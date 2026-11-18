@@ -122,59 +122,24 @@ namespace
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     }
 
-    struct DeviceMem
+    using Bytes = DevBuf<unsigned char>;
+
+    // Sets every allocated byte of `buf` to `value`.
+    void fill_bytes(Bytes& buf, unsigned char value)
     {
-        void*  ptr   = nullptr;
-        size_t bytes = 0;
+        std::vector<unsigned char> host = buf.read();
+        std::fill(host.begin(), host.end(), value);
+        ASSERT_EQ(hipMemcpy(buf.get(), host.data(), host.size(), hipMemcpyHostToDevice),
+                  hipSuccess);
+    }
 
-        explicit DeviceMem(size_t n)
-            : bytes(n == 0 ? 4 : n)
-        {
-            if(hipMalloc(&ptr, bytes) != hipSuccess || hipMemset(ptr, 0, bytes) != hipSuccess)
-            {
-                ADD_FAILURE() << "device allocation failed (" << bytes << " bytes)";
-                ptr = nullptr;
-            }
-        }
-
-        ~DeviceMem()
-        {
-            if(ptr != nullptr)
-            {
-                EXPECT_EQ(hipFree(ptr), hipSuccess);
-            }
-        }
-
-        DeviceMem(const DeviceMem&) = delete;
-        DeviceMem& operator=(const DeviceMem&) = delete;
-
-        void upload(const void* host, size_t n)
-        {
-            if(n == 0 || ptr == nullptr)
-            {
-                return;
-            }
-            ASSERT_EQ(hipMemcpy(ptr, host, n, hipMemcpyHostToDevice), hipSuccess);
-        }
-
-        void fill(unsigned char value)
-        {
-            std::vector<unsigned char> host(bytes, value);
-            upload(host.data(), bytes);
-        }
-
-        bool is_fill(unsigned char value) const
-        {
-            std::vector<unsigned char> host(bytes);
-            if(ptr == nullptr
-               || hipMemcpy(host.data(), ptr, bytes, hipMemcpyDeviceToHost) != hipSuccess)
-            {
-                return false;
-            }
-            return std::all_of(
-                host.begin(), host.end(), [&](unsigned char byte) { return byte == value; });
-        }
-    };
+    // Every allocated byte of `buf` is `value`.
+    bool bytes_are(const Bytes& buf, unsigned char value)
+    {
+        const std::vector<unsigned char> host = buf.read();
+        return std::all_of(
+            host.begin(), host.end(), [&](unsigned char byte) { return byte == value; });
+    }
 
     void upload_idx(void* dst, rocsparse_indextype type, const std::vector<int64_t>& host)
     {
@@ -385,9 +350,9 @@ namespace
     {
         rocsparse_format format;
         Spmat            descr;
-        DeviceMem        a;
-        DeviceMem        b;
-        DeviceMem        c;
+        Bytes            a;
+        Bytes            b;
+        Bytes            c;
 
         TinyMat(rocsparse_format f, size_t na, size_t nb, size_t nc)
             : format(f)
@@ -416,9 +381,9 @@ namespace
             }
             else
             {
-                mat->a.fill(k_sentinel);
-                mat->b.fill(k_sentinel);
-                mat->c.fill(k_sentinel);
+                fill_bytes(mat->a, k_sentinel);
+                fill_bytes(mat->b, k_sentinel);
+                fill_bytes(mat->c, k_sentinel);
             }
         };
         switch(format)
@@ -427,25 +392,32 @@ namespace
         {
             mat = std::make_unique<TinyMat>(format, 4, 4, 4);
             fill_source([&] {
-                upload_i32(mat->a.ptr, {0});
-                upload_i32(mat->b.ptr, {0});
-                upload_f(mat->c.ptr, {2.f});
+                upload_i32(mat->a.get(), {0});
+                upload_i32(mat->b.get(), {0});
+                upload_f(mat->c.get(), {2.f});
             });
-            EXPECT_EQ(
-                rocsparse_create_coo_descr(
-                    &mat->descr, 1, 1, 1, mat->a.ptr, mat->b.ptr, mat->c.ptr, idx32, base, f32_r),
-                st_ok);
+            EXPECT_EQ(rocsparse_create_coo_descr(&mat->descr,
+                                                 1,
+                                                 1,
+                                                 1,
+                                                 mat->a.get(),
+                                                 mat->b.get(),
+                                                 mat->c.get(),
+                                                 idx32,
+                                                 base,
+                                                 f32_r),
+                      st_ok);
             break;
         }
         case rocsparse_format_coo_aos:
         {
             mat = std::make_unique<TinyMat>(format, 8, 4, 4);
             fill_source([&] {
-                upload_i32(mat->a.ptr, {0, 0});
-                upload_f(mat->b.ptr, {2.f});
+                upload_i32(mat->a.get(), {0, 0});
+                upload_f(mat->b.get(), {2.f});
             });
             EXPECT_EQ(rocsparse_create_coo_aos_descr(
-                          &mat->descr, 1, 1, 1, mat->a.ptr, mat->b.ptr, idx32, base, f32_r),
+                          &mat->descr, 1, 1, 1, mat->a.get(), mat->b.get(), idx32, base, f32_r),
                       st_ok);
             break;
         }
@@ -453,17 +425,17 @@ namespace
         {
             mat = std::make_unique<TinyMat>(format, 8, 4, 4);
             fill_source([&] {
-                upload_i32(mat->a.ptr, {0, 1});
-                upload_i32(mat->b.ptr, {0});
-                upload_f(mat->c.ptr, {2.f});
+                upload_i32(mat->a.get(), {0, 1});
+                upload_i32(mat->b.get(), {0});
+                upload_f(mat->c.get(), {2.f});
             });
             EXPECT_EQ(rocsparse_create_csr_descr(&mat->descr,
                                                  1,
                                                  1,
                                                  1,
-                                                 mat->a.ptr,
-                                                 mat->b.ptr,
-                                                 mat->c.ptr,
+                                                 mat->a.get(),
+                                                 mat->b.get(),
+                                                 mat->c.get(),
                                                  idx32,
                                                  idx32,
                                                  base,
@@ -475,17 +447,17 @@ namespace
         {
             mat = std::make_unique<TinyMat>(format, 8, 4, 4);
             fill_source([&] {
-                upload_i32(mat->a.ptr, {0, 1});
-                upload_i32(mat->b.ptr, {0});
-                upload_f(mat->c.ptr, {2.f});
+                upload_i32(mat->a.get(), {0, 1});
+                upload_i32(mat->b.get(), {0});
+                upload_f(mat->c.get(), {2.f});
             });
             EXPECT_EQ(rocsparse_create_csc_descr(&mat->descr,
                                                  1,
                                                  1,
                                                  1,
-                                                 mat->a.ptr,
-                                                 mat->b.ptr,
-                                                 mat->c.ptr,
+                                                 mat->a.get(),
+                                                 mat->b.get(),
+                                                 mat->c.get(),
                                                  idx32,
                                                  idx32,
                                                  base,
@@ -497,11 +469,11 @@ namespace
         {
             mat = std::make_unique<TinyMat>(format, 4, 4, 4);
             fill_source([&] {
-                upload_i32(mat->a.ptr, {0});
-                upload_f(mat->b.ptr, {2.f});
+                upload_i32(mat->a.get(), {0});
+                upload_f(mat->b.get(), {2.f});
             });
             EXPECT_EQ(rocsparse_create_ell_descr(
-                          &mat->descr, 1, 1, mat->a.ptr, mat->b.ptr, 1, idx32, base, f32_r),
+                          &mat->descr, 1, 1, mat->a.get(), mat->b.get(), 1, idx32, base, f32_r),
                       st_ok);
             break;
         }
@@ -509,9 +481,9 @@ namespace
         {
             mat = std::make_unique<TinyMat>(format, 8, 4, 4);
             fill_source([&] {
-                upload_i32(mat->a.ptr, {0, 1});
-                upload_i32(mat->b.ptr, {0});
-                upload_f(mat->c.ptr, {2.f});
+                upload_i32(mat->a.get(), {0, 1});
+                upload_i32(mat->b.get(), {0});
+                upload_f(mat->c.get(), {2.f});
             });
             EXPECT_EQ(rocsparse_create_bsr_descr(&mat->descr,
                                                  1,
@@ -519,9 +491,9 @@ namespace
                                                  1,
                                                  dir_r,
                                                  1,
-                                                 mat->a.ptr,
-                                                 mat->b.ptr,
-                                                 mat->c.ptr,
+                                                 mat->a.get(),
+                                                 mat->b.get(),
+                                                 mat->c.get(),
                                                  idx32,
                                                  idx32,
                                                  base,
@@ -533,12 +505,12 @@ namespace
         {
             mat = std::make_unique<TinyMat>(format, 4, 4, 4);
             fill_source([&] {
-                upload_i32(mat->a.ptr, {0});
-                upload_f(mat->b.ptr, {2.f});
+                upload_i32(mat->a.get(), {0});
+                upload_f(mat->b.get(), {2.f});
             });
             EXPECT_EQ(
                 rocsparse_create_bell_descr(
-                    &mat->descr, 1, 1, dir_r, 1, 1, mat->a.ptr, mat->b.ptr, idx32, base, f32_r),
+                    &mat->descr, 1, 1, dir_r, 1, 1, mat->a.get(), mat->b.get(), idx32, base, f32_r),
                 st_ok);
             break;
         }
@@ -546,9 +518,9 @@ namespace
         {
             mat = std::make_unique<TinyMat>(format, 8, 4, 4);
             fill_source([&] {
-                upload_i32(mat->a.ptr, {0, 1});
-                upload_i32(mat->b.ptr, {0});
-                upload_f(mat->c.ptr, {2.f});
+                upload_i32(mat->a.get(), {0, 1});
+                upload_i32(mat->b.get(), {0});
+                upload_f(mat->c.get(), {2.f});
             });
             EXPECT_EQ(rocsparse_create_sell_descr(&mat->descr,
                                                   1,
@@ -556,9 +528,9 @@ namespace
                                                   1,
                                                   1,
                                                   1,
-                                                  mat->a.ptr,
-                                                  mat->b.ptr,
-                                                  mat->c.ptr,
+                                                  mat->a.get(),
+                                                  mat->b.get(),
+                                                  mat->c.get(),
                                                   idx32,
                                                   idx32,
                                                   base,
@@ -575,25 +547,25 @@ namespace
         switch(mat.format)
         {
         case rocsparse_format_coo:
-            EXPECT_EQ(rocsparse_coo_set_pointers(mat.descr, mat.a.ptr, mat.b.ptr, mat.c.ptr),
+            EXPECT_EQ(rocsparse_coo_set_pointers(mat.descr, mat.a.get(), mat.b.get(), mat.c.get()),
                       st_ok);
             break;
         case rocsparse_format_coo_aos:
-            EXPECT_EQ(rocsparse_coo_aos_set_pointers(mat.descr, mat.a.ptr, mat.b.ptr), st_ok);
+            EXPECT_EQ(rocsparse_coo_aos_set_pointers(mat.descr, mat.a.get(), mat.b.get()), st_ok);
             break;
         case rocsparse_format_csr:
-            EXPECT_EQ(rocsparse_csr_set_pointers(mat.descr, mat.a.ptr, mat.b.ptr, mat.c.ptr),
+            EXPECT_EQ(rocsparse_csr_set_pointers(mat.descr, mat.a.get(), mat.b.get(), mat.c.get()),
                       st_ok);
             break;
         case rocsparse_format_csc:
-            EXPECT_EQ(rocsparse_csc_set_pointers(mat.descr, mat.a.ptr, mat.b.ptr, mat.c.ptr),
+            EXPECT_EQ(rocsparse_csc_set_pointers(mat.descr, mat.a.get(), mat.b.get(), mat.c.get()),
                       st_ok);
             break;
         case rocsparse_format_ell:
-            EXPECT_EQ(rocsparse_ell_set_pointers(mat.descr, mat.a.ptr, mat.b.ptr), st_ok);
+            EXPECT_EQ(rocsparse_ell_set_pointers(mat.descr, mat.a.get(), mat.b.get()), st_ok);
             break;
         case rocsparse_format_bsr:
-            EXPECT_EQ(rocsparse_bsr_set_pointers(mat.descr, mat.a.ptr, mat.b.ptr, mat.c.ptr),
+            EXPECT_EQ(rocsparse_bsr_set_pointers(mat.descr, mat.a.get(), mat.b.get(), mat.c.get()),
                       st_ok);
             break;
         case rocsparse_format_bell:
@@ -604,9 +576,9 @@ namespace
 
     void expect_untouched(const TinyMat& mat, const std::string& label)
     {
-        EXPECT_TRUE(mat.a.is_fill(k_sentinel)) << label << " array a";
-        EXPECT_TRUE(mat.b.is_fill(k_sentinel)) << label << " array b";
-        EXPECT_TRUE(mat.c.is_fill(k_sentinel)) << label << " array c";
+        EXPECT_TRUE(bytes_are(mat.a, k_sentinel)) << label << " array a";
+        EXPECT_TRUE(bytes_are(mat.b, k_sentinel)) << label << " array b";
+        EXPECT_TRUE(bytes_are(mat.c, k_sentinel)) << label << " array c";
     }
 
     void expect_one_entry(const TinyMat& mat, const std::string& label)
@@ -618,8 +590,8 @@ namespace
         {
             // One row stores ell_width columns; this matrix's width is 1.
             EXPECT_EQ(nnz, 1) << label;
-            const auto col = download_idx(mat.a.ptr, idx32, 1);
-            const auto val = download_f(mat.b.ptr, 1);
+            const auto col = download_idx(mat.a.get(), idx32, 1);
+            const auto val = download_f(mat.b.get(), 1);
             ASSERT_EQ(col.size(), 1u);
             EXPECT_EQ(col[0], 0) << label;
             EXPECT_EQ(val[0], 2.f) << label;
@@ -628,26 +600,26 @@ namespace
         EXPECT_EQ(nnz, 1) << label;
         if(mat.format == rocsparse_format_coo)
         {
-            const auto row = download_idx(mat.a.ptr, idx32, 1);
-            const auto col = download_idx(mat.b.ptr, idx32, 1);
-            const auto val = download_f(mat.c.ptr, 1);
+            const auto row = download_idx(mat.a.get(), idx32, 1);
+            const auto col = download_idx(mat.b.get(), idx32, 1);
+            const auto val = download_f(mat.c.get(), 1);
             EXPECT_EQ(row[0], 0) << label;
             EXPECT_EQ(col[0], 0) << label;
             EXPECT_EQ(val[0], 2.f) << label;
         }
         else if(mat.format == rocsparse_format_coo_aos)
         {
-            const auto ind = download_idx(mat.a.ptr, idx32, 2);
-            const auto val = download_f(mat.b.ptr, 1);
+            const auto ind = download_idx(mat.a.get(), idx32, 2);
+            const auto val = download_f(mat.b.get(), 1);
             EXPECT_EQ(ind[0], 0) << label;
             EXPECT_EQ(ind[1], 0) << label;
             EXPECT_EQ(val[0], 2.f) << label;
         }
         else
         {
-            const auto ptr = download_idx(mat.a.ptr, idx32, 2);
-            const auto ind = download_idx(mat.b.ptr, idx32, 1);
-            const auto val = download_f(mat.c.ptr, 1);
+            const auto ptr = download_idx(mat.a.get(), idx32, 2);
+            const auto ind = download_idx(mat.b.get(), idx32, 1);
+            const auto val = download_f(mat.c.get(), 1);
             EXPECT_EQ(ptr[0], 0) << label;
             EXPECT_EQ(ptr[1], 1) << label;
             EXPECT_EQ(ind[0], 0) << label;
@@ -680,9 +652,9 @@ namespace
         {
             return;
         }
-        DeviceMem scratch(std::max<size_t>(bytes, 1));
-        status
-            = rocsparse_sparse_to_sparse(handle, descr, source, target, stage, bytes, scratch.ptr);
+        Bytes scratch(bytes);
+        status = rocsparse_sparse_to_sparse(
+            handle, descr, source, target, stage, bytes, scratch.get());
     }
 
     void expect_rejected(rocsparse_handle      handle,
@@ -693,9 +665,9 @@ namespace
     {
         const auto check
             = [&](rocsparse_sparse_to_sparse_stage stage, bool buffer_only, const char* name) {
-                  written.a.fill(k_sentinel);
-                  written.b.fill(k_sentinel);
-                  written.c.fill(k_sentinel);
+                  fill_bytes(written.a, k_sentinel);
+                  fill_bytes(written.b, k_sentinel);
+                  fill_bytes(written.c, k_sentinel);
                   rocsparse_status status = st_ok;
                   call_stage(handle, source, target, stage, buffer_only, status);
                   EXPECT_EQ(status, st_ni) << label << " " << name;
@@ -712,22 +684,12 @@ namespace
     struct HostIdx
     {
         rocsparse_indextype type;
-        DeviceMem           mem;
+        Bytes               mem;
         explicit HostIdx(rocsparse_indextype t, const std::vector<int64_t>& host)
             : type(t)
             , mem(std::max<size_t>(host.size(), 1) * idx_width(t))
         {
-            upload_idx(mem.ptr, t, host);
-        }
-    };
-
-    struct HostVal
-    {
-        DeviceMem mem;
-        explicit HostVal(const std::vector<float>& host)
-            : mem(std::max<size_t>(host.size(), 1) * sizeof(float))
-        {
-            upload_f(mem.ptr, host);
+            upload_idx(mem.get(), t, host);
         }
     };
 
@@ -770,9 +732,9 @@ namespace
                     EXPECT_EQ(hipMemPtrGetInfo(intermediate->col_data, column_bytes), hipSuccess);
                 }
             }
-            DeviceMem scratch(std::max<size_t>(bytes, 1));
+            Bytes scratch(bytes);
             status = rocsparse_sparse_to_sparse(
-                handle, descr, source, target, stage, bytes, scratch.ptr);
+                handle, descr, source, target, stage, bytes, scratch.get());
             if(status != st_ok)
             {
                 return status;
@@ -796,22 +758,22 @@ namespace
             cols.push_back(entry.col);
             vals.push_back(entry.val);
         }
-        HostIdx row_buf(src_type, rows);
-        HostIdx col_buf(src_type, cols);
-        HostVal val_buf(vals);
+        HostIdx       row_buf(src_type, rows);
+        HostIdx       col_buf(src_type, cols);
+        DevBuf<float> val_buf(vals);
         // Column pointers and row indices are filled by the conversion.
-        HostIdx csc_ptr(col_ptr_type, std::vector<int64_t>(3, 0));
-        HostIdx csc_row(row_ind_type, std::vector<int64_t>(entries.size(), 0));
-        HostVal csc_val(std::vector<float>(entries.size(), 0.f));
+        HostIdx       csc_ptr(col_ptr_type, std::vector<int64_t>(3, 0));
+        HostIdx       csc_row(row_ind_type, std::vector<int64_t>(entries.size(), 0));
+        DevBuf<float> csc_val(std::vector<float>(entries.size(), 0.f));
 
         Spmat source, target;
         ASSERT_EQ(rocsparse_create_coo_descr(&source,
                                              2,
                                              2,
                                              static_cast<int64_t>(entries.size()),
-                                             row_buf.mem.ptr,
-                                             col_buf.mem.ptr,
-                                             val_buf.mem.ptr,
+                                             row_buf.mem.get(),
+                                             col_buf.mem.get(),
+                                             val_buf.get(),
                                              src_type,
                                              base,
                                              f32_r),
@@ -820,9 +782,9 @@ namespace
                                              2,
                                              2,
                                              static_cast<int64_t>(entries.size()),
-                                             csc_ptr.mem.ptr,
-                                             csc_row.mem.ptr,
-                                             csc_val.mem.ptr,
+                                             csc_ptr.mem.get(),
+                                             csc_row.mem.get(),
+                                             csc_val.get(),
                                              col_ptr_type,
                                              row_ind_type,
                                              base,
@@ -840,9 +802,9 @@ namespace
         }
         // Intermediate CSR column type for COO -> CSC is the CSC row-index type.
         EXPECT_EQ(column_bytes, entries.size() * idx_width(row_ind_type));
-        const auto ptr = download_idx(csc_ptr.mem.ptr, col_ptr_type, 3);
-        const auto ind = download_idx(csc_row.mem.ptr, row_ind_type, entries.size());
-        const auto got = download_f(csc_val.mem.ptr, entries.size());
+        const auto ptr = download_idx(csc_ptr.mem.get(), col_ptr_type, 3);
+        const auto ind = download_idx(csc_row.mem.get(), row_ind_type, entries.size());
+        const auto got = download_f(csc_val.get(), entries.size());
         expect_entries(entries_from_csx(ptr, ind, got, true, label), label);
     }
 
@@ -860,20 +822,20 @@ namespace
             cols.push_back(entry.col);
             vals.push_back(entry.val);
         }
-        HostIdx row_buf(src_type, rows);
-        HostIdx col_buf(src_type, cols);
-        HostVal val_buf(vals);
-        HostIdx bsr_ptr(row_ptr_type, std::vector<int64_t>(3, 0));
-        HostIdx bsr_col(col_ind_type, std::vector<int64_t>(entries.size(), 0));
-        HostVal bsr_val(std::vector<float>(entries.size(), 0.f));
-        Spmat   source, target;
+        HostIdx       row_buf(src_type, rows);
+        HostIdx       col_buf(src_type, cols);
+        DevBuf<float> val_buf(vals);
+        HostIdx       bsr_ptr(row_ptr_type, std::vector<int64_t>(3, 0));
+        HostIdx       bsr_col(col_ind_type, std::vector<int64_t>(entries.size(), 0));
+        DevBuf<float> bsr_val(std::vector<float>(entries.size(), 0.f));
+        Spmat         source, target;
         ASSERT_EQ(rocsparse_create_coo_descr(&source,
                                              2,
                                              2,
                                              static_cast<int64_t>(entries.size()),
-                                             row_buf.mem.ptr,
-                                             col_buf.mem.ptr,
-                                             val_buf.mem.ptr,
+                                             row_buf.mem.get(),
+                                             col_buf.mem.get(),
+                                             val_buf.get(),
                                              src_type,
                                              base,
                                              f32_r),
@@ -884,9 +846,9 @@ namespace
                                              static_cast<int64_t>(entries.size()),
                                              dir_r,
                                              1,
-                                             bsr_ptr.mem.ptr,
-                                             bsr_col.mem.ptr,
-                                             bsr_val.mem.ptr,
+                                             bsr_ptr.mem.get(),
+                                             bsr_col.mem.get(),
+                                             bsr_val.get(),
                                              row_ptr_type,
                                              col_ind_type,
                                              base,
@@ -904,9 +866,9 @@ namespace
         }
         // Intermediate CSR column type for COO -> BSR is the BSR column-index type.
         EXPECT_EQ(column_bytes, entries.size() * idx_width(col_ind_type));
-        const auto ptr = download_idx(bsr_ptr.mem.ptr, row_ptr_type, 3);
-        const auto ind = download_idx(bsr_col.mem.ptr, col_ind_type, entries.size());
-        const auto got = download_f(bsr_val.mem.ptr, entries.size());
+        const auto ptr = download_idx(bsr_ptr.mem.get(), row_ptr_type, 3);
+        const auto ind = download_idx(bsr_col.mem.get(), col_ind_type, entries.size());
+        const auto got = download_f(bsr_val.get(), entries.size());
         expect_entries(entries_from_csx(ptr, ind, got, false, label), label);
     }
 
@@ -924,18 +886,18 @@ namespace
             ind.push_back(entry.col);
             vals.push_back(entry.val);
         }
-        HostIdx aos(src_type, ind);
-        HostVal aval(vals);
-        HostIdx csc_ptr(col_ptr_type, std::vector<int64_t>(3, 0));
-        HostIdx csc_row(row_ind_type, std::vector<int64_t>(entries.size(), 0));
-        HostVal csc_val(std::vector<float>(entries.size(), 0.f));
-        Spmat   source, target;
+        HostIdx       aos(src_type, ind);
+        DevBuf<float> aval(vals);
+        HostIdx       csc_ptr(col_ptr_type, std::vector<int64_t>(3, 0));
+        HostIdx       csc_row(row_ind_type, std::vector<int64_t>(entries.size(), 0));
+        DevBuf<float> csc_val(std::vector<float>(entries.size(), 0.f));
+        Spmat         source, target;
         ASSERT_EQ(rocsparse_create_coo_aos_descr(&source,
                                                  2,
                                                  2,
                                                  static_cast<int64_t>(entries.size()),
-                                                 aos.mem.ptr,
-                                                 aval.mem.ptr,
+                                                 aos.mem.get(),
+                                                 aval.get(),
                                                  src_type,
                                                  base,
                                                  f32_r),
@@ -944,9 +906,9 @@ namespace
                                              2,
                                              2,
                                              static_cast<int64_t>(entries.size()),
-                                             csc_ptr.mem.ptr,
-                                             csc_row.mem.ptr,
-                                             csc_val.mem.ptr,
+                                             csc_ptr.mem.get(),
+                                             csc_row.mem.get(),
+                                             csc_val.get(),
                                              col_ptr_type,
                                              row_ind_type,
                                              base,
@@ -963,9 +925,9 @@ namespace
             return;
         }
         EXPECT_EQ(column_bytes, entries.size() * idx_width(row_ind_type));
-        const auto ptr = download_idx(csc_ptr.mem.ptr, col_ptr_type, 3);
-        const auto row = download_idx(csc_row.mem.ptr, row_ind_type, entries.size());
-        const auto got = download_f(csc_val.mem.ptr, entries.size());
+        const auto ptr = download_idx(csc_ptr.mem.get(), col_ptr_type, 3);
+        const auto row = download_idx(csc_row.mem.get(), row_ind_type, entries.size());
+        const auto got = download_f(csc_val.get(), entries.size());
         expect_entries(entries_from_csx(ptr, row, got, true, label), label);
     }
 
@@ -980,18 +942,18 @@ namespace
         const std::vector<float>   vals    = {1.f, 3.f, 2.f};
         HostIdx                    csc_ptr(col_ptr_type, ptr);
         HostIdx                    csc_row(row_ind_type, row_ind);
-        HostVal                    csc_val(vals);
+        DevBuf<float>              csc_val(vals);
         HostIdx                    coo_row(coo_type, std::vector<int64_t>(3, 0));
         HostIdx                    coo_col(coo_type, std::vector<int64_t>(3, 0));
-        HostVal                    coo_val(std::vector<float>(3, 0.f));
+        DevBuf<float>              coo_val(std::vector<float>(3, 0.f));
         Spmat                      source, target;
         ASSERT_EQ(rocsparse_create_csc_descr(&source,
                                              2,
                                              2,
                                              3,
-                                             csc_ptr.mem.ptr,
-                                             csc_row.mem.ptr,
-                                             csc_val.mem.ptr,
+                                             csc_ptr.mem.get(),
+                                             csc_row.mem.get(),
+                                             csc_val.get(),
                                              col_ptr_type,
                                              row_ind_type,
                                              base,
@@ -1001,9 +963,9 @@ namespace
                                              2,
                                              2,
                                              3,
-                                             coo_row.mem.ptr,
-                                             coo_col.mem.ptr,
-                                             coo_val.mem.ptr,
+                                             coo_row.mem.get(),
+                                             coo_col.mem.get(),
+                                             coo_val.get(),
                                              coo_type,
                                              base,
                                              f32_r),
@@ -1020,9 +982,9 @@ namespace
         }
         // Intermediate CSR column type for CSC is the CSC row-index type.
         EXPECT_EQ(column_bytes, static_cast<size_t>(3) * idx_width(row_ind_type));
-        const auto rows = download_idx(coo_row.mem.ptr, coo_type, 3);
-        const auto cols = download_idx(coo_col.mem.ptr, coo_type, 3);
-        const auto got  = download_f(coo_val.mem.ptr, 3);
+        const auto rows = download_idx(coo_row.mem.get(), coo_type, 3);
+        const auto cols = download_idx(coo_col.mem.get(), coo_type, 3);
+        const auto got  = download_f(coo_val.get(), 3);
         expect_entries(entries_from_coo(rows, cols, got), label);
     }
 
@@ -1094,49 +1056,48 @@ namespace
         // Source holds entry (0, 0) = 3. Target indices start as 0xA5. A symbolic target
         // is created with nnz 0 and a null value pointer, which must stay null.
         clear_hip_error();
-        const bool  src_aos = pair.source == rocsparse_format_coo_aos;
-        const bool  tgt_aos = pair.target == rocsparse_format_coo_aos;
-        DeviceMem   src_primary(src_aos || pair.source != rocsparse_format_coo ? 8 : 4);
-        DeviceMem   src_secondary(4);
-        const float source_value = 3.f;
-        DeviceMem   source_values(sizeof(float));
-        source_values.upload(&source_value, sizeof(source_value));
-        DeviceMem numeric_values(sizeof(float));
-        numeric_values.fill(0);
+        const bool    src_aos = pair.source == rocsparse_format_coo_aos;
+        const bool    tgt_aos = pair.target == rocsparse_format_coo_aos;
+        Bytes         src_primary(src_aos || pair.source != rocsparse_format_coo ? 8 : 4);
+        Bytes         src_secondary(4);
+        const float   source_value = 3.f;
+        DevBuf<float> source_values(std::vector<float>{source_value});
+        DevBuf<float> numeric_values(1);
 
         if(pair.source == rocsparse_format_coo)
         {
-            upload_i32(src_primary.ptr, {0});
-            upload_i32(src_secondary.ptr, {0});
+            upload_i32(src_primary.get(), {0});
+            upload_i32(src_secondary.get(), {0});
         }
         else if(src_aos)
         {
-            upload_i32(src_primary.ptr, {0, 0});
+            upload_i32(src_primary.get(), {0, 0});
         }
         else
         {
-            upload_i32(src_primary.ptr, {0, 1});
-            upload_i32(src_secondary.ptr, {0});
+            upload_i32(src_primary.get(), {0, 1});
+            upload_i32(src_secondary.get(), {0});
         }
         Spmat source;
-        create_shell(pair.source, 1, src_primary.ptr, src_secondary.ptr, source_values.ptr, source);
+        create_shell(
+            pair.source, 1, src_primary.get(), src_secondary.get(), source_values.get(), source);
         ASSERT_NE(source.get(), nullptr);
 
-        DeviceMem dst_primary(tgt_aos || pair.target != rocsparse_format_coo ? 8 : 4);
-        DeviceMem dst_secondary(4);
-        DeviceMem dst_extra(4);
-        dst_primary.fill(k_sentinel);
-        dst_secondary.fill(k_sentinel);
-        dst_extra.fill(k_sentinel);
-        void* target_values = with_values ? numeric_values.ptr : nullptr;
+        Bytes dst_primary(tgt_aos || pair.target != rocsparse_format_coo ? 8 : 4);
+        Bytes dst_secondary(4);
+        Bytes dst_extra(4);
+        fill_bytes(dst_primary, k_sentinel);
+        fill_bytes(dst_secondary, k_sentinel);
+        fill_bytes(dst_extra, k_sentinel);
+        void* target_values = with_values ? numeric_values.get() : nullptr;
         Spmat target;
         // Numeric targets are created at the final nnz. A symbolic target has a null
         // value pointer, which the constructors accept only when nnz is 0; analysis
         // then stores the real nnz and leaves the value pointer null.
         create_shell(pair.target,
                      with_values ? 1 : 0,
-                     dst_primary.ptr,
-                     dst_secondary.ptr,
+                     dst_primary.get(),
+                     dst_secondary.get(),
                      target_values,
                      target);
         ASSERT_NE(target.get(), nullptr);
@@ -1153,25 +1114,25 @@ namespace
         ASSERT_EQ(
             rocsparse_sparse_to_sparse_buffer_size(handle, descr, source, target, stage_a, &bytes),
             st_ok);
-        DeviceMem analysis(std::max<size_t>(bytes, 1));
-        ASSERT_EQ(
-            rocsparse_sparse_to_sparse(handle, descr, source, target, stage_a, bytes, analysis.ptr),
-            st_ok);
+        Bytes analysis(bytes);
+        ASSERT_EQ(rocsparse_sparse_to_sparse(
+                      handle, descr, source, target, stage_a, bytes, analysis.get()),
+                  st_ok);
         ASSERT_EQ(
             rocsparse_sparse_to_sparse_buffer_size(handle, descr, source, target, stage_c, &bytes),
             st_ok);
-        DeviceMem  compute(std::max<size_t>(bytes, 1));
+        Bytes      compute(bytes);
         const auto status = rocsparse_sparse_to_sparse(
-            handle, descr, source, target, stage_c, bytes, compute.ptr);
+            handle, descr, source, target, stage_c, bytes, compute.get());
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
         const auto expect_values_kept = [&] {
-            EXPECT_EQ(download_f(source_values.ptr, 1)[0], source_value) << label;
+            EXPECT_EQ(download_f(source_values.get(), 1)[0], source_value) << label;
             void* values = &values;
             EXPECT_EQ(rocsparse_spmat_get_values(target, &values), st_ok);
             if(with_values)
             {
-                EXPECT_EQ(values, numeric_values.ptr) << label;
+                EXPECT_EQ(values, static_cast<void*>(numeric_values.get())) << label;
             }
             else
             {
@@ -1190,36 +1151,36 @@ namespace
         EXPECT_EQ(nnz, 1);
         if(pair.target == rocsparse_format_coo)
         {
-            const auto row = download_idx(dst_primary.ptr, idx32, 1);
-            const auto col = download_idx(dst_secondary.ptr, idx32, 1);
+            const auto row = download_idx(dst_primary.get(), idx32, 1);
+            const auto col = download_idx(dst_secondary.get(), idx32, 1);
             EXPECT_EQ(row[0], 0);
             EXPECT_EQ(col[0], 0);
         }
         else if(tgt_aos)
         {
-            const auto ind = download_idx(dst_primary.ptr, idx32, 2);
+            const auto ind = download_idx(dst_primary.get(), idx32, 2);
             EXPECT_EQ(ind[0], 0);
             EXPECT_EQ(ind[1], 0);
         }
         else if(pair.target == rocsparse_format_csr)
         {
-            const auto ptr = download_idx(dst_primary.ptr, idx32, 2);
-            const auto col = download_idx(dst_secondary.ptr, idx32, 1);
+            const auto ptr = download_idx(dst_primary.get(), idx32, 2);
+            const auto col = download_idx(dst_secondary.get(), idx32, 1);
             EXPECT_EQ(ptr[0], 0);
             EXPECT_EQ(ptr[1], 1);
             EXPECT_EQ(col[0], 0);
         }
         else if(pair.target == rocsparse_format_csc)
         {
-            const auto ptr = download_idx(dst_primary.ptr, idx32, 2);
-            const auto row = download_idx(dst_secondary.ptr, idx32, 1);
+            const auto ptr = download_idx(dst_primary.get(), idx32, 2);
+            const auto row = download_idx(dst_secondary.get(), idx32, 1);
             EXPECT_EQ(ptr[0], 0);
             EXPECT_EQ(ptr[1], 1);
             EXPECT_EQ(row[0], 0);
         }
         if(with_values)
         {
-            const auto got = download_f(numeric_values.ptr, 1);
+            const auto got = download_f(numeric_values.get(), 1);
             EXPECT_EQ(got[0], 3.f) << label;
         }
     }
@@ -1277,41 +1238,38 @@ namespace
         SCOPED_TRACE(label);
         clear_hip_error();
 
-        DeviceMem src_a(k_capture_bytes);
-        DeviceMem src_b(k_capture_bytes);
-        DeviceMem src_c(k_capture_bytes);
-        DeviceMem dst_a(k_capture_bytes);
-        DeviceMem dst_b(k_capture_bytes);
-        DeviceMem dst_c(k_capture_bytes);
+        Bytes src_a(k_capture_bytes);
+        Bytes src_b(k_capture_bytes);
+        Bytes src_c(k_capture_bytes);
+        Bytes dst_a(k_capture_bytes);
+        Bytes dst_b(k_capture_bytes);
+        Bytes dst_c(k_capture_bytes);
         if(cc.source == rocsparse_format_csr)
         {
             std::vector<int64_t> ptr(static_cast<size_t>(cc.m + 1), cc.nnz);
             ptr[0] = 0;
-            upload_idx(src_a.ptr, idx32, ptr);
+            upload_idx(src_a.get(), idx32, ptr);
         }
         if(cc.nnz > 0)
         {
-            upload_f(src_c.ptr, {4.f});
+            upload_f(src_c.get(), {4.f});
         }
 
-        DeviceMem* const out[]
+        Bytes* const out[]
             = {cc.alias ? &src_a : &dst_a, cc.alias ? &src_b : &dst_b, cc.alias ? &src_c : &dst_c};
         const auto reset_target = [&] {
             if(!cc.alias)
             {
-                dst_a.fill(k_sentinel);
-                dst_b.fill(k_sentinel);
-                dst_c.fill(k_sentinel);
+                fill_bytes(dst_a, k_sentinel);
+                fill_bytes(dst_b, k_sentinel);
+                fill_bytes(dst_c, k_sentinel);
             }
         };
         const auto snapshot = [&] {
             std::vector<std::vector<unsigned char>> bytes;
-            for(const DeviceMem* mem : out)
+            for(const Bytes* mem : out)
             {
-                std::vector<unsigned char> host(mem->bytes);
-                EXPECT_EQ(hipMemcpy(host.data(), mem->ptr, host.size(), hipMemcpyDeviceToHost),
-                          hipSuccess);
-                bytes.push_back(std::move(host));
+                bytes.push_back(mem->read());
             }
             return bytes;
         };
@@ -1319,14 +1277,14 @@ namespace
 
         Spmat source, target;
         create_capture_descr(
-            cc.source, cc.m, cc.n, cc.nnz, src_a.ptr, src_b.ptr, src_c.ptr, source);
+            cc.source, cc.m, cc.n, cc.nnz, src_a.get(), src_b.get(), src_c.get(), source);
         create_capture_descr(cc.target,
                              cc.m,
                              cc.n,
                              0,
-                             out[0]->ptr,
-                             out[1]->ptr,
-                             cc.values ? out[2]->ptr : nullptr,
+                             out[0]->get(),
+                             out[1]->get(),
+                             cc.values ? out[2]->get() : nullptr,
                              target);
         ASSERT_NE(source.get(), nullptr);
         ASSERT_NE(target.get(), nullptr);
@@ -1342,19 +1300,19 @@ namespace
         ASSERT_EQ(
             rocsparse_sparse_to_sparse_buffer_size(handle, descr, source, target, stage_a, &bytes),
             st_ok);
-        DeviceMem analysis(std::max<size_t>(bytes, 1));
-        ASSERT_EQ(
-            rocsparse_sparse_to_sparse(handle, descr, source, target, stage_a, bytes, analysis.ptr),
-            st_ok);
+        Bytes analysis(bytes);
+        ASSERT_EQ(rocsparse_sparse_to_sparse(
+                      handle, descr, source, target, stage_a, bytes, analysis.get()),
+                  st_ok);
         ASSERT_EQ(
             rocsparse_sparse_to_sparse_buffer_size(handle, descr, source, target, stage_c, &bytes),
             st_ok);
-        DeviceMem compute(std::max<size_t>(bytes, 1));
+        Bytes compute(bytes);
 
         // Eager result, then the same compute captured and replayed.
-        ASSERT_EQ(
-            rocsparse_sparse_to_sparse(handle, descr, source, target, stage_c, bytes, compute.ptr),
-            st_ok);
+        ASSERT_EQ(rocsparse_sparse_to_sparse(
+                      handle, descr, source, target, stage_c, bytes, compute.get()),
+                  st_ok);
         ASSERT_EQ(hipStreamSynchronize(guard.stream), hipSuccess);
         const auto eager = snapshot();
 
@@ -1363,20 +1321,20 @@ namespace
         EXPECT_EQ(nnz, cc.nnz);
         if(cc.target == rocsparse_format_csr)
         {
-            const auto ptr = download_idx(out[0]->ptr, idx32, static_cast<size_t>(cc.m + 1));
+            const auto ptr = download_idx(out[0]->get(), idx32, static_cast<size_t>(cc.m + 1));
             EXPECT_EQ(ptr.front(), 0);
             EXPECT_EQ(ptr.back(), cc.nnz);
         }
         if(cc.nnz > 0)
         {
-            const auto got = download_f(out[2]->ptr, 1);
+            const auto got = download_f(out[2]->get(), 1);
             EXPECT_EQ(got[0], 4.f);
         }
 
         reset_target();
         ASSERT_EQ(hipStreamBeginCapture(guard.stream, hipStreamCaptureModeGlobal), hipSuccess);
         const auto compute_status = rocsparse_sparse_to_sparse(
-            handle, descr, source, target, stage_c, bytes, compute.ptr);
+            handle, descr, source, target, stage_c, bytes, compute.get());
         const auto end_status = hipStreamEndCapture(guard.stream, &guard.graph);
         EXPECT_EQ(compute_status, st_ok);
         EXPECT_EQ(end_status, hipSuccess);
@@ -1506,9 +1464,9 @@ namespace
                     expect_rejected(handle, source->descr, target->descr, *target, label);
                     continue;
                 }
-                target->a.fill(0);
-                target->b.fill(0);
-                target->c.fill(0);
+                fill_bytes(target->a, 0);
+                fill_bytes(target->b, 0);
+                fill_bytes(target->c, 0);
                 refresh_pointers(*target);
                 S2sDescr descr;
                 ASSERT_EQ(rocsparse_create_sparse_to_sparse_descr(
@@ -1522,11 +1480,15 @@ namespace
                                   handle, descr, source->descr, target->descr, stage, &bytes),
                               st_ok)
                         << label;
-                    DeviceMem scratch(std::max<size_t>(bytes, 1));
-                    ASSERT_EQ(
-                        rocsparse_sparse_to_sparse(
-                            handle, descr, source->descr, target->descr, stage, bytes, scratch.ptr),
-                        st_ok)
+                    Bytes scratch(bytes);
+                    ASSERT_EQ(rocsparse_sparse_to_sparse(handle,
+                                                         descr,
+                                                         source->descr,
+                                                         target->descr,
+                                                         stage,
+                                                         bytes,
+                                                         scratch.get()),
+                              st_ok)
                         << label;
                     if(stage == stage_a)
                     {
@@ -1571,30 +1533,36 @@ namespace
         // column is invalid_pointer, and the row pointer and the values stay put.
         // nnz 0 is what lets the constructor take a null column array.
         clear_hip_error();
-        DeviceMem   src_row(8);
-        DeviceMem   src_col(4);
-        DeviceMem   src_val(sizeof(float));
-        const float source_value = 3.f;
-        upload_i32(src_row.ptr, {0, 1});
-        upload_i32(src_col.ptr, {0});
-        src_val.upload(&source_value, sizeof(source_value));
+        Bytes         src_row(8);
+        Bytes         src_col(4);
+        DevBuf<float> src_val(std::vector<float>{3.f});
+        upload_i32(src_row.get(), {0, 1});
+        upload_i32(src_col.get(), {0});
 
         Spmat source;
-        ASSERT_EQ(
-            rocsparse_create_csr_descr(
-                &source, 1, 1, 1, src_row.ptr, src_col.ptr, src_val.ptr, idx32, idx32, base, f32_r),
-            st_ok);
+        ASSERT_EQ(rocsparse_create_csr_descr(&source,
+                                             1,
+                                             1,
+                                             1,
+                                             src_row.get(),
+                                             src_col.get(),
+                                             src_val.get(),
+                                             idx32,
+                                             idx32,
+                                             base,
+                                             f32_r),
+                  st_ok);
 
-        DeviceMem dst_row(8);
-        DeviceMem dst_val(sizeof(float));
-        dst_row.fill(k_sentinel);
-        dst_val.fill(k_sentinel);
+        Bytes dst_row(8);
+        Bytes dst_val(sizeof(float));
+        fill_bytes(dst_row, k_sentinel);
+        fill_bytes(dst_val, k_sentinel);
 
         Spmat target;
         ASSERT_EQ(rocsparse_create_csr_descr(
-                      &target, 1, 1, 0, dst_row.ptr, nullptr, nullptr, idx32, idx32, base, f32_r),
+                      &target, 1, 1, 0, dst_row.get(), nullptr, nullptr, idx32, idx32, base, f32_r),
                   st_ok);
-        ASSERT_EQ(rocsparse_spmat_set_values(target, dst_val.ptr), st_ok);
+        ASSERT_EQ(rocsparse_spmat_set_values(target, dst_val.get()), st_ok);
 
         S2sDescr descr;
         ASSERT_EQ(rocsparse_create_sparse_to_sparse_descr(&descr, source, target, alg), st_ok);
@@ -1603,23 +1571,23 @@ namespace
         ASSERT_EQ(
             rocsparse_sparse_to_sparse_buffer_size(handle, descr, source, target, stage_a, &bytes),
             st_ok);
-        DeviceMem analysis(std::max<size_t>(bytes, 1));
-        ASSERT_EQ(
-            rocsparse_sparse_to_sparse(handle, descr, source, target, stage_a, bytes, analysis.ptr),
-            st_ok);
-        EXPECT_TRUE(dst_row.is_fill(k_sentinel));
-        EXPECT_TRUE(dst_val.is_fill(k_sentinel));
+        Bytes analysis(bytes);
+        ASSERT_EQ(rocsparse_sparse_to_sparse(
+                      handle, descr, source, target, stage_a, bytes, analysis.get()),
+                  st_ok);
+        EXPECT_TRUE(bytes_are(dst_row, k_sentinel));
+        EXPECT_TRUE(bytes_are(dst_val, k_sentinel));
 
         ASSERT_EQ(
             rocsparse_sparse_to_sparse_buffer_size(handle, descr, source, target, stage_c, &bytes),
             st_ok);
-        DeviceMem compute(std::max<size_t>(bytes, 1));
-        EXPECT_EQ(
-            rocsparse_sparse_to_sparse(handle, descr, source, target, stage_c, bytes, compute.ptr),
-            st_ptr);
+        Bytes compute(bytes);
+        EXPECT_EQ(rocsparse_sparse_to_sparse(
+                      handle, descr, source, target, stage_c, bytes, compute.get()),
+                  st_ptr);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-        EXPECT_TRUE(dst_row.is_fill(k_sentinel));
-        EXPECT_TRUE(dst_val.is_fill(k_sentinel));
+        EXPECT_TRUE(bytes_are(dst_row, k_sentinel));
+        EXPECT_TRUE(bytes_are(dst_val, k_sentinel));
     }
 
     TEST_F(ConvS2s, IntermediateCountOverflow)
@@ -1719,17 +1687,17 @@ namespace
         ASSERT_EQ(
             rocsparse_sparse_to_sparse_buffer_size(handle, descr, source, target, stage_a, &bytes),
             st_ok);
-        DeviceMem analysis(std::max<size_t>(bytes, 1));
-        ASSERT_EQ(
-            rocsparse_sparse_to_sparse(handle, descr, source, target, stage_a, bytes, analysis.ptr),
-            st_ok);
+        Bytes analysis(bytes);
+        ASSERT_EQ(rocsparse_sparse_to_sparse(
+                      handle, descr, source, target, stage_a, bytes, analysis.get()),
+                  st_ok);
         ASSERT_EQ(
             rocsparse_sparse_to_sparse_buffer_size(handle, descr, source, target, stage_c, &bytes),
             st_ok);
-        DeviceMem compute(std::max<size_t>(bytes, 1));
-        ASSERT_EQ(
-            rocsparse_sparse_to_sparse(handle, descr, source, target, stage_c, bytes, compute.ptr),
-            st_ok);
+        Bytes compute(bytes);
+        ASSERT_EQ(rocsparse_sparse_to_sparse(
+                      handle, descr, source, target, stage_c, bytes, compute.get()),
+                  st_ok);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     }
 
