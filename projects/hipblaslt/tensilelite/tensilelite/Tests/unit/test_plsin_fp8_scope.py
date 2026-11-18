@@ -122,19 +122,23 @@ def test_path_gate_requires_use_subtile_impl():
 
 
 @pytest.mark.parametrize("transA,transB,expected", [
-    (True, False, True),    # TN, the layout the fused store was measured on
+    (True, False, True),    # TN, the layout permlane16 was measured on
     (False, False, False),  # NN
     (False, True, False),   # NT
     (True, True, False),    # TT
 ])
 def test_path_gate_is_restricted_to_tn(transA, transB, expected):
-    """Inherited from the MXF4 gate, and for the same reason.
+    """This does not decide whether non-TN gets the fused store. It already does.
 
-    The non-TN layouts reach the subtile path through a strided-K global-read
-    pointer update, a shape the fused store does not model. ``MXFP8`` makes
-    that reachable in a way fp4 never was -- the shipped F8 logic is all
-    ``Cijk_Alik_Bljk_*`` today, but fp8 with TLU=1 is accepted by
-    ``assignDerivedParameters``, so the restriction has to live in the gate.
+    The store is built from ``PostLoopStoreInNll`` itself, which
+    ``assignPostLoopStoreInNll`` resolves with no transpose term at all, so
+    NT/NN/TT carry the fused store on both fp4 and fp8. What this gate scopes,
+    through ``plsinStoreScope``, is only the permlane16 paired store and its
+    two helpers; non-TN keeps develop's ds_bpermute path for those.
+
+    TN here is therefore parity with fp4 rather than a restriction on fp8:
+    ``isMxf4SubtilePath`` scopes fp4's permlane16 the same way, and non-TN
+    permlane16 has been measured on neither type.
     """
     assert isPlsinSubtilePath(kern(transA=transA, transB=transB)) is expected
 

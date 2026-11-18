@@ -146,6 +146,12 @@ def isPlsinSubtilePath(kernel) -> bool:
     schedule with it on (a scale global read at n+2 finds no local read to
     collide with, because the scale is loaded once per two unroll iterations).
 
+    TN is parity with fp4, not a restriction on fp8. Whether the fused store is
+    built at all is decided by PostLoopStoreInNll, which carries no transpose
+    term, so non-TN gets the store on both types. This gate reaches only the
+    permlane16 paired store and its helpers, which isMxf4SubtilePath keeps
+    TN-only for fp4 and which has been measured on no other layout.
+
     Same tolerance of partial state as isMxf4SubtilePath, and for the same
     reason: it is asked during derivation.
     """
