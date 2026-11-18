@@ -388,33 +388,86 @@ def _sdpa_fwd_plan_names():
     ]
 
 
+def _check_known_keys(path):
+    for section, keys, _ in _toml_entries(path):
+        assert section in TOML_SECTION_KEYS, (path.name, section)
+        unknown = set(keys) - TOML_SECTION_KEYS[section]
+        assert not unknown, (path.name, section, sorted(unknown))
+
+
+def _check_sdpa_fwd_plan_filters(path, names):
+    exact = set(names)
+    for section, _, filters in _toml_entries(path):
+        for f in filters:
+            if "SdpaFwdPlan" not in f:
+                continue
+            where = (path.name, section, f)
+            if not any(c in f for c in "*?["):
+                assert f in exact, where
+                continue
+            assert any(fnmatch.fnmatchcase(n, f) for n in names), where
+
+
 def test_engine_toml_entries_have_known_keys():
     """A misspelled key is not an error for the harness: a misspelled `archs`
-    makes a skip apply on every GPU."""
+    makes a skip apply on every GPU.
+
+    Blind spots: only section and key names are checked, not values, so a
+    typo in an `archs` or `platforms` value, a wrong value type and a missing
+    key all pass. Only the files that ENGINE_TOMLS finds are checked."""
     assert ENGINE_TOML in ENGINE_TOMLS
     for path in ENGINE_TOMLS:
-        for section, keys, _ in _toml_entries(path):
-            assert section in TOML_SECTION_KEYS, (path.name, section)
-            unknown = set(keys) - TOML_SECTION_KEYS[section]
-            assert not unknown, (path.name, section, sorted(unknown))
+        _check_known_keys(path)
 
 
 def test_engine_toml_sdpa_fwd_plan_filters_match_cases():
     """Every filter of every engine TOML that names SdpaFwdPlan selects at
-    least one checked-in SdpaFwdPlan case (no stale or mistyped entry)."""
+    least one checked-in SdpaFwdPlan case (no stale entry).
+
+    Blind spots: only filters that contain the word SdpaFwdPlan are checked,
+    so a typo in that word (for example SdpaFwdPln) hides the filter from
+    this test. A glob passes when it matches at least one case, so a glob that
+    matches more cases than intended is not caught. The `archs` and
+    `platforms` of the entry are not compared with where the case runs."""
     names = _sdpa_fwd_plan_names()
     assert names
-    exact = set(names)
     for path in ENGINE_TOMLS:
-        for section, _, filters in _toml_entries(path):
-            for f in filters:
-                if "SdpaFwdPlan" not in f:
-                    continue
-                where = (path.name, section, f)
-                if not any(c in f for c in "*?["):
-                    assert f in exact, where
-                    continue
-                assert any(fnmatch.fnmatchcase(n, f) for n in names), where
+        _check_sdpa_fwd_plan_filters(path, names)
+
+
+_SYNTHETIC_SKIP = """\
+[[test_skips]]
+filters = ["{name}"]
+reason = "synthetic"
+{archs_key} = ["gfx942"]
+"""
+
+
+def test_known_keys_check_fails_on_a_misspelled_key(tmp_path):
+    path = tmp_path / "engine.toml"
+    path.write_text(_SYNTHETIC_SKIP.format(name="x", archs_key="archs"))
+    _check_known_keys(path)
+    path.write_text(_SYNTHETIC_SKIP.format(name="x", archs_key="arch"))
+    with pytest.raises(AssertionError, match="'arch'"):
+        _check_known_keys(path)
+
+
+@pytest.mark.parametrize(
+    "unmatched",
+    [
+        "PR_SdpaFwdPlan_Folder.no_such_case",
+        "PR_SdpaFwdPlan_NoSuchFolder.*",
+    ],
+)
+def test_sdpa_fwd_plan_filter_check_fails_on_an_unmatched_filter(tmp_path, unmatched):
+    names = ["PR_SdpaFwdPlan_Folder.case_a", "PR_SdpaFwdPlan_Folder.case_b"]
+    path = tmp_path / "engine.toml"
+    for matched in (names[0], "PR_SdpaFwdPlan_Folder.*"):
+        path.write_text(_SYNTHETIC_SKIP.format(name=matched, archs_key="archs"))
+        _check_sdpa_fwd_plan_filters(path, names)
+    path.write_text(_SYNTHETIC_SKIP.format(name=unmatched, archs_key="archs"))
+    with pytest.raises(AssertionError, match="no_such_case|NoSuchFolder"):
+        _check_sdpa_fwd_plan_filters(path, names)
 
 
 def test_quarantined_cases_are_rejection_probes(written):
