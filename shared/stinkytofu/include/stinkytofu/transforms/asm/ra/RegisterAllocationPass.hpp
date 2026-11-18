@@ -103,6 +103,23 @@ struct RegisterAllocationOptions {
     enum class Quadrant { Any, Prefer, Plan };
     Quadrant quadrant = Quadrant::Any;
 
+    /// How matrix operands are placed, chosen among the rules the architecture
+    /// tags with a matrix role (MatrixRole), so no architecture's rule is named
+    /// here.
+    ///
+    /// Pin leaves the table as shipped: every matrix operand keeps the
+    /// producer's register, so the producer's banks are kept too. Shape ties
+    /// the values the producer put on one register tuple and lets the
+    /// allocator choose where the tuple goes, banks included. Accumulators
+    /// pins the accumulators and ties A and B by shape.
+    ///
+    /// Auto tries Shape and, when that colouring is refused, Pin, so a kernel
+    /// the pin colours is not lost. Shape alone has no fallback: a crowded
+    /// kernel it cannot colour is dropped. A table with no Shape-role rule
+    /// refuses Shape and Accumulators, and Auto there is Pin alone.
+    enum class Matrix { Pin, Accumulators, Shape, Auto };
+    Matrix matrix = Matrix::Pin;
+
     bool applyToOperands = false;  // false = shadow
     bool verify = true;
 

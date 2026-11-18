@@ -168,13 +168,31 @@ TEST_F(Gfx1250AllocationRulesTest, DeclaresEveryRuleWithTheRightKind) {
 }
 
 TEST_F(Gfx1250AllocationRulesTest, TheShapeAndAccumulatorPinRulesShipOff) {
-    // Both are alternatives to ProducerPinMatrix, chosen per kernel with rules=
-    // and noRule=. Shipping either Active would change every kernel's colouring.
+    // Both are alternatives to ProducerPinMatrix, chosen per kernel with
+    // matrix=. Shipping either Active would change every kernel's colouring.
     const AllocationRules rules = gfx1250Rules(/*xnack=*/true);
     for (const char* name : {kShapeRule, kPinAccumulatorRule}) {
         ASSERT_NE(findRule(rules, name), nullptr) << name;
         EXPECT_EQ(findRule(rules, name)->status, RuleStatus::Off) << name;
     }
+}
+
+TEST_F(Gfx1250AllocationRulesTest, TheThreeMatrixRulesCarryTheRolesMatrixChoosesBy) {
+    // matrix= chooses by role, so a rule without its role would be out of reach
+    // of every placement, and a role on another rule would hand that rule over.
+    const AllocationRules rules = gfx1250Rules(/*xnack=*/true);
+    ASSERT_NE(findRule(rules, kPinRule), nullptr);
+    ASSERT_NE(findRule(rules, kShapeRule), nullptr);
+    ASSERT_NE(findRule(rules, kPinAccumulatorRule), nullptr);
+    EXPECT_EQ(findRule(rules, kPinRule)->role, MatrixRole::Pin);
+    EXPECT_EQ(findRule(rules, kShapeRule)->role, MatrixRole::Shape);
+    EXPECT_EQ(findRule(rules, kPinAccumulatorRule)->role, MatrixRole::PinAccumulator);
+    for (const char* name : {kSmemRule, kAlignRule, kVectorAlignRule, kWmmaRule}) {
+        ASSERT_NE(findRule(rules, name), nullptr) << name;
+        EXPECT_EQ(findRule(rules, name)->role, MatrixRole::None) << name;
+    }
+    EXPECT_EQ(AllocationRulesRegistry::matrixRuleNames(),
+              (std::vector<std::string>{kPinAccumulatorRule, kPinRule, kShapeRule}));
 }
 
 TEST_F(Gfx1250AllocationRulesTest, EveryRuleIsActive) {

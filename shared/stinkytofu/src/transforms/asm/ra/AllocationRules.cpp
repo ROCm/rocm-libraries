@@ -249,6 +249,25 @@ std::vector<std::string> AllocationRules::unknownNames(const RuleOverrides& over
     return unknown;
 }
 
+std::vector<std::string> AllocationRules::matrixRuleNames(const RuleOverrides& overrides) const {
+    std::vector<std::string> named;
+    for (const std::vector<std::string>* listed : {&overrides.activate, &overrides.disable}) {
+        for (const std::string& wanted : *listed) {
+            const bool tagged =
+                std::any_of(rules_.begin(), rules_.end(), [&wanted](const AllocationRule& rule) {
+                    return rule.name == wanted && rule.role != MatrixRole::None;
+                });
+            if (tagged) named.push_back(wanted);
+        }
+    }
+    return named;
+}
+
+bool AllocationRules::hasRole(MatrixRole role) const {
+    return std::any_of(rules_.begin(), rules_.end(),
+                       [role](const AllocationRule& rule) { return rule.role == role; });
+}
+
 std::vector<std::string> AllocationRules::contradictoryNames(const RuleOverrides& overrides) {
     std::vector<std::string> both;
     for (const std::string& wanted : overrides.activate) {
@@ -281,6 +300,13 @@ void AllocationRules::force(const RuleOverrides& overrides) {
         } else if (overrides.auditAll && rule.kind() != RuleKind::Preference) {
             rule.status = RuleStatus::Audit;
         }
+    }
+    refresh();
+}
+
+void AllocationRules::forceRole(MatrixRole role, RuleStatus status) {
+    for (AllocationRule& rule : rules_) {
+        if (rule.role == role) rule.status = status;
     }
     refresh();
 }

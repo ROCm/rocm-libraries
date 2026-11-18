@@ -933,3 +933,238 @@ TEST_F(RegisterAllocationPassTest, TheReportPredictsVgprMsbSwitchesOnlyWhereBank
     ASSERT_TRUE(allocateRegisters(*func, allocator, options, &withMode).hasValue());
     EXPECT_TRUE(contains(withMode, " msb[loop=2->2]")) << withMode;
 }
+
+// ---------------------------------------------------------------------------
+// Placing matrix operands: matrix=
+// ---------------------------------------------------------------------------
+
+namespace {
+
+using Matrix = RegisterAllocationOptions::Matrix;
+
+/// One rule per matrix role, each doing nothing, so a test sees which rules a
+/// placement chose without their effects in the way. Shipped as gfx1250 ships
+/// its own: the pin Active, the other two Off.
+AllocationRules matrixRoleTable() {
+    AllocationRule pin;
+    pin.name = "TestPin";
+    pin.description = "matrix operands keep the producer's registers";
+    pin.status = RuleStatus::Active;
+    pin.role = MatrixRole::Pin;
+    pin.pinToProducer = [](const StinkyInstruction&, const OperandValues&,
+                           std::vector<SSAValueID>&) {};
+    AllocationRule shape;
+    shape.name = "TestShape";
+    shape.description = "matrix operands keep the producer's grouping";
+    shape.role = MatrixRole::Shape;
+    shape.addRelations = [](const Function&, std::vector<TupleRun>&, std::vector<AffinitySet>&) {};
+    AllocationRule pinAccumulator;
+    pinAccumulator.name = "TestPinAccumulator";
+    pinAccumulator.description = "accumulators keep the producer's registers";
+    pinAccumulator.role = MatrixRole::PinAccumulator;
+    pinAccumulator.pinToProducer = [](const StinkyInstruction&, const OperandValues&,
+                                      std::vector<SSAValueID>&) {};
+    return AllocationRules({pin, shape, pinAccumulator});
+}
+
+/// Refuses whenever a Shape-role rule is Active and colours as the producer did
+/// otherwise: a kernel the pin colours and shape mode does not.
+class RefusesShapePlacement : public RegisterAllocator {
+   public:
+    const char* name() const override {
+        return "refuses-shape";
+    }
+    AllocatorCapabilities capabilities() const override {
+        return {};
+    }
+    Expected<AllocationResult> allocate(const AllocationContext& context) override {
+        ++attempts;
+        for (const AllocationRule& rule : context.rules.all()) {
+            if (rule.role == MatrixRole::Shape && rule.status == RuleStatus::Active) {
+                return Expected<AllocationResult>::Error("@" + context.function.getName() +
+                                                         ": no room for the tiles");
+            }
+        }
+        return createLegacyColoring(context.function);
+    }
+    int attempts = 0;
+};
+
+}  // namespace
+
+TEST_F(RegisterAllocationPassTest, AutoPinsTheMatrixOperandsWhenPlacingThemByShapeIsRefused) {
+    const ScopedArchRules rules(matrixRoleTable());
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    const std::string before = physicalIR(*func);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.report = true;
+    options.matrix = Matrix::Auto;
+    RefusesShapePlacement allocator;
+    std::string report;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options, &report);
+
+    ASSERT_TRUE(result.hasValue()) << result.getError();
+    EXPECT_EQ(allocator.attempts, 2);
+    EXPECT_TRUE(contains(report, " matrix[auto pin]")) << report;
+    EXPECT_TRUE(
+        contains(report, "rule[TestPin=active] rule[TestShape=off] rule[TestPinAccumulator=off]"))
+        << report;
+    EXPECT_TRUE(contains(report,
+                         "\n  pinned the matrix operands because placing them by shape was "
+                         "refused: no room for the tiles"))
+        << report;
+    // The refused attempt changed nothing; the pin's colouring was applied once.
+    EXPECT_FALSE(func->hasAttachedSSA());
+    EXPECT_EQ(physicalIR(*func), before);
+}
+
+TEST_F(RegisterAllocationPassTest, AutoKeepsTheShapeColouringWhenItColours) {
+    const ScopedArchRules rules(matrixRoleTable());
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.report = true;
+    options.matrix = Matrix::Auto;
+    LegacyIdentityAllocator allocator;
+    std::string report;
+    ASSERT_TRUE(allocateRegisters(*func, allocator, options, &report).hasValue());
+
+    EXPECT_TRUE(contains(report, " matrix[auto shape]")) << report;
+    EXPECT_TRUE(
+        contains(report, "rule[TestPin=off] rule[TestShape=active] rule[TestPinAccumulator=off]"))
+        << report;
+    EXPECT_FALSE(contains(report, "because placing them by shape was refused")) << report;
+}
+
+TEST_F(RegisterAllocationPassTest, EachMatrixPlacementSetsTheRulesItChoosesByRole) {
+    const ScopedArchRules rules(matrixRoleTable());
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const struct {
+        Matrix placement;
+        const char* field;
+        const char* statuses;
+    } cases[] = {
+        {Matrix::Pin, "", "rule[TestPin=active] rule[TestShape=off] rule[TestPinAccumulator=off]"},
+        {Matrix::Shape, " matrix[shape]",
+         "rule[TestPin=off] rule[TestShape=active] rule[TestPinAccumulator=off]"},
+        {Matrix::Accumulators, " matrix[accumulators]",
+         "rule[TestPin=off] rule[TestShape=active] rule[TestPinAccumulator=active]"},
+    };
+    for (const auto& c : cases) {
+        RegisterAllocationOptions options = legacyApply();
+        options.applyToOperands = false;
+        options.report = true;
+        options.matrix = c.placement;
+        LegacyIdentityAllocator allocator;
+        std::string report;
+        ASSERT_TRUE(allocateRegisters(*func, allocator, options, &report).hasValue());
+        EXPECT_TRUE(contains(report, c.statuses)) << report;
+        if (c.placement == Matrix::Pin)
+            EXPECT_FALSE(contains(report, "matrix[")) << "the default stays silent: " << report;
+        else
+            EXPECT_TRUE(contains(report, c.field)) << report;
+    }
+}
+
+TEST_F(RegisterAllocationPassTest, AutoNamesBothRefusalsWhenNoPlacementColours) {
+    const ScopedArchRules rules(matrixRoleTable());
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.matrix = Matrix::Auto;
+    AlwaysRefuses allocator;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
+
+    ASSERT_TRUE(result.hasError());
+    EXPECT_EQ(allocator.attempts, 2);
+    EXPECT_EQ(result.getError(),
+              "@kernel: refused whether the matrix operands are placed by shape or pinned\n"
+              "  shape: refused\n  pin: refused");
+}
+
+TEST_F(RegisterAllocationPassTest, AMatrixPlacementCannotAlsoNameAMatrixRule) {
+    // Whichever won, one of the two requests would go silently undone.
+    const ScopedArchRules rules(matrixRoleTable());
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.matrix = Matrix::Shape;
+    options.rules.activate.push_back("TestShape");
+    LegacyIdentityAllocator allocator;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
+    ASSERT_TRUE(result.hasError());
+    EXPECT_EQ(result.getError(),
+              "@kernel: matrix=shape sets the matrix rules itself, so rules= and noRule= cannot "
+              "name TestShape");
+
+    // Naming them with the pin is the spelling from before matrix=, and stands.
+    options.matrix = Matrix::Pin;
+    options.rules.disable.push_back("TestPin");
+    EXPECT_TRUE(allocateRegisters(*func, allocator, options).hasValue());
+}
+
+TEST_F(RegisterAllocationPassTest, WithoutAShapeRuleShapeIsRefusedAndAutoIsThePin) {
+    const ScopedArchRules rules(selfOverwriteTable(RuleStatus::Off));
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    LegacyIdentityAllocator allocator;
+    for (const Matrix placement : {Matrix::Shape, Matrix::Accumulators}) {
+        options.matrix = placement;
+        Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
+        ASSERT_TRUE(result.hasError());
+        EXPECT_TRUE(contains(result.getError(), "needs a rule that keeps the producer's grouping"))
+            << result.getError();
+    }
+
+    options.matrix = Matrix::Auto;
+    AlwaysRefuses refuses;
+    Expected<AllocationResult> refused = allocateRegisters(*func, refuses, options);
+    ASSERT_TRUE(refused.hasError());
+    EXPECT_EQ(refuses.attempts, 1) << "nothing to place by shape, so the pin is the one attempt";
+    EXPECT_EQ(refused.getError(), "@kernel: refused");
+
+    options.applyToOperands = false;
+    options.report = true;
+    std::string report;
+    ASSERT_TRUE(allocateRegisters(*func, allocator, options, &report).hasValue());
+    EXPECT_TRUE(contains(report, " matrix[auto pin]")) << report;
+    EXPECT_FALSE(contains(report, "was refused")) << report;
+}
+
+TEST_F(RegisterAllocationPassTest, MatrixShapeColoursAsNamingTheGfx1250RulesDoes) {
+    // On gfx1250, matrix=shape is a spelling of
+    // noRule=ProducerPinMatrix,rules=ProducerShapeMatrix, not a new colouring.
+    AllocationRulesRegistry::registerAll();
+    ASSERT_TRUE(AllocationRulesRegistry::forArch(raTestTriple(), AsmCapsConfig{})
+                    .hasRole(MatrixRole::Shape));
+    inReachScaleOperand(*func, block("entry"));
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options;
+    options.allocate = RegClassSet::only(RegType::V);
+    CompactingGreedyAllocator allocator;
+    Expected<AllocationResult> pinned = allocateRegisters(*func, allocator, options);
+    options.matrix = Matrix::Shape;
+    Expected<AllocationResult> byShape = allocateRegisters(*func, allocator, options);
+    options.matrix = Matrix::Pin;
+    options.rules.activate = {"ProducerShapeMatrix"};
+    options.rules.disable = {"ProducerPinMatrix"};
+    Expected<AllocationResult> byName = allocateRegisters(*func, allocator, options);
+
+    ASSERT_TRUE(pinned.hasValue()) << pinned.getError();
+    ASSERT_TRUE(byShape.hasValue()) << byShape.getError();
+    ASSERT_TRUE(byName.hasValue()) << byName.getError();
+    EXPECT_EQ(byShape->toString(), byName->toString());
+    // If the pin ever colours this the same way, the test has stopped telling
+    // the placements apart.
+    EXPECT_NE(byShape->toString(), pinned->toString());
+}

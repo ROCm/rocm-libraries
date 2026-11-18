@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "stinkytofu/bindings/python/Module.hpp"
+#include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterAllocationConfig.hpp"
 
 using namespace stinkytofu;
@@ -18,6 +19,7 @@ using Dialect = RegisterAllocationDialect;
 using Mode = RegisterAllocationMode;
 using Unbankable = RegisterAllocationOptions::UnbankableOperands;
 using Quadrant = RegisterAllocationOptions::Quadrant;
+using Matrix = RegisterAllocationOptions::Matrix;
 
 RegisterAllocationConfig parsed(std::string_view text, Dialect dialect = Dialect::Kernel) {
     Expected<RegisterAllocationConfig> config = parseRegisterAllocationConfig(text, dialect);
@@ -45,6 +47,7 @@ TEST(RegisterAllocationConfigTest, AKernelDefaultsToOffWithBothClassesAndTheChai
               "greedy-compact+greedy-compact-largest+greedy-compact-program");
     EXPECT_EQ(config.options.unbankableOperands, Unbankable::Auto);
     EXPECT_EQ(config.options.quadrant, Quadrant::Any);
+    EXPECT_EQ(config.options.matrix, Matrix::Pin);
     EXPECT_FALSE(config.options.applyToOperands);
     EXPECT_TRUE(config.options.verify);
     EXPECT_FALSE(config.options.report);
@@ -107,6 +110,42 @@ TEST(RegisterAllocationConfigTest, TheQuadrantCanBePlanned) {
     EXPECT_EQ(canonical("3,quadrant=prefer"), "3,quadrant=prefer");
 }
 
+TEST(RegisterAllocationConfigTest, TheMatrixPlacementDefaultsToThePin) {
+    EXPECT_EQ(parsed("").options.matrix, Matrix::Pin);
+    EXPECT_EQ(parsed("", Dialect::Tool).options.matrix, Matrix::Pin);
+    EXPECT_EQ(parsed("matrix=pin").options.matrix, Matrix::Pin);
+    EXPECT_EQ(parsed("matrix=accumulators").options.matrix, Matrix::Accumulators);
+    EXPECT_EQ(parsed("matrix=shape").options.matrix, Matrix::Shape);
+    EXPECT_EQ(parsed("matrix=auto", Dialect::Tool).options.matrix, Matrix::Auto);
+}
+
+TEST(RegisterAllocationConfigTest, TheMatrixPlacementIsSpelledOnlyWhenItIsNotThePin) {
+    EXPECT_EQ(canonical("3,matrix=pin"), "3");
+    EXPECT_EQ(canonical("3,matrix=shape"), "3,matrix=shape");
+    EXPECT_EQ(canonical("3,matrix=accumulators"), "3,matrix=accumulators");
+    // After unbankable= and before quadrant=, so it reads as the plan spells it.
+    EXPECT_EQ(canonical("quadrant=plan,3,matrix=auto,unbankable=hold"),
+              "3,unbankable=hold,matrix=auto,quadrant=plan");
+    EXPECT_EQ(canonical(canonical("3,matrix=auto,quadrant=plan")), "3,matrix=auto,quadrant=plan");
+}
+
+TEST(RegisterAllocationConfigTest, AMatrixPlacementOtherThanThePinCannotNameAMatrixRule) {
+    // What TensileLite sees when it validates a YAML, before any kernel or
+    // architecture: the names come from every registered table.
+    ASSERT_FALSE(AllocationRulesRegistry::matrixRuleNames().empty());
+    const std::string error = errorOf("3,matrix=shape,rules=ProducerShapeMatrix");
+    EXPECT_NE(error.find("matrix=shape sets the matrix rules itself"), std::string::npos) << error;
+    EXPECT_NE(error.find("ProducerShapeMatrix"), std::string::npos) << error;
+    EXPECT_NE(errorOf("3,matrix=auto,noRule=ProducerPinMatrix").find("ProducerPinMatrix"),
+              std::string::npos);
+
+    // A rule outside the matrix roles is still the configuration's to force,
+    // and the pin keeps the spelling that names the matrix rules itself.
+    EXPECT_EQ(parsed("3,matrix=shape,noRule=WmmaAccumulatorReuse").options.matrix, Matrix::Shape);
+    EXPECT_EQ(parsed("3,rules=ProducerShapeMatrix,noRule=ProducerPinMatrix").options.matrix,
+              Matrix::Pin);
+}
+
 TEST(RegisterAllocationConfigTest, BlanksAndEmptyWordsAreIgnored) {
     const RegisterAllocationConfig config = parsed(" apply , classes = vs ,");
     EXPECT_EQ(config.mode, Mode::Apply);
@@ -122,6 +161,7 @@ TEST(RegisterAllocationConfigTest, ABadValueSaysWhatTheKeyTakes) {
     EXPECT_NE(errorOf("unbankable=freeze").find("hold, allocate or auto"), std::string::npos);
     EXPECT_NE(errorOf("classes=x").find("s, v or vs"), std::string::npos);
     EXPECT_NE(errorOf("quadrant=strict").find("any, prefer or plan"), std::string::npos);
+    EXPECT_NE(errorOf("matrix=free").find("pin, accumulators, shape or auto"), std::string::npos);
     EXPECT_NE(errorOf("mode=7").find("0..3"), std::string::npos);
     EXPECT_NE(errorOf("pinReg=x3").find("'x3'"), std::string::npos);
     EXPECT_NE(errorOf("regionEnd=").find("label"), std::string::npos);

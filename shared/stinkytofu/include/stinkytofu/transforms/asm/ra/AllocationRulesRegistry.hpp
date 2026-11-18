@@ -68,6 +68,11 @@ class STINKYTOFU_EXPORT AllocationRulesRegistry {
     /// Registered arch keys, sorted (form `gfxMNS`).
     static std::vector<std::string> archKeys();
 
+    /// Names of the rules any registered table tags with a matrix role, sorted.
+    /// For checking a configuration before it meets an architecture, the way
+    /// TensileLite validates one.
+    static std::vector<std::string> matrixRuleNames();
+
     /// Exists so a static build keeps the self-registering per-arch TUs, whose
     /// anchors its body names. Registers nothing itself.
     static void registerAll();
