@@ -162,13 +162,12 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
         gammaD = hiptensor::readVal<double>(gamma, hiptensor::convertToComputeType(typeScalar));
     }
 
-    autotuneMgr->setAutotune<hiptensor::ElementwiseSolution>(
+    auto trial = autotuneMgr->setAutotune<hiptensor::ElementwiseSolution>(
         hiptensor::AutotuneOps::Autotune_TrinaryOp, handle, plan);
 
     std::vector<hiptensor::ElementwiseSolution*> solutions;
-    // Load the plan's solution once: another thread sharing this plan may update it.
-    if(auto* planSolution
-       = static_cast<hiptensor::ElementwiseSolution*>(plan->mPref->mSolution.load()))
+    // Use the trial's solution: another thread sharing this plan may update the plan's.
+    if(auto* planSolution = trial.solution())
         solutions.push_back(planSolution);
     else
     {
@@ -260,8 +259,7 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
             }
 
             plan->mPref->mSolution.store(pSolution);
-            autotuneMgr->saveAutotune<hiptensor::ElementwiseSolution>(
-                hiptensor::AutotuneOps::Autotune_TrinaryOp, pSolution, time, handle, plan);
+            trial.save(pSolution, time);
 
             return HIPTENSOR_STATUS_SUCCESS;
         }

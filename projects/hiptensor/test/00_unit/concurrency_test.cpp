@@ -46,9 +46,14 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <memory>
 #include <mutex>
+#include <random>
+#include <set>
+#include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -650,6 +655,167 @@ namespace
                                                         : "operation not supported";
     }
 
+    // A status for failure messages. Numeric for the same reason as skipReason: the
+    // name of HIPTENSOR_STATUS_ARCH_MISMATCH would turn the failure into a skip.
+    int statusCode(hiptensorStatus_t status)
+    {
+        return static_cast<int>(status);
+    }
+
+
+    // A plan that autotunes incrementally: the first count calls each try a candidate
+    // kernel, then the fastest one is added to the plan cache.
+    hiptensorStatus_t createIncrementalPlan(hiptensorHandle_t              handle,
+                                            hiptensorOperationDescriptor_t op,
+                                            int32_t                        count,
+                                            hiptensorPlan_t*               plan,
+                                            uint64_t*                      workspaceSize)
+    {
+        hiptensorPlanPreference_t pref   = nullptr;
+        auto                      status = hiptensorCreatePlanPreference(
+            handle, &pref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE);
+        if(status != HIPTENSOR_STATUS_SUCCESS)
+            return status;
+        auto cacheMode    = HIPTENSOR_CACHE_MODE_PEDANTIC;
+        auto autotuneMode = HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL;
+        status            = hiptensorPlanPreferenceSetAttribute(
+            handle, pref, HIPTENSOR_PLAN_PREFERENCE_CACHE_MODE, &cacheMode, sizeof(cacheMode));
+        if(status == HIPTENSOR_STATUS_SUCCESS)
+            status = hiptensorPlanPreferenceSetAttribute(handle,
+                                                         pref,
+                                                         HIPTENSOR_PLAN_PREFERENCE_AUTOTUNE_MODE,
+                                                         &autotuneMode,
+                                                         sizeof(autotuneMode));
+        if(status == HIPTENSOR_STATUS_SUCCESS)
+            status = hiptensorPlanPreferenceSetAttribute(
+                handle, pref, HIPTENSOR_PLAN_PREFERENCE_INCREMENTAL_COUNT, &count, sizeof(count));
+        if(status == HIPTENSOR_STATUS_SUCCESS)
+            status = hiptensorEstimateWorkspaceSize(
+                handle, op, pref, HIPTENSOR_WORKSPACE_DEFAULT, workspaceSize);
+        if(status == HIPTENSOR_STATUS_SUCCESS)
+            status = hiptensorCreatePlan(handle, plan, op, pref, *workspaceSize);
+        hiptensorDestroyPlanPreference(pref);
+        return status;
+    }
+
+    // Collects the kernel id of every contraction call, from the performance trace the
+    // library logs for each call. Installed for the lifetime of the object.
+    class KernelLog
+    {
+    public:
+        KernelLog()
+        {
+            std::scoped_lock lock(sMutex);
+            sIds.clear();
+            hiptensorLoggerSetCallback(&KernelLog::callback);
+            hiptensorLoggerSetMask(HIPTENSOR_LOG_LEVEL_PERF_TRACE);
+        }
+        ~KernelLog()
+        {
+            hiptensorLoggerSetMask(HIPTENSOR_LOG_LEVEL_OFF);
+            hiptensorLoggerSetCallback(nullptr);
+        }
+        KernelLog(KernelLog const&)            = delete;
+        KernelLog& operator=(KernelLog const&) = delete;
+
+        // The kernel ids logged so far, in call order, and clears them.
+        std::vector<std::size_t> take()
+        {
+            std::scoped_lock lock(sMutex);
+            return std::exchange(sIds, {});
+        }
+
+    private:
+        static void callback(int32_t, const char* funcName, const char* msg)
+        {
+            std::string_view const func(funcName);
+            if(func != "hiptensorContraction" && func != "hiptensorContractTrinary")
+                return;
+            if(auto* id = std::strstr(msg, "KernelId: "))
+            {
+                std::scoped_lock lock(sMutex);
+                sIds.push_back(std::strtoull(id + std::strlen("KernelId: "), nullptr, 10));
+            }
+        }
+
+        static inline std::mutex               sMutex;
+        static inline std::vector<std::size_t> sIds;
+    };
+
+    // The (problem hash, kernel id) lines of the handle's plan cache, read back from the
+    // file hiptensorHandleWritePlanCacheToFile writes.
+    std::vector<std::pair<std::size_t, std::size_t>> planCacheLines(hiptensorHandle_t handle)
+    {
+        std::ostringstream name;
+        name << ::testing::TempDir() << "hiptensor_"
+             << ::testing::UnitTest::GetInstance()->current_test_info()->name() << "_" << std::hex
+             << std::random_device{}() << std::random_device{}() << ".bin";
+        auto const path = name.str();
+
+        std::vector<std::pair<std::size_t, std::size_t>> lines;
+        EXPECT_EQ(hiptensorHandleWritePlanCacheToFile(handle, path.c_str()),
+                  HIPTENSOR_STATUS_SUCCESS);
+        {
+            std::ifstream in(path, std::ios::in | std::ios::binary);
+            uint32_t      maxCachelines = 0;
+            std::size_t   size          = 0;
+            in.read(reinterpret_cast<char*>(&maxCachelines), sizeof(maxCachelines));
+            in.read(reinterpret_cast<char*>(&size), sizeof(size));
+            lines.resize(in.good() ? size : 0);
+            for(auto& [hash, uid] : lines)
+            {
+                in.read(reinterpret_cast<char*>(&hash), sizeof(hash));
+                in.read(reinterpret_cast<char*>(&uid), sizeof(uid));
+            }
+            EXPECT_TRUE(in.good()) << "truncated plan cache file " << path;
+        }
+        std::remove(path.c_str());
+        return lines;
+    }
+
+    // Device buffers for one call of an operation case.
+    struct CallBuffers
+    {
+        std::vector<DeviceBuffer> inputs;
+        std::vector<void*>        inputPtrs;
+        DeviceBuffer              out;
+        DeviceBuffer              workspace;
+    };
+
+    CallBuffers makeBuffers(OpCase const& opCase, int t, uint64_t workspaceSize)
+    {
+        CallBuffers b;
+        for(auto const& host : opCase.inputs(t))
+        {
+            b.inputs.push_back(upload(host));
+            b.inputPtrs.push_back(b.inputs.back().mPtr);
+        }
+        b.out       = DeviceBuffer(opCase.outputElements() * sizeof(float));
+        b.workspace = DeviceBuffer(workspaceSize);
+        return b;
+    }
+
+    // Runs one call on the null stream and returns its status and output.
+    std::pair<hiptensorStatus_t, std::vector<float>> runCall(OpCase const&      opCase,
+                                                             hiptensorHandle_t  handle,
+                                                             hiptensorPlan_t    plan,
+                                                             CallBuffers const& b,
+                                                             uint64_t           workspaceSize)
+    {
+        std::vector<float> result(opCase.outputElements());
+        auto               status = opCase.execute(
+            handle, plan, b.inputPtrs, b.out.mPtr, b.workspace.mPtr, workspaceSize, nullptr);
+        if(status == HIPTENSOR_STATUS_SUCCESS
+           && hipMemcpy(result.data(),
+                        b.out.mPtr,
+                        result.size() * sizeof(float),
+                        hipMemcpyDeviceToHost)
+                  != hipSuccess)
+        {
+            status = HIPTENSOR_STATUS_HIP_ERROR;
+        }
+        return {status, std::move(result)};
+    }
 } // namespace
 
 class ConcurrencyTest : public ::testing::TestWithParam<std::tuple<std::string, Plans, Mode>>
@@ -832,7 +998,7 @@ TEST_P(ConcurrencyTest, MatchesSingleThreadedResult)
         auto const& ts = threads[t];
         SCOPED_TRACE("thread " + std::to_string(t));
         EXPECT_EQ(ts.calls, iters);
-        EXPECT_EQ(ts.errors, 0) << "last error: " << hiptensorGetErrorString(ts.lastError);
+        EXPECT_EQ(ts.errors, 0) << "last error status: " << statusCode(ts.lastError);
         if(mode == Mode::Broken && t == 1)
         {
             EXPECT_EQ(ts.wrong, iters) << "the harness failed to detect a swapped problem";
@@ -861,6 +1027,225 @@ INSTANTIATE_TEST_SUITE_P(
                + (std::get<1>(info.param) == Plans::Shared ? "_SharedPlan_" : "_PlanPerThread_")
                + toString(std::get<2>(info.param));
     });
+
+// Incremental autotuning with one plan shared by all threads. Each thread makes one call
+// at the same time, so every call of the round is in flight before any is recorded. Each
+// call must run its own candidate, and the round must cache one of the kernels it ran.
+TEST(ConcurrencyAutotuneTest, SharedPlanTriesEachCandidateOnce)
+{
+    ScaleContraction  opCase;
+    hiptensorHandle_t handle = nullptr, refHandle = nullptr;
+    ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_EQ(hiptensorCreate(&refHandle), HIPTENSOR_STATUS_SUCCESS);
+    hiptensorPlan_t plan = nullptr, refPlan = nullptr;
+    ScopeExit       cleanup{[&] {
+        if(plan)
+            hiptensorDestroyPlan(plan);
+        if(refPlan)
+            hiptensorDestroyPlan(refPlan);
+        opCase.destroy();
+        hiptensorDestroy(refHandle);
+        hiptensorDestroy(handle);
+    }};
+
+    auto status = opCase.create(handle);
+    if(isSkipStatus(status))
+    {
+        GTEST_SKIP() << skipReason(status);
+    }
+    ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
+
+    uint64_t workspaceSize = 0, refWorkspaceSize = 0;
+    status = createIncrementalPlan(handle, opCase.mOp, kThreads, &plan, &workspaceSize);
+    if(isSkipStatus(status))
+    {
+        GTEST_SKIP() << skipReason(status);
+    }
+    ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
+    // The reference results come from another handle, so they do not take part in the round.
+    ASSERT_EQ(createPlan(refHandle,
+                         opCase.mOp,
+                         HIPTENSOR_CACHE_MODE_NONE,
+                         &refPlan,
+                         &refWorkspaceSize),
+              HIPTENSOR_STATUS_SUCCESS);
+
+    std::vector<CallBuffers>        buffers;
+    std::vector<std::vector<float>> references;
+    for(int t = 0; t < kThreads; t++)
+    {
+        buffers.push_back(makeBuffers(opCase, t, std::max(workspaceSize, refWorkspaceSize)));
+        auto [refStatus, reference]
+            = runCall(opCase, refHandle, refPlan, buffers.back(), refWorkspaceSize);
+        ASSERT_EQ(refStatus, HIPTENSOR_STATUS_SUCCESS) << "status " << statusCode(refStatus);
+        references.push_back(std::move(reference));
+    }
+
+    KernelLog                      log;
+    std::vector<hiptensorStatus_t> callStatus(kThreads, HIPTENSOR_STATUS_SUCCESS);
+    std::vector<char>              matches(kThreads, false);
+    std::atomic<int>               ready{0};
+    auto                           worker = [&](int t) {
+        ready++;
+        while(ready.load() < kThreads)
+        {
+            std::this_thread::yield();
+        }
+        auto [s, result] = runCall(opCase, handle, plan, buffers[t], workspaceSize);
+        callStatus[t]    = s;
+        matches[t]       = s == HIPTENSOR_STATUS_SUCCESS && result == references[t];
+    };
+    std::vector<std::thread> workers;
+    for(int t = 0; t < kThreads; t++)
+    {
+        workers.emplace_back(worker, t);
+    }
+    for(auto& w : workers)
+    {
+        w.join();
+    }
+
+    // A candidate kernel may not support the problem: that call fails and is skipped.
+    int successes = 0;
+    for(int t = 0; t < kThreads; t++)
+    {
+        SCOPED_TRACE("thread " + std::to_string(t));
+        if(callStatus[t] == HIPTENSOR_STATUS_SUCCESS)
+        {
+            successes++;
+            EXPECT_TRUE(matches[t]);
+        }
+    }
+    ASSERT_GT(successes, 0);
+
+    auto const tried = log.take();
+    ASSERT_EQ(tried.size(), static_cast<std::size_t>(successes));
+    EXPECT_EQ(std::set<std::size_t>(tried.begin(), tried.end()).size(), tried.size())
+        << "two calls of the round ran the same candidate";
+
+    auto const lines = planCacheLines(handle);
+    ASSERT_EQ(lines.size(), 1u) << "the round did not cache a kernel";
+    EXPECT_NE(std::find(tried.begin(), tried.end(), lines[0].second), tried.end())
+        << "the cached kernel was not tried in the round";
+
+    // The next call runs the cached kernel.
+    auto [s, result] = runCall(opCase, handle, plan, buffers[0], workspaceSize);
+    ASSERT_EQ(s, HIPTENSOR_STATUS_SUCCESS) << "status " << statusCode(s);
+    EXPECT_EQ(result, references[0]);
+    EXPECT_EQ(log.take(), std::vector<std::size_t>{lines[0].second});
+}
+
+// A call that reserves a candidate and then returns early, here for a missing workspace,
+// counts as a failed run of that candidate: the round still completes.
+TEST(ConcurrencyAutotuneTest, AbandonedCandidateDoesNotStallRound)
+{
+    TrinaryContraction opCase;
+    hiptensorHandle_t  handle = nullptr;
+    ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
+    hiptensorPlan_t plan = nullptr;
+    ScopeExit       cleanup{[&] {
+        if(plan)
+            hiptensorDestroyPlan(plan);
+        opCase.destroy();
+        hiptensorDestroy(handle);
+    }};
+
+    auto status = opCase.create(handle);
+    if(isSkipStatus(status))
+    {
+        GTEST_SKIP() << skipReason(status);
+    }
+    ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
+
+    uint64_t workspaceSize = 0;
+    status                 = createIncrementalPlan(handle, opCase.mOp, 2, &plan, &workspaceSize);
+    if(isSkipStatus(status))
+    {
+        GTEST_SKIP() << skipReason(status);
+    }
+    ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_GT(workspaceSize, 0u) << "the intermediate tensor needs a workspace";
+
+    auto const b = makeBuffers(opCase, 0, workspaceSize);
+    KernelLog  log;
+
+    auto [abandoned, unused] = runCall(opCase, handle, plan, b, 0);
+    EXPECT_EQ(abandoned, HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE)
+        << "status " << statusCode(abandoned);
+    EXPECT_TRUE(planCacheLines(handle).empty());
+
+    auto [s, result] = runCall(opCase, handle, plan, b, workspaceSize);
+    ASSERT_EQ(s, HIPTENSOR_STATUS_SUCCESS) << "status " << statusCode(s);
+
+    auto const lines = planCacheLines(handle);
+    ASSERT_EQ(lines.size(), 1u) << "the round did not complete";
+    EXPECT_EQ(log.take(), std::vector<std::size_t>{lines[0].second});
+}
+
+// Calls of different problems on one handle, interleaved, are tuned separately: each
+// problem caches its kernel after its own count of calls. Permute has no candidate list,
+// so its round counts calls of its one solution.
+TEST(ConcurrencyAutotuneTest, InterleavedProblemsAreTunedSeparately)
+{
+    constexpr int32_t kCount = 3;
+
+    std::vector<std::unique_ptr<OpCase>> cases;
+    cases.push_back(std::make_unique<ScaleContraction>());
+    cases.push_back(std::make_unique<BilinearContraction>());
+    cases.push_back(std::make_unique<Permute>());
+
+    hiptensorHandle_t handle = nullptr;
+    ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
+    std::vector<hiptensorPlan_t> plans(cases.size(), nullptr);
+    ScopeExit                    cleanup{[&] {
+        for(auto plan : plans)
+        {
+            if(plan)
+                hiptensorDestroyPlan(plan);
+        }
+        for(auto& opCase : cases)
+        {
+            opCase->destroy();
+        }
+        hiptensorDestroy(handle);
+    }};
+
+    std::vector<uint64_t>    workspaceSizes(cases.size(), 0);
+    std::vector<CallBuffers> buffers;
+    for(std::size_t i = 0; i < cases.size(); i++)
+    {
+        auto status = cases[i]->create(handle);
+        if(status == HIPTENSOR_STATUS_SUCCESS)
+            status = createIncrementalPlan(
+                handle, cases[i]->mOp, kCount, &plans[i], &workspaceSizes[i]);
+        if(isSkipStatus(status))
+        {
+            GTEST_SKIP() << skipReason(status);
+        }
+        ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
+        buffers.push_back(makeBuffers(*cases[i], 0, workspaceSizes[i]));
+    }
+
+    for(int32_t call = 0; call < kCount; call++)
+    {
+        SCOPED_TRACE("call " + std::to_string(call));
+        EXPECT_EQ(planCacheLines(handle).size(), 0u);
+        for(std::size_t i = 0; i < cases.size(); i++)
+        {
+            // A candidate that cannot run the problem fails its call; the round moves on.
+            (void)runCall(*cases[i], handle, plans[i], buffers[i], workspaceSizes[i]);
+        }
+    }
+
+    auto const lines = planCacheLines(handle);
+    EXPECT_EQ(lines.size(), cases.size()) << "every problem caches its own kernel";
+    std::set<std::size_t> hashes;
+    for(auto const& line : lines)
+    {
+        hashes.insert(line.first);
+    }
+    EXPECT_EQ(hashes.size(), lines.size());
+}
 
 // Several threads create plans at the same time. Plan cache lookup is disabled so
 // every thread runs the brute-force selection, which times every candidate kernel.
@@ -968,9 +1353,9 @@ TEST(ConcurrencyPlanCreationTest, ConcurrentBruteForceSelection)
     {
         SCOPED_TRACE("thread " + std::to_string(t));
         EXPECT_EQ(createStatus[t], HIPTENSOR_STATUS_SUCCESS)
-            << hiptensorGetErrorString(createStatus[t]);
+            << "status " << statusCode(createStatus[t]);
         EXPECT_EQ(execStatus[t], HIPTENSOR_STATUS_SUCCESS)
-            << hiptensorGetErrorString(execStatus[t]);
+            << "status " << statusCode(execStatus[t]);
         EXPECT_TRUE(matches[t]);
     }
 }

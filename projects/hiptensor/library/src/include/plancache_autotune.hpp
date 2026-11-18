@@ -26,11 +26,13 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <map>
 #include <mutex>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "data_types.hpp"
@@ -49,14 +51,77 @@ namespace hiptensor
         Autotune_Redution
     };
 
+    class PlancacheAutotuneMgr;
+
+    // One execution's part in Plan Cache autotuning: the solution the execution runs and,
+    // during incremental autotuning, the candidate it reserved. Executions that share a plan
+    // each get their own trial, so none of them runs or records another one's candidate.
+    // A trial with a reserved candidate that is destroyed before save() or fail() counts as a
+    // failed run, so an execution that returns early does not stall its round.
+    template <typename T>
+    class AutotuneTrial
+    {
+    public:
+        AutotuneTrial()                                = default;
+        AutotuneTrial(AutotuneTrial const&)            = delete;
+        AutotuneTrial& operator=(AutotuneTrial const&) = delete;
+        AutotuneTrial(AutotuneTrial&& other) noexcept
+        {
+            *this = std::move(other);
+        }
+        AutotuneTrial& operator=(AutotuneTrial&& other) noexcept
+        {
+            if(this != &other)
+            {
+                if(mRound != 0)
+                    fail();
+                mType     = other.mType;
+                mHandle   = std::exchange(other.mHandle, nullptr);
+                mPlan     = std::exchange(other.mPlan, nullptr);
+                mSolution = std::exchange(other.mSolution, nullptr);
+                mRound    = std::exchange(other.mRound, 0);
+            }
+            return *this;
+        }
+        ~AutotuneTrial()
+        {
+            if(mRound != 0)
+                fail();
+        }
+
+        // The solution to run: the reserved candidate, the cached solution or the plan's
+        // solution. nullptr when the plan has no solution yet.
+        T* solution() const
+        {
+            return mSolution;
+        }
+
+        // Records a successful run of solution taking time.
+        void save(T* solution, float time);
+
+        // Records a failed run. The failed candidate is not retried.
+        void fail();
+
+    private:
+        friend class PlancacheAutotuneMgr;
+
+        AutotuneOps       mType     = AutotuneOps::Autotune_Contraction;
+        hiptensorHandle_t mHandle   = nullptr; // nullptr when there is nothing to record
+        hiptensorPlan_t   mPlan     = nullptr;
+        T*                mSolution = nullptr;
+        uint64_t          mRound    = 0; // round of the reserved candidate, 0 if none
+    };
+
     class PlancacheAutotuneMgr : public LazySingleton<PlancacheAutotuneMgr>
     {
     private:
         // Incremental autotune state of one problem
         struct AutotuneState
         {
+            uint64_t mRound         = 0; //Identifies the round, see mNextRound
             uint32_t mNextCandidate = 0; //Index of the next candidate to hand out
-            uint32_t mCallCount     = 0; //Number of calls (timed or failed) so far
+            uint32_t mPending       = 0; //Candidates handed out but not recorded yet
+            uint32_t mCallCount     = 0; //Number of calls (timed or failed) recorded so far
             float    mBestTime      = std::numeric_limits<float>::max();
             void*    mBestSolution  = nullptr; //Fastest solution timed so far
         };
@@ -67,8 +132,12 @@ namespace hiptensor
         using AutotuneKey = std::tuple<AutotuneOps, std::uintptr_t, PlanCache::HashId>;
         std::map<AutotuneKey, AutotuneState> mAutotuneStates;
 
+        // Every round gets a new number, so a trial cannot be recorded in a later round of
+        // the same problem.
+        uint64_t mNextRound = 1;
+
         // The manager is process-wide and every execute call goes through it,
-        // so all access to the map above must hold this lock.
+        // so all access to the members above must hold this lock.
         std::mutex mMutex;
 
         //Singleton: only one instance
@@ -88,18 +157,27 @@ namespace hiptensor
                     planCache->getHashID(plan->mOpDesc)};
         }
 
+        // Number of calls a round records. A plan with candidates tries each of them once, up
+        // to mIncrementalCount; only the calls that reserved a candidate are recorded. A plan
+        // without candidates (e.g. elementwise) records mIncrementalCount calls of its solution.
+        static uint32_t roundSize(const hiptensorPlan_t plan)
+        {
+            auto count = static_cast<std::size_t>(std::max(plan->mPref->mIncrementalCount, 0));
+            if(!plan->mPref->mCandidates.empty())
+            {
+                count = std::min(count, plan->mPref->mCandidates.size());
+            }
+            return static_cast<uint32_t>(count);
+        }
+
         // Records one autotune call: a successful run of solution taking time, or a failed run
         // when solution is nullptr. A failed run still advances the round (so a candidate that
-        // cannot run does not stall autotuning) but is never selected. Once the round has seen
-        // mIncrementalCount calls, the fastest successful solution is added to the Plan Cache.
+        // cannot run does not stall autotuning) but is never selected. Once the round has
+        // recorded all its calls, the fastest successful solution is added to the Plan Cache.
         template <typename T>
-        void recordAutotune(const AutotuneOps       autotuneType,
-                            T*                      solution,
-                            float                   time,
-                            const hiptensorHandle_t handle,
-                            const hiptensorPlan_t   plan)
+        void recordAutotune(AutotuneTrial<T> const& trial, T* solution, float time)
         {
-            auto key = makeKey(autotuneType, handle, plan);
+            auto key = makeKey(trial.mType, trial.mHandle, trial.mPlan);
 
             std::scoped_lock lock(mMutex);
 
@@ -109,8 +187,21 @@ namespace hiptensor
             if(it == mAutotuneStates.end())
                 return;
 
-            //For Plan Cache autotuning, remember the best performace solution
             auto& state = it->second;
+            if(trial.mRound != 0)
+            {
+                // The trial's round already completed and a new one started.
+                if(trial.mRound != state.mRound)
+                    return;
+                state.mPending--;
+            }
+            else if(!trial.mPlan->mPref->mCandidates.empty())
+            {
+                // The call ran the plan's solution, which is not a candidate of this round.
+                return;
+            }
+
+            //For Plan Cache autotuning, remember the best performace solution
             if(solution != nullptr && time < state.mBestTime)
             {
                 state.mBestTime     = time;
@@ -120,13 +211,13 @@ namespace hiptensor
             //Count the number of calling this function for Plan Cache autotuning
             state.mCallCount++;
 
-            //When the number of calling this function is equal to the number of different candidates to explore,
-            //add the best solution to the Plan Cache.
-            if(state.mCallCount >= plan->mPref->mIncrementalCount)
+            //When every call of the round is recorded, add the best solution to the Plan Cache.
+            //Waiting for the pending candidates keeps a slow candidate from being dropped.
+            if(state.mCallCount >= roundSize(trial.mPlan) && state.mPending == 0)
             {
                 if(state.mBestSolution != nullptr)
                 {
-                    handle->getPlanCache()->addCacheLine(
+                    trial.mHandle->getPlanCache()->addCacheLine(
                         std::get<2>(key), static_cast<T*>(state.mBestSolution)->uid());
                 }
 
@@ -135,23 +226,35 @@ namespace hiptensor
             }
         }
 
+        template <typename T>
+        friend class AutotuneTrial;
+
     public:
         friend std::unique_ptr<PlancacheAutotuneMgr> std::make_unique<PlancacheAutotuneMgr>();
 
-        //Set current solution to try in autotune
+        //Picks the solution an execution runs and returns it in a trial, to be saved after the
+        //run. The plan's solution is not changed for incremental autotuning: executions sharing
+        //the plan each run the candidate in their own trial.
         template <typename T>
-        void setAutotune(const AutotuneOps       autotuneType,
-                         const hiptensorHandle_t handle,
-                         const hiptensorPlan_t   plan)
+        AutotuneTrial<T> setAutotune(const AutotuneOps       autotuneType,
+                                     const hiptensorHandle_t handle,
+                                     const hiptensorPlan_t   plan)
         {
-            if(handle == nullptr || plan == nullptr)
-                return;
+            AutotuneTrial<T> trial;
+            if(plan == nullptr || plan->mPref == nullptr)
+                return trial;
+            trial.mSolution = static_cast<T*>(plan->mPref->mSolution.load());
+
+            if(handle == nullptr)
+                return trial;
             if(handle->getPlanCache() == nullptr)
-                return;
-            if(plan->mPref == nullptr)
-                return;
+                return trial;
             if(plan->mPref->mCacheMode != HIPTENSOR_CACHE_MODE_PEDANTIC)
-                return;
+                return trial;
+
+            trial.mType   = autotuneType;
+            trial.mHandle = handle;
+            trial.mPlan   = plan;
 
             // Look for solution from memory cache (Plan Cache) or do autotuning for Plan Cache.
             // The plan cache has its own lock, and the plan's solution is atomic, so this
@@ -160,9 +263,8 @@ namespace hiptensor
             if(Uid > 0ull)
             {
                 //If the plan already uses the cached solution, skip searching the candidates
-                auto* current = static_cast<T*>(plan->mPref->mSolution.load());
-                if(current != nullptr && current->uid() == Uid)
-                    return;
+                if(trial.mSolution != nullptr && trial.mSolution->uid() == Uid)
+                    return trial;
 
                 //If there is a solution already in the Plan Cache, directly set solution from Plan Cache
                 auto candidates = std::vector<T*>(plan->mPref->mCandidates.size());
@@ -174,10 +276,18 @@ namespace hiptensor
                 //Keep the current solution if the cached one is not among the candidates
                 //(e.g. a plan created from a cache hit may have no candidate list)
                 if(auto* cached = findSolutionByUid(candidates, Uid))
+                {
                     plan->mPref->mSolution.store(cached);
+                    trial.mSolution = cached;
+                }
             }
             else if(plan->mPref->mAutotuneMode == HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL)
             {
+                auto size = roundSize(plan);
+                // A plan with candidates that tries none of them has no round to record.
+                if(size == 0 && !plan->mPref->mCandidates.empty())
+                    return trial;
+
                 auto key = makeKey(autotuneType, handle, plan);
 
                 std::scoped_lock lock(mMutex);
@@ -185,72 +295,24 @@ namespace hiptensor
                 //If there is no solution in the Plan Cache, we may need to do autotuning based on the number of calling this function.
                 //Candidates are handed out by a separate counter so that concurrent calls, which
                 //all start before any of them is recorded, each try a different candidate.
-                auto&    state = mAutotuneStates[key];
-                uint32_t next  = state.mNextCandidate;
-                if(next < plan->mPref->mIncrementalCount)
+                auto [it, inserted] = mAutotuneStates.try_emplace(key);
+                auto& state         = it->second;
+                if(inserted)
+                    state.mRound = mNextRound++;
+
+                if(!plan->mPref->mCandidates.empty() && state.mNextCandidate < size)
                 {
                     //If the number of calling this function is less than the number of different candidates to explore,
                     //we are doing the autotuning to find the best solution
-                    if(next < plan->mPref->mCandidates.size())
-                    {
-                        plan->mPref->mSolution.store(plan->mPref->mCandidates[next]);
-                        state.mNextCandidate++;
-                    }
                     // TODO: need a ranked solution array to explore from fastest to slowest
+                    trial.mSolution
+                        = static_cast<T*>(plan->mPref->mCandidates[state.mNextCandidate]);
+                    trial.mRound = state.mRound;
+                    state.mNextCandidate++;
+                    state.mPending++;
                 }
             }
-        }
-
-        //Check and save autotune results to Plan Cache.
-        //solution is the kernel that produced time. Callers pass the solution they ran rather
-        //than letting this re-read the plan, which another thread sharing the plan may have
-        //changed in the meantime.
-        template <typename T>
-        void saveAutotune(const AutotuneOps       autotuneType,
-                          T*                      solution,
-                          float                   time,
-                          const hiptensorHandle_t handle,
-                          const hiptensorPlan_t   plan)
-        {
-            if(solution == nullptr || handle == nullptr || plan == nullptr)
-                return;
-            if(handle->getPlanCache() == nullptr)
-                return;
-            if(plan->mPref == nullptr)
-                return;
-            if(plan->mPref->mCacheMode != HIPTENSOR_CACHE_MODE_PEDANTIC)
-                return;
-
-            if(plan->mPref->mAutotuneMode != HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL)
-            {
-                //There is no autotuning: add the solution that ran to the Plan Cache.
-                auto hashID = handle->getPlanCache()->getHashID(plan->mOpDesc);
-                handle->getPlanCache()->addCacheLine(hashID, solution->uid());
-                return;
-            }
-
-            recordAutotune(autotuneType, solution, time, handle, plan);
-        }
-
-        //Record a failed execution during incremental autotuning. The candidate that failed
-        //is skipped: the round moves on to the next candidate instead of retrying it forever.
-        template <typename T>
-        void failAutotune(const AutotuneOps       autotuneType,
-                          const hiptensorHandle_t handle,
-                          const hiptensorPlan_t   plan)
-        {
-            if(handle == nullptr || plan == nullptr)
-                return;
-            if(handle->getPlanCache() == nullptr)
-                return;
-            if(plan->mPref == nullptr)
-                return;
-            if(plan->mPref->mCacheMode != HIPTENSOR_CACHE_MODE_PEDANTIC)
-                return;
-            if(plan->mPref->mAutotuneMode != HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL)
-                return;
-
-            recordAutotune<T>(autotuneType, nullptr, 0.0f, handle, plan);
+            return trial;
         }
 
         //Drop the autotune state of a plan cache that is being destroyed, so that a new
@@ -267,5 +329,48 @@ namespace hiptensor
                           [id](auto const& entry) { return std::get<1>(entry.first) == id; });
         }
     };
+
+    //Check and save autotune results to Plan Cache.
+    //solution is the kernel that produced time.
+    template <typename T>
+    void AutotuneTrial<T>::save(T* solution, float time)
+    {
+        if(mHandle == nullptr)
+            return;
+        if(solution == nullptr)
+        {
+            fail();
+            return;
+        }
+
+        if(mPlan->mPref->mAutotuneMode != HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL)
+        {
+            //There is no autotuning: add the solution that ran to the Plan Cache.
+            auto hashID = mHandle->getPlanCache()->getHashID(mPlan->mOpDesc);
+            mHandle->getPlanCache()->addCacheLine(hashID, solution->uid());
+        }
+        else
+        {
+            PlancacheAutotuneMgr::instance()->recordAutotune(*this, solution, time);
+        }
+        mHandle = nullptr;
+        mRound  = 0;
+    }
+
+    //Record a failed execution during incremental autotuning. The candidate that failed
+    //is skipped: the round moves on to the next candidate instead of retrying it forever.
+    template <typename T>
+    void AutotuneTrial<T>::fail()
+    {
+        if(mHandle == nullptr)
+            return;
+
+        if(mPlan->mPref->mAutotuneMode == HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL)
+        {
+            PlancacheAutotuneMgr::instance()->recordAutotune<T>(*this, nullptr, 0.0f);
+        }
+        mHandle = nullptr;
+        mRound  = 0;
+    }
 
 } // namespace hiptensor

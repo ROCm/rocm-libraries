@@ -236,8 +236,9 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
     {
         // Composable Kernels (CK) does not handle reductions where the input and
         // output tensors maintain the same rank. For those scenarios, employ
-        // elementwise binary operations.
-        plan->mOpDesc->mOpAC = HIPTENSOR_OP_ADD;
+        // elementwise binary operations. hiptensorCreatePlan already set the
+        // plan's operation to HIPTENSOR_OP_ADD, so that executions sharing the
+        // plan only read it.
         return hiptensorElementwiseBinaryExecute(handle, plan, alpha, A, beta, C, D, stream);
     }
 
@@ -265,13 +266,12 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
         internalTypeCompute = HIPTENSOR_COMPUTE_DESC_32F;
     }
 
-    autotuneMgr->setAutotune<hiptensor::ReductionSolution>(
+    auto trial = autotuneMgr->setAutotune<hiptensor::ReductionSolution>(
         hiptensor::AutotuneOps::Autotune_Redution, handle, plan);
 
     std::vector<hiptensor::ReductionSolution*> solutions;
-    // Load the plan's solution once: another thread sharing this plan may update it.
-    if(auto* planSolution
-       = static_cast<hiptensor::ReductionSolution*>(plan->mPref->mSolution.load()))
+    // Use the trial's solution: another thread sharing this plan may update the plan's.
+    if(auto* planSolution = trial.solution())
         solutions.push_back(planSolution);
     else
     {
@@ -423,8 +423,7 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
             }
 
             plan->mPref->mSolution.store(pSolution);
-            autotuneMgr->saveAutotune<hiptensor::ReductionSolution>(
-                hiptensor::AutotuneOps::Autotune_Redution, pSolution, time, handle, plan);
+            trial.save(pSolution, time);
 
             return HIPTENSOR_STATUS_SUCCESS;
         }

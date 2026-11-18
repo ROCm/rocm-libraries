@@ -354,6 +354,9 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
     char alphaMsg[32];
     char betaMsg[32];
 
+    // The solution this call runs, and its part in Plan Cache autotuning.
+    hiptensor::AutotuneTrial<hiptensor::ContractionSolution> trial;
+
     if(plan != nullptr)
     {
         if(alpha == nullptr)
@@ -378,7 +381,7 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
             snprintf(betaMsg, sizeof(betaMsg), "beta=%s", std::to_string(betaValue).c_str());
         }
 
-        autotuneMgr->setAutotune<hiptensor::ContractionSolution>(
+        trial = autotuneMgr->setAutotune<hiptensor::ContractionSolution>(
             hiptensor::AutotuneOps::Autotune_Contraction, handle, plan);
     }
     else
@@ -425,7 +428,7 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
         return checkResult;
     }
 
-    auto* cSolution = static_cast<hiptensor::ContractionSolution*>(plan->mPref->mSolution.load());
+    auto* cSolution = trial.solution();
     if(cSolution == nullptr)
     {
         snprintf(msg, sizeof(msg), "Contraction plan has null solution");
@@ -556,14 +559,12 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
 
     if(errorCode == HIPTENSOR_STATUS_SUCCESS)
     {
-        autotuneMgr->saveAutotune<hiptensor::ContractionSolution>(
-            hiptensor::AutotuneOps::Autotune_Contraction, cSolution, time, handle, plan);
+        trial.save(cSolution, time);
     }
     else
     {
         // Move incremental autotuning past this candidate instead of retrying it forever.
-        autotuneMgr->failAutotune<hiptensor::ContractionSolution>(
-            hiptensor::AutotuneOps::Autotune_Contraction, handle, plan);
+        trial.fail();
     }
 
     return errorCode;
@@ -1478,6 +1479,9 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
     char alphaMsg[32];
     char betaMsg[32];
 
+    // The solution this call runs, and its part in Plan Cache autotuning.
+    hiptensor::AutotuneTrial<hiptensor::ContractionSolution> trial;
+
     if(plan != nullptr)
     {
         if(alpha == nullptr)
@@ -1502,7 +1506,7 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
             snprintf(betaMsg, sizeof(betaMsg), "beta=%s", std::to_string(betaValue).c_str());
         }
 
-        autotuneMgr->setAutotune<hiptensor::ContractionSolution>(
+        trial = autotuneMgr->setAutotune<hiptensor::ContractionSolution>(
             hiptensor::AutotuneOps::Autotune_ContractionTrinary, handle, plan);
     }
     else
@@ -1551,7 +1555,7 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
         return checkResult;
     }
 
-    auto* solution = static_cast<hiptensor::ContractionSolution*>(plan->mPref->mSolution.load());
+    auto* solution = trial.solution();
 
     if(!solution)
     {
@@ -1655,8 +1659,7 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
                  "Trinary contraction step 1 (T = A*B) failed (%s)",
                  hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorContractTrinary", msg);
-        autotuneMgr->failAutotune<hiptensor::ContractionSolution>(
-            hiptensor::AutotuneOps::Autotune_ContractionTrinary, handle, plan);
+        trial.fail();
         return errorCode;
     }
 
@@ -1696,8 +1699,7 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
                  "Trinary contraction step 2 (E = alpha*T*C + beta*D) failed (%s)",
                  hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorContractTrinary", msg);
-        autotuneMgr->failAutotune<hiptensor::ContractionSolution>(
-            hiptensor::AutotuneOps::Autotune_ContractionTrinary, handle, plan);
+        trial.fail();
         return errorCode;
     }
 
@@ -1728,8 +1730,7 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
 
     // Plan Cache autotune: record execution time and, once enough
     // samples have been collected, persist the fastest solution to the cache.
-    autotuneMgr->saveAutotune<hiptensor::ContractionSolution>(
-        hiptensor::AutotuneOps::Autotune_ContractionTrinary, solution, totalTime, handle, plan);
+    trial.save(solution, totalTime);
 
     return errorCode;
 }

@@ -250,6 +250,11 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
         logger->logAPITrace("hiptensorCreate", msg);
     }
 
+    // hiptensorDestroy uses the autotune manager. Create it before returning the handle: a
+    // static object that owns the handle then finishes construction after the manager, so it
+    // is destroyed before the manager at exit.
+    hiptensor::PlancacheAutotuneMgr::instance();
+
     *handle = newHandle.release();
     return HIPTENSOR_STATUS_SUCCESS;
 }
@@ -1023,6 +1028,15 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
 
     newPlan->mOpDesc = newPlan->mOwnedOpDesc.get();
     newPlan->mPref   = newPlan->mOwnedPref.get();
+
+    // A reduction that keeps the rank reduces nothing: hiptensorReduce runs it as the
+    // elementwise binary operation D = alpha * A + beta * C. Set that operation here,
+    // while the plan is private to this call, so executions sharing the plan only read it.
+    if(desc->mOperationType == HIPTENSOR_REDUCTION && desc->mDescA != nullptr
+       && desc->mDescD != nullptr && desc->mDescA->mLengths.size() == desc->mDescD->mLengths.size())
+    {
+        newPlan->mOwnedOpDesc->mOpAC = HIPTENSOR_OP_ADD;
+    }
 
     if(desc->mOperationType == HIPTENSOR_CONTRACTION)
     {
