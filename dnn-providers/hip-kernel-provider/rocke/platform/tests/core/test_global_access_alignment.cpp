@@ -334,6 +334,8 @@ kernel @scalar_accesses {
     memref.global_store_typed ( %p, %i, %aligned ) { align = i:2, elem_type = s:"f16" }
     %half_base : ptr<f16,global> = tile.global_ptr_add ( %p, %bytes ) {  }
     %legacy : f16 = memref.global_load ( %half_base, %i ) {  }
+    memref.global_store ( %half_base, %i, %legacy ) { elem_type = s:"f16" }
+    memref.global_store ( %half_base, %i, %weak ) { align = i:1, elem_type = s:"f16" }
     %bool_base : ptr<i1,global> = tile.global_ptr_add ( %q, %bytes ) {  }
     %bit : i1 = memref.global_load_typed ( %bool_base, %i ) { elem_type = s:"i1" }
     memref.global_store_typed ( %bool_base, %i, %bit ) { elem_type = s:"i1" }
@@ -354,6 +356,13 @@ kernel @scalar_accesses {
     CHECK(contains(result.text,
                    "__builtin_memcpy(&legacy, __builtin_assume_aligned(reinterpret_cast<const "
                    "unsigned char*>(half_base) + (int64_t)i * (int64_t)sizeof(fp16), 2), 2);"));
+    const std::string half_dst
+        = "const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(half_base))"
+          " + (int64_t)i * (int64_t)sizeof(fp16)";
+    CHECK(contains(result.text,
+                   "__builtin_memcpy(__builtin_assume_aligned(" + half_dst + ", 2), &legacy, 2);"));
+    CHECK(contains(result.text,
+                   "__builtin_memcpy(__builtin_assume_aligned(" + half_dst + ", 1), &weak, 2);"));
     CHECK(contains(result.text,
                    "bool bit = (*(reinterpret_cast<const unsigned char*>(bool_base) + "
                    "(int64_t)i * (int64_t)sizeof(unsigned char)) & 1u) != 0;"));

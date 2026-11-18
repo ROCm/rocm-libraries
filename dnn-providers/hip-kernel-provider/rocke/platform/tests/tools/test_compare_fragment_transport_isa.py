@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: MIT
 """ISA census is diagnostic evidence, not a hardware correctness or speed gate."""
 
+import errno
 import importlib.util
 
+import pytest
 from rocke.assets import platform_tools_dir
 
 
@@ -63,7 +65,21 @@ def test_compiler_multicall_symlink_keeps_its_driver_name(tmp_path):
     target = tmp_path / "amdllvm"
     target.write_text("multicall driver")
     driver = tmp_path / "amdclang++"
-    driver.symlink_to(target)
+    try:
+        driver.symlink_to(target)
+    except NotImplementedError as exc:
+        pytest.skip(f"cannot create symlinks: {exc}")
+    except OSError as exc:
+        # Windows may report ERROR_NOT_SUPPORTED or ERROR_PRIVILEGE_NOT_HELD.
+        if getattr(exc, "winerror", None) in (50, 1314) or exc.errno in {
+            errno.EACCES,
+            errno.EPERM,
+            errno.ENOSYS,
+            errno.ENOTSUP,
+            errno.EOPNOTSUPP,
+        }:
+            pytest.skip(f"cannot create symlinks: {exc}")
+        raise
     assert _tool().compiler_driver_path(str(driver)) == str(driver)
 
 

@@ -47,6 +47,7 @@ from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM20
 from rocke.tests.engines import (
     ENGINES,
     assert_engine_rejects,
+    assert_engine_rejects_hip,
     lower_hip_with_engine,
     lower_with_engine,
 )
@@ -274,6 +275,48 @@ def test_hip_legacy_fp16_load_on_a_rebased_pointer(engine):
     val = value.name[1:]
     addr = f"reinterpret_cast<const unsigned char*>({base.name[1:]}) + (int64_t)i * (int64_t)sizeof(fp16)"
     assert f"__builtin_memcpy(&{val}, __builtin_assume_aligned({addr}, 2), 2);" in hip
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("align", [None, 1, 2])
+def test_hip_legacy_fp16_store_on_a_rebased_pointer(engine, align):
+    b = IRBuilder("legacy_half_store")
+    ptr = b.param("p", PtrType(F16, "global"))
+    idx = b.param("i", I32)
+    value = b.param("value", F16)
+    base = b.global_ptr_add(ptr, b.const_i64(16))
+    b.store_f16(base, idx, value)
+    store = b.kernel.body.ops[-1]
+    if align is None:
+        del store.attrs["align"]
+    elif align == 1:
+        store.attrs["align"] = align
+    hip = lower_hip_with_engine(b.kernel, _ARCH, engine=engine)
+    addr = (
+        f"const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>({base.name[1:]}))"
+        " + (int64_t)i * (int64_t)sizeof(fp16)"
+    )
+    assert (
+        f"__builtin_memcpy(__builtin_assume_aligned({addr}, {align or 2}), &value, 2);"
+        in hip
+    )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_hip_legacy_fp16_store_rejects_non_fp16_value(engine):
+    b = IRBuilder("legacy_half_store_wrong_type")
+    ptr = b.param("p", PtrType(F16, "global"))
+    idx = b.param("i", I32)
+    value = b.param("value", F32)
+    base = b.global_ptr_add(ptr, b.const_i64(16))
+    b.store_f16(base, idx, value)
+    assert_engine_rejects_hip(
+        b.kernel,
+        _ARCH,
+        engine=engine,
+        error_type=ValueError,
+        message="memref.global_store: expected an f16 value",
+    )
 
 
 @pytest.mark.parametrize("engine", ENGINES)

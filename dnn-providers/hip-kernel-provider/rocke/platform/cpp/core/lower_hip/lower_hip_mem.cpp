@@ -685,44 +685,24 @@ static rocke_status_t _op_memref_global_load_vN(rocke_h_lowerer_t* lw, const roc
 
 /* ============================= global store ============================= */
 
-/* Python _op_memref_global_store */
-static rocke_status_t _op_memref_global_store(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+/* Python _emit_scalar_global_store */
+static rocke_status_t mem_emit_scalar_global_store(rocke_h_lowerer_t* lw,
+                                                   const rocke_op_t* op,
+                                                   int default_align,
+                                                   const char* count_error)
 {
-    rocke_value_t *ptr, *idx, *val;
     if(!rocke_h_live(lw))
-    {
         return lw->status;
-    }
     if(op->num_operands < 3)
-    {
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "memref.global_store: too few operands");
-    }
-    ptr = op->operands[0];
-    idx = op->operands[1];
-    val = op->operands[2];
-    rocke_h_emitf(
-        lw, "%s[%s] = %s;", rocke_h_name(lw, ptr), rocke_h_name(lw, idx), rocke_h_name(lw, val));
-    return lw->status;
-}
-
-/* Python _op_memref_global_store_typed */
-static rocke_status_t _op_memref_global_store_typed(rocke_h_lowerer_t* lw, const rocke_op_t* op)
-{
-    rocke_value_t *ptr, *idx, *val;
-    if(!rocke_h_live(lw))
-    {
-        return lw->status;
-    }
-    if(op->num_operands < 3)
-    {
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "memref.global_store_typed: too few operands");
-    }
-    ptr = op->operands[0];
-    idx = op->operands[1];
-    val = op->operands[2];
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", count_error);
+    const auto* ptr = op->operands[0];
+    const auto* idx = op->operands[1];
+    const auto* val = op->operands[2];
     const auto* elem = val->type;
+    if(op->opcode == ROCKE_OP_MEMREF_GLOBAL_STORE && !rocke_type_eq(elem, rocke_f16()))
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "memref.global_store: expected an f16 value");
     const auto align_attr = rocke_i_align_attr(op);
-    const auto align = align_attr ? align_attr : 1;
+    const auto align = align_attr ? align_attr : default_align;
     if(rocke_type_eq(elem, rocke_i1()))
     {
         const auto* address = mem_global_byte_address(lw, ptr, idx, "unsigned char", true);
@@ -748,6 +728,16 @@ static rocke_status_t _op_memref_global_store_typed(rocke_h_lowerer_t* lw, const
                       size);
     }
     return lw->status;
+}
+
+static rocke_status_t _op_memref_global_store(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    return mem_emit_scalar_global_store(lw, op, 2, "memref.global_store: too few operands");
+}
+
+static rocke_status_t _op_memref_global_store_typed(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    return mem_emit_scalar_global_store(lw, op, 1, "memref.global_store_typed: too few operands");
 }
 
 /* Python _op_memref_global_store_vN */

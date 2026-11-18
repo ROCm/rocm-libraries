@@ -792,8 +792,7 @@ class _Lowerer:
         self._emit_scalar_global_load(op, default_align=2)
 
     def _op_memref_global_store(self, op: Op) -> None:
-        ptr, idx, val = op.operands
-        self._emit(f"{_name(ptr)}[{_name(idx)}] = {_name(val)};")
+        self._emit_scalar_global_store(op, default_align=2)
 
     def _op_memref_global_load_vN(self, op: Op) -> None:
         ptr, idx = op.operands
@@ -2464,9 +2463,14 @@ class _Lowerer:
         )
 
     def _op_memref_global_store_typed(self, op: Op) -> None:
+        self._emit_scalar_global_store(op, default_align=1)
+
+    def _emit_scalar_global_store(self, op: Op, *, default_align: int) -> None:
         ptr, idx, val = op.operands
         elem = val.type
-        align = align_attr(op) or 1
+        if op.name == "memref.global_store" and elem != F16:
+            raise ValueError("memref.global_store: expected an f16 value")
+        align = align_attr(op) or default_align
         if elem == I1:
             address = _global_byte_address(ptr, idx, "unsigned char", store=True)
             self._emit(f"*({address}) = (unsigned char){_name(val)};")
