@@ -1171,6 +1171,47 @@ bool rocke_implicit_gemm_conv_spec_validate(const rocke_implicit_gemm_conv_spec_
     return true;
 }
 
+/* Python fwd_rdna4_knob_reason: uniform_k_decode, lds_swizzle and
+ * group_fast_raster are built for the gfx12 RDNA targets only. */
+static bool rocke_conv_fwd_rdna4_knob_ok(const rocke_implicit_gemm_conv_spec_t* s,
+                                         const char* arch,
+                                         char* reason,
+                                         size_t reason_cap)
+{
+    const rocke_arch_target_t* target;
+    const char* tf;
+    const struct
+    {
+        bool on;
+        const char* label;
+    } flags[] = {
+        {s->uniform_k_decode, "uniform_k_decode"},
+        {s->lds_swizzle, "lds_swizzle"},
+        {s->group_fast_raster, "group_fast_raster"},
+    };
+    size_t i;
+    if(arch == NULL)
+        return true;
+    target = rocke_arch_target_from_gfx(arch);
+    if(target == NULL)
+        return true;
+    tf = target->target_family;
+    if(tf != NULL && strcmp(tf, "gfx12_rdna") == 0)
+        return true;
+    for(i = 0; i < sizeof(flags) / sizeof(flags[0]); ++i)
+    {
+        if(flags[i].on)
+        {
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "%s is enabled only on the gfx12 RDNA targets (got %s)",
+                            flags[i].label,
+                            tf != NULL ? tf : "None");
+        }
+    }
+    return true;
+}
+
 /* Python fwd_regt_prefetch_reason: why spec.regt_prefetch cannot be built
  * (false + reason), or true. Built for the gfx12 RDNA targets only. */
 static bool rocke_conv_fwd_regt_prefetch_ok(const rocke_implicit_gemm_conv_spec_t* s,
@@ -1477,6 +1518,10 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
          * group-aware descriptor/epilogue are family-neutral (Python PR #10064). */
     }
 
+    if(!rocke_conv_fwd_rdna4_knob_ok(s, arch, reason, reason_cap))
+    {
+        return false;
+    }
     /* The uniform-decode K-loop. */
     if(s->uniform_k_decode)
     {

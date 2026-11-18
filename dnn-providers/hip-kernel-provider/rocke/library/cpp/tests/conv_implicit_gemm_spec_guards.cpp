@@ -118,7 +118,20 @@ void gfr_wavelet(rocke_implicit_gemm_conv_spec_t* s, const char**)
     s->group_fast_raster = true;
     s->pipeline = "wavelet";
 }
-/* chiplet_swizzle is MFMA-only: gfx1201's WMMA gate would refuse it first. */
+/* The three RDNA4-only knobs on the other targets: gfx11 WMMA, gfx1250 WMMA
+ * (16x16x32 atom) and a CDNA MFMA target. chiplet_swizzle is MFMA-only, so
+ * gfx1201's WMMA gate would refuse it first; on gfx950 the arch gate now does. */
+void ukd_gfx1151(rocke_implicit_gemm_conv_spec_t* s, const char** arch)
+{
+    *arch = "gfx1151";
+    s->uniform_k_decode = true;
+}
+void lxs_gfx1250(rocke_implicit_gemm_conv_spec_t* s, const char** arch)
+{
+    *arch = "gfx1250";
+    s->warp_tile_k = 32;
+    s->lds_swizzle = true;
+}
 void gfr_chiplet_swizzle(rocke_implicit_gemm_conv_spec_t* s, const char** arch)
 {
     *arch = "gfx950";
@@ -254,7 +267,13 @@ int main()
         {"gfr_wavelet", gfr_wavelet, "group_fast_raster does not support the wavelet pipeline"},
         {"gfr_chiplet_swizzle",
          gfr_chiplet_swizzle,
-         "group_fast_raster does not support chiplet_swizzle (it remaps blockIdx.y)"},
+         "group_fast_raster is enabled only on the gfx12 RDNA targets (got gfx950)"},
+        {"ukd_gfx1151",
+         ukd_gfx1151,
+         "uniform_k_decode is enabled only on the gfx12 RDNA targets (got gfx11_rdna)"},
+        {"lxs_gfx1250",
+         lxs_gfx1250,
+         "lds_swizzle is enabled only on the gfx12 RDNA targets (got gfx12_cdna)"},
     };
     for(const Refused& r : refused)
         run_refused(r);

@@ -927,6 +927,30 @@ def fwd_regt_prefetch_reason(
     return None
 
 
+def fwd_rdna4_knob_reason(spec: ImplicitGemmConvSpec, target=None) -> Optional[str]:
+    """Why a gfx12-RDNA-only forward knob cannot be built on ``target``, or ``None``.
+
+    ``uniform_k_decode``, ``lds_swizzle`` and ``group_fast_raster`` are written
+    for, and only checked on, the gfx12 RDNA targets (gfx1200 / gfx1201 /
+    gfx12-generic), the same set as ``regt_prefetch``. Other WMMA targets
+    (gfx11, gfx1250) and the MFMA targets are refused. ``target`` (an
+    ``ArchTarget``) gates that when given.
+    """
+    if target is None or target.target_family == "gfx12_rdna":
+        return None
+    for flag, label in (
+        (spec.uniform_k_decode, "uniform_k_decode"),
+        (spec.lds_swizzle, "lds_swizzle"),
+        (spec.group_fast_raster, "group_fast_raster"),
+    ):
+        if flag:
+            return (
+                f"{label} is enabled only on the gfx12 RDNA targets "
+                f"(got {target.target_family})"
+            )
+    return None
+
+
 def fwd_lds_swizzle_reason(spec: ImplicitGemmConvSpec, family: str) -> Optional[str]:
     """Why ``spec.lds_swizzle`` cannot be built, or ``None``."""
     if not spec.lds_swizzle:
@@ -1187,6 +1211,9 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             if flag:
                 return False, f"WMMA conv does not support {label} on {arch}"
 
+    _why = fwd_rdna4_knob_reason(spec, target)
+    if _why is not None:
+        return False, _why
     if spec.uniform_k_decode:
         if family != "wmma" or spec.pipeline != "mem":
             return False, "uniform_k_decode is wired for the WMMA mem pipeline only"

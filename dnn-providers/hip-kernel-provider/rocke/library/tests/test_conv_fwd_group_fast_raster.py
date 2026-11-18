@@ -94,12 +94,59 @@ class TestSpec(unittest.TestCase):
             self.assertFalse(ok)
             self.assertIn(why, msg)
 
+    def test_grid_refuses_bad_group_merge(self):
+        """A merge factor that is not a positive divisor of the group count
+        would silently drop group slices or give a non-integer grid axis."""
+        from kernels.common.conv_args import ConvArgs
+
+        args = ConvArgs.from_problem(_PROBLEM, tile_m=64, tile_n=64)
+        for bad in (0, -1, 3, 16, 2.0, True):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                args.grid(group_merge=bad)
+        self.assertEqual(args.grid(group_merge=2)[2], 4)
+        self.assertEqual(args.grid(group_merge=8)[2], 1)
+
     def test_default_ir_untouched(self):
         def ir(**kw):
             return print_ir(build_implicit_gemm_conv(_spec(**kw), arch=_WMMA))
 
         self.assertNotEqual(ir(), ir(group_fast_raster=True))
         self.assertEqual(ir(), ir(group_fast_raster=False))
+
+
+class TestRdna4OnlyKnobs(unittest.TestCase):
+    """uniform_k_decode / lds_swizzle / group_fast_raster are checked on the
+    gfx12 RDNA targets only, so every other target refuses them."""
+
+    _KNOBS = ("uniform_k_decode", "lds_swizzle", "group_fast_raster")
+
+    def test_gfx12_rdna_accepts(self):
+        for arch in ("gfx1201", "gfx1200"):
+            for knob in self._KNOBS:
+                ok, why = is_valid_spec(_spec(**{knob: True}), arch)
+                self.assertTrue(ok, f"{arch} {knob}: {why}")
+
+    def test_other_wmma_targets_refuse(self):
+        for arch, atom_k in (("gfx1151", 16), ("gfx1250", 32)):
+            for knob in self._KNOBS:
+                spec = _spec(warp_tile_k=atom_k, **{knob: True})
+                self.assertTrue(is_valid_spec(_spec(warp_tile_k=atom_k), arch)[0])
+                ok, why = is_valid_spec(spec, arch)
+                self.assertFalse(ok, f"{arch} {knob}")
+                self.assertIn("only on the gfx12 RDNA targets", why)
+                self.assertIn(knob, why)
+
+    def test_mfma_targets_refuse(self):
+        from kernels.common.conv_implicit_gemm import fwd_rdna4_knob_reason
+        from rocke.core.arch import ArchTarget
+
+        for arch in ("gfx942", "gfx950"):
+            target = ArchTarget.from_gfx(arch)
+            for knob in self._KNOBS:
+                why = fwd_rdna4_knob_reason(_spec(**{knob: True}), target)
+                self.assertIsNotNone(why, f"{arch} {knob}")
+                self.assertIn(knob, why)
+        self.assertIsNone(fwd_rdna4_knob_reason(_spec(), ArchTarget.from_gfx("gfx950")))
 
 
 class TestIdentity(unittest.TestCase):
