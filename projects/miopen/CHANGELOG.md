@@ -3,6 +3,23 @@
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 
+## MIOpen 3.6.0 for ROCm 7.0.2.1
+### Compatibility note
+* The default user find-db and performance-db suffix includes the MIOpen version. Existing 3.5.0 user databases remain on disk but are not selected automatically by 3.6.0. No automatic migration is performed.
+
+### Resolved Issues
+* Restored the per-architecture kernel database (kdb) packages for gfx900, gfx906, gfx908, gfx90a, gfx942 and gfx1030. The kdb files are stored in Git LFS and the build now recognizes the real bzip2 archives. A checkout without the Git LFS objects skips the kdb packages and CMake prints a warning.
+* [Conv] Restored the default for `MIOPEN_USE_MLIR`: it is ON again, except for static builds that use COMGR, so shared builds link rocMLIR. Pass `-DMIOPEN_USE_MLIR=OFF` to build without it.
+* [FP8] Fixed wrong FP8 and BF8 results on gfx942 from a library built for several targets that
+  include gfx950 or gfx12 ([#14375](https://github.com/ROCm/rocm-libraries/issues/14375)). The
+  FP8 exponent bias was picked once at build time from `GPU_TARGETS`. MIOpen now picks it at run
+  time from the device: the IEEE bias on gfx950 and gfx12, the FNUZ bias everywhere else.
+
+### Removed
+* Removed the `MIOPEN_FP8_IEEE_EXPONENT_BIAS` CMake option and its `config.h` define. The FP8
+  exponent bias now follows the device at run time.
+
+
 ## MIOpen 3.5.2 for ROCm 7.14.0
 ### Added
 * Added an informational log when the Composable Kernel (CK) dynamic library is loaded.

@@ -1,174 +1,101 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 //
-// Numerical 2D BWD test for ConvHipImplicitGemmGroupBwdXdlops on a shape with
-// element-strides exceeding INT_MAX. This complements
-// conv_api_solution_count_2d_large_stride.cpp (which only verifies CompileSolution
-// success): RunTestImpl actually launches the kernel and compares against a CPU
-// reference, catching int32 wraparound that can occur inside the CK kernel even
-// after MIOpen's host-side widening. The shape is shared with the Fwd test.
+// 2D BWD applicability test for ConvHipImplicitGemmGroupBwdXdlops on shapes around the
+// 32-bit range.
 //
-// Shape: x = (1, 96, 4736, 4736), w = (16, 96, 1, 1), group=1, pad=0, stride=1.
-//   element count of x = 96 * 4736 * 4736 = 2.153 B (just above INT_MAX = 2.147 B).
-//   FP16 footprint of x ~= 4.3 GB; FP32 ~= 8.6 GB. The full test allocates several
-//   such tensors (X, W, Y on device plus host-side reference), so heavyweight
-//   instances are gated at runtime by an explicit memory estimate.
+// On this branch the solver rejects any problem with a tensor larger than INT_MAX bytes
+// (see IsApplicable in conv_hip_implicit_gemm_grouped_bwd_xdlops.cpp): CK's grouped
+// backward-data kernel returned wrong results for these shapes.
 //
-// Heavyweight: requires a 64 GB-class GPU (FP32 needs even more) and is excluded
-// from the standard (per-PR) test category via test_categories.yaml. Each variant
-// dynamically skips when the device cannot fit the estimated working set.
+// Gated shape: x = (1, 96, 4736, 4736), w = (16, 96, 1, 1), group=1, pad=0, stride=1.
+//   x has 96 * 4736 * 4736 = 2,153,250,816 elements: 4.3 GB in FP16/BF16, 8.6 GB in FP32.
+//   The shape crosses the bound for every data type, so the solver must be applicable on
+//   no device.
+//
+// In-range shape: x = (1, 96, 3344, 3344), same filter, FP16 only.
+//   x has 96 * 3344 * 3344 = 1,073,504,256 elements: 2,147,008,512 bytes in FP16, which is
+//   just below INT_MAX (2,147,483,647). The solver must be applicable on the same devices
+//   as for the small shapes. This case keeps the suite from passing when the solver rejects
+//   every problem, for example a gate that is too tight.
+//
+// Byte-only gated shape: x = (1, 96, 3345, 3345), same filter, FP16 only.
+//   x has 96 * 3345 * 3345 = 1,074,146,400 elements, which fits in int32, but 2,148,292,800
+//   bytes in FP16, which is just above INT_MAX. Only a gate on bytes rejects it. A gate that
+//   compared the element count would accept it, so this case pins the byte comparison. The
+//   solver must be applicable on no device.
+//
+// The solver also returns false when the CK plugin for the device is not loaded, which
+// would make the gated cases pass without exercising the gate. The suite therefore declares
+// the CK dynamic library as a dependency and is skipped when the plugin is missing.
+//
+// This replaces a GPU numerical test that required the solver to be applicable to the gated
+// shape. That test contradicted the gate and could only fail.
 
-#include <algorithm>
-#include <cstddef>
-#include <utility>
-
-#include "get_handle.hpp"
-#include "unit_conv_solver_group_xdlops.hpp"
+#include "unit_conv_solver.hpp"
 
 namespace {
 
-using TestCase     = miopen::unit_tests::GroupXdlopsNumericData;
-using TestDataType = miopen::unit_tests::TestDataType;
+using ConvTestCase = miopen::unit_tests::ConvTestCase;
+using SolverParams = miopen::unit_tests::UnitTestConvSolverParams;
 
-template <TestDataType type>
-std::vector<TestCase> GetLargeStrideBwdTestCases()
+auto GetConvCase(miopenDataType_t type, miopenTensorLayout_t layout, std::size_t hw)
 {
-    return {
-        // clang-format off
-        TestCase{{1, 96, 4736, 4736}, {16, 96, 1, 1}, {0, 0}, {1, 1}, {1, 1}, 1, false, false},
-        // clang-format on
-    };
+    return ConvTestCase{{type, layout, {1, 96, hw, hw}},
+                        {type, layout, {16, 96, 1, 1}},
+                        type,
+                        {{0, 0}, {1, 1}, {1, 1}}};
 }
 
-template <TestDataType type>
-miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
+// No device may accept these shapes.
+SolverParams GetGatedParams()
 {
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    // Restricted to gfx90A, gfx94X, and gfx950: covered by CI and manually
-    // qualified for the large-stride kernel-launch path on this shape.
-    Gpu supportedDevices = Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
-#else
-    Gpu supportedDevices = Gpu::None;
-#endif
-    miopen::unit_tests::UnitTestConvSolverParams p(supportedDevices);
-    p.Tunable(5);
+    SolverParams p(Gpu::None);
     p.UsesCKDynamicLib();
     return p;
 }
 
-// Conservative working-set estimate for the configured Bwd test. Sums the workspace
-// (queried from the solver), the X/W/Y device tensors, and 4× the largest tensor
-// for the host-side input/weights/output/reference allocations. Adds headroom for
-// runtime/library reservations, allocator fragmentation, and (on consumer cards)
-// the display compositor — using max(+1 GiB, +10%) to cover both the absolute and
-// the proportional components.
-struct MemoryEstimate
+// Same device list as the FP16 device applicability test in
+// unit_conv_solver_ConvHipImplicitGemmGroupBwdXdlops.cpp.
+SolverParams GetInRangeParams()
 {
-    std::size_t required;
-    std::size_t available;
-};
+#if MIOPEN_BACKEND_HIP
+    Gpu supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx110X |
+                           Gpu::gfx115X | Gpu::gfx120X;
+#else
+    Gpu supportedDevices = Gpu::None;
+#endif
+    SolverParams p(supportedDevices);
+    p.ExcludeDevice("gfx1103");
+    p.UsesCKDynamicLib();
+    return p;
+}
 
-template <miopenDataType_t datatype>
-MemoryEstimate EstimateRequiredMemoryBwd(TestCase tc,
-                                         miopenTensorLayout_t layout,
-                                         const miopen::solver::conv::ConvSolverInterface& solver)
+auto GetTestParams()
 {
-    auto conv_case = miopen::unit_tests::GetConvTestForGroupXdlops<datatype>(layout, std::move(tc));
-    const auto x_desc = conv_case.GetXTensorDescriptor();
-    const auto w_desc = conv_case.GetWTensorDescriptor();
-    const auto y_desc =
-        conv_case.GetConv().GetForwardOutputTensor(x_desc, w_desc, conv_case.GetYDataType());
-
-    auto&& handle      = get_handle();
-    const auto problem = miopen::conv::ProblemDescription(
-        y_desc, w_desc, x_desc, conv_case.GetConv(), miopen::conv::Direction::BackwardData);
-    auto ctx = miopen::ExecutionContext{&handle};
-    problem.SetupFloats(ctx);
-    problem.SetupComputeType(ctx);
-
-    const std::size_t ws_size =
-        solver.MayNeedWorkspace() ? solver.GetWorkspaceSize(ctx, problem) : 0;
-    const std::size_t x_bytes = x_desc.GetNumBytes();
-    const std::size_t y_bytes = y_desc.GetNumBytes();
-    const std::size_t w_size  = w_desc.GetNumBytes();
-    const std::size_t h_bytes = std::max(x_bytes, y_bytes);
-
-    const std::size_t raw_mem      = ws_size + x_bytes + y_bytes + w_size + 4 * h_bytes;
-    const std::size_t headroom     = std::max<std::size_t>(1ULL << 30, raw_mem / 10);
-    const std::size_t required_mem = raw_mem + headroom;
-    const std::size_t device_mem   = handle.GetGlobalMemorySize();
-
-    return {required_mem, device_mem};
+    std::vector<std::tuple<SolverParams, ConvTestCase>> params;
+    for(const auto type : {miopenHalf, miopenBFloat16, miopenFloat})
+        for(const auto layout : {miopenTensorNHWC, miopenTensorNCHW})
+            params.emplace_back(GetGatedParams(), GetConvCase(type, layout, 4736));
+    for(const auto layout : {miopenTensorNHWC, miopenTensorNCHW})
+        params.emplace_back(GetGatedParams(), GetConvCase(miopenHalf, layout, 3345));
+    for(const auto layout : {miopenTensorNHWC, miopenTensorNCHW})
+        params.emplace_back(GetInRangeParams(), GetConvCase(miopenHalf, layout, 3344));
+    return params;
 }
 
 } // namespace
 
-#define SKIP_IF_INSUFFICIENT_DEVICE_MEMORY(datatype, solver_expr)                           \
-    do                                                                                      \
-    {                                                                                       \
-        miopen::unit_tests::UnitTestConvSolverParams _params;                               \
-        miopenTensorLayout_t _layout;                                                       \
-        TestCase _tc;                                                                       \
-        std::tie(_params, _layout, _tc) = this->GetParam();                                 \
-        const auto _mem = EstimateRequiredMemoryBwd<datatype>(_tc, _layout, (solver_expr)); \
-        if(_mem.available < _mem.required)                                                  \
-        {                                                                                   \
-            GTEST_SKIP() << "Insufficient device memory: need " << _mem.required            \
-                         << " bytes, device has " << _mem.available;                        \
-        }                                                                                   \
-    } while(0)
+using CPU_UnitTestConvSolverImplicitGemmGroupBwdXdlopsInt32GateDevApplicability_NONE =
+    CPU_UnitTestConvSolverDevApplicabilityBwd_NONE;
 
-using GPU_UnitTestConvSolverImplicitGemmGroupBwdXdlops_LargeStride_FP16 =
-    miopen::unit_tests::UnitTestConvSolverGroupXDlops<miopen::conv::Direction::BackwardData,
-                                                      miopenHalf>;
-using GPU_UnitTestConvSolverImplicitGemmGroupBwdXdlops_LargeStride_BFP16 =
-    miopen::unit_tests::UnitTestConvSolverGroupXDlops<miopen::conv::Direction::BackwardData,
-                                                      miopenBFloat16>;
-using GPU_UnitTestConvSolverImplicitGemmGroupBwdXdlops_LargeStride_FP32 =
-    miopen::unit_tests::UnitTestConvSolverGroupXDlops<miopen::conv::Direction::BackwardData,
-                                                      miopenFloat>;
-
-TEST_P(GPU_UnitTestConvSolverImplicitGemmGroupBwdXdlops_LargeStride_FP16,
+TEST_P(CPU_UnitTestConvSolverImplicitGemmGroupBwdXdlopsInt32GateDevApplicability_NONE,
        ConvHipImplicitGemmGroupBwdXdlops)
 {
-    const auto solver = miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops{};
-    SKIP_IF_INSUFFICIENT_DEVICE_MEMORY(miopenHalf, solver);
-    this->RunTest(solver);
-};
-
-TEST_P(GPU_UnitTestConvSolverImplicitGemmGroupBwdXdlops_LargeStride_BFP16,
-       ConvHipImplicitGemmGroupBwdXdlops)
-{
-    const auto solver = miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops{};
-    SKIP_IF_INSUFFICIENT_DEVICE_MEMORY(miopenBFloat16, solver);
-    this->RunTest(solver);
-};
-
-TEST_P(GPU_UnitTestConvSolverImplicitGemmGroupBwdXdlops_LargeStride_FP32,
-       ConvHipImplicitGemmGroupBwdXdlops)
-{
-    const auto solver = miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops{};
-    SKIP_IF_INSUFFICIENT_DEVICE_MEMORY(miopenFloat, solver);
-    this->RunTest(solver);
+    this->RunTest(miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops{});
 };
 
 INSTANTIATE_TEST_SUITE_P(
-    Full,
-    GPU_UnitTestConvSolverImplicitGemmGroupBwdXdlops_LargeStride_FP16,
-    testing::Combine(testing::Values(GetTestParams<TestDataType::FP16>()),
-                     testing::Values(miopenTensorNHWC, miopenTensorNCHW),
-                     testing::ValuesIn(GetLargeStrideBwdTestCases<TestDataType::FP16>())));
-
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    GPU_UnitTestConvSolverImplicitGemmGroupBwdXdlops_LargeStride_BFP16,
-    testing::Combine(testing::Values(GetTestParams<TestDataType::BF16>()),
-                     testing::Values(miopenTensorNHWC, miopenTensorNCHW),
-                     testing::ValuesIn(GetLargeStrideBwdTestCases<TestDataType::BF16>())));
-
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    GPU_UnitTestConvSolverImplicitGemmGroupBwdXdlops_LargeStride_FP32,
-    testing::Combine(testing::Values(GetTestParams<TestDataType::FP32>()),
-                     testing::Values(miopenTensorNHWC, miopenTensorNCHW),
-                     testing::ValuesIn(GetLargeStrideBwdTestCases<TestDataType::FP32>())));
+    Smoke,
+    CPU_UnitTestConvSolverImplicitGemmGroupBwdXdlopsInt32GateDevApplicability_NONE,
+    testing::ValuesIn(GetTestParams()));

@@ -501,7 +501,9 @@ else()
     message(STATUS "clang-offload-bundler not found")
 endif()
 
-option(MIOPEN_USE_MLIR "Use MLIR compilation backend" OFF)
+set_var_to_condition(MIOPEN_USE_MLIR_DEFAULT
+    NOT (NOT ${BUILD_SHARED_LIBS} AND ${MIOPEN_USE_COMGR}))
+option(MIOPEN_USE_MLIR "Use MLIR compilation backend" ${MIOPEN_USE_MLIR_DEFAULT})
 
 if(MIOPEN_USE_MLIR)
     if(NOT ${BUILD_SHARED_LIBS} AND ${MIOPEN_USE_COMGR})
@@ -705,9 +707,11 @@ function(install_kdb FILE_NAME COMPONENT_NAME)
         # Guard against a placeholder standing in for the real artifact: a git-LFS
         # pointer ("version https://git-lfs...") or a DVC stub is a small text file
         # that would otherwise be handed to bzip2 and fail the build. Real bzip2
-        # archives start with the magic "BZh".
-        file(READ "${FILE_NAME}" __magic LIMIT 3)
-        if(NOT __magic STREQUAL "BZh")
+        # archives start with the magic "BZh", which is 425a68 in hex. Read it as
+        # HEX: the plain file(READ ... LIMIT 3) is line based and appends a newline
+        # to the result when the file holds one past the limit, so it never matches.
+        file(READ "${FILE_NAME}" __magic LIMIT 3 HEX)
+        if(NOT __magic STREQUAL "425a68")
             list(APPEND DVC_MISSING_FILES ${FILE_NAME})
             set(DVC_MISSING_FILES ${DVC_MISSING_FILES} PARENT_SCOPE)
             return()
@@ -778,7 +782,8 @@ endforeach()
 
 if(DVC_MISSING_FILES)
     string(REPLACE ";" ", " __dvc_missing_files "${DVC_MISSING_FILES}")
-    message(WARNING "DVC files not pulled down, skipped: ${__dvc_missing_files}")
+    message(WARNING "Git LFS objects not fetched, so the kdb packages are skipped: "
+                    "${__dvc_missing_files}. Install Git LFS, run 'git lfs pull' and reconfigure.")
     set(MIOPEN_NO_DVC_PULLED TRUE CACHE INTERNAL "")
 else()
     set(CPACK_COMPONENTS_ALL ${COMPONENT_LST})

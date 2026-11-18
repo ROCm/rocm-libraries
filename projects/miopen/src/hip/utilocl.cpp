@@ -172,7 +172,7 @@ float Im2d2ColGPU(const Handle& handle,
         network_config += " -DNUM_IM_BLKS_EQ_1=" + std::to_string(static_cast<int>(num_blks == 1));
         network_config += " -DUSE_IM_OFF_GUARD=1"; // always one
 
-        params += GetDataTypeKernelParams(type);
+        params += GetDataTypeKernelParams(type, handle.GetDeviceName());
 
         const int group_size_x = 256;
         const std::vector<size_t> vld{group_size_x, 1, 1};
@@ -349,7 +349,7 @@ float Im3d2ColGPU(const Handle& handle,
     }
     else
     {
-        std::string params = GetDataTypeKernelParams(type);
+        std::string params = GetDataTypeKernelParams(type, handle.GetDeviceName());
 
         size_t global_threads = std::min(
             256 * static_cast<std::size_t>(out_d * out_h * out_w * im_c * wei_d * wei_h * wei_w) /
@@ -454,7 +454,7 @@ float Col2Im2dGPU(const Handle& handle,
     }
     else
     {
-        std::string params = GetDataTypeKernelParams(type);
+        std::string params = GetDataTypeKernelParams(type, handle.GetDeviceName());
 
         size_t global_threads = static_cast<size_t>(in_c) * in_h * in_w;
         size_t local_threads  = std::min(WG_SIZE, global_threads);
@@ -582,7 +582,7 @@ float Col2Im3dGPU(const Handle& handle,
 
         const bool use_64_bit_index = index_size > 0xffffffffULL;
 
-        std::string params = GetDataTypeKernelParams(type);
+        std::string params = GetDataTypeKernelParams(type, handle.GetDeviceName());
 
         params += use_64_bit_index ? " -DMIOPEN_USE_64BIT_INDEX=1" : " -DMIOPEN_USE_64BIT_INDEX=0";
 
@@ -713,7 +713,7 @@ float Col2Im3dGPUBatched(const Handle& handle,
 
         const bool use_64_bit_index = index_size > 0xffffffffULL;
 
-        std::string params = GetDataTypeKernelParams(type);
+        std::string params = GetDataTypeKernelParams(type, handle.GetDeviceName());
         params += use_64_bit_index ? " -DMIOPEN_USE_64BIT_INDEX=1" : " -DMIOPEN_USE_64BIT_INDEX=0";
         // Force a distinct code-object cache key for the batched entry point.
         params += " -DMIOPEN_COL2IM3D_BATCHED_VARIANT=1";
@@ -919,7 +919,7 @@ float transpose_NCHW2CNHW(const Handle& handle,
 
     std::string kernel_name = "transpose_NCHW2CNHW";
 
-    std::string params = GetDataTypeKernelParams(type);
+    std::string params = GetDataTypeKernelParams(type, handle.GetDeviceName());
 
     if(h_stride == 1 && w_stride == 1 && type == miopenFloat)
     {
@@ -1049,7 +1049,7 @@ float transpose_CNHW2NCHW(const Handle& handle,
 
     std::string kernel_name = "transpose_CNHW2NCHW";
 
-    std::string params = GetDataTypeKernelParams(type);
+    std::string params = GetDataTypeKernelParams(type, handle.GetDeviceName());
 
     if(h_stride == 1 && w_stride == 1 && type == miopenFloat)
     {
@@ -1311,7 +1311,7 @@ float transpose_packed_MN2NM(const Handle& handle,
 
     auto&& kernels = handle.GetKernels(kernel_name, network_config);
 
-    std::string params = GetDataTypeKernelParams(type);
+    std::string params = GetDataTypeKernelParams(type, handle.GetDeviceName());
 
     if(type != miopenInt8)
     {
