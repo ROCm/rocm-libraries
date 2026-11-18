@@ -1844,41 +1844,39 @@ class TestConvDgradResolvedSplitK(unittest.TestCase):
 
         return ConvProblem(N=1, Hi=8, Wi=8, C=64, K=2048, Y=3, X=3, pH=1, pW=1)
 
-    # gfx950 admits the 32x32x16 MFMA for 16-bit inputs; gfx90a and gfx942 stop
-    # at 32x32x8. These tests are about the split-K degree and the 16-bit
-    # atomic, not the instruction, so use the widest tile the arch admits.
-    _WARP_TILE_K = (16, 8)
-
+    # The tile is the widest 32x32 atom the arch's MMA table offers for 16-bit
+    # inputs (32x32x16 on gfx950, 32x32x8 on gfx90a/gfx942) and it must
+    # validate. These tests are about the split-K degree and the 16-bit atomic.
     def _spec(self, dtype, split_k):
         from kernels.common.conv_implicit_gemm import ConvDataSpec
         from kernels.common.conv_implicit_gemm_dgrad import (
             DgradConvSpec,
             is_valid_dgrad_spec,
         )
+        from rocke.core.arch import ArchTarget
 
-        refused = []
-        for warp_tile_k in self._WARP_TILE_K:
-            spec = DgradConvSpec(
-                problem=self._problem(),
-                name="rocke_test_dgrad_resolved_split_k",
-                data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
-                tile_m=64,
-                tile_n=64,
-                tile_k=32,
-                warp_m=2,
-                warp_n=2,
-                warp_tile_m=32,
-                warp_tile_n=32,
-                warp_tile_k=warp_tile_k,
-                wave_size=64,
-                epilogue="cshuffle",
-                split_k=split_k,
-            )
-            ok, why = is_valid_dgrad_spec(spec, arch=ARCH)
-            if ok:
-                return spec
-            refused.append(f"warp_tile_k={warp_tile_k}: {why}")
-        raise AssertionError(f"no valid dgrad spec on {ARCH}: {'; '.join(refused)}")
+        atom = ArchTarget.from_gfx(ARCH).mma.select_largest_k(
+            family="mma", a_dtype=dtype, b_dtype=dtype, c_dtype="fp32", m=32, n=32
+        )
+        spec = DgradConvSpec(
+            problem=self._problem(),
+            name="rocke_test_dgrad_resolved_split_k",
+            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=atom.k,
+            wave_size=64,
+            epilogue="cshuffle",
+            split_k=split_k,
+        )
+        ok, why = is_valid_dgrad_spec(spec, arch=ARCH)
+        assert ok, why
+        return spec
 
     def _resolve(self, dtype, **kw):
         from kernels.common.conv_split_k import resolve_conv_split_k
