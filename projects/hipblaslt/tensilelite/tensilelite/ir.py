@@ -41,9 +41,19 @@ A migrated name becomes a stable call-time dispatcher: ``X(...)`` builds via the
 active backend, while ``isinstance`` / ``issubclass`` delegate to the active
 backend's class so type checks keep working across the migration. Names that are
 not migrated stay the real rocisa class and pay no dispatch cost.
+
+Migration happens per *region*, not per opcode. ``logical_region()`` marks a
+block of codegen (e.g. ``globalOffset``) whose dispatched instructions should
+build logical IR; outside the region a dispatched name still builds rocisa, so
+the same opcode used elsewhere in the kernel is unaffected. While a region's
+logical lowering is being validated, the logical backend is gated behind the
+``TENSILELITE_LOGICALIR_TRIAL`` env var so the two run-yaml passes (trial off vs
+on) A/B compare; the final migration stage drops that gate and flips gfx1250 to
+logical unconditionally.
 """
 
 import os
+from contextlib import contextmanager
 from contextvars import ContextVar
 
 import rocisa as _rocisa
@@ -73,6 +83,38 @@ def active_version():
   return _active_version.get()
 
 
+# Whether the current context is inside a region whose dispatched instructions
+# should build logical IR (for a logical-capable ISA). A ContextVar, like
+# _active_version, so nesting and Parallel.py's thread backends stay correct.
+# False everywhere by default -> dispatched names still build rocisa.
+_region_active: ContextVar = ContextVar("tensilelite_ir_logical_region", default=False)
+
+
+@contextmanager
+def logical_region(name=None):
+  """Mark the enclosed codegen as a logical-IR migration region.
+
+  Inside this block, instruction names in ``_MIGRATED`` build via the logical
+  backend when the active ISA is logical-capable (and, while a region is still
+  under validation, when TENSILELITE_LOGICALIR_TRIAL is set). Outside it the
+  same names build rocisa, so a migrated opcode used elsewhere in the kernel is
+  byte-identical to the pre-facade path. ``name`` is advisory, for debugging.
+
+  Harmless on architectures that still build rocisa: the region flag is set but
+  ``_backend()`` ignores it, so wrapping a block costs nothing there.
+  """
+  token = _region_active.set(True)
+  try:
+    yield
+  finally:
+    _region_active.reset(token)
+
+
+def region_active():
+  """Whether the current context is inside a logical_region()."""
+  return _region_active.get()
+
+
 class _LogicalBackend:
   """Construction backend that builds StinkyTofu logical IR instead of rocisa.
 
@@ -98,50 +140,65 @@ class _LogicalBackend:
 _logical_backend = _LogicalBackend()
 
 
-# Trial opt-in: instructions routed through the logical backend for gfx1250 only
-# when TENSILELITE_LOGICALIR_TRIAL is set in the environment. Intentionally EMPTY:
-# an opcode-level trial proved too coarse. Even v_mov_b32 has callers that build
-# it with a deferred Holder destination (copyAccToArchVgpr / moveMIoutToArch),
-# resolved later by replaceHolder() walking the rocisa tree; building it as a
-# logical leaf freezes the unresolved Holder and the resolution pass skips the
-# opaque leaf, so the mixed tree diverges. The mechanism below is kept for the
-# next stage, which flips the whole gfx1250 build to logical at once (no mixed
-# tree within a kernel) rather than migrating by opcode.
-_TRIAL_NAMES = frozenset()
+# ISAs whose codegen regions may build logical IR. Only gfx1250 for now.
+_LOGICAL_ISAS = frozenset({(12, 5, 0)})
 
-
+# Dev A/B gate. While a region's logical lowering is being validated, the
+# logical backend is engaged only when this env var is set, so run-yaml.sh can
+# compare the trial-off pass (pure rocisa) against the trial-on pass (region
+# builds logical) for the same config. Step 9 removes this gate and flips the
+# logical ISAs to logical unconditionally.
 def _trial_enabled():
   return bool(os.environ.get("TENSILELITE_LOGICALIR_TRIAL"))
 
 
 def _backend():
-  """Return the namespace that builds instructions for the active ISA.
+  """Return the namespace that builds instructions for the active context.
 
-  This is the single arch dispatch point. By default every architecture builds
-  rocisa, so codegen is byte-identical to the pre-facade path. The trial flips
-  to the logical backend for gfx1250 only when TENSILELITE_LOGICALIR_TRIAL is
-  set; the eventual migration stage replaces this with an unconditional
-  ``if _active_version.get() == (12, 5, 0): return _logical_backend``.
+  This is the single arch/region dispatch point. A dispatched name builds via
+  the logical backend only when all of the following hold:
+
+    * the active ISA is logical-capable (gfx1250), and
+    * we are inside a ``logical_region()``, and
+    * the trial A/B gate is enabled (dropped in the final stage).
+
+  Otherwise it builds rocisa, so codegen is byte-identical to the pre-facade
+  path everywhere else. The eventual migration stage drops the trial gate:
+  ``if _active_version.get() in _LOGICAL_ISAS and _region_active.get(): ...``.
   """
-  if _trial_enabled() and _active_version.get() == (12, 5, 0):
-    return _rocisa_instruction
+  if (_active_version.get() in _LOGICAL_ISAS
+      and _region_active.get()
+      and _trial_enabled()):
+    return _logical_backend
   return _rocisa_instruction
 
 
-# Instruction names routed through _backend() at call time. Empty here, so the
-# facade is a pure passthrough and every imported name is the real rocisa class.
-# The migration stage adds names (or sets _MIGRATE_ALL) as regions move onto
-# logical IR.
-_MIGRATED = set()
+# Instruction names installed as call-time dispatchers. A dispatched name still
+# builds rocisa unless _backend() routes it to logical (ISA + region + trial), so
+# adding a name here is safe even when the same opcode is used outside any
+# logical_region(): only calls inside a region on a logical ISA change.
+#
+# Step 1: the gfx1250 FFM global-read path is TDM (tensor direct-to-LDS), not the
+# classic graTileAssignment/globalOffset helpers (those are the non-TDM `else`
+# branch and are never on this arch's hot path). tdmGlobalOffset() ->
+# TensorDataMover.calculateStartAddr() and initTDMDescriptor() build a
+# self-contained, concrete-operand address/descriptor block from exactly these
+# opcodes (no deferred Holder / memToken / branch -- control flow and the LDS
+# load live in other, un-migrated methods of the component). They dispatch to the
+# logical backend only inside those helpers' logical_region(); everywhere else --
+# including the subtile path, which emits pure rocisa via str(module) and never
+# runs the converter -- they still build rocisa.
+_MIGRATED = {
+    "SMovB32", "SMovB64", "SLShiftRightB32", "SMulI32",
+    "SAddU32", "SAddCU32", "SSubI32", "SCSelectB32", "VReadfirstlaneB32",
+}
 _MIGRATE_ALL = False
 
 _dispatch_cache = {}
 
 
 def _is_dispatched(name):
-  if _MIGRATE_ALL or name in _MIGRATED:
-    return True
-  return _trial_enabled() and name in _TRIAL_NAMES
+  return _MIGRATE_ALL or name in _MIGRATED
 
 
 def _make_dispatcher(name, real):
@@ -173,8 +230,15 @@ def _make_dispatcher(name, real):
       target = real
     return issubclass(sub, target)
 
+  def _getattr(cls, attr):
+    # Class-level attribute / static-method access on the dispatcher (e.g.
+    # X.issueLatency). The subclassing path already inherits these from real via
+    # the MRO; this is the safety net for the nb::is_final fallback below, where
+    # the dispatcher does NOT subclass real and would otherwise lose them.
+    return getattr(real, attr)
+
   ns = {"__call__": _call, "__instancecheck__": _instancecheck,
-        "__subclasscheck__": _subclasscheck}
+        "__subclasscheck__": _subclasscheck, "__getattr__": _getattr}
   try:
     meta = type("_IRDispatchMeta_" + name, (type(real),), ns)
     return meta(name, (real,), {})

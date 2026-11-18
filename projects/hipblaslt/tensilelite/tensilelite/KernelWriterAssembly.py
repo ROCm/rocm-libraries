@@ -107,6 +107,7 @@ from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, getCus
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, persistentSpatialCluster, plsinBlockSchedTile
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from .ir import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
+from .ir import logical_region
 from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinBlockSchedTile, isMxf4SubtilePath, isSubtileSwizzledTensor
 from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal, tdmCacheModifiers
 from .Common.DataType import DataType
@@ -137,6 +138,30 @@ from .ir import ReadWriteInstruction as _RWInstruction, \
 # op is ever relocated into the LDS-synchronized NLL loop (byte-equivalent to the
 # old startswith('ds')/'waitcnt'/'barrier'/'load'/'store'/'buffer'/'atomic' scan for
 # every instruction that can actually appear in the store-init stream).
+
+def _logical_region_method(regionName):
+  """Decorator for KernelWriter(Assembly) methods that build a self-contained,
+  zero-mutation instruction block (no deferred Holder/memToken/label mutation on
+  the opcodes it emits directly or via facade-routed callees).
+
+  Step 1 (gfx1250 logical-IR migration): wraps the method body in an
+  ir.logical_region() so that migrated opcodes (those listed in ir._MIGRATED)
+  build logical-IR leaves on a logical ISA (gfx1250 + TENSILELITE_LOGICALIR_TRIAL);
+  everywhere else they stay byte-identical rocisa. The region is suppressed on the
+  subtile path, which emits pure rocisa via str(module) and never runs the
+  logical->asm converter (a leaf reaching str() would be garbage).
+
+  The decorated method must take (self, kernel, ...)."""
+  def deco(fn):
+    @wraps(fn)
+    def wrapper(self, kernel, *args, **kwargs):
+      if kernel["UseSubtileImpl"]:
+        return fn(self, kernel, *args, **kwargs)
+      with logical_region(regionName):
+        return fn(self, kernel, *args, **kwargs)
+    return wrapper
+  return deco
+
 _PLSIN_STOREINIT_MEM_INSTS = (
   _RWInstruction, SWaitCnt, SBarrier, _SBarrierSignalIsFirst, _TensorLoadToLds,
 )
@@ -215,7 +240,7 @@ from math import ceil, floor, log, prod
 from contextlib import contextmanager
 from copy import copy as shallowCopy, deepcopy
 from dataclasses import dataclass, field
-from functools import lru_cache
+from functools import lru_cache, wraps
 from typing import List, Mapping, NamedTuple, Optional, Tuple, Union
 
 import os
@@ -24925,6 +24950,7 @@ class KernelWriterAssembly(KernelWriter):
         kernel, tc, f"{group0Name}+2", tmpSgprResource, True))
     return mod
 
+  @_logical_region_method("initTDMDescriptor")
   def initTDMDescriptor(self, kernel: Mapping, tP: Mapping) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
@@ -25680,6 +25706,7 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(tdmInitLblEnd)
     return mod
 
+  @_logical_region_method("tdmGlobalOffset")
   def tdmGlobalOffset(self, kernel: Mapping, tP: Mapping,
                       useDescriptor: bool = False) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
