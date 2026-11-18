@@ -742,16 +742,16 @@ TEST(TestPointwiseSignatureKey, PlanBuildersCoverAddedDataTypes)
                               DataType::DOUBLE,
                               DataType::DOUBLE,
                               DataType::DOUBLE}));
-    EXPECT_TRUE(isRegistered({PointwiseMode::CMP_EQ,
-                              DataType::DOUBLE,
-                              DataType::DOUBLE,
-                              DataType::BOOLEAN,
-                              DataType::DOUBLE}));
-    EXPECT_TRUE(isRegistered({PointwiseMode::CMP_LE,
-                              DataType::DOUBLE,
-                              DataType::DOUBLE,
-                              DataType::BOOLEAN,
-                              DataType::DOUBLE}));
+    for(const auto comparison : {PointwiseMode::CMP_EQ,
+                                 PointwiseMode::CMP_NEQ,
+                                 PointwiseMode::CMP_GT,
+                                 PointwiseMode::CMP_GE,
+                                 PointwiseMode::CMP_LT,
+                                 PointwiseMode::CMP_LE})
+    {
+        EXPECT_TRUE(isRegistered(
+            {comparison, DataType::DOUBLE, DataType::DOUBLE, DataType::BOOLEAN, DataType::DOUBLE}));
+    }
     EXPECT_TRUE(isRegistered(
         {PointwiseMode::GEN_INDEX, DataType::DOUBLE, DataType::DOUBLE, DataType::INT32}));
     EXPECT_TRUE(isRegistered({PointwiseMode::BINARY_SELECT,
@@ -763,16 +763,20 @@ TEST(TestPointwiseSignatureKey, PlanBuildersCoverAddedDataTypes)
 
     // INT32 computes in FP32 and supports only some modes
     EXPECT_TRUE(
-        isRegistered({PointwiseMode::NEG, DataType::INT32, DataType::FLOAT, DataType::INT32}));
+        isRegistered({PointwiseMode::RELU_FWD, DataType::INT32, DataType::FLOAT, DataType::INT32}));
     EXPECT_TRUE(isRegistered({PointwiseMode::MAX_OP,
                               DataType::INT32,
                               DataType::FLOAT,
                               DataType::INT32,
                               DataType::INT32}));
-    EXPECT_FALSE(
-        isRegistered({PointwiseMode::ABS, DataType::INT32, DataType::FLOAT, DataType::INT32}));
-    EXPECT_FALSE(isRegistered(
-        {PointwiseMode::SIGMOID_FWD, DataType::INT32, DataType::FLOAT, DataType::INT32}));
+    // ABS and NEG overflow int32 at INT32_MIN, and the transcendental modes do not apply
+    for(const auto mode : {PointwiseMode::ABS,
+                           PointwiseMode::NEG,
+                           PointwiseMode::SIGMOID_FWD,
+                           PointwiseMode::TANH_FWD})
+    {
+        EXPECT_FALSE(isRegistered({mode, DataType::INT32, DataType::FLOAT, DataType::INT32}));
+    }
 
     // BOOLEAN supports only BINARY_SELECT among the non-logical modes
     EXPECT_TRUE(isRegistered({PointwiseMode::BINARY_SELECT,
@@ -781,8 +785,15 @@ TEST(TestPointwiseSignatureKey, PlanBuildersCoverAddedDataTypes)
                               DataType::BOOLEAN,
                               DataType::BOOLEAN,
                               DataType::BOOLEAN}));
-    EXPECT_FALSE(isRegistered(
-        {PointwiseMode::RELU_FWD, DataType::BOOLEAN, DataType::FLOAT, DataType::BOOLEAN}));
+    for(const auto mode : {PointwiseMode::RELU_FWD, PointwiseMode::ABS, PointwiseMode::NEG})
+    {
+        EXPECT_FALSE(isRegistered({mode, DataType::BOOLEAN, DataType::FLOAT, DataType::BOOLEAN}));
+    }
+    for(const auto mode : {PointwiseMode::ADD, PointwiseMode::CMP_GT})
+    {
+        EXPECT_FALSE(isRegistered(
+            {mode, DataType::BOOLEAN, DataType::FLOAT, DataType::BOOLEAN, DataType::BOOLEAN}));
+    }
 
     // FP8 computes in FP32, with an FP8 or FP32 output, and compares with CMP_GT only
     for(const auto fp8 : {DataType::FP8_E4M3, DataType::FP8_E5M2})
@@ -792,8 +803,14 @@ TEST(TestPointwiseSignatureKey, PlanBuildersCoverAddedDataTypes)
         EXPECT_TRUE(isRegistered({PointwiseMode::ADD, fp8, DataType::FLOAT, fp8, fp8}));
         EXPECT_TRUE(
             isRegistered({PointwiseMode::CMP_GT, fp8, DataType::FLOAT, DataType::BOOLEAN, fp8}));
-        EXPECT_FALSE(
-            isRegistered({PointwiseMode::CMP_EQ, fp8, DataType::FLOAT, DataType::BOOLEAN, fp8}));
+        for(const auto comparison : {PointwiseMode::CMP_EQ,
+                                     PointwiseMode::CMP_NEQ,
+                                     PointwiseMode::CMP_GE,
+                                     PointwiseMode::CMP_LT,
+                                     PointwiseMode::CMP_LE})
+        {
+            EXPECT_FALSE(isRegistered({comparison, fp8, DataType::FLOAT, DataType::BOOLEAN, fp8}));
+        }
         EXPECT_TRUE(isRegistered(
             {PointwiseMode::BINARY_SELECT, fp8, DataType::FLOAT, fp8, fp8, DataType::BOOLEAN}));
     }
@@ -819,9 +836,18 @@ TEST(TestPointwiseSignatureKey, PlanBuildersCoverAddedDataTypes)
                                DataType::DOUBLE,
                                DataType::BOOLEAN,
                                DataType::DOUBLE}));
-    EXPECT_FALSE(isRegistered({PointwiseMode::CMP_EQ,
-                               DataType::FLOAT,
-                               DataType::FLOAT,
+    EXPECT_FALSE(isRegistered({PointwiseMode::CMP_GT,
+                               DataType::BFLOAT16,
+                               DataType::DOUBLE,
                                DataType::BOOLEAN,
-                               DataType::HALF}));
+                               DataType::DOUBLE}));
+    for(const auto comparison : {PointwiseMode::CMP_EQ,
+                                 PointwiseMode::CMP_NEQ,
+                                 PointwiseMode::CMP_GE,
+                                 PointwiseMode::CMP_LT,
+                                 PointwiseMode::CMP_LE})
+    {
+        EXPECT_FALSE(isRegistered(
+            {comparison, DataType::FLOAT, DataType::FLOAT, DataType::BOOLEAN, DataType::HALF}));
+    }
 }

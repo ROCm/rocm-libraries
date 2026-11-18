@@ -174,10 +174,6 @@ struct PointwiseSignatureKey
                             hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
                             hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                             hipdnn_flatbuffers_sdk::data_objects::DataType::INT32>(map);
-        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::NEG,
-                            hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
-                            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                            hipdnn_flatbuffers_sdk::data_objects::DataType::INT32>(map);
         addUnaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                              hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3>(map);

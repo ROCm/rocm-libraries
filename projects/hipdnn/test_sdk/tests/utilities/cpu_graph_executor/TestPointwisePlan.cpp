@@ -3348,7 +3348,6 @@ TEST(TestPointwisePlanDataTypes, Int32Operations)
     const std::vector<double> b = {2, -1, 7, 4};
 
     EXPECT_EQ((runUnary<I, F, I>(PointwiseMode::RELU_FWD, a)), (std::vector<double>{0, 0, 3, 8}));
-    EXPECT_EQ((runUnary<I, F, I>(PointwiseMode::NEG, a)), (std::vector<double>{5, 1, -3, -8}));
     EXPECT_EQ((runBinary<I, I, F, I>(PointwiseMode::SUB, a, b)),
               (std::vector<double>{-7, 0, -4, 4}));
     EXPECT_EQ((runBinary<I, I, F, I>(PointwiseMode::MAX, a, b)),
@@ -3431,6 +3430,7 @@ TEST(TestPointwisePlanDataTypes, DeclinesOperationsThatAreNotMeaningfulForTheTyp
         {std::pair{DataType::INT32, hipdnn_frontend::PointwiseMode::SIGMOID_FWD},
          std::pair{DataType::INT32, hipdnn_frontend::PointwiseMode::TANH_FWD},
          std::pair{DataType::INT32, hipdnn_frontend::PointwiseMode::ABS},
+         std::pair{DataType::INT32, hipdnn_frontend::PointwiseMode::NEG},
          std::pair{DataType::BOOLEAN, hipdnn_frontend::PointwiseMode::RELU_FWD}})
     {
         auto [graph, tensorBundle, variantPack] = buildPointwiseUnaryGraph(
