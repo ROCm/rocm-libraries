@@ -149,8 +149,8 @@ const std::vector<int64_t>& convYDims = test_conv_common::CONV_2D_Y_DIMS;
 // of the shared header, whose initialization order against a namespace-scope copy is unspecified.
 const RankShapes& convShapes()
 {
-    static const RankShapes SHAPES = {convXDims, convWDims, convYDims};
-    return SHAPES;
+    static const RankShapes s_SHAPES = {convXDims, convWDims, convYDims};
+    return s_SHAPES;
 }
 
 // ---------------------------------------------------------------------------------------------
