@@ -23,6 +23,7 @@
 
 #include "rocfft/rocfft.h"
 
+#include <array>
 #include <cstring>
 #include <limits>
 #include <optional>
@@ -87,7 +88,11 @@ constexpr bool is_hermitian_domain(rocfft_transform_type fft_type, io_data_label
  * - the set of logical "batch" coordinates.
  * Elements having different batch coordinates are considered strictly independent
  * of one another.
- * 
+ *
+ * The data set also captures one in-buffer offset (in elements) per plane of the
+ * data set: two for planar array types, one otherwise (an unset array type counts
+ * as non-planar). Invariant: the second offset is `0` unless the array type is
+ * planar; the array type and the offsets only change together to preserve it.
  */
 struct data_set_t
 {
@@ -195,6 +200,18 @@ struct data_set_t
      */
     bool has_precision() const;
     /**
+     * @return The number of planes of the data set: `2` for planar array types,
+     * `1` otherwise (including an unset array type).
+     */
+    size_t num_planes() const;
+    /**
+     * @param[in] part part of the stored data: `data_part::ALL` (default) for non-planar
+     * (or untyped) data sets, `data_part::REAL` or `data_part::IMAGINARY` for planar ones.
+     * @return The in-buffer offset (in elements) of `part` in the buffer holding it.
+     * @throw An `std::invalid_argument` is thrown if `part` does not suit the array type.
+     */
+    size_t get_offset(data_part part = data_part::ALL) const;
+    /**
      * @return The spans of the logical index range along all its axes (length followed by batch axes).
      */
     std::vector<size_t> lengths_and_batches() const;
@@ -261,7 +278,9 @@ struct data_set_t
      * value only matches an unset value).
      * 
      * @return The in-buffer offset (in elements) for this data set's very first element
-     * in a buffer that observes the `other` data set.
+     * in a buffer that observes the `other` data set. This is a plane-independent offset
+     * relative to `other`'s first element, i.e., the offsets captured by either object
+     * are ignored.
      * 
      * @throw An `std::invalid_argument` is thrown if `other` is not dimensionally consistent
      * with this object, does not contain its very first element, or has a different
@@ -279,6 +298,8 @@ struct data_set_t
      * - both data sets have identical logical index ranges along all axes except
      *   for the `other`'s slowest-varying one;
      * - this data set's logical range is contained by the `other` along its slowest-varying axis.
+     *
+     * @note The offsets captured by either object are ignored.
      * 
      * @throw An `std::invalid_argument` is thrown if `other` is not dimensionally consistent
      * with this object or has a different precision or array type.
@@ -287,7 +308,8 @@ struct data_set_t
 
     /**
      * @return A string reporting this object's state, including its precision
-     * ("unset" if not provided) and array type (as `PrintArrayType` prints it).
+     * ("unset" if not provided), array type (as `PrintArrayType` prints it), and the
+     * offsets of all its planes (see `num_planes`).
      */
     std::string str() const;
 
@@ -297,11 +319,9 @@ struct data_set_t
     size_t logical_count() const;
 
     /**
-     * @param[in] part part of the stored data: `data_part::ALL` (default) for non-planar
-     * (or untyped) data sets, `data_part::REAL` or `data_part::IMAGINARY` for planar ones.
+     * @param[in] part see `get_offset`.
      * @return The (minimum) number of elements the buffer holding `part` must hold to
-     * store it. Both planes of a planar data set have the same count (per-plane offsets
-     * are not captured by `data_set_t` objects yet).
+     * store it, its offset included (see `get_offset`).
      * @throw An `std::invalid_argument` is thrown if `part` does not suit the array type.
      */
     size_t buffer_element_count(data_part part = data_part::ALL) const;
@@ -330,7 +350,8 @@ struct data_set_t
      * @return A copy of this object relabeled with `new_array_type`. Only relabeling
      * is supported, i.e., the array type must be unchanged or switch between the
      * Hermitian and complex variants of the same format (interleaved or planar).
-     * The precision is never changed.
+     * The precision is never changed and the offsets are kept (allowed relabels never
+     * change the number of planes).
      * @note Reinterpreting complex data as Hermitian asserts that the stored data is
      * the non-redundant part of a Hermitian-symmetric whole (the data set this object
      * describes or is part of), the rest being implied by the symmetry (e.g., after the
@@ -348,21 +369,24 @@ struct data_set_t
      * non-contiguous axis to the value required in real domain for real, in-place
      * Discrete Fourier Transforms (see `default_full_range`).
      * @return A data set with this object's logical range, precision and array type,
-     * default contiguous in-buffer strides (possibly padded), and no embedding.
+     * default contiguous in-buffer strides (possibly padded), zero offsets, and no
+     * embedding.
      */
     data_set_t get_packed_data_set(bool real_inplace_padding = false) const;
 
     /**
      * @return `true` iff this object describes a contiguous data layout, i.e., iff all
      * in-buffer elements between offset 0 and logical_count() (excluded) correspond
-     * to a distinct element in logical range.
+     * to a distinct element in logical range. Offsets are ignored, i.e., in-buffer
+     * locations are relative to `get_offset(part)` for every part.
      */
     bool is_contiguous() const;
 
     /**
      * @param[in] other data set to be compared to this one.
      * @return `true` iff this object and `other` are strictly identical, including
-     * their precisions and array types (an unset value only equals an unset value).
+     * their precisions, array types (an unset value only equals an unset value) and
+     * offsets.
      */
     bool operator==(const data_set_t& other) const;
 
@@ -399,8 +423,9 @@ struct data_set_t
      * @param[in] second a data_set_t object that's dimensionally consistent with `first`
      * @return A data_set_t object capturing the intersection of the logical ranges
      * between `first` and `second`. The in-buffer strides of the constructed intersection
-     * are set to their default contiguous values. The returned object has the common
-     * precision and array type.
+     * are set to their default contiguous values and its offsets are zero: it describes
+     * a fresh contiguous buffer, regardless of where `first` and `second` start in theirs.
+     * The returned object has the common precision and array type.
      * 
      * @throw An `std::invalid_argument` is thrown if `first` and `second` are not
      * dimensionally consistent, have different embeddings (if any), or have different
@@ -450,14 +475,15 @@ struct data_set_t
      * 
      * @return An `std::optional<data_set_t>` object which has a value set
      * iff a corresponding data set for in-place operation does actually exist. Its
-     * precision is this object's. For complex transforms, its array type is this
-     * object's; for real transforms, it is `rocfft_array_type_real` (resp.
-     * `rocfft_array_type_hermitian_interleaved`) if the returned data set is in real
-     * (resp. Hermitian) domain, unless this object's array type is unset, in which
-     * case it remains unset.
+     * precision is this object's. For complex transforms, its array type and its
+     * offsets are this object's; for real transforms, its array type is
+     * `rocfft_array_type_real` (resp. `rocfft_array_type_hermitian_interleaved`) if
+     * the returned data set is in real (resp. Hermitian) domain, unless this object's
+     * array type is unset, in which case it remains unset, and its (single) offset is
+     * such that real offsets are twice the Hermitian ones (no value is set if a real
+     * offset to be halved is odd, or if this object's second offset is non-zero).
      * 
-     * @note This function does not verify if either data set is self-aliasing and
-     * ignores offsets as `data_set_t` objects do not capture them.
+     * @note This function does not verify if either data set is self-aliasing.
      * 
      * @warning Should not be used for distributed data sets, unless length axes are
      * all undistributed.
@@ -491,8 +517,8 @@ struct data_set_t
      * or if any of the values in `len_indices` is out of bounds.
      * @note If `len_indices = {0, 1, ..., get_len_rank() - 1}`, this function is
      * equivalent to a simple copy of the current object.
-     * @note The precision is passed through unchanged. So is the array type, unless
-     * `len_indices` does not cover all length axes and the array type is Hermitian:
+     * @note The precision and offsets are passed through unchanged. So is the array type,
+     * unless `len_indices` does not cover all length axes and the array type is Hermitian:
      * the result then gets the complex counterpart (`hermitian_*` -> `complex_*`), since
      * the Hermitian symmetry relates indices across all length axes jointly.
      */
@@ -503,8 +529,8 @@ struct data_set_t
      * embedded.
      * @note If this object is not representing the data layout of an embedded data set,
      * this function is equivalent to a simple copy of the current object.
-     * @note The precision is passed through unchanged. So is the array type, unless
-     * this object is embedded and its array type is Hermitian: the result then gets
+     * @note The precision and offsets are passed through unchanged. So is the array type,
+     * unless this object is embedded and its array type is Hermitian: the result then gets
      * the complex counterpart (`hermitian_*` -> `complex_*`), since a sub-data set's
      * symmetry does not carry over to its embedding.
      * @throw An `std::logic_error` exception is thrown if the object's embedding map is
@@ -595,6 +621,9 @@ private:
     // Array type of the data set's elements; unset until provided.
     rocfft_array_type array_type = rocfft_array_type_unset;
 
+    // In-buffer offsets of the data set's planes, see set_array_type_and_offsets.
+    std::array<size_t, 2> offsets = {0, 0};
+
     // Marker for "no precision provided". Stored as the enum's underlying integer
     // type because rocfft_precision has no unset value and out-of-range enum
     // values are undefined behavior. Never exposed outside this struct.
@@ -619,6 +648,14 @@ private:
     void set_precision(rocfft_precision p);
 
     /**
+     * @brief Sets the array type and the offsets of the data set together.
+     * @throw An `std::invalid_argument` is thrown (and nothing is modified) if
+     * `new_offsets[1]` is not `0` while `new_array_type` is not planar.
+     */
+    void set_array_type_and_offsets(rocfft_array_type            new_array_type,
+                                    const std::array<size_t, 2>& new_offsets);
+
+    /**
      * @brief Implementation-simplifying helper accessor for the length and batch
      * axes of the data set.
      * 
@@ -636,8 +673,8 @@ private:
     size_t slowest_varying_axis() const;
 
     /**
-     * @brief Empties all axes of the data set and resets the embedding map. Precision
-     * and array type are left untouched.
+     * @brief Empties all axes of the data set and resets the embedding map. Precision,
+     * array type and offsets are left untouched.
      */
     void clear();
 
@@ -661,7 +698,7 @@ private:
     /**
      * @brief Resets the object's state to capture a full range of logical
      * indices with either prescribed or default strides and/or distance.
-     * Precision and array type are left untouched.
+     * Precision, array type and offsets are left untouched.
      * 
      * @param[in] lengths spans of the logical index range along all length axes.
      * @param[in] strides in-buffer strides associated with all length axes.
