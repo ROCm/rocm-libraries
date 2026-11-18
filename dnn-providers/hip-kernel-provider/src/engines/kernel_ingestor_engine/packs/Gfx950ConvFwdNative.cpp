@@ -49,13 +49,59 @@ namespace conv = gfx950_conv_fwd;
 namespace
 {
 
-constexpr std::string_view X_TOKEN = "gfx950_conv_fwd.x.uid";
-constexpr std::string_view W_TOKEN = "gfx950_conv_fwd.w.uid";
-constexpr std::string_view Y_TOKEN = "gfx950_conv_fwd.y.uid";
-/// The whole matched problem, so a kernel matcher reads it from what graph_match bound
-/// instead of walking the graph again for every kernel: problemTokenValues() order.
-/// Private (`_`): the graph features already describe the problem, so this is no feature.
-constexpr std::string_view PROBLEM_TOKEN = "_gfx950_conv_fwd.problem";
+/// One forward AOT engine this file serves (hipkernel:Gfx950ConvFwdAot,
+/// hipkernel:Gfx942ConvFwdAot): its architecture and wave size, the prefix of its error
+/// messages, the native symbols its descriptors name, its binding tokens and its kpack
+/// module cache. The hooks are templates over it. problemToken carries the whole matched
+/// problem, so a kernel matcher reads it from what graph_match bound instead of walking
+/// the graph again for every kernel (problemTokenValues() order); it is private (`_`),
+/// since the graph features already describe the problem.
+struct Engine
+{
+    std::string_view arch;
+    int64_t waveSize;
+    std::string_view messagePrefix;
+    std::string_view graphMatcherSymbol;
+    std::string_view kernelMatcherSymbol;
+    std::string_view scoreSymbol;
+    std::string_view dispatchSymbol;
+    /// The packs of split-C kernels (make_conv_aot_config.SPLIT_C_DISPATCH): two launches.
+    /// The gfx942 catalog has no split-C kernels and no UDD names its symbol; it is
+    /// registered anyway so both engines share one registration path.
+    std::string_view splitCDispatchSymbol;
+    std::string_view xToken;
+    std::string_view wToken;
+    std::string_view yToken;
+    std::string_view problemToken;
+    compilation::KpackModuleCache& (*moduleCache)();
+};
+
+constexpr Engine GFX950_ENGINE{"gfx950",
+                               64,
+                               "gfx950_conv_fwd",
+                               "hipkernel.gfx950_conv_fwd_aot.graph_match",
+                               "hipkernel.gfx950_conv_fwd_aot.kernel_match",
+                               "hipkernel.gfx950_conv_fwd_aot.score",
+                               "hipkernel.gfx950_conv_fwd_aot.dispatch",
+                               "hipkernel.gfx950_conv_fwd_aot.split_c_dispatch",
+                               "gfx950_conv_fwd.x.uid",
+                               "gfx950_conv_fwd.w.uid",
+                               "gfx950_conv_fwd.y.uid",
+                               "_gfx950_conv_fwd.problem",
+                               &gfx950ConvFwdAotKpackModuleCache};
+constexpr Engine GFX942_ENGINE{"gfx942",
+                               64,
+                               "gfx942_conv_fwd",
+                               "hipkernel.gfx942_conv_fwd_aot.graph_match",
+                               "hipkernel.gfx942_conv_fwd_aot.kernel_match",
+                               "hipkernel.gfx942_conv_fwd_aot.score",
+                               "hipkernel.gfx942_conv_fwd_aot.dispatch",
+                               "hipkernel.gfx942_conv_fwd_aot.split_c_dispatch",
+                               "gfx942_conv_fwd.x.uid",
+                               "gfx942_conv_fwd.w.uid",
+                               "gfx942_conv_fwd.y.uid",
+                               "_gfx942_conv_fwd.problem",
+                               &gfx942ConvFwdAotKpackModuleCache};
 
 struct Binding
 {
@@ -156,12 +202,16 @@ std::optional<MatchedProblem>
     return MatchedProblem{binding, problem, *geometry, dtype, std::move(chunks), false};
 }
 
-std::optional<MatchedProblem> matchProblem(const MatchContext& context)
+/// The graph @p engine serves on this device: one convolution forward node on the
+/// engine's architecture at its wave size (the rest of the contract is the same for
+/// every forward AOT engine).
+std::optional<MatchedProblem> matchProblem(const Engine& engine, const MatchContext& context)
 {
     if(!context.graph.isValid() || context.graph.getGraph().is_override_shape_enabled()
-       || !hipdnn_plugin_sdk::archMatches(
-           context.deviceProperties.gcnArchName, "gfx950", hipdnn_plugin_sdk::ArchMatchMode::PREFIX)
-       || context.deviceProperties.warpSize != 64 || context.graph.nodeCount() != 1)
+       || !hipdnn_plugin_sdk::archMatches(context.deviceProperties.gcnArchName,
+                                          std::string(engine.arch),
+                                          hipdnn_plugin_sdk::ArchMatchMode::PREFIX)
+       || context.deviceProperties.warpSize != engine.waveSize || context.graph.nodeCount() != 1)
     {
         return std::nullopt;
     }
@@ -240,8 +290,8 @@ std::optional<MatchedProblem> matchProblem(const MatchContext& context)
     return matched;
 }
 
-/// PROBLEM_TOKEN's value: the binding, the problem in conv::Problem's field order, then
-/// the dtype. The geometry is derived from the problem again on reading.
+/// Engine::problemToken's value: the binding, the problem in conv::Problem's field order,
+/// then the dtype. The geometry is derived from the problem again on reading.
 std::vector<int64_t> problemTokenValues(const MatchedProblem& matched)
 {
     const auto& p = matched.problem;
@@ -268,16 +318,15 @@ std::vector<int64_t> problemTokenValues(const MatchedProblem& matched)
 /// The problem graphMatches resolved for @p context, read back from @p bound: the SDK
 /// passes every kernel matcher what graph_match bound for that same context. Falls back
 /// to matching the graph when the token is absent, as for a caller with no graph match.
-std::optional<MatchedProblem> matchedFromBound(const MatchContext& context,
-                                               const BoundTokens& bound)
+std::optional<MatchedProblem>
+    matchedFromBound(const Engine& engine, const MatchContext& context, const BoundTokens& bound)
 {
-    static const std::string s_problemToken(PROBLEM_TOKEN);
-    const auto it = bound.find(s_problemToken);
+    const auto it = bound.find(std::string(engine.problemToken));
     const auto* values
         = it == bound.end() ? nullptr : std::get_if<std::vector<int64_t>>(&it->second);
     if(values == nullptr || values->size() != 18)
     {
-        return matchProblem(context);
+        return matchProblem(engine, context);
     }
     const auto& v = *values;
     const conv::Problem problem{
@@ -286,17 +335,18 @@ std::optional<MatchedProblem> matchedFromBound(const MatchContext& context,
         Binding{v[0], v[1], v[2]}, problem, static_cast<data_objects::DataType>(v[17]));
 }
 
+template <const Engine& E>
 std::optional<BoundTokens> graphMatches(const MatchContext& context)
 {
-    const auto matched = matchProblem(context);
+    const auto matched = matchProblem(E, context);
     if(!matched)
     {
         return std::nullopt;
     }
-    return BoundTokens{{std::string(X_TOKEN), matched->binding.x},
-                       {std::string(W_TOKEN), matched->binding.w},
-                       {std::string(Y_TOKEN), matched->binding.y},
-                       {std::string(PROBLEM_TOKEN), problemTokenValues(*matched)}};
+    return BoundTokens{{std::string(E.xToken), matched->binding.x},
+                       {std::string(E.wToken), matched->binding.w},
+                       {std::string(E.yToken), matched->binding.y},
+                       {std::string(E.problemToken), problemTokenValues(*matched)}};
 }
 
 template <typename T>
@@ -335,25 +385,20 @@ bool hasReviewedPipeline(const KernelDefinition& kernel)
                || *pipelineName == "basic");
 }
 
-// ---- hipkernel:Gfx950ConvFwdAot: shape-generic AOT instances ----
+// ---- hipkernel:Gfx950ConvFwdAot, hipkernel:Gfx942ConvFwdAot: shape-generic AOT instances ----
 //
-// Each kernel is one rocKE forward KernelIdentity, implicit GEMM or direct depthwise: its
-// metadata holds tuning and capability fields only, and the problem reaches the kernel as
-// AOT arguments computed from the graph. Matching is therefore a capability check
-// (conv::aotInstanceLaunch, conv::directInstanceLaunch), not an equality on the geometry.
+// One engine per architecture (Engine); both share everything below but the device they
+// accept and the symbols, tokens and module cache they name. Each kernel is one rocKE
+// forward KernelIdentity, implicit GEMM or direct depthwise: its metadata holds tuning and
+// capability fields only, and the problem reaches the kernel as AOT arguments computed
+// from the graph. Matching is therefore a capability check (conv::aotInstanceLaunch,
+// conv::directInstanceLaunch), not an equality on the geometry.
 
-constexpr std::string_view AOT_GRAPH_MATCHER_SYMBOL = "hipkernel.gfx950_conv_fwd_aot.graph_match";
-constexpr std::string_view AOT_KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_conv_fwd_aot.kernel_match";
-constexpr std::string_view AOT_SCORE_SYMBOL = "hipkernel.gfx950_conv_fwd_aot.score";
-constexpr std::string_view AOT_DISPATCH_SYMBOL = "hipkernel.gfx950_conv_fwd_aot.dispatch";
-/// The packs of split-C kernels (make_conv_aot_config.SPLIT_C_DISPATCH): two launches.
-constexpr std::string_view AOT_SPLIT_C_DISPATCH_SYMBOL
-    = "hipkernel.gfx950_conv_fwd_aot.split_c_dispatch";
 /// The launches of a split-C kernel's `sources` (make_conv_aot_config.SPLIT_C_LAUNCHES).
 constexpr const char* SPLIT_C_CONV_LAUNCH = "conv";
 constexpr const char* SPLIT_C_REDUCE_LAUNCH = "reduce";
 
-/// Integer instance fields; supports_gfx950_conv_fwd_aot validated every one at build.
+/// Integer instance fields; supports_conv_fwd_aot validated every one at build.
 constexpr std::array<const char*, 13> AOT_INT_FIELDS{"tile_m",
                                                      "tile_n",
                                                      "tile_k",
@@ -691,7 +736,7 @@ std::optional<AotKernel> aotInstance(const KernelDefinition& kernel)
     return aotImplicitGemmInstance(kernel, *groupMerge);
 }
 
-/// What hipkernel:Gfx950ConvFwdAot reads of one kernel on every graph, decoded from its
+/// What a forward AOT engine reads of one kernel on every graph, decoded from its
 /// metadata once: its dtype and epilogue, and its instance (nullopt for metadata no
 /// reviewed launch contract describes).
 struct AotPrepared
@@ -823,14 +868,16 @@ std::optional<ConvLaunch> aotKernelFits(const MatchedProblem& matched,
     return aotInstanceLaunch(matched, *prepared.instance);
 }
 
+template <const Engine& E>
 bool aotKernelMatches(const MatchContext& context,
                       const BoundTokens& bound,
                       const KernelDefinition& kernel)
 {
-    const auto matched = matchedFromBound(context, bound);
+    const auto matched = matchedFromBound(E, context, bound);
     return matched && aotKernelFits(*matched, kernel).has_value();
 }
 
+template <const Engine& E>
 double
     aotScore(const MatchContext& context, const BoundTokens& bound, const KernelDefinition& kernel)
 {
@@ -847,7 +894,7 @@ double
     // implicit-GEMM instance (and above a refusal): an unbenchmarked plan keeps serving
     // implicit GEMM wherever it can, and the direct kernels are chosen by benchmarking,
     // a recorded winner, the kernel_family knob, or where nothing else serves.
-    const auto matched = matchedFromBound(context, bound);
+    const auto matched = matchedFromBound(E, context, bound);
     AotPrepared scratch;
     const auto& instance = preparedOf(kernel, scratch).instance;
     const auto launch = matched && instance ? aotInstanceLaunch(*matched, *instance) : std::nullopt;
@@ -884,6 +931,7 @@ double
 /// serving instance when none bakes them (conv::widestVectorSelection); "serves" is the
 /// capability, this is the policy. rocKE's direct benchmark runs every direct kernel that
 /// serves, so direct instances all stay, and so do group-merged ones.
+template <const Engine& E>
 std::vector<bool> aotCandidateFilter(const MatchContext& context,
                                      const BoundTokens& /*bound*/,
                                      const std::vector<const KernelDefinition*>& candidates)
@@ -910,7 +958,7 @@ std::vector<bool> aotCandidateFilter(const MatchContext& context,
         return keep;
     }
     // Every candidate was admitted by aotKernelMatches, so the graph matches.
-    const auto matched = matchProblem(context);
+    const auto matched = matchProblem(E, context);
     if(!matched)
     {
         return keep;
@@ -925,32 +973,36 @@ std::vector<bool> aotCandidateFilter(const MatchContext& context,
     return keep;
 }
 
-/// How this pack admits a kernel for a matched graph and launches it (aotKernelFits).
-using KernelFits = std::optional<ConvLaunch> (*)(const MatchedProblem&, const KernelDefinition&);
-
-void requireBindings(const BoundTokens& bound, const Binding& binding)
+/// @p message prefixed with @p engine's message prefix.
+std::string engineMessage(const Engine& engine, std::string_view message)
 {
-    if(tryGetBoundInt(bound, X_TOKEN) != std::optional<int64_t>(binding.x)
-       || tryGetBoundInt(bound, W_TOKEN) != std::optional<int64_t>(binding.w)
-       || tryGetBoundInt(bound, Y_TOKEN) != std::optional<int64_t>(binding.y))
+    return std::string(engine.messagePrefix) + " " + std::string(message);
+}
+
+void requireBindings(const Engine& engine, const BoundTokens& bound, const Binding& binding)
+{
+    if(tryGetBoundInt(bound, engine.xToken) != std::optional<int64_t>(binding.x)
+       || tryGetBoundInt(bound, engine.wToken) != std::optional<int64_t>(binding.w)
+       || tryGetBoundInt(bound, engine.yToken) != std::optional<int64_t>(binding.y))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "gfx950_conv_fwd dispatch requires this graph matcher's tensor bindings");
+            engineMessage(engine, "dispatch requires this graph matcher's tensor bindings"));
     }
 }
 
 /// Defense-in-depth: matchProblem already declines a graph whose output isn't NHWK, so
 /// this never throws for a kernel reached through this pack's own matchers. It stays as
 /// prepare()'s own invariant check regardless.
-void requireOutput(const MatchContext& context, const MatchedProblem& matched)
+void requireOutput(const Engine& engine, const MatchContext& context, const MatchedProblem& matched)
 {
     const auto* output = findTensor(context, matched.binding.y);
     if(!outputMatches(output, matched))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "gfx950_conv_fwd requires packed NHWK output with the inferred convolution dimensions");
+            engineMessage(engine,
+                          "requires packed NHWK output with the inferred convolution dimensions"));
     }
 }
 
@@ -1109,14 +1161,15 @@ void launchConvKernel(compilation::IRunnableKernel& kernel,
 /// launchNames) runs each kernel's `kernel_source`; the split-C handler declares the
 /// launches "conv" and "reduce" of its kernels' `sources` and runs both, the conv pass
 /// into the workspace and the fold from it into the output, in that order on one stream.
+/// workspaceBytes() and prepare() admit a kernel through the same matchProblem(E, ...) and
+/// aotKernelFits, so a kernel prepare() refuses never reports a workspace.
+template <const Engine& E>
 class ConvFwdDispatchHandler : public IKernelDispatchHandler<Handle>
 {
 public:
-    ConvFwdDispatchHandler(const compilation::KpackKernelLoader& loader,
-                           KernelFits fits,
-                           std::set<std::string> launchNames = {})
+    explicit ConvFwdDispatchHandler(const compilation::KpackKernelLoader& loader,
+                                    std::set<std::string> launchNames = {})
         : _loader(loader)
-        , _fits(fits)
         , _launchNames(std::move(launchNames))
     {
     }
@@ -1136,8 +1189,8 @@ public:
         {
             return 0;
         }
-        const auto matched = matchProblem(context);
-        const auto launch = matched ? _fits(*matched, kernel) : std::nullopt;
+        const auto matched = matchProblem(E, context);
+        const auto launch = matched ? aotKernelFits(*matched, kernel) : std::nullopt;
         return launch ? static_cast<size_t>(launch->workspaceBytes) : 0;
     }
 
@@ -1145,21 +1198,22 @@ public:
                                               const BoundTokens& bound,
                                               const KernelDefinition& kernel) const override
     {
-        const auto matched = matchProblem(context);
-        const auto launch = matched ? _fits(*matched, kernel) : std::nullopt;
+        const auto matched = matchProblem(E, context);
+        const auto launch = matched ? aotKernelFits(*matched, kernel) : std::nullopt;
         // A split-C kernel launches through this pack's two-launch handler only, and
         // every kernel of that pack is split-C.
         if(!launch || launch->reduce.has_value() != !_launchNames.empty())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "gfx950_conv_fwd graph or packaged kernel does not satisfy the convolution "
-                "contract");
+                engineMessage(E,
+                              "graph or packaged kernel does not satisfy the convolution "
+                              "contract"));
         }
-        requireBindings(bound, matched->binding);
-        requireOutput(context, *matched);
+        requireBindings(E, bound, matched->binding);
+        requireOutput(E, context, *matched);
 
-        // This pack ships prebuilt code objects only; _fits already refused every
+        // This pack ships prebuilt code objects only; aotKernelFits already refused every
         // other source kind. Each family has its own ABI, so the signature follows it.
         // No kernel of this pack uses dynamic LDS.
         const auto& signature = kernelSignature(launch->kernargs);
@@ -1206,7 +1260,7 @@ public:
         if(deviceBuffers == nullptr)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM, "gfx950_conv_fwd requires device buffers");
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM, engineMessage(E, "requires device buffers"));
         }
         const auto& binding = convPrepared.binding();
         const auto a
@@ -1221,7 +1275,7 @@ public:
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                    "gfx950_conv_fwd requires non-null device pointers aligned to 16 bytes");
+                    engineMessage(E, "requires non-null device pointers aligned to 16 bytes"));
             }
         }
         const auto stream = handle.getStream();
@@ -1238,7 +1292,7 @@ public:
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "gfx950_conv_fwd requires nonoverlapping input, filter, and output storage");
+                engineMessage(E, "requires nonoverlapping input, filter, and output storage"));
         }
         auto* reduce = convPrepared.reduceKernelForStream(stream);
         if(reduce == nullptr)
@@ -1270,8 +1324,9 @@ public:
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "gfx950_conv_fwd split-C requires a 16-byte aligned workspace of the "
-                "requested size that overlaps no tensor");
+                engineMessage(E,
+                              "split-C requires a 16-byte aligned workspace of the "
+                              "requested size that overlaps no tensor"));
         }
         launchConvKernel(convPrepared.kernelForStream(stream),
                          stream,
@@ -1337,7 +1392,7 @@ private:
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "gfx950_conv_fwd requires nonoverlapping input, filter, and output storage");
+                engineMessage(E, "requires nonoverlapping input, filter, and output storage"));
         }
         for(const auto& chunk : prepared.batchChunks())
         {
@@ -1352,28 +1407,44 @@ private:
     }
 
     const compilation::KpackKernelLoader& _loader;
-    KernelFits _fits;
     std::set<std::string> _launchNames;
 };
 
+template <const Engine& E>
 const compilation::KpackKernelLoader& aotKpackLoader()
 {
-    static const compilation::KpackKernelLoader s_loader(gfx950ConvFwdAotKpackModuleCache());
+    // The registries retain non-owning pointers; the loader and the handlers below live
+    // for the process, including across provider handle destruction and recreation.
+    static const compilation::KpackKernelLoader s_loader(E.moduleCache());
     return s_loader;
 }
 
-const ConvFwdDispatchHandler& aotDispatchHandler()
+template <const Engine& E>
+const ConvFwdDispatchHandler<E>& aotDispatchHandler()
 {
-    static const ConvFwdDispatchHandler s_handler(aotKpackLoader(), &aotKernelFits);
+    static const ConvFwdDispatchHandler<E> s_handler(aotKpackLoader<E>());
     return s_handler;
 }
 
 /// The handler of the split-C packs: the same admission, two launches per kernel.
-const ConvFwdDispatchHandler& aotSplitCDispatchHandler()
+template <const Engine& E>
+const ConvFwdDispatchHandler<E>& aotSplitCDispatchHandler()
 {
-    static const ConvFwdDispatchHandler s_handler(
-        aotKpackLoader(), &aotKernelFits, {SPLIT_C_CONV_LAUNCH, SPLIT_C_REDUCE_LAUNCH});
+    static const ConvFwdDispatchHandler<E> s_handler(aotKpackLoader<E>(),
+                                                     {SPLIT_C_CONV_LAUNCH, SPLIT_C_REDUCE_LAUNCH});
     return s_handler;
+}
+
+template <const Engine& E>
+void registerSymbols(SymbolScope<Handle>& scope)
+{
+    scope.add(std::string(E.graphMatcherSymbol), &graphMatches<E>);
+    scope.add(std::string(E.kernelMatcherSymbol), &aotKernelMatches<E>);
+    scope.add(std::string(E.kernelMatcherSymbol), &aotCandidateFilter<E>);
+    scope.add(std::string(E.kernelMatcherSymbol), &aotPrepare);
+    scope.add(std::string(E.scoreSymbol), &aotScore<E>);
+    scope.add(std::string(E.dispatchSymbol), &aotDispatchHandler<E>());
+    scope.add(std::string(E.splitCDispatchSymbol), &aotSplitCDispatchHandler<E>());
 }
 
 } // namespace
@@ -1384,20 +1455,30 @@ compilation::KpackModuleCache& gfx950ConvFwdAotKpackModuleCache()
     return s_moduleCache;
 }
 
+compilation::KpackModuleCache& gfx942ConvFwdAotKpackModuleCache()
+{
+    static compilation::KpackModuleCache s_moduleCache;
+    return s_moduleCache;
+}
+
 void registerGfx950ConvFwdAotSymbols(SymbolScope<Handle>& scope)
 {
-    scope.add(std::string(AOT_GRAPH_MATCHER_SYMBOL), &graphMatches);
-    scope.add(std::string(AOT_KERNEL_MATCHER_SYMBOL), &aotKernelMatches);
-    scope.add(std::string(AOT_KERNEL_MATCHER_SYMBOL), &aotCandidateFilter);
-    scope.add(std::string(AOT_KERNEL_MATCHER_SYMBOL), &aotPrepare);
-    scope.add(std::string(AOT_SCORE_SYMBOL), &aotScore);
-    scope.add(std::string(AOT_DISPATCH_SYMBOL), &aotDispatchHandler());
-    scope.add(std::string(AOT_SPLIT_C_DISPATCH_SYMBOL), &aotSplitCDispatchHandler());
+    registerSymbols<GFX950_ENGINE>(scope);
+}
+
+void registerGfx942ConvFwdAotSymbols(SymbolScope<Handle>& scope)
+{
+    registerSymbols<GFX942_ENGINE>(scope);
 }
 
 void resetGfx950ConvFwdAotModuleCache()
 {
     gfx950ConvFwdAotKpackModuleCache().clear();
+}
+
+void resetGfx942ConvFwdAotModuleCache()
+{
+    gfx942ConvFwdAotKpackModuleCache().clear();
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

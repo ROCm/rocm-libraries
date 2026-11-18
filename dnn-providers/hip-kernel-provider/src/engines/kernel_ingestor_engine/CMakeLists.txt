@@ -15,8 +15,9 @@ target_sources(hip_kernel_provider_impl PRIVATE
     # bundle also sits in descriptor-packaging/examples/descriptors, where the superbuild CI
     # lane points the production source root. Gfx950AttentionDense, Gfx950AttentionUnified2D,
     # Gfx950AttentionUnified3D, Gfx942AttentionUnified2D, Gfx942AttentionDense,
-    # Gfx950ConvFwdAot, Gfx950ConvDgradAot, Gfx942ConvDgradAot and Gfx1250ConvDgradAot ship
-    # from descriptors/; the two dense attention engines share AttentionDenseNative.cpp, the
+    # Gfx950ConvFwdAot, Gfx942ConvFwdAot, Gfx950ConvDgradAot, Gfx942ConvDgradAot and
+    # Gfx1250ConvDgradAot ship from descriptors/; the two dense attention engines share
+    # AttentionDenseNative.cpp, the two forward AOT engines Gfx950ConvFwdNative.cpp, the
     # three dgrad engines ConvDgradAotNative.cpp.
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNative.cpp

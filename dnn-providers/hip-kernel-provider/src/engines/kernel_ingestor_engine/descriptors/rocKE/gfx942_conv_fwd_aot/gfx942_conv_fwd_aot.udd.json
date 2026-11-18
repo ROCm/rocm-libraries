@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "2115867a-2990-4e4a-b6a9-45e5c55ed86f",
+  "name": "Gfx942ConvFwdAot dispatch",
+  "dispatch_symbol": "hipkernel.gfx942_conv_fwd_aot.dispatch"
+}

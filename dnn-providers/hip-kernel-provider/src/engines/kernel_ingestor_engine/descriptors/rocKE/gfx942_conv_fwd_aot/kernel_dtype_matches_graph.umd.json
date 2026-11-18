@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "976de211-d833-4da4-a536-50faeed86b41",
+  "name": "kernel dtype matches the graph's dtype",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.gfx942_conv_fwd_aot.kernel_match"
+}

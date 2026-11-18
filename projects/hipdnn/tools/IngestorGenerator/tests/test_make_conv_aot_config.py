@@ -35,12 +35,18 @@ _PROVIDER = (
     _REPO / "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine"
 )
 _SHIPPED_DIR = _PROVIDER / "descriptors/rocKE/gfx950_conv_fwd_aot"
+_GFX942_DIR = _PROVIDER / "descriptors/rocKE/gfx942_conv_fwd_aot"
 _SEED_DIR = _PROVIDER / "test_descriptors/integration/rocKE/gfx950_conv_fwd_aot_seed"
 #: One small shipped shard, for the tests that rewrite a KDP.
 _SEED_KDP_NAME = "gfx950_conv_fwd_aot_seed_fp16.kdp.json"
 #: GitHub warns about any file above 50 MB; every emitted file stays below it.
 _FILE_SIZE_LIMIT = 50 * 1000 * 1000
 
+#: The committed instance lists of the gfx942 engine.
+_GFX942_LISTS = [
+    _CONFIGS / f"gfx942_conv_fwd_aot_{dtype}.instances.json"
+    for dtype in ("bf16", "fp16")
+]
 #: Each bundle the tool emits: (engine, its descriptor folder, its instance lists,
 #: its sharding).
 _BUNDLES = {
@@ -54,15 +60,10 @@ _BUNDLES = {
         "k-loop",
     ),
     "seed": (_SEED_ENGINE, _SEED_DIR, [_INSTANCES], "dtype"),
+    "gfx942": ("hipkernel:Gfx942ConvFwdAot", _GFX942_DIR, _GFX942_LISTS, "k-loop"),
 }
 #: The architecture of each bundle's engine.
-_BUNDLE_ARCH = {"product": "gfx950", "seed": "gfx950"}
-#: The committed instance lists of the gfx942 engine, whose bundle is not
-#: installed yet.
-_GFX942_LISTS = [
-    _CONFIGS / f"gfx942_conv_fwd_aot_{dtype}.instances.json"
-    for dtype in ("bf16", "fp16")
-]
+_BUNDLE_ARCH = {"product": "gfx950", "seed": "gfx950", "gfx942": "gfx942"}
 #: Worker processes that convert a catalog.
 _JOBS = min(32, os.cpu_count() or 1)
 
@@ -207,11 +208,14 @@ def test_shipped_bundle_is_sharded_below_the_hosting_size_limit(bundle):
 
 
 def test_committed_instance_lists_and_census_are_below_the_hosting_size_limit():
-    census = (
+    packs = (
         _REPO / "dnn-providers/hip-kernel-provider/src/tests/engines"
-        "/kernel_ingestor_engine/packs/TestGfx950ConvFwdAotPacks.cpp"
+        "/kernel_ingestor_engine/packs"
     )
-    for path in _BUNDLES["product"][2] + _GFX942_LISTS + [census]:
+    censuses = [
+        packs / f"Test{arch}ConvFwdAotPacks.cpp" for arch in ("Gfx950", "Gfx942")
+    ]
+    for path in _BUNDLES["product"][2] + _GFX942_LISTS + censuses:
         assert path.stat().st_size < _FILE_SIZE_LIMIT, path.name
 
 
