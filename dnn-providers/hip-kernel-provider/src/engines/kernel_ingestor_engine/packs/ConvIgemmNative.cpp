@@ -995,7 +995,13 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
     const bool wgps = device_units::reportsWorkgroupProcessors(device.gcnArchName);
     const bool gfx1250 = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) == "gfx1250";
     const long long blocksPerUnit = wgps || gfx1250 ? 1 : 2;
-    const long long minIterations = gfx1250 ? 8 : (wgps ? 64 : 2);
+    const long long minIterations = [&]() -> long long {
+        if(gfx1250)
+        {
+            return 8;
+        }
+        return wgps ? 64 : 2;
+    }();
     constexpr long long MAX_SPLITS = 16;
     constexpr long long MAX_PARTIAL_BYTES = 1LL << 30;
     const auto& a = problem.args;

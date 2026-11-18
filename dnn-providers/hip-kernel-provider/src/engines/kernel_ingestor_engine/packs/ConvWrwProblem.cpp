@@ -355,7 +355,9 @@ int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave)
     // Scalar gathers have no register load-pass bitmask or outstanding inline-asm loads.
     if(config.loop == LOOP_NATIVE_GENERIC || config.loop == LOOP_TAP_TILED
        || config.loop == LOOP_SMALL_K || config.loop == LOOP_ACCURATE)
+    {
         return 0;
+    }
     const int64_t vec = config.vec;
     if(config.loop == LOOP_GENERIC)
     {
@@ -594,7 +596,11 @@ std::optional<bool>
 int64_t ldsLimitOf(std::string_view gcnArchName)
 {
     const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
-    return arch == "gfx1250" ? 320 * 1024 : arch == "gfx950" ? 160 * 1024 : 64 * 1024;
+    if(arch == "gfx1250")
+    {
+        return 320 * 1024;
+    }
+    return arch == "gfx950" ? 160 * 1024 : 64 * 1024;
 }
 
 int64_t splitsWanted(int64_t blocksXY,
@@ -962,7 +968,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         return std::nullopt;
     }
     // The vector and the tile: 16 bytes, or (FMA output rows) one element.
-    if((config.vec * eb != 16 && !((config.loop == LOOP_ROWS_FMA || runtime) && config.vec == 1))
+    if((config.vec * eb != 16 && ((config.loop != LOOP_ROWS_FMA && !runtime) || config.vec != 1))
        || config.bk < 1 || config.bc < 1 || config.bq < 1)
     {
         return std::nullopt;
@@ -1304,7 +1310,9 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         const auto columns = pack_features::checkedProduct({problem.taps, cg});
         if(!columns.has_value())
+        {
             return std::nullopt;
+        }
         const auto tiles
             = tapTiled
                   ? pack_features::checkedProduct(
@@ -1316,7 +1324,9 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         const auto positions = pack_features::checkedProduct(
             {a.n, a.outSpatial[0], a.outSpatial[1], a.outSpatial[2]});
         if(!tiles.has_value() || !positions.has_value())
+        {
             return std::nullopt;
+        }
         gridX = *tiles;
         steps = divUp(*positions, config.bq);
     }
@@ -1440,9 +1450,15 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     const bool reduceRows = reduceTile.blocks > 0 && splits == 1
                             && problem.taps <= K3_REDUCE_ROW_MAX_TAPS
                             && hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) == "gfx950";
-    int64_t reduceGrid = accurate                ? divUp(*partialElems, 256)
-                         : reduceTile.blocks > 0 ? reduceTile.blocks
-                                                 : divUp(quads, REDUCE_QUADS_PER_BLOCK);
+    int64_t reduceGrid = divUp(quads, REDUCE_QUADS_PER_BLOCK);
+    if(accurate)
+    {
+        reduceGrid = divUp(*partialElems, 256);
+    }
+    else if(reduceTile.blocks > 0)
+    {
+        reduceGrid = reduceTile.blocks;
+    }
     if(reduceRows)
     {
         reduceGrid = a.groups * kg * divUp(cg, int64_t{K3_REDUCE_ROW_CHANNELS});

@@ -405,13 +405,19 @@ std::optional<WinogradProblem> parseWinogradProblem(const MatchContext& context,
     if(hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName) == "gfx1250")
     {
         // Extent-one axes can match either order: classify the native pair jointly.
-        problem.activations = packedIn(a.xStrides, xExtents, NCHW_ORDER)
-                                      && packedIn(a.yStrides, yExtents, NCHW_ORDER)
-                                  ? Layout::NCHW
-                              : packedIn(a.xStrides, xExtents, NHWC_ORDER)
-                                      && packedIn(a.yStrides, yExtents, NHWC_ORDER)
-                                  ? Layout::NHWC
-                                  : Layout::OTHER;
+        if(packedIn(a.xStrides, xExtents, NCHW_ORDER) && packedIn(a.yStrides, yExtents, NCHW_ORDER))
+        {
+            problem.activations = Layout::NCHW;
+        }
+        else if(packedIn(a.xStrides, xExtents, NHWC_ORDER)
+                && packedIn(a.yStrides, yExtents, NHWC_ORDER))
+        {
+            problem.activations = Layout::NHWC;
+        }
+        else
+        {
+            problem.activations = Layout::OTHER;
+        }
     }
     else
     {
@@ -523,19 +529,53 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
                             || config.variant == Variant::COOP;
         const bool nativeMultipass
             = config.variant == Variant::MULTIPASS && config.arch == "gfx1250";
-        const int expectedAtom = config.variant == Variant::WRW ? (config.arch == "any"      ? 0
-                                                                   : config.arch == "gfx11"  ? 1
-                                                                   : config.arch == "gfx12"  ? 2
-                                                                   : config.arch == "gfx9"   ? 3
-                                                                   : config.arch == "gfx950" ? 6
-                                                                                             : -1)
-                                 : nativeMultipass              ? 5
-                                 : !matrix                      ? 0
-                                 : config.arch == "gfx11"       ? 1
-                                 : config.arch == "gfx12"       ? 2
-                                 : isCdna(config)               ? 3
-                                 : config.arch == "gfx1250"     ? (config.atom == 5 ? 5 : 4)
-                                                                : -1;
+        const int expectedAtom = [&]() {
+            if(config.variant == Variant::WRW)
+            {
+                if(config.arch == "any")
+                {
+                    return 0;
+                }
+                if(config.arch == "gfx11")
+                {
+                    return 1;
+                }
+                if(config.arch == "gfx12")
+                {
+                    return 2;
+                }
+                if(config.arch == "gfx9")
+                {
+                    return 3;
+                }
+                return config.arch == "gfx950" ? 6 : -1;
+            }
+            if(nativeMultipass)
+            {
+                return 5;
+            }
+            if(!matrix)
+            {
+                return 0;
+            }
+            if(config.arch == "gfx11")
+            {
+                return 1;
+            }
+            if(config.arch == "gfx12")
+            {
+                return 2;
+            }
+            if(isCdna(config))
+            {
+                return 3;
+            }
+            if(config.arch == "gfx1250")
+            {
+                return config.atom == 5 ? 5 : 4;
+            }
+            return -1;
+        }();
         if(config.atom != expectedAtom
            || (config.atom == 5 && config.variant != Variant::WMMA && !nativeMultipass))
         {
@@ -769,14 +809,18 @@ bool configRunsOn(const Config& config, std::string_view gcnArchName)
                    || arch == "gfx942" || arch == "gfx950";
         }
         if(config.arch == "gfx1250")
+        {
             return arch == "gfx1250";
+        }
         return legacyMatrixRunsOn();
     case Variant::FUSED:
         return config.arch == "any" || (arch.size() > 5 && arch.substr(0, 5) == config.arch);
     case Variant::WMMA:
     case Variant::WREG:
         if(config.arch == "gfx1250")
+        {
             return arch == "gfx1250";
+        }
         return legacyMatrixRunsOn();
     case Variant::SREG:
         // Wave64 with v_dot2_f32_f16: gfx906 and later gfx9.
@@ -1081,7 +1125,15 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     }
 
     long long uBytes = 0;
-    const long long matrixChunk = config.atom == 4 ? 32 : config.atom == 5 ? 4 : 16;
+    long long matrixChunk = 16;
+    if(config.atom == 4)
+    {
+        matrixChunk = 32;
+    }
+    else if(config.atom == 5)
+    {
+        matrixChunk = 4;
+    }
     switch(config.variant)
     {
     case Variant::MULTIPASS:

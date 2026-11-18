@@ -5,6 +5,7 @@
 // Forward-form correlation, generic positive element strides in N,C,H,W roles.
 // U[G][P][CO/G][CI/G], V[G][P][CI/G][tiles], M[G][P][CO/G][tiles], all FP32.
 // tileBegin is a global spatial/batch tile index; only V/M are spatially chunked.
+// NOLINTBEGIN(modernize-avoid-c-arrays)
 struct KNdArgs
 {
     const void* in;
@@ -21,3 +22,4 @@ struct KNdArgs
     int tiles;
     int rotate;
 };
+// NOLINTEND(modernize-avoid-c-arrays)

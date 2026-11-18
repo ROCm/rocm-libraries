@@ -918,7 +918,7 @@ conv_igemm::IgemmProblem haloProblem(
 class TestConvIgemmCatalogReader : public ::testing::Test
 {
 protected:
-    hipdnn_test_sdk::utilities::ScopedDirectory directory
+    hipdnn_test_sdk::utilities::ScopedDirectory _directory
         = hipdnn_test_sdk::utilities::claimScratchDirectory("igemm-catalog");
 
     static nlohmann::json record(const std::string& id)
@@ -937,7 +937,7 @@ protected:
 
     std::filesystem::path shard(const std::string& name, const nlohmann::json& records) const
     {
-        const auto path = directory.path() / (name + ".kdp.json");
+        const auto path = _directory.path() / (name + ".kdp.json");
         std::ofstream stream;
         stream.exceptions(std::ios::failbit | std::ios::badbit);
         stream.open(path);

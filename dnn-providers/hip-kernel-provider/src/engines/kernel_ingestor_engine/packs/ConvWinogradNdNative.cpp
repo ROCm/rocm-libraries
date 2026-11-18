@@ -8,6 +8,7 @@
 #include "core/Handle.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/descriptors/conv/winograd/kernels/ConvWinogradArgs.h"
 #include "engines/kernel_ingestor_engine/packs/ConvWinogradNdProblem.hpp"
@@ -30,7 +31,9 @@ std::optional<BoundTokens> ndGraph(const MatchContext& context, ConvDirection di
 {
     const auto p = nd::parseProblem(context, dir);
     if(!p)
+    {
         return std::nullopt;
+    }
     BoundTokens b;
     b["conv_winograd_nd.x.uid"] = p->base.operands.x;
     b["conv_winograd_nd.w.uid"] = p->base.operands.w;
@@ -55,16 +58,22 @@ std::optional<NdResolved> ndResolve(const MatchContext& context, const KernelDef
     {
         const auto direction = kernel.getStringMetadata("direction");
         if(direction != "FWD")
+        {
             return std::nullopt;
+        }
         auto p = nd::parseProblem(context, ConvDirection::FORWARD);
         auto c = nd::configOf(kernel);
         if(!p || !c || !nd::configRunsOn(*c, context.deviceProperties.gcnArchName)
            || kernel.getStringMetadata("dtype")
                   != hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(p->base.dataType))
+        {
             return std::nullopt;
+        }
         auto plan = nd::planFor(*p, *c);
         if(!plan)
+        {
             return std::nullopt;
+        }
         return NdResolved{*p, *c, *plan};
     }
     catch(const std::exception&)
@@ -72,16 +81,16 @@ std::optional<NdResolved> ndResolve(const MatchContext& context, const KernelDef
         return std::nullopt;
     }
 }
-bool ndMatches(const MatchContext& context, const BoundTokens&, const KernelDefinition& k)
+bool ndMatches(const MatchContext& context, const BoundTokens& /*bound*/, const KernelDefinition& k)
 {
     return ndResolve(context, k).has_value();
 }
 template <class A>
 const std::vector<KernelArgument>& ndSignature()
 {
-    static const std::vector<KernelArgument> signature{
+    static const std::vector<KernelArgument> s_signature{
         {"by_value", static_cast<uint32_t>(sizeof(A)), 0, ""}};
-    return signature;
+    return s_signature;
 }
 class NdPrepared : public IngestorPreparedDispatch
 {
@@ -102,12 +111,12 @@ class NdHandler : public IKernelDispatchHandler<Handle>
 {
 public:
     NdHandler(const compilation::IKernelCompiler& c, const compilation::KpackKernelLoader& l)
-        : compiler(c)
-        , loader(l)
+        : _compiler(c)
+        , _loader(l)
     {
     }
     size_t workspaceBytes(const MatchContext& ctx,
-                          const BoundTokens&,
+                          const BoundTokens& /*bound*/,
                           const KernelDefinition& k) const override
     {
         const auto r = ndResolve(ctx, k);
@@ -118,13 +127,15 @@ public:
                                               const KernelDefinition& k) const override
     {
         const auto r = ndResolve(ctx, k);
-        const auto x = tryGetBoundInt(b, "conv_winograd_nd.x.uid"),
-                   w = tryGetBoundInt(b, "conv_winograd_nd.w.uid"),
-                   y = tryGetBoundInt(b, "conv_winograd_nd.y.uid");
+        const auto x = tryGetBoundInt(b, "conv_winograd_nd.x.uid");
+        const auto w = tryGetBoundInt(b, "conv_winograd_nd.w.uid");
+        const auto y = tryGetBoundInt(b, "conv_winograd_nd.y.uid");
         if(!r || !x || !w || !y || *x != r->problem.base.operands.x
            || *w != r->problem.base.operands.w || *y != r->problem.base.operands.y)
+        {
             throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                            "winograd_nd: unmatched graph/config");
+        }
         compilation::KernelCompileOptions opts(ctx.deviceProperties.gcnArchName);
         const auto& c = r->config;
         const auto& p = r->plan;
@@ -140,7 +151,7 @@ public:
                                unsigned int gz) {
             KernelDefinition def = k;
             def.source.entryPoint = entry;
-            auto code = buildIngestorKernelCode(compiler, loader, ctx, def, opts, signature);
+            auto code = buildIngestorKernelCode(_compiler, _loader, ctx, def, opts, signature);
             code.setBlockSize(256, 1, 1);
             code.setGridSize(gx, gy, gz);
             codes.push_back(std::move(code));
@@ -163,9 +174,11 @@ public:
     {
         const auto& d = dynamic_cast<const NdPrepared&>(prepared);
         const auto& p = d.resolved.problem;
-        if(!workspace)
+        if(workspace == nullptr)
+        {
             throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                            "winograd_nd: workspace required");
+        }
         auto* x = hipdnn_plugin_sdk::findDeviceBuffer(p.base.operands.x, buffers, count).ptr;
         auto* w = hipdnn_plugin_sdk::findDeviceBuffer(p.base.operands.w, buffers, count).ptr;
         auto* y = hipdnn_plugin_sdk::findDeviceBuffer(p.base.operands.y, buffers, count).ptr;
@@ -208,20 +221,20 @@ public:
     }
 
 private:
-    const compilation::IKernelCompiler& compiler;
-    const compilation::KpackKernelLoader& loader;
+    const compilation::IKernelCompiler& _compiler;
+    const compilation::KpackKernelLoader& _loader;
 };
 compilation::KpackModuleCache& ndCache()
 {
-    static compilation::KpackModuleCache c;
-    return c;
+    static compilation::KpackModuleCache s_cache;
+    return s_cache;
 }
 const NdHandler& ndHandler()
 {
-    static const HipMlopsKernelCompiler compiler;
-    static const compilation::KpackKernelLoader loader(ndCache());
-    static const NdHandler handler(compiler, loader);
-    return handler;
+    static const HipMlopsKernelCompiler s_compiler;
+    static const compilation::KpackKernelLoader s_loader(ndCache());
+    static const NdHandler s_handler(s_compiler, s_loader);
+    return s_handler;
 }
 }
 void registerConvWinogradNdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope)

@@ -283,7 +283,11 @@ int64_t ldsBytesOf(const StemBwdConfig& config, int elementBytes)
 int64_t ldsLimitOf(std::string_view gcnArchName)
 {
     const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
-    return arch == "gfx1250" ? 320 * 1024 : arch == "gfx950" ? 160 * 1024 : 64 * 1024;
+    if(arch == "gfx1250")
+    {
+        return 320 * 1024;
+    }
+    return arch == "gfx950" ? 160 * 1024 : 64 * 1024;
 }
 
 std::optional<StemBwdLaunch>
