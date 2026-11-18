@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -330,6 +331,13 @@ inline KernelDefinition mainKernelOf(const generated::CatalogRow& row)
         {"main_worklist", row.mainWorklist},
         {"main_static_scale",
          std::string(generated::STATIC_SCALES.at(static_cast<std::size_t>(row.mainStaticScale)))},
+        // The int knob fields of the main KMD (general_bwd_catalog.py KNOB_FIELDS).
+        {"tuning_key_id", row.tuningKeyId},
+        {"head_pack_on", static_cast<int64_t>(row.headPack)},
+        {"lb_mirror_on", static_cast<int64_t>(row.lbMirror)},
+        {"lb_interleave_on", static_cast<int64_t>(row.lbInterleave)},
+        {"worklist_on", static_cast<int64_t>(row.mainWorklist)},
+        {"static_scale_id", row.mainStaticScale},
     };
     return kernel;
 }
@@ -431,6 +439,51 @@ inline std::vector<json> loadCorpus(const std::filesystem::path& path, std::stri
         entries.push_back(std::move(entry));
     }
     return entries;
+}
+
+/// The alternates file of @p arch, which sits beside its corpus, or nullopt when there is none
+/// (a full corpus taken from `HKP_GENERAL_BWD_CORPUS` ships without one).
+inline std::optional<std::filesystem::path> alternatesPath(std::string_view arch)
+{
+    const auto corpus = corpusPath(arch);
+    if(corpus.empty())
+    {
+        return std::nullopt;
+    }
+    auto path = corpus.parent_path() / ("alternates_" + std::string(arch) + ".jsonl");
+    if(!std::filesystem::is_regular_file(path))
+    {
+        return std::nullopt;
+    }
+    return path;
+}
+
+/// The alternate main kernels of every corpus entry that has one, by entry id; the meta line is
+/// skipped.
+inline std::map<std::string, json> loadAlternates(const std::filesystem::path& path)
+{
+    std::ifstream in(path);
+    if(!in)
+    {
+        throw std::runtime_error("cannot open the alternates '" + path.string() + "'");
+    }
+    std::map<std::string, json> byId;
+    std::string line;
+    while(std::getline(in, line))
+    {
+        if(line.empty())
+        {
+            continue;
+        }
+        auto record = json::parse(line);
+        if(record.contains("meta"))
+        {
+            continue;
+        }
+        const auto id = record.at("id").get<std::string>();
+        byId.emplace(id, std::move(record));
+    }
+    return byId;
 }
 
 /// A kernarg's value as the corpus spells it: a pointer's role or "null", an integer in

@@ -90,6 +90,55 @@ def test_corpus_subset_is_current(rocke_sources, arch):
     assert r.returncode == 0, r.stderr
 
 
+@pytest.mark.parametrize("arch", ARCHES)
+def test_alternates_are_current(rocke_sources, arch):
+    r = _run("general_bwd_alternates.py", "--arch", arch, "--check")
+    assert r.returncode == 0, r.stderr
+
+
+@pytest.mark.parametrize("arch", ARCHES)
+def test_alternates_shape(arch):
+    """Alternates join the corpus on id, only for accepted entries, never repeat the pick,
+    and every row is either an alternate or declined, never both."""
+    lines = (
+        (FIXTURES / f"alternates_{arch}.jsonl").read_text(encoding="utf-8").splitlines()
+    )
+    meta = json.loads(lines[0])["meta"]
+    records = [json.loads(x) for x in lines[1:]]
+    _corpus_meta, entries = _corpus(arch)
+    accepted = {e["id"]: e for e in entries if e["expect"]["code"] == "OK"}
+    assert meta["arch"] == arch and meta["accepted_entries"] == len(accepted)
+    assert len(records) == meta["entries_with_alternates"]
+    assert sum(len(r["alternates"]) for r in records) == meta["alternates"]
+    assert sum(len(r["declined"]) for r in records) == meta["declined"]
+    assert meta["alternates"] > 0 and meta["declined"] > 0
+    ids = [r["id"] for r in records]
+    assert len(ids) == len(set(ids)) and set(ids) <= set(accepted)
+    for record in records:
+        pick_main = accepted[record["id"]]["expect"]["tokens"]
+        pick = (
+            pick_main["attention_general_bwd.main.tuning_key"],
+            pick_main["attention_general_bwd.main.head_pack"],
+        )
+        keys = [(a["tuning_key"], a["head_pack"]) for a in record["alternates"]]
+        keys += [(d["tuning_key"], d["head_pack"]) for d in record["declined"]]
+        assert len(keys) == len(set(keys)) and pick not in keys, record["id"]
+        assert record["alternates"] or record["declined"]
+        for alternate in record["alternates"]:
+            main = [
+                x
+                for x in accepted[record["id"]]["expect"]["launches"]
+                if x["slot"] == "main"
+            ]
+            assert [x["launch"] for x in alternate["launches"]] == [
+                x["launch"] for x in main
+            ]
+            for got, want in zip(alternate["launches"], main):
+                assert len(got["values"]) == len(want["kernargs"])
+        for refused in record["declined"]:
+            assert refused["reason"] in ("tuned_class", "head_pack_group")
+
+
 def test_constants_headers_are_current(rocke_sources):
     sys.path.insert(0, str(TOOLS))
     try:

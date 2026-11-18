@@ -230,6 +230,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/attention_general_bwd/corpus_${_corpus_arch}.jsonl"
             "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${_hkp_general_bwd_corpus_subdir}/corpus_${_corpus_arch}.jsonl"
             COPYONLY)
+        # The reference plans of the alternate main kernels, joined to the corpus on entry id.
+        configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/attention_general_bwd/alternates_${_corpus_arch}.jsonl"
+            "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${_hkp_general_bwd_corpus_subdir}/alternates_${_corpus_arch}.jsonl"
+            COPYONLY)
     endforeach()
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_GENERAL_BWD_CORPUS_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${_hkp_general_bwd_corpus_subdir}")
