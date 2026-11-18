@@ -33,8 +33,10 @@ namespace rocsparse
     // Threads per block of every bsrsv solve launch.
     static constexpr uint32_t bsrsv_solve_block_size = 128;
 
-    // Writes the analysis and the zero pivot into bsrsv_info. Reuse may borrow
-    // the bsric0, bsrilu0 or bsrsm analysis held by info.
+    // Writes the analysis and the zero pivot into bsrsv_info. When bsrsv_info is
+    // the bsrsv container of info, reuse may borrow the bsric0, bsrilu0 or bsrsm
+    // analysis held by info. Any other bsrsv_info gets an analysis of its own,
+    // because only the containers of info are told when that analysis is freed.
     template <typename T, typename I, typename J>
     rocsparse_status bsrsv_analysis_template(rocsparse_handle          handle,
                                              rocsparse_direction       dir,

@@ -122,6 +122,14 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
     ROCSPARSE_CHECKARG_ARRAY(6, nnzb, bsr_val);
     ROCSPARSE_CHECKARG_ARRAY(8, nnzb, bsr_col_ind);
 
+    // Reuse borrows the bsric0, bsrilu0 or bsrsm analysis of info only into the
+    // bsrsv container of info. When the donor is cleared or info is destroyed,
+    // trm_t::uncouple hands a borrowed analysis over to the containers of info
+    // that alias it, but it does not know any other container, which would be
+    // left with a dangling pointer. Any other bsrsv_info builds and owns its
+    // analysis.
+    const bool own_container = (bsrsv_info == info->get_shared_bsrsv_info().get());
+
     if(analysis == rocsparse_analysis_policy_reuse)
     {
         auto                     trm   = bsrsv_info->get(trans, descr->fill_mode);
@@ -129,7 +137,8 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
 
         // donor is the container that owns a borrowed analysis. Its zero pivot holds
         // the structural zeros that analysis found, so the solve must report them.
-        if((descr->fill_mode == rocsparse_fill_mode_lower) && (trans == rocsparse_operation_none))
+        if(own_container && (descr->fill_mode == rocsparse_fill_mode_lower)
+           && (trans == rocsparse_operation_none))
         {
             if(trm == nullptr)
             {
@@ -180,10 +189,11 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
         }
     }
 
-    // Reuse stores a raw alias of a bsric0, bsrilu0 or bsrsm analysis of info in
-    // this slot. recreate deletes whatever the slot holds, so drop the alias first
-    // and leave the analysis with the routine that created it. An analysis
-    // bsrsv_info owns stays in the slot and is replaced.
+    // Reuse may have stored a raw alias of a bsric0, bsrilu0 or bsrsm analysis of
+    // info in this slot, which only happens in the bsrsv container of info.
+    // recreate deletes whatever the slot holds, so drop the alias first and leave
+    // the analysis with the routine that created it. An analysis bsrsv_info owns
+    // stays in the slot and is replaced.
     if(info->holds_bsrsv_donor(bsrsv_info->get(trans, descr->fill_mode)))
     {
         bsrsv_info->set(trans, descr->fill_mode, nullptr);

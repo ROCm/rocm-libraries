@@ -693,6 +693,31 @@ namespace
         return pivot;
     }
 
+    // A mat_info that a test destroys when it chooses to, or at scope exit.
+    struct scoped_mat_info
+    {
+        rocsparse_mat_info info = nullptr;
+
+        scoped_mat_info() = default;
+        ~scoped_mat_info()
+        {
+            if(info != nullptr)
+            {
+                rocsparse_destroy_mat_info(info);
+            }
+        }
+
+        scoped_mat_info(const scoped_mat_info&) = delete;
+        scoped_mat_info& operator=(const scoped_mat_info&) = delete;
+
+        rocsparse_status destroy()
+        {
+            const rocsparse_status status = rocsparse_destroy_mat_info(info);
+            info                          = nullptr;
+            return status;
+        }
+    };
+
     // The routines whose lower analysis bsrsv reuse borrows.
     enum class donor_t
     {
@@ -1047,6 +1072,98 @@ namespace
             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
             expect_public_zero_pivot(3);
             ASSERT_EQ(donor_clear(donor), rocsparse_status_success);
+        }
+
+        // The zero pivot of a bsrsv container with 32-bit column indices.
+        static int32_t pivot_of(rocsparse_bsrsv_info container)
+        {
+            int32_t value = -2;
+            EXPECT_EQ(container->get_indextype(), rocsparse_indextype_i32);
+            EXPECT_NE(container->get_position(), nullptr);
+            if(container->get_position() != nullptr)
+            {
+                EXPECT_EQ(
+                    hipMemcpy(
+                        &value, container->get_position(), sizeof(value), hipMemcpyDeviceToHost),
+                    hipSuccess);
+            }
+            return value;
+        }
+
+        // Lower solve through the analysis and pivot that container holds.
+        rocsparse_status solve_container(rocsparse_bsrsv_info container)
+        {
+            return solve_core<int32_t, int32_t>(
+                container->get(rocsparse_operation_none, rocsparse_fill_mode_lower),
+                container->get_indextype(),
+                static_cast<int32_t*>(container->get_position()));
+        }
+
+        // Reuse borrows the bsric0 analysis into the bsrsv container of
+        // objects.info, then a force writes into a separate destination, which
+        // builds an analysis of its own and leaves the alias alone. Either side
+        // can then go first. Clearing the donor hands the borrowed analysis to
+        // the bsrsv container of objects.info and leaves the destination's
+        // analysis alone, and destroying the destination frees only its own.
+        void expect_force_into_separate_destination_after_borrow(bool donor_first)
+        {
+            ASSERT_NO_FATAL_FAILURE(build());
+            ASSERT_EQ(donor_analysis(donor_t::bsric0), rocsparse_status_success);
+            ASSERT_EQ((analysis<int32_t, int32_t>(rocsparse_fill_mode_lower,
+                                                  rocsparse_analysis_policy_reuse)),
+                      rocsparse_status_success);
+            rocsparse::trm_info_t* const borrowed = donor_slot(donor_t::bsric0);
+            ASSERT_NE(borrowed, nullptr);
+            ASSERT_EQ(
+                objects.info->get_bsrsv_info(rocsparse_operation_none, rocsparse_fill_mode_lower),
+                borrowed);
+
+            scoped_mat_info dest_info;
+            ASSERT_EQ(rocsparse_create_mat_info(&dest_info.info), rocsparse_status_success);
+            rocsparse_bsrsv_info dest = dest_info.info->get_bsrsv_info();
+            ASSERT_EQ((analysis<int32_t, int32_t>(rocsparse_fill_mode_lower,
+                                                  rocsparse_analysis_policy_force,
+                                                  rocsparse_operation_none,
+                                                  dest)),
+                      rocsparse_status_success);
+
+            rocsparse::trm_info_t* const own
+                = dest->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+            ASSERT_NE(own, nullptr);
+            EXPECT_NE(own, borrowed);
+            EXPECT_EQ(
+                objects.info->get_bsrsv_info(rocsparse_operation_none, rocsparse_fill_mode_lower),
+                borrowed);
+            EXPECT_EQ(donor_slot(donor_t::bsric0), borrowed);
+
+            if(donor_first)
+            {
+                ASSERT_EQ(donor_clear(donor_t::bsric0), rocsparse_status_success);
+                EXPECT_EQ(objects.info->get_bsrsv_info(rocsparse_operation_none,
+                                                       rocsparse_fill_mode_lower),
+                          borrowed);
+                EXPECT_EQ(dest->get(rocsparse_operation_none, rocsparse_fill_mode_lower), own);
+                ASSERT_EQ(solve_container(dest), rocsparse_status_success);
+                expect_lower_solution();
+
+                ASSERT_EQ(dest_info.destroy(), rocsparse_status_success);
+                ASSERT_EQ((solve_stored<int32_t, int32_t>()), rocsparse_status_success);
+                expect_lower_solution();
+            }
+            else
+            {
+                ASSERT_EQ(dest_info.destroy(), rocsparse_status_success);
+                EXPECT_EQ(donor_slot(donor_t::bsric0), borrowed);
+                EXPECT_EQ(objects.info->get_bsrsv_info(rocsparse_operation_none,
+                                                       rocsparse_fill_mode_lower),
+                          borrowed);
+                ASSERT_EQ((solve_stored<int32_t, int32_t>()), rocsparse_status_success);
+                expect_lower_solution();
+
+                ASSERT_EQ(donor_clear(donor_t::bsric0), rocsparse_status_success);
+                ASSERT_EQ((solve_stored<int32_t, int32_t>()), rocsparse_status_success);
+                expect_lower_solution();
+            }
         }
 
         // Lower solve through bsrsv_solve_core, the entry rocsparse_sptrsv is going
@@ -1431,43 +1548,50 @@ TEST_F(internal_level2_bsrsv_wide, reuse_borrowed_bsrsm_structural_zero_reported
 }
 
 // The analysis goes to a container other than the one in the mat_info that
-// holds the donor. Reuse borrows the bsric0 analysis into it, copies the
-// donor's pivot with the structural zero, and leaves the bsrsv container of
-// the mat_info alone.
-TEST_F(internal_level2_bsrsv_wide, reuse_borrows_into_separate_destination)
+// holds the donor. trm_t::uncouple would not see an alias stored there, so
+// reuse must not borrow the bsric0 analysis. The destination builds its own,
+// which finds the structural zero itself, and the bsrsv container of the
+// mat_info stays empty. The destination's analysis survives the donor's clear
+// and goes with the destination.
+TEST_F(internal_level2_bsrsv_wide, reuse_into_separate_destination_builds_own_analysis)
 {
     ASSERT_NO_FATAL_FAILURE(build(3));
     ASSERT_EQ(donor_analysis(donor_t::bsric0), rocsparse_status_success);
 
-    rocsparse_mat_info dest_info = nullptr;
-    ASSERT_EQ(rocsparse_create_mat_info(&dest_info), rocsparse_status_success);
-    rocsparse_bsrsv_info dest = dest_info->get_bsrsv_info();
+    scoped_mat_info dest_info;
+    ASSERT_EQ(rocsparse_create_mat_info(&dest_info.info), rocsparse_status_success);
+    rocsparse_bsrsv_info dest = dest_info.info->get_bsrsv_info();
 
-    EXPECT_EQ((analysis<int32_t, int32_t>(rocsparse_fill_mode_lower,
+    ASSERT_EQ((analysis<int32_t, int32_t>(rocsparse_fill_mode_lower,
                                           rocsparse_analysis_policy_reuse,
                                           rocsparse_operation_none,
                                           dest)),
               rocsparse_status_success);
-    EXPECT_EQ(dest->get(rocsparse_operation_none, rocsparse_fill_mode_lower),
-              donor_slot(donor_t::bsric0));
+    rocsparse::trm_info_t* const own
+        = dest->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+    ASSERT_NE(own, nullptr);
+    EXPECT_NE(own, donor_slot(donor_t::bsric0));
     EXPECT_EQ(objects.info->get_bsrsv_info(rocsparse_operation_none, rocsparse_fill_mode_lower),
               nullptr);
+    EXPECT_EQ(pivot_of(dest), 3);
 
-    int32_t pivot = -2;
-    EXPECT_EQ(dest->get_indextype(), rocsparse_indextype_i32);
-    EXPECT_NE(dest->get_position(), nullptr);
-    if(dest->get_position() != nullptr)
-    {
-        EXPECT_EQ(hipMemcpy(&pivot, dest->get_position(), sizeof(pivot), hipMemcpyDeviceToHost),
-                  hipSuccess);
-    }
-    EXPECT_EQ(pivot, 3);
-
-    // dest_info does not own the borrowed analysis, so drop the alias before
-    // destroying it.
-    dest->set(rocsparse_operation_none, rocsparse_fill_mode_lower, nullptr);
-    EXPECT_EQ(rocsparse_destroy_mat_info(dest_info), rocsparse_status_success);
     ASSERT_EQ(donor_clear(donor_t::bsric0), rocsparse_status_success);
+    EXPECT_EQ(dest->get(rocsparse_operation_none, rocsparse_fill_mode_lower), own);
+    ASSERT_EQ(solve_container(dest), rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    EXPECT_EQ(pivot_of(dest), 3);
+
+    EXPECT_EQ(dest_info.destroy(), rocsparse_status_success);
+}
+
+TEST_F(internal_level2_bsrsv_wide, force_into_separate_destination_after_borrow_donor_first)
+{
+    expect_force_into_separate_destination_after_borrow(true);
+}
+
+TEST_F(internal_level2_bsrsv_wide, force_into_separate_destination_after_borrow_destination_first)
+{
+    expect_force_into_separate_destination_after_borrow(false);
 }
 
 // The extra block at column r - 3 makes the transposed permutation more than a
