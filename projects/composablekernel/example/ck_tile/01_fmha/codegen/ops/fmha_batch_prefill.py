@@ -1027,9 +1027,9 @@ class PageTileFactoryGfx125:
     """gfx125x page-tile kernel: BF16/FP16, D64/D128, linear or vectorized K/V pool, vLLM 2D or
     SGLang 1D page table, group mode, no mask or a causal/sliding window from either corner (optionally with sink
     tokens and per-head sink logits), optional tanh logits soft cap or elementwise bias or ALiBi,
-    optional LSE. FP8 (fp8bf16, per-tensor descales): D64 M128, 64-token pages of the vectorized
-    pool (x = 16), vLLM 2D table, no mask or a window as above, no sink, bias, soft cap
-    or LSE."""
+    optional LSE. FP8 (fp8bf16, per-tensor descales): D64 M128, and M64 on small grids, 64-token
+    pages of the vectorized pool (x = 16), vLLM 2D table, no mask or a window as above, no sink,
+    bias, soft cap or LSE."""
 
     # Unsplit arms: the caller asks for no KV split (num_splits 1). A problem that asks for a split
     # and matches no split arm matches no arm: the dispatch returns -1.
@@ -1050,6 +1050,15 @@ class PageTileFactoryGfx125:
     SMALL_GRID_D64 = CppConstraint(
         "a.num_splits == 1 && (get_num_blocks(128) <= num_cus || "
         "(t.page_size == 64 && 2 * get_num_blocks(128) <= 3 * num_cus))"
+    )
+    # FP8 D64 M64 tiles (64-token pages) take grids of up to 2 num_cus M128 workgroups, where all
+    # of their workgroups are resident at once (four per CU at the M64 kernel's 208 VGPRs): the M64
+    # tile took 0.87-0.96 of the M128 tile's time there on gfx1250 with 256 CUs, and no measured
+    # grid more than 0.2 % longer. Above it the faster tile alternates with the wave quantization
+    # of the two tiles (M128 keeps three workgroups per CU), and at 4 num_cus the M64 tile is
+    # slower on SWA and on many short requests.
+    SMALL_GRID_FP8 = CppConstraint(
+        "a.num_splits == 1 && get_num_blocks(128) <= 2 * num_cus"
     )
 
     # KV split (kKvSplits 2: partial kernel + merge). The caller decides whether to split, as for
@@ -1104,10 +1113,12 @@ class PageTileFactoryGfx125:
             }  # fmt: skip
         elif dtype == "fp8bf16":
             # FP8 WMMAs (16x16x64 QK, 16x16x128 PV): a full-head QK stage (bk0 = D) and one PV
-            # stage over the KV tile (bk1 = 128).
+            # stage over the KV tile (bk1 = 128). The M64 tile (64-key QK stages) comes first and
+            # takes the grids of SMALL_GRID_FP8; the M128 tile takes the others.
             F = PageTileFactoryGfx125
             return {
-                64 : [FmhaFwdTileSize(128, 128, 64,  64, 128, 64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  1, F.UNSPLIT, GFX125_ARCH)],
+                64 : [FmhaFwdTileSize( 64, 128, 64,  64, 128, 64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  1, F.SMALL_GRID_FP8, GFX125_ARCH),
+                      FmhaFwdTileSize(128, 128, 64,  64, 128, 64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  1, F.UNSPLIT, GFX125_ARCH)],
             }  # fmt: skip
         else:
             return None
