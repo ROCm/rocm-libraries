@@ -346,6 +346,69 @@ TEST_F(PrecondGeneric, spilu0_numeric_boost)
     for_all_types([&](auto tag) { check_ilu_boost<decltype(tag)>(handle); });
 }
 
+namespace
+{
+    // A diagonal that is exactly zero after the optional boost is reported as
+    // numeric_exact, whatever its value before the boost. The pivot of row 0 is its
+    // diagonal entry (nothing is subtracted from it); a boost tolerance of twice the
+    // largest pivot catches every pivot, half the smallest only the zeroed row 0.
+    template <typename T, typename I, typename J>
+    void check_ilu_boost_to_zero(rocsparse_handle handle)
+    {
+        const auto           grid  = make_grid_matrix<T>(4, true);
+        const std::vector<T> plain = host_ilu0(grid);
+        std::vector<double>  pivots;
+        for(int32_t r = 0; r < grid.n; ++r)
+            pivots.push_back(std::abs(to_cd(plain[diagonal_position(grid, r)])));
+        const double largest                     = *std::max_element(pivots.begin(), pivots.end());
+        const double smallest                    = *std::min_element(pivots.begin(), pivots.end());
+        auto         zeroed                      = grid;
+        zeroed.val[diagonal_position(zeroed, 0)] = make_value<T>(0.0);
+
+        struct boost_case
+        {
+            const char*           name;
+            bool                  zero_row0;
+            double                tol;
+            double                val;
+            bool                  device;
+            rocsparse_singularity want;
+        };
+        const auto                    exact = rocsparse_singularity_numeric_exact;
+        const std::vector<boost_case> cases = {
+            {"boost to 0", true, 0.5 * smallest, 0.0, false, exact},
+            {"boost to 0, device scalars", true, 0.5 * smallest, 0.0, true, exact},
+            {"nonzero pivots boosted to 0", false, 2.0 * largest, 0.0, false, exact},
+            {"negative tolerance", true, -1.0, 7.0, false, exact},
+            {"boost to 7", true, 0.5 * smallest, 7.0, false, rocsparse_singularity_none},
+        };
+        for(const auto& c : cases)
+        {
+            SCOPED_TRACE(::testing::Message()
+                         << c.name << " index bytes " << sizeof(I) << "/" << sizeof(J));
+            run_options opt;
+            opt.boost        = true;
+            opt.boost_tol    = c.tol;
+            opt.boost_val    = c.val;
+            opt.boost_device = c.device;
+            singular_case<Kind::ilu, T, I, J>(handle,
+                                              c.zero_row0 ? zeroed : grid,
+                                              opt,
+                                              c.want,
+                                              c.want == rocsparse_singularity_none ? -1 : 0);
+        }
+    }
+}
+
+TEST_F(PrecondGeneric, spilu0_numeric_boost_to_zero_is_exact_singularity)
+{
+    for_all_types([&](auto tag) {
+        using T = decltype(tag);
+        check_ilu_boost_to_zero<T, int32_t, int32_t>(handle);
+        check_ilu_boost_to_zero<T, int64_t, int64_t>(handle);
+    });
+}
+
 TEST_F(PrecondGeneric, spildlt0_numeric_boost)
 {
     for_all_types([&](auto tag) { check_ildlt_boost<decltype(tag)>(handle); });

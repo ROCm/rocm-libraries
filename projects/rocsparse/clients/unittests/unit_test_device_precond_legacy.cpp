@@ -684,7 +684,10 @@ TEST_F(PrecondLegacy, bsrilu0_numeric_boost_first_pivot)
 // pattern, so ILU(0) is the exact LU) has the pivot u00 = a00, boosted to |boost_val| *
 // phase(a00) when |a00| <= tol; u11 = 2 is never boosted. Boosting to 0, boosting a
 // nonzero pivot to 0, and a negative tolerance (no boost) all leave u00 = 0, reported at
-// row 0 in the index base of the matrix; boosting to 5 repairs it.
+// row 0 in the index base of the matrix, as the zero pivot and as the singular pivot (the
+// boost only suppresses near-singular pivots); boosting to 5 repairs it. The mixed
+// precision setters exist for the single precision types only. The binary-search kernel
+// is covered in unit_test_device_precond_kernels.cpp.
 TEST_F(PrecondLegacy, csrilu0_numeric_boost_to_zero_keeps_zero_pivot)
 {
     struct boost_case
@@ -705,6 +708,7 @@ TEST_F(PrecondLegacy, csrilu0_numeric_boost_to_zero_keeps_zero_pivot)
          0.0,
          true},
         {"negative tolerance", 0.0, {true, -1.0, 5.0, false, boost_api::standard}, 0.0, true},
+        {"boost to 0, mixed setter", 0.0, {true, 1.0, 0.0, false, boost_api::mixed}, 0.0, true},
         {"boost to 5", 0.0, {true, 1.0, 5.0, false, boost_api::standard}, 5.0, false},
     };
     for(const auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
@@ -715,6 +719,8 @@ TEST_F(PrecondLegacy, csrilu0_numeric_boost_to_zero_keeps_zero_pivot)
                 using T = decltype(tag);
                 for(const auto& c : cases)
                 {
+                    if(c.req.api == boost_api::mixed && !is_single_precision<T>)
+                        continue;
                     SCOPED_TRACE(::testing::Message()
                                  << c.name << " device_position " << device_position << " base "
                                  << static_cast<int>(base));
@@ -734,11 +740,13 @@ TEST_F(PrecondLegacy, csrilu0_numeric_boost_to_zero_keeps_zero_pivot)
                     {
                         EXPECT_EQ(out.zero_pivot_status, rocsparse_status_zero_pivot);
                         EXPECT_EQ(out.zero_pivot, position_in_base(0, base));
+                        EXPECT_EQ(out.singular_pivot, position_in_base(0, base));
                     }
                     else
                     {
                         EXPECT_EQ(out.zero_pivot_status, rocsparse_status_success);
                         EXPECT_EQ(out.zero_pivot, -1);
+                        EXPECT_EQ(out.singular_pivot, -1);
                         expect_close(out.values,
                                      host_ilu0(a, c.req.tol, c.req.val),
                                      tolerance<T>(max_row_length(a)));
@@ -754,7 +762,10 @@ TEST_F(PrecondLegacy, csrilu0_numeric_boost_to_zero_keeps_zero_pivot)
 // tolerance 0.5 only `d` can be boosted. Boosting d = 0 to 0, boosting d = 0.25 to 0,
 // and a negative tolerance (no boost) all leave a zero pivot in block row 1, reported
 // in the index base of the matrix; boosting d = 0 to 5 repairs it. bd = 2 is the matrix
-// of the issue; the block dimensions reach every bsrilu0 kernel on wave64 devices.
+// of the issue; the block dimensions reach every bsrilu0 kernel on wave64 devices. The
+// zero check does not depend on the direction or on the pointer mode of the position,
+// so each (block dimension, case) pair runs one of their four combinations, in turn,
+// and every block dimension and every case still meets all four.
 TEST_F(PrecondLegacy, bsrilu0_numeric_boost_to_zero_keeps_zero_pivot)
 {
     struct boost_case
@@ -777,67 +788,74 @@ TEST_F(PrecondLegacy, bsrilu0_numeric_boost_to_zero_keeps_zero_pivot)
         {"negative tolerance", 0.0, {true, -1.0, 5.0, false, boost_api::standard}, 0.0, true},
         {"boost to 5", 0.0, {true, 0.5, 5.0, false, boost_api::standard}, 5.0, false},
     };
+    struct mode
+    {
+        rocsparse_direction dir;
+        bool                device_position;
+    };
+    const std::vector<mode>    modes      = {{rocsparse_direction_row, false},
+                                             {rocsparse_direction_column, false},
+                                             {rocsparse_direction_row, true},
+                                             {rocsparse_direction_column, true}};
+    const std::vector<int32_t> block_dims = {2, 9, 33, 65};
     for(const auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
     {
-        for(const bool device_position : {false, true})
-        {
-            for_all_types([&](auto tag) {
-                using T = decltype(tag);
-                for(const int32_t bd : {2, 9, 33, 65})
+        for_all_types([&](auto tag) {
+            using T = decltype(tag);
+            for(size_t b = 0; b < block_dims.size(); ++b)
+            {
+                for(size_t k = 0; k < cases.size(); ++k)
                 {
-                    for(const auto dir : {rocsparse_direction_row, rocsparse_direction_column})
+                    const int32_t bd              = block_dims[b];
+                    const auto&   c               = cases[k];
+                    const auto    dir             = modes[(b + k) % modes.size()].dir;
+                    const bool    device_position = modes[(b + k) % modes.size()].device_position;
+                    SCOPED_TRACE(::testing::Message()
+                                 << c.name << " block_dim " << bd << " dir "
+                                 << static_cast<int>(dir) << " device_position " << device_position
+                                 << " base " << static_cast<int>(base));
+                    const size_t  bsz = static_cast<size_t>(bd) * bd;
+                    const size_t  pos = 3 * bsz + static_cast<size_t>(bd - 1) * (bd + 1);
+                    bsr_matrix<T> bsr;
+                    bsr.mb        = 2;
+                    bsr.block_dim = bd;
+                    bsr.dir       = dir;
+                    bsr.ptr       = {0, 2, 4};
+                    bsr.ind       = {0, 1, 0, 1};
+                    bsr.val.assign(4 * bsz, make_value<T>(0.0));
+                    for(int32_t i = 0; i < bd; ++i)
                     {
-                        for(const auto& c : cases)
-                        {
-                            SCOPED_TRACE(::testing::Message()
-                                         << c.name << " block_dim " << bd << " dir "
-                                         << static_cast<int>(dir) << " device_position "
-                                         << device_position << " base " << static_cast<int>(base));
-                            const size_t  bsz = static_cast<size_t>(bd) * bd;
-                            const size_t  pos = 3 * bsz + static_cast<size_t>(bd - 1) * (bd + 1);
-                            bsr_matrix<T> bsr;
-                            bsr.mb        = 2;
-                            bsr.block_dim = bd;
-                            bsr.dir       = dir;
-                            bsr.ptr       = {0, 2, 4};
-                            bsr.ind       = {0, 1, 0, 1};
-                            bsr.val.assign(4 * bsz, make_value<T>(0.0));
-                            for(int32_t i = 0; i < bd; ++i)
-                            {
-                                bsr.val[static_cast<size_t>(i) * (bd + 1)] = make_value<T>(1.0);
-                                bsr.val[3 * bsz + static_cast<size_t>(i) * (bd + 1)]
-                                    = make_value<T>(1.0);
-                            }
-                            bsr.val[pos] = make_value<T>(c.d);
+                        bsr.val[static_cast<size_t>(i) * (bd + 1)]           = make_value<T>(1.0);
+                        bsr.val[3 * bsz + static_cast<size_t>(i) * (bd + 1)] = make_value<T>(1.0);
+                    }
+                    bsr.val[pos] = make_value<T>(c.d);
 
-                            bsr_out<T> out;
-                            run_bsrilu0<T>(handle, bsr, base, c.req, out, device_position);
-                            ASSERT_EQ(out.compute_status, rocsparse_status_success);
-                            ASSERT_EQ(out.values.size(), bsr.val.size());
-                            // Every other entry is unchanged: the multipliers are 0 / 1 and
-                            // the updates subtract exact zeros.
-                            std::vector<T> want = bsr.val;
-                            want[pos]           = make_value<T>(c.want_d);
-                            for(size_t i = 0; i < want.size(); ++i)
-                            {
-                                ASSERT_EQ(to_cd(out.values[i]), to_cd(want[i])) << "entry " << i;
-                            }
-                            if(c.zero_pivot)
-                            {
-                                EXPECT_EQ(out.zero_pivot_status, rocsparse_status_zero_pivot);
-                                EXPECT_EQ(out.zero_pivot, position_in_base(1, base));
-                            }
-                            else
-                            {
-                                EXPECT_EQ(out.zero_pivot_status, rocsparse_status_success);
-                                EXPECT_EQ(out.zero_pivot, -1);
-                                expect_bsr_factor(bsr, out, c.req);
-                            }
-                        }
+                    bsr_out<T> out;
+                    run_bsrilu0<T>(handle, bsr, base, c.req, out, device_position);
+                    ASSERT_EQ(out.compute_status, rocsparse_status_success);
+                    ASSERT_EQ(out.values.size(), bsr.val.size());
+                    // Every other entry is unchanged: the multipliers are 0 / 1 and
+                    // the updates subtract exact zeros.
+                    std::vector<T> want = bsr.val;
+                    want[pos]           = make_value<T>(c.want_d);
+                    for(size_t i = 0; i < want.size(); ++i)
+                    {
+                        ASSERT_EQ(to_cd(out.values[i]), to_cd(want[i])) << "entry " << i;
+                    }
+                    if(c.zero_pivot)
+                    {
+                        EXPECT_EQ(out.zero_pivot_status, rocsparse_status_zero_pivot);
+                        EXPECT_EQ(out.zero_pivot, position_in_base(1, base));
+                    }
+                    else
+                    {
+                        EXPECT_EQ(out.zero_pivot_status, rocsparse_status_success);
+                        EXPECT_EQ(out.zero_pivot, -1);
+                        expect_bsr_factor(bsr, out, c.req);
                     }
                 }
-            });
-        }
+            }
+        });
     }
 }
 

@@ -97,11 +97,28 @@ namespace
         return pivot == Pivot::none ? -1 : (pivot == Pivot::structural ? 5 : 0);
     }
 
-    // csrilu0 through the legacy interface. singular_tol < 0 keeps the library default.
-    template <typename T>
-    void run_csrilu0(rocsparse_handle handle, Pivot pivot, double singular_tol, int32_t fat = 513)
+    // Numeric boost of run_csrilu0 (host scalars) and the zero based row of the zero pivot
+    // expected with it, -1 for none.
+    struct Boost
     {
-        SCOPED_TRACE("fat " + std::to_string(fat));
+        bool    enable = false;
+        double  tol    = 0.0;
+        double  val    = 0.0;
+        int64_t want   = -1;
+    };
+
+    // csrilu0 through the legacy interface. singular_tol < 0 keeps the library default.
+    // With `boost` enabled, the singular pivot is the zero pivot (the boost suppresses
+    // near-singular pivots), and the factor is compared without a zero pivot only.
+    template <typename T>
+    void run_csrilu0(rocsparse_handle handle,
+                     Pivot            pivot,
+                     double           singular_tol,
+                     int32_t          fat   = 513,
+                     const Boost&     boost = Boost{})
+    {
+        SCOPED_TRACE(::testing::Message() << "fat " << fat << " boost " << boost.enable << " tol "
+                                          << boost.tol << " val " << boost.val);
         const csr_matrix<T>          a = make_binsearch_matrix<T>(fat, pivot, true);
         const rocsparse_int          m = a.n, nnz = a.nnz();
         device_vector<rocsparse_int> drow{as_rocsparse_int(a.ptr)};
@@ -143,6 +160,14 @@ namespace
         if(singular_tol >= 0.0)
             ASSERT_EQ(rocsparse_csrilu0_set_tolerance(handle, di.info, singular_tol),
                       rocsparse_status_success);
+        // The library keeps the boost pointers until the compute.
+        const real_of<T> boost_tol = static_cast<real_of<T>>(boost.tol);
+        const T          boost_val = make_value<T>(boost.val);
+        if(boost.enable)
+            ASSERT_EQ(
+                PRECOND_CALL(T, csrilu0_numeric_boost, handle, di.info, 1, &boost_tol, &boost_val),
+                rocsparse_status_success);
+        const int64_t want = boost.enable ? boost.want : pivot_row(pivot);
 
         const rocsparse_status st = PRECOND_CALL(T,
                                                  csrilu0,
@@ -156,7 +181,7 @@ namespace
                                                  di.info,
                                                  rocsparse_solve_policy_auto,
                                                  buffer.ptr);
-        if(pivot == Pivot::none)
+        if(want == -1)
             ASSERT_EQ(st, rocsparse_status_success);
         else
             EXPECT_TRUE(st == rocsparse_status_success || st == rocsparse_status_zero_pivot) << st;
@@ -164,8 +189,20 @@ namespace
 
         rocsparse_int position = -2;
         EXPECT_EQ(rocsparse_csrilu0_zero_pivot(handle, di.info, &position),
-                  pivot == Pivot::none ? rocsparse_status_success : rocsparse_status_zero_pivot);
-        EXPECT_EQ(position, pivot_row(pivot));
+                  want == -1 ? rocsparse_status_success : rocsparse_status_zero_pivot);
+        EXPECT_EQ(position, want);
+        if(boost.enable)
+        {
+            rocsparse_int singular = -2;
+            EXPECT_EQ(rocsparse_csrilu0_singular_pivot(handle, di.info, &singular),
+                      rocsparse_status_success);
+            EXPECT_EQ(singular, want);
+            if(want == -1)
+                expect_close(to_host(dval),
+                             host_ilu0(a, boost.tol, boost.val),
+                             tolerance<T>(max_row_length(a)));
+            return;
+        }
         if(pivot != Pivot::none)
             return;
         expect_diagonally_dominant(a);
@@ -302,6 +339,25 @@ TEST_F(PrecondCsrilu0Binsearch, value_types_1024)
     run_csrilu0<double>(handle, Pivot::none, -1.0, 1024);
     run_csrilu0<rocsparse_float_complex>(handle, Pivot::none, -1.0, 1024);
     run_csrilu0<rocsparse_double_complex>(handle, Pivot::none, -1.0, 1024);
+}
+
+// A diagonal that is exactly zero after the optional numeric boost is a zero pivot,
+// whatever its value before the boost, in the binary-search kernel too (max nnz 1024, both
+// wave sizes). Every pivot of Pivot::none is at most 4, so a tolerance of 5 boosts all of
+// them; the exact zero of row 0 is reported first.
+TEST_F(PrecondCsrilu0Binsearch, numeric_boost_to_zero_keeps_zero_pivot)
+{
+    for_all_types([&](auto tag) {
+        using T = decltype(tag);
+        // boost to 0
+        run_csrilu0<T>(handle, Pivot::exact, -1.0, 1024, Boost{true, 1.0, 0.0, 0});
+        // nonzero pivots boosted to 0
+        run_csrilu0<T>(handle, Pivot::none, -1.0, 1024, Boost{true, 5.0, 0.0, 0});
+        // a negative tolerance boosts nothing
+        run_csrilu0<T>(handle, Pivot::exact, -1.0, 1024, Boost{true, -1.0, 5.0, 0});
+        // boost to 5 repairs the zero pivot
+        run_csrilu0<T>(handle, Pivot::exact, -1.0, 1024, Boost{true, 1.0, 5.0, -1});
+    });
 }
 
 class PrecondCsrildlt0Binsearch : public HandleTest
