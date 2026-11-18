@@ -116,8 +116,7 @@ extern "C" {
 *  \retval      rocsparse_status_invalid_pointer \p mat_A, \p mat_B, or \p buffer_size
 *               pointer is invalid.
 *  \retval      rocsparse_status_invalid_size the number of rows or columns of
-*               \p mat_A differs from \p mat_B. For blocked ELL, a descriptor
-*               whose rows or columns were rounded up past the dense size is rejected.
+*               \p mat_A differs from \p mat_B.
 *
 *  \par Example
 *  \snippet example_rocsparse_sparse_to_dense.cpp doc example
