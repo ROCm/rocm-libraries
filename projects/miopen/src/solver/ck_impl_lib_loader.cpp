@@ -580,26 +580,30 @@ ConvSolution CkImplLibLoader::GetSolutionTf32Aware(CKSolverType solver,
     // the config build used in FillValidKernelsWithTf32Fallback. IsArgsSupported cannot decide it:
     // with use_tf32 it falls back to the FP32 instances. Building the TF32 valid set asks CK about
     // every TF32 instance, and this runs on every solution query of an FP32 problem with TF32 on,
-    // so the answer is memoized per (solver, problem, kernel_id); the problem part of the key is
+    // so the answer is memoized per solver and (problem, kernel_id); the problem part of the key is
     // DefaultConfigKey's, which covers everything the valid set depends on.
     if(use_tf32)
     {
-        auto key =
-            conv::DefaultConfigKey(std::to_string(ToSolverIndex(solver)), ctx, problem, false);
+        auto key = conv::DefaultConfigKey({}, ctx, problem, false);
         key += '\n';
         key += kernel_id;
-        use_tf32 = *tf32_kernel_ids_.GetOrCompute(key, [&] {
-            // bwd-data/wrw solvers store kernel_id as "<type>+<split_k>", but FillValidKernels
-            // returns the bare type string; strip the suffix before the membership test, as the
-            // invoker does.
-            const auto pos = kernel_id.find_last_of('+');
-            const auto type_string =
-                (pos == std::string::npos) ? kernel_id : kernel_id.substr(0, pos);
-            const auto tf32_kernels = FillValidKernels(solver, problem, dtype, true);
-            return std::optional<bool>{std::find(tf32_kernels.begin(),
-                                                 tf32_kernels.end(),
-                                                 type_string) != tf32_kernels.end()};
-        });
+        use_tf32 =
+            tf32_kernel_ids_[ToSolverIndex(solver)]
+                .GetOrCompute(
+                    key,
+                    [&] {
+                        // bwd-data/wrw solvers store kernel_id as "<type>+<split_k>", but
+                        // FillValidKernels returns the bare type string; strip the suffix before
+                        // the membership test, as the invoker does.
+                        const auto pos = kernel_id.find_last_of('+');
+                        const auto type_string =
+                            (pos == std::string::npos) ? kernel_id : kernel_id.substr(0, pos);
+                        const auto tf32_kernels = FillValidKernels(solver, problem, dtype, true);
+                        return std::optional<bool>{std::find(tf32_kernels.begin(),
+                                                             tf32_kernels.end(),
+                                                             type_string) != tf32_kernels.end()};
+                    })
+                .value_or(false);
     }
     return GetSolution(solver, ctx, problem, kernel_id, use_tf32);
 }

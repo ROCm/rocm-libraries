@@ -158,8 +158,9 @@ private:
     void* lib_handle_ = nullptr;
     bool loaded_      = false;
 
-    // GetSolutionTf32Aware's decision, per (solver, problem, kernel_id); see there.
-    mutable CKProblemCache<std::unordered_map<std::string, bool>> tf32_kernel_ids_;
+    // GetSolutionTf32Aware's decision per (problem, kernel_id), one cache per solver; see there.
+    mutable CKProblemCache<std::unordered_map<std::string, bool>>
+        tf32_kernel_ids_[static_cast<int>(CKSolverType::Count)];
 
     // -- Function pointer types -----------------------------------------------
     // CKKernelListHandle is declared at global scope in the interface header.
