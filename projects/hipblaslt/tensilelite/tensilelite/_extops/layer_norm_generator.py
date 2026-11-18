@@ -42,7 +42,7 @@ from ..Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from ..Common.DataType import DataType
 from ..Common.GlobalParameters import assignGlobalParameters, restoreDefaultGlobalParameters
 from ..Common.Types import IsaVersion
-from ..Toolchain.Validators import ToolchainDefaults, validateToolchain
+from ..Toolchain.Validators import ToolchainDefaults, deviceEnumeratorCandidates, validateToolchain
 
 def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int, xnack: bool = False):
     vgpr = ((vgpr+7)//8)*8
@@ -971,7 +971,7 @@ if __name__ == '__main__':
 
     if any([not i for i in (arch, toolchain_path, isa)]):
         restoreDefaultGlobalParameters()
-        enumerator = validateToolchain(ToolchainDefaults.DEVICE_ENUMERATOR)
+        enumerator = deviceEnumeratorCandidates()
         # `arch` is the compile target for this kernel, so it has to be the name
         # the device reported: gfx1250 and gfx1250-strict share an ISA, and
         # deriving the name back from it would build for gfx1250 on either --
