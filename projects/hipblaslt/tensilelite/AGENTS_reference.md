@@ -8,11 +8,13 @@ Supplementary reference for `AGENTS.md` — load this when you need test command
 # Full test suite (builds client + runs all common tests)
 tox -e py3 -- tensilelite/Tests -m common
 
-# Python unit tests only (skips the long client build; requires a prior build)
+
+# Python unit tests only (builds and configures the client in the tox environment)
 tox -e unit -- tensilelite/Tests/unit
 
 # Run a specific test category
 tox -e py3 -- tensilelite/Tests -m gemm
+
 
 # Run a single test directly after building and binding the client
 invoke configure-client --build-dir build_tmp
@@ -22,13 +24,17 @@ python -m tensilelite run tensilelite/Tests/common/exception/<test>.yaml tensile
 ## Custom CMake Build
 
 ```bash
+
+# Client-only builds use the selected SDK and do not create a private venv.
 cmake --preset tensilelite -S .. -B my-custom-build
 cmake --build my-custom-build --parallel
+
 
 # Run a test with a custom client path
 python -m tensilelite_configure_client \
     --client "$PWD/my-custom-build/tensilelite/client/tensilelite-client"
-python -m tensilelite run tensilelite/Tests/common/<test>.yaml tensile-out
+ROCM_PATH=/opt/rocm python -m tensilelite run \
+    tensilelite/Tests/common/<test>.yaml tensile-out
 
 # Build with custom args (e.g., Debug + specific GPU)
 TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e py3 -- tensilelite/Tests -m common
@@ -69,6 +75,7 @@ make co TENSILE_OUT=tensile-out ARCH="gfx1100" WAVE=32  # gfx11 explicit
 | `TENSILELITE_ENABLE_HOST` | ON | Build C++ runtime library |
 | `TENSILELITE_ENABLE_CLIENT` | ON | Build benchmark client |
 | `TENSILELITE_BUILD_TESTING` | OFF | Build C++ host library tests |
+| `ROCISA_BUILD_PYTHON` | OFF | Build only the in-tree rocisa extension without device libraries |
 | `GPU_TARGETS` | (detected) | Semicolon-separated list of gfx targets |
 
 ## Supported Targets
