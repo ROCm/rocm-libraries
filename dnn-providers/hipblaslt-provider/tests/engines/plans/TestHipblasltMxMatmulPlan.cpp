@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <future>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <random>
@@ -29,9 +31,9 @@
 #include "TestWorkarounds.hpp"
 #include "engines/plans/HipblasltMxMatmulPlan.hpp"
 #include "engines/plans/MxArchSupport.hpp"
+#include "engines/plans/MxTestUtils.hpp"
 
 using namespace hipblaslt_plugin;
-#include "engines/plans/MxTestUtils.hpp"
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using hipdnn_plugin_sdk::archMatches;
 using hipdnn_plugin_sdk::ArchMatchMode;
@@ -40,12 +42,12 @@ namespace
 {
 
 using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
-using hipdnn_test_sdk::utilities::createValidMxMatmulGraph;
-
 using hipblaslt_plugin_test::createMxGraphWithLayout;
 using hipblaslt_plugin_test::DevicePtr;
 using hipblaslt_plugin_test::MxOperandLayout;
 using hipblaslt_plugin_test::upload;
+using hipdnn_test_sdk::utilities::createValidMxMatmulGraph;
+
 /// Borrowed references to the three node attribute tables of an MX graph.
 /// node 0 → dequant A, node 1 → dequant B, node 2 → matmul (emission order of
 /// createValidMxMatmulGraph with swapDequantOrder=false).
@@ -587,10 +589,26 @@ TEST_F(TestGpuMxMatmulPlan, Gfx1250SwizzledFormatDoesNotFallBack)
 namespace
 {
 
-constexpr int64_t EXEC_M = 64;
-constexpr int64_t EXEC_N = 96;
-constexpr int64_t EXEC_K = 256;
-constexpr int64_t EXEC_K_BLOCKS = EXEC_K / VEC32_BLOCK_SIZE;
+// M, N and K of an executed GEMM, and how many leading dims of 1 each tensor has
+// (the in-tree bundles use rank-3 and rank-4 tensors with batch 1).
+struct MxShape
+{
+    int64_t m;
+    int64_t n;
+    int64_t k;
+    int64_t leadingOnes = 0;
+
+    int64_t kBlocks() const
+    {
+        return k / VEC32_BLOCK_SIZE;
+    }
+};
+
+constexpr MxShape EXEC_SHAPE{64, 96, 256};
+// Small M and N with a large K: hipBLASLt asks for a workspace of its own.
+constexpr MxShape LARGE_K_SHAPE{16, 16, 8192};
+// What C holds before execute(), far above the tolerance of the host reference.
+constexpr float INITIAL_C = 1e6f;
 
 // Physical order of our A [M, K], our B [K, N] and their scales [M, K/32] and
 // [K/32, N]; true means K (or the K-block axis) is contiguous.
@@ -602,40 +620,51 @@ struct MxStorage
     bool scaleBKContiguous;
 };
 
-std::vector<int64_t> rowMajorStrides(int64_t /*rows*/, int64_t cols)
+// Dims and packed strides of a [rows, cols] matrix behind `leadingOnes` dims of 1.
+struct MatrixLayout
 {
-    return {cols, 1};
+    std::vector<int64_t> dims;
+    std::vector<int64_t> strides;
+};
+
+MatrixLayout matrix(int64_t rows, int64_t cols, bool rowMajor, int64_t leadingOnes)
+{
+    MatrixLayout layout{std::vector<int64_t>(static_cast<size_t>(leadingOnes), 1),
+                        std::vector<int64_t>(static_cast<size_t>(leadingOnes), rows * cols)};
+    layout.dims.insert(layout.dims.end(), {rows, cols});
+    layout.strides.insert(layout.strides.end(),
+                          rowMajor ? std::initializer_list<int64_t>{cols, 1}
+                                   : std::initializer_list<int64_t>{1, rows});
+    return layout;
 }
 
-std::vector<int64_t> colMajorStrides(int64_t rows, int64_t /*cols*/)
+flatbuffers::FlatBufferBuilder createExecuteGraph(const MxStorage& s, const MxShape& shape)
 {
-    return {1, rows};
-}
-
-flatbuffers::FlatBufferBuilder createExecuteGraph(const MxStorage& s)
-{
-    return createValidMxMatmulGraph(
-        {EXEC_M, EXEC_K},
-        s.aKContiguous ? rowMajorStrides(EXEC_M, EXEC_K) : colMajorStrides(EXEC_M, EXEC_K),
-        {EXEC_K, EXEC_N},
-        s.bKContiguous ? colMajorStrides(EXEC_K, EXEC_N) : rowMajorStrides(EXEC_K, EXEC_N),
-        {EXEC_M, EXEC_N},
-        rowMajorStrides(EXEC_M, EXEC_N),
-        {EXEC_M, EXEC_K_BLOCKS},
-        {EXEC_K_BLOCKS, EXEC_N},
-        DT::FP8_E4M3,
-        DT::FLOAT,
-        DT::FP8_E8M0,
-        DT::FP8_E8M0,
-        DT::FLOAT,
-        static_cast<int32_t>(VEC32_BLOCK_SIZE),
-        false,
-        false,
-        DT::UNSET,
-        s.scaleAKContiguous ? rowMajorStrides(EXEC_M, EXEC_K_BLOCKS)
-                            : colMajorStrides(EXEC_M, EXEC_K_BLOCKS),
-        s.scaleBKContiguous ? colMajorStrides(EXEC_K_BLOCKS, EXEC_N)
-                            : rowMajorStrides(EXEC_K_BLOCKS, EXEC_N));
+    const auto ones = shape.leadingOnes;
+    const auto a = matrix(shape.m, shape.k, s.aKContiguous, ones);
+    const auto b = matrix(shape.k, shape.n, !s.bKContiguous, ones);
+    const auto c = matrix(shape.m, shape.n, true, ones);
+    const auto scaleA = matrix(shape.m, shape.kBlocks(), s.scaleAKContiguous, ones);
+    const auto scaleB = matrix(shape.kBlocks(), shape.n, !s.scaleBKContiguous, ones);
+    return createValidMxMatmulGraph(a.dims,
+                                    a.strides,
+                                    b.dims,
+                                    b.strides,
+                                    c.dims,
+                                    c.strides,
+                                    scaleA.dims,
+                                    scaleB.dims,
+                                    DT::FP8_E4M3,
+                                    DT::FLOAT,
+                                    DT::FP8_E8M0,
+                                    DT::FP8_E8M0,
+                                    DT::FLOAT,
+                                    static_cast<int32_t>(VEC32_BLOCK_SIZE),
+                                    false,
+                                    false,
+                                    DT::UNSET,
+                                    scaleA.strides,
+                                    scaleB.strides);
 }
 
 // Logical row-major [rows][cols] bytes laid out row- or column-major.
@@ -653,13 +682,14 @@ std::vector<uint8_t>
 // Logical row-major contents: A [M][K], B [K][N], scale_a [M][K/32], scale_b [K/32][N].
 struct MxInputs
 {
+    MxShape shape;
     std::vector<uint8_t> a;
     std::vector<uint8_t> b;
     std::vector<uint8_t> scaleA;
     std::vector<uint8_t> scaleB;
 };
 
-MxInputs randomInputs()
+MxInputs randomInputs(const MxShape& shape = EXEC_SHAPE)
 {
     std::mt19937 rng(20261028);
     // Finite E4M3 values (exponent field <= 12, either sign) and E8M0 scales near 1,
@@ -668,10 +698,11 @@ MxInputs randomInputs()
         = [&rng]() { return static_cast<uint8_t>((rng() % 0x68) | ((rng() & 1u) << 7)); };
     const auto e8m0 = [&rng]() { return static_cast<uint8_t>(122 + rng() % 11); };
     MxInputs in;
-    in.a.resize(static_cast<size_t>(EXEC_M * EXEC_K));
-    in.b.resize(static_cast<size_t>(EXEC_K * EXEC_N));
-    in.scaleA.resize(static_cast<size_t>(EXEC_M * EXEC_K_BLOCKS));
-    in.scaleB.resize(static_cast<size_t>(EXEC_K_BLOCKS * EXEC_N));
+    in.shape = shape;
+    in.a.resize(static_cast<size_t>(shape.m * shape.k));
+    in.b.resize(static_cast<size_t>(shape.k * shape.n));
+    in.scaleA.resize(static_cast<size_t>(shape.m * shape.kBlocks()));
+    in.scaleB.resize(static_cast<size_t>(shape.kBlocks() * shape.n));
     for(auto* bytes : {&in.a, &in.b})
     {
         for(auto& value : *bytes)
@@ -695,15 +726,82 @@ struct MxExecution
     size_t workspaceSize = 0;
     bool scaleAPrepared = false; // our A's scale (hipBLAS B_SCALE)
     bool scaleBPrepared = false; // our B's scale (hipBLAS A_SCALE)
+    size_t preparedScaleBytes = 0; // the two scale regions at the front of the workspace
+    std::vector<uint8_t> preparedWhileHeld; // those regions read while the stream was held
     std::vector<uint8_t> c;
+};
+
+// Holds a stream back with a host function until release(), so nothing enqueued on it
+// after the hold can run before then.
+class StreamHold
+{
+public:
+    explicit StreamHold(hipStream_t stream)
+    {
+        EXPECT_EQ(hipLaunchHostFunc(stream, &StreamHold::wait, &_released), hipSuccess);
+    }
+    StreamHold(const StreamHold&) = delete;
+    StreamHold& operator=(const StreamHold&) = delete;
+    StreamHold(StreamHold&&) = delete;
+    StreamHold& operator=(StreamHold&&) = delete;
+    ~StreamHold()
+    {
+        release();
+    }
+
+    void release()
+    {
+        if(!_done)
+        {
+            _promise.set_value();
+            _done = true;
+        }
+    }
+
+private:
+    static void wait(void* released)
+    {
+        static_cast<std::shared_future<void>*>(released)->wait();
+    }
+
+    std::promise<void> _promise;
+    std::shared_future<void> _released = _promise.get_future().share();
+    bool _done = false;
+};
+
+// A non-blocking stream, so the default stream never waits for it.
+class NonBlockingStream
+{
+public:
+    NonBlockingStream()
+    {
+        EXPECT_EQ(hipStreamCreateWithFlags(&_stream, hipStreamNonBlocking), hipSuccess);
+    }
+    NonBlockingStream(const NonBlockingStream&) = delete;
+    NonBlockingStream& operator=(const NonBlockingStream&) = delete;
+    NonBlockingStream(NonBlockingStream&&) = delete;
+    NonBlockingStream& operator=(NonBlockingStream&&) = delete;
+    ~NonBlockingStream()
+    {
+        static_cast<void>(hipStreamDestroy(_stream));
+    }
+
+    hipStream_t get() const
+    {
+        return _stream;
+    }
+
+private:
+    hipStream_t _stream = nullptr;
 };
 
 // `format` defaults to the one the provider selects for the device.
 std::unique_ptr<MxMatmulPlan> createExecutePlan(const HipdnnEnginePluginHandle& handle,
                                                 const MxStorage& s,
-                                                std::optional<MxScaleFormat> format = std::nullopt)
+                                                std::optional<MxScaleFormat> format = std::nullopt,
+                                                const MxShape& shape = EXEC_SHAPE)
 {
-    auto fb = createExecuteGraph(s);
+    auto fb = createExecuteGraph(s, shape);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
     return createMxMatmulPlan(handle,
@@ -715,28 +813,43 @@ std::unique_ptr<MxMatmulPlan> createExecutePlan(const HipdnnEnginePluginHandle& 
 }
 
 // `nullWorkspace` passes no workspace, as hipDNN does for a plan that needs none.
+// `holdStream` holds the handle's stream (which must not be the default stream) while
+// execute() enqueues its work and reads the prepared-scale regions before releasing it.
 MxExecution execute(const HipdnnEnginePluginHandle& handle,
                     const MxStorage& s,
                     const MxInputs& in,
                     bool nullWorkspace = false,
-                    std::optional<MxScaleFormat> format = std::nullopt)
+                    std::optional<MxScaleFormat> format = std::nullopt,
+                    bool holdStream = false)
 {
-    auto fb = createExecuteGraph(s);
+    const auto m = in.shape.m;
+    const auto n = in.shape.n;
+    const auto k = in.shape.k;
+    const auto kBlocks = in.shape.kBlocks();
+    auto fb = createExecuteGraph(s, in.shape);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
-    const auto plan = createExecutePlan(handle, s, format);
+    const auto plan = createExecutePlan(handle, s, format, in.shape);
 
     MxExecution result;
     result.format = plan->scaleFormat();
     result.workspaceSize = plan->getWorkspaceSize(handle);
     result.scaleAPrepared = !plan->bScalePrep().isPassThrough();
     result.scaleBPrepared = !plan->aScalePrep().isPassThrough();
+    result.preparedScaleBytes = hipblaslt_utils::alignUp(plan->aScalePrep().workspaceSize(),
+                                                         hipblaslt_utils::WORKSPACE_ALIGNMENT)
+                                + hipblaslt_utils::alignUp(plan->bScalePrep().workspaceSize(),
+                                                           hipblaslt_utils::WORKSPACE_ALIGNMENT);
 
-    auto a = upload(inMemoryOrder(in.a, EXEC_M, EXEC_K, s.aKContiguous));
-    auto b = upload(inMemoryOrder(in.b, EXEC_K, EXEC_N, !s.bKContiguous));
-    auto scaleA = upload(inMemoryOrder(in.scaleA, EXEC_M, EXEC_K_BLOCKS, s.scaleAKContiguous));
-    auto scaleB = upload(inMemoryOrder(in.scaleB, EXEC_K_BLOCKS, EXEC_N, !s.scaleBKContiguous));
-    auto c = upload(std::vector<uint8_t>(static_cast<size_t>(EXEC_M * EXEC_N) * sizeof(float), 0));
+    auto a = upload(inMemoryOrder(in.a, m, k, s.aKContiguous));
+    auto b = upload(inMemoryOrder(in.b, k, n, !s.bKContiguous));
+    auto scaleA = upload(inMemoryOrder(in.scaleA, m, kBlocks, s.scaleAKContiguous));
+    auto scaleB = upload(inMemoryOrder(in.scaleB, kBlocks, n, !s.scaleBKContiguous));
+    // C starts far from any result, so a matmul that adds to it (beta != 0) changes C.
+    std::vector<uint8_t> initialC(static_cast<size_t>(m * n) * sizeof(float));
+    const std::vector<float> initialValues(static_cast<size_t>(m * n), INITIAL_C);
+    std::memcpy(initialC.data(), initialValues.data(), initialC.size());
+    auto c = upload(initialC);
     // Garbage in the workspace, so a prepared scale that is not fully written, or is
     // overwritten by the other one, changes C.
     auto workspace = nullWorkspace
@@ -749,10 +862,29 @@ MxExecution execute(const HipdnnEnginePluginHandle& handle,
            hipdnnPluginDeviceBuffer_t{attrs.deqB.x_tensor_uid(), b.get()},
            hipdnnPluginDeviceBuffer_t{attrs.deqB.scale_tensor_uid(), scaleB.get()},
            hipdnnPluginDeviceBuffer_t{attrs.matmul.c_tensor_uid(), c.get()}};
+    std::optional<StreamHold> hold;
+    if(holdStream && handle.getStream() == nullptr)
+    {
+        ADD_FAILURE() << "holdStream needs a non-default stream: holding the default one deadlocks";
+    }
+    else if(holdStream)
+    {
+        hold.emplace(handle.getStream());
+    }
     plan->execute(handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace.get());
+    if(hold)
+    {
+        result.preparedWhileHeld.resize(result.preparedScaleBytes);
+        EXPECT_EQ(hipMemcpy(result.preparedWhileHeld.data(),
+                            workspace.get(),
+                            result.preparedWhileHeld.size(),
+                            hipMemcpyDeviceToHost),
+                  hipSuccess);
+        hold->release();
+    }
     EXPECT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
 
-    result.c.resize(static_cast<size_t>(EXEC_M * EXEC_N) * sizeof(float));
+    result.c.resize(static_cast<size_t>(m * n) * sizeof(float));
     EXPECT_EQ(hipMemcpy(result.c.data(), c.get(), result.c.size(), hipMemcpyDeviceToHost),
               hipSuccess);
     return result;
@@ -764,6 +896,52 @@ std::vector<float> asFloats(const std::vector<uint8_t>& bytes)
     std::vector<float> values(bytes.size() / sizeof(float));
     std::memcpy(values.data(), bytes.data(), values.size() * sizeof(float));
     return values;
+}
+
+// OCP FP8 E4M3: bias 7, no infinities; randomInputs() produces no NaN.
+double decodeE4M3(uint8_t bits)
+{
+    const int exponent = (bits >> 3) & 0xF;
+    const int mantissa = bits & 0x7;
+    const double magnitude = exponent == 0 ? std::ldexp(mantissa / 8.0, -6)
+                                           : std::ldexp(1.0 + mantissa / 8.0, exponent - 7);
+    return (bits & 0x80) != 0 ? -magnitude : magnitude;
+}
+
+// Expects C to equal dequant(A) x dequant(B), each E8M0 scale being 2^(value - 127),
+// computed on the host in double. On gfx950 hipBLASLt's C differs from it by up to
+// about 1.2e-4 of the sum of the products' magnitudes; the tolerance is 1e-3 of it.
+void expectMatchesHostReference(const MxExecution& run, const MxInputs& in, const std::string& name)
+{
+    const auto m = in.shape.m;
+    const auto n = in.shape.n;
+    const auto k = in.shape.k;
+    const auto kBlocks = in.shape.kBlocks();
+    const auto c = asFloats(run.c);
+    ASSERT_EQ(c.size(), static_cast<size_t>(m * n)) << name;
+    size_t mismatches = 0;
+    for(int64_t row = 0; row < m; ++row)
+    {
+        for(int64_t col = 0; col < n; ++col)
+        {
+            double sum = 0.0;
+            double magnitude = 0.0;
+            for(int64_t kk = 0; kk < k; ++kk)
+            {
+                const auto block = kk / static_cast<int64_t>(VEC32_BLOCK_SIZE);
+                const double a
+                    = std::ldexp(decodeE4M3(in.a[static_cast<size_t>(row * k + kk)]),
+                                 in.scaleA[static_cast<size_t>(row * kBlocks + block)] - 127);
+                const double b = std::ldexp(decodeE4M3(in.b[static_cast<size_t>(kk * n + col)]),
+                                            in.scaleB[static_cast<size_t>(block * n + col)] - 127);
+                sum += a * b;
+                magnitude += std::abs(a * b);
+            }
+            const auto actual = static_cast<double>(c[static_cast<size_t>(row * n + col)]);
+            mismatches += std::abs(actual - sum) > 1e-3 * magnitude + 1e-6 ? 1 : 0;
+        }
+    }
+    EXPECT_EQ(mismatches, 0u) << name << ": C differs from the host reference";
 }
 
 std::string describe(const MxStorage& s)
@@ -788,15 +966,7 @@ protected:
     {
         const auto inputs = randomInputs();
         const auto expected = execute(_handle, reference, inputs);
-        size_t nonZero = 0;
-        for(size_t i = 0; i < expected.c.size(); i += sizeof(float))
-        {
-            float value = 0.f;
-            std::memcpy(&value, expected.c.data() + i, sizeof(float));
-            nonZero += value != 0.f ? 1 : 0;
-        }
-        ASSERT_GT(nonZero, expected.c.size() / sizeof(float) / 2)
-            << "reference output is mostly zero: " << describe(reference);
+        expectMatchesHostReference(expected, inputs, describe(reference));
 
         for(const auto& [storage, prepared] : variants)
         {
@@ -862,6 +1032,85 @@ TEST_F(TestGpuMxMatmulPlanExecute, RunsWithoutWorkspaceWhenNoneIsNeeded)
     }
     const auto withoutWorkspace = execute(_handle, passThrough, inputs, /*nullWorkspace=*/true);
     EXPECT_TRUE(withoutWorkspace.c == withWorkspace.c);
+}
+
+// The workspace is [A scale prep | B scale prep | hipBLASLt workspace]. With a large K
+// hipBLASLt asks for a workspace of its own, so the matmul must use the region after
+// the prepared scales: placed over them, or left out, C changes.
+TEST_F(TestGpuMxMatmulPlanExecute, PreparedScalesAndHipblasltWorkspaceDoNotOverlap)
+{
+    const auto inputs = randomInputs(LARGE_K_SHAPE);
+    std::vector<std::optional<MxScaleFormat>> formats{std::nullopt};
+    if(onGfx950())
+    {
+        formats.emplace_back(MxScaleFormat::SWIZZLED_GFX950);
+    }
+    for(const auto& format : formats)
+    {
+        const auto expected = execute(_handle, {true, true, true, true}, inputs, false, format);
+        const auto actual = execute(_handle, {true, true, false, false}, inputs, false, format);
+        const auto name = toString(actual.format);
+        ASSERT_GT(actual.preparedScaleBytes, 0u) << name;
+        if(actual.workspaceSize <= actual.preparedScaleBytes)
+        {
+            GTEST_SKIP() << name << ": hipBLASLt asks for no workspace for " << LARGE_K_SHAPE.m
+                         << "x" << LARGE_K_SHAPE.n << "x" << LARGE_K_SHAPE.k;
+        }
+        EXPECT_TRUE(actual.c == expected.c)
+            << name << ": prepared scales next to a hipBLASLt workspace give a different C";
+    }
+}
+
+// The scale preparation (transpose or relayout) is enqueued on the handle's stream,
+// ordered after the work that wrote the scales and before the matmul that reads them.
+// With the stream held back, nothing may have been written to the workspace yet.
+TEST_F(TestGpuMxMatmulPlanExecute, PreparesScalesOnTheHandleStream)
+{
+    const MxStorage bothScalesPrepared{true, true, false, false};
+    const auto inputs = randomInputs();
+    std::vector<std::optional<MxScaleFormat>> formats{std::nullopt};
+    if(onGfx950())
+    {
+        formats.emplace_back(MxScaleFormat::SWIZZLED_GFX950);
+    }
+    for(const auto& format : formats)
+    {
+        const auto expected = execute(_handle, bothScalesPrepared, inputs, false, format);
+
+        const NonBlockingStream stream;
+        _handle.setStream(stream.get());
+        const auto actual = execute(_handle, bothScalesPrepared, inputs, false, format, true);
+        _handle.setStream(nullptr);
+
+        const auto name = toString(actual.format);
+        ASSERT_GT(actual.preparedScaleBytes, 0u) << name;
+        EXPECT_EQ(actual.preparedWhileHeld, std::vector<uint8_t>(actual.preparedScaleBytes, 0xA5))
+            << name << ": a scale was prepared before the handle's stream ran";
+        EXPECT_TRUE(actual.c == expected.c) << name << ": C differs on a non-default stream";
+    }
+}
+
+// Tensors of rank 3 and 4 with leading dims of 1, as the in-tree bundles have, are the
+// same GEMM: M, N, K and the scale extents come from the last two dims.
+TEST_F(TestGpuMxMatmulPlanExecute, LeadingUnitDimsGiveTheSameResult)
+{
+    std::vector<MxStorage> storages{{true, true, false, false}};
+    if(onGfx950())
+    {
+        storages.push_back({false, false, true, true});
+    }
+    const auto inputs = randomInputs();
+    for(const auto& storage : storages)
+    {
+        const auto expected = execute(_handle, storage, inputs);
+        for(const int64_t leadingOnes : {1, 2})
+        {
+            auto batched = inputs;
+            batched.shape.leadingOnes = leadingOnes;
+            EXPECT_TRUE(execute(_handle, storage, batched).c == expected.c)
+                << describe(storage) << " with " << leadingOnes << " leading dims of 1";
+        }
+    }
 }
 
 // A scale stored in the other order is transposed by hipBLASLt for natural scales and
