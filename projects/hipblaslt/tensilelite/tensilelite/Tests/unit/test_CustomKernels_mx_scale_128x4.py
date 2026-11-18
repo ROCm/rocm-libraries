@@ -35,9 +35,15 @@ _LOGIC_FILES = [
     for chip in _CHIP_DIRS
     for name, fmt in _TILED_B_FILES
 ]
-# Each kernel runs 12 * L + 8 K tiles of 128: L iterations of a 12-tile main loop and a
-# fixed 8-tile tail. Only these K have a kernel (L = 42 and L = 85).
+# The 4096x4096 kernels at these K run 12 * L + 8 K tiles of 128 (L = 42 and L = 85).
 _KS = (65536, 131584)
+# Shape-specialized kernels. Their K loop is compiled for that K, not for 12 * L + 8.
+_SHAPE_SUFFIX = {
+    (4096, 4096, 2048): "kbd6c3ec4bc",
+    (4096, 4096, 6144): "ke767b25fce",
+    (32768, 4096, 2048): "kd369500cb3",
+    (32768, 4096, 6144): "k3063b64df0",
+}
 # B in HIPBLASLT_ORDER_COL: one E2M3 kernel that runs 24 * L + 8 K tiles, L = 21.
 _CANONICAL_B_FILE = "gfx950_Cijk_Alik_Bljk_F6BS_MXAE8B32_MXBE8B32_STA_H_UserArgs.yaml"
 _CANONICAL_B_KERNEL = (
@@ -58,6 +64,21 @@ def _kernel_name(fmt, k):
         f"_4096x4096x{k}_c0c1"
     )
     return name + "_k4b371438f4" if k == 65536 else name
+
+
+def _tiled_shapes():
+    shapes = [(4096, 4096, k) for k in _KS]
+    shapes.extend(_SHAPE_SUFFIX)
+    return shapes
+
+
+def _tiled_kernel_name(fmt, m, n, k):
+    if (m, n, k) in _SHAPE_SUFFIX:
+        return (
+            f"rocke_gemm_mx_{fmt}_{fmt}_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3"
+            f"_{m}x{n}x{k}_c0c1_{_SHAPE_SUFFIX[(m, n, k)]}"
+        )
+    return _kernel_name(fmt, k)
 
 
 def _flatten(predicate):
@@ -222,12 +243,13 @@ def test_logic_file_predicates(rel, fmt, chip, assembler, gfx950_iim):
     logic = require_logic_file(rel)
     assert L.readYAML(str(logic))["DeviceNames"] == [f"Device {chip}"]
     library = L.parseLibraryLogicFile(str(logic), assembler, False, False, False, gfx950_iim, False)
-    assert len(library.solutions) == len(_KS)
+    shapes = _tiled_shapes()
+    assert len(library.solutions) == len(shapes)
     rows = {tuple(key): index for key, (index, _) in library.exactLogic}
-    assert set(rows) == {(4096, 4096, 1, k) for k in _KS}
-    for k in _KS:
-        struct = library.solutions[rows[(4096, 4096, 1, k)]]
-        assert struct["CustomKernelName"] == _kernel_name(fmt, k)
+    assert set(rows) == {(m, n, 1, k) for m, n, k in shapes}
+    for m, n, k in shapes:
+        struct = library.solutions[rows[(m, n, 1, k)]]
+        assert struct["CustomKernelName"] == _tiled_kernel_name(fmt, m, n, k)
         solution = C.Solution.FromSolutionStruct(struct, False, False, False, assembler, gfx950_iim)
         preds = {}
         for p in _flatten(solution.problemPredicate):
@@ -240,10 +262,10 @@ def test_logic_file_predicates(rel, fmt, chip, assembler, gfx950_iim):
         assert values("AlphaValue") == {(None, "1")}
         assert values("SwizzleTensorA") == {(None, True)}
         assert values("SwizzleTensorB") == {(None, True)}
-        assert values("SizeEqual") == {(0, 4096), (1, 4096), (2, 1), (3, k)}
+        assert values("SizeEqual") == {(0, m), (1, n), (2, 1), (3, k)}
         assert values("StrideAEqual") == {(1, k)}
         assert values("StrideBEqual") == {(1, k)}
-        assert values("StrideDEqual") == {(1, 4096)}
+        assert values("StrideDEqual") == {(1, m)}
         assert solution.problemType.mxScaleFormat == 3
         assert not solution.problemType.useBeta
 
