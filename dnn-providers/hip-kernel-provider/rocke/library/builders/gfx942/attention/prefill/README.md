@@ -194,12 +194,15 @@ magnitudes live outside the repo per `AGENTS.md`.
 ### Opt-in (off by default)
 
 Measurements, static register and ISA counts, and methodology are in the
-[bf16 D128 CFVST / K double buffering / V prefetch case study](gfx942_dense_cfvst_kdb_vprefetch_case_study.md).
+[bf16 D128 CFVST / K double buffering / V prefetch case study](gfx942_dense_cfvst_kdb_vprefetch_case_study.md)
+and the [QK lookahead / `xcd_local` case study](gfx942_dense_qk_lookahead_case_study.md).
 
 | Lever | Config | Mechanism | Verdict |
 |---|---|---|---|
 | K-only LDS double buffering (`lds_num_buffers=2`) | bf16 D128 CFVST causal, `persistent=True`, `block_n=64` only | allocates two K LDS slots while keeping one V LDS slot | **opt-in** — independent of V register prefetch. Not validated at `block_n=32` |
 | V register prefetch (`v_reg_prefetch=True`) | bf16 D128 CFVST causal, `persistent=True`, `block_n=64` only | loads V for the next tile into registers before the current PV; V LDS stays single-buffered | **opt-in** — independent of K LDS buffering; can also be combined with `lds_num_buffers=2` |
+| QK lookahead (`qk_lookahead=True`) | bf16 D128 top-left causal, `persistent=True` on the `xcd_local` decode, `block_m=256`, `block_n=64`, with `lds_num_buffers=2`, `v_reg_prefetch=True`, `causal_diag_split=True` and `lds_row_pad=0` | software-pipelines QK of the next tile under the current tile's softmax and follows each MFMA with one chunk of VALU/LDS work; two K and two V^T LDS slots leave one barrier per tile; O is stored through LDS | **opt-in** — no candidate; reached by pinning those seven knobs on `gfx942_dense`. See the [QK lookahead case study](gfx942_dense_qk_lookahead_case_study.md) |
+| XCD-local persistent decode (`persist_decode="xcd_local"`) | gfx942 persistent grid, 304 CTAs over 8 XCDs, Hq 32, Hkv 8 or 16 | each XCD owns 4 Q heads and deals its work items longest query block first to its 38 CTAs | **opt-in** — legal on its own; `qk_lookahead` requires it |
 
 ### Evaluated and rejected
 

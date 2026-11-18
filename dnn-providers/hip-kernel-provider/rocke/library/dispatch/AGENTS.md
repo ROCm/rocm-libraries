@@ -44,7 +44,6 @@ params). Correctness rests entirely on the key.
 | 3 | `attention_gfx942_dense_persist_aot` | gfx942 | `gfx942_dense.py` | same body on the ingestor's D128 persistent grid: 304 CTAs, an explicit (never `auto`) `persist_decode`, one KV segment; the other knobs swept (`spec_id=gfx942_dense_persist_aot`, opt-in) |
 | 3 | `attention_gfx942_dense_btminor_aot` | gfx942 | `gfx942_dense.py` | same body on the ingestor's non-persistent `bt_hkv_minor` grid, one KV segment; default spec only (`spec_id=gfx942_dense_btminor_aot`, opt-in) |
 | 3 | `attention_gfx942_dense_hqswz_aot` | gfx942 | `gfx942_dense.py` | same body on the ingestor's non-persistent `hq_minor_swz` grid, one KV segment; default spec only (`spec_id=gfx942_dense_hqswz_aot`, opt-in) |
-| 3 | `attention_gfx942_dense_qkla` | gfx942 | `gfx942_dense.py` | the tuned default spec with the QK-lookahead pipeline (`qk_lookahead`) and its prerequisites on, on the `xcd_local` persistent decode where that decode serves the shape; default spec only (`spec_id=gfx942_dense_qkla`, opt-in, registered last) |
 | 3 | `attention_gfx950_dense_grid` | gfx950 | `gfx950_dense.py` | dense grid body (`algorithm=attention_dense_grid`, `spec_id=gfx950_dense_grid`, opt-in) |
 | 3 | `attention_gfx950_dense_qbminor` | gfx950 | `gfx950_dense.py` | dense grid body at the `qb_minor` order the hipDNN ingestor launches (`algorithm=attention_dense_grid`, `spec_id=gfx950_dense_qbminor`, opt-in) |
 | 3 | `attention_gfx950_dense_persist` | gfx950 | `gfx950_dense.py` | dense persistent body (`algorithm=attention_dense_persist`, opt-in) |
@@ -98,9 +97,8 @@ an invalid point. This is deliberately separate from the heuristic production
 builders.
 
 Four candidate families are **opt-in only** and never win under `algorithm="auto"`:
-`attention_gfx942_dense`, `attention_gfx942_dense_qbminor`, the three
-`attention_gfx942_dense_*_aot` candidates and `attention_gfx942_dense_qkla`,
-the four `attention_gfx950_dense_*` candidates, and
+`attention_gfx942_dense`, `attention_gfx942_dense_qbminor` and the three
+`attention_gfx942_dense_*_aot` candidates, the four `attention_gfx950_dense_*` candidates, and
 `attention_gfx1250_wmma`, plus every priority-30 unified tuning candidate.
 Registering a kernel makes it reachable; making it an
 arch's default is a separate decision that wants benchmark evidence, so none
@@ -236,17 +234,27 @@ Bare `tuning_id` replay searches production points only; replay a
 full-space-only combination with its recorded knob dictionary.
 
 `qk_lookahead=True` is the software-pipelined tile body (QK of the next tile
-under the current tile's softmax, one barrier per tile). It needs BF16 D128
+under the current tile's softmax, one LDS barrier per tile). It needs BF16 D128
 top-left causal on the persistent grid with `block_m=256`, `block_n=64`,
-`lds_num_buffers=2`, `v_reg_prefetch=True`, `causal_diag_split=True` and
-`lds_row_pad=0`, and refuses windows, sinks, LSE, paging, KV segments, iglp
-and the PV priority/fence knobs (`NOT_YET_IMPLEMENTED:` in the kernel's
-validator). Setting it does not turn those prerequisites on: like the triple
-combination above, it is more than the one prerequisite a production point
-pairs, so on `gfx942_dense` it is reachable through an explicit knob pin
-(all six fields) or the full tuning space. `gfx942_dense_qkla` is the same
-configuration as a candidate of its own, so every sweep over the registered
-candidates includes it.
+`lds_num_buffers=2`, `v_reg_prefetch=True`, `causal_diag_split=True`,
+`lds_row_pad=0`, the CFVST V path with its swizzle and
+`persist_decode="xcd_local"`. It refuses windows, sinks, LSE, paging, KV
+segments, iglp and the PV priority/fence knobs (`NOT_YET_IMPLEMENTED:` in the
+kernel's validator), and it rejects a non-default `o_store_width`, because it
+stores O through LDS and never reads that field. Setting it does not turn the
+prerequisites on. It has no candidate of its own and the `gfx942_dense`
+defaults are unchanged. Like the triple combination above, it is more than the
+one prerequisite a production point pairs, so it is reached through an
+explicit seven-knob pin on `gfx942_dense` (`qk_lookahead`, `block_m=256`,
+`lds_num_buffers=2`, `v_reg_prefetch`, `causal_diag_split`, `lds_row_pad=0`,
+`persist_decode="xcd_local"`) or through the full tuning space.
+`use_exp2_fast` and `pv_loop_order` stay free under it.
+
+`xcd_local` is a gfx942-only persistent decode: XCD-local load balance at 304
+CTAs over 8 XCDs, Hq 32 and Hkv 8 or 16. It is not in the shared
+`PERSIST_DECODES`, so the shared spec, gfx950 and the C++ mirror never accept
+it. The restriction is one-way: `qk_lookahead` requires `xcd_local`, and
+`xcd_local` is legal without `qk_lookahead`.
 
 **Tuning-id migration for `gfx942_dense`.** Adding a defaulted field
 (`v_reg_prefetch`, then `qk_lookahead`) changes the defaults fingerprint in
