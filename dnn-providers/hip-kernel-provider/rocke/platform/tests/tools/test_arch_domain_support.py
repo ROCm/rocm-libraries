@@ -16,8 +16,11 @@ import json
 import sys
 import tempfile
 import unittest
-from unittest import mock
 from pathlib import Path
+from unittest import mock
+
+from rocke.core.isa.backend import wired_arches
+from rocke.core.lower_llvm import _resolve_llvm_flavor
 
 # CMake stages the standalone generator and its private imports beside installed
 # tests. Prefer that copy when present; never reach back into a source checkout.
@@ -56,15 +59,88 @@ class PackagedColumnTest(unittest.TestCase):
                 self.assertEqual(failures, [], "\n".join(failures))
                 self.assertEqual(doc["toolchain"]["flavor"], path.name.split(".")[1])
 
-    def test_every_packaged_column_is_canonically_serialized(self):
+    def test_every_packaged_column_covers_the_wired_arches(self):
+        for path in self._columns():
+            with self.subTest(column=path.name):
+                doc = json.loads(path.read_text())
+                self.assertEqual(
+                    sorted(doc["toolchain"]["arches"]), sorted(wired_arches())
+                )
+
+    def test_committed_contract_records_are_canonical_and_single_line(self):
         for path in self._columns():
             with self.subTest(column=path.name):
                 text = path.read_text()
+                doc = json.loads(text)
                 self.assertEqual(
-                    G._serialize_column(json.loads(text)),
+                    G._serialize_column(doc),
                     text,
                     f"{path.name}: packaged column is not canonically serialized",
                 )
+                # Check the layout independently of the serializer: changing
+                # both generator and artifact to multiline records must fail.
+                contracts = doc["probe_contracts"]
+                if not contracts:
+                    self.assertIn('  "probe_contracts": {},', text)
+                    continue
+                lines = text.splitlines()
+                start = lines.index('  "probe_contracts": {')
+                end = lines.index("  },", start)
+                records = lines[start + 1 : end]
+                self.assertEqual(len(records), len(contracts))
+                parsed = {}
+                for line in records:
+                    self.assertTrue(line.startswith('    "'))
+                    record = json.loads("{" + line.strip().rstrip(",") + "}")
+                    self.assertEqual(len(record), 1)
+                    parsed.update(record)
+                self.assertEqual(parsed, contracts)
+                self.assertEqual(list(parsed), sorted(parsed))
+
+    def test_every_column_records_how_it_was_measured(self):
+        """Valid method records must also use the current measurement policy."""
+        for path in self._columns():
+            with self.subTest(column=path.name):
+                tc = json.loads(path.read_text())["toolchain"]
+                self.assertGreaterEqual(tc["generator"], G.GENERATOR)
+                self.assertIn(
+                    "-O0",
+                    tc["probe_cflags"],
+                    "column measured without -O0: the IR pipeline can delete "
+                    "the probed call, so its `ok` cells prove nothing",
+                )
+
+    def test_every_decl_key_is_covered(self):
+        """Stale keys always fail; missing measurements require the host flavor.
+
+        Record validity and architecture-row coverage belong to the validator.
+        Declaration coverage is asymmetric: a host cannot fill another flavor's
+        missing measurements, but it can reject stale keys in every column.
+        """
+        for path in self._columns():
+            with self.subTest(column=path.name):
+                flavor = path.name.split(".")[1]
+                doc = json.loads(path.read_text())
+                expected = set(G._decl_table(flavor))
+                got = set(doc["keys"])
+                self.assertEqual(
+                    sorted(got - expected),
+                    [],
+                    f"{path.name} measures keys the decl table no longer has "
+                    "-- re-run tools/gen_arch_domain.py and commit the result",
+                )
+                missing = sorted(expected - got)
+                if not missing:
+                    continue
+                why = (
+                    f"{path.name} has no answer for {len(missing)} decl "
+                    f"key(s): {missing} -- re-run tools/gen_arch_domain.py on "
+                    f"a {flavor} toolchain and commit the result"
+                )
+                # Complete columns need no host-flavor discovery or toolchain.
+                if flavor == _resolve_llvm_flavor():
+                    self.fail(why)
+                self.skipTest(why)
 
 
 class SupportComparisonTest(unittest.TestCase):
