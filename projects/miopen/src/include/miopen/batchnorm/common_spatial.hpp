@@ -255,115 +255,23 @@ inline void GetVariantFromKernelId(const std::string& kernel_id,
 inline void DefaultConfigSpatialSingle(const miopen::batchnorm::ProblemDescription& problem,
                                        std::vector<std::string>& valid_kernels)
 {
-    int n, c, h, w;
-    std::tie(n, c, h, w) = tien<4>(problem.GetXDesc().GetLengths());
+    // Variant 1 is supported by every layout and problem
+    valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
 
-    unsigned int in_cstride = h * w;
-    unsigned int in_nhw     = n * in_cstride;
-
-    bool bfpmixparm =
-        problem.GetXDesc().GetType() == miopenHalf && problem.GetBnScale().GetType() == miopenFloat
-            ? true
-            : false;
-
-    bool bbfpmixparam = problem.GetXDesc().GetType() == miopenBFloat16 &&
-                                problem.GetBnScale().GetType() == miopenFloat
-                            ? true
-                            : false;
-
-    // NCHW supports also variants 0 and 3 which can be much faster than
-    // variant 1 but have more restrictions. Here we decide if we use variant
-    // 0, 1, 3
-    // In case variant 0 or 3 are selected, we add also variant 1 for tuning.
-    // Almost always variant 0 and 3 will be faster than variant 1 but
-    // we add the latter for tuning to be sure and because it is cheap
+    // NHWC supports only variant 1. NCHW supports also variants 0 and 3: all of them are added
+    // so that they are explored by tuning.
     if(!problem.IsLayoutNHWC())
     {
-        if(problem.GetDirection() == miopen::batchnorm::Direction::Backward)
-        {
-            if((in_cstride < 200) && (in_cstride > 60) && bfpmixparm)
-            {
-                valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
-                return;
-            }
+        int n, c, h, w;
+        std::tie(n, c, h, w) = tien<4>(problem.GetXDesc().GetLengths());
 
-            // N*H*W < 32M and H*W > 1024
-            // use batchnorm variant#1 implementation which parallelize
-            // work groups over channels and loop through NHW.
-            if((in_nhw < (32 * 1024 * 1024) && in_cstride > 1024))
-            {
-                valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
-                return;
-            }
-            // N*H*W < 32M and H*W > 512
-            // use batchnorm variant#1 or variant#3 implementation which
-            // parallelize work groups over channels and loop through N.
-            else if(in_nhw < (32 * 1024 * 1024) && in_cstride > 512)
-            {
-                if(n >= 32)
-                {
-                    valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
-                    return;
-                }
-                else
-                {
-                    valid_kernels.push_back(GetKernelIdFromVariant(3, 1));
-                    valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
-                    return;
-                }
-            }
-            // H*W < 512  use batchnorm variant#0 or variant#3 implementation
-            // based on batch size and H*W
-            else if(in_cstride <= 512)
-            {
-                if((n > 64) && (in_cstride > 160))
-                {
-                    valid_kernels.push_back(GetKernelIdFromVariant(3, 1));
-                    valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
-                    return;
-                }
-                else
-                {
-                    valid_kernels.push_back(GetKernelIdFromVariant(0, 1));
-                    valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
-                    return;
-                }
-            }
-        }
-        else
+        valid_kernels.push_back(GetKernelIdFromVariant(3, 1));
+        // Variant 0 uses one thread per HW element. As in the heuristics, it is only
+        // considered for small HW dimensions.
+        if(h * w <= 512)
         {
-            // clang-format off
-            if(in_cstride > 512 && in_cstride <= 1024 && n < 32)
-            {
-                valid_kernels.push_back(GetKernelIdFromVariant(3, 1));
-                valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
-                return;
-            }
-
-            if( (in_nhw < 33554432 && in_cstride > 1024) ||
-            ((n >= 256) && (in_cstride > 60) && (bfpmixparm || bbfpmixparam)) ||
-            ((in_cstride > 512) && (bfpmixparm || bbfpmixparam)))
-            {
-                valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
-                if(in_cstride <= 512)
-                {
-                    valid_kernels.push_back(GetKernelIdFromVariant(0, 1));
-                }
-                return;
-            }
-            else if(in_cstride <= 512)
-            {
-                valid_kernels.push_back(GetKernelIdFromVariant(0, 1));
-                valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
-                return;
-            }
-            // clang-format on
+            valid_kernels.push_back(GetKernelIdFromVariant(0, 1));
         }
-        valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
-    }
-    else
-    {
-        valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
     }
 }
 
@@ -379,6 +287,11 @@ inline bool IsSpatialMultipleApplicable(const miopen::batchnorm::ProblemDescript
     int n, c, h, w;
     std::tie(n, c, h, w)    = tien<4>(problem.GetXDesc().GetLengths());
     unsigned int in_cstride = h * w;
+
+    if(nelements == 0 || n % nelements != 0 || (n / nelements) % zlocalsize != 0)
+    {
+        return false;
+    }
 
     if(problem.IsLayoutNHWC())
     {
@@ -567,9 +480,8 @@ inline void GetHeuristicsConfigTuningNHWC(const miopen::batchnorm::ProblemDescri
 // Additional instances are added:
 //  - for NCHW all supported vector sizes smaller than the default one
 //    (the default is the largest applicable)
-//  - for NHWC an hybrid approach is used, xlocalsize and vectorsize are set using heuristics,
-//    while ylocalsize, zlocalsize and nelements are added to the tuning with some
-//    additional restrictions based on heuristics to keep the number of instances low
+//  - for NHWC the combinations of vectorsize, xlocalsize, ylocalsize, zlocalsize and
+//    nelements that are valid for the implementation and pass a few heuristic filters
 inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescription& problem,
                                          unsigned int stash_values,
                                          std::vector<std::string>& valid_kernels)
@@ -631,125 +543,94 @@ inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescrip
             }
         }
 
-        // This is a case where variant 1 will probably work better than variant 2, so
-        // we don't add other instances.
-        if(c <= 4)
+        // Vector sizes that are two largest ones dividing c and 1
+        std::vector<size_t> vectorsizes;
+        for(size_t vs = kMaxSupportedVectorSize; vs > 1; vs >>= 1)
         {
-            return;
-        }
-
-        // Add other instances to be added to tuning
-        // xlocalsize and vectorsize are set using heuristics
-        size_t vectorsize = 1;
-        size_t xlocalsize = 64;
-        {
-            size_t reference_dimension = problem.IsLayoutNHWC() ? c : in_cstride;
-            if(problem.IsLayoutNHWC())
+            if(c % vs == 0 && vectorsizes.size() < 2)
             {
-                GetHeuristicsConfigTuningNHWC(problem, vectorsize, xlocalsize);
-            }
-            while(reference_dimension % vectorsize != 0)
-            {
-                vectorsize >>= 1;
-            }
-            if(vectorsize == 1)
-            {
-                xlocalsize =
-                    std::min(size_t{1 << int(std::ceil(std::log2(c / vectorsize)))}, size_t{64});
+                vectorsizes.push_back(vs);
             }
         }
+        vectorsizes.push_back(1);
 
-        // Given xlocalsize and vectorsize, add instances with different
-        // ylocalsize, zlocalsize, nelements
-
-        // We consider max_localsize = 1024 for vector size 1,2,4 and 512 for vectorsize 8.
-        // Additionally, max_localsize = 1024 / vectorsize is added when vectorization is used.
-        std::vector<size_t> max_localsize_vector = {1024 / (1 << (vectorsize / 8))};
-        if(vectorsize > 1)
-        {
-            max_localsize_vector.push_back(1024 / vectorsize);
-        }
-        // Default case is zlocalsize 1, but with batch sizes >= 10, zlocalsize 2
-        // can be beneficial
+        // zlocalsize is 1, but with batch sizes >= 10, zlocalsize 2 can be beneficial
         std::vector<size_t> zlocalsize_vector = {1};
         if(n >= 10)
         {
             zlocalsize_vector.push_back(2);
         }
-        for(const size_t& max_localsize : max_localsize_vector)
+
+        for(const size_t& vectorsize : vectorsizes)
         {
-            for(const size_t& zlocalsize : zlocalsize_vector)
+            const size_t cv = c / vectorsize;
+            std::vector<size_t> xlocalsize_vector;
+            for(size_t xl = 8; xl <= 64; xl <<= 1)
             {
-                // restrictions on ylocalsize are based on heuristics to decrease the amount
-                // of instances removing the least used cases
-                size_t ylocalsize = max_localsize / xlocalsize / zlocalsize;
-                if(problem.GetDirection() == miopen::batchnorm::Direction::ForwardTraining)
+                if(cv % xl == 0)
                 {
-                    if(ylocalsize < 8 || ylocalsize > 32)
-                    {
-                        continue;
-                    }
+                    xlocalsize_vector.push_back(xl);
                 }
-                else
+            }
+
+            for(const size_t& xlocalsize : xlocalsize_vector)
+            {
+                for(const size_t& zlocalsize : zlocalsize_vector)
                 {
-                    if(in_cstride > 16384)
+                    // Use multiple zblocks if batch size is large enough.
+                    // nelements = 32 is an optimal value for the current implementation when
+                    // the batch size is large enough.
+                    std::vector<size_t> nelements_vector = {n / zlocalsize};
+                    if(n / zlocalsize > 64)
                     {
-                        if(ylocalsize < 8 || ylocalsize > 32)
+                        nelements_vector.push_back(32);
+                    }
+
+                    for(size_t ylocalsize = 8; ylocalsize <= 64; ylocalsize <<= 1)
+                    {
+                        for(const size_t& nelements : nelements_vector)
                         {
-                            continue;
+                            // Restriction of the current implementation
+                            if(nelements == 0 || n % nelements != 0)
+                            {
+                                continue;
+                            }
+
+                            // Restriction based on the number of CUs
+                            const size_t xgridsize =
+                                xlocalsize * ((cv + xlocalsize - 1) / xlocalsize);
+                            const size_t ygridsize =
+                                ylocalsize * ((in_cstride + ylocalsize - 1) / ylocalsize);
+                            const size_t zgridsize =
+                                zlocalsize * ((n / nelements + zlocalsize - 1) / zlocalsize);
+                            const size_t nWG = (xgridsize / xlocalsize) * (ygridsize / ylocalsize) *
+                                               (zgridsize / zlocalsize);
+                            if(in_cstride > 64 && nWG < problem.GetMinWorkgroups())
+                            {
+                                continue;
+                            }
+
+                            // Avoid inserting the default spatial multiple instance twice
+                            if(vectorsize == vectorsize_default &&
+                               xlocalsize == xlocalsize_default &&
+                               ylocalsize == ylocalsize_default &&
+                               zlocalsize == zlocalsize_default && nelements == nelements_default)
+                            {
+                                continue;
+                            }
+
+                            // Check if the instance is applicable and add it
+                            if(IsSpatialMultipleApplicable(problem,
+                                                           vectorsize,
+                                                           stash_values,
+                                                           ylocalsize,
+                                                           zlocalsize,
+                                                           nelements))
+                            {
+                                valid_kernels.push_back(GetKernelIdFromVariant(
+                                    2, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements));
+                            }
                         }
-                    }
-                    else
-                    {
-                        if(ylocalsize > 16)
-                        {
-                            continue;
-                        }
-                    }
-                }
-
-                // Use multiple zblocks if batch size is large enough.
-                // nelements = 32 is an optimal value for the current implementation when
-                // the batch size is large enough.
-                std::vector<size_t> nelements_vector = {n / zlocalsize};
-                if(n / zlocalsize > 64)
-                {
-                    nelements_vector.push_back(32);
-                }
-                for(const size_t& nelements : nelements_vector)
-                {
-                    // Restriction of the current implementation
-                    if(n % nelements != 0)
-                    {
-                        continue;
-                    }
-
-                    // Restriction based on the number of CUs
-                    size_t xgridsize =
-                        xlocalsize * ((c / vectorsize + xlocalsize - 1) / xlocalsize);
-                    size_t ygridsize = ylocalsize * ((in_cstride + ylocalsize - 1) / ylocalsize);
-                    size_t zgridsize = zlocalsize * ((n / nelements + zlocalsize - 1) / zlocalsize);
-                    size_t nWG       = (xgridsize / xlocalsize) * (ygridsize / ylocalsize) *
-                                 (zgridsize / zlocalsize);
-                    if(in_cstride > 64 && nWG < problem.GetMinWorkgroups())
-                    {
-                        continue;
-                    }
-
-                    // Avoid inserting the default spatial multiple instance twice
-                    if(vectorsize == vectorsize_default && xlocalsize == xlocalsize_default &&
-                       ylocalsize == ylocalsize_default && zlocalsize == zlocalsize_default &&
-                       nelements == nelements_default)
-                    {
-                        continue;
-                    }
-
-                    // Check if the instance is applicable and add it
-                    if(IsSpatialMultipleApplicable(
-                           problem, vectorsize, stash_values, ylocalsize, zlocalsize, nelements))
-                    {
-                        valid_kernels.push_back(GetKernelIdFromVariant(
-                            2, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements));
                     }
                 }
             }

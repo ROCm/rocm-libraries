@@ -72,28 +72,9 @@ void PerformanceConfigBnBwdBackward::HeuristicInit(
     const miopen::batchnorm::ProblemDescription& problem)
 {
     unsigned int stash_values = !problem.UseSaved() ? stash_values_bwd : stash_values_bwd / 2;
-    // Define default configuration based on heuristics and
-    // add all other valid configurations for the given problem
-    if(UseMultiple(problem))
-    {
-        DefaultConfigSpatialMultiple(problem, stash_values, this->valid_kernels);
-        // if more than 2 instances are present, it means that variant 1 will be slower
-        if((this->valid_kernels.size() < 2 && problem.IsLayoutNHWC()) || !problem.IsLayoutNHWC())
-        {
-            DefaultConfigSpatialSingle(problem, this->valid_kernels);
-        }
-    }
-    else
-    {
-        DefaultConfigSpatialSingle(problem, this->valid_kernels);
-        // if valid_kernels is 2, it means that variant 0 or variant 3 were added and in
-        // this case it doesn't make sense to add instances for variant 2 because it is
-        // very unlikely that they will be faster than those variants
-        if(this->valid_kernels.size() < 2)
-        {
-            DefaultConfigSpatialMultiple(problem, stash_values, this->valid_kernels);
-        }
-    }
+
+    DefaultConfigSpatialSingle(problem, this->valid_kernels);
+    DefaultConfigSpatialMultiple(problem, stash_values, this->valid_kernels);
 
     // Set index and kernel_id to default value
     this->index     = 0;
