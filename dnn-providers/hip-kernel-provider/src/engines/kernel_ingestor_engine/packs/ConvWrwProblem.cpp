@@ -1163,15 +1163,29 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     int64_t yImage = a.k * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
     if(generic)
     {
-        xImage = config.pb == 1 ? xWindow : problem.xSpan;
-        yImage = config.pb == 1 ? yWindow : problem.ySpan;
+        xImage = config.pb == 1 ? xWindow : config.flat != 0 ? xTensor : problem.xSpan;
+        yImage = config.pb == 1 ? yWindow : config.flat != 0 ? yTensor : problem.ySpan;
     }
     if(!generic && cf && (xImage < config.vec || yImage < config.vec))
     {
         return std::nullopt;
     }
-    // The two tiers: the generic loop only where no specialized config's class serves.
-    if(generic)
+    // Flattened positions (flat 1): the generic loop without a shared window or block-based
+    // buffers, where an output row is shorter than a step (row chunks would run part empty);
+    // x and dy each one buffer, and the positions within 32 bits.
+    const int64_t positions = a.n * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
+    const int64_t xTensor = (a.n - 1) * a.xStrides[0] + problem.xSpan;
+    const int64_t yTensor = (a.n - 1) * a.yStrides[0] + problem.ySpan;
+    if(config.flat != 0
+       && (config.flat != 1 || !generic || config.dw != 0 || config.pb != 0
+           || a.outSpatial[2] >= config.bq || positions > INT_LIMIT - config.bq
+           || xTensor > INT_LIMIT / eb || yTensor > INT_LIMIT / eb))
+    {
+        return std::nullopt;
+    }
+    // The two tiers: the generic loop only where no specialized config's class serves (flat
+    // configs serve beside them: the specialized loops step over row chunks).
+    if(generic && config.flat == 0)
     {
         size_t from = 0;
         while(from < config.spec.size())
@@ -1272,6 +1286,11 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         if(packed)
         {
             steps = pack_features::checkedProduct({a.n, a.outSpatial[0], chunks});
+        }
+        else if(generic && config.flat != 0)
+        {
+            chunks = 1;
+            steps = divUp(positions, config.bq);
         }
         else if(rows)
         {
@@ -1502,6 +1521,10 @@ std::vector<std::pair<std::string, std::string>> compileDefinesFor(data_objects:
     if(config.pb != 0)
     {
         defines.emplace_back("CONV_K3_PB", std::to_string(config.pb));
+    }
+    if(config.flat != 0)
+    {
+        defines.emplace_back("CONV_K3_FLAT", std::to_string(config.flat));
     }
     return defines;
 }

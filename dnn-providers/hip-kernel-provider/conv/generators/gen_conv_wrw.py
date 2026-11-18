@@ -107,6 +107,7 @@ INTS = [
     "wq",
     "dws",
     "pb",
+    "flat",
     "math",
 ]
 STRINGS = ["direction", "dtype", "atom"]
@@ -820,7 +821,7 @@ def C(atom, loop, layout, tile, s, sw, dw, fr, vec, xcd, align, ns):
         bpu=0,
         wq=0,
     )
-    return dict(c, dws=dws_of(c), pb=0, math=0)
+    return dict(c, dws=dws_of(c), pb=0, flat=0, math=0)
 
 
 def D(atom, tile, s, dw, fr, ns):
@@ -850,6 +851,7 @@ def D(atom, tile, s, dw, fr, ns):
         wq=wq,
         dws=0,
         pb=0,
+        flat=0,
         math=0,
     )
 
@@ -1232,6 +1234,28 @@ GENERIC = [
 ]
 
 
+# Flattened positions (flat 1): steps of bq consecutive positions of the flattened (image, depth,
+# row, column) order, for output rows shorter than bq (small 2-D and 3-D maps with wide channels:
+# GEMM-shaped wrw). Twins of the generic configs without a shared window, plus wider tiles: one
+# or two taps of 128 x 128 channels a block.
+GENERIC_FLAT = [
+    (
+        {"HALF": "mfma32x16_f16", "BFLOAT16": "mfma32x16_bf16"},
+        1,
+        [(CL, (128, 128, 2, 2, 32), 2), (CL, (128, 128, 2, 2, 32), 3)],
+    ),
+    (
+        {"HALF": "mfma32_f16", "BFLOAT16": "mfma32_bf16"},
+        0,
+        [
+            (CL, (128, 128, 2, 2, 32), 1),
+            (CL, (128, 128, 2, 2, 32), 2),
+            (CL, (128, 128, 4, 2, 32), 2),
+        ],
+    ),
+]
+
+
 def build_generic():
     dropped = 0
     for atoms, xcd, tiles in GENERIC:
@@ -1243,6 +1267,16 @@ def build_generic():
                     CATALOG[dtype].extend(with_bpu(c))
                     # Its block-based buffer twin: images past the 32-bit buffer range.
                     CATALOG[dtype].extend(with_bpu(dict(c, pb=1)))
+                    if not wx:
+                        CATALOG[dtype].extend(with_bpu(dict(c, flat=1)))
+                else:
+                    dropped += 1
+    for atoms, xcd, tiles in GENERIC_FLAT:
+        for dtype, atom in atoms.items():
+            for lay, tile, taps in tiles:
+                c = C(atom, 8, lay, tile, 0, 0, 0, taps, 16 // eb(dtype), xcd, 0, 0)
+                if valid(c, dtype):
+                    CATALOG[dtype].extend(with_bpu(dict(c, flat=1)))
                 else:
                     dropped += 1
     return dropped
@@ -1594,6 +1628,7 @@ def emit():
                 f".{thr}.fr{c['fr']}s{c['s']}sw{c['sw']}dw{c['dw']}"
                 f".v{c['vec']}.x{c['xcd']}a{c['align']}n{c['ns']}b{c['bpu']}"
                 + (".pb" if c["pb"] else "")
+                + (".flat" if c["flat"] else "")
             )
             pack.append(
                 {
