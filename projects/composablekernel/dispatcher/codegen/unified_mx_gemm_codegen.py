@@ -336,7 +336,7 @@ def kernel_name(cfg: dict) -> str:
     with _make_builder(cfg) as builder:
         name = builder._format_kernel_name(trait_combo, tile_config)
         if tuning is not None:
-            name += builder._v4_name_suffix(tile_config, tuning)
+            name += builder.scheduled_name_suffix(tile_config, tuning)
         return name
 
 

@@ -28,7 +28,7 @@ def _import_gemm_kernel_builder():
 
 GemmKernelBuilder, _validation_utils = _import_gemm_kernel_builder()
 GEMM_MX_PIPELINES_BY_ARCH = _validation_utils.GEMM_MX_PIPELINES_BY_ARCH
-V4_PIPELINE = _validation_utils.MX_TDM_SCHEDULED_PIPELINE
+TDM_SCHEDULED_PIPELINE = _validation_utils.MX_TDM_SCHEDULED_PIPELINE
 mx_tdm_scheduled = _validation_utils.load_mx_tdm_scheduled()
 
 
@@ -74,16 +74,16 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
     # product of its values; the defaults when absent). Other pipelines take no tuning. It is built
     # only through the dispatcher (mx_gemm_full_benchmark.py); main() rejects it.
 
-    def _v4_tunings(self):
+    def _scheduled_tunings(self):
         return mx_tdm_scheduled.expand_tuning_config(self.config.get("tuning_config"))
 
-    def _v4_spec(self, tile_config, tuning):
+    def _scheduled_spec(self, tile_config, tuning):
         out = mx_tdm_scheduled.TE_OUT_DTYPES[self._c_datatype()]
         return mx_tdm_scheduled.spec_from_tile(
             tile_config, tuning, self.datatype, self.datatype, out
         )
 
-    def _v4_reject_reason(self, tile_config, tuning):
+    def _scheduled_reject_reason(self, tile_config, tuning):
         keys = ("tile", "warp", "warp_tile")
         dims = [tile_config[f"{k}_{d}"] for k in keys for d in "mnk"]
         return _validation_utils.mx_tdm_scheduled_reject_reason(
@@ -95,9 +95,9 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
             tuning,
         )
 
-    def _v4_name_suffix(self, tile_config, tuning):
+    def scheduled_name_suffix(self, tile_config, tuning):
         return mx_tdm_scheduled.instance_name_suffix(
-            self._v4_spec(tile_config, tuning), tuning
+            self._scheduled_spec(tile_config, tuning), tuning
         )
 
     def _get_sampled_kernel_list(self):
@@ -111,13 +111,13 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
             self.max_instances = max_instances
         expanded = []
         for kernel in kernels:
-            if kernel["trait_combo"][0] != V4_PIPELINE:
+            if kernel["trait_combo"][0] != TDM_SCHEDULED_PIPELINE:
                 expanded.append({**kernel, "tuning": None})
                 continue
-            for tuning in self._v4_tunings():
-                if self._v4_reject_reason(kernel["tile_config"], tuning):
+            for tuning in self._scheduled_tunings():
+                if self._scheduled_reject_reason(kernel["tile_config"], tuning):
                     continue
-                suffix = self._v4_name_suffix(kernel["tile_config"], tuning)
+                suffix = self.scheduled_name_suffix(kernel["tile_config"], tuning)
                 expanded.append(
                     {**kernel, "name": kernel["name"] + suffix, "tuning": tuning}
                 )
@@ -126,13 +126,13 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
     def _generate_kernel_instance(
         self, tile_config, trait_combo, validate=False, tuning=None
     ):
-        if self._normalize_trait_combo(trait_combo)[0] == V4_PIPELINE:
-            return self._generate_v4_instance(tile_config, trait_combo, tuning)
+        if self._normalize_trait_combo(trait_combo)[0] == TDM_SCHEDULED_PIPELINE:
+            return self._generate_scheduled_instance(tile_config, trait_combo, tuning)
         if tuning is not None and not mx_tdm_scheduled.is_default_tuning(tuning):
-            raise ValueError(f"only {V4_PIPELINE} takes a tuning")
+            raise ValueError(f"only {TDM_SCHEDULED_PIPELINE} takes a tuning")
         return super()._generate_kernel_instance(tile_config, trait_combo, validate)
 
-    def _generate_v4_instance(self, tile_config, trait_combo, tuning):
+    def _generate_scheduled_instance(self, tile_config, trait_combo, tuning):
         tuning = mx_tdm_scheduled.normalize_tuning(tuning)
         pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent = (
             self._normalize_trait_combo(trait_combo)
@@ -150,18 +150,20 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
             gpu_target=self.gpu_target,
         ):
             raise ValueError(
-                f"{V4_PIPELINE} needs an epilogue of "
+                f"{TDM_SCHEDULED_PIPELINE} needs an epilogue of "
                 f"{_validation_utils.MX_TDM_SCHEDULED_EPILOGUES}, "
                 "the intrawave scheduler, no padding and no persistence"
             )
-        reason = self._v4_reject_reason(tile_config, tuning)
+        reason = self._scheduled_reject_reason(tile_config, tuning)
         if reason:
             raise ValueError(f"tile {tile_config} with tuning {tuning}: {reason}")
-        spec = self._v4_spec(tile_config, tuning)
+        spec = self._scheduled_spec(tile_config, tuning)
         kernel_name = self._format_kernel_name(
             trait_combo, tile_config
         ) + mx_tdm_scheduled.instance_name_suffix(spec, tuning)
-        instance_code = self._v4_instance_code(kernel_name, tile_config, spec, tuning)
+        instance_code = self._scheduled_instance_code(
+            kernel_name, tile_config, spec, tuning
+        )
 
         simplified_name = kernel_name[len(self.kernel_name_prefix) + 1 :]
         header_file = (
@@ -173,7 +175,7 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
         print(f"Generated {header_file}")
         return kernel_name, instance_code
 
-    def _v4_instance_code(self, kernel_name, tile_config, spec, tuning):
+    def _scheduled_instance_code(self, kernel_name, tile_config, spec, tuning):
         t = tile_config
         return f"""// Generated kernel instance for {kernel_name}
 #pragma once
@@ -501,9 +503,9 @@ def main():
                 .get("pipeline", {})
                 .get("values", [])
             )
-        if V4_PIPELINE in pipelines:
+        if TDM_SCHEDULED_PIPELINE in pipelines:
             sys.exit(
-                f"{V4_PIPELINE} runs through the dispatcher (mx_gemm_full_benchmark.py)"
+                f"{TDM_SCHEDULED_PIPELINE} runs through the dispatcher (mx_gemm_full_benchmark.py)"
             )
     builder = MxGemmKernelBuilder(
         kernel_name_prefix,

@@ -2340,24 +2340,6 @@ def validate_gemm_mx(
     if layout.lower() != "rcr":
         return False, "MX GEMM currently supports only rcr layout"
 
-    if pipeline == MX_TDM_SCHEDULED_PIPELINE:
-        reason = mx_tdm_scheduled_reject_reason(
-            tile_m,
-            tile_n,
-            tile_k,
-            warp_m,
-            warp_n,
-            warp_k,
-            warp_tile_m,
-            warp_tile_n,
-            warp_tile_k,
-            a_datatype,
-            b_datatype,
-            c_datatype,
-            gpu_target,
-        )
-        return not reason, reason
-
     if a_datatype not in ["fp4", "fp8"] or b_datatype not in ["fp4", "fp8"]:
         return False, "MX GEMM currently supports fp4 and fp8 inputs only"
 

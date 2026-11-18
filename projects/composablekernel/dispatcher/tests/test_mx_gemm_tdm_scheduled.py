@@ -252,10 +252,6 @@ class TestValidationUtils(unittest.TestCase):
         self.assertFalse(valid(tile_k=1024))  # LDS
         self.assertFalse(valid(warp_tile_n=32))
         self.assertFalse(valid(warp_k=2))
-        ok, reason = vu.validate_gemm_mx(
-            *TILE.values(), "fp4", "fp4", "fp16", "comp_tdm_scheduled", "rcr", "gfx1250"
-        )
-        self.assertTrue(ok, reason)
 
 
 class TestTileEngine(unittest.TestCase):
@@ -297,6 +293,16 @@ def _cfg(**extra):
     }
 
 
+def _kernel_config(**extra):
+    return mx.MxGemmKernelConfig(
+        datatype="fp4",
+        gpu_target="gfx1250",
+        pipeline="comp_tdm_scheduled",
+        **TILE,
+        **extra,
+    )
+
+
 class TestDispatcher(unittest.TestCase):
     def test_names(self):
         base = "mx_gemm_fp4_rcr_comp_tdm_scheduled_tdm_intrawave_False_False_False_False_256x256x512_2x2x1_32x16x128"
@@ -334,20 +340,52 @@ class TestDispatcher(unittest.TestCase):
         self.assertIn("ck_tile::MxTdmStoreEpilogue<P>", header)
 
     def test_kernel_config(self):
-        cfg = mx.MxGemmKernelConfig(
-            datatype="fp4",
-            gpu_target="gfx1250",
-            pipeline="comp_tdm_scheduled",
-            tile_m=256,
-            tile_n=256,
-            tile_k=512,
-            warp_tile_m=32,
-            warp_tile_n=16,
-            tuning={"cluster_dim": (2, 2), "gl2_prefetch_distance": 2},
+        cfg = _kernel_config(
+            tuning={"cluster_dim": (2, 2), "gl2_prefetch_distance": 2}
         ).to_codegen_config()
         self.assertEqual(cfg["epilogue"], "tdm")
-        self.assertEqual(cfg["cluster_dim"], [2, 2])
+        self.assertEqual(cfg["cluster_dim"], [2, 2, 1])
         self.assertTrue(codegen.kernel_name(cfg).endswith("_c2x2_pf2"))
+
+    def test_fallback_name_carries_the_tuning(self):
+        for tuning, suffix in (
+            (None, "_c4x4"),
+            ({"cluster_dim": (2, 2), "gl2_prefetch_distance": 2}, "_c2x2_pf2"),
+        ):
+            with self.subTest(tuning=tuning):
+                cfg = _kernel_config(tuning=tuning)
+                name = codegen.kernel_name(cfg.to_codegen_config())
+                self.assertTrue(name.endswith(suffix), name)
+                self.assertTrue(cfg._fallback_name().endswith(suffix))
+        # Without the spec module: a hash of the tuning, still distinct per tuning.
+        with mock.patch.object(mx, "_mx_codegen", side_effect=ImportError):
+            hashed = {
+                _kernel_config(tuning={"cluster_dim": c})._fallback_name()
+                for c in ((1, 1), (2, 2))
+            }
+        self.assertEqual(len(hashed), 2)
+
+    def test_name_falls_back_per_tuning(self):
+        failed = mock.Mock(returncode=1, stdout="", stderr="boom")
+        with mock.patch.object(mx.subprocess, "run", return_value=failed):
+            names = [
+                _kernel_config(tuning={"cluster_dim": c}).name for c in ((1, 1), (2, 2))
+            ]
+        self.assertNotEqual(names[0], names[1])
+        self.assertTrue(names[0].endswith("_c1x1"), names[0])
+        self.assertTrue(names[1].endswith("_c2x2"), names[1])
+
+    def test_kernel_config_tuning_keys(self):
+        typo = _kernel_config(tuning={"cluster": (2, 2)})
+        self.assertFalse(typo.is_valid())
+        with self.assertRaisesRegex(ValueError, "unknown"):
+            typo.to_codegen_config()
+        for tuning, suffix in (({"cluster_dim": (2, 2)}, "_c2x2"), (None, "_c4x4")):
+            with self.subTest(tuning=tuning):
+                cfg = _kernel_config(tuning=tuning)
+                self.assertTrue(cfg.is_valid())
+                name = codegen.kernel_name(cfg.to_codegen_config())
+                self.assertTrue(name.endswith(suffix), name)
 
     def test_tuning_config(self):
         path = _MX / "configs" / "comp_tdm_scheduled_tuning_gfx1250.json"

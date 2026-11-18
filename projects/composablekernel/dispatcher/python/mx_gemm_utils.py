@@ -36,6 +36,7 @@ from dispatcher_common import (
 import concurrent.futures
 import ctypes
 import functools
+import hashlib
 import importlib.util
 import json
 import logging
@@ -293,10 +294,18 @@ class MxGemmKernelConfig:
             if pipeline in ("comp_tdm", "comp_tdm_v2", "comp_tdm_scheduled")
             else "cshuffle"
         )
-        tuning = {
-            k: list(v) if isinstance(v, tuple) else v
-            for k, v in (self.tuning or {}).items()
-        }
+        # Normalized here: the codegen picks only the keys it knows, so a misspelled key
+        # would otherwise build the default tuning under the requested name.
+        tuning = (
+            {
+                k: list(v) if isinstance(v, tuple) else v
+                for k, v in _mx_codegen()
+                .mx_tdm_scheduled.normalize_tuning(self.tuning)
+                .items()
+            }
+            if self.tuning
+            else {}
+        )
         return {
             **tuning,
             "datatype": self.datatype,
@@ -328,8 +337,8 @@ class MxGemmKernelConfig:
         """Byte-exact kernel name from the codegen CLI (--list-name).
 
         The codegen owns the canonical name format; we never reconstruct it here
-        to avoid drift. Falls back to a locally computed name only if the codegen
-        script is not yet present (so utils stays import/unit testable before the
+        to avoid drift. Falls back to a locally computed name if the codegen script
+        is absent, fails or times out (so utils stays import/unit testable before the
         codegen component lands).
         """
         if self._name_cache is not None:
@@ -370,21 +379,21 @@ class MxGemmKernelConfig:
           mx_gemm_{dtype}_{layout}_comp_async_cshuffle_intrawave_
           {PadM}_{PadN}_{PadK}[_{Persistent}]_
           {tileM}x{tileN}x{tileK}_{warpM}x{warpN}x{warpK}_{wtM}x{wtN}x{wtK}
-        Only used when the codegen script is absent (never at real build time).
+          [comp_tdm_scheduled: the tuning suffix]
+        Used when the codegen script is absent, fails or times out. The name keys the
+        .so cache and the dedup, so different tunings must never share one.
         """
         arch = normalize_arch(self.gpu_target)
+        pipeline = self.pipeline or ("comp_tdm" if arch == "gfx1250" else "comp_async")
         parts = [
             "mx_gemm",
             self.datatype,
             self.layout,
-            self.pipeline or ("comp_tdm" if arch == "gfx1250" else "comp_async"),
+            pipeline,
             self.epilogue
             or (
                 "tdm"
-                if (
-                    self.pipeline or ("comp_tdm" if arch == "gfx1250" else "comp_async")
-                )
-                in ("comp_tdm", "comp_tdm_v2", "comp_tdm_scheduled")
+                if pipeline in ("comp_tdm", "comp_tdm_v2", "comp_tdm_scheduled")
                 else "cshuffle"
             ),
             self.scheduler,
@@ -397,7 +406,40 @@ class MxGemmKernelConfig:
         parts.append(f"{self.tile_m}x{self.tile_n}x{self.tile_k}")
         parts.append(f"{self.warp_m}x{self.warp_n}x{self.warp_k}")
         parts.append(f"{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}")
-        return "_".join(parts)
+        name = "_".join(parts)
+        if pipeline == "comp_tdm_scheduled":
+            name += self._fallback_tuning_suffix()
+        return name
+
+    def _fallback_tuning_suffix(self) -> str:
+        """The codegen's comp_tdm_scheduled tuning suffix, else a hash of the tuning."""
+        try:
+            sched = _mx_codegen().mx_tdm_scheduled
+            tile = {
+                k: getattr(self, k)
+                for k in (
+                    "tile_m",
+                    "tile_n",
+                    "tile_k",
+                    "warp_m",
+                    "warp_n",
+                    "warp_k",
+                    "warp_tile_m",
+                    "warp_tile_n",
+                    "warp_tile_k",
+                )
+            }
+            spec = sched.spec_from_tile(
+                tile,
+                self.tuning,
+                self.datatype,
+                self.datatype,
+                sched.TE_OUT_DTYPES["fp16"],
+            )
+            return sched.instance_name_suffix(spec, self.tuning)
+        except Exception:  # noqa: BLE001
+            key = json.dumps(self.tuning or {}, sort_keys=True, default=list)
+            return "_t" + hashlib.sha1(key.encode()).hexdigest()[:8]
 
     def is_valid(self) -> bool:
         # Unbound configs can be checked without detecting or selecting a device.
