@@ -451,6 +451,17 @@ TEST(TestConvEpilogueFormulation, AddendTakesOnlyYsType)
               EpilogueForm::NATIVE);
 }
 
+TEST(TestConvEpilogueFormulation, NoAddendOnAVectorShapedGemm)
+{
+    // One output channel: the GEMM is a GEMV, which the libraries may run in place on d.
+    ConvGemmShape shape = oneByOneNchw();
+    shape.k = 1;
+    EXPECT_EQ(fused(shape, {bias(DataType::HALF)}, ROCBLAS)->epilogueForm,
+              EpilogueForm::EXTRA_PASS);
+    EXPECT_EQ(fused(shape, {bias(DataType::HALF)}, HIPBLASLT)->epilogueForm,
+              EpilogueForm::EXTRA_PASS);
+}
+
 TEST(TestConvEpilogueFormulation, RocblasTakesNoBiasAlongTheRows)
 {
     // rocBLAS has no bias epilogue, and a bias along the rows is no matrix it can add.

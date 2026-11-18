@@ -249,7 +249,11 @@ std::optional<ConvGemmPlanCalls> fuseIntoGemm(const ConvProblem& problem,
                     const bool rows = support.libraryEpilogue && channelRows(problem, call)
                                       && gemm.activation != NATIVE_EPILOGUE_SIGMOID;
                     asAddend = !rows;
-                    if(asAddend && (!channelColumns(problem, call) || gemm.bias->dataType != yType))
+                    // A vector-shaped call may run as the library's GEMV, which reads c as d: no
+                    // addend there.
+                    if(asAddend
+                       && (!channelColumns(problem, call) || gemm.bias->dataType != yType
+                           || call.m == 1 || call.n == 1))
                     {
                         return std::nullopt;
                     }
