@@ -43,6 +43,7 @@
 #include "MetaRunListener.hpp"
 #include "ProgressListener.hpp"
 #include "ReferenceValidator.hpp"
+#include "SplitPlacement.hpp"
 #include "SolutionIterator.hpp"
 #include "SynchronizerValidator.hpp"
 #include "TimingEvents.hpp"
@@ -234,7 +235,7 @@ namespace TensileLite
                 ("fused-a2a",                po::value<FusedA2A>()->default_value(FusedA2A::Disabled), "Fused A2A mode: Disabled, GemmA2A (all-to-all PUSH from the GEMM epilogue) or A2AGemm (B's K shards gathered from the peers into a2aBuf one shard at a time).")
                 ("split-devices",          po::value<int>()->default_value(1), "Split each problem across N consecutive devices (device-idx .. device-idx+N-1), one stream each, and run the slices concurrently. Devices 0..N-2 get size/N, the last device gets the rest. --split-dim M: A is split, B replicated. --split-dim N: B is split, A replicated. Each device writes its slice into its own full-size D at the slice's final offset (nothing goes to a peer); the slices are read back and validated after the timed run. Reported time is the slowest device; reported GFlops are for the full problem. Needs the all-solutions run (no --best-solution). For partitioned GPUs (e.g. NPS2: N=2). 1 = off.")
                 ("split-dim",              po::value<std::string>()->default_value("M"), "Dimension --split-devices splits: M or N.")
-                ("split-placement",        po::value<std::string>()->default_value("RRRR"), "With --split-devices, one letter each for A, B, C, D: R = a copy on every device, S = one copy that the other devices access over peer access. A shared A, B or C is the copy of the last device, whose slice is the largest; a shared D is the one of device-idx, and every device writes its slice into it.")
+                ("split-placement",        po::value<std::string>()->default_value("RRRR"), "With --split-devices, one letter each for A, B, C, D: R = a copy on every device, S = one copy that the other devices access over peer access. Only the operand the split does not cut (B for --split-dim M, A for --split-dim N) and D can be shared; a shared operand is the copy of the last device, and the other devices validate against its data. A shared D is the one of device-idx, and every device writes its slice into it.")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
@@ -953,11 +954,13 @@ int main(int argc, const char* argv[])
         // --split-devices N: every problem runs as N slices on N consecutive devices.
         {
             auto const placement = args["split-placement"].as<std::string>();
-            if(placement.size() != 4
-               || placement.find_first_not_of("RS") != std::string::npos)
-                throw std::runtime_error(
-                    "--split-placement needs 4 letters (A, B, C, D), each R or S, got '" + placement
-                    + "'");
+            if(args["split-devices"].as<int>() > 1)
+            {
+                auto const err
+                    = splitPlacementError(placement, args["split-dim"].as<std::string>() == "N");
+                if(!err.empty())
+                    throw std::runtime_error(err);
+            }
             if(args["output-peerD"].as<bool>()
                && (args["split-devices"].as<int>() != 2 || placement[3] != 'R'))
                 throw std::runtime_error(
@@ -1222,10 +1225,9 @@ int main(int argc, const char* argv[])
         // R = every device has its own copy, S = one copy that the other devices use.
         auto const placement = args["split-placement"].as<std::string>();
         auto const shared    = [&](size_t tensor) { return placement[tensor] == 'S'; };
-        // A shared D is the first device's. A shared A, B or C is the last device's: every device
-        // reads it with its own slice's size, and the last slice is the largest (it takes the
-        // remainder), so every other slice fits in the last device's buffers. The first device's
-        // would be too small for the last slice whenever the split is not even.
+        // A shared D is the first device's. The only shared input is the operand the split does not
+        // cut, the same size on every device, so the last device's copy is simply the one used.
+        // ReferenceValidator uses the same owner for its reference data.
         const size_t inputOwner  = devices.size() - 1;
         const bool   sharedInput = shared(0) || shared(1) || shared(2);
         // The other devices reach a shared tensor over peer access. An OutputPeerD kernel also
