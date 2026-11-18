@@ -32,6 +32,7 @@
 #include <filesystem>
 #include <functional>
 #include <limits>
+#include <map>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -4559,6 +4560,100 @@ TEST_F(TestGraph, BuildOperationGraphPopulatesOnlyMissingUids)
     EXPECT_NE(biasUid, 300);
     EXPECT_NE(biasUid, 400);
     EXPECT_NE(biasUid, 500);
+}
+
+// Builds a chain of RELU pointwise nodes X -> T1 -> ... -> T<nodeCount>. Every tensor is
+// named and none has a UID; only the last output is a real graph output.
+static void createUnsetUidPointwiseChain(Graph& graph, int nodeCount)
+{
+    graph.set_name("PointwiseChain")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto tensor = std::make_shared<TensorAttributes>();
+    tensor->set_name("X")
+        .set_dim({1, 2, 3, 4})
+        .set_stride({24, 12, 4, 1})
+        .set_data_type(DataType::FLOAT);
+
+    for(int node = 1; node <= nodeCount; ++node)
+    {
+        PointwiseAttributes attributes;
+        attributes.set_name("Relu" + std::to_string(node));
+        attributes.set_mode(PointwiseMode::RELU_FWD);
+        tensor = graph.pointwise(tensor, attributes);
+        tensor->set_name("T" + std::to_string(node));
+    }
+    tensor->set_output(true);
+}
+
+static std::map<std::string, int64_t> tensorUidsByName(const Graph& graph)
+{
+    std::map<std::string, int64_t> uids;
+    for(const auto& [name, tensor] : graph.getTensorsByName())
+    {
+        uids.emplace(name, tensor->get_uid());
+    }
+    return uids;
+}
+
+TEST_F(TestGraph, AssignedTensorUidsFollowNodeOrder)
+{
+    Graph graph;
+    createUnsetUidPointwiseChain(graph, 8);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    ASSERT_TRUE(buildResult.is_good()) << buildResult.get_message();
+
+    // Nodes in the order they were added; per node its inputs, then its outputs.
+    const std::map<std::string, int64_t> expected = {{"X", 0},
+                                                     {"T1", 1},
+                                                     {"T2", 2},
+                                                     {"T3", 3},
+                                                     {"T4", 4},
+                                                     {"T5", 5},
+                                                     {"T6", 6},
+                                                     {"T7", 7},
+                                                     {"T8", 8}};
+    EXPECT_EQ(tensorUidsByName(graph), expected);
+}
+
+TEST_F(TestGraph, IdenticalGraphsGetIdenticalUids)
+{
+    constexpr int BUILD_COUNT = 20;
+
+    std::vector<std::unique_ptr<Graph>> graphs;
+    std::vector<std::vector<char>> heapNoise;
+    std::vector<std::map<std::string, int64_t>> uidsPerBuild;
+
+    for(int build = 0; build < BUILD_COUNT; ++build)
+    {
+        // Move the next graph's tensors to other heap addresses: a different number of
+        // live blocks of varying size before each build, every other new one freed again
+        // to leave holes. Earlier graphs stay alive, so their memory is not reused either.
+        const size_t firstNewBlock = heapNoise.size();
+        for(int block = 0; block <= build; ++block)
+        {
+            heapNoise.emplace_back(static_cast<size_t>(64 * (block % 8 + 1)));
+        }
+        for(size_t block = firstNewBlock + 1; block < heapNoise.size(); block += 2)
+        {
+            heapNoise[block] = std::vector<char>();
+        }
+
+        graphs.push_back(std::make_unique<Graph>());
+        createUnsetUidPointwiseChain(*graphs.back(), 8);
+
+        auto buildResult = graphs.back()->build_operation_graph(_handle);
+        ASSERT_TRUE(buildResult.is_good()) << buildResult.get_message();
+        uidsPerBuild.push_back(tensorUidsByName(*graphs.back()));
+    }
+
+    for(size_t build = 1; build < uidsPerBuild.size(); ++build)
+    {
+        EXPECT_EQ(uidsPerBuild[build], uidsPerBuild[0]) << "build " << build;
+    }
 }
 
 TEST_F(TestGraph, GetTensorsByUidReturnsMap)

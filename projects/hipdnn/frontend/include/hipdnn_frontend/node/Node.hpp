@@ -6,23 +6,22 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_frontend/detail/GraphTensorIds.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/NodeType.hpp>
 #include <memory>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace hipdnn_frontend::detail
 {
 
-// Inserts a non-null tensor and, if it has one, its ragged-offset tensor, so the
-// ragged-offset tensor also receives a UID and takes part in duplicate-UID checks,
-// variant-pack validation and lowering.
-inline void
-    insertTensorWithAux(std::unordered_set<std::shared_ptr<graph::TensorAttributes>>& tensors,
-                        const std::shared_ptr<graph::TensorAttributes>& tensor)
+// Inserts a non-null tensor and, if it has one, its ragged-offset tensor right after
+// it, so the ragged-offset tensor also receives a UID and takes part in duplicate-UID
+// checks, variant-pack validation and lowering.
+inline void insertTensorWithAux(OrderedTensorSet& tensors,
+                                const std::shared_ptr<graph::TensorAttributes>& tensor)
 {
     if(!tensor)
     {
@@ -82,9 +81,7 @@ public:
 
     virtual void
         // NOLINTNEXTLINE(readability-identifier-naming)
-        gather_hipdnn_tensors(
-            [[maybe_unused]] std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors)
-            const
+        gather_hipdnn_tensors([[maybe_unused]] detail::OrderedTensorSet& allTensors) const
     {
     }
 
@@ -189,8 +186,8 @@ protected:
         return {};
     }
 
-    void gatherHipdnnTensorsSubtree(
-        std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors) const
+    // Collects the tensors of this node, then of each sub-node in _sub_nodes order.
+    void gatherHipdnnTensorsSubtree(detail::OrderedTensorSet& allTensors) const
     {
         gather_hipdnn_tensors(allTensors);
 
@@ -231,8 +228,7 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    void gather_hipdnn_tensors(
-        std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors) const override
+    void gather_hipdnn_tensors(detail::OrderedTensorSet& allTensors) const override
     {
         for(auto& [_, tensor] : self().attributes.inputs)
         {

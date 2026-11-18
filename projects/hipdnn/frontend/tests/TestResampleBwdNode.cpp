@@ -519,7 +519,7 @@ TEST(TestResampleBwdNode, GatherHipdnnTensor)
     const GraphAttributes graphAttributes;
     const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    hipdnn_frontend::detail::OrderedTensorSet allTensors;
 
     node.gather_hipdnn_tensors(allTensors);
 

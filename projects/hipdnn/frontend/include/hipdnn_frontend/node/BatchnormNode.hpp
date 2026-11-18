@@ -258,8 +258,7 @@ public:
         return {};
     }
 
-    void gather_hipdnn_tensors(
-        std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors) const override
+    void gather_hipdnn_tensors(detail::OrderedTensorSet& allTensors) const override
     {
         BaseNode<BatchnormNode, NodeType::BATCHNORM>::gather_hipdnn_tensors(allTensors);
 

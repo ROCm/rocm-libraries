@@ -54,7 +54,7 @@ TEST(TestCustomOpNode, GatherTensors)
 
     const CustomOpNode node(std::move(attr), graphAttrs);
 
-    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    hipdnn_frontend::detail::OrderedTensorSet allTensors;
     node.gather_hipdnn_tensors(allTensors);
 
     EXPECT_EQ(allTensors.size(), 2u);
@@ -83,7 +83,7 @@ TEST(TestCustomOpNode, GatherTensorsIncludesRaggedOffsetAux)
 
     const CustomOpNode node(std::move(attr), graphAttrs);
 
-    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    hipdnn_frontend::detail::OrderedTensorSet allTensors;
     node.gather_hipdnn_tensors(allTensors);
 
     EXPECT_EQ(allTensors.size(), 4u);

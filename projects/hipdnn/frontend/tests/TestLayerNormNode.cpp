@@ -1146,7 +1146,7 @@ TEST(TestLayerNormNode, GatherHipdnnTensors)
     const GraphAttributes graphAttrs;
     const LayerNormNode node(std::move(attrs), graphAttrs);
 
-    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    hipdnn_frontend::detail::OrderedTensorSet allTensors;
     node.gather_hipdnn_tensors(allTensors);
 
     EXPECT_TRUE(allTensors.find(x) != allTensors.end());
@@ -1186,7 +1186,7 @@ TEST(TestLayerNormNode, GatherHipdnnTensorsRequired)
     const GraphAttributes graphAttrs;
     const LayerNormNode node(std::move(attrs), graphAttrs);
 
-    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    hipdnn_frontend::detail::OrderedTensorSet allTensors;
     node.gather_hipdnn_tensors(allTensors);
 
     EXPECT_TRUE(allTensors.find(x) != allTensors.end());

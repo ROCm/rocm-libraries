@@ -929,7 +929,7 @@ private:
 
     void assignUnsetTensorUids()
     {
-        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        detail::OrderedTensorSet allTensors;
         gatherHipdnnTensorsSubtree(allTensors);
         auto usedIds = detail::getUsedIds(allTensors);
         detail::populateHipdnnTensorIds(allTensors, usedIds);
@@ -1250,7 +1250,7 @@ private:
 
         // --- Validate variantPack contains all required tensor UIDs ---
         {
-            std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+            detail::OrderedTensorSet allTensors;
             gatherHipdnnTensorsSubtree(allTensors);
 
             std::vector<int64_t> missingUids;
@@ -2256,7 +2256,7 @@ public:
 
         const auto inputTensors = getGraphInputTensorAttributesAndRemainder().first;
 
-        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        detail::OrderedTensorSet allTensors;
         gatherHipdnnTensorsSubtree(allTensors);
 
         HIPDNN_CHECK_ERROR(detail::checkNoDuplicateTensorIdsImpl(allTensors));
@@ -2290,7 +2290,7 @@ public:
      */
     Error checkNoDuplicateTensorIds()
     {
-        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        detail::OrderedTensorSet allTensors;
         gatherHipdnnTensorsSubtree(allTensors);
 
         return detail::checkNoDuplicateTensorIdsImpl(allTensors);
@@ -2304,7 +2304,7 @@ public:
      */
     Error checkTensorUidsSet() const
     {
-        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        detail::OrderedTensorSet allTensors;
         gatherHipdnnTensorsSubtree(allTensors);
 
         return detail::checkTensorUidsSetImpl(allTensors);
@@ -2321,7 +2321,7 @@ public:
     {
         std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> result;
 
-        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        detail::OrderedTensorSet allTensors;
         gatherHipdnnTensorsSubtree(allTensors);
 
         for(const auto& tensor : allTensors)
@@ -2346,7 +2346,7 @@ public:
     {
         std::unordered_map<std::string, std::shared_ptr<TensorAttributes>> result;
 
-        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        detail::OrderedTensorSet allTensors;
         gatherHipdnnTensorsSubtree(allTensors);
 
         for(const auto& tensor : allTensors)

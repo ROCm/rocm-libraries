@@ -1169,7 +1169,7 @@ TEST(TestLayernormBackwardNode, GatherHipdnnTensor)
     const GraphAttributes graphAttributes;
     const LayernormBackwardNode node(std::move(attrs), graphAttributes);
 
-    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    hipdnn_frontend::detail::OrderedTensorSet allTensors;
 
     node.gather_hipdnn_tensors(allTensors);
 

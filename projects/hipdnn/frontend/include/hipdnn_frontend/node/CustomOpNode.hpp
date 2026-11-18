@@ -42,8 +42,7 @@ public:
         return attributes.get_name();
     }
 
-    void gather_hipdnn_tensors(
-        std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors) const override
+    void gather_hipdnn_tensors(detail::OrderedTensorSet& allTensors) const override
     {
         for(const auto& tensor : attributes.inputs)
         {

@@ -492,7 +492,7 @@ TEST(TestConvolutionDgradNode, GatherHipdnnTensors)
     const GraphAttributes graphAttributes;
     const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
-    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    hipdnn_frontend::detail::OrderedTensorSet allTensors;
 
     node.gather_hipdnn_tensors(allTensors);
 
