@@ -20,9 +20,13 @@
 //   D     true           true         true                 naive skipped by the run time bound,
 //                                                          or timed: may pass or be skipped
 //
-// Tests cover all four paths. Path C is reached without fault injection: Find runs without a
-// workspace, so MIOPEN_DEBUG_FIND_ONLY_SOLVER=GemmFwdRest;ConvDirectNaiveConvFwd leaves a
-// non-naive solver that is rejected for lack of workspace next to naive.
+// Find evaluates one algorithm at a time, so defer_naive looks at the solvers of the algorithm
+// being evaluated, plus whatever succeeded in the algorithms before it. Path C therefore needs
+// a non-naive Direct solver that fails next to naive. It is reached without fault injection where
+// ConvHipConv is a candidate (fp16 NCHW, gfx950): Find runs without a workspace and ConvHipConv
+// needs one for its transposes. Where it is not a candidate that test skips and path C is not
+// covered. Path B is also reached with a failing solver of another algorithm (GemmFwdRest, in the
+// GEMM algorithm).
 //
 // CaptureAfterATimedOutNaiveEvaluationSucceeds covers issue #12121: a naive
 // evaluation abandoned by find must not break a later HIP graph capture.
@@ -203,6 +207,52 @@ struct ConvBuffers
             (void)hipFree(p);
     }
 };
+
+struct LegacyFind
+{
+    miopenStatus_t status = miopenStatusUnknownError;
+    int returned          = 0;
+    miopenConvAlgoPerf_t perf[8]{};
+    std::string log; // what the library logged at Info level during the Find
+};
+
+// The legacy Find entry point takes the caller's workspace, and here it is null. A solver that
+// needs a workspace is rejected for lack of one. (miopenFindSolutions provides its own workspace
+// and cannot reach this.) The convolution is the one RunFind uses, in the default layout.
+template <class T>
+void RunLegacyFindWithoutWorkspace(miopenHandle_t handle, LegacyFind& found)
+{
+    tensor<T> x{1, 64, 14, 14};
+    tensor<T> w{64, 64, 3, 3};
+    miopen::ConvolutionDescriptor conv{
+        2, miopenConvolution, miopenPaddingDefault, {1, 1}, {1, 1}, {1, 1}};
+    tensor<T> y{conv.GetForwardOutputTensor(x.desc, w.desc)};
+
+    ConvBuffers buffers;
+    ASSERT_EQ(hipMalloc(&buffers.x, x.desc.GetNumBytes()), hipSuccess);
+    ASSERT_EQ(hipMalloc(&buffers.w, w.desc.GetNumBytes()), hipSuccess);
+    ASSERT_EQ(hipMalloc(&buffers.y, y.desc.GetNumBytes()), hipSuccess);
+    ASSERT_EQ(hipMemset(buffers.x, 0, x.desc.GetNumBytes()), hipSuccess);
+    ASSERT_EQ(hipMemset(buffers.w, 0, w.desc.GetNumBytes()), hipSuccess);
+
+    ScopedEnvironment<int> log_level(MIOPEN_LOG_LEVEL, 5);
+    testing::internal::CaptureStderr();
+    found.status = miopenFindConvolutionForwardAlgorithm(handle,
+                                                         &x.desc,
+                                                         buffers.x,
+                                                         &w.desc,
+                                                         buffers.w,
+                                                         &conv,
+                                                         &y.desc,
+                                                         buffers.y,
+                                                         8,
+                                                         &found.returned,
+                                                         found.perf,
+                                                         nullptr,
+                                                         0,
+                                                         false);
+    found.log    = testing::internal::GetCapturedStderr();
+}
 
 } // namespace
 
@@ -400,12 +450,12 @@ TEST(GPU_NaiveTimeout_FP32, NaivePrecompiledWhenBoundSkipDisabled)
         << "the naive kernel was not looked up before the first evaluation";
 }
 
-// Path C. The legacy Find entry point takes the caller's workspace, and here it is null. A solver
-// that needs a workspace is rejected for lack of one, so no non-naive solver succeeds. Naive is
-// then evaluated even though its bound is above its 1% budget: the bound and the timeout only
-// apply once a non-naive solver has succeeded. The solver filter leaves one workspace user next
-// to naive. (miopenFindSolutions provides its own workspace and cannot reach this path.)
-TEST(GPU_NaiveTimeout_FP32, NaiveEvaluatedWhenEveryNonNaiveSolverNeedsWorkspace)
+// Path B again, with a failing non-naive solver around. Find evaluates one algorithm at a time, and
+// GemmFwdRest belongs to the GEMM algorithm, so the Direct algorithm holds naive alone. Find runs
+// without a workspace, so GemmFwdRest is rejected for lack of one and no non-naive solver
+// succeeds. Naive is then evaluated even though its bound is above its 1% budget: the bound and
+// the timeout only apply once a non-naive solver has succeeded.
+TEST(GPU_NaiveTimeout_FP32, NaiveEvaluatedWhenOtherAlgorithmsNeedWorkspace)
 {
     auto& handle_ref      = get_handle();
     miopenHandle_t handle = &handle_ref;
@@ -421,49 +471,58 @@ TEST(GPU_NaiveTimeout_FP32, NaiveEvaluatedWhenEveryNonNaiveSolverNeedsWorkspace)
     ScopedEnvironment<std::string> only(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
                                         std::string{"GemmFwdRest;ConvDirectNaiveConvFwd"});
 
-    tensor<float> x{1, 64, 14, 14};
-    tensor<float> w{64, 64, 3, 3};
-    miopen::ConvolutionDescriptor conv{
-        2, miopenConvolution, miopenPaddingDefault, {1, 1}, {1, 1}, {1, 1}};
-    tensor<float> y{conv.GetForwardOutputTensor(x.desc, w.desc)};
+    LegacyFind found;
+    ASSERT_NO_FATAL_FAILURE(RunLegacyFindWithoutWorkspace<float>(handle, found));
 
-    ConvBuffers buffers;
-    ASSERT_EQ(hipMalloc(&buffers.x, x.desc.GetNumBytes()), hipSuccess);
-    ASSERT_EQ(hipMalloc(&buffers.w, w.desc.GetNumBytes()), hipSuccess);
-    ASSERT_EQ(hipMalloc(&buffers.y, y.desc.GetNumBytes()), hipSuccess);
-    ASSERT_EQ(hipMemset(buffers.x, 0, x.desc.GetNumBytes()), hipSuccess);
-    ASSERT_EQ(hipMemset(buffers.w, 0, w.desc.GetNumBytes()), hipSuccess);
+    if(found.log.find("Solver <GemmFwdRest>, workspace required") == std::string::npos)
+        GTEST_SKIP() << "GemmFwdRest is not a candidate on " << handle_ref.GetDeviceName();
 
-    miopenConvAlgoPerf_t perf[8];
-    int returned = 0;
-    ScopedEnvironment<int> log_level(MIOPEN_LOG_LEVEL, 5);
-    testing::internal::CaptureStderr();
-    const auto status     = miopenFindConvolutionForwardAlgorithm(handle,
-                                                              &x.desc,
-                                                              buffers.x,
-                                                              &w.desc,
-                                                              buffers.w,
-                                                              &conv,
-                                                              &y.desc,
-                                                              buffers.y,
-                                                              8,
-                                                              &returned,
-                                                              perf,
-                                                              nullptr,
-                                                              0,
-                                                              false);
-    const std::string log = testing::internal::GetCapturedStderr();
+    ASSERT_EQ(found.status, miopenStatusSuccess);
+    ASSERT_GE(found.returned, 1) << "naive must be evaluated when no non-naive solver succeeded";
+    for(int i = 0; i < found.returned; ++i)
+        EXPECT_EQ(found.perf[i].fwd_algo, miopenConvolutionFwdAlgoDirect) << "result " << i;
+    EXPECT_TRUE(LogShowsNaiveEvaluation(found.log));
+    EXPECT_FALSE(LogShowsBoundSkip(found.log));
+}
 
-    if(log.find("workspace required") == std::string::npos)
-        GTEST_SKIP() << "no non-naive candidate that needs a workspace on "
+// Path C. The Direct algorithm holds a non-naive solver next to naive, and that solver fails, so
+// no non-naive solver has succeeded when naive comes up. ConvHipConv stages an fp16 NCHW problem
+// through transposes in the workspace, and Find runs without one, so it is rejected for lack of a
+// workspace. Naive must then be evaluated and returned: the bound and the timeout apply only
+// once a non-naive solver has succeeded, and until then there is no best time to measure against.
+// The test skips where ConvHipConv is not a candidate for the problem (not gfx950 for example).
+TEST(GPU_NaiveTimeout_FP32, NaiveEvaluatedWhenEveryNonNaiveSolverOfItsAlgorithmFails)
+{
+    auto& handle_ref      = get_handle();
+    miopenHandle_t handle = &handle_ref;
+
+    if(IsWinogradOnlyArch(handle_ref))
+        GTEST_SKIP() << "Direct finder is disabled by use_winograd_only on "
+                     << handle_ref.GetDeviceName();
+
+    ScopedFindDb no_cache;
+    ScopedEnvironment<bool> guard_naive(MIOPEN_NAIVE_TIMEOUT, true);
+    ScopedEnvironment<bool> guard_bound(MIOPEN_NAIVE_BOUND_SKIP, true);
+    ScopedEnvironment<int> guard_factor(MIOPEN_NAIVE_TIMEOUT_FACTOR, 1);
+    ScopedEnvironment<std::string> only(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
+                                        std::string{"ConvHipConv;ConvDirectNaiveConvFwd"});
+
+    LegacyFind found;
+    ASSERT_NO_FATAL_FAILURE(RunLegacyFindWithoutWorkspace<half_float::half>(handle, found));
+
+    const auto rejected = found.log.find("Solver <ConvHipConv>, workspace required");
+    if(rejected == std::string::npos)
+        GTEST_SKIP() << "ConvHipConv is not a candidate for this problem on "
                      << handle_ref.GetDeviceName() << ", path C is not reached";
 
-    ASSERT_EQ(status, miopenStatusSuccess);
-    ASSERT_GE(returned, 1) << "naive must be evaluated when every non-naive solver failed (path C)";
-    for(int i = 0; i < returned; ++i)
-        EXPECT_EQ(perf[i].fwd_algo, miopenConvolutionFwdAlgoDirect) << "result " << i;
-    EXPECT_TRUE(LogShowsNaiveEvaluation(log));
-    EXPECT_FALSE(LogShowsBoundSkip(log));
+    ASSERT_EQ(found.status, miopenStatusSuccess);
+    ASSERT_GE(found.returned, 1) << "naive must be evaluated when every non-naive solver failed";
+    for(int i = 0; i < found.returned; ++i)
+        EXPECT_EQ(found.perf[i].fwd_algo, miopenConvolutionFwdAlgoDirect) << "result " << i;
+    EXPECT_TRUE(LogShowsNaiveEvaluation(found.log));
+    EXPECT_FALSE(LogShowsBoundSkip(found.log));
+    EXPECT_EQ(found.log.find("Skipped naive solver"), std::string::npos)
+        << "naive was dropped although no non-naive solver had succeeded";
 }
 
 // Regression for issue #12121. With a 1% budget the naive evaluation is
@@ -582,6 +641,7 @@ const FloorCase floor_cases[] = {
     {"2x2 input, 7x7 filter, pad 3", 128, 256, 256, 2, 2, 7, 7, 3, 1, 1, 1, false},
     {"7x7 input, dilation 4, 3x3 filter, pad 4", 64, 256, 256, 7, 7, 3, 3, 4, 1, 4, 1, false},
     {"stride 2, 5x5 filter, pad 2, 4 groups", 16, 64, 128, 15, 15, 5, 5, 2, 2, 1, 4, false},
+    {"depthwise, 3x3 filter, pad 1", 8, 64, 64, 14, 14, 3, 3, 1, 1, 1, 64, false},
     {"3x3 filter, pad 1", 8, 128, 128, 28, 28, 3, 3, 1, 1, 1, 1, false},
     {"1x1 filter, stride 2", 8, 128, 256, 56, 56, 1, 1, 0, 2, 1, 1, false},
 };
@@ -689,6 +749,33 @@ TEST(GPU_NaiveTimeout_FP32, NaiveTimeFloorCountsOnlyTapsInInput)
         EXPECT_NEAR(got / expected, 1.0f, 1e-4f) << "taps in input " << taps << ", all taps "
                                                  << static_cast<std::size_t>(ho) * wo * fc.y * fc.x;
     }
+}
+
+// Each output channel of a grouped convolution sums over C/G input channels, so the floor is the
+// floor of the same problem with one group divided by the group count. Without the divisor the
+// floor of a depthwise convolution would be G times too large and exceed the kernel's run time.
+TEST(GPU_NaiveTimeout_FP32, NaiveTimeFloorDividesByTheGroupCount)
+{
+    ScopedEnvironment<bool> guard_naive(MIOPEN_NAIVE_TIMEOUT, true);
+
+    bool any_grouped = false;
+    for(const auto& fc : floor_cases)
+    {
+        if(fc.groups == 1)
+            continue;
+        any_grouped = true;
+        SCOPED_TRACE(fc.name);
+
+        FloorCase one_group = fc;
+        one_group.groups    = 1;
+        const float single  = FloorMs(one_group, miopen::conv::Direction::Forward);
+        ASSERT_GT(single, 0.0f);
+
+        const float expected = single / static_cast<float>(fc.groups);
+        EXPECT_NEAR(FloorMs(fc, miopen::conv::Direction::Forward) / expected, 1.0f, 1e-4f)
+            << "groups " << fc.groups;
+    }
+    EXPECT_TRUE(any_grouped);
 }
 
 // Forward, backward data and backward weights of one convolution do the same work in the naive
