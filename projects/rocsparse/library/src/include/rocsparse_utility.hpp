@@ -69,6 +69,27 @@ namespace rocsparse
         }
         return 32 - __builtin_clz(n);
     }
+
+    // A 64-bit size would be narrowed by clz(rocsparse_int).
+    static inline int64_t clz(int64_t n)
+    {
+        // __builtin_clzll is undefined for n == 0
+        if(n == 0)
+        {
+            return 0;
+        }
+        return 64 - __builtin_clzll(n);
+    }
 #endif
+
+    // Radix sort end bit for keys of type K in [0, n]: the bit width of n, but
+    // at most the width of K, which rocprim does not check.
+    template <typename K>
+    static inline uint32_t radix_end_bit(int64_t n)
+    {
+        const int64_t bits  = rocsparse::clz(n);
+        const int64_t kbits = static_cast<int64_t>(sizeof(K) * 8);
+        return static_cast<uint32_t>((bits < kbits) ? bits : kbits);
+    }
 
 }
