@@ -75,3 +75,17 @@ The bindings' Component CI lanes build them against an installed ROCm, the way a
 - **Status values follow the PR.** The status test reads the checkout's `hipblas-common.h`. The lanes run when `projects/hipblaslt/library/include/hipblaslt/` or `projects/hipblas-common/library/include/` change, so a new `hipblasStatus_t` value fails on the PR that adds it. Since `status.hpp` maps statuses by number, that PR can also map it, before the pinned nightly has it.
 - **The gap this leaves.** The bindings compile against the installed headers. Changes to other declarations, or to the library's behavior, reach these lanes only once the nightly contains them and the pinned version is bumped. `TESTING.md` lists this under Known Risks.
 - **Lanes.** Linux CPU and gfx942 run on every PR that changes the bindings or the public headers; gfx950, whose machines are scarce, runs only with the `ci:run-gfx950` label or on a manual run; Windows CPU runs informationally; Windows gfx1151 runs when the lanes themselves change. GPU lanes set `HIPBLASLT_PY_REQUIRE_GPU=1`, so a lane that can't see its device fails instead of skipping every GPU test. `TESTING.md` says which lanes gate.
+
+## Enums
+
+`_core` binds every value of every public enum in `hipblaslt.h`, `hipblaslt-ext.hpp` and `hipblas-common.h`, plus the `hipDataType` values hipBLASLt accepts, as Python `IntEnum`s with the C prefix dropped (`HIPBLASLT_EPILOGUE_RELU` is `Epilogue.RELU`). A missing or misnumbered value makes every call that uses it quietly wrong, so completeness is checked, not hoped for.
+
+- **One registration form.** Each value is one `reg(e, "<C enum>", "<Python name>", <C value>)` call in `src/enums.cpp`, which also records it in a registry the tests read.
+- **Opt-in values.** A value inside `#if HIPBLASLT_HAS_...` is bound under the same `#if`, so it exists exactly when the hipBLASLt the bindings are built against turns that feature on.
+- **What's left out.** `ALLOWED_MISSING` in `hipblaslt/_coverage.py` lists the values deliberately not bound, each with a reason. Only three kinds belong there:
+  - sentinels such as `..._MAX`, which grow whenever a value is added;
+  - values the header marks "Not supported yet";
+  - the HIP data types and hipBLAS compute types hipBLASLt doesn't accept.
+- **One parser, two checks.** `hipblaslt/_coverage.py` reads enums from C and C++ headers: comments containing braces, implicit, hex and expression values, `typedef enum` with or without a tag, `enum class`, CRLF line endings, and values under `#if HIPBLASLT_HAS_...`. It uses only the standard library.
+  - The `hipblaslt-python-enum-sync` pre-commit hook (`scripts/check_enum_sync.py`) compares the raw headers with `enums.cpp`, with nothing built. It's the first line of defense, and fires on the PR that adds a value. CI's pre-commit checkout can be sparse, so files that aren't on disk are read from git, and an unreadable one is an error.
+  - The coverage tests compare the headers after the real preprocessor has run, so the build configuration decides which opt-in values count. In a source checkout they read the checkout's own headers.
