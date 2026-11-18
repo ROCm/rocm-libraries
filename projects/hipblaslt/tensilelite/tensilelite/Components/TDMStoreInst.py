@@ -2,23 +2,22 @@
 # SPDX-License-Identifier: MIT
 """TDMStore: store D through LDS with tensor_store_from_lds in place of buffer_store (gfx1250).
 
-The store blocks a TDMStoreInst level picks store through the TDM block, which stages the converted D
+The store blocks TDMStoreInst picks store through the TDM block, which stages the converted D
 tile in LDS over the main-loop buffers and stores it with one tensor_store_from_lds per wave,
 bounded to D by tensor_dim. With beta != 0 it first loads the C tile into the staged tile with
-tensor_load_to_lds, bounded the same way. Each level adds one path to the level below:
+tensor_load_to_lds, bounded the same way.
 
-  =====  =======================================================================
-  Level  Paths stored through the TDM block
-  =====  =======================================================================
-  0      none
-  1      EdgeM: the masked paths narrower than the store vector width, and the narrowest one
-  2      EdgeN too: the masked path of the store vector width, so every edge tile
-  3      NonEdge too: the unmasked path, so every tile, the OptNLL store included
-  =====  =======================================================================
+  =============  =================================================================
+  TDMStoreInst   Paths stored through the TDM block
+  =============  =================================================================
+  0              none: every block keeps its buffer_store
+  1              EdgeM, EdgeN and NonEdge, so every tile, the OptNLL store included
+  =============  =================================================================
 
-Level 3 stores every tile through the TDM block, whatever the alignment of its columns. Where the
-columns of D do not start on a 16-byte boundary the TDM store is slower than buffer_store, so tuning
-chooses between levels 2 and 3.
+TDMStoreInst 1 stores every tile through the TDM block, whatever the alignment of its columns, so
+the epilogue keeps one store path and splits only on beta / non-beta. Where the columns of D do not
+start on a 16-byte boundary the TDM store is slower than buffer_store, so the choice is whether to
+enable TDMStoreInst for a kernel at all, not which paths it covers.
 
 A path is a store block of the store-width cascade generateBetaModules builds, one per vector width,
 and the level only picks the blocks that store through the TDM block: no level adds, drops or moves a
@@ -57,9 +56,7 @@ from .NonTemporal import tdmCacheModifiers
 
 TDM_STORE_PATHS = {
   0: (),
-  1: ("EdgeM",),
-  2: ("EdgeM", "EdgeN"),
-  3: ("EdgeM", "EdgeN", "NonEdge"),
+  1: ("EdgeM", "EdgeN", "NonEdge"),
 }
 
 # StinkyRemoveWaitCntPass never removes a wait whose comment contains this tag. The TDM block tags

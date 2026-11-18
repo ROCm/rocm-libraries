@@ -2896,9 +2896,8 @@
       'head': list([
         0,
         1,
-        2,
       ]),
-      'len': 4,
+      'len': 2,
       'type': 'list',
     }),
     'TailloopInNll': dict({
