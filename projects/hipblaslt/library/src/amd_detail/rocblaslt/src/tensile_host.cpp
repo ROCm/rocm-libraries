@@ -41,6 +41,7 @@
 #include "rocblaslt_fused_a2a_peers.hpp"
 #include "candidate_preparation.hpp"
 #include "get_all_search_type_for_test.hpp"
+#include "grouped_predicate_problem.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
@@ -3874,8 +3875,8 @@ namespace
     // A hand-written kernel may rely on its problem predicates to stay inside the
     // tensors (fixed sizes or strides, no bounds checks) and takes plain tensor
     // addresses, so an algo for one is refused once the problem it runs no longer
-    // satisfies them or is a pointer-array batch. Generated kernels and the grouped
-    // path keep their existing launch checks.
+    // satisfies them or is a pointer-array batch. Generated kernels keep their
+    // existing launch checks.
     rocblaslt_status checkHandwrittenKernelPredicates(
         const char*                                caller,
         const TensileLite::ContractionProblemGemm& problem,
@@ -4309,6 +4310,21 @@ namespace
         static int hotIterations()
         {
             return std::max(1, envInt("HIPBLASLT_TUNING_HOT_ITERS", 1000));
+        }
+        /**
+         * Whether candidates are timed with HIP events rather than the host clock.
+         * Not on Windows until the minimum supported runtime has ROCm/rocm-systems#13190.
+         * Without it, HIP's PAL backend writes later launches' end times into an event
+         * record's timestamp and derives elapsed time from the host clock, so an event
+         * pair does not time the batch it brackets.
+         */
+        static constexpr bool gpuTimer()
+        {
+#ifdef _WIN32
+            return false;
+#else
+            return true;
+#endif
         }
         /**
          * Wall-clock ceiling for one shape, or zero for no ceiling.
@@ -5447,10 +5463,11 @@ namespace
         // hipblaslt-bench's measurement, from the same code: per candidate the cold
         // launches, then one timed batch of hot launches with the instruction cache
         // flushed after each and the flush's per-device cost taken back out, the
-        // lowest time winning. Tune mode times on HIP events.
+        // lowest time winning. Tune mode times on HIP events, or on the host clock
+        // between stream synchronizations where events cannot time a batch.
         hipblaslt_bench::TimingConfig timing;
         timing.iters         = TuningPolicy::hotIterations();
-        timing.use_gpu_timer = true;
+        timing.use_gpu_timer = TuningPolicy::gpuTimer();
 
         hipblaslt_bench::SearchConfig search;
         search.cold_calls = TuningPolicy::coldIterations();
@@ -7077,6 +7094,20 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             {
                 log_error(__func__, "workspace size is less than the solution requires");
                 return rocblaslt_status_invalid_value;
+            }
+            // With user args every launch reads its sizes from device memory, and
+            // the host sizes may be placeholders, so only the host problem is checked.
+            if(!useUserArgs)
+            {
+                for(size_t i = 0; i < data->problem.gemms.size(); i++)
+                {
+                    if(auto st = checkHandwrittenKernelPredicates(
+                           __func__,
+                           rocblaslt::groupedPredicateProblem(data->problem, i, isCUFallback),
+                           *solution);
+                       st != rocblaslt_status_success)
+                        return st;
+                }
             }
 
             // Grouped GEMM does select Stream-K solutions, so isolation has to
