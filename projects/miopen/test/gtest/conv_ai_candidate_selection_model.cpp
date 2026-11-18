@@ -794,6 +794,12 @@ std::string VocabBaseId(const std::string& id)
 // silently make those kernels unselectable. ASSERT the vocab is present, and EXPECT most live CK
 // instances are covered (lenient, to tolerate modest CK version drift between the shipped table and
 // the build's CK plugin). Runs for the current device arch only.
+//
+// 3D wrw's GetAllKernelTypeStrings also returns the Bilinear and Scale
+// DeviceGroupedConvBwdWeightMultipleD instances. The shipped tables rank the default PassThrough
+// set only, so those alpha/beta instances are excluded from the coverage count. 3D fwd/bwd default
+// instances (DeviceGroupedConvFwdMultipleABD / DeviceGroupedConvBwdDataMultipleD) do not match
+// this prefix and stay in the count.
 TEST_P(GPU_CandidateSelection_FP32, ShippedVocabCoversCKInstances_Test)
 {
     const auto& params      = GetParam();
@@ -818,19 +824,25 @@ TEST_P(GPU_CandidateSelection_FP32, ShippedVocabCoversCKInstances_Test)
     for(const auto& id : vocab)
         vocab_bases.insert(VocabBaseId(id));
 
-    std::size_t covered = 0;
+    std::size_t considered = 0;
+    std::size_t covered    = 0;
     std::string first_missing;
     for(const auto& k : ck_instances)
     {
+        // Bilinear/Scale wrw instances. See the comment above this test.
+        if(k.find("DeviceGroupedConvBwdWeightMultipleD") != std::string::npos)
+            continue;
+        ++considered;
         if(vocab_bases.count(k) != 0)
             ++covered;
         else if(first_missing.empty())
             first_missing = k;
     }
-    const double fraction = static_cast<double>(covered) / static_cast<double>(ck_instances.size());
+    ASSERT_GT(considered, 0u) << "No default CK instances enumerated for " << params.solver;
+    const double fraction = static_cast<double>(covered) / static_cast<double>(considered);
     EXPECT_GE(fraction, 0.5)
-        << "Shipped vocab covers only " << covered << " / " << ck_instances.size()
-        << " live CK instances for " << params.arch << "_" << params.solver
+        << "Shipped vocab covers only " << covered << " / " << considered
+        << " default CK instances for " << params.arch << "_" << params.solver
         << " -- likely a stale or truncated table; regenerate it. First uncovered: "
         << first_missing;
 }
