@@ -21,8 +21,8 @@ from typing import Tuple
 from kernels.common.attention_unified import (
     select_auto_path,
     supports_native_unified_attention,
-    supports_native_unified_attention_3d_tiled,
-    supports_native_unified_attention_tiled,
+    supports_native_unified_attention_coverage,
+    unified_lse_path_gate,
 )
 from rocke.core.arch import arches_with_own_facts
 from rocke.dispatch.core import (
@@ -46,7 +46,6 @@ from .common import (
     _request_errors,
     _selector_matches,
     UNIFIED_ALIBI_ARCHES,
-    unified_coverage_problem,
 )
 
 # The unified paths are portable, so they declare every known target rather than
@@ -107,11 +106,9 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         problem = attention_problem(req)
         if problem.use_alibi and req.arch not in UNIFIED_ALIBI_ARCHES:
             return False, f"unified ALiBi runs on {UNIFIED_ALIBI_ARCHES} only"
-        # The scalar gate is the coverage check; it refuses LSE and ALiBi (the
-        # scalar kernel has neither), so ask it about the problem without them
-        # and let the path's own gate rule on them below.
-        coverage = unified_coverage_problem(problem)
-        ok, why = supports_native_unified_attention(coverage, arch=req.arch)
+        # The scalar gate refuses LSE and ALiBi (the scalar kernel has neither), so
+        # coverage is asked with both off; the path's own gate rules on them below.
+        ok, why = supports_native_unified_attention_coverage(problem, arch=req.arch)
         if not ok:
             return False, why
         # Split-KV also takes the LSE requests that ``select_path(arch)`` sends
@@ -123,15 +120,10 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
             return False, (
                 f"problem routes to {problem.select_path(req.arch)!r} path, not {path!r}"
             )
-        if coverage is not problem:
+        if problem.emit_lse or problem.use_alibi:
             # The path's own gate owns which arches and features can write LSE
             # or apply ALiBi.
-            gate = (
-                supports_native_unified_attention_3d_tiled
-                if path == "3d"
-                else supports_native_unified_attention_tiled
-            )
-            ok, why = gate(problem, arch=req.arch)
+            ok, why = unified_lse_path_gate(path)(problem, arch=req.arch)
             if not ok:
                 return False, why
         return True, "ok"

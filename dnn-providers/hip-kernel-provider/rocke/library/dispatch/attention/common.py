@@ -54,6 +54,8 @@ from enum import IntEnum
 from operator import index
 from typing import Any, Tuple
 
+from kernels.common._spec_checks import require_bool
+
 # Re-exported, never redeclared: the tiled kernel specs name their band by these
 # ordinals (``mask_type()``), so the ordinals have one home, beside that mapping.
 from kernels.common.attention_mask_type import AttentionMaskType
@@ -851,14 +853,6 @@ def _problem_with_num_cus(
 UNIFIED_ALIBI_ARCHES = ("gfx942", "gfx950")
 
 
-def unified_coverage_problem(problem: UnifiedAttentionProblem):
-    """``problem`` without the features only the tiled paths implement (LSE output,
-    ALiBi), for the scalar coverage gate; the path's own gate rules on those."""
-    if not (problem.emit_lse or problem.use_alibi):
-        return problem
-    return replace(problem, emit_lse=False, use_alibi=False)
-
-
 def attention_problem(req: AttentionRequest) -> UnifiedAttentionProblem:
     """The production-routing problem, including the live-device CU policy.
 
@@ -935,10 +929,7 @@ class AttentionSpec:
     def __post_init__(self) -> None:
         # identity() and kernel_name() branch on emit_lse, so a truthy non-bool
         # (1, "yes") would silently produce an LSE identity: refuse it instead.
-        if type(self.emit_lse) is not bool:
-            raise ValueError(
-                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
-            )
+        require_bool("emit_lse", self.emit_lse)
 
     def identity(self) -> dict:
         """``spec_hash`` payload: every field, except ``emit_lse`` when it is off,

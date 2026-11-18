@@ -10,13 +10,11 @@ and Torch binding; admission, pin resolution and sweeping are shared.
 
 from __future__ import annotations
 
-
 from typing import Callable, Mapping, Optional
 
 from kernels.common.attention_unified import (
-    supports_native_unified_attention,
-    supports_native_unified_attention_3d_tiled,
-    supports_native_unified_attention_tiled,
+    supports_native_unified_attention_coverage,
+    unified_lse_path_gate,
 )
 from rocke.dispatch.core import Capability, KernelCandidate, ShapeRange
 from rocke.dispatch.tuning import make_tuned_candidate
@@ -33,7 +31,6 @@ from .common import (
     _request_errors,
     _tuning_problem,
     UNIFIED_ALIBI_ARCHES,
-    unified_coverage_problem,
 )
 from .dense_rules import DenseSpace, DenseSupports
 from .unified_rules import TUNING_ALGORITHM, AttentionGeometryVariant, unified_space
@@ -57,24 +54,18 @@ DENSE_ALGORITHMS = frozenset(
 
 def _tuning_precheck(variant: AttentionGeometryVariant):
     """Coverage for one geometry variant. The scalar coverage check refuses LSE
-    (the scalar kernel writes none), so it is asked about the LSE-off problem
-    and an LSE request must also pass the gate of the variant's own path: the
-    split-KV or tiled 2D gate owns which arches and features can write LSE."""
-    path_gate = (
-        supports_native_unified_attention_3d_tiled
-        if variant.path == "3d"
-        else supports_native_unified_attention_tiled
-    )
+    and ALiBi (the scalar kernel has neither), so it is asked about the problem
+    without them, and an LSE or ALiBi request must also pass the gate of the
+    variant's own path: the split-KV or tiled 2D gate owns which arches and
+    features can write LSE or apply ALiBi."""
+    path_gate = unified_lse_path_gate(variant.path)
 
     def precheck(req):
         problem = _tuning_problem(req)
-        coverage = unified_coverage_problem(problem)
-        if coverage is problem:
-            return supports_native_unified_attention(problem, arch=variant.arch)
         if problem.use_alibi and variant.arch not in UNIFIED_ALIBI_ARCHES:
             return False, f"unified ALiBi runs on {UNIFIED_ALIBI_ARCHES} only"
-        ok, why = supports_native_unified_attention(coverage, arch=variant.arch)
-        if ok:
+        ok, why = supports_native_unified_attention_coverage(problem, arch=variant.arch)
+        if ok and (problem.emit_lse or problem.use_alibi):
             return path_gate(problem, arch=variant.arch)
         return ok, why
 

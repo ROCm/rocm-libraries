@@ -1164,10 +1164,33 @@ _CONFIGS[72] = {**_CONFIGS[64], "lse_layout": "head_major"}
 _CONFIGS[73] = {**_CONFIGS[65], "lse_layout": "head_major"}
 _CONFIGS[74] = {**_CONFIGS[66], "lse_layout": "head_major"}
 
-# --- idx75-78: ALiBi at the slope sites idx16/17 miss: per-row hoist (75, GQA with 24 heads so the slope formula's
-#     tail heads appear), and the transposed 32x32 per-iter (76, mask-once),
-#     hoisted (77) and inline (78) per-lane slopes.
+# --- idx75-76: fp8 K in LDS on each 32x32 QK path.
+# fp8 KV cache kept as raw fp8 in K_lds (use_fp8_mfma_qk) on the
+# non-transposed 32x32 QK path: K is read as fp8 and dequantized with
+# k_scale before the bf16 MFMA, as on the transposed path.
 _CONFIGS[75] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=32,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype="fp8e4m3",
+    use_fp8_mfma_qk=True,
+    use_mfma_32x32=True,
+    block_m_per_warp=32,
+    tile_size=64,
+)
+# The same fp8 K in LDS on the transposed 32x32 QK path, which reads K through
+# the same shared reader.
+_CONFIGS[76] = {**_CONFIGS[75], "use_transposed_qk_32x32": True}
+
+# --- idx77-80: ALiBi at the slope sites idx16/17 miss: per-row hoist (77, GQA with 24 heads so the slope formula's
+#     tail heads appear), and the transposed 32x32 per-iter (78, mask-once),
+#     hoisted (79) and inline (80) per-lane slopes.
+_CONFIGS[77] = dict(
     head_size=64,
     block_size=32,
     num_query_heads=24,
@@ -1193,9 +1216,9 @@ _TRANSPOSED_ALIBI = dict(
     block_m_per_warp=32,
     tile_size=64,
 )
-_CONFIGS[76] = {**_TRANSPOSED_ALIBI, "use_transposed_mask_once": True}
-_CONFIGS[77] = {**_TRANSPOSED_ALIBI, "use_transposed_invariant_hoist": True}
-_CONFIGS[78] = dict(_TRANSPOSED_ALIBI)
+_CONFIGS[78] = {**_TRANSPOSED_ALIBI, "use_transposed_mask_once": True}
+_CONFIGS[79] = {**_TRANSPOSED_ALIBI, "use_transposed_invariant_hoist": True}
+_CONFIGS[80] = dict(_TRANSPOSED_ALIBI)
 
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:

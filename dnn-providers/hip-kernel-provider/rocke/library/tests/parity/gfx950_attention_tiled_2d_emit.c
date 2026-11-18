@@ -1213,10 +1213,36 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->lse_head_major = true;
         break;
 
-    /* --- idx75-78: ALiBi at the slope sites idx16/17 miss (lockstep with the
-     *     Python _CONFIGS[75..78]): 75 per-row hoist (GQA, 24 heads); 76-78 the
-     *     transposed 32x32 per-iter (mask-once), hoisted and inline slopes. */
+    /* --- idx75-76: fp8 K in LDS on each 32x32 QK path. */
+    /* fp8 KV cache kept as raw fp8 in K_lds (use_fp8_mfma_qk) on the
+     * non-transposed 32x32 QK path: K is read as fp8 and dequantized with
+     * k_scale before the bf16 MFMA, as on the transposed path. */
     case 75:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 32;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = "fp8e4m3";
+        s->use_fp8_mfma_qk = true;
+        s->use_mfma_32x32 = true;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        break;
+    /* The same fp8 K in LDS on the transposed 32x32 QK path, which reads K
+     * through the same shared reader. */
+    case 76:
+        make_spec(75, s);
+        s->use_transposed_qk_32x32 = true;
+        break;
+    /* --- idx77-80: ALiBi at the slope sites idx16/17 miss (lockstep with the
+     *     Python _CONFIGS[77..80]): 77 per-row hoist (GQA, 24 heads); 78-80 the
+     *     transposed 32x32 per-iter (mask-once), hoisted and inline slopes. */
+    case 77:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 24;
@@ -1227,9 +1253,9 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->has_softcap = false;
         s->use_alibi = true;
         break;
-    case 76:
-    case 77:
     case 78:
+    case 79:
+    case 80:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 32;
@@ -1244,8 +1270,8 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->block_m_per_warp = 32;
         s->has_tile_size = true;
         s->tile_size = 64;
-        s->use_transposed_mask_once = (idx == 76);
-        s->use_transposed_invariant_hoist = (idx == 77);
+        s->use_transposed_mask_once = (idx == 78);
+        s->use_transposed_invariant_hoist = (idx == 79);
         break;
     default:
         return -1;

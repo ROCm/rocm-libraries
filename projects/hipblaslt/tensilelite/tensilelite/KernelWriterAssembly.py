@@ -6162,7 +6162,7 @@ class KernelWriterAssembly(KernelWriter):
   # K_pad = 1 for A/B, 256 for MX scale (matches host rearrangePaddedMXScaleLayout).
   # Precondition: upstream Srd+2 is computeLoadSrd's tile-boundary limit
   # (useFixedSrd2 + non-isConstUnitStride); PGR/mainloop GR_INC only touch Srd+0/+1.
-  # tPs must share kPad and bpe_K_byteStride (delta emitted once, reused).
+  # tPs must share kPad (delta_K emitted once); bpe_K_byteStride may differ.
   ##############################################################################
   def computeTailLoopSrdLimit(self, kernel, tPs):
     module = Module("computeTailLoopSrdLimit")
@@ -6184,8 +6184,8 @@ class KernelWriterAssembly(KernelWriter):
     MX_PAD_K = 256
     depthU = int(kernel["DepthU"])
 
-    # Gather per-tc (kPad, bpeForLimit, kRowStride). kPad and bpeForLimit must
-    # agree across tPs, otherwise bail. kRowStride is None when K is the
+    # Gather per-tc (kPad, bpeForLimit, kRowStride). kPad must agree across
+    # tPs, otherwise bail. kRowStride is None when K is the
     # contiguous dimension and the unroll stride when it is not (TLU=1), where
     # the window set up in computeLoadSrd spans DepthU K rows.
     tcKpadBpeList = []
@@ -6224,11 +6224,13 @@ class KernelWriterAssembly(KernelWriter):
           kRowStride = self.strideRef(tc, kernel["ProblemType"]["IndexUnroll"])
       tcKpadBpeList.append((tc, kPad, bpeForLimit, kRowStride))
 
-    # Joint emission requires uniform kPad/bpe across all tPs (true for A/B
-    # symmetric configs and for MXSA/MXSB scale pairs in the gauntlet).
+    # Joint emission requires uniform kPad across all tPs (true for A/B and for
+    # MXSA/MXSB scale pairs). bpe may differ between A and B with mixed MX
+    # operands (e.g. MXFP4 x MXFP8); delta_K is shared and delta_bytes is
+    # computed per bpe.
     kPad = tcKpadBpeList[0][1]
     bpeForLimit = tcKpadBpeList[0][2]
-    if any(kp != kPad or bp != bpeForLimit for _, kp, bp, _ in tcKpadBpeList):
+    if any(kp != kPad for _, kp, _, _ in tcKpadBpeList):
       return module
     tcs = [t for t, _, _, _ in tcKpadBpeList]
     isMx = tcs[0] in ("MXSA", "MXSB")
@@ -6257,15 +6259,15 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SSubU32(dst=sgpr(stmp), src0=depthU, src1=sgpr(loopCounterName),
                            comment="delta_K = DepthU - K_rem"))
 
-      for tc, _, _, kRowStride in tcKpadBpeList:
+      for tc, _, bpe, kRowStride in tcKpadBpeList:
         # delta_bytes = delta_K [* K-row stride] * bpe (handles bpe=0.5 via SShr 1)
         if kRowStride is None:
-          module.add(scalarMultiplyBpe(sbytes, stmp, bpeForLimit,
+          module.add(scalarMultiplyBpe(sbytes, stmp, bpe,
                                        comment="delta_bytes"))
         else:
           module.add(SMulI32(dst=sgpr(sbytes), src0=sgpr(stmp), src1=kRowStride,
                              comment="delta_K rows * %s K-row stride" % tc))
-          module.add(scalarMultiplyBpe(sbytes, sbytes, bpeForLimit,
+          module.add(scalarMultiplyBpe(sbytes, sbytes, bpe,
                                        comment="delta_bytes"))
         module.add(SSubU32(dst=sgpr("Srd%s+2" % tc), src0=sgpr("Srd%s+2" % tc),
                            src1=sgpr(sbytes),
@@ -11468,6 +11470,11 @@ class KernelWriterAssembly(KernelWriter):
         self.argLoader.setOffset(argOffset) # Restore offset
         module.add(SBranch(extReadEpilogueLabelEnd.getLabelName()))
         module.add(extReadEpilogueLabel)
+        if kernel["ProblemType"]["OutputPeerD"]:
+          # The device user-args struct has no peer D. A zero distance keeps the peer store
+          # inside D (it repeats the D store) instead of using an unloaded register.
+          module.add(SMovB32(dst=sgpr("DeltaPeerD+0"), src=0, comment="no peer D with user args"))
+          module.add(SMovB32(dst=sgpr("DeltaPeerD+1"), src=0))
         extArgOffset = self.externalArgLoader.getOffset()
         backupExtArgOffset = extArgOffset
         loadList = [[-1, 0, extArgOffset]]
@@ -11634,6 +11641,14 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.useGateResidual:
       self.defineSgpr("SrdGate", 4, 4)
       module.add(RegSet("s", "sgprSrdGate", self.sgprs["SrdGate"]))
+
+    if kernel["ProblemType"]["OutputPeerD"]:
+      # SrdPeerD is rebuilt from SrdD before each peer store: SrdPeerD = SrdD + DeltaPeerD,
+      # so it follows every SrdD update. DeltaPeerD (peer D - D, in bytes) is a store kernel
+      # argument, so the peer store does not depend on what AddressD holds: D's base for a
+      # strided batch, the pointer array for a pointer-array batch.
+      self.defineSgpr("SrdPeerD", 4, 4)
+      module.add(RegSet("s", "sgprSrdPeerD", self.sgprs["SrdPeerD"]))
 
     if kernel["ProblemType"]["UseE"]:
       self.defineSgpr("SrdE", 4, 4)
@@ -22241,7 +22256,8 @@ class KernelWriterAssembly(KernelWriter):
 
   ##############################################################################
   def addStore(self, kernel, ss, tc: str, addrCalc, sumIdx, tmpS01, edge, elementIdx=None, batchIdx=None,
-               wsOffset=0, overrideAfterPrimerRows=0, comment="addStore", forceSlc: bool = False):
+               wsOffset=0, overrideAfterPrimerRows=0, comment="addStore", forceSlc: bool = False,
+               peerD: bool = False):
     """
     Add stores for the element with addrCalc and sumIdx.
     tmpS01 is a single :temp sGPR
@@ -22249,6 +22265,9 @@ class KernelWriterAssembly(KernelWriter):
     CompactLoopStore: elementIdx lets elt0 (rowInc==0) seed incrementToNextRow.
     overrideAfterPrimerRows is the next emitting elt's rowInc (0 = no override).
     forceSlc forces slc on the D store regardless of NonTemporalD; tc == 'D' only.
+    peerD (OutputPeerD): the same D store into the peer D buffer. SrdPeerD is SrdD plus the
+    distance between the two buffers, taken from the SrdD that the regular store just used,
+    with a system-scope store so that another device sees the data.
     """
     module = Module("addStore sumIdx %s"%(str(sumIdx)))
     if self.do["GlobalWrite"]:
@@ -22270,14 +22289,19 @@ class KernelWriterAssembly(KernelWriter):
         bps = self.states.bpeCexternal * ss.cfg.gwvw
         rpv = self.states.bpeCexternal * ss.cfg.gwvw / self.states.bpr
 
+        if peerD:
+          module.add(SAddU32(dst=sgpr("SrdPeerD+0"), src0=sgpr("SrdD+0"), src1=sgpr("DeltaPeerD+0"), comment="peer SRD = SrdD + delta"))
+          module.add(SAddCU32(dst=sgpr("SrdPeerD+1"), src0=sgpr("SrdD+1"), src1=sgpr("DeltaPeerD+1")))
+          module.add(SMovB64(dst=sgpr("SrdPeerD+2", 2), src=sgpr("SrdD+2", 2), comment="same limit and flags"))
+          scope = CacheScope.SCOPE_SYS
         if kernel["BufferStore"]:
           addr0 = vgpr(addrCalc.addrDVgpr)
-          addr1 = sgpr("SrdD", 4)
+          addr1 = sgpr("SrdPeerD" if peerD else "SrdD", 4)
         else:
           addr0 = vgpr(addrCalc.addrDVgpr,2)
           addr1 = ""
         # CLS: also seed the SRD chain on elt0/batch0 (rowInc==0).
-        if (ss.optSrdIncForRow and (addrCalc.rowInc or (kernel["CompactLoopStore"] and elementIdx == 0 and batchIdx == 0))):
+        if (not peerD and ss.optSrdIncForRow and (addrCalc.rowInc or (kernel["CompactLoopStore"] and elementIdx == 0 and batchIdx == 0))):
           module.add(addrCalc.incrementToNextRow(kernel, "D", ss, tmpS01, forceinitrow0=1,
                                                  overrideAfterPrimerRows=overrideAfterPrimerRows))
 
@@ -22392,6 +22416,9 @@ class KernelWriterAssembly(KernelWriter):
           module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx, rpv, \
               addr0, addr1, globalOffset, soffset=wsOffset, \
               glc=isGlc, slc=isSlc, nt=isNT, dlc=isDlc, comment=comment, scope=scope, th=th, nv=nv))
+    if tc == 'D' and not peerD and kernel["ProblemType"]["OutputPeerD"]:
+      module.add(self.addStore(kernel, ss, tc, addrCalc, sumIdx, tmpS01, edge, elementIdx, batchIdx,
+                               wsOffset, overrideAfterPrimerRows, comment + " (peer D)", forceSlc, peerD=True))
     return module
 
   ##############################################################################
