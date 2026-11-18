@@ -1,6 +1,6 @@
 outs:
-- md5: 40c645e3fcfdf14eeccca67a5f1bf1df
-  size: 57869
+- md5: 7a1c56d5a3144e0949f6a93e76dccbfa
+  size: 82224
   hash: md5
   path: conv_stem_bwd_f16_fma906.kdp.json
   remote: ingestor

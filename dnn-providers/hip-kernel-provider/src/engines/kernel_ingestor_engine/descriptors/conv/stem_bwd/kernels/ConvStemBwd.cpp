@@ -7,7 +7,8 @@
 //   CONV_SB_T        element type: float, _Float16, or unsigned short (bf16 bits)
 //   CONV_SB_ATOM     K1's matrix-core atom (ConvIgemmCore.h); absent for FMA (fp32)
 //   CONV_SB_LAYOUT   dy 0 channels-first (N K H W), 1 channels-last (N H W K)
-//   CONV_SB_VEC      channels-first dy loads: 1 element, or 16 bytes of aligned columns
+//   CONV_SB_VEC      dy loads: 1 element, or 16 bytes (channels-first: aligned columns;
+//                    channels-last: channels)
 //   CONV_SB_U, _V    window offsets (filter rows / columns per stride phase, rounded up)
 //   CONV_SB_NB       GEMM columns: input channels x stride phases, padded to whole fragments
 //   CONV_SB_KC       output channels per chunk
