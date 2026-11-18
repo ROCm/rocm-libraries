@@ -847,11 +847,18 @@ namespace
         const auto      once = [&](bool as_const) {
             Spmat      mutable_source, target;
             ConstSpmat const_source;
-            EXPECT_EQ(as_const ? rocsparse_create_const_csr_descr(
-                          &const_source, 2, 2, 1, ptr, ind, val, i32, i32, base0, f32)
-                               : rocsparse_create_csr_descr(
-                                   &mutable_source, 2, 2, 1, ptr, ind, val, i32, i32, base0, f32),
-                      st_ok);
+            if(as_const)
+            {
+                EXPECT_EQ(rocsparse_create_const_csr_descr(
+                              &const_source, 2, 2, 1, ptr, ind, val, i32, i32, base0, f32),
+                          st_ok);
+            }
+            else
+            {
+                EXPECT_EQ(rocsparse_create_csr_descr(
+                              &mutable_source, 2, 2, 1, ptr, ind, val, i32, i32, base0, f32),
+                          st_ok);
+            }
             EXPECT_EQ(rocsparse_create_ell_descr(
                           &target, 2, 2, ell_ind, ell_val, 1, i32, base0, rocsparse_datatype_f64_r),
                       st_ok);
@@ -878,11 +885,18 @@ namespace
         const auto      once = [&](bool as_const) {
             Spmat      mutable_source, target;
             ConstSpmat const_source;
-            EXPECT_EQ(as_const ? rocsparse_create_const_csr_descr(
-                          &const_source, 2, 2, 1, ptr, ind, val, i32, i32, base0, f32)
-                               : rocsparse_create_csr_descr(
-                                   &mutable_source, 2, 2, 1, ptr, ind, val, i32, i32, base0, f32),
-                      st_ok);
+            if(as_const)
+            {
+                EXPECT_EQ(rocsparse_create_const_csr_descr(
+                              &const_source, 2, 2, 1, ptr, ind, val, i32, i32, base0, f32),
+                          st_ok);
+            }
+            else
+            {
+                EXPECT_EQ(rocsparse_create_csr_descr(
+                              &mutable_source, 2, 2, 1, ptr, ind, val, i32, i32, base0, f32),
+                          st_ok);
+            }
             EXPECT_EQ(rocsparse_create_bsr_descr(&target,
                                                  2,
                                                  2,
