@@ -1206,7 +1206,8 @@ conv_stem_bwd.f32.mfma16_f32.nhwc.v4.s4x4.w4x4.nb64.kc8.t4f2
 # not whole 16-byte vectors (r(2+1)d's 45-channel stem): the twin of each kept channels-last
 # vector config other than space-to-depth, at its chunk, or at the largest smaller chunk whose
 # register prefetch fits; and one config for each (dtype, atom, geometry, columns) whose twins
-# all overflow it.
+# all overflow it. A twin the code-size gate fails (an outlined function past the short-branch
+# range) is left out when its class keeps another config.
 conv_stem_bwd.bf16.fma.nhwc.v1.s1x1.w1x1.nb3.kc32.t16f2
 conv_stem_bwd.bf16.fma.nhwc.v1.s1x1.w1x1.nb4.kc16.t16f2
 conv_stem_bwd.bf16.fma.nhwc.v1.s1x1.w1x1.nb4.kc32.t16f2
@@ -1423,7 +1424,6 @@ conv_stem_bwd.f16.fma.nhwc.v1.s2x2.w4x4.nb16.kc16.t16f2.d3
 conv_stem_bwd.f16.fma.nhwc.v1.s4x4.w1x1.nb48.kc16.t16f2
 conv_stem_bwd.f16.fma.nhwc.v1.s4x4.w1x1.nb48.kc16.t8f4
 conv_stem_bwd.f16.fma.nhwc.v1.s4x4.w1x1.nb64.kc16.t16f2
-conv_stem_bwd.f16.fma.nhwc.v1.s4x4.w1x1.nb64.kc16.t8f4
 conv_stem_bwd.f16.fma.nhwc.v1.s4x4.w1x1.nb64.kc32.t16f2
 conv_stem_bwd.f16.fma.nhwc.v1.s4x4.w4x4.nb48.kc16.t8f1
 conv_stem_bwd.f16.fma.nhwc.v1.s4x4.w4x4.nb64.kc16.t8f1
