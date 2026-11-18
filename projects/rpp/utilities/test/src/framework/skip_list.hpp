@@ -133,7 +133,6 @@ inline constexpr const char* kSkipList[] = {
     "Image_Filter/BoxFilterTest.Correctness/HOST_F16toF16_PLN3_PartialRoi_*_k5",
     "Image_Filter/BoxFilterTest.Correctness/HOST_F32toF32_PLN1_PartialRoi_*_k5",
     "Image_Filter/BoxFilterTest.Correctness/HOST_F32toF32_PLN3_PartialRoi_*_k5",
-    "Image_Filter/EmbossTest.Correctness/*_F16toF16_*",
     "Image_Filter/EmbossTest.Correctness/*_PKD3_PartialRoi_*_k3_*",
     "Image_Filter/EmbossTest.Correctness/*_PKD3toPLN3_PartialRoi_*_k3_*",
     "Image_Filter/EmbossTest.Correctness/HIP_I8toI8_*",
