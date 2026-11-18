@@ -13,7 +13,8 @@
 # A test that is in library/tests but in no list here does not run in CI.
 #
 # A pytest entry starts its command with ${_ROCKE_INSTALLED_PYTEST}, which
-# platform/CMakeLists.txt defines. The explicit gates do not.
+# platform/CMakeLists.txt defines. The explicit gates do not. The configure
+# fails for any other pytest entry that does not.
 
 # Oracle-free uniform-probability launches of the shipped dense kernels. Only
 # the GPU module runs here; its CPU contracts run in the attention CPU lane.
@@ -324,6 +325,12 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # discovery. The structural gate is host-only; the compiler gate additionally
 # requires the reference COMGR/LLVM toolchain and llvm-objdump. They share a
 # lock to cap aggregate host memory and compiler pressure in parallel runs.
+# The gate conftest stops a partial run, so the gates run whole on every CI shard
+# and must not load the shard plugin. platform/CMakeLists.txt reads this list
+# when it checks the installed pytest entries.
+set(_ROCKE_EXPLICIT_PYTEST_GATES
+    rocke_library_counted_structural_gate
+    rocke_library_counted_compiler_gate)
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_counted_structural_gate python -m pytest -p pytest_timeout \"${ROCKE_TEST_CTEST_REL}tests/library/tests/gates/attention_bwd_counted_structural_gate.py\" -v -rs --timeout=60)\n"
        "set_tests_properties(rocke_library_counted_structural_gate PROPERTIES\n"
