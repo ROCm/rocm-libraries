@@ -3194,3 +3194,90 @@ TEST_CASE("GEMM: a gfx115x kernel is modeled with the workgroup mapping it launc
     ignores_declared_mapping(hw);
   }
 }
+
+// ---------------------------------------------------------------------------------------
+// gfx1151 L_mem reference.  Shipped gfx1151 TN kernels on the problems they are tuned for,
+// timed with the TensileLite client at a 2100 MHz shader clock, 512 MB rotating buffer and all
+// leading dimensions padded to an odd multiple of 128 B.  Memory-only is the kernel with its
+// WMMA instructions removed, compute-only the kernel with its global and LDS loads and stores
+// removed.  Cycles are per K-iteration: kernel time * clock / (timesteps * K / DepthU), with
+// timesteps = ceil(workgroups / 40).
+// ---------------------------------------------------------------------------------------
+namespace {
+struct gfx1151_reference_t {
+  size_t m, n, k;
+  bool f16;
+  size_t mt_m, mt_n, depth_u;
+  int wgm;
+  size_t grvw_a, grvw_b, gwvw_d;
+  int vw_a, vw_b;
+  int wave_group_m, wave_group_n;
+  int pgr, plr;
+  bool one_lds_buffer;
+  // Measured.
+  int roofline_pct;  // of 43.0 TFLOP/s
+  double full, compute_only, memory_only;
+};
+
+// clang-format off
+const gfx1151_reference_t gfx1151_reference[] = {
+    {12288, 1024,  1536, false,  96, 128, 32, 5, 8, 8, 1, 1, 4, 2, 2, 2, 0, false, 80, 1890, 1701, 1487},
+    {37888, 1606,  3584, false, 128,  96, 32, 0, 8, 8, 4, 4, 1, 2, 2, 1, 0, false, 90, 1668, 1603, 1673},
+    { 2560,  428,  9728, false, 128, 112, 32, 8, 8, 4, 1, 1, 1, 4, 1, 2, 0, false, 84, 2027, 1903, 1521},
+    {16384,  779,  5376, false, 128, 112, 32, 8, 8, 4, 1, 1, 1, 4, 1, 2, 0, false, 89, 1953, 1861, 1447},
+    {20480,  775,  2560, false, 128, 112, 32, 8, 8, 4, 1, 1, 1, 4, 1, 2, 0, false, 82, 2163, 1970, 1551},
+    { 2560, 1322,  9728, false, 128,  96, 64, 8, 8, 8, 1, 1, 1, 2, 2, 2, 0, false, 91, 3314, 3172, 2335},
+    // One N tile: no workgroup shares A, so this one is DRAM-bound.
+    { 3584,  128, 18944, false,  96, 128, 32, 0, 8, 8, 1, 1, 4, 2, 2, 2, 0, false, 60, 2392, 1597, 2305},
+    { 9216, 1214,  3072, false, 128,  96, 32, 8, 8, 8, 2, 2, 1, 2, 2, 2, 1, false, 86, 1694, 1626, 1590},
+    { 1152, 3200,  4304, true,   96, 128, 32, 8, 8, 8, 1, 1, 1, 2, 2, 2, 1, true,  78, 1851, 1690, 1764},
+};
+// clang-format on
+
+// The config as Serialization/PredictionLibrary.hpp builds it from the solution.
+origami::config_t gfx1151_reference_config(const gfx1151_reference_t& r) {
+  origami::config_t c;
+  c.mt                = {r.mt_m, r.mt_n, r.depth_u};
+  c.mi                = {16, 16, 16};
+  c.occupancy         = 2;
+  c.workgroup_mapping = r.wgm;
+  c.stream_k          = 0;
+  c.grvw_a            = r.grvw_a;
+  c.grvw_b            = r.grvw_b;
+  c.gwvw_d            = r.gwvw_d;
+  c.vector_width_a    = r.vw_a;
+  c.vector_width_b    = r.vw_b;
+  origami::tensile_params_t t;
+  t.wavefront_size              = 32;
+  t.wave_group_m                = r.wave_group_m;
+  t.wave_group_n                = r.wave_group_n;
+  t.prefetch_global_read        = r.pgr;
+  t.prefetch_local_read         = r.plr;
+  t.workgroup_mapping_xcc       = 1;
+  t.workgroup_mapping_xcc_group = -1;
+  t.one_lds_buffer              = r.one_lds_buffer;
+  t.source_swap                 = true;
+  t.unroll_major_lds_a          = 1;
+  t.unroll_major_lds_b          = 1;
+  c.backend                     = t;
+  return c;
+}
+}  // namespace
+
+TEST_CASE("GEMM: gfx1151 L_mem follows measured memory-only kernels", "[gemm][gfx1151]") {
+  const auto hw = origami::hardware_t::get_hardware_for_arch(
+      origami::hardware_t::architecture_t::gfx1151, 40, 65536, 512 * 1024, 2 << 20, 2100000);
+
+  for (const auto& r : gfx1151_reference) {
+    CAPTURE(r.m, r.n, r.k, r.mt_m, r.mt_n, r.depth_u, r.roofline_pct);
+    auto problem = make_problem(r.m, r.n, r.k);
+    if (r.f16)
+      problem.a_dtype = problem.b_dtype = problem.c_dtype = problem.d_dtype = problem.mi_dtype =
+          origami::data_type_t::Half;
+    const auto config = gfx1151_reference_config(r);
+    origami::gemm::context_t ctx(problem, hw, config);
+    const double L_mem = origami::gemm::compute_memory_latency(problem, hw, config, ctx);
+    CAPTURE(L_mem, r.memory_only, r.compute_only, r.full);
+    REQUIRE(L_mem == Approx(r.memory_only).epsilon(0.20));
+  }
+}
