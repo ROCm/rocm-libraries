@@ -135,6 +135,60 @@ struct heuristic_defaults_t {
 };
 
 /**
+ * @brief W4A16 (int4 A dequantized to a bf16/fp16 MI type) on gfx1151: constants of
+ *        the latency model and of the Stream-K launch grid, fit on hipBLASLt kernel times.
+ *
+ * The constants describe the kernels.  What depends on the device is read from hardware_t
+ * (CUs, SIMDs per CU, MALL) and from the kernel's CUOccupancy.
+ */
+struct w4a16_params_t {
+  // --- Tile latency model ---
+  // Dequantize VALU per element, with its dependency stalls (bf16 rounds f32 products, fp16
+  // uses packed halves).
+  static constexpr double BF16_DEQUANT_VALU_PER_ELEM = 10.0;
+  static constexpr double F16_DEQUANT_VALU_PER_ELEM  = 5.0;
+  // Cycles per C element of a Stream-K partial tile on the critical path: the workgroup that
+  // finishes a tile waits for, reads and adds the f32 partial of each other workgroup.
+  static constexpr double SK_FIXUP_CYCLES_PER_ELEM = 2.71;
+
+  // --- Stream-K grid (grid_k_split_aware_w4a16) ---
+  // Waves of a workgroup when the config does not carry its wave layout.
+  static constexpr int DEFAULT_WAVES_PER_WORKGROUP = 4;
+  // Workgroups with this many waves fill a CU (rules 1 and 4).
+  static constexpr int FULL_CU_WAVES = 16;
+  // Rule 2: K iterations up to which a tile per CU or less stays DP, and up to which it does
+  // when the tiles are more than half the CUs (each workgroup then gets over half a tile).
+  static constexpr size_t SK_SPLIT_MIN_K_ITERS           = 8;
+  static constexpr size_t SK_SPLIT_MIN_K_ITERS_OVER_HALF = 64;
+  // Rules 4 and 6: with a MALL to hold the partials, tiles are shared below this many tiles
+  // per CU (a single row of token tiles up to it).
+  static constexpr size_t SHARED_MAX_TILES_PER_CU = 5;
+  // Above the shared range (or without a MALL): DP for K up to this many iterations.
+  static constexpr size_t MANY_TILES_DP_MAX_K_ITERS = 16;
+  // Rule 4: largest ceil(t) / t that still runs DP: full-CU workgroups, 4-wave (non-token)
+  // ones, and the rest.
+  static constexpr double DP_MAX_WAVE_ROUNDING_FULL_CU = 1.5;
+  static constexpr double DP_MAX_WAVE_ROUNDING_4_WAVES = 1.15;
+  static constexpr double DP_MAX_WAVE_ROUNDING         = 1.06;
+  // Rule 5: token tiles (MT_N at most this) get one workgroup per SIMD of the CU.
+  static constexpr size_t TOKEN_TILE_MAX_N = 48;
+};
+
+inline constexpr w4a16_params_t W4A16_PARAMS{};
+
+/// The W4A16 constants for @p problem on @p hardware, or nullptr where the W4A16 model does
+/// not apply. The latency model and the Stream-K grid rule both use it, so they apply together.
+inline const w4a16_params_t* w4a16_params(const problem_t& problem, const hardware_t& hardware) {
+  if (problem.a_dtype != data_type_t::Int4) return nullptr;
+  const w4a16_params_t* p = nullptr;
+  switch (hardware.arch) {
+    case hardware_t::architecture_t::gfx1151: p = &W4A16_PARAMS; break;
+    default: return nullptr;
+  }
+  return (problem.mi_dtype == data_type_t::BFloat16 || problem.mi_dtype == data_type_t::Half) ? p : nullptr;
+}
+
+/**
  * @brief StreamK=5 hybrid-mode (SK3 static vs SK4 dynamic) selection thresholds.
  *
  * Fit to measured SK5 on(SK4)/off(SK3) sweeps on MI350X (gfx950); see

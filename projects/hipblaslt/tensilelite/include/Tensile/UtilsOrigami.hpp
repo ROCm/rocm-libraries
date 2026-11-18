@@ -83,6 +83,8 @@ namespace TensileLite
             return origami::data_type_t::BFloat6;   
         case rocisa::DataType::Float4:
             return origami::data_type_t::Float4;
+        case rocisa::DataType::Int4:
+            return origami::data_type_t::Int4;
 
         default:
             throw std::runtime_error("Unsupported data type: " + std::to_string(static_cast<int>(type)));
