@@ -535,10 +535,13 @@ if(ROCKE_INSTALL_TESTS)
     # arch-domain reproduction gate. Keep it outside the production package:
     # CTest owns the compiler sweep; pytest checks the policy without one.
     # tests/conftest.py also points rocke.tests.ir_validity at this copy, so the
-    # installed pytest runs compile lowered IR with the same tool.
+    # installed pytest runs compile lowered IR with the same tool. The
+    # fragment transport oracle imports the ISA comparison tool from this copy.
     install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ir_validity.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/compare_fragment_transport_isa.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/compare_fragment_transport_io.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_corpus.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_bounded_run.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_flavor_gate.py"
