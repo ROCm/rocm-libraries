@@ -183,11 +183,13 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
 
     [[maybe_unused]] const bool is_deterministic = problem.GetConv().attribute.deterministic;
 
-    // AI heuristics (if enabled)
+    // AI heuristics (if enabled), then the default; the result is computed once per process
+    // (DefaultConfigCache), since the AI heuristics also build the full valid-kernel list.
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-    if(&ctx != &GetDummyCtx() &&
-       !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS_AI_HEUR))
-    {
+    const bool ai_heuristics =
+        &ctx != &GetDummyCtx() &&
+        !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS_AI_HEUR);
+    const auto run_ai = [&]() {
         bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
         auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
@@ -199,29 +201,30 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
             loader, CKSolverType::GrpConv3dWrw, problem.GetInDataType(), mode_use_tf32);
 
         // Note: No KTN runner needed for 3D (supports_ktn = false)
-        if(RunAIHeuristics(k3DWrwSolverConfig,
-                           state,
-                           ctx,
-                           problem,
-                           is_deterministic,
-                           fill_valid_kernels,
-                           nullptr,
-                           ck_val_creator,
-                           mode_use_tf32))
-        {
-            return;
-        }
-    }
-#endif
-
-    // Fallback to default initialization, computed once per process (DefaultConfigCache).
-    InitDefaultConfigFromCache(*this,
+        return RunAIHeuristics(k3DWrwSolverConfig,
                                state,
                                ctx,
                                problem,
-                               ConvHipImplicitGemm3DGroupWrwXdlops{}.SolverDbId(),
-                               !env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS),
-                               k3DWrwSolverConfig.uses_split_k);
+                               is_deterministic,
+                               fill_valid_kernels,
+                               nullptr,
+                               ck_val_creator,
+                               mode_use_tf32);
+    };
+#else
+    const bool ai_heuristics = false;
+    const auto run_ai        = [] { return false; };
+#endif
+
+    InitHeuristicConfigFromCache(*this,
+                                 state,
+                                 ctx,
+                                 problem,
+                                 ConvHipImplicitGemm3DGroupWrwXdlops{}.SolverDbId(),
+                                 !env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS),
+                                 k3DWrwSolverConfig.uses_split_k,
+                                 ai_heuristics,
+                                 run_ai);
 
     // Invariant: split_k must always be 1 in deterministic mode
     assert(!is_deterministic || split_k == 1);

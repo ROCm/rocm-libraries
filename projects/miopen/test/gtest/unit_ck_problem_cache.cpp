@@ -305,6 +305,18 @@ TEST(CPU_DefaultConfigKey_NONE, DeviceSolverAndRankingChangeTheKey)
     EXPECT_NE(Key(p, "gfx942", true, "ConvHipImplicitGemm3DGroupWrwXdlops"), base) << "solver";
 }
 
+TEST(CPU_DefaultConfigKey_NONE, AiHeuristicsAndComputeUnitsChangeTheHeuristicKey)
+{
+    using miopen::solver::conv::HeuristicConfigKey;
+    const ProblemDescription p = MakeProblem(Spec{});
+    const auto key             = [&](std::size_t compute_units, bool ai) {
+        return HeuristicConfigKey(
+            "ConvHipImplicitGemmGroupWrwXdlops", "gfx942", compute_units, p, true, ai);
+    };
+    EXPECT_NE(key(304, true), key(304, false)) << "AI heuristics";
+    EXPECT_NE(key(304, true), key(228, true)) << "compute units read by the AI features";
+}
+
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 namespace {

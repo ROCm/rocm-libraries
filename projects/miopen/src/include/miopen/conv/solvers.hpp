@@ -3946,14 +3946,16 @@ private:
     void InitValidKernels(const miopen::conv::ProblemDescription& problem);
     mutable bool use_tf32 = false;
 
-    template <class Config, class State>
-    friend void InitDefaultConfigFromCache(Config&,
-                                           State&,
-                                           const ExecutionContext&,
-                                           const miopen::conv::ProblemDescription&,
-                                           std::string_view,
-                                           bool,
-                                           bool);
+    template <class Config, class State, class RunAI>
+    friend void InitHeuristicConfigFromCache(Config&,
+                                             State&,
+                                             const ExecutionContext&,
+                                             const miopen::conv::ProblemDescription&,
+                                             std::string_view,
+                                             bool,
+                                             bool,
+                                             bool,
+                                             RunAI&&);
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupWrwXdlops final
@@ -4236,14 +4238,16 @@ private:
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
     mutable bool use_tf32 = false;
 
-    template <class Config, class State>
-    friend void InitDefaultConfigFromCache(Config&,
-                                           State&,
-                                           const ExecutionContext&,
-                                           const miopen::conv::ProblemDescription&,
-                                           std::string_view,
-                                           bool,
-                                           bool);
+    template <class Config, class State, class RunAI>
+    friend void InitHeuristicConfigFromCache(Config&,
+                                             State&,
+                                             const ExecutionContext&,
+                                             const miopen::conv::ProblemDescription&,
+                                             std::string_view,
+                                             bool,
+                                             bool,
+                                             bool,
+                                             RunAI&&);
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupWrwXdlops final
