@@ -358,7 +358,7 @@ for low in ("fwd", "bwd", "wrw"):
                 group, atom, side, layout, ko, (fd, fr, fs), tile = cfg
                 wr, rb, nw, mpw = tile
                 name = (
-                    f"conv_narrow.wrw.{dt}.{atom}.{side}.{layout}.k{ko}.f{fd}x{fr}x{fs}"
+                    f"conv_narrow.wrw.{dt}.{atom}.{PACK_OF[group]}.{side}.{layout}.k{ko}.f{fd}x{fr}x{fs}"
                     f".w{wr}r{rb}n{nw}m{mpw}"
                 )
                 meta = {
@@ -386,7 +386,7 @@ for low in ("fwd", "bwd", "wrw"):
                 group, atom, layout, ko, (fd, fr, fs, sw), tile, cmin, cm = cfg
                 wr, rb, nw, op, pd, ds = tile
                 name = (
-                    f"conv_narrow.{low}.{dt}.{atom}.{layout}.k{ko}.f{fd}x{fr}x{fs}s{sw}d{ds}"
+                    f"conv_narrow.{low}.{dt}.{atom}.{PACK_OF[group]}.{layout}.k{ko}.f{fd}x{fr}x{fs}s{sw}d{ds}"
                     f".w{wr}r{rb}n{nw}o{op}p{pd}c{cm}"
                 )
                 meta = {
