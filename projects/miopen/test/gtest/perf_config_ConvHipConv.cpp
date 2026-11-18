@@ -8,7 +8,12 @@
 #if defined(MIOPEN_USE_HIPCONV) && MIOPEN_USE_HIPCONV
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
+#include <miopen/conv/heuristics/lgbm_common.hpp>
 #include <miopen/conv/heuristics/lgbm_pcfg_metadata.hpp>
+#include <miopen/conv/heuristics/lgbm_pcfg_pick.hpp>
+
+#include <algorithm>
+#include <string>
 #endif
 
 using Config   = miopen::solver::conv::PerformanceConfigConvHipConv;
@@ -126,6 +131,73 @@ TEST(GPU_PerfConfig_ConvHipConv_FP16, PickerCatalogVersion)
     }
     if(candidates == 0)
         GTEST_SKIP() << "no ConvHipConv picker candidates for " << gfx_id;
+}
+
+// gfx950 backward weights uses a pick only when its score beats the default config's score by a
+// margin. Forward never asks for the default config, the default config's record is one of the
+// candidates PickConfig scores, PickConfig abstains when the default is not among them, and a pick
+// that clears the margin is never the default itself.
+TEST(GPU_PerfConfig_ConvHipConv_FP16, PickerDefaultMargin)
+{
+    if(!IsTestSupportedByDevice(Gpu::gfx950))
+        GTEST_SKIP();
+
+    const auto& meta  = miopen::ai::lgbm::pcfg::LgbmPcfgMetadata::Get();
+    const auto* model = meta.IsReady() ? meta.Find("ConvHipConv") : nullptr;
+    if(model == nullptr)
+        GTEST_SKIP() << "no ConvHipConv perf-config model installed";
+
+    using miopen::ai::lgbm::pcfg::PickConfig;
+    using miopen::conv::Direction;
+
+    constexpr auto type   = miopenHalf;
+    constexpr auto layout = miopenTensorNHWC;
+    // clang-format off
+    const auto test_case = TestCase{{type, layout, {7, 64, 8, 8}}, {type, layout, {128, 64, 3, 3}}, type, {{1, 1}, {1, 1}, {1, 1}}};
+    // clang-format on
+
+    auto&& handle     = get_handle();
+    auto ctx          = miopen::ExecutionContext{&handle};
+    const auto solver = miopen::solver::conv::ConvHipConv{};
+
+    int asked = 0;
+
+    const auto fwd = test_case.GetProblemDescription(Direction::Forward);
+    fwd.SetupFloats(ctx);
+    const auto fwd_picks = PickConfig("ConvHipConv", fwd, handle, [&] {
+        ++asked;
+        return std::string{};
+    });
+    EXPECT_FALSE(fwd_picks.empty());
+    EXPECT_EQ(asked, 0);
+
+    const auto wrw = test_case.GetProblemDescription(Direction::BackwardWeights);
+    wrw.SetupFloats(ctx);
+    ASSERT_TRUE(solver.IsApplicable(ctx, wrw));
+
+    const auto key =
+        handle.GetDeviceName() + "|" +
+        std::to_string(miopen::ai::lgbm::DirectionPerfDbCode(Direction::BackwardWeights)) + "|" +
+        miopen::ai::lgbm::DataTypeName(type);
+    const auto bucket = model->buckets.find(key);
+    ASSERT_NE(bucket, model->buckets.end()) << key;
+
+    const auto record = solver.GetDefaultPerformanceConfig(ctx, wrw).ToString();
+    EXPECT_TRUE(std::any_of(bucket->second.begin(),
+                            bucket->second.end(),
+                            [&](const auto& candidate) { return candidate.desc == record; }))
+        << record;
+
+    EXPECT_TRUE(
+        PickConfig("ConvHipConv", wrw, handle, [] { return std::string{"not-a-config"}; }).empty());
+
+    asked             = 0;
+    const auto picked = PickConfig("ConvHipConv", wrw, handle, [&] {
+        ++asked;
+        return record;
+    });
+    EXPECT_EQ(asked, 1);
+    EXPECT_EQ(std::find(picked.begin(), picked.end(), record), picked.end());
 }
 #endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
