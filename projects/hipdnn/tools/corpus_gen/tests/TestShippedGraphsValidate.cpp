@@ -129,45 +129,61 @@ TEST(TestShippedGraphsValidate, EveryDeclarationBuildsGraphsTheFrontendValidates
 
 TEST(TestShippedGraphsValidate, EverySdpaFormBuildsAGraphTheFrontendValidates)
 {
-    // The sweep above reaches a form only by chance; this builds each declared one, over a GQA
-    // causal shape, with and without the training forward's statistics.
+    // The sweep above reaches a form only by chance; this builds each declared one over a GQA
+    // shape at every element type, mask and diagonal anchor the declaration admits, with and
+    // without the training forward's statistics.
     for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
     {
-        std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/" + operation
-                           + ".opmeta.json");
-        ASSERT_TRUE(file.good()) << operation;
-        const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-        ASSERT_TRUE(parsed.ok()) << operation;
-        const auto& metadata = *parsed.metadata;
+        const auto metadata = test::shippedOperation(operation);
         const auto* form = metadata.find("form");
         ASSERT_NE(form, nullptr) << operation;
         ASSERT_FALSE(form->values.empty()) << operation;
 
+        size_t built = 0;
         for(const auto& value : form->values)
         {
-            for(const bool stats : {true, false})
+            for(const auto* dtype : {"fp16", "bf16"})
             {
-                const ProblemPoint point{{"batch", int64_t{2}},
-                                         {"heads", int64_t{4}},
-                                         {"heads_kv", int64_t{2}},
-                                         {"seqlen_q", int64_t{16}},
-                                         {"seqlen_k", int64_t{32}},
-                                         {"head_dim", int64_t{64}},
-                                         {"is_causal", true},
-                                         {"alignment", std::string("top_left")},
-                                         {"generate_stats", stats},
-                                         {"dtype", std::string("fp16")},
-                                         {"form", value}};
-                const auto built = buildGraphFor(metadata, point);
-                ASSERT_TRUE(built.ok()) << operation << " " << value << ": " << built.error;
-                hipdnn_frontend::graph::Graph graph;
-                const auto restored = graph.deserialize(built.bytes);
-                ASSERT_TRUE(restored.is_good())
-                    << operation << " " << value << ": deserialize: " << restored.get_message();
-                const auto valid = graph.validate();
-                EXPECT_TRUE(valid.is_good()) << operation << " " << value << " (stats " << stats
-                                             << "): validate: " << valid.get_message();
+                for(const bool causal : {true, false})
+                {
+                    for(const auto* alignment : {"top_left", "bottom_right"})
+                    {
+                        for(const bool stats : {true, false})
+                        {
+                            const ProblemPoint point{{"batch", int64_t{2}},
+                                                     {"heads", int64_t{4}},
+                                                     {"heads_kv", int64_t{2}},
+                                                     {"seqlen_q", int64_t{16}},
+                                                     {"seqlen_k", int64_t{32}},
+                                                     {"head_dim", int64_t{64}},
+                                                     {"is_causal", causal},
+                                                     {"alignment", std::string(alignment)},
+                                                     {"generate_stats", stats},
+                                                     {"dtype", std::string(dtype)},
+                                                     {"form", value}};
+                            // The declaration pins the anchor where it makes no difference.
+                            if(!detail::satisfiesConstraints(metadata, point))
+                            {
+                                continue;
+                            }
+                            auto where = operation;
+                            where.append(" ").append(detail::describe(point));
+                            const auto result = buildGraphFor(metadata, point);
+                            ASSERT_TRUE(result.ok()) << where << ": " << result.error;
+                            hipdnn_frontend::graph::Graph graph;
+                            const auto restored = graph.deserialize(result.bytes);
+                            ASSERT_TRUE(restored.is_good())
+                                << where << ": deserialize: " << restored.get_message();
+                            const auto valid = graph.validate();
+                            EXPECT_TRUE(valid.is_good())
+                                << where << ": validate: " << valid.get_message();
+                            ++built;
+                        }
+                    }
+                }
             }
         }
+        // Three admitted mask and anchor pairs, two element types, two statistics settings.
+        EXPECT_EQ(built, form->values.size() * 12U) << operation;
     }
 }

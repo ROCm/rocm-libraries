@@ -66,10 +66,11 @@ pack-coverage engine adds its entry there on its branch.
   reports a regime the engine does not serve as short, without failing.
 - `--form-floor n` asks n in every optional **form** the operation declares (`form_label`):
   for `sdpa_fwd` plain, `scale_unset`, `scale_tensor`, `dropout`, `padded`, `ragged`, `bias`,
-  `sink`; for `sdpa_bwd` the first six. Each form varies one optional attribute or tensor from
-  the plain graph, so a model trains and is validated on graphs that leave it unbound (RFC 0019
-  §6.2). Forms are a manifest column of their own, not part of the regime label, and are
-  reported as `form:<label>` in `reports.regime_quota`; the live engine decides which it serves.
+  `sink`; for `sdpa_bwd` all but `ragged` and `sink`. Each form varies one optional attribute
+  or tensor from the plain graph, so a model trains and is validated on graphs that leave it
+  unbound (RFC 0019 §6.7, absent is not zero, and §6.8 rule 9). Forms are a manifest column of
+  their own, not part of the regime label, and are reported as `form:<label>` in
+  `reports.regime_quota`; the live engine decides which it serves.
 - `--include-extremes` takes the served point at each end of every numeric parameter first;
   `--ceiling` is the largest extent searched. Every manifest records `served_extent` (how far
   the search reached; a maximum near the ceiling is marked `at_search_ceiling`).

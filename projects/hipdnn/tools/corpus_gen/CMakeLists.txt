@@ -76,6 +76,13 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                 # One form axis of eight labels: one graph under each, and nothing else. Each
                 # label is a value of the manifest's own `form` column and a reported quota.
                 "form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--form-floor,1|0|8|plain,scale_unset,scale_tensor,dropout,padded,ragged,bias,sink"
+                # The backward declares six of them: no sink token, and no ragged form.
+                "form_floor_sdpa_bwd|--without-engine,--operations,${_operations_dir},--operation,sdpa_bwd,--form-floor,1|0|6|plain,scale_unset,scale_tensor,dropout,padded,bias"
+                # Both floors at once, narrowed to one form so that the six regimes the constraints
+                # exclude and the seven other forms are short: one graph fills a regime's floor
+                # and the form's, so `requested` is the graphs plus the larger of the two
+                # shortfalls (CorpusGenRun.cmake), not the floors' sum.
+                "regime_and_form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-floor,1,--form-floor,1,--keep,q.form=padded|0|18|padded"
                 # A sweep with no share still delivers the regimes the quotas name.
                 "regime_quota_without_sweep|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-quota,decode_short_mha=3,--sweep-share,0|0|3"
                 "model_shapes|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--model-shapes,${_model_shapes},--count,1,--model-share,1,--sweep-share,0|0|1"

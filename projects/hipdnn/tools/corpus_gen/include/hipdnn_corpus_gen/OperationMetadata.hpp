@@ -473,6 +473,71 @@ inline ParameterValue jsonToValue(const nlohmann::json& value)
     return value.is_string() ? value.get<std::string>() : std::string();
 }
 
+/// @brief Checks an axis that labels the values of one enum parameter, one `==` clause each
+/// (`{"==": ["$q.form", "padded"]}`).
+///
+/// Such an axis spells the parameter's vocabulary a second time, so each clause must compare a
+/// value the parameter declares, and each declared value must be compared by a clause or be the
+/// `otherwise` label: a value left out would be labelled `otherwise`, a misspelt one would
+/// never match. An axis with any other clause is not of this shape and is not checked.
+inline void checkEnumAxis(const RegimeAxis& axis,
+                          const std::string& block,
+                          const OperationMetadata& metadata,
+                          MetadataLoad& load)
+{
+    const Parameter* parameter = nullptr;
+    std::vector<std::string> compared;
+    for(const auto& when : axis.whens)
+    {
+        const auto operands = when.is_object() && when.size() == 1 && when.contains("==")
+                                  ? when.at("==")
+                                  : nlohmann::json();
+        if(!operands.is_array() || operands.size() != 2 || !operands[0].is_string()
+           || !operands[1].is_string())
+        {
+            return;
+        }
+        const auto* compares = metadata.find(queryReference(operands[0].get<std::string>()));
+        if(compares == nullptr || compares->type != ParameterType::ENUM
+           || (parameter != nullptr && compares != parameter))
+        {
+            return;
+        }
+        parameter = compares;
+        compared.push_back(operands[1].get<std::string>());
+    }
+    if(parameter == nullptr)
+    {
+        return;
+    }
+
+    const auto declares = [&](const std::string& value) {
+        return std::find(parameter->values.begin(), parameter->values.end(), value)
+               != parameter->values.end();
+    };
+    for(const auto& value : compared)
+    {
+        if(!declares(value))
+        {
+            auto error = block;
+            error.append(" axis '").append(axis.name).append("' compares '");
+            error.append(parameter->name).append("' to '").append(value);
+            load.errors.push_back(error.append("', which it does not declare"));
+        }
+    }
+    for(const auto& value : parameter->values)
+    {
+        if(value != axis.otherwise
+           && std::find(compared.begin(), compared.end(), value) == compared.end())
+        {
+            auto error = block;
+            error.append(" axis '").append(axis.name).append("' has no clause for '");
+            error.append(parameter->name).append("' value '").append(value);
+            load.errors.push_back(error.append("' and does not name it 'otherwise'"));
+        }
+    }
+}
+
 /// @brief The axes of a `regime_label` or `form_label` block, in declaration order.
 ///
 /// @p block names the block in an error. An array, not an object: axis order is part of the
@@ -542,6 +607,7 @@ inline std::vector<RegimeAxis> parseLabelAxes(const nlohmann::json& axes,
             load.errors.push_back(block + " axis '" + axis.name
                                   + "': " + std::string(error.what()));
         }
+        checkEnumAxis(axis, block, metadata, load);
         parsed.push_back(std::move(axis));
     }
     return parsed;

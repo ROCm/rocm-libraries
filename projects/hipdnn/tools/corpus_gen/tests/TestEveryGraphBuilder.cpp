@@ -13,14 +13,16 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_corpus_gen/GraphBuilderRegistry.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h>
 
 #include <nlohmann/json.hpp>
 
 #include "OperationsDir.hpp"
 #include <algorithm>
-#include <fstream>
+#include <map>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace hipdnn_corpus_gen
@@ -385,16 +387,6 @@ TEST(TestEveryGraphBuilder, AnAdapterMissingAnArgumentSaysWhichOne)
 namespace
 {
 
-OperationMetadata shippedAttention(const std::string& operation)
-{
-    const std::string path = test::operationsDir() + "/" + operation + ".opmeta.json";
-    std::ifstream file(path);
-    EXPECT_TRUE(file.is_open()) << path;
-    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-    EXPECT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
-    return parsed.metadata.value_or(OperationMetadata{});
-}
-
 /// One shape every form is built at: GQA, causal, fp16.
 constexpr int64_t BATCH = 2;
 constexpr int64_t HEADS = 4;
@@ -418,100 +410,88 @@ ProblemPoint formPoint(const std::string& form, bool stats = true)
                         {"form", form}};
 }
 
-/// Which optional fields of an SDPA node are set.
-struct BoundFields
+/// What an SDPA node binds, as the generated `node_operands::visit` reports it for either
+/// direction: its tensor operands by role with their uids, and the scalar attributes it sets. A
+/// bool is listed only when true (the visitor reports an unset one at its default).
+struct Operands
 {
-    bool attnScale = false;
-    bool scaleTensor = false;
-    bool dropout = false;
-    bool seed = false;
-    bool offset = false;
-    bool padding = false;
-    bool seqLenQ = false;
-    bool seqLenKv = false;
-    bool bias = false;
-    bool sink = false;
+    std::map<std::string, int64_t> tensors;
+    std::set<std::string> scalars;
 
-    bool operator==(const BoundFields& other) const
+    void tensor(std::string_view role, int64_t uid, bool /*workDataDependent*/)
     {
-        return attnScale == other.attnScale && scaleTensor == other.scaleTensor
-               && dropout == other.dropout && seed == other.seed && offset == other.offset
-               && padding == other.padding && seqLenQ == other.seqLenQ && seqLenKv == other.seqLenKv
-               && bias == other.bias && sink == other.sink;
+        tensors[std::string(role)] = uid;
+    }
+
+    void scalar(std::string_view name, int64_t /*value*/)
+    {
+        scalars.emplace(name);
+    }
+
+    void scalar(std::string_view name, double /*value*/)
+    {
+        scalars.emplace(name);
+    }
+
+    void scalar(std::string_view name, bool value)
+    {
+        if(value)
+        {
+            scalars.emplace(name);
+        }
+    }
+
+    std::set<std::string> roles() const
+    {
+        std::set<std::string> roles;
+        for(const auto& entry : tensors)
+        {
+            roles.insert(entry.first);
+        }
+        return roles;
     }
 };
 
-template <typename Attributes>
-BoundFields boundFields(const Attributes& a)
+Operands operandsOf(const fb::Graph& graph)
 {
-    BoundFields bound;
-    bound.attnScale = a.attn_scale_value().has_value();
-    bound.scaleTensor = a.scale_tensor_uid().has_value();
-    bound.dropout = a.dropout_probability().has_value();
-    bound.seed = a.seed_tensor_uid().has_value();
-    bound.offset = a.offset_tensor_uid().has_value();
-    bound.padding = a.padding_mask();
-    bound.seqLenQ = a.seq_len_q_tensor_uid().has_value();
-    bound.seqLenKv = a.seq_len_kv_tensor_uid().has_value();
-    bound.bias = a.attn_mask_tensor_uid().has_value();
+    Operands bound;
+    const auto* node = graph.nodes()->Get(0);
+    if(const auto* forward = node->attributes_as_SdpaAttributes())
+    {
+        fb::node_operands::visit(*forward, bound);
+    }
+    else if(const auto* backward = node->attributes_as_SdpaBackwardAttributes())
+    {
+        fb::node_operands::visit(*backward, bound);
+    }
     return bound;
 }
 
-BoundFields boundFields(const fb::SdpaAttributes& a)
-{
-    auto bound = boundFields<fb::SdpaAttributes>(a);
-    bound.sink = a.sink_token_tensor_uid().has_value();
-    return bound;
-}
-
-/// The fields each form binds, and how many tensors its graph holds (statistics included for
-/// the forward; the backward's nine roles always).
+/// What a form changes about the plain graph's node, and how many tensors its graph holds
+/// (statistics included for the forward; the backward's nine roles always). A direction that
+/// does not build the form has 0 tensors.
 struct FormExpectation
 {
     std::string form;
-    BoundFields bound;
+    std::set<std::string> addedRoles;
+    std::set<std::string> addedScalars;
+    std::set<std::string> removedScalars;
     size_t forwardTensors;
     size_t backwardTensors;
 };
 
 std::vector<FormExpectation> formExpectations()
 {
-    BoundFields plain;
-    plain.attnScale = true;
-    const auto with = [&plain](auto edit) {
-        auto bound = plain;
-        edit(bound);
-        return bound;
-    };
     return {
-        {"plain", plain, 5, 9},
-        {"scale_unset", with([](auto& b) { b.attnScale = false; }), 5, 9},
-        {"scale_tensor",
-         with([](auto& b) {
-             b.attnScale = false;
-             b.scaleTensor = true;
-         }),
-         6,
-         10},
-        {"dropout",
-         with([](auto& b) {
-             b.dropout = true;
-             b.seed = true;
-             b.offset = true;
-         }),
-         7,
-         11},
-        {"padded",
-         with([](auto& b) {
-             b.padding = true;
-             b.seqLenQ = true;
-             b.seqLenKv = true;
-         }),
-         7,
-         11},
-        {"ragged", plain, 7, 0},
-        {"bias", with([](auto& b) { b.bias = true; }), 6, 10},
-        {"sink", with([](auto& b) { b.sink = true; }), 6, 0},
+        {"plain", {}, {}, {}, 5, 9},
+        {"scale_unset", {}, {}, {"attn_scale_value"}, 5, 9},
+        {"scale_tensor", {"scale"}, {}, {"attn_scale_value"}, 6, 10},
+        {"dropout", {"seed", "offset"}, {"dropout_probability"}, {}, 7, 11},
+        {"padded", {"seq_len_q", "seq_len_kv"}, {"padding_mask"}, {}, 7, 11},
+        // The offsets go on the tensors, not the node.
+        {"ragged", {}, {}, {}, 7, 0},
+        {"bias", {"attn_mask"}, {}, {}, 6, 10},
+        {"sink", {"sink_token"}, {}, {}, 6, 0},
     };
 }
 
@@ -544,61 +524,87 @@ BuildResult buildForm(const OperationMetadata& metadata, const std::string& form
 
 } // namespace
 
-TEST(TestSdpaForms, EveryForwardFormBindsExactlyItsOptionalFields)
+namespace
 {
-    const auto metadata = shippedAttention("sdpa_fwd");
+
+/// Builds every form @p operation declares and checks that its node binds exactly the plain
+/// node's operands and scalars, changed as the form says, over @p baseRoles.
+void expectEveryFormBindsExactlyItsOptionalFields(const std::string& operation,
+                                                  const std::set<std::string>& baseRoles)
+{
+    const bool backward = operation == "sdpa_bwd";
+    const auto metadata = test::shippedOperation(operation);
+    const auto* form = metadata.find("form");
+    ASSERT_NE(form, nullptr) << operation;
+    const auto tensorsOf = [backward](const FormExpectation& expected) {
+        return backward ? expected.backwardTensors : expected.forwardTensors;
+    };
+
+    // The declared forms are the ones this direction builds: a new one needs an expectation here.
+    std::set<std::string> buildable;
     for(const auto& expected : formExpectations())
     {
+        if(tensorsOf(expected) != 0)
+        {
+            buildable.insert(expected.form);
+        }
+    }
+    EXPECT_EQ(std::set<std::string>(form->values.begin(), form->values.end()), buildable)
+        << operation;
+
+    const auto plainBuilt = buildForm(metadata, "plain");
+    ASSERT_TRUE(plainBuilt.ok()) << plainBuilt.error;
+    const auto plain = operandsOf(*asGraph(plainBuilt.bytes));
+    EXPECT_EQ(plain.roles(), baseRoles) << operation;
+    ASSERT_EQ(plain.scalars.count("attn_scale_value"), 1U) << operation;
+
+    for(const auto& expected : formExpectations())
+    {
+        if(tensorsOf(expected) == 0)
+        {
+            continue;
+        }
         const auto built = buildForm(metadata, expected.form);
-        ASSERT_TRUE(built.ok()) << expected.form << ": " << built.error;
+        ASSERT_TRUE(built.ok()) << operation << " " << expected.form << ": " << built.error;
         const auto* graph = asGraph(built.bytes);
         ASSERT_NE(graph, nullptr) << expected.form;
-        const auto* attributes = graph->nodes()->Get(0)->attributes_as_SdpaAttributes();
-        ASSERT_NE(attributes, nullptr) << expected.form;
+        const auto bound = operandsOf(*graph);
 
-        EXPECT_TRUE(boundFields(*attributes) == expected.bound) << expected.form;
-        EXPECT_EQ(graph->tensors()->size(), expected.forwardTensors) << expected.form;
-        // Only the ragged form names offsets, through the tensors rather than the node.
-        EXPECT_FALSE(attributes->cu_seq_len_q_tensor_uid().has_value()) << expected.form;
-        EXPECT_FALSE(attributes->cu_seq_len_kv_tensor_uid().has_value()) << expected.form;
+        auto roles = baseRoles;
+        roles.insert(expected.addedRoles.begin(), expected.addedRoles.end());
+        auto scalars = plain.scalars;
+        for(const auto& name : expected.removedScalars)
+        {
+            scalars.erase(name);
+        }
+        scalars.insert(expected.addedScalars.begin(), expected.addedScalars.end());
+
+        EXPECT_EQ(bound.roles(), roles) << operation << " " << expected.form;
+        EXPECT_EQ(bound.scalars, scalars) << operation << " " << expected.form;
+        EXPECT_EQ(graph->tensors()->size(), tensorsOf(expected))
+            << operation << " " << expected.form;
     }
+}
+
+} // namespace
+
+TEST(TestSdpaForms, EveryForwardFormBindsExactlyItsOptionalFields)
+{
+    expectEveryFormBindsExactlyItsOptionalFields("sdpa_fwd", {"q", "k", "v", "o", "stats"});
 }
 
 TEST(TestSdpaForms, EveryBackwardFormBindsExactlyItsOptionalFields)
 {
-    const auto metadata = shippedAttention("sdpa_bwd");
-    const auto* form = metadata.find("form");
-    ASSERT_NE(form, nullptr);
-    size_t built = 0;
-    for(const auto& expected : formExpectations())
-    {
-        const bool declared = std::find(form->values.begin(), form->values.end(), expected.form)
-                              != form->values.end();
-        // The backward schema has no ragged offsets and no sink token.
-        EXPECT_EQ(declared, expected.backwardTensors != 0) << expected.form;
-        if(!declared)
-        {
-            continue;
-        }
-        const auto result = buildForm(metadata, expected.form);
-        ASSERT_TRUE(result.ok()) << expected.form << ": " << result.error;
-        const auto* graph = asGraph(result.bytes);
-        ASSERT_NE(graph, nullptr) << expected.form;
-        const auto* attributes = graph->nodes()->Get(0)->attributes_as_SdpaBackwardAttributes();
-        ASSERT_NE(attributes, nullptr) << expected.form;
-
-        EXPECT_TRUE(boundFields(*attributes) == expected.bound) << expected.form;
-        EXPECT_EQ(graph->tensors()->size(), expected.backwardTensors) << expected.form;
-        ++built;
-    }
-    EXPECT_EQ(built, 6U);
+    // The backward schema has no sink token, and no ragged form is built for it.
+    expectEveryFormBindsExactlyItsOptionalFields(
+        "sdpa_bwd", {"q", "k", "v", "o", "do", "stats", "dq", "dk", "dv"});
 }
 
 TEST(TestSdpaForms, ThePlainFormIsTheGraphTheDeclarationAlwaysBuilt)
 {
     // No optional tensor, the stated scale: byte for byte what the builder writes given only
     // the operands, as it did before forms existed.
-    const auto metadata = shippedAttention("sdpa_fwd");
+    const auto metadata = test::shippedOperation("sdpa_fwd");
     const auto tensor
         = [](int64_t uid, const char* name, Ints dims, Ints strides, fb::DataType type) {
               builders::TensorSpec spec;
@@ -643,7 +649,7 @@ TEST(TestSdpaForms, ThePlainFormIsTheGraphTheDeclarationAlwaysBuilt)
 
 TEST(TestSdpaForms, TheScaleTensorIsAScalarPassByValueWhoseDefaultIsTheStatedScale)
 {
-    const auto built = buildForm(shippedAttention("sdpa_fwd"), "scale_tensor");
+    const auto built = buildForm(test::shippedOperation("sdpa_fwd"), "scale_tensor");
     ASSERT_TRUE(built.ok()) << built.error;
     const auto* graph = asGraph(built.bytes);
     const auto* attributes = graph->nodes()->Get(0)->attributes_as_SdpaAttributes();
@@ -659,7 +665,7 @@ TEST(TestSdpaForms, TheScaleTensorIsAScalarPassByValueWhoseDefaultIsTheStatedSca
 
 TEST(TestSdpaForms, DropoutCarriesItsRateAndInt64SeedAndOffsetTensors)
 {
-    const auto built = buildForm(shippedAttention("sdpa_fwd"), "dropout");
+    const auto built = buildForm(test::shippedOperation("sdpa_fwd"), "dropout");
     ASSERT_TRUE(built.ok()) << built.error;
     const auto* graph = asGraph(built.bytes);
     const auto* attributes = graph->nodes()->Get(0)->attributes_as_SdpaAttributes();
@@ -680,25 +686,14 @@ TEST(TestSdpaForms, PaddedNamesBothLengthsAsInt32OnePerBatch)
 {
     for(const auto& operation : {"sdpa_fwd", "sdpa_bwd"})
     {
-        const auto built = buildForm(shippedAttention(operation), "padded");
+        const auto built = buildForm(test::shippedOperation(operation), "padded");
         ASSERT_TRUE(built.ok()) << operation << ": " << built.error;
         const auto* graph = asGraph(built.bytes);
-        std::optional<int64_t> seqLenQ;
-        std::optional<int64_t> seqLenKv;
-        if(const auto* forward = graph->nodes()->Get(0)->attributes_as_SdpaAttributes())
+        const auto bound = operandsOf(*graph);
+        for(const auto* role : {"seq_len_q", "seq_len_kv"})
         {
-            seqLenQ = forward->seq_len_q_tensor_uid();
-            seqLenKv = forward->seq_len_kv_tensor_uid();
-        }
-        else
-        {
-            const auto* backward = graph->nodes()->Get(0)->attributes_as_SdpaBackwardAttributes();
-            seqLenQ = backward->seq_len_q_tensor_uid();
-            seqLenKv = backward->seq_len_kv_tensor_uid();
-        }
-        for(const auto uid : {seqLenQ, seqLenKv})
-        {
-            const auto* tensor = tensorWithUid(*graph, uid);
+            ASSERT_EQ(bound.tensors.count(role), 1U) << operation << " " << role;
+            const auto* tensor = tensorWithUid(*graph, bound.tensors.at(role));
             ASSERT_NE(tensor, nullptr) << operation;
             EXPECT_EQ(dimsOf(tensor), (Ints{BATCH, 1, 1, 1})) << operation;
             EXPECT_EQ(tensor->data_type(), fb::DataType::INT32) << operation;
@@ -710,14 +705,12 @@ TEST(TestSdpaForms, TheBiasTakesQsTypeAndOneScorePerQueryAndKey)
 {
     for(const auto& operation : {"sdpa_fwd", "sdpa_bwd"})
     {
-        const auto built = buildForm(shippedAttention(operation), "bias");
+        const auto built = buildForm(test::shippedOperation(operation), "bias");
         ASSERT_TRUE(built.ok()) << operation << ": " << built.error;
         const auto* graph = asGraph(built.bytes);
-        const auto* node = graph->nodes()->Get(0);
-        const auto uid = node->attributes_as_SdpaAttributes() != nullptr
-                             ? node->attributes_as_SdpaAttributes()->attn_mask_tensor_uid()
-                             : node->attributes_as_SdpaBackwardAttributes()->attn_mask_tensor_uid();
-        const auto* bias = tensorWithUid(*graph, uid);
+        const auto bound = operandsOf(*graph);
+        ASSERT_EQ(bound.tensors.count("attn_mask"), 1U) << operation;
+        const auto* bias = tensorWithUid(*graph, bound.tensors.at("attn_mask"));
         ASSERT_NE(bias, nullptr) << operation;
         EXPECT_EQ(dimsOf(bias), (Ints{1, 1, SEQLEN_Q, SEQLEN_K})) << operation;
         EXPECT_EQ(bias->data_type(), fb::DataType::HALF) << operation;
@@ -726,7 +719,7 @@ TEST(TestSdpaForms, TheBiasTakesQsTypeAndOneScorePerQueryAndKey)
 
 TEST(TestSdpaForms, TheSinkIsOneFloatLogitPerQueryHead)
 {
-    const auto built = buildForm(shippedAttention("sdpa_fwd"), "sink");
+    const auto built = buildForm(test::shippedOperation("sdpa_fwd"), "sink");
     ASSERT_TRUE(built.ok()) << built.error;
     const auto* graph = asGraph(built.bytes);
     const auto* sink = tensorWithUid(
@@ -740,7 +733,7 @@ TEST(TestSdpaForms, RaggedPacksQOAndStatsThroughOneOffsetAndKVThroughAnother)
 {
     for(const bool stats : {true, false})
     {
-        const auto built = buildForm(shippedAttention("sdpa_fwd"), "ragged", stats);
+        const auto built = buildForm(test::shippedOperation("sdpa_fwd"), "ragged", stats);
         ASSERT_TRUE(built.ok()) << built.error;
         const auto* graph = asGraph(built.bytes);
         const auto* attributes = graph->nodes()->Get(0)->attributes_as_SdpaAttributes();
@@ -798,13 +791,118 @@ TEST(TestSdpaForms, AFormTheDirectionDoesNotBuildIsRefusedByName)
 {
     for(const auto* form : {"ragged", "sink", "paged"})
     {
-        const auto built = buildForm(shippedAttention("sdpa_bwd"), form);
+        const auto built = buildForm(test::shippedOperation("sdpa_bwd"), form);
         EXPECT_FALSE(built.ok()) << form;
         EXPECT_NE(built.error.find(form), std::string::npos) << built.error;
     }
-    const auto built = buildForm(shippedAttention("sdpa_fwd"), "paged");
+    const auto built = buildForm(test::shippedOperation("sdpa_fwd"), "paged");
     EXPECT_FALSE(built.ok());
     EXPECT_NE(built.error.find("paged"), std::string::npos) << built.error;
+}
+
+namespace
+{
+
+/// @p metadata with graph-builder argument @p name removed, which it must have.
+OperationMetadata withoutArgument(OperationMetadata metadata, const std::string& name)
+{
+    auto& arguments = metadata.graphBuilder.arguments;
+    const auto found
+        = std::find_if(arguments.begin(), arguments.end(), [&](const BuilderArgument& argument) {
+              return argument.name == name;
+          });
+    EXPECT_NE(found, arguments.end()) << name;
+    if(found != arguments.end())
+    {
+        arguments.erase(found);
+    }
+    return metadata;
+}
+
+/// @p metadata with graph-builder argument @p name fixed at @p value, which it must have.
+OperationMetadata withConstantArgument(OperationMetadata metadata,
+                                       const std::string& name,
+                                       const nlohmann::json& value)
+{
+    auto& arguments = metadata.graphBuilder.arguments;
+    const auto found
+        = std::find_if(arguments.begin(), arguments.end(), [&](const BuilderArgument& argument) {
+              return argument.name == name;
+          });
+    EXPECT_NE(found, arguments.end()) << name;
+    if(found != arguments.end())
+    {
+        *found = BuilderArgument{};
+        found->name = name;
+        found->kind = BuilderArgument::Kind::CONSTANT;
+        found->constant = value;
+    }
+    return metadata;
+}
+
+struct MissingOperandCase
+{
+    std::string operation;
+    std::string form;
+    std::string argument;
+};
+
+} // namespace
+
+TEST(TestSdpaForms, AFormWhoseOperandIsNotDeclaredIsRefusedByFormAndArgument)
+{
+    // The dims, the strides and the element type are each required: an operand's type is part of
+    // what it is, so none is defaulted from the graph's. (Dims a `strides_of` argument reads are
+    // not removed: the resolver refuses that first.)
+    const std::vector<MissingOperandCase> cases{
+        {"sdpa_fwd", "scale_tensor", "scaleDims"},
+        {"sdpa_fwd", "dropout", "seedDims"},
+        {"sdpa_fwd", "padded", "seqLenStrides"},
+        {"sdpa_fwd", "bias", "biasDataType"},
+        {"sdpa_fwd", "sink", "sinkStrides"},
+        {"sdpa_fwd", "ragged", "offsetsStrides"},
+        {"sdpa_bwd", "scale_tensor", "scaleDataType"},
+        {"sdpa_bwd", "dropout", "seedStrides"},
+        {"sdpa_bwd", "padded", "seqLenDataType"},
+        {"sdpa_bwd", "bias", "biasStrides"},
+    };
+    for(const auto& missing : cases)
+    {
+        const auto built = buildForm(
+            withoutArgument(test::shippedOperation(missing.operation), missing.argument),
+            missing.form);
+        const auto where = missing.operation + " " + missing.form + " without " + missing.argument;
+        EXPECT_FALSE(built.ok()) << where;
+        EXPECT_NE(built.error.find("form '" + missing.form + "'"), std::string::npos)
+            << where << ": " << built.error;
+        EXPECT_NE(built.error.find(missing.argument), std::string::npos)
+            << where << ": " << built.error;
+    }
+}
+
+TEST(TestSdpaForms, AScaleTensorWithNoStatedScaleToDefaultToIsRefused)
+{
+    // The tensor's value is the stated scale, so a zero scale has nothing to give it.
+    for(const auto& operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        const auto built
+            = buildForm(withConstantArgument(test::shippedOperation(operation), "attnScale", 0.0),
+                        "scale_tensor");
+        EXPECT_FALSE(built.ok()) << operation;
+        EXPECT_NE(built.error.find("scale_tensor"), std::string::npos) << built.error;
+        EXPECT_NE(built.error.find("attnScale"), std::string::npos) << built.error;
+    }
+}
+
+TEST(TestSdpaForms, ARaggedFormOverTokensWithNoPositiveStrideIsRefused)
+{
+    // The stride is the offsets' elements per token; zero would pack every token onto one.
+    const auto built = buildForm(
+        withConstantArgument(test::shippedOperation("sdpa_fwd"), "qStrides", Ints{0, 0, 0, 1}),
+        "ragged");
+    EXPECT_FALSE(built.ok());
+    EXPECT_NE(built.error.find("ragged"), std::string::npos) << built.error;
+    EXPECT_NE(built.error.find("qStrides"), std::string::npos) << built.error;
 }
 
 } // namespace hipdnn_corpus_gen

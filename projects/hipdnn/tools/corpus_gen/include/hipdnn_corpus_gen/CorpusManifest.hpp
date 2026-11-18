@@ -91,7 +91,9 @@ struct ManifestContext
 
     uint64_t seed = 0;
 
-    /// Requested entry count. A shortfall is reported, never padded.
+    /// Requested entry count. A shortfall is reported, never padded. With quotas and no
+    /// `--count`, the graphs the quotas took plus the fewest more that could fill the rest: a
+    /// graph that fills a regime's quota and a form's is asked once.
     int64_t requested = 0;
 
     /// Per source, from `PoolAssembly::select`.

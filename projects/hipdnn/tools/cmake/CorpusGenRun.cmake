@@ -63,6 +63,48 @@ if(NOT commands EQUAL EXPECTED_GRAPHS)
     message(FATAL_ERROR "commands.txt has ${commands} commands, expected ${EXPECTED_GRAPHS}")
 endif()
 
+# With quotas or floors and no --count the corpus is the quotas alone, so `requested` is the
+# graphs written plus the fewest more that could fill what is short: a graph that fills a
+# regime's floor and a form's (`<axis>:<label>`) is asked once, so the sum of the quotas would
+# overstate it. A graph has one regime, so the regimes' shortfalls need graphs of their own, and
+# so do the forms'.
+if(NOT CLI_ARGS MATCHES "--count," AND CLI_ARGS MATCHES "--operation,([^,]+)")
+    set(quotaOperation "${CMAKE_MATCH_1}")
+    string(JSON quotas ERROR_VARIABLE quotaError
+           GET "${manifest}" reports regime_quota "${quotaOperation}")
+    if(NOT quotaError)
+        set(regimesShort 0)
+        set(formsShort 0)
+        string(JSON quotaCount LENGTH "${quotas}")
+        if(quotaCount GREATER 0)
+            math(EXPR lastQuota "${quotaCount} - 1")
+            foreach(index RANGE 0 ${lastQuota} 1)
+                string(JSON key MEMBER "${quotas}" ${index})
+                string(JSON asked GET "${quotas}" "${key}" asked)
+                string(JSON delivered GET "${quotas}" "${key}" delivered)
+                math(EXPR short "${asked} - ${delivered}")
+                if("${key}" MATCHES ":")
+                    math(EXPR formsShort "${formsShort} + ${short}")
+                else()
+                    math(EXPR regimesShort "${regimesShort} + ${short}")
+                endif()
+            endforeach()
+        endif()
+        if(regimesShort GREATER formsShort)
+            set(stillShort ${regimesShort})
+        else()
+            set(stillShort ${formsShort})
+        endif()
+        math(EXPR expectedRequested "${graphs} + ${stillShort}")
+        string(JSON requested GET "${manifest}" requested)
+        if(NOT requested EQUAL expectedRequested)
+            message(FATAL_ERROR "the manifest requests ${requested}, expected ${expectedRequested}: "
+                                "${graphs} graphs and at least ${stillShort} more for the quotas "
+                                "still short")
+        endif()
+    endif()
+endif()
+
 # EXPECTED_FORMS (optional, comma-separated labels): the corpus carries a `form` facet column of
 # its own right after `grouping` in manifest.csv, holding exactly these labels, and the run
 # reports each as a form quota (`form:<label>`, in reports.regime_quota of the --operation)

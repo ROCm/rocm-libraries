@@ -207,7 +207,8 @@ void printHelp(const char* program)
         << "  --per-combination <n>  First-pass problems per categorical combination\n"
         << "                         (default 50)\n"
         << "  --kdp-root <path>      A *.kdp.json pack, or a directory of them (repeatable)\n"
-        << "  --model-shapes <csv>   Recorded shapes as q.<parameter> columns (repeatable)\n"
+        << "  --model-shapes <csv>   Recorded shapes as q.<parameter> columns (repeatable). A\n"
+        << "                         file with no q.form column reads every row as plain\n"
         << "  --model-share <f>      Share of the corpus per source; a share of 0\n"
         << "  --kernel-share <f>     excludes that source rather than deferring it\n"
         << "  --sweep-share <f>\n"
@@ -735,26 +736,30 @@ int runGenerator(const std::vector<std::string>& args)
         std::cerr << "--regime-floor is negative\n";
         return 1;
     }
+    // A form key (`form:padded`) never equals a regime label, so regime and form floors share
+    // the maps.
+    const auto addFloors = [&](const std::string& operation,
+                               std::map<std::string, hipdnn_corpus_gen::RegimeFocus> floors,
+                               int64_t count) {
+        for(auto& [key, focus] : floors)
+        {
+            quotasFor[operation][key] = count;
+            focusFor[operation].emplace(key, std::move(focus));
+            floorsFor[operation].insert(key);
+        }
+    };
     for(const auto& entry : selected.operations)
     {
         const auto& operation = entry.second.operation;
-        for(auto& [regime, focus] :
-            options.regimeFloor > 0
-                ? hipdnn_corpus_gen::regimeFloors(entry.second, quotasFor[operation])
-                : std::map<std::string, hipdnn_corpus_gen::RegimeFocus>{})
+        if(options.regimeFloor > 0)
         {
-            quotasFor[operation][regime] = options.regimeFloor;
-            focusFor[operation].emplace(regime, std::move(focus));
-            floorsFor[operation].insert(regime);
+            addFloors(operation,
+                      hipdnn_corpus_gen::regimeFloors(entry.second, quotasFor[operation]),
+                      options.regimeFloor);
         }
-        // A form key (`form:padded`) never equals a regime label, so these share the maps.
-        for(auto& [key, focus] : options.formFloor > 0
-                                     ? hipdnn_corpus_gen::formFloors(entry.second)
-                                     : std::map<std::string, hipdnn_corpus_gen::RegimeFocus>{})
+        if(options.formFloor > 0)
         {
-            quotasFor[operation][key] = options.formFloor;
-            focusFor[operation].emplace(key, std::move(focus));
-            floorsFor[operation].insert(key);
+            addFloors(operation, hipdnn_corpus_gen::formFloors(entry.second), options.formFloor);
         }
     }
 
@@ -1523,18 +1528,30 @@ int runGenerator(const std::vector<std::string>& args)
             = quotas != quotasFor.end() ? quotas->second : std::map<std::string, int64_t>{};
         // With quotas and count 0, the corpus is the quotas alone; a short quota stays short
         // rather than being padded from another regime.
-        int64_t cut = count;
-        if(!owed.empty() && options.count == 0)
+        const bool quotasAlone = !owed.empty() && options.count == 0;
+        const auto chosen = hipdnn_corpus_gen::select(deduplicated,
+                                                      quotasAlone ? 0 : count,
+                                                      options.shares,
+                                                      allocation,
+                                                      owed,
+                                                      quotaOutcome,
+                                                      reserved);
+        if(quotasAlone)
         {
-            cut = 0;
-            count = 0;
-            for(const auto& quota : owed)
+            // One graph can fill a regime's quota and a form's, so the quotas' sum overstates
+            // what was asked. Ask for the graphs the quotas took plus the fewest more that
+            // could fill what is still short, which keeps the gap to the row count the
+            // shortfall. A graph has one regime and one label per form axis, so the regimes'
+            // shortfalls (and the forms') need graphs of their own; a form key has a ':'.
+            int64_t regimesShort = 0;
+            int64_t formsShort = 0;
+            for(const auto& [key, outcome] : quotaOutcome)
             {
-                count += quota.second;
+                (key.find(':') == std::string::npos ? regimesShort : formsShort)
+                    += outcome.asked - outcome.taken;
             }
+            count = static_cast<int64_t>(chosen.size()) + std::max(regimesShort, formsShort);
         }
-        const auto chosen = hipdnn_corpus_gen::select(
-            deduplicated, cut, options.shares, allocation, owed, quotaOutcome, reserved);
         for(const auto& [regime, outcome] : quotaOutcome)
         {
             const auto search = focused.find(regime);

@@ -10,9 +10,13 @@
 #include <nlohmann/json.hpp>
 
 #include "OperationsDir.hpp"
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
+#include <sstream>
 #include <string>
+#include <vector>
 
 /// @file TestModelShapeSource.cpp
 /// @brief The model pool: the shapes somebody recorded a real workload running.
@@ -50,25 +54,43 @@ private:
     std::filesystem::path _root;
 };
 
-OperationMetadata shippedOperation(const std::string& name)
-{
-    const std::string path = hipdnn_corpus_gen::test::operationsDir() + "/" + name + ".opmeta.json";
-    std::ifstream file(path);
-    EXPECT_TRUE(file.is_open()) << path;
-    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-    EXPECT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
-    return parsed.ok() ? *parsed.metadata : OperationMetadata{};
-}
-
 OperationMetadata shippedSdpa()
 {
-    return shippedOperation("sdpa_fwd");
+    return test::shippedOperation("sdpa_fwd");
 }
 
 /// A complete header in the spelling the miner emits, and one complete row.
 const char* kHeader = "name,q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,q.head_dim,"
                       "q.is_causal,q.alignment,q.generate_stats,q.dtype,q.form\n";
 const char* kRow = "llama3-70b prefill,1,64,8,4096,4096,128,true,top_left,false,bf16,plain\n";
+
+/// kHeader and kRow with @p dropped columns (by header name) cut out of both.
+std::string csvWithout(std::initializer_list<const char*> dropped)
+{
+    const auto fields = [](const std::string& line) {
+        std::vector<std::string> parts;
+        std::istringstream stream(line.substr(0, line.find('\n')));
+        for(std::string part; std::getline(stream, part, ',');)
+        {
+            parts.push_back(part);
+        }
+        return parts;
+    };
+    const auto names = fields(kHeader);
+    const auto values = fields(kRow);
+    std::string header;
+    std::string row;
+    for(size_t i = 0; i < names.size(); ++i)
+    {
+        if(std::find(dropped.begin(), dropped.end(), names[i]) != dropped.end())
+        {
+            continue;
+        }
+        header += (header.empty() ? "" : ",") + names[i];
+        row += (row.empty() ? "" : ",") + values[i];
+    }
+    return header + "\n" + row + "\n";
+}
 
 } // namespace
 
@@ -118,21 +140,15 @@ TEST(TestModelShapeSource, AFilePredatingTheFormColumnReadsAsPlain)
     const auto metadata = shippedSdpa();
     ModelShapeReport report;
 
-    const std::string old = "name,q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,q.head_dim,"
-                            "q.is_causal,q.alignment,q.generate_stats,q.dtype\n"
-                            "llama3-70b prefill,1,64,8,4096,4096,128,true,top_left,false,bf16\n";
-    const auto entries = readModelShapes(metadata, tree.write("old.csv", old), report);
+    const auto entries
+        = readModelShapes(metadata, tree.write("old.csv", csvWithout({"q.form"})), report);
     ASSERT_EQ(entries.size(), 1u);
     EXPECT_EQ(entries.front().point.at("form"), ParameterValue{std::string("plain")});
 
     // sdpa_bwd declares no kernel_catalog, so nothing but the form rule can answer for it.
-    const auto backward = shippedOperation("sdpa_bwd");
-    const std::string oldBackward
-        = "name,q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,q.head_dim,"
-          "q.is_causal,q.alignment,q.dtype\n"
-          "llama3-70b prefill,1,64,8,4096,4096,128,true,top_left,bf16\n";
-    const auto backwardEntries
-        = readModelShapes(backward, tree.write("old_bwd.csv", oldBackward), report);
+    const auto backward = test::shippedOperation("sdpa_bwd");
+    const auto backwardEntries = readModelShapes(
+        backward, tree.write("old_bwd.csv", csvWithout({"q.form", "q.generate_stats"})), report);
     ASSERT_EQ(backwardEntries.size(), 1u) << report.firstProblem;
     EXPECT_EQ(backwardEntries.front().point.at("form"), ParameterValue{std::string("plain")});
 
@@ -152,20 +168,15 @@ TEST(TestModelShapeSource, AFileMissingAnyOtherParameterColumnIsRefused)
     const auto metadata = shippedSdpa();
     ModelShapeReport report;
 
-    const std::string noAlignment
-        = "name,q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,q.head_dim,"
-          "q.is_causal,q.generate_stats,q.dtype,q.form\n"
-          "llama3-70b prefill,1,64,8,4096,4096,128,true,false,bf16,plain\n";
-    EXPECT_TRUE(
-        readModelShapes(metadata, tree.write("no_alignment.csv", noAlignment), report).empty());
+    EXPECT_TRUE(readModelShapes(
+                    metadata, tree.write("no_alignment.csv", csvWithout({"q.alignment"})), report)
+                    .empty());
     EXPECT_EQ(report.unusable, 1);
     EXPECT_NE(report.firstProblem.find("alignment"), std::string::npos) << report.firstProblem;
 
-    const std::string noStats
-        = "name,q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,"
-          "q.head_dim,q.is_causal,q.alignment,q.dtype,q.form\n"
-          "llama3-70b prefill,1,64,8,4096,4096,128,true,top_left,bf16,plain\n";
-    EXPECT_TRUE(readModelShapes(metadata, tree.write("no_stats.csv", noStats), report).empty());
+    EXPECT_TRUE(readModelShapes(
+                    metadata, tree.write("no_stats.csv", csvWithout({"q.generate_stats"})), report)
+                    .empty());
     EXPECT_EQ(report.unusable, 1);
     EXPECT_NE(report.firstProblem.find("generate_stats"), std::string::npos) << report.firstProblem;
 }

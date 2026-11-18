@@ -5,6 +5,7 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -740,21 +741,38 @@ struct SdpaForwardOperands : SdpaOperands
 namespace detail
 {
 
-/// Writes @p operands' tensors after those the builder wrote, in declaration order.
-inline void addSdpaOperandTensors(flatbuffers::FlatBufferBuilder& builder,
-                                  std::vector<flatbuffers::Offset<fb::TensorAttributes>>& tensors,
-                                  const SdpaOperands& operands)
+/// One of @p AttributesBuilder's optional tensor uids and the SdpaOperands member it is bound
+/// from. The table is the one place the six operands are paired with their uid fields, in the
+/// order their tensors are written.
+template <typename AttributesBuilder>
+struct SdpaOperandSlot
 {
-    for(const auto* operand : {&operands.scale,
-                               &operands.bias,
-                               &operands.seqLenQ,
-                               &operands.seqLenKv,
-                               &operands.seed,
-                               &operands.dropoutOffset})
+    std::optional<TensorSpec> SdpaOperands::*operand;
+    void (AttributesBuilder::*bindUid)(int64_t);
+};
+
+template <typename AttributesBuilder>
+constexpr std::array<SdpaOperandSlot<AttributesBuilder>, 6> sdpaOperandSlots()
+{
+    return {{{&SdpaOperands::scale, &AttributesBuilder::add_scale_tensor_uid},
+             {&SdpaOperands::bias, &AttributesBuilder::add_attn_mask_tensor_uid},
+             {&SdpaOperands::seqLenQ, &AttributesBuilder::add_seq_len_q_tensor_uid},
+             {&SdpaOperands::seqLenKv, &AttributesBuilder::add_seq_len_kv_tensor_uid},
+             {&SdpaOperands::seed, &AttributesBuilder::add_seed_tensor_uid},
+             {&SdpaOperands::dropoutOffset, &AttributesBuilder::add_offset_tensor_uid}}};
+}
+
+/// Writes @p operands' tensors after those the builder wrote, in declaration order.
+template <typename AttributesBuilder>
+void addSdpaOperandTensors(flatbuffers::FlatBufferBuilder& builder,
+                           std::vector<flatbuffers::Offset<fb::TensorAttributes>>& tensors,
+                           const SdpaOperands& operands)
+{
+    for(const auto& slot : sdpaOperandSlots<AttributesBuilder>())
     {
-        if(operand->has_value())
+        if((operands.*slot.operand).has_value())
         {
-            tensors.push_back(addTensor(builder, **operand));
+            tensors.push_back(addTensor(builder, *(operands.*slot.operand)));
         }
     }
 }
@@ -763,29 +781,12 @@ inline void addSdpaOperandTensors(flatbuffers::FlatBufferBuilder& builder,
 template <typename AttributesBuilder>
 void bindSdpaOperands(AttributesBuilder& attributes, const SdpaOperands& operands)
 {
-    if(operands.scale.has_value())
+    for(const auto& slot : sdpaOperandSlots<AttributesBuilder>())
     {
-        attributes.add_scale_tensor_uid(operands.scale->uid);
-    }
-    if(operands.bias.has_value())
-    {
-        attributes.add_attn_mask_tensor_uid(operands.bias->uid);
-    }
-    if(operands.seqLenQ.has_value())
-    {
-        attributes.add_seq_len_q_tensor_uid(operands.seqLenQ->uid);
-    }
-    if(operands.seqLenKv.has_value())
-    {
-        attributes.add_seq_len_kv_tensor_uid(operands.seqLenKv->uid);
-    }
-    if(operands.seed.has_value())
-    {
-        attributes.add_seed_tensor_uid(operands.seed->uid);
-    }
-    if(operands.dropoutOffset.has_value())
-    {
-        attributes.add_offset_tensor_uid(operands.dropoutOffset->uid);
+        if((operands.*slot.operand).has_value())
+        {
+            (attributes.*slot.bindUid)((operands.*slot.operand)->uid);
+        }
     }
 }
 
@@ -814,7 +815,7 @@ inline GraphBytes sdpaForward(const TensorSpec& q,
     {
         tensors.push_back(detail::addTensor(builder, *stats));
     }
-    detail::addSdpaOperandTensors(builder, tensors, operands);
+    detail::addSdpaOperandTensors<fb::SdpaAttributesBuilder>(builder, tensors, operands);
     if(operands.sink.has_value())
     {
         tensors.push_back(detail::addTensor(builder, *operands.sink));
@@ -877,7 +878,8 @@ inline GraphBytes sdpaForward(const TensorSpec& q,
 /// @brief Scaled dot-product attention, backward. Stats from the forward pass are required,
 ///        not optional: the backward pass reads them rather than recomputing the softmax.
 ///
-/// The backward schema has no sink and no ragged offsets, so @p operands is the shared set.
+/// The backward schema has no sink token, and no ragged form is built for it yet (the offsets
+/// live on the tensors, so the schema could carry one), so @p operands is the shared set.
 inline GraphBytes sdpaBackward(const TensorSpec& q,
                                const TensorSpec& k,
                                const TensorSpec& v,
@@ -902,7 +904,7 @@ inline GraphBytes sdpaBackward(const TensorSpec& q,
         detail::addTensor(builder, dq),
         detail::addTensor(builder, dk),
         detail::addTensor(builder, dv)};
-    detail::addSdpaOperandTensors(builder, tensors, operands);
+    detail::addSdpaOperandTensors<fb::SdpaBackwardAttributesBuilder>(builder, tensors, operands);
 
     fb::SdpaBackwardAttributesBuilder attributes(builder);
     attributes.add_q_tensor_uid(q.uid);
