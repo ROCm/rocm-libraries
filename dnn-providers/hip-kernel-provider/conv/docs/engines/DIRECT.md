@@ -147,6 +147,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
 | gfx1100 | 177 | 156/6 | 3.88x | CK group fwd, GEMM, naive (fp32 3-D) |
 
 - **Strong:**
+  - narrow-channel, dilated and one-row (1 x S) 16-bit NCHW layers (Real-ESRGAN, U-Net, DeepLab dilation 2 / 4, HiFi-GAN), against the same build without the narrow, dilated, line and `bpu` tiles (autotuned, fresh cache, 20 iterations, two interleaved rounds, our engines only, 97 graphs, usage-weighted): gfx950 1.27x (roofline efficiency 25% -> 32%; HiFi-GAN layers 1.5-1.7x, 3x3 K <= 64 forward 1.28x, dilated 1.31-1.35x), MI325X 1.06x (29% -> 31%), gfx90a 1.04x (51% -> 53%). On 38 other layers (gfx950, MI325X) no layer is repeatably slower; gfx950 gains on Wan VAE c96 3x3x3 (1.14x, a 64-wide tile the small-tile rule now admits) and EfficientNet 24- and 48-channel NHWC layers (1.4-1.7x);
   - packed channels-first 16-bit 2-D graphs on gfx950 (`cf`): 1.14x weighted over the staged path on 101 Flux/SD/Wan/Real-ESRGAN layers, up to 1.58x (MI350X, autotuned, same node);
   - gfx908 16-bit `rows`: EfficientNet fp16 1.27-1.34x and Wan c384 240x416 bf16 1.18x over the halo tile (MI100, autotuned, same node);
   - Wan VAE 3x3x3 bf16 (fwd 0.54-0.85x of MIOpen's time, bwd 0.36-0.47x on gfx90a-gfx950);
