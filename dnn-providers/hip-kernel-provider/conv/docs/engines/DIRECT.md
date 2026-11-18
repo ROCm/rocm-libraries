@@ -20,7 +20,7 @@ SPDX-License-Identifier:  MIT
   - NCHW 16-bit 3x3 usually goes to `CONV_WINOGRAD`;
   - anything strided, dilated or grouped goes to `CONV_IGEMM`.
 - **Precision:** fp32 accumulation of exact products, rounded once at the store (split-C sums fp32 partials in a fixed order). Deterministic. No numerical note on the exact engines; the TF32 siblings report `TENSOR_CORE`.
-- **Instances:** 586 exact configs, 293 per direction: 145 halo-tile MMA, 96 `rows`, 8 channels-first `rows` (`cf`), 44 FMA (the floor on every architecture); and 18 three-bf16 per direction in the TF32 siblings. Each matrix-core config ships only to the architecture groups whose autotuned sweeps it won (`archs`).
+- **Instances:** 744 exact configs, 372 per direction: 194 halo-tile MMA, 100 `rows`, 34 channels-first `rows` (`cf`), 44 FMA (the floor on every architecture); and 18 three-bf16 per direction in the TF32 siblings. Each matrix-core config ships only to the architecture groups whose autotuned sweeps it won (`archs`).
 - **vs MIOpen:** usage-weighted speedup on the subset graphs where K2 is our fastest engine: 1.49x gfx950, 1.23x gfx942, 1.22x gfx90a, 1.03x gfx908, 2.16x gfx906, 2.80x gfx1201, 3.88x gfx1100. MIOpen ran in search mode.
 
 ## Why it exists
