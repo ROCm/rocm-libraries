@@ -279,8 +279,8 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  \p hipsparseSpMM supports \ref HIPSPARSE_INDEX_32I and \ref HIPSPARSE_INDEX_64I index precisions
 *  for storing the row pointer and column indices arrays of the sparse matrices.
 *
-*  \p hipsparseSpMM also supports batched computation for CSR, CSC, COO and Blocked ELL matrices. Batched computation
-*  is not supported for BSR matrices. There are three supported batch modes:
+*  \p hipsparseSpMM also supports batched computation for CSR, CSC and COO matrices. Batched computation is not
+*  supported for BSR and Blocked ELL matrices. There are three supported batch modes:
 *  \f[
 *      C_i = A \times B_i \\
 *      C_i = A_i \times B \\

@@ -627,6 +627,7 @@ void testing_spmm_bsr_extra(const Arguments& arg)
         run_spmm(block_dim, 1, 2, 2, rocsparse_status_not_implemented, hC_in);
         run_spmm(block_dim, 1, 1, 2, rocsparse_status_not_implemented, hC_in);
         run_spmm(block_dim, 1, 2, 1, rocsparse_status_not_implemented, hC_in);
+        run_spmm(block_dim, 2, 1, 1, rocsparse_status_not_implemented, hC_in);
         run_spmm(block_dim, 2, 1, 2, rocsparse_status_not_implemented, hC_in);
         run_spmm(block_dim, 2, 2, 2, rocsparse_status_not_implemented, hC_in);
     }
