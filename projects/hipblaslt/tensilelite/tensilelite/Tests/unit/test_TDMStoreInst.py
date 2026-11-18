@@ -521,15 +521,17 @@ def test_turning_it_on_only_adds_the_tdm_blocks(gp_gfx1250, gfx1250_iim, assembl
     asms[level] = asm
   for level, asm in asms.items():
     assert _skeleton(asm) == _skeleton(asms[0]), level
-  # The differential is now against level 0: everything outside the TDM blocks must be untouched.
-  assert _outside(asms[1]) == _outside(asms[0])
+  # A byte-level differential of the untouched code is no longer available: the old levels 2 and 3
+  # differed only in the NonEdge blocks, so everything else had to match, whereas 1 vs 0 moves every
+  # store block to the TDM block. _skeleton above is the property that survives and is the one this
+  # test exists for: the label and branch structure of the global write is identical at every level.
 
 
 @pytest.mark.parametrize("adaptive", [0, 1])
 @pytest.mark.parametrize("level", [0] + _LEVELS)
 def test_sourceswap_store_vector_width_2(gp_gfx1250, gfx1250_iim, assembler, capsys, level, adaptive):
   """With SourceSwap the store vector width is VectorWidthA: MIWaveTile0=2 gives 2, whose only
-  narrower path is VW1, so level 1 sends the VW1 path through the TDM block."""
+  narrower path is VW1, and TDMStoreInst sends both the VW2 and the VW1 path through the TDM block."""
   sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 2, 8, 4, 1], TDMStoreInst=level,
                        AdaptiveGemm=adaptive, SourceSwap=True)
   assert sol.get("Valid"), capsys.readouterr().out
@@ -538,7 +540,7 @@ def test_sourceswap_store_vector_width_2(gp_gfx1250, gfx1250_iim, assembler, cap
   for beta in "01":
     direct = stores[("GSU1", beta)]
     assert sorted(direct["then"], reverse=True) == [2, 1]
-    assert sorted(direct["tdm"], reverse=True) == {0: [], 1: [1], 2: [2, 1], 3: [2, 1]}[level]
+    assert sorted(direct["tdm"], reverse=True) == ([2, 1] if level else [])
 
 
 _FP16 = {"DataType": "H", "MacDataTypeA": "H", "MacDataTypeB": "H", "DestDataType": "H"}
@@ -1001,14 +1003,22 @@ def _cacheTokens(line):
 
 
 def test_c_load_takes_the_hints_of_c(gp_gfx1250, gfx1250_iim, assembler, capsys):
-  """The tensor_load_to_lds of C carries the th: and scope: of the buffer_load of C on the other paths."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, TemporalHintC=3, NonTemporalC=2)
-  assert sol.get("Valid"), capsys.readouterr().out
-  load = re.search(r"^\s*tensor_load_to_lds [^\n]*", _tdmBlock(asm, "1", 8), re.M)
-  bufferLoad = re.search(r"^\s*buffer_load\S* [^\n]*s\[sgprSrdC:[^\n]*", asm, re.M)
-  assert load and bufferLoad
+  """The tensor_load_to_lds of C carries the th: and scope: that the buffer_load of C carries with
+  TDMStoreInst off. With it on every path stores through the TDM block, so no buffer_load of C
+  survives in the same kernel to compare against; the reference comes from the level-0 twin, which
+  is what this pins: the cache hints of C are preserved across the change of transport."""
+  hints = dict(TemporalHintC=3, NonTemporalC=2)
+  solOff, asmOff = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=0, **hints)
+  assert solOff.get("Valid"), capsys.readouterr().out
+  bufferLoad = re.search(r"^\s*buffer_load\S* [^\n]*s\[sgprSrdC:[^\n]*", asmOff, re.M)
+  assert bufferLoad, "TDMStoreInst 0 must still read C with buffer_load"
   expected = _cacheTokens(bufferLoad.group(0))
   assert "th" in expected
+
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, **hints)
+  assert sol.get("Valid"), capsys.readouterr().out
+  load = re.search(r"^\s*tensor_load_to_lds [^\n]*", _tdmBlock(asm, "1", 8), re.M)
+  assert load, "the TDM block must load C with tensor_load_to_lds"
   assert _cacheTokens(load.group(0)) == expected
 
 
@@ -1170,7 +1180,7 @@ def test_staged_tile_over_main_loop_property(gp_gfx1250, gfx1250_iim, assembler,
   """Without PrefetchAcrossPersistent the staged tile lies over the main-loop buffers (_TDMStoreOverMainLoop):
   it starts at 0, or at the first 256-byte boundary after the epilogue vectors, and the setup fences the
   main-loop LDS. TDMStoreInst 0 reserves no tile."""
-  for level in (0, 2):
+  for level in [0] + _LEVELS:
     sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, **deepcopy(overrides))
     assert sol.get("Valid"), capsys.readouterr().out
     offset = sol["_TDMStoreLdsOffset"]
