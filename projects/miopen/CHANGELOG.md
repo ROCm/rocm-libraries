@@ -6,6 +6,16 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
+* [Reduce] Fixed `miopenReduceTensor` returning inf, NaN or imprecise results above 1024 reduced
+  elements per output when the compute type is wider than the input type (for example FP16 `AVG`
+  with FP32 compute). The workspace size now follows the compute type: allocate the workspace with the
+  size that `miopenGetReductionWorkspaceSize` returns.
+* [Reduce] `miopenReduceTensor` now applies `alpha` and `beta` in the compute type in every
+  reduction; they were converted to the input and output type first (a fractional INT8 `alpha` or
+  `beta` became 0). The blend with the prior output is made in the compute type and rounded once.
+* [Reduce] Fixed an out-of-bounds shared-memory read in warp-wise reductions that return indices,
+  when the compute type has no built-in shuffle support (compute types other than FP32 and FP64, for
+  example FP16). The results were not affected.
 * [Conv] Fixed deterministic convolutions that reused the find-db record and the cached invokers
   of a non-deterministic call with the same problem. The deterministic call could return a stale
   time and, in one handle, run a non-deterministic split-K kernel. The find-db key now contains
@@ -61,6 +71,18 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   held by a skipped evaluation is now released by a background thread as soon as its kernel
   finishes, rather than from a later kernel launch, so it is also released in workloads that only
   replay a captured graph.
+* [Conv] Fixed `miopenConvolutionForwardGetWorkSpaceSize` and its backward variants reporting no
+  GEMM workspace for dilated convolutions. Find, given the reported size, dropped `GemmFwdRest`,
+  so a dilated fp32 Conv1d on RDNA ran on the naive solver and failed with "No suitable algorithm
+  was found" when the naive solver was disabled (#14965). Dilated GEMM workspace is now reported
+  when GEMM is the only alternative to the naive solvers and the workspace fits in 85% of the
+  device memory free at query time. Where another solver applies, it stays unreported, so Find
+  does not also benchmark GEMM; larger requests stay unreported to avoid the out-of-memory
+  failures that caused #6974. The memory limit also applies when a find-db record names a GEMM
+  solver for a dilated problem (that workspace used to be reported whatever its size), and to the
+  workspace `miopenFindSolutions` allocates when no workspace is preallocated, so it can now
+  return GEMM solutions for dilated problems. When free memory cannot be read, no dilated GEMM
+  workspace is reported.
 
 ### Added
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
@@ -73,6 +95,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   [`src/hipconv/CHANGELOG.md`](src/hipconv/CHANGELOG.md) for the full list.
 
 ### Changed
+* [Conv] Refreshed the 2D and 3D TunaNet solver-selection heuristics for gfx942 and gfx950 to
+  support the current solver set (including `ConvHipConv`, depthwise, and Winograd variants) and
+  improve top-1 accuracy and time-regret across all four architecture/dimension combinations.
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
   never uses split-K, so these solvers are deterministic; previously, deterministic forward
   convolutions could only use the GEMM and naive solvers.
@@ -82,6 +107,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   `MIOPEN_SYSTEM_DB_PATH` still overrides the location. A Windows build tree stages the same
   files under `build\share\miopen\db` instead of `build\bin`, so a `BUILD_DEV=OFF` build runs
   from the build tree without an install.
+* [Conv] The bundled AI heuristic models (`*.tn.model` and `*.ktn.model`) are now Keras 3 exports
+  for frugally-deep v0.21.0 or newer (fixes ROCm/rocm-libraries#889). Builds against
+  frugally-deep 0.15.x instead install temporary Keras 2 copies of the same models. Configuring
+  against frugally-deep 0.16 to 0.20 is an error because those versions can load neither set.
 * [Conv] The `ConvHipConv` config version is now `v0.5`, so user perf-db records written with
   hipconv v0.4 are rejected and those layers run the default config until re-tuned.
 * [Conv] `ConvHipConv` fp16 and bf16 backward weights now write dW directly in the weight type for

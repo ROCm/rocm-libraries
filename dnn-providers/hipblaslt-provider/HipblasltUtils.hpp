@@ -11,6 +11,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <string>
+#include <vector>
 
 #define LOG_ON_HIPBLASLT_FAILURE(status)                                              \
     do                                                                                \
@@ -98,6 +99,11 @@ hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper findTensor
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     int64_t uid);
+
+/// True when `strides` describe dense row-major data for `dims` (innermost dimension
+/// contiguous, each outer stride the product of the inner extents). The stride of a
+/// size-1 dimension does not affect the layout and is ignored.
+bool isDenseRowMajor(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides);
 
 bool isTypeFp8Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType);
 

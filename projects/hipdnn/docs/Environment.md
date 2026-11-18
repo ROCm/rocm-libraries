@@ -332,8 +332,11 @@ export HIPDNN_INGESTOR_SHORTLIST_LIMIT=8
 - `predictConfiguration` (the `HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT` query path) applies
   the same limit to the candidates it predicts over, so its answer names a configuration plan
   build could actually shortlist.
-- A slotted engine's `slotCandidates` path ignores this limit entirely: every slot keeps its
-  full knob- and workspace-filtered catalog regardless of the value set here.
+- A slotted engine's `slotCandidates` path applies this limit too, on its ranked (plan-building
+  and predicting) call only: each slot's knob- and workspace-filtered catalog is further cut to
+  the best-ranked `n`. The unranked call `getMaxWorkspaceSize` uses keeps the full catalog, since
+  it must report the largest scratch any surviving kernel could need. A slot benchmark due to
+  a shortlist limit records nothing, the same as under a knob filter or workspace limit.
 
 ### Engine Applicability Threading
 

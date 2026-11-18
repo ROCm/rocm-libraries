@@ -3562,6 +3562,97 @@ def cases():
             build_fwd_small_mfma_case(_kind, _prob, **_over),
         )
 
+    # --- conv_direct_fwd_pp_mfma: LDS-DMA ping-pong MFMA forward (gfx950) ---
+    # buffer_load ... lds staging, two wave ranks with s_setprio ping-pong,
+    # per-buffer LDS alias scopes. The C++ twin is gated (every knob, both
+    # dtypes) by library/tests/parity/conv_direct_fwd_pp_mfma_emit.*.
+    def build_fwd_pp_mfma_case(dtype, KH, block_k):
+        def _build():
+            from kernels.common.conv_direct_fwd_pp_mfma import (
+                FwdPpMfmaSpec,
+                build_fwd_pp_mfma,
+            )
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            p = DirectConvProblem(
+                N=2,
+                H=20,
+                W=24,
+                groups=1,
+                cpg=72,
+                kpg=96,
+                KH=KH,
+                KW=KH,
+                PAD=(KH - 1) // 2,
+                stride=1,
+                dtype=dtype,
+            )
+            return build_fwd_pp_mfma(
+                FwdPpMfmaSpec(problem=p, block_k=block_k), arch="gfx950"
+            )
+
+        return _build
+
+    for _case_id, _dtype, _KH, _bk in (
+        ("bf16_k3_bk64", "bf16", 3, 64),
+        ("fp16_k3_bk128", "fp16", 3, 128),
+        ("bf16_k3_bk256", "bf16", 3, 256),
+    ):
+        add(
+            "conv_direct_fwd_pp_mfma",
+            f"conv_direct_fwd_pp_mfma/gfx950/{_case_id}",
+            "gfx950",
+            build_fwd_pp_mfma_case(_dtype, _KH, _bk),
+        )
+
+    # --- conv_direct_fwd_flex_mfma: flattened-pixel implicit-GEMM forward
+    # (gfx950). LDS-DMA staging of both operands, two ping-pong wave groups
+    # over a persistent grid, tap skipping and the split-C fp32 slabs. The C++
+    # twin is gated (every knob, both dtypes) by
+    # library/tests/parity/conv_direct_fwd_flex_mfma_emit.*.
+    def build_fwd_flex_mfma_case(dtype, geom, bk, split_c):
+        def _build():
+            from kernels.common.conv_direct_fwd_flex_mfma import (
+                FwdFlexMfmaSpec,
+                build_fwd_flex_mfma,
+            )
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            KH, KW, PAD, pad_w, stride, dil = geom
+            p = DirectConvProblem(
+                N=2,
+                H=20,
+                W=24,
+                groups=1,
+                cpg=512,
+                kpg=96,
+                KH=KH,
+                KW=KW,
+                PAD=PAD,
+                pad_w=pad_w,
+                stride=stride,
+                dil_h=dil,
+                dil_w=dil,
+                dtype=dtype,
+            )
+            return build_fwd_flex_mfma(
+                FwdFlexMfmaSpec(problem=p, bk=bk, split_c=split_c), arch="gfx950"
+            )
+
+        return _build
+
+    for _case_id, _dtype, _geom, _bk, _sc in (
+        ("bf16_k3s2_bk256_sc1", "bf16", (3, 3, 1, -1, 2, 1), 256, 1),
+        ("fp16_k1x7_bk128_sc2", "fp16", (1, 7, 0, 3, 1, 1), 128, 2),
+        ("bf16_k3d12_bk256_sc4", "bf16", (3, 3, 12, -1, 1, 12), 256, 4),
+    ):
+        add(
+            "conv_direct_fwd_flex_mfma",
+            f"conv_direct_fwd_flex_mfma/gfx950/{_case_id}",
+            "gfx950",
+            build_fwd_flex_mfma_case(_dtype, _geom, _bk, _sc),
+        )
+
     # --- conv_direct_fwd_tapouter_wmma: tap-outer forward of large dilations
     # (gfx1250). TDM tap windows + wave32 WMMA; every case needs llvm23 (TDM),
     # so the other flavors record them as expected failures. The C++ twin is
@@ -3761,6 +3852,52 @@ def cases():
             f"conv_direct_dgrad_wmma/gfx1250/{_case_id}",
             "gfx1250",
             build_direct_dgrad_wmma_case(_dtype, **_over),
+        )
+
+    # --- conv_direct_dgrad_pp_mfma: LDS-DMA ping-pong MFMA dgrad (gfx950) ---
+    # buffer_load ... lds staging, two wave ranks with s_setprio ping-pong,
+    # per-buffer LDS alias scopes, in-kernel transposed weights read with
+    # ds_read_b64_tr_b16. The C++ twin is gated (every knob, both dtypes) by
+    # library/tests/parity/conv_direct_dgrad_pp_mfma_emit.*.
+    def build_direct_dgrad_pp_mfma_case(dtype, KH, block_k):
+        def _build():
+            from kernels.common.conv_direct_dgrad_pp_mfma import (
+                DgradPpMfmaSpec,
+                build_dgrad_pp_mfma,
+                dgrad_pp_mfma_problem,
+            )
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            p = DirectConvProblem(
+                N=2,
+                H=20,
+                W=24,
+                groups=1,
+                cpg=72,
+                kpg=96,
+                KH=KH,
+                KW=KH,
+                PAD=(KH - 1) // 2,
+                stride=1,
+                dtype=dtype,
+            )
+            return build_dgrad_pp_mfma(
+                DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(p), block_k=block_k),
+                arch="gfx950",
+            )
+
+        return _build
+
+    for _case_id, _dtype, _KH, _bk in (
+        ("bf16_k3_bk128", "bf16", 3, 128),
+        ("fp16_k3_bk256", "fp16", 3, 256),
+        ("bf16_k5_bk128", "bf16", 5, 128),
+    ):
+        add(
+            "conv_direct_dgrad_pp_mfma",
+            f"conv_direct_dgrad_pp_mfma/gfx950/{_case_id}",
+            "gfx950",
+            build_direct_dgrad_pp_mfma_case(_dtype, _KH, _bk),
         )
 
     # --- conv_direct_fwd_wmma: wave32 WMMA direct forward (gfx1250) ---
@@ -4249,10 +4386,29 @@ def cases():
             ),
         ),
         (
+            "tiled_pingpong_halves",
+            "tiled",
+            dict(H=30),
+            dict(pingpong=True, row_unroll=4, rows_per_seg=12),
+        ),
+        (
             "tiled_fp16_unfold4",
             "tiled",
             dict(N=4, H=15, W=40, dtype="fp16"),
             dict(unfold_n=4, rows_per_seg=15, row_unroll=3),
+        ),
+        (
+            "tiled_auto_launch",
+            "tiled",
+            dict(H=30),
+            dict(
+                waves_k=2,
+                wave_c16=1,
+                prefetch=3,
+                row_unroll=4,
+                rows_per_seg=0,
+                target_blocks=512,
+            ),
         ),
         ("fold_t9", "fold", {}, dict(taps=9)),
         (

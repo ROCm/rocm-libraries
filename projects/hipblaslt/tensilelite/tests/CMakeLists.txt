@@ -23,17 +23,20 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/BenchmarkTimer_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CachingLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ContractionSelectionLibrary_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ClientProblemFactorySplit_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CuCount_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CustomKernel_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInit_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DeviceContext_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExactLogicLibrary_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/FusedA2AKernArg_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FusedA2AProblem_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitor_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HipUtilsCopyTensor_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HybridAssignmentPolicy_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../clients/common/src/hipblaslt_bench_options.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/ClientArgsTestUtils.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/RunGEMMKernelTest.hpp"
@@ -41,6 +44,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestData.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestUtils.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LaunchDimGuard_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SolutionAdapterModuleLoad_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MXScalePadding_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PciChipId_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PersistentArgumentLayout_test.cpp"
@@ -70,6 +74,21 @@ target_sources(tensilelite-tests
 # (see tensilelite/src/Tensile.cpp). The test also writes msgpack mapping
 # files directly via <msgpack.hpp>, so it has no meaning in YAML builds.
 if(NOT TENSILELITE_ENABLE_YAML)
+    # The solution-record fixtures are written into TEST_DATA_DIR on every
+    # build, where TestData::Instance() finds them in build and installed trees.
+    set(SOLUTION_STATE_UNIT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/Tests/unit")
+    set(SOLUTION_STATE_FIXTURE_DIR "${TEST_DATA_DIR}/solution-state")
+    add_custom_target(tensilelite-solution-state-fixtures
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${SOLUTION_STATE_FIXTURE_DIR}"
+        COMMAND "${Python3_EXECUTABLE}" "${SOLUTION_STATE_UNIT_DIR}/solution_state_fixtures.py"
+                "${SOLUTION_STATE_FIXTURE_DIR}/record"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${SOLUTION_STATE_FIXTURE_DIR}/catalog"
+        COMMAND ${CMAKE_COMMAND} -E copy
+                "${SOLUTION_STATE_UNIT_DIR}/test_data/catalog_chip_ids.txt"
+                "${SOLUTION_STATE_FIXTURE_DIR}/catalog"
+        COMMENT "Writing solution-state fixtures into ${SOLUTION_STATE_FIXTURE_DIR}")
+    add_dependencies(tensilelite-tests tensilelite-solution-state-fixtures)
+
     target_sources(tensilelite-tests
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/MasterSolutionLibraryMapping_test.cpp"
@@ -78,6 +97,8 @@ if(NOT TENSILELITE_ENABLE_YAML)
             # msgpack BIN, and mapRawBytes has no YAML implementation.
             "${CMAKE_CURRENT_SOURCE_DIR}/IndexedLibraryLoad_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/MessagePackWriting_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/SolutionState_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/SolutionRecord_test.cpp"
     )
 endif()
 
