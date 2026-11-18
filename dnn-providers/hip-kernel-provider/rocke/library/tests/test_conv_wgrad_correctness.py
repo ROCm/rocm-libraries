@@ -3607,6 +3607,35 @@ class TestWgradRegTransposeKnobNumerics(unittest.TestCase):
             ),
         )
 
+    def _run_two_stage(self, dtype, **kw):
+        """A two-stage spec through the stage-1 + stage-2 pipeline
+        (``_run_two_stage_ts``: stage 1 needs its workspace, which ``_run_one``
+        does not allocate), against the CPU reference."""
+        import torch
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+        from rocke.runtime.hip_module import Runtime
+
+        spec = _regt_spec(dtype, two_stage=True, **kw)
+        ok, why = is_valid_wgrad_spec(spec, arch=GPU_ARCH)
+        self.assertTrue(ok, f"two_stage spec invalid: {why}")
+        p = spec.problem
+        torch_dtype = torch.float16 if dtype == "fp16" else torch.bfloat16
+        torch.manual_seed(0)
+        X_f32 = torch.empty(p.N, p.Hi, p.Wi, p.C).uniform_(-1.0, 1.0)
+        dY_f32 = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0)
+        dW = _run_two_stage_ts(
+            spec,
+            GPU_ARCH,
+            Runtime(),
+            dY_f32.to(torch_dtype),
+            X_f32.to(torch_dtype),
+        )
+        ref = _cpu_wgrad_ref_ts(X_f32, dY_f32, p)
+        scale = ref.abs().max().item()
+        self.assertGreater(scale, 1e-6, "reference is zero: nothing was compared")
+        rel_err = (dW - ref).abs().max().item() / scale
+        self.assertLess(rel_err, _TOL[dtype], f"rel_err={rel_err:.3e}")
+
     def test_regt(self):
         for dtype in _DTYPES:
             for split_k in (1, 2):
@@ -3615,7 +3644,10 @@ class TestWgradRegTransposeKnobNumerics(unittest.TestCase):
                     with self.subTest(
                         dtype=dtype, split_k=split_k, two_stage=two_stage
                     ):
-                        self._run(dtype, split_k=split_k, two_stage=two_stage)
+                        if two_stage:
+                            self._run_two_stage(dtype, split_k=split_k)
+                        else:
+                            self._run(dtype, split_k=split_k)
 
     def test_rtp3(self):
         for dtype in _DTYPES:
@@ -3624,10 +3656,21 @@ class TestWgradRegTransposeKnobNumerics(unittest.TestCase):
                     self._run(dtype, regt_prefetch=3, split_k=split_k)
 
     def test_ras(self):
+        # Wo = 16 (a multiple of REGT_K_RUN = 8) so the stepped run path
+        # (Wo % 8 == 0) runs; the default shape's Wo of 14 never takes it.
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+        stepped = ConvProblem(N=2, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        self.assertEqual(stepped.Wo % 8, 0)
         for dtype in _DTYPES:
             for prefetch in (0, 3):
                 with self.subTest(dtype=dtype, regt_prefetch=prefetch):
-                    self._run(dtype, regt_addr_step=True, regt_prefetch=prefetch)
+                    self._run(
+                        dtype,
+                        problem=stepped,
+                        regt_addr_step=True,
+                        regt_prefetch=prefetch,
+                    )
 
     def test_apr(self):
         for dtype in _DTYPES:
