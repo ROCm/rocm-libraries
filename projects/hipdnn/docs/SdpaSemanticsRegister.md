@@ -535,8 +535,9 @@ batch when `seq_len_q/kv` are set).
   (`TestSdpaBwdPackUnpack.GraphUsingNoNewFieldLowersThroughABackendThatRejectsThem`).
 - **`max_total_seq_len_q/kv`:** the physical token span of the packed Q (K/V) buffer, at least
   `max(offset[b] + len[b])` over the batch (cudnn-frontend `docs/operations/Attention.md:761-781`). It is
-  serialized and an engine may read it to size buffers and set its sequence-length arguments; the ASM SDPA
-  engine's grouped backward does. Engines that do not need it ignore it. Divergence from cuDNN, which checks only
+  serialized so that an engine can read it to size buffers and set its sequence-length arguments. No in-tree
+  engine reads it yet: the ASM SDPA engine declines grouped (ragged) backward graphs, and its grouped backward
+  (ALMIOPEN-3364) is the intended reader. Engines that do not need it ignore it. Divergence from cuDNN, which checks only
   raggedness: `validate()` fails with `INVALID_VALUE` when `max_total_seq_len_q` is below Q's S_max (`dims[2]`) or
   `max_total_seq_len_kv` is below K's S_max; equal to S_max is valid. Pinned by
   `TestSdpaBwdNode.PreValidateFailsMaxTotalSeqLenQBelowQSMax`, `PreValidateFailsMaxTotalSeqLenKvBelowKSMax`,
