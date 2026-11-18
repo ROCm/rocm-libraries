@@ -215,6 +215,47 @@ TEST_F(WaitAluTrackerTest, UntilFreeUsesFormWmma) {
     EXPECT_EQ(t.requiredGap(*insts[1], *insts[2], WaitAluHideOp::Wmma, insts[1]), -1);
 }
 
+// Mixed hide of the latency-8 / 8-VGPR form (lead 5, tail 7): VALUs count only once 5 matrix
+// ops issued, then each one fills a tail slot.
+TEST_F(WaitAluTrackerTest, MixedHideCountsValusAfterLead) {
+    // Each one accumulates into its own 8 VGPRs, so none re-stamps the producer's v[0:7].
+    auto wmma = [](int i) {
+        const std::string r = "v[" + std::to_string(8 * i) + ":" + std::to_string(8 * i + 7) + "]";
+        return "  " + r + R"( = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], )" + r +
+               R"() { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } })" +
+               "\n";
+    };
+    std::string body;
+    for (int i = 0; i <= 5; ++i) body += wmma(i);
+    for (int i = 0; i < 7; ++i)
+        body += "  v" + std::to_string(200 + i) + " = \"st.v_add_f32\"(v250, v251) " +
+                "{ issueCycles = 1, latencyCycles = 5 }\n";
+    body += "  v260 = \"st.ds_load_b32\"(v0) " + std::string(kDsAttrs) + "\n";
+    const std::vector<StinkyInstruction*> insts = parse(body);
+    ASSERT_EQ(insts.size(), 14u);
+    const StinkyInstruction& ds = *insts.back();
+    WaitAluTracker t = makeTracker();
+    t.commit(*insts[0]);
+    // Matrix ops alone: the lead plus a tail of matrix ops, the form's matrix count.
+    EXPECT_EQ(t.untilFree(ds, WaitAluHideOp::Wmma), 12);
+    EXPECT_EQ(t.requiredGap(*insts[0], ds, WaitAluHideOp::Wmma), 12);
+    // One VALU per WMMA window: the tail after windows 5..8 is 1, 3, 5, 7. Four per window: the
+    // no-order rule counts the VALUs alone (matrix ops fill none of its 21 slots), so it is met
+    // after 6 windows (24), before the mixed rule's 7 (windows 6 and 7 give 2 + 8).
+    EXPECT_EQ(t.requiredGap(*insts[0], ds, WaitAluHideOp::Wmma, nullptr, 1), 8);
+    EXPECT_EQ(t.requiredGap(*insts[0], ds, WaitAluHideOp::Wmma, nullptr, 4), 6);
+    // Before the lead a VALU fills no mixed-rule slot, only the no-order rule's: 21, and still
+    // 21 after 4 matrix ops, which fill no slot of that rule.
+    EXPECT_EQ(t.untilFree(ds, WaitAluHideOp::Valu), 21);
+    for (int i = 1; i <= 4; ++i) t.commit(*insts[i]);
+    EXPECT_EQ(t.untilFree(ds, WaitAluHideOp::Valu), 21);
+    t.commit(*insts[5]);
+    // Lead met: 7 VALUs or 7 matrix ops, one slot each.
+    EXPECT_EQ(t.untilFree(ds, WaitAluHideOp::Wmma), 7);
+    std::vector<StinkyInstruction*> valus(insts.begin() + 6, insts.begin() + 13);
+    expectCountsDown(t, ds, WaitAluHideOp::Valu, valus, /*vm=*/false);
+}
+
 // A read never waits for a read: the store waits for the v_mov that wrote v1 (one follower in
 // the shared order), not for the v_add that read it.
 TEST_F(WaitAluTrackerTest, ReadWaitsForWriterNotReader) {
@@ -232,6 +273,122 @@ TEST_F(WaitAluTrackerTest, ReadWaitsForWriterNotReader) {
     // for the v_add's read.
     t.commit(*insts[2]);
     EXPECT_EQ(t.query(*insts[3]).vaVdst, 0);
+}
+
+// A read does not restart the writer's hide progress: WMMAs issued before the read still count.
+TEST_F(WaitAluTrackerTest, ReadKeepsWriterProgress) {
+    std::string body = "  v1 = \"st.v_mov_b32\"(v5) { issueCycles = 1, latencyCycles = 1 }\n" + wmmas(6) +
+                       "  v2 = \"st.v_add_f32\"(v3, v1) { issueCycles = 1, latencyCycles = 5 }\n" +
+                       "  \"st.ds_store_b32\"(v7, v1) " + std::string(kDsAttrs) + "\n";
+    const std::vector<StinkyInstruction*> insts = parse(body);
+    ASSERT_EQ(insts.size(), 9u);
+    WaitAluTracker t = makeTracker();
+    for (size_t i = 0; i + 1 < insts.size(); ++i) t.commit(*insts[i]);
+    // The form's mixed rule (lead 5, tail 7): 6 matrix ops met the lead and filled one tail slot,
+    // the v_add after the lead filled another, so 5 more matrix ops free it. A stamp reset by
+    // the read would have needed 12.
+    EXPECT_EQ(t.untilFree(*insts.back(), WaitAluHideOp::Wmma), 5);
+}
+
+// The no-order rule: 21 VALUs after a CSMACC producer hide its writeback with no matrix op
+// after it, once the form is latched.
+TEST_F(WaitAluTrackerTest, ValuOnlyHidesWithoutLead) {
+    std::string body = "  v[8:15] = " + std::string(kWmma).replace(std::string(kWmma).find("v[0:7]"), 6, "v[8:15]") + "\n" +
+                       "  v40 = \"st.v_mov_b32\"(v41) { issueCycles = 1, latencyCycles = 1 }\n";
+    for (int i = 0; i < 21; ++i)
+        body += "  v" + std::to_string(100 + i) + " = \"st.v_add_f32\"(v250, v251) { issueCycles = 1, latencyCycles = 5 }\n";
+    body += "  \"st.ds_store_b32\"(v7, v40) " + std::string(kDsAttrs) + "\n";
+    const std::vector<StinkyInstruction*> insts = parse(body);
+    ASSERT_EQ(insts.size(), 24u);
+    const StinkyInstruction& store = *insts.back();
+    WaitAluTracker t = makeTracker();
+    t.commit(*insts[0]);
+    t.commit(*insts[1]);
+    EXPECT_EQ(t.untilFree(store, WaitAluHideOp::Valu), 21);
+    EXPECT_EQ(t.untilFree(store, WaitAluHideOp::Wmma), 12);
+    std::vector<StinkyInstruction*> valus(insts.begin() + 2, insts.begin() + 23);
+    expectCountsDown(t, store, WaitAluHideOp::Valu, valus, /*vm=*/false);
+}
+
+// A WAR consumer (overwrites a source the WMMA read) is freed by the src rule, 9 ops for this
+// form, while the WMMA's C (read and written) still needs the dst rule's 12.
+TEST_F(WaitAluTrackerTest, SourceOverwriteUsesSrcRule) {
+    std::string body =
+        "  v[0:7] = \"st.v_wmma_f32_16x16x128_fp8_fp8\"(v[300:315], v[316:331], v[0:7]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }\n";
+    for (int i = 0; i < 12; ++i) {
+        const std::string r = "v[" + std::to_string(8 + 8 * i) + ":" + std::to_string(15 + 8 * i) + "]";
+        body += "  " + r + " = \"st.v_wmma_f32_16x16x128_fp8_fp8\"(v[400:415], v[416:431], " + r +
+                ") { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }\n";
+    }
+    body += "  v[300:303] = \"st.ds_load_b128\"(v250) " + std::string(kDsAttrs) + "\n";
+    body += "  v[0:3] = \"st.ds_load_b128\"(v250) " + std::string(kDsAttrs) + "\n";
+    const std::vector<StinkyInstruction*> insts = parse(body);
+    ASSERT_EQ(insts.size(), 15u);
+    WaitAluTracker t = makeTracker();
+    t.commit(*insts[0]);
+    EXPECT_EQ(t.untilFree(*insts[13], WaitAluHideOp::Wmma), 9);
+    EXPECT_EQ(t.untilFree(*insts[13], WaitAluHideOp::Valu), 9);
+    EXPECT_EQ(t.untilFree(*insts[14], WaitAluHideOp::Wmma), 12);
+    EXPECT_EQ(t.untilFree(*insts[14], WaitAluHideOp::Valu), 21);
+    for (int i = 1; i <= 9; ++i) t.commit(*insts[i]);
+    EXPECT_LT(t.query(*insts[13]).vaVdst, 0);
+    EXPECT_EQ(t.query(*insts[14]).vaVdst, 9);
+}
+
+// An f64 producer: no count of matrix ops frees a consumer (-1), 12 VALU-class ops free one that
+// overwrites a source, and nothing frees one that reads or overwrites its result.
+TEST_F(WaitAluTrackerTest, DpmaccProducerCapacityRule) {
+    std::string body =
+        "  v[0:1] = \"st.v_fma_f64\"(v[2:3], v[4:5], v[0:1]) { issueCycles = 1, latencyCycles = 32 }\n";
+    for (int i = 0; i < 12; ++i)
+        body += "  v" + std::to_string(100 + i) + " = \"st.v_add_f32\"(v250, v251) { issueCycles = 1, latencyCycles = 5 }\n";
+    body += "  v[2:3] = \"st.ds_load_b64\"(v252) " + std::string(kDsAttrs) + "\n";
+    body += "  v[0:1] = \"st.ds_load_b64\"(v252) " + std::string(kDsAttrs) + "\n";
+    body += "  \"st.ds_store_b64\"(v252, v[0:1]) " + std::string(kDsAttrs) + "\n";
+    const std::vector<StinkyInstruction*> insts = parse(body);
+    ASSERT_EQ(insts.size(), 16u);
+    WaitAluTracker t = makeTracker();
+    t.commit(*insts[0]);
+    EXPECT_EQ(t.untilFree(*insts[13], WaitAluHideOp::Wmma), -1);
+    EXPECT_EQ(t.untilFree(*insts[13], WaitAluHideOp::Valu), 12);
+    EXPECT_EQ(t.untilFree(*insts[14], WaitAluHideOp::Valu), -1);
+    EXPECT_EQ(t.untilFree(*insts[15], WaitAluHideOp::Valu), -1);
+    std::vector<StinkyInstruction*> valus(insts.begin() + 1, insts.begin() + 13);
+    expectCountsDown(t, *insts[13], WaitAluHideOp::Valu, valus, /*vm=*/false);
+    EXPECT_EQ(t.query(*insts[14]).vaVdst, 0);
+    EXPECT_EQ(t.query(*insts[15]).vaVdst, 0);
+}
+
+// A CSMACC producer before any matrix op: the no-latch set frees a source overwrite after 12
+// VALUs; matrix ops are not what it counts.
+TEST_F(WaitAluTrackerTest, NoLatchCsmaccCapacityRule) {
+    std::string body = "  v9 = \"st.v_add_f32\"(v300, v301) { issueCycles = 1, latencyCycles = 5 }\n";
+    for (int i = 0; i < 12; ++i)
+        body += "  v" + std::to_string(100 + i) + " = \"st.v_add_f32\"(v250, v251) { issueCycles = 1, latencyCycles = 5 }\n";
+    body += "  v300 = \"st.ds_load_b32\"(v252) " + std::string(kDsAttrs) + "\n";
+    const std::vector<StinkyInstruction*> insts = parse(body);
+    ASSERT_EQ(insts.size(), 14u);
+    WaitAluTracker t = makeTracker();
+    t.commit(*insts[0]);
+    EXPECT_EQ(t.untilFree(*insts[13], WaitAluHideOp::Wmma), -1);
+    EXPECT_EQ(t.untilFree(*insts[13], WaitAluHideOp::Valu), 12);
+    std::vector<StinkyInstruction*> valus(insts.begin() + 1, insts.begin() + 13);
+    expectCountsDown(t, *insts[13], WaitAluHideOp::Valu, valus, /*vm=*/false);
+}
+
+// A rule only VALUs satisfy (the f64 capacity set) behind each WMMA: one VALU per WMMA needs 12
+// WMMAs, two need 6, none never.
+TEST_F(WaitAluTrackerTest, RequiredGapCountsValusForAValuOnlyRule) {
+    const std::vector<StinkyInstruction*> insts = parse(
+        "  v[32:39] = \"st.v_wmma_scale_f32_16x16x128_f8f6f4\"(v[400:415], v[416:431], v[32:39], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = \"MATRIX_FMT_FP8\", fmtB = \"MATRIX_FMT_FP8\" } }\n"
+        "  v[0:1] = \"st.v_fma_f64\"(v[2:3], v[4:5], v[0:1]) { issueCycles = 1, latencyCycles = 32 }\n"
+        "  v[2:3] = \"st.ds_load_b64\"(v252) " + std::string(kDsAttrs) + "\n");
+    ASSERT_EQ(insts.size(), 3u);
+    WaitAluTracker t = makeTracker();
+    t.commit(*insts[0]);
+    EXPECT_EQ(t.requiredGap(*insts[1], *insts[2], WaitAluHideOp::Wmma, nullptr, 0), -1);
+    EXPECT_EQ(t.requiredGap(*insts[1], *insts[2], WaitAluHideOp::Wmma, nullptr, 1), 12);
+    EXPECT_EQ(t.requiredGap(*insts[1], *insts[2], WaitAluHideOp::Wmma, nullptr, 2), 6);
 }
 
 }  // namespace

@@ -1,0 +1,537 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass=enableESM2TrackValuVsrc --print-output
+#
+# The dst (writeback) rules of every gfx1250 form, from the user's table. Per form three rules
+# may hide a RAW / WAW consumer's va_vdst: matrix ops alone (pure), a lead of matrix ops then a
+# tail of slots (mix; a VALU fills one, a scaled matrix op two, an unscaled one one), or VALUs
+# with no order (valu, 21 for every form; a matrix op never fills one of its slots, so a mixed
+# sequence is judged by the pure and mixed rules only).
+#   4/8/no  13 (6,7) 21 | 4/8/MX 8 (5,6) 21 s2 | 8/8/no 12 (5,7) 21 | 8/8/MX 7 (4,6) 21 s2
+#   8/16/MX 7 (3,8) 21 s2 | 16/8/no 12 (5,7) 21
+# The waits here count the producer's own pipe only (no shared-order option on the RUN line).
+
+#===----------------------------------------------------------------------===#
+# 21 VALUs after a v_mov hide its writeback for the store, no matrix op needed past the latch.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_valu_only_21_hides
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: ds_store_b32
+st.func @vdst_valu_only_21_hides() {
+^entry:
+  v[88:95] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[88:95]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v0 = "st.v_mov_b32"(v5) { issueCycles = 1, latencyCycles = 1 }
+  v200 = "st.v_add_f32"(v230, v230) { issueCycles = 1, latencyCycles = 5 }
+  v201 = "st.v_add_f32"(v231, v231) { issueCycles = 1, latencyCycles = 5 }
+  v202 = "st.v_add_f32"(v232, v232) { issueCycles = 1, latencyCycles = 5 }
+  v203 = "st.v_add_f32"(v233, v233) { issueCycles = 1, latencyCycles = 5 }
+  v204 = "st.v_add_f32"(v234, v234) { issueCycles = 1, latencyCycles = 5 }
+  v205 = "st.v_add_f32"(v235, v235) { issueCycles = 1, latencyCycles = 5 }
+  v206 = "st.v_add_f32"(v236, v236) { issueCycles = 1, latencyCycles = 5 }
+  v207 = "st.v_add_f32"(v237, v237) { issueCycles = 1, latencyCycles = 5 }
+  v208 = "st.v_add_f32"(v238, v238) { issueCycles = 1, latencyCycles = 5 }
+  v209 = "st.v_add_f32"(v239, v239) { issueCycles = 1, latencyCycles = 5 }
+  v210 = "st.v_add_f32"(v240, v240) { issueCycles = 1, latencyCycles = 5 }
+  v211 = "st.v_add_f32"(v241, v241) { issueCycles = 1, latencyCycles = 5 }
+  v212 = "st.v_add_f32"(v242, v242) { issueCycles = 1, latencyCycles = 5 }
+  v213 = "st.v_add_f32"(v243, v243) { issueCycles = 1, latencyCycles = 5 }
+  v214 = "st.v_add_f32"(v244, v244) { issueCycles = 1, latencyCycles = 5 }
+  v215 = "st.v_add_f32"(v245, v245) { issueCycles = 1, latencyCycles = 5 }
+  v216 = "st.v_add_f32"(v246, v246) { issueCycles = 1, latencyCycles = 5 }
+  v217 = "st.v_add_f32"(v247, v247) { issueCycles = 1, latencyCycles = 5 }
+  v218 = "st.v_add_f32"(v248, v248) { issueCycles = 1, latencyCycles = 5 }
+  v219 = "st.v_add_f32"(v249, v249) { issueCycles = 1, latencyCycles = 5 }
+  v220 = "st.v_add_f32"(v250, v250) { issueCycles = 1, latencyCycles = 5 }
+  "st.ds_store_b32"(v7, v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# 20 is one short (the count saturates at the 4-bit field).
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_valu_only_20_waits
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 14
+# CHECK-NEXT: ds_store_b32
+st.func @vdst_valu_only_20_waits() {
+^entry:
+  v[88:95] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[88:95]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v0 = "st.v_mov_b32"(v5) { issueCycles = 1, latencyCycles = 1 }
+  v200 = "st.v_add_f32"(v230, v230) { issueCycles = 1, latencyCycles = 5 }
+  v201 = "st.v_add_f32"(v231, v231) { issueCycles = 1, latencyCycles = 5 }
+  v202 = "st.v_add_f32"(v232, v232) { issueCycles = 1, latencyCycles = 5 }
+  v203 = "st.v_add_f32"(v233, v233) { issueCycles = 1, latencyCycles = 5 }
+  v204 = "st.v_add_f32"(v234, v234) { issueCycles = 1, latencyCycles = 5 }
+  v205 = "st.v_add_f32"(v235, v235) { issueCycles = 1, latencyCycles = 5 }
+  v206 = "st.v_add_f32"(v236, v236) { issueCycles = 1, latencyCycles = 5 }
+  v207 = "st.v_add_f32"(v237, v237) { issueCycles = 1, latencyCycles = 5 }
+  v208 = "st.v_add_f32"(v238, v238) { issueCycles = 1, latencyCycles = 5 }
+  v209 = "st.v_add_f32"(v239, v239) { issueCycles = 1, latencyCycles = 5 }
+  v210 = "st.v_add_f32"(v240, v240) { issueCycles = 1, latencyCycles = 5 }
+  v211 = "st.v_add_f32"(v241, v241) { issueCycles = 1, latencyCycles = 5 }
+  v212 = "st.v_add_f32"(v242, v242) { issueCycles = 1, latencyCycles = 5 }
+  v213 = "st.v_add_f32"(v243, v243) { issueCycles = 1, latencyCycles = 5 }
+  v214 = "st.v_add_f32"(v244, v244) { issueCycles = 1, latencyCycles = 5 }
+  v215 = "st.v_add_f32"(v245, v245) { issueCycles = 1, latencyCycles = 5 }
+  v216 = "st.v_add_f32"(v246, v246) { issueCycles = 1, latencyCycles = 5 }
+  v217 = "st.v_add_f32"(v247, v247) { issueCycles = 1, latencyCycles = 5 }
+  v218 = "st.v_add_f32"(v248, v248) { issueCycles = 1, latencyCycles = 5 }
+  v219 = "st.v_add_f32"(v249, v249) { issueCycles = 1, latencyCycles = 5 }
+  "st.ds_store_b32"(v7, v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# A matrix op fills no slot of the no-order rule: 1 matrix op + 20 VALUs still wait (the pure rule
+# sees 1 < 12 and the mixed rule's lead of 5 is not met).
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_valu_only_matrix_op_fills_no_slot
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 14
+# CHECK-NEXT: ds_store_b32
+st.func @vdst_valu_only_matrix_op_fills_no_slot() {
+^entry:
+  v[88:95] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[88:95]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v0 = "st.v_mov_b32"(v5) { issueCycles = 1, latencyCycles = 1 }
+  v[96:103] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[96:103]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v200 = "st.v_add_f32"(v230, v230) { issueCycles = 1, latencyCycles = 5 }
+  v201 = "st.v_add_f32"(v231, v231) { issueCycles = 1, latencyCycles = 5 }
+  v202 = "st.v_add_f32"(v232, v232) { issueCycles = 1, latencyCycles = 5 }
+  v203 = "st.v_add_f32"(v233, v233) { issueCycles = 1, latencyCycles = 5 }
+  v204 = "st.v_add_f32"(v234, v234) { issueCycles = 1, latencyCycles = 5 }
+  v205 = "st.v_add_f32"(v235, v235) { issueCycles = 1, latencyCycles = 5 }
+  v206 = "st.v_add_f32"(v236, v236) { issueCycles = 1, latencyCycles = 5 }
+  v207 = "st.v_add_f32"(v237, v237) { issueCycles = 1, latencyCycles = 5 }
+  v208 = "st.v_add_f32"(v238, v238) { issueCycles = 1, latencyCycles = 5 }
+  v209 = "st.v_add_f32"(v239, v239) { issueCycles = 1, latencyCycles = 5 }
+  v210 = "st.v_add_f32"(v240, v240) { issueCycles = 1, latencyCycles = 5 }
+  v211 = "st.v_add_f32"(v241, v241) { issueCycles = 1, latencyCycles = 5 }
+  v212 = "st.v_add_f32"(v242, v242) { issueCycles = 1, latencyCycles = 5 }
+  v213 = "st.v_add_f32"(v243, v243) { issueCycles = 1, latencyCycles = 5 }
+  v214 = "st.v_add_f32"(v244, v244) { issueCycles = 1, latencyCycles = 5 }
+  v215 = "st.v_add_f32"(v245, v245) { issueCycles = 1, latencyCycles = 5 }
+  v216 = "st.v_add_f32"(v246, v246) { issueCycles = 1, latencyCycles = 5 }
+  v217 = "st.v_add_f32"(v247, v247) { issueCycles = 1, latencyCycles = 5 }
+  v218 = "st.v_add_f32"(v248, v248) { issueCycles = 1, latencyCycles = 5 }
+  v219 = "st.v_add_f32"(v249, v249) { issueCycles = 1, latencyCycles = 5 }
+  "st.ds_store_b32"(v7, v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# VALUs before the lead do not add up with matrix ops after it: 15 VALUs then 6 matrix ops after an
+# XDL producer wait (pure 6 < 12; the mixed lead of 5 leaves one slot of 7; the no-order rule has 15
+# of 21). Reading the result waits for the 6 matrix ops behind the producer in its pipe.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_valu_only_15v_then_6w_waits
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 6
+# CHECK-NEXT: ds_store_b32
+st.func @vdst_valu_only_15v_then_6w_waits() {
+^entry:
+  v[88:95] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[88:95]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v200 = "st.v_add_f32"(v230, v230) { issueCycles = 1, latencyCycles = 5 }
+  v201 = "st.v_add_f32"(v231, v231) { issueCycles = 1, latencyCycles = 5 }
+  v202 = "st.v_add_f32"(v232, v232) { issueCycles = 1, latencyCycles = 5 }
+  v203 = "st.v_add_f32"(v233, v233) { issueCycles = 1, latencyCycles = 5 }
+  v204 = "st.v_add_f32"(v234, v234) { issueCycles = 1, latencyCycles = 5 }
+  v205 = "st.v_add_f32"(v235, v235) { issueCycles = 1, latencyCycles = 5 }
+  v206 = "st.v_add_f32"(v236, v236) { issueCycles = 1, latencyCycles = 5 }
+  v207 = "st.v_add_f32"(v237, v237) { issueCycles = 1, latencyCycles = 5 }
+  v208 = "st.v_add_f32"(v238, v238) { issueCycles = 1, latencyCycles = 5 }
+  v209 = "st.v_add_f32"(v239, v239) { issueCycles = 1, latencyCycles = 5 }
+  v210 = "st.v_add_f32"(v240, v240) { issueCycles = 1, latencyCycles = 5 }
+  v211 = "st.v_add_f32"(v241, v241) { issueCycles = 1, latencyCycles = 5 }
+  v212 = "st.v_add_f32"(v242, v242) { issueCycles = 1, latencyCycles = 5 }
+  v213 = "st.v_add_f32"(v243, v243) { issueCycles = 1, latencyCycles = 5 }
+  v214 = "st.v_add_f32"(v244, v244) { issueCycles = 1, latencyCycles = 5 }
+  v[96:103] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[96:103]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[104:111] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[104:111]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[112:119] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[112:119]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[120:127] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[120:127]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[128:135] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[128:135]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[136:143] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[136:143]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  "st.ds_store_b32"(v7, v88) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# 4-pass fp8 form: lead 6, then 7 VALUs.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_4_8_mix_6w_7v_hides
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: ds_load_b32
+st.func @vdst_4_8_mix_6w_7v_hides() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[0:7]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[8:15]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[16:23]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[24:31]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[32:39]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[40:47]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[48:55]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v200 = "st.v_add_f32"(v230, v230) { issueCycles = 1, latencyCycles = 5 }
+  v201 = "st.v_add_f32"(v231, v231) { issueCycles = 1, latencyCycles = 5 }
+  v202 = "st.v_add_f32"(v232, v232) { issueCycles = 1, latencyCycles = 5 }
+  v203 = "st.v_add_f32"(v233, v233) { issueCycles = 1, latencyCycles = 5 }
+  v204 = "st.v_add_f32"(v234, v234) { issueCycles = 1, latencyCycles = 5 }
+  v205 = "st.v_add_f32"(v235, v235) { issueCycles = 1, latencyCycles = 5 }
+  v206 = "st.v_add_f32"(v236, v236) { issueCycles = 1, latencyCycles = 5 }
+  v260 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# VALUs before the 6th matrix op count for nothing: 6 matrix ops, 0 tail.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_4_8_mix_5w_7v_1w_waits
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 6
+# CHECK-NEXT: ds_load_b32
+st.func @vdst_4_8_mix_5w_7v_1w_waits() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[0:7]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[8:15]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[16:23]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[24:31]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[32:39]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[40:47]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v200 = "st.v_add_f32"(v230, v230) { issueCycles = 1, latencyCycles = 5 }
+  v201 = "st.v_add_f32"(v231, v231) { issueCycles = 1, latencyCycles = 5 }
+  v202 = "st.v_add_f32"(v232, v232) { issueCycles = 1, latencyCycles = 5 }
+  v203 = "st.v_add_f32"(v233, v233) { issueCycles = 1, latencyCycles = 5 }
+  v204 = "st.v_add_f32"(v234, v234) { issueCycles = 1, latencyCycles = 5 }
+  v205 = "st.v_add_f32"(v235, v235) { issueCycles = 1, latencyCycles = 5 }
+  v206 = "st.v_add_f32"(v236, v236) { issueCycles = 1, latencyCycles = 5 }
+  v[48:55] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[48:55]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v260 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# 13 matrix ops alone.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_4_8_pure_13_hides
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: ds_load_b32
+st.func @vdst_4_8_pure_13_hides() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[0:7]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[8:15]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[16:23]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[24:31]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[32:39]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[40:47]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[48:55]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[56:63]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[64:71]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[72:79]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[80:87]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[88:95]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[96:103] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[96:103]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[104:111] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[104:111]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v260 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# 12 is one short.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_4_8_pure_12_waits
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 12
+# CHECK-NEXT: ds_load_b32
+st.func @vdst_4_8_pure_12_waits() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[0:7]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[8:15]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[16:23]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[24:31]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[32:39]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[40:47]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[48:55]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[56:63]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[64:71]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[72:79]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[80:87]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[88:95]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v[96:103] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[300:307], v[308:315], v[96:103]) { issueCycles = 1, latencyCycles = 4, mod.mfma = { reuseA = false, reuseB = false } }
+  v260 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# 4-pass scaled FP4xFP4 form (its own row since this commit): 8 scaled matrix ops alone.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_4_8_mx_pure_8_hides
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: ds_load_b32
+st.func @vdst_4_8_mx_pure_8_hides() {
+^entry:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[0:7], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[8:15], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[16:23], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[24:31], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[32:39], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[40:47], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[48:55], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[56:63], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[64:71], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v260 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# 7 is one short; each scaled op holds two tickets.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_4_8_mx_pure_7_waits
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 14
+# CHECK-NEXT: ds_load_b32
+st.func @vdst_4_8_mx_pure_7_waits() {
+^entry:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[0:7], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[8:15], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[16:23], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[24:31], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[32:39], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[40:47], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[48:55], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[56:63], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v260 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# Lead 5, then 6 VALUs fill the 6 slots.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_4_8_mx_mix_5w_6v_hides
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: ds_load_b32
+st.func @vdst_4_8_mx_mix_5w_6v_hides() {
+^entry:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[0:7], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[8:15], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[16:23], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[24:31], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[32:39], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[40:47], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v200 = "st.v_add_f32"(v230, v230) { issueCycles = 1, latencyCycles = 5 }
+  v201 = "st.v_add_f32"(v231, v231) { issueCycles = 1, latencyCycles = 5 }
+  v202 = "st.v_add_f32"(v232, v232) { issueCycles = 1, latencyCycles = 5 }
+  v203 = "st.v_add_f32"(v233, v233) { issueCycles = 1, latencyCycles = 5 }
+  v204 = "st.v_add_f32"(v234, v234) { issueCycles = 1, latencyCycles = 5 }
+  v205 = "st.v_add_f32"(v235, v235) { issueCycles = 1, latencyCycles = 5 }
+  v260 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# One slot short.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_4_8_mx_mix_5w_5v_waits
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 10
+# CHECK-NEXT: ds_load_b32
+st.func @vdst_4_8_mx_mix_5w_5v_waits() {
+^entry:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[0:7], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[8:15], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[16:23], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[24:31], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[32:39], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[40:47], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v200 = "st.v_add_f32"(v230, v230) { issueCycles = 1, latencyCycles = 5 }
+  v201 = "st.v_add_f32"(v231, v231) { issueCycles = 1, latencyCycles = 5 }
+  v202 = "st.v_add_f32"(v232, v232) { issueCycles = 1, latencyCycles = 5 }
+  v203 = "st.v_add_f32"(v233, v233) { issueCycles = 1, latencyCycles = 5 }
+  v204 = "st.v_add_f32"(v234, v234) { issueCycles = 1, latencyCycles = 5 }
+  v260 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# A scaled matrix op past the lead fills 2 slots: 2 + 4.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_4_8_mx_mix_6w_4v_hides
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: ds_load_b32
+st.func @vdst_4_8_mx_mix_6w_4v_hides() {
+^entry:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[0:7], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[8:15], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[16:23], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[24:31], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[32:39], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[40:47], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[48:55], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v200 = "st.v_add_f32"(v230, v230) { issueCycles = 1, latencyCycles = 5 }
+  v201 = "st.v_add_f32"(v231, v231) { issueCycles = 1, latencyCycles = 5 }
+  v202 = "st.v_add_f32"(v232, v232) { issueCycles = 1, latencyCycles = 5 }
+  v203 = "st.v_add_f32"(v233, v233) { issueCycles = 1, latencyCycles = 5 }
+  v260 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# A CSMACC producer takes the same rules once the form is latched.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_4_8_mx_csmacc_5w_6v_hides
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: ds_load_b32
+st.func @vdst_4_8_mx_csmacc_5w_6v_hides() {
+^entry:
+  v[88:95] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[88:95], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v0 = "st.v_mov_b32"(v5) { issueCycles = 1, latencyCycles = 1 }
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[8:15], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[16:23], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[24:31], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[32:39], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:307], v[308:315], v[40:47], v290, v291) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v200 = "st.v_add_f32"(v230, v230) { issueCycles = 1, latencyCycles = 5 }
+  v201 = "st.v_add_f32"(v231, v231) { issueCycles = 1, latencyCycles = 5 }
+  v202 = "st.v_add_f32"(v232, v232) { issueCycles = 1, latencyCycles = 5 }
+  v203 = "st.v_add_f32"(v233, v233) { issueCycles = 1, latencyCycles = 5 }
+  v204 = "st.v_add_f32"(v234, v234) { issueCycles = 1, latencyCycles = 5 }
+  v205 = "st.v_add_f32"(v235, v235) { issueCycles = 1, latencyCycles = 5 }
+  v260 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# 8-pass scaled 32x16x128 f4 (16 dst VGPRs): 7 scaled matrix ops alone (was 6).
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_8_16_mx_pure_7_hides
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: ds_load_b32
+st.func @vdst_8_16_mx_pure_7_hides() {
+^entry:
+  v[0:15] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[0:15], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:31] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[16:31], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:47] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[32:47], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:63] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[48:63], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:79] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[64:79], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:95] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[80:95], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[96:111] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[96:111], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[112:127] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[112:127], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v260 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# 6 is one short.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_8_16_mx_pure_6_waits
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 12
+# CHECK-NEXT: ds_load_b32
+st.func @vdst_8_16_mx_pure_6_waits() {
+^entry:
+  v[0:15] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[0:15], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:31] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[16:31], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:47] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[32:47], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:63] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[48:63], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:79] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[64:79], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:95] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[80:95], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[96:111] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[96:111], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v260 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# Lead 3, then 8 slots (was 6).
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_8_16_mx_mix_3w_8v_hides
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: ds_load_b32
+st.func @vdst_8_16_mx_mix_3w_8v_hides() {
+^entry:
+  v[0:15] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[0:15], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:31] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[16:31], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:47] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[32:47], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:63] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[48:63], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v200 = "st.v_add_f32"(v230, v230) { issueCycles = 1, latencyCycles = 5 }
+  v201 = "st.v_add_f32"(v231, v231) { issueCycles = 1, latencyCycles = 5 }
+  v202 = "st.v_add_f32"(v232, v232) { issueCycles = 1, latencyCycles = 5 }
+  v203 = "st.v_add_f32"(v233, v233) { issueCycles = 1, latencyCycles = 5 }
+  v204 = "st.v_add_f32"(v234, v234) { issueCycles = 1, latencyCycles = 5 }
+  v205 = "st.v_add_f32"(v235, v235) { issueCycles = 1, latencyCycles = 5 }
+  v206 = "st.v_add_f32"(v236, v236) { issueCycles = 1, latencyCycles = 5 }
+  v207 = "st.v_add_f32"(v237, v237) { issueCycles = 1, latencyCycles = 5 }
+  v260 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# One slot short.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_8_16_mx_mix_3w_7v_waits
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 6
+# CHECK-NEXT: ds_load_b32
+st.func @vdst_8_16_mx_mix_3w_7v_waits() {
+^entry:
+  v[0:15] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[0:15], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:31] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[16:31], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:47] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[32:47], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:63] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[48:63], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v200 = "st.v_add_f32"(v230, v230) { issueCycles = 1, latencyCycles = 5 }
+  v201 = "st.v_add_f32"(v231, v231) { issueCycles = 1, latencyCycles = 5 }
+  v202 = "st.v_add_f32"(v232, v232) { issueCycles = 1, latencyCycles = 5 }
+  v203 = "st.v_add_f32"(v233, v233) { issueCycles = 1, latencyCycles = 5 }
+  v204 = "st.v_add_f32"(v234, v234) { issueCycles = 1, latencyCycles = 5 }
+  v205 = "st.v_add_f32"(v235, v235) { issueCycles = 1, latencyCycles = 5 }
+  v206 = "st.v_add_f32"(v236, v236) { issueCycles = 1, latencyCycles = 5 }
+  v260 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# Two scaled matrix ops past the lead fill 4 slots: 4 + 4.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_8_16_mx_mix_5w_4v_hides
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: ds_load_b32
+st.func @vdst_8_16_mx_mix_5w_4v_hides() {
+^entry:
+  v[0:15] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[0:15], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:31] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[16:31], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:47] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[32:47], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:63] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[48:63], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:79] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[64:79], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:95] = "st.v_wmma_scale_f32_32x16x128_f4"(v[300:307], v[308:323], v[80:95], v290, v291) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v200 = "st.v_add_f32"(v230, v230) { issueCycles = 1, latencyCycles = 5 }
+  v201 = "st.v_add_f32"(v231, v231) { issueCycles = 1, latencyCycles = 5 }
+  v202 = "st.v_add_f32"(v232, v232) { issueCycles = 1, latencyCycles = 5 }
+  v203 = "st.v_add_f32"(v233, v233) { issueCycles = 1, latencyCycles = 5 }
+  v260 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# 16-pass i32 iu8 form: lead 5, then 7 slots (mixed rule new for this form).
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_16_8_mix_5w_7v_hides
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: ds_load_b32
+st.func @vdst_16_8_mix_5w_7v_hides() {
+^entry:
+  v[0:7] = "st.v_wmma_i32_16x16x64_iu8"(v[300:307], v[308:315], v[0:7]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_i32_16x16x64_iu8"(v[300:307], v[308:315], v[8:15]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_i32_16x16x64_iu8"(v[300:307], v[308:315], v[16:23]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_i32_16x16x64_iu8"(v[300:307], v[308:315], v[24:31]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_i32_16x16x64_iu8"(v[300:307], v[308:315], v[32:39]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_i32_16x16x64_iu8"(v[300:307], v[308:315], v[40:47]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { reuseA = false, reuseB = false } }
+  v200 = "st.v_add_f32"(v230, v230) { issueCycles = 1, latencyCycles = 5 }
+  v201 = "st.v_add_f32"(v231, v231) { issueCycles = 1, latencyCycles = 5 }
+  v202 = "st.v_add_f32"(v232, v232) { issueCycles = 1, latencyCycles = 5 }
+  v203 = "st.v_add_f32"(v233, v233) { issueCycles = 1, latencyCycles = 5 }
+  v204 = "st.v_add_f32"(v234, v234) { issueCycles = 1, latencyCycles = 5 }
+  v205 = "st.v_add_f32"(v235, v235) { issueCycles = 1, latencyCycles = 5 }
+  v206 = "st.v_add_f32"(v236, v236) { issueCycles = 1, latencyCycles = 5 }
+  v260 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# One slot short.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vdst_16_8_mix_5w_6v_waits
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 5
+# CHECK-NEXT: ds_load_b32
+st.func @vdst_16_8_mix_5w_6v_waits() {
+^entry:
+  v[0:7] = "st.v_wmma_i32_16x16x64_iu8"(v[300:307], v[308:315], v[0:7]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_i32_16x16x64_iu8"(v[300:307], v[308:315], v[8:15]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_i32_16x16x64_iu8"(v[300:307], v[308:315], v[16:23]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_i32_16x16x64_iu8"(v[300:307], v[308:315], v[24:31]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_i32_16x16x64_iu8"(v[300:307], v[308:315], v[32:39]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_i32_16x16x64_iu8"(v[300:307], v[308:315], v[40:47]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { reuseA = false, reuseB = false } }
+  v200 = "st.v_add_f32"(v230, v230) { issueCycles = 1, latencyCycles = 5 }
+  v201 = "st.v_add_f32"(v231, v231) { issueCycles = 1, latencyCycles = 5 }
+  v202 = "st.v_add_f32"(v232, v232) { issueCycles = 1, latencyCycles = 5 }
+  v203 = "st.v_add_f32"(v233, v233) { issueCycles = 1, latencyCycles = 5 }
+  v204 = "st.v_add_f32"(v234, v234) { issueCycles = 1, latencyCycles = 5 }
+  v205 = "st.v_add_f32"(v235, v235) { issueCycles = 1, latencyCycles = 5 }
+  v260 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+

@@ -156,9 +156,10 @@ struct HWModel {
             int costLatency;
             int dstVgprs;
             bool scaled = false;
-            /// Rules for XDL producers once this form is the kernel's.
+            /// Rules for XDL (WMMA) producers once this form is the kernel's.
             RuleSet xdl;
-            /// Rules for CSMACC producers once this form is the kernel's.
+            /// Rules for CSMACC producers once this form is the kernel's: `xdl` with the src
+            /// VALU-only count replaced by the SQ->SP path capacity (forCsmaccProducer).
             RuleSet csmacc;
             bool operator==(const Form&) const = default;
         };

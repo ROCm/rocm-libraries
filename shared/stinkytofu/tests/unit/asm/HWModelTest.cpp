@@ -248,11 +248,33 @@ TEST(HWModel, Gfx1250WaitHideFormTable) {
         }
     }
 
+    // The pass measures ages against a ring of kAgeRing matrix ordinals (InsertWaitAlu
+    // AgeClock::kRing) and takes "older than the ring" as "every matrix rule met": that needs the
+    // age cap, 2 * max(lead + tail), inside the ring, and a pure rule beside every mixed one.
+    constexpr int kAgeRing = 64;
+    auto expectRingFits = [&](const HWModel::WaitHide::RuleSet& rs, const char* what) {
+        for (const auto* rh : {&rs.dst, &rs.src}) {
+            for (const auto* h : {&rh->pure, &rh->mix, &rh->valu})
+                EXPECT_LE(2 * (h->lead + h->tail), kAgeRing) << what;
+            // A lead-less mixed rule is a VALU-only count (the capacity sets); a led one needs
+            // a pure rule beside it.
+            if (rh->mix.lead > 0) EXPECT_TRUE(rh->pure.on()) << what << ": mixed rule without a pure one";
+        }
+    };
+    expectRingFits(hw.waitHide.noLatchCsmacc, "noLatchCsmacc");
+    expectRingFits(hw.waitHide.dpmacc, "dpmacc");
     for (const auto& form : hw.waitHide.forms) {
+        expectRingFits(form.xdl, "xdl");
+        expectRingFits(form.csmacc, "csmacc");
         expectSrcNoStricterThanDst(form.xdl, "xdl");
         expectSrcNoStricterThanDst(form.csmacc, "csmacc");
-        EXPECT_GE(form.xdl.wmmaSlots, 1);
-        EXPECT_GE(form.csmacc.wmmaSlots, 1);
+        // No mixed rule without a lead: the pass counts a mixed rule's VALUs from the lead on.
+        for (const auto* rs : {&form.xdl, &form.csmacc})
+            for (const auto* rh : {&rs->dst, &rs->src})
+                if (rh->mix.on()) EXPECT_GT(rh->mix.lead, 0) << "lead-less mixed rule";
+        // s is the form's wmma_scale: a scaled matrix op takes two tail slots, a plain one one.
+        EXPECT_EQ(form.xdl.wmmaSlots, form.scaled ? 2 : 1) << "xdl slots of " << form.dstVgprs;
+        EXPECT_EQ(form.csmacc.wmmaSlots, form.scaled ? 2 : 1) << "csmacc slots of " << form.dstVgprs;
     }
     expectSrcNoStricterThanDst(hw.waitHide.noLatchCsmacc, "noLatchCsmacc");
     expectSrcNoStricterThanDst(hw.waitHide.dpmacc, "dpmacc");
@@ -269,6 +291,58 @@ TEST(HWModel, Gfx1250WaitHideFormTable) {
         EXPECT_TRUE(v0.waitHide.forms[i] == hw.waitHide.forms[i]) << "row " << i;
 }
 
+
+// The gfx1250 wait-hide table, cell by cell (WMMA producer rules, the derived CSMACC set, the
+// capacity sets). A row key that moves or a number that drifts fails here on purpose.
+TEST(HWModel, Gfx1250WaitHideFinalEncode) {
+    using Hide = HWModel::WaitHide::Hide;
+    using RoleHide = HWModel::WaitHide::RoleHide;
+    const HWModel& hw = hwModelForArch(kGfx1250);
+    auto row = [&](int lat, int dst, bool scaled) -> const HWModel::WaitHide::Form* {
+        for (const auto& f : hw.waitHide.forms)
+            if (f.costLatency == lat && f.dstVgprs == dst && f.scaled == scaled) return &f;
+        return nullptr;
+    };
+    struct Expect {
+        int lat, dst;
+        bool scaled;
+        RoleHide dstRules;
+        RoleHide srcRules;
+        int slots;
+    };
+    const Expect table[] = {
+        {4, 8, false, {Hide{13, 0}, Hide{6, 7}, Hide{0, 21}}, {Hide{9, 0}, Hide{2, 7}, Hide{0, 10}}, 1},
+        {4, 8, true, {Hide{8, 0}, Hide{5, 6}, Hide{0, 21}}, {Hide{5, 0}, Hide{2, 6}, Hide{0, 10}}, 2},
+        {8, 8, false, {Hide{12, 0}, Hide{5, 7}, Hide{0, 21}}, {Hide{9, 0}, Hide{1, 8}, Hide{0, 9}}, 1},
+        {8, 8, true, {Hide{7, 0}, Hide{4, 6}, Hide{0, 21}}, {Hide{5, 0}, Hide{1, 8}, Hide{0, 9}}, 2},
+        {8, 16, true, {Hide{7, 0}, Hide{3, 8}, Hide{0, 21}}, {Hide{5, 0}, Hide{1, 8}, Hide{0, 10}}, 2},
+        {16, 8, false, {Hide{12, 0}, Hide{5, 7}, Hide{0, 21}}, {Hide{9, 0}, Hide{1, 8}, Hide{0, 9}}, 1},
+    };
+    EXPECT_EQ(hw.waitHide.forms.size(), std::size(table));
+    for (const Expect& e : table) {
+        const auto* f = row(e.lat, e.dst, e.scaled);
+        ASSERT_NE(f, nullptr) << e.lat << "/" << e.dst << "/" << e.scaled;
+        EXPECT_TRUE(f->xdl.dst == e.dstRules) << "dst " << e.lat << "/" << e.dst << "/" << e.scaled;
+        EXPECT_TRUE(f->xdl.src == e.srcRules) << "src " << e.lat << "/" << e.dst << "/" << e.scaled;
+        // A CSMACC producer: the WMMA rules, except VALUs alone on the src role (path capacity).
+        HWModel::WaitHide::RuleSet asCsmacc = f->xdl;
+        asCsmacc.src.valu = Hide{0, 12};
+        EXPECT_TRUE(f->csmacc == asCsmacc) << "csmacc " << e.lat << "/" << e.dst << "/" << e.scaled;
+        EXPECT_EQ(f->xdl.wmmaSlots, e.slots);
+    }
+    // No unscaled 8-pass form writes 16 VGPRs; the old ghost row is gone.
+    EXPECT_EQ(row(8, 16, false), nullptr);
+    // Form-independent sets, the table's (-1, 12, -1): src 12 VALU-class ops with no order, matrix
+    // ops count nothing, dst always waits.
+    const RoleHide capacity{Hide{}, Hide{0, 12}, Hide{}};
+    const int noWmma = HWModel::WaitHide::RuleSet::kNoWmma;
+    EXPECT_TRUE(hw.waitHide.noLatchCsmacc.src == capacity);
+    EXPECT_FALSE(hw.waitHide.noLatchCsmacc.dst.any());
+    EXPECT_EQ(hw.waitHide.noLatchCsmacc.wmmaSlots, noWmma);
+    EXPECT_TRUE(hw.waitHide.dpmacc.src == capacity);
+    EXPECT_FALSE(hw.waitHide.dpmacc.dst.any());
+    EXPECT_EQ(hw.waitHide.dpmacc.wmmaSlots, noWmma);
+}
 
 // archName disambiguates steppings sharing a triple (gfx1250 vs gfx1250v0).
 TEST(ArchResolve, ArchNameDisambiguatesSharedTriple) {

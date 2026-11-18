@@ -18,13 +18,16 @@ namespace {
 // load-bearing. One definition in one TU, reached through an exported function,
 // keeps that sound.
 
-// This arch's per-form wait-hide rules. Rows may be added in any order. Other arches omit
-// .waitHide. Every row gives XDL and CSMACC producers the same rules, and the src role takes
-// the dst rules until it has its own.
+// This arch's per-form wait-hide rules (other arches omit .waitHide), measured for a WMMA
+// producer; forCsmaccProducer derives a CSMACC producer's. Rows may be in any order.
 using Hide = HWModel::WaitHide::Hide;
 using RoleHide = HWModel::WaitHide::RoleHide;
 using RuleSet = HWModel::WaitHide::RuleSet;
 using Form = HWModel::WaitHide::Form;
+
+// VALU-class ops the SQ->SP path holds behind the issue slot: after that many, a VALU producer
+// has left the instruction buffer with its sources read.
+constexpr int kSqSpPathCapacity = 12;
 
 constexpr RoleHide roleHide(Hide pure, Hide mix = {}, Hide valu = {}) {
     return {.pure = pure, .mix = mix, .valu = valu};
@@ -32,18 +35,39 @@ constexpr RoleHide roleHide(Hide pure, Hide mix = {}, Hide valu = {}) {
 constexpr RuleSet rules(RoleHide dst, RoleHide src = {}, int wmmaSlots = 1) {
     return {.dst = dst, .src = src, .wmmaSlots = wmmaSlots};
 }
-constexpr Form sameRules(int costLatency, int dstVgprs, bool scaled, RuleSet rs) {
-    return {.costLatency = costLatency, .dstVgprs = dstVgprs, .scaled = scaled, .xdl = rs, .csmacc = rs};
+// A CSMACC producer reads its sources when it leaves the path, a WMMA in its first passes: VALUs
+// alone free its WAR consumer only after the path capacity. All else is the form's.
+constexpr RuleSet forCsmaccProducer(RuleSet wmma) {
+    wmma.src.valu = {0, kSqSpPathCapacity};
+    return wmma;
+}
+constexpr Form form(int costLatency, int dstVgprs, bool scaled, RuleSet wmma) {
+    return {.costLatency = costLatency,
+            .dstVgprs = dstVgprs,
+            .scaled = scaled,
+            .xdl = wmma,
+            .csmacc = forCsmaccProducer(wmma)};
 }
 
 constexpr Form kGfx1250WaitHideForms[] = {
-    // Per (pass count, dst VGPRs, scaled): dst rules (RAW / WAW consumers wait for the writeback)
-    // then src rules (a WAR consumer waits for the last source read). Only matrix-op counts for
-    // the dst role so far; the src role falls back to them.
-    sameRules(4, 8, false, rules(roleHide({13, 0}))),
-    sameRules(8, 8, false, rules(roleHide({12, 0}))),
-    sameRules(8, 16, false, rules(roleHide({11, 0}))),
-    sameRules(16, 8, false, rules(roleHide({12, 0}))),
+    // Per (pass count, dst VGPRs, scaled): dst rules (RAW / WAW consumers wait for the writeback),
+    // then src rules (WAR consumers wait for the last source read); pure, lead + tail, VALUs alone.
+    // 4-pass f32-out 16x16x64 fp8 / bf8, unscaled f8f6f4 FP4xFP4.
+    form(4, 8, false, rules(roleHide({13, 0}, {6, 7}, {0, 21}), roleHide({9, 0}, {2, 7}, {0, 10}))),
+    // 4-pass scaled f8f6f4 FP4xFP4: a scaled matrix op fills 2 tail slots.
+    form(4, 8, true,
+         rules(roleHide({8, 0}, {5, 6}, {0, 21}), roleHide({5, 0}, {2, 6}, {0, 10}), 2)),
+    // 8-pass f32-out 16x16x32 bf16 / f16, 16x16x128 fp8 / bf8, unscaled f8f6f4, swmmac f32.
+    form(8, 8, false, rules(roleHide({12, 0}, {5, 7}, {0, 21}), roleHide({9, 0}, {1, 8}, {0, 9}))),
+    // 8-pass scaled f8f6f4 (not FP4xFP4).
+    form(8, 8, true,
+         rules(roleHide({7, 0}, {4, 6}, {0, 21}), roleHide({5, 0}, {1, 8}, {0, 9}), 2)),
+    // 8-pass scaled 32x16x128 f4 (16 dst VGPRs). No unscaled 8-pass form writes 16 VGPRs.
+    form(8, 16, true,
+         rules(roleHide({7, 0}, {3, 8}, {0, 21}), roleHide({5, 0}, {1, 8}, {0, 10}), 2)),
+    // 16-pass i32-out 16x16x64 iu8, swmmac i32 16x16x128 iu8. The SGEMM v_wmma_f32_16x16x4_f32
+    // is an ordinary CSMACC producer, not an XDL form (one form per kernel).
+    form(16, 8, false, rules(roleHide({12, 0}, {5, 7}, {0, 21}), roleHide({9, 0}, {1, 8}, {0, 9}))),
 };
 
 constexpr HWModel kGfx1250Model = {
@@ -99,10 +123,10 @@ constexpr HWModel kGfx1250Model = {
     .waitHide =
         {
             .forms = kGfx1250WaitHideForms,
-            // Form-independent sets: no rules yet, so a CSMACC producer with no form latched and an
-            // f64 producer always wait.
-            .noLatchCsmacc = {},
-            .dpmacc = {},
+            // Form-independent sets, src role only: kSqSpPathCapacity VALUs after the producer,
+            // matrix ops count nothing (kNoWmma). CSMACC before a latch, TRANS and f64 always.
+            .noLatchCsmacc = rules({}, roleHide({}, {0, kSqSpPathCapacity}), RuleSet::kNoWmma),
+            .dpmacc = rules({}, roleHide({}, {0, kSqSpPathCapacity}), RuleSet::kNoWmma),
             .vmVsrcLds = 11,
             .vmVsrcTex = 11,
             .vmVsrcBridge = 11,
