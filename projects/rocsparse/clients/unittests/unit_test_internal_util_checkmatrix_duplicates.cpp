@@ -26,6 +26,8 @@
 // an ELL failure that the HYB checker must not replace with the COO result.
 #include "unit_test_utils.hpp"
 
+#include "rocsparse_hyb_mat.hpp"
+
 #include <algorithm>
 #include <cstdint>
 #include <functional>
@@ -705,18 +707,6 @@ namespace
                 }
     }
 
-    // Leading members of the library HYB matrix. The library keeps their layout fixed
-    // for test code that mirrors it.
-    struct hyb_layout
-    {
-        rocsparse_int           m;
-        rocsparse_int           n;
-        rocsparse_hyb_partition partition;
-        rocsparse_int           ell_nnz_legacy;
-        rocsparse_int           ell_width;
-        rocsparse_int*          ell_col_ind;
-    };
-
     // An ELL slot `index` (column-major) of the converted HYB matrix is set to `col`.
     struct ell_poke
     {
@@ -760,14 +750,13 @@ namespace
         ASSERT_EQ(
             csr2hyb<T>(handle, m, n, descr.p, dval.ptr, drow.ptr, dcol.ptr, hyb.p, ell_width, part),
             rocsparse_status_success);
-        const hyb_layout* layout = reinterpret_cast<const hyb_layout*>(hyb.p);
         for(const auto& poke : pokes)
         {
-            ASSERT_LT(poke.index, static_cast<int64_t>(layout->m) * layout->ell_width);
+            ASSERT_LT(poke.index, static_cast<int64_t>(hyb.p->m) * hyb.p->ell_width);
             const rocsparse_int value
                 = poke.col < 0 ? rocsparse_int(-1) : static_cast<rocsparse_int>(poke.col + b);
             UT_CHECK_HIP(hipMemcpy(
-                layout->ell_col_ind + poke.index, &value, sizeof(value), hipMemcpyHostToDevice));
+                hyb.p->ell_col_ind + poke.index, &value, sizeof(value), hipMemcpyHostToDevice));
         }
         size_t bytes = 0;
         ASSERT_EQ(rocsparse_check_matrix_hyb_buffer_size(handle,
