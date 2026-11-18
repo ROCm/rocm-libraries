@@ -1210,7 +1210,36 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         make_spec(idx - 8, s);
         s->lse_head_major = true;
         break;
-    case 75: /* i64 K/V, two pages per tile, one page per copy (page copies, i64 page base). */
+
+    /* --- idx75-76: fp8 K in LDS on each 32x32 QK path. */
+    /* fp8 KV cache kept as raw fp8 in K_lds (use_fp8_mfma_qk) on the
+     * non-transposed 32x32 QK path: K is read as fp8 and dequantized with
+     * k_scale before the bf16 MFMA, as on the transposed path. */
+    case 75:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 32;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = "fp8e4m3";
+        s->use_fp8_mfma_qk = true;
+        s->use_mfma_32x32 = true;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        break;
+    /* The same fp8 K in LDS on the transposed 32x32 QK path, which reads K
+     * through the same shared reader. */
+    case 76:
+        make_spec(75, s);
+        s->use_transposed_qk_32x32 = true;
+        break;
+
+    /* --- idx77-81: K/V page copies (i64 page base, pages from the wave, one 64-token page per tile). */
+    case 77: /* i64 K/V, two pages per tile, one page per copy (page copies, i64 page base). */
         s->head_size = 128;
         s->block_size = 16;
         s->num_query_heads = 32;
@@ -1223,19 +1252,19 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->tile_size = 32;
         s->use_i64_kv_addr = true;
         break;
-    case 76: /* cfg71 with i64 K/V (mid-row copies, i64 page base). */
+    case 78: /* cfg71 with i64 K/V (mid-row copies, i64 page base). */
         make_spec(71, s);
         s->use_i64_kv_addr = true;
         break;
-    case 77: /* cfg68 with i64 K/V (pages from the wave, whole-row copies). */
+    case 79: /* cfg68 with i64 K/V (pages from the wave, whole-row copies). */
         make_spec(68, s);
         s->use_i64_kv_addr = true;
         break;
-    case 78: /* cfg59 with i64 K/V (pages from the wave, mid-row copies). */
+    case 80: /* cfg59 with i64 K/V (pages from the wave, mid-row copies). */
         make_spec(59, s);
         s->use_i64_kv_addr = true;
         break;
-    case 79: /* cfg48 with one 64-token page per tile (page base in soffset). */
+    case 81: /* cfg48 with one 64-token page per tile (page base in soffset). */
         make_spec(48, s);
         s->block_size = 64;
         break;

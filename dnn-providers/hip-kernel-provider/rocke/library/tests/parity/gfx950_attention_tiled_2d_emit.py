@@ -1161,8 +1161,33 @@ _CONFIGS[67] = {**_CONFIGS[5], "use_alibi": True, "emit_lse": True}
 _CONFIGS[72] = {**_CONFIGS[64], "lse_layout": "head_major"}
 _CONFIGS[73] = {**_CONFIGS[65], "lse_layout": "head_major"}
 _CONFIGS[74] = {**_CONFIGS[66], "lse_layout": "head_major"}
-# i64 K/V, two pages per tile, one page per copy (page copies, i64 page base).
+# --- idx75-76: fp8 K in LDS on each 32x32 QK path.
+# fp8 KV cache kept as raw fp8 in K_lds (use_fp8_mfma_qk) on the
+# non-transposed 32x32 QK path: K is read as fp8 and dequantized with
+# k_scale before the bf16 MFMA, as on the transposed path.
 _CONFIGS[75] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=32,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype="fp8e4m3",
+    use_fp8_mfma_qk=True,
+    use_mfma_32x32=True,
+    block_m_per_warp=32,
+    tile_size=64,
+)
+# The same fp8 K in LDS on the transposed 32x32 QK path, which reads K through
+# the same shared reader.
+_CONFIGS[76] = {**_CONFIGS[75], "use_transposed_qk_32x32": True}
+
+# --- idx77-81: K/V page copies (i64 page base, pages from the wave, one
+# 64-token page per tile).
+# i64 K/V, two pages per tile, one page per copy (page copies, i64 page base).
+_CONFIGS[77] = dict(
     head_size=128,
     block_size=16,
     num_query_heads=32,
@@ -1175,14 +1200,15 @@ _CONFIGS[75] = dict(
     use_i64_kv_addr=True,
 )
 # cfg71 with i64 K/V (mid-row copies, i64 page base).
-_CONFIGS[76] = {**_CONFIGS[71], "use_i64_kv_addr": True}
+_CONFIGS[78] = {**_CONFIGS[71], "use_i64_kv_addr": True}
 # i64 K/V with each wave's page from the wave: whole-row copies spanning pages
 # (cfg68) and mid-row copies (cfg59).
-_CONFIGS[77] = {**_CONFIGS[68], "use_i64_kv_addr": True}
-_CONFIGS[78] = {**_CONFIGS[59], "use_i64_kv_addr": True}
+_CONFIGS[79] = {**_CONFIGS[68], "use_i64_kv_addr": True}
+_CONFIGS[80] = {**_CONFIGS[59], "use_i64_kv_addr": True}
 # cfg48 with one 64-token page per tile: the page base stays in soffset
 # without prefetching (grouped KV2 carries no page ids).
-_CONFIGS[79] = {**_CONFIGS[48], "block_size": 64}
+_CONFIGS[81] = {**_CONFIGS[48], "block_size": 64}
+
 
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:

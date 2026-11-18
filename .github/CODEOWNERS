@@ -42,7 +42,6 @@
 /.github/workflows/pr-merge-sync-patches-manual.yml @ROCm/rocm-libraries-reviewers @jayhawk-commits
 /.github/workflows/pr-merge-sync-patches.yml        @ROCm/rocm-libraries-reviewers @jayhawk-commits
 /.github/workflows/pr-org-label.yml                 @ROCm/rocm-libraries-reviewers @jayhawk-commits
-/.github/workflows/update-subtrees.yml              @ROCm/rocm-libraries-reviewers @jayhawk-commits
 
 # GitHub Copilot custom review instructions
 /.github/instructions/                                           @ROCm/rocm-math-lib-build-infra
