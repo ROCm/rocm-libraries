@@ -9,7 +9,7 @@
 // backward-data kernel returned wrong results for these shapes.
 //
 // Gated shape: x = (1, 96, 4736, 4736), w = (16, 96, 1, 1), group=1, pad=0, stride=1.
-//   x has 96 * 4736 * 4736 = 2,153,316,352 elements: 4.3 GB in FP16/BF16, 8.6 GB in FP32.
+//   x has 96 * 4736 * 4736 = 2,153,250,816 elements: 4.3 GB in FP16/BF16, 8.6 GB in FP32.
 //   The shape crosses the bound for every data type, so the solver must be applicable on
 //   no device.
 //

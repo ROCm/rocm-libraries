@@ -9,7 +9,7 @@
 // grouped weight-gradient kernel returned wrong results for these shapes.
 //
 // Gated shape: x = (1, 96, 4736, 4736), w = (16, 96, 1, 1), group=1, pad=0, stride=1.
-//   x has 96 * 4736 * 4736 = 2,153,316,352 elements (INT_MAX is 2,147,483,647). The shape
+//   x has 96 * 4736 * 4736 = 2,153,250,816 elements (INT_MAX is 2,147,483,647). The shape
 //   crosses the bound for every data type, so the solver must be applicable on no device.
 //
 // In-range shape: x = (1, 96, 4700, 4700), same filter, FP16 only.
