@@ -898,9 +898,14 @@ def _resolve_dgrad(
             tile_k=tile_k,
             arch=arch,
         )
-        return ConvSplitK(
-            legacy.split_k, False, legacy.split_k, f"CK formula ({legacy.reason})"
-        )
+        degree = legacy.split_k
+        reason = f"CK formula ({legacy.reason})"
+        if _is_16bit(dtype) and degree > ATOMIC_16BIT_MAX_SPLIT_K:
+            # dgrad has no workspace to move to: the packed 16-bit atomic stays
+            # within its accuracy limit, as on the other resolver paths.
+            degree = ATOMIC_16BIT_MAX_SPLIT_K
+            reason += f", held to the 16-bit atomic limit {ATOMIC_16BIT_MAX_SPLIT_K}"
+        return ConvSplitK(degree, False, legacy.split_k, reason)
     waves = max(1, block_size // wave_size)
     # The group rides grid y, the slice grid z: groups multiply the CTAs but do
     # not share the z budget.

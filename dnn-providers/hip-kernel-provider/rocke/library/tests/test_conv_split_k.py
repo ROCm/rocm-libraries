@@ -422,6 +422,53 @@ def test_dgrad_split_k_available_accepts_fp32_odd_channels():
     assert dgrad_split_k_available(ODD_CPG, "fp32") == (True, "ok")
 
 
+# Long dY reduction (K=2048) into a small dX: the CK formula asks for 608.
+FALLBACK_DGRAD = ConvProblem(N=1, Hi=8, Wi=8, C=64, K=2048, Y=3, X=3, pH=1, pW=1)
+
+
+def _fallback_dgrad(dtype):
+    from kernels.common.conv_split_k import split_k_cost_model
+
+    assert split_k_cost_model("gfx942") is None  # unfitted: the CK-formula fallback
+    return resolve_conv_split_k(
+        "dgrad",
+        FALLBACK_DGRAD,
+        arch="gfx942",
+        dtype=dtype,
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        block_size=256,
+    )
+
+
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+def test_dgrad_fallback_holds_a_16bit_atomic_to_its_limit(dtype):
+    """An unfitted arch (gfx942) resolves dgrad through the CK formula; a 16-bit
+    dX atomic must stay within ATOMIC_16BIT_MAX_SPLIT_K there too."""
+    result = _fallback_dgrad(dtype)
+    assert result.split_k <= ATOMIC_16BIT_MAX_SPLIT_K
+    assert result.split_k == ATOMIC_16BIT_MAX_SPLIT_K
+    assert result.requested > ATOMIC_16BIT_MAX_SPLIT_K
+
+
+def test_dgrad_fallback_does_not_clamp_fp32():
+    from kernels.common.conv_implicit_gemm_dgrad import _dg_K, _dg_M, _dg_N
+
+    result = _fallback_dgrad("fp32")
+    ck = select_split_k_wgrad(
+        wg_M=_dg_M(FALLBACK_DGRAD),
+        wg_N=_dg_N(FALLBACK_DGRAD),
+        wg_K=_dg_K(FALLBACK_DGRAD),
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        arch="gfx942",
+    )
+    assert result.split_k == result.requested == ck.split_k
+    assert result.split_k > ATOMIC_16BIT_MAX_SPLIT_K
+
+
 def test_benchmark_workers_skip_combos_the_resolver_cannot_serve():
     # The JIT sweep builds single- and two-stage legs for every combo; a combo
     # with nothing to split must come back None, not raise and end the run.
