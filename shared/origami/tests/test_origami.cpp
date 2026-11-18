@@ -1038,9 +1038,12 @@ TEST_CASE("Origami: select_config_mnk unit test", "[origami]") {
         REQUIRE(result_config.config.mt.m == config[1].mt.m);
 
       result_config = origami::select_config_mnk(201, 201, 201, hardware, config);  // M = N = K
-      // All architectures prefer the square 192x160x64 tile (Tile B) for this
-      // small cube.
-      REQUIRE(result_config.config.mt.m == config[1].mt.m);
+      // The CDNA architectures prefer the square 192x160x64 tile (Tile B) for this small cube;
+      // gfx1250 ranks the 128x128x256 tile (Tile C) first.
+      if (gpu_arch == 1250)
+        REQUIRE(result_config.config.mt.m == config[2].mt.m);
+      else
+        REQUIRE(result_config.config.mt.m == config[1].mt.m);
 
       // Test 2: Verify default problem settings (transpose, data types)
       origami::problem_t problem = {
