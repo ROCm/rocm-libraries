@@ -3532,9 +3532,15 @@ TEST(local_matrix_moves, an_analysed_matrix_is_analysed_again_after_moves)
             EXPECT_EQ(backend_of(*L), backend_name(Backend::Accelerator));
         }
 
-        // Without a move in between, as on the host
+        // Without a move in between. The header pairs LLAnalyse with LLAnalyseClear, but
+        // the host also accepts LAnalyseClear before the next LLAnalyse. Without asserts,
+        // HIP leaks a vector there, which the child cannot see.
+#ifdef NDEBUG
+        GTEST_SKIP() << "only a build with asserts shows whether HIP accepts LAnalyseClear "
+                        "between two LLAnalyse calls";
+#endif
         KNOWN_BUG("after LLAnalyse, the HIP LAnalyseClear keeps tmp_vec_, and the next LLAnalyse "
-                  "aborts");
+                  "asserts on it, or without asserts leaks it");
         expect_in_child([&] {
             auto L   = make_local_matrix(Backend::Accelerator, lower(s, true));
             auto inv = make_local_vector(Backend::Accelerator, std::vector<T>());

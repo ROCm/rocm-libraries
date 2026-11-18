@@ -777,8 +777,9 @@ TYPED_TEST(matrix_csr, lu_solve)
 }
 
 // Both factors have rows longer than a 64-wide wavefront, so that the device solves walk
-// each row in more than one pass on wave32 and wave64. The entries follow no short period,
-// so that the entries of a row beyond its first 64 change the result, also in float.
+// each row in more than one pass on wave32 and wave64. The off-diagonals do not decay with
+// the distance from the diagonal, so that the entries of a row beyond its first 64 change
+// the result by far more than the float tolerance.
 TYPED_TEST(matrix_csr, lu_solve_of_factors_with_long_rows)
 {
     using T              = typename TypeParam::value_type;
