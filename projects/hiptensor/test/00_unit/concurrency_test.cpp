@@ -63,6 +63,7 @@
 #include <hiptensor/hiptensor.h>
 
 #include "data_types.hpp"
+#include "util.hpp"
 
 namespace
 {
@@ -1028,10 +1029,24 @@ INSTANTIATE_TEST_SUITE_P(
                + toString(std::get<2>(info.param));
     });
 
+// Incremental autotuning, checked through the plan cache. Without a plan cache there is
+// nothing to autotune into, and writing the cache file succeeds without doing anything.
+class ConcurrencyAutotuneTest : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        if(hiptensor::checkEnvironmentVariableEnabled("HIPTENSOR_DISABLE_PLAN_CACHE"))
+        {
+            GTEST_SKIP() << "plan cache disabled by HIPTENSOR_DISABLE_PLAN_CACHE";
+        }
+    }
+};
+
 // Incremental autotuning with one plan shared by all threads. Each thread makes one call
 // at the same time, so every call of the round is in flight before any is recorded. Each
 // call must run its own candidate, and the round must cache one of the kernels it ran.
-TEST(ConcurrencyAutotuneTest, SharedPlanTriesEachCandidateOnce)
+TEST_F(ConcurrencyAutotuneTest, SharedPlanTriesEachCandidateOnce)
 {
     ScaleContraction  opCase;
     hiptensorHandle_t handle = nullptr, refHandle = nullptr;
@@ -1137,7 +1152,7 @@ TEST(ConcurrencyAutotuneTest, SharedPlanTriesEachCandidateOnce)
 
 // A call that reserves a candidate and then returns early, here for a missing workspace,
 // counts as a failed run of that candidate: the round still completes.
-TEST(ConcurrencyAutotuneTest, AbandonedCandidateDoesNotStallRound)
+TEST_F(ConcurrencyAutotuneTest, AbandonedCandidateDoesNotStallRound)
 {
     TrinaryContraction opCase;
     hiptensorHandle_t  handle = nullptr;
@@ -1185,7 +1200,7 @@ TEST(ConcurrencyAutotuneTest, AbandonedCandidateDoesNotStallRound)
 // Calls of different problems on one handle, interleaved, are tuned separately: each
 // problem caches its kernel after its own count of calls. Permute has no candidate list,
 // so its round counts calls of its one solution.
-TEST(ConcurrencyAutotuneTest, InterleavedProblemsAreTunedSeparately)
+TEST_F(ConcurrencyAutotuneTest, InterleavedProblemsAreTunedSeparately)
 {
     constexpr int32_t kCount = 3;
 
@@ -1245,6 +1260,89 @@ TEST(ConcurrencyAutotuneTest, InterleavedProblemsAreTunedSeparately)
         hashes.insert(line.first);
     }
     EXPECT_EQ(hashes.size(), lines.size());
+}
+
+// An incremental count of 0 (the default) tries no candidate: the first call's kernel is
+// cached, as without incremental autotuning.
+TEST_F(ConcurrencyAutotuneTest, CountZeroCachesFirstCall)
+{
+    ScaleContraction  opCase;
+    hiptensorHandle_t handle = nullptr;
+    ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
+    hiptensorPlan_t plan = nullptr;
+    ScopeExit       cleanup{[&] {
+        if(plan)
+            hiptensorDestroyPlan(plan);
+        opCase.destroy();
+        hiptensorDestroy(handle);
+    }};
+
+    auto     status        = opCase.create(handle);
+    uint64_t workspaceSize = 0;
+    if(status == HIPTENSOR_STATUS_SUCCESS)
+        status = createIncrementalPlan(handle, opCase.mOp, 0, &plan, &workspaceSize);
+    if(isSkipStatus(status))
+    {
+        GTEST_SKIP() << skipReason(status);
+    }
+    ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
+
+    auto const b = makeBuffers(opCase, 0, workspaceSize);
+    KernelLog  log;
+    auto [s, result] = runCall(opCase, handle, plan, b, workspaceSize);
+    ASSERT_EQ(s, HIPTENSOR_STATUS_SUCCESS) << "status " << statusCode(s);
+
+    auto const lines = planCacheLines(handle);
+    ASSERT_EQ(lines.size(), 1u) << "the first call was not cached";
+    EXPECT_EQ(log.take(), std::vector<std::size_t>{lines[0].second});
+}
+
+// Two plans of the same problem with different incremental counts share one round. The
+// round keeps the count of the plan that started it, so calls through either plan
+// complete it.
+TEST_F(ConcurrencyAutotuneTest, PlansWithDifferentCountsShareRound)
+{
+    ScaleContraction  opCase;
+    hiptensorHandle_t handle = nullptr;
+    ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
+    hiptensorPlan_t countTwo = nullptr, countOne = nullptr;
+    ScopeExit       cleanup{[&] {
+        if(countTwo)
+            hiptensorDestroyPlan(countTwo);
+        if(countOne)
+            hiptensorDestroyPlan(countOne);
+        opCase.destroy();
+        hiptensorDestroy(handle);
+    }};
+
+    auto     status        = opCase.create(handle);
+    uint64_t workspaceSize = 0, unused = 0;
+    if(status == HIPTENSOR_STATUS_SUCCESS)
+        status = createIncrementalPlan(handle, opCase.mOp, 2, &countTwo, &workspaceSize);
+    if(status == HIPTENSOR_STATUS_SUCCESS)
+        status = createIncrementalPlan(handle, opCase.mOp, 1, &countOne, &unused);
+    if(isSkipStatus(status))
+    {
+        GTEST_SKIP() << skipReason(status);
+    }
+    ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
+
+    auto const b = makeBuffers(opCase, 0, std::max(workspaceSize, unused));
+    KernelLog  log;
+
+    // A candidate kernel may not support the problem: that call fails, which still
+    // counts toward the round.
+    (void)runCall(opCase, handle, countTwo, b, workspaceSize);
+    EXPECT_TRUE(planCacheLines(handle).empty()) << "a count-2 round cached after one call";
+
+    (void)runCall(opCase, handle, countOne, b, unused);
+    auto const tried = log.take();
+    EXPECT_EQ(std::set<std::size_t>(tried.begin(), tried.end()).size(), tried.size())
+        << "two calls of the round ran the same candidate";
+
+    auto const lines = planCacheLines(handle);
+    ASSERT_EQ(lines.size(), 1u) << "the round did not complete";
+    EXPECT_NE(std::find(tried.begin(), tried.end(), lines[0].second), tried.end());
 }
 
 // Several threads create plans at the same time. Plan cache lookup is disabled so

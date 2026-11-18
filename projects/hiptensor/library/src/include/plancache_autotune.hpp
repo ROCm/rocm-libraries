@@ -80,6 +80,7 @@ namespace hiptensor
                 mPlan     = std::exchange(other.mPlan, nullptr);
                 mSolution = std::exchange(other.mSolution, nullptr);
                 mRound    = std::exchange(other.mRound, 0);
+                mCandidate = other.mCandidate;
             }
             return *this;
         }
@@ -110,20 +111,27 @@ namespace hiptensor
         hiptensorPlan_t   mPlan     = nullptr;
         T*                mSolution = nullptr;
         uint64_t          mRound    = 0; // round of the reserved candidate, 0 if none
+        uint32_t          mCandidate = 0; // index of the reserved candidate in its round
     };
 
     class PlancacheAutotuneMgr : public LazySingleton<PlancacheAutotuneMgr>
     {
     private:
         // Incremental autotune state of one problem
+        // The candidates and the size of a round are taken from the plan that starts it and
+        // kept for the whole round: plans of the same problem may differ in both, and calls
+        // through any of them reserve and complete the same round.
         struct AutotuneState
         {
-            uint64_t mRound         = 0; //Identifies the round, see mNextRound
-            uint32_t mNextCandidate = 0; //Index of the next candidate to hand out
-            uint32_t mPending       = 0; //Candidates handed out but not recorded yet
-            uint32_t mCallCount     = 0; //Number of calls (timed or failed) recorded so far
-            float    mBestTime      = std::numeric_limits<float>::max();
-            void*    mBestSolution  = nullptr; //Fastest solution timed so far
+            uint64_t           mRound = 0; //Identifies the round, see mNextRound
+            std::vector<void*> mCandidates; //Candidates the round tries, in order
+            uint32_t           mSize          = 0; //Number of calls the round records
+            uint32_t           mNextCandidate = 0; //Index of the next candidate to hand out
+            uint32_t           mPending       = 0; //Candidates handed out but not recorded yet
+            uint32_t           mCallCount = 0; //Number of calls (timed or failed) recorded so far
+            float              mBestTime  = std::numeric_limits<float>::max();
+            uint32_t           mBestIndex = std::numeric_limits<uint32_t>::max();
+            void*              mBestSolution = nullptr; //Fastest solution timed so far
         };
 
         // Autotune state is tracked per operation, plan cache and problem, so concurrent calls
@@ -195,16 +203,22 @@ namespace hiptensor
                     return;
                 state.mPending--;
             }
-            else if(!trial.mPlan->mPref->mCandidates.empty())
+            else if(!state.mCandidates.empty())
             {
                 // The call ran the plan's solution, which is not a candidate of this round.
                 return;
             }
 
-            //For Plan Cache autotuning, remember the best performace solution
-            if(solution != nullptr && time < state.mBestTime)
+            //For Plan Cache autotuning, remember the best performace solution.
+            //Untimed runs all take 0 ms: a tie goes to the earlier candidate, which ranked
+            //faster in the plan's kernel selection, whatever order the calls finish in.
+            auto index
+                = trial.mRound != 0 ? trial.mCandidate : std::numeric_limits<uint32_t>::max();
+            if(solution != nullptr
+               && (time < state.mBestTime || (time == state.mBestTime && index < state.mBestIndex)))
             {
                 state.mBestTime     = time;
+                state.mBestIndex    = index;
                 state.mBestSolution = solution;
             }
 
@@ -213,7 +227,7 @@ namespace hiptensor
 
             //When every call of the round is recorded, add the best solution to the Plan Cache.
             //Waiting for the pending candidates keeps a slow candidate from being dropped.
-            if(state.mCallCount >= roundSize(trial.mPlan) && state.mPending == 0)
+            if(state.mCallCount >= state.mSize && state.mPending == 0)
             {
                 if(state.mBestSolution != nullptr)
                 {
@@ -283,9 +297,9 @@ namespace hiptensor
             }
             else if(plan->mPref->mAutotuneMode == HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL)
             {
+                // A round of size 0 tries nothing: save() caches the solution that ran.
                 auto size = roundSize(plan);
-                // A plan with candidates that tries none of them has no round to record.
-                if(size == 0 && !plan->mPref->mCandidates.empty())
+                if(size == 0)
                     return trial;
 
                 auto key = makeKey(autotuneType, handle, plan);
@@ -298,16 +312,20 @@ namespace hiptensor
                 auto [it, inserted] = mAutotuneStates.try_emplace(key);
                 auto& state         = it->second;
                 if(inserted)
-                    state.mRound = mNextRound++;
+                {
+                    state.mRound      = mNextRound++;
+                    state.mCandidates = plan->mPref->mCandidates;
+                    state.mSize       = size;
+                }
 
-                if(!plan->mPref->mCandidates.empty() && state.mNextCandidate < size)
+                if(!state.mCandidates.empty() && state.mNextCandidate < state.mSize)
                 {
                     //If the number of calling this function is less than the number of different candidates to explore,
                     //we are doing the autotuning to find the best solution
                     // TODO: need a ranked solution array to explore from fastest to slowest
-                    trial.mSolution
-                        = static_cast<T*>(plan->mPref->mCandidates[state.mNextCandidate]);
-                    trial.mRound = state.mRound;
+                    trial.mSolution  = static_cast<T*>(state.mCandidates[state.mNextCandidate]);
+                    trial.mRound     = state.mRound;
+                    trial.mCandidate = state.mNextCandidate;
                     state.mNextCandidate++;
                     state.mPending++;
                 }
@@ -343,9 +361,11 @@ namespace hiptensor
             return;
         }
 
-        if(mPlan->mPref->mAutotuneMode != HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL)
+        if(mPlan->mPref->mAutotuneMode != HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL
+           || PlancacheAutotuneMgr::roundSize(mPlan) == 0)
         {
-            //There is no autotuning: add the solution that ran to the Plan Cache.
+            //There is no autotuning, or it tries no candidate (an incremental count of 0):
+            //add the solution that ran to the Plan Cache.
             auto hashID = mHandle->getPlanCache()->getHashID(mPlan->mOpDesc);
             mHandle->getPlanCache()->addCacheLine(hashID, solution->uid());
         }
