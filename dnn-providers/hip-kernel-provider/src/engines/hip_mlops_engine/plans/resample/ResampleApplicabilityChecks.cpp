@@ -8,6 +8,7 @@
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
+#include <cstdint>
 #include <unordered_set>
 
 namespace hip_kernel_provider::resample
@@ -15,6 +16,26 @@ namespace hip_kernel_provider::resample
 using namespace hip_kernel_provider::core::utils;
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+
+namespace
+{
+
+// True when the product of dims[first..] is at most `limit`, multiplied in 64 bits without
+// overflow.
+bool extentProductAtMost(const std::vector<int64_t>& dims, size_t first, int64_t limit)
+{
+    int64_t product = 1;
+    for(size_t i = first; i < dims.size(); ++i)
+    {
+        if(__builtin_mul_overflow(product, dims[i], &product) || product > limit)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
 
 void ResampleValidator::checkTensorLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds)
 {
@@ -96,11 +117,29 @@ void ResampleValidator::checkTensorShapesSupported(
                                 toStdVector(resampleAttr.stride()),
                                 toStdVector(resampleAttr.window()));
 
+    // The forward plan launches one thread per output element in 256-thread blocks, and HIP
+    // rejects a launch of 2^32 or more threads, so the rounded-up thread count must stay below
+    // 2^32: at most 2^32 - 256 outputs. The kernel also narrows the flattened input spatial index
+    // to the INT32 index tensor.
+    constexpr int64_t MAX_OUTPUT_ELEMENTS = (int64_t{1} << 32) - 256;
+    if(!extentProductAtMost(yDims, 0, MAX_OUTPUT_ELEMENTS))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "ResampleFwd output exceeds the 2^32 - 256 elements one launch can cover.");
+    }
+
     if(resampleAttr.index_tensor_uid().has_value())
     {
         const auto& indexTensor
             = findTensorAttributes(_tensorMap, resampleAttr.index_tensor_uid().value());
         validateResampleIndexShape(indexTensor, yDims, "ResampleFwd");
+        if(!extentProductAtMost(xDims, 2, INT32_MAX))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "ResampleFwd flattened input spatial extent does not fit the INT32 index tensor.");
+        }
     }
 }
 
@@ -154,6 +193,14 @@ void ResampleValidator::checkTensorConfigSupported(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "ResampleFwd index tensor is supported only for maxpool mode.");
     }
+    // The kernel writes the index tensor whenever one is present, so an index tensor
+    // without generate_index would be written against the graph's stated intent.
+    if(resampleAttr.index_tensor_uid().has_value() && !generateIndex)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "ResampleFwd index tensor requires generate_index to be true.");
+    }
 
     std::vector<int64_t> tensorIds{resampleAttr.x_tensor_uid(), resampleAttr.y_tensor_uid()};
     if(resampleAttr.index_tensor_uid().has_value())
@@ -161,6 +208,8 @@ void ResampleValidator::checkTensorConfigSupported(
         tensorIds.push_back(resampleAttr.index_tensor_uid().value());
     }
 
+    validateNoVirtualTensors(
+        tensorIds, "Resample operands are read or written by the kernel and must not be virtual.");
     checkTensorLayoutsAndDimsSupported(tensorIds);
     checkTensorDataTypesSupported({tensorIds[0], tensorIds[1]}, resampleAttr.index_tensor_uid());
     checkTensorShapesSupported(resampleAttr);
@@ -207,6 +256,8 @@ void ResampleValidator::checkBwdTensorConfigSupported(
         tensorIds.push_back(resampleBwdAttr.index_tensor_uid().value());
     }
 
+    validateNoVirtualTensors(
+        tensorIds, "Resample operands are read or written by the kernel and must not be virtual.");
     checkTensorLayoutsAndDimsSupported(tensorIds);
     checkTensorDataTypesSupported({tensorIds[0], tensorIds[1]}, resampleBwdAttr.index_tensor_uid());
     checkBwdTensorShapesSupported(resampleBwdAttr);
