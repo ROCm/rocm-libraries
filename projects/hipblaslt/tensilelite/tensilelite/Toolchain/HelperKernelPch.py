@@ -19,12 +19,15 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import tempfile
 import threading
 from pathlib import Path
 from shlex import split
 from subprocess import DEVNULL, PIPE, STDOUT, CalledProcessError, run
 from typing import List, Optional
+
+from filelock import FileLock, Timeout
 
 from ..Common import print1
 from .HelperKernelCache import _evictStale
@@ -34,6 +37,7 @@ _PCH_HEADERS = ("hip/hip_runtime.h", "hip/hip_ext.h", "hip/hip_fp8.h")
 # that file is gone, which would tie an entry to the temporary directory it was built in.
 PCH_SOURCE = "".join(f"#include <{header}>\n" for header in _PCH_HEADERS).encode()
 _PCH_FILE = "hip.pch"
+_PUBLICATION_LOCK_FILE = ".publish.lock"
 # How many times this process discarded the PCH of each key after the compiler rejected it. The
 # first rejection rebuilds the PCH (a ROCm reinstall heals that way); a second means the compiler
 # keeps rejecting what is built for that key (e.g. two hosts sharing the cache whose HIP headers
@@ -144,7 +148,8 @@ def _computePchKey(
 
 def _isUsable(pchPath: Path) -> bool:
     try:
-        return pchPath.stat().st_size > 0
+        info = pchPath.stat()
+        return stat.S_ISREG(info.st_mode) and info.st_size > 0
     except OSError:
         return False
 
@@ -210,7 +215,9 @@ class HelperKernelPch:
 
     def _build(self, compiler, targets: List[str], key: str) -> Optional[Path]:
         """Build into a temporary directory, then rename it into place: safe under concurrent
-        builds of the same key (xdist workers, overlapping helper compiles)."""
+        builds of the same key (xdist workers, overlapping helper compiles). Publication and
+        removal share a lock, so repairing an invalid entry preserves a valid concurrent
+        winner. A busy lock falls back to compilation without the PCH."""
         try:
             self.dir.mkdir(parents=True, exist_ok=True)
             tmpDir = Path(tempfile.mkdtemp(prefix=f".tmp_{key}_{os.getpid()}_", dir=self.dir))
@@ -225,12 +232,21 @@ class HelperKernelPch:
             return None
 
         finalDir = self.dir / key
-        try:
-            tmpDir.rename(finalDir)
-        except OSError:
-            # Another build stored this key first.
-            shutil.rmtree(tmpDir, ignore_errors=True)
         pchPath = finalDir / _PCH_FILE
+        try:
+            with FileLock(str(self.dir / _PUBLICATION_LOCK_FILE), timeout=0):
+                if _isUsable(pchPath):
+                    return pchPath
+                if finalDir.is_dir() and not finalDir.is_symlink():
+                    shutil.rmtree(finalDir)
+                else:
+                    finalDir.unlink(missing_ok=True)
+                tmpDir.rename(finalDir)
+        except (OSError, Timeout) as err:
+            print1(f"# Helper kernel PCH not used, cannot publish the cache entry: {err}")
+            return None
+        finally:
+            shutil.rmtree(tmpDir, ignore_errors=True)
         return pchPath if _isUsable(pchPath) else None
 
     def discard(self, pchPath: Path):
@@ -249,7 +265,8 @@ class HelperKernelPch:
             )
         staleDir = entry.with_name(f".tmp_stale_{entry.name}_{os.getpid()}_{threading.get_ident()}")
         try:
-            entry.rename(staleDir)
-        except OSError:
+            with FileLock(str(self.dir / _PUBLICATION_LOCK_FILE), timeout=0):
+                entry.rename(staleDir)
+        except (OSError, Timeout):
             return
         shutil.rmtree(staleDir, ignore_errors=True)
