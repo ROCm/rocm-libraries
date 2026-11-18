@@ -1257,8 +1257,11 @@ namespace hipblaslt_ext
             * pointers, in any order: the peer of each partition is found by device), and the backend
             * needs kernels that store a second D; without them setProblem succeeds and
             * algoGetHeuristic returns nothing (also with a device library built before this
-            * feature). The peer D is written with system-scope stores. Ordering a later kernel that
-            * reads D after the run (including under graph capture) is up to the caller.
+            * feature). The peer D is written with system-scope stores. After run() returns, later work on
+            * any partition's stream sees the complete D (with ``storePeerD`` both complete Ds). Up
+            * to the caller: ordering with a stream that is not one of the partition streams (record
+            * an event on a partition stream and wait for it, or synchronize), and graph capture that
+            * does not include every partition stream.
             *
             *  \retval HIPBLAS_STATUS_SUCCESS           If the problem was set on every partition.
             *  \retval HIPBLAS_STATUS_INVALID_VALUE     If `inputs` does not hold one GemmInputs
