@@ -8,6 +8,11 @@
 namespace hipblaslt_plugin
 {
 
+// The checks of isApplicable() that need only the graph: node pattern, data types,
+// shapes, operand, scale and output layouts, alignment and block size. Throws
+// HipdnnPluginException(BAD_PARAM) with the reason for the first rule the graph breaks.
+void checkMxGraphConstraints(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph);
+
 class HipblasltMxMatmulPlanBuilder : public IPlanBuilder
 {
 public:

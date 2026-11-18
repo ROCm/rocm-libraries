@@ -387,6 +387,21 @@ void checkHipblasltConstraints(
             "MX matmul: B scale must be a packed row- or column-major [K/32, N] matrix");
     }
 
+    // The plan hands C to hipBLASLt as a packed row-major [M, N] matrix, and hipBLASLt
+    // ignores the leading dimensions of an MX GEMM (#14290), so a padded or
+    // column-major C would be written as packed row-major.
+    const auto& stridesC = tC.strides();
+    const bool cPackedRowMajor = dimsC.size() >= 2 && stridesC.size() == dimsC.size()
+                                 && stridesC[dimsC.size() - 1] == 1
+                                 && (dimsC[dimsC.size() - 2] == 1
+                                     || stridesC[dimsC.size() - 2] == dimsC[dimsC.size() - 1]);
+    if(!cPackedRowMajor)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "MX matmul: output C must be a packed row-major [M, N] matrix");
+    }
+
     // Alignment: m % 16 == 0, n % 16 == 0, K % 128 == 0.
     // Logical matmul dims: A[M, K], B[K, N].
     const int64_t matM = dimsA[dimsA.size() - 2];
@@ -507,6 +522,12 @@ std::unique_ptr<MxMatmulPlan>
 
 } // namespace
 
+void checkMxGraphConstraints(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
+{
+    auto [deqAttrA, deqAttrB, matmulAttr] = getNodeAttrs(graph);
+    checkConstraints(graph, deqAttrA, deqAttrB, matmulAttr, graph.getTensorMap());
+}
+
 bool HipblasltMxMatmulPlanBuilder::isApplicable(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
@@ -516,7 +537,7 @@ bool HipblasltMxMatmulPlanBuilder::isApplicable(
     {
         auto [deqAttrA, deqAttrB, matmulAttr] = getNodeAttrs(opGraph);
         REJECT_IF_WORKAROUND_ISSUE_10811(deqAttrA, deqAttrB, opGraph.getTensorMap());
-        checkConstraints(opGraph, deqAttrA, deqAttrB, matmulAttr, opGraph.getTensorMap());
+        checkMxGraphConstraints(opGraph);
         // The scale format depends on the device, so it is resolved (and the plan,
         // which queries hipBLASLt, built) only after the graph-only checks above.
         // No algorithm -> makeMxPlan throws -> the graph is reported unsupported

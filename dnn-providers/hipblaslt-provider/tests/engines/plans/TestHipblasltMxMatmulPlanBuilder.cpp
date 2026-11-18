@@ -634,6 +634,66 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonPackedTensorsN
     }
 }
 
+// The graph-only checks need no device. Every packed operand order passes them, with
+// packed scales in either order: the plan prepares a scale stored in the other order.
+TEST(TestMxGraphConstraints, AcceptsPackedOperandsWithScalesInEitherOrder)
+{
+    for(const auto layout : {MxOperandLayout::MN_MN,
+                             MxOperandLayout::K_K,
+                             MxOperandLayout::K_MN,
+                             MxOperandLayout::MN_K})
+    {
+        for(const bool mnContiguousScales : {false, true})
+        {
+            auto fb = createMxGraphWithLayout(
+                layout, DT::FP8_E4M3, DT::HALF, DT::UNSET, mnContiguousScales);
+            GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+            EXPECT_NO_THROW(checkMxGraphConstraints(graph))
+                << toString(layout) << " mnContiguousScales=" << mnContiguousScales;
+        }
+    }
+}
+
+// hipBLASLt writes an MX GEMM's C as a packed row-major matrix whatever its leading
+// dimension (#14290), so a padded or column-major C is declined.
+TEST(TestMxGraphConstraints, DeclinesOutputThatIsNotPackedRowMajor)
+{
+    for(const auto& cStrides : {std::vector<int64_t>{48, 1}, std::vector<int64_t>{1, 32}})
+    {
+        auto fb = createValidMxMatmulGraph({32, 128},
+                                           {128, 1},
+                                           {128, 32},
+                                           {1, 128},
+                                           {32, 32},
+                                           cStrides,
+                                           {32, 4},
+                                           {4, 32},
+                                           DT::FP8_E4M3,
+                                           DT::HALF,
+                                           DT::FP8_E8M0,
+                                           DT::FP8_E8M0,
+                                           DT::FLOAT,
+                                           32,
+                                           false,
+                                           false,
+                                           DT::UNSET,
+                                           {4, 1},
+                                           {1, 4});
+        GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+        try
+        {
+            checkMxGraphConstraints(graph);
+            ADD_FAILURE() << "C strides {" << cStrides[0] << ", " << cStrides[1] << "} accepted";
+        }
+        catch(const HipdnnPluginException& e)
+        {
+            EXPECT_NE(std::string(e.what()).find("output C must be a packed row-major"),
+                      std::string::npos)
+                << e.what();
+        }
+    }
+}
+
 // rocRoller (gfx950) reads every operand-order combination; the plan transposes a
 // scale whose order differs from its operand's.
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsEveryLayoutOnGfx950)

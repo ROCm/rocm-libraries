@@ -70,7 +70,7 @@ against these before accepting it. They derive from hipBLASLt's `VEC32_UE8M0` sc
 [hipBLASLt API reference](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/reference/api-reference.html).
 - Tensor roles: the MX inputs, the UE8M0 scales, and the output `d` must be non-virtual; the dequantize outputs `a`/`b` must be virtual (fused intermediates)
 - Scale tensors: dtype `FP8_E8M0`, natural (unswizzled) values, one scale per 32-element block: `[M, K/32]` for `scale_a`, `[K/32, N]` for `scale_b`
-- Layout: A, B and both scales are packed row- or column-major matrices (see the table above); padded leading dimensions are rejected
+- Layout: A, B and both scales are packed row- or column-major matrices (see the table above), and the output `d` is a packed row-major matrix; padded leading dimensions are rejected
 - Alignment: `M % 16 == 0`, `N % 16 == 0`, `K % 128 == 0`
 - Block size: innermost `block_size == 32` for both scale tensors (VEC32)
 - Batch: single batch only (`batch == 1`); hipBLASLt requires `B == 1` for this scale mode
