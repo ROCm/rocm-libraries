@@ -83,6 +83,8 @@ struct GraphSpec
     int64_t kvLength = 65;
     int64_t headSize = 96;
     data_objects::DataType dtype = data_objects::DataType::HALF;
+    // The SDPA node's compute_data_type.
+    data_objects::DataType computeDataType = data_objects::DataType::FLOAT;
     bool bhsd = false;
     bool returnLse = true;
     data_objects::DataType lseDtype = data_objects::DataType::FLOAT;
@@ -106,6 +108,9 @@ struct GraphSpec
     // Elements of padding after each Q row: a row stride that is not a multiple of 8
     // elements leaves rows off the kernels' 16-byte vector alignment.
     int64_t qRowPad = 0;
+    // Cumulative sequence length tensor UIDs; the matcher declines on presence alone.
+    std::optional<int64_t> cuSeqLenQUid;
+    std::optional<int64_t> cuSeqLenKvUid;
     // Attention sinks: sink_token [1, Hq, 1, 1] in the Q data type.
     bool sinks = false;
     // Declared device-pointer alignment in bytes, by tensor uid (16 when absent).
@@ -273,6 +278,14 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     attributes.add_causal_mask(spec.causalMask);
     attributes.add_causal_mask_bottom_right(spec.causalMaskBottomRight);
     attributes.add_right_bound(spec.rightBound);
+    if(spec.cuSeqLenQUid.has_value())
+    {
+        attributes.add_cu_seq_len_q_tensor_uid(*spec.cuSeqLenQUid);
+    }
+    if(spec.cuSeqLenKvUid.has_value())
+    {
+        attributes.add_cu_seq_len_kv_tensor_uid(*spec.cuSeqLenKvUid);
+    }
     attributes.add_diagonal_alignment(spec.bottomRight
                                           ? data_objects::DiagonalAlignment::BOTTOM_RIGHT
                                           : data_objects::DiagonalAlignment::TOP_LEFT);
@@ -302,7 +315,7 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     const std::vector<flatbuffers::Offset<data_objects::Node>> nodes{
         data_objects::CreateNodeDirect(builder,
                                        "sdpa",
-                                       data_objects::DataType::FLOAT,
+                                       spec.computeDataType,
                                        data_objects::NodeAttributes::SdpaAttributes,
                                        attributes.Finish().Union())};
 
@@ -472,6 +485,21 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeclinesRaggedOperands)
         spec.raggedOperand = uid;
         EXPECT_FALSE(matchGraph(spec).has_value()) << "ragged operand uid " << uid;
     }
+}
+
+// cu_seq_len_* (variable-length batching) is unsupported. padding_mask stays false in
+// GraphSpec, so only the cu_seq_len decline can reject these.
+TEST(TestGfx1151WmmaAttentionMatchers, DeclinesCuSeqLenBothSpellings)
+{
+    ASSERT_TRUE(matchGraph(GraphSpec{}).has_value());
+
+    GraphSpec q;
+    q.cuSeqLenQUid = 900;
+    EXPECT_FALSE(matchGraph(q).has_value());
+
+    GraphSpec kv;
+    kv.cuSeqLenKvUid = 901;
+    EXPECT_FALSE(matchGraph(kv).has_value());
 }
 
 // Only the paged prefill objects ship with attention sinks: a dense-layout graph carrying
@@ -1559,6 +1587,30 @@ TEST(TestGfx1151WmmaAttentionSignature, RefusesEachExchangeOfTwoLikeDecodeSlots)
                 prepareFailure(decodeGraph(), kpackKernel(decodeKernel(128), exchanged)),
                 what.c_str());
         }
+    }
+}
+
+TEST(TestGfx1151WmmaAttentionMatchers, ComputeDataTypeMustBeServedByFloatAccumulation)
+{
+    // The kernels accumulate and keep the softmax statistics in FLOAT, which meets an unset,
+    // FLOAT, HALF or BFLOAT16 compute type; a wider or non-floating one asks for a computation
+    // they do not perform.
+    for(const auto computeType : {data_objects::DataType::UNSET,
+                                  data_objects::DataType::FLOAT,
+                                  data_objects::DataType::HALF,
+                                  data_objects::DataType::BFLOAT16})
+    {
+        auto spec = GraphSpec{};
+        spec.computeDataType = computeType;
+        EXPECT_TRUE(matchGraph(spec).has_value()) << data_objects::EnumNameDataType(computeType);
+    }
+    for(const auto computeType : {data_objects::DataType::DOUBLE,
+                                  data_objects::DataType::INT32,
+                                  data_objects::DataType::FP8_E4M3})
+    {
+        auto spec = GraphSpec{};
+        spec.computeDataType = computeType;
+        EXPECT_FALSE(matchGraph(spec).has_value()) << data_objects::EnumNameDataType(computeType);
     }
 }
 

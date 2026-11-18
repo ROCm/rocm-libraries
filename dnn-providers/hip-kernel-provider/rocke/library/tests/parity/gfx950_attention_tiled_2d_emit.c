@@ -1235,65 +1235,92 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         make_spec(idx - 8, s);
         s->lse_head_major = true;
         break;
-    /* --- idx75-93: runtime_layout, every catalog (head_size, block_size) cell
+
+    /* --- idx75-76: fp8 K in LDS on each 32x32 QK path. */
+    /* fp8 KV cache kept as raw fp8 in K_lds (use_fp8_mfma_qk) on the
+     * non-transposed 32x32 QK path: K is read as fp8 and dequantized with
+     * k_scale before the bf16 MFMA, as on the transposed path. */
+    case 75:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 32;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = "fp8e4m3";
+        s->use_fp8_mfma_qk = true;
+        s->use_mfma_32x32 = true;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        break;
+    /* The same fp8 K in LDS on the transposed 32x32 QK path, which reads K
+     * through the same shared reader. */
+    case 76:
+        make_spec(75, s);
+        s->use_transposed_qk_32x32 = true;
+        break;
+    /* --- idx77-95: runtime_layout, every catalog (head_size, block_size) cell
      *     with its catalog num_warps, GQA 1-16, one num_kv_heads > 1 spec, then
      *     the sink variants (lockstep with the Python _rtl rows). */
-    case 75:
+    case 77:
         rtl_spec(s, 64, 16, 1, 1, "fp16", false, 2);
         break;
-    case 76:
+    case 78:
         rtl_spec(s, 64, 32, 4, 1, "bf16", false, 4);
         break;
-    case 77:
+    case 79:
         rtl_spec(s, 64, 64, 6, 1, "fp16", false, 4);
         break;
-    case 78:
+    case 80:
         rtl_spec(s, 128, 16, 8, 1, "bf16", false, 4);
         break;
-    case 79:
+    case 81:
         rtl_spec(s, 128, 32, 1, 1, "fp16", false, 4);
         break;
-    case 80:
+    case 82:
         rtl_spec(s, 128, 64, 4, 1, "bf16", false, 4);
         break;
-    case 81:
+    case 83:
         rtl_spec(s, 256, 16, 6, 1, "fp16", false, 4);
         break;
-    case 82:
+    case 84:
         rtl_spec(s, 256, 32, 8, 1, "bf16", false, 4);
         break;
-    case 83:
+    case 85:
         rtl_spec(s, 256, 64, 1, 1, "fp16", false, 4);
         break;
-    case 84:
+    case 86:
         rtl_spec(s, 128, 32, 16, 4, "bf16", false, 4);
         break;
-    /* idx85-93: the sink variants. */
-    case 85:
+    /* idx87-95: the sink variants. */
+    case 87:
         rtl_spec(s, 64, 16, 2, 1, "bf16", true, 2);
         break;
-    case 86:
+    case 88:
         rtl_spec(s, 64, 32, 5, 1, "fp16", true, 4);
         break;
-    case 87:
+    case 89:
         rtl_spec(s, 64, 64, 7, 1, "bf16", true, 4);
         break;
-    case 88:
+    case 90:
         rtl_spec(s, 128, 16, 16, 1, "fp16", true, 4);
         break;
-    case 89:
+    case 91:
         rtl_spec(s, 128, 32, 2, 1, "bf16", true, 4);
         break;
-    case 90:
+    case 92:
         rtl_spec(s, 128, 64, 5, 1, "fp16", true, 4);
         break;
-    case 91:
+    case 93:
         rtl_spec(s, 256, 16, 7, 1, "bf16", true, 4);
         break;
-    case 92:
+    case 94:
         rtl_spec(s, 256, 32, 16, 1, "fp16", true, 4);
         break;
-    case 93:
+    case 95:
         rtl_spec(s, 256, 64, 2, 1, "bf16", true, 4);
         break;
     default:

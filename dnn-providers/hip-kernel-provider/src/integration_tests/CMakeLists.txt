@@ -93,6 +93,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         IntegrationGpuGfx950AttentionUnifiedKnobs.cpp
             Gfx950AttentionUnified2D,Gfx950AttentionUnified3D
         IntegrationGpuGfx942AttentionUnified3dKnobs.cpp Gfx942AttentionUnified3d
+        IntegrationGpuGfx942AttentionUnified2DKnobs.cpp Gfx942AttentionUnified2D
         IntegrationGpuGfx942AttentionDenseKnobs.cpp Gfx942AttentionDense
         IntegrationGpuAttentionPagedUnified.cpp AttentionPagedUnified
     )
@@ -117,6 +118,25 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             )
         endif()
     endwhile()
+    # The packaged convolution suites follow the same rule as the knobs suite above, one
+    # define per engine: the AOT-instance engine is its own product bundle. The AOT seed
+    # is test content of this build's own integration root, so its gate is arch-aware
+    # instead.
+    hkp_product_offers_engine(_hkp_conv_fwd_aot_bundle "hipkernel:Gfx950ConvFwdAot")
+    hkp_gfx950_conv_fwd_aot_seed_available(_hkp_conv_fwd_aot_seed_bundle)
+    if(_hkp_conv_fwd_aot_bundle OR _hkp_conv_fwd_aot_seed_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx950ConvFwd.cpp
+        )
+    endif()
+    foreach(_hkp_conv_suite IN ITEMS conv_fwd_aot conv_fwd_aot_seed)
+        if(_hkp_${_hkp_conv_suite}_bundle)
+            string(TOUPPER "HKP_TEST_GFX950_${_hkp_conv_suite}" _hkp_conv_define)
+            target_compile_definitions(hip_kernel_provider_integration_tests
+                PRIVATE ${_hkp_conv_define}=1
+            )
+        endif()
+    endforeach()
     # The dgrad AOT-instance engine is a product bundle of its own, gated like the knob
     # suites; it needs no SDPA.
     hkp_product_offers_engine(_hkp_conv_dgrad_aot_bundle "hipkernel:Gfx950ConvDgradAot")
@@ -330,7 +350,7 @@ while(_engines)
 endwhile()
 
 # The FlyDSL SDPA backward engines, one gpu-reference target per (engine, architecture)
-# the product ships. Split ships gfx950 content and gfx11-generic content, which the pack
+# the product ships. Split ships gfx950, gfx90a, gfx942 and gfx11-generic content, which the pack
 # expands to every gfx11 member this build targets; merged ships gfx950 only. Gated and
 # routed per architecture exactly as the pinned attention targets above: the predicate is
 # the one the census uses, and the entry installs into that architecture's shard so a

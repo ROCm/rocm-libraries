@@ -1070,3 +1070,7 @@ namespace ArgumentsHelper
 
 // Validate explicit operand compute types and derive unset ones from compute_type.
 std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Arguments& arg);
+
+// Derive an unset bias type using the client defaults. Validate the resulting
+// type only when bias_vector is enabled.
+hipDataType derive_unset_bias_type(const Arguments& arg);

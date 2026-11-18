@@ -45,6 +45,8 @@ from kernels.common._attention_runtime_layout import (
     sink_logit,
 )
 from kernels.common._lse_store import lse_row_has_mass, lse_store
+from kernels.common.attention_mask_type import band_mask_type
+from kernels.common._spec_checks import require_bool
 
 from rocke.core.ir import (
     BF16,
@@ -533,10 +535,8 @@ class UnifiedAttention2DTiledSpec:
     runtime_layout: bool = False
 
     def __post_init__(self):
-        if type(self.emit_lse) is not bool:
-            raise ValueError(
-                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
-            )
+        require_bool("emit_lse", self.emit_lse)
+        require_bool("runtime_layout", self.runtime_layout)
         _rtl_reason = _runtime_layout_reject_reason(self)
         if _rtl_reason is not None:
             raise ValueError(_rtl_reason)
@@ -979,6 +979,24 @@ class UnifiedAttention2DTiledSpec:
     @property
     def num_queries_per_kv(self) -> int:
         return gqa_ratio(self.num_query_heads, self.num_kv_heads)
+
+    def resolved_num_queries_per_kv(self) -> int:
+        """The GQA ratio the kernel bakes (the head counts are kernargs), as a bound
+        method so ``hkp_pack`` can observe it as catalog metadata."""
+        return self.num_queries_per_kv
+
+    def mask_type(self) -> int:
+        """The band as one ``AttentionMaskType`` value
+        (``kernels.common.attention_mask_type.band_mask_type``): 2 bottom-right causal,
+        3 a sliding window.
+
+        This body computes only the bottom-right causal band (right bound 0,
+        bottom-right alignment); ``sliding_window`` is its left bound. A bound method,
+        like the gfx950 spec's, so ``hkp_pack`` observes it as catalog metadata.
+        """
+        return band_mask_type(
+            sliding_window=self.sliding_window, right_bound=0, causal_top_left=False
+        )
 
     @property
     def block_m(self) -> int:

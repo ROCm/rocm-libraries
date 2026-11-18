@@ -131,11 +131,17 @@ extern "C" {
  *     v_ptr and live_rows at its end, which changes its size and field
  *     offsets; rocke_wmma_fmha_fwd_v2_spec_t gained dense_q and seqused_q in
  *     the padding after page_block_size (its size and offsets are unchanged).
- * 19: rocke_attention_tiled_2d_spec_t gained runtime_layout at its end. The
+ * 19: rocke_coalesced_tile_loader_t gained has_col_xor and col_xor[4] at its
+ *     end (after elem_dtype), which changes its size.
+ * 20: rocke_mx_gemm_spec_t lost per_input_row and now declares the
+ *     workgroup tile (block_tile_m, block_tile_n) right after M, N, K, which
+ *     changes its size and the offsets of its fields; rocke_mx_gemm_block_size
+ *     returns long long (it returned int), which changes its signature.
+ * 21: rocke_attention_tiled_2d_spec_t gained runtime_layout at its end. The
  *     bool lands in the struct's tail padding, so sizeof is unchanged, but a
  *     caller built against the old header leaves the byte the builder now
  *     reads unset. */
-#define ROCKE_ABI_VERSION 19
+#define ROCKE_ABI_VERSION 21
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.
