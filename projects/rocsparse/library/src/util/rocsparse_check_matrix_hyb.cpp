@@ -266,9 +266,10 @@ rocsparse_status rocsparse_check_matrix_hyb(rocsparse_handle        handle,
                                                                             data_status,
                                                                             temp_buffer));
 
-    // The COO check writes success into data_status before it looks at the COO
-    // part, including when that part is empty.
-    const rocsparse_data_status ell_data_status = *data_status;
+    if(*data_status != rocsparse_data_status_success)
+    {
+        return rocsparse_status_success;
+    }
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::check_matrix_coo_template_dispatch(hyb->data_type_T,
                                                                             handle,
@@ -284,11 +285,6 @@ rocsparse_status rocsparse_check_matrix_hyb(rocsparse_handle        handle,
                                                                             storage,
                                                                             data_status,
                                                                             temp_buffer));
-
-    if(ell_data_status != rocsparse_data_status_success)
-    {
-        *data_status = ell_data_status;
-    }
 
     return rocsparse_status_success;
 }

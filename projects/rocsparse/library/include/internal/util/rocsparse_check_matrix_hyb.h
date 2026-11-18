@@ -89,7 +89,8 @@ rocsparse_status rocsparse_check_matrix_hyb_buffer_size(rocsparse_handle        
 *  Any issues detected will be written to the \p data_status parameter, which is always a host variable regardless of the pointer mode.
 *
 *  The ELL and COO parts are checked separately. A coordinate that is stored once in the ELL part and once in the COO
-*  part is not reported as a duplicate entry. If both parts have an issue, the issue in the ELL part is reported.
+*  part is not reported as a duplicate entry. The COO part is checked only when the ELL part has no issue, so an issue
+*  in the ELL part is reported even if the COO part also has one.
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.

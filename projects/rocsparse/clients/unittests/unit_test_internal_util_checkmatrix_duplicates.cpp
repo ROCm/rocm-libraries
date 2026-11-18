@@ -826,6 +826,18 @@ namespace
                 expect_hyb<T>(handle, type_name, "nan_ell_bad_coo", base, storage, 2,
                               {0, 2, 3}, {0, 5, 1}, {nan, one, one},
                               1, user, k_nan);
+                // An ELL failure is reported without checking the COO part.
+                expect_hyb<T>(handle, type_name, "bad_ell_nan_coo", base, storage, 2,
+                              {0, 2, 3}, {0, 1, 1}, {one, nan, one},
+                              1, user, k_idx, {{0, 5}});
+                expect_hyb<T>(handle, type_name, "nan_ell_separated_duplicate_coo_tail", base,
+                              storage, 4,
+                              {0, 4, 5}, {0, 1, 2, 1, 1}, {nan, one, one, one, one},
+                              1, user, k_nan);
+                expect_hyb<T>(handle, type_name, "bad_ell_separated_duplicate_coo_tail", base,
+                              storage, 4,
+                              {0, 4, 5}, {0, 1, 2, 1, 1}, {one, one, one, one, one},
+                              1, user, k_idx, {{1, 9}});
                 expect_hyb<T>(handle, type_name, "duplicate_ell", base, storage, 2,
                               {0, 2, 3}, {0, 0, 1}, {one, one, one},
                               2, user, k_dup);
