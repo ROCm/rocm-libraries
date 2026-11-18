@@ -13,7 +13,8 @@ directly.
   engine with stubs that fail the test, then lowers one spec per family with
   ``backend="python"``: it must succeed. It needs no engine.
 * :class:`TestBothRunsBothLowerers` (needs ``rocke_library_engine``) checks that
-  ``backend="both"`` calls the Python lowerer once and the C++ binding.
+  ``backend="both"`` calls the Python lowerer once and the C++ binding, and
+  that the two engines agree (serialized IR and ``.ll``) for every family.
 * :func:`test_no_py_fn_uses_the_dispatching_lowerer` covers every ``lower_*``,
   including the families without a spec in the table below.
 
@@ -358,19 +359,6 @@ class TestPyFnIsPythonOnly(unittest.TestCase):
                 self.assertTrue(res.ir_text)
 
 
-# Families whose Python-built and C++-built serialized IR (``ck.dsl.ir/v1``)
-# differ in a few op attributes (implicit GEMM: ``tile.buffer_load_vN`` with
-# ``elem_type`` against ``tile.buffer_load_vN_f16``; direct 16c / 4c:
-# ``elide_trailing_barrier`` true against false on the main ``scf.for``), so
-# ``backend="both"`` refuses them. This predates the Python-lowerer ``py_fn``
-# (``both`` always compared the Python-built serialized IR) and the ``.ll`` is
-# identical. The test pins the refusal so that fixing the IR twin shows up
-# here: drop the family from this set then.
-_KNOWN_SERIALIZED_IR_MISMATCH = frozenset(
-    {"conv_implicit_gemm", "conv_direct_grouped/16c", "conv_direct_grouped/4c"}
-)
-
-
 @unittest.skipIf(bool(_SKIP), _SKIP)
 @mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm23"})
 class TestBothRunsBothLowerers(unittest.TestCase):
@@ -406,22 +394,10 @@ class TestBothRunsBothLowerers(unittest.TestCase):
                         eb, "import_engine", lambda *_a, **_k: _Counting()
                     ),
                 ):
-                    if label in _KNOWN_SERIALIZED_IR_MISMATCH:
-                        with self.assertRaises(bk.BackendMismatch):
-                            fn(*args, arch=arch, backend="both", **kw)
-                        res = None
-                    else:
-                        res = fn(*args, arch=arch, backend="both", **kw)
+                    res = fn(*args, arch=arch, backend="both", **kw)
                 self.assertEqual(len(py_calls), 1)
                 self.assertEqual(len(cpp_calls), 1, cpp_calls)
-                if res is None:
-                    # Both engines were reached, and the lowered .ll is the
-                    # same on either; only the serialized IR differs.
-                    py = fn(*args, arch=arch, backend="python", **kw)
-                    cpp = fn(*args, arch=arch, backend="cpp", **kw)
-                    self.assertEqual(py.llvm_text, cpp.llvm_text)
-                else:
-                    self.assertEqual(res.backend, "both")
+                self.assertEqual(res.backend, "both")
 
 
 def test_no_py_fn_uses_the_dispatching_lowerer():
