@@ -456,6 +456,11 @@ std::vector<KnobCase> knobCases()
                      makeShape(FP16, 64, 8, 8, Mask::NO_MASK, 0, 1, 384, 384),
                      COLD,
                      Tile{64, 64}});
+    // Cold on a graph whose K and V are one tensor: three unique inputs instead of four, so a
+    // ranker that read positional tensor features could not evaluate it.
+    auto sharedKv = makeShape(BF16, 128, 32, 8, Mask::BOUNDS_TOP_LEFT, 0, 2, 1024, 1024);
+    sharedKv.sharedKv = true;
+    cases.push_back({"Cold_SharedKv", sharedKv, COLD, Tile{256, 64}});
     // Shape breadth on a forced tile: B > 1, Sq != Skv, both alignments at equal lengths,
     // the deprecated causal flag, top-left windows at unequal lengths: Sq > Skv by less
     // than W, so the last 64 rows keep only part of their window, then Skv > Sq.
@@ -752,24 +757,23 @@ std::optional<std::string> expectedKernelId(const GraphShape& shape,
     return onlyServedKernelCarryingBias(key, catalogBias(shape));
 }
 
-/// Whether the served kernel with id @p kernelId carries @p shape's semantic fields (its bias
-/// included), @p tile and @p grid, whatever its levers.
-bool selectedIsOfClass(const std::string& kernelId,
-                       const GraphShape& shape,
-                       const Tile& tile,
-                       const Grid& grid)
+/// The metadata fields a kernel serving @p shape must carry, whatever its tile, grid and levers.
+/// Its use_additive_bias is not among them: a record may omit that field (see carriedBias), so
+/// selectedCarries matches it separately.
+detail::MetadataKey semanticKey(const GraphShape& shape)
 {
-    const detail::MetadataKey key{
+    return {
         {"dtype", detail::catalogDtypeName(shape.dataType)},
         {"head_size", shape.headSize},
         {"causal", detail::catalogCausal(shape.mask)},
         {"sliding_window", shape.window},
         {"emit_lse", int64_t{shape.withStats ? 1 : 0}},
-        {"block_m", tile.blockM},
-        {"block_n", tile.blockN},
-        {"persistent", int64_t{grid.persistent ? 1 : 0}},
-        {grid.persistent ? "persist_decode" : "nonpersist_decode", grid.order},
     };
+}
+
+/// Whether the served kernel with id @p kernelId carries @p key and the use_additive_bias @p bias.
+bool selectedCarries(const std::string& kernelId, const detail::MetadataKey& key, int64_t bias)
+{
     bool found = false;
     bool matches = false;
     detail::forEachServedKernel(ENGINE,
@@ -779,15 +783,30 @@ bool selectedIsOfClass(const std::string& kernelId,
                                         return;
                                     }
                                     found = true;
-                                    matches = carriesKeyAndBias(kernel, key, catalogBias(shape));
+                                    matches = carriesKeyAndBias(kernel, key, bias);
                                 });
     EXPECT_TRUE(found) << "no served kernel has id " << kernelId;
     if(found && !matches)
     {
         ADD_FAILURE() << "kernel " << kernelId << " is not of the class "
-                      << detail::describeKey(key) << " use_additive_bias=" << catalogBias(shape);
+                      << detail::describeKey(key) << " use_additive_bias=" << bias;
     }
     return found && matches;
+}
+
+/// Whether the served kernel with id @p kernelId carries @p shape's semantic fields (its bias
+/// included), @p tile and @p grid, whatever its levers.
+bool selectedIsOfClass(const std::string& kernelId,
+                       const GraphShape& shape,
+                       const Tile& tile,
+                       const Grid& grid)
+{
+    auto key = semanticKey(shape);
+    key.emplace_back("block_m", tile.blockM);
+    key.emplace_back("block_n", tile.blockN);
+    key.emplace_back("persistent", int64_t{grid.persistent ? 1 : 0});
+    key.emplace_back(grid.persistent ? "persist_decode" : "nonpersist_decode", grid.order);
+    return selectedCarries(kernelId, key, catalogBias(shape));
 }
 
 int64_t ordinalOf(const std::string& field, const std::string& value)
@@ -1040,11 +1059,30 @@ TEST_P(IntegrationGpuGfx942AttentionDenseKnobs, SelectsTheExpectedKernelAndMatch
     }
     else
     {
-        // Cold: the engine's score picks the tile and grid; which of the class's lever
-        // variants it ranks first is the score's own policy (its goldens pin that).
-        EXPECT_TRUE(selectedIsOfClass(*selected, testCase.shape, testCase.tile, grid))
-            << "Captured logs:\n"
-            << recorder.getRecordedLogsAsString();
+        // Cold: a trained ranker bound for this arch picks whichever kernel it ranks fastest,
+        // so only the shape's semantic class is pinned (the CPU reference below still checks
+        // the launch); one that could not rank fell back to declared kernel order, which is a
+        // failure unless the pack left the ranker out because its model.bin was never pulled.
+        // Without a trained ranker the engine's score picks the tile and grid; which
+        // of the class's lever variants it ranks first is the score's own policy (its goldens
+        // pin that).
+        const auto decidedBy = detail::rankingDecidedBy(ENGINE, recorder);
+        testing::expectRankerDecided(decidedBy,
+                                     detail::boundRankerLeftOutAsUnpulled(ENGINE),
+                                     recorder.getRecordedLogsAsString());
+        if(decidedBy.has_value())
+        {
+            EXPECT_TRUE(selectedCarries(
+                *selected, semanticKey(testCase.shape), catalogBias(testCase.shape)))
+                << "Captured logs:\n"
+                << recorder.getRecordedLogsAsString();
+        }
+        else
+        {
+            EXPECT_TRUE(selectedIsOfClass(*selected, testCase.shape, testCase.tile, grid))
+                << "Captured logs:\n"
+                << recorder.getRecordedLogsAsString();
+        }
     }
 
     // Rank 0: the selected kernel heads the ranking, rather than being reached past a
