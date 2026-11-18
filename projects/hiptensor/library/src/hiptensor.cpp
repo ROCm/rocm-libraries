@@ -36,6 +36,7 @@
 
 #include <hiptensor/hiptensor.h>
 
+#include "backends/common/registry.hpp"
 #include "data_types.hpp"
 #include "hiptensor_options.hpp"
 #include "logger.hpp"
@@ -315,15 +316,33 @@ hiptensorStatus_t hiptensorHandleReadPlanCacheFromFile(hiptensorHandle_t handle,
     return retVal;
 }
 
+// The kernel cache belongs to the backend that keeps one. Without such a backend there is
+// nothing to write or read, and both calls succeed without touching the file.
 hiptensorStatus_t hiptensorWriteKernelCacheToFile(const hiptensorHandle_t handle,
                                                   const char              fileName[])
 {
-    return HIPTENSOR_STATUS_SUCCESS;
+    if(handle == nullptr)
+    {
+        return HIPTENSOR_STATUS_NOT_INITIALIZED;
+    }
+    if(fileName == nullptr)
+    {
+        return HIPTENSOR_STATUS_INVALID_VALUE;
+    }
+    return hiptensor::backend::writeKernelCache(handle, fileName);
 }
 
 hiptensorStatus_t hiptensorReadKernelCacheFromFile(hiptensorHandle_t handle, const char fileName[])
 {
-    return HIPTENSOR_STATUS_SUCCESS;
+    if(handle == nullptr)
+    {
+        return HIPTENSOR_STATUS_NOT_INITIALIZED;
+    }
+    if(fileName == nullptr)
+    {
+        return HIPTENSOR_STATUS_INVALID_VALUE;
+    }
+    return hiptensor::backend::readKernelCache(handle, fileName);
 }
 
 hiptensorStatus_t hiptensorCreateTensorDescriptor(const hiptensorHandle_t      handle,
@@ -944,47 +963,21 @@ hiptensorStatus_t hiptensorPlanGetAttribute(const hiptensorHandle_t  handle,
     return retStatus;
 }
 
-hiptensorStatus_t contractionGetWorkspaceSize(const hiptensorHandle_t              handle,
-                                              const hiptensorOperationDescriptor_t desc,
-                                              const hiptensorPlanPreference_t      planPref,
-                                              const hiptensorWorksizePreference_t  workspacePref,
-                                              uint64_t* workspaceSizeEstimate);
-hiptensorStatus_t
-                  contractionTrinaryGetWorkspaceSize(const hiptensorHandle_t              handle,
-                                                     const hiptensorOperationDescriptor_t desc,
-                                                     const hiptensorPlanPreference_t      planPref,
-                                                     const hiptensorWorksizePreference_t  workspacePref,
-                                                     uint64_t*                            workspaceSizeEstimate);
 hiptensorStatus_t hiptensorEstimateWorkspaceSize(const hiptensorHandle_t              handle,
                                                  const hiptensorOperationDescriptor_t desc,
                                                  const hiptensorPlanPreference_t      planPref,
                                                  const hiptensorWorksizePreference_t  workspacePref,
                                                  uint64_t* workspaceSizeEstimate)
 {
-    if(desc->mOperationType == HIPTENSOR_CONTRACTION)
-    {
-        return contractionGetWorkspaceSize(
-            handle, desc, planPref, workspacePref, workspaceSizeEstimate);
-    }
-    if(desc->mOperationType == HIPTENSOR_CONTRACTION_TRINARY)
-    {
-        return contractionTrinaryGetWorkspaceSize(
-            handle, desc, planPref, workspacePref, workspaceSizeEstimate);
-    }
-    *workspaceSizeEstimate = 0u;
-    return HIPTENSOR_STATUS_SUCCESS;
+    // The backend a plan of this operation would select estimates its workspace.
+    hiptensor::backend::EstimateContext context;
+    context.handle        = handle;
+    context.desc          = desc;
+    context.planPref      = planPref;
+    context.workspacePref = workspacePref;
+    return hiptensor::backend::estimateWorkspace(context, *workspaceSizeEstimate);
 }
 
-hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handle,
-                                      hiptensorPlan_t                      plan,
-                                      const hiptensorOperationDescriptor_t desc,
-                                      const hiptensorPlanPreference_t      pref,
-                                      uint64_t                             workspaceSizeLimit);
-hiptensorStatus_t contractionTrinaryInitPlan(const hiptensorHandle_t              handle,
-                                             hiptensorPlan_t                      plan,
-                                             const hiptensorOperationDescriptor_t desc,
-                                             const hiptensorPlanPreference_t      pref,
-                                             uint64_t workspaceSizeLimit);
 hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handle,
                                       hiptensorPlan_t*                     plan,
                                       const hiptensorOperationDescriptor_t desc,
@@ -1038,17 +1031,9 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
         newPlan->mOwnedOpDesc->mOpAC = HIPTENSOR_OP_ADD;
     }
 
-    if(desc->mOperationType == HIPTENSOR_CONTRACTION)
-    {
-        return contractionInitPlan(
-            handle, newPlan, newPlan->mOpDesc, newPlan->mPref, workspaceSizeLimit);
-    }
-    if(desc->mOperationType == HIPTENSOR_CONTRACTION_TRINARY)
-    {
-        return contractionTrinaryInitPlan(
-            handle, newPlan, newPlan->mOpDesc, newPlan->mPref, workspaceSizeLimit);
-    }
-    return HIPTENSOR_STATUS_SUCCESS;
+    // The backend is selected and prepared now, for every operation. The plan keeps its own copy
+    // of the descriptors, so the problem the backend checks is the one every execution runs.
+    return hiptensor::backend::createPlanBackend(handle, newPlan, workspaceSizeLimit);
 }
 
 hiptensorStatus_t hiptensorDestroyPlan(hiptensorPlan_t plan)

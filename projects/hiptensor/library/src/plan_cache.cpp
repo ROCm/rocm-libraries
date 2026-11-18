@@ -41,7 +41,8 @@ namespace hiptensor
     {
     }
 
-    PlanCache::HashId PlanCache::getHashID(hiptensorOperationDescriptor_t desc)
+    PlanCache::HashId PlanCache::getHashID(hiptensorOperationDescriptor_t desc,
+                                           std::string const&             backend)
     {
         auto tag             = desc->mTag;
         auto ADataType       = desc->mDescA ? desc->mDescA->mType : hiptensor::NONE_TYPE;
@@ -81,8 +82,10 @@ namespace hiptensor
         arrLSM.insert(arrLSM.end(), desc->mModeC.begin(), desc->mModeC.end());
         arrLSM.insert(arrLSM.end(), desc->mModeD.begin(), desc->mModeD.end());
 
-        //generate hash ID by {Tag, DatatypeA, DatatypeB, DatatypeC, DatatypeD, DatatypeCompute, mOperationType, mContractionOpId, lengths, strides, modes}
-        PlanCache::HashId hashID = Hash{}(tag,
+        //generate hash ID by {Backend, Tag, DatatypeA, DatatypeB, DatatypeC, DatatypeD, DatatypeCompute, mOperationType, mContractionOpId, lengths, strides, modes}
+        std::size_t const backendHash = Hash{}(backend);
+        PlanCache::HashId hashID      = Hash{}(backendHash,
+                                          tag,
                                           ADataType,
                                           BDataType,
                                           CDataType,
@@ -95,11 +98,12 @@ namespace hiptensor
         return hashID;
     }
 
-    PlanCache::Uid PlanCache::querySolutionUid(hiptensorOperationDescriptor_t desc)
+    PlanCache::Uid PlanCache::querySolutionUid(hiptensorOperationDescriptor_t desc,
+                                               std::string const&             backend)
     {
         std::scoped_lock lock(mMutex);
 
-        PlanCache::HashId hashID      = getHashID(desc);
+        PlanCache::HashId hashID      = getHashID(desc, backend);
         PlanCache::Uid    solutionUid = getSolutionID(hashID);
         //Update cache line used time
         if(solutionUid > 0ull)

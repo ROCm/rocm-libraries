@@ -25,6 +25,8 @@
  *******************************************************************************/
 #include <hiptensor/hiptensor.h>
 
+#include "backends/ck/ck_backend.hpp"
+#include "backends/common/registry.hpp"
 #include "elementwise_solution.hpp"
 #include "elementwise_solution_instances.hpp"
 #include "elementwise_solution_registry.hpp"
@@ -42,6 +44,34 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
                                    void*                   B,
                                    const hipStream_t       stream)
 {
+    hiptensor::backend::LaunchConfig cfg;
+    cfg.stream = stream;
+
+    // Plans run on the backend selected when they were created.
+    if(handle == nullptr || plan == nullptr || plan->mBackend == nullptr)
+    {
+        return hiptensor::ckbackend::permute(handle, plan, alpha, A, B, cfg);
+    }
+
+    hiptensor::backend::Scalars scalars;
+    scalars.alpha = alpha;
+
+    hiptensor::backend::Buffers buffers;
+    buffers.A   = A;
+    buffers.out = B;
+
+    return hiptensor::backend::executePlan(handle, plan, scalars, buffers, nullptr, 0, cfg);
+}
+
+hiptensorStatus_t hiptensor::ckbackend::permute(hiptensorHandle_t            handle,
+                                                hiptensorPlan_t              plan,
+                                                void const*                  alpha,
+                                                void const*                  A,
+                                                void*                        B,
+                                                backend::LaunchConfig const& cfg)
+{
+    hipStream_t const stream = cfg.stream;
+
     using hiptensor::Logger;
     auto& logger = Logger::instance();
 
@@ -161,17 +191,7 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
             // Perform permutation with LOG_LEVEL_PERF_TRACE
             if(logger->getLogMask() & HIPTENSOR_LOG_LEVEL_PERF_TRACE)
             {
-                using hiptensor::HiptensorOptions;
-                auto& options = HiptensorOptions::instance();
-
-                time = pSolution->run(args,
-                                      StreamConfig{
-                                          stream, // stream id
-                                          true, // time_kernel
-                                          0, // log_level
-                                          options->coldRuns(), // cold_niters
-                                          options->hotRuns(), // nrepeat
-                                      });
+                time = pSolution->run(args, toStreamConfig(timedLaunch(cfg)));
                 if(time < 0)
                 {
                     return HIPTENSOR_STATUS_CK_ERROR;
@@ -204,7 +224,7 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
             // Perform permutation without timing
             else
             {
-                time = pSolution->run(args, StreamConfig{stream, false});
+                time = pSolution->run(args, toStreamConfig(cfg));
                 if(time < 0)
                 {
                     return HIPTENSOR_STATUS_CK_ERROR;
