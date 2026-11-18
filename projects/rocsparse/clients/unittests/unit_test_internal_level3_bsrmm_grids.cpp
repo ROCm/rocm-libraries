@@ -724,7 +724,7 @@ namespace
             for(size_t i = 0; i < got.size(); ++i)
             {
                 const cplx g(std::real(got[i]), std::imag(got[i]));
-                if(std::abs(g - want[i]) > 4.0 * eps * std::max(1.0, std::abs(want[i])))
+                if(!(std::abs(g - want[i]) <= 4.0 * eps * std::max(1.0, std::abs(want[i]))))
                 {
                     if(bad++ == 0)
                     {
@@ -894,7 +894,7 @@ TEST_F(BsrmmGrids, general_clamped)
 
 // The clamped large_ext kernel runs a separate grid-stride copy of the B loads, so
 // op(B) = B^H needs its own clamped check, in both B orders (nn and nt loads), for
-// every tuned config. The unclamped double complex run is the control.
+// every tuned config. Each type pair also runs unclamped as its control.
 TEST_F(BsrmmGrids, large_ext_conj_B_clamped)
 {
     const struct
@@ -912,6 +912,10 @@ TEST_F(BsrmmGrids, large_ext_conj_B_clamped)
         for(const rocsparse_order order_B : {rocsparse_order_column, rocsparse_order_row})
         {
             check_bsrmm_conj_B<rocsparse_float_complex, int32_t, int32_t>(
+                handle, s.block_dim, s.dir, order_B, bsrmm_limits, s.kernel);
+            check_bsrmm_conj_B<rocsparse_float_complex, int32_t, int32_t>(
+                handle, s.block_dim, s.dir, order_B, unclamped, s.kernel);
+            check_bsrmm_conj_B<rocsparse_double_complex, int64_t, int64_t>(
                 handle, s.block_dim, s.dir, order_B, bsrmm_limits, s.kernel);
             check_bsrmm_conj_B<rocsparse_double_complex, int64_t, int64_t>(
                 handle, s.block_dim, s.dir, order_B, unclamped, s.kernel);
