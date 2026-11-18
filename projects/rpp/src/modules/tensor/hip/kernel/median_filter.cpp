@@ -2035,7 +2035,7 @@ RppStatus hip_exec_median_filter_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* ds
 
     int globalThreads_x = (dstDescPtr->strides.hStride + kernelSize + 7) >> 3;
     int globalThreads_y = dstDescPtr->h + kernelSize;
-    int globalThreads_z = handle.GetBatchSize();
+    int globalThreads_z = dstDescPtr->n;
 
     uint padLength = kernelSize / 2;
     uint padLengthTwice = padLength * 2;
