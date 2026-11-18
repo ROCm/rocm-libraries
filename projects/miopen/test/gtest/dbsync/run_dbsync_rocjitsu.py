@@ -50,6 +50,15 @@ FAMILY_MAP = {
         "rj_config": "gfx950_mi355x_kmd.json",
         "cus": [256],
     },
+    # TheRock's family string for gfx90a has no -dcgpu suffix. Only the 104-CU MI210 system DB
+    # (gfx90a68) is validated here: the 110-CU MI250X GCD one (gfx90a6e) still has wrong workspace
+    # sizes in its find-db (known issue in #14519) and fails StaticFDBSync. Add 110 once it is
+    # corrected.
+    "gfx90a": {
+        "arch": "gfx90a",
+        "rj_config": "gfx90a_mi210_kmd.json",
+        "cus": [104],
+    },
 }
 
 # StaticFDBSync's default thread fan-out (min(hw_concurrency, 32)) can deadlock/stall under the

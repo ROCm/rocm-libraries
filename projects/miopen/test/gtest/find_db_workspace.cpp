@@ -27,7 +27,6 @@
 #include <miopen/tensor.hpp>
 
 #include <fstream>
-#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -42,23 +41,7 @@ GetConvSolutions(const ExecutionContext& ctx,
 
 namespace {
 
-struct FindDbPathOverride
-{
-    explicit FindDbPathOverride(const miopen::fs::path& path)
-        : cached(miopen::debug::testing_find_db_path_override())
-    {
-        miopen::debug::testing_find_db_path_override() = path;
-    }
-
-    ~FindDbPathOverride() { miopen::debug::testing_find_db_path_override() = cached; }
-
-    FindDbPathOverride(const FindDbPathOverride&)            = delete;
-    FindDbPathOverride& operator=(const FindDbPathOverride&) = delete;
-
-private:
-    std::optional<miopen::fs::path> cached;
-    miopen::TestRordbEmbedFsOverrideLock rordb_embed_fs_override;
-};
+using miopen::FindDbPathOverride;
 
 struct RecordedSolver
 {
