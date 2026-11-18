@@ -18,11 +18,12 @@ from typing import Callable, Optional
 
 from kernels.common._fmha_common import gqa_ratio
 from kernels.common._spec_checks import require_bool
-from rocke.core.ir import BF16, F16, F32, FP8E4M3, IRBuilder, Type, Value
+from rocke.core.ir import BF16, F16, F32, FP8E4M3, I32, IRBuilder, Type, Value
 from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.distribution import make_static_tile_distribution
 
 __all__ = [
+    "C16_DIST",
     "C32_DIST",
     "AccLayout",
     "Fp8KvSyncLoader",
@@ -33,6 +34,10 @@ __all__ = [
     "TiledDtypeIrMixin",
     "TiledGqaMixin",
     "TiledLaneMap",
+    "dequant_fp8_lds_to_bf16",
+    "fast_paged_kv_blocks",
+    "load_page_id_window",
+    "mfma_16x16_c_row",
     "mfma_32x32_c_col",
     "mfma_32x32_c_row",
 ]
@@ -88,6 +93,35 @@ def mfma_32x32_c_col(b, lane, n_tile32: int = 0):
     if n_tile32 == 0:
         return col
     return b.add(b.const_i32(n_tile32 * 32), col)
+
+
+# CK-Tile C-accumulator warp distribution for the 16x16x16 MFMA atom. For one
+# wavefront the lane splits as ``(m_blk, n) = (lane // 16, lane % 16)`` and the
+# per-lane ``<4 x f32>`` accumulator slot ``reg`` is the inner M Y dim
+# (``kCM1PerLane = 4``), so ``calculate_x`` returns ``row = m_blk * 4 + reg``
+# (and ``col = n``). The C layout is dtype-independent, so the f16 atom drives
+# it for fp16 and bf16. Used by the single-warp tiled 3D segment kernels.
+C16_DIST = make_static_tile_distribution(
+    make_c_warp_dstr_encoding(MfmaAtom.f16_16x16x16())
+)
+
+
+def mfma_16x16_c_row(b, lane, reg: int):
+    """MFMA-local output row for a ``16x16`` C element ``reg`` (0..3).
+
+    Drives CK Tile's C-warp ``TileDistribution.calculate_x`` instead of the
+    hand-rolled ``row = (lane // 16) * 4 + reg`` lane arithmetic. The 16x16 C
+    layout has a single inner M Y dim of length 4 (``kCM0PerLane = 1``), so the
+    outer Y is always 0 and ``reg`` is the inner Y.
+    """
+    if not (0 <= reg < 4):
+        raise ValueError(f"mfma_16x16 reg must be 0..3, got {reg}")
+    m_blk = b.div(lane, b.const_i32(16))
+    n = b.mod(lane, b.const_i32(16))
+    row, _col = C16_DIST.calculate_x(
+        b, ys=[b.const_i32(0), b.const_i32(reg)], ps=[[m_blk, n]]
+    )
+    return row
 
 
 @dataclass(frozen=True)
@@ -531,3 +565,117 @@ class ReduceTiledSpecMixin(TiledDtypeIrMixin):
         require_bool("emit_lse", self.emit_lse)
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
+
+
+def fast_paged_kv_blocks(
+    b: IRBuilder,
+    kv_tile_idx: Value,
+    *,
+    block_tables: Value,
+    seq_base: Value,
+    block_table_max_idx: Value,
+) -> tuple[Value, Value]:
+    """Physical page ids of the two paged-KV blocks of KV tile ``kv_tile_idx``.
+
+    The fast paged-KV descriptor covers each tile with two cache blocks. Loads
+    past ``block_table_max_idx`` read 0. Returns both ids as SGPR values.
+    """
+    logical_block0 = b.mul(kv_tile_idx, b.const_i32(2))
+    logical_block1 = b.add(logical_block0, b.const_i32(1))
+    idx0 = b.add(seq_base, logical_block0)
+    idx1 = b.add(seq_base, logical_block1)
+    block0 = b.masked_global_load(
+        block_tables,
+        idx0,
+        b.cmp_lt(idx0, block_table_max_idx),
+        b.const_i32(0),
+        dtype=I32,
+        align=4,
+    )
+    block1 = b.masked_global_load(
+        block_tables,
+        idx1,
+        b.cmp_lt(idx1, block_table_max_idx),
+        b.const_i32(0),
+        dtype=I32,
+        align=4,
+    )
+    return b.to_sgpr_u32(block0), b.to_sgpr_u32(block1)
+
+
+def dequant_fp8_lds_to_bf16(
+    b: IRBuilder,
+    buf_idx: Value,
+    scale: Value,
+    fp8_lds,
+    bf16_lds,
+    bf16_buf: Value,
+    *,
+    tid: Value,
+    threads: int,
+    dtype: Type,
+    elems_per_chunk: int,
+    chunks_per_thread: int,
+    cols_per_row: int,
+) -> None:
+    """LDS->LDS dequant: fp8 -> f32 * scale -> bf16.
+
+    `buf_idx` selects the fp8 source buffer (for K, the active
+    double-buffer slot; for V, always 0).
+    `bf16_buf` selects the bf16 destination buffer (for K, always
+    0 since FP8 path single-buffers the bf16 K_lds; for V, 0).
+    """
+    for c in range(chunks_per_thread):
+        chunk_id = b.add(b.mul(b.const_i32(c), b.const_i32(threads)), tid)
+        row = b.div(chunk_id, b.const_i32(cols_per_row))
+        col = b.mul(
+            b.mod(chunk_id, b.const_i32(cols_per_row)),
+            b.const_i32(elems_per_chunk),
+        )
+        fp8_vec = b.smem_load_vN(
+            fp8_lds,
+            buf_idx,
+            row,
+            col,
+            dtype=FP8E4M3,
+            n=elems_per_chunk,
+        )
+        dequanted = []
+        for i in range(elems_per_chunk):
+            fp8_v = b.vec_extract(fp8_vec, i)
+            f32_v = b.fmul(b.cvt_fp8_to_f32(fp8_v), scale)
+            dequanted.append(b.cast_f32_to(f32_v, dtype))
+        packed = b.vec_pack(dequanted, dtype)
+        b.smem_store_vN(
+            bf16_lds,
+            [bf16_buf, row, col],
+            packed,
+            elems_per_chunk,
+        )
+
+
+def load_page_id_window(
+    b: IRBuilder,
+    rel_page: Value,
+    *,
+    tid: Value,
+    block_tables: Value,
+    seq_base: Value,
+    seq_pages: Value,
+    seg_first_page: Value,
+) -> Value:
+    """Lane l: the id of the segment's page ``rel_page + l``.
+
+    Past the sequence's last page the lane reads 0, which is never used.
+    ``seg_first_page`` is the segment's first page, which each arch's tiled
+    3D builder computes for its own grid.
+    """
+    pg = b.add(b.add(seg_first_page, rel_page), tid)
+    return b.masked_global_load(
+        block_tables,
+        b.add(seq_base, pg),
+        b.cmp_lt(pg, seq_pages),
+        b.const_i32(0),
+        dtype=I32,
+        align=4,
+    )

@@ -9,6 +9,7 @@
 
 #include <stdbool.h>
 
+#include "rocke/helper_rocke.helpers.distribution.h" /* rocke_tile_distribution_t */
 #include "rocke/helper_rocke.helpers.transforms.h" /* rocke_tensor_descriptor_t */
 #include "rocke/ir.h" /* rocke_ir_builder_t, rocke_value_t, rocke_type_t */
 
@@ -89,6 +90,35 @@ rocke_value_t* rocke_attn_tiled_pack_p_a32(const rocke_attn_tiled_lane_map_t* lm
                                            rocke_value_t* const* p_regs1_f32,
                                            int n);
 
+/* mfma_16x16_c_row(b, lane, reg): MFMA-local output row for a 16x16 C element
+ * ``reg`` (0..3), through the arch ctx's C16_DIST (CK Tile's C-warp
+ * distribution of the f16 16x16x16 atom). ``reg`` outside 0..3 records
+ * ROCKE_ERR_VALUE on ``b`` and returns NULL. */
+rocke_value_t* rocke_attn_tiled_mfma_16x16_c_row(rocke_ir_builder_t* b,
+                                                 const rocke_tile_distribution_t* c16_dist,
+                                                 rocke_value_t* lane,
+                                                 int reg);
+
+/* fast_paged_kv_blocks(kv_tile_idx): physical page ids of the two paged-KV
+ * blocks of one KV tile (0 past block_table_max_idx), as SGPR values. */
+void rocke_attn_tiled_fast_paged_kv_blocks(rocke_ir_builder_t* b,
+                                           rocke_value_t* kv_tile_idx,
+                                           rocke_value_t* block_tables,
+                                           rocke_value_t* seq_base,
+                                           rocke_value_t* block_table_max_idx,
+                                           rocke_value_t** out_block0,
+                                           rocke_value_t** out_block1);
+
+/* load_page_id_window(rel_page): lane l loads the id of the segment's page
+ * rel_page + l; past the sequence's last page it gets 0, never used. */
+rocke_value_t* rocke_attn_tiled_load_page_id_window(rocke_ir_builder_t* b,
+                                                    rocke_value_t* rel_page,
+                                                    rocke_value_t* tid,
+                                                    rocke_value_t* block_tables,
+                                                    rocke_value_t* seq_base,
+                                                    rocke_value_t* seq_pages,
+                                                    rocke_value_t* seg_first_page);
+
 /* ------------------------------------- fp8 K/V sync loaders (Fp8KvSyncLoader) *
  *
  * Sync fp8 K/V cache loaders of the tiled 2D kernels. Each arch fills one from
@@ -122,6 +152,14 @@ void rocke_attn_tiled_fp8_issue_dequant_loads(const rocke_attn_tiled_fp8_kv_load
 /* issue_v_mfma_stripe(kv_tile_idx): raw fp8 V -> V_lds[0, col/16, token, col%16]. */
 void rocke_attn_tiled_fp8_issue_v_mfma_stripe(const rocke_attn_tiled_fp8_kv_loader_t* ld,
                                               rocke_value_t* kv_tile_idx);
+
+/* dequant_fp8_lds_to_bf16: LDS->LDS dequant fp8 -> f32 * scale -> working
+ * dtype, from ``src`` slab ``buf_idx`` to ``dst`` slab 0. No caller today. */
+void rocke_attn_tiled_fp8_dequant_lds_to_bf16(const rocke_attn_tiled_fp8_kv_loader_t* ld,
+                                              rocke_value_t* src,
+                                              rocke_value_t* dst,
+                                              rocke_value_t* scale,
+                                              rocke_value_t* buf_idx);
 
 /* --------------------------------------- tiled 3D K/V LDS swizzle (KvLdsSwizzle) *
  *

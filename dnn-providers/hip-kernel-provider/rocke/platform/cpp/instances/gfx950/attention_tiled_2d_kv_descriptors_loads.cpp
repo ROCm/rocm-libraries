@@ -51,6 +51,7 @@
 #include <string.h> /* memset */
 
 #include "rocke/arena.h" /* rocke_arena_calloc */
+#include "rocke/instance_attention_tiled_common_internal.h"
 #include "rocke/instance_gfx950_attention_tiled_2d_internal.h"
 
 /* ==========================================================================
@@ -468,28 +469,13 @@ void rocke_gfx950_attn2d_fast_paged_kv_blocks(rocke_gfx950_attn2d_build_ctx_t* c
                                               rocke_value_t** out_block0,
                                               rocke_value_t** out_block1)
 {
-    rocke_ir_builder_t* b = ctx->b;
-    rocke_value_t* seq_base = rocke__seq_base(ctx);
-    rocke_value_t* max_idx = rocke__block_table_max_idx(ctx);
-
-    /* logical_block0 = kv_tile_idx * 2 ; logical_block1 = logical_block0 + 1. */
-    rocke_value_t* logical_block0 = rocke_b_mul(b, kv_tile_idx, rocke_b_const_i32(b, 2));
-    rocke_value_t* logical_block1 = rocke_b_add(b, logical_block0, rocke_b_const_i32(b, 1));
-    rocke_value_t* idx0 = rocke_b_add(b, seq_base, logical_block0);
-    rocke_value_t* idx1 = rocke_b_add(b, seq_base, logical_block1);
-    /* Python b.masked_global_load(table, idx, b.cmp_lt(idx, max), const(0))
-     * creates the cmp_lt mask BEFORE the const(0) fill (left-to-right). Bind the
-     * masks so C's right-to-left arg eval does not allocate const(0) first. */
-    rocke_value_t* mask0 = rocke_b_cmp_lt(b, idx0, max_idx);
-    rocke_value_t* block0 = rocke_b_masked_global_load(
-        b, ctx->block_tables, idx0, mask0, rocke_b_const_i32(b, 0), rocke_i32(), 4);
-    rocke_value_t* mask1 = rocke_b_cmp_lt(b, idx1, max_idx);
-    rocke_value_t* block1 = rocke_b_masked_global_load(
-        b, ctx->block_tables, idx1, mask1, rocke_b_const_i32(b, 0), rocke_i32(), 4);
-    if(out_block0)
-        *out_block0 = rocke_b_to_sgpr_u32(b, block0);
-    if(out_block1)
-        *out_block1 = rocke_b_to_sgpr_u32(b, block1);
+    rocke_attn_tiled_fast_paged_kv_blocks(ctx->b,
+                                          kv_tile_idx,
+                                          ctx->block_tables,
+                                          rocke__seq_base(ctx),
+                                          rocke__block_table_max_idx(ctx),
+                                          out_block0,
+                                          out_block1);
 }
 
 /* Internal: the full Python tuple return of _fast_paged_kv_voff

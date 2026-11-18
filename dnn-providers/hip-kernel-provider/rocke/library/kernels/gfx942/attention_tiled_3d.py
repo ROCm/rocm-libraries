@@ -31,6 +31,7 @@ See the gfx950 module docstring for the split-KV grid / workspace layout.
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from typing import ClassVar, Optional, Tuple
 
@@ -44,6 +45,8 @@ from kernels.common._attention_tiled_shared import (
     KvLdsSwizzle,
     ReduceTiledSpecMixin,
     Tiled3DSpecMixin,
+    load_page_id_window,
+    mfma_16x16_c_row,
 )
 from kernels.common._lse_store import emit_lse_field, reduce_lse_store
 from kernels.common.attention_split_kv_reduce import (
@@ -64,7 +67,6 @@ from rocke.core.ir import (
     Value,
     cache_policy_from_name,
 )
-from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2 as _apply_softcap,
     binary_search_seq_idx as _binary_search_seq_idx_helper,
@@ -74,7 +76,6 @@ from rocke.helpers.attention import (
     wave64_reduce_max as _wave64_reduce_max,
     wave64_reduce_sum as _wave64_reduce_sum,
 )
-from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     embed,
@@ -84,28 +85,6 @@ from rocke.helpers.transforms import (
 
 MFMA_M = 16
 MFMA_N = 16
-
-
-# CK-Tile C-accumulator warp distribution for the 16x16x16 MFMA atom (identical
-# to the gfx950 file; the C layout is dtype- and arch-independent so the f16
-# atom drives it for both fp16 and bf16). This segment kernel is single-warp
-# (lane == tid); the per-lane ``<4 x f32>`` accumulator row decode is
-# ``row = (lane // 16) * 4 + reg`` expressed through ``calculate_x``.
-_C16_DIST = make_static_tile_distribution(
-    make_c_warp_dstr_encoding(MfmaAtom.f16_16x16x16())
-)
-
-
-def _mfma_16x16_c_row(b, lane, reg: int):
-    """MFMA-local output row for a ``16x16`` C element ``reg`` (0..3)."""
-    if not (0 <= reg < 4):
-        raise ValueError(f"mfma_16x16 reg must be 0..3, got {reg}")
-    m_blk = b.div(lane, b.const_i32(16))
-    n = b.mod(lane, b.const_i32(16))
-    row, _col = _C16_DIST.calculate_x(
-        b, ys=[b.const_i32(0), b.const_i32(reg)], ps=[[m_blk, n]]
-    )
-    return row
 
 
 @dataclass(frozen=True)
@@ -541,7 +520,7 @@ def build_unified_attention_3d_tiled(
         zero_local = b.const_f32(0.0)
         lane_writes_ml_e = b.cmp_eq(b.mod(tid, b.const_i32(16)), b.const_i32(0))
         for reg in range(4):
-            row = _mfma_16x16_c_row(b, tid, reg)
+            row = mfma_16x16_c_row(b, tid, reg)
             qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
             qh_r = b.add(
                 b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
@@ -559,7 +538,7 @@ def build_unified_attention_3d_tiled(
         lane_col_e = b.mod(tid, b.const_i32(16))
         for n in range(PV_N_TILES):
             for reg in range(4):
-                row = _mfma_16x16_c_row(b, tid, reg)
+                row = mfma_16x16_c_row(b, tid, reg)
                 col = b.add(b.mul(b.const_i32(n), b.const_i32(16)), lane_col_e)
                 qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
                 qh_r = b.add(
@@ -1009,18 +988,17 @@ def build_unified_attention_3d_tiled(
         seq_pages = b.div(b.add(seq_len, b.const_i32(BS - 1)), b.const_i32(BS))
         seg_first_page = _tile_page(tile_start)
 
-        def _load_page_id_window(rel_page: Value) -> Value:
-            # Lane l: the id of the segment's page rel_page + l (0 past the
-            # sequence's last page: never used).
-            pg = b.add(b.add(seg_first_page, rel_page), tid)
-            return b.masked_global_load(
-                block_tables,
-                b.add(seq_base, pg),
-                b.cmp_lt(pg, seq_pages),
-                b.const_i32(0),
-                dtype=I32,
-                align=4,
-            )
+        # Lane l: the id of the segment's page rel_page + l (0 past the
+        # sequence's last page: never used).
+        _load_page_id_window = functools.partial(
+            load_page_id_window,
+            b,
+            tid=tid,
+            block_tables=block_tables,
+            seq_base=seq_base,
+            seq_pages=seq_pages,
+            seg_first_page=seg_first_page,
+        )
 
         def _window_tile_page_id(page_id_window: Value, kv_tile_idx: Value) -> Value:
             lane = b.mod(

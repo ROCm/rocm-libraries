@@ -246,58 +246,8 @@ void rocke_gfx942_attn2d_dequant_fp8_lds_to_bf16(rocke_gfx942_attn2d_build_ctx_t
                                                  rocke_value_t* scale,
                                                  rocke_value_t* buf_idx)
 {
-    rocke_ir_builder_t* b = ctx->b;
-    const int CHUNK = 8; /* fp8_dequant_elems_per_chunk */
-    int total_chunks;
-    int chunks_per_thread;
-    int cols_per_row;
-    rocke_value_t* bf16_buf;
-    int c;
-
-    if(b == NULL || b->status != ROCKE_OK)
-    {
-        return;
-    }
-
-    total_chunks = (ctx->T * ctx->HD) / CHUNK;
-    if(ctx->THREADS <= 0 || (total_chunks % ctx->THREADS) != 0)
-    {
-        return; /* prologue assert: divisible by THREADS */
-    }
-    chunks_per_thread = total_chunks / ctx->THREADS;
-    cols_per_row = ctx->HD / CHUNK;
-    bf16_buf = rocke_b_const_i32(b, 0);
-
-    for(c = 0; c < chunks_per_thread; ++c)
-    {
-        rocke_value_t* chunk_id = rocke_b_add(
-            b,
-            rocke_b_mul(b, rocke_b_const_i32(b, c), rocke_b_const_i32(b, ctx->THREADS)),
-            ctx->tid);
-        rocke_value_t* row = rocke_b_div(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
-        rocke_value_t* col
-            = rocke_b_mul(b,
-                          rocke_b_mod(b, chunk_id, rocke_b_const_i32(b, cols_per_row)),
-                          rocke_b_const_i32(b, CHUNK));
-        rocke_value_t* idx_load[3] = {buf_idx, row, col};
-        rocke_value_t* fp8_vec = rocke_b_smem_load_vN(b, src, idx_load, 3, rocke_fp8e4m3(), CHUNK);
-        rocke_value_t* dequanted[8];
-        rocke_value_t* packed;
-        rocke_value_t* idx_store[3];
-        int i;
-
-        for(i = 0; i < CHUNK; ++i)
-        {
-            rocke_value_t* fp8_v = rocke_b_vec_extract(b, fp8_vec, i);
-            rocke_value_t* f32_v = rocke_b_fmul(b, rocke_b_cvt_fp8_to_f32(b, fp8_v), scale);
-            dequanted[i] = rocke_b_cast_f32_to(b, f32_v, ctx->dtype);
-        }
-        packed = rocke_b_vec_pack(b, dequanted, CHUNK, ctx->dtype);
-        idx_store[0] = bf16_buf;
-        idx_store[1] = row;
-        idx_store[2] = col;
-        rocke_b_smem_store_vN(b, dst, idx_store, 3, packed, CHUNK);
-    }
+    rocke_attn_tiled_fp8_kv_loader_t ld = rocke_gfx942_attn2d_fp8_kv_loader(ctx);
+    rocke_attn_tiled_fp8_dequant_lds_to_bf16(&ld, src, dst, scale, buf_idx);
 }
 
 /* ===================================================================== *

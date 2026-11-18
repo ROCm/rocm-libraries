@@ -603,3 +603,156 @@ rocke_value_t* rocke_attn_tiled_kv_swz_src_linear(const rocke_attn_tiled_kv_swiz
     col = rocke_b_mod(b, linear_half, rocke_b_const_i32(b, s->HD));
     return rocke_b_add(b, row_base, rocke_attn_tiled_kv_swz_col(s, row, col));
 }
+
+/* ------------------------------------------------- 16x16 C row (C16_DIST) */
+
+rocke_value_t* rocke_attn_tiled_mfma_16x16_c_row(rocke_ir_builder_t* b,
+                                                 const rocke_tile_distribution_t* c16_dist,
+                                                 rocke_value_t* lane,
+                                                 int reg)
+{
+    rocke_value_t* m_blk;
+    rocke_value_t* n;
+    rocke_value_t* ys[2];
+    rocke_value_t* ps0[2];
+    rocke_value_t* const* ps[1];
+    int ps_counts[1];
+    rocke_value_t* out_x[2] = {NULL, NULL};
+
+    if(!(0 <= reg && reg < 4))
+    {
+        if(b != NULL && b->status == ROCKE_OK)
+        {
+            snprintf(b->err, (size_t)ROCKE_ERR_MSG_CAP, "mfma_16x16 reg must be 0..3, got %d", reg);
+            b->status = ROCKE_ERR_VALUE;
+        }
+        return NULL;
+    }
+
+    m_blk = rocke_b_div(b, lane, rocke_b_const_i32(b, 16));
+    n = rocke_b_mod(b, lane, rocke_b_const_i32(b, 16));
+
+    ys[0] = rocke_b_const_i32(b, 0);
+    ys[1] = rocke_b_const_i32(b, reg);
+    ps0[0] = m_blk;
+    ps0[1] = n;
+    ps[0] = ps0;
+    ps_counts[0] = 2;
+
+    if(!rocke_tile_distribution_calculate_x(b, c16_dist, ys, 2, ps, ps_counts, 1, out_x, 2))
+    {
+        return NULL;
+    }
+    return out_x[0]; /* row (col discarded) */
+}
+
+/* ------------------------------------------------- paged block-table loads */
+
+void rocke_attn_tiled_fast_paged_kv_blocks(rocke_ir_builder_t* b,
+                                           rocke_value_t* kv_tile_idx,
+                                           rocke_value_t* block_tables,
+                                           rocke_value_t* seq_base,
+                                           rocke_value_t* block_table_max_idx,
+                                           rocke_value_t** out_block0,
+                                           rocke_value_t** out_block1)
+{
+    rocke_value_t* logical_block0 = rocke_b_mul(b, kv_tile_idx, rocke_b_const_i32(b, 2));
+    rocke_value_t* logical_block1 = rocke_b_add(b, logical_block0, rocke_b_const_i32(b, 1));
+    rocke_value_t* idx0 = rocke_b_add(b, seq_base, logical_block0);
+    rocke_value_t* idx1 = rocke_b_add(b, seq_base, logical_block1);
+    /* Python evaluates masked_global_load args left-to-right: the cmp_lt mask is
+     * created BEFORE the const(0) default. C arg-eval order is unspecified, so
+     * bind the mask + default in source order to keep the value numbering. */
+    rocke_value_t* mask0 = rocke_b_cmp_lt(b, idx0, block_table_max_idx);
+    rocke_value_t* def0 = rocke_b_const_i32(b, 0);
+    rocke_value_t* block0
+        = rocke_b_masked_global_load(b, block_tables, idx0, mask0, def0, rocke_i32(), 4);
+    rocke_value_t* mask1 = rocke_b_cmp_lt(b, idx1, block_table_max_idx);
+    rocke_value_t* def1 = rocke_b_const_i32(b, 0);
+    rocke_value_t* block1
+        = rocke_b_masked_global_load(b, block_tables, idx1, mask1, def1, rocke_i32(), 4);
+    if(out_block0)
+        *out_block0 = rocke_b_to_sgpr_u32(b, block0);
+    if(out_block1)
+        *out_block1 = rocke_b_to_sgpr_u32(b, block1);
+}
+
+rocke_value_t* rocke_attn_tiled_load_page_id_window(rocke_ir_builder_t* b,
+                                                    rocke_value_t* rel_page,
+                                                    rocke_value_t* tid,
+                                                    rocke_value_t* block_tables,
+                                                    rocke_value_t* seq_base,
+                                                    rocke_value_t* seq_pages,
+                                                    rocke_value_t* seg_first_page)
+{
+    rocke_value_t* first = rocke_b_add(b, seg_first_page, rel_page);
+    rocke_value_t* pg = rocke_b_add(b, first, tid);
+    rocke_value_t* idx = rocke_b_add(b, seq_base, pg);
+    rocke_value_t* live = rocke_b_cmp_lt(b, pg, seq_pages);
+    rocke_value_t* other = rocke_b_const_i32(b, 0);
+    return rocke_b_masked_global_load(b, block_tables, idx, live, other, rocke_i32(), 4);
+}
+
+/* ------------------------------------------------- fp8 LDS->LDS dequant */
+
+void rocke_attn_tiled_fp8_dequant_lds_to_bf16(const rocke_attn_tiled_fp8_kv_loader_t* ld,
+                                              rocke_value_t* src,
+                                              rocke_value_t* dst,
+                                              rocke_value_t* scale,
+                                              rocke_value_t* buf_idx)
+{
+    rocke_ir_builder_t* b = ld->b;
+    const int CHUNK = 8; /* fp8_dequant_elems_per_chunk */
+    int total_chunks;
+    int chunks_per_thread;
+    int cols_per_row;
+    rocke_value_t* bf16_buf;
+    int c;
+
+    if(b == NULL || b->status != ROCKE_OK)
+    {
+        return;
+    }
+
+    total_chunks = (ld->T * ld->HD) / CHUNK;
+    if(ld->THREADS <= 0 || (total_chunks % ld->THREADS) != 0)
+    {
+        return; /* prologue assert: divisible by THREADS */
+    }
+    chunks_per_thread = total_chunks / ld->THREADS;
+    cols_per_row = ld->HD / CHUNK;
+    /* The Python bf16_buf destination selector is always 0 on this path (the
+     * FP8 path single-buffers the working-dtype K_lds). */
+    bf16_buf = rocke_b_const_i32(b, 0);
+
+    for(c = 0; c < chunks_per_thread; ++c)
+    {
+        rocke_value_t* chunk_c = rocke_b_const_i32(b, c);
+        rocke_value_t* chunk_thr = rocke_b_const_i32(b, ld->THREADS);
+        rocke_value_t* chunk_id = rocke_b_add(b, rocke_b_mul(b, chunk_c, chunk_thr), ld->tid);
+        rocke_value_t* row = rocke_b_div(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
+        /* Python: col = mul(mod(chunk_id, const(cols_per_row)), const(CHUNK));
+         * the mod (and its const) are created before const(CHUNK). Sequence
+         * explicitly so C arg-eval order does not reorder value creation. */
+        rocke_value_t* col_mod = rocke_b_mod(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
+        rocke_value_t* col = rocke_b_mul(b, col_mod, rocke_b_const_i32(b, CHUNK));
+        rocke_value_t* idx_load[3] = {buf_idx, row, col};
+        rocke_value_t* fp8_vec = rocke_b_smem_load_vN(b, src, idx_load, 3, rocke_fp8e4m3(), CHUNK);
+        rocke_value_t* dequanted[8];
+        rocke_value_t* packed;
+        rocke_value_t* idx_store[3];
+        int i;
+
+        for(i = 0; i < CHUNK; ++i)
+        {
+            rocke_value_t* fp8_v = rocke_b_vec_extract(b, fp8_vec, i);
+            rocke_value_t* f32_v = rocke_b_fmul(b, rocke_b_cvt_fp8_to_f32(b, fp8_v), scale);
+            dequanted[i] = rocke_b_cast_f32_to(b, f32_v, ld->dtype);
+        }
+        packed = rocke_b_vec_pack(b, dequanted, CHUNK, ld->dtype);
+        idx_store[0] = bf16_buf;
+        idx_store[1] = row;
+        idx_store[2] = col;
+        rocke_b_smem_store_vN(b, dst, idx_store, 3, packed, CHUNK);
+    }
+}

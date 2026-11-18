@@ -34,6 +34,7 @@ that gfx942 does not have. gfx950 keeps its own file, byte-identical.
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, field
 import os
 from typing import ClassVar, Optional, Tuple
@@ -47,6 +48,8 @@ from kernels.common._attention_tiled_shared import (
     Fp8KvSyncLoader,
     Tiled2DSpecMixin,
     TiledLaneMap,
+    dequant_fp8_lds_to_bf16,
+    fast_paged_kv_blocks,
     mfma_32x32_c_col,
     mfma_32x32_c_row,
 )
@@ -2502,28 +2505,13 @@ def build_unified_attention_2d_tiled(
         FAST_CALLS_PER_BLOCK = (BS * HD) // KV_HALVES_PER_CALL
         assert kv_calls_per_tile == 2 * FAST_CALLS_PER_BLOCK
 
-        def _fast_paged_kv_blocks(kv_tile_idx: Value) -> tuple[Value, Value]:
-            logical_block0 = b.mul(kv_tile_idx, b.const_i32(2))
-            logical_block1 = b.add(logical_block0, b.const_i32(1))
-            idx0 = b.add(seq_base, logical_block0)
-            idx1 = b.add(seq_base, logical_block1)
-            block0 = b.masked_global_load(
-                block_tables,
-                idx0,
-                b.cmp_lt(idx0, block_table_max_idx),
-                b.const_i32(0),
-                dtype=I32,
-                align=4,
-            )
-            block1 = b.masked_global_load(
-                block_tables,
-                idx1,
-                b.cmp_lt(idx1, block_table_max_idx),
-                b.const_i32(0),
-                dtype=I32,
-                align=4,
-            )
-            return b.to_sgpr_u32(block0), b.to_sgpr_u32(block1)
+        _fast_paged_kv_blocks = functools.partial(
+            fast_paged_kv_blocks,
+            b,
+            block_tables=block_tables,
+            seq_base=seq_base,
+            block_table_max_idx=block_table_max_idx,
+        )
 
         def _fast_paged_kv_voff(call: int, block0: Value, block1: Value):
             # ``FAST_CALLS_PER_BLOCK`` consecutive calls drain one logical
@@ -3307,43 +3295,16 @@ def build_unified_attention_2d_tiled(
         fp8_dequant_chunks_per_thread = fp8_dequant_total_chunks // THREADS
         fp8_cols_per_row = HD // fp8_dequant_elems_per_chunk
 
-        def _dequant_fp8_lds_to_bf16(
-            buf_idx: Value, scale: Value, fp8_lds, bf16_lds, bf16_buf: Value
-        ) -> None:
-            """LDS->LDS dequant: fp8 -> f32 * scale -> bf16.
-
-            `buf_idx` selects the fp8 source buffer (for K, the active
-            double-buffer slot; for V, always 0).
-            `bf16_buf` selects the bf16 destination buffer (for K, always
-            0 since FP8 path single-buffers the bf16 K_lds; for V, 0).
-            """
-            for c in range(fp8_dequant_chunks_per_thread):
-                chunk_id = b.add(b.mul(b.const_i32(c), b.const_i32(THREADS)), tid)
-                row = b.div(chunk_id, b.const_i32(fp8_cols_per_row))
-                col = b.mul(
-                    b.mod(chunk_id, b.const_i32(fp8_cols_per_row)),
-                    b.const_i32(fp8_dequant_elems_per_chunk),
-                )
-                fp8_vec = b.smem_load_vN(
-                    fp8_lds,
-                    buf_idx,
-                    row,
-                    col,
-                    dtype=FP8E4M3,
-                    n=fp8_dequant_elems_per_chunk,
-                )
-                dequanted = []
-                for i in range(fp8_dequant_elems_per_chunk):
-                    fp8_v = b.vec_extract(fp8_vec, i)
-                    f32_v = b.fmul(b.cvt_fp8_to_f32(fp8_v), scale)
-                    dequanted.append(b.cast_f32_to(f32_v, dtype))
-                packed = b.vec_pack(dequanted, dtype)
-                b.smem_store_vN(
-                    bf16_lds,
-                    [bf16_buf, row, col],
-                    packed,
-                    fp8_dequant_elems_per_chunk,
-                )
+        _dequant_fp8_lds_to_bf16 = functools.partial(
+            dequant_fp8_lds_to_bf16,
+            b,
+            tid=tid,
+            threads=THREADS,
+            dtype=dtype,
+            elems_per_chunk=fp8_dequant_elems_per_chunk,
+            chunks_per_thread=fp8_dequant_chunks_per_thread,
+            cols_per_row=fp8_cols_per_row,
+        )
 
     # ---------------- FP8 K/V cache: sync dequant loader (round 1, kept as fallback) ----------------
     # Each thread loads one byte per fp8 element from HBM, dequantises

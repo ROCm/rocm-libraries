@@ -38,6 +38,7 @@
 #include <stdio.h> /* snprintf */
 #include <string.h>
 
+#include "rocke/instance_attention_tiled_common_internal.h"
 #include "rocke/instance_gfx942_attention_tiled_3d_internal.h"
 
 /* ============================================================ *
@@ -59,39 +60,7 @@
 rocke_value_t* rocke_gfx942_attention_tiled_3d_mfma_16x16_c_row(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx, rocke_value_t* lane, int reg)
 {
-    rocke_value_t* m_blk;
-    rocke_value_t* n;
-    rocke_value_t* ys[2];
-    rocke_value_t* ps0[2];
-    rocke_value_t* const* ps[1];
-    int ps_counts[1];
-    rocke_value_t* out_x[2] = {NULL, NULL};
-
-    if(!(0 <= reg && reg < 4))
-    {
-        if(B != NULL && B->status == ROCKE_OK)
-        {
-            snprintf(B->err, (size_t)ROCKE_ERR_MSG_CAP, "mfma_16x16 reg must be 0..3, got %d", reg);
-            B->status = ROCKE_ERR_VALUE;
-        }
-        return NULL;
-    }
-
-    m_blk = rocke_b_div(B, lane, rocke_b_const_i32(B, 16));
-    n = rocke_b_mod(B, lane, rocke_b_const_i32(B, 16));
-
-    ys[0] = rocke_b_const_i32(B, 0);
-    ys[1] = rocke_b_const_i32(B, reg);
-    ps0[0] = m_blk;
-    ps0[1] = n;
-    ps[0] = ps0;
-    ps_counts[0] = 2;
-
-    if(!rocke_tile_distribution_calculate_x(B, ctx->C16_DIST, ys, 2, ps, ps_counts, 1, out_x, 2))
-    {
-        return NULL;
-    }
-    return out_x[0]; /* row (col discarded) */
+    return rocke_attn_tiled_mfma_16x16_c_row(B, ctx->C16_DIST, lane, reg);
 }
 
 /* ============================================================ *
@@ -947,12 +916,13 @@ rocke_value_t*
 rocke_value_t* rocke_gfx942_attention_tiled_3d_load_page_id_window(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx, rocke_value_t* rel_page)
 {
-    rocke_value_t* first = rocke_b_add(B, ctx->seg_first_page, rel_page);
-    rocke_value_t* pg = rocke_b_add(B, first, ctx->tid);
-    rocke_value_t* idx = rocke_b_add(B, ctx->seq_base, pg);
-    rocke_value_t* live = rocke_b_cmp_lt(B, pg, ctx->seq_pages);
-    rocke_value_t* other = rocke_b_const_i32(B, 0);
-    return rocke_b_masked_global_load(B, ctx->block_tables, idx, live, other, rocke_i32(), 4);
+    return rocke_attn_tiled_load_page_id_window(B,
+                                                rel_page,
+                                                ctx->tid,
+                                                ctx->block_tables,
+                                                ctx->seq_base,
+                                                ctx->seq_pages,
+                                                ctx->seg_first_page);
 }
 
 /* _window_tile_page_id(page_id_window, kv_tile_idx): the tile's page id from
