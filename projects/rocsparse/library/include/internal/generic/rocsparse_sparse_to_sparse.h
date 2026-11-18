@@ -63,9 +63,10 @@ extern "C" {
 *  \retval      rocsparse_status_invalid_size if the size in bytes of an array of the
 *               intermediate CSR matrix does not fit in \p size_t, its row count plus one
 *               does not fit in \c int64_t, the BSR rows, columns, or nonzero entries of
-*               \p source expanded by the block dimension do not fit in \c int64_t, or
-*               \p source is batched. A batched \p target is not checked by this query;
-*               \ref rocsparse_sparse_to_sparse rejects it.
+*               \p source expanded by the block dimension do not fit in \c int64_t, the
+*               expanded rows or columns of a BSR \p source with 32-bit column indices
+*               do not fit in \c int32_t, or \p source is batched. A batched \p target is
+*               not checked by this query; \ref rocsparse_sparse_to_sparse rejects it.
 *  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats or data types of \p source and \p target.
 */
 ROCSPARSE_EXPORT

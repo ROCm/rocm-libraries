@@ -1411,6 +1411,69 @@ namespace
         EXPECT_EQ(descr.get()->m_intermediate, nullptr);
     }
 
+    // --- BSR expansion -------------------------------------------------------
+
+    constexpr int64_t k_wide_block_dim = 16;
+    constexpr int64_t k_wide_block_nnz = k_wide_block_dim * k_wide_block_dim;
+
+    // A 1 x nb BSR matrix whose only block is in the last block column, and a COO
+    // target with int64_t indices for its expansion.
+    struct WideBsr
+    {
+        HostIdx       ptr;
+        HostIdx       col;
+        DevBuf<float> val;
+        HostIdx       coo_row;
+        HostIdx       coo_col;
+        DevBuf<float> coo_val;
+        Spmat         source;
+        Spmat         target;
+
+        WideBsr(rocsparse_indextype type, int64_t nb)
+            : ptr(type, {0, 1})
+            , col(type, {nb - 1})
+            , val(std::vector<float>(k_wide_block_nnz, 1.f))
+            , coo_row(idx64, std::vector<int64_t>(k_wide_block_nnz, 0))
+            , coo_col(idx64, std::vector<int64_t>(k_wide_block_nnz, 0))
+            , coo_val(k_wide_block_nnz)
+        {
+            EXPECT_EQ(rocsparse_create_bsr_descr(&source,
+                                                 1,
+                                                 nb,
+                                                 1,
+                                                 dir_r,
+                                                 k_wide_block_dim,
+                                                 ptr.mem.get(),
+                                                 col.mem.get(),
+                                                 val.get(),
+                                                 type,
+                                                 type,
+                                                 base,
+                                                 f32_r),
+                      st_ok);
+            EXPECT_EQ(rocsparse_create_coo_descr(&target,
+                                                 k_wide_block_dim,
+                                                 k_wide_block_dim * nb,
+                                                 k_wide_block_nnz,
+                                                 coo_row.mem.get(),
+                                                 coo_col.mem.get(),
+                                                 coo_val.get(),
+                                                 idx64,
+                                                 base,
+                                                 f32_r),
+                      st_ok);
+        }
+
+        // The target columns are the block_dim columns of the last block column.
+        void expect_last_columns(int64_t nb) const
+        {
+            const auto got = download_idx(coo_col.mem.get(), idx64, k_wide_block_nnz);
+            ASSERT_FALSE(got.empty());
+            EXPECT_EQ(*std::min_element(got.begin(), got.end()), k_wide_block_dim * (nb - 1));
+            EXPECT_EQ(*std::max_element(got.begin(), got.end()), k_wide_block_dim * nb - 1);
+        }
+    };
+
     TEST_F(ConvS2s, SellSourceEachStageWritesNothing)
     {
         auto source = make_tiny(rocsparse_format_sell, true);
@@ -1672,6 +1735,32 @@ namespace
         ASSERT_TRUE(source && target);
         EXPECT_EQ(run_permissive(handle, source->descr, target->descr, nullptr), st_ok);
         expect_one_entry(*target, "csr -> csc after overflow");
+    }
+
+    TEST_F(ConvS2s, BsrExpansionFitsIndexType)
+    {
+        // The intermediate CSR matrix keeps the int32_t source column type, so an
+        // expansion past the int32_t range is rejected before anything is allocated.
+        constexpr int64_t too_wide = 1LL << 28;
+        {
+            WideBsr bsr(idx32, too_wide);
+            expect_count_rejected(handle, bsr.source, bsr.target, "i32 2^28 block columns");
+        }
+        {
+            // The widest int32_t expansion still converts.
+            constexpr int64_t widest = std::numeric_limits<int32_t>::max() / k_wide_block_dim;
+            WideBsr           bsr(idx32, widest);
+            SCOPED_TRACE("i32 widest");
+            ASSERT_EQ(run_permissive(handle, bsr.source, bsr.target, nullptr), st_ok);
+            bsr.expect_last_columns(widest);
+        }
+        {
+            // int64_t indices hold the expansion that int32_t cannot.
+            WideBsr bsr(idx64, too_wide);
+            SCOPED_TRACE("i64 2^28 block columns");
+            ASSERT_EQ(run_permissive(handle, bsr.source, bsr.target, nullptr), st_ok);
+            bsr.expect_last_columns(too_wide);
+        }
     }
 
     TEST_F(ConvS2s, EmptyEllThroughIntermediate)
