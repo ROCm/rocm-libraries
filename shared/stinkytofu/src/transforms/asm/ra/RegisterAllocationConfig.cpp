@@ -13,6 +13,7 @@
 
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
 #include "stinkytofu/support/PassArguments.hpp"
+#include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocatorRegistry.hpp"
 
 namespace stinkytofu {
@@ -21,6 +22,7 @@ namespace {
 using Mode = RegisterAllocationMode;
 using Unbankable = RegisterAllocationOptions::UnbankableOperands;
 using Quadrant = RegisterAllocationOptions::Quadrant;
+using Matrix = RegisterAllocationOptions::Matrix;
 
 // What a kernel gets when its configuration names no classes or allocator.
 constexpr RegClassSet kKernelClasses = RegClassSet::all();
@@ -81,6 +83,21 @@ std::optional<std::string> unregisteredAllocator(const std::vector<std::string>&
     return std::nullopt;
 }
 
+/// The rules \p rules forces by name that some architecture tags with a
+/// matrix role, which a matrix placement other than the pin sets itself.
+/// Checked here as well as against the kernel's own table, so TensileLite
+/// refuses the configuration when it validates the YAML.
+std::vector<std::string> namedMatrixRules(const RuleOverrides& rules) {
+    const std::vector<std::string> tagged = AllocationRulesRegistry::matrixRuleNames();
+    std::vector<std::string> named;
+    for (const std::vector<std::string>* listed : {&rules.activate, &rules.disable}) {
+        for (const std::string& name : *listed) {
+            if (std::binary_search(tagged.begin(), tagged.end(), name)) named.push_back(name);
+        }
+    }
+    return sortedUnique(std::move(named));
+}
+
 /// Keys that only shape diagnostics. stinkytofu-opt takes them; for a kernel
 /// the pipeline chooses its own.
 bool isToolOnlyKey(std::string_view key) {
@@ -106,6 +123,20 @@ const char* unbankableOperandsName(Unbankable policy) {
             return "auto";
     }
     return "auto";
+}
+
+const char* matrixPlacementName(Matrix placement) {
+    switch (placement) {
+        case Matrix::Pin:
+            return "pin";
+        case Matrix::Accumulators:
+            return "accumulators";
+        case Matrix::Shape:
+            return "shape";
+        case Matrix::Auto:
+            return "auto";
+    }
+    return "pin";
 }
 
 std::optional<RegClassSet> parseRegClasses(std::string_view spec) {
@@ -262,6 +293,14 @@ Expected<RegisterAllocationConfig> parseRegisterAllocationConfig(
                 options.quadrant = Quadrant::Plan;
             else
                 return badValue("any, prefer or plan");
+        } else if (key == "matrix") {
+            std::optional<Matrix> placement;
+            for (const Matrix candidate :
+                 {Matrix::Pin, Matrix::Accumulators, Matrix::Shape, Matrix::Auto}) {
+                if (value == matrixPlacementName(candidate)) placement = candidate;
+            }
+            if (!placement.has_value()) return badValue("pin, accumulators, shape or auto");
+            options.matrix = *placement;
         } else if (key == "rules" || key == "noRule") {
             const std::vector<std::string> names = splitList(value, '+');
             if (names.empty()) return badValue("rule names joined with '+'");
@@ -294,6 +333,15 @@ Expected<RegisterAllocationConfig> parseRegisterAllocationConfig(
 
     if (!kernel && config.mode == Mode::Off)
         return Result::Error("mode off runs no register allocation; leave the pass out instead");
+    if (options.matrix != Matrix::Pin) {
+        if (const std::vector<std::string> named = namedMatrixRules(options.rules);
+            !named.empty()) {
+            return Result::Error(std::string("matrix=") + matrixPlacementName(options.matrix) +
+                                 " sets the matrix rules itself, so rules= and noRule= cannot "
+                                 "name " +
+                                 joined(named, ", "));
+        }
+    }
     setModeOf(config, config.mode);
     return config;
 }
@@ -325,6 +373,8 @@ std::string canonicalRegisterAllocationConfig(const RegisterAllocationConfig& co
     if (options.unbankableOperands != defaults.unbankableOperands)
         words.push_back(std::string("unbankable=") +
                         unbankableOperandsName(options.unbankableOperands));
+    if (options.matrix != defaults.matrix)
+        words.push_back(std::string("matrix=") + matrixPlacementName(options.matrix));
     if (options.quadrant != defaults.quadrant)
         words.push_back(options.quadrant == Quadrant::Plan ? "quadrant=plan" : "quadrant=prefer");
 

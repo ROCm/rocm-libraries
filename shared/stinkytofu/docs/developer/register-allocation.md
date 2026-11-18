@@ -189,6 +189,7 @@ The list is the one TensileLite's `StinkyTofuRegisterAllocation` takes, read by 
 | `regionEnd=<label>` | region axis: only values whose live range ends at or before this block may move (`^` prefix optional). Empty = whole function. See section 3.2 |
 | `pinReg=<range>` | leave these registers exactly as found: each keeps the value lifted into it and takes no other. One as `pinReg=s0`, an inclusive run as `pinReg=s0:19`. Repeat the key, or join with `+`, for disjoint runs |
 | `unbankable=auto\|hold\|allocate` | what to do about an operand whose field cannot select a VGPR bank. `allocate` places it under a ceiling, ahead of the free blocks; `hold` keeps the register the producer chose; `auto` (default) tries `allocate`, then `hold`. Section 12.2 says why |
+| `matrix=pin\|accumulators\|shape\|auto` | how matrix operands are placed. `pin` (default) keeps each on the register the producer chose; `shape` keeps the producer's grouping and lets the tuples move; `accumulators` pins the accumulators and moves A and B by shape; `auto` tries `shape`, then `pin`. Section 12.2 says why |
 | `quadrant=any\|prefer\|plan` | where a free block may start. `prefer` searches the 256-register bank the producer used for the block before the rest of the file; `plan` chooses that bank for each block used in a loop by predicted `s_set_vgpr_msb` (section 12.2); `any` (default) takes the lowest legal base |
 | `report` | emit peak / highest / `regionPeak` / rules / preferences as an analysis remark (`--remarks`). Tool only, like the next two: the pipeline chooses a kernel's diagnostics itself |
 | `emitRegisterMap` | with `apply`, insert a producer→allocated map as a TEXTBLOCK at the entry block; see section 11.3 |
@@ -969,6 +970,8 @@ It must precede every consumer of physical numbers: `InsertVgprMsbPass`, `Insert
 
 On a target with a VGPR MSB mode (`AsmCapsConfig::vgprMsbMode`), `msb[<header>=<producer>-><chosen> ...]` gives, for each loop `detectLoops` finds, how many `s_set_vgpr_msb` `InsertVgprMsbPass` will emit in that loop's blocks under the producer's colouring and under this one. Where a value sits decides the bank word every instruction needs, so this is a cost of the colouring like `highest`, one that otherwise shows only in the final asm. Loops where both counts are zero are left out, and `n/a` means the colouring puts an operand of that loop past the encodable file, where no word exists to count; a producer that used `v1024` and up reads `n/a`. The count is `predictLoopVgprMsbSwitches` (`VgprMsbPrediction.hpp`), which follows the pass's own rule: a switch whenever the next VGPR instruction needs another word, with every block, label and call starting from none. `AsmMovePropagationPass` runs between allocation and insertion and may still change an instruction, so it is a prediction; `tests/filecheck/vgpr_msb_prediction_test.stir` holds it to the pass. A loop is named by the header the depth-first walk finds, so a loop entered at two points, such as a main loop whose first iteration is an InitC clone that jumps in mid-body, is named by the entry reached first.
 
+When the configuration chooses how matrix operands are placed (`matrix=`, section 12.2), `matrix[<placement>]` follows: `shape` or `accumulators`, or under `auto` the attempt that coloured, `auto shape` or `auto pin`. After `auto pin`, a line of its own, `pinned the matrix operands because placing them by shape was refused: ...`, quotes that refusal. Silent at the default, `pin`.
+
 Under `quadrant=plan` (section 12.2), `plan[<honoured>/<planned>]` follows: how many of the blocks the plan gave a bank were placed wholly inside it. `plan[dropped]` means placing by the plan was refused and the colouring was made without it; the refusal follows on a line of its own. Silent without a plan.
 
 Three cautions on reading it, all of which have caught someone out.
@@ -1002,6 +1005,7 @@ The words may come in any order:
 | `classes=` | `s`, `v`, `vs` | `vs` | what to lift and allocate; any other class keeps the producer's registers |
 | `allocator=` | a registered name, or several joined with `+` | `greedy-compact+greedy-compact-largest+greedy-compact-program` | the policy (section 9). A chain is tried in order, and the first that colours the function is applied |
 | `unbankable=` | `auto`, `allocate`, `hold` | `auto` | operands that cannot name a VGPR bank; see below |
+| `matrix=` | `pin`, `accumulators`, `shape`, `auto` | `pin` | how matrix operands are placed; see below |
 | `quadrant=` | `any`, `prefer`, `plan` | `any` | `prefer` searches the producer's 256-register bank for each block before the rest of the file; `plan` chooses the bank; see below |
 | `rules=`, `noRule=`, `noRules`, `ruleAudit` | as in section 2.1 | none | force rule statuses (section 14) |
 | `pinReg=`, `regionEnd=`, `noVerify` | as in section 2.1 | none | scope, and a testing hatch |
@@ -1021,18 +1025,19 @@ The kernel name records only the mode: no tag for mode 0, so a kernel that does 
 
 `auto` tries `allocate` and, when that colouring is refused, `hold`. With no such operand in the kernel it is a single attempt. Constraints and live ranges are built once, only the scope differs between attempts, and only the colouring that succeeds is applied. The report names the treatment that won and, after a fallback, quotes the refusal; when both refuse, the missed remark gives each reason. `tests/filecheck/allocation_unbankable_bank0_conflict_test.stir` is the conflict in miniature. In an allocator chain, each allocator makes its own attempts before the next one is tried.
 
-**Matrix operands without the pin.** `ProducerPinMatrix` ships `Active`. Two `Off` rules (section 14.5) hand the matrix operands back to the allocator instead, chosen per kernel through `rules=` and `noRule=`:
+**Matrix operands without the pin.** `ProducerPinMatrix` ships `Active`, so by default every matrix operand keeps the producer's register, and with it the producer's banks. `matrix=` chooses among the rules the architecture tags with a matrix role (section 14.5) instead:
 
-- `noRule=ProducerPinMatrix,rules=ProducerShapeMatrix` keeps each accumulator chain and each A or B tile on one register tuple, and lets all of them move.
-- `noRule=ProducerPinMatrix,rules=ProducerPinAccumulator+ProducerShapeMatrix` keeps the accumulators where the producer put them, and moves A and B.
+- `shape` keeps each accumulator chain and each A or B tile on one register tuple, and lets all of them move. On gfx1250 that is `ProducerShapeMatrix` without `ProducerPinMatrix`.
+- `accumulators` keeps the accumulators where the producer put them, and moves A and B by shape: `ProducerPinAccumulator` and `ProducerShapeMatrix`, without `ProducerPinMatrix`.
+- `auto` tries `shape` and, when that colouring is refused, `pin`. The live ranges, loops and bank model are built once; only what the rules change is rebuilt for the second attempt. In an allocator chain, every allocator tries `shape` before any tries `pin`. The report names the placement that coloured and, after a fallback, quotes the shape refusal; when both refuse, the missed remark gives each reason.
 
-Neither falls back to the pin when it refuses, so a kernel neither can colour is dropped, as it would be with the pin simply removed. As the paragraph on kernel names says, a configuration does not rename the kernel, so comparing these needs one Tensile run per configuration.
+`shape` and `accumulators` have no fallback, so a kernel they cannot colour is dropped, as it would be with the pin simply removed; `auto` is the one that cannot lose a kernel the pin colours. A table with no shape rule refuses `shape` and `accumulators`, and `auto` there is the pin alone. `matrix=` sets the role-tagged rules itself, so with any placement but `pin`, naming one of them in `rules=` or `noRule=` is an error, reported when TensileLite validates the YAML. With `pin` the spelling from before `matrix=` still works: `noRule=ProducerPinMatrix,rules=ProducerShapeMatrix` colours as `matrix=shape` does. As the paragraph on kernel names says, a configuration does not rename the kernel, so comparing placements needs one Tensile run per configuration.
 
 **Banks by plan.** `quadrant=plan` gives the compacting allocators a price for each choice of VGPR banks. `VgprMsbStreamModel` replays `InsertVgprMsbPass` over the scheduled stream and weighs each switch `10^min(loop depth, 4)`, as a block's uses are weighed. Before placement, each block used in a loop gets the bank that costs least within what each bank can hold, and goes there when it fits ([greedy allocator](register-allocation-GreedyAllocator.md) section 6.1).
 
 - **Where it applies.** The model is built only on a target with a VGPR MSB mode, and only compacting runs plan; elsewhere the setting behaves as `any`.
 - **A preference.** When placing by the plan is refused, the run starts over without it, and the report says so (section 12.1).
-- **What it buys.** With `ProducerPinMatrix` in force only the address registers can move, so it pays in shape mode: `noRule=ProducerPinMatrix,rules=ProducerShapeMatrix,quadrant=plan`. On the MXF8 TN MAF loop-model kernel that gives 357 switches per iteration of the main loop under every compacting order, against 379–445 without the plan, with the epilogue at or below the pinned colouring's.
+- **What it buys.** With `ProducerPinMatrix` in force only the address registers can move, so it pays when matrix operands are placed by shape: `matrix=shape,quadrant=plan`, or `matrix=auto,quadrant=plan` to keep the pin as a fallback. On the MXF8 TN MAF loop-model kernel that gives 366 switches per iteration of the main loop under every compacting order, against 420–444 without the plan, with the epilogue at or below the pinned colouring's.
 
 **Dumps.** `StinkyTofuRegisterAllocationDump` (`ModuleOptions::RegisterAllocationDump`) writes the files listed in section 3.3. It is a global switch rather than part of the configuration, so turning it on renames no kernel.
 
@@ -1116,6 +1121,8 @@ pin.description =
 pin.status = RuleStatus::Off;
 pin.pinToProducer = pinMatrixProducerRegisters;
 ```
+
+A rule that is one way of placing matrix operands also sets `role`: `MatrixRole::Pin`, `Shape` or `PinAccumulator`. `matrix=` (section 12.2) chooses among those rules by role and sets their status itself, so neither a policy nor the configuration's grammar names an architecture's rule. Every other rule leaves it at `None`.
 
 Each preference carries a `benefit`, and that number must never be negative: `pickBase` stops scanning as soon as a base costs nothing, which is only sound while penalties cannot go below zero.
 
@@ -1292,6 +1299,8 @@ The family is `isMatrixInstruction`: dest and every VGPR source, including slotl
 
 It ships `Active`. A hard rule the input already violates would turn those kernels silently uncoloured; the producer's own colouring is tautological for a pin, because that colouring *is* the producer registers. `tests/filecheck/allocation_rule_producer_pin_matrix_test.stir` is the end-to-end check.
 
+Its role is `Pin`: `matrix=pin`, the default, leaves it as shipped, and the other placements turn it off.
+
 This is not `AllocationScope::pinRegisters`. HeldRange withholds a physical register for the whole function; this pins a *value* to its hint, and the register is free again when the value dies.
 
 #### `ProducerShapeMatrix` — offset, `Off`
@@ -1300,13 +1309,13 @@ Matrix operand values the producer put on one register tuple share one tuple, wh
 
 **Why `addRelations`.** A group spans instructions — a load and the WMMAs that read it, every link of a chain — and `addPreferences` sees one instruction at a time. `addRelations` sees the function, and appends one `AffinitySet` per unit of each producer tuple, keyed on the tuple's base and width as well as the unit. Keying on the register alone joins two tuple shapes that overlap in the producer's numbering: a tail loop reading B at `v[858:873]` next to a main loop reading it at `v[860:875]` chains every tile the two touch into one block.
 
-The family is `isMatrixInstruction`, dest and every source with an MSB slot; slotless scale fields stay with the `unbankable` policy. The members of a set all sat on one register in the producer's colouring, which is legal, so a set is always satisfiable and the audit is silent by construction. `ProducerPinMatrix` implies the rule, and with the pin in force it adds nothing, so it ships `Off` and is opted into with `rules=ProducerShapeMatrix,noRule=ProducerPinMatrix`. Every in-place accumulator chain becomes one set, so `WmmaAccumulatorReuse` adds nothing on top. `tests/filecheck/allocation_rule_producer_shape_matrix_test.stir` is the end-to-end check.
+The family is `isMatrixInstruction`, dest and every source with an MSB slot; slotless scale fields stay with the `unbankable` policy. The members of a set all sat on one register in the producer's colouring, which is legal, so a set is always satisfiable and the audit is silent by construction. `ProducerPinMatrix` implies the rule, and with the pin in force it adds nothing, so it ships `Off`. Its role is `Shape`: `matrix=shape` turns it on and the pin off, `matrix=accumulators` turns it on with `ProducerPinAccumulator`, and `matrix=auto` tries it before the pin. Every in-place accumulator chain becomes one set, so `WmmaAccumulatorReuse` adds nothing on top. `tests/filecheck/allocation_rule_producer_shape_matrix_test.stir` is the end-to-end check, and `tests/filecheck/allocation_matrix_policy_test.stir` reaches the same registers through `matrix=auto`.
 
 #### `ProducerPinAccumulator` — pin, `Off`
 
 The accumulator fields of a matrix instruction, dst and src2, keep the registers the producer assigned; A and B do not. The accumulators are most of a GEMM's VGPRs and every register the epilogue reads, so pinning them keeps the epilogue as the producer laid it out while the operands are free to move.
 
-It is meant to run with `ProducerShapeMatrix`, which keeps each A and B tile together as it moves: `rules=ProducerPinAccumulator+ProducerShapeMatrix,noRule=ProducerPinMatrix`. On its own it leaves those tiles to fall apart into one block per load, which refuses a crowded kernel just as dropping the pin does. It ships `Off` for the same reason as `ProducerShapeMatrix`. `tests/filecheck/allocation_rule_producer_pin_accumulator_test.stir` is the end-to-end check.
+It is meant to run with `ProducerShapeMatrix`, which keeps each A and B tile together as it moves. Its role is `PinAccumulator`, and `matrix=accumulators` turns the two on together and the pin off. On its own it leaves those tiles to fall apart into one block per load, which refuses a crowded kernel just as dropping the pin does. It ships `Off` for the same reason as `ProducerShapeMatrix`. `tests/filecheck/allocation_rule_producer_pin_accumulator_test.stir` is the end-to-end check.
 
 ### 14.6. Diagnostics
 

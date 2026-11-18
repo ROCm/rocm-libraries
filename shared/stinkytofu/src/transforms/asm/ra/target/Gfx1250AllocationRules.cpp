@@ -297,28 +297,30 @@ AllocationRules buildGfx1250Rules(const AsmCapsConfig& caps) {
     producerPin.description =
         "VGPR operands of a matrix instruction keep the registers the producer assigned";
     producerPin.status = RuleStatus::Active;
+    producerPin.role = MatrixRole::Pin;
     producerPin.pinToProducer = pinMatrixProducerRegisters;
 
     /// Keep each group of matrix operand values the producer laid out on one
     /// register tuple -- an accumulator chain, a rotating A or B tile -- on one
     /// tuple still, without fixing which. The alternative to ProducerPinMatrix
-    /// that leaves banks to the allocator; opt in with
-    /// rules=ProducerShapeMatrix,noRule=ProducerPinMatrix.
+    /// that leaves banks to the allocator; opt in with matrix=shape.
     AllocationRule producerShape;
     producerShape.name = "ProducerShapeMatrix";
     producerShape.description =
         "matrix operand values the producer put on one register tuple share one tuple";
     producerShape.status = RuleStatus::Off;
+    producerShape.role = MatrixRole::Shape;
     producerShape.addRelations = tieMatrixProducerShapes;
 
     /// The middle ground: accumulators stay where the producer put them and
     /// ProducerShapeMatrix keeps A and B together while they move. Opt in with
-    /// rules=ProducerPinAccumulator+ProducerShapeMatrix,noRule=ProducerPinMatrix.
+    /// matrix=accumulators.
     AllocationRule producerPinAccumulator;
     producerPinAccumulator.name = "ProducerPinAccumulator";
     producerPinAccumulator.description =
         "accumulator operands of a matrix instruction keep the registers the producer assigned";
     producerPinAccumulator.status = RuleStatus::Off;
+    producerPinAccumulator.role = MatrixRole::PinAccumulator;
     producerPinAccumulator.pinToProducer = pinMatrixAccumulatorRegisters;
 
     return AllocationRules({smemSelfOverlap, scalarAlignment, vectorAlignment, wmmaAccumulator,
