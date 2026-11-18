@@ -220,6 +220,230 @@ struct FmhaBatchPrefillFp8PageTileRead
 
 } // namespace detail
 
+// Geometries of the FP8 page tile: the M128 tiles of the shared FP8 list
+// (FmhaTdmSchedFp8SupportedGeometry), and the D64 M64 tile, which the forward FP8 pipeline does not
+// have. Its four waves hold one 16-row WMMA tile each and walk QK in two 64-key stages, as the BF16
+// D64 M64 page tile does (kFmhaBatchPrefillPageTileQkSuColumnsFor).
+template <typename Geometry>
+struct FmhaBatchPrefillFp8PageTileM64Geometry
+{
+    using Q = typename Geometry::QDataType;
+    static_assert(std::is_same_v<Q, fp8_t> && std::is_same_v<typename Geometry::KDataType, Q> &&
+                      std::is_same_v<typename Geometry::VDataType, Q> &&
+                      std::is_same_v<typename Geometry::PDataType, Q>,
+                  "the FP8 page tile requires homogeneous FP8 Q/K/V/P");
+    static_assert(Geometry::kM == 64 && Geometry::kN == 128 && Geometry::kHeadDimQK == 64 &&
+                      Geometry::kDv == 64,
+                  "the FP8 page tile supports the shared FP8 M128 tiles and M64 D64/V64 N128");
+    static_assert(Geometry::kWaves == 4 && Geometry::kWaveSize == 32,
+                  "the FP8 M64 page tile requires four wave32 waves");
+    static_assert(Geometry::kQkWmmaK == 64 && Geometry::kPvWmmaK == 128,
+                  "the FP8 M64 page tile needs a K64 QK WMMA and a K128 PV WMMA");
+    static_assert(Geometry::kQkStages == Geometry::kN / 64 &&
+                      Geometry::kPvStages == Geometry::kN / 128,
+                  "the FP8 M64 page tile requires 64-key QK stages and one 128-key PV stage");
+    static_assert(Geometry::PRepackLayout::kInThread,
+                  "gemm_0 C^T and gemm_1 A lane layouts differ; P cannot be re-packed in-thread");
+    static constexpr bool value = true;
+};
+
+template <typename Geometry>
+inline constexpr bool kFmhaBatchPrefillFp8PageTileGeometryOk =
+    std::conditional_t<Geometry::kM == 128,
+                       FmhaTdmSchedFp8SupportedGeometry<Geometry>,
+                       FmhaBatchPrefillFp8PageTileM64Geometry<Geometry>>::value;
+
+// The split softmax of the FP8 M64 page tile: the two entry points that the page-tile pipeline
+// calls on the forward FP8 policy (BlockFmhaPipelineQRKSVSTdmSchedFp8Policy::RunSplitSoftmaxPart01
+// and RunSplitSoftmaxPart2AndGetScale), adapted to the one 16-row M iteration of an M64 wave. That
+// policy asserts the M128 geometries, keeps two row halves (m0 / m1) and sizes its exp stream for
+// four MSBs, so these are adapted copies, not calls. The score groups stay 32 columns wide whatever
+// the QK stage width, as the 16-bit policy keeps them (kScoreGroupColumns).
+template <typename Geometry>
+struct FmhaBatchPrefillFp8PageTileM64Softmax
+{
+    static_assert(Geometry::kQkMIter == 1 && Geometry::kPvMIter == 1,
+                  "the M64 softmax handles one M iteration per wave");
+    static constexpr index_t kScoreGroupColumns = 32;
+    using ScoreSoftmax =
+        FmhaTdmSchedSplitSoftmaxFor<Geometry::kN / kScoreGroupColumns, Geometry::kQkMIter>;
+    using ScoreMapping = typename ScoreSoftmax::Mapping;
+    using OutputFragments =
+        FmhaTdmSchedOutputFragmentsFor<Geometry::kPvNIter / 2, Geometry::kPvMIter>;
+    static_assert(ScoreMapping::kNumMIter == Geometry::kQkMIter &&
+                      ScoreMapping::kNumNIter == Geometry::kN / Geometry::kQkWmmaN &&
+                      ScoreMapping::kNumSu == Geometry::kN / kScoreGroupColumns &&
+                      ScoreMapping::kNIterPerSu == kScoreGroupColumns / Geometry::kQkWmmaN &&
+                      ScoreMapping::kNumMsb ==
+                          Geometry::kQkMIter * (kScoreGroupColumns / Geometry::kQkWmmaN) &&
+                      ScoreMapping::kElementsPerWmma ==
+                          Geometry::QkWmma::kCM0PerLane * Geometry::QkWmma::kCM1PerLane,
+                  "split-softmax score mapping does not match the QK geometry");
+
+    // Max of N values by max3 levels; a two-value remainder carries to the next level (copied from
+    // BlockFmhaPipelineQRKSVSTdmSchedFp8Policy::TreeMax).
+    template <index_t N>
+    CK_TILE_DEVICE static float TreeMax(const array<float, N>& v)
+    {
+        if constexpr(N == 1)
+            return v[number<0>{}];
+        else if constexpr(N == 2)
+            return max(v[number<0>{}], v[number<1>{}]);
+        else
+        {
+            constexpr index_t kTriples = N / 3;
+            constexpr index_t kRest    = N % 3;
+            array<float, kTriples + kRest> next{};
+            static_for<0, kTriples, 1>{}([&](auto i) {
+                constexpr index_t k = 3 * decltype(i)::value;
+                next(i) = max(max(v[number<k>{}], v[number<k + 1>{}]), v[number<k + 2>{}]);
+            });
+            static_for<0, kRest, 1>{}([&](auto i) {
+                constexpr index_t k          = decltype(i)::value;
+                next(number<kTriples + k>{}) = v[number<3 * kTriples + k>{}];
+            });
+            return TreeMax<kTriples + kRest>(next);
+        }
+    }
+
+    // The forward RunSplitSoftmaxPart01 for its one row half: one max3 tree over the old max and
+    // the lane's scores of the row (both MSBs, in GatherRowPairs order), then a single lane
+    // exchange. delta_m1 is 0: there is no second row half.
+    template <typename Problem, typename ScoreTensor, typename RowTensor>
+    CK_TILE_DEVICE static void RunSplitSoftmaxPart01(
+        ScoreTensor& score, RowTensor& row_max, float log2e_scale, float& delta_m0, float& delta_m1)
+    {
+        using Softmax = ScoreSoftmax;
+        using Mapping = ScoreMapping;
+        static_assert(Problem::BiasEnum != BlockAttentionBiasEnum::ALIBI);
+        static_assert(!Problem::kHasLogitsSoftCap);
+        static_assert(ScoreTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
+        static_assert(RowTensor::get_thread_buffer_size() == 1);
+
+        // An elementwise bias may carry -inf, like a mask.
+        constexpr bool kValidateMax = Problem::FmhaMask::IsMasking ||
+                                      Problem::BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS;
+        const float old_max = row_max.get_thread_buffer()[number<0>{}];
+        array<float, 2 * Mapping::kElementsPerMsb + 1> values{};
+        values(number<0>{}) = old_max;
+        static_for<0, Mapping::kNumSu, 1>{}([&](auto su) {
+            static_for<0, 2, 1>{}([&](auto h) {
+                static_for<0, Mapping::kPairsPerFragment, 1>{}([&](auto p) {
+                    constexpr index_t at = 1 + ((su * 2 + h) * Mapping::kPairsPerFragment + p) * 2;
+                    const auto x =
+                        Mapping::template LoadPair<h, su * Mapping::kPairsPerFragment + p>(score);
+                    values(number<at>{})     = x[0];
+                    values(number<at + 1>{}) = x[1];
+                });
+            });
+        });
+        const float lane_max = TreeMax(values);
+        const auto p1        = Softmax::template RunPart1<kValidateMax>(
+            lane_max, Softmax::PermuteLaneX16(lane_max), old_max * log2e_scale, log2e_scale);
+        row_max.get_thread_buffer()[number<0>{}] = p1.row_max;
+        delta_m0                                 = p1.delta;
+        delta_m1                                 = 0.0f;
+    }
+
+    // The forward RunSplitSoftmaxPart2AndGetScale with SumRows false for its one row half: the exp
+    // stream of RunInterleavedLocalSums (each slot issues exp, fma, exp and, every second slot, the
+    // in-place rescale of one output pair, so no exp pairs up) without the row-sum add tree, whose
+    // sum the caller forms from the quantized P (AccumulateQuantizedMass). output_scale_m1 is 1:
+    // there is no second row half.
+    template <typename Problem,
+              bool SumRows,
+              typename ScoreTensor,
+              typename RowTensor,
+              typename Fragments>
+    CK_TILE_DEVICE static void RunSplitSoftmaxPart2AndGetScale(ScoreTensor& score,
+                                                               const RowTensor& row_max,
+                                                               RowTensor& row_sum,
+                                                               float log2e_scale,
+                                                               float delta_m0,
+                                                               float delta_m1,
+                                                               float& output_scale_m0,
+                                                               float& output_scale_m1,
+                                                               Fragments& output)
+    {
+        using Softmax = ScoreSoftmax;
+        using Mapping = ScoreMapping;
+        using Pair    = typename Softmax::Pair;
+        static_assert(!SumRows, "the FP8 M64 page tile sums the quantized P, not the exp stream");
+        static_assert(Problem::BiasEnum != BlockAttentionBiasEnum::ALIBI);
+        static_assert(!Problem::kHasLogitsSoftCap);
+        static_assert(ScoreTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
+        static_assert(RowTensor::get_thread_buffer_size() == 1);
+        ignore = row_sum;
+        ignore = delta_m1;
+
+        // An elementwise bias may carry -inf, like a mask.
+        constexpr bool kValidateMax = Problem::FmhaMask::IsMasking ||
+                                      Problem::BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS;
+        const float raw_max = row_max.get_thread_buffer()[number<0>{}];
+        const float exponent_max =
+            kValidateMax && raw_max <= -numeric<float>::infinity() ? 0.0f : raw_max;
+
+        constexpr index_t kPairs               = Mapping::kNumMsb * Mapping::kPairsPerMsb;
+        constexpr index_t kOutPairsPerFragment = OutputFragments::kElementsPerFragment / 2;
+        constexpr index_t kOutPairs = OutputFragments::kNumFragments * kOutPairsPerFragment;
+        static_assert(kPairs % kOutPairs == 0);
+        constexpr index_t kSlotsPerOutPair = kPairs / kOutPairs;
+        // SALU, WMMA, VMEM and LDS may cross; VALU and TRANS keep the source order.
+        constexpr int32_t kValuFence = LLVMSchedGroupMask::SALU | LLVMSchedGroupMask::MFMA |
+                                       LLVMSchedGroupMask::VMEM | LLVMSchedGroupMask::VMEM_READ |
+                                       LLVMSchedGroupMask::VMEM_WRITE | LLVMSchedGroupMask::DS |
+                                       LLVMSchedGroupMask::DS_READ | LLVMSchedGroupMask::DS_WRITE;
+
+        array<Pair, kPairs> leaf{};
+        auto make_delta = [&](auto q) {
+            constexpr index_t msb  = decltype(q)::value / Mapping::kPairsPerMsb;
+            constexpr index_t pair = decltype(q)::value % Mapping::kPairsPerMsb;
+            leaf(q) = __builtin_elementwise_fma(Mapping::template LoadPair<msb, pair>(score),
+                                                Softmax::Broadcast(log2e_scale),
+                                                -Softmax::Broadcast(exponent_max * log2e_scale));
+        };
+        auto exp_element = [&](auto q, auto e) {
+            leaf(q)[decltype(e)::value] = Softmax::Exp2(leaf[q][decltype(e)::value]);
+            if constexpr(decltype(e)::value == 1)
+                Mapping::template StorePair<decltype(q)::value / Mapping::kPairsPerMsb,
+                                            decltype(q)::value % Mapping::kPairsPerMsb>(score,
+                                                                                        leaf[q]);
+        };
+        auto rescale_pair = [&](auto o) {
+            constexpr index_t ordinal = decltype(o)::value / kOutPairsPerFragment;
+            constexpr index_t e       = decltype(o)::value % kOutPairsPerFragment * 2;
+            auto& fragment            = output.at(number<ordinal>{});
+            const Pair v = Pair{fragment[e], fragment[e + 1]} * Softmax::Broadcast(output_scale_m0);
+            fragment[e]  = v[0];
+            fragment[e + 1] = v[1];
+        };
+
+        output_scale_m0 = Softmax::Exp2(delta_m0);
+        output_scale_m1 = 1.0f;
+        __builtin_amdgcn_sched_barrier(kValuFence);
+        make_delta(number<0>{});
+        __builtin_amdgcn_sched_barrier(kValuFence);
+        make_delta(number<1>{});
+        __builtin_amdgcn_sched_barrier(kValuFence);
+        static_for<0, kPairs, 1>{}([&](auto q) {
+            exp_element(q, number<0>{});
+            __builtin_amdgcn_sched_barrier(kValuFence);
+            if constexpr(decltype(q)::value + 2 < kPairs)
+            {
+                make_delta(number<decltype(q)::value + 2>{});
+                __builtin_amdgcn_sched_barrier(kValuFence);
+            }
+            exp_element(q, number<1>{});
+            __builtin_amdgcn_sched_barrier(kValuFence);
+            if constexpr(decltype(q)::value % kSlotsPerOutPair == 0)
+            {
+                rescale_pair(number<decltype(q)::value / kSlotsPerOutPair>{});
+                __builtin_amdgcn_sched_barrier(kValuFence);
+            }
+        });
+    }
+};
+
 // Policy of the gfx1250 FP8 (fp8bf16) batch-prefill page tile: FP8 Q / K / V / P with the FP8
 // WMMAs (16x16x64 QK, 16x16x128 PV), the vectorized KV layout with x = 16 and the page-tile window.
 // The data path: the LDS arena, the K / V LDS layouts the window writes, the operand reads
@@ -238,7 +462,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
     using Tuning     = Tuning_;
     using Options    = typename FmhaTdmSchedTuningOptionsOf<Tuning>::type;
     using Schedule   = TileSchedule_;
-    static_assert(kFmhaTdmSchedFp8GeometryOk<Geometry> && Geometry::kWaves == 4);
+    static_assert(kFmhaBatchPrefillFp8PageTileGeometryOk<Geometry> && Geometry::kWaves == 4);
     static_assert(Schedule::kNumQkStages == Geometry::kQkStages &&
                   Schedule::kNumPvStages == Geometry::kPvStages &&
                   Schedule::kQkWmmasPerStage == Geometry::kQkWmmasPerStage &&
@@ -581,9 +805,11 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
     static_assert(kKPrefetchTensorCount == 0 || kKPrefetchTensorCount == 1);
     static_assert(kVPrefetchTensorCount == 0 || kVPrefetchTensorCount == 1);
 
-    // fp32 O fragments of the PV WMMAs, as the forward FP8 policy's. One PV stage covers the KV
-    // tile, so every PV row is an output fragment.
-    using OutputFragments = FmhaTdmSchedOutputFragmentsFor<Geometry::kPvNIter / 2>;
+    // fp32 O fragments of the PV WMMAs, as the forward FP8 policy's, over the geometry's M
+    // iterations (one at M64). One PV stage covers the KV tile, so every PV row is an output
+    // fragment.
+    using OutputFragments =
+        FmhaTdmSchedOutputFragmentsFor<Geometry::kPvNIter / 2, Geometry::kPvMIter>;
     static_assert(OutputFragments::kNumFragments == Geometry::kPvMIter * Geometry::kPvNIter &&
                       OutputFragments::kNumDmsb == 2 * Geometry::kPvMIter &&
                       OutputFragments::kElementsPerFragment ==
@@ -592,11 +818,15 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
     static_assert(Geometry::kPvStages == 1 &&
                   Geometry::kPvWmmasPerStage == OutputFragments::kNumFragments);
 
-    // The softmax is the forward FP8 pipeline's: the static entry points RunSplitSoftmaxPart01 and
-    // RunSplitSoftmaxPart2AndGetScale of its policy on this geometry. They read the geometry and
-    // the problem, no LDS layout and no tuning member.
-    using SoftmaxPolicy = BlockFmhaPipelineQRKSVSTdmSchedFp8Policy<Geometry, Tuning>;
-    using ScoreSoftmax  = typename SoftmaxPolicy::ScoreSoftmax;
+    // The softmax of the M128 tiles is the forward FP8 pipeline's: the static entry points
+    // RunSplitSoftmaxPart01 and RunSplitSoftmaxPart2AndGetScale of its policy on this geometry.
+    // They read the geometry and the problem, no LDS layout and no tuning member. The M64 tile,
+    // which that policy does not take, has the same entry points for its one M iteration.
+    using SoftmaxPolicy =
+        std::conditional_t<Geometry::kQkMIter == 2,
+                           BlockFmhaPipelineQRKSVSTdmSchedFp8Policy<Geometry, Tuning>,
+                           FmhaBatchPrefillFp8PageTileM64Softmax<Geometry>>;
+    using ScoreSoftmax = typename SoftmaxPolicy::ScoreSoftmax;
     static_assert(std::is_same_v<typename SoftmaxPolicy::OutputFragments, OutputFragments>);
 
     // K(i+1) is waited at NextK (WaitTensorReadyAtLoadNextK), not in the softmax: the lean D64
@@ -1053,31 +1283,58 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
     }
 };
 
-// Geometry of an FP8 page-tile problem: 32-column QK stages, one 128-deep PV stage.
-template <typename Problem>
-using FmhaBatchPrefillFp8PageTileGeometryFor = FmhaTdmSchedGeometryFor<Problem>;
+// QK stage width of an FP8 page-tile problem: 64 keys for M64 tiles, whose waves have one 16-row
+// WMMA tile per column tile (as the BF16 D64 M64 page tile,
+// kFmhaBatchPrefillPageTileQkSuColumnsFor), else two WMMA column tiles (32 keys).
+template <typename Problem, typename Shape = remove_cvref_t<typename Problem::BlockFmhaShape>>
+inline constexpr index_t kFmhaBatchPrefillFp8PageTileQkSuColumnsFor =
+    Shape::kM0 == 64 ? 64 : kFmhaTdmSchedDefaultQkSuColumns<typename Shape::Gemm0WarpTile>;
 
-// Code-generation options of the FP8 page tile: the M128 page tile's scalar row clamp 1 and the
-// WMMA operand guard (the vectorized KV layout requires it); the LDS drain before the TDM issue
+// Geometry of an FP8 page-tile problem: the QK stages above, one 128-deep PV stage.
+template <typename Problem>
+using FmhaBatchPrefillFp8PageTileGeometryFor =
+    FmhaTdmSchedGeometryFor<Problem, kFmhaBatchPrefillFp8PageTileQkSuColumnsFor<Problem>>;
+
+// Code-generation options of the FP8 M128 page tile: the M128 page tile's scalar row clamp 1 and
+// the WMMA operand guard (the vectorized KV layout requires it); the LDS drain before the TDM issue
 // stays off as in the BF16 M128 tile (the FP8 race screen found no whole-tile event with it off).
 // QkKOuter, KReadKMajor and RowMaxMaximum have no FP8 implementation.
 using FmhaBatchPrefillFp8PageTileOptions =
     FmhaTdmSchedTuningOptions<false, false, false, 1, true, false>;
 
+// Code-generation options of the FP8 M64 page tile: those of the BF16 P64 D64 M64 page tile, the
+// WMMA operand guard with scalar row clamp 0, and the LDS drain before every K / V TDM issue, which
+// every 16-bit D64 M64 tile runs (kDrainLdsBeforeTdmIssue of the scheduled-TDM policy: a
+// stale-fragment event at P64 without it).
+using FmhaBatchPrefillFp8PageTileM64Options =
+    FmhaTdmSchedTuningOptions<false, false, false, 0, true, true>;
+
+template <typename Problem, typename Geometry = FmhaBatchPrefillFp8PageTileGeometryFor<Problem>>
+using FmhaBatchPrefillFp8PageTileOptionsFor =
+    std::conditional_t<Geometry::kM == 64,
+                       FmhaBatchPrefillFp8PageTileM64Options,
+                       FmhaBatchPrefillFp8PageTileOptions>;
+
 template <typename Problem, typename Geometry = FmhaBatchPrefillFp8PageTileGeometryFor<Problem>>
 using FmhaBatchPrefillFp8PageTileTuningFor =
     FmhaBatchPrefillPageTileTuning<FmhaTdmSchedDerivedTuning<Geometry, 1>,
-                                   FmhaBatchPrefillFp8PageTileOptions>;
+                                   FmhaBatchPrefillFp8PageTileOptionsFor<Problem, Geometry>>;
 
-// Schedule: the WMMA-first rows with grouped drains (groups of four QK m0/m1 pairs and four PV
-// rows, QK tail reads on) and the FP8 reads evenly interleaved, from the shared templates.
+// Schedule: the WMMA-first rows with grouped drains, from the shared templates. M128: groups of
+// four QK m0/m1 pairs and four PV rows, QK tail reads on, and the FP8 reads evenly interleaved
+// (FmhaTdmSchedFp8EvenlyInterleavedReadSchedule, whose packed next-K reads take more PV rows than
+// the four of M64). M64: the placement's defaults, with the shared evenly interleaved reads, as the
+// BF16 D64 M64 page tile.
 template <typename Problem, typename Geometry = FmhaBatchPrefillFp8PageTileGeometryFor<Problem>>
-using FmhaBatchPrefillFp8PageTileScheduleFor = FmhaTdmSchedSequentialTileSchedule<
-    FmhaTdmSchedGroupedDrainPlacement<Geometry,
-                                      4,
-                                      4,
-                                      true,
-                                      FmhaTdmSchedFp8EvenlyInterleavedReadSchedule<Geometry>>>;
+using FmhaBatchPrefillFp8PageTileScheduleFor =
+    FmhaTdmSchedSequentialTileSchedule<std::conditional_t<
+        Geometry::kM == 64,
+        FmhaTdmSchedGroupedDrainPlacement<Geometry>,
+        FmhaTdmSchedGroupedDrainPlacement<Geometry,
+                                          4,
+                                          4,
+                                          true,
+                                          FmhaTdmSchedFp8EvenlyInterleavedReadSchedule<Geometry>>>>;
 
 template <typename Problem>
 using FmhaBatchPrefillFp8PageTilePolicyFor =

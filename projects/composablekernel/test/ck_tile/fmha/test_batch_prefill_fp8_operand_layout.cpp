@@ -13,10 +13,13 @@
 // contiguous 256-byte span of its tile (each of the 64 four-byte LDS banks once, no padding).
 // Controls read K or V as whole 16-byte chunks, in the b128 order of AttrNumAccess::Double, which
 // the Default-order WMMAs mis-pair: the K control must change S, the V control O alone. A further
-// kernel runs the forward FP8 policy's split softmax on the page-tile problem.
+// kernel runs the policy's split softmax on the page-tile problem's score tile against the host.
+// The tile is M128 (32-key QK stages), or M64 (64-key QK stages and the M64 split softmax) with
+// CK_TILE_FMHA_FP8_OPERAND_LAYOUT_TEST_M64 1.
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <random>
@@ -28,13 +31,18 @@
 #include "ck_tile/ops/fmha/pipeline/block_fmha_batch_prefill_pipeline_qr_ks_vs_tdm_sched_fp8_page_tile_policy.hpp"
 #include "fmha_test_common.hpp"
 
+#ifndef CK_TILE_FMHA_FP8_OPERAND_LAYOUT_TEST_M64
+#define CK_TILE_FMHA_FP8_OPERAND_LAYOUT_TEST_M64 0
+#endif
+
 namespace {
 
 using namespace ck_tile;
 
+constexpr bool kM64        = CK_TILE_FMHA_FP8_OPERAND_LAYOUT_TEST_M64 != 0;
 constexpr index_t kPage    = 64;
 constexpr index_t kHeadDim = 64;
-constexpr index_t kTileM   = 128;
+constexpr index_t kTileM   = kM64 ? 64 : 128;
 constexpr index_t kTileN   = 128;
 using TypeConfig           = FmhaFwdTypeConfig<FmhaFwdFp8Bf16>;
 
@@ -106,12 +114,16 @@ static_assert(Problem::kVectorSize == 16);
 static_assert(Policy::kLdsOffsetK0 == 0 && Policy::kLdsOffsetK1 == 8192 &&
               Policy::kLdsOffsetV0 == 16384 && Policy::kLdsOffsetV1 == 24576 &&
               Policy::kLdsArenaSize == 32768);
-static_assert(Geometry::kQkStages == 4 && Geometry::kQkSuColumns == 32 &&
-              Geometry::kPvStages == 1 && Geometry::kKSuLoadCount == 8 &&
+// M128 walks QK in 32-key stages, M64 in 64-key stages (D5).
+static_assert(Geometry::kQkStages == (kM64 ? 2 : 4) && Geometry::kQkSuColumns == (kM64 ? 64 : 32) &&
+              Geometry::kPvStages == 1 && Geometry::kKSuLoadCount == (kM64 ? 16 : 8) &&
               Geometry::kVStageLoadCount == 32);
-static_assert(Policy::Schedule::kNumQkStages == 4 && Policy::Schedule::kNumPvStages == 1);
-static_assert(Policy::kBlockPerCu == 1 && Policy::Options::kScalarRowClamp == 1 &&
-              Policy::Options::kWmmaOperandGuard && !Policy::kDrainLdsBeforeTdmIssue);
+static_assert(Policy::Schedule::kNumQkStages == (kM64 ? 2 : 4) &&
+              Policy::Schedule::kNumPvStages == 1);
+// Options: M128 the scalar row clamp 1 without the LDS drain, M64 those of the BF16 D64 M64 tile
+// (clamp 0, the drain before every TDM issue); the guard in both.
+static_assert(Policy::kBlockPerCu == 1 && Policy::Options::kScalarRowClamp == (kM64 ? 0 : 1) &&
+              Policy::Options::kWmmaOperandGuard && Policy::kDrainLdsBeforeTdmIssue == kM64);
 static_assert(Policy::template MakeQLdsBlockDescriptor<Problem>().get_element_space_size() <=
               Policy::kV1FootprintBytes);
 
@@ -338,38 +350,78 @@ struct OperandProbe
     }
 };
 
-// The forward FP8 policy's split softmax (the FP8 page tile's, design.md "Reused without copying")
-// on the page-tile problem's score tile: scores of 0 give P = 1 everywhere.
+struct SoftmaxArgs
+{
+    const float* s;       // [kTileM][kTileN] scores
+    const float* old_max; // [kTileM] row max before the tile
+    float* p;             // [kTileM][kTileN] the score tile after the softmax (P)
+    float* o;             // [kTileM][kHeadDim] the output, 1 before the tile
+    float* row_max;       // [kTileM] row max after the tile
+};
+
+// The policy's split softmax (SoftmaxPolicy: the forward FP8 policy's at M128, design.md "Reused
+// without copying"; FmhaBatchPrefillFp8PageTileM64Softmax at M64) on the page-tile problem's score
+// tile, its two parts called as the pipeline calls them, with a unit log2 scale.
 struct SoftmaxProbe
 {
     static constexpr index_t kBlockSize = Geometry::kWaves * Geometry::kWaveSize;
 
-    [[maybe_unused]] CK_TILE_DEVICE void operator()(float* out) const
+    // Row index of each element of a row tile.
+    template <typename RowTile, typename F>
+    CK_TILE_DEVICE static void ForEachRow(RowTile& rows, F f)
+    {
+        constexpr auto spans = RowTile::get_distributed_spans();
+        sweep_tile_span(spans[number<0>{}], [&](auto idx0) {
+            constexpr auto i = make_tuple(idx0);
+            const auto x = get_x_indices_from_distributed_indices(rows.get_tile_distribution(), i);
+            f(rows(i), x.at(number<0>{}));
+        });
+    }
+
+    [[maybe_unused]] CK_TILE_DEVICE void operator()(SoftmaxArgs args) const
     {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
-        using ForwardFp8Policy =
-            BlockFmhaPipelineQRKSVSTdmSchedFp8Policy<Geometry, typename Policy::Tuning>;
+        using Softmax         = typename Policy::SoftmaxPolicy;
+        using Fragments       = typename Policy::OutputFragments;
         constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
         constexpr auto gemm_1 = Policy::template GetPVBlockGemm<Problem>();
         auto score            = gemm_0.MakeCBlockTile();
-        clear_tile(score);
+        auto s_view           = make_naive_tensor_view<address_space_enum::global>(
+            args.s,
+            make_tuple(number<kTileM>{}, number<kTileN>{}),
+            make_tuple(number<kTileN>{}, number<1>{}),
+            number<1>{},
+            number<1>{});
+        score.get_thread_buffer() =
+            load_tile(make_tile_window(s_view,
+                                       make_tuple(number<kTileM>{}, number<kTileN>{}),
+                                       {0, 0},
+                                       score.get_tile_distribution()))
+                .get_thread_buffer();
         using OTile      = decltype(gemm_1.MakeCBlockTile());
         using STile      = decltype(cast_tile<float>(OTile{}));
         const auto f_max = [](auto a, auto b) { return max(a, b); };
         using RowTile = decltype(block_tile_reduce<float>(STile{}, sequence<1>{}, f_max, float{0}));
         RowTile row_max{};
         RowTile row_sum{};
-        set_tile(row_max, -numeric<float>::infinity());
+        ForEachRow(row_max, [&](float& x, index_t row) { x = args.old_max[row]; });
         clear_tile(row_sum);
-        auto output    = ForwardFp8Policy::OutputFragments::MakeZero();
+        auto output    = Fragments::Make([](auto) {
+            typename Fragments::Fragment fragment{};
+            for(index_t e = 0; e < Fragments::kElementsPerFragment; ++e)
+                fragment[e] = 1.0f;
+            return fragment;
+        });
         float delta_m0 = 0, delta_m1 = 0, scale_m0 = 0, scale_m1 = 0;
-        ForwardFp8Policy::template RunSplitSoftmaxPart01<Problem>(
-            score, row_max, 1.0f, delta_m0, delta_m1);
-        ForwardFp8Policy::template RunSplitSoftmaxPart2AndGetScale<Problem, false>(
+        Softmax::template RunSplitSoftmaxPart01<Problem>(score, row_max, 1.0f, delta_m0, delta_m1);
+        Softmax::template RunSplitSoftmaxPart2AndGetScale<Problem, false>(
             score, row_max, row_sum, 1.0f, delta_m0, delta_m1, scale_m0, scale_m1, output);
-        OperandProbe<false, false>::Store<kTileM, kTileN>(out, score);
+        OperandProbe<false, false>::Store<kTileM, kTileN>(args.p, score);
+        OperandProbe<false, false>::Store<kTileM, kHeadDim>(
+            args.o, Fragments::template Reconstruct<OTile>(output));
+        ForEachRow(row_max, [&](float& x, index_t row) { args.row_max[row] = x; });
 #else
-        ignore = out;
+        ignore = args;
 #endif
     }
 };
@@ -586,22 +638,56 @@ TEST_F(Fp8PageTileOperands, WholeChunkVReadsMisPair)
     EXPECT_GT(result.o, 0u);
 }
 
-TEST_F(Fp8PageTileOperands, ForwardSplitSoftmaxRuns)
+// The split softmax against the host: integer scores whose row maximum moves over the columns
+// with the row (both lane halves, MSBs and score groups of a row), and an old row max below it on
+// even rows and above it on odd rows. The new row max must be exact; P = exp2(S - max) and the
+// output 1 * exp2(old max - max) are exact powers of two up to the exp2 approximation.
+TEST_F(Fp8PageTileOperands, SplitSoftmaxMatchesHost)
 {
-    DeviceMem dout(kTileM * kTileN * sizeof(float));
-    launch_kernel(stream_config{nullptr, false, 0},
-                  make_kernel<1, gfx125_t>(SoftmaxProbe{},
-                                           dim3(1),
-                                           dim3(SoftmaxProbe::kBlockSize),
-                                           0,
-                                           static_cast<float*>(dout.GetDeviceBuffer())));
+    std::vector<float> s(kTileM * kTileN), old_max(kTileM);
+    for(int m = 0; m < kTileM; ++m)
+    {
+        const int top = (5 * m + 17) % kTileN;
+        for(int n = 0; n < kTileN; ++n)
+            s[m * kTileN + n] =
+                n == top ? static_cast<float>(2 + m % 3) : -static_cast<float>(1 + (m + 3 * n) % 9);
+        old_max[m] = m % 2 == 0 ? -20.0f : 10.0f;
+    }
+    DeviceMem ds(s.size() * sizeof(float)), dold(old_max.size() * sizeof(float)),
+        dp(s.size() * sizeof(float)), dout(kTileM * kHeadDim * sizeof(float)),
+        dmax(kTileM * sizeof(float));
+    ds.ToDevice(s.data());
+    dold.ToDevice(old_max.data());
+    const SoftmaxArgs args{static_cast<const float*>(ds.GetDeviceBuffer()),
+                           static_cast<const float*>(dold.GetDeviceBuffer()),
+                           static_cast<float*>(dp.GetDeviceBuffer()),
+                           static_cast<float*>(dout.GetDeviceBuffer()),
+                           static_cast<float*>(dmax.GetDeviceBuffer())};
+    launch_kernel(
+        stream_config{nullptr, false, 0},
+        make_kernel<1, gfx125_t>(SoftmaxProbe{}, dim3(1), dim3(SoftmaxProbe::kBlockSize), 0, args));
     hip_check_error(hipDeviceSynchronize());
-    std::vector<float> p(kTileM * kTileN);
-    dout.FromDevice(p.data());
-    std::size_t bad = 0;
-    for(float x : p)
-        bad += x != 1.0f;
-    std::cout << "forward FP8 split softmax on the page-tile problem: P != 1 in " << bad << " / "
-              << p.size() << '\n';
-    EXPECT_EQ(bad, 0u);
+    std::vector<float> p(s.size()), o(kTileM * kHeadDim), row_max(kTileM);
+    dp.FromDevice(p.data());
+    dout.FromDevice(o.data());
+    dmax.FromDevice(row_max.data());
+    const auto off      = [](float x, float ref) { return std::abs(x - ref) > 1e-6f * ref; };
+    std::size_t bad_max = 0, bad_p = 0, bad_o = 0;
+    for(int m = 0; m < kTileM; ++m)
+    {
+        float expected_max = old_max[m];
+        for(int n = 0; n < kTileN; ++n)
+            expected_max = std::max(expected_max, s[m * kTileN + n]);
+        bad_max += row_max[m] != expected_max;
+        for(int n = 0; n < kTileN; ++n)
+            bad_p += off(p[m * kTileN + n], std::exp2(s[m * kTileN + n] - expected_max));
+        for(int d = 0; d < kHeadDim; ++d)
+            bad_o += off(o[m * kHeadDim + d], std::exp2(old_max[m] - expected_max));
+    }
+    std::cout << "split softmax (M" << kTileM << ") against the host: row max " << bad_max << " / "
+              << kTileM << ", P " << bad_p << " / " << p.size() << ", output rescale " << bad_o
+              << " / " << o.size() << " wrong\n";
+    EXPECT_EQ(bad_max, 0u);
+    EXPECT_EQ(bad_p, 0u);
+    EXPECT_EQ(bad_o, 0u);
 }
