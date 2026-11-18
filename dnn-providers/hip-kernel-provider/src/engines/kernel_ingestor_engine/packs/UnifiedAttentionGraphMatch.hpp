@@ -508,11 +508,13 @@ inline std::optional<MatchedAttributes>
     // Ragged operands: the engine derives query_start_len and seq_lens itself, from uniform
     // lengths.
     if(attributes.seq_len_q_tensor_uid().has_value()
-       || attributes.seq_len_kv_tensor_uid().has_value())
+       || attributes.seq_len_kv_tensor_uid().has_value()
+       || attributes.cu_seq_len_q_tensor_uid().has_value()
+       || attributes.cu_seq_len_kv_tensor_uid().has_value())
     {
         HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "varlen"})
-                               << "variable sequence lengths (seq_len_q/seq_len_kv tensors) are "
-                                  "not supported");
+                               << "variable sequence lengths (seq_len_q/seq_len_kv or "
+                                  "cu_seq_len_q/cu_seq_len_kv tensors) are not supported");
         return std::nullopt;
     }
     // Dropout.
@@ -605,6 +607,15 @@ inline std::optional<MatchedAttributes>
         HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "mma_core_mode"})
                                << "mma_core_mode " << mmaCoreMode
                                << " is not supported; the kernel runs HALF or BFLOAT16 MFMA");
+        return std::nullopt;
+    }
+    // The kernels accumulate and keep the softmax statistics in FLOAT.
+    if(!sdpa_graph::computesInFloat(context))
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "compute_data_type"})
+                               << "compute data type "
+                               << context.graph.getNodeWrapper(0).computeDataType()
+                               << " is not supported; the kernels accumulate in FLOAT");
         return std::nullopt;
     }
     // `implementation` is an execution-strategy hint. AUTO leaves the choice to the provider.

@@ -439,6 +439,16 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesSinksADanglingStatsUidMaskTenso
     auto varlen = baseGraph();
     varlen.seqLenQUid = EXTRA_UID;
     EXPECT_FALSE(matchGraph(varlen).has_value());
+
+    // Cumulative lengths, on each side alone. padding_mask stays false, so only the
+    // cu_seq_len decline can reject these.
+    auto cuQ = baseGraph();
+    cuQ.cuSeqLenQUid = EXTRA_UID;
+    EXPECT_FALSE(matchGraph(cuQ).has_value());
+
+    auto cuKv = baseGraph();
+    cuKv.cuSeqLenKvUid = EXTRA_UID;
+    EXPECT_FALSE(matchGraph(cuKv).has_value());
 }
 
 // =============================================================================
