@@ -59,6 +59,7 @@ constexpr int64_t Y_UID = 3;
 struct GraphSpec
 {
     data_objects::DataType dtype = data_objects::DataType::FLOAT;
+    data_objects::DataType computeType = data_objects::DataType::FLOAT;
     std::optional<data_objects::DataType> wDtype;
     bool channelsLast = false;
     std::optional<bool> wChannelsLast;
@@ -151,7 +152,7 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
     nodes.push_back(
         data_objects::CreateNodeDirect(builder,
                                        "conv_fwd",
-                                       spec.dtype,
+                                       spec.computeType,
                                        data_objects::NodeAttributes::ConvolutionFwdAttributes,
                                        attributes.Union()));
 
@@ -273,6 +274,11 @@ TEST(TestHipConvFwdFmaIgemmRdnaGraphMatcher, RefusesWhatTheKernelCannotServe)
     GraphSpec mixedDtype;
     mixedDtype.wDtype = data_objects::DataType::HALF;
     EXPECT_FALSE(matches(mixedDtype)) << "mixed dtypes";
+
+    GraphSpec halfCompute;
+    halfCompute.dtype = data_objects::DataType::HALF;
+    halfCompute.computeType = data_objects::DataType::HALF;
+    EXPECT_FALSE(matches(halfCompute)) << "half compute type";
 
     GraphSpec mixedLayout;
     mixedLayout.wChannelsLast = true;
