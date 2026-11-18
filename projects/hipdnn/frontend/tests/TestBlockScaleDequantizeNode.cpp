@@ -9,6 +9,33 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 
+namespace
+{
+ErrorCode preValidateWithScale(const std::vector<int64_t>& xDims,
+                               const std::vector<int32_t>& blockSize,
+                               const std::vector<int64_t>& scaleDims)
+{
+    BlockScaleDequantizeAttributes attrs;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim(xDims);
+    attrs.set_x(xTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim(scaleDims);
+    attrs.set_scale(scaleTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_is_virtual(true);
+    attrs.set_y(yTensor);
+    attrs.set_block_size(blockSize);
+
+    const GraphAttributes graphAttributes;
+    const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+    return node.pre_validate_node().code;
+}
+} // namespace
+
 TEST(TestBlockScaleDequantizeNode, PreValidateNode)
 {
     BlockScaleDequantizeAttributes attrs;
@@ -18,7 +45,7 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNode)
     attrs.set_x(xTensor);
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({2, 2, 32, 32});
+    scaleTensor->set_dim({2, 64, 32, 1});
     attrs.set_scale(scaleTensor);
 
     auto yTensor = std::make_shared<TensorAttributes>();
@@ -124,7 +151,7 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeYShapeMismatch)
     attrs.set_x(xTensor);
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({2, 2, 32, 32});
+    scaleTensor->set_dim({2, 64, 32, 1});
     attrs.set_scale(scaleTensor);
 
     auto yTensor = std::make_shared<TensorAttributes>();
@@ -289,6 +316,43 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeXDimsNotSetSkipsDimChecks)
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestBlockScaleDequantizeNode, PreValidateNodeScaleCoversTrailingBlocks)
+{
+    // block_size entries apply to the trailing dimensions of x; leading dimensions use block 1
+    EXPECT_EQ(preValidateWithScale({4, 64}, {1, 32}, {4, 2}), ErrorCode::OK);
+    EXPECT_EQ(preValidateWithScale({4, 64}, {32}, {4, 2}), ErrorCode::OK);
+    EXPECT_EQ(preValidateWithScale({2, 64, 32, 32}, {32}, {2, 64, 32, 1}), ErrorCode::OK);
+
+    // A leading-aligned reading of block_size {32} would expect these scale shapes
+    EXPECT_EQ(preValidateWithScale({4, 64}, {32}, {1, 64}), ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(preValidateWithScale({2, 64, 32, 32}, {32}, {2, 2, 32, 32}),
+              ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestBlockScaleDequantizeNode, PreValidateNodeScaleDimAtLeastBlockCount)
+{
+    // Too few scale entries for the blocks of x
+    EXPECT_EQ(preValidateWithScale({4, 64}, {1, 32}, {4, 1}), ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(preValidateWithScale({4, 64}, {1, 32}, {3, 2}), ErrorCode::INVALID_VALUE);
+
+    // A padded scale layout has more entries than blocks
+    EXPECT_EQ(preValidateWithScale({4, 64}, {1, 32}, {4, 3}), ErrorCode::OK);
+    EXPECT_EQ(preValidateWithScale({4, 64}, {1, 32}, {8, 4}), ErrorCode::OK);
+}
+
+TEST(TestBlockScaleDequantizeNode, PreValidateNodeScaleDimUsesCeilForPartialBlocks)
+{
+    // 70 elements in blocks of 32 need ceil(70 / 32) = 3 scale entries
+    EXPECT_EQ(preValidateWithScale({4, 70}, {1, 32}, {4, 3}), ErrorCode::OK);
+    EXPECT_EQ(preValidateWithScale({4, 70}, {1, 32}, {4, 2}), ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestBlockScaleDequantizeNode, PreValidateNodeScaleRankMismatch)
+{
+    EXPECT_EQ(preValidateWithScale({4, 64}, {1, 32}, {4, 2, 1}), ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(preValidateWithScale({4, 64}, {1, 32}, {4}), ErrorCode::INVALID_VALUE);
 }
 
 TEST(TestBlockScaleDequantizeNode, InferPropertiesNode)

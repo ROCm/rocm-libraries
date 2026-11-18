@@ -5,12 +5,16 @@
 #include "Node.hpp"
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/ResampleBwdAttributes.hpp>
 #include <hipdnn_frontend/detail/ResampleBwdPacker.hpp>
 #include <hipdnn_frontend/detail/ResampleBwdUnpacker.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+#include <hipdnn_frontend/node/detail/CheckedShapeMath.hpp>
 #include <hipdnn_frontend/node/detail/ResampleParamsValidation.hpp>
+
+#include <string>
 
 namespace hipdnn_frontend::graph
 {
@@ -51,6 +55,19 @@ public:
         HIPDNN_RETURN_IF_FALSE(attributes.get_dx(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "ResampleBwdNode missing dx (output) for pre-validation");
+
+        // The modes must be ones the lowering can express; padding_mode may stay unset
+        HIPDNN_RETURN_IF_FALSE(
+            toBackendResampleMode(attributes.get_resample_mode()).has_value(),
+            ErrorCode::INVALID_VALUE,
+            "ResampleBwdNode resample mode "
+                + std::to_string(static_cast<int>(attributes.get_resample_mode()))
+                + " is not supported by hipDNN lowering");
+        HIPDNN_RETURN_IF_FALSE(toBackendPaddingMode(attributes.get_padding_mode()).has_value(),
+                               ErrorCode::INVALID_VALUE,
+                               "ResampleBwdNode padding mode "
+                                   + std::to_string(static_cast<int>(attributes.get_padding_mode()))
+                                   + " is not supported by hipDNN lowering");
 
         // Validate required tensor dimensions
         HIPDNN_RETURN_IF_TRUE(attributes.get_dy()->get_dim().empty(),
@@ -167,8 +184,14 @@ public:
             for(size_t i = 2; i < dyDims.size(); ++i)
             {
                 const size_t spatialIdx = i - 2;
-                dxDims[i] = (dyDims[i] - 1) * strideVec[spatialIdx] - prePadding[spatialIdx]
-                            - postPadding[spatialIdx] + windowVec[spatialIdx];
+                HIPDNN_CHECK_ERROR(detail::checkedTransposedExtent("ResampleBwdNode",
+                                                                   spatialIdx,
+                                                                   dyDims[i],
+                                                                   strideVec[spatialIdx],
+                                                                   prePadding[spatialIdx],
+                                                                   postPadding[spatialIdx],
+                                                                   windowVec[spatialIdx],
+                                                                   dxDims[i]));
 
                 HIPDNN_RETURN_IF_LT(dxDims[i],
                                     1,

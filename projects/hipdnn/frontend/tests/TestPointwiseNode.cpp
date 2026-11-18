@@ -12,8 +12,10 @@
 
 #include "fake_backend/MockHipdnnBackend.hpp"
 
+#include <algorithm>
 #include <array>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -30,7 +32,9 @@ constexpr auto K_POINTWISE_MODE_COUNT = PointwiseMode::COUNT;
 static_assert(static_cast<int>(K_POINTWISE_MODE_COUNT) == 51,
               "PointwiseMode enum changed — update this assertion");
 
-// Generic helper function to generate vectors of pointwise modes based on a checker function
+// Generic helper function to generate vectors of pointwise modes based on a checker function.
+// Only modes the lowering can express (toBackendPointwiseMode) are returned; modes without a
+// backend mapping are rejected by pre-validation and covered by the agreement test below.
 template <typename CheckerFunc>
 std::vector<PointwiseMode> getPointwiseModesByChecker(CheckerFunc checker)
 {
@@ -41,7 +45,7 @@ std::vector<PointwiseMode> getPointwiseModesByChecker(CheckerFunc checker)
         ++i)
     {
         auto mode = static_cast<PointwiseMode>(i);
-        if(checker(mode))
+        if(checker(mode) && toBackendPointwiseMode(mode).has_value())
         {
             modes.push_back(mode);
         }
@@ -312,6 +316,62 @@ TEST_P(TestPointwiseNodeTernaryOps, ValidWithThreeInputs)
 INSTANTIATE_TEST_SUITE_P(,
                          TestPointwiseNodeTernaryOps,
                          ::testing::ValuesIn(getTernaryPointwiseModes()));
+
+namespace
+{
+// A pointwise node for `mode` whose inputs match the mode's operand count, with valid shapes.
+PointwiseNode makeNodeWithModeOperands(PointwiseMode mode)
+{
+    PointwiseAttributes attributes;
+    attributes.set_mode(mode);
+    const size_t inputCount = std::max<size_t>(PointwiseNode::modeInputCount(mode), 1);
+    for(size_t slot = 0; slot < inputCount; ++slot)
+    {
+        auto input = std::make_shared<TensorAttributes>();
+        input->set_uid(static_cast<int64_t>(slot) + 1)
+            .set_name("InputTensor" + std::to_string(slot))
+            .set_data_type(DataType::FLOAT)
+            .set_dim({2, 3, 4})
+            .set_stride({12, 4, 1});
+        attributes.inputs[static_cast<PointwiseAttributes::InputNames>(slot)] = input;
+    }
+    auto output = std::make_shared<TensorAttributes>();
+    output->set_uid(10).set_name("OutputTensor").set_dim({2, 3, 4});
+    attributes.set_output_0(output);
+
+    const GraphAttributes graphAttributes;
+    return {std::move(attributes), graphAttributes};
+}
+} // namespace
+
+// pre_validate_node and the lowering share one table (toBackendPointwiseMode): every mode is
+// either accepted by both or rejected by both.
+TEST(TestPointwiseNode, PreValidateAgreesWithLoweringForEveryMode)
+{
+    for(int i = static_cast<int>(PointwiseMode::NOT_SET) + 1;
+        i < static_cast<int>(K_POINTWISE_MODE_COUNT);
+        ++i)
+    {
+        const auto mode = static_cast<PointwiseMode>(i);
+        const auto node = makeNodeWithModeOperands(mode);
+        const auto error = node.pre_validate_node();
+        EXPECT_EQ(error.is_good(), toBackendPointwiseMode(mode).has_value())
+            << "Mode " << to_string(mode) << ": " << error.get_message();
+    }
+}
+
+TEST(TestPointwiseNode, PreValidateRejectsModesWithoutBackendMapping)
+{
+    for(auto mode : {PointwiseMode::COS, PointwiseMode::MOD, PointwiseMode::POW})
+    {
+        const auto node = makeNodeWithModeOperands(mode);
+        const auto error = node.pre_validate_node();
+        EXPECT_EQ(error,
+                  Error(ErrorCode::INVALID_VALUE,
+                        std::string("PointwiseNode mode ") + to_string(mode)
+                            + " is not supported by hipDNN lowering"));
+    }
+}
 
 TEST(TestPointwiseNode, ZeroInputsError)
 {

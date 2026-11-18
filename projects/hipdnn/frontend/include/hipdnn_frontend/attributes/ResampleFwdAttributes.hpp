@@ -180,6 +180,8 @@ public:
         return padding_mode;
     }
 
+    /// @brief Set the padding mode; required: validation rejects PaddingMode::NOT_SET with
+    ///        ATTRIBUTE_NOT_SET
     // NOLINTNEXTLINE(readability-identifier-naming)
     ResampleFwdAttributes& set_padding_mode(PaddingMode value)
     {
@@ -193,6 +195,12 @@ public:
         return generate_index;
     }
 
+    /**
+     * @brief Request the max-pool index output
+     *
+     * Index generation is supported only with ResampleMode::MAXPOOL: validation rejects
+     * generate_index set to true with any other resample mode with INVALID_VALUE.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     ResampleFwdAttributes& set_generate_index(bool value)
     {

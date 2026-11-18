@@ -623,7 +623,7 @@ hipdnnSetEnginePluginPaths_ext(
 );
 ```
 
-Plugins are loaded according to the selected path schema during hipDNN handle creation. Changing paths after handle creation has no effect until another handle is created.
+Plugins are loaded according to the selected path schema during hipDNN handle creation. Changing the paths while a handle is live fails with `HIPDNN_STATUS_NOT_SUPPORTED`; destroy every handle first. Repeating the current paths and loading mode succeeds and changes nothing.
 
 ### Querying Loaded Plugins
 

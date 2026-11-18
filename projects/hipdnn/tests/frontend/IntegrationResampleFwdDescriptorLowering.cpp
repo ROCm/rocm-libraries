@@ -494,65 +494,40 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, TensorTypesPreservedInRoundTrip
     EXPECT_EQ(tensorMap[K_RESAMPLE_FWD_TENSOR_INDEX_UID]->name, "index");
 }
 
-TEST_F(IntegrationResampleFwdDescriptorLowering, GenerateIndexNotMaxPool)
+TEST_F(IntegrationResampleFwdDescriptorLowering, GenerateIndexNotMaxPoolRejectedAtValidate)
 {
-    auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
-    graph->set_name("ResampleFwdIntegrationTest")
-        .set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT)
-        .set_io_data_type(DataType::FLOAT);
+    for(auto mode : {ResampleMode::AVGPOOL_EXCLUDE_PADDING, ResampleMode::AVGPOOL_INCLUDE_PADDING})
+    {
+        SCOPED_TRACE(static_cast<int>(mode));
 
-    ResampleFwdAttributes attrs;
-    attrs.set_name("test_index_not_max_pool");
-    attrs.set_resample_mode(ResampleMode::AVGPOOL_EXCLUDE_PADDING);
-    attrs.set_padding_mode(PaddingMode::ZERO_PAD);
-    attrs.set_pre_padding(toVec(K_RESAMPLE_FWD_PRE_PADDING));
-    attrs.set_post_padding(toVec(K_RESAMPLE_FWD_POST_PADDING));
-    attrs.set_stride(toVec(K_RESAMPLE_FWD_STRIDE));
-    attrs.set_window(toVec(K_RESAMPLE_FWD_WINDOW));
-    attrs.set_generate_index(true);
+        auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
+        graph->set_name("ResampleFwdIntegrationTest")
+            .set_compute_data_type(DataType::FLOAT)
+            .set_intermediate_data_type(DataType::FLOAT)
+            .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(K_RESAMPLE_FWD_TENSOR_X_UID).set_name("x").set_data_type(DataType::FLOAT);
-    x->set_dim(toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS))
-        .set_stride(toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
+        ResampleFwdAttributes attrs;
+        attrs.set_name("test_index_not_max_pool");
+        attrs.set_resample_mode(mode);
+        attrs.set_padding_mode(PaddingMode::ZERO_PAD);
+        attrs.set_pre_padding(toVec(K_RESAMPLE_FWD_PRE_PADDING));
+        attrs.set_post_padding(toVec(K_RESAMPLE_FWD_POST_PADDING));
+        attrs.set_stride(toVec(K_RESAMPLE_FWD_STRIDE));
+        attrs.set_window(toVec(K_RESAMPLE_FWD_WINDOW));
+        attrs.set_generate_index(true);
 
-    auto [y, index] = graph->resample(x, attrs);
-    y->set_uid(K_RESAMPLE_FWD_TENSOR_Y_UID).set_output(true).set_name("y");
-    EXPECT_EQ(index, nullptr);
+        auto x = std::make_shared<TensorAttributes>();
+        x->set_uid(K_RESAMPLE_FWD_TENSOR_X_UID).set_name("x").set_data_type(DataType::FLOAT);
+        x->set_dim(toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS))
+            .set_stride(toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
 
-    auto result = graph->validate();
-    EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        auto [y, index] = graph->resample(x, attrs);
+        y->set_uid(K_RESAMPLE_FWD_TENSOR_Y_UID).set_output(true).set_name("y");
+        EXPECT_EQ(index, nullptr);
 
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // Retrieve serialized graph
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_GT(serializedSize, 0u);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
-    hipdnn_flatbuffers_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
-
-    auto& node = graphT.nodes[0];
-    EXPECT_EQ(node->attributes.type, NodeAttrType::ResampleFwdAttributes);
-
-    auto* opNode = node->attributes.AsResampleFwdAttributes();
-    ASSERT_NE(opNode, nullptr);
-
-    ASSERT_TRUE(opNode->generate_index.has_value());
-    EXPECT_TRUE(opNode->generate_index.value());
-    ASSERT_FALSE(opNode->index_tensor_uid.has_value());
-    ASSERT_EQ(opNode->resample_mode,
-              hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_EXCLUDE_PADDING);
+        auto result = graph->validate();
+        EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.err_msg;
+    }
 }
 
 } // namespace

@@ -1791,6 +1791,89 @@ TEST_F(TestGraph, ValidateUnsetTensorDataTypeSetGraphDataTypes)
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
+// Builds y = x + b, where x carries @p raggedOffset as its ragged-offset tensor.
+// x and b leave their data types unset so they take the graph's I/O type.
+// Returns b.
+static std::shared_ptr<TensorAttributes>
+    createRaggedPointwiseGraph(Graph& graph, const std::shared_ptr<TensorAttributes>& raggedOffset)
+{
+    graph.set_name("RaggedGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1).set_name("X").set_dim({4, 4}).set_stride({4, 1});
+    x->set_ragged_offset(raggedOffset);
+
+    auto b = std::make_shared<TensorAttributes>();
+    b->set_uid(2).set_name("B").set_dim({4, 4}).set_stride({4, 1});
+
+    PointwiseAttributes attributes;
+    attributes.set_name("Add");
+    attributes.set_mode(PointwiseMode::ADD);
+
+    auto y = graph.pointwise(x, b, attributes);
+    y->set_uid(3).set_name("Y").set_output(true);
+    return b;
+}
+
+TEST_F(TestGraph, ValidateRejectsRaggedAuxWithDuplicateUid)
+{
+    auto raggedOffset = std::make_shared<TensorAttributes>();
+    raggedOffset->set_uid(7)
+        .set_name("RaggedOffset")
+        .set_data_type(DataType::INT32)
+        .set_dim({5})
+        .set_stride({1});
+
+    Graph graph;
+    auto b = createRaggedPointwiseGraph(graph, raggedOffset);
+    b->set_uid(7);
+
+    const auto result = graph.validate();
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.get_message();
+    EXPECT_NE(result.get_message().find("Duplicate tensor UIDs"), std::string::npos)
+        << result.get_message();
+
+    b->set_uid(8);
+    const auto distinct = graph.validate();
+    EXPECT_TRUE(distinct.is_good()) << distinct.get_message();
+}
+
+// The ragged-offset tensor is an offset table: it does not take the graph's
+// (floating-point) I/O type, so an unset data type is an error.
+TEST_F(TestGraph, ValidateRejectsRaggedAuxWithoutDataType)
+{
+    auto raggedOffset = std::make_shared<TensorAttributes>();
+    raggedOffset->set_uid(7).set_name("RaggedOffset").set_dim({5}).set_stride({1});
+
+    Graph graph;
+    createRaggedPointwiseGraph(graph, raggedOffset);
+
+    const auto result = graph.validate();
+    EXPECT_EQ(result.code, ErrorCode::ATTRIBUTE_NOT_SET) << result.get_message();
+    EXPECT_NE(result.get_message().find("RaggedOffset"), std::string::npos) << result.get_message();
+    EXPECT_EQ(raggedOffset->get_data_type(), DataType::NOT_SET);
+
+    raggedOffset->set_data_type(DataType::INT32);
+    const auto withDataType = graph.validate();
+    EXPECT_TRUE(withDataType.is_good()) << withDataType.get_message();
+}
+
+TEST_F(TestGraph, ValidateRejectsInvalidRaggedAuxDims)
+{
+    auto raggedOffset = std::make_shared<TensorAttributes>();
+    raggedOffset->set_uid(7).set_name("RaggedOffset").set_data_type(DataType::INT32);
+
+    Graph graph;
+    createRaggedPointwiseGraph(graph, raggedOffset);
+
+    const auto result = graph.validate();
+    EXPECT_EQ(result.code, ErrorCode::ATTRIBUTE_NOT_SET) << result.get_message();
+    EXPECT_NE(result.get_message().find("RaggedOffset"), std::string::npos) << result.get_message();
+}
+
 TEST_F(TestGraph, SetAndGetAttributes)
 {
     Graph graph;
@@ -7407,6 +7490,187 @@ TEST_F(TestGraph, GetRankedEngineIdsReturnsGraphNotSupportedWhenRetrievedCountZe
     auto result = graph.get_ranked_engine_ids(rankedEngineIds);
     EXPECT_FALSE(result.is_good());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_NOT_SUPPORTED);
+}
+
+// As in cuDNN, an empty heuristic-mode list queries no heuristic: create_execution_plans()
+// succeeds with no plans, and build_plans() then reports that there is nothing to build.
+TEST_F(TestGraph, CreateExecutionPlansWithEmptyModesReturnsNoPlans)
+{
+    hipdnn_frontend::GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    auto buildResult = graph.build_operation_graph(_handle);
+    ASSERT_TRUE(buildResult.is_good()) << buildResult.get_message();
+    graph.injectDummyCompiledPlan();
+
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
+        .Times(0);
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_MODE, _, _, _))
+        .Times(0);
+
+    const auto result = graph.create_execution_plans({});
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.get_execution_plan_count(), 0);
+
+    const auto buildPlans = graph.build_plans();
+    EXPECT_EQ(buildPlans.code, ErrorCode::INVALID_VALUE) << buildPlans.get_message();
+}
+
+// The other heuristic queries give their empty result for an empty mode list and
+// never reach the backend with an empty HIPDNN_ATTR_ENGINEHEUR_MODE.
+TEST_F(TestGraph, EmptyHeuristicModesReturnEmptyResultsWithoutBackendQuery)
+{
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+    auto buildResult = graph.build_operation_graph(_handle);
+    ASSERT_TRUE(buildResult.is_good()) << buildResult.get_message();
+
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
+        .Times(0);
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_MODE, _, _, _))
+        .Times(0);
+
+    std::vector<int64_t> rankedEngineIds{1, 2};
+    const auto ranked = graph.get_ranked_engine_ids(rankedEngineIds, {});
+    EXPECT_TRUE(ranked.is_good()) << ranked.get_message();
+    EXPECT_TRUE(rankedEngineIds.empty());
+
+    std::vector<EngineConfigInfo> configs = {{42, "", {}, false, 0}};
+    const auto configsResult = graph.get_engine_configs(_handle, configs, {});
+    EXPECT_TRUE(configsResult.is_good()) << configsResult.get_message();
+    EXPECT_TRUE(configs.empty());
+
+    EXPECT_EQ(graph.is_supported_ext(_handle, {}).code, ErrorCode::GRAPH_NOT_SUPPORTED);
+    EXPECT_EQ(graph.add_all_engines({}).code, ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(graph.build(_handle, {}).code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}
+
+// The backend may fill fewer engine configurations than it counted; the unfilled
+// descriptors are dropped so the configurations and the engine ids stay index-aligned.
+TEST_F(TestGraph, GetEngineConfigsTrimsDescriptorsToRetrievedCount)
+{
+    auto heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9abc);
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(heurDesc,
+                                    HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    0,
+                                    _,
+                                    IsNull()))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 3;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(heurDesc,
+                                    HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    3,
+                                    _,
+                                    NotNull()))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(_,
+                                    HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    IsNull(),
+                                    NotNull()))
+        .WillOnce([engineDesc](hipdnnBackendDescriptor_t,
+                               hipdnnBackendAttributeName_t,
+                               hipdnnBackendAttributeType_t,
+                               int64_t,
+                               int64_t*,
+                               void* arrayOfElements) {
+            *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements) = engineDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(
+            engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, IsNull(), NotNull()))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t*,
+                     void* arrayOfElements) {
+            *static_cast<int64_t*>(arrayOfElements) = 42;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
+    std::vector<int64_t> engineIds;
+    const auto result = detail::getEngineConfigs(engineConfigs, engineIds, heurDesc, true);
+
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(engineIds, std::vector<int64_t>{42});
+    EXPECT_EQ(engineConfigs.size(), engineIds.size());
+}
+
+// A backend that reports more retrieved configurations than were requested breaks the
+// retrieval contract; the ids past the requested count would have no descriptor.
+TEST_F(TestGraph, GetEngineConfigsRejectsMoreConfigsThanRequested)
+{
+    auto heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(heurDesc,
+                                    HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    0,
+                                    _,
+                                    IsNull()))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 3;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(heurDesc,
+                                    HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    _,
+                                    NotNull()))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 2;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
+    std::vector<int64_t> engineIds;
+    const auto result
+        = detail::getEngineConfigs(engineConfigs, engineIds, heurDesc, /*getAll=*/false);
+
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR) << result.get_message();
 }
 
 TEST_F(TestGraph, IsSupportedAutoBuildsGraphIfNotBuilt)

@@ -36,6 +36,12 @@ public:
             return {ErrorCode::ATTRIBUTE_NOT_SET,
                     "PointwiseNode missing operation for pre-validation"};
         }
+        if(!toBackendPointwiseMode(attributes.get_mode()).has_value())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    std::string("PointwiseNode mode ") + to_string(attributes.get_mode())
+                        + " is not supported by hipDNN lowering"};
+        }
         if(attributes.outputs.size() != 1)
         {
             return {ErrorCode::INVALID_VALUE, "PointwiseNode must have exactly one output"};

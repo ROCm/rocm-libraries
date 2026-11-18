@@ -25,16 +25,17 @@ namespace hipdnn_frontend::graph
  *
  * RMSNormAttributes configures an RMS normalization operation. Unlike batch
  * normalization, RMSNorm normalizes using only the root mean square of the
- * input without subtracting the mean, and operates per-channel rather than
- * across the batch dimension.
+ * input without subtracting the mean, and normalizes over the trailing
+ * dimensions that Scale spans, not across the batch dimension.
  *
  * **Required inputs:**
  * - X: Input tensor to normalize
- * - Scale: Per-channel scale (gamma) tensor with shape [1, C, 1, 1, ...]
+ * - Scale: Scale (gamma) tensor of the rank of X; its shape encodes the
+ *   normalized shape (see Graph::rmsnorm())
  * - Epsilon: Scalar numerical stability constant
  *
  * **Optional inputs:**
- * - Bias: Per-channel bias (beta) tensor with shape [1, C, 1, 1, ...]
+ * - Bias: Bias (beta) tensor with the same shape as Scale
  *
  * **Required outputs:**
  * - Y: Normalized output tensor (same shape as X)

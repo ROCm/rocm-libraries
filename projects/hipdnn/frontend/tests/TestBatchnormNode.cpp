@@ -687,6 +687,56 @@ TEST(TestBatchnormNode, PreValidateAcceptsCompleteRunningStats)
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
+TEST(TestBatchnormNode, PreValidateRejectsMomentumWithoutPreviousRunningStats)
+{
+    BatchnormAttributes batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_scale(scaleTensor);
+
+    auto biasTensor = std::make_shared<TensorAttributes>();
+    biasTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_bias(biasTensor);
+
+    auto epsilonTensor = std::make_shared<TensorAttributes>();
+    epsilonTensor->set_dim({1}).set_value(1e-5);
+    batchnormAttributes.set_epsilon(epsilonTensor);
+
+    auto momentumTensor = std::make_shared<TensorAttributes>();
+    momentumTensor->set_value(0.1);
+    batchnormAttributes.set_momentum(momentumTensor);
+
+    const GraphAttributes graphAttributes;
+
+    // Momentum without any running statistics.
+    auto withoutStats = batchnormAttributes;
+    const BatchnormNode nodeWithoutStats(std::move(withoutStats), graphAttributes);
+    auto error = nodeWithoutStats.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.get_message().find("momentum"), std::string::npos) << error.get_message();
+
+    // Momentum with the complete running statistics.
+    auto runningStat = [] {
+        auto tensor = std::make_shared<TensorAttributes>();
+        tensor->set_dim({1, 64, 1, 1});
+        return tensor;
+    };
+    batchnormAttributes.set_prev_running_mean(runningStat())
+        .set_prev_running_variance(runningStat())
+        .set_next_running_mean(runningStat())
+        .set_next_running_variance(runningStat());
+    const BatchnormNode nodeWithStats(std::move(batchnormAttributes), graphAttributes);
+    error = nodeWithStats.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK) << error.get_message();
+}
+
 // ============================================================================
 // 5D Tensor (NCDHW) Validation Tests
 // ============================================================================

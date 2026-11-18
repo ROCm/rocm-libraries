@@ -2,11 +2,15 @@
 // SPDX-License-Identifier:  MIT
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/ResampleBwdAttributes.hpp>
 #include <hipdnn_frontend/node/ResampleBwdNode.hpp>
 
+#include <cstdint>
+#include <limits>
 #include <memory>
+#include <string>
 #include <unordered_set>
 #include <vector>
 
@@ -34,6 +38,7 @@ ResampleBwdAttributes createValidAttributes()
     attrs.set_post_padding({1, 1});
     attrs.set_stride({2, 2});
     attrs.set_window({3, 3});
+    attrs.set_resample_mode(ResampleMode::AVGPOOL_EXCLUDE_PADDING);
 
     return attrs;
 }
@@ -62,9 +67,14 @@ ResampleBwdAttributes createInferableAttributes()
     attrs.set_post_padding({0, 0});
     attrs.set_stride({2, 2});
     attrs.set_window({2, 2});
+    attrs.set_resample_mode(ResampleMode::AVGPOOL_EXCLUDE_PADDING);
 
     return attrs;
 }
+
+// Mode values probed by the lowering drift guards; values past the last enumerator are included
+// so that an enumerator added later is covered too.
+constexpr int K_MODE_PROBE_END = 16;
 
 } // namespace
 
@@ -151,6 +161,7 @@ TEST(TestResampleBwdNode, PreValidateNodeMissingParameters)
     dxTensor->set_dim({1, 3, 32, 32});
     dxTensor->set_stride({3072, 1024, 32, 1});
     attrs.set_dx(dxTensor);
+    attrs.set_resample_mode(ResampleMode::AVGPOOL_EXCLUDE_PADDING);
 
     // Required parameters are missing
     const GraphAttributes graphAttributes;
@@ -324,6 +335,45 @@ TEST(TestResampleBwdNode, PreValidateNodeAcceptsWindowWiderThanPaddedDx)
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 }
 
+TEST(TestResampleBwdNode, PreValidateNodeAcceptsExactlyTheResampleModesLoweringMaps)
+{
+    for(int raw = 0; raw < K_MODE_PROBE_END; ++raw)
+    {
+        const auto mode = static_cast<ResampleMode>(raw);
+        auto attrs = createValidAttributes();
+        attrs.set_resample_mode(mode);
+        attrs.set_index(createValidIndexTensor());
+
+        const GraphAttributes graphAttributes;
+        const ResampleBwdNode node(std::move(attrs), graphAttributes);
+
+        auto error = node.pre_validate_node();
+        const auto expected = toBackendResampleMode(mode).has_value() ? error_code_t::OK
+                                                                      : error_code_t::INVALID_VALUE;
+        EXPECT_EQ(error.code, expected) << "resample mode " << raw << ": " << error.err_msg;
+    }
+}
+
+TEST(TestResampleBwdNode, PreValidateNodeAcceptsExactlyThePaddingModesLoweringMaps)
+{
+    // NOT_SET has a backend value and stays accepted: resample backward has no padding default
+    // to require
+    for(int raw = 0; raw < K_MODE_PROBE_END; ++raw)
+    {
+        const auto mode = static_cast<PaddingMode>(raw);
+        auto attrs = createValidAttributes();
+        attrs.set_padding_mode(mode);
+
+        const GraphAttributes graphAttributes;
+        const ResampleBwdNode node(std::move(attrs), graphAttributes);
+
+        auto error = node.pre_validate_node();
+        const auto expected = toBackendPaddingMode(mode).has_value() ? error_code_t::OK
+                                                                     : error_code_t::INVALID_VALUE;
+        EXPECT_EQ(error.code, expected) << "padding mode " << raw << ": " << error.err_msg;
+    }
+}
+
 // --- InferPropertiesNode ---
 
 TEST(TestResampleBwdNode, InferPropertiesNode)
@@ -401,6 +451,47 @@ TEST(TestResampleBwdNode, InferPropertiesNodeRejectsNonPositiveDxExtent)
     // (1 - 1) * 1 - 5 - 5 + 1 = -9
     auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_TRUE(dxTensor->get_dim().empty());
+}
+
+TEST(TestResampleBwdNode, InferPropertiesNodeRejectsStrideOverflow)
+{
+    // (5 - 1) * stride exceeds int64; wrapped, it gives a dx extent of 5
+    constexpr int64_t K_STRIDE_PAST_QUARTER = (int64_t{1} << 62) + 1;
+    auto attrs = createInferableAttributes();
+    attrs.get_dy()->set_dim({1, 3, 5, 5});
+    attrs.get_dy()->set_stride({75, 25, 5, 1});
+    attrs.set_stride({K_STRIDE_PAST_QUARTER, 1});
+    attrs.set_window({1, 1});
+    auto dxTensor = attrs.get_dx();
+
+    const GraphAttributes graphAttributes;
+    ResampleBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
+    EXPECT_TRUE(dxTensor->get_dim().empty());
+}
+
+TEST(TestResampleBwdNode, InferPropertiesNodeRejectsPaddingUnderflow)
+{
+    // 0 - pre_padding - post_padding is below int64's minimum; wrapped, it gives a dx extent of 3
+    constexpr int64_t K_MAX = std::numeric_limits<int64_t>::max();
+    auto attrs = createInferableAttributes();
+    attrs.get_dy()->set_dim({1, 3, 1, 1});
+    attrs.set_stride({1, 1});
+    attrs.set_pre_padding({K_MAX, 0});
+    attrs.set_post_padding({K_MAX, 0});
+    attrs.set_window({1, 1});
+    auto dxTensor = attrs.get_dx();
+
+    const GraphAttributes graphAttributes;
+    ResampleBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
     EXPECT_TRUE(dxTensor->get_dim().empty());
 }
 

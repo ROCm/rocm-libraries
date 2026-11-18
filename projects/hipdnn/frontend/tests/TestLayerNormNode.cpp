@@ -679,8 +679,37 @@ TEST(TestLayerNormNode, PreValidateFailsXYShapeMismatch)
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
-TEST(TestLayerNormNode, PreValidateFailsScaleWithNoDimensions)
+TEST(TestLayerNormNode, PreValidateAcceptsScaleWithNoDimensions)
 {
+    // infer_properties_node() fills the scale dims with [1, 512]
+    auto x = makeTensor({32, 512});
+    auto attrs = makeMinimalAttrs(x);
+    attrs.set_scale(std::make_shared<TensorAttributes>()); // No dimensions
+    attrs.set_bias(makeTensor({1, 512}));
+
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestLayerNormNode, PreValidateAcceptsBiasWithNoDimensions)
+{
+    // infer_properties_node() fills the bias dims with [1, 512]
+    auto x = makeTensor({32, 512});
+    auto attrs = makeMinimalAttrs(x);
+    attrs.set_scale(makeTensor({1, 512}));
+    attrs.set_bias(std::make_shared<TensorAttributes>()); // No dimensions
+
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestLayerNormNode, PreValidateFailsBiasNotMatchingInferredScale)
+{
+    // The unset scale is inferred as [1, 512], which a rank-reduced bias [512] does not match
     auto x = makeTensor({32, 512});
     auto attrs = makeMinimalAttrs(x);
     attrs.set_scale(std::make_shared<TensorAttributes>()); // No dimensions
@@ -688,19 +717,72 @@ TEST(TestLayerNormNode, PreValidateFailsScaleWithNoDimensions)
     const GraphAttributes graphAttrs;
     const LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
-    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+    EXPECT_NE(err.err_msg.find("inferred"), std::string::npos) << err.err_msg;
 }
 
-TEST(TestLayerNormNode, PreValidateFailsBiasWithNoDimensions)
+TEST(TestLayerNormNode, ValidateInfersUnsetScaleAndBias)
 {
-    auto x = makeTensor({32, 512});
+    // pre_validate_node() then infer_properties_node(), the order validate() runs them in
+    auto x = makeTensor({32, 512}, {512, 1});
     auto attrs = makeMinimalAttrs(x);
-    attrs.set_bias(std::make_shared<TensorAttributes>()); // No dimensions
+    attrs.set_forward_phase(NormFwdPhase::TRAINING);
+    auto scale = std::make_shared<TensorAttributes>();
+    auto bias = std::make_shared<TensorAttributes>();
+    auto mean = std::make_shared<TensorAttributes>();
+    auto invVariance = std::make_shared<TensorAttributes>();
+    attrs.set_scale(scale);
+    attrs.set_bias(bias);
+    attrs.set_mean(mean);
+    attrs.set_inv_variance(invVariance);
 
     const GraphAttributes graphAttrs;
-    const LayerNormNode node(std::move(attrs), graphAttrs);
+    LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
-    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    ASSERT_EQ(err.code, error_code_t::OK) << err.err_msg;
+    err = node.infer_properties_node();
+    ASSERT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    EXPECT_EQ(scale->get_dim(), (std::vector<int64_t>{1, 512}));
+    EXPECT_EQ(bias->get_dim(), (std::vector<int64_t>{1, 512}));
+    EXPECT_EQ(scale->get_stride(), (std::vector<int64_t>{512, 1}));
+    EXPECT_EQ(mean->get_dim(), (std::vector<int64_t>{32, 1}));
+    EXPECT_EQ(invVariance->get_dim(), (std::vector<int64_t>{32, 1}));
+
+    err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestLayerNormNode, ValidateInfersUnsetScaleAndBiasFromExplicitNormalizedDimCount)
+{
+    // With normalized_dim_count 2, x [2, 3, 5, 7] gives scale and bias [1, 1, 5, 7]; the
+    // cuDNN form [1, 3, 5, 7] would conflict with the count
+    auto x = makeTensor({2, 3, 5, 7}, {105, 35, 7, 1});
+    auto attrs = makeMinimalAttrs(x);
+    attrs.set_forward_phase(NormFwdPhase::TRAINING);
+    attrs.set_normalized_dim_count(2);
+    auto scale = std::make_shared<TensorAttributes>();
+    auto bias = std::make_shared<TensorAttributes>();
+    auto mean = std::make_shared<TensorAttributes>();
+    attrs.set_scale(scale);
+    attrs.set_bias(bias);
+    attrs.set_mean(mean);
+    attrs.set_inv_variance(std::make_shared<TensorAttributes>());
+
+    const GraphAttributes graphAttrs;
+    LayerNormNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    ASSERT_EQ(err.code, error_code_t::OK) << err.err_msg;
+    err = node.infer_properties_node();
+    ASSERT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    EXPECT_EQ(scale->get_dim(), (std::vector<int64_t>{1, 1, 5, 7}));
+    EXPECT_EQ(bias->get_dim(), (std::vector<int64_t>{1, 1, 5, 7}));
+    EXPECT_EQ(node.attributes.get_normalized_dim_count(), 2);
+    EXPECT_EQ(mean->get_dim(), (std::vector<int64_t>{2, 3, 1, 1}));
+
+    err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
 // ============================================================================

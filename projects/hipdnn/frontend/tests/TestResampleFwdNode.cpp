@@ -3,8 +3,13 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
 #include <hipdnn_frontend/node/ResampleFwdNode.hpp>
+
+#include <cstdint>
+#include <limits>
+#include <string>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -12,11 +17,13 @@ using namespace hipdnn_frontend::graph;
 namespace
 {
 
-// Runs output inference for x = {1, 3, 8, 8} with zero padding and the given window and
-// stride; yDims receives the y dimensions afterwards.
+// Runs output inference for x = {1, 3, 8, 8} with the given window, stride and padding;
+// yDims receives the y dimensions afterwards.
 Error inferYFromX8x8(const std::vector<int64_t>& window,
                      const std::vector<int64_t>& stride,
-                     std::vector<int64_t>& yDims)
+                     std::vector<int64_t>& yDims,
+                     const std::vector<int64_t>& prePadding = {0, 0},
+                     const std::vector<int64_t>& postPadding = {0, 0})
 {
     ResampleFwdAttributes attr;
     auto xTensor = std::make_shared<TensorAttributes>();
@@ -26,8 +33,8 @@ Error inferYFromX8x8(const std::vector<int64_t>& window,
     auto yTensor = std::make_shared<TensorAttributes>();
     attr.set_y(yTensor);
 
-    attr.set_pre_padding(std::vector<int64_t>{0, 0});
-    attr.set_post_padding(std::vector<int64_t>{0, 0});
+    attr.set_pre_padding(prePadding);
+    attr.set_post_padding(postPadding);
     attr.set_window(window);
     attr.set_stride(stride);
 
@@ -38,11 +45,9 @@ Error inferYFromX8x8(const std::vector<int64_t>& window,
     return error;
 }
 
-// Pre-validates x = {1, 3, 8, 8} and y = {1, 3, 4, 4} with the given resample parameters.
-Error preValidateX8x8(const std::vector<int64_t>& window,
-                      const std::vector<int64_t>& stride,
-                      const std::vector<int64_t>& prePadding,
-                      const std::vector<int64_t>& postPadding)
+// x = {1, 3, 8, 8} max-pooled to y = {1, 3, 4, 4} by a 2x2 window with stride 2 and zero
+// padding mode.
+ResampleFwdAttributes makeX8x8Attributes()
 {
     ResampleFwdAttributes attr;
     auto xTensor = std::make_shared<TensorAttributes>();
@@ -53,15 +58,39 @@ Error preValidateX8x8(const std::vector<int64_t>& window,
     yTensor->set_dim({1, 3, 4, 4});
     attr.set_y(yTensor);
 
-    attr.set_pre_padding(prePadding);
-    attr.set_post_padding(postPadding);
-    attr.set_window(window);
-    attr.set_stride(stride);
+    attr.set_pre_padding(std::vector<int64_t>{0, 0});
+    attr.set_post_padding(std::vector<int64_t>{0, 0});
+    attr.set_window(std::vector<int64_t>{2, 2});
+    attr.set_stride(std::vector<int64_t>{2, 2});
+    attr.set_resample_mode(ResampleMode::MAXPOOL);
+    attr.set_padding_mode(PaddingMode::ZERO_PAD);
+    return attr;
+}
 
+Error preValidate(ResampleFwdAttributes attr)
+{
     const GraphAttributes graphAttributes;
     const ResampleFwdNode node(std::move(attr), graphAttributes);
     return node.pre_validate_node();
 }
+
+// Pre-validates makeX8x8Attributes() with the given resample parameters.
+Error preValidateX8x8(const std::vector<int64_t>& window,
+                      const std::vector<int64_t>& stride,
+                      const std::vector<int64_t>& prePadding,
+                      const std::vector<int64_t>& postPadding)
+{
+    auto attr = makeX8x8Attributes();
+    attr.set_pre_padding(prePadding);
+    attr.set_post_padding(postPadding);
+    attr.set_window(window);
+    attr.set_stride(stride);
+    return preValidate(std::move(attr));
+}
+
+// Mode values probed by the lowering drift guards; values past the last enumerator are included
+// so that an enumerator added later is covered too.
+constexpr int K_MODE_PROBE_END = 16;
 
 } // namespace
 
@@ -117,6 +146,8 @@ TEST(TestResampleFwdNode, PreValidateNode)
     indexTensor->set_data_type(hipdnn_frontend::DataType::INT32);
     attr.set_index(indexTensor);
     attr.set_generate_index(true);
+    attr.set_resample_mode(ResampleMode::MAXPOOL);
+    attr.set_padding_mode(PaddingMode::NEG_INF_PAD);
 
     const GraphAttributes graphAttributes;
     const ResampleFwdNode node(std::move(attr), graphAttributes);
@@ -128,6 +159,8 @@ TEST(TestResampleFwdNode, PreValidateNode)
 TEST(TestResampleFwdNode, PreValidateNodeMissingValues)
 {
     ResampleFwdAttributes attr;
+    attr.set_resample_mode(ResampleMode::AVGPOOL_INCLUDE_PADDING);
+    attr.set_padding_mode(PaddingMode::ZERO_PAD);
 
     const GraphAttributes graphAttributes;
     auto resampleFwdAttributesCopy = attr;
@@ -161,6 +194,7 @@ TEST(TestResampleFwdNode, MissingIndexTensor)
     auto yTensor = std::make_shared<TensorAttributes>();
     yTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
     attr.set_y(yTensor);
+    attr.set_padding_mode(PaddingMode::ZERO_PAD);
 
     const GraphAttributes graphAttributes;
 
@@ -178,7 +212,6 @@ TEST(TestResampleFwdNode, MissingIndexTensor)
     // Ok to not have index tensor when using a resample mode other than MAXPOOL
     {
         ResampleFwdAttributes attrCopy = attr;
-        attrCopy.set_generate_index(true);
         attrCopy.set_resample_mode(ResampleMode::AVGPOOL_EXCLUDE_PADDING);
         const ResampleFwdNode node(std::move(attrCopy), graphAttributes);
 
@@ -186,7 +219,7 @@ TEST(TestResampleFwdNode, MissingIndexTensor)
         EXPECT_EQ(error.code, ErrorCode::OK);
     }
 
-    // Not ok to not have index tensor when using a resample mode other than MAXPOOL
+    // Not ok to not have index tensor when MAXPOOL index generation is requested
     {
         ResampleFwdAttributes attrCopy = attr;
         attrCopy.set_generate_index(true);
@@ -203,6 +236,8 @@ TEST(TestResampleFwdNode, InvalidIndexType)
     ResampleFwdAttributes attr;
     attr.set_x(std::make_shared<TensorAttributes>());
     attr.set_y(std::make_shared<TensorAttributes>());
+    attr.set_resample_mode(ResampleMode::MAXPOOL);
+    attr.set_padding_mode(PaddingMode::ZERO_PAD);
     auto indexTensor = std::make_shared<TensorAttributes>();
     indexTensor->set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr.set_index(indexTensor);
@@ -224,6 +259,8 @@ TEST(TestResampleFwdNode, InvalidXDim)
     auto yTensor = std::make_shared<TensorAttributes>();
     yTensor->set_dim({2, 64, 32, 32});
     attr.set_y(yTensor);
+    attr.set_resample_mode(ResampleMode::MAXPOOL);
+    attr.set_padding_mode(PaddingMode::ZERO_PAD);
 
     const GraphAttributes graphAttributes;
     const ResampleFwdNode node(std::move(attr), graphAttributes);
@@ -242,6 +279,8 @@ TEST(TestResampleFwdNode, InvalidYDim)
     auto yTensor = std::make_shared<TensorAttributes>();
     yTensor->set_dim({2, 64});
     attr.set_y(yTensor);
+    attr.set_resample_mode(ResampleMode::MAXPOOL);
+    attr.set_padding_mode(PaddingMode::ZERO_PAD);
 
     const GraphAttributes graphAttributes;
     const ResampleFwdNode node(std::move(attr), graphAttributes);
@@ -389,6 +428,8 @@ TEST(TestResampleFwdNode, PreValidateRejectsWindowShorterThanSpatialRankWithYSet
     attr.set_post_padding(std::vector<int64_t>{0, 0});
     attr.set_stride(std::vector<int64_t>{2, 2});
     attr.set_window(std::vector<int64_t>{2});
+    attr.set_resample_mode(ResampleMode::MAXPOOL);
+    attr.set_padding_mode(PaddingMode::ZERO_PAD);
 
     const GraphAttributes graphAttributes;
     const ResampleFwdNode node(std::move(attr), graphAttributes);
@@ -412,6 +453,8 @@ TEST(TestResampleFwdNode, PreValidateAcceptsWindowWiderThanPaddedInputWithYSet)
     attr.set_post_padding(std::vector<int64_t>{0, 0});
     attr.set_stride(std::vector<int64_t>{2, 2});
     attr.set_window(std::vector<int64_t>{9, 9});
+    attr.set_resample_mode(ResampleMode::MAXPOOL);
+    attr.set_padding_mode(PaddingMode::ZERO_PAD);
 
     const GraphAttributes graphAttributes;
     const ResampleFwdNode node(std::move(attr), graphAttributes);
@@ -454,6 +497,82 @@ TEST(TestResampleFwdNode, PreValidateRejectsStrideCountMismatch)
 {
     auto error = preValidateX8x8({2, 2}, {2, 2, 2}, {0, 0}, {0, 0});
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestResampleFwdNode, PreValidateRejectsUnsetPaddingMode)
+{
+    auto attr = makeX8x8Attributes();
+    attr.set_padding_mode(PaddingMode::NOT_SET);
+
+    auto error = preValidate(std::move(attr));
+    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET) << error.err_msg;
+}
+
+TEST(TestResampleFwdNode, PreValidateAcceptsExactlyTheResampleModesLoweringMaps)
+{
+    for(int raw = 0; raw < K_MODE_PROBE_END; ++raw)
+    {
+        const auto mode = static_cast<ResampleMode>(raw);
+        auto attr = makeX8x8Attributes();
+        attr.set_resample_mode(mode);
+
+        auto error = preValidate(std::move(attr));
+        const auto expected
+            = toBackendResampleMode(mode).has_value() ? ErrorCode::OK : ErrorCode::INVALID_VALUE;
+        EXPECT_EQ(error.code, expected) << "resample mode " << raw << ": " << error.err_msg;
+    }
+}
+
+TEST(TestResampleFwdNode, PreValidateAcceptsExactlyThePaddingModesLoweringMaps)
+{
+    for(int raw = 0; raw < K_MODE_PROBE_END; ++raw)
+    {
+        const auto mode = static_cast<PaddingMode>(raw);
+        auto attr = makeX8x8Attributes();
+        attr.set_padding_mode(mode);
+
+        auto error = preValidate(std::move(attr));
+        // NOT_SET has a backend value but is rejected as missing: padding_mode has no default
+        auto expected
+            = toBackendPaddingMode(mode).has_value() ? ErrorCode::OK : ErrorCode::INVALID_VALUE;
+        if(mode == PaddingMode::NOT_SET)
+        {
+            expected = ErrorCode::ATTRIBUTE_NOT_SET;
+        }
+        EXPECT_EQ(error.code, expected) << "padding mode " << raw << ": " << error.err_msg;
+    }
+}
+
+TEST(TestResampleFwdNode, PreValidateRejectsGenerateIndexForAvgpool)
+{
+    for(const auto mode :
+        {ResampleMode::AVGPOOL_EXCLUDE_PADDING, ResampleMode::AVGPOOL_INCLUDE_PADDING})
+    {
+        auto attr = makeX8x8Attributes();
+        attr.set_resample_mode(mode).set_generate_index(true);
+
+        auto error = preValidate(attr);
+        EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE) << error.err_msg;
+
+        // An index tensor does not make index generation valid for average pooling
+        auto indexTensor = std::make_shared<TensorAttributes>();
+        indexTensor->set_data_type(DataType::INT32);
+        attr.set_index(indexTensor);
+
+        error = preValidate(std::move(attr));
+        EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE) << error.err_msg;
+    }
+}
+
+TEST(TestResampleFwdNode, InferRejectsPaddingOverflow)
+{
+    // 8 + pre_padding + post_padding exceeds int64; wrapped, it gives a y extent of 5
+    constexpr int64_t K_MAX = std::numeric_limits<int64_t>::max();
+    std::vector<int64_t> yDims;
+    auto error = inferYFromX8x8({2, 2}, {1, 1}, yDims, {K_MAX, 0}, {K_MAX, 0});
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
+    EXPECT_TRUE(yDims.empty());
 }
 
 TEST(TestResampleFwdNode, InferRejectsXWithoutDims)

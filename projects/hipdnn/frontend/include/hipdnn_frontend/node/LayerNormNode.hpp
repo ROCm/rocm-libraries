@@ -116,34 +116,57 @@ public:
         // SECTION 5: Validate Scale and Bias Tensors
         // Scale and bias are per-feature parameters matching the normalized dimensions.
         // For input shape [N, C, H, W] normalized over last 3 dims, scale/bias shape is [C, H, W]
-        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(scale, 1, "Scale tensor"));
-        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(bias, 1, "Bias tensor"));
+        // Unset scale or bias dims are filled by infer_properties_node(); the checks below
+        // validate the dims they receive there.
+        const auto& xDims = x->get_dim();
+        const bool scaleDimsSet = detail::areTensorDimensionsSet(scale);
+        const bool biasDimsSet = detail::areTensorDimensionsSet(bias);
+        std::vector<int64_t> inferredAffineDims;
+        if(!scaleDimsSet || !biasDimsSet)
+        {
+            inferredAffineDims = inferAffineDims(xDims, attributes.get_normalized_dim_count());
+        }
+        const auto& scaleDims = scaleDimsSet ? scale->get_dim() : inferredAffineDims;
 
         // Scale and bias should have matching shapes
-        HIPDNN_CHECK_ERROR(
-            detail::validateTensorShapesMatchIfSet(scale, bias, "Scale tensor", "Bias tensor"));
+        if(scaleDimsSet && biasDimsSet)
+        {
+            HIPDNN_CHECK_ERROR(
+                detail::validateTensorShapesMatch(scale, bias, "Scale tensor", "Bias tensor"));
+        }
+        else if(scaleDimsSet != biasDimsSet)
+        {
+            const auto& setTensor = scaleDimsSet ? scale : bias;
+            HIPDNN_RETURN_IF_TRUE(setTensor->get_dim() != inferredAffineDims,
+                                  ErrorCode::INVALID_VALUE,
+                                  "LayerNormNode "
+                                      + detail::getTensorNameForError(
+                                          setTensor, scaleDimsSet ? "Scale tensor" : "Bias tensor")
+                                      + " dims must equal the dims inferred from x for the unset "
+                                      + (scaleDimsSet ? "bias" : "scale") + " tensor");
+        }
 
         // SECTION 6: Validate Scale, Bias and Statistics Against the Normalized Dims of X
         // Scale and bias hold the last k dims of x, optionally preceded by 1s; mean and
         // inv_variance hold the first n - k (batch) dims of x, optionally followed by k 1s.
         int64_t normalizedDimCount = 0;
         HIPDNN_CHECK_ERROR(
-            detail::deriveLayernormNormalizedDimCount(x->get_dim(),
-                                                      scale->get_dim(),
+            detail::deriveLayernormNormalizedDimCount(xDims,
+                                                      scaleDims,
                                                       attributes.get_normalized_dim_count(),
                                                       "LayerNormNode",
                                                       normalizedDimCount));
-        HIPDNN_CHECK_ERROR(detail::validateLayernormAffineIfSet(
-            scale, x->get_dim(), normalizedDimCount, "Scale tensor"));
-        HIPDNN_CHECK_ERROR(detail::validateLayernormAffineIfSet(
-            bias, x->get_dim(), normalizedDimCount, "Bias tensor"));
+        HIPDNN_CHECK_ERROR(
+            detail::validateLayernormAffineIfSet(scale, xDims, normalizedDimCount, "Scale tensor"));
+        HIPDNN_CHECK_ERROR(
+            detail::validateLayernormAffineIfSet(bias, xDims, normalizedDimCount, "Bias tensor"));
 
         if(attributes.get_forward_phase() != NormFwdPhase::INFERENCE)
         {
             HIPDNN_CHECK_ERROR(detail::validateLayernormStatsIfSet(
-                attributes.get_mean(), x->get_dim(), normalizedDimCount, "Mean tensor"));
+                attributes.get_mean(), xDims, normalizedDimCount, "Mean tensor"));
             HIPDNN_CHECK_ERROR(detail::validateLayernormStatsIfSet(attributes.get_inv_variance(),
-                                                                   x->get_dim(),
+                                                                   xDims,
                                                                    normalizedDimCount,
                                                                    "Inverse variance tensor"));
         }
@@ -186,60 +209,40 @@ public:
             }
         }
 
-        // Infer scale and bias dims and strides from X's normalized dimensions
-        // For input [N, C, H, W], scale/bias dim = [1, C, H, W] (batch dim set to 1)
+        // Infer unset scale and bias dims from x (see inferAffineDims) and their strides from
+        // the stride order of x
         auto scale = attributes.get_scale();
         auto bias = attributes.get_bias();
 
-        if(scale && !x->get_dim().empty())
-        {
-            if(scale->get_dim().empty())
+        auto inferAffineTensor = [&](const std::shared_ptr<TensorAttributes>& tensor) {
+            if(!tensor || x->get_dim().empty())
             {
-                auto scaleBiasDim = x->get_dim();
-                scaleBiasDim[0] = 1;
-                scale->set_dim(scaleBiasDim);
+                return;
             }
-            if(scale->get_stride().empty())
+            if(tensor->get_dim().empty())
             {
-                const auto& scaleDim = scale->get_dim();
-                if(!x->get_stride().empty() && x->get_stride().size() == scaleDim.size())
+                tensor->set_dim(
+                    inferAffineDims(x->get_dim(), attributes.get_normalized_dim_count()));
+            }
+            if(tensor->get_stride().empty())
+            {
+                const auto& dims = tensor->get_dim();
+                if(!x->get_stride().empty() && x->get_stride().size() == dims.size())
                 {
                     auto strideOrder
                         = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
-                    scale->set_stride(
-                        hipdnn_data_sdk::utilities::generateStrides(scaleDim, strideOrder));
+                    tensor->set_stride(
+                        hipdnn_data_sdk::utilities::generateStrides(dims, strideOrder));
                 }
                 else
                 {
-                    scale->set_stride(hipdnn_data_sdk::utilities::generateStrides(scaleDim));
+                    tensor->set_stride(hipdnn_data_sdk::utilities::generateStrides(dims));
                 }
             }
-        }
+        };
 
-        if(bias && !x->get_dim().empty())
-        {
-            if(bias->get_dim().empty())
-            {
-                auto scaleBiasDim = x->get_dim();
-                scaleBiasDim[0] = 1;
-                bias->set_dim(scaleBiasDim);
-            }
-            if(bias->get_stride().empty())
-            {
-                const auto& biasDim = bias->get_dim();
-                if(!x->get_stride().empty() && x->get_stride().size() == biasDim.size())
-                {
-                    auto strideOrder
-                        = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
-                    bias->set_stride(
-                        hipdnn_data_sdk::utilities::generateStrides(biasDim, strideOrder));
-                }
-                else
-                {
-                    bias->set_stride(hipdnn_data_sdk::utilities::generateStrides(biasDim));
-                }
-            }
-        }
+        inferAffineTensor(scale);
+        inferAffineTensor(bias);
 
         // Normalized dim count: the explicit attribute if set, else derived from x and scale
         const bool shapesSet = scale && !scale->get_dim().empty() && !x->get_dim().empty();
@@ -306,6 +309,25 @@ public:
         std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
     {
         return detail::createLayernormOperation(attributes, tensorDescs, operations);
+    }
+
+private:
+    // Dims infer_properties_node() gives an unset scale or bias. Without an explicit
+    // normalized_dim_count this is x with the batch dim set to 1, as cuDNN infers
+    // ([N, C, H, W] gives [1, C, H, W]). With an explicit count k it is 1s followed by the
+    // last k dims of x ([N, C, H, W] and k = 2 give [1, 1, H, W]), so the dims satisfy k.
+    // An out-of-range count falls back to the first form; validation rejects the count.
+    static std::vector<int64_t> inferAffineDims(const std::vector<int64_t>& xDims,
+                                                int64_t explicitCount)
+    {
+        auto dims = xDims;
+        const auto rank = static_cast<int64_t>(xDims.size());
+        const int64_t leadingOnes
+            = explicitCount > 0 && explicitCount <= rank ? rank - explicitCount : 1;
+        std::fill(dims.begin(),
+                  dims.begin() + static_cast<std::ptrdiff_t>(std::min(leadingOnes, rank)),
+                  1);
+        return dims;
     }
 };
 } // namespace hipdnn_frontend::graph

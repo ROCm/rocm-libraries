@@ -10,6 +10,7 @@
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/detail/ConvolutionDgradPacker.hpp>
 #include <hipdnn_frontend/detail/ConvolutionDgradUnpacker.hpp>
+#include <hipdnn_frontend/node/detail/CheckedShapeMath.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -211,8 +212,18 @@ public:
             auto kernelSize = wDims[i + 2];
             auto inputSize = dxDims[i + 2];
 
-            auto dilatedKernelSize = (dilationVal * (kernelSize - 1)) + 1;
-            auto numerator = inputSize + prePad + postPad - dilatedKernelSize;
+            int64_t dilatedKernelSize = 0;
+            HIPDNN_CHECK_ERROR(detail::checkedDilatedKernelSize(
+                "ConvolutionDgradNode", i, dilationVal, kernelSize, dilatedKernelSize));
+
+            int64_t numerator = 0;
+            HIPDNN_CHECK_ERROR(detail::checkedPaddedNumerator("ConvolutionDgradNode",
+                                                              i,
+                                                              inputSize,
+                                                              prePad,
+                                                              postPad,
+                                                              dilatedKernelSize,
+                                                              numerator));
 
             HIPDNN_RETURN_IF_LT(numerator,
                                 0,
@@ -223,7 +234,9 @@ public:
                                     + std::to_string(kernelSize) + ") and dilation ("
                                     + std::to_string(dilationVal) + ")");
 
-            const int64_t expectedOutputSize = (numerator / strideVal) + 1;
+            int64_t expectedOutputSize = 0;
+            HIPDNN_CHECK_ERROR(detail::checkedStridedExtent(
+                "ConvolutionDgradNode", i, numerator, strideVal, expectedOutputSize));
 
             HIPDNN_RETURN_IF_NE(
                 outputSize,

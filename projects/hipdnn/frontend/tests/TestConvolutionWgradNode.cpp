@@ -11,6 +11,12 @@
 
 #include <gmock/gmock.h>
 
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <string>
+#include <vector>
+
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace hipdnn_tests::constants;
@@ -2113,6 +2119,76 @@ TEST(TestConvolutionWgradNode, PreValidateNodeInputTooSmall)
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+namespace
+{
+constexpr int64_t K_INT64_MAX = std::numeric_limits<int64_t>::max();
+// dilation * 4 wraps to 4 in two's complement
+constexpr int64_t K_WRAPPING_DILATION = (int64_t{1} << 62) + 1;
+
+// Wgrad node with x {1, 3, 8, 8}, stride 1 and the same padding before and after each spatial
+// dimension.
+ConvolutionWgradNode makeShapeOverflowWgradNode(const std::vector<int64_t>& dwDims,
+                                                const std::vector<int64_t>& dyDims,
+                                                const std::vector<int64_t>& padding,
+                                                const std::vector<int64_t>& dilation)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 8, 8});
+    xTensor->set_stride({192, 64, 8, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim(dyDims);
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    dwTensor->set_dim(dwDims);
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding(padding);
+    convAttributes.set_post_padding(padding);
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation(dilation);
+
+    return {std::move(convAttributes), GraphAttributes{}};
+}
+} // namespace
+
+TEST(TestConvolutionWgradNode, PreValidateNodeRejectsPaddingOverflow)
+{
+    // dy matches the extent the wrapped numerator 8 + max + max - 3 = 3 would produce
+    const auto node
+        = makeShapeOverflowWgradNode({64, 3, 3, 3}, {1, 64, 4, 6}, {K_INT64_MAX, 0}, {1, 1});
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
+}
+
+TEST(TestConvolutionWgradNode, PreValidateNodeRejectsDilationOverflow)
+{
+    const auto node = makeShapeOverflowWgradNode(
+        {64, 3, 5, 5}, {1, 64, 4, 4}, {0, 0}, {K_WRAPPING_DILATION, 1});
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
+}
+
+TEST(TestConvolutionWgradNode, PreValidateNodeLargeDilationKeepsInputTooSmallError)
+{
+    // The dilated kernel size fits int64, so the input-too-small check reports it
+    const auto node
+        = makeShapeOverflowWgradNode({64, 3, 5, 5}, {1, 64, 4, 4}, {0, 0}, {int64_t{1} << 40, 1});
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("is too small"), std::string::npos) << error.err_msg;
+    EXPECT_EQ(error.err_msg.find("overflows"), std::string::npos) << error.err_msg;
 }
 
 // =============================================================================

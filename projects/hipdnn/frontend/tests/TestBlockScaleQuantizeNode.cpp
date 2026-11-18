@@ -347,6 +347,38 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeDefaultAxisNotDivisible)
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
+TEST(TestBlockScaleQuantizeNode, PreValidateNodeScaleRankMustMatchX)
+{
+    const auto makeNodeWithScaleDims = [](const std::vector<int64_t>& scaleDims) {
+        BlockScaleQuantizeAttributes attrs;
+
+        auto xTensor = std::make_shared<TensorAttributes>();
+        xTensor->set_dim({4, 64}).set_stride({64, 1});
+        attrs.set_x(xTensor);
+
+        auto scaleTensor = std::make_shared<TensorAttributes>();
+        scaleTensor->set_dim(scaleDims);
+        attrs.set_scale(scaleTensor);
+
+        attrs.set_y(std::make_shared<TensorAttributes>());
+        attrs.set_block_size(32);
+
+        const GraphAttributes graphAttributes;
+        return BlockScaleQuantizeNode(std::move(attrs), graphAttributes);
+    };
+
+    EXPECT_EQ(makeNodeWithScaleDims({4, 2}).pre_validate_node().code, ErrorCode::OK);
+
+    const std::vector<std::vector<int64_t>> mismatchedScaleDims
+        = {{4, 2, 1}, {4, 1, 2}, {4, 2, 1, 1}, {4}};
+    for(const auto& scaleDims : mismatchedScaleDims)
+    {
+        EXPECT_EQ(makeNodeWithScaleDims(scaleDims).pre_validate_node().code,
+                  ErrorCode::INVALID_VALUE)
+            << "scale rank " << scaleDims.size() << " vs x rank 2";
+    }
+}
+
 TEST(TestBlockScaleQuantizeNode, InferPropertiesNode)
 {
     BlockScaleQuantizeAttributes attrs;

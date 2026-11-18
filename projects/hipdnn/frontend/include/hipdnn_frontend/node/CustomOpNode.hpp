@@ -47,19 +47,35 @@ public:
     {
         for(const auto& tensor : attributes.inputs)
         {
-            if(tensor)
-            {
-                allTensors.insert(tensor);
-            }
+            detail::insertTensorWithAux(allTensors, tensor);
         }
 
         for(const auto& tensor : attributes.outputs)
         {
-            if(tensor)
-            {
-                allTensors.insert(tensor);
-            }
+            detail::insertTensorWithAux(allTensors, tensor);
         }
+    }
+
+    /// @brief Logical equality: same node type and logically equal CustomOpAttributes.
+    bool logicallyEquals(const INode& other) const override
+    {
+        if(getNodeType() != other.getNodeType())
+        {
+            return false;
+        }
+
+        return attributes.logicallyEquals(static_cast<const CustomOpNode&>(other).attributes);
+    }
+
+    /// @brief Strict equality: same node type and strictly equal CustomOpAttributes.
+    bool operator==(const INode& other) const override
+    {
+        if(getNodeType() != other.getNodeType())
+        {
+            return false;
+        }
+
+        return attributes == static_cast<const CustomOpNode&>(other).attributes;
     }
 
     std::vector<std::shared_ptr<TensorAttributes>> getNodeInputTensorAttributes() const override

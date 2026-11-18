@@ -484,7 +484,7 @@ TEST(TestCudnnShimGraphNodes, BlockScaleDequantizeValidGraphValidates)
     setFloatGraphTypes(graph);
 
     auto x = hipdnn_shim_test::makeTensor(graph, {2, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
-    auto scale = hipdnn_shim_test::makeTensor(graph, {2, 2, 32, 32}, {2048, 1024, 32, 1}, 2);
+    auto scale = hipdnn_shim_test::makeTensor(graph, {2, 64, 32, 1}, {2048, 32, 1, 1}, 2);
 
     auto y = graph.block_scale_dequantize(
         x,

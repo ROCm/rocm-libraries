@@ -24,6 +24,17 @@ namespace hipdnn_frontend::graph
 /**
  * @class MoeGroupedMatmulAttributes
  * @brief Configuration for MoeGroupedMatmul operations
+ *
+ * The routing mode selects the routing inputs the operation uses:
+ * - NONE: no routing inputs.
+ * - GATHER: token_index ([1, routed_tokens, 1], INT32) selects the source token
+ *   rows; the output has routed_tokens rows.
+ * - SCATTER: token_index and token_ks ([1, routed_tokens, 1], INT32) and top_k
+ *   (1 to the expert count). routed_tokens must equal the token tensor row count.
+ *
+ * Routing inputs a mode does not use are accepted and ignored: token_index under
+ * NONE, and token_ks and top_k under NONE and GATHER. They are not passed to the
+ * backend operation.
  */
 class MoeGroupedMatmulAttributes : public Attributes<MoeGroupedMatmulAttributes>
 {

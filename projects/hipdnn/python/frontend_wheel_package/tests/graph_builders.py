@@ -452,7 +452,7 @@ def build_block_scale_dequantize_graph():
     graph = create_float_graph()
     x = hipdnn.Tensor.create([2, 64, 32, 32], hipdnn.DataType.FLOAT)
     x.set_name("x")
-    scale = hipdnn.Tensor.create([2, 2, 32, 32], hipdnn.DataType.FLOAT)
+    scale = hipdnn.Tensor.create([2, 64, 32, 1], hipdnn.DataType.FLOAT)
     scale.set_name("scale")
 
     y = graph.block_scale_dequantize(

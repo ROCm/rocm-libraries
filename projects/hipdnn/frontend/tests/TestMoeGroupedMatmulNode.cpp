@@ -242,6 +242,23 @@ TEST(TestMoeGroupedMatmulNode, ScatterRequiresValidRoutingAndBoundedTopK)
               ErrorCode::INVALID_VALUE);
 }
 
+TEST(TestMoeGroupedMatmulNode, ScatterRoutedRowsMustMatchTokenRows)
+{
+    const GraphAttributes graphAttrs;
+
+    for(const int64_t routedTokens : {int64_t{6}, int64_t{10}})
+    {
+        auto attrs = createValidAttributes();
+        attrs.set_mode(MoeGroupedMatmulMode::SCATTER)
+            .set_token_index(makeRoutingTensor(routedTokens))
+            .set_token_ks(makeRoutingTensor(routedTokens))
+            .set_top_k(2);
+        EXPECT_EQ(MoeGroupedMatmulNode(std::move(attrs), graphAttrs).pre_validate_node().code,
+                  ErrorCode::INVALID_VALUE)
+            << "routed tokens " << routedTokens << " vs token rows 8";
+    }
+}
+
 TEST(TestMoeGroupedMatmulNode, GatherInfersOutputDimensionsAndStrides)
 {
     auto attrs = createValidAttributes();
@@ -263,10 +280,10 @@ TEST(TestMoeGroupedMatmulNode, ScatterInfersSourceTokenOutputDimensionsAndStride
 {
     auto attrs = createValidAttributes();
     auto output = std::make_shared<TensorAttributes>();
-    auto tokenKs = makeRoutingTensor(6);
+    auto tokenKs = makeRoutingTensor(8);
     tokenKs->set_uid(1904);
     attrs.set_mode(MoeGroupedMatmulMode::SCATTER)
-        .set_token_index(makeRoutingTensor(6))
+        .set_token_index(makeRoutingTensor(8))
         .set_token_ks(tokenKs)
         .set_top_k(2)
         .set_output(output);

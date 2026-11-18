@@ -34,6 +34,11 @@ namespace hipdnn_frontend::graph
  * 2. **Default**: If scale dims are also unset, they are inferred as
  *    `[1, D1, ..., Dk]` (batch dim = 1), normalizing all non-batch dims.
  *
+ * Unset Scale and Bias dims are inferred during validation as
+ * `[1, D1, ..., Dk]`, as cuDNN does, or, when `normalized_dim_count` k is set
+ * explicitly, as 1s followed by the last k dims of X. When only one of Scale and
+ * Bias has dims set, they must equal the dims inferred for the other.
+ *
  * **Tensor Shapes:**
  * - **X** (input): `(N, D1, D2, ..., Dk)` — batch first, then feature dims
  * - **Scale, Bias**: Full-rank `(1, D1, ..., Dk)` with batch dim = 1,
