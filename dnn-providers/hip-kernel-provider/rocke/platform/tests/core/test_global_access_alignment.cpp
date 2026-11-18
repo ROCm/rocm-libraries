@@ -292,6 +292,52 @@ int test_hip_rebased_moe_weights_use_halfword_indices()
     return 0;
 }
 
+int test_hip_scalar_memory_accesses()
+{
+    const Lowering result = lower_hip(R"(ckdsl.ir v1
+kernel @scalar_accesses {
+  params {
+    %p : ptr<f16,global>
+    %q : ptr<i1,global>
+    %i : i32
+    %bytes : i64
+  }
+  region @entry {
+    %weak : f16 = memref.global_load_typed ( %p, %i ) { align = i:1, elem_type = s:"f16" }
+    memref.global_store_typed ( %p, %i, %weak ) { align = i:1, elem_type = s:"f16" }
+    %aligned : f16 = memref.global_load_typed ( %p, %i ) { align = i:2, elem_type = s:"f16" }
+    memref.global_store_typed ( %p, %i, %aligned ) { align = i:2, elem_type = s:"f16" }
+    %half_base : ptr<f16,global> = tile.global_ptr_add ( %p, %bytes ) {  }
+    %legacy : f16 = memref.global_load ( %half_base, %i ) {  }
+    %bool_base : ptr<i1,global> = tile.global_ptr_add ( %q, %bytes ) {  }
+    %bit : i1 = memref.global_load_typed ( %bool_base, %i ) { elem_type = s:"i1" }
+    memref.global_store_typed ( %bool_base, %i, %bit ) { elem_type = s:"i1" }
+    cf.return (  )
+  }
+}
+)");
+    CHECK(result.status == ROCKE_OK);
+    CHECK(contains(result.text,
+                   "__builtin_memcpy(&weak, __builtin_assume_aligned(reinterpret_cast<const "
+                   "unsigned char*>(p) + (int64_t)i * (int64_t)sizeof(fp16), 1), 2);"));
+    CHECK(contains(result.text,
+                   "__builtin_memcpy(__builtin_assume_aligned(const_cast<unsigned char*>("
+                   "reinterpret_cast<const unsigned char*>(p)) + (int64_t)i * "
+                   "(int64_t)sizeof(fp16), 1), &weak, 2);"));
+    CHECK(contains(result.text, "fp16 aligned = p[i];"));
+    CHECK(contains(result.text, "p[i] = aligned;"));
+    CHECK(contains(result.text,
+                   "__builtin_memcpy(&legacy, __builtin_assume_aligned(reinterpret_cast<const "
+                   "unsigned char*>(half_base) + (int64_t)i * (int64_t)sizeof(fp16), 2), 2);"));
+    CHECK(contains(result.text,
+                   "bool bit = (*(reinterpret_cast<const unsigned char*>(bool_base) + "
+                   "(int64_t)i * (int64_t)sizeof(unsigned char)) & 1u) != 0;"));
+    CHECK(contains(result.text,
+                   "*(const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(bool_base))"
+                   " + (int64_t)i * (int64_t)sizeof(unsigned char)) = (unsigned char)bit;"));
+    return 0;
+}
+
 /* Four i1 lanes have no byte width to claim, so the LLVM lowering refuses the
  * store rather than give it two bytes per lane. */
 int test_a_sub_byte_vector_store_without_align_is_refused()
@@ -460,7 +506,7 @@ int main()
     if(test_an_llvm_vector_access_without_align_claims_its_natural_alignment()
        || test_a_hip_vector_access_without_align_claims_its_natural_alignment()
        || test_hip_word_access_through_byte_pointers()
-       || test_hip_rebased_moe_weights_use_halfword_indices()
+       || test_hip_rebased_moe_weights_use_halfword_indices() || test_hip_scalar_memory_accesses()
        || test_a_sub_byte_vector_store_without_align_is_refused()
        || test_an_llvm_vector_load_refuses_an_invalid_align()
        || test_the_hip_lowering_refuses_an_invalid_align()

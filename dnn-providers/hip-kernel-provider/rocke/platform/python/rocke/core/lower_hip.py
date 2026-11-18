@@ -21,6 +21,7 @@ from .arch.target import integer_mma_op_ids
 from .arch.wmma_scale import gfx1250_scaled_wmma
 from .dtypes import dtype_info
 from .ir import (
+    I1,
     BF16,
     F16,
     I64,
@@ -355,12 +356,16 @@ def _global_access_address(
     """Match LLVM's GEP in access-element units, independent of pointer type."""
     if _has_typed_access_base(ptr, elem):
         return f"{_name(ptr)} + {_name(idx)}"
+    return _global_byte_address(ptr, idx, _type_to_hip(elem), store=store)
+
+
+def _global_byte_address(ptr: Value, idx: Value, cpp_t: str, *, store: bool) -> str:
     base = f"reinterpret_cast<const unsigned char*>({_name(ptr)})"
     if store:
         # A store is writable by contract; the byte-rebase emitter encodes its
         # result as const char* even when the original tensor is writable.
         base = f"const_cast<unsigned char*>({base})"
-    return f"{base} + (int64_t){_name(idx)} * (int64_t)sizeof({_type_to_hip(elem)})"
+    return f"{base} + (int64_t){_name(idx)} * (int64_t)sizeof({cpp_t})"
 
 
 # Vector-load/store element type -> ext_vector_type prefix (see the _ROCKE_VEC
@@ -784,8 +789,7 @@ class _Lowerer:
         op.attrs.setdefault("_shape", list(st.shape))
 
     def _op_memref_global_load(self, op: Op) -> None:
-        ptr, idx = op.operands
-        self._emit(f"fp16 {_name(op.result)} = {_name(ptr)}[{_name(idx)}];")
+        self._emit_scalar_global_load(op, default_align=2)
 
     def _op_memref_global_store(self, op: Op) -> None:
         ptr, idx, val = op.operands
@@ -2304,19 +2308,28 @@ class _Lowerer:
     # -------------------- memref: typed loads / stores / atomics --------------------
 
     def _op_memref_global_load_typed(self, op: Op) -> None:
+        self._emit_scalar_global_load(op, default_align=1)
+
+    def _emit_scalar_global_load(self, op: Op, *, default_align: int) -> None:
         ptr, idx = op.operands
         elem = op.result.type
         cpp_t = _type_to_hip(elem)
         name = _name(op.result)
-        if _has_typed_access_base(ptr, elem):
+        align = align_attr(op) or default_align
+        if elem == I1:
+            # LLVM i1 occupies a byte in memory, but only its low bit is the
+            # value. Do not copy an arbitrary byte into a C++ bool object.
+            address = _global_byte_address(ptr, idx, "unsigned char", store=False)
+            self._emit(f"bool {name} = (*({address}) & 1u) != 0;")
+            return
+        size = type_bytes(elem)
+        if _has_typed_access_base(ptr, elem) and align >= size:
             self._emit(f"{cpp_t} {name} = {_name(ptr)}[{_name(idx)}];")
             return
-        # Read the stored bits, not a scalar of the pointee type converted to
-        # elem. memcpy can also honor an alignment below alignof(elem).
-        address = _global_access_address(ptr, idx, elem)
+        address = _global_byte_address(ptr, idx, cpp_t, store=False)
         self._emit(
             f"{cpp_t} {name}; __builtin_memcpy(&{name}, "
-            f"__builtin_assume_aligned({address}, {align_attr(op) or 1}), {type_bytes(elem)});"
+            f"__builtin_assume_aligned({address}, {align}), {size});"
         )
 
     def _op_memref_global_atomic_add(self, op: Op) -> None:
@@ -2453,13 +2466,19 @@ class _Lowerer:
     def _op_memref_global_store_typed(self, op: Op) -> None:
         ptr, idx, val = op.operands
         elem = val.type
-        if _has_typed_access_base(ptr, elem):
+        align = align_attr(op) or 1
+        if elem == I1:
+            address = _global_byte_address(ptr, idx, "unsigned char", store=True)
+            self._emit(f"*({address}) = (unsigned char){_name(val)};")
+            return
+        size = type_bytes(elem)
+        if _has_typed_access_base(ptr, elem) and align >= size:
             self._emit(f"{_name(ptr)}[{_name(idx)}] = {_name(val)};")
             return
-        address = _global_access_address(ptr, idx, elem, store=True)
+        address = _global_byte_address(ptr, idx, _type_to_hip(elem), store=True)
         self._emit(
-            f"__builtin_memcpy(__builtin_assume_aligned({address}, {align_attr(op) or 1}), "
-            f"&{_name(val)}, {type_bytes(elem)});"
+            f"__builtin_memcpy(__builtin_assume_aligned({address}, {align}), "
+            f"&{_name(val)}, {size});"
         )
 
     def _op_memref_global_store_vN(self, op: Op) -> None:

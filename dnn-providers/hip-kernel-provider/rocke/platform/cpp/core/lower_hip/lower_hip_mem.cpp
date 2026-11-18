@@ -108,31 +108,36 @@ static bool mem_has_typed_access_base(const rocke_value_t* ptr, const rocke_type
     return ptr->type->kind != ROCKE_TYPE_PTR || rocke_type_eq(ptr->type->pointee, elem);
 }
 
+static const char* mem_global_byte_address(rocke_h_lowerer_t* lw,
+                                           const rocke_value_t* ptr,
+                                           const rocke_value_t* idx,
+                                           const char* cpp_t,
+                                           bool store)
+{
+    // Store destinations are writable by contract, including byte rebases.
+    const char* address = rocke_arena_printf(
+        &lw->b->arena,
+        store ? "const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(%s))"
+                " + (int64_t)%s * (int64_t)sizeof(%s)"
+              : "reinterpret_cast<const unsigned char*>(%s) + (int64_t)%s * (int64_t)sizeof(%s)",
+        rocke_h_name(lw, ptr),
+        rocke_h_name(lw, idx),
+        cpp_t);
+    if(!address)
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "HIP global access address: arena allocation failed");
+    return address;
+}
+
 static const char* mem_global_access_address(rocke_h_lowerer_t* lw,
                                              const rocke_value_t* ptr,
                                              const rocke_value_t* idx,
                                              const rocke_type_t* elem,
                                              bool store = false)
 {
-    const char* p = rocke_h_name(lw, ptr);
-    const char* i = rocke_h_name(lw, idx);
-    const char* address;
-    if(mem_has_typed_access_base(ptr, elem))
-        address = rocke_arena_printf(&lw->b->arena, "%s + %s", p, i);
-    else
-    {
-        // Store destinations are writable by contract, including byte rebases.
-        const char* cpp_t = rocke_h_type_to_hip(lw, elem);
-        address = rocke_arena_printf(
-            &lw->b->arena,
-            store
-                ? "const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(%s))"
-                  " + (int64_t)%s * (int64_t)sizeof(%s)"
-                : "reinterpret_cast<const unsigned char*>(%s) + (int64_t)%s * (int64_t)sizeof(%s)",
-            p,
-            i,
-            cpp_t);
-    }
+    if(!mem_has_typed_access_base(ptr, elem))
+        return mem_global_byte_address(lw, ptr, idx, rocke_h_type_to_hip(lw, elem), store);
+    const char* address = rocke_arena_printf(
+        &lw->b->arena, "%s + %s", rocke_h_name(lw, ptr), rocke_h_name(lw, idx));
     if(!address)
         rocke_h_fail(lw, ROCKE_ERR_OOM, "HIP global access address: arena allocation failed");
     return address;
@@ -557,64 +562,58 @@ static rocke_status_t _op_tile_lds_atomic_add(rocke_h_lowerer_t* lw, const rocke
 
 /* ============================= global load ============================== */
 
-/* Python _op_memref_global_load */
-static rocke_status_t _op_memref_global_load(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+/* Python _emit_scalar_global_load */
+static rocke_status_t mem_emit_scalar_global_load(rocke_h_lowerer_t* lw,
+                                                  const rocke_op_t* op,
+                                                  int default_align,
+                                                  const char* count_error)
 {
-    rocke_value_t *ptr, *idx;
     if(!rocke_h_live(lw))
-    {
         return lw->status;
-    }
     if(op->num_operands < 2 || op->num_results < 1)
-    {
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "memref.global_load: bad operand/result count");
-    }
-    ptr = op->operands[0];
-    idx = op->operands[1];
-    rocke_h_emitf(lw,
-                  "fp16 %s = %s[%s];",
-                  rocke_h_name(lw, op->results[0]),
-                  rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, idx));
-    return lw->status;
-}
-
-/* Python _op_memref_global_load_typed */
-static rocke_status_t _op_memref_global_load_typed(rocke_h_lowerer_t* lw, const rocke_op_t* op)
-{
-    rocke_value_t *ptr, *idx;
-    const char* cpp_t;
-    if(!rocke_h_live(lw))
-    {
-        return lw->status;
-    }
-    if(op->num_operands < 2 || op->num_results < 1)
-    {
-        return rocke_h_fail(
-            lw, ROCKE_ERR_VALUE, "memref.global_load_typed: bad operand/result count");
-    }
-    ptr = op->operands[0];
-    idx = op->operands[1];
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", count_error);
+    const auto* ptr = op->operands[0];
+    const auto* idx = op->operands[1];
     const auto* elem = op->results[0]->type;
-    cpp_t = rocke_h_type_to_hip(lw, elem);
+    const char* cpp_t = rocke_h_type_to_hip(lw, elem);
     const char* res = rocke_h_name(lw, op->results[0]);
-    if(mem_has_typed_access_base(ptr, elem))
+    const auto align_attr = rocke_i_align_attr(op);
+    const auto align = align_attr ? align_attr : default_align;
+    if(rocke_type_eq(elem, rocke_i1()))
+    {
+        // The one-byte memory representation carries the value in its low bit.
+        const auto* address = mem_global_byte_address(lw, ptr, idx, "unsigned char", false);
+        rocke_h_emitf(lw, "bool %s = (*(%s) & 1u) != 0;", res, address);
+        return lw->status;
+    }
+    const int size = rocke_i_type_bytes(elem);
+    if(mem_has_typed_access_base(ptr, elem) && align >= size)
         rocke_h_emitf(
             lw, "%s %s = %s[%s];", cpp_t, res, rocke_h_name(lw, ptr), rocke_h_name(lw, idx));
     else
     {
-        const auto align = rocke_i_align_attr(op);
-        const auto* address = mem_global_access_address(lw, ptr, idx, elem);
+        const auto* address = mem_global_byte_address(lw, ptr, idx, cpp_t, false);
         rocke_h_emitf(lw,
                       "%s %s; __builtin_memcpy(&%s, __builtin_assume_aligned(%s, %lld), %d);",
                       cpp_t,
                       res,
                       res,
                       address,
-                      (long long)(align ? align : 1),
-                      rocke_i_type_bytes(elem));
+                      (long long)align,
+                      size);
     }
     return lw->status;
+}
+
+static rocke_status_t _op_memref_global_load(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    return mem_emit_scalar_global_load(lw, op, 2, "memref.global_load: bad operand/result count");
+}
+
+static rocke_status_t _op_memref_global_load_typed(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    return mem_emit_scalar_global_load(
+        lw, op, 1, "memref.global_load_typed: bad operand/result count");
 }
 
 /* Python _op_memref_global_load_vN */
@@ -722,7 +721,16 @@ static rocke_status_t _op_memref_global_store_typed(rocke_h_lowerer_t* lw, const
     idx = op->operands[1];
     val = op->operands[2];
     const auto* elem = val->type;
-    if(mem_has_typed_access_base(ptr, elem))
+    const auto align_attr = rocke_i_align_attr(op);
+    const auto align = align_attr ? align_attr : 1;
+    if(rocke_type_eq(elem, rocke_i1()))
+    {
+        const auto* address = mem_global_byte_address(lw, ptr, idx, "unsigned char", true);
+        rocke_h_emitf(lw, "*(%s) = (unsigned char)%s;", address, rocke_h_name(lw, val));
+        return lw->status;
+    }
+    const int size = rocke_i_type_bytes(elem);
+    if(mem_has_typed_access_base(ptr, elem) && align >= size)
         rocke_h_emitf(lw,
                       "%s[%s] = %s;",
                       rocke_h_name(lw, ptr),
@@ -730,14 +738,14 @@ static rocke_status_t _op_memref_global_store_typed(rocke_h_lowerer_t* lw, const
                       rocke_h_name(lw, val));
     else
     {
-        const auto align = rocke_i_align_attr(op);
-        const auto* address = mem_global_access_address(lw, ptr, idx, elem, true);
+        const auto* address
+            = mem_global_byte_address(lw, ptr, idx, rocke_h_type_to_hip(lw, elem), true);
         rocke_h_emitf(lw,
                       "__builtin_memcpy(__builtin_assume_aligned(%s, %lld), &%s, %d);",
                       address,
-                      (long long)(align ? align : 1),
+                      (long long)align,
                       rocke_h_name(lw, val),
-                      rocke_i_type_bytes(elem));
+                      size);
     }
     return lw->status;
 }

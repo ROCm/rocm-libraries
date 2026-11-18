@@ -25,6 +25,7 @@ from rocke.core.ir import (
     F16,
     F32,
     F64,
+    I1,
     I8,
     I32,
     I64,
@@ -198,6 +199,67 @@ def test_hip_rebased_moe_weights_use_halfword_indices(
             f"__builtin_memcpy(&{value.name[1:]}, __builtin_assume_aligned({addr}, 2), 8);"
             in hip
         )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize(
+    ("elem", "cpp_t", "size"), [(F16, "fp16", 2), (F32, "float", 4)]
+)
+@pytest.mark.parametrize("weak", [False, True])
+def test_hip_scalar_load_store_match_the_claimed_alignment(
+    engine, elem, cpp_t, size, weak
+):
+    b = IRBuilder("scalar_copy")
+    ptr = b.param("p", PtrType(elem, "global"))
+    idx = b.param("i", I32)
+    align = 1 if weak else size
+    value = b.global_load(ptr, idx, elem, align=align)
+    b.global_store(ptr, idx, value, align=align)
+    hip = lower_hip_with_engine(b.kernel, _ARCH, engine=engine)
+    val = value.name[1:]
+    if weak:
+        base = "reinterpret_cast<const unsigned char*>(p)"
+        offset = f" + (int64_t)i * (int64_t)sizeof({cpp_t})"
+        assert f"__builtin_assume_aligned({base}{offset}, 1), {size});" in hip
+        assert (
+            f"__builtin_assume_aligned(const_cast<unsigned char*>({base}){offset}, 1), &{val}, {size});"
+            in hip
+        )
+        assert "p[i]" not in hip
+    else:
+        assert f"{cpp_t} {val} = p[i];" in hip
+        assert f"p[i] = {val};" in hip
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_hip_legacy_fp16_load_on_a_rebased_pointer(engine):
+    b = IRBuilder("legacy_half_load")
+    ptr = b.param("p", PtrType(F16, "global"))
+    idx = b.param("i", I32)
+    base = b.global_ptr_add(ptr, b.const_i64(16))
+    value = b.global_load_f16(base, idx)
+    hip = lower_hip_with_engine(b.kernel, _ARCH, engine=engine)
+    val = value.name[1:]
+    addr = f"reinterpret_cast<const unsigned char*>({base.name[1:]}) + (int64_t)i * (int64_t)sizeof(fp16)"
+    assert f"__builtin_memcpy(&{val}, __builtin_assume_aligned({addr}, 2), 2);" in hip
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_hip_rebased_scalar_i1_uses_a_byte(engine):
+    b = IRBuilder("bool_copy")
+    ptr = b.param("p", PtrType(I1, "global"))
+    idx = b.param("i", I32)
+    base = b.global_ptr_add(ptr, b.const_i64(3))
+    value = b.global_load(base, idx, I1)
+    b.global_store(base, idx, value)
+    hip = lower_hip_with_engine(b.kernel, _ARCH, engine=engine)
+    addr = f"reinterpret_cast<const unsigned char*>({base.name[1:]})"
+    offset = " + (int64_t)i * (int64_t)sizeof(unsigned char)"
+    val = value.name[1:]
+    assert f"bool {val} = (*({addr}{offset}) & 1u) != 0;" in hip
+    assert (
+        f"*(const_cast<unsigned char*>({addr}){offset}) = (unsigned char){val};" in hip
+    )
 
 
 @pytest.mark.parametrize("engine", ENGINES)
