@@ -164,6 +164,28 @@ switch `cluster_barrier::kRule3CrossLoop` in
 `InsertClusterBarrierPass.hpp` (default **false**). See
 [`kRule3CrossLoop`](#krule3crossloop) below.
 
+### WaveIdx compare lead (`ClusterBarrierSignalCmpLead`)
+
+By default the gated cluster signal is four consecutive instructions at the
+signal anchor:
+
+```asm
+    s_cmp_eq_u32 s[sgprWaveIdx], 0
+    s_cbranch_scc0 label_skipCBPreSignal_<HASH>
+    s_barrier_signal -3
+  label_skipCBPreSignal_<HASH>:
+```
+
+With `ClusterBarrierSignalCmpLead: true`, the WaveIdx `s_cmp` may move
+immediately after a matrix instruction so that up to two WMMAs sit between it
+and the anchor, in the same straight-line segment. The compare therefore sits
+behind the third WMMA counted back from the anchor. A clear two-WMMA gap beats
+a shorter one. The `s_cbranch`, cluster signal, and skip label stay at the
+(dscnt-hoisted) anchor. A candidate is skipped when SCC is live there or any
+SCC read/write sits between it and the branch; the next nearer WMMA is tried,
+and with none left the four instructions stay consecutive. The LoopCounterL
+outer gate of Rule 1 is unchanged.
+
 ### SCC
 
 The signal block opens with `s_cmp_eq_u32 s[sgprWaveIdx], 0`, so wherever it
@@ -172,7 +194,10 @@ the anchor search is what keeps the block out of a live range in the first
 place, and it may give up lead to do so — climbing to a spot in front of the
 def, or sinking below the range towards the wait. A range the loop closes
 across its back edge counts too, which is why the climb carries a liveness flag
-of its own alongside the forward scan the placement check runs.
+of its own alongside the forward scan the placement check runs. When
+`ClusterBarrierSignalCmpLead` moves only the compare, that early site is checked
+the same way, and the path down to the branch must stay free of other SCC
+accesses.
 
 #### Liveness without a CFG — `isSccLiveIn`
 

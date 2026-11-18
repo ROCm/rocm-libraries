@@ -157,6 +157,7 @@
     X(DsReadCreditLifetimeB64, int, 0)    /* b64 ds_read credit lifetime; 0 = shared lifetime */   \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                                \
     X(ReduceClusterBarrierPerLoop, int, -1)                                                        \
+    X(ClusterBarrierSignalCmpLead, bool, false) /* WaveIdx s_cmp with up to two WMMAs before branch */ \
     X(TensorLoadDsLoadGapCycles, int, 64)
 
 namespace stinkytofu {

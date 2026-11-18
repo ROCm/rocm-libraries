@@ -613,13 +613,14 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
     // Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
     void runPass(int rule3SignalLeadCycles = 100, bool splitWaveLoop = false,
                  bool streamKMulticast = false, int pgrValue = 1,
-                 bool reduceClusterBarrierPerLoop = false) {
+                 bool reduceClusterBarrierPerLoop = false, bool signalCmpLead = false) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         auto pass = createInsertClusterBarrierPass(
             streamKMulticast, pgrValue, rule3SignalLeadCycles,
             /*splitWaveLoop=*/splitWaveLoop,
-            /*reduceClusterBarrierPerLoop=*/reduceClusterBarrierPerLoop);
+            /*reduceClusterBarrierPerLoop=*/reduceClusterBarrierPerLoop,
+            /*signalCmpLead=*/signalCmpLead);
         if (testDumpEnabled()) {
             std::cerr << "\n=== INPUT (before InsertClusterBarrierPass):" << blockListing(*bb)
                       << "\n";
@@ -1677,6 +1678,153 @@ class InsertClusterBarrierSignalAheadOfDsCntTest : public InsertClusterBarrierPa
         return findClusterWaveCmpAfter(indexOf(loopHead));
     }
 };
+
+// ClusterBarrierSignalCmpLead: the WaveIdx compare sits right after the
+// preceding WMMA; the branch / signal / label stay at the (dscnt-hoisted)
+// anchor in front of the drain that belongs to the next WMMA.
+//
+//     v_wmma / s_cmp sgprWaveIdx / ds_load / s_wait_dscnt / v_wmma /
+//     s_cbranch / s_barrier_signal -3 / label / ...
+TEST_F(InsertClusterBarrierPassTest, SignalCmpLeadPlacesWaveIdxCmpAfterPrevWmma) {
+    appendGsu1Preheader();
+    openLoop();
+    // lead=0 co-locates the signal with the workgroup trigger, so the preceding
+    // WMMA is unambiguous and the ds_load is the filler the compare climbs over.
+    StinkyInstruction* prevWmma = createWMMA(8, 0, 8);
+    StinkyInstruction* filler = createDsRead(/*destReg=*/200, /*addrReg=*/300);
+    StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/0, /*splitWaveLoop=*/false,
+            /*streamKMulticast=*/false, /*pgrValue=*/1,
+            /*reduceClusterBarrierPerLoop=*/false, /*signalCmpLead=*/true);
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    StinkyInstruction* handshakeCmp = findClusterWaveCmpAfter(indexOf(loopHead));
+    ASSERT_NE(handshakeCmp, nullptr) << "the pass planted no Rule 3 handshake:"
+                                     << blockListing(*bb);
+    EXPECT_EQ(realInstBefore(handshakeCmp), prevWmma)
+        << "WaveIdx s_cmp must sit immediately after the preceding WMMA:"
+        << blockListing(*bb);
+    EXPECT_EQ(firstRealInstAfter(handshakeCmp), filler)
+        << "early s_cmp must precede the filler that sat between the WMMA and the anchor:"
+        << blockListing(*bb);
+
+    const size_t cmpIdx = indexOf(handshakeCmp);
+    StinkyInstruction* signal = findClusterSignalBetween(cmpIdx, indexOf(trigger) + 1);
+    ASSERT_NE(signal, nullptr) << blockListing(*bb);
+    StinkyInstruction* branch = realInstBefore(signal);
+    ASSERT_NE(branch, nullptr);
+    EXPECT_EQ(branch->getUnifiedOpcode(), GFX::s_cbranch_scc0)
+        << "s_cbranch must remain immediately before the cluster signal:"
+        << blockListing(*bb);
+    EXPECT_GT(indexOf(branch), cmpIdx)
+        << "branch must stay later than the early WaveIdx cmp:" << blockListing(*bb);
+    EXPECT_EQ(firstRealInstAfter(filler), branch)
+        << "filler must still sit between the early cmp and the branch at the anchor:"
+        << blockListing(*bb);
+}
+
+// Two WMMAs stay between the compare and the branch. A fourth further back is
+// out of range.
+//
+//     v_wmma(too far) / ds / v_wmma(lead) / s_cmp / ds / v_wmma / ds / v_wmma /
+//     ds / s_cbranch / signal
+TEST_F(InsertClusterBarrierPassTest, SignalCmpLeadLeavesTwoWmmasInTheGap) {
+    appendGsu1Preheader();
+    openLoop();
+    StinkyInstruction* tooFar = createWMMA(8, 0, 8);
+    createDsRead(/*destReg=*/200, /*addrReg=*/300);
+    StinkyInstruction* leadWmma = createWMMA(16, 8, 16);
+    StinkyInstruction* afterLead = createDsRead(/*destReg=*/204, /*addrReg=*/304);
+    createWMMA(24, 16, 24);
+    createDsRead(/*destReg=*/208, /*addrReg=*/308);
+    createWMMA(32, 24, 32);
+    createDsRead(/*destReg=*/212, /*addrReg=*/312);
+    StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/0, /*splitWaveLoop=*/false,
+            /*streamKMulticast=*/false, /*pgrValue=*/1,
+            /*reduceClusterBarrierPerLoop=*/false, /*signalCmpLead=*/true);
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    StinkyInstruction* handshakeCmp = findClusterWaveCmpAfter(indexOf(loopHead));
+    ASSERT_NE(handshakeCmp, nullptr) << blockListing(*bb);
+    EXPECT_EQ(realInstBefore(handshakeCmp), leadWmma)
+        << "WaveIdx s_cmp must sit after the WMMA that leaves two WMMAs before the branch:"
+        << blockListing(*bb);
+    EXPECT_EQ(firstRealInstAfter(handshakeCmp), afterLead) << blockListing(*bb);
+    EXPECT_GT(indexOf(handshakeCmp), indexOf(tooFar))
+        << "the lead must not climb a fourth WMMA:" << blockListing(*bb);
+
+    StinkyInstruction* signal = findClusterSignalBetween(indexOf(handshakeCmp), indexOf(trigger) + 1);
+    ASSERT_NE(signal, nullptr) << blockListing(*bb);
+    StinkyInstruction* branch = realInstBefore(signal);
+    ASSERT_NE(branch, nullptr);
+    EXPECT_EQ(branch->getUnifiedOpcode(), GFX::s_cbranch_scc0) << blockListing(*bb);
+    int wmmasInGap = 0;
+    for (auto mid = std::next(BasicBlock::iterator(handshakeCmp));
+         mid != BasicBlock::iterator(branch); ++mid) {
+        auto* inst = dyn_cast<StinkyInstruction>(mid.getNodePtr());
+        if (inst != nullptr && inst->getUnifiedOpcode() == GFX::v_wmma_f32_16x16x32_bf16)
+            ++wmmasInGap;
+    }
+    EXPECT_EQ(wmmasInGap, 2) << blockListing(*bb);
+}
+
+// An SCC write between the two candidate WMMAs keeps the compare at the nearer one.
+TEST_F(InsertClusterBarrierPassTest, SignalCmpLeadFallsBackToOneWmmaAcrossScc) {
+    appendGsu1Preheader();
+    openLoop();
+    StinkyInstruction* farWmma = createWMMA(8, 0, 8);
+    StinkyInstruction* sccWrite = createSCmpWritingScc(/*srcSgpr=*/90);
+    StinkyInstruction* nearWmma = createWMMA(16, 8, 16);
+    createDsRead(/*destReg=*/200, /*addrReg=*/300);
+    StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/0, /*splitWaveLoop=*/false,
+            /*streamKMulticast=*/false, /*pgrValue=*/1,
+            /*reduceClusterBarrierPerLoop=*/false, /*signalCmpLead=*/true);
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    StinkyInstruction* handshakeCmp = findClusterWaveCmpAfter(indexOf(loopHead));
+    ASSERT_NE(handshakeCmp, nullptr) << blockListing(*bb);
+    EXPECT_EQ(realInstBefore(handshakeCmp), nearWmma)
+        << "SCC between the two WMMAs must keep the compare at the nearer one:"
+        << blockListing(*bb);
+    EXPECT_GT(indexOf(handshakeCmp), indexOf(sccWrite)) << blockListing(*bb);
+    EXPECT_GT(indexOf(handshakeCmp), indexOf(farWmma)) << blockListing(*bb);
+    StinkyInstruction* signal = findClusterSignalBetween(indexOf(handshakeCmp), indexOf(trigger) + 1);
+    ASSERT_NE(signal, nullptr) << blockListing(*bb);
+    EXPECT_EQ(realInstBefore(signal)->getUnifiedOpcode(), GFX::s_cbranch_scc0)
+        << blockListing(*bb);
+}
+
+// Default off: the WaveIdx compare stays glued to its branch at the anchor.
+TEST_F(InsertClusterBarrierPassTest, SignalCmpLeadOffKeepsWaveIdxCmpWithBranch) {
+    appendGsu1Preheader();
+    openLoop();
+    createWMMA(8, 0, 8);
+    createDsRead(/*destReg=*/200, /*addrReg=*/300);
+    appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/0);
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    StinkyInstruction* handshakeCmp = findClusterWaveCmpAfter(indexOf(loopHead));
+    ASSERT_NE(handshakeCmp, nullptr) << blockListing(*bb);
+    StinkyInstruction* afterCmp = firstRealInstAfter(handshakeCmp);
+    ASSERT_NE(afterCmp, nullptr);
+    EXPECT_EQ(afterCmp->getUnifiedOpcode(), GFX::s_cbranch_scc0)
+        << "default must keep s_cmp contiguous with s_cbranch:" << blockListing(*bb);
+}
 
 // The signal goes in front of the drain, which stays next to the WMMA it was
 // parked for:

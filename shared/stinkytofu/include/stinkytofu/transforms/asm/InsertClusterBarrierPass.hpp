@@ -72,8 +72,15 @@ class Pass;
 /// A Rule 3 or pre-loop cluster signal that lands right behind an `s_wait_dscnt`
 /// run goes in front of that run, so the drain stays next to the instruction it
 /// was inserted for.
+/// \p signalCmpLead places the WaveIdx `s_cmp` of a gated cluster signal
+/// immediately after a matrix instruction, leaving up to two WMMAs between it
+/// and the `s_cbranch` / signal / label at the anchor. The furthest safe spot
+/// in that window is used; a nearer one is the fallback when the further span
+/// touches SCC. Off by default: the four instructions stay consecutive at the
+/// anchor.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
     bool streamKMulticast = false, int pgrValue = 1, int rule3SignalLeadCycles = 100,
-    bool splitWaveLoop = false, bool reduceClusterBarrierPerLoop = false);
+    bool splitWaveLoop = false, bool reduceClusterBarrierPerLoop = false,
+    bool signalCmpLead = false);
 
 }  // namespace stinkytofu

@@ -322,9 +322,72 @@ IRBase* hoistSignalAboveLeadingDsCntWaits(IRBase* anchor) {
     return hoisted;
 }
 
+/// How many matrix instructions may sit between the WaveIdx `s_cmp` and its
+/// `s_cbranch`. The compare is inserted immediately after the next matrix
+/// instruction beyond that span, so the backward walk collects one more.
+constexpr int kWaveIdxCmpLeadGapWmmas = 2;
+
+/// Instruction the compare is inserted in front of so it lands immediately
+/// after \p wmma, or null when nothing follows it.
+IRBase* firstInstAfter(StinkyInstruction* wmma) {
+    BasicBlock* parent = wmma->getParent();
+    if (parent == nullptr) return nullptr;
+    for (auto after = std::next(BasicBlock::iterator(wmma)); after != parent->end(); ++after) {
+        if (dyn_cast<StinkyInstruction>(after.getNodePtr()) != nullptr) return after.getNodePtr();
+    }
+    return nullptr;
+}
+
+/// When \p signalCmpLead is on, the WaveIdx `s_cmp` may sit immediately after a
+/// matrix instruction with up to \c kWaveIdxCmpLeadGapWmmas matrix instructions
+/// between it and \p branchAnchor. The `s_cbranch` / signal / label stay at the
+/// anchor. The furthest safe spot in that window wins. Returns null when none
+/// is safe and the compare must stay with the branch.
+IRBase* findWaveIdxCmpLeadInsertBefore(IRBase* branchAnchor) {
+    auto* branchInst = dyn_cast<StinkyInstruction>(branchAnchor);
+    if (branchInst == nullptr || branchInst->getParent() == nullptr) return nullptr;
+    BasicBlock* parent = branchInst->getParent();
+    // Nearest preceding WMMA first. A label, branch, call, or barrier ends the
+    // straight-line span, so a WMMA on the far side of one is not a candidate.
+    // Collect the gap plus the matrix instruction the compare sits behind.
+    std::vector<StinkyInstruction*> wmmas;
+    auto it = BasicBlock::iterator(branchInst);
+    while (it != parent->begin() &&
+           static_cast<int>(wmmas.size()) < kWaveIdxCmpLeadGapWmmas + 1) {
+        --it;
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (isSegmentBoundary(*inst) || isBarrier(*inst)) break;
+        if (isMatrixInstruction(*inst)) wmmas.push_back(inst);
+    }
+
+    auto spanIsSafe = [&](IRBase* cmpInsertBefore) {
+        if (cmpInsertBefore == nullptr || cmpInsertBefore == branchAnchor) return false;
+        auto* cmpAt = dyn_cast<StinkyInstruction>(cmpInsertBefore);
+        if (cmpAt == nullptr || isSccLiveIn(cmpAt)) return false;
+        // The WaveIdx SCC must survive until the branch.
+        for (auto mid = BasicBlock::iterator(cmpAt); mid != BasicBlock::iterator(branchInst);
+             ++mid) {
+            auto* inst = dyn_cast<StinkyInstruction>(mid.getNodePtr());
+            if (inst != nullptr && (writesScc(*inst) || readsScc(*inst))) return false;
+        }
+        return true;
+    };
+
+    // Furthest first, so a clear two-WMMA gap beats a shorter one.
+    for (auto wmma = wmmas.rbegin(); wmma != wmmas.rend(); ++wmma) {
+        IRBase* slot = firstInstAfter(*wmma);
+        if (spanIsSafe(slot)) return slot;
+    }
+    return nullptr;
+}
+
 /// The signal goes above the `s_wait_dscnt` run in front of \p anchor.
+/// With \p signalCmpLead the WaveIdx compare may move earlier, leaving up to two
+/// WMMAs between it and the branch. The branch, signal, and skip label stay at
+/// the (dscnt-hoisted) anchor.
 void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
-                                          GfxArchID archId) {
+                                          GfxArchID archId, bool signalCmpLead = false) {
     anchor = hoistSignalAboveLeadingDsCntWaits(anchor);
     const std::string labelName = kSkipLabelPrefix + makeRandomHash();
 
@@ -334,7 +397,12 @@ void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilde
     assert(cmpDesc && brDesc && signalDesc &&
            "Cluster-barrier opcodes are not supported on this architecture");
 
-    StinkyInstruction* cmpInst = irBuilder.create(cmpDesc, anchor);
+    IRBase* cmpAnchor = anchor;
+    if (signalCmpLead) {
+        if (IRBase* lead = findWaveIdxCmpLeadInsertBefore(anchor)) cmpAnchor = lead;
+    }
+
+    StinkyInstruction* cmpInst = irBuilder.create(cmpDesc, cmpAnchor);
     // Implicit-operand legalisation has already run, so declare the SCC write
     // that the branch below depends on.
     cmpInst->addDestReg(StinkyRegister::getSCCRegister());
@@ -387,7 +455,7 @@ std::pair<StinkyInstruction*, StinkyInstruction*> insertWorkgroupBarrierSyncBefo
 }
 
 void insertRule1ClusterBarrierSignalBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
-                                           GfxArchID archId) {
+                                           GfxArchID archId, bool signalCmpLead = false) {
     const std::string lclLabelName = std::string(kSkipLabelPrefixLCL) + makeRandomHash();
 
     const HwInstDesc* cmpDesc = getMCIDByUOp(GFX::s_cmp_eq_u32, archId);
@@ -408,7 +476,7 @@ void insertRule1ClusterBarrierSignalBefore(IRBase* anchor, AsmIRBuilder& irBuild
     brInst->addModifier<CommentData>(CommentData{"skip cluster barrier when LoopCounterL == 0"});
 
     insertWorkgroupBarrierSyncBefore(anchor, irBuilder, archId);
-    insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
+    insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId, signalCmpLead);
 
     static const HwInstDesc labelMCID{
         GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
@@ -428,8 +496,8 @@ void insertClusterBarrierWaitBefore(IRBase* anchor, const char* comment, AsmIRBu
 /// WaveIdx-gated cluster signal at \p signalAnchor, then wait at \p waitAnchor
 /// (the trigger).
 void insertRule3HandshakeBefore(IRBase* signalAnchor, IRBase* waitAnchor, AsmIRBuilder& irBuilder,
-                                GfxArchID archId) {
-    insertClusterBarrierSignalOnlyBefore(signalAnchor, irBuilder, archId);
+                                GfxArchID archId, bool signalCmpLead = false) {
+    insertClusterBarrierSignalOnlyBefore(signalAnchor, irBuilder, archId, signalCmpLead);
     insertClusterBarrierWaitBefore(waitAnchor, "cluster barrier wait", irBuilder, archId);
 }
 
@@ -1362,7 +1430,7 @@ void retargetBranch(StinkyInstruction& branch, const std::string& newLabel) {
 /// them on a token nobody posted, so they are routed past it instead.
 bool emitLoopCarriedCompensation(StinkyInstruction* loopHead, const std::string& exitLabelName,
                                  const PreLoopSignalAnchor& pre, BasicBlock& preLoopBlock,
-                                 Function& func, GfxArchID archId) {
+                                 Function& func, GfxArchID archId, bool signalCmpLead = false) {
     if (exitLabelName.empty() || loopHead == nullptr) return false;
 
     // The exit label may be an instruction inside a block or the header of the
@@ -1501,7 +1569,7 @@ bool emitLoopCarriedCompensation(StinkyInstruction* loopHead, const std::string&
         if (pre.needsWorkgroupBarrier) {
             insertWorkgroupBarrierSyncBefore(pre.anchor, entryBuilder, archId);
         }
-        insertClusterBarrierSignalOnlyBefore(pre.anchor, entryBuilder, archId);
+        insertClusterBarrierSignalOnlyBefore(pre.anchor, entryBuilder, archId, signalCmpLead);
     }
     return true;
 }
@@ -1741,12 +1809,14 @@ class InsertClusterBarrierPassImpl : public Pass {
     static char ID;
 
     InsertClusterBarrierPassImpl(bool streamKMulticast, int pgrValue, int rule3SignalLeadCycles,
-                                 bool splitWaveLoop, bool reduceClusterBarrierPerLoop)
+                                 bool splitWaveLoop, bool reduceClusterBarrierPerLoop,
+                                 bool signalCmpLead)
         : streamKMulticast_(streamKMulticast),
           pgrValue_(pgrValue),
           rule3SignalLeadCycles_(std::max(0, rule3SignalLeadCycles)),
           splitWaveLoop_(splitWaveLoop),
-          reduceClusterBarrierPerLoop_(reduceClusterBarrierPerLoop) {}
+          reduceClusterBarrierPerLoop_(reduceClusterBarrierPerLoop),
+          signalCmpLead_(signalCmpLead) {}
 
     const char* getName() const override {
         return "Insert Cluster Barrier";
@@ -1784,7 +1854,7 @@ class InsertClusterBarrierPassImpl : public Pass {
             if (gsu1Anchors.empty()) continue;
             AsmIRBuilder irBuilder(bb, archId);
             for (IRBase* anchor : gsu1Anchors) {
-                insertRule1ClusterBarrierSignalBefore(anchor, irBuilder, archId);
+                insertRule1ClusterBarrierSignalBefore(anchor, irBuilder, archId, signalCmpLead_);
             }
         }
 
@@ -2077,14 +2147,15 @@ class InsertClusterBarrierPassImpl : public Pass {
                     insertClusterBarrierWaitBefore(waitAnchor, "cluster barrier wait", irBuilder,
                                                    archId);
                 } else {
-                    insertRule3HandshakeBefore(signalAnchor, waitAnchor, irBuilder, archId);
+                    insertRule3HandshakeBefore(signalAnchor, waitAnchor, irBuilder, archId,
+                                               signalCmpLead_);
                 }
                 (void)trigger;
             }
             // kRule3CrossLoop true only: drain / skipCBWait for hoisted loops.
             for (const LoopCompensation& comp : hoistedLoops) {
                 emitLoopCarriedCompensation(comp.head, comp.exitLabel, comp.preLoopSignal, bb, func,
-                                            archId);
+                                            archId, signalCmpLead_);
             }
             // Producer-side drain right after each cooperative tensor_load
             // group (retire the async cooperative load before the back-edge so
@@ -2095,7 +2166,7 @@ class InsertClusterBarrierPassImpl : public Pass {
             if (tailWait != nullptr) {
                 IRBase* anchor =
                     (tailWaitNextIt != bb.end()) ? tailWaitNextIt.getNodePtr() : nullptr;
-                insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
+                insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId, signalCmpLead_);
             }
             if (tailTL != nullptr) {
                 insertClusterBarrierWaitBefore(hoistAboveLeadingWaitCnts(tailTL),
@@ -2138,6 +2209,7 @@ class InsertClusterBarrierPassImpl : public Pass {
     const int rule3SignalLeadCycles_ = 100;
     const bool splitWaveLoop_ = false;
     const bool reduceClusterBarrierPerLoop_ = false;
+    const bool signalCmpLead_ = false;
 };
 
 char InsertClusterBarrierPassImpl::ID = 0;
@@ -2146,10 +2218,11 @@ char InsertClusterBarrierPassImpl::ID = 0;
 
 std::unique_ptr<Pass> createInsertClusterBarrierPass(bool streamKMulticast, int pgrValue,
                                                      int rule3SignalLeadCycles, bool splitWaveLoop,
-                                                     bool reduceClusterBarrierPerLoop) {
-    return std::make_unique<InsertClusterBarrierPassImpl>(streamKMulticast, pgrValue,
-                                                          rule3SignalLeadCycles, splitWaveLoop,
-                                                          reduceClusterBarrierPerLoop);
+                                                     bool reduceClusterBarrierPerLoop,
+                                                     bool signalCmpLead) {
+    return std::make_unique<InsertClusterBarrierPassImpl>(
+        streamKMulticast, pgrValue, rule3SignalLeadCycles, splitWaveLoop,
+        reduceClusterBarrierPerLoop, signalCmpLead);
 }
 
 namespace cluster_barrier {
