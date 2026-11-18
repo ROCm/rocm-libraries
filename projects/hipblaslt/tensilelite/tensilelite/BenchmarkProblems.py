@@ -37,13 +37,14 @@ import rocisa
 from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, TypedDict
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, TypedDict, Union
 
 from . import SolutionLibrary, LibraryIO
 from .KernelWriter import DebugConfig
 from .KernelHelperNaming import KernelHelperEnum, HelperKernelObjectsMemo
 from .Toolchain.Component import Assembler
 from .SolutionStructs.Problem import ProblemType, ProblemSizes
+from .SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs, GateTypeArgs
 from .SolutionStructs.Solution import Solution
 from .Common.TypeValidationErrors import ConfigTypeError
 from .SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, \
@@ -551,6 +552,32 @@ def _loadSolutionPool(solutionPoolFiles):
         poolIndex.setdefault(ptStr, []).append((poolFile, data))
     return poolIndex
 
+class _BenchmarkFilesContext(NamedTuple):
+    """Inputs retained until a prepared benchmark step writes its remaining files."""
+
+    kernelBuild: BenchmarkKernelBuild
+    stepBaseDir: Path
+    solutions: List[Solution]
+    problemSizes: ProblemSizes
+    biasTypeArgs: BiasTypeArgs
+    factorDimArgs: FactorDimArgs
+    activationArgs: ActivationArgs
+    icacheFlushArgs: List[bool]
+    stepName: str
+    solutionSummationSizes: List[int]
+    asmToolchain: AssemblyToolchain
+    sourcePath: Path
+    debugConfig: DebugConfig
+    gateTypeArgs: Optional[GateTypeArgs]
+    deviceId: int
+    gfxName: str
+    isaInfoMap: Dict[IsaVersion, IsaInfo]
+    probSolMap: dict
+    writeResultsFile: bool
+    problemType: ProblemType
+    cmdLineArchs: List[str]
+
+
 class BenchmarkFilesBuild(NamedTuple):
     """A benchmark step's files between kernel generation's phases (prepareBenchmarkFiles)."""
 
@@ -650,58 +677,73 @@ def prepareBenchmarkFiles(
                             compress=False,
                             removeTemporaries=not globalParameters["KeepBuildTmp"],
                         )
-    finish = functools.partial(_finishBenchmarkFiles, kernelBuild, stepBaseDir, solutions,
-                               problemSizes, biasTypeArgs, factorDimArgs, activationArgs,
-                               icacheFlushArgs, stepName, solutionSummationSizes, asmToolchain,
-                               sourcePath, debugConfig, gateTypeArgs, deviceId, gfxName,
-                               isaInfoMap, probSolMap, writeResultsFile, problemType, cmdLineArchs)
+    context = _BenchmarkFilesContext(
+        kernelBuild=kernelBuild,
+        stepBaseDir=stepBaseDir,
+        solutions=solutions,
+        problemSizes=problemSizes,
+        biasTypeArgs=biasTypeArgs,
+        factorDimArgs=factorDimArgs,
+        activationArgs=activationArgs,
+        icacheFlushArgs=icacheFlushArgs,
+        stepName=stepName,
+        solutionSummationSizes=solutionSummationSizes,
+        asmToolchain=asmToolchain,
+        sourcePath=sourcePath,
+        debugConfig=debugConfig,
+        gateTypeArgs=gateTypeArgs,
+        deviceId=deviceId,
+        gfxName=gfxName,
+        isaInfoMap=isaInfoMap,
+        probSolMap=probSolMap,
+        writeResultsFile=writeResultsFile,
+        problemType=problemType,
+        cmdLineArchs=cmdLineArchs,
+    )
+    finish = functools.partial(_finishBenchmarkFiles, context)
     return BenchmarkFilesBuild(kernelBuild, finish)
 
 
-def _finishBenchmarkFiles(kernelBuild, stepBaseDir, solutions, problemSizes, biasTypeArgs,
-                          factorDimArgs, activationArgs, icacheFlushArgs, stepName,
-                          solutionSummationSizes, asmToolchain, sourcePath, debugConfig,
-                          gateTypeArgs, deviceId, gfxName, isaInfoMap, probSolMap,
-                          writeResultsFile, problemType, cmdLineArchs):
+def _finishBenchmarkFiles(context: _BenchmarkFilesContext):
     """The rest of prepareBenchmarkFiles once the step's kernels are generated: assemble and link
     them, then write the library and the client configuration."""
-    codeObjectFiles, _ = finishSolutionsAndKernels(kernelBuild)
-    # ^ this is where solutions is mutated
+    codeObjectFiles, _ = finishSolutionsAndKernels(context.kernelBuild)
+    # ^ this is where context.solutions is mutated
     with timing_context("python_kernel_bench_postprocess"):
         with timing_context("python_benchpost_naming"):
-            for s in solutions:
-                s["SolutionNameMin"] = getSolutionNameMin(s, debugConfig.splitGSU)
-                s["KernelNameMin"]   = getKernelNameMin(s, debugConfig.splitGSU)
+            for s in context.solutions:
+                s["SolutionNameMin"] = getSolutionNameMin(s, context.debugConfig.splitGSU)
+                s["KernelNameMin"]   = getKernelNameMin(s, context.debugConfig.splitGSU)
 
             # Benchmark builds always target a single base arch; pick its subdir.
-            newLibraryDir = ensurePath(libraryDir(sourcePath, cmdLineArchs[0]))
+            newLibraryDir = ensurePath(libraryDir(context.sourcePath, context.cmdLineArchs[0]))
             newLibraryFile = os.path.join(newLibraryDir, "TensileLibrary")
             libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
             newLibraryFileFull = newLibraryFile + libraryExt
 
         with timing_context("python_benchpost_lib_construction"):
             newLibrary = SolutionLibrary.MasterSolutionLibrary.BenchmarkingLibrary(
-                             solutions,
-                             asmToolchain.assembler,
-                             debugConfig.splitGSU,
-                             debugConfig.printSolutionRejectionReason,
-                             debugConfig.printIndexAssignmentInfo,
-                             isaInfoMap,
+                             context.solutions,
+                             context.asmToolchain.assembler,
+                             context.debugConfig.splitGSU,
+                             context.debugConfig.printSolutionRejectionReason,
+                             context.debugConfig.printIndexAssignmentInfo,
+                             context.isaInfoMap,
                          )
-            newLibrary.applyNaming(debugConfig.splitGSU)
+            newLibrary.applyNaming(context.debugConfig.splitGSU)
 
         with timing_context("python_benchpost_library_write"):
             LibraryIO.write(newLibraryFile, state(newLibrary), globalParameters["LibraryFormat"])
 
-        codeObjectFiles = [os.path.relpath(f, sourcePath) \
+        codeObjectFiles = [os.path.relpath(f, context.sourcePath)
                 for f in codeObjectFiles]
-        libraryFileRel = os.path.relpath(newLibraryFileFull, sourcePath)
+        libraryFileRel = os.path.relpath(newLibraryFileFull, context.sourcePath)
 
         with timing_context("python_benchpost_client_config"):
-            if "TileAwareSelection" in problemType and problemType["TileAwareSelection"]:
+            if "TileAwareSelection" in context.problemType and context.problemType["TileAwareSelection"]:
                 maxMacroTile0 = 0
                 maxMacroTile1 = 0
-                for solution in solutions:
+                for solution in context.solutions:
                     macroTile0 = solution["MacroTile0"]
                     macroTile1 = solution["MacroTile1"]
                     if macroTile0 > maxMacroTile0:
@@ -711,31 +753,50 @@ def _finishBenchmarkFiles(kernelBuild, stepBaseDir, solutions, problemSizes, bia
                 idealM = 36 * maxMacroTile0
                 idealN = 36 * maxMacroTile1
                 idealSizes = []
-                if problemType["Batched"]:
-                    for idealK in solutionSummationSizes:
+                if context.problemType["Batched"]:
+                    for idealK in context.solutionSummationSizes:
                         idealSize = {"Exact": [idealM, idealN, 1, idealK]}
                         idealSizes.append(idealSize)
                 else:
-                    for idealK in solutionSummationSizes:
+                    for idealK in context.solutionSummationSizes:
                         idealSize = {"Exact": [idealM, idealN, idealK]}
                         idealSizes.append(idealSize)
-                idealProblemSizes = ProblemSizes(problemType, idealSizes)
-                writeClientConfig(True, solutions, idealProblemSizes, biasTypeArgs, \
-                                  factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
-                                  newLibrary, codeObjectFiles, True, deviceId, gfxName, \
-                                  libraryFile=newLibraryFileFull, gateTypeArgs=gateTypeArgs, probSolMap=probSolMap,
-                                  sourceDir=str(sourcePath), writeResultsFile=writeResultsFile)
+                idealProblemSizes = ProblemSizes(context.problemType, idealSizes)
+                writeClientConfig(
+                    True, context.solutions, idealProblemSizes, context.biasTypeArgs,
+                    context.factorDimArgs, context.activationArgs, context.icacheFlushArgs,
+                    context.stepName, context.stepBaseDir, newLibrary, codeObjectFiles, True,
+                    context.deviceId, context.gfxName, libraryFile=newLibraryFileFull,
+                    gateTypeArgs=context.gateTypeArgs, probSolMap=context.probSolMap,
+                    sourceDir=str(context.sourcePath), writeResultsFile=context.writeResultsFile,
+                )
             else:
-                writeClientConfig(True, solutions, problemSizes, biasTypeArgs, \
-                                  factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
-                                  newLibrary, codeObjectFiles, False, deviceId, gfxName, \
-                                  libraryFile=newLibraryFileFull, gateTypeArgs=gateTypeArgs, probSolMap=probSolMap,
-                                  sourceDir=str(sourcePath), writeResultsFile=writeResultsFile)
+                writeClientConfig(
+                    True, context.solutions, context.problemSizes, context.biasTypeArgs,
+                    context.factorDimArgs, context.activationArgs, context.icacheFlushArgs,
+                    context.stepName, context.stepBaseDir, newLibrary, codeObjectFiles, False,
+                    context.deviceId, context.gfxName, libraryFile=newLibraryFileFull,
+                    gateTypeArgs=context.gateTypeArgs, probSolMap=context.probSolMap,
+                    sourceDir=str(context.sourcePath), writeResultsFile=context.writeResultsFile,
+                )
 
-    if len(solutions) == 0:
+    if len(context.solutions) == 0:
         printExit("write solutions and kernels results 0 valid soultion.")
 
     return codeObjectFiles, libraryFileRel
+
+
+class _StepCompletion(NamedTuple):
+    """Finish a prepared step and record its client return code."""
+
+    finish: Callable[[], Tuple[str, int]]
+
+
+class _GroupCollection(NamedTuple):
+    """Collect a group's results after its steps have finished."""
+
+    benchmarkErrors: int
+    collect: Callable[[int], None]
 
 
 class _StepBatch:
@@ -752,8 +813,7 @@ class _StepBatch:
     def __init__(self, helperExecutor):
         self.helperExecutor = helperExecutor
         self._kernelBuilds = []
-        # In order: (step finish function, None) or (None, (benchmarkErrors, collect)).
-        self._pending = []
+        self._pending: List[Union[_StepCompletion, _GroupCollection]] = []
         self._cacheDirs = set()
         self._resultsFiles = set()
         # Failed client runs of finished steps whose group is not collected yet.
@@ -767,14 +827,14 @@ class _StepBatch:
         self._cacheDirs.add(cacheDir)
         if kernelBuild is not None:
             self._kernelBuilds.append(kernelBuild)
-        self._pending.append((finish, None))
+        self._pending.append(_StepCompletion(finish=finish))
 
     def endGroup(self, newResultsFileName, benchmarkErrors: int, collect: Callable[[int], None]):
         """The steps added since the last group end make a problem size group whose results go to
         newResultsFileName: collect(errors) runs after them, with errors = benchmarkErrors plus
         their failed client runs."""
         self._resultsFiles.add(newResultsFileName)
-        self._pending.append((None, (benchmarkErrors, collect)))
+        self._pending.append(_GroupCollection(benchmarkErrors=benchmarkErrors, collect=collect))
 
     def buildsInto(self, cacheDir) -> bool:
         """Whether an unfinished step builds into cacheDir."""
@@ -797,14 +857,13 @@ class _StepBatch:
             with timing_context("python_kernel_compilation"):
                 generateBenchmarkKernels(kernelBuilds)
         while pending:
-            finishStep, groupEnd = pending.pop(0)
-            if finishStep is not None:
-                _, returncode = finishStep()
+            event = pending.pop(0)
+            if isinstance(event, _StepCompletion):
+                _, returncode = event.finish()
                 if returncode:
                     self._failedSteps += 1
             else:
-                benchmarkErrors, collect = groupEnd
-                collect(benchmarkErrors + self._failedSteps)
+                event.collect(event.benchmarkErrors + self._failedSteps)
                 self._failedSteps = 0
         return hadSteps
 
