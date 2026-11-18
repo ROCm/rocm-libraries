@@ -160,8 +160,10 @@ void checkTensorVirtuality1Node(
             "Batchnorm training tensors must be non-virtual for 1-node graph");
     }
 
-    // Optional mean/variance tensors must be non-virtual if present
-    if(bnAttr.mean_tensor_uid().has_value())
+    // Optional mean/variance tensors must be non-virtual if present, except a saved pair that is
+    // virtual in both tensors, which is not requested.
+    const bool unrequestedSavedPair = hasUnrequestedSavedPair(bnAttr, tensorMap);
+    if(!unrequestedSavedPair && bnAttr.mean_tensor_uid().has_value())
     {
         const auto& bnTensorMean
             = findTensorAttributes(tensorMap, bnAttr.mean_tensor_uid().value());
@@ -172,7 +174,7 @@ void checkTensorVirtuality1Node(
         }
     }
 
-    if(bnAttr.inv_variance_tensor_uid().has_value())
+    if(!unrequestedSavedPair && bnAttr.inv_variance_tensor_uid().has_value())
     {
         const auto& bnTensorInvVar
             = findTensorAttributes(tensorMap, bnAttr.inv_variance_tensor_uid().value());
