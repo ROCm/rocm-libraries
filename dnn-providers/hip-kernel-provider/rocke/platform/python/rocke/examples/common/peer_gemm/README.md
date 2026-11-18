@@ -179,7 +179,11 @@ allocation guards (including staging), and verifies immutable inputs/tables.
 It uses deterministic synthetic dyadic inputs, not customer/model data. CPU tests
 exercise its packed-ABI host model at one, two, four, and eight ranks; these are
 **mock-only tests, not multi-GPU numerical validation**. The new baseline and
-runner still require independent hardware correctness gates.
+runner were subsequently exercised on four `gfx942` GPUs: both paths, both
+dtypes, all four placements, two aligned geometries, and single/repeated iterations
+passed exact output, guard, immutability, intermediate-layout, all-rank completion,
+retention-isolation, and teardown checks. The `gfx950` four-GPU lane did not obtain
+an allocation, so that gate remains pending; it was not a kernel-test failure.
 
 Run the correctness-only entry point inside a separately authorized GPU allocation,
 from `rocke/platform/` with `PYTHONPATH=python`:
@@ -193,6 +197,65 @@ Repeat for both dtypes and all four input/output placements; include single-iter
 and repeated-iteration checks and more than one aligned geometry. The CLI does not
 submit Slurm jobs or import PyTorch. Its report contains checks, shapes, placements,
 launch counts, and logical workload bytes, **not achieved software-performance values**.
+
+## Stage 3b: opt-in finite work assignment
+
+`PeerGemmScheduleSpec(gemm, work_order, max_ctas)` adds a scheduled family without
+changing the legacy `PeerGemmSpec` or its C ABI. `build_scheduled_peer_gemm` shares
+the canonical panel MFMA body with the legacy builder. Python/C++ builders and
+independent binding/standalone oracles cover both `gfx942` and `gfx950`.
+
+Let `Mt = Ms / 16`, `Nt = Ns / 16`, `P = sources`, and `T = P * Mt * Nt`.
+A zero cap selects `Q = T`; otherwise `Q = min(max_ctas, T)`. Grid `(Q, 1, 1)`
+launches one wave per CTA. CTA `q` visits logical tile indices `q, q+Q, q+2Q, ...`
+while the index is below `T`:
+
+| Work order | Source | Panel tile |
+| --- | --- | --- |
+| `source_grouped` | `index // (Mt * Nt)` | `index % (Mt * Nt)` |
+| `tile_interleaved` | `index % P` | `index // P` |
+
+The panel tile maps to row/column tile by division/remainder with `Nt`. Each
+logical output tile has exactly one CTA owner, finishes its entire K accumulation,
+and uses the same local/peer A and C pointer tables as the legacy path. There is
+no split-K, reduction, reusable staging buffer, or publication/reuse protocol.
+
+### Bounds and progress
+
+- Valid shapes make `T` and `Q` positive. The residues modulo `Q` partition the
+  tile range; each CTA's loop is finite and independent of other CTAs/ranks.
+- Existing panel bounds and the explicit schedule validator ensure the final
+  grid-stride increment fits signed i32 arithmetic. Pointer tables remain u64.
+- Extra x CTAs and nonzero y/z CTAs do no work. This is a launch-coordinate guard,
+  not support for arbitrary matrix tails; dimensions still need atom alignment.
+- The cap bounds **submitted CTAs**. It does not guarantee residency, dispatch
+  order, a physical link-traffic limit, or an outstanding-request count.
+- Inputs are immutable and host-published before launch. The all-rank completion
+  and allocation/module/table lifetime contract is unchanged.
+
+Grouping may favor source locality; interleaving may distribute source selection
+across logical tiles. A smaller CTA grid trades available parallel work for more
+sequential tile visits per CTA. These are experimental levers, not measured
+improvements. There is still one fused launch per execution rank.
+
+The runner accepts an optional schedule and uses **the same scheduled GEMM code
+object for both fused and local-baseline paths**. Gather/scatter copies stay in
+the same baseline phases; shape, precision, final C layout, and timing boundary
+remain equivalent. The default CLI/runner path stays legacy.
+
+Correctness-only replay in a separately authorized allocation:
+
+```text
+python -m rocke.examples.common.peer_gemm.run --devices 0,1,2,3 --arch gfx942 --dtype bf16 --rows 32 --cols 48 --k 32 --schedule tile_interleaved --max-ctas 3 --inputs gather --outputs scatter --repeats 3 --correctness-output <correctness-report.json>
+```
+
+CPU tests establish ownership/progress and packed-ABI host reconstruction;
+LLVM/IR parity and offline compilation establish program/compilation agreement.
+**The scheduled variants have not been hardware-validated or measured.** The
+legacy four-GPU `gfx942` result does not validate them. New schedule correctness
+experiments need separate approval before timing/profiling. Input-tile reuse
+across output-column tiles and physical traffic/wait attribution remain later
+Stage 3 work; Stage 4 requires evidence justifying staging or separate roles.
 
 ### Timing and traffic interpretation
 

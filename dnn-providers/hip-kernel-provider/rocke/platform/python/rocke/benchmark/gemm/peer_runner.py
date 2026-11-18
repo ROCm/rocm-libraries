@@ -20,8 +20,11 @@ import numpy as np
 from ...helpers.compile import compile_kernel
 from ...instances.common.peer_gemm import (
     PeerGemmAllocation,
+    PeerGemmScheduleSpec,
     PeerGemmSpec,
     build_peer_gemm,
+    build_scheduled_peer_gemm,
+    is_valid_schedule_spec,
 )
 from ...instances.common.peer_gemm_pipeline import (
     PeerGemmPipelinePlan,
@@ -114,7 +117,15 @@ class PeerGemmRunner:
         output_placement: str = "scatter",
         backend: str = "python",
         seed: int = 12345,
+        schedule: PeerGemmScheduleSpec | None = None,
     ) -> None:
+        if schedule is not None:
+            valid, why = is_valid_schedule_spec(schedule, arch)
+            if not valid or schedule.gemm != spec:
+                raise ValueError(
+                    why if not valid else "schedule GEMM spec must match the runner"
+                )
+        self.schedule = schedule
         if len(devices) != spec.sources or len(set(devices)) != len(devices):
             raise ValueError("one unique device per source/rank is required")
         if any(
@@ -147,9 +158,12 @@ class PeerGemmRunner:
         self.reference = _decode(a_words, spec.dtype) @ _decode(b_words, spec.dtype)
         self.immutable: list[_Buffer] = []
         try:
-            gemm = compile_kernel(
-                build_peer_gemm(spec, arch), arch=arch, backend=backend
+            definition = (
+                build_peer_gemm(spec, arch)
+                if schedule is None
+                else build_scheduled_peer_gemm(schedule, arch)
             )
+            gemm = compile_kernel(definition, arch=arch, backend=backend)
             copy_spec = PeerTileCopySpec(dtype=spec.dtype)
             copy = compile_kernel(
                 build_peer_tile_copy(copy_spec, arch), arch=arch, backend=backend
@@ -223,7 +237,11 @@ class PeerGemmRunner:
                     self.modules.append(cm)
                     self.functions.append(
                         (
-                            gm.get_function(spec.kernel_name()),
+                            gm.get_function(
+                                spec.kernel_name()
+                                if schedule is None
+                                else schedule.kernel_name()
+                            ),
                             cm.get_function(copy_spec.kernel_name()),
                         )
                     )
@@ -277,6 +295,7 @@ class PeerGemmRunner:
                 a_table=at.region(),
                 c_table=ct.region(),
                 fused=fused,
+                schedule=self.schedule,
             )
             counts.append(summary.launches)
         return tuple(counts)
@@ -346,6 +365,13 @@ class PeerGemmRunner:
             "fused": fused,
             "ranks": p,
             "dtype": self.spec.dtype,
+            "work_order": (
+                "legacy" if self.schedule is None else self.schedule.work_order
+            ),
+            "max_ctas": 0 if self.schedule is None else self.schedule.max_ctas,
+            "scheduled_ctas": (
+                None if self.schedule is None else self.schedule.cta_count
+            ),
             "input_placement": self.input_placement,
             "output_placement": self.output_placement,
             "repeats": repeats,
@@ -391,6 +417,7 @@ class PeerGemmRunner:
                         a_table=at.region(),
                         c_table=ct.region(),
                         fused=fused,
+                        schedule=self.schedule,
                     )
                     events[rank][1].record()
                 counts.append(summary.launches)

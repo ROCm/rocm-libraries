@@ -26,15 +26,15 @@ rocke_peer_gemm_spec_t rocke_peer_gemm_spec_default(void)
 
 static bool peer_gemm_identifier(const char* name)
 {
-    if(name == NULL || !*name || strlen(name) > 128)
+    if (name == NULL || !*name || strlen(name) > 128)
     {
         return false;
     }
-    for(size_t i = 0; name[i]; ++i)
+    for (size_t i = 0; name[i]; ++i)
     {
         unsigned char c = (unsigned char)name[i];
         bool letter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
-        if(!letter && !(i && c >= '0' && c <= '9'))
+        if (!letter && !(i && c >= '0' && c <= '9'))
         {
             return false;
         }
@@ -61,32 +61,32 @@ static rocke_mfma_gemm_spec_t peer_base_spec(
 bool rocke_peer_gemm_is_valid_spec(
     const rocke_peer_gemm_spec_t* spec, const char* arch, char* reason, size_t reason_cap)
 {
-    if(arch == NULL)
+    if (arch == NULL)
     {
         arch = "gfx950";
     }
     const char* why = NULL;
     char message[256];
-    if(spec == NULL)
+    if (spec == NULL)
     {
         why = "null spec";
     }
-    else if(strcmp(arch, "gfx942") && strcmp(arch, "gfx950"))
+    else if (strcmp(arch, "gfx942") && strcmp(arch, "gfx950"))
     {
         snprintf(message, sizeof(message), "unsupported peer GEMM arch '%s'", arch);
         why = message;
     }
-    else if(spec->sources < 1 || spec->sources > 8)
+    else if (spec->sources < 1 || spec->sources > 8)
     {
         why = "sources must be an integer in [1, 8]";
     }
-    else if(spec->rows_per_source <= 0 || spec->cols_per_rank <= 0 || spec->k <= 0)
+    else if (spec->rows_per_source <= 0 || spec->cols_per_rank <= 0 || spec->k <= 0)
     {
         why = "panel dimensions must be positive i32 integers";
     }
-    else if(spec->dtype == NULL || (strcmp(spec->dtype, "f16") && strcmp(spec->dtype, "bf16")))
+    else if (spec->dtype == NULL || (strcmp(spec->dtype, "f16") && strcmp(spec->dtype, "bf16")))
     {
-        if(spec->dtype == NULL)
+        if (spec->dtype == NULL)
         {
             why = "unsupported dtype None";
         }
@@ -96,17 +96,17 @@ bool rocke_peer_gemm_is_valid_spec(
             why = message;
         }
     }
-    else if(!peer_gemm_identifier(spec->name))
+    else if (!peer_gemm_identifier(spec->name))
     {
         why = "name must be an ASCII identifier of at most 128 characters";
     }
-    else if((int64_t)spec->rows_per_source * spec->k > INT_MAX
+    else if ((int64_t)spec->rows_per_source * spec->k > INT_MAX
         || (int64_t)spec->k * spec->cols_per_rank > INT_MAX
         || (int64_t)spec->rows_per_source * spec->cols_per_rank > INT_MAX)
     {
         why = "each GEMM panel element span must fit i32 indexing";
     }
-    if(why != NULL)
+    if (why != NULL)
     {
         rocke_spec_set_reason(reason, reason_cap, why);
         return false;
@@ -119,7 +119,7 @@ bool rocke_peer_gemm_is_valid_spec(
 rocke_status_t rocke_peer_gemm_kernel_name(
     const rocke_peer_gemm_spec_t* spec, char* out, size_t out_cap)
 {
-    if(!rocke_peer_gemm_is_valid_spec(spec, NULL, NULL, 0))
+    if (!rocke_peer_gemm_is_valid_spec(spec, NULL, NULL, 0))
     {
         return ROCKE_ERR_VALUE;
     }
@@ -157,11 +157,37 @@ static rocke_value_t* peer_load_b(rocke_ir_builder_t* b, rocke_value_t* kt, void
         b, context->B, context->atom, context->decode, context->n_base, k_base, context->n);
 }
 
+static void peer_gemm_compute(rocke_ir_builder_t* b, const rocke_peer_gemm_spec_t* spec,
+    const rocke_mfma_atom_t* atom, rocke_value_t* selected_a, rocke_value_t* local_b,
+    rocke_value_t* selected_c, rocke_value_t* lane, rocke_value_t* bid_n, rocke_value_t* bid_m)
+{
+    rocke_value_t* atom_m = rocke_b_const_i32(b, atom->m);
+    rocke_value_t* m_base = rocke_b_mul(b, bid_m, atom_m);
+    rocke_value_t* atom_n = rocke_b_const_i32(b, atom->n);
+    rocke_value_t* n_base = rocke_b_mul(b, bid_n, atom_n);
+    rocke_lane_decode_t decode = rocke_decode_mfma_lanes(b, atom, lane);
+    rocke_value_t* atom_k = rocke_b_const_i32(b, atom->k);
+    peer_gemm_load_ctx_t context;
+    context.A = selected_a;
+    context.B = local_b;
+    context.atom = atom;
+    context.decode = &decode;
+    context.m_base = m_base;
+    context.n_base = n_base;
+    context.atom_k = atom_k;
+    context.k = spec->k;
+    context.n = spec->cols_per_rank;
+    rocke_value_t* acc = rocke_mfma_k_loop(
+        b, spec->k, atom, peer_load_a, peer_load_b, NULL, NULL, NULL, NULL, &context);
+    rocke_store_acc_to_global(b, selected_c, atom, &decode, m_base, n_base, acc,
+        spec->cols_per_rank, spec->dtype, false, NULL, NULL);
+}
+
 static rocke_kernel_def_t* peer_gemm_build(
     rocke_ir_builder_t* b, const rocke_peer_gemm_spec_t* spec, const char* arch)
 {
     char reason[ROCKE_ERR_MSG_CAP];
-    if(!rocke_peer_gemm_is_valid_spec(spec, arch, reason, sizeof(reason)))
+    if (!rocke_peer_gemm_is_valid_spec(spec, arch, reason, sizeof(reason)))
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "invalid peer GEMM spec: %s", reason);
         return NULL;
@@ -199,36 +225,7 @@ static rocke_kernel_def_t* peer_gemm_build(
     rocke_value_t* lane = rocke_b_thread_id_x(b);
     rocke_value_t* bid_n = rocke_b_block_id_x(b);
     rocke_value_t* bid_m = rocke_b_block_id_y(b);
-    rocke_value_t* atom_m = rocke_b_const_i32(b, atom->m);
-    rocke_value_t* m_base = rocke_b_mul(b, bid_m, atom_m);
-    rocke_value_t* atom_n = rocke_b_const_i32(b, atom->n);
-    rocke_value_t* n_base = rocke_b_mul(b, bid_n, atom_n);
-    rocke_lane_decode_t decode = rocke_decode_mfma_lanes(b, atom, lane);
-    rocke_value_t* atom_k = rocke_b_const_i32(b, atom->k);
-    peer_gemm_load_ctx_t context;
-    context.A = selected_a;
-    context.B = local_b;
-    context.atom = atom;
-    context.decode = &decode;
-    context.m_base = m_base;
-    context.n_base = n_base;
-    context.atom_k = atom_k;
-    context.k = spec->k;
-    context.n = spec->cols_per_rank;
-    rocke_value_t* acc = rocke_mfma_k_loop(
-        b, spec->k, atom, peer_load_a, peer_load_b, NULL, NULL, NULL, NULL, &context);
-    rocke_store_acc_to_global(b,
-        selected_c,
-        atom,
-        &decode,
-        m_base,
-        n_base,
-        acc,
-        spec->cols_per_rank,
-        spec->dtype,
-        false,
-        NULL,
-        NULL);
+    peer_gemm_compute(b, spec, atom, selected_a, local_b, selected_c, lane, bid_n, bid_m);
     rocke_b_region_leave(b);
     rocke_b_ret(b);
     return rocke_ir_builder_ok(b) ? b->kernel : NULL;
@@ -240,13 +237,13 @@ rocke_kernel_def_t* rocke_build_peer_gemm_new(
     return ckc::guard_builder(b,
         [&]() -> rocke_kernel_def_t*
         {
-            if(b == NULL)
+            if (b == NULL)
             {
                 return NULL;
             }
             char name[256];
             rocke_status_t status = rocke_peer_gemm_kernel_name(spec, name, sizeof(name));
-            if(rocke_ir_builder_init(b, status == ROCKE_OK ? name : "rocke_peer_gemm") != ROCKE_OK)
+            if (rocke_ir_builder_init(b, status == ROCKE_OK ? name : "rocke_peer_gemm") != ROCKE_OK)
             {
                 return NULL;
             }
@@ -256,7 +253,7 @@ rocke_kernel_def_t* rocke_build_peer_gemm_new(
 
 rocke_status_t rocke_peer_gemm_grid(const rocke_peer_gemm_spec_t* spec, int out[3])
 {
-    if(out == NULL || !rocke_peer_gemm_is_valid_spec(spec, NULL, NULL, 0))
+    if (out == NULL || !rocke_peer_gemm_is_valid_spec(spec, NULL, NULL, 0))
     {
         return ROCKE_ERR_VALUE;
     }
@@ -266,14 +263,10 @@ rocke_status_t rocke_peer_gemm_grid(const rocke_peer_gemm_spec_t* spec, int out[
     return ROCKE_OK;
 }
 
-rocke_status_t rocke_peer_gemm_lower_to_llvm(const rocke_peer_gemm_spec_t* spec,
-    const char* arch,
-    rocke_llvm_flavor_t flavor,
-    char** out_ll,
-    char* err,
-    size_t err_cap)
+rocke_status_t rocke_peer_gemm_lower_to_llvm(const rocke_peer_gemm_spec_t* spec, const char* arch,
+    rocke_llvm_flavor_t flavor, char** out_ll, char* err, size_t err_cap)
 {
-    if(out_ll == NULL)
+    if (out_ll == NULL)
     {
         return ROCKE_ERR_VALUE;
     }
@@ -284,7 +277,213 @@ rocke_status_t rocke_peer_gemm_lower_to_llvm(const rocke_peer_gemm_spec_t* spec,
     rocke_status_t status = kernel == NULL
         ? ROCKE_ERR_VALUE
         : rocke_lower_kernel_to_llvm(kernel, flavor, arch == NULL ? "gfx950" : arch, out_ll);
-    if(kernel == NULL)
+    if (kernel == NULL)
+    {
+        rocke_spec_set_reason(err, err_cap, b.err);
+    }
+    rocke_ir_builder_free(&b);
+    return status;
+}
+
+rocke_peer_gemm_schedule_spec_t rocke_peer_gemm_schedule_spec_default(void)
+{
+    rocke_peer_gemm_schedule_spec_t spec;
+    memset(&spec, 0, sizeof(spec));
+    spec.gemm = rocke_peer_gemm_spec_default();
+    spec.work_order = "source_grouped";
+    return spec;
+}
+
+static int schedule_panel_tiles(const rocke_peer_gemm_schedule_spec_t* spec)
+{
+    return (spec->gemm.rows_per_source / 16) * (spec->gemm.cols_per_rank / 16);
+}
+
+static int schedule_tile_count(const rocke_peer_gemm_schedule_spec_t* spec)
+{
+    return spec->gemm.sources * schedule_panel_tiles(spec);
+}
+
+static int schedule_cta_count(const rocke_peer_gemm_schedule_spec_t* spec)
+{
+    int tiles = schedule_tile_count(spec);
+    return spec->max_ctas == 0 || spec->max_ctas > tiles ? tiles : spec->max_ctas;
+}
+
+bool rocke_peer_gemm_schedule_is_valid_spec(
+    const rocke_peer_gemm_schedule_spec_t* spec, const char* arch, char* reason, size_t reason_cap)
+{
+    if (spec == NULL)
+    {
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
+        return false;
+    }
+    if (!rocke_peer_gemm_is_valid_spec(&spec->gemm, arch, reason, reason_cap))
+    {
+        return false;
+    }
+    const char* why = NULL;
+    if (spec->work_order == NULL
+        || (strcmp(spec->work_order, "source_grouped")
+            && strcmp(spec->work_order, "tile_interleaved")))
+    {
+        why = "work_order must be 'source_grouped' or 'tile_interleaved'";
+    }
+    else if (spec->max_ctas < 0)
+    {
+        why = "max_ctas must be a non-negative i32 integer";
+    }
+    else if (schedule_tile_count(spec) > INT_MAX / 2)
+    {
+        why = "tile count and final grid-stride increment must fit i32";
+    }
+    rocke_spec_set_reason(reason, reason_cap, why == NULL ? "ok" : why);
+    return why == NULL;
+}
+
+rocke_status_t rocke_peer_gemm_schedule_kernel_name(
+    const rocke_peer_gemm_schedule_spec_t* spec, char* out, size_t out_cap)
+{
+    if (out == NULL || out_cap == 0 || !rocke_peer_gemm_schedule_is_valid_spec(spec, NULL, NULL, 0))
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    char base[256];
+    if (rocke_peer_gemm_kernel_name(&spec->gemm, base, sizeof(base)) != ROCKE_OK)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    int size
+        = snprintf(out, out_cap, "%s_%s_q%d", base, spec->work_order, schedule_cta_count(spec));
+    return size < 0 || (size_t)size >= out_cap ? ROCKE_ERR_VALUE : ROCKE_OK;
+}
+
+rocke_status_t rocke_peer_gemm_schedule_grid(
+    const rocke_peer_gemm_schedule_spec_t* spec, int out[3])
+{
+    if (out == NULL || !rocke_peer_gemm_schedule_is_valid_spec(spec, NULL, NULL, 0))
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    out[0] = schedule_cta_count(spec);
+    out[1] = 1;
+    out[2] = 1;
+    return ROCKE_OK;
+}
+
+static rocke_kernel_def_t* scheduled_peer_gemm_build(
+    rocke_ir_builder_t* b, const rocke_peer_gemm_schedule_spec_t* spec, const char* arch)
+{
+    char reason[ROCKE_ERR_MSG_CAP];
+    if (!rocke_peer_gemm_schedule_is_valid_spec(spec, arch, reason, sizeof(reason)))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "invalid peer GEMM schedule spec: %s", reason);
+        return NULL;
+    }
+    const rocke_peer_gemm_spec_t* gemm = &spec->gemm;
+    char base_name[160];
+    rocke_mfma_gemm_spec_t base = peer_base_spec(gemm, base_name, sizeof(base_name));
+    const rocke_mfma_atom_t* atom = rocke_mfma_gemm_atom(&base);
+    rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", 64);
+    const rocke_type_t* element = strcmp(gemm->dtype, "bf16") == 0 ? rocke_bf16() : rocke_f16();
+    const rocke_type_t* panel_pointer = rocke_ptr_type(b, element, "global");
+    const rocke_type_t* table_pointer = rocke_ptr_type(b, panel_pointer, "global");
+    rocke_param_opts_t options;
+    memset(&options, 0, sizeof(options));
+    options.noalias = true;
+    options.noalias_set = true;
+    options.readonly = true;
+    options.readonly_set = true;
+    options.align = 8;
+    options.align_set = true;
+    rocke_value_t* a_table = rocke_b_param(b, "A_ptrs", table_pointer, &options);
+    options.align = 16;
+    rocke_value_t* local_b = rocke_b_param(b, "B", panel_pointer, &options);
+    options.align = 8;
+    rocke_value_t* c_table = rocke_b_param(b, "C_ptrs", table_pointer, &options);
+    rocke_value_t* cta = rocke_b_block_id_x(b);
+    rocke_value_t* zero = rocke_b_const_i32(b, 0);
+    rocke_value_t* nonnegative = rocke_b_cmp_ge(b, cta, zero);
+    rocke_value_t* count = rocke_b_const_i32(b, schedule_cta_count(spec));
+    rocke_value_t* below_limit = rocke_b_cmp_lt(b, cta, count);
+    rocke_value_t* valid = rocke_b_land(b, nonnegative, below_limit);
+    rocke_value_t* y = rocke_b_block_id_y(b);
+    zero = rocke_b_const_i32(b, 0);
+    rocke_value_t* y_zero = rocke_b_cmp_eq(b, y, zero);
+    valid = rocke_b_land(b, valid, y_zero);
+    rocke_value_t* z = rocke_b_block_id_z(b);
+    zero = rocke_b_const_i32(b, 0);
+    rocke_value_t* z_zero = rocke_b_cmp_eq(b, z, zero);
+    valid = rocke_b_land(b, valid, z_zero);
+    rocke_if_t guard = rocke_b_scf_if(b, valid);
+    rocke_b_region_enter(b, guard.then_region);
+    rocke_value_t* end = rocke_b_const_i32(b, schedule_tile_count(spec));
+    rocke_value_t* step = rocke_b_const_i32(b, schedule_cta_count(spec));
+    rocke_for_t work = rocke_b_scf_for(b, cta, end, step, "work");
+    rocke_b_region_enter(b, work.body);
+    rocke_value_t* source;
+    rocke_value_t* panel;
+    if (strcmp(spec->work_order, "source_grouped") == 0)
+    {
+        rocke_value_t* divisor = rocke_b_const_i32(b, schedule_panel_tiles(spec));
+        source = rocke_b_div(b, work.iv, divisor);
+        panel = rocke_b_mod(b, work.iv, divisor);
+    }
+    else
+    {
+        rocke_value_t* divisor = rocke_b_const_i32(b, gemm->sources);
+        source = rocke_b_mod(b, work.iv, divisor);
+        panel = rocke_b_div(b, work.iv, divisor);
+    }
+    rocke_value_t* columns = rocke_b_const_i32(b, gemm->cols_per_rank / atom->n);
+    rocke_value_t* bid_m = rocke_b_div(b, panel, columns);
+    rocke_value_t* bid_n = rocke_b_mod(b, panel, columns);
+    rocke_value_t* selected_a = rocke_b_global_load(b, a_table, source, panel_pointer, 8);
+    rocke_value_t* selected_c = rocke_b_global_load(b, c_table, source, panel_pointer, 8);
+    rocke_value_t* lane = rocke_b_thread_id_x(b);
+    peer_gemm_compute(b, gemm, atom, selected_a, local_b, selected_c, lane, bid_n, bid_m);
+    rocke_b_region_leave(b);
+    rocke_b_region_leave(b);
+    rocke_b_ret(b);
+    return rocke_ir_builder_ok(b) ? b->kernel : NULL;
+}
+
+rocke_kernel_def_t* rocke_build_scheduled_peer_gemm_new(
+    rocke_ir_builder_t* b, const rocke_peer_gemm_schedule_spec_t* spec, const char* arch)
+{
+    return ckc::guard_builder(b,
+        [&]() -> rocke_kernel_def_t*
+        {
+            if (b == NULL)
+            {
+                return NULL;
+            }
+            char name[256];
+            rocke_status_t status = rocke_peer_gemm_schedule_kernel_name(spec, name, sizeof(name));
+            if (rocke_ir_builder_init(b, status == ROCKE_OK ? name : "rocke_peer_gemm_scheduled")
+                != ROCKE_OK)
+            {
+                return NULL;
+            }
+            return scheduled_peer_gemm_build(b, spec, arch);
+        });
+}
+
+rocke_status_t rocke_peer_gemm_schedule_lower_to_llvm(const rocke_peer_gemm_schedule_spec_t* spec,
+    const char* arch, rocke_llvm_flavor_t flavor, char** out_ll, char* err, size_t err_cap)
+{
+    if (out_ll == NULL)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    *out_ll = NULL;
+    rocke_ir_builder_t b;
+    memset(&b, 0, sizeof(b));
+    rocke_kernel_def_t* kernel = rocke_build_scheduled_peer_gemm_new(&b, spec, arch);
+    rocke_status_t status = kernel == NULL
+        ? ROCKE_ERR_VALUE
+        : rocke_lower_kernel_to_llvm(kernel, flavor, arch == NULL ? "gfx950" : arch, out_ll);
+    if (kernel == NULL)
     {
         rocke_spec_set_reason(err, err_cap, b.err);
     }

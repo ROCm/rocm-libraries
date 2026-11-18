@@ -1438,6 +1438,18 @@ def cfgs_peer_gemm() -> list[tuple[dict[str, int | str], str]]:
     ]
 
 
+def cfgs_peer_gemm_scheduled():
+    """Nested additive schedule spec; ordering matches the standalone oracle."""
+    bases = cfgs_peer_gemm()[::2]
+    return [
+        ({"gemm": dict(base), "work_order": order, "max_ctas": cap}, arch)
+        for base, _ in bases
+        for order in ("source_grouped", "tile_interleaved")
+        for cap in (0, 1, 3)
+        for arch in ("gfx950", "gfx942")
+    ]
+
+
 # (family, lower_fn_name, configs, arch). arch=None => use per-config arch
 # (configs are (dict, arch) tuples). Otherwise configs are plain dicts.
 FAMILIES = [
@@ -1461,6 +1473,12 @@ FAMILIES = [
     ("transpose", "transpose_lower_llvm", cfgs_transpose(), "gfx950"),
     ("peer_tile_copy", "peer_tile_copy_lower_llvm", cfgs_peer_tile_copy(), None),
     ("peer_gemm", "peer_gemm_lower_llvm", cfgs_peer_gemm(), None),
+    (
+        "peer_gemm_scheduled",
+        "peer_gemm_scheduled_lower_llvm",
+        cfgs_peer_gemm_scheduled(),
+        None,
+    ),
     ("permute_nd", "permute_nd_lower_llvm", cfgs_permute_nd(), "gfx950"),
     ("smoothquant", "smoothquant_lower_llvm", cfgs_smoothquant(), "gfx950"),
     ("topk_softmax", "topk_softmax_lower_llvm", cfgs_topk_softmax(), "gfx950"),

@@ -49,6 +49,18 @@ helper Z".
 | Python-time vs runtime branch split | `Value.__bool__` raises; `IRBuilder.static_if(...)` for host branches, `IRBuilder.scf_if(...)` for runtime branches |
 | Persistent kernel | `TraitSpec.persistent` (universal GEMM) + `StreamKGemmSpec` (`instances/common/streamk_gemm.py`), backed by `helpers/persistent.py::persistent_tile_for_each` |
 | Split-K | not yet a dedicated TileSpec field; primitives exist (`global_atomic_add_f32`), and Stream-K (`StreamKGemmSpec`) covers the load-balanced K-split case |
+| Immutable direct-peer work assignment | `PeerGemmScheduleSpec` / `build_scheduled_peer_gemm` (`instances/common/peer_gemm.py`): source-grouped/interleaved tile coordinates plus finite fixed-grid stride; no split-K or publication protocol |
+
+For direct-peer work, distinguish logical tile assignment from physical dispatch
+order. A grid cap bounds submitted CTAs, not guaranteed residency or outstanding
+memory traffic. Prove complete unique output ownership and finite independent
+progress before profiling. Compare fused and materialized-local paths with the
+same selected compute schedule, precision, shape, and output layout. The legacy
+schedule remains the default until independent correctness and characterization
+justify another choice; see the
+[peer-GEMM replay methodology](../../python/rocke/examples/common/peer_gemm/README.md#stage-3b-opt-in-finite-work-assignment).
+Keep measured values out of repository artifacts and avoid overlap claims from
+logical interleaving or a persistent loop alone.
 
 ## §6 Memory hierarchy
 

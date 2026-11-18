@@ -44,11 +44,31 @@ extern "C"
     rocke_status_t rocke_peer_gemm_grid(const rocke_peer_gemm_spec_t* spec, int out[3]);
     /* On success out_ll is malloc'd and caller frees it. */
     rocke_status_t rocke_peer_gemm_lower_to_llvm(const rocke_peer_gemm_spec_t* spec,
-        const char* arch,
-        rocke_llvm_flavor_t flavor,
-        char** out_ll,
-        char* err,
-        size_t err_cap);
+        const char* arch, rocke_llvm_flavor_t flavor, char** out_ll, char* err, size_t err_cap);
+
+    /* Additive opt-in schedule API; rocke_peer_gemm_spec_t layout is unchanged.
+     * PeerGemmScheduleSpec -> rocke_peer_gemm_schedule_spec_t.
+     * A CTA cap bounds submitted workgroups, not residency or physical peer traffic.
+     */
+    typedef struct rocke_peer_gemm_schedule_spec
+    {
+        rocke_peer_gemm_spec_t gemm;
+        const char* work_order;
+        int max_ctas;
+    } rocke_peer_gemm_schedule_spec_t;
+
+    rocke_peer_gemm_schedule_spec_t rocke_peer_gemm_schedule_spec_default(void);
+    bool rocke_peer_gemm_schedule_is_valid_spec(const rocke_peer_gemm_schedule_spec_t* spec,
+        const char* arch, char* reason, size_t reason_cap);
+    rocke_status_t rocke_peer_gemm_schedule_kernel_name(
+        const rocke_peer_gemm_schedule_spec_t* spec, char* out, size_t out_cap);
+    rocke_status_t rocke_peer_gemm_schedule_grid(
+        const rocke_peer_gemm_schedule_spec_t* spec, int out[3]);
+    rocke_kernel_def_t* rocke_build_scheduled_peer_gemm_new(
+        rocke_ir_builder_t* b, const rocke_peer_gemm_schedule_spec_t* spec, const char* arch);
+    rocke_status_t rocke_peer_gemm_schedule_lower_to_llvm(
+        const rocke_peer_gemm_schedule_spec_t* spec, const char* arch, rocke_llvm_flavor_t flavor,
+        char** out_ll, char* err, size_t err_cap);
 
 #ifdef __cplusplus
 }

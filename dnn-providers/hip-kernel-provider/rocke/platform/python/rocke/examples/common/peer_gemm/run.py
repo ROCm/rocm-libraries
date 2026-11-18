@@ -15,7 +15,12 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ....benchmark.gemm.peer_runner import PeerGemmRunner
-from ....instances.common.peer_gemm import PeerGemmSpec, is_valid_spec
+from ....instances.common.peer_gemm import (
+    PeerGemmScheduleSpec,
+    PeerGemmSpec,
+    is_valid_schedule_spec,
+    is_valid_spec,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -33,6 +38,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--outputs", default="scatter", choices=["local", "scatter"])
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--correctness-output", type=Path)
+    parser.add_argument(
+        "--schedule",
+        default="legacy",
+        choices=["legacy", "source_grouped", "tile_interleaved"],
+    )
+    parser.add_argument(
+        "--max-ctas",
+        type=int,
+        default=0,
+        help="cap submitted CTAs; zero means one CTA per output tile",
+    )
     parser.add_argument(
         "--warmup",
         type=int,
@@ -62,13 +78,31 @@ def main(argv: list[str] | None = None) -> int:
     valid, why = is_valid_spec(spec, args.arch)
     if not valid:
         parser.error(why)
-    report = {"spec": asdict(spec), "devices": devices, "arch": args.arch, "checks": []}
+    if args.schedule == "legacy" and args.max_ctas != 0:
+        parser.error("max-ctas requires an opt-in non-legacy schedule")
+    schedule = (
+        None
+        if args.schedule == "legacy"
+        else PeerGemmScheduleSpec(spec, args.schedule, args.max_ctas)
+    )
+    if schedule is not None:
+        valid, why = is_valid_schedule_spec(schedule, args.arch)
+        if not valid:
+            parser.error(why)
+    report = {
+        "spec": asdict(spec),
+        "devices": devices,
+        "arch": args.arch,
+        "schedule": None if schedule is None else asdict(schedule),
+        "checks": [],
+    }
     with PeerGemmRunner(
         spec,
         devices=devices,
         arch=args.arch,
         input_placement=args.inputs,
         output_placement=args.outputs,
+        schedule=schedule,
     ) as runner:
         report["checks"].append(runner.validate(fused=True, repeats=args.repeats))
         report["checks"].append(runner.validate(fused=False, repeats=args.repeats))
@@ -85,7 +119,11 @@ def main(argv: list[str] | None = None) -> int:
                 for fused in ((True, False) if sample % 2 == 0 else (False, True)):
                     print(
                         json.dumps(
-                            {"sample": sample, **asdict(runner.measure(fused=fused))}
+                            {
+                                "sample": sample,
+                                "schedule": report["schedule"],
+                                **asdict(runner.measure(fused=fused)),
+                            }
                         )
                     )
     # Publish a correctness report only after successful all-rank teardown.

@@ -14,3 +14,21 @@ live in ``instances/<family>/policy.py``.
 
 See ``dsl_docs/architecture/multi_arch_data_layout.md``.
 """
+
+from .peer_gemm import (
+    PeerGemmScheduleSpec,
+    build_scheduled_peer_gemm,
+    is_valid_schedule_spec,
+    scheduled_peer_gemm_cta_work,
+    scheduled_peer_gemm_grid,
+    scheduled_peer_gemm_tile_coordinate,
+)
+
+__all__ = [
+    "PeerGemmScheduleSpec",
+    "build_scheduled_peer_gemm",
+    "is_valid_schedule_spec",
+    "scheduled_peer_gemm_cta_work",
+    "scheduled_peer_gemm_grid",
+    "scheduled_peer_gemm_tile_coordinate",
+]

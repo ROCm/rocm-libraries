@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import re
 import struct
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 
-from ...core.ir import IRBuilder, KernelDef, PtrType
+from ...core.ir import IRBuilder, KernelDef, PtrType, Value
 from ...helpers.io import io_ir_type
 from ...helpers.mfma_gemm_inner import (
     decode_mfma_lanes,
@@ -35,13 +35,19 @@ from .mfma_gemm import is_valid_spec as is_valid_mfma_spec
 
 __all__ = [
     "PeerGemmAllocation",
+    "PeerGemmScheduleSpec",
     "PeerGemmSpec",
     "PeerGemmTables",
     "build_peer_gemm",
+    "build_scheduled_peer_gemm",
+    "is_valid_schedule_spec",
     "is_valid_spec",
     "make_peer_gemm_tables",
     "peer_gemm_grid",
     "peer_gemm_signature",
+    "scheduled_peer_gemm_cta_work",
+    "scheduled_peer_gemm_grid",
+    "scheduled_peer_gemm_tile_coordinate",
 ]
 
 
@@ -107,6 +113,95 @@ def is_valid_spec(spec: PeerGemmSpec, arch: str = "gfx950") -> tuple[bool, str]:
     ):
         return False, "each GEMM panel element span must fit i32 indexing"
     return is_valid_mfma_spec(spec.to_mfma_spec(), arch)
+
+
+@dataclass(frozen=True)
+class PeerGemmScheduleSpec:
+    """Opt-in work assignment; the legacy GEMM spec, ABI, and layout stay intact.
+
+    A zero CTA cap submits one CTA per output tile. A positive cap limits the
+    grid size; each CTA visits tiles by a fixed grid stride. This bounds submitted
+    workgroups, not residency, physical peer traffic, or outstanding memory requests.
+    """
+
+    gemm: PeerGemmSpec
+    work_order: str = "source_grouped"
+    max_ctas: int = 0
+
+    @property
+    def tiles_per_source(self) -> int:
+        return (self.gemm.rows_per_source // 16) * (self.gemm.cols_per_rank // 16)
+
+    @property
+    def tile_count(self) -> int:
+        return self.gemm.sources * self.tiles_per_source
+
+    @property
+    def cta_count(self) -> int:
+        return min(self.max_ctas or self.tile_count, self.tile_count)
+
+    def kernel_name(self) -> str:
+        """Effective cap, not addresses/rank/placement, identifies the code object."""
+        ok, why = is_valid_schedule_spec(self)
+        if not ok:
+            raise ValueError(f"invalid peer GEMM schedule spec: {why}")
+        return f"{self.gemm.kernel_name()}_{self.work_order}_q{self.cta_count}"
+
+
+def is_valid_schedule_spec(
+    spec: PeerGemmScheduleSpec, arch: str = "gfx950"
+) -> tuple[bool, str]:
+    """Keep the existing aligned atom's constraints and bound i32 loop arithmetic."""
+    if not isinstance(spec.gemm, PeerGemmSpec):
+        return False, "gemm must be a PeerGemmSpec"
+    ok, why = is_valid_spec(spec.gemm, arch)
+    if not ok:
+        return False, why
+    if spec.work_order not in ("source_grouped", "tile_interleaved"):
+        return False, "work_order must be 'source_grouped' or 'tile_interleaved'"
+    if type(spec.max_ctas) is not int or not 0 <= spec.max_ctas <= 0x7FFFFFFF:
+        return False, "max_ctas must be a non-negative i32 integer"
+    # Legacy panel indexing bounds and sources <= 8 imply 2*tile_count fits i32,
+    # including the grid-stride loop's final increment. Check it explicitly.
+    if spec.tile_count > 0x7FFFFFFF // 2:
+        return False, "tile count and final grid-stride increment must fit i32"
+    return True, "ok"
+
+
+def scheduled_peer_gemm_grid(spec: PeerGemmScheduleSpec) -> tuple[int, int, int]:
+    """One-dimensional fixed CTA grid for a single consuming rank launch."""
+    ok, why = is_valid_schedule_spec(spec)
+    if not ok:
+        raise ValueError(f"invalid peer GEMM schedule spec: {why}")
+    return spec.cta_count, 1, 1
+
+
+def scheduled_peer_gemm_tile_coordinate(
+    spec: PeerGemmScheduleSpec, index: int
+) -> tuple[int, int, int]:
+    """Host oracle for (source, row tile, column tile), not hardware dispatch order."""
+    scheduled_peer_gemm_grid(spec)
+    if type(index) is not int or not 0 <= index < spec.tile_count:
+        raise ValueError("tile index must be inside the scheduled tile range")
+    if spec.work_order == "source_grouped":
+        source, panel = divmod(index, spec.tiles_per_source)
+    else:
+        panel, source = divmod(index, spec.gemm.sources)
+    row, column = divmod(panel, spec.gemm.cols_per_rank // 16)
+    return source, row, column
+
+
+def scheduled_peer_gemm_cta_work(
+    spec: PeerGemmScheduleSpec, cta: int
+) -> Iterator[tuple[int, int, int]]:
+    """Finite unique work for one CTA, with no waits or cross-CTA dependencies."""
+    scheduled_peer_gemm_grid(spec)
+    if type(cta) is not int or not 0 <= cta < spec.cta_count:
+        raise ValueError("CTA index must be inside the scheduled grid")
+    return (
+        scheduled_peer_gemm_tile_coordinate(spec, index)
+        for index in range(cta, spec.tile_count, spec.cta_count)
+    )
 
 
 @dataclass(frozen=True)
@@ -345,44 +440,117 @@ def build_peer_gemm(spec: PeerGemmSpec, arch: str = "gfx950") -> KernelDef:
         lane = b.thread_id_x()
         bid_n = b.block_id_x()
         bid_m = b.block_id_y()
-        m_base = b.mul(bid_m, b.const_i32(atom.m))
-        n_base = b.mul(bid_n, b.const_i32(atom.n))
-        decode = decode_mfma_lanes(b, atom, lane)
-        atom_k = b.const_i32(atom.k)
+        _emit_peer_gemm_compute(
+            b, spec, atom, selected_a, local_b, selected_c, lane, bid_n, bid_m
+        )
+    b.ret()
+    return b.kernel
 
-        def load_a(builder, kt):
-            return load_a_row_major_contiguous(
-                builder,
-                A=selected_a,
-                atom=atom,
-                lane_decode=decode,
-                m_tile_base=m_base,
-                k_tile_base=builder.mul(kt, atom_k),
-                K=spec.k,
-            )
 
-        def load_b(builder, kt):
-            return load_b_col_strided_scalars(
-                builder,
-                B=local_b,
-                atom=atom,
-                lane_decode=decode,
-                n_tile_base=n_base,
-                k_tile_base=builder.mul(kt, atom_k),
-                N=spec.cols_per_rank,
-            )
+def _emit_peer_gemm_compute(
+    b: IRBuilder,
+    spec: PeerGemmSpec,
+    atom,
+    selected_a: Value,
+    local_b: Value,
+    selected_c: Value,
+    lane: Value,
+    bid_n: Value,
+    bid_m: Value,
+) -> None:
+    """Canonical existing panel body shared by legacy and scheduled placement."""
+    m_base = b.mul(bid_m, b.const_i32(atom.m))
+    n_base = b.mul(bid_n, b.const_i32(atom.n))
+    decode = decode_mfma_lanes(b, atom, lane)
+    atom_k = b.const_i32(atom.k)
 
-        acc = mfma_k_loop(b, K=spec.k, atom=atom, load_a=load_a, load_b=load_b)
-        store_acc_to_global(
-            b,
-            C=selected_c,
+    def load_a(builder, kt):
+        return load_a_row_major_contiguous(
+            builder,
+            A=selected_a,
             atom=atom,
             lane_decode=decode,
             m_tile_base=m_base,
-            n_tile_base=n_base,
-            acc=acc,
-            N=spec.cols_per_rank,
-            out_dtype=spec.dtype,
+            k_tile_base=builder.mul(kt, atom_k),
+            K=spec.k,
         )
+
+    def load_b(builder, kt):
+        return load_b_col_strided_scalars(
+            builder,
+            B=local_b,
+            atom=atom,
+            lane_decode=decode,
+            n_tile_base=n_base,
+            k_tile_base=builder.mul(kt, atom_k),
+            N=spec.cols_per_rank,
+        )
+
+    acc = mfma_k_loop(b, K=spec.k, atom=atom, load_a=load_a, load_b=load_b)
+    store_acc_to_global(
+        b,
+        C=selected_c,
+        atom=atom,
+        lane_decode=decode,
+        m_tile_base=m_base,
+        n_tile_base=n_base,
+        acc=acc,
+        N=spec.cols_per_rank,
+        out_dtype=spec.dtype,
+    )
+
+
+def build_scheduled_peer_gemm(
+    spec: PeerGemmScheduleSpec, arch: str = "gfx950"
+) -> KernelDef:
+    """Reassign full output tiles; do not stage/publish tiles or split K.
+
+    Extra x CTAs and nonzero y/z CTAs do no work. Valid CTAs independently
+    execute a finite grid-stride loop around the same panel MFMA body. Logical
+    source grouping/interleaving does not promise a physical dispatch ordering.
+    """
+    ok, why = is_valid_schedule_spec(spec, arch)
+    if not ok:
+        raise ValueError(f"invalid peer GEMM schedule spec: {why}")
+    gemm = spec.gemm
+    atom = gemm.to_mfma_spec().atom
+    b = IRBuilder(spec.kernel_name())
+    b.kernel.attrs["max_workgroup_size"] = gemm.block_size
+    element = io_ir_type(gemm.dtype)
+    panel_pointer = PtrType(element, "global")
+    table_pointer = PtrType(panel_pointer, "global")
+    a_table = b.param("A_ptrs", table_pointer, noalias=True, readonly=True, align=8)
+    local_b = b.param("B", panel_pointer, noalias=True, readonly=True, align=16)
+    c_table = b.param("C_ptrs", table_pointer, noalias=True, readonly=True, align=8)
+    cta = b.block_id_x()
+    valid = b.land(
+        b.cmp_ge(cta, b.const_i32(0)), b.cmp_lt(cta, b.const_i32(spec.cta_count))
+    )
+    valid = b.land(valid, b.cmp_eq(b.block_id_y(), b.const_i32(0)))
+    valid = b.land(valid, b.cmp_eq(b.block_id_z(), b.const_i32(0)))
+    with b.scf_if(valid):  # noqa: SIM117 - explicit guarded SSA emission scope
+        with b.scf_for(
+            cta,
+            b.const_i32(spec.tile_count),
+            b.const_i32(spec.cta_count),
+            iv_name="work",
+        ) as index:
+            if spec.work_order == "source_grouped":
+                divisor = b.const_i32(spec.tiles_per_source)
+                source = b.div(index, divisor)
+                panel = b.mod(index, divisor)
+            else:
+                divisor = b.const_i32(gemm.sources)
+                source = b.mod(index, divisor)
+                panel = b.div(index, divisor)
+            columns = b.const_i32(gemm.cols_per_rank // atom.n)
+            bid_m = b.div(panel, columns)
+            bid_n = b.mod(panel, columns)
+            selected_a = b.global_load(a_table, source, dtype=panel_pointer, align=8)
+            selected_c = b.global_load(c_table, source, dtype=panel_pointer, align=8)
+            lane = b.thread_id_x()
+            _emit_peer_gemm_compute(
+                b, gemm, atom, selected_a, local_b, selected_c, lane, bid_n, bid_m
+            )
     b.ret()
     return b.kernel

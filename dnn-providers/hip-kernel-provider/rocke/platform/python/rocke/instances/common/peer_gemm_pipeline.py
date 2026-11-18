@@ -16,6 +16,7 @@ from ...runtime.hip_module import Runtime, _HipFunctionHandle, device_scope
 from ...runtime.packing import pack_args
 from .peer_gemm import (
     PeerGemmAllocation,
+    PeerGemmScheduleSpec,
     PeerGemmSpec,
     PeerGemmTables,
     _overlap,
@@ -23,6 +24,7 @@ from .peer_gemm import (
     make_peer_gemm_tables,
     peer_gemm_grid,
     peer_gemm_signature,
+    scheduled_peer_gemm_grid,
 )
 from .peer_tile_copy import (
     PeerTileCopyProblem,
@@ -250,6 +252,7 @@ def enqueue_peer_gemm_pipeline(
     c_table: PeerGemmAllocation,
     fused: bool,
     stream: int = 0,
+    schedule: PeerGemmScheduleSpec | None = None,
 ) -> PeerGemmEnqueueSummary:
     """Enqueue one rank's path with no host fence between its phases.
 
@@ -260,6 +263,13 @@ def enqueue_peer_gemm_pipeline(
     """
     if type(fused) is not bool:
         raise ValueError("fused must be a boolean")
+    if schedule is not None and schedule.gemm != plan.spec:
+        raise ValueError("schedule GEMM spec must match the pipeline plan")
+    grid = (
+        peer_gemm_grid(plan.spec)
+        if schedule is None
+        else scheduled_peer_gemm_grid(schedule)
+    )
     tables = plan.fused_tables if fused else plan.local_tables
     values = tables.kernel_values(a_table, c_table)
     if any(
@@ -287,7 +297,7 @@ def enqueue_peer_gemm_pipeline(
                 copy(task)
         runtime.launch(
             gemm_function,
-            peer_gemm_grid(plan.spec),
+            grid,
             (plan.spec.block_size, 1, 1),
             pack_args(peer_gemm_signature(plan.spec), values),
             stream=stream,

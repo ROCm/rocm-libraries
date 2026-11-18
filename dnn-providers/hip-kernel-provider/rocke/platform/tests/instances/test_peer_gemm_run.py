@@ -152,3 +152,44 @@ def test_failed_teardown_cannot_publish_success_report(
             ]
         )
     assert not output.exists()
+
+
+@pytest.mark.parametrize("order", ["source_grouped", "tile_interleaved"])
+def test_cli_opt_in_schedule_is_recorded_and_delegated(fake_runner, tmp_path, order):
+    output = tmp_path / "checks.json"
+    assert (
+        run.main(
+            [
+                "--devices",
+                "0,1",
+                "--arch",
+                "gfx950",
+                "--schedule",
+                order,
+                "--max-ctas",
+                "3",
+                "--correctness-output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    spec, kwargs = fake_runner[0][1:]
+    schedule = kwargs["schedule"]
+    assert (
+        schedule.gemm == spec
+        and schedule.work_order == order
+        and schedule.max_ctas == 3
+    )
+    assert json.loads(output.read_text())["schedule"]["work_order"] == order
+    assert not any(call[0] == "measure" for call in fake_runner)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [["--max-ctas", "3"], ["--schedule", "tile_interleaved", "--max-ctas", "-1"]],
+)
+def test_cli_invalid_caps_never_create_runtime(fake_runner, arguments):
+    with pytest.raises(SystemExit) as error:
+        run.main(["--devices", "0,1", "--arch", "gfx950", *arguments])
+    assert error.value.code == 2 and not fake_runner

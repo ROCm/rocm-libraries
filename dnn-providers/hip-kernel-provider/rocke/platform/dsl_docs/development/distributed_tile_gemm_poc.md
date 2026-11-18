@@ -5,9 +5,12 @@ direct-peer GEMM panel prototype are implemented. CPU, compiler, and engine-pari
 checks passed. Stage 1's basic peer-copy gate and Stage 2's focused two-GPU
 numerical gate passed on both `gfx942` and `gfx950`. Stage 2 coverage is the
 fixed, aligned, panel-packed prototype scope. Stage 3a adds a CPU-tested,
-host-only same-stack unfused baseline and multi-rank replay runner; their
-hardware correctness gate is still pending. Multi-peer scheduling, bandwidth,
-and communication/compute overlap remain unvalidated.
+host-only same-stack unfused baseline and multi-rank replay runner. Their focused
+four-GPU correctness gate passed on `gfx942`; the `gfx950` lane was allocation-
+blocked and remains pending. Stage 3b adds paired opt-in source-grouped/interleaved
+work assignment and bounded CTA grids, with CPU/parity/compiler coverage. New
+schedule hardware correctness, measured characterization, bandwidth, and
+communication/compute overlap remain unvalidated.
 
 ## Goal and agreed scope
 
@@ -392,12 +395,28 @@ Its CPU packed-ABI models are not hardware validation. The
 [replay methodology](../../python/rocke/examples/common/peer_gemm/README.md#stage-3a-same-stack-baseline-and-replay-runner)
 describes correctness-only reports and separately opt-in timing boundaries.
 
-**Next bounded hardware proposal:** four execution GPUs on each target, both
-dtypes, all four placements, two aligned geometries, and single/repeated
-iterations for both fused and unfused paths. Authorize this correctness-only
-allocation separately; do not measure performance or submit an eight-GPU lane
-before the new baseline and runner pass that gate. Source-order/interleaved,
-bounded-work, and input-reuse scheduling changes remain subsequent Stage 3 work.
+**Stage 3a hardware status:** the focused four-GPU `gfx942` lane passed both
+paths, dtypes, placements, aligned geometries, and single/repeated iterations.
+Exact output/guards/immutability, local baseline intermediates, all-rank completion,
+retention isolation, and teardown passed. The `gfx950` allocation did not start;
+that gate remains pending, not failed numerical validation.
+
+**Stage 3b implementation:** `PeerGemmScheduleSpec` composes the unchanged legacy
+GEMM spec with source-grouped/tile-interleaved logical work order and a CTA cap.
+A finite grid-stride loop partitions output tiles among submitted CTAs, around
+the shared canonical MFMA body. Legacy ABI and IR remain unchanged. The runner
+uses the same selected scheduled kernel for fused and materialized-local baseline
+paths. A cap bounds submitted workgroups, not physical residency, link traffic,
+outstanding requests, or communication/compute overlap. See the
+[scheduled work methodology](../../python/rocke/examples/common/peer_gemm/README.md#stage-3b-opt-in-finite-work-assignment).
+
+**Next hardware proposal:** separately authorize correctness-only replay of the
+new schedules on four `gfx942` GPUs before timing/profiling; retain the pending
+legacy `gfx950` gate. Exercise both orders, uncapped and bounded grids, one-CTA
+and non-dividing CTA caps, both dtypes/placements, and repeated all-rank launches.
+The legacy four-GPU pass does not validate new emitted schedules. Eight-GPU
+expansion, A-tile reuse across output-column tiles, actual traffic/wait attribution,
+and performance/overlap experiments remain subsequent work.
 
 **Gate:** reproducible evidence identifying where the direct-peer schedule
 spends work/waits and whether staging or separate communication roles are worth
@@ -488,13 +507,17 @@ queued, skipped, or compile-only lane is not a passed hardware test.
 - [x] Add parity-tested direct-peer GEMM panel variants (Stage 2 implementation).
 - [x] Validate the focused two-GPU fused GEMM variants on both targets (Stage 2 gate).
 - [x] Add the CPU-tested same-stack unfused baseline and replay runner (Stage 3a).
-- [ ] Validate both paths with the new runner on four GPUs per target (Stage 3a gate).
+- [x] Validate both paths with the new runner on four `gfx942` GPUs (Stage 3a gate).
+- [ ] Complete the allocation-blocked four-GPU `gfx950` Stage 3a gate.
+- [x] Add paired source-grouped/interleaved and bounded-CTA work assignment (Stage 3b implementation).
+- [ ] Hardware-validate new scheduled variants before measuring them (Stage 3b gate).
 - [ ] Characterize multi-peer schedules against the same-stack baseline (Stage 3).
 - [ ] Decide whether a staged protocol is justified; implement only if needed (Stage 4).
 
-**Immediate next action:** separately authorize the bounded four-GPU Stage 3a
-correctness-only gate for the fused path and new unfused baseline/runner.
-Preserve the completed Stage 1 and Stage 2 correctness evidence. Scheduling and
-performance experiments follow that gate; keep measured software-performance
-results in-session or in protected AMD Confluence, outside repository artifacts,
-and do not claim overlap or throughput improvements before evidence establishes them.
+**Immediate next action:** separately authorize the new scheduled variants'
+four-GPU `gfx942` correctness-only gate; do not replay the already-passed legacy
+lane unnecessarily. Preserve completed Stage 1/2 and Stage 3a `gfx942` evidence,
+and keep the allocation-blocked `gfx950` gate explicit. Timing/profiling follows
+new-schedule correctness; keep achieved software-performance values in-session
+or protected AMD Confluence, never repository artifacts. Do not claim overlap
+or improvements before evidence establishes them.

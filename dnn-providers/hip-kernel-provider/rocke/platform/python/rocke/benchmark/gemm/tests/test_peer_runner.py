@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import ctypes
+import re
 import struct
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -15,7 +16,11 @@ import pytest
 
 from rocke.benchmark.gemm import peer_runner as runner_module
 from rocke.instances.common import peer_gemm_pipeline as pipeline_module
-from rocke.instances.common.peer_gemm import PeerGemmSpec
+from rocke.instances.common.peer_gemm import (
+    PeerGemmScheduleSpec,
+    PeerGemmSpec,
+    scheduled_peer_gemm_cta_work,
+)
 
 
 class FakeRuntime:
@@ -82,7 +87,7 @@ class FakeRuntime:
 
         return SimpleNamespace(
             get_function=lambda name: SimpleNamespace(
-                device=owner, kind="copy" if "tile_copy" in name else "gemm"
+                device=owner, kind="copy" if "tile_copy" in name else "gemm", name=name
             ),
             unload=unload,
         )
@@ -94,7 +99,14 @@ class FakeRuntime:
         if self.launch_count == self.fail_launch:
             raise RuntimeError("synthetic enqueue failure")
         self.log.append(("launch", self.device, function.kind))
-        self.queues.setdefault(self.device, []).append((function.kind, packed))
+        match = re.search(
+            r"_(source_grouped|tile_interleaved)_q([0-9]+)$", function.name
+        )
+        if match:
+            assert grid == (int(match.group(2)), 1, 1)
+        self.queues.setdefault(self.device, []).append(
+            (function.kind, packed, function.name)
+        )
 
     def retain_for_stream(self, stream, *owners):
         self.retained.setdefault(self.device, []).append(owners)
@@ -103,7 +115,7 @@ class FakeRuntime:
         self.log.append(("wait", self.device))
         if self.device == self.fail_device:
             raise RuntimeError("synthetic drain failure")
-        for kind, packed in self.queues.pop(self.device, []):
+        for kind, packed, name in self.queues.pop(self.device, []):
             if kind == "copy":
                 values = struct.unpack("<QQ" + "q" * 14, packed)
                 source, target, rows, cols = values[:4]
@@ -125,16 +137,37 @@ class FakeRuntime:
                 b = runner_module._decode(
                     self.view(bp, k * n), self.spec.dtype
                 ).reshape(k, n)
-                for a, c in zip(a_addresses, c_addresses):
-                    values = (
-                        runner_module._decode(
-                            self.view(int(a), m * k), self.spec.dtype
-                        ).reshape(m, k)
-                        @ b
+                match = re.search(
+                    r"_(source_grouped|tile_interleaved)_q([0-9]+)$", name
+                )
+                if match:
+                    schedule = PeerGemmScheduleSpec(
+                        self.spec, match.group(1), int(match.group(2))
                     )
-                    self.view(int(c), m * n)[:] = runner_module._encode(
+                    coordinates = [
+                        item
+                        for cta in range(schedule.cta_count)
+                        for item in scheduled_peer_gemm_cta_work(schedule, cta)
+                    ]
+                else:
+                    coordinates = [
+                        (source, row, col)
+                        for source in range(p)
+                        for row in range(m // 16)
+                        for col in range(n // 16)
+                    ]
+                for source, row, col in coordinates:
+                    a = runner_module._decode(
+                        self.view(int(a_addresses[source]), m * k), self.spec.dtype
+                    ).reshape(m, k)
+                    rows, columns = slice(row * 16, (row + 1) * 16), slice(
+                        col * 16, (col + 1) * 16
+                    )
+                    values = a[rows] @ b[:, columns]
+                    output = self.view(int(c_addresses[source]), m * n).reshape(m, n)
+                    output[rows, columns] = runner_module._encode(
                         values, self.spec.dtype
-                    ).ravel()
+                    )
         self.retained.pop(self.device, None)
 
     def event(self):
@@ -367,3 +400,58 @@ def test_staging_guard_corruption_is_detected(fake_environment, monkeypatch):
         monkeypatch.setattr(runner, "enqueue", corrupt)
         with pytest.raises(AssertionError, match="staging guards"):
             runner.validate(fused=False)
+
+
+@pytest.mark.parametrize("order", ["source_grouped", "tile_interleaved"])
+@pytest.mark.parametrize("cap", [0, 1, 3])
+@pytest.mark.parametrize("dtype", ["f16", "bf16"])
+@pytest.mark.parametrize(
+    "inputs,outputs",
+    [
+        ("gather", "local"),
+        ("gather", "scatter"),
+        ("replicated", "local"),
+        ("replicated", "scatter"),
+    ],
+)
+def test_scheduled_runner_mock_matched_baseline_and_grid(
+    fake_environment, order, cap, dtype, inputs, outputs
+):
+    spec = PeerGemmSpec(32, 48, 32, sources=4, dtype=dtype)
+    schedule = PeerGemmScheduleSpec(spec, order, cap)
+    rt = fake_environment(spec)
+    with runner_module.PeerGemmRunner(
+        spec,
+        devices=(0, 1, 2, 3),
+        arch="gfx950",
+        input_placement=inputs,
+        output_placement=outputs,
+        schedule=schedule,
+    ) as runner:
+        assert all(gemm.name == schedule.kernel_name() for gemm, _ in runner.functions)
+        for fused in [True, False]:
+            check = runner.validate(fused=fused, repeats=2)
+            assert check["status"] == "passed" and check["work_order"] == order
+            assert (
+                check["max_ctas"] == cap
+                and check["scheduled_ctas"] == schedule.cta_count
+            )
+            assert not rt.queues and not rt.retained
+    assert not rt.memory
+
+
+def test_schedule_mismatch_rejects_before_gpu_setup(fake_environment, monkeypatch):
+    spec = PeerGemmSpec(32, 48, 32, sources=4)
+    fake_environment(spec)
+    monkeypatch.setattr(
+        runner_module,
+        "get_device_count",
+        lambda: pytest.fail("GPU setup ran before schedule validation"),
+    )
+    with pytest.raises(ValueError, match="must match"):
+        runner_module.PeerGemmRunner(
+            spec,
+            devices=(0, 1, 2, 3),
+            arch="gfx950",
+            schedule=PeerGemmScheduleSpec(PeerGemmSpec(16, 16, 16)),
+        )

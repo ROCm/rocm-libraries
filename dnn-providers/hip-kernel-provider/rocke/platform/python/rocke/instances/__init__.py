@@ -126,13 +126,19 @@ from .common.elementwise import (  # noqa: F401
 )
 from .common.peer_gemm import (  # noqa: F401
     PeerGemmAllocation,
+    PeerGemmScheduleSpec,
     PeerGemmSpec,
     PeerGemmTables,
     build_peer_gemm,
+    build_scheduled_peer_gemm,
+    is_valid_schedule_spec as is_valid_peer_gemm_schedule_spec,
     is_valid_spec as is_valid_peer_gemm_spec,
     make_peer_gemm_tables,
     peer_gemm_grid,
     peer_gemm_signature,
+    scheduled_peer_gemm_cta_work,
+    scheduled_peer_gemm_grid,
+    scheduled_peer_gemm_tile_coordinate,
 )
 from .common.peer_tile_copy import (  # noqa: F401
     PeerTileCopyProblem,
