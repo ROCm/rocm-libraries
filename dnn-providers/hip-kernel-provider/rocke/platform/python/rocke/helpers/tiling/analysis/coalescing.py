@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..transforms import as_forward_map
-from .vectorization import addr_fn_from_strides, vector_transactions
+from .vectorization import addr_fn_from_strides, check_memory_space, vector_transactions
 
 __all__ = ["Instruction", "CoalescingReport", "analyze_coalescing", "assert_asm_backed"]
 
@@ -52,6 +52,7 @@ class Instruction:
 @dataclass(frozen=True)
 class CoalescingReport:
     direction: str  # "load" | "store"
+    space: str  # "global" | "lds" -- the memory the access targets; sets the alignment rule
     dims: tuple  # axis NAMES, per coord component -- carried so a render never guesses which is which
     strides: tuple  # element stride per axis (parallel to dims) -- the source of the addresses
     dtype_bits: int
@@ -112,7 +113,14 @@ class CoalescingReport:
 
 
 def analyze_coalescing(
-    distribution, dims, strides, dtype_bits, *, direction="store", line_bytes
+    distribution,
+    dims,
+    strides,
+    dtype_bits,
+    *,
+    direction="store",
+    space: str,
+    line_bytes,
 ):
     """GENERIC coalescing report for a ``distribution`` accessing a tensor.
 
@@ -120,11 +128,14 @@ def analyze_coalescing(
     axis NAMES and ``strides`` the element stride of each (parallel tuples) -- pass BOTH so there is never an
     M/N mix-up: which axis is contiguous is decided by the strides, and every report/label uses the names.
     ``direction`` is ``"store"`` (registers -> memory; transactions ordered by address) or ``"load"`` (memory ->
-    registers; ordered by fill/register). ``line_bytes`` is the arch cache-line size -- REQUIRED, never assumed
+    registers; ordered by fill/register). ``space`` is the memory the access targets, ``"global"`` or ``"lds"``
+    -- REQUIRED: LDS vectors must be aligned to their width and global ones need not be
+    (:func:`vector_transactions`). ``line_bytes`` is the arch cache-line size -- REQUIRED, never assumed
     (it differs per arch). Reuses :func:`vector_transactions` for the b128-IDEAL per-lane vector runs (what the
     LAYOUT+strides SUPPORT -- the achieved width is a codegen matter, reconciled by the ASM gate), then counts
     distinct ``line_bytes`` cache lines per wave-wide instruction (the fused/scattered + footprint story).
     """
+    check_memory_space("analyze_coalescing", space)
     dims, strides = tuple(dims), tuple(int(s) for s in strides)
     if len(dims) != len(strides):
         raise ValueError(
@@ -137,7 +148,12 @@ def analyze_coalescing(
         "addr" if direction == "store" else "reg"
     )  # store = memory order; load = register/fill order
     ts, _maxt = vector_transactions(
-        fwd, lambda r, c: addr(r, c), dtype_bits, order_by=order, max_bits=128
+        fwd,
+        lambda r, c: addr(r, c),
+        dtype_bits,
+        order_by=order,
+        max_bits=128,
+        space=space,
     )
 
     by_inst: dict = {}
@@ -177,6 +193,7 @@ def analyze_coalescing(
     footprint = max((i.footprint for i in insts), default=1.0)
     return CoalescingReport(
         direction,
+        space,
         dims,
         strides,
         dtype_bits,
