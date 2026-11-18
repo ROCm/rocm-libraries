@@ -287,7 +287,8 @@
     "bias_pitch": "bias_skv + [1, 2, 3, 4, 5, 6, 7, 8][var] if family == 'bias_pitch_pad' else (max(1, bias_skv // 2) if family == 'bias_overlap' else bias_skv)",
     "ovf_served": "family == 'overflow_stride' and var in [0, 3, 6, 7]",
     "scale_v": "2**21 if family == 'scale_huge' else (2**20 if family == 'scale_limit' else 0.08838834764831843)",
-    "qk_mag": "0.0001 if family == 'scale_limit' else 1",
+    "qk_kind": "'large' if family == 'scale_limit' else 'free'",
+    "qk_scale": "0.001 if family == 'scale_limit' else 1",
     "nseq": "family in ['padding', 'seq_len_group']",
     "ovf_skv": "skv_d"
   },
@@ -387,18 +388,18 @@
       "enforcement_level": "${'full' if ovf_served else ('buildable' if ov else 'full')}",
       "inputs": {
         "2": {
-          "kind": "free",
-          "lo": "${-qk_mag}",
-          "hi": "${qk_mag}",
+          "kind": "${qk_kind}",
+          "lo": -1,
+          "hi": 1,
           "value": 0,
-          "scale": 1
+          "scale": "${qk_scale}"
         },
         "0": {
-          "kind": "free",
-          "lo": "${-qk_mag}",
-          "hi": "${qk_mag}",
+          "kind": "${qk_kind}",
+          "lo": -1,
+          "hi": 1,
           "value": 0,
-          "scale": 1
+          "scale": "${qk_scale}"
         },
         "6": {
           "kind": "free",
