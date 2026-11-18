@@ -736,6 +736,15 @@ foreign host.
   wall-clock and memory limit.
 - **With a disk compile cache, measurement and strategy time dominate a
   search**, hence the GP pool repair cap above.
+- **Compile a round in parallel.** Without a compile cache, compiling dominates
+  a live search and is CPU bound. A backend may define `precompile(items)`
+  (`CallableBackend(..., precompile=...)`); with `batch > 1` the evaluator offers
+  it every fresh compile of a round before it compiles, checks and times the
+  configs one at a time on its own thread. `ProcessCompilePool` builds a round in
+  spawned worker processes (a picklable `worker(config) -> payload`, no GPU state
+  in the workers) and the backend's `compile` loads the payload on the evaluator's
+  thread. The hook changes when compiles happen, not what the search decides at
+  a given `batch`; it is skipped for a backend whose `compile` takes a fidelity.
 - **Family-neutral.** The same `tune` / `run_search` path tunes any family
   whose space it can see, e.g. permute variant x knob lists with
   `auto:permute` (GP).

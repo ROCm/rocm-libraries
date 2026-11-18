@@ -66,6 +66,7 @@ import random
 import sys
 import threading
 import time
+import warnings
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -152,6 +153,11 @@ class Backend(Protocol):
     - ``measure_batch(items, fidelity)`` takes ``[(config, key, artifact),
       ...]`` and returns one sample list per item, interleaving reps across
       the items;
+    - ``precompile(items)`` takes ``[(config, key), ...]``, the fresh compiles of
+      one round, before the evaluator compiles them one by one; a backend can
+      build them ahead in parallel (see :class:`~.precompile.ProcessCompilePool`)
+      and serve the results from its ``compile``. It is ignored for a backend
+      whose ``compile`` takes the fidelity;
     - ``environment() -> Mapping`` names the toolchain and device the
       backend compiles and times on (JSON data); it enters the evaluator's
       cache fingerprint;
@@ -511,6 +517,42 @@ class Evaluator:
         akey = self._akey(key, fid)
         return akey not in self._compiled and self.known(key, fid) is None
 
+    def _precompile_round(
+        self, trials: Sequence[Trial], max_fresh: int | None
+    ) -> None:
+        """Offer the round's fresh compiles to ``backend.precompile`` at once.
+
+        The evaluator still compiles, checks and times one config at a time on
+        its own thread; ``precompile`` only lets a backend build the whole round
+        ahead of that (in worker processes, say). It is skipped for a backend whose
+        ``compile`` depends on the fidelity, and a failure only loses the speedup.
+        """
+        pre = getattr(self.backend, "precompile", None)
+        if not callable(pre) or self._compile_fid:
+            return
+        items: list[tuple[dict, str]] = []
+        seen: set[str] = set()
+        for t in trials:
+            if max_fresh is not None and len(items) >= max_fresh:
+                break
+            key = self.space.key(t.genome)
+            if key is None or key in seen:
+                continue
+            if not self.needs_compile(key, t.fidelity):
+                continue
+            seen.add(key)
+            items.append((self.space.decode(t.genome), key))
+        if not items:
+            return
+        try:
+            pre(items)
+        except Exception as e:  # noqa: BLE001 - the serial path still works
+            warnings.warn(
+                f"backend.precompile failed, compiling serially: {e!r}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
     # ------------------------------------------------------------ evaluate
     def evaluate(
         self,
@@ -528,6 +570,7 @@ class Evaluator:
         compiled and checked one by one, then timed in one interleaved
         batch per fidelity.
         """
+        self._precompile_round(trials, max_fresh)
         out: dict[int, Observation] = {}
         to_measure: dict[int, list[tuple[int, Trial, str, dict, Any]]] = {}
         leftover: list[int] = []
@@ -1035,12 +1078,17 @@ class CallableBackend:
             Callable[[Sequence, Fidelity], Sequence[Sequence[float]]] | None
         ) = None,
         environment: Mapping[str, object] | None = None,
+        precompile: (
+            Callable[[Sequence[tuple[Mapping[str, object], str]]], Any] | None
+        ) = None,
     ):
         self.compile = compile
         self.check = check
         self.measure = measure
         if measure_batch is not None:
             self.measure_batch = measure_batch
+        if precompile is not None:
+            self.precompile = precompile
         self._environment = dict(environment or {})
 
     def environment(self) -> dict:
