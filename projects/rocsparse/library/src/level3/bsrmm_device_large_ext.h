@@ -236,10 +236,9 @@ namespace rocsparse
                                     if(nn)
                                     {
                                         shared_B[BSR_BLOCK_DIM * (BLK_SIZE_Y * l + tidy) + tidx]
-                                            = rocsparse::conj_val(
-                                                dense_B[block_dim * block_col + tidx
-                                                        + cols[l] * ldb],
-                                                conj_B);
+                                            = rocsparse::conj_val(dense_B[block_dim * block_col
+                                                                          + tidx + cols[l] * ldb],
+                                                                  conj_B);
                                     }
                                     else
                                     {

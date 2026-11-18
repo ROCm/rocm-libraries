@@ -355,9 +355,9 @@ namespace rocsparse
                     const T sv0 = rocsparse::shfl(my_val[0], i, WF_SIZE);
                     if(col < N)
                     {
-                        T val_B = rocsparse::conj_val(
-                            rocsparse::ldg(dense_B + col + ldb * sc), conj_B);
-                        sum     = rocsparse::fma<T>(sv0, val_B, sum);
+                        T val_B
+                            = rocsparse::conj_val(rocsparse::ldg(dense_B + col + ldb * sc), conj_B);
+                        sum = rocsparse::fma<T>(sv0, val_B, sum);
                     }
                     if(BSR_BLOCK_DIM >= 2)
                     {
@@ -366,7 +366,7 @@ namespace rocsparse
                         {
                             T val_B = rocsparse::conj_val(
                                 rocsparse::ldg(dense_B + col + ldb * (1 + sc)), conj_B);
-                            sum     = rocsparse::fma<T>(sv1, val_B, sum);
+                            sum = rocsparse::fma<T>(sv1, val_B, sum);
                         }
                     }
                     if(BSR_BLOCK_DIM >= 3)
@@ -376,7 +376,7 @@ namespace rocsparse
                         {
                             T val_B = rocsparse::conj_val(
                                 rocsparse::ldg(dense_B + col + ldb * (2 + sc)), conj_B);
-                            sum     = rocsparse::fma<T>(sv2, val_B, sum);
+                            sum = rocsparse::fma<T>(sv2, val_B, sum);
                         }
                     }
                     if(BSR_BLOCK_DIM >= 4)
@@ -386,7 +386,7 @@ namespace rocsparse
                         {
                             T val_B = rocsparse::conj_val(
                                 rocsparse::ldg(dense_B + col + ldb * (3 + sc)), conj_B);
-                            sum     = rocsparse::fma<T>(sv3, val_B, sum);
+                            sum = rocsparse::fma<T>(sv3, val_B, sum);
                         }
                     }
                 }
