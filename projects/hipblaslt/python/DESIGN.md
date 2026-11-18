@@ -63,3 +63,13 @@ Since Python 3.8, Windows resolves an extension's dependent DLLs only from the s
 ## Errors
 
 Every `hipblasStatus_t` other than success becomes a `HipblasLtError` naming the failing call, the status and its number. No status is swallowed. `status.hpp` names statuses by number, not by enumerator, so the PR that adds a status can name it before the ROCm the bindings compile against has it. A test parses the status enum from the checkout's `hipblas-common.h` when there is one (otherwise the installed one), so a status added in a PR fails until it's mapped. Errors in the Python values a caller passes are ordinary `ValueError`s and `TypeError`s; `HipblasLtError` is for hipBLASLt's own status codes and the bindings' library-state errors.
+
+## CI
+
+The bindings' Component CI lanes build them against an installed ROCm, the way a user does, rather than against the PR's own hipBLASLt.
+
+- **Which ROCm.** Every lane installs TheRock's nightly wheels into a fresh venv: `rocm[libraries,devel]`, plus a `device-<gfx>` wheel on GPU lanes. The nightly is pinned in one place, `HIPBLASLT_PY_ROCM_VERSION` in `.github/workflows/component-ci-hipblaslt-python.yml`, and bumped deliberately in its own PR, so a failure that arrives with a new nightly is attributed to the nightly. `scripts/ci_lane.sh` is the whole lane, and runs the same way locally.
+- **Why not the in-tree hipBLASLt.** The in-tree headers can't be used on their own: they need three generated headers (`hipblaslt-version.h`, `hipblaslt-export.h` and `hipblaslt-opt-in-features.h`) that exist only in an installed tree. And what changes in a bindings PR is the bindings, not the library.
+- **Enums still follow the PR.** Checks of the public enums read the PR's own headers, with the generated headers taken from the install. The lanes run when `projects/hipblaslt/library/include/hipblaslt/` or `projects/hipblas-common/library/include/` change, so a new enum value is caught on the PR that adds it.
+- **The gap this leaves.** A change in the library's behavior, rather than its API, reaches the bindings' lanes only when the pinned nightly picks it up. `TESTING.md` lists it under Known Risks.
+- **Lanes.** Linux CPU and gfx942 run on every PR that changes the bindings or the public headers; gfx950 runs with the `ci:run-gfx950` label; Windows CPU runs informationally; Windows gfx1151 runs when the lanes themselves change. GPU lanes set `HIPBLASLT_PY_REQUIRE_GPU=1`, so a lane that can't see its device fails instead of skipping every GPU test. `TESTING.md` says which lanes gate.
