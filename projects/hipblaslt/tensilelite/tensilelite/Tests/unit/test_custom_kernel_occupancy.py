@@ -9,6 +9,7 @@ Also tests the print2-gated CUOccupancy<=0 warning in processKernelSource.
 """
 
 import io
+from importlib.resources import files
 import os
 import shutil
 import sys
@@ -37,7 +38,7 @@ except Exception:
 # Constants
 # ---------------------------------------------------------------------------
 
-_CUSTOM_KERNEL_DIR = Path(__file__).parents[2] / "CustomKernels"
+_CUSTOM_KERNEL_DIR = files("tensilelite").joinpath("CustomKernels")
 
 
 # ---------------------------------------------------------------------------
