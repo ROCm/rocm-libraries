@@ -43,14 +43,21 @@ def compute_contiguous_strides(dims):
     return strides
 
 
-def compute_strides(dims, layout="bhsd"):
-    """Strides for the given layout. bhsd matches compute_contiguous_strides."""
+def compute_strides(dims, layout="bhsd", seq_stride_pad=0):
+    """Strides for the given layout. bhsd matches compute_contiguous_strides.
+
+    seq_stride_pad adds that many unused elements to the sequence-axis (dim 2) stride,
+    so every axis stored outside it is padded too: a non-packed tensor whose rows are
+    seq_stride_pad elements apart beyond their extent.
+    """
     order = LAYOUT_STRIDE_ORDER.get(layout)
     if order is None or len(dims) != len(order):
         raise ValueError(f"no stride order for layout {layout!r} at rank {len(dims)}")
     stride = [1] * len(dims)
     acc = 1
     for idx in sorted(range(len(dims)), key=lambda i: order[i]):
+        if idx == 2:
+            acc += seq_stride_pad
         stride[idx] = acc
         acc *= dims[idx]
     return stride
@@ -274,6 +281,7 @@ def save_tensor_bin(tensor, path):
         torch.float16,
         torch.float8_e4m3fn,
         torch.float8_e5m2,
+        torch.float8_e4m3fnuz,
     ):
         raw = t.view(torch.uint8).numpy().tobytes()
     else:

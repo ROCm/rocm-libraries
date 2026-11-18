@@ -217,6 +217,15 @@ class TestGenerateSdpaFwdGoldenRaggedHelpers(unittest.TestCase):
             self.gen.compute_strides([2, 3, 5, 7], "bshd"), [105, 7, 21, 1]
         )
 
+    def test_seq_stride_pad_pads_rows_and_every_outer_axis(self):
+        # bhsd: rows of D + 4; bshd: token rows of H * D + 4. Head and batch strides follow.
+        self.assertEqual(
+            self.gen.compute_strides([2, 3, 5, 7], "bhsd", 4), [165, 55, 11, 1]
+        )
+        self.assertEqual(
+            self.gen.compute_strides([2, 3, 5, 7], "bshd", 4), [125, 7, 25, 1]
+        )
+
     def test_pack_ragged_concatenates_valid_rows_in_bshd_order(self):
         torch = self.gen.torch
         tensor = torch.arange(2 * 2 * 4 * 3, dtype=torch.float32).reshape(2, 2, 4, 3)
@@ -645,6 +654,49 @@ class TestGenerateSdpaFwdGoldenGraphOnly(unittest.TestCase):
         bundle_dir, golden_graph, graph, meta = self.generate_both(*args)
         self.assert_graph_only(bundle_dir, golden_graph, graph, meta)
         self.assertEqual(sorted(meta["inputs"]), ["0", "1", "2"])
+
+    def test_fnuz_fp8_codes_span_240_with_unset_mma_core_mode(self):
+        args = (
+            "--dtype",
+            "fp8",
+            "--fp8-format",
+            "e4m3fnuz",
+            "--mma-core-mode",
+            "unset",
+            "--q-dims",
+            "1",
+            "2",
+            "8",
+            "16",
+            "--v-dims",
+            "1",
+            "1",
+            "8",
+            "16",
+        )
+        bundle_dir, golden_graph, graph, meta = self.generate_both(*args)
+        self.assert_graph_only(bundle_dir, golden_graph, graph, meta)
+        self.assertEqual(graph["nodes"][0]["attributes"]["mma_core_mode"], "unset")
+        types = {t["name"]: t["data_type"] for t in graph["tensors"]}
+        self.assertEqual(
+            [types[n] for n in ("Q", "K", "V", "O")],
+            ["fp8_e4m3_fnuz"] * 3 + ["bfloat16"],
+        )
+        for uid in ("0", "1", "2"):
+            self.assertEqual(
+                meta["inputs"][uid], {"kind": "free", "lo": -240.0, "hi": 240.0}
+            )
+
+    def test_seq_stride_pad_needs_graph_only(self):
+        with TemporaryDirectory() as tmp:
+            completed = self.run_generator(
+                Path(tmp) / "Small",
+                *("--q-dims", "1", "1", "8", "16", "--v-dims", "1", "1", "8", "16"),
+                "--seq-stride-pad",
+                "8",
+            )
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("--seq-stride-pad needs --graph-only", completed.stderr)
 
     def test_rejects_inputs_a_recipe_cannot_express(self):
         with TemporaryDirectory() as tmp:

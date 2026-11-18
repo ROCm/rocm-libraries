@@ -271,6 +271,24 @@ reference); its module docstring lists the supported options. `--graph-only`
 writes the graph and a `.meta.json` whose `inputs` tell the harness how to fill
 each input, with no golden tensors, so the bundle is verified against the
 reference executor instead (dense BATCH mode only).
+`integration-test-bundles/comprehensive/SdpaFwd/generate_dense_coverage_bundles.sh`
+regenerates the comprehensive-tier graph-only coverage bundles, which use
+`--fp8-format e4m3fnuz` (gfx942 FP8_E4M3_FNUZ inputs), `--mma-core-mode`,
+`--o-layout` and `--seq-stride-pad` (non-packed Q/K/V/O).
+
+## `generate_sdpa_fwd_ragged_lengths_golden.py`
+
+Generates ragged (RFC 0014 packed BSHD) forward bundles with explicit per-batch Q and
+K/V lengths (`--lens-q`, `--lens-kv`) and an explicit declared `S_max` (`--seq-dims`),
+which may exceed every length. `generate_sdpa_fwd_golden.py --ragged-offsets` derives
+the lengths itself and always puts the longest sequence in batch 0; this script exists
+for the shapes that pin how an engine sizes a packed batch from `S_max`: the longest
+sequence in any batch position, empty Q or K/V batches, and per-batch Q/K/V lengths that
+differ under bottom-right causal (rows with no attendable key output 0, as
+`CpuFpReferenceSdpaRagged`). It writes the graph, metadata, an empty support sidecar (when
+none exists) and a `.tensors.dvc` pointer with each tensor's md5 and size.
+`integration-test-bundles/comprehensive/SdpaFwd/generate_ragged_lengths_golden_data.sh`
+regenerates the checked-in bundles.
 
 ## Sliding-window bounds in the generators
 

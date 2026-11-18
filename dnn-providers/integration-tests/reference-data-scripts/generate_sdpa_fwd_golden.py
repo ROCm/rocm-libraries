@@ -10,8 +10,12 @@ source. Bundles are provider-agnostic: they encode the SDPA *operation* (graph
 attributes + reference tensors), not a specific provider's kernel.
 
 Supported, fully composable operation axes:
-  - dtype:        bf16, fp16, fp8 (FP8_E4M3 inputs, BF16 output, per-tensor descale)
+  - dtype:        bf16, fp16, fp8 (FP8_E4M3, FP8_E5M2 or gfx942 FP8_E4M3_FNUZ inputs via
+                  --fp8-format, BF16 output, per-tensor descale)
   - head dim:     hd128, hd192 (via --q-dims / --v-dims)
+  - layout:       --layout {bhsd,bshd} for Q/K/V, --o-layout for O; --seq-stride-pad
+                  for non-packed (padded-row) Q/K/V/O strides (--graph-only)
+  - mma_core_mode: --mma-core-mode overrides the default (unset; the fp8 format for fp8)
   - causal mask:  none, top_left, bottom_right
   - sliding window: --left-bound (cuDNN / graph convention) or --window-left
                     (FlashAttention convention), and --window-right
@@ -134,21 +138,34 @@ from sdpa_common import (  # noqa: E402  (needs the sys.path entry above)
 #         record 1.5.0; bundles from 1.4.0 keep recording 1.4.0.
 #         --ragged-offsets with --stats is rejected: the dense LSE reference holds -inf
 #         past each batch's valid length, which the bundle verifier rejects.
-GENERATOR_VERSION = "1.13.0"
+# 1.14.0 — Added --fp8-format e4m3fnuz (gfx942 FP8_E4M3_FNUZ inputs), --mma-core-mode,
+#          --o-layout (O in a different layout than Q/K/V) and --seq-stride-pad
+#          (non-packed Q/K/V/O, graph-only). The metadata config records o_layout,
+#          seq_stride_pad and mma_core_mode. Every other bundle is unchanged.
+GENERATOR_VERSION = "1.14.0"
 
-# FP8 operation: OCP fp8 inputs (Q/K/V, E4M3 by default), BF16 output (or fp8 with --fp8-scaling).
-# AITER's fmha fp8 path uses OCP e4m3 (float8_e4m3fn) with a per-tensor scalar descale; mirror it.
+# FP8 operation: fp8 inputs (Q/K/V, OCP E4M3 by default), BF16 output (or fp8 with --fp8-scaling).
+# AITER's fmha fp8 path uses OCP e4m3 (float8_e4m3fn) on gfx950 and the FNUZ e4m3
+# (float8_e4m3fnuz) on gfx942, with a per-tensor scalar descale; mirror it.
 # The json names match the flatbuffers DataType enum string map.
 FP8_OUTPUT_TORCH = torch.bfloat16
 FP8_OUTPUT_JSON = "bfloat16"
 FP8_E4M3_MAX = 448.0  # max representable magnitude of float8_e4m3fn
 
 # --fp8-format: torch dtype, json name, largest finite value, and cudnn-frontend's
-# get_fp8_largest_po2 (helpers.py) for the scale factors.
+# get_fp8_largest_po2 (helpers.py) for the scale factors (for FNUZ, the largest power
+# of two below its 240 maximum).
 FP8_FORMATS = {
     "e4m3": (torch.float8_e4m3fn, "fp8_e4m3", FP8_E4M3_MAX, 128.0),
     "e5m2": (torch.float8_e5m2, "fp8_e5m2", 57344.0, 32768.0),
+    "e4m3fnuz": (torch.float8_e4m3fnuz, "fp8_e4m3_fnuz", 240.0, 128.0),
 }
+
+# --mma-core-mode values (flatbuffers DataType json names). "auto" keeps the default:
+# "unset" for bf16/fp16 and the input fp8 format for fp8.
+MMA_CORE_MODES = ["auto", "unset", "half", "bfloat16", "float"] + [
+    f[1] for f in FP8_FORMATS.values()
+]
 
 # Tensor UID assignment (stable contract with the JSON consumer / loader).
 UID_Q = 0
@@ -456,23 +473,28 @@ def build_graph_json(
     fp8_format="e4m3",
     alibi=False,
     row_stats=False,
+    o_layout=None,
+    seq_stride_pad=0,
+    mma_core_mode="auto",
 ):
     B, H_q, S_q = q_dims[0], q_dims[1], q_dims[2]
     fp8_json = FP8_FORMATS[fp8_format][1]
     qkv_dtype = fp8_json if fp8 else dtype_str
     o_dtype = o_dtype_str if o_dtype_str is not None else dtype_str
+    if mma_core_mode == "auto":
+        mma_core_mode = fp8_json if fp8 else "unset"
 
     tensors = []
     primaries = [
-        (UID_Q, "Q", q_dims, qkv_dtype, UID_RAGGED_OFFSET_QO),
-        (UID_K, "K", k_dims, qkv_dtype, UID_RAGGED_OFFSET_KV),
-        (UID_V, "V", v_dims, qkv_dtype, UID_RAGGED_OFFSET_KV),
-        (UID_O, "O", o_dims, o_dtype, UID_RAGGED_OFFSET_QO),
+        (UID_Q, "Q", q_dims, qkv_dtype, UID_RAGGED_OFFSET_QO, layout),
+        (UID_K, "K", k_dims, qkv_dtype, UID_RAGGED_OFFSET_KV, layout),
+        (UID_V, "V", v_dims, qkv_dtype, UID_RAGGED_OFFSET_KV, layout),
+        (UID_O, "O", o_dims, o_dtype, UID_RAGGED_OFFSET_QO, o_layout or layout),
     ]
-    for uid, name, dims, dt, ragged_offset_uid in primaries:
+    for uid, name, dims, dt, ragged_offset_uid, tensor_layout in primaries:
         # Ragged primaries declare padded logical dims [B, H, S_max, D] with BSHD
         # strides; the packed .bin is sized by ragged_offset[B].
-        strides = compute_strides(dims, layout)
+        strides = compute_strides(dims, tensor_layout, seq_stride_pad)
         entry = {
             "uid": uid,
             "name": name,
@@ -653,7 +675,7 @@ def build_graph_json(
                     "right_bound": right_bound,
                     "max_seq_len_kv": None,
                     "diagonal_alignment": diagonal_alignment,
-                    "mma_core_mode": fp8_json if fp8 else "unset",
+                    "mma_core_mode": mma_core_mode,
                     "implementation": "AUTO",
                 },
             }
@@ -726,6 +748,9 @@ def build_meta_json(config, pytorch_version):
             "fp8_format": config["fp8_format"],
             "alibi": config["alibi"],
             "row_stats": config["row_stats"],
+            "o_layout": config["o_layout"],
+            "seq_stride_pad": config["seq_stride_pad"],
+            "mma_core_mode": config["mma_core_mode"],
         },
     }
 
@@ -946,7 +971,11 @@ def generate_forward_bundle(
     alibi=False,
     row_stats=False,
     graph_only=False,
+    o_layout=None,
+    seq_stride_pad=0,
+    mma_core_mode="auto",
 ):
+    o_layout = o_layout or layout
     B, H_q, S_q, D_qk = q_dims
     B_v, H_kv, S_kv, D_v = v_dims
     k_dims = [B, H_kv, S_kv, D_qk]
@@ -1047,6 +1076,13 @@ def generate_forward_bundle(
             "--ragged-offsets requires --layout bshd (RFC 0014 packed memory is "
             "sequence-outermost within a batch, with a single sequence stride)"
         )
+    if ragged and o_layout != layout:
+        errors.append("--ragged-offsets needs O in the Q/K/V layout (no --o-layout)")
+    if seq_stride_pad < 0:
+        errors.append(f"--seq-stride-pad must be >= 0 (got {seq_stride_pad})")
+    if seq_stride_pad and not graph_only:
+        # Golden blobs are written packed; padded rows need the harness to fill them.
+        errors.append("--seq-stride-pad needs --graph-only")
     if ragged and stats:
         errors.append(
             "--ragged-offsets does not support --stats: the dense [B, H, S, 1] LSE "
@@ -1102,6 +1138,9 @@ def generate_forward_bundle(
             min_val=min_val,
             max_val=max_val,
             layout=layout,
+            o_layout=o_layout,
+            seq_stride_pad=seq_stride_pad,
+            mma_core_mode=mma_core_mode,
             block_mask=block_mask,
             fp8_format=fp8_format,
             alibi=alibi,
@@ -1245,21 +1284,21 @@ def generate_forward_bundle(
             O[b, :, valid_q[b] : physical_q[b], :] = float("nan")
 
     # Write raw tensor data as .bin files (one per tensor UID). Q/K/V/O are
-    # packed (ragged) or reordered to physical BSHD bytes (bshd layout); LSE,
-    # seq-lens, descales, and ragged offsets keep their contiguous layout.
+    # packed (ragged) or reordered to physical BSHD bytes (bshd layout, --o-layout
+    # for O); LSE, seq-lens, descales, and ragged offsets keep their contiguous layout.
     primary_inputs = [
-        ("Q", Q_store, UID_Q, physical_q),
-        ("K", K_store, UID_K, physical_kv),
-        ("V", V_store, UID_V, physical_kv),
-        ("O", O, UID_O, physical_q),
+        ("Q", Q_store, UID_Q, physical_q, layout),
+        ("K", K_store, UID_K, physical_kv, layout),
+        ("V", V_store, UID_V, physical_kv, layout),
+        ("O", O, UID_O, physical_q, o_layout),
     ]
     tensor_list = []
-    for name, tensor, uid, physical_lens in primary_inputs:
+    for name, tensor, uid, physical_lens, tensor_layout in primary_inputs:
         logical_shape = list(tensor.shape)
         stored = (
             pack_ragged(tensor, physical_lens)
             if ragged
-            else to_physical_layout(tensor, layout)
+            else to_physical_layout(tensor, tensor_layout)
         )
         tensor_list.append((name, stored, uid, logical_shape))
 
@@ -1344,6 +1383,8 @@ def generate_forward_bundle(
         fp8_format=fp8_format,
         alibi=alibi,
         row_stats=row_stats,
+        o_layout=o_layout,
+        mma_core_mode=mma_core_mode,
     )
     json_path = f"{base_filename}.json"
     with open(json_path, "w") as f:
@@ -1358,7 +1399,8 @@ def generate_forward_bundle(
         )
     elif is_fp8:
         precision_note = (
-            "fp8: FP8_E4M3 inputs (per-tensor descale), FP32 intermediates, BF16 output"
+            f"fp8: {FP8_FORMATS[fp8_format][1].upper()} inputs (per-tensor descale), "
+            "FP32 intermediates, BF16 output"
         )
     else:
         precision_note = f"like-for-like: {dtype.upper()} inputs, FP32 intermediates"
@@ -1388,6 +1430,9 @@ def generate_forward_bundle(
         "fp8_format": fp8_format if is_fp8 else None,
         "alibi": alibi,
         "row_stats": row_stats,
+        "o_layout": o_layout,
+        "seq_stride_pad": 0,
+        "mma_core_mode": mma_core_mode,
     }
     meta_json = build_meta_json(config, torch.__version__)
     meta_path = f"{base_filename}.meta.json"
@@ -1437,6 +1482,9 @@ def write_graph_only_bundle(
     min_val,
     max_val,
     layout,
+    o_layout,
+    seq_stride_pad,
+    mma_core_mode,
     block_mask,
     fp8_format,
     alibi,
@@ -1470,6 +1518,9 @@ def write_graph_only_bundle(
         fp8_format=fp8_format,
         alibi=alibi,
         row_stats=row_stats,
+        o_layout=o_layout,
+        seq_stride_pad=seq_stride_pad,
+        mma_core_mode=mma_core_mode,
     )
     json_path = f"{base_filename}.json"
     with open(json_path, "w") as f:
@@ -1501,6 +1552,9 @@ def write_graph_only_bundle(
         "fp8_format": fp8_format if is_fp8 else None,
         "alibi": alibi,
         "row_stats": row_stats,
+        "o_layout": o_layout,
+        "seq_stride_pad": seq_stride_pad,
+        "mma_core_mode": mma_core_mode,
     }
     inputs = graph_only_input_recipes(dtype, fp8_format, block_mask, min_val, max_val)
     meta_json = build_graph_only_meta_json(config, torch.__version__, inputs)
@@ -1540,8 +1594,8 @@ def main():
         "--dtype",
         default="bf16",
         choices=list(DTYPE_MAP.keys()) + ["fp8"],
-        help="Input dtype. fp8 = FP8_E4M3 inputs, BF16 output, per-tensor descale "
-        "(default: bf16)",
+        help="Input dtype. fp8 = fp8 inputs (--fp8-format), BF16 output, per-tensor "
+        "descale (default: bf16)",
     )
     parser.add_argument(
         "--causal",
@@ -1587,6 +1641,25 @@ def main():
         "stay [B,H,S,D]). bshd stores bytes in [B,S,H,D] order (default: bhsd)",
     )
     parser.add_argument(
+        "--o-layout",
+        default=None,
+        choices=["bhsd", "bshd"],
+        help="Physical memory layout of O when it differs from Q/K/V (default: --layout)",
+    )
+    parser.add_argument(
+        "--seq-stride-pad",
+        type=int,
+        default=0,
+        help="Pad the sequence stride of Q/K/V/O by this many elements, so the tensors are "
+        "not packed (every outer stride grows with it). Needs --graph-only (default: 0)",
+    )
+    parser.add_argument(
+        "--mma-core-mode",
+        default="auto",
+        choices=MMA_CORE_MODES,
+        help="mma_core_mode attribute (auto: unset for bf16/fp16, the fp8 format for fp8)",
+    )
+    parser.add_argument(
         "--ragged-offsets",
         action="store_true",
         dest="ragged",
@@ -1612,7 +1685,8 @@ def main():
         "--fp8-format",
         default="e4m3",
         choices=list(FP8_FORMATS.keys()),
-        help="OCP fp8 format for --dtype fp8 (default: e4m3)",
+        help="fp8 format for --dtype fp8: OCP e4m3 / e5m2, or e4m3fnuz (the gfx942 "
+        "FP8_E4M3_FNUZ encoding) (default: e4m3)",
     )
     parser.add_argument(
         "--block-mask",
@@ -1684,6 +1758,9 @@ def main():
         alibi=args.alibi,
         row_stats=args.row_stats,
         graph_only=args.graph_only,
+        o_layout=args.o_layout,
+        seq_stride_pad=args.seq_stride_pad,
+        mma_core_mode=args.mma_core_mode,
     )
     print("\nDone.")
 
