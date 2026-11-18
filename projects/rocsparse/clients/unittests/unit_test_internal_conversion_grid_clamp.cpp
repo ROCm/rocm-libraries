@@ -97,6 +97,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <gtest/gtest.h>
 #include <numeric>
 #include <sstream>
@@ -705,6 +706,75 @@ TEST_F(ConversionGrids, convert_array_data_widening_grid_stride)
 
     EXPECT_EQ(first_mismatch(to_host(d_target), expected), -1)
         << "convert_array (f32 -> f64) did not cover all " << convert_nitems
+        << " items with grid.x clamped to " << clamped_grid_x << " blocks";
+}
+
+// The shared real-widening kernel of convert_array, real target: bf16 -> f32.
+// Item i holds the bf16 bit pattern i, so every item is a distinct finite value
+// and its f32 widening has the bit pattern i << 16.
+TEST_F(ConversionGrids, convert_array_data_bf16_to_f32_grid_stride)
+{
+    std::vector<rocsparse_bfloat16> source(convert_nitems);
+    std::vector<float>              expected(convert_nitems);
+    for(size_t i = 0; i < convert_nitems; ++i)
+    {
+        const uint16_t bits16 = static_cast<uint16_t>(i);
+        const uint32_t bits32 = static_cast<uint32_t>(bits16) << 16;
+        std::memcpy(&source[i], &bits16, sizeof(bits16));
+        std::memcpy(&expected[i], &bits32, sizeof(bits32));
+    }
+
+    device_vector<rocsparse_bfloat16> d_source(source);
+    device_vector<float>              d_target(std::vector<float>(convert_nitems, -1.0f));
+
+    {
+        ScopedMaxGridSizeX clamp(handle, clamped_grid_x);
+        ASSERT_EQ(rocsparse::convert_array(handle,
+                                           convert_nitems,
+                                           rocsparse_datatype_f32_r,
+                                           d_target.ptr,
+                                           rocsparse_datatype_bf16_r,
+                                           d_source.ptr),
+                  rocsparse_status_success);
+        UT_CHECK_HIP(hipDeviceSynchronize());
+    }
+
+    EXPECT_EQ(first_mismatch(to_host(d_target), expected), -1)
+        << "convert_array (bf16 -> f32) did not cover all " << convert_nitems
+        << " items with grid.x clamped to " << clamped_grid_x << " blocks";
+}
+
+// The shared real-widening kernel of convert_array, complex target: f32 -> f64_c.
+// The target starts at (-1, -1), so an item whose real or imaginary part is not
+// written does not match its expected (source, 0).
+TEST_F(ConversionGrids, convert_array_data_f32_to_f64_c_grid_stride)
+{
+    std::vector<float>                    source(convert_nitems);
+    std::vector<rocsparse_double_complex> expected(convert_nitems);
+    for(size_t i = 0; i < convert_nitems; ++i)
+    {
+        source[i]   = static_cast<float>(i) + 0.25f;
+        expected[i] = rocsparse_double_complex(static_cast<double>(source[i]), 0.0);
+    }
+
+    device_vector<float>                    d_source(source);
+    device_vector<rocsparse_double_complex> d_target(std::vector<rocsparse_double_complex>(
+        convert_nitems, rocsparse_double_complex(-1.0, -1.0)));
+
+    {
+        ScopedMaxGridSizeX clamp(handle, clamped_grid_x);
+        ASSERT_EQ(rocsparse::convert_array(handle,
+                                           convert_nitems,
+                                           rocsparse_datatype_f64_c,
+                                           d_target.ptr,
+                                           rocsparse_datatype_f32_r,
+                                           d_source.ptr),
+                  rocsparse_status_success);
+        UT_CHECK_HIP(hipDeviceSynchronize());
+    }
+
+    EXPECT_EQ(first_mismatch(to_host(d_target), expected), -1)
+        << "convert_array (f32 -> f64_c) did not cover all " << convert_nitems
         << " items with grid.x clamped to " << clamped_grid_x << " blocks";
 }
 
