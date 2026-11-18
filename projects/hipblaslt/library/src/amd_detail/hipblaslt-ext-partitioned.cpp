@@ -216,9 +216,56 @@ namespace hipblaslt_ext::experimental
         // run(): created on the device of the partition's stream, recreated when that changes.
         std::vector<std::pair<int, hipEvent_t>> joinEvents;
 
+        // Partitions whose D slice (or the peer D they also store) is memory of another device:
+        // run() publishes their writes. One host word per partition (device, word) is the
+        // target of that stream write.
+        std::vector<bool>                      publishD;
+        std::vector<std::pair<int, uint64_t*>> publishWords;
+
         ~PartitionedGemmImpl()
         {
             releaseJoinEvents();
+            releasePublishWords();
+        }
+
+        void releasePublishWords()
+        {
+            for(auto& [device, word] : publishWords)
+                if(word != nullptr)
+                {
+                    ScopedDevice guard(device);
+                    static_cast<void>(hipHostFree(word));
+                }
+            publishWords.clear();
+        }
+
+        // The word that partition `i` writes on `device`, or nullptr when it cannot be allocated.
+        uint64_t* publishWord(size_t i, int device)
+        {
+            if(publishWords.size() != count())
+            {
+                releasePublishWords();
+                publishWords.assign(count(), {-1, nullptr});
+            }
+            auto& [owner, word] = publishWords[i];
+            if(word != nullptr && owner == device)
+                return word;
+            if(word != nullptr)
+            {
+                ScopedDevice guard(owner);
+                static_cast<void>(hipHostFree(word));
+                word = nullptr;
+            }
+            ScopedDevice guard(device);
+            void*        p = nullptr;
+            if(!guard.ok()
+               || hipHostMalloc(&p, sizeof(uint64_t), hipHostMallocCoherent | hipHostMallocMapped)
+                      != hipSuccess)
+                return nullptr;
+            owner = device;
+            word  = static_cast<uint64_t*>(p);
+            *word = 0;
+            return word;
         }
 
         void releaseJoinEvents()
@@ -683,6 +730,7 @@ namespace hipblaslt_ext::experimental
             size   = std::move(z);
         }
 
+        std::vector<bool> publish(parts, false);
         for(size_t i = 0; i < parts; i++)
         {
             // Element offset of this partition's slice inside each (whole) matrix. The
@@ -797,8 +845,25 @@ namespace hipblaslt_ext::experimental
                                              type);
             if(st != HIPBLAS_STATUS_SUCCESS)
                 return st;
+
+            // Whoever writes memory of another device publishes it: a D slice that is not on
+            // this partition's device (a shared D), or the peer D of storePeerD.
+            const int64_t last = leading[3] * (ni - 1) + mi - 1 + (bi - 1) * std::abs(strides[3]);
+            auto const    foreign = [&](const void* base) {
+                for(int64_t at : {int64_t(0), last})
+                {
+                    const int where = pageDevice(advance(base, at, bytes[3]));
+                    if(where >= 0 && where != s.devices[i])
+                        return true;
+                }
+                return false;
+            };
+            publish[i]
+                = foreign(ptr[3])
+                  || (inputs.storePeerD && foreign(advance(dPointers[1 - i], elems[3], bytes[3])));
         }
 
+        s.publishD = std::move(publish);
         s.m = m, s.n = n, s.k = k, s.batch = batch_count;
         for(int t = 0; t < 4; t++)
         {
@@ -943,6 +1008,14 @@ namespace hipblaslt_ext::experimental
                 streams[i], start.empty() ? nullptr : start[i], stop.empty() ? nullptr : stop[i]);
             if(st != HIPBLAS_STATUS_SUCCESS)
                 return st;
+            // This partition wrote memory of another device: a stream write after the slice makes
+            // those writes visible to the other devices before the join below lets them go on.
+            if(s.publishD[i])
+            {
+                uint64_t* word = s.publishWord(i, devices[i]);
+                if(word == nullptr || hipStreamWriteValue64(streams[i], word, 1, 0) != hipSuccess)
+                    return HIPBLAS_STATUS_INTERNAL_ERROR;
+            }
         }
 
         // Join the partitions on the GPU, so that work enqueued on any partition's stream after

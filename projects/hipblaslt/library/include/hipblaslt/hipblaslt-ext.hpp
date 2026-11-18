@@ -1357,6 +1357,12 @@ namespace hipblaslt_ext
             * of the streams after this call therefore sees the slices of all partitions (for
             * example, a shared D is complete), with no event or host wait of the caller's own.
             *
+            *  A partition whose D slice is memory of another device (a shared D), or that also
+            * stores the peer D (``storePeerD``), publishes its writes on its stream after the
+            * slice, so that the other devices see them. A partition that writes only its own
+            * device's memory does not. Shared A, B and C are the caller's: whoever wrote them
+            * last must have made them visible to every partition's device before this call.
+            *
             *  @param[in]
             *  streams       One stream per partition.
             *  @param[in]
