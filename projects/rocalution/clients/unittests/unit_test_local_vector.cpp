@@ -1359,7 +1359,8 @@ TEST(local_vector_moves, a_vector_can_be_destroyed_after_an_async_move_without_s
     });
 }
 
-// Only LeakSanitizer shows the leak, at the exit of the child
+// Only LeakSanitizer shows the leak, at the exit of the child. The child stops rocALUTION
+// first, as LeakSanitizer can hang at the exit of a process whose HIP backend still runs.
 TEST(local_vector_moves, a_vector_destroyed_after_an_async_move_without_sync_frees_both_objects)
 {
     REQUIRE_BACKEND(Backend::Accelerator);
@@ -1372,7 +1373,12 @@ TEST(local_vector_moves, a_vector_destroyed_after_an_async_move_without_sync_fre
         using T = typename decltype(type)::type;
 
         const std::vector<T> a = x<T>();
-        expect_in_child([&] { destroy_after_async_moves(a); }, 120);
+        expect_in_child(
+            [&] {
+                destroy_after_async_moves(a);
+                rocalution::stop_rocalution();
+            },
+            120);
     });
 }
 
