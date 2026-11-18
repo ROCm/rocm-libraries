@@ -104,105 +104,16 @@ static void test_arch_and_dtype_refusals(void)
     expect_refused("fp32", &s, "gfx950", "fp16/bf16 only");
 }
 
-static void test_problem_refusals(void)
+static void test_problem_reaches_the_pp_gate(void)
 {
-    const char* square = "square odd filters >= 3 only";
-    struct
-    {
-        const char* what;
-        void (*edit)(rocke_direct_conv_problem_t*);
-        const char* expected;
-    } cases[] = {
-        {"N 0", [](rocke_direct_conv_problem_t* p) { p->N = 0; }, "N must be >= 1 (got 0)"},
-        {"cpg 0", [](rocke_direct_conv_problem_t* p) { p->cpg = 0; }, "cpg must be >= 1 (got 0)"},
-        {"kpg 0", [](rocke_direct_conv_problem_t* p) { p->kpg = 0; }, "kpg must be >= 1 (got 0)"},
-        {"groups 2", [](rocke_direct_conv_problem_t* p) { p->groups = 2; }, "groups must be 1"},
-        {"stride 2", [](rocke_direct_conv_problem_t* p) { p->stride = 2; }, "stride must be 1"},
-        {"dil_h 2", [](rocke_direct_conv_problem_t* p) { p->dil_h = 2; }, "dilation must be 1"},
-        {"dil_w 2", [](rocke_direct_conv_problem_t* p) { p->dil_w = 2; }, "dilation must be 1"},
-        {"4x4",
-         [](rocke_direct_conv_problem_t* p) {
-             p->KH = p->KW = 4;
-             p->PAD = 1;
-         },
-         square},
-        {"3x5", [](rocke_direct_conv_problem_t* p) { p->KW = 5; }, square},
-        {"1x1",
-         [](rocke_direct_conv_problem_t* p) {
-             p->KH = p->KW = 1;
-             p->PAD = 0;
-         },
-         square},
-        {"PAD 0",
-         [](rocke_direct_conv_problem_t* p) { p->PAD = 0; },
-         "'same' padding only: PAD must be 1 (got 0)"},
-        {"pad_w 0",
-         [](rocke_direct_conv_problem_t* p) { p->pad_w = 0; },
-         "one padding for both axes (got PAD=1x0)"},
-        {"pad_w -3",
-         [](rocke_direct_conv_problem_t* p) { p->pad_w = -3; },
-         "pad_w must be -1 (PAD) or a column padding of at least 0 (got -3)"},
-        {"cpg 12",
-         [](rocke_direct_conv_problem_t* p) { p->cpg = 12; },
-         "C 12 must be a multiple of 8 (16-byte granules)"},
-        {"kpg 10",
-         [](rocke_direct_conv_problem_t* p) { p->kpg = 10; },
-         "K 10 must be a multiple of 4 (8-byte output writes)"},
-        {"7x7",
-         [](rocke_direct_conv_problem_t* p) {
-             p->KH = p->KW = 7;
-             p->PAD = 3;
-         },
-         "LDS 167936 B > 163840"},
-        {"input image",
-         [](rocke_direct_conv_problem_t* p) {
-             p->H = 1024;
-             p->W = 2048;
-             p->cpg = 768;
-             p->kpg = 768;
-         },
-         "input image exceeds 2147483647 B, the i32 buffer range"},
-        {"output image",
-         [](rocke_direct_conv_problem_t* p) {
-             p->H = 16;
-             p->W = 16;
-             p->cpg = 8;
-             p->kpg = 1 << 27;
-         },
-         "output image exceeds 2147483647 B, the i32 buffer range"},
-        {"filter",
-         [](rocke_direct_conv_problem_t* p) {
-             p->H = 1;
-             p->W = 1;
-             p->cpg = 1 << 14;
-             p->kpg = 1 << 14;
-         },
-         "filter exceeds 2147483647 B, the i32 buffer range"},
-        {"input",
-         [](rocke_direct_conv_problem_t* p) {
-             p->N = 32;
-             p->H = 256;
-             p->W = 256;
-             p->cpg = 1024;
-             p->kpg = 1024;
-         },
-         "input exceeds 2147483647 B, the i32 byte-count kernarg"},
-        {"output",
-         [](rocke_direct_conv_problem_t* p) {
-             p->N = 32;
-             p->H = 256;
-             p->W = 256;
-             p->cpg = 8;
-             p->kpg = 1024;
-         },
-         "output exceeds 2147483647 B, the i32 byte-count kernarg"},
-    };
-    for(const auto& c : cases)
-    {
-        rocke_dgrad_pp_mfma_spec_t s = base_spec();
-        c.edit(&s.problem);
-        expect_refused(c.what, &s, "gfx950", c.expected);
-    }
+    /* The shared problem refusals live in conv_direct_pp_mfma_host.cpp; here
+     * only that this family's validator reaches them. */
+    rocke_dgrad_pp_mfma_spec_t s = base_spec();
+    s.problem.groups = 2;
+    expect_refused("groups 2", &s, "gfx950", "groups must be 1");
+    s = base_spec();
+    s.problem.cpg = 12;
+    expect_refused("cpg 12", &s, "gfx950", "C 12 must be a multiple of 8 (16-byte granules)");
 }
 
 static void test_knob_refusals(void)
@@ -224,7 +135,7 @@ int main(void)
 {
     test_accepted();
     test_arch_and_dtype_refusals();
-    test_problem_refusals();
+    test_problem_reaches_the_pp_gate();
     test_knob_refusals();
     if(g_failures != 0)
     {
