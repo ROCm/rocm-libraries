@@ -168,15 +168,15 @@ namespace
         EXPECT_EQ(warned, !native) << operation << " logged:\n" << log;
     }
 
-    // The formats with an analysis for the triangular solves. In the others the
-    // analysis ends the program, and the solves fall back to the host.
+    // The formats whose triangular solve analysis does not end the program. The DENSE
+    // LU analysis does nothing.
     bool has_analysis(Backend b, unsigned int format, const std::string& solve)
     {
         if(b == Backend::Accelerator)
         {
-            return format == CSR || format == BCSR;
+            return format == CSR || format == BCSR || (solve == "LU" && format == DENSE);
         }
-        return format == CSR || (solve == "LU" && format == MCSR);
+        return format == CSR || (solve == "LU" && (format == MCSR || format == DENSE));
     }
 
     // Nonsymmetric and diagonally dominant, with lower bandwidth 1, so that ILU(0)
@@ -1940,9 +1940,9 @@ TEST_P(local_matrix_formats, connectivity_order_sorts_the_rows_by_their_non_zero
         const std::vector<int> p = values_of(perm);
         expect_permutation(p, ref.n);
 
-        // The documented usage: ConnectivityOrder, then Permute
-        KNOWN_BUG("ConnectivityOrder returns perm[new] = old");
-        const Csr<T> ordered = permuted(ref, p);
+        // The documented usage: ConnectivityOrder, then Permute. The ordering follows the
+        // stored entries, which for BCSR include the zeros of the blocks
+        const Csr<T> ordered = permuted(csr_of(*A), p);
         for(int i = 1; i < ordered.n; ++i)
         {
             EXPECT_LE(ordered.row_offset[i] - ordered.row_offset[i - 1],
@@ -3302,6 +3302,24 @@ TEST(local_matrix_preconditions, ic_factorize_of_a_row_without_a_diagonal_ends_t
         EXPECT_LOGGED_EXIT(A->ICFactorize(inv.get()),
                            "Fatal error - the program will be terminated");
     }
+}
+
+// The LU analysis of a format without one ends the program, so that LU and the ILU
+// preconditioners do not fall back to the host at every solve without notice
+TEST(local_matrix_DeathTest, lu_analysis_of_a_format_without_one_ends_the_program_on_the_host)
+{
+    auto A = make_local_matrix(Backend::Host, banded(4), Format{COO, 1});
+    EXPECT_FATAL_ERROR(A->LUAnalyse(), "base_matrix\\.cpp");
+    EXPECT_FATAL_ERROR(A->LUAnalyseClear(), "base_matrix\\.cpp");
+}
+
+TEST(local_matrix_DeathTest,
+     lu_analysis_of_a_format_without_one_ends_the_program_on_the_accelerator)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    auto A = make_local_matrix(Backend::Accelerator, banded(4), Format{COO, 1});
+    EXPECT_FATAL_ERROR(A->LUAnalyse(), "base_matrix\\.cpp");
+    EXPECT_FATAL_ERROR(A->LUAnalyseClear(), "base_matrix\\.cpp");
 }
 
 // LocalStencil, the other local Operator, keeps the async moves and Sync of

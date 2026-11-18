@@ -50,6 +50,7 @@ EXPECTED_SCRIPTS = {
         "reviewlib.py",
     ),
     "hipdnn-ingestor-impact": ("impact.py", "impact_emit.py"),
+    "hipdnn-review-comments": ("review_comments.py",),
     "hipdnn-trigger-ci": ("trigger_ci.py",),
     "hipdnn-uhd": (
         "candidate_tree.py",
@@ -71,6 +72,7 @@ CLAUDE_COMMAND_SKILLS = frozenset(
         "hipdnn-ingestor-impact",
         "hipdnn-integration-testing",
         "hipdnn-pr-quality",
+        "hipdnn-review-comments",
         "hipdnn-superbuild",
         "hipdnn-superbuild-test",
         "hipdnn-tidy",
