@@ -132,6 +132,11 @@ struct heuristic_defaults_t {
   static constexpr double GFX1250_L2_LATENCY_NS = 125.0;
   /// Dependent LDS read latency in cycles the matrix pipe must cover.
   static constexpr double GFX1250_LDS_READ_LATENCY = 70.0;
+
+  /// gfx1151: round trip of one K-iteration's global loads that hit the caches, in compute
+  /// cycles (it tracks the shader clock).  Fitted to memory-only kernel timings
+  /// (tests/test_gemm.cpp, gfx1151 L_mem reference).
+  static constexpr double GFX1151_LOAD_LATENCY_CYCLES = 1050.0;
 };
 
 /**
