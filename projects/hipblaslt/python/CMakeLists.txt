@@ -14,12 +14,15 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
 find_package(nanobind CONFIG REQUIRED)
 
-# The same search order as skbuild_plugins/hipblaslt_version_provider.py. find_package also
-# honors hipblaslt_ROOT on its own.
+# The ROCm that provides HIP. find_package(hipblaslt) honors hipblaslt_ROOT first on its own,
+# like skbuild_plugins/hipblaslt_version_provider.py; hipblaslt_ROOT also counts as the ROCm
+# root when it's the only one set.
 if(DEFINED ENV{ROCM_PATH} AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
     set(HIPBLASLT_PY_ROCM "$ENV{ROCM_PATH}")
 elseif(DEFINED ENV{ROCM_HOME} AND NOT "$ENV{ROCM_HOME}" STREQUAL "")
     set(HIPBLASLT_PY_ROCM "$ENV{ROCM_HOME}")
+elseif(DEFINED ENV{hipblaslt_ROOT} AND NOT "$ENV{hipblaslt_ROOT}" STREQUAL "")
+    set(HIPBLASLT_PY_ROCM "$ENV{hipblaslt_ROOT}")
 elseif(NOT WIN32)
     set(HIPBLASLT_PY_ROCM "/opt/rocm")
 else()
@@ -50,6 +53,13 @@ endif()
 get_filename_component(HIPBLASLT_PY_BUILD_LIB_DIR "${_hipblaslt_lib}" DIRECTORY)
 get_target_property(_hipblaslt_inc roc::hipblaslt INTERFACE_INCLUDE_DIRECTORIES)
 list(GET _hipblaslt_inc 0 HIPBLASLT_PY_BUILD_INCLUDE_DIR)
+# hipblas-common can live in a different prefix (invoke build installs hipBLASLt on its own).
+find_path(HIPBLASLT_PY_HIPBLAS_COMMON_INCLUDE_DIR hipblas-common/hipblas-common.h
+    HINTS ${_hipblaslt_inc} "${HIPBLASLT_PY_ROCM}/include" NO_DEFAULT_PATH)
+if(NOT HIPBLASLT_PY_HIPBLAS_COMMON_INCLUDE_DIR)
+    message(FATAL_ERROR "Can't find hipblas-common/hipblas-common.h next to hipBLASLt or in "
+                        "${HIPBLASLT_PY_ROCM}/include.")
+endif()
 if(WIN32)
     set(HIPBLASLT_PY_BUILD_BIN_DIR "${HIPBLASLT_PY_ROCM}/bin")
 else()

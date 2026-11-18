@@ -816,7 +816,11 @@ def build(
     # ---------------------------------------------------------------------------
     if python:
         hipblaslt_root = rocm_s if relocatable else (ROOT_PATH / "hipblaslt-install").as_posix()
-        env = {"ROCM_PATH": rocm_s, "hipblaslt_ROOT": hipblaslt_root}
+        # pip runs its own CMake configure, so hand it this build's compilers: on Windows the
+        # bindings need clang (hipBLASLt's headers don't compile with MSVC) and Ninja.
+        env = {"ROCM_PATH": rocm_s, "hipblaslt_ROOT": hipblaslt_root, "CXX": compiler, "CC": ccompiler}
+        if sys.platform == "win32":
+            env["CMAKE_GENERATOR"] = "Ninja"
         c.run(f'"{sys.executable}" -m pip install "{(ROOT_PATH / "python").as_posix()}"', env=env)
 
 

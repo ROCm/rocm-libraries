@@ -169,6 +169,39 @@ def test_different_version_warns():
     assert msg and "1.4.1" in msg
 
 
+def test_the_loaded_version_is_checked_once(monkeypatch, recwarn):
+    monkeypatch.setattr(
+        L, "_library", L.LoadInfo("/p/libhipblaslt.so.1", "rocm-sdk", True)
+    )
+    monkeypatch.setattr(L, "_built_version", (100500, "25f28906"))
+    monkeypatch.setattr(L, "_version_checked", False)
+    monkeypatch.delenv(L.LIBRARY_ENV, raising=False)
+    L.check_loaded_version((100500, "565c4c74"))
+    L.check_loaded_version((100500, "565c4c74"))
+    found = [w for w in recwarn if issubclass(w.category, L.HipblasLtLoadWarning)]
+    assert len(found) == 1 and "565c4c74" in str(found[0].message)
+
+
+def test_no_version_warning_with_an_override(monkeypatch, recwarn):
+    # The override already warned at import; a different build is what the caller asked for.
+    monkeypatch.setattr(
+        L, "_library", L.LoadInfo("/o/libhipblaslt.so.1", L.LIBRARY_ENV, True)
+    )
+    monkeypatch.setattr(L, "_built_version", (100500, "25f28906"))
+    monkeypatch.setattr(L, "_version_checked", False)
+    monkeypatch.setenv(L.LIBRARY_ENV, "/o/libhipblaslt.so.1")
+    L.check_loaded_version((100500, "565c4c74"))
+    assert not [w for w in recwarn if issubclass(w.category, L.HipblasLtLoadWarning)]
+
+
+def test_import_does_not_check_the_loaded_version():
+    # The check needs a handle, and creating one at import allocates GPU memory (and exits the
+    # process if that fails), so import leaves it for the first Handle().
+    import hipblaslt
+
+    assert hipblaslt._loader._version_checked is False
+
+
 # --- the loaded-library scan --------------------------------------------------------------------
 
 
