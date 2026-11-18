@@ -1513,40 +1513,40 @@ TEST(TestConvWrwKernelMatch, GenericBlockBuffersServeLargeImagesThroughStepWindo
     // pb 1 on a small image: declined (the specialized and per-image configs serve it).
     EXPECT_FALSE(admits(f, "gfx942", channelsLastShape()));
     // Channels-first: the step window spans the block's channel planes (2.2 GB 33000 x 33000
-    // fp16 planes are past it) but only the columns a chunk reaches (one 2^31-byte row at
-    // width stride 2^20 is within it).
+    // fp16 planes are past it) but only the columns a chunk reaches (eight 2^28-byte rows at
+    // width stride 2^17 are within it).
     auto planes = baseShape();
-    planes.c = 2;
+    planes.c = 8;
     planes.k = 1; // one dy plane: the x window alone past the range
     planes.input = {33000, 33000};
     planes.prePadding = planes.postPadding = {1, 1};
     auto cf = genericFields();
     cf.pb = 1;
     EXPECT_FALSE(admits(cf, "gfx942", planes));
-    // The dy window alone: one 0.8 GB x plane, 8 dy planes of it (7 more in the window).
+    // The dy window alone: 0.2 GB planes, x's window 7 more of them (within), dy's 15 more
+    // (past); at 11 dy planes the window (10 more, 2.0 GB) is within and the image past.
     auto dyPlanes = baseShape();
     dyPlanes.n = 1;
-    dyPlanes.c = 1;
-    dyPlanes.k = 8;
-    dyPlanes.input = {20000, 20000};
+    dyPlanes.c = 8;
+    dyPlanes.k = 16;
+    dyPlanes.input = {10000, 10000};
     EXPECT_FALSE(admits(cf, "gfx942", dyPlanes));
-    dyPlanes.k = 2;
-    dyPlanes.input = {20000, 30000}; // 1 more 1.2 GB dy plane: within
+    dyPlanes.k = 11;
     EXPECT_TRUE(admits(cf, "gfx942", dyPlanes));
     auto row = baseShape();
     row.n = 1;
-    row.c = 1;
+    row.c = 8;
     row.k = 8;
-    row.input = {1, int64_t{1} << 30}; // fp16: 2^31 bytes in one row
+    row.input = {1, int64_t{1} << 27}; // fp16: 2^28 bytes a row, 2^31 an image
     row.filter = {1, 1};
     row.prePadding = row.postPadding = {0, 0};
-    row.stride = {1, int64_t{1} << 20};
+    row.stride = {1, int64_t{1} << 17};
     EXPECT_TRUE(admits(cf, "gfx942", row));
     auto cfLarge = large;
     cfLarge.channelsLast = false;
-    cfLarge.c = 2;
+    cfLarge.c = 8;
     cfLarge.k = 1;
-    cfLarge.input = {33000, 16500}; // two 1.1 GB planes: window within, image past
+    cfLarge.input = {14000, 10000}; // eight 0.28 GB planes: window within, image past
     EXPECT_TRUE(admits(cf, "gfx942", cfLarge));
     // A specialized block-buffer class (lower case) declines the generic twin.
     cf.spec = "4r0.3.2.1.0";
@@ -2770,13 +2770,14 @@ TEST(TestConvWrwKernelMatch, TheGenericLoopServesStridedOperandsAlone)
     EXPECT_FALSE(matchesKernel(PACK, fixture.context(), kernel, *bound));
     // Elements take any channel count (no whole vectors), in either packed layout too.
     auto odd = baseShape();
-    odd.c = 5;
+    odd.c = 9;
     odd.k = 7;
     EXPECT_TRUE(admits(genericFields(), "gfx942", odd));
     odd.channelsLast = true;
     EXPECT_TRUE(admits(genericFields(), "gfx942", odd));
     EXPECT_FALSE(admits(genericClFields(), "gfx942", odd));
-    // Images smaller than a vector (one channel of 5 positions).
+    // Images smaller than a vector (one channel of 5 positions): the rows decline them, and
+    // the generic loop declines them as a stem.
     auto tiny = baseShape();
     tiny.c = 1;
     tiny.k = 2;
@@ -2784,7 +2785,7 @@ TEST(TestConvWrwKernelMatch, TheGenericLoopServesStridedOperandsAlone)
     tiny.filter = {1, 3};
     tiny.prePadding = tiny.postPadding = {0, 0};
     EXPECT_FALSE(admits(rowsFields(), "gfx942", tiny));
-    EXPECT_TRUE(admits(genericFields(), "gfx942", tiny));
+    EXPECT_FALSE(admits(genericFields(), "gfx942", tiny));
 }
 
 TEST(TestConvWrwLaunch, TheGenericLoopReadsTheGraphsStridesAndSpans)
@@ -2910,7 +2911,7 @@ TEST(TestConvWrwKernelMatch, TheGenericLoopLeavesNarrowGroupsToTheVectorEngines)
     // One group is not narrow, however few its channels.
     EXPECT_TRUE(admits(genericFields(), "gfx942", grouped(1, 8, 8, false)));
     // The FMA form too (fp32 on RDNA), past its own few-channel gate.
-    auto fp32 = [&](int64_t groups, int64_t cg, int64_t kg) {
+    const auto fp32 = [&](int64_t groups, int64_t cg, int64_t kg) {
         auto shape = grouped(groups, cg, kg, false);
         shape.dataType = DataType::FLOAT;
         return shape;
