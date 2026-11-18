@@ -750,10 +750,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # _mxsInterleavePlan). Developer switch for A/B comparisons; kernels it cannot
     # interleave keep the default layout.
     self.do["MXScaleVgprInterleave"] = True
-    # False (default): the interleave never takes more VGPRs than the default layout; when the
-    # bank-conflict-free layout does not fit, it picks the fewest-conflict layout that does.
-    # True: the region may grow to hold the conflict-free layout (the kernel uses more VGPRs).
-    self.do["MXScaleVgprInterleaveExtraVgpr"] = False
 
     self.do["executeToInitEnd"] = 0
     self.do["executeToPrefetchEnd"] = 0
@@ -6726,8 +6722,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     By default the region is exactly the default MXSA + MXSB valu span, so the kernel's VGPR
     count does not grow: the bank-conflict-free layout is used when it fits, otherwise the layout
-    with the fewest bank conflicts that fits (_mxsBudgetPlan). With do["MXScaleVgprInterleaveExtraVgpr"]
-    the region instead grows to hold the conflict-free layout."""
+    with the fewest bank conflicts that fits (_mxsBudgetPlan). With the solution parameter
+    MXScaleVgprInterleaveExtraVgpr the region instead grows to hold the conflict-free layout."""
     plan, reason = self._mxsInterleavePlan(kernel, tPMXSA, tPMXSB)
     if plan is None:
       return None, 0, reason
@@ -6742,7 +6738,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       shared, _ = self._mxsInterleavePlan(kernel, tPMXSA, tPMXSB, shareGroups=True)
       if shared is not None and sum(g["span"] for g in shared["groups"]) < needed:
         plan, needed = shared, sum(g["span"] for g in shared["groups"])
-    allowExtraVgpr = getattr(self, "do", {}).get("MXScaleVgprInterleaveExtraVgpr", False)
+    allowExtraVgpr = bool(kernel["MXScaleVgprInterleaveExtraVgpr"])
     if needed > defaultLen and not allowExtraVgpr:
       plan = self._mxsBudgetPlan(kernel, stacked, defaultLen, mxsbStart - vgprIdx)
       needed = sum(g["span"] for g in plan["groups"])

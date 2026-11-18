@@ -452,6 +452,13 @@ validParameters = { # we need to make sure this matches develop
     # WTA == VWA (MIWaveTile[0] == VectorWidthA) keeps the original path.
     # B keeps its VectorWidthB layout and iterate setting.
     "WaveTileContiguousA": [False, True],
+    # MXScaleVgprInterleaveExtraVgpr (gfx1250, MX kernels on both A and B): the scale-VGPR interleave
+    # lays MXSA/MXSB on disjoint VGPR banks so v_wmma_scale avoids the +1 cycle bank-conflict penalty.
+    #   False (default): never use more VGPRs than the default layout; when the conflict-free layout does
+    #        not fit, use the layout with the fewest bank conflicts that does.
+    #   True: let the scale region grow to hold the conflict-free layout. The kernel then uses more VGPRs
+    #        and can exceed the 1024 VGPR limit, in which case it does not build.
+    "MXScaleVgprInterleaveExtraVgpr": [False, True],
     # Persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed

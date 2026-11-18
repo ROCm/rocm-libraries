@@ -623,6 +623,7 @@ defaultBenchmarkCommonParameters = [
     {"LDSSegmentInterleave": [0]},
     {"LDSSegmentBRotate": [0]},
     {"WaveTileContiguousA": [False]},
+    {"MXScaleVgprInterleaveExtraVgpr": [False]},
     {"DepthU": [-1]},
     {"NonTemporalE": [0]},
     {"NonTemporalGate": [0]},

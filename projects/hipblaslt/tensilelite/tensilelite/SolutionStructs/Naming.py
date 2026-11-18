@@ -355,6 +355,10 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     # PrefetchGL2SAddr=False (vgpr-pair address) is the default; naming it would rename every kernel.
     if not state.get("PrefetchGL2SAddr", False):
       requiredParametersTemp.discard("PrefetchGL2SAddr")
+    # MXScaleVgprInterleaveExtraVgpr=False (interleave within the default VGPR span) is the default;
+    # naming it would rename every kernel.
+    if not state.get("MXScaleVgprInterleaveExtraVgpr", False):
+      requiredParametersTemp.discard("MXScaleVgprInterleaveExtraVgpr")
 
     for key in sorted(requiredParametersTemp):
       if key not in state or key == "CustomKernel":

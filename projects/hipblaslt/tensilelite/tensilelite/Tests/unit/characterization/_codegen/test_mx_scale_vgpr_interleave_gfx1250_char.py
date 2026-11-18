@@ -11,7 +11,7 @@ Where it applies, every MXS reference must resolve inside v0-v255 and no VGPR ma
 through two different scale blocks. By default it never raises the VGPR count: when the
 bank-conflict-free layout needs a larger scale region than the default, the kernel gets the layout
 with the fewest bank conflicts that fits the default region (kernels already at the 1024 VGPR
-limit would not assemble otherwise). With do["MXScaleVgprInterleaveExtraVgpr"] the region grows
+limit would not assemble otherwise). With the parameter MXScaleVgprInterleaveExtraVgpr the region grows
 instead and every v_wmma_scale reads its two scales from disjoint banks. With the switch off every
 kernel keeps the default layout, whose scale banks collide.
 
@@ -185,17 +185,16 @@ def test_mx_scale_vgpr_interleave_tight_budget(kernels_on_off):
 
 
 @pytest.fixture(scope="module", params=[c for c in _CONFIGS if c[1]], ids=[c[0] for c in _CONFIGS if c[1]])
-def kernels_extra_vgprs(request):
+def kernels_extra_vgprs(request, tmp_path_factory):
+    # The same config with the solution parameter MXScaleVgprInterleaveExtraVgpr set.
     name, _ = request.param
-    init = KernelWriter.__init__
-
-    def initExtra(self, *args, **kwargs):
-        init(self, *args, **kwargs)
-        self.do["MXScaleVgprInterleaveExtraVgpr"] = True
-
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(KernelWriter, "__init__", initExtra)
-        return _emit(name)
+    with open(os.path.join(_DESIGNED, name)) as f:
+        text = f.read()
+    assert text.count("    ForkParameters:\n") == 1
+    text = text.replace("    ForkParameters:\n", "    ForkParameters:\n    - MXScaleVgprInterleaveExtraVgpr: [true]\n")
+    path = tmp_path_factory.mktemp("extra_vgprs") / name
+    path.write_text(text)
+    return emit_kernels_from_config(str(path), limit=8, arch=_ARCH)
 
 
 def test_mx_scale_vgpr_interleave_extra_vgprs_is_conflict_free(kernels_extra_vgprs):

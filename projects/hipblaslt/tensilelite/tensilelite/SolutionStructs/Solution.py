@@ -7850,6 +7850,11 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "with PrefetchLocalRead %u LoopIters %u LocalReadVectorWidthB %u, not enough LoopIters to prefetch %ux%u iterations, " \
           % (state["PrefetchLocalRead"],state["LoopIters"],state["LocalReadVectorWidthB"], state["PrefetchLocalRead"] , wlrMultiple) )
 
+    # Only the gfx1250 MX scale-VGPR interleave reads MXScaleVgprInterleaveExtraVgpr; elsewhere it is a
+    # no-op and must not rename the kernel.
+    if not (state["ISA"][:2] == (12, 5) and state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
+      state["MXScaleVgprInterleaveExtraVgpr"] = False
+
     if state["PrefetchGL2"] == 0:
       state["PrefetchGL2Inc64Bit"] = False
       state["PrefetchGL2SAddr"] = False
