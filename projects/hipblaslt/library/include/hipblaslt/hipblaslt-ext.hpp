@@ -1220,8 +1220,8 @@ namespace hipblaslt_ext
             * scales, aux, amax) must stay null, because a PartitionedGemm runs a plain GEMM. Each
             * pointer points at a whole matrix (the library adds the partition's slice offset), and
             * the leading dimensions and batch strides describe that whole matrix. The same pointer
-            * in every element shares one matrix between the partitions (it must be reachable from
-            * every partition device); different pointers give each partition its own copy, which
+            * in every element shares one matrix between the partitions (it must be accessible from
+            * every partition device, see below); different pointers give each partition its own copy, which
             * the caller keeps equal. For D, the same pointer means every partition writes its slice
             * into one D. Copies are matched to the partitions by device, whatever the order of
             * ``inputs``: partition ``p`` uses the copy on its device, so the D on device X receives
@@ -1231,6 +1231,14 @@ namespace hipblaslt_ext
             * allocates and copies nothing. ``alpha`` and ``beta`` are host pointers, as in
             * GemmInputs; they are read from the first element, must be set in every element, and
             * apply to every partition.
+            *
+            *  Precondition: every partition's slices of A, B, C and D (and with ``storePeerD`` the
+            * peer D) must be accessible from that partition's device: local memory, or peer access
+            * or VMM access that the caller has set up. Otherwise the run faults, as with any GEMM
+            * given an inaccessible pointer; setProblem does not check it and does not enable peer
+            * access. With ``HIPBLASLT_LOG_MASK=4`` (hints) it samples a few addresses and logs a
+            * hint when one looks unreachable (``hipDeviceCanAccessPeer`` says only that peer
+            * access is possible, not that it is enabled), but never changes its return value.
             *
             *  Where the memory is (hipMalloc on one device, or a VMM range whose pages are on
             * several devices) is up to the caller: for example, two copies of A back to back in one
@@ -1253,10 +1261,7 @@ namespace hipblaslt_ext
             * reads D after the run (including under graph capture) is up to the caller.
             *
             *  \retval HIPBLAS_STATUS_SUCCESS           If the problem was set on every partition.
-            *  \retval HIPBLAS_STATUS_INVALID_VALUE     If a partition would use memory on another
-            * device that it has no peer access to (``hipDeviceCanAccessPeer``; with ``storePeerD`` the
-            * two partitions need it both ways), with an error log. The library does not enable peer
-            * access, which is up to the caller. Also if `inputs` does not hold one GemmInputs
+            *  \retval HIPBLAS_STATUS_INVALID_VALUE     If `inputs` does not hold one GemmInputs
             * per partition, a required pointer is null, a size is not positive, or the split dimension is smaller than the
             * number of partitions.
             *  \retval HIPBLAS_STATUS_NOT_SUPPORTED     If the types or operations are not

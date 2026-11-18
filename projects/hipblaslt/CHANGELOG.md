@@ -10,7 +10,8 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   a partitioned GPU (for example, a device in DPX mode), with one handle, stream, and workspace per partition,
   `SplitDim::M`, `SplitDim::N` or `SplitDim::Batch`, and one pointer per partition for each
   matrix (the same pointer shares a matrix, different pointers replicate it). hipBLASLt
-  allocates and copies nothing.
+  allocates and copies nothing and does not enable peer access: every partition's slices must be
+  accessible from its device, otherwise the run faults like any GEMM given an inaccessible pointer.
   Only plain GEMM is supported; the device user arguments overloads return `HIPBLAS_STATUS_NOT_SUPPORTED`.
   This is a beta API: it may change in a future release.
   Added `hipblaslt-bench --partitions N --split_dim M|N|B` (which runs `testing_matmul` through

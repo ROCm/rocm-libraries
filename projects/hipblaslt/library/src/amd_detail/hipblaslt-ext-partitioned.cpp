@@ -110,16 +110,11 @@ namespace hipblaslt_ext::experimental
         }
 
         // Whether kernels on device `from` can access memory on device `to`. Capability only: it is
-        // the caller's job to enable peer access. HIPBLASLT_PARTITIONED_FORCE_NO_PEER=1 makes two
-        // different devices unreachable, so the no-peer-access paths can be tested on a machine that
-        // has it.
+        // the caller's job to enable peer access. Used for a hint only, never to reject a problem.
         bool canReach(int from, int to)
         {
             if(from == to)
                 return true;
-            const char* force = std::getenv("HIPBLASLT_PARTITIONED_FORCE_NO_PEER");
-            if(force != nullptr && force[0] == '1')
-                return false;
             int ok = 0;
             if(hipDeviceCanAccessPeer(&ok, from, to) != hipSuccess)
             {
@@ -722,8 +717,11 @@ namespace hipblaslt_ext::experimental
             }
 
             // Partition i reads A, B and C and writes D (and the peer D) from device
-            // s.devices[i]. Memory on another device must be reachable from it: without peer
-            // access the kernel would fault.
+            // s.devices[i]. Memory on another device must be reachable from it, which is the
+            // caller's precondition: without peer access the kernel faults, as with any GEMM given
+            // an inaccessible pointer. Nothing is rejected here; with hints on, a few addresses
+            // are sampled to say so.
+            if(hints)
             {
                 const int64_t mi0 = dim == SplitDim::M ? size[i] : m;
                 const int64_t ni0 = dim == SplitDim::N ? size[i] : n;
@@ -748,19 +746,18 @@ namespace hipblaslt_ext::experimental
                         const int where = pageDevice(advance(base, at, bytes[mat]));
                         if(where >= 0 && !canReach(s.devices[i], where))
                         {
-                            log_error(__func__,
+                            log_hints(__func__,
                                       "PartitionedGemm: partition",
                                       i,
-                                      "runs on device",
-                                      s.devices[i],
-                                      "but its",
+                                      "will access",
                                       t < 4 ? names[mat] : "peer D",
-                                      "is on device",
+                                      "on device",
                                       where,
-                                      "and there is no peer access between them. Put a copy on the"
-                                      " partition's device, or use devices that can reach each"
-                                      " other (the partitions of one GPU).");
-                            return HIPBLAS_STATUS_INVALID_VALUE;
+                                      "from device",
+                                      s.devices[i],
+                                      "without peer access; the run will fault unless the caller"
+                                      " enables it (or places a copy on the partition's device)");
+                            break;
                         }
                     }
                 }

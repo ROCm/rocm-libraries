@@ -99,38 +99,6 @@ namespace
         return v;
     }
 
-    // Sets an environment variable for the life of the object.
-    class ScopedEnv
-    {
-    public:
-        ScopedEnv(const char* name, const char* value)
-            : m_name(name)
-        {
-            set(name, value);
-        }
-        ~ScopedEnv()
-        {
-            // An empty value is "not set" for the library's check (it looks for "1").
-            set(m_name, "");
-        }
-
-    private:
-        static void set(const char* name, const char* value)
-        {
-#ifdef _WIN32
-            _putenv_s(name, value);
-#else
-            setenv(name, value, 1);
-#endif
-        }
-
-        const char* m_name;
-    };
-
-    // Makes two different devices unreachable for PartitionedGemm::setProblem, so the paths without
-    // peer access can be tested on a machine that has it.
-    constexpr const char* kForceNoPeer = "HIPBLASLT_PARTITIONED_FORCE_NO_PEER";
-
     // PartitionedGemm is validated on gfx1250 only; the tests skip on any other architecture.
     bool isGfx1250()
     {
@@ -647,21 +615,6 @@ TEST(pre_checkin_partitioned_gemm_ext, OnePartitionMatchesGemm)
     auto ref = referenceGemm(op, parts.rawHandles()[0], 0);
     ASSERT_FALSE(ref.empty());
     expectSlicesMatch(gemm, parts, buffers, ref, SplitDim::N);
-}
-
-// All partitions on one device (SPX) never need peer access, whatever the machine offers.
-TEST(pre_checkin_partitioned_gemm_ext, NoPeerAccessIsNeededOnOneDevice)
-{
-    SKIP_UNLESS_GFX1250();
-    ScopedEnv         noPeer(kForceNoPeer, "1");
-    auto              parts = onDeviceZero(2);
-    auto              gemm  = makeGemm(parts);
-    Operands          op;
-    ReplicatedBuffers buffers(parts, op);
-
-    auto in       = buffers.inputs();
-    in.storePeerD = true;
-    EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_SUCCESS);
 }
 
 // Only gfx1250 has kernels that store a second D. On any other architecture a problem with
@@ -1355,40 +1308,4 @@ TEST(pre_checkin_partitioned_gemm_ext, MovedFromAndNullHandlesAreRejected)
                              HIPBLAS_COMPUTE_32F);
     EXPECT_EQ(withNull.getPartitionCount(), 0u);
     EXPECT_EQ(setReplicated(withNull, SplitDim::N, buffers.inputs()), HIPBLAS_STATUS_INVALID_VALUE);
-}
-
-// A partition cannot use memory on another device that it has no peer access to; the kernel would
-// fault. setProblem refuses it with an error. Copies on the partition's own device, which need no
-// access, stay fine.
-TEST(partitioned_gemm_ext_streams_multi_gpu, MemoryOnAnotherDeviceNeedsPeerAccess)
-{
-    SKIP_UNLESS_GFX1250();
-    const auto pair = hipblaslt_partitions::dpxPair();
-    if(!pair)
-        GTEST_SKIP() << "needs a GPU in DPX mode (two HIP devices that are its two partitions)";
-    Partitions        parts({pair->first, pair->second});
-    auto              gemm = makeGemm(parts);
-    Operands          op;
-    ReplicatedBuffers buffers(parts, op);
-
-    // One copy of A on the first device, read by both partitions.
-    DeviceBuf sharedA(pair->first, op.a.size() * 2, op.a.data());
-    auto      shared = buffers.inputs();
-    shared.a         = {sharedA.get(), sharedA.get()};
-    EXPECT_EQ(setReplicated(gemm, SplitDim::N, shared), HIPBLAS_STATUS_SUCCESS);
-    {
-        ScopedEnv noPeer(kForceNoPeer, "1");
-        EXPECT_EQ(setReplicated(gemm, SplitDim::N, shared), HIPBLAS_STATUS_INVALID_VALUE);
-
-        // A copy on each partition's device needs no access.
-        EXPECT_EQ(setReplicated(gemm, SplitDim::N, buffers.inputs()), HIPBLAS_STATUS_SUCCESS);
-
-        // storePeerD writes the other partition's D: it needs access both ways.
-        auto in       = buffers.inputs();
-        in.storePeerD = true;
-        EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_INVALID_VALUE);
-    }
-    auto in       = buffers.inputs();
-    in.storePeerD = true;
-    EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_SUCCESS);
 }

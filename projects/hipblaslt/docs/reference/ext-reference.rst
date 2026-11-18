@@ -120,7 +120,12 @@ dimension to split (M, N, or the batch). The first ``N - 1`` partitions take ``s
 rest; otherwise they take ``size / N`` and a hint is logged (``HIPBLASLT_LOG_MASK=4``). A slice that starts
 off a 256-byte boundary runs much slower, so pad the leading dimensions (and batch strides) to multiples of
 256 bytes, which is enough for N and Batch splits; for an M split also make M a multiple of
-``parts * 256 / element size``. hipBLASLt does not allocate or copy any matrix. The caller passes one pointer per
+``parts * 256 / element size``. hipBLASLt does not allocate or copy any matrix, and does not enable
+peer access: every partition's slices must be accessible from its device (local memory, or peer or VMM access
+that the caller has set up), otherwise the run faults like any GEMM given an inaccessible pointer.
+Run in DPX mode for speed; SPX (every partition on one device) gives correct results but is only meant for
+checking them without a DPX GPU. ``setProblem`` queries where the memory is, so call it when a pointer or the
+shape changes, not on every launch. The caller passes one pointer per
 partition for each matrix: the same pointer shares a matrix between the partitions, different
 pointers give each partition its own copy. Where the memory lives (``hipMalloc`` on one
 device, or a VMM range with pages on several devices) is up to the caller: the library gives
