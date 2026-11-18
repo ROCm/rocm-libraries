@@ -541,28 +541,92 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
     auto kernel = makeKernel(0, dtype, "ConvWinogradGemm");
     kernel.source.sourceFile = "kernels/ConvWinograd.cpp";
     const bool matrix = f.variant == "wmma" || f.variant == "wreg" || f.variant == "coop";
-    const int64_t atom = f.atom >= 0                                       ? f.atom
-                         : f.variant == "wrw"                              ? (f.arch == "any"      ? 0
-                                                                              : f.arch == "gfx11"  ? 1
-                                                                              : f.arch == "gfx12"  ? 2
-                                                                              : f.arch == "gfx9"   ? 3
-                                                                              : f.arch == "gfx950" ? 6
-                                                                                                   : -1)
-                         : f.variant == "multipass" && f.arch == "gfx1250" ? 5
-                         : !matrix                                         ? 0
-                         : f.arch == "gfx11"                               ? 1
-                         : f.arch == "gfx12"                               ? 2
-                         : (f.arch == "gfx9" || f.arch == "gfx942" || f.arch == "gfx950") ? 3
-                         : f.arch == "gfx1250"                                            ? 4
-                                                                                          : -1;
-    const int64_t variantId = f.variant == "multipass" ? 0
-                              : f.variant == "fused"   ? 1
-                              : f.variant == "wmma"    ? 2
-                              : f.variant == "wreg"    ? 3
-                              : f.variant == "sreg"    ? 4
-                              : f.variant == "coop"    ? 5
-                              : f.variant == "wrw"     ? 6
-                                                       : -1;
+    const int64_t atom = [&]() -> int64_t {
+        if(f.atom >= 0)
+        {
+            return f.atom;
+        }
+        if(f.variant == "wrw")
+        {
+            if(f.arch == "any")
+            {
+                return 0;
+            }
+            if(f.arch == "gfx11")
+            {
+                return 1;
+            }
+            if(f.arch == "gfx12")
+            {
+                return 2;
+            }
+            if(f.arch == "gfx9")
+            {
+                return 3;
+            }
+            if(f.arch == "gfx950")
+            {
+                return 6;
+            }
+            return -1;
+        }
+        if(f.variant == "multipass" && f.arch == "gfx1250")
+        {
+            return 5;
+        }
+        if(!matrix)
+        {
+            return 0;
+        }
+        if(f.arch == "gfx11")
+        {
+            return 1;
+        }
+        if(f.arch == "gfx12")
+        {
+            return 2;
+        }
+        if(f.arch == "gfx9" || f.arch == "gfx942" || f.arch == "gfx950")
+        {
+            return 3;
+        }
+        if(f.arch == "gfx1250")
+        {
+            return 4;
+        }
+        return -1;
+    }();
+    const int64_t variantId = [&]() -> int64_t {
+        if(f.variant == "multipass")
+        {
+            return 0;
+        }
+        if(f.variant == "fused")
+        {
+            return 1;
+        }
+        if(f.variant == "wmma")
+        {
+            return 2;
+        }
+        if(f.variant == "wreg")
+        {
+            return 3;
+        }
+        if(f.variant == "sreg")
+        {
+            return 4;
+        }
+        if(f.variant == "coop")
+        {
+            return 5;
+        }
+        if(f.variant == "wrw")
+        {
+            return 6;
+        }
+        return -1;
+    }();
     kernel.metadata
         = {{"direction", std::string(direction == ConvDirection::FORWARD ? "FWD" : "BWD")},
            {"dtype", dtype},
@@ -737,7 +801,9 @@ bool admits(const ConfigFields& fields,
     const GraphFixture fixture(buildGraph(specFor(shape, direction)), properties);
     auto pack = PACK_FWD;
     if(direction == ConvDirection::BACKWARD_DATA)
+    {
         pack.graphMatcher = "hipkernel.conv_winograd_bwd.graph_match";
+    }
     const auto bound = matchesGraph(pack, fixture.context());
     return bound.has_value()
            && matchesKernel(pack, fixture.context(), kernelOf(fields, dtype, direction), *bound);
@@ -751,7 +817,9 @@ TEST(TestConvWinogradKernelMatch, NativeMultipassIsFloatOnlyOnExactGfx1250)
         {
             auto shape = baseShape();
             if(m == 3)
+            {
                 shape.stride = {2, 2};
+            }
             for(const bool channelsLast : {false, true})
             {
                 shape.channelsLast = channelsLast;
@@ -764,9 +832,13 @@ TEST(TestConvWinogradKernelMatch, NativeMultipassIsFloatOnlyOnExactGfx1250)
                 fields.atom = 5;
                 EXPECT_TRUE(admits(fields, "gfx1250:sramecc-", shape, "FLOAT", direction));
                 for(const auto& arch : {"gfx1201", "gfx1251", "gfx942"})
+                {
                     EXPECT_FALSE(admits(fields, arch, shape, "FLOAT", direction));
+                }
                 for(const auto& dtype : {"HALF", "BFLOAT16"})
+                {
                     EXPECT_FALSE(admits(fields, "gfx1250", shape, dtype, direction));
+                }
                 auto wrongStride = shape;
                 wrongStride.stride = {m == 3 ? 1 : 2, m == 3 ? 1 : 2};
                 EXPECT_FALSE(admits(fields, "gfx1250", wrongStride, "FLOAT", direction));
@@ -1713,7 +1785,7 @@ TEST(TestConvWinogradPlan, NativeReductionPaddingMatchesBothDirectionalFilterLau
             const auto plan = conv_winograd::planFor(*problem, *config, countedDevice());
             ASSERT_TRUE(plan.has_value());
             const size_t paddedCo = fields.variant == "coop" ? (cgo + 15) / 16 * 16 : cgo;
-            EXPECT_EQ(plan->uBytes, 2 * 16 * paddedCo * paddedCi * 2);
+            EXPECT_EQ(plan->uBytes, size_t{2} * 16 * paddedCo * paddedCi * 2);
             EXPECT_EQ(plan->filterBlocks[0], (2 * cgo * paddedCi + 255) / 256);
         }
     }
@@ -1727,7 +1799,7 @@ TEST(TestConvWinogradPlan, NativeReductionPaddingMatchesBothDirectionalFilterLau
     ASSERT_TRUE(config.has_value());
     const auto plan = conv_winograd::planFor(*problem, *config, countedDevice());
     ASSERT_TRUE(plan.has_value());
-    EXPECT_EQ(plan->uBytes, size_t{2 * 16 * 33 * 20 * 4});
+    EXPECT_EQ(plan->uBytes, size_t{2} * 16 * 33 * 20 * 4);
     EXPECT_EQ(plan->filterBlocks[0], (2u * 33 * 20 + 255) / 256);
 }
 

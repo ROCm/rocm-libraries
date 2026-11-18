@@ -1049,7 +1049,7 @@ TEST(TestConvStemBwdKernelMatch, TheAtomsRunOnTheirArchitectures)
     ASSERT_GT(conv_stem_bwd::ldsBytesOf(config, 2), 64 * 1024);
     ASSERT_LE(conv_stem_bwd::ldsBytesOf(config, 2), 160 * 1024);
     auto legacy = deviceOf("gfx950:sramecc+:xnack-");
-    legacy.sharedMemPerBlock = 64 * 1024;
+    legacy.sharedMemPerBlock = std::size_t{64} * 1024;
     EXPECT_TRUE(conv_stem_bwd::stemBwdLaunchFor(*problem, config, legacy).has_value());
     auto big = ConfigFields{};
     big.kc = 128;

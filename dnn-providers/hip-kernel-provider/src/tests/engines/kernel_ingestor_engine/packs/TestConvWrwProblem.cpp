@@ -2107,7 +2107,7 @@ TEST(TestConvWrwKernelMatch, TheLdsLimitIsTheDevices)
     const auto problem = parse(specOf(baseShape()));
     ASSERT_TRUE(problem.has_value());
     auto legacy = deviceOf("gfx950:sramecc+:xnack-");
-    legacy.sharedMemPerBlock = 64 * 1024;
+    legacy.sharedMemPerBlock = size_t{64} * 1024;
     EXPECT_TRUE(conv_wrw::wrwLaunchFor(*problem, configOf(f), legacy).has_value());
     EXPECT_EQ(conv_wrw::ldsLimitOf("gfx950:sramecc+:xnack-"), 160 * 1024);
     EXPECT_EQ(conv_wrw::ldsLimitOf("gfx942"), 64 * 1024);
@@ -3376,9 +3376,18 @@ TEST(TestConvWrwLds, MirrorsTheKernelsArithmetic)
 WrwConfig genericConfig(DataType dtype, bool channelsLast = false)
 {
     WrwConfig c;
-    c.atom = dtype == DataType::FLOAT  ? "wmma125_f32"
-             : dtype == DataType::HALF ? "wmma125_f16"
-                                       : "wmma125_bf16";
+    if(dtype == DataType::FLOAT)
+    {
+        c.atom = "wmma125_f32";
+    }
+    else if(dtype == DataType::HALF)
+    {
+        c.atom = "wmma125_f16";
+    }
+    else
+    {
+        c.atom = "wmma125_bf16";
+    }
     c.atomId = conv_wrw::atomIdOf(c.atom);
     c.loop = conv_wrw::LOOP_NATIVE_GENERIC;
     c.layout = channelsLast ? 1 : 0;
@@ -3395,7 +3404,9 @@ WrwConfig genericConfig(DataType dtype, bool channelsLast = false)
 TEST(TestConvWrwGeneric, RuntimeGeometryAndGroupedChannelTails)
 {
     for(const auto dtype : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
+    {
         for(const bool channelsLast : {false, true})
+        {
             for(const auto mode : {ConvMode::CROSS_CORRELATION, ConvMode::CONVOLUTION})
             {
                 auto shape = baseShape();
@@ -3433,6 +3444,8 @@ TEST(TestConvWrwGeneric, RuntimeGeometryAndGroupedChannelTails)
                 EXPECT_FALSE(
                     conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1250")).has_value());
             }
+        }
+    }
 }
 
 TEST(TestConvWrwGeneric, NativeScalarGathersAdmitStridedOperandsInMatchingLoadOrder)
@@ -3447,9 +3460,9 @@ TEST(TestConvWrwGeneric, NativeScalarGathersAdmitStridedOperandsInMatchingLoadOr
             shape.dataType = dtype;
             shape.channelsLast = pitch != 0;
             auto spec = specOf(shape);
-            spec.x.strides = pitch == 0
-                                 ? std::vector<int64_t>{24 * 10 * 16, 10 * 16, 16, 1}
-                                 : std::vector<int64_t>{10 * 12 * pitch, 1, 12 * pitch, pitch};
+            spec.x.strides
+                = pitch == 0 ? std::vector<int64_t>{int64_t{24} * 10 * 16, int64_t{10} * 16, 16, 1}
+                             : std::vector<int64_t>{int64_t{10} * 12 * pitch, 1, 12 * pitch, pitch};
             const auto problem = parse(spec);
             ASSERT_TRUE(problem.has_value());
             ASSERT_FALSE(problem->channelsFirst || problem->channelsLast);
@@ -3593,9 +3606,9 @@ TEST(TestConvWrwTapTiled, UsesAvailableLdsRatherThanLegacyLimit)
         config.bq = 256;
         config.wc = 4;
         auto device = deviceOf("gfx1250");
-        device.sharedMemPerBlock = 64 * 1024;
+        device.sharedMemPerBlock = size_t{64} * 1024;
         EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, device).has_value());
-        device.sharedMemPerBlock = 320 * 1024;
+        device.sharedMemPerBlock = size_t{320} * 1024;
         EXPECT_TRUE(conv_wrw::wrwLaunchFor(*problem, config, device).has_value());
     }
 }
@@ -3694,7 +3707,9 @@ WrwConfig accurateConfig(bool channelsLast = false)
 TEST(TestConvWrwAccurate, CoversRuntimeGeometryWithoutDirectStoreOrFloatWorkspace)
 {
     for(const bool channelsLast : {false, true})
+    {
         for(const bool filterLast : {false, true})
+        {
             for(const auto mode : {ConvMode::CROSS_CORRELATION, ConvMode::CONVOLUTION})
             {
                 auto shape = baseShape();
@@ -3726,6 +3741,8 @@ TEST(TestConvWrwAccurate, CoversRuntimeGeometryWithoutDirectStoreOrFloatWorkspac
                 EXPECT_LT((launch->args.splits - 1) * launch->args.stepsPerSplit,
                           launch->args.steps);
             }
+        }
+    }
 }
 
 TEST(TestConvWrwAccurate, RefusesEveryUnsupportedConfigFieldAndDeviceResource)
@@ -3786,7 +3803,9 @@ TEST(TestConvWrwAccurate, RefusesEveryUnsupportedConfigFieldAndDeviceResource)
     device.multiProcessorCount = 0;
     EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, good, device).has_value());
     for(const char* arch : {"gfx000", "gfx950", "gfx1201", ""})
+    {
         EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, good, deviceOf(arch)).has_value()) << arch;
+    }
     EXPECT_TRUE(conv_wrw::wrwLaunchFor(*problem, good, deviceOf("gfx1250:xnack-")).has_value());
 }
 

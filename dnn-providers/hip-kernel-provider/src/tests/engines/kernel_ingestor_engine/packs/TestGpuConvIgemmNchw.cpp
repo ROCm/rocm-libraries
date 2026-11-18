@@ -93,7 +93,8 @@ const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& catalog()
             roots.push_back(dir / "lib" / "hipdnn_plugins" / "engines"
                             / HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR);
         }
-        const std::string prefix = "conv_igemm_nchw_bwd", suffix = ".kdp.json";
+        const std::string prefix = "conv_igemm_nchw_bwd";
+        const std::string suffix = ".kdp.json";
         std::vector<std::filesystem::path> found;
         for(const auto& root : roots)
         {

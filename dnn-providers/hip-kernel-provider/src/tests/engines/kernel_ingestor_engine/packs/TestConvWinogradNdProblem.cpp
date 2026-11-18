@@ -33,7 +33,7 @@ ConvShape ndShape(bool rank3)
 }
 TEST(TestConvWinogradNdProblem, DilatedResiduesAndSpatialChunksPartitionOutputs)
 {
-    for(int chunk : {3, 256, 4096})
+    for(const int chunk : {3, 256, 4096})
     {
         const GraphFixture f(buildGraph(specFor(ndShape(false), ConvDirection::FORWARD)));
         const auto p = nd::parseProblem(f.context(), ConvDirection::FORWARD);
@@ -47,9 +47,11 @@ TEST(TestConvWinogradNdProblem, DilatedResiduesAndSpatialChunksPartitionOutputs)
         std::set<std::array<long long, 3>> writes;
         const auto& a = plan->args;
         for(long long first = 0; first < plan->totalTiles; first += a.tiles)
+        {
             for(int t = 0; t < a.tiles && first + t < plan->totalTiles; ++t)
             {
-                long long rem = first + t, origin[2];
+                long long rem = first + t;
+                std::array<long long, 2> origin{};
                 for(int j = 1; j >= 0; --j)
                 {
                     const auto q = rem % a.axisTiles[j];
@@ -57,14 +59,19 @@ TEST(TestConvWinogradNdProblem, DilatedResiduesAndSpatialChunksPartitionOutputs)
                     origin[j] = q % a.residues[j] + 2 * a.dilation[j] * (q / a.residues[j]);
                 }
                 for(int h = 0; h < 2; ++h)
+                {
                     for(int w = 0; w < 2; ++w)
                     {
                         std::array<long long, 3> pos{
                             rem, origin[0] + h * a.dilation[0], origin[1] + w * a.dilation[1]};
                         if(pos[1] < a.output[0] && pos[2] < a.output[1])
+                        {
                             EXPECT_TRUE(writes.insert(pos).second);
+                        }
                     }
+                }
             }
+        }
         EXPECT_EQ(writes.size(), a.n * a.output[0] * a.output[1]);
     }
 }
@@ -82,7 +89,7 @@ TEST(TestConvWinogradNdProblem, FixedFilterMustFitWorkspaceAndTileProductsMustNo
     const GraphFixture f(buildGraph(specFor(ndShape(false), ConvDirection::FORWARD)));
     auto p = nd::parseProblem(f.context(), ConvDirection::FORWARD);
     ASSERT_TRUE(p);
-    nd::Config c;
+    const nd::Config c;
     EXPECT_FALSE(nd::planFor(*p, c, 512));
     p->args.n = LLONG_MAX;
     EXPECT_FALSE(nd::planFor(*p, c));
@@ -137,7 +144,9 @@ TEST(TestConvWinogradNdProblem, PaddedMixedViewsAreAdmittedButOverlapsAreRefused
     auto spec = specFor(ndShape(false), ConvDirection::FORWARD);
     spec.y.strides = packedStrides(spec.y.dims, true);
     for(auto& stride : spec.x.strides)
+    {
         stride *= 2;
+    }
     const GraphFixture padded(buildGraph(spec));
     EXPECT_TRUE(nd::parseProblem(padded.context(), ConvDirection::FORWARD));
     spec.x.strides.back() = spec.x.strides[spec.x.strides.size() - 2];

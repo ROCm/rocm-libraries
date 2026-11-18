@@ -59,41 +59,60 @@ std::vector<double>
     direct(const ConvNaiveArgs& a, const float* x, const float* w, bool magnitude = false)
 {
     std::vector<double> result(static_cast<size_t>(span(a.yStrides, a.n, a.k, a.outSpatial)), 0.0);
-    const long long cg = a.c / a.groups, kg = a.k / a.groups;
+    const long long cg = a.c / a.groups;
+    const long long kg = a.k / a.groups;
     for(long long n = 0; n < a.n; ++n)
+    {
         for(long long k = 0; k < a.k; ++k)
+        {
             for(long long od = 0; od < a.outSpatial[0]; ++od)
+            {
                 for(long long oh = 0; oh < a.outSpatial[1]; ++oh)
+                {
                     for(long long ow = 0; ow < a.outSpatial[2]; ++ow)
                     {
                         const auto yo = off(a.yStrides, n, k, od, oh, ow);
                         for(long long c = 0; c < cg; ++c)
+                        {
                             for(long long rd = 0; rd < a.filter[0]; ++rd)
+                            {
                                 for(long long rh = 0; rh < a.filter[1]; ++rh)
+                                {
                                     for(long long rw = 0; rw < a.filter[2]; ++rw)
                                     {
                                         const long long d
-                                            = od - a.prePadding[0] + rd * a.dilation[0],
-                                            h = oh - a.prePadding[1] + rh * a.dilation[1],
-                                            v = ow - a.prePadding[2] + rw * a.dilation[2];
+                                            = od - a.prePadding[0] + rd * a.dilation[0];
+                                        const long long h
+                                            = oh - a.prePadding[1] + rh * a.dilation[1];
+                                        const long long v
+                                            = ow - a.prePadding[2] + rw * a.dilation[2];
                                         if(d < 0 || d >= a.inSpatial[0] || h < 0
                                            || h >= a.inSpatial[1] || v < 0 || v >= a.inSpatial[2])
+                                        {
                                             continue;
+                                        }
                                         const auto xo
                                             = off(a.xStrides, n, (k / kg) * cg + c, d, h, v);
-                                        const auto wo
-                                            = off(a.wStrides,
-                                                  k,
-                                                  c,
-                                                  a.flipFilter ? a.filter[0] - 1 - rd : rd,
-                                                  a.flipFilter ? a.filter[1] - 1 - rh : rh,
-                                                  a.flipFilter ? a.filter[2] - 1 - rw : rw);
+                                        const bool flip = a.flipFilter != 0;
+                                        const auto wo = off(a.wStrides,
+                                                            k,
+                                                            c,
+                                                            flip ? a.filter[0] - 1 - rd : rd,
+                                                            flip ? a.filter[1] - 1 - rh : rh,
+                                                            flip ? a.filter[2] - 1 - rw : rw);
                                         const double product = static_cast<double>(x[xo])
                                                                * static_cast<double>(w[wo]);
                                         result[static_cast<size_t>(yo)]
                                             += magnitude ? std::fabs(product) : product;
                                     }
+                                }
+                            }
+                        }
                     }
+                }
+            }
+        }
+    }
     return result;
 }
 void runNd(bool last,
@@ -106,8 +125,8 @@ void runNd(bool last,
 {
     ConvShape shape;
     shape.n = 1;
-    shape.c = 2 * channelsPerGroup;
-    shape.k = 2 * outputsPerGroup;
+    shape.c = 2 * static_cast<int64_t>(channelsPerGroup);
+    shape.k = 2 * static_cast<int64_t>(outputsPerGroup);
     shape.groups = 2;
     shape.channelsLast = last;
     shape.dataType = DataType::FLOAT;
@@ -139,20 +158,24 @@ void runNd(bool last,
     ASSERT_TRUE(bound);
     const auto problem = conv_winograd_nd::parseProblem(fixture.context(), ConvDirection::FORWARD);
     ASSERT_TRUE(problem);
-    Tensor<float> x(spec.x.dims, spec.x.strides), w(spec.w.dims, spec.w.strides),
-        y(spec.y.dims, spec.y.strides);
+    Tensor<float> x(spec.x.dims, spec.x.strides);
+    Tensor<float> w(spec.w.dims, spec.w.strides);
+    Tensor<float> y(spec.y.dims, spec.y.strides);
     auto& input = x;
     auto& output = y;
     input.fillTensorWithRandomValues(-1.0f, 1.0f, 7123);
     w.fillTensorWithRandomValues(-1.0f, 1.0f, 9213);
     const auto& handler = dispatchHandler(pack);
-    for(int bm : {64, 128})
-        for(int chunk : chunks)
+    for(const int bm : {64, 128})
+    {
+        for(const int chunk : chunks)
         {
             auto kernel = ndKernel(bm, chunk);
             if(!conv_winograd_nd::configRunsOn(*conv_winograd_nd::configOf(kernel),
                                                fixture.context().deviceProperties.gcnArchName))
+            {
                 GTEST_SKIP() << "Dilated forward convolution requires gfx1250";
+            }
             ASSERT_TRUE(matchesKernel(pack, fixture.context(), kernel, *bound));
             const auto prepared = handler.prepare(fixture.context(), *bound, kernel);
             ASSERT_NE(prepared, nullptr);
@@ -164,7 +187,7 @@ void runNd(bool last,
             otherInput.fillTensorWithRandomValues(-1.0f, 1.0f, 5171);
             for(int repeat = 0; repeat < 2; ++repeat)
             {
-                auto& selected = repeat ? otherInput : input;
+                auto& selected = repeat != 0 ? otherInput : input;
                 w.fillTensorWithRandomValues(
                     -1.0f, 1.0f, 9213u + static_cast<unsigned int>(repeat));
                 const auto ref = direct(problem->base.args,
@@ -192,34 +215,45 @@ void runNd(bool last,
                 // Existing F2 FP32 tolerance, scaled by sum-|products| in the same residue tile.
                 const auto& a = problem->args;
                 for(long long n = 0; n < a.n; ++n)
+                {
                     for(long long c = 0; c < a.co; ++c)
+                    {
                         for(long long h = 0; h < a.output[0]; ++h)
+                        {
                             for(long long v = 0; v < a.output[1]; ++v)
                             {
                                 const auto offset = [&](long long yy, long long xx) {
                                     return n * a.outStride[0] + c * a.outStride[1]
                                            + yy * a.outStride[2] + xx * a.outStride[3];
                                 };
-                                const size_t i = static_cast<size_t>(offset(h, v));
+                                const auto i = static_cast<size_t>(offset(h, v));
                                 double scale = 0.0;
                                 for(int dy = -1; dy <= 1; ++dy)
+                                {
                                     for(int dx = -1; dx <= 1; ++dx)
                                     {
-                                        const long long yy = h + dy * a.dilation[0],
-                                                        xx = v + dx * a.dilation[1];
+                                        const long long yy = h + dy * a.dilation[0];
+                                        const long long xx = v + dx * a.dilation[1];
                                         if(yy >= 0 && yy < a.output[0] && xx >= 0
                                            && xx < a.output[1])
+                                        {
                                             scale = std::max(
                                                 scale,
                                                 magnitude[static_cast<size_t>(offset(yy, xx))]);
+                                        }
                                     }
+                                }
                                 EXPECT_NEAR(static_cast<double>(static_cast<float>(actual[i])),
                                             ref[i],
                                             1e-5 * scale + 2.0 * 1.2e-7 * std::fabs(ref[i]) + 1e-6)
                                     << "bm " << bm << " chunk " << chunk << " offset " << i;
                             }
+                        }
+                    }
+                }
             }
         }
+    }
 }
 TEST(TestGpuConvWinogradNd, AnisotropicAndHighDilationResidues)
 {
@@ -228,9 +262,15 @@ TEST(TestGpuConvWinogradNd, AnisotropicAndHighDilationResidues)
                          std::array<int, 2>{4, 2},
                          std::array<int, 2>{6, 12},
                          std::array<int, 2>{24, 36}})
-        for(bool last : {false, true})
-            for(bool reflect : {false, true})
+    {
+        for(const bool last : {false, true})
+        {
+            for(const bool reflect : {false, true})
+            {
                 runNd(last, reflect, dilation[0], dilation[1], 3, 5, {256, 4096, 3});
+            }
+        }
+    }
 }
 TEST(TestGpuConvWinogradNd, NchwMultipleReductionAndOutputRowTails)
 {

@@ -638,20 +638,44 @@ void runCase(const DeviceCase& deviceCase,
             }
             else if(config->atom >= 4)
             {
-                nativeModesRan |= variant == "wmma" ? 1u : variant == "wreg" ? 2u : 4u;
+                if(variant == "wmma")
+                {
+                    nativeModesRan |= 1u;
+                }
+                else if(variant == "wreg")
+                {
+                    nativeModesRan |= 2u;
+                }
+                else
+                {
+                    nativeModesRan |= 4u;
+                }
             }
             if(variant == "fused")
+            {
                 nativeModesRan |= 8u;
+            }
         }
     }
     EXPECT_GE(ran, 1) << "no catalog config serves this case";
     // Numeric proof must exercise each intended family, not silently pass on VALU alone.
     if(native1250)
     {
-        const unsigned expected = nativeCoopOnly             ? 4u
-                                  : shape.stride[0] == 2     ? 8u
-                                  : std::is_same_v<T, float> ? 9u
-                                                             : 15u;
+        const unsigned expected = [&]() -> unsigned {
+            if(nativeCoopOnly)
+            {
+                return 4u;
+            }
+            if(shape.stride[0] == 2)
+            {
+                return 8u;
+            }
+            if constexpr(std::is_same_v<T, float>)
+            {
+                return 9u;
+            }
+            return 15u;
+        }();
         EXPECT_EQ(nativeModesRan, expected);
         if constexpr(std::is_same_v<T, float>)
         {
@@ -962,24 +986,24 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST(TestConvWinogradCatalog, ApplicableCompiledContractsHaveDistinctIntegerKnobs)
 {
-    constexpr const char* KNOBS[] = {"m",
-                                     "llc",
-                                     "gemm_bm",
-                                     "gemm_bn",
-                                     "gemm_bk",
-                                     "bk",
-                                     "bt",
-                                     "ccv",
-                                     "tm",
-                                     "tn",
-                                     "waves",
-                                     "bins",
-                                     "f16math",
-                                     "pf",
-                                     "sb",
-                                     "variant_id",
-                                     "layout_id",
-                                     "atom"};
+    constexpr std::array KNOBS = {"m",
+                                  "llc",
+                                  "gemm_bm",
+                                  "gemm_bn",
+                                  "gemm_bk",
+                                  "bk",
+                                  "bt",
+                                  "ccv",
+                                  "tm",
+                                  "tn",
+                                  "waves",
+                                  "bins",
+                                  "f16math",
+                                  "pf",
+                                  "sb",
+                                  "variant_id",
+                                  "layout_id",
+                                  "atom"};
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter smallCache(
         "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_LLC_BYTES", "4096");
     for(const auto direction :
@@ -1009,7 +1033,9 @@ TEST(TestConvWinogradCatalog, ApplicableCompiledContractsHaveDistinctIntegerKnob
                     {
                         std::vector<int64_t> key;
                         for(const auto* knob : KNOBS)
+                        {
                             key.push_back(kernel.getIntMetadata(knob));
+                        }
                         EXPECT_TRUE(seen.insert(std::move(key)).second)
                             << "two applicable kernels would enroll the same config";
                     }
@@ -1018,7 +1044,9 @@ TEST(TestConvWinogradCatalog, ApplicableCompiledContractsHaveDistinctIntegerKnob
                            || config->variant == conv_winograd::Variant::WREG
                            || config->variant == conv_winograd::Variant::COOP
                            || config->variant == conv_winograd::Variant::WRW))
+                    {
                         EXPECT_FALSE(conv_winograd::configRunsOn(*config, "gfx1250"));
+                    }
                 }
             }
         }

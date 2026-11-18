@@ -757,7 +757,9 @@ bool expectServed(const std::string& arch, DataType dataType)
 {
     const auto base = std::string(hipdnn_plugin_sdk::stripArchFeatures(arch));
     if(base == "gfx1250")
+    {
         return true;
+    }
     // gfx906: the FMA loops, every element type.
     if(base == "gfx90a" || base == "gfx942" || base == "gfx950" || base == "gfx906")
     {
@@ -935,11 +937,15 @@ void runCase(const DeviceCase& deviceCase,
     if((deviceCase.onlyLoop != 0
         && hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) != "gfx1250")
        || (deviceCase.sixteenBitOnly && shape.dataType == DataType::FLOAT))
+    {
         GTEST_SKIP() << "targeted native WRW family requires gfx1250 and its supported dtype";
+    }
     if(deviceCase.dilationRows
        && (dataTypeOf<T>() != DataType::HALF
            || hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) != "gfx1250"))
+    {
         GTEST_SKIP() << "measured dilation rows require native gfx1250 HALF";
+    }
     const GraphFixture fixture(buildGraph(spec), device);
     const auto bound = matchesGraph(PACK, fixture.context());
     ASSERT_TRUE(bound.has_value()) << "the engine refused a case it should serve";
@@ -1012,9 +1018,13 @@ void runCase(const DeviceCase& deviceCase,
         }
         // Loop 10 has its own strict numerical suite below, never the legacy scaled bound.
         if(configOf(kernel).loop == conv_wrw::LOOP_ACCURATE)
+        {
             continue;
+        }
         if(deviceCase.onlyLoop != 0 && configOf(kernel).loop != deviceCase.onlyLoop)
+        {
             continue;
+        }
         if(deviceCase.dilationRows)
         {
             const auto candidate = configOf(kernel);
@@ -1024,10 +1034,14 @@ void runCase(const DeviceCase& deviceCase,
                || candidate.wc != 2 || candidate.bpu != 2 || candidate.fr != 1 || candidate.s != 3
                || candidate.sw != 1 || candidate.dw != 24 || candidate.vec != 8
                || candidate.dws != 1)
+            {
                 continue;
+            }
         }
         if(deviceCase.directChannelsFirstStore && configOf(kernel).dws != 2)
+        {
             continue;
+        }
         // Known open parity item: gfx950's direct loop (5) turns an infinity in x into
         // NaN in other dw elements (0 x inf from positions outside the window), on 16-bit graphs
         // too; left out of the infinity runs until that is fixed.
@@ -1108,9 +1122,12 @@ void runCase(const DeviceCase& deviceCase,
                                                                   shape.prePadding,
                                                                   shape.postPadding);
                 if(reflect)
+                {
                     reflectFilter(crossCorrelation, reference);
+                }
             }
             if(independentRevisions)
+            {
                 CpuFpReferenceConvolution::wgrad<T, double, T, double>(currentX,
                                                                        *unroundedReference,
                                                                        currentY,
@@ -1118,8 +1135,11 @@ void runCase(const DeviceCase& deviceCase,
                                                                        shape.dilation,
                                                                        shape.prePadding,
                                                                        shape.postPadding);
+            }
             if(workspace != nullptr)
+            {
                 ASSERT_EQ(hipMemset(workspace, 0x7f, workspaceBytes), hipSuccess);
+            }
             w.fillWithSentinelValue();
             const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
                 hipdnnPluginDeviceBuffer_t{X_UID, currentX.rawDeviceData()},
@@ -1175,19 +1195,23 @@ void runCase(const DeviceCase& deviceCase,
                       : nullptr;
             int64_t mismatches = 0;
             forEachIndex(w.dims(), [&](const std::vector<int64_t>& index) {
-                const float got = static_cast<float>(actual[offsetOf(index, w.strides())]);
-                const float legacyWant
+                const auto got = static_cast<float>(actual[offsetOf(index, w.strides())]);
+                const auto legacyWant
                     = static_cast<float>(expected[offsetOf(index, reference.strides())]);
                 const float legacyTolerance
                     = accumulationBound
                       + 2.0f * storageEpsilon<T>() * (std::fabs(legacyWant) + 1e-3f);
                 int64_t independentOffset = 0;
                 if(independentRevisions)
+                {
                     for(size_t axis = 0; axis < index.size(); ++axis)
+                    {
                         independentOffset
                             += (reflect && axis >= 2 ? w.dims()[axis] - 1 - index[axis]
                                                      : index[axis])
                                * unroundedReference->strides()[axis];
+                    }
+                }
                 const double want = independentRevisions ? independent[independentOffset]
                                                          : static_cast<double>(legacyWant);
                 const double tolerance = independentRevisions
@@ -1205,7 +1229,9 @@ void runCase(const DeviceCase& deviceCase,
             EXPECT_EQ(mismatches, 0);
         }
         if(workspace != nullptr)
+        {
             ASSERT_EQ(hipFree(workspace), hipSuccess);
+        }
     }
     // Three-bf16 is admitted only where it measured faster (threeBf16Pays).
     if(ran == 0 && math == Math::THREE_BF16)
@@ -1445,7 +1471,9 @@ std::vector<AccurateCase> accurateCases()
 {
     std::vector<AccurateCase> cases;
     for(const bool channelsLast : {false, true})
+    {
         for(const bool filterLast : {false, true})
+        {
             for(const auto mode : {ConvMode::CROSS_CORRELATION, ConvMode::CONVOLUTION})
             {
                 auto shape = conv(10,
@@ -1466,6 +1494,8 @@ std::vector<AccurateCase> accurateCases()
                      shape,
                      filterLast});
             }
+        }
+    }
     for(const bool channelsLast : {false, true})
     {
         cases.push_back({channelsLast ? "LongCancellationNwc" : "LongCancellationNcw",
@@ -1505,28 +1535,60 @@ void fillAccurateOperands(Tensor<float>& x,
     forEachIndex(x.dims(), [&](const auto& index) {
         int64_t position = index[0];
         for(size_t axis = 2; axis < index.size(); ++axis)
+        {
             position = position * x.dims()[axis] + index[axis];
-        xp[offsetOf(index, x.strides())]
-            = test.splitCancellation ? 1.0f + float(index[1]) / 16.0f
-              : test.productCancellation
-                  ? 4096.0f + float(index[1] + revision) + (position % 2 == 0 ? 1.0f : 0.0f)
-                  : 1.0f + float((position / 4) % 7) / 16.0f + float(index[1]) / 32.0f
-                        + float(revision) / 128.0f;
+        }
+        float value = 0.0f;
+        if(test.splitCancellation)
+        {
+            value = 1.0f + float(index[1]) / 16.0f;
+        }
+        else if(test.productCancellation)
+        {
+            value = 4096.0f + float(index[1] + revision) + (position % 2 == 0 ? 1.0f : 0.0f);
+        }
+        else
+        {
+            value = 1.0f + float((position / 4) % 7) / 16.0f + float(index[1]) / 32.0f
+                    + float(revision) / 128.0f;
+        }
+        xp[offsetOf(index, x.strides())] = value;
     });
     auto* yp = static_cast<float*>(dy.rawHostData());
     constexpr std::array<float, 4> CANCELLATION{16777216.0f, 1.0f, -16777216.0f, 1.0f};
     forEachIndex(dy.dims(), [&](const auto& index) {
         int64_t position = index[0];
         for(size_t axis = 2; axis < index.size(); ++axis)
+        {
             position = position * dy.dims()[axis] + index[axis];
-        yp[offsetOf(index, dy.strides())]
-            = test.splitCancellation     ? (position < 32768    ? 16777216.0f
-                                            : position == 65535 ? -16777216.0f + float(revision + 1)
-                                                                : -16777216.0f)
-              : test.productCancellation ? (position % 2 == 0 ? 4097.0f + float(2 * revision)
-                                                              : -4098.0f - float(2 * revision))
-                                         : CANCELLATION[size_t((position + revision) % 4)]
-                                               * (1.0f + float(index[1] % 3) / 8.0f);
+        }
+        float value = 0.0f;
+        if(test.splitCancellation)
+        {
+            if(position < 32768)
+            {
+                value = 16777216.0f;
+            }
+            else if(position == 65535)
+            {
+                value = -16777216.0f + float(revision + 1);
+            }
+            else
+            {
+                value = -16777216.0f;
+            }
+        }
+        else if(test.productCancellation)
+        {
+            value = position % 2 == 0 ? 4097.0f + float(2 * revision)
+                                      : -4098.0f - float(2 * revision);
+        }
+        else
+        {
+            value = CANCELLATION[size_t((position + revision) % 4)]
+                    * (1.0f + float(index[1] % 3) / 8.0f);
+        }
+        yp[offsetOf(index, dy.strides())] = value;
     });
     x.markHostModified();
     dy.markHostModified();
@@ -1543,7 +1605,9 @@ std::vector<double> accurateCpuWeights(const ConvGraphSpec& spec,
     const auto* yp = dy.memory().hostData();
     size_t elements = 1;
     for(const auto extent : spec.w.dims)
+    {
         elements *= size_t(extent);
+    }
     std::vector<double> reference(elements, 0.0);
     auto outputPositions = spec.y.dims;
     outputPositions[1] = 1;
@@ -1568,8 +1632,10 @@ std::vector<double> accurateCpuWeights(const ConvGraphSpec& spec,
                 inside = inside && xi[axis] >= 0 && xi[axis] < spec.x.dims[axis];
             }
             if(inside)
+            {
                 sum += double(xp[offsetOf(xi, spec.x.strides)])
                        * double(yp[offsetOf(yi, spec.y.strides)]);
+            }
         });
         reference[size_t(offsetOf(weight, spec.w.strides))] = sum;
     });
@@ -1590,15 +1656,20 @@ TEST_P(TestGpuConvWrwAccurate, StrictDoubleTruthAndPreparedRebinding)
     spec.w.strides = packedStrides(spec.w.dims, test.filterLast);
     const auto device = currentDeviceProperties();
     if(hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) != "gfx1250")
+    {
         GTEST_SKIP() << "FP64 WRW is qualified only on gfx1250";
+    }
     const GraphFixture fixture(buildGraph(spec), device);
     const auto bound = matchesGraph(PACK, fixture.context());
     ASSERT_TRUE(bound.has_value());
     const auto problem = conv_wrw::parseWrwProblem(fixture.context());
     ASSERT_TRUE(problem.has_value());
-    Tensor<float> x0(spec.x.dims, spec.x.strides), x1(spec.x.dims, spec.x.strides);
-    Tensor<float> y0(spec.y.dims, spec.y.strides), y1(spec.y.dims, spec.y.strides);
-    Tensor<float> w0(spec.w.dims, spec.w.strides), w1(spec.w.dims, spec.w.strides);
+    Tensor<float> x0(spec.x.dims, spec.x.strides);
+    Tensor<float> x1(spec.x.dims, spec.x.strides);
+    Tensor<float> y0(spec.y.dims, spec.y.strides);
+    Tensor<float> y1(spec.y.dims, spec.y.strides);
+    Tensor<float> w0(spec.w.dims, spec.w.strides);
+    Tensor<float> w1(spec.w.dims, spec.w.strides);
     const auto& handler = dispatchHandler(PACK);
     const Handle handle;
     int ran = 0;
@@ -1607,15 +1678,21 @@ TEST_P(TestGpuConvWrwAccurate, StrictDoubleTruthAndPreparedRebinding)
         const auto config = configOf(kernel);
         if(config.loop != conv_wrw::LOOP_ACCURATE
            || !matchesKernel(PACK, fixture.context(), kernel, *bound))
+        {
             continue;
+        }
         SCOPED_TRACE(kernel.name);
         ++ran;
         const auto launch = conv_wrw::wrwLaunchFor(*problem, config, device);
         ASSERT_TRUE(launch.has_value());
         if(test.partitions == 1)
+        {
             ASSERT_EQ(launch->args.splits, 1);
+        }
         if(test.partitions == 2)
+        {
             ASSERT_GT(launch->args.splits, 1);
+        }
         const auto prepared = handler.prepare(fixture.context(), *bound, kernel);
         ASSERT_NE(prepared, nullptr);
         const size_t bytes = handler.workspaceBytes(fixture.context(), *bound, kernel);
@@ -1637,8 +1714,12 @@ TEST_P(TestGpuConvWrwAccurate, StrictDoubleTruthAndPreparedRebinding)
                 hipdnnPluginDeviceBuffer_t{W_UID, w.rawDeviceData()},
                 hipdnnPluginDeviceBuffer_t{Y_UID, y.rawDeviceData()}};
             if(revision == 2)
+            {
                 for(size_t i = 0; i < buffers.size(); ++i)
+                {
                     EXPECT_EQ(buffers[i].ptr, previous[i].ptr);
+                }
+            }
             previous = buffers;
             ASSERT_EQ(hipMemset(workspace, 0x7f, bytes), hipSuccess);
             handler.launch(handle, *prepared, buffers.data(), uint32_t(buffers.size()), workspace);
@@ -1659,8 +1740,10 @@ TEST_P(TestGpuConvWrwAccurate, StrictDoubleTruthAndPreparedRebinding)
             {
                 const double tolerance = 1e-4 + 1e-4 * std::fabs(reference[i]);
                 if(!(std::fabs(double(actual[i]) - reference[i]) <= tolerance) && ++mismatches <= 5)
+                {
                     ADD_FAILURE() << "dw[" << i << "] got " << actual[i] << ", reference "
                                   << reference[i] << ", tolerance " << tolerance;
+                }
             }
             EXPECT_EQ(mismatches, 0);
         }
@@ -1678,7 +1761,9 @@ TEST(TestGpuConvWrwDirectChannelsFirstStore, GroupedReflectedAndSplitTransitions
 {
     SKIP_IF_NO_DEVICES();
     if(hipdnn_plugin_sdk::stripArchFeatures(currentDeviceProperties().gcnArchName) != "gfx1250")
+    {
         GTEST_SKIP() << "native direct channels-first store requires gfx1250";
+    }
     for(const bool manySplits : {false, true})
     {
         auto shape = conv(15,

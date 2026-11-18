@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <hip/hip_runtime.h>
 #include <hip/hiprtc.h>
@@ -14,6 +15,7 @@
 namespace hip_kernel_provider::conv_validation
 {
 // Independent logical K,C,T,R,S reference geometry, not the production K3 ABI.
+// NOLINTBEGIN(modernize-avoid-c-arrays)
 struct ReferenceGeometry
 {
     int64_t n, c, k, groups;
@@ -23,6 +25,7 @@ struct ReferenceGeometry
     int64_t weights;
     int flip;
 };
+// NOLINTEND(modernize-avoid-c-arrays)
 
 inline constexpr const char* REFERENCE_SOURCE = R"hip(
 struct ReferenceGeometry
@@ -83,7 +86,9 @@ extern "C" __global__ void fp64_wrw_reference(
 inline void checkHip(hipError_t error, const char* operation)
 {
     if(error != hipSuccess)
+    {
         throw std::runtime_error(std::string(operation) + ": " + hipGetErrorString(error));
+    }
 }
 
 class Fp64WrwReference
@@ -99,11 +104,13 @@ public:
         const auto created = hiprtcCreateProgram(
             &program, REFERENCE_SOURCE, "fp64_wrw_reference.cpp", 0, nullptr, nullptr);
         if(created != HIPRTC_SUCCESS)
+        {
             throw std::runtime_error(hiprtcGetErrorString(created));
+        }
         const std::string architecture
             = std::string("--gpu-architecture=") + properties.gcnArchName;
-        const char* options[] = {architecture.c_str(), "-std=c++17", "-O3"};
-        const auto compiled = hiprtcCompileProgram(program, 3, options);
+        std::array<const char*, 3> options = {architecture.c_str(), "-std=c++17", "-O3"};
+        const auto compiled = hiprtcCompileProgram(program, 3, options.data());
         if(compiled != HIPRTC_SUCCESS)
         {
             size_t size = 0;
@@ -124,14 +131,18 @@ public:
         const auto copied = hiprtcGetCode(program, binary.data());
         hiprtcDestroyProgram(&program);
         if(copied != HIPRTC_SUCCESS)
+        {
             throw std::runtime_error(hiprtcGetErrorString(copied));
+        }
         checkHip(hipModuleLoadData(&_module, binary.data()), "hipModuleLoadData");
         const auto loaded = hipModuleGetFunction(&_function, _module, "fp64_wrw_reference");
         if(loaded != hipSuccess)
         {
             const auto cleanup = hipModuleUnload(_module);
             if(cleanup != hipSuccess)
+            {
                 std::cerr << "FP64 reference cleanup: " << hipGetErrorString(cleanup) << '\n';
+            }
             _module = nullptr;
             checkHip(loaded, "hipModuleGetFunction");
         }
@@ -140,11 +151,13 @@ public:
     Fp64WrwReference& operator=(const Fp64WrwReference&) = delete;
     ~Fp64WrwReference()
     {
-        if(_module)
+        if(_module != nullptr)
         {
             const auto cleanup = hipModuleUnload(_module);
             if(cleanup != hipSuccess)
+            {
                 std::cerr << "FP64 reference cleanup: " << hipGetErrorString(cleanup) << '\n';
+            }
         }
     }
     std::vector<double> execute(const float* x,
@@ -155,11 +168,16 @@ public:
         if(geometry.weights <= 0
            || static_cast<uint64_t>(geometry.weights) > SIZE_MAX / sizeof(double)
            || (geometry.weights + 255) / 256 > UINT32_MAX)
+        {
             throw std::runtime_error("FP64 reference output/grid exceeds supported bounds");
-        const size_t count = static_cast<size_t>(geometry.weights);
-        hipdnn_data_sdk::utilities::Workspace<> deviceResult(count * sizeof(double));
+        }
+        const auto count = static_cast<size_t>(geometry.weights);
+        const hipdnn_data_sdk::utilities::Workspace<> deviceResult(count * sizeof(double));
         void* result = deviceResult.get();
-        void* arguments[] = {&x, &dy, &result, &geometry};
+        std::array<void*, 4> arguments = {static_cast<void*>(&x),
+                                          static_cast<void*>(&dy),
+                                          static_cast<void*>(&result),
+                                          static_cast<void*>(&geometry)};
         checkHip(hipModuleLaunchKernel(_function,
                                        static_cast<unsigned>((count + 255) / 256),
                                        1,
@@ -169,7 +187,7 @@ public:
                                        1,
                                        0,
                                        stream,
-                                       arguments,
+                                       arguments.data(),
                                        nullptr),
                  "fp64_wrw_reference launch");
         checkHip(hipStreamSynchronize(stream), "FP64 reference synchronization");
