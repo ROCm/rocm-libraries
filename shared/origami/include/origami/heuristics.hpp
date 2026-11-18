@@ -130,8 +130,9 @@ struct heuristic_defaults_t {
   static constexpr double GFX1250_NONSWAP_STORE_EXTRA_CLK_NT     = 152.3 * 2.4;   // 365.52 clk (152.3 ns)
   static constexpr double GFX1250_NONSWAP_STORE_PEAK_B_PER_CLK_RT = 4674.0 / 2.4;  // 1947.5 B/clk (4674 B/ns)
   static constexpr double GFX1250_NONSWAP_STORE_PEAK_B_PER_CLK_NT = 1432.0 / 2.4;  // 596.67 B/clk (1432 B/ns)
-  /// Sustained DRAM read bandwidth (B/clk) the GFX1250_STORE_* rates were measured at; the store
-  /// model scales them by the part's DRAM peak (hardware_t::mem3_perf_ratio, B/clk) over this.
+  /// Sustained DRAM read bandwidth (B/clk) the GFX1250_*STORE_PEAK ceilings were measured at; the
+  /// store model scales the ceilings by the part's DRAM peak (hardware_t::mem3_perf_ratio, B/clk)
+  /// over this.
   static constexpr double GFX1250_STORE_REF_DRAM_B_PER_CLK = 17130.0 / 2.4;  // 7137.5 B/clk (17130 B/ns)
   /// Load-to-use latency of a DRAM access (single-wave pointer chase), cycles.
   static constexpr double GFX1250_DRAM_LATENCY_CLK = 180.0 * 2.4;  // 432 clk (180 ns)

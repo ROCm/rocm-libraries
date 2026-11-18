@@ -3119,13 +3119,17 @@ TEST_CASE("GEMM: gfx1250 DRAM occupancy curve scales with the part's CUs", "[gem
         origami::hardware_t::architecture_t::gfx1250, n_cu, 327680, 512 * 1024, 4 << 20, 2400000);
   };
   const auto full = part(256);
+  const auto p128 = part(128);
   const auto p96  = part(96);
   const auto p192 = part(192);
   using origami::gemm::compute_mem_bw_from_occupancy;
-  REQUIRE(compute_mem_bw_from_occupancy(p96, 96) == compute_mem_bw_from_occupancy(full, 256));
-  REQUIRE(compute_mem_bw_from_occupancy(p96, 48) == compute_mem_bw_from_occupancy(full, 128));
-  REQUIRE(compute_mem_bw_from_occupancy(p192, 192) == compute_mem_bw_from_occupancy(full, 256));
+  // An 8-XCD partition reaches the same fraction at the same fraction of its CUs.
+  REQUIRE(compute_mem_bw_from_occupancy(p128, 64) == compute_mem_bw_from_occupancy(full, 128));
   REQUIRE(compute_mem_bw_from_occupancy(full, 256) > 0.95);
+  // The 6-XCD part has its own curve (measured on 96 WGPs), the same for its whole part.
+  REQUIRE(compute_mem_bw_from_occupancy(p96, 48) == compute_mem_bw_from_occupancy(p192, 96));
+  REQUIRE(compute_mem_bw_from_occupancy(p96, 96) == 1.0);
+  REQUIRE(compute_mem_bw_from_occupancy(p96, 48) == Approx(0.745).margin(0.01));
   REQUIRE(compute_mem_bw_from_occupancy(p96, 97) == 1.0);
 }
 

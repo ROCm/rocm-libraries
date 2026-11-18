@@ -1970,7 +1970,8 @@ static double compute_epilogue_latency_cdna5(const problem_t& problem,
                                              const context_t& context) {
   using h               = heuristic_defaults_t;
   const double d_bytes  = context.d_bytes;
-  if (d_bytes == 0.0 || !(hardware.mem3_perf_ratio > 0.0)) return 0.0;
+  // An unset D type (data_type_t::None) has a negative size.
+  if (!(d_bytes > 0.0) || !(hardware.mem3_perf_ratio > 0.0)) return 0.0;
   const size_t M = problem.size.m, N = problem.size.n;
   const size_t MT_M = config.mt.m, MT_N = config.mt.n;
   const double lanes     = static_cast<double>(kernel_wavefront_size(hardware, config));
@@ -2019,10 +2020,12 @@ static double compute_epilogue_latency_cdna5(const problem_t& problem,
     const double peak       = !nonswap ? h::GFX1250_STORE_PEAK_B_PER_CLK
                               : d_nt   ? h::GFX1250_NONSWAP_STORE_PEAK_B_PER_CLK_NT
                                        : h::GFX1250_NONSWAP_STORE_PEAK_B_PER_CLK_RT;
+    // The wave and WGP rates are the WGP's own (the same on the 8- and 6-XCD parts); only the
+    // device ceiling scales with the part's DRAM peak.
     const double wgp_rate =  // B/clk
-        1.0 / ((h::GFX1250_STORE_INST_CLK + extra_clk + inst_bytes / (h::GFX1250_STORE_WAVE_B_PER_CLK * scale)) /
+        1.0 / ((h::GFX1250_STORE_INST_CLK + extra_clk + inst_bytes / h::GFX1250_STORE_WAVE_B_PER_CLK) /
                    (waves * inst_bytes) +
-               1.0 / (h::GFX1250_STORE_WGP_B_PER_CLK * scale));
+               1.0 / h::GFX1250_STORE_WGP_B_PER_CLK);
     double device = soft_min(writers * wgp_rate, peak * scale, h::GFX1250_STORE_SHARPNESS);
     if (nonswap) device *= nonswap_line_eff(static_cast<double>(rows) * elem_bytes);
     return bytes / (device / writers);
