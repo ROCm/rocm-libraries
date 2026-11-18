@@ -136,6 +136,9 @@ struct Config
     /// Line tiles (2-D rows, 1 x S filters): one-row images, a tile wp pw segments of 16 wq
     /// columns of the row staged as one halo line.
     int line = 0;
+    /// Rows: persistent blocks resident per unit (1 to 3); each holds its own halo stages, so the
+    /// blocks' memory phases and barriers overlap the others' MMAs.
+    int bpu = 1;
     std::string archs; ///< ship list: comma-separated arch groups, or "any"
 
     /// Output pixels per block (the planner's tile budget) and output channels per block.
@@ -182,7 +185,7 @@ int64_t ldsLimitOf(std::string_view gcnArchName);
 int64_t rowsLdsBytes(const Config& config);
 
 /// Whether the device runs @p config: its atom exists there, its ship list names it, and (rows)
-/// its halo stages fit the device's LDS.
+/// the halo stages of its bpu resident blocks fit the device's LDS.
 bool configRunsOn(const Config& config, std::string_view gcnArchName);
 
 /// How a config runs a problem: the tile, the split, the launch grid and the workspace.

@@ -536,7 +536,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     int math = 0;
     int atomId = 0;
     int rowsKnob = 0;
-    const std::array<std::pair<const char*, int*>, 31> ints{
+    const std::array<std::pair<const char*, int*>, 32> ints{
         {{"atom_id", &atomId},   {"math", &math},          {"kd", &config.kd},
          {"r", &config.r},       {"s", &config.s},         {"bm", &config.bm},
          {"bn", &config.bn},     {"bc", &config.bc},       {"wm", &config.wm},
@@ -547,7 +547,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
          {"fn", &config.fn},     {"wp", &config.wp},       {"wq", &config.wq},
          {"wk", &config.wk},     {"pp", &config.pp},       {"epi", &config.epi},
          {"un", &config.un},     {"cf", &config.cf},       {"dil", &config.dil},
-         {"line", &config.line}}};
+         {"line", &config.line}, {"bpu", &config.bpu}}};
     for(const auto& [name, target] : ints)
     {
         const auto value = intField(kernel, name);
@@ -567,6 +567,11 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
        || (config.line != 0
            && (config.line != 1 || !config.rows || config.kd != 1 || config.r != 1 || config.un != 1
                || config.pp != 0 || config.split != 0)))
+    {
+        return std::nullopt;
+    }
+    // Resident blocks per unit: rows configs only.
+    if(config.bpu < 1 || config.bpu > 3 || (config.bpu != 1 && !config.rows))
     {
         return std::nullopt;
     }
@@ -704,7 +709,7 @@ bool configRunsOn(const Config& config, std::string_view gcnArchName)
     // Channels-first rows run wherever rows run: 16-byte DMA and transpose reads on gfx950,
     // dword DMA and a gather transpose on the other MFMA parts.
     return conv_igemm::atomRunsOn(config.atom, gcnArchName) && shipsTo(config.archs, gcnArchName)
-           && rowsLdsBytes(config) <= ldsLimitOf(gcnArchName);
+           && rowsLdsBytes(config) * config.bpu <= ldsLimitOf(gcnArchName);
 }
 
 std::optional<Plan>
@@ -784,7 +789,8 @@ std::optional<Plan>
         const long long tilePixels = config.line != 0
                                          ? static_cast<long long>(t.tw)
                                          : static_cast<long long>(t.th) * config.wq * 16;
-        const long long tilePixelChannels = tilePixels * tileChannels;
+        // bpu resident blocks of a tile work as one bpu times larger.
+        const long long tilePixelChannels = tilePixels * tileChannels * config.bpu;
         if(config.split == 0 && !config.math && config.cf == 0
            && config.atom.rfind("mfma16x32_", 0) == 0
            && tilePixelChannels < ROWS_LARGE_TILE_PIXELS * refChannels
@@ -889,9 +895,9 @@ std::optional<Plan>
     plan.grid[2] = static_cast<unsigned int>(k2.splits);
     if(config.rows)
     {
-        // One 1-D grid of at most one block per unit; the kernel walks the tiles.
+        // One 1-D grid of at most bpu blocks per unit; the kernel walks the tiles.
         plan.grid[0] = static_cast<unsigned int>(
-            std::min<long long>(tile->blocks * k2.splits, computeUnits));
+            std::min<long long>(tile->blocks * k2.splits, computeUnits * config.bpu));
         plan.grid[1] = 1;
         plan.grid[2] = 1;
     }

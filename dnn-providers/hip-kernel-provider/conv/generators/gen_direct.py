@@ -71,9 +71,10 @@ INTS = [
     "cf",
     "dil",
     "line",
+    "bpu",
 ]
 ROWS0 = dict(
-    rows=0, pw=0, fn=0, wp=0, wq=0, wk=0, pp=0, epi=0, un=0, cf=0, dil=1, line=0
+    rows=0, pw=0, fn=0, wp=0, wq=0, wk=0, pp=0, epi=0, un=0, cf=0, dil=1, line=0, bpu=1
 )
 STRINGS = ["direction", "dtype", "kind", "atom", "archs"]
 F33, F55, F77, F17, F71, F333, F555 = (
@@ -163,6 +164,7 @@ def RW(
     cf=0,
     dil=1,
     line=0,
+    bpu=1,
 ):
     """Filter-row reuse kernel (ConvDirectRows.h): LDS DMA (16-byte on gfx950, dword elsewhere),
     16x16 MFMA atoms; 2-D, or 3-D (each output plane walks its depth taps' input planes). un > 1
@@ -170,7 +172,7 @@ def RW(
     (16-bit): packed channels-first activations read and written in place; cf 2 is the
     dword-DMA form (even input widths) on any MFMA part. dil (2-D): the filter dilation it serves.
     line 1 (1 x S filters on one-row images): a tile is wp pw segments of 16 wq columns of the row,
-    staged as one halo line.
+    staged as one halo line. bpu: persistent blocks resident per unit (their LDS stages together).
     """
     return dict(
         kind="rows",
@@ -206,6 +208,7 @@ def RW(
         cf=cf,
         dil=dil,
         line=line,
+        bpu=bpu,
     )
 
 
@@ -532,14 +535,43 @@ for dt in ("HALF", "BFLOAT16"):
             RW(f"mfma16_{e}", F33, 8, 1, 2, 2, 2, 16, 8, epi=0, cf=1),
         ],
     )
+    # Narrow 8-row tiles of 4 waves, two or three resident per unit: the blocks' chunk DMA,
+    # transposes and barriers overlap each other's MMAs, which a K <= 64 tile's short chunks (three
+    # steps of 32 channels) cannot hide alone.
+    add(
+        dt,
+        ["gfx950"],
+        [
+            RW(f"mfma16x32_{e}", F33, 8, 2, 1, 2, 2, 32, 8, epi=0, cf=1, bpu=b)
+            for b in (2, 3)
+        ]
+        + [
+            RW(f"mfma16x32_{e}", F33, 8, 1, 1, 2, 2, 32, 8, epi=0, cf=1, bpu=b)
+            for b in (2, 3)
+        ]
+        + [RW(f"mfma16x32_{e}", F33, 8, 2, 1, 2, 2, 32, 8, bpu=b) for b in (2, 3)],
+    )
+    add(
+        dt,
+        ["gfx90a", "gfx942"],
+        [
+            RW(f"mfma16_{e}", F33, 8, 2, 1, 2, 2, 16, 8, epi=0, cf=1, bpu=2),
+            RW(f"mfma16_{e}", F33, 8, 1, 1, 2, 2, 16, 8, epi=0, cf=1, bpu=2),
+        ],
+    )
     # Dilated 3x3 (DeepLab's dilation 2 and 4 stages, any channel count): the halo grows by
     # (3 - 1) d rows and columns and each filter row reads its input rows d apart, still from the
     # one staged halo; 32-channel chunks keep the larger halo within the LDS.
     for d in (2, 4):
+        # 8-row tiles two per unit at dilation 2 (dilation 4's halo passes half the LDS).
+        pair = [
+            RW(f"mfma16x32_{e}", F33, 8, 4, 1, 2, 2, 32, 8, epi=0, cf=1, dil=d, bpu=2)
+        ]
         add(
             dt,
             ["gfx950"],
-            [
+            (pair if d == 2 else [])
+            + [
                 RW(f"mfma16x32_{e}", F33, 8, 4, 2, 2, 2, 32, 8, dil=d),
                 RW(f"mfma16x32_{e}", F33, 8, 2, 2, 2, 2, 32, 8, dil=d),
                 RW(f"mfma16x32_{e}", F33, 8, 4, 2, 2, 2, 32, 8, epi=0, cf=1, dil=d),
@@ -642,6 +674,8 @@ for s_, d in LINE_GEOMETRIES:
             dt,
             ["gfx950"],
             [
+                RW(f"mfma16x32_{e}", f, 8, 4, 1, 2, 2, 32, 8, epi=0, cf=1, bpu=2, **L),
+                RW(f"mfma16x32_{e}", f, 8, 2, 1, 2, 2, 32, 8, epi=0, cf=1, bpu=2, **L),
                 RW(f"mfma16x32_{e}", f, 8, 4, 2, 2, 2, 32, 8, epi=0, cf=1, **L),
                 RW(f"mfma16x32_{e}", f, 8, 2, 2, 2, 2, 32, 8, epi=0, cf=1, **L),
                 RW(f"mfma16x32_{e}", f, 8, 2, 2, 2, 2, 32, 8, **L),
@@ -652,6 +686,7 @@ for s_, d in LINE_GEOMETRIES:
             dt,
             ["gfx90a", "gfx942"],
             [
+                RW(f"mfma16_{e}", f, 8, 4, 1, 2, 2, 16, 8, epi=0, cf=1, bpu=2, **L),
                 RW(f"mfma16_{e}", f, 8, 4, 2, 2, 2, 16, 8, epi=0, cf=1, **L),
                 RW(f"mfma16_{e}", f, 8, 2, 2, 2, 2, 16, 8, **L),
                 RW(f"mfma16_{e}", f, 8, 4, 2, 2, 2, 16, 8, **L),
@@ -881,7 +916,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                     runs = ((7 + cols + reach + 7) // 8 + 1) // 2 * 2
                     lds = lds // 2 + hh * c["bc"] * runs * 16
                 limit = 160 * 1024 if archs <= {"gfx950"} else 64 * 1024
-                assert lds <= limit, (c, archs, lds)
+                assert lds * c["bpu"] <= limit, (c, archs, lds)
                 name = (
                     f"conv_direct.{tag}.{dt}.{c['kd']}x{c['r']}x{c['s']}.{c['atom']}.{mathTag}.rows"
                     f".p{c['pw']}f{c['fn']}.w{c['wp']}x{c['wq']}x{c['wk']}c{c['bc']}.v{c['vec']}"
@@ -891,6 +926,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                     + {0: "", 1: ".cf", 2: ".cfd"}[c["cf"]]
                     + (f".d{c['dil']}" if c["dil"] > 1 else "")
                     + (".line" if c["line"] else "")
+                    + (f".b{c['bpu']}" if c["bpu"] > 1 else "")
                 )
             else:
                 name = (

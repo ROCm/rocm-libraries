@@ -146,6 +146,10 @@
     {
       "name": "line",
       "type": "int"
+    },
+    {
+      "name": "bpu",
+      "type": "int"
     }
   ]
 }

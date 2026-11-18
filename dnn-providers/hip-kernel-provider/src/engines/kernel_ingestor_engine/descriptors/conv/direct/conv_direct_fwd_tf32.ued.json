@@ -37,7 +37,8 @@
     "un",
     "cf",
     "dil",
-    "line"
+    "line",
+    "bpu"
   ],
   "behavior_notes": [
     "runtime_compilation"

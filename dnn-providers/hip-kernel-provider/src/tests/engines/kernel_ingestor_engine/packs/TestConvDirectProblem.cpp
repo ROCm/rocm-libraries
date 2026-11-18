@@ -534,6 +534,7 @@ struct ConfigFields
     int64_t rows = 0, pw = 0, fn = 0, wp = 0, wq = 0, wk = 0, pp = 0, epi = 0, un = 0, cf = 0;
     int64_t dil = 1;
     int64_t line = 0;
+    int64_t bpu = 1;
 };
 
 /// A gfx950 rows config: 2 x 2 x 2 waves of 8 rows x 16 columns x 64 channels, 64-channel chunks.
@@ -616,7 +617,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"un", f.un},
                        {"cf", f.cf},
                        {"dil", f.dil},
-                       {"line", f.line}};
+                       {"line", f.line},
+                       {"bpu", f.bpu}};
     return kernel;
 }
 
@@ -1486,6 +1488,51 @@ TEST(TestConvDirectPlan, SmallGfx950RowsTilesDeclineManyRoundGrids)
     auto gfx9 = rowsGfx9Fields();
     gfx9.wq = 1;
     EXPECT_TRUE(planOf(shape, gfx9, "HALF", 32).has_value());
+}
+
+TEST(TestConvDirectPlan, RowsBlocksPerUnitScaleTheGridAndTheirStages)
+{
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.dataType = DataType::HALF;
+    shape.c = 64;
+    shape.k = 64;
+    shape.input = {64, 64};
+    // 8 x 32 x 64, 4 waves: 8 x 2 tiles x 2 images = 32 tiles.
+    auto pair = rowsFields();
+    pair.wp = 1;
+    pair.bm = 8;
+    pair.fn = 2;
+    pair.bn = 64;
+    pair.bc = 32;
+    pair.bpu = 2;
+    const auto plan = planOf(shape, pair, "HALF", 8);
+    ASSERT_TRUE(plan.has_value());
+    EXPECT_EQ(plan->grid[0], 16u) << "two resident blocks per unit";
+    pair.bpu = 1;
+    EXPECT_EQ(planOf(shape, pair, "HALF", 8)->grid[0], 8u);
+    pair.bpu = 3;
+    EXPECT_EQ(planOf(shape, pair, "HALF", 64)->grid[0], 32u) << "never more blocks than tiles";
+    // Every resident block holds its halo stages: 3 x 43,520 bytes fit gfx950's 160 KiB; on a
+    // 64 KiB part two 16-row dword tiles do not, two 8-row ones do.
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(pair, "HALF"))),
+              2 * 10 * 34 * 32 * 2);
+    EXPECT_TRUE(admits(pair, "gfx950", shape));
+    pair.bpu = 4;
+    EXPECT_FALSE(admits(pair, "gfx950", shape)) << "bpu 1 to 3";
+    auto dword = rowsGfx9Fields();
+    ASSERT_TRUE(admits(dword, "gfx90a"));
+    dword.bpu = 2;
+    EXPECT_FALSE(admits(dword, "gfx90a")) << "2 x 39 KiB past 64 KiB";
+    dword.wp = 1;
+    dword.bm = 8;
+    EXPECT_TRUE(admits(dword, "gfx90a")) << "2 x 21 KiB";
+    // A rows knob only.
+    ConfigFields mma;
+    mma.atom = "mfma16x32_f16";
+    mma.archs = "gfx950";
+    mma.bpu = 2;
+    EXPECT_FALSE(admits(mma, "gfx950"));
 }
 
 TEST(TestConvDirectPlan, LineTilesAreSegmentsOfTheRowEndToEnd)
