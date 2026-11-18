@@ -78,7 +78,10 @@ std::string GetKernelName(miopenDataType_t data_type)
 bool checkNumericsImpl(
     const Handle& handle, int mode, const TensorDescriptor& dDesc, ConstData_t data, bool isInput)
 {
-    int numElements = dDesc.GetElementSize();
+    const size_t numElements = dDesc.GetElementSize();
+    if(numElements == 0)
+        return false;
+
     CheckNumericsResult abnormal_h;
     auto abnormal_d =
         handle.Create(sizeof(CheckNumericsResult)); // TODO - someday avoid slow malloc/free here
