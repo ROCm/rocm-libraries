@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 """gemm() refuses what it can't do, before it needs a GPU.
 
-The prototype's gemm() looked types up in a table that also held int8, int32 and the fp8 types,
-so it accepted those arrays and ran them with the wrong compute type.
+It chooses one compute type per input type, so an input type it has no choice for (int8, int32,
+the fp8 types) must be refused rather than run with a compute type that doesn't fit.
 """
 
 import ml_dtypes

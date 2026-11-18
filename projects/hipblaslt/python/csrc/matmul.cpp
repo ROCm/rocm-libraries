@@ -1,10 +1,10 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// The heuristic query and the low-level matmul. Three of the prototype's quiet failures are
-// checked here, before hipBLASLt sees the call:
-//   - alpha and beta are passed in the descriptor's scale type (the prototype always passed
-//     float, so an fp64 GEMM computed garbage);
+// The heuristic query and the low-level matmul. Three quiet failures are checked here, before
+// hipBLASLt sees the call:
+//   - alpha and beta are passed in the descriptor's scale type (hipBLASLt reads them through a
+//     void*, so a float passed for a double scale computes garbage);
 //   - the workspace must be at least as big as the chosen solution needs, and the size passed to
 //     hipBLASLt is always the buffer's own;
 //   - each operand must match its layout's data type and be big enough for the layout.
@@ -35,7 +35,7 @@ namespace
     {
         hipblasLtMatmulAlgo_t algo{};
         // The position in heuristic()'s ranked results, or None for a solution found another
-        // way. Not hipBLASLt's catalog index (Review A, Decision 2).
+        // way. Not hipBLASLt's catalog index.
         std::optional<int> heuristic_rank;
     };
 
