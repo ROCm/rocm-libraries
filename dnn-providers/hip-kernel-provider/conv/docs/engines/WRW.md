@@ -45,6 +45,12 @@ Per group, filter row (t, r) and width tap s: D[k][c] += A[k][q]·B[c][q]. A is 
 | 7 | packed rows | several narrow output rows of one plane in one step, each padded to the taps' reach | narrow channels-first outputs (7², 14² s2, 35² s2) |
 | 8 | generic taps | runtime filter, strides and dilations; dy chunk once, then the x positions each tap reads | the long tail; strided views |
 
+**Width fold.** A width stride s that divides the filter width S, over a width L that s divides (unit width dilation, one group, packed x and dy), is the same wrw as a stride-1 one: position u s + j of input channel c is folded channel j C + c at position u (`widthFoldOf`). The folded problem has C s input channels, width L / s, filter width ceil((S - p) / s) + ceil(p / s) at padding ceil(p / s); depth and height are unchanged.
+- Specialized configs of unit width stride whose class is the folded one (filter width, stride 1, dilation 1) serve the graph through the fold. HiFi-GAN's transposed-conv wrw (1x16, stride 8, padding 4) runs on the 1x3 stride-1 configs over C x 8 channels.
+- Channels-last x is already the folded layout (its width stride becomes s C). Channels-first x is staged into the workspace by `ConvWrwFoldX`, one more launch.
+- `ConvWrwReduceFold` sums the folded partials in the quad reduce's order and writes folded (channel j C + c, tap tau) to dW tap (tau - ceil(p / s)) s + j + p of channel c, reflected for true convolution. Folded taps outside the filter (where ceil-padding adds one) are dropped. Every dW element is exactly one folded element, so the kernel never writes dW itself (no `dws`).
+- Graphs whose own class has specialized configs keep them; autotune ranks both. Measured on gfx950: HiFi-GAN 1x16 stride 8 (n32 c128 k256 1x25600) 1.22 ms -> 0.37 ms.
+
 **Ring tracks.** The ring walks tracks: (image, output depth, height class ρ mod dh, width chunk). A track ends at its last step that has both an x row in the image and a dy row for some tap. Trailing pad-only steps are trimmed: at dilation 36 on 128 rows they are a third of the steps.
 
 **Split and reduce.** Steps split evenly over grid z to fill the dispatch units. The count comes from `splitsWanted`: units x `bpu` blocks per unit, at most steps / 4, workspace ≤ 1 GiB, then the count that best fills the last round.
