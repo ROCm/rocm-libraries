@@ -217,6 +217,13 @@ def _publishes(*columns: str):
     )
 
 
+def _publishes_together(*columns: str):
+    """A frame holds the family when a row publishes every one of `columns`."""
+    return lambda frame: all(column in frame.columns for column in columns) and bool(
+        frame[list(columns)].notna().all(axis=1).any()
+    )
+
+
 #: Each family: whether a training frame holds the operation, and its features.
 _FAMILIES = (
     (_publishes("graph.nodes[0].w.dims[0]", "graph.nodes[0].dw.dims[0]"), _convolution),
@@ -228,7 +235,12 @@ _FAMILIES = (
         ),
         _batchnorm,
     ),
-    (_publishes("graph.nodes[0].q.dims[0]"), _attention),
+    # The rows the attention guard admits (`present(q, k)`): a frame publishing Q without K
+    # holds no attention node, and the features would read fields it does not publish.
+    (
+        _publishes_together("graph.nodes[0].q.dims[0]", "graph.nodes[0].k.dims[0]"),
+        _attention,
+    ),
 )
 
 

@@ -429,7 +429,7 @@
         "revision": "1.0"
       }
     ],
-    "selector_revision": "generic-untuned-v1/273e0203ad7132e794f0f1dd0860a936160c2e04bafe934f67a50f7772936e9e",
+    "selector_revision": "generic-untuned-v1/c3366f45a324646d0974856a26dc1128b94327cda88b2bf0c2e5778006736fa8",
     "feature_semantics_revision": 1
   },
   "objective": "max",

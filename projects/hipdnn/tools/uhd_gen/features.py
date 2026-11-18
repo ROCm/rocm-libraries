@@ -305,6 +305,8 @@ def evaluator_feature_semantics_revision(executable: str | Path | None = None) -
 
 # UhdFeatures.cpp refuses a request over 256 MiB; a chunk stays well under it.
 _REQUEST_CHUNK_BYTES = 64 * 1024 * 1024
+
+
 def run_evaluator(
     request: dict | None,
     executable: str | Path | None = None,
