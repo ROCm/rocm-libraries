@@ -11,6 +11,7 @@ is required.
 """
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -22,11 +23,22 @@ _DISP = Path(__file__).resolve().parent.parent
 _CK = _DISP.parent
 _GEMM = _CK / "tile_engine" / "ops" / "gemm"
 _MX = _GEMM / "mx_gemm"
-for _p in (_DISP / "python", _DISP / "codegen", _GEMM, _MX):
+_HOST_TEST = _CK / "test" / "ck_tile" / "gemm_mx" / "tdm_scheduled"
+_POLICY_HPP = (
+    _CK
+    / "include"
+    / "ck_tile"
+    / "ops"
+    / "gemm"
+    / "pipeline"
+    / "mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled_policy.hpp"
+)
+for _p in (_DISP / "python", _DISP / "codegen", _GEMM, _MX, _HOST_TEST):
     sys.path.insert(0, str(_p))
 
 import gemm_validation_utils as vu  # noqa: E402
 import mx_gemm_utils as mx  # noqa: E402
+import parity_cases  # noqa: E402
 import unified_mx_gemm_codegen as codegen  # noqa: E402
 
 sched = vu.load_mx_tdm_scheduled()
@@ -134,6 +146,44 @@ class TestTuning(unittest.TestCase):
             sched.instance_name_suffix(spec, {**t, "edge": False, "tail_steps": 2}),
             "_c2x2_lsi0_noedge_tail2",
         )
+
+
+class TestParity(unittest.TestCase):
+    """The Python half of parity_cases.py; test_mx_gemm_tdm_scheduled_host.cpp checks the C++ half."""
+
+    def test_rows(self):
+        for row in parity_cases.PARITY_CASES:
+            with self.subTest(row=row["name"]):
+                self.assertEqual(parity_cases.python_reason(row), row["reason"])
+
+    def test_render_inc(self):
+        # CMake generates the C++ half at build time: one check per row.
+        inc = parity_cases.render_inc()
+        for row in parity_cases.PARITY_CASES:
+            with self.subTest(row=row["name"]):
+                self.assertEqual(inc.count(f'("{row["name"]}", '), 1)
+                self.assertIn(f'"{row["reason"]}");', inc)
+
+    def test_every_reason_covered(self):
+        rows = {row["reason"] for row in parity_cases.PARITY_CASES}
+        unreachable = set(parity_cases.HOST_UNREACHABLE)
+        self.assertFalse(rows & unreachable)
+        self.assertEqual(rows | unreachable, set(sched.REASONS))
+        self.assertFalse(parity_cases.PYTHON_ONLY & set(sched.REASONS))
+
+    def test_enum_matches_reasons(self):
+        text = _POLICY_HPP.read_text()
+        enum = re.search(
+            r"enum class MxTdmScheduledReason : int\s*\{(.*?)\};", text, re.S
+        )
+        names = re.findall(r"\b(\w+)\b", enum.group(1))
+        start = text.index("mx_tdm_scheduled_reason_code(MxTdmScheduledReason r)")
+        end = text.index("mx_tdm_scheduled_reason_message(MxTdmScheduledReason r)")
+        cases = re.findall(
+            r'case MxTdmScheduledReason::(\w+): return "(\w+)";', text[start:end]
+        )
+        self.assertEqual([name for name, _ in cases], names)
+        self.assertEqual(tuple(code for _, code in cases), sched.REASONS)
 
 
 class TestValidationUtils(unittest.TestCase):

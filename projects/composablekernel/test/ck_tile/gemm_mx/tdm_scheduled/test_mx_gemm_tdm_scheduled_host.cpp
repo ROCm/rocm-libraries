@@ -234,48 +234,40 @@ TEST(MxGemmTdmScheduledHost, TailHandlerPicksTheVariantOfTheTileCount)
     }
 }
 
-TEST(MxGemmTdmScheduledHost, PolicyRejectsInvalidProblems)
+/// The code of a GetUnsupportedReason result: "ok" for nullptr, the reason whose message it is,
+/// else the message (a shape path the traits lack).
+const char* reason_code_of(const char* why)
 {
-    using Default  = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>;
-    using Shape1x1 = ck_tile::ClusterTileGemmShape<ck_tile::sequence<4, 4, 1>,
-                                                   ck_tile::sequence<16, 16, 128>,
-                                                   ck_tile::sequence<2, 2, 1>,
-                                                   ck_tile::sequence<32, 16, 128>>;
-    using Small    = ck_tile::
-        MxGemmTdmScheduledProblem<ck_tile::pk_fp4_t, ck_tile::pk_fp4_t, ck_tile::fp8_t, Shape1x1>;
-    EXPECT_STREQ((Default::Validate<Small>()), "tile_atoms");
-    using Fp8Atom32 = ck_tile::
-        MxGemmTdmScheduledProblem<ck_tile::fp8_t, ck_tile::fp8_t, ck_tile::fp8_t, MafShape>;
-    EXPECT_STREQ((Default::Validate<Fp8Atom32>()), "tile_k");
-    using Mixed = ck_tile::
-        MxGemmTdmScheduledProblem<ck_tile::pk_fp4_t, ck_tile::fp8_t, ck_tile::fp8_t, MafShape>;
-    EXPECT_STREQ((Default::Validate<Mixed>()), "dtype_width");
-    using F32Out =
-        ck_tile::MxGemmTdmScheduledProblem<ck_tile::pk_fp4_t, ck_tile::pk_fp4_t, float, MafShape>;
-    EXPECT_STREQ((Default::Validate<F32Out>()), "out_dtype");
-    using Cluster4x8Shape = ck_tile::ClusterTileGemmShape<ck_tile::sequence<4, 8, 1>,
-                                                          ck_tile::sequence<256, 256, 512>,
-                                                          ck_tile::sequence<2, 2, 1>,
-                                                          ck_tile::sequence<32, 16, 128>>;
-    using Cluster8x4      = ck_tile::MxGemmTdmScheduledProblem<ck_tile::pk_fp4_t,
-                                                               ck_tile::pk_fp4_t,
-                                                               ck_tile::fp8_t,
-                                                               Cluster4x8Shape>;
-    EXPECT_STREQ((Default::Validate<Cluster8x4>()), "cluster_size");
-    // SplitBLdsRead without PrefetchLdsRead.
-    using NoPrefetch = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, false, true>;
-    EXPECT_STREQ((NoPrefetch::Validate<MafProblem>()), "split_b_read");
-    // GL2 prefetch distance 1.
-    using Pf1 = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<1>;
-    EXPECT_STREQ((Pf1::Validate<MafProblem>()), "gl2_distance");
-    // 8-bit types on the 32x16 FP4 atom, with a tile_k the 8-bit types allow.
-    using Fp8Atom32Shape = ck_tile::ClusterTileGemmShape<ck_tile::sequence<2, 2, 1>,
-                                                         ck_tile::sequence<128, 128, 256>,
-                                                         ck_tile::sequence<2, 2, 1>,
-                                                         ck_tile::sequence<32, 16, 128>>;
-    using Fp8Mma32       = ck_tile::
-        MxGemmTdmScheduledProblem<ck_tile::fp8_t, ck_tile::fp8_t, ck_tile::fp8_t, Fp8Atom32Shape>;
-    EXPECT_STREQ((Default::Validate<Fp8Mma32>()), "mma");
+    if(why == nullptr)
+        return "ok";
+    for(int r = 0; r <= static_cast<int>(MxTdmScheduledReason::LdsCapacity); ++r)
+    {
+        const auto reason = static_cast<MxTdmScheduledReason>(r);
+        if(std::string(why) == ck_tile::mx_tdm_scheduled_reason_message(reason))
+            return ck_tile::mx_tdm_scheduled_reason_code(reason);
+    }
+    return why;
+}
+
+template <typename P, typename Policy>
+void check_instance(const char* name, const char* want)
+{
+    const char* got = Policy::template Validate<P>();
+    EXPECT_STREQ(got ? got : "ok", want) << name;
+}
+
+template <typename P, typename Policy>
+void check_problem(const char* name, index_t M, index_t N, index_t K, const char* want)
+{
+    EXPECT_STREQ(reason_code_of(PipelineOf<P, Policy>::GetUnsupportedReason(M, N, K)), want)
+        << name;
+}
+
+// The rows of parity_cases.py, which dispatcher/tests/test_mx_gemm_tdm_scheduled.py checks
+// against tile_engine's mx_tdm_scheduled.py: both rule sets give each row the same reason.
+TEST(MxGemmTdmScheduledHost, ParityWithPythonSpec)
+{
+#include "parity_cases.inc"
 }
 
 // K plus the loads' lookahead, (4 + 1) tiles of 256 at GL2 distance 4, must fit in i32: K at most
