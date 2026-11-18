@@ -604,7 +604,7 @@ TEST_F(data_set_test, inplace_complex_is_unchanged)
             = with_type(data_set_t(lo, hi, full.strides_and_distances(), full.get_batch_rank()),
                         array_type,
                         random_precision());
-        auto             len_axes = random_permutation(full.get_len_rank());
+        auto len_axes = random_permutation(full.get_len_rank());
         len_axes.resize(uniform(1, len_axes.size()));
         const auto data_set
             = batch_range.get_data_set_for_len_axes({len_axes.begin(), len_axes.end()});
@@ -634,9 +634,9 @@ TEST_F(data_set_test, inplace_real_round_trip)
 {
     for(size_t i = 0; i < num_random_cases; i++)
     {
-        const auto L    = random_vec(uniform(1, 4), 1, 33);
-        const auto B    = random_vec(uniform(1, 3), 1, 5);
-        const bool odd  = L[0] % 2 == 1;
+        const auto L   = random_vec(uniform(1, 4), 1, 33);
+        const auto B   = random_vec(uniform(1, 3), 1, 5);
+        const bool odd = L[0] % 2 == 1;
         // real (or unset) array type and random precision
         const bool typed     = uniform(0, 1);
         const auto precision = random_precision();
