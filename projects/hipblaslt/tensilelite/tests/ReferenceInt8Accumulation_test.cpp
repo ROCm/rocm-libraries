@@ -54,37 +54,53 @@ namespace
         {"IntegerAlphaControl", 1024, -128, 2, false, 1.0f, 0.0f, 0, 16777218},
     };
 
-    ContractionProblemGemm makeProblem(size_t           k,
-                                       bool             floatAlpha,
-                                       rocisa::DataType outputType = rocisa::DataType::Int32)
+    ContractionProblemGemm makeInt8DotProductProblem(size_t           k,
+                                                     bool             floatAlpha,
+                                                     rocisa::DataType outputType
+                                                     = rocisa::DataType::Int32)
     {
-        auto problem = ContractionProblemGemm::GEMM_Strides(false,
-                                                            false,
-                                                            rocisa::DataType::Int8,
-                                                            rocisa::DataType::Int8,
-                                                            outputType,
-                                                            outputType,
-                                                            1,
-                                                            1,
-                                                            k,
-                                                            1,
-                                                            1,
-                                                            k,
-                                                            k,
-                                                            k,
-                                                            1,
-                                                            1,
-                                                            1,
-                                                            1,
-                                                            0.0);
-        problem.setComputeInputTypeA(rocisa::DataType::Int8);
-        problem.setComputeInputTypeB(rocisa::DataType::Int8);
+        auto problem
+            = ContractionProblemGemm::GEMM_InnerProduct(rocisa::DataType::Int8, outputType, k, 0.0);
         const auto alphaType = floatAlpha ? rocisa::DataType::Float : rocisa::DataType::Int32;
         problem.setAlphaType(alphaType);
         problem.setBetaType(alphaType);
         return problem;
     }
 } // namespace
+
+TEST(ContractionProblemGemm, InnerProductUsesPackedVectorsAndScalarOutput)
+{
+    for(auto inputType : {rocisa::DataType::Int8, rocisa::DataType::Float})
+    {
+        SCOPED_TRACE(static_cast<int>(inputType));
+        for(size_t k : {size_t{0}, size_t{1}, size_t{7}})
+        {
+            SCOPED_TRACE(k);
+            auto problem = ContractionProblemGemm::GEMM_InnerProduct(
+                inputType, rocisa::DataType::Int32, k, 0.25);
+            EXPECT_EQ(problem.a().dataType(), inputType);
+            EXPECT_EQ(problem.b().dataType(), inputType);
+            EXPECT_EQ(problem.computeInputTypeA(), inputType);
+            EXPECT_EQ(problem.computeInputTypeB(), inputType);
+            EXPECT_EQ(problem.a().sizes(), (std::vector<size_t>{1, k, 1}));
+            EXPECT_EQ(problem.b().sizes(), (std::vector<size_t>{k, 1, 1}));
+            EXPECT_EQ(problem.a().totalAllocatedElements(), k);
+            EXPECT_EQ(problem.b().totalAllocatedElements(), k);
+            for(size_t i = 0; i < k; ++i)
+            {
+                EXPECT_EQ(problem.a().index(size_t{0}, i, size_t{0}), i);
+                EXPECT_EQ(problem.b().index(i, size_t{0}, size_t{0}), i);
+            }
+            EXPECT_EQ(problem.c().dataType(), rocisa::DataType::Int32);
+            EXPECT_EQ(problem.d().dataType(), rocisa::DataType::Int32);
+            EXPECT_EQ(problem.c().sizes(), (std::vector<size_t>{1, 1, 1}));
+            EXPECT_EQ(problem.d().sizes(), (std::vector<size_t>{1, 1, 1}));
+            EXPECT_EQ(problem.c().totalAllocatedElements(), 1);
+            EXPECT_EQ(problem.d().totalAllocatedElements(), 1);
+            EXPECT_EQ(problem.beta(), 0.25);
+        }
+    }
+}
 
 class ReferenceInt8Accumulation : public ::testing::TestWithParam<std::tuple<DotProductCase, bool>>
 {
@@ -113,7 +129,7 @@ TEST_P(ReferenceInt8Accumulation, IntegerDotProductBeforeEpilogue)
         ASSERT_LE(integerDot, std::numeric_limits<int32_t>::max());
     }
 
-    auto    problem = makeProblem(k, test.floatAlpha);
+    auto    problem = makeInt8DotProductProblem(k, test.floatAlpha);
     int32_t c       = test.c;
     int32_t d       = -1;
 
@@ -151,7 +167,7 @@ TEST_P(ReferenceInt8MX, RejectsMXScalesBeforeWritingOutput)
     constexpr size_t    k                        = 32;
     std::vector<int8_t> a(k, 1);
     std::vector<int8_t> b(k, 1);
-    auto                problem = makeProblem(k, floatAlpha);
+    auto                problem = makeInt8DotProductProblem(k, floatAlpha);
     if(scaleA)
         problem.setMXScaleA(rocisa::DataType::E8, k, {}, /*padScaleTensor=*/false);
     else
@@ -212,7 +228,7 @@ TYPED_TEST(ReferenceInt8Output, AmaxPreservesFloatEpilogueBeforeOutputCast)
     std::vector<int8_t> b(k, -128);
     a[k - 2] = a[k - 1] = b[k - 2] = b[k - 1] = 1;
 
-    auto problem = makeProblem(k, true, TypeInfo<OutputT>::Enum);
+    auto problem = makeInt8DotProductProblem(k, true, TypeInfo<OutputT>::Enum);
     problem.setOutputAmaxD(true);
     problem.setAmaxD(rocisa::DataType::Float, /*isOutput=*/true);
 
@@ -236,7 +252,7 @@ TEST(ReferenceInt8Wrapping, CompletedSumIsSignedInt32BeforeFloatEpilogue)
     const size_t        k = 131072;
     std::vector<int8_t> a(k, -128);
     std::vector<int8_t> b(k, -128);
-    auto                problem = makeProblem(k, true);
+    auto                problem = makeInt8DotProductProblem(k, true);
     int32_t             c       = 0;
 
     for(bool tryFastPath : {false, true})
@@ -277,7 +293,7 @@ TYPED_TEST(ReferenceInt8IntegerWrapping, BothOverflowDirectionsBeforeIntegerEpil
         SCOPED_TRACE(test.k);
         std::vector<int8_t> a(test.k, -128);
         std::vector<int8_t> b(test.k, test.b);
-        auto                problem = makeProblem(test.k, false, TypeInfo<OutputT>::Enum);
+        auto problem = makeInt8DotProductProblem(test.k, false, TypeInfo<OutputT>::Enum);
         OutputT             c       = 0;
         for(bool tryFastPath : {false, true})
         {
