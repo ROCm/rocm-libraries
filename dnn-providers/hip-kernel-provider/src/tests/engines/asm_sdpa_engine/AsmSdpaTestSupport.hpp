@@ -82,7 +82,8 @@ struct AsmFwdLaunchLimitRow
     unsigned int blockDimX;
 };
 
-/// Every cfg_fmha_fwd row for @p arch. Defined in AsmSdpaConfigHelpers.cpp.
+/// Every cfg_fmha_fwd row for @p arch. Defined in AsmSdpaFwdLaunchLimitRows.cpp, which
+/// calls into the forward plan builder and so builds only into the unit test binary.
 std::vector<AsmFwdLaunchLimitRow> getFwdLaunchLimitRows(const std::string& arch);
 
 } // namespace asm_sdpa_engine

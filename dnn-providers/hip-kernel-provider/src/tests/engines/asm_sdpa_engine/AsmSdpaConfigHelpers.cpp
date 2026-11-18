@@ -3,7 +3,6 @@
 
 #include "AsmSdpaConfigHelpers.hpp"
 #include "../../../engines/asm_sdpa_engine/asm/AsmKernelPath.hpp"
-#include "../../../engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #include "../../../engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "AsmSdpaTestSupport.hpp"
 #include "hip_kernel_provider_common/SdpaConfigConstants.hpp"
@@ -276,9 +275,8 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
     return {graph, testCase.withStats ? stats : nullptr};
 }
 
-// The TOC keys SdpaFwdPlanBuilder resolves a cfg_fmha_fwd row to on @p arch: gfx942 ships
-// each forward object once per MI300 and MI308 variant.
-static std::vector<std::string> fwdTocKeys(const fmha_v3_fwdConfig& config, const std::string& arch)
+std::vector<std::string> getFwdKernelTocKeys(const fmha_v3_fwdConfig& config,
+                                             const std::string& arch)
 {
     std::vector<std::string> tocKeys{asm_kernels::getFwdKernelTocKey(config.co_name, arch, false)};
     if(arch == "gfx942")
@@ -297,29 +295,12 @@ std::vector<AsmKernelTocEntry> getFwdKernelTocEntries(const std::string& arch)
         {
             continue;
         }
-        for(auto& tocKey : fwdTocKeys(config, arch))
+        for(auto& tocKey : getFwdKernelTocKeys(config, arch))
         {
             entries.push_back({std::move(tocKey), config.knl_name});
         }
     }
     return entries;
-}
-
-std::vector<AsmFwdLaunchLimitRow> getFwdLaunchLimitRows(const std::string& arch)
-{
-    std::vector<AsmFwdLaunchLimitRow> rows;
-    for(const auto& [key, config] : cfg_fmha_fwd)
-    {
-        if(config.arch != arch)
-        {
-            continue;
-        }
-        rows.push_back({config.knl_name,
-                        fwdTocKeys(config, arch),
-                        config.max_flat_workgroup_size,
-                        fwdConfigBlockDimX(config)});
-    }
-    return rows;
 }
 
 } // namespace asm_sdpa_engine
