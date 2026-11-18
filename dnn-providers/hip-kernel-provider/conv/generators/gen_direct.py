@@ -393,6 +393,26 @@ for dt in ("HALF", "BFLOAT16"):
             M(f"mfma32_{e}", F333, 128, 128, 32, 2, 2, 8, ring=0),
         ],
     )
+    # xpf twins of the gfx950 and gfx90a halo tiles (3x3x3 and 3x3).
+    add(
+        dt,
+        ["gfx950"],
+        [
+            M(f"mfma16x32_{e}", F333, 128, 128, 32, 2, 2, 8, ring=0, xpf=1),
+            M(f"mfma16_{e}", F333, 128, 64, 32, 2, 2, 8, ring=0, xpf=1),
+            M(f"mfma16x32_{e}", F33, 128, 64, 32, 2, 2, 8, xpf=1),
+        ],
+    )
+    add(
+        dt,
+        ["gfx90a"],
+        [
+            M(f"mfma16_{e}", F333, 128, 64, 32, 2, 2, 8, ring=0, xpf=1),
+            M(f"mfma16_{e}", F333, 128, 128, 16, 2, 2, 8, ring=0, xpf=1),
+            M(f"mfma16_{e}", F33, 128, 64, 32, 2, 2, 8, xpf=1),
+            M(f"mfma16_{e}", F33, 128, 128, 32, 2, 2, 8, xpf=1),
+        ],
+    )
     # gfx90a
     add(
         dt,
