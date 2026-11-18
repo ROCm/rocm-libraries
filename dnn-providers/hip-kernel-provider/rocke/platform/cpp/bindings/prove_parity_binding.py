@@ -56,6 +56,21 @@ _COMPLETE_TABLES = frozenset(
     }
 )
 
+# Library families (library/cpp) bind into rocke_library_engine, built beside
+# rocke_engine from the same engine archive. Absent in a platform-only build.
+try:
+    import rocke_library_engine  # noqa: E402
+except ImportError:
+    rocke_library_engine = None
+
+
+def _entry_point(name):
+    """A family's binding entry point, from whichever module carries it."""
+    for module in (rocke_engine, rocke_library_engine):
+        if module is not None and hasattr(module, name):
+            return getattr(module, name)
+    raise AttributeError(f"no binding module carries {name!r}")
+
 
 def _assert_build_id_match():
     """Cross-check the loaded .so's build-id against the emit dir's BUILD_ID.
@@ -809,6 +824,21 @@ def cfgs_gfx1151_wmma_fmha_fwd_v2():
         ("bf16", 192, 128, "causal", None, "c8", "dense", 0, 32, False),
         ("fp16", 256, 128, "none", None, "s", "paged", 32, 32, False),
     )
+    # flags d dense Q (paged), u seqused_q.
+    query_lengths = (
+        ("bf16", 128, 128, "causal", None, "d", "paged", 16, 32, None),
+        ("fp16", 64, 64, "causal", None, "du", "paged", 32, 32, None),
+        ("bf16", 128, 128, "causal", None, "u", "paged", 16, 32, None),
+        ("fp16", 128, 128, "none", None, "u", "ragged", 0, 32, None),
+        ("bf16", 256, 256, "causal", None, "du", "paged", 16, 32, None),
+    )
+    # Shipped paged catalog objects (causal, block_n 32) not reached above.
+    shipped_paged = (
+        ("bf16", 128, 128, "causal", None, "sdu", "paged", 64, 32, None),
+        ("fp16", 64, 64, "causal", None, "su", "paged", 32, 32, None),
+        ("fp16", 96, 96, "causal", None, "u", "paged", 16, 32, None),
+    )
+    shipped_paged_gfx11 = ("fp16", 96, 96, "causal", None, "du", "paged", 32, 32, None)
 
     def feat(row):
         dt, hd, hdv, mask, bias, flags, layout, ps, bn, pair = row
@@ -824,6 +854,8 @@ def cfgs_gfx1151_wmma_fmha_fwd_v2():
             use_qq_bias="q" in flags,
             layout=layout,
             page_block_size=ps,
+            dense_q="d" in flags,
+            seqused_q="u" in flags,
             kv_dtype="fp8e4m3" if "8" in flags else "",
             block_n=bn,
             wave_pair=pair,
@@ -836,6 +868,14 @@ def cfgs_gfx1151_wmma_fmha_fwd_v2():
         out.append((feat(row), g12))
     out.append((feat(feats[2]), "gfx1151"))
     out.append((feat(feats[8]), "gfx1201"))
+    for arch in archs:
+        for row in query_lengths:
+            out.append((feat(row), arch))
+    for arch in archs:
+        for row in shipped_paged:
+            out.append((feat(row), arch))
+    # gfx11 ships head 96 at pages 32 and 64 with block_m 64.
+    out.append((dict(feat(shipped_paged_gfx11), block_m=64), "gfx11-generic"))
     return out
 
 
@@ -2010,7 +2050,7 @@ def main():
         f"{'family':<40}{'nonempty':<10}{'match':<8}{'mismatch':<10}{'empty':<7}status"
     )
     for fam, lower_name, cfgs, fam_arch in FAMILIES:
-        lower = getattr(rocke_engine, lower_name)
+        lower = _entry_point(lower_name)
         n_nonempty = n_match = n_mismatch = n_empty = 0
         details = []
         for idx, cfg in enumerate(cfgs):
