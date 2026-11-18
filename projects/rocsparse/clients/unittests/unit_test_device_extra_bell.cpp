@@ -24,8 +24,9 @@
 
 //
 // Generic spmm with a blocked ELL matrix that has no stored blocks (the
-// product is zero, so C = beta * C), with a transposed or batched blocked ELL
-// product that spmm rejects, with a blocked ELL matrix built by
+// product is zero, so C = beta * C) or a few stored blocks, including a row
+// count that the block dimension does not divide, with a transposed or batched
+// blocked ELL product that spmm rejects, with a blocked ELL matrix built by
 // dense_to_sparse, and with formats spmm does not support.
 //
 #include "unit_test_extra_common.hpp"
@@ -41,21 +42,24 @@ namespace
     struct BellRun
     {
         rocsparse_operation opA    = rocsparse_operation_none;
-        int64_t             mb     = 3;
+        int64_t             rows   = 6;
         int64_t             kb     = 2;
         int64_t             bd     = 2;
         int64_t             cols   = 0;
         int64_t             n      = 5;
+        rocsparse_order     order  = rocsparse_order_column;
         bool                device = false;
     };
 
-    // A blocked ELL A of mb x kb blocks with ell_cols = cols, so cols / bd
-    // stored blocks per block row, and the B and C of op(A) * B. B and C hold
-    // `slabs` copies of ld x n so that a strided batch stays in bounds.
+    // A blocked ELL A of `rows` scalar rows (ceil(rows / bd) block rows, so the
+    // last block row is partial when bd does not divide rows) and kb block
+    // columns, with ell_cols = cols, so cols / bd stored blocks per block row.
+    // Ad is A on the host. B and C, in `order`, are those of op(A) * B and hold
+    // `slabs` copies of their storage so that a strided batch stays in bounds.
     struct BellProblem
     {
         int64_t            Mc = 0, Kc = 0, ldb = 0, ldc = 0;
-        Dense              Bl, C0;
+        Dense              Ad, Bl, C0;
         std::vector<float> hC;
         DevBuf<float>      dB, dC;
         DevBuf<int32_t>    ind;
@@ -66,25 +70,47 @@ namespace
 
     void make_bell_problem(const BellRun& r, BellProblem& p, int64_t slabs = 1)
     {
-        const int64_t m = r.mb * r.bd, k = r.kb * r.bd;
-        p.Mc  = (r.opA == rocsparse_operation_none) ? m : k;
-        p.Kc  = (r.opA == rocsparse_operation_none) ? k : m;
-        p.ldb = p.Kc + 1;
-        p.ldc = p.Mc + 2;
+        const int64_t m = r.rows, k = r.kb * r.bd;
+        const int64_t mb = (m + r.bd - 1) / r.bd, width = r.cols / r.bd;
+        const bool    col = (r.order == rocsparse_order_column);
+        p.Mc              = (r.opA == rocsparse_operation_none) ? m : k;
+        p.Kc              = (r.opA == rocsparse_operation_none) ? k : m;
+        p.ldb             = (col ? p.Kc : r.n) + 1;
+        p.ldc             = (col ? p.Mc : r.n) + 2;
 
         Rng rng(17);
         p.Bl                  = random_dense<float>(p.Kc, r.n, rng);
         p.C0                  = random_dense<float>(p.Mc, r.n, rng);
-        std::vector<float> hB = store_dense<float>(p.Bl, rocsparse_order_column, p.ldb);
-        p.hC                  = store_dense<float>(p.C0, rocsparse_order_column, p.ldc);
+        std::vector<float> hB = store_dense<float>(p.Bl, r.order, p.ldb);
+        p.hC                  = store_dense<float>(p.C0, r.order, p.ldc);
         hB.resize(slabs * hB.size(), -77.0f);
         p.hC.resize(slabs * p.hC.size(), -77.0f);
         p.dB = up_raw<float>(hB);
         p.dC = up_raw<float>(p.hC);
-        // The block values are never read by these tests, only the count matters.
-        const int64_t nblocks = r.mb * (r.cols / r.bd);
-        p.ind                 = up_idx<int32_t>(std::vector<int64_t>(nblocks, 0));
-        p.val                 = up_raw<float>(std::vector<float>(nblocks * r.bd * r.bd, 0.0f));
+
+        // Block row i stores block columns i, i + 1, ... (mod kb) in increasing
+        // order. ell_val holds rows * cols values, so the rows of a partial last
+        // block row past `rows` have no storage.
+        std::vector<int64_t> hind(mb * width);
+        std::vector<cplx>    hval(m * r.cols, cplx(0.0, 0.0));
+        p.Ad = Dense(m, k);
+        for(int64_t i = 0; i < mb; ++i)
+        {
+            const auto first = hind.begin() + i * width;
+            for(int64_t e = 0; e < width; ++e)
+                first[e] = (i + e) % r.kb;
+            std::sort(first, first + width);
+            for(int64_t e = 0; e < width; ++e)
+                for(int64_t row = i * r.bd; row < std::min(m, (i + 1) * r.bd); ++row)
+                    for(int64_t c = 0; c < r.bd; ++c)
+                    {
+                        const cplx v                      = round_to<float>(rand_val<float>(rng));
+                        hval[row * r.cols + e * r.bd + c] = v;
+                        p.Ad.at(row, first[e] * r.bd + c) = v;
+                    }
+        }
+        p.ind = up_idx<int32_t>(hind);
+        p.val = up_val<float>(hval);
         ASSERT_TRUE(p.dB.ptr && p.dC.ptr && p.ind.ptr && p.val.ptr);
 
         ASSERT_EQ(rocsparse_create_bell_descr(&p.sp.p,
@@ -99,21 +125,11 @@ namespace
                                               rocsparse_index_base_zero,
                                               rocsparse_datatype_f32_r),
                   rocsparse_status_success);
-        ASSERT_EQ(rocsparse_create_dnmat_descr(&p.mB.p,
-                                               p.Kc,
-                                               r.n,
-                                               p.ldb,
-                                               p.dB.ptr,
-                                               rocsparse_datatype_f32_r,
-                                               rocsparse_order_column),
+        ASSERT_EQ(rocsparse_create_dnmat_descr(
+                      &p.mB.p, p.Kc, r.n, p.ldb, p.dB.ptr, rocsparse_datatype_f32_r, r.order),
                   rocsparse_status_success);
-        ASSERT_EQ(rocsparse_create_dnmat_descr(&p.mC.p,
-                                               p.Mc,
-                                               r.n,
-                                               p.ldc,
-                                               p.dC.ptr,
-                                               rocsparse_datatype_f32_r,
-                                               rocsparse_order_column),
+        ASSERT_EQ(rocsparse_create_dnmat_descr(
+                      &p.mC.p, p.Mc, r.n, p.ldc, p.dC.ptr, rocsparse_datatype_f32_r, r.order),
                   rocsparse_status_success);
     }
 
@@ -141,11 +157,14 @@ namespace
                               buffer);
     }
 
-    // trans_A == none with no stored blocks: C = beta * C on every stage.
-    void run_empty_bell(rocsparse_handle handle, const BellRun& r)
+    // trans_A == none: C = alpha * A * B + beta * C on every stage, compared
+    // with the host product. With no stored blocks that is C = beta * C.
+    void run_bell_product(rocsparse_handle handle, const BellRun& r)
     {
-        SCOPED_TRACE("mb=" + std::to_string(r.mb) + " kb=" + std::to_string(r.kb)
-                     + " n=" + std::to_string(r.n) + " cols=" + std::to_string(r.cols));
+        SCOPED_TRACE("rows=" + std::to_string(r.rows) + " kb=" + std::to_string(r.kb)
+                     + " n=" + std::to_string(r.n) + " cols=" + std::to_string(r.cols)
+                     + " order=" + std::to_string(static_cast<int>(r.order))
+                     + " device=" + std::to_string(r.device));
         ASSERT_EQ(r.opA, rocsparse_operation_none);
         BellProblem p;
         ASSERT_NO_FATAL_FAILURE(make_bell_problem(r, p));
@@ -166,25 +185,53 @@ namespace
             ASSERT_EQ(spmm(stage, buffer.ptr), rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        const Dense want = axpby(0.0, Dense(p.Mc, r.n), -0.5, p.C0);
-        expect_dense_equal<float>(p.dC.host(), want, rocsparse_order_column, p.ldc, "C");
-        expect_dense_equal<float>(p.dB.host(), p.Bl, rocsparse_order_column, p.ldb, "B");
+        const Dense want = axpby(2.0, matmul(p.Ad, p.Bl), -0.5, p.C0);
+        // Without stored blocks C = beta * C is exact.
+        const double tol = (r.cols == 0) ? 0.0 : 1e-5;
+        expect_dense_equal<float>(p.dC.host(), want, r.order, p.ldc, "C", cplx(-77.0, 0.0), tol);
+        expect_dense_equal<float>(p.dB.host(), p.Bl, r.order, p.ldb, "B");
     }
 }
 
 TEST_F(ExtraBell, no_stored_blocks_scales_C)
 {
     // trans_A == none: an empty blocked ELL product is C = beta * C.
-    // Host and device pointer modes both take that path. Transposed A is
-    // covered by transpose_is_not_implemented_on_every_stage.
-    for(bool device : {false, true})
-    {
-        BellRun r;
-        r.device = device;
-        run_empty_bell(handle, r);
-        if(HasFatalFailure())
-            return;
-    }
+    // Host and device pointer modes both take that path. With 5 rows and
+    // block dimension 2 the last block row is partial, and 1 row is less than
+    // one block; every row of C is still scaled. Transposed A is covered by
+    // transpose_is_not_implemented_on_every_stage.
+    for(int64_t rows : {6, 5, 1})
+        for(rocsparse_order order : {rocsparse_order_column, rocsparse_order_row})
+            for(bool device : {false, true})
+            {
+                BellRun r;
+                r.rows   = rows;
+                r.order  = order;
+                r.device = device;
+                run_bell_product(handle, r);
+                if(HasFatalFailure())
+                    return;
+            }
+}
+
+TEST_F(ExtraBell, stored_blocks_match_host_product)
+{
+    // trans_A == none with one or two stored blocks per block row, for B and C
+    // in column and in row order. With 5 rows and block dimension 2 the last
+    // block row is partial, and 1 row is less than one block: every row of C
+    // holds the product, and the padding of C stays untouched.
+    for(int64_t rows : {6, 5, 1})
+        for(int64_t blocks : {1, 2})
+            for(rocsparse_order order : {rocsparse_order_column, rocsparse_order_row})
+            {
+                BellRun r;
+                r.rows  = rows;
+                r.cols  = blocks * r.bd;
+                r.order = order;
+                run_bell_product(handle, r);
+                if(HasFatalFailure())
+                    return;
+            }
 }
 
 TEST_F(ExtraBell, transpose_is_not_implemented_on_every_stage)

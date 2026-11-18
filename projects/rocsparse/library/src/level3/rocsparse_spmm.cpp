@@ -659,7 +659,7 @@ namespace rocsparse
                     handle,
                     trans_A,
                     trans_B,
-                    (mat_C->rows / mat_A->block_dim),
+                    mat_C->rows,
                     mat_C->cols,
 
                     (trans_A == rocsparse_operation_none) ? (mat_A->cols / mat_A->block_dim)
@@ -694,7 +694,7 @@ namespace rocsparse
                     handle,
                     trans_A,
                     trans_B,
-                    (mat_C->rows / mat_A->block_dim),
+                    mat_C->rows,
                     mat_C->cols,
 
                     (trans_A == rocsparse_operation_none) ? (mat_A->cols / mat_A->block_dim)
@@ -728,7 +728,7 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::bellmm(handle,
                                                              trans_A,
                                                              trans_B,
-                                                             (mat_C->rows / mat_A->block_dim),
+                                                             mat_C->rows,
                                                              mat_C->cols,
 
                                                              (trans_A == rocsparse_operation_none)
