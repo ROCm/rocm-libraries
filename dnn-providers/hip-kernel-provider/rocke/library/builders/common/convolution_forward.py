@@ -61,7 +61,7 @@ import functools
 import hashlib
 import json
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, replace
 from typing import ClassVar
 
@@ -1076,10 +1076,6 @@ class ConvFwdAotTarget:
     pipelines: tuple[str, ...]
     direct_algorithms: dict
     direct_knobs: dict
-    #: ``(variant, knobs) -> fields`` of a direct identity's knobs.
-    fields_from_knobs: Callable[[str, dict], dict]
-    #: ``(identity, variant) -> fields`` of the extra recorded channel counts.
-    recorded_fields: Callable[[KernelIdentity, str], dict]
     #: The value each field after the implicit-GEMM ones holds where unused.
     family_defaults: dict
 
@@ -1103,10 +1099,10 @@ def aot_direct_fields_from_knobs(variant: str, knobs: dict, arch: str = _ARCH) -
     optional knobs may be absent), or a constant knob holds another value. On
     gfx1250 every knob is optional (:func:`_gfx1250_fields_from_knobs`).
     """
-    target = TARGETS.get(arch)
-    if target is None:
+    spec_class = SPEC_CLASSES.get(arch)
+    if spec_class is None:
         raise ValueError(f"no forward AOT engine for arch {arch!r}")
-    return target.fields_from_knobs(variant, knobs)
+    return spec_class.fields_from_knobs(variant, knobs)
 
 
 def _gfx950_fields_from_knobs(variant: str, knobs: dict) -> dict:
@@ -1195,8 +1191,6 @@ TARGETS = {
         pipelines=_AOT_PIPELINES,
         direct_algorithms=AOT_DIRECT_ALGORITHMS,
         direct_knobs=AOT_DIRECT_KNOBS,
-        fields_from_knobs=_gfx950_fields_from_knobs,
-        recorded_fields=_gfx950_recorded_fields,
         family_defaults=_AOT_FAMILY_DEFAULTS,
     ),
     "gfx1250": ConvFwdAotTarget(
@@ -1208,8 +1202,6 @@ TARGETS = {
         pipelines=("mem", "wavelet"),
         direct_algorithms=GFX1250_DIRECT_ALGORITHMS,
         direct_knobs=GFX1250_DIRECT_KNOBS,
-        fields_from_knobs=_gfx1250_fields_from_knobs,
-        recorded_fields=_gfx1250_recorded_fields,
         family_defaults={**_AOT_FAMILY_DEFAULTS, **_GFX1250_KNOB_DEFAULTS},
     ),
 }
@@ -1247,7 +1239,7 @@ def aot_direct_instance_fields(identity: KernelIdentity) -> dict:
         "dilation_w": identity.dilation_w,
     }
     fields_.update(aot_direct_fields_from_knobs(variant, knobs, target.arch))
-    fields_.update(target.recorded_fields(identity, variant))
+    fields_.update(SPEC_CLASSES[identity.arch].recorded_fields(identity, variant))
     return fields_
 
 
@@ -1277,6 +1269,17 @@ class ConvFwdAotSpec:
     """
 
     TARGET: ClassVar[ConvFwdAotTarget]
+
+    @staticmethod
+    def fields_from_knobs(variant: str, knobs: dict) -> dict:
+        """The instance fields a direct identity's ``knobs`` of ``variant`` set (the
+        target's knob contract; see :func:`aot_direct_fields_from_knobs`)."""
+        raise NotImplementedError
+
+    @staticmethod
+    def recorded_fields(identity: KernelIdentity, variant: str) -> dict:
+        """The extra channel counts (and row tile) the target's variants record."""
+        raise NotImplementedError
 
     def _target_direct_knobs(self) -> dict:
         """The target's spelling of :meth:`direct_knobs`."""
@@ -1698,6 +1701,14 @@ class Gfx950ConvFwdAotSpec(ConvFwdAotSpec):
 
     TARGET: ClassVar[ConvFwdAotTarget] = TARGETS["gfx950"]
 
+    @staticmethod
+    def fields_from_knobs(variant: str, knobs: dict) -> dict:
+        return _gfx950_fields_from_knobs(variant, knobs)
+
+    @staticmethod
+    def recorded_fields(identity: KernelIdentity, variant: str) -> dict:
+        return _gfx950_recorded_fields(identity, variant)
+
     def _target_direct_knobs(self) -> dict:
         """gfx950: every knob the variant states, constants included."""
         knobs = {}
@@ -1743,6 +1754,14 @@ class Gfx1250ConvFwdAotSpec(ConvFwdAotSpec):
     """
 
     TARGET: ClassVar[ConvFwdAotTarget] = TARGETS["gfx1250"]
+
+    @staticmethod
+    def fields_from_knobs(variant: str, knobs: dict) -> dict:
+        return _gfx1250_fields_from_knobs(variant, knobs)
+
+    @staticmethod
+    def recorded_fields(identity: KernelIdentity, variant: str) -> dict:
+        return _gfx1250_recorded_fields(identity, variant)
 
     def _target_direct_knobs(self) -> dict:
         """gfx1250: each knob its variant uses that is not absent."""
