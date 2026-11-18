@@ -155,6 +155,11 @@ _DGRAD_SHAPES = {
     "depthwise7x7": dict(C=96, K=96, G=96, Y=7, X=7, pad_h=3, pad_w=3),
 }
 
+#: The arches with a registered dgrad list: each is its own cohort of instances.
+_DGRAD_ARCHES = sorted(
+    arch for arch, direction in gc._INSTANCE_LISTS if direction == "dgrad"
+)
+
 _CASES = [
     pytest.param(arch, direction, shape, id=f"{arch}-{direction}-{shape}")
     for arch, direction in sorted(gc._INSTANCE_LISTS)
@@ -806,17 +811,19 @@ def test_launch_plan_of_the_patch_dgrad():
 # ---------------------------------------------------------------------------
 
 
-def test_default_pick_is_the_first_admitted_instance_by_label_order():
+@pytest.mark.parametrize("arch", _DGRAD_ARCHES)
+def test_default_pick_is_the_first_admitted_instance_by_label_order(arch):
     """With no ranker, dgrad's default pick is deterministic (sorted by
     label), not dependent on the list file's on-disk order (a list is a
     set) -- see ``gc._SET_SEMANTICS_DIRECTIONS``. fwd is scoped out: its
-    on-disk order is a hand-tuned family preference, exercised below."""
+    on-disk order is a hand-tuned family preference, exercised below. The
+    dgrad engines rank their candidates themselves (a trained ranker, else
+    the native fallback score), so no family outranks another here."""
     order = {
-        name: i
-        for i, name in enumerate(sorted(_listed_names(_LISTS[(_ARCH, "dgrad")])))
+        name: i for i, name in enumerate(sorted(_listed_names(_LISTS[(arch, "dgrad")])))
     }
     for kw in _DGRAD_SHAPES.values():
-        req = _req(direction="dgrad", **kw)
+        req = _req(arch=arch, direction="dgrad", **kw)
         admitted = [r.spec.name for r in gc.dispatch_conv_grouped_all(req)]
         assert admitted == sorted(admitted, key=order.__getitem__)
         assert gc.dispatch_conv_grouped(req).spec.name == admitted[0]
@@ -903,6 +910,66 @@ def test_algorithm_pin_keeps_one_family():
     assert results
     assert {r.spec.algorithm for r in results} == {"direct_depthwise_tiled"}
     assert gc.dispatch_conv_grouped(req).spec.algorithm == "direct_depthwise_tiled"
+
+
+def _dgrad_families(arch: str) -> set[str]:
+    return {
+        s.algorithm
+        for s in gc.registered_conv_grouped_instances(arch, direction="dgrad")
+    }
+
+
+def _dgrad_reqs_admitting(arch: str, **pins) -> list[gc.ConvGroupedRequest]:
+    """The dgrad requests of :data:`_DGRAD_SHAPES` on ``arch`` (with ``pins``)
+    some instance admits."""
+    reqs = [
+        _req(arch=arch, direction="dgrad", **pins, **kw)
+        for kw in _DGRAD_SHAPES.values()
+    ]
+    return [r for r in reqs if gc.dispatch_conv_grouped_all(r)]
+
+
+@pytest.mark.parametrize("arch", _DGRAD_ARCHES)
+def test_each_dgrad_family_of_the_arch_can_be_pinned(arch):
+    """``algorithm=`` keeps exactly the pinned family, on the request's arch only,
+    for every dgrad family ``arch`` registers."""
+    for family in sorted(_dgrad_families(arch)):
+        reqs = _dgrad_reqs_admitting(arch, algorithm=family)
+        assert reqs, f"no shape reaches {arch}'s {family}"
+        for req in reqs:
+            results = gc.dispatch_conv_grouped_all(req)
+            assert {r.spec.algorithm for r in results} == {family}
+            assert {r.spec.identity.arch for r in results} == {arch}
+            assert gc.dispatch_conv_grouped(req).spec.algorithm == family
+
+
+@pytest.mark.parametrize("arch", _DGRAD_ARCHES)
+def test_a_dgrad_pin_outside_the_arch_cohort_is_refused(arch):
+    """A family or an instance of another arch's cohort is never admitted, even on
+    a shape it serves there: the pin is refused with the arch gate's reason."""
+    foreign = {
+        family: other
+        for other in _DGRAD_ARCHES
+        if other != arch
+        for family in _dgrad_families(other) - _dgrad_families(arch)
+    }
+    assert foreign, f"every dgrad family is {arch}'s too"
+    for family, other in sorted(foreign.items()):
+        served = _dgrad_reqs_admitting(other, algorithm=family)
+        assert served
+        req = dataclasses.replace(served[0], arch=arch)
+        assert not gc.dispatch_conv_grouped_all(req)
+        with pytest.raises(ValueError, match=f"arch '{arch}' not in"):
+            gc.dispatch_conv_grouped(req)
+    for other in _DGRAD_ARCHES:
+        if other == arch:
+            continue
+        req = _dgrad_reqs_admitting(other)[0]
+        pinned = gc.dispatch_conv_grouped(req).spec.name
+        with pytest.raises(PinRefused, match=f"arch '{arch}' not in"):
+            gc.dispatch_conv_grouped(
+                dataclasses.replace(req, arch=arch, spec_id=pinned)
+            )
 
 
 # ---------------------------------------------------------------------------
