@@ -354,8 +354,9 @@ globalParameters["UseUserArgs"] = False
 globalParameters["SplitDevices"] = 1
 globalParameters["SplitDim"] = "M"
 # Where each tensor lives when split: "Replicated" (a copy on every device, the default) or
-# "Shared" (one copy that the other devices use over peer access: A, B and C are read from the
-# last device, whose slice is the largest; D is written on the first device).
+# "Shared" (one copy that the other devices use over peer access). Only the operand the split does
+# not cut (B for SplitDim M, A for SplitDim N) and D can be shared: a shared B or A is read from
+# the last device, a shared D is written on the first device.
 globalParameters["SplitPlacementA"] = "Replicated"
 globalParameters["SplitPlacementB"] = "Replicated"
 globalParameters["SplitPlacementC"] = "Replicated"

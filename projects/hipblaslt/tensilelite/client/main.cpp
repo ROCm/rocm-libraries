@@ -954,13 +954,16 @@ int main(int argc, const char* argv[])
         // --split-devices N: every problem runs as N slices on N consecutive devices.
         {
             auto const placement = args["split-placement"].as<std::string>();
-            if(args["split-devices"].as<int>() > 1)
-            {
-                auto const err
-                    = splitPlacementError(placement, args["split-dim"].as<std::string>() == "N");
-                if(!err.empty())
-                    throw std::runtime_error(err);
-            }
+            auto const splitDim  = args["split-dim"].as<std::string>();
+            const bool split     = args["split-devices"].as<int>() > 1;
+            // --split-dim first: the placement rules depend on it.
+            if(split && splitDim != "M" && splitDim != "N")
+                throw std::runtime_error("--split-dim must be M or N");
+            // The format is checked even without a split; the sharing rules only apply to one.
+            auto const err = split ? splitPlacementError(placement, splitDim == "N")
+                                   : splitPlacementFormatError(placement);
+            if(!err.empty())
+                throw std::runtime_error(err);
             if(args["output-peerD"].as<bool>()
                && (args["split-devices"].as<int>() != 2 || placement[3] != 'R'))
                 throw std::runtime_error(
@@ -969,9 +972,6 @@ int main(int argc, const char* argv[])
         int splitM = args["split-devices"].as<int>();
         if(splitM < 1)
             throw std::runtime_error("--split-devices must be >= 1");
-        if(splitM > 1 && args["split-dim"].as<std::string>() != "M"
-           && args["split-dim"].as<std::string>() != "N")
-            throw std::runtime_error("--split-dim must be M or N");
         if(splitM > 1 && fusedA2A)
             throw std::runtime_error("--split-devices cannot be combined with --fused-a2a");
         if(splitM > 1 && args["use-user-args"].as<bool>())

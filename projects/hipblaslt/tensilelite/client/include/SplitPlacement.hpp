@@ -9,6 +9,16 @@ namespace TensileLite
 {
     namespace Client
     {
+        // Checks that --split-placement has one letter each for A, B, C, D, each R or S. Returns an
+        // empty string when it does, else the message to report.
+        inline std::string splitPlacementFormatError(std::string const& placement)
+        {
+            if(placement.size() != 4 || placement.find_first_not_of("RS") != std::string::npos)
+                return "--split-placement needs 4 letters (A, B, C, D), each R or S, got '"
+                       + placement + "'";
+            return "";
+        }
+
         // Checks --split-placement against --split-dim for --split-devices > 1. Returns an empty
         // string when the placement is valid, else the message to report.
         //
@@ -20,21 +30,25 @@ namespace TensileLite
         // one full matrix.
         inline std::string splitPlacementError(std::string const& placement, bool splitN)
         {
-            if(placement.size() != 4 || placement.find_first_not_of("RS") != std::string::npos)
-                return "--split-placement needs 4 letters (A, B, C, D), each R or S, got '"
-                       + placement + "'";
+            auto const formatError = splitPlacementFormatError(placement);
+            if(!formatError.empty())
+                return formatError;
+
             char const* const names[3] = {"A", "B", "C"};
             // Index of the operand the split cuts (A for M, B for N) and of the one it does not.
-            const size_t cut    = splitN ? 1 : 0;
-            const size_t uncut  = splitN ? 0 : 1;
+            const size_t      cut   = splitN ? 1 : 0;
+            const size_t      uncut = splitN ? 0 : 1;
+            std::string const split = splitN ? "N" : "M";
             for(size_t t : {size_t(0), size_t(1), size_t(2)})
-                if(placement[t] == 'S' && t != uncut)
-                    return std::string("--split-placement: ") + names[t]
-                           + " cannot be shared in an " + (splitN ? "N" : "M") + " split, because "
-                           + (t == cut ? "the split cuts it" : "each device has its own C slice")
-                           + " (only " + names[uncut]
-                           + (t == cut ? ", the operand the split does not cut, and D can be shared)"
-                                       : " and D can be shared)");
+            {
+                if(placement[t] != 'S' || t == uncut)
+                    continue;
+                std::string const reason
+                    = t == cut ? "the split cuts it" : "each device has its own C slice";
+                return std::string("--split-placement: ") + names[t] + " cannot be shared in an "
+                       + split + " split, because " + reason + " (only " + names[uncut]
+                       + ", the operand the split does not cut, and D can be shared)";
+            }
             return "";
         }
     }
