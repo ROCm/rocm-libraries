@@ -441,6 +441,9 @@ def getRealDataTypeB(dataType):
     else:
         return dataType
 
+def _isNarrowFloat(dataType):
+    return dataType.is8bitFloat() or dataType.is6bitFloat() or dataType.isFloat4()
+
 _INT4_ENCODING_CHAR = {"Signed": "", "UnsignedBias8": "U8"}
 
 ################################################################################
@@ -1001,6 +1004,16 @@ class ProblemType(Mapping):
     else:
       self["DataTypeB"] = self["MacDataTypeB"]
     self["DataTypeB"] = getRealDataTypeB(self["DataTypeB"])
+
+    # Kernels cannot convert between two of these types, so an operand stored in one is
+    # also its MAC type (e.g. DataType F4 with DataTypeB F8 is an F4 x F8 MFMA).
+    for tc in ("A", "B"):
+      dataType, macDataType = self["DataType%s"%tc], self["MacDataType%s"%tc]
+      if dataType != macDataType and _isNarrowFloat(dataType) and _isNarrowFloat(macDataType):
+        if "MacDataType%s"%tc in config:
+          raise Exception("Unsupported input conversion DataType%s (%s) -> MacDataType%s (%s)" \
+                          % (tc, dataType.toChar(), tc, macDataType.toChar()))
+        self["MacDataType%s"%tc] = dataType
 
     if "DestDataType" in config:
       self["DestDataType"] = DataType(config["DestDataType"])
