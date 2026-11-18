@@ -127,7 +127,9 @@ def ctest_tests(
     return json.loads(listing.stdout)["tests"]
 
 
-_CTEST_READINESS_EXEMPT = frozenset({"rocke_arch_domain_reproducibility"})
+_CTEST_READINESS_EXEMPT = frozenset(
+    {"rocke_arch_domain_reproducibility", "rocke_gfx950_grouped_moe_hip"}
+)
 
 
 def ctest_ready(build_root: Path, config: str) -> bool:

@@ -383,7 +383,11 @@ def test_source_script_alone_does_not_claim_the_native_suite_is_ready(
                 {
                     "name": "rocke_arch_domain_reproducibility",
                     "command": [runner.sys.executable, "generator.py", "--check"],
-                }
+                },
+                {
+                    "name": "rocke_gfx950_grouped_moe_hip",
+                    "command": [runner.sys.executable, "run_gfx950_grouped_moe_hip.py"],
+                },
             ]
         }
         return subprocess.CompletedProcess(command, 0, stdout=json.dumps(listing))
