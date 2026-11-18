@@ -27,6 +27,8 @@ from tensilelite.OccupancyMeasure import (
     _arch_caps_for_kernel,
 )
 
+from logic_corpus import needs_logic_corpus, require_asm_full_root
+
 try:
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly as _KWA
     _KWA_AVAILABLE = True
@@ -435,6 +437,35 @@ class TestSolutionKeepsTheDeclaredCustomKernelOccupancy:
 
     def test_handwritten_custom_kernel_block_keeps_a_positive_value(self):
         assert self._declared({"CustomKernel": {"name": "k"}, "CUOccupancy": 4}) == 4
+
+
+@needs_logic_corpus
+class TestGfx1151W4A16LogicDeclaresOccupancy:
+    """The gfx1151 W4A16 custom kernels get no computed occupancy (not gfx9), so every
+    logic entry that uses one must declare it, and every entry of a kernel the same
+    value; otherwise Origami would see one workgroup per WGP for all of them."""
+
+    def test_every_entry_declares_one_consistent_value(self):
+        import yaml
+
+        values, missing = {}, []
+        for f in sorted(require_asm_full_root().glob("gfx1151/*/gfx1151_*I4*.yaml")):
+            text = f.read_text()
+            # The libyaml loader when PyYAML has it: the Origami logic files are large.
+            data = yaml.load(text, Loader=yaml.CSafeLoader) if hasattr(yaml, "CSafeLoader") else yaml.safe_load(text)
+            for sol in data["Solutions"]:
+                name = sol.get("CustomKernelName")
+                if not name:
+                    continue
+                occ = sol.get("CUOccupancy")
+                if not isinstance(occ, int) or isinstance(occ, bool) or occ < 1:
+                    missing.append(f"{f.name}: {name} ({occ})")
+                else:
+                    values.setdefault(name, set()).add(occ)
+        assert values, "no gfx1151 W4A16 custom kernels found"
+        assert not missing, f"{len(missing)} entries without CUOccupancy, e.g. {missing[:3]}"
+        inconsistent = {n: v for n, v in values.items() if len(v) > 1}
+        assert not inconsistent, f"kernels declared with different values: {inconsistent}"
 
 
 class TestPythonDebugWarning:
