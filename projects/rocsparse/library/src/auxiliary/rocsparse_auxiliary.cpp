@@ -2734,13 +2734,13 @@ try
     // rows * ell_cols is the value-array length; it must fit in int64_t.
     ROCSPARSE_CHECKARG(
         1, rows, rocsparse::size_product_overflows(rows, ell_cols), rocsparse_status_invalid_size);
-    const int64_t bell_values = rows * ell_cols;
+    const int64_t values_size = rows * ell_cols;
     // brows <= rows, so brows * ell_cols fits as well.
     const int64_t brows        = rocsparse::ceil_div(rows, ell_block_dim);
-    const int64_t bell_col_ind = (brows * ell_cols) / ell_block_dim;
+    const int64_t col_ind_size = (brows * ell_cols) / ell_block_dim;
 
-    ROCSPARSE_CHECKARG_ARRAY(6, bell_col_ind, ell_col_ind);
-    ROCSPARSE_CHECKARG_ARRAY(7, bell_values, ell_val);
+    ROCSPARSE_CHECKARG_ARRAY(6, col_ind_size, ell_col_ind);
+    ROCSPARSE_CHECKARG_ARRAY(7, values_size, ell_val);
 
     ROCSPARSE_CHECKARG_ENUM(8, idx_type);
     ROCSPARSE_CHECKARG_ENUM(9, idx_base);
@@ -2819,13 +2819,13 @@ try
     // rows * ell_cols is the value-array length; it must fit in int64_t.
     ROCSPARSE_CHECKARG(
         1, rows, rocsparse::size_product_overflows(rows, ell_cols), rocsparse_status_invalid_size);
-    const int64_t bell_values = rows * ell_cols;
+    const int64_t values_size = rows * ell_cols;
     // brows <= rows, so brows * ell_cols fits as well.
     const int64_t brows        = rocsparse::ceil_div(rows, ell_block_dim);
-    const int64_t bell_col_ind = (brows * ell_cols) / ell_block_dim;
+    const int64_t col_ind_size = (brows * ell_cols) / ell_block_dim;
 
-    ROCSPARSE_CHECKARG_ARRAY(6, bell_col_ind, ell_col_ind);
-    ROCSPARSE_CHECKARG_ARRAY(7, bell_values, ell_val);
+    ROCSPARSE_CHECKARG_ARRAY(6, col_ind_size, ell_col_ind);
+    ROCSPARSE_CHECKARG_ARRAY(7, values_size, ell_val);
 
     ROCSPARSE_CHECKARG_ENUM(8, idx_type);
     ROCSPARSE_CHECKARG_ENUM(9, idx_base);
@@ -4291,15 +4291,16 @@ try
                        rocsparse::size_product_overflows(descr->rows, descr->ell_cols),
                        rocsparse_status_invalid_size);
 
-    const int64_t brows  = rocsparse::ceil_div(descr->rows, descr->block_dim);
-    const int64_t values = descr->rows * descr->ell_cols;
+    const int64_t brows        = rocsparse::ceil_div(descr->rows, descr->block_dim);
+    const int64_t col_ind_size = brows * descr->ell_cols / descr->block_dim;
+    const int64_t values_size  = descr->rows * descr->ell_cols;
 
     ROCSPARSE_CHECKARG(1,
                        bell_col_ind,
-                       brows * descr->ell_cols / descr->block_dim > 0 && bell_col_ind == nullptr,
+                       col_ind_size > 0 && bell_col_ind == nullptr,
                        rocsparse_status_invalid_pointer);
     ROCSPARSE_CHECKARG(
-        2, bell_val, values > 0 && bell_val == nullptr, rocsparse_status_invalid_pointer);
+        2, bell_val, values_size > 0 && bell_val == nullptr, rocsparse_status_invalid_pointer);
 
     descr->col_data = bell_col_ind;
     descr->val_data = bell_val;
