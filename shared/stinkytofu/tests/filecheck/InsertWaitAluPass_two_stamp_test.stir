@@ -1,0 +1,280 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --InsertWaitAluPass=enableESM2TrackValuVsrc --print-output
+#
+# Two stamps per VGPR: the newest VALU that WROTE it (dst role) and the newest that READ it
+# (src role). A consumer that reads the VGPR waits for the writer only (RAW); one that writes it
+# waits for the writer (WAW) and the last reader (WAR). Reads never wait for reads: the hardware
+# has no RAR hazard in DEP_MODE 2.
+
+#===----------------------------------------------------------------------===#
+# A store reading v1 waits for the v_mov that wrote it (1 follower), not for the v_add that
+# only read it (0 followers): no RAR.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @two_stamp_read_waits_for_writer_only
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 1
+# CHECK-NEXT: ds_store_b32
+st.func @two_stamp_read_waits_for_writer_only() {
+^entry:
+  v1 = "st.v_mov_b32"(v5) { issueCycles = 1, latencyCycles = 1 }
+  v2 = "st.v_add_f32"(v3, v1) { issueCycles = 1, latencyCycles = 5 }
+  "st.ds_store_b32"(v7, v1) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# The reader's stamp is not consumed by the store's wait: the ds_load that then overwrites v1
+# still waits for the v_add's read (WAR), which the va_vdst = 1 left in flight.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @two_stamp_write_waits_for_reader
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 1
+# CHECK-NEXT: ds_store_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK-NEXT: v1 = "st.ds_load_b32"
+st.func @two_stamp_write_waits_for_reader() {
+^entry:
+  v1 = "st.v_mov_b32"(v5) { issueCycles = 1, latencyCycles = 1 }
+  v2 = "st.v_add_f32"(v3, v1) { issueCycles = 1, latencyCycles = 5 }
+  "st.ds_store_b32"(v7, v1) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v1 = "st.ds_load_b32"(v6) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# A later read does not restart the writer's progress: 12 matrix ops after the v_mov hide its
+# va_vdst for the store even though a v_add read v1 after 6 of them.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @two_stamp_read_keeps_writer_progress
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: ds_store_b32
+st.func @two_stamp_read_keeps_writer_progress() {
+^entry:
+  v1 = "st.v_mov_b32"(v5) { issueCycles = 1, latencyCycles = 1 }
+  v[8:15] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[8:15]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[16:23]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[24:31]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[32:39]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[40:47]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[48:55]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v2 = "st.v_add_f32"(v3, v1) { issueCycles = 1, latencyCycles = 5 }
+  v[56:63] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[56:63]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[64:71]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[72:79]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[80:87]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[88:95]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[96:103] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[96:103]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  "st.ds_store_b32"(v7, v1) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# A producer that reads and writes the same VGPR (v_fmac) stamps both roles with its own ticket:
+# the ds_load overwriting it waits for it through either.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @two_stamp_read_modify_write_stamps_both
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK-NEXT: v1 = "st.ds_load_b32"
+st.func @two_stamp_read_modify_write_stamps_both() {
+^entry:
+  v1 = "st.v_fmac_f32"(v2, v3, v1) { issueCycles = 1, latencyCycles = 5 }
+  v1 = "st.ds_load_b32"(v6) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# Roles join separately at a CFG merge. One path wrote v1 (ticket 1 of 2), the other read it
+# (ticket 2 of 2). After the join a store (read) waits only for the writer: va_vdst = 1. That
+# wait retires the writer but not the reader, so the ds_load that overwrites v1 next waits
+# va_vdst = 0 for the reader. A single stamp would have taken the later ticket for both.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @two_stamp_roles_join_separately
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 1
+# CHECK-NEXT: ds_store_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK-NEXT: v1 = "st.ds_load_b32"
+st.func @two_stamp_roles_join_separately() {
+^entry:
+  "st.s_cbranch_scc1"("label_reader", SCC0)
+  Successors: ^bb_writer, ^label_reader
+^bb_writer:
+  v1 = "st.v_mov_b32"(v5) { issueCycles = 1, latencyCycles = 1 }
+  v9 = "st.v_add_f32"(v8, v8) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_branch"("label_join")
+  Successors: ^label_join
+^label_reader:
+  v9 = "st.v_add_f32"(v8, v8) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_add_f32"(v3, v1) { issueCycles = 1, latencyCycles = 5 }
+  Successors: ^label_join
+^label_join:
+  "st.ds_store_b32"(v7, v1) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v1 = "st.ds_load_b32"(v6) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# A reader at the end of a loop body reaches the ds_load at the loop top through the back
+# edge: the load overwriting v1 waits for it (WAR), with the v_mov in between as its follower.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @two_stamp_loop_back_edge_reader
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 1
+# CHECK-NEXT: v1 = "st.ds_load_b32"
+st.func @two_stamp_loop_back_edge_reader() {
+^entry:
+  "st.s_branch"("label_loop")
+  Successors: ^label_loop
+^label_loop:
+  v1 = "st.ds_load_b32"(v6) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v2 = "st.v_add_f32"(v3, v1) { issueCycles = 1, latencyCycles = 5 }
+  v9 = "st.v_mov_b32"(v8) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_cbranch_scc1"("label_loop", SCC0)
+  Successors: ^label_loop, ^label_exit
+^label_exit:
+  "st.s_endpgm"()
+}
+
+#===----------------------------------------------------------------------===#
+# The same loop with a store at the top: the back edge carries only a reader of v1, and a read
+# never waits for a read.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @two_stamp_loop_back_edge_reader_no_rar
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: s_endpgm
+st.func @two_stamp_loop_back_edge_reader_no_rar() {
+^entry:
+  "st.s_branch"("label_loop2")
+  Successors: ^label_loop2
+^label_loop2:
+  "st.ds_store_b32"(v7, v1) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v2 = "st.v_add_f32"(v3, v1) { issueCycles = 1, latencyCycles = 5 }
+  v9 = "st.v_mov_b32"(v8) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_cbranch_scc1"("label_loop2", SCC0)
+  Successors: ^label_loop2, ^label_exit2
+^label_exit2:
+  "st.s_endpgm"()
+}
+
+#===----------------------------------------------------------------------===#
+# A write consumer takes the stricter of the two roles. v1 was read (ticket 1), then written
+# (ticket 2), then one more VALU issued: the writer has 1 follower, the reader 2, so the
+# ds_load overwriting v1 waits va_vdst = 1.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @two_stamp_write_takes_stricter_role
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 1
+# CHECK-NEXT: v1 = "st.ds_load_b32"
+st.func @two_stamp_write_takes_stricter_role() {
+^entry:
+  v9 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v1 = "st.v_mov_b32"(v5) { issueCycles = 1, latencyCycles = 1 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  v1 = "st.ds_load_b32"(v6) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# The only reader of v1 sits in the loop latch; the ds_load that overwrites v1 is in the body
+# block after the header. The reader's stamp must travel header -> body over the back edge:
+# the body is re-run once the header's entry tightened.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @two_stamp_back_edge_reader_reaches_body
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 2
+# CHECK-NEXT: v1 = "st.ds_load_b32"
+st.func @two_stamp_back_edge_reader_reaches_body() {
+^entry:
+  "st.s_branch"("label_head")
+  Successors: ^label_head
+^label_head:
+  v9 = "st.v_mov_b32"(v8) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_branch"("label_body")
+  Successors: ^label_body
+^label_body:
+  v10 = "st.v_mov_b32"(v8) { issueCycles = 1, latencyCycles = 1 }
+  v1 = "st.ds_load_b32"(v6) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  "st.s_branch"("label_latch")
+  Successors: ^label_latch
+^label_latch:
+  v2 = "st.v_add_f32"(v3, v1) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_cbranch_scc1"("label_head", SCC0)
+  Successors: ^label_head, ^label_exit3
+^label_exit3:
+  "st.s_endpgm"()
+}
+
+#===----------------------------------------------------------------------===#
+# A matrix op outside the XDL pipe (v_wmma_f32_16x16x4_f32, the SGEMM WMMA on the CMACC pipe) is an
+# ordinary CSMACC producer with no form latched: the no-latch set has no dst rule, so the ds_load, whose
+# address v6 is in its result v[0:7], waits whatever issued after it. Kernels mixing XDL and SGEMM
+# WMMAs are out of scope: the table assumes one form per kernel.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @two_stamp_sgemm_wmma_result_always_waits
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 13
+# CHECK-NEXT: v[16:17] = "st.ds_load_b64"
+st.func @two_stamp_sgemm_wmma_result_always_waits() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x4_f32"(v[16:17], v[18:19], v[0:7]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { reuseA = false, reuseB = false } }
+  v200 = "st.v_add_f32"(v220, v220) { issueCycles = 1, latencyCycles = 5 }
+  v201 = "st.v_add_f32"(v221, v221) { issueCycles = 1, latencyCycles = 5 }
+  v202 = "st.v_add_f32"(v222, v222) { issueCycles = 1, latencyCycles = 5 }
+  v203 = "st.v_add_f32"(v223, v223) { issueCycles = 1, latencyCycles = 5 }
+  v204 = "st.v_add_f32"(v224, v224) { issueCycles = 1, latencyCycles = 5 }
+  v205 = "st.v_add_f32"(v225, v225) { issueCycles = 1, latencyCycles = 5 }
+  v206 = "st.v_add_f32"(v226, v226) { issueCycles = 1, latencyCycles = 5 }
+  v207 = "st.v_add_f32"(v227, v227) { issueCycles = 1, latencyCycles = 5 }
+  v208 = "st.v_add_f32"(v228, v228) { issueCycles = 1, latencyCycles = 5 }
+  v209 = "st.v_add_f32"(v229, v229) { issueCycles = 1, latencyCycles = 5 }
+  v210 = "st.v_add_f32"(v230, v230) { issueCycles = 1, latencyCycles = 5 }
+  v211 = "st.v_add_f32"(v231, v231) { issueCycles = 1, latencyCycles = 5 }
+  v212 = "st.v_add_f32"(v232, v232) { issueCycles = 1, latencyCycles = 5 }
+  v[16:17] = "st.ds_load_b64"(v6) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# A VALU write retires the older writers of that VGPR in the other pipes (the hardware orders
+# VALU WAW): the store waits for the v_mov (2 followers), not for the WMMA (0 followers).
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @two_stamp_valu_write_retires_other_pipes
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 2
+# CHECK-NEXT: ds_store_b32
+st.func @two_stamp_valu_write_retires_other_pipes() {
+^entry:
+  v[8:15] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[8:15]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v8 = "st.v_mov_b32"(v5) { issueCycles = 1, latencyCycles = 1 }
+  v101 = "st.v_add_f32"(v3, v4) { issueCycles = 1, latencyCycles = 5 }
+  v102 = "st.v_add_f32"(v3, v4) { issueCycles = 1, latencyCycles = 5 }
+  "st.ds_store_b32"(v7, v8) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# A VALU read retires nothing: the store still waits for the WMMA that wrote v8.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @two_stamp_valu_read_keeps_other_pipes
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK-NEXT: ds_store_b32
+st.func @two_stamp_valu_read_keeps_other_pipes() {
+^entry:
+  v[8:15] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[8:15]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v2 = "st.v_add_f32"(v3, v8) { issueCycles = 1, latencyCycles = 5 }
+  v101 = "st.v_add_f32"(v3, v4) { issueCycles = 1, latencyCycles = 5 }
+  v102 = "st.v_add_f32"(v3, v4) { issueCycles = 1, latencyCycles = 5 }
+  "st.ds_store_b32"(v7, v8) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# The retirement is per VGPR: the v_mov rewrote v8 only, so the store reading v[8:9] still
+# waits for the WMMA through v9.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @two_stamp_valu_write_retires_only_its_vgprs
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK-NEXT: ds_store_b64
+st.func @two_stamp_valu_write_retires_only_its_vgprs() {
+^entry:
+  v[8:15] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[8:15]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v8 = "st.v_mov_b32"(v5) { issueCycles = 1, latencyCycles = 1 }
+  v101 = "st.v_add_f32"(v3, v4) { issueCycles = 1, latencyCycles = 5 }
+  v102 = "st.v_add_f32"(v3, v4) { issueCycles = 1, latencyCycles = 5 }
+  "st.ds_store_b64"(v7, v[8:9]) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}

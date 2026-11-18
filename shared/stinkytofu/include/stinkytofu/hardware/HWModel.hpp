@@ -112,23 +112,62 @@ struct HWModel {
         bool hasSplitStoreCntAsyncCnt;
     };
 
-    /// Intervening-operation counts that satisfy a pending wait, so it need not be
-    /// emitted. A non-zero entry is how many ops are needed; 0 is a sentinel for off,
-    /// so that wait is always sent.
+    /// Intervening-operation counts that satisfy a pending va_vdst / vm_vsrc wait, so it need
+    /// not be emitted. A rule at (0, 0) is off; a role with every rule off always waits.
     struct WaitHide {
-        /// Matrix ops that satisfy a pending va_vdst, for one form. Keyed by the
-        /// instruction's own resolved cost latency and destination width.
+        /// One hide rule: `lead` matrix ops, then `tail` slots that matrix ops (wmmaSlots each) and
+        /// VALUs (one each) fill. (N, 0) = matrix ops only; (0, V) = VALUs alone; TRANS fills nothing.
+        struct Hide {
+            int lead = 0;
+            int tail = 0;
+            constexpr bool on() const {
+                return lead > 0 || tail > 0;
+            }
+            bool operator==(const Hide&) const = default;
+        };
+        /// One producer class's rules for one hazard role; any satisfied rule hides. `pure`:
+        /// matrix ops only; `mix`: VALUs count after its lead; `valu`: VALUs alone.
+        struct RoleHide {
+            Hide pure;
+            Hide mix;
+            Hide valu;
+            constexpr bool any() const {
+                return pure.on() || mix.on() || valu.on();
+            }
+            bool operator==(const RoleHide&) const = default;
+        };
+        /// Rules for one producer class: `dst` for the producer's write (a RAW / WAW consumer
+        /// waits for the writeback), `src` for its last source read (a WAR consumer waits for
+        /// the read). An all-off `src` takes the `dst` rules; an all-off `dst` always waits.
+        struct RuleSet {
+            RoleHide dst;
+            RoleHide src;
+            /// Tail slots one matrix op fills (a VALU fills one). kNoWmma: matrix ops fill nothing,
+            /// the rule counts VALU-class ops only (the table's (-1, N, -1) rows).
+            static constexpr int kNoWmma = -1;
+            int wmmaSlots = 1;
+            bool operator==(const RuleSet&) const = default;
+        };
+        /// One WMMA form the arch issues, keyed by the instruction's own resolved cost
+        /// latency, destination width and whether it is a scaled (MX, LD_SCALE + WMMA pair)
+        /// op. A scaled op with no scaled row uses the unscaled one. A form with no row never
+        /// satisfies a va_vdst wait.
         struct Form {
             int costLatency;
             int dstVgprs;
-            /// Matrix ops after an XDL producer that satisfy its va_vdst wait.
-            int xdlVaVdst;
-            /// Matrix ops after a CSMACC producer that satisfy its va_vdst wait.
-            int csmaccVaVdst;
+            bool scaled = false;
+            /// Rules for XDL producers once this form is the kernel's.
+            RuleSet xdl;
+            /// Rules for CSMACC producers once this form is the kernel's.
+            RuleSet csmacc;
+            bool operator==(const Form&) const = default;
         };
-        /// One row per form the arch issues. A form with no row never satisfies a
-        /// va_vdst wait, so its producers are always waited on.
         std::span<const Form> forms;
+        /// CSMACC producers while no form is latched (no matrix op issued yet, a form without a
+        /// row, or two forms in one kernel), and TRANS producers at any time.
+        RuleSet noLatchCsmacc;
+        /// DPMACC (f64) producers, independent of the form.
+        RuleSet dpmacc;
         /// Same-class reads after a read that satisfy its vm_vsrc wait; a class at 0 always waits.
         int vmVsrcLds;
         int vmVsrcTex;

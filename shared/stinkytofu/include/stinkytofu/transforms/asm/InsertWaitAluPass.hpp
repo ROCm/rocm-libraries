@@ -42,6 +42,8 @@ struct InsertWaitAluOptions {
     bool sharedOrderCountFollowers = false;
     /// Count an XDL producer's followers from the nearest anchor rather than its own ticket.
     bool xdlCountFromNextWmma = false;
+    /// Ignore the arch's WaitHide table: every wait is emitted (plain mode 2). Test hook.
+    bool ignoreWaitHide = false;
 };
 
 /// Insert s_wait_alu instructions for SCHED_MODE 2 (VA_VDST + VM_VSRC).
@@ -67,8 +69,9 @@ struct WaitAluNeed {
 };
 
 /// An op the scoreboard counts toward hiding a wait: a WMMA hides a va_vdst, an op in the LDS
-/// or TEX FIFO hides a vm_vsrc (a flat_* is in both).
-enum class WaitAluHideOp { Wmma, Lds, Tex, Flat };
+/// or TEX FIFO hides a vm_vsrc (a flat_* is in both). A VALU hides a va_vdst only as a tail
+/// slot of a form's mixed rule (HWModel::WaitHide::Hide with a tail).
+enum class WaitAluHideOp { Wmma, Lds, Tex, Flat, Valu };
 
 /// InsertWaitAlu's scoreboard stepped one instruction at a time, so a scheduler can ask
 /// what s_wait_alu a candidate would need at the current point of its schedule. Uses the
@@ -89,9 +92,12 @@ class STINKYTOFU_EXPORT WaitAluTracker {
     /// the one already issued, else `formWmma`'s (an XDL WMMA).
     int untilFree(const StinkyInstruction& inst, WaitAluHideOp op,
                   const StinkyInstruction* formWmma = nullptr) const;
-    /// untilFree() for `consumer` right after `producer`, with nothing else in flight.
+    /// untilFree() for `consumer` right after `producer`, with nothing else in flight. With
+    /// `valusPerWmma` > 0 (op Wmma only), each WMMA is followed by that many VALUs, which fill
+    /// the tail of a form's mixed hide; the result still counts WMMAs.
     int requiredGap(const StinkyInstruction& producer, const StinkyInstruction& consumer,
-                    WaitAluHideOp op, const StinkyInstruction* formWmma = nullptr) const;
+                    WaitAluHideOp op, const StinkyInstruction* formWmma = nullptr,
+                    int valusPerWmma = 0) const;
     /// Issue `inst`: apply the wait it needs, then record what it produces.
     void commit(const StinkyInstruction& inst);
 

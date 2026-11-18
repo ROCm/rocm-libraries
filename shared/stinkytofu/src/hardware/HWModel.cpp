@@ -18,13 +18,32 @@ namespace {
 // load-bearing. One definition in one TU, reached through an exported function,
 // keeps that sound.
 
-// This arch's per-form wait-hide counts. Rows may be added in any order.
-// Other arches omit .waitHide.
-constexpr HWModel::WaitHide::Form kGfx1250WaitHideForms[] = {
-    {.costLatency = 4, .dstVgprs = 8, .xdlVaVdst = 13, .csmaccVaVdst = 13},
-    {.costLatency = 8, .dstVgprs = 8, .xdlVaVdst = 12, .csmaccVaVdst = 12},
-    {.costLatency = 8, .dstVgprs = 16, .xdlVaVdst = 11, .csmaccVaVdst = 11},
-    {.costLatency = 16, .dstVgprs = 8, .xdlVaVdst = 12, .csmaccVaVdst = 12},
+// This arch's per-form wait-hide rules. Rows may be added in any order. Other arches omit
+// .waitHide. Every row gives XDL and CSMACC producers the same rules, and the src role takes
+// the dst rules until it has its own.
+using Hide = HWModel::WaitHide::Hide;
+using RoleHide = HWModel::WaitHide::RoleHide;
+using RuleSet = HWModel::WaitHide::RuleSet;
+using Form = HWModel::WaitHide::Form;
+
+constexpr RoleHide roleHide(Hide pure, Hide mix = {}, Hide valu = {}) {
+    return {.pure = pure, .mix = mix, .valu = valu};
+}
+constexpr RuleSet rules(RoleHide dst, RoleHide src = {}, int wmmaSlots = 1) {
+    return {.dst = dst, .src = src, .wmmaSlots = wmmaSlots};
+}
+constexpr Form sameRules(int costLatency, int dstVgprs, bool scaled, RuleSet rs) {
+    return {.costLatency = costLatency, .dstVgprs = dstVgprs, .scaled = scaled, .xdl = rs, .csmacc = rs};
+}
+
+constexpr Form kGfx1250WaitHideForms[] = {
+    // Per (pass count, dst VGPRs, scaled): dst rules (RAW / WAW consumers wait for the writeback)
+    // then src rules (a WAR consumer waits for the last source read). Only matrix-op counts for
+    // the dst role so far; the src role falls back to them.
+    sameRules(4, 8, false, rules(roleHide({13, 0}))),
+    sameRules(8, 8, false, rules(roleHide({12, 0}))),
+    sameRules(8, 16, false, rules(roleHide({11, 0}))),
+    sameRules(16, 8, false, rules(roleHide({12, 0}))),
 };
 
 constexpr HWModel kGfx1250Model = {
@@ -80,6 +99,10 @@ constexpr HWModel kGfx1250Model = {
     .waitHide =
         {
             .forms = kGfx1250WaitHideForms,
+            // Form-independent sets: no rules yet, so a CSMACC producer with no form latched and an
+            // f64 producer always wait.
+            .noLatchCsmacc = {},
+            .dpmacc = {},
             .vmVsrcLds = 11,
             .vmVsrcTex = 11,
             .vmVsrcBridge = 11,

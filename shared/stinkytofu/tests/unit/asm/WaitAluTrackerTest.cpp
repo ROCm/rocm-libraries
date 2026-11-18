@@ -126,17 +126,19 @@ TEST_F(WaitAluTrackerTest, DsSourceOverwriteCountsLdsOps) {
     EXPECT_LT(t.query(mov).vmVsrc, 0);
 }
 
-// A transcendental after the producer breaks the matrix-op hide: only a wait drains it.
-TEST_F(WaitAluTrackerTest, TransBreaksTheHide) {
+// A transcendental or an f64 op after the producer neither counts as a matrix op nor blocks
+// the hide: 12 matrix ops still free the store.
+TEST_F(WaitAluTrackerTest, TransAndDpmaccDoNotBreakTheHide) {
     const std::vector<StinkyInstruction*> insts =
         parse("  v[0:7] = " + std::string(kWmma) + "\n" +
               "  v40 = \"st.v_mov_b32\"(v41) { issueCycles = 1, latencyCycles = 1 }\n" +
               "  v42 = \"st.v_rcp_f32\"(v43) { issueCycles = 1, latencyCycles = 8 }\n" +
+              "  v[44:45] = \"st.v_fma_f64\"(v[46:47], v[48:49], v[50:51]) { issueCycles = 1, latencyCycles = 32 }\n" +
               "  v100 = \"st.ds_load_b32\"(v40) " + kDsAttrs + "\n");
-    ASSERT_EQ(insts.size(), 4u);
+    ASSERT_EQ(insts.size(), 5u);
     WaitAluTracker t = makeTracker();
-    for (size_t i = 0; i < 3; ++i) t.commit(*insts[i]);
-    EXPECT_EQ(t.untilFree(*insts[3], WaitAluHideOp::Wmma), -1);
+    for (size_t i = 0; i < 4; ++i) t.commit(*insts[i]);
+    EXPECT_EQ(t.untilFree(*insts[4], WaitAluHideOp::Wmma), 12);
 }
 
 // A VALU consumer never gets a va_vdst, and the form comes from formWmma before any WMMA issued.
@@ -211,6 +213,25 @@ TEST_F(WaitAluTrackerTest, UntilFreeUsesFormWmma) {
     EXPECT_EQ(t.untilFree(*insts[2], WaitAluHideOp::Wmma, insts[1]), -1);
     EXPECT_GT(t.untilFree(*insts[2], WaitAluHideOp::Wmma, insts[0]), 0);
     EXPECT_EQ(t.requiredGap(*insts[1], *insts[2], WaitAluHideOp::Wmma, insts[1]), -1);
+}
+
+// A read never waits for a read: the store waits for the v_mov that wrote v1 (one follower in
+// the shared order), not for the v_add that read it.
+TEST_F(WaitAluTrackerTest, ReadWaitsForWriterNotReader) {
+    const std::vector<StinkyInstruction*> insts =
+        parse("  v1 = \"st.v_mov_b32\"(v5) { issueCycles = 1, latencyCycles = 1 }\n"
+              "  v2 = \"st.v_add_f32\"(v3, v1) { issueCycles = 1, latencyCycles = 5 }\n"
+              "  \"st.ds_store_b32\"(v7, v1) " + std::string(kDsAttrs) + "\n" +
+              "  v1 = \"st.ds_load_b32\"(v6) " + kDsAttrs + "\n");
+    ASSERT_EQ(insts.size(), 4u);
+    WaitAluTracker t = makeTracker();
+    t.commit(*insts[0]);
+    t.commit(*insts[1]);
+    EXPECT_EQ(t.query(*insts[2]).vaVdst, 1);
+    // The store's wait retires the writer, not the reader: the load overwriting v1 still waits
+    // for the v_add's read.
+    t.commit(*insts[2]);
+    EXPECT_EQ(t.query(*insts[3]).vaVdst, 0);
 }
 
 }  // namespace

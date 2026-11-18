@@ -192,32 +192,83 @@ TEST(HWModelDsIssue, UnmodelledShareIsInert) {
         << "an arch that does not model pipe sharing must keep the ISA cost";
 }
 
-// The lookup key must stay unique and gfx1250v0 must keep mirroring gfx1250; no numbers pinned.
+namespace {
+// Fewest matrix ops alone that satisfy a rule (slots per matrix op); -1 when none do.
+int matrixOpsAlone(const HWModel::WaitHide::Hide& h, int slots) {
+    if (!h.on()) return -1;
+    if (h.tail == 0) return h.lead;
+    if (slots <= 0) return -1;
+    return h.lead + (h.tail + slots - 1) / slots;
+}
+int matrixOpsAlone(const HWModel::WaitHide::RoleHide& rh, int slots) {
+    int best = -1;
+    for (const auto* h : {&rh.pure, &rh.mix, &rh.valu}) {
+        const int n = matrixOpsAlone(*h, slots);
+        if (n >= 0 && (best < 0 || n < best)) best = n;
+    }
+    return best;
+}
+// Fewest VALUs alone (no matrix op) that satisfy a rule; -1 when none do.
+int valusAlone(const HWModel::WaitHide::RoleHide& rh) {
+    int best = -1;
+    for (const auto* h : {&rh.pure, &rh.mix, &rh.valu}) {
+        if (!h->on() || h->lead > 0) continue;
+        if (best < 0 || h->tail < best) best = h->tail;
+    }
+    return best;
+}
+// A src rule set may only hide EARLIER than the dst one it stands next to: the source read
+// completes before the writeback. Checked where both sides have rules.
+void expectSrcNoStricterThanDst(const HWModel::WaitHide::RuleSet& rs, const char* what) {
+    if (!rs.src.any() || !rs.dst.any()) return;
+    const int wSrc = matrixOpsAlone(rs.src, rs.wmmaSlots);
+    const int wDst = matrixOpsAlone(rs.dst, rs.wmmaSlots);
+    if (wSrc >= 0 && wDst >= 0) EXPECT_LE(wSrc, wDst) << what << " matrix ops";
+    const int vSrc = valusAlone(rs.src);
+    const int vDst = valusAlone(rs.dst);
+    if (vSrc >= 0 && vDst >= 0) EXPECT_LE(vSrc, vDst) << what << " VALUs";
+}
+}  // namespace
+
+// The lookup key must stay unique, src rules must not be stricter than dst ones, and gfx1250v0
+// must keep mirroring gfx1250; no numbers pinned.
 TEST(HWModel, Gfx1250WaitHideFormTable) {
     const HWModel& hw = hwModelForArch(kGfx1250);
 
-    // Two rows sharing a {costLatency, dstVgprs} key would make the lookup order-dependent.
+    // Two rows sharing a {costLatency, dstVgprs, scaled} key would make the lookup
+    // order-dependent.
     for (size_t i = 0; i < hw.waitHide.forms.size(); ++i) {
         for (size_t j = i + 1; j < hw.waitHide.forms.size(); ++j) {
             const auto& a = hw.waitHide.forms[i];
             const auto& b = hw.waitHide.forms[j];
-            EXPECT_FALSE(a.costLatency == b.costLatency && a.dstVgprs == b.dstVgprs)
-                << "duplicate key: latency " << a.costLatency << " dst " << a.dstVgprs;
+            EXPECT_FALSE(a.costLatency == b.costLatency && a.dstVgprs == b.dstVgprs &&
+                         a.scaled == b.scaled)
+                << "duplicate key: latency " << a.costLatency << " dst " << a.dstVgprs << " scaled "
+                << a.scaled;
         }
     }
+
+    for (const auto& form : hw.waitHide.forms) {
+        expectSrcNoStricterThanDst(form.xdl, "xdl");
+        expectSrcNoStricterThanDst(form.csmacc, "csmacc");
+        EXPECT_GE(form.xdl.wmmaSlots, 1);
+        EXPECT_GE(form.csmacc.wmmaSlots, 1);
+    }
+    expectSrcNoStricterThanDst(hw.waitHide.noLatchCsmacc, "noLatchCsmacc");
+    expectSrcNoStricterThanDst(hw.waitHide.dpmacc, "dpmacc");
 
     // A deliberate alias, not an accidental fallthrough.
     const HWModel& v0 = hwModelForArch(kGfx1250v0);
     ASSERT_EQ(v0.waitHide.forms.size(), hw.waitHide.forms.size());
     EXPECT_EQ(v0.waitHide.vmVsrcLds, hw.waitHide.vmVsrcLds);
     EXPECT_EQ(v0.waitHide.vmVsrcTex, hw.waitHide.vmVsrcTex);
-    for (size_t i = 0; i < hw.waitHide.forms.size(); ++i) {
-        EXPECT_EQ(v0.waitHide.forms[i].costLatency, hw.waitHide.forms[i].costLatency);
-        EXPECT_EQ(v0.waitHide.forms[i].dstVgprs, hw.waitHide.forms[i].dstVgprs);
-        EXPECT_EQ(v0.waitHide.forms[i].xdlVaVdst, hw.waitHide.forms[i].xdlVaVdst);
-        EXPECT_EQ(v0.waitHide.forms[i].csmaccVaVdst, hw.waitHide.forms[i].csmaccVaVdst);
-    }
+    EXPECT_EQ(v0.waitHide.vmVsrcBridge, hw.waitHide.vmVsrcBridge);
+    EXPECT_TRUE(v0.waitHide.noLatchCsmacc == hw.waitHide.noLatchCsmacc);
+    EXPECT_TRUE(v0.waitHide.dpmacc == hw.waitHide.dpmacc);
+    for (size_t i = 0; i < hw.waitHide.forms.size(); ++i)
+        EXPECT_TRUE(v0.waitHide.forms[i] == hw.waitHide.forms[i]) << "row " << i;
 }
+
 
 // archName disambiguates steppings sharing a triple (gfx1250 vs gfx1250v0).
 TEST(ArchResolve, ArchNameDisambiguatesSharedTriple) {
