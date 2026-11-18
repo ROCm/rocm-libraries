@@ -1288,3 +1288,187 @@ TEST(TestLayernormValidator, DxDataTypeDifferentFromXDeclinedBprop)
     expectBpropDxType(DT::FLOAT, DT::BFLOAT16, true);
     expectBpropDxType(DT::HALF, DT::FLOAT, true);
 }
+
+namespace
+{
+
+// [1,8,4,4] with C, H, W strides 16, 3, 2: the span is 128 for 128 elements and the order
+// matches NCHW x, yet (h, w) = (0, 3) and (2, 0) share an element.
+std::vector<int64_t> overlappingAffineStrides()
+{
+    return {128, 16, 3, 2};
+}
+
+// Normalized over W only: affine [1,1,1,4], statistics [2,8,4,1].
+LayoutCase makeNchStatCase()
+{
+    LayoutCase layout;
+    layout.affineDims = {1, 1, 1, 4};
+    layout.scaleStrides = {4, 4, 4, 1};
+    layout.biasStrides = {4, 4, 4, 1};
+    layout.dscaleStrides = {4, 4, 4, 1};
+    layout.dbiasStrides = {4, 4, 4, 1};
+    layout.statDims = {2, 8, 4, 1};
+    layout.meanStrides = {32, 4, 1, 1};
+    layout.invVarianceStrides = {32, 4, 1, 1};
+    return layout;
+}
+
+// N, C, H strides 36, 3, 2: the span is 64 for 64 elements and the order matches NCHW x,
+// yet (c, h) = (0, 3) and (2, 0) share an element.
+std::vector<int64_t> overlappingStatStrides()
+{
+    return {36, 3, 2, 1};
+}
+
+} // anonymous namespace
+
+TEST(TestLayernormValidator, OverlappingOperandStridesDeclinedFprop)
+{
+    {
+        SCOPED_TRACE("scale");
+        LayoutCase layout;
+        layout.scaleStrides = overlappingAffineStrides();
+        expectFprop(layout, true);
+    }
+    {
+        SCOPED_TRACE("bias");
+        LayoutCase layout;
+        layout.biasStrides = overlappingAffineStrides();
+        expectFprop(layout, true);
+    }
+    {
+        SCOPED_TRACE("dense statistics");
+        expectFprop(makeNchStatCase(), false);
+    }
+    {
+        SCOPED_TRACE("mean");
+        auto layout = makeNchStatCase();
+        layout.meanStrides = overlappingStatStrides();
+        expectFprop(layout, true);
+    }
+    {
+        SCOPED_TRACE("inv_variance");
+        auto layout = makeNchStatCase();
+        layout.invVarianceStrides = overlappingStatStrides();
+        expectFprop(layout, true);
+    }
+}
+
+TEST(TestLayernormValidator, OverlappingOperandStridesDeclinedBprop)
+{
+    {
+        SCOPED_TRACE("scale");
+        LayoutCase layout;
+        layout.scaleStrides = overlappingAffineStrides();
+        expectBprop(layout, true);
+    }
+    {
+        SCOPED_TRACE("dscale");
+        LayoutCase layout;
+        layout.dscaleStrides = overlappingAffineStrides();
+        expectBprop(layout, true);
+    }
+    {
+        SCOPED_TRACE("dbias");
+        LayoutCase layout;
+        layout.dbiasStrides = overlappingAffineStrides();
+        expectBprop(layout, true);
+    }
+    {
+        SCOPED_TRACE("dense statistics");
+        expectBprop(makeNchStatCase(), false);
+    }
+    {
+        SCOPED_TRACE("mean");
+        auto layout = makeNchStatCase();
+        layout.meanStrides = overlappingStatStrides();
+        expectBprop(layout, true);
+    }
+    {
+        SCOPED_TRACE("inv_variance");
+        auto layout = makeNchStatCase();
+        layout.invVarianceStrides = overlappingStatStrides();
+        expectBprop(layout, true);
+    }
+}
+
+namespace
+{
+
+// x [4,6,8,8] NCHW normalized over C, H and W: affine [1,6,8,8], statistics [4,1,1,1].
+LayoutCase makeNormalizedOverChwCase()
+{
+    const std::vector<int64_t> strides = {384, 64, 8, 1};
+    LayoutCase layout;
+    layout.xDims = {4, 6, 8, 8};
+    layout.xStrides = strides;
+    layout.affineDims = {1, 6, 8, 8};
+    layout.scaleStrides = strides;
+    layout.biasStrides = strides;
+    layout.dscaleStrides = strides;
+    layout.dbiasStrides = strides;
+    layout.statDims = {4, 1, 1, 1};
+    return layout;
+}
+
+void setAffine(LayoutCase& layout,
+               const std::vector<int64_t>& dims,
+               const std::vector<int64_t>& strides)
+{
+    layout.affineDims = dims;
+    layout.scaleStrides = strides;
+    layout.biasStrides = strides;
+    layout.dscaleStrides = strides;
+    layout.dbiasStrides = strides;
+}
+
+} // anonymous namespace
+
+TEST(TestLayernormValidator, OperandDimsMatchingXAcceptedFprop)
+{
+    expectFprop(makeNormalizedOverChwCase(), false);
+}
+
+TEST(TestLayernormValidator, OperandDimsDifferentFromXDeclinedFprop)
+{
+    {
+        SCOPED_TRACE("statistics cover 2 of x's 4 rows");
+        auto layout = makeNormalizedOverChwCase();
+        layout.statDims = {2, 1, 1, 1};
+        expectFprop(layout, true);
+    }
+    {
+        SCOPED_TRACE("affine W extent 4 against x's 8");
+        auto layout = makeNormalizedOverChwCase();
+        setAffine(layout, {1, 6, 8, 4}, {192, 32, 4, 1});
+        expectFprop(layout, true);
+    }
+    {
+        SCOPED_TRACE("affine H extent 1 against x's 8");
+        auto layout = makeNormalizedOverChwCase();
+        setAffine(layout, {1, 6, 1, 8}, {48, 8, 8, 1});
+        expectFprop(layout, true);
+    }
+}
+
+TEST(TestLayernormValidator, OperandDimsMatchingXAcceptedBprop)
+{
+    expectBprop(makeNormalizedOverChwCase(), false);
+}
+
+TEST(TestLayernormValidator, OperandDimsDifferentFromXDeclinedBprop)
+{
+    {
+        SCOPED_TRACE("saved statistics cover 3 of x's 4 rows");
+        auto layout = makeNormalizedOverChwCase();
+        layout.statDims = {3, 1, 1, 1};
+        expectBprop(layout, true);
+    }
+    {
+        SCOPED_TRACE("affine W extent 4 against x's 8");
+        auto layout = makeNormalizedOverChwCase();
+        setAffine(layout, {1, 6, 8, 4}, {192, 32, 4, 1});
+        expectBprop(layout, true);
+    }
+}

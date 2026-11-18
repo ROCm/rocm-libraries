@@ -6,6 +6,7 @@
 #include "hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h"
 #include "hipdnn_plugin_sdk/PluginApiDataTypes.h"
 #include "hipdnn_plugin_sdk/PluginException.hpp"
+#include <algorithm>
 #include <cstdint>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
@@ -20,6 +21,45 @@ using namespace hip_kernel_provider::core::utils;
 
 namespace hip_kernel_provider::layernorm
 {
+
+namespace
+{
+
+// True when the dims of size > 1, taken in increasing stride order, tile memory with no gap
+// and no overlap: each stride equals the product of the faster extents. Size-1 dims are
+// never stepped over, so their strides are free.
+bool hasDenseNonOverlappingStrides(const std::vector<int64_t>& dims,
+                                   const std::vector<int64_t>& strides)
+{
+    std::vector<size_t> order;
+    for(size_t i = 0; i < dims.size(); ++i)
+    {
+        if(dims[i] > 1)
+        {
+            order.push_back(i);
+        }
+    }
+    std::sort(
+        order.begin(), order.end(), [&](size_t a, size_t b) { return strides[a] < strides[b]; });
+
+    int64_t expected = 1;
+    for(const size_t i : order)
+    {
+        if(strides[i] != expected)
+        {
+            return false;
+        }
+        expected *= dims[i];
+    }
+    return true;
+}
+
+std::optional<int64_t> toStdOptional(flatbuffers::Optional<int64_t> value)
+{
+    return value.has_value() ? std::make_optional(value.value()) : std::nullopt;
+}
+
+} // namespace
 
 // --- Type Configuration Helpers ---
 
@@ -250,6 +290,13 @@ void LayernormValidator::checkTensorMemoryOrderSupported(
                                                            std::string("Layernorm ") + named.first
                                                                + " tensor must be packed.");
         }
+        if(!hasDenseNonOverlappingStrides(dims, strides))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                std::string("Layernorm ") + named.first
+                    + " tensor strides must address each element once with no gap.");
+        }
 
         const size_t offset = alignTrailing ? xRank - dims.size() : 0;
         for(size_t a = 0; a < dims.size(); ++a)
@@ -267,6 +314,59 @@ void LayernormValidator::checkTensorMemoryOrderSupported(
                         std::string("Layernorm ") + named.first
                             + " tensor must have the same memory order as x.");
                 }
+            }
+        }
+    };
+
+    for(const auto& named : affineTensors)
+    {
+        check(named, true);
+    }
+    for(const auto& named : statTensors)
+    {
+        check(named, false);
+    }
+}
+
+void LayernormValidator::checkOperandDimsMatchNormalizedDims(
+    int64_t xTensorId,
+    const std::vector<NamedTensorId>& affineTensors,
+    std::optional<int64_t> meanTensorId,
+    const std::vector<NamedTensorId>& statTensors)
+{
+    const auto& xAttr = findTensorAttributes(_tensorMap, xTensorId);
+    const std::vector<int64_t> xDims(xAttr.dims()->begin(), xAttr.dims()->end());
+    const size_t xRank = xDims.size();
+
+    const auto* scaleAttr = &findTensorAttributes(_tensorMap, affineTensors.front().second);
+    const auto meanAttr = meanTensorId.has_value()
+                              ? std::make_optional(&findTensorAttributes(_tensorMap, *meanTensorId))
+                              : std::nullopt;
+    const size_t normalizedDim = guessNormalizedDim(&xAttr, scaleAttr, meanAttr);
+
+    const auto check = [&](const NamedTensorId& named, bool isAffine) {
+        const auto& attr = findTensorAttributes(_tensorMap, named.second);
+        if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&attr))
+        {
+            return;
+        }
+
+        const std::vector<int64_t> dims(attr.dims()->begin(), attr.dims()->end());
+        const size_t offset = isAffine ? xRank - dims.size() : 0;
+        for(size_t i = 0; i < xRank; ++i)
+        {
+            const bool inOperand = i >= offset && i - offset < dims.size();
+            const int64_t dim = inOperand ? dims[i - offset] : 1;
+            const bool normalized = i >= normalizedDim;
+            const int64_t expected = (normalized == isAffine) ? xDims[i] : 1;
+            if(dim != expected)
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    std::string("Layernorm ") + named.first + " dim " + std::to_string(i) + " is "
+                        + std::to_string(dim) + ", expected " + std::to_string(expected)
+                        + " for normalized dims starting at " + std::to_string(normalizedDim)
+                        + ".");
             }
         }
     };
@@ -333,6 +433,11 @@ void LayernormValidator::checkTensorConfigSupported(
         fwdStatTensors);
     validateNormalizedDim(ioTensorIds, affineTensorIds, statTensorIds);
     checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);
+    checkOperandDimsMatchNormalizedDims(
+        lnAttr.x_tensor_uid(),
+        {{"scale", lnAttr.scale_tensor_uid()}, {"bias", lnAttr.bias_tensor_uid()}},
+        toStdOptional(lnAttr.mean_tensor_uid()),
+        fwdStatTensors);
 }
 
 void LayernormValidator::checkTensorConfigSupported(
@@ -375,6 +480,12 @@ void LayernormValidator::checkTensorConfigSupported(
                                     bwdStatTensors);
     validateNormalizedDim(ioTensorIds, affineTensorIds, statTensorIds);
     checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);
+    checkOperandDimsMatchNormalizedDims(lnAttr.x_tensor_uid(),
+                                        {{"scale", lnAttr.scale_tensor_uid()},
+                                         {"dscale", lnAttr.dscale_tensor_uid()},
+                                         {"dbias", lnAttr.dbias_tensor_uid()}},
+                                        toStdOptional(lnAttr.mean_tensor_uid()),
+                                        bwdStatTensors);
     checkDxDataTypeSupported(lnAttr.x_tensor_uid(), lnAttr.dx_tensor_uid());
 }
 
