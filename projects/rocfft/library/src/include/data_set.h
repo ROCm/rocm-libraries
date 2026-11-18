@@ -473,8 +473,9 @@ struct data_set_t
      * 
      * @throw An `std::logic_error` is thrown if the current object is an empty
      * data set, has any non-zero lower bound for a length axis, or has a set array
-     * type that does not match its side of the transform (complex for complex
-     * transforms, real or Hermitian for real ones).
+     * type that does not match its side of the transform (complex interleaved or
+     * planar for complex transforms; real or Hermitian interleaved for real ones,
+     * since in-place real transforms do not support planar data).
      * An `std::invalid_argument` is thrown if `fft_type` is not an expected value
      * or if `other_io` is not an expected value, or if a real data set is to be returned
      * for a Hermitian innermost length of 1 with `other_innermost_length_is_odd` set
