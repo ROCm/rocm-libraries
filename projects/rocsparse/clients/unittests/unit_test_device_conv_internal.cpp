@@ -1467,8 +1467,8 @@ namespace
     // S values into targets with T values, a supported pair. The values are converted and
     // the indices match the target format, for the same format (BSR with 2 x 2 blocks),
     // cross-format COO, COO AoS and CSR conversions, and the permissive CSC, ELL and BSR to
-    // COO conversions through an intermediate CSR matrix (not for f16 and bf16 values).
-    // The target values start at fill.
+    // COO (and CSC to COO AoS) conversions through an intermediate CSR matrix (not for f16
+    // and bf16 values). The target values start at fill.
     template <typename S, typename T>
     void mixed_datatypes_convert(rocsparse_handle handle, T fill)
     {
@@ -1492,7 +1492,8 @@ namespace
                               {rocsparse_format_coo_aos, rocsparse_format_coo, false, 1},
                               {rocsparse_format_csc, rocsparse_format_coo, true, 1},
                               {rocsparse_format_ell, rocsparse_format_coo, true, 1},
-                              {rocsparse_format_bsr, rocsparse_format_coo, true, 1}};
+                              {rocsparse_format_bsr, rocsparse_format_coo, true, 1},
+                              {rocsparse_format_csc, rocsparse_format_coo_aos, true, 1}};
         for(const Case& c : cases)
         {
             SCOPED_TRACE(testing::Message() << "source " << c.sf << " target " << c.tf);
@@ -1500,12 +1501,16 @@ namespace
             S2sMat<T>        target(c.tf, dt_of<T>(), true, c.block_dim, fill);
             const S2sArrays& want = target.host;
             // The permissive routes start with a CSC, ELL or BSR -> CSR conversion in the
-            // source data type, which has no f16 or bf16 kernel.
+            // source data type, which has no f16 or bf16 kernel. The buffer size query of
+            // the analysis stage runs that conversion and returns the error.
             if(c.permissive
                && (std::is_same_v<S, _Float16> || std::is_same_v<S, rocsparse_bfloat16>))
             {
-                EXPECT_EQ(sparse_to_sparse(handle, source.descr, target.descr, c.permissive),
+                std::string failed_call;
+                EXPECT_EQ(sparse_to_sparse(
+                              handle, source.descr, target.descr, c.permissive, &failed_call),
                           rocsparse_status_not_implemented);
+                EXPECT_EQ(failed_call, "rocsparse_sparse_to_sparse_buffer_size(analysis)");
                 EXPECT_EQ(target.read_a(), std::vector<int32_t>(target.host.a.size(), -7));
                 EXPECT_EQ(target.read_b(), std::vector<int32_t>(target.host.b.size(), -7));
                 EXPECT_EQ(target.read_val(), std::vector<T>(want.val.size(), fill));
@@ -1890,5 +1895,32 @@ namespace
         EXPECT_EQ(sparse_to_sparse(handle, source.descr, target), st_ptr);
         EXPECT_EQ(t_ptr.read(), ptr_guard);
         EXPECT_EQ(t_val.read(), val_guard);
+    }
+
+    // CSR -> CSR from a 3 x 3 source into a 4 x 4 target: the compute stage returns
+    // rocsparse_status_invalid_size.
+    TEST_F(ConvInternal, SparseToSparseSameFormatSizeMismatch)
+    {
+        Silence                          silence;
+        S2sMat<float>                    source(rocsparse_format_csr, f32, false);
+        constexpr int64_t                m = s2s_m + 1;
+        DevBuf<int32_t>                  t_ptr(m + 1), t_col(source.host.nnz);
+        DevBuf<rocsparse_double_complex> t_val(source.host.nnz);
+        Spmat                            target;
+        ASSERT_EQ(rocsparse_create_csr_descr(&target,
+                                             m,
+                                             m,
+                                             source.host.nnz,
+                                             t_ptr,
+                                             t_col,
+                                             t_val,
+                                             i32,
+                                             i32,
+                                             base0,
+                                             rocsparse_datatype_f64_c),
+                  st_ok);
+        std::string failed_call;
+        EXPECT_EQ(sparse_to_sparse(handle, source.descr, target, false, &failed_call), st_size);
+        EXPECT_EQ(failed_call, "rocsparse_sparse_to_sparse(compute)");
     }
 } // namespace
