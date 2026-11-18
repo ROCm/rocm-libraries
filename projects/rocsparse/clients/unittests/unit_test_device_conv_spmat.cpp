@@ -39,7 +39,6 @@
 #include <cstdint>
 #include <string>
 #include <tuple>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -537,6 +536,32 @@ namespace
         return st;
     }
 
+    // Runs the analysis and the compute stages of a conversion and returns the first
+    // status that is not success.
+    rocsparse_status sparse_to_sparse_status(rocsparse_handle            handle,
+                                             rocsparse_const_spmat_descr source,
+                                             rocsparse_spmat_descr       target,
+                                             bool                        permissive = false)
+    {
+        S2sDescr s2s;
+        auto     st = rocsparse_create_sparse_to_sparse_descr(&s2s, source, target, s2s_def);
+        if(st == st_ok && permissive)
+            st = rocsparse_sparse_to_sparse_permissive(s2s);
+        for(auto stage : {s2s_ana, s2s_cmp})
+        {
+            size_t size = 0;
+            if(st == st_ok)
+                st = rocsparse_sparse_to_sparse_buffer_size(
+                    handle, s2s, source, target, stage, &size);
+            if(st == st_ok)
+            {
+                DevBuf<char> buffer(size);
+                st = rocsparse_sparse_to_sparse(handle, s2s, source, target, stage, size, buffer);
+            }
+        }
+        return st;
+    }
+
     template <typename T, typename J>
     rocsparse_status analysis_status(rocsparse_handle     handle,
                                      const HostMat<T, J>& sm,
@@ -667,7 +692,6 @@ namespace
                                       rocsparse_direction  dir_s,
                                       rocsparse_index_base base)
     {
-        constexpr auto      f64   = rocsparse_datatype_f64_r;
         const auto          itype = it_of<I>();
         std::vector<double> dense(m * n, 0.0);
         std::vector<bool>   nonzero(m * n, false);
@@ -758,16 +782,8 @@ namespace
                         &target, mb, nb, 1, dir, bd, t_ptr, t_ind, t_val, itype, itype, base, f64),
                     st_ok);
                 if(reblock)
-                {
-                    S2sDescr strict;
-                    ASSERT_EQ(
-                        rocsparse_create_sparse_to_sparse_descr(&strict, source, target, s2s_def),
-                        st_ok);
-                    size_t size = 0;
-                    EXPECT_EQ(rocsparse_sparse_to_sparse_buffer_size(
-                                  handle, strict, source, target, s2s_ana, &size),
+                    EXPECT_EQ(analysis_status(handle, source, target),
                               rocsparse_status_not_implemented);
-                }
                 S2sDescr s2s;
                 ASSERT_EQ(rocsparse_create_sparse_to_sparse_descr(&s2s, source, target, s2s_def),
                           st_ok);
@@ -831,11 +847,9 @@ namespace
     // A BSR -> BSR conversion with another block dimension keeps the index and value types:
     // a 32-bit to 64-bit change of both index types or of the column index type only, or a
     // double to float value change with both value arrays set, returns
-    // rocsparse_status_not_implemented before the analysis, also in permissive mode.
+    // rocsparse_status_not_implemented, also in permissive mode.
     TEST_F(ConvSpmat, SparseToSparseBsrReblockTypes)
     {
-        constexpr auto            f32 = rocsparse_datatype_f32_r, f64 = rocsparse_datatype_f64_r;
-        constexpr auto            i64 = rocsparse_indextype_i64;
         const std::vector<double> val = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
         DevBuf<int32_t>           s_ptr(std::vector<int32_t>{0, 2, 3});
         DevBuf<int64_t>           s_ptr64(std::vector<int64_t>{0, 2, 3});
@@ -898,25 +912,18 @@ namespace
                                                      base0,
                                                      f32),
                           st_ok);
-            S2sDescr s2s;
-            ASSERT_EQ(rocsparse_create_sparse_to_sparse_descr(&s2s, source, target, s2s_def),
-                      st_ok);
-            ASSERT_EQ(rocsparse_sparse_to_sparse_permissive(s2s), st_ok);
-            size_t size = 0;
-            EXPECT_EQ(
-                rocsparse_sparse_to_sparse_buffer_size(handle, s2s, source, target, s2s_ana, &size),
-                rocsparse_status_not_implemented);
+            EXPECT_EQ(analysis_status(handle, source, target, true),
+                      rocsparse_status_not_implemented);
         }
     }
 
     // A 4 x 4 matrix in 2 x 2 blocks (0,0), (0,1) and (1,1), converted to a BSR target with
     // 1 x 1 blocks that declares the same 2 x 2 block grid, or 4 block rows and 2 block
     // columns: the target cannot hold the matrix, so the conversion returns
-    // rocsparse_status_invalid_size, also without permissive mode, and nothing is written
-    // past the target arrays.
+    // rocsparse_status_invalid_size, also without permissive mode, and the target arrays
+    // are not written.
     TEST_F(ConvSpmat, SparseToSparseBsrTargetTooSmall)
     {
-        constexpr auto             f64 = rocsparse_datatype_f64_r;
         constexpr int64_t          mb = 2, nnzb = 3, pad = 64;
         const std::vector<double>  val = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
         DevBuf<int32_t>            s_ptr(std::vector<int32_t>{0, 2, 3});
@@ -942,61 +949,12 @@ namespace
                 rocsparse_create_bsr_descr(
                     &target, t_mb, mb, nnzb, dir_r, 1, t_ptr, t_ind, t_val, i32, i32, base0, f64),
                 st_ok);
-            S2sDescr s2s;
-            ASSERT_EQ(rocsparse_create_sparse_to_sparse_descr(&s2s, source, target, s2s_def),
-                      st_ok);
-            if(permissive)
-                ASSERT_EQ(rocsparse_sparse_to_sparse_permissive(s2s), st_ok);
-            rocsparse_status st = st_ok;
-            for(auto stage : {s2s_ana, s2s_cmp})
-            {
-                size_t size = 0;
-                if(st == st_ok)
-                    st = rocsparse_sparse_to_sparse_buffer_size(
-                        handle, s2s, source, target, stage, &size);
-                if(st == st_ok)
-                {
-                    DevBuf<char> buffer(size);
-                    st = rocsparse_sparse_to_sparse(
-                        handle, s2s, source, target, stage, size, buffer);
-                }
-            }
-            EXPECT_EQ(st, rocsparse_status_invalid_size);
+            EXPECT_EQ(sparse_to_sparse_status(handle, source, target, permissive), st_size);
             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-            const auto tail = [](const auto& v, int64_t from) {
-                return std::vector<typename std::decay_t<decltype(v)>::value_type>(v.begin() + from,
-                                                                                   v.end());
-            };
-            EXPECT_EQ(tail(t_ptr.read(), t_mb + 1), tail(guard_i, t_mb + 1));
-            EXPECT_EQ(tail(t_ind.read(), nnzb), tail(guard_i, nnzb));
-            EXPECT_EQ(tail(t_val.read(), nnzb), tail(guard_v, nnzb));
+            EXPECT_EQ(t_ptr.read(), guard_i);
+            EXPECT_EQ(t_ind.read(), guard_i);
+            EXPECT_EQ(t_val.read(), guard_v);
         }
-    }
-
-    // Runs the analysis and the compute stages of a conversion and returns the first
-    // status that is not success.
-    rocsparse_status sparse_to_sparse_status(rocsparse_handle            handle,
-                                             rocsparse_const_spmat_descr source,
-                                             rocsparse_spmat_descr       target,
-                                             bool                        permissive)
-    {
-        S2sDescr s2s;
-        auto     st = rocsparse_create_sparse_to_sparse_descr(&s2s, source, target, s2s_def);
-        if(st == st_ok && permissive)
-            st = rocsparse_sparse_to_sparse_permissive(s2s);
-        for(auto stage : {s2s_ana, s2s_cmp})
-        {
-            size_t size = 0;
-            if(st == st_ok)
-                st = rocsparse_sparse_to_sparse_buffer_size(
-                    handle, s2s, source, target, stage, &size);
-            if(st == st_ok)
-            {
-                DevBuf<char> buffer(size);
-                st = rocsparse_sparse_to_sparse(handle, s2s, source, target, stage, size, buffer);
-            }
-        }
-        return st;
     }
 
     // A BSR source without blocks, with null column and value arrays, converted to a BSR
@@ -1006,7 +964,6 @@ namespace
     // rocsparse_status_invalid_size.
     TEST_F(ConvSpmat, SparseToSparseBsrEmptySource)
     {
-        constexpr auto f64 = rocsparse_datatype_f64_r;
         struct Case
         {
             const char*          what;
@@ -1019,16 +976,7 @@ namespace
             {"4 x 4, direction only", 2, 2, 2, 2, 2, 2, dir_c, base0, st_ok},
             {"4 x 6, 2 x 2 to 3 x 3 blocks", 2, 3, 2, 2, 2, 3, dir_r, base1, st_ok},
             {"0 x 4, 2 x 2 to 1 x 1 blocks", 0, 2, 2, 0, 4, 1, dir_r, base1, st_ok},
-            {"0 x 4, target block columns too few",
-             0,
-             2,
-             2,
-             0,
-             2,
-             1,
-             dir_r,
-             base0,
-             rocsparse_status_invalid_size},
+            {"0 x 4, target block columns too few", 0, 2, 2, 0, 2, 1, dir_r, base0, st_size},
         };
         for(const Case& c : cases)
         {
@@ -1085,7 +1033,6 @@ namespace
     // the analysis buffer size stage, before the source arrays are read.
     TEST_F(ConvSpmat, SparseToSparseBsrReblock32BitLimits)
     {
-        constexpr auto  f64 = rocsparse_datatype_f64_r;
         DevBuf<int32_t> ptr(4), ind(4);
         DevBuf<double>  val(16);
         {
@@ -1134,7 +1081,6 @@ namespace
     // storage returns rocsparse_status_not_implemented.
     TEST_F(ConvSpmat, SparseToSparseBsrReblockAttributes)
     {
-        constexpr auto            f64 = rocsparse_datatype_f64_r;
         const std::vector<double> val = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
         DevBuf<int32_t>           s_ptr(std::vector<int32_t>{0, 2, 3});
         DevBuf<int32_t>           s_ind(std::vector<int32_t>{0, 1, 1});
@@ -1538,7 +1484,6 @@ namespace
                     return rocsparse_create_bsr_descr(
                         &out, R, C, Z, h32.dir, h32.bd, p, i, V, pt, it, B, f32);
                 };
-            constexpr auto i64 = rocsparse_indextype_i64;
             // (64 bit pointers, 32 bit indices) and (64, 64) are supported; (32, 64) is
             // not documented as supported or unsupported.
             const std::
