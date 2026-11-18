@@ -154,9 +154,10 @@ inline origami::hardware_t make_hardware(int gpu_arch) {
     parallel_mi_cu             = 1;
     mem_bw_per_wg_coefficients = std::make_tuple(0, 0.008, 0);
   } else if (gpu_arch == 1250) {
-    // TODO: using gfx950 placeholders for most fields, update lds_capacity and l2_capacity later
+    // TODO: using gfx950 placeholders for most fields, update lds_capacity later
     auto hw                       = make_hardware(950);
     hw.arch                       = origami::hardware_t::architecture_t::gfx1250;
+    hw.L2_capacity                = 96ull << 20;  // one AID's L2
     hw.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.016, 0);
     return hw;
   }
