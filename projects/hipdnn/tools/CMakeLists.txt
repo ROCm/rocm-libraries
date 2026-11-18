@@ -538,7 +538,9 @@ endif()
         endforeach()
 
         # <fixture>:<exit status>:<model checks>[:<diagnostic>], as the fixtures' README states
-        # them; the optional diagnostic is a colon-free text a reported diagnostic must contain. A
+        # them; the optional diagnostic is a colon-free text a reported diagnostic must contain.
+        # An overlay fixture holds only the files it changes, laid over slotted_valid or, for
+        # the l2_*_optional and l2_tflops_work_feature fixtures, over l2_dynamic_features. A
         # predict_engine model is admitted only through the L1 guards, so a static_order
         # estimate fails the run while a static_order kernel ranker does not. A ranker whose
         # features need a sample, run without one, is admitted with extraction skipped.
@@ -549,6 +551,9 @@ endif()
             slotted_two_ws_tokens
             slotted_ranker_names_other_slot
             slotted_multi_launch
+            l2_unguarded_optional
+            l2_guarded_optional
+            l2_tflops_work_feature
         )
         foreach(
             roleFixture
@@ -556,6 +561,7 @@ endif()
             "l2_dynamic_features:0:sort_kernel_catalog=true"
             "l2_unguarded_optional:0:sort_kernel_catalog=true"
             "l2_guarded_optional:0:sort_kernel_catalog=true"
+            "l2_tflops_work_feature:0:sort_kernel_catalog=true"
             "l1_static_order:1:sort_kernel_catalog=true,predict_engine=false"
             "l1_native:0:sort_kernel_catalog=true,predict_engine=true"
             "slotted_valid:0:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=true,predict_engine=true"
@@ -584,18 +590,26 @@ endif()
                     "-DHIPDNN_VALIDATE_DESCRIPTORS_OVERLAY=${fixtureRoot}"
                     "-DHIPDNN_VALIDATE_DESCRIPTORS_WORKDIR=${CMAKE_CURRENT_BINARY_DIR}/vdo/${fixtureName}"
                 )
-                set(fixtureRoot "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/slotted_valid")
+                if(fixtureName MATCHES "^l2_")
+                    set(fixtureRoot "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/l2_dynamic_features")
+                else()
+                    set(fixtureRoot "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/slotted_valid")
+                endif()
             elseif(fixtureName STREQUAL "slotted_feature_samples_ws")
                 set(fixtureCaseArgs
                     "-DHIPDNN_VALIDATE_DESCRIPTORS_FEATURE_SAMPLES=${fixtureRoot}/feature_samples.json"
                 )
                 set(fixtureRoot "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/slotted_valid")
-            elseif(fixtureName STREQUAL "l2_unguarded_optional")
-                set(fixtureCaseArgs
-                    "-DHIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED=$graph.nodes[0].attn_scale_value"
+            endif()
+            # l2_tflops_work_feature also reads $graph.flops bare, which a tflops model may: only
+            # the scale is reported.
+            if(fixtureName STREQUAL "l2_unguarded_optional"
+               OR fixtureName STREQUAL "l2_tflops_work_feature")
+                list(APPEND fixtureCaseArgs
+                     "-DHIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED=$graph.nodes[0].attn_scale_value"
                 )
             elseif(fixtureName STREQUAL "l2_guarded_optional")
-                set(fixtureCaseArgs "-DHIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED=none")
+                list(APPEND fixtureCaseArgs "-DHIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED=none")
             endif()
             add_test(
                 NAME hipdnn_validate_descriptors_${fixtureName}

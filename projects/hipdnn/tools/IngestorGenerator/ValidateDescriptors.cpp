@@ -737,9 +737,11 @@ nlohmann::json validateModels(const DescriptorCatalog& catalog,
                 {
                     throw std::invalid_argument("Feature contract hash mismatch");
                 }
-                // RFC 0019 section 6.2: a feature a valid graph may leave unbound must be read
-                // through value_or_default or behind present, or that graph is unscorable. A
-                // warning until the shipped models are migrated (uhd_gen rewrite-signature).
+                // RFC 0019 section 6.7 (absent is not zero) and section 6.8 rule 9: a feature a
+                // valid graph may leave unbound must be read through value_or_default or behind
+                // present, or that graph is unscorable (a model of a work-derived metric, tflops,
+                // may read the work features bare). A warning until the shipped models are
+                // migrated (uhd_gen rewrite-signature).
                 const auto unguarded = hipdnn_tools::unguardedOptionalReferences(
                     model->featuresSignature, model->score.metric);
                 if(!unguarded.empty())

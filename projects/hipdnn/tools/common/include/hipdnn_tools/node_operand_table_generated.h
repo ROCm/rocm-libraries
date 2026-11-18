@@ -4,7 +4,8 @@
 // publishes them, each marked optional when a valid node may leave it out: optional
 // scalars and tensor references (skipped when unset), vectors of tensor references
 // and vector attributes (the schema fixes no length). UHD models must tolerate their
-// absence (RFC 0019 section 6.2). Tools-internal (hipdnn_tools_common): never installed.
+// absence: RFC 0019 section 6.7 (absent is not zero) and section 6.8 rule 9.
+// Tools-internal (hipdnn_tools_common): never installed.
 
 #pragma once
 

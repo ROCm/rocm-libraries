@@ -260,13 +260,13 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
                     "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen_cache_key.py"
                     "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/default_flatc_version.txt"
                     ${_cache_key_schema_depends} ${_cache_key_flatc_dependency}
-            COMMENT "Generating node_operands_generated.h from the FlatBuffers schemas"
+            COMMENT "Generating node_operands_generated.h and node_operand_table_generated.h"
             VERBATIM
         )
         add_custom_target(
             generate_hipdnn_node_operands
             DEPENDS "${_node_operands_header}" "${_node_operand_table_header}"
-            COMMENT "Node-operand visitor header generation"
+            COMMENT "Node-operand headers generation"
         )
         add_dependencies(hipdnn_flatbuffers_sdk generate_hipdnn_node_operands)
     endif()

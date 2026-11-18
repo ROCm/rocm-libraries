@@ -84,7 +84,7 @@ class Operand:
 
 
 class OperandsEmitter:
-    """Walks the node union's member tables and emits the visitor header."""
+    """Walks the node union's member tables; emits the visitor header and the operand table."""
 
     def __init__(self, schema, root_name=ROOT_TABLE, node_name=NODE_TABLE):
         self.schema = schema
@@ -270,8 +270,9 @@ class OperandsEmitter:
             "// and vector attributes (the schema fixes no length). UHD models must tolerate their"
         )
         w(
-            "// absence (RFC 0019 section 6.2). Tools-internal (hipdnn_tools_common): never installed."
+            "// absence: RFC 0019 section 6.7 (absent is not zero) and section 6.8 rule 9."
         )
+        w("// Tools-internal (hipdnn_tools_common): never installed.")
         w("")
         w("#pragma once")
         w("")
@@ -582,6 +583,31 @@ class OperandsEmitter:
         w("")
 
 
+def sdk_emitter(flatc_path):
+    """The emitter over the SDK's own graph.fbs."""
+    schemas_dir = os.path.join(_HIPDNN_DIR, SDK_DIR, "schemas")
+    with tempfile.TemporaryDirectory() as work_dir:
+        schema = load_schema(flatc_path, schemas_dir, SCHEMA_FILE, work_dir)
+    return OperandsEmitter(schema)
+
+
+def generated_headers(emitter):
+    """(path, text) of every header one run writes: flatbuffers_sdk/CMakeLists.txt declares
+    both as the outputs of the rule that runs this script."""
+    return (
+        (
+            os.path.join(
+                _HIPDNN_DIR, SDK_DIR, "include", NAMESPACE, "data_objects", HEADER_NAME
+            ),
+            emitter.emit(),
+        ),
+        (
+            os.path.join(_HIPDNN_DIR, TABLE_DIR, TABLE_HEADER_NAME),
+            emitter.emit_table(),
+        ),
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -591,21 +617,9 @@ def main():
         "binary CMake already resolved, which need not be on PATH.",
     )
     flatc_path = _resolve_flatc(parser.parse_args().flatc)
-    schemas_dir = os.path.join(_HIPDNN_DIR, SDK_DIR, "schemas")
-    output_dir = os.path.join(
-        _HIPDNN_DIR, SDK_DIR, "include", NAMESPACE, "data_objects"
-    )
-    with tempfile.TemporaryDirectory() as work_dir:
-        schema = load_schema(flatc_path, schemas_dir, SCHEMA_FILE, work_dir)
-    emitter = OperandsEmitter(schema)
-    for directory, name, text in (
-        (output_dir, HEADER_NAME, emitter.emit()),
-        (os.path.join(_HIPDNN_DIR, TABLE_DIR), TABLE_HEADER_NAME, emitter.emit_table()),
-    ):
-        os.makedirs(directory, exist_ok=True)
-        with open(
-            os.path.join(directory, name), "w", encoding="utf-8", newline="\n"
-        ) as f:
+    for path, text in generated_headers(sdk_emitter(flatc_path)):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
 
 
