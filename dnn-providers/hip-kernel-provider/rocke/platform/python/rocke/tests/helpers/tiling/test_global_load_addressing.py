@@ -37,6 +37,8 @@ _CASES = [
     CopyCase("f16_odd_row_stride", F16, run=4, row_stride=257),
     # 60 rows is not a multiple of the 8-row tile: every load is masked.
     CopyCase("f16_masked_rows", F16, run=4, rows=60),
+    # A negative row stride (a reversed view): the later row blocks sit at negative constants.
+    CopyCase("u8_reversed_rows", U8, run=8, row_stride=-256),
 ]
 
 
@@ -93,7 +95,7 @@ def test_every_per_element_load_is_one_lane_base_plus_a_constant(
         definition = ir.definitions[index]
         assert definition.startswith("add nsw i32 "), definition
         assert ir.operands(index)[0] == base, definition
-        assert ir.operands(index)[1].isdigit(), definition
+        assert ir.operands(index)[1].lstrip("-").isdigit(), definition
 
 
 @pytest.mark.parametrize("engine", ENGINES)
