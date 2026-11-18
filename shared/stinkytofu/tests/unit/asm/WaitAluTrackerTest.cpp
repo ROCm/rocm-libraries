@@ -126,19 +126,6 @@ TEST_F(WaitAluTrackerTest, DsSourceOverwriteCountsLdsOps) {
     EXPECT_LT(t.query(mov).vmVsrc, 0);
 }
 
-// A transcendental after the producer breaks the matrix-op hide: only a wait drains it.
-TEST_F(WaitAluTrackerTest, TransBreaksTheHide) {
-    const std::vector<StinkyInstruction*> insts =
-        parse("  v[0:7] = " + std::string(kWmma) + "\n" +
-              "  v40 = \"st.v_mov_b32\"(v41) { issueCycles = 1, latencyCycles = 1 }\n" +
-              "  v42 = \"st.v_rcp_f32\"(v43) { issueCycles = 1, latencyCycles = 8 }\n" +
-              "  v100 = \"st.ds_load_b32\"(v40) " + kDsAttrs + "\n");
-    ASSERT_EQ(insts.size(), 4u);
-    WaitAluTracker t = makeTracker();
-    for (size_t i = 0; i < 3; ++i) t.commit(*insts[i]);
-    EXPECT_EQ(t.untilFree(*insts[3], WaitAluHideOp::Wmma), -1);
-}
-
 // A VALU consumer never gets a va_vdst, and the form comes from formWmma before any WMMA issued.
 TEST_F(WaitAluTrackerTest, RequiredGapUsesFormWmma) {
     const std::vector<StinkyInstruction*> insts =

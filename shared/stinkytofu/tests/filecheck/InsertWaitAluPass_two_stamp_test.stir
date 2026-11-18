@@ -1,0 +1,82 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --InsertWaitAluPass=enableESM2TrackValuVsrc --print-output
+#
+# Two stamps per VGPR: dst = the newest writer, src = the newest reader.
+
+#===----------------------------------------------------------------------===#
+# A store reading v1 waits for the v_mov that wrote it (1 follower), not for the v_add that
+# only read it (0 followers): no RAR.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @two_stamp_read_waits_for_writer_only
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 1
+# CHECK-NEXT: ds_store_b32
+st.func @two_stamp_read_waits_for_writer_only() {
+^entry:
+  v1 = "st.v_mov_b32"(v5) { issueCycles = 1, latencyCycles = 1 }
+  v2 = "st.v_add_f32"(v3, v1) { issueCycles = 1, latencyCycles = 5 }
+  "st.ds_store_b32"(v7, v1) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# The reader's stamp is not consumed by the store's wait: the ds_load that then overwrites v1
+# still waits for the v_add's read (WAR), which the va_vdst = 1 left in flight.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @two_stamp_write_waits_for_reader
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 1
+# CHECK-NEXT: ds_store_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK-NEXT: v1 = "st.ds_load_b32"
+st.func @two_stamp_write_waits_for_reader() {
+^entry:
+  v1 = "st.v_mov_b32"(v5) { issueCycles = 1, latencyCycles = 1 }
+  v2 = "st.v_add_f32"(v3, v1) { issueCycles = 1, latencyCycles = 5 }
+  "st.ds_store_b32"(v7, v1) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v1 = "st.ds_load_b32"(v6) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# A producer that reads and writes the same VGPR (v_fmac) stamps both roles with its own ticket:
+# the ds_load overwriting it waits for it through either.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @two_stamp_read_modify_write_stamps_both
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK-NEXT: v1 = "st.ds_load_b32"
+st.func @two_stamp_read_modify_write_stamps_both() {
+^entry:
+  v1 = "st.v_fmac_f32"(v2, v3, v1) { issueCycles = 1, latencyCycles = 5 }
+  v1 = "st.ds_load_b32"(v6) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# Roles join separately at a CFG merge. One path wrote v1 (ticket 1 of 2), the other read it
+# (ticket 2 of 2). After the join a store (read) waits only for the writer: va_vdst = 1. That
+# wait retires the writer but not the reader, so the ds_load that overwrites v1 next waits
+# va_vdst = 0 for the reader. A single stamp would have taken the later ticket for both.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @two_stamp_roles_join_separately
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 1
+# CHECK-NEXT: ds_store_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK-NEXT: v1 = "st.ds_load_b32"
+st.func @two_stamp_roles_join_separately() {
+^entry:
+  "st.s_cbranch_scc1"("label_reader", SCC0)
+  Successors: ^bb_writer, ^label_reader
+^bb_writer:
+  v1 = "st.v_mov_b32"(v5) { issueCycles = 1, latencyCycles = 1 }
+  v9 = "st.v_add_f32"(v8, v8) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_branch"("label_join")
+  Successors: ^label_join
+^label_reader:
+  v9 = "st.v_add_f32"(v8, v8) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_add_f32"(v3, v1) { issueCycles = 1, latencyCycles = 5 }
+  Successors: ^label_join
+^label_join:
+  "st.ds_store_b32"(v7, v1) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v1 = "st.ds_load_b32"(v6) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}

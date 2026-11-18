@@ -34,7 +34,7 @@ st.func @gfx1250_vmtex_hidden_no_wait() {
 # CHECK: buffer_load_b32
 # CHECK: s_wait_alu
 # CHECK-SAME: vm_vsrc = 6
-# CHECK: v_mov_b32
+# CHECK-NEXT: v_mov_b32
 
 st.func @gfx1250_vmtex_one_short_wait() {
 ^entry:
@@ -83,7 +83,7 @@ st.func @gfx1250_lds_hidden_no_wait() {
 # CHECK: buffer_load_b32
 # CHECK: s_wait_alu
 # CHECK-SAME: vm_vsrc = 0
-# CHECK: v_mov_b32
+# CHECK-NEXT: v_mov_b32
 
 st.func @gfx1250_tex_lds_between_dont_count() {
 ^entry:
