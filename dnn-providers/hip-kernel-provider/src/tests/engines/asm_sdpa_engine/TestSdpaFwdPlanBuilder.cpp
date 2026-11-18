@@ -219,18 +219,18 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAvailableKernels)
 }
 
 // Whether the registry has the row a batch-mode causal bf16 hd128 graph runs on for archId:
-// the bottom-right causal batch row, selected by the same rule getKernelNameKey applies
-// (gfx942 also matches bf16_cvt, RTNE (0) for bf16). Top-left causal graphs with
-// S_q == S_kv run on it too.
+// the bottom-right causal batch row, at the RTNE (0) conversion getBf16ConvertMode asks
+// for with bf16. Top-left causal graphs with S_q == S_kv run on it too.
 bool hasBatchCausalBf16Hd128Row(const std::string& archId)
 {
-    return std::any_of(cfg_fmha_fwd.begin(), cfg_fmha_fwd.end(), [&](const auto& entry) {
-        const auto& cfg = entry.second;
-        return cfg.arch == archId && cfg.dtype == "bf16" && cfg.hdim_q == 128 && cfg.hdim_v == 128
-               && cfg.mask == static_cast<int>(plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL)
-               && cfg.mode == static_cast<int>(hip_kernel_provider_common::BatchMode::BATCH)
-               && (archId == "gfx950" || cfg.bf16_cvt == 0);
-    });
+    return !fwdKernelNameKey(archId,
+                             "bf16",
+                             128,
+                             128,
+                             plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL,
+                             hip_kernel_provider_common::RoundingMode::RTNE,
+                             hip_kernel_provider_common::BatchMode::BATCH)
+                .empty();
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
@@ -2444,23 +2444,24 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesHeadDimsThatTruncateToASuppor
 }
 
 // ts_qo of the row isApplicable resolves for an hd128 no-mask batch graph of
-// `dtype`, selected by the same rule getKernelNameKey applies. gfx942 also
-// matches bf16_cvt, which getBf16ConvertMode sets to RTNE (0) for bf16 and
-// RTNA (1) for fp8.
+// `dtype`, at the conversion getBf16ConvertMode asks for: RTNA (1) for fp8 and
+// RTNE (0) for bf16.
 std::optional<int> resolveFwdTileSizeQo(const std::string& archId, const std::string& dtype)
 {
-    const int expectedBf16Cvt = (dtype == "fp8bf16") ? 1 : 0;
-    for(const auto& entry : cfg_fmha_fwd)
+    const auto bf16Cvt = (dtype == "fp8bf16") ? hip_kernel_provider_common::RoundingMode::RTNA
+                                              : hip_kernel_provider_common::RoundingMode::RTNE;
+    const auto key = fwdKernelNameKey(archId,
+                                      dtype,
+                                      128,
+                                      128,
+                                      plan_utils::MaskType::NO_MASK,
+                                      bf16Cvt,
+                                      hip_kernel_provider_common::BatchMode::BATCH);
+    if(key.empty())
     {
-        const auto& cfg = entry.second;
-        if(cfg.arch == archId && cfg.dtype == dtype && cfg.hdim_q == 128 && cfg.hdim_v == 128
-           && cfg.mask == 0 && cfg.mode == 0
-           && (archId == "gfx950" || cfg.bf16_cvt == expectedBf16Cvt))
-        {
-            return cfg.ts_qo;
-        }
+        return std::nullopt;
     }
-    return std::nullopt;
+    return cfg_fmha_fwd.at(key).ts_qo;
 }
 
 // s_Ts is tileSizeQo * stride_q * bytes-per-element, computed in unsigned int.

@@ -58,17 +58,16 @@ static RoundingMode
     return getRoundingMode(attrs);
 }
 
-static std::string getKernelNameKey(const std::string& archId,
-                                    const std::string& dataType,
-                                    int hdim_q, // NOLINT(readability-identifier-naming)
-                                    int hdim_v, // NOLINT(readability-identifier-naming)
-                                    plan_utils::MaskType maskType,
-                                    RoundingMode bf16_cvt, // NOLINT(readability-identifier-naming)
-                                    BatchMode mode,
-                                    const CFG* cfgs)
+std::string fwdKernelNameKey(const std::string& archId,
+                             const std::string& dataType,
+                             int hdimQ,
+                             int hdimV,
+                             plan_utils::MaskType maskType,
+                             RoundingMode bf16Cvt,
+                             BatchMode mode)
 {
     std::string kernelNameKey{};
-    for(const auto& el : *cfgs)
+    for(const auto& el : cfg_fmha_fwd)
     {
         const auto& cfg = el.second;
         if(cfg.arch != archId)
@@ -76,7 +75,7 @@ static std::string getKernelNameKey(const std::string& archId,
             continue;
         }
 
-        if(cfg.dtype == dataType && cfg.hdim_q == hdim_q && cfg.hdim_v == hdim_v
+        if(cfg.dtype == dataType && cfg.hdim_q == hdimQ && cfg.hdim_v == hdimV
            && cfg.mask == static_cast<int>(maskType) && static_cast<int>(cfg.mode) == mode)
         {
             if(archId == "gfx950")
@@ -84,7 +83,7 @@ static std::string getKernelNameKey(const std::string& archId,
                 kernelNameKey = el.first;
                 break;
             }
-            if(archId == "gfx942" && cfg.bf16_cvt == bf16_cvt)
+            if(archId == "gfx942" && cfg.bf16_cvt == bf16Cvt)
             {
                 kernelNameKey = el.first;
                 break;
@@ -985,14 +984,13 @@ bool SdpaFwdPlanBuilder::isApplicable(
         return false;
     }
 
-    auto key = getKernelNameKey(deviceString,
+    auto key = fwdKernelNameKey(deviceString,
                                 dataTypeId,
                                 static_cast<int>(qTensor->dims()->Get(3)),
                                 static_cast<int>(vTensor->dims()->Get(3)),
                                 maskType,
                                 getBf16ConvertMode(attrs, dataTypeId),
-                                batchMode,
-                                &cfg_fmha_fwd);
+                                batchMode);
 
     HIP_KERNEL_RETURN_FALSE_IF(
         key.empty(),
@@ -1233,14 +1231,13 @@ void SdpaFwdPlanBuilder::buildPlan(
 
     // Find matching kernel to graph
     fmha_v3_fwdConfig config;
-    auto kernelKey = getKernelNameKey(deviceString,
+    auto kernelKey = fwdKernelNameKey(deviceString,
                                       dataTypeId,
                                       static_cast<int>(headDimQk),
                                       static_cast<int>(headDimV),
                                       params.maskType,
                                       getBf16ConvertMode(sdpaAttrs, dataTypeId),
-                                      batchMode,
-                                      &cfg_fmha_fwd);
+                                      batchMode);
 
     if(kernelKey.empty())
     {
