@@ -30,7 +30,9 @@ def test_build_client_configures_for_the_target_and_not_the_features(monkeypatch
     tasks = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(tasks)
 
-    monkeypatch.setattr(tasks, "detect_gpu_arch", lambda: "gfx950:sramecc+:xnack-")
+    from tensilelite import GpuArch
+
+    monkeypatch.setattr(GpuArch, "detect_gpu_arch", lambda: "gfx950:sramecc+:xnack-")
     context = _RecordingContext()
 
     tasks.build_client.body(
