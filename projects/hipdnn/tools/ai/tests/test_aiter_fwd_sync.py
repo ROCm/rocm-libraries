@@ -813,7 +813,7 @@ def test_new_arch_diffs_from_the_merge_base_of_diverging_host_code_commits(sync,
         )
         recorded.append(aiter.commit(f"v0.1.1-{branch}"))
     git(aiter.root, "checkout", "-q", "main")
-    pins_path = kernels / "aiter_fwd_pins.json"
+    pins_path = kernels / "aiter_pins.json"
     pins = json.loads(pins_path.read_text())
     pins["modules"][KEY]["abi_commit"] = recorded[0]
     pins["modules"]["gfx950/fmha_v3_fwd"]["abi_commit"] = recorded[1]
