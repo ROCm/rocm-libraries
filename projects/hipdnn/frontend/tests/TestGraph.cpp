@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
@@ -434,9 +435,14 @@ protected:
     hipdnnHandle_t _handle;
     std::array<char, 256> _fakeDescs{};
     size_t _nextFakeDescIdx = 0;
+    hipdnnSeverity_t _savedLogLevel = HIPDNN_SEV_OFF;
 
     void SetUp() override
     {
+        // Pin logging off so HIPDNN_LOG_LEVEL does not enable the WARN-gated engine-config
+        // workspace reads; a test that needs WARN opts in with a SharedLogRecorder override.
+        _savedLogLevel = hipdnn_data_sdk::logging::getLogLevel();
+        hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_OFF);
         _mockBackend = std::make_shared<::testing::NiceMock<Mock_hipdnn_backend>>();
         detail::IHipdnnBackend::setInstance(_mockBackend);
         _handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
@@ -468,6 +474,7 @@ protected:
 
     void TearDown() override
     {
+        hipdnn_data_sdk::logging::setLogLevel(_savedLogLevel);
         detail::IHipdnnBackend::resetInstance();
         _mockBackend.reset();
     }
@@ -746,6 +753,18 @@ protected:
         EXPECT_NE(message.find("engine 30: behavior note filter"), std::string::npos) << message;
         EXPECT_NE(message.find("engine 40: workspace 500 exceeds limit 100"), std::string::npos)
             << message;
+    }
+
+    // Number of WARN logs naming a plan workspace over its engine config workspace; other WARNs
+    // (benchmark timing, knob handling) are not the subject.
+    static size_t countWorkspaceBreachWarns(const hipdnn_test_sdk::utilities::SharedLogRecorder& r)
+    {
+        const auto logs = r.getRecordedLogs();
+        return static_cast<size_t>(std::count_if(logs.begin(), logs.end(), [](const auto& log) {
+            return log.severity == HIPDNN_SEV_WARN
+                   && log.message.find("larger than its engine config workspace")
+                          != std::string::npos;
+        }));
     }
 
     // Every execute succeeds and every profiling query reports 1 ms, so benchmarking yields
@@ -12164,6 +12183,126 @@ TEST_F(TestGraph, BuildPlansCompliantPlanLogsNoWorkspaceWarn)
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(_engineConfigWorkspaceReads.size(), 1u);
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0u) << recorder.getRecordedLogsAsString();
+}
+
+TEST_F(TestGraph, BuildPlansReadsNoEngineConfigWorkspaceWhenLogLevelIsError)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10});
+    _engineConfigWorkspace[10] = 50;
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+
+    // WARN is below the ERROR level, so the comparison neither queries the plugin nor logs.
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_TRUE(_engineConfigWorkspaceReads.empty());
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0u) << recorder.getRecordedLogsAsString();
+}
+
+TEST_F(TestGraph, BuildPlansWithUnreadableEngineConfigWorkspaceAndNoLimitBuildsWithoutWarn)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10});
+    _unreadableWorkspaceEngines.insert(10);
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+
+    // The read is attempted, fails, and skips the comparison; the plan still builds.
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    EXPECT_EQ(_engineConfigWorkspaceReads, (std::vector<int64_t>{10}));
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0u) << recorder.getRecordedLogsAsString();
+}
+
+TEST_F(TestGraph, AutotunePlanSpecWarnsWhenBenchmarkedPlanWorkspaceExceedsEngineConfig)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {});
+    graph.injectPlanSpec(61, /*workspaceSize=*/100);
+    _engineConfigWorkspace[61] = 50;
+
+    // The config reports 50, yet the plan finalizes with 500.
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           int64_t*,
+                           void* out) {
+            *static_cast<int64_t*>(out) = 500;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    mockSuccessfulBenchmarkExecution();
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto variantPack = testVariantPack();
+    std::vector<AutotuneResult> results;
+    auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
+    auto result = graph.autotune(
+        _handle, variantPack, workspace, int64_t{100000}, AutotuneConfig{}, {}, &results);
+
+    ASSERT_TRUE(result.is_good()) << result.err_msg;
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results.front().succeeded);
+    EXPECT_EQ(countWorkspaceBreachWarns(recorder), 1u) << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "(id 61)"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "workspace 500"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "engine config workspace 50"));
+}
+
+TEST_F(TestGraph, AutotunePlanSpecWarnsWhenPrimingPlanWorkspaceExceedsEngineConfig)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {});
+    graph.injectPlanSpec(61, /*workspaceSize=*/100, /*supportsExhaustive=*/true);
+    _engineConfigWorkspace[61] = 50;
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           int64_t*,
+                           void* out) {
+            *static_cast<int64_t*>(out) = 500;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    mockSuccessfulBenchmarkExecution();
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto variantPack = testVariantPack();
+    std::vector<AutotuneResult> results;
+    auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
+    AutotuneConfig config;
+    config.mode = TuneMode::EXHAUSTIVE;
+    auto result
+        = graph.autotune(_handle, variantPack, workspace, int64_t{100000}, config, {}, &results);
+
+    ASSERT_TRUE(result.is_good()) << result.err_msg;
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results.front().succeeded);
+    EXPECT_TRUE(results.front().ranExhaustive);
+    // One WARN for the priming plan and one for the benchmarked plan, both over the config.
+    EXPECT_EQ(countWorkspaceBreachWarns(recorder), 2u) << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "engine config workspace 50"));
 }
 
 TEST_F(TestGraph, BuildPlansHeuristicsChoiceSafetyNetRejectingEveryPlanReturnsNoSurvivorCode)

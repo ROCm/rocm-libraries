@@ -3,7 +3,7 @@
 - Contributors: Brian Harrison, Garby Gilbert
 - **Status**: Implemented
 - **Status notes**: Shipped in #15493: the backend attribute, `Graph::get_numerical_notes_for_engine()`, the Python binding, the UED `numerical_notes` vocabulary, the MIOpen determinism claims, and note filtering in the cuDNN v9 and v8 layers. #15792 added note filtering on the native and Python `Graph`. Only MIOpen reports notes, and only `NONDETERMINISTIC`; no provider reports any other note (§5).
-- **Last verified**: 2026-11-13 against `develop` (7d8674e8542)
+- **Last verified**: 2026-11-18 against `develop` (02433ce8085)
 - **Follows**: [RFC 0010: Per-engine behavior notes](./0010_BehaviorNotes.md)
 
 ## Table of Contents
@@ -67,7 +67,7 @@ Every engine filter (`deselect_engines`, the note filters, `deselect_workspace_g
 - A failed note read fails the evaluating call, and only when a note filter is set. cuDNN fails `create_execution_plans` with `HEURISTIC_QUERY_FAILED` on every call.
 - Note filters set before plans exist apply to the plans created later; cuDNN ignores them.
 - `add_engine_*()` autotune candidates are filtered. Compiled-plan `autotune` applies filters set after `build_plans(ALL)`; cuDNN times every built plan.
-- A finalized plan over the workspace limit despite its engine config is rejected after it finalizes. cuDNN 9.2+ trusts the config value. The plugin contract makes the engine-config workspace an upper bound on the workspace of any plan finalized from it, so the rejection is a safety net.
+- A plan the call finalizes over the workspace limit despite its engine config is rejected after it finalizes. cuDNN 9.2+ trusts the config value. The plugin contract makes the engine-config workspace an upper bound on the workspace of any plan finalized from it, so the rejection is a safety net.
 - Python filter methods return the graph; cuDNN returns `None`.
 - `build_plan_at_index` on a plan whose engine-config workspace cannot be read returns `GRAPH_EXECUTION_PLAN_CREATION_FAILED`; cuDNN returns the read error. `check_support` and the build walks skip such a plan, as cuDNN does.
 - A `deselect_engines` or note filter cannot be removed from a `Graph`: lists only grow, and creating plans does not reset them. cuDNN's `deselect_engines` replaces its list, so `deselect_engines({})` clears it. Use a new `Graph` to drop a filter.
@@ -103,4 +103,4 @@ See [RFC 0024](./0024_CuDNN_V8_Compatibility.md) and [RFC 0012](./0012_CuDNN_Shi
 ## 7. Out of scope
 
 - Precision notes from any in-tree provider.
-- A plugin API version bump. The engine-config workspace query MUST return at least the workspace of any plan finalized from that config, and benchmarking-config coverage is also a MUST; both change documentation only. The ABI is unchanged and the in-tree plugins already comply. When a limit is set, the frontend's safety net rejects a plan that finalizes over it, so a non-compliant plugin degrades gracefully. Otherwise the frontend rejects nothing, and the violation shows up as a WARN when WARN logging is enabled.
+- A plugin API version bump. The engine-config workspace query MUST return at least the workspace of any plan finalized from that config, and benchmarking-config coverage is also a MUST; both change documentation only. The ABI is unchanged and the in-tree plugins already comply. When a limit is set, the frontend's safety net rejects a plan the call finalizes over it, so a non-compliant plugin degrades gracefully. Otherwise the frontend rejects nothing, and the violation shows up as a WARN when WARN logging is enabled.

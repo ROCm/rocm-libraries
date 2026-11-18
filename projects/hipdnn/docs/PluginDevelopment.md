@@ -417,7 +417,7 @@ public:
 
 #### Engine-config workspace contract
 
-The engine-config workspace query (`getMaxWorkspaceSize` in `IEngine`, `hipdnnEnginePluginGetWorkspaceSize` in the C API) **must** return at least the workspace of any plan the engine finalizes from that config. The frontend filters by this value before it finalizes a plan (`deselect_workspace_greater_than()`), so a smaller value lets a plan through that is then rejected after it finalizes; the frontend also sizes its estimate from it.
+The engine-config workspace query (`getMaxWorkspaceSize` in `IEngine`, `hipdnnEnginePluginGetWorkspaceSize` in the C API) **must** return at least the workspace of any plan the engine finalizes from that config. The frontend filters by this value before it finalizes a plan (`deselect_workspace_greater_than()`), so a smaller value lets a plan through. When a workspace limit is set, the frontend rejects a plan its call finalizes over the limit; otherwise it rejects nothing and logs a WARN when WARN logging is enabled. The frontend also sizes its estimate from this value.
 
 #### Implementing `global.benchmarking`
 
