@@ -11,6 +11,8 @@ import time
 from pathlib import Path
 from shlex import join
 
+from filelock import FileLock
+
 import pytest
 
 import tensilelite.Toolchain.Component as Component
@@ -86,6 +88,11 @@ def _compiler(driverDir, asan=False):
 def _calls(driverDir, flag):
     calls = driverDir / "calls.txt"
     return [c for c in calls.read_text().splitlines() if flag in c] if calls.exists() else []
+
+
+def _cacheEntries(cacheDir):
+    # FileLock versions differ in whether they keep the lock file after releasing it.
+    return sorted(p.name for p in cacheDir.iterdir() if p.name != HKP._PUBLICATION_LOCK_FILE)
 
 
 def _key(compiler, targets):
@@ -258,7 +265,7 @@ def test_miss_builds_and_stores_then_hits(fakeDriver, tmp_path):
     key = _key(compiler, ["gfx950"])
     assert pchPath == tmp_path / "pch_cache" / key / "hip.pch"
     assert pchPath.read_bytes() == HKP.PCH_SOURCE  # the fake driver's "PCH" is its stdin
-    assert [p.name for p in (tmp_path / "pch_cache").iterdir()] == [key]
+    assert _cacheEntries(tmp_path / "pch_cache") == [key]
 
     assert HKP.HelperKernelPch().get(compiler, ["gfx950"]) == pchPath
     pchBuilds = [c for c in _calls(fakeDriver, "-emit-pch") if "-###" not in c]
@@ -323,7 +330,59 @@ def test_concurrent_store_keeps_the_first_entry(fakeDriver, tmp_path):
     (first / "hip.pch").write_bytes(b"first")
     assert HKP.HelperKernelPch()._build(compiler, ["gfx950"], key) == first / "hip.pch"
     assert (first / "hip.pch").read_bytes() == b"first"
-    assert [p.name for p in (tmp_path / "pch_cache").iterdir()] == [key]
+    assert _cacheEntries(tmp_path / "pch_cache") == [key]
+
+
+@pytest.mark.parametrize("invalid", ["empty", "directory"])
+def test_invalid_entry_is_rebuilt_then_reused(fakeDriver, tmp_path, invalid):
+    compiler = _compiler(fakeDriver)
+    pch = HKP.HelperKernelPch()
+    key = _key(compiler, ["gfx950"])
+    path = tmp_path / "pch_cache" / key / "hip.pch"
+    path.parent.mkdir(parents=True)
+    if invalid == "empty":
+        path.touch()
+    else:
+        path.mkdir()
+
+    assert pch.get(compiler, ["gfx950"]) == path
+    assert path.is_file() and path.read_bytes() == HKP.PCH_SOURCE
+    assert pch.get(compiler, ["gfx950"]) == path
+    assert len(_pchBuilds(fakeDriver)) == 1
+    assert not any(p.name.startswith(".tmp_") for p in path.parent.parent.iterdir())
+
+
+def test_invalid_entry_repair_keeps_a_concurrent_valid_publication(fakeDriver, tmp_path, monkeypatch):
+    compiler = _compiler(fakeDriver)
+    pch = HKP.HelperKernelPch()
+    key = _key(compiler, ["gfx950"])
+    path = tmp_path / "pch_cache" / key / "hip.pch"
+    path.parent.mkdir(parents=True)
+    path.touch()
+    buildPch = compiler.buildPch
+
+    def publishWinner(targets, source, temporaryPath):
+        buildPch(targets, source, temporaryPath)
+        # Another worker publishes a valid entry while this worker is building its PCH.
+        path.write_bytes(b"concurrent winner")
+
+    monkeypatch.setattr(compiler, "buildPch", publishWinner)
+    assert pch.get(compiler, ["gfx950"]) == path
+    assert path.read_bytes() == b"concurrent winner"
+    assert not any(p.name.startswith(".tmp_") for p in path.parent.parent.iterdir())
+
+
+def test_busy_publication_lock_compiles_plain_and_recovers(fakeDriver, tmp_path):
+    compiler = _compiler(fakeDriver)
+    cache = tmp_path / "pch_cache"
+    cache.mkdir()
+    with FileLock(str(cache / HKP._PUBLICATION_LOCK_FILE)):
+        pchPath, objPath = _compileHelpers(compiler, tmp_path)
+        assert pchPath is None
+        assert objPath.read_text() == "obj\n"
+        assert "-include-pch" not in _calls(fakeDriver, "Kernels.cpp")[0]
+        assert {p.name for p in cache.iterdir()} == {HKP._PUBLICATION_LOCK_FILE}
+    assert HKP.HelperKernelPch().get(compiler, ["gfx950"]).read_bytes() == HKP.PCH_SOURCE
 
 
 # =========================================================================== #
@@ -355,7 +414,7 @@ def test_stale_pch_falls_back_and_is_rebuilt(fakeDriver, tmp_path):
     compiles = _calls(fakeDriver, "Kernels.cpp")
     assert ["-include-pch" in c for c in compiles] == [True, False]
     assert not pchPath.parent.exists()  # discarded ...
-    assert list((tmp_path / "pch_cache").iterdir()) == []
+    assert _cacheEntries(tmp_path / "pch_cache") == []
     (fakeDriver / "stale_pch").unlink()
     assert HKP.HelperKernelPch().get(compiler, ["gfx950"]) == pchPath  # ... and built again
 
