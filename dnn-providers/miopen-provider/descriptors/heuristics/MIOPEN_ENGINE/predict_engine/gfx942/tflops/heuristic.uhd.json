@@ -10,15 +10,55 @@
     "$graph.flops_by_type.ConvolutionFwdAttributes",
     "$graph.flops_by_type.ConvolutionWrwAttributes",
     "$graph.logical_bytes",
-    "$graph.nodes[0].dilation[0]",
-    "$graph.nodes[0].dilation[1]",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dilation[0]",
+        1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dilation[1]",
+        1
+      ]
+    },
     "$graph.nodes[0].flops",
-    "$graph.nodes[0].post_padding[0]",
-    "$graph.nodes[0].post_padding[1]",
-    "$graph.nodes[0].pre_padding[0]",
-    "$graph.nodes[0].pre_padding[1]",
-    "$graph.nodes[0].stride[0]",
-    "$graph.nodes[0].stride[1]",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].post_padding[0]",
+        0
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].post_padding[1]",
+        0
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].pre_padding[0]",
+        0
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].pre_padding[1]",
+        0
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stride[0]",
+        1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stride[1]",
+        1
+      ]
+    },
     "$graph.nodes[0].type",
     "$graph.tensors[0].data_type",
     "$graph.tensors[0].dims[0]",
@@ -2708,13 +2748,23 @@
                 },
                 {
                   "==": [
-                    "$graph.nodes[0].stride[0]",
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].stride[0]",
+                        1
+                      ]
+                    },
                     1
                   ]
                 },
                 {
                   "==": [
-                    "$graph.nodes[0].dilation[0]",
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].dilation[0]",
+                        1
+                      ]
+                    },
                     1
                   ]
                 }
@@ -2728,7 +2778,7 @@
       ]
     }
   ],
-  "features_hash": "sha256:d748af2129d6fac3",
+  "features_hash": "sha256:c551dac0c704d9ca",
   "trained_against": {
     "selector_revision": "miopen-provider/0.2.0/MIOPEN_ENGINE-untuned-v2/miopen-3.6.3",
     "feature_semantics_revision": 1
@@ -2741,6 +2791,6 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "046f05146b54656b484d48266226f66bc06e3176622e19b17b084f185e7e37f8"
+    "hash": "1687755b3caa70520945409ce93b4537a7cfcbbb69f3fd0e62c3658291055ff0"
   }
 }
