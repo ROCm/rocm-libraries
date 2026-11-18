@@ -182,11 +182,23 @@ TEST(GPU_CkImplLoader_FP16, LoaderStripsDeviceSuffix)
 }
 
 #ifndef _WIN32
+namespace {
+
+// HSA_OVERRIDE_GFX_VERSION changes the architecture the HIP runtime reports for a device but not
+// the KFD topology that MIOpen reads before the runtime starts, so the two names can differ.
+bool GfxVersionOverridden() { return std::getenv("HSA_OVERRIDE_GFX_VERSION") != nullptr; }
+
+} // namespace
+
 // MIOpen loads the CK library of each GPU in the KFD topology when MIOpen itself is loaded. The
 // name derived there must be the one the HIP runtime reports, or that early load picks the wrong
 // library and handle creation then loads the right one.
 TEST(GPU_CkImplLoader_FP16, KfdDeviceNamesContainCurrentDevice)
 {
+    if(GfxVersionOverridden())
+        GTEST_SKIP() << "HSA_OVERRIDE_GFX_VERSION makes the HIP runtime report another name than "
+                        "the KFD topology";
+
     auto device_name = GetCurrentDeviceName();
     ASSERT_FALSE(device_name.empty());
     device_name = device_name.substr(0, device_name.find(':'));
@@ -239,6 +251,11 @@ TEST(GPU_CkImplLoader_FP16, EarlyLoadMapsLibraryBeforeRuntime)
     const char* deferred = std::getenv("HIP_ENABLE_DEFERRED_LOADING");
     if(deferred != nullptr && std::string{deferred} == "0")
         GTEST_SKIP() << "HIP_ENABLE_DEFERRED_LOADING=0 starts the HIP runtime before MIOpen loads";
+
+    // The early load follows the KFD names and the library below follows the HIP name.
+    if(GfxVersionOverridden())
+        GTEST_SKIP() << "HSA_OVERRIDE_GFX_VERSION makes the HIP runtime report another name than "
+                        "the KFD topology";
 
     auto device_name = GetCurrentDeviceName();
     ASSERT_FALSE(device_name.empty());
