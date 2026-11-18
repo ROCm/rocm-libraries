@@ -201,6 +201,9 @@ def per_axis_pad_variants(
         DIRECT_DEPTHWISE_TILED_DGRAD: direction == "dgrad" and depthwise_s1,
         # The Toeplitz WMMA depthwise wgrad.
         "direct_depthwise_wgrad_wmma": direction == "wgrad" and depthwise_s1,
+        # The gfx950 flattened-pixel forward: any ungrouped forward (filter,
+        # stride, dilation and column padding are all its own).
+        DIRECT_FWD_FLEX_MFMA: direction == "fwd" and dense,
         # An ungrouped stride-1 forward; the MFMA small-K form validates its
         # shape through the same rule as the WMMA one (_common_shape_reason).
         DIRECT_FWD_SMALLK_WMMA: (
