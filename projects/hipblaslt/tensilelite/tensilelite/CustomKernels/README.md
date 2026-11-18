@@ -173,7 +173,8 @@ The host picks one mode per launch and passes it in `SKSplitFactor`:
   tile and applies the epilogue.
 
 For a kernel that declares `parallel`, the host prefers it above a quarter of
-the CU count in tiles (up to the CU count), with a grid of up to two waves of
+the CU count in tiles (up to the CU count, with at least 64 iterations per tile
+and no CU cap), with a grid of up to two waves of
 `tiles * F` workgroups, because a handwritten tree split needs `F | itersPerTile`
 under uniform summation order.
 
