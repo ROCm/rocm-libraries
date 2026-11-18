@@ -655,6 +655,9 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST(TestConvNarrowCatalog, EveryConfigParsesAndIsDistinct)
 {
+    const auto hashOf = [](const std::string& text) {
+        return static_cast<int64_t>(std::hash<std::string>{}(text));
+    };
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         ASSERT_FALSE(catalog(direction).empty());
@@ -667,23 +670,52 @@ TEST(TestConvNarrowCatalog, EveryConfigParsesAndIsDistinct)
             EXPECT_EQ(config->direction,
                       direction == ConvDirection::FORWARD ? std::string("FWD")
                                                           : std::string("BWD"));
-            // The integer knobs and the strings that fix the graph (dtype, layout) tell every
-            // config apart.
-            std::vector<int64_t> key{
-                kernel.getIntMetadata("atom_id"),
-                config->ko,
-                config->fd,
-                config->fr,
-                config->fs,
-                config->sw,
-                config->wr,
-                config->rb,
-                config->nw,
-                config->op,
-                config->layout == "nchw" ? 1 : 0,
-                static_cast<int64_t>(std::hash<std::string>{}(kernel.getStringMetadata("dtype")))};
+            // The integer knobs and the strings that fix the graph and the device (dtype,
+            // layout, ship list) tell every config apart.
+            const std::vector<int64_t> key{kernel.getIntMetadata("atom_id"),
+                                           config->kmin,
+                                           config->ko,
+                                           config->fd,
+                                           config->fr,
+                                           config->fs,
+                                           config->sw,
+                                           config->ds,
+                                           config->cmin,
+                                           config->cm,
+                                           config->pd,
+                                           config->sf,
+                                           config->wr,
+                                           config->rb,
+                                           config->nw,
+                                           config->op,
+                                           config->layout == "nchw" ? 1 : 0,
+                                           hashOf(std::string(kernel.getStringMetadata("dtype"))),
+                                           hashOf(std::string(kernel.getStringMetadata("archs")))};
             EXPECT_TRUE(knobs.insert(key).second) << "two configs with the same knobs";
         }
+    }
+    ASSERT_FALSE(catalog(ConvDirection::BACKWARD_WEIGHTS).empty());
+    std::set<std::vector<int64_t>> knobs;
+    for(const auto& kernel : catalog(ConvDirection::BACKWARD_WEIGHTS))
+    {
+        SCOPED_TRACE(kernel.name);
+        const auto config = conv_narrow::wrwConfigOf(kernel);
+        ASSERT_TRUE(config.has_value());
+        const std::vector<int64_t> key{kernel.getIntMetadata("atom_id"),
+                                       config->side == "k" ? 1 : 0,
+                                       config->kmin,
+                                       config->ko,
+                                       config->fd,
+                                       config->fr,
+                                       config->fs,
+                                       config->wr,
+                                       config->rb,
+                                       config->nw,
+                                       config->mpw,
+                                       config->layout == "nchw" ? 1 : 0,
+                                       hashOf(std::string(kernel.getStringMetadata("dtype"))),
+                                       hashOf(std::string(kernel.getStringMetadata("archs")))};
+        EXPECT_TRUE(knobs.insert(key).second) << "two configs with the same knobs";
     }
 }
 
