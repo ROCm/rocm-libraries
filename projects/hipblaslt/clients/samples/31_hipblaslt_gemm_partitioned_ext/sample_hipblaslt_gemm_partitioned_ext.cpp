@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 // Runs one GEMM on the partitions of a partitioned GPU (for example DPX) with
-// hipblaslt_ext::experimental::PartitionedGemm.
+// hipblaslt_experimental::PartitionedGemm, an experimental API: it is declared only when
+// ROCM_ENABLE_EXPERIMENTAL_APIS is 1, and the sample checks both the revision it was written
+// for (at compile time) and the revision of the loaded library (at run time).
 //
 //   - one hipBLASLt handle, stream, workspace and set of matrices per partition (device)
 //   - the problem is the full m x n x k GEMM; it is split along N, so partition i computes
@@ -20,8 +22,15 @@
 // its slice into the other partition's D). It needs OutputPeerD kernels in the device library;
 // with the current library algoGetHeuristic returns no algorithm for it.
 
+#define ROCM_ENABLE_EXPERIMENTAL_APIS 1
+#include <hipblaslt/hipblaslt-experimental.h>
+
+#if !defined(HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM) \
+    || HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM != 1
+#error "This sample is written for revision 1 of hipBLASLt PARTITIONED_GEMM; see the CHANGELOG"
+#endif
+
 #include <hip/hip_runtime.h>
-#include <hipblaslt/hipblaslt-ext.hpp>
 
 #include <cstdint>
 #include <cstdio>
@@ -34,6 +43,15 @@
 
 int main(int argc, char** argv)
 {
+    // The header says revision 1; the loaded library must have the same one. A program with a
+    // non-experimental path would fall back to it here instead of stopping.
+    if(hipblasLtExperimentalGetFeatureRevision("PARTITIONED_GEMM") != 1)
+    {
+        std::cerr << "The loaded hipBLASLt does not have revision 1 of PARTITIONED_GEMM"
+                  << std::endl;
+        return EXIT_FAILURE;
+    }
+
     int deviceCount = 0;
     CHECK_HIP_ERROR(hipGetDeviceCount(&deviceCount));
     const int  partitions = argc > 1 ? std::atoi(argv[1]) : 2;
@@ -94,14 +112,14 @@ int main(int argc, char** argv)
     CHECK_HIP_ERROR(hipDeviceSynchronize());
 
     // ---- the partitioned GEMM ----
-    hipblaslt_ext::experimental::PartitionedGemm gemm(handles,
-                                        HIPBLAS_OP_N,
-                                        HIPBLAS_OP_N,
-                                        HIP_R_16F,
-                                        HIP_R_16F,
-                                        HIP_R_16F,
-                                        HIP_R_16F,
-                                        HIPBLAS_COMPUTE_32F);
+    hipblaslt_experimental::PartitionedGemm gemm(handles,
+                                                 HIPBLAS_OP_N,
+                                                 HIPBLAS_OP_N,
+                                                 HIP_R_16F,
+                                                 HIP_R_16F,
+                                                 HIP_R_16F,
+                                                 HIP_R_16F,
+                                                 HIPBLAS_COMPUTE_32F);
 
     // One GemmInputs per partition. A matrix that is shared has the same pointer in every
     // element; a replicated one has its own copy in each.
@@ -116,20 +134,8 @@ int main(int argc, char** argv)
         inputs[i].setBeta(&beta);
     }
 
-    CHECK_HIPBLASLT_ERROR(gemm.setProblem(m,
-                                          n,
-                                          k,
-                                          1,
-                                          lda,
-                                          ldb,
-                                          ldc,
-                                          ldd,
-                                          0,
-                                          0,
-                                          0,
-                                          0,
-                                          hipblaslt_ext::experimental::SplitDim::N,
-                                          inputs));
+    CHECK_HIPBLASLT_ERROR(gemm.setProblem(
+        m, n, k, 1, lda, ldb, ldc, ldd, 0, 0, 0, 0, hipblaslt_experimental::SplitDim::N, inputs));
 
     // Only algorithms that every partition accepts for its slice come back.
     hipblaslt_ext::GemmPreference pref;

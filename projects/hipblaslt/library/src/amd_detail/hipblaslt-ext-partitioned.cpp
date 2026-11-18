@@ -5,8 +5,11 @@
 // DPX card). It owns one hipblaslt_ext::Gemm per partition and uses the public Gemm API, plus
 // the device of each handle to give every partition the slice whose memory is on its device.
 
+// The library always compiles in every experimental feature, so it enables the switch.
+#define ROCM_ENABLE_EXPERIMENTAL_APIS 1
+#include "hipblaslt/hipblaslt-experimental.h"
+
 #include "hipblaslt-ext-inputs.hpp"
-#include "hipblaslt/hipblaslt-ext.hpp"
 #include "hipblaslt_internal.hpp"
 #include "utility.hpp"
 
@@ -24,8 +27,14 @@
 #include <string>
 #include <vector>
 
-namespace hipblaslt_ext::experimental
+namespace hipblaslt_experimental
 {
+    using hipblaslt_ext::Gemm;
+    using hipblaslt_ext::GemmEpilogue;
+    using hipblaslt_ext::GemmInputs;
+    using hipblaslt_ext::GemmPreference;
+    using hipblaslt_ext::GemmProblemType;
+
     namespace
     {
         // The pointers of every partition, as setProblem works with them: one entry per matrix
@@ -798,8 +807,8 @@ namespace hipblaslt_ext::experimental
             slice.setBeta(inputs.beta);
             // The peer is the other partition's D, at this partition's slice offset.
             if(inputs.storePeerD)
-                slice.pimpl->dPeer
-                    = const_cast<void*>(advance(dPointers[1 - i], elems[3], bytes[3]));
+                hipblaslt_ext::detail::GemmInputsAccess::setPeerD(
+                    slice, const_cast<void*>(advance(dPointers[1 - i], elems[3], bytes[3])));
 
             GemmEpilogue    epilogue;
             GemmProblemType type(s.opA, s.opB, s.typeA, s.typeB, s.typeC, s.typeD, s.typeCompute);
@@ -1025,4 +1034,4 @@ namespace hipblaslt_ext::experimental
     {
         return HIPBLAS_STATUS_NOT_SUPPORTED;
     }
-} // namespace hipblaslt_ext::experimental
+} // namespace hipblaslt_experimental

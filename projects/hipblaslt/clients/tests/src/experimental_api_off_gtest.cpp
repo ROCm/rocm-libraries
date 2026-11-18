@@ -6,6 +6,7 @@
 #define ROCM_ENABLE_EXPERIMENTAL_APIS 0
 #include <hipblaslt/hipblaslt-experimental.h>
 
-#if defined(HIPBLASLT_EXPERIMENTAL_DEMO) || defined(HIPBLASLT_EXPERIMENTAL_ENUM_BIT)
+#if defined(HIPBLASLT_EXPERIMENTAL_DEMO) || defined(HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM) \
+    || defined(HIPBLASLT_EXPERIMENTAL_ENUM_BIT)
 #error "hipblaslt-experimental.h declared experimental APIs with ROCM_ENABLE_EXPERIMENTAL_APIS=0"
 #endif

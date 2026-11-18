@@ -6,18 +6,9 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
-* Extension API `hipblaslt_ext::experimental::PartitionedGemm` that runs one GEMM as slices on the devices of
-  a partitioned GPU (for example, a device in DPX mode; gfx1250 only, `setProblem` returns
-  `HIPBLAS_STATUS_NOT_SUPPORTED` elsewhere), with one handle, stream, and workspace per partition,
-  `SplitDim::M`, `SplitDim::N` or `SplitDim::Batch`, and one pointer per partition for each
-  matrix (the same pointer shares a matrix, different pointers replicate it). hipBLASLt
-  allocates and copies nothing and does not enable peer access: every partition's slices must be
-  accessible from its device, otherwise the run faults like any GEMM given an inaccessible pointer.
-  Only plain GEMM is supported; the device user arguments overloads return `HIPBLAS_STATUS_NOT_SUPPORTED`.
-  This is a beta API: it may change in a future release.
-  Added `hipblaslt-bench --partitions N --split_dim M|N|B` (which runs `testing_matmul` through
-  `PartitionedGemm` with the same data, reference and verification), the `partitioned_gemm_ext`
-  tests in `hipblaslt-test` and `samples/31_hipblaslt_gemm_partitioned_ext`.
+* `hipblaslt-bench --partitions N --split_dim M|N|B`, which runs `testing_matmul` through the
+  experimental `PartitionedGemm` (see Experimental) with the same data, reference and verification,
+  and `samples/31_hipblaslt_gemm_partitioned_ext`.
 * Device scalar alpha on gfx1250 through
   `HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_SCALAR_BETA_HOST_EXT`, Extension API
   `GemmInputs::setScaleAlphaScalar()` / `getScaleAlphaScalar()`, and
@@ -150,6 +141,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Experimental API tier in the new `hipblaslt/hipblaslt-experimental.h` header. The header is installed but not included by `hipblaslt.h`, and declares nothing unless the consumer defines the ROCm-wide `ROCM_ENABLE_EXPERIMENTAL_APIS` switch. Each feature defines a revision macro, `HIPBLASLT_EXPERIMENTAL_<FEATURE>`, and `hipblasLtExperimentalGetFeatureRevision` returns the loaded library's revision of a feature (0 if absent), so consumers can fall back on a mismatch. Reserves `HIPBLASLT_EXPERIMENTAL_ENUM_BIT` for experimental values of stable enums; experimental enumerator values are never reused. Experimental APIs can change or be removed in any ROCm release.
 * Experimental API lifecycle enforcement: each feature is registered in `library/experimental/features.cmake` with a deadline of four ROCm releases, and configure fails once a feature is past it; `tools/scripts/check_experimental_api.py` fails a PR that changes a function, type or enumerator in place, or breaks a feature or its contract tests without bumping that feature's revision.
 * Experimental feature DEMO, revision 1 (spike only, not for merge): `hipblasLtExperimentalDemoAlignSize`, a trivial function that exercises the checks above.
+* Experimental feature PARTITIONED_GEMM, revision 1, in `hipblaslt/hipblaslt-experimental-partitioned-gemm.h` (C++ only): `hipblaslt_experimental::PartitionedGemm` runs one GEMM as slices on the devices of a partitioned GPU (for example, a device in DPX mode; gfx1250 only, `setProblem` returns `HIPBLAS_STATUS_NOT_SUPPORTED` elsewhere), with one handle, stream, and workspace per partition, `hipblaslt_experimental::SplitDim::M`, `N` or `Batch`, and one pointer per partition for each matrix (the same pointer shares a matrix, different pointers replicate it). hipBLASLt allocates and copies nothing and does not enable peer access: every partition's slices must be accessible from its device, otherwise the run faults like any GEMM given an inaccessible pointer. Only plain GEMM is supported; the device user arguments overloads return `HIPBLAS_STATUS_NOT_SUPPORTED`. Contract tests: `pre_checkin_partitioned_gemm_contract` in `hipblaslt-test`.
 
 ### Changed
 
