@@ -229,10 +229,8 @@ bool HeldOutOfPicker(const std::string& solver_name,
     return solver_name == "ConvHipConv" && gfx_id.starts_with("gfx1250");
 }
 
-// ConvHipConv on gfx950, backward weights: hipconv's default config is already the best or close
-// to it on most problems, and a model pick that beats the default by a small score gap is as likely
-// to be slower as faster. The pick is used only when its score exceeds the default config's score
-// by more than this margin; otherwise the solver runs its default config.
+// ConvHipConv on gfx950, backward weights: the pick is used only when its score exceeds the
+// default config's score by more than this margin. Otherwise the solver runs its default config.
 constexpr double kConvHipConvWrwGfx950Margin = 7.5;
 
 std::optional<double>
