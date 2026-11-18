@@ -12,7 +12,9 @@ relation compares two subject outputs.
 
 from __future__ import annotations
 
+import ast
 import hashlib
+import importlib.util
 import math
 import re
 import statistics
@@ -21,17 +23,21 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from fractions import Fraction
 from functools import cache
+from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from rocke.core.llvm_profile import LLVM_FLAVORS
 from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 
-from ._analytical import _FORMAT, decode_bits, encode_bits
+from ._analytical import _FORMAT, UniformCase, decode_bits, encode_bits
 from ._dense_subject import (
     DENSE_SUBJECTS,
     VALUE_SHIFT_SUBJECT_CASES,
+    _validate_supported_case,
     _verify_resolved_spec,
+    compile_dense_subject,
     resolve_dense_subject,
     softmax_scale,
 )
@@ -42,7 +48,7 @@ from ._value_shift import (
     _FP32_UNIT,
     _HOST_UNIT,
     _LATTICE_LIMIT,
-    _MIN_EXPONENT,
+    _min_exponent,
     OUTPUT_SCALE_SWEEP,
     VALUE_SHIFT_QUICK_CASES,
     ShiftMutation,
@@ -81,7 +87,7 @@ from ._value_shift_path import (
     unmasked_path_violations,
     verified_key_tiles,
 )
-from .test_contracts import _fake_tuning_spec
+from .test_contracts import _dotted_name, _fake_tuning_spec
 from .test_value_shift_dense import _not_rejected
 
 _LOG2E = 1.4426950408889634
@@ -299,6 +305,23 @@ def test_case_scope_refuses_what_the_tolerance_does_not_cover() -> None:
         ValueShiftCase(1, 4, 8, 2, 2, 8, "fp32")
     with pytest.raises(ValueError, match="profile must be one of"):
         ValueShiftCase(1, 4, 8, 2, 2, 8, "fp16", "uniform")
+    # The shape checks are the shared base's, so both lanes' cases refuse a
+    # dimension that is not positive.
+    shape = {
+        "batch": 1,
+        "seqlen_q": 32,
+        "seqlen_k": 32,
+        "nhead_q": 2,
+        "nhead_k": 2,
+        "head_dim": 8,
+    }
+    for name in shape:
+        for value in (0, -1):
+            changed = {**shape, name: value, "dtype": "fp16"}
+            with pytest.raises(ValueError, match=f"{name} must be positive"):
+                ValueShiftCase(**changed)
+            with pytest.raises(ValueError, match=f"{name} must be positive"):
+                UniformCase(**changed, mask="causal")
 
 
 @pytest.mark.parametrize(
@@ -338,7 +361,7 @@ def _derived_constants(dtype: str, keys: int, key_tiles: int) -> dict[str, Fract
     rescaled = (1 + unit) ** key_tiles
     smallest = (1 - unit) ** key_tiles
     cast = Fraction(1, 2 ** (fraction_bits + 1))
-    subnormal_half = Fraction(2) ** (_MIN_EXPONENT[dtype] - fraction_bits - 1)
+    subnormal_half = Fraction(2) ** (_min_exponent(dtype) - fraction_bits - 1)
     sigma = cast + (keys - 1) * subnormal_half * rescaled / smallest
     theta = gamma + key_tiles * rescaled * (1 + gamma) * _FP32_UNDERFLOW / smallest
     row_sum = (1 + sigma) * (1 + unit) / (1 - theta) - 1
@@ -350,6 +373,7 @@ def _derived_constants(dtype: str, keys: int, key_tiles: int) -> dict[str, Fract
     )
     return {
         "row_sum": row_sum,
+        "cast_normalizer_row_sum": (1 + unit) / (1 - theta) - 1,
         "accumulation": gamma * (1 + row_sum),
         "accumulation_floor": reciprocal * underflow,
     }
@@ -389,6 +413,10 @@ def test_bound_pinned_values_at_the_quick_shape(
     assert float(bound.row_sum) == pytest.approx(row_sum, rel=1e-12)
     assert float(bound.accumulation) == pytest.approx(accumulation, rel=1e-12)
     assert float(bound.accumulation_floor) < 1e-37
+    # The same for both dtypes: the FP32 normalizer and reciprocal alone.
+    assert float(bound.cast_normalizer_row_sum) == pytest.approx(
+        3.1115549694469674e-5, rel=1e-12
+    )
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
@@ -458,7 +486,8 @@ def test_rounding_radius_is_half_the_gap_away_from_zero(dtype: str) -> None:
         rounding_radius(magnitudes | np.uint16(0x8000), dtype), radius
     )
     fraction_bits = _FORMAT[dtype][0]
-    assert radius[0] == 2.0 ** (_MIN_EXPONENT[dtype] - fraction_bits - 1)
+    assert radius[0] == 2.0 ** (_min_exponent(dtype) - fraction_bits - 1)
+    assert _min_exponent(dtype) == {"fp16": -14, "bf16": -126}[dtype]
     one = encode_bits(np.array([1.0], dtype=np.float32), dtype)
     assert rounding_radius(one, dtype)[0] == 2.0 ** -(fraction_bits + 1)
 
@@ -923,12 +952,13 @@ def test_vectorized_tolerance_is_not_below_the_exact_one(case: ValueShiftCase) -
     contract = _spec_contract(case)
     base, follow_up = _spec_outputs(contract)
     tolerance = value_shift_tolerance(contract, base, follow_up)
+    reduced = value_shift_tolerance(contract, base, follow_up, cast_normalizer=True)
     bound = contract.bound
+    assert bound.cast_normalizer_row_sum < bound.row_sum
     for index in np.ndindex(case.output_shape):
         expected = abs(Fraction(float(contract.shift[index[3]])))
-        exact = (
-            expected * bound.row_sum
-            + bound.accumulation_bound(Fraction(1))
+        rest = (
+            bound.accumulation_bound(Fraction(1))
             + bound.accumulation_bound(1 + expected)
             + Fraction(_HOST_UNIT) * expected
         )
@@ -936,10 +966,16 @@ def test_vectorized_tolerance_is_not_below_the_exact_one(case: ValueShiftCase) -
             value = _exact_value(bits, case.dtype)
             if value is None:
                 bits, value = 0, Fraction(0)
-            exact += _exact_store_allowance(bits, case.dtype)
-            exact += Fraction(_HOST_UNIT) * abs(value)
-        found = Fraction(float(tolerance[index]))
-        assert exact <= found <= exact * (1 + Fraction(1, 2**40)), index
+            rest += _exact_store_allowance(bits, case.dtype)
+            rest += Fraction(_HOST_UNIT) * abs(value)
+        # The diagnostic tolerance differs in the row-sum bound only.
+        for values, row_sum in (
+            (tolerance, bound.row_sum),
+            (reduced, bound.cast_normalizer_row_sum),
+        ):
+            exact = expected * row_sum + rest
+            found = Fraction(float(values[index]))
+            assert exact <= found <= exact * (1 + Fraction(1, 2**40)), index
 
 
 def _scalar_analyze(
@@ -949,7 +985,10 @@ def _scalar_analyze(
     vectorized analyzer must reproduce in every field."""
     case = contract.case
     tolerance = value_shift_tolerance(contract, base, follow_up)
+    reduced = value_shift_tolerance(contract, base, follow_up, cast_normalizer=True)
     invalid = magnitude_count = exceed = compared = 0
+    reduced_exceed = 0
+    reduced_ratio = 0.0
     max_ratio = max_abs = 0.0
     worst = None
     squares = total = fraction_sum = 0.0
@@ -982,6 +1021,10 @@ def _scalar_analyze(
                     limit = float(tolerance[index])
                     ratio = abs(residual) / limit
                     exceed += abs(residual) > limit
+                    reduced_exceed += abs(residual) > float(reduced[index])
+                    reduced_ratio = max(
+                        reduced_ratio, abs(residual) / float(reduced[index])
+                    )
                     if worst is None or ratio > max_ratio:
                         worst = (index, residual, limit)
                     max_ratio = max(max_ratio, ratio)
@@ -1033,6 +1076,8 @@ def _scalar_analyze(
         max_row_spread=row_spread,
         apriori_max_ratio=apriori_ratio,
         tolerance_fraction=fraction_sum / compared if compared else 0.0,
+        cast_normalizer_max_ratio=reduced_ratio,
+        cast_normalizer_exceed_count=reduced_exceed,
     )
 
 
@@ -1140,11 +1185,16 @@ def _model_dense_run(
     block_n: int = _MODEL_BLOCK_N,
     defect: _Defect = _Defect(),
     weight_error: float = 0.0,
+    cast_normalizer: bool = False,
 ) -> np.ndarray:
     """Model one launch: per KV tile the running maximum, ``exp2(s - m)`` in FP32,
     the normalizer over uncast weights, the accumulator over weights cast to the
     subject dtype, both rescaled by ``exp2(m_old - m_new)``; then one reciprocal
     and one output conversion.
+
+    ``cast_normalizer`` models a different kernel, not the shipped one: its
+    normalizer sums the cast weights, so the weights it applies sum to one up
+    to FP32 rounding.
 
     ``weight_error`` multiplies every weight by ``1 +- weight_error`` before it
     is used anywhere, the same factor in the normalizer and in the accumulator:
@@ -1171,8 +1221,8 @@ def _model_dense_run(
                 rescale = np.exp2(running_max - new_max)
                 weights = np.exp2(scores[:, first:last] - new_max[:, None])
                 weights = weights * factors[:, first:last]
-                counted = weights
                 applied = _round_to(weights, case.dtype)
+                counted = applied if cast_normalizer else weights
                 local = defect.key - first
                 in_tile = 0 <= local < block_n
                 if defect.kind == "normalizer_omits_key" and in_tile:
@@ -1226,6 +1276,7 @@ def _model_pair(
     block_n: int = _MODEL_BLOCK_N,
     defect: _Defect = _Defect(),
     weight_error: float = 0.0,
+    cast_normalizer: bool = False,
 ) -> tuple[ValueShiftContract, np.ndarray, np.ndarray]:
     """Model the base and the follow-up launch of one case and return the
     contract of the pair with the two raw outputs."""
@@ -1241,7 +1292,12 @@ def _model_pair(
         key_tiles=case.seqlen_k // block_n,
         applied=applied,
     )
-    settings = {"block_n": block_n, "defect": defect, "weight_error": weight_error}
+    settings = {
+        "block_n": block_n,
+        "defect": defect,
+        "weight_error": weight_error,
+        "cast_normalizer": cast_normalizer,
+    }
     outputs = [
         _model_dense_run(
             case, q, k, decode_bits(bits, case.dtype).astype(np.float32), **settings
@@ -1266,6 +1322,33 @@ def test_modeled_shift_stays_inside_the_tolerance(
     # A repeated launch of the model is identical: the determinism the relation
     # needs from the subject.
     assert np.array_equal(base, _model_pair(case, block_n=block_n)[1])
+
+
+@pytest.mark.parametrize("case", VALUE_SHIFT_QUICK_CASES, ids=_case_id)
+def test_modeled_uncast_normalizer_is_reported_and_not_judged(
+    case: ValueShiftCase,
+) -> None:
+    """The path sums uncast weights in the normalizer and accumulates cast
+    ones, so the weights it applies do not sum to one exactly. The verdict
+    accepts that as a property of the shipped kernel. The diagnostic keeps it
+    measured: the same residuals against the tolerance of a kernel whose
+    normalizer sums the cast weights. On the fixture the modeled path exceeds
+    that tolerance in BF16 on the moderate profile only, and a modeled kernel
+    with the cast weights in its normalizer exceeds it nowhere."""
+    contract, base, follow_up = _model_pair(case)
+    result = analyze_value_shift(contract, base, follow_up)
+    assert not result.violations, format_value_shift_result(result)
+    assert result.cast_normalizer_max_ratio >= result.max_ratio
+    assert (result.cast_normalizer_exceed_count > 0) == (case is _BF16_MODERATE)
+    assert f"{result.cast_normalizer_exceed_count} beyond" in (
+        format_value_shift_result(result)
+    )
+
+    contract, base, follow_up = _model_pair(case, cast_normalizer=True)
+    conserving = analyze_value_shift(contract, base, follow_up)
+    assert not conserving.violations, format_value_shift_result(conserving)
+    assert conserving.cast_normalizer_exceed_count == 0
+    assert conserving.cast_normalizer_max_ratio < 1.0
 
 
 @pytest.mark.parametrize("case", [_FP16_MODERATE, _BF16_MODERATE], ids=_case_id)
@@ -1445,6 +1528,8 @@ def _result(*, exceed: bool) -> ValueShiftResult:
         max_row_spread=0.0,
         apriori_max_ratio=0.0,
         tolerance_fraction=0.5,
+        cast_normalizer_max_ratio=0.0,
+        cast_normalizer_exceed_count=0,
     )
 
 
@@ -1532,6 +1617,22 @@ def test_modeled_path_counts_at_the_shipped_tile() -> None:
     }
 
 
+def _gate_refuses(edited: str, spec, match: str) -> None:
+    """The lane's pre-launch gate refuses an edited FP16 quick kernel, with the
+    message of the check that found the edit. A check that fired only when
+    called directly, and not through the gate, would guard no launch."""
+    with pytest.raises(AssertionError) as refusal:
+        verified_key_tiles(
+            edited,
+            "fp16",
+            seqlen_k=_FP16_MODERATE.seqlen_k,
+            block_n=int(spec.block_n),
+            head_size=int(spec.head_size),
+        )
+    message = str(refusal.value)
+    assert REDERIVE in message and match in message, message
+
+
 def _replace_once(old: str, new: str) -> Callable[[str], str]:
     def edit(ir: str) -> str:
         assert old in ir, f"edit target {old!r} not in the lowered IR"
@@ -1599,8 +1700,10 @@ def _substitute_once(pattern: str, replacement: str) -> Callable[[str], str]:
 )
 def test_path_check_rejects_each_unmodeled_change(edit, match: str) -> None:
     ir, spec = _lowered_subject("gfx942", _FP16_MODERATE)
-    violations, _ = classify_unmasked_path(edit(ir), "fp16", spec.block_n)
+    edited = edit(ir)
+    violations, _ = classify_unmasked_path(edited, "fp16", spec.block_n)
     assert any(match in item for item in violations), violations
+    _gate_refuses(edited, spec, match)
 
 
 @pytest.mark.parametrize("subject_case", _PATH_SUBJECT_CASES, ids=_subject_id)
@@ -1617,6 +1720,15 @@ def test_lowered_mfma_operands_reach_the_stored_tensors(
     fills = {name: counts.pop(name) for name in ("k_fills", "v_fills")}
     assert all(fills.values()), fills
     assert counts == expected_chain_counts(spec.block_n, spec.head_size)
+
+
+def _value_atom_takes_a_loaded_vector(ir: str) -> str:
+    loaded = re.search(r"(%[-\w.]+) = load <4 x half>, ptr addrspace\(1\)", ir)
+    assert loaded, "no <4 x half> load from a global pointer in the lowered IR"
+    return _substitute_once(
+        r"(<4 x half> %vp\d+, <4 x half> )%vp\d+(, <16 x float> )",
+        rf"\g<1>{loaded.group(1)}\2",
+    )(ir)
 
 
 @pytest.mark.parametrize(
@@ -1666,6 +1778,59 @@ def test_lowered_mfma_operands_reach_the_stored_tensors(
             ),
             "does not read Q from q_ptr",
         ),
+        (
+            # A value atom multiplies V by a Q vector: its second operand is a
+            # load, not a pack of cast probabilities.
+            _value_atom_takes_a_loaded_vector,
+            "not four cast probabilities",
+        ),
+        (
+            # Slot 0 of a pack is written twice. The later write wins, so the
+            # first probability never enters the atom.
+            _substitute_once(
+                r"(%vpk\.\d+)( = insertelement <4 x half> undef, half %cast\d+, "
+                r"i32 0\n)(\s+)(%vpk\.\d+ = insertelement <4 x half> )\1"
+                r"(, half (%cast\d+), i32 1\n)",
+                r"\1\2\3%rewritten = insertelement <4 x half> \1, half \6, i32 0\n"
+                r"\3\4%rewritten\5",
+            ),
+            "not four cast probabilities",
+        ),
+        (
+            # A pack restarts from undef at slot 1, so slot 0 is never written.
+            _substitute_once(
+                r"(insertelement <4 x half> undef, half %cast\d+, i32 0\n"
+                r"\s+%vpk\.\d+ = insertelement <4 x half> )%vpk\.\d+"
+                r"(, half %cast\d+, i32 1\n)",
+                r"\1undef\2",
+            ),
+            "not four cast probabilities",
+        ),
+        (
+            # The probability pack of a value atom is a constant.
+            _substitute_once(
+                r"(<4 x half> %vp\d+, <4 x half> )%vp\d+(, <16 x float> )",
+                r"\1undef\2",
+            ),
+            "MFMA operand is a constant",
+        ),
+        (
+            # A value atom multiplies a constant, not V.
+            _substitute_once(
+                r"(\(<4 x half> )%vp\d+(, <4 x half> %vp\d+, <16 x float> )",
+                r"\1zeroinitializer\2",
+            ),
+            "MFMA operand is a constant",
+        ),
+        (
+            # A value atom starts from zero: what the row accumulated before
+            # it is dropped.
+            _substitute_once(
+                r"(<4 x half> %vp\d+, <4 x half> %vp\d+, <16 x float> )%[-\w.]+",
+                r"\1zeroinitializer",
+            ),
+            "MFMA operand is a constant",
+        ),
     ],
     ids=[
         "value-region-aliases-keys",
@@ -1673,12 +1838,20 @@ def test_lowered_mfma_operands_reach_the_stored_tensors(
         "probability-used-twice",
         "value-chain-skips-an-atom",
         "score-reads-keys-twice",
+        "pack-is-not-an-insert-chain",
+        "pack-slot-written-twice",
+        "pack-slot-never-written",
+        "probability-pack-is-a-constant",
+        "value-operand-is-a-constant",
+        "accumulator-is-a-constant",
     ],
 )
 def test_operand_trace_rejects_each_misrouted_operand(edit, match: str) -> None:
-    ir, _ = _lowered_subject("gfx942", _FP16_MODERATE)
-    violations, _ = trace_mfma_operands(edit(ir), "fp16")
+    ir, spec = _lowered_subject("gfx942", _FP16_MODERATE)
+    edited = edit(ir)
+    violations, _ = trace_mfma_operands(edited, "fp16")
     assert any(match in item for item in violations), violations
+    _gate_refuses(edited, spec, match)
 
 
 # ---------------------------------------------------------------------------
@@ -1799,10 +1972,12 @@ def _from_accumulator(pattern: str, replacement: str) -> Callable[[str], str]:
     ],
 )
 def test_value_cone_rejects_each_escape(edit, match: str) -> None:
-    ir, _ = _lowered_subject("gfx942", _FP16_MODERATE)
+    ir, spec = _lowered_subject("gfx942", _FP16_MODERATE)
     assert not trace_value_cone(ir, "fp16")[0]
-    violations, _ = trace_value_cone(edit(ir), "fp16")
+    edited = edit(ir)
+    violations, _ = trace_value_cone(edited, "fp16")
     assert any(match in item for item in violations), violations
+    _gate_refuses(edited, spec, match)
 
 
 # ---------------------------------------------------------------------------
@@ -1929,6 +2104,60 @@ def test_fp_mode_is_read_from_the_kernel_descriptor() -> None:
         kernel_descriptor_words(b"not a code object")
 
 
+def test_compiled_subject_must_be_the_resolved_kernel(monkeypatch) -> None:
+    """The artifact the lane checks carries the name of the kernel dispatch
+    resolved; any other artifact is refused before it is read."""
+    import rocke.helpers.compile as compile_module
+
+    arch, case = VALUE_SHIFT_SUBJECT_CASES[0]
+    subject = resolve_dense_subject(arch, case)
+    resolved_name = subject.tuning_spec.kernel_spec.kernel_name()
+
+    def compile_as(kernel_name: str):
+        monkeypatch.setattr(
+            compile_module,
+            "compile_kernel",
+            lambda kernel, **options: SimpleNamespace(kernel_name=kernel_name),
+        )
+        return compile_dense_subject(arch, subject)
+
+    assert compile_as(resolved_name).kernel_name == resolved_name
+    with pytest.raises(AssertionError, match="compiled 'another_kernel', expected"):
+        compile_as("another_kernel")
+
+
+def _compile_calls(path: Path, function: str) -> list[str]:
+    """Source of every ``compile_kernel`` call in one module-level function."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    (definition,) = (
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == function
+    )
+    return [
+        ast.unparse(node)
+        for node in ast.walk(definition)
+        if isinstance(node, ast.Call) and _dotted_name(node.func) == "compile_kernel"
+    ]
+
+
+@pytest.mark.parametrize("arch", sorted(DENSE_SUBJECTS))
+def test_subject_compile_call_is_the_launchers(arch: str) -> None:
+    """``compile_dense_subject`` repeats the compile call of the launcher whose
+    kernel it checks. If one of the two changed alone, the lane would check one
+    artifact and launch another, and nothing else would fail."""
+    adapter = _compile_calls(
+        Path(__file__).with_name("_dense_subject.py"), "compile_dense_subject"
+    )
+    runner = importlib.util.find_spec(DENSE_SUBJECTS[arch].runner_module)
+    launcher = _compile_calls(Path(runner.origin), "run_attention_dense_torch")
+    assert len(adapter) == 1 and len(launcher) == 1, (adapter, launcher)
+    assert (
+        adapter[0].replace("runner.build_attention_dense(", "build_attention_dense(")
+        == launcher[0]
+    )
+
+
 # ---------------------------------------------------------------------------
 # Subject scope
 # ---------------------------------------------------------------------------
@@ -1956,6 +2185,22 @@ def test_subject_accepts_only_an_unmasked_spec_for_an_unmasked_case() -> None:
             _verify_resolved_spec(
                 "gfx942", case, _unmasked_tuning_spec(**{name: value})
             )
+
+
+class _BottomRightCase(ValueShiftCase):
+    """A case of some other lane, with a mask the adapter cannot dispatch."""
+
+    @property
+    def mask(self) -> str:
+        return "bottom_right"
+
+
+def test_subject_refuses_a_case_mask_it_cannot_dispatch() -> None:
+    case = _BottomRightCase(1, 256, 256, 8, 2, 64, "fp16")
+    case.require_scope()
+    for entry in (_validate_supported_case, resolve_dense_subject):
+        with pytest.raises(ValueError, match="case mask must be one of"):
+            entry("gfx942", case)
 
 
 @pytest.mark.parametrize("subject_case", VALUE_SHIFT_SUBJECT_CASES, ids=_subject_id)

@@ -580,9 +580,14 @@ reads only the floating-point mode; how each instruction rounds is not checked
 here.
 
 The uncast-normalizer item is a property of this kernel, not a requirement of
-attention. It is the largest part of the row-sum term, and the path check
-requires it: a kernel that summed the cast weights would be more accurate and
-would fail the check until the tolerance is re-derived for it.
+attention. With it the weights the kernel applies do not sum to one exactly: a
+row sum is off by up to `2^-(p+1)`, which is the largest part of the row-sum
+term. The verdict accepts that, and the path check requires it: a kernel that
+summed the cast weights would be more accurate and would fail the check until
+the tolerance is re-derived for it. So that the accepted behaviour stays a
+measured number, every run is also reported against the tolerance of such a
+kernel, whose row-sum term is `3.1e-5` in both dtypes (the
+`against a normalizer over cast weights` diagnostic below).
 
 ### Scope checked before a launch
 
@@ -594,7 +599,9 @@ anything, and fails, never skips, when one is missing:
   ragged, bottom-right, paged, varlen) and additionally requires the resolved
   spec to be unmasked.
 - The kernel is compiled as the launcher compiles it, and the path checks above
-  run on the LLVM IR of that artifact, not on an earlier build.
+  run on the LLVM IR of that artifact, not on an earlier build. The adapter
+  repeats the launcher's compile call; a CPU contract fails when the two calls
+  differ.
 - The number of key tiles a query row visits is taken from that IR: one KV loop
   over `seqlen_kv / block_n` whole tiles, with no mask and no early exit.
 - The kernel descriptor of the code object selects round-to-nearest-even and
@@ -625,6 +632,7 @@ The lane also prints diagnostics. None of them is a verdict:
 | `eta_row`, `s_row` | largest per-row median of `E_d / c_d`, and largest distance of a column from its row's median; a row-sum defect moves the median, a column defect the spread |
 | `rms`, `mean` | root-mean-square and mean signed residual |
 | `apriori rho_max`, `tau/apriori` | largest residual over the tolerance that reads no output, and the mean of the applied tolerance over that one |
+| `against a normalizer over cast weights` | largest residual over the tolerance of a kernel whose normalizer sums the cast weights, and the number of elements beyond it; a nonzero count is the uncast normalizer of the shipped kernel showing, not a failure |
 
 `E_d` is a difference of stored values and an exact shift, so it is a multiple
 of the grid spacing of the stored values. Two store roundings of full size and

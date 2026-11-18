@@ -23,7 +23,7 @@ from fractions import Fraction
 import numpy as np
 from rocke.numeric.bf16 import f32_to_bf16
 
-from ._analytical import _DTYPES, _FORMAT, decode_bits, encode_bits
+from ._analytical import _DTYPES, _FORMAT, DenseCaseShape, decode_bits, encode_bits
 
 # One period of the shift: alternating signs and three magnitudes, every
 # component nonzero and exact in both subject dtypes.
@@ -44,8 +44,6 @@ _PROFILES = ("moderate", "concentrated")
 _DOMINANT_KEY = 70
 _DOMINANT_LEVEL = 2.0
 
-# Smallest normal exponent of each subject dtype.
-_MIN_EXPONENT = {"fp16": -14, "bf16": -126}
 # One FP32 unit of faithful rounding: an operation returns one of the two FP32
 # neighbours of its exact result.
 _FP32_UNIT = Fraction(1, 2**23)
@@ -73,34 +71,14 @@ class ShiftMutation(str, Enum):
 
 
 @dataclass(frozen=True)
-class ValueShiftCase:
+class ValueShiftCase(DenseCaseShape):
     """Logical unmasked dense-attention shape and attention profile for one
     value-shift case."""
 
-    batch: int
-    seqlen_q: int
-    seqlen_k: int
-    nhead_q: int
-    nhead_k: int
-    head_dim: int
-    dtype: str
     profile: str = "moderate"
 
     def __post_init__(self) -> None:
-        for name in (
-            "batch",
-            "seqlen_q",
-            "seqlen_k",
-            "nhead_q",
-            "nhead_k",
-            "head_dim",
-        ):
-            if int(getattr(self, name)) <= 0:
-                raise ValueError(f"{name} must be positive")
-        if self.nhead_q % self.nhead_k:
-            raise ValueError("nhead_q must be a multiple of nhead_k")
-        if self.dtype not in _DTYPES:
-            raise ValueError(f"dtype must be one of {sorted(_DTYPES)}")
+        super().__post_init__()
         if self.profile not in _PROFILES:
             raise ValueError(f"profile must be one of {sorted(_PROFILES)}")
 
@@ -115,22 +93,9 @@ class ValueShiftCase:
         return 0
 
     @property
-    def output_shape(self) -> tuple[int, int, int, int]:
-        """Return the runner's logical ``[B, Sq, Hq, D]`` output shape."""
-        return (self.batch, self.seqlen_q, self.nhead_q, self.head_dim)
-
-    @property
-    def key_shape(self) -> tuple[int, int, int, int]:
-        """Return the runner's logical ``[B, Sk, Hkv, D]`` K/V shape."""
-        return (self.batch, self.seqlen_k, self.nhead_k, self.head_dim)
-
-    @property
     def case_id(self) -> str:
         """Return a stable identifier for test ids and resolved-subject checks."""
-        return (
-            f"{self.dtype}-none-{self.profile}-b{self.batch}-sq{self.seqlen_q}-"
-            f"sk{self.seqlen_k}-hq{self.nhead_q}-hk{self.nhead_k}-d{self.head_dim}"
-        )
+        return self._shape_id(f"{self.mask}-{self.profile}")
 
     def require_scope(self) -> None:
         """Refuse a case the tolerance's derivation or the fixture does not cover.
@@ -337,6 +302,11 @@ def shifted_value_bits(values: np.ndarray, shift: np.ndarray, dtype: str) -> np.
     return encode_bits(single, dtype)
 
 
+def _min_exponent(dtype: str) -> int:
+    """Smallest normal exponent of a subject dtype."""
+    return 1 - _FORMAT[dtype][2]
+
+
 def _float_not_below(value: Fraction) -> float:
     """The float nearest ``value``, moved up one step if it lies below it."""
     nearest = float(value)
@@ -363,7 +333,11 @@ class ValueShiftBound:
     absolute errors of casts below it, relative to the normalizer; and
     ``normalizer``, the error of the FP32 normalizer. One launch's accumulation
     error is at most ``accumulation`` times the largest ``|V|`` of the column
-    plus ``accumulation_floor``."""
+    plus ``accumulation_floor``.
+
+    ``cast_normalizer_row_sum`` is ``row_sum`` without the two cast terms: the
+    bound of a kernel whose normalizer summed the cast weights, so that the
+    weights it applies sum to one up to FP32 rounding. No verdict uses it."""
 
     dtype: str
     keys: int
@@ -372,6 +346,7 @@ class ValueShiftBound:
     subnormal_cast: Fraction
     normalizer: Fraction
     row_sum: Fraction
+    cast_normalizer_row_sum: Fraction
     accumulation: Fraction
     accumulation_floor: Fraction
 
@@ -436,7 +411,7 @@ def value_shift_bound(dtype: str, *, keys: int, key_tiles: int) -> ValueShiftBou
     rescaled = 1 / (1 - key_tiles * unit)
 
     cast = Fraction(1, 2 ** (fraction_bits + 1))
-    subnormal_half = Fraction(2) ** (_MIN_EXPONENT[dtype] - fraction_bits - 1)
+    subnormal_half = Fraction(2) ** (_min_exponent(dtype) - fraction_bits - 1)
     subnormal_cast = (keys - 1) * subnormal_half * rescaled**2
     normalizer = gamma + key_tiles * rescaled**2 * (1 + gamma) * _FP32_UNDERFLOW
     if normalizer >= 1:
@@ -456,6 +431,7 @@ def value_shift_bound(dtype: str, *, keys: int, key_tiles: int) -> ValueShiftBou
         subnormal_cast=subnormal_cast,
         normalizer=normalizer,
         row_sum=row_sum,
+        cast_normalizer_row_sum=(1 + unit) / (1 - normalizer) - 1,
         accumulation=gamma * (1 + row_sum),
         accumulation_floor=reciprocal * accumulator_underflow,
     )
@@ -504,7 +480,7 @@ def _store_allowance_within(magnitude: Fraction, dtype: str) -> Fraction:
     exactly. The allowance does not decrease with the stored magnitude, so this
     bounds it for every stored value inside ``magnitude``."""
     fraction_bits = _FORMAT[dtype][0]
-    exponent = _MIN_EXPONENT[dtype]
+    exponent = _min_exponent(dtype)
     if magnitude > 0:
         exponent = max(_floor_log2(magnitude), exponent)
     radius = Fraction(2) ** (exponent - fraction_bits - 1)
@@ -517,7 +493,7 @@ def _magnitude_guard(reach: Fraction, dtype: str) -> Fraction:
     and the cast each move it up by at most their rounding."""
     fraction_bits = _FORMAT[dtype][0]
     product = reach * (1 + _FP32_UNIT) + _FP32_UNDERFLOW
-    exponent = max(_floor_log2(product), _MIN_EXPONENT[dtype])
+    exponent = max(_floor_log2(product), _min_exponent(dtype))
     return product + Fraction(2) ** (exponent - fraction_bits - 1)
 
 
@@ -532,7 +508,13 @@ class ValueShiftContract:
     allowance of the two stored values. ``base_guard`` and ``follow_up_guard``
     are the largest magnitudes a launch can store, and ``apriori_tolerance`` is
     the tolerance of two stored values at those guards: no pair inside the
-    guards has a larger one."""
+    guards has a larger one.
+
+    ``cast_normalizer_tolerance`` is ``column_tolerance`` with the row-sum bound
+    of a kernel whose normalizer sums the cast weights. The shipped kernel sums
+    the uncast ones, which the verdict accepts; residuals are also reported
+    against this tighter value, so that what the verdict accepts stays a
+    measured number. It takes part in no verdict."""
 
     case: ValueShiftCase
     bound: ValueShiftBound
@@ -544,6 +526,7 @@ class ValueShiftContract:
     follow_up_guard: np.ndarray
     apriori_tolerance: np.ndarray
     output_scale_floor: np.ndarray
+    cast_normalizer_tolerance: np.ndarray
 
 
 def _column_maxima(values: np.ndarray) -> np.ndarray:
@@ -606,6 +589,7 @@ def value_shift_contract(
     follow_up_guard = np.empty(case.head_dim, dtype=np.float64)
     apriori = np.empty(case.head_dim, dtype=np.float64)
     floor = np.empty(case.head_dim, dtype=np.float64)
+    cast_normalizer = np.empty(case.head_dim, dtype=np.float64)
     for dim in columns:
         expected = abs(Fraction(float(shift[dim])))
         accumulation = []
@@ -633,6 +617,9 @@ def value_shift_contract(
         follow_up_guard[dim] = _float_not_below(guards[1])
         apriori[dim] = _float_not_below(widest)
         floor[dim] = _float_not_below((2 * widest + sum(stores)) / (expected - widest))
+        cast_normalizer[dim] = _float_not_below(
+            column - expected * (bound.row_sum - bound.cast_normalizer_row_sum)
+        )
     arrays = (
         shift,
         base_max,
@@ -642,6 +629,7 @@ def value_shift_contract(
         follow_up_guard,
         apriori,
         floor,
+        cast_normalizer,
     )
     for array in arrays:
         array.setflags(write=False)
@@ -649,11 +637,18 @@ def value_shift_contract(
 
 
 def value_shift_tolerance(
-    contract: ValueShiftContract, base: np.ndarray, follow_up: np.ndarray
+    contract: ValueShiftContract,
+    base: np.ndarray,
+    follow_up: np.ndarray,
+    *,
+    cast_normalizer: bool = False,
 ) -> np.ndarray:
     """The tolerance of every element of a pair of raw-bit outputs:
     the contract's column part, the store allowance of each of the two stored
-    values, and the FP64 rounding of the residual itself, rounded upward."""
+    values, and the FP64 rounding of the residual itself, rounded upward.
+
+    ``cast_normalizer`` selects the diagnostic column part of a kernel whose
+    normalizer sums the cast weights; the verdict uses the default."""
     dtype = contract.case.dtype
     fraction_bits, exponent_bits, _ = _FORMAT[dtype]
     exponent_mask = np.uint16(((1 << exponent_bits) - 1) << fraction_bits)
@@ -662,11 +657,13 @@ def value_shift_tolerance(
         finite = (raw & exponent_mask) != exponent_mask
         magnitudes += np.abs(np.where(finite, decode_bits(raw, dtype), 0.0))
     host = _HOST_UNIT * (magnitudes + np.abs(contract.shift))
+    column = (
+        contract.cast_normalizer_tolerance
+        if cast_normalizer
+        else contract.column_tolerance
+    )
     return (
-        contract.column_tolerance
-        + store_allowance(follow_up, dtype)
-        + store_allowance(base, dtype)
-        + host
+        column + store_allowance(follow_up, dtype) + store_allowance(base, dtype) + host
     ) * _HOST_MARGIN
 
 
@@ -685,7 +682,10 @@ class ValueShiftResult:
     from its row's median: a row-sum defect moves the median, a column defect
     the spread. ``apriori_max_ratio`` is the largest residual over the
     tolerance that does not read the outputs, and ``tolerance_fraction`` the
-    mean of the applied tolerance over that one."""
+    mean of the applied tolerance over that one.
+    ``cast_normalizer_max_ratio`` and ``cast_normalizer_exceed_count`` judge the
+    same residuals against the tolerance of a kernel whose normalizer sums the
+    cast weights: what the shipped kernel's uncast normalizer costs, measured."""
 
     violations: tuple[str, ...]
     invalid_count: int
@@ -708,6 +708,8 @@ class ValueShiftResult:
     max_row_spread: float
     apriori_max_ratio: float
     tolerance_fraction: float
+    cast_normalizer_max_ratio: float
+    cast_normalizer_exceed_count: int
 
     @property
     def rejected_by_residual(self) -> bool:
@@ -756,6 +758,9 @@ def analyze_value_shift(
     ratio = magnitude / tolerance
     exceed = compared & (magnitude > tolerance)
     exceed_count = int(np.count_nonzero(exceed))
+    reduced = value_shift_tolerance(
+        contract, base_raw, follow_raw, cast_normalizer=True
+    )
 
     worst_coordinate: tuple[int, int, int, int] | None = None
     residual_at_worst = tolerance_at_worst = 0.0
@@ -832,6 +837,10 @@ def analyze_value_shift(
             if compared_count
             else 0.0
         ),
+        cast_normalizer_max_ratio=float(np.max(magnitude / reduced)),
+        cast_normalizer_exceed_count=int(
+            np.count_nonzero(compared & (magnitude > reduced))
+        ),
     )
 
 
@@ -898,7 +907,10 @@ def format_value_shift_result(result: ValueShiftResult) -> str:
         f"eta_row={result.max_row_eta:.3g} s_row={result.max_row_spread:.3g}; "
         f"rms={result.rms:.9g} mean={result.mean_signed:.9g}; "
         f"rho_max by d mod 4: {classes}; apriori rho_max="
-        f"{result.apriori_max_ratio:.3g}, tau/apriori={result.tolerance_fraction:.3g}"
+        f"{result.apriori_max_ratio:.3g}, tau/apriori={result.tolerance_fraction:.3g}; "
+        f"against a normalizer over cast weights: rho_max="
+        f"{result.cast_normalizer_max_ratio:.3g}, "
+        f"{result.cast_normalizer_exceed_count} beyond"
     )
 
 
