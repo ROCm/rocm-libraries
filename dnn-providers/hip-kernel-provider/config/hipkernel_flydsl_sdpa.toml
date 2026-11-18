@@ -5,24 +5,3 @@
 
 [meta]
 version = 1
-
-# -- SdpaFwdPlan run-time attention scale cases --
-# SdpaFwdPlan cases whose run-time attention scale is zero.
-[[test_skips]]
-filters = [
-    "full_SdpaFwdPlan_Bm_ScRt.bf16_7ce8c20b0aa9dab3",
-    "full_SdpaFwdPlan_Bm_ScRt.bf16_eb6d98791c63695b",
-    "standard_SdpaFwdPlan_Bm_ScRt.bf16_83e906024b68c435",
-    "standard_SdpaFwdPlan_Bm_ScRt.bf16_d78679e2a34d1c47",
-]
-reason = "ALMIOPEN-3247: a run-time attention scale of zero; declined at planning on every lane tested on Linux; kept until the Windows and remaining lanes are confirmed"
-
-# SdpaFwdPlan cases with a bias whose run-time attention scale is negative.
-[[test_skips]]
-filters = [
-    "comprehensive_SdpaFwdPlan_Bias_ScRt_Stats.bf16_00e130a802bf3019",
-    "full_SdpaFwdPlan_Bias_ScRt_Stats.bf16_12bf5c234e92fd7a",
-    "standard_SdpaFwdPlan_Bias_ScRt_Stats.bf16_195fa1067d4d3335",
-    "standard_SdpaFwdPlan_Bias_ScRt_Stats.bf16_e255b647ffccf099",
-]
-reason = "ALMIOPEN-3247: a run-time attention scale below zero; refused at execute on the Windows gfx110X lane before #15066; passes or is declined on every lane tested on Linux after #15066; kept until the Windows and remaining lanes are confirmed"
