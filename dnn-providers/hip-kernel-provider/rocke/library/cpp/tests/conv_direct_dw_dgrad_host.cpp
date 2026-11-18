@@ -66,6 +66,7 @@
 #include "rocke/instance_conv_direct_dw_fwd_wmma.h"
 #include "rocke/instance_conv_direct_dw_wgrad.h"
 #include "rocke/instance_conv_direct_dw_wgrad_mfma.h"
+#include "rocke/instance_conv_direct_dw_wgrad_wmma.h"
 #include "rocke/instance_conv_direct_fwd_gstream_wmma.h"
 #include "rocke/instance_conv_direct_fwd_tapouter_wmma.h"
 #include "rocke/instance_conv_direct_fwd_wmma.h"
@@ -1234,8 +1235,74 @@ static void test_problem_dims_refused(void)
     check_problem_dims("fwd_smallk_wmma", sk, rocke_fwd_smallk_wmma_is_valid_spec);
 }
 
+/* The WMMA wgrad validators' empty-problem refusals (every zero extent, an
+ * output with no rows or columns) and the depthwise one's i32 tensor bound,
+ * with the texts of the Python validators (test_direct_*wgrad_wmma.py). */
+template <typename Spec, typename Valid>
+static void check_empty_output(const char* kernel, Spec spec, Valid is_valid)
+{
+    char reason[ERR_CAP];
+    Spec rows = spec;
+    rows.problem.H = 2;
+    rows.problem.PAD = 0;
+    reason[0] = '\0';
+    CHECK(!is_valid(&rows, "gfx1250", reason, sizeof(reason)), "%s accepted Ho = 0", kernel);
+    CHECK(strncmp(reason, "empty output 0x", 15) == 0, "%s Ho = 0 reason: %s", kernel, reason);
+    Spec cols = spec;
+    cols.problem.W = 2;
+    cols.problem.PAD = 0;
+    reason[0] = '\0';
+    CHECK(!is_valid(&cols, "gfx1250", reason, sizeof(reason)), "%s accepted Wo = 0", kernel);
+    CHECK(strstr(reason, "empty output ") == reason && strstr(reason, "x0") != NULL,
+          "%s Wo = 0 reason: %s",
+          kernel,
+          reason);
+}
+
+static void test_wmma_wgrad_empty_problems(void)
+{
+    rocke_direct_wgrad_wmma_spec_t wgrad = rocke_direct_wgrad_wmma_spec_default();
+    wgrad.problem = dense_problem(13, 40, 64, 96);
+    check_problem_dims("direct_wgrad_wmma", wgrad, rocke_direct_wgrad_wmma_is_valid_spec);
+    check_empty_output("direct_wgrad_wmma", wgrad, rocke_direct_wgrad_wmma_is_valid_spec);
+
+    rocke_grouped_wgrad_wmma_spec_t gwgrad = rocke_grouped_wgrad_wmma_spec_default();
+    gwgrad.problem = dense_problem(19, 45, 4, 4);
+    gwgrad.problem.groups = 16;
+    check_problem_dims("grouped_wgrad_wmma", gwgrad, rocke_grouped_wgrad_wmma_is_valid_spec);
+    check_empty_output("grouped_wgrad_wmma", gwgrad, rocke_grouped_wgrad_wmma_is_valid_spec);
+
+    rocke_direct_dw_wgrad_wmma_spec_t dw = rocke_direct_dw_wgrad_wmma_spec_default();
+    dw.problem = dw_problem(3, 3, 1, -1);
+    dw.problem.dtype = "bf16";
+    check_problem_dims("direct_dw_wgrad_wmma", dw, rocke_direct_dw_wgrad_wmma_is_valid_spec);
+
+    /* 4 x 512 x 512 x 1024 bf16 is 2 GiB: the masked-lane offset INT32_MAX
+     * would be inside the buffer, so it is refused (3 images are kept). */
+    char reason[ERR_CAP];
+    dw.problem = dw_problem(7, 7, 0, -1);
+    dw.problem.dtype = "bf16";
+    dw.problem.N = 4;
+    dw.problem.H = 512;
+    dw.problem.W = 512;
+    dw.problem.groups = 1024;
+    reason[0] = '\0';
+    CHECK(!rocke_direct_dw_wgrad_wmma_is_valid_spec(&dw, "gfx1250", reason, sizeof(reason)),
+          "direct_dw_wgrad_wmma accepted a 2 GiB input");
+    CHECK(strcmp(reason, "tensors of 2147483648 B exceed the i32 byte offsets") == 0,
+          "direct_dw_wgrad_wmma 2 GiB input reason: %s",
+          reason);
+    dw.problem.N = 3;
+    dw.problem.PAD = 3;
+    reason[0] = '\0';
+    CHECK(rocke_direct_dw_wgrad_wmma_is_valid_spec(&dw, "gfx1250", reason, sizeof(reason)),
+          "direct_dw_wgrad_wmma refused a 1.5 GiB input: %s",
+          reason);
+}
+
 int main(void)
 {
+    test_wmma_wgrad_empty_problems();
     test_problem_dims_refused();
     test_channel_totals_refused();
     test_wgrad_dilation_reason();

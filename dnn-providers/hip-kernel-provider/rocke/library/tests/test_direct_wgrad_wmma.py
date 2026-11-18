@@ -352,6 +352,7 @@ if __name__ == "__main__":
         (dict(C=0, K=0), "cpg must be >= 1"),
         (dict(N=0), "N must be >= 1"),
         (dict(W=2, PAD=0), "empty output"),
+        (dict(H=2, PAD=0), "empty output"),
     ],
 )
 def test_refuses_empty_problems(kw, why):

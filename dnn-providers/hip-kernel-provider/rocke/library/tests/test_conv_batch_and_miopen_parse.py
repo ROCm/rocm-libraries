@@ -169,6 +169,27 @@ def test_direct_parse_padding_gate_follows_requested_directions():
     assert parse_miopen_cmd_direct(_DW_1X31.format(u=1, f=4))[0].pad_w == 15
 
 
+_DILATED = (
+    "MIOpenDriver convfp16 -n 2 -c 64 -H 20 -W 20 -k 64 -y 3 -x 3 "
+    "-p 2 -q 2 -u 1 -v 1 -l 2 -j 2 -g 1 -F {f}"
+)
+
+
+def test_direct_parse_dilation_gate_follows_requested_directions():
+    """--run-from-cache --directions overrides -F, so the dilation gate
+    checks the directions that will run, not the -F one."""
+    from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
+
+    # -F 1 (fwd) is fine, but a wgrad run of the same command is refused,
+    parse_miopen_cmd_direct(_DILATED.format(f=1))
+    with pytest.raises(ValueError, match="dilated convolution only"):
+        parse_miopen_cmd_direct(_DILATED.format(f=1), ("wgrad",))
+    # and a -F 4 command that is asked for fwd only parses.
+    with pytest.raises(ValueError, match="dilated convolution only"):
+        parse_miopen_cmd_direct(_DILATED.format(f=4))
+    parse_miopen_cmd_direct(_DILATED.format(f=4), ("fwd",))
+
+
 def test_per_axis_pad_variants_name_every_per_axis_variant():
     """The parser's per-axis padding rule comes from per_axis_pad_variants,
     which states a shape for each PER_AXIS_PAD_VARIANTS entry."""
@@ -196,11 +217,15 @@ def test_per_axis_pad_variants_name_every_per_axis_variant():
     assert variants("wgrad", **dw) == ("direct_depthwise_wgrad_wmma",)
     assert variants("wgrad", stride=2, **dw) == ()
     assert variants("fwd", KH=1, PAD=0) == (
+        "direct_fwd_flex_mfma",
         "direct_fwd_smallk_wmma",
         "direct_fwd_smallk_mfma",
         "direct_fwd_wmma",
     )
-    assert variants("fwd", stride=2, KH=1, PAD=0, one_d=True) == ("direct_fwd_wmma",)
+    assert variants("fwd", stride=2, KH=1, PAD=0, one_d=True) == (
+        "direct_fwd_flex_mfma",
+        "direct_fwd_wmma",
+    )
     assert variants("fwd", groups=2, cpg=32, kpg=32) == ()
     assert variants("wgrad") == ()
     named = set(variants("dgrad", **dw) + variants("wgrad", **dw))

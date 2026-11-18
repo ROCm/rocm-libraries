@@ -268,4 +268,12 @@ def test_masked_lane_sentinel_is_past_every_admitted_buffer():
     assert str((1 << 31) - 1) in str(build_dw_wgrad_wmma(DwWgradWmmaSpec(problem=big)))
     too_big = _problem(N=4, H=512, W=512, C=1024, KH=3, PAD=1)
     ok, why = is_valid_dw_wgrad_wmma_spec(DwWgradWmmaSpec(problem=too_big), "gfx1250")
-    assert not ok and "exceeds i32 byte offsets" in why
+    assert not ok and "i32 byte offsets" in why
+
+
+def test_activation_bound_refuses_an_oversized_input():
+    """The input tensor alone (not the output) can be past the i32 bound: a
+    7x7 filter with no padding makes the output smaller than the input."""
+    big = _problem(N=4, H=512, W=512, C=1024, KH=7, PAD=0)
+    ok, why = is_valid_dw_wgrad_wmma_spec(DwWgradWmmaSpec(problem=big), "gfx1250")
+    assert not ok and "i32 byte offsets" in why
