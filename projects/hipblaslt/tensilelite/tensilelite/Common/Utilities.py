@@ -101,6 +101,25 @@ def isMxf4SubtilePath(kernel) -> bool:
         return False
 
 
+def isSubtileSwizzledTensor(kernel) -> bool:
+    """Scope gate for the subtile global read of a host-swizzled A or B.
+
+    Named off SwizzleTensorA/B, the parameters this reads downstream: the scale
+    blocks have their own swizzle (HasMXScaleSwizzle, graTileAssignmentScaleSwizzled)
+    on a separate layout and a separate read, and nothing here applies to it.
+
+    Distinct from isMxf4SubtilePath even though it currently answers the same
+    question. Nothing about reading a pre-swizzled operand is tied to MXF4 or to
+    a bf16 output -- the layout and the K step are functions of the element size
+    and the matrix instruction, so MXFP8 and BF16 would work the same way. They
+    are simply untuned and untested here, and out of scope for this change, so
+    the narrower gate stands in. Widening is then one edit in one place rather
+    than three, and it will not disturb the store and schedule work, which is
+    genuinely MXF4-and-bf16 specific and stays on isMxf4SubtilePath.
+    """
+    return isMxf4SubtilePath(kernel)
+
+
 def plsinBlockSchedTile(kernel) -> bool:
     """Whether block scheduling may be built for this kernel.
 
@@ -565,6 +584,25 @@ def wmmaV3InputVgprLayout(wmma: Sequence[int], dtypeBitWidth: Optional[int] = No
 # Bytes moved by one buffer_load_dwordx4, the widest global load we issue.
 SWIZZLE_LOAD_BYTES = 16
 
+# MUBUF offset12 is a 12-bit unsigned field.  rocisa does not range-check it, so
+# an oversized step would be emitted verbatim rather than rejected.
+SWIZZLE_DTL_OFFSET12_MAX = 4095
+
+
+def swizzleTensorMaxDepthU(rowsPerBlock: int, bpe: float) -> int:
+    """Largest DepthU the read of a swizzled A or B can encode.
+
+    SwizzleTensor, not the MX scale swizzle: the scale blocks have their own
+    layout and their own read, and this ceiling says nothing about them.
+
+    A K step consumes a K-extent on every row of a swizzle block, so the byte
+    step is rowsPerBlock times the unit-stride count, and that product rides in
+    the DTL immediate.  The ceiling is therefore a property of the element size
+    and the matrix instruction, not of a data type: 512 for MXF4's half-byte
+    element over 16 rows, 256 for FP8, 128 for BF16.
+    """
+    return int((SWIZZLE_DTL_OFFSET12_MAX + 1) // rowsPerBlock / bpe)
+
 def swizzleGeometry(solution, tc: str) -> dict:
     """Layout of the pre-swizzled (pre-tiled) tensor `tc` ("A" or "B").
 
@@ -579,13 +617,18 @@ def swizzleGeometry(solution, tc: str) -> dict:
     `solution` may be a partly derived state; only MIInputPerThread{tc}, MatrixInst{M,N,K},
     WavefrontSize and ProblemType.DataType{tc} are read.
     """
-    bpe       = int(solution["ProblemType"][f"DataType{tc}"].numBytes())
+    # Sub-byte types give a fractional bpe (0.5 for F4), which int() truncates to
+    # 0 and makes a divisor below. Keep it fractional and fold it into the
+    # divisor so the division stays exact.
+    bpe       = solution["ProblemType"][f"DataType{tc}"].numBytes()
     miInput   = solution[f"MIInputPerThread{tc}"]
     miMorN    = solution["MatrixInstM"] if tc == "A" else solution["MatrixInstN"]
     # Pack several MI steps into one load when one operand is narrower than a dwordx4.
-    packK     = max(1, SWIZZLE_LOAD_BYTES // miInput // bpe)
+    packK     = max(1, int(SWIZZLE_LOAD_BYTES // (miInput * bpe)))
     miOperand = miInput * packK
-    laneSize  = min(miOperand, SWIZZLE_LOAD_BYTES // bpe)
+    # Elements the host pre-swizzle vectorises over per lane: half a dwordx4.
+    miKv      = max(1, int(SWIZZLE_LOAD_BYTES // 2 // bpe))
+    laneSize  = min(miOperand, int(SWIZZLE_LOAD_BYTES // bpe))
     # Elements the wave holds vs. distinct elements the instruction consumes.
     dupFactor = max(1, (solution["WavefrontSize"] * miInput) // (miMorN * solution["MatrixInstK"]))
     lanesUsed = solution["WavefrontSize"] // dupFactor
@@ -593,6 +636,13 @@ def swizzleGeometry(solution, tc: str) -> dict:
         "packK":        packK,
         "laneSize":     laneSize,
         "swizzleK":     max(1, lanesUsed // miMorN) * laneSize,
+        # K granularity the host pre-swizzle pads to before reshaping.  It packs
+        # SWIZZLE_LOAD_BYTES per lane out of miKv-element vectors, so the step is
+        # miInput * SWIZZLE_LOAD_BYTES / (miKv * bpe) elements.  This is the
+        # pre-shuffled 16-row block stride and is not swizzleK, which covers a
+        # whole wave and is larger; rounding K to swizzleK instead puts every
+        # block after the first at the wrong offset.
+        "layoutK":      int(miInput * SWIZZLE_LOAD_BYTES // (miKv * bpe)),
         "lanesUsed":    lanesUsed,
         "dupFactor":    dupFactor,
         "loadsPerLane": miOperand // laneSize,

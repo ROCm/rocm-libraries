@@ -126,7 +126,9 @@ def _get_arch() -> str:
 
     arch = ""
     try:
-        out = subprocess.check_output(["rocminfo"], text=True, stderr=subprocess.DEVNULL)
+        out = subprocess.check_output(
+            ["rocminfo"], text=True, stderr=subprocess.DEVNULL
+        )
         for line in out.splitlines():
             if "Name:" in line and "gfx" in line:
                 arch = line.split()[-1].strip()
@@ -393,7 +395,9 @@ class GpuBatchedGemmRunner:
     def __init__(self, lib_path: Path, arch: Optional[str] = None):
         self.lib = BatchedGemmDispatcherLib(lib_path)
         if not self.lib.initialize():
-            raise RuntimeError(f"Failed to initialize batched dispatcher .so: {lib_path}")
+            raise RuntimeError(
+                f"Failed to initialize batched dispatcher .so: {lib_path}"
+            )
         names = self.lib.kernel_names
         self._kernel_name = names[0] if names else "unknown"
         # fp8/bf8 encoding must match the arch the .so was compiled for; `arch`
@@ -459,16 +463,13 @@ class GpuBatchedGemmRunner:
 
         dtype = _gu._dtype_from_kernel_name(self._kernel_name)
         la, lb, lc = _gu._layout_from_kernel_name(self._kernel_name)
-
-        # Per-batch layout transform: a 'c' (column-major) operand is stored as
-        # the transpose of its logical (rows, cols) so the contiguous per-batch
-        # slab matches column-major memory order (leading batch axis untouched).
-        A_lay = A if la == "r" else np.transpose(A, (0, 2, 1))
-        B_lay = B if lb == "r" else np.transpose(B, (0, 2, 1))
         C_shape = (batch, M, N) if lc == "r" else (batch, N, M)
 
-        A_h = _gu._encode_operand(A_lay, dtype, self._use_ocp)
-        B_h = _gu._encode_operand(B_lay, dtype, self._use_ocp)
+        # A/B host buffers in the kernel's element dtype and per-batch layout; the
+        # kernels of a sweep worker's shape reuse them (see _gu._sweep_inputs).
+        A_h, B_h = _gu._encode_ab_cached(
+            A, B, dtype, la, lb, self._use_ocp, self._kernel_name
+        )
         out_dtype, c_np = _gu._c_numpy_dtype(dtype)
         # F6: the host C buffer is memcpy'd byte-for-byte to/from the device
         # buffer the kernel writes as CDataType, so the numpy element size MUST
@@ -794,7 +795,12 @@ def expand_sweep(
                 f"batched_gemm bridge supports {name} {list(supported)}; got {value!r}"
             )
     base_configs = _gu.expand_sweep(
-        config_path, arch, dtype=dtype, layout=layout, variant="batched", **vector_kwargs
+        config_path,
+        arch,
+        dtype=dtype,
+        layout=layout,
+        variant="batched",
+        **vector_kwargs,
     )
     out: List[BatchedGemmKernelConfig] = []
     seen: set = set()
@@ -847,6 +853,8 @@ def expand_sweep(
             vector_size_a=b.vector_size_a,
             vector_size_b=b.vector_size_b,
             vector_size_c=b.vector_size_c,
+            num_slots=b.num_slots,
+            publish_lag=b.publish_lag,
             variant="batched",
         )
         if c.name in seen:

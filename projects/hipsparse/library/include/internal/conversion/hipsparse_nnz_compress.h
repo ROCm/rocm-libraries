@@ -89,6 +89,54 @@ hipsparseStatus_t hipsparseSnnz_compress(hipsparseHandle_t         handle,
                                          int*                      nnzC,
                                          float                     tol);
 
+/*! \ingroup conv_module
+*  This function is used as the first step in converting a CSR matrix to a compressed CSR matrix.
+*
+*  \details
+*  Given a sparse CSR matrix and a non-negative tolerance, this function computes how many entries would be left
+*  in each row of the matrix if elements less than the tolerance were removed. It also computes the total number
+*  of remaining elements in the matrix.
+*
+*  Given an input sparse matrix \f$A\f$ in CSR format, the resulting compressed sparse CSR matrix \f$C\f$ is
+*  computed using:
+*  \f[
+*   C(i,j) = A(i, j) \text{  if |A(i, j)| > tol}
+*  \f]
+*
+*  The user first allocates \p nnzPerRow with size \p m elements, then calls \p hipsparseXnnz_compress.
+*  The function fills in the \p nnzPerRow array and sets the total number of non-zeros found in \p nnzC.
+*
+*  See hipsparseScsr2csr_compress() for a full code example.
+*
+*  \note
+*  In the case of complex matrices, only the magnitude of the real part of \p tol is used.
+*
+*  @param[in]
+*  handle        handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m             number of rows of the sparse CSR matrix.
+*  @param[in]
+*  descrA        the descriptor of the sparse CSR matrix.
+*  @param[in]
+*  csrValA       array of \p nnzA elements of the sparse CSR matrix.
+*  @param[in]
+*  csrRowPtrA    array of \p m+1 elements that point to the start of every row of the
+*                uncompressed sparse CSR matrix.
+*  @param[out]
+*  nnzPerRow     array of length \p m containing the number of entries that will be kept per row in
+*                the final compressed CSR matrix.
+*  @param[out]
+*  nnzC          number of elements in the column indices and values arrays of the compressed
+*                sparse CSR matrix. Can be either host or device pointer.
+*  @param[in]
+*  tol           the non-negative tolerance used for compression. If \p tol is complex, then only the magnitude
+*                of the real part is used. Entries in the input uncompressed CSR array that are below the tolerance
+*                are removed in output compressed CSR matrix.
+*
+*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p tol, \p csrValA, \p csrRowPtrA, \p nnzPerRow, or \p nnzC
+*              pointer is invalid.
+*/
 DEPRECATED_CUDA_12000("The routine will be removed in a future CUDA release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDnnz_compress(hipsparseHandle_t         handle,
@@ -100,6 +148,54 @@ hipsparseStatus_t hipsparseDnnz_compress(hipsparseHandle_t         handle,
                                          int*                      nnzC,
                                          double                    tol);
 
+/*! \ingroup conv_module
+*  This function is used as the first step in converting a CSR matrix to a compressed CSR matrix.
+*
+*  \details
+*  Given a sparse CSR matrix and a non-negative tolerance, this function computes how many entries would be left
+*  in each row of the matrix if elements less than the tolerance were removed. It also computes the total number
+*  of remaining elements in the matrix.
+*
+*  Given an input sparse matrix \f$A\f$ in CSR format, the resulting compressed sparse CSR matrix \f$C\f$ is
+*  computed using:
+*  \f[
+*   C(i,j) = A(i, j) \text{  if |A(i, j)| > tol}
+*  \f]
+*
+*  The user first allocates \p nnzPerRow with size \p m elements, then calls \p hipsparseXnnz_compress.
+*  The function fills in the \p nnzPerRow array and sets the total number of non-zeros found in \p nnzC.
+*
+*  See hipsparseScsr2csr_compress() for a full code example.
+*
+*  \note
+*  In the case of complex matrices, only the magnitude of the real part of \p tol is used.
+*
+*  @param[in]
+*  handle        handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m             number of rows of the sparse CSR matrix.
+*  @param[in]
+*  descrA        the descriptor of the sparse CSR matrix.
+*  @param[in]
+*  csrValA       array of \p nnzA elements of the sparse CSR matrix.
+*  @param[in]
+*  csrRowPtrA    array of \p m+1 elements that point to the start of every row of the
+*                uncompressed sparse CSR matrix.
+*  @param[out]
+*  nnzPerRow     array of length \p m containing the number of entries that will be kept per row in
+*                the final compressed CSR matrix.
+*  @param[out]
+*  nnzC          number of elements in the column indices and values arrays of the compressed
+*                sparse CSR matrix. Can be either host or device pointer.
+*  @param[in]
+*  tol           the non-negative tolerance used for compression. If \p tol is complex, then only the magnitude
+*                of the real part is used. Entries in the input uncompressed CSR array that are below the tolerance
+*                are removed in output compressed CSR matrix.
+*
+*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p tol, \p csrValA, \p csrRowPtrA, \p nnzPerRow, or \p nnzC
+*              pointer is invalid.
+*/
 DEPRECATED_CUDA_12000("The routine will be removed in a future CUDA release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCnnz_compress(hipsparseHandle_t         handle,
@@ -111,6 +207,54 @@ hipsparseStatus_t hipsparseCnnz_compress(hipsparseHandle_t         handle,
                                          int*                      nnzC,
                                          hipComplex                tol);
 
+/*! \ingroup conv_module
+*  This function is used as the first step in converting a CSR matrix to a compressed CSR matrix.
+*
+*  \details
+*  Given a sparse CSR matrix and a non-negative tolerance, this function computes how many entries would be left
+*  in each row of the matrix if elements less than the tolerance were removed. It also computes the total number
+*  of remaining elements in the matrix.
+*
+*  Given an input sparse matrix \f$A\f$ in CSR format, the resulting compressed sparse CSR matrix \f$C\f$ is
+*  computed using:
+*  \f[
+*   C(i,j) = A(i, j) \text{  if |A(i, j)| > tol}
+*  \f]
+*
+*  The user first allocates \p nnzPerRow with size \p m elements, then calls \p hipsparseXnnz_compress.
+*  The function fills in the \p nnzPerRow array and sets the total number of non-zeros found in \p nnzC.
+*
+*  See hipsparseScsr2csr_compress() for a full code example.
+*
+*  \note
+*  In the case of complex matrices, only the magnitude of the real part of \p tol is used.
+*
+*  @param[in]
+*  handle        handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m             number of rows of the sparse CSR matrix.
+*  @param[in]
+*  descrA        the descriptor of the sparse CSR matrix.
+*  @param[in]
+*  csrValA       array of \p nnzA elements of the sparse CSR matrix.
+*  @param[in]
+*  csrRowPtrA    array of \p m+1 elements that point to the start of every row of the
+*                uncompressed sparse CSR matrix.
+*  @param[out]
+*  nnzPerRow     array of length \p m containing the number of entries that will be kept per row in
+*                the final compressed CSR matrix.
+*  @param[out]
+*  nnzC          number of elements in the column indices and values arrays of the compressed
+*                sparse CSR matrix. Can be either host or device pointer.
+*  @param[in]
+*  tol           the non-negative tolerance used for compression. If \p tol is complex, then only the magnitude
+*                of the real part is used. Entries in the input uncompressed CSR array that are below the tolerance
+*                are removed in output compressed CSR matrix.
+*
+*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p tol, \p csrValA, \p csrRowPtrA, \p nnzPerRow, or \p nnzC
+*              pointer is invalid.
+*/
 DEPRECATED_CUDA_12000("The routine will be removed in a future CUDA release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZnnz_compress(hipsparseHandle_t         handle,

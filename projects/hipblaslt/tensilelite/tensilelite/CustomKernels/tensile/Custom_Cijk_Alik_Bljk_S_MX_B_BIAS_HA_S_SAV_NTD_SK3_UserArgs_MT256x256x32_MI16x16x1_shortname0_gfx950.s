@@ -3441,6 +3441,7 @@ v_mfma_f32_16x16x32_bf16 acc[248:251], v[vgprValuB_X0_I0+56:vgprValuB_X0_I0+56+3
 s_sub_u32 s[sgprLoopCounterL], s[sgprLoopCounterL], 1 // dec counterLCVT A 24 24 22
 .endif
 CVT A 24 24 23 \usePLR
+s_waitcnt lgkmcnt(0) // Wait for all LR B0 to finish
 .if  \usePLR==1  
 v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+0+0], v[vgprValuB_T0_I0+0+0], v[vgprValuB_T0_I0+0+1]
 v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+0+1], v[vgprValuB_T0_I0+0+2], v[vgprValuB_T0_I0+0+3]
@@ -3502,7 +3503,6 @@ v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+0+4], v[vgprValuB_T0_I0+0+0], v[vgprValuB_T0
 .endif
   /*  mfmaIndex:189  */
 v_mfma_f32_16x16x32_bf16 acc[252:255], v[vgprValuB_X0_I0+56:vgprValuB_X0_I0+56+3], v[vgprValuA_X0_I0+56+4:vgprValuA_X0_I0+56+4+3], acc[252:255] // left value = acc[252+0:255+0]
-s_waitcnt lgkmcnt(0) // Wait for all LR B0 to finish
 .if  \usePLR==1  
 v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+8+7], v[vgprValuB_T0_I0+8+6], v[vgprValuB_T0_I0+8+7]
 v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+8+6], v[vgprValuB_T0_I0+8+4], v[vgprValuB_T0_I0+8+5]

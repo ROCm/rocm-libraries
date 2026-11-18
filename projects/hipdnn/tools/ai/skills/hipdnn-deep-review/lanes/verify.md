@@ -36,7 +36,26 @@ one to `IMPORTANT` or above, also run step 3.
      names, inside the changed code or what it calls. Rebuild, rerun, revert, and recheck
      the baseline before the next mutant. Discard a mutant that changes no observable
      behavior. When the reporter already mutated, rerun only the 3 most decisive mutants and state which were reused.
-4. Set the verdict and the tier you can defend; `PARTIAL` states the narrower claim.
+     Before any mutant, check the named tests' binary compiles the mutated file: a mutant in code the binary does not build survives by
+     construction and proves nothing. Check every configuration that builds the file (the **Options and guards** of
+     `CONTEXT.md` and the area files), not only the default link line or `compile_commands.json`. If one links it into the
+     binary, run the mutant under that configuration or return `UNVERIFIED`. If none does, run no mutant: return
+     `CONFIRMED` only on that link-graph evidence plus the absence of any registered test that exercises the path, and say
+     in **Proof** that no mutant ran.
+4. Set the verdict and the tier you can defend; `PARTIAL` states the narrower claim. A `design` finding is never `BLOCKING`
+   ([../policy.md](../policy.md) *Design findings*): a verifier who believes one must block writes it as a `VER` defect with its own
+   proof (`verify/VER<batch>.md`) and sets the design finding's tier at `IMPORTANT` at most.
+
+## Threads
+
+A finding linked to a PR thread (`LEDGER.md` *Threads*, the `Thread URL` rows of the finding;
+the thread's comments are in `pr/threads.json`) joins your batch when its thread has a new reply
+(`reply-affected.txt`). Read the reply: it can show a guard, test or document you missed, and then step 2 applies. The
+verdict follows the proof, never the reply or the thread's resolved state. When the proof
+holds and the reply argues intent (the behavior is deliberate, accepted or out of scope), keep
+the verdict and add a `Needs human decision:` line to the verify file: the question, the
+options and your recommendation. The orchestrator moves it to Open questions. Cite the thread
+URL; never quote the reply or name its author.
 
 ## Handoffs
 

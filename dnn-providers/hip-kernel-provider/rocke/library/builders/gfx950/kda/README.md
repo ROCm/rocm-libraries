@@ -50,12 +50,14 @@ python -m pytest tests/test_kda_chunkwise_gfx950_numeric.py -m gpu
 ```
 
 KDA is a family in the shared CPU-only IR parity harness. From the `rocke/`
-root, re-bless or verify all representative families with:
+root, re-bless the KDA shard (drop `--only` to re-bless every family) and
+verify all representative families with:
 
 ```bash
 PYTHONPATH=platform/python:library \
   python platform/tests/instances/rocke_ir_parity_harness.py \
-    --write platform/tests/golden/rocke_representative_ir_sha256.json
+    --write platform/tests/golden/rocke_representative_ir_sha256/ \
+    --only kda_chunkwise
 PYTHONPATH=platform/python:library \
   python -m pytest platform/tests/test_rocke_ci_static.py \
     -k ir_cases_match_golden_sha256

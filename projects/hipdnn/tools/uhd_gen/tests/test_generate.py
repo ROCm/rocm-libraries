@@ -3,6 +3,7 @@
 """Tests for uhd_gen generate: corpus collection, labels and model emission."""
 import copy
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from uhd_gen.generate import (
 )
 from uhd_gen.provenance import snapshot_provenance
 from uhd_gen.tests.bench_stub import find_any_bench
+from uhd_gen.tests.model_bin import ENCODING_FLAGS, encoding_of
 
 
 def _cli():
@@ -611,6 +613,20 @@ def test_one_generate_run_emits_and_installs_one_l1_model_per_metric(
     assert ued["predict_engine"] == {"gfx942": [emitted["tflops"], emitted["time"]]}
 
 
+@pytest.mark.parametrize(("flags", "written"), ENCODING_FLAGS)
+def test_generate_writes_the_encoding_its_flags_ask_for(
+    monkeypatch, tmp_path, evaluator, flags, written
+):
+    """generate trains through `train`, so it takes and passes on the same flags."""
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    _immediate_bench(monkeypatch, snapshot_provenance(tree))
+    output = tmp_path / "out"
+    common = _l1_args(_graphs(tmp_path / "graphs"), tree, output, evaluator)
+    assert main([*common, "--metric", "tflops", *flags]) == 0
+    assert encoding_of(output / "model" / "model.bin") == written
+
+
 TFLOPS_ID = "c47e1b3a-8f60-4a92-b5d4-1e08c9a27f63"
 TIME_ID = "30284ebe-6e15-4f8e-968d-09f92d8a9480"
 
@@ -1032,12 +1048,18 @@ def test_an_authored_recipe_reading_kernel_priority_is_admitted():
         )
 
 
-def test_the_bench_is_run_for_real_and_a_failing_exit_is_refused(tmp_path):
+def test_the_bench_is_run_for_real_and_a_failing_exit_is_refused(tmp_path, monkeypatch):
     """Every other test replaces `_run_json`; this one runs a stand-in executable, so the
-    exit status and the one-JSON-object rule are what is checked."""
+    exit status and the one-JSON-object rule are what is checked. The child gets this
+    process's environment, as `bench_environment` gives it: an interpreter that finds its
+    libpython through LD_LIBRARY_PATH cannot start without it."""
+    import os
     import sys
 
     from uhd_gen.generate import _run_json
+
+    monkeypatch.delenv("HIPDNN_CACHE_DIR", raising=False)
+    environment = dict(os.environ)
 
     def bench(body: str) -> list:
         script = tmp_path / f"bench{len(list(tmp_path.glob('bench*')))}.py"
@@ -1046,26 +1068,35 @@ def test_the_bench_is_run_for_real_and_a_failing_exit_is_refused(tmp_path):
 
     commands: list = []
     answered = _run_json(
-        bench("print('{\"avg_time_ms\": 1.5}')"), {}, tmp_path / "logs", 0, commands
+        bench("print('{\"avg_time_ms\": 1.5}')"),
+        environment,
+        tmp_path / "logs",
+        0,
+        commands,
     )
     assert answered == {"avg_time_ms": 1.5} and commands[0]["returncode"] == 0
 
     with pytest.raises(ValueError, match=r"hipdnn_bench failed \(3\)"):
         _run_json(
             bench("import sys\nprint('{}')\nsys.exit(3)"),
-            {},
+            environment,
             tmp_path / "logs",
             1,
             commands,
         )
     with pytest.raises(ValueError, match="one JSON response"):
-        _run_json(bench("print('not json')"), {}, tmp_path / "logs", 2, commands)
+        _run_json(
+            bench("print('not json')"), environment, tmp_path / "logs", 2, commands
+        )
 
 
-def test_a_bench_that_outlasts_its_timeout_is_killed_and_refused(tmp_path):
+def test_a_bench_that_outlasts_its_timeout_is_killed_and_refused(tmp_path, monkeypatch):
+    import os
     import sys
 
     from uhd_gen.generate import _run_json
+
+    monkeypatch.delenv("HIPDNN_CACHE_DIR", raising=False)
 
     script = tmp_path / "hang.py"
     script.write_text("import time\ntime.sleep(60)\n", encoding="utf-8")
@@ -1073,7 +1104,7 @@ def test_a_bench_that_outlasts_its_timeout_is_killed_and_refused(tmp_path):
     with pytest.raises(ValueError, match="timed out after 0.5 s"):
         _run_json(
             [sys.executable, str(script)],
-            {},
+            dict(os.environ),
             tmp_path / "logs",
             0,
             commands,
@@ -1170,3 +1201,175 @@ def test_the_bench_sweep_entry_is_read_as_the_bench_writes_it(monkeypatch, tmp_p
     ) == (2.0, 2.75, 2.5, 0.125, 40)
     assert row["is_valid"] is True and row["numerically_valid"] is True
     assert row["validation"] == entry["validation"]
+
+
+def _generate_arguments(*extra):
+    import argparse
+
+    from uhd_gen.generate import add_generate_arguments
+
+    parser = argparse.ArgumentParser()
+    add_generate_arguments(parser)
+    return parser.parse_args(
+        [
+            "--graphs",
+            "g",
+            "--descriptor-tree",
+            "t",
+            "--engine-id",
+            "7",
+            "--output-dir",
+            "o",
+            *extra,
+        ]
+    )
+
+
+def test_generate_hands_train_every_mlp_option_it_was_given_and_only_those():
+    """`generate` trains through `train`, so an option it parsed but did not forward would
+    silently fit the defaults."""
+    from uhd_gen.__main__ import adapter_args
+
+    given = _generate_arguments(
+        "--adapter",
+        "mlp_data",
+        "--mlp-hidden",
+        "16,8",
+        "--mlp-members",
+        "2",
+        "--mlp-epochs",
+        "5",
+        "--mlp-seed",
+        "9",
+        "--mlp-max-rows",
+        "100",
+    )
+    assert adapter_args(given) == [
+        "--adapter",
+        "mlp_data",
+        "--mlp-hidden",
+        "16,8",
+        "--mlp-members",
+        "2",
+        "--mlp-epochs",
+        "5",
+        "--mlp-seed",
+        "9",
+        "--mlp-max-rows",
+        "100",
+    ]
+    assert adapter_args(_generate_arguments("--adapter", "mlp_data")) == [
+        "--adapter",
+        "mlp_data",
+    ]
+    assert adapter_args(_generate_arguments("--mlp-epochs", "5")) == [
+        "--adapter",
+        "tree_data",
+        "--mlp-epochs",
+        "5",
+    ]
+
+
+@pytest.mark.parametrize(
+    "extra, message",
+    [
+        (["--mlp-epochs", "5"], "--mlp-epochs apply only to --adapter mlp_data"),
+        (
+            ["--adapter", "linear_data", "--mlp-seed", "1", "--mlp-members", "2"],
+            "--mlp-members, --mlp-seed apply only to --adapter mlp_data",
+        ),
+        (
+            ["--adapter", "mlp_data", "--group-by-feature", "kernel.tile"],
+            "tree_data option",
+        ),
+    ],
+)
+def test_generate_refuses_an_adapter_option_that_does_not_apply_before_measuring(
+    extra, message
+):
+    """Checked on the arguments alone: no corpus is read and no GPU is touched."""
+    from uhd_gen.generate import _check_generate_arguments
+
+    with pytest.raises(ValueError, match=message):
+        _check_generate_arguments(
+            _generate_arguments(*extra), False, Path("nonexistent-output"), Path("t")
+        )
+
+
+def test_generate_trains_the_adapter_it_was_asked_for_on_the_metric_it_was_asked_for(
+    monkeypatch, tmp_path, evaluator
+):
+    """`generate` trains through `train`: an mlp_data run must come out as an mlp_data model
+    that names the requested metric, not a tree_data one."""
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    _immediate_bench(monkeypatch, snapshot_provenance(tree))
+    output = tmp_path / "out"
+    common = _l1_args(_graphs(tmp_path / "graphs"), tree, output, evaluator)
+    assert (
+        main(
+            [
+                *common,
+                "--adapter",
+                "mlp_data",
+                "--metric",
+                "time",
+                "--mlp-epochs",
+                "5",
+                "--mlp-members",
+                "1",
+            ]
+        )
+        == 0
+    )
+    uhd = json.loads(
+        (output / "model" / "heuristic.uhd.json").read_text(encoding="utf-8")
+    )
+    assert uhd["adapter"] == "mlp_data" and "tree_data" not in uhd
+    assert (uhd["score"]["metric"], uhd["objective"]) == ("time", "min")
+
+
+MLP_REFUSALS = [
+    (
+        ["--dataset", "ds", "--slot", "dkdv"],
+        "a slot has no time of its own.*metric-less.*names the metric.*tree_data or "
+        "linear_data",
+    ),
+    (["--role", "sort_kernel_catalog"], "pass --metric tflops or --metric time"),
+    (
+        ["--role", "sort_kernel_catalog", "--dataset", "ds"],
+        "pass --metric tflops or --metric time",
+    ),
+]
+
+
+@pytest.mark.parametrize(("extra", "message"), MLP_REFUSALS)
+def test_an_mlp_data_run_that_cannot_train_is_refused_before_anything_is_measured(
+    monkeypatch, tmp_path, caplog, extra, message
+):
+    """A slot ranker must be metric-less and an mlp_data model names a metric; a catalog
+    run with no --metric could fall back to the metric-less robustMeanMs label only after the
+    sweep. Both are decided on the arguments, before the bench or a dataset is touched.
+    """
+    main = _cli()
+    touched = []
+    for name in ("_measure", "load_dataset"):
+        monkeypatch.setattr(
+            f"uhd_gen.generate.{name}",
+            lambda *args, name=name, **kwargs: touched.append(name),
+        )
+    arguments = [
+        "generate",
+        "--adapter",
+        "mlp_data",
+        "--descriptor-tree",
+        str(tmp_path / "tree"),
+        "--output-dir",
+        str(tmp_path / "out"),
+        *(["--graphs", str(tmp_path)] if "--dataset" not in extra else []),
+        *extra,
+    ]
+    assert main(arguments) == 1
+    assert not touched
+    assert re.search(message, caplog.text)
+    assert not (tmp_path / "out").exists()

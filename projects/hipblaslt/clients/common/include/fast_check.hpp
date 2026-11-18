@@ -23,6 +23,7 @@
 #include <hipblaslt/hipblaslt.h>
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -159,10 +160,18 @@ uint64_t fast_check_probe(uint64_t seed, uint64_t index);
 
 // Returns why a case that needs device_bytes of device memory and host_bytes of host memory
 // cannot run here, or an empty string when both fit. Device memory is what hipMemGetInfo reports
-// free; host memory is MemAvailable from /proc/meminfo, which counts reclaimable page cache,
-// unlike sysinfo's freeram. Before reporting a shortfall, releases idle client-pool buffers and
-// queries again, since those buffers otherwise hide memory available to the next case.
+// free; host memory is available_host_memory_bytes() (host_memory.hpp), the smaller of
+// MemAvailable and the container's memory-limit headroom. Before reporting a shortfall, releases
+// idle client-pool buffers and queries again, since those buffers otherwise hide memory
+// available to the next case.
 std::string fast_check_memory_shortfall(size_t device_bytes, size_t host_bytes);
+
+// As above, with the free device memory read by free_device_bytes (false: unknown) instead of
+// hipMemGetInfo. hipMemGetInfo reports the whole device, which other processes sharing the GPU
+// change at any moment; tests pass their own reader so the result depends only on this process.
+std::string fast_check_memory_shortfall(size_t                                   device_bytes,
+                                        size_t                                   host_bytes,
+                                        const std::function<bool(size_t& free)>& free_device_bytes);
 
 // Reads element i of a host buffer of the given type as a double.
 double fast_check_load(const void* data, hipDataType type, size_t i);

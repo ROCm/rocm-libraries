@@ -3060,7 +3060,7 @@ def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
         numMfma = 120
         nglshift = nllshift = len(optSchedule["GRA"][0])/2 + len(optSchedule["GRB"][0])/2
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    elif isNT(kernel) and TLDS==0:
+    elif isNT(kernel) and TLDS==0 and useLDSTr:
         optSchedule = {
             'SYNC': [[-1,24,24,59,59]],
             'LRA0': [[0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,14,14,15]],
@@ -3351,6 +3351,11 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
         if not valid:
             return False, None
         optSchedule = switch_A_B_schedule(opt.optSchedule)
+        # The 224x128 schedule issues B first via SwapGlobalReadOrder, and the
+        # GRA/GRB keys name the first/second load stream rather than a tensor.
+        # Mirrored, A is issued first, so the prologue must not swap either.
+        kernel["SwapGlobalReadOrder"] = 0
+        optSchedule["GRA"], optSchedule["GRB"] = optSchedule["GRB"], optSchedule["GRA"]
         return True, ScheduleInfo(opt.numCodePaths, opt.numMfma, optSchedule, opt.syncCode, opt.nglshift, opt.nllshift)
     else:
         return False, None

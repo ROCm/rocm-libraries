@@ -7,7 +7,7 @@ Formats for lane reports and verifier files. Tiers and the M-rules are in
 
 ```markdown
 ID:        <LANE>-p<n>         provisional; the orchestrator assigns the final ID
-Kind:      defect | test-gap | source-claim | process
+Kind:      defect | test-gap | source-claim | process | design
 Tier:      BLOCKING | IMPORTANT | SUGGESTION | FUTURE WORK
 Where:     path:line read from $HEAD, every location involved; $BASE:path:line for removed content
 Expected:  the contract and its source (header, doc, schema, test, PR description, policy rule)
@@ -16,18 +16,25 @@ Proof:     what was run or read: command, exit code, log as $EVIDENCE/<relative 
 Fix:       smallest change that resolves it, or the decision a human must make
 ```
 
-Write the block as plain lines, never inside a code fence. `Actual` and `Fix` are written for the PR author, who posts them
+Write the block as plain lines, never inside a code fence; each label starts its line (no
+bullet, bold or quote). A `##` or deeper heading or a `---` line ends a field, so fence any
+command, diff or code inside a field. Write notes under
+**Checked, no finding** or **Handoffs**, never below a block. `Actual` and `Fix` are written for the PR author, who posts them
 nearly verbatim: no first person, no lane IDs and no `$VAR`s (`path:line` anchors, quoted code and final IDs are fine).
 
-`<LANE>` is the lane's name (`VER` for a verifier). `<n>` counts from 1 within the report; a
-follow-up report continues after the lane's last `p<n>`. Read each anchor from `$HEAD`
+`<LANE>` is the lane's name (`VER<batch>` for a verifier). `<n>` counts from 1 within the report; a
+follow-up report continues after the lane's last `p<n>` with the lane's own prefix (`AUTH-p3`,
+never `AUTH-f1-p1`). A provisional ID anywhere in **Findings** must be a finding some report of
+this round writes as a block; cite an earlier round's finding by its final ID. Read each anchor from `$HEAD`
 (`$REPO`, or `git -C "$CLONE" show` outside the sparse set), not from a diff hunk or an
 earlier head. Mark anything not observed directly `[INFERENCE]`. Never write absolute local
 paths: cite `$EVIDENCE/...`, `$SCRATCH/...` or repository-relative paths.
 
 File a finding only when you can name the input or situation that makes the code or text
-produce a wrong result or decision, and the consequence. Style and preference are not
-findings. At `IMPORTANT` or above, **Proof** holds the reproduction or the quoted
+produce a wrong result or decision, and the consequence. A naming or organization finding
+(a name, a file or layer placement, a helper's grouping) states the mistake a caller or
+maintainer could reasonably make and what in the change leads to it; an interchangeable
+preference is not a finding. At `IMPORTANT` or above, **Proof** holds the reproduction or the quoted
 contradiction and the policy rule it relies on.
 
 ## Proof per kind
@@ -35,9 +42,10 @@ contradiction and the policy rule it relies on.
 | Kind | Confirmed when | `REFUTED` when | `UNVERIFIED` when |
 |---|---|---|---|
 | defect | A reproduction fails at `$HEAD` for the stated reason, and passes or is absent at `$BASE` if the finding says the PR introduced it | It passes at `$HEAD`, or fails for another reason | It cannot run here (device, declined approval, dependency, no build) |
-| test-gap | A plausible, non-equivalent mutation in the claimed behavior survives the named tests, which pass unmutated | The mutation is killed | The tests cannot run, or only skip |
+| test-gap | A plausible, non-equivalent mutation in the claimed behavior survives the named tests, which pass unmutated; or, when no configuration that builds the claimed code links it into the named tests' binary, that link-graph evidence plus the absence of any registered test that exercises the path (no mutant runs) | The mutation is killed | The tests cannot run, or only skip |
 | source-claim | Every cited `path:line` supports it and no other location contradicts it | A cited or uncited location contradicts it | - |
 | process | The PR text, CI run or label the rule needs is absent or contradicts the claim; for skill or brief text, the cited text lacks or contradicts the requirement | The artifact exists and supports the claim, or the cited text states the requirement | The artifact is not readable |
+| design | The cited contract, commit or discussion supports the claim and the stated cost follows | An RFC, decision or discussion shows the design is intentional | A cited source is not readable |
 
 A `SUGGESTION` or `FUTURE WORK` finding of any kind is verified as a `source-claim` re-read.
 No fix is applied to confirm a defect. A compile failure, a skip or a failure for another
@@ -49,7 +57,8 @@ verify file's directory.
 A verifier returns `CONFIRMED`, `PARTIAL` (a narrower claim holds; restate it), `DOWNGRADED`
 or `UPGRADED` (tier changed, with the reason), `REFUTED` or `UNVERIFIED` (what blocked it).
 `CONFIRMED` and `REFUTED` are equal outcomes: never look for a reason to confirm, and
-correct tier inflation as readily as errors.
+correct tier inflation as readily as errors. The verdict follows the proof alone: a PR thread's
+state or an author's reply never sets it ([report.md](report.md) *Threads*).
 
 A second verifier, who is neither the reporter nor the first verifier, rechecks a `REFUTED`
 verdict on a `BLOCKING` or `IMPORTANT` finding and any verdict whose final tier is on the
@@ -65,8 +74,8 @@ sections. The first line is `# <LANE> (round <N>, <$HEAD_SHORT>)`. Sections, in 
 
 1. **Findings** in the format above (may be empty; **Checked, no finding** is then the
    content).
-2. **Coverage:** one row per examined file: path, read depth (`full`, `diff-only`,
-   `sampled`; nothing else in that cell), tests that reach it. `RUN` adds two literal non-file lines, and no other lane does: `Flag: <NAME>=<value> (<configure
+2. **Coverage:** one row per examined file: repository-relative path (a changed file exactly as in `files.txt`; no braces or globs), read depth (`full`, `diff-only`,
+   `sampled`; nothing else in that cell), tests that reach it. `APPL` adds one literal non-file line, `Hazard knowledge: <directory read>` or `Hazard knowledge: none supplied`, and `RUN` adds two; no other lane adds any. `RUN`'s are `Flag: <NAME>=<value> (<configure
    line or preset>)` for each option enabled, and `Build: none (<missing>)` when nothing built. Ledger and Coverage parsing ignore
    them (a row counts only when its second cell is a read depth); keep them free of `|`.
 3. **Checked, no finding:** what was examined and found correct. A lane that owns an M-rule
@@ -107,6 +116,7 @@ Reason:    <one line>
 Proof:     <command, exit code, log as $EVIDENCE/<relative path>>
 Class:     rerun | text-read | not-exercised   (at a new head)
 Not established: <what the proof does not cover>
+Needs human decision: <question, options, recommendation>   (optional; see lanes/verify.md *Threads*)
 ```
 
 Keep mutation diffs and logs in
