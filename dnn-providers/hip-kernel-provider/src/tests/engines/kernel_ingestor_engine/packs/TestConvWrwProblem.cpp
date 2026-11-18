@@ -2470,7 +2470,7 @@ TEST(TestConvWrwLaunch, TheReduceWritesEitherFilterLayoutAndReflectsForConvoluti
     EXPECT_EQ(oneSplit950->reduce.tile, 2);
     EXPECT_EQ(oneSplit950->reduceGrid, 40u);
     // More splits than the tile reduce takes: quads, by the deep reduce from
-    // K3_REDUCE_DEEP_MIN_SPLITS.
+    // K3_REDUCE_DEEP_MIN_SPLITS splits where the quad grid (34 blocks) leaves most units idle.
     auto deep = baseShape();
     deep.n = 64;
     const auto manySplits = launchOf(ConfigFields{}, deep);
@@ -2482,6 +2482,16 @@ TEST(TestConvWrwLaunch, TheReduceWritesEitherFilterLayoutAndReflectsForConvoluti
     EXPECT_EQ(manySplits->reduce.quads, 16);
     EXPECT_EQ(manySplits->reduceGrid, 2160u / 16);
     EXPECT_EQ(manySplits->reduceBlock, 64u);
+    // Wide: 9 taps x 256 k x 64 quads = 2304 quad blocks, more than a third of 2048 units; the
+    // quad reduce, however many splits.
+    auto wide256 = baseShape();
+    wide256.c = wide256.k = 256;
+    wide256.n = 64;
+    const auto wideSplits = launchOf(ConfigFields{}, wide256, "gfx942", 2048);
+    ASSERT_TRUE(wideSplits.has_value());
+    EXPECT_GE(wideSplits->reduce.splits, K3_REDUCE_DEEP_MIN_SPLITS);
+    EXPECT_EQ(wideSplits->reduce.tile, 0);
+    EXPECT_EQ(wideSplits->reduceBlock, 256u);
     auto fewSplits = baseShape();
     fewSplits.n = 12;
     const auto someSplits = launchOf(ConfigFields{}, fewSplits);

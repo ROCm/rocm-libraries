@@ -86,7 +86,8 @@ struct K3ReduceArgs
     /// 2: ConvWrwReduceRows (K C T R S of at most K3_REDUCE_ROW_MAX_TAPS taps at one split, on
     /// gfx950); 0: ConvWrwReduce, quads of channels of one tap and output channel; 3:
     /// ConvWrwReduceDeep, the quad reduce with `quads` quads a block and 16 loads a thread in
-    /// flight (many splits). All sum in the same order.
+    /// flight (many splits into few quads); 4: ConvWrwReduceFold (K3ReduceFoldArgs). All sum in
+    /// the same order.
     int tile;
     int tileK;
     int tileC;
@@ -152,9 +153,12 @@ struct K3SplitArgs
 /// The row reduce's channels per block; it takes taps * channels within 4096 floats of LDS.
 #define K3_REDUCE_ROW_CHANNELS 64
 #define K3_REDUCE_ROW_MAX_TAPS 64
-/// The deep quad reduce: at least this many splits (fewer: the quad reduce's 4 loads a thread in
-/// flight already cover them), and the most quads a block.
-#define K3_REDUCE_DEEP_MIN_SPLITS 16
+/// The deep quad reduce: at least this many splits, the quad reduce's grid at most a
+/// 1 / K3_REDUCE_DEEP_UNIT_SHARE of the dispatch units (where its few waves wait on load latency;
+/// wider grids are bandwidth-bound and ran 1-3% slower deep on gfx950), and the most quads a
+/// block.
+#define K3_REDUCE_DEEP_MIN_SPLITS 32
+#define K3_REDUCE_DEEP_UNIT_SHARE 3
 #define K3_REDUCE_DEEP_MAX_QUADS 64
 
 // NOLINTEND(modernize-avoid-c-arrays,modernize-macro-to-enum)

@@ -1552,9 +1552,10 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     r.tileC = static_cast<int>(reduceTile.tileC);
     r.tilesK = static_cast<int>(reduceTile.tilesK);
     r.tilesC = static_cast<int>(reduceTile.tilesC);
-    // Many splits into quads: the deep reduce (the same sum, more loads in flight, smaller
-    // blocks where the quads are few).
-    if(!dwStore && r.tile == 0 && splits >= K3_REDUCE_DEEP_MIN_SPLITS)
+    // Many splits into few quads: the deep reduce (the same sum, more loads in flight, smaller
+    // blocks), where the quad reduce's grid leaves most units idle and waits on load latency.
+    if(!dwStore && r.tile == 0 && splits >= K3_REDUCE_DEEP_MIN_SPLITS
+       && K3_REDUCE_DEEP_UNIT_SHARE * divUp(quads, REDUCE_QUADS_PER_BLOCK) <= units)
     {
         const int64_t perBlock = deepReduceQuads(quads, units);
         if(divUp(quads, perBlock) <= INT_LIMIT)

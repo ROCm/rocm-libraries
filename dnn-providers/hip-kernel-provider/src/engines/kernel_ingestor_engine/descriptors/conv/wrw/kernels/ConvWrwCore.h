@@ -4485,7 +4485,7 @@ __device__ inline void k3FoldX(const K3FoldArgs& a)
     }
 }
 
-/// The width fold's reduce (ConvWrwReduceFold): k3ReduceDeep's sum of the folded partials
+/// The width fold's reduce (ConvWrwReduceFold): the quad reduce's sum of the folded partials
 /// (`a.r`: c the folded channels, taps the folded taps, `quads` a block), each folded (channel
 /// j C + c, tap) element written to dw tap (tau - pre) s + j + pad of the graph's filter, and
 /// dropped outside it. Every dw element is one folded element.
@@ -4493,7 +4493,7 @@ template <class T>
 __device__ inline void k3ReduceFold(const K3ReduceFoldArgs& f)
 {
     typedef float f4 __attribute__((ext_vector_type(4)));
-    constexpr int DEPTH = 16;
+    constexpr int DEPTH = 4; // the quad reduce's loads in flight: fold grids are wide
     __shared__ f4 part[3][K3_REDUCE_DEEP_MAX_QUADS];
     const K3ReduceArgs& a = f.r;
     T* dw = static_cast<T*>(a.dw);
