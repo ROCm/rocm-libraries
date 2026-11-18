@@ -649,6 +649,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.conv_fwd.dispatch",
         "hipkernel.hip_conv_fwd_fma_igemm_rdna.dispatch",
         "hipkernel.hip_conv_dgrad_fma_2d_rdna.dispatch",
+        "hipkernel.hip_conv_dgrad_fma_3d_rdna.dispatch",
         "hipkernel.gfx950_conv_dgrad_aot.dispatch",
         "hipkernel.gfx1250_conv_dgrad_aot.dispatch",
         "hipkernel.gfx942_attention_unified3d.dispatch",

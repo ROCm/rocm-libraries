@@ -20,6 +20,7 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE and hip bundles below
 | `rocKE/gfx1250_conv_dgrad_aot/` | `hipkernel:Gfx1250ConvDgradAot` | `packs/ConvDgradAotNative.cpp` (shared with gfx950) |
 | `hip/conv_rdna/` | `hipkernel:hip_conv_fwd_fma_igemm_rdna` | `packs/HipConvFwdFmaIgemmRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`) |
 | `hip/conv_dgrad_fma_2d_rdna/` | `hipkernel:hip_conv_dgrad_fma_2d_rdna` | `packs/HipConvDgradFma2dRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`) |
+| `hip/conv_dgrad_fma_3d_rdna/` | `hipkernel:hip_conv_dgrad_fma_3d_rdna` | `packs/HipConvDgradFma3dRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`) |
 
 The `gfx950_attention_dense`, `gfx950_attention_unified_2d`, `gfx950_attention_unified_3d`,
 `gfx942_attention_unified_2d`, `gfx942_attention_unified_3d`, `gfx942_attention_dense`,
@@ -51,6 +52,12 @@ which also serves the forward of a ConvTranspose2d: an FMA implicit GEMM over th
 phases of dx, one variant per dtype x layout x dx-channel tile. No variant needs a
 workspace. Its descriptors are generated from
 `projects/hipdnn/tools/IngestorGenerator/configs/hip_conv_dgrad_fma_2d_rdna.yaml`.
+
+`hip/conv_dgrad_fma_3d_rdna/` holds no kernel source of its own: its UKDs name
+`../conv_dgrad_fma_2d_rdna/kernels/ConvDgradFmaIgemm.cpp`, built per dtype x layout x
+dx-channel tile for the backward data of 3-D convolutions (and the forward of a
+ConvTranspose3d). No variant needs a workspace. Its descriptors are generated from
+`projects/hipdnn/tools/IngestorGenerator/configs/hip_conv_dgrad_fma_3d_rdna.yaml`.
 
 `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
 their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in
