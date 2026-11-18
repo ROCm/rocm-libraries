@@ -220,7 +220,8 @@ endif()
 # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
 # fields, the gfx942 2D head counts and batch being IR-neutral at a fixed GQA
 # ratio, the 3D segment+reduce module's pairing, the reduce's LDS segment
-# bound against the compiled code object, the tiled C++ entries' head-count
+# bound against the compiled code object, run_all.py's forwarding of the
+# installed-asset --rocke-require-* flags, the tiled C++ entries' head-count
 # and arch refusals, the dense segment-combine launch ABI, the drift guard
 # that pins the shared dense spec's C++ mirror to the Python, the
 # oracle-free uniform-probability checker and subject contracts, the gfx942
@@ -258,6 +259,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_tiled_3d_module.py"
     "tests/library/tests/test_attention_tiled_3d_module_gfx942.py"
     "tests/library/tests/test_attention_tiled_3d_reduce_lds.py"
+    "tests/library/tests/test_run_all_asset_require_flags.py"
     "tests/library/tests/test_attention_unified_masked_tile_ir.py"
     "tests/library/tests/test_attention_unified_2d_lse_ir.py"
     "tests/library/tests/test_gfx942_cfvst_i64_kv_addr.py"
