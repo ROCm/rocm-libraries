@@ -24,9 +24,11 @@
 #include "rocfft/rocfft.h"
 
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <set>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 // Label distinguishing between input and output data sets where or
@@ -35,6 +37,15 @@ enum class io_data_label
 {
     INPUT,
     OUTPUT
+};
+
+// Part of a data set's stored data: all of it for non-planar array types, or
+// either plane for planar ones.
+enum class data_part
+{
+    ALL,
+    REAL,
+    IMAGINARY
 };
 
 /**
@@ -166,6 +177,24 @@ struct data_set_t
      */
     size_t get_full_rank() const;
     /**
+     * @return The array type of the data set.
+     * @throw std::logic_error if no array type was provided (see `has_array_type`).
+     */
+    rocfft_array_type get_array_type() const;
+    /**
+     * @return Whether an array type was provided for the data set.
+     */
+    bool has_array_type() const;
+    /**
+     * @return The precision of the data set.
+     * @throw std::logic_error if no precision was provided (see `has_precision`).
+     */
+    rocfft_precision get_precision() const;
+    /**
+     * @return Whether a precision was provided for the data set.
+     */
+    bool has_precision() const;
+    /**
      * @return The spans of the logical index range along all its axes (length followed by batch axes).
      */
     std::vector<size_t> lengths_and_batches() const;
@@ -227,20 +256,23 @@ struct data_set_t
 
     /**
      * @param[in] other data set which must be dimensionally consistent with this one
-     * (same number of length and batch axes) and must logically contain this data set's
-     * very first element.
+     * (same number of length and batch axes), must logically contain this data set's
+     * very first element, and must have the same precision and array type (an unset
+     * value only matches an unset value).
      * 
-     * @return The in-buffer offset for this data set's very first element in a buffer that
-     * observes the `other` data layout.
+     * @return The in-buffer offset (in elements) for this data set's very first element
+     * in a buffer that observes the `other` data set.
      * 
      * @throw An `std::invalid_argument` is thrown if `other` is not dimensionally consistent
-     * with this object or does not contain its very first element.
+     * with this object, does not contain its very first element, or has a different
+     * precision or array type.
      */
     size_t offset_in(const data_set_t& other) const;
 
     /**
      * @param[in] other data set which must be dimensionally consistent with this one
-     * (same number of length and batch axes).
+     * (same number of length and batch axes) and must have the same precision and array
+     * type (an unset value only matches an unset value).
      * 
      * @return `true` iff this data set represents a continuous chunk of `other`, i.e., iff
      * - both data sets have identical strides along all axes that have non-unit logical spans;
@@ -249,12 +281,13 @@ struct data_set_t
      * - this data set's logical range is contained by the `other` along its slowest-varying axis.
      * 
      * @throw An `std::invalid_argument` is thrown if `other` is not dimensionally consistent
-     * with this object.
+     * with this object or has a different precision or array type.
      */
     bool is_continuous_in(const data_set_t& other) const;
 
     /**
-     * @return A string reporting this object's state.
+     * @return A string reporting this object's state, including its precision
+     * ("unset" if not provided) and array type (as `PrintArrayType` prints it).
      */
     std::string str() const;
 
@@ -262,11 +295,62 @@ struct data_set_t
      * @return The volume of this object's hyper-rectangular logical index range.
      */
     size_t logical_count() const;
+
     /**
-     * @return The (minimum) number of elements required in a buffer to store the
-     * data layout described by this object.
+     * @param[in] part part of the stored data: `data_part::ALL` (default) for non-planar
+     * (or untyped) data sets, `data_part::REAL` or `data_part::IMAGINARY` for planar ones.
+     * @return The (minimum) number of elements the buffer holding `part` must hold to
+     * store it. Both planes of a planar data set have the same count (per-plane offsets
+     * are not captured by `data_set_t` objects yet).
+     * @throw An `std::invalid_argument` is thrown if `part` does not suit the array type.
      */
-    size_t buffer_element_count() const;
+    size_t buffer_element_count(data_part part = data_part::ALL) const;
+
+    /**
+     * @return The size in bytes of one element of the data set: 2, 4 or 8 bytes per real
+     * component for half, single or double precision, doubled for interleaved complex
+     * array types. For planar array types, this is the size of one real component
+     * (elements are split across two planes).
+     * @throw An `std::logic_error` is thrown if the precision or the array type
+     * is unset or out of range.
+     */
+    size_t element_byte_size() const;
+
+    /**
+     * @param[in] part see `buffer_element_count`.
+     * @return The (minimum) number of bytes required in the buffer holding `part`, i.e.,
+     * `buffer_element_count(part) * element_byte_size()`.
+     * @throw An `std::logic_error` is thrown if the precision or the array type
+     * is unset, and an `std::invalid_argument` if `part` does not suit the array type.
+     */
+    size_t buffer_size_bytes(data_part part = data_part::ALL) const;
+
+    /**
+     * @param[in] new_array_type array type to be given to the returned object.
+     * @return A copy of this object relabeled with `new_array_type`. Only relabeling
+     * is supported, i.e., the array type must be unchanged or switch between the
+     * Hermitian and complex variants of the same format (interleaved or planar).
+     * The precision is never changed.
+     * @note Reinterpreting complex data as Hermitian asserts that the stored data is
+     * the non-redundant part of a Hermitian-symmetric whole (the data set this object
+     * describes or is part of), the rest being implied by the symmetry (e.g., after the
+     * last complex transform of a multi-dimensional real forward transform). This
+     * structure cannot verify it: that is the caller's responsibility.
+     * @throw An `std::invalid_argument` is thrown if this object's array type or
+     * `new_array_type` is unset, or if the request switches between interleaved and
+     * planar formats. An `std::logic_error` is thrown for requests between real and
+     * complex/Hermitian array types (not implemented yet).
+     */
+    data_set_t reinterpret_as(rocfft_array_type new_array_type) const;
+
+    /**
+     * @param[in] real_inplace_padding flag setting the in-buffer stride of the first
+     * non-contiguous axis to the value required in real domain for real, in-place
+     * Discrete Fourier Transforms (see `default_full_range`).
+     * @return A data set with this object's logical range, precision and array type,
+     * default contiguous in-buffer strides (possibly padded), and no embedding.
+     */
+    data_set_t get_packed_data_set(bool real_inplace_padding = false) const;
 
     /**
      * @return `true` iff this object describes a contiguous data layout, i.e., iff all
@@ -277,7 +361,8 @@ struct data_set_t
 
     /**
      * @param[in] other data set to be compared to this one.
-     * @return `true` iff this object and `other` are strictly identical.
+     * @return `true` iff this object and `other` are strictly identical, including
+     * their precisions and array types (an unset value only equals an unset value).
      */
     bool operator==(const data_set_t& other) const;
 
@@ -310,14 +395,27 @@ struct data_set_t
     bool has_same_batch_range_as(const data_set_t& other) const;
 
     /**
+     * @param[in] other data set to be compared to this one.
+     * @return `true` iff all length and batch axes of this object and `other` are
+     * identical, regardless of their precisions, array types and embeddings.
+     * @note Temporary helper for comparing typed description data sets with untyped
+     * brick data sets: to be removed once bricks get types (AIFFT-563).
+     */
+    bool has_same_axes_as(const data_set_t& other) const;
+
+    /**
      * @param[in] first a data_set_t object
      * @param[in] second a data_set_t object that's dimensionally consistent with `first`
      * @return A data_set_t object capturing the intersection of the logical ranges
      * between `first` and `second`. The in-buffer strides of the constructed intersection
-     * are set to their default contiguous values.
+     * are set to their default contiguous values. The returned object has the common
+     * precision and array type.
      * 
      * @throw An `std::invalid_argument` is thrown if `first` and `second` are not
-     * dimensionally consistent, or have different embeddings (if any).
+     * dimensionally consistent, have different embeddings (if any), or have different
+     * precisions or array types (an unset value only matches an unset value). Both
+     * describe the same data: reinterpret either one (see `reinterpret_as`) beforehand
+     * if needed.
      */
     static data_set_t make_contiguous_intersection_of(const data_set_t& first,
                                                       const data_set_t& second);
@@ -360,7 +458,12 @@ struct data_set_t
      * transform.
      * 
      * @return An `std::optional<data_set_t>` object which has a value set
-     * iff a corresponding data set for in-place operation does actually exist.
+     * iff a corresponding data set for in-place operation does actually exist. Its
+     * precision is this object's. For complex transforms, its array type is this
+     * object's; for real transforms, it is `rocfft_array_type_real` (resp.
+     * `rocfft_array_type_hermitian_interleaved`) if the returned data set is in real
+     * (resp. Hermitian) domain, unless this object's array type is unset, in which
+     * case it remains unset.
      * 
      * @note This function does not verify if either data set is self-aliasing and
      * ignores offsets as `data_set_t` objects do not capture them.
@@ -369,7 +472,10 @@ struct data_set_t
      * all undistributed.
      * 
      * @throw An `std::logic_error` is thrown if the current object is an empty
-     * data set or has any non-zero lower bound for a length axis.
+     * data set, has any non-zero lower bound for a length axis, or has a set array
+     * type that does not match its side of the transform (complex interleaved or
+     * planar for complex transforms; real or Hermitian interleaved for real ones,
+     * since in-place real transforms do not support planar data).
      * An `std::invalid_argument` is thrown if `fft_type` is not an expected value
      * or if `other_io` is not an expected value, or if a real data set is to be returned
      * for a Hermitian innermost length of 1 with `other_innermost_length_is_odd` set
@@ -394,6 +500,10 @@ struct data_set_t
      * or if any of the values in `len_indices` is out of bounds.
      * @note If `len_indices = {0, 1, ..., get_len_rank() - 1}`, this function is
      * equivalent to a simple copy of the current object.
+     * @note The precision is passed through unchanged. So is the array type, unless
+     * `len_indices` does not cover all length axes and the array type is Hermitian:
+     * the result then gets the complex counterpart (`hermitian_*` -> `complex_*`), since
+     * the Hermitian symmetry relates indices across all length axes jointly.
      */
     data_set_t get_data_set_for_len_axes(const std::set<size_t>& len_indices) const;
 
@@ -402,6 +512,10 @@ struct data_set_t
      * embedded.
      * @note If this object is not representing the data layout of an embedded data set,
      * this function is equivalent to a simple copy of the current object.
+     * @note The precision is passed through unchanged. So is the array type, unless
+     * this object is embedded and its array type is Hermitian: the result then gets
+     * the complex counterpart (`hermitian_*` -> `complex_*`), since a sub-data set's
+     * symmetry does not carry over to its embedding.
      * @throw An `std::logic_error` exception is thrown if the object's embedding map is
      * found inconsistent.
      */
@@ -477,6 +591,28 @@ private:
     // vector plus a batch_rank counter because the split *is* the rank bookkeeping.
     std::vector<axis_t> len_axes;
     std::vector<axis_t> batch_axes;
+
+    // Array type and precision qualify the whole data set this object describes *or
+    // is part of*: for a brick, that's its field. A Hermitian array type means that only
+    // the non-redundant part is stored, the rest being implied by a symmetry defined with
+    // respect to the whole (along each length axis, k mirrors to (L - k) mod L, L being
+    // the whole data set's length), so it's only meaningful relative to the whole data
+    // set. Therefore, for fields, only the owning field should set these, uniformly
+    // across all its bricks (and its global data range), and possible reinterpretations
+    // must always be field-wide.
+
+    // Array type of the data set's elements; unset until provided.
+    rocfft_array_type array_type = rocfft_array_type_unset;
+
+    // Marker for "no precision provided". Stored as the enum's underlying integer
+    // type because rocfft_precision has no unset value and out-of-range enum
+    // values are undefined behavior. Never exposed outside this struct.
+    static constexpr std::underlying_type_t<rocfft_precision> precision_unset
+        = std::numeric_limits<std::underlying_type_t<rocfft_precision>>::max();
+
+    // Precision of the data set's elements; precision_unset until provided.
+    std::underlying_type_t<rocfft_precision> precision = precision_unset;
+
     // If the current object captures the data layout for a sub-dimensional data set
     // embedded within another, an embedding map is required to keep track of which of
     // the current object's axes correspond to the embedding set's length axes. If
@@ -487,6 +623,9 @@ private:
     std::optional<std::vector<size_t>> embedding;
 
     inline bool has_consistent_embedding() const;
+
+    // Stores the underlying value of `p`; used by friends.
+    void set_precision(rocfft_precision p);
 
     /**
      * @brief Implementation-simplifying helper accessor for the length and batch
@@ -506,7 +645,8 @@ private:
     size_t slowest_varying_axis() const;
 
     /**
-     * @brief Empties all axes of the data set.
+     * @brief Empties all axes of the data set and resets the embedding map. Precision
+     * and array type are left untouched.
      */
     void clear();
 
@@ -530,6 +670,7 @@ private:
     /**
      * @brief Resets the object's state to capture a full range of logical
      * indices with either prescribed or default strides and/or distance.
+     * Precision and array type are left untouched.
      * 
      * @param[in] lengths spans of the logical index range along all length axes.
      * @param[in] strides in-buffer strides associated with all length axes.
@@ -580,7 +721,8 @@ private:
     // Fields need access to private members to erase or reorder length axes in their bricks'
     // layouts and to compare individual axes for undistributed-dimension detection.
     friend struct rocfft_field_t;
-    // rocfft-internal-test drives reorder_length_axes directly (defined in data_set_test.cpp).
+    // rocfft-internal-test drives private members directly (defined in data_set_test.cpp),
+    // e.g., reorder_length_axes, or setting array types and precisions as friends do.
     friend struct data_set_test_access;
 };
 
