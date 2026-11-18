@@ -40,13 +40,14 @@ namespace rocsparse
         static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
                       "BLOCKSIZE must be a power of two.");
 
-        int tid = hipThreadIdx_x;
-        I   gid = BLOCKSIZE * hipBlockIdx_x + tid;
+        int     tid = hipThreadIdx_x;
+        int64_t gid = BLOCKSIZE * hipBlockIdx_x + tid;
 
         T dot = static_cast<T>(0);
 
-        I idx    = LOOPS * BLOCKSIZE * hipBlockIdx_x + tid;
-        I stride = LOOPS * hipGridDim_x * BLOCKSIZE;
+        // Keep the grid-stride arithmetic wide even when I is 32-bit.
+        int64_t idx    = LOOPS * BLOCKSIZE * hipBlockIdx_x + tid;
+        int64_t stride = LOOPS * hipGridDim_x * BLOCKSIZE;
         while(stride < nnz)
         {
 #pragma unroll
@@ -62,7 +63,7 @@ namespace rocsparse
 
         stride -= LOOPS * hipGridDim_x * BLOCKSIZE;
 
-        for(I i = gid + stride; i < nnz; i += hipGridDim_x * BLOCKSIZE)
+        for(int64_t i = gid + stride; i < nnz; i += hipGridDim_x * BLOCKSIZE)
         {
             dot = rocsparse::fma<T>(y[x_ind[i] - idx_base], x_val[i], dot);
         }
