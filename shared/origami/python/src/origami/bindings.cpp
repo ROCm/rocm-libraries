@@ -170,7 +170,9 @@ NB_MODULE(origami, m) {
       .def_rw("prefetch_local_read", &origami::tensile_params_t::prefetch_local_read)
       .def_rw("half_plr", &origami::tensile_params_t::half_plr)
       .def_rw("multicast", &origami::tensile_params_t::multicast)
-      .def_rw("adaptive_gemm", &origami::tensile_params_t::adaptive_gemm);
+      .def_rw("adaptive_gemm", &origami::tensile_params_t::adaptive_gemm)
+      .def_rw("persistent", &origami::tensile_params_t::persistent)
+      .def_rw("stream_k_spatial_cluster", &origami::tensile_params_t::stream_k_spatial_cluster);
 
   nanobind::class_<origami::config_t>(m, "config_t")
       .def(nanobind::init<>())

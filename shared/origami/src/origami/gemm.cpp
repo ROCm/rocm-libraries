@@ -315,9 +315,35 @@ size_t round_elements_to_NB(size_t elements,
 /* ---------------------------------------------------------------------------------------- */
 /* Misc. functions                                                                          */
 /* ---------------------------------------------------------------------------------------- */
+// Whether ContractionSolution::calculateAutoWGM re-picks the mapping per problem: a persistent
+// kernel (StreamK or DataParallel) with WGM 0 and WGMXCC -1 on a nonzero launch grid, unless it
+// is a spatial-cluster StreamK kernel, which always launches with WGM 1.  A config without
+// TensileLite params declares no mapping and counts as re-picked.
+static bool host_picks_workgroup_mapping(const problem_t& problem,
+                                         const config_t& config,
+                                         size_t grid_m,
+                                         size_t grid_n,
+                                         size_t splitting_factor) {
+  if (!config.has_tensile_params()) return true;
+  const tensile_params_t& tp = tparams(config);
+  if (tp.stream_k_spatial_cluster) return false;
+  // The launch grid is nonzero exactly when the problem has tiles.
+  const bool grid_nonzero = grid_m * grid_n * splitting_factor * problem.batch != 0;
+  const bool persistent   = tp.persistent || config.stream_k > 0;
+  return persistent && grid_nonzero && config.workgroup_mapping == 0 &&
+         tp.workgroup_mapping_xcc == -1;
+}
+
+// The launch WGM for WGM 0 outside the per-problem pick, from the whole device whatever the
+// problem's CU budget.
+static int32_t default_launch_wgm(const hardware_t& hardware) {
+  const size_t num_xcd = std::max<size_t>(hardware.NUM_XCD, 1);
+  return static_cast<int32_t>(std::ceil(std::sqrt(static_cast<double>(hardware.N_CU / num_xcd))));
+}
+
 // WGM a gfx1250 launch without clusters walks tiles with, as
 // ContractionSolution::calculateAutoWGM picks it: a fixed config.workgroup_mapping if set; a
-// StreamK auto mapping (WGM 0, WGMXCC -1) on a nonzero launch grid takes
+// persistent auto mapping (host_picks_workgroup_mapping) takes
 // select_workgroup_mapping on the solution's tile and hints; any other WGM 0 takes
 // ceil(sqrt(N_CU / NUM_XCD)) of the whole device, whatever the problem's CU budget.  A config
 // without TensileLite params declares no mapping and takes select_workgroup_mapping.  A
@@ -331,16 +357,12 @@ static workgroup_mapping_t predict_workgroup_mapping_cdna5(const problem_t& prob
                                                            size_t grid_m,
                                                            size_t grid_n,
                                                            size_t splitting_factor) {
-  if (std::max<size_t>(config.cluster_dim.m, 1) * std::max<size_t>(config.cluster_dim.n, 1) > 1)
+  const tensile_params_t& tp = tparams(config);
+  if (std::max<size_t>(config.cluster_dim.m, 1) * std::max<size_t>(config.cluster_dim.n, 1) > 1 ||
+      tp.stream_k_spatial_cluster)
     return {0, 0, 1, 1};
 
-  const tensile_params_t& tp = tparams(config);
-  // The launch grid is nonzero exactly when the problem has tiles.
-  const bool grid_nonzero = grid_m * grid_n * splitting_factor * problem.batch != 0;
-  const bool selected     = !config.has_tensile_params() ||
-                        (config.workgroup_mapping == 0 && tp.workgroup_mapping_xcc == -1 &&
-                         config.stream_k > 0 && grid_nonzero);
-  if (selected) {
+  if (host_picks_workgroup_mapping(problem, config, grid_m, grid_n, splitting_factor)) {
     config_t host;
     host.mt                 = config.mt;
     host.cache_hints_a      = config.cache_hints_a;
@@ -349,11 +371,7 @@ static workgroup_mapping_t predict_workgroup_mapping_cdna5(const problem_t& prob
     return {0, 0, 1, select_workgroup_mapping(problem, hardware, host, 0).wgm};
   }
   if (config.workgroup_mapping != 0) return {0, 0, 1, config.workgroup_mapping};
-  const size_t num_xcd = std::max<size_t>(hardware.NUM_XCD, 1);
-  return {0,
-          0,
-          1,
-          static_cast<int>(std::ceil(std::sqrt(static_cast<double>(hardware.N_CU / num_xcd))))};
+  return {0, 0, 1, default_launch_wgm(hardware)};
 }
 
 // Fast WGM prediction: mirrors select_workgroup_mapping's cheap paths, then
@@ -368,6 +386,21 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
   if (hardware.is_cdna5())
     return predict_workgroup_mapping_cdna5(
         problem, hardware, config, grid_m, grid_n, splitting_factor);
+
+  // Unless the host re-picks the mapping per problem, a TensileLite kernel launches with what
+  // ContractionSolution::calculateAutoWGM derives from its own parameters: WGM 1 and WGMXCC 1
+  // for a spatial-cluster StreamK kernel, else the fixed WorkGroupMapping (default_launch_wgm
+  // for 0) and the fixed WGMXCC (NUM_XCD for -1).
+  if (!host_picks_workgroup_mapping(problem, config, grid_m, grid_n, splitting_factor)) {
+    const tensile_params_t& tp = tparams(config);
+    if (tp.stream_k_spatial_cluster) return {0, 0, 1, 1};
+    const int xcc = tp.workgroup_mapping_xcc;
+    const int wgm =
+        (config.workgroup_mapping != 0) ? config.workgroup_mapping : default_launch_wgm(hardware);
+    const size_t wgmxcc =
+        (xcc == -1) ? std::max<size_t>(hardware.NUM_XCD, 1) : static_cast<size_t>(std::max(xcc, 0));
+    return {0, 0, wgmxcc, wgm};
+  }
 
   // Extract parameters
   const size_t batch = problem.batch;

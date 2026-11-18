@@ -160,6 +160,8 @@ namespace TensileLite
                 .half_plr                    = sm.HalfPLR,
                 .multicast                   = sm.Multicast != 0,
                 .adaptive_gemm               = sm.adaptiveGemm,
+                .persistent                  = sm.isPersistent(),
+                .stream_k_spatial_cluster    = solution.usesStreamKSpatialCluster(),
             },
         };
     }

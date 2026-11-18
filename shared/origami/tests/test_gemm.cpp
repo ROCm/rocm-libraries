@@ -27,6 +27,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <cmath>
 #include <limits>
 #include "common.hpp"
 
@@ -3366,4 +3367,112 @@ TEST_CASE("GEMM: gfx1250 ranking prices the WGM the host launches", "[gemm][gfx1
     }
   }
   REQUIRE(discriminates);
+}
+
+// ---------------------------------------------------------------------------------------
+// A TensileLite kernel launches with its own WorkGroupMapping (ContractionSolution::
+// calculateAutoWGM) unless it is persistent with WGM 0 and WGMXCC -1; only then is the mapping
+// picked per problem.  A spatial-cluster StreamK kernel always launches with WGM 1.
+// ---------------------------------------------------------------------------------------
+namespace {
+// bf16 TN MT128x112x32 as shipped for gfx1151.
+origami::config_t fixed_wgm_config(int wgm, int wgm_xcc, int stream_k, bool persistent = false) {
+  origami::config_t c;
+  c.mt                = {128, 112, 32};
+  c.mi                = {16, 16, 16};
+  c.occupancy         = 2;
+  c.workgroup_mapping = wgm;
+  c.stream_k          = stream_k;
+  c.grvw_a            = 8;
+  c.grvw_b            = 4;
+  origami::tensile_params_t t;
+  t.wavefront_size        = 32;
+  t.wave_group_m          = 4;
+  t.wave_group_n          = 1;
+  t.prefetch_global_read  = 2;
+  t.prefetch_local_read   = 0;
+  t.workgroup_mapping_xcc = wgm_xcc;
+  t.source_swap           = true;
+  t.persistent            = persistent || stream_k > 0;
+  c.backend               = t;
+  return c;
+}
+}  // namespace
+
+TEST_CASE("GEMM: a kernel is modeled with the workgroup mapping it launches with", "[gemm][wgm]") {
+  using arch_t       = origami::hardware_t::architecture_t;
+  const auto problem = make_problem(16384, 779, 5376);  // 128 x 7 tiles of 128 x 112
+
+  // One L2 domain.
+  const auto gfx1151 = origami::hardware_t::get_hardware_for_arch(
+      arch_t::gfx1151, 40, 65536, 512 * 1024, 2 << 20, 2100000);
+  REQUIRE(gfx1151.NUM_XCD == 1);
+  auto ctx_wgm = [&](const origami::hardware_t& hw, const origami::config_t& c) {
+    return origami::gemm::context_t(problem, hw, c).wgm;
+  };
+  auto mapping = [&](const origami::hardware_t& hw, int wgm, int wgm_xcc, int stream_k) {
+    return ctx_wgm(hw, fixed_wgm_config(wgm, wgm_xcc, stream_k));
+  };
+  // What the host picks per problem: the same tile without a declared mapping.
+  auto picked = [&](const origami::hardware_t& hw, int stream_k) {
+    auto c    = fixed_wgm_config(0, -1, stream_k);
+    c.backend = std::monostate{};
+    return ctx_wgm(hw, c);
+  };
+  auto same = [](const origami::workgroup_mapping_t& a, const origami::workgroup_mapping_t& b) {
+    return a.wgm == b.wgm && a.wgmxcc == b.wgmxcc && a.wgmxccchunk == b.wgmxccchunk &&
+           a.wgmxccsplitk == b.wgmxccsplitk;
+  };
+  const int gfx1151_default_wgm = 7;  // ceil(sqrt(40 / 1))
+
+  // Not persistent.
+  REQUIRE(mapping(gfx1151, 8, 1, 0).wgm == 8);
+  REQUIRE(mapping(gfx1151, -4, 1, 0).wgm == -4);
+  REQUIRE(mapping(gfx1151, 0, 1, 0).wgm == gfx1151_default_wgm);
+  REQUIRE(mapping(gfx1151, 8, 1, 0).wgmxcc == 1);
+
+  // StreamK with a fixed WGM or WGMXCC launches with it, like a non-persistent kernel.
+  for (int sk : {3, 4, 5}) {
+    REQUIRE(mapping(gfx1151, 8, 1, sk).wgm == 8);
+    REQUIRE(mapping(gfx1151, 8, 1, sk).wgmxcc == 1);
+    REQUIRE(mapping(gfx1151, 0, 1, sk).wgm == gfx1151_default_wgm);
+  }
+
+  // Only a persistent kernel with WGM 0 and WGMXCC -1 is picked per problem, StreamK or
+  // DataParallel.
+  REQUIRE(picked(gfx1151, 3).wgm != gfx1151_default_wgm);
+  REQUIRE(same(mapping(gfx1151, 0, -1, 3), picked(gfx1151, 3)));
+  REQUIRE(
+      same(ctx_wgm(gfx1151, fixed_wgm_config(0, -1, 0, /*persistent=*/true)), picked(gfx1151, 0)));
+
+  // A spatial-cluster StreamK kernel launches with WGM 1 and WGMXCC 1, auto mapping or not.
+  for (int wgm : {0, 8}) {
+    auto c                               = fixed_wgm_config(wgm, -1, 3);
+    c.tensile().stream_k_spatial_cluster = true;
+    const auto m                         = ctx_wgm(gfx1151, c);
+    REQUIRE(m.wgm == 1);
+    REQUIRE(m.wgmxcc == 1);
+  }
+
+  // With WGM 8 seven workgroups share each A tile instead of none.
+  const auto c = fixed_wgm_config(8, 1, 0);
+  origami::gemm::context_t ctx(problem, gfx1151, c);
+  const auto rates = origami::gemm::estimate_cache_hit_rates(problem, gfx1151, c, ctx);
+  REQUIRE(std::get<0>(rates) > 0.8);  // H_mem_l2_A
+  REQUIRE(std::get<2>(rates) > 0.8);  // H_mem_mall_A
+
+  // Several L2 domains: WGMXCC -1 launches with one group per XCD.
+  const auto gfx942 = make_hardware(942);
+  REQUIRE(gfx942.NUM_XCD > 1);
+  const int gfx942_default_wgm =
+      static_cast<int>(std::ceil(std::sqrt(static_cast<double>(gfx942.N_CU / gfx942.NUM_XCD))));
+  for (int sk : {0, 3}) {
+    REQUIRE(mapping(gfx942, 6, -1, sk).wgm == 6);
+    REQUIRE(mapping(gfx942, 6, -1, sk).wgmxcc == gfx942.NUM_XCD);
+    REQUIRE(mapping(gfx942, 6, 1, sk).wgmxcc == 1);
+    REQUIRE(mapping(gfx942, 0, 8, sk).wgm == gfx942_default_wgm);
+    REQUIRE(mapping(gfx942, 0, 8, sk).wgmxcc == 8);
+  }
+  REQUIRE(mapping(gfx942, 0, -1, 0).wgm == gfx942_default_wgm);
+  REQUIRE(same(mapping(gfx942, 0, -1, 3), picked(gfx942, 3)));
 }

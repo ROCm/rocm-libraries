@@ -496,6 +496,13 @@ struct tensile_params_t {
   /// allows instead of the scalar edge path.
   int adaptive_gemm = 0;
 
+  /// TensileLite TileProcessingStrategy is persistent (StreamK or DataParallel).
+  bool persistent = false;
+
+  /// TensileLite PersistentLoopArgsVersion 2: StreamK with spatial clusters, launched with
+  /// WGM 1 and WGMXCC 1.
+  bool stream_k_spatial_cluster = false;
+
   constexpr bool operator==(const tensile_params_t& o) const noexcept {
     return depth_u == o.depth_u && global_split_u == o.global_split_u &&
            global_accumulation == o.global_accumulation && local_split_u == o.local_split_u &&
@@ -517,7 +524,8 @@ struct tensile_params_t {
            lds_transpose_read_a == o.lds_transpose_read_a &&
            lds_transpose_read_b == o.lds_transpose_read_b && tdm_inst == o.tdm_inst &&
            prefetch_gl2 == o.prefetch_gl2 && prefetch_local_read == o.prefetch_local_read &&
-           half_plr == o.half_plr && multicast == o.multicast && adaptive_gemm == o.adaptive_gemm;
+           half_plr == o.half_plr && multicast == o.multicast && adaptive_gemm == o.adaptive_gemm &&
+           persistent == o.persistent && stream_k_spatial_cluster == o.stream_k_spatial_cluster;
   }
 
   std::size_t hash() const {
@@ -556,7 +564,9 @@ struct tensile_params_t {
                               prefetch_local_read,
                               half_plr,
                               multicast,
-                              adaptive_gemm);
+                              adaptive_gemm,
+                              persistent,
+                              stream_k_spatial_cluster);
   }
 };
 
