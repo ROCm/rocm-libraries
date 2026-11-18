@@ -2300,6 +2300,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         ####
         # scheduled sync
         ####
+        localReadsWaited = False
         if mfmaIndex == self.states.syncPlrMfmaIndex and self.states.numItersPLR:
           # scheduleGROverBarrier case, add GR wait at barrier sync with the number of GR already scheduled
           if self.states.scheduleGROverBarrier and (not isNLLorNGLL):
@@ -2309,6 +2310,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             iterCode.add(self._waitLocalReadsBeforeDirectToLdsBarrier(kernel, tPA, tPB))
           iterCode.add(waitLWCode)
           iterCode.add(syncCode)
+          localReadsWaited = not isNLLorNGLL and kernel["PrefetchGlobalRead"] \
+                            and (kernel["DirectToLdsA"] or kernel["DirectToLdsB"])
 
         ####
         # scheduled local read for next loop
@@ -2345,6 +2348,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           if localReadItemsNextLoop:
             item = localReadItemsNextLoop.pop(0)
             iterCode.add(item)
+            localReadsWaited = False
             if (i == 0):
               localReadsWaitcnt += countWeightedLocalRead(item)
 
@@ -2395,6 +2399,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               pass
             elif self.states.doPackPreSchedulingNextLoop and mfmaIndex == 0:
               # doPackPreSchedulingNextLoop case, we can skip only mfmaIndex == 0 (for prefetch only)
+              pass
+            elif localReadsWaited and isinstance(waitCode, SWaitCnt):
+              # The pre-barrier wait covers these reads unless new ones were issued.
               pass
             else:
               iterCode.add(waitCode)

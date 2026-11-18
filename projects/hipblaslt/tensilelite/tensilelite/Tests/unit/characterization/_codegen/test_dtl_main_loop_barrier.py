@@ -44,3 +44,8 @@ def test_dtl_main_loop_barrier_waits_for_local_reads():
             assert (
                 "s_waitcnt lgkmcnt(0)" in trips[last_read:barrier]
             ), f"{base}: a main-loop barrier leaves earlier ds_reads outstanding"
+            next_read = _DS_READ.search(trips, barrier)
+            assert next_read is not None, base
+            assert (
+                "lgkmcnt" not in trips[barrier : next_read.start()]
+            ), f"{base}: redundant local-read wait after the main-loop barrier"
