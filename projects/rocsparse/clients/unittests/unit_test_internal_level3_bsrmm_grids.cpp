@@ -848,33 +848,34 @@ TEST_F(BsrmmGrids, general_clamped)
     }
 }
 
-// The clamped large_ext kernel runs a separate grid-stride copy of the B loads, so
-// op(B) = B^H needs its own clamped check, in both B orders (nn and nt loads), for
-// every tuned config. Each type pair also runs unclamped as its control.
-TEST_F(BsrmmGrids, large_ext_conj_B_clamped)
+namespace
 {
+    // One shape per tuned large_ext config, for op(B) = B^H.
     const struct
     {
         int64_t             block_dim;
         rocsparse_direction dir;
         const char*         kernel;
-    } shapes[] = {{3, rocsparse_direction_row, "bsrmm_large_blockdim_kernel_ext<4, 16, 2>"},
-                  {7, rocsparse_direction_column, "bsrmm_large_blockdim_kernel_ext<8, 8, 2>"},
-                  {13, rocsparse_direction_row, "bsrmm_large_blockdim_kernel_ext<16, 16, 2>"},
-                  {29, rocsparse_direction_column, "bsrmm_large_blockdim_kernel_ext<32, 32, 2>"}};
+    } conj_B_shapes[]
+        = {{3, rocsparse_direction_row, "bsrmm_large_blockdim_kernel_ext<4, 16, 2>"},
+           {7, rocsparse_direction_column, "bsrmm_large_blockdim_kernel_ext<8, 8, 2>"},
+           {13, rocsparse_direction_row, "bsrmm_large_blockdim_kernel_ext<16, 16, 2>"},
+           {29, rocsparse_direction_column, "bsrmm_large_blockdim_kernel_ext<32, 32, 2>"}};
+}
 
-    for(const auto& s : shapes)
+// The clamped large_ext kernel runs a separate grid-stride copy of the B loads, so
+// op(B) = B^H needs its own clamped check, in both B orders (nn and nt loads), for
+// every tuned config.
+TEST_F(BsrmmGrids, large_ext_conj_B_clamped)
+{
+    for(const auto& s : conj_B_shapes)
     {
         for(const rocsparse_order order_B : {rocsparse_order_column, rocsparse_order_row})
         {
             check_bsrmm_conj_B<rocsparse_float_complex, int32_t, int32_t>(
                 handle, s.block_dim, s.dir, order_B, bsrmm_limits, s.kernel);
-            check_bsrmm_conj_B<rocsparse_float_complex, int32_t, int32_t>(
-                handle, s.block_dim, s.dir, order_B, unclamped, s.kernel);
             check_bsrmm_conj_B<rocsparse_double_complex, int64_t, int64_t>(
                 handle, s.block_dim, s.dir, order_B, bsrmm_limits, s.kernel);
-            check_bsrmm_conj_B<rocsparse_double_complex, int64_t, int64_t>(
-                handle, s.block_dim, s.dir, order_B, unclamped, s.kernel);
         }
     }
 }
@@ -902,6 +903,22 @@ TEST_F(BsrmmGrids, unclamped_grid_matches_host)
                 handle, s.block_dim, s.dir, order_B, unclamped, "bsrmm");
             check_bsrmm<double, int64_t, int64_t>(
                 handle, s.block_dim, s.dir, order_B, unclamped, "bsrmm");
+        }
+    }
+}
+
+// Control for large_ext_conj_B_clamped: the same shapes and types with the real
+// grid limits.
+TEST_F(BsrmmGrids, unclamped_conj_B_matches_host)
+{
+    for(const auto& s : conj_B_shapes)
+    {
+        for(const rocsparse_order order_B : {rocsparse_order_column, rocsparse_order_row})
+        {
+            check_bsrmm_conj_B<rocsparse_float_complex, int32_t, int32_t>(
+                handle, s.block_dim, s.dir, order_B, unclamped, s.kernel);
+            check_bsrmm_conj_B<rocsparse_double_complex, int64_t, int64_t>(
+                handle, s.block_dim, s.dir, order_B, unclamped, s.kernel);
         }
     }
 }
