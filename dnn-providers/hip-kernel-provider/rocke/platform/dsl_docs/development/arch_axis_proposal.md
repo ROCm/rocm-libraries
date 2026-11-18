@@ -37,7 +37,7 @@ the C++ lowerer does not yet own the same in-engine lookup.
 The staged design is:
 
 - **S1** *(done)* — generate an `arch_domain` table by probing the installed
-  toolchain; commit it, gate regeneration as a no-op, exactly like golden. One
+  toolchain; commit it, gate retained support with a monotonic floor. One
   column per flavor, `(key, arch) → status + evidence`; a plain `key → set of
   arches` proved too lossy (§3.2, §4/S1).
 - **S2** *(warning/corpus gate done; hard rejection proposed)* — make `_need()`
@@ -249,18 +249,26 @@ Two further findings from the sweep, neither visible to a 15-probe sample:
 `tools/gen_arch_domain.py`, for each decl key × each wired arch, emits a minimal
 module, compiles **and links** it in a **subprocess**, and classifies the
 outcome. Commit the result; `tests/tools/test_arch_domain_artifact.py` checks
-its structure and the `rocke_arch_domain_reproducibility` CTest asserts
-regeneration is a no-op when the host uses the exact compiler build recorded in
-the artifact. A different build is explicitly unvalidated because development
-builds within one LLVM major can disagree. The CTest is registered for both
-developer build trees and relocated provider test artifacts; the installed form
-checks the package data CI actually consumes without requiring a source
-checkout. This is exactly how golden is managed.
+its structure and the `rocke_arch_domain_reproducibility` CTest checks a
+monotonic support floor with compatible flavor, scope, and probe methodology.
+Previously working cells and accepted processor names must remain working.
+Retained positives must preserve the effective signature, operand sources and
+fixed witnesses in `probe_contracts`; both `ok` and `arch_absent` require an
+accepted processor. Live clang/opt provenance is checked before probing, and the
+complete generated document is validated before persistence or comparison.
+Compiler identity is provenance, not an applicability gate. Gains and improved
+classification pass and are reported; remaining no-data and degraded negative
+measurements are not qualified. Invalid or missing comparison records fail.
+The CTest is registered for both developer build trees and relocated provider
+test artifacts; the installed form checks the package data CI actually consumes
+without requiring a source checkout. Unlike an IR golden, this gate compares
+capability transitions rather than requiring identical generated text.
 
 Shipped schema — per-cell provenance is the point, per
 [`multi_toolchain_strategy.md`](multi_toolchain_strategy.md) §3.2, since one host
 can only ever validate one flavor column. It differs from what this doc first
-proposed in three ways, each of which was a mistake worth recording:
+proposed in the ways described below. This partial illustration omits some
+method fields and is not itself an input to the generator's validator:
 
 ```json
 {
@@ -274,7 +282,10 @@ proposed in three ways, each of which was a mistake worth recording:
                   "evidence": "Cannot select: intrinsic %llvm.amdgcn.ds.read.tr16.b64"}
     }
   },
-  "canonical": {"ds.read.tr16.b64": "llvm.amdgcn.ds.read.tr16.b64.v4i16"}
+  "canonical": {"ds.read.tr16.b64": "llvm.amdgcn.ds.read.tr16.b64.v4i16"},
+  "probe_contracts": {
+    "ds.read.tr16.b64": {"operands": [{"source": "addrspacecast", "type": "ptr addrspace(3)"}], "return_type": "<4 x i16>", "version": 1}
+  }
 }
 ```
 
@@ -290,6 +301,14 @@ proposed in three ways, each of which was a mistake worth recording:
 - **Every non-`ok` cell carries its `evidence`** — the compiler's own first
   diagnostic. A status with no diagnostic behind it cannot be acted on by whoever
   hits it, and cannot be distinguished from a bug in the probe.
+
+`probe_contracts` is comparison-only metadata, not a runtime availability or
+numerical-correctness policy. It comes from the same operand plan that renders
+each probe, including default immediates and explicit integer literals, and
+extends the v1 envelope without changing the Python/C++ runtime tables. Storage,
+positive-key completeness and
+[historical contract recovery](../../../TESTING.md#historical-positive-probe-contract-recovery)
+follow the support-gate policy in `TESTING.md`.
 
 `canonical` records what LLVM resolved each surviving declare to. Mostly
 identical to the declared name; the interesting rows are the overloads that
