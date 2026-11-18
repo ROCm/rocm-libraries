@@ -21,9 +21,12 @@ from tests import _attention_bwd_resources as res
 from tests._compiler_test_utils import require_tools_or_skip
 
 # Flavors measured to compile ``agpr_alloc=(128, 128)`` to zero AGPRs. Measured
-# 2026-11-18: llvm20 (comgr3.0, ROCm 7.1) gives agpr == 0; the primus-v26.9
-# container's compiler honours it on gfx942 and gfx950. llvm22 is not measured,
-# so it is not listed and the assertion below stays active there.
+# 2026-11-18: llvm20 (comgr3.0, ROCm 7.1) gives agpr == 0, and its plain build
+# of this kernel also spills (vgpr_spill_count 17 at vgpr_count 256), which the
+# ``r0`` spill check below would report; the skip covers both. The primus-v26.9
+# container's compiler honours the attribute on gfx942 and gfx950 (its flavor
+# reads "unknown" there). llvm22 is not measured, so it is not listed and every
+# assertion stays active there.
 _AGPR_ALLOC_IGNORED = frozenset({"llvm20"})
 
 
