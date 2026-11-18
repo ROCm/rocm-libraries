@@ -855,8 +855,18 @@ namespace TensileLite
         void disableOpenMPIdleSpin()
         {
 #if defined(_OPENMP) && defined(KMP_VERSION_MAJOR) && !defined(_WIN32)
-            if(std::getenv("KMP_BLOCKTIME") == nullptr)
+            auto const* blocktime = std::getenv("KMP_BLOCKTIME");
+            if(blocktime == nullptr)
                 kmp_set_blocktime(0);
+
+            std::clog << "OpenMP: KMP_VERSION_MAJOR=" << KMP_VERSION_MAJOR
+                      << ", blocktime=" << kmp_get_blocktime()
+                      << ", max_threads=" << omp_get_max_threads()
+                      << ", KMP_BLOCKTIME=" << (blocktime ? blocktime : "<unset>") << '\n';
+#elif defined(_OPENMP)
+            std::clog << "OpenMP: _OPENMP=" << _OPENMP << ", blocktime control unavailable\n";
+#else
+            std::clog << "OpenMP: disabled\n";
 #endif
         }
 
@@ -868,9 +878,8 @@ int main(int argc, const char* argv[])
     using namespace TensileLite;
     using namespace TensileLite::Client;
 
-    // Called before mainStart: when it calls kmp_set_blocktime, that first libomp call runs
-    // libomp's serial initialization (~0.5 ms), which belongs to process startup rather than
-    // main_parse_args.
+    // Initialize the OpenMP runtime and log its settings before mainStart so this work
+    // belongs to process startup rather than main_parse_args.
     disableOpenMPIdleSpin();
 
     auto const mainStart     = TimingClock::now();
