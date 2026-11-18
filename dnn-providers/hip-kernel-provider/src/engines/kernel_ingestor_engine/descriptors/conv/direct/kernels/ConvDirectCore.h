@@ -161,8 +161,7 @@ __device__ void k2FormatWeights(const K2FormatArgs& f)
     // reduction elements are ka output channels of one input channel, ka filter rows apart. A
     // unit is a VEC x VEC square: VEC output channels' 16-byte runs of VEC input channels (each
     // read coalesced across lanes), transposed in registers into the VEC input channels' 16-byte
-    // pieces of their runs. Per element it read 2-byte values one filter row apart (0.029 ms for
-    // a 512 x 512 x 27 bf16 filter on MI325X).
+    // pieces of their runs. The per-element path reads 2-byte values one filter row apart.
     const bool vecBwd = f.backward && f.wStrides[1] == 1 && f.ka % VEC == 0 && f.c0 % VEC == 0
                         && f.kpad % VEC == 0 && f.wStrides[0] % VEC == 0 && f.wStrides[2] % VEC == 0
                         && f.wStrides[3] % VEC == 0 && f.wStrides[4] % VEC == 0
