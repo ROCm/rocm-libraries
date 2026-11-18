@@ -33,6 +33,7 @@
 #include <hipblaslt_benchmark/benchmark_stats.hpp>
 #include <iomanip>
 #include <istream>
+#include <limits>
 #include <ostream>
 #include <regex>
 #include <set>
@@ -57,7 +58,9 @@ void hipblaslt_bench_options::apply_to(Arguments& arg)
 
 void Arguments::init()
 {
-    // match python in hipblaslt_common.py
+    // Fields without an assignment below default to zero, false or empty in
+    // hipblaslt_common.yaml.
+    *this = Arguments{};
 
     strcpy(function, "matmul");
     strcpy(name, "hipblaslt-bench");
@@ -319,4 +322,66 @@ std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Argum
     }
 
     return {real_compute_input_typeA, real_compute_input_typeB};
+}
+
+hipDataType derive_unset_bias_type(const Arguments& arg)
+{
+    static const std::set<hipDataType> supported_bias_types
+        = {HIP_R_32F, HIP_R_16F, HIP_R_16BF, HIP_R_64F, HIP_R_32I, HIP_C_32F, HIP_C_64F};
+
+    hipDataType real_bias_type = arg.bias_type;
+
+    if(arg.bias_type == HIPBLASLT_DATATYPE_INVALID)
+    {
+        if(arg.compute_type == HIPBLAS_COMPUTE_32I)
+        {
+            real_bias_type = HIP_R_32I;
+        }
+        else if(arg.compute_type == HIPBLAS_COMPUTE_32F_FAST_TF32)
+        {
+            real_bias_type = HIP_R_32F;
+        }
+        else if((arg.a_type == HIP_R_8F_E4M3_FNUZ || arg.a_type == HIP_R_8F_E5M2_FNUZ)
+                && (arg.b_type == HIP_R_8F_E4M3_FNUZ || arg.b_type == HIP_R_8F_E5M2_FNUZ))
+        {
+            if(arg.d_type == HIP_R_32F || arg.d_type == HIP_R_16BF)
+                real_bias_type = HIP_R_16BF;
+            else if(arg.d_type == HIP_R_16F)
+                real_bias_type = HIP_R_16F;
+            else
+                real_bias_type = HIP_R_16F;
+        }
+        else if((arg.a_type == HIP_R_8F_E4M3 || arg.a_type == HIP_R_8F_E5M2)
+                && (arg.b_type == HIP_R_8F_E4M3 || arg.b_type == HIP_R_8F_E5M2))
+        {
+            if(arg.d_type == HIP_R_32F || arg.d_type == HIP_R_16BF)
+                real_bias_type = HIP_R_16BF;
+            else if(arg.d_type == HIP_R_16F)
+                real_bias_type = HIP_R_16F;
+            else
+                real_bias_type = HIP_R_16F;
+        }
+        else if((arg.a_type == HIP_R_6F_E2M3 && arg.b_type == HIP_R_6F_E2M3)
+                || (arg.a_type == HIP_R_6F_E3M2 && arg.b_type == HIP_R_6F_E3M2)
+                || (arg.a_type == HIP_R_4F_E2M1 && arg.b_type == HIP_R_4F_E2M1))
+        {
+            if(arg.d_type == HIP_R_32F || arg.d_type == HIP_R_16BF)
+                real_bias_type = HIP_R_16BF;
+            else if(arg.d_type == HIP_R_16F)
+                real_bias_type = HIP_R_16F;
+            else
+                real_bias_type = HIP_R_16F;
+        }
+        else
+        {
+            real_bias_type = arg.d_type;
+        }
+    }
+
+    // A valid D type may be unsupported for bias, which matters only when bias is used.
+    if(arg.bias_vector && supported_bias_types.count(real_bias_type) == 0)
+        throw std::invalid_argument("Invalid bias type "
+                                    + std::string(hip_datatype_to_string(real_bias_type)));
+
+    return real_bias_type;
 }
