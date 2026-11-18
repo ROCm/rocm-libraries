@@ -30,7 +30,9 @@
 
 #include _HIPCUB_LIBCXX_INCLUDE(memory_resource)
 #include _HIPCUB_LIBCXX_INCLUDE(stream)
-#include _HIPCUB_STD_INCLUDE(execution)
+// Only __query_or is needed; the umbrella <execution> pulls in every PSTL backend
+// (including libhipcxx's __hipcub.h shim), which creates an include cycle with hipcub.hpp.
+#include _HIPCUB_STD_INCLUDE(__execution/env.h)
 
 BEGIN_HIPCUB_NAMESPACE
 namespace detail
