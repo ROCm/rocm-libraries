@@ -115,7 +115,11 @@ def test_combined_metadata_preserves_explicit_rocm_identity(tmp_path, identity, 
     script = _copy_metadata(tmp_path / "src")
     revision = _SHA + ".dirty." + "a" * 12
     result = _run(
-        script, "metadata", "--rocm-identity", identity, TENSILELITE_SOURCE_REVISION=revision
+        script,
+        "metadata",
+        "--rocm-identity",
+        identity,
+        TENSILELITE_SOURCE_REVISION=revision,
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {
@@ -130,12 +134,14 @@ def test_combined_metadata_preserves_explicit_rocm_identity(tmp_path, identity, 
     [
         ("OFF", "7.12.0", ""),
         ("ON", "git", ""),
-        ("ON", "", ""),
+        ("ON", "", None),
         ("ON", "7.12.0rc1", "7.12.0rc1"),
         ("ON", "7.12.0.dev0+abcdef", "7.12.0.dev0+abcdef"),
     ],
 )
-def test_cmake_selects_only_real_therock_package_identity(tmp_path, therock, version, expected):
+def test_cmake_selects_only_real_therock_package_identity(
+    tmp_path, therock, version, expected
+):
     output = tmp_path / "identity.txt"
     script = tmp_path / "resolve.cmake"
     module = _SOURCE_ROOT.parent / "cmake/hipblaslt_python.cmake"
@@ -145,9 +151,16 @@ set(THEROCK_PACKAGE_VERSION "{version}")
 hipblaslt_resolve_build_rocm_version(identity)
 file(WRITE "{output}" "${{identity}}")
 """)
-    result = subprocess.run(["cmake", "-P", str(script)], capture_output=True, text=True)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert output.read_text() == expected
+    result = subprocess.run(
+        ["cmake", "-P", str(script)], capture_output=True, text=True
+    )
+    if expected is None:
+        assert result.returncode != 0
+        assert "requires THEROCK_PACKAGE_VERSION" in result.stderr
+        assert not output.exists()
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert output.read_text() == expected
 
 
 def test_cli_ignores_the_rocm_environment(tmp_path):
@@ -177,7 +190,9 @@ def test_rocm_identity_replaces_the_commit_label(tmp_path, identity, label):
     metadata = runpy.run_path(str(script))
 
     assert metadata["distribution_version"](_SHA, identity) == f"5.0.0+{label}"
-    result = _run(script, "version", "--rocm-identity", identity, TENSILELITE_SOURCE_REVISION=_SHA)
+    result = _run(
+        script, "version", "--rocm-identity", identity, TENSILELITE_SOURCE_REVISION=_SHA
+    )
     assert result.stdout == f"5.0.0+{label}\n", result.stderr
 
 
