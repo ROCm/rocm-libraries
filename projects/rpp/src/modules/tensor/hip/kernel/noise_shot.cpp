@@ -344,7 +344,7 @@ RppStatus hip_exec_shot_noise_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPt
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;
-    int globalThreads_z = handle.GetBatchSize();
+    int globalThreads_z = dstDescPtr->n;
 
     Rpp32u* xorwowSeedStream;
     xorwowSeedStream = (Rpp32u*)&xorwowInitialStatePtr[1];

@@ -136,7 +136,7 @@ RppStatus hip_exec_grid_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
         else if (srcDescPtr->layout == RpptLayout::NCHW) {
             globalThreads_x = (dstDescPtr->w + 7) >> 3;
             globalThreads_y = dstDescPtr->h;
-            globalThreads_z = handle.GetBatchSize();
+            globalThreads_z = dstDescPtr->n;
             hipLaunchKernelGGL(convert_pln3_pkd3_hip_tensor,
                                dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
                                     ceil((float)globalThreads_y / LOCAL_THREADS_Y),
@@ -190,7 +190,7 @@ RppStatus hip_exec_grid_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
         else if (srcDescPtr->layout == RpptLayout::NHWC) {
             globalThreads_x = (dstDescPtr->w + 7) >> 3;
             globalThreads_y = dstDescPtr->h;
-            globalThreads_z = handle.GetBatchSize();
+            globalThreads_z = dstDescPtr->n;
             hipLaunchKernelGGL(convert_pkd3_pln3_hip_tensor,
                                dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
                                     ceil((float)globalThreads_y / LOCAL_THREADS_Y),

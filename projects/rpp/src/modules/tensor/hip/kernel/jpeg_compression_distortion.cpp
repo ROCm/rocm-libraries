@@ -1016,7 +1016,7 @@ RppStatus hip_exec_jpeg_compression_distortion(T* srcPtr, RpptDescPtr srcDescPtr
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;
-    int globalThreads_z = handle.GetBatchSize();
+    int globalThreads_z = dstDescPtr->n;
 
     // Allocate pinned memory and copy tables (no prescaling - matches HOST reference)
     Rpp32f* tableY =

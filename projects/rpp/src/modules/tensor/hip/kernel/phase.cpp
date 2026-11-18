@@ -238,7 +238,7 @@ RppStatus hip_exec_phase_tensor(T* srcPtr1, T* srcPtr2, RpptDescPtr srcDescPtr, 
 
     int globalThreads_x = (dstDescPtr->w + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;
-    int globalThreads_z = handle.GetBatchSize();
+    int globalThreads_z = dstDescPtr->n;
 
     if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC)) {
         hipLaunchKernelGGL(

@@ -1254,7 +1254,7 @@ RppStatus hip_exec_tensor_sum(T* srcPtr, RpptDescPtr srcDescPtr, U* tensorSumArr
 
     int globalThreads_x = (srcDescPtr->w + 7) >> 3;
     int globalThreads_y = srcDescPtr->h;
-    int globalThreads_z = handle.GetBatchSize();
+    int globalThreads_z = srcDescPtr->n;
     int gridDim_x = (int)ceil((float)globalThreads_x / LOCAL_THREADS_X);
     int gridDim_y = (int)ceil((float)globalThreads_y / LOCAL_THREADS_Y);
     int gridDim_z = (int)ceil((float)globalThreads_z / LOCAL_THREADS_Z);
@@ -1332,7 +1332,7 @@ RppStatus hip_exec_tensor_sum(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp64u* ten
 
     int globalThreads_x = (srcDescPtr->w + 7) >> 3;
     int globalThreads_y = srcDescPtr->h;
-    int globalThreads_z = handle.GetBatchSize();
+    int globalThreads_z = srcDescPtr->n;
     int gridDim_x = (int)ceil((float)globalThreads_x / LOCAL_THREADS_X);
     int gridDim_y = (int)ceil((float)globalThreads_y / LOCAL_THREADS_Y);
     int gridDim_z = (int)ceil((float)globalThreads_z / LOCAL_THREADS_Z);
@@ -1406,7 +1406,7 @@ RppStatus hip_exec_tensor_sum(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp64s* ten
 
     int globalThreads_x = (srcDescPtr->w + 7) >> 3;
     int globalThreads_y = srcDescPtr->h;
-    int globalThreads_z = handle.GetBatchSize();
+    int globalThreads_z = srcDescPtr->n;
     int gridDim_x = (int)ceil((float)globalThreads_x / LOCAL_THREADS_X);
     int gridDim_y = (int)ceil((float)globalThreads_y / LOCAL_THREADS_Y);
     int gridDim_z = (int)ceil((float)globalThreads_z / LOCAL_THREADS_Z);
