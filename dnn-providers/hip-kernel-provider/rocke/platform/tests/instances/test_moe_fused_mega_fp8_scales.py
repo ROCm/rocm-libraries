@@ -16,12 +16,13 @@ must read the A scale of each output's row, not of the row it loads A from.
 
 Checks:
 
-* On the host, on the kernel's LLVM IR for the spec the dispatcher ships for
-  gfx950 (the K=128 atom) and for gfx942 (the K=32 atom), from the Python
-  engine and, with the ``rocke_engine`` binding, from the C++ engine's own
-  builder (the two texts must be the same byte for byte): every gate and up
-  output that Pass A stores gets, in each loop iteration ``g``, exactly one A
-  scale, read at ``row * stride_a_scale + g``, and one weight scale, read at
+* On the host, on the kernel's LLVM IR for the spec the dispatcher ships (its
+  scheduling hint pinned to the default) for gfx950 (the K=128 atom) and for
+  gfx942 (the K=32 atom), from the Python engine and, with the
+  ``rocke_engine`` binding, from the C++ engine's own builder (the two texts
+  must be the same byte for byte): every gate and up output that Pass A
+  stores gets, in each loop iteration ``g``, exactly one A scale, read at
+  ``row * stride_a_scale + g``, and one weight scale, read at
   ``g * stride_w + col // 128``, where ``(row, col)`` is the cell the output
   is stored to, for every lane and group of a 3 x 2 grid of workgroups (the
   indices are affine in the workgroup ids, so more than one workgroup along
@@ -81,7 +82,13 @@ _EXPERTS = 3
 
 
 def _shipped_spec(arch: str) -> FusedMegaKernelSpecFp8:
-    """The fp8 spec the MoE dispatcher selects on ``arch`` for this shape."""
+    """The fp8 spec the MoE dispatcher selects on ``arch`` for this shape,
+    with the loop scheduling hint pinned to the default, ``iglp1``.
+
+    The dispatched spec leaves ``sched_cadence`` unset; then the Python builder
+    takes the hint from the ``ROCKE_FP8_SCHED`` environment variable while the
+    C++ builder uses ``iglp1``. Both builders read the field, so pinning it
+    makes them build the same kernel whatever that variable says."""
     request = MoeRequest(
         num_tokens=_TOKENS,
         hidden=_HIDDEN,
@@ -91,7 +98,7 @@ def _shipped_spec(arch: str) -> FusedMegaKernelSpecFp8:
         arch=arch,
         dtype="fp8",
     )
-    return dispatch_moe(request).spec
+    return dataclasses.replace(dispatch_moe(request).spec, sched_cadence="iglp1")
 
 
 def _lowered_llvm(spec: FusedMegaKernelSpecFp8, arch: str) -> str:
