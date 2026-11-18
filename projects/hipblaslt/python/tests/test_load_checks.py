@@ -196,10 +196,16 @@ def test_no_version_warning_with_an_override(monkeypatch, recwarn):
 
 def test_import_does_not_check_the_loaded_version():
     # The check needs a handle, and creating one at import allocates GPU memory (and exits the
-    # process if that fails), so import leaves it for the first Handle().
-    import hipblaslt
+    # process if that fails), so import leaves it for the first Handle(). A fresh process, since
+    # other tests here create handles.
+    import subprocess
 
-    assert hipblaslt._loader._version_checked is False
+    code = "import warnings; warnings.simplefilter('ignore'); import hipblaslt; print(hipblaslt._loader._version_checked)"
+    r = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=300
+    )
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert r.stdout.strip().splitlines()[-1] == "False"
 
 
 # --- the loaded-library scan --------------------------------------------------------------------
