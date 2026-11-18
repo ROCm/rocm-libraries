@@ -153,7 +153,8 @@ are ready.
 
 ## Before you send the change
 
-Build and run the StinkyTofu ctest suite.
+For a refactor, prove that the generated assembly is identical (rule 6). How to do that is in
+[`harness/ab.md`](../../../../harness/ab.md).
 
 Read the related docs:
 
