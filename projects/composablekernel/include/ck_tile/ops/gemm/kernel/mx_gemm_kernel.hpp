@@ -517,26 +517,6 @@ struct MxGemmKernel
 
     CK_TILE_HOST static bool IsSupportedArgument(const KernelArgs& kargs)
     {
-        if constexpr(kPipelineChecks)
-        {
-            // The pipeline's check covers the shape, the K tail and the 2^31 offsets (its Wide
-            // traits) for its K-major scales; the generic MX TDM shape checks assume MN-major
-            // scale views.
-            if(const char* why = GetUnsupportedReason(kargs))
-            {
-                if(EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                    CK_TILE_ERROR(BaseKernel::GetName(), ": ", why);
-                return false;
-            }
-            return BaseKernel::IsTdmArgumentSupported("MX GEMM",
-                                                      kargs.k_batch,
-                                                      kargs.K,
-                                                      kargs.as_ptr[0],
-                                                      kargs.bs_ptr[0],
-                                                      kargs.e_ptr) &&
-                   BaseKernel::IsTdmDeviceSupported("MX GEMM");
-        }
-
         const bool log = ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING));
 
         if(kargs.k_batch < 1)
@@ -618,6 +598,9 @@ struct MxGemmKernel
             {
                 return false;
             }
+            // The pipeline's own check covers the A, B, D and E sizes too (its Wide traits).
+            if constexpr(kPipelineChecks)
+                return true;
         }
 
         // Delegate the remaining shape/vector-size checks to the universal kernel.
@@ -625,14 +608,18 @@ struct MxGemmKernel
     }
 
     /**
-     * @brief Runs the shape checks of IsSupportedArgument: IsMxTdmShapeSupported and
-     *        IsScaleViewSizeSupported.
+     * @brief Runs the shape checks of IsSupportedArgument: the pipeline's own check
+     *        (GetUnsupportedReason) for a pipeline that checks problems itself (kPipelineChecks),
+     *        else IsMxTdmShapeSupported and IsScaleViewSizeSupported.
      * @details Skips the split-K, pointer-alignment and device checks and the A, B, D and E size
-     *          checks of UniversalGemmKernel::IsSupportedArgument.
+     *          checks of UniversalGemmKernel::IsSupportedArgument. The pipeline's check covers its
+     *          K-major scales, its K tail and its 2^31 offsets; the generic MX TDM checks assume
+     *          MN-major scale views.
      * @tparam AllowKTail Passed to IsMxTdmShapeSupported. The default, true, gives the checks of
      *                    IsSupportedArgument; false keeps the K checks for every configuration, as
-     *                    MxGroupedGemmKernel::IsSupportedArgument requires.
-     * @param kargs Kernel arguments; M, N, K and the A and B strides are read.
+     *                    MxGroupedGemmKernel::IsSupportedArgument requires (with kPipelineChecks:
+     *                    K must be a multiple of KPerBlock).
+     * @param kargs Kernel arguments; M, N, K, k_batch and the A, B and E strides are read.
      * @return true if the shape in kargs passes these checks.
      */
     template <bool AllowKTail = true>
@@ -642,6 +629,15 @@ struct MxGemmKernel
                       "MX GEMM: IsTdmShapeSupported applies to the TDM pipelines only.");
         static_assert(NumATensor == 1 && NumBTensor == 1,
                       "MX GEMM: the TDM pipelines take a single A and a single B tensor.");
+        if constexpr(kPipelineChecks)
+        {
+            const char* why = GetUnsupportedReason(kargs);
+            if(!why && !AllowKTail && kargs.K % TilePartitioner::KPerBlock)
+                why = "K must be a multiple of KPerBlock";
+            if(why && EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                CK_TILE_ERROR(BaseKernel::GetName(), ": ", why);
+            return !why;
+        }
         using ALayout = remove_cvref_t<std::tuple_element_t<0, AsLayout>>;
         using BLayout = remove_cvref_t<std::tuple_element_t<0, BsLayout>>;
         // IsMxTdmShapeSupported goes first, so a shape it rejects is logged with its own reason.
