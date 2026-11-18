@@ -350,9 +350,9 @@ rocblas_status rocsolver_larf_template(rocblas_handle handle,
     //      ZERO ENTRIES ****
 
     // compute the matrix vector product  (W=-A'*X or W=-A*X)
-    rocblasCall_gemv<T>(handle, trans, m, n, cast2constType<T>(scalars), 0, A, shiftA, lda, stridea,
-                        x, shiftx, incx, stridex, cast2constType<T>(scalars + 1), 0, Abyx, 0, 1,
-                        order, batch_count, workArr);
+    rocblasCall_gemv<T, I>(handle, trans, m, n, cast2constType<T>(scalars), 0, A, shiftA, lda,
+                           stridea, x, shiftx, incx, stridex, cast2constType<T>(scalars + 1), 0,
+                           Abyx, 0, 1, order, batch_count, workArr);
 
     // compute the rank-1 update  (A + tau*X*W'  or A + tau*W*X')
     if(leftside)
