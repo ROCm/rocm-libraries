@@ -75,6 +75,13 @@ else()
   set(FMHA_FWD_OPTDIM 32,64,80,128,256)
 endif()
 
+# gfx125x does not build the pagedkv_prefill API by default; paged KV then goes through
+# split-KV. The pagedkv pipeline gtests are built either way.
+option(FMHA_FWD_GFX125_PAGEDKV_PREFILL "Build the pagedkv_prefill API for gfx125x" OFF)
+if(FMHA_FWD_HAS_GFX125 AND NOT FMHA_FWD_GFX125_PAGEDKV_PREFILL)
+  list(REMOVE_ITEM FMHA_FWD_ENABLE_APIS "pagedkv_prefill")
+endif()
+
 string(REPLACE ";" "," FMHA_FWD_APIS "${FMHA_FWD_ENABLE_APIS}")
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/fmha_fwd_source_flags.cmake)
 set(FMHA_FWD_CODEGEN_RECEIPT 0 CACHE STRING "Codegen receipt for FMHA forward instances")
