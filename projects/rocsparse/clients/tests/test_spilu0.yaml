@@ -394,6 +394,27 @@ Tests:
   indextype: *i32
   batch_count: [70000]
 
+# Every diagonal of the tridiagonal matrix is at most 4 in magnitude, so the tolerance 10
+# boosts each of them to zero: the numeric singularity is exact, at (block) row 0.
+- name: spilu0
+  category: pre_checkin
+  function: spilu0
+  precision: *single_double_precisions_complex_real
+  M_N:
+    - { M: 50, N: 50 }
+  block_dim: [3]
+  numericboost: [1]
+  boosttol: [10.0]
+  boostval: [0.0]
+  boostvali: [0.0]
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: *all_rocsparse_index_base
+  direction: [rocsparse_direction_row]
+  formatA: [rocsparse_format_csr, rocsparse_format_bsr]
+  matrix: [rocsparse_matrix_tridiagonal]
+  indextype: *i32_i64
+  batch_count: [1]
+
 # Nightly
 - name: spilu0
   category: nightly

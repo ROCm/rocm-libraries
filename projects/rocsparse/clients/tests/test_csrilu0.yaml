@@ -189,6 +189,24 @@ Tests:
   category: pre_checkin
   function: csrilu0_extra
 
+# Every diagonal of the tridiagonal matrix is at most 4 in magnitude, so the tolerance 10
+# boosts each of them to zero: the zero pivot is row 0.
+- name: csrilu0
+  category: pre_checkin
+  function: csrilu0
+  precision: *single_double_precisions_complex_real
+  M: [50]
+  N: [50]
+  numericboost: [1]
+  boosttol: [10.0]
+  boostval: [0.0]
+  boostvali: [0.0]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: *all_rocsparse_index_base
+  matrix: [rocsparse_matrix_tridiagonal]
+
 # Nightly
 - name: csrilu0
   category: nightly

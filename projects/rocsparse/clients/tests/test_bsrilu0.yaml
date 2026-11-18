@@ -228,6 +228,26 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron2]
 
+# Every diagonal of the tridiagonal matrix is at most 4 in magnitude, so the tolerance 10
+# boosts each of them to zero: the zero pivot is block row 0.
+- name: bsrilu0
+  category: pre_checkin
+  function: bsrilu0
+  precision: *single_double_precisions_complex_real
+  M: [50]
+  N: [50]
+  block_dim: [3]
+  numericboost: [1]
+  boosttol: [10.0]
+  boostval: [0.0]
+  boostvali: [0.0]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: *all_rocsparse_index_base
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_tridiagonal]
+
 # Nightly
 - name: bsrilu0
   category: nightly
