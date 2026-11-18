@@ -1818,6 +1818,10 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     _tdm_a_mask = 0
                 if _cy == 1:
                     _tdm_b_mask = 0
+            # ROCKE_EXP_MC_NOMERGE=1 (control): every mask 0 -- the cluster launch and any
+            # tile remap stay, but no load is merged.
+            if _os_mc.environ.get("ROCKE_EXP_MC_NOMERGE") == "1":
+                _tdm_a_mask = _tdm_b_mask = 0
 
     def emit_load_phase(
         A_dst: Value,
@@ -2994,6 +2998,53 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         nonlocal _for_results
         _for_results = for_op.results
 
+    # EXPERIMENT (ROCKE_EXP_GL2_PREFETCH=D, uncommitted idea from the gfx1250 mx_gemm
+    # prototype): at the top of each K tile every thread issues global_prefetch (L2 hint)
+    # for its share of the A and B rows of the K tile D tiles ahead, so the TDM fills
+    # hit L2. Branch-free: past the last tile it prefetches the last tile again. Valid
+    # for shapes whose M and N are multiples of the block tile (no row clamp).
+    import os as _os_gl2
+
+    _gl2_dist = int(_os_gl2.environ.get("ROCKE_EXP_GL2_PREFETCH", "0"))
+    _GL2_CPOL = 1 | (1 << 3)
+
+    def _gl2_prefetch(k_cur) -> None:
+        if not _gl2_dist or not spec.trait.tdm:
+            return
+        line_bytes = 128
+        row_bytes = block_k * _tdm_elem_bytes
+        lines_per_row = max(1, row_bytes // line_bytes)
+        elems_per_line = line_bytes // _tdm_elem_bytes
+        last = b.sub(K, c_block_k)
+        k_ahead = b.add(k_cur, b.const_i32(_gl2_dist * block_k))
+        k_ahead = b.select(b.cmp_lt(k_ahead, K), k_ahead, last)
+        nthr = spec.block_size
+        # ROCKE_EXP_GL2_LINES=1: only each row's first line (half the volume at 256-byte rows);
+        # ROCKE_EXP_GL2_OPS=a|b|ab (default ab): which operands to prefetch.
+        if _os_gl2.environ.get("ROCKE_EXP_GL2_LINES") == "1":
+            lines_per_row = 1
+        _ops = _os_gl2.environ.get("ROCKE_EXP_GL2_OPS", "ab")
+        for name, ptr, row_off, rows, batch64 in (
+            ("a", A, block_m_off, block_m, tdm_batch_a),
+            ("b", Bp, block_n_off, block_n, tdm_batch_b),
+        ):
+            if name not in _ops:
+                continue
+            total = rows * lines_per_row
+            for base in range(0, total, nthr):
+                idx = b.add(tid, b.const_i32(base)) if base else tid
+                row = b.div(idx, b.const_i32(lines_per_row))
+                part = b.mod(idx, b.const_i32(lines_per_row))
+                row64 = b.mul(b.zext(b.add(row_off, row), _I64), b.zext(K, _I64))
+                col = b.add(k_ahead, b.mul(part, b.const_i32(elems_per_line)))
+                origin = b.add(batch64, b.add(row64, b.zext(col, _I64)))
+                byte_off = (
+                    origin
+                    if _tdm_elem_bytes == 1
+                    else b.mul(origin, b.const_i64(_tdm_elem_bytes))
+                )
+                b.global_prefetch(b.global_ptr_add(ptr, byte_off), cachepolicy=_GL2_CPOL)
+
     def _emit_kloop_tdm_early_refill() -> None:
         """Depth-2 TDM ping-pong with the early refill (``tdm_early_refill``).
 
@@ -3071,6 +3122,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
 
         def _tile(p, k_cur, acc, refill: bool) -> List[Value]:
             _top_wait(p)
+            _gl2_prefetch(k_cur)
             return _emit_wmma_phase(
                 A_smem,
                 B_smem,

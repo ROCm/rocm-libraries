@@ -1,0 +1,72 @@
+{
+  "_comment": "Example for mx_env_sweep.py: the B0 MX champion's flags (swizzled scales, K-atom fence, scale multicast off, constant scale extents) without the B0-only tile remap, across cluster shapes, with and without a light L2 prefetch of the K tile 4 ahead (one line per row of A, B or both); MAF shape for 96-CU partitions. ROCKE_EXP_CLUSTER 'cx,cy' shares A across cx workgroups along N and B across cy along M; MC_SOLO0 makes an unshared operand a plain load.",
+  "base_env": {
+    "ROCKE_EXP_MX": "1",
+    "ROCKE_EXP_MX_SWZ": "1",
+    "ROCKE_EXP_MX_SCALE_MC": "0",
+    "ROCKE_EXP_MX_KFENCE": "1",
+    "ROCKE_EXP_MX_SCALE_NOCLIP": "1",
+    "ROCKE_EXP_MC_SOLO0": "1"
+  },
+  "variants": [
+    {
+      "name": "mxswz",
+      "env": {}
+    },
+    {
+      "name": "pf4a",
+      "env": {
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_LINES": "1",
+        "ROCKE_EXP_GL2_OPS": "a"
+      }
+    },
+    {
+      "name": "pf4b",
+      "env": {
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_LINES": "1",
+        "ROCKE_EXP_GL2_OPS": "b"
+      }
+    },
+    {
+      "name": "pf4ab",
+      "env": {
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_LINES": "1",
+        "ROCKE_EXP_GL2_OPS": "ab"
+      }
+    }
+  ],
+  "arms": [
+    {
+      "name": "c1x1"
+    },
+    {
+      "name": "c1x2",
+      "cluster": "1,2"
+    },
+    {
+      "name": "c1x4",
+      "cluster": "1,4"
+    },
+    {
+      "name": "c2x2",
+      "cluster": "2,2"
+    },
+    {
+      "name": "c4x4",
+      "cluster": "4,4"
+    }
+  ],
+  "shapes": [
+    [
+      3072,
+      4096,
+      65536
+    ]
+  ],
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}
