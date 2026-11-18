@@ -227,25 +227,69 @@ inline void collectVgprMsbSlots(const StinkyInstruction* inst, int msbSrc[3], in
         msbDst, hasVgpr);
 }
 
-/// computeRequiredMsb() with each slotted VGPR operand's bank supplied by
-/// \p bankOf, as collectVgprMsbSlotsWith() takes it. One body for both, so a
-/// predicted word and an emitted one cannot disagree about which instructions
-/// carry an MSB or which field maps to which slot.
+/// Every slot of a bank word.
+constexpr int kVgprMsbFullMask = 0xFF;
+
+/// What one instruction needs of the bank word in force.
+struct VgprMsbRequirement {
+    /// The word with each filled slot's bank and 0 in the slots no operand
+    /// fills; -1 when the instruction needs no word at all.
+    int word = -1;
+    /// The bits of `word` the instruction depends on: 0b11 for each slot an
+    /// operand fills, or every slot when a VGPR operand's field selects none,
+    /// since which bank such a field reads is not settled.
+    int mask = 0;
+
+    /// Whether the instruction needs a word: it can carry one, and a VGPR
+    /// operand fills a slot.
+    bool needed() const {
+        return word >= 0;
+    }
+};
+
+/// requiredVgprMsb() with each slotted VGPR operand's bank supplied by \p bankOf,
+/// as collectVgprMsbSlotsWith() takes it. One body for both, so a predicted
+/// word and an emitted one cannot disagree about which instructions carry an
+/// MSB or which field maps to which slot. When two operands share a slot, the
+/// later one is what the word holds.
+template <typename BankOf>
+inline VgprMsbRequirement requiredVgprMsbWith(const StinkyInstruction& inst, BankOf&& bankOf) {
+    VgprMsbRequirement required;
+    if (!carriesVgprMsb(inst)) return required;
+
+    uint32_t word = 0;
+    uint32_t mask = 0;
+    bool slotless = false;
+    forEachVgprOperandField(
+        inst, [&](const StinkyRegister& reg, size_t operand, bool isDest, int slot) {
+            if (getMsbFromVgpr(reg) < 0) return;
+            if (slot < 0) {
+                slotless = true;
+                return;
+            }
+            const uint32_t shift = 2U * static_cast<uint32_t>(slot);
+            const uint32_t bank = static_cast<uint32_t>(bankOf(reg, operand, isDest)) & 0x3U;
+            word = (word & ~(0x3U << shift)) | (bank << shift);
+            mask |= 0x3U << shift;
+        });
+    if (mask == 0) return required;
+    required.word = static_cast<int>(word);
+    required.mask = slotless ? kVgprMsbFullMask : static_cast<int>(mask);
+    return required;
+}
+
+/// The bank word \p inst needs for its VGPR operands, each in the bank it names.
+inline VgprMsbRequirement requiredVgprMsb(const StinkyInstruction& inst) {
+    return requiredVgprMsbWith(
+        inst, [](const StinkyRegister& reg, size_t, bool) { return getMsbFromVgpr(reg); });
+}
+
+/// requiredVgprMsbWith() as (word, hasVgpr): the word, or -1 with hasVgpr false
+/// for an instruction that needs none.
 template <typename BankOf>
 inline std::pair<int, bool> computeRequiredMsbWith(const StinkyInstruction* inst, BankOf&& bankOf) {
-    if (!carriesVgprMsb(*inst)) return {-1, false};
-
-    int msbSrc[3] = {0, 0, 0};
-    int msbDst = 0;
-    bool hasVgpr = false;
-
-    collectVgprMsbSlotsWith(inst, bankOf, msbSrc, msbDst, hasVgpr);
-
-    if (!hasVgpr) return {-1, false};
-
-    int setVal = encodeVgprMsbForSlot(0, msbSrc[0]) | encodeVgprMsbForSlot(1, msbSrc[1]) |
-                 encodeVgprMsbForSlot(2, msbSrc[2]) | encodeVgprMsbForSlot(3, msbDst);
-    return {setVal, true};
+    const VgprMsbRequirement required = requiredVgprMsbWith(*inst, bankOf);
+    return {required.word, required.needed()};
 }
 
 /// The s_set_vgpr_msb immediate \p inst needs for its VGPR operands; (setVal, hasVgpr)
@@ -256,6 +300,13 @@ inline std::pair<int, bool> computeRequiredMsb(const StinkyInstruction* inst) {
         inst, [](const StinkyRegister& reg, size_t, bool) { return getMsbFromVgpr(reg); });
 }
 
+/// Which bank words serve an instruction.
+enum class VgprMsbPolicy {
+    /// Only its own word, every slot compared, with 0 in the slots no operand
+    /// fills. What InsertVgprMsbPass has always emitted.
+    ExactWord,
+};
+
 /// What has to happen before one instruction, as VgprMsbTracker::step() works it out.
 struct VgprMsbStep {
     /// An s_set_vgpr_msb is needed before the instruction.
@@ -264,19 +315,23 @@ struct VgprMsbStep {
     bool firstAfterLabel = false;
     /// The word it replaces, when one was set. Msb16 packs it into the high byte.
     std::optional<int> previousWord;
+    /// The word to write, when `emit` is set.
+    int word = -1;
 };
 
 /// The bank word in force while instructions are walked in order.
 ///
-/// An instruction needs a switch whenever its word differs from the current one,
-/// comparing every slot: computeRequiredMsb() writes 0 into the slots an
-/// instruction does not use. Nothing is known at the start of a block, after a
+/// An instruction needs a switch whenever the word in force does not serve it,
+/// as the policy decides. Nothing is known at the start of a block, after a
 /// call, or after a label, which may be reached from anywhere.
 ///
-/// InsertVgprMsbPass emits by this, and anything predicting what it will emit
-/// steps the same object, so the two cannot drift.
+/// InsertVgprMsbPass emits by this, and anything predicting what it will emit,
+/// or ordering instructions to emit fewer, steps the same object, so they
+/// cannot drift.
 class VgprMsbTracker {
    public:
+    explicit VgprMsbTracker(VgprMsbPolicy policy = VgprMsbPolicy::ExactWord) : policy_(policy) {}
+
     /// A label: no word is known, and the next switch follows an s_nop.
     void label() {
         current_ = kLabelBegin;
@@ -287,11 +342,22 @@ class VgprMsbTracker {
         current_ = kNotRequired;
     }
 
-    /// One instruction, needing \p required when \p hasVgpr, as computeRequiredMsb()
-    /// returns them.
-    VgprMsbStep step(int required, bool hasVgpr) {
+    /// Whether the word in force serves \p required, so it needs no switch.
+    /// True of an instruction that needs no word.
+    bool satisfies(const VgprMsbRequirement& required) const {
+        if (!required.needed()) return true;
+        switch (policy_) {
+            case VgprMsbPolicy::ExactWord:
+                return required.word == current_;
+        }
+        return false;
+    }
+
+    /// One instruction, needing \p required: whether a switch goes before it,
+    /// and which word it writes.
+    VgprMsbStep step(const VgprMsbRequirement& required) {
         VgprMsbStep result;
-        if (!hasVgpr || required == current_) {
+        if (satisfies(required)) {
             // The next switch no longer directly follows the label, so it needs
             // no s_nop.
             if (current_ == kLabelBegin) current_ = kNotRequired;
@@ -300,13 +366,15 @@ class VgprMsbTracker {
         result.emit = true;
         result.firstAfterLabel = current_ == kLabelBegin;
         if (current_ >= 0) result.previousWord = current_;
-        current_ = required;
+        result.word = required.word;
+        current_ = result.word;
         return result;
     }
 
    private:
     static constexpr int kNotRequired = -1;
     static constexpr int kLabelBegin = -2;
+    VgprMsbPolicy policy_;
     int current_ = kNotRequired;
 };
 

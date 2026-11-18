@@ -60,12 +60,12 @@ std::vector<LoopVgprMsbSwitches> predictLoopVgprMsbSwitches(const Function& func
                 if (idx >= vgprIndexCount) encodable = false;
                 return static_cast<int>(idx / kVgprBankSize);
             };
-            const auto [required, hasVgpr] = computeRequiredMsbWith(inst, bankOf);
+            const VgprMsbRequirement required = requiredVgprMsbWith(*inst, bankOf);
             if (!encodable) {
                 for (const size_t owner : owners->second) predicted[owner].switches.reset();
             }
 
-            if (!tracker.step(required, hasVgpr).emit) continue;
+            if (!tracker.step(required).emit) continue;
             for (const size_t owner : owners->second) {
                 if (predicted[owner].switches.has_value()) ++*predicted[owner].switches;
             }

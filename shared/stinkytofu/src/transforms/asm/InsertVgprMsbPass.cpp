@@ -93,10 +93,10 @@ void collectUnbankableOperands(const StinkyInstruction& inst, const std::string&
         });
 }
 
-bool emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, VgprMsbTracker& tracker,
+bool emitVgprMsbIfNeeded(const VgprMsbRequirement& required, VgprMsbTracker& tracker,
                          AsmIRBuilder& irBuilder, GfxArchID archId, IRBase* insertBefore,
                          VgprMsbMode msbMode) {
-    const VgprMsbStep step = tracker.step(requiredSetVal, hasVgpr);
+    const VgprMsbStep step = tracker.step(required);
     if (!step.emit) return false;
 
     if (step.firstAfterLabel) {
@@ -105,7 +105,7 @@ bool emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, VgprMsbTracker& track
         nopInst->addSrcReg(StinkyRegister(0));
     }
 
-    int combinedSetVal = requiredSetVal;
+    int combinedSetVal = step.word;
     if (msbMode == VgprMsbMode::Msb16 && step.previousWord.has_value()) {
         combinedSetVal += (*step.previousWord << 8);
     }
@@ -115,10 +115,10 @@ bool emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, VgprMsbTracker& track
     StinkyInstruction* msbInst = irBuilder.create(desc, insertBefore);
     msbInst->addSrcReg(StinkyRegister(combinedSetVal));
 
-    std::string msbComment = "src0: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 0)) +
-                             ", src1: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 1)) +
-                             ", src2: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 2)) +
-                             ", dst: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 3));
+    std::string msbComment = "src0: " + std::to_string(decodeVgprMsbForSlot(step.word, 0)) +
+                             ", src1: " + std::to_string(decodeVgprMsbForSlot(step.word, 1)) +
+                             ", src2: " + std::to_string(decodeVgprMsbForSlot(step.word, 2)) +
+                             ", dst: " + std::to_string(decodeVgprMsbForSlot(step.word, 3));
     msbInst->addModifier<CommentData>(CommentData{msbComment});
     return true;
 }
@@ -205,9 +205,8 @@ class InsertVgprMsbPassImpl : public Pass {
 
                 IRBase* insertBefore = preferredInsertBefore ? preferredInsertBefore : inst;
 
-                auto [requiredMsb, hasVgpr] = computeRequiredMsb(inst);
-                bool emittedVgprMsb = emitVgprMsbIfNeeded(requiredMsb, hasVgpr, tracker, irBuilder,
-                                                          archId, insertBefore, msbMode);
+                bool emittedVgprMsb = emitVgprMsbIfNeeded(requiredVgprMsb(*inst), tracker,
+                                                          irBuilder, archId, insertBefore, msbMode);
                 collectUnbankableOperands(*inst, func.getName(), unbankable);
                 encodeVgprOperands(inst);
                 if (emittedVgprMsb || isMsbComputableClass(*inst)) preferredInsertBefore = nullptr;
