@@ -31,6 +31,7 @@
 #include "engines/plans/MxArchSupport.hpp"
 
 using namespace hipblaslt_plugin;
+#include "engines/plans/MxTestUtils.hpp"
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using hipdnn_plugin_sdk::archMatches;
 using hipdnn_plugin_sdk::ArchMatchMode;
@@ -41,6 +42,10 @@ namespace
 using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
 using hipdnn_test_sdk::utilities::createValidMxMatmulGraph;
 
+using hipblaslt_plugin_test::createMxGraphWithLayout;
+using hipblaslt_plugin_test::DevicePtr;
+using hipblaslt_plugin_test::MxOperandLayout;
+using hipblaslt_plugin_test::upload;
 /// Borrowed references to the three node attribute tables of an MX graph.
 /// node 0 → dequant A, node 1 → dequant B, node 2 → matmul (emission order of
 /// createValidMxMatmulGraph with swapDequantOrder=false).
@@ -60,31 +65,6 @@ MxNodeAttrs getMxNodeAttrs(const GraphWrapper& graph)
             .attributesAs<hipdnn_flatbuffers_sdk::data_objects::BlockScaleDequantizeAttributes>(),
         graph.getNodeWrapper(2)
             .attributesAs<hipdnn_flatbuffers_sdk::data_objects::MatmulAttributes>()};
-}
-
-/// M = N = 32, K = 128 graph with K-contiguous A, B and scales (hipBLAS TN).
-flatbuffers::FlatBufferBuilder createKContiguousMxGraph(DT xType = DT::FP8_E4M3,
-                                                        DT cType = DT::HALF)
-{
-    return createValidMxMatmulGraph({32, 128},
-                                    {128, 1},
-                                    {128, 32},
-                                    {1, 128},
-                                    {32, 32},
-                                    {32, 1},
-                                    {32, 4},
-                                    {4, 32},
-                                    xType,
-                                    cType,
-                                    DT::FP8_E8M0,
-                                    DT::FP8_E8M0,
-                                    DT::FLOAT,
-                                    32,
-                                    false,
-                                    false,
-                                    DT::UNSET,
-                                    {4, 1},
-                                    {1, 4});
 }
 
 bool onGfx950()
@@ -251,7 +231,7 @@ TEST(TestMxMatmulParams, ScaleOperandsDefaultLayout)
 
 TEST(TestMxMatmulParams, ScaleOperandsKContiguousLayout)
 {
-    auto fb = createKContiguousMxGraph();
+    auto fb = createMxGraphWithLayout(MxOperandLayout::K_K);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
@@ -482,7 +462,7 @@ TEST_F(TestGpuMxMatmulPlan, KContiguousNaturalScalesArePassedThrough)
     {
         GTEST_SKIP() << "gfx950 (rocRoller) only";
     }
-    auto fb = createKContiguousMxGraph();
+    auto fb = createMxGraphWithLayout(MxOperandLayout::K_K);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
@@ -530,7 +510,7 @@ TEST_F(TestGpuMxMatmulPlan, Gfx950SwizzledFormatUsesTensileKernel)
     }
     for(const auto xType : {DT::FP8_E4M3, DT::FP4_E2M1})
     {
-        auto fb = createKContiguousMxGraph(xType, DT::FLOAT);
+        auto fb = createMxGraphWithLayout(MxOperandLayout::K_K, xType, DT::FLOAT);
         GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
         const auto attrs = getMxNodeAttrs(graph);
 
@@ -555,7 +535,7 @@ TEST_F(TestGpuMxMatmulPlan, Gfx950SwizzledFormatFallsBackToRocRoller)
     {
         GTEST_SKIP() << "gfx950-only check";
     }
-    auto fp6 = createKContiguousMxGraph(DT::FP6_E2M3, DT::FLOAT);
+    auto fp6 = createMxGraphWithLayout(MxOperandLayout::K_K, DT::FP6_E2M3, DT::FLOAT);
     auto mnContiguous = createValidMxMatmulGraph();
     for(const auto* fb : {&fp6, &mnContiguous})
     {
@@ -582,7 +562,7 @@ TEST_F(TestGpuMxMatmulPlan, Gfx1250SwizzledFormatDoesNotFallBack)
     {
         GTEST_SKIP() << "gfx950-only check";
     }
-    auto fb = createKContiguousMxGraph();
+    auto fb = createMxGraphWithLayout(MxOperandLayout::K_K);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
@@ -666,15 +646,8 @@ std::vector<uint8_t>
     {
         return logical;
     }
-    std::vector<uint8_t> out(logical.size());
-    for(int64_t r = 0; r < rows; ++r)
-    {
-        for(int64_t c = 0; c < cols; ++c)
-        {
-            out[static_cast<size_t>(c * rows + r)] = logical[static_cast<size_t>(r * cols + c)];
-        }
-    }
-    return out;
+    return hipblaslt_plugin_test::transposeHost(
+        logical, static_cast<size_t>(rows), static_cast<size_t>(cols));
 }
 
 // Logical row-major contents: A [M][K], B [K][N], scale_a [M][K/32], scale_b [K/32][N].
@@ -714,23 +687,6 @@ MxInputs randomInputs()
         }
     }
     return in;
-}
-
-struct DeviceFree
-{
-    void operator()(void* ptr) const
-    {
-        static_cast<void>(hipFree(ptr));
-    }
-};
-using DevicePtr = std::unique_ptr<void, DeviceFree>;
-
-DevicePtr upload(const std::vector<uint8_t>& bytes)
-{
-    void* ptr = nullptr;
-    EXPECT_EQ(hipMalloc(&ptr, bytes.empty() ? 1 : bytes.size()), hipSuccess);
-    EXPECT_EQ(hipMemcpy(ptr, bytes.data(), bytes.size(), hipMemcpyHostToDevice), hipSuccess);
-    return DevicePtr(ptr);
 }
 
 struct MxExecution

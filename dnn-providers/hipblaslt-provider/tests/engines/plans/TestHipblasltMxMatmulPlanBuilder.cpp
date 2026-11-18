@@ -20,6 +20,7 @@
 #include "engines/plans/HipblasltMxMatmulPlan.hpp"
 #include "engines/plans/HipblasltMxMatmulPlanBuilder.hpp"
 #include "engines/plans/MxArchSupport.hpp"
+#include "engines/plans/MxTestUtils.hpp"
 
 using namespace hipblaslt_plugin;
 using namespace hipdnn_plugin_sdk;
@@ -27,6 +28,8 @@ using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipdnn_test_sdk::utilities;
 
 using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
+using hipblaslt_plugin_test::createMxGraphWithLayout;
+using hipblaslt_plugin_test::MxOperandLayout;
 
 namespace
 {
@@ -218,74 +221,6 @@ static flatbuffers::FlatBufferBuilder
 
 namespace
 {
-
-// Physical order of our A and B. hipBLAS sees the transposed pair (row-major
-// swap): MN_MN -> NT (the original provider layout), K_K -> TN (the only layout
-// with Tensile MX kernels), K_MN -> NN, MN_K -> TT.
-enum class MxOperandLayout
-{
-    MN_MN,
-    K_K,
-    K_MN,
-    MN_K,
-};
-
-const char* toString(MxOperandLayout layout)
-{
-    switch(layout)
-    {
-    case MxOperandLayout::MN_MN:
-        return "MN_MN";
-    case MxOperandLayout::K_K:
-        return "K_K";
-    case MxOperandLayout::K_MN:
-        return "K_MN";
-    case MxOperandLayout::MN_K:
-        return "MN_K";
-    default:
-        return "?";
-    }
-}
-
-// M = N = 32, K = 128 MX graph in the given operand layout. Scales are
-// K-block-contiguous ([M, K/32] row-major, [K/32, N] column-major) unless
-// mnContiguousScales is set.
-flatbuffers::FlatBufferBuilder createMxGraphWithLayout(MxOperandLayout layout,
-                                                       DT xTypeA = DT::FP8_E4M3,
-                                                       DT cType = DT::HALF,
-                                                       DT xTypeB = DT::UNSET,
-                                                       bool mnContiguousScales = false)
-{
-    const bool aKContiguous = layout == MxOperandLayout::K_K || layout == MxOperandLayout::K_MN;
-    const bool bKContiguous = layout == MxOperandLayout::K_K || layout == MxOperandLayout::MN_K;
-    const std::vector<int64_t> aStrides
-        = aKContiguous ? std::vector<int64_t>{128, 1} : std::vector<int64_t>{1, 32};
-    const std::vector<int64_t> bStrides
-        = bKContiguous ? std::vector<int64_t>{1, 128} : std::vector<int64_t>{32, 1};
-    const std::vector<int64_t> scaleAStrides
-        = mnContiguousScales ? std::vector<int64_t>{1, 32} : std::vector<int64_t>{4, 1};
-    const std::vector<int64_t> scaleBStrides
-        = mnContiguousScales ? std::vector<int64_t>{32, 1} : std::vector<int64_t>{1, 4};
-    return createValidMxMatmulGraph({32, 128},
-                                    aStrides,
-                                    {128, 32},
-                                    bStrides,
-                                    {32, 32},
-                                    {32, 1},
-                                    {32, 4},
-                                    {4, 32},
-                                    xTypeA,
-                                    cType,
-                                    DT::FP8_E8M0,
-                                    DT::FP8_E8M0,
-                                    DT::FLOAT,
-                                    32,
-                                    false,
-                                    false,
-                                    xTypeB,
-                                    scaleAStrides,
-                                    scaleBStrides);
-}
 
 bool onArch(const char* arch)
 {

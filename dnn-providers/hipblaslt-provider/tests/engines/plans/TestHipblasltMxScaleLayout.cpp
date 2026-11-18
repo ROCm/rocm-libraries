@@ -16,8 +16,12 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "engines/plans/HipblasltMxScaleLayout.hpp"
+#include "engines/plans/MxTestUtils.hpp"
 
 using namespace hipblaslt_plugin;
+using hipblaslt_plugin_test::deviceAlloc;
+using hipblaslt_plugin_test::DevicePtr;
+using hipblaslt_plugin_test::transposeHost;
 
 namespace
 {
@@ -29,20 +33,6 @@ size_t roundUp(size_t value, size_t multiple)
 
 // Host references, written from the index formulas of mxDataGenerator's
 // PreSwizzle.hpp. Input is the natural K-contiguous scale [mn][kb].
-
-std::vector<uint8_t>
-    transposeHost(const std::vector<uint8_t>& in, size_t rows, size_t cols) // [rows][cols]
-{
-    std::vector<uint8_t> out(in.size());
-    for(size_t r = 0; r < rows; ++r)
-    {
-        for(size_t c = 0; c < cols; ++c)
-        {
-            out[c * rows + r] = in[r * cols + c];
-        }
-    }
-    return out;
-}
 
 // preSwizzleScalesGFX950: view(MNp/32, 2, 16, Kbp/8, 2, 4).permute(0, 3, 5, 2, 4, 1).
 std::vector<uint8_t> swizzleGfx950Host(const std::vector<uint8_t>& in, size_t mn, size_t kb)
@@ -80,22 +70,6 @@ std::vector<uint8_t> swizzleGfx1250Host(const std::vector<uint8_t>& in, size_t m
         }
     }
     return out;
-}
-
-struct DeviceFree
-{
-    void operator()(void* ptr) const
-    {
-        static_cast<void>(hipFree(ptr));
-    }
-};
-using DevicePtr = std::unique_ptr<void, DeviceFree>;
-
-DevicePtr deviceAlloc(size_t bytes)
-{
-    void* ptr = nullptr;
-    EXPECT_EQ(hipMalloc(&ptr, bytes == 0 ? 1 : bytes), hipSuccess);
-    return DevicePtr(ptr);
 }
 
 } // namespace
