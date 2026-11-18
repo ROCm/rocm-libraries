@@ -150,6 +150,28 @@ def test_both_entry_points_report_one_digest_for_a_signature(signature, evaluato
     assert digest == compute_features_hash(signature, executable=evaluator)
 
 
+def test_rows_split_across_evaluator_requests_keep_their_order_and_digest(
+    monkeypatch, evaluator
+):
+    """A corpus too large for one request is evaluated in batches, invisibly to the caller."""
+    signature = ["$q.batch", {"*": ["$q.batch", "$q.num_heads"]}]
+    corpus = pd.DataFrame(
+        {"q.batch": [float(n) for n in range(1, 41)], "q.num_heads": [3.0] * 40}
+    )
+    whole = evaluate_feature_rows(corpus, signature, executable=evaluator)
+    # A budget of about three rows per request.
+    monkeypatch.setattr(features, "EVALUATOR_BATCH_BYTES", 100)
+    requests = []
+    run = features._run_feature_evaluator
+    monkeypatch.setattr(
+        features,
+        "_run_feature_evaluator",
+        lambda *args: requests.append(len(args[2])) or run(*args),
+    )
+    assert evaluate_feature_rows(corpus, signature, executable=evaluator) == whole
+    assert len(requests) > 1 and sum(requests) == 40
+
+
 def test_signature_order_changes_model_identity(evaluator):
     signature = ["$q.batch", "$kernel.tile_m"]
     assert compute_features_hash(

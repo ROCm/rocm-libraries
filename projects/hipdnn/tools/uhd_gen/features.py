@@ -230,6 +230,12 @@ _warned_inherited: set[str] = set()
 EVALUATOR_NAME = "hipdnn_uhd_features"
 EVALUATOR_ENV_VAR = "HIPDNN_UHD_FEATURE_EVALUATOR"
 
+#: Rows per evaluator request are bounded by their JSON size: the evaluator refuses a request
+#: over 256 MiB (UhdFeatures.cpp), and a model trained on tens of thousands of rows with a
+#: wide signature exceeds that in one request. A quarter of the bound leaves room for the
+#: signature and encoding sent with every batch.
+EVALUATOR_BATCH_BYTES = 64 * 1024 * 1024
+
 #: Evaluator locations under a search root: install/venv `bin`, or in-tree `build/bin`.
 _EVALUATOR_RELATIVE_DIRS = ("bin", "build/bin")
 
@@ -355,6 +361,28 @@ def _run_feature_evaluator(
     return digest, values, revision
 
 
+def _row_batches(rows: list):
+    """Consecutive slices of @p rows whose JSON stays within EVALUATOR_BATCH_BYTES.
+
+    A batch holds at least one row; no rows is one empty batch, which still asks the
+    evaluator for the digest.
+    """
+    if not rows:
+        yield rows
+        return
+    start, size = 0, 0
+    for index, row in enumerate(rows):
+        row_bytes = (
+            len(json.dumps(row, ensure_ascii=False, allow_nan=False).encode("utf-8"))
+            + 2
+        )
+        if index > start and size + row_bytes > EVALUATOR_BATCH_BYTES:
+            yield rows[start:index]
+            start, size = index, 0
+        size += row_bytes
+    yield rows[start:]
+
+
 def evaluate_feature_maps(
     rows: list[dict],
     signature: list,
@@ -363,11 +391,21 @@ def evaluate_feature_maps(
 ) -> tuple[str, list[list[float]]]:
     """Feature maps (name -> value, None for absent) through the runtime's FeatureExtractor.
 
-    An unbound bare reference fails the whole batch, as the engine refuses that row.
+    An unbound bare reference fails the whole batch, as the engine refuses that row. Rows go
+    over in batches within the evaluator's request bound; the digest depends on the signature
+    alone, so every batch must report the same one.
     """
-    digest, values, _ = _run_feature_evaluator(
-        signature, categorical_encoding, rows, executable
-    )
+    digest, values = None, []
+    for batch in _row_batches(rows):
+        batch_digest, batch_values, _ = _run_feature_evaluator(
+            signature, categorical_encoding, batch, executable
+        )
+        if digest is not None and batch_digest != digest:
+            raise ValueError(
+                f"{EVALUATOR_NAME} reported {batch_digest} and {digest} for one signature"
+            )
+        digest = batch_digest
+        values.extend(batch_values)
     return digest, values
 
 
