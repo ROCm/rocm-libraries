@@ -480,13 +480,13 @@ std::optional<std::string> unsupportedCapability(const Function& function,
     return std::nullopt;
 }
 
-/// The constraints, after stamping the live-ins the dispatch does not fill:
-/// build() reads the stamp rather than work it out, and destruction has no
-/// other way to learn it.
-AllocationConstraints markAndBuild(Function& function, const AsmTargetRegisters& target,
-                                   const AllocationRules& rules) {
+/// The target's registers, after stamping the live-ins the dispatch does not
+/// fill: AllocationConstraints::build() reads the stamp rather than work it
+/// out, and destruction has no other way to learn it.
+AsmTargetRegisters markedTarget(Function& function) {
+    AsmTargetRegisters target = AsmTargetRegisters::forFunction(function);
     markUndefinedLiveIns(function, target);
-    return AllocationConstraints::build(function, target, rules);
+    return target;
 }
 
 /// The classes and, with \p regionEnd, the slot prefix a run may relocate.
@@ -513,21 +513,18 @@ std::unique_ptr<const BankCostModel> bankCostFor(const Function& function,
     return std::make_unique<VgprMsbStreamModel>(function, loops);
 }
 
-/// Everything colouring a function takes that no allocator changes. Built once,
-/// so every allocator in a chain, and every attempt each one makes, shares it.
-struct ColouringRun {
-    ColouringRun(Function& func, const RegisterAllocationOptions& opts, AllocationRules resolved,
-                 const BasicBlock* regionEnd)
+/// Everything colouring a function takes that no allocator and no rule
+/// changes. Built once, so every table of rules, every allocator in a chain,
+/// and every attempt each one makes, shares it.
+struct ProgramFacts {
+    ProgramFacts(Function& func, const RegisterAllocationOptions& opts, const BasicBlock* end)
         : function(func),
           options(opts),
-          rules(std::move(resolved)),
+          regionEnd(end),
           intervals(computeSSALiveIntervals(func)),
-          target(AsmTargetRegisters::forFunction(func)),
-          constraints(markAndBuild(func, target, rules)),
+          target(markedTarget(func)),
           loops(detectLoops(func)),
           bankCost(bankCostFor(func, opts, loops)),
-          ruleIntervals(applyEarlyClobber(func, intervals, rules)),
-          regionScope(regionScopeOf(constraints, ruleIntervals, opts.allocate, regionEnd)),
           unbankable(opts.unbankableOperands ==
                              RegisterAllocationOptions::UnbankableOperands::Allocate
                          ? std::vector<AllocationScope::HeldRange>{}
@@ -535,31 +532,53 @@ struct ColouringRun {
 
     Function& function;
     const RegisterAllocationOptions& options;
-    const AllocationRules rules;
+    /// The block whose end bounds what may move, or null for the whole function.
+    const BasicBlock* const regionEnd;
     /// The program's own ranges, which the shadow report reads for its
     /// pressure floor.
     const SSALiveIntervals intervals;
     const AsmTargetRegisters target;
-    const AllocationConstraints constraints;
     const std::vector<Loop> loops;
     /// Prices VGPR banks for quadrant=plan; null otherwise.
     const std::unique_ptr<const BankCostModel> bankCost;
-    /// The ranges with early-clobber widening, which the allocator and the
-    /// verifier read. Identical to `intervals` while no clobbersEarly rule is
-    /// Active.
-    const SSALiveIntervals ruleIntervals;
-    /// The scope every attempt starts from: classes and region, nothing held.
-    const AllocationScope regionScope;
     /// Registers named by operand fields that cannot select a bank. Empty
     /// under Allocate, which never holds them.
     const std::vector<AllocationScope::HeldRange> unbankable;
 };
 
+/// What colouring takes under one table of rules: the constraints they add to
+/// the program, and the scope every attempt under them starts from.
+struct RuleRun {
+    RuleRun(const ProgramFacts& programFacts, AllocationRules resolved)
+        : facts(programFacts),
+          rules(std::move(resolved)),
+          constraints(AllocationConstraints::build(facts.function, facts.target, rules)),
+          ruleIntervals(applyEarlyClobber(facts.function, facts.intervals, rules)),
+          regionScope(
+              regionScopeOf(constraints, ruleIntervals, facts.options.allocate, facts.regionEnd)) {}
+
+    const ProgramFacts& facts;
+    const AllocationRules rules;
+    const AllocationConstraints constraints;
+    /// The ranges with early-clobber widening, which the allocator and the
+    /// verifier read. Identical to `facts.intervals` while no clobbersEarly
+    /// rule is Active.
+    const SSALiveIntervals ruleIntervals;
+    /// The scope every attempt starts from: classes and region, nothing held.
+    const AllocationScope regionScope;
+};
+
+/// A request found well-formed: what every table of rules shares, and the
+/// rules it asked for.
+struct Request {
+    std::unique_ptr<ProgramFacts> facts;
+    AllocationRules rules;
+};
+
 /// The allocator-independent half of colouring \p function, or why no
 /// allocator could colour it as asked.
-Expected<std::unique_ptr<ColouringRun>> prepareColouring(Function& function,
-                                                         const RegisterAllocationOptions& options) {
-    using Result = Expected<std::unique_ptr<ColouringRun>>;
+Expected<Request> prepareColouring(Function& function, const RegisterAllocationOptions& options) {
+    using Result = Expected<Request>;
     if (!function.hasAttachedSSA())
         return Result::Error("@" + function.getName() + ": no attached SSA; nothing to colour");
 
@@ -595,16 +614,17 @@ Expected<std::unique_ptr<ColouringRun>> prepareColouring(Function& function,
                 ", which is empty because the bounds are inclusive and run backwards");
         }
     }
-    return std::make_unique<ColouringRun>(function, options, std::move(*rules), regionEnd);
+    return Request{std::make_unique<ProgramFacts>(function, options, regionEnd), std::move(*rules)};
 }
 
-/// Colour with \p allocator, trying each treatment of the operands that cannot
-/// name a bank that the options ask for, then report and apply the first
-/// colouring that succeeds. Nothing is written unless one does.
-Expected<AllocationResult> colourWith(const ColouringRun& run, RegisterAllocator& allocator,
+/// Colour with \p allocator under \p run's rules, trying each treatment of the
+/// operands that cannot name a bank that the options ask for, then report and
+/// apply the first colouring that succeeds. Nothing is written unless one does.
+Expected<AllocationResult> colourWith(const RuleRun& run, RegisterAllocator& allocator,
                                       std::string* report) {
-    Function& function = run.function;
-    const RegisterAllocationOptions& options = run.options;
+    const ProgramFacts& facts = run.facts;
+    Function& function = facts.function;
+    const RegisterAllocationOptions& options = facts.options;
     if (std::optional<std::string> problem = unsupportedCapability(function, allocator))
         return Expected<AllocationResult>::Error(*problem);
 
@@ -618,14 +638,14 @@ Expected<AllocationResult> colourWith(const ColouringRun& run, RegisterAllocator
     std::vector<Unbankable> attempts{options.unbankableOperands};
     if (automatic) {
         attempts = {Unbankable::Allocate};
-        if (!run.unbankable.empty()) attempts.push_back(Unbankable::Hold);
+        if (!facts.unbankable.empty()) attempts.push_back(Unbankable::Hold);
     }
 
     std::vector<std::string> refusals;
     for (const Unbankable attempt : attempts) {
         const std::span<const AllocationScope::HeldRange> held =
             attempt == Unbankable::Hold
-                ? std::span<const AllocationScope::HeldRange>(run.unbankable)
+                ? std::span<const AllocationScope::HeldRange>(facts.unbankable)
                 : std::span<const AllocationScope::HeldRange>{};
         // Held before the requested registers, so a register in both reports
         // the constraint rather than the request.
@@ -634,12 +654,12 @@ Expected<AllocationResult> colourWith(const ColouringRun& run, RegisterAllocator
         if (!options.pinRegisters.empty())
             scope.pinRegisters(run.constraints, options.pinRegisters);
 
-        AllocationContext context{function,  run.ruleIntervals, run.target, run.constraints,
-                                  run.loops, run.rules,         scope};
+        AllocationContext context{function,    run.ruleIntervals, facts.target, run.constraints,
+                                  facts.loops, run.rules,         scope};
         context.preferProducerQuadrant =
             options.quadrant == RegisterAllocationOptions::Quadrant::Prefer;
         PlanOutcome plan;
-        context.bankCost = run.bankCost.get();
+        context.bankCost = facts.bankCost.get();
         context.planOutcome = &plan;
         if (!options.blockDumpPrefix.empty()) {
             context.blockDumpPath = options.blockDumpPrefix + allocator.name() + "." +
@@ -662,8 +682,8 @@ Expected<AllocationResult> colourWith(const ColouringRun& run, RegisterAllocator
             UnbankableChoice choice{held, automatic, {}};
             if (!refusals.empty())
                 choice.allocateRefusal = withoutFunctionName(function, refusals.front());
-            *report = shadowReport(function, *allocated, run.intervals, run.constraints, scope,
-                                   run.rules, run.target, choice, allocator.name(), run.loops,
+            *report = shadowReport(function, *allocated, facts.intervals, run.constraints, scope,
+                                   run.rules, facts.target, choice, allocator.name(), facts.loops,
                                    options.caps.vgprMsbMode, plan);
         }
         if (options.applyToOperands) {
@@ -685,14 +705,59 @@ Expected<AllocationResult> colourWith(const ColouringRun& run, RegisterAllocator
     return Expected<AllocationResult>::Error(message);
 }
 
+/// The colouring that was applied, and who made it.
+struct Colouring {
+    AllocationResult result;
+    const RegisterAllocator* winner = nullptr;
+    /// Why each allocator before the winner refused, in chain order.
+    std::vector<std::string> refusals;
+};
+
+/// Colour \p function as \p options ask, trying every allocator in \p chain in
+/// order until one colours it. Only that colouring is reported and applied.
+/// One allocator's refusal is returned as it is; several are named together.
+///
+/// The one driver behind the pass and allocateRegisters, so the two cannot
+/// disagree about what was tried or how a refusal reads.
+Expected<Colouring> colourFunction(Function& function, const RegisterAllocationOptions& options,
+                                   std::span<RegisterAllocator* const> chain, std::string* report) {
+    Expected<Request> request = prepareColouring(function, options);
+    if (request.hasError()) {
+        PASS_DEBUG(std::cerr << "RegisterAllocation: " << request.getError() << "\n");
+        return Expected<Colouring>::Error(request.getError());
+    }
+
+    const RuleRun run(*request->facts, std::move(request->rules));
+    std::vector<std::string> refusals;
+    for (RegisterAllocator* allocator : chain) {
+        Expected<AllocationResult> result = colourWith(run, *allocator, report);
+        if (result.hasError()) {
+            PASS_DEBUG(std::cerr << "RegisterAllocation: " << result.getError() << "\n");
+            refusals.push_back(result.getError());
+            continue;
+        }
+        return Colouring{std::move(*result), allocator, std::move(refusals)};
+    }
+
+    if (refusals.size() == 1) return Expected<Colouring>::Error(refusals.front());
+    std::string message =
+        "@" + function.getName() + ": every allocator in " + options.allocator + " refused";
+    for (size_t i = 0; i < refusals.size(); ++i) {
+        message += "\n  " + std::string(chain[i]->name()) + ": " +
+                   withoutFunctionName(function, refusals[i]);
+    }
+    return Expected<Colouring>::Error(message);
+}
+
 }  // namespace
 
 Expected<AllocationResult> allocateRegisters(Function& function, RegisterAllocator& allocator,
                                              const RegisterAllocationOptions& options,
                                              std::string* report) {
-    Expected<std::unique_ptr<ColouringRun>> run = prepareColouring(function, options);
-    if (run.hasError()) return Expected<AllocationResult>::Error(run.getError());
-    return colourWith(**run, allocator, report);
+    RegisterAllocator* const chain[] = {&allocator};
+    Expected<Colouring> colouring = colourFunction(function, options, chain, report);
+    if (colouring.hasError()) return Expected<AllocationResult>::Error(colouring.getError());
+    return std::move(colouring->result);
 }
 
 class RegisterAllocationPassImpl : public Pass {
@@ -757,39 +822,10 @@ class RegisterAllocationPassImpl : public Pass {
 
         emitRuleAudit(func, passCtx, options);
 
-        Expected<std::unique_ptr<ColouringRun>> run = prepareColouring(func, options);
-        if (run.hasError()) {
-            PASS_DEBUG(std::cerr << "RegisterAllocation: " << run.getError() << "\n");
-            missed(passCtx, run.getError());
-            return preserveCFGAnalyses();
-        }
-
         std::string report;
-        std::vector<std::string> refusals;
-        std::optional<AllocationResult> coloured;
-        RegisterAllocator* winner = nullptr;
-        for (RegisterAllocator* allocator : chain) {
-            Expected<AllocationResult> result = colourWith(**run, *allocator, &report);
-            if (result.hasError()) {
-                PASS_DEBUG(std::cerr << "RegisterAllocation: " << result.getError() << "\n");
-                refusals.push_back(result.getError());
-                continue;
-            }
-            coloured.emplace(std::move(*result));
-            winner = allocator;
-            break;
-        }
-        if (winner == nullptr) {
-            std::string message = refusals.front();
-            if (refusals.size() > 1) {
-                message = "@" + func.getName() + ": every allocator in " + options_.allocator +
-                          " refused";
-                for (size_t i = 0; i < refusals.size(); ++i) {
-                    message += "\n  " + std::string(chain[i]->name()) + ": " +
-                               withoutFunctionName(func, refusals[i]);
-                }
-            }
-            missed(passCtx, message);
+        Expected<Colouring> colouring = colourFunction(func, options, chain, &report);
+        if (colouring.hasError()) {
+            missed(passCtx, colouring.getError());
             return preserveCFGAnalyses();
         }
         if (!report.empty()) {
@@ -798,11 +834,11 @@ class RegisterAllocationPassImpl : public Pass {
         }
 
         std::string summary = "@" + func.getName() + ": coloured " +
-                              std::to_string(coloured->valueCount()) + " value(s) with " +
-                              winner->name();
-        if (!refusals.empty()) {
+                              std::to_string(colouring->result.valueCount()) + " value(s) with " +
+                              colouring->winner->name();
+        if (!colouring->refusals.empty()) {
             summary += " after";
-            for (size_t i = 0; i < refusals.size(); ++i)
+            for (size_t i = 0; i < colouring->refusals.size(); ++i)
                 summary += std::string(i == 0 ? " " : ", ") + chain[i]->name();
             summary += " refused";
         }
