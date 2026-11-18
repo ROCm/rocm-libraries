@@ -28,7 +28,9 @@
 #include <miopen/datatype.hpp>
 
 #include "conv_test_base.hpp"
+#include "unit_conv_solver.hpp"
 
+#include <algorithm>
 #include <string>
 
 namespace {
@@ -57,6 +59,28 @@ struct HostBiasGuard
     bool saved = miopen_f8::get_hip_f8_ieee_exponent_bias();
     ~HostBiasGuard() { miopen_f8::set_hip_f8_ieee_exponent_bias(saved); }
 };
+
+// Compile options that the naive convolution solver passes to its kernel on a mock device.
+void GetNaiveConvOptions(const std::string& device_name,
+                         miopenDataType_t type,
+                         std::string& options)
+{
+    const auto& devs = GetAllKnownDevices();
+    const auto it    = std::find_if(
+        devs.begin(), devs.end(), [&](const auto& dev) { return dev.second.name == device_name; });
+    ASSERT_NE(it, devs.end()) << "no mock device " << device_name;
+
+    auto handle    = MockHandle{it->second, false};
+    const auto ctx = miopen::ExecutionContext{&handle};
+    const auto problem =
+        miopen::unit_tests::ConvTestCase{
+            {1, 16, 14, 14}, {16, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, type, type, type}
+            .GetProblemDescription(miopen::conv::Direction::Forward);
+
+    const auto solution = miopen::solver::conv::ConvDirectNaiveConvFwd{}.GetSolution(ctx, problem);
+    ASSERT_EQ(solution.construction_params.size(), 1u);
+    options = solution.construction_params[0].comp_options;
+}
 
 } // namespace
 
@@ -88,4 +112,28 @@ TEST(CPU_Fp8ExponentBias_NONE, HostBiasSwitchesInOneProcess)
     check(true);
     SetHostFp8ExponentBias<float8_fnuz>("gfx942");
     check(false);
+}
+
+TEST(CPU_Fp8ExponentBias_NONE, NaiveConvCompileOptionsUseDeviceBias)
+{
+    const auto bias_define = [](int bias) {
+        return "-DMIOPEN_FP8_IEEE_EXPONENT_BIAS=" + std::to_string(bias);
+    };
+
+    for(const auto type : {miopenFloat8_fnuz, miopenBFloat8_fnuz})
+    {
+        std::string options;
+        GetNaiveConvOptions("gfx942", type, options);
+        EXPECT_NE(options.find(bias_define(0)), std::string::npos)
+            << "gfx942 type " << type << ": " << options;
+
+        GetNaiveConvOptions("gfx950", type, options);
+        EXPECT_NE(options.find(bias_define(1)), std::string::npos)
+            << "gfx950 type " << type << ": " << options;
+    }
+
+    // Only FP8 problems carry the define.
+    std::string options;
+    GetNaiveConvOptions("gfx950", miopenHalf, options);
+    EXPECT_EQ(options.find("MIOPEN_FP8_IEEE_EXPONENT_BIAS"), std::string::npos) << options;
 }
