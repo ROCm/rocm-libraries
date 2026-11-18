@@ -249,6 +249,49 @@ kernel @word_copy {
     return 0;
 }
 
+/* Grouped MoE computes the expert rebase in bytes and indexes weights within
+ * that expert in halfwords. Cover both storage types in the C API test. */
+int test_hip_rebased_moe_weights_use_halfword_indices()
+{
+    for(const std::string elem : {"f16", "bf16"})
+    {
+        const std::string ir
+            = "ckdsl.ir v1\n"
+              "kernel @grouped_moe_weights {\n"
+              "  params {\n"
+              "    %weights : ptr<"
+              + elem
+              + ",global>\n"
+                "    %tile_offset : i32\n"
+                "  }\n"
+                "  region @entry {\n"
+                "    %expert_bytes : i64 = arith.constant (  ) { ity = s:\"i64\", value = i:256 }\n"
+                "    %base : ptr<"
+              + elem
+              + ",global> = tile.global_ptr_add ( %weights, %expert_bytes ) {  }\n"
+                "    %v : vec<"
+              + elem
+              + "x4> = memref.global_load_vN ( %base, %tile_offset ) "
+                "{ align = i:2, elem_type = s:\""
+              + elem
+              + "\", vec = i:4 }\n"
+                "    cf.return (  )\n"
+                "  }\n"
+                "}\n";
+        const Lowering result = lower_hip(ir);
+        CHECK(result.status == ROCKE_OK);
+        CHECK(contains(result.text,
+                       "const char* base = (const char*)weights + (int64_t)expert_bytes;"));
+        const std::string cpp_t = elem == "f16" ? "fp16" : "bf16";
+        CHECK(contains(result.text,
+                       "__builtin_memcpy(&v, __builtin_assume_aligned(reinterpret_cast<const "
+                       "unsigned char*>(base)"
+                       " + (int64_t)tile_offset * (int64_t)sizeof("
+                           + cpp_t + "), 2), 8);"));
+    }
+    return 0;
+}
+
 /* Four i1 lanes have no byte width to claim, so the LLVM lowering refuses the
  * store rather than give it two bytes per lane. */
 int test_a_sub_byte_vector_store_without_align_is_refused()
@@ -417,6 +460,7 @@ int main()
     if(test_an_llvm_vector_access_without_align_claims_its_natural_alignment()
        || test_a_hip_vector_access_without_align_claims_its_natural_alignment()
        || test_hip_word_access_through_byte_pointers()
+       || test_hip_rebased_moe_weights_use_halfword_indices()
        || test_a_sub_byte_vector_store_without_align_is_refused()
        || test_an_llvm_vector_load_refuses_an_invalid_align()
        || test_the_hip_lowering_refuses_an_invalid_align()

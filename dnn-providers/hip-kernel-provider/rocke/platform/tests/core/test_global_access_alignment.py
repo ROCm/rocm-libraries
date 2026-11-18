@@ -21,6 +21,7 @@ import re
 
 import pytest
 from rocke.core.ir import (
+    BF16,
     F16,
     F32,
     F64,
@@ -165,6 +166,38 @@ def test_hip_global_access_indexes_in_storage_units(engine, lanes, align, rebase
                 f"__builtin_memcpy(__builtin_assume_aligned({dst_addr}, {align}), &{val}, {payload});"
                 in hip
             )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize(
+    "elem,cpp_type,vec_type", [(F16, "fp16", "f16x4"), (BF16, "bf16", "bf16x4")]
+)
+@pytest.mark.parametrize("align", [8, 2])
+def test_hip_rebased_moe_weights_use_halfword_indices(
+    engine, elem, cpp_type, vec_type, align
+):
+    b = IRBuilder("grouped_moe_weights")
+    weights = b.param("weights", PtrType(elem, "global"))
+    tile_offset = b.param("tile_offset", I32)
+    # A nonzero expert slab byte rebase, followed by an element (not byte) index.
+    expert_offset = b.const_i64(256)
+    base = b.global_ptr_add(weights, expert_offset)
+    value = b.global_load_vN(base, tile_offset, elem, 4, align=align)
+
+    hip = lower_hip_with_engine(b.kernel, _ARCH, engine=engine)
+    ptr = base.name[1:]
+    assert (
+        f"const char* {ptr} = (const char*)weights + (int64_t){expert_offset.name[1:]};"
+        in hip
+    )
+    addr = f"reinterpret_cast<const unsigned char*>({ptr}) + (int64_t)tile_offset * (int64_t)sizeof({cpp_type})"
+    if align == 8:
+        assert f"*reinterpret_cast<const {vec_type}*>({addr})" in hip
+    else:
+        assert (
+            f"__builtin_memcpy(&{value.name[1:]}, __builtin_assume_aligned({addr}, 2), 8);"
+            in hip
+        )
 
 
 @pytest.mark.parametrize("engine", ENGINES)

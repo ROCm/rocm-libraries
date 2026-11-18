@@ -10,6 +10,12 @@ compatibility forwards; raw byte-padded rows and wider slots use the tiling
 adapter rather than a second transport implementation. New kernels should use
 the descriptor-driven verbs directly.
 
+HIP lowering of a rebased pointer adds the memory operation's element index
+using the access type's byte width. The rebase itself is still a byte offset.
+This applies beyond packed MMA fragments: grouped MoE rebases FP16/BF16 weights
+by expert before issuing typed loads. Address emission is covered in both HIP
+lowerers; the full grouped FP16 kernel is tested through the Python HIP route.
+
 The inventory below records the migration from `f29f15d3f7ec` and the validation
 requirements. Its old paths and line numbers refer to that starting revision.
 
