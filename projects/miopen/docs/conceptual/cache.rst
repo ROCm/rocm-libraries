@@ -33,13 +33,16 @@ Kernel cache writes during tuning
 Outside of tuning, MIOpen commits each newly compiled kernel to the user kernel cache in its own
 SQLite transaction. During tuning (``GenericSearch``) and during the parallel precompilation step
 of Find, MIOpen compiles many kernels in a row, so it groups their cache writes into bounded
-transactions instead:
+transactions instead. Grouping applies to the whole process: while a tuning or precompilation step
+runs, kernels that other threads in the same process store are grouped too.
 
 * Each compiled kernel is compressed and hashed as usual, then held in memory until its group is
   committed. The kernel is available to the same process immediately, without recompilation.
 * A group is committed in one transaction as soon as it holds 64 kernels or 32 MiB of compressed
-  code, or its oldest kernel has waited for two seconds, and when the tuning or precompilation step
-  ends. The transaction contains only the database writes, never kernel compilation.
+  code, or when the next kernel is stored (or, during tuning, between measurements) and its oldest
+  kernel has waited more than two seconds. Any remaining group is committed when the tuning or
+  precompilation step ends. The transaction contains only the database writes, never kernel
+  compilation.
 * Other processes see the kernels of a group once it's committed.
 * If a commit fails, the whole group is rolled back and discarded, and the error is reported.
   Kernels committed earlier stay in the cache, and discarded kernels are compiled again the next

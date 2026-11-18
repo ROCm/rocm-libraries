@@ -31,12 +31,15 @@
 #include <miopen/kern_db.hpp>
 #include <miopen/temp_file.hpp>
 
+#include "gtest_common.hpp"
 #include "test.hpp"
 #include "random.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <limits>
+#include <stdexcept>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -240,6 +243,16 @@ std::string IntegrityCheck(const miopen::KernDb& db)
     const auto res = db.sql.Exec("PRAGMA integrity_check;");
     return res.empty() ? "" : res[0].at("integrity_check");
 }
+
+// Compression hooks that store blobs as given: the stored size of a blob is exactly its size, and
+// an empty blob reaches SQLite as NULL, violating the NOT NULL constraint on kernel_blob.
+std::vector<char> StoreUncompressed(const std::vector<char>&, bool* success)
+{
+    *success = false;
+    return {};
+}
+
+std::vector<char> PassThrough(const std::vector<char>& blob, unsigned int) { return blob; }
 } // namespace
 
 TEST(CPU_Cache_NONE, check_kern_db_store_without_batch_commits_immediately)
@@ -323,6 +336,112 @@ TEST(CPU_Cache_NONE, check_kern_db_batch_byte_and_age_limits)
     EXPECT_TRUE(IsCommitted(temp_file, by_age));
 }
 
+TEST(CPU_Cache_NONE, check_kern_db_batch_age_limit_on_store)
+{
+    miopen::TempFile temp_file("tmp-kerndb-batch-age-store");
+    miopen::KernDb db(miopen::DbKinds::KernelDb, temp_file, false);
+    db.SetBatchLimits(unbounded_batch);
+    const auto first  = MakeKernelConfig("kernel_age_first");
+    const auto second = MakeKernelConfig("kernel_age_second");
+
+    miopen::KernelCacheBatch batch;
+    EXPECT_TRUE(db.StoreRecordUnsafe(first));
+    EXPECT_EQ(db.PendingCount(), 1u);
+
+    // Once the oldest record is past the age limit, the next store commits both. This is the only
+    // age bound in PrecompileKernels, which never calls FlushExpired().
+    db.SetBatchLimits({1000, 1ULL << 30, std::chrono::milliseconds{0}});
+    EXPECT_TRUE(db.StoreRecordUnsafe(second));
+    EXPECT_EQ(db.PendingCount(), 0u);
+    EXPECT_TRUE(IsCommitted(temp_file, first));
+    EXPECT_TRUE(IsCommitted(temp_file, second));
+}
+
+TEST(CPU_Cache_NONE, check_kern_db_batch_byte_accounting)
+{
+    miopen::TempFile temp_file("tmp-kerndb-batch-bytes");
+    // Uncompressed, so that every stored blob takes exactly blob_size bytes.
+    miopen::KernDb db(miopen::DbKinds::KernelDb, temp_file, false, StoreUncompressed, PassThrough);
+    constexpr std::size_t blob_size = 1000;
+    // Two blobs fit; the third reaches the limit.
+    db.SetBatchLimits({1000, 2 * blob_size + blob_size / 2, std::chrono::hours{1}});
+
+    std::vector<miopen::KernelConfig> cfgs;
+    for(int i = 0; i < 10; ++i)
+        cfgs.push_back(MakeKernelConfig("kernel_bytes_" + std::to_string(i), blob_size));
+    auto replacement        = cfgs[3];
+    replacement.kernel_blob = random_bytes(blob_size);
+
+    miopen::KernelCacheBatch first_batch;
+    EXPECT_TRUE(db.StoreRecordUnsafe(cfgs[0]));
+    EXPECT_TRUE(db.StoreRecordUnsafe(cfgs[1]));
+    EXPECT_EQ(db.PendingCount(), 2u);
+    EXPECT_TRUE(db.StoreRecordUnsafe(cfgs[2]));
+    EXPECT_EQ(db.PendingCount(), 0u);
+
+    // The commit resets the byte count, so two more blobs fit again.
+    EXPECT_TRUE(db.StoreRecordUnsafe(cfgs[3]));
+    EXPECT_TRUE(db.StoreRecordUnsafe(cfgs[4]));
+    EXPECT_EQ(db.PendingCount(), 2u);
+
+    // A replaced record no longer counts toward the limit...
+    EXPECT_TRUE(db.StoreRecordUnsafe(replacement));
+    EXPECT_EQ(db.PendingCount(), 2u);
+    // ...and neither does a removed one.
+    EXPECT_TRUE(db.RemoveRecordUnsafe(cfgs[4]));
+    EXPECT_TRUE(db.StoreRecordUnsafe(cfgs[5]));
+    EXPECT_EQ(db.PendingCount(), 2u);
+    EXPECT_TRUE(db.StoreRecordUnsafe(cfgs[6]));
+    EXPECT_EQ(db.PendingCount(), 0u);
+    EXPECT_TRUE(IsCommitted(temp_file, replacement));
+    EXPECT_FALSE(IsCommitted(temp_file, cfgs[4]));
+
+    // Ending a batch resets the byte count too.
+    EXPECT_TRUE(db.StoreRecordUnsafe(cfgs[7]));
+    first_batch.Commit();
+    miopen::KernelCacheBatch second_batch;
+    EXPECT_TRUE(db.StoreRecordUnsafe(cfgs[8]));
+    EXPECT_TRUE(db.StoreRecordUnsafe(cfgs[9]));
+    EXPECT_EQ(db.PendingCount(), 2u);
+    second_batch.Commit();
+    for(const auto i : {0, 1, 2, 5, 6, 7, 8, 9})
+        EXPECT_TRUE(IsCommitted(temp_file, cfgs[i])) << "record " << i;
+}
+
+TEST(CPU_Cache_NONE, check_kern_db_batch_limits_from_env)
+{
+    using lib_env::LibEnvVar;
+    // Distinct values, so that a variable read into the wrong field is caught.
+    ScopedEnvironment<unsigned long long> max_records{
+        LibEnvVar{MIOPEN_DEBUG_KERNEL_CACHE_BATCH_MAX_RECORDS.GetName()}, 3};
+    ScopedEnvironment<unsigned long long> max_bytes{
+        LibEnvVar{MIOPEN_DEBUG_KERNEL_CACHE_BATCH_MAX_BYTES.GetName()}, 5000};
+    ScopedEnvironment<unsigned long long> max_age{
+        LibEnvVar{MIOPEN_DEBUG_KERNEL_CACHE_BATCH_MAX_AGE_MS.GetName()}, 7};
+
+    const auto limits = miopen::KernDb::DefaultBatchLimits();
+    EXPECT_EQ(limits.max_records, 3u);
+    EXPECT_EQ(limits.max_bytes, 5000u);
+    EXPECT_EQ(limits.max_age.count(), 7);
+
+    // A very large age, the natural way to turn the age bound off, is clamped rather than
+    // overflowing the age check, which would commit every record on its own.
+    ScopedEnvironment<unsigned long long> no_max_age{
+        LibEnvVar{MIOPEN_DEBUG_KERNEL_CACHE_BATCH_MAX_AGE_MS.GetName()},
+        std::numeric_limits<unsigned long long>::max()};
+    EXPECT_GT(miopen::KernDb::DefaultBatchLimits().max_age, std::chrono::hours{24 * 365});
+
+    // New instances apply the limits from the environment.
+    miopen::TempFile temp_file("tmp-kerndb-batch-env");
+    miopen::KernDb db(miopen::DbKinds::KernelDb, temp_file, false);
+    miopen::KernelCacheBatch batch;
+    EXPECT_TRUE(db.StoreRecordUnsafe(MakeKernelConfig("kernel_env_0", 64)));
+    EXPECT_TRUE(db.StoreRecordUnsafe(MakeKernelConfig("kernel_env_1", 64)));
+    EXPECT_EQ(db.PendingCount(), 2u);
+    EXPECT_TRUE(db.StoreRecordUnsafe(MakeKernelConfig("kernel_env_2", 64)));
+    EXPECT_EQ(db.PendingCount(), 0u);
+}
+
 TEST(CPU_Cache_NONE, check_kern_db_batch_destruction_commits)
 {
     miopen::TempFile temp_file("tmp-kerndb-batch-dtor");
@@ -348,6 +467,63 @@ TEST(CPU_Cache_NONE, check_kern_db_batch_destruction_commits)
     EXPECT_FALSE(miopen::KernDb::IsBatchActive());
     EXPECT_EQ(db.PendingCount(), 0u);
     EXPECT_TRUE(IsCommitted(temp_file, in_scope));
+}
+
+TEST(CPU_Cache_NONE, check_kern_db_batch_stack_unwinding_commits)
+{
+    miopen::TempFile temp_file("tmp-kerndb-batch-unwind");
+    miopen::KernDb db(miopen::DbKinds::KernelDb, temp_file, false);
+    db.SetBatchLimits(unbounded_batch);
+    const auto cfg = MakeKernelConfig("kernel_unwind");
+
+    // An exception that leaves the batch scope ends the batch and commits what it holds.
+    EXPECT_THROW(
+        {
+            miopen::KernelCacheBatch batch;
+            EXPECT_TRUE(db.StoreRecordUnsafe(cfg));
+            throw std::runtime_error{"search failed"};
+        },
+        std::runtime_error);
+    EXPECT_FALSE(miopen::KernDb::IsBatchActive());
+    EXPECT_EQ(db.PendingCount(), 0u);
+    EXPECT_TRUE(IsCommitted(temp_file, cfg));
+}
+
+TEST(CPU_Cache_NONE, check_kern_db_batch_failed_commit_in_destructors)
+{
+    miopen::TempFile temp_file("tmp-kerndb-batch-dtor-fail");
+    // Uncompressed, so that the empty blob fails to commit.
+    miopen::KernDb db(miopen::DbKinds::KernelDb, temp_file, false, StoreUncompressed, PassThrough);
+    db.SetBatchLimits(unbounded_batch);
+    const auto bad  = MakeKernelConfig("kernel_bad", 0);
+    const auto good = MakeKernelConfig("kernel_good");
+
+    // A batch that ends without Commit() logs the failed commit; letting it escape the destructor
+    // would call std::terminate.
+    {
+        miopen::KernelCacheBatch batch;
+        EXPECT_TRUE(db.StoreRecordUnsafe(bad));
+    }
+    EXPECT_FALSE(miopen::KernDb::IsBatchActive());
+    EXPECT_EQ(db.PendingCount(), 0u);
+
+    // The same holds for an instance destroyed while it holds the record.
+    {
+        miopen::KernelCacheBatch batch;
+        {
+            miopen::KernDb short_lived(
+                miopen::DbKinds::KernelDb, temp_file, false, StoreUncompressed, PassThrough);
+            short_lived.SetBatchLimits(unbounded_batch);
+            EXPECT_TRUE(short_lived.StoreRecordUnsafe(bad));
+        }
+        batch.Commit();
+    }
+
+    EXPECT_FALSE(IsCommitted(temp_file, bad));
+    // The database remains writable.
+    EXPECT_TRUE(db.StoreRecordUnsafe(good));
+    EXPECT_TRUE(IsCommitted(temp_file, good));
+    EXPECT_EQ(IntegrityCheck(db), "ok");
 }
 
 TEST(CPU_Cache_NONE, check_kern_db_batch_nested)
@@ -412,17 +588,8 @@ TEST(CPU_Cache_NONE, check_kern_db_batch_duplicate_and_remove)
 TEST(CPU_Cache_NONE, check_kern_db_batch_failed_commit_rolls_back)
 {
     miopen::TempFile temp_file("tmp-kerndb-batch-fail");
-    // Store blobs uncompressed, so that an empty blob reaches SQLite as NULL and violates the
-    // NOT NULL constraint on kernel_blob in the middle of the batch.
-    miopen::KernDb db(
-        miopen::DbKinds::KernelDb,
-        temp_file,
-        false,
-        [](const std::vector<char>&, bool* success) {
-            *success = false;
-            return std::vector<char>{};
-        },
-        [](const std::vector<char>& blob, unsigned int) { return blob; });
+    // Store blobs uncompressed, so that an empty blob fails in the middle of the batch.
+    miopen::KernDb db(miopen::DbKinds::KernelDb, temp_file, false, StoreUncompressed, PassThrough);
     db.SetBatchLimits({3, 1ULL << 30, std::chrono::hours{1}});
 
     const auto before = MakeKernelConfig("kernel_before");

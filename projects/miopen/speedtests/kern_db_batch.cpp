@@ -41,7 +41,8 @@ int main(int argc, const char* argv[])
     for(const auto* suffix : {"", "-wal", "-shm", "-journal"})
         miopen::fs::remove(file.string() + suffix);
 
-    // Code objects compress roughly 3-5x; mimic that with a small alphabet.
+    // Uniform values from a 16-symbol alphabet compress about 2x with bz2, so the stored blobs are
+    // about half the requested size.
     std::vector<miopen::KernelConfig> cfgs(records);
     std::mt19937 gen{42};
     std::uniform_int_distribution<int> dist{0, 15};

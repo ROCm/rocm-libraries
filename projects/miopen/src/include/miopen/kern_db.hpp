@@ -32,6 +32,7 @@
 
 #include <miopen/sqlite_db.hpp>
 #include <miopen/bz2.hpp>
+#include <miopen/env.hpp>
 #include <miopen/md5.hpp>
 
 #include <chrono>
@@ -39,6 +40,12 @@
 #include <optional>
 #include <string>
 #include <vector>
+
+// Defaults for KernDb::DefaultBatchLimits(). Declared here so that env_debug.cpp can expose them
+// to tests.
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_KERNEL_CACHE_BATCH_MAX_RECORDS, 64)
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_KERNEL_CACHE_BATCH_MAX_BYTES, 32ULL << 20)
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_KERNEL_CACHE_BATCH_MAX_AGE_MS, 2000)
 
 namespace miopen {
 struct KernelConfig

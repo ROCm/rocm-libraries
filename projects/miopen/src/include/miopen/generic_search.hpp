@@ -745,7 +745,16 @@ auto GenericSearch(const Solver s,
     for(auto& agent : compile_agents)
         agent.join();
 
-    kernel_cache_batch.Commit();
+    // A failed commit only discards cached binaries, which costs a recompilation later. It must
+    // not discard the result of a search that succeeded.
+    try
+    {
+        kernel_cache_batch.Commit();
+    }
+    catch(const std::exception& e)
+    {
+        MIOPEN_LOG_E(e.what());
+    }
 
     MIOPEN_LOG_I("Done: " << n_runs_total << '/' << n_failed << '/' << n_runs_total << ", best #"
                           << n_best << ' ' << best_time << ' ' << best_config);

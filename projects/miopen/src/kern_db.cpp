@@ -35,10 +35,6 @@
 #include <mutex>
 #include <set>
 
-MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_KERNEL_CACHE_BATCH_MAX_RECORDS, 64)
-MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_KERNEL_CACHE_BATCH_MAX_BYTES, 32ULL << 20)
-MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_KERNEL_CACHE_BATCH_MAX_AGE_MS, 2000)
-
 namespace miopen {
 
 namespace {
@@ -158,11 +154,16 @@ KernDb::~KernDb()
 
 KernDb::BatchLimits KernDb::DefaultBatchLimits()
 {
+    // The age bound is compared with steady_clock durations. Clamping keeps a very large value
+    // (the natural way to turn the bound off) from overflowing that comparison.
+    constexpr auto clock_max  = std::chrono::steady_clock::duration::max();
+    constexpr auto max_age_ms = static_cast<unsigned long long>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(clock_max).count());
     return {
         static_cast<std::size_t>(env::value(MIOPEN_DEBUG_KERNEL_CACHE_BATCH_MAX_RECORDS)),
         static_cast<std::size_t>(env::value(MIOPEN_DEBUG_KERNEL_CACHE_BATCH_MAX_BYTES)),
         std::chrono::milliseconds{static_cast<std::chrono::milliseconds::rep>(
-            env::value(MIOPEN_DEBUG_KERNEL_CACHE_BATCH_MAX_AGE_MS))},
+            std::min(env::value(MIOPEN_DEBUG_KERNEL_CACHE_BATCH_MAX_AGE_MS), max_age_ms))},
     };
 }
 

@@ -63,7 +63,15 @@ PrecompileKernels(const Handle& h, const std::vector<KernelInfo>& kernels, bool 
                         programs[i]         = h.LoadProgram(k.kernel_file, k.comp_options, "", force_attach_binary);
                     });
     // clang-format on
-    kernel_cache_batch.Commit();
+    // A failed commit only discards cached binaries; the programs are already loaded.
+    try
+    {
+        kernel_cache_batch.Commit();
+    }
+    catch(const std::exception& e)
+    {
+        MIOPEN_LOG_E(e.what());
+    }
     ct.Log("PrecompileKernels");
     return programs;
 }
