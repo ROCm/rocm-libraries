@@ -47,7 +47,8 @@ namespace rocsparse
     // ones: mb itself does not fit in rocsparse_int, a vector offset
     // row * block_dim does not fit, or the in-block offset bi * block_dim does
     // not fit. The block value offset block_dim * block_dim * j is formed in
-    // int64_t by BSR_IND on both paths, so nnzb does not decide.
+    // int64_t on both paths (by BSR_IND and bsrsv_wide_ind), so nnzb does not
+    // decide.
     __host__ __forceinline__ bool bsrsv_solve_needs_wide(int64_t mb, int64_t block_dim)
     {
         if(mb <= 0 || block_dim <= 0)
@@ -68,6 +69,17 @@ namespace rocsparse
 
         // block_dim * block_dim <= narrow_max is tested without forming the product.
         return block_dim > narrow_max / block_dim;
+    }
+
+    // Offset of entry (bi, bj) of block j in bsr_val, formed entirely in
+    // int64_t. BSR_IND widens only block_dim * block_dim * j, and its
+    // bi * block_dim and bj * block_dim overflow int from block_dim 46341,
+    // which bsrsv_solve_needs_wide sends to the general wide kernels.
+    __host__ __device__ __forceinline__ int64_t bsrsv_wide_ind(
+        int64_t j, int64_t bi, int64_t bj, int64_t block_dim, rocsparse_direction dir)
+    {
+        return block_dim * block_dim * j
+               + ((dir == rocsparse_direction_row) ? bi * block_dim + bj : bi + bj * block_dim);
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T, typename I, typename J>
@@ -127,7 +139,9 @@ namespace rocsparse
                 for(int bj = 0; bj < block_dim; ++bj)
                 {
                     local_sum = rocsparse::fma(
-                        bsr_val[BSR_IND(j, bi, bj, dir)], y[y_col + bj], local_sum);
+                        bsr_val[rocsparse::bsrsv_wide_ind(j, bi, bj, block_dim, dir)],
+                        y[y_col + bj],
+                        local_sum);
                 }
                 y[y_row + bi] -= local_sum;
             }
@@ -139,11 +153,9 @@ namespace rocsparse
         {
             for(int bi = 0; bi < block_dim; ++bi)
             {
-                const int64_t diag_off
-                    = static_cast<int64_t>(block_dim) * block_dim * static_cast<int64_t>(j) + bi
-                      + static_cast<int64_t>(bi) * block_dim;
-                const T diag = (diag_type == rocsparse_diag_type_non_unit) ? bsr_val[diag_off]
-                                                                           : static_cast<T>(1);
+                const int64_t diag_off = rocsparse::bsrsv_wide_ind(j, bi, bi, block_dim, dir);
+                const T       diag = (diag_type == rocsparse_diag_type_non_unit) ? bsr_val[diag_off]
+                                                                                 : static_cast<T>(1);
 
                 T val = y[y_row + bi];
                 if(diag == static_cast<T>(0))
@@ -157,7 +169,8 @@ namespace rocsparse
 
                 for(int bj = bi + lid + 1; bj < block_dim; bj += WFSIZE)
                 {
-                    y[y_row + bj] -= val * bsr_val[BSR_IND(j, bj, bi, dir)];
+                    y[y_row + bj]
+                        -= val * bsr_val[rocsparse::bsrsv_wide_ind(j, bj, bi, block_dim, dir)];
                 }
             }
         }
@@ -230,7 +243,9 @@ namespace rocsparse
                 for(int bj = 0; bj < block_dim; ++bj)
                 {
                     local_sum = rocsparse::fma(
-                        bsr_val[BSR_IND(j, bi, bj, dir)], y[y_col + bj], local_sum);
+                        bsr_val[rocsparse::bsrsv_wide_ind(j, bi, bj, block_dim, dir)],
+                        y[y_col + bj],
+                        local_sum);
                 }
                 y[y_row + bi] -= local_sum;
             }
@@ -242,11 +257,9 @@ namespace rocsparse
         {
             for(int bi = block_dim - 1; bi >= 0; --bi)
             {
-                const int64_t diag_off
-                    = static_cast<int64_t>(block_dim) * block_dim * static_cast<int64_t>(j) + bi
-                      + static_cast<int64_t>(bi) * block_dim;
-                const T diag = (diag_type == rocsparse_diag_type_non_unit) ? bsr_val[diag_off]
-                                                                           : static_cast<T>(1);
+                const int64_t diag_off = rocsparse::bsrsv_wide_ind(j, bi, bi, block_dim, dir);
+                const T       diag = (diag_type == rocsparse_diag_type_non_unit) ? bsr_val[diag_off]
+                                                                                 : static_cast<T>(1);
 
                 T val = y[y_row + bi];
                 if(diag == static_cast<T>(0))
@@ -260,7 +273,8 @@ namespace rocsparse
 
                 for(int bj = lid; bj < bi; bj += WFSIZE)
                 {
-                    y[y_row + bj] -= val * bsr_val[BSR_IND(j, bj, bi, dir)];
+                    y[y_row + bj]
+                        -= val * bsr_val[rocsparse::bsrsv_wide_ind(j, bj, bi, block_dim, dir)];
                 }
             }
         }

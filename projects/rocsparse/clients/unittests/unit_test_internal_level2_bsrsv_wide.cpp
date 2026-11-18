@@ -1290,6 +1290,69 @@ TEST_F(internal_level2_bsrsv_wide, needs_wide_predicate_boundaries)
     EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(1, 46341));
 }
 
+namespace
+{
+    // The argument types are the ones the general wide kernels pass: the
+    // block index has type I, the in-block indices are int and block_dim is
+    // rocsparse_int, so the test does not widen anything itself.
+    __global__ void bsrsv_wide_ind_kernel(
+        int32_t j, int bi, int bj, rocsparse_int block_dim, rocsparse_direction dir, int64_t* out)
+    {
+        out[0] = rocsparse::bsrsv_wide_ind(j, bi, bj, block_dim, dir);
+    }
+}
+
+// From block_dim 46341, which bsrsv_solve_needs_wide sends to the general wide
+// kernels, bi * block_dim alone passes INT32_MAX, so the in-block offset must
+// be formed in 64 bits on the host and on the device.
+TEST_F(internal_level2_bsrsv_wide, wide_ind_forms_in_block_offset_in_64_bit)
+{
+    struct offset_case
+    {
+        int32_t             j;
+        int                 bi;
+        int                 bj;
+        rocsparse_int       block_dim;
+        rocsparse_direction dir;
+        int64_t             want;
+    };
+    const offset_case cases[] = {
+        // Row 46341 of block 1 at block_dim 46342, which is 148290 in 32 bits.
+        {1, 46341, 0, 46342, rocsparse_direction_row, 4295115586},
+        {1, 0, 46341, 46342, rocsparse_direction_column, 4295115586},
+        // The last diagonal entry of block 0 at the first wide block_dim.
+        {0, 46340, 46340, 46341, rocsparse_direction_row, 2147488280},
+        {0, 46340, 46340, 46341, rocsparse_direction_column, 2147488280},
+        // One strict-triangle entry in both storage directions.
+        {2, 3, 46340, 46341, rocsparse_direction_row, 4295161925},
+        {2, 3, 46340, 46341, rocsparse_direction_column, 6442418505},
+    };
+
+    for(const offset_case& c : cases)
+    {
+        SCOPED_TRACE(::testing::Message() << "j " << c.j << " bi " << c.bi << " bj " << c.bj
+                                          << " block_dim " << c.block_dim << " dir " << c.dir);
+        EXPECT_EQ(rocsparse::bsrsv_wide_ind(c.j, c.bi, c.bj, c.block_dim, c.dir), c.want);
+
+        rocsparse_ut::device_vector<int64_t> d_out(std::vector<int64_t>(1, -1));
+        ASSERT_NE(d_out.ptr, nullptr);
+        hipLaunchKernelGGL(bsrsv_wide_ind_kernel,
+                           dim3(1),
+                           dim3(1),
+                           0,
+                           0,
+                           c.j,
+                           c.bi,
+                           c.bj,
+                           c.block_dim,
+                           c.dir,
+                           d_out.ptr);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(rocsparse_ut::to_host(d_out)[0], c.want);
+    }
+}
+
 TEST_F(internal_level2_bsrsv_wide, public_lower_narrow_and_clamped)
 {
     for(int limit : {0, 1})
