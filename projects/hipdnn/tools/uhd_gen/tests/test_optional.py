@@ -251,7 +251,9 @@ def test_automatic_selection_keeps_an_optional_column_and_drops_any_other_gap(
 
 
 def test_generate_proposes_an_optional_column_some_rows_leave_unbound(evaluator):
+    from uhd_gen.features import signature_references
     from uhd_gen.generate import _feature_signature
+    from uhd_gen.physics import derived_features
 
     frame = pd.DataFrame(
         {
@@ -263,10 +265,17 @@ def test_generate_proposes_an_optional_column_some_rows_leave_unbound(evaluator)
     args = argparse.Namespace(
         dim_tile=[], feature_signature=None, features=None, feature_evaluator=evaluator
     )
+    # A published q.dims[0] adds the derived attention features; they read fields every real
+    # SDPA graph publishes, so the frame carries those too, bound on every row.
+    for ref in signature_references(list(derived_features(frame).values())):
+        if ref[1:] not in frame.columns:
+            frame[ref[1:]] = 1
     signature, _, _ = _feature_signature(
         args, frame, set(frame.columns), None, [], False
     )
-    assert signature == [SCALE, "$graph.nodes[0].q.dims[0]"]
+    assert SCALE in signature
+    assert "$graph.nodes[0].q.dims[0]" in signature
+    assert Q_DIM not in signature
 
 
 #: The artifact root class of each adapter whose artifact embeds a features_hash.
