@@ -219,8 +219,7 @@ TEST(field_test, field_for_lengths_passes_array_type_and_precision_through)
 TEST(field_test, field_for_lengths_relabels_hermitian_for_fewer_axes)
 {
     const auto field = field_3d(rocfft_precision_single, rocfft_array_type_hermitian_interleaved);
-    for(const auto& len_dims :
-        std::vector<std::set<size_t>>{{0}, {1}, {2}, {0, 1}, {0, 2}, {1, 2}})
+    for(const auto& len_dims : std::vector<std::set<size_t>>{{0}, {1}, {2}, {0, 1}, {0, 2}, {1, 2}})
         expect_field_for_lengths(field, len_dims, rocfft_array_type_complex_interleaved);
 }
 
