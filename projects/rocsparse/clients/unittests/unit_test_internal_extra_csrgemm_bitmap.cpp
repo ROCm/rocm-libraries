@@ -876,11 +876,13 @@ namespace
                             const host_c<I, J, T> initial = make_c(p, ref, false);
                             const host_c<I, J, T> want    = make_c(p, ref, true);
 
+                            const auto& ind_C
+                                = stage == value_stage::numeric ? want.ind : initial.ind;
+
                             device_csr<I, J, T> A(p.A), B(p.B), D(p.D);
                             device_vector<J>    d_perm(p.perm), d_offset(std::vector<J>{p.offset});
                             device_vector<I>    d_ptr_C(initial.ptr);
-                            device_vector<J>    d_ind_C(stage == value_stage::numeric ? want.ind
-                                                                                   : initial.ind);
+                            device_vector<J>    d_ind_C(ind_C);
                             device_vector<T>    d_val_C(initial.val);
                             auto                workspace = make_workspace<I, J>(handle, s, p.n);
                             ASSERT_TRUE(d_ptr_C.ptr && d_ind_C.ptr && d_val_C.ptr);
