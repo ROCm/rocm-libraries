@@ -1210,7 +1210,6 @@ _CONFIGS[80] = {**_CONFIGS[59], "use_i64_kv_addr": True}
 _CONFIGS[81] = {**_CONFIGS[48], "block_size": 64}
 
 
-
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:
     if idx not in _CONFIGS:
         raise SystemExit(f"unknown config index {idx}")
