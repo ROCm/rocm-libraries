@@ -919,8 +919,12 @@ def _geometries(
         )
         if atom is None or tile_k % atom.k:
             continue
-        if _wgrad_extra_k_only(target.gfx, tile_k) and not _wgrad_extra_k_listed(
-            (tile_m, tile_n, tile_k, warp_m, warp_n, wt), epilogue
+        if (
+            direction == "wgrad"
+            and _wgrad_extra_k_only(target.gfx, tile_k)
+            and not _wgrad_extra_k_listed(
+                (tile_m, tile_n, tile_k, warp_m, warp_n, wt), epilogue
+            )
         ):
             continue
         yield tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom
@@ -1632,7 +1636,6 @@ def _wgrad_jobs(
         )
         if epilogue != "default" and not in_cover:
             continue
-        # On the RDNA4 tile_k axis only the register-transpose rows are built.
         regt_only = _wgrad_extra_k_only(arch, tile_k)
         ts_cover = _wgrad_two_stage_cover(
             arch, mma_family, (tile_m, tile_n, tile_k, warp_m, warp_n), in_cover
@@ -1666,13 +1669,36 @@ def _wgrad_jobs(
             wave_size=wave_size,
         )
         _pad_cfg = {} if _k_pad is None else {"lds_k_pad": _k_pad}
+        # Register-transpose kernels (RDNA4 WMMA): the same configurations on
+        # the M-outer tile with the transpose moved into registers, at the
+        # CACHE_REGT_VECS widths, plus their register-prefetch, address-step,
+        # paired-atomic and filter-row-run twins. Default epilogue only: no
+        # register-transpose cshuffle kernel was measured.
+        regt_geometry = epilogue == "default" and _wgrad_regt_geometry(
+            target, (tile_m, tile_n, tile_k, warp_m, warp_n, wt), da, db
+        )
+        regt_args = (
+            arch,
+            (da, db, dd),
+            flavor,
+            (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue),
+            atom,
+            wave_size,
+            split_ks,
+            ts_cover,
+            _pad_cfg,
+        )
+        if regt_only:
+            # The RDNA4 tile_k axis builds the register-transpose rows and
+            # nothing else (no M-outer, stream-K or group-merged job).
+            if regt_geometry:
+                yield from _wgrad_regt_jobs(*regt_args)
+            continue
         # wgrad's B (X) and D (dW) are both contiguous along cpg, so they
         # share one width; A (dY) runs along kpg. The default epilogue (and so
         # every two-stage kernel) stores scalar, so there D is 1 and B takes
         # its own width -- tied to D it could only ever load scalar.
-        for vec_a, vec_bc, split_k in itertools.product(
-            _VECS, _VECS, () if regt_only else split_ks
-        ):
+        for vec_a, vec_bc, split_k in itertools.product(_VECS, _VECS, split_ks):
             for two_stage, caps in itertools.product(
                 _wgrad_split_reductions(arch, split_k, False), _layout_caps()
             ):
@@ -1749,36 +1775,15 @@ def _wgrad_jobs(
                             spec_kwargs=kc,
                             caps=caps,
                         )
-        # Register-transpose kernels (RDNA4 WMMA): the same configurations on
-        # the M-outer tile with the transpose moved into registers, at the
-        # CACHE_REGT_VECS widths, plus their register-prefetch, address-step,
-        # paired-atomic and filter-row-run twins. Default
-        # epilogue only: no register-transpose cshuffle kernel was measured.
-        if epilogue == "default" and _wgrad_regt_geometry(
-            target, (tile_m, tile_n, tile_k, warp_m, warp_n, wt), da, db
-        ):
-            yield from _wgrad_regt_jobs(
-                arch,
-                (da, db, dd),
-                flavor,
-                (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue),
-                atom,
-                wave_size,
-                split_ks,
-                ts_cover,
-                _pad_cfg,
-            )
+        if regt_geometry:
+            yield from _wgrad_regt_jobs(*regt_args)
         # Stream-K kernels (opt-in). Default epilogue only, so the store is
         # scalar and B takes its own width; split_k stays 1 (stream-K owns the
         # K partition). The workspace reduction reuses the two-stage scratch,
         # so its replica count is pinned exactly as for two-stage.
         for (mode, reduction, vec_a, vec_b), caps in itertools.product(
-            (
-                ()
-                if regt_only
-                else _wgrad_streamk_builds(
-                    epilogue, tile_n, dtype, streamk_modes, streamk_reductions
-                )
+            _wgrad_streamk_builds(
+                epilogue, tile_n, dtype, streamk_modes, streamk_reductions
             ),
             _layout_caps(),
         ):
@@ -1827,7 +1832,7 @@ def _wgrad_jobs(
         # serves (cpg = kpg = 1) -- while an explicit width is validated
         # against the per-group run of 1 and could only be 1.
         for gm, split_k in itertools.product(
-            _WGRAD_GROUP_MERGES, [sk for sk in split_ks if sk > 1 and not regt_only]
+            _WGRAD_GROUP_MERGES, [sk for sk in split_ks if sk > 1]
         ):
             cfg = dict(
                 tile_m=tile_m,
@@ -2546,9 +2551,7 @@ def count_jobs(
                     if in_cover
                     else 0
                 )
-                regt_only = _wgrad_extra_k_only(target.gfx, geo[2])
-                if not regt_only:
-                    total += vecs * stages * layouts + asyncs * layouts
+                regt_total = 0
                 if geo[7] == "default" and _wgrad_regt_geometry(target, geo, da, db):
                     for v in _wgrad_regt_variants(
                         target.gfx, dtype_triple(dtype)[2], geo[:6], split_ks
@@ -2556,7 +2559,7 @@ def count_jobs(
                         two_stage = v[4]
                         if two_stage and not ts_cover:
                             continue
-                        total += layouts
+                        regt_total += layouts
                         if _wgrad_x_run(
                             dict(
                                 tile_m=geo[0],
@@ -2571,9 +2574,12 @@ def count_jobs(
                             target.gfx,
                         ):
                             # The ungrouped x_run twin of the grouped job.
-                            total += sum(1 for c in _layout_caps() if c["grouped"])
-                if regt_only:
+                            regt_total += sum(1 for c in _layout_caps() if c["grouped"])
+                if _wgrad_extra_k_only(target.gfx, geo[2]):
+                    # The RDNA4 tile_k axis: register-transpose rows only.
+                    total += regt_total
                     continue
+                total += vecs * stages * layouts + asyncs * layouts + regt_total
                 if 8 in _VECS and _wgrad_prefetch_global_regs_geometry(
                     target.gfx, geo[:6]
                 ):

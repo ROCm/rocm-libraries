@@ -523,6 +523,30 @@ class TestWgradRdna4Grid(unittest.TestCase):
                 jobs = self._jobs(arch, geos=geos[:60])
                 self.assertTrue(jobs)
                 self.assertTrue(all(j.identity.reg_transpose for j in jobs))
+        # The filter is the wgrad axis's: were forward walked on the axis too
+        # (a combined ("fwd", "wgrad") tuple), its tile_k 128 geometries would
+        # stay unfiltered.
+        from unittest import mock
+
+        import kernels.conv.aot_jobs as aot_jobs
+
+        with mock.patch.object(
+            aot_jobs, "CACHE_RDNA4_EXTRA_TILE_K_DIRECTIONS", ("fwd", "wgrad")
+        ):
+            for arch in ("gfx1201", "gfx1200", "gfx12-generic"):
+                target = ArchTarget.from_gfx(arch)
+                fwd = [g for g in _geometry_list(target, "fp16", "fwd") if g[2] == 128]
+                wgrad = [
+                    g for g in _geometry_list(target, "fp16", "wgrad") if g[2] == 128
+                ]
+                with self.subTest(arch=arch, combined=True):
+                    self.assertTrue(fwd)
+                    self.assertTrue(
+                        [g for g in fwd if tuple(g[:6]) not in listed],
+                        "forward must not inherit the wgrad register-transpose filter",
+                    )
+                    for g in wgrad:
+                        self.assertIn(tuple(g[:6]), listed)
         # Every other arch keeps its geometry lists.
         for arch in ("gfx1250", "gfx950"):
             target = ArchTarget.from_gfx(arch)
@@ -540,7 +564,7 @@ class TestWgradRdna4Grid(unittest.TestCase):
         )
         from rocke.core.arch import ArchTarget
 
-        for arch in ("gfx1201", "gfx1250"):
+        for arch in ("gfx1201", "gfx1200", "gfx1250"):
             target = ArchTarget.from_gfx(arch)
             n = sum(
                 1
