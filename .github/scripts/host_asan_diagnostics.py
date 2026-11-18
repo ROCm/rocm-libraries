@@ -8,13 +8,15 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
+import sys
 import time
 
 
-def command_log(path, command, timeout_seconds=20):
+def command_log(path, command, timeout_seconds=20, mode="w"):
     # Keep stderr even on failure. A broken GPU probe must not prevent others.
-    with path.open("w") as output:
+    with path.open(mode) as output:
         print(f"UTC: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}", file=output)
         print(f"Command: {command!r}", file=output, flush=True)
         try:
@@ -45,6 +47,142 @@ def descendants(pid):
             except OSError:
                 pass  # A child can exit while we inspect it.
     return sorted(found)
+
+
+def smi_command(bin_dir):
+    command = [str(bin_dir / "amd-smi")]
+    asan_runtime = next(
+        (bin_dir.parent / "lib/llvm/lib/clang").rglob("libclang_rt.asan*.so"), None
+    )
+    if asan_runtime:
+        # Also works when sudo clears the caller's runtime environment.
+        command = [
+            "env",
+            f"LD_PRELOAD={asan_runtime.resolve()}",
+            f"LD_LIBRARY_PATH={bin_dir.parent.resolve()}/lib/rocm_sysdeps/lib:{bin_dir.parent.resolve()}/lib:{asan_runtime.parent.resolve()}:{os.environ.get('LD_LIBRARY_PATH', '')}",
+            f"ASAN_OPTIONS={os.environ.get('ASAN_OPTIONS', '')}:detect_leaks=0",
+            *command,
+        ]
+    return command
+
+
+def gpu_sample(
+    directory,
+    bin_dir,
+    dumps=Path("/sys/class/devcoredump"),
+    debug=Path("/sys/kernel/debug/dri"),
+):
+    directory.mkdir(parents=True, exist_ok=True)
+    record: dict[str, object] = {
+        "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    }
+    # Preserve dumps before querying a possibly wedged GPU. Linux normally
+    # expires devcoredumps after five minutes. Never write to their sysfs files.
+    saved: list[dict[str, object]] = []
+    try:
+        available = sorted(dumps.iterdir())
+        record["devcoredump_entries"] = [path.name for path in available]
+    except OSError as error:
+        available = []
+        record["devcoredump_error"] = str(error)
+    for dump in available:
+        entry: dict[str, object] = {"source": str(dump)}
+        try:
+            device = (dump / "failing_device").resolve(strict=True)
+            if (device / "vendor").read_text().strip() != "0x1002":
+                continue
+            destination = (
+                directory / f"{dump.name}-{device.name.replace(':', '_')}.data"
+            )
+            if destination.exists():
+                continue
+            partial = destination.with_suffix(".partial")
+            with (dump / "data").open("rb") as source, partial.open("wb") as output:
+                shutil.copyfileobj(source, output)
+            partial.replace(destination)
+            entry.update(
+                device=str(device),
+                file=destination.name,
+                bytes=destination.stat().st_size,
+            )
+            destination.with_suffix(".json").write_text(
+                json.dumps({"utc": record["utc"], **entry}, indent=2) + "\n"
+            )
+        except OSError as error:
+            entry["error"] = str(error)
+        saved.append(entry)
+    record["coredumps"] = saved
+
+    # These read-only driver files can expose process names across PID
+    # namespaces, if debugfs is already visible. Never mount it or use host PIDs
+    # as indices into this container's /proc: those PIDs mean different things.
+    driver_processes: dict[str, object] = {}
+    try:
+        entries = sorted(
+            path
+            for path in debug.iterdir()
+            if path.name.isdigit() and not path.is_symlink()
+        )
+        record["debugfs_entries"] = [path.name for path in entries]
+    except OSError as error:
+        entries = []
+        record["debugfs_error"] = str(error)
+    for device in entries:
+        try:
+            result = subprocess.run(
+                ["cat", str(device / "name"), str(device / "amdgpu_vm_info")],
+                capture_output=True,
+                text=True,
+                timeout=1,
+                check=False,
+            )
+            driver_processes[device.name] = {
+                "returncode": result.returncode,
+                "stderr": result.stderr,
+                "identity": result.stdout.splitlines()[:1],
+                "processes": [
+                    line
+                    for line in result.stdout.splitlines()
+                    if line.startswith("pid:")
+                ],
+            }
+        except (OSError, subprocess.TimeoutExpired) as error:
+            driver_processes[device.name] = {"error": str(error)}
+    record["driver_processes"] = driver_processes
+
+    # Keep per-device activity even when AMD-SMI fails. Enumerate PCI devices
+    # directly so card/render aliases do not duplicate the same GPU.
+    devices: dict[str, object] = {}
+    for device in sorted(Path("/sys/bus/pci/drivers/amdgpu").glob("????:??:??.?")):
+        fields: dict[str, object] = {}
+        for name in ("gpu_busy_percent", "mem_info_vram_used", "mem_info_gtt_used"):
+            try:
+                fields[name] = (device / name).read_text().strip()
+            except OSError as error:
+                fields[name] = {"error": str(error)}
+        devices[device.name] = fields
+    record["devices"] = devices
+
+    gpu_processes: object = []
+    try:
+        result = subprocess.run(
+            [*smi_command(bin_dir), "process", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        record["smi_returncode"] = result.returncode
+        record["smi_stderr"] = result.stderr
+        try:
+            gpu_processes = json.loads(result.stdout)
+        except ValueError:
+            record["smi_stdout"] = result.stdout
+    except (OSError, subprocess.TimeoutExpired) as error:
+        record["smi_error"] = str(error)
+    record["gpu_processes"] = gpu_processes
+    with (directory / "timeline.jsonl").open("a") as output:
+        print(json.dumps(record), file=output, flush=True)
 
 
 def snapshot(directory, root_pid=None, executable=None):
@@ -131,23 +269,8 @@ def snapshot(directory, root_pid=None, executable=None):
         directory / "dmesg.txt", ["sudo", "-n", "dmesg", "--time-format", "iso"]
     )
     bin_dir = Path(os.environ.get("THEROCK_BIN_DIR", "build/bin"))
-    smi_command = [str(bin_dir / "amd-smi")]
-    asan_runtime = next(
-        (bin_dir.parent / "lib/llvm/lib/clang").rglob("libclang_rt.asan*.so"), None
-    )
-    if asan_runtime:
-        # The Python CLI loads ASAN-instrumented libamd_smi through ctypes.
-        # Preload its runtime; omit interpreter leak checks for this probe only.
-        # Include bundled libdrm for dynamically loaded GPU queries.
-        smi_command = [
-            "env",
-            f"LD_PRELOAD={asan_runtime.resolve()}",
-            f"LD_LIBRARY_PATH={bin_dir.parent.resolve()}/lib/rocm_sysdeps/lib:{os.environ.get('LD_LIBRARY_PATH', '')}",
-            f"ASAN_OPTIONS={os.environ.get('ASAN_OPTIONS', '')}:detect_leaks=0",
-            *smi_command,
-        ]
     for mode in ("static", "metric", "process"):
-        command_log(directory / f"amd-smi-{mode}.txt", [*smi_command, mode])
+        command_log(directory / f"amd-smi-{mode}.txt", [*smi_command(bin_dir), mode])
     command_log(directory / "rocminfo.txt", [str(bin_dir / "rocminfo")])
 
 
@@ -159,7 +282,9 @@ def safe_snapshot(directory, **kwargs):
         print(f"::warning::Unable to finish ASAN diagnostics: {error}", flush=True)
 
 
-def run_monitored(command, log_file, directory, executable, quiet_seconds):
+def run_monitored(
+    command, log_file, directory, executable, quiet_seconds, gpu_samples=False
+):
     process = subprocess.Popen(command, start_new_session=True)
 
     def forward(sig, _frame=None):
@@ -174,8 +299,34 @@ def run_monitored(command, log_file, directory, executable, quiet_seconds):
     last_size = 0
     last_progress = time.monotonic()
     captured = False
+    next_sample = 0.0
     try:
         while process.poll() is None:
+            if gpu_samples and time.monotonic() >= next_sample:
+                directory.mkdir(parents=True, exist_ok=True)
+                command_log(
+                    directory / "gpu-sample-status.txt",
+                    [
+                        "sudo",
+                        "-n",
+                        "env",
+                        f"LD_LIBRARY_PATH={os.environ.get('LD_LIBRARY_PATH', '')}",
+                        sys.executable,
+                        str(Path(__file__).resolve()),
+                        "--output-dir",
+                        str(directory / "gpu-timeline"),
+                        "--sample-gpu",
+                        "--bin-dir",
+                        str(
+                            Path(
+                                os.environ.get("THEROCK_BIN_DIR", "build/bin")
+                            ).resolve()
+                        ),
+                    ],
+                    timeout_seconds=20,
+                    mode="a",
+                )
+                next_sample = time.monotonic() + 5
             try:
                 size = log_file.stat().st_size
             except OSError:
@@ -218,8 +369,14 @@ def main():
     parser.add_argument("--log-file", type=Path)
     parser.add_argument("--executable", type=Path)
     parser.add_argument("--quiet-seconds", type=float, default=300)
+    parser.add_argument("--gpu-samples", action="store_true")
+    parser.add_argument("--sample-gpu", action="store_true")
+    parser.add_argument("--bin-dir", type=Path, default=Path("build/bin"))
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
+    if args.sample_gpu:
+        gpu_sample(args.output_dir, args.bin_dir)
+        return 0
     if not args.command:
         safe_snapshot(args.output_dir)
         return 0
@@ -238,6 +395,7 @@ def main():
         args.output_dir,
         args.executable.resolve(),
         args.quiet_seconds,
+        args.gpu_samples,
     )
 
 

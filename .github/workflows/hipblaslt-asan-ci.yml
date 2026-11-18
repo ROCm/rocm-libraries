@@ -283,7 +283,6 @@ jobs:
         --group-add 992
         --group-add 110
         --env-file /etc/podinfo/gha-gpu-isolation-settings
-        ${{ inputs.replay && inputs.replay != 'none' && '--mount type=bind,source=/proc,target=/node-proc,readonly' || '' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.setup.outputs.test_matrix) }}
@@ -333,31 +332,6 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Verify node process visibility for diagnostics
-        if: ${{ inputs.replay && inputs.replay != 'none' }}
-        run: |
-          mkdir -p test_logs
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          records: dict[str, object] = {}
-          for name in ("/proc/1/comm", "/proc/self/status", "/node-proc/1/comm", "/node-proc/self/status"):
-              try:
-                  value = Path(name).read_text()
-                  if name.endswith("/status"):
-                      value = "\n".join(line for line in value.splitlines() if line.startswith(("Name:", "Pid:", "NSpid:")))
-                  records[name] = value.strip()
-              except OSError as error:
-                  records[name] = str(error)
-          records["device_coredumps"] = [str(path) for path in Path("/sys/class/devcoredump").glob("devcd*")]
-          text = json.dumps(records, indent=2) + "\n"
-          Path("test_logs/node-process-visibility.json").write_text(text)
-          print(text)
-          if records["/node-proc/1/comm"] != "systemd":
-              raise SystemExit("Node procfs is not visible: peer GPU PIDs cannot be reliably attributed; keep replays paused.")
-          PY
-
       - name: Install artifact dependencies
         run: pip install --constraint build_tools/packaging/linux/requirements.txt boto3 pyzstd
 
@@ -404,6 +378,10 @@ jobs:
           python diagnostics/.github/scripts/host_asan_diagnostics.py \
             --output-dir test_logs/before-tests
           sha256sum "${THEROCK_BIN_DIR}/${TEST_COMPONENT}-test" > test_logs/test-executable.sha256
+          if [[ "$REPLAY" != none ]]; then
+            sudo -n env "PATH=$PATH" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" timeout -k 5 30 python diagnostics/.github/scripts/host_asan_diagnostics.py \
+              --output-dir test_logs/gpu-timeline --sample-gpu --bin-dir "${THEROCK_BIN_DIR}"
+          fi
 
       - name: Set up Python YAML converter
         run: |
@@ -427,6 +405,10 @@ jobs:
         run: |
           mkdir -p ./test_logs
           status=0
+          gpu_options=()
+          if [[ "$REPLAY" != none ]]; then
+            gpu_options=(--gpu-samples)
+          fi
           executable="${THEROCK_BIN_DIR}/${TEST_COMPONENT}-test"
           command=(python -u "rocm-libraries/test/therock/test_${TEST_COMPONENT}.py")
           if [[ "$REPLAY" = validate ]]; then
@@ -436,7 +418,7 @@ jobs:
           fi
           python diagnostics/.github/scripts/host_asan_diagnostics.py \
             --output-dir test_logs --log-file "test_logs/${TEST_COMPONENT}-test_output.log" \
-            --executable "$executable" --quiet-seconds 300 \
+            --executable "$executable" --quiet-seconds 300 "${gpu_options[@]}" \
             -- timeout -k 60 "${TEST_COMMAND_TIMEOUT}" \
             "${command[@]}" 2>&1 \
             | tee "./test_logs/${TEST_COMPONENT}-test_output.log" || status=$?
