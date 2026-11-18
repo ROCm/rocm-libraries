@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -124,10 +125,25 @@ def _rows() -> list[gd.KernelEntry]:
     return rows
 
 
-def _split(
-    rows: list[gd.KernelEntry] | None = None, content_dir: Path = gd.CONTENT_DIR
+def _build(
+    rows: list[gd.KernelEntry], arch: str, content_dir: Path | None = None
 ) -> dict:
-    return gd.build_documents(_rows() if rows is None else rows, ARCH, content_dir)
+    """`build_documents` over synthetic rows.
+
+    Their fields fingerprint an engine id of their own, so unless a test installs models of its
+    own they are built against an empty content folder: the shipped one files its trained models
+    under the real engine's id, which `installed_models` rightly refuses for any other id.
+    """
+    if content_dir is not None:
+        return gd.build_documents(rows, arch, content_dir)
+    with tempfile.TemporaryDirectory() as empty:
+        return gd.build_documents(rows, arch, Path(empty))
+
+
+def _split(
+    rows: list[gd.KernelEntry] | None = None, content_dir: Path | None = None
+) -> dict:
+    return _build(_rows() if rows is None else rows, ARCH, content_dir)
 
 
 def _ued(folders: dict) -> dict:
@@ -371,7 +387,7 @@ def test_a_partial_split_is_refused() -> None:
 
 
 def test_an_unslotted_op_keeps_its_1_0_engine() -> None:
-    folders = gd.build_documents([_entry("sdpa_rdna", "r0")], ARCH)
+    folders = _build([_entry("sdpa_rdna", "r0")], ARCH)
     assert Path("sdpa_bwd_split") not in folders
     docs = folders[Path("sdpa_rdna")]
     ued = docs["flydsl_sdpa_rdna.ued.json"]
@@ -481,7 +497,7 @@ def test_a_slot_ops_inputs_move_no_other_ops_digest(tmp_path: Path) -> None:
 def test_a_dq_row_with_a_companion_ships_in_its_own_pack_on_the_reduce_dispatch() -> (
     None
 ):
-    folders = gd.build_documents(_gfx11_rows(), GFX11)
+    folders = _build(_gfx11_rows(), GFX11)
     pack = folders[Path("sdpa_bwd_dq") / GFX11]
     assert sorted(pack) == ["flydsl_sdpa_bwd_dq.kdp.json", f"{GFX11}.reduce.kdp.json"]
     plain, reduce = (
@@ -521,13 +537,13 @@ def test_a_reduce_symbol_that_is_not_its_companions_is_refused() -> None:
     rows = _gfx11_rows()
     rows[-1].record["knobs"]["reduce_symbol"] = "another_kernel"
     with pytest.raises(gd.HkpPackError, match="reduce_symbol"):
-        gd.build_documents(rows, GFX11)
+        _build(rows, GFX11)
 
 
 def test_a_gfx11_pack_with_a_reduce_row_passes_the_authoring_validator(
     tmp_path: Path,
 ) -> None:
-    folders = gd.build_documents(_gfx11_rows(), GFX11)
+    folders = _build(_gfx11_rows(), GFX11)
     gd._write(tmp_path, folders)
     assert gd._check(tmp_path, folders) == []
     gd.load_flat_input(
@@ -537,7 +553,7 @@ def test_a_gfx11_pack_with_a_reduce_row_passes_the_authoring_validator(
 
 def test_every_arch_run_of_the_dq_op_authors_the_shared_reduce_dispatch() -> None:
     gfx950 = _split()[Path("sdpa_bwd_dq")]
-    gfx11 = gd.build_documents(_gfx11_rows(), GFX11)[Path("sdpa_bwd_dq")]
+    gfx11 = _build(_gfx11_rows(), GFX11)[Path("sdpa_bwd_dq")]
     name = "flydsl_sdpa_bwd_dq_reduce.udd.json"
     assert gfx950[name] == gfx11[name]
 
@@ -570,7 +586,7 @@ def test_a_dq_row_with_only_a_tailzero_companion_is_dq_then_tailzero_on_the_plai
 def test_a_merged_row_launches_merged_then_tailzero_across_folders() -> None:
     row = _entry("sdpa_bwd_merged", "sdpa_bwd_merged_a", gqa_pack=0, block_q=-1)
     crossing = _tailzero(ARCH, file="../../sdpa_bwd_dq/gfx950/tz.hsaco")
-    folders = gd.build_documents([_with_companions(row, {"tailzero": crossing})], ARCH)
+    folders = _build([_with_companions(row, {"tailzero": crossing})], ARCH)
     (kernel,) = folders[Path("sdpa_bwd_merged") / ARCH][
         "flydsl_sdpa_bwd_merged.kdp.json"
     ]["kernelDescriptors"]
@@ -585,7 +601,7 @@ def test_a_packed_row_without_a_valid_block_q_is_refused(op: str, block_q) -> No
     knobs = {} if block_q is None else {"block_q": block_q}
     rows = [_entry(op, f"{op}_packed", gqa_pack=1, **knobs)]
     with pytest.raises(gd.HkpPackError, match="block_q"):
-        gd.build_documents(rows, ARCH)
+        _build(rows, ARCH)
 
 
 @pytest.mark.parametrize("block_q", [1, 32, 64])
@@ -890,7 +906,7 @@ def test_the_dq_op_ships_its_reduce_and_u2_packs_side_by_side() -> None:
     bias = bias._replace(companions={**bias.companions, "dbias_reduce": companion})
     hv = _dq_row("hv11", "dq", hv_tailzero, grid="g", has_bias=0)
     rows = [*others, bias, hv]
-    pack = gd.build_documents(rows, GFX11)[Path("sdpa_bwd_dq") / GFX11]
+    pack = _build(rows, GFX11)[Path("sdpa_bwd_dq") / GFX11]
     assert sorted(pack) == [
         "flydsl_sdpa_bwd_dq.kdp.json",
         f"{GFX11}.dq_u2.kdp.json",
@@ -908,7 +924,7 @@ def test_every_arch_run_of_the_dq_and_dkdv_ops_authors_the_shared_u2_dispatches(
     None
 ):
     gfx950 = _split()
-    gfx11 = gd.build_documents(_gfx11_rows(), GFX11)
+    gfx11 = _build(_gfx11_rows(), GFX11)
     for op, name in (
         ("sdpa_bwd_dq", "flydsl_sdpa_bwd_dq_u2.udd.json"),
         ("sdpa_bwd_dkdv", "flydsl_sdpa_bwd_dkdv_u2.udd.json"),

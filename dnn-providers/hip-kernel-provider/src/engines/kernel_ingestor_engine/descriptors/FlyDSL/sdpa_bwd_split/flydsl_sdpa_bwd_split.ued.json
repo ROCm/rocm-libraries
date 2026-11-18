@@ -8,7 +8,25 @@
   },
   "shared_workspace": "ws.bytes",
   "predict_engine": {
-    "default": "cce91ef0-6b53-5888-ab97-18aa6f8cec29"
+    "default": "cce91ef0-6b53-5888-ab97-18aa6f8cec29",
+    "gfx1100": [
+      "2f72a2a4-b453-40e2-99e7-d258a11647b1"
+    ],
+    "gfx1101": [
+      "4d38746f-8c75-4739-96bd-90b51ffe8734"
+    ],
+    "gfx1151": [
+      "8fadeff7-b607-4cbd-9f48-f4cd8baf5b6e"
+    ],
+    "gfx90a": [
+      "a3d658af-8426-41b6-952d-3c68622ed3be"
+    ],
+    "gfx942": [
+      "ccc15f6d-430a-4e0b-aea3-f6bca744bf80"
+    ],
+    "gfx950": [
+      "7c25b74a-0f0b-491d-98de-1a4781d46c5a"
+    ]
   },
   "slots": [
     {

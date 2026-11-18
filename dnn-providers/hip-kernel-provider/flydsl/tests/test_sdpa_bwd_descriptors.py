@@ -112,7 +112,8 @@ def documents(tmp_path, monkeypatch):
     monkeypatch.setattr(gd, "verify_generic", lambda *args: None)
     _write_manifest(tmp_path, "sdpa_bwd_merged", MERGED_KNOBS, "fmha_bwd_merged")
     _write_manifest(tmp_path, "sdpa_cdna", SIBLING_KNOBS, "sdpa_cdna_kernel")
-    folders = gd.build_documents(gd.collect(tmp_path, ARCH), ARCH)
+    # The manifests' tree, not the shipped content: synthetic rows fingerprint their own engine id.
+    folders = gd.build_documents(gd.collect(tmp_path, ARCH), ARCH, tmp_path)
     return folders
 
 
