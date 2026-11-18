@@ -1214,6 +1214,9 @@ int main(int argc, const char* argv[])
     // Pointer-array batches: the kernels take one pointer per batch (batchA/B/C/D) instead of the
     // scalar pointers, so every redirected D also needs its own pointer array on the device.
     std::vector<std::vector<std::shared_ptr<void>>> fullBatchD; // [device][rotating slot]
+    // One host word per device: the target of the stream write that publishes a device's writes
+    // into another device's D (see launchAll).
+    std::vector<std::shared_ptr<void>> publishWords; // [device]
     auto attachFullOutput = [&](ContractionProblem* problem, size_t firstSlot, size_t endSlot) {
         if(problemFactory.numSlices() < 2)
             return;
@@ -1653,6 +1656,37 @@ int main(int argc, const char* argv[])
                                     rotationLaunchIdx++;
                                 };
 
+                                // Whoever writes memory of another device publishes it, as
+                                // hipBLASLt's PartitionedGemm::run() does: every device but the
+                                // owner of a shared D, and every device of an OutputPeerD kernel.
+                                // A stream write after the kernels makes those writes visible to
+                                // the other devices.
+                                auto const* splitGemm
+                                    = dynamic_cast<ContractionProblemGemm const*>(problem);
+                                const bool split = problemFactory.numSlices() > 1;
+                                const bool sharedD
+                                    = split && args["split-placement"].as<std::string>()[3] == 'S';
+                                const bool peerD   = split && splitGemm && splitGemm->outputPeerD();
+                                auto       publish = [&](size_t d) {
+                                    if(!peerD && !(sharedD && d > 0))
+                                        return;
+                                    if(publishWords.size() < active.size())
+                                        publishWords.resize(active.size());
+                                    if(!publishWords[d])
+                                    {
+                                        void* word = nullptr;
+                                        HIP_CHECK_EXC(hipHostMalloc(&word,
+                                                                    sizeof(uint64_t),
+                                                                    hipHostMallocCoherent
+                                                                        | hipHostMallocMapped));
+                                        publishWords[d] = std::shared_ptr<void>(word, [](void* q) {
+                                            static_cast<void>(hipHostFree(q));
+                                        });
+                                    }
+                                    HIP_CHECK_EXC(hipStreamWriteValue64(
+                                        active[d]->stream, publishWords[d].get(), 1, 0));
+                                };
+
                                 // One counter across warmups, the profiler run and every sync.
                                 size_t launchIdx = 0;
                                 auto   launchAll = [&](TimingEvents const* startEvents,
@@ -1672,6 +1706,7 @@ int main(int argc, const char* argv[])
                                         else
                                             HIP_CHECK_EXC(ctx.adapter->launchKernels(
                                                 launch[d], ctx.stream, nullptr, nullptr));
+                                        publish(d);
                                     }
                                 };
 
