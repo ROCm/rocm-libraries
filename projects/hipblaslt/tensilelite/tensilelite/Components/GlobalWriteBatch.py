@@ -4455,10 +4455,11 @@ class GlobalWriteBatchWriter:
       module.add(SNop(waitState=9, comment="STAGGER_MARK arm=9 WOVEN store (staggered)"))
     staggered = self._staggerStoreActive() and pairIdx >= self._staggerStartPair()
     vPack = self._pairPackQuad(pairIdx)
-    vAddrSlot = self._pairAddrSlot(pairIdx) if staggered else None
+    hoistVoff = staggered and self._cachelineAlignVoffHoistKey(addrCalc) is not None
+    vAddrSlot = self.PLAIN_ADDR if hoistVoff else (self._pairAddrSlot(pairIdx) if staggered else None)
     phase1 = self._emit16bitSubtilePairedStorePhase1(
       addrCalc, sumIdx0, sumIdx1, prefixOffset, tt0=tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN,
-      vPackOverride=vPack, vAddrScratchOverride=vAddrSlot)
+      vPackOverride=vPack, vAddrScratchOverride=None if hoistVoff else vAddrSlot, skipAddr=hoistVoff)
     module.add(phase1)
     gap = Module(f"PlsinGap_pair{pairIdx}")
     self._weaveEmitGroup(gap, pairIdx + self._weaveLookahead())
@@ -4482,7 +4483,7 @@ class GlobalWriteBatchWriter:
     self._advancePairPackQuad()
     return module
 
-  def _emit16bitSubtilePairedStorePhase1(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int, tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0, interior: bool = False, vPackOverride=None, vAddrScratchOverride=None) -> Module:
+  def _emit16bitSubtilePairedStorePhase1(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int, tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0, interior: bool = False, vPackOverride=None, vAddrScratchOverride=None, skipAddr: bool = False) -> Module:
     """Phase 1 (issue) of the paired dwordx4 store — see _emit16bitSubtilePairedStore.
 
     Emits, with NO s_barrier and NO buffer_store:
@@ -4596,7 +4597,11 @@ class GlobalWriteBatchWriter:
                        and self.parentWriter.states.subtileHoistedAddrDVgpr == addrDVgpr
                        and (nGroupInvariant
                             or self.parentWriter.states.subtileHoistedAddrBlockN == blockIdxN))
-    if addrAlreadyLive:
+    if skipAddr:
+      # Woven cacheline align with hoisted voffsets: the store address does not depend on the pair
+      # (the pair's M offset rides the MUBUF immediate), so nothing is computed per pair.
+      module.addComment1("store address hoisted (woven cacheline align): no per-pair address")
+    elif addrAlreadyLive:
       module.addComment1(f"reuse hoisted dwordx4 base in v{vAddrScratch} (addrDVgpr={addrDVgpr}, N={blockIdxN})")
     elif addrScaleShift:
       module.add(VLShiftRightB32(dst=vgpr(vAddrScratch), shiftHex=addrScaleShift,
@@ -4606,7 +4611,10 @@ class GlobalWriteBatchWriter:
     else:
       module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(addrDVgpr), src1=vgpr(vRowDelta),
                          comment=f"adjusted D addr = addrDVgpr + {deltaStr}"))
-    if hoistAddr:
+    if not skipAddr and vAddrScratch in (self.cvtVgprStruct.vgprAddrScratch,
+                                         getattr(self.cvtVgprStruct, "vgprPairAddrRing", -1)):
+      self.parentWriter.states.subtileCachelineAlignVoffHoisted = None   # that register was just rewritten
+    if hoistAddr and not skipAddr:
       self.parentWriter.states.subtileHoistedAddrArm = self.parentWriter.states.subtileStoreArmId
       self.parentWriter.states.subtileHoistedAddrDVgpr = addrDVgpr
       self.parentWriter.states.subtileHoistedAddrBlockN = blockIdxN
@@ -5125,6 +5133,23 @@ class GlobalWriteBatchWriter:
             and getattr(self, "_permlane16Active", False)
             and bool(storeCachelineAlignEnabled(self.kernel)))
 
+  PLAIN_ADDR = "plain"   # pending-store address slot: no register, computed at the store
+
+  def _cachelineAlignVoffHoistKey(self, addrCalc):
+    """Key under which the woven cacheline align's two blended store addresses stay valid, or None when
+    the per-pair address is not invariant (then every pair keeps its own address slot).
+    Invariant when addrDVgpr is materialized once and rows/N groups advance through SrdD."""
+    c = self.cvtVgprStruct
+    states = self.parentWriter.states
+    if getattr(c, "vgprPairAddrRing", -1) < 0 or getattr(c, "vgprCachelineAlignTmp", -1) < 0:
+      return None
+    if states.bpeCexternal > states.bpeCexternalGSU1:
+      return None
+    if not (self.ss.optSingleColVgpr and self.ss.optSrdIncForRow
+            and getattr(self.ss, "singleColDAddrUpdated", False)):
+      return None
+    return (getattr(states, "subtileStoreArmId", 0), addrCalc.addrDVgpr)
+
   def _staggerStartPair(self) -> int:
     """First pairIdx at which staggering begins. The cacheline align staggers from the first pair."""
     return 0
@@ -5170,6 +5195,8 @@ class GlobalWriteBatchWriter:
       return True
     if abs(heldPack - nextPack) < 4:
       return True
+    if heldAddr == self.PLAIN_ADDR or _meta.get("hoist"):
+      return False   # hoisted voffsets: a pair's prep writes no address register
     return self._pairAddrSlot(pairIdx) == heldAddr
 
   def _cachelineAlignPartners(self, pendA, pendB) -> bool:
@@ -5188,7 +5215,9 @@ class GlobalWriteBatchWriter:
       return False
     if self._deferredSrdDIncs():
       return False
-    if not isinstance(qA, int) or not isinstance(qB, int) or abs(qA - qB) < 4 or aA == aB:
+    if not isinstance(qA, int) or not isinstance(qB, int) or abs(qA - qB) < 4:
+      return False
+    if (aA == self.PLAIN_ADDR) != (aB == self.PLAIN_ADDR) or (aA == aB and aA != self.PLAIN_ADDR):
       return False
     bpeCurr = self.parentWriter.states.bpeCexternal
     bpeDest = self.parentWriter.states.bpeCexternalGSU1
@@ -5210,6 +5239,18 @@ class GlobalWriteBatchWriter:
     module = Module("16bitSubtileStaggerCachelineAlign")
     if __import__("os").environ.get("STORE_CACHELINE_ALIGN_MARK"):
       module.add(SNop(waitState=13, comment="STAGGER_MARK=13 align blend entry"))
+    hoist = aA == self.PLAIN_ADDR
+    key = self._cachelineAlignVoffHoistKey(addrA) if hoist else None
+    voffLive = hoist and self.parentWriter.states.subtileCachelineAlignVoffHoisted == key
+    if hoist:
+      # Hoisted voffsets: both blended store addresses are the same for every cacheline align of this
+      # store (only the MUBUF offset and SrdD change), so build them once, at the first cacheline align.
+      aA, aB = self.cvtVgprStruct.vgprAddrScratch, self.cvtVgprStruct.vgprPairAddrRing
+    if hoist and not voffLive:
+      # Emitted here, ahead of the data blend: the address blend below reads this register
+      # through DPP, and a DPP read needs 2 wait states after a VALU write to its source.
+      module.add(VAddU32(dst=vgpr(aA), src0=vgpr(addrA.addrDVgpr), src1=vgpr(self.cvtVgprStruct.vgprPermAddr),
+                         comment="align voff (once): adjusted D addr = addrDVgpr + (lane_group&1)*12rows"))
     mS = self._epilogScratchSgpr(self.laneSGPRC)
     module.add(SMovB32(dst=sgpr(mS), src=hex(0x55555555), comment="even-lane select mask lo32"))
     if self.laneSGPRC >= 2:
@@ -5225,6 +5266,13 @@ class GlobalWriteBatchWriter:
                              comment=f"align d{k}: store1 even<-A odd<-B[0,0,2,2] tt0={tt0A}"))
       module.add(VCndMaskB32(dst=rB, src0=rB, src1=vgpr(T), src2=VCC(),
                              comment=f"align d{k}: store2 even<-A[1,1,3,3] odd<-B tt0={tt0B}"))
+    if voffLive:
+      module.addComment1(f"align voffsets hoisted: store1 v{aA}, store2 v{aB}")
+      module.add(self._emit16bitSubtilePairedStorePhase2b(addrA, tt0=tt0A, forceSlc=forceSlc,
+                                                          vPackOverride=qA, vAddrScratchOverride=aA))
+      self._pendingPhase2b = (addrA, tt0A, forceSlc, qB, aB, idxB,
+                              {"blockIdxN": metaB["blockIdxN"], "aligned": True, "hoist": True})
+      return module
     module.add(VMovB32(dst=vgpr(T), src=vgpr(aA), dpp=DPPModifiers(quad_perm=[1,1,3,3]),
                        comment="align voff2: addr perm [1,1,3,3]"))
     module.add(VAddU32(dst=vgpr(aB), src0=vgpr(aA), src1=hex(half), comment=f"align voff2: addr + {half}B"))
@@ -5240,8 +5288,10 @@ class GlobalWriteBatchWriter:
     module.add(self._emit16bitSubtilePairedStorePhase2b(addrA, tt0=tt0A, forceSlc=forceSlc,
                                                         vPackOverride=qA, vAddrScratchOverride=aA))
     # store 2 = quad B / slot B, still at A's offset and soffset: pending.
+    if hoist:
+      self.parentWriter.states.subtileCachelineAlignVoffHoisted = key
     self._pendingPhase2b = (addrA, tt0A, forceSlc, qB, aB, idxB,
-                            {"blockIdxN": metaB["blockIdxN"], "aligned": True})
+                            {"blockIdxN": metaB["blockIdxN"], "aligned": True, "hoist": hoist})
     return module
 
   def _commitPendingPhase2b(self, pending=None):
@@ -5258,6 +5308,12 @@ class GlobalWriteBatchWriter:
       return Module("16bitSubtilePairedStorePhase2bEmpty")
     addrCalc, tt0, forceSlc, vPack, vAddrSlot, _pairIdx, _meta = pending
     module = Module("16bitSubtilePairedStorePhase2bCommit")
+    if vAddrSlot == self.PLAIN_ADDR:
+      # Unaligned store under hoisted voffsets: its plain address goes through the cacheline align temp.
+      vAddrSlot = self.cvtVgprStruct.vgprCachelineAlignTmp
+      module.add(VAddU32(dst=vgpr(vAddrSlot), src0=vgpr(addrCalc.addrDVgpr),
+                         src1=vgpr(self.cvtVgprStruct.vgprPermAddr),
+                         comment="adjusted D addr = addrDVgpr + (lane_group&1)*12rows (unaligned store)"))
     module.add(self._emit16bitSubtilePairedStorePhase2b(addrCalc, tt0=tt0, forceSlc=forceSlc,
                                                         vPackOverride=vPack, vAddrScratchOverride=vAddrSlot))
     incs = self._deferredSrdDIncs()
@@ -5298,6 +5354,7 @@ class GlobalWriteBatchWriter:
       forceSlc:     force the slc bit regardless of NonTemporalD.
     """
     module = Module("16bitSubtileScalarStore")
+    self.parentWriter.states.subtileCachelineAlignVoffHoisted = None   # reuses the address scratch
     isFp16 = self.kernel["ProblemType"]["DestDataType"].isHalf()
     # An orphan/scalar store changes the addressing context; drop any
     # hoisted paired-store base so the next paired store recomputes vAddrScratch.

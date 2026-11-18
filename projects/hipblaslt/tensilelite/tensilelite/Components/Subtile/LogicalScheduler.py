@@ -5569,6 +5569,7 @@ class LogicalScheduler:
             writer.states.subtileWeavePairCounter = 0
             writer.states.subtileWeaveEmitted = set()
             writer.states.subtilePendingPhase2b = None
+            writer.states.subtileCachelineAlignVoffHoisted = None
             writer.states.subtileDeferredSrdDIncs = []
             writer.states.subtileWeaveCaptureInstances = [] if weaveGroups is not None else None
             writer.states.subtileWeaveCaptureCurrent = None
@@ -5602,6 +5603,7 @@ class LogicalScheduler:
                     writer.states.subtileWeavePairCounter = 0
                     writer.states.subtileWeaveEmitted = set()
                     writer.states.subtilePendingPhase2b = None
+                    writer.states.subtileCachelineAlignVoffHoisted = None
                     writer.states.subtileDeferredSrdDIncs = []
                     writer.states.subtileWeaveCaptureInstances = [] if weaveGroups is not None else None
                     writer.states.subtileWeaveCaptureCurrent = None
