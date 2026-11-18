@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 #include <optional>
 
@@ -157,6 +158,139 @@ TEST(TestGfx942AttentionUnified3dGeometry, IndicesFitInt32IsTotal)
     EXPECT_FALSE(gfx942Unified3dIndicesFitInt32(4, -1, 16, 128));
     EXPECT_FALSE(gfx942Unified3dIndicesFitInt32(4, 32, 0, 128));
     EXPECT_FALSE(gfx942Unified3dIndicesFitInt32(4, 32, 16, 0));
+}
+
+namespace
+{
+
+/// Does the workspace function lay the shape out, or refuse it with a plugin exception?
+bool workspaceAdmits(int64_t batch, int64_t hq, int64_t numSegments, int64_t headSize)
+{
+    try
+    {
+        static_cast<void>(gfx942AttentionUnified3dWorkspace(batch, hq, numSegments, headSize));
+        return true;
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException&)
+    {
+        return false;
+    }
+}
+
+/// An independent statement of the rule: every factor positive and the product at most 2^31.
+/// It divides instead of multiplying, so it shares nothing with the code under test.
+bool referenceFits(std::initializer_list<int64_t> factors)
+{
+    constexpr int64_t LIMIT = int64_t{1} << 31;
+    int64_t product = 1;
+    for(const int64_t factor : factors)
+    {
+        if(factor <= 0 || product > LIMIT / factor)
+        {
+            return false;
+        }
+        product *= factor;
+    }
+    return true;
+}
+
+} // namespace
+
+// The workspace function lays out the same segm_output the kernels index with i32 offsets,
+// so it holds the same boundary as the matcher's predicate: exactly 2^31 elements lays out,
+// one more is refused with a plugin exception.
+// Defence in depth: on the shipped path the matcher and prepare() refuse first, so a direct
+// caller of the workspace function is the one who reaches this.
+TEST(TestGfx942AttentionUnified3dGeometry, WorkspaceAdmitsTwoToThe31ElementsAndRefusesOneMore)
+{
+    // segm_output: 16384 * 32 * 16 * 256 = 2^31 elements.
+    EXPECT_TRUE(workspaceAdmits(16384, 32, 16, 256));
+    // One batch row more is 2^31 + 2^17 elements.
+    EXPECT_FALSE(workspaceAdmits(16385, 32, 16, 256));
+    // One element past 2^31, reached by the batch alone.
+    EXPECT_FALSE(workspaceAdmits((int64_t{1} << 31) + 1, 1, 1, 1));
+}
+
+// 274177 * 67280421310721 = 2^64 + 1, which wraps to exactly 1 in 64 bits. A product taken
+// without an overflow check would see one tiny scratch and lay it out; the true size is
+// astronomically past the index limit.
+TEST(TestGfx942AttentionUnified3dGeometry, WorkspaceRefusesAProductThatWrapsToOne)
+{
+    EXPECT_FALSE(workspaceAdmits(274177, 67280421310721, 1, 1));
+    EXPECT_FALSE(workspaceAdmits(1, 274177, 67280421310721, 1));
+    EXPECT_FALSE(workspaceAdmits(1, 1, 274177, 67280421310721));
+}
+
+TEST(TestGfx942AttentionUnified3dGeometry, WorkspaceRefusesNonPositiveDimensions)
+{
+    EXPECT_FALSE(workspaceAdmits(0, 32, 16, 128));
+    EXPECT_FALSE(workspaceAdmits(-1, 32, 16, 128));
+    EXPECT_FALSE(workspaceAdmits(4, 0, 16, 128));
+    EXPECT_FALSE(workspaceAdmits(4, -1, 16, 128));
+    EXPECT_FALSE(workspaceAdmits(4, 32, 0, 128));
+    EXPECT_FALSE(workspaceAdmits(4, 32, -1, 128));
+    EXPECT_FALSE(workspaceAdmits(4, 32, 16, 0));
+    EXPECT_FALSE(workspaceAdmits(4, 32, 16, -1));
+}
+
+// The matcher refuses with gfx942Unified3dIndicesFitInt32 and the launch path lays out with
+// gfx942AttentionUnified3dWorkspace. They must refuse exactly the same shapes, or a shape one
+// accepts becomes silent corruption in the other.
+TEST(TestGfx942AttentionUnified3dGeometry, WorkspaceAndMatcherPredicateRefuseTheSameShapes)
+{
+    struct Shape
+    {
+        int64_t batch;
+        int64_t hq;
+        int64_t numSegments;
+        int64_t headSize;
+    };
+    constexpr std::array<Shape, 10> SHAPES{{
+        {1, 1, 1, 1},
+        {4, 32, 16, 128},
+        {16384, 32, 16, 256}, // exactly 2^31 elements
+        {16385, 32, 16, 256}, // 2^31 + 2^17
+        {4097, 128, 16, 256}, // the default-path case, past the limit
+        {4097, 128, 8, 256}, // half of it
+        {int64_t{1} << 31, 1, 1, 1},
+        {(int64_t{1} << 31) + 1, 1, 1, 1},
+        {0, 32, 16, 128},
+        {274177, 67280421310721, 1, 1},
+    }};
+    for(const auto& s : SHAPES)
+    {
+        SCOPED_TRACE(::testing::Message() << "batch " << s.batch << " hq " << s.hq << " nseg "
+                                          << s.numSegments << " D " << s.headSize);
+        EXPECT_EQ(workspaceAdmits(s.batch, s.hq, s.numSegments, s.headSize),
+                  gfx942Unified3dIndicesFitInt32(s.batch, s.hq, s.numSegments, s.headSize));
+    }
+}
+
+// The reference above tests segm_output, segm_max/expsum and Q/O separately; the predicate
+// tests segm_output only, because it is the largest. Check the predicate against that
+// independent rule over a grid, so the bound can live in one place without losing a case.
+// 2^31 is among the values, to sit on both sides of the limit.
+TEST(TestGfx942AttentionUnified3dGeometry, SegmOutputIsTheOnlyBoundThatBinds)
+{
+    constexpr std::array<int64_t, 6> VALUES{1, 7, 4097, 65536, int64_t{1} << 20, int64_t{1} << 31};
+    for(const int64_t b : VALUES)
+    {
+        for(const int64_t hq : VALUES)
+        {
+            for(const int64_t n : VALUES)
+            {
+                for(const int64_t d : VALUES)
+                {
+                    const bool expected = referenceFits({b, hq, n, d}) // segm_output
+                                          && referenceFits({b, hq, n}) // segm_max, segm_expsum
+                                          && referenceFits({b, hq, d}); // Q, O
+                    SCOPED_TRACE(::testing::Message()
+                                 << "batch " << b << " hq " << hq << " nseg " << n << " D " << d);
+                    EXPECT_EQ(gfx942Unified3dIndicesFitInt32(b, hq, n, d), expected);
+                }
+            }
+        }
+    }
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

@@ -350,9 +350,12 @@ struct UnifiedAttentionSegmentScratchLayout
     std::size_t endOffset = 0;
 };
 
+/// One past the largest element offset a signed 32-bit index reaches (2^31).
+inline constexpr int64_t UNIFIED_ATTENTION_I32_INDEX_LIMIT = int64_t{1} << 31;
+
 /**
  * @brief The split-KV segment scratch every unified 3D (segment + reduce) pack lays out,
- *        starting at @p base.
+ *        starting at @p base, or nullopt when the kernels cannot address it.
  *
  * Restates `kernels/common/attention_unified.py::_attention_3d_workspace_specs`:
  *
@@ -360,22 +363,63 @@ struct UnifiedAttentionSegmentScratchLayout
  *     segm_max     f32 [total_q, Hq, num_segments]
  *     segm_expsum  f32 [total_q, Hq, num_segments]
  *
- * with @p rows = `total_q * Hq * num_segments`. Each section starts on a 256-byte boundary,
- * so @p base must be one. The caller validates the dimensions (positive, and `rows * D`
- * representable); this only places the sections.
+ * Each section starts on a 256-byte boundary, so @p base must be one.
+ *
+ * This is the one place the 32-bit bound lives. The kernels index these arrays with signed
+ * 32-bit element offsets, and a tensor of N elements reaches offset N - 1: exactly 2^31
+ * elements still addresses, one more wraps negative and the stores land before the buffer
+ * (the Python launch guard, `_check_3d_workspace_addr_width`, records the gfx942 check: 2^31
+ * elements completes, one more faults). The limit comes from the kernels' 32-bit indexing,
+ * not from the hardware, so wider offsets would lift it.
+ * The bound is on `segm_output`: it is the largest of the three, and Q and O
+ * `[total_q, Hq, D]` are no larger (equal when `num_segments` is 1), so bounding it bounds all of
+ * them. The dimensions come in raw, not as a row count, so a product that wraps is seen here.
+ *
+ * Blind spot: this assumes Q and O are dense `[total_q, Hq, D]` tensors, and it does not look
+ * at K and V, which the packs bound where they match (they use 64-bit bases).
+ *
+ * nullopt for a non-positive dimension, a product that overflows int64, or a `segm_output`
+ * past the bound. Total: never throws.
  */
-inline UnifiedAttentionSegmentScratchLayout
-    unifiedAttentionSegmentScratchLayout(std::size_t base, std::size_t rows, std::size_t headSize)
+inline std::optional<UnifiedAttentionSegmentScratchLayout> unifiedAttentionSegmentScratchLayout(
+    std::size_t base, int64_t totalQ, int64_t numQueryHeads, int64_t numSegments, int64_t headSize)
 {
+    if(totalQ <= 0 || numQueryHeads <= 0 || numSegments <= 0 || headSize <= 0)
+    {
+        return std::nullopt;
+    }
+    int64_t rows = 0;
+    int64_t outputElements = 0;
+    if(__builtin_mul_overflow(totalQ, numQueryHeads, &rows)
+       || __builtin_mul_overflow(rows, numSegments, &rows)
+       || __builtin_mul_overflow(rows, headSize, &outputElements)
+       || outputElements > UNIFIED_ATTENTION_I32_INDEX_LIMIT)
+    {
+        return std::nullopt;
+    }
+
+    const auto rowCount = static_cast<std::size_t>(rows);
     UnifiedAttentionSegmentScratchLayout s;
     s.segmOutputOffset = base;
-    s.segmOutputBytes = rows * headSize * UNIFIED_ATTENTION_SCRATCH_ELEMENT;
+    s.segmOutputBytes
+        = rowCount * static_cast<std::size_t>(headSize) * UNIFIED_ATTENTION_SCRATCH_ELEMENT;
     s.segmMaxOffset = s.segmOutputOffset + detail::alignWorkspaceSection(s.segmOutputBytes);
-    s.segmMaxBytes = rows * UNIFIED_ATTENTION_SCRATCH_ELEMENT;
+    s.segmMaxBytes = rowCount * UNIFIED_ATTENTION_SCRATCH_ELEMENT;
     s.segmExpsumOffset = s.segmMaxOffset + detail::alignWorkspaceSection(s.segmMaxBytes);
     s.segmExpsumBytes = s.segmMaxBytes;
     s.endOffset = s.segmExpsumOffset + detail::alignWorkspaceSection(s.segmExpsumBytes);
     return s;
+}
+
+/// Whether unifiedAttentionSegmentScratchLayout() can lay the scratch out: the same rule, for
+/// a matcher that has nothing to place.
+inline bool unifiedAttentionSegmentScratchFitsI32(int64_t totalQ,
+                                                  int64_t numQueryHeads,
+                                                  int64_t numSegments,
+                                                  int64_t headSize)
+{
+    return unifiedAttentionSegmentScratchLayout(0, totalQ, numQueryHeads, numSegments, headSize)
+        .has_value();
 }
 
 /// Where each workspace section sits, in bytes: the identity paged-KV metadata (exactly
@@ -431,36 +475,27 @@ inline std::optional<UnifiedAttention3DWorkspaceLayout>
                                       int64_t numSegments)
 {
     const auto identity = unifiedAttentionWorkspaceLayout(batch, seqLenKv, blockSize);
-    if(!identity.has_value() || seqLenQ <= 0 || numQueryHeads <= 0 || headSize <= 0
-       || numSegments <= 0)
-    {
-        return std::nullopt;
-    }
-
-    int64_t rows = 0;
-    int64_t outputElements = 0;
-    // The bound is on the largest offset, ``outputElements - 1``, not the element
-    // count: a scratch of exactly 2^31 elements reaches exactly INT32_MAX and still
-    // addresses. Every factor is positive above, so the subtraction cannot underflow.
-    if(__builtin_mul_overflow(batch, seqLenQ, &rows)
-       || __builtin_mul_overflow(rows, numQueryHeads, &rows)
-       || __builtin_mul_overflow(rows, numSegments, &rows)
-       || __builtin_mul_overflow(rows, headSize, &outputElements) || outputElements - 1 > INT32_MAX)
+    int64_t totalQ = 0;
+    if(!identity.has_value() || seqLenQ <= 0 || __builtin_mul_overflow(batch, seqLenQ, &totalQ))
     {
         return std::nullopt;
     }
 
     const auto scratch = unifiedAttentionSegmentScratchLayout(
-        identity->totalBytes, static_cast<std::size_t>(rows), static_cast<std::size_t>(headSize));
+        identity->totalBytes, totalQ, numQueryHeads, numSegments, headSize);
+    if(!scratch.has_value())
+    {
+        return std::nullopt;
+    }
     UnifiedAttention3DWorkspaceLayout layout;
     layout.identity = *identity;
-    layout.segmOutputOffset = scratch.segmOutputOffset;
-    layout.segmOutputBytes = scratch.segmOutputBytes;
-    layout.segmMaxOffset = scratch.segmMaxOffset;
-    layout.segmMaxBytes = scratch.segmMaxBytes;
-    layout.segmExpsumOffset = scratch.segmExpsumOffset;
-    layout.segmExpsumBytes = scratch.segmExpsumBytes;
-    layout.totalBytes = scratch.endOffset;
+    layout.segmOutputOffset = scratch->segmOutputOffset;
+    layout.segmOutputBytes = scratch->segmOutputBytes;
+    layout.segmMaxOffset = scratch->segmMaxOffset;
+    layout.segmMaxBytes = scratch->segmMaxBytes;
+    layout.segmExpsumOffset = scratch->segmExpsumOffset;
+    layout.segmExpsumBytes = scratch->segmExpsumBytes;
+    layout.totalBytes = scratch->endOffset;
     return layout;
 }
 
