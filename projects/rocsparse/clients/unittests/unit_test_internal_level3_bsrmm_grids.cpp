@@ -333,21 +333,23 @@ namespace
         }
     };
 
-    // C = alpha * A * B + beta * C through rocsparse_spmm (buffer size,
-    // preprocess, compute). The grid limits are shrunk for the compute stage,
-    // which is where the launches under test live.
+    // C = alpha * A * op(B) + beta * C through rocsparse_spmm (buffer size,
+    // preprocess, compute). B is k x n for trans_B = none and n x k otherwise,
+    // in order_B. The grid limits are shrunk for the compute stage, which is
+    // where the launches under test live.
     //
     // Returns an empty vector and records a gtest failure on any API error.
     template <typename T, typename I, typename J>
-    std::vector<double> device_spmm(rocsparse_handle           handle,
-                                    const HostSparse&          a,
-                                    int64_t                    n,
-                                    int64_t                    batch_count,
-                                    rocsparse_spmm_alg         alg,
-                                    rocsparse_order            order_B,
-                                    const std::vector<double>& b,
-                                    const std::vector<double>& c_in,
-                                    GridLimits                 limits)
+    std::vector<T> device_spmm(rocsparse_handle      handle,
+                               const HostSparse&     a,
+                               int64_t               n,
+                               int64_t               batch_count,
+                               rocsparse_spmm_alg    alg,
+                               rocsparse_operation   trans_B,
+                               rocsparse_order       order_B,
+                               const std::vector<T>& b,
+                               const std::vector<T>& c_in,
+                               GridLimits            limits)
     {
         // COO has a single index type, I.
         device_vector<I> d_row(convert<I>(a.row));
@@ -356,8 +358,8 @@ namespace
         device_vector<I> d_col_i(a.format == rocsparse_format_coo ? convert<I>(a.col)
                                                                   : std::vector<I>{0});
         device_vector<T> d_val(convert_values<T>(a.val));
-        device_vector<T> d_b(convert_values<T>(b));
-        device_vector<T> d_c(convert_values<T>(c_in));
+        device_vector<T> d_b(b);
+        device_vector<T> d_c(c_in);
 
         if(d_row.ptr == nullptr || d_col_j.ptr == nullptr || d_col_i.ptr == nullptr
            || d_val.ptr == nullptr || d_b.ptr == nullptr || d_c.ptr == nullptr)
@@ -412,9 +414,12 @@ namespace
             break;
         }
 
-        const int64_t ldb = (order_B == rocsparse_order_column) ? a.k : n;
+        const int64_t b_rows = (trans_B == rocsparse_operation_none) ? a.k : n;
+        const int64_t b_cols = (trans_B == rocsparse_operation_none) ? n : a.k;
+        const int64_t ldb    = (order_B == rocsparse_order_column) ? b_rows : b_cols;
         if(status != rocsparse_status_success
-           || rocsparse_create_dnmat_descr(&descrs.mat_b, a.k, n, ldb, d_b.ptr, dt_of<T>(), order_B)
+           || rocsparse_create_dnmat_descr(
+                  &descrs.mat_b, b_rows, b_cols, ldb, d_b.ptr, dt_of<T>(), order_B)
                   != rocsparse_status_success
            || rocsparse_create_dnmat_descr(
                   &descrs.mat_c, a.m, n, a.m, d_c.ptr, dt_of<T>(), rocsparse_order_column)
@@ -440,7 +445,7 @@ namespace
         auto spmm = [&](rocsparse_spmm_stage stage, size_t* buffer_size, void* buffer) {
             return rocsparse_spmm(handle,
                                   rocsparse_operation_none,
-                                  rocsparse_operation_none,
+                                  trans_B,
                                   &alpha,
                                   descrs.mat_a,
                                   descrs.mat_b,
@@ -491,8 +496,7 @@ namespace
             return {};
         }
 
-        const std::vector<T> c = to_host(d_c);
-        return std::vector<double>(c.begin(), c.end());
+        return to_host(d_c);
     }
 
     template <typename T>
@@ -539,11 +543,14 @@ namespace
         const std::vector<double> b    = make_dense(a.k * n * batch_count, 1);
         const std::vector<double> c_in = make_dense(a.m * n * batch_count, 4);
         const std::vector<double> want = host_spmm(a, n, batch_count, b, order_B, c_in);
+        const std::vector<T>      h_b  = convert_values<T>(b);
+        const std::vector<T>      h_c  = convert_values<T>(c_in);
 
         for(const GridLimits& l : limits)
         {
-            const std::vector<double> got
-                = device_spmm<T, I, J>(handle, a, n, batch_count, alg, order_B, b, c_in, l);
+            const std::vector<T> got_t = device_spmm<T, I, J>(
+                handle, a, n, batch_count, alg, rocsparse_operation_none, order_B, h_b, h_c, l);
+            const std::vector<double> got(got_t.begin(), got_t.end());
             ASSERT_EQ(got.size(), want.size());
 
             int64_t bad   = 0;
@@ -653,69 +660,18 @@ namespace
             h_c[i] = T(c_re[i], c_im[i]);
         }
 
-        const T alpha = static_cast<T>(alpha_value);
-        const T beta  = static_cast<T>(beta_value);
-
         for(const GridLimits& l : limits)
         {
-            device_vector<I> d_row(convert<I>(a.row));
-            device_vector<J> d_col(convert<J>(a.col));
-            device_vector<T> d_val(convert_values<T>(a.val));
-            device_vector<T> d_b(h_b);
-            device_vector<T> d_c(h_c);
-
-            SpmmDescrs descrs;
-            ASSERT_EQ(rocsparse_create_bsr_descr(&descrs.mat_a,
-                                                 a.mb,
-                                                 a.kb,
-                                                 a.nnz,
-                                                 a.dir,
-                                                 a.block_dim,
-                                                 d_row.ptr,
-                                                 d_col.ptr,
-                                                 d_val.ptr,
-                                                 it_of<I>(),
-                                                 it_of<J>(),
-                                                 rocsparse_index_base_zero,
-                                                 dt_of<T>()),
-                      rocsparse_status_success);
-            ASSERT_EQ(rocsparse_create_dnmat_descr(
-                          &descrs.mat_b, n, a.k, ldb, d_b.ptr, dt_of<T>(), order_B),
-                      rocsparse_status_success);
-            ASSERT_EQ(rocsparse_create_dnmat_descr(
-                          &descrs.mat_c, a.m, n, a.m, d_c.ptr, dt_of<T>(), rocsparse_order_column),
-                      rocsparse_status_success);
-
-            auto spmm = [&](rocsparse_spmm_stage stage, size_t* buffer_size, void* buffer) {
-                return rocsparse_spmm(handle,
-                                      rocsparse_operation_none,
-                                      rocsparse_operation_conjugate_transpose,
-                                      &alpha,
-                                      descrs.mat_a,
-                                      descrs.mat_b,
-                                      &beta,
-                                      descrs.mat_c,
-                                      dt_of<T>(),
-                                      rocsparse_spmm_alg_bsr,
-                                      stage,
-                                      buffer_size,
-                                      buffer);
-            };
-
-            size_t buffer_size = 0;
-            ASSERT_EQ(spmm(rocsparse_spmm_stage_buffer_size, &buffer_size, nullptr),
-                      rocsparse_status_success);
-            device_vector<char> d_buffer(buffer_size > 0 ? buffer_size : size_t(1));
-            ASSERT_EQ(spmm(rocsparse_spmm_stage_preprocess, &buffer_size, d_buffer.ptr),
-                      rocsparse_status_success);
-            {
-                ScopedMaxGridSizeXY clamp(handle, l.x, l.y);
-                ASSERT_EQ(spmm(rocsparse_spmm_stage_compute, &buffer_size, d_buffer.ptr),
-                          rocsparse_status_success);
-            }
-            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-
-            const std::vector<T> got = to_host(d_c);
+            const std::vector<T> got = device_spmm<T, I, J>(handle,
+                                                            a,
+                                                            n,
+                                                            1,
+                                                            rocsparse_spmm_alg_bsr,
+                                                            rocsparse_operation_conjugate_transpose,
+                                                            order_B,
+                                                            h_b,
+                                                            h_c,
+                                                            l);
             ASSERT_EQ(got.size(), want.size());
 
             const double eps   = std::numeric_limits<decltype(std::real(got[0]))>::epsilon();
