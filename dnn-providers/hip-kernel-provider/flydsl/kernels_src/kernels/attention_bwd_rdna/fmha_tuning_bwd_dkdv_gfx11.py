@@ -45,7 +45,7 @@ register and LDS arithmetic differs from `fmha_tuning_bwd_dkdv_gfx1201`:
   `hd / C` VGPRs (v16: a 16-column pack is 8 VGPRs, a 16-column f32 accumulator 8). The only column constraint is that `hd / C` is a
   multiple of 16; gfx1201's `D_STEPS % TEAM == 0` is not required here (it spreads both accumulators over the whole team).
 * LDS: Q and dO row-major, Q^T and dO^T (`transposed_source="tile"`), the per-row LSE and Delta of the Q block, and the team exchange
-  (one f32 slot of 32 lanes x 8 values per wave, a second buffer when the Q block holds two 16-row sub-tiles).
+  (one f32 slot of `PDS_SLOT_F32` = lanes x accumulator elements per wave (32 x 8 WMMA, 64 x 4 MFMA16), a second buffer when the Q block holds two 16-row sub-tiles).
 """
 
 from dataclasses import dataclass
@@ -53,13 +53,18 @@ from dataclasses import dataclass
 # One wave owns one WMMA M tile of KV rows. Not a knob: it is the instruction.
 ROWS_PER_WAVE = 16
 LDS_LIMIT = 65536
-WAVE_LANES = 32
+PDS_SLOT_F32 = 256  # one team-exchange slot: lanes x accumulator elements = 32 x 8 (WMMA) = 64 x 4 (MFMA16)
 # LDS row padding, in 16-bit elements: the value the register-pressure skeletons were measured with.
 LDS_PAD = 4
 # LDS element index granularity of every base (a base is a multiple of 8 elements = 16 B).
 _ALIGN = 8
 
 GENERIC_ARCHES = ("gfx11-generic", "gfx12-generic")
+MFMA16_ARCHES = ("gfx942", "gfx90a")
+GRID_ORDERS = ("kv_fastest", "head_fastest")
+# Dispatch-grid order of the dK/dV kernel: `kv_fastest` is the grid (kv_tile, head_k, batch): every shipped gfx11 object, and AOTriton's order on gfx90a and
+# gfx12. `head_fastest` (head_k, kv_tile, batch) is the order gfx950 measured faster and AOTriton's on gfx942.
+DEFAULT_GRID_ORDER = {"gfx942": "head_fastest"}
 LADDER = (16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256)
 
 # (split_head_dim, contraction_shards, num_waves, block_q) per hd tile: the initial register-pressure policy, re-measured at
@@ -77,6 +82,28 @@ POLICY = {
     192: (True, 2, 16, 16),
     224: (True, 2, 16, 16),
     256: (True, 2, 16, 16),
+}
+
+# MFMA16 (wave64): a 16-column pack is 2 VGPRs and a 16-column f32 accumulator 4, so no rung to 256 needs the role split; 4 waves = 256 threads.
+# (split_head_dim, contraction_shards, num_waves, block_q, transposed_source): measured on gfx90a against AOTriton T1-auto over hd 64, 128, 256
+# (f16 and bf16, plain and causal, S 512-4096, filled and under-filled): the transposed tiles are derived from the row-major ones (LDS 2-3x
+# smaller, so a 64-row Q block fits at hd <= 64 and the 8-wave schedule at hd >= 160); rungs 16-48 take the hd 64 row, 80-96 the hd 128
+# row, 160-224 the hd 256 row (checked on the unmeasured rungs against the policy default and the other two rows). Rung 512 splits the
+# head dim (C2, 8 waves) and derives the transposed tiles: `tile` would need 82,304 B at block_q 16 (over the 64 KiB cap), `derived`
+# 41,344 B; its schedules (16 waves, C4, 4-wave split) measured slower on gfx90a.
+POLICY_MFMA16 = {
+    16: (False, 1, 4, 64, "derived"),
+    32: (False, 1, 4, 64, "derived"),
+    48: (False, 1, 4, 64, "derived"),
+    64: (False, 1, 4, 64, "derived"),
+    80: (False, 1, 4, 32, "derived"),
+    96: (False, 1, 4, 32, "derived"),
+    128: (False, 1, 4, 32, "derived"),
+    160: (False, 1, 8, 16, "derived"),
+    192: (False, 1, 8, 16, "derived"),
+    224: (False, 1, 8, 16, "derived"),
+    256: (False, 1, 8, 16, "derived"),
+    512: (True, 2, 8, 16, "derived"),
 }
 
 SCHED_STRATEGIES = (
@@ -114,7 +141,7 @@ class LdsLayout:
     dotr_base: int
     dotr_stride: int
     rowq_base: int  # LSE (f32 x block_q) then Delta (f32 x block_q), as 2 * block_q f32 = 4 * block_q elements
-    pds_base: int  # team exchange; f32 slots, `pds_bufs` buffers of `num_waves` slots of 32 lanes x 8 values
+    pds_base: int  # team exchange; f32 slots, `pds_bufs` buffers of `num_waves` slots of `PDS_SLOT_F32` values
     pds_bufs: int
     pds_slot_f32: int
     total: int  # elements
@@ -131,7 +158,7 @@ def lds_layout(block_q, hd, hdv, num_waves, split_head_dim, transposed_source):
     rowq_base = _up(dotr_base + (hdv * dotr_stride if keep_tr else 0), _ALIGN)
     pds_base = _up(rowq_base + 4 * block_q, _ALIGN)
     pds_bufs = 2 if (split_head_dim and block_q > 16) else 1
-    pds_slot_f32 = WAVE_LANES * 8
+    pds_slot_f32 = PDS_SLOT_F32
     pds_elems = pds_bufs * num_waves * pds_slot_f32 * 2 if split_head_dim else 0
     return LdsLayout(
         qrm_base,
@@ -183,7 +210,12 @@ def default_block_q(want, hd, hdv, num_waves, split_head_dim, transposed_source)
 
 @dataclass(frozen=True)
 class BwdDkDvKnobs:
-    """The resolved configuration of one dK/dV object (the record `bwd_dkdv_knobs` returns)."""
+    """The resolved configuration of one dK/dV object (the record `bwd_dkdv_knobs` returns). `arch` selects the layout ABI
+    (`rdna_layout_gfx11.abi_for`) and the Philox width; `grid_order` the block-id decode and launch grid.
+    """
+
+    arch: str
+    grid_order: str  # "kv_fastest" | "head_fastest"
 
     num_waves: int
     waves_per_eu: int | None
@@ -217,8 +249,8 @@ def bwd_dkdv_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **
     rounded up to a whole number of teams. `block_q` is the policy's walked down until LDS fits. `legal` is false for a record that
     breaks a rule the Spec cannot see (LDS over 65,536 B, `BLOCK_KV` or a column slice not a multiple of 16).
     """
-    if arch not in GENERIC_ARCHES:
-        raise ValueError(f"arch {arch!r} is not a generic arch")
+    if arch not in GENERIC_ARCHES + MFMA16_ARCHES:
+        raise ValueError(f"arch {arch!r} is not a generic or MFMA16 arch")
     if dtype not in _DTYPES:
         raise ValueError(f"dtype {dtype!r} is not one of {_DTYPES}")
     unknown = set(pins) - {
@@ -233,12 +265,14 @@ def bwd_dkdv_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **
         "rne",
         "bias_f32",
         "u2",
+        "grid_order",
     }
     if unknown:
         raise ValueError(f"unknown dkdv knob(s) {sorted(unknown)}")
-    if tile not in POLICY:
+    policy = POLICY_MFMA16 if arch in MFMA16_ARCHES else POLICY
+    if tile not in policy:
         raise ValueError(f"no dK/dV policy for tile {tile}")
-    p_split, p_shards, p_waves, p_bq = POLICY[tile]
+    p_split, p_shards, p_waves, p_bq, *p_tsrc = policy[tile]
 
     split = bool(pins["split_head_dim"]) if "split_head_dim" in pins else p_split
     shards = (
@@ -248,7 +282,10 @@ def bwd_dkdv_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **
     )
     team = team_waves(split, shards)
     waves = int(pins["num_waves"]) if "num_waves" in pins else _up(p_waves, team)
-    tsrc = pins.get("transposed_source", "tile")
+    tsrc = pins.get("transposed_source", p_tsrc[0] if p_tsrc else "tile")
+    grid_order = pins.get("grid_order", DEFAULT_GRID_ORDER.get(arch, "kv_fastest"))
+    if grid_order not in GRID_ORDERS:
+        raise ValueError(f"grid_order {grid_order!r} is not one of {GRID_ORDERS}")
     sched = pins.get("sched_strategy", _DEFAULT_SCHED)
     if sched not in SCHED_STRATEGIES and sched != _DEFAULT_SCHED:
         raise ValueError(f"sched_strategy {sched!r}")
@@ -298,6 +335,8 @@ def bwd_dkdv_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **
     if lds > LDS_LIMIT:
         why.append(f"LDS {lds} B over the {LDS_LIMIT} B cap")
     return BwdDkDvKnobs(
+        arch=arch,
+        grid_order=grid_order,
         num_waves=waves,
         waves_per_eu=(int(pins["waves_per_eu"]) if "waves_per_eu" in pins else None),
         block_q=bq,

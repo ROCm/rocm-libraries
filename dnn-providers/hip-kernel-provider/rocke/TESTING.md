@@ -452,19 +452,78 @@ This gate and §4.4 overlap on purpose and neither subsumes the other:
   often an unnamed fatal error. This reports `(key, arch, flavor)` plus the
   diagnostic the probe recorded.
 
-### 4.6 Does the measured arch-domain artifact reproduce?
+### 4.6 Does the toolchain retain the baseline's support?
 
 The warning gate consumes committed measurements; it does not prove that this
-host's toolchain reproduces them. When the host compiler identity matches the
-provenance recorded in the committed column, the
+host's toolchain retains the recorded support. The existing
 `rocke_arch_domain_reproducibility` CTest runs
 `tools/gen_arch_domain.py --check` over the full intrinsic/architecture matrix
-and compares the result with that column. LLVM development builds with the same
-major can disagree about intrinsic availability and ABI, so a different compiler
-identity is explicitly unvalidated rather than compared as though it asked the
-same question. This is an artifact-reproduction gate backed by the host
-toolchain, not a Python unit test: it owns external compiler processes, a
-dedicated timeout and resource policy, and an explicit CTest skip result.
+for the host's LLVM flavor and checks a **monotonic support floor**, not exact
+snapshot equality. A formerly `ok` cell must still be `ok`; becoming unavailable,
+crashing, timing out, or losing a measurement fails. Previously accepted processor
+names must remain accepted too. Both `ok` and `arch_absent` records require an
+accepted processor; flavor-axis negatives and no-data can precede rejection.
+
+Every retained positive must also use the same **effective probe contract**:
+return/operand types, operand sources, and actual immediate/literal witnesses.
+The generator derives `probe_contracts` from the same operand plan used by single
+probes, positive batches, splits, and retries. A new `immarg` cannot turn the
+baseline's variable operand into constant zero and still claim an unchanged
+question. Canonical names, stripped attributes, and IR formatting are not this
+contract; there is no IR, assembly, or HSACO hash comparison here.
+
+A shared canonical column serializer keeps one named contract per line while
+leaving ordinary measurement sections pretty-printed. Both generation and
+pruning use it; a later tool run must not expand the metadata again. Every new
+positive key requires its own evidence-backed contract before comparison, not
+just keys present when the metadata was first introduced.
+
+Support gains and unknown-to-unavailable transitions pass and are reported.
+Unavailable-to-unknown transitions are reported as degraded measurement, not
+support loss; remaining no-data cells are explicitly not qualified. Diagnostic
+wording, canonical intrinsic names, and compiler identity do not define support.
+Compiler identity is retained and printed as provenance. Invalid probes,
+malformed data, missing coverage, and incompatible scope or probe methodology
+still fail. This is a real-toolchain gate, not a Python unit test: it owns
+external compiler processes, a dedicated timeout and resource policy, and an
+explicit environmental CTest skip result.
+
+`--check` never re-blesses the baseline. Reviewed gains must be recorded separately
+to protect them from future loss and update the runtime availability table. That
+table also controls lowering warnings/refusals, so a baseline update is a product
+policy change, not merely a way to make this test pass.
+
+#### Historical positive-probe contract recovery
+
+Comparison-only contracts extend the v1 envelope without changing runtime `Cell`
+lookup or the generated C++ availability table. Missing historical positive
+contracts fail comparison: recover the original question from the recorded
+compiler or auditable matching-source evidence, never infer it from a newer host
+or silently fill it with default witnesses.
+
+For a metadata-only recovery:
+
+1. Verify the recorded compiler or matching LLVM source identity and executable
+   provenance. Resolve the canonical declaration with that compiler's `opt`.
+2. Recover the historical probe builder from version history. Render the resolved
+   declaration with both the historical and contract-aware builders, using the
+   column's datalayout and original explicit witnesses. Compare complete module
+   bytes and check that the derived contract describes that same question,
+   including default immediates absent from optional `probe_imm`.
+3. Preserve every measurement field, compiler identity and unrelated contract.
+   Independently check the recovered record, positive-cell inventory and generated
+   runtime-table bytes. Support updates require their own review; metadata
+   recovery must not re-bless a loss or invent a measurement.
+4. Record the exact source/generator revisions, executable receipts, counts,
+   validation results and limitations in the PR description. Attribute compiler
+   and CI results to their tested snapshots, not a later untested head.
+
+This establishes a historical probe question, not a replay of the original
+compiler installation, a new support measurement or GPU numerical qualification.
+Newly measured positives must record their effective contracts from the live
+probe plan; they do not authorize guessing missing historical contracts.
+
+#### Execution and test coverage
 
 The gate is registered in both execution environments. A developer build runs
 the source tool against the source package data. Provider CI runs a packaged,
@@ -474,13 +533,16 @@ stages every input, CTest supplies artifact-relative paths, and the test never
 configures or reaches back into a source checkout.
 
 The result mapping distinguishes applicability from failure: no clang, no
-committed host-flavor column, a clang/resolved-flavor mismatch, or a compiler
-identity different from the column's provenance skips with a named reason. A
-partial or internally inconsistent LLVM installation fails. Flavor
-auto-detection errors, including unavailable COMGR evidence, also remain
+committed host-flavor column, or a clang/resolved-flavor mismatch skips with a
+named reason. A partial or internally inconsistent LLVM installation fails.
+Blank or `(unknown)` live clang/opt identities fail before probing, while a
+nonblank vendor-reworded banner is not automatically a flavor mismatch. The
+complete generated column is validated before either writing or comparing it,
+so invalid produced records cannot overwrite an existing reference.
+Flavor auto-detection errors, including unavailable COMGR evidence, also remain
 failures during this migration.
 
-The reproduction scheduler preserves exhaustive coverage while avoiding
+The probe scheduler preserves exhaustive coverage while avoiding
 redundant compiler startup. It batches declaration discovery, preflights each
 target once, and combines expected-positive calls per architecture. The
 committed artifact schedules those batches but cannot make them pass: every call
@@ -492,17 +554,25 @@ Expected crashes and timeouts whose normalized evidence still matches are not
 retried; changed evidence, unexpected verdicts, and unclassified outcomes still
 receive a contention-free retry.
 
-The fast structure and generator units remain source-only in
-`platform/tests/tools/test_arch_domain_artifact.py`. Normal pytest and the
+The broader structure and compiler-probe units remain source-only in
+`platform/tests/tools/test_arch_domain_artifact.py`. Host-only column and
+support-policy checks in `platform/tests/tools/test_arch_domain_support.py` run in
+both source pytest and the installed `rocke_pytest_*` CI parts, using the staged
+generator in installed artifacts. They read every column from the imported
+package, validate its records and filename/flavor agreement, and require canonical
+serialization without a compiler or active-flavor filter. The synthetic controls
+check loss-fail, gain-pass, invalid records, method/metadata guards, effective-probe
+contracts, and processor consistency for both gfx942 and gfx950 without a real
+compiler. Source-only CLI controls additionally check early live-provenance and
+final-document admission in write/check modes. Normal pytest and the
 `ROCKE_BACKEND=both` pytest pass do not re-run the compiler sweep. The dedicated
 CTest is categorized as standard in both build-tree and installed manifests, so
 installed-artifact CI can schedule the reproduction result without adding the
 external process sweep to the quick or FFM pytest pools. A named skip is not
-reproduction coverage: check the CTest result and reason, especially when the
-compiler identity differs from the committed provenance, its major differs from
-rocKE's resolved flavor, or no committed column exists. Keeping one generator
-implementation behind two thin registrations preserves local coverage while
-avoiding duplicated test logic.
+support-validation coverage: check the CTest result and reason, especially when the
+compiler's major differs from rocKE's resolved flavor or no committed column
+exists. Keeping one generator implementation behind two thin registrations
+preserves local coverage while avoiding duplicated test logic.
 
 **Kernel-author routing.** Ordinary kernel work does not need a separate focused
 run beyond the full pre-merge `tests/run_all.py`; once that runner has configured
@@ -677,7 +747,13 @@ the items about evenly by count. The split does not use the run time.
 `python -m pytest -p rocke.tests.ctest_shard --rocke-shard-from-gtest-env`.
 Every installed rocKE pytest entry starts its command with this variable,
 except the explicit gates. Use it for each new installed pytest entry. The
-plugin takes the shard from the first source that applies:
+configure stops with an error when an installed entry that runs pytest (its
+command runs `-m pytest`, or its program is `pytest`) does not start with the
+variable, or when an explicit gate loads the plugin. Without the variable, the
+entry would run all its items on every CI shard. The explicit gates are listed
+in `_ROCKE_EXPLICIT_PYTEST_GATES` in `library/tests/ctest_lists.cmake`; a new
+gate goes there too.
+The plugin takes the shard from the first source that applies:
 
 1. A non-blank `ROCKE_TEST_SHARD` (`i/n` or `i,j,.../n`, 0-based).
 2. `GTEST_SHARD_INDEX` and `GTEST_TOTAL_SHARDS` (0-based), only when the
@@ -1127,7 +1203,7 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 
 | # | Gap | Impact | Target |
 |---|---|---|---|
-| G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN, reference-contract, and GPU cohorts, but external tier selection does not currently enroll DSA and source tests outside the explicit CMake selections remain ungated; registration or adding a file under `library/tests/` does not establish CI coverage; the GDN/KDA host entry `rocke_library_gdn_pytest` is not registered on Windows (a slow case in `test_gdn_decode_fused.py`), so Windows runs no GDN/KDA decode host pytest (the KDA chunkwise IR hashes stay covered by `rocke_golden_static`); the TF32 conv build-and-lower matrices and comgr ISA checks (`rocke_library_conv_tf32_lowering_pytest`) are not registered on Windows either, to fit the Windows shard time, so Windows runs only the representative TF32 builds in `rocke_library_conv_tf32_pytest`; the GDN/KDA GPU numeric files skip on the Windows GPU lanes, which lack gfx950/gfx942 devices | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
+| G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN, reference-contract, and GPU cohorts, but external tier selection does not currently enroll DSA and source tests outside the explicit CMake selections remain ungated; registration or adding a file under `library/tests/` does not establish CI coverage; the GDN/KDA host entry `rocke_library_gdn_pytest` is not registered on Windows (a slow case in `test_gdn_decode_fused.py`), so Windows runs no GDN/KDA decode host pytest (the KDA chunkwise IR hashes stay covered by `rocke_golden_static`); the TF32 conv build-and-lower matrices and comgr ISA checks (`rocke_library_conv_tf32_lowering_pytest`) are not registered on Windows either, to fit the Windows shard time, so Windows runs only the representative TF32 builds in `rocke_library_conv_tf32_pytest`; on Windows, `rocke_library_attention_cpu_pytest` leaves out the gfx942 dense prefill host tests and their IR golden; the GDN/KDA GPU numeric files skip on the Windows GPU lanes, which lack gfx950/gfx942 devices | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
 | G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | `platform/tests/in_tree` runs the `benchmark/perf/tests` files in the `rocke_pytest_*` parts. `heuristics/tests` runs in no lane: it needs `pandas`, `sklearn` and `lightgbm`, which the CI images do not install. `test_wavescope_pmc.py` runs in no lane: its 30 s subprocess limit is unreliable on a loaded host, and the CI install lacks the `dsl_docs` script that it needs. Other `platform/python` test directories also run in no lane | Install the heuristics packages in CI, then list `rocke.heuristics.tests` in `test_in_tree_suites.py`; enroll the remaining directories |
 | G9 | **Legacy discovered pytest contains resource-bound work** | The affordable runner now excludes the largest marked matrices from execution and isolates selected files, but collection still imports and parameterizes every discovered module; additional unmarked structural/compiler cohorts remain in the default lane | Move each remaining resource-bound cohort behind a named structural/compiler CTest, then remove its transitional `exhaustive` marker |
 

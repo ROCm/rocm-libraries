@@ -184,7 +184,8 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
     [[maybe_unused]] const bool is_deterministic = problem.GetConv().attribute.deterministic;
 
     // AI heuristics (if enabled), then the default; the result is computed once per process
-    // (DefaultConfigCache), since the AI heuristics also build the full valid-kernel list.
+    // (DefaultConfigCache), since the AI heuristics also score their whole configuration
+    // vocabulary and ask CK about candidates on every call.
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     const bool ai_heuristics =
         &ctx != &GetDummyCtx() &&
@@ -192,13 +193,11 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
     const auto run_ai = [&]() {
         bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
-        auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
-            return loader.FillValidKernels(
-                CKSolverType::GrpConv3dWrw, p, p.GetInDataType(), try_tf32);
-        };
-
-        auto ck_val_creator = MakeCKValidatorCreator(
-            loader, CKSolverType::GrpConv3dWrw, problem.GetInDataType(), mode_use_tf32);
+        auto ck_val_creator = MakeCKValidatorCreator(loader,
+                                                     CKSolverType::GrpConv3dWrw,
+                                                     problem.GetInDataType(),
+                                                     mode_use_tf32,
+                                                     k3DWrwSolverConfig.uses_split_k);
 
         // Note: No KTN runner needed for 3D (supports_ktn = false)
         return RunAIHeuristics(k3DWrwSolverConfig,
@@ -206,7 +205,6 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
                                ctx,
                                problem,
                                is_deterministic,
-                               fill_valid_kernels,
                                nullptr,
                                ck_val_creator,
                                mode_use_tf32);

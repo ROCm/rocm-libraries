@@ -42,6 +42,10 @@
      ${HIPTENSOR_COMMON_TEST_SOURCES}
      ${CMAKE_CURRENT_SOURCE_DIR}/plan_lifetime_test.cpp
      )
+ add_hiptensor_unit_test(plan_cache_lru_test
+     ${HIPTENSOR_COMMON_TEST_SOURCES}
+     ${CMAKE_CURRENT_SOURCE_DIR}/plan_cache_lru_test.cpp
+     )
  add_hiptensor_unit_test(batched_contraction_test
      ${HIPTENSOR_COMMON_TEST_SOURCES}
      ${CMAKE_CURRENT_SOURCE_DIR}/batched_contraction_test.cpp
@@ -53,6 +57,9 @@ add_hiptensor_unit_test(elementwise_mode_test
 add_hiptensor_unit_test(elementwise_broadcast_test
     ${HIPTENSOR_COMMON_TEST_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_broadcast_test.cpp
+    )
+add_hiptensor_unit_test(device_init_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/device_init_test.cpp
     )
  # add_hiptensor_unit_test(interface_test
      # ${HIPTENSOR_COMMON_TEST_SOURCES}

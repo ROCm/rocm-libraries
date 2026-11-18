@@ -3,13 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <string>
-#include <vector>
-
 #include <gtest/gtest.h>
-
-#include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
-#include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
@@ -41,16 +35,10 @@ namespace
 
 using namespace hip_kernel_provider::kernel_ingestor_engine;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
-namespace ingestor = hipdnn_plugin_sdk::ingestor;
 
 /// The metric and architecture key the shipped UHDs declare.
 constexpr const char* METRIC = "tflops";
 constexpr const char* ARCH = "gfx942";
-
-const ingestor::HeuristicDescriptor* find(const ModelMap& models)
-{
-    return findModel(models, METRIC, ARCH);
-}
 
 TEST(TestGfx942AttentionUnified3dModelBinding, TheBoundL2KernelRankerLoads)
 {
@@ -59,34 +47,8 @@ TEST(TestGfx942AttentionUnified3dModelBinding, TheBoundL2KernelRankerLoads)
 
 TEST(TestGfx942AttentionUnified3dModelBinding, TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)
 {
-    const auto& set = loadedSet(GFX942_ATTENTION_UNIFIED_3D_ENGINE_NAME);
-
-    const auto ids = boundIds(set.engine.predictEngine, ARCH);
-    if(ids.empty())
-    {
-        // No L1 ships. The check stays live: the day a UED binds one, the branches below
-        // hold it to the revision this build computes.
-        EXPECT_EQ(find(set.enginePredictionsByMetric), nullptr)
-            << "the UED binds no " << ARCH << " predict_engine model, yet one loaded";
-        return;
-    }
-
-    if(!packedTreeObligesLoad(ids, "L1 predict_engine"))
-    {
-        return;
-    }
-
-    const auto* model = find(set.enginePredictionsByMetric);
-    ASSERT_NE(model, nullptr) << "no " << METRIC << " predict_engine model for " << ARCH
-                              << " survived the loader's pre-flight; the engine reports no "
-                                 "prediction";
-    expectModelArtifactPresent(*model, "L1 predict_engine");
-
-    // The same call makeEngine() makes, on the same loaded set.
-    EXPECT_EQ(model->trainedAgainstSelectorRevision, ingestor::engineSelectorRevision(set))
-        << "GenericEngine refuses this model and reports no prediction: the shipped UHD was "
-           "trained against another selector revision than this build computes. Retrain the "
-           "L1 against this build, or find what changed the code objects.";
+    expectBoundPredictorMatchesThisBuild(
+        loadedSet(GFX942_ATTENTION_UNIFIED_3D_ENGINE_NAME), METRIC, ARCH);
 }
 
 } // namespace
