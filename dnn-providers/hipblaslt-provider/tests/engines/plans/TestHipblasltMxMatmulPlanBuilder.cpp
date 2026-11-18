@@ -5,19 +5,16 @@
 
 #include <gtest/gtest.h>
 #include <hipblaslt/hipblaslt.h>
-#include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/DeviceQuery.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
-#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipblasltUtils.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 #include "TestWorkarounds.hpp"
-#include "engines/plans/HipblasltMxMatmulPlan.hpp"
 #include "engines/plans/HipblasltMxMatmulPlanBuilder.hpp"
 #include "engines/plans/MxArchSupport.hpp"
 #include "engines/plans/MxTestUtils.hpp"
@@ -744,52 +741,6 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsOnlyKContiguousOn
         EXPECT_FALSE(_builder.isApplicable(_handle, graph)) << toString(layout);
     }
 }
-
-#if WORKAROUND_ISSUE_14286
-// HIPBLASLT_USE_ROCROLLER=0 makes hipBLASLt route VEC32_UE8M0 problems to Tensile,
-// whose gfx950 MX kernels expect pre-swizzled scales and silently return wrong
-// results with natural ones. The plan must refuse that combination.
-TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsTensileWithNaturalScalesOnGfx950)
-{
-    if(!onArch("gfx950"))
-    {
-        GTEST_SKIP() << "gfx950-only check";
-    }
-    // hipBLASLt reads the variable once, at handle creation.
-    ScopedEnvironmentVariableSetter const forceTensile("HIPBLASLT_USE_ROCROLLER", "0");
-    HipdnnEnginePluginHandle tensileHandle;
-    ASSERT_EQ(hipblasLtCreate(&tensileHandle.hipblasltHandle), HIPBLAS_STATUS_SUCCESS);
-    hipdnn_data_sdk::utilities::ScopedResource<hipblasLtHandle_t> const ownedHandle(
-        tensileHandle.hipblasltHandle,
-        [](hipblasLtHandle_t h) { EXPECT_EQ(hipblasLtDestroy(h), HIPBLAS_STATUS_SUCCESS); });
-
-    auto fb = createMxGraphWithLayout(MxOperandLayout::K_K, DT::FP8_E4M3, DT::FLOAT);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
-    EXPECT_FALSE(_builder.isApplicable(tensileHandle, graph));
-
-    // The swizzled format feeds the same kernels correctly.
-    const auto& deqA
-        = graph.getNodeWrapper(0)
-              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::BlockScaleDequantizeAttributes>();
-    const auto& deqB
-        = graph.getNodeWrapper(1)
-              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::BlockScaleDequantizeAttributes>();
-    const auto& matmul
-        = graph.getNodeWrapper(2)
-              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::MatmulAttributes>();
-    std::unique_ptr<MxMatmulPlan> plan;
-    EXPECT_NO_THROW(plan = createMxMatmulPlan(tensileHandle,
-                                              deqA,
-                                              deqB,
-                                              matmul,
-                                              graph.getTensorMap(),
-                                              MxScaleFormat::SWIZZLED_GFX950));
-    if(plan != nullptr)
-    {
-        EXPECT_EQ(plan->scaleFormat(), MxScaleFormat::SWIZZLED_GFX950);
-    }
-}
-#endif
 
 // Non-MX graph (batchnorm) must return false
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsBatchnormGraph)

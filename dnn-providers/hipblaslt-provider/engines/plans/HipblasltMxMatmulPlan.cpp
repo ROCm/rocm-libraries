@@ -8,7 +8,6 @@
 #include <string_view>
 #include <unordered_map>
 
-#include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
@@ -20,6 +19,9 @@
 #include "HipblasltMxMatmulPlan.hpp"
 #include "HipblasltUtils.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
+#if WORKAROUND_ISSUE_14286
+#include <hipblaslt/hipblaslt-ext.hpp>
+#endif
 
 namespace hipblaslt_plugin
 {
