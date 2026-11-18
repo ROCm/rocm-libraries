@@ -18,12 +18,14 @@ lanes, and the builder and the verifier refuse one that does not. The f32
 epilogue store emits an f32 access, so it refuses a value that does not hold
 f32 with a TypeError; ``smem_store_f16`` records an f16 store, so it refuses a
 value that does not hold f16 the same way. Both refuse a value with no type
-first.
+first. A one-lane vector stored with ``n=1`` is one element in the LLVM IR and
+in the HIP source, which hipcc compiles.
 """
 
 from __future__ import annotations
 
 import re
+import shutil
 from collections.abc import Callable
 
 import pytest
@@ -49,6 +51,7 @@ from rocke.tests.engines import (
     assert_backend_lane_rejects,
     assert_engine_rejects,
     assert_refused_everywhere,
+    lower_hip_with_engine,
     lower_with_engine,
 )
 
@@ -663,10 +666,8 @@ def test_a_store_whose_value_lanes_differ_from_n_is_refused(lanes, n):
     assert len(b.kernel.body.ops) == ops_before
 
 
-@pytest.mark.parametrize("engine", ENGINES)
-def test_a_one_lane_vector_is_a_one_element_store(engine):
-    """``n=1`` takes a one-lane vector as it takes a scalar: one element,
-    stored as ``<1 x float>``, which the verifier accepts."""
+def _one_lane_vector_store() -> KernelDef:
+    """A kernel that stores a one-lane f32 vector with ``smem_store_vN(n=1)``."""
     b = IRBuilder("lds_store_f32x1")
     out = b.param("out", PtrType(F32, "global"))
     zero = b.const_i32(0)
@@ -674,13 +675,34 @@ def test_a_one_lane_vector_is_a_one_element_store(engine):
     one_lane = b.vector_splat(b.global_load(out, zero, F32), 1)
     b.smem_store_vN(buf, [zero], one_lane, 1)
     b.ret()
-    assert verify(b.kernel) == []
-    ll = lower_with_engine(
-        b.kernel, _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20
-    )
+    return b.kernel
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_one_lane_vector_is_a_one_element_store(engine):
+    """``n=1`` takes a one-lane vector as it takes a scalar: one element. The
+    verifier accepts it, the LLVM lowering stores it as ``<1 x float>``, and
+    the HIP lowering stores its lane 0, since C++ converts no vector to its
+    element implicitly. Both engines emit the same IR and HIP source."""
+    kernel = _one_lane_vector_store()
+    assert verify(kernel) == []
+    ll = lower_with_engine(kernel, _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20)
     assert re.search(
         r"store <1 x float> \S+, ptr addrspace\(3\) \S+, align 4$", ll, re.MULTILINE
     )
+    hip = lower_hip_with_engine(kernel, _ARCH, engine=engine)
+    assert re.search(r"^\s*\w+_storage\[\w+\] = \w+\[0\];$", hip, re.MULTILINE)
+
+
+def test_the_hip_source_of_a_one_lane_vector_store_compiles():
+    """hipcc compiles the HIP source of a one-lane vector store; the source is
+    the C++ engine's too (:func:`test_a_one_lane_vector_is_a_one_element_store`
+    holds the two equal)."""
+    if shutil.which("hipcc") is None:
+        pytest.skip("hipcc not found")
+    from rocke.helpers.compile import compile_kernel_via_hipcc
+
+    assert compile_kernel_via_hipcc(_one_lane_vector_store(), arch=_ARCH).hsaco
 
 
 @pytest.mark.parametrize(

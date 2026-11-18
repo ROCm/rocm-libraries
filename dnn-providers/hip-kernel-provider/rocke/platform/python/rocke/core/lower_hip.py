@@ -842,7 +842,14 @@ class _Lowerer:
         if storage is None:
             raise RuntimeError("smem store before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
-        self._emit(f"{storage}[{idx_str}] = {_name(value)};")
+        stored = _name(value)
+        if isinstance(value.type, VectorType) and value.type.count == 1:
+            # A one-lane vector (from smem_store_vN with n=1, say) is stored
+            # as its one element, as the LLVM lowering's <1 x T> store does;
+            # HIP has no implicit conversion from a vector to its element, so
+            # read lane 0.
+            stored += "[0]"
+        self._emit(f"{storage}[{idx_str}] = {stored};")
 
     def _op_tile_smem_load_v4(self, op: Op) -> None:
         smem, row, col = op.operands

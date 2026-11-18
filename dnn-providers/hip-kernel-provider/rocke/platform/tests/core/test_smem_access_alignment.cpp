@@ -653,9 +653,13 @@ int test_a_store_whose_value_lanes_differ_from_n_is_refused()
     return 0;
 }
 
-/* n = 1 takes a one-lane vector as it takes a scalar: one element, stored as
- * <1 x float>, which the verifier accepts. Mirrors
- * test_a_one_lane_vector_is_a_one_element_store. */
+/* n = 1 takes a one-lane vector as it takes a scalar: one element. The
+ * verifier accepts it, the LLVM lowering stores it as <1 x float>, and the HIP
+ * lowering stores its lane 0, since C++ converts no vector to its element
+ * implicitly. Mirrors test_a_one_lane_vector_is_a_one_element_store, which
+ * also holds the two engines' texts equal;
+ * test_the_hip_source_of_a_one_lane_vector_store_compiles compiles the HIP
+ * source. */
 int test_a_one_lane_vector_is_a_one_element_store()
 {
     rocke_ir_builder_t b;
@@ -674,10 +678,16 @@ int test_a_one_lane_vector_is_a_one_element_store()
     size_t num_diags = 0;
     CHECK(rocke_verify(b.kernel, &diags, &num_diags) == ROCKE_OK);
     rocke_diags_free(diags, num_diags);
-    const Lowering lowering = lower_and_free(&b);
+    /* The HIP source names a value without its leading '%'. */
+    const std::string lane_zero_of_one_lane = std::string(one_lane->name + 1) + "[0];";
+    const Lowering lowering = lower_to_llvm(&b);
+    const Lowering hip = lower_to_hip(&b, b.kernel);
+    rocke_ir_builder_free(&b);
     CHECK(num_diags == 0);
     CHECK(lowering.status == ROCKE_OK);
     CHECK(every_lds_access_claims(lowering.text, "store <1 x float> %", 4));
+    CHECK(hip.status == ROCKE_OK);
+    CHECK(lines_with(hip.text, "_storage[c1] = " + lane_zero_of_one_lane).size() == 1);
     return 0;
 }
 
