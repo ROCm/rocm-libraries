@@ -89,7 +89,8 @@ protected:
         need_twd_table = true;
     }
 
-    void SetupGridParam_internal(GridParam& gp) override;
+    void                            SetupGridParam_internal(GridParam& gp) override;
+    std::pair<size_t, unsigned int> StockhamLaunchSize() const override;
 
 public:
     bool                CreateDeviceResources() override;
@@ -137,7 +138,8 @@ protected:
         need_twd_table = true;
     }
 
-    void SetupGridParam_internal(GridParam& gp) override;
+    void                            SetupGridParam_internal(GridParam& gp) override;
+    std::pair<size_t, unsigned int> StockhamLaunchSize() const override;
 
     // InitIntrinsicMode is the first step to check if eligible for buffer load/store
     void InitIntrinsicMode();
@@ -178,7 +180,8 @@ protected:
     {
     }
 
-    void SetupGridParam_internal(GridParam& gp) override;
+    void                            SetupGridParam_internal(GridParam& gp) override;
+    std::pair<size_t, unsigned int> StockhamLaunchSize() const override;
 
 public:
     bool                CreateDeviceResources() override;
@@ -201,7 +204,8 @@ protected:
         allowInplace   = false;
     }
 
-    void SetupGridParam_internal(GridParam& gp) override;
+    void                            SetupGridParam_internal(GridParam& gp) override;
+    std::pair<size_t, unsigned int> StockhamLaunchSize() const override;
 
     void TuneDirectRegType();
 
@@ -241,7 +245,8 @@ protected:
         allowInplace   = false;
     }
 
-    void SetupGridParam_internal(GridParam& gp) override;
+    void                            SetupGridParam_internal(GridParam& gp) override;
+    std::pair<size_t, unsigned int> StockhamLaunchSize() const override;
 
     // InitIntrinsicMode is the first step to check if eligible for buffer load/store
     void InitIntrinsicMode();

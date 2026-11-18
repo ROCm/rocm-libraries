@@ -22,6 +22,14 @@ Documentation for rocFFT is available at
   factors silently falling back to running the transform on a single device.  Such plans may now
   perform better.
 * Fixed a crash in `rocfft_execute` for in-place multi-device plans when `out_buffer` is null.
+* Fixed `rocfft_execute` failures for very large batched transforms (for example, 512x512x512 with
+  batch 128) whose Stockham FFT kernel launch exceeded 2^32 work items in one grid dimension.
+
+### Known issues
+
+* Very large real-to-complex and complex-to-real transforms (for example, a 1D real transform of
+  length 49152 with batch 688297) can still fail in `rocfft_execute`, because some of their
+  internal kernels can exceed 2^32 work items in one grid dimension.
 
 ## rocFFT 1.0.41 for ROCm 10.2
 
@@ -53,6 +61,8 @@ Documentation for rocFFT is available at
   factors when the output data layout uses a batch distance larger than the transform length.
 * Fixed `rocfft_plan_create` failures and GPU memory access faults for 1D complex transforms of
   lengths involving large prime factors when batches are interleaved (unit batch distance).
+* Fixed `rocfft_execute` failures for large batched transforms (for example, 512x512x512 with
+  batch 128) whose kernel launch exceeded 2^32 work items in one grid dimension.
 
 ### Optimized
 
