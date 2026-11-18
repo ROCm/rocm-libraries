@@ -571,3 +571,125 @@ def test_stagger_conflicts_on_shared_pack_or_address():
 ])
 def test_stagger_store_gate(change, active):
     assert _wovenWriter(**change)._staggerStoreActive() is active
+
+
+# ---------------------------------------------------------------- hoisted align voffsets
+#
+# When the store address does not depend on the pair, the woven cacheline align builds its two
+# blended addresses once per store and a pair's prep computes none.
+
+ADDR_D, ROW_DELTA = 50, 26
+
+
+def _hoistWriter(**kw):
+    w = _wovenWriter(**kw)
+    w.cvtVgprStruct.vgprPermAddr = ROW_DELTA
+    w.ss = SimpleNamespace(optSingleColVgpr=True, optSrdIncForRow=True, singleColDAddrUpdated=True)
+    w.parentWriter.states.subtileStoreArmId = 3
+    w.parentWriter.states.subtileCachelineAlignVoffHoisted = None
+    return w
+
+
+def _isPlainAddrAdd(text, dst):
+    """v_add_u32 dst, [carry-out,] addrDVgpr, rowDelta (the carry operand depends on the ISA)."""
+    return bool(re.fullmatch(r"v_add_u32 v%d,( vcc\w*,)? v%d, v%d" % (dst, ADDR_D, ROW_DELTA), text))
+
+
+def _plainPartners(offsetA=0):
+    P = GlobalWriteBatchWriter.PLAIN_ADDR
+    return (_pend(tt0=0, idx=0, q=QA, a=P, offset=offsetA, addrD=ADDR_D),
+            _pend(tt0=2, idx=1, q=QB, a=P, offset=offsetA + 64, addrD=ADDR_D))
+
+
+@pytest.mark.parametrize("change, hoisted", [
+    ({}, True),
+    ({"optSingleColVgpr": False}, False),       # addrDVgpr may be rewritten per N group
+    ({"optSrdIncForRow": False}, False),
+    ({"singleColDAddrUpdated": False}, False),
+])
+def test_voffset_hoist_needs_an_invariant_address(change, hoisted):
+    w = _hoistWriter()
+    for k, v in change.items():
+        setattr(w.ss, k, v)
+    key = w._cachelineAlignVoffHoistKey(_addr(0, addrD=ADDR_D))
+    assert (key is not None) is hoisted
+    if hoisted:
+        assert key == (3, ADDR_D)
+
+
+def test_voffset_hoist_needs_its_registers_and_no_address_scaling():
+    w = _hoistWriter()
+    w.cvtVgprStruct.vgprPairAddrRing = -1
+    assert w._cachelineAlignVoffHoistKey(_addr(0, addrD=ADDR_D)) is None
+    w = _hoistWriter()
+    w.parentWriter.states.bpeCexternal = 4          # address would need a per-store shift
+    assert w._cachelineAlignVoffHoistKey(_addr(0, addrD=ADDR_D)) is None
+
+
+def test_plain_slot_pairs_cacheline_align_and_mixed_slots_do_not():
+    w = _hoistWriter()
+    a, b = _plainPartners()
+    assert w._cachelineAlignPartners(a, b) is True
+    mixed = _pend(tt0=2, idx=1, q=QB, a=SB, offset=64, addrD=ADDR_D)
+    assert w._cachelineAlignPartners(a, mixed) is False
+
+
+def test_first_cacheline_align_builds_the_voffsets_once_clear_of_the_dpp_read():
+    w = _hoistWriter()
+    a, b = _plainPartners()
+    insts = _insts(w._emitStaggerCachelineAlign(a, b))
+    texts = [_text(i) for i in insts]
+    sa = str(vgpr(SA))
+    # plain address into the scratch slot, from addrDVgpr + the lane row delta
+    add = next(i for i, t in enumerate(texts) if _isPlainAddrAdd(t, SA))
+    # a DPP read needs 2 wait states after a VALU write to its source register
+    dppRead = next(i for i, t in enumerate(texts) if t.startswith("v_mov_b32") and ", %s " % sa in t + " ")
+    assert dppRead - add > 2
+    # store 1 from the scratch slot now, store 2 pending on the ring slot
+    stores = [i for i in insts if isinstance(i, BufferStoreB128)]
+    assert len(stores) == 1 and ", %s," % sa in _text(stores[0])
+    assert w._pendingPhase2b[4] == SB and w._pendingPhase2b[6]["hoist"] is True
+    assert w.parentWriter.states.subtileCachelineAlignVoffHoisted == (3, ADDR_D)
+
+
+def test_later_cacheline_aligns_emit_no_address_work():
+    w = _hoistWriter()
+    w._emitStaggerCachelineAlign(*_plainPartners())
+    w._pendingPhase2b = None
+    insts = _insts(w._emitStaggerCachelineAlign(*_plainPartners(offsetA=128)))
+    texts = [_text(i) for i in insts]
+    assert not any(t.startswith("v_add_u32") for t in texts)
+    # 4 dwords x (1 save + 2 blends) and nothing for the addresses
+    assert sum(t.startswith(("v_mov_b32", "v_cndmask_b32")) for t in texts) == 12
+    stores = [i for i in insts if isinstance(i, BufferStoreB128)]
+    assert len(stores) == 1 and ", %s," % vgpr(SA) in _text(stores[0]) and "offset:128" in _text(stores[0])
+    assert w._pendingPhase2b[4] == SB
+
+
+def test_rewriting_the_scratch_address_drops_the_hoisted_voffsets():
+    w = _hoistWriter()
+    w._emitStaggerCachelineAlign(*_plainPartners())
+    w.parentWriter.states.subtileCachelineAlignVoffHoisted = None      # what a scalar / plain store does
+    w._pendingPhase2b = None
+    texts = [_text(i) for i in _insts(w._emitStaggerCachelineAlign(*_plainPartners(offsetA=128)))]
+    assert sum(_isPlainAddrAdd(t, SA) for t in texts) == 1
+
+
+def test_unaligned_store_computes_its_plain_address_into_the_cacheline_align_temp():
+    w = _hoistWriter()
+    P = GlobalWriteBatchWriter.PLAIN_ADDR
+    w._pendingPhase2b = _pend(tt0=4, idx=2, q=QB, a=P, offset=128, addrD=ADDR_D)
+    insts = _insts(w._commitPendingPhase2b())
+    texts = [_text(i) for i in insts]
+    add = next(i for i, t in enumerate(texts) if _isPlainAddrAdd(t, TMP))
+    store = next(i for i, x in enumerate(insts) if isinstance(x, BufferStoreB128))
+    assert add < store and ", %s," % vgpr(TMP) in texts[store]
+
+
+def test_hoisted_pending_store_never_conflicts_on_the_address():
+    w = _hoistWriter(pairPackSlot=0)
+    P = GlobalWriteBatchWriter.PLAIN_ADDR
+    assert w._staggerConflicts(_pend(q=QA, a=P), 1) is False
+    aligned = (_addr(0), 0, False, QA, SA, 0, {"blockIdxN": 3, "aligned": True, "hoist": True})
+    assert w._staggerConflicts(aligned, 1) is False                   # SA is slot 0, but nothing writes it
+    assert w._staggerConflicts(_pend(q=WA + 1, a=P), 1) is True      # pack quads still conflict

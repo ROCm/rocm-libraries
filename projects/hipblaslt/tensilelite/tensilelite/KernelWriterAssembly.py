@@ -18184,6 +18184,7 @@ class KernelWriterAssembly(KernelWriter):
     self.states.subtilePairPackSlot = 0
     self.states.subtileStagedHold = None   # staged store cacheline align: pair held for its line partner
     self.states.subtilePendingPhase2b = None     # staggered store: buffer_store deferred across batches
+    self.states.subtileCachelineAlignVoffHoisted = None    # woven cacheline align: (arm, addrDVgpr) whose blended voffsets are live
     self.states.subtileDeferredSrdDIncs = []     # SrdD row advances held behind that store
     self.states.subtileHoistedAddrArm = -1
     self.states.subtileHoistedAddrDVgpr = -1
@@ -21857,6 +21858,7 @@ class KernelWriterAssembly(KernelWriter):
           self.states.subtileWeaveEmitted = set()
           self.states.subtileWeavePairCounter = 0
           self.states.subtilePendingPhase2b = None
+          self.states.subtileCachelineAlignVoffHoisted = None
           self.states.subtileDeferredSrdDIncs = []
         mulAlpha = self.codes.mulAlphaMultipleBuffer if (kernel["_GlobalAccumulation"] == 'MultipleBuffer' or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel') else self.codes.mulAlphaOther
         codeMulAlpha = deepcopy(mulAlpha) if self.states.serializedStore else None
