@@ -825,10 +825,9 @@ class ORIGAMI_EXPORT hardware_t {
   size_t lds_capacity;  ///< Capacity of Local Data Share (LDS) in bytes
   size_t rf_capacity;   ///< Capacity of Register File (RF) in bytes
 
-  // Bandwidths in bytes per compute-clock cycle (see architecture_constants).
-  double mem1_perf_ratio;  ///< L2
-  double mem2_perf_ratio;  ///< MALL
-  double mem3_perf_ratio;  ///< DRAM/HBM
+  double mem1_perf_ratio;  ///< L1/shared memory performance ratio (microbenchmarked)
+  double mem2_perf_ratio;  ///< L2 cache performance ratio (microbenchmarked)
+  double mem3_perf_ratio;  ///< MALL/HBM performance ratio (microbenchmarked)
 
   size_t L2_capacity;   ///< Capacity of one L2 cache (one XCD's on CDNA, one AID's on gfx1250) in bytes
   size_t l1_capacity;   ///< Capacity of L1 data cache per CU in bytes (shared across all SIMDs in a CU)
