@@ -1,14 +1,14 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""gfx950 fused GEMM+A2A (FusedGemmA2A=1) codegen characterization.
+"""gfx950 fused GEMM+A2A (FusedA2A: GemmA2A) codegen characterization.
 
-Checks that a FusedGemmA2A=1 solution emits the SDMA ring and packet
+Checks that a FusedA2A: GemmA2A solution emits the SDMA ring and packet
 instructions and that the result assembles for gfx950. The store path replaces
 the ordinary global-write batch, so a solution that silently fell back to it
 still satisfies every assertion except the SDMA markers.
 
 Covers tensilelite/Components/SdmaRingEmitter.py, SdmaPacketEmitter.py, and the
-FusedGemmA2A=1 store path in GlobalWriteBatch.py.
+FusedA2A: GemmA2A store path in GlobalWriteBatch.py.
 """
 
 import os
@@ -43,7 +43,7 @@ _A2A_RESETS = (
 
 
 def test_fused_a2a_gfx950_emits_assembly():
-    """FusedGemmA2A=1: SDMA ring instructions present, assembles for gfx950."""
+    """FusedA2A: GemmA2A: SDMA ring instructions present, assembles for gfx950."""
     results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
     assert len(results) >= 1, f"Expected >=1 kernel, got {len(results)}"
     assert all(err == 0 for (_b, _s, err) in results), (

@@ -23,9 +23,9 @@
  * ************************************************************************ */
 
 // Generic-API descriptor and auxiliary entry points: const descriptor constructors and
-// getters, nnz / batch accessors, dense matrix copy, status strings, color info and
-// the spmat printer. Round trips compare what the public getters return with what was
-// passed in; the constructors are checked with one invalid argument at a time.
+// getters, nnz / batch accessors, dense matrix copy and transpose, status strings, color
+// info and the spmat printer. Round trips compare what the public getters return with
+// what was passed in; the constructors are checked with one invalid argument at a time.
 
 #include "unit_test_device_conv_common.hpp"
 
@@ -320,8 +320,8 @@ namespace
         int64_t nnz = 0;
         EXPECT_EQ(rocsparse_spmat_get_nnz(d, &nnz), st_ok);
         EXPECT_GE(nnz, rows * ell_cols);
-        // The nnz of a blocked ELL matrix cannot be set (the header only says it fails).
-        EXPECT_REJECTED(rocsparse_spmat_set_nnz(mut(d), 3));
+        // The nnz of a blocked ELL matrix cannot be set.
+        EXPECT_EQ(rocsparse_spmat_set_nnz(mut(d), 3), st_val);
 
         EXPECT_EQ(mk(nullptr, 4, 4, dir_r, 2, 2, b.i, b.v), st_ptr);
         EXPECT_EQ(mk(&bad, -1, 4, dir_r, 2, 2, b.i, b.v), st_size);
@@ -444,19 +444,18 @@ namespace
         Buf   b;
         Spmat d;
         ASSERT_EQ(rocsparse_create_ell_descr(&d, 5, 7, b.i, b.v, 3, i32, base0, f32), st_ok);
-        // ELL: nnz is ell_width * rows and cannot be set (the header only says it fails).
+        // ELL: nnz is ell_width * rows and cannot be set.
         int64_t nnz = 0;
         EXPECT_EQ(rocsparse_spmat_get_nnz(d, &nnz), st_ok);
         EXPECT_EQ(nnz, 3 * 5);
-        EXPECT_REJECTED(rocsparse_spmat_set_nnz(d, 4));
+        EXPECT_EQ(rocsparse_spmat_set_nnz(d, 4), st_val);
 
         EXPECT_EQ(rocsparse_ell_set_strided_batch(nullptr, 2, 10), st_ptr);
-        // The header documents invalid_size for an invalid batch count or stride, while
-        // the implementation returns invalid_value; accept both (AISPARSE-904).
-        EXPECT_STATUS_IN(rocsparse_ell_set_strided_batch(d, 0, 10), st_size, st_val);
-        EXPECT_STATUS_IN(rocsparse_ell_set_strided_batch(d, 2, -1), st_size, st_val);
-        // A positive stride with a batch count of one is not covered by the header; the
-        // library accepts it.
+        // An invalid batch count or stride is an invalid value.
+        EXPECT_EQ(rocsparse_ell_set_strided_batch(d, 0, 10), st_val);
+        EXPECT_EQ(rocsparse_ell_set_strided_batch(d, -1, 10), st_val);
+        EXPECT_EQ(rocsparse_ell_set_strided_batch(d, 2, -1), st_val);
+        // A positive stride with a batch count of one is accepted.
         EXPECT_EQ(rocsparse_ell_set_strided_batch(d, 1, 5), st_ok);
         ASSERT_EQ(rocsparse_ell_set_strided_batch(d, 3, 20), st_ok);
         rocsparse_int batch_count = 0;
@@ -495,7 +494,6 @@ namespace
         expect_null_args(rocsparse_spmat_get_nnz, csr.get(), &out);
     }
 
-#ifdef ROCSPARSE_WITH_SPMAT_SCALE
     TEST_F(ConvDescr, DnvecScalar)
     {
         float      alpha = 2.5f, other = 1.0f;
@@ -540,7 +538,6 @@ namespace
         EXPECT_REJECTED(mk(handle, &bad, host, f32, &alpha, &other));
         EXPECT_EQ(bad.get(), nullptr);
     }
-#endif
 
     TEST_F(ConvDescr, ConstDnmatRowOrderLd)
     {
@@ -577,9 +574,10 @@ namespace
 
 // rocsparse_dnmat_copy_data (only declared with ROCSPARSE_WITH_TRSM_REFACTORING):
 // contiguous, padded and batched layouts, scaled copies through the kernel path in both
-// pointer modes (only with ROCSPARSE_WITH_SPMAT_SCALE, which provides
-// rocsparse_dnvec_descr_create_scalar) and argument validation. Every logical and
-// padding element of the target is checked.
+// pointer modes, using rocsparse_dnvec_descr_create_scalar, and argument validation.
+// Every logical and padding element of the target is checked. rocsparse_dnmat_transpose
+// (declared under the same option): argument validation. Both routines: the f16, bf16,
+// i8, u8, i32 and u32 entries of their Uniform Precisions tables.
 #ifdef ROCSPARSE_WITH_TRSM_REFACTORING
 namespace
 {
@@ -596,7 +594,8 @@ namespace
         none,
         host,
         device,
-        device_batched
+        device_batched,
+        host_batched
     };
 
     constexpr int64_t M = 5, N = 4;
@@ -635,6 +634,8 @@ namespace
         {{col, M, B, M * N}, {col, M, B, M * N}, Alpha::device_batched},
         {{col, M, 1, 0}, {col, M, B, M * N}, Alpha::host},
         {{row, N, 1, 0}, {col, M, 1, 0}, Alpha::host},
+        // A host alpha uses its first value for every batch, whatever its batch count.
+        {{col, M, B, M * N}, {col, M, B, M * N}, Alpha::host_batched},
     };
     // clang-format on
 
@@ -651,11 +652,7 @@ namespace
     void run_copy(rocsparse_handle handle, const CopyCase& c)
     {
         const Layout &src = c.src, &dst = c.dst;
-#ifdef ROCSPARSE_WITH_SPMAT_SCALE
-        const Alpha kind = c.alpha;
-#else
-        const Alpha kind = Alpha::none;
-#endif
+        const Alpha   kind = c.alpha;
         // Source values depend on the logical position only.
         std::vector<T> hsrc(layout_size(src), make_val<T>(-7, -3));
         for(int b = 0; b < src.batch; ++b)
@@ -665,7 +662,8 @@ namespace
 
         const T        sentinel = make_val<T>(-99, 99);
         std::vector<T> halpha;
-        for(int b = 0; b < (kind == Alpha::device_batched ? dst.batch : kind != Alpha::none); ++b)
+        const bool     batched = kind == Alpha::device_batched || kind == Alpha::host_batched;
+        for(int b = 0; b < (batched ? dst.batch : kind != Alpha::none); ++b)
             halpha.push_back(make_val<T>(2 + b, 1));
 
         DevBuf<T> dsrc(hsrc), ddst(std::vector<T>(layout_size(dst), sentinel)), dalpha(halpha);
@@ -678,10 +676,9 @@ namespace
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dm_dst, dst.batch, dst.stride), st_ok);
 
         Dnvec alpha;
-#ifdef ROCSPARSE_WITH_SPMAT_SCALE
         if(kind != Alpha::none)
         {
-            const bool  host = kind == Alpha::host;
+            const bool  host = kind == Alpha::host || kind == Alpha::host_batched;
             T*          dev  = dalpha;
             const void* ptr  = host ? static_cast<const void*>(halpha.data()) : dev;
             ASSERT_EQ(rocsparse_dnvec_descr_create_scalar(handle,
@@ -693,12 +690,11 @@ namespace
                                                           nullptr,
                                                           nullptr),
                       st_ok);
-            if(kind == Alpha::device_batched)
+            if(batched)
             {
                 ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, dst.batch, 1), st_ok);
             }
         }
-#endif
         ASSERT_EQ(rocsparse_dnmat_copy_data(handle, alpha, dm_src, dm_dst, nullptr), st_ok);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
@@ -739,6 +735,132 @@ namespace
         run_all_copies<rocsparse_double_complex>(handle);
     }
 
+    // The data types of the Uniform Precisions tables not covered above. Sources
+    // (i + 2j + b) % 5 and factors 2 to 4 are exact in every one of them.
+    template <typename T>
+    rocsparse_datatype small_dt()
+    {
+        if constexpr(std::is_same_v<T, int8_t>)
+            return rocsparse_datatype_i8_r;
+        else if constexpr(std::is_same_v<T, uint8_t>)
+            return rocsparse_datatype_u8_r;
+        else if constexpr(std::is_same_v<T, int32_t>)
+            return rocsparse_datatype_i32_r;
+        else if constexpr(std::is_same_v<T, uint32_t>)
+            return rocsparse_datatype_u32_r;
+        else
+            return dt_of<T>();
+    }
+
+    template <typename T>
+    double to_double(T v)
+    {
+        return static_cast<double>(static_cast<float>(v));
+    }
+
+    // Every order pair, batch count B, and no alpha, a host alpha or a per-batch device
+    // alpha, for rocsparse_dnmat_copy_data or rocsparse_dnmat_transpose.
+    template <typename T>
+    void run_small_types(rocsparse_handle handle, bool transpose)
+    {
+        const rocsparse_datatype dt     = small_dt<T>();
+        const int64_t            m_Y    = transpose ? N : M;
+        const int64_t            n_Y    = transpose ? M : N;
+        const int64_t            stride = M * N;
+        const auto               ld_of
+            = [](rocsparse_order o, int64_t rows, int64_t cols) { return o == col ? rows : cols; };
+        const auto at = [](rocsparse_order o, int64_t ld_, int b, int64_t i, int64_t j) {
+            return static_cast<size_t>(b * M * N + (o == col ? i + ld_ * j : i * ld_ + j));
+        };
+        for(const rocsparse_order ord_X : {col, row})
+            for(const rocsparse_order ord_Y : {col, row})
+                for(const Alpha kind : {Alpha::none, Alpha::host, Alpha::device_batched})
+                {
+                    SCOPED_TRACE(::testing::Message()
+                                 << "datatype " << dt << ", X order " << ord_X << ", Y order "
+                                 << ord_Y << ", alpha " << static_cast<int>(kind));
+                    const int64_t  ld_X = ld_of(ord_X, M, N);
+                    const int64_t  ld_Y = ld_of(ord_Y, m_Y, n_Y);
+                    std::vector<T> hX(B * stride);
+                    for(int b = 0; b < B; ++b)
+                        for(int64_t i = 0; i < M; ++i)
+                            for(int64_t j = 0; j < N; ++j)
+                                hX[at(ord_X, ld_X, b, i, j)] = make_val<T>((i + 2 * j + b) % 5);
+                    std::vector<T> halpha;
+                    for(int b = 0; b < (kind == Alpha::device_batched ? B : kind != Alpha::none);
+                        ++b)
+                        halpha.push_back(make_val<T>(2 + b));
+
+                    DevBuf<T> dX(hX), dY(std::vector<T>(B * stride, make_val<T>(99))),
+                        dalpha(halpha);
+                    Dnmat X, Y;
+                    ASSERT_EQ(rocsparse_create_dnmat_descr(&X, M, N, ld_X, dX, dt, ord_X), st_ok);
+                    ASSERT_EQ(rocsparse_create_dnmat_descr(&Y, m_Y, n_Y, ld_Y, dY, dt, ord_Y),
+                              st_ok);
+                    ASSERT_EQ(rocsparse_dnmat_set_strided_batch(X, B, stride), st_ok);
+                    ASSERT_EQ(rocsparse_dnmat_set_strided_batch(Y, B, stride), st_ok);
+                    Dnvec alpha;
+                    if(kind != Alpha::none)
+                    {
+                        const bool  host = kind == Alpha::host;
+                        T*          dev  = dalpha;
+                        const void* ptr  = host ? static_cast<const void*>(halpha.data()) : dev;
+                        ASSERT_EQ(
+                            rocsparse_dnvec_descr_create_scalar(
+                                handle,
+                                &alpha,
+                                host ? rocsparse_pointer_mode_host : rocsparse_pointer_mode_device,
+                                dt,
+                                ptr,
+                                nullptr,
+                                nullptr),
+                            st_ok);
+                        if(!host)
+                        {
+                            ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, B, 1), st_ok);
+                        }
+                    }
+                    ASSERT_EQ(transpose ? rocsparse_dnmat_transpose(handle, alpha, X, Y, nullptr)
+                                        : rocsparse_dnmat_copy_data(handle, alpha, X, Y, nullptr),
+                              st_ok);
+                    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+                    std::vector<double> expected(B * stride), result;
+                    for(int b = 0; b < B; ++b)
+                        for(int64_t i = 0; i < M; ++i)
+                            for(int64_t j = 0; j < N; ++j)
+                                expected[transpose ? at(ord_Y, ld_Y, b, j, i)
+                                                   : at(ord_Y, ld_Y, b, i, j)]
+                                    = (halpha.empty()
+                                           ? 1.0
+                                           : to_double(halpha[halpha.size() == 1 ? 0 : b]))
+                                      * to_double(hX[at(ord_X, ld_X, b, i, j)]);
+                    for(const T& v : dY.read())
+                        result.push_back(to_double(v));
+                    EXPECT_EQ(result, expected);
+                }
+    }
+
+    template <typename F>
+    void for_small_types(F f)
+    {
+        f(_Float16{});
+        f(rocsparse_bfloat16{});
+        f(int8_t{});
+        f(uint8_t{});
+        f(int32_t{});
+        f(uint32_t{});
+    }
+
+    TEST_F(ConvDescr, DnmatCopyOtherPrecisions)
+    {
+        for_small_types([&](auto t) { run_small_types<decltype(t)>(handle, false); });
+    }
+    TEST_F(ConvDescr, DnmatTransposeOtherPrecisions)
+    {
+        for_small_types([&](auto t) { run_small_types<decltype(t)>(handle, true); });
+    }
+
     TEST_F(ConvDescr, DnmatCopyInvalid)
     {
         DevBuf<float>  df(std::vector<float>(64, 1.0f)), df2(std::vector<float>(64, 1.0f));
@@ -757,40 +879,136 @@ namespace
             = [&](rocsparse_dnvec_descr a, rocsparse_dnmat_descr s, rocsparse_dnmat_descr d) {
                   return rocsparse_dnmat_copy_data(handle, a, s, d, nullptr);
               };
-        // (invalid_handle is not in the list of documented statuses)
-        EXPECT_REJECTED(rocsparse_dnmat_copy_data(nullptr, nullptr, src, dst, nullptr));
+        EXPECT_EQ(rocsparse_dnmat_copy_data(nullptr, nullptr, src, dst, nullptr),
+                  rocsparse_status_invalid_handle);
         EXPECT_EQ(copy(nullptr, nullptr, dst), st_ptr);
         EXPECT_EQ(copy(nullptr, src, nullptr), st_ptr);
-        // The header documents invalid_value for different data types while the
-        // implementation returns not_implemented; accept both (AISPARSE-904).
-        EXPECT_STATUS_IN(copy(nullptr, src, dst_double), st_val, rocsparse_status_not_implemented);
+        // Different data types (mixed precision) are not implemented.
+        EXPECT_EQ(copy(nullptr, src, dst_double), rocsparse_status_not_implemented);
         EXPECT_EQ(copy(nullptr, src, tall), st_val);
         EXPECT_EQ(copy(nullptr, src, wide), st_val);
         // Different batch counts.
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 2, 12), st_ok);
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst, 3, 12), st_ok);
         EXPECT_EQ(copy(nullptr, src, dst), st_val);
+        // A source batch count of one is broadcast only with a zero stride.
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 1, 0), st_ok);
+        EXPECT_EQ(copy(nullptr, src, dst), st_ok);
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 1, 12), st_ok);
+        EXPECT_EQ(copy(nullptr, src, dst), st_val);
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 1, 0), st_ok);
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst, 1, 0), st_ok);
 
-#ifdef ROCSPARSE_WITH_SPMAT_SCALE
         const auto scalar = [&](Dnvec& a, rocsparse_datatype dt, const void* p) {
             ASSERT_EQ(rocsparse_dnvec_descr_create_scalar(
                           handle, &a, rocsparse_pointer_mode_host, dt, p, nullptr, nullptr),
                       st_ok);
         };
-        // The scalar must have the data type of the matrices.
+        // A scalar of another data type (mixed precision) is not implemented.
         double alpha_d = 2.0;
         Dnvec  alpha_double;
         scalar(alpha_double, rocsparse_datatype_f64_r, &alpha_d);
-        EXPECT_STATUS_IN(copy(alpha_double, src, dst), st_val, rocsparse_status_not_implemented);
+        EXPECT_EQ(copy(alpha_double, src, dst), rocsparse_status_not_implemented);
         // The scalar batch count must match the target or be one with a zero stride.
         float alpha_f[3] = {2.0f, 3.0f, 4.0f};
         Dnvec alpha;
         scalar(alpha, f32, alpha_f);
         ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 2, 1), st_ok);
         EXPECT_EQ(copy(alpha, src, dst), st_val);
-#endif
+        // The same checks when the orders differ.
+        Dnmat dst_row;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(&dst_row, 4, 3, 3, df2, f32, rocsparse_order_row),
+                  st_ok);
+        EXPECT_EQ(copy(alpha_double, src, dst_row), rocsparse_status_not_implemented);
+        EXPECT_EQ(copy(alpha, src, dst_row), st_val);
+        // A scalar batch count of one is broadcast only with a zero stride.
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst, 3, 12), st_ok);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 1, 0), st_ok);
+        EXPECT_EQ(copy(alpha, src, dst), st_ok);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 1, 1), st_ok);
+        EXPECT_EQ(copy(alpha, src, dst), st_val);
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst_row, 3, 12), st_ok);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 1, 0), st_ok);
+        EXPECT_EQ(copy(alpha, src, dst_row), st_ok);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 1, 1), st_ok);
+        EXPECT_EQ(copy(alpha, src, dst_row), st_val);
+    }
+
+    TEST_F(ConvDescr, DnmatTransposeInvalid)
+    {
+        DevBuf<float>  df(std::vector<float>(64, 1.0f)), df2(std::vector<float>(64, 1.0f));
+        DevBuf<double> dd(std::vector<double>(64, 1.0));
+        Dnmat          src, dst, same, dst_double;
+        const auto     mk = [&](Dnmat& d, int64_t m, int64_t n, void* p, rocsparse_datatype dt) {
+            ASSERT_EQ(rocsparse_create_dnmat_descr(&d, m, n, m, p, dt, col), st_ok);
+        };
+        mk(src, 4, 3, df, f32);
+        mk(dst, 3, 4, df2, f32);
+        mk(same, 4, 3, df2, f32);
+        mk(dst_double, 3, 4, dd, rocsparse_datatype_f64_r);
+
+        const auto transpose
+            = [&](rocsparse_dnvec_descr a, rocsparse_dnmat_descr s, rocsparse_dnmat_descr d) {
+                  return rocsparse_dnmat_transpose(handle, a, s, d, nullptr);
+              };
+        EXPECT_EQ(rocsparse_dnmat_transpose(nullptr, nullptr, src, dst, nullptr),
+                  rocsparse_status_invalid_handle);
+        EXPECT_EQ(transpose(nullptr, nullptr, dst), st_ptr);
+        EXPECT_EQ(transpose(nullptr, src, nullptr), st_ptr);
+        // Different data types (mixed precision) are not implemented.
+        EXPECT_EQ(transpose(nullptr, src, dst_double), rocsparse_status_not_implemented);
+        // The target must have the transposed dimensions.
+        EXPECT_EQ(transpose(nullptr, src, same), st_val);
+        // Different batch counts.
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 2, 12), st_ok);
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst, 3, 12), st_ok);
+        EXPECT_EQ(transpose(nullptr, src, dst), st_val);
+        // A source batch count of one is broadcast only with a zero stride.
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 1, 0), st_ok);
+        EXPECT_EQ(transpose(nullptr, src, dst), st_ok);
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 1, 12), st_ok);
+        EXPECT_EQ(transpose(nullptr, src, dst), st_val);
+        // The same rule when the orders differ.
+        Dnmat dst_row;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(&dst_row, 3, 4, 4, df2, f32, rocsparse_order_row),
+                  st_ok);
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst_row, 3, 12), st_ok);
+        EXPECT_EQ(transpose(nullptr, src, dst_row), st_val);
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 1, 0), st_ok);
+        EXPECT_EQ(transpose(nullptr, src, dst_row), st_ok);
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst_row, 1, 0), st_ok);
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst, 1, 0), st_ok);
+
+        const auto scalar = [&](Dnvec& a, rocsparse_datatype dt, const void* p) {
+            ASSERT_EQ(rocsparse_dnvec_descr_create_scalar(
+                          handle, &a, rocsparse_pointer_mode_host, dt, p, nullptr, nullptr),
+                      st_ok);
+        };
+        // A scalar of another data type (mixed precision) is not implemented.
+        double alpha_d = 2.0;
+        Dnvec  alpha_double;
+        scalar(alpha_double, rocsparse_datatype_f64_r, &alpha_d);
+        EXPECT_EQ(transpose(alpha_double, src, dst), rocsparse_status_not_implemented);
+        // The scalar batch count must match the target or be one with a zero stride.
+        float alpha_f[3] = {2.0f, 3.0f, 4.0f};
+        Dnvec alpha;
+        scalar(alpha, f32, alpha_f);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 2, 1), st_ok);
+        EXPECT_EQ(transpose(alpha, src, dst), st_val);
+        // The same checks when the orders differ.
+        EXPECT_EQ(transpose(alpha_double, src, dst_row), rocsparse_status_not_implemented);
+        EXPECT_EQ(transpose(alpha, src, dst_row), st_val);
+        // A scalar batch count of one is broadcast only with a zero stride.
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst, 3, 12), st_ok);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 1, 0), st_ok);
+        EXPECT_EQ(transpose(alpha, src, dst), st_ok);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 1, 1), st_ok);
+        EXPECT_EQ(transpose(alpha, src, dst), st_val);
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst_row, 3, 12), st_ok);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 1, 0), st_ok);
+        EXPECT_EQ(transpose(alpha, src, dst_row), st_ok);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 1, 1), st_ok);
+        EXPECT_EQ(transpose(alpha, src, dst_row), st_val);
     }
 } // namespace
 #endif // ROCSPARSE_WITH_TRSM_REFACTORING

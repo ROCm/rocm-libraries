@@ -284,6 +284,56 @@ def conv_direct_fwd_smallk_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     )
 
 
+def conv_direct_fwd_smallc_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`FwdSmallcMfmaSpec` -> flat dict (problem nested, dtype included)."""
+    return dict(
+        problem=_fwd_small_problem_dict(spec.problem),
+        name=spec.name,
+        waves_k=spec.waves_k,
+        waves_p=spec.waves_p,
+        tiles_k=spec.tiles_k,
+        tiles_p=spec.tiles_p,
+        out_h=spec.out_h,
+        out_w=spec.out_w,
+        tiles_per_block=spec.tiles_per_block,
+        prefetch=spec.prefetch,
+        wave_size=spec.wave_size,
+    )
+
+
+def conv_direct_fwd_smallk_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`FwdSmallkMfmaSpec` -> flat dict (problem nested, dtype included)."""
+    return dict(
+        problem=_fwd_small_problem_dict(spec.problem),
+        name=spec.name,
+        waves=spec.waves,
+        out_h=spec.out_h,
+        out_w=spec.out_w,
+        wave_size=spec.wave_size,
+    )
+
+
+def conv_direct_fwd_pp_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`FwdPpMfmaSpec` -> flat dict (problem nested, dtype included)."""
+    return dict(
+        problem=_fwd_small_problem_dict(spec.problem),
+        name=spec.name,
+        block_k=spec.block_k,
+        wave_size=spec.wave_size,
+    )
+
+
+def conv_direct_fwd_flex_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`FwdFlexMfmaSpec` -> flat dict (problem nested, dtype included)."""
+    return dict(
+        problem=_fwd_small_problem_dict(spec.problem),
+        bk=spec.bk,
+        split_c=spec.split_c,
+        name=spec.name,
+        wave_size=spec.wave_size,
+    )
+
+
 def conv_direct_dw_fwd_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`DwFwdWmmaSpec` -> flat dict (problem nested, dtype included)."""
     return dict(
@@ -442,6 +492,17 @@ def conv_direct_dgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
         pack_groups=spec.pack_groups,
         split_barrier=spec.split_barrier,
         wave_epilogue=spec.wave_epilogue,
+    )
+
+
+def conv_direct_dgrad_pp_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`DgradPpMfmaSpec` -> flat dict (the transposed forward-pass
+    problem nested, dtype included)."""
+    return dict(
+        problem=_fwd_small_problem_dict(spec.problem),
+        name=spec.name,
+        block_k=spec.block_k,
+        wave_size=spec.wave_size,
     )
 
 
@@ -787,6 +848,160 @@ def lower_conv_direct_fwd_smallk_wmma(
     )
 
 
+def lower_conv_direct_fwd_smallc_mfma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> GemmLowerResult:
+    """Lower a :class:`FwdSmallcMfmaSpec` (the gfx950 MFMA small-C forward)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_fwd_small_mfma import build_fwd_smallc_mfma
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        k = build_fwd_smallc_mfma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from rocke.core.ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = import_engine(ENGINE_MODULE)
+    sd = conv_direct_fwd_smallc_mfma_spec_to_dict(spec)
+    return lower_family(
+        family="conv_direct_fwd_smallc_mfma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_direct_fwd_smallc_mfma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_direct_fwd_smallc_mfma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
+    )
+
+
+def lower_conv_direct_fwd_smallk_mfma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> GemmLowerResult:
+    """Lower a :class:`FwdSmallkMfmaSpec` (the gfx950 MFMA small-K forward)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_fwd_small_mfma import build_fwd_smallk_mfma
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        k = build_fwd_smallk_mfma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from rocke.core.ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = import_engine(ENGINE_MODULE)
+    sd = conv_direct_fwd_smallk_mfma_spec_to_dict(spec)
+    return lower_family(
+        family="conv_direct_fwd_smallk_mfma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_direct_fwd_smallk_mfma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_direct_fwd_smallk_mfma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
+    )
+
+
+def lower_conv_direct_fwd_pp_mfma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> GemmLowerResult:
+    """Lower a :class:`FwdPpMfmaSpec` (the gfx950 LDS-DMA ping-pong MFMA
+    direct forward)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_fwd_pp_mfma import build_fwd_pp_mfma
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        k = build_fwd_pp_mfma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from rocke.core.ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    # The engine is imported on the C++ path only: backend="python" needs no
+    # rocke_library_engine.
+    def eng():
+        return import_engine(ENGINE_MODULE)
+
+    sd = conv_direct_fwd_pp_mfma_spec_to_dict(spec)
+    return lower_family(
+        family="conv_direct_fwd_pp_mfma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng().conv_direct_fwd_pp_mfma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng().conv_direct_fwd_pp_mfma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
+    )
+
+
+def lower_conv_direct_fwd_flex_mfma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> GemmLowerResult:
+    """Lower a :class:`FwdFlexMfmaSpec` (the gfx950 flattened-pixel
+    implicit-GEMM MFMA direct forward)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_fwd_flex_mfma import build_fwd_flex_mfma
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        k = build_fwd_flex_mfma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from rocke.core.ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    # The engine is imported on the C++ path only: backend="python" needs no
+    # rocke_library_engine.
+    def eng():
+        return import_engine(ENGINE_MODULE)
+
+    sd = conv_direct_fwd_flex_mfma_spec_to_dict(spec)
+    return lower_family(
+        family="conv_direct_fwd_flex_mfma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng().conv_direct_fwd_flex_mfma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng().conv_direct_fwd_flex_mfma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
+    )
+
+
 def lower_conv_direct_dw_fwd_wmma(
     spec: Any,
     *,
@@ -1006,6 +1221,47 @@ def lower_conv_direct_dgrad_wmma(
         py_fn=py_fn,
         cpp_ll_fn=lambda: eng.conv_direct_dgrad_wmma_lower_llvm(sd, arch=arch),
         cpp_ir_fn=lambda: eng.conv_direct_dgrad_wmma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
+    )
+
+
+def lower_conv_direct_dgrad_pp_mfma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> GemmLowerResult:
+    """Lower a :class:`DgradPpMfmaSpec` (the gfx950 LDS-DMA ping-pong MFMA
+    direct dgrad)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_dgrad_pp_mfma import build_dgrad_pp_mfma
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        k = build_dgrad_pp_mfma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from rocke.core.ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    # The engine is imported on the C++ path only: backend="python" needs no
+    # rocke_library_engine.
+    def eng():
+        return import_engine(ENGINE_MODULE)
+
+    sd = conv_direct_dgrad_pp_mfma_spec_to_dict(spec)
+    return lower_family(
+        family="conv_direct_dgrad_pp_mfma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng().conv_direct_dgrad_pp_mfma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng().conv_direct_dgrad_pp_mfma_serialize_ir(sd, arch=arch),
         spec_name=name_of(spec),
     )
 

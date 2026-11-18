@@ -15,7 +15,12 @@ import sys
 import tempfile
 from pathlib import Path
 
-from miopen_wrapper_libs import default_lib_dirs, resolve_pair
+from miopen_wrapper_libs import (
+    ON_WINDOWS,
+    default_lib_dirs,
+    loader_path_variable,
+    resolve_pair,
+)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -71,7 +76,7 @@ def replay(argv, mode, env):
     return True
 
 
-def main():
+def main(argv=None, windows=ON_WINDOWS):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gtest", required=True, help="the test binary to replay")
     parser.add_argument(
@@ -83,19 +88,28 @@ def main():
     )
     parser.add_argument(
         "--lib-dir",
-        help="directory holding libMIOpen.so*; defaults to searching lib*/ in the "
-        "install prefix, two directories above this script",
+        help="directory holding the MIOpen libraries; defaults to the install "
+        "prefix's lib*/ on Linux and bin/ on Windows, found from this script's "
+        "location",
     )
     parser.add_argument("--compare", default=SCRIPT_DIR / "compare_forwarding_runs.py")
     parser.add_argument(
         "--known-divergences", default=SCRIPT_DIR / "known_forwarding_divergences.txt"
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     gtest = Path(args.gtest).resolve()
+    # Windows starts "miopen_gtest" when only miopen_gtest.exe exists, so both
+    # replays would pass and only the later comparison (which needs the exact file
+    # for --newer-than) would fail.
+    if not gtest.is_file():
+        print(f"FAIL: test binary {gtest} does not exist", flush=True)
+        return 1
 
-    lib_dirs = [Path(args.lib_dir)] if args.lib_dir else default_lib_dirs(SCRIPT_DIR)
-    wrapper_lib, private_lib, problems = resolve_pair(lib_dirs)
+    lib_dirs = (
+        [Path(args.lib_dir)] if args.lib_dir else default_lib_dirs(SCRIPT_DIR, windows)
+    )
+    wrapper_lib, private_lib, problems = resolve_pair(lib_dirs, windows)
     if problems:
         # Both are built whenever this entry is registered, so a missing one is a
         # packaging regression, not something to skip.
@@ -105,9 +119,11 @@ def main():
     print(f"libraries under test: {wrapper_lib}, {private_lib}", flush=True)
 
     # An installed test binary's RUNPATH names the ROCm library directory, so an
-    # install to any other prefix would otherwise load some other MIOpen.
-    ld_path = os.pathsep.join(
-        p for p in (str(private_lib.parent), os.environ.get("LD_LIBRARY_PATH")) if p
+    # install to any other prefix would otherwise load some other MIOpen. Windows
+    # has no RUNPATH; it looks beside the program first and then on PATH.
+    path_variable = loader_path_variable(windows)
+    search_path = os.pathsep.join(
+        p for p in (str(private_lib.parent), os.environ.get(path_variable)) if p
     )
 
     # Not the working directory: ctest runs the installed entry inside the install
@@ -132,10 +148,10 @@ def main():
         env = dict(
             os.environ,
             MIOPEN_HIPDNN_FORWARDING=mode,
-            LD_LIBRARY_PATH=ld_path,
             MIOPEN_USER_DB_PATH=str(output_dir / f"{mode}_db"),
             MIOPEN_CUSTOM_CACHE_DIR=str(output_dir / "kernel_cache"),
         )
+        env[path_variable] = search_path
         ok = replay(
             [
                 gtest,

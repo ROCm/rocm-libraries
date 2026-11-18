@@ -140,4 +140,74 @@ if(ROCKE_BUILD_PYENV)
         COMMENT "rocke-wheels: building platform + library Python wheels")
 endif()
 
+# External assets used by installed library tests belong to the embedding
+# project, not the standalone platform. Missing assets retain the tests' skip
+# behavior.
+include(GNUInstallDirs)
+
+if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
+    set(ROCKE_TEST_INSTALL_DIR
+        "${CMAKE_INSTALL_BINDIR}/${ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR}")
+else()
+    set(ROCKE_TEST_INSTALL_DIR "${CMAKE_INSTALL_BINDIR}")
+endif()
+
+if(DEFINED ROCM_LIBRARIES_ROOT)
+    set(_rocke_asset_repository_root "${ROCM_LIBRARIES_ROOT}")
+else()
+    set(_rocke_asset_repository_root "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
+endif()
+set(_rocke_sdpa_template
+    "${_rocke_asset_repository_root}/projects/hipdnn/tools/IngestorGenerator/configs/templates/attention_sdpa_fwd.graph.json")
+set(_rocke_sdpa_bundles
+    "${_rocke_asset_repository_root}/dnn-providers/integration-tests/integration-test-bundles")
+set(_rocke_pack_headers
+    "${_rocke_asset_repository_root}/dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs")
+
+set(_rocke_discover_test_assets ON)
+if((DEFINED ROCKE_INSTALL_TESTS AND NOT ROCKE_INSTALL_TESTS)
+   OR (DEFINED ROCKE_INSTALL_PYTHON_TESTS AND NOT ROCKE_INSTALL_PYTHON_TESTS))
+    set(_rocke_discover_test_assets OFF)
+endif()
+
+set(_rocke_sdpa_files "")
+if(_rocke_discover_test_assets
+   AND EXISTS "${_rocke_sdpa_template}"
+   AND NOT IS_DIRECTORY "${_rocke_sdpa_template}"
+   AND IS_DIRECTORY "${_rocke_sdpa_bundles}")
+    file(GLOB_RECURSE _rocke_sdpa_files CONFIGURE_DEPENDS
+         RELATIVE "${_rocke_sdpa_bundles}" "${_rocke_sdpa_bundles}/*.json")
+    # Stage the whole SdpaFwd set; hipdnn_assets.py owns graph selection.
+    list(FILTER _rocke_sdpa_files INCLUDE REGEX "^[^/]+/SdpaFwd[^/]*/.+\\.json$")
+endif()
+if(_rocke_sdpa_files)
+    set(ROCKE_REQUIRE_INSTALLED_HIPDNN_SDPA_ASSETS ON)
+endif()
+
+set(_rocke_dense_geometry_header
+    "${_rocke_pack_headers}/Gfx950AttentionDenseGeometry.hpp")
+set(_rocke_unified_geometry_header
+    "${_rocke_pack_headers}/Gfx950AttentionUnified3DGeometry.hpp")
+
 add_subdirectory(platform)
+
+if(ROCKE_INSTALL_TESTS AND ROCKE_INSTALL_PYTHON_TESTS)
+    if(_rocke_sdpa_files)
+        set(_rocke_sdpa_hipdnn_dest
+            "${ROCKE_TEST_INSTALL_DIR}/tests/library/tests/sdpa/hipdnn")
+        install(FILES "${_rocke_sdpa_template}"
+                DESTINATION "${_rocke_sdpa_hipdnn_dest}")
+        foreach(_rocke_sdpa_file IN LISTS _rocke_sdpa_files)
+            cmake_path(GET _rocke_sdpa_file PARENT_PATH _rocke_sdpa_file_dir)
+            install(FILES "${_rocke_sdpa_bundles}/${_rocke_sdpa_file}"
+                    DESTINATION "${_rocke_sdpa_hipdnn_dest}/integration-test-bundles/${_rocke_sdpa_file_dir}")
+        endforeach()
+    endif()
+
+    if(EXISTS "${_rocke_dense_geometry_header}"
+       AND EXISTS "${_rocke_unified_geometry_header}")
+        install(FILES "${_rocke_dense_geometry_header}"
+                      "${_rocke_unified_geometry_header}"
+                DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library/tests/hkp_packs")
+    endif()
+endif()
