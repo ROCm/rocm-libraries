@@ -212,6 +212,43 @@ int test_a_hip_vector_access_without_align_claims_its_natural_alignment()
     return 0;
 }
 
+/* The element type of the access determines the scale, not the pointer's
+ * element type. Also check the byte-copy path for a weakly aligned access. */
+int test_hip_word_access_through_byte_pointers()
+{
+    const Lowering result = lower_hip(R"(ckdsl.ir v1
+kernel @word_copy {
+  params {
+    %src : ptr<i8,global>
+    %dst : ptr<i8,global>
+    %si : i64
+    %di : i32
+  }
+  region @entry {
+    %v : vec<i32x4> = memref.global_load_vN ( %src, %si ) { align = i:16, elem_type = s:"i32", vec = i:4 }
+    memref.global_store_vN ( %dst, %di, %v ) { align = i:1, elem_type = s:"i32", vec = i:4 }
+    %word : i32 = memref.global_load_typed ( %src, %si ) { align = i:1, elem_type = s:"i32" }
+    memref.global_store_typed ( %dst, %di, %word ) { align = i:1, elem_type = s:"i32" }
+    cf.return (  )
+  }
+}
+)");
+    CHECK(result.status == ROCKE_OK);
+    const std::string src = "reinterpret_cast<const unsigned char*>(src) + "
+                            "(int64_t)si * (int64_t)sizeof(int)";
+    const std::string dst
+        = "const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(dst))"
+          " + (int64_t)di * (int64_t)sizeof(int)";
+    CHECK(contains(result.text, "*reinterpret_cast<const i32x4*>(" + src + ")"));
+    CHECK(contains(result.text,
+                   "__builtin_memcpy(__builtin_assume_aligned(" + dst + ", 1), &v, 16);"));
+    CHECK(contains(result.text,
+                   "__builtin_memcpy(&word, __builtin_assume_aligned(" + src + ", 1), 4);"));
+    CHECK(contains(result.text,
+                   "__builtin_memcpy(__builtin_assume_aligned(" + dst + ", 1), &word, 4);"));
+    return 0;
+}
+
 /* Four i1 lanes have no byte width to claim, so the LLVM lowering refuses the
  * store rather than give it two bytes per lane. */
 int test_a_sub_byte_vector_store_without_align_is_refused()
@@ -379,6 +416,7 @@ int main()
 {
     if(test_an_llvm_vector_access_without_align_claims_its_natural_alignment()
        || test_a_hip_vector_access_without_align_claims_its_natural_alignment()
+       || test_hip_word_access_through_byte_pointers()
        || test_a_sub_byte_vector_store_without_align_is_refused()
        || test_an_llvm_vector_load_refuses_an_invalid_align()
        || test_the_hip_lowering_refuses_an_invalid_align()

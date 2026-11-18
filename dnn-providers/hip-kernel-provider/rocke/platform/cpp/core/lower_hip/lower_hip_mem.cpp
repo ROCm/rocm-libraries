@@ -99,6 +99,45 @@ static bool mem_streaming_arch(const char* gfx)
     return gfx && (strcmp(gfx, "gfx942") == 0 || strcmp(gfx, "gfx950") == 0);
 }
 
+/* Match LLVM's GEP in access-element units. In particular global_ptr_add
+ * emits a const char* even if its IR type retains a non-byte pointee. */
+static bool mem_has_typed_access_base(const rocke_value_t* ptr, const rocke_type_t* elem)
+{
+    if(ptr->op && ptr->op->opcode == ROCKE_OP_TILE_GLOBAL_PTR_ADD)
+        return false;
+    return ptr->type->kind != ROCKE_TYPE_PTR || rocke_type_eq(ptr->type->pointee, elem);
+}
+
+static const char* mem_global_access_address(rocke_h_lowerer_t* lw,
+                                             const rocke_value_t* ptr,
+                                             const rocke_value_t* idx,
+                                             const rocke_type_t* elem,
+                                             bool store = false)
+{
+    const char* p = rocke_h_name(lw, ptr);
+    const char* i = rocke_h_name(lw, idx);
+    const char* address;
+    if(mem_has_typed_access_base(ptr, elem))
+        address = rocke_arena_printf(&lw->b->arena, "%s + %s", p, i);
+    else
+    {
+        // Store destinations are writable by contract, including byte rebases.
+        const char* cpp_t = rocke_h_type_to_hip(lw, elem);
+        address = rocke_arena_printf(
+            &lw->b->arena,
+            store
+                ? "const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(%s))"
+                  " + (int64_t)%s * (int64_t)sizeof(%s)"
+                : "reinterpret_cast<const unsigned char*>(%s) + (int64_t)%s * (int64_t)sizeof(%s)",
+            p,
+            i,
+            cpp_t);
+    }
+    if(!address)
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "HIP global access address: arena allocation failed");
+    return address;
+}
+
 /* ================================ LDS alloc =============================== */
 
 /* Python _op_tile_smem_alloc */
@@ -556,13 +595,25 @@ static rocke_status_t _op_memref_global_load_typed(rocke_h_lowerer_t* lw, const 
     }
     ptr = op->operands[0];
     idx = op->operands[1];
-    cpp_t = rocke_h_type_to_hip(lw, op->results[0]->type);
-    rocke_h_emitf(lw,
-                  "%s %s = %s[%s];",
-                  cpp_t,
-                  rocke_h_name(lw, op->results[0]),
-                  rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, idx));
+    const auto* elem = op->results[0]->type;
+    cpp_t = rocke_h_type_to_hip(lw, elem);
+    const char* res = rocke_h_name(lw, op->results[0]);
+    if(mem_has_typed_access_base(ptr, elem))
+        rocke_h_emitf(
+            lw, "%s %s = %s[%s];", cpp_t, res, rocke_h_name(lw, ptr), rocke_h_name(lw, idx));
+    else
+    {
+        const auto align = rocke_i_align_attr(op);
+        const auto* address = mem_global_access_address(lw, ptr, idx, elem);
+        rocke_h_emitf(lw,
+                      "%s %s; __builtin_memcpy(&%s, __builtin_assume_aligned(%s, %lld), %d);",
+                      cpp_t,
+                      res,
+                      res,
+                      address,
+                      (long long)(align ? align : 1),
+                      rocke_i_type_bytes(elem));
+    }
     return lw->status;
 }
 
@@ -587,7 +638,9 @@ static rocke_status_t _op_memref_global_load_vN(rocke_h_lowerer_t* lw, const roc
     prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "global_load_vN");
     res = rocke_h_name(lw, op->results[0]);
     const int64_t byte_count = vec * (rocke_dtype_info(elem_name)->encoded_bits / 8);
-    const int64_t align = rocke_i_claimed_align(op, vec, rocke_i_elem_of(op->results[0]->type));
+    const auto* elem = rocke_i_elem_of(op->results[0]->type);
+    const int64_t align = rocke_i_claimed_align(op, vec, elem);
+    const char* address = mem_global_access_address(lw, ptr, idx, elem);
     const int nontemporal = mem_nontemporal(op);
     if(nontemporal < 0)
         return rocke_h_fail(
@@ -607,30 +660,27 @@ static rocke_status_t _op_memref_global_load_vN(rocke_h_lowerer_t* lw, const roc
                                 "nontemporal on the memcpy path (under-aligned or "
                                 "non-power-of-two payload)");
         /* Copy only the payload, not vector padding, with the IR's alignment. */
-        rocke_h_emitf(
-            lw,
-            "%s%lld %s; __builtin_memcpy(&%s, __builtin_assume_aligned(%s + %s, %lld), %lld);",
-            prefix,
-            (long long)vec,
-            res,
-            res,
-            rocke_h_name(lw, ptr),
-            rocke_h_name(lw, idx),
-            (long long)align,
-            (long long)byte_count);
+        rocke_h_emitf(lw,
+                      "%s%lld %s; __builtin_memcpy(&%s, __builtin_assume_aligned(%s, %lld), %lld);",
+                      prefix,
+                      (long long)vec,
+                      res,
+                      res,
+                      address,
+                      (long long)align,
+                      (long long)byte_count);
         return lw->status;
     }
     rocke_h_emitf(lw,
                   nontemporal ? "%s%lld %s = __builtin_nontemporal_load(reinterpret_cast<const "
-                                "%s%lld*>(%s + %s));"
-                              : "%s%lld %s = *reinterpret_cast<const %s%lld*>(%s + %s);",
+                                "%s%lld*>(%s));"
+                              : "%s%lld %s = *reinterpret_cast<const %s%lld*>(%s);",
                   prefix,
                   (long long)vec,
                   res,
                   prefix,
                   (long long)vec,
-                  rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, idx));
+                  address);
     return lw->status;
 }
 
@@ -671,8 +721,24 @@ static rocke_status_t _op_memref_global_store_typed(rocke_h_lowerer_t* lw, const
     ptr = op->operands[0];
     idx = op->operands[1];
     val = op->operands[2];
-    rocke_h_emitf(
-        lw, "%s[%s] = %s;", rocke_h_name(lw, ptr), rocke_h_name(lw, idx), rocke_h_name(lw, val));
+    const auto* elem = val->type;
+    if(mem_has_typed_access_base(ptr, elem))
+        rocke_h_emitf(lw,
+                      "%s[%s] = %s;",
+                      rocke_h_name(lw, ptr),
+                      rocke_h_name(lw, idx),
+                      rocke_h_name(lw, val));
+    else
+    {
+        const auto align = rocke_i_align_attr(op);
+        const auto* address = mem_global_access_address(lw, ptr, idx, elem, true);
+        rocke_h_emitf(lw,
+                      "__builtin_memcpy(__builtin_assume_aligned(%s, %lld), &%s, %d);",
+                      address,
+                      (long long)(align ? align : 1),
+                      rocke_h_name(lw, val),
+                      rocke_i_type_bytes(elem));
+    }
     return lw->status;
 }
 
@@ -697,7 +763,9 @@ static rocke_status_t _op_memref_global_store_vN(rocke_h_lowerer_t* lw, const ro
     elem_name = mem_attr_str(op, "elem_type", "f16");
     prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "global_store_vN");
     const int64_t byte_count = n * (rocke_dtype_info(elem_name)->encoded_bits / 8);
-    const int64_t align = rocke_i_claimed_align(op, n, rocke_i_elem_of(val->type));
+    const auto* elem = rocke_i_elem_of(val->type);
+    const int64_t align = rocke_i_claimed_align(op, n, elem);
+    const char* address = mem_global_access_address(lw, ptr, idx, elem, true);
     const int nontemporal = mem_nontemporal(op);
     if(nontemporal < 0)
         return rocke_h_fail(
@@ -717,9 +785,8 @@ static rocke_status_t _op_memref_global_store_vN(rocke_h_lowerer_t* lw, const ro
                                 "nontemporal on the memcpy path (under-aligned or "
                                 "non-power-of-two payload)");
         rocke_h_emitf(lw,
-                      "__builtin_memcpy(__builtin_assume_aligned(%s + %s, %lld), &%s, %lld);",
-                      rocke_h_name(lw, ptr),
-                      rocke_h_name(lw, idx),
+                      "__builtin_memcpy(__builtin_assume_aligned(%s, %lld), &%s, %lld);",
+                      address,
                       (long long)align,
                       rocke_h_name(lw, val),
                       (long long)byte_count);
@@ -728,20 +795,18 @@ static rocke_status_t _op_memref_global_store_vN(rocke_h_lowerer_t* lw, const ro
     if(nontemporal)
     {
         rocke_h_emitf(lw,
-                      "__builtin_nontemporal_store(%s, reinterpret_cast<%s%lld*>(%s + %s));",
+                      "__builtin_nontemporal_store(%s, reinterpret_cast<%s%lld*>(%s));",
                       rocke_h_name(lw, val),
                       prefix,
                       (long long)n,
-                      rocke_h_name(lw, ptr),
-                      rocke_h_name(lw, idx));
+                      address);
         return lw->status;
     }
     rocke_h_emitf(lw,
-                  "*reinterpret_cast<%s%lld*>(%s + %s) = %s;",
+                  "*reinterpret_cast<%s%lld*>(%s) = %s;",
                   prefix,
                   (long long)n,
-                  rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, idx),
+                  address,
                   rocke_h_name(lw, val));
     return lw->status;
 }

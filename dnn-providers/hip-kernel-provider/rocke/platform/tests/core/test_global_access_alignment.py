@@ -20,7 +20,18 @@ from __future__ import annotations
 import re
 
 import pytest
-from rocke.core.ir import F16, F32, F64, I8, IRBuilder, KernelDef, PtrType, VectorType
+from rocke.core.ir import (
+    F16,
+    F32,
+    F64,
+    I8,
+    I32,
+    I64,
+    IRBuilder,
+    KernelDef,
+    PtrType,
+    VectorType,
+)
 from rocke.core.ir_serialize import parse
 from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM20
 from rocke.tests.engines import (
@@ -108,6 +119,52 @@ def test_a_hip_vector_access_without_align_claims_its_natural_alignment(engine):
     three = lower_hip_with_engine(_copy("f32", 3), _ARCH, engine=engine)
     assert "__builtin_memcpy(&v, __builtin_assume_aligned(p + c0, 4), 12);" in three
     assert "__builtin_memcpy(__builtin_assume_aligned(p + c0, 4), &v, 12);" in three
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("lanes,align", [(4, 16), (4, 1), (3, 4), (1, 1)])
+@pytest.mark.parametrize("rebased", [False, True])
+def test_hip_global_access_indexes_in_storage_units(engine, lanes, align, rebased):
+    b = IRBuilder("word_copy")
+    # The rebased case retains ptr<i32> in IR but the HIP emitter spells
+    # global_ptr_add's result as const char*. Both cases need word addressing.
+    ptr = PtrType(I32 if rebased else I8, "global")
+    src = b.param("src", ptr)
+    dst = b.param("dst", ptr)
+    si = b.param("si", I64)
+    di = b.param("di", I32)
+    if rebased:
+        src = b.global_ptr_add(src, b.const_i64(16))
+        dst = b.global_ptr_add(dst, b.const_i64(16))
+    if lanes == 1:
+        value = b.global_load(src, si, I32, align=align)
+        b.global_store(dst, di, value, align=align)
+    else:
+        value = b.global_load_vN(src, si, I32, lanes, align=align)
+        if lanes != 3:  # The builder admits 96-bit loads, not stores.
+            b.global_store_vN(dst, di, value, lanes, align=align)
+
+    hip = lower_hip_with_engine(b.kernel, _ARCH, engine=engine)
+    src_addr = f"reinterpret_cast<const unsigned char*>({src.name[1:]}) + (int64_t)si * (int64_t)sizeof(int)"
+    dst_addr = (
+        f"const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>({dst.name[1:]}))"
+        " + (int64_t)di * (int64_t)sizeof(int)"
+    )
+    val = value.name[1:]
+    if lanes == 4 and align == 16:
+        assert f"*reinterpret_cast<const i32x4*>({src_addr})" in hip
+        assert f"*reinterpret_cast<i32x4*>({dst_addr}) = {val};" in hip
+    else:
+        payload = 4 * lanes
+        assert (
+            f"__builtin_memcpy(&{val}, __builtin_assume_aligned({src_addr}, {align}), {payload});"
+            in hip
+        )
+        if lanes != 3:
+            assert (
+                f"__builtin_memcpy(__builtin_assume_aligned({dst_addr}, {align}), &{val}, {payload});"
+                in hip
+            )
 
 
 @pytest.mark.parametrize("engine", ENGINES)
