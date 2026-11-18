@@ -81,7 +81,11 @@ jobs:
       - name: Checkout the bindings
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: projects/hipblaslt/python
+          # The public headers too: the enum coverage test reads develop's (Decision 6).
+          sparse-checkout: |
+            projects/hipblaslt/python
+            projects/hipblaslt/library/include
+            projects/hipblas-common/library/include
       - name: Build and test
         run: bash projects/hipblaslt/python/scripts/ci_lane.sh
 
@@ -107,7 +111,11 @@ jobs:
       - name: Checkout the bindings
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: projects/hipblaslt/python
+          # The public headers too: the enum coverage test reads develop's (Decision 6).
+          sparse-checkout: |
+            projects/hipblaslt/python
+            projects/hipblaslt/library/include
+            projects/hipblas-common/library/include
       - name: Install build tools
         run: |
           sudo apt-get update
@@ -138,7 +146,11 @@ jobs:
       - name: Checkout the bindings
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: projects/hipblaslt/python
+          # The public headers too: the enum coverage test reads develop's (Decision 6).
+          sparse-checkout: |
+            projects/hipblaslt/python
+            projects/hipblaslt/library/include
+            projects/hipblas-common/library/include
       - name: Install build tools
         run: |
           sudo apt-get update
@@ -165,7 +177,11 @@ jobs:
       - name: Checkout the bindings
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: projects/hipblaslt/python
+          # The public headers too: the enum coverage test reads develop's (Decision 6).
+          sparse-checkout: |
+            projects/hipblaslt/python
+            projects/hipblaslt/library/include
+            projects/hipblas-common/library/include
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
@@ -195,7 +211,11 @@ jobs:
       - name: Checkout the bindings
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: projects/hipblaslt/python
+          # The public headers too: the enum coverage test reads develop's (Decision 6).
+          sparse-checkout: |
+            projects/hipblaslt/python
+            projects/hipblaslt/library/include
+            projects/hipblas-common/library/include
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
