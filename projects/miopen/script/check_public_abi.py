@@ -65,8 +65,10 @@ DT_NEEDED baseline names Linux libraries and does not apply.
 miopen_plugin.dll) built alongside a flag-on wrapper. hipDNN calls the plugin, and the
 plugin calls MIOpen. A plugin built against the public libMIOpen.so binds to the wrapper
 (the SONAME is the same) and its call to a forwarded entry point is forwarded to hipDNN
-again, so the wrapper rejects it at run time. This gate rejects such a plugin at build
-time. Needs ``--private-lib``, the libMIOpen_private.so of the same build.
+again, so the wrapper rejects it at run time. This gate fails such a plugin before it
+runs. The provider registers it as a ctest entry for the plugin it builds (and for a
+stand-in built against the public library, which it must reject); it cannot see a plugin
+built elsewhere. Needs ``--private-lib``, the libMIOpen_private.so of the same build.
 
   1. The plugin's DT_NEEDED names libMIOpen_private at the same major as that
      library's SONAME.

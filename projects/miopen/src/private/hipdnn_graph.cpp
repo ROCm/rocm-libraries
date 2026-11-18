@@ -4,6 +4,7 @@
 #include "hipdnn_graph.hpp"
 #include "hipdnn_types.hpp"
 
+#include "erase_outside_lock.hpp"
 #include "lru_cache.hpp"
 #include "miopen_impl.h"
 #include "routing.hpp"
@@ -232,6 +233,13 @@ miopenStatus_t RecordHipdnnFailure(const fe::Error& error)
     return RecordFailure(TranslateHipdnnError(error), error.get_message());
 }
 
+std::optional<miopenStatus_t> FailureOfHipdnnResult(const fe::Error& error)
+{
+    if(error.is_good())
+        return std::nullopt;
+    return RecordHipdnnFailure(error);
+}
+
 miopenStatus_t RecordSuccess()
 {
     ClearForwardedFailure();
@@ -255,14 +263,10 @@ AcquireGraph(const PlanKey& key, const PopulateGraphFn& populate, hipdnnHandle_t
                 RecordFailure(miopenStatusUnsupportedOp,
                               "could not build a hipDNN graph for this problem")};
 
-    const ScopedHipdnnCall scope;
-    const fe::Error error = graph->build(hipdnnHandle);
-    // Checked before the status and before caching: a graph built during a re-entry is not
-    // worth reusing.
-    if(scope.ReentryDetected())
-        return {nullptr, RecordReentryFailure()};
-    if(!error.is_good())
-        return {nullptr, RecordHipdnnFailure(error)};
+    const auto built = CallInsideHipdnn([&] { return graph->build(hipdnnHandle); });
+    // Checked before caching: a graph built during a re-entry is not worth reusing.
+    if(const auto failure = FailureOfGuardedCall(built, FailureOfHipdnnResult))
+        return {nullptr, *failure};
 
     PlanCache().Insert(key, graph);
     return {graph, miopenStatusSuccess};
@@ -289,16 +293,13 @@ miopenStatus_t RunGraph(HandleState& state,
         workspace = state.workspace;
     }
 
-    const ScopedHipdnnCall scope;
-    const fe::Error error = graph->execute(*state.hipdnnHandle, variantPack, workspace);
-    // Recorded even when execute failed, because it may have queued work first.
+    const auto executed = CallInsideHipdnn(
+        [&] { return graph->execute(*state.hipdnnHandle, variantPack, workspace); });
+    // Recorded even when execute failed, because it may have queued work first, so it comes
+    // before the failure is reported.
     const bool recorded = hipEventRecord(state.lastWork, state.stream) == hipSuccess;
-    // Checked after the event record, which must still happen, and before hipDNN's status:
-    // a plugin that ignored the error makes hipDNN report success for an output nobody wrote.
-    if(scope.ReentryDetected())
-        return RecordReentryFailure();
-    if(!error.is_good())
-        return RecordHipdnnFailure(error);
+    if(const auto failure = FailureOfGuardedCall(executed, FailureOfHipdnnResult))
+        return *failure;
     if(!recorded)
         return RecordFailure(miopenStatusInternalError,
                              "could not record the end of the hipDNN work on the MIOpen "
@@ -485,8 +486,7 @@ void ReleaseHandle(miopenHandle_t handle) noexcept
             PlanCache().EraseIf([handle](const PlanKey& key) { return key.handle == handle; });
         }
 
-        const std::lock_guard<std::mutex> lock(HandleMapMutex());
-        HandleMap().erase(handle);
+        EraseDestroyingOutsideLock(HandleMap(), HandleMapMutex(), handle);
     }
     catch(...)
     {

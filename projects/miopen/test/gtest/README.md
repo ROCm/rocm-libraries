@@ -231,26 +231,40 @@ call with `miopenStatusInternalError` (`ScopedHipdnnCall` and `RejectReentrantCa
 `src/private/hipdnn_graph.cpp`, checked in `MIOPEN_WRAPPER_FORWARD`). These tests cover it:
 
 - `CPU_WrapperRoutingReentry_NONE.*` in `wrapper_routing.cpp` test the per-thread guard, the
-  failure it records and the trace line. They run with the other routing tests and need nothing
-  special.
+  failure it records, the trace line, and the helpers `AcquireGraph` and `RunGraph` use to report
+  a re-entry (`CallInsideHipdnn` opens the scope, `FailureOfGuardedCall` puts a re-entry ahead of
+  hipDNN's result). They run with the other routing tests and, like every `CPU_` test in
+  `miopen_gtest`, need a visible device.
+- `CPU_HipdnnEraseOutsideLock_NONE.*` test the helper that releases a handle's hipDNN state
+  without holding the map lock. The plugin's handle destructor takes that lock again (when the
+  plugin is built against the public library), which would deadlock `miopenDestroy`.
 - `CPU_WrapperRoutingReentryMacro_NONE.*` run the dispatch macro itself, through a stub named
   like an entry point. The route is read from `MIOPEN_HIPDNN_FORWARDING` once per process, so the
-  tests skip unless it enables forwarding. The `wrapper_reentry_macro` ctest entry sets it, and
-  fails when a test skips, because gtest exits 0 for a skip and a stray
-  `MIOPEN_DISABLE_HIPDNN_FOR` would otherwise leave an entry that checks nothing. It needs no
-  GPU. Only the build tree registers it, not the packaged test list.
+  tests skip unless it enables forwarding. The `wrapper_reentry_macro` ctest entry sets it and
+  fails when a test skips: gtest exits 0 for a skip, and a stray `MIOPEN_DISABLE_HIPDNN_FOR`
+  would otherwise leave an entry that checks nothing. It needs a visible device and a loadable
+  hipDNN, but no compute. It is registered for the build tree and, in a combined build, the
+  packaged test list, with the per-architecture entries `check_wrapper_registration.py` checks.
+  The flag-on workflow does not run it because its runner has no device.
 - `miopen-provider-plugin-reentry-guard` (registered by `dnn-providers/miopen-provider` in a
-  superbuild that has both) runs `script/check_plugin_reentry.py`. It runs one forwarded
-  convolution through a stand-in plugin, the provider's own sources built against the public
-  library, with `HIPDNN_PLUGIN_DIR` pointing at it so it is the only engine. It passes when
-  MIOpen's message is printed; the shim test it runs is expected to fail. Without the guard the
-  process recurses until `hipblasLtCreate` fails and exits without a message.
+  superbuild that has both) runs `script/check_plugin_reentry.py`, which runs
+  `GPU_HipdnnReentry_FP32.RejectedCallThenDestroyReturns` (`hipdnn_reentry.cpp`): one forwarded
+  convolution on a fresh handle, then `miopenDestroy`. The script makes a stand-in plugin (the
+  provider's own sources built against the public library) the only engine through
+  `HIPDNN_PLUGIN_DIR` and sets `MIOPEN_TEST_EXPECT_REENTRY_REJECTION=1`. The test then passes only
+  if the convolution failed with `miopenStatusInternalError`, `miopenGetLastForwardedError` agrees,
+  the error string has the `[hipDNN-forwarded]` prefix and `miopenDestroy` returned within 30 s.
+  The script also requires MIOpen's message in the output. Without the guard the process recurses
+  until `hipblasLtCreate` fails and exits without a message.
 
-  The entry needs a built test binary, a GPU the shim test supports and a usable hipDNN, and it
-  is **skipped** (exit 77, `SKIP_RETURN_CODE`) when the machine lacks any of them. A run without
-  the message is repeated with hipDNN's default plugins: if that control run does not pass, the
-  machine cannot run the test and the entry skips; only a machine that passes the control and
-  still shows no message fails.
+  The entry needs a built test binary, a GPU the test supports and a usable hipDNN. It is
+  **skipped** (exit 77, `SKIP_RETURN_CODE`) when the machine lacks any of them: a run that did not
+  pass is repeated with hipDNN's default plugins, and if that control run fails too, the machine
+  cannot run the test. Only a machine that passes the control and still fails with the stand-in has
+  a real failure. A binary without the test is a failure, not a skip. The script drops the caller's
+  shard, filter, deny-list, plugin-directory and log-level settings, which would hide a failure or
+  the message.
 
-`script/check_public_abi.py check-plugin` checks a plugin binary without running it; the provider
-registers it for the real plugin (must pass) and for the stand-in (must fail).
+`script/check_public_abi.py check-plugin` checks a plugin binary without running it. The provider
+registers it for the plugin it builds (must pass) and for the stand-in (must fail), and the flag-on
+workflow's provider job runs both. It is never given a plugin built elsewhere.

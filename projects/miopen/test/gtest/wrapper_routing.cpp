@@ -1005,6 +1005,105 @@ TEST(CPU_WrapperRoutingReport_NONE, TraceLineGivesARejectedCallItsOwnReason)
     EXPECT_EQ(line.find("not-in-forwarding-set"), std::string::npos) << line;
 }
 
+// The two helpers AcquireGraph and RunGraph report through: the scope is opened inside
+// CallInsideHipdnn, and FailureOfGuardedCall puts a re-entry ahead of hipDNN's result.
+
+TEST(CPU_WrapperRoutingReentry_NONE, CallInsideHipdnnMarksTheThreadOnlyWhileItRuns)
+{
+    bool insideWhileRunning = false;
+    const auto guarded      = hipdnn::CallInsideHipdnn([&] {
+        insideWhileRunning = hipdnn::InHipdnnCall();
+        return 7;
+    });
+
+    EXPECT_TRUE(insideWhileRunning);
+    EXPECT_FALSE(hipdnn::InHipdnnCall());
+    EXPECT_EQ(guarded.result, 7);
+    EXPECT_FALSE(guarded.reentered);
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, CallInsideHipdnnReportsARejectionMadeWhileItRan)
+{
+    testing::internal::CaptureStderr();
+    const auto guarded = hipdnn::CallInsideHipdnn([] {
+        hipdnn::RejectReentrantCall("miopenConvolutionForward");
+        return 0;
+    });
+    static_cast<void>(testing::internal::GetCapturedStderr());
+
+    EXPECT_TRUE(guarded.reentered);
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, CallInsideHipdnnDoesNotInheritAnEarlierRejection)
+{
+    testing::internal::CaptureStderr();
+    hipdnn::CallInsideHipdnn([] {
+        hipdnn::RejectReentrantCall("miopenConvolutionForward");
+        return 0;
+    });
+    static_cast<void>(testing::internal::GetCapturedStderr());
+
+    const auto next = hipdnn::CallInsideHipdnn([] { return 0; });
+    EXPECT_FALSE(next.reentered);
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, AReentryFailsTheCallEvenWhenHipdnnReportedSuccess)
+{
+    hipdnn::ClearForwardedFailure();
+    int hipdnnFailureCalls = 0;
+    const hipdnn::GuardedResult<int> guarded{0, true};
+
+    testing::internal::CaptureStderr();
+    const auto failure = hipdnn::FailureOfGuardedCall(
+        guarded, [&hipdnnFailureCalls](int) -> std::optional<miopenStatus_t> {
+            ++hipdnnFailureCalls;
+            return std::nullopt;
+        });
+    static_cast<void>(testing::internal::GetCapturedStderr());
+
+    miopenStatus_t recorded = miopenStatusSuccess;
+    ASSERT_TRUE(failure.has_value());
+    EXPECT_EQ(*failure, miopenStatusInternalError);
+    EXPECT_TRUE(hipdnn::LastForwardedFailure(&recorded));
+    EXPECT_EQ(recorded, miopenStatusInternalError);
+    EXPECT_EQ(hipdnnFailureCalls, 0);
+    hipdnn::ClearForwardedFailure();
+}
+
+// hipDNN's own failure would hide the cause: the application would see a generic status
+// and no message about the plugin.
+TEST(CPU_WrapperRoutingReentry_NONE, AReentryIsReportedInsteadOfHipdnnsOwnFailure)
+{
+    const hipdnn::GuardedResult<int> guarded{1, true};
+
+    testing::internal::CaptureStderr();
+    const auto failure = hipdnn::FailureOfGuardedCall(
+        guarded, [](int) -> std::optional<miopenStatus_t> { return miopenStatusBadParm; });
+    const std::string logged = testing::internal::GetCapturedStderr();
+    hipdnn::ClearForwardedFailure();
+
+    ASSERT_TRUE(failure.has_value());
+    EXPECT_EQ(*failure, miopenStatusInternalError);
+    if(miopen::wrapper::ErrorLoggingEnabled())
+        EXPECT_NE(logged.find("Rebuild or reinstall the plugin"), std::string::npos) << logged;
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, WithoutAReentryHipdnnsResultDecides)
+{
+    const hipdnn::GuardedResult<int> failed{1, false};
+    const hipdnn::GuardedResult<int> worked{0, false};
+    const auto map = [](int value) -> std::optional<miopenStatus_t> {
+        if(value == 0)
+            return std::nullopt;
+        return miopenStatusBadParm;
+    };
+
+    const auto failure = hipdnn::FailureOfGuardedCall(failed, map);
+    ASSERT_TRUE(failure.has_value());
+    EXPECT_EQ(*failure, miopenStatusBadParm);
+    EXPECT_FALSE(hipdnn::FailureOfGuardedCall(worked, map).has_value());
+}
+
 // ---------------------------------------------------------------------------
 // The dispatch macro itself, through a stub named like an entry point. The route is read
 // from MIOPEN_HIPDNN_FORWARDING once per process, so these skip unless it enables

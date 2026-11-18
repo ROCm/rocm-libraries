@@ -16,8 +16,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 // Declared rather than included so that the wrapper's stub files and routing.cpp,
@@ -102,6 +105,38 @@ miopenStatus_t RejectReentrantCall(const char* entryPoint) noexcept;
 // Records that a hipDNN plugin re-entered the wrapper as a forwarded failure and returns
 // miopenStatusInternalError. Call it when ReentryDetected() is true, whatever hipDNN returned.
 miopenStatus_t RecordReentryFailure() noexcept;
+
+// What a hipDNN build or execute call returned, and whether a forwarded entry point was
+// rejected while it ran.
+template <typename Result>
+struct GuardedResult
+{
+    Result result;
+    bool reentered;
+};
+
+// Runs `call`, a hipDNN build or execute, with this thread marked as inside hipDNN. The
+// scope is opened here, not at each call site, so no call into hipDNN can go without one.
+template <typename Call>
+auto CallInsideHipdnn(Call&& call) -> GuardedResult<std::decay_t<decltype(call())>>
+{
+    const ScopedHipdnnCall scope;
+    auto result = call();
+    return {std::move(result), scope.ReentryDetected()};
+}
+
+// The failure to report for `guarded`, or nullopt when the call worked. `hipdnnFailure`
+// maps what hipDNN returned to its failure, or nullopt. A re-entry takes precedence over
+// it: a plugin that ignored the error it was given makes hipDNN report success for an
+// output nobody wrote.
+template <typename Result, typename HipdnnFailure>
+std::optional<miopenStatus_t> FailureOfGuardedCall(const GuardedResult<Result>& guarded,
+                                                   HipdnnFailure&& hipdnnFailure)
+{
+    if(guarded.reentered)
+        return RecordReentryFailure();
+    return hipdnnFailure(guarded.result);
+}
 
 // One value per kind of graph the wrapper builds. Kept in one list so that the
 // values stay distinct as operations are added: it is the first element of

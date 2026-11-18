@@ -79,7 +79,9 @@ endif()
 # registers exactly the tests it did before that work.
 if(NOT MIOPEN_ENABLE_HIPDNN_WRAPPER)
     list(APPEND SKIP_TESTS
+        hipdnn_erase_outside_lock.cpp
         hipdnn_lru_cache.cpp
+        hipdnn_reentry.cpp
         hipdnn_shim_conv.cpp
         hipdnn_shim_conv_gaps.cpp
         hipdnn_shim_conv_translation.cpp
@@ -448,8 +450,13 @@ function(miopen_add_wrapper_check NAME)
 endfunction()
 
 # The packaged counterpart of miopen_add_wrapper_check. COMMAND_TEXT and EXTRA_PROPERTIES are
-# written into the test list as given, so they carry their own quoting.
+# written into the test list as given, so they carry their own quoting. The program is the
+# Python interpreter unless a fourth argument names another one.
 function(miopen_append_installed_wrapper_check NAME COMMAND_TEXT EXTRA_PROPERTIES)
+  set(CHECK_PROGRAM ${MIOPEN_INSTALLED_TEST_PYTHON})
+  if(ARGC GREATER 3)
+    set(CHECK_PROGRAM "${ARGV3}")
+  endif()
   foreach(CHECK_GPU_LABEL "" ${MIOPEN_FORWARDING_PARITY_GPU_LABELS})
     set(CHECK_ENTRY_NAME ${NAME})
     set(CHECK_LABELS ${MIOPEN_FORWARDING_PARITY_TIER_LABELS})
@@ -458,7 +465,7 @@ function(miopen_append_installed_wrapper_check NAME COMMAND_TEXT EXTRA_PROPERTIE
       list(APPEND CHECK_LABELS ${CHECK_GPU_LABEL})
     endif()
     file(APPEND "${INSTALL_TEST_FILE}"
-"add_test(${CHECK_ENTRY_NAME} ${MIOPEN_INSTALLED_TEST_PYTHON} ${COMMAND_TEXT})
+"add_test(${CHECK_ENTRY_NAME} ${CHECK_PROGRAM} ${COMMAND_TEXT})
 set_tests_properties(${CHECK_ENTRY_NAME} PROPERTIES TIMEOUT 300 LABELS \"${CHECK_LABELS}\"${EXTRA_PROPERTIES})
 
 ")
@@ -656,6 +663,15 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE)
   miopen_append_installed_wrapper_check(forwarding_failure_modes
     "\"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/test_forwarding_failure_modes.py\" \"-v\""
     " ENVIRONMENT \"PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=../${MIOPEN_WRAPPER_TESTS_SUBDIR}/forwarding_failure_probe${CMAKE_EXECUTABLE_SUFFIX};MIOPEN_FAKE_HIPDNN_BACKEND=../${MIOPEN_WRAPPER_TESTS_SUBDIR}/fake_hipdnn_backend\"")
+endif()
+
+# The dispatch macro's re-entry tests, with the settings wrapper_reentry_macro gives them in the
+# build tree. They need a visible device and a loadable hipDNN, like the parity entries.
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE)
+  miopen_append_installed_wrapper_check(wrapper_reentry_macro
+    "\"--gtest_filter=CPU_WrapperRoutingReentryMacro_NONE.*\""
+    " ENVIRONMENT \"MIOPEN_HIPDNN_FORWARDING=1\" ENVIRONMENT_MODIFICATION \"MIOPEN_DISABLE_HIPDNN_FOR=unset:\" FAIL_REGULAR_EXPRESSION \"\\\\[  SKIPPED \\\\]\""
+    "../miopen_gtest${CMAKE_EXECUTABLE_SUFFIX}")
 endif()
 
 # Install CTestTestfile.cmake to bin/MIOpen/ subdirectory for TheRock distribution

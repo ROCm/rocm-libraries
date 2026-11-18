@@ -27,7 +27,7 @@ import check_wrapper_registration as registration
 
 TIERS = ["quick", "standard", "comprehensive", "full"]
 GPU_LABELS = ["ex_gpu_gfx110X", "ex_gpu_gfx950"]
-CHECKS = ("wrapper_abi_check", "forwarding_failure_modes")
+CHECKS = ("wrapper_abi_check", "forwarding_failure_modes", "wrapper_reentry_macro")
 
 
 def registered(drop=(), relabel=None, tiers=TIERS):
@@ -83,11 +83,11 @@ class ProblemsTest(unittest.TestCase):
             found, ["build tree: wrapper_abi_check_ex_gpu_gfx950 is not registered"]
         )
 
-    def test_both_checks_are_required_on_every_architecture(self):
+    def test_every_check_is_required_on_every_architecture(self):
         entries = registered(
             drop=[f"{check}_{label}" for check in CHECKS for label in GPU_LABELS]
         )
-        self.assertEqual(len(self.problems(entries)), 4)
+        self.assertEqual(len(self.problems(entries)), len(CHECKS) * len(GPU_LABELS))
 
     def test_a_missing_bare_entry_is_named(self):
         found = self.problems(registered(drop=["forwarding_failure_modes"]))

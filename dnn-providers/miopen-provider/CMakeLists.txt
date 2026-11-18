@@ -371,8 +371,10 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/include)
         target_link_libraries(miopen_plugin_public_stand_in PRIVATE
             MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
-        # --as-needed keeps libMIOpen_private.so, which MIOpen exports to its dependents,
-        # out of the link where possible, so the stand-in looks like the plugin it stands for.
+        # --as-needed drops libraries nothing needs. libMIOpen_private.so stays, because the
+        # stand-in calls the three *GetWorkSpaceSizeRange functions that only it exports, so
+        # check-plugin rejects the stand-in for linking the public library and for needing
+        # public entry points, not for missing the private one.
         target_link_options(miopen_plugin_public_stand_in PRIVATE -Wl,--as-needed)
         target_compile_definitions(miopen_plugin_public_stand_in PRIVATE MIOPEN_BETA_API)
         target_compile_options(miopen_plugin_public_stand_in PRIVATE
@@ -514,11 +516,12 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             list(APPEND miopen_plugin_abi_tests
                  ${PROJECT_NAME}-plugin-abi-check-rejects-public-plugin)
         endif()
-        # Runs one forwarded convolution through the stand-in with the real hipDNN backend;
-        # see check_plugin_reentry.py. Needs a built MIOpen test binary and a GPU, so the
-        # script skips (exit 77) on a machine that cannot run the shim test, instead of failing.
+        # Runs the re-entry test (test/gtest/hipdnn_reentry.cpp) with the real hipDNN backend and
+        # the stand-in as the only plugin; see check_plugin_reentry.py. Needs a built MIOpen
+        # test binary and a GPU, so the script skips (exit 77) on a machine that cannot run it,
+        # instead of failing.
         if(MIOPEN_TEST_DISCRETE)
-            set(miopen_plugin_reentry_gtest test_hipdnn_shim_conv)
+            set(miopen_plugin_reentry_gtest test_hipdnn_reentry)
         else()
             set(miopen_plugin_reentry_gtest miopen_gtest)
         endif()
