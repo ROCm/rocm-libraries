@@ -560,6 +560,9 @@ validParameters = { # we need to make sure this matches develop
     "DirectToVgprDot2A": [False, True],
     # With DirectToVgprDot2A and one row group per workgroup, B also feeds v_dot2 from its registers.
     "DirectToVgprDot2B": [False, True],
+    # DirectToVgprDot2A/B bf16 block-scaled: v_dot2 on the exact (q - z) and the group scale applied
+    # to each K slot's f32 partial sum, instead of rounding (q - z) * s to bf16 per weight.
+    "Dot2PostScaleA": [False, True],
     "DirectToVgprMXSA": [False, True],
     "DirectToVgprMXSB": [False, True],
     "DirectToVgprSparseMetadata": [False, True],

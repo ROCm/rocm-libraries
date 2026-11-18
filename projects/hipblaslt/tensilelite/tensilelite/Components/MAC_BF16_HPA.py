@@ -23,7 +23,7 @@
 ################################################################################
 from rocisa.code import Module
 from rocisa.container import vgpr
-from rocisa.instruction import SSetPrior, VDot2F32BF16, VDot2CF32BF16
+from rocisa.instruction import SSetPrior, VDot2F32BF16, VDot2CF32BF16, VFmaF32
 
 from rocisa.enum import DataTypeEnum
 from ..Common.DataType import DataType
@@ -144,6 +144,14 @@ class FMA_BF16_HPA_DOT2(MAC):
         vars["ThreadTile0"] = kernel["ThreadTile0"]
         vars["ThreadTile1"] = kernel["ThreadTile1"]
 
+        postScale = kernel.get("Dot2PostScaleA", False)
+        if postScale:
+            assert instruction == VDot2F32BF16 and kernel["DirectToVgprDot2A"] and unrollIdx is not None
+            pairs = writer.dot2DtvAPairsPerSlot(kernel)
+            slot = unrollIdx // pairs
+            firstOfSlot = unrollIdx % pairs == 0
+            lastOfSlot = unrollIdx % pairs == pairs - 1
+
         for block1 in range(0, kernel["ThreadTile1"]):
             for block0 in range(0, kernel["ThreadTile0"]):
                 for iui in range(0, innerUnroll):
@@ -164,7 +172,18 @@ class FMA_BF16_HPA_DOT2(MAC):
                         bStr = writer.dot2DirectToVgprBReg(kernel, vars["blockB"], unrollIdx)
                     else:
                         bStr = "ValuB_X{m}_I{iui}+{blockB}".format_map(vars)
-                    if instruction == VDot2F32BF16:
+                    if postScale:
+                        # The slot's v_dot2 sum the exact (q - z) * b into Dot2PS; its last
+                        # one hands the sum to ValuC, scaled by the row's group scale.
+                        pStr = "Dot2PS+%u" % cidx
+                        module.add(VDot2F32BF16(dst=vgpr(pStr), src0=vgpr(aStr), src1=vgpr(bStr),
+                                                src2=0 if firstOfSlot else vgpr(pStr),
+                                                comment="Dot2PS[%u] slot %u" % (cidx, slot)))
+                        if lastOfSlot:
+                            scale = "G2LScaleA+%u" % writer.dot2DtvALoadIdx(kernel, vars["blockA"], slot)
+                            module.add(VFmaF32(dst=vgpr(cStr), src0=vgpr(scale), src1=vgpr(pStr), src2=vgpr(cStr),
+                                               comment="ValuC[%u] += s * Dot2PS" % cidx))
+                    elif instruction == VDot2F32BF16:
                         module.add(instruction(dst=vgpr(cStr), src0=vgpr(aStr), src1=vgpr(bStr), src2=vgpr(cStr), \
                                             comment="ValuC[%u] iui=%u" % (cidx, vars["iui"])))
                     else:

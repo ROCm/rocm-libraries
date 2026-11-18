@@ -90,7 +90,7 @@ from .Components.TDMFuse import tdmWaveComponents, tdmWavePartition, tdmSoleWave
 from .SolutionStructs import isPackedIndex
 from .SolutionStructs.Problem import blockDequantItersPerGroupA, blockDequantPackedFp16A, usesBlockDequantA
 from .SolutionStructs.Validators.DirectToVgprDot2 import DOT2_DTVA_ITEM, dot2DtvADoubleBuffered, \
-  dot2DtvASlotPipelined, dot2MaskedTail, dot2NoLdsAB
+  dot2DtvASlotPipelined, dot2MaskedTail, dot2NoLdsAB, dot2PostScaleA
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, getCustomKernelSource, supportsUserSgprKernargPreload
@@ -1737,6 +1737,8 @@ class KernelWriterAssembly(KernelWriter):
               self.startVgprGlobalReadOffsetScaleA))
           module.add(RegSet("v", "vgprG2LScaleA", \
               self.startVgprG2LScaleA))
+          if dot2PostScaleA(kernel):
+            module.add(RegSet("v", "vgprDot2PS", self.startVgprDot2PS))
           if kernel["ProblemType"]["ScaleZeroPointA"]:
             module.add(RegSet("v", "vgprG2LScaleZeroA", \
                 self.startVgprG2LScaleZeroA))
@@ -5981,7 +5983,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(VAddPKF16(
             dst=vgpr(vTmps[pair]), src0=vgpr(vTmps[pair]), src1=vgpr(vNegZPk + which) if kernel["ProblemType"]["ScaleZeroPointA"] else sgpr("ScaleAPkMagic+%u" % (2 + which)),
             comment="w4a16: q - z (exact: both sides are integers near %d)" % magicVal))
-      for pair in range(4):
+      for pair in range(4 if not dot2PostScaleA(kernel) else 0):  # Dot2PostScaleA: the MAC scales
         operands = dict(dst=vgpr(vTmps[pair]), src0=vgpr(vTmps[pair]), src1=vgpr(vScalePk),
                         comment="w4a16: (q - z)*s, packed")
         if kernel["ProblemType"]["ScaleZeroPointA"]:
@@ -6037,8 +6039,13 @@ class KernelWriterAssembly(KernelWriter):
     vScale, vScale2, vSrc = tmp, tmp + 1, tmp + 2
     vC = tmp + 3 if zeroPoint else None
 
-    module.add(VLShiftLeftB32(dst=vgpr(vScale), shiftHex=16, src=vgpr(scaleVgpr), comment="scaleA: bf16 -> f32"))
-    module.add(VMovB32(dst=vgpr(vScale2), src=vgpr(vScale), comment="scaleA: copy on the other VGPR bank"))
+    postScale = dot2PostScaleA(kernel)
+    if postScale:
+      # The MAC applies the scale to the slot's partial sums (Dot2PostScaleA).
+      module.add(VLShiftLeftB32(dst=vgpr(scaleVgpr), shiftHex=16, src=vgpr(scaleVgpr), comment="scaleA: bf16 -> f32, for the MAC"))
+    else:
+      module.add(VLShiftLeftB32(dst=vgpr(vScale), shiftHex=16, src=vgpr(scaleVgpr), comment="scaleA: bf16 -> f32"))
+      module.add(VMovB32(dst=vgpr(vScale2), src=vgpr(vScale), comment="scaleA: copy on the other VGPR bank"))
     if zeroPoint:
       # n = stored nibble (xor 8 when signed); w = (n - c) * s with c = z
       # (UnsignedBias8) or 8 + z (two's complement, z sign-extended).
@@ -6093,6 +6100,13 @@ class KernelWriterAssembly(KernelWriter):
           # more than the largest zero-point tiles have.
           for r in regsH:
             module.add(VSubF32(dst=vgpr(r), src0=vgpr(r), src1=vgpr(vC), comment="w4a16: - zero-point, exact"))
+        if postScale:
+          # (n - c) is a small integer: its f32 low half is zero, so the high half is the exact bf16.
+          module.add(VPermB32(dst=out(2 * h), src0=vgpr(b[0]), src1=vgpr(a[0]), src2="0x07060302",
+                              comment="w4a16: pack 2 bf16 (n - c), exact"))
+          module.add(VPermB32(dst=out(2 * h + 1), src0=vgpr(b[1]), src1=vgpr(a[1]), src2="0x07060302",
+                              comment="w4a16: pack 2 bf16 (n - c), exact"))
+          continue
         module.add(VDualOp("mul_f32", vgpr(a[0]), vgpr(vScale), vgpr(a[0]), "mul_f32", vgpr(b[0]), vgpr(vScale2), vgpr(b[0]),
                            comment="w4a16: (n - c) * s, exact"))
         module.add(VDualOp("mul_f32", vgpr(a[1]), vgpr(vScale), vgpr(a[1]), "add_nc_u32", vgpr(a[0]), rnd, vgpr(a[0]),
@@ -6197,9 +6211,13 @@ class KernelWriterAssembly(KernelWriter):
                                  comment="w4a16: pack 2 bf16"))
       return insts
 
-    if fp16Pk:
+    if fp16Pk and dot2PostScaleA(kernel):
+      # The MAC applies the scale to the slot's partial sums (Dot2PostScaleA).
+      module.add(VCvtF16toF32(dst=vgpr(scaleVgpr), src=vgpr(scaleVgpr), comment="scaleA: fp16 -> f32, for the MAC"))
+    if fp16Pk and not dot2PostScaleA(kernel):
       module.add(VPackF16toB32(dst=vgpr(vScale), src0=vgpr(scaleVgpr), src1=vgpr(scaleVgpr),
                                comment="scaleA: duplicate fp16 scale"))
+    if fp16Pk:
       if zeroPoint:
         module.add(VAndB32(dst=vgpr(vLo), src0=1,
                            src1=vgpr("GlobalReadOffsetScaleZeroA+%u" % loadIdx)))

@@ -53,6 +53,32 @@ def dot2MaskedTail(state):
                 and state["AssertSummationElementMultiple"] % state["DepthU"] != 0)
 
 
+def dot2PostScaleA(kernel):
+    """Dot2PostScaleA: the dequantized A is the exact (q - z), the v_dot2 of a K slot
+    accumulate into a per-(row, token) partial sum, and the slot's group scale is
+    applied to it with one f32 multiply-add."""
+    return bool(kernel.get("Dot2PostScaleA", False))
+
+
+def validateDot2PostScaleA(state, printRejectionReason):
+    if not state.get("Dot2PostScaleA", False):
+        return True
+    pt = state["ProblemType"]
+    def fail(msg):
+        reject(state, printRejectionReason, "Dot2PostScaleA: " + msg)
+        return False
+    if not (state["DirectToVgprDot2A"] and state["DirectToVgprDot2B"]):
+        return fail("requires DirectToVgprDot2A and DirectToVgprDot2B")
+    if pt["UseScaleAB"] != "Block" or not pt["DataTypeA"].isInt4():
+        return fail("requires int4 A with block scales")
+    if not (pt["MacDataTypeA"].isBFloat16() or pt["MacDataTypeA"].isHalf()):
+        return fail("requires a bf16 or fp16 MacDataTypeA")
+    # A lane's GlobalReadVectorWidthA weights of a slot share one group scale.
+    if any(g % state["GlobalReadVectorWidthA"] for g in pt["ScaleBlockSizesA"] if g > 0):
+        return fail("requires every ScaleBlockSizeA to be a multiple of GlobalReadVectorWidthA")
+    return True
+
+
 def validateDirectToVgprDot2A(state, printRejectionReason):
     """Return ``True`` when the mode is off or supported, ``False`` after a reject.
 
@@ -60,6 +86,9 @@ def validateDirectToVgprDot2A(state, printRejectionReason):
     dot2 parameters are derived.
     """
     if not state["DirectToVgprDot2A"]:
+        if state.get("Dot2PostScaleA", False):
+            reject(state, printRejectionReason, "Dot2PostScaleA: requires DirectToVgprDot2A")
+            return False
         return True
 
     def fail(msg):
@@ -107,7 +136,7 @@ def validateDirectToVgprDot2A(state, printRejectionReason):
                 return fail("K tail requires a power-of-two %s (%d)" % (k, state[k]))
         if state["GlobalSplitU"] != 1 or isPersistent(state):
             return fail("K tail requires GlobalSplitU 1 and no persistent tile processing")
-    return True
+    return validateDot2PostScaleA(state, printRejectionReason)
 
 
 def validateDirectToVgprDot2B(state, printRejectionReason):

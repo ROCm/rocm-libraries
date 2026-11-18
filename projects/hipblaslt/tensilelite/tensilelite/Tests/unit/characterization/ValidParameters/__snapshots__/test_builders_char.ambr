@@ -1397,6 +1397,7 @@
     'DirectToVgprMXSA',
     'DirectToVgprMXSB',
     'DirectToVgprSparseMetadata',
+    'Dot2PostScaleA',
     'DtlPlusLdsBuf',
     'ExpandPointerSwap',
     'ExtraLatencyForLR',
@@ -1834,6 +1835,14 @@
       'type': 'list',
     }),
     'DirectToVgprSparseMetadata': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'Dot2PostScaleA': dict({
       'head': list([
         False,
         True,

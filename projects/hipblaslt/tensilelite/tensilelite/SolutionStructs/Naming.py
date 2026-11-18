@@ -256,8 +256,8 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("LDSSegmentBRotate")
 
-    # DirectToVgprDot2A/B=False is the default; naming it would rename every kernel.
-    for key in ("DirectToVgprDot2A", "DirectToVgprDot2B"):
+    # DirectToVgprDot2A/B and Dot2PostScaleA=False are the default; naming them would rename every kernel.
+    for key in ("DirectToVgprDot2A", "DirectToVgprDot2B", "Dot2PostScaleA"):
       if state.get(key, False):
         requiredParametersTemp.add(key)
       else:

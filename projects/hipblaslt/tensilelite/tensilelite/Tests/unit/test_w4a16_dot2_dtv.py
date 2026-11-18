@@ -255,6 +255,65 @@ def test_dtvb_k_tail_masks_lanes_past_k(toolchain, zeroPoint):
     assert re.search(r"s_mov_b32 s\[sgprLoopCounterL\], 1\s.*\n\s*s_branch label_LoopBeginL", tail)
 
 
+_BF16 = {"DataType": "B", "MacDataTypeA": "B", "DestDataType": "B"}
+
+
+def test_post_scale_valid(toolchain):
+    """Dot2PostScaleA needs both operands straight to VGPRs and int4 A with block scales."""
+    assert _solution(toolchain, **_dtvb(Dot2PostScaleA=True, problemType=_BF16)).get("Valid") is True
+    assert _solution(toolchain, **_dtvb(Dot2PostScaleA=True)).get("Valid") is True  # fp16
+    # B through LDS: no.
+    assert _solution(toolchain, pgr=0, glvwA=8, Dot2PostScaleA=True, problemType=_BF16).get("Valid") is not True
+    # Off by default, and not named then.
+    from Tensile.SolutionStructs.Naming import getKernelNameMin
+    assert "DPSA" not in getKernelNameMin(_solution(toolchain, **_dtvb(problemType=_BF16)), False)
+    assert "DPSA1" in getKernelNameMin(_solution(toolchain, **_dtvb(Dot2PostScaleA=True, problemType=_BF16)), False)
+
+
+@pytest.mark.parametrize("zeroPoint", [False, True])
+def test_post_scale_scales_each_slot_sum(toolchain, zeroPoint):
+    """bf16 Dot2PostScaleA: the dequantize leaves the exact (q - z) (no per-weight scale or
+    rounding); each K slot's v_dot2 sum into Dot2PS from zero, and one f32 FMA per
+    (row, token, slot) adds it to ValuC scaled by that row's f32 group scale."""
+    tile = [2, 2]
+    sol = _solution(toolchain, **_dtvb(Dot2PostScaleA=True, problemType=_BF16, ThreadTile=tile, zeroPoint=zeroPoint,
+                                       WorkGroup=[1, 1, 32]))
+    assert sol.get("Valid") is True
+    nlc, pairs = sol["NumLoadsCoalescedA"], sol["GlobalReadVectorWidthA"] // 2
+    body = _loopBody(_emit_solution(toolchain, sol)[1])
+    assert "(n - c) * s" not in body and "w4a16: round" not in body
+    assert len(re.findall(r"v_lshlrev_b32 v\[vgprG2LScaleA\+(\d+)\], 16, v\[vgprG2LScaleA\+\1\]", body)) == tile[0] * nlc
+    dots = re.findall(r"v_dot2_f32_bf16 v\[vgprDot2PS\+(\d+)\], \S+, \S+, (\S+)\s", body)
+    assert len(dots) == tile[0] * tile[1] * nlc * pairs
+    assert sum(src2 == "0" for _, src2 in dots) == tile[0] * tile[1] * nlc
+    fmas = re.findall(r"v_fma_f32 v\[vgprValuC\+([\d+]+)\], v\[vgprG2LScaleA\+(\d+)\], v\[vgprDot2PS\+(\d+)\], "
+                      r"v\[vgprValuC\+([\d+]+)\]", body)
+    assert len(fmas) == tile[0] * tile[1] * nlc
+    for c, scale, ps, c2 in fmas:
+        c, c2 = eval(c), eval(c2)  # ValuC+block0+block1*TT0
+        assert c == int(ps) == c2 and int(scale) // nlc == c % tile[0]
+    assert not re.search(r"v_dot2_f32_bf16 v\[vgprValuC", body)
+
+
+@pytest.mark.parametrize("zeroPoint", [False, True])
+def test_post_scale_fp16_scales_each_slot_sum(toolchain, zeroPoint):
+    """fp16 Dot2PostScaleA: same structure as bf16 with v_dot2_f32_f16; the fp16 group
+    scale is widened to f32 once per (row, slot) before the slot's FMA."""
+    tile = [2, 2]
+    sol = _solution(toolchain, **_dtvb(Dot2PostScaleA=True, ThreadTile=tile, zeroPoint=zeroPoint,
+                                       WorkGroup=[1, 1, 32]))
+    assert sol.get("Valid") is True
+    nlc, pairs = sol["NumLoadsCoalescedA"], sol["GlobalReadVectorWidthA"] // 2
+    body = _loopBody(_emit_solution(toolchain, sol)[1])
+    assert len(re.findall(r"v_cvt_f32_f16 v\[vgprG2LScaleA\+(\d+)\], v\[vgprG2LScaleA\+\1\]", body)) == tile[0] * nlc
+    dots = re.findall(r"v_dot2_f32_f16 v\[vgprDot2PS\+(\d+)\], \S+, \S+, (\S+)\s", body)
+    assert len(dots) == tile[0] * tile[1] * nlc * pairs
+    assert sum(src2 == "0" for _, src2 in dots) == tile[0] * tile[1] * nlc
+    fmas = re.findall(r"v_fma_f32 v\[vgprValuC\+[\d+]+\], v\[vgprG2LScaleA\+\d+\], v\[vgprDot2PS\+\d+\]", body)
+    assert len(fmas) == tile[0] * tile[1] * nlc
+    assert not re.search(r"v_dot2\w* v\[vgprValuC", body)
+
+
 @pytest.mark.parametrize("nt, mods", [(0, ""), (2, " slc"), (6, " slc dlc")])
 def test_non_temporal_a_streams_with_dlc(toolchain, nt, mods):
     """gfx11 has no nt modifier; the nt bit of NonTemporalA becomes dlc."""

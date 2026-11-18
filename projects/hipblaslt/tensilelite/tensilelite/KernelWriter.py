@@ -63,7 +63,7 @@ from .Components.TDMFuse import tdmWavePartition
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Problem import blockDequantItersPerGroupA, blockDequantPackedFp16A, usesBlockDequantZeroPointA
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
-from .SolutionStructs.Validators.DirectToVgprDot2 import dot2DtvADoubleBuffered, dot2DtvASlotPipelined, dot2MaskedTail
+from .SolutionStructs.Validators.DirectToVgprDot2 import dot2DtvADoubleBuffered, dot2DtvASlotPipelined, dot2MaskedTail, dot2PostScaleA
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
@@ -9098,6 +9098,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           vgprIdx += self.states.numGlobalReadScaleA
           self.startVgprG2LScaleA = vgprIdx
           vgprIdx += self.states.numGlobalReadScaleA
+          if dot2PostScaleA(kernel):
+            # One f32 partial sum per (row, token) of the tile for the current K slot.
+            self.startVgprDot2PS = vgprIdx
+            vgprIdx += kernel["ThreadTile0"] * kernel["ThreadTile1"]
           if kernel["ProblemType"]["ScaleZeroPointA"]:
             self.startVgprG2LScaleZeroA = vgprIdx
             vgprIdx += self.states.numGlobalReadScaleA

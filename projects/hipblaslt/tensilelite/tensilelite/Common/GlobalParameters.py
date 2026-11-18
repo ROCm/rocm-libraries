@@ -546,6 +546,7 @@ defaultBenchmarkCommonParameters = [
     {"DirectToVgprB": [False]},
     {"DirectToVgprDot2A": [False]},
     {"DirectToVgprDot2B": [False]},
+    {"Dot2PostScaleA": [False]},
     {"DirectToVgprMXSA": [False]},
     {"DirectToVgprMXSB": [False]},
     {"DirectToVgprSparseMetadata": [False]},

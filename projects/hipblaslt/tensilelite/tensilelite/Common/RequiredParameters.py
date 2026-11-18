@@ -50,6 +50,7 @@ def getRequiredParametersMin() -> set:
         'DirectToVgprB',
         'DirectToVgprDot2A',
         'DirectToVgprDot2B',
+        'Dot2PostScaleA',
         'DirectToVgprSparseMetadata',
         'DirectToLdsA',
         'DirectToLdsB',
