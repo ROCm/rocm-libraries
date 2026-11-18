@@ -27,6 +27,19 @@ from rocke.core.codegen_policy import scheduler_strategy_reason
 ENGINE_MODULE = "rocke_library_engine"
 
 
+def _lower_python(kernel: Any, arch: str) -> str:
+    """Lower a built kernel with the Python lowerer, unconditionally.
+
+    Every ``py_fn`` handed to :func:`rocke.core.lower_family` is the Python
+    side of the ``python`` / ``both`` selection, so it must not re-resolve the
+    backend: the public ``lower_kernel_to_llvm`` dispatches on
+    ``ROCKE_BACKEND`` and would run the C++ lowerer, which makes ``"both"``
+    compare C++ against C++."""
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+    return _lower_kernel_to_llvm_python(kernel, arch=arch)
+
+
 def _reject_unknown_sched(spec: Any, arch: str) -> None:
     """Refuse a ``spec.sched`` outside :class:`SchedulerStrategy` before either
     engine runs, with the ValueError the Python builder raises for it.
@@ -660,10 +673,9 @@ def lower_conv_implicit_gemm(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_implicit_gemm import build_implicit_gemm_conv
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_implicit_gemm_conv(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -709,14 +721,13 @@ def lower_conv_direct_grouped(
             build_direct_conv_16c,
             build_direct_conv_4c,
         )
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         build = {
             "4c": build_direct_conv_4c,
             "generic": build_direct_conv,
         }.get(kind, build_direct_conv_16c)
         k = build(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -749,10 +760,9 @@ def lower_conv_direct_nongrouped(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_direct_nongrouped import build_direct_conv_nongrouped
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_direct_conv_nongrouped(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -785,10 +795,9 @@ def lower_conv_direct_fwd_smallc_wmma(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_fwd_small_wmma import build_fwd_smallc_wmma
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_fwd_smallc_wmma(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -822,10 +831,9 @@ def lower_conv_direct_fwd_smallk_wmma(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_fwd_small_wmma import build_fwd_smallk_wmma
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_fwd_smallk_wmma(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -859,10 +867,9 @@ def lower_conv_direct_fwd_smallc_mfma(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_fwd_small_mfma import build_fwd_smallc_mfma
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_fwd_smallc_mfma(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -895,10 +902,9 @@ def lower_conv_direct_fwd_smallk_mfma(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_fwd_small_mfma import build_fwd_smallk_mfma
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_fwd_smallk_mfma(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -932,10 +938,9 @@ def lower_conv_direct_fwd_pp_mfma(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_direct_fwd_pp_mfma import build_fwd_pp_mfma
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_fwd_pp_mfma(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -973,10 +978,9 @@ def lower_conv_direct_fwd_flex_mfma(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_direct_fwd_flex_mfma import build_fwd_flex_mfma
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_fwd_flex_mfma(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -1013,10 +1017,9 @@ def lower_conv_direct_dw_fwd_wmma(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_direct_dw_fwd_wmma import build_dw_fwd_wmma
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_dw_fwd_wmma(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -1049,10 +1052,9 @@ def lower_conv_direct_fwd_gstream_wmma(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_direct_fwd_gstream_wmma import build_fwd_gstream_wmma
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_fwd_gstream_wmma(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -1088,10 +1090,9 @@ def lower_conv_direct_fwd_tapouter_wmma(
         from kernels.common.conv_direct_fwd_tapouter_wmma import (
             build_direct_fwd_tapouter_wmma,
         )
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_direct_fwd_tapouter_wmma(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -1125,10 +1126,9 @@ def lower_conv_dgrad_patch_wmma(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_dgrad_patch_wmma import build_dgrad_patch_wmma
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_dgrad_patch_wmma(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -1162,10 +1162,9 @@ def lower_conv_dgrad_smallc_wmma(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_dgrad_smallc_wmma import build_dgrad_smallc_wmma
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_dgrad_smallc_wmma(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -1199,10 +1198,9 @@ def lower_conv_direct_dgrad_wmma(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_direct_dgrad_wmma import build_direct_dgrad_wmma
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_direct_dgrad_wmma(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -1237,10 +1235,9 @@ def lower_conv_direct_dgrad_pp_mfma(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_direct_dgrad_pp_mfma import build_dgrad_pp_mfma
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_dgrad_pp_mfma(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -1277,10 +1274,9 @@ def lower_conv_direct_fwd_wmma(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_direct_fwd_wmma import build_direct_fwd_wmma
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_direct_fwd_wmma(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -1364,7 +1360,6 @@ def lower_conv_winograd_fwd(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common import conv_winograd_fwd as wf
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         if isinstance(stages, str):
             build = {
@@ -1378,7 +1373,7 @@ def lower_conv_winograd_fwd(
             k = wf.build_winograd_merged(
                 wf.WinogradMergedSpec(spec, tuple(stages)), arch=arch
             )
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -1435,10 +1430,9 @@ def lower_conv_winograd_gemm_wmma(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_winograd_gemm_wmma import build_winograd_gemm_wmma
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_winograd_gemm_wmma(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -1473,10 +1467,9 @@ def lower_conv_winograd_gemm_reduce(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_winograd_gemm_wmma import build_winograd_gemm_reduce
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_winograd_gemm_reduce(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -1560,7 +1553,6 @@ def lower_conv_winograd_gen(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common import conv_winograd_gen as G
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         build = {
             "K1": G.build_filter_transform,
@@ -1568,7 +1560,7 @@ def lower_conv_winograd_gen(
             "K4": G.build_output_transform,
         }[stage]
         k = build(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -1646,10 +1638,9 @@ def lower_conv_winograd_fused_1d_wmma(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_winograd_fused_1d_wmma import build_fused_wino_1d
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_fused_wino_1d(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -1682,10 +1673,9 @@ def lower_img2col(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.img2col import build_img2col
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_img2col(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
@@ -1720,10 +1710,9 @@ def lower_deep_fused_conv_pool(
         from kernels.common.deep_fused_conv_pool import (
             build_deep_fused_conv_pool,
         )
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = build_deep_fused_conv_pool(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
+        ll = _lower_python(k, arch)
         ir = ""
         if wi:
             from rocke.core.ir_serialize import serialize
