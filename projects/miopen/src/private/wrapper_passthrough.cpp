@@ -7,12 +7,13 @@
 // Regenerate: python3 projects/miopen/script/generate_wrapper_sources.py
 //
 // Pass-through stubs for the public wrapper of the MIOpen public/private split,
-// compiled into libMIOpen.so next to wrapper.cpp. Each public C entry point in
-// <miopen/miopen.h> has an extern "C" stub, either here or in wrapper.cpp. Every
-// stub opens with MIOPEN_WRAPPER_DISPATCH (routing.hpp), which forwards the call
-// to hipDNN when MIOPEN_HIPDNN_FORWARDING and the compile-time forwarding set
-// say so; otherwise the stub calls the matching _impl symbol in the private
-// library (declared in miopen_impl.h).
+// compiled into libMIOpen.so next to wrapper.cpp. Each C entry point declared in
+// <miopen/miopen.h> or <miopen/miopen_internal.h> has an extern "C" stub, either
+// here or in wrapper.cpp. Every stub opens with MIOPEN_WRAPPER_DISPATCH
+// (routing.hpp), which forwards the call to hipDNN when
+// MIOPEN_HIPDNN_FORWARDING and the compile-time forwarding set say so;
+// otherwise the stub calls the matching _impl symbol in the private library
+// (declared in miopen_impl.h).
 //
 // A stub that needs more than a pass-through belongs in wrapper.cpp. The
 // generator skips every entry point wrapper.cpp defines, so move the stub there,
@@ -32,8 +33,8 @@
 #endif
 
 #include <miopen/miopen.h>
-// Also declares, with MIOPEN_EXPORT, the entry points that miopen.h does not;
-// without that declaration hidden visibility would leave their stubs unexported.
+// Also declares, with MIOPEN_EXPORT, the entry points that miopen.h does not, so
+// their stubs are exported. miopen_impl.h includes it too.
 #include <miopen/miopen_internal.h>
 
 #include "hipdnn_graph.hpp"

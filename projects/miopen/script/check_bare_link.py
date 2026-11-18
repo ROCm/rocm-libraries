@@ -19,9 +19,11 @@ consumer can use them. It never runs the program.
 Linux only: a Windows import library already fails the link for a symbol the DLL
 does not export, so the export-table comparison in check-wrapper covers it.
 
-Exit codes: 0 every symbol resolved, 1 the link failed, 77 nothing to check
-here (Windows, or no compiler found when none was named). 77 is the code ctest's
-SKIP_RETURN_CODE property is set to.
+Exit codes: 0 every symbol resolved, 1 the link failed or a library is missing,
+2 bad input (unreadable baseline, a named compiler that does not exist, no
+libMIOpen.so in the library directory), 77 nothing to check here (Windows, or no
+compiler found when none was named). 77 is the code ctest's SKIP_RETURN_CODE
+property is set to.
 
     check_bare_link.py [--lib-dir <dir>] [--baseline <file>] [--compiler <c++>]
 """

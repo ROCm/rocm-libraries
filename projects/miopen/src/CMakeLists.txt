@@ -982,15 +982,15 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     miopen_apply_private_rename(${_MIOPEN_IMPL_TARGET})
 
     # Public wrapper library. src/private/wrapper_passthrough.cpp (generated from
-    # <miopen/miopen.h> by script/generate_wrapper_sources.py) and
-    # src/private/wrapper.cpp (the stubs that do more than pass a call through)
-    # define an extern "C" stub for every MIOPEN_EXPORT entry point in the header,
-    # each routing through src/private/routing.cpp to either hipDNN or its
-    # renamed _impl symbol in MIOpen_private. PUBLIC linkage
-    # propagates the implementation's include directories and link interface to
-    # consumers of the wrapper, so existing consumers (driver, tests, CK plugins)
-    # that link MIOpen keep resolving MIOpen's internal C++ symbols against
-    # libMIOpen_private.so.
+    # <miopen/miopen.h> and <miopen/miopen_internal.h> by
+    # script/generate_wrapper_sources.py) and src/private/wrapper.cpp (the stubs
+    # that do more than pass a call through) define an extern "C" stub for every
+    # MIOPEN_EXPORT entry point in those headers, each routing through
+    # src/private/routing.cpp to either hipDNN or its renamed _impl symbol in
+    # MIOpen_private. PUBLIC linkage propagates the implementation's include
+    # directories and link interface to consumers of the wrapper, so existing
+    # consumers (driver, tests, CK plugins) that link MIOpen keep resolving
+    # MIOpen's internal C++ symbols against libMIOpen_private.so.
     add_library(MIOpen
         ${PROJECT_SOURCE_DIR}/src/private/wrapper.cpp
         ${PROJECT_SOURCE_DIR}/src/private/wrapper_passthrough.cpp
@@ -1018,11 +1018,12 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
         ${PROJECT_SOURCE_DIR}/src/private/hipdnn_types.cpp)
     target_link_libraries(MIOpen PRIVATE hipdnn_frontend_dynamic)
 
-    # The wrapper is meant to see only the public header and its own _impl
-    # declarations: a stub that included an internal C++ header would re-couple
-    # the public shim to types that live behind libMIOpen_private.so. This
-    # target adds no src/include, but the PUBLIC link to the private target above
-    # brings it in, so the build does not enforce that rule.
+    # The wrapper is meant to see only C declarations (miopen.h,
+    # miopen_internal.h and its own _impl declarations): a stub that included an
+    # internal C++ header would re-couple the public shim to types that live
+    # behind libMIOpen_private.so. This target adds no src/include, but the PUBLIC
+    # link to the private target above brings it in, so the build does not
+    # enforce that rule.
     # CMAKE_BINARY_DIR/include holds the generated export.h and is listed here
     # rather than relied on from miopen_generate_export_header() further down,
     # so the target is complete at its point of definition even in a superbuild

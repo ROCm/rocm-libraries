@@ -285,14 +285,14 @@ repos:
         files: ^(projects/miopen/(include_wrapper/miopen/hipdnn_forwarding\.h|src/(private/wrapper\.cpp|convolution_api\.cpp)|test/public_abi/wrapper_only_symbols\.txt)|dnn-providers/miopen-provider/MiopenApi\.hpp)$
         pass_filenames: false
 
-      # The wrapper's derived files are generated from include/miopen/miopen.h;
-      # this catches a hand edit or a stale file. The generator prefers the
-      # release pinned for the clang-format hook above, and takes another only
-      # while its output matches the committed files (releases can wrap lines
-      # differently). That release is written twice in this file: the
-      # clang-format hook's rev and the additional_dependencies list that the two
-      # hooks below share. Bump both together; a mismatch shows only when the
-      # output differs.
+      # The wrapper's derived files are generated from include/miopen/miopen.h
+      # and src/include/miopen/miopen_internal.h; this catches a hand edit or a
+      # stale file. The generator prefers the release pinned for the clang-format
+      # hook above, and takes another only while its output matches the committed
+      # files (releases can wrap lines differently). That release is written twice
+      # in this file: the clang-format hook's rev and the additional_dependencies
+      # list that the two hooks below share. Bump both together; a mismatch shows
+      # only when the output differs.
       - id: miopen-wrapper-sources
         name: MIOpen wrapper sources match miopen.h and miopen_internal.h
         entry: >-

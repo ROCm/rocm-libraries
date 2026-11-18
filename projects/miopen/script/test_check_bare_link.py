@@ -117,6 +117,40 @@ class SourceTest(unittest.TestCase):
         self.assertIn("    miopenA,\n    miopenB,\n", source)
 
 
+class LinkerMessageTest(unittest.TestCase):
+    """Linkers word their errors differently; the check reads both common forms."""
+
+    def test_gnu_ld_and_lld_undefined_symbol_messages_are_read(self):
+        gnu = "/usr/bin/ld: bare.o: undefined reference to `miopenFoo'"
+        lld = "ld.lld: error: undefined symbol: miopenFoo\n>>> referenced by bare.o"
+        self.assertEqual(bare_link.UNDEFINED_RE.findall(gnu), ["miopenFoo"])
+        self.assertEqual(bare_link.UNDEFINED_RE.findall(lld), ["miopenFoo"])
+
+    def test_a_linker_that_rejects_the_dt_needed_option_gets_a_retry(self):
+        calls = []
+        rejection = "ld.lld: error: unknown argument '--no-copy-dt-needed-entries'"
+
+        def fake_link(compiler, source, output, lib_dir, copy_dt_needed_option):
+            calls.append(copy_dt_needed_option)
+            if copy_dt_needed_option:
+                return subprocess.CompletedProcess([], 1, "", rejection)
+            return subprocess.CompletedProcess([], 0, "", "")
+
+        original = bare_link.link
+        bare_link.link = fake_link
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                (Path(directory) / "libMIOpen.so").touch()
+                ok, unresolved, _ = bare_link.check_bare_link(
+                    "c++", directory, {PUBLIC}
+                )
+        finally:
+            bare_link.link = original
+        self.assertTrue(ok)
+        self.assertEqual(unresolved, [])
+        self.assertEqual(calls, [True, False])
+
+
 class MainTest(unittest.TestCase):
     def run_main(self, argv, windows=False):
         out = io.StringIO()
@@ -126,7 +160,8 @@ class MainTest(unittest.TestCase):
 
     def test_windows_is_skipped(self):
         code, output = self.run_main([], windows=True)
-        self.assertEqual(code, bare_link.SKIP)
+        # 77 is the SKIP_RETURN_CODE that CMake gives the ctest entry.
+        self.assertEqual(code, 77)
         self.assertIn("SKIP", output)
 
     def test_no_compiler_is_a_skip_unless_one_was_named(self):
@@ -134,7 +169,7 @@ class MainTest(unittest.TestCase):
         bare_link.shutil.which = lambda name: None
         try:
             code, output = self.run_main([])
-            self.assertEqual(code, bare_link.SKIP)
+            self.assertEqual(code, 77)
             self.assertIn("no C++ compiler", output)
             code, output = self.run_main(["--compiler", "no-such-compiler"])
         finally:
