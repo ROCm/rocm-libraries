@@ -424,12 +424,12 @@ private:
     size_t _dxBytes = 0;
 };
 
-/// The cases a saved plan must reproduce: each layout, a 32-bit and a 16-bit dtype, and a stride
-/// wider than the filter (phases with no tap).
+/// The cases a saved plan must reproduce: each layout, a 32-bit and a 16-bit dtype, a stride
+/// wider than the filter (phases with no tap), and unequal H / W values (a swapped axis shows).
 bool savesThisCase(const ConvCase& convCase)
 {
     return convCase.name == "F32NchwT64K4S2" || convCase.name == "Bf16NhwcT128K4S2"
-           || convCase.name == "F16NhwcT64K2S4";
+           || convCase.name == "F16NhwcT64K2S4" || convCase.name == "F16NchwT32S3x2";
 }
 
 } // namespace
@@ -442,7 +442,7 @@ TEST_P(IntegrationGpuHipConvDgradFma2dRdna, SavedPlanReproducesTheOutput)
     const auto& convCase = GetParam();
     if(!savesThisCase(convCase))
     {
-        GTEST_SKIP() << "saved plans are checked on three representative graphs";
+        GTEST_SKIP() << "saved plans are checked on four representative graphs";
     }
     CaseBuffers buffers(convCase);
 

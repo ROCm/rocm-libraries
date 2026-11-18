@@ -111,6 +111,7 @@ constexpr size_t W = 2;
 
 // Must match kernels/ConvDgradFmaIgemm.cpp.
 constexpr int64_t TILE_M = 128;
+constexpr int64_t TILE_C = 16;
 constexpr unsigned int BLOCK_SIZE = 256;
 // One dx channel per group is the depthwise shape, which belongs to a depthwise kernel family.
 constexpr int64_t MIN_DX_CHANNELS_PER_GROUP = 2;
@@ -137,12 +138,24 @@ int64_t tileN(const ConvProblem& problem)
 }
 
 /// One run of blocks per stride phase (sh x sw of them), each as long as phase (0, 0) needs:
-/// ceil(N x ceil(Hi / sh) x ceil(Wi / sw) / TILE_M).
+/// ceil(N x ceil(Hi / sh) x ceil(Wi / sw) / TILE_M). Saturates at MAX_GRID_X_BLOCKS + 1, so
+/// extents and strides near INT_MAX cannot wrap the product into the launch limits.
 int64_t gridXBlocks(const ConvProblem& problem)
 {
-    const int64_t phasePositions = int64_t{problem.n} * ceilDiv(problem.in[H], problem.stride[H])
-                                   * ceilDiv(problem.in[W], problem.stride[W]);
-    return int64_t{problem.stride[H]} * problem.stride[W] * ceilDiv(phasePositions, TILE_M);
+    constexpr int64_t TOO_MANY = MAX_GRID_X_BLOCKS + 1;
+    int64_t phases = 1;
+    int64_t phasePositions = problem.n;
+    for(const size_t axis : {H, W})
+    {
+        phases *= problem.stride[axis];
+        phasePositions *= ceilDiv(problem.in[axis], problem.stride[axis]);
+        if(phases > MAX_GRID_X_BLOCKS || phasePositions > MAX_GRID_X_BLOCKS * TILE_M)
+        {
+            return TOO_MANY;
+        }
+    }
+    const int64_t blocks = ceilDiv(phasePositions, TILE_M);
+    return blocks > MAX_GRID_X_BLOCKS / phases ? TOO_MANY : phases * blocks;
 }
 
 int64_t gridY(const ConvProblem& problem)
@@ -150,9 +163,26 @@ int64_t gridY(const ConvProblem& problem)
     return problem.groups * ceilDiv(problem.channelsPerGroup(), tileN(problem));
 }
 
+/// The kernel counts the taps and its K iterations (taps x ceil(dy channels per group /
+/// TILE_C)) in int.
+bool kLoopFits(const ConvProblem& problem)
+{
+    int64_t iterations = ceilDiv(problem.outChannelsPerGroup(), TILE_C);
+    for(const int extent : problem.filter)
+    {
+        iterations *= extent;
+        if(iterations > std::numeric_limits<int>::max())
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool launchFits(const ConvProblem& problem)
 {
-    return gridXBlocks(problem) <= MAX_GRID_X_BLOCKS && gridY(problem) <= MAX_GRID_Y;
+    return gridXBlocks(problem) <= MAX_GRID_X_BLOCKS && gridY(problem) <= MAX_GRID_Y
+           && kLoopFits(problem);
 }
 
 /// The shape hip_conv_dgrad_fma_1d_rdna takes: unit H with no padding along it.
