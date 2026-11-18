@@ -1202,6 +1202,60 @@ static double compute_w4a16_dequant_latency(const problem_t& problem,
   return static_cast<double>(config.mt.m) * static_cast<double>(config.mt.k) * per_elem / lanes;
 }
 
+// W4A16 decode kernels: dot2 (no MI) WaveSplitK kernels, one wave per workgroup that
+// owns MT_M weight rows x MT_N tokens and splits K over its lanes. They stream the
+// weights once per token tile, so they are bound by DRAM bandwidth or by the rounds of
+// resident waves, whichever is longer. The tile model
+// (MI tiles, LDS, workgroup waves) does not describe them and rejects them.
+static bool is_w4a16_decode(const problem_t& problem,
+                            const hardware_t& hardware,
+                            const config_t& config) {
+  return is_w4a16(problem, hardware) && w4a16_decode_dram_bytes_per_us(hardware).has_value() && config.mi.m == 1
+         && config.mi.n == 1 && config.mi.k == 64;
+}
+
+// Latency of a W4A16 decode kernel, in the cycles of compute_total_latency (2200 per us,
+// as KERNEL_LAUNCH_OVERHEAD). problem.size: m weight rows, n tokens, k. The longer of the
+// weight stream at the DRAM bandwidth and the rounds of resident waves, plus the launch.
+static double compute_w4a16_decode_latency(const problem_t& problem,
+                                           const hardware_t& hardware,
+                                           const config_t& config) {
+  const double dram_bytes_per_us = *w4a16_decode_dram_bytes_per_us(hardware);
+  // 2200 is not the device clock (hardware.compute_clock_ghz is 2.9 GHz on gfx1150 and
+  // gfx1151).  It cancels in the wave term, whose constants are cycles, so all it sets is what
+  // the DRAM stream costs against the waves and against the tiles: 2200 cycles per us, 24%
+  // less than the device's 2900.  With the device clock the picks that change get slower,
+  // measured 1.04x on gfx1151 and 1.08x on gfx1150 on 1-5 token shapes.  The factor makes up
+  // for the memory rates of hardware_t, which the tile model is calibrated with and which are
+  // wrong on these devices (their DRAM bandwidth is 2.5x too high on gfx1151).  Keep it until
+  // those are fixed, then use the device clock.
+  constexpr double CYCLES_PER_US = 2200.0;
+  const double m                 = static_cast<double>(problem.size.m);
+  const double k                 = static_cast<double>(problem.size.k);
+  const double depth_u           = static_cast<double>(config.mt.k);
+  const double batch             = static_cast<double>(std::max<size_t>(problem.batch, 1));
+  const double token_tiles
+      = static_cast<double>(math::safe_ceil_div(problem.size.n, std::max<size_t>(config.mt.n, 1)));
+  const double waves = static_cast<double>(math::safe_ceil_div(problem.size.m, std::max<size_t>(config.mt.m, 1)))
+                       * token_tiles * batch;
+  // The weights (half a byte each) are read once per token tile, at the DRAM bandwidth.
+  const double t_dram = token_tiles * m * k * batch * 0.5 / dram_bytes_per_us;
+  // The waves run in rounds of the resident ones (one per workgroup), each one K iteration
+  // after another (the last one whole when DepthU does not divide K).  The kernel's occupancy
+  // counts the workgroups on hardware_t::OCCUPANCY_SIMDS SIMDs, a CU has simds_per_cu of them.
+  const double resident = static_cast<double>(resolve_num_cus(problem.num_cus, hardware.N_CU))
+                          * static_cast<double>(hardware.simds_per_cu()) / static_cast<double>(hardware_t::OCCUPANCY_SIMDS)
+                          * static_cast<double>(std::max(config.occupancy, 1));
+  // The cost of a wave has no term in MT_M x MT_N (the dot products of an iteration).  Most
+  // problems are DRAM bound and never reach this term: 9 of 10 measured cases of 30 us or
+  // more.  Where the waves do bound the time (small problems), an iteration is mostly the
+  // load-to-use latency of its global reads: from 1 to 10 elements per wave the measured time
+  // over the predicted one shows no trend (0.72-1.08 on gfx1151, 0.85-1.19 on gfx1150).
+  const double wave_cycles = w4a16_params_t::DECODE_WAVE_CYCLES + std::ceil(k / depth_u) * w4a16_params_t::DECODE_ITER_CYCLES;
+  const double t_waves     = std::ceil(waves / resident) * wave_cycles / CYCLES_PER_US;
+  return std::max(t_dram, t_waves) * CYCLES_PER_US + heuristic_defaults_t::KERNEL_LAUNCH_OVERHEAD;
+}
+
 // Compute cvt overhead in tf32 emulation
 double compute_cvt_overhead(const problem_t& problem,
                             const hardware_t& hardware,
@@ -3234,6 +3288,9 @@ double compute_total_latency(const problem_t& problem,
   if (config.prediction_mode == prediction_modes_t::simulation) {
     return compute_formocast_latency(problem, hardware, config);
   }
+
+  // W4A16 decode kernels have their own model (and none of the tile model's rules).
+  if (is_w4a16_decode(problem, hardware, config)) return compute_w4a16_decode_latency(problem, hardware, config);
 
   // Extract parameters from structured types
   size_t M     = problem.size.m;
