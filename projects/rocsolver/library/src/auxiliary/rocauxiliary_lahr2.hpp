@@ -333,7 +333,7 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
                 rocsolver_lacgv_template<T>(handle, j, A, shiftA + idx2D(k + j - 1, 0, lda), lda,
                                             strideA, batch_count);
 
-            rocblasCall_gemv<T>(
+            rocblasCall_gemv<T, I>(
                 handle, rocblas_operation_none, n - k, j, &neg_one, 0, Y, shiftY + idx2D(k, 0, ldy),
                 ldy, strideY, A, shiftA + idx2D(k + j - 1, 0, lda), lda, strideA, &one, 0, A,
                 shiftA + idx2D(k, j, lda), 1, strideA, batch_count, (T**)work_workArr);
@@ -364,9 +364,9 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
                                     stride_work);
 
             // w = T^H * w  (TRMV upper ^H non-unit)
-            rocblasCall_trmv<T>(handle, rocblas_fill_upper, rocblas_operation_conjugate_transpose,
-                                rocblas_diagonal_non_unit, j, F, 0, ldf, strideF, work_vec, 0, 1,
-                                stride_work, (T*)work_workArr, stride_work, batch_count);
+            rocblasCall_trmv<T, I>(handle, rocblas_fill_upper, rocblas_operation_conjugate_transpose,
+                                   rocblas_diagonal_non_unit, j, F, 0, ldf, strideF, work_vec, 0, 1,
+                                   stride_work, (T*)work_workArr, stride_work, batch_count);
 
             // b -= V * w
             constexpr rocblas_int TZMVN_DIM_X = 64;
@@ -398,10 +398,10 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
         if(j > 0)
         {
             // T(0:j-1, j) = A(k+j:n-1, 0:j-1)^H * A(k+j:n-1, j)
-            rocblasCall_gemv<T>(handle, rocblas_operation_conjugate_transpose, n - k - j, j, &one,
-                                0, A, shiftA + idx2D(k + j, 0, lda), lda, strideA, A,
-                                shiftA + idx2D(k + j, j, lda), 1, strideA, &zero, 0, F,
-                                idx2D(0, j, ldf), 1, strideF, batch_count, (T**)work_workArr);
+            rocblasCall_gemv<T, I>(handle, rocblas_operation_conjugate_transpose, n - k - j, j,
+                                   &one, 0, A, shiftA + idx2D(k + j, 0, lda), lda, strideA, A,
+                                   shiftA + idx2D(k + j, j, lda), 1, strideA, &zero, 0, F,
+                                   idx2D(0, j, ldf), 1, strideF, batch_count, (T**)work_workArr);
         }
 
         // Y(k:n-1, j) = t * (A(k:n-1, j+1:n-k) * A(k+j:n-1, j) - Y(k:n-1, 0:j-1) * T(0:j-1, j))
@@ -423,9 +423,10 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
         if(j > 0)
         {
             // T(0:j-1, j) = T(0:j-1, 0:j-1) * T(0:j-1, j)  (upper non-unit)
-            rocblasCall_trmv<T>(handle, rocblas_fill_upper, rocblas_operation_none,
-                                rocblas_diagonal_non_unit, j, F, 0, ldf, strideF, F, idx2D(0, j, ldf),
-                                1, strideF, (T*)work_workArr, stride_work, batch_count);
+            rocblasCall_trmv<T, I>(handle, rocblas_fill_upper, rocblas_operation_none,
+                                   rocblas_diagonal_non_unit, j, F, 0, ldf, strideF, F,
+                                   idx2D(0, j, ldf), 1, strideF, (T*)work_workArr, stride_work,
+                                   batch_count);
         }
     }
 
