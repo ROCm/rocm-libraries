@@ -39,7 +39,8 @@ def _uses_in_tree_headers() -> bool:
 
 def _preprocess() -> str:
     includes = [str(d) for d in _IN_TREE] if _uses_in_tree_headers() else []
-    includes.append(_build_info.INCLUDE_DIR)
+    # hipblas-common can live in a different prefix from hipBLASLt (invoke build --python).
+    includes += [_build_info.INCLUDE_DIR, _build_info.HIPBLAS_COMMON_INCLUDE_DIR]
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "headers.cpp")
         with open(src, "w", encoding="utf-8") as f:
