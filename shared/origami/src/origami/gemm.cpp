@@ -2524,6 +2524,14 @@ double compute_tile_latency(const problem_t& problem,
                                                      &l2_cycles, &L_mem_floor, &l2_iter_bytes,
                                                      &dram_iter_bytes, &dram_cycles)
                       : compute_memory_latency(problem, hardware, config, context);
+  // gfx1250 refit: scale of the read times (L_mem is the max of the L2 and DRAM times).
+  if (hardware.is_cdna5()) {
+    const double mem_scale = heuristic_defaults_t::GFX1250_FIT_MEM_SCALE;
+    L_mem *= mem_scale;
+    l2_cycles *= mem_scale;
+    dram_cycles *= mem_scale;
+    L_mem_floor *= mem_scale;
+  }
 
   // LDS read time that narrow M/N-contiguous reads (VectorWidth * bpe below a
   // bank) add over the full-width floor.  The LDS pipe feeds the MFMAs, so only
@@ -2595,6 +2603,8 @@ double compute_tile_latency(const problem_t& problem,
                     sub_iters;
   }
   L_compute += L_lds_latency;
+  // gfx1250 refit: scale of the per-K-iteration compute time.
+  if (hardware.is_cdna5()) L_compute *= heuristic_defaults_t::GFX1250_FIT_COMPUTE_SCALE;
 
   // XF32 / BF16-from-f32 conversion, charged per main-loop iter.
   // TODO: gfx90a also lacks native TF32 and should get CVT overhead, but
@@ -2666,6 +2676,9 @@ double compute_tile_latency(const problem_t& problem,
       lat_dram = heuristic_defaults_t::GFX1250_TDM_DRAM_LAT0_CLK +
                  heuristic_defaults_t::GFX1250_TDM_DRAM_LAT_CLK_PER_BPC * dram_iter_bytes / L_iter;
     }
+    // gfx1250 refit: scale of the load-to-use latencies.
+    lat_l2 *= heuristic_defaults_t::GFX1250_FIT_LATENCY_SCALE;
+    lat_dram *= heuristic_defaults_t::GFX1250_FIT_LATENCY_SCALE;
     const double lat_load = l2_hit * lat_l2 + (1.0 - l2_hit) * lat_dram;
     const double gl2_lead = hardware.is_cdna5()
                                 ? static_cast<double>(std::max(tp.prefetch_gl2, 0)) * L_iter
@@ -2742,10 +2755,12 @@ double compute_tile_latency(const problem_t& problem,
                                          L_mem_floor}) +
                                fixed;
       // Loaded latency in cycles at iteration time T: lat0 + clk_per_bpc * bytes / T.
-      const double l2_lat0   = heuristic_defaults_t::GFX1250_TDM_L2_LAT0_CLK;
-      const double dram_lat0 = heuristic_defaults_t::GFX1250_TDM_DRAM_LAT0_CLK;
-      const double l2_load   = heuristic_defaults_t::GFX1250_TDM_L2_LAT_CLK_PER_BPC * l2_iter_bytes;
-      const double dram_load = heuristic_defaults_t::GFX1250_TDM_DRAM_LAT_CLK_PER_BPC * dram_iter_bytes;
+      // (gfx1250 refit: the latencies, lat0 and the throughput-dependent part, are scaled.)
+      const double lat_scale = heuristic_defaults_t::GFX1250_FIT_LATENCY_SCALE;
+      const double l2_lat0   = lat_scale * heuristic_defaults_t::GFX1250_TDM_L2_LAT0_CLK;
+      const double dram_lat0 = lat_scale * heuristic_defaults_t::GFX1250_TDM_DRAM_LAT0_CLK;
+      const double l2_load   = lat_scale * heuristic_defaults_t::GFX1250_TDM_L2_LAT_CLK_PER_BPC * l2_iter_bytes;
+      const double dram_load = lat_scale * heuristic_defaults_t::GFX1250_TDM_DRAM_LAT_CLK_PER_BPC * dram_iter_bytes;
       // Root of  (depth + lead) T = c_it + S + lat0 + load / T.
       auto period = [&](double lat0, double load, double lead) {
         const double a = c_it + l2_cycles + lat0;
@@ -2932,9 +2947,13 @@ double compute_tile_latency(const problem_t& problem,
   // Multiplies only the epilogue term, so it bites store-bound shapes but not
   // mainloop-bound ones.
   const double cu_occ_epi = wgs_per_cu;
+  // gfx1250 has no such factor; the refit moves the develop model's saturation S_dev to S_fit, applied as the ratio.
   const double epi_occ_exposure =
       hardware.is_cdna5()
-          ? 1.0
+          ? (cu_occ_epi > 0.0
+                 ? std::max(1.0, heuristic_defaults_t::GFX1250_FIT_EPILOGUE_OCC_SATURATION / cu_occ_epi) /
+                       std::max(1.0, heuristic_defaults_t::GFX1250_FIT_EPILOGUE_OCC_SATURATION_DEV / cu_occ_epi)
+                 : 1.0)
           : std::max(1.0, heuristic_defaults_t::EPILOGUE_OCC_SATURATION / cu_occ_epi);
   double scalar_store_fraction = 0.0;
   double L_epilogue =

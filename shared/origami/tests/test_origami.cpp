@@ -1981,13 +1981,13 @@ TEST_CASE("gfx1250 WGP count selects the 6-XCD part", "[hardware]") {
   }
 
   // A 96-WGP DPX partition of the 6-XCD part: 3 XCDs in one L2 domain, measured peaks
-  // (L2 14.75 TB/s, DRAM 8.64 TB/s at a 2.4 GHz engine clock).
+  // (L2 14.75 TB/s, DRAM 8.64 TB/s at a 2.4 GHz engine clock), scaled by the refit's peak ratios.
   const auto dpx = hardware_t::get_hardware_for_arch(arch, 96, 327680, 512 * 1024, 4 << 20, 2'400'000);
   REQUIRE(dpx.NUM_XCD == 3);
   REQUIRE(dpx.num_l2_domains() == 1);
   REQUIRE(dpx.l2_domain_capacity() == (96ull << 20));
-  REQUIRE(dpx.mem1_perf_ratio * dpx.compute_clock_ghz == Catch::Approx(14750.0));
-  REQUIRE(dpx.mem3_perf_ratio * dpx.compute_clock_ghz == Catch::Approx(8637.0));
+  REQUIRE(dpx.mem1_perf_ratio * dpx.compute_clock_ghz == Catch::Approx(14750.0 * (41301.81761089743 / 41930.0)));
+  REQUIRE(dpx.mem3_perf_ratio * dpx.compute_clock_ghz == Catch::Approx(8637.0 * (18382.976995668938 / 19725.454545454544)));
 
   // The whole 6-XCD part has twice the partition's peaks; the 8-XCD part keeps its own.
   const auto spx = hardware_t::get_hardware_for_arch(arch, 192, 327680, 512 * 1024, 4 << 20, 2'400'000);
