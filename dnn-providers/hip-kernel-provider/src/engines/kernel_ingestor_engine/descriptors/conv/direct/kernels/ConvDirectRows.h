@@ -344,6 +344,24 @@ __device__ void k2rFormatWeights(const K2FormatArgs& f)
     }
 }
 
+// The halo rows a wave's step reads: output row p (of PW) through filter row r (of R) reads
+// halo row p + r DIL. With DIL <= PW those rows are one run of PW + (R - 1) DIL; past PW they are
+// R separate runs of PW. at(p, r) is the fragment's index among them, row(i) its halo row.
+template <int PW, int R, int DIL>
+struct K2rRowSet
+{
+    static constexpr bool RUN = DIL <= PW;
+    static constexpr int N = RUN ? PW + (R - 1) * DIL : R * PW;
+    static constexpr __device__ int at(int p, int r)
+    {
+        return RUN ? p + r * DIL : r * PW + p;
+    }
+    static constexpr __device__ int row(int i)
+    {
+        return RUN ? i : (i / PW) * DIL + i % PW;
+    }
+};
+
 template <class T,
           class Atom,
           int R,
@@ -358,7 +376,8 @@ template <class T,
           int EPI,
           class TO = T,
           int UN = 1,
-          int SPLIT = 0>
+          int SPLIT = 0,
+          int DIL = 1>
 __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = 64;
@@ -368,17 +387,19 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_E
     // consecutive images, so narrow maps (40, 24, ...) fill the atom; the halo row holds the UN
     // images' halo rows side by side, HWI pixels each.
     static_assert(UN >= 1 && DIM % UN == 0, "batch unfold");
-    constexpr int QI = DIM / UN, BQI = WQ * QI, HWI = BQI + S - 1;
+    // DIL > 1: filter taps DIL pixels apart; the halo spans (R - 1) DIL rows and (S - 1) DIL
+    // columns past the tile, and filter row r of output row p reads halo row p + r DIL.
+    constexpr int QI = DIM / UN, BQI = WQ * QI, HWI = BQI + (S - 1) * DIL;
     constexpr int BP = WP * PW, BN = WK * FN * DIM;
     constexpr int NW = WP * WQ * WK;
-    constexpr int HH = BP + R - 1, HW = UN * HWI;
+    constexpr int HH = BP + (R - 1) * DIL, HW = UN * HWI;
     constexpr int GE = 16 / static_cast<int>(sizeof(T)); // elements per granule
     constexpr int G = BC / GE; // granules per pixel per chunk
     constexpr int ROWG = HW * G;
     constexpr int NG = HH * ROWG; // granules per stage
     constexpr int KK = BC / KA;
     constexpr int NQ = S * KK; // steps per chunk
-    constexpr int NR = PW + R - 1; // input fragments per step
+    constexpr int NR = K2rRowSet<PW, R, DIL>::N; // input fragments per step
     constexpr int FB = KPL * static_cast<int>(sizeof(T)); // fragment bytes per lane
     constexpr int FRAG = WAVE * FB; // bytes per weight fragment
     static_assert(Atom::WAVE == WAVE && Atom::DIM == DIM, "16x16 MFMA atoms only");
@@ -754,14 +775,17 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_E
             {
                 const int l = olane();
                 const int lc = l % DIM;
-                const int x = UN == 1 ? wq * DIM + lc + s : (lc / QI) * HWI + wq * QI + lc % QI + s;
+                const int x = UN == 1 ? wq * DIM + lc + s * DIL
+                                      : (lc / QI) * HWI + wq * QI + lc % QI + s * DIL;
                 const int ch = kk + Atom::template kBase<KPL>(l);
                 const int slot = x * G + ((ch / GE + x) % G);
                 const T* base = reinterpret_cast<const T*>(cur) + slot * GE + ch % GE;
 #pragma unroll
                 for(int rr = 0; rr < NR; ++rr)
                     xin[rr] = __builtin_bit_cast(
-                        Frag, *reinterpret_cast<const RawF*>(base + (wp * PW + rr) * ROWG * GE));
+                        Frag,
+                        *reinterpret_cast<const RawF*>(
+                            base + (wp * PW + K2rRowSet<PW, R, DIL>::row(rr)) * ROWG * GE));
             }
             if constexpr(q == NQ - 1)
                 __builtin_amdgcn_s_waitcnt(K2R_VMCNT0);
@@ -795,7 +819,8 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_E
                 for(int j = 0; j < FN; ++j)
 #pragma unroll
                     for(int p = 0; p < PW; ++p)
-                        acc[p][j] = Atom::mma(wfr[r][j], xin[p + r], acc[p][j]);
+                        acc[p][j]
+                            = Atom::mma(wfr[r][j], xin[K2rRowSet<PW, R, DIL>::at(p, r)], acc[p][j]);
             __builtin_amdgcn_sched_barrier(0);
             if constexpr(PP == 1)
             {
@@ -1668,7 +1693,8 @@ template <class T,
           int WQ,
           int WK,
           int BC,
-          class TO = T>
+          class TO = T,
+          int DIL = 1>
 __device__ __attribute__((always_inline)) void k2ConvRowsCf(const K2Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = 64;
@@ -1676,17 +1702,18 @@ __device__ __attribute__((always_inline)) void k2ConvRowsCf(const K2Args& a CONV
     constexpr int KA = Atom::KA, KPL = Atom::KPL;
     constexpr int BP = WP * PW, BQ = WQ * DIM, BN = WK * FN * DIM;
     constexpr int NW = WP * WQ * WK;
-    constexpr int HH = BP + R - 1, HW = BQ + S - 1;
+    // DIL > 1: filter taps DIL pixels apart, as k2ConvRows.
+    constexpr int HH = BP + (R - 1) * DIL, HW = BQ + (S - 1) * DIL;
     constexpr int GE = 8; // 16-bit elements per granule
     constexpr int G = BC / GE;
     constexpr int ROWG = HW * G;
     constexpr int NG = HH * ROWG; // channels-last granules
-    constexpr int RUNS = (7 + BQ + S - 1 + 7) / 8; // raw runs per channel row
+    constexpr int RUNS = (7 + HW + 7) / 8; // raw runs per channel row
     constexpr int XW = RUNS * 8;
     constexpr int NSLOT = HH * BC * RUNS; // raw 16-byte slots
     constexpr int KK = BC / KA;
     constexpr int NQ = S * KK;
-    constexpr int NR = PW + R - 1;
+    constexpr int NR = K2rRowSet<PW, R, DIL>::N;
     constexpr int FB = KPL * static_cast<int>(sizeof(T));
     constexpr int FRAG = WAVE * FB;
     static_assert(sizeof(T) == 2 && BC % KA == 0 && (G & (G - 1)) == 0 && G <= 8, "chunk");
@@ -1922,14 +1949,16 @@ __device__ __attribute__((always_inline)) void k2ConvRowsCf(const K2Args& a CONV
             Frag xin[NR];
             {
                 const int l = olane();
-                const int x = wq * DIM + l % DIM + s;
+                const int x = wq * DIM + l % DIM + s * DIL;
                 const int ch = kk + Atom::template kBase<KPL>(l);
                 const int slot = x * G + ((ch / GE + x) % G);
                 const T* base = reinterpret_cast<const T*>(nh) + slot * GE + ch % GE;
 #pragma unroll
                 for(int rr = 0; rr < NR; ++rr)
                     xin[rr] = __builtin_bit_cast(
-                        Frag, *reinterpret_cast<const RawF*>(base + (wp * PW + rr) * ROWG * GE));
+                        Frag,
+                        *reinterpret_cast<const RawF*>(
+                            base + (wp * PW + K2rRowSet<PW, R, DIL>::row(rr)) * ROWG * GE));
             }
             if constexpr(q == NQ - 1)
                 __builtin_amdgcn_s_waitcnt(K2R_VMCNT0);
@@ -1940,7 +1969,8 @@ __device__ __attribute__((always_inline)) void k2ConvRowsCf(const K2Args& a CONV
                 for(int j = 0; j < FN; ++j)
 #pragma unroll
                     for(int p = 0; p < PW; ++p)
-                        acc[p][j] = Atom::mma(wfr[r][j], xin[p + r], acc[p][j]);
+                        acc[p][j]
+                            = Atom::mma(wfr[r][j], xin[K2rRowSet<PW, R, DIL>::at(p, r)], acc[p][j]);
             __builtin_amdgcn_sched_barrier(0);
         });
         k2rBarrier();

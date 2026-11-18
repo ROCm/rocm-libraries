@@ -73,8 +73,9 @@ constexpr long long BUFFER_LIMIT = std::numeric_limits<int>::max();
 constexpr size_t WORKSPACE_ALIGNMENT = 256;
 constexpr long long MAX_GRID_YZ = 65535;
 constexpr long long MAX_SPLITS = 16;
-/// Pixels x output channels of the rows reference tile (16 rows x 32 columns x 128 channels).
-constexpr long long ROWS_LARGE_TILE = 16LL * 32 * 128;
+/// Pixels and output channels of the rows reference tile (16 rows x 32 columns x 128 channels).
+constexpr long long ROWS_LARGE_TILE_PIXELS = 16LL * 32;
+constexpr long long ROWS_LARGE_TILE_CHANNELS = 128;
 /// Persistent rounds past which a smaller rows tile declines.
 constexpr long long ROWS_SMALL_TILE_ROUNDS = 8;
 constexpr int SPATIAL = CONV_NAIVE_SPATIAL_DIMS;
@@ -375,9 +376,17 @@ std::optional<DirectProblem> parseDirectProblem(const MatchContext& context,
             return std::nullopt;
         }
     }
+    // Dilation: 1 on every axis, or (2-D) one dilation of both filter axes.
+    const long long dilation = a.dilation[SPATIAL - 1];
+    if(dilation < 1 || dilation > INT_LIMIT
+       || (dilation != 1
+           && (base->spatialRank != 2 || a.dilation[0] != 1 || a.dilation[1] != dilation)))
+    {
+        return std::nullopt;
+    }
     for(int axis = 0; axis < SPATIAL; ++axis)
     {
-        if(a.stride[axis] != 1 || a.dilation[axis] != 1)
+        if(a.stride[axis] != 1 || (a.dilation[axis] != 1 && a.dilation[axis] != dilation))
         {
             return std::nullopt;
         }
@@ -410,6 +419,7 @@ std::optional<DirectProblem> parseDirectProblem(const MatchContext& context,
         problem.wStrides[i] = a.wStrides[i];
     }
     problem.flip = a.flipFilter != 0 ? 1 : 0;
+    problem.dilation = static_cast<int>(dilation);
 
     const bool forward = direction == ConvDirection::FORWARD;
     // The forward form: backward data convolves dy (k channels, output extents) into dx.
@@ -427,10 +437,11 @@ std::optional<DirectProblem> parseDirectProblem(const MatchContext& context,
     k2.dout = static_cast<int>(outExt[0]);
     k2.ho = static_cast<int>(outExt[1]);
     k2.wo = static_cast<int>(outExt[2]);
+    // Backward data pads dy by the dilated filter's reach less the forward padding.
     const std::array<long long, 3> pads
-        = {forward ? a.prePadding[0] : a.filter[0] - 1 - a.prePadding[0],
-           forward ? a.prePadding[1] : a.filter[1] - 1 - a.prePadding[1],
-           forward ? a.prePadding[2] : a.filter[2] - 1 - a.prePadding[2]};
+        = {forward ? a.prePadding[0] : (a.filter[0] - 1) * a.dilation[0] - a.prePadding[0],
+           forward ? a.prePadding[1] : (a.filter[1] - 1) * a.dilation[1] - a.prePadding[1],
+           forward ? a.prePadding[2] : (a.filter[2] - 1) * a.dilation[2] - a.prePadding[2]};
     k2.pd = static_cast<int>(pads[0]);
     k2.ph = static_cast<int>(pads[1]);
     k2.pw = static_cast<int>(pads[2]);
@@ -493,7 +504,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     int math = 0;
     int atomId = 0;
     int rowsKnob = 0;
-    const std::array<std::pair<const char*, int*>, 29> ints{
+    const std::array<std::pair<const char*, int*>, 30> ints{
         {{"atom_id", &atomId},   {"math", &math},          {"kd", &config.kd},
          {"r", &config.r},       {"s", &config.s},         {"bm", &config.bm},
          {"bn", &config.bn},     {"bc", &config.bc},       {"wm", &config.wm},
@@ -503,7 +514,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
          {"pipe", &config.pipe}, {"rows", &rowsKnob},      {"pw", &config.pw},
          {"fn", &config.fn},     {"wp", &config.wp},       {"wq", &config.wq},
          {"wk", &config.wk},     {"pp", &config.pp},       {"epi", &config.epi},
-         {"un", &config.un},     {"cf", &config.cf}}};
+         {"un", &config.un},     {"cf", &config.cf},       {"dil", &config.dil}}};
     for(const auto& [name, target] : ints)
     {
         const auto value = intField(kernel, name);
@@ -514,6 +525,11 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         *target = *value;
     }
     if((math != 0 && math != 1) || rowsKnob != (config.rows ? 1 : 0))
+    {
+        return std::nullopt;
+    }
+    // Dilation is a 2-D rows knob (one image per MFMA column group).
+    if(config.dil < 1 || (config.dil != 1 && (!config.rows || config.kd != 1 || config.un != 1)))
     {
         return std::nullopt;
     }
@@ -617,18 +633,20 @@ int64_t rowsLdsBytes(const Config& config)
     }
     // The operand is the atom's element (three-bf16 runs on bf16 atoms).
     const int64_t operandBytes = conv_igemm::atomElement(config.atom) == "f32" ? 4 : 2;
-    const int64_t haloRows = static_cast<int64_t>(config.wp) * config.pw + config.r - 1;
+    const int64_t haloRows = static_cast<int64_t>(config.wp) * config.pw
+                             + static_cast<int64_t>(config.r - 1) * config.dil;
+    const int64_t haloReach = static_cast<int64_t>(config.s - 1) * config.dil;
     if(config.cf != 0)
     {
         // Raw stage: per halo row bc channel rows of the 8-column runs covering the halo from
         // its 8-aligned start; plus one channels-last stage.
-        const int64_t runs = (7 + config.wq * 16 + config.s - 1 + 7) / 8;
+        const int64_t runs = (7 + config.wq * 16 + haloReach + 7) / 8;
         return haloRows * config.bc * runs * 16
-               + haloRows * (config.wq * 16 + config.s - 1) * config.bc * operandBytes;
+               + haloRows * (config.wq * 16 + haloReach) * config.bc * operandBytes;
     }
-    // un images' halo rows side by side, (16 wq / un + s - 1) pixels each.
+    // un images' halo rows side by side, (16 wq / un + (s - 1) dil) pixels each.
     const int64_t haloColumns
-        = static_cast<int64_t>(config.un) * (config.wq * 16 / config.un + config.s - 1);
+        = static_cast<int64_t>(config.un) * (config.wq * 16 / config.un + haloReach);
     return 2 * haloRows * haloColumns * config.bc * operandBytes;
 }
 
@@ -704,11 +722,19 @@ std::optional<Plan>
         // gfx950 16-bit rows tiles smaller than the 16 x 32 x 128 tile serve tail-bound grids:
         // past ROWS_SMALL_TILE_ROUNDS persistent rounds the tail is a small share and the large
         // tile is ahead (MI355X, 384^2-1024^2 VAE layers), so they decline instead of near-tying
-        // it under autotune.
+        // it under autotune. Tiles compare by the output channels they compute: with fewer than
+        // 128 (whole 16-channel blocks), the reference tile's columns past them are idle, and a
+        // tile as narrow as the channels does the same work in fewer MMAs.
+        const long long kBlocked = divUp(a.k, 16) * 16;
+        const long long refChannels = std::min(ROWS_LARGE_TILE_CHANNELS, kBlocked);
+        const long long tileChannels = kBlocked < ROWS_LARGE_TILE_CHANNELS
+                                           ? std::min<long long>(config.blockColumns(), kBlocked)
+                                           : config.blockColumns();
         const long long tilePixelChannels
-            = static_cast<long long>(t.th) * config.wq * 16 * config.blockColumns();
+            = static_cast<long long>(t.th) * config.wq * 16 * tileChannels;
         if(config.split == 0 && !config.math && config.cf == 0
-           && config.atom.rfind("mfma16x32_", 0) == 0 && tilePixelChannels < ROWS_LARGE_TILE
+           && config.atom.rfind("mfma16x32_", 0) == 0
+           && tilePixelChannels < ROWS_LARGE_TILE_PIXELS * refChannels
            && t.blocks > ROWS_SMALL_TILE_ROUNDS * std::max<int64_t>(1, computeUnits))
         {
             return std::nullopt;
@@ -957,7 +983,8 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
         return std::nullopt;
     }
     const auto& filter = problem->base.args.filter;
-    if(config->kd != filter[0] || config->r != filter[1] || config->s != filter[2])
+    if(config->kd != filter[0] || config->r != filter[1] || config->s != filter[2]
+       || config->dil != problem->dilation)
     {
         return std::nullopt;
     }
@@ -996,7 +1023,7 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
     return Admitted{*problem, *config, *plan};
 }
 
-/// Kernel-scoped applicability: the config's direction, dtype and filter are the graph's; its
+/// Kernel-scoped applicability: the config's direction, dtype, filter and dilation are the graph's; its
 /// atom runs on this device and its ship list names it; its channel vector divides the reduction
 /// channels; and the planner fits the problem in its halo and launch limits.
 bool kernelMatches(const MatchContext& context,
@@ -1177,6 +1204,10 @@ public:
             options.add("CONV_DIRECT_PP", std::to_string(config.pp));
             options.add("CONV_DIRECT_EPI", std::to_string(config.epi));
             options.add("CONV_DIRECT_CF", std::to_string(config.cf != 0 ? 1 : 0));
+            if(config.dil != 1)
+            {
+                options.add("CONV_DIRECT_DIL", std::to_string(config.dil));
+            }
             if(config.cf == 2)
             {
                 // The dword-DMA, gather-transpose form on any MFMA part (even widths).

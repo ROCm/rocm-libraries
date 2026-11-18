@@ -56,7 +56,7 @@ struct Staging
 
 /// A forward or backward-data convolution in the kernels' forward form: backward data is the
 /// forward convolution of dy with the filter rotated and its channel roles swapped (both done by
-/// the weight pre-pass), padded by F - 1 - p.
+/// the weight pre-pass), padded by (F - 1) d - p at dilation d.
 struct DirectProblem
 {
     conv_naive::ConvNaiveProblem base;
@@ -71,6 +71,8 @@ struct DirectProblem
     /// reflected (true convolution).
     std::array<long long, 5> wStrides = {};
     int flip = 0;
+    /// The dilation of both 2-D filter axes (1 when undilated); a 3-D problem is undilated.
+    int dilation = 1;
     /// The forward-form input (x, or dy) and output (y, or dx), staged when not channels-last.
     Staging in;
     Staging out;
@@ -83,7 +85,8 @@ struct DirectProblem
  *        direct kernels do not serve it.
  *
  * Everything parseConvNaiveProblem gates, plus: two or three spatial axes, groups 1, stride 1
- * and dilation 1 on every axis, a filter in FILTERS, every extent, channel count and padding
+ * on every axis, dilation 1 on every axis or (2-D) one dilation of both filter axes, a filter in
+ * FILTERS, every extent, channel count and padding
  * within 32 bits, and one image of the forward-form input within 2^31 bytes (the kernels' 32-bit
  * buffer offsets). Any padding, asymmetric included (the output extent the graph declares is the
  * one computed), both convolution modes, fp32 / fp16 / bf16, and any operand layout (staged to
@@ -118,6 +121,9 @@ struct Config
     /// Rows on packed channels-first activations in place (2-D, 16-bit, gfx950): the halo is
     /// fetched as it lies and transposed in LDS, the output stored channels-first; no staging.
     int cf = 0;
+    /// Filter dilation (2-D rows configs; 1 elsewhere): the config serves exactly this dilation of
+    /// both filter axes.
+    int dil = 1;
     std::string archs; ///< ship list: comma-separated arch groups, or "any"
 
     /// Output pixels per block (the planner's tile budget) and output channels per block.
@@ -157,10 +163,10 @@ bool shipsTo(std::string_view archs, std::string_view gcnArchName);
 /// LDS per workgroup on @p gcnArchName: 160 KiB on CDNA4 (gfx950), 64 KiB on every other family.
 int64_t ldsLimitOf(std::string_view gcnArchName);
 
-/// LDS a rows config's kernel declares: two halo stages of (wp pw + r - 1) x (16 wq + s - 1)
-/// pixels x bc channels of the atom's operand (ConvDirectRows.h; the staged epilogue reuses a
-/// stage); a channels-first config one such stage plus one raw stage of (wp pw + r - 1) x bc
-/// channel rows of 8-column runs. 0 for a config of another kind.
+/// LDS a rows config's kernel declares: two halo stages of (wp pw + (r - 1) dil) x
+/// (16 wq + (s - 1) dil) pixels x bc channels of the atom's operand (ConvDirectRows.h; the staged
+/// epilogue reuses a stage); a channels-first config one such stage plus one raw stage of
+/// (wp pw + (r - 1) dil) x bc channel rows of 8-column runs. 0 for a config of another kind.
 int64_t rowsLdsBytes(const Config& config);
 
 /// Whether the device runs @p config: its atom exists there, its ship list names it, and (rows)
