@@ -759,7 +759,7 @@ inputs); re-check them when that pin moves.
 
 | CI job | Runs on | Tier | CI shards | Builds rocKE |
 |---|---|---|---|---|
-| `therock-multi-arch-ci.yml` | a pull request or push whose changed paths all belong to projects in the repo config, hip-kernel-provider among them (alone or with hipDNN) | standard | 4 | yes |
+| `therock-multi-arch-ci.yml` | a pull request or push whose changed paths all belong to projects in the repo config, when one of them is hip-kernel-provider or a project TheRock's consumer graph links to it (such as hipDNN), or that changes a TheRock CI workflow (every configured project is tested) | standard | 4 | yes |
 | `therock-multi-arch-ci.yml` | a manual dispatch, or a pull request or push that touches shared CI files or an unclassified path: the configure step then tests every project | quick | 1 | yes |
 | `therock-multi-arch-ci-nightly.yml` | the nightly schedule | comprehensive | 4 | no |
 | `hipdnn-superbuild-ci.yml` | a pull request that changes hipDNN or provider files other than docs, and its own nightly schedule | `full`, then entries without a tier label | n/a (one job per OS) | yes; tests the build tree only |
