@@ -246,6 +246,11 @@ struct heuristic_defaults_t {
       default: return K_ITER_LOOP_OVERHEAD;
     }
   }
+
+  /// gfx1151: round trip of one K-iteration's global loads that hit the caches, in compute
+  /// cycles (it tracks the shader clock).  Fitted to memory-only kernel timings
+  /// (tests/test_gemm.cpp, gfx1151 L_mem reference).
+  static constexpr double GFX1151_LOAD_LATENCY_CYCLES = 1050.0;
 };
 
 /**
