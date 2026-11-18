@@ -1,16 +1,16 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Tests for the device helpers in clients/common/include/row_uniform.hpp, which
-// hipblaslt-bench --row_uniform_check uses to make the inputs uniform along M and to check that
-// every row of D equals row 0. They need a GPU.
+// Tests for the device helpers in clients/common/include/uniform_check.hpp, which
+// hipblaslt-bench --uniform_check uses to make the inputs uniform along M and to check that every
+// row of D equals row 0. They need a GPU.
 //
 // The suite name carries the "pre_checkin" token so the test_categories.yaml patterns select it.
 
 #include <gtest/gtest.h>
 
 #include "hipBuffer.hpp"
-#include "row_uniform.hpp"
+#include "uniform_check.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -57,15 +57,32 @@ namespace
             EXPECT_EQ(hipMemcpy(host.data(), dev.buf(), host.size(), hipMemcpyDeviceToHost),
                       hipSuccess);
         }
-        RowUniformDeviceResult check()
+        void fillRows()
         {
-            HipDeviceBuffer result(HIP_R_8I, sizeof(RowUniformDeviceResult));
-            auto*           d = result.as<RowUniformDeviceResult>();
-            EXPECT_EQ(row_uniform_reset_device(d, nullptr), hipSuccess);
-            EXPECT_EQ(
-                row_uniform_check_device(dev.buf(), elem, rows, cols, ld, stride, batches, d, nullptr),
-                hipSuccess);
-            RowUniformDeviceResult h{};
+            ASSERT_EQ(uniform_check_fill_rows_device(
+                          dev.buf(), elem, rows, cols, ld, stride, batches, nullptr),
+                      hipSuccess);
+            download();
+        }
+        // flags is the scratch to use, or a fresh buffer when null.
+        UniformCheckDeviceResult check(HipDeviceBuffer* flags = nullptr)
+        {
+            HipDeviceBuffer result(HIP_R_8I, sizeof(UniformCheckDeviceResult));
+            HipDeviceBuffer own(HIP_R_8I, uniform_check_flags_bytes(cols, batches));
+            auto*           d = result.as<UniformCheckDeviceResult>();
+            EXPECT_EQ(uniform_check_reset_device(d, nullptr), hipSuccess);
+            EXPECT_EQ(uniform_check_rows_device(dev.buf(),
+                                                elem,
+                                                rows,
+                                                cols,
+                                                ld,
+                                                stride,
+                                                batches,
+                                                (flags ? flags : &own)->buf(),
+                                                d,
+                                                nullptr),
+                      hipSuccess);
+            UniformCheckDeviceResult h{};
             EXPECT_EQ(hipMemcpy(&h, d, sizeof(h), hipMemcpyDeviceToHost), hipSuccess);
             return h;
         }
@@ -73,16 +90,13 @@ namespace
 
     constexpr size_t kSizes[] = {1, 2, 4, 8, 16};
 
-    TEST(RowUniformCheck_pre_checkin, FillRowsMakesEveryRowEqualRowZero)
+    TEST(UniformCheck_pre_checkin, FillRowsMakesEveryRowEqualRowZero)
     {
         for(size_t elem : kSizes)
         {
-            Matrix m(elem, 37, 5, 41, 41 * 5 + 3, 3);
+            Matrix                           m(elem, 37, 5, 41, 41 * 5 + 3, 3);
             const std::vector<unsigned char> before = m.host;
-            ASSERT_EQ(row_uniform_fill_rows_device(
-                          m.dev.buf(), elem, m.rows, m.cols, m.ld, m.stride, m.batches, nullptr),
-                      hipSuccess);
-            m.download();
+            m.fillRows();
             for(int64_t b = 0; b < m.batches; b++)
                 for(int64_t c = 0; c < m.cols; c++)
                 {
@@ -96,17 +110,17 @@ namespace
                         ASSERT_EQ(std::memcmp(m.at(b, r, c), before.data() + off, elem), 0);
                     }
                 }
-            EXPECT_EQ(m.check().bad_cols, 0u) << "elem " << elem;
+            EXPECT_EQ(m.check().bad, 0u) << "elem " << elem;
         }
     }
 
-    TEST(RowUniformCheck_pre_checkin, FillColsMakesEveryColumnEqualColumnZero)
+    TEST(UniformCheck_pre_checkin, FillColsMakesEveryColumnEqualColumnZero)
     {
         // A transposed op(A) stores logical row m as column m.
         for(size_t elem : kSizes)
         {
             Matrix m(elem, 19, 7, 23, 23 * 7, 2);
-            ASSERT_EQ(row_uniform_fill_cols_device(
+            ASSERT_EQ(uniform_check_fill_cols_device(
                           m.dev.buf(), elem, m.rows, m.cols, m.ld, m.stride, m.batches, nullptr),
                       hipSuccess);
             m.download();
@@ -118,26 +132,23 @@ namespace
         }
     }
 
-    TEST(RowUniformCheck_pre_checkin, CheckFindsOneFlippedBit)
+    TEST(UniformCheck_pre_checkin, CheckFindsOneFlippedBit)
     {
         for(size_t elem : kSizes)
         {
             Matrix m(elem, 300, 9, 305, 305 * 9, 4);
-            ASSERT_EQ(row_uniform_fill_rows_device(
-                          m.dev.buf(), elem, m.rows, m.cols, m.ld, m.stride, m.batches, nullptr),
-                      hipSuccess);
-            m.download();
+            m.fillRows();
 
             // Padding below the last row is not part of D.
             *m.at(3, m.rows, 8) ^= 0x01;
             m.upload();
-            EXPECT_EQ(m.check().bad_cols, 0u) << "elem " << elem;
+            EXPECT_EQ(m.check().bad, 0u) << "elem " << elem;
 
             // The last row of the last batch, in the last column, in the top byte.
             *(m.at(3, m.rows - 1, 8) + elem - 1) ^= 0x80;
             m.upload();
-            RowUniformDeviceResult r = m.check();
-            EXPECT_EQ(r.bad_cols, 1u) << "elem " << elem;
+            UniformCheckDeviceResult r = m.check();
+            EXPECT_EQ(r.bad, 1u) << "elem " << elem;
             EXPECT_EQ(r.first_row(), m.rows - 1);
             EXPECT_EQ(r.first_col(), 8);
 
@@ -145,32 +156,67 @@ namespace
             *m.at(1, 5, 2) ^= 0x01;
             m.upload();
             r = m.check();
-            EXPECT_EQ(r.bad_cols, 2u) << "elem " << elem;
+            EXPECT_EQ(r.bad, 2u) << "elem " << elem;
+            EXPECT_EQ(r.first, (5ull << 32) | 2);
             EXPECT_EQ(r.first_row(), 5);
             EXPECT_EQ(r.first_col(), 2);
         }
     }
 
-    TEST(RowUniformCheck_pre_checkin, CheckCoversBatchesAboveTheGridLimit)
+    TEST(UniformCheck_pre_checkin, CheckCountsEachColumnOfEachBatchOnce)
     {
-        // 65535 batches per launch; the last batch is in the second launch.
-        Matrix m(2, 3, 1, 3, 3, 65537);
-        ASSERT_EQ(row_uniform_fill_rows_device(
-                      m.dev.buf(), 2, m.rows, m.cols, m.ld, m.stride, m.batches, nullptr),
-                  hipSuccess);
-        m.download();
-        EXPECT_EQ(m.check().bad_cols, 0u);
-        *m.at(m.batches - 1, 2, 0) ^= 0x01;
+        Matrix m(4, 200, 6, 200, 200 * 6, 3);
+        m.fillRows();
+        // Many rows of column 4 of batch 1, and one row of column 4 of batch 2.
+        for(int64_t r = 1; r < m.rows; r += 3)
+            *m.at(1, r, 4) ^= 0x10;
+        *m.at(2, 7, 4) ^= 0x10;
         m.upload();
-        RowUniformDeviceResult r = m.check();
-        EXPECT_EQ(r.bad_cols, 1u);
-        EXPECT_EQ(r.first_row(), 2);
+        UniformCheckDeviceResult r = m.check();
+        EXPECT_EQ(r.bad, 2u);
+        EXPECT_EQ(r.first_row(), 1);
+        EXPECT_EQ(r.first_col(), 4);
     }
 
-    TEST(RowUniformCheck_pre_checkin, UniformMatrixWithOneRowPasses)
+    TEST(UniformCheck_pre_checkin, CheckClearsReusedFlags)
+    {
+        Matrix          m(2, 64, 5, 64, 64 * 5, 2);
+        HipDeviceBuffer flags(HIP_R_8I, uniform_check_flags_bytes(m.cols, m.batches));
+        m.fillRows();
+        *m.at(1, 9, 3) ^= 0x01;
+        m.upload();
+        EXPECT_EQ(m.check(&flags).bad, 1u);
+        // The difference moves within the same column and to another one; the flag the first
+        // check set must not hide the column.
+        *m.at(1, 9, 3) ^= 0x01;
+        *m.at(1, 20, 3) ^= 0x01;
+        *m.at(0, 2, 4) ^= 0x01;
+        m.upload();
+        UniformCheckDeviceResult r = m.check(&flags);
+        EXPECT_EQ(r.bad, 2u);
+        EXPECT_EQ(r.first_row(), 2);
+        EXPECT_EQ(r.first_col(), 4);
+    }
+
+    TEST(UniformCheck_pre_checkin, CheckCoversBatchesBeyondOneGridPass)
+    {
+        // More elements than one pass of the capped grid covers; the last batch is reached by
+        // the grid-stride loop.
+        constexpr int64_t batches = (int64_t(1) << 22) + 5;
+        Matrix            m(1, 5, 1, 5, 5, batches);
+        m.fillRows();
+        EXPECT_EQ(m.check().bad, 0u);
+        *m.at(m.batches - 1, 4, 0) ^= 0x01;
+        m.upload();
+        UniformCheckDeviceResult r = m.check();
+        EXPECT_EQ(r.bad, 1u);
+        EXPECT_EQ(r.first_row(), 4);
+    }
+
+    TEST(UniformCheck_pre_checkin, CheckPassesOneRow)
     {
         Matrix m(4, 1, 6, 1, 6, 1);
-        EXPECT_EQ(m.check().bad_cols, 0u);
+        EXPECT_EQ(m.check().bad, 0u);
         EXPECT_EQ(m.check().first_row(), -1);
     }
 }
