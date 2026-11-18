@@ -31,6 +31,7 @@ ATOMS = {  # name: (id, wave, ka, lds bytes per block available, element)
     "wmma11_bf16": (7, 32, 16, 65536, "BFLOAT16"),
     "wmma12_f16": (8, 32, 16, 65536, "HALF"),
     "wmma12_bf16": (9, 32, 16, 65536, "BFLOAT16"),
+    "mfma16_bf16_908": (10, 64, 8, 65536, "BFLOAT16"),  # gfx908: no bf16_1k atom
 }
 INTS = [
     "atom_id",
@@ -133,7 +134,7 @@ ARCH_ATOMS = {
     "gfx950": ["mfma16x32_f16", "mfma16x32_bf16", "mfma16_f32"],
     "gfx942": ["mfma16_f16", "mfma16_bf16", "mfma16_f32"],
     "gfx90a": ["mfma16_f16", "mfma16_bf16", "mfma16_f32"],
-    "gfx908": ["mfma16_f16", "mfma16_f32"],
+    "gfx908": ["mfma16_f16", "mfma16_f32", "mfma16_bf16_908"],
     "gfx11": ["wmma11_f16", "wmma11_bf16"],
     "gfx12": ["wmma12_f16", "wmma12_bf16"],
 }

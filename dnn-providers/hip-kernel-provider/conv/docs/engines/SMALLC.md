@@ -11,11 +11,11 @@ SPDX-License-Identifier:  MIT
 
 - **What:** a block stages its input window and its formatted weights in LDS once and runs the whole flattened (channel, depth, row, column) reduction as a handful of 16x16 matrix-core steps; no channel loop.
 - **Covers:** fwd with at most 4 input channels (configs bound C at 1, 3 or 4); bwd-data at unit stride with at most 4 dy channels, run as the forward kernel over dy. fp32, fp16, bf16; any activation strides (NCHW, NHWC, views); 2-D and 3-D; groups 1; any padding; both conv modes. No TF32 form. Compile-time geometries: fwd 7x7 s2, 3x3 s2, 3x3 s1, 4x4 s4 (patchify), 1x7x7 and 3x7x7 at stride (1, 2, 2), 3x3x3 s1 and s2; bwd 3x3 and 3x3x3 at stride 1. Dilation 1.
-- **Arches:** MFMA 16x16 on gfx908 (fp16, fp32), gfx90a/gfx942 (fp16, bf16, fp32), gfx950 (16x16x32 for 16-bit, 16x16x4 fp32); WMMA on gfx11/gfx12 (fp16, bf16); an FMA kernel for fp32 (fwd on every architecture, bwd on gfx11/gfx12).
+- **Arches:** MFMA 16x16 on gfx908 (fp16, fp32, and bf16 on the half-rate 16x16x8 atom), gfx90a/gfx942 (fp16, bf16, fp32), gfx950 (16x16x32 for 16-bit, 16x16x4 fp32); WMMA on gfx11/gfx12 (fp16, bf16); an FMA kernel for fp32 (fwd on every architecture, bwd on gfx11/gfx12).
 - **Wins when:** RGB / grey stems on gfx950, gfx942 and RDNA (1.5-2.2x MIOpen call-weighted), single-channel 3-D medical inputs (3-5x), and VAE / diffusion output layers in backward data (c96-c320 dx from 3-4 dy channels, 1.4-2.2x).
 - **Loses when:** stems on gfx90a and gfx908 (1.6-2.2x behind MIOpen's stride-2 Winograd, CK, asm implicit GEMM and direct kernels), large-K NHWC 16-bit stems (sdxl c4 to k320, 1.1-1.4x behind CK), gfx950 patchify (behind hipconv's patch-embed kernel).
 - **Precision:** fp32 accumulation, the reduction done inside one block, one rounding at the store. Deterministic. No numerical notes.
-- **Instances:** 782 fwd + 195 bwd configs, each shipped to the architecture groups whose sweeps it won (`archs`).
+- **Instances:** 864 fwd + 216 bwd configs, each shipped to the architecture groups whose sweeps it won (`archs`).
 - **vs MIOpen:** competes with CK grouped/3-D implicit GEMM, the Winograd `ConvBinWinogradRxSf3x2` / `f2x3g1` and `GemmFwdRest` on stems: 1.0-1.3x vs Winograd and 1.8-3.0x vs CK 3-D on gfx950/942/RDNA, 0.5-0.6x on gfx90a/gfx908.
 
 ## Why it exists
