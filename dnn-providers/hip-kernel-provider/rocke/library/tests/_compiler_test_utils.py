@@ -90,4 +90,6 @@ def skip_where_compiler_refuses_processor() -> Iterator[None]:
         message = str(exc)
         if not all(phrase in message for phrase in _PROCESSOR_REFUSAL):
             raise
-        require_tools_or_skip(f"loaded compiler cannot target this processor: {message}")
+        require_tools_or_skip(
+            f"loaded compiler cannot target this processor: {message}"
+        )
