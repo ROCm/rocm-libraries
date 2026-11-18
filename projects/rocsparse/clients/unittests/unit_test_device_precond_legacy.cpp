@@ -794,9 +794,9 @@ TEST_F(PrecondLegacy, bsrilu0_numeric_boost_to_zero_keeps_zero_pivot)
         bool                device_position;
     };
     const std::vector<mode>    modes      = {{rocsparse_direction_row, false},
-                                             {rocsparse_direction_column, false},
-                                             {rocsparse_direction_row, true},
-                                             {rocsparse_direction_column, true}};
+                                     {rocsparse_direction_column, false},
+                                     {rocsparse_direction_row, true},
+                                     {rocsparse_direction_column, true}};
     const std::vector<int32_t> block_dims = {2, 9, 33, 65};
     for(const auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
     {
