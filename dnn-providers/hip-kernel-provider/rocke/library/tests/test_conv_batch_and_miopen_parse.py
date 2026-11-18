@@ -151,6 +151,24 @@ def test_direct_parse_refuses_column_padding_for_strided_depthwise_wgrad():
         parse_miopen_cmd_direct(_DW_1X31.format(u=2, f=4))
 
 
+def test_direct_parse_padding_gate_follows_requested_directions():
+    """--run-from-cache --directions overrides -F, so the per-axis padding
+    gate checks the directions that will run, not the -F one."""
+    from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
+
+    # -F 1 (fwd) alone refuses the depthwise 1x31 column padding at stride 1 ...
+    with pytest.raises(ValueError, match="one padding for both axes"):
+        parse_miopen_cmd_direct(_DW_1X31.format(u=1, f=1))
+    # ... a wgrad run of the same command keeps it,
+    problem, _, _ = parse_miopen_cmd_direct(_DW_1X31.format(u=1, f=1), ("wgrad",))
+    assert problem.pad_w == 15
+    # and a -F 4 command that is also asked for fwd is refused again.
+    with pytest.raises(ValueError, match="one padding for both axes"):
+        parse_miopen_cmd_direct(_DW_1X31.format(u=1, f=4), ("wgrad", "fwd"))
+    # The default (no directions) is unchanged.
+    assert parse_miopen_cmd_direct(_DW_1X31.format(u=1, f=4))[0].pad_w == 15
+
+
 def test_per_axis_pad_variants_name_every_per_axis_variant():
     """The parser's per-axis padding rule comes from per_axis_pad_variants,
     which states a shape for each PER_AXIS_PAD_VARIANTS entry."""
