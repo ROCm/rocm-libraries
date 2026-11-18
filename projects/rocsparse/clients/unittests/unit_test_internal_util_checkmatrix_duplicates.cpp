@@ -1166,6 +1166,82 @@ namespace
                   rocsparse_status_not_implemented);
     }
 
+    // The unsorted COO duplicate pass sorts keys of as many bits as max(m, n) - 1 + idx_base
+    // needs, so a wide or a tall matrix has keys above the bits of its short side.
+    void expect_coo_shape(rocsparse_handle            handle,
+                          const char*                 name,
+                          int64_t                     m,
+                          int64_t                     n,
+                          const std::vector<int64_t>& rows,
+                          const std::vector<int64_t>& cols,
+                          rocsparse_data_status       sorted,
+                          rocsparse_data_status       unsorted)
+    {
+        const auto general = rocsparse_matrix_type_general;
+        const auto lower   = rocsparse_fill_mode_lower;
+        for(auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
+            for(auto storage : {rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted})
+            {
+                SCOPED_TRACE(std::string("coo shape ") + name + " base "
+                             + std::to_string(base_of(base)) + " storage "
+                             + std::to_string(storage));
+                const int  b        = base_of(base);
+                const auto expected = storage == rocsparse_storage_mode_sorted ? sorted : unsorted;
+                expect_coo_public<float>(handle,
+                                         static_cast<rocsparse_int>(m),
+                                         static_cast<rocsparse_int>(n),
+                                         as_index<rocsparse_int>(rows, b),
+                                         as_index<rocsparse_int>(cols, b),
+                                         base,
+                                         general,
+                                         lower,
+                                         storage,
+                                         expected);
+                expect_coo_spmat<float, int32_t>(handle,
+                                                 m,
+                                                 n,
+                                                 as_index<int32_t>(rows, b),
+                                                 as_index<int32_t>(cols, b),
+                                                 base,
+                                                 general,
+                                                 lower,
+                                                 storage,
+                                                 expected);
+                expect_coo_spmat<float, int64_t>(handle,
+                                                 m,
+                                                 n,
+                                                 as_index<int64_t>(rows, b),
+                                                 as_index<int64_t>(cols, b),
+                                                 base,
+                                                 general,
+                                                 lower,
+                                                 storage,
+                                                 expected);
+            }
+    }
+
+    // The public 32-bit API and rocsparse_check_spmat with 32-bit and 64-bit indices.
+    void expect_ell_shape(rocsparse_handle                     handle,
+                          const char*                          name,
+                          int                                  n,
+                          int                                  width,
+                          const std::vector<std::vector<int>>& rows,
+                          rocsparse_data_status                sorted,
+                          rocsparse_data_status                unsorted)
+    {
+        const int m = static_cast<int>(rows.size());
+        for(auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
+            for(auto storage : {rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted})
+            {
+                const auto expected = storage == rocsparse_storage_mode_sorted ? sorted : unsorted;
+                for(bool spmat : {false, true})
+                    expect_ell<float, int32_t>(
+                        handle, "s", name, m, n, width, rows, base, storage, expected, spmat);
+                expect_ell<float, int64_t>(
+                    handle, "s64", name, m, n, width, rows, base, storage, expected, true);
+            }
+    }
+
     template <typename T>
     void run_shapes(rocsparse_handle handle, const char* type_name)
     {
@@ -1360,6 +1436,42 @@ TEST_F(CheckMatrixDefects, CooScale)
         expect_coo_scale(
             handle, "shuffled_dup_first_last", with_copy(unsorted, 0, last), base, u_mode, k_dup);
     }
+}
+
+// The entry between the two entries of a pair, and the entries that differ only in bit 19,
+// need more key bits than the short side of a 2 x 2^20 or 2^20 x 2 matrix.
+TEST_F(CheckMatrixDefects, CooWideAndTall)
+{
+    const int64_t long_side = int64_t(1) << 20;
+    const int64_t high      = int64_t(1) << 19;
+    expect_coo_shape(
+        handle, "wide_duplicate", 2, long_side, {0, 0, 0}, {0, high, 0}, k_sort, k_dup);
+    expect_coo_shape(
+        handle, "tall_duplicate", long_side, 2, {5, high, 5}, {1, 1, 1}, k_sort, k_dup);
+    // The entry between the pair has the same low bits as the pair.
+    expect_coo_shape(handle,
+                     "tall_duplicate_low_bits",
+                     long_side,
+                     2,
+                     {5, high + 5, 5},
+                     {1, 1, 1},
+                     k_sort,
+                     k_dup);
+    expect_coo_shape(handle, "wide_high_bit", 2, long_side, {0, 0}, {high + 1, 1}, k_sort, k_ok);
+    expect_coo_shape(handle, "tall_high_bit", long_side, 2, {high + 5, 5}, {1, 1}, k_sort, k_ok);
+}
+
+// Columns of a row with 2^20 columns that differ only in bit 19 are distinct, and the last
+// column sorts before the padding.
+TEST_F(CheckMatrixDefects, EllHighBits)
+{
+    const int n    = 1 << 20;
+    const int high = 1 << 19;
+    expect_ell_shape(handle, "high_bit_increasing", n, 2, {{1, high + 1}, {0, high}}, k_ok, k_ok);
+    expect_ell_shape(handle, "high_bit_unordered", n, 2, {{high + 1, 1}, {high, 0}}, k_sort, k_ok);
+    expect_ell_shape(
+        handle, "high_bit_duplicate", n, 3, {{high + 1, 1, high + 1}, {0}}, k_sort, k_dup);
+    expect_ell_shape(handle, "last_column", n, 3, {{n - 1, 0, -1}, {0, n - 1}}, k_sort, k_ok);
 }
 
 // One thread checks one row, so pairs are planted in the first and last rows and in
