@@ -24,7 +24,10 @@ device="${HIPBLASLT_PY_DEVICE:-}"
 python="${PYTHON:-python3}"
 
 package_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-venv="$(mktemp -d)/venv"
+work_dir="$(mktemp -d)"
+# Leave the directory before removing it; Windows can't delete the current directory.
+trap 'cd / && rm -rf "${work_dir}"' EXIT
+venv="${work_dir}/venv"
 "${python}" -m venv "${venv}"
 if [[ -x "${venv}/bin/python" ]]; then
     vpy="${venv}/bin/python"
@@ -56,5 +59,5 @@ fi
 "${vpy}" -m pip install -v "${package_dir}"
 
 # Run from outside the source tree, so the tests import the installed package.
-cd "$(dirname "${venv}")"
+cd "${work_dir}"
 "${vpy}" -m pytest "${package_dir}/tests" -ra -v
