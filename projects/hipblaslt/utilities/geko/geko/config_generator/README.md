@@ -153,6 +153,10 @@ For `geko --tune`, turn it on with the environment variable (any workload source
 BUILDABLE_MIS=1 geko --tune --inline 4096 4096 1 4096 B B S T N --arch gfx950 --devices 0
 ```
 
+The bundled lists cover gfx950 (108), gfx942 (64), gfx1250 (82), and gfx1250-strict (82). The gfx950 and
+gfx942 totals include 12 int8 lists each: `I8:I:I`, `I8:I:S`, and `I8:I8:S` across `NN`, `NT`, `TN`, and `TT`.
+gfx1250 and gfx1250-strict do not have int8 MIs on geko's allowlist.
+
 The lists are produced, CPU only, by [`scripts/generate_buildable_mis.py`](../../scripts/generate_buildable_mis.py)
 (search described in [`buildability/`](buildability/__init__.py)). Code generation and fork ranges change, so
 regenerate them regularly and whenever either changes:
@@ -162,17 +166,19 @@ python3 scripts/generate_buildable_mis.py --hipblaslt /path/to/hipblaslt --arch 
   --types B:B:S H:H:S F8:B:S --layouts TN NN NT TT --workers 64
 ```
 
-Each list names the rocm-libraries commit it was generated from and the DepthUs searched, gives every buildable MI
-as `{MatrixInstruction: [...], DepthU: [...]}` (the DepthUs it builds at; macro tile as a comment), and ends with the
-unbuildable MIs and why the setting closest to fitting failed (`no resource counts` when TensileLite refused every
-setting tried before code generation; the generator prints how many, since validity rules alone decided those MIs).
+The bundled lists record the `rocm-libraries` `develop` base used for TensileLite code generation. Each list records
+the DepthUs searched and gives each MI found buildable as `{MatrixInstruction: [...], DepthU: [...]}` (macro tile
+as a comment). The trailer lists MIs for which no setting built and why the closest setting failed. It says
+`no resource counts` when TensileLite refused every setting before code generation.
 MI Designer warns, with the command that regenerates it, when a list it uses was generated (the UTC date in its
 `Source` line) more than 7 days from today in UTC, or records no date (`BUILDABLE_LIST_MAX_AGE_DAYS` in
 `mi_candidates.py`).
 A list whose `Architecture` and `GemmType` headers differ from the ARCH and GEMM type it was looked up for (e.g. one
 copied to the wrong file) is not used: MI Designer warns and uses every candidate MI.
-Finding where each MI stops building roughly doubles the time.
-On 352 workers: about 7 h for all 96 gfx950 lists, 3 h for the 52 gfx942 lists. Each MI runs in a fresh worker
+For each buildable MI, the generator checks every DepthU below the one that built and stops at the first failed
+search going upward. This DepthU pass roughly doubles generation time.
+Earlier runs on 352 workers took about 7 h for 96 non-int8 gfx950 lists and 3 h for 52 non-int8 gfx942 lists.
+The 24 int8 lists took about 4 h 43 min on 320 workers. Each MI runs in a fresh worker
 process; a worker can still need several GB for a large tile (the gfx1250 FP4 lists peak around 1.7 TB at 352
 workers), so lower `--workers` on machines with less memory. GEMM types MI Designer tunes only as subtile kernels
 (gfx950 MX, e.g. FP4) are skipped: they never read a list. `--report-dir` also writes every MI's verdict and witness
