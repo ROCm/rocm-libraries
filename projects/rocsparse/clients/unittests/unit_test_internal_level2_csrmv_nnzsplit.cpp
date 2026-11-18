@@ -669,6 +669,23 @@ namespace
         return a;
     }
 
+    // 20002 x 2: row 0 = {0, 1}, 20000 empty rows and a last row of {0}. An
+    // adaptive block would span the empty rows, so the default algorithm
+    // selects nnz-split, and row 0 reaches the wavefront that holds the last
+    // nonzero.
+    Csr make_gap_first_row_reaches_tail()
+    {
+        Csr a;
+        a.n = 2;
+        a.add_row(0, 2);
+        for(int i = 0; i < 20000; ++i)
+        {
+            a.add_row(0, 0);
+        }
+        a.add_row(0, 1);
+        return a;
+    }
+
     // Shapes that stay at one nnz per thread. B is the number of nonzeros in a
     // block at that granularity and W the wavefront size.
     std::vector<Named> small_shapes(int64_t B, int64_t W)
@@ -1058,11 +1075,14 @@ TEST_F(CsrmvNnzsplit, first_row_reaching_last_wavefront_every_configuration)
     }
 }
 
-// Same data, default algorithm and nnz-split.
+// Same data, default algorithm and nnz-split. run() checks both against the
+// host reference. The small shapes are good adaptive fits, so the default
+// keeps adaptive there; the gap matrix must send it through nnz-split.
 TEST_F(CsrmvNnzsplit, matches_default_algorithm)
 {
-    int compared = 0;
-    for(const Named& shape : small_shapes(block, wavefront()))
+    std::vector<Named> shapes = small_shapes(block, wavefront());
+    shapes.emplace_back("gap_first_row_reaches_tail", make_gap_first_row_reaches_tail());
+    for(const Named& shape : shapes)
     {
         Opt ns;
         Opt def;
@@ -1070,19 +1090,24 @@ TEST_F(CsrmvNnzsplit, matches_default_algorithm)
         const Out got  = run_f32(handle, shape.second, ns, shape.first + " nnzsplit");
         const Out want = run_f32(handle, shape.second, def, shape.first + " default");
         ASSERT_TRUE(got.ran && want.ran) << shape.first;
-        // None of these shapes is a poor adaptive fit, so the default stays
-        // adaptive (npt stays 0). The empty-gap cases in CsrmvDefaultDispatch
-        // are what send the default algorithm through nnz-split.
-        if(want.npt == 0)
-        {
-            ++compared;
-        }
-        if(got.y != want.y)
-        {
-            report(shape.first + ": nnz-split and the default algorithm disagree");
-        }
     }
-    EXPECT_GT(compared, 0) << "the default algorithm selected nnz-split for every shape";
+
+    const Csr a = make_gap_first_row_reaches_tail();
+    for(rocsparse_index_base base : {rocsparse_index_base_zero, rocsparse_index_base_one})
+    {
+        each_mode([&](Opt o, const std::string& mode) {
+            o.alg                  = rocsparse_spmv_alg_default;
+            o.base                 = base;
+            const std::string what = "gap_first_row_reaches_tail default " + mode
+                                     + (base == rocsparse_index_base_one ? " base1" : " base0");
+            const Out out = run_f32(handle, a, o, what + " f32");
+            if(!o.v2)
+            {
+                EXPECT_GT(out.npt, 0u) << what << ": the default algorithm kept adaptive";
+            }
+            run_f64(handle, a, o, what + " f64");
+        });
+    }
 }
 
 TEST_F(CsrmvNnzsplit, small_shapes)
