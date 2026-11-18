@@ -117,6 +117,18 @@ struct ClampArgs
     float upper;
 };
 
+/// dst[c * rows + r] = src[c * srcStride] for every r < rows and c < channels: a column-major
+/// rows x channels matrix whose every row is the per-channel vector src, in the entry point's
+/// element size. The broadcast bias a fused epilogue's GEMM adds as its C.
+struct BroadcastArgs
+{
+    const void* src;
+    void* dst;
+    long long rows;
+    long long channels;
+    long long srcStride;
+};
+
 /// The convolution geometry im2col and col2im share. Every problem is described as 3-D: missing
 /// leading spatial axes have extent 1, pad 0, stride 1, dilation 1 and tensor stride 0.
 ///

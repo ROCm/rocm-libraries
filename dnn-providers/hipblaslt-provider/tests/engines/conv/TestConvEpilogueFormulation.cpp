@@ -406,19 +406,16 @@ TEST(TestConvEpilogueFormulation, ChannelsFirstBiasIsABroadcastAddend)
         EXPECT_EQ(call.c->batchStride, 0) << "one matrix for every image";
         EXPECT_FALSE(call.accumulate);
         EXPECT_EQ(call.d.dataType, DataType::HALF);
-        // The fill: bias (stride 1 along channels, 0 along the rows) into the matrix.
+        // The fill: the bias broadcast along the matrix's rows.
         const auto& fill = calls->stages.front().before.front();
-        const auto* copy = std::get_if<StridedCopyArgs>(&fill.args);
-        ASSERT_NE(copy, nullptr);
+        const auto* broadcast = std::get_if<BroadcastArgs>(&fill.args);
+        ASSERT_NE(broadcast, nullptr);
         EXPECT_EQ(fill.srcUid, EPI_OPERAND_UID);
         EXPECT_EQ(fill.dstUid, call.c->uid);
-        EXPECT_EQ(copy->rank, 2);
-        EXPECT_EQ(copy->dims[0], 24);
-        EXPECT_EQ(copy->dims[1], call.m);
-        EXPECT_EQ(copy->srcStrides[0], 1);
-        EXPECT_EQ(copy->srcStrides[1], 0);
-        EXPECT_EQ(copy->dstStrides[0], call.m);
-        EXPECT_EQ(copy->dstStrides[1], 1);
+        EXPECT_EQ(fill.dataType, DataType::HALF);
+        EXPECT_EQ(broadcast->rows, call.m);
+        EXPECT_EQ(broadcast->channels, 24);
+        EXPECT_EQ(broadcast->srcStride, 1);
         const auto tile
             = std::find_if(calls->workspace.begin(),
                            calls->workspace.end(),

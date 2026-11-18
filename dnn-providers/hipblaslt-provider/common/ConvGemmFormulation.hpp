@@ -51,7 +51,8 @@ struct RepackStep
                  Im2ColArgs,
                  Col2ImArgs,
                  StridedCastEpilogueArgs,
-                 ClampArgs>
+                 ClampArgs,
+                 BroadcastArgs>
         args;
     /// The element type moved (strided copy, im2col), written (cast, col2im) or clamped.
     hipdnn_flatbuffers_sdk::data_objects::DataType dataType

@@ -689,8 +689,66 @@ TEST(TestGpuRepackKernels, ClampInPlaceKeepsNanAndClampsAtTheBounds)
     }
 }
 
+template <typename Bits>
+void runBroadcast(int64_t rows, int64_t channels, int64_t srcStride, int64_t first)
+{
+    const RepackProgram program;
+    std::vector<Bits> src(static_cast<size_t>(channels * srcStride));
+    std::iota(src.begin(), src.end(), Bits(1));
+    std::vector<Bits> fill(static_cast<size_t>(first + rows * channels + 3), Bits(0));
+    void* deviceSrc = nullptr;
+    void* deviceDst = nullptr;
+    ASSERT_EQ(hipMalloc(&deviceSrc, src.size() * sizeof(Bits)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&deviceDst, fill.size() * sizeof(Bits)), hipSuccess);
+    ASSERT_EQ(hipMemcpy(deviceSrc, src.data(), src.size() * sizeof(Bits), hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_EQ(hipMemcpy(deviceDst, fill.data(), fill.size() * sizeof(Bits), hipMemcpyHostToDevice),
+              hipSuccess);
+    BroadcastArgs args{};
+    args.rows = rows;
+    args.channels = channels;
+    args.srcStride = srcStride;
+    const auto type
+        = sizeof(Bits) == 2 ? data_objects::DataType::HALF : data_objects::DataType::FLOAT;
+    program.launch(
+        RepackStep{args, type, 0, 0}, deviceSrc, static_cast<Bits*>(deviceDst) + first, nullptr);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    std::vector<Bits> got(fill.size());
+    ASSERT_EQ(hipMemcpy(got.data(), deviceDst, got.size() * sizeof(Bits), hipMemcpyDeviceToHost),
+              hipSuccess);
+    ASSERT_EQ(hipFree(deviceSrc), hipSuccess);
+    ASSERT_EQ(hipFree(deviceDst), hipSuccess);
+    for(size_t i = 0; i < got.size(); ++i)
+    {
+        const auto index = static_cast<int64_t>(i) - first;
+        const Bits want = index < 0 || index >= rows * channels
+                              ? Bits(0)
+                              : src[static_cast<size_t>((index / rows) * srcStride)];
+        ASSERT_EQ(got[i], want) << "at " << i;
+    }
+}
+
+TEST(TestGpuRepackKernels, BroadcastFillsEveryRowWithTheVector)
+{
+    // The fused epilogue's broadcast bias: the vector runs and the per-element path (rows not a
+    // multiple of the vector, or a destination off 16 bytes), a strided source, both sizes.
+    SKIP_IF_NO_DEVICES();
+    for(const auto& [rows, first] : {std::pair{int64_t{64}, int64_t{0}},
+                                     std::pair{int64_t{35}, int64_t{0}},
+                                     std::pair{int64_t{64}, int64_t{1}}})
+    {
+        runBroadcast<uint16_t>(rows, 13, 1, first);
+        runBroadcast<uint32_t>(rows, 13, 1, first);
+        runBroadcast<uint16_t>(rows, 13, 3, first);
+    }
+}
+
 TEST(TestRepackProgram, EntryNamesFollowTheStepKind)
 {
+    EXPECT_EQ(RepackProgram::entryName({BroadcastArgs{}, data_objects::DataType::BFLOAT16, 0, 0}),
+              "Broadcast2");
+    EXPECT_EQ(RepackProgram::entryName({BroadcastArgs{}, data_objects::DataType::FLOAT, 0, 0}),
+              "Broadcast4");
     EXPECT_EQ(RepackProgram::entryName({ClampArgs{}, data_objects::DataType::HALF, 0, 0}),
               "ClampHalf");
     EXPECT_EQ(RepackProgram::entryName({ClampArgs{}, data_objects::DataType::BFLOAT16, 0, 0}),
