@@ -58,11 +58,14 @@ extern "C" {
 *  \retval      rocsparse_status_success the operation completed successfully.
 *  \retval      rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval      rocsparse_status_invalid_value if any required enumeration is invalid.
-*  \retval      rocsparse_status_invalid_pointer \p mat_A, \p mat_B, or \p buffer_size_in_bytes
-*               pointer is invalid.
-*  \retval      rocsparse_status_invalid_size if an element count of the intermediate CSR
-*               matrix does not fit in \p size_t, a BSR block product overflows, or
-*               \p source is batched.
+*  \retval      rocsparse_status_invalid_pointer \p descr, \p source, \p target, or
+*               \p buffer_size_in_bytes pointer is invalid.
+*  \retval      rocsparse_status_invalid_size if the size in bytes of an array of the
+*               intermediate CSR matrix does not fit in \p size_t, its row count plus one
+*               does not fit in \c int64_t, the BSR rows, columns, or nonzero entries of
+*               \p source expanded by the block dimension do not fit in \c int64_t, or
+*               \p source is batched. A batched \p target is not checked by this query;
+*               \ref rocsparse_sparse_to_sparse rejects it.
 *  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats or data types of \p source and \p target.
 */
 ROCSPARSE_EXPORT
@@ -278,7 +281,8 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *               set and the corresponding target array is null. A null target value array
 *               between the COO, COO AoS, CSR, and CSC formats requests a symbolic
 *               conversion and is not an error.
-*  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats or data types of \p source and \p target.
+*  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats
+*               or data types of \p source and \p target, or \p source or \p target is batched.
 *  \par Example
 *  This example converts a CSR matrix into an ELL matrix.
 *  \snippet example_rocsparse_sparse_to_sparse.cpp doc example
