@@ -1,0 +1,4 @@
+tensilelite/tensilelite/CustomKernels/rocdojo/*.s linguist-generated=true
+tensilelite/tensilelite/CustomKernels/rocdojo/MANIFEST.json linguist-generated=true
+library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1250/gfx1250/Origami/*_rocdojo.yaml linguist-generated=true
+clients/scripts/rocdojo/gfx1250_bf16_dashboard_bench.yaml linguist-generated=true
