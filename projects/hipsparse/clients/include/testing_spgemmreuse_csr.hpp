@@ -64,6 +64,7 @@ void testing_spgemmreuse_csr_bad_arg(const Arguments& argus)
     hipsparseLocalHandle_t handle;
 
     hipsparseLocalSpGEMMDescr descr;
+
     auto dcsr_row_ptr_A_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
     auto dcsr_col_ind_A_managed
