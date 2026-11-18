@@ -11,7 +11,7 @@
  * `align`, to the caller's value or that same natural alignment, so the
  * lowering cases parse serialized IR. They mirror
  * tests/core/test_global_access_alignment.py and the HIP refusals of
- * tests/core/test_mma_io.py and tests/core/test_tf32.py, whose C++ halves
+ * tests/helpers/test_fragment_compat.py and tests/core/test_tf32.py, whose C++ halves
  * otherwise run only where the pybind engine is built.
  */
 

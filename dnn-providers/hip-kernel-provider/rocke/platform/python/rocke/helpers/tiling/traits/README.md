@@ -286,7 +286,7 @@ A dtype an instruction takes as A, B, C or D has one spelling per layer, and eac
 
 1. The dtype exists in `core.dtypes` (`dtype_info(name).name == name`) and as a `rocke.core.ir`
    constant; the catalog loader refuses any other spelling.
-2. Its storage: `helpers/mma_io.storage_ir_type` (the type a register of it is held in) and, for a
+2. Its storage: `core/ir_storage.storage_element_type` (the type a register of it is held in) and, for a
    sub-byte dtype, `core.storage.register_packing` (how its elements pack into 32-bit words). The
    fragment storage table (`helpers/tiling/fragments.py` module docstring) follows from these two.
 3. An integer operand dtype: `INTEGER_OPERAND_DTYPES` and, if the instruction also takes an unsigned
@@ -332,7 +332,7 @@ caused it.
    key. A `selectable` integer row also matches ops on the unsigned twins of its operands.
 2. Each candidate is lowered alone with the operand form the tiling layer feeds it: the row's
    logical elements per lane (`fragment_length` of its encodings, never core's `*_frag_len`,
-   which counts register words for some ops), spelled by `helpers/mma_io.mma_operand_ir_type`
+   which counts register words for some ops), spelled by `core/mma_operand.mma_operand_ir_type`
    (packed 32-bit words for a sub-byte dtype, the logical vector otherwise). A lowering that
    raises anything other than `NotImplementedError` fails the test: the operand contract and the
    backend disagree.

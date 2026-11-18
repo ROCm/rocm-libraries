@@ -368,6 +368,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             f"{test_ctest_rel}tests/portable_ir/rocke_portable_ir_provenance.txt"
         ),
         "ROCKE_STORAGE_TEST": native_artifact("rocke_storage"),
+        "ROCKE_FRAGMENT_IO_TEST": native_artifact("rocke_fragment_io"),
         "ROCKE_IR_TYPES_TEST": native_artifact("rocke_ir_types"),
         "ROCKE_NONTEMPORAL_HIP_TEST": native_artifact("rocke_nontemporal_hip"),
         "ROCKE_UNSIGNED_INT_OPS_CLI": native_artifact("rocke_unsigned_int_ops"),

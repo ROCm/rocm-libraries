@@ -57,7 +57,7 @@ from rocke.core.arch.mfma_scale import gfx950_scaled_mfma, matrix_layout
 from rocke.core.dtypes import dtype_info
 from rocke.core.ir import I32, IRBuilder, PtrType, VectorType, dtype_to_ir_type
 from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
-from rocke.helpers.mma_io import mma_operand_ir_type
+from rocke.core.mma_operand import mma_operand_ir_type
 from rocke.helpers.tiling.fragments import fragment_length
 from rocke.helpers.tiling.mma.warp_encoding import (
     a_warp_encoding,

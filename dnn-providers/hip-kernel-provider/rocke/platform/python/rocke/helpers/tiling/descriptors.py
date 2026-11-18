@@ -57,7 +57,7 @@ class TensorDesc:
     :attr:`element_span`. Axes are positional: batch axes first, the reduction axis last.
     """
 
-    lengths: tuple[int, ...]
+    lengths: tuple[int | None, ...]
     strides: tuple[int, ...]
     dtype: Any
 
@@ -66,7 +66,7 @@ class TensorDesc:
             raise ValueError(
                 f"lengths rank {len(self.lengths)} != strides rank {len(self.strides)}"
             )
-        if any(length <= 0 for length in self.lengths):
+        if any(length is not None and length <= 0 for length in self.lengths):
             raise ValueError(f"lengths must be positive -- lengths={self.lengths!r}")
 
     @property
@@ -83,6 +83,8 @@ class TensorDesc:
         up to the last element; the dead space after it is not. Static: every length and stride is
         an int.
         """
+        if any(length is None for length in self.lengths):
+            raise ValueError("TensorDesc.element_span needs known lengths")
         for axis, stride in enumerate(self.strides):
             if stride < 0:
                 raise ValueError(
@@ -110,12 +112,18 @@ class TensorDesc:
 
 
 def make_tensor_desc(
-    lengths: tuple[int, ...],
+    lengths: tuple[int | None, ...],
     strides: tuple[int, ...],
     dtype: Any,
 ) -> TensorDesc:
     """Free factory: a pure, ptr-free `TensorDesc` (lengths + strides + dtype), axes written batch
-    first and the reduction axis last, the memory layout in the strides."""
+    first and the reduction axis last, the memory layout in the strides.
+
+    ``None`` explicitly denotes an unknown caller-owned leading extent, such
+    as a batch count absent from a kernel ABI. A verb refuses unknown lengths
+    on tile-covered axes. Unknown extents cannot provide a static allocation
+    span or justify a bounded byte-address shortcut.
+    """
     return TensorDesc(tuple(lengths), tuple(strides), dtype)
 
 

@@ -42,8 +42,8 @@ TileMma((16,16,16), a,b,c, target)          TileMma((64,64,32), a,b,c, target,
 | `TileDesc(shape, layout)` | dtype-free logical->register layout value | no | `mma.a/b/c_desc`, self-composed, or `make_tile_desc(...)` |
 | `make_fragment(tile_desc, dtype)` | realized per-lane registers | no (value filled by verbs) | dtype from the operand |
 | `fill_fragment(b, frag, 0)` | element-wise materialize | yes (b-first) | -- |
-| `load_fragment(b, ptr, window, desc, lane, *, pad=0, lds_swizzle=False, packed_runs_aligned=False)` | memory -> Fragment (zero-pads OOB) | yes | addressing from `desc.layout`; `pad` = clip fill (0); `lds_swizzle` = bank-swizzle POLICY (§5c); `packed_runs_aligned` = a runtime packed origin/bound is on a word group (§5) |
-| `store_fragment(b, ptr, window, frag, lane, *, lds_swizzle=False, packed_runs_aligned=False)` | Fragment -> memory (drops OOB) | yes | cast frag dtype -> desc dtype; `lds_swizzle` = bank-swizzle POLICY (§5c); `packed_runs_aligned` as for `load_fragment` |
+| `load_fragment(b, ptr, window, desc, lane, *, pad=0, lds_swizzle=False, packed_runs_aligned=False, alignment_bytes=None)` | memory -> Fragment (zero-pads OOB) | yes | addressing from `desc.layout`; `pad` = clip fill (0); `lds_swizzle` = bank-swizzle POLICY (§5c); `packed_runs_aligned` = a runtime packed origin/bound is on a word group (§5) |
+| `store_fragment(b, ptr, window, frag, lane, *, lds_swizzle=False, packed_runs_aligned=False, alignment_bytes=None)` | Fragment -> memory (drops OOB) | yes | cast frag dtype -> desc dtype; `lds_swizzle` = bank-swizzle POLICY (§5c); `packed_runs_aligned` as for `load_fragment` |
 | `TileMma(shape, a=, b=, c=, d=, target=, tiling=, style=, catalog=, atom_override=)` | intrinsic resolver + subtile driver | no | atom/layouts/op_id/wave_size from traits; `style=` picks the operand-layout profile; `atom_override=` pins an instruction by name (§6) |
 | `Tiling(atom_shape=, order=, mac_prio=)` | the MMA object's knobs | no | atom=shape (single MMA), order="MNK", mac_prio=0 (setprio off; §5d) |
 | `CanonicalStyle()` / `InterleavedStyle()` | the operand-layout profile (`style=`) | no | default canonical; interleaved = wide free-contiguous loads |
@@ -246,6 +246,25 @@ b_frag = load_fragment(b, smem, make_window(b_lds_td, (n0, k0)), mma.b_desc, lan
   lengths. Its stride-1 axis is axis 0, so a swizzle on it is a swizzle callable.
 - **Why no allocation verb.** `smem_alloc(dtype, [count])` already takes the two values the descriptor
   gives; a tiling wrapper would be a second home for them.
+
+### Explicit transport and instruction contracts
+
+- `alignment_bytes` states the guarantee at the passed global pointer and caps
+  every layout-derived access alignment. Omitted preserves existing emission;
+  LDS rejects this global-pointer argument. Complete bounded views may share a
+  runtime byte base and constant run offsets without narrowing large views.
+- `make_matrix_fragment_desc(layout)` composes an atom-owned contiguous-chunk
+  layout into a logical `TileDesc`, without carrier-capacity or ABI padding.
+- `make_mma_accumulator_desc(atom, target=..., result=False)` describes input C;
+  `result=True` uses independent D metadata. It requires a verified registered
+  map. MFMA composes the existing C-warp calculator; the current WMMA profile is
+  deliberately gfx1250-only, not borrowed by targets with different row order.
+- A `TensorDesc` may state `None` for an unknown caller-owned **leading** extent
+  (for example a batch count absent from the kernel ABI). Tile-covered lengths
+  must be known, and unknown extents cannot justify static allocation spans.
+- Native `helper_rocke.helpers.tiling.h` mirrors the bounded rank-1..8 global
+  authoring subset. Native builder parity is tested separately from lowering
+  Python-authored IR. General native LDS and the MMA driver remain separate work.
 
 ### Reserved (post-M1)
 - per-load `coherency=` (param exists on the verbs; ignored in M1).

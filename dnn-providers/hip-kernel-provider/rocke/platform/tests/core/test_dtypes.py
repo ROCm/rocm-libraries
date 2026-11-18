@@ -14,7 +14,7 @@ from rocke.core.dtypes import DTypeCategory, dtype_info, dtype_names
 from rocke.core.arch.target import MmaScaleDType
 from rocke.core import ir
 from rocke.core.ir import FP8E4M3, I8, IRBuilder, Type, dtype_to_ir_type, type_bits
-from rocke.helpers.mma_io import storage_ir_type
+from rocke.core.ir_storage import storage_ir_type
 from rocke.core.ir_serialize import parse, serialize
 from rocke.helpers.quant import (
     quant_ir_type,

@@ -17,7 +17,7 @@ Terminology: a *register* here is one logical element slot of the fragment's `dt
 logical number format; the SSA `value` holds the registers in the fragment's *storage type*
 (:attr:`Fragment.storage_type`), derived from the dtype and never supplied: the vector of its
 storage dtype (:func:`rocke.core.storage.storage_dtype`, the one rule) built by
-:func:`rocke.helpers.mma_io.storage_vector_type` -- ``vec<f16 x n>`` for f16, ``vec<i32 x n>`` for
+:func:`rocke.core.ir_storage.storage_vector_type` -- ``vec<f16 x n>`` for f16, ``vec<i32 x n>`` for
 tf32, and ``vec<i32 x n*bits/32>`` for a packed sub-byte dtype such as fp4e2m1.
 
 LLVM packs a byte-or-wider vector into VGPRs itself: a gfx90a MFMA A operand of ``vec<f16x4>``
@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from ...core.dtypes import dtype_info
 from ...core.ir import Type, Value, VectorType
 from ...core.storage import is_register_packed, packed_word_range, register_packing
-from ..mma_io import storage_vector_type
+from ...core.ir_storage import storage_vector_type
 from .encoding import WarpDistributionEncoding
 from .register_mapper import RegisterMapper
 
@@ -152,7 +152,7 @@ def fragment_dtype_ok(dtype: object) -> tuple[bool, str]:
 
 
 def storage_slots(dtype: Type, register_count: int, start: int, length: int) -> range:
-    """The elements of a fragment's storage vector (:func:`~rocke.helpers.mma_io.storage_vector_type`)
+    """The elements of a fragment's storage vector (:func:`~rocke.core.ir_storage.storage_vector_type`)
     that hold logical registers ``[start, start + length)`` of a `register_count`-register `dtype`
     fragment -- the one rule for where a fragment's registers sit in its storage vector.
 
@@ -197,7 +197,7 @@ def _fragment_value_type_ok(
     tile_desc: TileDesc, dtype: Type, value: object
 ) -> tuple[bool, str]:
     """Whether `value` can hold the registers of a `tile_desc` fragment at element `dtype`: an IR
-    `Value` of the fragment's storage type (:func:`~rocke.helpers.mma_io.storage_vector_type`).
+    `Value` of the fragment's storage type (:func:`~rocke.core.ir_storage.storage_vector_type`).
 
     A single-register fragment is a ``vec<storage x 1>`` vector, never a bare scalar. A value of the
     logical vector type of a dtype stored differently (``vec<tf32x8>``), or anything but the words of a

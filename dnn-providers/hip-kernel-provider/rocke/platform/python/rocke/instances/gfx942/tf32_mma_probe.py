@@ -8,7 +8,15 @@ from rocke.core.arch import ArchTarget
 from rocke.core.arch.target import _frag_info
 from rocke.core.ir import F32, I32, TF32, IRBuilder, PtrType, VectorType
 from rocke.core.storage import BitPacking, FragmentPacking, MatrixFragmentLayout
-from rocke.helpers.mma_io import load_matrix_fragment
+from rocke.helpers.tiling import (
+    Fragment,
+    load_fragment,
+    make_matrix_fragment_desc,
+    make_mma_accumulator_desc,
+    make_tensor_desc,
+    make_window,
+    store_fragment,
+)
 
 PREPARATIONS = ("raw", "carrier", "rne", "prepacked", "fp32")
 
@@ -99,7 +107,8 @@ def build_tf32_mma_probe(spec: Tf32MmaProbeSpec):
         raise ValueError(
             "TF32 probe requires the fixed gfx942 instruction and layout contract"
         )
-    src_layout = atom.srcs[2].layout
+    c_desc = make_mma_accumulator_desc(atom, target="gfx942")
+    d_desc = make_mma_accumulator_desc(atom, target="gfx942", result=True)
     b = IRBuilder(spec.name)
     ty = I32 if mode == "prepacked" else F32
     a = b.param("A", PtrType(ty, "global"), align=4)
@@ -110,47 +119,55 @@ def build_tf32_mma_probe(spec: Tf32MmaProbeSpec):
     pb = b.param("PB", PtrType(I32, "global"), align=4)
     lane = b.thread_id_x()
     batch = b.block_id_x()
-    cm = b.const_i32(m)
-    axis = b.mod(lane, cm)
-    group = b.div(lane, cm)
-    ck = b.const_i32(k)
-    row = b.mul(axis, ck)
-    batch_input = b.mul(batch, b.const_i32(m * k))
-    row_base = b.add(batch_input, row)
-    batch_output = b.mul(batch, b.const_i32(m * m))
-    c_values, out_indices = [], []
-    for slot in range(atom.srcs[2].frag_len):
-        r, col = src_layout.coord(b, lane, slot)
-        index = b.add(batch_output, b.add(b.mul(r, cm), col))
-        out_indices.append(index)
-        c_values.append(b.global_load(cc, index, F32, align=4))
-    acc = b.vec_pack(c_values, F32)
+    input_dtype = TF32 if mode == "prepacked" else F32
+    inputs = make_tensor_desc((None, m, k), (m * k, k, 1), input_dtype)
+    diagnostics = make_tensor_desc((None, m, k), (m * k, k, 1), I32)
+    outputs = make_tensor_desc((None, m, m), (m * m, m, 1), F32)
+    output_window = make_window(outputs, (batch, 0, 0))
+    acc = load_fragment(b, cc, output_window, c_desc, lane, alignment_bytes=4).value
     if mode == "fp32":
+        scalar_layout = MatrixFragmentLayout(
+            FragmentPacking(BitPacking(32), 1, 32, 1), 1, 64 // m, m
+        )
+        scalar_desc = make_matrix_fragment_desc(scalar_layout)
         for step in range(2):
-            index = b.add(row_base, b.add(group, b.const_i32(step * (64 // m))))
-            av = b.global_load(a, index, F32, align=4)
-            bv = b.global_load(bb, index, F32, align=4)
-            b.global_store(pa, index, b.bitcast(av, I32), align=4)
-            b.global_store(pb, index, b.bitcast(bv, I32), align=4)
+            origin = (batch, 0, step * (64 // m))
+            window = make_window(inputs, origin)
+            af = load_fragment(b, a, window, scalar_desc, lane, alignment_bytes=4)
+            bf = load_fragment(b, bb, window, scalar_desc, lane, alignment_bytes=4)
+            av, bv = b.vec_extract(af.value, 0), b.vec_extract(bf.value, 0)
+            # Preserve alias-visible A/B reads, PA/PB writes, then the instruction.
+            bits = b.vector_splat(b.bitcast(av, I32), 1)
+            store_fragment(
+                b,
+                pa,
+                make_window(diagnostics, origin),
+                Fragment(scalar_desc, I32, bits),
+                lane,
+                alignment_bytes=4,
+            )
+            bits = b.vector_splat(b.bitcast(bv, I32), 1)
+            store_fragment(
+                b,
+                pb,
+                make_window(diagnostics, origin),
+                Fragment(scalar_desc, I32, bits),
+                lane,
+                alignment_bytes=4,
+            )
             acc = b.mma(full, av, bv, acc)
     else:
         layout = MatrixFragmentLayout(
             FragmentPacking(BitPacking(32), 2, 32, 2), 2, 64 // m, m
         )
+        desc = make_matrix_fragment_desc(layout)
+        window = make_window(inputs, (batch, 0, 0))
+        diagnostic_window = make_window(diagnostics, (batch, 0, 0))
         fragments = []
         for ptr, prepared in ((a, pa), (bb, pb)):
-            carrier = I32 if mode in ("carrier", "prepacked") else F32
-            values = load_matrix_fragment(
-                b,
-                ptr,
-                row_base,
-                group,
-                0,
-                dtype="tf32" if mode == "prepacked" else "fp32",
-                layout=layout,
-                carrier_type=carrier,
-                alignment_bytes=4,
-            )
+            values = load_fragment(b, ptr, window, desc, lane, alignment_bytes=4).value
+            if mode == "carrier":
+                values = b.bitcast(values, VectorType(I32, 2))
             if mode == "rne":
                 values = b.vec_pack(
                     [b.cvt_f32_to_tf32(b.vec_extract(values, i)) for i in range(2)],
@@ -158,15 +175,19 @@ def build_tf32_mma_probe(spec: Tf32MmaProbeSpec):
                 )
             else:
                 values = b.bitcast(values, VectorType(TF32, 2))
-            for slot in range(2):
-                index = b.add(
-                    row_base, b.add(b.mul(group, b.const_i32(2)), b.const_i32(slot))
-                )
-                bits = b.bitcast(b.vec_extract(values, slot), I32)
-                b.global_store(prepared, index, bits, align=4)
+            bits = b.bitcast(values, VectorType(I32, 2))
+            store_fragment(
+                b,
+                prepared,
+                diagnostic_window,
+                Fragment(desc, I32, bits),
+                lane,
+                alignment_bytes=4,
+            )
             fragments.append(values)
         acc = b.mma(atom, *fragments, acc)
-    for slot, index in enumerate(out_indices):
-        b.global_store(d, index, b.vec_extract(acc, slot), align=4)
+    store_fragment(
+        b, d, output_window, Fragment(d_desc, F32, acc), lane, alignment_bytes=4
+    )
     b.ret()
     return b.kernel

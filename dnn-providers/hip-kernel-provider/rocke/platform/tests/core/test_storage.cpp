@@ -1,6 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-/* Host packing fixtures and native authoring emission for test_mma_io.py.
+/* Host packing fixtures and native authoring emission for test_fragment_compat.py.
  *
  * It also answers register-packing questions for test_storage.py, which
  * compares each answer with core/storage.py (found through ROCKE_STORAGE_TEST):

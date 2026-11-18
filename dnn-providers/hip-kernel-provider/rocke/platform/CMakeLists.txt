@@ -708,6 +708,7 @@ if(ROCKE_INSTALL_TESTS)
           "ROCKE_PROVENANCE_MANIFEST=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_provenance.txt")
       foreach(_rocke_native_parity
               "ROCKE_STORAGE_TEST=rocke_storage"
+              "ROCKE_FRAGMENT_IO_TEST=rocke_fragment_io"
               "ROCKE_IR_TYPES_TEST=rocke_ir_types"
               "ROCKE_NONTEMPORAL_HIP_TEST=rocke_nontemporal_hip"
               "ROCKE_UNSIGNED_INT_OPS_CLI=rocke_unsigned_int_ops"

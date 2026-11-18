@@ -175,7 +175,9 @@ def test_fp4_catalog_signature_and_lowering(path, scale_type):
     kernel = build_block_scaled_gemm(spec)
     llvm = lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor="llvm23")
     call = next(
-        l for l in llvm.splitlines() if "call <8 x float> @llvm.amdgcn.wmma.scale" in l
+        line
+        for line in llvm.splitlines()
+        if "call <8 x float> @llvm.amdgcn.wmma.scale" in line
     )
     assert call.count("i32 4, <16 x i32>") == 2
     assert call.count(f", {scale_type} %") == 2
@@ -256,8 +258,6 @@ def test_scale_operands_pack_consecutive_k_groups_low_byte_first(path, count, dt
         "arith.mul": operator.mul,
         "arith.mod": operator.mod,
         "arith.div": operator.floordiv,
-        "arith.shl": operator.lshift,
-        "arith.or": operator.or_,
     }
     for lane in (0, 7, 16, 31):
 
@@ -269,15 +269,28 @@ def test_scale_operands_pack_consecutive_k_groups_low_byte_first(path, count, dt
             op = producers[value.name]
             if op.name == "arith.constant":
                 return op.attrs["value"]
+            if op.name == "arith.constant_vec":
+                return (int(op.attrs["fill"]),) * op.attrs["vec"]
             if op.name == "gpu.thread_id":
                 return lane
             if op.name == "gpu.block_id":
                 return 0
             args = [evaluate(v) for v in op.operands]
+            if op.name == "arith.sext":
+                return args[0]  # Evaluated addresses are already signed Python ints.
+            if op.name == "tile.global_ptr_add":
+                return args[0][args[1] :]
             if op.name == "memref.global_load_typed":
                 return int(args[0][args[1]])
-            if op.name == "arith.zext":
-                return args[0]
+            if op.name == "memref.global_load_vN":
+                return tuple(map(int, args[0][args[1] : args[1] + value.type.count]))
+            if op.name == "vector.extract":
+                return args[0][op.attrs["index"]]
+            if op.name == "vector.insert":
+                index = op.attrs["index"]
+                return args[0][:index] + (args[1],) + args[0][index + 1 :]
+            if op.name == "arith.bitcast":
+                return int.from_bytes(bytes(args[0]), "little")
             return binary[op.name](*args)
 
         calls = [op for op in kernel.body.ops if op.name == "tile.mma"]

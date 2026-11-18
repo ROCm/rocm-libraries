@@ -26,7 +26,7 @@ import pytest
 
 from rocke.core.ir import F32, FP4E2M1, FP8E4M3, I32, IRBuilder, PtrType, VectorType
 from rocke.examples.common.scaled_gemm_reference import decode_fp4, pack_fp4_codes
-from rocke.helpers.mma_io import storage_ir_type
+from rocke.core.ir_storage import storage_ir_type
 from rocke.helpers.tiling import (
     fill_fragment,
     load_fragment,

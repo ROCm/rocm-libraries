@@ -9,6 +9,8 @@ hand-writing raw encoding integer sequences.
 """
 from __future__ import annotations
 
+from .accumulator import make_mma_accumulator_desc
+from .matrix_fragment import make_matrix_fragment_desc
 from .tile_distribution import make_tile_desc
 
-__all__ = ["make_tile_desc"]
+__all__ = ["make_tile_desc", "make_matrix_fragment_desc", "make_mma_accumulator_desc"]
