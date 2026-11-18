@@ -28,6 +28,9 @@
 #include "rocsparse_primitives.hpp"
 #include "rocsparse_utility.hpp"
 
+#include <algorithm>
+#include <limits>
+
 namespace rocsparse
 {
     // Temporary buffer layout of the COO and ELL checks. The status slot comes first and
@@ -102,6 +105,18 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
+    // rocprim::segmented_radix_sort_keys takes the number of keys and segments as unsigned
+    // int and reads each segment offset as unsigned int. The unsorted ELL duplicate pass
+    // therefore sorts whole rows in batches of at most this many entries.
+    constexpr int64_t check_matrix_ell_sort_batch_limit = std::numeric_limits<uint32_t>::max();
+
+    // Rows in each batch of the unsorted ELL duplicate pass, for 0 < ell_width <= batch_limit.
+    inline int64_t
+        check_matrix_ell_rows_per_batch(int64_t m, int64_t ell_width, int64_t batch_limit)
+    {
+        return std::min(m, batch_limit / ell_width);
+    }
+
     // The duplicate pass sorts zero-based column indices with padding stored as n.
     template <typename I>
     inline rocsparse_status check_matrix_ell_workspace_query(rocsparse_handle            handle,
@@ -109,7 +124,9 @@ namespace rocsparse
                                                              I                           n,
                                                              I                           ell_width,
                                                              rocsparse_storage_mode      storage,
-                                                             check_matrix_ell_workspace& ws)
+                                                             check_matrix_ell_workspace& ws,
+                                                             int64_t                     batch_limit
+                                                             = check_matrix_ell_sort_batch_limit)
     {
         ws = {};
 
@@ -124,18 +141,24 @@ namespace rocsparse
 
         if(storage == rocsparse_storage_mode_unsorted && ell_width > 1)
         {
-            ws.end_bit = check_matrix_key_bits(n);
+            if(ell_width > batch_limit)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            }
+
+            const int64_t batch_rows = check_matrix_ell_rows_per_batch(m, ell_width, batch_limit);
+            ws.end_bit               = check_matrix_key_bits(n);
 
             RETURN_IF_ROCSPARSE_ERROR(
                 (rocsparse::primitives::segmented_radix_sort_keys_buffer_size<I, int64_t>(
                     handle,
-                    static_cast<size_t>(entries),
-                    static_cast<size_t>(m),
+                    static_cast<size_t>(batch_rows * ell_width),
+                    static_cast<size_t>(batch_rows),
                     0,
                     ws.end_bit,
                     &ws.rocprim_bytes)));
             ws.rocprim_slot = rocsparse::align_size<char>(ws.rocprim_bytes);
-            ws.offset_bytes = rocsparse::align_size<int64_t>(static_cast<size_t>(m) + 1);
+            ws.offset_bytes = rocsparse::align_size<int64_t>(static_cast<size_t>(batch_rows) + 1);
             ws.array_bytes  = rocsparse::align_size<I>(static_cast<size_t>(entries));
             ws.total += ws.rocprim_slot + ws.offset_bytes + 2 * ws.array_bytes;
         }

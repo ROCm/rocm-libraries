@@ -22,10 +22,12 @@
  *
  * ************************************************************************ */
 
-// COO, ELL and HYB matrix checkers: duplicate coordinates, row ordering, and
-// an ELL failure that the HYB checker must not replace with the COO result.
+// COO, ELL and HYB matrix checkers: duplicate coordinates, row ordering, an
+// ELL failure that the HYB checker must not replace with the COO result, and
+// the row batches of the unsorted ELL duplicate pass.
 #include "unit_test_utils.hpp"
 
+#include "../../library/src/util/check_matrix_ell_unsorted.hpp"
 #include "rocsparse_hyb_mat.hpp"
 
 #include <algorithm>
@@ -35,6 +37,7 @@
 #include <numeric>
 #include <random>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -1059,6 +1062,110 @@ namespace
                           expected);
     }
 
+    // The duplicate pass of the unsorted ELL check on its own, sorting batches of at most
+    // batch_limit entries. Returns the status it reports.
+    template <typename I>
+    rocsparse_status run_ell_duplicate_pass(rocsparse_handle                     handle,
+                                            I                                    n,
+                                            I                                    width,
+                                            const std::vector<std::vector<int>>& rows,
+                                            rocsparse_index_base                 base,
+                                            int64_t                              batch_limit,
+                                            rocsparse_data_status&               data)
+    {
+        const I            m = static_cast<I>(rows.size());
+        std::vector<I>     cols;
+        std::vector<float> ignore;
+        ell_pack<I>(rows, static_cast<int>(width), base_of(base), cols, ignore);
+        device_vector<I> dcol(cols);
+
+        rocsparse::check_matrix_ell_workspace ws;
+        const rocsparse_status query = rocsparse::check_matrix_ell_workspace_query<I>(
+            handle, m, n, width, rocsparse_storage_mode_unsorted, ws, batch_limit);
+        if(query != rocsparse_status_success)
+            return query;
+
+        guarded_buffer work(ws.total);
+        EXPECT_EQ(hipMemset(work.ptr(), 0, ws.status_bytes), hipSuccess);
+        data                         = k_fill;
+        const rocsparse_status check = rocsparse::check_matrix_ell_unsorted_duplicates<I>(
+            handle, m, n, width, dcol.ptr, base, &data, work.ptr(), batch_limit);
+        work.expect_canary();
+        return check;
+    }
+
+    // Rows of 4 distinct columns that are not in increasing order. Each full row ends with
+    // the column that the next row starts with, so a sort segment that crosses the boundary
+    // between two full rows holds a repeated column. Row 5 ends with padding.
+    std::vector<std::vector<int>> batch_ell_rows()
+    {
+        std::vector<std::vector<int>> rows;
+        for(int r = 0; r < 7; ++r)
+            rows.push_back({r, r + 2, r + 3, r + 1});
+        rows[5][3] = -1;
+        return rows;
+    }
+
+    template <typename I>
+    void expect_ell_batches(rocsparse_handle handle, const char* type_name)
+    {
+        const I    n     = 16;
+        const I    width = 4;
+        const auto valid = batch_ell_rows();
+        const int  m     = static_cast<int>(valid.size());
+
+        // name, rows, expected
+        std::vector<std::tuple<std::string, std::vector<std::vector<int>>, rocsparse_data_status>>
+            cases;
+        cases.emplace_back("valid", valid, k_ok);
+        for(int r = 0; r < m; ++r)
+        {
+            auto rows  = valid;
+            rows[r][2] = rows[r][0];
+            cases.emplace_back("duplicate_row_" + std::to_string(r), rows, k_dup);
+        }
+        // With 2 rows per batch, rows 3 and 4 are on either side of a batch boundary.
+        auto both  = valid;
+        both[3][2] = both[3][0];
+        both[4][2] = both[4][0];
+        cases.emplace_back("duplicate_rows_3_4", both, k_dup);
+
+        // Batches of 1, 2, 3 and 6 rows, with and without unused entries below the limit,
+        // one batch of all rows, and the library default.
+        const int64_t limits[]
+            = {4, 5, 8, 11, 12, 24, 27, 28, rocsparse::check_matrix_ell_sort_batch_limit};
+
+        for(auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
+            for(const auto& item : cases)
+                for(int64_t limit : limits)
+                {
+                    SCOPED_TRACE(std::string(type_name) + " " + std::get<0>(item) + " base "
+                                 + std::to_string(base_of(base)) + " limit "
+                                 + std::to_string(limit));
+                    rocsparse_data_status data = k_fill;
+                    EXPECT_EQ(run_ell_duplicate_pass<I>(
+                                  handle, n, width, std::get<1>(item), base, limit, data),
+                              rocsparse_status_success);
+                    EXPECT_EQ(data, std::get<2>(item));
+                }
+
+        // A limit below the ELL width cannot hold one row.
+        rocsparse_data_status data = k_fill;
+        EXPECT_EQ(run_ell_duplicate_pass<I>(
+                      handle, n, width, valid, rocsparse_index_base_zero, width - 1, data),
+                  rocsparse_status_not_implemented);
+        EXPECT_EQ(rocsparse::check_matrix_ell_unsorted_duplicates<I>(handle,
+                                                                     I(m),
+                                                                     n,
+                                                                     width,
+                                                                     nullptr,
+                                                                     rocsparse_index_base_zero,
+                                                                     &data,
+                                                                     nullptr,
+                                                                     width - 1),
+                  rocsparse_status_not_implemented);
+    }
+
     template <typename T>
     void run_shapes(rocsparse_handle handle, const char* type_name)
     {
@@ -1295,6 +1402,15 @@ TEST_F(CheckMatrixDefects, EllScale)
         expect_ell_scale(
             handle, "unordered_dup_row_256", copy(unsorted, 256, 1, 6), base, u_mode, k_dup);
     }
+}
+
+// The unsorted ELL duplicate pass sorts whole rows in batches that fit the 32-bit sizes of
+// the segmented sort. A lowered batch limit splits a small matrix into several batches,
+// which must report the same status as a single batch.
+TEST_F(CheckMatrixDefects, EllUnsortedBatches)
+{
+    expect_ell_batches<int32_t>(handle, "i32");
+    expect_ell_batches<int64_t>(handle, "i64");
 }
 
 // The helpers allocate the queried size plus a canary and check that the canary is
