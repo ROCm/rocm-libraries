@@ -30,6 +30,7 @@ from geko.config_generator.load_input_config import gemm_configs_from_gemm_dataf
 from geko.bench.utils import update_lib_source
 from geko.config_generator.constants import VALID_BACKENDS
 from geko.constants import SUPPORTED_ARCH, canonical_arch
+from geko.library.uid_uniqueness import uniquify_generated_logic
 from geko.schemas import GemmConfig, RunState
 from geko.utils import parse_devices
 
@@ -511,9 +512,14 @@ def run_optimize(
             (tracked in a persistent .failcount file); 0 disables
             retirement. Forwarded to optim.run.
 
+    Colliding SolutionUIDs in the ``3_LibraryLogic`` files under
+    ``optimizations/`` are rewritten before they are merged. Those are the
+    files this run's Tensile jobs wrote, including builds a resume kept.
+
     Raises:
         FileNotFoundError: hipBLASLt, workdir, optimizations/, or state file missing.
         ValueError: configure not completed, no GEMM configs, or none completed after run.
+        ImportError: If ``tensilelite`` is not installed.
     """
     hipblaslt_path = Path(hipblaslt_path)
     if not hipblaslt_path.is_dir():
@@ -601,6 +607,11 @@ def run_optimize(
 
     optim.process_duplicates(hipblaslt_path, input_dir, devices)
 
+    generated_logic = sorted(input_dir.glob("**/3_LibraryLogic/*.yaml"))
+    rewritten = uniquify_generated_logic(generated_logic)
+    logger.debug(
+        f"Rewrote {rewritten} colliding SolutionUID values in {len(generated_logic)} logic files"
+    )
     merged_libs = library.merge_solutions(input_dir, epilogues=True)
 
     if lib_dir.is_dir():

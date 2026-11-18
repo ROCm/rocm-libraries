@@ -5,12 +5,15 @@ solution. This first migration step provides the identifier format and
 maintenance tooling, but does not assign or consume UIDs in library generation
 or at runtime.
 
-`TensileMergeLibrary` matches `SolutionNameMin`. A matching name keeps the
-pooled Equality solution and ignores the incoming UID. The merge also claims a
-UID for every solution copied from the base file into the output. A base UID
-that is already unique and non-zero is kept. A base UID that is missing, zero,
-malformed, or duplicated inside that base file is replaced in the merged file.
-The input file is left unchanged unless the output path is that file.
+Geko assigns a fresh UID to solutions copied into `final_libs` or `full_libs`,
+including copies from Origami. These are new records, even when they describe
+the same GPU kernel. `TensileMergeLibrary` matches `SolutionNameMin`. A matching
+name keeps the pooled Equality solution and ignores the incoming UID. The merge
+also claims a UID for every solution copied from the base file into the output.
+A base UID that is already unique and non-zero is kept. A base UID that is
+missing, zero, malformed, or duplicated inside that base file is replaced in
+the merged file. The input file is left unchanged unless the output path is
+that file.
 
 ## Identifier format
 
@@ -56,12 +59,12 @@ python3 -m tensilelite.TensileGenerateUID path/to/logic.yaml --index 5 --inplace
 `--inplace`, the command prints the new canonical `0u` UID without modifying
 the file.
 
-One Tensile process replaces a zero, malformed, or colliding UID in the files
-that run writes. `TensileMergeLibrary` writes its output, and that output
-replaces a missing, zero, malformed, or colliding UID on every solution it
-contains, including solutions copied from the base file. A unique non-zero base
-UID is kept. Uniqueness across the shipped logic tree is checked by
-`test_solution_uid_uniqueness.py` in the logic-corpus lane
+One Tensile process and one Geko generation each replace a zero, malformed, or
+colliding UID in the files that run writes. `TensileMergeLibrary` writes its
+output, and that output replaces a missing, zero, malformed, or colliding UID on
+every solution it contains, including solutions copied from the base file. A
+unique non-zero base UID is kept. Uniqueness across the shipped logic tree is
+checked by `test_solution_uid_uniqueness.py` in the logic-corpus lane
 (`tox -e logic-corpus`).
 
 Runtime metadata, runtime selection, and mandatory uniqueness are introduced
