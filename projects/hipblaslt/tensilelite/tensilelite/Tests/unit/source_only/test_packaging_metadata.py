@@ -115,6 +115,17 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
     assert "tensilelite_configure_client.py" in archived_names
 
 
+def test_cmake_device_generation_owns_raw_rocisa():
+    """Device generation builds raw rocisa; rocisa-only builds opt in explicitly."""
+    cmake = (_PROJECT_ROOT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
+
+    assert (
+        "option(ROCISA_BUILD_PYTHON "
+        '"Build the in-tree rocisa Python extension without device libraries." OFF)'
+    ) in cmake
+    assert "if(HIPBLASLT_ENABLE_DEVICE OR ROCISA_BUILD_PYTHON" in cmake
+
+
 def _pip_wheel(source, out, env):
     subprocess.run(
         [
@@ -220,6 +231,19 @@ def test_sdist_keeps_its_rocm_identity_when_built_into_a_wheel(tmp_path):
     assert mismatch.returncode != 0
     assert (
         "this sdist was made as 5.0.0+rocm7.12.0" in mismatch.stdout + mismatch.stderr
+    )
+
+
+def test_rocisa_python_package_outputs_are_configuration_invariant():
+    cmake = (_PROJECT_ROOT / "rocisa/CMakeLists.txt").read_text(encoding="utf-8")
+
+    assert "function(_rocisa_set_python_package_output_directory" in cmake
+    assert "LIBRARY_OUTPUT_DIRECTORY_${_config_upper}" in cmake
+    assert "RUNTIME_OUTPUT_DIRECTORY_${_config_upper}" in cmake
+    assert "_rocisa_set_python_package_output_directory(\n        _rocisa" in cmake
+    assert (
+        "_rocisa_set_python_package_output_directory(\n            stinkytofu_python"
+        in cmake
     )
 
 
