@@ -224,6 +224,11 @@ int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave);
 /// The LDS a workgroup may use on @p gcnArchName: 160 KiB on gfx950, else 64 KiB.
 int64_t ldsLimitOf(std::string_view gcnArchName);
 
+/// Quads a block of the deep reduce (ConvWrwReduceDeep, K3ReduceArgs::quads) for @p quads quads
+/// of dw on @p dispatchUnits units: 64, halved (down to 16) while the blocks leave a unit fewer
+/// than two.
+int64_t deepReduceQuads(int64_t quads, int64_t dispatchUnits);
+
 /// The launch of a config on a problem: both kernels' grids and argument blocks, and the
 /// workspace of the fp32 partials.
 struct WrwLaunch

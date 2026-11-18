@@ -197,6 +197,17 @@ bool inputPackedChannelsFirst(const IgemmProblem& problem);
 /// operands keep their order in the workspace.
 IgemmProblem withoutInputStaging(const IgemmProblem& problem);
 
+/**
+ * @brief @p problem as a 1-D channels-first line, for the channels-first-input (cfx) configs.
+ *
+ * A pointwise convolution (every filter extent 1, unit stride, no padding, output extents equal to
+ * the input's) whose input and output are packed channels-first is the 1-D problem over each
+ * channel's D x H x W pixels as one run of L = D H W: the same bytes, read and written in place.
+ * The view has depth and height 1 and width L. A problem that is already 1-D, or that is not such
+ * a pointwise convolution, is returned unchanged (cfxFits then decides as before).
+ */
+IgemmProblem withChannelsFirstLineView(const IgemmProblem& problem);
+
 /// The tile fields the channels-first-input fit depends on.
 struct CfxTile
 {

@@ -675,6 +675,9 @@ std::vector<DeviceCase> channelsFirst1dCases()
     toOne.stride = {2};
     cases.push_back({"NclStride2OutputOne", toOne});
     cases.push_back({"NclShortRow", dense(8, 16, {3}, {3}, {1}, false)});
+    // Pointwise 2-D and 3-D channels-first layers, as the 1-D line of each channel's pixels.
+    cases.push_back({"Nchw1x1Line", dense(64, 32, {12, 13}, {1, 1}, {0, 0}, false)});
+    cases.push_back({"Ncdhw1x1x1Line", dense(16, 24, {3, 5, 7}, {1, 1, 1}, {0, 0, 0}, false)});
     auto convolution = dense(24, 40, {40}, {3}, {1}, false);
     convolution.mode = ConvMode::CONVOLUTION;
     cases.push_back({"NclK3ConvolutionMode", convolution});
@@ -1581,6 +1584,11 @@ TEST(TestConvIgemmCatalog, ChannelsFirstInputConfigsServeOnlyOneDimensionalChann
         {"nlc", dense(64, 64, {300}, {3}, {1}, true), false},
         {"nchw 3x3", dense(64, 64, {12, 13}, {3, 3}, {1, 1}, false), false},
         {"ncdhw", dense(16, 24, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, false), false},
+        // Pointwise, unit stride, unpadded: the 1-D line of D x H x W pixels a channel.
+        {"nchw 1x1", dense(64, 64, {12, 13}, {1, 1}, {0, 0}, false), true},
+        {"ncdhw 1x1x1", dense(16, 24, {5, 6, 7}, {1, 1, 1}, {0, 0, 0}, false), true},
+        {"nhwc 1x1", dense(64, 64, {12, 13}, {1, 1}, {0, 0}, true), false},
+        {"nchw 1x1 padded", dense(64, 64, {12, 13}, {1, 1}, {1, 1}, false), false},
     };
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
@@ -1624,6 +1632,44 @@ TEST(TestConvIgemmCatalog, ChannelsFirstInputConfigsServeOnlyOneDimensionalChann
         }
     }
     EXPECT_GT(served, 0);
+}
+
+TEST(TestConvIgemmCatalog, PointwiseChannelsFirstProblemsViewAsTheirOneDimensionalLine)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        const auto planar
+            = parsedProblem(dense(64, 32, {12, 13}, {1, 1}, {0, 0}, false), direction);
+        const auto line = conv_igemm::withChannelsFirstLineView(planar);
+        EXPECT_EQ(line.args.di, 1);
+        EXPECT_EQ(line.args.hi, 1);
+        EXPECT_EQ(line.args.wi, 12 * 13);
+        EXPECT_EQ(line.args.dout, 1);
+        EXPECT_EQ(line.args.ho, 1);
+        EXPECT_EQ(line.args.wo, 12 * 13);
+        EXPECT_EQ(line.args.m, planar.args.m);
+        EXPECT_EQ(line.base.args.inSpatial[2], 12 * 13);
+        EXPECT_EQ(line.base.args.outSpatial[1], 1);
+        EXPECT_TRUE(conv_igemm::cfxFits(line, cfxTile(128, 1)));
+        EXPECT_FALSE(conv_igemm::cfxFits(planar, cfxTile(128, 1)));
+        const auto volume
+            = parsedProblem(dense(16, 24, {3, 5, 7}, {1, 1, 1}, {0, 0, 0}, false), direction);
+        EXPECT_EQ(conv_igemm::withChannelsFirstLineView(volume).args.wi, 3 * 5 * 7);
+        // Not pointwise unit-stride unpadded channels-first: unchanged.
+        for(const auto& shape : {dense(64, 32, {12, 13}, {3, 3}, {1, 1}, false),
+                                 dense(64, 32, {12, 13}, {1, 1}, {1, 1}, false),
+                                 dense(64, 32, {12, 13}, {1, 1}, {0, 0}, true)})
+        {
+            const auto problem = parsedProblem(shape, direction);
+            const auto same = conv_igemm::withChannelsFirstLineView(problem);
+            EXPECT_EQ(same.args.hi, problem.args.hi);
+            EXPECT_EQ(same.args.wi, problem.args.wi);
+        }
+        auto strided = dense(64, 32, {12, 14}, {1, 1}, {0, 0}, false);
+        strided.stride = {2, 2};
+        const auto s2 = parsedProblem(strided, direction);
+        EXPECT_EQ(conv_igemm::withChannelsFirstLineView(s2).args.hi, s2.args.hi);
+    }
 }
 
 TEST(TestConvIgemmCatalog, ChannelsFirstInputConfigsArePlainHaloTilesOrFma)

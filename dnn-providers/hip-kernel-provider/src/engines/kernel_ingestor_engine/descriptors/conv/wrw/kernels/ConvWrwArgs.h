@@ -84,14 +84,15 @@ struct K3ReduceArgs
     /// K3_REDUCE_TILE_MAX_SPLITS splits), a block a tile of tileK output channels by tileC
     /// input channels of one group (tilesK x tilesC tiles a group), written as contiguous runs;
     /// 2: ConvWrwReduceRows (K C T R S of at most K3_REDUCE_ROW_MAX_TAPS taps at one split, on
-    /// gfx950); 0: ConvWrwReduce, quads of channels of one tap and output channel. All sum in
-    /// the same order.
+    /// gfx950); 0: ConvWrwReduce, quads of channels of one tap and output channel; 3:
+    /// ConvWrwReduceDeep, the quad reduce with `quads` quads a block and 16 loads a thread in
+    /// flight (many splits). All sum in the same order.
     int tile;
     int tileK;
     int tileC;
     int tilesK;
     int tilesC;
-    int padding0; ///< keeps the struct size a multiple of 8 on host and device alike
+    int quads; ///< tile 3: quads a block (16, 32 or 64; 4 threads each); unused otherwise
 };
 
 /// Three-bf16 (an fp32 graph, a config of math 1: the TF32 engine's): ConvWrwSplit writes
@@ -115,5 +116,9 @@ struct K3SplitArgs
 /// The row reduce's channels per block; it takes taps * channels within 4096 floats of LDS.
 #define K3_REDUCE_ROW_CHANNELS 64
 #define K3_REDUCE_ROW_MAX_TAPS 64
+/// The deep quad reduce: at least this many splits (fewer: the quad reduce's 4 loads a thread in
+/// flight already cover them), and the most quads a block.
+#define K3_REDUCE_DEEP_MIN_SPLITS 16
+#define K3_REDUCE_DEEP_MAX_QUADS 64
 
 // NOLINTEND(modernize-avoid-c-arrays,modernize-macro-to-enum)

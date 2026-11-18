@@ -72,10 +72,12 @@ constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.conv_wrw.graph_matc
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.conv_wrw.kernel_match";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.conv_wrw.dispatch";
 /// The reduce kernels: the same source as ConvWrw, under other entry points; the launch says
-/// which (the tile reduce for K C T R S at few splits, the row reduce at one split on gfx950).
+/// which (the tile reduce for K C T R S at few splits, the row reduce at one split on gfx950,
+/// the deep quad reduce at many splits).
 constexpr std::string_view REDUCE_ENTRY_POINT = "ConvWrwReduce";
 constexpr std::string_view REDUCE_TILE_ENTRY_POINT = "ConvWrwReduceTile";
 constexpr std::string_view REDUCE_ROWS_ENTRY_POINT = "ConvWrwReduceRows";
+constexpr std::string_view REDUCE_DEEP_ENTRY_POINT = "ConvWrwReduceDeep";
 /// Three-bf16's operand split (math 1), the same source again.
 constexpr std::string_view SPLIT_ENTRY_POINT = "ConvWrwSplit";
 
@@ -364,6 +366,10 @@ public:
             else if(launch->reduce.tile == 2)
             {
                 entry = REDUCE_ROWS_ENTRY_POINT;
+            }
+            else if(launch->reduce.tile == 3)
+            {
+                entry = REDUCE_DEEP_ENTRY_POINT;
             }
             reduceKernel.source.entryPoint = std::string(entry);
             reduce = buildIngestorKernelCode(

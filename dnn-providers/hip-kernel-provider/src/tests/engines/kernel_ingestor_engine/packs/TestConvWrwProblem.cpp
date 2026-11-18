@@ -2469,19 +2469,47 @@ TEST(TestConvWrwLaunch, TheReduceWritesEitherFilterLayoutAndReflectsForConvoluti
     EXPECT_EQ(oneSplit950->reduce.splits, 1);
     EXPECT_EQ(oneSplit950->reduce.tile, 2);
     EXPECT_EQ(oneSplit950->reduceGrid, 40u);
-    // More splits than the tile reduce takes: quads.
+    // More splits than the tile reduce takes: quads, by the deep reduce from
+    // K3_REDUCE_DEEP_MIN_SPLITS.
     auto deep = baseShape();
     deep.n = 64;
     const auto manySplits = launchOf(ConfigFields{}, deep);
     ASSERT_TRUE(manySplits.has_value());
     EXPECT_GT(manySplits->reduce.splits, K3_REDUCE_TILE_MAX_SPLITS);
-    EXPECT_EQ(manySplits->reduce.tile, 0);
+    EXPECT_GE(manySplits->reduce.splits, K3_REDUCE_DEEP_MIN_SPLITS);
+    EXPECT_EQ(manySplits->reduce.tile, 3);
+    // 9 taps x 40 k x 6 quads = 2160 quads on 304 units: 16 a block (64 threads).
+    EXPECT_EQ(manySplits->reduce.quads, 16);
+    EXPECT_EQ(manySplits->reduceGrid, 2160u / 16);
+    EXPECT_EQ(manySplits->reduceBlock, 64u);
+    auto fewSplits = baseShape();
+    fewSplits.n = 12;
+    const auto someSplits = launchOf(ConfigFields{}, fewSplits);
+    ASSERT_TRUE(someSplits.has_value());
+    if(someSplits->reduce.splits > K3_REDUCE_TILE_MAX_SPLITS
+       && someSplits->reduce.splits < K3_REDUCE_DEEP_MIN_SPLITS)
+    {
+        EXPECT_EQ(someSplits->reduce.tile, 0);
+        EXPECT_EQ(someSplits->reduceBlock, 256u);
+    }
 
     auto convolution = baseShape();
     convolution.mode = ConvMode::CONVOLUTION;
     const auto flipped = launchOf(ConfigFields{}, convolution);
     ASSERT_TRUE(flipped.has_value());
     EXPECT_EQ(flipped->reduce.flip, 1);
+}
+
+TEST(TestConvWrwLaunch, DeepReduceBlocksGiveEveryUnitTwo)
+{
+    // 64 quads a block while that leaves every unit two blocks, halved down to 16.
+    EXPECT_EQ(conv_wrw::deepReduceQuads(36864, 256), 64); // 576 blocks
+    EXPECT_EQ(conv_wrw::deepReduceQuads(32768, 256), 64); // exactly 512
+    EXPECT_EQ(conv_wrw::deepReduceQuads(16384, 256), 32); // 512 of 32
+    EXPECT_EQ(conv_wrw::deepReduceQuads(2304, 256), 16); // c32 k32 3x3: 144 blocks
+    EXPECT_EQ(conv_wrw::deepReduceQuads(1, 256), 16);
+    EXPECT_EQ(conv_wrw::deepReduceQuads(1000, 1), 64);
+    EXPECT_EQ(conv_wrw::deepReduceQuads(1000, 0), 64); // no units reported: as one
 }
 
 TEST(TestConvWrwLaunch, ReduceTilesFillTheUnitsWithinTheLds)

@@ -762,6 +762,54 @@ IgemmProblem withoutInputStaging(const IgemmProblem& problem)
     return direct;
 }
 
+IgemmProblem withChannelsFirstLineView(const IgemmProblem& problem)
+{
+    const auto& b = problem.base.args;
+    if(b.inSpatial[0] == 1 && b.inSpatial[1] == 1)
+    {
+        return problem; // already 1-D
+    }
+    long long pixels = 1;
+    for(int axis = 0; axis < SPATIAL; ++axis)
+    {
+        if(b.filter[axis] != 1 || b.stride[axis] != 1 || b.prePadding[axis] != 0
+           || b.outSpatial[axis] != b.inSpatial[axis])
+        {
+            return problem;
+        }
+        pixels *= b.inSpatial[axis];
+    }
+    if(problem.largeImage || pixels > INT_LIMIT || !inputPackedChannelsFirst(problem)
+       || !outputPackedChannelsFirst(problem))
+    {
+        return problem;
+    }
+    IgemmProblem view = problem;
+    auto& v = view.base.args;
+    for(int axis = 0; axis < SPATIAL - 1; ++axis)
+    {
+        v.inSpatial[axis] = 1;
+        v.outSpatial[axis] = 1;
+    }
+    v.inSpatial[SPATIAL - 1] = pixels;
+    v.outSpatial[SPATIAL - 1] = pixels;
+    // Packed channels-first strides of the line (the axes of extent 1 take any stride).
+    for(auto* strides : {v.xStrides, v.yStrides})
+    {
+        strides[2] = pixels;
+        strides[3] = pixels;
+        strides[4] = 1;
+    }
+    auto& a = view.args;
+    a.di = 1;
+    a.hi = 1;
+    a.wi = static_cast<int>(pixels);
+    a.dout = 1;
+    a.ho = 1;
+    a.wo = static_cast<int>(pixels);
+    return view;
+}
+
 namespace
 {
 
@@ -1354,8 +1402,9 @@ bool kernelMatches(const MatchContext& context,
     if(tile->cfx != 0)
     {
         // Channels-first input read in place: a packed channels-first activation and output (the
-        // FMA kernel writes it itself), a 1-D problem the channels-first loaders fit, and 32-bit
-        // buffer offsets.
+        // FMA kernel writes it itself), a 1-D problem (or a pointwise one, as its 1-D line) the
+        // channels-first loaders fit, and 32-bit buffer offsets.
+        problem = conv_igemm::withChannelsFirstLineView(*problem);
         const auto arch
             = hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName);
         conv_igemm::CfxTile fit;
@@ -1454,7 +1503,7 @@ std::optional<IgemmProblem>
     }
     if(problem.has_value() && tile.cfx != 0)
     {
-        problem = conv_igemm::withoutInputStaging(*problem);
+        problem = conv_igemm::withoutInputStaging(conv_igemm::withChannelsFirstLineView(*problem));
     }
     return problem;
 }

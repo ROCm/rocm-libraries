@@ -4456,3 +4456,85 @@ __device__ inline void k3Reduce(const K3ReduceArgs& a)
     for(int j = 0; j < 4 && c + j < a.cg; ++j)
         o[(c + j) * a.wc] = K1Elem<T>::store(sum[j]);
 }
+
+/// The quad reduce for many splits (ConvWrwReduceDeep): the same association as k3Reduce (four
+/// split groups, group j adding splits j, j + 4, ... in order, then the groups in order), so dw
+/// is bitwise the same. A block is `a.quads` quads (16, 32 or 64) by the 4 groups, so a small dw
+/// spreads over more blocks, and a thread keeps 16 partial loads in flight before adding them in
+/// split order: k3Reduce's 4 leave a long split walk waiting on load latency (c32 k32 3x3 at
+/// 500 splits: 36 blocks, 14 us for 18 MB).
+template <class T>
+__device__ inline void k3ReduceDeep(const K3ReduceArgs& a)
+{
+    typedef float f4 __attribute__((ext_vector_type(4)));
+    constexpr int DEPTH = 16;
+    __shared__ f4 part[3][K3_REDUCE_DEEP_MAX_QUADS];
+    T* dw = static_cast<T*>(a.dw);
+    const int nq = a.quads;
+    const int cq = (a.cg + 3) / 4;
+    const long long quads = a.elems / a.cg * cq;
+    const bool vec = (a.cg % 4) == 0;
+    const int lane = static_cast<int>(threadIdx.x) % nq, grp = static_cast<int>(threadIdx.x) / nq;
+    const long long i = static_cast<long long>(blockIdx.x) * nq + lane;
+    const bool live = i < quads;
+    // i over [g][tap][k][c / 4] (the partials' order), c fastest.
+    const int c = live ? static_cast<int>(i % cq) * 4 : 0;
+    const long long r1 = live ? i / cq : 0;
+    const float* src = a.partial + r1 * a.cg + c;
+    f4 sum = {0.0f, 0.0f, 0.0f, 0.0f};
+    if(live)
+    {
+        if(vec)
+        {
+            const auto add = [&](auto nt) {
+                constexpr bool NT = decltype(nt)::value != 0;
+                int sp = grp;
+                for(; sp + 4 * (DEPTH - 1) < a.splits; sp += 4 * DEPTH)
+                {
+                    f4 v[DEPTH];
+#pragma unroll
+                    for(int j = 0; j < DEPTH; ++j)
+                        v[j] = k3PartialLoad<NT>(
+                            reinterpret_cast<const f4*>(src + (sp + 4 * j) * a.partialElems));
+#pragma unroll
+                    for(int j = 0; j < DEPTH; ++j)
+                        sum += v[j];
+                }
+                for(; sp < a.splits; sp += 4)
+                    sum += k3PartialLoad<NT>(
+                        reinterpret_cast<const f4*>(src + sp * a.partialElems));
+            };
+#if defined(__gfx950__)
+            // As k3Reduce: plain loads from 64 splits on gfx950, non-temporal below.
+            if(a.splits >= 64)
+                add(K3Int<0>{});
+            else
+                add(K3Int<1>{});
+#else
+            add(K3Int<1>{});
+#endif
+        }
+        else
+        {
+            for(int sp = grp; sp < a.splits; sp += 4)
+                for(int j = 0; j < 4 && c + j < a.cg; ++j)
+                    sum[j] += src[sp * a.partialElems + j];
+        }
+    }
+    if(grp > 0)
+        part[grp - 1][lane] = sum;
+    k1LdsBarrier();
+    if(grp != 0 || !live)
+        return;
+    sum += part[0][lane];
+    sum += part[1][lane];
+    sum += part[2][lane];
+    const int k = static_cast<int>(r1 % a.kg);
+    const long long r2 = r1 / a.kg;
+    const int tap = static_cast<int>(r2 % a.taps);
+    const int g = static_cast<int>(r2 / a.taps);
+    const int wtap = a.flip ? a.taps - 1 - tap : tap;
+    T* o = dw + (static_cast<long long>(g) * a.kg + k) * a.wk + wtap * a.wtap;
+    for(int j = 0; j < 4 && c + j < a.cg; ++j)
+        o[(c + j) * a.wc] = K1Elem<T>::store(sum[j]);
+}

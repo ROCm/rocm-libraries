@@ -1420,7 +1420,31 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     r.tileC = static_cast<int>(reduceTile.tileC);
     r.tilesK = static_cast<int>(reduceTile.tilesK);
     r.tilesC = static_cast<int>(reduceTile.tilesC);
+    // Many splits into quads: the deep reduce (the same sum, more loads in flight, smaller
+    // blocks where the quads are few).
+    if(!dwStore && r.tile == 0 && splits >= K3_REDUCE_DEEP_MIN_SPLITS)
+    {
+        const int64_t perBlock = deepReduceQuads(quads, units);
+        if(divUp(quads, perBlock) <= INT_LIMIT)
+        {
+            r.tile = 3;
+            r.quads = static_cast<int>(perBlock);
+            launch.reduceGrid = static_cast<unsigned int>(divUp(quads, perBlock));
+            launch.reduceBlock = static_cast<unsigned int>(4 * perBlock);
+        }
+    }
     return launch;
+}
+
+int64_t deepReduceQuads(int64_t quads, int64_t dispatchUnits)
+{
+    // The largest block (64 quads) that still gives every unit two blocks, down to 16.
+    int64_t perBlock = K3_REDUCE_DEEP_MAX_QUADS;
+    while(perBlock > 16 && divUp(quads, perBlock) < 2 * std::max<int64_t>(dispatchUnits, 1))
+    {
+        perBlock /= 2;
+    }
+    return perBlock;
 }
 
 bool threeBf16Pays(const WrwProblem& problem, std::string_view gcnArchName)

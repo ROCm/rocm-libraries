@@ -774,6 +774,10 @@ void expectReduceIsFixedOrderSum(const conv_wrw::WrwLaunch& launch,
     {
         reduce = "rows";
     }
+    else if(r.tile == 3)
+    {
+        reduce = "deep";
+    }
     EXPECT_EQ(mismatches, 0) << "of " << count << " dw elements (reduce " << reduce << ")";
 }
 
@@ -1061,6 +1065,64 @@ void runWideTilesPartialChannels()
     // Admitted on gfx950 only (transpose reads, LDS past 64 KiB): skipped elsewhere.
     deviceCase.someArchs = true;
     runCase<T>(deviceCase, Math::NATIVE, false, &kernels);
+}
+
+/// The deep quad reduce (ConvWrwReduceDeep): many splits into few quads (c8 k8 3x3: 144 quads,
+/// 16 a block), against the CPU reference and, bit for bit, the quad reduce's fixed-order sum.
+/// Up to four admitted configs whose launch takes it.
+template <typename T>
+void runDeepReduce()
+{
+    DeviceCase deviceCase{
+        "DeepReduce", conv(8, 8, {16, 16}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, false, 1, 64)};
+    auto shape = deviceCase.shape;
+    shape.dataType = dataTypeOf<T>();
+    const auto spec = specFor(shape, ConvDirection::BACKWARD_WEIGHTS);
+    const auto device = currentDeviceProperties();
+    const GraphFixture fixture(buildGraph(spec), device);
+    const auto bound = matchesGraph(PACK, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    const auto problem = conv_wrw::parseWrwProblem(fixture.context());
+    ASSERT_TRUE(problem.has_value());
+    std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> kernels;
+    for(const auto& kernel : catalog())
+    {
+        if(kernels.size() >= 4 || !matchesKernel(PACK, fixture.context(), kernel, *bound)
+           || kernel.getIntMetadata("math") != 0)
+        {
+            continue;
+        }
+        const auto launch = conv_wrw::wrwLaunchFor(*problem, configOf(kernel), device);
+        if(launch.has_value() && !launch->dwStore && launch->reduce.tile == 3)
+        {
+            EXPECT_GE(launch->reduce.splits, K3_REDUCE_DEEP_MIN_SPLITS);
+            EXPECT_EQ(launch->reduceBlock, 4u * static_cast<unsigned int>(launch->reduce.quads));
+            kernels.push_back(kernel);
+        }
+    }
+    if(kernels.empty())
+    {
+        GTEST_SKIP() << "no config takes the deep reduce here on " << device.gcnArchName;
+    }
+    runCase<T>(deviceCase, Math::NATIVE, false, &kernels);
+}
+
+TEST(TestGpuConvWrwDeepReduce, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runDeepReduce<float>();
+}
+
+TEST(TestGpuConvWrwDeepReduce, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runDeepReduce<Half>();
+}
+
+TEST(TestGpuConvWrwDeepReduce, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runDeepReduce<BFloat16>();
 }
 
 TEST(TestGpuConvWrwWideTiles, HalfPartialChannelTiles)
