@@ -598,9 +598,9 @@ int64_t ldsLimitOf(std::string_view gcnArchName)
     const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
     if(arch == "gfx1250")
     {
-        return 320 * 1024;
+        return int64_t{320} * 1024;
     }
-    return arch == "gfx950" ? 160 * 1024 : 64 * 1024;
+    return arch == "gfx950" ? int64_t{160} * 1024 : int64_t{64} * 1024;
 }
 
 int64_t splitsWanted(int64_t blocksXY,
