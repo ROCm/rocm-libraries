@@ -157,6 +157,57 @@ __device__ void k2FormatWeights(const K2FormatArgs& f)
         }
         return;
     }
+    // Backward data with channels-last filter rows (input channels contiguous): a run's ka
+    // reduction elements are ka output channels of one input channel, ka filter rows apart. A
+    // unit is a VEC x VEC square: VEC output channels' 16-byte runs of VEC input channels (each
+    // read coalesced across lanes), transposed in registers into the VEC input channels' 16-byte
+    // pieces of their runs. Per element it read 2-byte values one filter row apart (0.029 ms for
+    // a 512 x 512 x 27 bf16 filter on MI325X).
+    const bool vecBwd = f.backward && f.wStrides[1] == 1 && f.ka % VEC == 0 && f.c0 % VEC == 0
+                        && f.kpad % VEC == 0 && f.wStrides[0] % VEC == 0 && f.wStrides[2] % VEC == 0
+                        && f.wStrides[3] % VEC == 0 && f.wStrides[4] % VEC == 0
+                        && reinterpret_cast<unsigned long long>(w) % 16 == 0
+                        && reinterpret_cast<unsigned long long>(wf) % 16 == 0;
+    if(vecBwd)
+    {
+        const int kgs = f.ka / VEC;
+        const int ngs = f.kpad / VEC;
+        const int units = runs / f.kpad * kgs * ngs;
+        for(int u = blockIdx.x * blockDim.x + threadIdx.x; u < units; u += gridDim.x * blockDim.x)
+        {
+            const int ng = u % ngs;
+            int rest = u / ngs;
+            const int kg = rest % kgs;
+            rest /= kgs;
+            const int ca = rest % cas;
+            const int tap = rest / cas;
+            const int n0 = ng * VEC;
+            const int r0 = ca * f.ka + kg * VEC;
+            T rows[VEC][VEC];
+#pragma unroll
+            for(int v = 0; v < VEC; ++v)
+            {
+                K2U4 val = {0u, 0u, 0u, 0u};
+                if(n0 < f.c0 && r0 + v < cred)
+                    val = *reinterpret_cast<const K2U4*>(
+                        w + k2FilterOffset(f, r0 + v, n0, tap, mirror));
+                __builtin_memcpy(rows[v], &val, 16);
+            }
+            T* dst = wf + (static_cast<long long>(tap * cas + ca) * f.kpad + n0) * f.ka + kg * VEC;
+#pragma unroll
+            for(int j = 0; j < VEC; ++j)
+            {
+                T col[VEC];
+#pragma unroll
+                for(int v = 0; v < VEC; ++v)
+                    col[v] = rows[v][j];
+                K2U4 out;
+                __builtin_memcpy(&out, col, 16);
+                *reinterpret_cast<K2U4*>(dst + static_cast<long long>(j) * f.ka) = out;
+            }
+        }
+        return;
+    }
     for(int i = blockIdx.x * blockDim.x + threadIdx.x; i < runs; i += gridDim.x * blockDim.x)
     {
         const int n = i % f.kpad;
