@@ -3692,5 +3692,72 @@ TEST_F(TestSdpaBwdPlanBuilder, BuildPlanDeclinesA16GraphsTheA16KernelsDoNotServe
     }
 }
 
+// =============================================================================
+// Operand dtype and tensor metadata the backward kernels do not serve
+// =============================================================================
+
+TEST_F(TestSdpaBwdPlanBuilder, DeclinesAnOutputWhoseDtypeDiffersFromTheInputs)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+
+    SKIP_IF_NO_DEVICES();
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
+    {
+        GTEST_SKIP();
+    }
+
+    {
+        auto builder = createSdpaBwdGraph();
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        ASSERT_TRUE(_planBuilder.isApplicable(_handle, graph));
+    }
+
+    // O keeps its shape, strides and the Q/K/V/dO/dQ/dK/dV dtype checks still pass; only its
+    // element type, hence its byte size, changes.
+    auto builder = hipdnn_test_sdk::utilities::mutateGraph(createSdpaBwdGraph(), [](GraphT& graph) {
+        for(auto& tensor : graph.tensors)
+        {
+            if(tensor->name == "o")
+            {
+                tensor->data_type = DataType::HALF;
+            }
+        }
+    });
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, DeclinesARaggedOffsetMultiplierOnATensorWithoutRaggedOffset)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+
+    SKIP_IF_NO_DEVICES();
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
+    {
+        GTEST_SKIP();
+    }
+
+    for(const char* name : {"q", "k", "v", "o"})
+    {
+        SCOPED_TRACE(name);
+        auto builder
+            = hipdnn_test_sdk::utilities::mutateGraph(createSdpaBwdGraph(), [name](GraphT& graph) {
+                  for(auto& tensor : graph.tensors)
+                  {
+                      if(tensor->name == name)
+                      {
+                          tensor->ragged_offset_multiplier = 2;
+                      }
+                  }
+              });
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
+    }
+}
+
 } // namespace
 } // namespace asm_sdpa_engine

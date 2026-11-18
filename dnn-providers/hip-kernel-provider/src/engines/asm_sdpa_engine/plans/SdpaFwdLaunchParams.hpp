@@ -6,6 +6,7 @@
 #include "SdpaFwdParams.hpp"
 
 #include <cstdint>
+#include <string>
 
 namespace asm_sdpa_engine
 {
@@ -18,6 +19,23 @@ struct SdpaFwdLaunchParams
     unsigned int blockDimX;
     uint32_t tuneOpt;
 };
+
+// Threads per block the forward kernel is launched with: hd192x128 kernels use
+// 4 wavefronts (256 threads) on all architectures, as does the group-mode bf16
+// hd256/gfx950 kernel; the others use 8 wavefronts (512 threads).
+// SdpaFwdPlanBuilder checks this value against the resolved kernel's
+// max_flat_workgroup_size, so it is the only place the block is chosen.
+inline unsigned int fwdBlockDimX(const std::string& arch,
+                                 unsigned int headDimQk,
+                                 unsigned int headDimV,
+                                 bool isBf16,
+                                 bool isGroupMode)
+{
+    const bool isHd192x128 = headDimQk == 192U && headDimV == 128U;
+    const bool isHd256Bf16Gfx950Group
+        = arch == "gfx950" && headDimQk == 256U && isBf16 && isGroupMode;
+    return (isHd192x128 || isHd256Bf16Gfx950Group) ? 256U : 512U;
+}
 
 // Ports AITER's forward grid math (get_grid_dim, mha_fwd.cu). Batch mode sets
 // gridDimX = ceil(Q-tiles / tgDiv) (causal masks set tgDiv=2, halving the grid),
@@ -44,8 +62,9 @@ inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
     const bool isHd192x128 = params.headDimQk == 192 && params.headDimV == 128;
     const bool isHd192x128Gfx942 = isHd192x128 && isGfx942;
     // inBytesPerElement is 2 only for bf16 inputs (1 for fp8).
-    const bool isHd256Bf16Gfx950 = params.archString == "gfx950" && params.headDimQk == 256
-                                   && params.inBytesPerElement == 2U;
+    const bool isBf16 = params.inBytesPerElement == 2U;
+    const bool isHd256Bf16Gfx950
+        = params.archString == "gfx950" && params.headDimQk == 256 && isBf16;
     const bool masked = params.maskType != plan_utils::MaskType::NO_MASK;
 
     // tune_opt: default 5; downgrade to 3 when masked and either nhead is
@@ -99,9 +118,8 @@ inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
     lp.gridDimY = gdy;
     lp.gridDimZ = gdz;
 
-    // hd192x128 kernels use 4 wavefronts (256 threads) on all architectures, as does
-    // the group-mode bf16 hd256/gfx950 kernel; the others use 8 wavefronts (512 threads).
-    lp.blockDimX = (isHd192x128 || (isHd256Bf16Gfx950 && isGroupMode)) ? 256U : 512U;
+    lp.blockDimX
+        = fwdBlockDimX(params.archString, params.headDimQk, params.headDimV, isBf16, isGroupMode);
 
     return lp;
 }

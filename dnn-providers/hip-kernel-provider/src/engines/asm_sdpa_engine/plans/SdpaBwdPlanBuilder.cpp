@@ -1000,6 +1000,9 @@ bool SdpaBwdPlanBuilder::isApplicable(
 
     const auto& tensorMap = opGraph.getTensorMap();
     HIP_KERNEL_RETURN_FALSE_IF(
+        !hip_kernel_provider::core::utils::hasNoStrayRaggedOffsetMultiplier(tensorMap),
+        "ragged_offset_multiplier is set on a tensor without a ragged offset");
+    HIP_KERNEL_RETURN_FALSE_IF(
         !hip_kernel_provider::core::utils::hasOnly16ByteAlignedTensors(tensorMap),
         "All tensors must be aligned to a multiple of 16 bytes");
 
@@ -1228,6 +1231,12 @@ bool SdpaBwdPlanBuilder::isApplicable(
             + ", dk=" + EnumNameDataType(dkTensor->data_type())
             + ", dv=" + EnumNameDataType(dvTensor->data_type()));
     const auto& dataTypeId = *dataTypeIdOpt;
+
+    // The kernels read O in the dtype of Q, K and V, with the same element size.
+    HIP_KERNEL_RETURN_FALSE_IF(oTensor->data_type() != qTensor->data_type(),
+                               "O tensor dtype must equal the Q/K/V dtype (O: "
+                                   + EnumNameDataType(oTensor->data_type())
+                                   + ", Q: " + EnumNameDataType(qTensor->data_type()) + ")");
 
     auto headDimQk = static_cast<int>(qTensor->dims()->Get(3));
     auto headDimV = static_cast<int>(vTensor->dims()->Get(3));

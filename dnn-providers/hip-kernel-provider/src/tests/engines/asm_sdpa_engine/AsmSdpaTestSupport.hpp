@@ -70,4 +70,19 @@ struct AsmKernelTocEntry
 /// Defined in AsmSdpaConfigHelpers.cpp, which includes the forward registry.
 std::vector<AsmKernelTocEntry> getFwdKernelTocEntries(const std::string& arch);
 
+/// One cfg_fmha_fwd row's launch limit as the generated table records it.
+struct AsmFwdLaunchLimitRow
+{
+    std::string knlName;
+    /// Every build the row resolves to on its arch, keyed as in getFwdKernelTocEntries.
+    std::vector<std::string> tocKeys;
+    /// max_flat_workgroup_size: the smallest limit among tocKeys' builds.
+    int maxFlatWorkgroupSize;
+    /// The block computeFwdLaunchParams launches the row with (fwdConfigBlockDimX).
+    unsigned int blockDimX;
+};
+
+/// Every cfg_fmha_fwd row for @p arch. Defined in AsmSdpaConfigHelpers.cpp.
+std::vector<AsmFwdLaunchLimitRow> getFwdLaunchLimitRows(const std::string& arch);
+
 } // namespace asm_sdpa_engine

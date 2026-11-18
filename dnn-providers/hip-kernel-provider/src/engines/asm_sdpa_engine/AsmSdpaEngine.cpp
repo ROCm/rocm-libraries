@@ -7,6 +7,8 @@
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+
 #include <vector>
 
 namespace asm_sdpa_engine
@@ -73,8 +75,9 @@ size_t AsmSdpaEngine::getMaxWorkspaceSize(
     const auto* pb = findApplicablePlanBuilder(handle, opGraph);
     if(pb == nullptr)
     {
-        HIPDNN_PLUGIN_LOG_ERROR("AsmSdpaEngine::getMaxWorkspaceSize: no supporting engine found");
-        return 0;
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "AsmSdpaEngine::getMaxWorkspaceSize: no plan builder applies to the graph");
     }
 
     // Size with the same knob settings initializeExecutionContext builds the plan
@@ -93,9 +96,9 @@ void AsmSdpaEngine::initializeExecutionContext(
     const auto* pb = findApplicablePlanBuilder(handle, opGraph);
     if(pb == nullptr)
     {
-        HIPDNN_PLUGIN_LOG_ERROR(
-            "AsmSdpaEngine::initializeExecutionContext: no supporting engine found");
-        return;
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "AsmSdpaEngine::initializeExecutionContext: no plan builder applies to the graph");
     }
 
     // buildPlan reads the knob settings from the context, so they are stored first.

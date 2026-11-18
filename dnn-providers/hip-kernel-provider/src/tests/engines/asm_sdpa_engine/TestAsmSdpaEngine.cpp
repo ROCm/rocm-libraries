@@ -14,6 +14,7 @@
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -336,6 +337,44 @@ TEST_F(TestAsmSdpaEngine, InvalidAccumulatorKnobIsRejected)
         Context context;
         EXPECT_THROW(_engine.initializeExecutionContext(_handle, graph, config, context),
                      hipdnn_plugin_sdk::HipdnnPluginException);
+    }
+}
+
+TEST_F(TestAsmSdpaEngine, InitializeExecutionContextThrowsInternalErrorIfNoBuilderApplies)
+{
+    // A graph no builder accepts must not yield a context that has no plan.
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    Context context;
+    const hipdnn_test_sdk::utilities::MockEngineConfig engineConfig;
+
+    try
+    {
+        _engine.initializeExecutionContext(_handle, graphWrapper, engineConfig, context);
+        FAIL() << "a context with no plan must not be created";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+    }
+}
+
+TEST_F(TestAsmSdpaEngine, GetMaxWorkspaceSizeThrowsInternalErrorIfNoBuilderApplies)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    const hipdnn_test_sdk::utilities::MockEngineConfig engineConfig;
+
+    try
+    {
+        static_cast<void>(_engine.getMaxWorkspaceSize(_handle, graphWrapper, engineConfig));
+        FAIL() << "a workspace query with no applicable builder must throw";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
     }
 }
 
