@@ -40,7 +40,7 @@ for sphinx_var in ROCmDocs.SPHINX_VARS:
 # Theme-related settings
 html_theme = "rocm_docs_theme"
 html_theme_options = {
-    "flavor": "rocm",
+    "flavor": "hpc-sdk",
     "repository_url": "https://github.com/ROCm/rocm-libraries",
     "repository_branch": "develop",
     "path_to_docs": "projects/rocalution/docs",
