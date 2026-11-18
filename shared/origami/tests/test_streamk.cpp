@@ -458,7 +458,7 @@ TEST_CASE("Origami streamk: ipt <= 1 switches to DP above two waves of workgroup
   }
 }
 
-TEST_CASE("Origami streamk: select_grid_size with explicit reduction strategy", "[streamk]") {
+TEST_CASE("Origami streamk: select_grid_size reduction strategy", "[streamk]") {
   // 50 tiles on 256 CUs with deep K: parallel reduction splits K by floor(256/50)=5 (grid 250),
   // while the tree path picks the largest fraction that fits (4 -> grid 200).
   constexpr size_t MT_M = 16, MT_N = 16, MT_K = 32, TILES = 50, ITERS = 128;
@@ -471,27 +471,21 @@ TEST_CASE("Origami streamk: select_grid_size with explicit reduction strategy", 
 
   const auto algo = origami::grid_selection_t::k_split_aware;
 
-  SECTION("explicit argument selects the strategy") {
-    REQUIRE(origami::streamk::select_grid_size(
-                problem, hardware, config, algo, origami::reduction_t::parallel) == 250);
-    REQUIRE(origami::streamk::select_grid_size(
-                problem, hardware, config, algo, origami::reduction_t::tree) == 200);
-  }
-
-  SECTION("4-argument overload forwards config.reduction_strategy") {
-    for (auto r : {origami::reduction_t::parallel, origami::reduction_t::tree,
-                   origami::reduction_t::none}) {
-      config.reduction_strategy = r;
-      REQUIRE(origami::streamk::select_grid_size(problem, hardware, config, algo) ==
-              origami::streamk::select_grid_size(problem, hardware, config, algo, r));
-    }
-  }
-
-  SECTION("explicit argument overrides the config field") {
+  SECTION("config.reduction_strategy selects the strategy when set") {
+    config.reduction_strategy = origami::reduction_t::parallel;
+    REQUIRE(origami::streamk::select_grid_size(problem, hardware, config, algo) == 250);
     config.reduction_strategy = origami::reduction_t::tree;
-    REQUIRE(origami::streamk::select_grid_size(
-                problem, hardware, config, algo, origami::reduction_t::parallel) == 250);
-    REQUIRE(config.reduction_strategy == origami::reduction_t::tree);  // config untouched
+    REQUIRE(origami::streamk::select_grid_size(problem, hardware, config, algo) == 200);
+  }
+
+  SECTION("an unset strategy is chosen with select_reduction()") {
+    // select_reduction() picks parallel for this problem.
+    REQUIRE(origami::streamk::select_reduction(problem, hardware, config, algo) ==
+            origami::reduction_t::parallel);
+    config.reduction_strategy = origami::reduction_t::none;
+    REQUIRE(origami::streamk::select_grid_size(problem, hardware, config, algo) == 250);
+    config.reduction_strategy = origami::reduction_t::parallel;
+    REQUIRE(origami::streamk::select_grid_size(problem, hardware, config, algo) == 250);
   }
 
   SECTION("other algorithms ignore the reduction strategy") {
@@ -499,10 +493,10 @@ TEST_CASE("Origami streamk: select_grid_size with explicit reduction strategy", 
                    origami::grid_selection_t::energy_aware,
                    origami::grid_selection_t::reduction_cost_aware,
                    origami::grid_selection_t::data_parallel}) {
-      REQUIRE(origami::streamk::select_grid_size(
-                  problem, hardware, config, a, origami::reduction_t::parallel) ==
-              origami::streamk::select_grid_size(
-                  problem, hardware, config, a, origami::reduction_t::tree));
+      config.reduction_strategy = origami::reduction_t::parallel;
+      const auto with_parallel  = origami::streamk::select_grid_size(problem, hardware, config, a);
+      config.reduction_strategy = origami::reduction_t::tree;
+      REQUIRE(origami::streamk::select_grid_size(problem, hardware, config, a) == with_parallel);
     }
   }
 }

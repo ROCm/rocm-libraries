@@ -647,10 +647,6 @@ struct config_t {
   int stream_k = 5;
 
   /// Reduction strategy.
-  /// @deprecated The reduction strategy depends on the problem as well as the config, so it
-  /// does not belong here. Origami's own launch model no longer reads it; it is only consulted
-  /// by the 4-argument streamk::select_grid_size(), and by operator==/hash(). Pass the
-  /// strategy explicitly to the 5-argument streamk::select_grid_size() instead.
   reduction_t reduction_strategy = reduction_t::none;
 
   /// Prediction mode for latency estimation.
@@ -661,8 +657,7 @@ struct config_t {
   /// Grid selection algorithm.
   grid_selection_t grid_selection = grid_selection_t::k_split_aware;
 
-  /// Opaque user tag, not used by Origami. To get the position of a config in the
-  /// candidate vector, use the indices returned by argsort_configs().
+  /// Index of config, not used by Origami but can be used by the user
   std::size_t index = 0;
 
   /// Global read vector width for matrix A (elements per load)
@@ -769,6 +764,16 @@ struct config_t {
 struct prediction_result_t {
   double latency;
   config_t config;
+};
+
+/**
+ * @brief One entry of an argsort over a candidate config list.
+ *
+ * Combines a configuration index with its estimated latency.
+ */
+struct argsort_result_t {
+  double latency;
+  std::size_t index;
 };
 
 /**

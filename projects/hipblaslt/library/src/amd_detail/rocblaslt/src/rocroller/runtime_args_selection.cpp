@@ -47,13 +47,14 @@ int chooseStreamKGridSize(std::shared_ptr<GemmKernel> gemm, const RocblasltContr
     auto reduction_type = origami::streamk::select_reduction(
         origami_problem, analytical_hardware, origami_config, DEFAULT_DYNAMIC_MODE);
 
+    origami_config.reduction_strategy = reduction_type;
+
     // origami_problem.num_cus carries the caller's budget (sm_count_target);
     // select_grid_size derives the CU budget from it internally.
     auto result = origami::streamk::select_grid_size(origami_problem,
                                                     analytical_hardware,
                                                     origami_config,
-                                                    DEFAULT_DYNAMIC_MODE,
-                                                    reduction_type);
+                                                    DEFAULT_DYNAMIC_MODE);
 
     return result;
 }

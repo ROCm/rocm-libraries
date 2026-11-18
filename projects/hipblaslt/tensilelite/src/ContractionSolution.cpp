@@ -7776,21 +7776,20 @@ namespace TensileLite
                         .workspace_size_per_elem_c = self.sizeMapping.isPersistentDataParallel()
                                                          ? static_cast<size_t>(DataTypeInfo::Get(self.problemType.computeType).elementSize)
                                                          : self.sizeMapping.workspaceSizePerElemC,
+                        // The existing grid predictor was calibrated with this model
+                        // for whole-tile launches. This adapter preserves its grid policy;
+                        // the DataParallel launch itself has no reduction strategy.
+                        .reduction_strategy = self.sizeMapping.isPersistentDataParallel()
+                                                  ? origami::reduction_t::tree : reductionStrat,
                     };
 
                     TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
 
-                    // The existing grid predictor was calibrated with the tree model
-                    // for whole-tile launches. This adapter preserves its grid policy;
-                    // the DataParallel launch itself has no reduction strategy.
                     grid = origami::streamk::select_grid_size(
                         origami_problem,
                         *(hipAMDGPU->analyticalHardware),
                         origami_config,
-                        static_cast<origami::grid_selection_t>(pAMDGPU->persistentDynamicGrid),
-                        self.sizeMapping.isPersistentDataParallel()
-                            ? origami::reduction_t::tree
-                            : reductionStrat);
+                        static_cast<origami::grid_selection_t>(pAMDGPU->persistentDynamicGrid));
                 }
             }
             // Limit the CUs persistent execution uses to the hardware or specified maximum,

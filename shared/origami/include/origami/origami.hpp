@@ -102,19 +102,6 @@ ORIGAMI_EXPORT std::vector<prediction_result_t> rank_configs(const problem_t& pr
                                               model_t model = model_t::gemm);
 
 /**
- * @brief One entry of an argsort over a candidate config list.
- */
-struct argsort_result_t {
-  /// Predicted latency. std::numeric_limits<double>::max() when every candidate was rejected
-  /// by the model (fallback ranking).
-  double latency;
-
-  /// Position of the config in the `configs` vector passed to argsort_configs().
-  /// This is NOT config_t::index, which is an opaque user tag.
-  std::size_t index;
-};
-
-/**
  * @brief Rank configurations by predicted performance without copying them.
  *
  * Same ranking, tie-breaking and fallback behavior as rank_configs(), but returns

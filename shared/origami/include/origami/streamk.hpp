@@ -63,9 +63,9 @@ ORIGAMI_EXPORT reduction_t select_reduction(const problem_t& problem,
 /**
  * @brief Based on the provided kernel config, select the best grid dimension.
  *
- * @deprecated Reads the reduction strategy from config.reduction_strategy, which is itself
- * deprecated because the strategy depends on the problem as well as the config. Use the
- * overload that takes the reduction strategy explicitly.
+ * For grid_selection_t::k_split_aware, the reduction strategy is taken from
+ * config.reduction_strategy if it is set (not reduction_t::none). Otherwise it is chosen
+ * with select_reduction().
  *
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
@@ -77,26 +77,6 @@ ORIGAMI_EXPORT size_t select_grid_size(const problem_t& problem,
                         const hardware_t& hardware,
                         const config_t& config,
                         grid_selection_t algorithm);
-
-/**
- * @brief Like the overload above, but with the reduction strategy given explicitly.
- *
- * @p reduction_strategy is used instead of config.reduction_strategy, so callers that
- * select the reduction themselves (see select_reduction()) do not need to copy and
- * modify the config. The 4-argument overload forwards config.reduction_strategy here.
- *
- * @param problem Problem description (M, N, K, etc.)
- * @param hardware Hardware characteristics (@see origami::hardware_t)
- * @param config Kernel configuration.
- * @param algorithm grid selection algorithm (@see origami::grid_selection_t)
- * @param reduction_strategy Reduction strategy to assume for the grid selection.
- * @return size_t Dimensions of the grid launched.
- */
-ORIGAMI_EXPORT size_t select_grid_size(const problem_t& problem,
-                        const hardware_t& hardware,
-                        const config_t& config,
-                        grid_selection_t algorithm,
-                        reduction_t reduction_strategy);
 
 /**
  * @brief Pick the SK3-vs-SK4 sub-path for a StreamK=5 hybrid kernel.
