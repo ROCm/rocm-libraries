@@ -24,7 +24,7 @@ from toolchain_test_helpers import copy_isa_info_map
 
 pytestmark = pytest.mark.unit
 
-_LEVELS = [1, 2, 3]
+_LEVELS = [1]
 
 # The ProblemType keys an override of _state may name; every other override goes to the solution.
 _PROBLEM_TYPE_KEYS = {
@@ -193,10 +193,12 @@ def test_accepts_persistent_policies(overrides):
   assert tdmStoreRejectReason(_state(**overrides)) is None
 
 
-def test_levels_match_the_valid_values_and_add_one_path_each():
-  assert list(TDM_STORE_PATHS) == validParameters["TDMStoreInst"]
-  for level in _LEVELS:
-    assert TDM_STORE_PATHS[level][:-1] == TDM_STORE_PATHS[level - 1]
+def test_levels_match_the_valid_values_and_one_covers_every_path():
+  """TDMStoreInst is 0 or 1 only, and 1 sends every store path of a final-D store through the TDM
+  block, so the epilogue keeps one store path and splits only on beta / non-beta."""
+  assert list(TDM_STORE_PATHS) == validParameters["TDMStoreInst"] == [0, 1]
+  assert TDM_STORE_PATHS[0] == ()
+  assert set(TDM_STORE_PATHS[1]) == {"EdgeM", "EdgeN", "NonEdge"}
 
 
 def _blocks(level, edge=True, atomic=False, accumulation=None, vectorWidths=(8, 1), bpe=2, mpm=0):
@@ -212,17 +214,18 @@ _VECTOR_WIDTHS = {0: (8, 1), 1: (8, 4, 2, 1)}
 @pytest.mark.parametrize("adaptive", [0, 1])
 @pytest.mark.parametrize("svw", [1, 2, 4, 8])
 def test_each_level_picks_blocks_of_the_store_width_cascade(svw, adaptive):
-  """A level picks the blocks of the store-width cascade that store through the TDM block: level 1 the
-  masked blocks narrower than the store vector width and the narrowest one, level 2 every masked block,
-  and of a store without edge blocks only level 3 the unmasked one. Level 2 adds the masked block of the
-  store vector width, which at store vector width 1 is the narrowest one, already picked by level 1."""
+  """TDMStoreInst 1 picks every block of the store-width cascade: with edge blocks the masked ones
+  narrower than the store vector width, the narrowest one (EdgeM) and the masked block of the store
+  vector width (EdgeN) - which together are the whole cascade - and without edge blocks the unmasked
+  one (NonEdge). TDMStoreInst 0 picks none, so every block keeps its buffer_store."""
   cascade = [svw, 1] if adaptive == 0 else [w for w in (8, 4, 2, 1) if w <= svw]
   edgeM = {w for w in cascade if w < svw} | {min(cascade)}
-  expected = {0: set(), 1: edgeM, 2: edgeM | {svw}, 3: edgeM | {svw}}
+  expected = {0: set(), 1: edgeM | {svw}}
   for level in [0] + _LEVELS:
     assert _blocks(level, vectorWidths=cascade) == expected[level], (level, cascade)
-    assert _blocks(level, edge=False, vectorWidths=cascade[:1]) == ({svw} if level == 3 else set()), level
-  assert (_blocks(1, vectorWidths=cascade) == _blocks(2, vectorWidths=cascade)) == (svw == 1)
+    assert _blocks(level, edge=False, vectorWidths=cascade[:1]) == ({svw} if level else set()), level
+  # With edge blocks the picked set is now the whole cascade, at every store vector width.
+  assert _blocks(1, vectorWidths=cascade) == set(cascade)
 
 
 @pytest.mark.parametrize("accumulation, atomic", [
@@ -231,8 +234,8 @@ def test_each_level_picks_blocks_of_the_store_width_cascade(svw, adaptive):
   (None, True),
 ])
 def test_partial_and_atomic_stores_keep_buffer_store(accumulation, atomic):
-  assert _blocks(3, atomic=atomic, accumulation=accumulation) == set()
-  assert _blocks(3, edge=False, vectorWidths=(8,), atomic=atomic, accumulation=accumulation) == set()
+  assert _blocks(1, atomic=atomic, accumulation=accumulation) == set()
+  assert _blocks(1, edge=False, vectorWidths=(8,), atomic=atomic, accumulation=accumulation) == set()
 
 
 @pytest.mark.parametrize("accumulation", [None, "PartialsBuffer", "MultipleBuffer", "MultipleBufferSingleKernel",
@@ -247,7 +250,7 @@ def test_stores_final_d_predicate(accumulation, atomic, mpm):
                           or (accumulation == "MultipleBufferSingleKernel" and mpm == 0))
   assert storesFinalD({"_GlobalAccumulation": accumulation, "MbskPrefetchMethod": mpm}, atomic) == final
   for bpe in (2, 4):
-    assert bool(_blocks(3, atomic=atomic, accumulation=accumulation, bpe=bpe, mpm=mpm)) == final, bpe
+    assert bool(_blocks(1, atomic=atomic, accumulation=accumulation, bpe=bpe, mpm=mpm)) == final, bpe
 
 
 @pytest.mark.parametrize("level", _LEVELS)
@@ -260,18 +263,18 @@ def test_fp32_final_store_uses_the_tdm_block(level):
 @pytest.mark.parametrize("accumulation, atomic", [("MultipleBuffer", False), (None, True)])
 def test_gsu_partials_keep_buffer_store_at_fp32(accumulation, atomic):
   """GSU>1 partials, at the compute type, and atomic stores keep buffer_store."""
-  assert _blocks(3, accumulation=accumulation, atomic=atomic, bpe=4) == set()
+  assert _blocks(1, accumulation=accumulation, atomic=atomic, bpe=4) == set()
 
 
 def test_streamk_final_store_uses_the_tdm_block():
-  assert _blocks(2, accumulation="PartialsBuffer") == {8, 1}
+  assert _blocks(1, accumulation="PartialsBuffer") == {8, 1}
 
 
 def test_mbsk_reduced_tile_uses_the_tdm_block():
   """MultipleBufferSingleKernel stores the reduced tile to D: the blocks of a final store with MbskPrefetchMethod
   0, where one workgroup reduces the tile at a GSU of at most 2, and none with MbskPrefetchMethod 1."""
-  assert _blocks(2, accumulation="MultipleBufferSingleKernel") == {8, 1}
-  assert _blocks(2, accumulation="MultipleBufferSingleKernel", mpm=1) == set()
+  assert _blocks(1, accumulation="MultipleBufferSingleKernel") == {8, 1}
+  assert _blocks(1, accumulation="MultipleBufferSingleKernel", mpm=1) == set()
 
 
 @pytest.mark.parametrize("dest, bpe", [("h", 2), ("s", 4)])
@@ -1087,7 +1090,7 @@ def test_pap_oversized_tile_hits_max_lds(gp_gfx1250, gfx1250_iim, assembler, cap
 
 
 @pytest.mark.parametrize("streamk", [0, 3])
-@pytest.mark.parametrize("level", [2, 3])
+@pytest.mark.parametrize("level", [1])
 def test_tdm_waits_survive_stinkytofu(gp_gfx1250, gfx1250_iim, assembler, capsys, level, streamk):
   """In the emitted assembly the drain of tensor_load_to_lds still comes before the next barrier, and
   every tensor_store_from_lds is waited for before the next barrier or the end of the kernel."""
