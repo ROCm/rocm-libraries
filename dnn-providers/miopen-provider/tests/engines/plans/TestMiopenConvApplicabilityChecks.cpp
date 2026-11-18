@@ -145,8 +145,13 @@ const std::vector<int64_t>& convXDims = test_conv_common::CONV_2D_X_DIMS;
 const std::vector<int64_t>& convWDims = test_conv_common::CONV_2D_W_DIMS;
 const std::vector<int64_t>& convYDims = test_conv_common::CONV_2D_Y_DIMS;
 
-// The three shapes in the roles of uniformCase.
-const RankShapes CONV_SHAPES = {convXDims, convWDims, convYDims};
+// The three shapes in the roles of uniformCase. Built on first use: the dims are inline variables
+// of the shared header, whose initialization order against a namespace-scope copy is unspecified.
+const RankShapes& convShapes()
+{
+    static const RankShapes SHAPES = {convXDims, convWDims, convYDims};
+    return SHAPES;
+}
 
 // ---------------------------------------------------------------------------------------------
 // Forward, backward data and backward weights
@@ -953,7 +958,7 @@ TEST(TestMiopenConvApplicabilityChecks, AcceptsEverySupportedDataType)
         for(const bool channelsLastLayout : {false, true})
         {
             SCOPED_TRACE(hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType));
-            expectAccepted(uniformCase(CONV_SHAPES, channelsLastLayout, dataType));
+            expectAccepted(uniformCase(convShapes(), channelsLastLayout, dataType));
         }
     }
 }
@@ -1082,7 +1087,7 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesEmptyTensorsWhoseZeroExtentIsNot
 {
     for(const bool channelsLastLayout : {false, true})
     {
-        const ConvCase base = uniformCase(CONV_SHAPES, channelsLastLayout);
+        const ConvCase base = uniformCase(convShapes(), channelsLastLayout);
 
         for(size_t zeroIndex = 1; zeroIndex < convXDims.size(); ++zeroIndex)
         {
@@ -1124,7 +1129,7 @@ TEST(TestMiopenConvApplicabilityChecks, AcceptsEmptyTensorsWhoseZeroExtentFollow
         ASSERT_EQ(empty.strides, packedStrides(empty.dims, unitBatch.channelsLastLayout));
         ASSERT_TRUE(isTensorPacked(empty.dims, empty.strides));
 
-        const ConvCase base = uniformCase(CONV_SHAPES, unitBatch.channelsLastLayout);
+        const ConvCase base = uniformCase(convShapes(), unitBatch.channelsLastLayout);
 
         for(const Role role : ROLES)
         {
@@ -1457,7 +1462,7 @@ TEST(TestMiopenConvApplicabilityChecks, BackwardDeclinesNonPackedChannelsLast)
 // broadcast tensors and does not say that MIOpen computes such a convolution correctly.
 TEST(TestMiopenConvApplicabilityChecks, BroadcastAxisIsJudgedLikeAnyNonPackedTensor)
 {
-    const ConvCase base = uniformCase(CONV_SHAPES, /*channelsLastLayout=*/false);
+    const ConvCase base = uniformCase(convShapes(), /*channelsLastLayout=*/false);
 
     for(const Role role : ROLES)
     {
@@ -1479,15 +1484,15 @@ TEST(TestMiopenConvApplicabilityChecks, BroadcastAxisIsJudgedLikeAnyNonPackedTen
 
 TEST(TestMiopenConvApplicabilityChecks, DeclinesMalformedTensors)
 {
-    auto nullDyDims = uniformCase(CONV_SHAPES, false);
+    auto nullDyDims = uniformCase(convShapes(), false);
     nullDyDims.dy.nullDims = true;
     expectDeclined(nullDyDims, "null dims");
 
-    auto nullDxDims = uniformCase(CONV_SHAPES, false);
+    auto nullDxDims = uniformCase(convShapes(), false);
     nullDxDims.dx.nullDims = true;
     expectDeclined(nullDxDims, "null dims");
 
-    auto nullStrides = uniformCase(CONV_SHAPES, false);
+    auto nullStrides = uniformCase(convShapes(), false);
     nullStrides.w.nullStrides = true;
     expectDeclined(nullStrides, "null dims or strides");
 
@@ -1666,7 +1671,7 @@ TEST(TestMiopenConvApplicabilityChecks, SizeLimitIsNotPartOfTheIoTensorRules)
 // Every operation, every tensor in turn, under the tensor's name in the operation.
 TEST(TestMiopenConvApplicabilityChecks, DeclinesDimsWhoseElementCountOverflows)
 {
-    const ConvCase packed = uniformCase(CONV_SHAPES, false);
+    const ConvCase packed = uniformCase(convShapes(), false);
 
     for(const auto& dims : ioOverflowingDims())
     {
@@ -1694,7 +1699,7 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesDimsWhoseElementCountOverflows)
 // Every operation, every tensor in turn, under the tensor's name in the operation.
 TEST(TestMiopenConvApplicabilityChecks, DeclinesStridesWhoseArithmeticOverflows)
 {
-    const ConvCase packed = uniformCase(CONV_SHAPES, false);
+    const ConvCase packed = uniformCase(convShapes(), false);
 
     for(const auto& overflowing : overflowingStrides())
     {
@@ -1757,7 +1762,7 @@ TEST(TestMiopenConvApplicabilityChecks, StridesOnTheRepresentableLimitAreJudgedB
     constexpr int64_t MAX_VALUE = std::numeric_limits<int64_t>::max();
     constexpr int64_t MIN_VALUE = std::numeric_limits<int64_t>::min();
 
-    const ConvCase base = uniformCase(CONV_SHAPES, false);
+    const ConvCase base = uniformCase(convShapes(), false);
     const TensorSpec spanReachesMax = withStrides({2, 1, 1}, {MAX_VALUE - 1, 1, 1});
     const TensorSpec termIsMin = withStrides({2, 1, 1}, {MIN_VALUE, 1, 1});
     ASSERT_FALSE(isTensorPacked(spanReachesMax.dims, spanReachesMax.strides));
@@ -1870,7 +1875,7 @@ TEST(TestMiopenConvApplicabilityChecks, DimsWhoseElementCountIsJustBelowTheLimit
 TEST(TestMiopenConvApplicabilityChecks, DeclinesNegativeDims)
 {
     const TensorSpec negative = withUnitStrides({4, -2, 3, 3});
-    const ConvCase packed = uniformCase(CONV_SHAPES, false);
+    const ConvCase packed = uniformCase(convShapes(), false);
 
     for(const Role role : ROLES)
     {
