@@ -7,7 +7,7 @@
 
 Architecture: gfx942
 GemmType: ZZZ_NT
-Source: rocm-libraries 501708505c, 2026-10-22
+Source: rocm-libraries 1a33436bd6, 2026-11-17
 DepthU: [8, 16, 32, 64, 128, 256]  # searched
 MatrixInstructions:
   - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 1, 4, 1], DepthU: [16, 32, 64]}  # MT64x16
@@ -167,22 +167,22 @@ MatrixInstructions:
   - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 1, 1, 1], DepthU: [8, 16, 32, 64]}  # MT64x16
 
 # Not buildable (closest kernel: overflow of its most over-used resource, and why):
-#   [16, 16, 4, 1, 1, 8, 1, 4, 1]  MT512x16  +3.1%  needs at least 67584 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 9, 1, 4, 1]  MT576x16  +15.6%  needs at least 75776 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 10, 1, 4, 1]  MT640x16  +28.1%  needs at least 83968 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 11, 1, 4, 1]  MT704x16  +40.6%  needs at least 92160 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 12, 1, 4, 1]  MT768x16  +53.1%  needs at least 100352 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 13, 1, 4, 1]  MT832x16  +65.6%  needs at least 108544 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 14, 1, 4, 1]  MT896x16  +78.1%  needs at least 116736 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 15, 1, 4, 1]  MT960x16  +90.6%  needs at least 124928 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 8, 1, 4, 1]  MT512x16  +3.1%  No valid DepthU found
+#   [16, 16, 4, 1, 1, 9, 1, 4, 1]  MT576x16  +15.6%  No valid DepthU found
+#   [16, 16, 4, 1, 1, 10, 1, 4, 1]  MT640x16  +28.1%  No valid DepthU found
+#   [16, 16, 4, 1, 1, 11, 1, 4, 1]  MT704x16  +40.6%  No valid DepthU found
+#   [16, 16, 4, 1, 1, 12, 1, 4, 1]  MT768x16  +53.1%  No valid DepthU found
+#   [16, 16, 4, 1, 1, 13, 1, 4, 1]  MT832x16  +65.6%  No valid DepthU found
+#   [16, 16, 4, 1, 1, 14, 1, 4, 1]  MT896x16  +78.1%  No valid DepthU found
+#   [16, 16, 4, 1, 1, 15, 1, 4, 1]  MT960x16  +90.6%  No valid DepthU found
 #   [16, 16, 4, 1, 1, 16, 1, 4, 1]  MT1024x16  +100.0%  Kernel Uses 131072 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 16, 1, 2, 2]  MT512x32  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 9, 1, 4]  MT16x576  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 10, 1, 4]  MT16x640  +25.0%  needs at least 81920 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 11, 1, 4]  MT16x704  +37.5%  needs at least 90112 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 12, 1, 4]  MT16x768  +50.0%  needs at least 98304 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 13, 1, 4]  MT16x832  +62.5%  needs at least 106496 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 14, 1, 4]  MT16x896  +75.0%  needs at least 114688 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 15, 1, 4]  MT16x960  +87.5%  needs at least 122880 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 16, 1, 4]  MT16x1024  +100.0%  needs at least 131072 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 16, 1, 2, 2]  MT512x32  +6.2%  Kernel Uses 69632 > 65536 bytes of LDS
+#   [16, 16, 4, 1, 1, 1, 9, 1, 4]  MT16x576  +12.5%  DirectToVgprA does not supports TLUA = UnrollMajorLDSA
+#   [16, 16, 4, 1, 1, 1, 10, 1, 4]  MT16x640  +25.0%  DirectToVgprA does not supports TLUA = UnrollMajorLDSA
+#   [16, 16, 4, 1, 1, 1, 11, 1, 4]  MT16x704  +37.5%  DirectToVgprA does not supports TLUA = UnrollMajorLDSA
+#   [16, 16, 4, 1, 1, 1, 12, 1, 4]  MT16x768  +50.0%  DirectToVgprA does not supports TLUA = UnrollMajorLDSA
+#   [16, 16, 4, 1, 1, 1, 13, 1, 4]  MT16x832  +62.5%  DirectToVgprA does not supports TLUA = UnrollMajorLDSA
+#   [16, 16, 4, 1, 1, 1, 14, 1, 4]  MT16x896  +75.0%  DirectToVgprA does not supports TLUA = UnrollMajorLDSA
+#   [16, 16, 4, 1, 1, 1, 15, 1, 4]  MT16x960  +87.5%  DirectToVgprA does not supports TLUA = UnrollMajorLDSA
+#   [16, 16, 4, 1, 1, 1, 16, 1, 4]  MT16x1024  +100.0%  DirectToVgprA does not supports TLUA = UnrollMajorLDSA
 #   [16, 16, 4, 1, 1, 15, 1, 1, 4]  MT240x64  +3.9%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=266, sgprs=102

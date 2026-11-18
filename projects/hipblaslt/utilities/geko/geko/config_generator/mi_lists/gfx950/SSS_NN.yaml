@@ -7,7 +7,7 @@
 
 Architecture: gfx950
 GemmType: SSS_NN
-Source: rocm-libraries 501708505c, 2026-10-21
+Source: rocm-libraries 1a33436bd6, 2026-11-16
 DepthU: [32, 64, 128, 256, 512, 1024]  # searched
 MatrixInstructions:
   - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 1, 4, 1], DepthU: [32, 64, 128, 256]}  # MT64x16
@@ -943,7 +943,7 @@ MatrixInstructions:
 #   [16, 16, 4, 1, 1, 1, 61, 4, 1]  MT64x976  +0.6%  Kernel Uses 164864 > 163840 bytes of LDS
 #   [16, 16, 4, 1, 1, 1, 62, 4, 1]  MT64x992  +5.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=269, sgprs=102
 #   [16, 16, 4, 1, 1, 1, 63, 4, 1]  MT64x1008  +3.8%  Kernel Uses 169984 > 163840 bytes of LDS
-#   [16, 16, 4, 1, 1, 1, 64, 4, 1]  MT64x1024  +8.2%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=277, sgprs=108
+#   [16, 16, 4, 1, 1, 1, 64, 4, 1]  MT64x1024  +8.2%  overflowed resources.  errorCode=2, msg="too many sgprs", vgprs=277, sgprs=108
 #   [16, 16, 4, 1, 1, 49, 1, 1, 4]  MT784x64  +3.1%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=264, sgprs=70
 #   [16, 16, 4, 1, 1, 51, 1, 1, 4]  MT816x64  +7.0%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=274, sgprs=70
 #   [16, 16, 4, 1, 1, 53, 1, 1, 4]  MT848x64  +10.9%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=284, sgprs=70

@@ -7,7 +7,7 @@
 
 Architecture: gfx942
 GemmType: SSS_NN
-Source: rocm-libraries 501708505c, 2026-10-22
+Source: rocm-libraries 1a33436bd6, 2026-11-17
 DepthU: [32, 64, 128, 256, 512, 1024]  # searched
 MatrixInstructions:
   - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 1, 4, 1], DepthU: [32, 64, 128]}  # MT64x16
@@ -628,51 +628,51 @@ MatrixInstructions:
 
 # Not buildable (closest kernel: overflow of its most over-used resource, and why):
 #   [16, 16, 4, 1, 1, 1, 28, 4, 1]  MT64x448  +2.1%  Kernel Uses 66944 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 1, 29, 4, 1]  MT64x464  +3.1%  needs at least 67584 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 29, 4, 1]  MT64x464  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 1, 30, 4, 1]  MT64x480  +5.5%  Kernel Uses 69120 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 1, 31, 4, 1]  MT64x496  +2.9%  Kernel Uses 67456 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 1, 32, 4, 1]  MT64x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 1, 33, 4, 1]  MT64x528  +3.1%  needs at least 67584 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 34, 4, 1]  MT64x544  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 35, 4, 1]  MT64x560  +9.4%  needs at least 71680 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 36, 4, 1]  MT64x576  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 37, 4, 1]  MT64x592  +15.6%  needs at least 75776 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 38, 4, 1]  MT64x608  +18.8%  needs at least 77824 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 39, 4, 1]  MT64x624  +21.9%  needs at least 79872 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 40, 4, 1]  MT64x640  +25.0%  needs at least 81920 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 41, 4, 1]  MT64x656  +28.1%  needs at least 83968 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 42, 4, 1]  MT64x672  +31.2%  needs at least 86016 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 43, 4, 1]  MT64x688  +34.4%  needs at least 88064 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 44, 4, 1]  MT64x704  +37.5%  needs at least 90112 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 45, 4, 1]  MT64x720  +40.6%  needs at least 92160 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 46, 4, 1]  MT64x736  +43.8%  needs at least 94208 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 47, 4, 1]  MT64x752  +46.9%  needs at least 96256 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 48, 4, 1]  MT64x768  +50.0%  needs at least 98304 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 49, 4, 1]  MT64x784  +53.1%  needs at least 100352 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 50, 4, 1]  MT64x800  +56.2%  needs at least 102400 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 51, 4, 1]  MT64x816  +59.4%  needs at least 104448 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 52, 4, 1]  MT64x832  +62.5%  needs at least 106496 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 53, 4, 1]  MT64x848  +65.6%  needs at least 108544 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 54, 4, 1]  MT64x864  +68.8%  needs at least 110592 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 55, 4, 1]  MT64x880  +71.9%  needs at least 112640 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 56, 4, 1]  MT64x896  +75.0%  needs at least 114688 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 57, 4, 1]  MT64x912  +78.1%  needs at least 116736 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 58, 4, 1]  MT64x928  +81.2%  needs at least 118784 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 59, 4, 1]  MT64x944  +84.4%  needs at least 120832 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 60, 4, 1]  MT64x960  +87.5%  needs at least 122880 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 61, 4, 1]  MT64x976  +90.6%  needs at least 124928 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 62, 4, 1]  MT64x992  +93.8%  needs at least 126976 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 63, 4, 1]  MT64x1008  +96.9%  needs at least 129024 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 64, 4, 1]  MT64x1024  +100.0%  needs at least 131072 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 25, 4, 1]  MT128x400  +3.1%  needs at least 67584 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 26, 4, 1]  MT128x416  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 33, 4, 1]  MT64x528  +3.1%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 34, 4, 1]  MT64x544  +6.2%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 35, 4, 1]  MT64x560  +9.4%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 36, 4, 1]  MT64x576  +12.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 37, 4, 1]  MT64x592  +15.6%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 38, 4, 1]  MT64x608  +18.8%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 39, 4, 1]  MT64x624  +21.9%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 40, 4, 1]  MT64x640  +25.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 41, 4, 1]  MT64x656  +28.1%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 42, 4, 1]  MT64x672  +31.2%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 43, 4, 1]  MT64x688  +34.4%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 44, 4, 1]  MT64x704  +37.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 45, 4, 1]  MT64x720  +40.6%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 46, 4, 1]  MT64x736  +43.8%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 47, 4, 1]  MT64x752  +46.9%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 48, 4, 1]  MT64x768  +50.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 49, 4, 1]  MT64x784  +53.1%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 50, 4, 1]  MT64x800  +56.2%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 51, 4, 1]  MT64x816  +59.4%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 52, 4, 1]  MT64x832  +62.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 53, 4, 1]  MT64x848  +65.6%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 54, 4, 1]  MT64x864  +68.8%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 55, 4, 1]  MT64x880  +71.9%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 56, 4, 1]  MT64x896  +75.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 57, 4, 1]  MT64x912  +78.1%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 58, 4, 1]  MT64x928  +81.2%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 59, 4, 1]  MT64x944  +84.4%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 60, 4, 1]  MT64x960  +87.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 61, 4, 1]  MT64x976  +90.6%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 62, 4, 1]  MT64x992  +93.8%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 63, 4, 1]  MT64x1008  +96.9%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 64, 4, 1]  MT64x1024  +100.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 25, 4, 1]  MT128x400  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
+#   [16, 16, 4, 1, 1, 2, 26, 4, 1]  MT128x416  +6.2%  Kernel Uses 69632 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 2, 27, 4, 1]  MT128x432  +5.5%  Kernel Uses 69120 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 2, 28, 4, 1]  MT128x448  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 2, 28, 4, 1]  MT128x448  +12.5%  Kernel Uses 73728 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 2, 29, 4, 1]  MT128x464  +13.3%  Kernel Uses 74240 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 2, 30, 4, 1]  MT128x480  +5.5%  Kernel Uses 69120 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 2, 31, 4, 1]  MT128x496  +2.9%  Kernel Uses 67456 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 2, 32, 4, 1]  MT128x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 3, 21, 4, 1]  MT192x336  +3.1%  needs at least 67584 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 3, 21, 4, 1]  MT192x336  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 7, 9, 4, 1]  MT448x144  +5.5%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=270, sgprs=72
 #   [16, 16, 4, 1, 1, 9, 3, 4, 1]  MT576x48  +1.6%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=260, sgprs=72
 #   [16, 16, 4, 1, 1, 9, 4, 4, 1]  MT576x64  +0.2%  Kernel Uses 65664 > 65536 bytes of LDS
@@ -685,7 +685,7 @@ MatrixInstructions:
 #   [16, 16, 4, 1, 1, 11, 2, 4, 1]  MT704x32  +0.2%  Kernel Uses 65664 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 11, 3, 4, 1]  MT704x48  +20.3%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=308, sgprs=72
 #   [16, 16, 4, 1, 1, 11, 4, 4, 1]  MT704x64  +0.2%  Kernel Uses 65664 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 11, 5, 4, 1]  MT704x80  +25.0%  needs at least 81920 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 11, 5, 4, 1]  MT704x80  +25.8%  too many vgprs after _initKernel (body skipped)
 #   [16, 16, 4, 1, 1, 12, 4, 4, 1]  MT768x64  +0.2%  Kernel Uses 65664 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 12, 5, 4, 1]  MT768x80  +7.0%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=274, sgprs=72
 #   [16, 16, 4, 1, 1, 13, 1, 4, 1]  MT832x16  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
@@ -698,174 +698,174 @@ MatrixInstructions:
 #   [16, 16, 4, 1, 1, 14, 4, 4, 1]  MT896x64  +0.2%  Kernel Uses 65664 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 15, 1, 4, 1]  MT960x16  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 15, 2, 4, 1]  MT960x32  +0.2%  Kernel Uses 65664 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 15, 3, 4, 1]  MT960x48  +50.0%  needs at least 98304 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 15, 3, 4, 1]  MT960x48  +54.7%  too many vgprs after _initKernel (body skipped)
 #   [16, 16, 4, 1, 1, 15, 4, 4, 1]  MT960x64  +0.2%  Kernel Uses 65664 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 16, 1, 4, 1]  MT1024x16  +0.2%  Kernel Uses 65664 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 16, 2, 4, 1]  MT1024x32  +0.2%  Kernel Uses 65664 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 16, 3, 4, 1]  MT1024x48  +26.6%  too many vgprs after _initKernel (body skipped)
 #   [16, 16, 4, 1, 1, 16, 4, 4, 1]  MT1024x64  +0.2%  Kernel Uses 65664 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 1, 16, 2, 2]  MT32x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 1, 17, 2, 2]  MT32x544  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 18, 2, 2]  MT32x576  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 19, 2, 2]  MT32x608  +18.8%  needs at least 77824 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 20, 2, 2]  MT32x640  +25.0%  needs at least 81920 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 21, 2, 2]  MT32x672  +31.2%  needs at least 86016 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 22, 2, 2]  MT32x704  +37.5%  needs at least 90112 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 23, 2, 2]  MT32x736  +43.8%  needs at least 94208 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 24, 2, 2]  MT32x768  +50.0%  needs at least 98304 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 25, 2, 2]  MT32x800  +56.2%  needs at least 102400 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 26, 2, 2]  MT32x832  +62.5%  needs at least 106496 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 27, 2, 2]  MT32x864  +68.8%  needs at least 110592 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 28, 2, 2]  MT32x896  +75.0%  needs at least 114688 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 29, 2, 2]  MT32x928  +81.2%  needs at least 118784 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 30, 2, 2]  MT32x960  +87.5%  needs at least 122880 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 31, 2, 2]  MT32x992  +93.8%  needs at least 126976 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 32, 2, 2]  MT32x1024  +100.0%  needs at least 131072 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 17, 2, 2]  MT32x544  +6.2%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 18, 2, 2]  MT32x576  +12.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 19, 2, 2]  MT32x608  +18.8%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 20, 2, 2]  MT32x640  +25.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 21, 2, 2]  MT32x672  +31.2%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 22, 2, 2]  MT32x704  +37.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 23, 2, 2]  MT32x736  +43.8%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 24, 2, 2]  MT32x768  +50.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 25, 2, 2]  MT32x800  +56.2%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 26, 2, 2]  MT32x832  +62.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 27, 2, 2]  MT32x864  +68.8%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 28, 2, 2]  MT32x896  +75.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 29, 2, 2]  MT32x928  +81.2%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 30, 2, 2]  MT32x960  +87.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 31, 2, 2]  MT32x992  +93.8%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 1, 32, 2, 2]  MT32x1024  +100.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
 #   [16, 16, 4, 1, 1, 2, 16, 2, 2]  MT64x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 2, 17, 2, 2]  MT64x544  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 18, 2, 2]  MT64x576  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 19, 2, 2]  MT64x608  +18.8%  needs at least 77824 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 20, 2, 2]  MT64x640  +25.0%  needs at least 81920 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 21, 2, 2]  MT64x672  +31.2%  needs at least 86016 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 22, 2, 2]  MT64x704  +37.5%  needs at least 90112 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 23, 2, 2]  MT64x736  +43.8%  needs at least 94208 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 24, 2, 2]  MT64x768  +50.0%  needs at least 98304 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 25, 2, 2]  MT64x800  +56.2%  needs at least 102400 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 26, 2, 2]  MT64x832  +62.5%  needs at least 106496 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 27, 2, 2]  MT64x864  +68.8%  needs at least 110592 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 28, 2, 2]  MT64x896  +75.0%  needs at least 114688 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 29, 2, 2]  MT64x928  +81.2%  needs at least 118784 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 30, 2, 2]  MT64x960  +87.5%  needs at least 122880 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 31, 2, 2]  MT64x992  +93.8%  needs at least 126976 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 32, 2, 2]  MT64x1024  +100.0%  needs at least 131072 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 2, 17, 2, 2]  MT64x544  +6.2%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 18, 2, 2]  MT64x576  +12.5%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 19, 2, 2]  MT64x608  +18.8%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 20, 2, 2]  MT64x640  +25.0%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 21, 2, 2]  MT64x672  +31.2%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 22, 2, 2]  MT64x704  +37.5%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 23, 2, 2]  MT64x736  +43.8%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 24, 2, 2]  MT64x768  +50.0%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 25, 2, 2]  MT64x800  +56.2%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 26, 2, 2]  MT64x832  +62.5%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 27, 2, 2]  MT64x864  +68.8%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 28, 2, 2]  MT64x896  +75.0%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 29, 2, 2]  MT64x928  +81.2%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 30, 2, 2]  MT64x960  +87.5%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 31, 2, 2]  MT64x992  +93.8%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 32, 2, 2]  MT64x1024  +100.0%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
 #   [16, 16, 4, 1, 1, 3, 15, 2, 2]  MT96x480  +5.5%  Kernel Uses 69120 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 3, 16, 2, 2]  MT96x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 3, 17, 2, 2]  MT96x544  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 3, 18, 2, 2]  MT96x576  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 3, 19, 2, 2]  MT96x608  +18.8%  needs at least 77824 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 3, 20, 2, 2]  MT96x640  +25.0%  needs at least 81920 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 3, 21, 2, 2]  MT96x672  +31.2%  needs at least 86016 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 3, 17, 2, 2]  MT96x544  +6.2%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 3, 18, 2, 2]  MT96x576  +12.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 3, 19, 2, 2]  MT96x608  +18.8%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 3, 20, 2, 2]  MT96x640  +25.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 3, 21, 2, 2]  MT96x672  +31.2%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
 #   [16, 16, 4, 1, 1, 4, 14, 2, 2]  MT128x448  +0.4%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=257, sgprs=72
 #   [16, 16, 4, 1, 1, 4, 15, 2, 2]  MT128x480  +5.5%  Kernel Uses 69120 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 4, 16, 2, 2]  MT128x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 5, 11, 2, 2]  MT160x352  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 5, 12, 2, 2]  MT160x384  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 5, 12, 2, 2]  MT160x384  +6.2%  Kernel Uses 69632 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 7, 9, 2, 2]  MT224x288  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 9, 7, 2, 2]  MT288x224  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 11, 5, 2, 2]  MT352x160  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 12, 5, 2, 2]  MT384x160  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 12, 5, 2, 2]  MT384x160  +6.2%  No valid DepthU found
 #   [16, 16, 4, 1, 1, 13, 3, 2, 2]  MT416x96  +2.7%  Kernel Uses 67328 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 13, 4, 2, 2]  MT416x128  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 14, 3, 2, 2]  MT448x96  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 14, 3, 2, 2]  MT448x96  +6.2%  No valid DepthU found
 #   [16, 16, 4, 1, 1, 14, 4, 2, 2]  MT448x128  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 15, 1, 2, 2]  MT480x32  +2.0%  Kernel Uses 66816 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 15, 2, 2, 2]  MT480x64  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 15, 3, 2, 2]  MT480x96  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 15, 3, 2, 2]  MT480x96  +12.5%  MFMA non-SourceSwap mode doesn't support miovw(4) with svw(8)
 #   [16, 16, 4, 1, 1, 15, 4, 2, 2]  MT480x128  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 16, 1, 2, 2]  MT512x32  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 16, 2, 2, 2]  MT512x64  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 16, 3, 2, 2]  MT512x96  +18.8%  needs at least 77824 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 16, 3, 2, 2]  MT512x96  +18.8%  No valid DepthU found
 #   [16, 16, 4, 1, 1, 16, 4, 2, 2]  MT512x128  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 17, 1, 2, 2]  MT544x32  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 17, 2, 2, 2]  MT544x64  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 17, 3, 2, 2]  MT544x96  +22.3%  too many vgprs after _initKernel (body skipped)
 #   [16, 16, 4, 1, 1, 18, 1, 2, 2]  MT576x32  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 18, 2, 2, 2]  MT576x64  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 18, 3, 2, 2]  MT576x96  +31.2%  needs at least 86016 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 19, 1, 2, 2]  MT608x32  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
+#   [16, 16, 4, 1, 1, 18, 3, 2, 2]  MT576x96  +31.2%  No valid DepthU found
+#   [16, 16, 4, 1, 1, 19, 1, 2, 2]  MT608x32  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 19, 2, 2, 2]  MT608x64  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 19, 3, 2, 2]  MT608x96  +34.8%  too many vgprs after _initKernel (body skipped)
 #   [16, 16, 4, 1, 1, 20, 1, 2, 2]  MT640x32  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 20, 2, 2, 2]  MT640x64  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 20, 3, 2, 2]  MT640x96  +43.8%  needs at least 94208 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 21, 1, 2, 2]  MT672x32  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
+#   [16, 16, 4, 1, 1, 20, 3, 2, 2]  MT640x96  +43.8%  No valid DepthU found
+#   [16, 16, 4, 1, 1, 21, 1, 2, 2]  MT672x32  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 21, 2, 2, 2]  MT672x64  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 21, 3, 2, 2]  MT672x96  +47.3%  too many vgprs after _initKernel (body skipped)
 #   [16, 16, 4, 1, 1, 22, 1, 2, 2]  MT704x32  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 22, 2, 2, 2]  MT704x64  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 23, 1, 2, 2]  MT736x32  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
+#   [16, 16, 4, 1, 1, 23, 1, 2, 2]  MT736x32  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 23, 2, 2, 2]  MT736x64  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 24, 1, 2, 2]  MT768x32  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 24, 2, 2, 2]  MT768x64  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 25, 1, 2, 2]  MT800x32  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
+#   [16, 16, 4, 1, 1, 25, 1, 2, 2]  MT800x32  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 25, 2, 2, 2]  MT800x64  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 26, 1, 2, 2]  MT832x32  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 26, 2, 2, 2]  MT832x64  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 27, 1, 2, 2]  MT864x32  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
+#   [16, 16, 4, 1, 1, 27, 1, 2, 2]  MT864x32  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 27, 2, 2, 2]  MT864x64  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 28, 1, 2, 2]  MT896x32  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 28, 2, 2, 2]  MT896x64  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 29, 1, 2, 2]  MT928x32  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
+#   [16, 16, 4, 1, 1, 29, 1, 2, 2]  MT928x32  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 29, 2, 2, 2]  MT928x64  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 30, 1, 2, 2]  MT960x32  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 30, 2, 2, 2]  MT960x64  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 31, 1, 2, 2]  MT992x32  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
+#   [16, 16, 4, 1, 1, 31, 1, 2, 2]  MT992x32  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 31, 2, 2, 2]  MT992x64  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 32, 1, 2, 2]  MT1024x32  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 32, 2, 2, 2]  MT1024x64  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 1, 8, 1, 4]  MT16x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 1, 9, 1, 4]  MT16x576  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 10, 1, 4]  MT16x640  +25.0%  needs at least 81920 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 11, 1, 4]  MT16x704  +37.5%  needs at least 90112 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 12, 1, 4]  MT16x768  +50.0%  needs at least 98304 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 13, 1, 4]  MT16x832  +62.5%  needs at least 106496 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 14, 1, 4]  MT16x896  +75.0%  needs at least 114688 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 15, 1, 4]  MT16x960  +87.5%  needs at least 122880 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 16, 1, 4]  MT16x1024  +100.0%  needs at least 131072 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 9, 1, 4]  MT16x576  +12.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 1, 10, 1, 4]  MT16x640  +25.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 1, 11, 1, 4]  MT16x704  +37.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 1, 12, 1, 4]  MT16x768  +50.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 1, 13, 1, 4]  MT16x832  +62.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 1, 14, 1, 4]  MT16x896  +75.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 1, 15, 1, 4]  MT16x960  +87.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 1, 16, 1, 4]  MT16x1024  +100.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
 #   [16, 16, 4, 1, 1, 2, 8, 1, 4]  MT32x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 2, 9, 1, 4]  MT32x576  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 10, 1, 4]  MT32x640  +25.0%  needs at least 81920 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 11, 1, 4]  MT32x704  +37.5%  needs at least 90112 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 12, 1, 4]  MT32x768  +50.0%  needs at least 98304 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 13, 1, 4]  MT32x832  +62.5%  needs at least 106496 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 14, 1, 4]  MT32x896  +75.0%  needs at least 114688 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 15, 1, 4]  MT32x960  +87.5%  needs at least 122880 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 2, 16, 1, 4]  MT32x1024  +100.0%  needs at least 131072 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 2, 9, 1, 4]  MT32x576  +12.5%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 10, 1, 4]  MT32x640  +25.0%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 11, 1, 4]  MT32x704  +37.5%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 12, 1, 4]  MT32x768  +50.0%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 13, 1, 4]  MT32x832  +62.5%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 14, 1, 4]  MT32x896  +75.0%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 15, 1, 4]  MT32x960  +87.5%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 2, 16, 1, 4]  MT32x1024  +100.0%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
 #   [16, 16, 4, 1, 1, 3, 8, 1, 4]  MT48x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 3, 9, 1, 4]  MT48x576  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 3, 10, 1, 4]  MT48x640  +25.0%  needs at least 81920 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 3, 11, 1, 4]  MT48x704  +37.5%  needs at least 90112 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 3, 12, 1, 4]  MT48x768  +50.0%  needs at least 98304 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 3, 13, 1, 4]  MT48x832  +62.5%  needs at least 106496 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 3, 14, 1, 4]  MT48x896  +75.0%  needs at least 114688 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 3, 15, 1, 4]  MT48x960  +87.5%  needs at least 122880 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 3, 16, 1, 4]  MT48x1024  +100.0%  needs at least 131072 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 3, 9, 1, 4]  MT48x576  +12.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 3, 10, 1, 4]  MT48x640  +25.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 3, 11, 1, 4]  MT48x704  +37.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 3, 12, 1, 4]  MT48x768  +50.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 3, 13, 1, 4]  MT48x832  +62.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 3, 14, 1, 4]  MT48x896  +75.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 3, 15, 1, 4]  MT48x960  +87.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 3, 16, 1, 4]  MT48x1024  +100.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
 #   [16, 16, 4, 1, 1, 4, 8, 1, 4]  MT64x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 4, 9, 1, 4]  MT64x576  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 4, 10, 1, 4]  MT64x640  +25.0%  needs at least 81920 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 4, 11, 1, 4]  MT64x704  +37.5%  needs at least 90112 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 4, 12, 1, 4]  MT64x768  +50.0%  needs at least 98304 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 4, 13, 1, 4]  MT64x832  +62.5%  needs at least 106496 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 4, 14, 1, 4]  MT64x896  +75.0%  needs at least 114688 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 4, 15, 1, 4]  MT64x960  +87.5%  needs at least 122880 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 4, 16, 1, 4]  MT64x1024  +100.0%  needs at least 131072 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 4, 9, 1, 4]  MT64x576  +12.5%  DirectToVgprA does not supports TLU + VectorWidthA(=4) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 4, 10, 1, 4]  MT64x640  +25.0%  DirectToVgprA does not supports TLU + VectorWidthA(=4) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 4, 11, 1, 4]  MT64x704  +37.5%  DirectToVgprA does not supports TLU + VectorWidthA(=4) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 4, 12, 1, 4]  MT64x768  +50.0%  DirectToVgprA does not supports TLU + VectorWidthA(=4) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 4, 13, 1, 4]  MT64x832  +62.5%  DirectToVgprA does not supports TLU + VectorWidthA(=4) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 4, 14, 1, 4]  MT64x896  +75.0%  DirectToVgprA does not supports TLU + VectorWidthA(=4) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 4, 15, 1, 4]  MT64x960  +87.5%  DirectToVgprA does not supports TLU + VectorWidthA(=4) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 4, 16, 1, 4]  MT64x1024  +100.0%  DirectToVgprA does not supports TLU + VectorWidthA(=4) != GlobalReadVectorWidthA(2)
 #   [16, 16, 4, 1, 1, 5, 8, 1, 4]  MT80x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 5, 9, 1, 4]  MT80x576  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 5, 10, 1, 4]  MT80x640  +25.0%  needs at least 81920 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 5, 11, 1, 4]  MT80x704  +37.5%  needs at least 90112 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 5, 12, 1, 4]  MT80x768  +50.0%  needs at least 98304 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 5, 9, 1, 4]  MT80x576  +12.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 5, 10, 1, 4]  MT80x640  +25.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 5, 11, 1, 4]  MT80x704  +37.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
+#   [16, 16, 4, 1, 1, 5, 12, 1, 4]  MT80x768  +50.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
 #   [16, 16, 4, 1, 1, 6, 8, 1, 4]  MT96x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 6, 9, 1, 4]  MT96x576  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 6, 10, 1, 4]  MT96x640  +25.0%  needs at least 81920 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 7, 7, 1, 4]  MT112x448  +9.4%  needs at least 71680 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 6, 9, 1, 4]  MT96x576  +12.5%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 6, 10, 1, 4]  MT96x640  +25.0%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [16, 16, 4, 1, 1, 7, 7, 1, 4]  MT112x448  +9.4%  Kernel Uses 71680 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 7, 8, 1, 4]  MT112x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 7, 9, 1, 4]  MT112x576  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 7, 9, 1, 4]  MT112x576  +12.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(2)
 #   [16, 16, 4, 1, 1, 8, 7, 1, 4]  MT128x448  +6.6%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=273, sgprs=72
 #   [16, 16, 4, 1, 1, 8, 8, 1, 4]  MT128x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 9, 6, 1, 4]  MT144x384  +3.1%  needs at least 67584 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 9, 6, 1, 4]  MT144x384  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 9, 7, 1, 4]  MT144x448  +9.4%  Kernel Uses 71680 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 10, 6, 1, 4]  MT160x384  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 10, 6, 1, 4]  MT160x384  +6.2%  Kernel Uses 69632 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 12, 5, 1, 4]  MT192x320  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 20, 3, 1, 4]  MT320x192  +2.3%  Kernel Uses 67072 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 21, 3, 1, 4]  MT336x192  +3.1%  needs at least 67584 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 25, 2, 1, 4]  MT400x128  +3.1%  needs at least 67584 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 26, 2, 1, 4]  MT416x128  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 21, 3, 1, 4]  MT336x192  +3.1%  MFMA non-SourceSwap mode doesn't support miovw(4) with svw(8)
+#   [16, 16, 4, 1, 1, 25, 2, 1, 4]  MT400x128  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
+#   [16, 16, 4, 1, 1, 26, 2, 1, 4]  MT416x128  +6.2%  Kernel Uses 69632 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 27, 2, 1, 4]  MT432x128  +6.2%  Kernel Uses 69632 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 28, 1, 1, 4]  MT448x64  +0.8%  Kernel Uses 66048 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 28, 2, 1, 4]  MT448x128  +6.2%  Kernel Uses 69632 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 29, 1, 1, 4]  MT464x64  +3.1%  needs at least 67584 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 29, 1, 1, 4]  MT464x64  +3.1%  MFMA non-SourceSwap mode doesn't support miovw(4) with svw(8)
 #   [16, 16, 4, 1, 1, 29, 2, 1, 4]  MT464x128  +6.2%  Kernel Uses 69632 > 65536 bytes of LDS
-#   [16, 16, 4, 1, 1, 30, 1, 1, 4]  MT480x64  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 30, 1, 1, 4]  MT480x64  +6.2%  No valid DepthU found
 #   [16, 16, 4, 1, 1, 30, 2, 1, 4]  MT480x128  +6.2%  Kernel Uses 69632 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 31, 1, 1, 4]  MT496x64  +6.2%  Kernel Uses 69632 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 31, 2, 1, 4]  MT496x128  +6.2%  Kernel Uses 69632 > 65536 bytes of LDS
@@ -905,8 +905,8 @@ MatrixInstructions:
 #   [16, 16, 4, 1, 1, 64, 1, 1, 4]  MT1024x64  +6.2%  Kernel Uses 69632 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 1, 16, 1, 2]  MT16x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
 #   [16, 16, 4, 1, 1, 16, 1, 2, 1]  MT512x16  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [32, 32, 2, 1, 1, 1, 13, 4, 1]  MT128x416  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
-#   [32, 32, 2, 1, 1, 1, 14, 4, 1]  MT128x448  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
+#   [32, 32, 2, 1, 1, 1, 13, 4, 1]  MT128x416  +6.2%  Kernel Uses 69632 > 65536 bytes of LDS
+#   [32, 32, 2, 1, 1, 1, 14, 4, 1]  MT128x448  +12.5%  Kernel Uses 73728 > 65536 bytes of LDS
 #   [32, 32, 2, 1, 1, 1, 15, 4, 1]  MT128x480  +5.5%  Kernel Uses 69120 > 65536 bytes of LDS
 #   [32, 32, 2, 1, 1, 1, 16, 4, 1]  MT128x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
 #   [32, 32, 2, 1, 1, 5, 1, 4, 1]  MT640x32  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
@@ -919,14 +919,14 @@ MatrixInstructions:
 #   [32, 32, 2, 1, 1, 8, 1, 4, 1]  MT1024x32  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
 #   [32, 32, 2, 1, 1, 8, 2, 4, 1]  MT1024x64  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
 #   [32, 32, 2, 1, 1, 1, 8, 2, 2]  MT64x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [32, 32, 2, 1, 1, 1, 9, 2, 2]  MT64x576  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
-#   [32, 32, 2, 1, 1, 1, 10, 2, 2]  MT64x640  +25.0%  needs at least 81920 > 65536 bytes of LDS (validation skipped)
-#   [32, 32, 2, 1, 1, 1, 11, 2, 2]  MT64x704  +37.5%  needs at least 90112 > 65536 bytes of LDS (validation skipped)
-#   [32, 32, 2, 1, 1, 1, 12, 2, 2]  MT64x768  +50.0%  needs at least 98304 > 65536 bytes of LDS (validation skipped)
-#   [32, 32, 2, 1, 1, 1, 13, 2, 2]  MT64x832  +62.5%  needs at least 106496 > 65536 bytes of LDS (validation skipped)
-#   [32, 32, 2, 1, 1, 1, 14, 2, 2]  MT64x896  +75.0%  needs at least 114688 > 65536 bytes of LDS (validation skipped)
-#   [32, 32, 2, 1, 1, 1, 15, 2, 2]  MT64x960  +87.5%  needs at least 122880 > 65536 bytes of LDS (validation skipped)
-#   [32, 32, 2, 1, 1, 1, 16, 2, 2]  MT64x1024  +100.0%  needs at least 131072 > 65536 bytes of LDS (validation skipped)
+#   [32, 32, 2, 1, 1, 1, 9, 2, 2]  MT64x576  +12.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [32, 32, 2, 1, 1, 1, 10, 2, 2]  MT64x640  +25.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [32, 32, 2, 1, 1, 1, 11, 2, 2]  MT64x704  +37.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [32, 32, 2, 1, 1, 1, 12, 2, 2]  MT64x768  +50.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [32, 32, 2, 1, 1, 1, 13, 2, 2]  MT64x832  +62.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [32, 32, 2, 1, 1, 1, 14, 2, 2]  MT64x896  +75.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [32, 32, 2, 1, 1, 1, 15, 2, 2]  MT64x960  +87.5%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [32, 32, 2, 1, 1, 1, 16, 2, 2]  MT64x1024  +100.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
 #   [32, 32, 2, 1, 1, 2, 7, 2, 2]  MT128x448  +3.5%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=265, sgprs=72
 #   [32, 32, 2, 1, 1, 2, 8, 2, 2]  MT128x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
 #   [32, 32, 2, 1, 1, 7, 2, 2, 2]  MT448x128  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
@@ -941,20 +941,20 @@ MatrixInstructions:
 #   [32, 32, 2, 1, 1, 15, 1, 2, 2]  MT960x64  +0.8%  Kernel Uses 66048 > 65536 bytes of LDS
 #   [32, 32, 2, 1, 1, 16, 1, 2, 2]  MT1024x64  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
 #   [32, 32, 2, 1, 1, 1, 4, 1, 4]  MT32x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [32, 32, 2, 1, 1, 1, 5, 1, 4]  MT32x640  +25.0%  needs at least 81920 > 65536 bytes of LDS (validation skipped)
-#   [32, 32, 2, 1, 1, 1, 6, 1, 4]  MT32x768  +50.0%  needs at least 98304 > 65536 bytes of LDS (validation skipped)
-#   [32, 32, 2, 1, 1, 1, 7, 1, 4]  MT32x896  +75.0%  needs at least 114688 > 65536 bytes of LDS (validation skipped)
-#   [32, 32, 2, 1, 1, 1, 8, 1, 4]  MT32x1024  +100.0%  needs at least 131072 > 65536 bytes of LDS (validation skipped)
+#   [32, 32, 2, 1, 1, 1, 5, 1, 4]  MT32x640  +25.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [32, 32, 2, 1, 1, 1, 6, 1, 4]  MT32x768  +50.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [32, 32, 2, 1, 1, 1, 7, 1, 4]  MT32x896  +75.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
+#   [32, 32, 2, 1, 1, 1, 8, 1, 4]  MT32x1024  +100.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
 #   [32, 32, 2, 1, 1, 2, 4, 1, 4]  MT64x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [32, 32, 2, 1, 1, 2, 5, 1, 4]  MT64x640  +25.0%  needs at least 81920 > 65536 bytes of LDS (validation skipped)
-#   [32, 32, 2, 1, 1, 2, 6, 1, 4]  MT64x768  +50.0%  needs at least 98304 > 65536 bytes of LDS (validation skipped)
-#   [32, 32, 2, 1, 1, 2, 7, 1, 4]  MT64x896  +75.0%  needs at least 114688 > 65536 bytes of LDS (validation skipped)
-#   [32, 32, 2, 1, 1, 2, 8, 1, 4]  MT64x1024  +100.0%  needs at least 131072 > 65536 bytes of LDS (validation skipped)
+#   [32, 32, 2, 1, 1, 2, 5, 1, 4]  MT64x640  +25.0%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [32, 32, 2, 1, 1, 2, 6, 1, 4]  MT64x768  +50.0%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [32, 32, 2, 1, 1, 2, 7, 1, 4]  MT64x896  +75.0%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
+#   [32, 32, 2, 1, 1, 2, 8, 1, 4]  MT64x1024  +100.0%  DirectToVgprA does not supports TLU + VectorWidthA(=2) != GlobalReadVectorWidthA(4)
 #   [32, 32, 2, 1, 1, 3, 4, 1, 4]  MT96x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [32, 32, 2, 1, 1, 3, 5, 1, 4]  MT96x640  +25.0%  needs at least 81920 > 65536 bytes of LDS (validation skipped)
+#   [32, 32, 2, 1, 1, 3, 5, 1, 4]  MT96x640  +25.0%  DirectToVgprA does not supports TLU + VectorWidthA(=1) != GlobalReadVectorWidthA(4)
 #   [32, 32, 2, 1, 1, 4, 4, 1, 4]  MT128x512  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [32, 32, 2, 1, 1, 5, 3, 1, 4]  MT160x384  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
-#   [32, 32, 2, 1, 1, 13, 1, 1, 4]  MT416x128  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
+#   [32, 32, 2, 1, 1, 5, 3, 1, 4]  MT160x384  +6.2%  Kernel Uses 69632 > 65536 bytes of LDS
+#   [32, 32, 2, 1, 1, 13, 1, 1, 4]  MT416x128  +6.2%  Kernel Uses 69632 > 65536 bytes of LDS
 #   [32, 32, 2, 1, 1, 14, 1, 1, 4]  MT448x128  +6.2%  Kernel Uses 69632 > 65536 bytes of LDS
 #   [32, 32, 2, 1, 1, 15, 1, 1, 4]  MT480x128  +6.2%  Kernel Uses 69632 > 65536 bytes of LDS
 #   [32, 32, 2, 1, 1, 16, 1, 1, 4]  MT512x128  +6.2%  Kernel Uses 69632 > 65536 bytes of LDS

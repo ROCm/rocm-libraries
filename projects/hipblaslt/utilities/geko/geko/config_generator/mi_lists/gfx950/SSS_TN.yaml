@@ -7,7 +7,7 @@
 
 Architecture: gfx950
 GemmType: SSS_TN
-Source: rocm-libraries 501708505c, 2026-10-21
+Source: rocm-libraries 1a33436bd6, 2026-11-16
 DepthU: [32, 64, 128, 256, 512, 1024]  # searched
 MatrixInstructions:
   - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 1, 4, 1], DepthU: [32, 64, 128, 256]}  # MT64x16
@@ -941,7 +941,7 @@ MatrixInstructions:
 #   [16, 16, 4, 1, 1, 1, 53, 4, 1]  MT64x848  +10.9%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=284, sgprs=70
 #   [16, 16, 4, 1, 1, 1, 55, 4, 1]  MT64x880  +14.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=294, sgprs=70
 #   [16, 16, 4, 1, 1, 1, 57, 4, 1]  MT64x912  +18.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=304, sgprs=70
-#   [16, 16, 4, 1, 1, 1, 59, 4, 1]  MT64x944  +21.6%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=257, sgprs=124
+#   [16, 16, 4, 1, 1, 1, 59, 4, 1]  MT64x944  +21.6%  overflowed resources.  errorCode=2, msg="too many sgprs", vgprs=257, sgprs=124
 #   [16, 16, 4, 1, 1, 1, 60, 4, 1]  MT64x960  +1.2%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=259, sgprs=100
 #   [16, 16, 4, 1, 1, 1, 61, 4, 1]  MT64x976  +1.6%  Kernel Uses 166400 > 163840 bytes of LDS
 #   [16, 16, 4, 1, 1, 1, 62, 4, 1]  MT64x992  +4.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=267, sgprs=102
@@ -952,7 +952,7 @@ MatrixInstructions:
 #   [16, 16, 4, 1, 1, 53, 1, 1, 4]  MT848x64  +10.9%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=284, sgprs=70
 #   [16, 16, 4, 1, 1, 55, 1, 1, 4]  MT880x64  +14.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=294, sgprs=70
 #   [16, 16, 4, 1, 1, 57, 1, 1, 4]  MT912x64  +18.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=304, sgprs=70
-#   [16, 16, 4, 1, 1, 59, 1, 1, 4]  MT944x64  +21.6%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=257, sgprs=124
+#   [16, 16, 4, 1, 1, 59, 1, 1, 4]  MT944x64  +21.6%  overflowed resources.  errorCode=2, msg="too many sgprs", vgprs=257, sgprs=124
 #   [16, 16, 4, 1, 1, 60, 1, 1, 4]  MT960x64  +1.2%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=259, sgprs=100
 #   [16, 16, 4, 1, 1, 61, 1, 1, 4]  MT976x64  +1.6%  Kernel Uses 166400 > 163840 bytes of LDS
 #   [16, 16, 4, 1, 1, 62, 1, 1, 4]  MT992x64  +4.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=267, sgprs=102

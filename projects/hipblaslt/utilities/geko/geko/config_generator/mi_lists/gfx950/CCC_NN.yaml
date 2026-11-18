@@ -7,7 +7,7 @@
 
 Architecture: gfx950
 GemmType: CCC_NN
-Source: rocm-libraries 501708505c, 2026-10-26
+Source: rocm-libraries 1a33436bd6, 2026-11-16
 DepthU: [16, 32, 64, 128, 256]  # searched
 MatrixInstructions:
   - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 1, 4, 1], DepthU: [16, 32, 64, 128]}  # MT64x16
@@ -389,8 +389,8 @@ MatrixInstructions:
 
 # Not buildable (closest kernel: overflow of its most over-used resource, and why):
 #   [16, 16, 4, 1, 1, 1, 30, 2, 2]  MT32x960  +0.8%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=258, sgprs=102
-#   [16, 16, 4, 1, 1, 1, 31, 2, 2]  MT32x992  +3.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=266, sgprs=104
-#   [16, 16, 4, 1, 1, 1, 32, 2, 2]  MT32x1024  +7.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=276, sgprs=104
+#   [16, 16, 4, 1, 1, 1, 31, 2, 2]  MT32x992  +3.9%  overflowed resources.  errorCode=2, msg="too many sgprs", vgprs=266, sgprs=104
+#   [16, 16, 4, 1, 1, 1, 32, 2, 2]  MT32x1024  +7.8%  overflowed resources.  errorCode=2, msg="too many sgprs", vgprs=276, sgprs=104
 #   [16, 16, 4, 1, 1, 27, 1, 2, 2]  MT864x32  +1.6%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=260, sgprs=72
 #   [16, 16, 4, 1, 1, 28, 1, 2, 2]  MT896x32  +5.1%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=269, sgprs=72
 #   [16, 16, 4, 1, 1, 29, 1, 2, 2]  MT928x32  +8.6%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=278, sgprs=72

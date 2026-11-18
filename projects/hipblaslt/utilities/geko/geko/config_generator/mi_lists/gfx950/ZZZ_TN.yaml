@@ -7,7 +7,7 @@
 
 Architecture: gfx950
 GemmType: ZZZ_TN
-Source: rocm-libraries 501708505c, 2026-10-26
+Source: rocm-libraries 1a33436bd6, 2026-11-16
 DepthU: [8, 16, 32, 64, 128]  # searched
 MatrixInstructions:
   - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 1, 4, 1], DepthU: [16, 32, 64, 128]}  # MT64x16
@@ -171,18 +171,18 @@ MatrixInstructions:
 
 # Not buildable (closest kernel: overflow of its most over-used resource, and why):
 #   [16, 16, 4, 1, 1, 9, 1, 4, 1]  MT576x16  +3.9%  overflowed resources.  errorCode=2, msg="too many sgprs", vgprs=256, sgprs=106
-#   [16, 16, 4, 1, 1, 10, 1, 4, 1]  MT640x16  +2.5%  needs at least 167936 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 11, 1, 4, 1]  MT704x16  +12.5%  needs at least 184320 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 12, 1, 4, 1]  MT768x16  +22.5%  needs at least 200704 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 13, 1, 4, 1]  MT832x16  +32.5%  needs at least 217088 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 14, 1, 4, 1]  MT896x16  +42.5%  needs at least 233472 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 15, 1, 4, 1]  MT960x16  +52.5%  needs at least 249856 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 16, 1, 4, 1]  MT1024x16  +62.5%  needs at least 266240 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 10, 1, 4, 1]  MT640x16  +2.5%  Kernel Uses 167936 > 163840 bytes of LDS
+#   [16, 16, 4, 1, 1, 11, 1, 4, 1]  MT704x16  +12.5%  Kernel Uses 184320 > 163840 bytes of LDS
+#   [16, 16, 4, 1, 1, 12, 1, 4, 1]  MT768x16  +22.5%  Kernel Uses 200704 > 163840 bytes of LDS
+#   [16, 16, 4, 1, 1, 13, 1, 4, 1]  MT832x16  +32.5%  Kernel Uses 217088 > 163840 bytes of LDS
+#   [16, 16, 4, 1, 1, 14, 1, 4, 1]  MT896x16  +42.5%  Kernel Uses 233472 > 163840 bytes of LDS
+#   [16, 16, 4, 1, 1, 15, 1, 4, 1]  MT960x16  +52.5%  Kernel Uses 249856 > 163840 bytes of LDS
+#   [16, 16, 4, 1, 1, 16, 1, 4, 1]  MT1024x16  +62.5%  Kernel Uses 266240 > 163840 bytes of LDS
 #   [16, 16, 4, 1, 1, 1, 9, 1, 4]  MT16x576  +3.9%  overflowed resources.  errorCode=2, msg="too many sgprs", vgprs=256, sgprs=106
-#   [16, 16, 4, 1, 1, 1, 10, 1, 4]  MT16x640  +2.5%  needs at least 167936 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 11, 1, 4]  MT16x704  +12.5%  needs at least 184320 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 12, 1, 4]  MT16x768  +22.5%  needs at least 200704 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 13, 1, 4]  MT16x832  +32.5%  needs at least 217088 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 14, 1, 4]  MT16x896  +42.5%  needs at least 233472 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 15, 1, 4]  MT16x960  +52.5%  needs at least 249856 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 4, 1, 1, 1, 16, 1, 4]  MT16x1024  +62.5%  needs at least 266240 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 10, 1, 4]  MT16x640  +2.5%  Kernel Uses 167936 > 163840 bytes of LDS
+#   [16, 16, 4, 1, 1, 1, 11, 1, 4]  MT16x704  +12.5%  Kernel Uses 184320 > 163840 bytes of LDS
+#   [16, 16, 4, 1, 1, 1, 12, 1, 4]  MT16x768  +22.5%  Kernel Uses 200704 > 163840 bytes of LDS
+#   [16, 16, 4, 1, 1, 1, 13, 1, 4]  MT16x832  +32.5%  Kernel Uses 217088 > 163840 bytes of LDS
+#   [16, 16, 4, 1, 1, 1, 14, 1, 4]  MT16x896  +42.5%  Kernel Uses 233472 > 163840 bytes of LDS
+#   [16, 16, 4, 1, 1, 1, 15, 1, 4]  MT16x960  +52.5%  Kernel Uses 249856 > 163840 bytes of LDS
+#   [16, 16, 4, 1, 1, 1, 16, 1, 4]  MT16x1024  +62.5%  Kernel Uses 266240 > 163840 bytes of LDS

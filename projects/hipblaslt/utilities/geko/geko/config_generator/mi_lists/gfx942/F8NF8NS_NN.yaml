@@ -7,7 +7,7 @@
 
 Architecture: gfx942
 GemmType: F8NF8NS_NN
-Source: rocm-libraries 501708505c, 2026-10-22
+Source: rocm-libraries 1a33436bd6, 2026-11-17
 DepthU: [32, 64, 128, 256, 512, 1024]  # searched
 MatrixInstructions:
   - {MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 4, 1], DepthU: [32, 64, 128, 256, 512]}  # MT64x16
@@ -1268,15 +1268,15 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 2, 54, 4, 1]  MT128x864  +2.2%  Kernel Uses 67008 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 2, 55, 4, 1]  MT128x880  +3.9%  Kernel Uses 68064 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 2, 56, 4, 1]  MT128x896  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
-#   [16, 16, 32, 1, 1, 2, 57, 4, 1]  MT128x912  +1.6%  needs at least 66560 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 2, 58, 4, 1]  MT128x928  +3.1%  needs at least 67584 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 2, 57, 4, 1]  MT128x912  +1.6%  No valid DepthU found
+#   [16, 16, 32, 1, 1, 2, 58, 4, 1]  MT128x928  +3.1%  No valid DepthU found
 #   [16, 16, 32, 1, 1, 3, 31, 4, 1]  MT192x496  +4.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=267, sgprs=70
-#   [16, 16, 32, 1, 1, 3, 33, 4, 1]  MT192x528  +3.1%  needs at least 67584 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 3, 33, 4, 1]  MT192x528  +7.5%  Kernel Uses 70464 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 3, 34, 4, 1]  MT192x544  +2.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=262, sgprs=72
-#   [16, 16, 32, 1, 1, 3, 35, 4, 1]  MT192x560  +9.4%  needs at least 71680 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 3, 36, 4, 1]  MT192x576  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 3, 37, 4, 1]  MT192x592  +15.6%  needs at least 75776 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 3, 38, 4, 1]  MT192x608  +18.8%  needs at least 77824 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 3, 35, 4, 1]  MT192x560  +12.2%  Kernel Uses 73536 > 65536 bytes of LDS
+#   [16, 16, 32, 1, 1, 3, 36, 4, 1]  MT192x576  +13.7%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=291, sgprs=72
+#   [16, 16, 32, 1, 1, 3, 37, 4, 1]  MT192x592  +16.9%  Kernel Uses 76608 > 65536 bytes of LDS
+#   [16, 16, 32, 1, 1, 3, 38, 4, 1]  MT192x608  +25.0%  too many vgprs after _initKernel (body skipped)
 #   [16, 16, 32, 1, 1, 4, 25, 4, 1]  MT256x400  +1.6%  Kernel Uses 66592 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 4, 26, 4, 1]  MT256x416  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=258, sgprs=76
 #   [16, 16, 32, 1, 1, 4, 27, 4, 1]  MT256x432  +2.8%  Kernel Uses 67392 > 65536 bytes of LDS
@@ -1300,13 +1300,13 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 13, 8, 4, 1]  MT832x128  +7.4%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=275, sgprs=72
 #   [16, 16, 32, 1, 1, 14, 7, 4, 1]  MT896x112  +2.0%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=261, sgprs=70
 #   [16, 16, 32, 1, 1, 14, 8, 4, 1]  MT896x128  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
-#   [16, 16, 32, 1, 1, 15, 7, 4, 1]  MT960x112  +4.7%  needs at least 68608 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 16, 7, 4, 1]  MT1024x112  +10.9%  needs at least 72704 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 15, 7, 4, 1]  MT960x112  +4.7%  MFMA non-SourceSwap mode doesn't support miovw(4) with svw(8)
+#   [16, 16, 32, 1, 1, 16, 7, 4, 1]  MT1024x112  +10.9%  No valid DepthU found
 #   [16, 16, 32, 1, 1, 3, 31, 2, 2]  MT96x992  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=260, sgprs=70
 #   [16, 16, 32, 1, 1, 4, 26, 2, 2]  MT128x832  +0.6%  Kernel Uses 65920 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 4, 27, 2, 2]  MT128x864  +2.2%  Kernel Uses 67008 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 4, 28, 2, 2]  MT128x896  +0.8%  Kernel Uses 66048 > 65536 bytes of LDS
-#   [16, 16, 32, 1, 1, 4, 29, 2, 2]  MT128x928  +3.1%  needs at least 67584 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 4, 29, 2, 2]  MT128x928  +3.1%  No valid DepthU found
 #   [16, 16, 32, 1, 1, 5, 22, 2, 2]  MT160x704  +9.0%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=279, sgprs=72
 #   [16, 16, 32, 1, 1, 5, 23, 2, 2]  MT160x736  +18.0%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=302, sgprs=72
 #   [16, 16, 32, 1, 1, 6, 18, 2, 2]  MT192x576  +2.0%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=261, sgprs=72
@@ -1330,11 +1330,11 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 26, 4, 2, 2]  MT832x128  +0.8%  Kernel Uses 66048 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 27, 4, 2, 2]  MT864x128  +2.7%  Kernel Uses 67328 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 28, 4, 2, 2]  MT896x128  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
-#   [16, 16, 32, 1, 1, 29, 4, 2, 2]  MT928x128  +3.1%  needs at least 67584 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 31, 3, 2, 2]  MT992x96  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 32, 3, 2, 2]  MT1024x96  +9.4%  needs at least 71680 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 7, 15, 1, 4]  MT112x960  +4.7%  needs at least 68608 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 7, 16, 1, 4]  MT112x1024  +10.9%  needs at least 72704 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 29, 4, 2, 2]  MT928x128  +3.1%  MFMA non-SourceSwap mode doesn't support miovw(4) with svw(8)
+#   [16, 16, 32, 1, 1, 31, 3, 2, 2]  MT992x96  +6.2%  MFMA non-SourceSwap mode doesn't support miovw(4) with svw(8)
+#   [16, 16, 32, 1, 1, 32, 3, 2, 2]  MT1024x96  +9.4%  No valid DepthU found
+#   [16, 16, 32, 1, 1, 7, 15, 1, 4]  MT112x960  +4.7%  MFMA non-SourceSwap mode doesn't support miovw(4) with svw(8)
+#   [16, 16, 32, 1, 1, 7, 16, 1, 4]  MT112x1024  +10.9%  Kernel Uses 72704 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 8, 14, 1, 4]  MT128x896  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 9, 12, 1, 4]  MT144x768  +10.2%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=282, sgprs=70
 #   [16, 16, 32, 1, 1, 10, 11, 1, 4]  MT160x704  +4.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=267, sgprs=72
@@ -1383,11 +1383,11 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 55, 2, 1, 4]  MT880x128  +4.7%  Kernel Uses 68608 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 56, 2, 1, 4]  MT896x128  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 57, 1, 1, 4]  MT912x64  +1.6%  Kernel Uses 66560 > 65536 bytes of LDS
-#   [16, 16, 32, 1, 1, 57, 2, 1, 4]  MT912x128  +1.6%  needs at least 66560 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 58, 2, 1, 4]  MT928x128  +3.1%  needs at least 67584 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 57, 2, 1, 4]  MT912x128  +1.6%  MFMA non-SourceSwap mode doesn't support miovw(4) with svw(8)
+#   [16, 16, 32, 1, 1, 58, 2, 1, 4]  MT928x128  +3.1%  No valid DepthU found
 #   [16, 16, 32, 1, 1, 59, 1, 1, 4]  MT944x64  +4.7%  Kernel Uses 68608 > 65536 bytes of LDS
-#   [16, 16, 32, 1, 1, 61, 1, 1, 4]  MT976x64  +1.6%  needs at least 66560 > 65536 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 63, 1, 1, 4]  MT1008x64  +4.7%  needs at least 68608 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 61, 1, 1, 4]  MT976x64  +1.6%  MFMA non-SourceSwap mode doesn't support miovw(4) with svw(8)
+#   [16, 16, 32, 1, 1, 63, 1, 1, 4]  MT1008x64  +4.7%  MFMA non-SourceSwap mode doesn't support miovw(4) with svw(8)
 #   [32, 32, 16, 1, 1, 1, 24, 4, 1]  MT128x768  +3.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=266, sgprs=72
 #   [32, 32, 16, 1, 1, 1, 25, 4, 1]  MT128x800  +0.4%  Kernel Uses 65792 > 65536 bytes of LDS
 #   [32, 32, 16, 1, 1, 1, 26, 4, 1]  MT128x832  +3.9%  Kernel Uses 68096 > 65536 bytes of LDS

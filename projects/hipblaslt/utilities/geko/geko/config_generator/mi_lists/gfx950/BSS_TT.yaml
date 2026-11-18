@@ -7,7 +7,7 @@
 
 Architecture: gfx950
 GemmType: BSS_TT
-Source: rocm-libraries 501708505c, 2026-10-26
+Source: rocm-libraries 1a33436bd6, 2026-11-17
 DepthU: [32, 64, 128, 256, 512, 1024]  # searched
 MatrixInstructions:
   - {MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 4, 1], DepthU: [32, 64, 128, 256, 512]}  # MT64x16
@@ -1207,14 +1207,14 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 2, 56, 4, 1]  MT128x896  +20.2%  Kernel Uses 196864 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 2, 57, 4, 1]  MT128x912  +0.3%  Kernel Uses 164352 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 2, 58, 4, 1]  MT128x928  +1.2%  Kernel Uses 165888 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 3, 29, 4, 1]  MT192x464  +2.5%  needs at least 167936 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 3, 30, 4, 1]  MT192x480  +5.0%  needs at least 172032 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 3, 31, 4, 1]  MT192x496  +7.5%  needs at least 176128 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 3, 32, 4, 1]  MT192x512  +10.0%  needs at least 180224 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 3, 29, 4, 1]  MT192x464  +2.8%  Kernel Uses 168448 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 3, 30, 4, 1]  MT192x480  +5.3%  Kernel Uses 172544 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 3, 31, 4, 1]  MT192x496  +7.8%  Kernel Uses 176640 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 3, 32, 4, 1]  MT192x512  +10.3%  Kernel Uses 180736 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 3, 33, 4, 1]  MT192x528  +1.2%  Kernel Uses 165888 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 3, 34, 4, 1]  MT192x544  +3.6%  Kernel Uses 169728 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 3, 35, 4, 1]  MT192x560  +5.9%  Kernel Uses 173568 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 3, 36, 4, 1]  MT192x576  +20.0%  needs at least 196608 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 3, 36, 4, 1]  MT192x576  +20.3%  Kernel Uses 197120 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 3, 37, 4, 1]  MT192x592  +10.6%  Kernel Uses 181248 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 3, 38, 4, 1]  MT192x608  +13.0%  Kernel Uses 185088 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 4, 23, 4, 1]  MT256x368  +0.3%  Kernel Uses 164352 > 163840 bytes of LDS
@@ -1226,14 +1226,14 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 4, 29, 4, 1]  MT256x464  +12.5%  Kernel Uses 184320 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 5, 19, 4, 1]  MT320x304  +0.6%  Kernel Uses 164864 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 5, 20, 4, 1]  MT320x320  +0.3%  Kernel Uses 164352 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 5, 21, 4, 1]  MT320x336  +2.5%  needs at least 167936 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 5, 22, 4, 1]  MT320x352  +5.0%  needs at least 172032 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 5, 23, 4, 1]  MT320x368  +7.5%  needs at least 176128 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 6, 17, 4, 1]  MT384x272  +2.5%  needs at least 167936 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 6, 18, 4, 1]  MT384x288  +5.0%  needs at least 172032 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 6, 19, 4, 1]  MT384x304  +7.5%  needs at least 176128 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 7, 15, 4, 1]  MT448x240  +7.5%  needs at least 176128 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 7, 16, 4, 1]  MT448x256  +10.0%  needs at least 180224 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 5, 21, 4, 1]  MT320x336  +2.8%  Kernel Uses 168448 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 5, 22, 4, 1]  MT320x352  +5.3%  Kernel Uses 172544 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 5, 23, 4, 1]  MT320x368  +7.8%  Kernel Uses 176640 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 6, 17, 4, 1]  MT384x272  +2.8%  Kernel Uses 168448 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 6, 18, 4, 1]  MT384x288  +5.3%  Kernel Uses 172544 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 6, 19, 4, 1]  MT384x304  +7.8%  Kernel Uses 176640 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 7, 15, 4, 1]  MT448x240  +7.8%  Kernel Uses 176640 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 7, 16, 4, 1]  MT448x256  +10.3%  Kernel Uses 180736 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 8, 13, 4, 1]  MT512x208  +10.2%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=282, sgprs=72
 #   [16, 16, 32, 1, 1, 8, 14, 4, 1]  MT512x224  +15.0%  Kernel Uses 188416 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 9, 12, 4, 1]  MT576x192  +12.5%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=288, sgprs=72
@@ -1265,19 +1265,19 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 6, 17, 2, 2]  MT192x544  +3.6%  Kernel Uses 169728 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 6, 18, 2, 2]  MT192x576  +15.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=296, sgprs=74
 #   [16, 16, 32, 1, 1, 6, 19, 2, 2]  MT192x608  +13.0%  Kernel Uses 185088 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 7, 14, 2, 2]  MT224x448  +5.0%  needs at least 172032 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 7, 14, 2, 2]  MT224x448  +5.3%  Kernel Uses 172544 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 7, 15, 2, 2]  MT224x480  +3.1%  Kernel Uses 168960 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 7, 16, 2, 2]  MT224x512  +15.0%  needs at least 188416 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 7, 16, 2, 2]  MT224x512  +15.3%  Kernel Uses 188928 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 8, 13, 2, 2]  MT256x416  +5.0%  Kernel Uses 172032 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 8, 14, 2, 2]  MT256x448  +10.0%  Kernel Uses 180224 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 9, 11, 2, 2]  MT288x352  +0.3%  Kernel Uses 164352 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 9, 12, 2, 2]  MT288x384  +5.0%  needs at least 172032 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 10, 11, 2, 2]  MT320x352  +5.0%  needs at least 172032 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 9, 12, 2, 2]  MT288x384  +5.3%  Kernel Uses 172544 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 10, 11, 2, 2]  MT320x352  +5.3%  Kernel Uses 172544 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 11, 9, 2, 2]  MT352x288  +0.3%  Kernel Uses 164352 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 11, 10, 2, 2]  MT352x320  +5.0%  needs at least 172032 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 11, 10, 2, 2]  MT352x320  +5.3%  Kernel Uses 172544 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 12, 9, 2, 2]  MT384x288  +5.0%  Kernel Uses 172032 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 13, 8, 2, 2]  MT416x256  +5.0%  needs at least 172032 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 14, 8, 2, 2]  MT448x256  +10.0%  needs at least 180224 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 13, 8, 2, 2]  MT416x256  +5.3%  Kernel Uses 172544 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 14, 8, 2, 2]  MT448x256  +10.6%  Kernel Uses 181248 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 15, 7, 2, 2]  MT480x224  +3.1%  Kernel Uses 168960 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 16, 7, 2, 2]  MT512x224  +15.0%  Kernel Uses 188416 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 17, 6, 2, 2]  MT544x192  +2.2%  Kernel Uses 167424 > 163840 bytes of LDS
@@ -1313,28 +1313,28 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 11, 9, 1, 4]  MT176x576  +9.4%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=280, sgprs=72
 #   [16, 16, 32, 1, 1, 11, 10, 1, 4]  MT176x640  +0.8%  Kernel Uses 165120 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 12, 9, 1, 4]  MT192x576  +8.3%  Kernel Uses 177408 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 13, 8, 1, 4]  MT208x512  +12.5%  needs at least 184320 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 14, 7, 1, 4]  MT224x448  +5.0%  needs at least 172032 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 14, 8, 1, 4]  MT224x512  +15.0%  needs at least 188416 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 13, 8, 1, 4]  MT208x512  +12.8%  Kernel Uses 184832 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 14, 7, 1, 4]  MT224x448  +5.3%  Kernel Uses 172544 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 14, 8, 1, 4]  MT224x512  +15.6%  Kernel Uses 189440 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 15, 7, 1, 4]  MT240x448  +0.8%  Kernel Uses 165120 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 16, 7, 1, 4]  MT256x448  +10.0%  Kernel Uses 180224 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 17, 6, 1, 4]  MT272x384  +2.5%  needs at least 167936 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 18, 6, 1, 4]  MT288x384  +5.0%  needs at least 172032 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 17, 6, 1, 4]  MT272x384  +2.8%  Kernel Uses 168448 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 18, 6, 1, 4]  MT288x384  +5.3%  Kernel Uses 172544 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 19, 5, 1, 4]  MT304x320  +4.7%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=268, sgprs=72
 #   [16, 16, 32, 1, 1, 19, 6, 1, 4]  MT304x384  +0.8%  Kernel Uses 165120 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 20, 5, 1, 4]  MT320x320  +0.3%  Kernel Uses 164352 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 21, 5, 1, 4]  MT336x320  +2.5%  needs at least 167936 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 22, 5, 1, 4]  MT352x320  +5.0%  needs at least 172032 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 21, 5, 1, 4]  MT336x320  +2.8%  Kernel Uses 168448 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 22, 5, 1, 4]  MT352x320  +5.3%  Kernel Uses 172544 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 23, 4, 1, 4]  MT368x256  +2.8%  Kernel Uses 168448 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 23, 5, 1, 4]  MT368x320  +0.8%  Kernel Uses 165120 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 24, 4, 1, 4]  MT384x256  +0.6%  Kernel Uses 164864 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 25, 4, 1, 4]  MT400x256  +2.5%  needs at least 167936 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 26, 4, 1, 4]  MT416x256  +5.0%  needs at least 172032 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 32, 1, 1, 27, 4, 1, 4]  MT432x256  +7.5%  needs at least 176128 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 25, 4, 1, 4]  MT400x256  +2.8%  Kernel Uses 168448 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 26, 4, 1, 4]  MT416x256  +5.6%  Kernel Uses 173056 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 27, 4, 1, 4]  MT432x256  +7.8%  Kernel Uses 176640 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 28, 4, 1, 4]  MT448x256  +10.0%  Kernel Uses 180224 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 29, 3, 1, 4]  MT464x192  +2.5%  needs at least 167936 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 29, 3, 1, 4]  MT464x192  +2.8%  Kernel Uses 168448 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 29, 4, 1, 4]  MT464x256  +1.7%  Kernel Uses 166656 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 30, 3, 1, 4]  MT480x192  +5.0%  needs at least 172032 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 32, 1, 1, 30, 3, 1, 4]  MT480x192  +5.3%  Kernel Uses 172544 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 31, 3, 1, 4]  MT496x192  +0.8%  Kernel Uses 165120 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 32, 3, 1, 4]  MT512x192  +10.0%  Kernel Uses 180224 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 33, 3, 1, 4]  MT528x192  +5.5%  Kernel Uses 172800 > 163840 bytes of LDS

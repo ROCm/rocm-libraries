@@ -7,7 +7,7 @@
 
 Architecture: gfx950
 GemmType: F8B8BS_NT
-Source: rocm-libraries 501708505c, 2026-10-26
+Source: rocm-libraries 1a33436bd6, 2026-11-16
 DepthU: [32, 64, 128, 256, 512, 1024]  # searched
 MatrixInstructions:
   - {MatrixInstruction: [16, 16, 128, 1, 1, 1, 1, 4, 1], DepthU: [128, 256, 512, 1024]}  # MT64x16
@@ -1325,19 +1325,19 @@ MatrixInstructions:
 #   [16, 16, 128, 1, 1, 15, 1, 2, 1]  MT480x16  +17.1%  Kernel Uses 191872 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 16, 1, 2, 1]  MT512x16  +21.2%  Kernel Uses 198656 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 1, 9, 1, 1]  MT16x144  +0.6%  Kernel Uses 164864 > 163840 bytes of LDS
-#   [16, 16, 128, 1, 1, 1, 10, 1, 1]  MT16x160  +10.0%  needs at least 180224 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 128, 1, 1, 1, 11, 1, 1]  MT16x176  +20.0%  needs at least 196608 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 128, 1, 1, 1, 10, 1, 1]  MT16x160  +10.0%  Kernel Uses 180224 > 163840 bytes of LDS
+#   [16, 16, 128, 1, 1, 1, 11, 1, 1]  MT16x176  +20.0%  Kernel Uses 196608 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 1, 12, 1, 1]  MT16x192  +3.1%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=264, sgprs=76
-#   [16, 16, 128, 1, 1, 1, 13, 1, 1]  MT16x208  +40.0%  needs at least 229376 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 128, 1, 1, 1, 14, 1, 1]  MT16x224  +50.0%  needs at least 245760 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 128, 1, 1, 1, 13, 1, 1]  MT16x208  +40.0%  Kernel Uses 229376 > 163840 bytes of LDS
+#   [16, 16, 128, 1, 1, 1, 14, 1, 1]  MT16x224  +50.0%  Kernel Uses 245760 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 1, 15, 1, 1]  MT16x240  +20.2%  Kernel Uses 196864 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 1, 16, 1, 1]  MT16x256  +22.5%  Kernel Uses 200704 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 9, 1, 1, 1]  MT144x16  +1.2%  Kernel Uses 165888 > 163840 bytes of LDS
-#   [16, 16, 128, 1, 1, 10, 1, 1, 1]  MT160x16  +10.0%  needs at least 180224 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 128, 1, 1, 11, 1, 1, 1]  MT176x16  +20.0%  needs at least 196608 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 128, 1, 1, 10, 1, 1, 1]  MT160x16  +10.0%  LocalSplitU but NumThreads=256 not divisible by MT0=160 for sideways store
+#   [16, 16, 128, 1, 1, 11, 1, 1, 1]  MT176x16  +20.0%  LocalSplitU but NumThreads=256 not divisible by MT0=176 for sideways store
 #   [16, 16, 128, 1, 1, 12, 1, 1, 1]  MT192x16  +3.1%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=264, sgprs=76
-#   [16, 16, 128, 1, 1, 13, 1, 1, 1]  MT208x16  +40.0%  needs at least 229376 > 163840 bytes of LDS (validation skipped)
-#   [16, 16, 128, 1, 1, 14, 1, 1, 1]  MT224x16  +50.0%  needs at least 245760 > 163840 bytes of LDS (validation skipped)
+#   [16, 16, 128, 1, 1, 13, 1, 1, 1]  MT208x16  +40.0%  LocalSplitU but NumThreads=256 not divisible by MT0=208 for sideways store
+#   [16, 16, 128, 1, 1, 14, 1, 1, 1]  MT224x16  +50.0%  LocalSplitU but NumThreads=256 not divisible by MT0=224 for sideways store
 #   [16, 16, 128, 1, 1, 15, 1, 1, 1]  MT240x16  +20.3%  Kernel Uses 197120 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 16, 1, 1, 1]  MT256x16  +22.5%  Kernel Uses 200704 > 163840 bytes of LDS
 #   [32, 32, 64, 1, 1, 1, 17, 4, 1]  MT128x544  +4.7%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=268, sgprs=70

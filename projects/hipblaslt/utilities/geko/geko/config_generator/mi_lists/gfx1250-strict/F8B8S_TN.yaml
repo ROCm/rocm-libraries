@@ -7,7 +7,7 @@
 
 Architecture: gfx1250-strict
 GemmType: F8B8S_TN
-Source: rocm-libraries 2a155d5314, 2026-11-02
+Source: rocm-libraries 1a33436bd6, 2026-11-17
 DepthU: [128, 256, 512]  # searched
 MatrixInstructions:
   - {MatrixInstruction: [16, 16, 128, 1, 1, 1, 1, 4, 1], DepthU: [128, 256, 512]}  # MT64x16
