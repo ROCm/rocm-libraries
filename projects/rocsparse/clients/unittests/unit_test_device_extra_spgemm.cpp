@@ -837,6 +837,67 @@ TEST_F(ExtraSpgemm, alias_c_d_bsr)
         }
 }
 
+// One row of C with n + extra entries: A = [1], B is a row of n ones, D holds
+// j % 7 + 1 at the n columns of B and at extra more. A row with more entries
+// than the hash table of its group fits in shared memory goes through the
+// bitmap algorithm (with 64 KiB and 32-bit column indices, beyond 4096 entries
+// for float and 2048 for double complex; on every device beyond 32768; in the
+// nnz stage, which counts products and entries of D, beyond 8192 with 64 KiB
+// and 65536 on every device); the shorter rows stay in the hash groups.
+namespace
+{
+    template <typename T>
+    void alias_long_row(rocsparse_handle handle, int64_t n, int64_t extra, cplx alpha, cplx beta)
+    {
+        const int64_t        w = n + extra;
+        std::vector<int64_t> colB(static_cast<size_t>(n)), colD(static_cast<size_t>(w));
+        std::vector<double>  valB(static_cast<size_t>(n), 1.0), valD(static_cast<size_t>(w));
+        for(int64_t j = 0; j < w; ++j)
+        {
+            colD[static_cast<size_t>(j)] = j;
+            valD[static_cast<size_t>(j)] = static_cast<double>(j % 7 + 1);
+            if(j < n)
+                colB[static_cast<size_t>(j)] = j;
+        }
+        const Bsr A = bsr_of(1, 1, 1, {0, 1}, {0}, {1});
+        const Bsr B = bsr_of(1, w, 1, {0, n}, colB, valB);
+        const Bsr D = bsr_of(1, w, 1, {0, w}, colD, valD);
+        for(Stages s : kCsrStages)
+            for(bool dev : {false, true})
+            {
+                AliasCase c;
+                c.alpha  = alpha;
+                c.beta   = beta;
+                c.device = dev;
+                c.stages = s;
+                run_alias<T, int32_t, int32_t>(handle, c, A, B, D);
+                if(::testing::Test::HasFatalFailure())
+                    return;
+            }
+    }
+}
+
+TEST_F(ExtraSpgemm, alias_c_d_long_row)
+{
+    const cplx one(1.0, 0.0), two(2.0, 0.0);
+    alias_long_row<float>(handle, 1000, 0, one, two);
+    if(HasFatalFailure())
+        return;
+    alias_long_row<float>(handle, 5000, 0, one, two);
+    if(HasFatalFailure())
+        return;
+    alias_long_row<float>(handle, 4000, 1000, one, two);
+    if(HasFatalFailure())
+        return;
+    alias_long_row<float>(handle, 33000, 0, one, two);
+    if(HasFatalFailure())
+        return;
+    alias_long_row<rocsparse_double_complex>(handle, 2048, 0, one, cplx(2.0, -1.0));
+    if(HasFatalFailure())
+        return;
+    alias_long_row<rocsparse_double_complex>(handle, 2049, 0, one, cplx(2.0, -1.0));
+}
+
 // D misses (0,2) of the pattern of A * B, so C cannot have the pattern of D: the
 // nnz stage rejects the alias and leaves D as it is.
 TEST_F(ExtraSpgemm, alias_c_d_pattern_mismatch)

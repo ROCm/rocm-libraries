@@ -693,6 +693,34 @@ namespace rocsparse
         }
     }
 
+    // Scales the group's rows of C by beta. Takes the place of the clear when C
+    // is D, whose rows are then already in their places in C.
+    template <uint32_t BLOCKSIZE, typename I, typename J, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void csrgemm_bitmap_scale_val_kernel(J slot_base,
+                                         const J* __restrict__ offset,
+                                         const J* __restrict__ perm,
+                                         ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
+                                         const I* __restrict__ csr_row_ptr_C,
+                                         rocsparse_index_base idx_base_C,
+                                         T* __restrict__ csr_val_C,
+                                         bool is_host_mode)
+    {
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
+
+        const J slot = slot_base + static_cast<J>(blockIdx.x);
+        const J row  = perm[slot + *offset];
+
+        const I row_begin_C = csr_row_ptr_C[row] - idx_base_C;
+        const I row_end_C   = csr_row_ptr_C[row + 1] - idx_base_C;
+
+        for(I k = row_begin_C + blockIdx.y * BLOCKSIZE + threadIdx.x; k < row_end_C;
+            k += static_cast<I>(gridDim.y) * BLOCKSIZE)
+        {
+            csr_val_C[k] = beta * csr_val_C[k];
+        }
+    }
+
     // Adds every intermediate product straight into its entry of C. The rank index turns a column
     // into an offset in constant time, so nothing has to be expanded, sorted or reduced: the
     // products are consumed where they are produced. carry is as for the emit kernel.
