@@ -5576,11 +5576,8 @@ class Solution(collections.abc.Mapping):
           if bpeTc not in (0.5, 1, 2):
             reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM supports F4 and 1-/2-byte data types only (got {bpeTc} bytes)")
             return
-          # StreamK starts a workgroup mid-tile in K; the swizzled operand's K start would need the
-          # MI-row scaling (see StreamK._preShuffleRows, subtile-only today). Not supported yet.
-          if isStreamK(state):
-            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM does not support StreamK yet")
-            return
+          # StreamK starts a workgroup mid-tile in K at StreamKLocalStart * GlobalReadIncs; the swizzled-TDM
+          # GlobalReadIncs already carry the MI-row factor (GSU.graIncrements), so no extra scaling is needed.
           # The swizzled read and host swizzle assume both operands are K-major (TN). Other layouts are
           # also caught by the generic TDM TileMajor rule today; reject here so that does not stay implicit.
           if not (state["ProblemType"]["TransposeA"] and not state["ProblemType"]["TransposeB"]):

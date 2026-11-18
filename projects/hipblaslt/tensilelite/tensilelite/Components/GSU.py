@@ -228,6 +228,13 @@ class GSUOff(GSU):
         stride = writer.strideRef(tc, dimIdx)
         isMirrorIdx = dimIdx in kernel["ProblemType"]["MirrorDims%s"%tc]
         m = int(kernel["_DepthU%s"%tc] * tP["bpeGR"])
+        # Swizzled-TDM operand: one K step of DepthU spans MI rows of the pre-swizzled layout,
+        # so the per-iteration advance is MI * DepthU * bpe (same factor GSUOn.graIncrements
+        # applies). Persistent data-parallel kernels select GSUOff (SingleBuffer), so without
+        # it the TDM address advances by a single row's worth and every K step re-reads the
+        # wrong data.
+        if tP.get("isSwizzledTDM"):
+          m *= kernel["MatrixInstM"] if tc == "A" else kernel["MatrixInstN"]
         if isMirrorIdx:
           m = -m
 

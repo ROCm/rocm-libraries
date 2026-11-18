@@ -613,9 +613,11 @@ class StreamK(TileProcessingStrategy):
         whose StreamK range starts mid-tile has to start from the same scale or
         it reads a K position 16x too close to the tile.
 
-        Only the subtile global read walks blocks this way.  The classic swizzle
-        path steps one row per K window, so scaling its start would move the
-        workgroup off its own range.
+        Only the subtile global read walks blocks this way.  The classic (DTV)
+        swizzle path steps one row per K window, so scaling its start would move
+        the workgroup off its own range.  Swizzled-TDM needs no scaling here
+        either: its StreamKLocalStart * GlobalReadIncs K offset is applied to the
+        TDM descriptor address, and GlobalReadIncs already carries the MI factor.
         """
         if tc not in ("A", "B"):
             return 1
