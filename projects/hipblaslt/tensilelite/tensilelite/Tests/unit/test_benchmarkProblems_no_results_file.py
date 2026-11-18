@@ -447,6 +447,16 @@ class _DummyLock:
 
 
 @pytest.mark.parametrize(
+    "resultsSetting",
+    [
+        "results-file={results}",
+        "results-file = {results}",
+        "results-file= {results}",
+        "results-file={results} # benchmark output",
+        " results-file\t=\t{results}\t # benchmark output",
+    ],
+)
+@pytest.mark.parametrize(
     "setting, writeResultsFile",
     [
         ("no-results-file=True", False),
@@ -461,7 +471,7 @@ class _DummyLock:
     ],
 )
 def test_parallel_execution_results_file_policy(
-    tmp_path, monkeypatch, capsys, setting, writeResultsFile
+    tmp_path, monkeypatch, capsys, setting, writeResultsFile, resultsSetting
 ):
     """Valid client INI formatting preserves the requested output policy during merging."""
     monkeypatch.setattr(ParallelExecution, "ClientExecutionLock", _DummyLock)
@@ -473,8 +483,12 @@ def test_parallel_execution_results_file_policy(
         gpu = len(perGpuConfigs)
         perGpuConfigs.append(text)
         if writeResultsFile:
-            result = next(line.split("=", 1)[1] for line in text.splitlines()
-                          if line.startswith("results-file="))
+            # Model the client's valid INI syntax independently of the Python reader.
+            options = dict(
+                tuple(part.strip() for part in line.split("#", 1)[0].split("=", 1))
+                for line in text.splitlines() if "=" in line.split("#", 1)[0]
+            )
+            result = options["results-file"]
             Path(result).write_text(f"Problem,GFLOPS\n{gpu},1\n")
         return _Proc()
 
@@ -482,7 +496,7 @@ def test_parallel_execution_results_file_policy(
     cfg = tmp_path / "ClientParameters.ini"
     results = tmp_path / "results.csv"
     cfg.write_text(
-        f"device-idx=0\nresults-file={results}\n{setting}\n"
+        f"device-idx=0\n{resultsSetting.format(results=results)}\n{setting}\n"
         + "".join(f"problem-size={i}\n" for i in range(4))
     )
 
