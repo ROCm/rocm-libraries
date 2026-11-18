@@ -103,4 +103,4 @@ See [RFC 0024](./0024_CuDNN_V8_Compatibility.md) and [RFC 0012](./0012_CuDNN_Shi
 ## 7. Out of scope
 
 - Precision notes from any in-tree provider.
-- A plugin API version bump. The engine-config workspace query MUST return at least the workspace of any plan finalized from that config, and benchmarking-config coverage is also a MUST; both change documentation only. The ABI is unchanged, the in-tree plugins already comply, and the frontend's safety net rejects a plan that finalizes over the limit, so a non-compliant plugin degrades gracefully.
+- A plugin API version bump. The engine-config workspace query MUST return at least the workspace of any plan finalized from that config, and benchmarking-config coverage is also a MUST; both change documentation only. The ABI is unchanged and the in-tree plugins already comply. When a limit is set, the frontend's safety net rejects a plan that finalizes over it, so a non-compliant plugin degrades gracefully. Otherwise the frontend rejects nothing, and the violation shows up as a WARN when WARN logging is enabled.

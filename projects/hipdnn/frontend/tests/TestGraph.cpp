@@ -11823,6 +11823,100 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceSafetyNetRejectsPlanFinalizedOverLim
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
 }
 
+TEST_F(TestGraph, BuildPlansWarnsWhenPlanWorkspaceExceedsEngineConfigWithoutLimit)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10});
+    _engineConfigWorkspace[10] = 50;
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+
+    // With no limit the plan is never rejected; the WARN is the only sign of the breach.
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false}));
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 1u) << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "(id 10)"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "workspace 500"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "engine config workspace 50"));
+}
+
+TEST_F(TestGraph, BuildPlansReadsNoEngineConfigWorkspaceWhenWarnLoggingIsOff)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10});
+    _engineConfigWorkspace[10] = 50;
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_OFF);
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_TRUE(_engineConfigWorkspaceReads.empty());
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0u);
+}
+
+TEST_F(TestGraph, BuildPlansPlanOverEngineConfigWithinLimitLogsExactlyOneWarn)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10});
+    graph.deselect_workspace_greater_than(100);
+    _engineConfigWorkspace[10] = 50;
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/80);
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false}));
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 1u) << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "engine config workspace 50"));
+}
+
+TEST_F(TestGraph, BuildPlansPlanOverLimitLogsOnlyTheRejectionWarn)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10});
+    graph.deselect_workspace_greater_than(100);
+    _engineConfigWorkspace[10] = 50;
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 1u) << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "rejected: finalized workspace 500"));
+}
+
+TEST_F(TestGraph, BuildPlansCompliantPlanLogsNoWorkspaceWarn)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10});
+    _engineConfigWorkspace[10] = 50;
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/50);
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(_engineConfigWorkspaceReads.size(), 1u);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0u) << recorder.getRecordedLogsAsString();
+}
+
 TEST_F(TestGraph, BuildPlansHeuristicsChoiceSafetyNetRejectingEveryPlanReturnsNoSurvivorCode)
 {
     ::testing::FLAGS_gmock_verbose = "error";

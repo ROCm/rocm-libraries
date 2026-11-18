@@ -656,6 +656,32 @@ protected:
         return {ErrorCode::OK, ""};
     }
 
+    // Warn when a built plan's workspace exceeds the workspace its engine config reported,
+    // which breaks the plugin contract (IEngine::getMaxWorkspaceSize). Runs only when WARN
+    // logging is enabled, because reading a heuristic config's workspace queries the plugin.
+    // Never fails: a deserialized plan has no engine config, and a failed read skips the
+    // comparison. Callers log the rejection instead for a plan over the limit.
+    static void warnIfWorkspaceExceedsEngineConfig(const CompiledPlan& plan)
+    {
+        if(!hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_WARN) || plan.deserialized
+           || !plan.engineConfigDesc || !plan.engineConfigDesc->valid())
+        {
+            return;
+        }
+
+        int64_t configWorkspace = 0;
+        if(readEngineConfigWorkspace(plan, configWorkspace).is_bad()
+           || plan.workspaceSize <= configWorkspace)
+        {
+            return;
+        }
+
+        HIPDNN_FE_LOG_WARN("Engine "
+                           << engineNameFor(nullptr, plan.engineId) << " (id " << plan.engineId
+                           << ") built a plan with workspace " << plan.workspaceSize
+                           << ", larger than its engine config workspace " << configWorkspace);
+    }
+
     // Skip reason for a finalized plan whose workspace exceeds the limit although its engine
     // config reported less.
     std::string finalizedWorkspaceReason(const CompiledPlan& plan) const
@@ -752,6 +778,10 @@ protected:
             rejection = finalizedWorkspaceReason(plan);
             HIPDNN_FE_LOG_WARN("Plan index " << index << " (engine " << plan.engineId
                                              << ") rejected: " << rejection);
+        }
+        else
+        {
+            warnIfWorkspaceExceedsEngineConfig(plan);
         }
         return {ErrorCode::OK, ""};
     }
@@ -1791,6 +1821,8 @@ private:
                         continue;
                     }
 
+                    warnIfWorkspaceExceedsEngineConfig(primingPlan);
+
                     // Do not deselect priming plans by workspace size here  as the real plan's
                     // compiled workspace size may be smaller after the priming plan run than
                     // it would be if priming was not run, but still guard that the priming
@@ -1932,6 +1964,8 @@ private:
                     ++barredCount;
                     continue;
                 }
+
+                warnIfWorkspaceExceedsEngineConfig(plan);
 
                 // --- Recheck workspace size guard using real compiled plan workspace size ---
                 if(maxWorkspaceSize >= 0 && plan.workspaceSize > maxWorkspaceSize)
