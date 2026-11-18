@@ -122,8 +122,8 @@ _TDM_SRC = r"""
   printf("ERROR %s at %d\n", hipGetErrorString(e), __LINE__); exit(2); } } while (0)
 
 typedef unsigned v4u __attribute__((ext_vector_type(4)));
+typedef unsigned v8u __attribute__((ext_vector_type(8)));
 typedef int v4i __attribute__((ext_vector_type(4)));
-typedef int v8i __attribute__((ext_vector_type(8)));
 #define THREADS THREADS_
 #define T TILE_
 constexpr int M = M_, N = N_; constexpr long K = K_;
@@ -134,9 +134,9 @@ constexpr int TILES_N = N / T;
 __device__ void tdm(const char* g, unsigned lds, unsigned dim0, unsigned dim1) {
   unsigned long ga = (unsigned long)g;
   v4u g0 = {1u, lds, (unsigned)ga, (unsigned)((ga >> 32) & 0x1FFFFFF) | (2u << 30)};
-  v8i g1 = {0, (int)(dim0 << 16), (int)((dim0 >> 16) | (dim1 << 16)),
-            (int)((dim1 >> 16) | (T << 16)), T, (int)K, 1 << 16, 0};
-  v4i z4 = {0, 0, 0, 0}; v8i z8 = {0, 0, 0, 0, 0, 0, 0, 0};
+  v8u g1 = {0, dim0 << 16, (dim0 >> 16) | (dim1 << 16), (dim1 >> 16) | (T << 16), T, K,
+            1 << 16, 0};
+  v4u z4 = {0, 0, 0, 0}; v8u z8 = {0, 0, 0, 0, 0, 0, 0, 0};
   __builtin_amdgcn_tensor_load_to_lds(g0, g1, z4, z4, z8, 0);
 }
 
