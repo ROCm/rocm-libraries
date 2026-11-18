@@ -187,6 +187,12 @@ struct PassFeatureConfig {
         /// Mirrors ModuleOptions::WarGateWmmas. WMMAs a ds_load waits before
         /// overwriting a vgpr a WMMA read (WmmaVgprSrcToDsWrite); <= 0 = derived.
         int warGateWmmas = 0;
+        /// Mirrors ModuleOptions::WarGateViaTracker. The mode2 WAR gate asks the InsertWaitAlu
+        /// scoreboard (WaitAluTracker::untilFreeWrites) whether the ds_load's destination still
+        /// needs a va_vdst: the arch's vsrc / vdst rules with the matrix ops and VALUs really
+        /// issued, instead of the pipe-op distance (warGateWmmas). Needs waitAluScoreboard and
+        /// enableESM2TrackValuVsrc.
+        bool warGateViaTracker = false;
     };
 
     LoopConfig loopConfig;

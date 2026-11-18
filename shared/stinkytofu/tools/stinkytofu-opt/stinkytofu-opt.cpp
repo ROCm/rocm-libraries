@@ -212,7 +212,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--global-read-drain-latency=") ||
                 arg.starts_with("--merge-barrier-threshold=") ||
                 arg == "--enable-wmma-hide-budget-prescan" ||
-                arg == "--enable-esm2-track-valu-vsrc" ||
+                arg == "--enable-esm2-track-valu-vsrc" || arg == "--war-gate-via-tracker" ||
                 arg.starts_with("--wait-alu-hold-strict-count=") ||
                 arg == "--wait-alu-scoreboard" || arg == "--ds-address-plan" ||
                 arg.starts_with("--prefetch-lead-wmmas=") ||
@@ -644,6 +644,8 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.globalReadDrainLatency = std::stoi(a.substr(28));
         } else if (a == "--enable-esm2-track-valu-vsrc") {
             passFeatureConfig.dagFeatures.enableESM2TrackValuVsrc = true;
+        } else if (a == "--war-gate-via-tracker") {
+            passFeatureConfig.dagFeatures.warGateViaTracker = true;
         } else if (a.starts_with("--wait-alu-hold-strict-count=")) {
             passFeatureConfig.dagFeatures.waitAluHoldStrictCount = std::stoi(a.substr(29));
         } else if (a == "--wait-alu-scoreboard") {

@@ -92,6 +92,12 @@ class STINKYTOFU_EXPORT WaitAluTracker {
     /// the one already issued, else `formWmma`'s (an XDL WMMA).
     int untilFree(const StinkyInstruction& inst, WaitAluHideOp op,
                   const StinkyInstruction* formWmma = nullptr) const;
+    /// untilFree() for the registers `inst` writes only: WAW through their last writer's rules,
+    /// WAR through their last reader's. The registers it reads (a load's address) are left out,
+    /// so a scheduler can gate a load on its destination alone and leave the address wait to
+    /// the pass.
+    int untilFreeWrites(const StinkyInstruction& inst, WaitAluHideOp op,
+                        const StinkyInstruction* formWmma = nullptr) const;
     /// untilFree() for `consumer` right after `producer`, with nothing else in flight. With
     /// `valusPerWmma` > 0 (op Wmma only), each WMMA is followed by that many VALUs, which fill
     /// the tail of a form's mixed hide; the result still counts WMMAs.

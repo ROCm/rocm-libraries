@@ -376,6 +376,27 @@ TEST_F(WaitAluTrackerTest, NoLatchCsmaccCapacityRule) {
     expectCountsDown(t, *insts[13], WaitAluHideOp::Valu, valus, /*vm=*/false);
 }
 
+// untilFreeWrites answers for the destination alone: the ds_load's address v40 (a CSMACC
+// write, the dst rule's 12 matrix ops) is left out and its data VGPRs decide: v[200:203] is a
+// source the WMMA read, so the src rule (any 9 ops) applies, and the v_mov already filled one.
+TEST_F(WaitAluTrackerTest, UntilFreeWritesIgnoresTheAddressRead) {
+    const std::vector<StinkyInstruction*> insts =
+        parse("  v[0:7] = " + std::string(kWmma) + "\n" +
+              "  v40 = \"st.v_mov_b32\"(v41) { issueCycles = 1, latencyCycles = 1 }\n" +
+              "  v[200:203] = \"st.ds_load_b128\"(v40) " + kDsAttrs + "\n" +
+              "  v[300:303] = \"st.ds_load_b128\"(v40) " + kDsAttrs + "\n");
+    ASSERT_EQ(insts.size(), 4u);
+    WaitAluTracker t = makeTracker();
+    t.commit(*insts[0]);
+    t.commit(*insts[1]);
+    EXPECT_EQ(t.untilFree(*insts[2], WaitAluHideOp::Wmma), 12);
+    // The src role: the form's pure 9 (the v_mov before the mixed rule's lead counts nothing).
+    EXPECT_EQ(t.untilFreeWrites(*insts[2], WaitAluHideOp::Wmma), 9);
+    // A destination nothing wrote or read is free on the write side now; the address still waits.
+    EXPECT_EQ(t.untilFree(*insts[3], WaitAluHideOp::Wmma), 12);
+    EXPECT_EQ(t.untilFreeWrites(*insts[3], WaitAluHideOp::Wmma), 0);
+}
+
 // A rule only VALUs satisfy (the f64 capacity set) behind each WMMA: one VALU per WMMA needs 12
 // WMMAs, two need 6, none never.
 TEST_F(WaitAluTrackerTest, RequiredGapCountsValusForAValuOnlyRule) {

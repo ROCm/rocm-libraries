@@ -144,6 +144,7 @@
     X(WaitAluHoldStrictCount, int, 2)     /* hold s_wait_alu count <= N to next barrier wait */    \
     X(DsAddressPlan, bool, false)         /* ds_load address fillers issue at the pacer's need-by */ \
     X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */    \
+    X(WarGateViaTracker, bool, true)  /* the WAR gate asks the InsertWaitAlu scoreboard */   \
     X(PrefetchLeadWmmas, int, 25)         /* 0 = prefetch issues when ready */                     \
     X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                    \
     X(DsSpread, bool, true)               /* even ds_load spread over the WMMAs */                 \

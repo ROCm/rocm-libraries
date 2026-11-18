@@ -880,15 +880,17 @@ class WaitcntBrackets {
 
     // Probe each VGPR operand for hazards and accumulate the wait. A read waits for the
     // VGPR's writer (RAW); a write waits for its writer (WAW) and for its last reader (WAR).
+    // writesOnly: probe only the registers `inst` writes (WAW / WAR), not the ones it reads, for a
+    // scheduler that gates a load on its destination and leaves the address wait to the pass.
     void onConsumer(const StinkyInstruction& inst, const VGPRHalfKeyer& keyer, Wait& wait,
-                    Blockers* blockers = nullptr) const {
+                    bool writesOnly = false, Blockers* blockers = nullptr) const {
         // TEMP HACK: drop the src RAW va_vdst for valu->global_load and valu->global_prefetch
         // (prefetch lacks IF_GLOBALLoad, so classify it separately). Safe: the DAG already
         // spaces the vaddr producer >=32 cycles (CDNA5 isVmemAddrHazardConsumer covers it).
         const bool suppressSrcVaVdst = g_enableESM2SuppressValuToGlobalVaVdst &&
                                        (isGLOBALLoad(inst) || isGlobalPrefetch(inst));
 
-        if (!suppressSrcVaVdst) {
+        if (!suppressSrcVaVdst && !writesOnly) {
             forEachVgprHalf(inst, OperandSide::Src, [&](unsigned idx, HighBitSel half) {
                 keyer.forEachConsumerKey(idx, half, [&](RegKey k) {
                     determineVaWait(k, ROLE_DST, wait, "src(RAW)", blockers);
@@ -1441,11 +1443,12 @@ GfxArchID setupWaitAluContext(WaitAluContext& ctx, VGPRHalfKeyer& keyer,
 
 // `blockers`, when given, collects the producers whose va_vdst wait survives the rules.
 Wait computeWaitForInst(const StinkyInstruction& inst, const WaitcntBrackets& sb,
-                        const VGPRHalfKeyer& keyer, Blockers* blockers = nullptr) {
+                        const VGPRHalfKeyer& keyer, bool writesOnly = false,
+                        Blockers* blockers = nullptr) {
     Wait wait;
 
-    // Step 1: scoreboard probes on every VGPR operand of `inst`.
-    sb.onConsumer(inst, keyer, wait, blockers);
+    // Step 1: scoreboard probes on every VGPR operand of `inst` (writesOnly: its destinations).
+    sb.onConsumer(inst, keyer, wait, writesOnly, blockers);
 
     // Step 2: skip VA_VDST for VALU consumers
     if (isVectorALU(inst) || isTranscendental(inst) || isMatrixInstruction(inst)) {
@@ -1947,11 +1950,12 @@ static void latchFormIfUnset(WaitcntBrackets& sb, const StinkyInstruction* formW
 // when none does. `formWmma` as in latchFormIfUnset; each op is followed by `valusPerOp` VALUs.
 static int countUntilFree(const WaitcntBrackets& start, const StinkyInstruction& inst,
                           const WaitAluContext& ctx, const VGPRHalfKeyer& keyer, WaitAluHideOp op,
-                          const StinkyInstruction* formWmma, int valusPerOp = 0) {
+                          const StinkyInstruction* formWmma, int valusPerOp = 0,
+                          bool writesOnly = false) {
     if (isPseudoInst(&inst) || isWaitAluInst(inst) || isCall(inst)) return 0;
     const bool va = op == WaitAluHideOp::Wmma || op == WaitAluHideOp::Valu;
     const CounterType c = va ? CT_VA_VDST : CT_VM_VSRC;
-    if (isNoWait(computeWaitForInst(inst, start, keyer), c)) return 0;
+    if (isNoWait(computeWaitForInst(inst, start, keyer, writesOnly), c)) return 0;
     WaitcntBrackets sb = start;
     latchFormIfUnset(sb, formWmma);
     int maxOps = 0;
@@ -1959,7 +1963,7 @@ static int countUntilFree(const WaitcntBrackets& start, const StinkyInstruction&
         maxOps = maxVmHideOps(ctx, op);
     } else {
         Blockers blockers;
-        const Wait latched = computeWaitForInst(inst, sb, keyer, &blockers);
+        const Wait latched = computeWaitForInst(inst, sb, keyer, writesOnly, &blockers);
         if (isNoWait(latched, c)) {
             // The latch alone freed it; the first op confirms.
             maxOps = 1;
@@ -1975,13 +1979,19 @@ static int countUntilFree(const WaitcntBrackets& start, const StinkyInstruction&
     for (int n = 1; n <= maxOps; ++n) {
         sb.countBareOp(op);
         for (int v = 0; v < valusPerOp; ++v) sb.countBareOp(WaitAluHideOp::Valu);
-        if (isNoWait(computeWaitForInst(inst, sb, keyer), c)) return n;
+        if (isNoWait(computeWaitForInst(inst, sb, keyer, writesOnly), c)) return n;
     }
     return -1;
 }
 int WaitAluTracker::untilFree(const StinkyInstruction& inst, WaitAluHideOp op,
                               const StinkyInstruction* formWmma) const {
     return countUntilFree(impl_->sb, inst, impl_->ctx, impl_->keyer, op, formWmma);
+}
+
+int WaitAluTracker::untilFreeWrites(const StinkyInstruction& inst, WaitAluHideOp op,
+                                    const StinkyInstruction* formWmma) const {
+    return countUntilFree(impl_->sb, inst, impl_->ctx, impl_->keyer, op, formWmma, 0,
+                          /*writesOnly=*/true);
 }
 
 int WaitAluTracker::requiredGap(const StinkyInstruction& producer,

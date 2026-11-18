@@ -874,6 +874,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int getMaxSrcDataWait(DAGNode* node) const;
     bool destOverlapsActiveWmmaSrc(DAGNode* node) const;
     bool pipeOpGateBlocks(DAGNode* node) const;
+    bool warGateBlocks(DAGNode* ds) const;
     bool warGateRelieved(DAGNode* ds) const;
     bool dsWarClear(DAGNode* ds) const;
     // dagFeatures.prefetchLeadWmmas for this basic block (StageWmmaCounter, set in onInit).
@@ -1391,12 +1392,24 @@ bool CDNA5ReadyQueue::warGateRelieved(DAGNode* ds) const {
     return dsSpreadOn() && dsSpread_.behind(ds->id, wmmaIssuedCountThisRegion_) > 0;
 }
 
+// The mode2 WAR gate's answer for \p ds. With dagFeatures.warGateViaTracker the InsertWaitAlu
+// scoreboard answers for the load's destination alone (untilFreeWrites: the arch's vsrc / vdst
+// rules, counting the matrix ops and VALUs really issued): > 0 means more WMMAs would free it, so
+// it is held; 0 is free now; -1 means no WMMA count hides it, so holding would only delay it and
+// the pass puts the wait. Otherwise the pipe-op lane with its own distance (pipeOpGateBlocks).
+bool CDNA5ReadyQueue::warGateBlocks(DAGNode* ds) const {
+    const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
+    if (f.warGateViaTracker && f.enableESM2TrackValuVsrc && waitAlu_)
+        return waitAlu_->untilFreeWrites(*ds->inst, WaitAluHideOp::Wmma, formWmma_) > 0;
+    return pipeOpGateBlocks(ds);
+}
+
 // May \p ds issue without overwriting a register a queued WMMA still reads? Two checks, one answer:
-// the pipe-op gate holds a load too close after its WMMA reader (a heuristic that avoids an
+// the WAR gate holds a load too close after its WMMA reader (a heuristic that avoids an
 // s_wait_alu, lifted when the region is behind its ds rate), and the overlap check against the
 // queued WMMAs' sources (what the hardware does).
 bool CDNA5ReadyQueue::dsWarClear(DAGNode* ds) const {
-    if (!warGateRelieved(ds) && pipeOpGateBlocks(ds)) return false;
+    if (!warGateRelieved(ds) && warGateBlocks(ds)) return false;
     return !destOverlapsActiveWmmaSrc(ds);
 }
 
@@ -2282,7 +2295,9 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
     };
     // WMMAs that must issue between a WMMA read and a ds_load that overwrites it.
     // onInit already resolved this into pipeOpDistance_ (table, WarGateWmmas, or
-    // deriveWarGateWmmas). pickOne only consults it when ESM2 VALU-src tracking is on.
+    // deriveWarGateWmmas). pickOne only consults it when ESM2 VALU-src tracking is on. With
+    // dagFeatures.warGateViaTracker the gate itself asks the scoreboard instead; this planning
+    // offset keeps the pipe-op distance, a conservative barrier threshold.
     int wmmaToDsWarGate = 0;
     if (getPassContext().getPassFeatureConfig().dagFeatures.enableESM2TrackValuVsrc) {
         for (int ruleIdx = 0; ruleIdx < hw_.hazards.numRules; ++ruleIdx) {
