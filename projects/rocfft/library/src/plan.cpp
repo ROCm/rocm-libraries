@@ -735,9 +735,12 @@ NodeMetaData
             if(io_loc && *io_loc == exec_plan_location)
             {
                 // The execution plan can access the user's undistributed data directly
-                root_plan_io_buffer = io == io_data_label::INPUT
-                                          ? BufferPtr::user_input(0, desc.get_local_comm_rank())
-                                          : BufferPtr::user_output(0, desc.get_local_comm_rank());
+                // (output buffers are ignored for in-place plans: output data lives in
+                // input buffers)
+                root_plan_io_buffer
+                    = io == io_data_label::INPUT || placement == rocfft_placement_inplace
+                          ? BufferPtr::user_input(0, desc.get_local_comm_rank())
+                          : BufferPtr::user_output(0, desc.get_local_comm_rank());
                 root_plan_io_layout = desc.undistributed_layout_for(io);
                 // other io layout to be set for the execution plan:
                 auto& root_plan_other_io_layout = other(io) == io_data_label::INPUT
@@ -1768,9 +1771,7 @@ std::vector<size_t>
 
     const auto in_loc = desc.expected_undistributed_location_for(io_data_label::INPUT);
     if(in_loc && *in_loc == exec_plan_location
-       && (exec_plan_metadata.input_buffer.ptr_type() == BufferPtr::PtrType::PTR_USER_IN
-           || (placement == rocfft_placement_inplace
-               && exec_plan_metadata.input_buffer.ptr_type() == BufferPtr::PTR_USER_OUT)))
+       && exec_plan_metadata.input_buffer.ptr_type() == BufferPtr::PtrType::PTR_USER_IN)
     {
         // no need to gather, input data is readily available to the single-device execution plan
         return gather_plan_items;
@@ -1928,18 +1929,21 @@ std::vector<size_t> rocfft_plan_t::CreateOutputScatteringItemsIfNeeded(
 
     const auto out_loc = desc.expected_undistributed_location_for(io_data_label::OUTPUT);
     if(out_loc && *out_loc == exec_plan_location
-       && (exec_plan_metadata.output_buffer.ptr_type() == BufferPtr::PtrType::PTR_USER_OUT
-           || (placement == rocfft_placement_inplace
-               && exec_plan_metadata.output_buffer.ptr_type() == BufferPtr::PTR_USER_IN)))
+       && exec_plan_metadata.output_buffer.ptr_type()
+              == (placement == rocfft_placement_inplace ? BufferPtr::PtrType::PTR_USER_IN
+                                                        : BufferPtr::PtrType::PTR_USER_OUT))
     {
         // no need to scatter, output data is written directly by the single-device execution plan
         return scatter_plan_items;
     }
 
-    const auto& output_bricks    = desc.get_field_for(io_data_label::OUTPUT).get_bricks();
-    const auto  local_comm_rank  = desc.get_local_comm_rank();
-    const auto  output_buffers   = GatherUserBuffers(BufferPtr::user_output, output_bricks);
-    const auto  output_elem_size = element_size(precision, desc.outArrayType);
+    const auto& output_bricks   = desc.get_field_for(io_data_label::OUTPUT).get_bricks();
+    const auto  local_comm_rank = desc.get_local_comm_rank();
+    // in-place plans write their results into the user's input buffers
+    const auto output_buffers = GatherUserBuffers(
+        placement == rocfft_placement_inplace ? BufferPtr::user_input : BufferPtr::user_output,
+        output_bricks);
+    const auto output_elem_size = element_size(precision, desc.outArrayType);
     // data layout of the results to be scattered
     const auto single_dev_output_layout = exec_plan_metadata.layout_for(io_data_label::OUTPUT);
 
