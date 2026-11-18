@@ -2523,12 +2523,13 @@ ConvShape foldShape(bool channelsLast = false)
     return shape;
 }
 
-/// A unit-stride ring config of the folded class (filter width 3, stride 1).
+/// A unit-stride ring config of the folded class: filter width 2 channels-first (staged,
+/// shifted), 3 channels-last (in place, ceil-padded).
 ConfigFields foldFields(int64_t layout = 0)
 {
     ConfigFields f;
     f.fr = 1;
-    f.s = 3;
+    f.s = layout == 0 ? 2 : 3;
     f.layout = layout;
     return f;
 }
@@ -2540,24 +2541,31 @@ TEST(TestConvWrwFold, ViewIsTheStrideOneProblemOverFoldedChannels)
     const auto view = conv_wrw::widthFoldOf(*problem);
     ASSERT_TRUE(view.has_value());
     const auto& v = view->base.args;
-    // 24 channels by 8 phases; 256 / 8 positions; ceil(12 / 8) + ceil(4 / 8) = 3 taps, padding 1.
+    // Channels-first, staged shifted by 4 mod 8 = 4: 24 channels by 8 phases, ceil(260 / 8) = 33
+    // positions, 16 / 8 = 2 taps at padding (4 - 4) / 8 = 0.
     EXPECT_EQ(v.c, 24 * 8);
-    EXPECT_EQ(v.inSpatial[2], 32);
+    EXPECT_EQ(v.inSpatial[2], 33);
     EXPECT_EQ(v.outSpatial[2], problem->base.args.outSpatial[2]);
-    EXPECT_EQ(v.filter[2], 3);
+    EXPECT_EQ(v.filter[2], 2);
     EXPECT_EQ(v.stride[2], 1);
-    EXPECT_EQ(v.prePadding[2], 1);
-    EXPECT_EQ(view->taps, 3);
+    EXPECT_EQ(v.prePadding[2], 0);
+    EXPECT_EQ(view->taps, 2);
+    EXPECT_EQ(view->foldShift, 4);
     EXPECT_TRUE(view->folded);
-    // Channels-first x is staged packed N (C s) D H U.
+    // Staged packed N (C s) D H U.
     EXPECT_EQ(v.xStrides[4], 1);
-    EXPECT_EQ(v.xStrides[1], 32);
-    EXPECT_EQ(v.xStrides[0], 24 * 8 * 32);
-    // Channels-last x is the folded layout already: s C elements a folded position.
+    EXPECT_EQ(v.xStrides[1], 33);
+    EXPECT_EQ(v.xStrides[0], 24 * 8 * 33);
+    // Channels-last x is the folded layout already (s C elements a folded position), in place:
+    // 256 / 8 positions, ceil(12 / 8) + ceil(4 / 8) = 3 taps at padding 1, no shift.
     const auto nhwc = conv_wrw::widthFoldOf(*parse(specOf(foldShape(true))));
     ASSERT_TRUE(nhwc.has_value());
     EXPECT_EQ(nhwc->base.args.xStrides[1], 1);
     EXPECT_EQ(nhwc->base.args.xStrides[4], 24 * 8);
+    EXPECT_EQ(nhwc->base.args.inSpatial[2], 32);
+    EXPECT_EQ(nhwc->base.args.filter[2], 3);
+    EXPECT_EQ(nhwc->base.args.prePadding[2], 1);
+    EXPECT_EQ(nhwc->foldShift, 0);
     // A filter equal to the stride, unpadded (patch-like): one folded tap.
     auto patch = baseShape();
     patch.input = {12, 16};
@@ -2576,7 +2584,11 @@ TEST(TestConvWrwFold, DeclinesEveryFieldOutsideTheFold)
     const std::vector<std::pair<std::string, std::function<void(ConvShape&)>>> refusals{
         {"unit stride", [](ConvShape& s) { s.stride = {1}; }},
         {"stride not dividing the filter", [](ConvShape& s) { s.filter = {12}; }},
-        {"width not a whole number of strides", [](ConvShape& s) { s.input = {252}; }},
+        {"channels-last width not a whole number of strides",
+         [](ConvShape& s) {
+             s.input = {252};
+             s.channelsLast = true;
+         }},
         {"dilated width", [](ConvShape& s) { s.dilation = {2}; }},
         {"groups", [](ConvShape& s) { s.groups = 2; }},
     };
@@ -2590,6 +2602,12 @@ TEST(TestConvWrwFold, DeclinesEveryFieldOutsideTheFold)
         ASSERT_TRUE(problem.has_value());
         EXPECT_FALSE(conv_wrw::widthFoldOf(*problem).has_value());
     }
+    // Staged channels-first x takes any width: the shifted tail is zero.
+    auto ragged = foldShape();
+    ragged.input = {250};
+    const auto view = conv_wrw::widthFoldOf(*parse(specOf(ragged)));
+    ASSERT_TRUE(view.has_value());
+    EXPECT_EQ(view->base.args.inSpatial[2], 32); // ceil(254 / 8)
 }
 
 TEST(TestConvWrwFold, AUnitStrideConfigOfTheFoldedClassServesThroughTheFold)
@@ -2601,26 +2619,30 @@ TEST(TestConvWrwFold, AUnitStrideConfigOfTheFoldedClassServesThroughTheFold)
     EXPECT_FALSE(launch->dwStore);
     EXPECT_EQ(launch->reduce.tile, 4);
     EXPECT_EQ(launch->reduce.cg, 24 * 8);
-    EXPECT_EQ(launch->reduce.taps, 3);
+    EXPECT_EQ(launch->reduce.taps, 2);
     EXPECT_EQ(launch->reduceBlock, 4u * static_cast<unsigned int>(launch->reduce.quads));
     const auto& f = launch->reduceFold;
     EXPECT_EQ(f.c, 24);
     EXPECT_EQ(f.s, 8);
-    EXPECT_EQ(f.fw, 3);
-    EXPECT_EQ(f.pre, 1);
-    EXPECT_EQ(f.pad, 4);
+    EXPECT_EQ(f.fw, 2);
+    EXPECT_EQ(f.pre, 0);
+    EXPECT_EQ(f.pad, 0); // 4 less the shift of 4
     EXPECT_EQ(f.filterW, 16);
     EXPECT_EQ(f.outer, 1);
     EXPECT_EQ(f.wk, 24 * 16); // K C S
     EXPECT_EQ(f.wc, 16);
     EXPECT_EQ(f.wtap, 1);
-    // The staged x after the partials: 2 images x 24 channels x 256 halves.
+    // The staged x after the partials: 2 images x 24 channels x 33 positions x 8 phases.
     EXPECT_GE(launch->foldOffset,
               static_cast<size_t>(launch->reduce.splits)
                   * static_cast<size_t>(launch->reduce.partialElems) * 4);
-    EXPECT_EQ(launch->workspaceBytes, launch->foldOffset + 2 * 24 * 256 * 2);
+    EXPECT_EQ(launch->workspaceBytes, launch->foldOffset + 2 * 24 * 33 * 8 * 2);
     EXPECT_EQ(launch->foldArgs.rows, 2 * 24);
-    EXPECT_EQ(launch->foldArgs.u, 32);
+    EXPECT_EQ(launch->foldArgs.u, 33);
+    EXPECT_EQ(launch->foldArgs.shift, 4);
+    EXPECT_EQ(launch->foldArgs.width, 256);
+    // One tile of 2048 / 8 = 256 positions a row.
+    EXPECT_EQ(launch->foldGrid, 2u * 24);
     // Channels-last: no staging.
     const auto nhwc = launchOf(foldFields(1), foldShape(true));
     ASSERT_TRUE(nhwc.has_value());
@@ -2640,10 +2662,10 @@ TEST(TestConvWrwFold, AUnitStrideConfigOfTheFoldedClassServesThroughTheFold)
     {
         EXPECT_FALSE(unfolded->fold);
     }
-    // Not foldable (width 252): the unit-stride config declines as before.
-    auto ragged = foldShape();
+    // Not foldable (channels-last width 252): the unit-stride config declines as before.
+    auto ragged = foldShape(true);
     ragged.input = {252};
-    EXPECT_FALSE(launchOf(foldFields(), ragged).has_value());
+    EXPECT_FALSE(launchOf(foldFields(1), ragged).has_value());
 }
 
 TEST(TestConvWrwLaunch, DeepReduceBlocksGiveEveryUnitTwo)

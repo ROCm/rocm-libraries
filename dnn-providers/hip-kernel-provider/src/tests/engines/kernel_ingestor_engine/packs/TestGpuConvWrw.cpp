@@ -1205,7 +1205,9 @@ std::vector<DeviceCase> foldCases()
             {"TwoD2x2Stride2", conv(16, 32, {12, 16}, {2, 2}, {0, 0}, {0, 0}, {2, 2}, {1, 1})},
             {"TwoD2x2Stride2Nhwc",
              conv(16, 32, {12, 16}, {2, 2}, {0, 0}, {0, 0}, {2, 2}, {1, 1}, true)},
-            {"OneD1x4Stride2Convolution", convolution}};
+            {"OneD1x4Stride2Convolution", convolution},
+            // A width the stride does not divide: the staged tail is zero.
+            {"OneD1x16Stride8RaggedWidth", conv(32, 64, {250}, {16}, {4}, {4}, {8}, {1})}};
 }
 
 class TestGpuConvWrwFold : public ::testing::TestWithParam<DeviceCase>

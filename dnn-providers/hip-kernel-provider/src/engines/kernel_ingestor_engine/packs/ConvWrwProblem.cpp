@@ -746,15 +746,18 @@ std::optional<WrwProblem> widthFoldOf(const WrwProblem& problem)
     const int64_t width = a.inSpatial[2];
     const int64_t filterW = a.filter[2];
     const int64_t pad = a.prePadding[2];
+    const bool staged = problem.channelsFirst;
     if(problem.noFold || problem.folded || s < 2 || filterW % s != 0 || a.dilation[2] != 1
-       || a.groups != 1 || width % s != 0 || pad < 0 || problem.largeImage
-       || !(problem.channelsFirst || problem.channelsLast))
+       || a.groups != 1 || pad < 0 || problem.largeImage
+       || !(problem.channelsFirst || problem.channelsLast) || (!staged && width % s != 0))
     {
         return std::nullopt;
     }
-    const int64_t u = width / s;
-    const int64_t pre = divUp(pad, s);
-    const int64_t fw = divUp(filterW - pad, s) + pre;
+    // Staged: shifted by the padding's phase, exactly S / s taps. In place: ceil-padded.
+    const int64_t shift = staged ? pad % s : 0;
+    const int64_t u = staged ? divUp(width + shift, s) : width / s;
+    const int64_t pre = staged ? (pad - shift) / s : divUp(pad, s);
+    const int64_t fw = staged ? filterW / s : divUp(filterW - pad, s) + pre;
     const auto channels = pack_features::checkedMultiply(a.c, s);
     // The folded output width is dy's: u + pre + post - fw + 1 with a padding past the end of at
     // least 0 (every dy position's window starts inside the folded row's reach).
@@ -793,6 +796,7 @@ std::optional<WrwProblem> widthFoldOf(const WrwProblem& problem)
     view.channelsFirst = problem.channelsFirst;
     view.channelsLast = problem.channelsLast;
     view.folded = true;
+    view.foldShift = shift;
     return view;
 }
 
@@ -891,7 +895,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         rf.s = static_cast<int>(s);
         rf.fw = static_cast<int>(f.filter[2]);
         rf.pre = static_cast<int>(f.prePadding[2]);
-        rf.pad = static_cast<int>(a.prePadding[2]);
+        rf.pad = static_cast<int>(a.prePadding[2] - folded->foldShift);
         rf.filterW = static_cast<int>(a.filter[2]);
         rf.outer = static_cast<int>(a.filter[0] * a.filter[1]);
         rf.flip = a.flipFilter != 0 ? 1 : 0;
@@ -904,23 +908,30 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
             {
                 return std::nullopt;
             }
-            const auto xBytes = pack_features::checkedProduct(
-                {*rows, a.inSpatial[2], int64_t{problem.elementBytes}});
-            if(!xBytes.has_value())
+            // The staged x' (ceil((L + shift) / s) positions a row by s phases), by tiles of
+            // K3_FOLD_TILE x elements of one row.
+            const int64_t tilePositions = K3_FOLD_TILE / s;
+            const auto blocks
+                = pack_features::checkedMultiply(*rows, divUp(f.inSpatial[2], tilePositions));
+            const auto stagedBytes = pack_features::checkedProduct(
+                {*rows, f.inSpatial[2], s, int64_t{problem.elementBytes}});
+            if(tilePositions < 1 || !blocks.has_value() || *blocks > INT_LIMIT
+               || !stagedBytes.has_value())
             {
                 return std::nullopt;
             }
             launch->foldStage = true;
             launch->foldOffset = (launch->workspaceBytes + 255) / 256 * 256;
-            launch->workspaceBytes = launch->foldOffset + static_cast<size_t>(*xBytes);
+            launch->workspaceBytes = launch->foldOffset + static_cast<size_t>(*stagedBytes);
             auto& fa = launch->foldArgs;
             fa.rows = *rows;
             fa.planes = a.inSpatial[0] * a.inSpatial[1];
+            fa.width = a.inSpatial[2];
             fa.c = static_cast<int>(a.c);
             fa.s = static_cast<int>(s);
             fa.u = static_cast<int>(f.inSpatial[2]);
-            launch->foldGrid = static_cast<unsigned int>(
-                std::min<int64_t>(divUp(*rows * f.inSpatial[2], 256), int64_t{1} << 16));
+            fa.shift = static_cast<int>(folded->foldShift);
+            launch->foldGrid = static_cast<unsigned int>(*blocks);
         }
         return launch;
     }

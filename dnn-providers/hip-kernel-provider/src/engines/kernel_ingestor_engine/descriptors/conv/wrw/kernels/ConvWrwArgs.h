@@ -96,22 +96,23 @@ struct K3ReduceArgs
     int quads; ///< tile 3: quads a block (16, 32 or 64; 4 threads each); unused otherwise
 };
 
-/// The width fold (a width stride s dividing the filter width, groups 1): ConvWrwFoldX writes
-/// channels-first x as x'[n][j C + c][d][h][u] = x[n][c][d][h][u s + j] (channels-last x is
-/// that layout already), the config runs the stride-1 problem over x' (C s channels, width L / s,
-/// filter width fw, padding ceil(p / s)), and ConvWrwReduceFold writes its taps back to dw:
-/// channel j C + c, folded tap tau -> dw tap (tau - pre) s + j + pad (taps outside the filter
-/// dropped).
+/// The width fold (a width stride s dividing the filter width, groups 1). Channels-first x is
+/// staged by ConvWrwFoldX as x'[n][j C + c][d][h][u] = x[n][c][d][h][u s + j - shift] (zero
+/// outside the row; shift = the width padding mod s, so the folded filter has exactly S / s
+/// taps); channels-last x is x'[n][d][h][u][j C + c] = x[n][d][h][u s + j][c] already. The
+/// config runs the stride-1 problem over x', and ConvWrwReduceFold writes its taps back to dw:
+/// folded channel j C + c, tap tau -> dw tap (tau - pre) s + j + pad (taps outside dropped).
 struct K3FoldArgs
 {
     const void* x;
     void* xf;
     long long rows; ///< n x c x d x h: the rows of x
     long long planes; ///< d x h
+    long long width; ///< x's width L
     int c; ///< x's channels
     int s; ///< the fold (the width stride)
-    int u; ///< folded width (L / s)
-    int padding0; ///< keeps the struct size a multiple of 8 on host and device alike
+    int u; ///< folded width, ceil((L + shift) / s)
+    int shift; ///< the padding's phase: x' position u s + j reads x position u s + j - shift
 };
 
 /// ConvWrwReduceFold: the quad reduce of the folded problem's partials (`r`, its geometry: c the
@@ -126,7 +127,7 @@ struct K3ReduceFoldArgs
     int s; ///< the fold
     int fw; ///< folded filter width
     int pre; ///< folded width padding, ceil(pad / s)
-    int pad; ///< the graph's width padding
+    int pad; ///< the graph's width padding less the staged shift
     int filterW; ///< the graph's filter width
     int outer; ///< filter depth x height (taps outside the width)
     int flip; ///< true convolution: dw taps reflected
@@ -160,5 +161,7 @@ struct K3SplitArgs
 #define K3_REDUCE_DEEP_MIN_SPLITS 32
 #define K3_REDUCE_DEEP_UNIT_SHARE 3
 #define K3_REDUCE_DEEP_MAX_QUADS 64
+/// ConvWrwFoldX's tile: x elements of one row a block stages through LDS.
+#define K3_FOLD_TILE 2048
 
 // NOLINTEND(modernize-avoid-c-arrays,modernize-macro-to-enum)

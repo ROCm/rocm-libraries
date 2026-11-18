@@ -189,19 +189,24 @@ struct WrwProblem
     /// never by the kernel itself. noFold: not to be folded (three-bf16's split operands).
     bool folded = false;
     bool noFold = false;
+    /// A width fold's staged view: the padding's phase the staging shifts x by (0 in place).
+    int64_t foldShift = 0;
 };
 
 /**
  * @brief The width fold of @p problem: the same backward-weights convolution as a stride-1 one,
  *        or nullopt where it does not apply.
  *
- * A width stride s > 1 dividing the filter width S, at unit width dilation, one group, a width
- * L that s divides, packed x and dy (either layout), images within the 32-bit buffer range.
- * Position u s + j of channel c is folded channel j C + c at position u: the view has C s input
- * channels, width L / s, filter width ceil((S - p) / s) + ceil(p / s) at stride 1 and padding
- * ceil(p / s) (p the width padding); depth and height are unchanged. Channels-last x is already
- * that layout (its strides are rewritten); channels-first x is staged (ConvWrwFoldX). dw tap t is
- * the folded tap (t + ceil(p / s) s - p) / s of folded channel ((t + ceil(p / s) s - p) % s) C + c.
+ * A width stride s > 1 dividing the filter width S, at unit width dilation, one group, packed x
+ * and dy (either layout), images within the 32-bit buffer range. Position u s + j of channel c is
+ * folded channel j C + c at position u: the view has C s input channels at unit width stride;
+ * depth and height are unchanged.
+ * - Channels-first x is staged (ConvWrwFoldX) shifted by the padding's phase r = p mod s (p the
+ *   width padding): S / s folded taps at padding (p - r) / s over ceil((L + r) / s) positions.
+ * - Channels-last x is read in place (its width stride becomes s C), so its width L must be a
+ *   multiple of s: ceil((S - p) / s) + ceil(p / s) folded taps at padding ceil(p / s), the taps
+ *   reaching outside the filter dropped by the fold reduce.
+ * Folded tap tau of folded channel j C + c is dw tap (tau - pre) s + j + p - r of channel c.
  */
 std::optional<WrwProblem> widthFoldOf(const WrwProblem& problem);
 

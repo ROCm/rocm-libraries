@@ -4457,31 +4457,35 @@ __device__ inline void k3Reduce(const K3ReduceArgs& a)
         o[(c + j) * a.wc] = K1Elem<T>::store(sum[j]);
 }
 
-/// The width fold's staging (ConvWrwFoldX, channels-first x): a thread per (row of x, folded
-/// position u) reads x's s elements u s .. u s + s - 1 and writes element j to folded channel
-/// j C + c of the same row, so consecutive threads write consecutive positions of each of the s
-/// folded rows. A bitwise copy.
+/// The width fold's staging (ConvWrwFoldX, channels-first x): a block takes a tile of one row
+/// of x, K3_FOLD_TILE / s folded positions by s phases, reads it contiguously (zero outside the
+/// row, shifted by `shift`) into LDS and writes each phase's run of positions contiguously to
+/// folded channel j C + c of the same row. A bitwise copy.
 template <class T>
 __device__ inline void k3FoldX(const K3FoldArgs& a)
 {
-    const long long total = a.rows * a.u;
-    const long long stride = static_cast<long long>(gridDim.x) * blockDim.x;
-    const T* x = static_cast<const T*>(a.x);
-    T* xf = static_cast<T*>(a.xf);
-    const long long rowLen = static_cast<long long>(a.u) * a.s;
-    const long long chanRows = static_cast<long long>(a.c) * a.planes; // rows of one image
-    for(long long i = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x; i < total;
-        i += stride)
+    __shared__ T tile[K3_FOLD_TILE];
+    const int tu = K3_FOLD_TILE / a.s; // folded positions a tile
+    const long long tilesPerRow = (a.u + tu - 1) / tu;
+    const long long row = blockIdx.x / tilesPerRow;
+    const int u0 = static_cast<int>(blockIdx.x - row * tilesPerRow) * tu;
+    const int un = a.u - u0 < tu ? a.u - u0 : tu;
+    const T* x = static_cast<const T*>(a.x) + row * a.width;
+    const long long first = static_cast<long long>(u0) * a.s - a.shift;
+    for(int e = static_cast<int>(threadIdx.x); e < un * a.s; e += blockDim.x)
     {
-        const long long row = i / a.u;
-        const int u = static_cast<int>(i - row * a.u);
-        const long long n = row / chanRows;
-        const long long rest = row - n * chanRows; // c planes + dh
-        const T* src = x + row * rowLen + static_cast<long long>(u) * a.s;
-        // Folded row of phase j: image n, channel j C + c, the same plane: rest + j C planes.
-        T* dst = xf + (n * a.s * chanRows + rest) * a.u + u;
-        for(int j = 0; j < a.s; ++j)
-            dst[static_cast<long long>(j) * chanRows * a.u] = src[j];
+        const long long p = first + e;
+        tile[e] = p >= 0 && p < a.width ? x[p] : T{};
+    }
+    k1LdsBarrier();
+    const long long chanRows = static_cast<long long>(a.c) * a.planes; // rows of one image
+    const long long n = row / chanRows;
+    const long long rest = row - n * chanRows; // c planes + dh
+    T* xf = static_cast<T*>(a.xf) + (n * a.s * chanRows + rest) * a.u + u0;
+    for(int e = static_cast<int>(threadIdx.x); e < un * a.s; e += blockDim.x)
+    {
+        const int j = e / un, u = e - j * un;
+        xf[static_cast<long long>(j) * chanRows * a.u + u] = tile[u * a.s + j];
     }
 }
 

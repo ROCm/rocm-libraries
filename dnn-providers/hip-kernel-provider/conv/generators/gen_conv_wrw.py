@@ -497,6 +497,7 @@ RDNA16 = [
 # for narrow channel counts and long filters, a tall one for 128+ channels.
 RDNA_1D = [(32, 32, 2, 2, 64), (128, 32, 4, 2, 64)]
 ONE_D = {
+    "1x2",
     "1x3",
     "1x3d3",
     "1x3d5",
@@ -622,6 +623,9 @@ FILTERS = [
     # HiFi-GAN's dilation-3 1x3 (the d5 row's tiles).
     ("1x3d3", 3, 1, 3, 1, 1, [0, -1], [0, 1], None),
     ("1x4", 4, 1, 1, 1, 1, [0, -1], [0], None),
+    # Two-tap rows: the width fold's HiFi-GAN class (1x16 stride 8 is 1x2 stride 1 over C x 8
+    # channels, widthFoldOf) on the 1x4 row's tiles.
+    ("1x2", 2, 1, 1, 1, 1, [0, -1], [0], None),
     ("1x7", 7, 1, 1, 1, 1, [-1], [0], None),
     ("1x7d3", 7, 1, 3, 1, 1, [-1], [0], None),
     ("1x7d5", 7, 1, 5, 1, 1, [-1], [0], None),
