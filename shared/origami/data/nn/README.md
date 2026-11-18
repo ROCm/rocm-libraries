@@ -23,5 +23,6 @@ data/nn/
 Point `ORIGAMI_NN_WEIGHTS_DIR` at a directory containing fetched weight YAML, or populate
 `tilewright/gfx950/` with manifests and sidecars listed in `origami_nn_index`.
 
-Tests tagged `[nn][tilewright]` that require loaded weights skip automatically when manifests
-are absent.
+Tests tagged `[nn][tilewright]` that require the real weights skip automatically when manifests
+are absent. Most NN tests use the small model in `tests/fixtures/tilewright/` instead and do not
+need these files.
