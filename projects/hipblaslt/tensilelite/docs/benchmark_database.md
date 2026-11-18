@@ -4,7 +4,7 @@
 
 The client runs every solution on every problem size. A kernel that crashes, faults the GPU or hangs used to kill the client and lose the progress of the whole run.
 
-With `--benchmark-db <path>` (or `benchmark-db=<path>` in `ClientParameters.ini`) the client records each (init config, solution) pair in a SQLite file. Running the client again with the same database resumes: pairs that already have a result are not launched again, and a kernel that killed the client is not launched again either. The option is off by default (empty path).
+With `--benchmark-db <path>` (or `benchmark-db=<path>` in `ClientParameters.ini`) the client records each (init config, solution) pair in a SQLite file. Running the client again with the same database resumes: pairs that already have a result are not launched again, and a kernel that killed the client is not launched again either. The option is off by default (empty path). A Python supervisor, `tensilelite.ClientSupervisor`, can run a client to completion across crashes and hangs (see Supervision).
 
 The contract:
 
@@ -110,6 +110,42 @@ benchmark database mismatch: solution count differs: database has <n>, run has <
 
 The client configuration contains absolute paths, so a configuration that names other paths is a mismatch. To start over, delete the `.db`, `-wal` and `-shm` files.
 
+## Supervision
+
+`superviseClient(command, cwd, dbPath, watchdog, stopOnCleanExit, probe=None)` in `tensilelite.ClientSupervisor` runs one client configuration to completion and returns `SupervisionResult(restarts, outcome, message)`. `outcome` is a `SupervisionOutcome`: `COMPLETED`, `STOPPED_AFTER_SESSION` (a session of this call confirmed that the database matches the configuration) or `STOPPED_BEFORE_SESSION`. `message` says why it stopped and is empty on completion.
+
+The supervised command is any wrapper script or the client itself, and runs in its own process group. The client's `benchmark-db` must be `dbPath`, which the supervisor reads itself: give an absolute path, or one relative to the supervisor's working directory, not `cwd`.
+
+```mermaid
+flowchart TD
+    A[start the command] --> B{pairs left?}
+    B -- no --> F[report]
+    B -- yes --> C[mark pair UNKNOWN, run, mark PASS or FAILURE]
+    C --> D{client exited or hung?}
+    D -- no --> B
+    D -- "yes, progress made" --> A
+    D -- "yes, no progress" --> E[stop with error]
+```
+
+The supervisor decides from the database, not the exit code, which is the validation failure count of a finished client. The run is complete when no pair is `NOT_BENCHMARKED`; `NOT_SELECTED` pairs are not pending, so a client that marked them and exited cleanly is done, and one that exited cleanly with `NOT_BENCHMARKED` pairs left stops with an error. A restart requires progress: a pair launched by, or newly marked (as `INDIRECTLY_FAILED`, `INDIRECT_VERIFICATION_FAILURE` or `NOT_SELECTED`) by, the new session. The `NOT_BENCHMARKED` count is not used because a disabled indirect option raises it. Restarts are therefore bounded by the number of pairs. With `stopOnCleanExit`, a client that stopped early with a cleanly ended session is not resumed (for a client that exits on its first error).
+
+`Watchdog(timeoutSeconds, pollSeconds=2, graceSeconds=5, reapSeconds=30)` polls the database. When a pair of a session started by this launch has been `UNKNOWN` longer than `timeoutSeconds`, it sends SIGTERM to the process group, waits `graceSeconds` and sends SIGKILL. A `timeoutSeconds` of 0 disables it. Warnings:
+
+```
+client failed (<how>); restarting to resume, <m> pairs left
+problem <p>, solution <i> <name> has been running for <t>s, over the <limit>s limit; killing the client
+```
+
+`<how>` is `exit code <n>`, `killed by signal <n> (<NAME>)` or `killed by the watchdog`. A wrapper script that reports a client killed by a signal as 128 + n is decoded as a signal only when the session did not end.
+
+The supervisor reads the database for each decision. A missing database, or one without tables, is the empty state. An unreadable one is read up to 3 times, 1 second apart, then supervision stops with `could not read the benchmark database <db> after 3 attempts: ...; not judging the client without it`. The watchdog poll skips a failed read.
+
+Helpers:
+
+- `reportDatabaseResults(dbPath, csvPath)` writes the CSV, prints the summary and returns 1 if any pair is not clean, otherwise 0. A pair is not clean when it is `UNKNOWN`, `FAILURE`, `INDIRECTLY_FAILED`, `INDIRECT_VERIFICATION_FAILURE` or `NOT_BENCHMARKED`; `NOT_SELECTED` is not a failure. If the database cannot be read it prints a warning, removes the stale CSV and returns 1.
+- `removeStaleResults(csvPath)` deletes a CSV of an earlier run.
+- `removeDatabase(dbPath)` deletes the `.db`, `-wal` and `-shm` files.
+
 ## Crash handling
 
 - The session is a scope: `BenchmarkSession` begins it and the client ends it with `end()` once all problems are done, which sets `sessions.end_time`. An exception unwinding through the scope leaves the session open; a normal exit from the scope, such as the `exit-on-error` early return, ends it.
@@ -121,6 +157,21 @@ The client configuration contains absolute paths, so a configuration that names 
 - On Linux the client in `benchmark-db` mode asks the kernel to SIGKILL it when its parent dies, so GPU work does not outlive the process that launched it. A client whose parent exits while the client is arranging the death signal exits with 1 and `benchmark-db client started after its parent exited` (a parent that died before the client started is not detected); if the request itself fails it exits with 1 and `benchmark-db cannot arrange to die with its parent: ...`.
 
 When the client completes all problems, its exit status is the number of validation failures, capped at 255, as without a database.
+
+The supervisor handles a crash, hang, GPU fault, lost device and database error alike: the pair stays `UNKNOWN`, the session stays open and the client exits non-zero, so it restarts the command.
+
+After an abnormal exit (death by signal, watchdog kill, a non-zero exit without a cleanly ended session, or an unreadable database after the launch) the supervisor runs the GPU warm-up probe on the device of the `GpuProbe(command, device)` passed to `superviseClient` before the next launch:
+
+- It makes up to 3 attempts of at most 120 seconds, logging `# gpu warm-up on device <d>, attempt <i>/3: passed` or a warning with the reason.
+- A probe that does not exit after SIGKILL stops the supervision at once, with `probe process <pid> did not exit after SIGKILL ...`, without another attempt.
+- If all fail, supervision stops with `gpu warm-up failed on device <d> after 3 attempts; not benchmarking on a possibly unhealthy gpu`. The warm-up stays pending process-wide and carries over to the next `superviseClient` call.
+- `findGpuProbe(clientExecutable, device)` looks for `tensilelite-gpu-probe` next to the client executable, then in the default build directory (`DEFAULT_CLIENT_PATH`). If it is missing, it warns once and returns `None`, and clients run without warm-up.
+
+## Shutdown
+
+- SIGTERM and SIGHUP make the supervisor kill the process group of the supervised command (SIGTERM, `graceSeconds`, SIGKILL) and raise `SupervisorTerminated`, a `SystemExit` with code 128 plus the signal. Ctrl-C kills the group the same way and re-raises. The handlers are installed only while supervising and only in the main thread. A signal that was already ignored when supervision starts, such as SIGHUP under `nohup`, stays ignored. The database stays resumable.
+- If the supervisor is SIGKILLed, on Linux `PR_SET_PDEATHSIG(SIGKILL)` kills the chain: the supervised command and the probe are started with it, and the client in `benchmark-db` mode sets it on itself, as described in Crash handling.
+- After SIGKILL the supervisor waits at most `Watchdog.reapSeconds` (30 by default) for the group leader. If it does not exit, supervision stops with `client process <pid> did not exit after SIGKILL ...; not relaunching onto a GPU it may still hold`.
 
 ## Durability
 
@@ -167,7 +218,7 @@ with closing(openDatabase("run.db")) as connection:
 
 Main functions: `openDatabase`, `getPairs`, `getSessions`, `countPairsByStatus`, `summarize`, `formatSummary`, `writeResultsCsv`.
 
-`writeResultsCsv` writes the results CSV from the database. The CSV has the layout and values of the client's own results CSV, and is byte-identical to it for a run that finished in a single session with every pair passed. It writes a temporary file and replaces the CSV atomically, from a single read snapshot. A pair that is not `PASS` has the cell `-1`, except a `NOT_SELECTED` pair, whose cell is empty as in the client's CSV because the client never visited it. A stored value that cannot be read raises `BenchmarkDatabaseError`. With `csv-export-extra-cols`, the best-of columns (winner, best time, bandwidth) consider only `PASS` pairs here, whereas the client also folds in a pair that failed verification after its timing was reported, so those columns can differ for runs with verification failures.
+`writeResultsCsv` writes the results CSV from the database. The CSV has the layout and values of the client's own results CSV, and is byte-identical to it for a run that finished in a single session with every pair passed. It writes a temporary file and replaces the CSV atomically, from a single read snapshot. A pair that is not `PASS` has the cell `-1`, except a `NOT_SELECTED` pair, whose cell is empty as in the client's CSV because the client never visited it. A stored value that cannot be read raises `BenchmarkDatabaseError`; `reportDatabaseResults` handles it by printing a warning and writing no CSV. With `csv-export-extra-cols`, the best-of columns (winner, best time, bandwidth) consider only `PASS` pairs here, whereas the client also folds in a pair that failed verification after its timing was reported, so those columns can differ for runs with verification failures.
 
 The client adds a CSV column the first time it visits a solution, writes the header after the first problem and every row with the columns known after its problem. `writeResultsCsv` reproduces that: a `NOT_SELECTED` pair is not visited and creates no column, so with prediction a solution first selected by a later problem has a cell without a header, and the rows before it are shorter. With `csv-merge-same-problems` every row has all columns, the late ones empty where unvisited. Solutions with the same name share one column. The one inexact part is the order of the columns that the same problem adds for the first time: the reader uses the library index order, which is the client's order without prediction, while a prediction run visits the solutions in the order of its ranking, which the database does not store.
 
@@ -177,7 +228,7 @@ The gtest `BenchmarkCsvParity*` (`tests/BenchmarkCsvParity_test.cpp`) and `Tests
 
 ## GPU warm-up probe
 
-`tensilelite-gpu-probe [--device-idx N]` is a standalone tool built with the client and installed in the tests component under `libexec/hipblaslt/tensilelite` when `HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS` is enabled. It is independent of the client libraries. After a GPU memory fault the first process that does real GPU work can compute wrong results. The probe does that work on the chosen device (default 0): it allocates two 128 MiB buffers, runs a copy kernel, reads the result back and verifies it, so the next client starts on a healthy device.
+`tensilelite-gpu-probe [--device-idx N]` is a standalone tool built with the client and installed in the tests component under `libexec/hipblaslt/tensilelite` when `HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS` is enabled. It is independent of the client libraries. After a GPU memory fault the first process that does real GPU work can compute wrong results. The probe does that work on the chosen device (default 0): it allocates two 128 MiB buffers, runs a copy kernel, reads the result back and verifies it, so the next client starts on a healthy device. `ClientSupervisor` runs it after abnormal client exits (see Crash handling).
 
 | Exit status | Meaning |
 |-------------|---------|
@@ -193,7 +244,8 @@ SQLite is required. CMake looks for the ROCm sysdeps config package in `${ROCM_P
 
 ## Known limitations
 
-- A hung pair blocks the run until the client is killed externally; the pair stays `UNKNOWN`.
+- Under the supervisor, the watchdog kills a hang inside a pair, which stays `UNKNOWN`. A hang outside a pair, such as the CPU reference computation or the data initialization, is never detected. Without the supervisor the client blocks until it is killed externally.
+- A failure right after a GPU fault may be a false failure even after a passing warm-up probe.
 - With `indirect-failures` off, a faulty kernel can cost one crash per problem.
 - The client configuration contains absolute paths, and each rerun repeats the client setup.
 - `INVALID` (an exception while launching) is a direct failure and does not propagate.
@@ -202,3 +254,6 @@ SQLite is required. CMake looks for the ROCm sysdeps config package in `${ROCM_P
 - The schema version was not bumped. A version 1 database that an earlier build of this unreleased schema created (status `CHECK` 0 to 5) must be deleted, otherwise the first `NOT_SELECTED` marking fails with a `CHECK` error.
 - The death-signal protection needs Linux.
 - The combinations in the Restrictions table are unsupported.
+- The watchdog kills the whole process group, so the cleanup of a wrapper script (for example a clock reset) does not run.
+- After a SIGKILL of the supervisor the client is killed by the death signal asynchronously, so a new run can start while the old client is still releasing the GPU.
+- The bounded reap only follows the group leader, and a signal between starting the client and entering the cleanup scope is not covered.

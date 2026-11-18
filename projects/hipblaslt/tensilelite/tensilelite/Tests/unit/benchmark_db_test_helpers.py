@@ -1,7 +1,10 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Synthetic benchmark databases shared by the unit tests."""
+"""Synthetic benchmark databases shared by the unit tests.
+
+Must not import tensilelite: fake_benchmark_client.py runs as a bare subprocess and imports it.
+"""
 
 from __future__ import annotations
 

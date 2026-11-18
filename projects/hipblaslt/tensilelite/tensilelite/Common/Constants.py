@@ -1,3 +1,5 @@
+from pathlib import Path
+
 # Map for converting between TensileLite-accepted co version strings
 # and code object versions accepted by the compiler.
 coVersionMap = {
@@ -16,6 +18,11 @@ BENCHMARK_PROBLEMS_DIR: str = "1_BenchmarkProblems"
 BENCHMARK_DATA_DIR: str = "2_BenchmarkData"
 LIBRARY_LOGIC_DIR: str = "3_LibraryLogic"
 LIBRARY_CLIENT_DIR: str = "4_LibraryClient"
+
+# Where `invoke build-client` puts the client.
+DEFAULT_CLIENT_PATH = (
+    Path(__file__).parents[2] / "build_tmp" / "tensilelite" / "client" / "tensilelite-client"
+)
 
 # If a file name is longer than this value, and `--short-filenames` is set, shorten it with a hash.
 MAX_FILENAME_LENGTH: int = 64
