@@ -212,6 +212,49 @@ def test_dtvb_wide_b_limit(toolchain):
                      GlobalReadVectorWidthB=32).get("Valid") is not True
 
 
+def test_dtvb_k_tail_valid(toolchain):
+    """Without LDS, K need only be a multiple of a lane's K block (GRVWA): the K tail
+    is a masked main-loop iteration, not the tail loop."""
+    sol = _solution(toolchain, **_dtvb(AssertSummationElementMultiple=8))
+    assert sol.get("Valid") is True
+    assert sol["NoTailLoop"]
+    # A lane's block may not straddle the end of K.
+    assert _solution(toolchain, **_dtvb(AssertSummationElementMultiple=4)).get("Valid") is not True
+    # Split-K would need the tail in every split.
+    assert _solution(toolchain, **_dtvb(AssertSummationElementMultiple=8, GlobalSplitU=2)).get("Valid") is not True
+
+
+@pytest.mark.parametrize("zeroPoint", [False, True])
+def test_dtvb_k_tail_masks_lanes_past_k(toolchain, zeroPoint):
+    """After the full DepthU iterations, a K remainder sends the lanes past K to an
+    out-of-bounds offset (A, its scales and B load zeros) and runs the body once more."""
+    tile = [2, 2]
+    sol = _solution(toolchain, **_dtvb(AssertSummationElementMultiple=8, ThreadTile=tile, zeroPoint=zeroPoint,
+                                       WorkGroup=[1, 1, 32]))
+    assert sol.get("Valid") is True
+    nlc = sol["NumLoadsCoalescedA"]
+    src = _emit_solution(toolchain, sol)[1]
+    assert "label_TailLoopBegin" not in src
+    # Prologue: K % DepthU and one lane mask per K slot.
+    assert re.search(r"s_and_b32 s\[sgprDot2TailRem\], s\[sgprSizesSum\+0\], 0x3ff", src)
+    masks = re.findall(r"v_cmp_gt_i32 s\[sgprDot2TailMask\+(\d+)\]", src)
+    assert [int(m) for m in masks] == list(range(nlc))
+    # After the loop: every A, A-scale and B offset of slot s takes mask s.
+    tail = src[src.index("label_LoopEndL:"):src.index("label_Dot2TailDone:")]
+    sel = re.findall(r"v_cndmask_b32 v\[vgpr(GlobalReadOffset(?:A|ScaleA|B))\+(\d+)\], BufferOOB, "
+                     r"v\[vgpr\1\+\2\], s\[sgprDot2TailMask\+(\d+)\]", tail)
+    byReg = {}
+    for reg, idx, slot in sel:
+        byReg.setdefault(reg, []).append((int(idx), int(slot)))
+    rows, toks = tile
+    assert byReg["GlobalReadOffsetA"] == [(i, i % nlc) for i in range(rows * nlc)]
+    assert byReg["GlobalReadOffsetScaleA"] == byReg["GlobalReadOffsetA"]
+    assert byReg["GlobalReadOffsetB"] == [(i, i % nlc) for i in range(toks * nlc)]
+    # ... then one more trip through the loop body, once.
+    assert re.search(r"s_mov_b32 s\[sgprDot2TailRem\], 0", tail)
+    assert re.search(r"s_mov_b32 s\[sgprLoopCounterL\], 1\s.*\n\s*s_branch label_LoopBeginL", tail)
+
+
 @pytest.mark.parametrize("nt, mods", [(0, ""), (2, " slc"), (6, " slc dlc")])
 def test_non_temporal_a_streams_with_dlc(toolchain, nt, mods):
     """gfx11 has no nt modifier; the nt bit of NonTemporalA becomes dlc."""

@@ -86,7 +86,7 @@ from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
 from .Validators.BlockDequant import validateBlockDequantCombination
-from .Validators.DirectToVgprDot2 import validateDirectToVgprDot2A
+from .Validators.DirectToVgprDot2 import dot2MaskedTail, validateDirectToVgprDot2A
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -5442,7 +5442,8 @@ class Solution(collections.abc.Mapping):
     # NoTailLoop parameter initialization.
     # If ASEM is multiple of DepthU TailLoop will not be used.
     state["NoTailLoop"] = False
-    if state["AssertSummationElementMultiple"] % state["DepthU"] == 0:
+    if state["AssertSummationElementMultiple"] % state["DepthU"] == 0 or dot2MaskedTail(state):
+      # dot2MaskedTail: the K tail is a masked main-loop iteration
       state["NoTailLoop"] = True
 
     # TailloopInNll optimization check

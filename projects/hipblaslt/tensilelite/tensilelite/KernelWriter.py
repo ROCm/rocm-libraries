@@ -63,7 +63,7 @@ from .Components.TDMFuse import tdmWavePartition
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Problem import blockDequantItersPerGroupA, blockDequantPackedFp16A, usesBlockDequantZeroPointA
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
-from .SolutionStructs.Validators.DirectToVgprDot2 import dot2DtvADoubleBuffered, dot2DtvASlotPipelined
+from .SolutionStructs.Validators.DirectToVgprDot2 import dot2DtvADoubleBuffered, dot2DtvASlotPipelined, dot2MaskedTail
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
@@ -408,6 +408,8 @@ class StateValues:
   numReadsPerIterB: int                  = 0
   # DirectToVgprDot2A: A register set the current global read and dequant target.
   dot2DtvASet: int                       = 0
+  # dot2MaskedTail: (global-read offset index, K slot) of A's and B's loads
+  dot2TailSlots: dict                    = field(default_factory=dict)
   numReadsPerIterMetadata: int           = 0
   localReadDoCntA: int                   = 0
   localReadDoCntMXSA: int                = 0
@@ -9947,6 +9949,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.defineSgpr(self.loopCounterName(kernel,i), 1)
 
     self.defineSgpr("OrigLoopCounter", 1)
+    if dot2MaskedTail(kernel):
+      # K % DepthU (nonzero until the masked tail iteration runs) and, per K slot,
+      # the lanes whose K block is inside K in that iteration.
+      self.defineSgpr("Dot2TailRem", 1)
+      self.defineSgpr("Dot2TailMask", kernel["NumLoadsCoalescedA"])
     if kernel.get("LDSSegmentBRotate"):
       # B-rotate: per-wave LocalReadAddrB+1 - LocalReadAddrB+0 (pair 0: +64K, pair 1: 64K - 2*S).
       # Defined here (not in defineVariableSgprs) because lraDeclareAddresses is emitted first.

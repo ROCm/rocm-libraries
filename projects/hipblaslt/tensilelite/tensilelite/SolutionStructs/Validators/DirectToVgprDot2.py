@@ -13,6 +13,7 @@ Public entry point: :func:`validateDirectToVgprDot2A`.
 """
 
 from ..Utilities import reject
+from ...ExecutionPolicy import isPersistent
 
 
 #: Name prefix of A's local-write items under DirectToVgprDot2A. They contain no
@@ -41,6 +42,15 @@ def dot2DtvADoubleBuffered(kernel):
 def dot2NoLdsAB(kernel):
     """Neither A nor B is staged through LDS, so no LDS addresses are needed."""
     return kernel.get("DirectToVgprDot2A", False) and kernel.get("DirectToVgprDot2B", False)
+
+
+def dot2MaskedTail(state):
+    """K tail of a DirectToVgprDot2A/B kernel (neither operand in LDS) whose K is not a
+    multiple of DepthU: one more main-loop iteration after the full ones, where the
+    lanes whose K block lies past the end read zeros (A, B and A's scales at an
+    out-of-bounds offset) instead of a separate tail loop."""
+    return bool(state.get("DirectToVgprDot2A") and state.get("DirectToVgprDot2B")
+                and state["AssertSummationElementMultiple"] % state["DepthU"] != 0)
 
 
 def validateDirectToVgprDot2A(state, printRejectionReason):
@@ -78,10 +88,26 @@ def validateDirectToVgprDot2A(state, printRejectionReason):
     # Two A register sets cover one load in flight; a third would be needed for PGR2.
     if state["PrefetchGlobalRead"] > 1:
         return fail("requires PrefetchGlobalRead <= 1")
-    # The tail loop reads A through LDS.
+    if not validateDirectToVgprDot2B(state, printRejectionReason):
+        return False
     if state["AssertSummationElementMultiple"] % state["DepthU"] != 0:
-        return fail("requires AssertSummationElementMultiple to be a multiple of DepthU")
-    return validateDirectToVgprDot2B(state, printRejectionReason)
+        # The generic tail loop reads A through LDS; without LDS the last
+        # iteration masks the lanes past K instead (dot2MaskedTail).
+        if not state["DirectToVgprDot2B"]:
+            return fail("requires AssertSummationElementMultiple to be a multiple of DepthU"
+                        " unless B is DirectToVgprDot2B too")
+        # A lane's K block is all valid or all past the end.
+        if state["AssertSummationElementMultiple"] % state["GlobalReadVectorWidthA"] != 0:
+            return fail("K tail requires AssertSummationElementMultiple (%d) to be a multiple of"
+                        " GlobalReadVectorWidthA (%d)"
+                        % (state["AssertSummationElementMultiple"], state["GlobalReadVectorWidthA"]))
+        # The tail's K remainder and lane mask use DepthU - 1 and NumWaveSplitK - 1 as masks.
+        for k in ("DepthU", "NumWaveSplitK"):
+            if state[k] & (state[k] - 1):
+                return fail("K tail requires a power-of-two %s (%d)" % (k, state[k]))
+        if state["GlobalSplitU"] != 1 or isPersistent(state):
+            return fail("K tail requires GlobalSplitU 1 and no persistent tile processing")
+    return True
 
 
 def validateDirectToVgprDot2B(state, printRejectionReason):

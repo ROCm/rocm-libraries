@@ -88,9 +88,9 @@ from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
                                 tdmMemberIsLive
 from .Components.TDMFuse import tdmWaveComponents, tdmWavePartition, tdmSoleWave, tdmWaveRangeText
 from .SolutionStructs import isPackedIndex
-from .SolutionStructs.Problem import blockDequantItersPerGroupA, blockDequantPackedFp16A
+from .SolutionStructs.Problem import blockDequantItersPerGroupA, blockDequantPackedFp16A, usesBlockDequantA
 from .SolutionStructs.Validators.DirectToVgprDot2 import DOT2_DTVA_ITEM, dot2DtvADoubleBuffered, \
-  dot2DtvASlotPipelined, dot2NoLdsAB
+  dot2DtvASlotPipelined, dot2MaskedTail, dot2NoLdsAB
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, getCustomKernelSource, supportsUserSgprKernargPreload
@@ -4545,6 +4545,9 @@ class KernelWriterAssembly(KernelWriter):
           for sPerp in range(0, tP["nrpv"]):
             for para in range(0, tP["nrc"]):
               for sPara in range(0, tP["nrcv"]//tP["nrcvpi"]):
+                if dot2MaskedTail(kernel) and tc in ("A", "B"):
+                  # para is the K slot of this offset (see dot2MaskedTailEntry)
+                  self.states.dot2TailSlots.setdefault(tc, []).append((graIdx, para))
                 # single loop
                 singleModule, graIdx = self.graFinalOffsetsSingleLoop(kernel, tP, tc, tmp, graIdx, perp, sPerp, para, sPara)
                 module.add(singleModule)
@@ -4563,6 +4566,9 @@ class KernelWriterAssembly(KernelWriter):
                 # single loop
                 singleModule, graIdx = self.graFinalOffsetsSingleLoop(kernel, tP, tc, tmp, graIdx, perp, sPerp, paraBase + sub, sPara)
                 module.add(singleModule)
+
+    if dot2MaskedTail(kernel) and tP["isB"]:
+      module.add(self.dot2MaskedTailMasks(kernel))
 
     self.vgprPool.checkIn(tP["gpr"]["lwoT"])
     tP["gpr"]["lwoT"] = None
@@ -9850,6 +9856,8 @@ class KernelWriterAssembly(KernelWriter):
 
       if (not tailLoop) or needTailEndCode:
         module.add(loopLabelEnd)
+        if not tailLoop and loopIdx == self.states.unrollIdx and dot2MaskedTail(kernel):
+          module.add(self.dot2MaskedTailEntry(kernel, loopLabelBegin))
       elif tailloopInNll:
         module.add(SBranch(labelName=loopLabelEnd.getLabelName(), \
                   comment="End of tailloopInNll. Jump to the end of TailLoop"))
@@ -10451,6 +10459,49 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # MAC Iteration
   ##############################################################################
+  def dot2MaskedTailMasks(self, kernel):
+    """dot2MaskedTail prologue: Dot2TailRem = K % DepthU and, per K slot s, the lanes
+    whose GlobalReadVectorWidthA elements at serial*GRVWA + s*NumWaveSplitK*GRVWA of
+    the tail iteration are inside K."""
+    module = Module("dot2MaskedTailMasks")
+    grvw, nwsk = kernel["GlobalReadVectorWidthA"], kernel["NumWaveSplitK"]
+    module.add(SAndB32(dst=sgpr("Dot2TailRem"), src0=sgpr("SizesSum+0"), src1=hex(kernel["DepthU"] - 1),
+                       comment="K tail: K %% DepthU(%u)" % kernel["DepthU"]))
+    vLaneK = self.vgprPool.checkOut(1, "dot2TailLaneK")
+    module.add(VAndB32(dst=vgpr(vLaneK), src0=hex(nwsk - 1), src1=vgpr("Serial"), comment="K tail: lane"))
+    module.add(VLShiftLeftB32(dst=vgpr(vLaneK), shiftHex=hex(log2(grvw)), src=vgpr(vLaneK),
+                              comment="K tail: lane K block start"))
+    with self.allocTmpSgpr(1, tag="dot2TailMasks") as tmp:
+      for slot in range(kernel["NumLoadsCoalescedA"]):
+        module.add(SSubI32(dst=sgpr(tmp.idx), src0=sgpr("Dot2TailRem"), src1=hex(slot * nwsk * grvw),
+                           comment="K tail: remainder past slot %u's start" % slot))
+        module.add(VCmpGTI32(dst=sgpr("Dot2TailMask+%u" % slot, self.states.laneSGPRCount), src0=sgpr(tmp.idx),
+                             src1=vgpr(vLaneK), comment="K tail: slot %u lanes inside K" % slot))
+    self.vgprPool.checkIn(vLaneK)
+    return module
+
+  def dot2MaskedTailEntry(self, kernel, loopLabelBegin):
+    """dot2MaskedTail: after the full DepthU iterations, if K % DepthU != 0, point the
+    A, B and A-scale global reads of the lanes past K out of bounds (they load zeros,
+    so their v_dot2 add 0) and run the loop body once more."""
+    module = Module("dot2MaskedTailEntry")
+    doneLabel = Label(self.labels.getNameInc("Dot2TailDone"), "")
+    module.add(SCmpEQU32(src0=sgpr("Dot2TailRem"), src1=0, comment="K tail: none, or done"))
+    module.add(SCBranchSCC1(labelName=doneLabel.getLabelName(), comment="K tail: skip"))
+    module.add(SMovB32(dst=sgpr("Dot2TailRem"), src=0, comment="K tail: run once"))
+    regs = [("GlobalReadOffsetA", g, slot) for g, slot in self.states.dot2TailSlots["A"]]
+    if kernel["ProblemType"]["DataTypeA"].isInt4() and usesBlockDequantA(kernel["ProblemType"]):
+      regs += [("GlobalReadOffsetScaleA", g, slot) for g, slot in self.states.dot2TailSlots["A"]]
+    regs += [("GlobalReadOffsetB", g, slot) for g, slot in self.states.dot2TailSlots["B"]]
+    for name, g, slot in regs:
+      module.add(VCndMaskB32(dst=vgpr("%s+%u" % (name, g)), src0="BufferOOB", src1=vgpr("%s+%u" % (name, g)),
+                             src2=sgpr("Dot2TailMask+%u" % slot, self.states.laneSGPRCount),
+                             comment="K tail: slot %u, lanes past K read zeros" % slot))
+    module.add(SMovB32(dst=self.loopCounter(kernel, self.states.unrollIdx), src=1, comment="K tail: one more iteration"))
+    module.add(SBranch(labelName=loopLabelBegin.getLabelName(), comment="K tail: masked iteration"))
+    module.add(doneLabel)
+    return module
+
   def dot2DtvAPairsPerSlot(self, kernel):
     """v_dot2 iterations (dword pairs) covered by one A load."""
     return kernel["GlobalReadVectorWidthA"] // kernel["NumDotElements"]

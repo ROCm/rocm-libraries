@@ -15,6 +15,7 @@ Public entry point: :func:`validateBlockDequantCombination`.
 from ..Problem import INT4_ENCODINGS_A, blockDequantItersPerGroupA, usesBlockDequantA
 from ..Utilities import reject
 from ...ExecutionPolicy import isPersistent
+from .DirectToVgprDot2 import dot2MaskedTail
 
 
 #: K-group sizes the prototype generates code for.
@@ -203,7 +204,8 @@ def validateBlockDequantCombination(state, printRejectionReason):
         return False
 
     # --- tail loop is a separate global-read path with no scale support yet ---
-    if state["AssertSummationElementMultiple"] % state["DepthU"] != 0:
+    # (dot2 kernels without LDS run their K tail as a masked main-loop iteration.)
+    if state["AssertSummationElementMultiple"] % state["DepthU"] != 0 and not dot2MaskedTail(state):
         reject(state, printRejectionReason,
                "UseScaleAB=Block has no tail-loop support yet; "
                "AssertSummationElementMultiple (%d) must be a multiple of DepthU (%d)"
