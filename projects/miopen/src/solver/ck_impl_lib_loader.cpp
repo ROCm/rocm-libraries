@@ -235,7 +235,8 @@ void ForEachDirectoryEntry(const char* dir, Fn&& fn)
     const std::unique_ptr<DIR, int (*)(DIR*)> handle{opendir(dir), closedir};
     if(!handle)
         return;
-    while(const dirent* entry = readdir(handle.get()))
+    // readdir is thread safe when no other thread reads the same stream, and this one is local.
+    while(const dirent* entry = readdir(handle.get())) // NOLINT(concurrency-mt-unsafe)
     {
         const std::string_view name{entry->d_name};
         if(name != "." && name != "..")
