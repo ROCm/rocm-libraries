@@ -142,6 +142,48 @@ class PackagedColumnTest(unittest.TestCase):
                     self.fail(why)
                 self.skipTest(why)
 
+    def test_recorded_witnesses_match_every_positive_special_cell(self):
+        """Explicit witnesses must appear on exactly the successful special probes."""
+        for path in self._columns():
+            with self.subTest(column=path.name):
+                rows = json.loads(path.read_text())["keys"]
+                expected = {
+                    (key, arch): imm
+                    for key, imm in G._IMMARG_WITNESSES.items()
+                    for arch, cell in rows.get(key, {}).items()
+                    if cell["status"] == G.STATUS_OK
+                }
+                actual = {
+                    (key, arch): cell["probe_imm"]
+                    for key, row in rows.items()
+                    for arch, cell in row.items()
+                    if "probe_imm" in cell
+                }
+                self.assertEqual(actual, expected)
+
+    def test_global_load_lds_is_available_on_cdna_and_not_on_rdna(self):
+        """Pin the measured boundary in both directions.
+
+        CDNA support is used in production, so an all-arch_absent row is a
+        false negative. RDNA still cannot lower the intrinsic.
+        """
+        for path in self._columns():
+            row = json.loads(path.read_text())["keys"].get("global.load.lds")
+            if row is None:
+                continue
+            for arch, cell in sorted(row.items()):
+                if cell["status"] in (
+                    G.STATUS_TARGET_UNSUPPORTED,
+                    G.STATUS_TOOLCHAIN_CRASH,
+                    G.STATUS_TOOLCHAIN_TIMEOUT,
+                ):
+                    continue  # no data, not an answer
+                expect = (
+                    G.STATUS_OK if arch.startswith("gfx9") else G.STATUS_ARCH_ABSENT
+                )
+                with self.subTest(column=path.name, arch=arch):
+                    self.assertEqual(cell["status"], expect)
+
 
 class SupportComparisonTest(unittest.TestCase):
     """Supported capabilities are a floor; observations retain their states."""

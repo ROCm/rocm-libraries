@@ -920,52 +920,6 @@ class ProbeWitnessTest(unittest.TestCase):
                     self.assertIn("float %a0, i32 %a1)", text)
                     self.assertIn("store volatile float %r", text)
 
-    def test_recorded_witnesses_match_every_positive_special_cell(self):
-        for flavor, path in _columns():
-            doc = json.loads(path.read_text())
-            expected = {
-                (key, arch)
-                for key, witness in G._IMMARG_WITNESSES.items()
-                for arch, cell in doc["keys"].get(key, {}).items()
-                if cell["status"] == G.STATUS_OK
-            }
-            actual = {
-                (key, arch)
-                for key, row in doc["keys"].items()
-                for arch, cell in row.items()
-                if "probe_imm" in cell
-            }
-            self.assertEqual(actual, expected, flavor)
-            for key, arch in sorted(actual):
-                cell = doc["keys"][key][arch]
-                self.assertEqual(cell["probe_imm"], G._IMMARG_WITNESSES[key])
-
-    def test_global_load_lds_is_available_on_cdna_and_not_on_rdna(self):
-        """The case that motivated the sweep, pinned in both directions.
-
-        The intrinsic takes a per-lane transfer size, legal at 1/2/4 on CDNA
-        and also 16 on gfx950, and it is on a live path (builder entry point,
-        handler in both engines, production instance), so an all-`arch_absent`
-        row is a false negative. RDNA really cannot lower it, and must still
-        say so after the full sweep.
-        """
-        for flavor, path in _columns():
-            row = json.loads(path.read_text())["keys"].get("global.load.lds")
-            if row is None:
-                continue
-            for arch, cell in sorted(row.items()):
-                if cell["status"] in (
-                    G.STATUS_TARGET_UNSUPPORTED,
-                    G.STATUS_TOOLCHAIN_CRASH,
-                    G.STATUS_TOOLCHAIN_TIMEOUT,
-                ):
-                    continue  # no data, not an answer
-                expect = (
-                    G.STATUS_OK if arch.startswith("gfx9") else G.STATUS_ARCH_ABSENT
-                )
-                with self.subTest(flavor=flavor, arch=arch):
-                    self.assertEqual(cell["status"], expect)
-
 
 class RefusalTest(unittest.TestCase):
     """What the generator must refuse to write.
