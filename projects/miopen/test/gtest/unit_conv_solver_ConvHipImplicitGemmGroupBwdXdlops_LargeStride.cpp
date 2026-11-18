@@ -19,6 +19,12 @@
 //   as for the small shapes. This case keeps the suite from passing when the solver rejects
 //   every problem, for example a gate that is too tight.
 //
+// Byte-only gated shape: x = (1, 96, 3345, 3345), same filter, FP16 only.
+//   x has 96 * 3345 * 3345 = 1,074,146,400 elements, which fits in int32, but 2,148,292,800
+//   bytes in FP16, which is just above INT_MAX. Only a gate on bytes rejects it. A gate that
+//   compared the element count would accept it, so this case pins the byte comparison. The
+//   solver must be applicable on no device.
+//
 // The solver also returns false when the CK plugin for the device is not loaded, which
 // would make the gated cases pass without exercising the gate. The suite therefore declares
 // the CK dynamic library as a dependency and is skipped when the plugin is missing.
@@ -71,6 +77,8 @@ auto GetTestParams()
     for(const auto type : {miopenHalf, miopenBFloat16, miopenFloat})
         for(const auto layout : {miopenTensorNHWC, miopenTensorNCHW})
             params.emplace_back(GetGatedParams(), GetConvCase(type, layout, 4736));
+    for(const auto layout : {miopenTensorNHWC, miopenTensorNCHW})
+        params.emplace_back(GetGatedParams(), GetConvCase(miopenHalf, layout, 3345));
     for(const auto layout : {miopenTensorNHWC, miopenTensorNCHW})
         params.emplace_back(GetInRangeParams(), GetConvCase(miopenHalf, layout, 3344));
     return params;
