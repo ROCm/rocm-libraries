@@ -33,12 +33,14 @@ rocsparse_status rocsparse::cscsv_diagonal_solve(rocsparse_handle            han
                                                  rocsparse_const_spmat_descr A,
                                                  rocsparse_const_dnvec_descr x,
                                                  rocsparse_dnvec_descr       y,
-                                                 rocsparse_cscsv_info        info)
+                                                 rocsparse_cscsv_info        info,
+                                                 bool                        limited_memory,
+                                                 bool                        conj)
 {
     ROCSPARSE_ROUTINE_TRACE;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_checkarg_matrix_properties(A));
 #if defined(ROCSPARSE_WITH_SPTRSV_CSC)
-    if(trans == rocsparse_operation_none)
+    if(rocsparse::cscsv_use_limited_memory(trans, limited_memory))
     {
         const int64_t batch_count = y->batch_count;
 
@@ -60,27 +62,27 @@ rocsparse_status rocsparse::cscsv_diagonal_solve(rocsparse_handle            han
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_seed_zero_pivot(
             handle, A->row_type, A->descr->diag_type, batch_count, info));
 
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::diagonal_solve(handle,
-                                      rocsparse_operation_none,
-                                      modifier,
-                                      alpha,
-                                      A,
-                                      diag,
-                                      static_cast<int64_t>(1),
-                                      x->const_values,
-                                      x->inc,
-                                      static_cast<int64_t>(0),
-                                      x->batch_stride,
-                                      y->values,
-                                      y->inc,
-                                      static_cast<int64_t>(0),
-                                      y->batch_stride,
-                                      batch_count,
-                                      false,
-                                      info->get_singularity_numeric_exact()->get_position(),
-                                      1,
-                                      handle->pointer_mode == rocsparse_pointer_mode_host));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::diagonal_solve(
+            handle,
+            conj ? rocsparse_operation_conjugate_transpose : rocsparse_operation_none,
+            modifier,
+            alpha,
+            A,
+            diag,
+            static_cast<int64_t>(1),
+            x->const_values,
+            x->inc,
+            static_cast<int64_t>(0),
+            x->batch_stride,
+            y->values,
+            y->inc,
+            static_cast<int64_t>(0),
+            y->batch_stride,
+            batch_count,
+            false,
+            info->get_singularity_numeric_exact()->get_position(),
+            1,
+            handle->pointer_mode == rocsparse_pointer_mode_host));
         return rocsparse_status_success;
     }
 #endif

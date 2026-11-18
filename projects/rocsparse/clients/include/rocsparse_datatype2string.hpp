@@ -379,6 +379,10 @@ constexpr auto rocsparse_spsvalg2string(rocsparse_spsv_alg alg)
     {
     case rocsparse_spsv_alg_default:
         return "default";
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
+    case rocsparse_spsv_alg_limited_memory:
+        return "limited_memory";
+#endif
     }
     return "invalid";
 }
@@ -389,6 +393,10 @@ constexpr auto rocsparse_sptrsvalg2string(rocsparse_sptrsv_alg alg)
     {
     case rocsparse_sptrsv_alg_default:
         return "default";
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
+    case rocsparse_sptrsv_alg_limited_memory:
+        return "limited_memory";
+#endif
     }
     return "invalid";
 }

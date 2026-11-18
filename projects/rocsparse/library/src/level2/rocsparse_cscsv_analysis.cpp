@@ -199,17 +199,19 @@ rocsparse_status rocsparse::cscsv_analysis(rocsparse_handle            handle,
                                            rocsparse_solve_policy      solve_policy,
                                            rocsparse_cscsv_info        info,
                                            size_t                      buffer_size_in_bytes,
-                                           void*                       buffer)
+                                           void*                       buffer,
+                                           bool                        limited_memory)
 {
     ROCSPARSE_ROUTINE_TRACE;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_checkarg_matrix_properties(A));
 #if defined(ROCSPARSE_WITH_SPTRSV_CSC)
-    info->set_csc_analysis(trans == rocsparse_operation_none);
-    if(trans == rocsparse_operation_none)
+    const bool use_limited_memory = rocsparse::cscsv_use_limited_memory(trans, limited_memory);
+    info->set_csc_analysis(use_limited_memory);
+    if(use_limited_memory)
     {
         size_t required_buffer_size{};
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::cscsv_analysis_buffer_size(handle, trans, A, &required_buffer_size));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_analysis_buffer_size(
+            handle, trans, A, &required_buffer_size, limited_memory));
         RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR((buffer_size_in_bytes < required_buffer_size)
                                                    ? rocsparse_status_invalid_size
                                                    : rocsparse_status_success,
@@ -351,10 +353,11 @@ rocsparse_status rocsparse::cscsv_analysis(rocsparse_handle            handle,
 
 bool rocsparse::cscsv_is_analyzed(rocsparse_cscsv_info        info,
                                   rocsparse_operation         trans,
-                                  rocsparse_const_spmat_descr A)
+                                  rocsparse_const_spmat_descr A,
+                                  bool                        limited_memory)
 {
 #if defined(ROCSPARSE_WITH_SPTRSV_CSC)
-    if(trans == rocsparse_operation_none)
+    if(rocsparse::cscsv_use_limited_memory(trans, limited_memory))
     {
         return info->get(rocsparse_operation_none, A->descr->fill_mode) != nullptr;
     }

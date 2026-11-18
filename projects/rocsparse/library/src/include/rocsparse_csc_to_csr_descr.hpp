@@ -101,4 +101,66 @@ namespace rocsparse
         // CSC solves correct.
         csr.batch_stride = csc.columns_values_batch_stride;
     }
+
+    //
+    // \brief Build a CSC matrix descriptor from a CSR one for triangular solve.
+    //
+    // CSC is the transpose of the CSR matrix that shares the same arrays, so the
+    // descriptor (type, diagonal type, index base, storage mode, ...) is copied
+    // unchanged and only the triangular fill mode is flipped (lower <-> upper).
+    //
+    // The output is a caller-provided stack object, so no heap allocation is
+    // performed and there is nothing to free.
+    //
+    // \param[in]  csr_descr the source CSR matrix descriptor.
+    // \param[out] csc_descr the CSC matrix descriptor (csr_descr with fill flipped).
+    //
+    static inline void build_csc_descr_from_csr(const _rocsparse_mat_descr& csr_descr,
+                                                _rocsparse_mat_descr&       csc_descr)
+    {
+        // Flipping the fill mode is its own inverse.
+        rocsparse::build_csr_descr_from_csc(csr_descr, csc_descr);
+    }
+
+    //
+    // \brief Build a CSC view of a CSR sparse matrix descriptor for triangular solve.
+    //
+    // A CSR matrix is the transpose of the CSC matrix that shares the same arrays:
+    // the CSR row-pointer / column-index arrays act as the CSC column-pointer /
+    // row-index arrays, the row and column dimensions are swapped, and the
+    // triangular fill mode is flipped (lower <-> upper).
+    //
+    // Both outputs are caller-provided stack objects, so no heap allocation is
+    // performed and there is nothing to free. The returned \p csc view only
+    // references the data owned by \p csr and must not outlive it.
+    //
+    // \param[in]  csr       the source CSR sparse matrix descriptor.
+    // \param[out] csc       the CSC sparse matrix descriptor viewing csr^T.
+    // \param[out] csc_descr the CSC matrix descriptor (referenced by \p csc).
+    //
+    static inline void build_csc_from_csr(const _rocsparse_spmat_descr& csr,
+                                          _rocsparse_spmat_descr&       csc,
+                                          _rocsparse_mat_descr&         csc_descr)
+    {
+        // Copy the matrix descriptor and flip only the fill mode, since CSC is
+        // the transpose of CSR.
+        rocsparse::build_csc_descr_from_csr(*csr.descr, csc_descr);
+
+        // Reinterpret the CSR arrays as the transposed CSC matrix.
+        csc                = csr;
+        csc.rows           = csr.cols;
+        csc.cols           = csr.rows;
+        csc.row_data       = csr.col_data;
+        csc.col_data       = csr.row_data;
+        csc.const_row_data = csr.const_col_data;
+        csc.const_col_data = csr.const_row_data;
+        csc.row_type       = csr.col_type;
+        csc.col_type       = csr.row_type;
+        csc.format         = rocsparse_format_csc;
+        csc.descr          = &csc_descr;
+
+        // rocsparse_csr_set_strided_batch stores the value batch stride in both
+        // batch_stride and columns_values_batch_stride, and the CSC solve reads
+        // columns_values_batch_stride, so no stride needs to be remapped here.
+    }
 }

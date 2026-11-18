@@ -72,7 +72,8 @@ namespace rocsparse
                                                      void*                zero_pivot,
                                                      rocsparse_index_base idx_base,
                                                      rocsparse_fill_mode  fill_mode,
-                                                     rocsparse_diag_type  diag_type);
+                                                     rocsparse_diag_type  diag_type,
+                                                     bool                 conj);
 
     rocsparse_status cscsv_solve_launch_find(rocsparse::cscsv_solve_launch_t* launch,
                                              uint32_t                         num_lanes,

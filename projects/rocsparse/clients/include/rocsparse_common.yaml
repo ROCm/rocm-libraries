@@ -169,10 +169,12 @@ Datatypes:
       bases: [c_int ]
       attr:
         rocsparse_spsv_alg_default: 0
+        rocsparse_spsv_alg_limited_memory: 1
   - rocsparse_sptrsv_alg:
       bases: [c_int ]
       attr:
         rocsparse_sptrsv_alg_default: 0
+        rocsparse_sptrsv_alg_limited_memory: 1
   - rocsparse_solve_mode:
       bases: [c_int ]
       attr:
@@ -468,10 +470,10 @@ All rocsparse_spmv_alg_csr: &all_rocsparse_spmv_alg_csr
          rocsparse_spmv_alg_csr_nnzsplit]
 
 All rocsparse_spsv_alg: &all_rocsparse_spsv_alg
-        [rocsparse_spsv_alg_default]
+        [rocsparse_spsv_alg_default, rocsparse_spsv_alg_limited_memory]
 
 All rocsparse_sptrsv_alg: &all_rocsparse_sptrsv_alg
-        [rocsparse_sptrsv_alg_default]
+        [rocsparse_sptrsv_alg_default, rocsparse_sptrsv_alg_limited_memory]
 
 All rocsparse_spitsv_alg: &all_rocsparse_spitsv_alg
         [rocsparse_spitsv_alg_default]

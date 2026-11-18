@@ -59,7 +59,8 @@ namespace rocsparse
                             J*                   zero_pivot,
                             rocsparse_index_base idx_base,
                             rocsparse_fill_mode  fill_mode,
-                            rocsparse_diag_type  diag_type)
+                            rocsparse_diag_type  diag_type,
+                            bool                 conj)
     {
         for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
             batch_index += hipGridDim_y)
@@ -83,7 +84,8 @@ namespace rocsparse
                 zero_pivot + batch_index,
                 idx_base,
                 fill_mode,
-                diag_type);
+                diag_type,
+                conj);
             // The next batch instance reuses the shared ticket of the block.
             __syncthreads();
         }
@@ -110,7 +112,8 @@ namespace rocsparse
                                                void*                zero_pivot,
                                                rocsparse_index_base idx_base,
                                                rocsparse_fill_mode  fill_mode,
-                                               rocsparse_diag_type  diag_type)
+                                               rocsparse_diag_type  diag_type,
+                                               bool                 conj)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::cscsv_solve_kernel<BLOCKSIZE, NUM_LANES, I, J, T>),
@@ -139,7 +142,8 @@ namespace rocsparse
             reinterpret_cast<J*>(zero_pivot),
             idx_base,
             fill_mode,
-            diag_type);
+            diag_type,
+            conj);
         return rocsparse_status_success;
     }
     using cscsv_solve_tpl_t
@@ -209,12 +213,14 @@ rocsparse_status rocsparse::cscsv_solve(rocsparse_handle            handle,
                                         rocsparse_solve_policy      solve_policy,
                                         rocsparse_cscsv_info        info,
                                         size_t                      buffer_size_in_bytes,
-                                        void*                       buffer)
+                                        void*                       buffer,
+                                        bool                        limited_memory,
+                                        bool                        conj)
 {
     ROCSPARSE_ROUTINE_TRACE;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_checkarg_matrix_properties(A));
 #if defined(ROCSPARSE_WITH_SPTRSV_CSC)
-    if(trans == rocsparse_operation_none)
+    if(rocsparse::cscsv_use_limited_memory(trans, limited_memory))
     {
         hipStream_t               stream      = handle->stream;
         const rocsparse_mat_descr descr       = A->descr;
@@ -292,7 +298,8 @@ rocsparse_status rocsparse::cscsv_solve(rocsparse_handle            handle,
                          zero_pivot,
                          descr->base,
                          descr->fill_mode,
-                         descr->diag_type));
+                         descr->diag_type,
+                         conj));
         return rocsparse_status_success;
     }
 #endif

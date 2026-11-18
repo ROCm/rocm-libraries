@@ -58,6 +58,9 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsv_alg value)
     switch(value)
     {
     case rocsparse_sptrsv_alg_default:
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
+    case rocsparse_sptrsv_alg_limited_memory:
+#endif
     {
         return false;
     }
@@ -301,7 +304,13 @@ try
         case rocsparse_format_csr:
         {
             auto csrsv_info = sptrsv_descr->get_csrsv_info();
-            if(csrsv_info != nullptr)
+            auto cscsv_info = sptrsv_descr->get_cscsv_info();
+            if(cscsv_info != nullptr)
+            {
+                symbolic_pivot = cscsv_info->get_symbolic_pivot();
+                exact_pivot    = cscsv_info->get_exact_pivot();
+            }
+            else if(csrsv_info != nullptr)
             {
                 symbolic_pivot = static_cast<rocsparse::pivot_info_t*>(csrsv_info);
                 exact_pivot    = csrsv_info->get_singularity_numeric_exact();
@@ -400,6 +409,17 @@ try
             break;
         }
         case rocsparse_format_csr:
+        {
+            if(sptrsv_descr->get_cscsv_info() != nullptr)
+            {
+                status = rocsparse::cscsv_zero_pivot(
+                    handle, sptrsv_descr->get_cscsv_info(), rocsparse_indextype_i64, data);
+                break;
+            }
+            auto csrsv_info = sptrsv_descr->get_csrsv_info();
+            status = rocsparse::csrsv_zero_pivot(handle, csrsv_info, rocsparse_indextype_i64, data);
+            break;
+        }
         case rocsparse_format_coo:
         {
             auto csrsv_info = sptrsv_descr->get_csrsv_info();
@@ -454,6 +474,7 @@ namespace rocsparse
         ROCSPARSE_ROUTINE_TRACE;
         const rocsparse_format    format    = A->format;
         const rocsparse_operation operation = sptrsv_descr->get_operation();
+        const bool limited_memory           = rocsparse::is_limited_memory(sptrsv_descr->get_alg());
         switch(sptrsv_stage)
         {
         case rocsparse_sptrsv_stage_analysis:
@@ -462,6 +483,15 @@ namespace rocsparse
             {
             case rocsparse_format_csr:
             {
+                if(rocsparse::csrsv_use_limited_memory(operation, limited_memory))
+                {
+                    _rocsparse_mat_descr   descr_csc;
+                    _rocsparse_spmat_descr mat_csc;
+                    rocsparse::build_csc_from_csr(*A, mat_csc, descr_csc);
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_analysis_buffer_size(
+                        handle, rocsparse_operation_none, &mat_csc, buffer_size_in_bytes, true));
+                    return rocsparse_status_success;
+                }
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_analysis_buffer_size(
                     handle, operation, A, buffer_size_in_bytes));
                 return rocsparse_status_success;
@@ -477,7 +507,7 @@ namespace rocsparse
             case rocsparse_format_csc:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_analysis_buffer_size(
-                    handle, operation, A, buffer_size_in_bytes));
+                    handle, operation, A, buffer_size_in_bytes, limited_memory));
                 return rocsparse_status_success;
             }
 
@@ -507,6 +537,21 @@ namespace rocsparse
             {
             case rocsparse_format_csr:
             {
+                if(rocsparse::csrsv_use_limited_memory(operation, limited_memory))
+                {
+                    _rocsparse_mat_descr   descr_csc;
+                    _rocsparse_spmat_descr mat_csc;
+                    rocsparse::build_csc_from_csr(*A, mat_csc, descr_csc);
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        rocsparse::cscsv_solve_buffer_size(handle,
+                                                           rocsparse_operation_none,
+                                                           &mat_csc,
+                                                           x,
+                                                           y,
+                                                           buffer_size_in_bytes,
+                                                           true));
+                    return rocsparse_status_success;
+                }
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve_buffer_size(
                     handle, operation, A, x, y, buffer_size_in_bytes));
                 return rocsparse_status_success;
@@ -522,7 +567,7 @@ namespace rocsparse
             case rocsparse_format_csc:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_solve_buffer_size(
-                    handle, operation, A, x, y, buffer_size_in_bytes));
+                    handle, operation, A, x, y, buffer_size_in_bytes, limited_memory));
                 return rocsparse_status_success;
             }
 
@@ -617,6 +662,7 @@ namespace rocsparse
                            sptrsv_descr,
                            rocsparse::enum_utils::is_invalid(alg),
                            rocsparse_status_invalid_value);
+        const bool limited_memory = rocsparse::is_limited_memory(alg);
 
         switch(sptrsv_stage)
         {
@@ -665,6 +711,25 @@ namespace rocsparse
             {
             case rocsparse_format_csr:
             {
+                if(rocsparse::csrsv_use_limited_memory(operation, limited_memory))
+                {
+                    _rocsparse_mat_descr   descr_csc;
+                    _rocsparse_spmat_descr mat_csc;
+                    rocsparse::build_csc_from_csr(*A, mat_csc, descr_csc);
+                    sptrsv_descr->set_cscsv_info(new _rocsparse_cscsv_info());
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        rocsparse::cscsv_analysis(handle,
+                                                  rocsparse_operation_none,
+                                                  &mat_csc,
+                                                  analysis_policy,
+                                                  rocsparse_solve_policy_auto,
+                                                  sptrsv_descr->get_cscsv_info(),
+                                                  buffer_size_in_bytes,
+                                                  buffer,
+                                                  true));
+                    sptrsv_descr->set_stage(rocsparse_sptrsv_stage_analysis);
+                    return rocsparse_status_success;
+                }
                 rocsparse_csrsv_info csrsv_info{};
                 switch(analysis_policy)
                 {
@@ -758,7 +823,8 @@ namespace rocsparse
                                                                     rocsparse_solve_policy_auto,
                                                                     sptrsv_descr->get_cscsv_info(),
                                                                     buffer_size_in_bytes,
-                                                                    buffer));
+                                                                    buffer,
+                                                                    limited_memory));
                 sptrsv_descr->set_stage(rocsparse_sptrsv_stage_analysis);
                 return rocsparse_status_success;
             }
@@ -846,6 +912,25 @@ namespace rocsparse
                 {
                 case rocsparse_format_csr:
                 {
+                    if(rocsparse::csrsv_use_limited_memory(operation, limited_memory))
+                    {
+                        _rocsparse_mat_descr   descr_csc;
+                        _rocsparse_spmat_descr mat_csc;
+                        rocsparse::build_csc_from_csr(*A, mat_csc, descr_csc);
+                        RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_diagonal_solve(
+                            handle,
+                            rocsparse_operation_none,
+                            modifier,
+                            alpha,
+                            &mat_csc,
+                            dnvec_descr_x,
+                            dnvec_descr_y,
+                            sptrsv_descr->get_cscsv_info(),
+                            true,
+                            operation == rocsparse_operation_conjugate_transpose));
+                        sptrsv_descr->set_stage(rocsparse_sptrsv_stage_compute);
+                        return rocsparse_status_success;
+                    }
                     RETURN_IF_ROCSPARSE_ERROR(
                         rocsparse::diagonal_solve_csr(handle,
                                                       operation,
@@ -877,7 +962,9 @@ namespace rocsparse
                                                         A,
                                                         dnvec_descr_x,
                                                         dnvec_descr_y,
-                                                        sptrsv_descr->get_cscsv_info()));
+                                                        sptrsv_descr->get_cscsv_info(),
+                                                        limited_memory,
+                                                        false));
                     sptrsv_descr->set_stage(rocsparse_sptrsv_stage_compute);
                     return rocsparse_status_success;
                 }
@@ -899,6 +986,29 @@ namespace rocsparse
             {
             case rocsparse_format_csr:
             {
+                if(rocsparse::csrsv_use_limited_memory(operation, limited_memory))
+                {
+                    _rocsparse_mat_descr   descr_csc;
+                    _rocsparse_spmat_descr mat_csc;
+                    rocsparse::build_csc_from_csr(*A, mat_csc, descr_csc);
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_solve(
+                        handle,
+                        rocsparse_operation_none,
+                        alpha_datatype,
+                        alpha,
+                        static_cast<int64_t>(0),
+                        &mat_csc,
+                        dnvec_descr_x,
+                        dnvec_descr_y,
+                        rocsparse_solve_policy_auto,
+                        sptrsv_descr->get_cscsv_info(),
+                        buffer_size_in_bytes,
+                        buffer,
+                        true,
+                        operation == rocsparse_operation_conjugate_transpose));
+                    sptrsv_descr->set_stage(rocsparse_sptrsv_stage_compute);
+                    return rocsparse_status_success;
+                }
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve(handle,
                                                                  operation,
                                                                  alpha_datatype,
@@ -944,7 +1054,9 @@ namespace rocsparse
                                                                  rocsparse_solve_policy_auto,
                                                                  sptrsv_descr->get_cscsv_info(),
                                                                  buffer_size_in_bytes,
-                                                                 buffer));
+                                                                 buffer,
+                                                                 limited_memory,
+                                                                 false));
                 sptrsv_descr->set_stage(rocsparse_sptrsv_stage_compute);
                 return rocsparse_status_success;
             }

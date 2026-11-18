@@ -60,10 +60,14 @@ extern "C" {
 *  stages only need to be called once for a given sparse matrix \f$op(A)\f$, while the computation stage can be repeatedly
 *  used with different \f$x\f$ and \f$y\f$ vectors.
 *
-*  For a CSC matrix without transpose, \p rocsparse_spsv solves directly on the columns of the
-*  matrix. Once an unknown is computed, its column contributes to the unknowns that
-*  depend on it. No transposed structure is built, and the analysis requires a single pass over the
-*  matrix. Atomic additions are used, so the results are not bitwise reproducible.
+*  \p rocsparse_spsv supports the following algorithms:
+*
+*  <table>
+*  <tr><th>Algorithm                                <th>Deterministic  <th>Notes
+*  <tr><td>rocsparse_spsv_alg_default</td>         <td>Yes</td>        <td>For a CSC matrix without transpose or a CSR matrix with transpose or conjugate transpose, the analysis builds the transposed structure and every solve gathers the matrix values. </td>
+*  <tr><td>rocsparse_spsv_alg_limited_memory</td>  <td>No</td>         <td>For a CSC matrix without transpose or a CSR matrix with transpose or conjugate transpose, the transposed structure is not built: once an unknown is computed, its column of \f$op(A)\f$ updates the unknowns that depend on it, and the analysis requires a single pass over the matrix. Atomic additions are used, so the results are not bitwise reproducible. Other formats and operations use \ref rocsparse_spsv_alg_default. </td>
+*  </table>
+*
 *
 *  \p rocsparse_spsv supports \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64 index types for
 *  storing the row pointer and column indices arrays of the sparse matrices. \p rocsparse_spsv supports the following

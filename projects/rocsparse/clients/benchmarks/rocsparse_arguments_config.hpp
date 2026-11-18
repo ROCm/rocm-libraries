@@ -68,6 +68,8 @@ private:
     rocsparse_int b_formatC{};
     rocsparse_int b_itilu0_alg{};
     rocsparse_int b_spmv_alg{};
+    rocsparse_int b_spsv_alg{};
+    rocsparse_int b_sptrsv_alg{};
     rocsparse_int b_spmm_alg{};
     rocsparse_int b_sddmm_alg{};
     rocsparse_int b_gtsv_interleaved_alg{};

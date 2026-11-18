@@ -458,6 +458,14 @@ void rocsparse_arguments_config::set_description(options_description& desc)
       value<rocsparse_int>(&this->b_spmv_alg)->default_value(rocsparse_spmv_alg_default),
       "Indicates what algorithm to use when running SpMV. Possibly choices are default: 0, COO: 1, CSR adaptive: 2, CSR stream: 3, ELL: 4, COO atomic: 5, BSR: 6, CSR LRB: 7, CSR nnzsplit: 8, SELL: 9 (default:0)")
 
+    ("spsv_alg",
+      value<rocsparse_int>(&this->b_spsv_alg)->default_value(rocsparse_spsv_alg_default),
+      "Indicates what algorithm to use when running SpSV. Possibly choices are default: 0, limited memory: 1 (default:0)")
+
+    ("sptrsv_alg",
+      value<rocsparse_int>(&this->b_sptrsv_alg)->default_value(rocsparse_sptrsv_alg_default),
+      "Indicates what algorithm to use when running SpTRSV. Possibly choices are default: 0, limited memory: 1 (default:0)")
+
     ("itilu0_alg",
       value<rocsparse_int>(&this->b_itilu0_alg)->default_value(rocsparse_itilu0_alg_default),
       "Indicates what algorithm to use when running Iterative ILU0. see documentation.")
@@ -568,6 +576,26 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
        && this->b_spmv_alg != rocsparse_spmv_alg_sell)
     {
         std::cerr << "Invalid value for --spmv_alg" << std::endl;
+        return -1;
+    }
+
+    if(this->b_spsv_alg != rocsparse_spsv_alg_default
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
+       && this->b_spsv_alg != rocsparse_spsv_alg_limited_memory
+#endif
+    )
+    {
+        std::cerr << "Invalid value for --spsv_alg" << std::endl;
+        return -1;
+    }
+
+    if(this->b_sptrsv_alg != rocsparse_sptrsv_alg_default
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
+       && this->b_sptrsv_alg != rocsparse_sptrsv_alg_limited_memory
+#endif
+    )
+    {
+        std::cerr << "Invalid value for --sptrsv_alg" << std::endl;
         return -1;
     }
 
@@ -688,6 +716,8 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
     this->formatB              = (rocsparse_format)this->b_formatB;
     this->formatC              = (rocsparse_format)this->b_formatC;
     this->spmv_alg             = (rocsparse_spmv_alg)this->b_spmv_alg;
+    this->spsv_alg             = (rocsparse_spsv_alg)this->b_spsv_alg;
+    this->sptrsv_alg           = (rocsparse_sptrsv_alg)this->b_sptrsv_alg;
     this->itilu0_alg           = (rocsparse_itilu0_alg)this->b_itilu0_alg;
     this->spmm_alg             = (rocsparse_spmm_alg)this->b_spmm_alg;
     this->sddmm_alg            = (rocsparse_sddmm_alg)this->b_sddmm_alg;
