@@ -1,40 +1,10 @@
 /*******************************************************************************
  *
  * MIT License
-
-        void ReferenceValidator::redirectSharedInputs()
-        {
-            if((!m_sharedA && !m_sharedB) || m_referenceInputs.size() < 2)
-                return;
-            // The owner is the last device, as in main.cpp (attachFullOutput). The pointers refer
-            // to the owner's DataInitialization host buffers, which outlive the reference inputs,
-            // and the reference only reads A and B, so nothing is copied or freed here. The same
-            // pointers serve the per-solution recomputation in preSolution.
-            auto const& owner = dynamic_cast<ContractionInputs const&>(*m_referenceInputs.back());
-            for(size_t d = 0; d + 1 < m_referenceInputs.size(); d++)
-            {
-                auto& inputs = dynamic_cast<ContractionInputs&>(*m_referenceInputs[d]);
-                if(m_sharedA)
-                {
-                    inputs.a      = owner.a;
-                    inputs.batchA = owner.batchA;
-                    inputs.scaleA = owner.scaleA;
-                    inputs.mxsa   = owner.mxsa;
-                }
-                if(m_sharedB)
-                {
-                    inputs.b      = owner.b;
-                    inputs.batchB = owner.batchB;
-                    inputs.scaleB = owner.scaleB;
-                    inputs.mxsb   = owner.mxsb;
-                }
-            }
-        }
  *
  * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
-                    redirectSharedInputs();
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
@@ -175,6 +145,7 @@ namespace TensileLite
                         m_referenceInputs.push_back(
                             (*m_devices)[d]->dataInit->prepareCPUInputs(deviceProblem(d)));
                     }
+                    redirectSharedInputs();
                 }
 
                 if(auto const* gemm = dynamic_cast<ContractionProblemGemm const*>(problem);
@@ -190,6 +161,35 @@ namespace TensileLite
                 if(auto const* gemm = dynamic_cast<ContractionProblemGemm const*>(problem);
                    gemm != nullptr && gemm->fusedA2A() == FusedA2A::GemmA2A)
                     referenceRecvs(*gemm);
+            }
+        }
+
+        void ReferenceValidator::redirectSharedInputs()
+        {
+            if((!m_sharedA && !m_sharedB) || m_referenceInputs.size() < 2)
+                return;
+            // The owner is the last device, as in main.cpp (attachFullOutput). The pointers refer
+            // to the owner's DataInitialization host buffers, which outlive the reference inputs,
+            // and the reference only reads A and B, so nothing is copied or freed here. The same
+            // pointers serve the per-solution recomputation in preSolution.
+            auto const& owner = dynamic_cast<ContractionInputs const&>(*m_referenceInputs.back());
+            for(size_t d = 0; d + 1 < m_referenceInputs.size(); d++)
+            {
+                auto& inputs = dynamic_cast<ContractionInputs&>(*m_referenceInputs[d]);
+                if(m_sharedA)
+                {
+                    inputs.a      = owner.a;
+                    inputs.batchA = owner.batchA;
+                    inputs.scaleA = owner.scaleA;
+                    inputs.mxsa   = owner.mxsa;
+                }
+                if(m_sharedB)
+                {
+                    inputs.b      = owner.b;
+                    inputs.batchB = owner.batchB;
+                    inputs.scaleB = owner.scaleB;
+                    inputs.mxsb   = owner.mxsb;
+                }
             }
         }
 
