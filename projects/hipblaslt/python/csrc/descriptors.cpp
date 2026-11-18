@@ -41,6 +41,20 @@ namespace hipblaslt_py
     {
         require_device();
         HIPBLASLT_CHECK(hipblasLtCreate(&h_));
+
+        // The loaded-version check needs a handle, so the first one in the process runs it
+        // (hipblaslt._loader.check_loaded_version); import never creates one.
+        static bool checked = false;
+        if(!checked)
+        {
+            checked       = true;
+            int  version  = 0;
+            char rev[128] = {};
+            if(hipblasLtGetVersion(h_, &version) == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtGetGitRevision(h_, rev) == HIPBLAS_STATUS_SUCCESS)
+                nb::module_::import_("hipblaslt._loader")
+                    .attr("check_loaded_version")(nb::make_tuple(version, std::string(rev)));
+        }
     }
 
     void Handle::close() noexcept
