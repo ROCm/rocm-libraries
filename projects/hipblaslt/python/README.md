@@ -56,6 +56,6 @@ pytest projects/hipblaslt/python/tests
 
 Tests marked `gpu` skip when no device is visible. Set `HIPBLASLT_PY_REQUIRE_GPU=1` to make them fail instead, as the GPU CI lanes do.
 
-## Design records
+## Design
 
-Decisions that should outlive the project are in [`docs/adr/`](docs/adr/README.md).
+The decisions behind the bindings, and why, are in [`DESIGN.md`](DESIGN.md).
