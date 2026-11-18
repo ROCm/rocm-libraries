@@ -210,14 +210,17 @@ namespace
     // a threshold.
     TEST_F(FixedPointEmulationHostTest, DeviceLookupChipAndArch)
     {
-        /* Radeon Pro W7800 and Radeon RX 9070 XT: chip rows, integer residues
-         * (low FP64 rate relative to INT8). */
+        /* Radeon Pro W7800, Radeon RX 9070 XT, and Radeon 8060S: chip rows,
+         * integer residues (low FP64 rate relative to INT8). */
         const auto w7800 = fixedPointEmulationLookupDevice(0x745eu, "gfx1100");
         EXPECT_EQ(w7800.match, FIXED_POINT_EMULATION_DEVICE_CHIP);
         EXPECT_TRUE(w7800.int_residues);
         const auto rx9070xt = fixedPointEmulationLookupDevice(0x7550u, "gfx1201");
         EXPECT_EQ(rx9070xt.match, FIXED_POINT_EMULATION_DEVICE_CHIP);
         EXPECT_TRUE(rx9070xt.int_residues);
+        const auto r8060s = fixedPointEmulationLookupDevice(0x1586u, "gfx1151");
+        EXPECT_EQ(r8060s.match, FIXED_POINT_EMULATION_DEVICE_CHIP);
+        EXPECT_TRUE(r8060s.int_residues);
         /* MI350X and MI355X: chip rows, no architecture row, FP64 residues. */
         const auto mi355x = fixedPointEmulationLookupDevice(0x75a3u, "gfx950:sramecc+:xnack-");
         EXPECT_EQ(mi355x.match, FIXED_POINT_EMULATION_DEVICE_CHIP);

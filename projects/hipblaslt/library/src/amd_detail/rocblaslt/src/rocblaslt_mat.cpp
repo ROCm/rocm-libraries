@@ -162,11 +162,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
        && E             == nullptr
        && !matmul_descr->pointermode
        && epilogue      == ROCBLASLT_EPILOGUE_DEFAULT
-       && batch_mode    == HIPBLASLT_BATCH_MODE_STRIDED
-       // BLAS leaves A and B unreferenced when alpha == 0, so callers may pass
-       // null pointers; the native path computes beta * C without reading them.
-       // Evaluated after !pointermode, so alpha is a host pointer here.
-       && !hostScalarIsZero(alphaBetaScalarType(scale_type, compute_type, type_a), alpha))
+       && batch_mode    == HIPBLASLT_BATCH_MODE_STRIDED)
     {
         FixedPointEmulationSettings emulDecision
             = fixedPointEmulationDecision(handle,
@@ -183,7 +179,15 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                           workspaceSizeInBytes);
         if(emulDecision.status != rocblaslt_status_success)
             return emulDecision.status;
-        if(emulDecision.apply)
+        // BLAS leaves A and B unreferenced when alpha == 0, so callers may pass
+        // null pointers; the native path computes beta * C without reading them.
+        // alpha is a host pointer (!pointermode above). Once the decision
+        // applies, A, B, C and D are all FP64 or all FP32 and the emulated GEMM
+        // reads *alpha as that type, so read it the same way here: the scale
+        // type can be narrower (a 64F compute type with a 32F scale type passes
+        // a double alpha, whose low 4 bytes are zero for 1.0).
+        if(emulDecision.apply
+           && !hostScalarIsZero(fixedPointEmulatedComputeDataType(compute_type), alpha))
         {
             /* Fill in the caller workspace pointer; all other fields are
              * already resolved by fixedPointEmulationDecision(). */
