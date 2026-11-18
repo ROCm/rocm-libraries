@@ -117,7 +117,8 @@ The following table lists all operations currently supported in hipDNN:
 > index tensor needs `generate_index`, Y's dimensions and packed NCHW/NCDHW strides, and must not
 > alias X or Y. On channels-last tensors, graphs whose window, stride, datatype and rank need a
 > per-thread tile above the scratch limit of MIOpen's tiled kernels (about 128 KiB) are not
-> supported. In-place execution and override-shape graphs are not supported.
+> supported. Pass-by-value and ragged tensors, in-place execution and override-shape graphs are
+> not supported.
 
 > [!NOTE]
 > **Sparse Support:** All operations currently work with dense tensors only.

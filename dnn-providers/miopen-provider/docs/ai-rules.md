@@ -125,7 +125,7 @@ Known MIOpen problems the provider works around live in two headers, each keyed 
 - `Workarounds.hpp` (production side): makes a plan builder's applicability decline the affected graphs, so engine selection skips them. `REJECT_IF_WORKAROUND_ISSUE_5409(handle)` returns `false` from a `bool` function; `WORKAROUND_ALMIOPEN_3295_DECLINES_INDEX(dataType, hasPadding)` is a predicate the resample checks turn into a decline.
 - `tests/common/TestWorkarounds.hpp` (test side, kept separate so production code never pulls in gtest): predicates and skips for tests that hit a known gap, such as `IS_WORKAROUND_ISSUE_6979(result)` and `SKIP_IF_WORKAROUND_ISSUE_6979(result)`. Use them only in tests of the affected path, so other failures still surface.
 - Each workaround is a commented section: the problem and where it is in MIOpen, the graphs or tests it affects, the macro's contract, and the steps to remove it. Tests that exist because of a workaround mention its key, so `git grep` on the key (for example `WORKAROUND_ISSUE_5409` or `ALMIOPEN.3295`) finds every site.
-- User-facing docs describe a declined case as "a known MIOpen limitation", without the tracker key.
+- User-facing docs describe a declined case as "a known MIOpen limitation". They may link a public GitHub issue (ROCm/rocm-libraries#<n>); they never name an internal Jira key.
 
 ### Testing
 - Use Google Test (gtest) framework for all C/C++ tests
