@@ -2636,7 +2636,7 @@ TEST(TestConvWrwFold, AUnitStrideConfigOfTheFoldedClassServesThroughTheFold)
     EXPECT_GE(launch->foldOffset,
               static_cast<size_t>(launch->reduce.splits)
                   * static_cast<size_t>(launch->reduce.partialElems) * 4);
-    EXPECT_EQ(launch->workspaceBytes, launch->foldOffset + 2 * 24 * 40 * 8 * 2);
+    EXPECT_EQ(launch->workspaceBytes, launch->foldOffset + size_t{2} * 24 * 40 * 8 * 2);
     EXPECT_EQ(launch->foldArgs.rows, 2 * 24);
     EXPECT_EQ(launch->foldArgs.u, 40);
     EXPECT_EQ(launch->foldArgs.shift, 4);
