@@ -1377,3 +1377,58 @@ def test_multistep_uses_step_indexed_log_filename(monkeypatch, tmp_path):
     backend.run({}, cfg, lambda *a, **kw: (str(csv_path), 0))
 
     assert any("step-01" in p for p in log_paths)
+
+
+def _run_backend_with_recording_runner(monkeypatch, tmp_path, evaluations):
+    csv_path = tmp_path / "results.csv"
+    _write_csv(csv_path, {"sol0": [10.0]})
+    runner_kwargs = []
+
+    class FakeGA:
+        def __init__(self, *args, **kwargs):
+            self._evaluate = kwargs["evaluate"]
+
+        def optimize(self):
+            for _ in range(evaluations):
+                self._evaluate([{"a": 0}])
+            return [{"a": 0}], np.array([1.0], dtype=np.float32)
+
+        def evaluate(self, _best):
+            return np.array([1.0], dtype=np.float32)
+
+    def runner(_solutions, **kwargs):
+        runner_kwargs.append(kwargs)
+        return str(csv_path), 0
+
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr(
+        "tensilelite.backends.ductile_backend._generate_ga_solutions",
+        lambda *_args, **_kwargs: [_fake_solution("sol0")],
+    )
+    monkeypatch.setattr(
+        "tensilelite.backends.ductile_backend.getSolutionNameMin",
+        lambda solution, _splitgsu: solution.name,
+    )
+    _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
+    DuctileBackend().run({}, _make_benchmark_config(tmp_path), runner)
+    return runner_kwargs
+
+
+def test_ductile_backend_every_evaluation_starts_a_fresh_database(monkeypatch, tmp_path):
+    runner_kwargs = _run_backend_with_recording_runner(monkeypatch, tmp_path, evaluations=2)
+    assert len(runner_kwargs) == 2
+    assert all(kwargs["freshDatabase"] is True for kwargs in runner_kwargs)
+
+
+@pytest.mark.parametrize("database", [True, False])
+@pytest.mark.parametrize("force_redo", [False, True])
+def test_ductile_backend_notes_fresh_database_only_without_force_redo(
+    monkeypatch, tmp_path, capsys, force_redo, database
+):
+    monkeypatch.setitem(
+        ductile_backend_mod.globalParameters, "ForceRedoBenchmarkProblems", force_redo
+    )
+    monkeypatch.setitem(ductile_backend_mod.globalParameters, "BenchmarkDatabase", database)
+    _run_backend_with_recording_runner(monkeypatch, tmp_path, evaluations=1)
+    noted = "starts a fresh benchmark database" in capsys.readouterr().out
+    assert noted is (database and not force_redo)

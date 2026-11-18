@@ -142,6 +142,17 @@ globalParameters["CheckASMCodeSize"] = False
 globalParameters["NumWarmups"] = 0
 globalParameters["TimingInstrumentation"] = False  # Enable detailed timing instrumentation output
 globalParameters["ParallelGpuExecution"] = 1  # Number of GPUs for parallel client execution (0=auto-detect, 1=serial, N=use N GPUs)
+# Record every benchmark pair in SQLite (Data/<name>.db), supervise the client, restart it after a
+# crash or hang and build the results CSV from the database. On by default: it falls back to the
+# legacy benchmark mode when a configuration is unsupported and the parameter was not set
+# explicitly.
+globalParameters["BenchmarkDatabase"] = True
+# Seconds one solution may run before the client is killed in BenchmarkDatabase mode (0 disables).
+globalParameters["BenchmarkSolutionTimeout"] = 600
+# Do not launch the remaining pairs of a solution that crashed, faulted or hung on another problem.
+globalParameters["BenchmarkIndirectFailures"] = True
+# Do not launch the remaining pairs of a solution that failed verification on another problem.
+globalParameters["BenchmarkIndirectVerificationFailures"] = True
 
 globalParameters["PythonProfile"] = False  # Enable python profiling
 
@@ -331,6 +342,7 @@ globalParameters["GranularityThreshold"] = 0.0
 #                              and run the solutions with better prediction value than the threshold. Usually only run the
 #                              `PredictionThreshold`-percent of solutions.
 #   PredictionTHreshold == 0: Run the single solution with best prediction value.
+# With BenchmarkDatabase, the pairs that the prediction does not select are recorded as NOT_SELECTED.
 globalParameters["PredictionThreshold"] = 2.0
 
 globalParameters["PristineOnGPU"] = (
@@ -782,6 +794,7 @@ def preserveGlobalParameters():
     of this dictionary. This scope is for sequential calls, not concurrent ones.
     """
     saved = deepcopy(globalParameters)
+    savedExplicit = isBenchmarkDatabaseExplicit()
     savedIsas = validParameters["ISA"]
     savedIsaValues = deepcopy(savedIsas)
     savedVerbosity = getVerbosity()
@@ -790,6 +803,7 @@ def preserveGlobalParameters():
     finally:
         globalParameters.clear()
         globalParameters.update(saved)
+        setBenchmarkDatabaseExplicit(savedExplicit)
         savedIsas[:] = savedIsaValues
         validParameters["ISA"] = savedIsas
         setVerbosity(savedVerbosity)
@@ -811,6 +825,7 @@ def restoreDefaultGlobalParameters():
     for key, value in deepcopy(defaultGlobalParameters).items():
         globalParameters[key] = value
     validParameters["ISA"] = validISA
+    setBenchmarkDatabaseExplicit(False)
 
 
 # hopefully the isaInfoMap keys only contain isas we plan to build and not all
@@ -972,6 +987,73 @@ def validateRuntimeLanguage(runtimeLanguage):
         )
 
 
+# Whether the user gave BenchmarkDatabase, in a config or on the command line. It is not a
+# parameter itself, so a config cannot set it directly in globalParameters.
+_benchmarkDatabaseExplicit = False
+
+
+def setBenchmarkDatabaseExplicit(value):
+    global _benchmarkDatabaseExplicit
+    _benchmarkDatabaseExplicit = value
+
+
+def isBenchmarkDatabaseExplicit():
+    return _benchmarkDatabaseExplicit
+
+
+def validateBenchmarkDatabaseParameters(overrides):
+    """Python decides whether the database mode applies; the client's checkSupportedOptions is
+    only a backstop for direct client invocations.
+
+    Call once after the command-line overrides, the last place the parameters change.
+    """
+    if "BenchmarkDatabase" in overrides:
+        setBenchmarkDatabaseExplicit(True)
+    if globalParameters["BenchmarkSolutionTimeout"] < 0:
+        printExit("BenchmarkSolutionTimeout must not be negative")
+    if not globalParameters["BenchmarkDatabase"]:
+        return
+    offenders = []
+    if globalParameters["ParallelGpuExecution"] != 1:
+        offenders.append("ParallelGpuExecution != 1")
+    if globalParameters["NumBenchmarks"] > 1:
+        offenders.append("NumBenchmarks > 1")
+    if globalParameters["CpuOnly"]:
+        offenders.append("CpuOnly")
+    if not offenders:
+        return
+    exitOrNoteBenchmarkDatabaseUnsupported(
+        "BenchmarkDatabase does not support " + ", ".join(offenders)
+    )
+    # Only reached when the parameter was not explicit: this global decision precedes benchmarking.
+    globalParameters["BenchmarkDatabase"] = False
+
+
+def exitOrNoteBenchmarkDatabaseUnsupported(reason):
+    if isBenchmarkDatabaseExplicit():
+        printExit(reason)
+    print(f"# {reason}; using the legacy benchmark mode")
+
+
+def benchmarkDatabaseUnsupportedReason(fusedA2A, icacheFlushArgs):
+    """Why a benchmark group cannot use the database mode, or None when it can."""
+    if fusedA2A:
+        return "BenchmarkDatabase does not support fused A2A problem types"
+    if len(icacheFlushArgs or []) > 1:
+        return (
+            "BenchmarkDatabase does not support multiple ICacheFlush values: "
+            "the client rejects multiple icache-flush-args values"
+        )
+    return None
+
+
+def benchmarkDatabaseApplies(fusedA2A, icacheFlushArgs):
+    return (
+        bool(globalParameters["BenchmarkDatabase"])
+        and benchmarkDatabaseUnsupportedReason(fusedA2A, icacheFlushArgs) is None
+    )
+
+
 def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     """
     Assign Global Parameters
@@ -1072,6 +1154,7 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
         if key in ignoreKeys:
             continue
         globalParameters[key] = config[key]
+    setBenchmarkDatabaseExplicit("BenchmarkDatabase" in config)
 
 
 def setupRestoreClocks():

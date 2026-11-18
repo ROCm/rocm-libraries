@@ -28,6 +28,7 @@ import shutil
 import sys
 import time
 
+from dataclasses import dataclass
 from pathlib import Path
 from enum import Enum
 from glob import glob
@@ -42,10 +43,23 @@ from .Common import ensurePath, print1, printExit, printWarning, ClientExecution
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
 from .Common.Architectures import (ARCH_CAP_OVERRIDES, archNamesByIsa, baseArchName,
                                    capOverrideKeyOf, isaToGfx)
-from .Common.GlobalParameters import globalParameters, preserveGlobalParameters
+from .Common.GlobalParameters import (
+    globalParameters,
+    preserveGlobalParameters,
+    benchmarkDatabaseApplies,
+)
 from .Common.TimingInstrumentation import record_timing, timing_context
 from .create_library import copyStaticFiles, libraryDir, main as createLibrary
 from .ParallelExecution import detectAvailableGpus, runClientParallel
+from .ClientSupervisor import (
+    SupervisionOutcome,
+    Watchdog,
+    findGpuProbe,
+    superviseClient,
+    reportDatabaseResults,
+    removeStaleResults,
+    removeDatabase,
+)
 from .Contractions import FreeIndex, BatchIndex
 from .Contractions import ProblemType as ContractionsProblemType
 
@@ -265,16 +279,107 @@ def _deviceScalarAlphaConfig(configPath, scalar, primary):
   for line in path.read_text().splitlines(keepends=True):
     if line.startswith("device-scalar-alpha="):
       line = f"device-scalar-alpha={scalar}\n"
-    elif not primary and line.startswith("results-file="):
-      results = Path(line.split("=", 1)[1].strip())
-      results = results.with_name(results.stem + suffix + results.suffix)
-      line = f"results-file={results}\n"
+    elif not primary and line.startswith(("results-file=", "benchmark-db=")):
+      # Each mode needs its own database too: the modes run with different inis.
+      key, value = line.split("=", 1)
+      target = Path(value.strip())
+      target = target.with_name(target.stem + suffix + target.suffix)
+      line = f"{key}={target}\n"
     lines.append(line)
   modePath.write_text("".join(lines))
   return str(modePath)
 
 
-def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: str, cCompiler: str, outputPath, configPaths=None, deviceScalarAlphaModes=None):
+def _readIni(configPath):
+    """Map each key of a client config to its value; the first occurrence of a key wins."""
+    values = {}
+    for line in Path(configPath).read_text().splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            values.setdefault(key, value.strip())
+    return values
+
+
+@dataclass(frozen=True)
+class _SupervisedLaunch:
+    buildPath: Path
+    enableTileSelection: bool
+    cxxCompiler: str
+    cCompiler: str
+    timingEnabled: bool
+    freshDatabase: bool
+
+
+def _requiredIniValue(ini, key, configPath):
+    if key not in ini:
+        raise RuntimeError(f"key '{key}' not found in client config {configPath}")
+    return ini[key]
+
+
+def _reportSupervision(result, dbPath, csvPath):
+    """Report a supervised run and return its exit code: non-zero unless every pair passed."""
+    if result.message:
+        printWarning(result.message)
+    if result.restarts:
+        print1(f"# Client restarted {result.restarts} time(s) after crashes or hangs")
+    if result.outcome == SupervisionOutcome.STOPPED_BEFORE_SESSION:
+        # The database was never confirmed to match this configuration, so it may be an old run's.
+        removeStaleResults(csvPath)
+        return 1
+    reportFailed = reportDatabaseResults(dbPath, csvPath)
+    return 1 if result.outcome != SupervisionOutcome.COMPLETED or reportFailed else 0
+
+
+def _superviseConfig(launch, configPath, ini):
+    """Run one client config under supervision; non-zero unless every pair passed."""
+    dbPath = _requiredIniValue(ini, "benchmark-db", configPath)
+    csvPath = _requiredIniValue(ini, "results-file", configPath)
+    # A fresh start is requested by the caller or by a ForceRedo rerun; restarts inside
+    # superviseClient keep resuming.
+    if launch.freshDatabase or globalParameters["ForceRedoBenchmarkProblems"]:
+        removeDatabase(dbPath)
+    # One run script per config keeps the clock pinning and flags of writeRunScript.
+    with timing_context("python_client_write_run_script"):
+        runScript = writeRunScript(
+            launch.buildPath,
+            True,
+            launch.enableTileSelection,
+            launch.cxxCompiler,
+            launch.cCompiler,
+            launch.buildPath,
+            [configPath],
+        )
+    deviceIdx = int(ini.get("device-idx") or 0)
+    probe = findGpuProbe(getClientExecutablePath(), deviceIdx)
+
+    with timing_context("python_client_subprocess"):
+        if launch.timingEnabled:
+            print(f"TIMING_TS:py_popen_start:{time.time_ns()}", file=sys.stderr, flush=True)
+        result = superviseClient(
+            [runScript],
+            launch.buildPath,
+            dbPath,
+            Watchdog(globalParameters["BenchmarkSolutionTimeout"]),
+            globalParameters["ExitOnFails"] > 1,
+            probe=probe,
+        )
+        if launch.timingEnabled:
+            print(f"TIMING_TS:py_communicate_end:{time.time_ns()}", file=sys.stderr, flush=True)
+    return _reportSupervision(result, dbPath, csvPath)
+
+
+def _runSupervisedClient(launch, configs):
+    """Supervise every (path, parsed ini) config, even after an earlier one failed."""
+    failed = False
+    with ClientExecutionLock(globalParameters["ClientExecutionLockPath"]):
+        for configPath, ini in configs:
+            if _superviseConfig(launch, configPath, ini):
+                failed = True
+    return 1 if failed else 0
+
+
+def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: str, cCompiler: str, outputPath, configPaths=None, deviceScalarAlphaModes=None,
+              freshDatabase=False):
   buildPath = ensurePath(outputPath / "build")
   timingEnabled = globalParameters.get("TimingInstrumentation", False)
   parallelGpus = globalParameters.get("ParallelGpuExecution", 1)
@@ -296,7 +401,8 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
       # Run configs separately so a passing run cannot hide an earlier failure.
       for modePath in modePaths:
         modeExit = runClient(libraryLogicPath, forBenchmark, enableTileSelection,
-                             cxxCompiler, cCompiler, outputPath, configPaths=[modePath])
+                             cxxCompiler, cCompiler, outputPath, configPaths=[modePath],
+                             freshDatabase=freshDatabase)
         returncode = returncode or modeExit
     return returncode
 
@@ -326,6 +432,14 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
     if globalParameters["CpuOnly"]:
       print1("# CpuOnly: skipping device-bound client launch; returning returncode 0.")
       return 0
+
+    # The ini carries the per-group decision: only groups where the mode applies have benchmark-db.
+    if forBenchmark:
+      inis = [_readIni(path) for path in configPaths]
+      if all("benchmark-db" in ini for ini in inis):
+        launch = _SupervisedLaunch(buildPath, enableTileSelection, cxxCompiler, cCompiler,
+                                   timingEnabled, freshDatabase)
+        return _runSupervisedClient(launch, list(zip(configPaths, inis)))
 
     # Original single-GPU path
     with timing_context(f"{timerPrefix}_write_run_script"):
@@ -720,6 +834,15 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
                 param("code-object", os.path.join(sourceDir,coFile))
 
         param('results-file', resultsFileName)
+        if forBenchmark and benchmarkDatabaseApplies(
+            problemType.fusedA2A != "Disabled", icacheFlushArgs
+        ):
+            param("benchmark-db", os.path.splitext(resultsFileName)[0] + ".db")
+            param("indirect-failures", globalParameters["BenchmarkIndirectFailures"])
+            param(
+                "indirect-verification-failures",
+                globalParameters["BenchmarkIndirectVerificationFailures"],
+            )
         param('performance-metric', globalParameters["PerformanceMetric"])
         param('problem-identifier', problemType.operationIdentifier)
         param('compute-input-type-A', problemType.computeInputTypeA.toName())

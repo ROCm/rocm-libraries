@@ -198,6 +198,14 @@ class DuctileBackend(OptimizationBackend):
             printWarning("DuctileBackend: cacheValid is not supported; running with cacheValid=False")
         if buildOnly:
             printWarning("DuctileBackend: buildOnly is not supported; running full benchmark")
+        if (
+            globalParameters["BenchmarkDatabase"]
+            and not globalParameters["ForceRedoBenchmarkProblems"]
+        ):
+            print1(
+                "# DuctileBackend: ForceRedoBenchmarkProblems is False, but every evaluation "
+                "starts a fresh benchmark database"
+            )
 
         if "benchmarkStep" not in benchmark_config or benchmark_config["benchmarkStep"] is None:
             raise ValueError("BenchmarkProblems: Missing required backend config key: benchmarkStep")
@@ -290,8 +298,10 @@ class DuctileBackend(OptimizationBackend):
                 with timing_context("python_ductile_clear_artifacts"):
                     shutil.rmtree(source_path)
 
-            # Benchmark solutions - Ductile forces no cache and no build-only.
-            results_filename, returncode = benchmark_runner(solutions, isCached=False, buildOnly=False)
+            # Each evaluation benchmarks a different solution set, so it needs its own database.
+            results_filename, returncode = benchmark_runner(
+                solutions, isCached=False, buildOnly=False, freshDatabase=True
+            )
             _last_results_file[0] = results_filename
 
             if not results_filename or not os.path.isfile(results_filename):

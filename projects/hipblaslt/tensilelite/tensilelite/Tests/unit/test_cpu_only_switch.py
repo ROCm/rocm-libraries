@@ -567,6 +567,8 @@ def test_off_path_text_golden(tmp_path, monkeypatch, _restore_gp):
     # restoreDefaultGlobalParameters() populates every key the writers read; CpuOnly OFF.
     restoreDefaultGlobalParameters()
     globalParameters["CpuOnly"] = False
+    # The golden ini is the legacy text, without the database options.
+    globalParameters["BenchmarkDatabase"] = False
 
     # --- writeRunScript golden (forBenchmark=True) ---
     monkeypatch.setattr(
@@ -680,6 +682,8 @@ def test_off_path_real_branches(monkeypatch, _restore_gp):
     import tempfile as _tempfile
 
     out = Path(_tempfile.mkdtemp(prefix="t11_"))
+    # An ini without benchmark-db is a legacy launch.
+    (out / "ClientParameters.ini").write_text("results-file=/DATA/benchmark.csv\n")
     with pytest.raises(RuntimeError, match="stop after proving"):
         ClientWriter.runClient(
             libraryLogicPath=None,

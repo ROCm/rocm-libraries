@@ -120,6 +120,18 @@ def checkCDBufferAndStrides(problemType, problemSizes, isCEqualD):
                         .format(ldd, ldc))
 
 
+def getICacheFlushArgs(config):
+    """Return the ICacheFlush values of a size group config, defaulting to [False]."""
+    icacheFlush = None
+    for bfp in config.get("BenchmarkFinalParameters", [])[1:]:
+        if "ICacheFlush" not in bfp:
+            continue
+        if icacheFlush is not None:
+            printExit("Duplicated ICacheFlush.")
+        icacheFlush = bfp["ICacheFlush"]
+    return [False] if icacheFlush is None else icacheFlush
+
+
 class BenchmarkProcess:
     """Representation of benchmarking parameters and resulting steps"""
 
@@ -216,7 +228,6 @@ class BenchmarkProcess:
         biasTypesConf  = ""
         factorDimConf  = ""
         deviceScalarAlphaModes = None
-        icacheFlush = None
         gateTypesConf = ""
         if "BenchmarkFinalParameters" in config:
             sizes          = config["BenchmarkFinalParameters"][0]["ProblemSizes"]
@@ -242,10 +253,6 @@ class BenchmarkProcess:
                       or any(type(mode) is not bool for mode in deviceScalarAlphaModes)
                       or len(set(deviceScalarAlphaModes)) != len(deviceScalarAlphaModes)):
                     printExit("DeviceScalarAlpha must be a non-empty list of distinct booleans.")
-                if "ICacheFlush" in bfp:
-                  if icacheFlush is not None:
-                    printExit("Duplicated ICacheFlush.")
-                  icacheFlush = bfp["ICacheFlush"]
                 if "GateTypeArgs" in bfp:
                   if gateTypesConf:
                     printExit("Duplicated GateTypeArgs.")
@@ -254,9 +261,6 @@ class BenchmarkProcess:
             sizes = defaultBatchedBenchmarkFinalProblemSizes if isbatched \
                 else defaultBenchmarkFinalProblemSizes
 
-        if icacheFlush is None:
-          icacheFlush = [False,]
-
         self.problemSizes = ProblemSizes(self.problemType, sizes)
         checkCDBufferAndStrides(self.problemType, self.problemSizes, globalParameters["CEqualD"])
 
@@ -264,7 +268,7 @@ class BenchmarkProcess:
         self.activationArgs = ActivationArgs(self.problemType, activationConf)
         self.factorDimArgs  = FactorDimArgs(self.problemType, factorDimConf)
         self.deviceScalarAlphaModes = deviceScalarAlphaModes
-        self.icacheFlushArgs = icacheFlush
+        self.icacheFlushArgs = getICacheFlushArgs(config)
         self.gateTypesArgs = GateTypeArgs(self.problemType, gateTypesConf)
 
         commonPrefix = f"{keyPathPrefix}.BenchmarkCommonParameters" if keyPathPrefix \

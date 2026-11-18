@@ -25,7 +25,8 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from tensilelite import ClientSupervisor
+from tensilelite import ClientSupervisor, ClientWriter
+from tensilelite.Common import TimingInstrumentation
 from tensilelite.BenchmarkDatabase import RunStatus, getPairs, openDatabase
 from tensilelite.ClientSupervisor import (
     PROBE_NAME,
@@ -48,6 +49,7 @@ from tensilelite.ClientSupervisor import (
     reportDatabaseResults,
     superviseClient,
 )
+from tensilelite.Common.GlobalParameters import globalParameters, restoreDefaultGlobalParameters
 
 from benchmark_db_test_helpers import DatabaseBuilder
 
@@ -69,6 +71,13 @@ NOT_SELECTED = RunStatus.NOT_SELECTED
 COMPLETED = SupervisionOutcome.COMPLETED
 STOPPED_AFTER_SESSION = SupervisionOutcome.STOPPED_AFTER_SESSION
 STOPPED_BEFORE_SESSION = SupervisionOutcome.STOPPED_BEFORE_SESSION
+
+
+@pytest.fixture(autouse=True)
+def restore_global_parameters():
+    restoreDefaultGlobalParameters()
+    yield
+    restoreDefaultGlobalParameters()
 
 
 @pytest.fixture(autouse=True)
@@ -834,7 +843,116 @@ def test_report_without_a_database_removes_the_stale_csv(tmp_path: Path, capsys)
 
 
 # ---------------------------------------------------------------------------
-# removeDatabase.
+# runClient with the supervision enabled.
+# ---------------------------------------------------------------------------
+
+
+def make_wrapper(directory: Path) -> Path:
+    wrapper = directory / "client.sh"
+    wrapper.write_text(f'#!/bin/sh\nexec {sys.executable} {FAKE_CLIENT} "$@"\n')
+    wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
+    return wrapper
+
+
+def enable_database_mode(directory: Path, exit_on_fails: int = 0) -> None:
+    globalParameters["PrebuiltClient"] = str(make_wrapper(directory))
+    globalParameters["BenchmarkDatabase"] = True
+    globalParameters["BenchmarkSolutionTimeout"] = 0
+    globalParameters["PinClocks"] = False
+    globalParameters["ExitOnFails"] = exit_on_fails
+
+
+def run_client(directory: Path, ini_paths: List[Path], **kwargs) -> int:
+    return ClientWriter.runClient(
+        None,
+        True,
+        False,
+        "cxx",
+        "cc",
+        directory / "out",
+        configPaths=[str(i) for i in ini_paths],
+        **kwargs,
+    )
+
+
+def test_run_client_survives_a_crash(tmp_path: Path):
+    enable_database_mode(tmp_path)
+    fixture = Fixture(tmp_path, pairs=3, behaviors={"1": "segv"})
+    assert run_client(tmp_path, [fixture.ini]) != 0
+    assert fixture.statuses() == {0: PASS, 1: UNKNOWN, 2: PASS}
+    assert len(fixture.launches()) == 2
+    assert fixture.csv.read_text().splitlines()[1].split(", ")[-3:] == ["101", "-1", "103"]
+    run_script = (tmp_path / "out" / "build" / "run.sh").read_text()
+    assert run_script.count("--config-file") == 1
+
+
+def test_run_client_times_the_run_script_and_the_subprocess(tmp_path: Path, monkeypatch):
+    enable_database_mode(tmp_path)
+    globalParameters["TimingInstrumentation"] = True
+    buffer = []
+    monkeypatch.setattr(TimingInstrumentation, "_timing_buffer", buffer)
+    fixture = Fixture(tmp_path, pairs=1)
+    assert run_client(tmp_path, [fixture.ini]) == 0
+    categories = {category for category, _ in buffer}
+    assert {"python_client_write_run_script", "python_client_subprocess"} <= categories
+
+
+def test_run_client_without_a_session_removes_the_stale_csv(tmp_path: Path):
+    enable_database_mode(tmp_path)
+    fixture = Fixture(tmp_path, pairs=2, early="exit:1")
+    make_complete_database(fixture)
+    fixture.csv.write_text("stale\n")
+    assert run_client(tmp_path, [fixture.ini]) != 0
+    assert not fixture.csv.exists()
+
+
+def test_run_client_reports_the_database_once_a_session_started(tmp_path: Path, capsys):
+    enable_database_mode(tmp_path)
+    fixture = Fixture(tmp_path, pairs=2, post_session="exit:3")
+    fixture.csv.write_text("stale\n")
+    assert run_client(tmp_path, [fixture.ini]) != 0
+    assert fixture.csv.read_text().splitlines()[1].split(", ")[-2:] == ["-1", "-1"]
+    assert "2 NOT_BENCHMARKED" in capsys.readouterr().out
+
+
+def test_run_client_of_a_clean_run_returns_zero(tmp_path: Path):
+    enable_database_mode(tmp_path)
+    fixture = Fixture(tmp_path, pairs=3)
+    assert run_client(tmp_path, [fixture.ini]) == 0
+    assert fixture.statuses() == all_pass(3)
+    assert fixture.csv.exists()
+
+
+def test_run_client_supervises_every_config_independently(tmp_path: Path):
+    enable_database_mode(tmp_path)
+    first = Fixture(tmp_path, "first", pairs=2, behaviors={"0": "fail"})
+    second = Fixture(tmp_path, "second", pairs=2)
+    assert run_client(tmp_path, [first.ini, second.ini]) != 0
+    assert len(first.launches()) == 1
+    assert len(second.launches()) == 1
+    assert second.statuses() == all_pass(2)
+    assert second.csv.exists()
+
+
+def test_device_scalar_alpha_modes_get_distinct_databases(tmp_path: Path):
+    ini = tmp_path / "ClientParameters.ini"
+    original = (
+        f"results-file={tmp_path / 'results.csv'}\n"
+        f"benchmark-db={tmp_path / 'results.db'}\n"
+        "device-scalar-alpha=False\n"
+    )
+    ini.write_text(original)
+    primary = Path(ClientWriter._deviceScalarAlphaConfig(str(ini), 0, True)).read_text()
+    other = Path(ClientWriter._deviceScalarAlphaConfig(str(ini), 1, False)).read_text()
+    assert f"results-file={tmp_path / 'results.csv'}\n" in primary
+    assert f"benchmark-db={tmp_path / 'results.db'}\n" in primary
+    assert f"results-file={tmp_path / 'results_DeviceScalarAlpha1.csv'}\n" in other
+    assert f"benchmark-db={tmp_path / 'results_DeviceScalarAlpha1.db'}\n" in other
+    assert ini.read_text() == original
+
+
+# ---------------------------------------------------------------------------
+# Fresh or resumed database (ForceRedoBenchmarkProblems) and the per-ini decision.
 # ---------------------------------------------------------------------------
 
 
@@ -855,6 +973,114 @@ def test_remove_database_accepts_missing_files(tmp_path: Path):
     (tmp_path / "results.db-wal").write_text("x")
     removeDatabase(str(db))
     assert list(tmp_path.iterdir()) == []
+
+
+def test_force_redo_starts_a_fresh_database(tmp_path: Path):
+    enable_database_mode(tmp_path)
+    globalParameters["ForceRedoBenchmarkProblems"] = True
+    fixture = Fixture(tmp_path, pairs=3)
+    write_garbage_database(fixture.db)
+    assert run_client(tmp_path, [fixture.ini]) == 0
+    assert [launch["existing"] for launch in fixture.launches()] == [[]]
+    assert fixture.statuses() == all_pass(3)
+
+
+def test_force_redo_deletes_the_database_once_not_between_crash_restarts(tmp_path: Path):
+    enable_database_mode(tmp_path)
+    globalParameters["ForceRedoBenchmarkProblems"] = True
+    fixture = Fixture(tmp_path, pairs=3, behaviors={"1": "segv"})
+    write_garbage_database(fixture.db)
+    assert run_client(tmp_path, [fixture.ini]) != 0
+    existing = [launch["existing"] for launch in fixture.launches()]
+    assert existing[0] == []
+    assert "" in existing[1]
+    assert fixture.statuses() == {0: PASS, 1: UNKNOWN, 2: PASS}
+
+
+def test_without_force_redo_a_partial_database_is_resumed(tmp_path: Path):
+    enable_database_mode(tmp_path)
+    globalParameters["ForceRedoBenchmarkProblems"] = False
+    interrupted = Fixture(tmp_path, pairs=4, behaviors={"1": "fail"}, stop_after_fail=True)
+    interrupted.supervise(stop_on_clean_exit=True)
+    assert interrupted.statuses() == {0: PASS, 1: FAILURE, 2: NOT_BENCHMARKED, 3: NOT_BENCHMARKED}
+    resumed = Fixture(tmp_path, pairs=4)
+    # The failed pair of the first run is kept, so the report is not clean.
+    assert run_client(tmp_path, [resumed.ini]) != 0
+    assert "" in resumed.launches()[-1]["existing"]
+    assert resumed.statuses() == {0: PASS, 1: FAILURE, 2: PASS, 3: PASS}
+
+
+def test_force_redo_covers_every_device_scalar_alpha_database(tmp_path: Path):
+    enable_database_mode(tmp_path)
+    globalParameters["ForceRedoBenchmarkProblems"] = True
+    fixture = Fixture(tmp_path, pairs=2)
+    fixture.ini.write_text(fixture.ini.read_text() + "device-scalar-alpha=False\n")
+    other_db = tmp_path / "bench_DeviceScalarAlpha1.db"
+    write_garbage_database(fixture.db)
+    write_garbage_database(other_db)
+    returncode = run_client(tmp_path, [fixture.ini], deviceScalarAlphaModes=[0, 1])
+    assert returncode == 0
+    assert [launch["existing"] for launch in fixture.launches()] == [[], []]
+    for db in (fixture.db, other_db):
+        with closing(openDatabase(db)) as connection:
+            assert len(getPairs(connection, RunStatus)) == 2
+
+
+def test_fresh_database_overrides_resume_without_force_redo(tmp_path: Path):
+    enable_database_mode(tmp_path)
+    globalParameters["ForceRedoBenchmarkProblems"] = False
+    fixture = Fixture(tmp_path, pairs=3)
+    write_garbage_database(fixture.db)
+    returncode = run_client(tmp_path, [fixture.ini], freshDatabase=True)
+    assert returncode == 0
+    assert [launch["existing"] for launch in fixture.launches()] == [[]]
+    assert fixture.statuses() == all_pass(3)
+
+
+def test_fresh_database_keeps_resuming_between_crash_restarts(tmp_path: Path):
+    enable_database_mode(tmp_path)
+    globalParameters["ForceRedoBenchmarkProblems"] = False
+    fixture = Fixture(tmp_path, pairs=3, behaviors={"1": "segv"})
+    write_garbage_database(fixture.db)
+    returncode = run_client(tmp_path, [fixture.ini], freshDatabase=True)
+    assert returncode != 0
+    existing = [launch["existing"] for launch in fixture.launches()]
+    assert existing[0] == []
+    assert "" in existing[1]
+    assert fixture.statuses() == {0: PASS, 1: UNKNOWN, 2: PASS}
+
+
+def test_fresh_database_covers_every_device_scalar_alpha_database(tmp_path: Path):
+    enable_database_mode(tmp_path)
+    globalParameters["ForceRedoBenchmarkProblems"] = False
+    fixture = Fixture(tmp_path, pairs=2)
+    fixture.ini.write_text(fixture.ini.read_text() + "device-scalar-alpha=False\n")
+    other_db = tmp_path / "bench_DeviceScalarAlpha1.db"
+    write_garbage_database(fixture.db)
+    write_garbage_database(other_db)
+    returncode = run_client(
+        tmp_path, [fixture.ini], deviceScalarAlphaModes=[0, 1], freshDatabase=True
+    )
+    assert returncode == 0
+    assert [launch["existing"] for launch in fixture.launches()] == [[], []]
+
+
+def test_run_client_without_benchmark_db_in_the_ini_takes_the_legacy_path(
+    tmp_path: Path, monkeypatch
+):
+    enable_database_mode(tmp_path)
+    marker = tmp_path / "legacy_launched"
+    client = tmp_path / "legacy_client.sh"
+    client.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    client.chmod(client.stat().st_mode | stat.S_IXUSR)
+    globalParameters["PrebuiltClient"] = str(client)
+    monkeypatch.setattr(
+        ClientWriter, "superviseClient", lambda *args, **kwargs: pytest.fail("supervised")
+    )
+    ini = tmp_path / "legacy.ini"
+    ini.write_text(f"results-file={tmp_path / 'legacy.csv'}\n")
+    assert run_client(tmp_path, [ini]) == 0
+    assert marker.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -1100,13 +1326,6 @@ def test_exited_abnormally(after, exitCode, expected):
     assert _exitedAbnormally(before, after, _Launch(exitCode)) is expected
 
 
-def make_wrapper(directory: Path) -> Path:
-    wrapper = directory / "client.sh"
-    wrapper.write_text(f'#!/bin/sh\nexec {sys.executable} {FAKE_CLIENT} "$@"\n')
-    wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
-    return wrapper
-
-
 def make_client_with_probe(directory: Path, probe_exists: bool) -> Path:
     client = make_wrapper(directory)
     if probe_exists:
@@ -1156,6 +1375,41 @@ def test_find_gpu_probe_warning_names_both_directories(tmp_path: Path, capsys):
 def test_find_gpu_probe_accepts_odd_client_values():
     assert findGpuProbe("python client.py", 0) is None
     assert findGpuProbe(Path("/fake/client"), 0) is None
+
+
+def install_logging_probe(directory: Path) -> Path:
+    """A probe next to the client that records its arguments, one line per run."""
+    log = directory / "probe_args.log"
+    probe = directory / ClientSupervisor.PROBE_NAME
+    probe.write_text(f'#!/bin/sh\necho "$@" >> {log}\n')
+    probe.chmod(probe.stat().st_mode | stat.S_IXUSR)
+    return log
+
+
+@pytest.mark.parametrize("ini_lines, device", [("device-idx=3\n", 3), ("", 0)])
+def test_supervised_run_warms_up_the_device_of_the_ini(tmp_path: Path, ini_lines, device):
+    enable_database_mode(tmp_path)
+    probe_log = install_logging_probe(tmp_path)
+    # The crash makes the supervisor run the probe before restarting the client.
+    fixture = Fixture(tmp_path, pairs=2, behaviors={"0": "segv"})
+    with open(fixture.ini, "a") as ini:
+        ini.write(ini_lines)
+    run_client(tmp_path, [fixture.ini])
+    assert probe_log.read_text().splitlines() == [f"--device-idx {device}"]
+
+
+def test_legacy_mode_never_looks_for_the_probe(tmp_path: Path, monkeypatch):
+    enable_database_mode(tmp_path)
+    client = tmp_path / "legacy_client.sh"
+    client.write_text("#!/bin/sh\n")
+    client.chmod(client.stat().st_mode | stat.S_IXUSR)
+    globalParameters["PrebuiltClient"] = str(client)
+    monkeypatch.setattr(
+        ClientWriter, "findGpuProbe", lambda *args, **kwargs: pytest.fail("probe lookup")
+    )
+    ini = tmp_path / "legacy.ini"
+    ini.write_text(f"results-file={tmp_path / 'legacy.csv'}\n")
+    assert run_client(tmp_path, [ini]) == 0
 
 
 # ---------------------------------------------------------------------------

@@ -42,7 +42,9 @@ SolutionSpec Client::serializeSolution([[maybe_unused]] ContractionSolution cons
 }
 
 // Rejects option combinations that the database mode does not support, before any database
-// file is created.
+// file is created. The Python side decides whether the database mode applies
+// (benchmarkDatabaseApplies and validateBenchmarkDatabaseParameters in GlobalParameters.py);
+// these checks are a backstop for direct client invocations and must stay in sync with it.
 void Client::checkSupportedOptions(po::variables_map const& args)
 {
 #if !defined(TENSILELITE_HAVE_MSGPACK_WRITER) && !defined(TENSILE_YAML)

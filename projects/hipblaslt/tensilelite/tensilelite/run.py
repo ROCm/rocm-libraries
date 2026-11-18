@@ -49,13 +49,18 @@ from typing import Dict, List, Optional
 from . import __version__
 from .Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
                            LIBRARY_LOGIC_DIR, setVerbosity, IsaInfo, makeDebugConfig, \
-                           DebugConfig, IsaVersion, coVersionMap
+                           DebugConfig, IsaVersion, coVersionMap, DEFAULT_CLIENT_PATH
 from .Common.Architectures import architectureMap, archNameForIsa, \
                                          baseArchName, capOverrideKeyOf, detectGlobalCurrentArch, \
                                          gfxToIsa, steppingArchOf, verifyTargetIdQualifiers
 from .Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
-from .Common.GlobalParameters import globalParameters, assignGlobalParameters, \
-                                            restoreDefaultGlobalParameters, validateRuntimeLanguage
+from .Common.GlobalParameters import (
+    globalParameters,
+    assignGlobalParameters,
+    restoreDefaultGlobalParameters,
+    validateRuntimeLanguage,
+    validateBenchmarkDatabaseParameters,
+)
 from .Common.TimingInstrumentation import timing_context, flush_timing_buffer
 from .ExecutionPolicy import normalize_hybrid_assignment_policy
 from .Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
@@ -69,8 +74,7 @@ from .backends.config import parse_backend_config
 from . import LibraryLogic
 
 TENSILE_SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
-TENSILE_CLIENT_PATH = Path('build_tmp') / 'tensilelite' / 'client' / 'tensilelite-client'
-TENSILE_CLIENT_PATH = TENSILE_SCRIPT_DIR.parent / TENSILE_CLIENT_PATH
+TENSILE_CLIENT_PATH = DEFAULT_CLIENT_PATH
 
 ###############################################################################
 # Execute Steps in Config
@@ -860,6 +864,7 @@ def main(argv=None):
     for key, value in overrideParameters.items():
         print("Overriding {0}={1}".format(key, value))
         globalParameters[key] = value
+    validateBenchmarkDatabaseParameters(overrideParameters)
 
     if "MaxFileName" in globalParameters or "MaxFileName" in config:
         printWarning("MaxFileName is no longer configurable, it will be automatically set to 64")

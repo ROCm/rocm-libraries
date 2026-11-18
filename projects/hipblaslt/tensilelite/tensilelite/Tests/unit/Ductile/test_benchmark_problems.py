@@ -335,12 +335,13 @@ class TestGenerateGaSolutions:
 # ---------------------------------------------------------------------------
 
 class _FakeBackendForBenchmark:
-    def __init__(self):
+    def __init__(self, fresh_database=None):
         self.calls = []
+        self.runner_kwargs = {} if fresh_database is None else {"freshDatabase": fresh_database}
 
     def run(self, backend_config, benchmark_config, benchmark_runner, cacheValid=False, buildOnly=False):
         self.calls.append((backend_config, benchmark_config, cacheValid, buildOnly))
-        benchmark_runner([{}], isCached=False, buildOnly=False)
+        benchmark_runner([{}], isCached=False, buildOnly=False, **self.runner_kwargs)
 
 
 class _FakeBackendForBenchmarkCached:
@@ -384,14 +385,19 @@ def _make_fake_step():
 
 
 @pytest.mark.parametrize("alpha_modes", [None, [True, False]])
-def test_benchmark_problem_type_passes_backend_config_and_runner(monkeypatch, tmp_path, alpha_modes):
-    fake_backend = _FakeBackendForBenchmark()
+@pytest.mark.parametrize("fresh_database", [None, False, True])
+def test_benchmark_problem_type_passes_backend_config_and_runner(
+    monkeypatch, tmp_path, alpha_modes, fresh_database
+):
+    fake_backend = _FakeBackendForBenchmark(fresh_database)
     fake_step = _make_fake_step()
     fake_step.deviceScalarAlphaModes = alpha_modes
     client_modes = []
+    client_fresh = []
 
     def run_client(*_args, **kwargs):
         client_modes.append(kwargs["deviceScalarAlphaModes"])
+        client_fresh.append(kwargs["freshDatabase"])
         return 0
 
     class _FakeBP:
@@ -450,6 +456,7 @@ def test_benchmark_problem_type_passes_backend_config_and_runner(monkeypatch, tm
 
     assert fails == 0
     assert client_modes == [alpha_modes]
+    assert client_fresh == [bool(fresh_database)]
     assert result_base is not None
     assert len(fake_backend.calls) == 1
     seen_backend_cfg, seen_bench_cfg, seen_cache, seen_build_only = fake_backend.calls[0]
@@ -702,3 +709,55 @@ def test_benchmark_problem_type_cached_runner_build_only_path(monkeypatch, tmp_p
     assert fails == 0
     assert result_base is not None
     assert len(fake_backend.calls) == 1
+
+
+def _run_main_without_results(monkeypatch, tmp_path, problem_type_config, size_group_cfg):
+    """Run main() with a client that produced no CSV; return the warnings printed."""
+    warnings = []
+    monkeypatch.setattr(BP, "_benchmarkProblemType", lambda **_kw: (str(tmp_path / "missing"), 0))
+    monkeypatch.setattr(BP, "printWarning", lambda msg, *_a, **_kw: warnings.append(msg))
+    monkeypatch.setitem(BP.globalParameters, "BenchmarkDatabase", True)
+    monkeypatch.setitem(BP.globalParameters, "ForceRedoBenchmarkProblems", True)
+    monkeypatch.setitem(BP.globalParameters, "CSVExportWinner", False)
+    monkeypatch.setitem(BP.globalParameters, "ExitOnFails", False)
+    monkeypatch.setitem(BP.globalParameters, "ConfigPath", ["/tmp/cfg.yaml"])
+    BP.main(
+        backend={"Name": "tensile"},
+        config=[[problem_type_config, size_group_cfg]],
+        useCache=False,
+        asmToolchain=types.SimpleNamespace(assembler=object()),
+        srcToolchain=types.SimpleNamespace(compiler="cc"),
+        cCompiler="cc",
+        outputPath=tmp_path / "out",
+        buildTmpPath=tmp_path / "build_tmp",
+        debugConfig=types.SimpleNamespace(
+            splitGSU=False, printSolutionRejectionReason=False, printIndexAssignmentInfo=False
+        ),
+        deviceId=0,
+        gfxName="gfx942",
+        isaInfoMap={IsaVersion(9, 4, 2): {}},
+        probSolMap={},
+        buildOnly=False,
+    )
+    return warnings
+
+
+def test_main_warns_and_skips_a_database_group_without_results(monkeypatch, tmp_path):
+    problem_type = {"OperationType": "GEMM", "DataType": "s", "DestDataType": "s"}
+    warnings = _run_main_without_results(
+        monkeypatch, tmp_path, problem_type, _minimal_problem_size_group_cfg()
+    )
+    assert any("no results were produced" in msg for msg in warnings)
+
+
+def test_main_collects_a_legacy_fallback_group_with_the_legacy_handling(monkeypatch, tmp_path):
+    problem_type = {"OperationType": "GEMM", "DataType": "s", "DestDataType": "s"}
+    size_group = _minimal_problem_size_group_cfg()
+    size_group["BenchmarkFinalParameters"].append({"ICacheFlush": [False, True]})
+    # Where the (mocked) benchmark step leaves its results; only the legacy collection copies them.
+    (tmp_path / "missing.csv").write_text("results")
+    (tmp_path / "missing.yaml").write_text("solutions")
+    warnings = _run_main_without_results(monkeypatch, tmp_path, problem_type, size_group)
+    assert not any("no results were produced" in msg for msg in warnings)
+    collected = sorted(path.suffix for path in (tmp_path / "out").rglob("*_00_00.*"))
+    assert collected == [".csv", ".yaml"]

@@ -19,7 +19,7 @@ BENCHMARK_DATA_DIR: str = "2_BenchmarkData"
 LIBRARY_LOGIC_DIR: str = "3_LibraryLogic"
 LIBRARY_CLIENT_DIR: str = "4_LibraryClient"
 
-# Where `invoke build-client` puts the client.
+# Where `invoke build-client` puts the client; run.py uses it as the default --prebuilt-client.
 DEFAULT_CLIENT_PATH = (
     Path(__file__).parents[2] / "build_tmp" / "tensilelite" / "client" / "tensilelite-client"
 )

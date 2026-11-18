@@ -2,9 +2,11 @@
 
 ## What it is and why
 
-The client runs every solution on every problem size. A kernel that crashes, faults the GPU or hangs used to kill the client and lose the progress of the whole run.
+A benchmark group runs every solution on every problem size. A kernel that crashes, faults the GPU or hangs used to kill the client, lose the data of the whole group and stop the pipeline.
 
-With `--benchmark-db <path>` (or `benchmark-db=<path>` in `ClientParameters.ini`) the client records each (init config, solution) pair in a SQLite file. Running the client again with the same database resumes: pairs that already have a result are not launched again, and a kernel that killed the client is not launched again either. The option is off by default (empty path). A Python supervisor, `tensilelite.ClientSupervisor`, can run a client to completion across crashes and hangs (see Supervision).
+With `--benchmark-db <path>` (or `benchmark-db=<path>` in `ClientParameters.ini`) the client records each (init config, solution) pair in a SQLite file. Running the client again with the same database resumes: pairs that already have a result are not launched again, and a kernel that killed the client is not launched again either. The client option is off by default (empty path). A Python supervisor, `tensilelite.ClientSupervisor`, runs a client to completion across crashes and hangs (see Supervision).
+
+Tensile enables the mode by default (see Usage): it supervises the client, restarts it after a crash or hang, kills a hung one and rebuilds the results CSV from the database.
 
 The contract:
 
@@ -61,7 +63,7 @@ The two indirect options need `benchmark-db`. Turning one off resets the pairs p
 
 `init-seed=0` seeds the data with the current time, so a rerun draws different data; `sessions.init_seed` records the seed each session used.
 
-### Restrictions
+### Client restrictions
 
 The client rejects these combinations with a diagnostic and exit status 1, before the database file is created:
 
@@ -75,7 +77,57 @@ The client rejects these combinations with a diagnostic and exit status 1, befor
 | A client without a solution writer | `benchmark-db needs a client built with the msgpack or YAML solution writer` |
 | An option value that the config-file syntax cannot hold | `benchmark-db cannot record this configuration: ...` |
 
+## Usage
+
+The mode is on by default. Turn it off with `BenchmarkDatabase: False` in `GlobalParameters` or `--global-parameters BenchmarkDatabase=False`. The standalone `tensilelite-client` stays opt-in with `--benchmark-db`.
+
+| Parameter | Default | Meaning |
+|-----------|---------|---------|
+| `BenchmarkDatabase` | `True` | Record pairs, supervise the client, build the results CSV from the database. |
+| `BenchmarkSolutionTimeout` | `600` | Seconds one pair may run before the client is killed. It is a safe limit for a single pair; a pair that legitimately needs longer needs a larger value. `0` disables the watchdog and a negative value is an error. |
+| `BenchmarkIndirectFailures` | `True` | Mark the remaining pairs of a solution that crashed, faulted or hung as `INDIRECTLY_FAILED`. |
+| `BenchmarkIndirectVerificationFailures` | `True` | Mark the remaining pairs of a solution that failed verification as `INDIRECT_VERIFICATION_FAILURE`. |
+
+The two indirect parameters are passed to the client as `indirect-failures` and `indirect-verification-failures`. In the `GlobalParameters` block of a config file the types are strict: the three booleans and the integer timeout raise `ConfigTypeError` otherwise. Values given with `--global-parameters` are not type-checked; only a negative `BenchmarkSolutionTimeout` is rejected.
+
+The timeout window starts when `PairRecorder` commits `UNKNOWN` and ends when `recorder->finish()` runs after `postSolution`. It covers solving, warm-ups, enqueues, validation against the CPU reference, timing and post-solution reporting. It does not cover the per-problem CPU reference, the per-problem input preparation, client start-up, solution selection, `preSolution` and the WGMXCC setup, so hangs there are not detected.
+
+### ExitOnFails
+
+The supervisor reports failure when any pair is `UNKNOWN`, `FAILURE`, `INDIRECTLY_FAILED`, `INDIRECT_VERIFICATION_FAILURE` or `NOT_BENCHMARKED`.
+
+| `ExitOnFails` | Behavior |
+|---------------|----------|
+| `1` (default) | The benchmark step runs fully, then Tensile exits with 1 if any group failed. LibraryLogic does not run. |
+| `0` | Tensile continues to LibraryLogic. Every non-`PASS` pair is `-1` in the CSV, so LibraryLogic skips it. |
+| `2` | The client gets `exit-on-error`. If it stops early after a failure the supervisor does not resume it. A crash or hang is still restarted. |
+
+### Tensile restrictions
+
+| Combination | Message |
+|-------------|---------|
+| `ParallelGpuExecution` other than 1 | `BenchmarkDatabase does not support ParallelGpuExecution != 1` |
+| `NumBenchmarks` greater than 1 | `BenchmarkDatabase does not support NumBenchmarks > 1` |
+| `CpuOnly` | `BenchmarkDatabase does not support CpuOnly` |
+| Fused A2A problem type | `BenchmarkDatabase does not support fused A2A problem types` |
+| More than one `ICacheFlush` value | `BenchmarkDatabase does not support multiple ICacheFlush values: the client rejects multiple icache-flush-args values` |
+
+With `BenchmarkDatabase` unset, Tensile prints one line, `# <reason>; using the legacy benchmark mode`, and uses the legacy mode. Explicit `True` exits with the message above; explicit `False` uses the legacy mode silently.
+
+The first three are global: `validateBenchmarkDatabaseParameters` decides once after the command-line overrides, and a fallback disables the mode for the whole run (several reasons are joined by commas). Fused A2A and multiple `ICacheFlush` values are per group, checked per step by `_checkBenchmarkDatabaseSupported`: only that group falls back, and the client ini carries the decision, since `benchmark-db` is written only for groups where the mode applies. The same decision selects result collection: a database group whose client left no CSV is skipped with a warning, a legacy group fails if the CSV is missing. The client-side `checkSupportedOptions` is only a backstop for direct invocations.
+
+Every `PredictionThreshold` is supported, and Tensile passes it to the client unchanged as `prediction-threshold`. The pairs that the prediction does not select are recorded as `NOT_SELECTED` (see Pairs the iterator does not select).
+
 ## Resume and rerun
+
+In Tensile, `ForceRedoBenchmarkProblems` decides whether the database of a config is fresh or resumed:
+
+- `True` (default) starts a fresh database: the `.db`, `-wal` and `-shm` files are deleted before the first launch of each config. Restarts inside the run resume.
+- `False` resumes from the existing database, which needs an unchanged client configuration: changing `ExitOnFails` between 1 and 2 (`exit-on-error`) or a print or log level option is a mismatch. A group is skipped before anything is launched when `2_BenchmarkData/<problem type>_<outer>_<idx>[_CSVWinner].csv` exists (database and legacy groups alike). With `True` no group is skipped.
+- The group skip looks only at the collected CSV, not at the database. The CSV of a group whose database run was partial or failed is collected too, with `-1` rows (also when `ExitOnFails` ends the run afterwards, because the exit comes after every group is collected), so with `False` that group is skipped on the next run. To resume it, delete its collected CSV, or use `True`. A group whose client produced no CSV (for example a configuration mismatch) is not collected and is launched again.
+- A database group that is not skipped always launches the client, even if `Data/00_Final.csv` exists, because that CSV may be partial. A complete database makes the launch a no-op that regenerates the CSV.
+- To start over with `False`, delete the `.db`, `-wal` and `-shm` files and the CSVs.
+- When the client is launched on a database containing any non-`PASS` pair, such as `FAILURE` or `UNKNOWN`, the launch returns 1 until it is deleted or `ForceRedoBenchmarkProblems` is `True`. With `False` the group's collected CSV must be deleted too (see the group-skip bullet above).
 
 On start the client opens the database, populating a new one or checking an existing one, and begins a session. Then, for each problem and solution:
 
@@ -108,13 +160,21 @@ benchmark database mismatch: solution <index> spec differs
 benchmark database mismatch: solution count differs: database has <n>, run has <m>
 ```
 
-The client configuration contains absolute paths, so a configuration that names other paths is a mismatch. To start over, delete the `.db`, `-wal` and `-shm` files.
+The client configuration contains absolute paths, so a configuration that names other paths is a mismatch (in Tensile, moving the output directory). To start over, delete the `.db`, `-wal` and `-shm` files.
+
+Under Tensile the supervisor then stops with `client failed (<how>) before starting a benchmark session; see its output above. If the benchmark configuration changed since <db> was created, delete it to start over`, removes any stale CSV and the group is skipped.
+
+### Ductile
+
+In database mode each evaluation uses a fresh database whatever `ForceRedoBenchmarkProblems` says, because every generation has a different solution set. With `False`, Tensile prints a note and still starts fresh; resuming is done by the GA checkpoint `step-NN__ductile.checkpoint`. Restarts inside one evaluation resume. In the legacy mode (`BenchmarkDatabase: False` or a per-group fallback) the existing CSV skip applies as before. Non-`PASS` pairs are `-1` in the CSV. Indirect propagation only acts within one evaluation. The per-generation CSV copies in `2_BenchmarkData/GA_iters/` are kept, the databases are not.
 
 ## Supervision
 
+For each config, Tensile writes `benchmark-db=<...>/Data/00_Final.db` next to the results CSV; the Granularity config and each additional device-scalar-alpha mode get their own database. It supervises `run.sh` with the `BenchmarkSolutionTimeout` watchdog, and the supervisor rebuilds the CSV and prints the summary when no pair is `NOT_BENCHMARKED`.
+
 `superviseClient(command, cwd, dbPath, watchdog, stopOnCleanExit, probe=None)` in `tensilelite.ClientSupervisor` runs one client configuration to completion and returns `SupervisionResult(restarts, outcome, message)`. `outcome` is a `SupervisionOutcome`: `COMPLETED`, `STOPPED_AFTER_SESSION` (a session of this call confirmed that the database matches the configuration) or `STOPPED_BEFORE_SESSION`. `message` says why it stopped and is empty on completion.
 
-The supervised command is any wrapper script or the client itself, and runs in its own process group. The client's `benchmark-db` must be `dbPath`, which the supervisor reads itself: give an absolute path, or one relative to the supervisor's working directory, not `cwd`.
+The supervised command is any wrapper script (Tensile passes `run.sh`) or the client itself, and runs in its own process group. The client's `benchmark-db` must be `dbPath`, which the supervisor reads itself: give an absolute path, or one relative to the supervisor's working directory, not `cwd`.
 
 ```mermaid
 flowchart TD
@@ -129,14 +189,17 @@ flowchart TD
 
 The supervisor decides from the database, not the exit code, which is the validation failure count of a finished client. The run is complete when no pair is `NOT_BENCHMARKED`; `NOT_SELECTED` pairs are not pending, so a client that marked them and exited cleanly is done, and one that exited cleanly with `NOT_BENCHMARKED` pairs left stops with an error. A restart requires progress: a pair launched by, or newly marked (as `INDIRECTLY_FAILED`, `INDIRECT_VERIFICATION_FAILURE` or `NOT_SELECTED`) by, the new session. The `NOT_BENCHMARKED` count is not used because a disabled indirect option raises it. Restarts are therefore bounded by the number of pairs. With `stopOnCleanExit`, a client that stopped early with a cleanly ended session is not resumed (for a client that exits on its first error).
 
-`Watchdog(timeoutSeconds, pollSeconds=2, graceSeconds=5, reapSeconds=30)` polls the database. When a pair of a session started by this launch has been `UNKNOWN` longer than `timeoutSeconds`, it sends SIGTERM to the process group, waits `graceSeconds` and sends SIGKILL. A `timeoutSeconds` of 0 disables it. Warnings:
+`Watchdog(timeoutSeconds, pollSeconds=2, graceSeconds=5, reapSeconds=30)` polls the database. When a pair of a session started by this launch has been `UNKNOWN` longer than `timeoutSeconds`, it sends SIGTERM to the process group, waits `graceSeconds` and sends SIGKILL. A `timeoutSeconds` of 0 disables it. Messages:
 
 ```
 client failed (<how>); restarting to resume, <m> pairs left
 problem <p>, solution <i> <name> has been running for <t>s, over the <limit>s limit; killing the client
+# Client restarted <n> time(s) after crashes or hangs
 ```
 
-`<how>` is `exit code <n>`, `killed by signal <n> (<NAME>)` or `killed by the watchdog`. A wrapper script that reports a client killed by a signal as 128 + n is decoded as a signal only when the session did not end.
+The first two carry the `Tensile::WARNING:` prefix; the last one is printed by Tensile at the end when there was a restart.
+
+`<how>` is `exit code <n>`, `killed by signal <n> (<NAME>)` or `killed by the watchdog`. `run.sh` reports a client killed by a signal as 128 + n, which is decoded as a signal only when the session did not end.
 
 The supervisor reads the database for each decision. A missing database, or one without tables, is the empty state. An unreadable one is read up to 3 times, 1 second apart, then supervision stops with `could not read the benchmark database <db> after 3 attempts: ...; not judging the client without it`. The watchdog poll skips a failed read.
 
@@ -160,7 +223,7 @@ When the client completes all problems, its exit status is the number of validat
 
 The supervisor handles a crash, hang, GPU fault, lost device and database error alike: the pair stays `UNKNOWN`, the session stays open and the client exits non-zero, so it restarts the command.
 
-After an abnormal exit (death by signal, watchdog kill, a non-zero exit without a cleanly ended session, or an unreadable database after the launch) the supervisor runs the GPU warm-up probe on the device of the `GpuProbe(command, device)` passed to `superviseClient` before the next launch:
+After an abnormal exit (death by signal, watchdog kill, a non-zero exit without a cleanly ended session, or an unreadable database after the launch) the supervisor runs the GPU warm-up probe on the device of the `GpuProbe(command, device)` passed to `superviseClient` before the next launch (Tensile passes the client's `device-idx`):
 
 - It makes up to 3 attempts of at most 120 seconds, logging `# gpu warm-up on device <d>, attempt <i>/3: passed` or a warning with the reason.
 - A probe that does not exit after SIGKILL stops the supervision at once, with `probe process <pid> did not exit after SIGKILL ...`, without another attempt.
@@ -170,8 +233,8 @@ After an abnormal exit (death by signal, watchdog kill, a non-zero exit without 
 ## Shutdown
 
 - SIGTERM and SIGHUP make the supervisor kill the process group of the supervised command (SIGTERM, `graceSeconds`, SIGKILL) and raise `SupervisorTerminated`, a `SystemExit` with code 128 plus the signal. Ctrl-C kills the group the same way and re-raises. The handlers are installed only while supervising and only in the main thread. A signal that was already ignored when supervision starts, such as SIGHUP under `nohup`, stays ignored. The database stays resumable.
-- If the supervisor is SIGKILLed, on Linux `PR_SET_PDEATHSIG(SIGKILL)` kills the chain: the supervised command and the probe are started with it, and the client in `benchmark-db` mode sets it on itself, as described in Crash handling.
-- After SIGKILL the supervisor waits at most `Watchdog.reapSeconds` (30 by default) for the group leader. If it does not exit, supervision stops with `client process <pid> did not exit after SIGKILL ...; not relaunching onto a GPU it may still hold`.
+- If the supervisor is SIGKILLed, on Linux `PR_SET_PDEATHSIG(SIGKILL)` kills the chain: `run.sh` and the probe are started with it, and the client in `benchmark-db` mode sets it on itself, as described in Crash handling.
+- After SIGKILL the supervisor waits at most `Watchdog.reapSeconds` (30 by default) for the group leader (`run.sh`). If it does not exit, supervision stops with `client process <pid> did not exit after SIGKILL ...; not relaunching onto a GPU it may still hold`.
 
 ## Durability
 
@@ -253,7 +316,7 @@ SQLite is required. CMake looks for the ROCm sysdeps config package in `${ROCM_P
 - The crash marking runs at the start of a session, before the selection of the unfinished problems is known. A crashed solution's `NOT_BENCHMARKED` pairs of those problems become `INDIRECTLY_FAILED` even if the prediction would not have selected them, and they are not retried.
 - The schema version was not bumped. A version 1 database that an earlier build of this unreleased schema created (status `CHECK` 0 to 5) must be deleted, otherwise the first `NOT_SELECTED` marking fails with a `CHECK` error.
 - The death-signal protection needs Linux.
-- The combinations in the Restrictions table are unsupported.
-- The watchdog kills the whole process group, so the cleanup of a wrapper script (for example a clock reset) does not run.
-- After a SIGKILL of the supervisor the client is killed by the death signal asynchronously, so a new run can start while the old client is still releasing the GPU.
+- The combinations in the Client restrictions and Tensile restrictions tables are unsupported.
+- The watchdog kills the whole process group, including `run.sh`, so the `PinClocks` reset at the end of `run.sh` does not run; the `atexit` `restoreClocks` handler is what restores the clocks.
+- After a SIGKILL of the supervisor the client is killed by the death signal asynchronously, while the client execution lock is released at once, so a new run can start while the old client is still releasing the GPU.
 - The bounded reap only follows the group leader, and a signal between starting the client and entering the cleanup scope is not covered.

@@ -41,7 +41,7 @@ from . import SolutionLibrary, LibraryIO
 from .KernelWriter import DebugConfig
 from .KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
 from .Toolchain.Component import Assembler
-from .SolutionStructs.Problem import ProblemType, ProblemSizes
+from .SolutionStructs.Problem import ProblemType, ProblemSizes, isFusedA2A
 from .SolutionStructs.Solution import Solution
 from .Common.TypeValidationErrors import ConfigTypeError
 from .SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, \
@@ -49,7 +49,7 @@ from .SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIP
 from .SolutionStructs.Naming import RegisterAllocationMerges, getSolutionNameMin, \
     getKernelNameMin
 
-from .BenchmarkStructs import BenchmarkProcess
+from .BenchmarkStructs import BenchmarkProcess, getICacheFlushArgs
 from .backends import BackendFactory
 from .backends.config import parse_backend_config
 from .Contractions import ProblemType as ContractionsProblemType
@@ -64,7 +64,13 @@ from .Common import HR, print1, print2, IsaInfo, IsaVersion, \
         BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR, ParallelMap2
 from .Common.Architectures import (ARCH_CAP_OVERRIDES, archNamesByIsa, capOverrideKeyOf,
                                    isaToGfx, gfxToVariants, xnackQualifierOf)
-from .Common.GlobalParameters import globalParameters, startTime
+from .Common.GlobalParameters import (
+    globalParameters,
+    startTime,
+    benchmarkDatabaseApplies,
+    benchmarkDatabaseUnsupportedReason,
+    exitOrNoteBenchmarkDatabaseUnsupported,
+)
 from .Common.TimingInstrumentation import timing_context
 
 _CACHE_FIELDS = {
@@ -653,6 +659,30 @@ def writeBenchmarkFiles(
     return codeObjectFiles, libraryFileRel
 
 
+def _checkBenchmarkDatabaseSupported(problemType, benchmarkStep):
+    if not globalParameters["BenchmarkDatabase"]:
+        return
+    reason = benchmarkDatabaseUnsupportedReason(
+        isFusedA2A(problemType), benchmarkStep.icacheFlushArgs
+    )
+    if reason is not None:
+        exitOrNoteBenchmarkDatabaseUnsupported(reason)
+
+
+def _shouldRunBenchmarkClient(problemType, benchmarkStep, resultsFileName):
+    # In database mode the client writes the CSV progressively, so a CSV left by an interrupted
+    # run is partial; the database decides what is left to run and a complete one is a no-op.
+    if benchmarkDatabaseApplies(isFusedA2A(problemType), benchmarkStep.icacheFlushArgs):
+        return True
+    return not os.path.exists(resultsFileName) or globalParameters["ForceRedoBenchmarkProblems"]
+
+
+def _removeStaleCollectedResults(*collectedPaths):
+    # Results copied by an earlier run must not feed LibraryLogic when this run produced none.
+    for path in collectedPaths:
+        Path(path).unlink(missing_ok=True)
+
+
 def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConfig, problemSizeGroupIdx,
                           outerBenchmarkIdx, configPath, useCache,
                          asmToolchain: AssemblyToolchain, srcToolchain: SourceToolchain, cCompiler: str,
@@ -707,6 +737,7 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
 
     for benchmarkStepIdx in range(0, totalBenchmarkSteps):
         benchmarkStep = benchmarkProcess[benchmarkStepIdx]
+        _checkBenchmarkDatabaseSupported(benchmarkProcess.problemType, benchmarkStep)
         stepName = str(benchmarkStep)
         shortName = stepName
 
@@ -760,7 +791,7 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                     printWarning("Cache data does not match config: redoing solution generation")
 
         # Pre-compute benchmark runner helper
-        def benchmark_runner(solutions, isCached=False, buildOnly=False):
+        def benchmark_runner(solutions, isCached=False, buildOnly=False, freshDatabase=False):
             """Compile and benchmark the given solutions.
             
             This function is backend-agnostic: receives pre-computed solutions
@@ -770,6 +801,8 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                 solutions: List of Solution objects to compile and benchmark
                 isCached: If True, indicates that the solutions are cached
                 buildOnly: If True, skip benchmarking and only compile
+                freshDatabase: If True, start the benchmark database from scratch; used by
+                    backends whose evaluations benchmark different solution sets
                 
             Returns:
                 - resultsFileName: Path to benchmark results CSV
@@ -873,21 +906,32 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
             # run benchmarking client
             if buildOnly:
                 print1("# Build-only mode: skipping benchmark.")
-            elif not os.path.exists(resultsFileName) or globalParameters["ForceRedoBenchmarkProblems"]:
+            elif _shouldRunBenchmarkClient(
+                benchmarkProcess.problemType, benchmarkStep, resultsFileName
+            ):
                 libraryLogicPath = None
                 forBenchmark = True
                 configPaths = [str(sourcePath / "ClientParameters.ini")]
 
                 if enableTileSelection:
                     configPaths.append(str(sourcePath / "ClientParameters_Granularity.ini"))
-                returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths,
-                                       deviceScalarAlphaModes=benchmarkStep.deviceScalarAlphaModes)
+                returncode = runClient(
+                    libraryLogicPath,
+                    forBenchmark,
+                    enableTileSelection,
+                    srcToolchain.compiler,
+                    cCompiler,
+                    shortNamePath,
+                    configPaths=configPaths,
+                    deviceScalarAlphaModes=benchmarkStep.deviceScalarAlphaModes,
+                    freshDatabase=freshDatabase,
+                )
 
                 # --cpu-only plumbing: runClient covered the config/run-script writing then
                 # stubbed the device launch (returncode 0). The device never produced a perf
                 # CSV, so synthesize a deterministic one here in the addFromCSV schema. We are
-                # inside the `not os.path.exists(resultsFileName)` branch, so this honors the
-                # existing skip-if-already-benchmarked guard.
+                # inside the `_shouldRunBenchmarkClient` branch, so this honors the existing
+                # skip-if-already-benchmarked guard.
                 if globalParameters["CpuOnly"]:
                     numSolutions = len(solutions) if solutions else 1
                     _writeSyntheticResultsCSV(resultsFileName, benchmarkStep.problemSizes,
@@ -1061,6 +1105,19 @@ def main(
                     # copy data
                     resultsFileBase = resultsFileBaseFinal
                     resultsFileName = resultsFileBase + ".csv"
+                    if benchmarkDatabaseApplies(
+                        isFusedA2A(problemTypeObj), getICacheFlushArgs(sizeGroupConfig)
+                    ) and not os.path.isfile(resultsFileName):
+                        printWarning(
+                            "no results were produced for {}_{:02d}_{:02d}; skipping its "
+                            "result collection (see the messages above)".format(
+                                str(problemTypeObj), outerIdx, idx
+                            )
+                        )
+                        _removeStaleCollectedResults(
+                            newResultsFileName, newSolutionsFileName, newGranularityFileName
+                        )
+                        continue
                     solutionsFileName = resultsFileBase + ".yaml"
                     granularityFileName = resultsFileBase + "_Granularity.csv"
                     shutil.copy(resultsFileName, newResultsFileName)
