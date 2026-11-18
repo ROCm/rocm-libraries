@@ -452,6 +452,7 @@ struct ConfigFields
     int64_t ring = 1, bl = 0, split = 0;
     int64_t tm = 0, tn = 0, nt = 0, threads = 0, pipe = 0;
     int64_t rows = 0, pw = 0, fn = 0, wp = 0, wq = 0, wk = 0, pp = 0, epi = 0, un = 0, cf = 0;
+    int64_t xpf = 0; ///< written only when set (an absent field reads as 0)
 };
 
 /// A gfx950 rows config: 2 x 2 x 2 waves of 8 rows x 16 columns x 64 channels, 64-channel chunks.
@@ -533,6 +534,10 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"epi", f.epi},
                        {"un", f.un},
                        {"cf", f.cf}};
+    if(f.xpf != 0)
+    {
+        kernel.metadata["xpf"] = f.xpf;
+    }
     return kernel;
 }
 
@@ -831,6 +836,48 @@ TEST(TestConvDirectKernelMatch, ChannelsFirstRowsTakePackedChannelsFirstActivati
         mutate(g);
         EXPECT_FALSE(admits(g, "gfx950", cfShape())) << name;
     }
+}
+
+TEST(TestConvDirectKernelMatch, CrossChunkPrefetchTakesRegisterPathHaloTiles)
+{
+    ConfigFields f;
+    f.xpf = 1;
+    EXPECT_TRUE(admits(f, "gfx942"));
+    EXPECT_TRUE(admits(f, "gfx942", baseShape(), "BFLOAT16"));
+    // Each field one at a time: the knob's range, register-path weights, channels-last halo.
+    const std::vector<std::pair<std::string, std::function<void(ConfigFields&)>>> mutations{
+        {"xpf", [](ConfigFields& g) { g.xpf = 2; }},
+        {"negative", [](ConfigFields& g) { g.xpf = -1; }},
+        {"bl", [](ConfigFields& g) { g.bl = 1; }},
+    };
+    for(const auto& [name, mutate] : mutations)
+    {
+        auto g = f;
+        mutate(g);
+        EXPECT_FALSE(admits(g, "gfx942")) << name;
+    }
+    // Not the rows or FMA kernels, nor the channels-first halo tile.
+    auto rows = rowsFields();
+    EXPECT_TRUE(admits(rows, "gfx950"));
+    rows.xpf = 1;
+    EXPECT_FALSE(admits(rows, "gfx950"));
+    auto fma = fmaFields(8);
+    EXPECT_TRUE(admits(fma, "gfx942"));
+    fma.xpf = 1;
+    EXPECT_FALSE(admits(fma, "gfx942"));
+    ConfigFields cf;
+    cf.atom = "wmma11_f16";
+    cf.archs = "gfx11";
+    cf.wm = 2;
+    cf.wn = 4;
+    cf.bn = 128;
+    cf.bc = 16;
+    cf.cf = 1;
+    auto shape = baseShape();
+    shape.input = {7, 16};
+    EXPECT_TRUE(admits(cf, "gfx1101", shape));
+    cf.xpf = 1;
+    EXPECT_FALSE(admits(cf, "gfx1101", shape));
 }
 
 TEST(TestConvDirectKernelMatch, ChannelsFirstHaloTilesTakePackedChannelsFirstActivations)

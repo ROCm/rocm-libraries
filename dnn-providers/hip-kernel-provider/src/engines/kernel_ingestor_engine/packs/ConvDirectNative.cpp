@@ -493,7 +493,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     int math = 0;
     int atomId = 0;
     int rowsKnob = 0;
-    const std::array<std::pair<const char*, int*>, 30> ints{
+    const std::array<std::pair<const char*, int*>, 29> ints{
         {{"atom_id", &atomId},   {"math", &math},          {"kd", &config.kd},
          {"r", &config.r},       {"s", &config.s},         {"bm", &config.bm},
          {"bn", &config.bn},     {"bc", &config.bc},       {"wm", &config.wm},
@@ -503,7 +503,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
          {"pipe", &config.pipe}, {"rows", &rowsKnob},      {"pw", &config.pw},
          {"fn", &config.fn},     {"wp", &config.wp},       {"wq", &config.wq},
          {"wk", &config.wk},     {"pp", &config.pp},       {"epi", &config.epi},
-         {"un", &config.un},     {"cf", &config.cf},       {"xpf", &config.xpf}}};
+         {"un", &config.un},     {"cf", &config.cf}}};
     for(const auto& [name, target] : ints)
     {
         const auto value = intField(kernel, name);
@@ -546,7 +546,9 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         // Channels-first halo tiles: 16-bit matrix-core, register-path weights, no split.
         return std::nullopt;
     }
-    // The cross-chunk prefetch: halo tiles with register-path weights, channels-last.
+    // The cross-chunk prefetch (absent: 0): halo tiles with register-path weights,
+    // channels-last.
+    config.xpf = intField(kernel, "xpf").value_or(0);
     if(config.xpf != 0
        && (config.xpf != 1 || config.rows || config.atom == "fma" || config.bl != 0
            || config.cf != 0))
