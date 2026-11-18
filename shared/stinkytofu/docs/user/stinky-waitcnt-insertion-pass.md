@@ -17,14 +17,14 @@
 
 ## Hardware background
 
-Asynchronous memory ops (LDS `ds_*`, global/buffer loads and stores, `tensor_load_to_lds`, scalar `s_load_*`) complete long after they issue. The hardware exposes one counter per kind of async memop, and before a consumer reads a result the compiler must insert the matching `s_wait_*` to drain the producer. Most of these counters retire in issue order, so a wait can name a producer while leaving newer ops in flight; `kmcnt` cannot.
+Asynchronous memory ops (LDS `ds_*`, global/buffer loads and stores, `tensor_load_to_lds` / `tensor_store_from_lds`, scalar `s_load_*`) complete long after they issue. The hardware exposes one counter per kind of async memop, and before a consumer reads a result the compiler must insert the matching `s_wait_*` to drain the producer. Most of these counters retire in issue order, so a wait can name a producer while leaving newer ops in flight; `kmcnt` cannot.
 
 | `CounterKind` | Covers | Wait instruction | Modifier field | Completion order |
 |---------------|--------|------------------|----------------|------------------|
 | `CK_DS` | `ds_read` / `ds_write` / `ds_atomic` | `s_wait_dscnt N` | `SWaitCntData.dlcnt` | in order |
 | `CK_Load` | global/buffer/flat **load**, returning MUBUF/FLAT/GLOBAL atomic | `s_wait_loadcnt N` | `SWaitCntData.vlcnt` | in order |
 | `CK_KM` | scalar memory loads (`s_load_*`) | `s_wait_kmcnt 0` | `SWaitCntData.kmcnt` | **out of order** |
-| `CK_Tensor` | `tensor_load_to_lds` | `s_wait_tensorcnt N` | `SWaitTensorCntData.tlcnt` | in order |
+| `CK_Tensor` | `tensor_load_to_lds` / `tensor_store_from_lds` | `s_wait_tensorcnt N` | `SWaitTensorCntData.tlcnt` | in order |
 
 `s_wait_*cnt N` blocks until the counter has dropped to **at most `N`**. On the in-order counters each op contributes exactly 1, so `N` is an op count and it identifies precisely which ops completed: the `N` most-recently-issued stay in flight and everything older has landed. `kmcnt` is neither in order nor one-per-op (see below).
 
