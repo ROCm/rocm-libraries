@@ -270,7 +270,7 @@ def test_writeMsgPackIndexed_omits_absent_version(tmp_path):
 
 
 def test_writeMsgPackIndexed_does_not_mutate_caller_dict(tmp_path):
-    """Run.py reuses the state dict, so splitting must not consume it."""
+    """create_library/run.py reuses the state dict, so splitting must not consume it."""
     dest = str(tmp_path / "library.dat")
     data = _masterLibraryState()
     before = copy.deepcopy(data)
@@ -526,8 +526,8 @@ def test_shared_indexed_writer_rejects_incomplete_master_state(tmp_path, payload
 def test_shared_metadata_utilities_work_without_generator_imports(tmp_path):
     """Use both utilities in a fresh interpreter with generator imports forbidden."""
     # A fresh interpreter keeps pytest's already-imported generator modules from
-    # hiding dependencies from the import guard. As in test_namespace_bridge.py,
-    # pass a self-contained script to Python's -c option.
+    # hiding dependencies from the import guard. Pass a self-contained script to
+    # Python's -c option.
     script = """
 import importlib.abc
 import sys

@@ -43,15 +43,16 @@ namespace TensileLite
     namespace Client
     {
 
+        class ClientProblemFactory;
+
         class BenchmarkTimer : public RunListener
         {
         public:
             using clock = std::chrono::steady_clock;
 
-            BenchmarkTimer(po::variables_map const&                    args,
-                           Hardware const&                             hardware,
-                           float                                       flushTimeUs,
-                           std::vector<std::shared_ptr<DeviceContext>> devices);
+            BenchmarkTimer(po::variables_map const& args,
+                           Hardware const&          hardware,
+                           float                    flushTimeUs);
 
             virtual bool needMoreBenchmarkRuns() const override;
             virtual void preBenchmarkRun() override;
@@ -95,10 +96,19 @@ namespace TensileLite
                 m_flushTimeUs = timeUs;
             }
 
+            // --split-devices: m_problem is the full problem; each device runs a slice.
+            void setSplit(ClientProblemFactory const* split)
+            {
+                m_split = split;
+            }
+
         protected:
             virtual double takeBatchTimeMs();
 
         private:
+            ContractionProblem* deviceProblem() const;
+            ClientProblemFactory const* m_split = nullptr;
+
             const int    m_numWarmups;
             const int    m_numBenchmarks;
             const int    m_numEnqueuesPerSync;
@@ -124,7 +134,6 @@ namespace TensileLite
             clock::time_point m_startTime;
             clock::time_point m_endTime;
 
-            std::vector<std::shared_ptr<DeviceContext>> m_devices;
             std::vector<hipEvent_t>                     m_start;
             std::vector<hipEvent_t>                     m_stop;
 

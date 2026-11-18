@@ -22,6 +22,7 @@
 *******************************************************************************/
 
 #include <algorithm>
+#include <complex>
 #include <iostream>
 #include <stdexcept>
 
@@ -32,7 +33,7 @@
 #include <vector>
 
 #include "../../../shared/CLI11.hpp"
-#include "rocfft.h"
+#include "rocfft/rocfft.h"
 
 // Check all ranks for an rocFFT non-success status.
 auto rocfft_status_sync(const rocfft_status fftrc, const MPI_Comm comm)

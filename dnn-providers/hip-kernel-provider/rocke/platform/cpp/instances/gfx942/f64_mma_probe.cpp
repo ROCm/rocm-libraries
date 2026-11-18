@@ -1,13 +1,25 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /* Spec-driven native mirror of instances/gfx942/f64_mma_probe.py. */
+#include "f64_mma_probe_internal.h"
+
+#include <stdio.h>
+#include <string.h>
+
 #include "rocke/arch_target.h"
 #include "rocke/error_boundary.hpp"
 #include "rocke/instance_f64_mma_probe.h"
 #include "rocke/ir_internal.h"
-#include <stdio.h>
 
 rocke_kernel_def_t* rocke_build_f64_mma_probe(rocke_ir_builder_t* b, int m, int k)
+{
+    return ckc::build_f64_mma_probe(b, m, k, nullptr);
+}
+
+rocke_kernel_def_t* ckc::build_f64_mma_probe(rocke_ir_builder_t* b,
+                                             int m,
+                                             int k,
+                                             const rocke_mma_catalog_t* catalog)
 {
     char name[64];
     snprintf(name, sizeof(name), "f64_mma_probe_m%d_k%d", m, k);
@@ -24,8 +36,36 @@ rocke_kernel_def_t* rocke_build_f64_mma_probe(rocke_ir_builder_t* b, int m, int 
         int slab_rows = m == 16 ? 4 : 16;
         int cols = m == 16 ? 16 : 4;
         const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx942");
-        const rocke_mma_op_t* atom = rocke_mma_catalog_op_for_shape(
-            &target->mma, "mma", "fp64", "fp64", "fp64", m, m, 4, NULL);
+        if(!catalog)
+            catalog = &target->mma;
+        const rocke_mma_op_t* atom
+            = rocke_mma_catalog_op_for_shape(catalog, "mma", "fp64", "fp64", "fp64", m, m, 4, NULL);
+        auto usable = [](const auto& desc) {
+            const auto* map = desc.layout;
+            return desc.dtype && !strcmp(desc.dtype, "fp64") && desc.frag_len > 0 && map && map->fn
+                   && map->frag_len == desc.frag_len && map->wave_size == 64;
+        };
+        bool valid = atom && atom->wave_size == 64;
+        if(valid)
+        {
+            for(int role = 0; role < 3; ++role)
+                valid = valid && usable(atom->srcs[role]);
+            /* One wave covers the declared C/D footprint (four blocks for m=4). */
+            int output_rows = m > 64 / m ? m : 64 / m;
+            valid = valid && usable(atom->dst) && atom->srcs[0].frag_len == 1
+                    && atom->srcs[1].frag_len == 1
+                    && atom->srcs[2].frag_len == output_rows * cols / 64
+                    && atom->srcs[2].frag_len <= 4
+                    && atom->dst.frag_len == atom->srcs[2].frag_len
+                    /* Shared mapping identity supports copies and shared forwarders;
+                     * it does not infer arbitrary callback equivalence. */
+                    && atom->dst.layout->fn == atom->srcs[2].layout->fn;
+        }
+        if(!valid)
+            return (rocke_kernel_def_t*)rocke_i_set_err(
+                b,
+                ROCKE_ERR_VALUE,
+                "F64 probe requires the fixed gfx942 instruction and layout contract");
         rocke_param_opts_t opts = {};
         opts.align = 8;
         opts.align_set = true;
@@ -39,18 +79,18 @@ rocke_kernel_def_t* rocke_build_f64_mma_probe(rocke_ir_builder_t* b, int m, int 
         rocke_value_t* ck = rocke_b_const_i32(b, k);
         rocke_value_t* indices[4];
         rocke_value_t* c_values[4];
-        for(int slot = 0; slot < atom->c_frag_len; ++slot)
+        for(int slot = 0; slot < atom->srcs[2].frag_len; ++slot)
         {
             rocke_value_t *r, *col;
-            rocke_layout_map_coord(atom->c_layout, b, lane, slot, &r, &col);
+            rocke_layout_map_coord(atom->srcs[2].layout, b, lane, slot, &r, &col);
             rocke_value_t* offset = rocke_b_mul(b, r, cn);
             indices[slot] = rocke_b_add(b, offset, col);
             c_values[slot] = rocke_b_global_load(b, cc, indices[slot], rocke_f64(), 8);
         }
-        rocke_value_t* acc = rocke_b_vec_pack(b, c_values, atom->c_frag_len, rocke_f64());
+        rocke_value_t* acc = rocke_b_vec_pack(b, c_values, atom->srcs[2].frag_len, rocke_f64());
         rocke_value_t *a_row, *a_k, *b_row, *b_col;
-        rocke_layout_map_coord(atom->a_layout, b, lane, 0, &a_row, &a_k);
-        rocke_layout_map_coord(atom->b_layout, b, lane, 0, &b_row, &b_col);
+        rocke_layout_map_coord(atom->srcs[0].layout, b, lane, 0, &a_row, &a_k);
+        rocke_layout_map_coord(atom->srcs[1].layout, b, lane, 0, &b_row, &b_col);
         for(int step = 0; step < k / 4; ++step)
         {
             rocke_value_t* a_off = rocke_b_mul(b, a_row, ck);
@@ -64,7 +104,7 @@ rocke_kernel_def_t* rocke_build_f64_mma_probe(rocke_ir_builder_t* b, int m, int 
             rocke_value_t* bv = rocke_b_global_load(b, bb, b_index, rocke_f64(), 8);
             acc = rocke_b_mma(b, atom->op_id, av, bv, acc, NULL, 0);
         }
-        for(int slot = 0; slot < atom->c_frag_len; ++slot)
+        for(int slot = 0; slot < atom->srcs[2].frag_len; ++slot)
         {
             rocke_value_t* value = rocke_b_vec_extract(b, acc, slot);
             rocke_b_global_store(b, d, indices[slot], value, 8);

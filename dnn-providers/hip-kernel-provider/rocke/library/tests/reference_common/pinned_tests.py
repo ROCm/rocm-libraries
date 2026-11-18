@@ -5,13 +5,15 @@
 
 ``test_<operation>_pinned_reference.py`` defines its ``reference_bundle``
 fixture with ``select_bundle`` and binds the tests that ``pinned_reference_tests``
-builds to module names, so CTest and pytest select them per operation.
+builds to module names, so CTest and pytest select them per operation. The tests
+are parametrized by each enrolled (architecture, variant) slot.
 """
 
 from __future__ import annotations
 
 import importlib
 from collections.abc import Callable, Iterator
+from contextlib import ExitStack
 from dataclasses import asdict
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -33,16 +35,25 @@ def select_bundle(
     operation: ReferenceOperation,
     default_bundle_path: Callable[..., Path],
     load_bundle: Callable[..., dict],
-) -> Iterator[tuple[ModuleType, Path, dict]]:
-    """Yield the GPU's adapter, bundle, and authenticated manifest, or skip.
+) -> Iterator[Callable[[str, str], tuple[ModuleType, Path, dict]]]:
+    """Yield the lookup of a slot's adapter, bundle, and authenticated manifest.
 
-    An explicitly selected operation or bundle is required: a missing enrolled
-    GPU or bundle fails instead of skipping. Each skip says which of these it
-    was, or that options selected another operation, and how to run the tests.
-    Workers are reused for the module. The test module passes its own bundle
-    lookup helpers so host tests can replace them there.
+    The lookup takes an architecture and variant and skips a slot of another
+    processor or, with ``--rocke-reference-variant``, of another variant. A
+    published variant, one with a committed lock, runs its default bundle. An
+    explicitly selected operation or bundle is required: a missing enrolled
+    GPU or bundle fails instead of skipping. An unpublished variant runs only a
+    candidate bundle and lock; without them it skips, but fails when selected
+    by name or when its selected architecture publishes no variant, since that
+    selection would otherwise pass without running anything. Each skip says
+    which of these it was, or that options selected another operation, and how
+    to run the tests. A slot's bundle and reused workers stay open until a test
+    opens another slot, so at most one slot's workers are alive at a time. The
+    test module passes its own bundle lookup helpers so host tests can replace
+    them there.
     """
     selected = config.getoption("--rocke-reference-operation")
+    chosen = config.getoption("--rocke-reference-variant")
     name = operation.name.upper()
     if selected and selected != operation.name:
         pytest.skip(
@@ -65,26 +76,91 @@ def select_bundle(
             else "no GPU detected: HIP reports no device"
         )
         pytest.skip(f"{reason}; run on an enrolled {name} processor ({enrolled})")
-    target = operation.architectures.get_architecture(arch)
-    bundle = (
-        Path(configured).resolve()
-        if configured
-        else default_bundle_path(_TESTS, arch, operation=operation.name)
-    )
+    registry = operation.architectures
     lock = config.getoption("--rocke-reference-lock")
     lock = Path(lock) if lock else None
-    if not bundle.is_dir():
-        hint = operation.bundle_hint(
-            arch, bundle, lock, option="--rocke-reference-bundle"
+    opened: dict[tuple[str, str], tuple[ModuleType, Path, dict]] = {}
+    workers = ExitStack()
+
+    def check_published(variant: str) -> None:
+        """Skip or fail an unpublished variant that has no candidate bundle and lock."""
+        committed = registry.baseline_lock(arch, variant)
+        if committed.is_file() or (configured and lock):
+            return
+        candidate = (
+            "pass a qualified candidate bundle and its qualification-lock.json with "
+            "--rocke-reference-bundle and --rocke-reference-lock"
         )
-        if selected or configured:
+        unpublished = f"the {arch} {variant} {name} reference is unpublished"
+        if configured:
             pytest.fail(
-                f"required {arch} {name} reference bundle is missing: {bundle}\n{hint}"
+                f"{unpublished}, so no committed lock authenticates the candidate "
+                f"bundle {Path(configured).resolve()}; {candidate}"
             )
-        pytest.skip(f"no extracted {arch} {name} reference bundle at {bundle}; {hint}")
-    manifest = load_bundle(bundle, lock, architecture=arch)
-    with reuse_workers(operation.worker_module):
-        yield target, bundle, manifest
+        if variant == chosen:
+            pytest.fail(
+                f"--rocke-reference-variant selects {variant}, but {unpublished}: "
+                f"{committed} does not exist; {candidate}"
+            )
+        published = [
+            other
+            for other in registry.variants(arch)
+            if registry.baseline_lock(arch, other).is_file()
+        ]
+        if selected and not published:
+            pytest.fail(
+                f"no {arch} {name} reference variant is published, so the selected "
+                f"{arch} suite would run nothing; {candidate}"
+            )
+        pytest.skip(
+            f"not published: {unpublished}, since {committed} does not exist; to "
+            f"verify a candidate, select it with --rocke-reference-variant {variant} "
+            f"and {candidate}"
+        )
+
+    def open_slot(architecture: str, variant: str) -> tuple[ModuleType, Path, dict]:
+        if architecture != arch:
+            pytest.skip(
+                f"not selected: this {architecture} {variant} reference runs only "
+                f"on a {architecture} GPU, and this GPU is {arch}"
+            )
+        if chosen and variant != chosen:
+            pytest.skip(
+                f"not selected: --rocke-reference-variant {chosen} selects another "
+                f"{arch} variant"
+            )
+        if (architecture, variant) in opened:
+            return opened[architecture, variant]
+        check_published(variant)
+        workers.close()
+        opened.clear()
+        target = registry.get_adapter(arch, variant)
+        bundle = (
+            Path(configured).resolve()
+            if configured
+            else default_bundle_path(
+                _TESTS, arch, operation=operation.name, variant=variant
+            )
+        )
+        if not bundle.is_dir():
+            hint = operation.bundle_hint(
+                arch, bundle, lock, variant=variant, option="--rocke-reference-bundle"
+            )
+            if selected or configured:
+                pytest.fail(
+                    f"required {arch} {name} reference bundle is missing: "
+                    f"{bundle}\n{hint}"
+                )
+            pytest.skip(
+                f"no extracted {arch} {name} reference bundle at {bundle}; {hint}"
+            )
+        manifest = load_bundle(bundle, lock, architecture=arch, variant=variant)
+        workers.enter_context(reuse_workers(operation.worker_module))
+        opened[architecture, variant] = target, bundle, manifest
+        return opened[architecture, variant]
+
+    with workers:
+        yield open_slot
 
 
 def pinned_reference_tests(
@@ -92,32 +168,35 @@ def pinned_reference_tests(
 ) -> tuple[Callable[..., None], Callable[..., None], Callable[..., None]]:
     """Return the correctness, perturbed-result, and missing-launch tests.
 
-    ``perturbation`` is added to one old or current output element. A changed
-    old output fails its qualified digest; a changed current output must exceed
-    the first case's comparison limit in the operation's own metric.
+    Each runs for every enrolled (architecture, variant) slot, and the
+    correctness test for every case of the slot's cohort. ``perturbation`` is
+    added to one old or current output element. A changed old output fails its
+    qualified digest; a changed current output must exceed the first case's
+    comparison limit in the operation's own metric.
     """
     registry = operation.architectures
-    cohort = [
-        (name, case)
+    slots = [
+        (name, variant)
         for name in registry.ARCHITECTURES
-        for case in registry.get_architecture(name).CASES
+        for variant in registry.variants(name)
+    ]
+    slot_ids = [f"{name}-{variant}" for name, variant in slots]
+    cohort = [
+        (name, variant, case)
+        for name, variant in slots
+        for case in registry.get_adapter(name, variant).CASES
     ]
 
     @pytest.mark.gpu
     @pytest.mark.parametrize(
-        "architecture,case",
+        "architecture,variant,case",
         cohort,
-        ids=[f"{name}-{case.id}" for name, case in cohort],
+        ids=[f"{name}-{variant}-{case.id}" for name, variant, case in cohort],
     )
     def test_correctness_against_qualified_rocke(
-        architecture, case, reference_bundle, pytestconfig
+        architecture, variant, case, reference_bundle, pytestconfig
     ):
-        target, bundle, manifest = reference_bundle
-        if architecture != target.NAME:
-            pytest.skip(
-                f"not selected: this {architecture} case runs only on a "
-                f"{architecture} GPU, and this GPU is {target.NAME}"
-            )
+        _, bundle, manifest = reference_bundle(architecture, variant)
         # A failure's rerun command checks the bundle against the same lock.
         lock = pytestconfig.getoption("--rocke-reference-lock")
         report = operation.verify_case(
@@ -126,14 +205,18 @@ def pinned_reference_tests(
             manifest=manifest,
             lock=Path(lock) if lock else None,
             architecture=architecture,
+            variant=variant,
         )
         assert not report["torch_imported"]
         assert report["old_launches"] == report["current_launches"] == 2
 
     @pytest.mark.gpu
     @pytest.mark.parametrize("mode", ["source", "replay"])
-    def test_rejects_perturbed_gpu_results(reference_bundle, monkeypatch, mode):
-        target, bundle, manifest = reference_bundle
+    @pytest.mark.parametrize("architecture,variant", slots, ids=slot_ids)
+    def test_rejects_perturbed_gpu_results(
+        architecture, variant, reference_bundle, monkeypatch, mode
+    ):
+        target, bundle, manifest = reference_bundle(architecture, variant)
         case = target.CASES[0]
         real_worker = cli.run_worker
 
@@ -149,18 +232,27 @@ def pinned_reference_tests(
         expected = "remaining limit" if mode == "source" else "qualification failure"
         with pytest.raises(AssertionError, match=expected):
             operation.verify_case(
-                case, bundle=bundle, manifest=manifest, architecture=target.NAME
+                case,
+                bundle=bundle,
+                manifest=manifest,
+                architecture=architecture,
+                variant=variant,
             )
 
     @pytest.mark.gpu
-    def test_rejects_missing_gpu_launch(reference_bundle, monkeypatch, tmp_path):
+    @pytest.mark.parametrize("architecture,variant", slots, ids=slot_ids)
+    def test_rejects_missing_gpu_launch(
+        architecture, variant, reference_bundle, monkeypatch, tmp_path
+    ):
         import rocke
         from rocke.runtime import KernelLauncher
 
         run = importlib.import_module(operation.worker_module).run
-        target, bundle, manifest = reference_bundle
+        target, bundle, manifest = reference_bundle(architecture, variant)
         case = target.CASES[0]
-        key = operation.manifest_key(manifest, case, architecture=target.NAME)
+        key = operation.manifest_key(
+            manifest, case, architecture=architecture, variant=variant
+        )
         entry = manifest["cases"][key]
         case_dir = bundle / "payload/cases" / key
         input_file = tmp_path / "inputs.npz"
@@ -174,7 +266,8 @@ def pinned_reference_tests(
             run(
                 {
                     "mode": "replay",
-                    "architecture": target.NAME,
+                    "architecture": architecture,
+                    "variant": variant,
                     "platform_root": str(Path(rocke.__file__).resolve().parent.parent),
                     "case": asdict(case),
                     "inputs": str(input_file),

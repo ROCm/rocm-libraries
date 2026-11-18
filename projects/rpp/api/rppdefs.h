@@ -126,8 +126,11 @@ const float ONE_OVER_255 = 1.0f / 255;
 const uint MMS_MAX_SCRATCH_MEMORY = 115293120;  // maximum scratch memory size (in number of floats)
                                                 // needed for MMS buffer in RNNT training
 const uint SPECTROGRAM_MAX_SCRATCH_MEMORY =
-    372877312;  // maximum scratch memory size (in number of floats) needed for spectrogram HIP
-                // kernel in RNNT training
+    742413440;  // maximum scratch memory size (in number of floats) needed for spectrogram HIP
+                // kernel in RNNT training with rocFFT:
+                // = windowLength + windowOutput + fftOutput(complex)
+                // = 512 + (512 * 3754 * 192) + (257 * 3754 * 192 * 2)
+                // = 512 + 371,392,512 + 371,020,416 = 742,413,440
 #define DROPOUT_FIXED_SEED 42  // Constant fixed seed for reproducing the dropout output
 #define RANDOM_ERASE_NOISE_BUFFER_SIDE \
     255  // Random erase spatial noise buffer height and width. Changing this constant will result
@@ -453,6 +456,18 @@ typedef enum {
     RpptColorRange_STUDIO = 0, /*!< Limited / MPEG / TV range */
     RpptColorRange_FULL = 2    /*!< Full / JPEG / PC range */
 } RpptColorRange;
+
+/*! \brief Bayer colour filter array pattern for \ref rppt_bayer_to_rgb.
+ * \details Names the colours of the top-left 2x2 block of the mosaic, row-major: RGGB is
+ * R at (0,0), G at (0,1) and (1,0), B at (1,1). The pattern repeats every 2 pixels in x and y.
+ * \ingroup group_rppdefs
+ */
+typedef enum {
+    RpptBayerPattern_RGGB = 0, /*!< R G / G B */
+    RpptBayerPattern_BGGR = 1, /*!< B G / G R */
+    RpptBayerPattern_GRBG = 2, /*!< G R / B G */
+    RpptBayerPattern_GBRG = 3  /*!< G B / R G */
+} RpptBayerPattern;
 
 /*! \brief RPPT Tensor 2D ROI type enum
  * \ingroup group_rppdefs

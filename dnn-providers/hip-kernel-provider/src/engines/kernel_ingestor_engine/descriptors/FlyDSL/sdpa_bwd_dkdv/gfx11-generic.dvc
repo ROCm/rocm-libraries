@@ -1,0 +1,7 @@
+outs:
+- md5: c0808573b7182aa883a1ab29b698aeb2.dir
+  size: 8652425
+  nfiles: 241
+  hash: md5
+  path: gfx11-generic
+  remote: ingestor

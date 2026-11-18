@@ -48,7 +48,8 @@ from collections import Counter
 
 import pytest
 
-from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from rocisa_test_state import preserve_rocisa_kernel_state
+from toolchain_test_helpers import shared_assembler, toolchain_for
 
 # Reuse the logic-driven harness for: assembler/toolchain construction, the
 # canonicalized emit, global-state isolation, and per-kernel rocisa
@@ -63,27 +64,10 @@ from char_paths import resolve_tensile_path
 _DEFAULT_ARCH = "gfx942"
 
 
-@functools.lru_cache(maxsize=None)
-def _toolchain_for(arch):
-    """Build ``(assembler, isaInfoMap)`` for a single ``arch`` (gfx name).
-
-    Mirrors :func:`codegen_harness._toolchain` but restricts the ISA-info map to
-    one architecture so ``_generate_single_solution``'s
-    ``next(iter(isaInfoMap.keys()))`` deterministically selects it. Uses
-    amdclang++; no GPU required. Cached per arch.
-    """
-    from tensilelite.Common.Architectures import gfxToIsa
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Validators import validateToolchain
-
-    isa = gfxToIsa(arch)
-    if isa is None:
-        raise ValueError(f"Unrecognized gfx architecture: {arch!r}")
-    cxx = validateToolchain("amdclang++")
-    iim = makeIsaInfoMap([isa], cxx)
-    # The assembler itself is arch-independent; reuse the shared cached build.
-    assembler = _ch.get_assembler()
-    return assembler, iim
+# ``(assembler, isaInfoMap)`` for a single ``arch`` (gfx name), cached per arch. The map is
+# restricted to one architecture so ``_generate_single_solution``'s
+# ``next(iter(isaInfoMap.keys()))`` deterministically selects it.
+_toolchain_for = toolchain_for
 
 
 @contextlib.contextmanager
@@ -186,6 +170,7 @@ def _solutions_from_config_unguarded(
     problem_index=0,
     problem_fingerprint=None,
     expected_fork_count=None,
+    size_group_index=0,
 ):
     """Build ``Solution`` objects from one selected BenchmarkProblems entry.
 
@@ -198,7 +183,8 @@ def _solutions_from_config_unguarded(
     generation (keeps the rocisa per-process footprint bounded for big sweeps).
     ``problem_fingerprint`` selects an entry by content and takes precedence
     over ``problem_index``. ``expected_fork_count`` checks the complete
-    permutation count before the cap is applied.
+    permutation count before the cap is applied. ``size_group_index`` selects
+    the ProblemSizeGroup within the entry.
     """
     from tensilelite.BenchmarkProblems import _generateForkedSolutions
     from tensilelite.BenchmarkStructs import BenchmarkProcess, constructForkPermutations
@@ -212,8 +198,9 @@ def _solutions_from_config_unguarded(
     if selected_problem is None:
         return []
 
-    # Each BenchmarkProblems entry is [ProblemTypeConfig, ProblemSizeGroupConfig].
-    problemTypeConfig, problemSizeGroupConfig = selected_problem[:2]
+    # Each BenchmarkProblems entry is [ProblemTypeConfig, ProblemSizeGroupConfig, ...].
+    problemTypeConfig = selected_problem[0]
+    problemSizeGroupConfig = selected_problem[1 + size_group_index]
 
     debugConfig = makeDebugConfig(config.get("GlobalParameters", {}))
 
@@ -273,7 +260,8 @@ def solutions_from_config(
 
 def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical=True,
                              splitGSU=False, cluster_dim=None, problem_index=0,
-                             problem_fingerprint=None, expected_fork_count=None):
+                             problem_fingerprint=None, expected_fork_count=None,
+                             size_group_index=0):
     """Emit assembly for the kernels of a ``BenchmarkProblems`` config.
 
     Drives ``config -> BenchmarkProcess -> constructForkPermutations ->
@@ -294,9 +282,10 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
     time (the kernel name is a hash, so the shape is not recoverable from it).
 
     ``problem_fingerprint`` selects a stable problem-group identity and takes
-    precedence over the positional ``problem_index``.
+    precedence over the positional ``problem_index``. ``size_group_index``
+    selects the ProblemSizeGroup within that entry.
     """
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
@@ -312,6 +301,7 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
             problem_index=problem_index,
             problem_fingerprint=problem_fingerprint,
             expected_fork_count=expected_fork_count,
+            size_group_index=size_group_index,
         )
         kernels = generateKernelObjectsFromSolutions(sols)
         if cluster_dim is not None:
@@ -388,7 +378,8 @@ def assert_cluster_barrier_balanced(src, base):
     copies of which exactly one runs.
     """
     n_signal, n_wait = _count_cluster_barriers(src)
-    per_tile_arrive = "label_PersistentMC_SkipNextTileArrive:" in src
+    # Persistent clusters require a close-site arrive, independent of its exit label.
+    per_tile_arrive = "label_PersistentLoopClose:" in src
     expected = n_signal if per_tile_arrive else n_signal + 1
     assert n_wait == expected, (
         f"Kernel {base!r}: unexpected cluster barrier balance: "
@@ -545,15 +536,11 @@ def _guard_assembler():
     through ``Solution``.
     """
     from tensilelite.Common.GlobalParameters import globalParameters
-    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
     coVersion = str(globalParameters["CodeObjectVersion"])
     if not coVersion.isdigit():
         coVersion = "4"
-    cxx = validateToolchain("amdclang++")
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(cxx, bundler, coVersion).assembler
+    return shared_assembler(coVersion)
 
 
 def _assembler_or_reason():

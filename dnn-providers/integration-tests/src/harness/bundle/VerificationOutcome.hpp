@@ -110,13 +110,16 @@ inline const char* toString(FailureOrigin origin)
 
 /// The oracle the engine's outputs were compared against. NONE when nothing was
 /// compared: a skip, a failure before the comparison, or a bundle whose
-/// enforcement_level stops short of comparing.
+/// enforcement_level stops short of comparing. EXPECTED_REJECTION is not an oracle:
+/// it says the bundle was an expected-rejection bundle and the engine refused it, so
+/// nothing was run to compare.
 enum class Verifier : uint8_t
 {
     NONE,
     GOLDEN,
     GPU_REFERENCE,
     CPU_REFERENCE,
+    EXPECTED_REJECTION,
 };
 
 inline const char* toString(Verifier verifier)
@@ -131,6 +134,8 @@ inline const char* toString(Verifier verifier)
         return "gpu_ref";
     case Verifier::CPU_REFERENCE:
         return "cpu_ref";
+    case Verifier::EXPECTED_REJECTION:
+        return "rejected";
     default:
         return "unknown";
     }
@@ -160,12 +165,28 @@ struct VerificationOutcome
     /// pass this harness exists to rule out. Only alreadyReported() sets it.
     bool alreadyReported = false;
 
-    /// Which oracle graded the outputs, pass or fail. Only a comparison sets it.
+    /// Which oracle graded the outputs, pass or fail. Only a comparison sets it, or
+    /// an expected rejection (EXPECTED_REJECTION).
     Verifier verifier = Verifier::NONE;
+
+    /// Where an EXPECTED_REJECTION engine refused the bundle ("ranked_list",
+    /// "plan_build_declined", "plan_build_failed"), printed on the VERIFIER line.
+    /// Empty for every other verifier.
+    std::string verifierDetail;
 
     static VerificationOutcome passed(VerificationDepth depth)
     {
-        return {OutcomeStatus::PASSED, depth, FailureOrigin::NONE, {}, false, Verifier::NONE};
+        return {OutcomeStatus::PASSED, depth, FailureOrigin::NONE, {}, false, Verifier::NONE, {}};
+    }
+
+    /// The engine refused an expected-rejection bundle at `stage`. It never took the
+    /// graph, so the depth reached is NOT_REACHED, which is also all such a bundle owes.
+    static VerificationOutcome rejected(std::string stage)
+    {
+        auto outcome = passed(VerificationDepth::NOT_REACHED);
+        outcome.verifier = Verifier::EXPECTED_REJECTION;
+        outcome.verifierDetail = std::move(stage);
+        return outcome;
     }
 
     static VerificationOutcome skipped(VerificationDepth depth, std::string message)
@@ -175,20 +196,22 @@ struct VerificationOutcome
                 FailureOrigin::NONE,
                 std::move(message),
                 false,
-                Verifier::NONE};
+                Verifier::NONE,
+                {}};
     }
 
     static VerificationOutcome
         failed(VerificationDepth depth, FailureOrigin origin, std::string message)
     {
-        return {OutcomeStatus::FAILED, depth, origin, std::move(message), false, Verifier::NONE};
+        return {
+            OutcomeStatus::FAILED, depth, origin, std::move(message), false, Verifier::NONE, {}};
     }
 
     /// A failure whose detail is already on the record. The caller MUST have issued
     /// at least one gtest failure before building this.
     static VerificationOutcome alreadyReportedFailure(VerificationDepth depth, FailureOrigin origin)
     {
-        return {OutcomeStatus::FAILED, depth, origin, {}, true, Verifier::NONE};
+        return {OutcomeStatus::FAILED, depth, origin, {}, true, Verifier::NONE, {}};
     }
 };
 

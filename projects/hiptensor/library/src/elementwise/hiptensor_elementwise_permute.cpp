@@ -29,6 +29,7 @@
 #include "elementwise_solution_instances.hpp"
 #include "elementwise_solution_registry.hpp"
 #include "elementwise_type_support.hpp"
+#include "handle.hpp"
 #include "logger.hpp"
 
 #include "hiptensor_options.hpp"
@@ -89,6 +90,12 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
         return checkResult;
     }
 
+    checkResult = hiptensor::checkHandleDevice(handle, "hiptensorPermute");
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
     if(!hiptensor::isSupportedElementwiseTypeCombination({descA->mType, descB->mType}, typeScalar))
     {
         auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
@@ -105,7 +112,7 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
         return errorCode;
     }
 
-    double alphaD;
+    double alphaD{};
     if(alpha != nullptr)
     {
         alphaD = hiptensor::readVal<double>(alpha, hiptensor::convertToComputeType(typeScalar));

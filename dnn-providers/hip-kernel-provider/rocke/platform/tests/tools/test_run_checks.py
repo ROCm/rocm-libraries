@@ -4,6 +4,7 @@
 
 import importlib.util
 from pathlib import Path
+import re
 
 import pytest
 
@@ -21,14 +22,72 @@ def _runner_path() -> Path:
     pytest.skip("top-level run_checks.py is absent from this platform-only tree")
 
 
+def _assert_guarded_runner_install(text: str) -> None:
+    assignment = re.search(
+        r'set\(\s*(\w+)\s+"\$\{CMAKE_CURRENT_SOURCE_DIR\}/\.\./tools/run_checks\.py"\s*\)',
+        text,
+    )
+    assert assignment, "no variable names the top-level run_checks.py"
+    variable = re.escape(assignment.group(1))
+    guarded_install = re.search(
+        rf'if\(\s*EXISTS\s+"\$\{{{variable}\}}"\s*\)\s*'
+        rf'install\(\s*FILES\s+"\$\{{{variable}\}}"\s+'
+        r'DESTINATION\s+"\$\{ROCKE_TEST_INSTALL_DIR\}/tests/tools"\s*\)',
+        text,
+    )
+    assert guarded_install, "top-level runner installation must use its existence guard"
+
+
 def test_platform_only_install_does_not_require_the_top_level_runner():
     platform = Path(__file__).resolve().parents[2]
     cmake = platform / "CMakeLists.txt"
     if not cmake.is_file():
         pytest.skip("source CMake project is absent from the installed test artifact")
-    text = cmake.read_text()
-    assert 'if(EXISTS "${_ROCKE_RUN_CHECKS}")' in text
-    assert 'install(FILES "${_ROCKE_RUN_CHECKS}"' in text
+    _assert_guarded_runner_install(cmake.read_text())
+
+
+def _runner_install_text(variable: str, files_spacing: str) -> str:
+    return (
+        f'set({variable} "${{CMAKE_CURRENT_SOURCE_DIR}}/../tools/run_checks.py")\n'
+        f'if(EXISTS "${{{variable}}}")\n'
+        f'  install({files_spacing}FILES "${{{variable}}}"\n'
+        '          DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/tools")\n'
+        "endif()\n"
+    )
+
+
+@pytest.mark.parametrize("variable", ["_ROCKE_RUN_CHECKS", "_rocke_run_checks"])
+@pytest.mark.parametrize("files_spacing", ["", "\n    "])
+def test_runner_install_contract_accepts_cmake_formatting(variable, files_spacing):
+    _assert_guarded_runner_install(_runner_install_text(variable, files_spacing))
+
+
+@pytest.mark.parametrize(
+    "old,new,message",
+    [
+        ('if(EXISTS "${_runner}")\n', "", "must use its existence guard"),
+        (
+            'if(EXISTS "${_runner}")',
+            'if(EXISTS "${_other}")',
+            "must use its existence guard",
+        ),
+        ('FILES "${_runner}"', 'FILES "${_other}"', "must use its existence guard"),
+        ("../tools/run_checks.py", "../tools/other.py", "no variable names"),
+        ("/tests/tools", "/tests/other", "must use its existence guard"),
+    ],
+    ids=[
+        "unguarded",
+        "wrong-guard",
+        "wrong-installed-variable",
+        "wrong-source",
+        "wrong-destination",
+    ],
+)
+def test_runner_install_contract_detects_broken_staging(old, new, message):
+    text = _runner_install_text("_runner", "")
+    assert old in text
+    with pytest.raises(AssertionError, match=message):
+        _assert_guarded_runner_install(text.replace(old, new))
 
 
 @pytest.fixture

@@ -19,6 +19,16 @@ struct SdpaFwdLaunchParams
     uint32_t tuneOpt;
 };
 
+// Threads per block the forward kernel for these head dims is launched with:
+// hd192x128 kernels use 4 wavefronts (256 threads) on all architectures, hd128
+// and other kernels use 8 wavefronts (512 threads). Batch and group mode launch
+// the same block. SdpaFwdPlanBuilder checks this value against the resolved
+// kernel's max_flat_workgroup_size, so it is the only place the block is chosen.
+inline unsigned int fwdBlockDimX(unsigned int headDimQk, unsigned int headDimV)
+{
+    return (headDimQk == 192U && headDimV == 128U) ? 256U : 512U;
+}
+
 // Ports AITER's forward grid math (get_grid_dim, mha_fwd.cu). Batch mode sets
 // gridDimX = ceil(Q-tiles / tgDiv) (causal masks set tgDiv=2, halving the grid),
 // gridDimY = nhead, gridDimZ = batch. Two flat overrides follow AITER's order:
@@ -94,9 +104,7 @@ inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
     lp.gridDimY = gdy;
     lp.gridDimZ = gdz;
 
-    // hd192x128 kernels use 4 wavefronts (256 threads) on all architectures;
-    // hd128 and other kernels use 8 wavefronts (512 threads).
-    lp.blockDimX = isHd192x128 ? 256U : 512U;
+    lp.blockDimX = fwdBlockDimX(params.headDimQk, params.headDimV);
 
     return lp;
 }

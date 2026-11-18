@@ -248,9 +248,16 @@ private:
     bool graph_testing{};
 };
 
-// Exact match for the wrapper, so this beats the implicit conversion to
-// hipsparseHandle_t. A leftover hipsparseDestroy(wrapper) is a compile error
-// instead of destroying the descriptor twice.
-hipsparseStatus_t hipsparseDestroy(const hipsparseLocalHandle_t&) = delete;
+// These beat the implicit conversion to void*. The handle, matrix descriptor,
+// HYB, color, sparse-vector, dense-vector, and dense-matrix typedefs are all
+// void*, so a leftover destroy of the wrong kind would otherwise compile and
+// free this descriptor twice.
+hipsparseStatus_t hipsparseDestroy(const hipsparseLocalHandle_t&)          = delete;
+hipsparseStatus_t hipsparseDestroyMatDescr(const hipsparseLocalHandle_t&)  = delete;
+hipsparseStatus_t hipsparseDestroyHybMat(const hipsparseLocalHandle_t&)    = delete;
+hipsparseStatus_t hipsparseDestroyColorInfo(const hipsparseLocalHandle_t&) = delete;
+hipsparseStatus_t hipsparseDestroySpVec(const hipsparseLocalHandle_t&)     = delete;
+hipsparseStatus_t hipsparseDestroyDnVec(const hipsparseLocalHandle_t&)     = delete;
+hipsparseStatus_t hipsparseDestroyDnMat(const hipsparseLocalHandle_t&)     = delete;
 
 #endif // HIPSPARSE_LOCAL_HANDLE_HPP

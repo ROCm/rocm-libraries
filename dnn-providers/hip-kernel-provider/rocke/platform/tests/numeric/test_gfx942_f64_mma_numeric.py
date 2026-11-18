@@ -1,8 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 import ctypes
-import importlib.util
-import os
 import struct
 
 import numpy as np
@@ -10,23 +8,9 @@ import pytest
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.instances.gfx942.f64_mma_probe import F64MmaProbeSpec, build_f64_mma_probe
-from rocke.runtime.hip_module import get_device_arch
-
-
-def _require_gfx942():
-    arch = get_device_arch()
-    if not arch or arch.split(":")[0] != "gfx942":
-        if os.getenv("ROCKE_REQUIRE_GFX942") == "1":
-            pytest.fail(f"Required gfx942 device absent: {arch}")
-        pytest.skip("requires gfx942")
-
-
-def _engines():
-    # The installed wheel has no pybind extension; demand native parity
-    # whenever the binding is supplied.
-    if importlib.util.find_spec("rocke_engine") is None:
-        return ("python",)
-    return ("python", "cpp")
+from rocke.tests.arch_marks import arch_specific
+from rocke.tests.engines import available_engines
+from rocke.tests.gpu import current_device_arch_in
 
 
 def _llvm(kernel, engine):
@@ -84,16 +68,20 @@ def _reference(m, a, b, c):
     return (a_blk @ b_blk + c.reshape(4, 4, 4)).reshape(16, 4)
 
 
+@arch_specific(
+    ("gfx942",),
+    reason="the f64 MMA probe builds for gfx942 only; the gfx950 catalog lists f64 MFMA atoms",
+)
 @pytest.mark.parametrize("m", [16, 4])
 @pytest.mark.parametrize("k", [4, 8, 64])
 def test_gfx942_f64_mma_numeric(m, k):
-    _require_gfx942()
+    current_device_arch_in(("gfx942",))
     kernel = build_f64_mma_probe(F64MmaProbeSpec(m, k))
     rng = np.random.default_rng(m * 100 + k)
     shapes = _shapes(m, k)
     exact = [rng.integers(-8, 9, shape).astype(np.float64) for shape in shapes]
     real = [rng.standard_normal(shape) for shape in shapes]
-    for engine in _engines():
+    for engine in available_engines():
         ll = _llvm(kernel, engine)
         a, b, c = exact
         np.testing.assert_array_equal(

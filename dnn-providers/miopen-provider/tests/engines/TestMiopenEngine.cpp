@@ -9,11 +9,13 @@
 #include <string>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
+#include <hipdnn_plugin_sdk/NumericalNote.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
@@ -216,6 +218,42 @@ TEST(TestMiopenEngine, GetDetailsReturnsSerializedEngineDetails)
     EXPECT_EQ(engineDetails.engineId(), 1);
 }
 
+TEST(TestMiopenEngine, GetDetailsDeterministicEngineReportsExplicitEmptyNumericalNotes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const MiopenEngine engine(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID);
+    HipdnnMiopenHandle dummyHandle;
+    const MockGraph mockGraph;
+
+    hipdnnPluginConstData_t result;
+    engine.getDetails(dummyHandle, mockGraph, result);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(
+        result.ptr, result.size);
+    const auto notes = engineDetails.numericalNotes();
+    ASSERT_TRUE(notes.has_value());
+    EXPECT_TRUE(notes->empty());
+}
+
+TEST(TestMiopenEngine, GetDetailsDefaultEngineReportsNondeterministicNumericalNotes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const MiopenEngine engine(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID);
+    HipdnnMiopenHandle dummyHandle;
+    const MockGraph mockGraph;
+
+    hipdnnPluginConstData_t result;
+    engine.getDetails(dummyHandle, mockGraph, result);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(
+        result.ptr, result.size);
+    const auto notes = engineDetails.numericalNotes();
+    ASSERT_TRUE(notes.has_value());
+    EXPECT_EQ(*notes, std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC});
+}
+
 TEST(TestMiopenEngine, GetDetailsContainsBenchmarkingKnob)
 {
     SKIP_IF_NO_DEVICES();
@@ -324,7 +362,7 @@ TEST(TestMiopenEngine, InitializeExecutionContextInvokesFirstApplicablePlanBuild
 
     // Only the first plan builder is applicable
     EXPECT_CALL(*mockPlanBuilder1, isApplicable(::testing::_, ::testing::_))
-        .Times(2)
+        .Times(1)
         .WillRepeatedly(::testing::Return(true));
     EXPECT_CALL(*mockPlanBuilder1,
                 initializeExecutionSettings(::testing::_, ::testing::_, ::testing::_, ::testing::_))
@@ -403,6 +441,13 @@ protected:
     {
         SKIP_IF_NO_DEVICES();
         _handle = std::make_unique<HipdnnMiopenHandle>();
+
+        // Initializing a context requires an applicable builder; this one builds nothing, so
+        // the cases below observe only the settings the engine derives from the config.
+        auto planBuilder = std::make_unique<::testing::NiceMock<MockPlanBuilder>>();
+        ON_CALL(*planBuilder, isApplicable(::testing::_, ::testing::_))
+            .WillByDefault(::testing::Return(true));
+        _engine.addPlanBuilder(std::move(planBuilder));
     }
 
     /// Valid for the whole test body; SetUp() skipped the case otherwise.
@@ -547,13 +592,13 @@ TEST(TestMiopenEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
 
     // First plan builder not applicable, second is
     EXPECT_CALL(*mockPlanBuilder1, isApplicable(::testing::_, ::testing::_))
-        .Times(2)
+        .Times(1)
         .WillRepeatedly(::testing::Return(false));
     EXPECT_CALL(*mockPlanBuilder1,
                 buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(0);
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_))
-        .Times(2)
+        .Times(1)
         .WillRepeatedly(::testing::Return(true));
     EXPECT_CALL(*mockPlanBuilder2,
                 initializeExecutionSettings(::testing::_, ::testing::_, ::testing::_, ::testing::_))
@@ -575,7 +620,7 @@ TEST(TestMiopenEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
     engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
 }
 
-TEST(TestMiopenEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoApplicableBuilders)
+TEST(TestMiopenEngine, InitializeExecutionContextThrowsInternalErrorIfNoApplicableBuilders)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -583,13 +628,13 @@ TEST(TestMiopenEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoApplica
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
 
     EXPECT_CALL(*mockPlanBuilder1, isApplicable(::testing::_, ::testing::_))
-        .Times(2)
+        .Times(1)
         .WillRepeatedly(::testing::Return(false));
     EXPECT_CALL(*mockPlanBuilder1,
                 buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(0);
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_))
-        .Times(2)
+        .Times(1)
         .WillRepeatedly(::testing::Return(false));
     EXPECT_CALL(*mockPlanBuilder2,
                 buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
@@ -605,5 +650,13 @@ TEST(TestMiopenEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoApplica
     const MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
-    engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
+    try
+    {
+        engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
+        FAIL() << "Expected HipdnnPluginException";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+    }
 }

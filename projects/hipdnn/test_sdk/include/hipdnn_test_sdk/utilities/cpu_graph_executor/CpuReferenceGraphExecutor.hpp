@@ -84,7 +84,9 @@ private:
         return true;
     }
 
-    // Unpacks the packed buffers into dense ones, runs the dense graph, and packs the outputs back.
+    // Unpacks the ragged buffers into dense ones, runs the dense graph, and packs the outputs back.
+    // Each ragged tensor's lengths are the graph's own seq_len values for its role, else its
+    // offset blocks.
     void executeRaggedAsDense(detail::DenseSdpaFromRagged& dense,
                               const std::unordered_map<int64_t, void*>& variantPack)
     {
@@ -95,7 +97,17 @@ private:
         {
             offsets.push_back(detail::raggedElementOffsets(
                 primary, variantPack.at(primary.offsetUid), dense.batch));
-            lengths.push_back(detail::raggedLengths(primary, offsets.back()));
+            const auto& added
+                = primary.queryPacking ? dense.addedSeqLenQUid : dense.addedSeqLenKvUid;
+            const auto seqLenUid = primary.queryPacking ? dense.seqLenQUid : dense.seqLenKvUid;
+            const auto seqLenStride
+                = primary.queryPacking ? dense.seqLenQStride : dense.seqLenKvStride;
+            lengths.push_back(detail::raggedLengths(
+                primary,
+                offsets.back(),
+                added.has_value() ? nullptr
+                                  : static_cast<const int32_t*>(variantPack.at(seqLenUid)),
+                seqLenStride));
         }
         const auto [qLengths, kvLengths] = detail::raggedGroupLengths(dense, lengths);
 
@@ -115,26 +127,22 @@ private:
             }
             densePack[primaries[i].uid] = buffers[i].data();
         }
-        const auto bindSeqLens = [&](std::optional<int64_t> added,
-                                     int64_t uid,
-                                     const std::vector<int64_t>& packed,
-                                     std::vector<int32_t>& storage,
-                                     const char* name) {
+        // The seq_len tensors the rewrite added carry the offset-block lengths. The graph's own
+        // seq_len tensors are already in the variant pack.
+        const auto bindAddedSeqLen = [&](std::optional<int64_t> added,
+                                         int64_t uid,
+                                         const std::vector<int64_t>& lengthsOfGroup,
+                                         std::vector<int32_t>& storage) {
             if(added.has_value())
             {
-                storage.assign(packed.begin(), packed.end());
+                storage.assign(lengthsOfGroup.begin(), lengthsOfGroup.end());
                 densePack[uid] = storage.data();
-            }
-            else if(!packed.empty())
-            {
-                detail::requireSeqLensWithinPacked(
-                    static_cast<const int32_t*>(variantPack.at(uid)), packed, name);
             }
         };
         std::vector<int32_t> seqLenQ;
         std::vector<int32_t> seqLenKv;
-        bindSeqLens(dense.addedSeqLenQUid, dense.seqLenQUid, qLengths, seqLenQ, "seq_len_q");
-        bindSeqLens(dense.addedSeqLenKvUid, dense.seqLenKvUid, kvLengths, seqLenKv, "seq_len_kv");
+        bindAddedSeqLen(dense.addedSeqLenQUid, dense.seqLenQUid, qLengths, seqLenQ);
+        bindAddedSeqLen(dense.addedSeqLenKvUid, dense.seqLenKvUid, kvLengths, seqLenKv);
 
         executeAsIs(dense.graph.data(), dense.graph.size(), densePack);
 

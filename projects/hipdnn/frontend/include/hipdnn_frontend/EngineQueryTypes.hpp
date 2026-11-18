@@ -79,6 +79,11 @@ struct EngineCandidatePage
     int64_t engineId = -1;
     std::string engineName;
     std::string engineDescriptorId; ///< UED UUID, empty for non-descriptor engines.
+    /// The serialized graph's own `graph.id()` UUID (as the bench tool and corpora name
+    /// graphs by) when the graph carries one; otherwise the decimal content hash of the
+    /// graph, as a string, as a fallback. Identical content finalized twice without an id
+    /// therefore gets the same value, but with an id gets two different ones -- the two
+    /// forms are not interchangeable, so compare only within one of them.
     std::string graphId;
     std::string deviceId;
     std::string deviceArch;

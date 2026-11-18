@@ -215,6 +215,63 @@ def test_a_standalone_kernel_may_serve_two_packs_of_one_slot(tmp_path):
     assert len(_load(root).kdps()) == 5
 
 
+# --- An mlp_data UHD: the engine's estimate, never a slot ranker -----------------
+MLP_ARTIFACT = "mlp_model.bin"
+
+
+def _as_mlp_data(doc):
+    """`doc` as an mlp_data model of `time`: it names the metric its artifact predicts and
+    scores its log (RFC 0019 §7.6)."""
+    doc.pop("native")
+    doc.update(
+        adapter="mlp_data",
+        objective="min",
+        score={"metric": "time", "calibrated": True, "transform": "log"},
+        features_signature=["$graph.flops"],
+        features_hash="sha256:" + "0" * 16,
+        mlp_data={"artifact": MLP_ARTIFACT},
+    )
+
+
+def _mlp_root(tmp_path, *stems):
+    root = _root(tmp_path, **{stem: _as_mlp_data for stem in stems})
+    (root / MLP_ARTIFACT).write_bytes(b"mlp artifact")
+    return root
+
+
+def test_a_slotted_engines_estimate_may_be_an_mlp_data_model(tmp_path, rocm_kpack_dir):
+    """A slot has no time of its own, so only the engine's own estimate (which names every
+    slot's KMD) can be a model of `time`."""
+    root = _mlp_root(tmp_path, "predict_engine.uhd")
+    estimate = _read(root / "predict_engine.uhd.json")
+    assert estimate["trained_against"]["kmds"] and estimate["version"] == "1.1"
+
+    shard = _files(_pack(root, tmp_path, rocm_kpack_dir))
+
+    packed = json.loads(shard["predict_engine.uhd.json"])
+    assert (packed["adapter"], packed["score"]) == (
+        "mlp_data",
+        {"metric": "time", "calibrated": True, "transform": "log"},
+    )
+    assert packed["trained_against"]["kmds"] == estimate["trained_against"]["kmds"]
+    assert shard[MLP_ARTIFACT] == b"mlp artifact"
+    ued = json.loads(shard["fixture.ued.json"])
+    assert ued["predict_engine"]["default"] == [estimate["id"]]
+
+
+def test_an_mlp_data_model_cannot_rank_a_slot(tmp_path):
+    """The loader drops a slotted engine whose slot ranker declares a metric, and an
+    mlp_data model always does."""
+    root = _mlp_root(tmp_path, "dkdv.uhd")
+
+    with pytest.raises(
+        HkpPackError,
+        match=r"slot 'dkdv'.sort_kernel_catalog.default names UHD .* declares "
+        r"score.metric 'time'; a slot ranker must be metric-less",
+    ):
+        _load(root)
+
+
 # --- Each rule, broken once ------------------------------------------------------
 def _ued(edit):
     return {"fixture.ued": edit}

@@ -10,7 +10,12 @@ kernels qualified offline against an independent NumPy reference. Ordinary
 verification computes neither CPU reference answers nor replacement budgets and
 requires no Torch. Each architecture in
 [`PublishedGpuReferences.cmake`](../../../../platform/cmake/PublishedGpuReferences.cmake)
-has a published forward bundle with its own trusted lock and DVC pointer.
+publishes the `implicit_gemm_fwd` [variant](../../reference_common/docs/README.md#glossary),
+the forward implicit-GEMM family in
+[`implementations/implicit_gemm_fwd.py`](../implementations/implicit_gemm_fwd.py),
+with its own trusted lock and DVC pointer. From the rocKE root,
+`PYTHONPATH=platform/python python library/tests/run_conv_reference.py status`
+lists each enrolled variant's publication and bundle state.
 Gradients use separate live NumPy checks and do not reuse the forward certificate.
 
 See the [shared compatibility and baseline policy](../../reference_common/docs/README.md#kernel-arguments-and-compatibility)
@@ -22,9 +27,11 @@ The forward cohorts contain FP16 and BF16 cases for these geometries:
 padded 3x3, pointwise 1x1, stride-2, dilation-2, groups=2, asymmetric spatial
 dimensions, K=96, K=33, C=33, stem C=3, larger spatial/channel dimensions,
 5x5 reduction, odd per-group channels, depthwise, anisotropic filter, and one
-output pixel. Exact geometry lives in the architecture adapters' `CASES`; from
-the rocKE root, `python library/tests/run_conv_reference.py cases --arch <arch>`
-lists them.
+output pixel. Exact geometry lives in the variant adapters' `CASES`, under
+`architectures/<arch>/implicit_gemm_fwd/`; from the rocKE root,
+`python library/tests/run_conv_reference.py cases --arch <arch>` lists them and
+names the processors whose cases are identical. Each adapter keeps its own
+tuple, so editing one processor's cases changes only its cohort.
 Inputs are NHWC, weights KYXC with C/groups channels, and outputs NHWK.
 
 The gfx942 current adapter uses an explicit 64x64x64 implicit-GEMM configuration;
@@ -55,7 +62,12 @@ cases, are explicitly configured. All wgrad cases are explicit
 configurations because no wgrad instance lists are registered. They cover atomic
 split-K, two-stage workspace reduction, and gfx950 merged groups. Each execution
 is checked against a live float64 NumPy oracle at a normalized max-error limit
-of 0.05, with three repetitions, immutable-buffer checks, and state reset.
+of 0.05, with three repetitions, immutable-buffer checks, and state reset. Their
+`implementations/implicit_gemm_dgrad.py` and `implicit_gemm_wgrad.py` modules
+serve these live checks and are not reference variants. Pinned gradients would
+form a separate operation with its own variants, because their inputs and
+outputs differ from forward convolution's; see
+[a variant or a new operation](../../reference_common/docs/gpu-reference-workflow.md#a-variant-or-a-new-operation).
 
 These bounded suites exercise Python-emitted kernels. Native provider selection,
 shipped kernel packs, direct implementation sweeps, stream-K, 3-D, and additional
@@ -134,18 +146,19 @@ cases address the coverage request in
 
 The umbrella option defaults ON for provider artifact builds and OFF for the
 rocm-libraries superbuild, which does not fetch the bundles. CMake installs each
-published operation/architecture bundle separately. The
-installed bundle is beneath
-`engines/test_arch_content/rocke/conv/<processor>/`, preserving architecture-specific,
-test-only artifact packaging. The generic artifact contains the harness and trusted
-lock. Host checks register as `rocke_conv_reference_unit_pytest`; a GPU entry,
+published variant's bundle separately. The installed bundle is beneath
+`engines/test_arch_content/rocke/conv/<processor>/<variant>/`, preserving
+architecture-specific, test-only artifact packaging. The generic artifact
+contains the harness and trusted locks. Host checks register as
+`rocke_conv_reference_unit_pytest`; a GPU entry,
 `rocke_conv_gpu_<processor>_pytest`, registers for each published processor only
-when reference installation is enabled and its bundle passes validation.
-The provider category YAML selects these entries by pattern.
+when reference installation is enabled and its bundles pass validation, and runs
+every variant installed for that processor. The provider category YAML selects
+these entries by pattern.
 
 Test a replacement candidate before publication with the offline CLI's `verify`
 command, passing explicit `--bundle` and `--lock` paths. CMake installs only the
-published archives and always validates them against their committed architecture
+published archives and always validates them against their committed variant
 locks. After publication, check the installed layout through the normal CMake path.
 
 `ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF` registers no pinned-reference GPU entries
@@ -176,10 +189,11 @@ of the old branch history.
 
 ## Bundle identity
 
-Each architecture's committed `baseline_lock.json` is the authoritative source
-revision and manifest identity. Its matching DVC pointer records the archive
-hash and size. Keep the lock and pointer together; a branch refresh or a current
-adapter change does not itself replace the frozen baseline.
+Each variant's committed `architectures/<arch>/<variant>/baseline_lock.json` is
+the authoritative source revision, manifest, and cohort identity. Its matching
+DVC pointer, `reference_bundles/conv/<arch>/<variant>.tar.gz.dvc`, records the
+archive hash and size. Keep the lock and pointer together; a branch refresh or a
+current adapter change does not itself replace the frozen baseline.
 
 Fetch the published archives from the rocm-libraries root before provider
 configuration:

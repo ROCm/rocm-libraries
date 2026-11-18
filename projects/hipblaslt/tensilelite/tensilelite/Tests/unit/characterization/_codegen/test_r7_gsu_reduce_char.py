@@ -113,6 +113,7 @@ def _build_kwa(kernel, *, globalReadIncsUseVgpr: bool, labels=None):
 # Minimal kernel for GSUOff (GSU=1) with a single summation index.
 _KERNEL_GSU_OFF = {
     "ProblemType": {
+        "UseScaleAlphaVec": 0,
         "NumIndicesSummation": 1,
         "IndicesSummation": [2],
         "MirrorDimsA": [],
@@ -140,6 +141,7 @@ _KERNEL_GSU_OFF = {
 # Minimal kernel for GSUOn (GSU=4) with a single summation index.
 _KERNEL_GSU_ON = {
     "ProblemType": {
+        "UseScaleAlphaVec": 0,
         "NumIndicesSummation": 1,
         "IndicesSummation": [2],
         "MirrorDimsA": [],

@@ -73,6 +73,7 @@ include(ClangCheck)
 include(Sanitizers)
 include(WindowsDllStaging)
 include(Tests)
+include(LongPathManifest)
 include(HipdnnIntegrationTestHelpers)
 
 list(
@@ -173,6 +174,13 @@ if(Python3_FOUND)
     )
     set(HIPDNN_IT_SUPPORT_SIDECAR_TEST hipdnn_support_sidecar_python_tests)
 
+    add_test(
+        NAME hipdnn_migration_scripts_python_tests
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/migration-scripts/test_migration.py
+    )
+    set(HIPDNN_IT_MIGRATION_SCRIPTS_TEST hipdnn_migration_scripts_python_tests)
+
     # pytest-style suites (fixtures, parametrize), so they run under -m pytest
     # rather than as scripts; a bare `python file.py` would collect nothing.
     add_test(
@@ -234,6 +242,18 @@ if(Python3_FOUND)
                          PROPERTIES SKIP_RETURN_CODE 77)
     set(HIPDNN_IT_GOLDEN_SDPA_FWD_PAGED_GENERATOR_TEST
         hipdnn_golden_sdpa_fwd_paged_generator_python_tests)
+    # The SdpaBackward bundles and their engine TOML rows are generated from the
+    # test plan; this pytest suite fails when they drift from the generator.
+    add_test(
+        NAME hipdnn_sdpa_bwd_bundle_generator_python_tests
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                ${CMAKE_CURRENT_SOURCE_DIR}/reference-data-scripts/tests/test_generate_sdpa_bwd_bundles.py
+    )
+    set_tests_properties(
+        hipdnn_sdpa_bwd_bundle_generator_python_tests
+        PROPERTIES ENVIRONMENT "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"
+    )
+    set(HIPDNN_IT_SDPA_BWD_GENERATOR_TEST hipdnn_sdpa_bwd_bundle_generator_python_tests)
 endif()
 
 # Install integration test bundles so installed tests can find them at
@@ -246,7 +266,9 @@ set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 
 add_executable(${INTEGRATION_TESTS_EXE}
     src/main.cpp
+    src/harness/CpuReferenceGraphExecutorAdapter.cpp
     src/harness/ReferenceExecutorPool.cpp
+    src/harness/ReferenceGraphExecutorFactory.cpp
     src/harness/bundle/FrontendGraphEngineRunner.cpp
     src/harness/bundle/GraphSession.cpp
     src/harness/bundle/HarnessDependencies.cpp
@@ -259,7 +281,9 @@ add_executable(${INTEGRATION_TESTS_EXE}
     src/harness/bundle/SupportVerdict.cpp
     src/harness/bundle/SweepManifestCache.cpp
     src/harness/bundle/VariantPackBuilder.cpp
+    src/harness/gpu-graph-executor/GpuReferenceGraphExecutor.cpp
     src/harness/input-init/FillInputs.cpp
+    src/harness/input-init/ResampleBackwardInputs.cpp
     src/harness/input-init/SdpaBackwardInputs.cpp
 )
 
@@ -278,6 +302,7 @@ set(GOLDEN_DATA_TESTS_EXE hipdnn_golden_data_tests)
 
 add_executable(${GOLDEN_DATA_TESTS_EXE}
     src/golden_data_main.cpp
+    src/harness/CpuReferenceGraphExecutorAdapter.cpp
     src/harness/ReferenceExecutorPool.cpp
     src/harness/bundle/GraphSession.cpp
     src/harness/bundle/OutputComparison.cpp
@@ -286,7 +311,9 @@ add_executable(${GOLDEN_DATA_TESTS_EXE}
     src/harness/bundle/SupportVerdict.cpp
     src/harness/bundle/SweepManifestCache.cpp
     src/harness/bundle/VariantPackBuilder.cpp
+    src/harness/gpu-graph-executor/GpuReferenceGraphExecutor.cpp
     src/harness/input-init/FillInputs.cpp
+    src/harness/input-init/ResampleBackwardInputs.cpp
     src/harness/input-init/SdpaBackwardInputs.cpp
     src/harness/reference-validation/BundleReferenceValidationHarness.cpp
     src/harness/reference-validation/GoldenDataPlan.cpp
@@ -317,6 +344,91 @@ target_compile_options(${GOLDEN_DATA_TESTS_EXE}
     PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})
 
 clang_tidy_check(${GOLDEN_DATA_TESTS_EXE})
+
+# This check needs no plugin: --benchmark-reference with a mode that never
+# runs a reference must be refused before any engine loads. PASS_REGULAR_EXPRESSION
+# replaces the exit-code check, and the refusal message is printed only on that
+# exit. A device-less runner passes, as the binary skips itself before parsing, so
+# the entry is also staged into the installed CTest file below, which the GPU jobs
+# run.
+set(HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST hipdnn_integration_tests_benchmark_reference_refusal)
+set(HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_ARGS --benchmark-reference --skip-graph-validation)
+set(HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_PASS
+    "--benchmark-reference cannot be combined with --skip-graph-validation|No HIP devices available"
+)
+add_test(
+    NAME ${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST}
+    COMMAND ${INTEGRATION_TESTS_EXE} ${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_ARGS}
+)
+set_tests_properties(${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST} PROPERTIES
+    PASS_REGULAR_EXPRESSION "${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_PASS}"
+)
+if(TEST_ENVIRONMENT)
+    set_tests_properties(${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST} PROPERTIES
+        ENVIRONMENT "${TEST_ENVIRONMENT}")
+endif()
+if(TEST_ENVIRONMENT_MODIFICATION)
+    set_tests_properties(${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST} PROPERTIES
+        ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}")
+endif()
+
+# YAML test categorization has to be decided before the first add_*_test_target() call below:
+# _add_test_target_internal() (dnn-providers/cmake/Tests.cmake) skips the raw, unlabeled
+# add_test() for a target only while DNN_PROVIDER_TEST_CATEGORY_YAMLS is already set. Set
+# after hipdnn_golden_data_tests was registered, the binary ran twice: once as the tiered
+# *_suite entries and once as an unlabeled raw test.
+set(HIPDNN_IT_GTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+set(HIPDNN_IT_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml")
+set(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED FALSE)
+if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
+   AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    set(DNN_PROVIDER_TEST_CATEGORY_YAMLS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}")
+    set(DNN_PROVIDER_CTEST_CATEGORIES_YAML "${HIPDNN_IT_CTEST_CATEGORIES_YAML}")
+    set(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED TRUE)
+    message(STATUS "hipdnn-integration-tests: YAML-based CTest categorization enabled")
+    # Label the pre-registered bundle-verifier ctest test via the shared YAML path
+    # (it is registered directly above, not by _create_test_name_validation_target_internal).
+    if(HIPDNN_IT_BUNDLE_VERIFIER_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_BUNDLE_VERIFIER_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_CLAIM_HARVEST_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_CLAIM_HARVEST_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_SIDECAR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_SIDECAR_TEST})
+    endif()
+    if(HIPDNN_IT_MIGRATION_SCRIPTS_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_MIGRATION_SCRIPTS_TEST})
+    endif()
+    if(HIPDNN_IT_BUNDLE_DISCOVERY_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_BUNDLE_DISCOVERY_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_FEATURES_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_FEATURES_TEST})
+    endif()
+    if(HIPDNN_IT_GOLDEN_SDPA_FWD_GENERATOR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_SDPA_FWD_GENERATOR_TEST})
+    endif()
+    if(HIPDNN_IT_GOLDEN_SDPA_BWD_GENERATOR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_SDPA_BWD_GENERATOR_TEST})
+    endif()
+    if(HIPDNN_IT_GOLDEN_SDPA_FWD_PAGED_GENERATOR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_SDPA_FWD_PAGED_GENERATOR_TEST})
+    endif()
+    if(HIPDNN_IT_SDPA_BWD_GENERATOR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SDPA_BWD_GENERATOR_TEST})
+    endif()
+    _apply_provider_ctest_category_labels(${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST})
+else()
+    message(STATUS "hipdnn-integration-tests: shared/ctest or test_categories.yaml not found, using legacy CTest labels")
+endif()
 
 # SKIP_NAME_VALIDATION: every test this binary registers is named after a bundle's
 # directory path (deriveTestName() in BundleDiscovery.hpp), so the names are
@@ -359,52 +471,6 @@ clang_tidy_check(${INTEGRATION_TESTS_EXE})
 # (see dnn-providers/miopen-provider) which runs this binary against a specific
 # engine and selects tests via that provider's test_categories_integration.yaml.
 
-set(HIPDNN_IT_GTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
-set(HIPDNN_IT_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml")
-set(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED FALSE)
-if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
-   AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
-    include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
-    set(DNN_PROVIDER_TEST_CATEGORY_YAMLS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}")
-    set(DNN_PROVIDER_CTEST_CATEGORIES_YAML "${HIPDNN_IT_CTEST_CATEGORIES_YAML}")
-    set(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED TRUE)
-    message(STATUS "hipdnn-integration-tests: YAML-based CTest categorization enabled")
-    # Label the pre-registered bundle-verifier ctest test via the shared YAML path
-    # (it is registered directly above, not by _create_test_name_validation_target_internal).
-    if(HIPDNN_IT_BUNDLE_VERIFIER_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_BUNDLE_VERIFIER_TEST})
-    endif()
-    if(HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST})
-    endif()
-    if(HIPDNN_IT_SUPPORT_CLAIM_HARVEST_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_CLAIM_HARVEST_TEST})
-    endif()
-    if(HIPDNN_IT_SUPPORT_SIDECAR_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_SIDECAR_TEST})
-    endif()
-    if(HIPDNN_IT_BUNDLE_DISCOVERY_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_BUNDLE_DISCOVERY_TEST})
-    endif()
-    if(HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST})
-    endif()
-    if(HIPDNN_IT_SUPPORT_FEATURES_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_FEATURES_TEST})
-    endif()
-    if(HIPDNN_IT_GOLDEN_SDPA_FWD_GENERATOR_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_SDPA_FWD_GENERATOR_TEST})
-    endif()
-    if(HIPDNN_IT_GOLDEN_SDPA_BWD_GENERATOR_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_SDPA_BWD_GENERATOR_TEST})
-    endif()
-    if(HIPDNN_IT_GOLDEN_SDPA_FWD_PAGED_GENERATOR_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_SDPA_FWD_PAGED_GENERATOR_TEST})
-    endif()
-else()
-    message(STATUS "hipdnn-integration-tests: shared/ctest or test_categories.yaml not found, using legacy CTest labels")
-endif()
-
 add_subdirectory(gpu-ref)
 add_subdirectory(tests)
 
@@ -431,17 +497,49 @@ if(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED)
     # from-scratch GPU reference implementation, and our own golden data directly),
     # so the ASAN-only MIOpen-cache-clear fixture miopen-provider/hipblaslt-provider
     # wire up does not apply here.
+    # hipdnn_gpu_ref_tests has its own tier file: its quick tier is fp32-only
+    # (see test_categories_gpu_ref.yaml).
+    set(HIPDNN_IT_GPU_REF_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_gpu_ref.yaml")
     foreach(_it_target hipdnn_integration_tests_unit_tests hipdnn_gpu_ref_tests
                        hipdnn_golden_data_tests)
+        set(_it_yaml "${HIPDNN_IT_GTEST_CATEGORIES_YAML}")
+        if(_it_target STREQUAL "hipdnn_gpu_ref_tests")
+            set(_it_yaml "${HIPDNN_IT_GPU_REF_CATEGORIES_YAML}")
+        endif()
         apply_test_category_labels(
             ${_it_target}
-            "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
+            "${_it_yaml}"
             "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
             "${HIPDNN_IT_CTEST_INSTALL_FILE}"
             ENVIRONMENT ${TEST_ENVIRONMENT}
             ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
         )
     endforeach()
+
+    # The refusal check, next to the GTest suites. It is the only pre-registered check
+    # staged here: the others run python scripts from the source tree. Labelled from
+    # test_categories_external.yaml, which matches it by exact name only.
+    set(_refusal_install_cmd
+        "add_test(\"${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST}\" \"../hipdnn_integration_tests${CMAKE_EXECUTABLE_SUFFIX}\""
+    )
+    foreach(_refusal_arg IN LISTS HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_ARGS)
+        string(APPEND _refusal_install_cmd " \"${_refusal_arg}\"")
+    endforeach()
+    string(APPEND _refusal_install_cmd ")\n")
+    set(_refusal_install_properties
+        "PASS_REGULAR_EXPRESSION \"${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_PASS}\"")
+    # Unescaped, as the GTest suites above write theirs: ctest splits the quoted list.
+    if(TEST_ENVIRONMENT)
+        string(APPEND _refusal_install_properties " ENVIRONMENT \"${TEST_ENVIRONMENT}\"")
+    endif()
+    if(TEST_ENVIRONMENT_MODIFICATION)
+        string(APPEND _refusal_install_properties
+               " ENVIRONMENT_MODIFICATION \"${TEST_ENVIRONMENT_MODIFICATION}\"")
+    endif()
+    file(APPEND "${HIPDNN_IT_CTEST_INSTALL_FILE}"
+         "\n${_refusal_install_cmd}"
+         "set_tests_properties(\"${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST}\" PROPERTIES ${_refusal_install_properties})\n")
+    apply_ctest_category_labels("${HIPDNN_IT_CTEST_CATEGORIES_YAML}" "${HIPDNN_IT_CTEST_INSTALL_FILE}")
 
     # Install the generated (category-labeled) CTestTestfile so
     # `ctest -L quick|standard|...` works from the installed tree.
@@ -506,3 +604,4 @@ install(FILES
 )
 
 add_clang_tidy_custom_target()
+hipdnn_apply_long_path_manifest()

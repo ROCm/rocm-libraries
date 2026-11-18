@@ -18,6 +18,8 @@ that builds MIOpen.
     python3 -m unittest test_check_wrapper_abi
 """
 
+import contextlib
+import io
 import os
 import shutil
 import subprocess
@@ -25,6 +27,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
+
+import check_wrapper_abi
 
 HARNESS = Path(__file__).resolve().parent / "check_wrapper_abi.py"
 
@@ -41,9 +46,9 @@ sys.exit(1)
 """
 
 
-# Checked before anything here touches os.geteuid(), which off POSIX would fail at
-# import rather than skip.
-@unittest.skipUnless(os.name == "posix", "the harness under test is POSIX-only")
+# The stand-in tree uses the Linux library layout, which the script only looks for
+# on Linux; test_miopen_wrapper_libs covers the Windows layout.
+@unittest.skipUnless(os.name == "posix", "the stand-in tree has the Linux layout")
 class WrapperAbiCheckTest(unittest.TestCase):
     def setUp(self):
         """A stand-in install tree: the libraries the harness resolves, plus its helper."""
@@ -219,6 +224,47 @@ class WrapperAbiCheckTest(unittest.TestCase):
             f"no libMIOpen_private.so.* found under {self.tree / 'lib'}", result.stdout
         )
         self.assertFalse((self.tree / "fake_abi_check.argv").exists())
+
+
+# Drives the Windows layout in-process by naming the platform, so it is covered on Linux.
+class WindowsLayoutTest(unittest.TestCase):
+    def setUp(self):
+        """A stand-in Windows install: DLLs and the scripts' folder both under bin/."""
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        self.bin = Path(holder.name) / "bin"
+        self.scripts = self.bin / "miopen_wrapper_tests"
+        self.scripts.mkdir(parents=True)
+        (self.bin / "MIOpen.dll").touch()
+        (self.bin / "MIOpen_private.dll").touch()
+        (self.scripts / "fake_abi_check.py").write_text(RECORDS_ARGV)
+
+    def run_main(self):
+        argv = [
+            "--abi-check",
+            str(self.scripts / "fake_abi_check.py"),
+            "--baseline",
+            os.devnull,
+            "--excluded",
+            os.devnull,
+            "--wrapper-only",
+            os.devnull,
+        ]
+        output = io.StringIO()
+        with mock.patch.object(
+            check_wrapper_abi, "SCRIPT_DIR", self.scripts
+        ), contextlib.redirect_stdout(output):
+            code = check_wrapper_abi.main(argv, windows=True)
+        return code, output.getvalue()
+
+    def test_the_dlls_beside_the_programs_are_handed_to_the_abi_check(self):
+        code, output = self.run_main()
+        self.assertEqual(code, 0, output)
+        argv = (self.scripts / "fake_abi_check.argv").read_text().splitlines()
+        self.assertIn(str(self.bin / "MIOpen.dll"), argv)
+        self.assertEqual(
+            argv[argv.index("--private-lib") + 1], str(self.bin / "MIOpen_private.dll")
+        )
 
 
 if __name__ == "__main__":

@@ -4,12 +4,16 @@
 #pragma once
 
 #include <ostream>
+#include <type_traits>
 #include <variant>
 
+#include "GpuBatchnormBwdSignatureKey.hpp"
 #include "GpuBatchnormFwdInfSignatureKey.hpp"
 #include "GpuBatchnormFwdInfVarianceSignatureKey.hpp"
 #include "GpuBatchnormFwdTrainSignatureKey.hpp"
+#include "GpuConvolutionBwdSignatureKey.hpp"
 #include "GpuConvolutionFwdSignatureKey.hpp"
+#include "GpuConvolutionWrwSignatureKey.hpp"
 #include "GpuLayernormBwdSignatureKey.hpp"
 #include "GpuLayernormFwdSignatureKey.hpp"
 #include "GpuMatmulSignatureKey.hpp"
@@ -26,8 +30,11 @@ namespace hipdnn_integration_tests::gpu_graph_executor::detail
 
 // Variant of all GPU plan signature key types.
 // Add new signature key types here as GPU plans are implemented.
-using GpuPlanRegistrySignatureKey = std::variant<GpuBatchnormFwdTrainSignatureKey,
+using GpuPlanRegistrySignatureKey = std::variant<GpuBatchnormBwdSignatureKey,
+                                                 GpuBatchnormFwdTrainSignatureKey,
+                                                 GpuConvolutionBwdSignatureKey,
                                                  GpuConvolutionFwdSignatureKey,
+                                                 GpuConvolutionWrwSignatureKey,
                                                  GpuLayernormFwdSignatureKey,
                                                  GpuLayernormBwdSignatureKey,
                                                  GpuMatmulSignatureKey,
@@ -53,23 +60,19 @@ struct GpuPlanRegistrySignatureKeyHash
 
 struct GpuPlanRegistrySignatureKeyEqual
 {
-    template <typename T, typename U>
-    bool operator()([[maybe_unused]] const T& a, [[maybe_unused]] const U& b) const
-    {
-        return false;
-    }
-
-    template <typename T>
-    bool operator()(const T& a, const T& b) const
-    {
-        return a == b;
-    }
-
-    // NOLINTNEXTLINE(readability-redundant-casting)
+    // Compare the active alternatives' indices first, then visit only `a` and fetch the matching
+    // alternative from `b`. Visiting both variants would instantiate one visitor call per pair of
+    // alternatives (N*N) instead of N.
     bool operator()(const GpuPlanRegistrySignatureKey& a,
                     const GpuPlanRegistrySignatureKey& b) const
     {
-        return std::visit(*this, a, b);
+        if(a.index() != b.index())
+        {
+            return false;
+        }
+
+        return std::visit(
+            [&b](const auto& x) { return x == std::get<std::decay_t<decltype(x)>>(b); }, a);
     }
 };
 

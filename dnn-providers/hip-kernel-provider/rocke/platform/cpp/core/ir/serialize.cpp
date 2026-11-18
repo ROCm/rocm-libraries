@@ -795,6 +795,20 @@ static int sc_match2(ser_scanner_t* sc, const char* two)
     return sc->i + 2 <= sc->n && sc->text[sc->i] == two[0] && sc->text[sc->i + 1] == two[1];
 }
 
+/* The count of the ROCKE_ATTR_LIST that holds a bare attr map
+ * (rocke_i_attr_is_bare_map). */
+static const int ROCKE_I_BARE_MAP_COUNT = -1;
+
+bool rocke_i_attr_is_bare_map(const rocke_attr_value_t* v)
+{
+    return v && v->kind == ROCKE_ATTR_LIST && v->u.list.count == ROCKE_I_BARE_MAP_COUNT;
+}
+
+bool rocke_i_attr_is_list(const rocke_attr_value_t* v)
+{
+    return v && v->kind == ROCKE_ATTR_LIST && !rocke_i_attr_is_bare_map(v);
+}
+
 /* Forward */
 static int parse_attr_value(ser_scanner_t* sc, rocke_attr_value_t* out);
 
@@ -992,13 +1006,9 @@ static int parse_attr_value(ser_scanner_t* sc, rocke_attr_value_t* out)
     char ch = sc_peek(sc);
     if(ch == '{')
     {
-        /* a nested attr-map (list element dict). Store as a 1-element... no:
-         * the Python form for an attr that IS a dict is rare; but list elements
-         * are dicts. We expose it as an attr map wrapped in a list-item; the
-         * caller (list path) handles it. Here we materialise a ROCKE_ATTR_LIST
-         * with a single map item is NOT correct -- instead, a bare dict value
-         * should never appear at top level in v1; only inside l:[...]. We thus
-         * parse it into a fresh map and signal via a special kind. */
+        /* A bare attr map: Python reads it as a dict. It is stored as a
+         * ROCKE_ATTR_LIST holding the map, marked as a bare map
+         * (rocke_i_attr_is_bare_map); a list of maps splices the map in. */
         rocke_attr_map_t* child = (rocke_attr_map_t*)rocke_arena_calloc(&b->arena, sizeof(*child));
         if(!child)
         {
@@ -1010,13 +1020,6 @@ static int parse_attr_value(ser_scanner_t* sc, rocke_attr_value_t* out)
         {
             return -1;
         }
-        /* Represent a dict as a single-item list carrying the map, so the list
-         * path can splice it. But the Python format only nests dicts inside
-         * lists; emit_attr_value handles ROCKE_ATTR_LIST element as a map. We
-         * encode this dict as a list with count==-1 marker is ugly. Instead we
-         * use a dedicated path: store the map pointer in a 1-cap list and the
-         * caller in the list loop will pull items[0]. To keep things simple we
-         * wrap: kind=LIST, count = -(1) is invalid. Use a cleaner scheme: */
         out->kind = ROCKE_ATTR_LIST;
         out->u.list.items
             = (rocke_attr_map_t**)rocke_arena_alloc(&b->arena, sizeof(rocke_attr_map_t*));
@@ -1026,7 +1029,7 @@ static int parse_attr_value(ser_scanner_t* sc, rocke_attr_value_t* out)
             return -1;
         }
         out->u.list.items[0] = child;
-        out->u.list.count = -1; /* marker: this LIST is actually a bare dict */
+        out->u.list.count = ROCKE_I_BARE_MAP_COUNT;
         return 0;
     }
     if(sc_match2(sc, "l:"))
@@ -1110,9 +1113,9 @@ static int parse_attr_value(ser_scanner_t* sc, rocke_attr_value_t* out)
                 rocke_i_set_err(b, ROCKE_ERR_VALUE, "list: mixed int/dict elements");
                 return -1;
             }
-            /* each element is a dict, encoded as the bare-dict marker above. */
+            /* each element is a dict, parsed as a bare map. */
             rocke_attr_map_t* child;
-            if(elem.kind == ROCKE_ATTR_LIST && elem.u.list.count == -1)
+            if(rocke_i_attr_is_bare_map(&elem))
             {
                 child = elem.u.list.items[0];
             }
@@ -1521,6 +1524,86 @@ static int count_top(const char* s, size_t n, char sep)
 
 static rocke_region_t* parse_region(rocke_ir_builder_t* b, line_reader_t* lr, val_table_t* vt);
 
+/* Mirrors Python _is_loop_block_value: true when `value` is an induction
+ * variable or carried value of an scf.for (bound to the loop, not one of its
+ * results). */
+static bool is_loop_block_value(const rocke_value_t* value)
+{
+    if(!value || !value->op || value->op->opcode != ROCKE_OP_SCF_FOR)
+    {
+        return false;
+    }
+    for(int i = 0; i < value->op->num_results; ++i)
+    {
+        if(value->op->results[i] == value)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Mirrors Python _refuse_reused_loop_names: refuse the names the scf.for `loop`
+ * gives its values (rocke_i_scf_for_value_names) when one is taken
+ * (rocke_i_first_reused_loop_name): bound in `vt` to a block value of a loop
+ * whose body `loop` is in, or repeating an earlier name of `loop`. Every name is
+ * checked, also one whose type attr is not a type name (refuse_untyped_loop_value
+ * refuses it next), so a reused name always gets this refusal. A refusal raises
+ * a ValueError (rocke_i_set_err). */
+static void refuse_reused_loop_names(rocke_ir_builder_t* b, const rocke_op_t* loop, val_table_t* vt)
+{
+    const int count = rocke_i_scf_for_value_names(loop, NULL);
+    if(count == 0)
+    {
+        return;
+    }
+    const char** names
+        = (const char**)rocke_arena_alloc(&b->arena, sizeof(const char*) * 2 * (size_t)count);
+    if(!names)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_OOM, "scf.for loop names: OOM");
+        return;
+    }
+    const char** taken = names + count;
+    rocke_i_scf_for_value_names(loop, names);
+    size_t n_taken = 0;
+    for(int i = 0; i < count; ++i)
+    {
+        if(is_loop_block_value(vt_get(vt, names[i])))
+        {
+            taken[n_taken++] = names[i];
+        }
+    }
+    const char* reused = rocke_i_first_reused_loop_name(taken, n_taken, names, (size_t)count);
+    if(reused)
+    {
+        char msg[ROCKE_ERR_MSG_CAP];
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "%s", rocke_i_reused_loop_name_message(reused, msg, sizeof msg));
+    }
+}
+
+/* Mirrors Python _loop_value_type's refusal: an induction variable or carried
+ * value named `name` whose type attr is not a type name could not be bound,
+ * and the body's reads of `name` would read whatever other value holds that
+ * name, or none. Raises a ValueError (rocke_i_set_err) with
+ * rocke_i_untyped_loop_value_message's text. */
+static void refuse_untyped_loop_value(rocke_ir_builder_t* b, const char* name)
+{
+    char msg[ROCKE_ERR_MSG_CAP];
+    rocke_i_set_err(
+        b, ROCKE_ERR_VALUE, "%s", rocke_i_untyped_loop_value_message(name, msg, sizeof msg));
+}
+
+/* Bind `v`, a block value of the scf.for being parsed, under its name. */
+static void bind_block_value(rocke_ir_builder_t* b, val_table_t* vt, rocke_value_t* v)
+{
+    if(vt_put(vt, v->name, v) != 0)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_OOM, "value table OOM");
+    }
+}
+
 /* Register block-defined SSA values for an scf.for op (iv + iter-args), so the
  * body operands resolve. Mirrors Python _register_block_values. Returns the
  * names added via out_added (arena array) / out_n. */
@@ -1533,10 +1616,15 @@ static void register_block_values(
     {
         return;
     }
+    refuse_reused_loop_names(b, op, vt);
+    if(!rocke_i_live(b))
+    {
+        return;
+    }
     /* Capacity = the induction var (at most 1) + every iter-arg; an scf.for can
      * carry dozens, so size to the actual count rather than a fixed cap. */
     const rocke_attr_value_t* ia = rocke_attr_get(&op->attrs, "iter_args");
-    int added_cap = 1 + ((ia && ia->kind == ROCKE_ATTR_LIST) ? ia->u.list.count : 0);
+    int added_cap = 1 + (rocke_i_attr_is_list(ia) ? ia->u.list.count : 0);
     const char** added
         = (const char**)rocke_arena_alloc(&b->arena, sizeof(const char*) * (size_t)added_cap);
     int na = 0;
@@ -1547,7 +1635,12 @@ static void register_block_values(
 
     const char* iv = rocke_attr_get_str(&op->attrs, "iv");
     const char* iv_type = rocke_attr_get_str(&op->attrs, "iv_type");
-    if(iv && iv_type)
+    if(iv && !iv_type)
+    {
+        refuse_untyped_loop_value(b, iv);
+        return;
+    }
+    if(iv)
     {
         const rocke_type_t* t = parse_type(b, iv_type, strlen(iv_type));
         if(t)
@@ -1556,19 +1649,24 @@ static void register_block_values(
             if(v)
             {
                 v->op = op;
-                vt_put(vt, v->name, v);
+                bind_block_value(b, vt, v);
                 added[na++] = v->name;
             }
         }
     }
-    if(ia && ia->kind == ROCKE_ATTR_LIST && ia->u.list.count > 0)
+    if(rocke_i_attr_is_list(ia))
     {
         for(int i = 0; i < ia->u.list.count; ++i)
         {
             const rocke_attr_map_t* entry = ia->u.list.items[i];
             const char* nm = rocke_attr_get_str(entry, "name");
             const char* ty = rocke_attr_get_str(entry, "type");
-            if(nm && ty)
+            if(nm && !ty)
+            {
+                refuse_untyped_loop_value(b, nm);
+                return;
+            }
+            if(nm)
             {
                 const rocke_type_t* t = parse_type(b, ty, strlen(ty));
                 if(t)
@@ -1577,7 +1675,7 @@ static void register_block_values(
                     if(v)
                     {
                         v->op = op;
-                        vt_put(vt, v->name, v);
+                        bind_block_value(b, vt, v);
                         added[na++] = v->name;
                     }
                 }
@@ -2403,7 +2501,7 @@ static void walk_op_defs(rename_table_t* rt, const rocke_op_t* op)
             rn_add(rt, iv);
         }
         const rocke_attr_value_t* ia = rocke_attr_get(&op->attrs, "iter_args");
-        if(ia && ia->kind == ROCKE_ATTR_LIST)
+        if(rocke_i_attr_is_list(ia))
         {
             for(int i = 0; i < ia->u.list.count; ++i)
             {
@@ -2471,7 +2569,7 @@ static void canon_rename_attrs(rename_table_t* rt, rocke_op_t* op)
         iv_e->value.u.s = rn_get(rt, iv_e->value.u.s);
     }
     const rocke_attr_value_t* ia = rocke_attr_get(&op->attrs, "iter_args");
-    if(ia && ia->kind == ROCKE_ATTR_LIST)
+    if(rocke_i_attr_is_list(ia))
     {
         for(int i = 0; i < ia->u.list.count; ++i)
         {
@@ -2521,6 +2619,40 @@ static void canon_rename_region(rename_table_t* rt, rocke_region_t* region)
     for(int i = 0; i < region->num_ops; ++i)
     {
         canon_rename_op(rt, region->ops[i]);
+    }
+}
+
+/* A param leaf "N" of a relation names the id "%N"; its canonical name is the
+ * renamed id without the '%'. */
+static const char* canon_rename_leaf(void* ctx, const char* name)
+{
+    rename_table_t* rt = (rename_table_t*)ctx;
+    const char* oldid = rocke_arena_printf(&rt->b->arena, "%%%s", name);
+    const char* newid = oldid ? rn_get(rt, oldid) : NULL;
+    return newid && newid[0] == '%' ? newid + 1 : name;
+}
+
+/* Python canonicalize's rparam_attrs: a relation names parameters, so its
+ * leaves are renamed by walking its tree, never by text substitution. */
+static void canon_rename_param_relations(rename_table_t* rt, rocke_kernel_def_t* k)
+{
+    for(int i = 0; i < k->num_params; ++i)
+    {
+        rocke_attr_map_t* attrs = &k->params[i]->attrs;
+        for(int j = 0; j < attrs->count; ++j)
+        {
+            rocke_attr_entry_t* e = &attrs->entries[j];
+            if(!rocke_param_is_fact_word(e->key) || e->value.kind != ROCKE_ATTR_STR)
+            {
+                continue;
+            }
+            const char* renamed
+                = rocke_relation_canonical(e->value.u.s, &rt->b->arena, canon_rename_leaf, rt);
+            if(renamed)
+            {
+                e->value.u.s = renamed;
+            }
+        }
     }
 }
 
@@ -2583,6 +2715,7 @@ rocke_status_t rocke_ir_canonicalize(const char* text, char** out_text)
             k->params[i]->name = rocke_arena_strdup(&b.arena, newid + 1);
         }
     }
+    canon_rename_param_relations(&rt, k);
     canon_rename_region(&rt, k->body);
 
     char* ser = NULL;

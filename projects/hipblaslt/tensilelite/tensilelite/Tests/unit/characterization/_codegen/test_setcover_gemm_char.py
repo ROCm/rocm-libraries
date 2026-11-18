@@ -21,7 +21,7 @@ from config_harness import assert_config_emits
 pytestmark = pytest.mark.unit
 
 _CONFIGS = [
-    ("tensilelite/Tests/common/gemm/gfx12/f8f8s_cls_gfx1250.yaml", "2f7e8ed3bd46", "gfx1250", 48, {0: 3}),
+    ("tensilelite/Tests/common/gemm/gfx12/f8f8s_cls_gfx1250.yaml", "2f7e8ed3bd46", "gfx1250", 48, {0: 4}),
     ("tensilelite/Tests/common/gemm/gfx950/agntab_coverage_gfx950.yaml", "44f4e29ebfea", "gfx950", 128, {0: 8}),
     ("tensilelite/Tests/common/gemm/gfx12/bf6_gfx1250.yaml", "7461004022b7", "gfx1250", 64, {0: 1}),
     ("tensilelite/Tests/common/gemm/gfx12/segment_interleave_gfx1250.yaml", "f7f947393334", "gfx1250", 72, {0: 8}),
@@ -39,7 +39,7 @@ _CONFIGS = [
     ("tensilelite/Tests/common/gemm/fp8nfp16mix_hhs.yaml", "f9f0eccb98d0", "gfx942", 5, {0: 5}),
     ("tensilelite/Tests/common/gemm/gfx12/f8b8ss_gfx1250.yaml", "35ae075de6c1", "gfx1250", 8, {0: 4}),
     ("tensilelite/Tests/common/gemm/fp32_nt.yaml", "bb7dea403a47", "gfx942", 1, {0: 1}),
-    ("tensilelite/Tests/common/gemm/gfx12/bf16_CLS_gfx1250.yaml", "fd11213715b9", "gfx1250", 56, {0: 8}),
+    ("tensilelite/Tests/common/gemm/gfx12/bf16_CLS_gfx1250.yaml", "5fad4212f21d", "gfx1250", 1782, {0: 4}),
     ("tensilelite/Tests/common/gemm/gfx11/fp16_HH_BHS_bf16mfma_gfx11.yaml", "d87dd1304f3f", "gfx1100", 1536, {0: 8}),
     ("tensilelite/Tests/common/gemm/lsu_fnuz.yaml", "55c95a6f640b", "gfx942", 648, {0: 3}),
     ("tensilelite/Tests/common/gemm/gfx11/i8_gsu_gfx11.yaml", "f18d461d35eb", "gfx1100", 768, {0: 4}),

@@ -127,7 +127,10 @@ void builder_refuses_a_descriptor_init()
     check(error == message(1), "builder, descriptor init: '" + error + "'");
 }
 
-void builder_refuses_a_yielded_descriptor()
+/* With `op_after_handle`, an op is emitted after the loop handle is created
+ * and before its body is entered, so the loop is not the last op of its
+ * region. */
+void builder_refuses_a_yielded_descriptor(bool op_after_handle)
 {
     Kernel k("descriptor_yield");
     rocke_value_t* zero = rocke_b_const_i32(&k.b, 0);
@@ -141,9 +144,13 @@ void builder_refuses_a_yielded_descriptor()
                                             "k0",
                                             false,
                                             true);
+    if(op_after_handle)
+        rocke_b_const_i32(&k.b, 7);
     rocke_b_region_enter(&k.b, loop.body);
     const std::string error = refusal(&k.b, [&] { rocke_b_scf_yield(&k.b, &k.descriptor, 1); });
-    check(error == message(0), "builder, yielded descriptor: '" + error + "'");
+    check(error == message(0),
+          std::string("builder, yielded descriptor") + (op_after_handle ? " after an op" : "")
+              + ": '" + error + "'");
 }
 
 void verifier_accepts_a_plain_vector_carry()
@@ -180,7 +187,8 @@ void verifier_refuses_a_carried_descriptor(bool in_yield)
 int main()
 {
     builder_refuses_a_descriptor_init();
-    builder_refuses_a_yielded_descriptor();
+    builder_refuses_a_yielded_descriptor(false);
+    builder_refuses_a_yielded_descriptor(true);
     verifier_accepts_a_plain_vector_carry();
     verifier_refuses_a_carried_descriptor(false);
     verifier_refuses_a_carried_descriptor(true);

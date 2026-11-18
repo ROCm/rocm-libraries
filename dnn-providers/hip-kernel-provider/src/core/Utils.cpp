@@ -112,6 +112,24 @@ bool isChannelLastLayout(const hipdnn_flatbuffers_sdk::data_objects::TensorAttri
         = hipdnn_data_sdk::utilities::extractStrideOrder(stridesVec);
 
     // Compare against known layouts
+    if(numDims == 3)
+    {
+        const auto layoutNcl = hipdnn_data_sdk::utilities::TensorLayout::NCL;
+        const auto layoutNlc = hipdnn_data_sdk::utilities::TensorLayout::NLC;
+
+        if(strideOrder == layoutNlc.strideOrder)
+        {
+            return true;
+        }
+        if(strideOrder == layoutNcl.strideOrder)
+        {
+            return false;
+        }
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Unsupported tensor layout for 3D tensor. Only NCL and NLC are supported.");
+    }
+
     if(numDims == 4)
     {
         const auto layoutNchw = hipdnn_data_sdk::utilities::TensorLayout::NCHW;
@@ -150,7 +168,7 @@ bool isChannelLastLayout(const hipdnn_flatbuffers_sdk::data_objects::TensorAttri
 
     throw hipdnn_plugin_sdk::HipdnnPluginException(
         HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-        "Tensor must be 4D or 5D for layout detection. Got " + std::to_string(numDims)
+        "Tensor must be 3D, 4D or 5D for layout detection. Got " + std::to_string(numDims)
             + "D tensor.");
 }
 
@@ -165,6 +183,18 @@ bool hasOnly16ByteAlignedTensors(
         return hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(tensor)
                || (tensor->alignment() >= REQUIRED_ALIGNMENT
                    && tensor->alignment() % REQUIRED_ALIGNMENT == 0);
+    });
+}
+
+bool hasNoStrayRaggedOffsetMultiplier(
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    return std::all_of(tensorMap.begin(), tensorMap.end(), [](const auto& entry) {
+        const auto* tensor = entry.second;
+        return tensor->ragged_offset_tensor_uid().has_value()
+               || tensor->ragged_offset_multiplier() == 1;
     });
 }
 

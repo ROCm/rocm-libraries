@@ -53,7 +53,6 @@ it is; an existing ``PYTHONPYCACHEPREFIX`` is kept.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import os
 import shutil
 import subprocess
@@ -62,52 +61,27 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-SHARD_ENV = "ROCKE_TEST_SHARD"
+# A checkout's own rocke package must win over an installed rocke wheel.
+_PLATFORM_PYTHON = Path(__file__).resolve().parents[2] / "platform" / "python"
+if _PLATFORM_PYTHON.is_dir():
+    try:
+        sys.path.remove(str(_PLATFORM_PYTHON))
+    except ValueError:
+        pass
+    sys.path.insert(0, str(_PLATFORM_PYTHON))
+
+from rocke.tests.ctest_shard import (  # noqa: E402
+    SHARD_ENV,
+    parse_shard,  # noqa: F401
+    select_items,  # noqa: F401
+    shard_key,  # noqa: F401
+    shard_of,  # noqa: F401
+)
+
 BWD_SHARD_ENV = "ROCKE_BWD_SHARD"
 CACHE_ENV = "ROCKE_BWD_HSACO_CACHE"
 PREBUILD_ENV = "ROCKE_BWD_PREBUILD"
 NO_TESTS = 5  # pytest exit code: nothing collected / selected
-
-
-# --------------------------------------------------------------------------- sharding
-def parse_shard(text: str) -> tuple[frozenset[int], int]:
-    """``"i/n"`` or ``"i,j,.../n"`` -> ``({i, j, ...}, n)``."""
-    picks, sep, total = text.strip().partition("/")
-    if not sep:
-        raise ValueError(f"shard {text!r} is not i/n")
-    n = int(total)
-    idx = frozenset(int(p) for p in picks.split(",") if p.strip())
-    if n < 1 or not idx or any(not 0 <= i < n for i in idx):
-        raise ValueError(f"shard {text!r} out of range")
-    return idx, n
-
-
-def shard_key(item) -> str:
-    """Module path plus parameter id (the test function name drops out, so
-    the tests of one parameter set share a shard); the node id without
-    parameters."""
-    callspec = getattr(item, "callspec", None)
-    if callspec is None:
-        return item.nodeid
-    return f"{item.nodeid.split('::', 1)[0]}[{callspec.id}]"
-
-
-def shard_of(key: str, n: int) -> int:
-    return int(hashlib.sha256(key.encode()).hexdigest()[:8], 16) % n
-
-
-def select_items(config, items: list) -> None:
-    """``pytest_collection_modifyitems`` body: keep this ``ROCKE_TEST_SHARD``."""
-    text = os.environ.get(SHARD_ENV, "").strip()
-    if not text:
-        return
-    picks, n = parse_shard(text)
-    keep, drop = [], []
-    for it in items:
-        (keep if shard_of(shard_key(it), n) in picks else drop).append(it)
-    if drop:
-        config.hook.pytest_deselected(items=drop)
-        items[:] = keep
 
 
 # --------------------------------------------------------------------------- devices

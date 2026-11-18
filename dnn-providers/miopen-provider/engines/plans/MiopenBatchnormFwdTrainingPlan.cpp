@@ -3,6 +3,7 @@
 
 #include "MiopenBatchnormFwdTrainingPlan.hpp"
 #include "MiopenUtils.hpp"
+#include "engines/plans/MiopenBatchnormApplicabilityChecks.hpp"
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 
 namespace miopen_plugin
@@ -25,17 +26,21 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     _epsilon = hipdnn_plugin_sdk::makeScalarOperand(
         tensorMap, attributes.epsilon_tensor_uid(), "Epsilon");
 
-    // Save mean and inv_variance are optional (controlled by MIO_SAVE_MEAN_VARIANCE)
-    auto optMeanUid = attributes.mean_tensor_uid();
-    if(optMeanUid.has_value())
+    // Save mean and inv_variance are optional (controlled by MIO_SAVE_MEAN_VARIANCE); a virtual
+    // pair that nothing consumes is not requested and stays unset.
+    if(!hasUnrequestedSavedPair(attributes, tensorMap))
     {
-        _mean = miopen_utils::createPaddedTensor(tensorMap, *optMeanUid);
-    }
+        auto optMeanUid = attributes.mean_tensor_uid();
+        if(optMeanUid.has_value())
+        {
+            _mean = miopen_utils::createPaddedTensor(tensorMap, *optMeanUid);
+        }
 
-    auto optInvVarUid = attributes.inv_variance_tensor_uid();
-    if(optInvVarUid.has_value())
-    {
-        _invVariance = miopen_utils::createPaddedTensor(tensorMap, *optInvVarUid);
+        auto optInvVarUid = attributes.inv_variance_tensor_uid();
+        if(optInvVarUid.has_value())
+        {
+            _invVariance = miopen_utils::createPaddedTensor(tensorMap, *optInvVarUid);
+        }
     }
 
     auto optPrevRunMeanUid = attributes.prev_running_mean_tensor_uid();

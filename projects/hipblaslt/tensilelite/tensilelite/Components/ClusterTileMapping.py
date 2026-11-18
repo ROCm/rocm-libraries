@@ -5,7 +5,7 @@
 
 from rocisa.code import Module, Label
 from rocisa.container import sgpr, ContinuousRegister
-from rocisa.instruction import SAddU32, SAndB32, SCSelectB32, SCMovB32, SCmpEQU32, SCmpGeU32, SLShiftLeftB32, SLShiftRightB32, SMinU32, SMovB32, SMulI32, SSubU32
+from rocisa.instruction import SAddU32, SAndB32, SCSelectB32, SCMovB32, SCmpEQU32, SCmpGeU32, SLShiftLeftB32, SLShiftRightB32, SMinU32, SMovB32, SMulI32, SSubU32, SWaitCnt
 from rocisa.functions import scalarUInt32DivideAndRemainder
 from ..Common import log2, persistentSpatialCluster
 
@@ -76,6 +76,9 @@ class ClusterTileMapping:
         module = Module("DataParallel skipPhantomTileStore")
         if not persistentSpatialCluster(kernel):
             return module
+        # Phantom tiles bypass the store path's wait. Drain epilogue scalar loads
+        # before the next tile reuses their destination SGPRs for TDM descriptors.
+        module.add(SWaitCnt(kmcnt=0, comment="drain epilogue kernarg loads before the next tile"))
         module.add(SCmpEQU32(src0=sgpr("PersistentPhantomTile"), src1=0, comment="phantom tiles skip the store"))
         module.add(writer.longBranchScc0(Label("PersistentLoopClose", ""), posNeg=1))
         return module

@@ -475,7 +475,7 @@ class _SynthStep:
         plan = _enumerate(t, 0)
         ik = t.instr_k
         fl = {g: t.frag_len(g) for g in ("g0", "g1", "g2", "g3", "g4")}
-        cl = t.c_frag_len
+        cl = t.dst_frag_len
         tsrc = {"xt_lds": "contig", "wmma_lds": "contig"}.get(
             t.transpose_source, t.transpose_source
         )
@@ -1092,7 +1092,7 @@ def test_kv_residency_and_acc_in_lds_add_their_lds_traffic(arch):
     ref = StageTable(**base)
     frag = ref._reads_per_frag("g0", "contig")
     kv_reads = (n0 // (16 * w)) * (d // ref.instr_k["g0"]) * frag
-    rmw = (n0 // (16 * w)) * (d // 16) * ref.c_frag_len
+    rmw = (n0 // (16 * w)) * (d // 16) * ref.dst_frag_len
     r = variants[("reg", False)]
     for (kv, al), got in variants.items():
         dk = kv_reads if kv == "lds" else 0

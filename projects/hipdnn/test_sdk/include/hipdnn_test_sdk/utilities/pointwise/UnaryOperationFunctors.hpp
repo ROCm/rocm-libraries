@@ -13,6 +13,9 @@
 namespace hipdnn_test_sdk::utilities::pointwise
 {
 
+// Defined here because M_PI is not portable across compilers.
+inline constexpr double PI = 3.14159265358979323846;
+
 // Unary operations with explicit ComputeType and OutputType
 // ComputeType: The type used for intermediate calculations
 // OutputType: The type returned from the operation
@@ -140,8 +143,9 @@ struct GeluApproxTanhForward
         using hipdnn_data_sdk::types::tanh;
         auto xCompute = static_cast<ComputeType>(x);
         // GELU_tanh(x) ~= 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))
-        static const ComputeType s_kSqrt2OverPi = sqrt(ComputeType{2} / ComputeType{3.14159265});
-        static const auto s_kCoeff = ComputeType{0.044715};
+        static const ComputeType s_kSqrt2OverPi
+            = sqrt(ComputeType{2} / static_cast<ComputeType>(PI));
+        static const auto s_kCoeff = static_cast<ComputeType>(0.044715);
         auto inner = s_kSqrt2OverPi * (xCompute + s_kCoeff * xCompute * xCompute * xCompute);
         auto result = ComputeType{0.5} * xCompute * (ComputeType{1} + tanh(inner));
         return static_cast<OutputType>(result);
@@ -166,6 +170,191 @@ struct SwishForward
         // Swish(x) = x * sigmoid(beta * x) = x / (1 + exp(-beta * x))
         auto result = xCompute / (ComputeType{1} + exp(-beta * xCompute));
         return static_cast<OutputType>(result);
+    }
+};
+
+template <typename ComputeType = float, typename OutputType = ComputeType>
+struct ExpForward
+{
+    template <typename X>
+    OutputType operator()(const X& x) const
+    {
+        using hipdnn_data_sdk::types::exp;
+        return static_cast<OutputType>(exp(static_cast<ComputeType>(x)));
+    }
+};
+
+template <typename ComputeType = float, typename OutputType = ComputeType>
+struct LogForward
+{
+    template <typename X>
+    OutputType operator()(const X& x) const
+    {
+        using hipdnn_data_sdk::types::log;
+        return static_cast<OutputType>(log(static_cast<ComputeType>(x)));
+    }
+};
+
+template <typename ComputeType = float, typename OutputType = ComputeType>
+struct SqrtForward
+{
+    template <typename X>
+    OutputType operator()(const X& x) const
+    {
+        using hipdnn_data_sdk::types::sqrt;
+        return static_cast<OutputType>(sqrt(static_cast<ComputeType>(x)));
+    }
+};
+
+template <typename ComputeType = float, typename OutputType = ComputeType>
+struct RsqrtForward
+{
+    template <typename X>
+    OutputType operator()(const X& x) const
+    {
+        using hipdnn_data_sdk::types::sqrt;
+        return static_cast<OutputType>(ComputeType{1} / sqrt(static_cast<ComputeType>(x)));
+    }
+};
+
+template <typename ComputeType = float, typename OutputType = ComputeType>
+struct ReciprocalForward
+{
+    template <typename X>
+    OutputType operator()(const X& x) const
+    {
+        return static_cast<OutputType>(ComputeType{1} / static_cast<ComputeType>(x));
+    }
+};
+
+template <typename ComputeType = float, typename OutputType = ComputeType>
+struct SinForward
+{
+    template <typename X>
+    OutputType operator()(const X& x) const
+    {
+        using hipdnn_data_sdk::types::sin;
+        return static_cast<OutputType>(sin(static_cast<ComputeType>(x)));
+    }
+};
+
+template <typename ComputeType = float, typename OutputType = ComputeType>
+struct TanForward
+{
+    template <typename X>
+    OutputType operator()(const X& x) const
+    {
+        using hipdnn_data_sdk::types::tan;
+        return static_cast<OutputType>(tan(static_cast<ComputeType>(x)));
+    }
+};
+
+template <typename ComputeType = float, typename OutputType = ComputeType>
+struct ErfForward
+{
+    template <typename X>
+    OutputType operator()(const X& x) const
+    {
+        using hipdnn_data_sdk::types::erf;
+        return static_cast<OutputType>(erf(static_cast<ComputeType>(x)));
+    }
+};
+
+template <typename ComputeType = float, typename OutputType = ComputeType>
+struct CeilForward
+{
+    template <typename X>
+    OutputType operator()(const X& x) const
+    {
+        using hipdnn_data_sdk::types::ceil;
+        return static_cast<OutputType>(ceil(static_cast<ComputeType>(x)));
+    }
+};
+
+template <typename ComputeType = float, typename OutputType = ComputeType>
+struct FloorForward
+{
+    template <typename X>
+    OutputType operator()(const X& x) const
+    {
+        using hipdnn_data_sdk::types::floor;
+        return static_cast<OutputType>(floor(static_cast<ComputeType>(x)));
+    }
+};
+
+template <typename ComputeType = float, typename OutputType = ComputeType>
+struct EluForward
+{
+    ComputeType alpha;
+
+    explicit EluForward(ComputeType alphaVal = ComputeType{1})
+        : alpha(alphaVal)
+    {
+    }
+
+    template <typename X>
+    OutputType operator()(const X& x) const
+    {
+        auto xCompute = static_cast<ComputeType>(x);
+        // ELU(x) = x for x > 0, alpha * expm1(x) otherwise. expm1 avoids the cancellation in
+        // exp(x) - 1 for x close to zero.
+        auto result = xCompute > ComputeType{0}
+                          ? xCompute
+                          : alpha
+                                * hipdnn_test_sdk::detail::safeConvert<ComputeType>(
+                                    std::expm1(static_cast<double>(xCompute)));
+        return static_cast<OutputType>(result);
+    }
+};
+
+template <typename ComputeType = float, typename OutputType = ComputeType>
+struct SoftplusForward
+{
+    ComputeType beta;
+
+    explicit SoftplusForward(ComputeType betaVal = ComputeType{1})
+        : beta(betaVal)
+    {
+    }
+
+    template <typename X>
+    OutputType operator()(const X& x) const
+    {
+        auto xCompute = static_cast<ComputeType>(x);
+        // Softplus(x) = log1p(exp(beta * x)) / beta, evaluated in double until the final result so
+        // neither exp nor the division by beta underflows in a narrower compute type. log1p avoids
+        // rounding 1 + exp(...) to 1 for very negative beta * x. Fall back to x above a threshold of
+        // 20, where log1p(exp(s)) / beta is indistinguishable from x. This also avoids overflow in
+        // exp (the same value is used in PyTorch's Softplus).
+        const auto betaDouble = static_cast<double>(beta);
+        const auto xDouble = static_cast<double>(xCompute);
+        const double scaled = betaDouble * xDouble;
+        const double result = scaled > 20.0 ? xDouble : std::log1p(std::exp(scaled)) / betaDouble;
+        return static_cast<OutputType>(hipdnn_test_sdk::detail::safeConvert<ComputeType>(result));
+    }
+};
+
+// Truthiness for logical operations.
+// Floating-point types are casted to double for safe comparison with zero.
+template <typename X>
+bool isTrue(const X& x)
+{
+    if constexpr(std::is_same_v<X, bool>)
+    {
+        return x;
+    }
+    else
+    {
+        return static_cast<double>(x) != 0.0;
+    }
+}
+
+struct LogicalNot
+{
+    template <typename X>
+    bool operator()(const X& x) const
+    {
+        return !isTrue(x);
     }
 };
 

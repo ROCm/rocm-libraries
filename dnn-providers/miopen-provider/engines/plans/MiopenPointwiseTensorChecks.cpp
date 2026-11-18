@@ -5,6 +5,7 @@
 
 #include <optional>
 
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace miopen_plugin::pointwise_applicability
@@ -24,6 +25,13 @@ void validatePointwiseIoTensors(
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM, opName + ": tensors must be non-virtual");
+        }
+
+        if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(tensor))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                opName + ": does not support pass-by-value tensors");
         }
 
         const auto dtype = tensor->data_type();

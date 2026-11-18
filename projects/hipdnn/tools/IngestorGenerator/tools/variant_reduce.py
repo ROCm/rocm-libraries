@@ -8,25 +8,35 @@ its ``divides`` knobs), one kernel for every ranked graph left uncovered, and ea
 graph's best kernel while its gain over the best kept kernel exceeds epsilon: the
 smallest grid value at or above the round-to-round noise floor that fits the budget.
 Rankings are the ``WinnerCacheFile.hpp`` shards of the successful timing phases of a
-``tools/sweep.py`` output. Exit 1: the kept set (eps or ``--apply-rules``) exceeds
-the budget, or the applied rules together lose more of a graph's best time than the
-rules eps; exit 2: unusable input; exit 3: the sweep cannot support a reduction: no
-``summary.json`` listing ``expected_phases``, an expected timing or correctness phase
-of the arm with no record or (timing) no winners, a failed correctness verdict, or timing
-phases missing for some (round, corpus). On exit 1, and on exit 3 for a failed
-correctness verdict or missing (round, corpus), the report is written and ``--out`` is
-not; an incomplete sweep (the other exit 3 causes) writes neither. A sweep of fewer
-than 2 timing rounds warns on stdout: its noise floor is assumed, not measured. ``reduction.single_round_epsilon``
+``tools/sweep.py`` output: ``v:2`` whole-graph records for an unslotted engine, ``v:3``
+slot records for a slotted one (its ``v:3`` program lines are validated and rank
+nothing). A slotted engine reduces per slot: each slot's (graph, device) rankings,
+floor, coverage, noise floor and epsilon use that slot's own kernels and the
+``reduction.fields`` its own ``kmd_fields`` declare; pass ``--kdp`` once per pack. The
+budget bounds every pack per arch, as ``generate.py`` counts it. The output keeps every
+pack, filtered to its slot's kept kernels. Exit 1: the kept set (eps or
+``--apply-rules``) exceeds the budget, or the applied rules together lose more of a
+graph's best time than the rules eps (per slot, with the other slots at their reference
+picks, not for the whole program); exit 2: unusable input; exit 3: the sweep cannot
+support a reduction: no ``summary.json`` listing ``expected_phases``; an expected timing
+or correctness phase of the arm with no record; an expected timing phase with no winners
+(for a slotted engine: none for some slot); a failed correctness verdict; or timing
+phases missing for some (round, corpus). On exit 1, and on exit 3 for a failed correctness verdict or missing
+(round, corpus), the report is written and ``--out`` is not; an incomplete sweep (the
+other exit 3 causes) writes neither. A sweep of fewer than 2 timing rounds warns on
+stdout: its noise floor is assumed, not measured. ``reduction.single_round_epsilon``
 (default 0.05) and ``reduction.drift_multiplier`` (default 2) set the noise floor.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import math
 import statistics
+import struct
 import sys
 import traceback
 from collections import Counter, defaultdict
@@ -46,9 +56,33 @@ from codegen.models import EVERY_ARCH  # noqa: E402
 
 # WinnerCacheFile.hpp detail::WINNER_LINE_*: line, device and entry fields; version.
 _LINE_FIELDS = frozenset({"v", "graph", "device", "entries"})
-_DEVICE_FIELDS = frozenset({"gcn_arch_name", "warp_size", "multi_processor_count"})
+# A slot record is the v2 line plus `slot`; a `program` line holds the slot-to-kernel
+# picks and the total time instead of `entries`.
+_SLOT_LINE_FIELDS = _LINE_FIELDS | {"slot"}
+_PROGRAM_LINE_FIELDS = frozenset({"v", "graph", "device", "program", "time_ms"})
+_PICK_FIELDS = frozenset({"slot", "kernel_id"})
+_DEVICE_FIELDS = frozenset(
+    {
+        "gcn_arch_name",
+        "warp_size",
+        "multi_processor_count",
+        "total_global_mem",
+        "memory_bus_width",
+        "memory_clock_rate",
+        "shared_mem_per_block",
+    }
+)
 _ENTRY_FIELDS = frozenset({"kernel_id", "pack_id", "dispatch_id", "time_ms"})
-_LINE_FORMAT_VERSION = 1
+# WINNER_LINE_FORMAT_VERSION: an unslotted engine's whole-graph records.
+# WINNER_LINE_SLOTTED_FORMAT_VERSION: a slotted engine's slot records and program lines.
+_WHOLE_GRAPH_VERSION = 2
+_SLOTTED_VERSION = 3
+_LINE_FORMAT_VERSIONS = (_WHOLE_GRAPH_VERSION, _SLOTTED_VERSION)
+# GraphContentKey.hpp CONTENT_FIELD: the graph half of a line, the raw Graph flatbuffer.
+_GRAPH_FIELDS = frozenset({"content_base64"})
+# graph.fbs `table Graph`: `id: Uuid (cache_ignore)` is field 9, an inline [ubyte:16].
+_GRAPH_ID_FIELD = 9
+_GRAPH_ID_BYTES = 16
 
 EPSILON_GRID = tuple(i / 100 for i in range(51)) + (math.inf,)
 # A healthy elapsed may be 0 (BenchmarkPlan.hpp); ratios use this floor instead.
@@ -68,15 +102,30 @@ class Classification:
     feature: tuple
     performance: tuple
     divides: tuple
+    #: A slotted engine's cells lead with the pack: a slot's packs serve different
+    #: graphs (their discriminators), so no pack's kernel stands in for another's.
+    by_pack: bool = False
+
+    @property
+    def cell_fields(self) -> tuple:
+        """The names of a cell's values, in order."""
+        return ("pack", *self.feature) if self.by_pack else self.feature
 
     @classmethod
-    def from_reduction(cls, reduction: dict) -> "Classification":
+    def from_reduction(cls, reduction: dict, slot_fields=None) -> "Classification":
+        """``slot_fields`` are a slot's KMD field names: the classification of that
+        slot, which keeps the reduction's fields the slot declares."""
         fields = reduction["fields"]
-        knobs = list(fields.get("performance") or [])
+
+        def declared(name) -> bool:
+            return slot_fields is None or name in slot_fields
+
+        knobs = [k for k in fields.get("performance") or [] if declared(k["name"])]
         return cls(
-            feature=tuple(fields.get("feature") or []),
+            feature=tuple(n for n in fields.get("feature") or [] if declared(n)),
             performance=tuple(k["name"] for k in knobs),
             divides=tuple(k["name"] for k in knobs if k.get("divides")),
+            by_pack=slot_fields is not None,
         )
 
 
@@ -87,6 +136,7 @@ class Variant:
     knobs: dict = field(hash=False, compare=False)
     default: bool = False
     arches: tuple = ()
+    pack: str = ""
 
 
 @dataclass
@@ -160,6 +210,7 @@ class Reduction:
     arm: str
     duplicate_keys: int = 0
     empty_records: int = 0
+    slot: str = ""
 
     def keep(self, epsilon: float) -> set:
         return keep_at(self.floor, self.coverage, self.steps, epsilon)
@@ -210,14 +261,134 @@ def _require_fields(obj, expected: frozenset, where: str) -> None:
         raise ReduceError(f"{where}: missing {missing}")
 
 
-def read_shard(path) -> dict:
-    """``{key: [entry, ...]}`` for one winner-cache shard; the last line per key wins.
+def graph_identity(graph, where: str) -> str:
+    """The graph half of a ranking's key: the line's Graph bytes with ``Graph.id`` zeroed.
+
+    hipDNN mints a fresh ``Graph.id`` each time it finalizes a graph, and the C++ key
+    compares content with that ``(cache_ignore)`` field skipped, but a line keeps the raw
+    bytes. Every sweep round finalizes the same graph file again, so rounds only match
+    once the id is cleared.
+    """
+    _require_fields(graph, _GRAPH_FIELDS, f"{where} graph")
+    try:
+        content = bytearray(base64.b64decode(graph["content_base64"], validate=True))
+        table = struct.unpack_from("<I", content, 0)[0]
+        vtable = table - struct.unpack_from("<i", content, table)[0]
+        (vtable_size,) = struct.unpack_from("<H", content, vtable)
+        slot = 4 + 2 * _GRAPH_ID_FIELD
+        offset = (
+            struct.unpack_from("<H", content, vtable + slot)[0]
+            if slot < vtable_size
+            else 0
+        )
+    except (ValueError, TypeError, struct.error) as exc:
+        raise ReduceError(
+            f"{where}: graph content is not a Graph flatbuffer ({exc})"
+        ) from exc
+    if offset:
+        start = table + offset
+        if start + _GRAPH_ID_BYTES > len(content):
+            raise ReduceError(
+                f"{where}: Graph.id runs past the end of the graph content"
+            )
+        content[start : start + _GRAPH_ID_BYTES] = bytes(_GRAPH_ID_BYTES)
+    return base64.b64encode(bytes(content)).decode("ascii")
+
+
+@dataclass(frozen=True)
+class WinnerLine:
+    """One decoded shard line (``WinnerCacheFile.hpp`` ``decodeWinnerLine``): a
+    whole-graph record (v2), a slot record (v3 with ``slot``) or a program line (v3
+    with ``picks``: ``(slot, kernel_id)`` in slot order, and ``time_ms``)."""
+
+    version: int
+    graph: str
+    device: dict
+    slot: str | None = None
+    entries: list = field(default_factory=list)
+    picks: tuple | None = None
+    time_ms: float | None = None
+
+    @property
+    def key(self) -> str | None:
+        """The ranking key, a JSON ``[graph identity, device]`` pair with the slot
+        appended for a slot record; None for a program line, which ranks nothing."""
+        if self.picks is not None:
+            return None
+        parts = [self.graph, self.device]
+        if self.slot is not None:
+            parts.append(self.slot)
+        return json.dumps(parts, sort_keys=True)
+
+
+def _check_time(t, where: str) -> None:
+    if type(t) not in (int, float) or not math.isfinite(t) or t < 0:
+        raise ReduceError(f"{where}: bad time_ms {t!r}")
+
+
+def _decode_line(doc: dict, where: str) -> WinnerLine:
+    version = doc.get("v")
+    if type(version) is not int or version not in _LINE_FORMAT_VERSIONS:
+        raise ReduceError(
+            f"{where}: line format v={version!r}, expected one of "
+            f"{list(_LINE_FORMAT_VERSIONS)}"
+        )
+    slotted = version == _SLOTTED_VERSION
+    program = slotted and "program" in doc
+    if program:
+        # The decoder returns at `program` before it reads `entries`.
+        _require_fields(
+            {k: v for k, v in doc.items() if k != "entries"},
+            _PROGRAM_LINE_FIELDS,
+            where,
+        )
+    else:
+        _require_fields(doc, _SLOT_LINE_FIELDS if slotted else _LINE_FIELDS, where)
+    _require_fields(doc["device"], _DEVICE_FIELDS, f"{where} device")
+    if program:
+        picks = doc["program"]
+        if not isinstance(picks, list) or not picks:
+            raise ReduceError(f"{where}: 'program' must be a non-empty list")
+        for index, pick in enumerate(picks):
+            _require_fields(pick, _PICK_FIELDS, f"{where} program[{index}]")
+            if any(not isinstance(pick[f], str) or not pick[f] for f in _PICK_FIELDS):
+                raise ReduceError(
+                    f"{where} program[{index}]: slot and kernel_id must be "
+                    "non-empty strings"
+                )
+        _check_time(doc["time_ms"], where)
+        return WinnerLine(
+            version,
+            graph_identity(doc["graph"], where),
+            doc["device"],
+            picks=tuple((p["slot"], p["kernel_id"]) for p in picks),
+            time_ms=doc["time_ms"],
+        )
+    slot = doc.get("slot")
+    if slotted and (not isinstance(slot, str) or not slot):
+        raise ReduceError(f"{where}: 'slot' must be a non-empty string")
+    if not isinstance(doc["entries"], list):
+        raise ReduceError(f"{where}: 'entries' must be a list")
+    for index, entry in enumerate(doc["entries"]):
+        _require_fields(entry, _ENTRY_FIELDS, f"{where} entries[{index}]")
+        _check_time(entry["time_ms"], f"{where} entries[{index}]")
+    return WinnerLine(
+        version,
+        graph_identity(doc["graph"], where),
+        doc["device"],
+        slot=slot,
+        entries=doc["entries"],
+    )
+
+
+def read_lines(path) -> list:
+    """The `WinnerLine` of every line of one winner-cache shard, in file order.
 
     Line 1 is the version. Lines split as ``LineStore.hpp`` ``splitLineStoreLines``:
     on ``\\n``, dropping a preceding ``\\r``, ignoring an unterminated last chunk.
     """
     path = Path(path)
-    records = {}
+    out = []
     chunks = path.read_text(encoding="utf-8").split("\n")
     lines = [chunk.removesuffix("\r") for chunk in chunks[:-1]]
     for number, line in enumerate(lines[1:], start=2):
@@ -230,20 +401,57 @@ def read_shard(path) -> dict:
             raise ReduceError(f"{where}: not JSON ({exc})") from exc
         if not isinstance(doc, dict):
             raise ReduceError(f"{where}: expected a JSON object")
-        version = doc.get("v")
-        if type(version) is not int or version != _LINE_FORMAT_VERSION:
-            raise ReduceError(f"{where}: line format v={version!r}, expected 1")
-        _require_fields(doc, _LINE_FIELDS, where)
-        _require_fields(doc["device"], _DEVICE_FIELDS, f"{where} device")
-        if not isinstance(doc["entries"], list):
-            raise ReduceError(f"{where}: 'entries' must be a list")
-        for index, entry in enumerate(doc["entries"]):
-            _require_fields(entry, _ENTRY_FIELDS, f"{where} entries[{index}]")
-            t = entry["time_ms"]
-            if type(t) not in (int, float) or not math.isfinite(t) or t < 0:
-                raise ReduceError(f"{where} entries[{index}]: bad time_ms {t!r}")
-        key = json.dumps([doc["graph"], doc["device"]], sort_keys=True)
-        records[key] = doc["entries"]
+        out.append(_decode_line(doc, where))
+    return out
+
+
+def read_shard(path) -> dict:
+    """``{key: [entry, ...]}`` for one winner-cache shard; the last line per key wins.
+
+    The keys are `WinnerLine.key`: a v2 record's is its ``(graph, device)``, a v3 slot
+    record's adds the slot. A v3 program line is validated and ranks nothing."""
+    return {line.key: line.entries for line in read_lines(path) if line.key is not None}
+
+
+def _slot_of(key: str) -> str | None:
+    """The slot of a ranking key; None for a whole-graph record's."""
+    parts = json.loads(key)
+    return parts[2] if len(parts) == 3 else None
+
+
+def _ranked(shard, slots) -> dict:
+    """`read_shard` of a shard swept for a selection whose slots are ``slots`` (None:
+    an unslotted engine, which writes whole-graph records only; a slotted engine writes
+    slot records only, for its own slots; its program lines name those slots too)."""
+    lines = read_lines(shard)
+    for line in lines:
+        if line.picks is None:
+            continue
+        if slots is None:
+            raise ReduceError(
+                f"{shard}: a program line in the sweep of an unslotted engine"
+            )
+        for slot, _ in line.picks:
+            if slot not in slots:
+                raise ReduceError(
+                    f"{shard}: a program line names slot {slot!r}, not a slot of the "
+                    f"selection ({list(slots)})"
+                )
+    records = {line.key: line.entries for line in lines if line.key is not None}
+    for key in records:
+        slot = _slot_of(key)
+        if slots is None and slot is not None:
+            raise ReduceError(
+                f"{shard}: a slot record ({slot!r}) in the sweep of an unslotted engine"
+            )
+        if slots is not None and slot is None:
+            raise ReduceError(
+                f"{shard}: a whole-graph v2 record in the sweep of a slotted engine"
+            )
+        if slots is not None and slot not in slots:
+            raise ReduceError(
+                f"{shard}: slot {slot!r} is not a slot of the selection ({list(slots)})"
+            )
     return records
 
 
@@ -252,7 +460,8 @@ def _shards(attempt: Path) -> list:
 
 
 def load_selection(path):
-    """``(raw, config, classification)``; requires a ``reduction:`` block."""
+    """``(raw, config)``; requires a ``reduction:`` block, and for an unslotted engine
+    a single pack."""
     import yaml
     from codegen.config_loader import ConfigError, load_config, read_yaml
 
@@ -263,9 +472,23 @@ def load_selection(path):
         raise ReduceError(f"{path}: {exc}") from exc
     if not config.reduction:
         raise ReduceError(f"{path}: no 'reduction' block")
-    if len(config.packs) != 1:
+    if not config.is_slotted and len(config.packs) != 1:
         raise ReduceError(f"{path}: {len(config.packs)} packs, expected 1")
-    return raw, config, Classification.from_reduction(config.reduction)
+    return raw, config
+
+
+def classifications_of(config) -> dict:
+    """``{slot: Classification}`` of the selection's reduction units: one named ``""``
+    for an unslotted engine, one per slot that has a pack for a slotted one."""
+    if not config.is_slotted:
+        return {"": Classification.from_reduction(config.reduction)}
+    return {
+        slot.name: Classification.from_reduction(
+            config.reduction, {f.name for f in slot.kmd_fields}
+        )
+        for slot in config.slots
+        if any(pack.slot == slot.name for pack in config.packs)
+    }
 
 
 def load_kdp(path) -> dict:
@@ -279,35 +502,62 @@ def load_kdp(path) -> dict:
     return kdp
 
 
-def build_variants(config, kdp: dict, classification: Classification) -> dict:
-    """``{name: Variant}`` in selection order; fields from KDP metadata, then spec."""
-    pack = config.packs[0]
-    selected = {k.name: k for k in pack.kernels}
-    installed = {d["name"]: d for d in kdp["kernelDescriptors"]}
-    if set(selected) != set(installed):
+def _kdp_of(pack, kdps: list, slotted: bool) -> dict:
+    """The KDP built from exactly ``pack``'s kernels."""
+    selected = {k.name for k in pack.kernels}
+    named = [{d["name"] for d in kdp["kernelDescriptors"]} for kdp in kdps]
+    for kdp, installed in zip(kdps, named):
+        if installed == selected:
+            return kdp
+    installed = max(named, key=lambda names: len(names & selected), default=set())
+    where = f" (pack {pack.name!r})" if slotted else ""
+    raise ReduceError(
+        f"the KDP is not built from this selection{where}: only in the selection "
+        f"{sorted(selected - installed)[:3]}, only in the KDP "
+        f"{sorted(installed - selected)[:3]}"
+    )
+
+
+def build_variants(config, kdps: list, classifications: dict) -> dict:
+    """``{slot: {name: Variant}}`` in selection order, one slot (``""``) for an
+    unslotted engine; fields from KDP metadata, then spec. Each pack pairs with the KDP
+    built from its kernels, so ``kdps`` holds one per pack."""
+    if len(kdps) != len(config.packs):
         raise ReduceError(
-            f"the KDP is not built from this selection: only in the selection "
-            f"{sorted(set(selected) - set(installed))[:3]}, only in the KDP "
-            f"{sorted(set(installed) - set(selected))[:3]}"
+            f"{len(config.packs)} pack(s) need {len(config.packs)} --kdp, "
+            f"got {len(kdps)}"
         )
-    variants = {}
-    for name, kernel in selected.items():
-        metadata = installed[name].get("metadata") or {}
-        spec = kernel.kernel_source.spec
+    by_slot = {slot: {} for slot in classifications}
+    for pack in config.packs:
+        slot = pack.slot if config.is_slotted else ""
+        classification = classifications[slot]
+        kdp = _kdp_of(pack, kdps, config.is_slotted)
+        kdps = [k for k in kdps if k is not kdp]
+        installed = {d["name"]: d for d in kdp["kernelDescriptors"]}
+        for kernel in pack.kernels:
+            metadata = installed[kernel.name].get("metadata") or {}
+            spec = kernel.kernel_source.spec
 
-        def lookup(f):
-            return metadata[f] if f in metadata else spec.get(f)
+            def lookup(f):
+                return metadata[f] if f in metadata else spec.get(f)
 
-        cell = tuple(lookup(f) for f in classification.feature)
-        knobs = {k: lookup(k) for k in classification.performance}
-        arches = tuple(kernel.arch or pack.arch or [EVERY_ARCH])
-        variants[name] = Variant(name, cell, knobs, kernel.default, arches)
-    return variants
+            cell = tuple(lookup(f) for f in classification.feature)
+            if classification.by_pack:
+                cell = (pack.name, *cell)
+            knobs = {k: lookup(k) for k in classification.performance}
+            arches = tuple(kernel.arch or pack.arch or [EVERY_ARCH])
+            by_slot[slot][kernel.name] = Variant(
+                kernel.name, cell, knobs, kernel.default, arches, pack.name
+            )
+    return by_slot
 
 
 def instances(variants: dict, names) -> int:
-    """Kept kernels for the most-populated arch: what the budget bounds."""
-    per_arch = Counter(arch for name in names for arch in variants[name].arches)
+    """Kept kernels for the most-populated (pack, arch): what the budget bounds, as
+    ``generate.py`` ``warn_over_budget`` counts it."""
+    per_arch = Counter(
+        (variants[name].pack, arch) for name in names for arch in variants[name].arches
+    )
     return max(per_arch.values(), default=0)
 
 
@@ -455,11 +705,13 @@ def noise_floor(
 
 
 def _cell_text(cell: tuple, classification: Classification, varying: list) -> str:
-    shown = zip(classification.feature, cell)
+    shown = zip(classification.cell_fields, cell)
     return "{" + ", ".join(f"{n}={v}" for n, v in shown if n in varying) + "}"
 
 
-def propose_rules(variants: dict, rankings: list, protected, classification, epsilon):
+def propose_rules(
+    variants: dict, rankings: list, protected, classification, epsilon, slot=""
+):
     """``drop knob X`` / ``drop X=v`` / ``keep X=v only for <cells>`` rules, ordered
     by instance saving per unit of worst gain lost. A non-default value wins a ranking
     when its best entry beats every default-valued entry (every other value in a cell
@@ -499,7 +751,7 @@ def propose_rules(variants: dict, rankings: list, protected, classification, eps
     cells = sorted({v.cell for v in variants.values()}, key=repr)
     varying = [
         name
-        for index, name in enumerate(classification.feature)
+        for index, name in enumerate(classification.cell_fields)
         if len({cell[index] for cell in cells}) > 1
     ]
     # (text, knob, values removed (empty: every non-default value), exempt cells)
@@ -540,7 +792,7 @@ def propose_rules(variants: dict, rankings: list, protected, classification, eps
             and v.name not in protected
         )
         if removed:
-            rules.append(_costed(text, removed, variants, rankings, protected))
+            rules.append(_costed(text, removed, variants, rankings, protected, slot))
     rules.sort(key=_rule_order)
     return rules
 
@@ -551,12 +803,14 @@ def _rule_order(rule: Rule) -> tuple:
     return (w > 0, -(saved / w) if w > 0 else -saved, rule.text)
 
 
-def _rule_id(text: str) -> str:
-    """Derived from the rule text alone: an id is stable for a rule's text. The text
+def _rule_id(text: str, slot: str = "") -> str:
+    """Derived from the rule text alone (and a slotted engine's slot, which can propose
+    the text another proposes): an id is stable for a rule's text. The text
     of ``drop`` rules does not move with ``--budget``; a ``keep ... only for <cells>``
     rule names the cells where the value wins by more than the budget-chosen eps, so
     its text, and its id, changes with ``--budget``."""
-    return "R" + hashlib.sha256(text.encode()).hexdigest()[:6]
+    keyed = f"{slot}: {text}" if slot else text
+    return "R" + hashlib.sha256(keyed.encode()).hexdigest()[:6]
 
 
 def _ranking_loss(removed, rankings) -> tuple:
@@ -571,7 +825,7 @@ def _ranking_loss(removed, rankings) -> tuple:
     return sorted(losing), worst
 
 
-def _costed(text, removed, variants, rankings, protected) -> Rule:
+def _costed(text, removed, variants, rankings, protected, slot="") -> Rule:
     losing, worst = _ranking_loss(removed, rankings)
     before = defaultdict(set)
     for v in variants.values():
@@ -580,7 +834,7 @@ def _costed(text, removed, variants, rankings, protected) -> Rule:
     at_floor = sorted(
         (cell for cell, names in before.items() if names <= removed), key=repr
     )
-    return Rule(_rule_id(text), text, removed, len(losing), worst, at_floor)
+    return Rule(_rule_id(text, slot), text, removed, len(losing), worst, at_floor)
 
 
 def apply_rules(variants: dict, rules: list, chosen: list) -> list:
@@ -622,18 +876,30 @@ def _correctness_verdict(record: dict) -> str:
     return "failed"
 
 
-def _rankings_and_correctness(attempts, kdp, variants, arm):
-    by_id = {str(d["id"]).lower(): d["name"] for d in kdp["kernelDescriptors"]}
-    pack_id = str(kdp["id"]).lower()
-    dispatch_id = str(kdp["dispatch"]).lower()
+def _rankings_and_correctness(attempts, kdps, variants, arm, slots):
+    """``(rounds, correctness, duplicates, empty)``: ``rounds`` is ``{slot: {round:
+    {key: Ranking}}}`` and the counts are ``{slot: n}``, for the ``variants`` of
+    `build_variants`; ``correctness`` covers every slot. ``slots`` are the slot names of a
+    slotted selection, None for an unslotted one."""
+    by_id = {
+        (str(kdp["id"]).lower(), str(kdp["dispatch"]).lower(), str(d["id"]).lower()): d[
+            "name"
+        ]
+        for kdp in kdps
+        for d in kdp["kernelDescriptors"]
+    }
 
-    def entries_of(raw, where):
+    def entries_of(raw, where, slot):
         out = []
         for entry in raw:
-            ids = (str(entry["pack_id"]).lower(), str(entry["dispatch_id"]).lower())
-            name = by_id.get(str(entry["kernel_id"]).lower())
-            if ids != (pack_id, dispatch_id) or name is None:
+            ids = tuple(
+                str(entry[f]).lower() for f in ("pack_id", "dispatch_id", "kernel_id")
+            )
+            name = by_id.get(ids)
+            if name is None:
                 raise ReduceError(f"stale ranking: {where}: {entry} not in the KDP")
+            if name not in variants[slot]:
+                raise ReduceError(f"{where}: {entry} is not a kernel of slot {slot}")
             out.append((name, max(float(entry["time_ms"]), _MIN_TIME_MS)))
         return sorted(out, key=lambda e: (e[1], e[0]))
 
@@ -649,31 +915,35 @@ def _rankings_and_correctness(attempts, kdp, variants, arm):
             verdict = _correctness_verdict(record)
             winners = set()
             for shard in _shards(attempt):
-                for raw in read_shard(shard).values():
-                    entries = entries_of(raw, str(shard))
+                for key, raw in _ranked(shard, slots).items():
+                    entries = entries_of(raw, str(shard), _slot_of(key) or "")
                     if entries:
                         winners.add(entries[0][0])
             correctness.append(Correctness(phase, verdict, winners))
 
-    rounds = {}
-    duplicates = 0
-    empty = 0
+    rounds = {slot: {} for slot in variants}
+    duplicates = dict.fromkeys(variants, 0)
+    empty = dict.fromkeys(variants, 0)
     for number in sorted(timing):
-        keyed = {}
+        keyed = {slot: {} for slot in variants}
         for corpus, attempt in sorted(timing[number], key=lambda x: x[0]):
             for shard in _shards(attempt):
-                for key, raw in read_shard(shard).items():
-                    entries = entries_of(raw, str(shard))
+                for key, raw in _ranked(shard, slots).items():
+                    slot = _slot_of(key) or ""
+                    entries = entries_of(raw, str(shard), slot)
                     if not entries:
-                        empty += 1
+                        empty[slot] += 1
                         continue
-                    cells = {variants[name].cell for name, _ in entries}
+                    cells = {variants[slot][name].cell for name, _ in entries}
                     if len(cells) != 1:
                         raise ReduceError(f"{shard}: a record spans {len(cells)} cells")
-                    if key in keyed:
-                        duplicates += 1
-                    keyed[key] = Ranking(number, corpus, key, entries, cells.pop())
-        rounds[number] = keyed
+                    if key in keyed[slot]:
+                        duplicates[slot] += 1
+                    keyed[slot][key] = Ranking(
+                        number, corpus, key, entries, cells.pop()
+                    )
+        for slot in variants:
+            rounds[slot][number] = keyed[slot]
     return rounds, correctness, duplicates, empty
 
 
@@ -690,11 +960,12 @@ def _missing_pairs(attempts, arm) -> list:
 _PHASE_KEYS = frozenset({"kind", "arm", "corpus", "round"})
 
 
-def _require_complete_arm(sweep_dir, attempts, arm) -> None:
+def _require_complete_arm(sweep_dir, attempts, arm, slots) -> None:
     """Raise `IncompleteSweep` unless ``sweep.py`` finished every timing and
-    correctness phase of ``arm`` and each timing phase ranked something. The
-    expected phases are the sweep's own list in ``summary.json``, which it writes
-    only after its last phase; another arm's phases are not this arm's evidence."""
+    correctness phase of ``arm`` and each timing phase ranked something (for a slotted
+    engine, in every slot of ``slots``). The expected phases are the sweep's own list in
+    ``summary.json``, which it writes only after its last phase; another arm's phases
+    are not this arm's evidence."""
     summary_path = Path(sweep_dir) / "summary.json"
     try:
         expected = json.loads(summary_path.read_text(encoding="utf-8"))[
@@ -735,20 +1006,33 @@ def _require_complete_arm(sweep_dir, attempts, arm) -> None:
         attempt = found.get((phase["kind"], phase["corpus"], phase["round"]))
         if attempt is None:
             problems.append(f"{label}: no record")
-        elif phase["kind"] == "timing" and not any(
-            read_shard(shard) for shard in _shards(attempt)
-        ):
-            problems.append(f"{label}: no winners")
+        elif phase["kind"] == "timing":
+            present = {
+                _slot_of(key)
+                for shard in _shards(attempt)
+                for key in _ranked(shard, slots)
+            }
+            for slot in slots or [None]:
+                if slot not in present:
+                    problems.append(
+                        f"{label}: "
+                        + (f"slot {slot} has no winners" if slot else "no winners")
+                    )
     if problems:
         raise IncompleteSweep(
             f"arm {arm}: the sweep is incomplete: {'; '.join(problems)}"
         )
 
 
-def analyse(selection, kdp_path, sweep_dir, arm=None, budget=None) -> Reduction:
-    raw, config, classification = load_selection(selection)
-    kdp = load_kdp(kdp_path)
-    variants = build_variants(config, kdp, classification)
+def analyse_slots(selection, kdp_paths, sweep_dir, arm=None, budget=None) -> list:
+    """One `Reduction` per slot of a slotted selection, in slot order; a single one,
+    with an empty ``slot``, for an unslotted selection. ``kdp_paths`` are the installed
+    KDPs, one per pack. Each slot ranks, floors, covers and sets its noise floor and
+    epsilon on its own records and kernels; ``budget`` bounds every pack per arch."""
+    raw, config = load_selection(selection)
+    classifications = classifications_of(config)
+    kdps = [load_kdp(path) for path in kdp_paths]
+    variants = build_variants(config, kdps, classifications)
     attempts = _phase_attempts(sweep_dir)
     arms = sorted(
         {r["phase"]["arm"] for _, r in attempts if r["phase"]["kind"] == "timing"}
@@ -761,103 +1045,150 @@ def analyse(selection, kdp_path, sweep_dir, arm=None, budget=None) -> Reduction:
         arm = arms[0]
     elif arm not in arms:
         raise ReduceError(f"--arm {arm} ran no timing phase; arms: {arms}")
-    _require_complete_arm(sweep_dir, attempts, arm)
+    slots = list(variants) if config.is_slotted else None
+    _require_complete_arm(sweep_dir, attempts, arm, slots)
     rounds, correctness, duplicates, empty = _rankings_and_correctness(
-        attempts, kdp, variants, arm
+        attempts, kdps, variants, arm, slots
     )
-    if not any(rounds.values()):
-        raise ReduceError(f"arm {arm} has no successful timing phase with a ranking")
-    noise = noise_floor(
-        rounds,
-        _missing_pairs(attempts, arm),
-        config.reduction.get("single_round_epsilon", DEFAULT_SINGLE_ROUND_EPSILON),
-        config.reduction.get("drift_multiplier", DEFAULT_DRIFT_MULTIPLIER),
-    )
-    rankings = [
-        ranking
-        for number in sorted(rounds)
-        for ranking in sorted(rounds[number].values(), key=lambda r: r.key)
-    ]
-    floor, no_default = floor_variants(variants, classification)
-    coverage, steps = search(rankings, floor)
+    missing_pairs = _missing_pairs(attempts, arm)
     if budget is None:
         budget = config.reduction.get(
             "aot_budget_per_arch", DEFAULT_AOT_BUDGET_PER_ARCH
         )
-    curve = [
-        (e, instances(variants, keep_at(floor, coverage, steps, e)))
-        for e in EPSILON_GRID
-    ]
-    epsilon = choose_epsilon(curve, noise.epsilon_min, budget)
-    floor_eps = next(e for e in EPSILON_GRID if e >= noise.epsilon_min)
-    rules_epsilon = floor_eps if epsilon is None else epsilon
-    protected = set(floor) | set(coverage)
-    rules = propose_rules(variants, rankings, protected, classification, rules_epsilon)
-    return Reduction(
-        classification=classification,
-        variants=variants,
-        floor=floor,
-        no_default_cells=no_default,
-        rankings=rankings,
-        noise=noise,
-        coverage=coverage,
-        steps=steps,
-        budget=budget,
-        epsilon=epsilon,
-        rules_epsilon=rules_epsilon,
-        rules=rules,
-        correctness=correctness,
-        arm=arm,
-        duplicate_keys=duplicates,
-        empty_records=empty,
-    )
+    reductions = []
+    for slot, slot_variants in variants.items():
+        where = f"slot {slot}: " if slot else ""
+        slot_rounds = rounds[slot]
+        if not any(slot_rounds.values()):
+            raise ReduceError(
+                f"arm {arm} has no ranking for slot {slot}"
+                if slot
+                else f"arm {arm} has no successful timing phase with a ranking"
+            )
+        try:
+            noise = noise_floor(
+                slot_rounds,
+                missing_pairs,
+                config.reduction.get(
+                    "single_round_epsilon", DEFAULT_SINGLE_ROUND_EPSILON
+                ),
+                config.reduction.get("drift_multiplier", DEFAULT_DRIFT_MULTIPLIER),
+            )
+        except ReduceError as exc:
+            raise ReduceError(f"{where}{exc}") from exc
+        rankings = [
+            ranking
+            for number in sorted(slot_rounds)
+            for ranking in sorted(slot_rounds[number].values(), key=lambda r: r.key)
+        ]
+        classification = classifications[slot]
+        floor, no_default = floor_variants(slot_variants, classification)
+        coverage, steps = search(rankings, floor)
+        curve = [
+            (e, instances(slot_variants, keep_at(floor, coverage, steps, e)))
+            for e in EPSILON_GRID
+        ]
+        epsilon = choose_epsilon(curve, noise.epsilon_min, budget)
+        floor_eps = next(e for e in EPSILON_GRID if e >= noise.epsilon_min)
+        rules_epsilon = floor_eps if epsilon is None else epsilon
+        protected = set(floor) | set(coverage)
+        rules = propose_rules(
+            slot_variants, rankings, protected, classification, rules_epsilon, slot
+        )
+        reductions.append(
+            Reduction(
+                classification=classification,
+                variants=slot_variants,
+                floor=floor,
+                no_default_cells=no_default,
+                rankings=rankings,
+                noise=noise,
+                coverage=coverage,
+                steps=steps,
+                budget=budget,
+                epsilon=epsilon,
+                rules_epsilon=rules_epsilon,
+                rules=rules,
+                correctness=correctness,
+                arm=arm,
+                duplicate_keys=duplicates[slot],
+                empty_records=empty[slot],
+                slot=slot,
+            )
+        )
+    return reductions
+
+
+def analyse(selection, kdp_path, sweep_dir, arm=None, budget=None) -> Reduction:
+    """The `Reduction` of an unslotted selection (`analyse_slots` for any selection)."""
+    reductions = analyse_slots(selection, [kdp_path], sweep_dir, arm, budget)
+    if reductions[0].slot:
+        raise ReduceError(f"{selection}: a slotted selection reduces per slot")
+    return reductions[0]
+
+
+def _vocabulary(config, pack) -> dict:
+    spec = config.slot_of(pack).specialization if config.is_slotted else None
+    return ((spec if spec is not None else config.specialization) or {}).get(
+        "vocabulary"
+    ) or {}
 
 
 def write_selection(selection, names, out) -> int:
-    """Write the selection restricted to ``names``, factorised and round-trip
-    checked; returns its line count."""
+    """Write the selection restricted to ``names``, every pack kept and factorised and
+    round-trip checked; returns its line count. A slotted selection keeps each pack's
+    ``slot``. The compact form has no per-kernel ``provenance``, so a kept kernel's is
+    not carried (see the README)."""
     import factorise_config
     from codegen.config_loader import ConfigError
 
-    raw, config, classification = load_selection(selection)
+    raw, config = load_selection(selection)
+    classifications = classifications_of(config)
     keep = set(names)
-    pack_raw = raw["packs"][0]
-    kernels = []
-    for kernel in config.packs[0].kernels:
-        if kernel.name not in keep:
-            continue
-        entry = {
-            "name": kernel.name,
-            "kernel_source": kernel.kernel_source.authored_document(),
-            "metadata": dict(kernel.metadata),
-        }
-        if kernel.arch:
-            entry["arch"] = list(kernel.arch)
-        if kernel.priority:
-            entry["priority"] = kernel.priority
-        if kernel.default:
-            entry["default"] = True
-        kernels.append(entry)
-    expanded_pack = {"name": pack_raw["name"]}
-    for key in ("arch", "discriminator"):
-        if pack_raw.get(key):
-            expanded_pack[key] = pack_raw[key]
-    expanded_pack["kernels"] = kernels
-    expanded = {k: v for k, v in raw.items() if k != "packs"}
-    expanded["packs"] = [expanded_pack]
-    # Knobs only where every kept kernel's metadata carries them: the loader
-    # rejects a group's `policy_knobs` naming a field its `metadata` lacks.
-    knobs = [
-        knob
-        for knob in classification.performance
-        if all(knob in entry["metadata"] for entry in kernels)
-    ]
+    expanded_packs = []
+    compact_packs = []
     try:
-        compact = factorise_config.factorise(
-            expanded,
-            knobs,
-            (config.specialization or {}).get("vocabulary") or {},
-        )
+        for pack_raw, pack in zip(raw["packs"], config.packs):
+            kernels = []
+            for kernel in pack.kernels:
+                if kernel.name not in keep:
+                    continue
+                entry = {
+                    "name": kernel.name,
+                    "kernel_source": kernel.kernel_source.authored_document(),
+                    "metadata": dict(kernel.metadata),
+                }
+                if kernel.arch:
+                    entry["arch"] = list(kernel.arch)
+                if kernel.priority:
+                    entry["priority"] = kernel.priority
+                if kernel.default:
+                    entry["default"] = True
+                kernels.append(entry)
+            expanded_pack = {"name": pack_raw["name"]}
+            for key in factorise_config.PACK_HEADER_KEYS:
+                if pack_raw.get(key):
+                    expanded_pack[key] = pack_raw[key]
+            expanded_pack["kernels"] = kernels
+            expanded_packs.append(expanded_pack)
+            # Knobs only where every kept kernel's metadata carries them: the loader
+            # rejects a group's `policy_knobs` naming a field its `metadata` lacks.
+            knobs = [
+                knob
+                for knob in classifications[
+                    pack.slot if config.is_slotted else ""
+                ].performance
+                if all(knob in entry["metadata"] for entry in kernels)
+            ]
+            compact_packs.append(
+                factorise_config.factorise_pack(
+                    expanded_pack, knobs, _vocabulary(config, pack)
+                )
+            )
+        expanded = {k: v for k, v in raw.items() if k != "packs"}
+        compact = dict(expanded)
+        expanded["packs"] = expanded_packs
+        compact["packs"] = compact_packs
         factorise_config._round_trip(expanded, compact)
     except (factorise_config.FactoriseError, ConfigError) as exc:
         raise ReduceError(f"the reduced selection does not factorise: {exc}") from exc
@@ -913,24 +1244,28 @@ def _sweep_warning(noise: NoiseFloor) -> str | None:
     )
 
 
-def _single_round_warning(noise: NoiseFloor) -> str | None:
+def _single_round_warning(noise: NoiseFloor, slot: str = "") -> str | None:
     if noise.rounds >= 2:
         return None
+    where = f"slot {slot}: " if slot else ""
     return (
-        f"{noise.rounds} timing round: eps_min is assumed {noise.epsilon_min}, "
+        f"{where}{noise.rounds} timing round: eps_min is assumed {noise.epsilon_min}, "
         "not measured; sweep at least 2 rounds"
     )
 
 
+def graph_label(identity: str) -> str:
+    """A short, stable name for one `graph_identity`: its content hash."""
+    return hashlib.sha256(identity.encode()).hexdigest()[:12]
+
+
 def _graph_at_device(key: str) -> str:
-    """``graph@device`` for one ranking key, a JSON ``[graph, device]`` pair."""
-    graph, device = json.loads(key)
-
-    def label(doc, field):
-        shown = doc.get(field) if isinstance(doc, dict) else None
-        return shown if isinstance(shown, str) else json.dumps(doc, sort_keys=True)
-
-    return f"{label(graph, 'key')}@{label(device, 'gcn_arch_name')}"
+    """``graph@device`` (``/slot`` for a slot record) for one ranking key, a JSON
+    ``[graph identity, device]`` pair with the slot appended for a slot record."""
+    graph, device, *slot = json.loads(key)
+    shown = device.get("gcn_arch_name") if isinstance(device, dict) else None
+    arch = shown if isinstance(shown, str) else json.dumps(device, sort_keys=True)
+    return f"{graph_label(graph)}@{arch}" + (f"/{slot[0]}" if slot else "")
 
 
 def _applied_loss(applied, rankings) -> tuple:
@@ -938,34 +1273,33 @@ def _applied_loss(applied, rankings) -> tuple:
     return _ranking_loss(set().union(*(rule.removed for rule in applied)), rankings)
 
 
-def render_report(r: Reduction, selection, output_note: str, names, applied=()) -> str:
-    """The report for the kernel set ``names`` that ``main`` writes, not whichever
-    set eps alone would keep. ``applied`` are the ``--apply-rules`` rules behind it."""
+#: What a slot's loss figure does and does not bound; `_applied_loss` ranks one slot.
+_SLOT_LOSS_SCOPE = (
+    "the loss bounds each slot with the other slots at their reference picks, "
+    "not the whole program"
+)
+
+
+def _budget_lines(r: Reduction, kept: set, applied) -> list:
     eps = r.epsilon if r.epsilon is not None else math.inf
-    kept = set(names)
-    noise = r.noise
     search = _eps(eps) if r.epsilon is not None else "none (over budget)"
     if applied:
         ids = ",".join(rule.id for rule in applied)
         chosen = f"chosen: rules {ids} (the eps search chose {search}; not used)"
     else:
         chosen = f"chosen eps: {search}"
-    lines = [
-        "# variant_reduce report",
-        "",
-        f"- selection `{selection}`, arm `{r.arm}`; output: {output_note}",
-        f"- budget {r.budget} instances per arch; {chosen}",
+    unit = "per pack per arch" if r.slot else "per arch"
+    return [
+        f"- budget {r.budget} instances {unit}; {chosen}",
         f"- kept {len(kept)} of {len(r.variants)} "
-        f"({instances(r.variants, kept)} instances per arch)",
-        f"- rounds {noise.rounds}, ranked graph records {len(r.rankings)}",
+        f"({instances(r.variants, kept)} instances {unit})",
+        f"- rounds {r.noise.rounds}, ranked graph records {len(r.rankings)}",
     ]
-    for warning in (
-        _correctness_warning(r),
-        _sweep_warning(noise),
-        _single_round_warning(noise),
-    ):
-        if warning:
-            lines.append(f"- WARNING: {warning}")
+
+
+def _noise_lines(r: Reduction, applied, missing: bool) -> list:
+    noise = r.noise
+    lines = []
     if applied:
         losing, worst = _applied_loss(applied, r.rankings)
         lines.append(
@@ -978,20 +1312,27 @@ def render_report(r: Reduction, selection, output_note: str, names, applied=()) 
             f"- drift {noise.drift:.6f}, eps_min {noise.epsilon_min:.6f}; graph keys "
             f"matched {noise.matched_keys}, unmatched {noise.unmatched_keys}"
         )
-    if noise.missing_pairs:
+    if missing and noise.missing_pairs:
         lines.append(f"- missing (round, corpus): {noise.missing_pairs}")
     if r.duplicate_keys:
         lines.append(f"- keys ranked by several corpora in a round: {r.duplicate_keys}")
     if r.empty_records:
         lines.append(f"- records with no usable entry: {r.empty_records}")
+    return lines
 
-    lines += ["", "## Eps curve", "", "| eps | kept |", "|---|---|"]
+
+def _detail_lines(r: Reduction, kept: set, applied, level: int) -> list:
+    """The eps curve and the variant, feature-cell and rule tables of one reduction,
+    under headings ``level`` deep."""
+    eps = r.epsilon if r.epsilon is not None else math.inf
+    h = "#" * level
+    lines = ["", f"{h} Eps curve", "", "| eps | kept |", "|---|---|"]
     for e in EPSILON_GRID:
         mark = " (chosen)" if e == r.epsilon and not applied else ""
         lines.append(f"| {_eps(e)}{mark} | {len(r.keep(e))} |")
 
     checked = {n for c in r.correctness if c.verdict == "passed" for n in c.winners}
-    lines += ["", "## Variants", "", "| variant | kept | reason |", "|---|---|---|"]
+    lines += ["", f"{h} Variants", "", "| variant | kept | reason |", "|---|---|---|"]
     for name in r.variants:
         if name in kept:
             tag = "numerics checked" if name in checked else "numerics unchecked"
@@ -1010,14 +1351,14 @@ def render_report(r: Reduction, selection, output_note: str, names, applied=()) 
     silent = [cell for cell in cells if cell not in ranked]
     lines += [
         "",
-        f"## Feature cells ({', '.join(r.classification.feature)})",
+        f"{h} Feature cells ({', '.join(r.classification.cell_fields)})",
         "",
         f"- floor only, never ranked: {len(silent)} of {len(cells)}",
         *(f"  - {cell}" for cell in silent),
         f"- no declared default: {len(r.no_default_cells)}",
         *(f"  - {cell}" for cell in r.no_default_cells),
         "",
-        f"## Proposed rules (eps {_eps(r.rules_epsilon)}; never remove the floor "
+        f"{h} Proposed rules (eps {_eps(r.rules_epsilon)}; never remove the floor "
         "or coverage)",
         "",
         "| id | rule | saved | graphs losing best | worst gain lost | cells at floor |",
@@ -1029,104 +1370,187 @@ def render_report(r: Reduction, selection, output_note: str, names, applied=()) 
             f"{rule.graphs_losing_best} | {_eps(rule.worst_gain_lost, 4)} | "
             f"{len(rule.cells_left_at_floor)} |"
         )
+    return lines
+
+
+def render_report(
+    reductions: list, selection, output_note: str, names: dict, applied=None
+) -> str:
+    """The report for the kernel sets ``names`` (``{slot: names}``) that ``main``
+    writes, not whichever sets eps alone would keep. ``applied`` maps each slot to the
+    ``--apply-rules`` rules behind its set. An unslotted selection has one reduction
+    with an empty slot; a slotted one gets a section per slot."""
+    applied = applied or {}
+    first = reductions[0]
+    lines = [
+        "# variant_reduce report",
+        "",
+        f"- selection `{selection}`, arm `{first.arm}`; output: {output_note}",
+    ]
+    if not first.slot:
+        r = first
+        kept, used = set(names[""]), applied.get("", ())
+        lines += _budget_lines(r, kept, used)
+        for warning in (
+            _correctness_warning(r),
+            _sweep_warning(r.noise),
+            _single_round_warning(r.noise),
+        ):
+            if warning:
+                lines.append(f"- WARNING: {warning}")
+        lines += _noise_lines(r, used, missing=True)
+        lines += _detail_lines(r, kept, used, 2)
+    else:
+        lines.append(
+            f"- slots {', '.join(r.slot for r in reductions)}; {_SLOT_LOSS_SCOPE}; the "
+            "full-corpus sweep stays the program-level check"
+        )
+        for warning in (_correctness_warning(first), _sweep_warning(first.noise)):
+            if warning:
+                lines.append(f"- WARNING: {warning}")
+        if first.noise.missing_pairs:
+            lines.append(f"- missing (round, corpus): {first.noise.missing_pairs}")
+        for r in reductions:
+            kept, used = set(names[r.slot]), applied.get(r.slot, ())
+            lines += ["", f"## Slot `{r.slot}`", ""]
+            lines += _budget_lines(r, kept, used)
+            if warning := _single_round_warning(r.noise):
+                lines.append(f"- WARNING: {warning}")
+            lines += _noise_lines(r, used, missing=False)
+            lines += _detail_lines(r, kept, used, 3)
 
     lines += ["", "## Correctness attempts", ""]
-    for c in r.correctness:
+    for c in first.correctness:
         verdict = "FAILED; investigate" if c.verdict == "failed" else c.verdict
         lines.append(f"- {c.phase['corpus']}: {verdict}, {len(c.winners)} winners")
-    if not r.correctness:
+    if not first.correctness:
         lines.append("- none for this arm")
     return "\n".join(lines) + "\n"
+
+
+def _check_rule_ids(rules: list, chosen: list) -> None:
+    by_id = {r.id for r in rules}
+    unknown = [r for r in chosen if r not in by_id]
+    if unknown:
+        raise ReduceError(
+            f"--apply-rules {unknown} not proposed: {sorted(by_id)}; ids come from the "
+            "rule text, so a rule the sweep or --budget no longer proposes is gone"
+        )
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--selection", required=True, help="selection YAML")
-    parser.add_argument("--kdp", required=True, help="installed KDP of the selection")
+    parser.add_argument(
+        "--kdp",
+        required=True,
+        action="append",
+        help="installed KDP of the selection; once per pack of a slotted selection",
+    )
     parser.add_argument("--sweep-output", required=True, help="tools/sweep.py output")
     parser.add_argument("--arm", help="sweep arm (default: the only one)")
     parser.add_argument("--out", required=True, help="reduced selection to write")
     parser.add_argument("--report", required=True, help="report to write")
-    parser.add_argument("--budget", type=int, help="instances per arch")
+    parser.add_argument(
+        "--budget", type=int, help="instances per arch (per pack, for a slotted engine)"
+    )
     parser.add_argument(
         "--apply-rules",
         default="",
         help="rule ids from the report's rule table (R and six hex digits, derived "
-        "from the rule text) to apply instead of eps",
+        "from the rule text and, for a slotted engine, its slot) to apply instead "
+        "of eps; a slot with none keeps all its kernels",
     )
     args = parser.parse_args(argv)
     chosen = [r.strip() for r in args.apply_rules.split(",") if r.strip()]
     report = Path(args.report)
     try:
-        reduction = analyse(
+        reductions = analyse_slots(
             args.selection, args.kdp, args.sweep_output, args.arm, args.budget
         )
+        first = reductions[0]
         blockers = [
-            w
-            for w in (
-                _correctness_warning(reduction),
-                _sweep_warning(reduction.noise),
-            )
-            if w
+            w for w in (_correctness_warning(first), _sweep_warning(first.noise)) if w
         ]
-        for warning in (*blockers, _single_round_warning(reduction.noise)):
+        singles = [_single_round_warning(r.noise, r.slot) for r in reductions]
+        for warning in (*blockers, *singles):
             if warning:
                 print(f"WARNING: {warning}")
-        applied = [rule for rule in reduction.rules if rule.id in chosen]
-        if chosen:
-            names = apply_rules(reduction.variants, reduction.rules, chosen)
-            what = f"rules {','.join(chosen)}"
-        elif reduction.epsilon is not None:
-            names = sorted(reduction.keep(reduction.epsilon))
-            what = f"eps {_eps(reduction.epsilon)}"
-        else:
-            names, what = sorted(reduction.keep(math.inf)), "floor + coverage"
-        if blockers:
-            note = "not written: the sweep cannot support a reduction (see WARNING)"
+        _check_rule_ids([rule for r in reductions for rule in r.rules], chosen)
+        names, whats, applied = {}, {}, {}
+        for r in reductions:
+            ids = {rule.id for rule in r.rules}
+            mine = [c for c in chosen if c in ids]
+            applied[r.slot] = [rule for rule in r.rules if rule.id in mine]
+            if chosen:
+                names[r.slot] = apply_rules(r.variants, r.rules, mine)
+                whats[r.slot] = f"rules {','.join(mine)}" if mine else "no rules"
+            elif r.epsilon is not None:
+                names[r.slot] = sorted(r.keep(r.epsilon))
+                whats[r.slot] = f"eps {_eps(r.epsilon)}"
+            else:
+                names[r.slot] = sorted(r.keep(math.inf))
+                whats[r.slot] = "floor + coverage"
+        what = (
+            "; ".join(f"slot {slot}: {w}" for slot, w in whats.items())
+            if first.slot
+            else whats[""]
+        )
+
+        def write_report(note):
             report.write_text(
-                render_report(reduction, args.selection, note, names, applied), "utf-8"
+                render_report(reductions, args.selection, note, names, applied),
+                "utf-8",
+            )
+
+        if blockers:
+            write_report(
+                "not written: the sweep cannot support a reduction (see WARNING)"
             )
             print(
                 f"FAIL: {what} not written: {'; '.join(blockers)}; report {report}",
                 file=sys.stderr,
             )
             return 3
-        if applied:
-            losing, worst = _applied_loss(applied, reduction.rankings)
-            if worst > reduction.rules_epsilon:
-                note = (
-                    "not written: the applied rules together lose more than the "
-                    "rules eps"
-                )
-                report.write_text(
-                    render_report(reduction, args.selection, note, names, applied),
-                    "utf-8",
-                )
+        refused = []
+        for r in reductions:
+            if applied[r.slot]:
+                losing, worst = _applied_loss(applied[r.slot], r.rankings)
+                if worst > r.rules_epsilon:
+                    refused.append((r, losing, worst))
+        if refused:
+            write_report(
+                "not written: the applied rules together lose more than the rules eps"
+            )
+            for r, losing, worst in refused:
+                where = f"slot {r.slot}: " if r.slot else ""
+                scope = f" ({_SLOT_LOSS_SCOPE})" if r.slot else ""
                 print(
-                    f"FAIL: {what} not written: the applied rules together lose "
+                    f"FAIL: {where}{whats[r.slot]} not written: the applied rules together lose "
                     f"{_eps(worst, 4)} of a graph's best time, over the rules eps "
-                    f"{_eps(reduction.rules_epsilon)}; {len(losing)} graphs lose "
-                    f"their best kernel; report {report}",
+                    f"{_eps(r.rules_epsilon)}; {len(losing)} graphs lose their best "
+                    f"kernel{scope}; report {report}",
                     file=sys.stderr,
                 )
-                return 1
-        count = instances(reduction.variants, names)
-        if count > reduction.budget:
-            note = f"not written: {what} exceed budget"
-            report.write_text(
-                render_report(reduction, args.selection, note, names, applied), "utf-8"
-            )
-            print(
-                f"FAIL: {what} exceed budget: {count} instances > "
-                f"{reduction.budget}; report {report}",
-                file=sys.stderr,
-            )
             return 1
-        lines = write_selection(args.selection, names, args.out)
-        note = f"`{args.out}` ({what}): {len(names)} kernels, {lines} lines"
-        report.write_text(
-            render_report(reduction, args.selection, note, names, applied), "utf-8"
-        )
+        over = [
+            (r, instances(r.variants, names[r.slot]))
+            for r in reductions
+            if instances(r.variants, names[r.slot]) > r.budget
+        ]
+        if over:
+            write_report(f"not written: {what} exceed budget")
+            for r, count in over:
+                where = f"slot {r.slot}: " if r.slot else ""
+                print(
+                    f"FAIL: {where}{whats[r.slot]} exceed budget: {count} instances > "
+                    f"{r.budget}; report {report}",
+                    file=sys.stderr,
+                )
+            return 1
+        kept = [name for r in reductions for name in names[r.slot]]
+        lines = write_selection(args.selection, kept, args.out)
+        write_report(f"`{args.out}` ({what}): {len(kept)} kernels, {lines} lines")
     except IncompleteSweep as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 3
@@ -1139,7 +1563,7 @@ def main(argv=None) -> int:
         traceback.print_exc()
         print(f"FAIL: unexpected {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
-    print(f"{len(names)} kernels -> {args.out}; report {report}")
+    print(f"{len(kept)} kernels -> {args.out}; report {report}")
     return 0
 
 

@@ -120,14 +120,14 @@
     X(CloneList, std::vector<CloneSpec>)          \
     X(DsReadQueueDepth, int)                      \
     X(DsReadDrainLatency, int)                    \
-    X(TensorLoadWmmaSpace, int)                   \
     X(WmmaRefillMode, int)                        \
     X(WmmaBatchSize, int)                         \
     X(WmmaRefillToCycles, int)                    \
     X(GlobalReadQueueDepth, int)                  \
     X(GlobalReadDrainLatency, int)                \
     X(DsReadOrder, int)                           \
-    X(ArchName, std::string)
+    X(ArchName, std::string)                      \
+    X(LowerViaLogicalIR, bool)
 
 // Scheduling knobs below default to -1 (= unset), except LockDsReadOrder, EvenSpreadFillers,
 // WaitAluHoldStrictCount, PrefetchLeadWmmas and PrefetchLeadMinStageWmmas, which
@@ -148,12 +148,12 @@
     X(DsSpread, bool, true)               /* even ds_load spread over the WMMAs */                 \
     X(DsBatchWmmas, int, 4)               /* WMMAs per ds_load pacing batch */                     \
     X(DsCatchUpPace, int, 2)              /* extra ds_loads per batch when behind the even line */ \
-    X(WmmaQueueDepth, int, 8)             /* WMMAs the matrix pipe buffers; 1 = queue model off */ \
     X(WmmaQueueCoverCycles, int, -1)      /* queued WMMA cover kept; < 0 = automatic, 0 = off */   \
     X(DsReadCyclesPerLoad, int, 6)        /* LDS return rate (cycles per ds_load); 0 = off */      \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                                \
     X(ReduceClusterBarrierPerLoop, int, -1)                                                        \
-    X(TensorLoadDsLoadGapCycles, int, 64)
+    X(TensorLoadWmmaSpace, int, -1) /* <0 unset; 0 = off; >0 = WMMA windows of exclusive space */  \
+    X(TensorLoadDsLoadGapCycles, int, -1) /* <0 unset; 0 = off; >0 = extra gap cycles */
 
 namespace stinkytofu {
 /**

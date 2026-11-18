@@ -57,12 +57,36 @@ public:
                                  const ParamType lowerClip,
                                  const ParamType upperClip,
                                  const ParamType lowerSlope,
-                                 const ParamType swishBeta = ParamType{1})
+                                 const ParamType swishBeta = ParamType{1},
+                                 const ParamType eluAlpha = ParamType{1},
+                                 const ParamType softplusBeta = ParamType{1})
     {
         static_assert(hipdnn_test_sdk::detail::IS_VALID_TENSOR_TYPE_V<ParamType>,
                       "ParamType must be a valid tensor type for scalar parameters");
-        executeParameterizedUnaryOperation<InputType, ParamType, ComputeType>(
-            operation, output, input, lowerClip, upperClip, lowerSlope, swishBeta);
+        executeParameterizedUnaryOperation<InputType, ParamType, ComputeType>(operation,
+                                                                              output,
+                                                                              input,
+                                                                              lowerClip,
+                                                                              upperClip,
+                                                                              lowerSlope,
+                                                                              swishBeta,
+                                                                              eluAlpha,
+                                                                              softplusBeta);
+    }
+
+    static void pointwiseCompute(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
+                                 hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                                 const int64_t axis)
+    {
+        if(operation != hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX)
+        {
+            throw std::runtime_error("This operation only supports GEN_INDEX mode but got: "
+                                     + std::to_string(static_cast<int>(operation)));
+        }
+
+        DeviceExecutor policy;
+        policy.executeGenerateIndex(output, axis);
+        policy.markOutputModified(output);
     }
 
     // Binary operations
@@ -101,12 +125,24 @@ public:
                                  const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2,
                                  const ParamType lowerClip,
                                  const ParamType upperClip,
-                                 const ParamType lowerSlope)
+                                 const ParamType lowerSlope,
+                                 const ParamType swishBeta = ParamType{1},
+                                 const ParamType eluAlpha = ParamType{1},
+                                 const ParamType softplusBeta = ParamType{1})
     {
         static_assert(hipdnn_test_sdk::detail::IS_VALID_TENSOR_TYPE_V<ParamType>,
                       "ParamType must be a valid tensor type for scalar parameters");
         executeParameterizedBinaryOperation<Input1Type, Input2Type, ParamType, ComputeType>(
-            operation, output, input1, input2, lowerClip, upperClip, lowerSlope);
+            operation,
+            output,
+            input1,
+            input2,
+            lowerClip,
+            upperClip,
+            lowerSlope,
+            swishBeta,
+            eluAlpha,
+            softplusBeta);
     }
 
 private:
@@ -136,7 +172,7 @@ private:
             policy.executeUnary(input, output, pointwise::Negation{});
             break;
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY:
-            policy.executeUnary(input, output, pointwise::Identity{});
+            policy.executeUnary(input, output, pointwise::Identity<ComputeType>{});
             break;
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_FWD:
             policy.executeUnary(input, output, pointwise::GeluForward<ComputeType>{});
@@ -146,6 +182,45 @@ private:
             break;
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD:
             policy.executeUnary(input, output, pointwise::SwishForward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::EXP:
+            policy.executeUnary(input, output, pointwise::ExpForward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::LOG:
+            policy.executeUnary(input, output, pointwise::LogForward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SQRT:
+            policy.executeUnary(input, output, pointwise::SqrtForward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RSQRT:
+            policy.executeUnary(input, output, pointwise::RsqrtForward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RECIPROCAL:
+            policy.executeUnary(input, output, pointwise::ReciprocalForward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIN:
+            policy.executeUnary(input, output, pointwise::SinForward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TAN:
+            policy.executeUnary(input, output, pointwise::TanForward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ERF:
+            policy.executeUnary(input, output, pointwise::ErfForward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CEIL:
+            policy.executeUnary(input, output, pointwise::CeilForward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::FLOOR:
+            policy.executeUnary(input, output, pointwise::FloorForward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_FWD:
+            policy.executeUnary(input, output, pointwise::EluForward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD:
+            policy.executeUnary(input, output, pointwise::SoftplusForward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::LOGICAL_NOT:
+            policy.executeUnary(input, output, pointwise::LogicalNot{});
             break;
         default:
             throw std::runtime_error("Unsupported unary pointwise operation: "
@@ -163,7 +238,9 @@ private:
         const ParamType lowerClip,
         const ParamType upperClip,
         const ParamType lowerSlope,
-        const ParamType swishBeta)
+        const ParamType swishBeta,
+        const ParamType eluAlpha,
+        const ParamType softplusBeta)
     {
         DeviceExecutor policy;
 
@@ -183,9 +260,21 @@ private:
                 output,
                 pointwise::SwishForward<ComputeType>{static_cast<ComputeType>(swishBeta)});
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_FWD:
+            policy.executeUnary(
+                input,
+                output,
+                pointwise::EluForward<ComputeType>{static_cast<ComputeType>(eluAlpha)});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD:
+            policy.executeUnary(
+                input,
+                output,
+                pointwise::SoftplusForward<ComputeType>{static_cast<ComputeType>(softplusBeta)});
+            break;
         default:
-            throw std::runtime_error("Unsupported parameterized pointwise operation: "
-                                     + std::to_string(static_cast<int>(operation)));
+            executeUnaryOperation<InputType, ComputeType>(operation, output, input);
+            return;
         }
 
         policy.markOutputModified(output);
@@ -223,6 +312,39 @@ private:
             policy.executeBinaryBroadcast(
                 input1, input2, output, pointwise::CompareGreater<ComputeType>{});
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_EQ:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::CompareEqual<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_NEQ:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::CompareNotEqual<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_GE:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::CompareGreaterEqual<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_LT:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::CompareLess<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_LE:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::CompareLessEqual<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::DIV:
+            policy.executeBinaryBroadcast(input1, input2, output, pointwise::Divide<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD_SQUARE:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::AddSquare<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::LOGICAL_AND:
+            policy.executeBinaryBroadcast(input1, input2, output, pointwise::LogicalAnd{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::LOGICAL_OR:
+            policy.executeBinaryBroadcast(input1, input2, output, pointwise::LogicalOr{});
+            break;
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD:
             policy.executeBinaryBroadcast(
                 input1, input2, output, pointwise::ReluBackward<ComputeType>{});
@@ -234,6 +356,26 @@ private:
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TANH_BWD:
             policy.executeBinaryBroadcast(
                 input1, input2, output, pointwise::TanhBackward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_BWD:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::GeluBackward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_BWD:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::GeluApproxTanhBackward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_BWD:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::SwishBackward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_BWD:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::EluBackward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_BWD:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::SoftplusBackward<ComputeType>{});
             break;
         default:
             throw std::runtime_error("Unsupported binary pointwise operation: "
@@ -275,7 +417,10 @@ private:
         const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2,
         const ParamType lowerClip,
         const ParamType upperClip,
-        const ParamType lowerSlope)
+        const ParamType lowerSlope,
+        const ParamType swishBeta,
+        const ParamType eluAlpha,
+        const ParamType softplusBeta)
     {
         DeviceExecutor policy;
 
@@ -290,9 +435,31 @@ private:
                                               static_cast<ComputeType>(upperClip),
                                               static_cast<ComputeType>(lowerSlope)});
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_BWD:
+            policy.executeBinaryBroadcast(
+                input1,
+                input2,
+                output,
+                pointwise::SwishBackward<ComputeType>{static_cast<ComputeType>(swishBeta)});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_BWD:
+            policy.executeBinaryBroadcast(
+                input1,
+                input2,
+                output,
+                pointwise::EluBackward<ComputeType>{static_cast<ComputeType>(eluAlpha)});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_BWD:
+            policy.executeBinaryBroadcast(
+                input1,
+                input2,
+                output,
+                pointwise::SoftplusBackward<ComputeType>{static_cast<ComputeType>(softplusBeta)});
+            break;
         default:
-            throw std::runtime_error("Unsupported parameterized binary pointwise operation: "
-                                     + std::to_string(static_cast<int>(operation)));
+            executeBinaryOperation<Input1Type, Input2Type, ComputeType>(
+                operation, output, input1, input2);
+            return;
         }
 
         policy.markOutputModified(output);

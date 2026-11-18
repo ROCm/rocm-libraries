@@ -218,7 +218,7 @@ Handle destruction (implicit via RAII)
             -> Plugin: hipdnnEnginePluginGetEngineDetails(handle, engineId, graph, details*)
 
 Engine finalization checks applicability, not plugin metadata. The first engine-name,
-knob-info, or behavior-note read fetches and validates ``EngineDetails``; count-only
+knob-info, behavior-note, or numerical-note read fetches and validates ``EngineDetails``; count-only
 queries also trigger this load. Retrieval or validation errors are therefore returned
 by ``hipdnnBackendGetAttribute()``, even after successful finalization. Callers that
 need eager metadata validation can issue a metadata query immediately after finalizing.
@@ -313,7 +313,7 @@ Plugin lifecycle
 1. **Discovery**: ``Plugin.so`` loaded, metadata queried (name, version, type)
 2. **Instance creation**: ``PluginCreate`` and ``GetAllEngineIds`` during handle creation
 3. **Engine selection**: ``GetApplicableEngineIds`` during graph build, plus ``GetPrediction`` for prediction-ranked policies
-4. **Engine details**: ``GetEngineDetails`` on the first engine-name, knob-info, or behavior-note query for an engine
+4. **Engine details**: ``GetEngineDetails`` on the first engine-name, knob-info, behavior-note, or numerical-note query for an engine
 5. **Context creation**: ``CreateExecutionContext`` and ``GetWorkspaceSize`` during plan finalization
 6. **Execution**: ``ExecuteOpGraph``
 7. **Cleanup**: ``DestroyExecutionContext``, ``DestroyEngineDetails``, and ``PluginDestroy``
@@ -354,7 +354,8 @@ Engine descriptor (``HIPDNN_BACKEND_ENGINE_DESCRIPTOR``)
 - Binds the engine ID to an operation graph; finalization validates applicability.
 - Retrieved from engine config descriptor.
 - Exposes the engine name through the read-only ``HIPDNN_ATTR_ENGINE_NAME_EXT`` attribute (``HIPDNN_TYPE_CHAR``).
-- Loads name, knob-info, and behavior-note metadata on the first corresponding attribute query.
+- Loads name, knob-info, behavior-note, and numerical-note metadata on the first corresponding attribute query.
+- Serves ``HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE`` read-only; an engine whose plugin omits the numerical-note list is reported ``HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC``.
 
 Execution plan descriptor (``HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR``)
 ------------------------------------------------------------------------

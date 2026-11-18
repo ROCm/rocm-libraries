@@ -330,6 +330,7 @@ def test_master_apply_naming(monkeypatch):
 # ---------------------------------------------------------------------------
 class _FakeProblemType:
     operationIdentifier = "OP_ID"
+    fusedA2A = "Disabled"
 
     def predicates(self, includeBatch=False, includeType=False):
         return []

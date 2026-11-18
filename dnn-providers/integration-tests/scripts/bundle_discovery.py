@@ -269,3 +269,28 @@ def read_sweep_cases(sweep_path: Path) -> tuple[list[dict] | None, str | None]:
             return None, f"duplicate case id '{case_id}'"
         seen.add(case_id)
     return sweep["cases"], None
+
+
+def is_expected_rejection(metadata: object) -> bool:
+    """Mirror of the C++ rule: only a metadata object whose expected_rejection
+    is exactly the JSON boolean true flags an expected-rejection bundle.
+
+    Absent, false and every non-boolean (the C++ side reports those as a
+    metadata error) are not flagged here: this reads for classification only.
+    """
+    return isinstance(metadata, dict) and metadata.get("expected_rejection") is True
+
+
+def single_graph_expected_rejection(graph_path: Path) -> bool:
+    """True iff X.meta.json beside graph_path flags expected_rejection.
+
+    An absent, unreadable or non-object metadata file is simply not flagged;
+    the checks that own those conditions report them.
+    """
+    meta, error = load_json(meta_for_graph(graph_path))
+    return error is None and is_expected_rejection(meta)
+
+
+def sweep_case_expected_rejection(case: object) -> bool:
+    """True iff a sweep cases[] entry's metadata flags expected_rejection."""
+    return isinstance(case, dict) and is_expected_rejection(case.get("metadata"))

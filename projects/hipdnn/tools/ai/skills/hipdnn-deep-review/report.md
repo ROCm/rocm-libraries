@@ -12,6 +12,8 @@ Change: <PR URL | branch:<name> | <base>..<head>>
 Round: <N>
 Repo: <owner>/<repo>
 <VAR>: <value>   one line each: SKILL EVIDENCE SCRATCH CLONE KEY TARGET TARGET_TIP HEAD HEAD_SHORT BASE REPO REPO_BASE KNOWLEDGE
+Pinned: <UTC time of the pin, YYYY-MM-DDTHH:MM:SSZ>
+Reviewer: <gh login of the person running the review; with a PR>
 Stack parent: <PR number and URL | none>
 Description: pr/body.md | intent.md
 Files: <count> (GitHub <count> | unverifiable (>3000))
@@ -48,9 +50,10 @@ schema is stable; a row in another format is a candidate, not a record.
 ## Lanes (round N)        table: Lane | Ran / N/A / merged into / split / FAILED (reason) | Report | STOP
 ## Decisions              table: Round | Question | Decision | Findings affected
 ## Open questions         table: ID | Question | Options | Recommendation
+## Threads                table: Thread URL | Finding | Opened by | State | Last reply | Round seen
 ```
 
-`ledger.py seed` writes the Coverage and Lanes tables, `ids` the candidate Findings rows,
+`ledger.py seed` writes the Coverage, Lanes and Threads tables, `ids` the candidate Findings rows,
 `verdicts` the verdict, status and final tier. A candidate has empty Status and Verdict. A second-verifier verdict that differs from the
 first replaces it.
 
@@ -62,6 +65,36 @@ A **candidate** is a reported finding with no verdict. A verdict sets the status
 `FIXED@<sha>`, `ACCEPTED-RISK` (human decision recorded), `SUPERSEDED-BY:<ID>`. `ledger.py set` records `FIXED`, `ACCEPTED-RISK` and reopening to `OPEN` ([RUNBOOK.md](RUNBOOK.md) *Iterate*). **Closed**
 is every status except `OPEN` and `UNVERIFIED`. Never delete a row. A row closed by a fix
 begins its Evidence cell with the evidence class ([findings.md](findings.md) *Verdicts*).
+
+### Threads
+
+One row per (Thread URL, Finding) of a PR review thread linked to a finding. Thread URL is the
+web URL of the thread's root comment (GraphQL `url`, REST `html_url`,
+`.../pull/<N>#discussion_r<id>`); GitHub threads have no URL of their own. A link is made only
+by `ledger.py link` from a `posted.tsv` or by hand, never inferred. `link` writes `Opened by`
+`review`, `Round seen` = the round and an empty `State` and `Last reply`; thread intake
+(`pin.py init`, `pin.py threads`) fills `State` (`resolved` or `unresolved`), `Last reply` (a
+role, `review`, `author` or `other`, and a UTC date) and `Round seen`. The table holds roles,
+dates and URLs: no logins and no comment text. GitHub keeps no resolve time, so `Round seen`
+and `State` record when a change was seen. Thread state never changes a finding's verdict,
+tier or status.
+
+Unlinked threads, with logins, are listed only in the local `r<N>/threads.md`. Intake also
+writes `r<N>/pr/threads.json` (raw thread data) and `r<N>/reply-affected.txt` (one final ID
+per line: the findings whose linked thread has a reply by someone other than the reviewer
+since the previous round's `Pinned:` (`pin.py init`) or since the round's own `Pinned:`
+(`pin.py threads`); `--since` overrides both).
+
+### posted.tsv
+
+One line per posted comment: `<comment URL><TAB><final ID>[,<final ID>...]`. The URL is the
+comment's web URL (REST `html_url`, `.../pull/<N>#discussion_r<id>`), never the API URL. List
+only final IDs that exist in the ledger, including the IDs of findings merged into that
+comment; leave out a comment with no such ID. The comments skill writes it next to the
+posted comments, `$EVIDENCE/r<k>/comments/*/posted.tsv`; the `posted:<file>` input names
+another. `ledger.py link` reads it. It lists inline review comments only (`#discussion_r<id>`);
+General comments (`#issuecomment-<id>`, `#pullrequestreview-<id>`) belong to no review thread and
+are not tracked.
 
 ## Assessment and risk
 

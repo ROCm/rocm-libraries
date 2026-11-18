@@ -18,9 +18,10 @@
 # since that module imports only the standard library -- and asks it:
 # domain.load() parses and validates each column, and domain.is_negative()
 # decides which cells the C++ engine gets. Only negative cells are emitted,
-# each with whether domain.waivers() exempts it, plus domain.DEFAULT_MODE. The
-# C++ engine needs the answers, not the policy, so changing the policy stays a
-# change to Python alone.
+# each with whether domain.waivers() exempts it, plus domain.DEFAULT_MODE and
+# every processor a column records its compiler as not accepting
+# (accepts_processor() is False). The C++ engine needs the answers, not the
+# policy, so changing the policy stays a change to Python alone.
 #
 # Usage (normally run by CMake, see CMakeLists.txt):
 #   python rocke/platform/tools/gen_arch_domain_cpp.py --out <file.inc>
@@ -32,6 +33,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 HERE = Path(__file__).resolve().parent
 DOMAIN_PY = HERE.parent / "python" / "rocke" / "core" / "arch" / "domain.py"
@@ -69,6 +71,20 @@ def c_string(text: str) -> str:
     return '"' + "".join(out) + '"'
 
 
+def committed_column(domain: ModuleType, flavor: str) -> Any:
+    """``flavor``'s committed arch-domain column, as ``domain.load`` reads it
+    (an ``ArchDomain``; typed ``Any`` because ``domain`` is loaded by path).
+
+    Raises ``RuntimeError`` when there is none: the generator is only asked for
+    the flavors ``domain.committed_flavors`` lists, so a missing column means
+    the committed data and that list disagree.
+    """
+    table = domain.load(flavor)
+    if table is None:
+        raise RuntimeError(f"no committed arch-domain column for {flavor}")
+    return table
+
+
 def negative_cells(domain: ModuleType, flavor: str) -> list:
     """Every cell of ``flavor``'s column that ``domain.is_negative`` accepts.
 
@@ -76,9 +92,7 @@ def negative_cells(domain: ModuleType, flavor: str) -> list:
     order ``strcmp`` uses if both fields are ASCII, so anything else is refused
     rather than emitted into a table the lookup would then search wrongly.
     """
-    table = domain.load(flavor)
-    if table is None:
-        raise RuntimeError(f"no committed arch-domain column for {flavor}")
+    table = committed_column(domain, flavor)
     cells = []
     for key in table.keys():  # noqa: SIM118 -- ArchDomain is not a mapping
         for arch in sorted(table.arches(key)):
@@ -101,6 +115,25 @@ def negative_cells(domain: ModuleType, flavor: str) -> list:
             waived = domain.is_waived(key, arch, flavor)
             cells.append((key, arch, cell.status, cell.evidence, waived))
     return sorted(cells)
+
+
+def rejected_processors(domain: ModuleType, flavor: str) -> list[str]:
+    """Every processor ``flavor``'s column records its compiler as not
+    accepting, sorted. A processor the column has no answer for is accepted,
+    as ``compiler_target_for_flavor`` treats it, so it is not emitted."""
+    table = committed_column(domain, flavor)
+    rejected = sorted(
+        processor
+        for processor in table.processors()
+        if table.accepts_processor(processor) is False
+    )
+    for processor in rejected:
+        if not processor.isascii():
+            raise ValueError(
+                f"{flavor}: non-ASCII processor {processor!r} would break the "
+                "C++ lookup's byte-wise comparison"
+            )
+    return rejected
 
 
 def render(domain: ModuleType) -> str:
@@ -158,6 +191,19 @@ def render(domain: ModuleType) -> str:
         for lane, source in getattr(domain, "COLUMN_ALIASES", {}).items()
         if lane not in flavors and source in flavors
     )
+    lines.append(
+        "/* Processors each column records its compiler as not accepting "
+        "(accepts_processor() is False). */"
+    )
+    lines.append(
+        "const rejected_processor_t ROCKE_ARCH_DOMAIN_REJECTED_PROCESSORS[] = {"
+    )
+    for flavor in flavors:
+        for processor in rejected_processors(domain, flavor):
+            lines.append(f"    {{{c_string(flavor)}, {c_string(processor)}}},")
+    lines.append("    {nullptr, nullptr},")
+    lines.append("};")
+    lines.append("")
     lines.append("/* domain.COLUMN_ALIASES: lanes enforcing another lane's column. */")
     lines.append("const column_alias_t ROCKE_ARCH_DOMAIN_ALIASES[] = {")
     for lane, source in aliases:

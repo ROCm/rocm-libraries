@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <type_traits>
+
 #include "../type_traits.hpp"
 
 template <typename T>
@@ -49,10 +51,17 @@ __device__ inline double maxDouble(double a, double b)
     return a > b ? a : b;
 }
 
-__global__ static void
-    maxReduceKernel(double* relativeError, uint32_t elements, uint32_t offset, uint32_t maxElements)
+// A template so the kernel is only emitted in TUs that launch it: a non-template __global__
+// defined in this header is emitted by every TU that includes it, forcing a device pass on
+// sources that never launch a kernel.
+template <typename DataType>
+__global__ void
+    maxReduceKernel(DataType* relativeError, uint32_t elements, uint32_t offset, uint32_t maxElements)
 {
-    double* localRelativeError = relativeError + (offset * elements * blockIdx.x);
+    static_assert(std::is_same_v<DataType, double>,
+                  "maxDouble reduces in double; the relative-error buffer is always double*");
+
+    DataType* localRelativeError = relativeError + (offset * elements * blockIdx.x);
 
     for(int i = elements >> 1; i > 0; i = i >> 1)
     {

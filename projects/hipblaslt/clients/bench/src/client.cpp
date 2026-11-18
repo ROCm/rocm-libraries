@@ -72,7 +72,7 @@ int run_bench_test(Arguments&         arg,
     // disable unit_check in client benchmark, it is only used in gtest unit test
     arg.unit_check = 0;
 
-    hipblaslt_bench_options::apply_strict_verification(arg);
+    hipblaslt_bench_options::apply_to(arg);
 
     // enable timing check,otherwise no performance data collected
     arg.timing = 1;
@@ -440,11 +440,11 @@ try
 
         ("compute_input_typeA",
          value<std::string>(&compute_input_typeA), "Precision of computation input A. "
-         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the compute_input_typeA has no effect.")
+         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, f6_r, bf6_r, f4_r. The default value indicates that the compute_input_typeA has no effect.")
 
         ("compute_input_typeB",
          value<std::string>(&compute_input_typeB), "Precision of computation input B. "
-         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the compute_input_typeA has no effect.")
+         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, f6_r, bf6_r, f4_r. The default value indicates that the compute_input_typeB has no effect.")
 
         ("scale_type",
          value<std::string>(&scale_type), "Precision of scalar. "
@@ -616,7 +616,8 @@ try
 
         ("scaleA",
          value<int>(&scaleAFormat)->default_value(0),
-         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8. "
+         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8, "
+         "1018 = B32E8 in 128x4 tiles (f6_r/bf6_r TN with --swizzleA and optionally --swizzleB, on A and B). "
          "w4a16 group scales (require --a_type i4_r), numbered as hipblasLtMatmulMatrixScale_t: "
          "bf16 scales: 1006 = VEC32, 1007 = VEC64, 1008 = VEC128, 1009 = VEC32_ZP, "
          "1010 = VEC64_ZP, 1011 = VEC128_ZP; fp16 scales: 1012..1017 in the same "
@@ -630,7 +631,8 @@ try
 
         ("scaleB",
          value<int>(&scaleBFormat)->default_value(0),
-         "Apply scale for B buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8.")
+         "Apply scale for B buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8, "
+         "1018 = B32E8 in 128x4 tiles (f6_r/bf6_r TN with --swizzleA and optionally --swizzleB, on A and B).")
 
         ("scaleC",
          value<int>(&scaleCFormat)->default_value(0),
@@ -643,6 +645,10 @@ try
         ("scaleAlpha_vector",
          bool_switch(&arg.scaleAlpha_vector)->default_value(false),
          "Apply scaleAlpha vector")
+
+        ("device_scalar_alpha",
+         bool_switch(&arg.device_scalar_alpha)->default_value(false),
+         "Read alpha as one scalar from device memory")
 
         ("amaxScaleA",
          bool_switch(&arg.amaxScaleA)->default_value(false),
@@ -765,10 +771,11 @@ try
 
         ("uniform_summation_order",
          value<std::string>(&hipblaslt_bench_options::uniform_summation_order_str())->default_value(""),
-         "Set the HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT extension attribute. "
+         "Set the handle-level uniform summation order request for every API method. "
          "Accepts off|0, on|1 (case-insensitive). When on, the matmul returns "
          "HIPBLAS_STATUS_INVALID_VALUE if no configuration honoring the guarantee exists. "
-         "When omitted the bench leaves the attribute unset so the library default (on) applies.")
+         "A YAML case's explicit 0 or 1 overrides the command-line value. "
+         "When neither specifies a value, the library default for the device applies.")
 
         ("help,h", "produces this help message")
 
@@ -1187,9 +1194,12 @@ try
                && arg.a_type != string_to_hip_datatype("f8_fnuz_r")
                && arg.a_type != string_to_hip_datatype("f8_r")
                && arg.a_type != string_to_hip_datatype("bf16_r")
+               && arg.a_type != string_to_hip_datatype("f6_r")
+               && arg.a_type != string_to_hip_datatype("bf6_r")
                && arg.b_type != string_to_hip_datatype("f4_r"))))
     {
-        hipblaslt_cerr << "For swizzle-A, problem type must be FP16 or BF16 or FP8 TN" << std::endl;
+        hipblaslt_cerr << "For swizzle-A, problem type must be FP16 or BF16 or FP8 or FP4 or FP6 TN"
+                       << std::endl;
         return 1;
     }
 
@@ -1199,9 +1209,12 @@ try
                && arg.b_type != string_to_hip_datatype("f8_fnuz_r")
                && arg.b_type != string_to_hip_datatype("f8_r")
                && arg.b_type != string_to_hip_datatype("bf16_r")
+               && arg.b_type != string_to_hip_datatype("f6_r")
+               && arg.b_type != string_to_hip_datatype("bf6_r")
                && arg.b_type != string_to_hip_datatype("f4_r"))))
     {
-        hipblaslt_cerr << "For swizzle-B, problem type must be FP16 or BF16 or FP8 TN" << std::endl;
+        hipblaslt_cerr << "For swizzle-B, problem type must be FP16 or BF16 or FP8 or FP4 or FP6 TN"
+                       << std::endl;
         return 1;
     }
 
@@ -1226,6 +1239,8 @@ try
             return hipblaslt_scaling_format::Block_16_UE5M3;
         if(s == 1001)
             return hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+        if(s == 1018)
+            return hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT;
         // w4a16 group scales; numbered as hipblasLtMatmulMatrixScale_t.
         if(s >= 1006 && s <= 1017)
             return static_cast<hipblaslt_scaling_format>(s);
@@ -1248,7 +1263,8 @@ try
                             || arg.scaleA == hipblaslt_scaling_format::Block_16_UE4M3
                             || arg.scaleA == hipblaslt_scaling_format::Block_32_UE5M3
                             || arg.scaleA == hipblaslt_scaling_format::Block_16_UE5M3
-                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)) 
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT))
         throw std::invalid_argument("Only Tensorwide scaling is supported when batch_mode is HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix A.");
     if(arg.batch_mode == 1 && (arg.scaleB == hipblaslt_scaling_format::Vector
                             || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0
@@ -1257,7 +1273,8 @@ try
                             || arg.scaleB == hipblaslt_scaling_format::Block_16_UE4M3
                             || arg.scaleB == hipblaslt_scaling_format::Block_32_UE5M3
                             || arg.scaleB == hipblaslt_scaling_format::Block_16_UE5M3
-                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)) 
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT))
         throw std::invalid_argument("Only Tensorwide scaling is supported when batch_mode is HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix B.");
 
     // Block scaling only allows F8/F6/F4

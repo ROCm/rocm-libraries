@@ -27,12 +27,17 @@
 #pragma once
 
 #include <Tensile/AMDGPU.hpp>
+#include <Tensile/LongPath.hpp>
 #include <Tensile/Tensile.hpp>
 #include <hip/hip_runtime.h>
 #include <unordered_set>
 
 #include <atomic>
+#include <map>
+#include <memory>
 #include <mutex>
+#include <unordered_map>
+#include <vector>
 
 #include <tensilelitehost/export.h>
 
@@ -47,9 +52,14 @@ namespace TensileLite
             // be tested without a GPU or process-wide HIP symbol interposition.
             struct ModuleApi
             {
-                decltype(&hipModuleLoad)   load         = hipModuleLoad;
-                decltype(&hipModuleUnload) unload       = hipModuleUnload;
-                decltype(&hipGetLastError) getLastError = hipGetLastError;
+                decltype(&hipModuleLoad)     load         = hipModuleLoad;
+                decltype(&hipModuleUnload)   unload       = hipModuleUnload;
+                decltype(&hipGetLastError)   getLastError = hipGetLastError;
+                decltype(&hipModuleLoadData) loadData     = hipModuleLoadData;
+                // Gives the path to open a code object with. When it differs
+                // from the path given, hipModuleLoad could not open the file,
+                // so the adapter reads it and calls loadData instead.
+                decltype(&longPathSafe) resolvePath = longPathSafe;
             };
 
             SolutionAdapter();
@@ -102,6 +112,24 @@ namespace TensileLite
 
             bool FindCodeObject(std::string const& codeObjectFile);
 
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+            // A local code object is named by absolute path and kept apart from
+            // the shipped modules: it is loaded at most once per adapter, never
+            // retried through out-of-memory recovery, and unloaded only with
+            // the adapter. Its kernels resolve only against their own module,
+            // so a name shared with a shipped kernel cannot pick the wrong code.
+            static bool isLocalCodeObject(std::string const& codeObjectFile);
+
+            hipError_t loadLocalCodeObject(std::string const& path);
+
+            // Loads `path` first if needed. Returns hipErrorNotFound only when
+            // the module loaded but does not export `name`.
+            hipError_t
+                getLocalKernel(hipFunction_t& rv, std::string const& path, std::string const& name);
+
+            size_t localCodeObjectCount();
+#endif
+
             hipError_t initKernel(std::string const& name);
 
             hipError_t initKernels(std::vector<std::string> const& kernelNames);
@@ -113,6 +141,11 @@ namespace TensileLite
             // for I-cache cold misses on rotation. The original handle (if
             // any) is left untouched; this function only appends extras.
             hipError_t loadCodeObjectFileExtraCopies(std::string const& path, int extraCopies);
+
+            // Load extra rotation copies of Kernels.so so each rotation slot
+            // mirrors m_modules (main .co + helper bundle). extraCopies==0 uses
+            // the count already established by loadCodeObjectFileExtraCopies.
+            hipError_t loadHelperKernelExtraCopies(int extraCopies = 0);
 
             // Select which rotation copy the next launchKernel uses.
             // idx 0 = original m_modules (default). idx>0 selects the
@@ -140,6 +173,14 @@ namespace TensileLite
             std::vector<std::string>        m_loadedModuleNames;
             std::unordered_set<std::string> m_loadedCOFiles;
 
+            // Code objects read into memory because their path was too long for
+            // hipModuleLoad. HIP keeps using the buffer passed to
+            // hipModuleLoadData, so each one lives until its module is unloaded.
+            // Shared so the code that loads a module can keep its own reference
+            // until the module is recorded here or unloaded.
+            std::unordered_map<hipModule_t, std::shared_ptr<const std::vector<char>>>
+                m_moduleImages;
+
             // Extra rotation copies for I-cache cold-miss testing.
             //   m_extraModuleCopies[i] is parallel to m_modules and holds
             //     independent hipModule_t handles, produced by re-loading every
@@ -158,6 +199,17 @@ namespace TensileLite
 
             // Record for module reload
             std::string m_lazyLoadArchitecture;
+            // Actual path of the loaded helper bundle; m_loadedCOFiles keys have
+            // the xnack suffix stripped, so the on-disk name cannot be derived.
+            std::string m_helperKernelPath;
+
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+            // One mutex per path serializes its load, so two threads cannot
+            // both load it. The maps are guarded by m_access.
+            std::unordered_map<std::string, std::shared_ptr<std::mutex>> m_localLoadMutexes;
+            std::unordered_map<std::string, hipModule_t>                 m_localModules;
+            std::map<std::pair<std::string, std::string>, hipFunction_t> m_localKernels;
+#endif
 
             friend std::ostream& operator<<(std::ostream& stream, SolutionAdapter const& adapter);
         };

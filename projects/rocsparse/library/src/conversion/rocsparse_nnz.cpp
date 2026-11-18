@@ -177,19 +177,9 @@ namespace rocsparse
         {
             if(nnz_per_row_columns != nullptr)
             {
-                switch(dir)
-                {
-                case rocsparse_direction_row:
-                {
-                    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
-                        nnz_per_row_columns, 0, sizeof(I) * m, handle->stream));
-                }
-                case rocsparse_direction_column:
-                {
-                    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
-                        nnz_per_row_columns, 0, sizeof(I) * n, handle->stream));
-                }
-                }
+                const J mn = dir == rocsparse_direction_row ? m : n;
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                    nnz_per_row_columns, 0, sizeof(I) * mn, handle->stream));
             }
 
             if(nnz_total_dev_host_ptr != nullptr)

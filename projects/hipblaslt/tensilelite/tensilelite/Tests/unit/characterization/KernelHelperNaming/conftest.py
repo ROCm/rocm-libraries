@@ -11,22 +11,16 @@ from pathlib import Path
 
 import pytest
 
-from tensilelite.Common.Architectures import SUPPORTED_ISA
-from tensilelite.Common.Capabilities import makeIsaInfoMap
-from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 import tensilelite.LibraryIO as LibraryIO
 
 _FIXTURE = Path(__file__).parent.parent / "LibraryIO" / "data" / "logic_gfx942_HSS_BH.yaml"
 
 
 @pytest.fixture(scope="session")
-def _solution():
-    cxx = validateToolchain("amdclang++")
-    iim = makeIsaInfoMap(SUPPORTED_ISA, cxx)
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    asm = makeAssemblyToolchain(cxx, bundler, "default").assembler
-    return LibraryIO.parseLibraryLogicFile(str(_FIXTURE), asm, False, False, False, iim, False).solutions[0]
+def _solution(assembler, isa_info_map):
+    return LibraryIO.parseLibraryLogicFile(
+        str(_FIXTURE), assembler, False, False, False, isa_info_map, False
+    ).solutions[0]
 
 
 @pytest.fixture

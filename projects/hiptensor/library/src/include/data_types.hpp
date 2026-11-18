@@ -98,6 +98,10 @@ struct hiptensorHandle
     {
         return mDevice;
     }
+    hipError_t initDevice(hipDevice_t deviceId)
+    {
+        return mDevice.initialize(deviceId);
+    }
     hiptensor::PlanCache* getPlanCache()
     {
         return planCache.get();

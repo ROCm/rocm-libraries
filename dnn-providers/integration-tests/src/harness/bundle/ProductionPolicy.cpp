@@ -21,11 +21,14 @@ HarnessPolicy productionPolicy(TensorPlacement placement)
     policy.validator = TestConfig::get().getValidatorDevice();
     policy.claims = claimMode();
     policy.skipGraphValidation = TestConfig::get().skipGraphValidation();
+    policy.writeSupportClaims = TestConfig::get().writeSupportClaims();
     policy.placement = placement;
     policy.arch = TestConfig::get().getCurrentArch();
     policy.platform = currentPlatform();
     policy.deviceVramMb = TestConfig::get().getCurrentDeviceVramMb();
     policy.benchmark = TestConfig::get().benchmarkSettings();
+    policy.graphCapture = TestConfig::get().graphCaptureSettings();
+    policy.benchmarkReference = TestConfig::get().benchmarkReference();
     return policy;
 }
 

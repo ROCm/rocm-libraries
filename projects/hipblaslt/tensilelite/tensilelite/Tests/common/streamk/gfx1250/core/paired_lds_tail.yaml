@@ -1,0 +1,190 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Paired LDS tails for StreamK and Persistent DataParallel, PGR1/PGR2.
+# BF16 and MXFP8 split both operands; FP8 keeps B whole. Every fork must
+# resolve pairedBuffers=True (checked by test_segment_interleave_policy.py).
+# K includes tail-only, complete unrolls, odd/even unroll counts plus a tail,
+# M/N edges, and a larger tile grid under normal runtime grid selection.
+# Random MX scales expose misplaced scale-buffer writes. Uniform summation order
+# is off, as in hipBLASLt by default: requesting it refuses StreamK MX launches
+# whose scales are not HostPreSwizzle, which gfx1250 TDM scale loads cannot use.
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030,
+    skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict]
+GlobalParameters:
+  Architecture: gfx1250
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  KernelTime: false
+  SyncsPerBenchmark: 0
+  NumWarmups: 0
+  EnqueuesPerSync: 0
+  CpuThreads: 4
+  PrintSolutionRejectionReason: true
+  PrintLevel: 2
+  UniformSummationOrder: 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeD: 2
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+BenchmarkProblems:
+- - OperationType: GEMM
+    DataType: b
+    DestDataType: s
+    ComputeDataType: s
+    HighPrecisionAccumulate: true
+    TransposeA: true
+    TransposeB: false
+    UseBeta: true
+    Batched: true
+    SupportUserArgs: true
+  - BenchmarkCommonParameters:
+    - KernelLanguage: [Assembly]
+    ForkParameters:
+    - MatrixInstruction:
+      - [16, 16, 32, 1, 1, 4, 4, 2, 2]
+    - DepthU: [256]
+    - TDMInst: [3]
+    - TDMIterateMode: [-1]
+    - TileProcessingStrategy: [StreamK, DataParallel]
+    - WorkAssignment: [StaticGrid]
+    - PrefetchAcrossPersistent: [0]
+    - PrefetchGlobalRead: [1, 2]
+    - PrefetchLocalRead: [1]
+    - LDSSegmentInterleave: [1]
+    - LDSSegmentBRotate: [0]
+    - HalfPLR: [0]
+    - ScheduleIterAlg: [4]
+    - SourceSwap: [true]
+    - ExpandPointerSwap: [false]
+    - 1LDSBuffer: [0]
+    - GlobalSplitU: [0]
+    - StaggerU: [0]
+    - VectorWidthA: [4]
+    - VectorWidthB: [1]
+    - LocalReadVectorWidth: [-1]
+    - StoreRemapVectorWidth: [0]
+    - WavefrontSize: [32]
+    - UseSgprForGRO: [0]
+    - ForceDisableShadowInit: [true]
+    - AssertSummationElementMultiple: [1]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [512, 640, 1, 32]
+      - Exact: [512, 640, 1, 256]
+      - Exact: [512, 640, 1, 288]
+      - Exact: [512, 640, 1, 512]
+      - Exact: [512, 640, 1, 544]
+      - Exact: [512, 640, 1, 800]
+      - Exact: [260, 193, 1, 288]
+      - Exact: [2048, 2048, 1, 288]
+- - OperationType: GEMM
+    DataType: F8
+    DestDataType: s
+    ComputeDataType: s
+    HighPrecisionAccumulate: true
+    TransposeA: true
+    TransposeB: false
+    UseBeta: true
+    Batched: true
+    SupportUserArgs: true
+  - BenchmarkCommonParameters:
+    - KernelLanguage: [Assembly]
+    ForkParameters:
+    - MatrixInstruction:
+      - [16, 16, 128, 1, 1, 1, 5, 2, 2]
+    - DepthU: [512]
+    - TDMInst: [3]
+    - TDMIterateMode: [-1]
+    - TileProcessingStrategy: [StreamK, DataParallel]
+    - WorkAssignment: [StaticGrid]
+    - PrefetchAcrossPersistent: [0]
+    - PrefetchGlobalRead: [1, 2]
+    - PrefetchLocalRead: [1]
+    - LDSSegmentInterleave: [1]
+    - LDSSegmentBRotate: [0]
+    - HalfPLR: [0]
+    - ScheduleIterAlg: [4]
+    - SourceSwap: [false]
+    - ExpandPointerSwap: [false]
+    - 1LDSBuffer: [0]
+    - GlobalSplitU: [0]
+    - StaggerU: [0]
+    - VectorWidthA: [1]
+    - VectorWidthB: [1]
+    - LocalReadVectorWidth: [-1]
+    - StoreRemapVectorWidth: [0]
+    - WavefrontSize: [32]
+    - UseSgprForGRO: [0]
+    - ForceDisableShadowInit: [true]
+    - AssertSummationElementMultiple: [1]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [512, 640, 1, 32]
+      - Exact: [512, 640, 1, 512]
+      - Exact: [512, 640, 1, 544]
+      - Exact: [512, 640, 1, 1024]
+      - Exact: [512, 640, 1, 1056]
+      - Exact: [512, 640, 1, 1568]
+      - Exact: [257, 193, 1, 544]
+      - Exact: [2048, 2048, 1, 544]
+- - OperationType: GEMM
+    DataType: F8
+    DestDataType: s
+    ComputeDataType: s
+    HighPrecisionAccumulate: true
+    TransposeA: true
+    TransposeB: false
+    UseBeta: true
+    Batched: true
+    SupportUserArgs: true
+    MXBlockA: 32
+    MXBlockB: 32
+    DataTypeMXSA: e8
+    DataTypeMXSB: e8
+  - BenchmarkCommonParameters:
+    - KernelLanguage: [Assembly]
+    ForkParameters:
+    - MatrixInstruction:
+      - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+    - DepthU: [512]
+    - TDMInst: [3]
+    - TDMIterateMode: [-1]
+    - TileProcessingStrategy: [StreamK, DataParallel]
+    - WorkAssignment: [StaticGrid]
+    - PrefetchAcrossPersistent: [0]
+    - PrefetchGlobalRead: [1, 2]
+    - PrefetchLocalRead: [1]
+    - LDSSegmentInterleave: [1]
+    - LDSSegmentBRotate: [0]
+    - HalfPLR: [0]
+    - ScheduleIterAlg: [4]
+    - SourceSwap: [true]
+    - ExpandPointerSwap: [false]
+    - 1LDSBuffer: [0]
+    - GlobalSplitU: [0]
+    - StaggerU: [0]
+    - VectorWidthA: [4]
+    - VectorWidthB: [2]
+    - LocalReadVectorWidth: [-1]
+    - StoreRemapVectorWidth: [0]
+    - WavefrontSize: [32]
+    - UseSgprForGRO: [0]
+    - ForceDisableShadowInit: [true]
+    - AssertSummationElementMultiple: [1]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [512, 640, 1, 32]
+      - Exact: [512, 640, 1, 512]
+      - Exact: [512, 640, 1, 544]
+      - Exact: [512, 640, 1, 1024]
+      - Exact: [512, 640, 1, 1056]
+      - Exact: [512, 640, 1, 1568]
+      - Exact: [260, 193, 1, 544]
+      - Exact: [2048, 2048, 1, 544]

@@ -8,11 +8,10 @@ compares the R4 tiled-2D baseline with the experimental kernel from
 ``attention_tiled_2d_fastkv_regp.py`` and optionally joins against a Triton CSV
 by ``shape_signature``.
 
-The emitted 2D kernel name omits specialization constants such as ``num_seqs``
-and the derived binary-search trip count.  This harness appends a short shape
-hash to each built ``KernelDef.name`` before compiling, so the ROCm module/HSACO
-cache never sees two different shape-specialized code objects with the same
-kernel symbol.
+Head counts, window and batch are kernargs, so shapes that share a kernel name
+share a code object. This harness still appends a short shape hash to each built
+``KernelDef.name`` before compiling, so every trace record loads its own module
+and the timings stay independent of the order records run in.
 
 Example:
 
@@ -308,7 +307,7 @@ class RockeFastKvRegPBench:
     def _launcher(self, shape, problem, variant: str, sliding_window: int):
         from rocke import compile_kernel
         from kernels.common.attention_unified import (
-            _attn_signature,
+            _tiled_2d_signature,
             _enable_i64_kv_addr,
         )
         from rocke.runtime import KernelLauncher
@@ -317,28 +316,25 @@ class RockeFastKvRegPBench:
             shape, problem, variant, sliding_window
         )
         spec = replace(spec, use_i64_kv_addr=_enable_i64_kv_addr(problem))
-        # kernel_name() does not encode the KV addressing width, so key on it too.
+        # The name carries i64 addressing; the signature keeps one module per
+        # trace record (see the module docstring).
         key = (
             variant,
             shape.signature,
             spec.kernel_name(),
-            spec.use_i64_kv_addr,
             self.compile_backend,
         )
         if key not in self._launchers:
             kernel = builder(spec)
-            # The display name omits compile-time shape constants.  Keep the
-            # human-readable spec name in CSV, but compile a shape-unique symbol
-            # to avoid ROCm HSACO/module-cache aliasing across trace records.
+            # Keep the human-readable spec name in CSV, but compile a
+            # shape-unique symbol so each trace record loads its own module.
             kernel.name = _shape_kernel_name(kernel.name, variant, shape.signature)
             artifact = compile_kernel(kernel, capture_ir_text=False)
             self._launchers[key] = (
                 KernelLauncher(
                     hsaco=artifact.hsaco,
                     kernel_name=artifact.kernel_name,
-                    signature=_attn_signature(
-                        spec.dtype, include_bt_stride=True, include_qq_bias_stride=True
-                    ),
+                    signature=_tiled_2d_signature("gfx950", spec.dtype),
                     cache_key=("prefill2d_fastkv_regp", key),
                 ),
                 spec,

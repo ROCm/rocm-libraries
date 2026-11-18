@@ -107,14 +107,17 @@ ROCSOLVER_BEGIN_NAMESPACE
             _kernel_log_token = std::make_unique<rocsolver_logger::scope_guard<T>>(false, handle);  \
         }                                                                                           \
         auto const max_x_grid = 2147483647;                                                         \
-        auto const max_y_grid = 64 * 1024;                                                          \
-        auto const max_z_grid = 64 * 1024;                                                          \
+        auto const max_y_grid = 64 * 1024 - 1;                                                      \
+        auto const max_z_grid = 64 * 1024 - 1;                                                      \
         bool const isvalid_grid = (1 <= grid_.x) && (grid_.x <= max_x_grid) && (1 <= grid_.y)       \
             && (grid_.y <= max_y_grid) && (1 <= grid_.z) && (grid_.z <= max_z_grid);                \
         bool const isvalid_block = (1 <= block_.x) && (block_.x <= 1024) && (1 <= block_.y)         \
             && (block_.y <= 1024) && (1 <= block_.z) && (block_.z <= 1024)                          \
             && ((block_.x * block_.y * block_.z) <= 1024);                                          \
-        bool const isvalid_config = (isvalid_grid && isvalid_block);                                \
+        bool const isvalid_threads = (((long)grid_.x) * ((long)grid_.y) * ((long)grid_.z)           \
+                                          * ((long)block_.x) * ((long)block_.y) * ((long)block_.z)  \
+                                      <= INT32_MAX);                                                \
+        bool const isvalid_config = (isvalid_grid && isvalid_block && isvalid_threads);             \
         if(!isvalid_config)                                                                         \
         {                                                                                           \
             THROW_IF_HIP_ERROR(hipErrorInvalidConfiguration);                                       \
@@ -132,14 +135,17 @@ ROCSOLVER_BEGIN_NAMESPACE
             _kernel_log_token = std::make_unique<rocsolver_logger::scope_guard<T>>(false, handle);  \
         }                                                                                           \
         auto const max_x_grid = 2147483647;                                                         \
-        auto const max_y_grid = 64 * 1024;                                                          \
-        auto const max_z_grid = 64 * 1024;                                                          \
+        auto const max_y_grid = 64 * 1024 - 1;                                                      \
+        auto const max_z_grid = 64 * 1024 - 1;                                                      \
         bool const isvalid_grid = (1 <= grid_.x) && (grid_.x <= max_x_grid) && (1 <= grid_.y)       \
             && (grid_.y <= max_y_grid) && (1 <= grid_.z) && (grid_.z <= max_z_grid);                \
         bool const isvalid_block = (1 <= block_.x) && (block_.x <= 1024) && (1 <= block_.y)         \
             && (block_.y <= 1024) && (1 <= block_.z) && (block_.z <= 1024)                          \
             && ((block_.x * block_.y * block_.z) <= 1024);                                          \
-        bool const isvalid_config = (isvalid_grid && isvalid_block);                                \
+        bool const isvalid_threads = (((long)grid_.x) * ((long)grid_.y) * ((long)grid_.z)           \
+                                          * ((long)block_.x) * ((long)block_.y) * ((long)block_.z)  \
+                                      <= INT32_MAX);                                                \
+        bool const isvalid_config = (isvalid_grid && isvalid_block && isvalid_threads);             \
         if(!isvalid_config)                                                                         \
         {                                                                                           \
             fmt::print(stderr,                                                                      \

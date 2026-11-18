@@ -340,13 +340,22 @@ namespace rocsparse
         const int row_right = (bidx == N - 1) ? (2 * N - 1) : (2 * bidx + 1);
 
         const T d_mod = B_modified[gidx];
+        T       x_final;
 
-        // These are the solved x_interface values that affect this tile
-        const T x_interface_left  = B_spike[row_left];
-        const T x_interface_right = B_spike[row_right];
+        // A diagonal row has no coupling to either interface, so the forward
+        // phase already solved it. The reduced spike system then has zero
+        // diagonal entries and its no-pivot solve can contain NaNs.
+        if(a_mod == static_cast<T>(0) && c_mod == static_cast<T>(0))
+        {
+            x_final = d_mod / b_mod;
+        }
+        else
+        {
+            const T x_interface_left  = B_spike[row_left];
+            const T x_interface_right = B_spike[row_right];
 
-        const T x_final
-            = (d_mod - (a_mod * x_interface_left) - (c_mod * x_interface_right)) / b_mod;
+            x_final = (d_mod - (a_mod * x_interface_left) - (c_mod * x_interface_right)) / b_mod;
+        }
 
         // Store result to global memory
         B[gidx] = x_final;
