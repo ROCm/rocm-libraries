@@ -525,8 +525,8 @@ void testing_spmm_bsr_extra(const Arguments& arg)
         device_vector<float>   dB(size);
         device_vector<float>   dC(size);
 
-        CHECK_HIP_ERROR(
-            hipMemcpy(drow_ptr, hrow_ptr.data(), sizeof(int32_t) * (mb + 1), hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(
+            drow_ptr, hrow_ptr.data(), sizeof(int32_t) * (mb + 1), hipMemcpyHostToDevice));
         CHECK_HIP_ERROR(
             hipMemcpy(dcol_ind, hcol_ind.data(), sizeof(int32_t) * nnzb, hipMemcpyHostToDevice));
         CHECK_HIP_ERROR(hipMemcpy(dval, hval.data(), sizeof(float) * nnz, hipMemcpyHostToDevice));
