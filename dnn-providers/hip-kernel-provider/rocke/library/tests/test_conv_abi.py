@@ -2716,8 +2716,9 @@ def test_aot_grid_caps_accumulator_registers(monkeypatch):
 
 def test_cache_applies_runtime_launch_limits(tmp_path):
     """Rules that depend on the launch-time problem, not on the binary: the
-    per-axis grid cap. The grouped implicit dgrad binary also serves depthwise
-    (cpg == 1), a one-column GEMM per group."""
+    per-axis grid cap, and the depthwise (cpg == 1) refusal. The grouped
+    implicit-GEMM dgrad binary has no depthwise path; depthwise dgrad runs on
+    the direct depthwise kernels instead."""
     from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 
     cache = KernelCache(tmp_path, _ARCH)
@@ -2765,11 +2766,12 @@ def test_cache_applies_runtime_launch_limits(tmp_path):
     grouped = ConvProblem(N=2, Hi=16, Wi=16, **dict(shape, C=64, K=64), groups=4)
     depthwise = ConvProblem(N=2, Hi=16, Wi=16, **dict(shape, C=64, K=64), groups=64)
     assert cache.supports_problem(dgrad, grouped)[0]
-    assert cache.supports_problem(dgrad, depthwise)[0]
+    ok, why = cache.supports_problem(dgrad, depthwise)
+    assert not ok and "depthwise" in why
 
-    # A split-K 16-bit dX binary needs an even cpg (packed <2 x dtype> atomic
-    # pairs must stay within one group's slab); depthwise has cpg=1 and must
-    # be rejected, while grouped's cpg=16 is unaffected.
+    # Split-K does not change which problems the grouped binary serves:
+    # grouped's cpg=16 is still accepted. (The even-cpg rule for a split-K
+    # 16-bit dX atomic is covered by test_conv_split_k.py.)
     split_k_dgrad = KernelIdentity(
         direction="dgrad",
         tile_m=64,
@@ -2782,6 +2784,4 @@ def test_cache_applies_runtime_launch_limits(tmp_path):
         split_k=2,
         **common,
     )
-    ok, why = cache.supports_problem(split_k_dgrad, depthwise)
-    assert not ok and "cpg" in why
     assert cache.supports_problem(split_k_dgrad, grouped)[0]
