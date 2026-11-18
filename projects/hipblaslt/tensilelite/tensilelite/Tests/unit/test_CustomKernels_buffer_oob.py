@@ -159,9 +159,14 @@ NO_BUFFER_OOB_KERNELS = {
         if name.startswith("wvSplitK_vllm_")
     },
 }
-# HIP-compiled W4A16 decode: a single 64-bit global_store, kept inside an exec
-# mask against the free size taken at entry.
-NO_BUFFER_OOB_GLOB = "RuntimeGroup_Decode_*"
+NO_BUFFER_OOB_GLOBS = (
+    # HIP-compiled W4A16 decode: a single 64-bit global_store, kept inside an exec
+    # mask against the free size taken at entry.
+    "RuntimeGroup_Decode_*",
+    # rocDojo gfx1250 GEMMs: global_store only, no buffer descriptors; the lanes of
+    # a partial tile are masked off against the size arguments.
+    "rocdojo_*",
+)
 
 _SET_BUFFER_OOB = re.compile(r"^\s*\.set\s+BufferOOB\s*,\s*([^\s/]+)", re.M)
 _STORE_SRD_NUM_RECORDS = re.compile(
@@ -276,8 +281,11 @@ def test_every_kernel_without_a_recognized_store_bound_is_listed():
         checked, _ = store_bound_findings(_kernel_text(name), generator_buffer_oob())
         if not any("BufferOOB" in kind or "num_records" in kind for kind in checked):
             unrecognized.add(name)
-    listed = set(NO_BUFFER_OOB_KERNELS) | set(
-        fnmatch.filter(custom_kernel_names(), NO_BUFFER_OOB_GLOB))
+    listed = set(NO_BUFFER_OOB_KERNELS) | {
+        name
+        for glob in NO_BUFFER_OOB_GLOBS
+        for name in fnmatch.filter(custom_kernel_names(), glob)
+    }
     assert unrecognized == listed, (
         f"no store bound recognized, not listed: {sorted(unrecognized - listed)}; "
         f"listed, but a store bound is recognized or the kernel is gone: "
