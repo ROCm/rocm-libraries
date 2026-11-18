@@ -237,25 +237,23 @@ TEST(VariousComplexTest, copysignf)
 
 TYPED_TEST(VariousComplexTest, log1p)
 {
-  using T = typename TestFixture::T;
-  run_rng_test<T, true>(
-    [](const T& x) {
+  run_rng_test<double, true>(
+    [](const double& x) {
       return std::log1p(x);
     },
-    [](const T& x) {
+    [](const double& x) {
       return thrust::detail::complex::log1p(x);
     });
 }
 
 TYPED_TEST(VariousComplexTest, log1pf)
 {
-  using T = typename TestFixture::T;
-  run_rng_test<T, true>(
-    [](const T& x) {
+  run_rng_test<float, true>(
+    [](const float& x) {
       return std::log1pf(x);
     },
-    [](const T& x) {
-      return thrust::detail::complex::log1p(x);
+    [](const float& x) {
+      return thrust::detail::complex::log1pf(x);
     });
 }
 #  endif
