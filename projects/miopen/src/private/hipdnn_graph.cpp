@@ -275,19 +275,25 @@ miopenStatus_t RunGraph(HandleState& state,
 
 } // namespace
 
-miopenStatus_t RecordFailure(miopenStatus_t status, std::string_view reason)
+miopenStatus_t
+RecordFailureTo(miopenStatus_t status, std::string_view reason, bool log, std::ostream& os)
 {
     LastError() = LastForwardedError{true, status};
-    if(ErrorLoggingEnabled())
+    if(log)
     {
         std::string line = "[MIOpen] [hipDNN-forwarded] ";
         line += miopenGetErrorString_impl(status);
         line += ": ";
         line += reason;
         line += '\n';
-        std::cerr << line;
+        os << line;
     }
     return status;
+}
+
+miopenStatus_t RecordFailure(miopenStatus_t status, std::string_view reason)
+{
+    return RecordFailureTo(status, reason, ErrorLoggingEnabled(), std::cerr);
 }
 
 miopenStatus_t ForwardingNotImplemented(const char* entryPoint)
@@ -348,16 +354,16 @@ bool ScopedHipdnnCall::ReentryDetected() const noexcept { return Reentry().rejec
 
 bool InHipdnnCall() noexcept { return Reentry().depth > 0; }
 
-miopenStatus_t RejectReentrantCall(const char* entryPoint) noexcept
+miopenStatus_t RejectReentrantCallTo(const char* entryPoint, bool trace, std::ostream& os) noexcept
 {
     Reentry().rejected = entryPoint != nullptr ? entryPoint : "<null>";
     try
     {
-        if(RouteTraceEnabled())
+        if(trace)
             ReportRouteDecision(entryPoint,
                                 ForwardingMode::Enabled,
                                 {Route::Rejected, RouteReason::ReentrantFromHipdnn},
-                                std::cerr);
+                                os);
     }
     catch(...)
     {
@@ -366,19 +372,33 @@ miopenStatus_t RejectReentrantCall(const char* entryPoint) noexcept
     return miopenStatusInternalError;
 }
 
-miopenStatus_t RecordReentryFailure() noexcept
+miopenStatus_t RejectReentrantCall(const char* entryPoint) noexcept
 {
+    return RejectReentrantCallTo(entryPoint, RouteTraceEnabled(), std::cerr);
+}
+
+miopenStatus_t RecordReentryFailureTo(bool log, std::ostream& os) noexcept
+{
+#ifdef _WIN32
+    constexpr const char* publicLibrary  = "MIOpen.dll";
+    constexpr const char* privateLibrary = "MIOpen_private.dll";
+#else
+    constexpr const char* publicLibrary  = "libMIOpen.so";
+    constexpr const char* privateLibrary = "libMIOpen_private.so";
+#endif
     try
     {
         const char* entryPoint = Reentry().rejected;
-        return RecordFailure(
+        return RecordFailureTo(
             miopenStatusInternalError,
             std::string("a hipDNN plugin called the public MIOpen entry point ") +
                 (entryPoint != nullptr ? entryPoint : "<unknown>") +
-                " while hipDNN was running a forwarded call. The plugin was built against "
-                "libMIOpen.so, not libMIOpen_private.so, so it would call back into hipDNN "
-                "forever. Rebuild or reinstall the plugin (libmiopen_plugin.so) from the "
-                "same build as libMIOpen.");
+                " while hipDNN was running a forwarded call. The plugin was built against " +
+                publicLibrary + ", not " + privateLibrary +
+                ", so it would call back into hipDNN forever. Rebuild or reinstall the plugin "
+                "from the same build as MIOpen.",
+            log,
+            os);
     }
     catch(...)
     {
@@ -386,6 +406,11 @@ miopenStatus_t RecordReentryFailure() noexcept
         LastError() = LastForwardedError{true, miopenStatusInternalError};
         return miopenStatusInternalError;
     }
+}
+
+miopenStatus_t RecordReentryFailure() noexcept
+{
+    return RecordReentryFailureTo(ErrorLoggingEnabled(), std::cerr);
 }
 
 miopenStatus_t RunCachedGraph(miopenHandle_t handle,

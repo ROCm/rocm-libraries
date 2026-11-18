@@ -15,6 +15,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <iosfwd>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -75,13 +76,14 @@ bool LastForwardedFailure(miopenStatus_t* status) noexcept;
 // like any other forwarded one, instead of silently running MIOpen.
 miopenStatus_t ForwardingNotImplemented(const char* entryPoint);
 
-// Marks this thread as inside a hipDNN build or execute call, the only place a hipDNN
-// plugin runs. A plugin built against the public libMIOpen.so binds to this wrapper, so its
-// call to a forwarded entry point would be forwarded back into hipDNN, which calls the
-// plugin again, without end.
+// Marks this thread as inside a hipDNN build or execute call. A plugin built against the
+// public libMIOpen.so binds to this wrapper, so its call to a forwarded entry point would be
+// forwarded back into hipDNN, which calls the plugin again, without end (RFC 0001 section 4.7).
 //
-// Thread-local, so a plugin that hands the call to a thread of its own is not seen. hipDNN
-// builds and executes plans on the calling thread.
+// Thread-local, so a plugin that hands the call to a thread of its own is not seen. Only
+// build and execute are marked, which is where the provider calls forwarded entry points. A
+// plugin also runs during workspace queries and handle creation and destruction, and a
+// forwarded entry point called from there is not rejected.
 class ScopedHipdnnCall
 {
 public:
@@ -107,6 +109,11 @@ miopenStatus_t RejectReentrantCall(const char* entryPoint) noexcept;
 // Records that a hipDNN plugin re-entered the wrapper as a forwarded failure and returns
 // miopenStatusInternalError. Call it when ReentryDetected() is true, whatever hipDNN returned.
 miopenStatus_t RecordReentryFailure() noexcept;
+
+// The two functions above with explicit output, so tests can run both the logging and the
+// silent case: `trace` and `log` choose whether the trace line and the error line go to `os`.
+miopenStatus_t RejectReentrantCallTo(const char* entryPoint, bool trace, std::ostream& os) noexcept;
+miopenStatus_t RecordReentryFailureTo(bool log, std::ostream& os) noexcept;
 
 // What a hipDNN build or execute call returned, and whether a forwarded entry point was
 // rejected while it ran.
@@ -170,6 +177,10 @@ struct PlanKey
 // miopenGetLastForwardedError to report, writes `reason` to stderr unless
 // MIOPEN_LOG_LEVEL hides errors, and returns `status`.
 miopenStatus_t RecordFailure(miopenStatus_t status, std::string_view reason);
+
+// RecordFailure with explicit output: the error line goes to `os` if `log` is set.
+miopenStatus_t
+RecordFailureTo(miopenStatus_t status, std::string_view reason, bool log, std::ostream& os);
 
 // Records the exception being handled as a forwarded miopenStatusUnknownError,
 // the status MIOpen returns for one, and returns it. Call only from a catch

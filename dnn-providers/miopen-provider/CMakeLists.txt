@@ -357,18 +357,37 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
         list(APPEND DNN_PROVIDER_TEST_RUN_DEPENDS miopen_plugin hipdnn_integration_tests)
     endif()
 
+    # The plugin ABI checks (check_public_abi.py check-plugin and the re-entry test) need
+    # MIOpen's private library, Python and the MIOpen scripts. The stand-in plugin below is
+    # built only where they are registered.
+    set(miopen_plugin_abi_script
+        "${ROCM_LIBRARIES_ROOT}/projects/miopen/script/check_public_abi.py")
+    set(miopen_plugin_abi_checks FALSE)
+    if(TARGET MIOpen_private)
+        if(EXISTS "${miopen_plugin_abi_script}" AND Python3_EXECUTABLE)
+            set(miopen_plugin_abi_checks TRUE)
+        else()
+            message(STATUS "miopen-provider: plugin ABI checks not registered: "
+                           "${miopen_plugin_abi_script} or Python3 not found")
+        endif()
+    endif()
+
     # A plugin built the way an older release or a prebuilt SDK plugin is: these sources,
     # linked against the public libMIOpen.so, with no rename. It is the input that
     # check_public_abi.py check-plugin and MIOpen's re-entry guard must reject. It stays out
     # of the engine plugin directory because hipDNN would load it as a real engine there.
     # Built by default so the tests that read it find it; the check targets also list it in
     # DNN_PROVIDER_TEST_RUN_DEPENDS.
-    if(TARGET MIOpen_private AND NOT WIN32)
+    if(miopen_plugin_abi_checks AND NOT WIN32)
         get_target_property(miopen_plugin_stand_in_sources miopen_plugin_impl SOURCES)
         add_library(miopen_plugin_public_stand_in SHARED ${miopen_plugin_stand_in_sources})
         unset(miopen_plugin_stand_in_sources)
+        # Same include directories and definitions as the real plugin. Its compile options and
+        # link libraries are not copied: they carry the rename header and MIOpen_private.
         target_include_directories(miopen_plugin_public_stand_in PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/include)
+            $<TARGET_PROPERTY:miopen_plugin_impl,INTERFACE_INCLUDE_DIRECTORIES>)
+        target_compile_definitions(miopen_plugin_public_stand_in PRIVATE
+            $<TARGET_PROPERTY:miopen_plugin_impl,INTERFACE_COMPILE_DEFINITIONS>)
         target_link_libraries(miopen_plugin_public_stand_in PRIVATE
             MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
         # --as-needed drops libraries nothing needs. libMIOpen_private.so stays, because the
@@ -376,7 +395,6 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
         # check-plugin rejects the stand-in for linking the public library and for needing
         # public entry points, not for missing the private one.
         target_link_options(miopen_plugin_public_stand_in PRIVATE -Wl,--as-needed)
-        target_compile_definitions(miopen_plugin_public_stand_in PRIVATE MIOPEN_BETA_API)
         target_compile_options(miopen_plugin_public_stand_in PRIVATE
             --system-header-prefix=miopen/ ${MIOPENPROVIDER_WARNING_COMPILE_OPTIONS})
         set_target_properties(miopen_plugin_public_stand_in PROPERTIES
@@ -384,6 +402,11 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             POSITION_INDEPENDENT_CODE ON
             LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/public_stand_in")
         list(APPEND DNN_PROVIDER_TEST_RUN_DEPENDS miopen_plugin_public_stand_in)
+    endif()
+    # In a discrete build the re-entry entry runs a small test binary, so the check targets
+    # build it. They do not build the combined miopen_gtest.
+    if(miopen_plugin_abi_checks AND MIOPEN_TEST_DISCRETE AND TARGET test_hipdnn_reentry)
+        list(APPEND DNN_PROVIDER_TEST_RUN_DEPENDS test_hipdnn_reentry)
     endif()
 
     # Finalize test targets with prefix to avoid collisions in superbuild mode
@@ -498,9 +521,7 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
     # The plugin must bind to libMIOpen_private.so (check_public_abi.py check-plugin). The
     # second entry runs the check on the stand-in and requires the "plugin check: FAIL" line,
     # not just a non-zero exit, so a script error does not count as a rejection.
-    set(miopen_plugin_abi_script
-        "${ROCM_LIBRARIES_ROOT}/projects/miopen/script/check_public_abi.py")
-    if(TARGET MIOpen_private AND EXISTS "${miopen_plugin_abi_script}" AND Python3_EXECUTABLE)
+    if(miopen_plugin_abi_checks)
         enable_testing()
         add_test(NAME ${PROJECT_NAME}-plugin-abi-check
             COMMAND ${Python3_EXECUTABLE} ${miopen_plugin_abi_script} check-plugin
@@ -534,6 +555,20 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             set_tests_properties(${PROJECT_NAME}-plugin-reentry-guard PROPERTIES
                 SKIP_RETURN_CODE 77
                 TIMEOUT 300)
+            # It runs MIOpen on a GPU, so it takes the same sanitizer environment and cache
+            # clearing as the provider's other tests.
+            if(TEST_ENVIRONMENT)
+                set_tests_properties(${PROJECT_NAME}-plugin-reentry-guard PROPERTIES
+                    ENVIRONMENT "${TEST_ENVIRONMENT}")
+            endif()
+            if(TEST_ENVIRONMENT_MODIFICATION)
+                set_tests_properties(${PROJECT_NAME}-plugin-reentry-guard PROPERTIES
+                    ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}")
+            endif()
+            if(HIPDNN_TEST_MIOPEN_CACHE_DIR)
+                set_tests_properties(${PROJECT_NAME}-plugin-reentry-guard PROPERTIES
+                    FIXTURES_REQUIRED hipdnn_clear_miopen_test_cache)
+            endif()
             list(APPEND miopen_plugin_abi_tests ${PROJECT_NAME}-plugin-reentry-guard)
         endif()
         if(MIOPENPROVIDER_YAML_CATEGORIZATION_ENABLED)

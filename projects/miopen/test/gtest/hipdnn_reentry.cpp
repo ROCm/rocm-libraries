@@ -13,6 +13,8 @@
 
 #include <gtest/gtest.h>
 
+#include "../../src/private/routing.hpp"
+
 #include <miopen/hipdnn_forwarding.h>
 #include <miopen/miopen.h>
 
@@ -50,6 +52,10 @@ void DestroyWithinTimeout(miopenHandle_t handle)
 
 TEST(GPU_HipdnnReentry_FP32, RejectedCallThenDestroyReturns)
 {
+    if(miopen::wrapper::GetForwardingMode() != miopen::wrapper::ForwardingMode::Enabled)
+        GTEST_SKIP() << "needs MIOPEN_HIPDNN_FORWARDING=1; run it through "
+                        "script/check_plugin_reentry.py";
+
     miopenHandle_t handle = nullptr;
     ASSERT_EQ(miopenCreate(&handle), miopenStatusSuccess);
 

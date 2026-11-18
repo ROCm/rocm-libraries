@@ -246,11 +246,9 @@ Route DispatchFromStub(const char* entryPoint, const char* enclosingFunction);
 // instead of silently never forwarding.
 //
 // The route is cached per entry point, but whether hipDNN is running on this thread is not,
-// so the Hipdnn branch checks that on every call. A call made from inside hipDNN comes from
-// a plugin built against the public libMIOpen.so; forwarding it would call the plugin again
-// without end. It fails with miopenStatusInternalError instead (see
-// hipdnn::RejectReentrantCall), and so does the call that started hipDNN. Entry points
-// served by MIOpen cannot loop and are not checked.
+// so the Hipdnn branch checks that on every call. A call made from inside hipDNN would loop,
+// so it fails with miopenStatusInternalError (see hipdnn::RejectReentrantCall), and so does
+// the call that started hipDNN. Entry points served by MIOpen cannot loop and are not checked.
 //
 // Caching the route in a function-local static is safe because neither input
 // changes after startup (the mode is read from the environment once, the

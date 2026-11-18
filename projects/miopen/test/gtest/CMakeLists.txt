@@ -118,11 +118,10 @@ function(add_gtest TEST_NAME TEST_CPP)
     # _impl suffix and MIOPEN_LOG_FUNCTION runs inside the renamed definition,
     # so the logged name carries that suffix.
     target_compile_definitions(${TEST_NAME} PRIVATE MIOPEN_ENABLE_HIPDNN_WRAPPER)
-    # src/private is deliberately not on the include path: wrapper_routing.cpp is
-    # the only test that needs the routing header and reaches it by relative
-    # path. Adding it would also expose miopen_private_rename.h, which rewrites
-    # the public miopenFoo names to their _impl form -- a name collision waiting
-    # to happen in tests that have no business seeing it.
+    # src/private is deliberately not on the include path: the wrapper tests that need its
+    # headers reach them by relative path. Adding it would also expose miopen_private_rename.h,
+    # which rewrites the public miopenFoo names to their _impl form -- a name collision
+    # waiting to happen in tests that have no business seeing it.
   endif()
 
   add_dependencies(miopen-tests ${TEST_NAME})

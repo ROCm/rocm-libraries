@@ -226,17 +226,15 @@ load the fake. A `MODULE` library goes to its own directory on every platform.
 ## Re-entry from a hipDNN plugin
 
 A hipDNN MIOpen plugin built against the public `libMIOpen.so` calls the wrapper from inside
-hipDNN, and the wrapper would forward that call to hipDNN again, without end. Instead it fails the
-call with `miopenStatusInternalError` (`ScopedHipdnnCall` and `RejectReentrantCall` in
-`src/private/hipdnn_graph.cpp`, checked in `MIOPEN_WRAPPER_FORWARD`). These tests cover it:
+hipDNN. The wrapper fails that call with `miopenStatusInternalError` instead of forwarding it
+again (`ScopedHipdnnCall` and `RejectReentrantCall` in `src/private/hipdnn_graph.cpp`, checked in
+`MIOPEN_WRAPPER_FORWARD`); the full account is in RFC 0001 section 4.7. These tests cover it:
 
 - `CPU_WrapperRoutingReentry_NONE.*` in `wrapper_routing.cpp` test the per-thread guard, the
-  failure it records, the trace line, and the two steps `AcquireGraph` and `RunGraph` are made of
-  (`AcquireGraphWith` and `RunGraphWith`, which take the hipDNN calls as parameters). The steps
-  run against a stand-in for hipDNN, and a re-entry is a call to `RejectReentrantCall` from inside
-  its build or execute. They check that a re-entry fails the call even when hipDNN succeeded,
-  outranks hipDNN's own failure, and is never cached. They run with the other routing tests and,
-  like every `CPU_` test in `miopen_gtest`, need a visible device.
+  failure it records, the trace line, and the build and run steps (`AcquireGraphWith`,
+  `RunGraphWith`) against a stand-in for hipDNN. A re-entry fails the call even when hipDNN
+  succeeded, outranks hipDNN's own failure, and is never cached. Like every `CPU_` test in
+  `miopen_gtest`, they need a visible device.
 - `CPU_HipdnnEraseOutsideLock_NONE.*` test the helper that releases a handle's hipDNN state
   without holding the map lock. The plugin's handle destructor takes that lock again (when the
   plugin is built against the public library), which would deadlock `miopenDestroy`.
@@ -275,3 +273,8 @@ No pull-request lane builds the wrapper, so none of these run automatically. The
 (`miopen-wrapper-flag-on.yml`, manual dispatch) builds the wrapper and runs the two plugin ABI
 entries in its provider job. The routing, macro and GPU entries run wherever MIOpen's ctest suite
 runs on hardware with the wrapper flag on.
+
+A default discrete build's ctest does not register the plain-named re-entry and erase tests (it
+keeps only `Smoke` names unless `MIOPEN_TEST_ALL` is on), like most `CPU_` tests. A combined
+build's quick tier runs them; in a discrete build run `bin/test_wrapper_routing` and
+`bin/test_hipdnn_erase_outside_lock` directly.

@@ -62,24 +62,14 @@ name and both version resources to record the same file version. The committed
 DT_NEEDED baseline names Linux libraries and does not apply.
 
 ``check-plugin`` -- run on the hipDNN MIOpen provider plugin (libmiopen_plugin.so or
-miopen_plugin.dll) built alongside a flag-on wrapper. hipDNN calls the plugin, and the
-plugin calls MIOpen. A plugin built against the public libMIOpen.so binds to the wrapper
-(the SONAME is the same) and its call to a forwarded entry point is forwarded to hipDNN
-again, so the wrapper rejects it at run time. This gate fails such a plugin before it
-runs. The provider registers it as a ctest entry for the plugin it builds (and for a
-stand-in built against the public library, which it must reject); it cannot see a plugin
-built elsewhere. Needs ``--private-lib``, the libMIOpen_private.so of the same build.
-
-  1. The plugin's DT_NEEDED names libMIOpen_private at the same major as that
-     library's SONAME.
-  2. The plugin's DT_NEEDED does not name the public libMIOpen.so.
-  3. Every ``miopen[A-Z]`` function the plugin leaves undefined is a ``*_impl`` one,
-     apart from the three miopenConvolution*GetWorkSpaceSizeRange entry points, which
-     the private library exports under their public names. A plugin that leaves no
-     ``miopen[A-Z]`` function undefined at all is an error: wrong file.
-
-On a DLL the import table stands in for DT_NEEDED and for the undefined symbols, and
-(1) asks for MIOpen_private.dll under its own name.
+miopen_plugin.dll) built alongside a flag-on wrapper, with ``--private-lib`` naming the
+libMIOpen_private.so of the same build. It checks that the plugin links the private
+library at that library's major version, does not link the public libMIOpen.so, and
+leaves no ``miopen[A-Z]`` function undefined except ``*_impl`` ones and the three
+miopenConvolution*GetWorkSpaceSizeRange entry points (on a DLL the import table stands
+in for DT_NEEDED and for the undefined symbols). It exits 0 when all of that holds, 1
+when the plugin is rejected and 2 when a file cannot be read or is not a MIOpen plugin.
+See projects/miopen/rfcs/0001_HipdnnForwardingWrapper.md section 4.7 for why.
 
 ``check-installed-headers`` -- run on the staged include tree of a flag-on
 build. Fails if the private rename spelling (``miopenFoo_impl``) appears in any
@@ -169,6 +159,8 @@ class Naming:
         str  # what a consumer of the public library links, without a version
     )
     private_prefix: str
+    private_library: str  # the whole file name of the private library
+    plugin_library: str  # the whole file name of the hipDNN MIOpen provider plugin
     backend_prefix: str
     own_name: str  # what the format calls that self-recorded name
     needed_on: str  # how a message names one link to another library
@@ -202,6 +194,8 @@ ELF_NAMING = Naming(
     wrapper_name="libMIOpen.so.1",
     public_library="libMIOpen.so",
     private_prefix="libMIOpen_private",
+    private_library="libMIOpen_private.so",
+    plugin_library="libmiopen_plugin.so",
     backend_prefix="libhipdnn_backend",
     own_name="SONAME",
     needed_on="DT_NEEDED on",
@@ -213,6 +207,8 @@ PE_NAMING = Naming(
     wrapper_name="MIOpen.dll",
     public_library="MIOpen.dll",
     private_prefix="MIOpen_private",
+    private_library="MIOpen_private.dll",
+    plugin_library="miopen_plugin.dll",
     backend_prefix="hipdnn_backend",
     own_name="DLL name",
     needed_on="import of",
@@ -257,6 +253,7 @@ SHN_UNDEF = 0
 STB_GLOBAL, STB_WEAK, STB_GNU_UNIQUE = 1, 2, 10
 STT_FUNC, STT_GNU_IFUNC = 2, 10
 DT_NULL, DT_NEEDED, DT_SONAME = 0, 1, 14
+ELF32_HEADER_SIZE = 0x34
 
 
 class Elf:
@@ -269,13 +266,17 @@ class Elf:
         self.data = path.read_bytes()
         if self.data[:4] != b"\x7fELF":
             raise AbiError(f"not an ELF file: {path}")
+        if len(self.data) < ELF32_HEADER_SIZE:
+            raise AbiError(f"truncated ELF file: {path}")
         self.is64 = self.data[4] == 2
         self.end = "<" if self.data[5] == 1 else ">"
         self._read_sections()
 
     def _unpack(self, fmt: str, off: int):
-        fmt = self.end + fmt
-        return struct.unpack_from(fmt, self.data, off)
+        try:
+            return struct.unpack_from(self.end + fmt, self.data, off)
+        except struct.error:
+            raise AbiError(f"truncated ELF file: {self.path}") from None
 
     def _read_sections(self) -> None:
         if self.is64:
@@ -315,7 +316,10 @@ class Elf:
         self.sections = raw
 
     def _cstr(self, off: int) -> str:
-        end = self.data.index(b"\x00", off)
+        try:
+            end = self.data.index(b"\x00", off)
+        except ValueError:
+            raise AbiError(f"truncated ELF file: {self.path}") from None
         return self.data[off:end].decode("utf-8", "replace")
 
     def _section(self, stype: int):
@@ -521,59 +525,15 @@ class Pe:
         (name_rva,) = self._unpack("I", self._offset(export_rva) + 12)
         return self._cstr(name_rva)
 
-    def needed(self) -> list[str]:
-        """The DLLs this one imports from, delay-loaded ones included.
+    def _import_descriptors(self):
+        """Yield (name_rva, table_rva, absolute) for each import descriptor.
 
-        A delay-loaded DLL is not opened until first use, but the link still binds
-        to it by name, which is what the backend check rules out.
+        Ordinary imports come first, delay-loaded ones after. `table_rva` is where
+        the descriptor's table of imported functions starts; None marks a delay
+        descriptor without one. `absolute` says that table's entries are addresses
+        rather than RVAs, which is how the old delay layout (attribute bit 0 clear)
+        writes them, and its DLL name too.
         """
-        names = []
-        import_rva, _ = self._directory(DIR_IMPORT)
-        if import_rva:
-            off = self._offset(import_rva)
-            while True:
-                (name_rva,) = self._unpack("I", off + 12)
-                if not name_rva:
-                    break
-                names.append(self._cstr(name_rva))
-                off += 20
-        delay_rva, _ = self._directory(DIR_DELAY_IMPORT)
-        if delay_rva:
-            off = self._offset(delay_rva)
-            while True:
-                attributes, name = self._unpack("II", off)
-                if not name:
-                    break
-                # Attribute bit 0 clear marks the old layout, which holds addresses
-                # rather than RVAs.
-                if not attributes & 1:
-                    name -= self.image_base
-                names.append(self._cstr(name))
-                off += 32
-        return sorted(names)
-
-    def required_functions(self) -> set[str]:
-        """Names of the functions this DLL imports by name, delay-loaded ones included.
-
-        Imports by ordinal have no name and are left out.
-        """
-        entry_size = 8 if self.is_pe32_plus else 4
-        fmt = "Q" if self.is_pe32_plus else "I"
-        by_ordinal = 1 << (entry_size * 8 - 1)
-        names: set[str] = set()
-
-        def read_names(table_rva: int, absolute: bool = False) -> None:
-            off = self._offset(table_rva)
-            while True:
-                (entry,) = self._unpack(fmt, off)
-                if not entry:
-                    break
-                if not entry & by_ordinal:
-                    # The entry points at a 2-byte hint followed by the name.
-                    rva = entry - self.image_base if absolute else entry
-                    names.add(self._cstr(rva + 2))
-                off += entry_size
-
         import_rva, _ = self._directory(DIR_IMPORT)
         if import_rva:
             off = self._offset(import_rva)
@@ -585,7 +545,7 @@ class Pe:
                     break
                 # Some linkers write no lookup table; the address table then holds the
                 # same names until the loader overwrites it.
-                read_names(lookup_rva or address_rva)
+                yield name_rva, lookup_rva or address_rva, False
                 off += 20
         delay_rva, _ = self._directory(DIR_DELAY_IMPORT)
         if delay_rva:
@@ -594,14 +554,46 @@ class Pe:
                 attributes, name, _module, _address, lookup = self._unpack("IIIII", off)
                 if not name:
                     break
-                # Attribute bit 0 clear marks the old layout, which holds addresses
-                # rather than RVAs, in the name table as well.
                 absolute = not attributes & 1
-                if lookup:
-                    read_names(
-                        lookup - self.image_base if absolute else lookup, absolute
-                    )
+                if absolute:
+                    name -= self.image_base
+                    lookup = lookup and lookup - self.image_base
+                yield name, lookup or None, absolute
                 off += 32
+
+    def needed(self) -> list[str]:
+        """The DLLs this one imports from, delay-loaded ones included.
+
+        A delay-loaded DLL is not opened until first use, but the link still binds
+        to it by name, which is what the backend check rules out.
+        """
+        return sorted(
+            self._cstr(name_rva) for name_rva, _, _ in self._import_descriptors()
+        )
+
+    def required_functions(self) -> set[str]:
+        """Names of the functions this DLL imports by name, delay-loaded ones included.
+
+        Imports by ordinal have no name and are left out.
+        """
+        entry_size = 8 if self.is_pe32_plus else 4
+        fmt = "Q" if self.is_pe32_plus else "I"
+        by_ordinal = 1 << (entry_size * 8 - 1)
+        names: set[str] = set()
+
+        for _name_rva, table_rva, absolute in self._import_descriptors():
+            if table_rva is None:
+                continue
+            off = self._offset(table_rva)
+            while True:
+                (entry,) = self._unpack(fmt, off)
+                if not entry:
+                    break
+                if not entry & by_ordinal:
+                    # The entry points at a 2-byte hint followed by the name.
+                    rva = entry - self.image_base if absolute else entry
+                    names.add(self._cstr(rva + 2))
+                off += entry_size
         return names
 
     def file_version(self) -> str:
@@ -655,6 +647,17 @@ def open_library(path_str: str, what: str) -> Library:
     if magic[:2] == b"MZ":
         return Pe(path)
     return Elf(path)
+
+
+def open_private_library(path_str: str, partner: Library, partner_what: str) -> Library:
+    """Open the private library that goes with `partner`, which must share its format."""
+    private = open_library(path_str, "private library")
+    if private.naming is not partner.naming:
+        raise AbiError(
+            f"{partner_what} and private library are different formats (ELF and DLL): "
+            f"{partner.path}, {private.path}"
+        )
+    return private
 
 
 def public_api_symbols(lib: Library) -> set[str]:
@@ -765,15 +768,19 @@ different builds -- almost always a stale build or install directory holding one
 half of an earlier configuration. Rebuild both from a clean directory rather than
 adjusting a version to match.""".rstrip()
 
-PLUGIN_REMEDY = """
+
+def plugin_remedy(naming: Naming) -> str:
+    return f"""
 hipDNN calls the MIOpen provider plugin, and the plugin calls MIOpen. In a build with
-the hipDNN wrapper, the plugin must call the private library's *_impl entry points
-directly. A plugin that calls the public ones lands in the wrapper, which forwards the
-call to hipDNN, which calls the plugin again; the wrapper stops that at run time by
-failing the call. Rebuild or reinstall the plugin from the same build as libMIOpen: build
+the hipDNN wrapper, the plugin must call the private library's ({naming.private_library})
+*_impl entry points directly. A plugin that calls the public ones ({naming.public_library})
+lands in the wrapper, which forwards the call to hipDNN, which calls the plugin again;
+the wrapper stops that at run time by failing the call. Rebuild or reinstall the plugin
+({naming.plugin_library}) from the same build as {naming.public_library}: build
 dnn-providers/miopen-provider where the MIOpen_private target exists (it then links it
 and renames its calls by itself), and do not take a plugin from a build or SDK made
 without the wrapper.""".rstrip()
+
 
 SUPERSET_REMEDY = """
 The private library exports a renamed entry point that the wrapper does not
@@ -1417,41 +1424,47 @@ def check_private_dep(lib: Library, expect_present: bool) -> bool:
     return False
 
 
+def check_not_linked(
+    naming: Naming, absent_name: str, linked: list[str], found: str, who: str = ""
+) -> bool:
+    """Report that a library does not link `absent_name`.
+
+    `linked` holds the entries that do name it; `found` is the account of what that
+    breaks, printed when there are any.
+    """
+    if not linked:
+        print(f"PASS: {who}{naming.needed_on} {absent_name} is absent as expected")
+        return True
+    print(f"FAIL: {found}")
+    return False
+
+
 def check_no_backend_dep(lib: Library) -> bool:
     naming = lib.naming
     linked = sorted(
         n for n in lib.needed() if naming.has_prefix(n, naming.backend_prefix)
     )
-    if not linked:
-        print(f"PASS: {naming.needed_on} {naming.backend_prefix} is absent as expected")
-        return True
-    print(
-        f"FAIL: wrapper has {naming.needed_on} {', '.join(linked)}, which makes hipDNN"
+    return check_not_linked(
+        naming,
+        naming.backend_prefix,
+        linked,
+        f"wrapper has {naming.needed_on} {', '.join(linked)}, which makes hipDNN"
         " a hard install dependency of every MIOpen consumer. Link the frontend's"
-        " dynamic-loading variant instead"
+        " dynamic-loading variant instead",
     )
-    return False
 
 
 def check_plugin_private_dep(plugin: Library, private: Library) -> bool:
     """The plugin must bind to the private library it was built with."""
     naming = plugin.naming
-    imported = naming.private_import(plugin.needed())
-    prefix = naming.private_prefix
-    if naming is PE_NAMING:
-        # A DLL name carries no version, so the name alone is what the loader binds.
-        expected = private.soname()
-        ok = bool(imported) and naming.same(imported, expected)
-    else:
-        expected = soname_major(private.soname())
-        ok = bool(expected) and soname_major(imported) == expected
-
+    imported, ok = private_import_matches(plugin, private)
     if ok:
         print(f"PASS: plugin {naming.needed_on} {imported} matches the private library")
         return True
     print(
-        f"FAIL: plugin {naming.needed_on} {prefix} is {imported or '(absent)'}; the "
-        f"private library under test is {private.soname() or '(unnamed)'}"
+        f"FAIL: plugin {naming.needed_on} {naming.private_prefix} is "
+        f"{imported or '(absent)'}; the private library under test is "
+        f"{private.soname() or '(unnamed)'}"
     )
     return False
 
@@ -1460,16 +1473,14 @@ def check_plugin_no_public_dep(plugin: Library) -> bool:
     """The plugin must not bind to the public library, which is the wrapper."""
     naming = plugin.naming
     linked = naming.public_imports(plugin.needed())
-    if not linked:
-        print(
-            f"PASS: plugin {naming.needed_on} {naming.public_library} is absent as expected"
-        )
-        return True
-    print(
-        f"FAIL: plugin has {naming.needed_on} {', '.join(linked)}, the public library. "
-        "Its calls land in the wrapper"
+    return check_not_linked(
+        naming,
+        naming.public_library,
+        linked,
+        f"plugin has {naming.needed_on} {', '.join(linked)}, the public library. "
+        "Its calls land in the wrapper",
+        who="plugin ",
     )
-    return False
 
 
 def check_plugin_symbols(plugin: Library) -> bool:
@@ -1588,6 +1599,21 @@ def soname_major(soname: str) -> str:
     return tail.split(".", 1)[0]
 
 
+def private_import_matches(lib: Library, private: Library) -> tuple[str, bool]:
+    """Return `lib`'s import of the private library, and whether it names `private`.
+
+    An ELF import matches when it carries the private library's non-empty major
+    soversion. A DLL name carries no version, so the name alone is what the loader
+    binds, and it must equal the private DLL's own, ignoring case.
+    """
+    naming = lib.naming
+    imported = naming.private_import(lib.needed())
+    if naming is PE_NAMING:
+        return imported, bool(imported) and naming.same(imported, private.soname())
+    major = soname_major(private.soname())
+    return imported, bool(major) and soname_major(imported) == major
+
+
 def check_coversioned(wrapper: Library, private: Library) -> bool:
     """The wrapper and the private library must be halves of the same build.
 
@@ -1601,13 +1627,12 @@ def check_coversioned(wrapper: Library, private: Library) -> bool:
         return check_dlls_coversioned(wrapper, private)
     wrapper_soname = wrapper.soname()
     private_soname = private.soname()
-    needed = wrapper.naming.private_import(wrapper.needed())
+    needed, needed_ok = private_import_matches(wrapper, private)
 
     wrapper_major = soname_major(wrapper_soname)
     private_major = soname_major(private_soname)
-    needed_major = soname_major(needed)
 
-    if wrapper_major and wrapper_major == private_major == needed_major:
+    if wrapper_major and wrapper_major == private_major and needed_ok:
         print(
             f"PASS: wrapper and private library are co-versioned at "
             f"soversion {wrapper_major}"
@@ -1632,17 +1657,12 @@ def check_dlls_coversioned(wrapper: Library, private: Library) -> bool:
     private DLL under its own name. Only the version resources say which release
     each half came from, so the two file versions must agree.
     """
-    imported = PE_NAMING.private_import(wrapper.needed())
+    imported, imported_ok = private_import_matches(wrapper, private)
     private_name = private.soname()
     wrapper_version = wrapper.file_version()
     private_version = private.file_version()
 
-    if (
-        imported
-        and PE_NAMING.same(imported, private_name)
-        and wrapper_version
-        and wrapper_version == private_version
-    ):
+    if imported_ok and wrapper_version and wrapper_version == private_version:
         print(
             f"PASS: wrapper and private library are co-versioned at "
             f"file version {wrapper_version}"
@@ -2000,12 +2020,7 @@ def cmd_check_wrapper(args) -> int:
         ok &= check_excluded_not_public(excluded, args.public_header)
         ok &= check_wrapper_only_not_public(wrapper_only, args.public_header)
     if args.private_lib:
-        private = open_library(args.private_lib, "private library")
-        if private.naming is not lib.naming:
-            raise AbiError(
-                "wrapper and private library are different formats (ELF and DLL): "
-                f"{lib.path}, {private.path}"
-            )
+        private = open_private_library(args.private_lib, lib, "wrapper")
         ok &= check_excluded_on_private(excluded, private)
         ok &= check_coversioned(lib, private)
         ok &= check_impl_superset(lib, private)
@@ -2016,18 +2031,13 @@ def cmd_check_wrapper(args) -> int:
 
 def cmd_check_plugin(args) -> int:
     plugin = open_library(args.plugin, "plugin")
-    private = open_library(args.private_lib, "private library")
-    if plugin.naming is not private.naming:
-        raise AbiError(
-            "plugin and private library are different formats (ELF and DLL): "
-            f"{plugin.path}, {private.path}"
-        )
+    private = open_private_library(args.private_lib, plugin, "plugin")
 
     ok = check_plugin_private_dep(plugin, private)
     ok &= check_plugin_no_public_dep(plugin)
     ok &= check_plugin_symbols(plugin)
     if not ok:
-        print(PLUGIN_REMEDY)
+        print(plugin_remedy(plugin.naming))
 
     print(f"plugin check: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1

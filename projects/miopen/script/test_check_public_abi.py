@@ -1107,6 +1107,7 @@ def pe_image(
     version_signature=0xFEEF04BD,
     text_vsize=None,
     import_functions=None,
+    no_lookup_table=False,
 ):
     """Return a DLL image.
 
@@ -1115,7 +1116,8 @@ def pe_image(
     lays the function table out in .def order, as a .def-file link does, with
     `ordinal_base` as the first ordinal. `old_delay_layout` (PE32 only) writes
     delay-import names as addresses. `decoy_resources` adds resource types around
-    RT_VERSION.
+    RT_VERSION. `no_lookup_table` leaves the import descriptors' lookup tables
+    zero, as some linkers do, so the readers must use the address tables.
     """
     rdata = bytearray()
     image_base = 0x180000000 if pe32_plus else 0x10000000
@@ -1194,7 +1196,16 @@ def pe_image(
         descriptors = []
         for name in imports:
             thunks = thunk_table(name)
-            descriptors.append(struct.pack("<IIIII", thunks, 0, 0, cstr(name), thunks))
+            descriptors.append(
+                struct.pack(
+                    "<IIIII",
+                    0 if no_lookup_table else thunks,
+                    0,
+                    0,
+                    cstr(name),
+                    thunks,
+                )
+            )
         table = put(b"".join(descriptors) + b"\0" * 20)
         directories[1] = (table, 20 * (len(imports) + 1))
 
@@ -2200,12 +2211,18 @@ def test_a_dll_plugin_is_matched_to_the_private_dll_without_case(capsys):
 
 
 def elf_image(
-    needed=(), undefined=(), defined=(), undefined_bind=abi.STB_GLOBAL, soname=""
+    needed=(),
+    undefined=(),
+    defined=(),
+    undefined_bind=abi.STB_GLOBAL,
+    soname="",
+    program_headers=0,
 ):
     """A minimal 64-bit ELF shared object: a .dynsym, its .dynstr and a .dynamic.
 
     `undefined` symbols are NOTYPE, as a real object's references are; `defined` ones
-    are global functions.
+    are global functions. `program_headers` empty program headers follow the header,
+    as in a linked object.
     """
     dynstr = bytearray(b"\0")
 
@@ -2232,7 +2249,8 @@ def elf_image(
         for n in (".dynstr", ".dynsym", ".dynamic", ".shstrtab")
     }
     body = [bytes(dynstr), bytes(dynsym), dynamic, shstrtab]
-    offsets, cursor = [], 64
+    phdrs = b"\0" * 56 * program_headers
+    offsets, cursor = [], 64 + len(phdrs)
     for blob in body:
         offsets.append(cursor)
         cursor += len(blob)
@@ -2249,11 +2267,25 @@ def elf_image(
         b"\x7fELF\x02\x01\x01"
         + b"\0" * 9
         + struct.pack(
-            "<HHIQQQIHHHHHH", 3, 0x3E, 1, 0, 0, shoff, 0, 64, 0, 0, 64, len(sections), 4
+            "<HHIQQQIHHHHHH",
+            3,
+            0x3E,
+            1,
+            0,
+            64 if program_headers else 0,
+            shoff,
+            0,
+            64,
+            56 if program_headers else 0,
+            program_headers,
+            64,
+            len(sections),
+            4,
         )
     )
     return (
         header
+        + phdrs
         + b"".join(body)
         + b"".join(struct.pack("<IIQQQQIIQQ", *section) for section in sections)
     )
@@ -2373,3 +2405,182 @@ def test_a_dll_plugin_with_public_function_imports_fails_the_symbol_check(
     lib = read_dll(tmp_path, image, "miopen_plugin.dll")
     assert abi.check_plugin_symbols(lib) is False
     assert "  miopenCreate\n" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("pe32_plus", [True, False], ids=["PE32+", "PE32"])
+@pytest.mark.parametrize("table", ["imports", "delay_imports"])
+def test_an_import_by_ordinal_is_not_a_named_function(tmp_path, pe32_plus, table):
+    image = pe_image(
+        "miopen_plugin.dll",
+        **{table: ["MIOpen.dll"]},
+        import_functions={"MIOpen.dll": [5, 9]},
+        pe32_plus=pe32_plus,
+    )
+    lib = read_dll(tmp_path, image, "miopen_plugin.dll")
+    assert lib.needed() == ["MIOpen.dll"]
+    assert lib.required_functions() == set()
+
+
+def test_a_dll_plugin_importing_only_by_ordinal_is_the_wrong_file(tmp_path):
+    """No name means no way to tell a public entry point from a private one."""
+    image = pe_image(
+        "miopen_plugin.dll",
+        imports=["MIOpen.dll"],
+        import_functions={"MIOpen.dll": [5, 9]},
+    )
+    lib = read_dll(tmp_path, image, "miopen_plugin.dll")
+    with pytest.raises(abi.AbiError, match="no undefined miopen\\* symbols"):
+        abi.check_plugin_symbols(lib)
+
+
+@pytest.mark.parametrize("pe32_plus", [True, False], ids=["PE32+", "PE32"])
+def test_pe_names_come_from_the_address_table_without_a_lookup_table(
+    tmp_path, pe32_plus
+):
+    image = pe_image(
+        "miopen_plugin.dll",
+        imports=["MIOpen_private.dll", "KERNEL32.dll"],
+        import_functions={
+            "MIOpen_private.dll": ["miopenCreate_impl"],
+            "KERNEL32.dll": ["LoadLibraryA"],
+        },
+        pe32_plus=pe32_plus,
+        no_lookup_table=True,
+    )
+    lib = read_dll(tmp_path, image, "miopen_plugin.dll")
+    assert lib.required_functions() == {"miopenCreate_impl", "LoadLibraryA"}
+    assert lib.needed() == ["KERNEL32.dll", "MIOpen_private.dll"]
+
+
+def test_pe_ordinals_in_the_old_delay_layout_are_not_names(tmp_path):
+    image = pe_image(
+        "miopen_plugin.dll",
+        delay_imports=["MIOpen.dll"],
+        import_functions={"MIOpen.dll": ["miopenCreate", 3]},
+        pe32_plus=False,
+        old_delay_layout=True,
+    )
+    lib = read_dll(tmp_path, image, "miopen_plugin.dll")
+    assert lib.needed() == ["MIOpen.dll"]
+    assert lib.required_functions() == {"miopenCreate"}
+
+
+def test_check_plugin_fails_a_delay_loaded_public_dll_plugin_end_to_end(
+    tmp_path, capsys
+):
+    plugin = tmp_path / "miopen_plugin.dll"
+    plugin.write_bytes(
+        pe_image(
+            "miopen_plugin.dll",
+            delay_imports=["MIOpen.dll"],
+            import_functions={"MIOpen.dll": ["miopenCreate"]},
+            pe32_plus=False,
+            old_delay_layout=True,
+        )
+    )
+    private = tmp_path / "MIOpen_private.dll"
+    private.write_bytes(
+        pe_image("MIOpen_private.dll", exports={"miopenCreate_impl": "code"})
+    )
+    result = abi.main(["check-plugin", str(plugin), "--private-lib", str(private)])
+    assert result == 1
+    out = capsys.readouterr().out
+    assert "FAIL: plugin import of MIOpen_private is (absent)" in out
+    assert "FAIL: plugin has import of MIOpen.dll" in out
+    assert "  miopenCreate\n" in out
+
+
+@pytest.mark.parametrize(
+    "plugin, private, names, other_format",
+    [
+        (
+            plugin_dll(needed=("MIOpen.dll",), required=("miopenCreate",)),
+            private_dll(),
+            ("miopen_plugin.dll", "MIOpen_private.dll", "MIOpen.dll"),
+            (".so",),
+        ),
+        (
+            plugin_elf(needed=("libMIOpen.so.1",), required=("miopenCreate",)),
+            private_elf(),
+            ("libmiopen_plugin.so", "libMIOpen_private.so", "libMIOpen.so"),
+            (".dll",),
+        ),
+    ],
+    ids=["DLL", "ELF"],
+)
+def test_the_plugin_remedy_names_the_files_of_its_own_format(
+    monkeypatch, capsys, plugin, private, names, other_format
+):
+    libs = {"plugin": plugin, "private": private}
+    monkeypatch.setattr(abi, "open_library", lambda path, what: libs[path])
+    assert abi.main(["check-plugin", "plugin", "--private-lib", "private"]) == 1
+    out = capsys.readouterr().out
+    remedy = out[out.index("hipDNN calls the MIOpen provider plugin") :]
+    for name in names:
+        assert name in remedy
+    for suffix in other_format:
+        assert suffix not in out
+
+
+# A plugin copied only in part (an interrupted download) must be reported as a file
+# that cannot be checked (exit 2), not as a plugin that was checked and rejected.
+
+
+def middle(section):
+    return section["offset"] + section["size"] // 2
+
+
+TRUNCATIONS = {
+    "magic only": lambda sections: 4,
+    "partial header": lambda sections: 40,
+    "header only": lambda sections: 64,
+    "mid program headers": lambda sections: 64 + 56 + 20,
+    "mid string table": lambda sections: middle(sections[".dynstr"]),
+    "mid symbol table": lambda sections: middle(sections[".dynsym"]),
+    "mid dynamic section": lambda sections: middle(sections[".dynamic"]),
+    "no section headers": lambda sections: sections[".shstrtab"]["offset"]
+    + sections[".shstrtab"]["size"],
+}
+
+
+def linked_plugin_image():
+    return elf_image(
+        needed=["libMIOpen_private.so.1", "libc.so.6"],
+        undefined=["miopenCreate_impl", *RANGE_FUNCTIONS, "malloc"],
+        program_headers=3,
+    )
+
+
+@pytest.mark.parametrize("cut", TRUNCATIONS)
+def test_check_plugin_reports_a_truncated_elf_plugin_as_an_error(tmp_path, capsys, cut):
+    image = linked_plugin_image()
+    sections = {s["name"]: s for s in read_elf(tmp_path, image).sections}
+    length = TRUNCATIONS[cut](sections)
+    assert length < len(image)
+    assert run_check_plugin_files(tmp_path, image[:length]) == 2
+    captured = capsys.readouterr()
+    assert "ERROR: truncated ELF file" in captured.err
+    assert "Traceback" not in captured.err + captured.out
+
+
+@pytest.mark.parametrize(
+    "cut, read",
+    [
+        ("mid symbol table", lambda lib: lib.required_functions()),
+        ("mid dynamic section", lambda lib: lib.needed()),
+    ],
+)
+def test_a_table_cut_short_after_the_sections_are_read_is_an_error(tmp_path, cut, read):
+    lib = read_elf(tmp_path, linked_plugin_image())
+    sections = {s["name"]: s for s in lib.sections}
+    lib.data = lib.data[: TRUNCATIONS[cut](sections)]
+    with pytest.raises(abi.AbiError, match="truncated ELF file"):
+        read(lib)
+
+
+def test_a_string_with_no_end_in_an_elf_is_an_error(tmp_path):
+    lib = read_elf(tmp_path, linked_plugin_image())
+    dynstr = next(s for s in lib.sections if s["name"] == ".dynstr")
+    lib.data = lib.data[: dynstr["offset"] + dynstr["size"] - 3]
+    with pytest.raises(abi.AbiError, match="truncated ELF file"):
+        lib._cstr(dynstr["offset"] + dynstr["size"] - 8)
