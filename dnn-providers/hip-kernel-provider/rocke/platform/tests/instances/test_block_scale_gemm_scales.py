@@ -46,15 +46,16 @@ from rocke.instances.common.block_scale_gemm import (
     build_block_scale_gemm,
 )
 from rocke.tests.engines import lower_spec_with_all_engines
+from rocke.tests.fp8_gemm_checks import (
+    EXACT_OPERAND_VALUES,
+    GEMM_TOLERANCE,
+    mfma_operand_bytes,
+)
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
 from rocke.tests.llvm_ir import KernelIR
 
 _GPU_ARCHS = ("gfx942", "gfx950")
 _MANTISSAS = ("fp8e4m3", "bf8e5m2")
-
-# The runbook's GEMM tolerance (optimization_runbook.md section 1.4), as an
-# error relative to the largest reference output.
-_GEMM_TOLERANCE = 7e-2
 
 
 def _lowered_llvm(spec: BlockScaleGemmSpec, arch: str) -> str:
@@ -215,37 +216,6 @@ def gpu_arch():
     return current_device_arch_in(_GPU_ARCHS, subject="the block-scaled GEMM")
 
 
-# (exponent bias, mantissa bits) of the fp8 / bf8 format each arch's MFMA
-# reads: gfx950 reads OCP E4M3 / E5M2, gfx942 the FNUZ variants.
-_ELEMENT_FORMATS = {
-    ("gfx950", "fp8e4m3"): (7, 3),
-    ("gfx950", "bf8e5m2"): (15, 2),
-    ("gfx942", "fp8e4m3"): (8, 3),
-    ("gfx942", "bf8e5m2"): (16, 2),
-}
-
-# Element values every format above holds exactly.
-_ELEMENT_VALUES = np.array([0.0, 0.5, -0.5, 1.0, -1.0, 1.5, -1.5, 2.0, -2.0])
-
-
-def _element_bytes(arch: str, mantissa: str, values: np.ndarray) -> np.ndarray:
-    """The fp8 / bf8 bytes the arch's MFMA reads as ``values`` (zero or a
-    normal number with a short mantissa)."""
-    bias, mantissa_bits = _ELEMENT_FORMATS[(arch, mantissa)]
-
-    def encode(value: float) -> int:
-        if value == 0:
-            return 0
-        exponent = int(np.floor(np.log2(abs(value))))
-        fraction = abs(value) / 2.0**exponent - 1.0
-        field = fraction * 2**mantissa_bits
-        assert field == int(field) and exponent + bias >= 1, value
-        sign = 0x80 if value < 0 else 0
-        return sign | ((exponent + bias) << mantissa_bits) | int(field)
-
-    return np.vectorize(encode)(values).astype(np.uint8)
-
-
 def _run_block_scale_gemm(arch, spec, *, a, a_scale, b, b_scale) -> np.ndarray:
     """Run the block-scaled GEMM of ``spec`` on the GPU and return C as an
     (M, N) f32 array. The kernel run is the one :func:`_lowered_llvm`
@@ -296,7 +266,7 @@ def _check_against_reference(got, want):
     np.testing.assert_array_equal(got[infinite], want[infinite])
     finite = np.isfinite(want)
     error = np.abs(got[finite] - want[finite]).max()
-    assert error <= _GEMM_TOLERANCE * np.abs(want[finite]).max(), error
+    assert error <= GEMM_TOLERANCE * np.abs(want[finite]).max(), error
 
 
 @pytest.mark.parametrize("mantissa", _MANTISSAS)
@@ -321,8 +291,8 @@ def test_row_and_column_scales_on_gpu(gpu_arch, mantissa, special_values):
     )
     groups = spec.K // spec.group_size_mnk[2]
     rng = np.random.default_rng(2888)
-    a_values = rng.choice(_ELEMENT_VALUES, size=(spec.M, spec.K))
-    b_values = rng.choice(_ELEMENT_VALUES, size=(spec.K, spec.N))
+    a_values = rng.choice(EXACT_OPERAND_VALUES, size=(spec.M, spec.K))
+    b_values = rng.choice(EXACT_OPERAND_VALUES, size=(spec.K, spec.N))
     a_scale = rng.uniform(0.25, 4.0, size=(spec.M, groups)).astype(np.float32)
     b_scale = rng.uniform(0.25, 4.0, size=(groups, spec.N)).astype(np.float32)
     if special_values:
@@ -335,9 +305,9 @@ def test_row_and_column_scales_on_gpu(gpu_arch, mantissa, special_values):
     got = _run_block_scale_gemm(
         gpu_arch,
         spec,
-        a=_element_bytes(gpu_arch, mantissa, a_values),
+        a=mfma_operand_bytes(gpu_arch, mantissa, a_values),
         a_scale=a_scale,
-        b=_element_bytes(gpu_arch, mantissa, b_values),
+        b=mfma_operand_bytes(gpu_arch, mantissa, b_values),
         b_scale=b_scale,
     )
     want = _reference(spec, a_values, a_scale, b_values, b_scale)

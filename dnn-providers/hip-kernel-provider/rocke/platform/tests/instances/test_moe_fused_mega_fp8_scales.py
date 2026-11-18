@@ -55,8 +55,13 @@ from rocke.instances.common.moe_fused_mega_fp8 import (
     moe_fused_mega_fp8_grid,
     moe_fused_mega_fp8_signature,
 )
-from rocke.numeric.fp8 import fp8e4m3_decode_table, fp8e4m3_encode, fp8e4m3_round
+from rocke.numeric.fp8 import fp8e4m3_decode_table, fp8e4m3_round
 from rocke.tests.engines import available_engines, lower_with_engine
+from rocke.tests.fp8_gemm_checks import (
+    EXACT_OPERAND_VALUES,
+    GEMM_TOLERANCE,
+    mfma_operand_bytes,
+)
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
 from rocke.tests.llvm_ir import KernelIR
 
@@ -73,10 +78,6 @@ _INTERMEDIATE = 256
 # The routed problem: each token goes to two of three experts.
 _TOKENS = 30
 _EXPERTS = 3
-
-# The runbook's GEMM tolerance (optimization_runbook.md section 1.4), as an
-# error relative to the largest reference output.
-_GEMM_TOLERANCE = 7e-2
 
 
 def _shipped_spec(arch: str) -> FusedMegaKernelSpecFp8:
@@ -256,17 +257,6 @@ def gpu_arch():
     return current_device_arch_in(_GPU_ARCHS, subject="the fp8 fused-MoE kernel")
 
 
-# Operand values every fp8 e4m3 encoding below holds exactly.
-_OPERAND_VALUES = np.array([0.0, 0.5, -0.5, 1.0, -1.0, 1.5, -1.5, 2.0, -2.0])
-
-
-def _operand_bytes(arch: str, values: np.ndarray) -> np.ndarray:
-    """The bytes the arch's MFMA reads as ``values``: OCP e4m3 on gfx950;
-    e4m3 FNUZ on gfx942, whose exponent bias is one higher, so a value's FNUZ
-    code is the OCP code of twice the value (zero is 0x00 in both)."""
-    return fp8e4m3_encode(values if arch == "gfx950" else 2.0 * values)
-
-
 @dataclasses.dataclass(frozen=True)
 class _MoeCase:
     """One routed problem in the sorted, tile-padded layout the kernel reads.
@@ -311,11 +301,11 @@ def _routed_case(tile_m: int, *, tokens: int, experts: int, seed: int) -> _MoeCa
         weight += [route_weight for _, route_weight in padded]
         block_expert += [expert] * blocks
     token = np.array(token, dtype=np.int32)
-    a = rng.choice(_OPERAND_VALUES, size=(token.size, _HIDDEN))
+    a = rng.choice(EXACT_OPERAND_VALUES, size=(token.size, _HIDDEN))
     a[token < 0] = 0.0
 
     def weights(out: int, contraction: int) -> np.ndarray:
-        return rng.choice(_OPERAND_VALUES, size=(experts, out, contraction))
+        return rng.choice(EXACT_OPERAND_VALUES, size=(experts, out, contraction))
 
     def weight_scales(groups: int, out_groups: int) -> np.ndarray:
         return rng.uniform(1 / 32, 1 / 8, size=(experts, groups, out_groups))
@@ -402,10 +392,10 @@ def _run_on_gpu(arch: str, spec: FusedMegaKernelSpecFp8, case: _MoeCase) -> np.n
     hidden_groups = _HIDDEN // GROUP_K
     inter_groups = _INTERMEDIATE // GROUP_K
     host = {
-        "A": _operand_bytes(arch, case.a),
-        "WGate": _operand_bytes(arch, case.w_gate),
-        "WUp": _operand_bytes(arch, case.w_up),
-        "WDown": _operand_bytes(arch, case.w_down),
+        "A": mfma_operand_bytes(arch, "fp8e4m3", case.a),
+        "WGate": mfma_operand_bytes(arch, "fp8e4m3", case.w_gate),
+        "WUp": mfma_operand_bytes(arch, "fp8e4m3", case.w_up),
+        "WDown": mfma_operand_bytes(arch, "fp8e4m3", case.w_down),
         "AScale": case.a_scale.astype(np.float32),
         "WGateScale": case.gate_scale.astype(np.float32),
         "WUpScale": case.up_scale.astype(np.float32),
@@ -456,4 +446,4 @@ def test_row_scales_on_gpu(gpu_arch):
     want = _reference(case, spec.tile_m)
     assert np.isfinite(got).all()
     error = np.abs(got - want).max()
-    assert error <= _GEMM_TOLERANCE * np.abs(want).max(), error
+    assert error <= GEMM_TOLERANCE * np.abs(want).max(), error
