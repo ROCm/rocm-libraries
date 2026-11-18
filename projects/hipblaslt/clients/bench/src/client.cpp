@@ -714,11 +714,14 @@ try
 
         ("partitions",
          value<int>(&partitions_opt)->default_value(1),
-         "Run each GEMM as slices on this many devices (device 0 .. partitions-1), one stream each, "
-         "with hipblaslt_ext::experimental::PartitionedGemm. The time is the full span, first launch to last "
-         "partition done. A, B, C and D stay in the device 0 buffers and the other partitions "
-         "reach them over peer access. Needs plain GEMM and the heuristic solution selection; "
-         "1 = off.")
+         "Run each GEMM as slices on this many partitions, one stream each, with "
+         "hipblaslt_ext::experimental::PartitionedGemm. The devices are the DPX group of the current "
+         "device when it is in one (the current device is partition 0), otherwise the current device "
+         "once per partition (SPX: correct results, only for checking them, not for speed). The time "
+         "is the full span, first launch to last partition done. Data placement follows "
+         "--part_place_a/b/c/d: shared (one copy in the first partition's buffers, which the other "
+         "partitions read over peer access) or replicated (a copy per partition). Needs plain GEMM "
+         "and the heuristic solution selection; 1 = off.")
 
         ("split_dim",
          value<std::string>(&split_dim_str)->default_value("N"),
@@ -727,7 +730,7 @@ try
 
         ("part_place_a",
          value<std::string>(&part_place_str[0])->default_value("shared"),
-         "With --partitions: shared (one copy of A in the device 0 buffer, read by every "
+         "With --partitions: shared (one copy of A in the first partition's buffer, read by every "
          "partition over peer access) or replicated (a copy on each partition device).")
 
         ("part_place_b",

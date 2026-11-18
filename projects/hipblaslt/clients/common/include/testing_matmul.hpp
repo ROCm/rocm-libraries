@@ -2195,7 +2195,7 @@ private:
 
 // --partitions N: one GEMM run as N slices with hipblaslt_ext::experimental::PartitionedGemm. The slices run on the
 // partitions of a GPU in DPX mode when the current device is one of them (see partition_devices.hpp),
-// and all on the current device otherwise (SPX: the same result, no speed benefit).
+// and all on the current device otherwise (SPX: the same result, only for checking results, not for speed).
 // Partition 0 runs on the caller's handle and stream; this holds the others (handle, stream,
 // workspace, events). A, B, C and D live in the caller's device 0 buffers. A tensor placed Shared
 // is read (or written) by the other partitions over peer access; a Replicated one gets a full
