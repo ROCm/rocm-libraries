@@ -365,21 +365,27 @@ def test_scan_reads_list_format_solutions(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "solutions",
+    ("solutions", "message"),
     [
-        "- SolutionIndex: 0\n  SolutionUID: 0u0\n",
-        "- SolutionIndex: 0\n  SolutionUID: 0u3E # comment\n  SolutionUID: 0u3F\n",
-        "- SolutionUID: 0u3E\n  KernelNameMin: k\n",
-        "- SolutionIndex: 0\n  SolutionUID: 0u03E\n",
+        ("- SolutionIndex: 0\n  SolutionUID: 0u0\n", "must not be zero"),
+        (
+            "- SolutionIndex: 0\n  SolutionUID: 0u3E # comment\n  SolutionUID: 0u3F\n",
+            "two SolutionUID keys",
+        ),
+        ("- SolutionUID: 0u3E\n  KernelNameMin: k\n", "has no SolutionIndex"),
+        ("- SolutionIndex: 0\n  SolutionUID: 0u03E\n", "leading zeros"),
     ],
     ids=["zero", "repeated-key", "no-index", "leading-zero"],
 )
-def test_scan_rejects_invalid_solutions(tmp_path: Path, solutions: str) -> None:
+def test_scan_rejects_invalid_solutions(
+    tmp_path: Path, solutions: str, message: str
+) -> None:
     """Verify invalid UID entries still fail the scan.
 
     Args:
         tmp_path: Pytest temporary-directory fixture.
         solutions: ``Solutions`` block containing one invalid entry.
+        message: Text the ``ValueError`` must contain.
 
     Returns:
         None.
@@ -390,7 +396,7 @@ def test_scan_rejects_invalid_solutions(tmp_path: Path, solutions: str) -> None:
     logic = tmp_path / "bad.yaml"
     logic.write_text("Solutions:\n" + solutions, encoding="utf-8")
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=message):
         _scan_yaml_file(logic)
 
 
