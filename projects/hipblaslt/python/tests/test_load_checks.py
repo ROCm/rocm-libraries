@@ -169,6 +169,87 @@ def test_different_version_warns():
     assert msg and "1.4.1" in msg
 
 
+# --- which already-loaded library _core can bind to ------------------------------------------------
+
+
+def test_versioned_file_names_match_the_soname():
+    assert L.matches_lib_name(
+        "/r/lib/libhipblaslt.so.1.5.0", "libhipblaslt.so.1", "linux"
+    )
+    assert L.matches_lib_name("/r/lib/libhipblaslt.so.1", "libhipblaslt.so.1", "linux")
+    assert not L.matches_lib_name(
+        "/r/lib/libhipblaslt.so.0", "libhipblaslt.so.1", "linux"
+    )
+    assert not L.matches_lib_name(
+        "/r/lib/libhipblaslt.so.10", "libhipblaslt.so.1", "linux"
+    )
+    assert L.matches_lib_name(r"C:\r\LIBHIPBLASLT.DLL", "libhipblaslt.dll", "win32")
+
+
+def test_an_already_loaded_copy_with_the_same_soname_is_used():
+    loaded = ["/torch/lib/libhipblaslt.so.1"]
+    assert (
+        L.compatible_already_loaded(loaded, "linux", "libhipblaslt.so.1") == loaded[0]
+    )
+    assert (
+        L.compatible_already_loaded(
+            ["/usr/lib/libc.so.6"], "linux", "libhipblaslt.so.1"
+        )
+        is None
+    )
+
+
+def test_an_already_loaded_copy_with_another_soname_raises():
+    # _core's NEEDED libhipblaslt.so.1 wouldn't bind to it, so a second hipBLASLt would load.
+    with pytest.raises(L.HipblasLtLoadError, match="need libhipblaslt.so.1"):
+        L.compatible_already_loaded(
+            ["/old/libhipblaslt.so.0"], "linux", "libhipblaslt.so.1"
+        )
+
+
+def test_only_the_selected_hipblaslt_may_be_loaded_after_import():
+    L.check_single_hipblaslt("/a/libhipblaslt.so.1", ["/a/libhipblaslt.so.1"], "linux")
+    with pytest.raises(L.HipblasLtLoadError, match="/b/libhipblaslt.so.1"):
+        L.check_single_hipblaslt(
+            "/a/libhipblaslt.so.1",
+            ["/a/libhipblaslt.so.1", "/b/libhipblaslt.so.1"],
+            "linux",
+        )
+    with pytest.raises(L.HipblasLtLoadError, match="nowhere"):
+        L.check_single_hipblaslt("/a/libhipblaslt.so.1", [], "linux")
+
+
+# --- the build-time HIP runtime -----------------------------------------------------------------
+
+
+def test_a_build_time_library_gets_its_hip_runtime_first():
+    build = L.Candidate("/install/lib/libhipblaslt.so.1", "build")
+    runtime = "/custom/rocm/lib/libamdhip64.so.7"
+    assert L.hip_runtime_to_preload(build, runtime, [], "linux") == runtime
+
+
+@pytest.mark.parametrize(
+    "candidate,loaded,platform",
+    [
+        (L.Candidate("/sdk/libhipblaslt.so.1", "rocm-sdk"), [], "linux"),
+        (
+            L.Candidate("/install/lib/libhipblaslt.so.1", "build"),
+            ["/x/libamdhip64.so.7"],
+            "linux",
+        ),
+        (L.Candidate(r"C:\b\libhipblaslt.dll", "build"), [], "win32"),
+    ],
+    ids=["not-build-time", "runtime-already-loaded", "windows"],
+)
+def test_no_hip_runtime_preload_otherwise(candidate, loaded, platform):
+    assert (
+        L.hip_runtime_to_preload(
+            candidate, "/custom/libamdhip64.so.7", loaded, platform
+        )
+        is None
+    )
+
+
 def test_the_loaded_version_is_checked_once(monkeypatch, recwarn):
     monkeypatch.setattr(
         L, "_library", L.LoadInfo("/p/libhipblaslt.so.1", "rocm-sdk", True)
@@ -189,9 +270,23 @@ def test_no_version_warning_with_an_override(monkeypatch, recwarn):
     )
     monkeypatch.setattr(L, "_built_version", (100500, "25f28906"))
     monkeypatch.setattr(L, "_version_checked", False)
-    monkeypatch.setenv(L.LIBRARY_ENV, "/o/libhipblaslt.so.1")
+    monkeypatch.delenv(L.LIBRARY_ENV, raising=False)
     L.check_loaded_version((100500, "565c4c74"))
     assert not [w for w in recwarn if issubclass(w.category, L.HipblasLtLoadWarning)]
+
+
+def test_setting_the_override_after_import_doesnt_silence_the_warning(
+    monkeypatch, recwarn
+):
+    # Setting it later (say, for a child process) doesn't change the library already loaded.
+    monkeypatch.setattr(
+        L, "_library", L.LoadInfo("/sdk/libhipblaslt.so.1", "rocm-sdk", True)
+    )
+    monkeypatch.setattr(L, "_built_version", (100500, "25f28906"))
+    monkeypatch.setattr(L, "_version_checked", False)
+    monkeypatch.setenv(L.LIBRARY_ENV, "/elsewhere/libhipblaslt.so.1")
+    L.check_loaded_version((100500, "565c4c74"))
+    assert [w for w in recwarn if issubclass(w.category, L.HipblasLtLoadWarning)]
 
 
 def test_import_does_not_check_the_loaded_version():

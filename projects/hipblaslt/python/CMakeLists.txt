@@ -51,6 +51,16 @@ if(NOT _hipblaslt_lib)
     get_target_property(_hipblaslt_lib roc::hipblaslt LOCATION)
 endif()
 get_filename_component(HIPBLASLT_PY_BUILD_LIB_DIR "${_hipblaslt_lib}" DIRECTORY)
+# The name _core's NEEDED entry uses: the SONAME on Linux, the DLL name on Windows.
+get_target_property(HIPBLASLT_PY_LIB_NAME roc::hipblaslt IMPORTED_SONAME_RELEASE)
+if(NOT HIPBLASLT_PY_LIB_NAME)
+    get_filename_component(HIPBLASLT_PY_LIB_NAME "${_hipblaslt_lib}" NAME)
+endif()
+# The HIP runtime the build used, which may live outside hipBLASLt's prefix.
+get_target_property(HIPBLASLT_PY_HIP_RUNTIME hip::amdhip64 IMPORTED_LOCATION_RELEASE)
+if(NOT HIPBLASLT_PY_HIP_RUNTIME)
+    get_target_property(HIPBLASLT_PY_HIP_RUNTIME hip::amdhip64 LOCATION)
+endif()
 get_target_property(_hipblaslt_inc roc::hipblaslt INTERFACE_INCLUDE_DIRECTORIES)
 list(GET _hipblaslt_inc 0 HIPBLASLT_PY_BUILD_INCLUDE_DIR)
 # hipblas-common can live in a different prefix (invoke build installs hipBLASLt on its own).
@@ -69,6 +79,8 @@ endif()
 nanobind_add_module(_core NB_SUPPRESS_WARNINGS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/module.cpp"
 )
+# hipBLASLt's headers first: hip::host's include directory may hold an older hipBLASLt.
+target_include_directories(_core BEFORE PRIVATE "${HIPBLASLT_PY_BUILD_INCLUDE_DIR}")
 target_include_directories(_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(_core PRIVATE hip::host roc::hipblaslt)
 if(WIN32)

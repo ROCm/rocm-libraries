@@ -64,6 +64,20 @@ def _import_in_child(**env_overrides: str) -> dict:
     return json.loads(out.stdout.strip().splitlines()[-1])
 
 
+def _import_in_child_without_rocm_sdk() -> dict:
+    env = {k: v for k, v in os.environ.items() if k not in _DROP}
+    code = "import sys; sys.modules['rocm_sdk'] = None\n" + _CHILD
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert out.returncode == 0, out.stderr[-4000:]
+    return json.loads(out.stdout.strip().splitlines()[-1])
+
+
 def _assert_one_of_each(r: dict) -> None:
     assert r["hipblaslt"] == [os.path.realpath(r["path"])], r
     assert len(r["amdhip"]) == 1, f"two HIP runtimes in one process: {r['amdhip']}"
@@ -84,6 +98,13 @@ def test_with_only_ld_library_path():
     r = _import_in_child(LD_LIBRARY_PATH=os.path.dirname(expected["path"]))
     _assert_one_of_each(r)
     assert r["hipblaslt"] == expected["hipblaslt"]
+
+
+def test_build_time_fallback():
+    # Without rocm_sdk or ROCM_PATH, the build-time library loads, with its HIP runtime first.
+    r = _import_in_child_without_rocm_sdk()
+    _assert_one_of_each(r)
+    assert r["source"] == "build", r
 
 
 def test_override_wins():

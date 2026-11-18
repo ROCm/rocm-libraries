@@ -24,14 +24,18 @@ from typing import Callable, Iterable, Mapping, Sequence
 __all__ = [
     "LIBRARY_ENV",
     "Candidate",
-    "HipblasLtLoadError",
-    "HipblasLtLoadWarning",
-    "LoadInfo",
     "candidate_libraries",
     "check_companions",
     "check_override_can_take_effect",
+    "check_single_hipblaslt",
     "choose_library",
+    "compatible_already_loaded",
+    "hip_runtime_to_preload",
+    "HipblasLtLoadError",
+    "HipblasLtLoadWarning",
     "loaded_hipblaslt",
+    "LoadInfo",
+    "matches_lib_name",
     "override_warning",
     "version_mismatch_warning",
     "windows_dirs_to_register",
@@ -66,8 +70,11 @@ class LoadInfo:
     preloaded: bool
 
 
-def library_file_name(platform: str) -> str:
-    return "libhipblaslt.dll" if platform == "win32" else "libhipblaslt.so.1"
+def library_file_name(platform: str, lib_name: str = "") -> str:
+    """The file name _core's dependency uses: the build's SONAME or DLL name, if recorded."""
+    return lib_name or (
+        "libhipblaslt.dll" if platform == "win32" else "libhipblaslt.so.1"
+    )
 
 
 def companion_stems(platform: str) -> tuple[str, ...]:
@@ -86,9 +93,10 @@ def candidate_libraries(
     platform: str,
     rocm_sdk_libraries: Sequence[str],
     build_lib_dir: str,
+    lib_name: str = "",
 ) -> list[Candidate]:
     """Every place to look, in lookup order. Existence is checked by choose_library."""
-    name = library_file_name(platform)
+    name = library_file_name(platform, lib_name)
     out = []
     override = environ.get(LIBRARY_ENV)
     if override:
@@ -156,6 +164,60 @@ def loaded_hipblaslt(loaded: Iterable[str], platform: str) -> list[str]:
         if hit and not any(_same_file(p, q, platform) for q in out):
             out.append(p)
     return out
+
+
+def matches_lib_name(path: str, lib_name: str, platform: str) -> bool:
+    """True if `path` is the library `lib_name` names (libhipblaslt.so.1.5.0 is libhipblaslt.so.1)."""
+    b, want = _base(path, platform), lib_name.lower()
+    return b == want or (platform != "win32" and b.startswith(want + "."))
+
+
+def compatible_already_loaded(
+    loaded: Iterable[str], platform: str, lib_name: str
+) -> str | None:
+    """The libhipblaslt already in the process that _core can bind to, or None if there's none.
+
+    Raises if the one loaded has a different name, such as libhipblaslt.so.0 when _core needs
+    libhipblaslt.so.1: _core would then load a second hipBLASLt beside it.
+    """
+    already = loaded_hipblaslt(loaded, platform)
+    if not already:
+        return None
+    name = library_file_name(platform, lib_name)
+    for p in already:
+        if matches_lib_name(p, name, platform):
+            return p
+    raise HipblasLtLoadError(
+        f"This process already uses hipBLASLt from {already[0]}, but these bindings need {name}. "
+        "Loading both would put two hipBLASLt libraries in one process; import hipblaslt before "
+        "the code that loads the other one, or rebuild the bindings against that hipBLASLt."
+    )
+
+
+def hip_runtime_to_preload(
+    chosen: Candidate, build_hip_runtime: str, loaded: Iterable[str], platform: str
+) -> str | None:
+    """The build-time HIP runtime to load before a build-time libhipblaslt, or None.
+
+    A hipBLASLt installed on its own (invoke build) can sit outside the ROCm whose HIP runtime
+    it needs, with nothing on the search path pointing there.
+    """
+    if platform == "win32" or chosen.source != "build" or not build_hip_runtime:
+        return None
+    if any(_base(p, platform).startswith("libamdhip64.so") for p in loaded):
+        return None
+    return build_hip_runtime
+
+
+def check_single_hipblaslt(path: str, loaded: Iterable[str], platform: str) -> None:
+    """Raise unless the only libhipblaslt in the process is `path`."""
+    found = loaded_hipblaslt(loaded, platform)
+    others = [p for p in found if not _same_file(p, path, platform)]
+    if others or not found:
+        raise HipblasLtLoadError(
+            f"After importing hipblaslt._core, the process has hipBLASLt from "
+            f"{', '.join(found) or 'nowhere'}, but the bindings chose {path}."
+        )
 
 
 def check_override_can_take_effect(
@@ -361,7 +423,12 @@ def _rocm_sdk_find(name: str) -> list[str]:
         return []
 
 
-def load(build_lib_dir: str, build_bin_dir: str) -> LoadInfo:
+def load(
+    build_lib_dir: str,
+    build_bin_dir: str,
+    lib_name: str = "",
+    build_hip_runtime: str = "",
+) -> LoadInfo:
     """Pick and preload libhipblaslt. Call before importing hipblaslt._core."""
     environ = os.environ
     platform = sys.platform
@@ -371,15 +438,15 @@ def load(build_lib_dir: str, build_bin_dir: str) -> LoadInfo:
     if override:
         check_override_can_take_effect(override, before, platform)
     else:
-        already = loaded_hipblaslt(before, platform)
+        already = compatible_already_loaded(before, platform, lib_name)
         if already:
             # Torch (or something else) got here first. _core binds to that copy by name, and
             # preloading another one would put two hipBLASLt builds in the process.
-            return LoadInfo(already[0], "already loaded", preloaded=False)
+            return LoadInfo(already, "already loaded", preloaded=False)
 
     chosen = choose_library(
         candidate_libraries(
-            environ, platform, _rocm_sdk_find("hipblaslt"), build_lib_dir
+            environ, platform, _rocm_sdk_find("hipblaslt"), build_lib_dir, lib_name
         ),
         os.path.isfile,
     )
@@ -397,6 +464,9 @@ def load(build_lib_dir: str, build_bin_dir: str) -> LoadInfo:
             os.add_dll_directory(d)
         ctypes.WinDLL(chosen.path)
     else:
+        runtime = hip_runtime_to_preload(chosen, build_hip_runtime, before, platform)
+        if runtime and os.path.isfile(runtime):
+            ctypes.CDLL(runtime, mode=ctypes.RTLD_GLOBAL)
         ctypes.CDLL(chosen.path, mode=ctypes.RTLD_GLOBAL)
 
     if override:
@@ -408,10 +478,12 @@ def load(build_lib_dir: str, build_bin_dir: str) -> LoadInfo:
 
 
 def check_after_import(info: LoadInfo, core) -> None:
-    """The check that needs _core loaded: companion libraries from the same build."""
+    """The checks that need _core loaded: one hipBLASLt, with companions from its build."""
     global _library, _built_version
     _library, _built_version = info, core._built_library_version()
-    check_companions(info.path, loaded_libraries(), sys.platform)
+    loaded = loaded_libraries()
+    check_single_hipblaslt(info.path, loaded, sys.platform)
+    check_companions(info.path, loaded, sys.platform)
 
 
 _library: LoadInfo | None = None
@@ -431,7 +503,8 @@ def check_loaded_version(loaded: tuple[int, str]) -> None:
     if _version_checked or _library is None or _built_version is None:
         return
     _version_checked = True
-    if os.environ.get(LIBRARY_ENV):
+    # An override already warned at import, and a different build is what the caller asked for.
+    if _library.source == LIBRARY_ENV:
         return
     msg = version_mismatch_warning(_built_version, loaded, _library.path)
     if msg:
