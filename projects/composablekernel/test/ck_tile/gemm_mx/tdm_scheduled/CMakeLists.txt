@@ -8,7 +8,9 @@ add_gtest_executable(test_ck_tile_mx_gemm_tdm_scheduled_host test_mx_gemm_tdm_sc
 add_gtest_executable(test_ck_tile_mx_gemm_tdm_scheduled_host_ref test_mx_gemm_tdm_scheduled_host_ref.cpp)
 # Every GPU case compiled for gfx1250 and checked as a problem its instance runs, without a launch.
 add_gtest_executable(test_ck_tile_mx_gemm_tdm_scheduled_cases test_mx_gemm_tdm_scheduled.cpp)
-# On a gfx1250 device: bitwise against the reference on the sparse check inputs.
+# On a gfx1250 device: bitwise against the reference on the sparse check inputs. The smoke test
+# runs a few small cases; the full and large-case tests are regression tests (test/CMakeLists.txt).
+add_gtest_executable(test_ck_tile_mx_gemm_tdm_scheduled_smoke test_mx_gemm_tdm_scheduled_smoke.cpp)
 add_gtest_executable(test_ck_tile_mx_gemm_tdm_scheduled test_mx_gemm_tdm_scheduled.cpp)
 add_gtest_executable(test_ck_tile_mx_gemm_tdm_scheduled_large_cases test_mx_gemm_tdm_scheduled_large_cases.cpp)
 
@@ -23,8 +25,8 @@ endif()
 list(APPEND MX_TDM_SCHEDULED_ROCKE_OPTIONS "SHELL:-mllvm -enable-post-misched=false"
                                            "SHELL:-mllvm -greedy-regclass-priority-trumps-globalness")
 foreach(test_target test_ck_tile_mx_gemm_tdm_scheduled_host test_ck_tile_mx_gemm_tdm_scheduled_host_ref
-                    test_ck_tile_mx_gemm_tdm_scheduled_cases test_ck_tile_mx_gemm_tdm_scheduled
-                    test_ck_tile_mx_gemm_tdm_scheduled_large_cases)
+                    test_ck_tile_mx_gemm_tdm_scheduled_cases test_ck_tile_mx_gemm_tdm_scheduled_smoke
+                    test_ck_tile_mx_gemm_tdm_scheduled test_ck_tile_mx_gemm_tdm_scheduled_large_cases)
     if(TARGET ${test_target})
         target_compile_options(${test_target} PRIVATE ${TEST_MX_GEMM_COMPILE_OPTIONS}
                                                       ${MX_TDM_SCHEDULED_ROCKE_OPTIONS})
