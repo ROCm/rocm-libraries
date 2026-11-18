@@ -12,7 +12,7 @@ namespace hipblaslt_py
 {
 
     // Raise HipblasLtError unless a HIP device is visible. hipblasLtCreate calls exit() when
-    // there's no device (ROCM-33629), which would end the Python process with no error.
+    // there's no device, which would end the Python process with no error.
     void require_device();
 
     class Handle
