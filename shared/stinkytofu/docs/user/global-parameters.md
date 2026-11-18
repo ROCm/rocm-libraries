@@ -14,6 +14,7 @@ Control StinkyTofu behavior through TensileLite's `GlobalParameters` system -- e
 | `StinkyTofuVerifyEach` | `0`, `1` | `0` | Verify StinkyTofu ASM IR after every pass |
 | `StinkyTofuEnableRemarks` | `0`, `1` | `0` | Emit optimization remarks to stderr |
 | `StinkyTofuTimePasses` | `0`, `1` | `0` | Report per-pass wall time to stderr |
+| `StinkyTofuModuleOptions` | a dict of module options | `{}` | Set any `ModuleOptions` field, such as `VgprMsbUnusedSlotsDontCare` |
 
 ---
 
@@ -136,6 +137,34 @@ Rows are ordered by descending self time, so the pass to look at is the first on
 ```
 
 A pass that only appears as an adaptor name (e.g. `InsertVgprMsbPass`, wrapped by `createFunctionToModuleAdaptor`) is timed through its adaptor entry, so its self time is the pass's own cost.
+
+---
+
+## `StinkyTofuModuleOptions`
+
+A dict merged into the module options KernelWriter passes to StinkyTofu, applied last, so it sets any `ModuleOptions` field (`bindings/python/Module.hpp`) whether or not it has a parameter of its own.
+
+### `VgprMsbUnusedSlotsDontCare`
+
+On gfx1250, `InsertVgprMsbPass` emits an `s_set_vgpr_msb` before an instruction whose operands need another VGPR bank word. By default it compares the whole word: it writes 0 into the slots an instruction does not use, so a `ds_load`, which uses only src0 and dst, switches away from a WMMA's word even when the slots it reads already hold its banks. With `VgprMsbUnusedSlotsDontCare` on, the slots an instruction does not use are don't-care:
+
+- An instruction needs a setter only when a slot it uses holds another bank.
+- When it does, and nothing since the last setter has read the slots that must change, that setter is rewritten to give them the new banks instead of a second setter following it. An `s_set_vgpr_msb` that was in the input is never rewritten.
+- A new setter keeps the slots it does not set. With no word known, at the start of a block, after a label and after a call, they are written as 0, as before.
+
+```yaml
+GlobalParameters:
+  StinkyTofuModuleOptions: {VgprMsbUnusedSlotsDontCare: True}
+```
+
+or on the command line, `'StinkyTofuModuleOptions={"VgprMsbUnusedSlotsDontCare": True}'`. It can also be set for one kernel through `StinkyTofuParameters`. `stinkytofu-opt --vgpr-msb-unused-slots-dont-care` is the same switch.
+
+The setters then split each block into the longest stretches whose instructions agree on every slot they use, which is as few as that order of instructions allows. So for the same instructions in the same order, it never emits more setters than the default.
+
+- An instruction with an operand whose field selects no slot (the WMMA scale operands) still depends on the whole word.
+- The scheduler's bank tiebreak and the register allocator's `msb[...]` prediction follow the same rule: a rewritten setter costs nothing. The bank planner (`quadrant=plan`) still prices by the whole word.
+
+It is off by default. Whether the hardware ignores every slot an instruction does not use is not yet confirmed for every format, so validate a kernel built with it before relying on it.
 
 ---
 

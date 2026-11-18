@@ -19,6 +19,7 @@
 
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
 #include "stinkytofu/ir/asm/ssa/AllocationResult.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
 
@@ -40,9 +41,10 @@ struct LoopVgprMsbSwitches {
 /// A lifted operand is read at the register \p colouring gives its first unit;
 /// anything else keeps the register it names. Blocks belonging to several nested
 /// loops count towards each of them. \p vgprIndexCount is how many VGPRs an
-/// operand can encode, past which the loop reports nullopt.
+/// operand can encode, past which the loop reports nullopt. \p policy is the
+/// pass's: which words serve an instruction (AsmCapsConfig).
 STINKYTOFU_EXPORT std::vector<LoopVgprMsbSwitches> predictLoopVgprMsbSwitches(
     const Function& function, const AllocationResult& colouring, const std::vector<Loop>& loops,
-    uint32_t vgprIndexCount);
+    uint32_t vgprIndexCount, VgprMsbPolicy policy = VgprMsbPolicy::ExactWord);
 
 }  // namespace stinkytofu

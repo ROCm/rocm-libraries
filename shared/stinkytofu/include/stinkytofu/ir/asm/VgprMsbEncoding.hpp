@@ -29,6 +29,7 @@
 #include <utility>
 #include <vector>
 
+#include "stinkytofu/core/Types.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
@@ -300,30 +301,68 @@ inline std::pair<int, bool> computeRequiredMsb(const StinkyInstruction* inst) {
         inst, [](const StinkyRegister& reg, size_t, bool) { return getMsbFromVgpr(reg); });
 }
 
+/// The word an s_set_vgpr_msb sets: the low byte of its literal, or -1 when it
+/// has none.
+inline int vgprMsbSetterWord(const StinkyInstruction& setter) {
+    const std::vector<StinkyRegister>& srcs = setter.getSrcRegs();
+    if (srcs.empty() || srcs[0].dataType != StinkyRegister::Type::LiteralInt) return -1;
+    return static_cast<int>(static_cast<uint32_t>(srcs[0].getLiteralInt()) &
+                            static_cast<uint32_t>(kVgprMsbFullMask));
+}
+
+/// The slot fields \p required depends on in which \p word holds another bank;
+/// none when \p word serves it in every slot it uses.
+inline uint32_t vgprMsbChangedFields(int word, const VgprMsbRequirement& required) {
+    return (static_cast<uint32_t>(word) ^ static_cast<uint32_t>(required.word)) &
+           static_cast<uint32_t>(required.mask);
+}
+
 /// Which bank words serve an instruction.
 enum class VgprMsbPolicy {
     /// Only its own word, every slot compared, with 0 in the slots no operand
     /// fills. What InsertVgprMsbPass has always emitted.
     ExactWord,
+    /// Any word that agrees on the slots the instruction depends on (its mask);
+    /// the others are don't-care. A setter takes the banks a later instruction
+    /// needs as long as nothing since it has read the slots that change, so
+    /// within a block the setters are as few as the order allows.
+    UnusedSlotsDontCare,
 };
+
+/// The policy \p caps asks for.
+inline VgprMsbPolicy vgprMsbPolicyOf(const AsmCapsConfig& caps) {
+    return caps.vgprMsbUnusedSlotsDontCare ? VgprMsbPolicy::UnusedSlotsDontCare
+                                           : VgprMsbPolicy::ExactWord;
+}
 
 /// What has to happen before one instruction, as VgprMsbTracker::step() works it out.
 struct VgprMsbStep {
-    /// An s_set_vgpr_msb is needed before the instruction.
+    /// A new s_set_vgpr_msb goes before the instruction.
     bool emit = false;
-    /// It is the first since a label, which InsertVgprMsbPass precedes with an s_nop.
+    /// Instead of a new one, the last setter this tracker asked for takes `word`:
+    /// nothing since it has read the slots that change. Never set with `emit`.
+    bool rewrite = false;
+    /// The new setter is the first since a label, which InsertVgprMsbPass
+    /// precedes with an s_nop.
     bool firstAfterLabel = false;
-    /// The word it replaces, when one was set. Msb16 packs it into the high byte.
+    /// The word a new setter replaces, when one was set. Msb16 packs it into the
+    /// high byte.
     std::optional<int> previousWord;
-    /// The word to write, when `emit` is set.
+    /// The word to write: the new setter's, or the rewritten setter's low byte.
     int word = -1;
 };
 
 /// The bank word in force while instructions are walked in order.
 ///
-/// An instruction needs a switch whenever the word in force does not serve it,
+/// An instruction needs a setter whenever the word in force does not serve it,
 /// as the policy decides. Nothing is known at the start of a block, after a
 /// call, or after a label, which may be reached from anywhere.
+///
+/// Under UnusedSlotsDontCare the tracker also remembers its last setter and the
+/// slots read since: an instruction that word does not serve, but whose
+/// changed slots nothing has read since, rewrites that setter rather than
+/// needing a new one. The setters then split each block into the longest
+/// stretches whose instructions agree on every slot they use.
 ///
 /// InsertVgprMsbPass emits by this, and anything predicting what it will emit,
 /// or ordering instructions to emit fewer, steps the same object, so they
@@ -332,50 +371,102 @@ class VgprMsbTracker {
    public:
     explicit VgprMsbTracker(VgprMsbPolicy policy = VgprMsbPolicy::ExactWord) : policy_(policy) {}
 
-    /// A label: no word is known, and the next switch follows an s_nop.
+    /// A label: no word is known, and the next setter follows an s_nop.
     void label() {
         current_ = kLabelBegin;
+        setterOpen_ = false;
     }
 
     /// The start of a block, or a call, after which the callee's word is unknown.
     void reset() {
         current_ = kNotRequired;
+        setterOpen_ = false;
     }
 
-    /// Whether the word in force serves \p required, so it needs no switch.
-    /// True of an instruction that needs no word.
+    /// An s_set_vgpr_msb already in the stream, setting \p word
+    /// (vgprMsbSetterWord(), -1 when unknown): in force from here, but that
+    /// setter is not this tracker's to rewrite.
+    void observeSetter(int word) {
+        current_ = word >= 0 ? word : kNotRequired;
+        setterOpen_ = false;
+    }
+
+    /// Whether the word in force serves \p required as it stands. True of an
+    /// instruction that needs no word.
     bool satisfies(const VgprMsbRequirement& required) const {
         if (!required.needed()) return true;
         switch (policy_) {
             case VgprMsbPolicy::ExactWord:
                 return required.word == current_;
+            case VgprMsbPolicy::UnusedSlotsDontCare:
+                return current_ >= 0 && vgprMsbChangedFields(current_, required) == 0;
         }
         return false;
     }
 
-    /// One instruction, needing \p required: whether a switch goes before it,
-    /// and which word it writes.
+    /// Whether step(\p required) would emit a new s_set_vgpr_msb: neither the
+    /// word in force nor a rewrite of the last setter serves it.
+    bool needsSetter(const VgprMsbRequirement& required) const {
+        return !satisfies(required) && !rewritable(required);
+    }
+
+    /// One instruction, needing \p required: whether a setter goes before it,
+    /// or the last one is rewritten, and which word is written.
     VgprMsbStep step(const VgprMsbRequirement& required) {
         VgprMsbStep result;
         if (satisfies(required)) {
-            // The next switch no longer directly follows the label, so it needs
+            // The next setter no longer directly follows the label, so it needs
             // no s_nop.
             if (current_ == kLabelBegin) current_ = kNotRequired;
+            readSince_ |= static_cast<uint32_t>(required.mask);
+            return result;
+        }
+        if (rewritable(required)) {
+            current_ = merged(required);
+            readSince_ |= static_cast<uint32_t>(required.mask);
+            result.rewrite = true;
+            result.word = current_;
             return result;
         }
         result.emit = true;
         result.firstAfterLabel = current_ == kLabelBegin;
         if (current_ >= 0) result.previousWord = current_;
-        result.word = required.word;
+        result.word = policy_ == VgprMsbPolicy::UnusedSlotsDontCare && current_ >= 0
+                          ? merged(required)
+                          : required.word;
         current_ = result.word;
+        readSince_ = static_cast<uint32_t>(required.mask);
+        setterOpen_ = true;
         return result;
     }
 
    private:
+    /// Under UnusedSlotsDontCare, whether the last setter can take \p required's
+    /// banks: it is this tracker's, and nothing since it has read a slot whose
+    /// bank would change.
+    bool rewritable(const VgprMsbRequirement& required) const {
+        if (policy_ != VgprMsbPolicy::UnusedSlotsDontCare || !setterOpen_ || current_ < 0 ||
+            !required.needed())
+            return false;
+        return (vgprMsbChangedFields(current_, required) & readSince_) == 0;
+    }
+
+    /// The word in force with the slots \p required depends on set to its banks.
+    int merged(const VgprMsbRequirement& required) const {
+        const uint32_t mask = static_cast<uint32_t>(required.mask);
+        const uint32_t kept = static_cast<uint32_t>(current_) & ~mask;
+        return static_cast<int>((kept | (static_cast<uint32_t>(required.word) & mask)) &
+                                static_cast<uint32_t>(kVgprMsbFullMask));
+    }
+
     static constexpr int kNotRequired = -1;
     static constexpr int kLabelBegin = -2;
     VgprMsbPolicy policy_;
     int current_ = kNotRequired;
+    /// The slot fields read since this tracker's last setter.
+    uint32_t readSince_ = 0;
+    /// The last setter is this tracker's own and can still be rewritten.
+    bool setterOpen_ = false;
 };
 
 }  // namespace stinkytofu
