@@ -38,6 +38,23 @@ pip install projects\hipblaslt\python
 
 To build hipBLASLt and the bindings together, use `invoke build --python` from `projects/hipblaslt`. It installs the bindings into the Python environment that runs `invoke`.
 
+## Handles and descriptors
+
+`Handle`, `MatmulDesc`, `MatrixLayout` and `Preference` wrap hipBLASLt's objects and release them when Python drops them. `Handle()` needs a visible HIP device and raises `HipblasLtError` without one; descriptors work without a GPU.
+
+Every descriptor attribute goes through one call, `set_attribute(attr, value)`, and comes back through `get_attribute(attr)`:
+
+```python
+from hipblaslt import _core as hb
+
+desc = hb.MatmulDesc(hb.ComputeType.COMPUTE_32F, hb.DataType.R_32F)
+desc.set_attribute(hb.MatmulDescAttr.TRANSA, hb.Operation.T)
+desc.set_attribute(hb.MatmulDescAttr.EPILOGUE, hb.Epilogue.RELU)
+assert desc.get_attribute(hb.MatmulDescAttr.EPILOGUE) is hb.Epilogue.RELU
+```
+
+The bindings know each attribute's C storage type, and its enum if it has one, and write exactly that many bytes. A value that doesn't fit, or isn't a member of the attribute's enum, raises `ValueError` or `TypeError` before hipBLASLt sees it. That matters because hipBLASLt itself accepts most wrong values without complaint.
+
 ## Which libhipblaslt gets loaded
 
 `import hipblaslt` picks one library and loads it by full path before anything else, in this order:
