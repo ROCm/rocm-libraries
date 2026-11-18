@@ -2096,10 +2096,16 @@ def _validate_slot_packs(flat):
     """RFC 0021 §4: `KDP.slot` is required for a slotted engine's pack, forbidden
     otherwise, and names a declared slot; a kernel serves at most one slot.
 
+    RFC 0021 §6: a slotted engine's pack dispatches through a native handler. A
+    slot's kernel finds its scratch past the shared region through the offset
+    tokens, and a declarative launch passes the workspace base instead. The
+    runtime drops such a pack; the packer refuses it.
+
     The kernel check covers kernels whose identity is static: an inline UKD's id
     or a standalone UKD named by id.
     """
     ued_by_id = {canonical_id(d.id): d for d in flat.by_type("ued")}
+    generics = flat.generic_by_id()
     claimed = {}
     for kdp in flat.kdps():
         ued = ued_by_id.get(canonical_id(kdp.doc.get("engine")))
@@ -2115,6 +2121,14 @@ def _validate_slot_packs(flat):
                 )
             continue
         agreement.pack_kmd_reference(ued.doc, kdp.doc, f"KDP {kdp.path.name}")
+        udd = generics.get(canonical_id(kdp.doc.get("dispatch")))
+        if udd is not None and "dispatch_symbol" not in udd.doc:
+            raise HkpPackError(
+                f"KDP {kdp.path.name} of slotted engine '{engine}' dispatches through "
+                f"UDD {udd.path.name}, a declarative launch; a slotted engine needs a "
+                "native dispatch_symbol, because a declarative launch's workspace "
+                "arguments are not offset past the shared region"
+            )
         served = claimed.setdefault(canonical_id(ued.id), {})
         for entry in kdp.doc["kernelDescriptors"]:
             kernel = canonical_id(entry if isinstance(entry, str) else entry.get("id"))

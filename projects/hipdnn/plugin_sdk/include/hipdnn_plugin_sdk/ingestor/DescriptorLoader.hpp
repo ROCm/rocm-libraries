@@ -3228,11 +3228,12 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
         // step.
         std::map<DescriptorId, MatchDescriptor> matchers;
         std::map<DescriptorId, DispatchDescriptor> dispatches;
-        // RFC 0018 A.5 checks 5 and 6, per (matcher, engine): a matcher several of this
-        // engine's packs list is checked once. "" means its references all resolve.
-        std::map<DescriptorId, std::string> criteriaErrors;
-        // The same pair check for a declarative UDD's launch formulas, per (UDD, engine).
-        std::map<DescriptorId, std::string> launchErrors;
+        // RFC 0018 A.5 checks 5 and 6, per (matcher, engine, slot): a matcher several of this
+        // engine's packs list is checked once against each KMD those packs declare kernels
+        // under, the slot's for a slotted engine. "" means its references all resolve.
+        std::map<std::pair<DescriptorId, size_t>, std::string> criteriaErrors;
+        // The same pair check for a declarative UDD's launch formulas, per (UDD, engine, slot).
+        std::map<std::pair<DescriptorId, size_t>, std::string> launchErrors;
 
         for(auto* packEntry : packEntries)
         {
@@ -3308,11 +3309,12 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
                 }
                 if(matcher->criteria != nullptr)
                 {
-                    auto [checked, inserted] = criteriaErrors.try_emplace(matcherId);
+                    auto [checked, inserted]
+                        = criteriaErrors.try_emplace(std::make_pair(matcherId, slotIndex));
                     if(inserted)
                     {
                         checked->second = criteriaReferenceError(
-                            *matcher->criteria, engine.graphMatch, set.schema);
+                            *matcher->criteria, engine.graphMatch, packSchema);
                     }
                     if(!checked->second.empty())
                     {
@@ -3335,11 +3337,12 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
             }
             if(reason.empty() && dispatch->launch != nullptr)
             {
-                auto [checked, inserted] = launchErrors.try_emplace(dispatch->id);
+                auto [checked, inserted]
+                    = launchErrors.try_emplace(std::make_pair(dispatch->id, slotIndex));
                 if(inserted)
                 {
                     checked->second
-                        = launchReferenceError(*dispatch->launch, engine.graphMatch, set.schema);
+                        = launchReferenceError(*dispatch->launch, engine.graphMatch, packSchema);
                 }
                 if(!checked->second.empty())
                 {

@@ -1411,7 +1411,8 @@ happen declaratively through the engine's pattern and the pack's matchers, so on
 itself becomes C++. On the drop-in path a native dispatch handler must be a built-in registered
 handler, subject to the source-trust rules for drop-in packages. An engine with kernel slots uses
 native handlers that read the offset tokens, because declarative workspace arguments are not offset
-past the shared region ([RFC 0021 § 6](0021_KernelSlots.md#6-shared-workspace-and-arguments)).
+past the shared region ([RFC 0021 § 6](0021_KernelSlots.md#6-shared-workspace-and-arguments)). The
+packer refuses a slotted engine's pack whose UDD is declarative, and the state manager drops it.
 
 ---
 

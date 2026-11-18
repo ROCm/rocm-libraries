@@ -552,9 +552,22 @@ private:
                 }
                 refusal = std::move(message);
             };
+            // RFC 0021 §6: a slot's kernel finds its scratch past the shared region through the
+            // offset tokens, which only a native handler reads. A declarative launch passes the
+            // workspace base, so its kernels would write over the shared region.
+            if(_slotted && packLaunch != nullptr)
+            {
+                refuse(describeDescriptor("dispatch", packDispatch.descriptor.name, pack.dispatchId)
+                       + " is a declarative launch, which a slotted engine cannot use: its "
+                         "workspace arguments are not offset past the shared region");
+            }
 
             for(const auto& kernel : pack.kernels)
             {
+                if(!refusal.empty())
+                {
+                    break;
+                }
                 const auto isAdaptable = [](const KernelSource& source) {
                     return source.kind == KernelSourceKind::EMBEDDED_SOURCE
                            || source.kind == KernelSourceKind::KPACK;

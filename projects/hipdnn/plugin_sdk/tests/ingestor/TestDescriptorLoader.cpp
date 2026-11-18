@@ -7351,6 +7351,27 @@ TEST(TestDescriptorLoader, LoadsAThreeSlotSetWithPerSlotState)
     EXPECT_EQ(set.dispatches.size(), 1u);
 }
 
+/// A slotted engine has no engine-level KMD: kernel-scoped criteria resolve `$kernel.*`
+/// against the KMD of the slot each pack serves, so a field only one slot's KMD declares
+/// keeps that slot's pack and drops the others'.
+TEST(TestDescriptorLoader, ResolvesKernelCriteriaAgainstEachSlotsKmd)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("slot_criteria"));
+    auto documents = makeSlottedDocuments('1', "test:slot_criteria");
+    declareCriteria(matcherOfScope(documents, "kernel"),
+                    nlohmann::json::parse(R"({"==": ["$kernel.variant", "a"]})"));
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& slots = sets.front().slots;
+    ASSERT_EQ(slots.size(), 3u);
+    EXPECT_TRUE(slots[0].packs.empty());
+    EXPECT_EQ(slots[1].packs.size(), 1u);
+    EXPECT_TRUE(slots[2].packs.empty());
+}
+
 TEST(TestDescriptorLoader, ParsesASlottedUedToOneDescriptorWhateverItsStorageHeld)
 {
     // Per-arch shards ship byte-identical copies of one slotted UED, and the loader keeps
