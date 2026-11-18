@@ -220,6 +220,8 @@ namespace
         int                  repeat    = 1;
         // Leave the previous result in y between computes. Needs beta = 0.
         bool reset_y = true;
+        // Store the rows of the pattern as the columns of a CSC matrix.
+        bool csc = false;
     };
 
     struct Out
@@ -336,8 +338,22 @@ namespace
             return out;
         }
 
+        // The CSC matrix is the transpose of the pattern, so its product is
+        // the opposite one of the pattern read as CSR.
+        Opt ro = o;
+        if(o.csc)
+        {
+            if(o.symmetric || o.op == rocsparse_operation_conjugate_transpose)
+            {
+                report(what + ": the reference does not cover this CSC case");
+                return out;
+            }
+            ro.op = (o.op == rocsparse_operation_none) ? rocsparse_operation_transpose
+                                                       : rocsparse_operation_none;
+        }
+
         const int64_t b    = (o.base == rocsparse_index_base_one) ? 1 : 0;
-        const bool    none = (o.op == rocsparse_operation_none);
+        const bool    none = (ro.op == rocsparse_operation_none);
         const int64_t xlen = none ? a.n : a.m;
         const int64_t ylen = none ? a.m : a.n;
 
@@ -385,7 +401,7 @@ namespace
         {
             c_y0[i] = to_cd(h_y0[i]);
         }
-        const std::vector<cd> ref = reference(a, c_val, c_x, c_y0, o, to_cd(alpha), to_cd(beta));
+        const std::vector<cd> ref = reference(a, c_val, c_x, c_y0, ro, to_cd(alpha), to_cd(beta));
 
         // y is not read when beta is zero.
         const std::vector<Y> y_init
@@ -406,18 +422,36 @@ namespace
         level2::spmat_guard mat;
         level2::dnvec_guard vx;
         level2::dnvec_guard vy;
-        if(rocsparse_create_csr_descr(&mat.d,
-                                      a.m,
-                                      a.n,
-                                      a.nnz(),
-                                      d_ptr.ptr,
-                                      d_ind.ptr,
-                                      d_val.ptr,
-                                      it_of<I>(),
-                                      it_of<J>(),
-                                      o.base,
-                                      dt_of<A>())
-           != rocsparse_status_success)
+        rocsparse_status    created = rocsparse_status_success;
+        if(o.csc)
+        {
+            created = rocsparse_create_csc_descr(&mat.d,
+                                                 a.n,
+                                                 a.m,
+                                                 a.nnz(),
+                                                 d_ptr.ptr,
+                                                 d_ind.ptr,
+                                                 d_val.ptr,
+                                                 it_of<I>(),
+                                                 it_of<J>(),
+                                                 o.base,
+                                                 dt_of<A>());
+        }
+        else
+        {
+            created = rocsparse_create_csr_descr(&mat.d,
+                                                 a.m,
+                                                 a.n,
+                                                 a.nnz(),
+                                                 d_ptr.ptr,
+                                                 d_ind.ptr,
+                                                 d_val.ptr,
+                                                 it_of<I>(),
+                                                 it_of<J>(),
+                                                 o.base,
+                                                 dt_of<A>());
+        }
+        if(created != rocsparse_status_success)
         {
             report(what + ": cannot create the matrix descriptor");
             return out;
@@ -683,6 +717,21 @@ namespace
             a.add_row(0, 0);
         }
         a.add_row(0, 1);
+        return a;
+    }
+
+    // Row 0 uses column 1, and row 1 uses column 0, so x[0] is read and there
+    // is no (0, 0) entry. The transposed product is [3, NaN, 9].
+    Csr make_nan_in_x0()
+    {
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        Csr          a;
+        a.m   = 3;
+        a.n   = 3;
+        a.ptr = {0, 1, 3, 4};
+        a.ind = {1, 0, 2, 2};
+        a.val = {cd(2, 0), cd(3, 0), cd(1, 0), cd(4, 0)};
+        a.x   = {cd(nan, 0), cd(1, 0), cd(2, 0)};
         return a;
     }
 
@@ -1787,20 +1836,10 @@ TEST_F(CsrmvNnzsplit, degenerate_sizes)
     }
 }
 
-// Row 0 uses column 1, and row 1 uses column 0, so x[0] is read and there is
-// no (0, 0) entry. A^T x is [3, NaN, 9]. A position past the last nonzero must
-// not turn y[0] into NaN.
+// A position past the last nonzero must not turn y[0] into NaN.
 TEST_F(CsrmvNnzsplit, transposed_nan_in_x0_stays_off_y0)
 {
-    const double nan = std::numeric_limits<double>::quiet_NaN();
-    Csr          a;
-    a.m   = 3;
-    a.n   = 3;
-    a.ptr = {0, 1, 3, 4};
-    a.ind = {1, 0, 2, 2};
-    a.val = {cd(2, 0), cd(3, 0), cd(1, 0), cd(4, 0)};
-    a.x   = {cd(nan, 0), cd(1, 0), cd(2, 0)};
-
+    const Csr a = make_nan_in_x0();
     for(rocsparse_operation op :
         {rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose})
     {
@@ -1810,6 +1849,28 @@ TEST_F(CsrmvNnzsplit, transposed_nan_in_x0_stays_off_y0)
             o.beta  = 0.0;
             run_f32(handle, a, o, mode + (op == rocsparse_operation_transpose ? " T" : " H"));
         });
+    }
+}
+
+// The same arrays as a CSC matrix. A non-transposed CSC product runs the
+// transposed CSR kernel on them, so A x is [3, NaN, 9] again.
+TEST_F(CsrmvNnzsplit, csc_nan_in_x0_stays_off_y0)
+{
+    const Csr a = make_nan_in_x0();
+    for(bool v2 : {false, true})
+    {
+        Opt o;
+        o.csc                  = true;
+        o.v2                   = v2;
+        o.alpha                = 1.0;
+        o.beta                 = 0.0;
+        const std::string what = std::string("csc ") + (v2 ? "v2" : "v1");
+        const Out         out  = run_f32(handle, a, o, what);
+        ASSERT_TRUE(out.ran) << what;
+        ASSERT_EQ(out.y.size(), 3u) << what;
+        EXPECT_EQ(out.y[0], cd(3, 0)) << what;
+        EXPECT_TRUE(std::isnan(out.y[1].real())) << what;
+        EXPECT_EQ(out.y[2], cd(9, 0)) << what;
     }
 }
 

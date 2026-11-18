@@ -805,6 +805,20 @@ TEST_F(CsrmvDefaultDispatch, transposed_csc_default_uses_the_csr_rule)
     expect_nnzsplit(run_f32(handle, alternating(), o));
 }
 
+// A transposed CSC product runs the non-transposed CSR kernel on the stored
+// columns, so the first column reaches the wavefront that holds the last
+// nonzero.
+TEST_F(CsrmvDefaultDispatch, transposed_csc_default_when_first_column_reaches_the_tail)
+{
+    Options t = with_op(rocsparse_operation_transpose);
+    t.as_csc  = true;
+    expect_nnzsplit(run_f32(handle, scattered_gap_first_row_reaches_tail(), t));
+    Options h = with_op(rocsparse_operation_conjugate_transpose);
+    h.as_csc  = true;
+    expect_nnzsplit(run<int32_t, int32_t, rocsparse_float_complex, rocsparse_float_complex>(
+        handle, scattered_gap_first_row_reaches_tail(), h));
+}
+
 TEST_F(CsrmvDefaultDispatch, conjugate_transposed_csc_default_uses_the_csr_rule)
 {
     Options o = with_op(rocsparse_operation_conjugate_transpose);
