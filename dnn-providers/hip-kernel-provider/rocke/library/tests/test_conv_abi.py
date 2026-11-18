@@ -2772,8 +2772,9 @@ def test_cache_applies_runtime_launch_limits(tmp_path):
 
     # A split-K binary serves the same problems: grouped is still accepted and
     # depthwise is still refused. The even-cpg rule for a split-K 16-bit dX
-    # atomic lives in the spec validator (covered by test_conv_split_k.py);
-    # supports_problem does not check it.
+    # atomic is checked by the spec validator and by dgrad_split_k_available
+    # (the latter is covered by test_conv_split_k.py); supports_problem does
+    # not check it.
     split_k_dgrad = KernelIdentity(
         direction="dgrad",
         tile_m=64,

@@ -344,10 +344,10 @@ class TestPatchIdentity(unittest.TestCase):
     def test_off_keeps_the_historical_hash(self):
         from kernels.conv.kernel_identity import KernelIdentity
 
-        # Pinned literal: the hash this identity had before ``patch`` (and the
-        # fields added since) existed. Every field added later is left out of
-        # the hash at its default, so an identity that does not use it keeps
-        # its hash and its AOT cache entries. A change here orphans the cache.
+        # Pinned literal: the hash ``stable_hash()`` gives this identity with
+        # ``patch`` off. Every field added after it is left out of the hash at
+        # its default, so an identity that does not use such a field keeps its
+        # hash and its AOT cache entries. A change here orphans the cache.
         ident = replace(KernelIdentity.from_label(self.LABEL), patch=False)
         self.assertEqual(
             ident.stable_hash(), "e8f7063e499219b036f4194967f2fa6311530819"
