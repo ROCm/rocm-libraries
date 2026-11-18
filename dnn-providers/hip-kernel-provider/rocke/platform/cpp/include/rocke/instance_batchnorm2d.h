@@ -62,6 +62,7 @@ typedef struct rocke_batchnorm2d_spec
     const char* dtype; /* default "f16" ("f16"|"bf16")      */
     bool training; /* default true                      */
     bool save_mean_invstd; /* default false                     */
+    int channels_per_block; /* default 1 (byte-identical when 1) */
     int wave_size; /* default 64                        */
     const char* name; /* default "rocke_batchnorm2d_fwd"  */
 } rocke_batchnorm2d_spec_t;

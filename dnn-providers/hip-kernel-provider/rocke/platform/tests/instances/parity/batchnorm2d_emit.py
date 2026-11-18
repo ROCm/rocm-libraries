@@ -21,32 +21,37 @@ from rocke.core.ir_serialize import serialize
 from rocke.core.verify import verify
 
 
-# (n, c, h, w, block_size, vec, dtype, training, save_mean_invstd)
+# (n, c, h, w, block_size, vec, dtype, training, save_mean_invstd, channels_per_block)
 CONFIGS = [
     # --- small single-pass, training ---
-    (2, 8, 16, 16, 64, 2, "f16", True, False),  # 0
-    (2, 8, 16, 16, 64, 2, "bf16", True, False),  # 1
-    (2, 8, 16, 16, 64, 2, "f16", True, True),  # 2  save mean/invstd
+    (2, 8, 16, 16, 64, 2, "f16", True, False, 1),  # 0
+    (2, 8, 16, 16, 64, 2, "bf16", True, False, 1),  # 1
+    (2, 8, 16, 16, 64, 2, "f16", True, True, 1),  # 2  save mean/invstd
     # --- inference (no reduction, no LDS) ---
-    (2, 8, 16, 16, 64, 2, "f16", False, False),  # 3
-    (2, 8, 16, 16, 64, 2, "bf16", False, False),  # 4
+    (2, 8, 16, 16, 64, 2, "f16", False, False, 1),  # 3
+    (2, 8, 16, 16, 64, 2, "bf16", False, False, 1),  # 4
     # --- vec / block sweep ---
-    (2, 8, 32, 32, 128, 4, "f16", True, False),  # 5
-    (4, 4, 16, 16, 64, 4, "bf16", True, True),  # 6
-    (1, 16, 8, 8, 32, 2, "f16", True, False),  # 7  N=1 (single sample)
+    (2, 8, 32, 32, 128, 4, "f16", True, False, 1),  # 5
+    (4, 4, 16, 16, 64, 4, "bf16", True, True, 1),  # 6
+    (1, 16, 8, 8, 32, 2, "f16", True, False, 1),  # 7  N=1 (single sample)
     # --- fp16 alias ---
-    (2, 8, 16, 16, 64, 2, "fp16", True, False),  # 8
+    (2, 8, 16, 16, 64, 2, "fp16", True, False, 1),  # 8
     # --- two-pass path: elems_per_thread > 64 ---
-    (8, 4, 32, 32, 64, 2, "f16", True, False),  # 9  elems=128 -> two-pass
-    (8, 4, 32, 32, 64, 2, "bf16", False, False),  # 10 two-pass shape, inference
-    (8, 4, 32, 32, 64, 4, "f16", True, True),  # 11 two-pass + save mv
+    (8, 4, 32, 32, 64, 2, "f16", True, False, 1),  # 9  elems=128 -> two-pass
+    (8, 4, 32, 32, 64, 2, "bf16", False, False, 1),  # 10 two-pass shape, inference
+    (8, 4, 32, 32, 64, 4, "f16", True, True, 1),  # 11 two-pass + save mv
+    # --- channels_per_block > 1 lever ---
+    (2, 8, 16, 16, 64, 2, "f16", True, False, 2),  # 12 training, cpb=2
+    (2, 8, 16, 16, 64, 2, "bf16", False, False, 4),  # 13 inference, cpb=4 (all channels, 1 CTA)
+    (4, 4, 16, 16, 64, 4, "bf16", True, True, 2),  # 14 training + save mv, cpb=2
+    (8, 4, 32, 32, 64, 2, "f16", True, False, 4),  # 15 two-pass + cpb=4
 ]
 
 
 def _spec(idx: int) -> BatchNorm2DSpec:
     if idx < 0 or idx >= len(CONFIGS):
         raise SystemExit(f"unknown config index {idx}")
-    n, c, h, w, bs, v, dt, training, smv = CONFIGS[idx]
+    n, c, h, w, bs, v, dt, training, smv, cpb = CONFIGS[idx]
     return BatchNorm2DSpec(
         n=n,
         c=c,
@@ -57,6 +62,7 @@ def _spec(idx: int) -> BatchNorm2DSpec:
         dtype=dt,
         training=training,
         save_mean_invstd=smv,
+        channels_per_block=cpb,
     )
 
 

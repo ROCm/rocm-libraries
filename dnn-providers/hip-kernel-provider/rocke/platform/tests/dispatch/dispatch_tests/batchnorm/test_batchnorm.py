@@ -92,6 +92,31 @@ class TestBatchNormDispatch(unittest.TestCase):
                 r = dispatch_batchnorm(req)
                 self.assertEqual(r.candidate.spec_id, "batchnorm_b256_v4")
 
+    def test_channels_per_block_default_is_one_and_not_auto_selected(self):
+        # channels_per_block is a default-off lever: auto dispatch must keep
+        # picking the channels_per_block=1 candidate even though cpb>1
+        # candidates are registered and legal for this shape (c=32 divides
+        # every value in _CHANNELS_PER_BLOCK).
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                r = dispatch_batchnorm(_req(1, 32, 64, 64, arch))
+                self.assertEqual(r.spec.channels_per_block, 1)
+
+    def test_channels_per_block_reachable_via_spec_id_and_shrinks_grid(self):
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                req = _req(1, 32, 64, 64, arch, spec_id="batchnorm_b256_v4_cpb4")
+                r = dispatch_batchnorm(req)
+                self.assertEqual(r.spec.channels_per_block, 4)
+                self.assertEqual(r.grid, (32 // 4, 1, 1))
+
+    def test_channels_per_block_appears_in_sweep_space(self):
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                req = _req(1, 32, 64, 64, arch)
+                specs = batchnorm_sweep_space(req)
+                self.assertTrue(any(s.channels_per_block > 1 for s in specs))
+
     def test_sweep_space_enumerates_valid_block_vec_combos(self):
         for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):

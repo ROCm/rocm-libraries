@@ -465,6 +465,22 @@ primitive in this codebase (every existing block reduction is intra-CTA), so
 per-sample sweep is just the existing row-sweep helper, called once per `n`
 into shared accumulators.
 
+**`channels_per_block` (default-off grid lever).** `BatchNorm2DSpec.channels_per_block`
+(default `1`, byte-identical emission when `1`) groups `channels_per_block`
+channels into one CTA, processed sequentially with the full block of threads
+on each in turn (not a thread-split): the per-channel Welford LDS buffers are
+reused across channels, with an explicit barrier between a channel's final
+LDS read and the next channel's first LDS write (training mode only — there
+is no LDS at all in inference mode). Grid becomes `(C // channels_per_block,
+1, 1)`. This exists to amortize launch overhead for shapes whose grid is
+otherwise very small; measured against the two shapes it targeted
+(`n16c256h16w16`, `n16c256h32w32`) on gfx950, every `channels_per_block>1`
+value measured *slower* than `1`, so the dispatcher's `auto` selection never
+picks it (lowest priority of the axis; reachable by pinning `spec_id`, e.g.
+`batchnorm_b64_v4_cpb4`). Correct and GPU-numeric-verified infrastructure
+that did not pan out for its target shapes — left registered as a lever in
+case a different shape regime benefits.
+
 ## Transpose2D
 
 File:

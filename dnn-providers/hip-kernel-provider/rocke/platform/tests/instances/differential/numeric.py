@@ -1181,6 +1181,7 @@ class BatchNormCfg:
     block_size: int = 64
     vec: int = 4
     momentum: float = 0.1
+    channels_per_block: int = 1
 
 
 # H*W must be divisible by block_size*vec (one sweep_row_chunks call per
@@ -1192,6 +1193,19 @@ BATCHNORM_CONFIGS: List[BatchNormCfg] = [
     BatchNormCfg("bn_infer_bf16_2x64x16x16", 2, 64, 16, 16, "bf16", training=False),
     BatchNormCfg("bn_train_f16_4x128x8x32", 4, 128, 8, 32, "f16", training=True),
     BatchNormCfg("bn_infer_bf16_4x128x8x32", 4, 128, 8, 32, "bf16", training=False),
+    # --- channels_per_block > 1 lever: fewer, bigger CTAs, same math ---
+    BatchNormCfg(
+        "bn_train_f16_2x64x16x16_cpb2", 2, 64, 16, 16, "f16",
+        training=True, channels_per_block=2,
+    ),
+    BatchNormCfg(
+        "bn_infer_bf16_2x64x16x16_cpb4", 2, 64, 16, 16, "bf16",
+        training=False, channels_per_block=4,
+    ),
+    BatchNormCfg(
+        "bn_train_bf16_4x128x8x32_cpb8", 4, 128, 8, 32, "bf16",
+        training=True, channels_per_block=8,
+    ),
 ]
 
 _BATCHNORM_TOL = Tol(rtol=2e-1, atol=1e-1)
@@ -1241,6 +1255,7 @@ def run_batchnorm_config(cfg: BatchNormCfg, arch: str = "gfx950") -> NumericResu
         vec=cfg.vec,
         dtype=cfg.dtype,
         training=cfg.training,
+        channels_per_block=cfg.channels_per_block,
         wave_size=_wave,
     )
     ok, reason = is_valid_spec(spec, arch=arch)

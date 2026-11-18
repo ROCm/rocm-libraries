@@ -271,12 +271,24 @@ parity runs on the matching device and is not implied by the ✅ here.
 - **`batchnorm2d`** is a new family (own dispatch family, NCHW layout, one CTA
   per channel — see `platform/dsl_docs/instances/batchnorm2d.md`). Its Python/C++
   byte-identity parity (`batchnorm2d_emit.py`/`.c`) is GREEN at all 4 LLVM
-  flavors and its dispatch tests pass, but it is **not yet** in the
-  GPU-numeric "Verified PASS" list above: the differential test case was
-  added to `differential/numeric.py`, but no GPU-enabled Python environment
-  (numpy/torch) was available to actually execute it at implementation time.
-  Treat `batchnorm2d` as implemented and structurally verified, GPU-numeric
-  verification pending.
+  flavors, its dispatch tests pass, and its GPU-numeric differential cases
+  (`differential/numeric.py::BATCHNORM_CONFIGS`, both training and inference,
+  both dtypes) are GREEN on gfx950 (max_rel ≤ 1.1e-2, well inside the
+  `rtol=2e-1` tolerance; training mode's in-place `RunningMean`/`RunningVar`
+  EMA update also verified against a non-trivial prior).
+  - **`channels_per_block`** (default `1`, byte-identical when `1`) is a
+    default-off grid lever: `>1` groups multiple channels into one CTA,
+    processed sequentially, shrinking the grid (`C // channels_per_block`
+    CTAs). Implemented + byte-identity-verified (16 parity configs, all 4
+    LLVM flavors) + GPU-numeric-verified (including training-mode LDS reuse
+    across channels within one CTA). Measured on gfx950 against the two
+    known-weak shapes (`n16c256h16w16`, `n16c256h32w32`, both train/infer):
+    **every `channels_per_block>1` value measured slower than `=1`**,
+    monotonically so (e.g. `cpb=32` ran ~12x slower, `cpb=2` ~1.3-1.7x
+    slower) — shrinking the grid does not help here, so the dispatcher never
+    auto-selects it (lowest priority, reachable only by pinning `spec_id`).
+    The weak shapes' actual bottleneck is still open; this lever is real,
+    correct infrastructure that did not pan out for the cases it targeted.
 - **`add_rmsnorm2d_rdquant` on gfx1151 (RDNA):** only `out_dtype="i8"` is
   supported. fp8/bf8 output needs the CDNA-only `v_cvt_pk_{fp8,bf8}_f32`
   conversion, so fp8/bf8 specs are rejected by the validator on non-CDNA

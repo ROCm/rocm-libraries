@@ -42,6 +42,7 @@ rocke_batchnorm2d_spec_t rocke_batchnorm2d_spec_default(void)
     s.dtype = "f16";
     s.training = true;
     s.save_mean_invstd = false;
+    s.channels_per_block = 1;
     s.wave_size = 64;
     s.name = "rocke_batchnorm2d_fwd";
     return s;
@@ -76,7 +77,11 @@ int rocke_batchnorm2d_elems_per_thread(const rocke_batchnorm2d_spec_t* spec)
 
 /* BatchNorm2DSpec.kernel_name():
  *   kernel_name_join(self.name, self.dtype, f"N{n}C{c}H{h}W{w}", f"b{block_size}",
- *                    f"v{vec}", flags={"train": training, "smv": save_mean_invstd}) */
+ *                    f"v{vec}",
+ *                    f"cpb{channels_per_block}" if channels_per_block != 1 else "",
+ *                    flags={"train": training, "smv": save_mean_invstd})
+ * kernel_name_join drops empty-string parts, so an empty part_cpb (the
+ * channels_per_block==1 default) reproduces the pre-lever name exactly. */
 rocke_status_t rocke_batchnorm2d_kernel_name(const rocke_batchnorm2d_spec_t* spec,
                                              char* out,
                                              size_t out_cap)
@@ -84,7 +89,8 @@ rocke_status_t rocke_batchnorm2d_kernel_name(const rocke_batchnorm2d_spec_t* spe
     char part_dims[64];
     char part_b[32];
     char part_v[32];
-    const char* parts[4];
+    char part_cpb[32];
+    const char* parts[5];
     const char* flag_names[2];
     int flag_on[2];
 
@@ -96,18 +102,27 @@ rocke_status_t rocke_batchnorm2d_kernel_name(const rocke_batchnorm2d_spec_t* spe
     snprintf(part_dims, sizeof part_dims, "N%dC%dH%dW%d", spec->n, spec->c, spec->h, spec->w);
     snprintf(part_b, sizeof part_b, "b%d", spec->block_size);
     snprintf(part_v, sizeof part_v, "v%d", spec->vec);
+    if(spec->channels_per_block != 1)
+    {
+        snprintf(part_cpb, sizeof part_cpb, "cpb%d", spec->channels_per_block);
+    }
+    else
+    {
+        part_cpb[0] = '\0';
+    }
 
     parts[0] = spec->dtype;
     parts[1] = part_dims;
     parts[2] = part_b;
     parts[3] = part_v;
+    parts[4] = part_cpb;
 
     flag_names[0] = "train";
     flag_on[0] = spec->training ? 1 : 0;
     flag_names[1] = "smv";
     flag_on[1] = spec->save_mean_invstd ? 1 : 0;
 
-    return rocke_kernel_name_join(spec->name, parts, 4, flag_names, flag_on, 2, out, out_cap, NULL);
+    return rocke_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 2, out, out_cap, NULL);
 }
 
 /* ------------------------------------------------------------------ *
@@ -165,6 +180,17 @@ bool rocke_batchnorm2d_is_valid_spec(const rocke_batchnorm2d_spec_t* spec,
     if(spec->save_mean_invstd && !spec->training)
     {
         bn_set_reason(reason, reason_cap, "save_mean_invstd requires training=True");
+        return false;
+    }
+
+    if(spec->channels_per_block <= 0)
+    {
+        bn_set_reason(reason, reason_cap, "channels_per_block must be positive");
+        return false;
+    }
+    if(spec->c % spec->channels_per_block != 0)
+    {
+        bn_set_reason(reason, reason_cap, "c not divisible by channels_per_block");
         return false;
     }
 
@@ -457,7 +483,10 @@ rocke_kernel_def_t* rocke_build_batchnorm2d(rocke_ir_builder_t* b,
     momentum = rocke_b_param(b, "momentum", rocke_f32(), NULL);
 
     tid = rocke_b_thread_id_x(b);
-    channel = rocke_b_block_id_x(b);
+    {
+        rocke_value_t* base_channel_early = rocke_b_block_id_x(b);
+        channel = base_channel_early; /* reused as the loop's base_channel below */
+    }
 
     /* Packed (N*C, H*W) view: see the Python module docstring for the NCHW
      * row-per-(n,c) layout rationale. */
@@ -478,147 +507,180 @@ rocke_kernel_def_t* rocke_build_batchnorm2d(rocke_ir_builder_t* b,
         lds_count = lds_count_v.base;
     }
 
-    /* --- Pass 1 (training only): N-loop of per-sample row sweeps --- */
     row_values = (rocke_value_t**)malloc(sizeof(rocke_value_t*) * (size_t)N);
     x_tiles = (rocke_tile_window_t*)malloc(sizeof(rocke_tile_window_t) * (size_t)N);
     cached_by_n = (rocke_value_t***)calloc((size_t)N, sizeof(rocke_value_t**));
     num_cached_by_n = (int*)calloc((size_t)N, sizeof(int));
 
     {
-        bn_pass1_ctx_t p1;
-        p1.sum_p = rocke_b_const_f32(b, 0.0);
-        p1.sumsq_p = rocke_b_const_f32(b, 0.0);
+        /* channels_per_block (default 1, byte-identical to the original
+         * single-channel-per-CTA emission): a build-time loop over the CPB
+         * channels this CTA owns, run sequentially with the full block of
+         * threads on each in turn. See the Python builder's matching
+         * comment for the LDS-reuse-barrier rationale. */
+        rocke_value_t* base_channel = channel; /* captured right after tid, above */
+        int CPB = spec->channels_per_block;
+        int cb;
 
-        lengths2[0] = 1;
-        lengths2[1] = HW;
-
-        for(n = 0; n < N; ++n)
+        for(cb = 0; cb < CPB; ++cb)
         {
-            rocke_value_t* row_n = rocke_b_add(b, rocke_b_const_i32(b, n * C), channel);
-            row_values[n] = row_n;
-            origin[0] = row_n;
-            origin[1] = rocke_b_const_i32(b, 0);
-            rocke_make_tile_window(&x_tiles[n], &x_view, lengths2, origin, 2);
+            bn_pass1_ctx_t p1;
+
+            if(CPB == 1)
+            {
+                channel = base_channel;
+            }
+            else
+            {
+                /* Match Python's left-to-right argument evaluation
+                 * (b.mul(...) emitted before b.const_i32(cb)): C/C++
+                 * argument evaluation order is unspecified, so each operand
+                 * is materialised into its own statement in emission order
+                 * rather than nested in the rocke_b_add call. */
+                rocke_value_t* scaled = rocke_b_mul(b, base_channel, rocke_b_const_i32(b, CPB));
+                rocke_value_t* cb_const = rocke_b_const_i32(b, cb);
+                channel = rocke_b_add(b, scaled, cb_const);
+                if(spec->training && cb > 0)
+                {
+                    rocke_b_sync(b);
+                }
+            }
+
+            p1.sum_p = rocke_b_const_f32(b, 0.0);
+            p1.sumsq_p = rocke_b_const_f32(b, 0.0);
+
+            lengths2[0] = 1;
+            lengths2[1] = HW;
+
+            for(n = 0; n < N; ++n)
+            {
+                rocke_value_t* row_n = rocke_b_add(b, rocke_b_const_i32(b, n * C), channel);
+                row_values[n] = row_n;
+                origin[0] = row_n;
+                origin[1] = rocke_b_const_i32(b, 0);
+                rocke_make_tile_window(&x_tiles[n], &x_view, lengths2, origin, 2);
+
+                if(spec->training)
+                {
+                    rocke_row_chunk_sweep_result_t res =
+                        rocke_sweep_row_chunks(b,
+                                               &x_tiles[n],
+                                               tid,
+                                               BS,
+                                               VEC,
+                                               ept_row,
+                                               NULL, /* row -- origin already placed */
+                                               bn_pass1_body,
+                                               &p1,
+                                               !two_pass);
+                    cached_by_n[n] = res.cached;
+                    num_cached_by_n[n] = res.num_cached;
+                }
+            }
 
             if(spec->training)
             {
-                rocke_row_chunk_sweep_result_t res =
-                    rocke_sweep_row_chunks(b,
-                                           &x_tiles[n],
-                                           tid,
-                                           BS,
-                                           VEC,
-                                           ept_row,
-                                           NULL, /* row -- origin already placed */
-                                           bn_pass1_body,
-                                           &p1,
-                                           !two_pass);
-                cached_by_n[n] = res.cached;
-                num_cached_by_n[n] = res.num_cached;
+                double count_p = (double)rocke_batchnorm2d_elems_per_thread(spec);
+                rocke_value_t* inv_count_p = rocke_b_const_f32(b, 1.0 / count_p);
+                rocke_value_t* mean_p = rocke_b_fmul(b, p1.sum_p, inv_count_p);
+                rocke_value_t* m2_p =
+                    rocke_b_fsub(b, p1.sumsq_p, rocke_b_fmul(b, mean_p, p1.sum_p));
+
+                rocke_welford_block_reduce_stable(b,
+                                                  mean_p,
+                                                  m2_p,
+                                                  rocke_b_const_f32(b, count_p),
+                                                  lds_mean,
+                                                  lds_m2,
+                                                  lds_count,
+                                                  tid,
+                                                  BS,
+                                                  &mean,
+                                                  &var);
+
+                {
+                    rocke_if_t iff = rocke_b_scf_if(b, rocke_b_cmp_eq(b, tid, rocke_b_const_i32(b, 0)));
+                    rocke_value_t* old_mean;
+                    rocke_value_t* old_var;
+                    rocke_value_t* one_minus_mom;
+                    rocke_value_t* new_running_mean;
+                    rocke_value_t* new_running_var;
+
+                    rocke_b_region_enter(b, iff.then_region);
+                    old_mean = rocke_b_global_load_f32(b, RunningMean, channel, 4);
+                    old_var = rocke_b_global_load_f32(b, RunningVar, channel, 4);
+                    one_minus_mom = rocke_b_fsub(b, rocke_b_const_f32(b, 1.0), momentum);
+                    {
+                        /* Match Python's left-to-right argument evaluation
+                         * (b.fmul(one_minus_mom, old_mean) emitted before
+                         * b.fmul(momentum, mean)): C/C++ argument evaluation
+                         * order is unspecified, so each operand MUST be
+                         * materialised into its own statement in emission
+                         * order rather than nested in the fadd call. */
+                        rocke_value_t* term_a = rocke_b_fmul(b, one_minus_mom, old_mean);
+                        rocke_value_t* term_b = rocke_b_fmul(b, momentum, mean);
+                        new_running_mean = rocke_b_fadd(b, term_a, term_b);
+                    }
+                    {
+                        rocke_value_t* term_a = rocke_b_fmul(b, one_minus_mom, old_var);
+                        rocke_value_t* term_b = rocke_b_fmul(b, momentum, var);
+                        new_running_var = rocke_b_fadd(b, term_a, term_b);
+                    }
+                    rocke_b_global_store(b, RunningMean, channel, new_running_mean, 1);
+                    rocke_b_global_store(b, RunningVar, channel, new_running_var, 1);
+                    if(spec->save_mean_invstd)
+                    {
+                        rocke_value_t* inv_std_save = rocke_b_rsqrt(b, rocke_b_fadd(b, var, eps));
+                        rocke_b_store_scalar_from_f32(b, Mean, channel, mean, spec->dtype);
+                        rocke_b_store_scalar_from_f32(b, InvStd, channel, inv_std_save, spec->dtype);
+                    }
+                    rocke_b_region_leave(b);
+                }
             }
-        }
-
-        if(spec->training)
-        {
-            double count_p = (double)rocke_batchnorm2d_elems_per_thread(spec);
-            rocke_value_t* inv_count_p = rocke_b_const_f32(b, 1.0 / count_p);
-            rocke_value_t* mean_p = rocke_b_fmul(b, p1.sum_p, inv_count_p);
-            rocke_value_t* m2_p = rocke_b_fsub(b, p1.sumsq_p, rocke_b_fmul(b, mean_p, p1.sum_p));
-
-            rocke_welford_block_reduce_stable(b,
-                                              mean_p,
-                                              m2_p,
-                                              rocke_b_const_f32(b, count_p),
-                                              lds_mean,
-                                              lds_m2,
-                                              lds_count,
-                                              tid,
-                                              BS,
-                                              &mean,
-                                              &var);
-
+            else
             {
-                rocke_if_t iff = rocke_b_scf_if(b, rocke_b_cmp_eq(b, tid, rocke_b_const_i32(b, 0)));
-                rocke_value_t* old_mean;
-                rocke_value_t* old_var;
-                rocke_value_t* one_minus_mom;
-                rocke_value_t* new_running_mean;
-                rocke_value_t* new_running_var;
+                mean = rocke_b_global_load_f32(b, RunningMean, channel, 4);
+                var = rocke_b_global_load_f32(b, RunningVar, channel, 4);
+            }
 
-                rocke_b_region_enter(b, iff.then_region);
-                old_mean = rocke_b_global_load_f32(b, RunningMean, channel, 4);
-                old_var = rocke_b_global_load_f32(b, RunningVar, channel, 4);
-                one_minus_mom = rocke_b_fsub(b, rocke_b_const_f32(b, 1.0), momentum);
-                {
-                    /* Match Python's left-to-right argument evaluation
-                     * (b.fmul(one_minus_mom, old_mean) emitted before
-                     * b.fmul(momentum, mean)): C/C++ argument evaluation
-                     * order is unspecified, so each operand MUST be
-                     * materialised into its own statement in emission
-                     * order rather than nested in the fadd call. */
-                    rocke_value_t* term_a = rocke_b_fmul(b, one_minus_mom, old_mean);
-                    rocke_value_t* term_b = rocke_b_fmul(b, momentum, mean);
-                    new_running_mean = rocke_b_fadd(b, term_a, term_b);
-                }
-                {
-                    rocke_value_t* term_a = rocke_b_fmul(b, one_minus_mom, old_var);
-                    rocke_value_t* term_b = rocke_b_fmul(b, momentum, var);
-                    new_running_var = rocke_b_fadd(b, term_a, term_b);
-                }
-                rocke_b_global_store(b, RunningMean, channel, new_running_mean, 1);
-                rocke_b_global_store(b, RunningVar, channel, new_running_var, 1);
-                if(spec->save_mean_invstd)
-                {
-                    rocke_value_t* inv_std_save = rocke_b_rsqrt(b, rocke_b_fadd(b, var, eps));
-                    rocke_b_store_scalar_from_f32(b, Mean, channel, mean, spec->dtype);
-                    rocke_b_store_scalar_from_f32(b, InvStd, channel, inv_std_save, spec->dtype);
-                }
-                rocke_b_region_leave(b);
+            inv_std = rocke_b_rsqrt(b, rocke_b_fadd(b, var, eps));
+
+            /* Gamma / Beta are per-channel scalars -- load once per CTA. */
+            gamma_v = rocke_b_load_scalar_as_f32(b, Gamma, channel, spec->dtype);
+            beta_v = rocke_b_load_scalar_as_f32(b, Beta, channel, spec->dtype);
+            scale = rocke_b_fmul(b, inv_std, gamma_v);
+
+            /* --- Pass 2: N-loop of per-sample row writes --- */
+            for(n = 0; n < N; ++n)
+            {
+                rocke_tile_window_t y_tile_n;
+                bn_pass2_ctx_t p2;
+
+                origin[0] = row_values[n];
+                origin[1] = rocke_b_const_i32(b, 0);
+                rocke_make_tile_window(&y_tile_n, &y_view, lengths2, origin, 2);
+
+                p2.two_pass = two_pass;
+                p2.training = spec->training;
+                p2.vec = VEC;
+                p2.x_tile_n = &x_tiles[n];
+                p2.mean = mean;
+                p2.scale = scale;
+                p2.beta_v = beta_v;
+
+                rocke_pass2_row_chunks(b,
+                                       &y_tile_n,
+                                       tid,
+                                       BS,
+                                       VEC,
+                                       ept_row,
+                                       NULL, /* row -- origin already placed */
+                                       bn_pass2_body,
+                                       &p2,
+                                       cached_by_n[n],
+                                       num_cached_by_n[n]);
             }
         }
-        else
-        {
-            mean = rocke_b_global_load_f32(b, RunningMean, channel, 4);
-            var = rocke_b_global_load_f32(b, RunningVar, channel, 4);
-        }
-    }
-
-    inv_std = rocke_b_rsqrt(b, rocke_b_fadd(b, var, eps));
-
-    /* Gamma / Beta are per-channel scalars -- load once per CTA. */
-    gamma_v = rocke_b_load_scalar_as_f32(b, Gamma, channel, spec->dtype);
-    beta_v = rocke_b_load_scalar_as_f32(b, Beta, channel, spec->dtype);
-    scale = rocke_b_fmul(b, inv_std, gamma_v);
-
-    /* --- Pass 2: N-loop of per-sample row writes --- */
-    for(n = 0; n < N; ++n)
-    {
-        rocke_tile_window_t y_tile_n;
-        bn_pass2_ctx_t p2;
-
-        origin[0] = row_values[n];
-        origin[1] = rocke_b_const_i32(b, 0);
-        rocke_make_tile_window(&y_tile_n, &y_view, lengths2, origin, 2);
-
-        p2.two_pass = two_pass;
-        p2.training = spec->training;
-        p2.vec = VEC;
-        p2.x_tile_n = &x_tiles[n];
-        p2.mean = mean;
-        p2.scale = scale;
-        p2.beta_v = beta_v;
-
-        rocke_pass2_row_chunks(b,
-                               &y_tile_n,
-                               tid,
-                               BS,
-                               VEC,
-                               ept_row,
-                               NULL, /* row -- origin already placed */
-                               bn_pass2_body,
-                               &p2,
-                               cached_by_n[n],
-                               num_cached_by_n[n]);
     }
 
     free(row_values);
@@ -661,12 +723,11 @@ rocke_kernel_def_t* rocke_build_batchnorm2d_new(rocke_ir_builder_t* b,
 rocke_status_t
     rocke_batchnorm2d_grid(int c, const rocke_batchnorm2d_spec_t* spec, int out[3])
 {
-    (void)spec;
-    if(out == NULL)
+    if(out == NULL || spec == NULL || spec->channels_per_block <= 0)
     {
         return ROCKE_ERR_VALUE;
     }
-    out[0] = c;
+    out[0] = c / spec->channels_per_block;
     out[1] = 1;
     out[2] = 1;
     return ROCKE_OK;

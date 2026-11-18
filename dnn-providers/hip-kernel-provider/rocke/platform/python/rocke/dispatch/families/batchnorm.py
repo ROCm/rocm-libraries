@@ -43,6 +43,16 @@ from .norm import _BLOCK_SIZES, _VECS
 _FAMILY = "batchnorm2d"
 BATCHNORM_ABI_VERSION = "hipkg-batchnorm2d/v1"
 
+# ``channels_per_block`` candidate axis: 1 (default, byte-identical to the
+# original one-CTA-per-channel emission) plus a few power-of-two groupings.
+# ``1`` is always the highest-priority value (see ``_cpb_rank``) -- this is a
+# default-OFF lever, exposed for measurement via ``registered_batchnorm_combos``
+# / ``batchnorm_sweep_space`` / ``dispatch_batchnorm_all``, never auto-selected
+# in production unless a caller pins its ``spec_id`` explicitly. It exists for
+# shapes whose grid (``C`` CTAs) is small enough that launch overhead
+# dominates -- see ``instances/common/batchnorm2d.py``'s module docstring.
+_CHANNELS_PER_BLOCK = (1, 2, 4, 8)
+
 
 @dataclass(frozen=True)
 class BatchNormRequest(OperatorRequest):
@@ -107,7 +117,9 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     return errors
 
 
-def _make_spec(req: BatchNormRequest, *, block_size: int, vec: int) -> _bn.BatchNorm2DSpec:
+def _make_spec(
+    req: BatchNormRequest, *, block_size: int, vec: int, channels_per_block: int = 1
+) -> _bn.BatchNorm2DSpec:
     dtype = _bn_dtype(req.dtype)
     wave = ArchTarget.from_gfx(req.arch).wave_size
     return _bn.BatchNorm2DSpec(
@@ -119,12 +131,19 @@ def _make_spec(req: BatchNormRequest, *, block_size: int, vec: int) -> _bn.Batch
         vec=vec,
         dtype=dtype,
         training=bool(req.training),
+        channels_per_block=channels_per_block,
         wave_size=wave,
     )
 
 
-def _make_candidate(*, block_size: int, vec: int, priority: int) -> KernelCandidate:
-    spec_id = f"batchnorm_b{block_size}_v{vec}"
+def _make_candidate(
+    *, block_size: int, vec: int, channels_per_block: int, priority: int
+) -> KernelCandidate:
+    # Matches BatchNorm2DSpec.kernel_name()'s convention: no suffix for the
+    # default channels_per_block=1, so this spec_id is stable for every
+    # pre-existing caller/test that pins it.
+    cpb_suffix = f"_cpb{channels_per_block}" if channels_per_block != 1 else ""
+    spec_id = f"batchnorm_b{block_size}_v{vec}{cpb_suffix}"
     name = f"batchnorm2d_{spec_id}"
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
@@ -135,7 +154,9 @@ def _make_candidate(*, block_size: int, vec: int, priority: int) -> KernelCandid
         ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
-        spec = _make_spec(req, block_size=block_size, vec=vec)
+        spec = _make_spec(
+            req, block_size=block_size, vec=vec, channels_per_block=channels_per_block
+        )
         return _bn.is_valid_spec(spec, arch=req.arch)
 
     def select(req: OperatorRequest) -> _bn.BatchNorm2DSpec:
@@ -143,7 +164,9 @@ def _make_candidate(*, block_size: int, vec: int, priority: int) -> KernelCandid
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, BatchNormRequest)
-        return _make_spec(req, block_size=block_size, vec=vec)
+        return _make_spec(
+            req, block_size=block_size, vec=vec, channels_per_block=channels_per_block
+        )
 
     candidate = KernelCandidate(
         name=name,
@@ -169,23 +192,33 @@ def _build(spec: _bn.BatchNorm2DSpec, _arch: str):
 
 
 def _grid(spec: _bn.BatchNorm2DSpec, req: OperatorRequest) -> Tuple[int, int, int]:
-    # One CTA per channel.
+    # One CTA per channels_per_block channels (1, the default, is one CTA
+    # per channel).
     assert isinstance(req, BatchNormRequest)
-    return (int(req.c), 1, 1)
+    return (int(req.c) // spec.channels_per_block, 1, 1)
 
 
 def _build_registry() -> CandidateRegistry:
     reg = CandidateRegistry(
         _FAMILY, dim_vocabulary=BATCHNORM_DIM_VOCABULARY, require_build=True
     )
-    # Priority order = largest block_size first, then widest vec, so the
-    # highest-throughput candidate that the arch accepts wins under ``auto``.
+    # Priority order = channels_per_block=1 first (unchanged production
+    # behavior; every cpb>1 candidate is a strictly lower-priority, default-
+    # off lever -- see _CHANNELS_PER_BLOCK's docstring), then largest
+    # block_size, then widest vec within a block_size tier, so the
+    # highest-throughput cpb=1 candidate that the arch accepts still wins
+    # under ``auto`` exactly as before this lever was added.
     cands = []
-    prio = 10
-    for bs in _BLOCK_SIZES:
-        for v in _VECS:
-            cands.append(_make_candidate(block_size=bs, vec=v, priority=prio))
-            prio += 1
+    for cpb_rank, cpb in enumerate(_CHANNELS_PER_BLOCK):
+        prio = 10 + cpb_rank * 1000
+        for bs in _BLOCK_SIZES:
+            for v in _VECS:
+                cands.append(
+                    _make_candidate(
+                        block_size=bs, vec=v, channels_per_block=cpb, priority=prio
+                    )
+                )
+                prio += 1
     reg.extend(cands)
     return reg
 
