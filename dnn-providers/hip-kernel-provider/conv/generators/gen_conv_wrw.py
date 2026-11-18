@@ -947,7 +947,8 @@ UNALIGNED_K = [
     ),
     ({"FLOAT": "mfma32_f32"}, [(32, 128, 1, 4, 16), (32, 64, 1, 2, 16)], 0),
 ]
-UNALIGNED_K_FILTERS = [("3x3", 3, 3), ("1x1", 1, 1)]
+# 1x7: HiFi-GAN's output layer (one output channel).
+UNALIGNED_K_FILTERS = [("3x3", 3, 3), ("1x1", 1, 1), ("1x7", 7, 1)]
 
 
 def build_unaligned_k():
@@ -1217,6 +1218,20 @@ GENERIC = [
         0,
         [(CF, (64, 64, 2, 2, 16), 3), (CL, (64, 64, 2, 2, 16), 3)],
     ),
+    # gfx11: gfx12's tiles (the same 16 x 16 WMMA steps and 64 KiB of LDS). Without them a
+    # graph no gfx11 specialized config serves (a channels-last 5x5, or channels that are not
+    # whole vectors: r(2+1)d's 230 and 45) goes to the BLAS path.
+    (
+        {"HALF": "wmma11_f16", "BFLOAT16": "wmma11_bf16"},
+        0,
+        [
+            (CL, (64, 64, 4, 2, 32), 5),
+            (CL, (128, 64, 4, 2, 32), 3),
+            (CL, (64, 32, 4, 2, 32), 9),
+            (CF, (64, 64, 4, 2, 32), 2),
+            (CL, (128, 64, 4, 2, 32), 5, 16),
+        ],
+    ),
     # The FMA form, fp32 where no matrix core takes it (RDNA; tiles (bk, bc, tk, tc, bq)),
     # measured on gfx1201 against the BLAS path: 5x5 1.6x, 1-D k9 1.4x, 3x3 s3 4.2x, 5x5x5 3.5x.
     (
@@ -1230,6 +1245,35 @@ GENERIC = [
         ],
     ),
 ]
+
+
+# gfx11 channels-last rows that the families' channels-first-only filter rows leave out (after
+# every other specialized config, so those keep their priorities): Inception's 5x5 on the output
+# rows (channels-first gfx11 runs 5x5 there, 3.4x ahead of the ring) on the channels-first tiles,
+# and the 3x3 ring on gfx12's 32 x 32 tile for 32-channel groups (ResNeXt / RegNet grouped
+# layers). (tag, s, sw, dw, fr, loop, tiles).
+GFX11_CL_ATOMS = {"HALF": "wmma11_f16", "BFLOAT16": "wmma11_bf16"}
+GFX11_CL_ROWS = [
+    ("5x5r1", 5, 1, 1, 1, 0, [RDNA16[1], (64, 64, 4, 2, 64)]),
+    ("3x3g32", 3, 1, 1, 3, 1, [(32, 32, 2, 2, 32)]),
+]
+
+
+def build_gfx11_cl():
+    dropped = 0
+    for dtype, atom in GFX11_CL_ATOMS.items():
+        vec = 16 // eb(dtype)
+        have = {tuple(x[f] for f in INTS) for x in CATALOG[dtype]}
+        for tag, s, sw, dw, fr, loop, tiles in GFX11_CL_ROWS:
+            for t in tiles:
+                c = C(atom, loop, CL, t, s, sw, dw, fr, vec, 0, 0, 0)
+                if not valid(c, dtype):
+                    dropped += 1
+                    continue
+                for v in with_bpu(c):
+                    assert tuple(v[f] for f in INTS) not in have, f"{tag} {t} ships"
+                    CATALOG[dtype].append(v)
+    return dropped
 
 
 def build_generic():
@@ -1377,6 +1421,7 @@ def build():
                             ), f"breadth config {atom} {tag} {t} b{b} ships"
                             CATALOG[dtype].append(dict(c, bpu=b))
                             BREADTH_KEYS.add(key)
+    dropped += build_gfx11_cl()
     # The generic tier last: the specialized configs keep their priorities.
     dropped += build_generic()
     # Two rows can give one config (the FMA output rows ignore the filter height: 1x3 and 3x3r1

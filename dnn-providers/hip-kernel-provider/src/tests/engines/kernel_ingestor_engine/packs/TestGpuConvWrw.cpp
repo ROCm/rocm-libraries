@@ -307,8 +307,8 @@ struct DeviceCase
     bool noGfx906 = false;
     /// Served only where a few configs ship (block-based buffers): skipped where none does.
     bool someArchs = false;
-    /// Served by the generic loop alone, which ships on the matrix atoms of gfx908 to gfx950
-    /// and gfx12: skipped on gfx906 and gfx11.
+    /// Served by the generic loop alone, which ships on the matrix atoms of gfx908 to gfx950,
+    /// gfx11 and gfx12, and on RDNA's FMA loop for fp32: skipped on gfx906.
     bool genericOnly = false;
     /// x's element strides (the generic loop's strided operands); empty: packed. The default
     /// initializer lets the cases' aggregate initializations omit it without
@@ -358,6 +358,11 @@ std::vector<DeviceCase> deviceCases()
          conv(32, 3, {21, 45}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true)},
         {"Nhwc1x1FiveOutputChannels",
          conv(16, 5, {13, 37}, {1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, true, 1, 3)},
+        // HiFi-GAN's output layer: one output channel, 1x7, in both layouts.
+        {"OneD1x7OneOutputChannel", conv(32, 1, {300}, {7}, {3}, {3}, {1}, {1})},
+        {"OneD1x7OneOutputChannelNhwc", conv(32, 1, {300}, {7}, {3}, {3}, {1}, {1}, true)},
+        // 32-channel groups (ResNeXt) channels-last.
+        {"Grouped32Nhwc3x3", conv(64, 64, {7, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true, 2)},
         {"ThreeDNhwc3x3x3",
          conv(16, 32, {4, 6, 40}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, true)},
         {"GroupedNchw3x3", conv(48, 32, {7, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, false, 2)},
@@ -493,6 +498,16 @@ std::vector<DeviceCase> deviceCases()
     {
         cases.push_back({name, shape, false, false, true});
     }
+    // r(2+1)d's temporal 3x1x1, channels-first, input channels that are not whole vectors.
+    cases.push_back(
+        {"ThreeD3x1x1UnalignedChannels",
+         conv(46, 16, {4, 6, 7}, {3, 1, 1}, {1, 0, 0}, {1, 0, 0}, {1, 1, 1}, {1, 1, 1})});
+    // Inception's 5x5 channels-last (the gfx11 output rows; the generic loop elsewhere).
+    cases.push_back({"Inception5x5Nhwc",
+                     conv(16, 24, {11, 13}, {5, 5}, {2, 2}, {2, 2}, {1, 1}, {1, 1}, true),
+                     false,
+                     false,
+                     true});
     // Narrow outputs (packed rows where they ship, gfx950 / gfx12): several images' 7^2 rows,
     // stride 2 with and without padding (17-column rows: 3 a 64-position step, a partial last
     // group), 3-D, and a grouped true convolution.
@@ -551,6 +566,10 @@ std::vector<DeviceCase> deviceCases()
               cases.push_back(deviceCase);
           };
     generic("Generic5x5Nhwc", conv(24, 40, {13, 17}, {5, 5}, {2, 2}, {2, 2}, {1, 1}, {1, 1}, true));
+    // r(2+1)d's temporal 3x1x1 with input channels that are not whole vectors (230, 45): the
+    // generic loop's channels-last elements. (Channels-first: the specialized tier.)
+    generic("Generic3x1x1UnalignedChannelsNdhwc",
+            conv(46, 16, {4, 6, 7}, {3, 1, 1}, {1, 0, 0}, {1, 0, 0}, {1, 1, 1}, {1, 1, 1}, true));
     generic("Generic1x9Nhwc", conv(32, 64, {150}, {9}, {4}, {4}, {1}, {1}, true));
     // Dilated width taps (the shared window reads them at offsets of 2).
     generic("Generic1x5Dilation2Nhwc", conv(32, 32, {90}, {5}, {4}, {4}, {1}, {2}, true));
@@ -983,8 +1002,7 @@ void runCase(const DeviceCase& deviceCase,
     if(ran == 0
        && (!expectServed(device.gcnArchName, shape.dataType)
            || (deviceCase.matrix16Only && fmaOrFp32) || (deviceCase.noGfx906 && gfx906)
-           || deviceCase.someArchs
-           || (deviceCase.genericOnly && (gfx906 || base.rfind("gfx11", 0) == 0))))
+           || deviceCase.someArchs || (deviceCase.genericOnly && gfx906)))
     {
         GTEST_SKIP() << "no catalog config for this case on " << device.gcnArchName;
     }
@@ -1249,7 +1267,7 @@ TEST(TestConvWrwCatalog, EveryGenericSpecKeyParses)
 TEST(TestConvWrwCatalog, DilatedRowsHaveSpecializedConfigsInBothLayouts)
 {
     // A dilated filter row the specialized tier misses in one layout falls to the generic tier,
-    // which declines ASPP-class dilations and has no gfx11 configs, and then to the BLAS path
+    // which declines ASPP-class dilations, and then to the BLAS path
     // (30x slower on gfx1100 for channels-last fp16 deeplab). Every matrix-core arch serves every
     // deeplab / SSD 3x3 dilation and HiFi-GAN's dilated 1-D rows in both layouts with a
     // specialized config.
