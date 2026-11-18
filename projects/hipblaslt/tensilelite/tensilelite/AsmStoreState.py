@@ -477,6 +477,11 @@ class StoreState:
                     strideD1 = (kernel["SubGroup1"] * kernel["VectorWidthB"])
                 coordOffset1 = d1 * strideD1 + vc1
 
+            if kernel.get("WaveTileContiguousA") and kernel["SourceSwap"]:
+                # d1 selects the B WMMA tile; vc1 selects its N output.
+                vb = kernel["VectorWidthB"]
+                coordOffset1 = 16 * kernel["MIWaveGroup"][1] * vb * (d1 // vb) + d1 % vb + vb * vc1
+
             newCoord1 = (self.firstBatch and elementIdx==0) or (coordOffset1 != self.lastCoordOffset1)
             self.elementCoord1.append(coordOffset1)
 
@@ -503,6 +508,8 @@ class StoreState:
                 coordOffset0  = coordOffset0 * vectorWidth + vc0
             else: # mac instruction
                 coordOffset0 = d0 * kernel["SubGroup0"]*kernel["VectorWidthA"] + vc0
+            if kernel.get("WaveTileContiguousA"):
+                coordOffset0 = 16 * d0 + vc0
             self.elementCoord0.append(coordOffset0)
 
         return self.elementCoord0, self.elementCoord1
