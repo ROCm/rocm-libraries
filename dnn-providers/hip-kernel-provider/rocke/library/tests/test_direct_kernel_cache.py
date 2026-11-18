@@ -26,7 +26,9 @@ from kernels.conv.direct_variants import (
     DIRECT_DGRAD_SMALLC_WMMA,
     DIRECT_DGRAD_WMMA,
     DIRECT_DW_FWD_WMMA,
+    DIRECT_FWD_FLEX_MFMA,
     DIRECT_FWD_GSTREAM_WMMA,
+    DIRECT_FWD_PP_MFMA,
     DIRECT_FWD_SMALLC_WMMA,
     DIRECT_FWD_SMALLK_WMMA,
     DIRECT_FWD_TAPOUTER_WMMA,
@@ -80,8 +82,11 @@ def _problem(**kw) -> DirectConvProblem:
 # The small-channel MFMA forward kernels (gfx950) bound their windows by the
 # runtime extents and take the stems' / layers' own padding ("valid" stems,
 # 1x7 with column padding).
+# The flattened-pixel MFMA forward (gfx950) indexes its im2col by output pixel
+# and takes any padding, stride and dilation.
 _PADDING_GENERIC_FWD = {
     "direct_depthwise_col",
+    "direct_fwd_flex_mfma",
     "direct_fwd_smallc_mfma",
     "direct_fwd_smallk_mfma",
 }
@@ -107,13 +112,14 @@ def test_forward_entries_only_use_same_padding(jobs):
 
 
 def test_only_the_nongrouped_kernel_is_dilated(jobs):
-    """On gfx950 (``_ARCH``) the non-grouped kernel is the one direct variant
-    with dilated rows; the gfx1250 WMMA variants add their own."""
+    """On gfx950 (``_ARCH``) the non-grouped kernel and the flattened-pixel
+    MFMA forward are the direct variants with dilated rows; the gfx1250 WMMA
+    variants add their own."""
     dilated = [
         j.identity for j in jobs if j.identity.dilation_h * j.identity.dilation_w > 1
     ]
     assert dilated
-    assert {i.algorithm for i in dilated} == {"direct_nongrouped"}
+    assert {i.algorithm for i in dilated} == {"direct_nongrouped", DIRECT_FWD_FLEX_MFMA}
 
 
 @pytest.mark.parametrize(
@@ -310,15 +316,17 @@ def test_padding_zero_is_a_baked_value(cache):
 def test_group_count_is_runtime(cache, groups):
     """Any group count is served; only tiles that do not divide it drop out.
 
-    The LDS-halo kernels (dense, and grouped through merging) have shape rules
-    of their own -- merge degree, chunk and tile fits -- so they are left out.
+    The LDS-halo kernels (dense, and grouped through merging) and the dense
+    LDS-DMA forwards have shape rules of their own -- merge degree, chunk and
+    tile fits, groups == 1 -- so they are left out.
     """
     plans, rejected = dks.direct_plans(cache, _problem(groups=groups), "fwd", _ARCH)
     assert plans
     assert all(
         "block_groups" in why
         for ident, why in rejected
-        if ident.algorithm not in dks._HALO_VARIANTS
+        if ident.algorithm
+        not in (*dks._HALO_VARIANTS, DIRECT_FWD_PP_MFMA, DIRECT_FWD_FLEX_MFMA)
     )
 
 
@@ -1264,12 +1272,17 @@ def test_nongrouped_only_serves_one_group(cache):
     plans, rejected = dks.direct_plans(cache, _problem(groups=16), "fwd", _ARCH)
     assert not _nongrouped(plans)
     assert all(i.algorithm != "direct_nongrouped" for i, _ in rejected)
-    # At stride 2 the non-grouped kernel serves one group; so does the
-    # windowed MFMA forward, whose grouped form takes a 64-channel group.
+    # At stride 2 the non-grouped kernel serves one group; so do the windowed
+    # MFMA forward, whose grouped form takes a 64-channel group, and the
+    # flattened-pixel MFMA forward.
     plans, _ = dks.direct_plans(
         cache, _problem(groups=1, cpg=64, kpg=64, stride=2), "fwd", _ARCH
     )
-    assert plans and _variants(plans) == {"direct_nongrouped", "direct_depthwise_win"}
+    assert plans and _variants(plans) == {
+        "direct_nongrouped",
+        "direct_depthwise_win",
+        DIRECT_FWD_FLEX_MFMA,
+    }
 
 
 def test_depthwise_forward_offers_col_alongside_preload(cache):
