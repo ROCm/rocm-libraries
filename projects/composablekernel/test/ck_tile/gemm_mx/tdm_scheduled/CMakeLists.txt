@@ -36,19 +36,3 @@ endforeach()
 if(TARGET test_ck_tile_mx_gemm_tdm_scheduled_cases)
     target_compile_definitions(test_ck_tile_mx_gemm_tdm_scheduled_cases PRIVATE MX_TDM_SCHEDULED_DRY_RUN)
 endif()
-
-# Instances the pipeline must reject at compile time (test_mx_gemm_tdm_scheduled_reject.cpp): SplitBLdsRead
-# without PrefetchLdsRead, 8-bit on the 32x16 atom, GL2 distance 1 and a 32-workgroup cluster.
-set(MX_TDM_SCHEDULED_REJECT_1 "InvalidTuning<ck_tile::MxTdmScheduledReason::SplitBRead>")
-set(MX_TDM_SCHEDULED_REJECT_2 "InvalidTuning<ck_tile::MxTdmScheduledReason::Mma>")
-set(MX_TDM_SCHEDULED_REJECT_3 "InvalidTuning<ck_tile::MxTdmScheduledReason::Gl2Distance>")
-set(MX_TDM_SCHEDULED_REJECT_4 "InvalidTuning<ck_tile::MxTdmScheduledReason::ClusterSize>")
-foreach(reject_case RANGE 1 4)
-    add_test(NAME test_ck_tile_mx_gemm_tdm_scheduled_reject_${reject_case}
-             COMMAND ${CMAKE_CXX_COMPILER} -x hip --offload-arch=gfx1250 -std=c++20 -fsyntax-only
-                     -DCK_USE_GFX1250 -DMX_TDM_SCHEDULED_REJECT=${reject_case}
-                     -I${PROJECT_SOURCE_DIR}/include -I${CMAKE_CURRENT_SOURCE_DIR}
-                     ${CMAKE_CURRENT_SOURCE_DIR}/test_mx_gemm_tdm_scheduled_reject.cpp)
-    set_tests_properties(test_ck_tile_mx_gemm_tdm_scheduled_reject_${reject_case} PROPERTIES
-                         PASS_REGULAR_EXPRESSION "${MX_TDM_SCHEDULED_REJECT_${reject_case}}")
-endforeach()

@@ -65,6 +65,15 @@ class TestTuning(unittest.TestCase):
         self.assertEqual(reason({"prefetch_lds_read": False}), "split_b_read")
         self.assertEqual(reason({"tail_steps": 4}), "tail_steps")
         self.assertEqual(reason({"cluster_dim": [8, 4]}), "cluster_size")
+        self.assertEqual(reason({"gl2_prefetch_distance": 1}), "gl2_distance")
+        # 8-bit types on the 32x16 FP4 atom, with a tile_k the 8-bit types allow.
+        fp8_tile = {**TILE, "tile_m": 128, "tile_n": 128, "tile_k": 256}
+        self.assertEqual(
+            sched.validate_instance(
+                sched.spec_from_tile(fp8_tile, {}, a_dtype="fp8", out_dtype="fp16"), {}
+            ),
+            "mma",
+        )
 
     def test_k_limit(self):
         # K plus (4 + 1) tiles of 256 must fit in i32; M = N = 32 keeps the
