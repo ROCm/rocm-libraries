@@ -346,6 +346,7 @@ TUNING_FIELDS = {
     "block_q",
     "tight_registers",
     "num_stream_buffers",
+    "vec_tail",
 }
 
 # Graph-determined fields that are also knobs of one op, because kernels of that op with
@@ -371,6 +372,12 @@ ALTERNATIVE_KNOBS: dict[str, frozenset[str]] = {
     ),
     "sdpa_bwd_merged": frozenset({"padded", "gqa_pack", "store_db"}),
 }
+
+
+# Per op, the knobs an instance row may leave out, which the KMD reads at the value given here. The KMD of an op is one for every arch,
+# so its schema holds these knobs whichever arch's rows are being described: prep's ``vec_tail`` is set only on the padded gfx942 and
+# gfx90a rows, so the rows of every other arch (and the unset rows) do not carry it.
+KMD_DEFAULTS: dict[str, dict[str, Any]] = {"sdpa_bwd_prep": {"vec_tail": -1}}
 
 
 def knob_fields(op: str, fields: Any) -> list[str]:
@@ -629,11 +636,14 @@ def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
                 if (source_role, dtype) in by_key
             }
             # A dQ or merged row that stores dB through a reduce names its symbol; the reduce is a standalone companion object (gfx11) or a
-            # second kernel of the row's own object (gfx950), launched through ``sources`` either way. A row with no ``reduce_symbol``
-            # launches none.
+            # second kernel of the row's own object (gfx950; a gfx942/gfx90a ``ship: combined`` fp32 row, beside 16-bit rows whose reduce is
+            # a standalone companion), launched through ``sources`` either way. A row with no ``reduce_symbol`` launches none.
             reduce = row_companions.pop(REDUCE_ROLE, None)
+            combined = record.get("ship") == "combined"
+            if combined:
+                reduce = None
             reduce_symbol = knobs.get("reduce_symbol") if op in MAIN_LAUNCH else None
-            standalone = any(role == REDUCE_ROLE for role, _ in by_key)
+            standalone = not combined and any(role == REDUCE_ROLE for role, _ in by_key)
             if reduce_symbol:
                 if reduce is None and standalone:
                     raise ValueError(
@@ -870,12 +880,14 @@ class OpDescriptors:
         kmd_fields = []
         for name, type_token in self.fields.items():
             field: dict[str, Any] = {"name": name, "type": type_token}
-            # Only the tunable field carries a default. The rest are required:
+            # Only the tunable field and the knobs of ``KMD_DEFAULTS`` carry a default. The rest are required:
             # `coerceKernelMetadata` (DescriptorLoader.hpp:1291) drops the whole
             # pack when a field with no default is missing, which is the loud
             # failure we want if an instance ever ships without its dtype or N.
             if name == "block_threads":
                 field["default_value"] = 256
+            elif name in KMD_DEFAULTS.get(self.op, {}):
+                field["default_value"] = KMD_DEFAULTS[self.op][name]
             kmd_fields.append(field)
 
         # The dispatches of the extra packs of an op (``EXTRA_PACKS``): shared documents, authored with
@@ -1093,25 +1105,33 @@ def kmd_knobs(entry: KernelEntry, lds_limits: dict[str, int]) -> dict[str, Any]:
 def _fields_for_op(entries: list[KernelEntry]) -> dict[str, str]:
     """The metadata schema for an op, derived from its instances' knobs (``kmd_knobs``).
 
-    Every instance must declare the same knob set: a schema is one shape, and an
+    Every instance must declare the same knob set, but for the knobs of ``KMD_DEFAULTS``, which a row may leave out: a schema is one shape, and an
     instance that carries a knob its siblings do not is a generator bug that
     would otherwise surface as a silently unselectable kernel.
     """
     fields: dict[str, str] = {}
     first: dict[str, Any] | None = None
+    defaults = KMD_DEFAULTS.get(entries[0].op, {})
     limits = _lds_tile_limits(entries)
     for entry in entries:
         knobs = kmd_knobs(entry, limits)
         if first is None:
             first = knobs
             fields["dtype"] = "string"
-            for key, value in knobs.items():
-                fields[key] = _metadata_type(value)
-        elif set(knobs) != set(first):
+        # Rows differ only in the knobs of KMD_DEFAULTS, which a row may leave out.
+        elif set(knobs) - set(defaults) != set(first) - set(defaults):
             raise HkpPackError(
                 f"{entry.record['name']} declares knobs {sorted(knobs)} but its "
                 f"siblings declare {sorted(first)}; one op is one schema"
             )
+        for key, value in knobs.items():
+            fields.setdefault(key, _metadata_type(value))
+    # The schema does not depend on which arch's rows are described, nor on which of them spell a default knob: it sits before ``grid``.
+    for key, value in defaults.items():
+        type_token = fields.pop(key, None) or _metadata_type(value)
+        tail = {"grid": fields.pop("grid")} if "grid" in fields else {}
+        fields[key] = type_token
+        fields.update(tail)
     for name in fields:
         homes = [
             label

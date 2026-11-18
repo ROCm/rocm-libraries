@@ -1515,6 +1515,36 @@ def _gpu_check_failed_op_error(op: Op) -> str | None:
     return None
 
 
+def _ldexp_types_error(
+    value_type: Type, exponent_type: Type, result_type: Type
+) -> str | None:
+    """The error for ``math.ldexp`` on these types, or None: the op takes an
+    f32 value and an i32 exponent and gives an f32."""
+    if (
+        value_type.name != "f32"
+        or exponent_type.name != "i32"
+        or result_type.name != "f32"
+    ):
+        return (
+            f"ldexp takes an f32 value and an i32 exponent and gives an f32, got "
+            f"{value_type.name}, {exponent_type.name} -> {result_type.name}"
+        )
+    return None
+
+
+def _ldexp_op_error(op: Op) -> str | None:
+    """The error for a built ``math.ldexp`` op, or None.
+
+    Serialized IR reaches the verifier and the lowerings without passing the
+    builder, so they all use this rule, and the C++ engine
+    (``rocke_i_ldexp_op_error``) reports the same text.
+    """
+    if len(op.operands) != 2 or len(op.results) != 1 or op.regions:
+        return "ldexp takes two operands and gives one result"
+    value, exponent = op.operands
+    return _ldexp_types_error(value.type, exponent.type, op.results[0].type)
+
+
 # The two branches of an scf.if_else, in region order.
 _IF_ELSE_BRANCHES = ("then", "else")
 
@@ -3079,6 +3109,24 @@ class IRBuilder:
     def exp2(self, a: Value) -> Value:
         return self._op("math.exp2", [a], [a.type], result_name_hint="exp2").result
 
+    def ldexp(self, value: Value, exponent: Value) -> Value:
+        """``value * 2^exponent``, rounded once (``llvm.ldexp.f32.i32``,
+        one ``v_ldexp_f32``).
+
+        ``value`` is f32 and ``exponent`` i32; the result is f32. The power of
+        two is never formed as a float, so any i32 exponent works:
+        ``value * exp2(e)`` overflows to Inf for ``e > 127`` and flushes to zero
+        for ``e < -149`` even when the product is an ordinary f32. A product
+        beyond the f32 range gives the infinity of its sign, one below it a
+        subnormal or a zero of its sign; NaN, Inf and zeros pass through.
+        """
+        error = _ldexp_types_error(value.type, exponent.type, F32)
+        if error:
+            raise ValueError(error)
+        return self._op(
+            "math.ldexp", [value, exponent], [F32], result_name_hint="ldexp"
+        ).result
+
     def exp2_fast(self, a: Value) -> Value:
         """Native single-instruction base-2 exp: ``llvm.amdgcn.exp2.f32`` -> one
         ``v_exp_f32``. Unlike ``exp2`` (``llvm.exp2.f32``), it emits NO
@@ -4029,20 +4077,31 @@ class IRBuilder:
     def global_load(
         self, ptr: Value, idx: Value, dtype: Type, *, align: int = 1
     ) -> Value:
+        """Load one ``dtype`` value from ``ptr[idx]``.
+
+        ``align`` is the alignment, in bytes, the caller guarantees for the
+        accessed element; one that is not an integer (``True``, ``8.0``) or
+        not a positive power of two is refused (:func:`_checked_align`). The typed wrappers (``global_load_f32`` ...) and
+        :meth:`masked_global_load` pass their ``align`` through here.
+        """
         return self._op(
             "memref.global_load_typed",
             [ptr, idx],
             [dtype],
-            attrs={"elem_type": dtype.name, "align": int(align)},
+            attrs={
+                "elem_type": dtype.name,
+                "align": _checked_align("memref.global_load_typed", align),
+            },
             result_name_hint="gl",
         ).result
 
     def global_load_f16(self, ptr: Value, idx: Value, *, align: int = 2) -> Value:
+        """Load one ``f16`` from ``ptr[idx]``; ``align`` as in :meth:`global_load`."""
         return self._op(
             "memref.global_load",
             [ptr, idx],
             [F16],
-            attrs={"align": int(align)},
+            attrs={"align": _checked_align("memref.global_load", align)},
             result_name_hint="gl",
         ).result
 
@@ -4103,10 +4162,19 @@ class IRBuilder:
     def global_store(
         self, ptr: Value, idx: Value, value: Value, *, align: int = 1
     ) -> None:
+        """Store scalar ``value`` to ``ptr[idx]``.
+
+        ``align`` is the alignment, in bytes, the caller guarantees for the
+        accessed element; one that is not an integer (``True``, ``8.0``) or
+        not a positive power of two is refused (:func:`_checked_align`).
+        """
         self._op(
             "memref.global_store_typed",
             [ptr, idx, value],
-            attrs={"elem_type": value.type.name, "align": int(align)},
+            attrs={
+                "elem_type": value.type.name,
+                "align": _checked_align("memref.global_store_typed", align),
+            },
         )
 
     def global_load_vN_f16(
@@ -7540,12 +7608,14 @@ class IRBuilder:
 
         Unlike :meth:`store_f16` (hardcoded ``half``), this derives the element
         type from ``value`` and lowers through ``memref.global_store_typed``.
+        A given ``align`` is checked as in :meth:`global_store`; without one
+        the op records none.
         """
         if idx is None:
             idx = self.const_i32(0)
         attrs: Dict[str, Any] = {}
         if align is not None:
-            attrs["align"] = int(align)
+            attrs["align"] = _checked_align("memref.global_store_typed", align)
         self._op("memref.global_store_typed", [ptr, idx, value], attrs=attrs)
 
     def ret(self) -> None:
@@ -7857,6 +7927,7 @@ PURE_OP_NAMES = {
     "arith.uitofp_f32",
     "arith.cvt_f32_to_u8_sat",
     "math.exp2",
+    "math.ldexp",
     "math.exp2_fast",
     "math.log2",
     "math.rcp",

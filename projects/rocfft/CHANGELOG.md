@@ -13,12 +13,15 @@ Documentation for rocFFT is available at
 * Multi-dimensional, multi-device transforms whose bricks split no transform length, but cannot be
   paired as above, now redistribute data between devices instead of gathering the entire transform
   on a single device.
+* Planar array types are now rejected by `rocfft_plan_create` if a field is set for either input or
+  output (previously, only the side with a field set was checked).
 
 ### Resolved issues
 
 * Fixed multi-device plans whose per-device sub-transforms have lengths involving large prime
   factors silently falling back to running the transform on a single device.  Such plans may now
   perform better.
+* Fixed a crash in `rocfft_execute` for in-place multi-device plans when `out_buffer` is null.
 
 ## rocFFT 1.0.41 for ROCm 10.2
 

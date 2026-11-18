@@ -1111,6 +1111,12 @@ inline int64_t bias_vector_length(hipblaslt_bias_source source, int64_t m, int64
     return source == hipblaslt_bias_source::b ? n : m;
 }
 
+// The MX element types integer_exact data supports (makeIntegerExactMX in mxDataGen.cpp).
+inline bool integer_exact_mx_element_type(hipDataType t)
+{
+    return t == HIP_R_8F_E4M3 || t == HIP_R_8F_E5M2 || t == HIP_R_6F_E2M3 || t == HIP_R_6F_E3M2;
+}
+
 // Returns why fast_check cannot verify this configuration, or an empty string when it can.
 inline std::string fast_check_unsupported_reason(const Arguments&     arg,
                                                  hipblasLtBatchMode_t batchMode,
@@ -1161,8 +1167,6 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
         if(char_to_hipblas_operation(arg.transA) != HIPBLAS_OP_T
            || char_to_hipblas_operation(arg.transB) != HIPBLAS_OP_N)
             return "fast_check with MX scales requires transA=T and transB=N";
-        // The reference recomputes each element's scale as its linear index over the block size,
-        // which holds only when no K block is partial.
         if(arg.K[0] % blockSize(arg.scaleA) != 0 || arg.K[0] % blockSize(arg.scaleB) != 0)
             return "fast_check supports MX scales only when K is a multiple of the scale block";
         if(arg.batch_count > 1)
@@ -1701,6 +1705,10 @@ void check(const Arguments&              arg,
                 hipblaslt_cerr << "allclose check failed for D of gemm " << gemmIdx << ": "
                                << allclose_failure_message(failure) << std::endl;
             }
+            // The skip_launch_solution self-test expects the solution it never launched to fail
+            // here, and fails the case itself when any other solution does.
+            if(arg.norm_check_assert && arg.skip_launch_solution < 0)
+                CHECK_SUCCESS(failure.bad_count == 0);
         }
 
         if(arg.ulp_check)
@@ -1741,70 +1749,6 @@ void check(const Arguments&              arg,
 
     if(arg.ulp_check && ulp_count_total > 0)
         hipblaslt_avg_ulp = ulp_sum_total / ulp_count_total;
-}
-
-// A function to determine the default bias_type
-hipDataType derive_unset_bias_type(const Arguments& arg)
-{
-    // TODO: confirm if HIP_R_64F, HIP_R_32I are neccessary for biastype
-    static const std::set<hipDataType> supported_bias_types
-        = {HIP_R_32F, HIP_R_16F, HIP_R_16BF, HIP_R_64F, HIP_R_32I, HIP_C_32F, HIP_C_64F};
-
-    hipDataType real_bias_type = arg.bias_type;
-
-    // when bias type is unset
-    if(arg.bias_type == HIPBLASLT_DATATYPE_INVALID)
-    {
-        if(arg.compute_type == HIPBLAS_COMPUTE_32I)
-        {
-            real_bias_type = HIP_R_32I;
-        }
-        else if(arg.compute_type == HIPBLAS_COMPUTE_32F_FAST_TF32)
-        {
-            real_bias_type = HIP_R_32F;
-        }
-        else if((arg.a_type == HIP_R_8F_E4M3_FNUZ || arg.a_type == HIP_R_8F_E5M2_FNUZ)
-                && (arg.b_type == HIP_R_8F_E4M3_FNUZ || arg.b_type == HIP_R_8F_E5M2_FNUZ))
-        {
-            if(arg.d_type == HIP_R_32F || arg.d_type == HIP_R_16BF)
-                real_bias_type = HIP_R_16BF;
-            else if(arg.d_type == HIP_R_16F)
-                real_bias_type = HIP_R_16F;
-            else //more default cases once support C != D
-                real_bias_type = HIP_R_16F;
-        }
-        else if((arg.a_type == HIP_R_8F_E4M3 || arg.a_type == HIP_R_8F_E5M2)
-                && (arg.b_type == HIP_R_8F_E4M3 || arg.b_type == HIP_R_8F_E5M2))
-        {
-            if(arg.d_type == HIP_R_32F || arg.d_type == HIP_R_16BF)
-                real_bias_type = HIP_R_16BF;
-            else if(arg.d_type == HIP_R_16F)
-                real_bias_type = HIP_R_16F;
-            else //more default cases once support C != D
-                real_bias_type = HIP_R_16F;
-        }
-        else if((arg.a_type == HIP_R_6F_E2M3 && arg.b_type == HIP_R_6F_E2M3)
-                || (arg.a_type == HIP_R_6F_E3M2 && arg.b_type == HIP_R_6F_E3M2)
-                || (arg.a_type == HIP_R_4F_E2M1 && arg.b_type == HIP_R_4F_E2M1))
-        {
-            if(arg.d_type == HIP_R_32F || arg.d_type == HIP_R_16BF)
-                real_bias_type = HIP_R_16BF;
-            else if(arg.d_type == HIP_R_16F)
-                real_bias_type = HIP_R_16F;
-            else
-                real_bias_type = HIP_R_16F;
-        }
-        else
-        {
-            real_bias_type = arg.d_type;
-        }
-    }
-
-    if(supported_bias_types.count(real_bias_type) == 0)
-        throw std::invalid_argument("Invalid bias type "
-                                    + std::string(hip_datatype_to_string(real_bias_type)));
-
-    return real_bias_type;
 }
 
 // A function to determine the default aux_type
@@ -1901,6 +1845,32 @@ void testing_matmul(const Arguments& arg)
               && std::fabs(arg.beta) <= 2 && !arg.scaleAlpha_vector && !arg.bias_vector
               && arg.scaleA == hipblaslt_scaling_format::none
               && arg.scaleB == hipblaslt_scaling_format::none && !arg.scaleC && !arg.scaleD;
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+        // MX integer_exact data is exact against the fp32 host reference only while
+        // integerExactMXSumBound(K) * |alpha| stays below 2^24 (see mxDataGen.hpp).
+        if(host_reference && (isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB)))
+        {
+            const int32_t gemm_count = std::max(1, arg.grouped_gemm);
+            for(int32_t i = 0; i < gemm_count; i++)
+            {
+                const double bound = double(integerExactMXSumBound(arg.K[i]))
+                                     * std::max(1.0, std::fabs(double(arg.alpha)));
+                if(bound >= double(kIntegerExactMXExactLimit))
+                {
+                    std::string why = "integer_exact MX data with K=" + std::to_string(arg.K[i])
+                                      + " bounds |alpha * D| by " + std::to_string(bound)
+                                      + ", which is not below 2^24, so the exact host check "
+                                        "does not hold";
+#ifdef GOOGLE_TEST
+                    FAIL() << why;
+#else
+                    hipblaslt_cerr << why << std::endl;
+                    return;
+#endif
+                }
+            }
+        }
+#endif
         if(is_16bit && (host_reference || !arg.fast_check) && !sparse_k_bounded)
         {
             // alpha=2: |2*dot|<=8K; beta=-2 adds 2*C. fp16 exact int ~2048 => K<=256 for both betas used
@@ -3427,15 +3397,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::rand_int
                && arg.initialization != hipblaslt_initialization::uniform_low_precision
                && !(arg.initialization == hipblaslt_initialization::integer_exact
-                    && arg.fast_check))
+                    && integer_exact_mx_element_type(TiA)))
             {
 #ifdef GOOGLE_TEST
                 GTEST_SKIP() << "unsupported MX initialization: "
                              << hipblaslt_initialization2string(arg.initialization);
 #else
-                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float, "
-                                  "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, not "
-                               << hipblaslt_initialization2string(arg.initialization) << std::endl;
+                hipblaslt_cout
+                    << "Initialization of microscaling data only allows hpl, trig_float, "
+                       "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, "
+                       "or integer_exact with fp8 or fp6 elements, not "
+                    << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
 #endif
             }
@@ -3538,15 +3510,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::rand_int
                && arg.initialization != hipblaslt_initialization::uniform_low_precision
                && !(arg.initialization == hipblaslt_initialization::integer_exact
-                    && arg.fast_check))
+                    && integer_exact_mx_element_type(TiB)))
             {
 #ifdef GOOGLE_TEST
                 GTEST_SKIP() << "unsupported MX initialization: "
                              << hipblaslt_initialization2string(arg.initialization);
 #else
-                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float, "
-                                  "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, not "
-                               << hipblaslt_initialization2string(arg.initialization) << std::endl;
+                hipblaslt_cout
+                    << "Initialization of microscaling data only allows hpl, trig_float, "
+                       "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, "
+                       "or integer_exact with fp8 or fp6 elements, not "
+                    << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
 #endif
             }
