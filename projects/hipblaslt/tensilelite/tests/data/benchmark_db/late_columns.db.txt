@@ -1,0 +1,152 @@
+meta	csv_export_extra_cols	true
+meta	csv_merge_same_problems	false
+meta	performance_metric	DeviceEfficiency
+solution	0	SolA
+solution	1	SolB,comma
+solution	2	SolC"quote"
+solution	3	SolD
+solution	4	SolE
+solution	5	SolF
+problem	0
+problem	1
+problem	2
+problem_value	0	SizeI	1024
+problem_value	0	SizeJ	1024
+problem_value	0	SizeK	1
+problem_value	0	SizeL	1024
+problem_value	0	activation-type	none
+problem_value	0	bias-type	None
+problem_value	0	lda	1024
+problem_value	0	ldb	1024
+problem_value	0	ldc	1024
+problem_value	0	ldd	1024
+problem_value	0	operation	Contraction_l_Alik_Bljk_Cijk_Dijk
+problem_value	0	problem-index	0
+problem_value	0	problem-progress	0/2
+problem_value	0	problem-sizes	(1024,1024,1,1024)
+problem_value	0	total-flops	2147483648
+problem_value	1	SizeI	512
+problem_value	1	SizeJ	2048
+problem_value	1	SizeK	1
+problem_value	1	SizeL	256
+problem_value	1	activation-type	none
+problem_value	1	bias-type	None
+problem_value	1	lda	512
+problem_value	1	ldb	256
+problem_value	1	ldc	512
+problem_value	1	ldd	512
+problem_value	1	operation	Contraction_l_Alik_Bljk_Cijk_Dijk
+problem_value	1	problem-index	1
+problem_value	1	problem-progress	1/2
+problem_value	1	problem-sizes	(512,2048,1,256)
+problem_value	1	total-flops	536870912
+problem_value	2	SizeI	4096
+problem_value	2	SizeJ	128
+problem_value	2	SizeK	1
+problem_value	2	SizeL	64
+problem_value	2	activation-type	none
+problem_value	2	bias-type	None
+problem_value	2	lda	4096
+problem_value	2	ldb	64
+problem_value	2	ldc	4096
+problem_value	2	ldd	4096
+problem_value	2	operation	Contraction_l_Alik_Bljk_Cijk_Dijk
+problem_value	2	problem-index	2
+problem_value	2	problem-progress	2/2
+problem_value	2	problem-sizes	(4096,128,1,64)
+problem_value	2	total-flops	67108864
+run	0	0	PASS	PASSED	
+run	0	1	PASS	PASSED	
+run	0	2	NOT_SELECTED		
+run	0	3	UNKNOWN		
+run	0	4	NOT_SELECTED		
+run	0	5	NOT_SELECTED		
+run	1	0	PASS	PASSED	
+run	1	1	NOT_SELECTED		
+run	1	2	PASS	PASSED	
+run	1	3	INDIRECTLY_FAILED	INDIRECTLY_FAILED	0
+run	1	4	NOT_SELECTED		
+run	1	5	PASS	PASSED	
+run	2	0	NOT_SELECTED		
+run	2	1	PASS	PASSED	
+run	2	2	NOT_SELECTED		
+run	2	3	INDIRECTLY_FAILED	INDIRECTLY_FAILED	0
+run	2	4	PASS	PASSED	
+run	2	5	NOT_SELECTED		
+run_value	0	0	gbps-bandwidth	83.8861
+run_value	0	0	gflops	21474.8
+run_value	0	0	gflops-per-cu	10737.4
+run_value	0	0	num-cus	8
+run_value	0	0	solution	SolA
+run_value	0	0	solution-index	0
+run_value	0	0	solution-library-index	0
+run_value	0	0	tiles-per-cu	0.25
+run_value	0	0	time-us	100
+run_value	0	0	total-gran	0.9
+run_value	0	0	validation	PASSED
+run_value	0	1	gbps-bandwidth	104.858
+run_value	0	1	gflops	26843.5
+run_value	0	1	gflops-per-cu	3355.44
+run_value	0	1	num-cus	8
+run_value	0	1	solution	SolB,comma
+run_value	0	1	solution-index	1
+run_value	0	1	solution-library-index	1
+run_value	0	1	tiles-per-cu	3
+run_value	0	1	time-us	80
+run_value	0	1	total-gran	0.95
+run_value	0	1	validation	PASSED
+run_value	1	0	gbps-bandwidth	91.7504
+run_value	1	0	gflops	8947.85
+run_value	1	0	gflops-per-cu	2236.96
+run_value	1	0	num-cus	8
+run_value	1	0	solution	SolA
+run_value	1	0	solution-index	0
+run_value	1	0	solution-library-index	0
+run_value	1	0	tiles-per-cu	0.5
+run_value	1	0	time-us	60
+run_value	1	0	total-gran	0.55
+run_value	1	0	validation	PASSED
+run_value	1	2	gbps-bandwidth	110.1
+run_value	1	2	gflops	10737.4
+run_value	1	2	gflops-per-cu	1342.18
+run_value	1	2	num-cus	8
+run_value	1	2	solution	SolC"quote"
+run_value	1	2	solution-index	2
+run_value	1	2	solution-library-index	2
+run_value	1	2	tiles-per-cu	2
+run_value	1	2	time-us	50
+run_value	1	2	total-gran	0.65
+run_value	1	2	validation	PASSED
+run_value	1	5	gbps-bandwidth	84.6927
+run_value	1	5	gflops	8259.55
+run_value	1	5	gflops-per-cu	1032.44
+run_value	1	5	num-cus	8
+run_value	1	5	solution	SolF
+run_value	1	5	solution-index	5
+run_value	1	5	solution-library-index	5
+run_value	1	5	tiles-per-cu	1.25
+run_value	1	5	time-us	65
+run_value	1	5	total-gran	0.75
+run_value	1	5	validation	PASSED
+run_value	2	1	gbps-bandwidth	65.9456
+run_value	2	1	gflops	1677.72
+run_value	2	1	gflops-per-cu	209.715
+run_value	2	1	num-cus	8
+run_value	2	1	solution	SolB,comma
+run_value	2	1	solution-index	1
+run_value	2	1	solution-library-index	1
+run_value	2	1	tiles-per-cu	6
+run_value	2	1	time-us	40
+run_value	2	1	total-gran	0.5
+run_value	2	1	validation	PASSED
+run_value	2	4	gbps-bandwidth	58.6183
+run_value	2	4	gflops	1491.31
+run_value	2	4	gflops-per-cu	186.414
+run_value	2	4	num-cus	8
+run_value	2	4	solution	SolE
+run_value	2	4	solution-index	4
+run_value	2	4	solution-library-index	4
+run_value	2	4	tiles-per-cu	2
+run_value	2	4	time-us	45
+run_value	2	4	total-gran	0.9
+run_value	2	4	validation	PASSED

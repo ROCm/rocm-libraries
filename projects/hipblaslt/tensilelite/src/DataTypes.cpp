@@ -171,6 +171,13 @@ namespace rocisa
         std::string strValue;
         stream >> strValue;
 
+        // None has no registered type info; read back what operator<< writes for it.
+        if(strValue == rocisa::toString(rocisa::DataType::None))
+        {
+            t = rocisa::DataType::None;
+            return stream;
+        }
+
         t = TensileLite::DataTypeInfo::Get(strValue).dataType;
 
         return stream;

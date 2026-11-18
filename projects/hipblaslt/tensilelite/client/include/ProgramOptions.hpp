@@ -14,11 +14,16 @@
 #include <any>
 #include <cctype>
 #include <functional>
+#include <iomanip>
+#include <limits>
 #include <map>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace TensileLite
@@ -210,6 +215,53 @@ namespace TensileLite
                 }
             };
 
+            // Text of a value as the config-file parser reads it back.
+            template <typename T>
+            std::string format_config_value(T const& value)
+            {
+                std::ostringstream oss;
+                if constexpr(std::is_floating_point_v<T>)
+                    oss << std::setprecision(std::numeric_limits<T>::max_digits10);
+                oss << value;
+                return oss.str();
+            }
+
+            inline std::string format_config_value(bool value)
+            {
+                return value ? "true" : "false";
+            }
+
+            // Rejects text the config-file parser would change: it drops comments, trims the
+            // edges, stops a scalar at whitespace and splits a list element at "," and ";".
+            enum class ConfigText
+            {
+                scalar,
+                listElement,
+                wholeLine
+            };
+
+            // A vector option with no elements still writes one empty line, so that the option is
+            // recorded as present.
+            inline std::vector<std::string> config_values_or_empty(std::vector<std::string> values)
+            {
+                if(values.empty())
+                    values.push_back("");
+                return values;
+            }
+
+            inline std::string checked_config_text(std::string text, ConfigText kind)
+            {
+                bool bad = text != trim_opt(text) || text.find_first_of("#\n\r") != std::string::npos;
+                if(kind != ConfigText::wholeLine)
+                    bad = bad || text.find_first_of(" \t") != std::string::npos;
+                if(kind == ConfigText::listElement)
+                    bad = bad || text.find_first_of(",;") != std::string::npos;
+                if(bad)
+                    throw std::runtime_error("value '" + text
+                                             + "' cannot be written to a config file");
+                return text;
+            }
+
             struct option_value_base
             {
                 virtual ~option_value_base()                                            = default;
@@ -245,6 +297,9 @@ namespace TensileLite
                 {
                     current = new_val;
                 }
+                /** Config-file values of `value`, one text per line, in the form parse_config_line
+                 *  reads back; an empty vector option gives one empty text. */
+                virtual std::vector<std::string> to_config_values(std::any const& value) const = 0;
             };
 
             template <typename T>
@@ -274,6 +329,12 @@ namespace TensileLite
                 std::any get_default() const override
                 {
                     return std::any(m_default);
+                }
+
+                std::vector<std::string> to_config_values(std::any const& value) const override
+                {
+                    return {checked_config_text(format_config_value(std::any_cast<T const&>(value)),
+                                                ConfigText::scalar)};
                 }
 
                 std::function<std::any(std::string const&)> parser() const override
@@ -339,6 +400,11 @@ namespace TensileLite
                     return std::any(m_default);
                 }
 
+                std::vector<std::string> to_config_values(std::any const& value) const override
+                {
+                    return {format_config_value(std::any_cast<bool const&>(value))};
+                }
+
                 std::function<std::any(std::string const&)> parser() const override
                 {
                     return [](std::string const& s) { return std::any(parse_bool_string(s)); };
@@ -382,6 +448,15 @@ namespace TensileLite
                 bool is_multivalued() const override
                 {
                     return true;
+                }
+
+                std::vector<std::string> to_config_values(std::any const& value) const override
+                {
+                    std::vector<std::string> out;
+                    for(U const& element : std::any_cast<std::vector<U> const&>(value))
+                        out.push_back(checked_config_text(format_config_value(element),
+                                                          ConfigText::listElement));
+                    return config_values_or_empty(std::move(out));
                 }
 
                 std::function<std::any(std::string const&)> parser() const override
@@ -447,6 +522,15 @@ namespace TensileLite
                     return true;
                 }
 
+                std::vector<std::string> to_config_values(std::any const& value) const override
+                {
+                    std::vector<std::string> out;
+                    for(std::string const& element :
+                        std::any_cast<std::vector<std::string> const&>(value))
+                        out.push_back(checked_config_text(element, ConfigText::wholeLine));
+                    return config_values_or_empty(std::move(out));
+                }
+
                 std::function<std::any(std::string const&)> parser() const override
                 {
                     return [](std::string const& s) { return std::any(split_string(s)); };
@@ -501,6 +585,14 @@ namespace TensileLite
                 bool is_multivalued() const override
                 {
                     return true;
+                }
+
+                std::vector<std::string> to_config_values(std::any const& value) const override
+                {
+                    std::vector<std::string> out;
+                    for(bool element : std::any_cast<std::vector<bool> const&>(value))
+                        out.push_back(format_config_value(element));
+                    return config_values_or_empty(std::move(out));
                 }
 
                 std::function<std::any(std::string const&)> parser() const override
@@ -596,6 +688,14 @@ namespace TensileLite
                                              options_description const& desc);
 
             variables_map parse_config_file(std::istream& is, options_description const& desc);
+
+            /** Writes every option of `desc` that has a value in `args`, except those in
+             *  `excluded`, as sorted `name=value` lines that parse_config_file reads back into
+             *  the same values. The values must still have the option's own type. Throws for a
+             *  value the config-file syntax cannot hold. */
+            std::string serialize_config(variables_map const&         args,
+                                         options_description const&   desc,
+                                         std::set<std::string> const& excluded);
 
             inline void store(variables_map const& from, variables_map& to)
             {

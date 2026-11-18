@@ -68,6 +68,23 @@ if(NOT TENSILELITE_ENABLE_YAML)
         set(tensilelite_msgpack_target "msgpackc-cxx")
         message(STATUS "Found msgpack (<=5.x)")
     endif()
+else()
+    # A YAML host still compiles the msgpack sources when msgpack is installed,
+    # so that clients can write solutions as msgpack. The loader stays YAML:
+    # TENSILE_MSGPACK is not defined here.
+    find_package(msgpack-cxx CONFIG QUIET)
+    if(msgpack-cxx_FOUND)
+        set(tensilelite_msgpack_target "msgpack-cxx")
+        message(STATUS "Found msgpack-cxx: the host writes benchmark solutions as msgpack")
+    else()
+        find_package(msgpackc-cxx CONFIG QUIET NAMES msgpackc-cxx msgpack)
+        if(msgpackc-cxx_FOUND)
+            set(tensilelite_msgpack_target "msgpackc-cxx")
+            message(STATUS "Found msgpackc-cxx: the host writes benchmark solutions as msgpack")
+        else()
+            message(STATUS "msgpack not found: the host writes benchmark solutions as YAML")
+        endif()
+    endif()
 endif()
 
 if(TENSILELITE_ENABLE_YAML AND TENSILELITE_STANDALONE)
@@ -185,9 +202,17 @@ if(TENSILELITE_ENABLE_HOST)
         target_link_libraries(tensilelite-host PRIVATE LLVMObjectYAML)
         target_include_directories(tensilelite-host PRIVATE ${LLVM_INCLUDE_DIRS})
         target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_YAML>)
+        if(tensilelite_msgpack_target)
+            target_link_libraries(tensilelite-host PRIVATE ${tensilelite_msgpack_target})
+        endif()
     else()
         target_link_libraries(tensilelite-host PRIVATE ${tensilelite_msgpack_target})
         target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_MSGPACK>)
+    endif()
+
+    # The msgpack solution writer is compiled into the host.
+    if(tensilelite_msgpack_target)
+        target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILELITE_HAVE_MSGPACK_WRITER>)
     endif()
 
     target_include_directories(tensilelite-host

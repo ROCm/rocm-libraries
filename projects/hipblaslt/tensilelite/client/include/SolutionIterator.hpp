@@ -175,6 +175,9 @@ namespace TensileLite
             virtual std::shared_ptr<ContractionSolution> getSolution() override;
             virtual bool                                 runCurrentSolution() override;
 
+            int firstSolutionIdx() const { return m_firstSolutionIdx; }
+            int lastSolutionIdx() const  { return m_lastSolutionIdx; }
+
         private:
             std::vector<std::shared_ptr<ContractionSolution>> m_solutions;
             std::queue<std::pair<int,double>>                 m_qSolutionIdx;
@@ -183,6 +186,8 @@ namespace TensileLite
 
             double m_predictionThreshold;
             double m_currentPrediction;
+            // Set per problem: every solution is visited in index order, without a ranking.
+            bool m_runAllSolutions;
 
             int m_firstSolutionIdx;
             int m_lastSolutionIdx;

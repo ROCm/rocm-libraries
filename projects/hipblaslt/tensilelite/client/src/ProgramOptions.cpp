@@ -193,6 +193,41 @@ namespace TensileLite
                 return m_vm;
             }
 
+            std::string serialize_config(variables_map const&         args,
+                                         options_description const&   desc,
+                                         std::set<std::string> const& excluded)
+            {
+                std::map<std::string, option_value_base const*> sorted;
+                for(auto const& opt : desc.options())
+                {
+                    std::string name = get_canonical_option_name(opt.opts);
+                    if(opt.value_semantic && !excluded.count(name))
+                        sorted[name] = opt.value_semantic.get();
+                }
+
+                std::ostringstream out;
+                for(auto const& [name, semantic] : sorted)
+                {
+                    if(!args.count(name) || args[name].empty())
+                        continue;
+                    try
+                    {
+                        for(std::string const& value : semantic->to_config_values(args[name].value()))
+                            out << name << "=" << value << "\n";
+                    }
+                    catch(std::bad_any_cast const&)
+                    {
+                        throw std::runtime_error("option '" + name
+                                                 + "' holds a value of an unexpected type");
+                    }
+                    catch(std::runtime_error const& error)
+                    {
+                        throw std::runtime_error("option '" + name + "': " + error.what());
+                    }
+                }
+                return out.str();
+            }
+
             std::ostream& operator<<(std::ostream& os, options_description const& desc)
             {
                 for(auto const& opt : desc.options())

@@ -365,6 +365,7 @@ namespace TensileLite
             : SolutionIterator(library, hardware, printWinnerOnly)
             , m_runCriteria(runCriteria)
             , m_predictionThreshold(predictionThreshold)
+            , m_runAllSolutions(predictionThreshold > 1.0)
         {
             m_firstSolutionIdx = firstSolutionIdx;
 
@@ -402,7 +403,9 @@ namespace TensileLite
         void AllSolutionsIterator::preProblem(ContractionProblem* const problem)
         {
             SolutionIterator::preProblem(problem);
-            if (m_predictionThreshold > 1.0 || !isPredictionAvailable(*m_hardware))
+            // Without a prediction there is nothing to rank by, whatever the threshold.
+            m_runAllSolutions = m_predictionThreshold > 1.0 || !isPredictionAvailable(*m_hardware);
+            if (m_runAllSolutions)
             {
                 m_currentSolutionIdx = m_firstSolutionIdx;
             }
@@ -437,18 +440,23 @@ namespace TensileLite
 
                 auto comp = [](const std::pair<int, double>& e1, const std::pair<int, double>& e2) { return e1.second < e2.second; };
                 std::stable_sort(performance.begin(),performance.end(),comp);
-                // TODO: This is the simple threshold method.
-                // May use the best perf * 1.x as threshold in the future.
-                size_t index    = std::min(performance.size() - 1, size_t(performance.size() * m_predictionThreshold));
-                auto threshhold = performance[index].second;
 
-                // push content
                 if(!m_qSolutionIdx.empty())
                 {
                     throw std::runtime_error(
                         "[AllSolutionsIterator::preProblem] Solution queue is not empty");
                 }
 
+                // Every solution failed checkSolution: nothing to rank or run.
+                if(performance.empty())
+                    return;
+
+                // TODO: This is the simple threshold method.
+                // May use the best perf * 1.x as threshold in the future.
+                size_t index    = std::min(performance.size() - 1, size_t(performance.size() * m_predictionThreshold));
+                auto threshhold = performance[index].second;
+
+                // push content
                 for (int i=0; i<performance.size(); i++)
                 {
                     if(m_predictionThreshold == 0.0)
@@ -480,7 +488,7 @@ namespace TensileLite
         {
             m_reporter->report(ResultKey::SolutionLibraryIndex, solution->libraryLogicIndex);
             m_reporter->report(ResultKey::SolutionIndex, m_currentSolutionIdx);
-            if (m_predictionThreshold > 1.0)
+            if (m_runAllSolutions)
             {
                 m_reporter->report(ResultKey::SolutionProgress,
                      concatenate(m_currentSolutionIdx, "/", m_lastSolutionIdx));
@@ -496,7 +504,7 @@ namespace TensileLite
         void AllSolutionsIterator::postSolution()
         {
             ScopedTimer timer("post_solution_sol_advance");
-            if (m_predictionThreshold > 1.0)
+            if (m_runAllSolutions)
             {
                 m_currentSolutionIdx++;
             }
@@ -514,7 +522,7 @@ namespace TensileLite
 
         bool AllSolutionsIterator::moreSolutionsInProblem() const
         {
-            if (m_predictionThreshold > 1.0)
+            if (m_runAllSolutions)
                 return m_currentSolutionIdx <= m_lastSolutionIdx;
             else
                 return !m_qSolutionIdx.empty();

@@ -3,7 +3,9 @@
 
 if(TENSILELITE_ENABLE_YAML)
     add_subdirectory(llvm)
-else()
+endif()
+
+if(NOT TENSILELITE_ENABLE_YAML OR tensilelite_msgpack_target)
     add_subdirectory(msgpack)
 endif()
 

@@ -15,9 +15,12 @@
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionLibrary.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
+#include <Tensile/hip/HipHardware.hpp>
+#include <origami/hardware.hpp>
 
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace TensileLite;
@@ -233,4 +236,58 @@ TEST_F(SolutionIteratorSelectionTest, ASolutionMustBeValidForEverySlice)
     whole.preProblem(full);
     EXPECT_TRUE(whole.valid(*solution1));
     EXPECT_TRUE(split.valid(*solution0));
+}
+
+// With prediction on, the iterator ranks only the solutions that pass checkSolution. When none does
+// there is nothing to run, and the iterator must not index into the empty ranking.
+TEST_F(SolutionIteratorSelectionTest, PredictionWithNoValidSolutionRunsNothing)
+{
+    // M = 4 is not a multiple of 128, so neither solution is valid.
+    auto sizeMultiple = std::make_shared<Predicates::Contraction::SizeMultiple>(0, 128);
+    solution0->problemPredicate = sizeMultiple;
+    solution1->problemPredicate = sizeMultiple;
+
+    // Prediction is available: the hardware has an analytical model.
+    auto device                = std::make_shared<hip::HipAMDGPU>();
+    device->processor          = AMDGPU::Processor::gfx950;
+    device->computeUnitCount   = 256;
+    device->deviceName         = "prediction-without-valid-solutions-test";
+    device->analyticalHardware = std::make_shared<origami::hardware_t>(
+        origami::hardware_t::architecture_t::gfx950,
+        256, // N_CU
+        163840, // lds_capacity
+        262144, // rf_capacity
+        8, // NUM_XCD
+        1.0, // mem1_perf_ratio
+        1.0, // mem2_perf_ratio
+        1.0, // mem3_perf_ratio
+        4000000, // L2_capacity
+        1.2, // compute_clock_ghz
+        1, // parallel_mi_cu
+        std::make_tuple(0.0, 0.008, 0.0)); // mem_bw_per_wg_coefficients
+
+    AllSolutionsIterator iterator(library, device, 1.0, 0, -1, false);
+    iterator.setReporter(reporter);
+    iterator.preProblem(&problem);
+    EXPECT_FALSE(iterator.moreSolutionsInProblem());
+}
+
+// Without a prediction (the hardware has no analytical model) nothing can be ranked, so every
+// solution is visited in index order whatever the threshold.
+TEST_F(SolutionIteratorSelectionTest, WithoutPredictionEverySolutionIsVisited)
+{
+    for(double threshold : {0.0, 0.5, 1.0, 2.0})
+    {
+        AllSolutionsIterator iterator(library, hardware, threshold, 0, -1, false);
+        iterator.setReporter(reporter);
+        iterator.preProblem(&problem);
+
+        std::vector<int32_t> visited;
+        while(iterator.moreSolutionsInProblem())
+        {
+            visited.push_back(iterator.getSolution()->index);
+            iterator.postSolution();
+        }
+        EXPECT_EQ(visited, (std::vector<int32_t>{0, 1})) << "threshold " << threshold;
+    }
 }

@@ -1,0 +1,4 @@
+GFlops, SizeI, SizeJ, SizeK, SizeL, LDD, LDC, LDA, LDB, TotalFlops, GbpsBW, TilesPerCu, TotalGranularity, WinnerGFlops, WinnerTimeUS, WinnerIdx, WinnerName, SolA, "SolB,comma", SolD
+0, 1024, 1024, 1, 1024, 1024, 1024, 1024, 1024, 2147483648, 104.858, 3, 0.95, 26843.5, 80, 1, "SolB,comma", 21474.8, 26843.5, -1
+1, 512, 2048, 1, 256, 512, 512, 512, 256, 536870912, 110.1, 2, 0.65, 10737.4, 50, 2, "SolC""quote""", 8947.85, , -1, 10737.4, 8259.55
+2, 4096, 128, 1, 64, 4096, 4096, 4096, 64, 67108864, 65.9456, 6, 0.5, 1677.72, 40, 1, "SolB,comma", , 1677.72, -1, , , 1491.31

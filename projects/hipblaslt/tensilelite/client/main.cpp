@@ -38,6 +38,9 @@
 #include "ClientConfig.hpp"
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
+#include "BenchmarkDatabaseSetup.hpp"
+#include "BenchmarkRecording.hpp"
+#include "DatabaseReporter.hpp"
 #include "DeviceContext.hpp"
 #include "HardwareMonitorListener.hpp"
 #include "MetaRunListener.hpp"
@@ -77,7 +80,14 @@
 #include <map>
 #include <memory>
 #include <numeric>
+#include <optional>
 #include <sstream>
+
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace TensileLite
 {
@@ -371,6 +381,9 @@ namespace TensileLite
                                                                                        "running library solution 0.")
 
                 ("results-file",             po::value<std::string>()->default_value("results.csv"), "File name to write results.")
+                ("benchmark-db",             po::value<std::string>()->default_value(""), "SQLite file recording the benchmark progress of every problem and solution pair; enables resuming after a crash. Empty = off.")
+                ("indirect-failures",         po::value<bool>()->default_value(true), "Mark the remaining pairs of a solution that crashed, faulted or hung as INDIRECTLY_FAILED instead of launching it again (needs benchmark-db). When off, such pairs are reset to NOT_BENCHMARKED and retried.")
+                ("indirect-verification-failures", po::value<bool>()->default_value(true), "Mark the remaining pairs of a solution that failed verification as INDIRECT_VERIFICATION_FAILURE (needs benchmark-db). When off, such pairs are reset to NOT_BENCHMARKED and retried.")
                 ("log-file",                 po::value<std::string>(),                               "File name for output log.")
                 ("log-file-append",          po::value<bool>()->default_value(false),                "Append to log file.")
                 ("log-level",                po::value<LogLevel>()->default_value(LogLevel::Debug),  "Log level")
@@ -622,7 +635,9 @@ namespace TensileLite
             }
         }
 
-        po::variables_map parse_args(int argc, const char* argv[])
+        // `clientConfig` receives the canonical text of the options, taken before the
+        // post-processing below changes their types. It stays empty without benchmark-db.
+        po::variables_map parse_args(int argc, const char* argv[], std::string& clientConfig)
         {
             auto options = all_options();
 
@@ -646,6 +661,41 @@ namespace TensileLite
                     if(file.bad())
                         throw std::runtime_error(concatenate("Could not open ", filename));
                     po::store(po::parse_config_file(file, options), args);
+                }
+            }
+
+            if(!args["benchmark-db"].as<std::string>().empty())
+            {
+                // A benchmark-db client is resumable, so dying with its parent is safe, and it keeps
+                // GPU work from outliving the process that launched it.
+                try
+                {
+                    if(!dieWithParent())
+                    {
+                        std::cerr << "benchmark-db client started after its parent exited"
+                                  << std::endl;
+                        exit(1);
+                    }
+                }
+                catch(std::runtime_error const& error)
+                {
+                    std::cerr << "benchmark-db cannot arrange to die with its parent: "
+                              << error.what() << std::endl;
+                    exit(1);
+                }
+
+                // Where and how the run is recorded, and how failures are scheduled, is not part
+                // of what it computes.
+                try
+                {
+                    clientConfig = po::serialize_config(
+                        args, options, optionsExcludedFromDatabaseConfig());
+                }
+                catch(std::runtime_error const& error)
+                {
+                    std::cerr << "benchmark-db cannot record this configuration: " << error.what()
+                              << std::endl;
+                    exit(1);
                 }
             }
 
@@ -845,7 +895,7 @@ namespace TensileLite
     } // namespace Client
 } // namespace TensileLite
 
-int main(int argc, const char* argv[])
+static int runClient(int argc, const char* argv[])
 {
     using namespace TensileLite;
     using namespace TensileLite::Client;
@@ -871,7 +921,8 @@ int main(int argc, const char* argv[])
         }
     } localsDestroyedStamp;
 
-    auto args = parse_args(argc, argv);
+    std::string clientConfig;
+    po::variables_map args = parse_args(argc, argv, clientConfig);
     auto const argsParsed = TimingClock::now();
 
     // Enable timing instrumentation if requested
@@ -1135,6 +1186,19 @@ int main(int argc, const char* argv[])
         solutionIterator = SolutionIterator::Default(library, hardware, args);
     }
 
+    // Opened before the problems are mutated per solution (WGMXCC), so the shapes are pristine.
+    std::shared_ptr<BenchmarkDatabase> database;
+    try
+    {
+        database = openBenchmarkDatabase(
+            args, clientConfig, problemIdxs, *library, *solutionIterator);
+    }
+    catch(std::exception const& error)
+    {
+        std::cerr << error.what() << std::endl;
+        return 1;
+    }
+
     MetaRunListener listeners;
     std::shared_ptr<BenchmarkTimer>        benchmarkTimer;
     std::shared_ptr<SynchronizerValidator> synchronizerValidator;
@@ -1175,6 +1239,7 @@ int main(int argc, const char* argv[])
     }
 
     std::shared_ptr<MetaResultReporter> reporters;
+    std::shared_ptr<DatabaseReporter>   databaseReporter;
     {
         ScopedTimer timer("reporter_setup");
         reporters = std::make_shared<MetaResultReporter>();
@@ -1193,6 +1258,12 @@ int main(int argc, const char* argv[])
                 filename.c_str(), args["log-file-append"].as<bool>() ? std::ios::app : std::ios::out);
 
             reporters->addReporter(LogReporter::Default(args, logFile, LogLevel::Normal));
+        }
+
+        if(database)
+        {
+            databaseReporter = std::make_shared<DatabaseReporter>(database);
+            reporters->addReporter(databaseReporter);
         }
 
         listeners.setReporter(reporters);
@@ -1362,6 +1433,19 @@ int main(int argc, const char* argv[])
         std::cout << ss.str();
     }
 
+#ifdef _WIN32
+    int64_t pid = _getpid();
+#else
+    int64_t pid = getpid();
+#endif
+    std::optional<BenchmarkSession> session;
+    if(database)
+        session.emplace(database,
+                        pid,
+                        static_cast<int64_t>(seed),
+                        IndirectFailurePolicy{args["indirect-failures"].as<bool>(),
+                                              args["indirect-verification-failures"].as<bool>()});
+
     while(listeners.needMoreBenchmarkRuns())
     {
         listeners.preBenchmarkRun();
@@ -1376,6 +1460,13 @@ int main(int argc, const char* argv[])
             size_t rotationLaunchIdx = 0;
             for(int problemIdx : problemIdxs)
             {
+                if(database && !database->hasPendingRuns(problemIdx))
+                {
+                    std::cout << "Skipping problem " << problemIdx
+                              << ": no pending runs in the benchmark database" << std::endl;
+                    continue;
+                }
+
                 // Declared first => destroyed last: problem_total covers the whole body,
                 // problem_teardown covers destruction of the body's locals (see mark() below).
                 ScopedTimer          problemTotalTimer("problem_total");
@@ -1545,6 +1636,9 @@ int main(int argc, const char* argv[])
                     if(solution == nullptr)
                         throw std::runtime_error("Could not find a solution");
 
+                    PairRecording const recording
+                        = classifyPair(database.get(), problemIdx, solution->index);
+
                     // WorkgroupMappingXCCCheck admits CU-fallback solutions on the basis that
                     // they launch at WGMXCC=1, as hipBLASLt does; zero keeps the solution's own
                     // mapping.
@@ -1560,8 +1654,15 @@ int main(int argc, const char* argv[])
                     bool runThisSolution = false;
                     {
                         ScopedTimer timer("run_current_solution_check");
-                        runThisSolution = solutionIterator->runCurrentSolution() && runKernels;
+                        if(recording == PairRecording::SkippedByDatabase)
+                            reporters->report(ResultKey::Validation, "SKIPPED_BY_DB");
+                        else
+                            runThisSolution = solutionIterator->runCurrentSolution() && runKernels;
                     }
+                    // Committed before any launch, so a crash leaves the pair Unknown.
+                    std::optional<PairRecorder> recorder;
+                    if(recording == PairRecording::Record)
+                        recorder.emplace(*databaseReporter, problemIdx, solution->index);
                     if(runThisSolution)
                     {
                         try
@@ -1844,13 +1945,21 @@ int main(int argc, const char* argv[])
                         ScopedTimer timer("post_solution");
                         listeners.postSolution();
                     }
+                    // A lost device leaves the pair Unknown.
+                    if(recorder && !deviceLost)
+                        recorder->finish();
                     solutionTeardownTimer.mark();
 
                     if(deviceLost || (exitOnError && listeners.error() > 0))
                     {
                         flushTimingBuffer();
                         // error range in shell is [0-255]
-                        return std::clamp(listeners.error(), 1, 255);
+                        int32_t const exitCode = std::clamp(listeners.error(), 1, 255);
+                        // The unwinding leaves the pair Unknown and the session open, like a
+                        // crash, so a rerun marks the solution's other pairs as indirectly failed.
+                        if(deviceLost)
+                            throw DeviceLostError(exitCode);
+                        return exitCode;
                     }
                 }
 
@@ -1858,12 +1967,19 @@ int main(int argc, const char* argv[])
                     ScopedTimer timer("post_problem");
                     listeners.postProblem();
                 }
+                // Only reached when the solution loop ended normally. The pairs the iterator never
+                // selected, for example by performance prediction, will not run.
+                if(database)
+                    database->markNotSelected(problemIdx);
                 problemTeardownTimer.mark();
             }
         }
 
         listeners.postBenchmarkRun();
     }
+
+    if(session)
+        session->end();
 
     {
         ScopedTimer timer("finalize_report");
@@ -1896,4 +2012,10 @@ int main(int argc, const char* argv[])
 
     // error range in shell is [0-255]
     return std::min(listeners.error(), 255);
+}
+
+int main(int argc, const char* argv[])
+{
+    return TensileLite::Client::runCatchingBenchmarkFailures(
+        [&]() { return runClient(argc, argv); });
 }
