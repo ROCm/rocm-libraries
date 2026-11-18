@@ -26,7 +26,8 @@
     "dma",
     "fuse",
     "large",
-    "patch"
+    "patch",
+    "split_policy"
   ],
   "behavior_notes": [
     "runtime_compilation"

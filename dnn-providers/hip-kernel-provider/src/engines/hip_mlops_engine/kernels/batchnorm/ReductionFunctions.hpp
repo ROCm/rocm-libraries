@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "Configuration.hpp"
 #include "StaticUnroll.hpp"
 
 namespace hip_kernel_provider::batchnorm

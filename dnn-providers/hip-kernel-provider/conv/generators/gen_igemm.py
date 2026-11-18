@@ -37,6 +37,7 @@ FIELDS = [
     "fuse",
     "large",
     "patch",
+    "split_policy",
 ]
 # Every field that tells two configs of one graph apart is a knob (the candidate enumeration
 # identifies a config by its knob tuple).
@@ -50,7 +51,7 @@ STRINGS = {"direction", "dtype", "atom", "math"}
 # (backward-data catalog only; served for packed K T R S C/g filters). pack 1: k-steps of whole
 # taps when the reduction channels per tap divide BK (small-channel grouped convolutions).
 # cf 1: the output is written packed channels-first from the epilogue (no staging transpose;
-# served for packed channels-first outputs). Every matrix-core config but tap packing has a cf twin.
+# served for packed channels-first outputs). Legacy matrix-core configs but tap packing have a cf twin.
 def C(
     atom,
     bm,
@@ -72,6 +73,7 @@ def C(
     fuse=0,
     large=0,
     patch=0,
+    split_policy=0,
 ):
     return dict(
         atom=atom,
@@ -94,6 +96,7 @@ def C(
         fuse=fuse,
         large=large,
         patch=patch,
+        split_policy=split_policy,
     )
 
 
@@ -114,6 +117,8 @@ SWZ_ATOMS = {
     "wmma11_bf16": 16,
     "wmma12_f16": 16,
     "wmma12_bf16": 16,
+    "wmma125_f16": 32,
+    "wmma125_bf16": 32,
 }
 
 
@@ -441,6 +446,31 @@ def wmma(atom):
     ]
 
 
+def wmma125(atom, fp32=False):
+    """Native gfx1250 atoms: wave32, K=32 for 16-bit, K=4 for fp32."""
+    bk = 16 if fp32 else 32
+    vec = 4 if fp32 else 8
+    tiles = [
+        (64, 64, bk, 2, 2),
+        (128, 64, bk, 2, 2),
+        (128, 128, bk, 2, 4),
+        (128, 128, 2 * bk, 2, 4),
+        (128, 256, bk, 2, 4),
+    ]
+    configs = [C(atom, bm, bn, k, wm, wn, vec=vec) for bm, bn, k, wm, wn in tiles]
+    configs += [
+        C(atom, 64, 64, bk, 2, 2, vec=1),
+        C(atom, 64, 64, bk, 2, 2, vec=vec, stages=2),
+        C(atom, 128, 128, bk, 2, 4, vec=vec, stages=2),
+        C(atom, 128, 64, bk, 2, 2, vec=vec, wdirect=1),
+        C(atom, 64, 64, bk, 2, 2, vec=vec, wdirect=1),
+        C(atom, 64, 16, bk, 4, 1, vec=vec, pack=1),
+    ]
+    if not fp32:
+        configs.append(C(atom, 128, 64, bk, 2, 2, vec=4))
+    return configs
+
+
 def fma(dt):
     if dt == "FLOAT":
         return [
@@ -519,6 +549,21 @@ def isTf32(c):
     return c["math"] == "bf16x3" or c["atom"].endswith("_xf32")
 
 
+CATALOG125 = {
+    "HALF": wmma125("wmma125_f16"),
+    "BFLOAT16": wmma125("wmma125_bf16"),
+    "FLOAT": wmma125("wmma125_f32", fp32=True),
+}
+
+# The same three-product algorithm as the legacy TF32 tier, on gfx1250's native K32
+# BF16 fragments. Keep its candidates separate from the exact native tier.
+CATALOG125TF32 = {
+    "FLOAT": [
+        C("wmma125_bf16", 128, 128, 32, 2, 4, vec=4, math="bf16x3"),
+        C("wmma125_bf16", 128, 64, 32, 2, 2, vec=4, math="bf16x3"),
+    ],
+}
+
 kmd, umd, udd = U("kmd"), U("umd"), U("udd")
 w(
     "conv_igemm.kmd.json",
@@ -550,6 +595,81 @@ w(
         "dispatch_symbol": "hipkernel.conv_igemm.dispatch",
     },
 )
+
+
+def kernels_for(catalog, direction, tag, priority=1000):
+    kernels = []
+    for dtype, cfgs in catalog.items():
+        dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
+        # The direct filter is a backward-data loader: forward has no use for it.
+        cfgs = withPatch(
+            withLarge(
+                withCf(
+                    withSwz(
+                        withFlat(
+                            withFuse([c for c in cfgs if tag == "bwd" or not c["wdirect"]], tag)
+                        )
+                    )
+                )
+            ),
+            tag,
+        )
+        # The measured explicit no-split candidate is appended after all legacy twins,
+        # preserving their names, enumeration order and priorities.
+        if tag == "bwd" and dtype == "HALF" and catalog is CATALOG125:
+            cfgs += [
+                C("wmma125_f16", 64, 64, 32, 2, 2, vec=8,
+                  cf=1, split_policy=1),
+            ]
+        if tag == "fwd" and dtype == "HALF" and catalog is CATALOG125:
+            cfgs += [
+                C("wmma125_f16", 64, 64, 32, 2, 2, vec=8, cf=2),
+            ]
+        for i, c in enumerate(cfgs):
+            name = f"conv_igemm.{tag}.{dt}.{c['atom']}.{c['math']}.{c['bm']}x{c['bn']}x{c['bk']}" f".w{c['wm']}x{c['wn']}.t{c['threads']}.v{c['vec']}.s{c['stages']}" + (
+                ".xcd" if c["xcd"] else ""
+            ) + (
+                ".halo" if c["halo"] else ""
+            ) + (
+                ".wd" if c["wdirect"] else ""
+            ) + (
+                ".pk" if c["pack"] == 1 else ""
+            ) + (
+                ".flat" if c["pack"] == 2 else ""
+            ) + (
+                ".cfio" if c["cf"] == 2 else ".cf" if c["cf"] else ""
+            ) + (
+                ".swz" if c["swz"] else ""
+            ) + (
+                f".dma{c['dma']}" if c["dma"] else ""
+            ) + (
+                f".fuse{c['fuse']}" if c["fuse"] else ""
+            ) + (
+                ".large" if c["large"] else ""
+            ) + (
+                ".patch" if c["patch"] == 1 else ""
+            ) + (
+                ".patchtile" if c["patch"] == 2 else ""
+            ) + (
+                ".nosplit" if c["split_policy"] else ""
+            )
+            kernels.append(
+                {
+                    "version": "1.0",
+                    "id": U(name),
+                    "name": name,
+                    "kernel_source": {
+                        "kind": "embedded_source",
+                        "source_file": "kernels/ConvIgemm.cpp",
+                        "entry_point": "ConvIgemm",
+                    },
+                    "metadata": {"direction": direction, "dtype": dtype, **c},
+                    "priority": priority - i,
+                }
+            )
+    return kernels
+
+
 total = 0
 for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
     ued = U("ued." + tag)
@@ -569,65 +689,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
             "numerical_notes": [],
         },
     )
-    kernels = []
-    for dtype, cfgs in CATALOG.items():
-        dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
-        # The direct filter is a backward-data loader: forward has no use for it.
-        cfgs = withPatch(
-            withLarge(
-                withCf(
-                    withSwz(
-                        withFlat(
-                            withFuse(
-                                [c for c in cfgs if tag == "bwd" or not c["wdirect"]],
-                                tag,
-                            )
-                        )
-                    )
-                )
-            ),
-            tag,
-        )
-        for i, c in enumerate(cfgs):
-            name = f"conv_igemm.{tag}.{dt}.{c['atom']}.{c['math']}.{c['bm']}x{c['bn']}x{c['bk']}" f".w{c['wm']}x{c['wn']}.t{c['threads']}.v{c['vec']}.s{c['stages']}" + (
-                ".xcd" if c["xcd"] else ""
-            ) + (
-                ".halo" if c["halo"] else ""
-            ) + (
-                ".wd" if c["wdirect"] else ""
-            ) + (
-                ".pk" if c["pack"] == 1 else ""
-            ) + (
-                ".flat" if c["pack"] == 2 else ""
-            ) + (
-                ".cf" if c["cf"] else ""
-            ) + (
-                ".swz" if c["swz"] else ""
-            ) + (
-                f".dma{c['dma']}" if c["dma"] else ""
-            ) + (
-                f".fuse{c['fuse']}" if c["fuse"] else ""
-            ) + (
-                ".large" if c["large"] else ""
-            ) + (
-                ".patch" if c["patch"] == 1 else ""
-            ) + (
-                ".patchtile" if c["patch"] == 2 else ""
-            )
-            kernels.append(
-                {
-                    "version": "1.0",
-                    "id": U(name),
-                    "name": name,
-                    "kernel_source": {
-                        "kind": "embedded_source",
-                        "source_file": "kernels/ConvIgemm.cpp",
-                        "entry_point": "ConvIgemm",
-                    },
-                    "metadata": {"direction": direction, "dtype": dtype, **c},
-                    "priority": 1000 - i,
-                }
-            )
+    kernels = kernels_for(CATALOG, direction, tag)
     total += len(kernels)
     # The TF32 configs make an engine of their own, which reports the TENSOR_CORE numerical
     # note (cuDNN's note for TF32 engines), so a caller can exclude them by note.
@@ -664,4 +726,23 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                 "kernelDescriptors": members,
             },
         )
+    for suffix, catalog, engine in (
+        ("_gfx1250", CATALOG125, ued),
+        ("_tf32_gfx1250", CATALOG125TF32, ued_tf32),
+    ):
+        native_kernels = kernels_for(catalog, direction, tag, priority=1100)
+        total += len(native_kernels)
+        assert len({k["id"] for k in native_kernels}) == len(native_kernels)
+        native_pack = {
+            "version": "1.0",
+            "id": U("kdp." + tag + suffix.replace("_", ".")),
+            "name": f"hipkernel:conv_igemm_{tag}{suffix}",
+            "arch": ["gfx1250"],
+            "matchers": [umd],
+            "engine": engine,
+            "dispatch": udd,
+            "kernelDescriptors": native_kernels,
+        }
+        assert len(json.dumps(native_pack, indent=2).encode()) < 500 * 1024
+        w(f"conv_igemm_{tag}{suffix}.kdp.json", native_pack)
 print(total, "kernel configs")

@@ -38,6 +38,9 @@ ATOMS = [
     "wmma11_bf16",
     "wmma12_f16",
     "wmma12_bf16",
+    "wmma125_f16",
+    "wmma125_bf16",
+    "wmma125_f32",
 ]
 INTS = [
     "atom_id",
@@ -617,6 +620,25 @@ for fam in ("11", "12"):
         ],
     )
 
+# Native gfx1250 atoms. Keep these separate from the older gfx12 instruction contracts.
+for dt, atom, bc, vec in (
+    ("HALF", "wmma125_f16", 32, 8),
+    ("BFLOAT16", "wmma125_bf16", 32, 8),
+    ("FLOAT", "wmma125_f32", 4, 4),
+):
+    for f in FILTERS2D + [F333]:
+        add(dt, ["gfx1250"], [
+            M(atom, f, 64, 64, bc, 2, 2, vec, ring=nr(f)),
+            M(atom, f, 128, 64, bc, 2, 2, vec, ring=nr(f)),
+            M(atom, f, 64, 64, bc, 2, 2, 1, ring=nr(f)),
+        ])
+
+add("FLOAT", ["gfx1250"], [
+    M("wmma125_bf16", F33, 64, 64, 32, 2, 2, 8, **X3),
+    M("wmma125_bf16", F33, 128, 64, 32, 2, 2, 8, **X3),
+    M("wmma125_bf16", F333, 64, 64, 32, 2, 2, 8, ring=0, **X3),
+])
+
 # The floor, every arch: FMA for every filter and dtype, a vector form and a scalar (any C) form.
 for dt in ("FLOAT", "HALF", "BFLOAT16"):
     v = 4 if dt == "FLOAT" else 8
@@ -627,7 +649,12 @@ for dt in ("FLOAT", "HALF", "BFLOAT16"):
             [F(f, 8, 8, 4, 16, v, ring=nr(f)), F(f, 4, 4, 8, 8, 1, ring=nr(f))],
         )
 
-ORDER = ["gfx908", "gfx90a", "gfx942", "gfx950", "gfx11", "gfx12", "any"]
+# Extra native candidates follow the existing entries so fallback priorities stay stable.
+for dt, atom in (("HALF", "wmma125_f16"), ("BFLOAT16", "wmma125_bf16")):
+    # Reuse the 3x3 input halo across twice as many output channels per block.
+    add(dt, ["gfx1250"], [M(atom, F33, 64, 128, 32, 2, 4, 8)])
+
+ORDER = ["gfx908", "gfx90a", "gfx942", "gfx950", "gfx11", "gfx12", "gfx1250", "any"]
 kmd, umd, udd = U("kmd"), U("umd"), U("udd")
 write(
     "conv_direct.kmd.json",
@@ -694,7 +721,14 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
     kernels = []
     for dtype, entries in catalog.items():
         dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
-        for i, (archs, c) in enumerate(merged(entries)):
+        legacy_index = native_index = 0
+        for archs, c in merged(entries):
+            if c["atom"].startswith("wmma125"):
+                priority = 1100 - native_index
+                native_index += 1
+            else:
+                priority = 1000 - legacy_index
+                legacy_index += 1
             groups = (
                 "any" if "any" in archs else ",".join(a for a in ORDER if a in archs)
             )
@@ -748,7 +782,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                         "archs": groups,
                         **{k: c[k] for k in INTS},
                     },
-                    "priority": 1000 - i,
+                    "priority": priority,
                 }
             )
     total += len(kernels)

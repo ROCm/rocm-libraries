@@ -717,6 +717,9 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
 #ifdef HIPDNN_ENGINE_CONV_WINOGRAD
         "hipkernel.conv_winograd.dispatch",
 #endif
+#ifdef HIPDNN_ENGINE_CONV_WINOGRAD_ND
+        "hipkernel.conv_winograd_nd.dispatch",
+#endif
 #ifdef HIPDNN_ENGINE_CONV_DIRECT
         "hipkernel.conv_direct.dispatch",
 #endif

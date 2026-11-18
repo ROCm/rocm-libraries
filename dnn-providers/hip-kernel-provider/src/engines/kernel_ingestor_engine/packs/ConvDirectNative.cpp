@@ -208,7 +208,7 @@ int atomReductionStep(std::string_view atom)
         std::string_view name;
         int ka;
     };
-    static constexpr std::array<Entry, 16> STEPS{{
+    static constexpr std::array<Entry, 19> STEPS{{
         {"mfma16_f16", 16},
         {"mfma32_f16", 8},
         {"mfma16_bf16", 16},
@@ -225,6 +225,9 @@ int atomReductionStep(std::string_view atom)
         {"wmma11_bf16", 16},
         {"wmma12_f16", 16},
         {"wmma12_bf16", 16},
+        {"wmma125_f16", 32},
+        {"wmma125_bf16", 32},
+        {"wmma125_f32", 4},
     }};
     for(const auto& entry : STEPS)
     {

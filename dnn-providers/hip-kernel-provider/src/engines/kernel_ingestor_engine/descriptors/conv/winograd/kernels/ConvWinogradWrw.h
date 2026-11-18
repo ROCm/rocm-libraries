@@ -30,6 +30,7 @@
 #pragma once
 
 #include "ConvWinogradCore.h"
+#include "ConvIgemmCore.h"
 
 #define K5W_LPAD 64 // tile padding of the transformed buffers (the GEMM's K needs no bounds)
 
@@ -433,10 +434,9 @@ __device__ void k5wGemm(const K5WrwArgs& a)
                         for(int i = 0; i < TM; ++i)
 #pragma unroll
                             for(int j = 0; j < TN; ++j)
-                                acc[i][j] = __builtin_amdgcn_fdot2(__builtin_bit_cast(h2, av[i][q]),
-                                                                   __builtin_bit_cast(h2, bv[j][q]),
-                                                                   acc[i][j],
-                                                                   false);
+                                acc[i][j] = k1Dot2(__builtin_bit_cast(h2, av[i][q]),
+                                                  __builtin_bit_cast(h2, bv[j][q]),
+                                                  acc[i][j]);
                 }
                 else
                 {

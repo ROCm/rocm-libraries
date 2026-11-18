@@ -244,6 +244,31 @@ TEST(TestConvWinogradForm, MixedLayoutsAreOther)
     EXPECT_EQ(problem->activations, conv_winograd::Layout::OTHER);
 }
 
+TEST(TestConvWinogradForm, ExtentOneChannelsClassifyTheActivationPairJointly)
+{
+    auto properties = testDeviceProperties();
+    properties.gcnArchName = "gfx1250";
+    for(const auto direction : DIRECTIONS)
+    {
+        for(const bool singleInput : {true, false})
+        {
+            auto shape = baseShape();
+            shape.channelsLast = true;
+            shape.c = singleInput ? 1 : 3;
+            shape.k = singleInput ? 3 : 1;
+            const auto spec = specFor(shape, direction);
+            const GraphFixture fixture(buildGraph(spec), properties);
+            const auto problem = parseWinogradProblem(fixture.context(), direction);
+            ASSERT_TRUE(problem.has_value());
+            EXPECT_EQ(problem->activations, conv_winograd::Layout::NHWC);
+            const GraphFixture legacyFixture(buildGraph(spec), testDeviceProperties());
+            const auto legacy = parseWinogradProblem(legacyFixture.context(), direction);
+            ASSERT_TRUE(legacy.has_value());
+            EXPECT_EQ(legacy->activations, conv_winograd::Layout::OTHER);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // One refusal per gated field
 // ---------------------------------------------------------------------------
@@ -505,19 +530,34 @@ struct ConfigFields
     int64_t gemmBm = 128, gemmBn = 64, gemmBk = 8;
     int64_t bk = 0, bt = 0, ccv = 0, tm = 0, tn = 0, waves = 0;
     int64_t bins = 0, f16math = 0, pf = 0, sb = 0;
+    int64_t atom = -1; ///< derived from the architecture unless explicitly testing a contract
 };
 
 hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
-                                                       const std::string& dtype)
+                                                       const std::string& dtype,
+                                                       ConvDirection direction = ConvDirection::FORWARD)
 {
     auto kernel = makeKernel(0, dtype, "ConvWinogradGemm");
     kernel.source.sourceFile = "kernels/ConvWinograd.cpp";
-    kernel.metadata = {{"direction", std::string("FWD")},
+    const bool matrix = f.variant == "wmma" || f.variant == "wreg" || f.variant == "coop";
+    const int64_t atom = f.atom >= 0 ? f.atom
+        : f.variant == "wrw" ? (f.arch == "any" ? 0 : f.arch == "gfx11" ? 1 : f.arch == "gfx12" ? 2
+                               : f.arch == "gfx9" ? 3 : f.arch == "gfx950" ? 6 : -1)
+        : f.variant == "multipass" && f.arch == "gfx1250" ? 5 : !matrix ? 0 : f.arch == "gfx11" ? 1
+        : f.arch == "gfx12" ? 2 : (f.arch == "gfx9" || f.arch == "gfx942" || f.arch == "gfx950") ? 3
+        : f.arch == "gfx1250" ? 4 : -1;
+    const int64_t variantId = f.variant == "multipass" ? 0 : f.variant == "fused" ? 1
+        : f.variant == "wmma" ? 2 : f.variant == "wreg" ? 3 : f.variant == "sreg" ? 4
+        : f.variant == "coop" ? 5 : f.variant == "wrw" ? 6 : -1;
+    kernel.metadata = {{"direction", std::string(direction == ConvDirection::FORWARD ? "FWD" : "BWD")},
                        {"dtype", dtype},
                        {"variant", f.variant},
                        {"m", f.m},
                        {"layout", f.layout},
                        {"arch", f.arch},
+                       {"atom", atom},
+                       {"variant_id", variantId},
+                       {"layout_id", int64_t{f.layout == "NCHW" ? 0 : 1}},
                        {"llc", f.llc},
                        {"gemm_bm", f.gemmBm},
                        {"gemm_bn", f.gemmBn},
@@ -661,7 +701,8 @@ TEST(TestConvWinogradKernelMatch, F43ServesFloat)
 bool admits(const ConfigFields& fields,
             const std::string& arch,
             ConvShape shape = baseShape(),
-            const std::string& dtype = "FLOAT")
+            const std::string& dtype = "FLOAT",
+            ConvDirection direction = ConvDirection::FORWARD)
 {
     if(dtype == "FLOAT")
     {
@@ -678,10 +719,83 @@ bool admits(const ConfigFields& fields,
     auto properties = testDeviceProperties();
     properties.gcnArchName = arch;
     properties.multiProcessorCount = 64;
-    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::FORWARD)), properties);
-    const auto bound = matchesGraph(PACK_FWD, fixture.context());
+    const GraphFixture fixture(buildGraph(specFor(shape, direction)), properties);
+    auto pack = PACK_FWD;
+    if(direction == ConvDirection::BACKWARD_DATA)
+        pack.graphMatcher = "hipkernel.conv_winograd_bwd.graph_match";
+    const auto bound = matchesGraph(pack, fixture.context());
     return bound.has_value()
-           && matchesKernel(PACK_FWD, fixture.context(), kernelOf(fields, dtype), *bound);
+           && matchesKernel(pack, fixture.context(), kernelOf(fields, dtype, direction), *bound);
+}
+
+TEST(TestConvWinogradKernelMatch, NativeMultipassIsFloatOnlyOnExactGfx1250)
+{
+    for(const auto direction : DIRECTIONS)
+    {
+        for(const int m : {2, 4, 3})
+        {
+            auto shape = baseShape();
+            if(m == 3)
+                shape.stride = {2, 2};
+            for(const bool channelsLast : {false, true})
+            {
+                shape.channelsLast = channelsLast;
+                shape.c = 1;
+                shape.k = 3;
+                ConfigFields fields;
+                fields.m = m;
+                fields.layout = channelsLast ? "NHWC" : "NCHW";
+                fields.arch = "gfx1250";
+                fields.atom = 5;
+                EXPECT_TRUE(admits(fields, "gfx1250:sramecc-", shape, "FLOAT", direction));
+                for(const auto& arch : {"gfx1201", "gfx1251", "gfx942"})
+                    EXPECT_FALSE(admits(fields, arch, shape, "FLOAT", direction));
+                for(const auto& dtype : {"HALF", "BFLOAT16"})
+                    EXPECT_FALSE(admits(fields, "gfx1250", shape, dtype, direction));
+                auto wrongStride = shape;
+                wrongStride.stride = {m == 3 ? 1 : 2, m == 3 ? 1 : 2};
+                EXPECT_FALSE(admits(fields, "gfx1250", wrongStride, "FLOAT", direction));
+            }
+        }
+    }
+}
+
+TEST(TestConvWinogradKernelMatch, NativeMultipassTileAndAtomContracts)
+{
+    ConfigFields native;
+    native.arch = "gfx1250";
+    native.atom = 5;
+    native.gemmBm = 64;
+    native.gemmBn = 32;
+    native.gemmBk = 8;
+    EXPECT_TRUE(admits(native, "gfx1250"));
+    auto invalid = native;
+    invalid.gemmBk = 6;
+    EXPECT_FALSE(admits(invalid, "gfx1250"));
+    invalid = native;
+    invalid.gemmBk = 4; // BN * BK does not split over 256 load threads.
+    EXPECT_FALSE(admits(invalid, "gfx1250"));
+    invalid = native;
+    invalid.gemmBm = 96;
+    EXPECT_FALSE(admits(invalid, "gfx1250"));
+    invalid = native;
+    invalid.gemmBn = 48;
+    EXPECT_FALSE(admits(invalid, "gfx1250"));
+    invalid = native;
+    invalid.gemmBm = 1024;
+    invalid.gemmBk = 64;
+    EXPECT_FALSE(admits(invalid, "gfx1250")); // Tile operands exceed the WMMA LDS budget.
+    for(const int atom : {0, 4})
+    {
+        invalid = native;
+        invalid.atom = atom;
+        EXPECT_FALSE(admits(invalid, "gfx1250"));
+    }
+    invalid = native;
+    invalid.arch = "any";
+    EXPECT_FALSE(admits(invalid, "gfx1250"));
+    invalid.atom = 0;
+    EXPECT_FALSE(admits(invalid, "gfx1250")); // Legacy BN still requires 64.
 }
 
 TEST(TestConvWinogradKernelMatch, MultipassServesItsOwnLayoutAndStagesOthersToNchw)
@@ -739,6 +853,79 @@ TEST(TestConvWinogradKernelMatch, WmmaOnlyOnItsFamilyAndOnlyForSixteenBitTypes)
     EXPECT_TRUE(admits(wmma("gfx12"), "gfx1201", baseShape(), "HALF"));
     EXPECT_FALSE(admits(wmma("gfx12"), "gfx942", baseShape(), "HALF"));
     EXPECT_FALSE(admits(wmma("gfx11"), "gfx1100", baseShape(), "FLOAT"));
+}
+
+TEST(TestConvWinogradKernelMatch, Gfx1250NativeContractsDoNotAliasLegacyWmma)
+{
+    auto shape = baseShape();
+    shape.c = 66;
+    shape.k = 70;
+    shape.groups = 2;
+    shape.input = {7, 9};
+    for(const auto direction : DIRECTIONS)
+    {
+        for(const auto& fields : {wmma("gfx1250"), wreg("gfx1250", 0), coop("gfx1250", 0)})
+        {
+            for(const auto* dtype : {"HALF", "BFLOAT16"})
+            {
+                EXPECT_TRUE(admits(fields, "gfx1250:xnack-", shape, dtype, direction));
+                EXPECT_FALSE(admits(fields, "gfx1201", shape, dtype, direction));
+                EXPECT_FALSE(admits(fields, "gfx1251", shape, dtype, direction));
+            }
+            EXPECT_FALSE(admits(fields, "gfx1250", shape, "FLOAT", direction));
+        }
+        for(const auto& legacy : {wmma("gfx12"), wreg("gfx12", 0), coop("gfx12", 0)})
+        {
+            EXPECT_FALSE(admits(legacy, "gfx1250", shape, "HALF", direction));
+            EXPECT_TRUE(admits(legacy, "gfx1200", shape, "HALF", direction));
+            EXPECT_TRUE(admits(legacy, "gfx1201", shape, "BFLOAT16", direction));
+        }
+        auto exactFloat = wmma("gfx1250");
+        exactFloat.atom = 5;
+        EXPECT_TRUE(admits(exactFloat, "gfx1250", shape, "FLOAT", direction));
+        EXPECT_FALSE(admits(exactFloat, "gfx1250", shape, "HALF", direction));
+        EXPECT_FALSE(admits(exactFloat, "gfx1250", shape, "BFLOAT16", direction));
+        EXPECT_TRUE(admits(wreg("gfx1250", 1), "gfx1250", shape, "HALF", direction));
+        EXPECT_FALSE(admits(coop("gfx1250", 1), "gfx1250", shape, "BFLOAT16", direction));
+        EXPECT_TRUE(admits(fused(), "gfx1250", shape, "HALF", direction));
+    }
+}
+
+TEST(TestConvWinogradKernelMatch, RejectsMismatchedNativeAtomAndOversizedCooperativeLds)
+{
+    auto wrongAtom = wmma("gfx12");
+    wrongAtom.atom = 4;
+    EXPECT_FALSE(admits(wrongAtom, "gfx1201", baseShape(), "HALF"));
+    auto tooWide = coop("gfx1250", 0);
+    tooWide.bt = 64; // double K32 V buffers would require 128 KiB
+    EXPECT_FALSE(admits(tooWide, "gfx1250", baseShape(), "HALF"));
+    tooWide.arch = "gfx12"; // legacy K16 buffers fit in 64 KiB
+    EXPECT_TRUE(admits(tooWide, "gfx1201", baseShape(), "HALF"));
+    auto prefetch = coop("gfx1250", 0);
+    prefetch.pf = 1;
+    EXPECT_FALSE(admits(prefetch, "gfx1250", baseShape(), "HALF"));
+    auto phased = coop("gfx1250", 0);
+    phased.m = 3;
+    auto strideTwoShape = baseShape();
+    strideTwoShape.stride = {2, 2};
+    EXPECT_FALSE(admits(phased, "gfx1250", strideTwoShape, "HALF"));
+}
+
+TEST(TestConvWinogradKernelMatch, LegacyMatrixFamiliesPreserveTheirGenericTargets)
+{
+    for(const auto direction : DIRECTIONS)
+    {
+        for(const auto& legacy : {wmma("gfx11"), wreg("gfx11", 0), coop("gfx11", 0)})
+        {
+            EXPECT_TRUE(admits(legacy, "gfx11-generic", baseShape(), "HALF", direction));
+            EXPECT_FALSE(admits(legacy, "gfx1170", baseShape(), "HALF", direction));
+        }
+        for(const auto& legacy : {wmma("gfx12"), wreg("gfx12", 0), coop("gfx12", 0)})
+        {
+            EXPECT_TRUE(admits(legacy, "gfx12-generic", baseShape(), "HALF", direction));
+            EXPECT_FALSE(admits(legacy, "gfx12-5-generic", baseShape(), "HALF", direction));
+        }
+    }
 }
 
 TEST(TestConvWinogradKernelMatch, TheLlcPlanOnlyWhereItSlices)
@@ -1271,6 +1458,18 @@ TEST(TestConvWinogradPlan, SlicesTheBatchUnderTheCacheAndSizesTheWorkspace)
     ASSERT_TRUE(llc.has_value());
     EXPECT_GT(llc->slices, 1);
     EXPECT_LE(llc->uBytes + llc->vBytes + llc->mBytes, size_t{20000} / 4 * 3);
+    llcFields.arch = "gfx1250";
+    llcFields.atom = 5;
+    properties.gcnArchName = "gfx1250";
+    const auto nativeLlc = conv_winograd::planFor(
+        *problem, *conv_winograd::configOf(kernelOf(llcFields, "FLOAT")), properties);
+    ASSERT_TRUE(nativeLlc.has_value());
+    EXPECT_EQ(nativeLlc->slices, llc->slices);
+    EXPECT_EQ(nativeLlc->sliceImages, llc->sliceImages);
+    EXPECT_EQ(nativeLlc->uBytes, llc->uBytes);
+    EXPECT_EQ(nativeLlc->vBytes, llc->vBytes);
+    EXPECT_EQ(nativeLlc->mBytes, llc->mBytes);
+    EXPECT_EQ(nativeLlc->workspaceBytes, llc->workspaceBytes);
 }
 
 /// A device that reports @p units dispatch units (the persistent variants size their grid).
@@ -1478,6 +1677,45 @@ TEST(TestConvWinogradPlan, CooperativeFilterBufferHoldsWholeSixteenChannelUnits)
     EXPECT_EQ(plan->uBytes, size_t{16} * 16 * 16 * 2);
 }
 
+TEST(TestConvWinogradPlan, NativeReductionPaddingMatchesBothDirectionalFilterLaunches)
+{
+    auto shape = baseShape();
+    shape.c = 34;
+    shape.k = 66;
+    shape.groups = 2;
+    shape.dataType = DataType::HALF;
+    for(const auto direction : DIRECTIONS)
+    {
+        const GraphFixture fixture(buildGraph(specFor(shape, direction)));
+        const auto problem = parseWinogradProblem(fixture.context(), direction);
+        ASSERT_TRUE(problem.has_value());
+        const size_t cgo = direction == ConvDirection::FORWARD ? 33 : 17;
+        const size_t paddedCi = direction == ConvDirection::FORWARD ? 32 : 64;
+        for(const auto& fields : {wmma("gfx1250"), wreg("gfx1250", 0), coop("gfx1250", 0)})
+        {
+            const auto config = conv_winograd::configOf(kernelOf(fields, "HALF", direction));
+            ASSERT_TRUE(config.has_value());
+            const auto plan = conv_winograd::planFor(*problem, *config, countedDevice());
+            ASSERT_TRUE(plan.has_value());
+            const size_t paddedCo = fields.variant == "coop" ? (cgo + 15) / 16 * 16 : cgo;
+            EXPECT_EQ(plan->uBytes, 2 * 16 * paddedCo * paddedCi * 2);
+            EXPECT_EQ(plan->filterBlocks[0], (2 * cgo * paddedCi + 255) / 256);
+        }
+    }
+    shape.dataType = DataType::FLOAT;
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::FORWARD)));
+    const auto problem = parseWinogradProblem(fixture.context(), ConvDirection::FORWARD);
+    ASSERT_TRUE(problem.has_value());
+    auto fields = wmma("gfx1250");
+    fields.atom = 5;
+    const auto config = conv_winograd::configOf(kernelOf(fields, "FLOAT"));
+    ASSERT_TRUE(config.has_value());
+    const auto plan = conv_winograd::planFor(*problem, *config, countedDevice());
+    ASSERT_TRUE(plan.has_value());
+    EXPECT_EQ(plan->uBytes, size_t{2 * 16 * 33 * 20 * 4});
+    EXPECT_EQ(plan->filterBlocks[0], (2u * 33 * 20 + 255) / 256);
+}
+
 TEST(TestConvWinogradPlan, StrideTwoStagesTheGraphsOperandsAndUsesSixteenPositions)
 {
     auto shape = baseShape();
@@ -1516,6 +1754,45 @@ TEST(TestConvWinogradPlan, StrideTwoStagesTheGraphsOperandsAndUsesSixteenPositio
         ASSERT_TRUE(staged->in.needed);
         EXPECT_EQ(staged->in.bytes, direction == ConvDirection::FORWARD ? xBytes : yBytes);
         EXPECT_EQ(staged->out.bytes, direction == ConvDirection::FORWARD ? yBytes : xBytes);
+    }
+}
+
+TEST(TestConvWinogradPlan, NativeMultipassPreservesUnpaddedBuffersAndStaging)
+{
+    for(const auto direction : DIRECTIONS)
+    {
+        for(const int m : {2, 4, 3})
+        {
+            for(const bool channelsLast : {false, true})
+            {
+                auto shape = baseShape();
+                shape.c = 3;
+                shape.k = 1;
+                shape.channelsLast = channelsLast;
+                if(m == 3)
+                    shape.stride = {2, 2};
+                const auto problem = parse(specFor(shape, direction));
+                ASSERT_TRUE(problem.has_value());
+                ConfigFields fields;
+                fields.m = m;
+                fields.layout = channelsLast ? "NHWC" : "NCHW";
+                fields.arch = "gfx1250";
+                fields.atom = 5;
+                const auto nativeConfig = conv_winograd::configOf(kernelOf(fields, "FLOAT", direction));
+                ASSERT_TRUE(nativeConfig.has_value());
+                const auto native = conv_winograd::planFor(*problem, *nativeConfig, countedDevice());
+                ASSERT_TRUE(native.has_value());
+                const int64_t positions = m == 4 ? 36 : 16;
+                EXPECT_EQ(native->uBytes,
+                          static_cast<size_t>(positions * problem->args.ci * problem->args.co * 4));
+                EXPECT_EQ(native->vBytes,
+                          static_cast<size_t>(positions * problem->args.ci * native->args.tiles * 4));
+                EXPECT_EQ(native->mBytes,
+                          static_cast<size_t>(positions * problem->args.co * native->args.tiles * 4));
+                EXPECT_FALSE(native->in.needed);
+                EXPECT_FALSE(native->out.needed);
+            }
+        }
     }
 }
 
@@ -2015,7 +2292,6 @@ TEST(TestConvWinogradComputeType, ServesCudnnsComputeTypesPerElementType)
             [direction](const ConvShape& s) { return parse(specFor(s, direction)).has_value(); });
     }
 }
-
 } // namespace
 
 #endif

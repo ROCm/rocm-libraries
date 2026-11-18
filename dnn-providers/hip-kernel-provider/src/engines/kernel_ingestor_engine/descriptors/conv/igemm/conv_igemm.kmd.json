@@ -90,6 +90,10 @@
     {
       "name": "patch",
       "type": "int"
+    },
+    {
+      "name": "split_policy",
+      "type": "int"
     }
   ]
 }

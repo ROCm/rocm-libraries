@@ -33,7 +33,7 @@ namespace hip_kernel_provider::kernel_ingestor_engine::conv_igemm_nchw
 {
 
 /// The atoms a config may name, in atom_id order: the FMA kernel, then K1's matrix-core atoms.
-inline constexpr std::array<std::string_view, 11> ATOMS{"fma",
+inline constexpr std::array<std::string_view, 14> ATOMS{"fma",
                                                         "mfma16_f16",
                                                         "mfma16_bf16",
                                                         "mfma16_f32",
@@ -43,7 +43,10 @@ inline constexpr std::array<std::string_view, 11> ATOMS{"fma",
                                                         "wmma11_f16",
                                                         "wmma11_bf16",
                                                         "wmma12_f16",
-                                                        "wmma12_bf16"};
+                                                        "wmma12_bf16",
+                                                        "wmma125_f16",
+                                                        "wmma125_bf16",
+                                                        "wmma125_f32"};
 
 /// One kernel config: the KMD fields minus direction and dtype. Fields the kernel kind does not
 /// use are 0 (wm, wn, wp for FMA; tq, tc for matrix cores); a config that sets one serves

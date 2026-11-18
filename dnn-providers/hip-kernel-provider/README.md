@@ -96,6 +96,15 @@ After building, run the test suites:
 ./bin/hip_kernel_plugin_integration_tests
 ```
 
+## Normalization Reductions
+
+On gfx1250, layernorm backward reuses batchnorm's existing `warpSize`-aware
+two-sum reduction: wave partials are combined through LDS rather than a full-block
+tree at every level. Other targets retain their existing reduction association.
+The change does not depend on enabling convolution. Forward Welford statistics,
+saved/recomputed-statistics handling and affine-gradient paths are unchanged;
+batchnorm and RMSNorm algorithms are unchanged.
+
 ## Kernel Embedding System
 
 Kernel source files (`.cpp`, `.hpp`, `.h`) under `engines/` are embedded as C++ string literals at CMake configure time. *Use the CMake function `add_kernels_for_embedding` in any engine you define that implements HIP kernels.* This allows runtime compilation via HIPRTC while keeping kernel sources as regular C++ files (with syntax highlighting, IDE support, etc.).

@@ -20,6 +20,7 @@
 #pragma once
 
 #include "ConvArchFamily.h"
+#include "ConvPackedMath.h"
 #include "ConvWinogradCore.h"
 
 typedef _Float16 k5h2 __attribute__((ext_vector_type(2)));
@@ -55,7 +56,10 @@ __device__ inline float k5Round(float v)
 
 // Buffer loads: 32-bit byte offsets from a per-tensor resource (tensor < 2 GiB; the host slices
 // the batch otherwise); per-chunk and per-row offsets go in the scalar offset.
-#if HKP_ARCH_GFX11 || HKP_ARCH_GFX12
+#if HKP_ARCH_GFX1250
+// Native gfx1250 resources have no legacy format or out-of-bounds control bits.
+#define K5_RSRC_FLAGS 0
+#elif HKP_ARCH_GFX11 || HKP_ARCH_GFX12
 #define K5_RSRC_FLAGS 0x31004000
 #elif defined(__gfx1010__) || defined(__gfx1030__) || defined(__gfx1031__) || defined(__gfx1032__)
 #define K5_RSRC_FLAGS 0x31014000
@@ -87,6 +91,15 @@ __device__ inline float k5BufLoad(__amdgpu_buffer_rsrc_t r, unsigned voff, unsig
         const unsigned short b = __builtin_amdgcn_raw_buffer_load_b16(r, voff, soff, 0);
         return K5Elem<T>::load(__builtin_bit_cast(T, b));
     }
+}
+
+__device__ inline void k5WaitGlobalLoads()
+{
+#if HKP_ARCH_GFX1250
+    asm volatile("s_wait_loadcnt 0" ::: "memory");
+#else
+    asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
+#endif
 }
 
 // Filter pre-pass for the fused kernel. One thread per (g, in-channel dword row iv, out channel o),
@@ -449,7 +462,7 @@ __device__ void k5FusedConv2(const K5Args& a CONV_EPI_FN_PARAM)
                 float d[4], t[4];
                 if constexpr(DMA)
                 {
-                    asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
+                    k5WaitGlobalLoads();
 #pragma unroll
                     for(int i = 0; i < 4; ++i)
                     {
@@ -495,7 +508,7 @@ __device__ void k5FusedConv2(const K5Args& a CONV_EPI_FN_PARAM)
             if constexpr(DMA)
             {
                 // Own DMA'd raw patch: this lane's loads must have landed (no cross-lane reads).
-                asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
+                k5WaitGlobalLoads();
                 if(tid < C::NTASK)
                 {
 #pragma unroll
@@ -577,7 +590,7 @@ __device__ void k5FusedConv2(const K5Args& a CONV_EPI_FN_PARAM)
             load(1, sets[PFD - 1]);
         stage(0, sets[0]);
         if constexpr(DMA)
-            asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
+            k5WaitGlobalLoads();
         __syncthreads();
         // The Hadamard of chunk ch from LDS buffer ch & 1.
         auto hadamard = [&](int ch) __attribute__((always_inline))
@@ -600,10 +613,8 @@ __device__ void k5FusedConv2(const K5Args& a CONV_EPI_FN_PARAM)
                         for(int j = j0; j < j0 + 4; ++j)
                         {
                             if constexpr(DOT2)
-                                acc[i][j] = __builtin_amdgcn_fdot2(__builtin_bit_cast(k5h2, av[i]),
-                                                                   __builtin_bit_cast(k5h2, bv[j]),
-                                                                   acc[i][j],
-                                                                   false);
+                                acc[i][j] = k1Dot2(__builtin_bit_cast(k5h2, av[i]),
+                                                  __builtin_bit_cast(k5h2, bv[j]), acc[i][j]);
                             else
                                 acc[i][j] = __builtin_fmaf(
                                     __uint_as_float(av[i]), __uint_as_float(bv[j]), acc[i][j]);
@@ -660,10 +671,8 @@ __device__ void k5FusedConv2(const K5Args& a CONV_EPI_FN_PARAM)
                         for(int j = 0; j < TN; ++j)
                         {
                             if constexpr(DOT2)
-                                acc[i][j] = __builtin_amdgcn_fdot2(__builtin_bit_cast(k5h2, av[i]),
-                                                                   __builtin_bit_cast(k5h2, bv[j]),
-                                                                   acc[i][j],
-                                                                   false);
+                                acc[i][j] = k1Dot2(__builtin_bit_cast(k5h2, av[i]),
+                                                  __builtin_bit_cast(k5h2, bv[j]), acc[i][j]);
                             else
                                 acc[i][j] = __builtin_fmaf(
                                     __uint_as_float(av[i]), __uint_as_float(bv[j]), acc[i][j]);
@@ -686,8 +695,7 @@ __device__ void k5FusedConv2(const K5Args& a CONV_EPI_FN_PARAM)
             if(more)
                 stage((ch + 1) & 1, nxt);
             if constexpr(DMA)
-                asm volatile("s_waitcnt vmcnt(0)" ::
-                                 : "memory"); // U DMA landed before others read it
+                k5WaitGlobalLoads(); // U DMA landed before others read it
             __syncthreads();
         };
         if constexpr(PFD == 1)
@@ -716,10 +724,9 @@ __device__ void k5FusedConv2(const K5Args& a CONV_EPI_FN_PARAM)
                             {
                                 if constexpr(DOT2)
                                     acc[i][j]
-                                        = __builtin_amdgcn_fdot2(__builtin_bit_cast(k5h2, av[i]),
-                                                                 __builtin_bit_cast(k5h2, bv[j]),
-                                                                 acc[i][j],
-                                                                 false);
+                                        = k1Dot2(__builtin_bit_cast(k5h2, av[i]),
+                                                 __builtin_bit_cast(k5h2, bv[j]),
+                                                 acc[i][j]);
                                 else
                                     acc[i][j] = __builtin_fmaf(
                                         __uint_as_float(av[i]), __uint_as_float(bv[j]), acc[i][j]);
@@ -777,10 +784,9 @@ __device__ void k5FusedConv2(const K5Args& a CONV_EPI_FN_PARAM)
                             {
                                 if constexpr(DOT2)
                                     acc[i][j]
-                                        = __builtin_amdgcn_fdot2(__builtin_bit_cast(k5h2, av[i]),
-                                                                 __builtin_bit_cast(k5h2, bv[j]),
-                                                                 acc[i][j],
-                                                                 false);
+                                        = k1Dot2(__builtin_bit_cast(k5h2, av[i]),
+                                                 __builtin_bit_cast(k5h2, bv[j]),
+                                                 acc[i][j]);
                                 else
                                     acc[i][j] = __builtin_fmaf(
                                         __uint_as_float(av[i]), __uint_as_float(bv[j]), acc[i][j]);

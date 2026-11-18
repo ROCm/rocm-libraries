@@ -18,11 +18,11 @@ SPDX-License-Identifier:  MIT
 - **Variants:**
   - `multipass`: transforms around a batched GEMM, any arch, NCHW and NHWC;
   - `fused`: VALU, every arch, `v_dot2_f32_f16` for fp16;
-  - `wmma` and `wreg`: register-built WMMA operands, gfx11/gfx12;
+  - `wmma` and `wreg`: register-built WMMA operands, gfx11/gfx12 and native gfx1250 16-bit atoms;
   - `sreg`: register VALU, wave64 gfx9;
-  - `coop`: cooperative WMMA (gfx11/gfx12) or MFMA (gfx908+), with a 16-bin RDNA layout;
+  - `coop`: cooperative WMMA (gfx11/gfx12 and gfx1250) or MFMA (gfx908+); native gfx1250 uses K32 chunks and the four-bin F(2,3) form, while older RDNA retains its 16-bin layout;
   - `wrw`: F(3,r) GEMM per Winograd position.
-- **Arches:** all. Matrix cores are used only for 16-bit operands; fp32 runs on VALU.
+- **Arches:** all. gfx1250 adds exact-fp32 K4 WMMA to multipass GEMM; other fp32 paths retain VALU or their existing backward-weights matrix atoms.
 - **Grids:** persistent variants size their grid by occupancy: units x blocks that are actually resident (registers and LDS). A second, partly empty round measured 15-26% slower.
 - **Wins when:**
   - NCHW fp16 3x3 on CDNA2 / CDNA1 (gfx90a 1.30x fwd / 1.50x bwd on its graphs), against CK and older implicit GEMMs;
@@ -34,7 +34,7 @@ SPDX-License-Identifier:  MIT
   - NHWC 3x3 fp16 backward weights and backward data against MIOpen's transpose-wrapped asm (`Transposed*`); other engines serve those graphs.
   - Kernel against kernel, K5 trails MIOpen's Winograd on gfx906 and RDNA (0.55-0.70x) and is near parity on gfx90a/gfx908 (0.96-0.98x); it leads on gfx950/gfx942 (1.03-1.32x) except against Rage (0.93x). See "Next steps".
 - **Precision:** every engine reports the `WINOGRAD` numerical note, with `WINOGRAD_TILE_4x4` on the fwd/bwd and BF16 engines and `WINOGRAD_TILE_6x6` on the F43 engines (wrw mixes F(3,2), F(3,4) and F(3,6) and names no tile). Transforms are fp32; 16-bit operands are rounded once after their transform, except the input transform of `f16math` configs. Accumulation is fp32. An output whose window lies wholly in padding is exactly 0. Deterministic.
-- **Instances:** 432: `CONV_WINOGRAD_FWD/BWD` 112 each, `CONV_WINOGRAD_FWD/BWD_BF16` 54 each (every bf16 fwd/bwd config), `CONV_WINOGRAD_FWD/BWD_F43` 8 each (fp32 F(4,3) multipass), `CONV_WINOGRAD_WRW` 84. All are offered by default.
+- **Instances:** current per-engine counts are in [HEURISTICS.md](../../HEURISTICS.md). The BF16 and F43 siblings remain separate numerical-note engines.
 - **vs MIOpen** (usage-weighted speedup on the graphs where it is our best engine, search mode), fwd / bwd / wrw:
 
   | GPU | fwd | bwd | wrw |
@@ -103,6 +103,10 @@ SPDX-License-Identifier:  MIT
   - fwd/bwd bf16 only with the switch.
   - Per config: dtype and direction equal to the graph's; atom on the device; WMMA / coop not fp32; sreg not bf16; `f16math` only for fp16; coop bf16 MFMA from gfx90a; per-chip coop configs (`gfx942`: gfx940-942; `gfx950`) only on their chip; `sb` only on the CDNA transform-row layout; F(3,2) exactly for stride 2; F(4,3) only fp32; a device reporting no units declined for persistent variants.
   - wrw per-dtype rules (below); every plan within launch, buffer and item-count limits.
+  - On gfx1250 only, extent-one activation axes are classified jointly: choose NCHW
+    when both x and y match it, otherwise NHWC when both match that order, otherwise
+    stage the mixed/other layouts. Other architectures retain their individual
+    NCHW-first classification and existing staging decisions.
 - **wrw.**
   - x and dy are read in place when packed channels-first. Packed channels-last operands go through 64 x 64 LDS transposes, which measured 3-23% faster than transforming in place on gfx906 / gfx90a UNet; others are copied.
   - GEMM on MFMA (gfx9 16x16, gfx950 16x16x32), WMMA, or FMA thread tiles.
@@ -153,6 +157,28 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
   - RDNA fp32 large layers, where F(2,3) runs (F(4,3) is the F43 engines').
   - gfx906 fused, where the Hadamard runs near peak but staging, loads and barriers cost as much again.
   - CDNA small-C against Rage: Inception c32 149² trails by 1.6-1.75x, realesrgan c160 k32 backward data by 1.33-1.38x, HRNet c32 56² by 1.18x (gfx950) and 1.27x (MI325X).
+
+## Dilated Winograd
+
+`hipkernel:CONV_WINOGRAD_ND_FWD` is a separate gfx1250 engine for FLOAT 2-D
+3x3, unit-stride forward convolution with non-unit dilation on at least one
+axis. Both convolution modes, groups, asymmetric padding and safe positive
+strided views are supported. It does not add backward paths, 16-bit storage,
+rank-3 convolution, unit-dilation candidates or fused pointwise graphs.
+
+Each output axis is split into dilation residues. F(2,3) operates inside those
+subgrids, without inserted filter zeros or materialized space-to-batch copies.
+Filter, input, GEMM and output transforms use fp32; GEMM uses native exact-fp32
+16x16x4 WMMA. Filter U and spatially chunked V/M buffers share a 256 MiB cap.
+The filter is transformed from its current binding on every execution.
+
+Four candidates combine `gemm_bm` 64/128 and `chunk_tiles` 256/4096;
+`gemm_bn` 64 and `gemm_bk` 16 are fixed. The engine reports `WINOGRAD` and
+`WINOGRAD_TILE_4x4`, with deterministic fixed-order sums and no atomics.
+Its generator is `gen_winograd_nd.py`; kernels and descriptors live in
+`descriptors/conv/winograd_nd/`, and matching/preparation in `ConvWinogradNd*`.
+`TestGpuConvWinogradNd.cpp` checks independent FP64 direct convolution,
+reduction/output-tile tails, chunk boundaries, rebinding and bitwise relaunches.
 
 ## Numerical precision
 - **Error model.** Winograd's rounding error scales with the magnitude of the whole tile it shares, Σ|products| over the neighbourhood, not with the output alone. An infinity in a tile poisons its neighbours (inf x structural zero gives NaN). Both are what the `WINOGRAD` note declares; the non-finite behaviour is documented, not fixed.

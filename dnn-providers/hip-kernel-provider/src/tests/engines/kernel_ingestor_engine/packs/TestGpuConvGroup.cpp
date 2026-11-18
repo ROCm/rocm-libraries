@@ -401,19 +401,22 @@ bool served(const ConvShape& shape, ConvDirection direction)
     // The properties outlive the architecture's view of their name.
     const auto device = currentDeviceProperties();
     const auto arch = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName);
+    // K4's block-diagonal cores require a reduction step dividing 16; native K32
+    // WRW atoms do not satisfy that contract.
+    const auto matrixAtomRuns = [&] {
+        const std::array<const char*, 4> atoms
+            = shape.dataType == DataType::HALF
+                  ? std::array<const char*, 4>{"mfma16_f16", "wmma11_f16", "wmma12_f16", ""}
+                  : std::array<const char*, 4>{
+                        "mfma16_bf16", "mfma16_bf16_908", "wmma11_bf16", "wmma12_bf16"};
+        return std::any_of(atoms.begin(), atoms.end(), [&](const char* atom) {
+            return *atom != '\0' && conv_igemm::atomRunsOn(atom, arch);
+        });
+    };
     if(direction == ConvDirection::BACKWARD_WEIGHTS)
     {
         // Small groups: a matrix-core atom for the element type, and fp32 also on FMA everywhere.
         // Wide groups (17 to 32 channels): the MFMA atoms.
-        const char* element = "bf16";
-        if(shape.dataType == DataType::FLOAT)
-        {
-            element = "f32";
-        }
-        else if(shape.dataType == DataType::HALF)
-        {
-            element = "f16";
-        }
         const int64_t cg = shape.c / shape.groups;
         if(cg > 16)
         {
@@ -432,7 +435,7 @@ bool served(const ConvShape& shape, ConvDirection direction)
             return conv_igemm::atomRunsOn("mfma16_bf16", arch)
                    || conv_igemm::atomRunsOn("mfma16_bf16_908", arch);
         }
-        return shape.dataType == DataType::FLOAT || conv_wrw::runsMatrixAtomFor(element, arch);
+        return shape.dataType == DataType::FLOAT || matrixAtomRuns();
     }
     if(direction == ConvDirection::BACKWARD_DATA
        && std::any_of(shape.stride.begin(), shape.stride.end(), [](int64_t s) { return s > 2; }))
@@ -448,14 +451,7 @@ bool served(const ConvShape& shape, ConvDirection direction)
     // 16-bit configs all run on matrix-core atoms: a device without one (gfx906) has none.
     if(shape.dataType != DataType::FLOAT)
     {
-        const std::array<const char*, 4> atoms
-            = shape.dataType == DataType::HALF
-                  ? std::array<const char*, 4>{"mfma16_f16", "wmma11_f16", "wmma12_f16", ""}
-                  : std::array<const char*, 4>{
-                        "mfma16_bf16", "mfma16_bf16_908", "wmma11_bf16", "wmma12_bf16"};
-        return std::any_of(atoms.begin(), atoms.end(), [&](const char* atom) {
-            return *atom != '\0' && conv_igemm::atomRunsOn(atom, arch);
-        });
+        return matrixAtomRuns();
     }
     return true;
 }
@@ -666,6 +662,10 @@ void runCase(ConvShape shape,
     if(served(shape, direction))
     {
         EXPECT_GE(ran, 1) << "no catalog config serves this case";
+    }
+    else if(ran == 0)
+    {
+        GTEST_SKIP() << "the device has no K4 atom satisfying this case's fixed K16 contract";
     }
 }
 

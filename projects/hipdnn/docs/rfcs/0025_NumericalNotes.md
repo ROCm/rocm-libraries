@@ -69,7 +69,7 @@ Compatibility-layer divergences from cuDNN are in [KNOWN_DIVERGENCES.md](../KNOW
 | `MIOPEN_ENGINE` | Explicit `[NONDETERMINISTIC]` |
 | hip-kernel-provider `hipkernel:CONV_*_TF32` | Explicit `[TENSOR_CORE]` |
 | hip-kernel-provider `hipkernel:CONV_FFT_*` | Explicit `[FFT]` |
-| hip-kernel-provider `hipkernel:CONV_WINOGRAD_FWD`, `_BWD`, `_FWD_BF16`, `_BWD_BF16` | Explicit `[WINOGRAD, WINOGRAD_TILE_4x4]` |
+| hip-kernel-provider `hipkernel:CONV_WINOGRAD_FWD`, `_BWD`, `_FWD_BF16`, `_BWD_BF16`, `_ND_FWD` | Explicit `[WINOGRAD, WINOGRAD_TILE_4x4]` |
 | hip-kernel-provider `hipkernel:CONV_WINOGRAD_FWD_F43`, `_BWD_F43` | Explicit `[WINOGRAD, WINOGRAD_TILE_6x6]` |
 | hip-kernel-provider `hipkernel:CONV_WINOGRAD_WRW` | Explicit `[WINOGRAD]` |
 | Every other hip-kernel-provider `hipkernel:CONV_*` engine | Explicit `[]` |
