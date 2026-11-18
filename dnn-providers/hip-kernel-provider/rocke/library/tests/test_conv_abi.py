@@ -2769,9 +2769,10 @@ def test_cache_applies_runtime_launch_limits(tmp_path):
     ok, why = cache.supports_problem(dgrad, depthwise)
     assert not ok and "depthwise" in why
 
-    # Split-K does not change which problems the grouped binary serves:
-    # grouped's cpg=16 is still accepted. (The even-cpg rule for a split-K
-    # 16-bit dX atomic is covered by test_conv_split_k.py.)
+    # A split-K binary serves the same problems: grouped is still accepted and
+    # depthwise is still refused. (The even-cpg rule for a split-K 16-bit dX
+    # atomic lives in the spec validator and resolver, covered by
+    # test_conv_split_k.py; supports_problem does not check it.)
     split_k_dgrad = KernelIdentity(
         direction="dgrad",
         tile_m=64,
@@ -2785,3 +2786,5 @@ def test_cache_applies_runtime_launch_limits(tmp_path):
         **common,
     )
     assert cache.supports_problem(split_k_dgrad, grouped)[0]
+    ok, why = cache.supports_problem(split_k_dgrad, depthwise)
+    assert not ok and "depthwise" in why
