@@ -154,6 +154,11 @@ class HelperKernelObjectsMemo:
     built for the first such solution and the same list is returned for the others. Scope an
     instance to one set of solutions (e.g. one benchmark step): it keeps every distinct
     ProblemType and helper list it has built.
+
+    Keep each ProblemType, the fixed compiler/capability context, and the returned helper
+    lists and objects unchanged while querying the memo. It retains live ProblemType
+    references and shares cached helpers; in-place mutation can leave stale cache entries
+    or change the helpers returned by later lookups.
     """
 
     _absent = object()
