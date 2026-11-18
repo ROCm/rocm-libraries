@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
+#include <optional>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
@@ -182,6 +184,45 @@ TEST(TestGpuPointwiseUnaryPlanBuilder, BuildNodePlanThrowsForWrongAttributesType
     const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
 
     EXPECT_THROW(patient.buildNodePlan(graph, graph.getNode(0)), std::runtime_error);
+}
+
+TEST(TestGpuPointwiseUnaryPlanBuilder, IsApplicableForSupportedModes)
+{
+    const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
+
+    for(const auto mode : {PointwiseMode::IDENTITY,    PointwiseMode::ABS,
+                           PointwiseMode::NEG,         PointwiseMode::RELU_FWD,
+                           PointwiseMode::SIGMOID_FWD, PointwiseMode::TANH_FWD,
+                           PointwiseMode::GELU_FWD,    PointwiseMode::GELU_APPROX_TANH_FWD,
+                           PointwiseMode::SWISH_FWD,   PointwiseMode::EXP,
+                           PointwiseMode::LOG,         PointwiseMode::SQRT,
+                           PointwiseMode::RSQRT,       PointwiseMode::RECIPROCAL,
+                           PointwiseMode::SIN,         PointwiseMode::TAN,
+                           PointwiseMode::ERF,         PointwiseMode::CEIL,
+                           PointwiseMode::FLOOR,       PointwiseMode::ELU_FWD,
+                           PointwiseMode::SOFTPLUS_FWD})
+    {
+        auto builder = createUnaryGraph(mode);
+        auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_TRUE(patient.isApplicable(graph.getNode(0), graph.getTensorMap()))
+            << EnumNamePointwiseMode(mode);
+    }
+}
+
+TEST(TestGpuPointwiseUnaryPlanBuilder, IsNotApplicableForUnsupportedMode)
+{
+    const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
+
+    // Registered on the CPU reference but not on the GPU one
+    for(const auto mode : {PointwiseMode::LOGICAL_NOT, PointwiseMode::GEN_INDEX})
+    {
+        auto builder = createUnaryGraph(mode);
+        auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_FALSE(patient.isApplicable(graph.getNode(0), graph.getTensorMap()))
+            << EnumNamePointwiseMode(mode);
+    }
 }
 
 // =============================================================
@@ -519,6 +560,104 @@ TEST(TestGpuPointwiseTernaryPlanBuilder, BuildNodePlanThrowsForWrongAttributesTy
 // =============================================================
 // Test executing the plans
 // =============================================================
+
+TEST(TestGpuPointwiseUnaryPlanFp32, ExecutePlanEluWithAlpha)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // The alpha attribute on the node must reach the kernel
+    const float alpha = 2.5f;
+    auto builder = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::ELU_FWD,
+                                                                  DIMS,
+                                                                  generateStrides(DIMS),
+                                                                  DIMS,
+                                                                  generateStrides(DIMS),
+                                                                  DataType::FLOAT,
+                                                                  DataType::FLOAT,
+                                                                  std::nullopt,
+                                                                  std::nullopt,
+                                                                  std::nullopt,
+                                                                  std::nullopt,
+                                                                  alpha));
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
+    auto plan = patient.buildNodePlan(graph, graph.getNode(0));
+
+    Tensor<float> inputTensor(DIMS);
+    Tensor<float> outputTensor(DIMS);
+    fillWithRandomValues(inputTensor, -3.0f, 3.0f, 1U);
+    outputTensor.fillWithValue(0);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[IN_0_UID] = inputTensor.rawDeviceData();
+    variantPack[OUT_UID] = outputTensor.rawDeviceData();
+
+    plan->execute(variantPack);
+    outputTensor.markDeviceModified();
+
+    for(size_t i = 0; i < outputTensor.elementCount(); ++i)
+    {
+        const float x = static_cast<float*>(inputTensor.rawHostData())[i];
+        const float expected = (x > 0.0f) ? x : alpha * std::expm1(x);
+        EXPECT_NEAR(expected, static_cast<float*>(outputTensor.rawHostData())[i], 1e-5f)
+            << "Mismatch at index " << i;
+    }
+}
+
+TEST(TestGpuPointwiseUnaryPlanFp32, ExecutePlanSoftplusWithBeta)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // The beta attribute on the node must reach the kernel
+    const float beta = 2.0f;
+    auto builder = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::SOFTPLUS_FWD,
+                                                                  DIMS,
+                                                                  generateStrides(DIMS),
+                                                                  DIMS,
+                                                                  generateStrides(DIMS),
+                                                                  DataType::FLOAT,
+                                                                  DataType::FLOAT,
+                                                                  std::nullopt,
+                                                                  std::nullopt,
+                                                                  std::nullopt,
+                                                                  std::nullopt,
+                                                                  std::nullopt,
+                                                                  beta));
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
+    auto plan = patient.buildNodePlan(graph, graph.getNode(0));
+
+    Tensor<float> inputTensor(DIMS);
+    Tensor<float> outputTensor(DIMS);
+    fillWithRandomValues(inputTensor, -3.0f, 3.0f, 1U);
+    outputTensor.fillWithValue(0);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[IN_0_UID] = inputTensor.rawDeviceData();
+    variantPack[OUT_UID] = outputTensor.rawDeviceData();
+
+    plan->execute(variantPack);
+    outputTensor.markDeviceModified();
+
+    for(size_t i = 0; i < outputTensor.elementCount(); ++i)
+    {
+        const auto x = static_cast<double>(static_cast<float*>(inputTensor.rawHostData())[i]);
+        const auto betaDouble = static_cast<double>(beta);
+        const auto expected = static_cast<float>(std::log1p(std::exp(betaDouble * x)) / betaDouble);
+        EXPECT_NEAR(expected, static_cast<float*>(outputTensor.rawHostData())[i], 1e-5f)
+            << "Mismatch at index " << i;
+    }
+}
 
 TEST(TestGpuPointwiseBinaryPlanFp32, ExecutePlanMaxMin)
 {

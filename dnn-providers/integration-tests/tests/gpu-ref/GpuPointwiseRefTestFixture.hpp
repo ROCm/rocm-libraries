@@ -46,8 +46,16 @@ void runGpuVsCpuPointwiseUnary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMo
     auto outputCpu = Tensor<DataType>(ioDims);
     auto outputGpu = Tensor<DataType>(ioDims);
 
+    // LOG, SQRT, RSQRT and RECIPROCAL are only defined on positive values, and RECIPROCAL and
+    // RSQRT blow up near zero, so keep their inputs away from it
+    const bool positiveDomain
+        = operation == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::LOG
+          || operation == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SQRT
+          || operation == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RSQRT
+          || operation == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RECIPROCAL;
+    const float fillMin = positiveDomain ? 0.25f * fillRange : -fillRange;
     fillWithRandomValues(
-        inputTensor, static_cast<DataType>(-fillRange), static_cast<DataType>(fillRange), seed);
+        inputTensor, static_cast<DataType>(fillMin), static_cast<DataType>(fillRange), seed);
 
     // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
     inputTensor.memory().hostData();
@@ -136,6 +144,37 @@ void runGpuVsCpuPointwiseTernary(hipdnn_flatbuffers_sdk::data_objects::Pointwise
     assertAllEqual(outputCpu, outputGpu);
 }
 
+// Runs a unary mode on inputs that random fills never produce: signed zeros, NaN, infinities and a
+// negative number, which is outside the domain of LOG and SQRT. The GPU result must match the CPU
+// reference, including NaN and infinity.
+template <typename DataType>
+void runGpuVsCpuPointwiseUnarySpecialValues(
+    hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation)
+{
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    const std::vector<float> values = {0.0f, -0.0f, -1.0f, nan, inf, -inf};
+    const std::vector<int64_t> dims = {1, 1, 1, static_cast<int64_t>(values.size())};
+
+    Tensor<DataType> inputTensor(dims);
+    Tensor<DataType> outputCpuTensor(dims);
+    Tensor<DataType> outputGpuTensor(dims);
+    for(size_t i = 0; i < values.size(); ++i)
+    {
+        inputTensor.setHostValue(
+            static_cast<DataType>(values[i]), 0, 0, 0, static_cast<int64_t>(i));
+    }
+
+    CpuReferencePointwiseImpl<DataType, DataType>::pointwiseCompute(
+        operation, outputCpuTensor, inputTensor);
+
+    GpuReferencePointwise::pointwiseCompute<DataType, DataType>(
+        operation, outputGpuTensor, inputTensor);
+
+    assertAllCloseWithSpecialValues(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<DataType>(operation, 5.0f));
+}
+
 // Runs a binary mode on values that rounding or NaN ordering could expose: NaN in either operand,
 // infinities and signed zeros. The result must match the CPU reference exactly.
 template <typename OutputType>
@@ -177,6 +216,13 @@ protected:
         SKIP_IF_NO_DEVICES();
         const auto& tc = GetParam();
         runGpuVsCpuPointwiseUnary<DataType>(tc.operation, tc.ioDims);
+    }
+
+    void runPointwiseUnarySpecialValuesTest()
+    {
+        SKIP_IF_NO_DEVICES();
+        const auto& tc = GetParam();
+        runGpuVsCpuPointwiseUnarySpecialValues<DataType>(tc.operation);
     }
 
     void runPointwiseBinaryTest()
