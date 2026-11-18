@@ -98,13 +98,11 @@ def poolSizeBudget():
 def shutdownWorkerPool():
     """Terminate the idle joblib (loky) worker pool, if one exists.
 
-    loky keeps its workers alive between Parallel calls so they can be reused.
-    Between build phases that reuse buys little (the next phase pays a few
-    seconds to respawn) while the workers keep every page their last phase
-    touched: a worker that parsed a 60 MB logic YAML or generated a few hundred
-    kernels retains hundreds of MiB of freed-but-unreturned heap. Shutting the
-    pool down returns all of it, and the next ParallelMap2 call starts from
-    fresh ~90 MiB processes. No-op when no pool was created (CpuThreads <= 1).
+    loky keeps its workers alive between Parallel calls, including any heap
+    pages their allocators retain after temporary objects are freed. Call this
+    after a phase's results have been consumed to release the workers' private
+    memory. The next ParallelMap2 call creates fresh workers. No-op when no
+    reusable executor exists.
     """
     try:
         from joblib.externals.loky import reusable_executor
@@ -131,11 +129,10 @@ _libc = None
 def releaseFreedMemory():
     """Hand freed heap pages back to the OS (glibc malloc_trim).
 
-    glibc only shrinks the heap from its top, so the 20-100 MiB a worker
-    allocates and frees while generating one kernel (rocisa module tree,
-    source text, temporaries) usually stays resident. Calling this after each
-    task keeps a worker's RSS near its live size instead of its historical
-    peak. Costs a few ms; a no-op where libc has no malloc_trim.
+    Allocators can retain pages after Python and rocisa objects are freed.
+    malloc_trim can return whole free pages throughout glibc's arenas; it
+    cannot release live allocations or free blocks held by other allocators.
+    A no-op where libc has no malloc_trim.
     """
     global _libc
     if _libc is False:
