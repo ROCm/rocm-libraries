@@ -280,6 +280,11 @@ for dt in ("HALF", "BFLOAT16"):
             M(f"mfma16_{e}", F333, 128, 64, 32, 2, 2, 8, ring=0, xpf=1),
             M(f"mfma16_{e}", F333, 128, 64, 32, 2, 2, 8, ring=1, xpf=1),
             M(f"mfma16_{e}", F333, 128, 32, 32, 4, 1, 8, ring=0, xpf=1),
+            # 2-D 3x3: the xpf twins of the gfx942 halo tiles.
+            M(f"mfma16_{e}", F33, 128, 64, 32, 2, 2, 8, xpf=1),
+            M(f"mfma16_{e}", F33, 128, 64, 16, 2, 2, 8, xpf=1),
+            M(f"mfma16_{e}", F33, 128, 128, 16, 2, 2, 8, xpf=1),
+            M(f"mfma16_{e}", F33, 128, 128, 32, 2, 2, 8, xpf=1),
         ],
     )
     # gfx942 (MI325X) rows, dword LDS DMA, 16-channel chunks: the 16 x 16 x 256 tile and the
