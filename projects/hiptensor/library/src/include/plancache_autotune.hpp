@@ -81,6 +81,7 @@ namespace hiptensor
                 mSolution = std::exchange(other.mSolution, nullptr);
                 mRound    = std::exchange(other.mRound, 0);
                 mCandidate = other.mCandidate;
+                mDirect    = other.mDirect;
             }
             return *this;
         }
@@ -112,6 +113,7 @@ namespace hiptensor
         T*                mSolution = nullptr;
         uint64_t          mRound    = 0; // round of the reserved candidate, 0 if none
         uint32_t          mCandidate = 0; // index of the reserved candidate in its round
+        bool              mDirect = false; // no round to join: save() caches the solution that ran
     };
 
     class PlancacheAutotuneMgr : public LazySingleton<PlancacheAutotuneMgr>
@@ -119,10 +121,14 @@ namespace hiptensor
     private:
         // Incremental autotune state of one problem
         // The candidates and the size of a round are taken from the plan that starts it and
-        // kept for the whole round: plans of the same problem may differ in both, and calls
-        // through any of them reserve and complete the same round.
+        // kept for the whole round: plans of the same problem may differ in their counts, and
+        // calls through any of them reserve and complete the same round.
+        // A round is closed when the problem gets a cached kernel some other way: later calls
+        // use that kernel and reserve nothing, so the round ends once its pending candidates
+        // are recorded.
         struct AutotuneState
         {
+            bool               mClosed = false;
             uint64_t           mRound = 0; //Identifies the round, see mNextRound
             std::vector<void*> mCandidates; //Candidates the round tries, in order
             uint32_t           mSize          = 0; //Number of calls the round records
@@ -134,10 +140,12 @@ namespace hiptensor
             void*              mBestSolution = nullptr; //Fastest solution timed so far
         };
 
-        // Autotune state is tracked per operation, plan cache and problem, so concurrent calls
-        // on different problems or handles do not mix their timings. An entry is created on
-        // first use and erased once its result is written to the plan cache.
-        using AutotuneKey = std::tuple<AutotuneOps, std::uintptr_t, PlanCache::HashId>;
+        // Autotune state is tracked per operation, plan cache, problem and set of candidates, so
+        // concurrent calls on different problems or handles do not mix their timings. The
+        // problem hash leaves out the unary operators, which restrict the candidates, so plans
+        // of one problem can select from different kernels; they get separate rounds. An entry
+        // is created on first use and erased once its result is written to the plan cache.
+        using AutotuneKey = std::tuple<AutotuneOps, std::uintptr_t, PlanCache::HashId, std::size_t>;
         std::map<AutotuneKey, AutotuneState> mAutotuneStates;
 
         // Every round gets a new number, so a trial cannot be recorded in a later round of
@@ -155,6 +163,21 @@ namespace hiptensor
         PlancacheAutotuneMgr& operator=(PlancacheAutotuneMgr const&) = delete;
         PlancacheAutotuneMgr& operator=(PlancacheAutotuneMgr&&)      = delete;
 
+        // Identifies the set of candidates of a plan, whatever their order.
+        static std::size_t candidateSetId(const hiptensorPlan_t plan)
+        {
+            std::uint64_t id = 0;
+            for(auto* candidate : plan->mPref->mCandidates)
+            {
+                // Mix each address (splitmix64 finalizer) and add, so the order does not matter.
+                auto x = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(candidate));
+                x      = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ull;
+                x      = (x ^ (x >> 27)) * 0x94d049bb133111ebull;
+                id += x ^ (x >> 31);
+            }
+            return static_cast<std::size_t>(id);
+        }
+
         static AutotuneKey makeKey(const AutotuneOps       autotuneType,
                                    const hiptensorHandle_t handle,
                                    const hiptensorPlan_t   plan)
@@ -162,7 +185,63 @@ namespace hiptensor
             auto* planCache = handle->getPlanCache();
             return {autotuneType,
                     reinterpret_cast<std::uintptr_t>(planCache),
-                    planCache->getHashID(plan->mOpDesc)};
+                    planCache->getHashID(plan->mOpDesc),
+                    candidateSetId(plan)};
+        }
+
+        // Closes the rounds of a problem that now has a cached kernel. Must hold mMutex.
+        void closeRoundsLocked(const AutotuneOps       autotuneType,
+                               std::uintptr_t          planCacheId,
+                               const PlanCache::HashId hashID)
+        {
+            auto it = mAutotuneStates.lower_bound({autotuneType, planCacheId, hashID, 0});
+            while(it != mAutotuneStates.end() && std::get<0>(it->first) == autotuneType
+                  && std::get<1>(it->first) == planCacheId && std::get<2>(it->first) == hashID)
+            {
+                if(it->second.mPending == 0)
+                {
+                    it = mAutotuneStates.erase(it);
+                }
+                else
+                {
+                    it->second.mClosed = true;
+                    ++it;
+                }
+            }
+        }
+
+        void closeRounds(const AutotuneOps       autotuneType,
+                         PlanCache const*        planCache,
+                         const PlanCache::HashId hashID)
+        {
+            std::scoped_lock lock(mMutex);
+            closeRoundsLocked(autotuneType, reinterpret_cast<std::uintptr_t>(planCache), hashID);
+        }
+
+        // Runs the plan cache's kernel for the problem, if it is one of the plan's candidates
+        // (a plan created from a cache hit may have no candidate list); otherwise keeps the
+        // plan's own solution.
+        template <typename T>
+        static void useCachedSolution(AutotuneTrial<T>&     trial,
+                                      const hiptensorPlan_t plan,
+                                      PlanCache::Uid        Uid)
+        {
+            //If the plan already uses the cached solution, skip searching the candidates
+            if(trial.mSolution != nullptr && trial.mSolution->uid() == Uid)
+                return;
+
+            //If there is a solution already in the Plan Cache, directly set solution from Plan Cache
+            auto candidates = std::vector<T*>(plan->mPref->mCandidates.size());
+            std::transform(plan->mPref->mCandidates.begin(),
+                           plan->mPref->mCandidates.end(),
+                           candidates.begin(),
+                           [](auto* p) { return (T*)p; });
+
+            if(auto* cached = findSolutionByUid(candidates, Uid))
+            {
+                plan->mPref->mSolution.store(cached);
+                trial.mSolution = cached;
+            }
         }
 
         // Number of calls a round records. A plan with candidates tries each of them once, up
@@ -227,9 +306,12 @@ namespace hiptensor
 
             //When every call of the round is recorded, add the best solution to the Plan Cache.
             //Waiting for the pending candidates keeps a slow candidate from being dropped.
-            if(state.mCallCount >= state.mSize && state.mPending == 0)
+            //A closed round ends with its pending candidates and keeps the cached kernel.
+            if(state.mPending == 0 && (state.mCallCount >= state.mSize || state.mClosed))
             {
-                if(state.mBestSolution != nullptr)
+                bool const cache
+                    = state.mCallCount >= state.mSize && state.mBestSolution != nullptr;
+                if(cache)
                 {
                     trial.mHandle->getPlanCache()->addCacheLine(
                         std::get<2>(key), static_cast<T*>(state.mBestSolution)->uid());
@@ -237,6 +319,12 @@ namespace hiptensor
 
                 //Reset for the next round of autotuning
                 mAutotuneStates.erase(it);
+
+                //The problem has a cached kernel now: its other rounds get no more calls.
+                if(cache)
+                {
+                    closeRoundsLocked(std::get<0>(key), std::get<1>(key), std::get<2>(key));
+                }
             }
         }
 
@@ -276,58 +364,66 @@ namespace hiptensor
             auto Uid = handle->getPlanCache()->querySolutionUid(plan->mOpDesc);
             if(Uid > 0ull)
             {
-                //If the plan already uses the cached solution, skip searching the candidates
-                if(trial.mSolution != nullptr && trial.mSolution->uid() == Uid)
-                    return trial;
-
-                //If there is a solution already in the Plan Cache, directly set solution from Plan Cache
-                auto candidates = std::vector<T*>(plan->mPref->mCandidates.size());
-                std::transform(plan->mPref->mCandidates.begin(),
-                               plan->mPref->mCandidates.end(),
-                               candidates.begin(),
-                               [](auto* p) { return (T*)p; });
-
-                //Keep the current solution if the cached one is not among the candidates
-                //(e.g. a plan created from a cache hit may have no candidate list)
-                if(auto* cached = findSolutionByUid(candidates, Uid))
-                {
-                    plan->mPref->mSolution.store(cached);
-                    trial.mSolution = cached;
-                }
+                useCachedSolution(trial, plan, Uid);
             }
             else if(plan->mPref->mAutotuneMode == HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL)
             {
-                // A round of size 0 tries nothing: save() caches the solution that ran.
-                auto size = roundSize(plan);
-                if(size == 0)
-                    return trial;
-
                 auto key = makeKey(autotuneType, handle, plan);
 
                 std::scoped_lock lock(mMutex);
 
+                // Another call may have completed a round and cached its kernel since the
+                // lookup above. Completing a round caches under mMutex, so this check and the
+                // round below cannot miss it.
+                Uid = handle->getPlanCache()->querySolutionUid(plan->mOpDesc);
+                if(Uid > 0ull)
+                {
+                    useCachedSolution(trial, plan, Uid);
+                    return trial;
+                }
+
                 //If there is no solution in the Plan Cache, we may need to do autotuning based on the number of calling this function.
                 //Candidates are handed out by a separate counter so that concurrent calls, which
                 //all start before any of them is recorded, each try a different candidate.
-                auto [it, inserted] = mAutotuneStates.try_emplace(key);
-                auto& state         = it->second;
-                if(inserted)
+                auto it = mAutotuneStates.find(key);
+                if(it == mAutotuneStates.end())
                 {
+                    // A plan that tries nothing (an incremental count of 0) joins a round of
+                    // another plan but does not start one: save() caches the solution that ran.
+                    auto size = roundSize(plan);
+                    if(size == 0)
+                    {
+                        trial.mDirect = true;
+                        return trial;
+                    }
+
+                    AutotuneState state;
                     state.mRound      = mNextRound++;
                     state.mCandidates = plan->mPref->mCandidates;
                     state.mSize       = size;
+                    it                = mAutotuneStates.emplace(key, std::move(state)).first;
                 }
 
-                if(!state.mCandidates.empty() && state.mNextCandidate < state.mSize)
+                auto& state = it->second;
+                if(!state.mClosed && !state.mCandidates.empty()
+                   && state.mNextCandidate < state.mSize)
                 {
                     //If the number of calling this function is less than the number of different candidates to explore,
                     //we are doing the autotuning to find the best solution
                     // TODO: need a ranked solution array to explore from fastest to slowest
-                    trial.mSolution  = static_cast<T*>(state.mCandidates[state.mNextCandidate]);
-                    trial.mRound     = state.mRound;
-                    trial.mCandidate = state.mNextCandidate;
-                    state.mNextCandidate++;
-                    state.mPending++;
+                    auto* candidate = state.mCandidates[state.mNextCandidate];
+
+                    // Rounds are kept apart by their set of candidates, so the candidate is one
+                    // of the plan's; this only guards against two sets with the same id.
+                    auto const& own = plan->mPref->mCandidates;
+                    if(std::find(own.begin(), own.end(), candidate) != own.end())
+                    {
+                        trial.mSolution  = static_cast<T*>(candidate);
+                        trial.mRound     = state.mRound;
+                        trial.mCandidate = state.mNextCandidate;
+                        state.mNextCandidate++;
+                        state.mPending++;
+                    }
                 }
             }
             return trial;
@@ -361,13 +457,17 @@ namespace hiptensor
             return;
         }
 
-        if(mPlan->mPref->mAutotuneMode != HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL
-           || PlancacheAutotuneMgr::roundSize(mPlan) == 0)
+        if(mPlan->mPref->mAutotuneMode != HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL || mDirect)
         {
             //There is no autotuning, or it tries no candidate (an incremental count of 0):
             //add the solution that ran to the Plan Cache.
-            auto hashID = mHandle->getPlanCache()->getHashID(mPlan->mOpDesc);
-            mHandle->getPlanCache()->addCacheLine(hashID, solution->uid());
+            auto* planCache = mHandle->getPlanCache();
+            auto  hashID    = planCache->getHashID(mPlan->mOpDesc);
+            planCache->addCacheLine(hashID, solution->uid());
+
+            //Later calls use this kernel and reserve no more candidates: close any open round.
+            //Caching before closing means a round created after the close sees the cache hit.
+            PlancacheAutotuneMgr::instance()->closeRounds(mType, planCache, hashID);
         }
         else
         {

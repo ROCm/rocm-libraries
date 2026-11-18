@@ -141,6 +141,14 @@ namespace hiptensor
                 if constexpr(std::is_same_v<typename Traits::ScaleOp,
                                             ck::tensor_operation::element_wise::PassThrough>)
                 {
+                    // This kernel only moves data: it ignores alpha and the operator on A, so
+                    // it cannot solve a call that needs either. A plan keeps the kernel of its
+                    // first call, and a later call may scale.
+                    if(scalarValues[0] != 1.0 || operators[0] != HIPTENSOR_OP_IDENTITY)
+                    {
+                        return {};
+                    }
+
                     args.mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
                         deviceInputLengths,
                         deviceInputStrides,

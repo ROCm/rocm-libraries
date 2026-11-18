@@ -187,6 +187,7 @@ namespace
     {
         static constexpr int64_t E = 8;
         std::vector<int32_t> mA{'m', 'n', 'h', 'k'}, mB{'u', 'v', 'h', 'k'}, mD{'m', 'n', 'u', 'v'};
+        hiptensorOperator_t      mOpA = HIPTENSOR_OP_IDENTITY;
 
         hiptensorStatus_t create(hiptensorHandle_t handle) override
         {
@@ -196,7 +197,7 @@ namespace
                                               &mOp,
                                               a,
                                               mA.data(),
-                                              HIPTENSOR_OP_IDENTITY,
+                                              mOpA,
                                               b,
                                               mB.data(),
                                               HIPTENSOR_OP_IDENTITY,
@@ -1343,6 +1344,204 @@ TEST_F(ConcurrencyAutotuneTest, PlansWithDifferentCountsShareRound)
     auto const lines = planCacheLines(handle);
     ASSERT_EQ(lines.size(), 1u) << "the round did not complete";
     EXPECT_NE(std::find(tried.begin(), tried.end(), lines[0].second), tried.end());
+}
+
+// A count-0 plan joins the open round of another plan of the same problem instead of
+// caching its own kernel, which would leave the round unfinished.
+TEST_F(ConcurrencyAutotuneTest, CountZeroPlanJoinsOpenRound)
+{
+    ScaleContraction  opCase;
+    hiptensorHandle_t handle = nullptr;
+    ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
+    hiptensorPlan_t countThree = nullptr, countZero = nullptr;
+    ScopeExit       cleanup{[&] {
+        if(countThree)
+            hiptensorDestroyPlan(countThree);
+        if(countZero)
+            hiptensorDestroyPlan(countZero);
+        opCase.destroy();
+        hiptensorDestroy(handle);
+    }};
+
+    auto     status        = opCase.create(handle);
+    uint64_t workspaceSize = 0, unused = 0;
+    if(status == HIPTENSOR_STATUS_SUCCESS)
+        status = createIncrementalPlan(handle, opCase.mOp, 3, &countThree, &workspaceSize);
+    if(status == HIPTENSOR_STATUS_SUCCESS)
+        status = createIncrementalPlan(handle, opCase.mOp, 0, &countZero, &unused);
+    if(isSkipStatus(status))
+    {
+        GTEST_SKIP() << skipReason(status);
+    }
+    ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
+
+    auto const b = makeBuffers(opCase, 0, std::max(workspaceSize, unused));
+    KernelLog  log;
+
+    (void)runCall(opCase, handle, countThree, b, workspaceSize);
+
+    // The count-0 call runs the round's second candidate: the round stays open.
+    (void)runCall(opCase, handle, countZero, b, unused);
+    EXPECT_TRUE(planCacheLines(handle).empty())
+        << "the count-0 call cached its own kernel instead of joining the round";
+
+    // The third candidate completes the round.
+    (void)runCall(opCase, handle, countThree, b, workspaceSize);
+    auto const tried = log.take();
+    EXPECT_EQ(std::set<std::size_t>(tried.begin(), tried.end()).size(), tried.size())
+        << "two calls of the round ran the same candidate";
+
+    auto const lines = planCacheLines(handle);
+    ASSERT_EQ(lines.size(), 1u) << "the round did not complete";
+    EXPECT_NE(std::find(tried.begin(), tried.end(), lines[0].second), tried.end());
+}
+
+// The problem hash leaves out unary operators, so an identity plan and a plan that negates
+// A describe the same problem but select from different kernels. Each must autotune with
+// its own candidates: an identity kernel would drop the negation and still succeed.
+TEST_F(ConcurrencyAutotuneTest, PlansWithDifferentOperatorsDoNotShareRound)
+{
+    ScaleContraction identity, negate;
+    negate.mOpA = HIPTENSOR_OP_NEG;
+
+    hiptensorHandle_t handle = nullptr, refHandle = nullptr;
+    ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_EQ(hiptensorCreate(&refHandle), HIPTENSOR_STATUS_SUCCESS);
+    hiptensorPlan_t identityPlan = nullptr, negatePlan = nullptr, refPlan = nullptr;
+    ScopeExit       cleanup{[&] {
+        for(auto plan : {identityPlan, negatePlan, refPlan})
+        {
+            if(plan)
+                hiptensorDestroyPlan(plan);
+        }
+        identity.destroy();
+        negate.destroy();
+        hiptensorDestroy(refHandle);
+        hiptensorDestroy(handle);
+    }};
+
+    uint64_t identityWs = 0, negateWs = 0, refWs = 0;
+    auto     status = identity.create(handle);
+    if(status == HIPTENSOR_STATUS_SUCCESS)
+        status = negate.create(handle);
+    if(status == HIPTENSOR_STATUS_SUCCESS)
+        status = createIncrementalPlan(handle, identity.mOp, 2, &identityPlan, &identityWs);
+    if(status == HIPTENSOR_STATUS_SUCCESS)
+        status = createIncrementalPlan(handle, negate.mOp, 2, &negatePlan, &negateWs);
+    // The reference comes from another handle, so it takes no part in the rounds.
+    if(status == HIPTENSOR_STATUS_SUCCESS)
+        status = createPlan(refHandle, negate.mOp, HIPTENSOR_CACHE_MODE_NONE, &refPlan, &refWs);
+    if(isSkipStatus(status))
+    {
+        GTEST_SKIP() << skipReason(status);
+    }
+    ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
+
+    auto const b                = makeBuffers(negate, 0, std::max({identityWs, negateWs, refWs}));
+    auto [refStatus, reference] = runCall(negate, refHandle, refPlan, b, refWs);
+    ASSERT_EQ(refStatus, HIPTENSOR_STATUS_SUCCESS) << "status " << statusCode(refStatus);
+
+    // The identity plan starts its round, then every call of the negating plan must negate.
+    (void)runCall(identity, handle, identityPlan, b, identityWs);
+    for(int call = 0; call < 3; call++)
+    {
+        SCOPED_TRACE("call " + std::to_string(call));
+        auto [s, result] = runCall(negate, handle, negatePlan, b, negateWs);
+        if(s == HIPTENSOR_STATUS_SUCCESS)
+        {
+            EXPECT_EQ(result, reference);
+        }
+    }
+}
+
+// The pass-through permutation kernel, selected when alpha is 1, ignores alpha. A plan keeps
+// the kernel of its first call, so later calls with another alpha, from any thread sharing
+// the plan, must not run it.
+TEST(ConcurrencyPermuteTest, SharedPlanWithDifferentAlphas)
+{
+    Permute           opCase;
+    hiptensorHandle_t handle = nullptr;
+    ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
+    hiptensorPlan_t plan = nullptr;
+    ScopeExit       cleanup{[&] {
+        if(plan)
+            hiptensorDestroyPlan(plan);
+        opCase.destroy();
+        hiptensorDestroy(handle);
+    }};
+
+    uint64_t workspaceSize = 0;
+    auto     status        = opCase.create(handle);
+    if(status == HIPTENSOR_STATUS_SUCCESS)
+        status
+            = createPlan(handle, opCase.mOp, HIPTENSOR_CACHE_MODE_PEDANTIC, &plan, &workspaceSize);
+    if(isSkipStatus(status))
+    {
+        GTEST_SKIP() << skipReason(status);
+    }
+    ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
+
+    std::size_t const               bytes = opCase.outputElements() * sizeof(float);
+    std::vector<CallBuffers>        buffers;
+    std::vector<std::vector<float>> references; // alpha 1
+    for(int t = 0; t < kThreads; t++)
+    {
+        // The first call has alpha 1, so the plan keeps the pass-through kernel.
+        buffers.push_back(makeBuffers(opCase, t, workspaceSize));
+        auto [s, reference] = runCall(opCase, handle, plan, buffers.back(), workspaceSize);
+        ASSERT_EQ(s, HIPTENSOR_STATUS_SUCCESS) << "status " << statusCode(s);
+        references.push_back(std::move(reference));
+    }
+
+    long const        iters = std::min(iterations(), 50L);
+    std::vector<long> wrong(kThreads, 0), errors(kThreads, 0);
+    std::atomic<int>  ready{0};
+    auto              worker = [&](int t) {
+        std::vector<float> result(opCase.outputElements()), expected(result.size());
+        ready++;
+        while(ready.load() < kThreads)
+        {
+            std::this_thread::yield();
+        }
+        for(long i = 0; i < iters; i++)
+        {
+            float const alpha = (t + i) % 2 == 0 ? 0.5f : 1.0f;
+            if(hiptensorPermute(
+                   handle, plan, &alpha, buffers[t].inputPtrs[0], buffers[t].out.mPtr, nullptr)
+                   != HIPTENSOR_STATUS_SUCCESS
+               || hipMemcpy(result.data(), buffers[t].out.mPtr, bytes, hipMemcpyDeviceToHost)
+                      != hipSuccess)
+            {
+                errors[t]++;
+                continue;
+            }
+            // Integer inputs: alpha 0.5 scales them exactly.
+            std::transform(references[t].begin(),
+                           references[t].end(),
+                           expected.begin(),
+                           [alpha](float v) { return alpha * v; });
+            if(result != expected)
+            {
+                wrong[t]++;
+            }
+        }
+    };
+    std::vector<std::thread> workers;
+    for(int t = 0; t < kThreads; t++)
+    {
+        workers.emplace_back(worker, t);
+    }
+    for(auto& w : workers)
+    {
+        w.join();
+    }
+
+    for(int t = 0; t < kThreads; t++)
+    {
+        SCOPED_TRACE("thread " + std::to_string(t));
+        EXPECT_EQ(errors[t], 0);
+        EXPECT_EQ(wrong[t], 0);
+    }
 }
 
 // Several threads create plans at the same time. Plan cache lookup is disabled so

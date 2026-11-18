@@ -120,25 +120,29 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
     auto trial = autotuneMgr->setAutotune<hiptensor::ElementwiseSolution>(
         hiptensor::AutotuneOps::Autotune_Permutation, handle, plan);
 
+    auto querySolutions = [&]() {
+        auto& instances = hiptensor::ElementwiseSolutionInstances::instance();
+        return instances->query({alphaD},
+                                descA->mLengths,
+                                {descA->mType},
+                                {descB->mType},
+                                {{modeA, modeA + descA->mLengths.size()}},
+                                {{modeB, modeB + descB->mLengths.size()}},
+                                {plan->mOpDesc->mOpA, plan->mOpDesc->mOpB},
+                                hiptensor::ElementwiseExecutionSpaceType_t::DEVICE);
+    };
+
     std::vector<hiptensor::ElementwiseSolution*> solutions;
     // Use the trial's solution: another thread sharing this plan may update the plan's.
-    if(auto* planSolution = trial.solution())
+    auto* planSolution = trial.solution();
+    if(planSolution != nullptr)
         solutions.push_back(planSolution);
     else
-    {
-        auto& instances = hiptensor::ElementwiseSolutionInstances::instance();
-        solutions       = instances->query({alphaD},
-                                     descA->mLengths,
-                                           {descA->mType},
-                                           {descB->mType},
-                                           {{modeA, modeA + descA->mLengths.size()}},
-                                           {{modeB, modeB + descB->mLengths.size()}},
-                                           {plan->mOpDesc->mOpA, plan->mOpDesc->mOpB},
-                                     hiptensor::ElementwiseExecutionSpaceType_t::DEVICE);
-    }
+        solutions = querySolutions();
 
-    for(auto pSolution : solutions)
+    for(std::size_t i = 0; i < solutions.size(); i++)
     {
+        auto* pSolution = solutions[i];
         auto args
             = pSolution->makeArgs({alphaD},
                                   {descA->mLengths},
@@ -211,6 +215,14 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
             trial.save(pSolution, time);
 
             return HIPTENSOR_STATUS_SUCCESS;
+        }
+
+        // The plan's solution may not fit this call: the pass-through kernel kept from a call
+        // with alpha 1 cannot scale. Fall back to the kernels selected for this call.
+        if(planSolution != nullptr && i == 0)
+        {
+            auto more = querySolutions();
+            solutions.insert(solutions.end(), more.begin(), more.end());
         }
     }
 
