@@ -793,7 +793,7 @@ NodeMetaData
         // from the current location. Temporary buffers on current device are used for input
         // and output of the execution plan. In-place default layout operations are
         // used to minimize the library's memory footprint.
-        root_plan.placement = rocfft_placement_inplace;
+        root_plan.placement    = rocfft_placement_inplace;
         root_plan_input_layout = desc.input_layout.get_packed_data_set(
             transformType == rocfft_transform_type_real_forward);
         root_plan_output_layout = desc.output_layout.get_packed_data_set(
