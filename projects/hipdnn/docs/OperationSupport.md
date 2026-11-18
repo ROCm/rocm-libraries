@@ -28,6 +28,7 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
 
 - **[HIP Kernel Provider Plugin](../../../dnn-providers/hip-kernel-provider/README.md)** - Custom HIP kernels compiled at run time with HIPRTC, plus assembly SDPA kernels. This provider has no separate operation support document.
   - HIP MLops engine: Batchnorm, Layernorm and RMSNorm (forward and backward), Resample (forward and backward)
+    - Layernorm and RMSNorm need an input `x` of rank 4 or 5. The engine declines lower-rank graphs, such as the `[B, S, D]` transformer form.
   - ASM SDPA engine: SDPA forward and backward
   - Optional engines, off by default: HIP Flash2 SDPA forward (`ENABLE_HIP_FLASH2_ENGINE`) and the kernel ingestor engine (`HIPDNN_ENABLE_KERNEL_INGESTOR`, RFC 0017)
 
