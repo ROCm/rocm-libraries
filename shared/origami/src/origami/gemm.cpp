@@ -1170,10 +1170,10 @@ double compute_cvt_overhead_x1(const problem_t& problem,
 static double compute_w4a16_dequant_latency(const problem_t& problem,
                                             const hardware_t& hardware,
                                             const config_t& config) {
-  if (!w4a16_defaults_t::applies(problem, hardware)) return 0.0;
-  const double per_elem = problem.mi_dtype == data_type_t::BFloat16
-      ? w4a16_defaults_t::BF16_DEQUANT_VALU_PER_ELEM
-      : w4a16_defaults_t::F16_DEQUANT_VALU_PER_ELEM;
+  const w4a16_params_t* w = w4a16_params(problem, hardware);
+  if (!w) return 0.0;
+  const double per_elem = problem.mi_dtype == data_type_t::BFloat16 ? w->bf16_dequant_valu_per_elem
+                                                                    : w->f16_dequant_valu_per_elem;
   constexpr double lanes = 32.0;  // wave32: one VALU instruction covers 32 elements
   return static_cast<double>(config.mt.m) * static_cast<double>(config.mt.k) * per_elem / lanes;
 }
@@ -2379,8 +2379,9 @@ double compute_tile_latency(const problem_t& problem,
   const double waves_per_wg = static_cast<double>(waves.m * waves.n * waves.k);
   // W4A16 counts co-residency in waves instead: its one-WG/CU kernels are the
   // 16-wave tiles.
-  const double wg_score = w4a16_defaults_t::applies(problem, hardware)
-      ? std::clamp(wgs_per_cu * waves_per_wg / w4a16_defaults_t::TARGET_WAVES_PER_CU, 0.0, 1.0)
+  const w4a16_params_t* w4 = w4a16_params(problem, hardware);
+  const double wg_score = w4
+      ? std::clamp(wgs_per_cu * waves_per_wg / w4->target_waves_per_cu, 0.0, 1.0)
       : std::clamp(wgs_per_cu / heuristic_defaults_t::TARGET_WG_SLOTS_PER_CU, 0.0, 1.0);
   constexpr double PER_WAVE_MIN_SCORE = 1.0 / 1.5;
   const double per_wave_score         = std::max(wg_score, PER_WAVE_MIN_SCORE);
@@ -2572,8 +2573,8 @@ double compute_tile_latency(const problem_t& problem,
   // more reads in flight and overlaps most of this, so expose only a fraction.
   const double pgr_loop_overlap =
       (pgr >= 3) ? (1.0 / static_cast<double>(pgr - 1)) : 1.0;
-  const double loop_overhead_per_iter = w4a16_defaults_t::applies(problem, hardware)
-      ? w4a16_defaults_t::K_ITER_LOOP_OVERHEAD
+  const double loop_overhead_per_iter = w4
+      ? w4->k_iter_loop_overhead
       : heuristic_defaults_t::K_ITER_LOOP_OVERHEAD;
   const double L_loop_overhead =
       loop_overhead_per_iter * static_cast<double>(k_iters) * pgr_loop_overlap;
@@ -2992,13 +2993,14 @@ double compute_total_latency(const problem_t& problem,
   // parallel pays a partly idle last wave, counting it as whole waves made Origami
   // pick the data-parallel kernel, measured up to 2x slower on gfx1151.
   // Token-tile grids (two workgroups per CU, streamk.cpp) are left out and still
-  // charged whole waves; w4a16_defaults_t was calibrated that way. Charging them
+  // charged whole waves; the W4A16 constants were calibrated that way. Charging them
   // tiles / CUs changed the pick on 6 of the 632 calibration problems (all M = 48).
   const size_t usable_cus = resolve_num_cus(problem.num_cus, hardware.N_CU);
-  if (w4a16_defaults_t::applies(problem, hardware) && config.stream_k > 0 && context.num_wgs < context.num_output_tiles
+  const w4a16_params_t* w4 = w4a16_params(problem, hardware);
+  if (w4 && config.stream_k > 0 && context.num_wgs < context.num_output_tiles
       && context.num_wgs <= usable_cus
       && static_cast<double>(context.num_output_tiles)
-             < w4a16_defaults_t::SK_SHARED_MAX_TILES_PER_CU * static_cast<double>(usable_cus))
+             < w4->sk_shared_max_tiles_per_cu * static_cast<double>(usable_cus))
     timesteps = static_cast<double>(context.num_output_tiles) / static_cast<double>(context.num_wgs);
   double total_latency             = L_timestep * timesteps;
 
@@ -3007,15 +3009,18 @@ double compute_total_latency(const problem_t& problem,
   // critical path. A tile split over s workgroups has s - 1 partials; a grid that shares
   // tiles unevenly has one. Without it, splitting a few large tiles' K over every CU
   // looked as fast as splitting many small ones, and was measured up to 2.3x slower.
-  if (w4a16_defaults_t::applies(problem, hardware) && config.stream_k > 0 && context.num_wgs != context.num_output_tiles) {
+  // Without a MALL (gfx1150) the partials stay in L2.
+  if (w4 && config.stream_k > 0 && context.num_wgs != context.num_output_tiles) {
     const double tiles     = static_cast<double>(context.num_output_tiles);
     const double wgs       = static_cast<double>(context.num_wgs);
     const double partials  = wgs > tiles ? std::ceil(wgs / tiles) - 1.0
                                          : (context.num_output_tiles % context.num_wgs ? 1.0 : 0.0);
     const double tile_bytes = static_cast<double>(config.mt.m * config.mt.n) * 4.0;
-    const double bw         = std::max(hardware.mem2_perf_ratio
+    const double mall       = hardware.mem2_perf_ratio >= hardware_t::NO_MALL_AVAILABLE
+        ? hardware.mem1_perf_ratio : hardware.mem2_perf_ratio;
+    const double bw         = std::max(mall
         * compute_mem_bw_from_occupancy(hardware, std::min(context.num_wgs, usable_cus)), 1e-12);
-    total_latency += partials * w4a16_defaults_t::SK_PARTIAL_TILE_COST * 2.0 * tile_bytes / bw;
+    total_latency += partials * w4->sk_partial_tile_cost * 2.0 * tile_bytes / bw;
   }
 
   //  4) Kernel launch overhead

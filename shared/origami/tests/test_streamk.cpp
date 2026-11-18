@@ -539,7 +539,7 @@ TEST_CASE("Origami streamk: W4A16 on gfx1151 with at most a tile per CU",
 
 TEST_CASE("Origami streamk: the W4A16 grid needs a bf16/fp16 MI type",
           "[streamk][grid][w4a16]") {
-  // The grid rule and the W4A16 latency model share w4a16_defaults_t::applies: an
+  // The grid rule and the W4A16 latency model share w4a16_params(): an
   // int4-A problem on gfx1151 with another MI type (W4A8, say) gets neither.
   auto hw = make_hardware(950);
   hw.arch = origami::hardware_t::architecture_t::gfx1151;
@@ -593,4 +593,36 @@ TEST_CASE("Origami streamk: W4A16 on gfx1151 runs data parallel when its last wa
   REQUIRE(grid(6144, 32, 32, 32, 8) == 80);
   REQUIRE(grid(3072, 64, 32, 32, 8) == 192);
   REQUIRE(grid(24576, 32, 32, 32, 8) == 768);
+}
+
+TEST_CASE("Origami streamk: W4A16 on gfx1150 keeps gfx1151's rules with its own thresholds",
+          "[streamk][grid][w4a16]") {
+  auto grid = [&](origami::hardware_t::architecture_t arch, size_t m, size_t n, size_t mt_m,
+                  size_t mt_n, int waves) {
+    auto hw   = make_hardware(950);
+    hw.arch   = arch;
+    auto p    = make_problem(m, n, 4096);
+    p.a_dtype = origami::data_type_t::Int4;
+    p.num_cus = 16;
+    auto c    = make_config(mt_m, mt_n, 64);
+    c.workspace_size            = std::numeric_limits<size_t>::max() / 2;
+    c.workspace_size_per_elem_c = 4;
+    c.tensile().wave_group_m    = waves / 2;
+    c.tensile().wave_group_n    = 2;
+    return origami::streamk::select_grid_size(p, hw, c, origami::grid_selection_t::k_split_aware);
+  };
+  const auto gfx1150 = origami::hardware_t::architecture_t::gfx1150;
+  const auto gfx1151 = origami::hardware_t::architecture_t::gfx1151;
+
+  // 40 tiles on 16 CUs (2.5 per CU): gfx1151's rules share them over one workgroup
+  // per CU; on gfx1150 the fixup of the shared tiles costs more than data parallel's
+  // last wave.
+  REQUIRE(grid(gfx1151, 2560, 128, 64, 128, 8) == 16);
+  REQUIRE(grid(gfx1150, 2560, 128, 64, 128, 8) == 40);
+  // 8 tiles of 8-wave workgroups: gfx1151 splits their K over all the CUs; on gfx1150
+  // 8 waves already fill a CU, so they run data parallel like gfx1151's 16-wave ones.
+  REQUIRE(grid(gfx1151, 512, 128, 64, 128, 8) == 16);
+  REQUIRE(grid(gfx1150, 512, 128, 64, 128, 8) == 8);
+  // At most a tile per CU, long K: one workgroup per CU on both.
+  REQUIRE(grid(gfx1150, 1024, 64, 64, 64, 8) == 16);
 }

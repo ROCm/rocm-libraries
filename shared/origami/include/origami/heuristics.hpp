@@ -135,67 +135,126 @@ struct heuristic_defaults_t {
 };
 
 /**
- * @brief W4A16 (int4 A dequantized to a bf16/fp16 MI type): latency-model constants
- *        and Stream-K launch-grid thresholds.
+ * @brief W4A16 (int4 A dequantized to a bf16/fp16 MI type): latency-model constants and
+ *        Stream-K grid thresholds, fit per architecture on hipBLASLt kernel times.
  *
- * Calibrated for gfx1151 (Strix Halo), and only applied there: fit with the W4A16
- * kernel sets of its Origami logic, on hipBLASLt GPU kernel times (every kernel timed
- * in its own process, rows padded to an odd multiple of 128 B; the score is the
- * measured speed of Origami's pick). Other architectures are not affected until they
- * are tuned.
+ * TODO: derive these from the hardware instead of fitting one table per architecture.
+ * gfx1150 and gfx1151 run the same kernels on the same ISA and differ only in the number
+ * of CUs, the MALL, the VGPR file per SIMD (1024 vs 1536) and the sustained clock, so a
+ * fitted value that differs between them (the dequantize VALU per element, say) is not a
+ * different cost of that code: it stands for one of those differences. The bf16 dequantize
+ * value and target_waves_per_cu differ by 1.5, the ratio of the VGPR files.
  */
-struct w4a16_defaults_t {
-  // The problems these defaults are for: gfx1151, int4 A (the weights) dequantized
-  // to a bf16/fp16 MI type inside the kernel. The latency model and the Stream-K grid
-  // rule both test this, so that they always apply together: their thresholds were
-  // calibrated as one.
-  static bool applies(const problem_t& problem, const hardware_t& hardware) {
-    return hardware.arch == hardware_t::architecture_t::gfx1151 &&
-           problem.a_dtype == data_type_t::Int4 &&
-           (problem.mi_dtype == data_type_t::BFloat16 || problem.mi_dtype == data_type_t::Half);
-  }
-
+struct w4a16_params_t {
   // --- Latency model ---
-  // Dequantize VALU per element, including its dependency stalls: bf16 rounds f32
-  // products, fp16 uses packed halves.
-  static constexpr double BF16_DEQUANT_VALU_PER_ELEM = 8.0;
-  static constexpr double F16_DEQUANT_VALU_PER_ELEM  = 4.0;
-  static constexpr double K_ITER_LOOP_OVERHEAD       = 500.0;
-  // Co-residency counted in waves: one 16-wave workgroup keeps a CU as busy as
-  // several small ones.
-  static constexpr double TARGET_WAVES_PER_CU = 4.0;
-  // Stream-K workgroups sharing tiles below this many tiles per CU are charged their
-  // share of tiles, not waves (above it data parallel's last wave is a small part of
-  // the work).
-  static constexpr double SK_SHARED_MAX_TILES_PER_CU = 6.0;
-  // Cost of a Stream-K partial tile on the critical path, in units of writing and
-  // reading its f32 values at the workgroups' memory bandwidth.
-  static constexpr double SK_PARTIAL_TILE_COST = 256.0;
+  // Dequantize VALU per element (bf16 rounds f32 products, fp16 uses packed halves).
+  double bf16_dequant_valu_per_elem;
+  double f16_dequant_valu_per_elem;
+  double k_iter_loop_overhead;
+  // Co-residency counted in waves, not workgroups.
+  double target_waves_per_cu;
+  // Below this many tiles per CU, a shared Stream-K grid is charged its share of tiles.
+  double sk_shared_max_tiles_per_cu;
+  // Cost of a Stream-K partial tile on the critical path.
+  double sk_partial_tile_cost;
 
-  // --- Stream-K launch grid (grid_k_split_aware_gfx1151_w4a16, rules 1-6) ---
-  // Waves per workgroup when the config does not say.
-  static constexpr int DEFAULT_WAVES_PER_WORKGROUP = 4;
-  // Workgroups with this many waves fill a CU.
-  static constexpr int FULL_CU_WAVES = 16;
-  // Rule 1: the t range where 16-wave workgroups split K instead of running DP.
-  static constexpr double FULL_CU_SPLIT_MIN_TILES_PER_CU = 0.5;
-  static constexpr double FULL_CU_SPLIT_MAX_TILES_PER_CU = 0.75;
-  // Rule 2: short K, in K iterations (the second when t > 0.5).
-  static constexpr size_t SK_SPLIT_MIN_K_ITERS           = 8;
-  static constexpr size_t SK_SPLIT_MIN_K_ITERS_OVER_HALF = 16;
-  // Rule 6: share the tiles below this t. Above it, DP for short K.
-  static constexpr size_t GRID_SHARED_MAX_TILES_PER_CU = 5;
-  static constexpr size_t MANY_TILES_DP_MAX_K_ITERS    = 8;
+  // --- Stream-K grid (grid_k_split_aware_w4a16, rules 1-6) ---
+  int default_waves_per_workgroup;
+  // Workgroups with this many waves fill a CU (rules 1 and 4).
+  int full_cu_waves;
+  // Rule 1: t range where full-CU workgroups split K.
+  double full_cu_split_min_tiles_per_cu;
+  double full_cu_split_max_tiles_per_cu;
+  // Rule 2: K iterations up to which a tile per CU or less stays DP.
+  size_t sk_split_min_k_iters;
+  size_t sk_split_min_k_iters_over_half;
+  // Rule 6: share the tiles below this t; above it, DP for short K.
+  size_t grid_shared_max_tiles_per_cu;
+  size_t many_tiles_dp_max_k_iters;
   // Rule 4: largest ceil(t) / t that still runs DP, by waves per workgroup.
-  static constexpr double DP_MAX_WAVE_ROUNDING_16_WAVES = 1.5;
-  static constexpr double DP_MAX_WAVE_ROUNDING_8_WAVES  = 1.06;
-  static constexpr double DP_MAX_WAVE_ROUNDING_4_WAVES  = 1.15;
-  // Rule 4: a single row of token tiles is shared, not DP, up to this t.
-  static constexpr double TOKEN_ROW_SHARED_MAX_TILES_PER_CU = 5.0;
+  double dp_max_wave_rounding_16_waves;
+  double dp_max_wave_rounding_8_waves;
+  double dp_max_wave_rounding_4_waves;
+  // Rule 4: a single row of token tiles is shared up to this t.
+  double token_row_shared_max_tiles_per_cu;
   // Rule 5: token tiles (MT_N at most this) and their workgroups per CU.
-  static constexpr size_t TOKEN_TILE_MAX_N      = 48;
-  static constexpr size_t TOKEN_TILE_WGS_PER_CU = 2;
+  size_t token_tile_max_n;
+  size_t token_tile_wgs_per_cu;
+  // Grid when no rule applies: generic (true) or DP (false).
+  bool generic_grid_otherwise;
 };
+
+// gfx1151 (Strix Halo).
+constexpr w4a16_params_t w4a16_gfx1151() {
+  w4a16_params_t p{};
+  p.bf16_dequant_valu_per_elem        = 8.0;
+  p.f16_dequant_valu_per_elem         = 4.0;
+  p.k_iter_loop_overhead              = 500.0;
+  p.target_waves_per_cu               = 4.0;
+  p.sk_shared_max_tiles_per_cu        = 6.0;
+  p.sk_partial_tile_cost              = 256.0;
+  p.default_waves_per_workgroup       = 4;
+  p.full_cu_waves                     = 16;
+  p.full_cu_split_min_tiles_per_cu    = 0.5;
+  p.full_cu_split_max_tiles_per_cu    = 0.75;
+  p.sk_split_min_k_iters              = 8;
+  p.sk_split_min_k_iters_over_half    = 16;
+  p.grid_shared_max_tiles_per_cu      = 5;
+  p.many_tiles_dp_max_k_iters         = 8;
+  p.dp_max_wave_rounding_16_waves     = 1.5;
+  p.dp_max_wave_rounding_8_waves      = 1.06;
+  p.dp_max_wave_rounding_4_waves      = 1.15;
+  p.token_row_shared_max_tiles_per_cu = 5.0;
+  p.token_tile_max_n                  = 48;
+  p.token_tile_wgs_per_cu             = 2;
+  p.generic_grid_otherwise            = true;
+  return p;
+}
+
+// gfx1150 (Strix Point: 16 CUs, no MALL), fit with the hardware hipBLASLt reads from the device.
+constexpr w4a16_params_t w4a16_gfx1150() {
+  w4a16_params_t p{};
+  p.bf16_dequant_valu_per_elem        = 12.0;
+  p.f16_dequant_valu_per_elem         = 4.0;
+  p.k_iter_loop_overhead              = 250.0;
+  p.target_waves_per_cu               = 6.0;
+  p.sk_shared_max_tiles_per_cu        = 1.5;
+  p.sk_partial_tile_cost              = 512.0;  // No MALL: the partials go through L2.
+  p.default_waves_per_workgroup       = 4;
+  p.full_cu_waves                     = 8;
+  p.full_cu_split_min_tiles_per_cu    = 0.5;
+  p.full_cu_split_max_tiles_per_cu    = 0.75;
+  p.sk_split_min_k_iters              = 0;
+  p.sk_split_min_k_iters_over_half    = 64;
+  // With 16 CUs, sharing tiles over one workgroup per CU costs more than DP's last wave.
+  p.grid_shared_max_tiles_per_cu      = 0;
+  p.many_tiles_dp_max_k_iters         = 16;
+  p.dp_max_wave_rounding_16_waves     = 1.5;
+  p.dp_max_wave_rounding_8_waves      = 1.0;
+  p.dp_max_wave_rounding_4_waves      = 1.15;
+  p.token_row_shared_max_tiles_per_cu = 0.0;
+  p.token_tile_max_n                  = 48;
+  p.token_tile_wgs_per_cu             = 2;
+  // The generic grid scales with occupancy: it split few tiles' K over 64 workgroups, 3x slower.
+  p.generic_grid_otherwise            = false;
+  return p;
+}
+
+inline constexpr w4a16_params_t W4A16_GFX1151_PARAMS = w4a16_gfx1151();
+inline constexpr w4a16_params_t W4A16_GFX1150_PARAMS = w4a16_gfx1150();
+
+/// The W4A16 constants for @p problem on @p hardware, or nullptr where the W4A16 model does
+/// not apply. The latency model and the Stream-K grid rule both use it, so they apply together.
+inline const w4a16_params_t* w4a16_params(const problem_t& problem, const hardware_t& hardware) {
+  if (problem.a_dtype != data_type_t::Int4) return nullptr;
+  const w4a16_params_t* p = nullptr;
+  switch (hardware.arch) {
+    case hardware_t::architecture_t::gfx1150: p = &W4A16_GFX1150_PARAMS; break;
+    case hardware_t::architecture_t::gfx1151: p = &W4A16_GFX1151_PARAMS; break;
+    default: return nullptr;
+  }
+  return (problem.mi_dtype == data_type_t::BFloat16 || problem.mi_dtype == data_type_t::Half) ? p : nullptr;
+}
 
 /**
  * @brief StreamK=5 hybrid-mode (SK3 static vs SK4 dynamic) selection thresholds.

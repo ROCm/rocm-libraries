@@ -360,9 +360,8 @@ static size_t correct_sk_grid_for_partial_tiles(size_t sk_grid,
 }
 
 /**
- * @brief Stream-K grid of W4A16 kernels on gfx1151 (w4a16_defaults_t::applies), or
- *        nullopt to use the
- *        generic grid. Measured on ~1300 prefill GEMMs (66 LLM projection layers
+ * @brief Stream-K grid of W4A16 kernels on gfx1151 and gfx1150 (w4a16_params), or
+ *        nullopt to use the generic grid. Measured on ~1300 prefill GEMMs (66 LLM projection layers
  *        with M from 16 to 4096, plus other model layers), 8 W4A16 types.
  *
  * The gfx1151 W4A16 kernels are all Stream-K: a grid of one workgroup per tile
@@ -383,17 +382,17 @@ static size_t correct_sk_grid_for_partial_tiles(size_t sk_grid,
  *   6. Other tiles with t < 5: one workgroup per CU, sharing the tiles.
  *   In 5 and 6, tiles that divide evenly stay DP, and so do partial tiles that do
  *   not fit in the workspace.
- * Anything else: the generic grid.
+ * Anything else: the generic grid (gfx1151) or data parallel (gfx1150).
  */
-static std::optional<size_t> grid_k_split_aware_gfx1151_w4a16(const problem_t& problem,
-                                                              const config_t& config,
-                                                              size_t cu_count) {
-  using D = w4a16_defaults_t;
+static std::optional<size_t> grid_k_split_aware_w4a16(const problem_t& problem,
+                                                      const config_t& config,
+                                                      size_t cu_count,
+                                                      const w4a16_params_t& D) {
   const size_t tiles = compute_number_of_output_tiles(
       config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
   const size_t tile_size = config.mt.m * config.mt.n * config.workspace_size_per_elem_c;
   const size_t k_iters   = math::safe_ceil_div(problem.size.k, config.mt.k);
-  int waves              = D::DEFAULT_WAVES_PER_WORKGROUP;
+  int waves              = D.default_waves_per_workgroup;
   if (config.has_tensile_params()) {
     const auto& tp = config.tensile();
     waves = std::max(tp.wave_group_m, 1) * std::max(tp.wave_group_n, 1) * std::max(tp.local_split_u, 1);
@@ -401,39 +400,40 @@ static std::optional<size_t> grid_k_split_aware_gfx1151_w4a16(const problem_t& p
   if (tiles <= cu_count) {
     const double t = static_cast<double>(tiles) / static_cast<double>(cu_count);
     // Rule 1.
-    if (waves >= D::FULL_CU_WAVES && !(t > D::FULL_CU_SPLIT_MIN_TILES_PER_CU && t <= D::FULL_CU_SPLIT_MAX_TILES_PER_CU))
+    if (waves >= D.full_cu_waves && !(t > D.full_cu_split_min_tiles_per_cu && t <= D.full_cu_split_max_tiles_per_cu))
       return tiles;
     // Rule 2.
-    if (k_iters <= D::SK_SPLIT_MIN_K_ITERS || (k_iters <= D::SK_SPLIT_MIN_K_ITERS_OVER_HALF && 2 * tiles > cu_count))
+    if (k_iters <= D.sk_split_min_k_iters || (k_iters <= D.sk_split_min_k_iters_over_half && 2 * tiles > cu_count))
       return tiles;
     // Rule 3.
     if (tiles == cu_count || tile_size * cu_count <= config.workspace_size) return cu_count;
-  } else if (tiles > D::GRID_SHARED_MAX_TILES_PER_CU * cu_count && k_iters <= D::MANY_TILES_DP_MAX_K_ITERS) {
+  } else if (tiles > D.grid_shared_max_tiles_per_cu * cu_count && k_iters <= D.many_tiles_dp_max_k_iters) {
     return tiles;  // many tiles, short K: DP
   } else {
     // Rule 4.
-    const bool token_tile = config.mt.n <= D::TOKEN_TILE_MAX_N;
+    const bool token_tile = config.mt.n <= D.token_tile_max_n;
     const bool token_row  = token_tile && problem.size.n <= config.mt.n
         && static_cast<double>(tiles)
-               <= D::TOKEN_ROW_SHARED_MAX_TILES_PER_CU * static_cast<double>(cu_count);
+               <= D.token_row_shared_max_tiles_per_cu * static_cast<double>(cu_count);
     if (!token_row) {
-      double max_rounding = D::DP_MAX_WAVE_ROUNDING_8_WAVES;
-      if (waves >= D::FULL_CU_WAVES)
-        max_rounding = D::DP_MAX_WAVE_ROUNDING_16_WAVES;
+      double max_rounding = D.dp_max_wave_rounding_8_waves;
+      if (waves >= D.full_cu_waves)
+        max_rounding = D.dp_max_wave_rounding_16_waves;
       else if (waves <= 4 && !token_tile)
-        max_rounding = D::DP_MAX_WAVE_ROUNDING_4_WAVES;
+        max_rounding = D.dp_max_wave_rounding_4_waves;
       if (static_cast<double>(math::safe_ceil_div(tiles, cu_count) * cu_count)
           < max_rounding * static_cast<double>(tiles))
         return tiles;
     }
     // Rules 5 and 6.
-    if (token_tile || tiles < D::GRID_SHARED_MAX_TILES_PER_CU * cu_count) {
-      const size_t per_cu = token_tile ? D::TOKEN_TILE_WGS_PER_CU : 1;
+    if (token_tile || tiles < D.grid_shared_max_tiles_per_cu * cu_count) {
+      const size_t per_cu = token_tile ? D.token_tile_wgs_per_cu : 1;
       size_t grid         = (tiles % (per_cu * cu_count) != 0) ? per_cu * cu_count : tiles;
       if (tiles % grid != 0 && tile_size * grid > config.workspace_size) grid = tiles;
       return grid;
     }
   }
+  if (!D.generic_grid_otherwise) return tiles;
   return std::nullopt;
 }
 
@@ -447,8 +447,8 @@ size_t grid_k_split_aware(const problem_t& problem,
                           const config_t& config,
                           size_t cu_count,
                           size_t cu_budget) {
-  if (w4a16_defaults_t::applies(problem, hardware)) {
-    if (const auto grid = grid_k_split_aware_gfx1151_w4a16(problem, config, cu_count)) return *grid;
+  if (const w4a16_params_t* w4 = w4a16_params(problem, hardware)) {
+    if (const auto grid = grid_k_split_aware_w4a16(problem, config, cu_count, *w4)) return *grid;
   }
 
   size_t tiles = compute_number_of_output_tiles(
