@@ -71,6 +71,18 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   held by a skipped evaluation is now released by a background thread as soon as its kernel
   finishes, rather than from a later kernel launch, so it is also released in workloads that only
   replay a captured graph.
+* [Conv] Fixed `miopenConvolutionForwardGetWorkSpaceSize` and its backward variants reporting no
+  GEMM workspace for dilated convolutions. Find, given the reported size, dropped `GemmFwdRest`,
+  so a dilated fp32 Conv1d on RDNA ran on the naive solver and failed with "No suitable algorithm
+  was found" when the naive solver was disabled (#14965). Dilated GEMM workspace is now reported
+  when GEMM is the only alternative to the naive solvers and the workspace fits in 85% of the
+  device memory free at query time. Where another solver applies, it stays unreported, so Find
+  does not also benchmark GEMM; larger requests stay unreported to avoid the out-of-memory
+  failures that caused #6974. The memory limit also applies when a find-db record names a GEMM
+  solver for a dilated problem (that workspace used to be reported whatever its size), and to the
+  workspace `miopenFindSolutions` allocates when no workspace is preallocated, so it can now
+  return GEMM solutions for dilated problems. When free memory cannot be read, no dilated GEMM
+  workspace is reported.
 
 ### Added
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
@@ -83,6 +95,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   [`src/hipconv/CHANGELOG.md`](src/hipconv/CHANGELOG.md) for the full list.
 
 ### Changed
+* [Conv] Refreshed the 2D and 3D TunaNet solver-selection heuristics for gfx942 and gfx950 to
+  support the current solver set (including `ConvHipConv`, depthwise, and Winograd variants) and
+  improve top-1 accuracy and time-regret across all four architecture/dimension combinations.
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
   never uses split-K, so these solvers are deterministic; previously, deterministic forward
   convolutions could only use the GEMM and naive solvers.

@@ -123,6 +123,11 @@ hipblasOperation_t operandTranspose(
 void requireRowMajorOutput(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor);
 
+/// True when `strides` describe dense row-major data for `dims` (innermost dimension
+/// contiguous, each outer stride the product of the inner extents). The stride of a
+/// size-1 dimension does not affect the layout and is ignored.
+bool isDenseRowMajor(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides);
+
 bool isTypeFp8Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType);
 
 bool isTypeFp6Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType);

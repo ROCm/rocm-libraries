@@ -167,6 +167,25 @@ void requireRowMajorOutput(
     }
 }
 
+bool isDenseRowMajor(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
+{
+    if(dims.size() != strides.size())
+    {
+        return false;
+    }
+
+    int64_t expectedStride = 1;
+    for(size_t i = dims.size(); i-- > 0;)
+    {
+        if(dims[i] != 1 && strides[i] != expectedStride)
+        {
+            return false;
+        }
+        expectedStride *= dims[i];
+    }
+    return true;
+}
+
 bool isTypeFp8Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType)
 {
     return dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3

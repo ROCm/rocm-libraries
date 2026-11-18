@@ -41,6 +41,7 @@ from typing import ClassVar, Optional, Tuple
 from kernels.common._fmha_common import check_head_counts, gqa_ratio
 from kernels.common._lse_store import lse_row_has_mass, lse_store
 from kernels.common.attention_mask_type import band_mask_type
+from kernels.common._spec_checks import require_bool
 
 from rocke.core.ir import (
     BF16,
@@ -506,10 +507,7 @@ class UnifiedAttention2DTiledSpec:
     emit_lse: bool = field(default=False, kw_only=True)
 
     def __post_init__(self):
-        if type(self.emit_lse) is not bool:
-            raise ValueError(
-                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
-            )
+        require_bool("emit_lse", self.emit_lse)
         # gfx942 (CDNA3) variant: the narrow ``16x16x16`` default path only.
         # The wide-K (32x32x16 migration) and transpose-read / native-fp8
         # experimental knobs all depend on gfx950-only ISA (wide-K MFMA atoms,
