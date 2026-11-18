@@ -74,49 +74,199 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *
 *  \details
 *  \p rocsparse_sparse_to_sparse performs the conversion of a sparse matrix to a sparse matrix.
+*  \ref rocsparse_format_bell and \ref rocsparse_format_sell are not supported.
+*  See the table below for the supported format and data type combinations.
 *
-*  \note
-*  The required allocation size (in bytes) to \p buffer_size_in_bytes must be obtained from \ref rocsparse_sparse_to_sparse_buffer_size
-*  for each stage. The required buffer size can be different between stages.
+*  <table>
+*  <tr><th>source / target <th>CSR <th>CSC <th>COO <th>COO AoS <th>ELL <th>BSR
+*  <tr><td>CSR
+*      <td>\ref sparse_to_sparse_mixed_conversions "Mixed"
+*      <td>\ref sparse_to_sparse_same_a "Same (a)"
+*      <td>\ref sparse_to_sparse_mixed_conversions "Mixed"
+*      <td>\ref sparse_to_sparse_mixed_conversions "Mixed"
+*      <td>\ref sparse_to_sparse_same_b "Same (b)"
+*      <td>\ref sparse_to_sparse_same_b "Same (b)"
+*  <tr><td>CSC
+*      <td>\ref sparse_to_sparse_same_a "Same (a)"
+*      <td>\ref sparse_to_sparse_mixed_conversions "Mixed"
+*      <td>\ref sparse_to_sparse_permissive_conversions "Permissive"
+*      <td>\ref sparse_to_sparse_permissive_conversions "Permissive"
+*      <td>\ref sparse_to_sparse_permissive_b "Permissive (b)"
+*      <td>\ref sparse_to_sparse_permissive_b "Permissive (b)"
+*  <tr><td>COO
+*      <td>\ref sparse_to_sparse_mixed_conversions "Mixed"
+*      <td>\ref sparse_to_sparse_permissive_a "Permissive (a)"
+*      <td>\ref sparse_to_sparse_mixed_conversions "Mixed"
+*      <td>\ref sparse_to_sparse_mixed_conversions "Mixed"
+*      <td>\ref sparse_to_sparse_permissive_b "Permissive (b)"
+*      <td>\ref sparse_to_sparse_permissive_b "Permissive (b)"
+*  <tr><td>COO AoS
+*      <td>\ref sparse_to_sparse_mixed_conversions "Mixed"
+*      <td>\ref sparse_to_sparse_permissive_a "Permissive (a)"
+*      <td>\ref sparse_to_sparse_mixed_conversions "Mixed"
+*      <td>\ref sparse_to_sparse_mixed_conversions "Mixed"
+*      <td>\ref sparse_to_sparse_permissive_b "Permissive (b)"
+*      <td>\ref sparse_to_sparse_permissive_b "Permissive (b)"
+*  <tr><td>ELL
+*      <td>\ref sparse_to_sparse_same_c "Same (c)"
+*      <td>\ref sparse_to_sparse_permissive_c "Permissive (c)"
+*      <td>\ref sparse_to_sparse_permissive_conversions "Permissive"
+*      <td>\ref sparse_to_sparse_permissive_conversions "Permissive"
+*      <td>\ref sparse_to_sparse_mixed_conversions "Mixed"
+*      <td>\ref sparse_to_sparse_permissive_c "Permissive (c)"
+*  <tr><td>BSR
+*      <td>\ref sparse_to_sparse_same_b "Same (b)"
+*      <td>\ref sparse_to_sparse_permissive_b "Permissive (b)"
+*      <td>\ref sparse_to_sparse_permissive_conversions "Permissive"
+*      <td>\ref sparse_to_sparse_permissive_conversions "Permissive"
+*      <td>\ref sparse_to_sparse_permissive_b "Permissive (b)"
+*      <td>\ref sparse_to_sparse_mixed_conversions "Mixed"
+*  </table>
 *
-*  \note
-*  The \ref rocsparse_format_bell and \ref rocsparse_format_sell formats are not supported.
+*  Mixed copies every identical \ref rocsparse_datatype and converts different data types with
+*  the pairs listed in \ref sparse_to_sparse_mixed_conversions "Mixed conversions".
+*  Same (a), Same (b), and Same (c) keep the source data type and accept only that set.
+*  Any other data type returns \ref rocsparse_status_not_implemented.
+*  \ref rocsparse_status_invalid_value is returned when the data type is not a valid
+*  \ref rocsparse_datatype.
 *
-*  \note
-*  If \p source and \p target have different data types, only the conversions
-*  \ref rocsparse_datatype_f32_r <-> \ref rocsparse_datatype_f64_r,
-*  \ref rocsparse_datatype_f16_r or \ref rocsparse_datatype_bf16_r -> \ref rocsparse_datatype_f32_r,
-*  \ref rocsparse_datatype_f64_r, \ref rocsparse_datatype_f32_c or \ref rocsparse_datatype_f64_c,
-*  \ref rocsparse_datatype_f32_r or \ref rocsparse_datatype_f64_r -> \ref rocsparse_datatype_f32_c
-*  or \ref rocsparse_datatype_f64_c, and \ref rocsparse_datatype_f32_c <-> \ref rocsparse_datatype_f64_c
-*  are supported, depending on the format of \p target:
-*  - same format as \p source: the values are converted.
-*  - \ref rocsparse_format_coo or \ref rocsparse_format_coo_aos target: the values are converted.
-*    From the CSC, ELL and BSR formats, this needs \ref rocsparse_sparse_to_sparse_permissive, and
-*    the conversion goes through an intermediate CSR matrix. CSC, ELL and BSR to COO with an
-*    \ref rocsparse_datatype_f16_r or \ref rocsparse_datatype_bf16_r source still go through the
-*    existing same-type CSR conversion, which returns \ref rocsparse_status_not_implemented for
-*    those two types. COO AoS from CSC, ELL and BSR uses the same intermediate conversion.
-*  - \ref rocsparse_format_csr target: the values are also converted from the COO and COO AoS
-*    formats.
-*  - \ref rocsparse_format_csc, \ref rocsparse_format_ell or \ref rocsparse_format_bsr target: only
-*    from the same format.
-*
-*  Other combinations return \ref rocsparse_status_not_implemented. The ELL to CSR and CSR to
-*  BSR conversions (also to BSR in permissive mode) only return it in the
+*  The ELL to CSR and CSR to BSR conversions report an unsupported data type in the
 *  \ref rocsparse_sparse_to_sparse_stage_compute stage, after the
 *  \ref rocsparse_sparse_to_sparse_stage_analysis stage has written the row pointer array of
-*  \p target.
+*  \p target. A permissive conversion to BSR does the same when the conversion into the
+*  intermediate CSR matrix succeeds.
 *
 *  A conversion that writes values returns \ref rocsparse_status_not_implemented for an
-*  unsupported value type pair even when the matrix has zero nonzeros, if both value arrays
-*  are set. The CSR to CSC, CSC to CSR and BSR to CSR conversions only check the data types
-*  when the value arrays of both \p source and \p target are set, so a matrix with no value
-*  arrays is converted for any pair of data types.
+*  unsupported data type pair even when the matrix has zero nonzeros, if both value arrays
+*  are set. The CSR to CSC and CSC to CSR conversions compare data types only when both
+*  value arrays are set, and otherwise dispatch on the source data type. BSR to CSR compares
+*  data types only when both value arrays are set and dispatches on the target data type. A
+*  dispatched type that the routine does not implement still returns an error.
 *
 *  Conversions to a single-precision type round each value (each real and imaginary part) to
 *  nearest. Values that overflow single precision become infinity of the same sign, NaN is
 *  preserved, and \ref rocsparse_status_success is returned.
+*
+*  \section sparse_to_sparse_type_rules Data type rules
+*
+*  \subsection sparse_to_sparse_mixed_conversions Mixed conversions
+*  <table>
+*  <tr><th>source                   <th>target
+*  <tr><td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f64_r
+*  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_f32_c <td>rocsparse_datatype_f64_c
+*  <tr><td>rocsparse_datatype_f64_c <td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f64_c
+*  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f64_c
+*  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f64_r
+*  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f64_c
+*  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f64_r
+*  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f64_c
+*  </table>
+*
+*  These real widenings are exact: every source value is representable in the target, and a
+*  real value stored in a complex target has an imaginary part of zero.
+*  \ref rocsparse_datatype_f64_r into \ref rocsparse_datatype_f32_c rounds the real part.
+*
+*  \subsection sparse_to_sparse_same_a Same (a)
+*  <table>
+*  <tr><th>data type
+*  <tr><td>rocsparse_datatype_i8_r
+*  <tr><td>rocsparse_datatype_u8_r
+*  <tr><td>rocsparse_datatype_i32_r
+*  <tr><td>rocsparse_datatype_u32_r
+*  <tr><td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f64_r
+*  <tr><td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_f64_c
+*  </table>
+*
+*  \subsection sparse_to_sparse_same_b Same (b)
+*  <table>
+*  <tr><th>data type
+*  <tr><td>rocsparse_datatype_i32_r
+*  <tr><td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f64_r
+*  <tr><td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_f64_c
+*  </table>
+*
+*  \subsection sparse_to_sparse_same_c Same (c)
+*  <table>
+*  <tr><th>data type
+*  <tr><td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f64_r
+*  <tr><td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_f64_c
+*  </table>
+*
+*  \subsection sparse_to_sparse_permissive_conversions Permissive
+*  These pairs require \ref rocsparse_sparse_to_sparse_permissive. The conversion goes through
+*  an intermediate CSR matrix, which adds a pass over the matrix. The supported conversions are:
+*  <table>
+*  <tr><th>source                   <th>target
+*  <tr><td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f64_r
+*  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_f32_c <td>rocsparse_datatype_f64_c
+*  <tr><td>rocsparse_datatype_f64_c <td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f64_c
+*  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f64_c
+*  </table>
+*
+*  CSC, ELL and BSR to COO with an \ref rocsparse_datatype_f16_r or
+*  \ref rocsparse_datatype_bf16_r source still go through the existing same-type CSR
+*  conversion, which returns \ref rocsparse_status_not_implemented for those two types.
+*  COO AoS from CSC, ELL and BSR uses the same intermediate conversion.
+*
+*  \subsection sparse_to_sparse_permissive_a Permissive (a)
+*  These pairs require \ref rocsparse_sparse_to_sparse_permissive. The conversion goes through
+*  an intermediate CSR matrix and keeps one of these source data types.
+*  <table>
+*  <tr><th>data type
+*  <tr><td>rocsparse_datatype_i8_r
+*  <tr><td>rocsparse_datatype_u8_r
+*  <tr><td>rocsparse_datatype_i32_r
+*  <tr><td>rocsparse_datatype_u32_r
+*  <tr><td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f64_r
+*  <tr><td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_f64_c
+*  </table>
+*
+*  \subsection sparse_to_sparse_permissive_b Permissive (b)
+*  These pairs require \ref rocsparse_sparse_to_sparse_permissive. The conversion goes through
+*  an intermediate CSR matrix and keeps one of these source data types.
+*  <table>
+*  <tr><th>data type
+*  <tr><td>rocsparse_datatype_i32_r
+*  <tr><td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f64_r
+*  <tr><td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_f64_c
+*  </table>
+*
+*  \subsection sparse_to_sparse_permissive_c Permissive (c)
+*  These pairs require \ref rocsparse_sparse_to_sparse_permissive. The conversion goes through
+*  an intermediate CSR matrix and keeps one of these source data types.
+*  <table>
+*  <tr><th>data type
+*  <tr><td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f64_r
+*  <tr><td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_f64_c
+*  </table>
+*
+*  \note
+*  The required allocation size (in bytes) to \p buffer_size_in_bytes must be obtained from \ref rocsparse_sparse_to_sparse_buffer_size
+*  for each stage. The required buffer size can be different between stages.
 *
 *  \note
 *  This routine does not support batched computation.

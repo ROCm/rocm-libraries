@@ -27,9 +27,9 @@ qualification from checks of the current source. Use the
 
 ## Production selection and explicit coverage
 
-The grouped-convolution dispatcher registers only gfx950 forward and dgrad
-instance lists. A gfx942 request or wgrad request cannot establish production
-selection coverage. Their tests build explicit configurations without modifying
+The grouped-convolution dispatcher registers only gfx950 forward and dgrad and
+gfx1250 dgrad instance lists. A gfx942 request or wgrad request cannot establish
+production selection coverage. Their tests build explicit configurations without modifying
 the production registry. No test silently falls back from a refused production
 request. The explicitly enrolled gfx950 K=33 gradient cases preserve coverage
 where the production list has no admitted instance.

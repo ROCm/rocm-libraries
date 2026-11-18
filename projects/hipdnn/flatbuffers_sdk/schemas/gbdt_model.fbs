@@ -96,6 +96,16 @@ table GbdtGroup {
     trees: [GbdtTree];
 }
 
+/// One early-exit stage: after the first `trees` trees of GbdtModel.trees, only the `keep`
+/// best candidates of a catalog, in the UHD objective's direction, are scored further.
+table EarlyExitStage {
+    /// Trees summed before this stage prunes: 1 <= trees < the number of layer-1 trees.
+    trees: uint32;
+
+    /// Candidates kept, at least 1.
+    keep: uint32;
+}
+
 /// @brief GBDT (Gradient Boosted Decision Tree) model for the tree_data adapter.
 ///
 /// This is the model artifact format for UHD's default shipping path. The model
@@ -153,6 +163,15 @@ table GbdtModel {
     /// The distinct split thresholds that split/leaf-encoded trees index. Absent when no
     /// tree uses that encoding.
     threshold_table: RealArray;
+
+    /// Early-exit schedule for ranking a whole catalog: stages strictly increasing in
+    /// `trees` and strictly decreasing in `keep`. Absent or empty scores every candidate with
+    /// every tree. It changes only which candidates get a full score, never a full score: a
+    /// pruned candidate ranks below every candidate scored by the whole model and carries no
+    /// estimate. Single-layer models only; a grouped model's schedule is ignored. A runtime
+    /// that predates this field ignores it and scores every candidate fully, which is still
+    /// correct.
+    early_exit: [EarlyExitStage];
 }
 
 root_type GbdtModel;

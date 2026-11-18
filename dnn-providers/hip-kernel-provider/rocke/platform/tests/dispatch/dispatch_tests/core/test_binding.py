@@ -18,6 +18,7 @@ from rocke.dispatch.core import Capability, KernelCandidate, ProblemBinding
 from rocke.dispatch.gemm.bf16_rcr import dispatch_gemm_bf16, gemm_bf16_candidates
 from rocke.dispatch.gemm.common import GemmRequest
 from rocke.dispatch.gemm.fp16_rcr import dispatch_gemm_fp16, gemm_fp16_candidates
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 
 class FakeRuntime:
@@ -47,13 +48,14 @@ def _write_reference_output(rt, binding, ptrs, req, dtype):
     """Fill the C buffer with the exact expected result, as a perfect kernel would."""
     import numpy as np
 
-    from rocke.dispatch.gemm.binding import _SEED, _bf16_from_f32
+    from rocke.dispatch.gemm.binding import _SEED
+    from rocke.numeric.bf16 import f32_to_bf16
 
     rng = np.random.default_rng(_SEED)
     a = rng.integers(-5, 6, size=(req.M, req.K), dtype=np.int16)
     b = rng.integers(-5, 6, size=(req.N, req.K), dtype=np.int16)
     ref = a.astype(np.float32) @ b.astype(np.float32).T
-    encoded = ref.astype(np.float16) if dtype == "fp16" else _bf16_from_f32(np, ref)
+    encoded = ref.astype(np.float16) if dtype == "fp16" else f32_to_bf16(ref)
     rt.mem[ptrs[2]][: encoded.nbytes] = encoded.tobytes()
 
 
@@ -99,29 +101,33 @@ class TestBindSeam(unittest.TestCase):
 
 
 class TestGemmBinding(unittest.TestCase):
-    CASES = (
-        ("fp16", dispatch_gemm_fp16),
-        ("bf16", dispatch_gemm_bf16),
+    CASES = tuple(
+        (arch, dtype, dispatch)
+        for arch in COVERED_ARCHES
+        for dtype, dispatch in (
+            ("fp16", dispatch_gemm_fp16),
+            ("bf16", dispatch_gemm_bf16),
+        )
     )
 
-    def _request(self, dtype):
-        return GemmRequest(M=64, N=128, K=256, arch="gfx950", dtype=dtype)
+    def _request(self, dtype, arch):
+        return GemmRequest(M=64, N=128, K=256, arch=arch, dtype=dtype)
 
     def test_geometry_comes_from_the_dispatcher_not_recomputed(self):
         # The whole point of binding on the candidate: one definition of the
         # launch geometry. If a binding ever recomputed it from tile fields,
         # this is the test that catches the drift.
-        for dtype, dispatch in self.CASES:
-            with self.subTest(dtype=dtype):
-                result = dispatch(self._request(dtype))
+        for arch, dtype, dispatch in self.CASES:
+            with self.subTest(arch=arch, dtype=dtype):
+                result = dispatch(self._request(dtype, arch))
                 binding = result.bind()
                 self.assertEqual(binding.grid, result.grid)
                 self.assertEqual(binding.block, result.block)
 
     def test_roofline_denominators(self):
-        for dtype, dispatch in self.CASES:
-            with self.subTest(dtype=dtype):
-                req = self._request(dtype)
+        for arch, dtype, dispatch in self.CASES:
+            with self.subTest(arch=arch, dtype=dtype):
+                req = self._request(dtype, arch)
                 binding = dispatch(req).bind()
                 self.assertEqual(binding.flop, 2.0 * req.M * req.N * req.K)
                 self.assertEqual(
@@ -130,9 +136,9 @@ class TestGemmBinding(unittest.TestCase):
                 )
 
     def test_packed_args_match_the_declared_signature(self):
-        for dtype, dispatch in self.CASES:
-            with self.subTest(dtype=dtype):
-                req = self._request(dtype)
+        for arch, dtype, dispatch in self.CASES:
+            with self.subTest(arch=arch, dtype=dtype):
+                req = self._request(dtype, arch)
                 result = dispatch(req)
                 args, ptrs = result.bind().make_args(FakeRuntime())
                 self.assertEqual(len(ptrs), 3)
@@ -141,9 +147,9 @@ class TestGemmBinding(unittest.TestCase):
                 self.assertEqual((a, b, c), ptrs)
 
     def test_verify_accepts_an_exact_kernel_and_rejects_a_wrong_one(self):
-        for dtype, dispatch in self.CASES:
-            with self.subTest(dtype=dtype):
-                req = self._request(dtype)
+        for arch, dtype, dispatch in self.CASES:
+            with self.subTest(arch=arch, dtype=dtype):
+                req = self._request(dtype, arch)
                 binding = dispatch(req).bind(verify=True)
                 rt = FakeRuntime()
                 _args, ptrs = binding.make_args(rt)
@@ -161,13 +167,15 @@ class TestGemmBinding(unittest.TestCase):
                 self.assertGreater(bad_zero, 0, "a silent kernel must fail verify")
 
     def test_binding_without_verify_does_no_reference_work(self):
-        req = self._request("fp16")
-        binding = dispatch_gemm_fp16(req).bind()
-        rt = FakeRuntime()
-        _args, ptrs = binding.make_args(rt)
-        diff, bad, total = binding.check(rt, ptrs)
-        self.assertEqual((diff, bad), (0.0, 0))
-        self.assertEqual(total, req.M * req.N)
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                req = self._request("fp16", arch)
+                binding = dispatch_gemm_fp16(req).bind()
+                rt = FakeRuntime()
+                _args, ptrs = binding.make_args(rt)
+                diff, bad, total = binding.check(rt, ptrs)
+                self.assertEqual((diff, bad), (0.0, 0))
+                self.assertEqual(total, req.M * req.N)
 
     def test_every_registered_gemm_candidate_can_bind(self):
         # Registration and launchability should not drift apart within a
@@ -283,25 +291,29 @@ class TestBindingRatchet(unittest.TestCase):
 
 
 class TestBf16Encoding(unittest.TestCase):
-    def test_round_trip_is_exact_for_bf16_representable_values(self):
+    """The binding encodes bf16 with rocke.numeric.bf16, not a codec of its own.
+
+    A second codec beside the shared one is how a harness ends up agreeing with
+    itself rather than with the device: the binding's old copy turned a NaN
+    into an infinity.
+    """
+
+    def test_binding_uses_the_shared_codec(self):
+        from rocke.dispatch.gemm import binding
+        from rocke.numeric import bf16
+
+        self.assertIs(binding.f32_to_bf16, bf16.f32_to_bf16)
+        self.assertIs(binding.bf16_to_f32, bf16.bf16_to_f32)
+        self.assertFalse(hasattr(binding, "bf16_from_f32"))
+        self.assertFalse(hasattr(binding, "f32_from_bf16"))
+
+    def test_nan_stays_nan(self):
         import numpy as np
 
-        from rocke.dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
+        from rocke.dispatch.gemm.binding import bf16_to_f32, f32_to_bf16
 
-        values = np.array([0.0, 1.0, -1.0, 5.0, -256.0, 1024.0], dtype=np.float32)
-        back = _f32_from_bf16(np, _bf16_from_f32(np, values))
-        np.testing.assert_array_equal(back, values)
-
-    def test_rounding_is_nearest_even_not_truncation(self):
-        import numpy as np
-
-        from rocke.dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
-
-        # A value just above a bf16 tick must round up, not truncate down.
-        one_ulp = np.float32(1.0 + 2.0**-8)
-        nudged = np.array([one_ulp * (1.0 + 2.0**-12)], dtype=np.float32)
-        back = _f32_from_bf16(np, _bf16_from_f32(np, nudged))
-        self.assertGreaterEqual(float(back[0]), float(one_ulp))
+        nan_low_payload = np.array([0x7F800001], dtype=np.uint32).view(np.float32)
+        self.assertTrue(np.isnan(bf16_to_f32(f32_to_bf16(nan_low_payload))[0]))
 
 
 if __name__ == "__main__":

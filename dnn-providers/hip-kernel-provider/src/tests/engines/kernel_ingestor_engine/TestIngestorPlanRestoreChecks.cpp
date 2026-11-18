@@ -28,6 +28,7 @@
 #include "engines/kernel_ingestor_engine/IngestorPlanRestore.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdLaunchValues.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanCodec.hpp"
@@ -157,6 +158,79 @@ IngestorPlanPayload gfx950AttentionDensePayload(std::string_view dispatchSymbol,
     payload.launchValues = gfx950AttentionDenseLaunchValues(binding, problem, int64_t{256});
     payload.symbol = "attention_dense";
     payload.recordedSignature = gfx950AttentionDenseSignature(withHeads);
+    return payload;
+}
+
+// A gfx942 dense-attention payload under its one contract, saved with stats uid `stats`
+// (ATTENTION_DENSE_NO_STATS for none), that passes every check before the module load when
+// `withHeads` is true and `writesLse` says whether `stats` is bound: gfx942 launches the
+// same ten arguments as gfx950's v2, and lse_ptr after them to a kernel that writes LSE.
+IngestorPlanPayload gfx942AttentionDensePayload(bool withHeads,
+                                                int64_t stats = ATTENTION_DENSE_NO_STATS,
+                                                bool writesLse = false)
+{
+    AttentionDenseBinding binding{1, 2, 3, 4, 1, 128, 0.125F};
+    binding.stats = stats;
+    AttentionDenseProblem problem;
+    problem.batch = 2;
+    problem.seqLenQ = 512;
+    problem.seqLenKv = 512;
+    problem.numQueryHeads = 8;
+    problem.numKvHeads = 4;
+    problem.headSize = 128;
+    problem.dataType = data_objects::DataType::HALF;
+
+    IngestorPlanPayload payload = validConvFwdPayload();
+    payload.dispatchSymbol = std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1);
+    payload.launchValues = gfx942AttentionDenseLaunchValues(binding, problem, int64_t{256});
+    payload.symbol = "attention_dense";
+    payload.recordedSignature = gfx950AttentionDenseSignature(withHeads);
+    if(writesLse)
+    {
+        payload.recordedSignature.push_back(KernelArgument{"global_buffer", 8, 56, "lse_ptr"});
+    }
+    return payload;
+}
+
+/// A gfx942 payload saved on the persistent grid at @p savedDecode (304 CTAs) whose code
+/// object records the pairs of @p recordedDecode, or none for an empty one, and lse_ptr
+/// after them when @p lse.
+IngestorPlanPayload
+    gfx942PersistentPayload(attention_dense::AttentionDensePersistDecode savedDecode,
+                            const std::vector<std::string>& recordedDivisors,
+                            bool lse = false)
+{
+    attention_dense::AttentionDenseGrid grid;
+    grid.order = attention_dense::AttentionDenseGridOrder::PERSISTENT;
+    grid.decode = savedDecode;
+    grid.numPersistent = 304;
+    auto payload = gfx942AttentionDensePayload(/*withHeads=*/true, lse ? int64_t{7} : int64_t{-1});
+    AttentionDenseBinding binding{1, 2, 3, 4, 1, 128, 0.125F};
+    binding.stats = lse ? int64_t{7} : ATTENTION_DENSE_NO_STATS;
+    AttentionDenseProblem problem;
+    problem.batch = 2;
+    problem.seqLenQ = 512;
+    problem.seqLenKv = 512;
+    problem.numQueryHeads = 8;
+    problem.numKvHeads = 4;
+    problem.headSize = 128;
+    problem.dataType = data_objects::DataType::HALF;
+    payload.launchValues = gfx942AttentionDenseLaunchValues(binding, problem, int64_t{256}, grid);
+    uint32_t offset = 56;
+    for(const auto& divisor : recordedDivisors)
+    {
+        for(const char* part : {"_magic", "_shift"})
+        {
+            payload.recordedSignature.push_back(
+                KernelArgument{"by_value", 4, offset, divisor + part});
+            offset += 4;
+        }
+    }
+    if(lse)
+    {
+        payload.recordedSignature.push_back(
+            KernelArgument{"global_buffer", 8, (offset + 7) / 8 * 8, "lse_ptr"});
+    }
     return payload;
 }
 
@@ -326,6 +400,131 @@ TEST_F(TestIngestorPlanRestoreChecks, Gfx950AttentionDenseContractsAcceptTheirOw
         payload.launchValues["block_m"] = int64_t{64};
         expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'block_m'");
     }
+}
+
+// gfx942's one contract restores only the 10-argument code object it launches.
+TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseContractRefusesTheEightArgumentSignature)
+{
+    expectRefusal(gfx942AttentionDensePayload(/*withHeads=*/false),
+                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                  "the saved kernel's arguments do not match what this provider launches");
+}
+
+// The matching signature passes: the plan reaches the launch-value check, which a block_m
+// gfx942 does not build, or a window that leaves query rows no key, then refuses. No case
+// reaches the module load, so no device is needed.
+TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseContractAcceptsItsOwnSignature)
+{
+    auto unbuiltTile = gfx942AttentionDensePayload(/*withHeads=*/true);
+    unbuiltTile.launchValues["block_m"] = int64_t{48};
+    expectRefusal(unbuiltTile, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'block_m'");
+
+    auto keylessRows = gfx942AttentionDensePayload(/*withHeads=*/true);
+    keylessRows.launchValues["seqlen_kv"] = int64_t{256};
+    keylessRows.launchValues["sliding_window"] = int64_t{256};
+    expectRefusal(
+        keylessRows, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'sliding_window'");
+}
+
+// The saved stats uid selects the argument list before anything is checked: a plan with a
+// stats output restores the 11-argument code object that writes the LSE, reaching the
+// launch-value check, which a broken block_m then refuses.
+TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseRestoresTheLseFormOfAPlanWithStats)
+{
+    for(const int64_t stats : {int64_t{0}, int64_t{7}})
+    {
+        SCOPED_TRACE(stats);
+        auto payload = gfx942AttentionDensePayload(/*withHeads=*/true, stats, /*writesLse=*/true);
+        payload.launchValues["block_m"] = int64_t{48};
+        expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'block_m'");
+    }
+}
+
+// A kernel whose arguments disagree with the saved stats uid is refused by the signature
+// check: an LSE kernel saved without a stats output would store through an argument the
+// launch never passes, and a non-LSE kernel saved with one would never write it.
+TEST_F(TestIngestorPlanRestoreChecks,
+       Gfx942AttentionDenseRefusesAKernelThatDisagreesWithItsStatsUid)
+{
+    expectRefusal(gfx942AttentionDensePayload(/*withHeads=*/true, int64_t{7}, /*writesLse=*/false),
+                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                  "the saved kernel's arguments do not match what this provider launches");
+    expectRefusal(gfx942AttentionDensePayload(
+                      /*withHeads=*/true, ATTENTION_DENSE_NO_STATS, /*writesLse=*/true),
+                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                  "the saved kernel's arguments do not match what this provider launches");
+}
+
+// The selector reads the uid leniently and the reader strictly: a uid below -1 selects the
+// LSE form and is then refused as a value; a missing one selects the plain form and is then
+// refused as missing.
+TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseRefusesAStatsUidItNeverSaves)
+{
+    expectRefusal(gfx942AttentionDensePayload(/*withHeads=*/true, int64_t{-2}, /*writesLse=*/true),
+                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                  "launch value 'stats.uid'");
+
+    auto missing = gfx942AttentionDensePayload(/*withHeads=*/true);
+    missing.launchValues.erase("stats.uid");
+    expectRefusal(missing, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "needs launch value 'stats.uid'");
+}
+
+// The saved grid selects the argument list before anything is checked: a persistent plan
+// restores the code object that takes its decode's fast-division pairs (and lse_ptr after
+// them), reaching the launch-value check, which a broken block_m then refuses.
+TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseRestoresThePersistentFormOfItsDecode)
+{
+    using attention_dense::AttentionDensePersistDecode;
+    for(const bool lse : {false, true})
+    {
+        SCOPED_TRACE(lse);
+        auto payload = gfx942PersistentPayload(
+            AttentionDensePersistDecode::BT_HKV_MINOR, {"batch", "num_query_heads"}, lse);
+        payload.launchValues["block_m"] = int64_t{48};
+        expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'block_m'");
+
+        auto swz = gfx942PersistentPayload(
+            AttentionDensePersistDecode::HQ_MINOR_SWZ, {"nqb", "num_query_heads", "gqa"}, lse);
+        swz.launchValues["block_m"] = int64_t{48};
+        expectRefusal(swz, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'block_m'");
+    }
+}
+
+// A code object whose arguments disagree with the saved grid is refused by the signature
+// check: a grid kernel under a persistent plan, a persistent one under a grid plan, and
+// another decode's pairs.
+TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseRefusesAKernelThatDisagreesWithItsGrid)
+{
+    using attention_dense::AttentionDensePersistDecode;
+    constexpr const char* MISMATCH
+        = "the saved kernel's arguments do not match what this provider launches";
+    expectRefusal(gfx942PersistentPayload(AttentionDensePersistDecode::QB_MAJOR, {}),
+                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                  MISMATCH);
+    expectRefusal(gfx942PersistentPayload(AttentionDensePersistDecode::QB_MAJOR,
+                                          {"batch", "num_query_heads"}),
+                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                  MISMATCH);
+    expectRefusal(gfx942PersistentPayload(AttentionDensePersistDecode::HKV_MAJOR,
+                                          {"batch", "num_query_heads", "gqa"}),
+                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                  MISMATCH);
+
+    auto gridPlan = gfx942PersistentPayload(AttentionDensePersistDecode::QB_MAJOR,
+                                            {"batch", "num_query_heads", "gqa"});
+    gridPlan.launchValues["grid_order"] = std::string("bt_hkv_minor");
+    gridPlan.launchValues["persist_decode"] = std::string();
+    gridPlan.launchValues["num_persistent"] = int64_t{0};
+    expectRefusal(gridPlan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, MISMATCH);
+}
+
+// The unversioned gfx942 name resolves to the gfx942 handler, which reads only v1.
+TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseRefusesItsUnversionedAlias)
+{
+    auto payload = gfx942AttentionDensePayload(/*withHeads=*/true);
+    payload.dispatchSymbol = "hipkernel.gfx942_attention_dense.dispatch";
+
+    expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "names no launch-value contract");
 }
 
 TEST_F(TestIngestorPlanRestoreChecks, RefusesAnUnversionedAlias)
