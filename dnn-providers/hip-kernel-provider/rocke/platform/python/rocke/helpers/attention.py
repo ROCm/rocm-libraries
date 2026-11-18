@@ -643,7 +643,7 @@ def mfma_32x32x8_for_dtype(
       - C/D: ``<16 x float>`` (M=32 x N=32 / 64 lanes)
 
     The C output lane layout is **identical** to the 32x32x16 atom (only K
-    per atom differs), so the shared ``_C32_DIST`` / ``_mfma_32x32_c_*``
+    per atom differs), so the shared ``C32_DIST`` / ``mfma_32x32_c_*``
     distribution drives both. Both fp16 and bf16 are gfx942-legal here:
     ``mfma_f32_32x32x8_f16`` and ``mfma_f32_32x32x8_bf16`` (the ``.1k``
     intrinsic) both select on CDNA3. (The wider K=16 bf16 atom
@@ -824,11 +824,11 @@ def dequant_fp8x8_to_dtype(
     preserves correctness for arbitrary (non-pow2) ``k_scale``/``v_scale``.
 
     This is the promotion of the byte-identical dequant chain that the 2D
-    tiled QK path (``_read_k8_mfma_operand`` and the inline 16x16 K_FP8_MFMA
-    branch) and the 3D segment loader (``_issue_fp8_dequant_loads``) each
-    emitted independently. ``b.vec_pack`` / ``b.cvt_pk_f32_fp8x4`` /
-    ``b.fmul`` / ``b.cast_f32_to`` are emitted in the same order the inline
-    sites used, so the lowered IR is unchanged.
+    tiled QK path (``_read_k8_mfma_operand``) and the 3D segment loader
+    (``_issue_fp8_dequant_loads``) each emitted independently.
+    ``b.vec_pack`` / ``b.cvt_pk_f32_fp8x4`` / ``b.fmul`` / ``b.cast_f32_to``
+    are emitted in the same order the inline sites used, so the lowered IR is
+    unchanged.
     """
     lo_fp8 = b.vec_pack([b.vec_extract(fp8_vec, i) for i in range(4)], FP8E4M3)
     hi_fp8 = b.vec_pack([b.vec_extract(fp8_vec, i) for i in range(4, 8)], FP8E4M3)
