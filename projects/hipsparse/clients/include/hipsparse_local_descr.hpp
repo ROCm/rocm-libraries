@@ -72,17 +72,19 @@ public:
     }
 };
 
-// These beat the implicit conversion to void*. The handle, matrix descriptor,
-// HYB, color, sparse-vector, dense-vector, and dense-matrix typedefs are all
-// void*, so a leftover destroy of the wrong kind would otherwise compile and
-// free this descriptor twice.
-hipsparseStatus_t hipsparseDestroy(const hipsparseLocalSpGEMMDescr&)          = delete;
-hipsparseStatus_t hipsparseDestroyMatDescr(const hipsparseLocalSpGEMMDescr&)  = delete;
-hipsparseStatus_t hipsparseDestroyHybMat(const hipsparseLocalSpGEMMDescr&)    = delete;
-hipsparseStatus_t hipsparseDestroyColorInfo(const hipsparseLocalSpGEMMDescr&) = delete;
-hipsparseStatus_t hipsparseDestroySpVec(const hipsparseLocalSpGEMMDescr&)     = delete;
-hipsparseStatus_t hipsparseDestroyDnVec(const hipsparseLocalSpGEMMDescr&)     = delete;
-hipsparseStatus_t hipsparseDestroyDnMat(const hipsparseLocalSpGEMMDescr&)     = delete;
+// Exact match for the matching destroy, and for the void* destroys. The handle,
+// matrix descriptor, HYB, color, sparse-vector, dense-vector, and dense-matrix
+// typedefs are all void*, and operator hipsparseSpGEMMDescr_t() makes
+// hipsparseSpGEMM_destroyDescr(wrapper) an exact match for the real function.
+// A leftover destroy is a compile error instead of freeing this descriptor twice.
+hipsparseStatus_t hipsparseSpGEMM_destroyDescr(const hipsparseLocalSpGEMMDescr&) = delete;
+hipsparseStatus_t hipsparseDestroy(const hipsparseLocalSpGEMMDescr&)             = delete;
+hipsparseStatus_t hipsparseDestroyMatDescr(const hipsparseLocalSpGEMMDescr&)     = delete;
+hipsparseStatus_t hipsparseDestroyHybMat(const hipsparseLocalSpGEMMDescr&)       = delete;
+hipsparseStatus_t hipsparseDestroyColorInfo(const hipsparseLocalSpGEMMDescr&)    = delete;
+hipsparseStatus_t hipsparseDestroySpVec(const hipsparseLocalSpGEMMDescr&)        = delete;
+hipsparseStatus_t hipsparseDestroyDnVec(const hipsparseLocalSpGEMMDescr&)        = delete;
+hipsparseStatus_t hipsparseDestroyDnMat(const hipsparseLocalSpGEMMDescr&)        = delete;
 #endif
 
 // clang-format off
@@ -124,17 +126,19 @@ public:
     }
 };
 
-// These beat the implicit conversion to void*. The handle, matrix descriptor,
-// HYB, color, sparse-vector, dense-vector, and dense-matrix typedefs are all
-// void*, so a leftover destroy of the wrong kind would otherwise compile and
-// free this descriptor twice.
-hipsparseStatus_t hipsparseDestroy(const hipsparseLocalSpSVDescr&)          = delete;
-hipsparseStatus_t hipsparseDestroyMatDescr(const hipsparseLocalSpSVDescr&)  = delete;
-hipsparseStatus_t hipsparseDestroyHybMat(const hipsparseLocalSpSVDescr&)    = delete;
-hipsparseStatus_t hipsparseDestroyColorInfo(const hipsparseLocalSpSVDescr&) = delete;
-hipsparseStatus_t hipsparseDestroySpVec(const hipsparseLocalSpSVDescr&)     = delete;
-hipsparseStatus_t hipsparseDestroyDnVec(const hipsparseLocalSpSVDescr&)     = delete;
-hipsparseStatus_t hipsparseDestroyDnMat(const hipsparseLocalSpSVDescr&)     = delete;
+// Exact match for the matching destroy, and for the void* destroys. The handle,
+// matrix descriptor, HYB, color, sparse-vector, dense-vector, and dense-matrix
+// typedefs are all void*, and operator hipsparseSpSVDescr_t() makes
+// hipsparseSpSV_destroyDescr(wrapper) an exact match for the real function.
+// A leftover destroy is a compile error instead of freeing this descriptor twice.
+hipsparseStatus_t hipsparseSpSV_destroyDescr(const hipsparseLocalSpSVDescr&) = delete;
+hipsparseStatus_t hipsparseDestroy(const hipsparseLocalSpSVDescr&)           = delete;
+hipsparseStatus_t hipsparseDestroyMatDescr(const hipsparseLocalSpSVDescr&)   = delete;
+hipsparseStatus_t hipsparseDestroyHybMat(const hipsparseLocalSpSVDescr&)     = delete;
+hipsparseStatus_t hipsparseDestroyColorInfo(const hipsparseLocalSpSVDescr&)  = delete;
+hipsparseStatus_t hipsparseDestroySpVec(const hipsparseLocalSpSVDescr&)      = delete;
+hipsparseStatus_t hipsparseDestroyDnVec(const hipsparseLocalSpSVDescr&)      = delete;
+hipsparseStatus_t hipsparseDestroyDnMat(const hipsparseLocalSpSVDescr&)      = delete;
 #endif
 
 // clang-format off
@@ -176,17 +180,19 @@ public:
     }
 };
 
-// These beat the implicit conversion to void*. The handle, matrix descriptor,
-// HYB, color, sparse-vector, dense-vector, and dense-matrix typedefs are all
-// void*, so a leftover destroy of the wrong kind would otherwise compile and
-// free this descriptor twice.
-hipsparseStatus_t hipsparseDestroy(const hipsparseLocalSpSMDescr&)          = delete;
-hipsparseStatus_t hipsparseDestroyMatDescr(const hipsparseLocalSpSMDescr&)  = delete;
-hipsparseStatus_t hipsparseDestroyHybMat(const hipsparseLocalSpSMDescr&)    = delete;
-hipsparseStatus_t hipsparseDestroyColorInfo(const hipsparseLocalSpSMDescr&) = delete;
-hipsparseStatus_t hipsparseDestroySpVec(const hipsparseLocalSpSMDescr&)     = delete;
-hipsparseStatus_t hipsparseDestroyDnVec(const hipsparseLocalSpSMDescr&)     = delete;
-hipsparseStatus_t hipsparseDestroyDnMat(const hipsparseLocalSpSMDescr&)     = delete;
+// Exact match for the matching destroy, and for the void* destroys. The handle,
+// matrix descriptor, HYB, color, sparse-vector, dense-vector, and dense-matrix
+// typedefs are all void*, and operator hipsparseSpSMDescr_t() makes
+// hipsparseSpSM_destroyDescr(wrapper) an exact match for the real function.
+// A leftover destroy is a compile error instead of freeing this descriptor twice.
+hipsparseStatus_t hipsparseSpSM_destroyDescr(const hipsparseLocalSpSMDescr&) = delete;
+hipsparseStatus_t hipsparseDestroy(const hipsparseLocalSpSMDescr&)           = delete;
+hipsparseStatus_t hipsparseDestroyMatDescr(const hipsparseLocalSpSMDescr&)   = delete;
+hipsparseStatus_t hipsparseDestroyHybMat(const hipsparseLocalSpSMDescr&)     = delete;
+hipsparseStatus_t hipsparseDestroyColorInfo(const hipsparseLocalSpSMDescr&)  = delete;
+hipsparseStatus_t hipsparseDestroySpVec(const hipsparseLocalSpSMDescr&)      = delete;
+hipsparseStatus_t hipsparseDestroyDnVec(const hipsparseLocalSpSMDescr&)      = delete;
+hipsparseStatus_t hipsparseDestroyDnMat(const hipsparseLocalSpSMDescr&)      = delete;
 #endif
 
 // clang-format off
@@ -228,17 +234,19 @@ public:
     }
 };
 
-// These beat the implicit conversion to void*. The handle, matrix descriptor,
-// HYB, color, sparse-vector, dense-vector, and dense-matrix typedefs are all
-// void*, so a leftover destroy of the wrong kind would otherwise compile and
-// free this descriptor twice.
-hipsparseStatus_t hipsparseDestroy(const hipsparseLocalSpGEAMDescr&)          = delete;
-hipsparseStatus_t hipsparseDestroyMatDescr(const hipsparseLocalSpGEAMDescr&)  = delete;
-hipsparseStatus_t hipsparseDestroyHybMat(const hipsparseLocalSpGEAMDescr&)    = delete;
-hipsparseStatus_t hipsparseDestroyColorInfo(const hipsparseLocalSpGEAMDescr&) = delete;
-hipsparseStatus_t hipsparseDestroySpVec(const hipsparseLocalSpGEAMDescr&)     = delete;
-hipsparseStatus_t hipsparseDestroyDnVec(const hipsparseLocalSpGEAMDescr&)     = delete;
-hipsparseStatus_t hipsparseDestroyDnMat(const hipsparseLocalSpGEAMDescr&)     = delete;
+// Exact match for the matching destroy, and for the void* destroys. The handle,
+// matrix descriptor, HYB, color, sparse-vector, dense-vector, and dense-matrix
+// typedefs are all void*, and operator hipsparseSpGEAMDescr_t() makes
+// hipsparseSpGEAM_destroyDescr(wrapper) an exact match for the real function.
+// A leftover destroy is a compile error instead of freeing this descriptor twice.
+hipsparseStatus_t hipsparseSpGEAM_destroyDescr(const hipsparseLocalSpGEAMDescr&) = delete;
+hipsparseStatus_t hipsparseDestroy(const hipsparseLocalSpGEAMDescr&)             = delete;
+hipsparseStatus_t hipsparseDestroyMatDescr(const hipsparseLocalSpGEAMDescr&)     = delete;
+hipsparseStatus_t hipsparseDestroyHybMat(const hipsparseLocalSpGEAMDescr&)       = delete;
+hipsparseStatus_t hipsparseDestroyColorInfo(const hipsparseLocalSpGEAMDescr&)    = delete;
+hipsparseStatus_t hipsparseDestroySpVec(const hipsparseLocalSpGEAMDescr&)        = delete;
+hipsparseStatus_t hipsparseDestroyDnVec(const hipsparseLocalSpGEAMDescr&)        = delete;
+hipsparseStatus_t hipsparseDestroyDnMat(const hipsparseLocalSpGEAMDescr&)        = delete;
 #endif
 
 #endif // HIPSPARSE_LOCAL_DESCR_HPP
