@@ -91,14 +91,13 @@ FILTERS = {
 # graphs whose channels round up into (previous tier, cm]; a graph's channels pick one tier.
 CM_TIERS = [32, 64, 128, 320, 512]
 # Tiles (wr, rb, nw, op, pd, ds): pixels a product row, in rows a step, waves a block, output
-# pixels a thread, A prefetch depth (matrix cores), depth streaming (3-D classes; 2-D and
-# single-plane filters run ds 0, which takes any depth stride).
-# Per atom family: the tiles of single-plane filters (2-D graphs, 1x1x1) and of 3-D filters.
-A_TILE, B_TILE, C_TILE = (64, 1, 4, 2, 3, 0), (32, 2, 4, 2, 1, 0), (64, 2, 8, 1, 2, 0)
-B_STREAM = (32, 2, 4, 2, 1, 1)
+# pixels a thread, A prefetch depth (matrix cores), depth streaming (unit depth stride; each list
+# also has a ds 0 tile, which takes any depth stride). Per atom family: the tiles of single-plane
+# filters (2-D graphs, 1x1x1) and of 3-D filters.
+A_TILE, B_TILE, C_TILE = (64, 1, 4, 2, 3, 0), (32, 2, 4, 2, 1, 1), (64, 2, 8, 1, 2, 0)
 TILES = {
-    "mfma": ([A_TILE, B_TILE], [A_TILE, C_TILE, B_STREAM]),
-    "wmma": ([B_TILE, C_TILE], [C_TILE, A_TILE, B_STREAM]),
+    "mfma": ([A_TILE, B_TILE], [A_TILE, C_TILE, B_TILE]),
+    "wmma": ([B_TILE, C_TILE], [C_TILE, A_TILE, B_TILE]),
     "valu": (
         [(32, 4, 4, 2, 0, 0), (64, 2, 4, 2, 0, 0)],
         [(32, 4, 4, 2, 0, 0), (64, 2, 4, 2, 0, 0), (32, 2, 4, 2, 0, 1)],
@@ -176,7 +175,7 @@ WRW_FILTERS = {
     "c": [(1, 7, 7), (3, 7, 7), (1, 3, 3), (1, 4, 4), (3, 3, 3)],
 }
 # Tiles (wr, rb, nw, mpw); valu (wr, rb, nw, column groups).
-WRW_TILES_MMA = [(32, 2, 8, 1), (64, 1, 4, 1), (32, 2, 4, 1)]
+WRW_TILES_MMA = [(32, 2, 8, 1), (64, 1, 4, 1), (32, 2, 4, 1), (32, 2, 4, 2)]
 WRW_TILES_VALU = [(32, 2, 8, 2), (64, 2, 4, 2), (32, 2, 4, 4)]
 
 

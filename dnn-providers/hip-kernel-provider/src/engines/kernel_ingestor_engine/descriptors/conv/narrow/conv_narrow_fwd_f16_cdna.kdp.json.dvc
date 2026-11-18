@@ -1,5 +1,5 @@
 outs:
-- md5: dd1d129c2d221e9d315ad5f3688ad8ad
+- md5: da2f94ac0d374731ca00a850d7c72f6d
   size: 191440
   hash: md5
   path: conv_narrow_fwd_f16_cdna.kdp.json
