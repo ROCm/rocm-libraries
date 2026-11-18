@@ -851,10 +851,9 @@ static int make_cfg_rdna4(int idx, rocke_implicit_gemm_conv_spec_t* spec, const 
         spec->uniform_k_decode = true;
         rdna4_bf16(spec);
         return 0;
-    case 90: /* on the gfx1250 split-K binary (config 41) */
-        if(make_cfg_split_k(41, spec, arch) != 0)
-            return -1;
+    case 90: /* split_k=2 */
         spec->uniform_k_decode = true;
+        spec->split_k = 2;
         return 0;
     case 91: /* pointwise: rejected */
         spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 128, 1, 1, 1, 1, 0, 0, 1, 1);
@@ -893,10 +892,9 @@ static int make_cfg_rdna4(int idx, rocke_implicit_gemm_conv_spec_t* spec, const 
         spec->regt_prefetch = 1;
         spec->uniform_k_decode = true;
         return 0;
-    case 99: /* gfx1250: 16-wide fragments */
-        if(make_cfg_split_k(41, spec, arch) != 0)
-            return -1;
-        spec->split_k = 1;
+    case 99: /* grouped */
+        spec->problem = rocke_conv_problem_make(1, 10, 10, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 2;
         spec->lds_swizzle = true;
         return 0;
     case 100: /* lds_k_pad: rejected */
