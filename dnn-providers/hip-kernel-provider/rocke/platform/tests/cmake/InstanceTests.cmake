@@ -24,6 +24,29 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/tiled_attention_2d_reentrancy.c
                rocke_tiled_attention_2d_reentrancy)
 endif()
 
+# The C++ gfx950 tiled-2D builder reads fp8 K from LDS as fp8 and scales it by
+# k_scale on every QK path (host only, no GPU). Its pytest twin compares the
+# engines only where the rocke_engine binding is built, which CI does not do.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/tiled_attention_2d_gfx950_fp8_k_read.cpp")
+  add_executable(rocke_tiled_attention_2d_gfx950_fp8_k_read
+                 instances/tiled_attention_2d_gfx950_fp8_k_read.cpp)
+  target_link_libraries(rocke_tiled_attention_2d_gfx950_fp8_k_read PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_tiled_attention_2d_gfx950_fp8_k_read PRIVATE m)
+  endif()
+  add_test(NAME rocke_tiled_attention_2d_gfx950_fp8_k_read
+           COMMAND rocke_tiled_attention_2d_gfx950_fp8_k_read)
+  set_tests_properties(rocke_tiled_attention_2d_gfx950_fp8_k_read
+                       PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_tiled_attention_2d_gfx950_fp8_k_read)
+  set_target_properties(rocke_tiled_attention_2d_gfx950_fp8_k_read
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_tiled_attention_2d_gfx950_fp8_k_read
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_tiled_attention_2d_gfx950_fp8_k_read)
+endif()
+
 # The C tiled-attention entries refuse bad head counts, and fastKV register-P
 # on gfx942, with the Python reason text (host only, no GPU).
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/tiled_attention_entry_guards.cpp")
