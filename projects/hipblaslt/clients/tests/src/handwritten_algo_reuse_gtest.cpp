@@ -6,6 +6,10 @@
 // pointer-array batch, which hand-written kernels cannot address. The gfx950 skinny TN
 // kernel for n == 1 asserts n == 1; its algo is reused for n == 2 and for a
 // pointer-array batch of the same problem.
+//
+// Grouped GEMM refuses such an algo on the host-argument path only: with user args,
+// every launch reads its sizes from device memory. Hand-written grouped kernels ship
+// for gfx942 only (FP16 and FP8 NN, Custom_*_GG_*_UserArgs).
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -13,6 +17,7 @@
 #include <hipblaslt/hipblaslt.h>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -256,5 +261,195 @@ namespace
         hipblaslt_ext::Gemm gemm(
             handle, p.desc, &alpha, arrayA, p.la, arrayB, p.lb, &beta, arrayD, p.ld, arrayD, p.ld);
         EXPECT_EQ(gemm.initialize(algo, nullptr), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    // Two FP16 NN groups. The second group's M is either kSize or kOddM, which the
+    // chosen hand-written kernel's M-alignment predicate refuses.
+    class HandwrittenGroupedAlgoReuse_smoke : public ::testing::Test
+    {
+    protected:
+        static constexpr int64_t kSize      = 256;
+        static constexpr int64_t kOddM      = 130;
+        static constexpr size_t  kGroups    = 2;
+        static constexpr size_t  kWorkspace = size_t(32) << 20;
+        static constexpr size_t  kBytes     = kSize * kSize * sizeof(uint16_t);
+
+        hipblasLtHandle_t  handle    = nullptr;
+        void*              a         = nullptr;
+        void*              b         = nullptr;
+        void*              workspace = nullptr;
+        std::vector<void*> d         = std::vector<void*>(kGroups, nullptr);
+        const float        alpha     = 1.0f;
+        const float        beta      = 0.0f;
+
+        void SetUp() override
+        {
+            int             count = 0;
+            hipDeviceProp_t props{};
+            if(hipGetDeviceCount(&count) != hipSuccess || count == 0
+               || hipGetDeviceProperties(&props, 0) != hipSuccess)
+                GTEST_SKIP() << "No GPU available";
+            if(std::string(props.gcnArchName).rfind("gfx942", 0) != 0)
+                GTEST_SKIP() << "Hand-written grouped kernels ship for gfx942 only";
+            ASSERT_EQ(hipMalloc(&a, kBytes), hipSuccess);
+            ASSERT_EQ(hipMalloc(&b, kBytes), hipSuccess);
+            ASSERT_EQ(hipMemset(a, 0, kBytes), hipSuccess);
+            ASSERT_EQ(hipMemset(b, 0, kBytes), hipSuccess);
+            for(void*& p : d)
+                ASSERT_EQ(hipMalloc(&p, kBytes), hipSuccess);
+            ASSERT_EQ(hipMalloc(&workspace, kWorkspace), hipSuccess);
+            ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+            // Hand-written kernels are not uniform-summation-order safe, and with the
+            // mode off the support check evaluates the problem predicates the launch
+            // re-checks.
+            ASSERT_EQ(hipblasLtSetUniformSummationOrder(handle, 0), HIPBLAS_STATUS_SUCCESS);
+        }
+
+        void TearDown() override
+        {
+            if(handle)
+                EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+            for(void* p : {a, b, workspace, d[0], d[1]})
+                if(p)
+                    EXPECT_EQ(hipFree(p), hipSuccess);
+        }
+
+        hipblaslt_ext::GroupedGemm makeGroupedGemm()
+        {
+            return hipblaslt_ext::GroupedGemm(
+                handle, HIPBLAS_OP_N, HIPBLAS_OP_N, HIP_R_16F, HIP_R_16F, HIP_R_16F, HIP_R_16F, HIPBLAS_COMPUTE_32F);
+        }
+
+        void setProblem(hipblaslt_ext::GroupedGemm& grouped, int64_t secondM)
+        {
+            std::vector<int64_t> m{kSize, secondM}, n(kGroups, kSize), k(kGroups, kSize),
+                batch(kGroups, 1);
+            std::vector<hipblaslt_ext::GemmEpilogue> epilogues(kGroups);
+            std::vector<hipblaslt_ext::GemmInputs>   inputs(kGroups);
+            for(size_t i = 0; i < kGroups; i++)
+            {
+                inputs[i].setA(a);
+                inputs[i].setB(b);
+                inputs[i].setC(d[i]);
+                inputs[i].setD(d[i]);
+                inputs[i].setAlpha(&alpha);
+                inputs[i].setBeta(&beta);
+            }
+            ASSERT_EQ(grouped.setProblem(m, n, k, batch, epilogues, inputs), HIPBLAS_STATUS_SUCCESS);
+            grouped.setMaxWorkspaceBytes(kWorkspace);
+        }
+
+        static bool isHandwritten(const std::string& name)
+        {
+            return name.rfind("Custom_", 0) == 0;
+        }
+
+        // A hand-written grouped algo the support check accepts for the aligned
+        // problem and refuses for the odd one. Probed on objects of its own, so the
+        // tests' objects never ran a support check before initialize.
+        bool handwrittenAlgo(hipblasLtMatmulAlgo_t& algo)
+        {
+            std::vector<hipblasLtMatmulHeuristicResult_t> results;
+            EXPECT_EQ(hipblaslt_ext::getAllAlgos(handle,
+                                                 hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM,
+                                                 HIPBLAS_OP_N,
+                                                 HIPBLAS_OP_N,
+                                                 HIP_R_16F,
+                                                 HIP_R_16F,
+                                                 HIP_R_16F,
+                                                 HIP_R_16F,
+                                                 HIPBLAS_COMPUTE_32F,
+                                                 results),
+                      HIPBLAS_STATUS_SUCCESS);
+            auto aligned = makeGroupedGemm();
+            auto odd     = makeGroupedGemm();
+            setProblem(aligned, kSize);
+            setProblem(odd, kOddM);
+            for(auto& result : results)
+            {
+                if(!isHandwritten(hipblaslt_ext::getKernelNameFromAlgo(handle, result.algo))
+                   && !isHandwritten(hipblaslt_ext::getSolutionNameFromAlgo(handle, result.algo)))
+                    continue;
+                size_t required = 0;
+                if(aligned.isAlgoSupported(result.algo, required) != HIPBLAS_STATUS_SUCCESS
+                   || required > kWorkspace)
+                    continue;
+                if(odd.isAlgoSupported(result.algo, required) == HIPBLAS_STATUS_SUCCESS)
+                    continue;
+                algo = result.algo;
+                return true;
+            }
+            return false;
+        }
+
+        void poisonD()
+        {
+            for(void* p : d)
+                ASSERT_EQ(hipMemset(p, 0x7f, kBytes), hipSuccess);
+        }
+
+        bool dUntouched()
+        {
+            std::vector<uint8_t> host(kBytes);
+            for(void* p : d)
+            {
+                EXPECT_EQ(hipMemcpy(host.data(), p, kBytes, hipMemcpyDeviceToHost), hipSuccess);
+                for(uint8_t byte : host)
+                    if(byte != 0x7f)
+                        return false;
+            }
+            return true;
+        }
+    };
+
+    TEST_F(HandwrittenGroupedAlgoReuse_smoke, HostArgsInitializeRefusesAlgoForAnotherProblem)
+    {
+        hipblasLtMatmulAlgo_t algo{};
+        ASSERT_TRUE(handwrittenAlgo(algo))
+            << "no hand-written grouped algo that refuses M = " << kOddM;
+
+        auto grouped = makeGroupedGemm();
+        setProblem(grouped, kSize);
+        EXPECT_EQ(grouped.initialize(algo, workspace, false), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(grouped.run(nullptr), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        auto refused = makeGroupedGemm();
+        setProblem(refused, kOddM);
+        poisonD();
+        EXPECT_EQ(refused.initialize(algo, workspace, false), HIPBLAS_STATUS_INVALID_VALUE);
+        // A run after the refusal has no kernels to launch.
+        static_cast<void>(refused.run(nullptr));
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_TRUE(dUntouched()) << "the refused algo launched";
+    }
+
+    TEST_F(HandwrittenGroupedAlgoReuse_smoke, UserArgsInitializeLeavesSizesToTheCaller)
+    {
+        hipblasLtMatmulAlgo_t algo{};
+        ASSERT_TRUE(handwrittenAlgo(algo))
+            << "no hand-written grouped algo that refuses M = " << kOddM;
+
+        auto grouped = makeGroupedGemm();
+        setProblem(grouped, kSize);
+        ASSERT_EQ(grouped.initialize(algo, workspace, true), HIPBLAS_STATUS_SUCCESS);
+        std::vector<hipblaslt_ext::UserArguments> userArgs(kGroups);
+        ASSERT_EQ(grouped.getDefaultValueForDeviceUserArguments(userArgs.data()),
+                  HIPBLAS_STATUS_SUCCESS);
+        void* deviceUserArgs = nullptr;
+        const size_t userArgsBytes = kGroups * sizeof(hipblaslt_ext::UserArguments);
+        ASSERT_EQ(hipMalloc(&deviceUserArgs, userArgsBytes), hipSuccess);
+        auto freeBuffer = [](void* p) { static_cast<void>(hipFree(p)); };
+        const std::unique_ptr<void, decltype(freeBuffer)> owner(deviceUserArgs, freeBuffer);
+        ASSERT_EQ(hipMemcpy(deviceUserArgs, userArgs.data(), userArgsBytes, hipMemcpyHostToDevice),
+                  hipSuccess);
+        EXPECT_EQ(grouped.run(deviceUserArgs, nullptr), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        // The host sizes may be placeholders for the device ones, so they are not
+        // checked. Not run: these sizes are outside the kernel's predicates.
+        auto placeholders = makeGroupedGemm();
+        setProblem(placeholders, kOddM);
+        EXPECT_EQ(placeholders.initialize(algo, workspace, true), HIPBLAS_STATUS_SUCCESS);
     }
 }
