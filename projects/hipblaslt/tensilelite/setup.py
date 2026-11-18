@@ -8,6 +8,7 @@ import shutil
 
 from setuptools import setup
 from setuptools.command.build_py import build_py
+from setuptools.command.egg_info import egg_info
 from setuptools.command.sdist import sdist
 
 _metadata = runpy.run_path(str(Path(__file__).with_name("release_metadata.py")))
@@ -16,6 +17,18 @@ _BUILD_INFO = os.path.join("tensilelite", "_build_info.py")
 # Resolved once per setup.py run. pip runs setup.py several times for one
 # install; the resolver gives the same answer each time for the same tree.
 _REVISION = _metadata["source_revision"]()
+
+
+def _distribution_version():
+    """Return this build's version.
+
+    Only TheRock's CMake build passes a ROCm identity (TENSILELITE_ROCM_VERSION);
+    every other build is a development build labelled with its commit. An
+    unpacked sdist keeps the version it was made with, so a wheel built from it
+    carries the same identity without the variable being passed again.
+    """
+    identity = os.environ.get("TENSILELITE_ROCM_VERSION") or None
+    return _metadata["distribution_version"](_REVISION, identity)
 
 
 def _write_build_info(path):
@@ -54,6 +67,17 @@ class CleanBuildPy(build_py):
         return outputs if stamp in outputs else [*outputs, stamp]
 
 
+class BuildEggInfo(egg_info):
+    """Keep generated distribution metadata out of the source root."""
+
+    def finalize_options(self):
+        if self.egg_base is None:
+            egg_base = Path(__file__).with_name("build") / "egg-info"
+            egg_base.mkdir(parents=True, exist_ok=True)
+            self.egg_base = str(egg_base)
+        super().finalize_options()
+
+
 class StampedSdist(sdist):
     """Save the source revision in the sdist, where git is no longer available."""
 
@@ -63,7 +87,7 @@ class StampedSdist(sdist):
 
 
 setup(
-    version=_metadata["distribution_version"](_REVISION),
+    version=_distribution_version(),
     install_requires=[
         "packaging",
         "pyyaml",
@@ -73,5 +97,9 @@ setup(
         "numpy",
         "pandas",
     ],
-    cmdclass={"build_py": CleanBuildPy, "sdist": StampedSdist},
+    cmdclass={
+        "build_py": CleanBuildPy,
+        "egg_info": BuildEggInfo,
+        "sdist": StampedSdist,
+    },
 )

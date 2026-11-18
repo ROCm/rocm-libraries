@@ -298,6 +298,7 @@ if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
     set(TENSILELITE_SOURCE_REVISION "" CACHE STRING
         "rocm-libraries commit to record when building from a tree without git")
     hipblaslt_resolve_build_rocm_root(HIPBLASLT_BUILD_ROCM_ROOT)
+    hipblaslt_resolve_build_rocm_version(HIPBLASLT_BUILD_ROCM_VERSION)
     include(cmake/TensileLiteMetadata.cmake)
     hipblaslt_configure_tensilelite_metadata("${_tensilelite_source_root}"
         "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-client-generated")
