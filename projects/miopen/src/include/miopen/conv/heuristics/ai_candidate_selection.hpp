@@ -108,6 +108,13 @@ public:
     {
         return output_params_;
     }
+    // Ordered names of the engineered (derived) features the model consumes, from the metadata's
+    // "derived_features" list. Empty when the metadata predates named engineered features, in which
+    // case the caller falls back to the fixed positional engineered block.
+    MIOPEN_INTERNALS_EXPORT const std::vector<std::string>& derived_feature_names() const
+    {
+        return derived_feature_names_;
+    }
     // Number of one-hot classes for an input feature (e.g. "precision"), from the metadata's
     // input encodings. Returns 0 when the feature has no encoding (i.e. is not categorical).
     MIOPEN_INTERNALS_EXPORT std::size_t GetInputEncodingClassCount(const std::string& name) const;
@@ -125,6 +132,7 @@ private:
     // Internal mappings and encodings
     std::vector<std::string> input_params_;
     std::vector<std::string> output_params_;
+    std::vector<std::string> derived_feature_names_;
     std::map<std::string, size_t> input_param_indices_;
     std::map<std::string, size_t> output_param_indices_;
     std::map<std::string, std::map<std::string, int>> feature_encodings_;

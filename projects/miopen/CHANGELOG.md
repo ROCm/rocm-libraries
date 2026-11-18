@@ -103,6 +103,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   current tuning data. Set `MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB=1` to disable the table
   and revert to the non-AI heuristic; set `MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE=0`
   to skip the pre-existing 3D forward large-tensor hard-coded override and use the AI heuristic.
+* [Conv] Refreshed the 2D and 3D TunaNet solver-selection heuristics for gfx942 and gfx950 to
+  support the current solver set (including `ConvHipConv`, depthwise, and Winograd variants) and
+  improve top-1 accuracy and time-regret across all four architecture/dimension combinations.
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
   never uses split-K, so these solvers are deterministic; previously, deterministic forward
   convolutions could only use the GEMM and naive solvers.
