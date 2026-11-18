@@ -80,7 +80,9 @@ def gpu_sample(
     # expires devcoredumps after five minutes. Never write to their sysfs files.
     saved: list[dict[str, object]] = []
     try:
-        available = sorted(dumps.iterdir())
+        available = sorted(
+            path for path in dumps.iterdir() if path.name.startswith("devcd")
+        )
         record["devcoredump_entries"] = [path.name for path in available]
     except OSError as error:
         available = []
