@@ -51,7 +51,8 @@ _VALUE = {
     ("PreferenceAttr", "MAX_WORKSPACE_BYTES"): 5,
 }
 
-# hipBLASLt accepts these but has no getter: reading one back returns HIPBLAS_STATUS_INVALID_VALUE.
+# hipBLASLt accepts these but has no getter: reading one back returns HIPBLAS_STATUS_INVALID_VALUE
+# (ROCM-34603). When the getters land, test_round_trip fails here; remove them from this set.
 _WRITE_ONLY = {
     ("MatmulDescAttr", n)
     for n in (
