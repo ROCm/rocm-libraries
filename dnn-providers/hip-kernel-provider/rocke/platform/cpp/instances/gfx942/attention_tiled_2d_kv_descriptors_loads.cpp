@@ -829,21 +829,21 @@ void rocke_gfx942_attn2d_issue_v_load_runtime(rocke_gfx942_attn2d_build_ctx_t* c
     else if(ctx->PAGE_COPIES && !rocke__tile_copy_pages(ctx, kv_tile_idx, &pages))
         return;
 
-    /* Rows past the sequence load zero (_attention_kv_seq_tail); the i64 page
-     * copies keep the per-lane bound: there the wave-uniform one adds a scalar
-     * compare and select per copy plus registers, and decode is slower. */
+    /* Rows past the sequence load zero (_attention_kv_seq_tail). i64 page
+     * copies without global_load_lds K bound per lane, the faster form there. */
     rocke_kv_v_tile_bound_t v_bound;
-    rocke_kv_v_tile_bound_init(&v_bound,
-                               b,
-                               ctx->seq_len,
-                               kv_tile_idx,
-                               ctx->T,
-                               ctx->HD,
-                               kv_halves_per_call,
-                               lane_half_base,
-                               NULL,
-                               !(ctx->PAGE_COPIES && ctx->I64_KV_ADDR),
-                               false);
+    rocke_kv_v_tile_bound_init(
+        &v_bound,
+        b,
+        ctx->seq_len,
+        kv_tile_idx,
+        ctx->T,
+        ctx->HD,
+        kv_halves_per_call,
+        lane_half_base,
+        NULL,
+        !(ctx->PAGE_COPIES && ctx->I64_KV_ADDR && !ctx->USE_GLOBAL_LOAD_LDS_K),
+        false);
 
     for(int call = 0; call < kv_calls_per_tile; ++call)
     {

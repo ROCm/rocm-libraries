@@ -280,14 +280,6 @@ class TestRegistrySplit(unittest.TestCase):
                 "block_table",
                 _Tensor((2, 32), "torch.int32", [list(range(32))] * 2),
             ),
-            "block_table_value": (
-                "block_table",
-                _Tensor(
-                    (1, 64),
-                    "torch.int32",
-                    [[64] + list(range(1, 64))],
-                ),
-            ),
             "block_table_stride": (
                 "block_table",
                 _Tensor(
@@ -318,6 +310,11 @@ class TestRegistrySplit(unittest.TestCase):
                 "block_table",
                 _Tensor((1, 64), "torch.int32", [[-1] + list(range(1, 64))]),
                 r"block_table\[0, 0\]=-1 is outside",
+            ),
+            "block_table_past_cache": (
+                "block_table",
+                _Tensor((1, 64), "torch.int32", [[64] + list(range(1, 64))]),
+                r"block_table\[0, 0\]=64 is outside \[0, 64\)",
             ),
         }
         for label, (name, replacement, message) in content_cases.items():

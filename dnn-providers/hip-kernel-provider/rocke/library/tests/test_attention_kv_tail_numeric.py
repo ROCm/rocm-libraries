@@ -175,6 +175,15 @@ _SHAPES = [
     _shape("decode_2d_bs64", _DECODE_LENS, 64),
     _shape("decode_2d_d256_bs16", _DECODE_LENS, 16, hq=16, hk=2, d=256),
     _shape("prefill_2d_i64_bs16", [(1000, 1000)], 16, i64=True),
+    # i64 page copies with K through global_load_lds take the wave-uniform V-tail bound.
+    _shape(
+        "decode_2d_i64_gldsk_bs16",
+        _DECODE_LENS,
+        16,
+        i64=True,
+        overrides={"use_global_load_lds_k": True},
+        arches=("gfx942",),
+    ),
     _shape("prefill_2d_d64_bs32", [(1000, 1000)], 32, hq=64, hk=8, d=64),
     _shape(
         "prefill_2d_fast_d64_bs32",

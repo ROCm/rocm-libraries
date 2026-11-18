@@ -2974,9 +2974,8 @@ def build_unified_attention_2d_tiled(
             fast_block0, fast_block1 = _fast_paged_kv_blocks(kv_tile_idx)
         elif PAGE_COPIES:
             blocks, pages = _tile_copy_pages(kv_tile_idx)
-        # Rows past the sequence load zero: see _attention_kv_seq_tail. The i64
-        # page copies keep the per-lane bound: there the wave-uniform one adds a
-        # scalar compare and select per copy plus registers, and decode is slower.
+        # Rows past the sequence load zero: see _attention_kv_seq_tail. i64 page
+        # copies without global_load_lds K bound per lane, the faster form there.
         v_bound = (
             VTileBound(
                 b,
@@ -2986,7 +2985,7 @@ def build_unified_attention_2d_tiled(
                 HD,
                 KV_HALVES_PER_CALL,
                 lane_half_base,
-                uniform=not (PAGE_COPIES and I64_KV_ADDR),
+                uniform=not (PAGE_COPIES and I64_KV_ADDR and not USE_GLOBAL_LOAD_LDS_K),
             )
             if v_tail
             else None
