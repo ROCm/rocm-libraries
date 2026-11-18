@@ -183,6 +183,10 @@ struct PassFeatureConfig {
         /// InsertWaitAlu's Phase-1 entry state of the function's current IR instead of empty, so
         /// the loop top sees what the back edge carries. Needs waitAluScoreboard.
         bool trackerSeedFromFixpoint = false;
+        /// Mirrors ModuleOptions::TailAwareFillQuota. The even filler quota is weighted into the
+        /// windows where VALUs count for a mixed rule (after its lead, before its consumer);
+        /// windows no tail covers get none. Needs evenSpreadFillers and waitAluScoreboard.
+        bool tailAwareFillQuota = false;
         /// Mirrors ModuleOptions::PrefetchLeadWmmas. A global prefetch is held until
         /// this many WMMA windows before the tensor_load it precedes, staggered over its
         /// group; below 8 marks a single-stage loop (whole group at the load's window,

@@ -646,6 +646,15 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // WMMA->WMMA / WMMA->VALU coexec hazards; those pads keep their full 7+1
     // length. 0 = feature off.
     int fillQuotaPerWindow_ = 0;
+    // dagFeatures.tailAwareFillQuota: the quota per window, weighted into the mixed rules' tail
+    // windows (onInitRegion); empty = the even quota everywhere.
+    std::vector<int> fillQuotaByWindow_;
+    int windowFillQuota() const {
+        if (fillQuotaByWindow_.empty()) return fillQuotaPerWindow_;
+        const int w = std::clamp(wmmaIssuedCountThisRegion_ - 1, 0,
+                                 static_cast<int>(fillQuotaByWindow_.size()) - 1);
+        return fillQuotaByWindow_[w];
+    }
     // VALU fillers per window: what a wait-hide tail counts (SALU and TRANS fill nothing). For
     // the planning gap estimate.
     int valuFillQuotaPerWindow_ = 0;
@@ -680,7 +689,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // / heldMemOpTailFillable), so the quota must not close the window on it either.
     mutable bool tailFillPick_ = false;
     bool fillQuotaMet() const {
-        return fillQuotaPerWindow_ > 0 && fillsThisWindow_ >= fillQuotaPerWindow_;
+        return fillQuotaPerWindow_ > 0 && fillsThisWindow_ >= windowFillQuota();
     }
 
     // Filler v_nops to emit before the next pickOne() result (drained by
@@ -3270,6 +3279,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     nonWmmaFillsSinceActiveWmma_ = 0;
     fillsThisWindow_ = 0;
     fillQuotaPerWindow_ = 0;
+    fillQuotaByWindow_.clear();
     valuFillQuotaPerWindow_ = 0;
     wmmaPosByNode_.clear();
     remainingDs_.clear();
@@ -4447,5 +4457,35 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     };
     planNeed(needWindow_, false);
     planNeed(needByWindow_, true);
+
+    // dagFeatures.tailAwareFillQuota: fillers go where they count, the windows after a producer's
+    // mixed-rule lead and before its consumer's planned window; windows no tail covers get none.
+    fillQuotaByWindow_.clear();
+    if (dagFeatures.tailAwareFillQuota && fillQuotaPerWindow_ > 0 && waitAlu_ &&
+        wmmaTotalThisRegion_ > 0) {
+        std::vector<int> weight(wmmaTotalThisRegion_, 0);
+        long sum = 0;
+        for (unsigned id = 0; id < deps.dag.nodes.size(); ++id) {
+            if (!isFillerInst(*deps.dag.nodes[id].inst) || needByWindow_[id] == INT_MAX) continue;
+            for (unsigned succ : deps.dag.graph[id]) {
+                if (planned[succ] == INT_MAX) continue;
+                const int lead = waitAlu_->mixedLead(*deps.dag.nodes[id].inst,
+                                                     *deps.dag.nodes[succ].inst, formWmma_);
+                if (lead < 0) continue;
+                const int start = std::max(0, needByWindow_[id] + lead);
+                const int end = std::min(planned[succ], wmmaTotalThisRegion_);
+                for (int w = start; w < end; ++w) {
+                    ++weight[w];
+                    ++sum;
+                }
+            }
+        }
+        if (sum > 0) {
+            fillQuotaByWindow_.assign(wmmaTotalThisRegion_, 0);
+            for (int w = 0; w < wmmaTotalThisRegion_; ++w)
+                fillQuotaByWindow_[w] = static_cast<int>(
+                    (static_cast<long>(regionFillerTotal_) * weight[w] + sum - 1) / sum);
+        }
+    }
 }
 }  // namespace

@@ -2056,6 +2056,25 @@ int WaitAluTracker::requiredGap(const StinkyInstruction& producer,
                           op == WaitAluHideOp::Wmma ? valusPerWmma : 0);
 }
 
+int WaitAluTracker::mixedLead(const StinkyInstruction& producer, const StinkyInstruction& consumer,
+                              const StinkyInstruction* formWmma) const {
+    if (isPseudoInst(&consumer) || isWaitAluInst(consumer) || isCall(consumer)) return -1;
+    WaitcntBrackets sb(impl_->ctx);
+    if (impl_->sb.formLatched()) sb.copyFormFrom(impl_->sb);
+    latchFormIfUnset(sb, formWmma);
+    stepInstruction(sb, producer, impl_->keyer);
+    Blockers blockers;
+    computeWaitForInst(consumer, sb, impl_->keyer, false, &blockers);
+    int lead = -1;
+    for (const Blocker& b : blockers) {
+        const RuleSet* set = sb.rulesFor(b.p);
+        if (set == nullptr) continue;
+        const Hide& mix = roleRules(*set, b.r).mix;
+        if (mix.on() && mix.lead > 0) lead = std::max(lead, mix.lead);
+    }
+    return lead;
+}
+
 bool WaitAluTracker::freeAfter(const StinkyInstruction& inst,
                                const std::vector<const StinkyInstruction*>& before,
                                const StinkyInstruction* formWmma) const {

@@ -213,6 +213,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                     moduleOptions.EnableESM2 && moduleOptions.ReleaseOnEitherAxis;
                 passFeatureConfig.dagFeatures.trackerSeedFromFixpoint =
                     moduleOptions.EnableESM2 && moduleOptions.TrackerSeedFromFixpoint;
+                passFeatureConfig.dagFeatures.tailAwareFillQuota =
+                    moduleOptions.EnableESM2 && moduleOptions.TailAwareFillQuota;
                 passFeatureConfig.dagFeatures.prefetchLeadWmmas = moduleOptions.PrefetchLeadWmmas;
                 passFeatureConfig.dagFeatures.prefetchLeadMinStageWmmas =
                     moduleOptions.PrefetchLeadMinStageWmmas;

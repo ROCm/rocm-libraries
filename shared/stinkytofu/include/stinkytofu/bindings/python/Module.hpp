@@ -145,6 +145,7 @@
     X(DsAddressPlan, bool, false)         /* ds_load address fillers issue at the pacer's need-by */ \
     X(ReleaseOnEitherAxis, bool, false)   /* held memory ops also release through the VALU axis */  \
     X(TrackerSeedFromFixpoint, bool, false) /* DAG tracker starts from the pass's BB entry state */  \
+    X(TailAwareFillQuota, bool, false)    /* filler quota weighted into the mixed rules' tail windows */ \
     X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */    \
     X(WarGateViaTracker, bool, true)  /* the WAR gate asks the InsertWaitAlu scoreboard */   \
     X(MixTailFill, bool, false)       /* ready VALUs fill a va_vdst hide's tail before a pick */ \

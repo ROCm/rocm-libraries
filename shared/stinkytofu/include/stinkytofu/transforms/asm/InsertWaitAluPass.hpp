@@ -123,6 +123,10 @@ class STINKYTOFU_EXPORT WaitAluTracker {
     int requiredGap(const StinkyInstruction& producer, const StinkyInstruction& consumer,
                     WaitAluHideOp op, const StinkyInstruction* formWmma = nullptr,
                     int valusPerWmma = 0) const;
+    /// The lead (WMMAs) of the mixed wait-hide rule that governs `consumer`'s va_vdst wait right
+    /// after `producer`, the largest when several producers block it; -1 when none has one.
+    int mixedLead(const StinkyInstruction& producer, const StinkyInstruction& consumer,
+                  const StinkyInstruction* formWmma = nullptr) const;
     /// Whether `inst` needs no va_vdst wait once `before` have issued in that order, each of them
     /// itself needing no s_wait_alu; `formWmma` as in untilFree(). Verifies a planned filler tail.
     bool freeAfter(const StinkyInstruction& inst,

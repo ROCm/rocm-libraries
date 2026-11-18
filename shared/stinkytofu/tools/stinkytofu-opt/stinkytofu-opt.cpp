@@ -217,7 +217,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--wait-alu-hold-strict-count=") ||
                 arg == "--wait-alu-scoreboard" || arg == "--ds-address-plan" ||
                 arg == "--release-on-either-axis" || arg == "--even-spread-fillers" ||
-                arg == "--tracker-seed-from-fixpoint" ||
+                arg == "--tracker-seed-from-fixpoint" || arg == "--tail-aware-fill-quota" ||
                 arg.starts_with("--prefetch-lead-wmmas=") ||
                 arg.starts_with("--prefetch-lead-min-stage-wmmas=") ||
                 arg.starts_with("--war-gate-wmmas=") || arg == "--ds-slot-first" ||
@@ -663,6 +663,8 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.evenSpreadFillers = true;
         } else if (a == "--tracker-seed-from-fixpoint") {
             passFeatureConfig.dagFeatures.trackerSeedFromFixpoint = true;
+        } else if (a == "--tail-aware-fill-quota") {
+            passFeatureConfig.dagFeatures.tailAwareFillQuota = true;
         } else if (a.starts_with("--prefetch-lead-wmmas=")) {
             passFeatureConfig.dagFeatures.prefetchLeadWmmas = std::stoi(a.substr(22));
         } else if (a.starts_with("--prefetch-lead-min-stage-wmmas=")) {
