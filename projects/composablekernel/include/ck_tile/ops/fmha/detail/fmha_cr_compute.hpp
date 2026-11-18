@@ -174,7 +174,8 @@ template <bool Causal,
           int KeyTile         = Tile,
           bool TailFragments  = false,
           bool PreferNonempty = false,
-          bool LateValue      = false>
+          bool LateValue      = false,
+          int PrefixUnroll    = LoopUnroll>
 CK_TILE_DEVICE void run(Args a)
 {
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
@@ -228,7 +229,7 @@ CK_TILE_DEVICE void run(Args a)
         else
             return DV;
     }();
-    static_assert(LoopUnroll > 0);
+    static_assert(LoopUnroll > 0 && PrefixUnroll > 0);
     static_assert(!Args::kPrepared || GridGroup == 0,
                   "Prepared tensor views use the shared kernel's grid mapping");
     // The launcher checks five Q/K tiles, Q % 16 == 15 and K % 128 > 112.
@@ -617,7 +618,7 @@ CK_TILE_DEVICE void run(Args a)
     }
     constexpr bool BiasTdm = Args::BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS;
     using BiasLayout       = LdsLayout<BN, 16>;
-    static_assert(BiasLayout::kChunk == BN);
+    static_assert(!BiasTdm || BiasLayout::kChunk == BN);
     auto* bias_lds = [] {
         if constexpr(BiasTdm)
         {
@@ -913,17 +914,40 @@ CK_TILE_DEVICE void run(Args a)
                 if constexpr(decltype(mask_last)::value)
                     if(mask.IsEdgeTile(tile * BM, start, number<BM>{}, number<BN>{}))
                     {
+                        if constexpr(std::is_same_v<T, __bf16> && !HeadPadded &&
+                                     (DQ == 64 || DQ == 128) &&
+                                     Args::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
+                                     !Args::kHasLogitsSoftCap && !Args::kHasSink &&
+                                     !Args::kVirtualSink)
+                        {
+                            const auto range = mask.GetRowRangeUnsigned(row);
+                            uint32_t width   = range.at(number<1>{});
+                            uint32_t offset =
+                                uint32_t(start + lane / 16 * 8) - uint32_t(range.at(number<0>{}));
+                            // Keep the empty-row select out of each element's predicate.
+                            asm volatile("" : "+v"(width), "+v"(offset));
 #pragma unroll
-                        for(int n = 0; n < BN / 16; ++n)
+                            for(int n = 0; n < BN / 16; ++n)
 #pragma unroll
-                            for(int i = 0; i < 8; ++i)
-                            {
-                                const int col     = start + n * 16 + lane / 16 * 8 + i;
-                                const bool masked = Args::kHasSink ? mask.IsOutOfSinkBound(row, col)
-                                                                   : mask.IsOutOfBound(row, col);
-                                if(masked)
-                                    s[qm][n][i] = -INFINITY;
-                            }
+                                for(int i = 0; i < 8; ++i)
+                                    if(offset + uint32_t(n * 16 + i) >= width)
+                                        s[qm][n][i] = -INFINITY;
+                        }
+                        else
+                        {
+#pragma unroll
+                            for(int n = 0; n < BN / 16; ++n)
+#pragma unroll
+                                for(int i = 0; i < 8; ++i)
+                                {
+                                    const int col     = start + n * 16 + lane / 16 * 8 + i;
+                                    const bool masked = Args::kHasSink
+                                                            ? mask.IsOutOfSinkBound(row, col)
+                                                            : mask.IsOutOfBound(row, col);
+                                    if(masked)
+                                        s[qm][n][i] = -INFINITY;
+                                }
+                        }
                     }
             }
             else if constexpr((Causal && decltype(mask_last)::value) || Pad)
@@ -1279,7 +1303,7 @@ CK_TILE_DEVICE void run(Args a)
                 a.left < 0 && a.right == 0
                     ? min(a.sk, tile * BM + (a.mask_type == 1 ? 0 : a.sk - a.sq) + 1)
                     : begin;
-#pragma unroll LoopUnroll
+#pragma unroll PrefixUnroll
             for(; start + BN <= full_end; start += BN, stage ^= 1)
                 iteration_body(std::false_type{}, std::false_type{}, start, std::false_type{});
         }
@@ -1299,7 +1323,7 @@ CK_TILE_DEVICE void run(Args a)
         const int full_end = a.left < 0 && a.right == 0
                                  ? min(a.sk, tile * BM + (a.mask_type == 1 ? 0 : a.sk - a.sq) + 1)
                                  : begin;
-#pragma unroll LoopUnroll
+#pragma unroll PrefixUnroll
         for(; start + BN <= full_end; start += BN, stage ^= 1)
             iteration(std::false_type{}, std::false_type{}, start);
 #pragma unroll LoopUnroll

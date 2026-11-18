@@ -275,18 +275,51 @@ set(FMHA_QR_TDM_CR_TEST_TARGETS)
 if(SUPPORTED_GPU_TARGETS MATCHES "gfx1250")
     set(FMHA_QR_TDM_CR_GPU_TARGETS ${SUPPORTED_GPU_TARGETS})
     list(FILTER FMHA_QR_TDM_CR_GPU_TARGETS INCLUDE REGEX "^gfx1250")
-    foreach(suffix IN ITEMS "" "_d64" "_long" "_head_dim")
+    include(${PROJECT_SOURCE_DIR}/example/ck_tile/01_fmha/cmake/fmha_fwd_source_flags.cmake)
+    # A mixed typed-test TU must use dependency checks if any of its native
+    # BF16 masked instances require them. Query production's policy so compiler
+    # version changes do not leave the test policy behind. Other families in
+    # these TUs do not necessarily use their production schedule; per-source
+    # schedule validation requires generated-instance tests.
+    set(cr_test_expert_schedule TRUE)
+    foreach(dim IN ITEMS 64 128)
+        ck_tile_fmha_fwd_get_source_compile_options(
+            "fmha_fwd_d${dim}_bf16_group_qr_tdm_cr_vr_pssk_nlogits_nbias_mask_nlse_ndropout_nskip_nqscale_ntrload_nsink_gfx125.cpp"
+            cr_native_options)
+        if(NOT "-amdgpu-expert-scheduling-mode" IN_LIST cr_native_options)
+            set(cr_test_expert_schedule FALSE)
+        endif()
+    endforeach()
+    foreach(suffix IN ITEMS "" "_d64" "_long" "_head_dim" "_report" "_d64_report")
         set(target "test_ck_tile_fmha_qr_tdm_cr_fwd${suffix}")
         if(suffix STREQUAL "_long" OR suffix STREQUAL "_head_dim")
             list(APPEND REGRESSION_TESTS ${target})
         endif()
         add_gtest_executable(${target} test_qr_tdm_cr_fwd.cpp)
         target_compile_definitions(${target} PRIVATE CK_TILE_FMHA_FWD_FAST_EXP2=1)
-        target_compile_options(${target} PRIVATE
-            -Wno-float-equal -fgpu-flush-denormals-to-zero
-            "SHELL:-mllvm -amdgpu-expert-scheduling-mode"
-            "SHELL:-mllvm -amdgpu-sched-strategy=max-ilp"
-            "SHELL:-mllvm -amdgpu-barrier-signal-wait-latency=32")
+        target_compile_options(${target} PRIVATE -Wno-float-equal -fgpu-flush-denormals-to-zero)
+        if(suffix MATCHES "_report$")
+            target_compile_definitions(${target} PRIVATE CK_TILE_TEST_CR_REPORT=1)
+            set(report_dim 128)
+            if(suffix STREQUAL "_d64_report")
+                set(report_dim 64)
+                target_compile_definitions(${target} PRIVATE CK_TILE_TEST_CR_D64=1)
+            endif()
+            ck_tile_fmha_fwd_get_source_compile_options(
+                "fmha_fwd_d${report_dim}_bf16_group_qr_tdm_cr_vr_pssk_nlogits_nbias_mask_nlse_ndropout_nskip_nqscale_ntrload_nsink_gfx125.cpp"
+                report_options)
+            # Preserve repeated -mllvm/-Xclang pairs instead of option de-duplication.
+            string(JOIN " " report_options_string ${report_options})
+            target_compile_options(${target} PRIVATE "SHELL:${report_options_string}")
+        elseif(cr_test_expert_schedule)
+            # These mixed typed-test translation units include native BF16
+            # masked CR. Match production's dependency checks on clang <24;
+            # expert scheduling can otherwise produce nondeterministic output.
+            target_compile_options(${target} PRIVATE
+                "SHELL:-mllvm -amdgpu-expert-scheduling-mode"
+                "SHELL:-mllvm -amdgpu-sched-strategy=max-ilp"
+                "SHELL:-mllvm -amdgpu-barrier-signal-wait-latency=32")
+        endif()
         if(suffix STREQUAL "_head_dim")
             target_compile_definitions(${target} PRIVATE CK_TILE_TEST_CR_HEAD_DIM=1)
         elseif(suffix STREQUAL "_d64")

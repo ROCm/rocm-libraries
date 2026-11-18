@@ -1427,7 +1427,130 @@ void CheckFlatHeadTraversal()
                  N>(D == 64 ? 16384 : 8192, 8192, 1, 2, -1, options);
 }
 
-#if defined(CK_TILE_TEST_CR_HEAD_DIM)
+#if defined(CK_TILE_TEST_CR_REPORT)
+#if !defined(CK_TILE_TEST_CR_D64)
+TEST_F(CrForward, D128WideKeysAndPrefix)
+{
+    ForwardTestOptions options;
+    options.input_pattern       = InputPattern::Random;
+    options.fixed_tolerance     = true;
+    options.check_all_rows      = true;
+    options.check_output_writes = true;
+    options.num_heads           = 4;
+    options.repeats             = 16;
+    options.packed_groups       = true;
+    options.group_lengths_q     = {257, 17, 0, 129};
+    options.group_lengths_k     = {1025, 259, 0, 0};
+    // Exercise both tile tails, a short group, and an empty-K group. Negative
+    // and zero scales cover the softmax rescaling path as well as random data.
+    for(float scale : {-0.25f, 0.f, 0.125f})
+        for(int mask_type : {1, 2})
+            for(int left : {-1, 31, 2047})
+            {
+                options.scale_s = scale;
+                CheckForward<ck_tile::bf16_t,
+                             128,
+                             true,
+                             true,
+                             64,
+                             true,
+                             4,
+                             false,
+                             false,
+                             ck_tile::BlockAttentionBiasEnum::NO_BIAS,
+                             false,
+                             false,
+                             false,
+                             256>(257, 1025, 1, mask_type, left, options);
+                CheckForward<ck_tile::bf16_t, 128, true, true, 128, true, 4, false>(
+                    257, 1025, 1, mask_type, left, options);
+            }
+    options.input_pattern = InputPattern::Rescaling;
+    options.scale_s       = 0.125f;
+    CheckForward<ck_tile::bf16_t,
+                 128,
+                 true,
+                 true,
+                 64,
+                 true,
+                 4,
+                 false,
+                 false,
+                 ck_tile::BlockAttentionBiasEnum::NO_BIAS,
+                 false,
+                 false,
+                 false,
+                 256>(257, 1025, 1, 2, -1, options);
+    // The generated dispatcher excludes virtual sinks from N256, but the
+    // typed general variant is still callable and must preserve their semantics.
+    options.virtual_sink = {-INFINITY, 0.f, 8.f, INFINITY};
+    CheckForward<ck_tile::bf16_t,
+                 128,
+                 true,
+                 true,
+                 64,
+                 true,
+                 4,
+                 false,
+                 false,
+                 ck_tile::BlockAttentionBiasEnum::NO_BIAS,
+                 false,
+                 false,
+                 false,
+                 256>(257, 1025, 1, 2, 2047, options);
+}
+#endif
+
+TEST_F(CrForward, RepeatedPackedCausalAndWindow)
+{
+#if defined(CK_TILE_TEST_CR_D64)
+    constexpr int D = 64;
+#else
+    constexpr int D = 128;
+#endif
+    ForwardTestOptions options;
+    options.input_pattern = InputPattern::Random;
+    options.num_heads     = 16;
+    options.repeats       = 512;
+    options.packed_groups = true;
+    // These packed GQA shapes exposed sparse nondeterministic errors with
+    // clang 23 expert scheduling. Compare every output bit on each repetition.
+    for(int left : {-1, 2047})
+    {
+        options.group_lengths_q.assign(2, 4096);
+        options.group_lengths_k.assign(2, 4096);
+        CheckForward<ck_tile::bf16_t, D, true, true, 64, true, 2, false>(
+            4096, 4096, D == 64 ? 2 : 1, 2, left, options);
+        options.group_lengths_q.assign(8, 1024);
+        options.group_lengths_k.assign(8, 1024);
+        CheckForward<ck_tile::bf16_t, D, true, true, 128, true, 8, false>(
+            1024, 1024, D == 64 ? 2 : 1, 2, left, options);
+    }
+}
+
+TEST(CrRowRangeMask, MatchesElementPredicate)
+{
+    for(int sq : {1, 17, 129})
+        for(int sk : {0, 1, 33, 257})
+            for(bool top_left : {false, true})
+                for(int left : {-1, 0, 31, 2047})
+                    for(int right : {0, 7})
+                    {
+                        auto mask = ck_tile::make_generic_attention_mask_from_lr_window<
+                            ck_tile::SimplifiedGenericAttentionMask<true>>(
+                            left, right, sq, sk, top_left);
+                        for(int row = 0; row < sq + 16; ++row)
+                        {
+                            const auto range = mask.GetRowRangeUnsigned(row);
+                            for(int col = 0; col < sk + 16; ++col)
+                                ASSERT_EQ(uint32_t(col) -
+                                                  uint32_t(range.at(ck_tile::number<0>{})) >=
+                                              range.at(ck_tile::number<1>{}),
+                                          mask.IsOutOfBound(row, col));
+                        }
+                    }
+}
+#elif defined(CK_TILE_TEST_CR_HEAD_DIM)
 template <typename Data, int M, bool StoreLSE>
 void CheckNativeSkipCausalPrefix()
 {

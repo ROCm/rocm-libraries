@@ -141,7 +141,10 @@ struct BlockFmhaPipelineQRKSVSTdmCr
                    kHeadDim % 32 == 0) ||
                   (kHeadDim == 192 && kValueDim == 128));
     static_assert((kM0 == kN0 && (kM0 == 64 || kM0 == 128)) || (kM0 == 128 && kN0 == 64) ||
-                  (kM0 == 64 && kN0 == 128 && kHeadDim <= 64));
+                  (kM0 == 64 && kN0 == 128 && kHeadDim <= 64) ||
+                  (kM0 == 64 && kN0 == 256 && kHeadDim == 128 && kValueDim == 128 && kIsGroupMode &&
+                   kCausal && std::is_same_v<QDataType, bf16_t> && !kPadHeadDimQ && !kPadHeadDimV &&
+                   !kGeneralArguments && !kStoreLSE));
     static_assert(BlockFmhaShape::kK0 == 32 && BlockFmhaShape::kK1 == 32 &&
                   BlockFmhaShape::NumWarps == 4);
     static_assert(std::is_same_v<typename Problem::SaccDataType, float> &&
@@ -333,6 +336,16 @@ struct BlockFmhaPipelineQRKSVSTdmCr
             using Native = std::conditional_t<std::is_same_v<QDataType, bf16_t>, __bf16, _Float16>;
             constexpr bool rectangular = kM0 > kN0;
             constexpr int unroll = rectangular || (kHeadDim == 64 && kM0 == 64 && kCausal) ? 2 : 1;
+            // Only the measured grouped native BF16 D128 path expands the fully
+            // visible prefix. Batch, general views, and masked loops retain
+            // their prior unroll; expanding General also introduces VGPR spills.
+            constexpr int prefix_unroll =
+                kIsGroupMode && std::is_same_v<QDataType, bf16_t> && kCausal && !kPadHeadDimQ &&
+                        !kPadHeadDimV && Args::kPrepared && kHeadDim == 128 && kValueDim == 128 &&
+                        kM0 == 128 && !kGeneralArguments && !Tuning::kVirtualSink &&
+                        !std::is_base_of_v<FmhaTdmCrGeneralTuning, Tuning>
+                    ? 2
+                    : unroll;
             constexpr int qk_priority = rectangular && !(kHeadDim == 192 && kPadHeadDimQ) ? 2 : 1;
             detail::fmha_cr::run<kCausal,
                                  true,
@@ -357,7 +370,8 @@ struct BlockFmhaPipelineQRKSVSTdmCr
                                  kN0,
                                  false,
                                  std::is_same_v<Tuning, FmhaTdmCrCausalSinkTuning>,
-                                 Tuning::kLateValue>(a);
+                                 Tuning::kLateValue,
+                                 prefix_unroll>(a);
         }
         else
         {

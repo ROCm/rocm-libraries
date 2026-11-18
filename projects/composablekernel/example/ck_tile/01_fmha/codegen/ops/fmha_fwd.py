@@ -347,6 +347,13 @@ def qr_tdm_cr_m64_preference(dtype, hdim, hdim_v) -> CppConstraint:
             "(a.mask_type != 0 && (a.seqlen_q == 128 || a.seqlen_q == 256) && "
             "a.seqlen_k == a.seqlen_q && int64_t{a.batch} * a.nhead_q <= 256)))"
         )
+    if dtype == "bf16" and (int(hdim), int(hdim_v)) in ((64, 64), (128, 128)):
+        # A long packed query can fill the GPU even with few batch/head rows.
+        # Keep N128's K/V reuse once its M128 grid already covers every CU.
+        small = (
+            f"({small}) && (!t.is_group_mode || a.mask_type == 0 || "
+            "a.sink_ptr != nullptr || get_num_blocks(128) <= num_cus)"
+        )
     return CppConstraint(small)
 
 
@@ -935,6 +942,31 @@ class FmhaFwdApiPool:
                         for trait in traits
                         if trait.pipeline_tag == "qr_tdm_cr" and trait.bm0 == 64
                     )
+                    if dtype == "bf16" and (int(hdim), int(hdim_v)) in (
+                        (64, 64),
+                        (128, 128),
+                    ):
+                        # Preserve CR's default priority when the packed query
+                        # outgrows the M64 preference and moves to M128/N128.
+                        preferred_cr.extend(
+                            replace(
+                                trait,
+                                constraint=trait.constraint
+                                & CppConstraint(
+                                    "a.mask_type != 0 && a.sink_ptr == nullptr && "
+                                    "int64_t{a.batch} * a.nhead_q <= 32 && "
+                                    "get_num_blocks(128) > num_cus"
+                                ),
+                            )
+                            for trait in traits
+                            if trait.pipeline_tag == "qr_tdm_cr"
+                            and trait.bm0 == 128
+                            and trait.mode == "group"
+                            and trait.dpad == trait.dvpad == "f"
+                            and trait.logits == "f"
+                            and trait.bias == "no"
+                            and trait.sink == trait.skip == "f"
+                        )
                     native_long_cr = [
                         replace(
                             trait,
@@ -2315,6 +2347,34 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     ) -> Tuple[FmhaFwdTileSize, ...]:
         tile = cls._get_cr_kernel_tile(problem_ctx, kernel_ctx)
         pipeline = kernel_ctx.pipeline
+        if (
+            pipeline.tag == "qr_tdm_cr"
+            and problem_ctx.dtype == "bf16"
+            and problem_ctx.mode == "group"
+            and (problem_ctx.hdim, problem_ctx.hdim_v) == (128, 128)
+            and tile.F_bm0 == tile.F_bn0 == 64
+            and pipeline.F_dpad == pipeline.F_dvpad == "f"
+            and pipeline.F_mask not in ("no", "s_no")
+            and pipeline.F_bias == "no"
+            and pipeline.F_logits
+            == pipeline.F_sink
+            == pipeline.F_skip
+            == pipeline.F_lse
+            == "f"
+        ):
+            # Sparse query grids benefit from amortizing K/V transfers over
+            # N256. Keep N64 for narrow windows and M128 for saturated grids.
+            wide = CppConstraint(
+                "a.sink_ptr == nullptr && a.max_seqlen_q >= 128 && "
+                "a.window_size_right == 0 && "
+                "(a.window_size_left < 0 || a.window_size_left >= 2047) && "
+                "get_num_blocks(128) <= num_cus / 2 && "
+                "int64_t{a.seqlen_k} >= 4 * int64_t{a.seqlen_q}"
+            )
+            return (
+                replace(tile, F_bn0=256, F_constraint=tile.F_constraint & wide),
+                tile,
+            )
         if (
             pipeline.tag == "qr_tdm_cr"
             and pipeline.F_bias == "alibi"
