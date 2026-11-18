@@ -15,7 +15,7 @@ from rocisa.enum import CacheScope, NonVolatile, TemporalHint
 from tensilelite.Common.DataType import DataType
 from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Common.ValidParameters import validParameters
-from tensilelite.Components.TDMStore import STINKY_KEEP, TDM_STORE_PATHS, storesFinalD, tdmStoreBlocks, \
+from tensilelite.Components.TDMStoreInst import STINKY_KEEP, TDM_STORE_PATHS, storesFinalD, tdmStoreBlocks, \
   tdmStoreLdsBytes, tdmStoreModifiers, tdmStoreRejectReason
 from tensilelite.SolutionStructs.Naming import getKernelNameMin
 
@@ -1027,7 +1027,7 @@ def test_staged_tile_token(overMainLoop):
   """The staged tile's LDS accesses carry the token of the main-loop buffer it lies over, or the epilogue's
   token when it lies after the main-loop buffers."""
   from types import SimpleNamespace
-  from tensilelite.Components.TDMStore import _stagedTileToken
+  from tensilelite.Components.TDMStoreInst import _stagedTileToken
   states = SimpleNamespace(memTokenLdsBuffer0=0, memTokenEpilogue=7)
   gwb = SimpleNamespace(kernel={"_TDMStoreOverMainLoop": overMainLoop}, parentWriter=SimpleNamespace(states=states))
   assert _stagedTileToken(gwb) == (0 if overMainLoop else 7)

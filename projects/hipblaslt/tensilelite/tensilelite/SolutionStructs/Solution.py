@@ -91,7 +91,7 @@ from ..Toolchain.Component import Assembler
 from ..Components.CustomSchedule import hasCustomSchedule
 
 from ..Component import TensorDataMover
-from ..Components.TDMStore import tdmStoreLdsBytes, tdmStoreRejectReason
+from ..Components.TDMStoreInst import tdmStoreLdsBytes, tdmStoreRejectReason
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateHostPreSwizzle128x4, validateMXScaleFormatCombination

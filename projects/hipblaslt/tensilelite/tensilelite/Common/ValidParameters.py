@@ -1313,7 +1313,7 @@ validParameters = { # we need to make sure this matches develop
     # gfx1250 / ScheduleIterAlg=4 path only, off by default.
     "TDMLoadWaveSync": [False, True],
     # Store D through LDS with tensor_store_from_lds in place of buffer_store in the epilogue
-    # store paths of the level; each level adds one path (Components/TDMStore.py). gfx1250 only.
+    # store paths of the level; each level adds one path (Components/TDMStoreInst.py). gfx1250 only.
     # 0: Disable
     # 1: EdgeM, the masked paths narrower than the store vector width, and the narrowest one
     # 2: EdgeN too, the masked path of the store vector width: every edge tile

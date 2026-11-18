@@ -100,7 +100,7 @@ from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
                                 tdmMemberIsLive, tdmPairOnEveryWave, tdmRidesEveryWave, \
                                 tdmStashedMembers, tdmWaveComponents, tdmWaveGuard, \
                                 tdmWavePartition, tdmWaveRangeText, tdmWaveResident
-from .Components.TDMStore import hasEpilogueSideEffects, tdmStoreBlocks
+from .Components.TDMStoreInst import hasEpilogueSideEffects, tdmStoreBlocks
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
