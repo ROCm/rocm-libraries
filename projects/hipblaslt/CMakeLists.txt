@@ -142,6 +142,15 @@ option(HIPBLASLT_ENABLE_LOCAL_KERNELS "Build experimental runtime local kernel r
 if(HIPBLASLT_ENABLE_LOCAL_KERNELS AND NOT HIPBLASLT_ENABLE_HOST)
     message(FATAL_ERROR "HIPBLASLT_ENABLE_LOCAL_KERNELS requires HIPBLASLT_ENABLE_HOST=ON")
 endif()
+# Testing only: the library then honors HIPBLASLT_LOCAL_KERNEL_TEST_SCOPE and
+# HIPBLASLT_LOCAL_KERNEL_TEST_CU, which give one device its own local kernel
+# journal or compute unit count for tests on machines whose devices are all
+# alike, and HIPBLASLT_LOCAL_KERNEL_TEST_PAUSE_MS, which pauses between saving a
+# mapping and reading it back.
+option(HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST "Testing only: honor the HIPBLASLT_LOCAL_KERNEL_TEST_* hooks." OFF)
+if(HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST AND NOT HIPBLASLT_ENABLE_LOCAL_KERNELS)
+    message(FATAL_ERROR "HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST requires HIPBLASLT_ENABLE_LOCAL_KERNELS=ON")
+endif()
 
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)
@@ -149,8 +158,6 @@ option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_
 option(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
        "Install TensileLite Python packages and test tools into the test artifact tree."
        OFF)
-option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" OFF)
-
 if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)
     option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
@@ -197,7 +204,6 @@ mark_as_advanced(HIPBLASLT_ENABLE_THEROCK)
 mark_as_advanced(HIPBLASLT_VALIDATE_INSTALL)
 mark_as_advanced(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
 mark_as_advanced(HIPBLASLT_ENABLE_COVERAGE)
-mark_as_advanced(TENSILELITE_ENABLE_AUTOBUILD)
 
 set(GPU_TARGETS "" CACHE STRING "AMD GFX targets to cross-compile")
 

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -115,7 +115,8 @@ namespace rocalution
         /** \brief Set the values of the interior vector to given argument */
         ROCALUTION_EXPORT
         virtual void SetValues(ValueType val);
-        /** \brief Set the values of the interior vector to random uniformly distributed values (between -1 and 1) */
+        /** \brief Set the values of the interior vector to random uniformly distributed values
+      * from the interval [a,b] */
         ROCALUTION_EXPORT
         virtual void SetRandomUniform(unsigned long long seed,
                                       ValueType          a = static_cast<ValueType>(-1),
@@ -209,7 +210,11 @@ namespace rocalution
         /** \brief Compute exclsuive sum of vector */
         ROCALUTION_EXPORT
         virtual ValueType ExclusiveSum(const GlobalVector<ValueType>& vec);
-        /** \brief Compute absolute value sum of vector components */
+        /** \brief Compute absolute value sum of vector components
+        * \details
+        * In the case of complex types, this is the sum of the moduli |z| of the components,
+        * returned with a zero imaginary part, as for LocalVector::Asum().
+        */
         ROCALUTION_EXPORT
         virtual ValueType Asum(void) const;
         /** \brief Compute maximum absolute value component of vector */

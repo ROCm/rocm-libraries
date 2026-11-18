@@ -33,7 +33,6 @@ What's hard, and how we handle it:
 from __future__ import annotations
 
 import enum
-import math
 import os
 import warnings
 from collections.abc import Iterator
@@ -46,8 +45,9 @@ from .ir import (
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
+    _ORPHAN_YIELD_ERROR,
     _int_add_wrap_error,
-    _scf_for_carried_descriptor_error,
+    _scf_for_error,
     BF16,
     F32,
     F16,
@@ -69,18 +69,27 @@ from .ir import (
     _global_ptr_offset_op_error,
     _global_ptr_to_i64_op_error,
     _gpu_check_failed_op_error,
-    _if_else_branch_yield,
+    _if_else_yields,
     _is_unsigned,
+    _ldexp_op_error,
+    _refuse_malformed_control_flow,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
     _trap_op_error,
+    align_attr,
     check_cluster_dims,
+    claimed_align,
     dpp_ctrl_attr,
     dpp_xor_ctrl,
+    element_type,
     gpu_check_word_symbol,
+    lane_count,
     require_streaming_arch,
+    smem_vector_access_align,
     split_loc,
+    type_bytes,
+    vector_access_align,
 )
 from .mma_operand import (
     MmaOperandRole,
@@ -318,6 +327,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "<4 x i32>, <8 x i32>, <4 x i32>, <4 x i32>, <8 x i32>, i32 immarg)"
     ),
     "exp2.f32": "declare float @llvm.exp2.f32(float)",
+    "ldexp.f32.i32": "declare float @llvm.ldexp.f32.i32(float, i32)",
     "amdgcn.exp2.f32": "declare float @llvm.amdgcn.exp2.f32(float)",
     "log2.f32": "declare float @llvm.log2.f32(float)",
     "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
@@ -1283,51 +1293,13 @@ def _loop_block_values(loop: Op) -> tuple[Value | None, list[Value]]:
     return iv, carried
 
 
-def _scf_iter_llvm_types(op: Op, num_iter: int) -> List[str]:
-    """Validate serialized loop metadata and render the real carry types."""
-    iter_inits = op.operands[3:]
-    iter_meta = op.attrs.get("iter_args", [])
-    if not isinstance(iter_meta, list):
-        raise ValueError("scf.for iter_args metadata must be a list")
-    if len(iter_inits) != num_iter:
-        raise ValueError(
-            f"scf.for declares {num_iter} iter_args but has "
-            f"{len(iter_inits)} init operands"
-        )
-    if len(iter_meta) != num_iter:
-        raise ValueError(
-            f"scf.for declares {num_iter} iter_args but has "
-            f"{len(iter_meta)} metadata entries"
-        )
-    if len(op.results) != num_iter:
-        raise ValueError(
-            f"scf.for declares {num_iter} iter_args but has {len(op.results)} results"
-        )
+def _scf_iter_llvm_types(op: Op) -> list[str]:
+    """Render the LLVM type of each value the ``scf.for`` ``op`` carries.
 
-    llvm_types: List[str] = []
-    for index, (meta, init, result) in enumerate(
-        zip(iter_meta, iter_inits, op.results)
-    ):
-        if not isinstance(meta, dict):
-            raise ValueError(f"scf.for iter_arg {index} metadata must be a map")
-        name = meta.get("name")
-        type_name = meta.get("type")
-        if not isinstance(name, str) or not name:
-            raise ValueError(f"scf.for iter_arg {index} metadata has no name")
-        if not isinstance(type_name, str):
-            raise ValueError(f"scf.for iter_arg {name} metadata has no type")
-        if type_name != init.type.name:
-            raise ValueError(
-                f"scf.for iter_arg {name} metadata type {type_name!r} "
-                f"does not match init type {init.type.name!r}"
-            )
-        if result.type != init.type:
-            raise ValueError(
-                f"scf.for result type {result.type.name!r} does not match "
-                f"iter_arg {name} type {init.type.name!r}"
-            )
-        llvm_types.append(_llvm_loop_carried_type(init.type))
-    return llvm_types
+    ``_scf_for_error`` has checked that the counts of carried values agree and
+    that the ``iter_args`` metadata describes them.
+    """
+    return [_llvm_loop_carried_type(init.type) for init in op.operands[3:]]
 
 
 def _param_llvm_type(p: Param) -> str:
@@ -1380,50 +1352,6 @@ def _escape_llvm_asm_string(s: str) -> str:
     return "".join(out)
 
 
-# Bytes per element for LDS vector alignment. Shared by the smem load and
-# store handlers so the two cannot drift: they did, and the load's copy was
-# missing the 8-bit floats.
-_SMEM_ELEM_BYTES = {
-    "i8": 1,
-    "u8": 1,
-    "fp8e4m3": 1,
-    "bf8e5m2": 1,
-    "f16": 2,
-    "bf16": 2,
-    "i32": 4,
-    "tf32": 4,
-    "f32": 4,
-    "i64": 8,
-    "f64": 8,
-}
-
-
-def _smem_vec_align(t: SmemType, vec: int, elem_bytes: int) -> int:
-    """Alignment an LDS vector access can actually guarantee, in bytes.
-
-    The natural alignment of a ``vec``-wide access is ``vec * elem_bytes``, but
-    that only holds if every address the access can land on is that aligned.
-    An LDS tile is indexed ``(..., row, col)`` with ``col`` a multiple of
-    ``vec``, so the address advances by the innermost dimension per row. When
-    that dimension is not a multiple of ``vec`` -- which is exactly what a
-    bank-conflict pad such as ``lds_k_pad`` does -- alternate rows start off
-    the natural boundary.
-
-    ``gcd(vec, innermost)`` is the largest element count every row start is
-    guaranteed to be a multiple of, so it bounds the claim. Outer strides are
-    products that include the innermost dimension, so they never bind tighter
-    and do not need to be considered.
-
-    An alignment attribute is an assertion to LLVM, not a formatting detail:
-    overstating it is undefined behaviour even where the hardware tolerates the
-    access. Understating it only costs instruction selection.
-    """
-    shape = getattr(t, "shape", None)
-    if not shape:
-        return vec * elem_bytes
-    return math.gcd(int(vec), int(shape[-1])) * elem_bytes
-
-
 def _smem_storage_type(t: SmemType) -> str:
     """LLVM aggregate type for a smem allocation: nested arrays of halves/floats."""
     inner = _llvm_type(t.elem)
@@ -1431,6 +1359,70 @@ def _smem_storage_type(t: SmemType) -> str:
     for d in reversed(t.shape):
         out = f"[{d} x {out}]"
     return out
+
+
+# Alignment of the single LDS pool global that backs every smem allocation.
+# No segment can be aligned more strictly than the pool it lives in. Public:
+# the fused-MoE LDS budget (instances/common/_moe_fused_mega_lds.py) bounds
+# the pool with it. The C++ engine's twin is ROCKE_SMEM_POOL_ALIGN
+# (rocke/lower_llvm.h).
+SMEM_POOL_ALIGN = 16
+
+
+def _lds_access_align(op: Op) -> int | None:
+    """Return the ``align N`` (bytes) that ``op`` claims on its LDS access.
+
+    This is the one home of the alignment every typed smem load / store
+    emits through a pool segment. The emitters print this value, and the pool
+    layout aligns each segment's offset to the largest value its accesses
+    claim, so a claim is never larger than what the segment base guarantees.
+    (The in-segment index is the kernel author's responsibility: a vector
+    access must start at a multiple of its claim.)
+
+    A vector access wider than the pool alignment (``<8 x float>`` is 32
+    bytes) claims the pool alignment: no segment can be aligned more strictly
+    than the pool it lives in, and LDS instructions need no more than 16.
+
+    Returns ``None`` for an op that makes no alignment claim on an smem
+    operand (intrinsic and raw-pointer LDS paths carry no ``align``). Raises
+    ``TypeError`` for a store whose ``align`` attribute is not an integer
+    (``True`` and ``8.0`` included) and ``ValueError`` for one that is not a
+    positive power of two: capping or converting it would hide an invalid
+    claim.
+    """
+    natural = _lds_natural_align(op)
+    return None if natural is None else min(natural, SMEM_POOL_ALIGN)
+
+
+def _lds_natural_align(op: Op) -> int | None:
+    """The natural alignment of ``op``'s LDS access, before the pool cap."""
+    name = op.name
+    if name == "tile.smem_store":
+        # One store of the whole value, which may be a vector: smem_store_vN
+        # routes n=1 here whatever the value's type. n=1 is the scalar store
+        # and records no align, so a vector stored whole promises nothing about
+        # its index beyond element alignment, which is all it claims.
+        return type_bytes(element_type(op.operands[-1].type))
+    if name == "tile.smem_store_vN":
+        vec = int(op.attrs["vec"])
+        elem = element_type(op.operands[-1].type)
+        align = align_attr(op)
+        if align is None:
+            return smem_vector_access_align(op.operands[0].type, vec, elem)
+        return align
+    if name == "tile.smem_load_vN":
+        return smem_vector_access_align(
+            op.operands[0].type, int(op.attrs["vec"]), element_type(op.result.type)
+        )
+    if name in ("tile.smem_store_vN_f32", "tile.smem_load_vN_f32"):
+        return vector_access_align(int(op.attrs["vec"]), F32)
+    if name == "tile.smem_load_v4":
+        # One scalar load per element.
+        return type_bytes(element_type(op.result.type))
+    if name == "tile.smem_store_distributed":
+        # One scalar store per element of the stored values.
+        return type_bytes(element_type(op.operands[-1].type))
+    return None
 
 
 # ----------------------------- block model -------------------------------
@@ -2274,6 +2266,28 @@ class _Lowerer:
         walk(region.ops, loop_end=None)
         return intervals, used
 
+    def _collect_smem_access_align(self, region: Region) -> dict[str, int]:
+        """Map each smem global to the widest alignment its accesses claim.
+
+        Walks every op in ``region`` (recursively) and records, per global
+        name, the largest :func:`_lds_access_align` of an access whose smem
+        operand is that global. Globals with no aligned access are absent.
+        """
+        widest: dict[str, int] = {}
+
+        def walk(ops: list[Op]) -> None:
+            for op in ops:
+                align = _lds_access_align(op)
+                if align is not None:
+                    gname = self._smem_storage_name.get(op.operands[0].name)
+                    if gname is not None:
+                        widest[gname] = max(widest.get(gname, 0), align)
+                for r in op.regions:
+                    walk(r.ops)
+
+        walk(region.ops)
+        return widest
+
     def _compute_smem_layout(self) -> None:
         """Compute byte offsets for all smem allocations in a single pool.
 
@@ -2291,29 +2305,15 @@ class _Lowerer:
         is before the current start and whose size is large enough), or open
         a new slot at the end of the pool.
 
-        Each allocation's offset is aligned to 16 bytes for byte-element
-        types (i8, fp8e4m3, bf8e5m2), 8 bytes for f64, and 4 bytes otherwise.
-        The pool itself is rounded up to 16-byte alignment.
+        Each segment's offset is aligned to the larger of its element rule
+        (16 bytes for 1-byte elements, else the element width but at least 4)
+        and the widest alignment any access to it claims (a ``<4 x float>``
+        store claims 16), so every ``align N`` the accesses emit holds. The
+        pool itself is rounded up to ``SMEM_POOL_ALIGN``.
 
         Falls back to the original sequential packing when liveness analysis
         yields no intervals (e.g. zero smem allocations).
         """
-        # No packed-only type has an entry: core/ir.py _refuse_packed_only_value
-        # refuses its LDS tiles.
-        _elem_bytes = {
-            "i8": 1,
-            "u8": 1,
-            "fp8e4m3": 1,
-            "bf8e5m2": 1,
-            "f16": 2,
-            "bf16": 2,
-            "i32": 4,
-            "tf32": 4,
-            "f32": 4,
-            "i64": 8,
-            "f64": 8,
-        }
-
         pool_name = f"@smem_pool.{self.kernel.name}"
         self._smem_pool_name = pool_name
 
@@ -2323,21 +2323,29 @@ class _Lowerer:
 
         # ---- compute per-allocation sizes and alignments ----
         def _seg_size(stype: "SmemType") -> int:
-            eb = _elem_bytes.get(stype.elem.name, 2)
-            seg = eb
+            seg = type_bytes(stype.elem)
             for d in stype.shape:
                 seg *= d
             return seg
 
-        def _align(stype: "SmemType") -> int:
+        # ---- live intervals and access alignments from the kernel body ----
+        live, used = self._collect_smem_liveness(self.kernel.body)
+        access_align = self._collect_smem_access_align(self.kernel.body)
+
+        def _align(gname: str, stype: "SmemType") -> int:
             # A packed-only type never reaches here: core/ir.py
             # _refuse_packed_only_value refuses its LDS tiles.
-            if stype.elem.name == "f64":
-                return 8
-            return 16 if stype.elem.name in ("i8", "u8", "fp8e4m3", "bf8e5m2") else 4
-
-        # ---- live intervals from the kernel body ----
-        live, used = self._collect_smem_liveness(self.kernel.body)
+            #
+            # The element rule is not redundant with access_align: it is the
+            # only alignment for accesses that print no ``align`` and so are
+            # absent from access_align -- the transpose reads, the async
+            # global-to-LDS copies and the LDS atomic. Byte-element segments
+            # get 16 bytes because ds_read_b64_tr_b8 on i8 / fp8 tiles needs a
+            # 16-byte aligned base. Any other element gets at least the 4-byte
+            # LDS word, and an 8-byte element (f64, i64) its own width.
+            elem_bytes = type_bytes(stype.elem)
+            elem_align = 16 if elem_bytes == 1 else max(4, elem_bytes)
+            return max(elem_align, access_align.get(gname, 0))
 
         # Never-referenced allocations (allocated but never read, written or
         # address-taken) must not consume pool space. The pre-pool lowering
@@ -2390,7 +2398,7 @@ class _Lowerer:
         for gname, stype in sorted_allocs:
             seg = _seg_size(stype)
             self._smem_sizes[gname] = seg
-            aln = _align(stype)
+            aln = _align(gname, stype)
             first_seq, last_seq = live.get(gname, (0, 0))
             # Exclusive (cshuffle no-alias) allocations must not reuse another
             # allocation's slot, and must never be reused by later allocations,
@@ -2463,7 +2471,9 @@ class _Lowerer:
                 slots.append((aligned_off, seg, _EXCL_LAST_SEQ if excl else last_seq))
 
         pool_size = max(s_off + s_size for s_off, s_size, _ in slots)
-        self._smem_pool_size = (pool_size + 15) & ~15
+        self._smem_pool_size = (pool_size + SMEM_POOL_ALIGN - 1) & ~(
+            SMEM_POOL_ALIGN - 1
+        )
 
     _LDS_AA_BASE = 900000
 
@@ -3347,6 +3357,17 @@ class _Lowerer:
             f"  {op.result.name} = call float @llvm.exp2.f32(float {self._operand(v)})"
         )
 
+    def _op_math_ldexp(self, op: Op) -> None:
+        error = _ldexp_op_error(op)
+        if error:
+            raise ValueError(error)
+        value, exponent = op.operands
+        self._need("ldexp.f32.i32")
+        self._current().emit(
+            f"  {op.result.name} = call float @llvm.ldexp.f32.i32("
+            f"float {self._operand(value)}, i32 {self._operand(exponent)})"
+        )
+
     def _op_math_exp2_fast(self, op: Op) -> None:
         (v,) = op.operands
         if v.type.name != "f32":
@@ -3776,7 +3797,7 @@ class _Lowerer:
             f"  {gep} = getelementptr inbounds {elem_ty}, {ptr_ty} "
             f"{self._operand(ptr)}, {idx_ty} {self._operand(idx)}"
         )
-        align = int(op.attrs.get("align", vec * 2))
+        align = claimed_align(op, vec, element_type(op.result.type))
         self._current().emit(
             f"  {op.result.name} = load <{vec} x {elem_ty}>, {ptr_ty} {gep}, "
             f"align {align}{self._nontemporal_md(op)}"
@@ -3811,22 +3832,7 @@ class _Lowerer:
             f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(gidx)}"
         )
-        # Alignment is the element byte size: 1 for i8/u8, 2 for f16/bf16,
-        # 4 for f32/i32, 8 for i64/f64. The AMDGPU backend rejects loads /
-        # stores with under-aligned addresses on ``addrspace(3)``.
-        align = {
-            "i8": 1,
-            "u8": 1,
-            "fp8e4m3": 1,
-            "bf8e5m2": 1,
-            "f16": 2,
-            "bf16": 2,
-            "i32": 4,
-            "tf32": 4,
-            "f32": 4,
-            "i64": 8,
-            "f64": 8,
-        }.get(value.type.name, 2)
+        align = _lds_access_align(op)
         self._current().emit(
             f"  store {_llvm_type(value.type)} {self._operand(value)}, ptr addrspace(3) {gep}, align {align}"
         )
@@ -3881,22 +3887,7 @@ class _Lowerer:
             f"{', '.join(gidx)}"
         )
         elem_ty = _llvm_type(value.type.elem)  # type: ignore[attr-defined]
-        elem_bytes = {
-            "i8": 1,
-            "u8": 1,
-            "fp8e4m3": 1,
-            "bf8e5m2": 1,
-            "f16": 2,
-            "bf16": 2,
-            "i32": 4,
-            "tf32": 4,
-            "f32": 4,
-            "i64": 8,
-            "f64": 8,
-        }.get(
-            value.type.elem.name, 2
-        )  # type: ignore[attr-defined]
-        align = int(op.attrs.get("align", vec * elem_bytes))
+        align = _lds_access_align(op)
         self._current().emit(
             f"  store <{vec} x {elem_ty}> {self._operand(value)}, ptr addrspace(3) {gep}, "
             f"align {align}{self._lds_aa_suffix(gname)}"
@@ -3923,7 +3914,10 @@ class _Lowerer:
                 f"  {ep} = getelementptr inbounds half, ptr addrspace(3) {base}, i32 {i}"
             )
             ld = self._fresh("smem.ld")
-            self._current().emit(f"  {ld} = load half, ptr addrspace(3) {ep}, align 2")
+            self._current().emit(
+                f"  {ld} = load half, ptr addrspace(3) {ep}, "
+                f"align {_lds_access_align(op)}"
+            )
             elems.append(ld)
         prev = "undef"
         for i, e in enumerate(elems):
@@ -3966,20 +3960,9 @@ class _Lowerer:
             f"{', '.join(idx_strs)}"
         )
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
-        # Element byte size drives the vector alignment. 16-bit
-        # (f16 / bf16): 2 bytes; 32-bit (f32 / i32): 4 bytes; 64-bit
-        # (i64 / f64): 8 bytes; the 8-bit floats are 1 byte each. fp8e4m3/bf8e5m2
-        # were missing from this map, so they fell to the default of 2 and a
-        # 16-element fp8 read claimed `align 32` for a 16-byte access -- an
-        # overclaim no padding choice could avoid.
-        elem_bytes = _SMEM_ELEM_BYTES.get(
-            op.result.type.elem.name,
-            2,  # type: ignore[attr-defined]
-        )
-        # New 96-bit widths guarantee only element alignment, including FP8.
-        align = (
-            12 // vec if vec in (3, 6, 12) else _smem_vec_align(stype, vec, elem_bytes)
-        )
+        # The vector alignment, bounded by what every row start of a padded
+        # tile guarantees (96-bit widths claim only element alignment).
+        align = _lds_access_align(op)
         # gfx1250: mark 8-wide (128-bit) LDS loads volatile to block the WMMA-aware
         # pass from substituting ds_load_tr16_b128 (transposed) in place of the plain
         # sequential ds_read_b128.  Only 8-wide loads feed the 16x16x32 WMMA fragment
@@ -4630,7 +4613,7 @@ class _Lowerer:
         """
         smem = op.operands[0]
         values = op.operands[1]
-        n = values.type.count if isinstance(values.type, VectorType) else 1
+        n = lane_count(values.type)
         gname, stype = self._smem_global_name(smem)
         base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
@@ -4651,7 +4634,8 @@ class _Lowerer:
                 f"ptr addrspace(3) {base_ptr}, i32 0, i32 {i}"
             )
             self._current().emit(
-                f"  store {elem_ty} {ev}, ptr addrspace(3) {gep}, align 2"
+                f"  store {elem_ty} {ev}, ptr addrspace(3) {gep}, "
+                f"align {_lds_access_align(op)}"
             )
 
     def _op_memref_cooperative_global_store(self, op: Op) -> None:
@@ -6683,7 +6667,7 @@ class _Lowerer:
             f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(gidx)}"
         )
-        align = vec * 4
+        align = _lds_access_align(op)
         # vec=1 stores expect the scalar form regardless of how the value was typed.
         if vec == 1:
             # value may be a scalar `float` (from `vec_extract`) or `<1 x float>`.
@@ -6718,7 +6702,7 @@ class _Lowerer:
             f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(idx_strs)}"
         )
-        align = vec * 4
+        align = _lds_access_align(op)
         if vec == 1:
             scalar = self._fresh("smem.s")
             self._current().emit(
@@ -6759,28 +6743,7 @@ class _Lowerer:
             f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"
         )
-        elem_name = (
-            val.type.elem.name if isinstance(val.type, VectorType) else val.type.name
-        )
-        elem_bytes = {
-            "i8": 1,
-            "u8": 1,
-            "fp8e4m3": 1,
-            "bf8e5m2": 1,
-            "i16": 2,
-            "f16": 2,
-            "bf16": 2,
-            "i32": 4,
-            "tf32": 4,
-            "f32": 4,
-            "i64": 8,
-            "f64": 8,
-        }.get(elem_name, 2)
-        align = int(op.attrs.get("align", vec * elem_bytes))
-        if align <= 0 or align & (align - 1):
-            raise ValueError(
-                "global_store_vN: alignment must be a positive power of two"
-            )
+        align = claimed_align(op, vec, element_type(val.type))
         ty = _llvm_type(val.type)
         self._current().emit(
             f"  store {ty} {self._operand(val)}, ptr addrspace(1) {gep}, "
@@ -7115,12 +7078,12 @@ class _Lowerer:
         """Lower scf.for to LLVM IR.
 
         Checks for 'unroll' hint and constant bounds to decide between
-        unrolled (straight-line) or normal (loop) lowering. Both refuse a
-        loop that carries a buffer descriptor.
+        unrolled (straight-line) or normal (loop) lowering. Both first refuse
+        a loop the loop rule (:func:`_scf_for_error`) refuses.
         """
-        descriptor_error = _scf_for_carried_descriptor_error(op)
-        if descriptor_error is not None:
-            raise ValueError(descriptor_error)
+        error = _scf_for_error(op)
+        if error is not None:
+            raise ValueError(error)
         unroll = op.attrs.get("unroll", False)
         lower, upper, step = op.operands[:3]
 
@@ -7173,7 +7136,7 @@ class _Lowerer:
         lower, upper, step = op.operands[:3]
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
-        iter_llvm_types = _scf_iter_llvm_types(op, num_iter)
+        iter_llvm_types = _scf_iter_llvm_types(op)
         iv_ty = _llvm_type(lower.type)
 
         # Capture the predecessor block (for the from-entry edge of phis).
@@ -7234,11 +7197,8 @@ class _Lowerer:
         last_body.emit(f"  br label %{latch.label}")
         last_body.terminated = True
 
+        # The body yields num_iter values, once: _scf_for_error checked it.
         yielded = self._yield_stack.pop()
-        if len(yielded) != num_iter:
-            raise RuntimeError(
-                f"scf.for expected {num_iter} yielded values, got {len(yielded)}"
-            )
 
         iv_next = f"%iv.next.{header.label}"
         latch.emit(f"  {iv_next} = add nsw {iv_ty} {iv_name}, {self._operand(step)}")
@@ -7282,7 +7242,6 @@ class _Lowerer:
         lower, upper, step = op.operands[:3]
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
-        iter_llvm_types = _scf_iter_llvm_types(op, num_iter)
 
         # Evaluate constant bounds
         lower_val = self._eval_constant(lower)
@@ -7291,6 +7250,10 @@ class _Lowerer:
 
         # Calculate trip count
         trip_count = (upper_val - lower_val) // step_val
+        if trip_count <= 0:
+            # No trip lowers the body, so apply the loop and if/else rules it
+            # would meet.
+            _refuse_malformed_control_flow(op.regions[0].ops)
 
         # Track current LLVM values of iteration variables
         # Start with init values (these are the LLVM operand strings)
@@ -7378,17 +7341,14 @@ class _Lowerer:
             # Clear elision marker
             self._unroll_elide_sync_op = None
 
-            # Verify yield count
-            if len(yielded) != num_iter:
-                raise RuntimeError(
-                    f"scf.for expected {num_iter} yielded values, got {len(yielded)}"
-                )
-
             # Update iteration variables with yielded values for next iteration
             for meta, yld in zip(iter_meta, yielded):
                 current_iter_values[meta["name"]] = yld
 
-        # After all iterations, bind results to final iter var values
+        # After all iterations, bind results to final iter var values. The
+        # carried types are rendered here, after the body, as the C++ engine
+        # does, so a loop with two faults gets the same refusal in both.
+        iter_llvm_types = _scf_iter_llvm_types(op)
         for meta, result, ll_ty in zip(iter_meta, op.results, iter_llvm_types):
             final_val = current_iter_values[meta["name"]]
             self._current().emit(
@@ -7446,8 +7406,7 @@ class _Lowerer:
         """
         # Refuse a malformed if/else, or a branch that does not yield the
         # results, before reading the op or emitting.
-        for branch in range(2):
-            _if_else_branch_yield(op, branch)
+        _if_else_yields(op)
         (cond,) = op.operands
         then_region = op.regions[0]
         else_region = op.regions[1]
@@ -7509,7 +7468,7 @@ class _Lowerer:
 
     def _op_scf_yield(self, op: Op) -> None:
         if not self._yield_stack:
-            raise RuntimeError("scf.yield without enclosing scf.for")
+            raise ValueError(_ORPHAN_YIELD_ERROR)
         self._yield_stack[-1].extend(self._operand(v) for v in op.operands)
 
     def _op_cf_return(self, op: Op) -> None:
@@ -7533,16 +7492,17 @@ class _Lowerer:
         # allocations. Segments are placed by liveness-guided interval packing
         # (see _compute_smem_layout): non-interfering allocations reuse the same
         # byte range, so the pool holds max(overlapping segments) rather than the
-        # sum. Per-allocation alignment is preserved (4 bytes for f16/bf16/f32/
-        # i32, 16 bytes for i8/fp8).
+        # sum. Each segment is aligned to its element rule and to the widest
+        # alignment its accesses claim (see _compute_smem_layout).
         # Each _op_tile_smem_* method emits a byte-level GEP to its segment
         # base before the typed aggregate GEP, so the typed addressing is
-        # unchanged. align 16 satisfies all segment alignments (the strictest
-        # is the 16-byte requirement for ds_read_b64_tr_b8 on i8/fp8 tiles).
+        # unchanged. The pool alignment bounds every segment alignment (an
+        # access claims at most the pool alignment; see _lds_access_align).
         if self._smem_globals:
             out.append(
                 f"{self._smem_pool_name} = internal unnamed_addr addrspace(3) "
-                f"global [{self._smem_pool_size} x i8] poison, align 16"
+                f"global [{self._smem_pool_size} x i8] poison, "
+                f"align {SMEM_POOL_ALIGN}"
             )
             out.append("")
 
