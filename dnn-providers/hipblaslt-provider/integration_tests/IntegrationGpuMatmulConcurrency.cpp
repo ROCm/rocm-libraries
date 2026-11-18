@@ -400,3 +400,80 @@ TEST_F(IntegrationGpuMatmulConcurrency, ConcurrentHandleCreateDestroy)
 
     EXPECT_EQ(failures.load(), 0);
 }
+
+// Concurrent get_knobs_for_engine() calls on one finalized graph. The call takes no handle, so
+// threads that each own a handle still go through the graph's own plugin handle, whose
+// engine-details buffers every call stores and removes. Fails (crash in the plugin handle's
+// map) if that bookkeeping is not synchronized; each call must also see the reference knobs.
+TEST_F(IntegrationGpuMatmulConcurrency, ConcurrentKnobQueriesOnSharedGraph)
+{
+    constexpr int64_t KNOB_DIM = 32;
+    constexpr int NUM_KNOB_THREADS = 16;
+    constexpr int NUM_KNOB_QUERIES = 3000;
+
+    Graph graph;
+    graph.set_name("MatmulKnobQueryConcurrency");
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT);
+
+    const std::vector<int64_t> dims = {1, KNOB_DIM, KNOB_DIM};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    auto a = std::make_shared<TensorAttributes>(
+        makeTensorAttributes("a", DataType::FLOAT, dims, strides).set_uid(UID_A));
+    auto b = std::make_shared<TensorAttributes>(
+        makeTensorAttributes("b", DataType::FLOAT, dims, strides).set_uid(UID_B));
+    auto c = graph.matmul(a, b, MatmulAttributes());
+    c->set_output(true).set_data_type(DataType::FLOAT).set_uid(UID_C);
+
+    auto result = graph.validate();
+    ASSERT_TRUE(result.is_good()) << result.err_msg;
+    result = graph.build_operation_graph(*_handle);
+    ASSERT_TRUE(result.is_good()) << result.err_msg;
+
+    // This test loads only the hipBLASLt plugin, so its engine is the one the ranking returns.
+    const int64_t engineId = hipdnn_data_sdk::utilities::engineNameOrIdToId("HIPBLASLT_ENGINE");
+    std::vector<int64_t> rankedEngineIds;
+    result = graph.get_ranked_engine_ids(rankedEngineIds);
+    ASSERT_TRUE(result.is_good()) << result.err_msg;
+    ASSERT_FALSE(rankedEngineIds.empty());
+    ASSERT_EQ(rankedEngineIds.front(), engineId);
+
+    std::vector<Knob> referenceKnobs;
+    result = graph.get_knobs_for_engine(engineId, referenceKnobs);
+    ASSERT_TRUE(result.is_good()) << result.err_msg;
+
+    const Graph& sharedGraph = graph;
+    FailureRecorder failures;
+    std::vector<std::thread> threads;
+    threads.reserve(NUM_KNOB_THREADS);
+    for(int t = 0; t < NUM_KNOB_THREADS; ++t)
+    {
+        threads.emplace_back([&sharedGraph, &failures, &referenceKnobs, engineId, t]() {
+            for(int iter = 0; iter < NUM_KNOB_QUERIES; ++iter)
+            {
+                std::vector<Knob> knobs;
+                const auto err = sharedGraph.get_knobs_for_engine(engineId, knobs);
+                const std::string at
+                    = "thread " + std::to_string(t) + " query " + std::to_string(iter) + ": ";
+                if(err.is_bad())
+                {
+                    failures.record(at + "get_knobs_for_engine: " + err.err_msg);
+                    return;
+                }
+                if(knobs.size() != referenceKnobs.size())
+                {
+                    failures.record(at + "got " + std::to_string(knobs.size()) + " knobs, expected "
+                                    + std::to_string(referenceKnobs.size()));
+                    return;
+                }
+            }
+        });
+    }
+    for(auto& thread : threads)
+    {
+        thread.join();
+    }
+
+    EXPECT_EQ(failures.count(), 0) << "first failure: " << failures.first();
+}
