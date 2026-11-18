@@ -417,10 +417,10 @@ ConvProblem distinctProblem()
 {
     ConvProblem problem;
     problem.spatialRank = 2;
-    problem.n = 3;
+    problem.n = 10;
     problem.c = 48;
     problem.k = 36;
-    problem.groups = 3;
+    problem.groups = 12;
     problem.in = {1, 23, 29};
     problem.filter = {1, 3, 5};
     problem.out = {1, 11, 13};
@@ -528,6 +528,16 @@ TEST(TestHipConvDgradFma2dRdnaLaunchValues, RefusesMalformedValues)
     manyPositions.values["in_h"] = int64_t{64};
     manyPositions.values["in_w"] = int64_t{112};
     refused(manyPositions, "a grid x beyond the launch limit");
+
+    auto wrappingStrides = savedValid();
+    wrappingStrides.values["stride_h"] = int64_t{1} << 30;
+    wrappingStrides.values["stride_w"] = int64_t{1} << 30;
+    refused(wrappingStrides, "strides whose product exceeds the grid");
+
+    auto hugeFilter = savedValid();
+    hugeFilter.values["filter_h"] = int64_t{50000};
+    hugeFilter.values["filter_w"] = int64_t{50000};
+    refused(hugeFilter, "more taps x K iterations than the kernel counts in int");
 }
 
 } // namespace
