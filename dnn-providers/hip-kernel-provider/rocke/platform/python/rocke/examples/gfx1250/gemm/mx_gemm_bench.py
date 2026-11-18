@@ -404,9 +404,25 @@ def _pad_scale_groups(scales_mn_k: np.ndarray) -> np.ndarray:
     return np.pad(scales_mn_k, ((0, 0), (0, pad))) if pad else scales_mn_k
 
 
-def device_inputs(inputs) -> tuple[np.ndarray, ...]:
-    """A, B, A_scale, B_scale, C with the scales swizzled ``[ceil(K/128)][MN][4]``."""
+def tile_rows(operand: np.ndarray, rows: int, row_bytes: int) -> np.ndarray:
+    """Row-major ``[R][K bytes]`` as ``tiled_operands`` stores it: groups of
+    ``rows`` rows, each group's K tiles one after another, a K tile's rows
+    ``row_bytes`` apart."""
+    r, k_bytes = operand.shape
+    blocks = operand.reshape(r // rows, rows, k_bytes // row_bytes, row_bytes)
+    return np.ascontiguousarray(blocks.transpose(0, 2, 1, 3)).reshape(r, k_bytes)
+
+
+def device_inputs(inputs, spec: MxGemmSpec | None = None) -> tuple[np.ndarray, ...]:
+    """A, B, A_scale, B_scale, C with the scales swizzled ``[ceil(K/128)][MN][4]``
+    and A and B tile by tile where ``spec`` tiles them (``tiled_operands``)."""
     a, b, a_scale, b_scale, c = inputs[:5]
+    if spec is not None and spec.tiled_operands != "none":
+        layout = spec.lds_layout
+        if spec.tiled("a"):
+            a = tile_rows(a, layout.a.rows, layout.row_bytes)
+        if spec.tiled("b"):
+            b = tile_rows(b, layout.b.rows, layout.row_bytes)
     return (
         a,
         b,
@@ -744,7 +760,7 @@ def _run(spec, artifact, grid, cluster, *, args, runtime, timing_inputs: bool):
     out_dtype = _out_numpy_dtype(spec.out_dtype)
     out_bytes = m * n * np.dtype(out_dtype).itemsize
     launcher = _Launcher(
-        runtime, artifact, grid, cluster, device_inputs(inputs), out_bytes
+        runtime, artifact, grid, cluster, device_inputs(inputs, spec), out_bytes
     )
     rows = cols = None
     if args.verify == "block":
@@ -755,7 +771,7 @@ def _run(spec, artifact, grid, cluster, *, args, runtime, timing_inputs: bool):
             data, data_alpha = inputs, alpha
             if kind == "sparse":
                 data, data_alpha = sparse_inputs(spec), np.float32(SPARSE_ALPHA)
-                for index, array in enumerate(device_inputs(data)):
+                for index, array in enumerate(device_inputs(data, spec)):
                     launcher.upload(index, array)
             for beta in args.check_betas:
                 arguments = launcher.arguments(m, n, k, data_alpha, beta)
@@ -779,7 +795,7 @@ def _run(spec, artifact, grid, cluster, *, args, runtime, timing_inputs: bool):
                 ):
                     failed.append(f"{kind} beta={beta:g}")
             if kind == "sparse":
-                for index, array in enumerate(device_inputs(inputs)):
+                for index, array in enumerate(device_inputs(inputs, spec)):
                     launcher.upload(index, array)
         if failed:
             return "FAIL:" + ",".join(failed), _Times(), _Hold()
@@ -787,7 +803,7 @@ def _run(spec, artifact, grid, cluster, *, args, runtime, timing_inputs: bool):
             return "PASS", _Times(), _Hold()
         timed = launcher.arguments(m, n, k, alpha, 0.0)
         if timing_inputs:
-            timing = device_inputs((*timed_inputs(spec), inputs[4]))
+            timing = device_inputs((*timed_inputs(spec), inputs[4]), spec)
             for index, array in enumerate(timing[:4]):
                 launcher.upload(index, array)
             timed = launcher.arguments(m, n, k, 1.0, 0.0)
@@ -888,6 +904,7 @@ _AXES = {
     "read_bases": ("read_bases", str, "loop"),
     "wave_map": ("wave_map", str, "rows"),
     "inst_prefetch": ("inst_prefetch", int, "0"),
+    "tiled_operands": ("tiled_operands", str, "none"),
     "a_lds_pad": ("a_lds_pad", _pad, "derived"),
     "b_lds_pad": ("b_lds_pad", _pad, "derived"),
     "a_scale_lds_pad": ("a_scale_lds_pad", _pad, "derived"),

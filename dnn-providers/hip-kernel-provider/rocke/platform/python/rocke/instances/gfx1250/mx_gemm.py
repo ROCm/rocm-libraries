@@ -62,6 +62,7 @@ __all__ = [
     "mx_gemm_grid",
     "mx_gemm_lds_layout",
     "mx_gemm_signature",
+    "tiled_transfer",
     "validate",
     "wave_coords",
 ]
@@ -136,6 +137,7 @@ READ_ISSUES = ("block", "interleave")
 WALKS = ("tile", "panels", "halves")
 READ_BASES = ("loop", "fixed")
 WAVE_MAPS = ("rows", "pairs")
+TILED_OPERANDS = ("none", "a", "b", "ab")
 # walk "panels": a workgroup's 256x256 output in four 128x128 passes over
 # 128-row panels of A and B, one panel per LDS slot, each panel split over
 # the four waves (one component of 32 rows each). walk "halves": two
@@ -319,6 +321,15 @@ class MxGemmSpec:
     own buffer: the TDM loads tile ``k + lds_buffers`` into tile ``k``'s
     buffer once the cluster has read it, so with 3 a tile load has two tiles
     of compute to land instead of one (:class:`Pipeline`).
+
+    ``tiled_operands`` names the operands (``"a"``, ``"b"``, ``"ab"``; or
+    ``"none"``) that the caller stores tile by tile instead of row-major
+    (``walk`` "tile", whole M and N tiles, K a multiple of ``tile_k``): the
+    operand's rows in groups of one TDM component (``rows``, half the
+    tile's rows of the operand), and group ``g``'s rows of K tile ``t``
+    one after another from byte ``(g * rows) * packed_k + t * rows *
+    row_bytes``. Each TDM load then copies whole 256 B lines
+    (:func:`tiled_transfer`) into the LDS image of the row-major operand.
     """
 
     name: str
@@ -353,6 +364,7 @@ class MxGemmSpec:
     read_bases: str = "loop"
     wave_map: str = "rows"
     inst_prefetch: int = 0
+    tiled_operands: str = "none"
     block_k: int = field(default=32, init=False)
 
     @property
@@ -554,6 +566,10 @@ class MxGemmSpec:
     def halves(self) -> bool:
         return self.walk == "halves"
 
+    def tiled(self, operand: str) -> bool:
+        """Whether ``operand`` (``"a"`` / ``"b"``) is stored tile by tile."""
+        return self.tiled_operands in (operand, "ab")
+
     @property
     def pass_spec(self) -> "MxGemmSpec":
         """With ``walk`` "panels", one 128x128 pass as a tile of its own;
@@ -710,6 +726,7 @@ class MxGemmSpec:
                 "rbf": self.fixed_bases,
                 "wmp": self.pairs,
                 f"ipf{self.inst_prefetch}": self.inst_prefetch > 0,
+                f"tl{self.tiled_operands}": self.tiled_operands != "none",
             },
         )
 
@@ -940,6 +957,26 @@ def mx_gemm_panel_layout(spec: MxGemmSpec) -> MxGemmLdsLayout:
     )
 
 
+def tiled_transfer(layout: MxGemmLdsLayout, name: str) -> tuple[int, int] | None:
+    """``(tile_dim0, tile_dim1)`` of one TDM transfer of operand ``name``
+    stored tile by tile (``tiled_operands``), so that every transfer is
+    whole 256 B lines and lands as the row-major operand's: an iterate-mode
+    block as lines; a padded component as its rows, as the row-major
+    operand's transfer, when the rows are whole lines; an unpadded
+    component as lines. ``None`` if the transfers cannot be whole lines."""
+    op = layout.operand(name)
+    row = layout.row_bytes
+    if op.iterate_rows:
+        block = op.iterate_rows * row
+    elif op.pad.on:
+        return (row, op.rows) if row % _GL2_LINE_BYTES == 0 else None
+    else:
+        block = op.rows * row
+    if block % _GL2_LINE_BYTES:
+        return None
+    return _GL2_LINE_BYTES, block // _GL2_LINE_BYTES
+
+
 # ---------------------------------------------------------------------------
 # Validation, signature, grid
 # ---------------------------------------------------------------------------
@@ -1067,6 +1104,13 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
                 "wave_map 'pairs' needs an even wave_repeat_n, scales 'lds' and "
                 "walk 'tile'"
             )
+    if spec.tiled_operands not in TILED_OPERANDS:
+        return f"tiled_operands must be one of {TILED_OPERANDS}"
+    if spec.tiled_operands != "none":
+        if spec.walk != "tile":
+            return "tiled_operands needs walk 'tile'"
+        if spec.K % spec.tile_k:
+            return "tiled_operands needs K to be a multiple of tile_k"
     rm, rn = spec.wave_repeat_m, spec.wave_repeat_n
     # A, B and D offsets switch to i64 past 2^31 (wide_*); the scales' stay
     # i32. A partial last tile's rows reach the next whole tile.
@@ -1135,6 +1179,19 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
         )
     if spec.lds_bytes > target.lds_capacity_bytes:
         return f"LDS {spec.lds_bytes} B exceeds {target.lds_capacity_bytes} B"
+    for name, edge, wide in (
+        ("a", spec.edge_m, spec.wide_a),
+        ("b", spec.edge_n, spec.wide_b),
+    ):
+        if not spec.tiled(name):
+            continue
+        if edge or wide:
+            return f"tiled operand {name} needs whole tiles and at most 2 GiB"
+        if tiled_transfer(spec.lds_layout, name) is None:
+            return (
+                f"tiled operand {name}: its TDM transfers are not whole "
+                f"{_GL2_LINE_BYTES} B lines"
+            )
     return None
 
 
@@ -1361,6 +1418,8 @@ class TdmLoader:
         )
         rows = layout.rows
         row0 = ops.add(block, ops.mul(component, rows))
+        if k.spec.tiled(operand):
+            return self._tiled_descriptor(operand, lds, row0, k_byte)
         if k.spec.wide_a if operand == "a" else k.spec.wide_b:
             element = k.offset64(row0, k.packed_k, k_byte)
         else:
@@ -1395,6 +1454,41 @@ class TdmLoader:
             row_stride=k.packed_k,
             tile_dim0=k.layout.row_bytes,
             tile_dim1=tile_rows,
+            workgroup_mask=mask,
+            **extra,
+        )
+
+    def _tiled_descriptor(self, operand: str, lds, row0, k_byte):
+        """``tiled_operands``: the component's rows of the K tile at
+        ``k_byte``, stored one after another from ``row0 * packed_k + k_byte
+        * rows``, in ``tiled_transfer`` units; the extents run from there to
+        the operand's end, so a tile needs no new ones."""
+        k = self.k
+        b, ops = k.b, k.ops
+        layout, _, _, mask = self._operand(operand)
+        base_ptr = k.params["A"] if operand == "a" else k.params["B"]
+        unit, units = tiled_transfer(k.layout, operand)
+        rows = layout.rows
+        element = ops.add(ops.mul(row0, k.packed_k), ops.mul(k_byte, rows))
+        extra: dict = {}
+        if layout.iterate_rows:
+            extra.update(
+                iterate_count=rows // layout.iterate_rows,
+                lds_increment=layout.iterate_stride,
+                global_increment=ops.v(unit * units),
+            )
+        elif layout.pad.on:
+            extra.update(tdm_pad_fields(layout.pad.block_bytes, layout.pad.pad_bytes))
+        left = ops.mul(self._rows_left(operand, row0), k.packed_k)
+        return b.tdm_descriptor_2d(
+            b.global_ptr_add(base_ptr, ops.v(element)),
+            self.lds_ptr(lds),
+            elem_bytes=1,
+            tensor_dim0=ops.v(unit),
+            tensor_dim1=ops.v(ops.div(left, unit)),
+            row_stride=ops.v(unit),
+            tile_dim0=unit,
+            tile_dim1=units,
             workgroup_mask=mask,
             **extra,
         )
@@ -1444,6 +1538,7 @@ class TdmLoader:
         k = self.k
         b, ops, c0, p = k.b, k.ops, k.c0, k.params
         even0 = b.cmp_eq(ops.mod(k.wave, 2), c0)
+        self.even = even0
         component0 = ops.div(k.wave, 2)
 
         def selected(b_desc, a_desc):
@@ -1490,28 +1585,52 @@ class TdmLoader:
         d1 = b.vec_pack([words.get(i, b.vec_extract(d1, i)) for i in range(8)], I32)
         return (d0, d1, *rest)
 
+    def _tiled_patch(self, k_byte, words):
+        """``(global byte offset, group-1 words)`` of this wave's data load of
+        the K tile at ``k_byte`` with ``tiled_operands``: a tiled operand's
+        tile is ``k_byte * rows`` into its row group and keeps the extents it
+        was built with; even waves load B, odd waves A."""
+        k = self.k
+        b, ops, spec = k.b, k.ops, k.spec
+        rows = {op: k.layout.operand(op).rows for op in ("a", "b")}
+
+        def offset(operand):
+            return ops.mul(k_byte, rows[operand]) if spec.tiled(operand) else k_byte
+
+        if spec.tiled_operands == "ab" and rows["a"] == rows["b"]:
+            byte_offset = offset("a")
+        else:
+            byte_offset = b.select(self.even, ops.v(offset("b")), ops.v(offset("a")))
+        if words:
+            # One operand is row-major: its waves take the new words.
+            kept = {i: b.vec_extract(self.data[1], i) for i in words}
+            row_b = not spec.tiled("b")
+            words = {
+                i: b.select(self.even, *((w, kept[i]) if row_b else (kept[i], w)))
+                for i, w in words.items()
+            }
+        return byte_offset, words
+
     def issue(self, k0, parity) -> None:
         """This wave's data and scale loads of the tile at ``k0`` into buffer ``parity``."""
         k = self.k
-        b, ops = k.b, k.ops
-        k_byte = k.spec.k_bytes(k0, ops)
-        remaining_k = b.sub(k.packed_k, ops.v(k_byte))
+        b, ops, spec = k.b, k.ops, k.spec
+        k_byte = spec.k_bytes(k0, ops)
+        row_major = not (spec.tiled("a") and spec.tiled("b"))
+        remaining_k = b.sub(k.packed_k, ops.v(k_byte)) if row_major else None
         c16 = b.const_i32(16)
         data = self.data
-        w2 = b.vec_extract(data[1], 2)
-        b.tensor_load_to_lds(
-            *self._patched(
-                data,
-                parity,
-                k_byte,
-                {
-                    1: b.shl(remaining_k, c16),
-                    2: b.lor(
-                        b.land(w2, b.const_i32(-0x10000)), b.lshr(remaining_k, c16)
-                    ),
-                },
-            )
-        )
+        words = {}
+        if row_major:
+            w2 = b.vec_extract(data[1], 2)
+            words = {
+                1: b.shl(remaining_k, c16),
+                2: b.lor(b.land(w2, b.const_i32(-0x10000)), b.lshr(remaining_k, c16)),
+            }
+        byte_offset = k_byte
+        if spec.tiled_operands != "none":
+            byte_offset, words = self._tiled_patch(k_byte, words)
+        b.tensor_load_to_lds(*self._patched(data, parity, byte_offset, words))
         if k.spec.scale_regs:
             return
         k_step = ops.v(ops.div(k0, _ATOM_K))
@@ -1705,18 +1824,45 @@ class Gl2Prefetcher:
 
             return address, k.layout.k_steps * lines_per_row
 
+        def tiled_line(base_ptr, row0, rows):
+            """``tiled_operands``: each row group's tile is whole lines."""
+            group_lines = rows * row_bytes // _GL2_LINE_BYTES
+
+            def address(index):
+                group_row = ops.add(row0, ops.mul(ops.div(index, group_lines), rows))
+                offset = ops.add(
+                    ops.mul(group_row, k.packed_k),
+                    ops.add(
+                        ops.mul(k_byte, rows),
+                        ops.mul(ops.mod(index, group_lines), _GL2_LINE_BYTES),
+                    ),
+                )
+                return b.global_ptr_add(base_ptr, ops.v(offset))
+
+            return address
+
         categories = []
-        if data_lines:
-            categories += [
-                (
-                    cluster_y * spec.tile_m * data_lines,
-                    data_line(p["A"], cluster_m0, p["M"], spec.edge_m, spec.wide_a),
-                ),
-                (
-                    cluster_x * spec.tile_n * data_lines,
-                    data_line(p["B"], cluster_n0, p["N"], spec.edge_n, spec.wide_b),
-                ),
-            ]
+        operands = (
+            ("a", cluster_y * spec.tile_m, p["A"], cluster_m0, p["M"], spec.edge_m),
+            ("b", cluster_x * spec.tile_n, p["B"], cluster_n0, p["N"], spec.edge_n),
+        )
+        for name, cluster_rows, base_ptr, row0, extent, edge in operands:
+            wide = spec.wide_a if name == "a" else spec.wide_b
+            if spec.tiled(name):
+                rows = k.layout.operand(name).rows
+                categories.append(
+                    (
+                        cluster_rows * row_bytes // _GL2_LINE_BYTES,
+                        tiled_line(base_ptr, row0, rows),
+                    )
+                )
+            elif data_lines:
+                categories.append(
+                    (
+                        cluster_rows * data_lines,
+                        data_line(base_ptr, row0, extent, edge, wide),
+                    )
+                )
         # Scales are prefetched only for an operand whose cluster scale row
         # is whole lines.
         if (cluster_x * spec.tile_n * 4) % _GL2_LINE_BYTES == 0:

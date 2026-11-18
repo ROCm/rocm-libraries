@@ -10,8 +10,10 @@ import shutil
 import types
 import unittest
 from dataclasses import replace
+from unittest import mock
 
 import numpy as np
+from rocke.core.ir import IRBuilder
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.examples.common.scaled_gemm_reference import (
     decode_e8m0,
@@ -35,6 +37,7 @@ from rocke.examples.gfx1250.gemm.mx_gemm_bench import (
     run_case,
     sparse_inputs,
     sparse_steps,
+    tile_rows,
     timed_inputs,
     verify_block,
 )
@@ -64,6 +67,7 @@ from rocke.instances.gfx1250.mx_gemm import (
     build_mx_gemm,
     derived_lds_pads,
     mx_gemm_lds_layout,
+    tiled_transfer,
     validate,
     wave_coords,
 )
@@ -649,6 +653,68 @@ class MxGemmSpecTest(unittest.TestCase):
         self.assertIn(
             "inst_prefetch must be 0", validate(_spec6(inst_prefetch=-1)) or ""
         )
+
+    def test_tiled_operands_validate_and_name(self):
+        """tiled_operands takes whole tiles of walk "tile" whose TDM
+        transfers are whole 256 B lines, and tags the name."""
+        self.assertEqual(_spec6().tiled_operands, "none")
+        self.assertNotIn("_tl", _spec6().kernel_name())
+        for fields in (
+            {"tile_m": 256, "tile_n": 256, "lds_buffers": 3, "half_b_order": "late"},
+            {"tile_m": 256, "tile_n": 128, "tile_k": 512},
+            {"tile_m": 64, "tile_n": 128, "tile_k": 512, "cluster_dim": (4, 2, 1)},
+        ):
+            for tiled in ("a", "b", "ab"):
+                spec = _spec6(**fields, tiled_operands=tiled)
+                with self.subTest(fields=fields, tiled=tiled):
+                    self.assertIsNone(validate(spec))
+                    self.assertTrue(spec.kernel_name().endswith(f"_tl{tiled}"))
+                    self.assertEqual(spec.tiled("a"), tiled in ("a", "ab"))
+                    self.assertEqual(spec.tiled("b"), tiled in ("b", "ab"))
+        # MXFP8 at 256 B rows: an iterate block, and padded whole-line rows.
+        self.assertIsNone(validate(_spec8(tiled_operands="ab")))
+        self.assertIsNone(
+            validate(
+                _spec8(
+                    1024,
+                    64,
+                    2048,
+                    tile_n=64,
+                    wave_group=(4, 1),
+                    cluster_dim=(1, 1, 1),
+                    tiled_operands="ab",
+                    **_DIRECT,
+                )
+            )
+        )
+        for reason, spec in (
+            ("tiled_operands must be one of", _spec6(tiled_operands="c")),
+            ("needs walk 'tile'", _spec6(tiled_operands="a", **_PANELS)),
+            (
+                "needs K to be a multiple of tile_k",
+                _spec6(1024, 1024, 2048 + 128, tiled_operands="a"),
+            ),
+            (
+                "tiled operand a needs whole tiles",
+                _spec6(1000, 1024, 2048, tiled_operands="a"),
+            ),
+            (
+                "tiled operand b needs whole tiles",
+                _spec6(1024, 1000, 2048, tiled_operands="ab"),
+            ),
+            # 96 B FP6 rows padded every two rows: 192 B blocks.
+            (
+                "tiled operand a: its TDM transfers are not whole",
+                _spec6(tile_k=128, a_lds_pad=LdsPad(16, 192), tiled_operands="a"),
+            ),
+            # 128 B MXFP8 rows with a pad period: rows are half lines.
+            (
+                "tiled operand b: its TDM transfers are not whole",
+                _spec8(tile_k=128, tiled_operands="b"),
+            ),
+        ):
+            with self.subTest(reason):
+                self.assertIn(reason, validate(spec) or "")
 
     def test_pair_map_covers_d_once_and_splits_the_halves(self):
         """With the pair map every D element of a tile has one lane, slot and
@@ -1289,6 +1355,81 @@ class MxGemmLayoutTest(unittest.TestCase):
                     missed, {row_start // 256} if row_start % 256 else set()
                 )
 
+    def test_tiled_transfers_are_whole_lines_into_the_row_major_image(self):
+        """With tiled_operands a component's K tile is its rows one after
+        another, copied in transfers of whole 256 B lines; byte j of it (row
+        j // row_bytes) lands where the row-major operand's row is read."""
+        ops = IntOps()
+        for spec in (
+            _spec6(tile_m=256, tile_n=256, lds_buffers=3, half_b_order="late"),
+            _spec6(tile_m=256, tile_n=128, tile_k=512),
+            _spec6(tile_m=128, tile_n=128, tile_k=512, half_plr="none"),
+            _spec6(tile_m=64, tile_n=128, tile_k=512, cluster_dim=(4, 2, 1)),
+            _spec6(
+                tile_n=16,
+                tile_k=512,
+                wave_group=(4, 1),
+                cluster_dim=(1, 1, 1),
+                **_DIRECT,
+            ),
+            _spec6(a_lds_pad=LdsPad(), b_lds_pad=LdsPad()),
+            _spec8(),
+            _spec8(tile_n=64, wave_group=(4, 1), cluster_dim=(1, 1, 1), **_DIRECT),
+        ):
+            layout = spec.lds_layout
+            for name in ("a", "b"):
+                op = layout.operand(name)
+                unit, units = tiled_transfer(layout, name)
+                size = unit * units
+                j = np.arange(op.rows * layout.row_bytes)
+                with self.subTest(spec.kernel_name(), operand=name):
+                    self.assertEqual(unit % 256, 0)
+                    self.assertEqual(len(j) % size, 0)
+                    if op.iterate_rows:
+                        self.assertEqual(size, op.iterate_rows * layout.row_bytes)
+                        land = j // size * op.iterate_stride + j % size
+                    else:
+                        # One transfer of the component, padded as it is written.
+                        self.assertEqual(size, len(j))
+                        land = _landing(layout, op.pad, j, 0, 0)
+                    base = layout.component_base(ops, op, 0)
+                    rows = [
+                        layout.row_offset(ops, name, row) - base
+                        for row in range(op.rows)
+                    ]
+                    np.testing.assert_array_equal(
+                        land,
+                        np.asarray(rows)[j // layout.row_bytes] + j % layout.row_bytes,
+                    )
+
+    def test_tile_rows_stores_each_row_groups_k_tiles_in_turn(self):
+        """tile_rows puts byte c of row r at (r // rows) * rows * K bytes +
+        (c // row_bytes) * rows * row_bytes + (r % rows) * row_bytes +
+        c % row_bytes; device_inputs applies it to the operands a spec
+        tiles, with the spec's component rows and K tile."""
+        operand = np.random.default_rng(1).integers(0, 256, (12, 24), dtype=np.uint8)
+        tiled = tile_rows(operand, 4, 6).reshape(-1)
+        row, col = np.meshgrid(np.arange(12), np.arange(24), indexing="ij")
+        at = (row // 4) * 4 * 24 + (col // 6) * 4 * 6 + (row % 4) * 6 + col % 6
+        np.testing.assert_array_equal(tiled[at], operand)
+        spec = _spec6(
+            256,
+            256,
+            2048,
+            tile_m=128,
+            tile_n=64,
+            tile_k=512,
+            cluster_dim=(1, 1, 1),
+            tiled_operands="b",
+        )
+        self.assertIsNone(validate(spec))
+        inputs = check_inputs(spec)
+        a, b, *_ = device_inputs(inputs, spec)
+        np.testing.assert_array_equal(a, inputs[0])
+        np.testing.assert_array_equal(b, tile_rows(inputs[1], 32, 384))
+        for got, want in zip(device_inputs(inputs), device_inputs(inputs, _spec6())):
+            np.testing.assert_array_equal(got, want)
+
 
 class MxGemmIrTest(unittest.TestCase):
     def test_benchmark_compile_options(self):
@@ -1700,6 +1841,76 @@ class MxGemmIrTest(unittest.TestCase):
                 self.assertEqual(
                     len(re.findall(_WMMA, llvm)), len(re.findall(_WMMA, _llvm(rows)))
                 )
+
+    def test_tiled_operands_descriptors_and_prefetch(self):
+        """A tiled operand's data loads copy 256 B lines in the iterate blocks
+        of its row-major layout; the other operand's loads and the scale loads
+        are unchanged. The GL2 prefetch takes a tiled operand's whole lines:
+        for 192 B FP6 rows at cluster 4x4, 768 lines per operand where the
+        row-major rows take 1024, which with the scales' 64 fits one round
+        of the cluster's 2048 threads instead of two."""
+
+        def descriptors(spec):
+            calls = []
+            original = IRBuilder.tdm_descriptor_2d
+
+            def record(builder, *args, **kwargs):
+                calls.append(kwargs)
+                return original(builder, *args, **kwargs)
+
+            with mock.patch.object(IRBuilder, "tdm_descriptor_2d", record):
+                build_mx_gemm(spec)
+            return {
+                (
+                    c["tile_dim0"],
+                    c["tile_dim1"],
+                    c.get("iterate_count", 0),
+                    c.get("lds_increment", 0),
+                )
+                for c in calls
+            }
+
+        base = _spec6(
+            1024, 1024, 2048, tile_m=256, tile_n=128, tile_k=512, half_b_order="late"
+        )
+        # A: 128 rows of 384 B, 8 per block (16 B pad); B: 64 rows, 4 per block.
+        row_major = {"a": (384, 8, 16, 3088), "b": (384, 4, 16, 1552)}
+        tiled = {"a": (256, 12, 16, 3088), "b": (256, 6, 16, 1552)}
+        loads = descriptors(base)
+        self.assertLessEqual(set(row_major.values()), loads)
+        scales = loads - set(row_major.values())
+        for which in ("a", "b", "ab"):
+            spec = replace(base, tiled_operands=which)
+            expected = scales | {
+                (tiled if spec.tiled(name) else row_major)[name] for name in ("a", "b")
+            }
+            with self.subTest(tiled=which):
+                self.assertEqual(descriptors(spec), expected)
+
+        def prefetches(spec):
+            count = [0]
+            original = IRBuilder.global_prefetch
+
+            def record(builder, *args, **kwargs):
+                count[0] += 1
+                return original(builder, *args, **kwargs)
+
+            with mock.patch.object(IRBuilder, "global_prefetch", record):
+                build_mx_gemm(spec)
+            return count[0]
+
+        maf = _spec6(
+            *_MAF_MED[0],
+            tile_m=256,
+            tile_n=256,
+            lds_buffers=3,
+            half_b_order="late",
+            k_reads="contiguous",
+            scale_swap="wait",
+        )
+        rounds = prefetches(maf)
+        self.assertGreater(rounds, 0)
+        self.assertEqual(prefetches(replace(maf, tiled_operands="ab")) * 2, rounds)
 
     def test_inst_prefetch_ir(self):
         """An instruction prefetch before every inst_prefetch-th WMMA of the
@@ -3499,6 +3710,95 @@ class MxGemmDeviceTest(unittest.TestCase):
                     tile_n=128,
                     b_dtype="bf8",
                     scales="registers",
+                    **_DIRECT,
+                ),
+            ]
+            # Tiled operands: A, B or both on 256x256x256 and 256x128x512
+            # half-B late (rows of 192 and 384 B, 6 and 12 lines per block),
+            # 128x128 interleaved reads, the N 16 tile, 64x128 with three
+            # buffers; MXFP8 in iterate blocks and as padded whole-line rows.
+            + [
+                _spec6(*problem, tiled_operands=tiled, **fields)
+                for problem, fields, tiled_set in (
+                    (
+                        (1024, 1024, 2048),
+                        {
+                            "tile_m": 256,
+                            "tile_n": 256,
+                            "lds_buffers": 3,
+                            "half_b_order": "late",
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                        },
+                        ("a", "b", "ab"),
+                    ),
+                    (
+                        (1024, 1024, 2048),
+                        {
+                            "tile_m": 256,
+                            "tile_n": 128,
+                            "tile_k": 512,
+                            "half_b_order": "late",
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                            "wmma_reuse": "b",
+                        },
+                        ("a", "b", "ab"),
+                    ),
+                    (
+                        (512, 512, 2048),
+                        {
+                            "tile_m": 128,
+                            "tile_n": 128,
+                            "tile_k": 512,
+                            "lds_buffers": 3,
+                            "half_plr": "none",
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                            "read_issue": "interleave",
+                            "cluster_dim": (2, 4, 1),
+                        },
+                        ("ab",),
+                    ),
+                    (
+                        (1024, 64, 2048),
+                        {
+                            "tile_n": 16,
+                            "tile_k": 512,
+                            "wave_group": (4, 1),
+                            "k_reads": "contiguous",
+                            "cluster_dim": (1, 2, 1),
+                            **_DIRECT,
+                        },
+                        ("a", "ab"),
+                    ),
+                    (
+                        (256, 512, 2048),
+                        {
+                            "tile_m": 64,
+                            "tile_n": 128,
+                            "tile_k": 512,
+                            "lds_buffers": 3,
+                            "half_b_order": "late",
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                            "cluster_dim": (4, 2, 1),
+                        },
+                        ("ab",),
+                    ),
+                )
+                for tiled in tiled_set
+            ]
+            + [
+                _spec8(half_b_order="late", wmma_reuse="b", tiled_operands="ab"),
+                _spec8(
+                    1024,
+                    64,
+                    2048,
+                    tile_n=64,
+                    wave_group=(4, 1),
+                    cluster_dim=(1, 2, 1),
+                    tiled_operands="ab",
                     **_DIRECT,
                 ),
             ]
