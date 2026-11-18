@@ -283,3 +283,59 @@ Tests:
 - name: sptrsv_csr
   category: quick
   function: sptrsv_csr_extra
+
+- name: sptrsv_csr
+  category: pre_checkin
+  function: sptrsv_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_checkin
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  diag: *all_rocsparse_diag_type
+  uplo: *all_rocsparse_fill_mode
+  baseA: [rocsparse_index_base_zero]
+  apol: [rocsparse_analysis_policy_reuse]
+  sptrsv_alg: [rocsparse_sptrsv_alg_limited_memory]
+  skip_reproducibility: true
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+
+- name: sptrsv_csr_file
+  category: pre_checkin
+  function: sptrsv_csr
+  indextype: *i64i32
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_one]
+  sptrsv_alg: [rocsparse_sptrsv_alg_limited_memory]
+  skip_reproducibility: true
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [mplate]
+
+- name: sptrsv_csr_file
+  category: nightly
+  function: sptrsv_csr
+  indextype: *i64
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_range_nightly
+  transA: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  diag: [rocsparse_diag_type_non_unit] # TODO rocsparse_diag_type_unit
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_limited_memory]
+  skip_reproducibility: true
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [bmwcra_1,
+             amazon0312,
+             sme3Dc,
+             shipsec1]

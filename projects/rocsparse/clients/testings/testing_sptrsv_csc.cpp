@@ -92,6 +92,13 @@ void testing_sptrsv_csc_bad_arg(const Arguments& arg)
 template <typename I, typename J, typename T>
 void testing_sptrsv_csc(const Arguments& arg)
 {
+#ifndef ROCSPARSE_WITH_SPTRSV_CSC
+    if(arg.sptrsv_alg != rocsparse_sptrsv_alg_default)
+    {
+        return;
+    }
+#endif
+
     rocsparse_error* p_error = nullptr;
 
     if(arg.M != arg.N)
@@ -460,7 +467,7 @@ namespace
         rocsparse_local_dnvec y(c.m, dy, ttype);
 
         const rocsparse_operation       trans = rocsparse_operation_none;
-        const rocsparse_sptrsv_alg      alg   = rocsparse_sptrsv_alg_default;
+        const rocsparse_sptrsv_alg      alg   = arg.sptrsv_alg;
         const rocsparse_analysis_policy apol  = rocsparse_analysis_policy_force;
         rocsparse_sptrsv_descr          descr;
         CHECK_ROCSPARSE_ERROR(rocsparse_create_sptrsv_descr(&descr));
@@ -546,6 +553,13 @@ namespace
 // Missing and zero diagonal entries, and the arguments the CSC solve without transpose rejects.
 void testing_sptrsv_csc_extra(const Arguments& arg)
 {
+#ifndef ROCSPARSE_WITH_SPTRSV_CSC
+    if(arg.sptrsv_alg != rocsparse_sptrsv_alg_default)
+    {
+        return;
+    }
+#endif
+
     const int32_t m = 64;
     for(auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
     {
