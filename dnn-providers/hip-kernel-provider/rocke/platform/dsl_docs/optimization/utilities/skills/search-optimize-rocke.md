@@ -179,6 +179,26 @@ cost, not the number of timed launches:
   run, and `cache_path=` reuses recorded measurements for a repeated search.
 - **Time on an idle device.** A shared or busy GPU raises both the noise and the
   number of rounds a paired confirmation needs.
+- **Price the compile before you search.** Cost per config varies by orders of
+  magnitude with the backend: in-process LLVM/comgr builds are cheap, candidates
+  built through `hipcc` cost seconds each and can time out, and a few paths are
+  far slower. Time a ten-config sample first and set the budget from the wall time
+  you can spend. Screen on the cheap backend and confirm on the one that ships.
+- **Random search is a short control, not a strategy to run to budget.** It costs
+  the most per evaluation (cold, structurally distant configs) and usually trails
+  a warm-started climb. Give it a small budget or skip it.
+- **Search the variant axis in the first round.** When geometry or backend
+  variants are separate candidates, warm-start each from its default and compare
+  them up front; deepen only the best. After the first confirmed winner, ablate it
+  (which knobs carry the gain) before adding seeds or budget; a one-lever change
+  was the whole gain in one trial.
+- **Keep job turnaround short.** Run a compile-only or one-config smoke test and
+  confirm the baseline passes the oracle before submitting long jobs. Check each
+  job's log in its first minute and watch jobs individually rather than waiting on
+  the slowest. Run independent searches (strategy, seed, shape) as parallel jobs,
+  not one after another in a single job, and split by shape up front. A wrong
+  environment or a missing header found after an hour of queueing costs a whole
+  queue cycle.
 
 ## Shipping
 
