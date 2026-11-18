@@ -598,7 +598,7 @@ TEST_F(data_set_test, inplace_complex_is_unchanged)
             hi[d] = uniform(lo[d] + 1, hi[d]);
         }
         auto array_type = random_array_type();
-        while(array_type == rocfft_array_type_real)
+        while(array_type == rocfft_array_type_real || array_type_is_hermitian(array_type))
             array_type = random_array_type();
         const auto batch_range
             = with_type(data_set_t(lo, hi, full.strides_and_distances(), full.get_batch_rank()),
@@ -847,9 +847,9 @@ TEST_F(data_set_test, inplace_query_rejects_bad_arguments)
     // types per side, in all_array_types order:
     const bool side_accepts[3][6] = {
         //unset CI    CP     R      HI     HP
-        {true, true, true, false, true, true}, // complex
+        {true, true, true, false, false, false}, // complex
         {true, false, false, true, false, false}, // real
-        {true, false, false, false, true, true}, // Hermitian
+        {true, false, false, false, true, false}, // Hermitian (interleaved only)
     };
     for(auto fft_type : {rocfft_transform_type_complex_forward,
                          rocfft_transform_type_complex_inverse,
