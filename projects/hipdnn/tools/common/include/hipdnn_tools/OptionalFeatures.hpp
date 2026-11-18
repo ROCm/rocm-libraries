@@ -7,6 +7,7 @@
 #include <array>
 #include <cctype>
 #include <cstddef>
+#include <cstdint>
 #include <iterator>
 #include <map>
 #include <optional>
@@ -35,6 +36,7 @@ enum class OptionalFeatureKind
     TENSORS, ///< every field of an element of a vector of tensor operands
     ELEMENTS, ///< an element of a vector attribute, whose length the schema leaves open
     WORK, ///< a work feature, unbound when the graph's work is unknown (RFC 0019 section 6.8)
+    CONSTRAINT, ///< a `constraint.*` feature of the engine config, bound only when it pins it
 };
 
 inline std::string_view toString(OptionalFeatureKind kind)
@@ -51,13 +53,16 @@ inline std::string_view toString(OptionalFeatureKind kind)
         return "elements";
     case OptionalFeatureKind::WORK:
         return "work";
+    case OptionalFeatureKind::CONSTRAINT:
+        return "constraint";
     default:
         return "unknown";
     }
 }
 
 /// A family of published features (EngineFeatures.hpp) a valid graph may leave unbound, so a
-/// UHD must read it through `value_or_default` or behind `present` (RFC 0019 section 6.2).
+/// UHD must read it through `value_or_default` or behind `present` (RFC 0019 section 6.7,
+/// absent is not zero, and section 6.8 rule 9).
 struct OptionalFeature
 {
     /// The published name without `$`: `[*]` stands for any index, and a trailing `.*` for
@@ -79,9 +84,17 @@ inline constexpr std::array<std::string_view, 5> WORK_FEATURE_PATTERNS{{
     "graph.nodes[*].flops",
 }};
 
-/// Whether ranking metric @p metric is computed from the graph's logical work. Where the
-/// work is unknown, so is such a metric, so a model of it rightly reports UNAVAILABLE there
-/// and may read the work features bare.
+/// The engine-level (L1) features engineFeatures() binds only when the engine config carries
+/// them: the workspace limit, and the knobs it pins (EngineFeatures.hpp).
+inline constexpr std::array<std::string_view, 2> CONSTRAINT_FEATURE_PATTERNS{{
+    "constraint.workspace_limit",
+    "constraint.knobs.*",
+}};
+
+/// Whether ranking metric @p metric is computed from the graph's logical work, so that a model
+/// of it may read the work features bare. Where the work is unknown, so is such a metric and
+/// the model has nothing to rank by, whatever its role: an engine-level (L1) model reports
+/// UNAVAILABLE there, and a catalog ranker (L2) leaves the catalog in its declared order.
 inline bool metricIsDerivedFromWork(std::string_view metric)
 {
     return metric == "tflops";
@@ -239,6 +252,14 @@ inline std::string operandPrefix(std::string_view reference)
     return {};
 }
 
+/// Whether @p field of an operand is published whenever the operand is in the graph. Its
+/// `dims[i]` and `strides[i]` exist only up to the operand's rank, and `numel` only while every
+/// dim is non-negative, so proving the operand present proves none of them.
+inline bool boundWheneverOperandIsPresent(std::string_view field)
+{
+    return field == "data_type" || field == "virtual" || field == "rank";
+}
+
 /// Adds @p bound, and the operands it proves present, to @p scope.
 inline void addProven(ReferenceSet& scope, const ReferenceSet& bound)
 {
@@ -252,6 +273,8 @@ inline void addProven(ReferenceSet& scope, const ReferenceSet& bound)
     }
 }
 
+/// Whether @p reference is proven bound by @p scope: itself, or a field published whenever its
+/// operand is, of an operand some proven field shows present.
 inline bool isGuarded(const std::string& reference, const ReferenceSet& scope)
 {
     if(scope.count(reference) != 0)
@@ -259,7 +282,8 @@ inline bool isGuarded(const std::string& reference, const ReferenceSet& scope)
         return true;
     }
     const auto prefix = operandPrefix(reference);
-    return !prefix.empty() && scope.count(prefix) != 0;
+    return !prefix.empty() && scope.count(prefix) != 0
+           && boundWheneverOperandIsPresent(std::string_view(reference).substr(prefix.size()));
 }
 
 /// The arguments of operator object @p node: an array, or a single argument.
@@ -273,27 +297,83 @@ inline std::vector<nlohmann::json> operatorArguments(const nlohmann::json& node)
     return {arguments};
 }
 
-inline void collectReferences(const nlohmann::json& node, ReferenceSet& references)
+/// Whether @p node is a `$` reference to a published feature.
+inline bool isReferenceText(const nlohmann::json& node)
 {
-    if(node.is_string())
-    {
-        const auto& text = node.get_ref<const std::string&>();
-        if(text.size() > 1 && text.front() == '$')
-        {
-            references.insert(text);
-        }
-    }
-    else if(node.is_array() || node.is_object())
-    {
-        for(const auto& child : node)
-        {
-            collectReferences(child, references);
-        }
-    }
+    return node.is_string() && node.get_ref<const std::string&>().size() > 1
+           && node.get_ref<const std::string&>().front() == '$';
 }
 
-/// The references @p condition proves bound when it is true (`present`, `and` of them), or,
-/// with @p negated, when it is false (`not_present`, `or` of them).
+/// @p node with the `shape` and `rank` short-hands of RFC 0019 section 6.2 read as the
+/// features they stand for, as ExpressionSet lowers them before it evaluates (`{"shape":
+/// ["$t", k]}` is `$t.dims[k]`, `{"rank": "$t"}` is `$t.rank`): a reference to the tensor
+/// alone names no published feature. Keep in step with ExpressionSet::lower
+/// (heuristics/uhd/Expressions.hpp), except that a malformed short-hand, which ExpressionSet
+/// refuses, is left as it is.
+inline nlohmann::json lowerShorthands(const nlohmann::json& node)
+{
+    if(node.is_array())
+    {
+        auto result = nlohmann::json::array();
+        for(const auto& child : node)
+        {
+            result.push_back(lowerShorthands(child));
+        }
+        return result;
+    }
+    if(!node.is_object())
+    {
+        return node;
+    }
+    const auto isTensor = [](const nlohmann::json& argument) {
+        return isReferenceText(argument) && argument.get_ref<const std::string&>()[1] != '$';
+    };
+    if(node.size() == 1)
+    {
+        const auto& name = node.begin().key();
+        const auto& body = node.begin().value();
+        if(name == "shape" && body.is_array() && body.size() == 2 && isTensor(body[0])
+           && body[1].is_number_integer() && body[1].get<int64_t>() >= 0
+           && body[1].get<int64_t>() <= 1024)
+        {
+            return body[0].get<std::string>() + ".dims[" + std::to_string(body[1].get<int64_t>())
+                   + "]";
+        }
+        const auto& tensor = body.is_array() && body.size() == 1 ? body[0] : body;
+        if(name == "rank" && isTensor(tensor))
+        {
+            return tensor.get<std::string>() + ".rank";
+        }
+    }
+    auto result = nlohmann::json::object();
+    for(const auto& [key, value] : node.items())
+    {
+        result[key] = lowerShorthands(value);
+    }
+    return result;
+}
+
+/// Whether @p node is an operator whose result, once resolved, is a boolean.
+inline bool yieldsBoolean(const nlohmann::json& node)
+{
+    if(!node.is_object() || node.size() != 1)
+    {
+        return false;
+    }
+    const auto& op = node.begin().key();
+    return op == "present" || op == "not_present" || op == "!" || op == "!!";
+}
+
+/// The references @p condition proves bound when it is true, or, with @p negated, when it is
+/// false. Only these forms prove anything, each by what the language answers:
+///  - `present` of bare references (true: every one resolved); an expression among its
+///    arguments says nothing of which of its references are bound;
+///  - `not_present` of one bare reference (false: that one is not wholly absent); with several
+///    it is false as soon as any is bound, which proves none of them;
+///  - `and` (true: every argument held) and `or` (false: every argument failed);
+///  - `!`, `!!`, and `==` / `!=` against a boolean literal of one of the above that yield a
+///    boolean, which read the same proof either way round.
+/// Anything else, a comparison for one, proves nothing.
 inline ReferenceSet provenBound(const nlohmann::json& condition, bool negated)
 {
     ReferenceSet bound;
@@ -302,16 +382,38 @@ inline ReferenceSet provenBound(const nlohmann::json& condition, bool negated)
         return bound;
     }
     const auto& op = condition.begin().key();
-    if(op == (negated ? "not_present" : "present"))
+    const auto arguments = operatorArguments(condition);
+    if(op == "present" ? !negated : (op == "not_present" && negated && arguments.size() == 1))
     {
-        collectReferences(condition.begin().value(), bound);
+        for(const auto& argument : arguments)
+        {
+            if(isReferenceText(argument))
+            {
+                bound.insert(argument.get<std::string>());
+            }
+        }
     }
     else if(op == (negated ? "or" : "and"))
     {
-        for(const auto& argument : operatorArguments(condition))
+        for(const auto& argument : arguments)
         {
             const auto inner = provenBound(argument, negated);
             bound.insert(inner.begin(), inner.end());
+        }
+    }
+    else if((op == "!" || op == "!!") && arguments.size() == 1)
+    {
+        return provenBound(arguments[0], op == "!" ? !negated : negated);
+    }
+    else if((op == "==" || op == "!=") && arguments.size() == 2)
+    {
+        // Equal or unequal to a boolean literal: the condition holds exactly when the other
+        // argument has one definite boolean value, and fails when it has the other.
+        const size_t literal = arguments[0].is_boolean() ? 0 : 1;
+        if(arguments[literal].is_boolean() && yieldsBoolean(arguments[1 - literal]))
+        {
+            const bool valueWhenTrue = (op == "==") == arguments[literal].get<bool>();
+            return provenBound(arguments[1 - literal], negated == valueWhenTrue);
         }
     }
     return bound;
@@ -399,8 +501,15 @@ inline void collectUnguardedReads(const nlohmann::json& node,
 
 } // namespace detail
 
-/// Every optional feature family, from the schemas' optional operands (generated with the
-/// operand visitor) and the work features.
+/// Every optional feature family: the schemas' optional operands (generated with the operand
+/// visitor), the work features, and the engine config's `constraint.*` features.
+///
+/// A family is listed when a valid graph may leave it unbound whatever its shape. What
+/// depends on the graph's shape is not listed, and is a gap training sees as a column absent in
+/// some rows, for the corpus to cover: a tensor's `dims[i]` and `strides[i]` past its rank, its
+/// `numel` when a dim is negative, and `graph.nodes[i]` / `graph.tensors[j]` past the graph's
+/// node and tensor counts. A bare read of one passes the lint, and a graph of another rank or
+/// size is one the engine's model cannot score.
 inline const std::vector<OptionalFeature>& optionalFeatures()
 {
     static const std::vector<OptionalFeature> s_features = [] {
@@ -427,13 +536,18 @@ inline const std::vector<OptionalFeature>& optionalFeatures()
         {
             result.push_back({std::string(pattern), OptionalFeatureKind::WORK, {}});
         }
+        for(const auto pattern : CONSTRAINT_FEATURE_PATTERNS)
+        {
+            result.push_back({std::string(pattern), OptionalFeatureKind::CONSTRAINT, {}});
+        }
         return result;
     }();
     return s_features;
 }
 
 /// The optional feature family published @p name (with or without `$`) belongs to, or
-/// nullptr when every valid graph that has the feature's node binds it.
+/// nullptr when it is not listed: every valid graph that has the feature's node binds it, or
+/// it depends on the graph's shape (see optionalFeatures()).
 inline const OptionalFeature* findOptionalFeature(std::string_view name)
 {
     if(!name.empty() && name.front() == '$')
@@ -458,23 +572,23 @@ struct UnguardedReference
 };
 
 /// The references of @p signature that make a valid graph unscorable: optional features read
-/// outside `value_or_default` / `present`, sorted. A feature's name does not say its node's
-/// type, so each node may be any type having every operand the signature reads at it; an
-/// operand required in all of those is not optional there. Work features are exempt in a model
-/// of a metric derived from the work (@p metric, see metricIsDerivedFromWork()).
+/// outside `value_or_default` / `present`, sorted. The `shape` and `rank` short-hands are
+/// read as the `dims[k]` and `rank` they stand for. A feature's name does not say its node's
+/// type, so each node may be any type having every operand the signature reads bare at it
+/// (a guarded read narrows nothing); an operand required in all of those is not optional
+/// there. Work features are exempt in a model of a metric derived from the work (@p metric,
+/// see metricIsDerivedFromWork()).
 inline std::vector<UnguardedReference>
     unguardedOptionalReferences(const std::vector<nlohmann::json>& signature,
                                 std::string_view metric)
 {
     detail::ReferenceSet unguarded;
-    detail::ReferenceSet read;
     for(const auto& entry : signature)
     {
-        detail::collectUnguardedReads(entry, {}, unguarded);
-        detail::collectReferences(entry, read);
+        detail::collectUnguardedReads(detail::lowerShorthands(entry), {}, unguarded);
     }
     std::map<std::string, std::set<std::string>> operandsByNode;
-    for(const auto& reference : read)
+    for(const auto& reference : unguarded)
     {
         if(auto operand = detail::nodeOperandOf(reference))
         {
