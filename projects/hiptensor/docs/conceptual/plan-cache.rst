@@ -57,6 +57,9 @@ Save and load from disk
 
 When paired with cache serialization APIs like `hiptensorHandleWritePlanCacheToFile() <../api-reference/api-reference.html#hiptensorhandlewriteplancachetofile>`_ and `hiptensorHandleReadPlanCacheFromFile() <../api-reference/api-reference.html#hiptensorhandlereadplancachefromfile>`_, plan cache lines can be saved to disk and reloaded later to avoid the repeated benchmarking in future application runs.
 
+Plan cache entries are kept per backend: the hash key of an entry includes the name of the backend whose kernel it
+records, so entries of one backend are never applied to plans that another backend serves.
+
 ------------------------------------
 Plan cache example
 ------------------------------------

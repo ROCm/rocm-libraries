@@ -528,6 +528,7 @@ set(_HIPTENSOR_DEVICE_TESTS
   "plan_cache_test|01_contraction/plan_cache_test_params.yaml"
   "plan_cache_lru_test|NONE"
   "plan_lifetime_test|NONE"
+  "backend_seam_test|NONE"
   "trinary_bilinear_contraction_test|NONE"
   "trinary_scale_contraction_test|NONE"
   "bilinear_contraction_with_unary_ops_test|NONE"

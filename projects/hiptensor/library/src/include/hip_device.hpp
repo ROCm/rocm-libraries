@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <string>
+
 #include <hip/hip_runtime_api.h>
 
 #include "hiptensor/hiptensor_types.hpp"
@@ -84,6 +86,12 @@ namespace hiptensor
 
         hipDevice_t  getDeviceId() const;
         hipGcnArch_t getGcnArch() const;
+
+        // Full architecture name of the device, with its target features
+        // (e.g. "gfx942:sramecc+:xnack-"). Empty until initialize() succeeds.
+        std::string getArchName() const;
+
+        int getCuCount() const;
 
         int warpSize() const;
 
