@@ -3,7 +3,7 @@
 **Status:** Draft
 **Owner:** @doctorcolinsmith
 **Technical Lead:** @ntrost57
-**Last Updated:** 2026-10-27
+**Last Updated:** 2026-11-17
 
 This document describes how rocSPARSE is tested today, which signals actually gate a merge, and
 where the gaps are. It follows the ROCm-wide TESTING.md template and is written as a description of
@@ -214,6 +214,13 @@ at one tier — e.g., `./rocsparse-test --gtest_filter=*quick/csrmv*` should fin
 > exist to keep any one routine from dominating a tier's total runtime; when a routine consistently
 > and substantially exceeds its budget, that is a signal to trim redundant cases (see the test-size guidance
 > below).
+
+**Known gap — no independent third-party reference:** numerical results are checked against an
+in-tree host implementation of the same routine, and the unit-test layer exercises components in
+isolation. rocSPARSE is not checked against an independent third-party sparse library (for example
+cuSPARSE or SciPy) at any tier. A host implementation can be wrong in the same way as the device
+kernel, so host/device agreement does not by itself establish numerical correctness. Closing this
+gap needs an external reference wired into the YAML pipeline or a dedicated comparison suite.
 
 **Test data / matrices:** functional suites read `.csr` matrices converted from **24 SuiteSparse**
 matrices (e.g. `nos1`–`nos7`, `amazon0312`, `webbase-1M`), MD5-verified and converted by
@@ -518,6 +525,7 @@ device configurations are not ASAN-covered.
 | Coverage `coverage_analysis` ignores unit-test failures | Low | Medium | Failures do not block the Codecov upload |
 | No tracked quarantine list (owner + ticket + expiry) for `known_bug` cases | Low | Low | `*known_bug*` excluded from gating; linkage is ad-hoc |
 | No TSAN/UBSAN/MSAN | High | High | ASAN only |
+| No independent third-party numerical reference (only in-tree host reference and unit tests) | Medium | High | Device results are compared with an in-tree host implementation; a bug shared with that host reference is not caught by any suite |
 
 ---
 

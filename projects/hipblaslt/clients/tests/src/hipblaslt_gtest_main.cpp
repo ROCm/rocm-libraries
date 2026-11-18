@@ -301,6 +301,9 @@ int main(int argc, char** argv)
     // Run the tests
     int status = RUN_ALL_TESTS();
 
+    // Join workers before GoogleTest tears down its thread-local state.
+    g_thread_pool.shutdown();
+
     // Failures printed at end for reporting so repeat version info
     hipblaslt_print_version();
 
