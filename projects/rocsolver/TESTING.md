@@ -19,12 +19,12 @@ The public interface is C99 and is kept source- and binary-compatible with
 previous releases; all public symbols are prefixed `rocsolver`/`ROCSOLVER` or
 `rocblas`/`ROCBLAS` (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
-The surface under test is large and largely combinatorial. The benchmark
+What makes the test suite large is that it is combinatorial. The benchmark
 dispatch table in `clients/common/misc/rocsolver_dispatcher.hpp` lists 359
 callable entry points covering 182 base routines, and each routine is
 instantiated across:
 
-- matrix data layout — single, `batched`, `strided_batched`
+- matrix data layout — single matrix, `batched`, `strided_batched`
 - precision — `float`, `double`, `rocblas_float_complex`, `rocblas_double_complex`
 - index type — `rocblas_int`, `int64_t`
 - where applicable, blocked and unblocked variants (for example `getf2` vs `getrf`)
@@ -59,7 +59,7 @@ Binaries land in `build/release/clients/staging/` (or `build/debug/...` with
 | --- | --- |
 | `-g` / `-k` | Debug / RelWithDebInfo build. Debug defaults `ARMOR_LEVEL` to 1. |
 | `-n` | Skip small-size optimized kernels — much faster to compile. |
-| `--no-sparse` | Build without rocSPARSE; the `refact` tests then expect `not_implemented`. |
+| `--no-sparse` | Build without rocSPARSE; the `refact` tests then call `GTEST_SKIP()` rather than asserting `not_implemented`, so a clean run means skipped coverage, not validated behavior. |
 | `--address-sanitizer` | `-DBUILD_ADDRESS_SANITIZER=ON`, see [Sanitizer Coverage](#sanitizer-coverage). |
 | `--codecoverage` | `-DBUILD_CODE_COVERAGE=ON`; refused in Release mode. |
 | `--clients-only` | Build only the clients, against an already-installed library. |
@@ -107,16 +107,24 @@ Then run the tests that correspond to what you changed:
 | Shared infrastructure under `library/src/include/` | `./rocsolver-test --gtest_filter='checkin*'` (≈45 min) | Yes |
 | Sparse re-factorization | `./rocsolver-test --gtest_filter='checkin*REFACT*:checkin*SPLITLU*'` | Yes |
 | Algorithm internals you expect to be exercised only at large sizes | `./rocsolver-test --gtest_filter='daily*<ROUTINE>*'` | Yes |
-| A whole tier, the way CI selects it | `ctest -L quick` (or `standard`, `comprehensive`) — needs `shared/`, see below | Yes |
+| A whole tier, the way CI selects it | `ctest -L '^quick$'` (or `standard`, `comprehensive`) — needs `shared/`, see below | Yes |
 | `rocsolver-bench` arguments or output | `CTEST_OUTPUT_ON_FAILURE=1 ctest -R '^test-rocsolver-bench'` | Yes |
 | Public headers | `./test-header`, `./test-rocsolver-dlopen` | No / Yes |
 | Anything, before pushing | `clang-format -i -style=file <files>` or `scripts/reformat-files` | No |
 
-The `ctest` rows above assume the super-repo's `shared/` is in your checkout. If
+The `ctest` rows above must be run **from the build root** (e.g. `build/release`),
+not from `clients/staging` where the `./rocsolver-test` rows run — CTest's
+registrations live at the build root, and running from `staging` finds zero
+tests with no error. Use `ctest --test-dir build/release ...` if you are
+elsewhere. They also assume the super-repo's `shared/` is in your checkout; if
 it is not, `ctest -L` silently matches nothing and the numbering of the
 remaining tests shifts — run `ctest -N` first to see what is actually
 registered, and read
 [A sparse checkout needs the super-repo's `shared/`](#a-sparse-checkout-needs-the-super-repos-shared).
+
+`-L` matches labels as a regular expression, so an unanchored `ctest -L quick`
+also selects `rocsolver-test_ffm-quick_suite` (and `full` selects `ffm-full`).
+Anchor the pattern — `ctest -L '^quick$'` — to run only the requested tier.
 
 ### Startup cost: the test binary is not hung
 
@@ -369,7 +377,7 @@ the `CTestTestfile.cmake` installed to `bin/rocsolver/`. You can run exactly
 what CI runs:
 
 ```bash
-ctest -L standard        # the checkin tier; also quick, comprehensive, full
+ctest -L '^standard$'    # the checkin tier; also quick, comprehensive, full
 ```
 
 A pull request touching `projects/rocsolver/**` runs **`standard`** — that is,
@@ -464,7 +472,7 @@ filter — provided the super-repo's `shared/` is in your checkout
 these entries do not exist):
 
 ```bash
-ctest -L quick                        # by label
+ctest -L '^quick$'                    # by label — anchored, see note above
 ctest -R rocsolver-test_standard_suite
 ```
 
@@ -601,7 +609,7 @@ Useful environment variables:
 
 | You are… | Do this |
 | --- | --- |
-| Adding a routine | Add `clients/common/<group>/testing_<r>.hpp` and `.cpp`, add `clients/gtest/<group>/<r>_gtest.cpp`, register the source in `clients/CMakeLists.txt`, and add the entry to `clients/common/misc/rocsolver_dispatcher.hpp` so it is benchmarkable. Instantiate `checkin_lapack` and `daily_lapack` suites. |
+| Adding a routine | Add `clients/common/<group>/testing_<r>.hpp` and `.cpp`, add `clients/gtest/<group>/<r>_gtest.cpp`, and add the entry to `clients/common/misc/rocsolver_dispatcher.hpp` so it is benchmarkable. Instantiate `checkin_lapack` and `daily_lapack` suites. Two separate, hand-maintained CMake registrations are required: the `testing_<r>.cpp` source goes in `clients/CMakeLists.txt`'s instantiation lists, and the `<r>_gtest.cpp` source goes in `clients/gtest/CMakeLists.txt` — missing the second leaves the new tests out of `rocsolver-test` and CI even though the code compiles. |
 | Fixing a numerical bug | Add the failing dimensions to that routine's `matrix_size_range` so the reproducer runs in the `checkin` tier. |
 | Fixing an argument-handling bug | Extend the routine's `<r>_checkBadArgs()`. |
 | Changing algorithm selection | Exercise the relevant `--alg_mode` / `--hetrd_alg_mode` path and confirm both paths are covered by a test case. |
