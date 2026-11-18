@@ -100,7 +100,7 @@ public:
         HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(x, 2, "Input tensor (x)"));
         HIPDNN_CHECK_ERROR(
             detail::validateMinimumTensorDimensions(dy, 2, "Gradient input tensor (dy)"));
-        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(scale, 2, "Scale tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(scale, 1, "Scale tensor"));
 
         // SECTION 3: Validate Tensor Shape Consistency
         // Why: Gradients flow through the same computational graph as forward pass.
@@ -118,9 +118,9 @@ public:
 
         // SECTION 4: Validate Channel Dimensions and Parameter Tensor Shapes
         // Why: Parameter gradients (dscale, dbias) are accumulated per-channel over (N,H,W):
-        //   dscale_c = Σ_{n,h,w} xhat[n,c,h,w] * dy[n,c,h,w]  -> shape [1, C, 1, 1]
-        //   dbias_c  = Σ_{n,h,w} dy[n,c,h,w]                   -> shape [1, C, 1, 1]
-        // scale from forward pass is also per-channel [1, C, 1, 1].
+        //   dscale_c = Σ_{n,h,w} xhat[n,c,h,w] * dy[n,c,h,w]  -> same shape as scale
+        //   dbias_c  = Σ_{n,h,w} dy[n,c,h,w]                   -> same shape as scale
+        // scale from forward pass holds one value per channel.
         // Saved statistics (mean_c, invStd_c) are per-channel for backward computation.
 
         // Extract optional tensors once for reuse in both shape validation and consistency check
@@ -131,14 +131,13 @@ public:
         auto& xDims = x->get_dim();
         const int64_t channels = xDims[1];
 
-        // Validate scale has correct channel-only shape (required user parameter)
-        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
+        // Validate that scale and dscale tensors have matching shapes
+        HIPDNN_CHECK_ERROR(detail::validateTensorShapesMatchIfSet(
+            scale, dscale, "Scale tensor", "Scale gradient tensor (dscale)"));
 
-        // Validate gradient outputs (only if dimensions set, will be inferred otherwise)
-        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(
-            dscale, channels, "Scale gradient tensor (dscale)"));
-        HIPDNN_CHECK_ERROR(
-            detail::validateChannelOnlyShapeIfSet(dbias, channels, "Bias gradient tensor (dbias)"));
+        // Validate that scale and dbias tensors have matching shapes
+        HIPDNN_CHECK_ERROR(detail::validateTensorShapesMatchIfSet(
+            scale, dbias, "Scale tensor", "Bias gradient tensor (dbias)"));
 
         // Validate optional saved statistics from forward pass (only if dimensions set)
         HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(mean, channels, "Mean tensor"));
@@ -169,6 +168,7 @@ public:
     {
         auto x = attributes.get_x();
         auto dx = attributes.get_dx();
+        auto scale = attributes.get_scale();
         auto dscale = attributes.get_dscale();
         auto dbias = attributes.get_dbias();
 
@@ -181,6 +181,11 @@ public:
         {
             return {ErrorCode::ATTRIBUTE_NOT_SET,
                     "BatchnormBackwardNode missing dx for setting properties"};
+        }
+        if(!scale)
+        {
+            return {ErrorCode::ATTRIBUTE_NOT_SET,
+                    "BatchnormBackwardNode missing scale for setting properties"};
         }
         if(!dscale)
         {
@@ -208,16 +213,12 @@ public:
         auto inferCTensor = [&](std::shared_ptr<TensorAttributes>& tensorToInfer) {
             if(tensorToInfer->get_dim().empty())
             {
-                std::vector<int64_t> tensorDims(x->get_dim().size(), 1);
-                tensorDims[1] = x->get_dim()[1];
-                tensorToInfer->set_dim(tensorDims);
+                tensorToInfer->set_dim(scale->get_dim());
             }
 
             if(tensorToInfer->get_stride().empty())
             {
-                auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
-                tensorToInfer->set_stride(hipdnn_data_sdk::utilities::generateStrides(
-                    tensorToInfer->get_dim(), strideOrder));
+                tensorToInfer->set_stride(scale->get_stride());
             }
         };
 

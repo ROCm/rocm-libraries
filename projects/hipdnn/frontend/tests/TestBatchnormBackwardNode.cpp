@@ -129,6 +129,9 @@ TEST(TestBatchnormBackwardNode, InferPropertiesNode)
     auto dbiasTensor = batchnormAttributes.get_dbias();
     dbiasTensor->set_uid(4).set_name("DbiasTensor");
 
+    auto scaleTensor = batchnormAttributes.get_scale();
+    scaleTensor->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
+
     const GraphAttributes graphAttributes;
     BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
@@ -140,11 +143,43 @@ TEST(TestBatchnormBackwardNode, InferPropertiesNode)
 
     EXPECT_EQ(dscaleTensor->get_dim(), (std::vector<int64_t>{1, 2, 1, 1}));
     EXPECT_EQ(dscaleTensor->get_stride(),
-              (std::vector<int64_t>{2, 1, 1, 1})); // Inherits NCHW layout
+              (std::vector<int64_t>{2, 1, 1, 1})); // Inherits scale layout
 
     EXPECT_EQ(dbiasTensor->get_dim(), (std::vector<int64_t>{1, 2, 1, 1}));
     EXPECT_EQ(dbiasTensor->get_stride(),
-              (std::vector<int64_t>{2, 1, 1, 1})); // Inherits NCHW layout
+              (std::vector<int64_t>{2, 1, 1, 1})); // Inherits scale layout
+}
+
+TEST(TestBatchnormBackwardNode, InferPropertiesNodeInheritsReducedRankScaleShape)
+{
+    BatchnormBackwardAttributes batchnormAttributes;
+    batchnormAttributes.set_dy(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_x(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_scale(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_dx(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
+
+    auto xTensor = batchnormAttributes.get_x();
+    xTensor->set_dim({1, 2, 3, 4}).set_stride({24, 12, 4, 1});
+
+    auto scaleTensor = batchnormAttributes.get_scale();
+    scaleTensor->set_dim({2, 1, 1}).set_stride({1, 1, 1});
+
+    auto dscaleTensor = batchnormAttributes.get_dscale();
+    auto dbiasTensor = batchnormAttributes.get_dbias();
+
+    const GraphAttributes graphAttributes;
+    BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+
+    EXPECT_EQ(dscaleTensor->get_dim(), (std::vector<int64_t>{2, 1, 1}));
+    EXPECT_EQ(dscaleTensor->get_stride(), (std::vector<int64_t>{1, 1, 1}));
+
+    EXPECT_EQ(dbiasTensor->get_dim(), (std::vector<int64_t>{2, 1, 1}));
+    EXPECT_EQ(dbiasTensor->get_stride(), (std::vector<int64_t>{1, 1, 1}));
 }
 
 TEST(TestBatchnormBackwardNode, GatherHipdnnTensors)
@@ -241,7 +276,42 @@ TEST(TestBatchnormBackwardNode, PreValidateRejectsMismatchedOutputGradientShapes
     EXPECT_TRUE(error.get_message().find("dimension mismatch") != std::string::npos);
 }
 
-TEST(TestBatchnormBackwardNode, PreValidateRejectsMismatchedChannelDimensions)
+// NOTE: Frontend allows broadcastable shapes for scale and its gradients.
+// Backend providers may still reject unsupported shapes.
+TEST(TestBatchnormBackwardNode, PreValidateAcceptsRank1ScaleForChannelLastInput)
+{
+    BatchnormBackwardAttributes batchnormAttributes;
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1, 2048, 64}); // NHWC layout
+    batchnormAttributes.set_dy(dyTensor);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1, 2048, 64}); // NHWC layout
+    batchnormAttributes.set_x(xTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({64});
+    batchnormAttributes.set_scale(scaleTensor);
+
+    batchnormAttributes.set_dx(std::make_shared<TensorAttributes>());
+
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({64});
+    batchnormAttributes.set_dscale(dscaleTensor);
+
+    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    dbiasTensor->set_dim({64});
+    batchnormAttributes.set_dbias(dbiasTensor);
+
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestBatchnormBackwardNode, PreValidateAcceptsReducedRankScale)
 {
     BatchnormBackwardAttributes batchnormAttributes;
 
@@ -254,7 +324,7 @@ TEST(TestBatchnormBackwardNode, PreValidateRejectsMismatchedChannelDimensions)
     batchnormAttributes.set_x(xTensor);
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 128, 1, 1}); // Mismatched channel dimension
+    scaleTensor->set_dim({64, 1, 1});
     batchnormAttributes.set_scale(scaleTensor);
 
     batchnormAttributes.set_dx(std::make_shared<TensorAttributes>());
@@ -265,8 +335,39 @@ TEST(TestBatchnormBackwardNode, PreValidateRejectsMismatchedChannelDimensions)
     const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestBatchnormBackwardNode, PreValidateRejectsDscaleNotMatchingReducedRankScale)
+{
+    BatchnormBackwardAttributes batchnormAttributes;
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    batchnormAttributes.set_dy(dyTensor);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    batchnormAttributes.set_x(xTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({64, 1, 1});
+    batchnormAttributes.set_scale(scaleTensor);
+
+    batchnormAttributes.set_dx(std::make_shared<TensorAttributes>());
+
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 64, 1, 1}); // Must match scale, not the full-rank shape
+    batchnormAttributes.set_dscale(dscaleTensor);
+
+    batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
+
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
-    EXPECT_TRUE(error.get_message().find("channel dimension") != std::string::npos);
+    EXPECT_TRUE(error.get_message().find("Scale gradient tensor") != std::string::npos);
 }
 
 TEST(TestBatchnormBackwardNode, PreValidateRejectsInvalidDscaleTensorShape)
@@ -288,7 +389,7 @@ TEST(TestBatchnormBackwardNode, PreValidateRejectsInvalidDscaleTensorShape)
     batchnormAttributes.set_dx(std::make_shared<TensorAttributes>());
 
     auto dscaleTensor = std::make_shared<TensorAttributes>();
-    dscaleTensor->set_dim({1, 64, 32, 32}); // Should be [1, 64, 1, 1]
+    dscaleTensor->set_dim({1, 64, 32, 32}); // Must match scale shape [1, 64, 1, 1]
     batchnormAttributes.set_dscale(dscaleTensor);
 
     batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
@@ -321,7 +422,7 @@ TEST(TestBatchnormBackwardNode, PreValidateRejectsInvalidDbiasTensorShape)
     batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
 
     auto dbiasTensor = std::make_shared<TensorAttributes>();
-    dbiasTensor->set_dim({2, 64, 1, 1}); // Batch dimension should be 1
+    dbiasTensor->set_dim({2, 64, 1, 1}); // Must match scale shape [1, 64, 1, 1]
     batchnormAttributes.set_dbias(dbiasTensor);
 
     const GraphAttributes graphAttributes;

@@ -305,30 +305,32 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsMismatchedInputOut
     EXPECT_TRUE(error.get_message().find("dimension mismatch") != std::string::npos);
 }
 
-TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsMismatchedChannelDimensions)
+// NOTE: Frontend allows broadcastable shapes for scale/bias.
+// Backend providers may still reject unsupported shapes.
+TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateAcceptsRank1ScaleBiasForChannelLastInput)
 {
     BatchnormInferenceAttributesVarianceExt batchnormAttributes;
 
     auto xTensor = std::make_shared<TensorAttributes>();
-    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1, 2048, 64}); // NHWC layout
     batchnormAttributes.set_x(xTensor);
 
     batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 128, 1, 1}); // Mismatched channel dimension
+    scaleTensor->set_dim({64});
     batchnormAttributes.set_scale(scaleTensor);
 
     auto biasTensor = std::make_shared<TensorAttributes>();
-    biasTensor->set_dim({1, 128, 1, 1});
+    biasTensor->set_dim({64});
     batchnormAttributes.set_bias(biasTensor);
 
     auto meanTensor = std::make_shared<TensorAttributes>();
-    meanTensor->set_dim({1, 128, 1, 1});
+    meanTensor->set_dim({1, 64, 1, 1});
     batchnormAttributes.set_mean(meanTensor);
 
     auto varianceTensor = std::make_shared<TensorAttributes>();
-    varianceTensor->set_dim({1, 128, 1, 1});
+    varianceTensor->set_dim({1, 64, 1, 1});
     batchnormAttributes.set_variance(varianceTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
@@ -339,11 +341,10 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsMismatchedChannelD
     const BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
-    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
-    EXPECT_TRUE(error.get_message().find("channel dimension") != std::string::npos);
+    EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
-TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsInvalidScaleTensorShape)
+TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateAcceptsReducedRankScaleBias)
 {
     BatchnormInferenceAttributesVarianceExt batchnormAttributes;
 
@@ -354,11 +355,48 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsInvalidScaleTensor
     batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 64, 32, 32}); // Should be [1, 64, 1, 1] for spatial mode
+    scaleTensor->set_dim({64, 1, 1});
     batchnormAttributes.set_scale(scaleTensor);
 
     auto biasTensor = std::make_shared<TensorAttributes>();
-    biasTensor->set_dim({1, 64, 1, 1});
+    biasTensor->set_dim({64, 1, 1});
+    batchnormAttributes.set_bias(biasTensor);
+
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_mean(meanTensor);
+
+    auto varianceTensor = std::make_shared<TensorAttributes>();
+    varianceTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_variance(varianceTensor);
+
+    auto epsilonTensor = std::make_shared<TensorAttributes>();
+    epsilonTensor->set_dim({1}).set_value(1e-5);
+    batchnormAttributes.set_epsilon(epsilonTensor);
+
+    const GraphAttributes graphAttributes;
+    const BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsMismatchedScaleBiasShapes)
+{
+    BatchnormInferenceAttributesVarianceExt batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({64});
+    batchnormAttributes.set_scale(scaleTensor);
+
+    auto biasTensor = std::make_shared<TensorAttributes>();
+    biasTensor->set_dim({32}); // intentionally mismatched
     batchnormAttributes.set_bias(biasTensor);
 
     auto meanTensor = std::make_shared<TensorAttributes>();
@@ -379,43 +417,6 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsInvalidScaleTensor
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_TRUE(error.get_message().find("Scale tensor") != std::string::npos);
-}
-
-TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsInvalidBiasTensorShape)
-{
-    BatchnormInferenceAttributesVarianceExt batchnormAttributes;
-
-    auto xTensor = std::make_shared<TensorAttributes>();
-    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
-    batchnormAttributes.set_x(xTensor);
-
-    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
-
-    auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 64, 1, 1});
-    batchnormAttributes.set_scale(scaleTensor);
-
-    auto biasTensor = std::make_shared<TensorAttributes>();
-    biasTensor->set_dim({2, 64, 1, 1}); // Batch dimension should be 1
-    batchnormAttributes.set_bias(biasTensor);
-
-    auto meanTensor = std::make_shared<TensorAttributes>();
-    meanTensor->set_dim({1, 64, 1, 1});
-    batchnormAttributes.set_mean(meanTensor);
-
-    auto varianceTensor = std::make_shared<TensorAttributes>();
-    varianceTensor->set_dim({1, 64, 1, 1});
-    batchnormAttributes.set_variance(varianceTensor);
-
-    auto epsilonTensor = std::make_shared<TensorAttributes>();
-    epsilonTensor->set_dim({1}).set_value(1e-5);
-    batchnormAttributes.set_epsilon(epsilonTensor);
-
-    const GraphAttributes graphAttributes;
-    const BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
-
-    auto error = node.pre_validate_node();
-    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_TRUE(error.get_message().find("Bias tensor") != std::string::npos);
 }
 
