@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -372,8 +373,11 @@ TEST(TestAttentionGeneralBwdGeometry, TuningKeyStringsNameTheirTableEntries)
 namespace
 {
 
-/// What prepare() throws for @p bound on the dense MHA graph, or "" when it throws nothing.
-std::string prepareFailure(std::string_view symbol, const BoundTokens& bound)
+/// What prepare() throws for @p bound on the dense MHA graph, or "" when it throws nothing. The
+/// kernel is the plan's own pick unless @p edit changes it.
+std::string prepareFailure(std::string_view symbol,
+                           const BoundTokens& bound,
+                           const std::function<void(KernelDefinition&)>& edit = {})
 {
     registerNativeIngestorSymbols();
     const auto* handler
@@ -385,8 +389,12 @@ std::string prepareFailure(std::string_view symbol, const BoundTokens& bound)
     }
     const GraphFixture fixture(bwdGraphJson({}), "gfx942", fullComputeUnits("gfx942"));
     const auto& plan = planOf(general_bwd::evaluate(fixture.context()));
-    const auto kernel
+    auto kernel
         = symbol == MAIN_DISPATCH_SYMBOL ? mainKernelOf(*plan.row) : prepKernelOf(*plan.row);
+    if(edit)
+    {
+        edit(kernel);
+    }
     try
     {
         handler->prepare(fixture.context(), bound, kernel);
@@ -433,6 +441,93 @@ TEST(TestAttentionGeneralBwdGeometry, PrepareRefusesWorkspaceTokensThatDisagreeW
         EXPECT_NE(prepareFailure(symbol, otherKernel).find("head_pack"), std::string::npos)
             << symbol;
     }
+}
+
+TEST(TestAttentionGeneralBwdGeometry, MainPrepareAdmitsOnlyAKernelThatCanStandInForThePick)
+{
+    const std::string admits = "is not a main kernel the plan of the graph admits";
+    const std::string symbol(MAIN_DISPATCH_SYMBOL);
+
+    // A kernel of another class (here the other dQ mode) is refused by its plan.
+    const auto otherDq = prepareFailure(symbol, denseMhaTokens(), [](KernelDefinition& kernel) {
+        const auto& mode = std::get<std::string>(kernel.metadata.at("dq_mode"));
+        kernel.metadata["dq_mode"] = std::string(mode == "split" ? "atomic" : "split");
+    });
+    EXPECT_NE(otherDq.find(admits), std::string::npos) << otherDq;
+
+    // A tuning key no arch encodes names no row.
+    const auto unknownKey = prepareFailure(symbol, denseMhaTokens(), [](KernelDefinition& kernel) {
+        kernel.metadata["tuning_key"] = std::string("not|a|tuning|key");
+    });
+    EXPECT_NE(unknownKey.find(admits), std::string::npos) << unknownKey;
+
+    // Packing heads needs a head group, which the dense MHA graph does not have.
+    const auto packed = prepareFailure(symbol, denseMhaTokens(), [](KernelDefinition& kernel) {
+        kernel.metadata["head_pack"] = true;
+    });
+    EXPECT_NE(packed.find(admits), std::string::npos) << packed;
+
+    // The pick itself is admitted: whatever prepare then does, it does not refuse the kernel.
+    EXPECT_EQ(prepareFailure(symbol, denseMhaTokens()).find(admits), std::string::npos);
+}
+
+TEST(TestAttentionGeneralBwdGeometry, ACandidateStandsInForThePickOnlyAtTheSamePrepAndWorkspace)
+{
+    const auto traits = general_bwd::GFX942_TRAITS;
+
+    // GQA with one query row: the engine packs the group's heads; the unpacked row of the same
+    // class computes the same result and leaves the prep launch and workspace alone.
+    const auto in = denseInput(2, 8, 2, 1, 256, 128);
+    const auto policy = planOf(general_bwd::resolvePlan(in, traits));
+    ASSERT_TRUE(policy.row->headPack);
+
+    general_bwd::Selection unpacked;
+    unpacked.headPack = false;
+    const auto alternate = planOf(general_bwd::resolveCandidate(in, traits, policy, unpacked));
+    EXPECT_FALSE(alternate.row->headPack);
+    EXPECT_EQ(alternate.runtime.packHeads, 0);
+    EXPECT_NE(alternate.row->mainKernel, policy.row->mainKernel);
+    EXPECT_EQ(alternate.row->prepKernel, policy.row->prepKernel);
+    EXPECT_EQ(alternate.workspace.bytes, policy.workspace.bytes);
+
+    // The pick is a candidate of itself.
+    general_bwd::Selection same;
+    same.headPack = true;
+    EXPECT_EQ(planOf(general_bwd::resolveCandidate(in, traits, policy, same)).row, policy.row);
+
+    // MHA has no group to pack: the packed row is refused for the graph, not as a kernel.
+    const auto mhaIn = denseInput(2, 8, 8, 128, 128, 128);
+    const auto mhaPolicy = planOf(general_bwd::resolvePlan(mhaIn, traits));
+    general_bwd::Selection packed;
+    packed.headPack = true;
+    EXPECT_TRUE(std::holds_alternative<general_bwd::Decline>(
+        general_bwd::resolveCandidate(mhaIn, traits, mhaPolicy, packed)));
+
+    // A tuned entry of another performance class is not offered to this graph.
+    const generated::TunedKey* other = nullptr;
+    for(const auto& entry : generated::TUNED_KEYS)
+    {
+        if(entry.arch == traits.arch && entry.headSize != mhaIn.headSize)
+        {
+            other = &entry;
+            break;
+        }
+    }
+    ASSERT_NE(other, nullptr);
+    general_bwd::Selection foreign;
+    foreign.tuned = other;
+    EXPECT_TRUE(std::holds_alternative<general_bwd::Decline>(
+        general_bwd::resolveCandidate(mhaIn, traits, mhaPolicy, foreign)));
+}
+
+TEST(TestAttentionGeneralBwdGeometry, EveryTunedEntryIsFoundByItsId)
+{
+    for(const auto& entry : generated::TUNED_KEYS)
+    {
+        EXPECT_EQ(general_bwd::tunedEntryById(entry.arch, entry.id), &entry) << entry.key;
+    }
+    EXPECT_EQ(general_bwd::tunedEntryById("gfx942", 0), nullptr)
+        << "id 0 is the class default, not an entry";
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

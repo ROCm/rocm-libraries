@@ -117,8 +117,14 @@ launch_surface:
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionGeneralBwdNative.cpp:attentionGeneralBwdKernelMatches
     kmd_fields: [dtype, head_size, seq_mode, stage_vec, worklist, rows_per_cta, narrow_vec, dkv_mode, mask_class, dq_mode, head_pack, lb_mirror, lb_interleave, tuning_key, main_block_n, main_worklist, main_static_scale]
     guard: >
-      kernel_match encodes every slot field of the candidate and returns false unless each
-      equals the token the graph match bound; a missing field or unknown value never
-      matches and is logged once. prepare() refuses a kernel whose fields or launch symbols
-      differ from the plan's.
+      The prep kernel_match encodes every prep field and returns false unless each equals the
+      token the graph match bound. The main kernel_match does the same for the class the graph
+      pins (dtype, head_size, seq_mode, stage_vec, dkv_mode, mask_class, dq_mode) and leaves the
+      tile, load-balance, head-pack, scale and work-list fields free. The candidate filter
+      then keeps the main kernels whose own plan resolves for the graph and the device and
+      leaves the prep launch and the workspace layout of the engine's pick unchanged
+      (resolveCandidate); main_score puts the engine's pick first. A missing field or unknown
+      value never matches and is logged once. prepare() builds the main plan from the kernel it
+      is given and refuses a kernel that is not such a candidate, or a kernel whose fields or
+      launch symbols differ from its plan's.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionGeneralBwdMatch.cpp

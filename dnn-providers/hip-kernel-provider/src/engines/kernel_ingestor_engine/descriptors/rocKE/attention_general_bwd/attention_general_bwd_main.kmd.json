@@ -59,6 +59,30 @@
     {
       "name": "main_static_scale",
       "type": "string"
+    },
+    {
+      "name": "tuning_key_id",
+      "type": "int"
+    },
+    {
+      "name": "head_pack_on",
+      "type": "int"
+    },
+    {
+      "name": "lb_mirror_on",
+      "type": "int"
+    },
+    {
+      "name": "lb_interleave_on",
+      "type": "int"
+    },
+    {
+      "name": "worklist_on",
+      "type": "int"
+    },
+    {
+      "name": "static_scale_id",
+      "type": "int"
     }
   ]
 }

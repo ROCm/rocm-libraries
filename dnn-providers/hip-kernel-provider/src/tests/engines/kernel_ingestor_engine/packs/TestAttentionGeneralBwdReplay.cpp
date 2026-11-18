@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -34,7 +35,9 @@
  * layout and every launch with its kernel symbol, grid, block and each kernarg in ABI order.
  * The C++ lowering, checks and plan must reproduce it exactly, through both the evaluator
  * and the registered graph matcher. For an accepted graph the kernel matcher must then pick
- * exactly one prep and one main kernel of the arch's catalog, the ones the plan names.
+ * exactly one prep kernel of the arch's catalog, the one the plan names, and the main
+ * candidates (the class match, then the candidate filter) must hold the plan's main kernel
+ * once, beside the alternates that can stand in for it.
  *
  * The committed subset runs here. `HKP_GENERAL_BWD_CORPUS` points the suite at a full
  * corpus (a file, or a directory of `corpus_<arch>.jsonl`) instead.
@@ -56,6 +59,8 @@ struct ReplayTally
     std::size_t accepts = 0;
     std::size_t launches = 0;
     std::size_t failures = 0;
+    std::size_t candidates = 0;
+    std::size_t withAlternates = 0;
     std::map<std::string, std::size_t> codes;
     std::map<std::string, std::size_t> mainKernelsHit;
 };
@@ -72,6 +77,10 @@ public:
             std::string(GRAPH_MATCHER_SYMBOL));
         _kernelMatcher = hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
             std::string(KERNEL_MATCHER_SYMBOL));
+        _candidateFilter = hipdnn_plugin_sdk::ingestor::CandidateFilterRegistry::resolve(
+            std::string(KERNEL_MATCHER_SYMBOL));
+        _mainScore = hipdnn_plugin_sdk::ingestor::ScoreRegistry::resolve(
+            "hipkernel.attention_general_bwd.main_score");
     }
 
     void run(const json& entry)
@@ -287,12 +296,21 @@ private:
                         const BoundTokens& bound,
                         const general_bwd::Plan& plan)
     {
-        std::vector<const KernelDefinition*> mains;
+        std::vector<const KernelDefinition*> admitted;
         for(const auto& kernel : _kernels.main)
         {
             if(_kernelMatcher(context, bound, kernel))
             {
-                mains.push_back(&kernel);
+                admitted.push_back(&kernel);
+            }
+        }
+        const auto keep = _candidateFilter(context, bound, admitted);
+        std::vector<const KernelDefinition*> mains;
+        for(std::size_t i = 0; i < admitted.size() && i < keep.size(); ++i)
+        {
+            if(keep[i])
+            {
+                mains.push_back(admitted[i]);
             }
         }
         std::vector<const KernelDefinition*> preps;
@@ -303,17 +321,34 @@ private:
                 preps.push_back(&kernel);
             }
         }
-        if(mains.size() != 1 || preps.size() != 1)
+        if(keep.size() != admitted.size() || preps.size() != 1)
         {
-            fail("kernel_match selected " + std::to_string(preps.size()) + " prep and "
-                 + std::to_string(mains.size()) + " main kernels, expected one of each");
+            fail("kernel_match selected " + std::to_string(preps.size())
+                 + " prep kernels, expected "
+                   "one, and the candidate filter answered "
+                 + std::to_string(keep.size()) + " flags for " + std::to_string(admitted.size())
+                 + " main kernels");
             return;
         }
-        if(mains.front()->name != plan.row->mainKernel)
+        // Tuned keys can share one binary, so the pick is the candidate the native score ranks
+        // first (its tuning key and head pack are the plan's), not the one with the plan's name.
+        std::vector<const KernelDefinition*> picks;
+        for(const auto* kernel : mains)
         {
-            fail("kernel_match selected main kernel " + mains.front()->name + ", the plan names "
-                 + std::string(plan.row->mainKernel));
+            if(_mainScore(context, bound, *kernel) > 0.0)
+            {
+                picks.push_back(kernel);
+            }
         }
+        if(picks.size() != 1 || picks.front()->name != plan.row->mainKernel)
+        {
+            fail("the main candidates hold " + std::to_string(picks.size())
+                 + " picks of the native score, expected one named "
+                 + std::string(plan.row->mainKernel));
+            return;
+        }
+        _tally.candidates += mains.size();
+        _tally.withAlternates += mains.size() > 1 ? 1 : 0;
         if(preps.front()->name != plan.row->prepKernel)
         {
             fail("kernel_match selected prep kernel " + preps.front()->name + ", the plan names "
@@ -327,6 +362,8 @@ private:
     ArchKernels _kernels;
     hipdnn_plugin_sdk::ingestor::GraphMatchFn _graphMatcher;
     hipdnn_plugin_sdk::ingestor::KernelMatcherFn _kernelMatcher;
+    hipdnn_plugin_sdk::ingestor::CandidateFilterFn _candidateFilter;
+    hipdnn_plugin_sdk::ingestor::ScoreFn _mainScore;
     ReplayTally _tally;
     std::string _id;
 };
@@ -359,7 +396,9 @@ TEST_P(TestAttentionGeneralBwdReplay, EveryCorpusEntryReplaysItsVerdictAndPlan)
     std::ostringstream summary;
     summary << arch << ": " << tally.entries << " entries, " << tally.accepts << " accepted, "
             << tally.launches << " launches, " << tally.mainKernelsHit.size()
-            << " distinct main kernels, " << tally.failures << " failures; codes:";
+            << " distinct main kernels, " << tally.candidates << " main candidates ("
+            << tally.withAlternates << " graphs with alternates), " << tally.failures
+            << " failures; codes:";
     for(const auto& [code, count] : tally.codes)
     {
         summary << ' ' << code << '=' << count;
