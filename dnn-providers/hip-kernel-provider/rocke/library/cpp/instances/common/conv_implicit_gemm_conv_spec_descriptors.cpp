@@ -1217,7 +1217,6 @@ static bool rocke_conv_fwd_rdna4_knob_ok(const rocke_implicit_gemm_conv_spec_t* 
  * (false + reason), or true. The gfx12-RDNA-only restriction is
  * rocke_conv_fwd_rdna4_knob_ok's. */
 static bool rocke_conv_fwd_regt_prefetch_ok(const rocke_implicit_gemm_conv_spec_t* s,
-                                            const char* family,
                                             char* reason,
                                             size_t reason_cap)
 {
@@ -1227,11 +1226,6 @@ static bool rocke_conv_fwd_regt_prefetch_ok(const rocke_implicit_gemm_conv_spec_
     {
         ROCKE_SPEC_FAIL(
             reason, reason_cap, "regt_prefetch (fwd) must be 0 or 1 (got %d)", s->regt_prefetch);
-    }
-    if(family == NULL || strcmp(family, "wmma") != 0)
-    {
-        ROCKE_SPEC_FAIL(
-            reason, reason_cap, "regt_prefetch (fwd) is enabled only on WMMA (wave32) targets");
     }
     if(s->pipeline == NULL || strcmp(s->pipeline, "mem") != 0)
     {
@@ -1536,7 +1530,7 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
             }
         }
     }
-    if(!rocke_conv_fwd_regt_prefetch_ok(s, family, reason, reason_cap))
+    if(!rocke_conv_fwd_regt_prefetch_ok(s, reason, reason_cap))
     {
         return false;
     }

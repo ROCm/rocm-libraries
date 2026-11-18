@@ -830,6 +830,13 @@ static void rdna4_bf16(rocke_implicit_gemm_conv_spec_t* spec)
     spec->dtype_d = "bf16";
 }
 
+/* Mirrors _RDNA4_GROUPED in conv_implicit_gemm_emit.py. */
+static void rdna4_grouped(rocke_implicit_gemm_conv_spec_t* spec)
+{
+    spec->problem = rocke_conv_problem_make(1, 10, 10, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+    spec->problem.groups = 2;
+}
+
 static int make_cfg_rdna4(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
 {
     rdna4_base(spec, arch);
@@ -846,8 +853,7 @@ static int make_cfg_rdna4(int idx, rocke_implicit_gemm_conv_spec_t* spec, const 
         spec->uniform_k_decode = true;
         return 0;
     case 89:
-        spec->problem = rocke_conv_problem_make(1, 10, 10, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
-        spec->problem.groups = 2;
+        rdna4_grouped(spec);
         spec->uniform_k_decode = true;
         rdna4_bf16(spec);
         return 0;
@@ -868,8 +874,7 @@ static int make_cfg_rdna4(int idx, rocke_implicit_gemm_conv_spec_t* spec, const 
         rdna4_bf16(spec);
         return 0;
     case 94:
-        spec->problem = rocke_conv_problem_make(1, 10, 10, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
-        spec->problem.groups = 2;
+        rdna4_grouped(spec);
         spec->regt_prefetch = 1;
         return 0;
     case 95: /* gfx1250: rejected */
@@ -893,8 +898,7 @@ static int make_cfg_rdna4(int idx, rocke_implicit_gemm_conv_spec_t* spec, const 
         spec->uniform_k_decode = true;
         return 0;
     case 99: /* grouped */
-        spec->problem = rocke_conv_problem_make(1, 10, 10, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
-        spec->problem.groups = 2;
+        rdna4_grouped(spec);
         spec->lds_swizzle = true;
         return 0;
     case 100: /* lds_k_pad: rejected */
@@ -909,13 +913,11 @@ static int make_cfg_rdna4(int idx, rocke_implicit_gemm_conv_spec_t* spec, const 
         spec->uniform_k_decode = true;
         return 0;
     case 102: /* group_fast_raster */
-        spec->problem = rocke_conv_problem_make(1, 10, 10, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
-        spec->problem.groups = 2;
+        rdna4_grouped(spec);
         spec->group_fast_raster = true;
         return 0;
     case 103:
-        spec->problem = rocke_conv_problem_make(1, 10, 10, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
-        spec->problem.groups = 2;
+        rdna4_grouped(spec);
         spec->group_fast_raster = true;
         spec->uniform_k_decode = true;
         spec->lds_swizzle = true;

@@ -183,7 +183,12 @@ class TestFwdRdnaGrid(unittest.TestCase):
         self.assertEqual(len(jobs), len(plain) + n_knob)
 
     def test_tile_k_128_axis_is_rdna4_forward_only_and_appended(self):
-        from kernels.conv.aot_jobs import CACHE_TILE_K, _geometries, _grid_axes
+        from kernels.conv.aot_jobs import (
+            CACHE_TILE_K,
+            CACHE_WGRAD_DEEPK_GEOMETRIES,
+            _geometries,
+            _grid_axes,
+        )
         from rocke.core.arch import ArchTarget
 
         for arch, wave, family, rdna4 in (
@@ -195,7 +200,13 @@ class TestFwdRdnaGrid(unittest.TestCase):
             for direction in ("fwd", "wgrad", "dgrad"):
                 with self.subTest(arch=arch, direction=direction):
                     t = ArchTarget.from_gfx(arch)
-                    geos = list(_geometries(t, family, "fp16", "fp16", direction))
+                    # WMMA wgrad's own deep-K geometries (one is tile_k 128)
+                    # are not this axis.
+                    geos = [
+                        g
+                        for g in _geometries(t, family, "fp16", "fp16", direction)
+                        if tuple(g[:5]) not in CACHE_WGRAD_DEEPK_GEOMETRIES
+                    ]
                     deep = [i for i, g in enumerate(geos) if g[2] == 128]
                     self.assertEqual(bool(deep), rdna4 and direction == "fwd")
                     if deep:

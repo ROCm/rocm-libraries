@@ -899,7 +899,7 @@ def is_valid_spec_for_problem(
     return True, "ok"
 
 
-def fwd_regt_prefetch_reason(spec: ImplicitGemmConvSpec, family: str) -> Optional[str]:
+def fwd_regt_prefetch_reason(spec: ImplicitGemmConvSpec) -> Optional[str]:
     """Why ``spec.regt_prefetch`` cannot be built, or ``None``.
 
     The register-prefetch K loop replaces the plain ``mem`` loop of the sync
@@ -911,8 +911,6 @@ def fwd_regt_prefetch_reason(spec: ImplicitGemmConvSpec, family: str) -> Optiona
         return None
     if spec.regt_prefetch != 1:
         return f"regt_prefetch (fwd) must be 0 or 1 (got {spec.regt_prefetch})"
-    if family != "wmma":
-        return "regt_prefetch (fwd) is enabled only on WMMA (wave32) targets"
     if spec.pipeline != "mem":
         return f"regt_prefetch is the 'mem' pipeline's K loop (got {spec.pipeline!r})"
     if spec.split_k_cluster:
@@ -1217,7 +1215,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         ):
             if flag:
                 return False, f"uniform_k_decode does not support {label}"
-    _why = fwd_regt_prefetch_reason(spec, family)
+    _why = fwd_regt_prefetch_reason(spec)
     if _why is not None:
         return False, _why
     if spec.lds_swizzle:
