@@ -26,6 +26,7 @@ from ..ExecutionPolicy import isPersistentDataParallel, isStreamK, hasStaticAssi
 from rocisa.code import SignatureBase
 from rocisa.enum import SignatureValueKind as SVK
 from ..Component import Signature
+from ..CustomKernels import magicSizeSemantic
 from ..Common import DataDirection
 from ..Common.ScaleAlphaVec import scaleAlphaVectorMode
 from ..Activation import ActivationType
@@ -385,13 +386,17 @@ class SignatureDefault(Signature):
             userArgumentsInfo.gemmArgumentSize += 4
 
         for idxChar in kernel["PackedC0IdxChars"][:-1]:
-            signature.addArg("MagicNumberSize%s"%idxChar, SVK.SIG_VALUE,               "u32")
-            signature.addArg( "MagicShiftSize%s"%idxChar, SVK.SIG_VALUE,               "u32")
+            signature.addArg(magicSizeSemantic("MagicNumberSize", kernel["MagicDivAlg"]) + idxChar,
+                             SVK.SIG_VALUE, "u32")
+            signature.addArg(magicSizeSemantic("MagicShiftSize", kernel["MagicDivAlg"]) + idxChar,
+                             SVK.SIG_VALUE, "u32")
 
         if isPersistentDataParallel(kernel):
             for idxChar in kernel["PackedC1IdxChars"][:-1]:
-                signature.addArg("MagicNumberSize%s"%idxChar, SVK.SIG_VALUE,           "u32")
-                signature.addArg( "MagicShiftSize%s"%idxChar, SVK.SIG_VALUE,           "u32")
+                signature.addArg(magicSizeSemantic("MagicNumberSize", kernel["MagicDivAlg"]) + idxChar,
+                                 SVK.SIG_VALUE, "u32")
+                signature.addArg(magicSizeSemantic("MagicShiftSize", kernel["MagicDivAlg"]) + idxChar,
+                                 SVK.SIG_VALUE, "u32")
 
         # These are fixed sizes
         userArgumentsInfo.gemmArgumentSize += userArgumentsInfo.alphaMaxSize
