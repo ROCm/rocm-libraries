@@ -20,6 +20,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+# DO NOT MERGE: no-op marker that puts real project source in this PR's diff
+# alongside the therock-multi-arch-ci.yml rewire. The pair is the point: the
+# workflow edit matches EXTERNAL_REPO_CI_PATTERNS but this file does not, so
+# the diff is CI-affecting without being CI-only and must hold test_type at
+# "standard" rather than dropping to "quick".
+
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 cmake_policy(VERSION 3.18...3.25)
 
