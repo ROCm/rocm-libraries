@@ -28,3 +28,6 @@
 /conv_wrw_f16_rdna12.kdp.json
 /conv_wrw_f32_x3rdna11.kdp.json
 /conv_wrw_f32_x3rdna12.kdp.json
+/conv_wrw_bf16_gfx950b.kdp.json
+/conv_wrw_f16_gfx950b.kdp.json
+/conv_wrw_f32_x3gfx950b.kdp.json

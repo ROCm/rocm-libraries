@@ -1472,9 +1472,11 @@ def dws_of(c):
 
 
 def family_of(c):
-    """The pack a config ships in: the direct loop, gfx950's 16 x 32 / 32 x 16 atoms, the other
-    MFMA atoms, RDNA's WMMA per generation (gfx11, gfx12), or the FMA loops. The 32 x 32 atom's
-    packed rows ship in a pack without gfx950, which has its own measured packed-rows tiles.
+    """The pack a config ships in: the direct loop, gfx950's 16 x 32 / 32 x 16 atoms (3-wide
+    filters in one pack, every other width in a second, each under the 500 KB file cap), the
+    other MFMA atoms, RDNA's WMMA per generation (gfx11, gfx12), or the FMA loops. The 32 x 32
+    atom's packed rows ship in a pack without gfx950, which has its own measured packed-rows
+    tiles.
     """
     if c["loop"] == 5:
         return "direct"
@@ -1489,7 +1491,7 @@ def family_of(c):
     if c["atom"].startswith("wmma12"):
         return "rdna12"
     if c["atom"].startswith(("mfma16x32", "mfma32x16")):
-        return "gfx950"
+        return "gfx950" if c["s"] == 3 else "gfx950b"
     return "cdna"
 
 
