@@ -1183,9 +1183,9 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
      * live-interval start, so A lands at offset 0 and the C tile -- live only
      * after the last A/B read -- reuses it. Charging the sum over-counted by a
      * whole C tile and rejected specs the emitter builds and runs fine.
-     * Counted as max only where gemm.cshuffle_lds_aliased is set (gfx1250,
-     * where it has run on silicon); the other targets keep the sum until they
-     * have been run with it.
+     * Counted as max only where the arch data sets gemm.cshuffle_lds_aliased,
+     * which it does once the aliased GEMM has run on that arch; the other
+     * targets keep the sum.
      * cshuffle_no_alias (C marked exclusive) and persistent (the grid-stride
      * tile loop makes A/B and C interfere) really are additive. */
     if(c_bytes != 0 && rocke_ati_gemm_caps(target)->cshuffle_lds_aliased

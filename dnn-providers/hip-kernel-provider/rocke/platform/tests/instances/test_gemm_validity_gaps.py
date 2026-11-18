@@ -13,7 +13,8 @@ why every other test in this directory missed them.
    to push a geometry that runs fine past the cap -- it silently removed the
    deepest tiles from every cshuffle sweep, and a perf conclusion was drawn
    from the resulting (smaller) champion before anyone noticed. The gate
-   counts ``max(AB, C)`` on gfx1250 only, where it has run on silicon.
+   counts ``max(AB, C)`` only on the arches whose data sets
+   ``gemm.cshuffle_lds_aliased`` -- those the aliased GEMM has run on.
 
 2. **``lds_swizzle`` was admitted on the WMMA path**, where the store side
    permutes the LDS column and ``_emit_wmma_phase`` never applies the inverse.
@@ -173,6 +174,64 @@ class TestCshuffleLdsBudget(unittest.TestCase):
         self.assertTrue(ok, why)
         ab_single, _, _ = _ab_lds_plan(spec, ARCH)
         self.assertEqual(_emitted_lds_bytes(spec), ab_single * 2)
+
+
+def _validator_lds_terms(spec, arch: str) -> tuple[int, int]:
+    """The (A/B, C) bytes the validator charges a non-TDM cshuffle spec."""
+    from rocke.instances.common.gemm_universal import _ab_lds_plan
+
+    ab_single, _, ab_double = _ab_lds_plan(spec, arch)
+    c_bytes = spec.tile.tile_m * spec.tile.tile_n * 2  # 16-bit C
+    return ab_single * (2 if ab_double else 1), c_bytes
+
+
+class TestCshuffleLdsBudgetGfx950(unittest.TestCase):
+    """The aliased budget on gfx950, where the sum rejected a tile that fits."""
+
+    def test_aliased_spec_is_admitted_and_fits_what_the_emitter_allocates(self):
+        from rocke.core.arch import ArchTarget
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        spec = _geometry_spec(GFX950_CSHUFFLE, dtype="fp16", epilogue="cshuffle")
+        ok, why = is_valid_spec(spec, arch="gfx950")
+        self.assertTrue(ok, f"aliased cshuffle spec rejected: {why}")
+
+        emitted = _emitted_lds_bytes(spec, arch="gfx950")
+        self.assertEqual(
+            emitted,
+            max(_validator_lds_terms(spec, "gfx950")),
+            "the emitter no longer aliases the C tile onto A/B on gfx950; if "
+            "that is deliberate, clear gemm.cshuffle_lds_aliased for gfx950",
+        )
+        self.assertLessEqual(emitted, ArchTarget.from_gfx("gfx950").lds_capacity_bytes)
+
+    def test_the_sum_would_have_rejected_this_spec(self):
+        from rocke.core.arch import ArchTarget
+
+        spec = _geometry_spec(GFX950_CSHUFFLE, dtype="fp16", epilogue="cshuffle")
+        ab_bytes, c_bytes = _validator_lds_terms(spec, "gfx950")
+        cap = ArchTarget.from_gfx("gfx950").lds_capacity_bytes
+
+        self.assertGreater(
+            ab_bytes + c_bytes, cap, "this geometry no longer exercises the alias"
+        )
+        self.assertLessEqual(max(ab_bytes, c_bytes), cap)
+
+    def test_no_alias_and_persistent_are_still_charged_additively(self):
+        """Both opt-outs give the C tile its own bytes, so the sum is the cost."""
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        for trait_kw in ({"cshuffle_no_alias": True}, {"persistent": True}):
+            with self.subTest(**trait_kw):
+                spec = _geometry_spec(
+                    GFX950_CSHUFFLE, dtype="fp16", epilogue="cshuffle", **trait_kw
+                )
+                ok, why = is_valid_spec(spec, arch="gfx950")
+                self.assertFalse(ok)
+                self.assertEqual(
+                    why,
+                    "LDS budget 196608 > 163840 cap (AB=65536, C=131072) on gfx950",
+                )
 
 
 class TestWmmaRejectsLdsSwizzle(unittest.TestCase):
@@ -420,8 +479,9 @@ class TestAtomWithoutLaneMapIsRejected(unittest.TestCase):
                         self.assertTrue(_resolve_mma_op(spec, ARCH).has_ab_layouts())
 
 
-def _bf16_spec(arch_tile, *, epilogue="default", **trait_kw):
-    """A bf16 universal GEMM with the given (tile, warps, warp tile) geometry."""
+def _geometry_spec(arch_tile, *, dtype="bf16", epilogue="default", **trait_kw):
+    """A universal GEMM with one ``dtype`` for A, B and C and the given
+    (tile, warps, warp tile, pipeline, wave size) geometry."""
     from rocke.instances.common.gemm_universal import (
         DataSpec,
         TileSpec,
@@ -447,9 +507,9 @@ def _bf16_spec(arch_tile, *, epilogue="default", **trait_kw):
             pipeline=pipeline, scheduler="intrawave", epilogue=epilogue, **trait_kw
         ),
         data=DataSpec(
-            dtype_a="bf16",
-            dtype_b="bf16",
-            dtype_c="bf16",
+            dtype_a=dtype,
+            dtype_b=dtype,
+            dtype_c=dtype,
             dtype_acc="fp32",
             layout="RCR",
         ),
@@ -457,31 +517,39 @@ def _bf16_spec(arch_tile, *, epilogue="default", **trait_kw):
     )
 
 
-# gfx950 MFMA, 256x256x64 cshuffle: AB = 64 KiB, C = 128 KiB. The sum (192 KiB)
-# exceeds the 160 KiB cap; the max (128 KiB) would not.
-CDNA_CSHUFFLE = ((256, 256, 64), (2, 2), (32, 32, 16), "compv3", 64)
+# gfx942 MFMA, 256x128x32 cshuffle: AB = 24 KiB, C = 64 KiB. The sum (88 KiB)
+# exceeds the 64 KiB cap; the max (64 KiB) would not.
+CDNA_CSHUFFLE = ((256, 128, 32), (2, 2), (32, 32, 8), "compv3", 64)
+# gfx950 MFMA, 256x256x64 cshuffle: the validator charges AB = 64 KiB and
+# C = 128 KiB. The sum (192 KiB) exceeds the 160 KiB cap; the max (128 KiB) fits.
+GFX950_CSHUFFLE = ((256, 256, 64), (4, 4), (32, 32, 16), "compv4", 64)
 # gfx1151 WMMA, the 16x16x16 atom on the mem pipeline.
 RDNA_WMMA = ((64, 64, 32), (2, 2), (16, 16, 16), "mem", 32)
 
 
 class TestTargetScope(unittest.TestCase):
-    """The aliased cshuffle budget is a gfx1250 rule; the WMMA lds_swizzle
-    reject covers every WMMA target (gfx1151 returns wrong outputs with it)."""
+    """The aliased cshuffle budget applies only where the arch data sets
+    ``gemm.cshuffle_lds_aliased``; the WMMA lds_swizzle reject covers every
+    WMMA target (gfx1151 returns wrong outputs with it)."""
 
-    def test_cdna_keeps_the_summed_cshuffle_budget(self):
+    def test_an_arch_without_the_flag_keeps_the_summed_cshuffle_budget(self):
+        from rocke.core.arch import ArchTarget
         from rocke.instances.common.gemm_universal import is_valid_spec
 
+        self.assertFalse(ArchTarget.from_gfx("gfx942").gemm.cshuffle_lds_aliased)
         ok, why = is_valid_spec(
-            _bf16_spec(CDNA_CSHUFFLE, epilogue="cshuffle"), "gfx950"
+            _geometry_spec(CDNA_CSHUFFLE, epilogue="cshuffle"), "gfx942"
         )
-        self.assertFalse(ok, "max(AB, C) admitted a CDNA cshuffle spec")
-        self.assertIn("LDS budget", why)
+        self.assertFalse(ok, "max(AB, C) admitted a cshuffle spec on gfx942")
+        self.assertEqual(
+            why, "LDS budget 90112 > 65536 cap (AB=24576, C=65536) on gfx942"
+        )
 
     def test_rdna_wmma_rejects_lds_swizzle(self):
         from rocke.instances.common.gemm_universal import is_valid_spec
 
-        self.assertTrue(is_valid_spec(_bf16_spec(RDNA_WMMA), "gfx1151")[0])
-        ok, why = is_valid_spec(_bf16_spec(RDNA_WMMA, lds_swizzle=True), "gfx1151")
+        self.assertTrue(is_valid_spec(_geometry_spec(RDNA_WMMA), "gfx1151")[0])
+        ok, why = is_valid_spec(_geometry_spec(RDNA_WMMA, lds_swizzle=True), "gfx1151")
         self.assertFalse(ok)
         self.assertIn("lds_swizzle", why)
 

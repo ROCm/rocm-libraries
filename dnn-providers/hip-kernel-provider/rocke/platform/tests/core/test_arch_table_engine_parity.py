@@ -216,6 +216,16 @@ class TestArchTableEngineParity(unittest.TestCase):
         )
         self.assertEqual(cpp_caps["gfx1201"]["wmma_atoms"], [[16, 16, 16]])
         self.assertEqual(cpp_caps["gfx942"]["wmma_atoms"], [])
+        # A block that sets one flag leaves the others at their defaults.
+        self.assertEqual(
+            cpp_caps["gfx950"],
+            {
+                "wmma_atoms": [],
+                "fp8_ab": False,
+                "wmma_cshuffle": False,
+                "cshuffle_lds_aliased": True,
+            },
+        )
 
     def test_gemm_wmma_atoms_are_sorted(self):
         # The C++ validator lists them in table order where Python sorts them,
