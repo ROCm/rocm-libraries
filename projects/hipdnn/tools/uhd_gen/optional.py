@@ -30,17 +30,15 @@ from .features import (
 #: These are markers, not API meanings.
 SENTINEL = -1
 
-#: Read for an unset ReLU upper clip, whose API meaning is no upper bound: the numeric maximum
-#: of a float, which the expression language cannot write (a literal stays below 1e15). The
-#: largest literal that fits stands in for it, so a model still orders "no bound" above every
-#: real bound; SENTINEL would order it below them, as the tightest clip. A marker, not an API
-#: meaning.
-UNBOUNDED_CLIP = 1e14
+#: Read for an unset ReLU upper clip, whose API meaning is no upper bound: cuDNN's default is
+#: the float maximum (its double maximum clamped to float, cudnn-frontend `pointwise.h`). A
+#: literal stays below 1e15, so the expression writes it as an exact product:
+#: (2**24 - 1) * 2**40 * 2**40 * 2**24 = 3.4028234663852886e38.
+FLOAT_MAX = {"*": [16777215, 1099511627776, 1099511627776, 16777216]}
 
 #: What the API means when an optional attribute or a vector element is unset, keyed by the
 #: optional feature's pattern: the number, or an expression of the reading node's own operands
-#: (`{node}` is its index). Where no number or expression says it, a marker stands in:
-#: SENTINEL or UNBOUNDED_CLIP.
+#: (`{node}` is its index). Where unset has no number, SENTINEL stands in.
 ATTRIBUTE_DEFAULTS: dict[str, object] = {
     # SDPA forward and backward (SdpaAttributes.hpp, SdpaBackwardAttributes.hpp: the scale is
     # 1.0 when neither a value nor a tensor is set; the fbs files state no default). A scale
@@ -53,7 +51,7 @@ ATTRIBUTE_DEFAULTS: dict[str, object] = {
     "graph.nodes[*].max_seq_len_kv": SENTINEL,  # not declared
     # Pointwise (hipdnn_frontend/attributes/PointwiseAttributes.hpp; cuDNN's defaults)
     "graph.nodes[*].relu_lower_clip": 0.0,
-    "graph.nodes[*].relu_upper_clip": UNBOUNDED_CLIP,  # no upper bound
+    "graph.nodes[*].relu_upper_clip": FLOAT_MAX,  # no upper bound
     "graph.nodes[*].relu_lower_clip_slope": 0.0,
     "graph.nodes[*].swish_beta": 1.0,
     "graph.nodes[*].elu_alpha": 1.0,

@@ -92,8 +92,7 @@ X_RANK = 4
 # What the API means by an unset optional attribute (or a vector element past the end),
 # written from the schemas and the frontend rather than read back from ATTRIBUTE_DEFAULTS.
 # A boolean reads as 0.0 (false) or 1.0 (true). Where unset has no number, a marker stands in:
-# -1 for an unset uid or sequence length, and for the upper clip the largest literal the
-# expression language admits (below 1e15), since numeric max cannot be written in it.
+# -1 for an unset uid or sequence length.
 UNSET_MEANINGS = {
     "graph.nodes[*].attn_scale_value": 1.0,  # SdpaAttributes.hpp: 1.0 with no value or tensor
     "graph.nodes[*].dropout_probability": 0.0,  # no dropout
@@ -102,7 +101,8 @@ UNSET_MEANINGS = {
     "graph.nodes[*].right_bound": -1.0,  # unbounded
     "graph.nodes[*].max_seq_len_kv": -1.0,  # not declared
     "graph.nodes[*].relu_lower_clip": 0.0,  # cuDNN pointwise defaults
-    "graph.nodes[*].relu_upper_clip": 1e14,  # no upper bound (numeric max): a marker
+    # cuDNN's unset upper clip is the float maximum (numpy.finfo(numpy.float32).max)
+    "graph.nodes[*].relu_upper_clip": 3.4028234663852886e38,
     "graph.nodes[*].relu_lower_clip_slope": 0.0,
     "graph.nodes[*].swish_beta": 1.0,
     "graph.nodes[*].elu_alpha": 1.0,

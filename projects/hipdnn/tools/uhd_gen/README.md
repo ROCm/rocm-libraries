@@ -696,10 +696,9 @@ each node is taken to be any type having every operand the signature reads at it
 - `train` reads every such reference through `value_or_default`, with the default
   `uhd_gen/optional.py` holds: the API's meaning of "unset" (1.0 for the SDPA scale, 0 for the
   dropout probability, 1/sqrt(K) for the GDN/KDA scale, the last axis of the input for a
-  BlockScaleQuantize `axis`, ...) or, where unset has no number, a marker: -1 (an omitted
-  tensor's fields, an unset uid or sequence length, unknown work, an engine-config constraint
-  the config does not pin) and 1e14 for an unset ReLU upper clip, whose meaning is numeric max,
-  which the expression language cannot write. A row without the feature trains
+  BlockScaleQuantize `axis`, the float maximum for a ReLU upper clip, ...) or, where unset has
+  no number, a marker: -1 (an omitted tensor's fields, an unset uid or sequence length, unknown
+  work, an engine-config constraint the config does not pin). A row without the feature trains
   on the value the runtime will read. A test fails when hipDNN gains an optional attribute
   the table does not cover.
 - `generate`'s automatic selection keeps a column some rows leave unbound when it is one of
