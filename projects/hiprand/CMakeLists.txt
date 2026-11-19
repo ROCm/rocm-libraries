@@ -20,6 +20,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+# DO NOT MERGE: no-op marker so this PR's diff is exactly one hipRAND file.
+# hipRAND is one of the three source_paths on TheRock's rand artifact, which is
+# the first artifact to set changed_projects_enabled in BUILD_TOPOLOGY.toml.
+# This PR is the end-to-end check that TheRock passes
+# changed_projects="projects/hiprand" through to the build and configures
+# math-libs with -DTHEROCK_ENABLE_ALL=OFF -DTHEROCK_ENABLE_RAND=ON instead of
+# enabling every math-libs artifact.
+
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 # --------------------------------------
