@@ -14,7 +14,10 @@ print it, ``<label> [@split_k=<d>[/full<t>]]``), binds it exactly as
   done, so counters and slots the kernel must reset itself are reused; the
   output is re-initialised before every launch (``--output-init``: zeroed, as
   the benchmark's verify does, or poisoned with 0xFF bytes to check the call
-  writes or clears every element itself). ``--fresh`` binds every launch anew
+  writes or clears every element itself: an element of the first output whose
+  bytes are all still 0xFF (``unwritten_elements``), or any non-finite element
+  (``nonfinite_elements``: a launch that accumulated into the poison), fails
+  the check). ``--fresh`` binds every launch anew
   instead (a freshly allocated, zeroed output and launch scratch each). The
   ``--batch`` launches of a round are queued back to back before they are read
   back. Reports identical yes/no, the number of differing launches and the
@@ -31,8 +34,9 @@ normal (std sqrt(2 / (C*Z*Y*X))), dY ~ N(0,1); ``--data uniform`` is the
 benchmark's U(-1, 1).
 
 Prints one ``RESULT {json}`` line. Exit status 0 when every check run passed
-(deterministic -- not checked with ``--no-det`` -- and, with ``--against``,
-identical to FILE), 1 when outputs differ, 2 on usage errors.
+(deterministic -- not checked with ``--no-det`` --, with ``--output-init
+poison`` no unwritten or non-finite element, and, with ``--against``, identical to FILE),
+1 when a check fails, 2 on usage errors.
 
 Example::
 
@@ -232,6 +236,16 @@ def _ordered(t):
     return torch.where(i < 0, -(i & 0x7FFFFFFF), i)
 
 
+def count_unwritten(t) -> int:
+    """Elements of ``t`` whose bytes are all 0xFF: the ``--output-init poison``
+    pattern, left in place by a launch that neither wrote nor cleared them (no
+    conv output holds the all-ones NaN from finite inputs)."""
+    import torch
+
+    u8 = t.contiguous().reshape(-1).view(torch.uint8).reshape(-1, t.element_size())
+    return int((u8 == 0xFF).all(dim=1).sum())
+
+
 def max_ulp(a, b) -> int:
     return int((_ordered(a) - _ordered(b)).abs().max())
 
@@ -267,7 +281,9 @@ def main(argv=None) -> int:
         choices=["zero", "poison"],
         default="zero",
         help="steady state: the output before every launch -- zeroed, or 0xFF bytes "
-        "(NaN in 16-bit dtypes) for a call that must write or clear all of it",
+        "(NaN in 16-bit dtypes) for a call that must write or clear all of it; "
+        "an element still all-0xFF, or non-finite, after the launch fails the "
+        "check",
     )
     ap.add_argument(
         "--acc", action="store_true", help="accuracy vs the fp64/fp32 reference"
@@ -454,6 +470,9 @@ def main(argv=None) -> int:
             "det_seconds": round(time.time() - t0, 2),
         }
     )
+    if init == 0xFF:
+        result["unwritten_elements"] = count_unwritten(outs_first)
+        result["nonfinite_elements"] = int((~torch.isfinite(outs_first)).sum())
     if args.save:
         torch.save(
             {
@@ -482,7 +501,12 @@ def main(argv=None) -> int:
     rt.free(A_dev)
     rt.free(B_dev)
     print("RESULT " + json.dumps(result), flush=True)
-    ok = (args.no_det or result["identical"]) and result.get("against_identical", True)
+    ok = (
+        (args.no_det or result["identical"])
+        and result.get("against_identical", True)
+        and result.get("unwritten_elements", 0) == 0
+        and result.get("nonfinite_elements", 0) == 0
+    )
     return 0 if ok else 1
 
 
