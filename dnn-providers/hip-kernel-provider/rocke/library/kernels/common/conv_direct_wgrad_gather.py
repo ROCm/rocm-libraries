@@ -37,6 +37,7 @@ from rocke.core.ir import I64, IRBuilder, KernelDef, Value
 from rocke.helpers.spec import ceil_div
 
 from kernels.common.conv_direct_grouped import (
+    direct_lds_dma_mfma_caps_reason,
     DirectConvProblem,
     _io_type,
     _mfma,
@@ -168,10 +169,15 @@ def is_valid_wgrad_gather_spec(
         return False, "dense layers only"
     if p.dtype not in ("fp16", "bf16"):
         return False, "fp16/bf16 only"
-    if not target.memory.has_ds_read_tr:
-        return False, f"needs ds_read_b64_tr_b16 (absent on {arch})"
-    if target.wave_size != 64 or target.async_lds_max_dwords < 4:
-        return False, f"needs wave64 + 16-byte buffer_load_lds (absent on {arch})"
+    why = direct_lds_dma_mfma_caps_reason(
+        target,
+        arch,
+        family="wgrad_gather",
+        bf16=p.dtype == "bf16",
+        needs_ds_read_tr=True,
+    )
+    if why is not None:
+        return False, why
     if p.kpg % _VEC:
         return False, "K must be a multiple of 8"
     if p.KW * p.cpg > 96:

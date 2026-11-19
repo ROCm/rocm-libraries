@@ -210,15 +210,9 @@ extern "C" bool rocke_direct_wgrad_gather_is_valid_spec(const rocke_direct_wgrad
     {
         why = "fp16/bf16 only";
     }
-    else if(!target->memory.has_ds_read_tr)
+    else if(rocke_direct_lds_dma_mfma_caps_reason(
+                target, arch, "wgrad_gather", 64, true, problem_is_bf16(p), msg, sizeof msg))
     {
-        ROCKE_ERR_SNPRINTF(msg, sizeof msg, "needs ds_read_b64_tr_b16 (absent on %s)", arch);
-        why = msg;
-    }
-    else if(target->wave_size != 64 || rocke_archtarget_async_lds_max_dwords(target) < 4)
-    {
-        ROCKE_ERR_SNPRINTF(
-            msg, sizeof msg, "needs wave64 + 16-byte buffer_load_lds (absent on %s)", arch);
         why = msg;
     }
     else if(p->kpg % kVec)

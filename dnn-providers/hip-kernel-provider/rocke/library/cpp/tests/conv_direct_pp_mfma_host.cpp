@@ -5,7 +5,9 @@
  * validators share: the capability gate
  * rocke_direct_lds_dma_mfma_caps_reason (rocke/instance_conv_direct_grouped.h),
  * the C++ twin of Python's direct_lds_dma_mfma_caps_reason, which fwd pp, dgrad
- * pp, fwd flex and the tiled wgrad all call.
+ * pp, fwd flex and the tiled and gather wgrad all call. The two wgrad
+ * validators have no host test of their own, so their gate calls are pinned
+ * here on real arches (gfx942: no transposing LDS read; gfx1100: wave32).
  *
  * Each stand-in target is gfx950 with exactly one capability removed (wave64,
  * the transposing LDS read, the 16-byte LDS DMA, mfma_f32_16x16x32), so each
@@ -24,6 +26,8 @@
 #include <initializer_list>
 
 #include "rocke/instance_conv_direct_pp_mfma_internal.hpp"
+#include "rocke/instance_conv_direct_wgrad_gather.h"
+#include "rocke/instance_conv_direct_wgrad_tiled.h"
 
 #define ERR_CAP 1024
 
@@ -295,10 +299,51 @@ static void test_shared_refusals(void)
     }
 }
 
+/* The wgrad validators call the gate with needs_ds_read_tr: gfx950 passes,
+ * gfx942 (no ds_read_b64_tr_b16) and gfx1100 (wave32) are refused by it. The
+ * problems are the ones test_direct_lds_dma_mfma_caps.py builds. */
+template <typename Spec, typename Valid>
+static void check_wgrad_gate(const char* family, const Spec& s, Valid is_valid)
+{
+    char why[ERR_CAP];
+    char want[ERR_CAP];
+    why[0] = '\0';
+    CHECK(is_valid(&s, "gfx950", why, sizeof why), "%s refused on gfx950: %s", family, why);
+
+    why[0] = '\0';
+    snprintf(want, sizeof want, "%s needs ds_read_b64_tr_b16 (absent on gfx942)", family);
+    CHECK(!is_valid(&s, "gfx942", why, sizeof why), "%s accepted on gfx942", family);
+    CHECK(strcmp(why, want) == 0, "%s gfx942 reason: got '%s', want '%s'", family, why, want);
+
+    why[0] = '\0';
+    snprintf(want, sizeof want, "%s is a wave64 MFMA kernel", family);
+    CHECK(!is_valid(&s, "gfx1100", why, sizeof why), "%s accepted on gfx1100", family);
+    CHECK(strcmp(why, want) == 0, "%s gfx1100 reason: got '%s', want '%s'", family, why, want);
+}
+
+static void test_wgrad_callers(void)
+{
+    rocke_direct_wgrad_tiled_spec_t tiled = rocke_direct_wgrad_tiled_spec_default();
+    tiled.problem = base_problem();
+    tiled.problem.cpg = 64;
+    tiled.problem.kpg = 64;
+    check_wgrad_gate("wgrad_tiled", tiled, rocke_direct_wgrad_tiled_is_valid_spec);
+
+    rocke_direct_wgrad_gather_spec_t gather = rocke_direct_wgrad_gather_spec_default();
+    gather.problem = base_problem();
+    gather.problem.H = 16;
+    gather.problem.W = 32;
+    gather.problem.cpg = 3;
+    gather.problem.kpg = 24;
+    gather.problem.stride = 2;
+    check_wgrad_gate("wgrad_gather", gather, rocke_direct_wgrad_gather_is_valid_spec);
+}
+
 int main(void)
 {
     test_each_capability_decides();
     test_shared_refusals();
+    test_wgrad_callers();
     if(g_failures != 0)
     {
         fprintf(stderr, "%d check(s) failed\n", g_failures);

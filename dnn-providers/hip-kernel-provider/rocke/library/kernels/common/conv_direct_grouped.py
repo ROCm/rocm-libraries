@@ -889,7 +889,7 @@ def direct_lds_dma_mfma_caps_reason(
     """Why an arch lacks what the LDS-DMA MFMA direct kernels need, or ``None``.
 
     One gate for every kernel that stages through the 16-byte LDS DMA and runs
-    ``mfma_f32_16x16x32`` (fwd pp / flex, dgrad pp, tiled wgrad). Checked in
+    ``mfma_f32_16x16x32`` (fwd pp / flex, dgrad pp, tiled and gather wgrad). Checked in
     this order: wave64 target and kernel, the transposing LDS read when
     ``needs_ds_read_tr``, the 16-byte LDS DMA, then the 16x16x32 MFMA of the
     operand dtype. ``family`` names the kernel in the reasons. The caller has

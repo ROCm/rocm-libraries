@@ -3,8 +3,9 @@
 """The one capability gate of the LDS-DMA MFMA direct conv kernels.
 
 ``direct_lds_dma_mfma_caps_reason`` (``kernels.common.conv_direct_grouped``) is
-what fwd pp / flex, dgrad pp and the tiled wgrad call to decide whether an arch
-can run them: wave64, the transposing LDS read (dgrad pp and wgrad only), the
+what fwd pp / flex, dgrad pp and the tiled and gather wgrad call to decide
+whether an arch can run them: wave64, the transposing LDS read (dgrad pp and the
+wgrads only), the
 16-byte LDS DMA, and ``mfma_f32_16x16x32``. Each stand-in target below is
 gfx950 with exactly one of those taken away, so every check is the deciding
 refusal in its own case; a check dropped from the helper fails one case.
@@ -33,6 +34,10 @@ from kernels.common.conv_direct_fwd_pp_mfma import FwdPpMfmaSpec, fwd_pp_mfma_re
 from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     direct_lds_dma_mfma_caps_reason,
+)
+from kernels.common.conv_direct_wgrad_gather import (
+    WgradGatherSpec,
+    is_valid_wgrad_gather_spec,
 )
 from kernels.common.conv_direct_wgrad_tiled import (
     DirectWgradTiledSpec,
@@ -133,16 +138,29 @@ def _callers():
     dgrad = DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(_p(136, 96)))
     flex = FwdFlexMfmaSpec(problem=_p(192, 136))
     wgrad = DirectWgradTiledSpec(problem=_p(64, 64))
+    gather = WgradGatherSpec(
+        problem=DirectConvProblem(
+            N=2, H=16, W=32, groups=1, cpg=3, kpg=24, stride=2, dtype="bf16"
+        )
+    )
+
+    def ok_or_why(valid):
+        return lambda a: (lambda ok, why: None if ok else why)(*valid(a))
+
     return (
         ("fwd_pp", lambda a: fwd_pp_mfma_reason(fwd, a), "fwd_pp_mfma", False),
         ("dgrad_pp", lambda a: dgrad_pp_mfma_reason(dgrad, a), "dgrad_pp_mfma", True),
         ("fwd_flex", lambda a: fwd_flex_mfma_reason(flex, a), "fwd_flex_mfma", False),
         (
             "wgrad_tiled",
-            lambda a: (lambda ok, why: None if ok else why)(
-                *is_valid_wgrad_tiled_spec(wgrad, a)
-            ),
+            ok_or_why(lambda a: is_valid_wgrad_tiled_spec(wgrad, a)),
             "wgrad_tiled",
+            True,
+        ),
+        (
+            "wgrad_gather",
+            ok_or_why(lambda a: is_valid_wgrad_gather_spec(gather, a)),
+            "wgrad_gather",
             True,
         ),
     )
@@ -167,3 +185,17 @@ def test_every_caller_uses_the_shared_gate(caller, name):
 def test_real_gfx950_passes_every_caller(caller):
     _, reason, _, _ = next(c for c in _callers() if c[0] == caller)
     assert reason("gfx950") is None
+
+
+@pytest.mark.parametrize(
+    "arch, want",
+    [
+        ("gfx942", "{f} needs ds_read_b64_tr_b16 (absent on gfx942)"),
+        ("gfx1100", "{f} is a wave64 MFMA kernel"),
+    ],
+)
+@pytest.mark.parametrize("caller", ["wgrad_tiled", "wgrad_gather"])
+def test_wgrad_callers_on_real_arches(caller, arch, want):
+    """The C++ host test ``conv_direct_pp_mfma_host`` pins the same texts."""
+    _, reason, family, _ = next(c for c in _callers() if c[0] == caller)
+    assert reason(arch) == want.format(f=family)

@@ -167,7 +167,7 @@ bool rocke_direct_problem_dims_reason(const rocke_direct_conv_problem_t* p,
                                       size_t why_cap);
 
 /* direct_lds_dma_mfma_caps_reason: the one capability gate of the LDS-DMA MFMA
- * direct kernels (fwd pp / flex, dgrad pp, tiled wgrad); twin of Python's
+ * direct kernels (fwd pp / flex, dgrad pp, tiled and gather wgrad); twin of Python's
  * direct_lds_dma_mfma_caps_reason. Returns true (and writes the reason) when
  * `target` is not wave64 or `wave_size` != 64 ("<family> is a wave64 MFMA
  * kernel"), lacks the transposing LDS read while `needs_ds_read_tr`, lacks the
