@@ -1156,7 +1156,7 @@ SPEC_CLASSES: dict[str, type[ConvDgradAotSpec]] = {
 }
 
 
-def gfx950_conv_dgrad_aot_helper_fields(
+def conv_dgrad_aot_helper_fields(
     spec: ConvDgradAotSpec,
 ) -> list[dict]:
     """The helper instances an MFMA instance's pipeline launches, in launch order,

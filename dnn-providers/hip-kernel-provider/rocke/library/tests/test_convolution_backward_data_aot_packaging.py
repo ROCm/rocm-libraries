@@ -64,11 +64,11 @@ from builders.common.convolution_backward_data import (
     build_gfx942_conv_dgrad_aot,
     build_gfx950_conv_dgrad_aot,
     build_gfx1250_conv_dgrad_aot,
+    conv_dgrad_aot_helper_fields,
     conv_dgrad_aot_launch_problem,
     conv_dgrad_aot_plan,
     conv_dgrad_aot_problem_for_request,
     conv_dgrad_aot_step_signature,
-    gfx950_conv_dgrad_aot_helper_fields,
     supports_conv_dgrad_aot,
     supports_conv_dgrad_aot_problem,
 )
@@ -307,7 +307,7 @@ def test_an_mfma_instance_names_the_helpers_its_pipeline_pulls_in(arch, catalog)
     for _, spec in catalog:
         if not spec.is_mfma:
             continue
-        for fields_ in gfx950_conv_dgrad_aot_helper_fields(spec):
+        for fields_ in conv_dgrad_aot_helper_fields(spec):
             helper = helpers[
                 (
                     fields_["dtype"],
