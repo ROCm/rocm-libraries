@@ -52,7 +52,8 @@ static double cluster_lockstep_factor(double peers, double k_iters) {
   return 1.0 + lam * k_iters / (k_iters + h::GFX1250_CLUSTER_LOCKSTEP_K0);
 }
 
-// Measured issue interval of a BF16 16x16x32 WMMA per SIMD with `w` waves on it, cycles.
+// Issue interval of a BF16 16x16x32 WMMA per SIMD, cycles.  Uses the 1-wave measurement for
+// every wave count; the faster 2- and 4-wave rates are not applied.
 static double wmma_bf16_issue(double) { return heuristic_defaults_t::GFX1250_WMMA_BF16_CLK; }
 
 // Safe Tensile-params accessor: config's params if present, else a default.
@@ -2947,7 +2948,7 @@ double compute_tile_latency(const problem_t& problem,
   // Multiplies only the epilogue term, so it bites store-bound shapes but not
   // mainloop-bound ones.
   const double cu_occ_epi = wgs_per_cu;
-  // gfx1250 has no such factor; the refit moves the develop model's saturation S_dev to S_fit, applied as the ratio.
+  // gfx1250 has no such factor; the refit moves the base model's saturation S_dev to S_fit, applied as the ratio.
   const double epi_occ_exposure =
       hardware.is_cdna5()
           ? (cu_occ_epi > 0.0

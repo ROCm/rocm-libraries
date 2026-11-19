@@ -301,7 +301,7 @@ class ORIGAMI_EXPORT hardware_t {
     c.l1_capacity     = 0;  // tensor-DMA loads bypass L1
     if (gfx1250_wgps_select_6xcd(n_cu)) {
       const double partition       = static_cast<double>(n_cu) / 96.0;
-      // Refit on the 145-size N-sweep of this part: the fit moved the peaks the develop model used (L2 41.93,
+      // Refit on the 145-size N-sweep of this part: the fit moved the base model's peaks (L2 41.93,
       // DRAM 19.725 TB/s) to 41.302 and 18.383 TB/s; applied here as those ratios.
       c.mem1_perf_ratio            = 14.75 * (41301.81761089743 / 41930.0) * partition;
       c.mem3_perf_ratio            = 8.637 * (18382.976995668938 / 19725.454545454544) * 1.65 / 2.4 * partition;

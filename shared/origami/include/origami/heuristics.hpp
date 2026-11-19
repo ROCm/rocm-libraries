@@ -178,7 +178,8 @@ struct heuristic_defaults_t {
   static constexpr double GFX1250_KLOOP_DRAM_OVERLAP = 1.73;
   /// Fixed cost of one K-iteration (two barriers, tensor waits, TDM issue), cycles: intercept of a K-loop DepthU
   /// sweep for 4 waves, which nearly all gfx1250 library kernels use (8 waves measured 314 clk).
-  /// 207 -> 263.439: refit on the 145-size N-sweep (see GFX1250_FIT_* below).
+  /// The microbenchmark intercept alone is 207 clk; the value used is refit on the 145-size N-sweep (see
+  /// GFX1250_FIT_* below).
   static constexpr double GFX1250_KITER_FIXED_CLK = 263.43924868273393;
   /// v_wmma_f32_16x16x32_bf16 issue interval per SIMD with 1, 2 and 4 waves on the SIMD, cycles at the engine
   /// clock (WMMA-rate microbenchmark, independent accumulators).
@@ -217,9 +218,9 @@ struct heuristic_defaults_t {
 
   /// gfx1250 refit of the model's relative-cost constants on the measured top-30 candidates of the 145-size
   /// (5 shapes x N = 64..512) bf16 TN N-sweep (centered objective, all data).  The fit
-  /// was made on the develop model, so the values that are multipliers on a model term are applied as such
-  /// (1.0 = unchanged): the K-iteration fixed cost (GFX1250_KITER_FIXED_CLK above) and the 6-XCD peaks
-  /// (hardware.hpp) are changed in place.
+  /// was made on the base model without the gfx1250 terms, so the values that are multipliers on a model
+  /// term are applied as such (1.0 = unchanged): the K-iteration fixed cost (GFX1250_KITER_FIXED_CLK
+  /// above) and the 6-XCD peaks (hardware.hpp) are changed in place.
   /// Scale of the L2 / DRAM read times (L_mem, L2 cycles, DRAM cycles and the floor).
   static constexpr double GFX1250_FIT_MEM_SCALE = 1.1005829744282523;
   /// Scale of the per-K-iteration compute time L_compute (WMMA issue, LDS-read exposure).
@@ -227,7 +228,7 @@ struct heuristic_defaults_t {
   /// Scale of the load-to-use latencies of the K-loop (L2 and DRAM, flat and tensor-DMA loaded).
   static constexpr double GFX1250_FIT_LATENCY_SCALE = 0.821273602515649;
   /// Epilogue 1/occupancy exposure max(1, S / resident WGs per CU): fitted S, and the S (= EPILOGUE_OCC_SATURATION)
-  /// of the develop model it was fitted against.  The gfx1250 model has no such factor (it is 1), so the fit is
+  /// of the base model it was fitted against.  The gfx1250 model has no such factor (it is 1), so the fit is
   /// applied as its ratio, max(1, S_fit / occ) / max(1, S_dev / occ).
   static constexpr double GFX1250_FIT_EPILOGUE_OCC_SATURATION     = 2.5326976116052373;
   static constexpr double GFX1250_FIT_EPILOGUE_OCC_SATURATION_DEV = 2.0;
