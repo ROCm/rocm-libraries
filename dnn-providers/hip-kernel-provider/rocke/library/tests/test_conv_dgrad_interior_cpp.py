@@ -174,6 +174,21 @@ class TestDgradInteriorHost(unittest.TestCase):
         with self.assertRaises(ValueError):
             eng.conv_dgrad_halo_zero_launch(_pd(_p3(1, 6, 6, 6, 4)), 2, 7, {})
 
+    def test_zero_fill_empty_shell(self):
+        # 1-tap filters: no shell, yet block 0 runs (into the section-3
+        # branch, every store out of bounds), so no divisor kernarg is 0.
+        eng = _engine()
+        p = _p3(1, 6, 6, 6, 64, Z=1, Y=1, X=1)
+        values, grid, _blk = halo_zero_launch(p, 2, 0, 0, DgradHaloZeroSpec(), 7)
+        self.assertEqual(grid, (1, 1, 1))
+        self.assertEqual((values["u1"], values["u2"], values["u3"]), (0, 0, 0))
+        for k in ("e", "L1", "L2", "L3", "Do", "Ho"):
+            self.assertGreaterEqual(values[k], 1, k)
+        got_v, got_grid, _ = eng.conv_dgrad_halo_zero_launch(_pd(p), 2, 7, {})
+        del values["dx"], values["dx_bytes"]
+        self.assertEqual(got_v, values)
+        self.assertEqual(tuple(got_grid), grid)
+
 
 class TestDgradHaloZeroKernel(unittest.TestCase):
     def test_lowered_ir_is_byte_identical(self):

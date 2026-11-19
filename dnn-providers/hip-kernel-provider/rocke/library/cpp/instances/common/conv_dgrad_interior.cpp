@@ -447,10 +447,13 @@ rocke_status_t rocke_dgrad_halo_zero_launch(const rocke_conv_problem_t* p,
         return st;
     const int64_t B = spec->block;
     const int64_t b1 = (u[11] + B - 1) / B, b2 = (u[12] + B - 1) / B, b3 = (u[13] + B - 1) / B;
-    for(int i = 0; i < 8; ++i)
+    for(int i = 0; i < 7; ++i)
         values[i] = u[i];
-    for(int i = 8; i < 11; ++i)
-        values[i] = u[i] > 1 ? u[i] : 1; /* (an empty section is never entered) */
+    /* Placeholder divisors of an empty section (e and L1..L3; Python
+     * halo_zero_launch): a fully empty shell (1-tap filters) still launches
+     * block 0 into the section-3 branch, every store out of bounds. */
+    for(int i = 7; i < 11; ++i)
+        values[i] = u[i] > 1 ? u[i] : 1;
     values[11] = b1;
     values[12] = b1 + b2;
     values[13] = u[11];

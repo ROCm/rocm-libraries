@@ -484,9 +484,13 @@ def halo_zero_launch(
     B = spec.block
     b1, b2, b3 = (-(-u[k] // B) for k in ("u1", "u2", "u3"))
     values = {"dx": dx_ptr, "dx_bytes": dx_bytes}
-    for k in ("Di", "Do", "Hi", "Ho", "ru", "hd", "hh", "e"):
+    for k in ("Di", "Do", "Hi", "Ho", "ru", "hd", "hh"):
         values[k] = u[k]
-    for k in ("L1", "L2", "L3"):
-        values[k] = max(1, u[k])  # (an empty section is never entered)
+    # Placeholder divisors of an empty section. A non-empty section is the
+    # only one its blocks enter, but a fully empty shell (1-tap filters) still
+    # launches block 0, which takes the section-3 branch with every store out
+    # of bounds: its divisors (e, L3) must not be 0 either.
+    for k in ("e", "L1", "L2", "L3"):
+        values[k] = max(1, u[k])
     values.update(n1=b1, n2=b1 + b2, u1=u["u1"], u2=u["u2"], u3=u["u3"])
     return values, (max(1, b1 + b2 + b3), 1, 1), (B, 1, 1)
