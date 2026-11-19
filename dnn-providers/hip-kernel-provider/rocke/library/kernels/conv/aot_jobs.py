@@ -1128,7 +1128,9 @@ _WGRAD_XWIN_KORD: Tuple[int, ...] = tuple(
 )
 # ROCKE_AOT_WGRAD_XWIN_TWIN_MAX_M=<m>: the BQ/AQ/PPS/ROT/KORD twins only
 # for xwin ping-pong copies with tile_m <= m (default: all).
-_WGRAD_XWIN_TWIN_MAX_M = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_TWIN_MAX_M", "0") or 0)
+_WGRAD_XWIN_TWIN_MAX_M = int(
+    _os.environ.get("ROCKE_AOT_WGRAD_XWIN_TWIN_MAX_M", "0") or 0
+)
 # ROCKE_AOT_WGRAD_XWIN_AQ=1: xwin_aq=1 twins (leader-only dY stores) of
 # the xwin_gn=2 ping-pong copies (and of their xwin_bq twins).
 _WGRAD_XWIN_AQ: Tuple[int, ...] = tuple(
@@ -1773,7 +1775,9 @@ def _fwd_kloop_scope() -> Optional[List[Tuple[int, ...]]]:
     for tok in raw.split(","):
         m = _FWD_KLOOP_SCOPE_RE.match(tok.strip())
         if m is None:
-            raise ValueError(f"ROCKE_AOT_FWD_KLOOP_SCOPE: {tok!r} is not MxNxK[wAxB][aT]")
+            raise ValueError(
+                f"ROCKE_AOT_FWD_KLOOP_SCOPE: {tok!r} is not MxNxK[wAxB][aT]"
+            )
         out.append(tuple(int(g) if g else 0 for g in m.groups()))
     return out
 
