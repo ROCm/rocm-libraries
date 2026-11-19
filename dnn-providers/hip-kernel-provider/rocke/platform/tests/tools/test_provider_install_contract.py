@@ -64,6 +64,9 @@ def _configure(rocke: Path, build: Path, *options: str) -> str:
             "-B",
             str(build),
             "-DROCKE_BUILD_PYENV=OFF",
+            # GNUInstallDirs picks lib64 on native 64-bit Fedora/RHEL; pin it so the
+            # lib/... destinations asserted below do not depend on the host.
+            "-DCMAKE_INSTALL_LIBDIR=lib",
             *options,
         ],
         capture_output=True,
