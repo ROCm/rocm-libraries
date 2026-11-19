@@ -1,0 +1,153 @@
+{
+  "_comment": "mx_env_sweep.py config, from a static ISA comparison with the mx_gemm reference: cs0 (the best so far) against its branch-free form (cs0nb: select-issued split loads, clamped refill) and the reference's last-K-atom order (r1*: ROCKE_EXP_MX_RA=1 = next-tile barrier without a read drain, next reads, first-half WMMAs, cluster wait, drain leaving PEND reads, buffer barrier, refill; early cluster signal CS WMMAs in; r1s1 with branching split loads). Cluster 4x4. MAF shape; time with --data mxgemm. pf*: plus the reference's cluster-split L2 prefetch of the tile D ahead (ROCKE_EXP_GL2_CLUSTER=1).",
+  "base_env": {
+    "ROCKE_EXP_MX": "1",
+    "ROCKE_EXP_MX_SWZ": "1",
+    "ROCKE_EXP_MX_SCALE_MC": "0",
+    "ROCKE_EXP_MX_KFENCE": "1",
+    "ROCKE_EXP_MX_SCALE_NOCLIP": "1",
+    "ROCKE_EXP_MC_SOLO0": "1"
+  },
+  "variants": [
+    {
+      "name": "mxswz",
+      "env": {}
+    },
+    {
+      "name": "cs0",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0"
+      }
+    },
+    {
+      "name": "cs0nb",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1"
+      }
+    },
+    {
+      "name": "r1",
+      "env": {
+        "ROCKE_EXP_MX_RA": "1",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CS": "6",
+        "ROCKE_EXP_MX_RA_PEND": "36"
+      }
+    },
+    {
+      "name": "r1cs0",
+      "env": {
+        "ROCKE_EXP_MX_RA": "1",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_PEND": "36"
+      }
+    },
+    {
+      "name": "r1p0",
+      "env": {
+        "ROCKE_EXP_MX_RA": "1",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CS": "6",
+        "ROCKE_EXP_MX_RA_PEND": "0"
+      }
+    },
+    {
+      "name": "r1s1",
+      "env": {
+        "ROCKE_EXP_MX_RA": "1",
+        "ROCKE_EXP_TDM_SPLIT": "1",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "0",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CS": "6",
+        "ROCKE_EXP_MX_RA_PEND": "36"
+      }
+    },
+    {
+      "name": "r1pf2",
+      "env": {
+        "ROCKE_EXP_MX_RA": "1",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CS": "6",
+        "ROCKE_EXP_MX_RA_PEND": "36",
+        "ROCKE_EXP_GL2_PREFETCH": "2",
+        "ROCKE_EXP_GL2_CLUSTER": "1"
+      }
+    },
+    {
+      "name": "r1pf4",
+      "env": {
+        "ROCKE_EXP_MX_RA": "1",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CS": "6",
+        "ROCKE_EXP_MX_RA_PEND": "36",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1"
+      }
+    },
+    {
+      "name": "r1pf8",
+      "env": {
+        "ROCKE_EXP_MX_RA": "1",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CS": "6",
+        "ROCKE_EXP_MX_RA_PEND": "36",
+        "ROCKE_EXP_GL2_PREFETCH": "8",
+        "ROCKE_EXP_GL2_CLUSTER": "1"
+      }
+    },
+    {
+      "name": "cs0nbpf4",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1"
+      }
+    }
+  ],
+  "arms": [
+    {
+      "name": "c4x4",
+      "cluster": "4,4"
+    }
+  ],
+  "shapes": [
+    [
+      3072,
+      4096,
+      65536
+    ]
+  ],
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}

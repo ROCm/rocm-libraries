@@ -1972,6 +1972,61 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 # wave w rows (w // 2) * rows / 2 .. + rows / 2 of its operand; the
                 # first wave of an operand also loads its scales. Needs four waves
                 # that all reach this load (the MX read-ahead loop).
+                if _os_mx.environ.get("ROCKE_EXP_TDM_SPLIT") == "2":
+                    # Branch-free form of the split (the mx_gemm prototype keeps
+                    # its loop branch-free: a branch makes LLVM drain the LDS
+                    # read pipeline). Every wave issues one data load, chosen by
+                    # selects (odd waves A, even waves B, half the rows each),
+                    # and one K-step row of its operand's scale tile.
+                    if _tdm_waves != 4 or not (_mx and _mx_ra) or block_m != block_n:
+                        raise ValueError("ROCKE_EXP_TDM_SPLIT=2 needs 4 waves, ROCKE_EXP_MX_RA and a square tile")
+                    c2 = b.const_i32(2)
+                    comp = b.div(_tdm_wave_id, c2)
+                    is_a = b.cmp_eq(b.mod(_tdm_wave_id, c2), b.const_i32(1))
+                    half_rows = block_m // 2
+                    pitch = _lds_k * _tdm_elem_bytes
+                    sel = lambda x, y: b.select(is_a, x, y)
+                    row_off = sel(block_m_off, block_n_off)
+                    row_c = b.add(row_off, b.mul(comp, b.const_i32(half_rows)))
+                    extent = sel(M, N)
+                    k_rem = b.smax(b.sub(K, k_off), zero)
+                    gaddr = sel(
+                        b.global_addr_of(A, b.add(tdm_batch_a, b.add(b.mul(b.zext(row_c, _I64), b.zext(K, _I64)), b.zext(k_off, _I64)))),
+                        b.global_addr_of(Bp, b.add(tdm_batch_b, b.add(b.mul(b.zext(row_c, _I64), b.zext(K, _I64)), b.zext(k_off, _I64)))),
+                    )
+                    lds_c = b.add(sel(a_lds, b_lds), b.zext(b.mul(comp, b.const_i32(half_rows * pitch)), _I64))
+                    mask = sel(_tdm_a_mask if isinstance(_tdm_a_mask, Value) else b.const_i32(_tdm_a_mask),
+                               _tdm_b_mask if isinstance(_tdm_b_mask, Value) else b.const_i32(_tdm_b_mask))
+                    groups = b.tdm_descriptor_2d(
+                        gaddr, lds_c, elem_bytes=_tdm_elem_bytes, tensor_dim0=k_rem,
+                        tensor_dim1=b.smax(b.sub(extent, row_c), zero), row_stride=K,
+                        tile_dim0=block_k, tile_dim1=half_rows,
+                        pad_interval=_tdm_pad_interval if _tdm_pad_enable else None,
+                        pad_amount=_tdm_pad_amount, workgroup_mask=mask,
+                    )
+                    b.tensor_load_to_lds(*groups, cachepolicy=0)
+                    # Scales: wave component c loads K-step row c of its operand's
+                    # [ksteps][rows * 4] tile (constant extents, as SCALE_NOCLIP).
+                    ksteps = block_k // 128
+                    if ksteps != 2:
+                        raise ValueError("ROCKE_EXP_TDM_SPLIT=2 needs two 128-K steps per tile")
+                    c4 = b.const_i32(4)
+                    kstep = b.add(b.div(k_off, b.const_i32(128)), comp)
+                    row_bytes = b.mul(extent, c4)
+                    sorigin = b.add(b.mul(b.zext(kstep, _I64), b.zext(row_bytes, _I64)), b.zext(b.mul(row_off, c4), _I64))
+                    saddr = sel(b.global_addr_of(AS, sorigin), b.global_addr_of(BS, sorigin))
+                    srow = block_m * 4
+                    sbase = sel(b.smem_addr_of(AS_smem), b.smem_addr_of(BS_smem))
+                    spar = b.mul(lds_parity, b.const_i32(ksteps * srow)) if isinstance(lds_parity, Value) else b.const_i32(lds_parity * ksteps * srow)
+                    slds = b.add(sbase, b.zext(b.add(spar, b.mul(comp, b.const_i32(srow))), _I64))
+                    smask = sel(b.const_i32(0) if not isinstance(_sa_mask, Value) and _sa_mask == 0 else (_sa_mask if isinstance(_sa_mask, Value) else b.const_i32(_sa_mask)),
+                                b.const_i32(0) if not isinstance(_sb_mask, Value) and _sb_mask == 0 else (_sb_mask if isinstance(_sb_mask, Value) else b.const_i32(_sb_mask)))
+                    sgroups = b.tdm_descriptor_2d(
+                        saddr, slds, elem_bytes=1, tensor_dim0=b.const_i32(srow), tensor_dim1=c4,
+                        row_stride=row_bytes, tile_dim0=srow, tile_dim1=1, workgroup_mask=smask,
+                    )
+                    b.tensor_load_to_lds(*sgroups, cachepolicy=0)
+                    return
                 if _os_mx.environ.get("ROCKE_EXP_TDM_SPLIT") == "1":
                     if _tdm_waves != 4 or not (_mx and _mx_ra):
                         raise ValueError("ROCKE_EXP_TDM_SPLIT needs 4 waves and ROCKE_EXP_MX_RA")
@@ -3055,6 +3110,37 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         k_ahead = b.add(k_cur, b.const_i32(_gl2_dist * block_k))
         k_ahead = b.select(b.cmp_lt(k_ahead, K), k_ahead, last)
         nthr = spec.block_size
+        # ROCKE_EXP_GL2_CLUSTER=1 (the mx_gemm prototype's PrefetchGL2): the
+        # cluster's A and B rows of the tile D ahead, split over every thread of
+        # the cluster (a line or two each, ROCKE_EXP_GL2_LINE bytes, default
+        # 256), branch-free: a thread picks its operand by select.
+        if _os_gl2.environ.get("ROCKE_EXP_GL2_CLUSTER") == "1":
+            _cl = _os_gl2.environ.get("ROCKE_EXP_CLUSTER")
+            cx, cy = (int(v) for v in _cl.split(",")) if _cl else (1, 1)
+            cwx = _cwx if _cl else b.const_i32(0)
+            cwy = _cwy if _cl else b.const_i32(0)
+            line = int(_os_gl2.environ.get("ROCKE_EXP_GL2_LINE", "256"))
+            lpr = max(1, row_bytes // line)
+            epl = line // _tdm_elem_bytes
+            a_lines, b_lines = cy * block_m * lpr, cx * block_n * lpr
+            total, threads = a_lines + b_lines, cx * cy * nthr
+            m0 = b.sub(block_m_off, b.mul(cwy, b.const_i32(block_m)))
+            n0 = b.sub(block_n_off, b.mul(cwx, b.const_i32(block_n)))
+            g = b.add(b.mul(b.add(cwx, b.mul(cwy, b.const_i32(cx))), b.const_i32(nthr)), tid)
+            for base in range(0, total, threads):
+                li = b.mod(b.add(g, b.const_i32(base)) if base else g, b.const_i32(total))
+                is_b = b.cmp_ge(li, b.const_i32(a_lines))
+                lj = b.select(is_b, b.sub(li, b.const_i32(a_lines)), li)
+                row = b.div(lj, b.const_i32(lpr))
+                part = b.mod(lj, b.const_i32(lpr))
+                rowabs = b.select(is_b, b.add(n0, row), b.add(m0, row))
+                batch = b.select(is_b, tdm_batch_b, tdm_batch_a)
+                col = b.add(k_ahead, b.mul(part, b.const_i32(epl)))
+                origin = b.add(batch, b.add(b.mul(b.zext(rowabs, _I64), b.zext(K, _I64)), b.zext(col, _I64)))
+                off = origin if _tdm_elem_bytes == 1 else b.mul(origin, b.const_i64(_tdm_elem_bytes))
+                ptr = b.select(is_b, b.global_ptr_add(Bp, off), b.global_ptr_add(A, off))
+                b.global_prefetch(ptr, cachepolicy=_GL2_CPOL)
+            return
         # ROCKE_EXP_GL2_LINES=1: only each row's first line (half the volume at 256-byte rows);
         # ROCKE_EXP_GL2_OPS=a|b|ab (default ab): which operands to prefetch.
         if _os_gl2.environ.get("ROCKE_EXP_GL2_LINES") == "1":
@@ -3308,7 +3394,11 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         k_end = b.add(k_lo, b.mul(n_even, c_block_k))
 
         bar_at = int(_os_ra.environ.get("ROCKE_EXP_MX_RA_BAR", "8"))
-        cb = _mx_ra_one and _os_ra.environ.get("ROCKE_EXP_MX_RA_CB") == "1"
+        cb = _mx_ra and _os_ra.environ.get("ROCKE_EXP_MX_RA_CB") == "1"
+        # ROCKE_EXP_MX_RA_NOBRANCH=1: the refill offset is clamped (past the
+        # end a buffer nobody reads gets the last tile again) instead of
+        # guarded by a branch.
+        nobranch = _os_ra.environ.get("ROCKE_EXP_MX_RA_NOBRANCH") == "1"
         if cb and not _os_ra.environ.get("ROCKE_EXP_CLUSTER"):
             cb = False  # no cluster launch: the workgroup barrier is enough
         cw = int(_os_ra.environ.get("ROCKE_EXP_MX_RA_CW", "16"))
@@ -3328,6 +3418,9 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
 
         def _refill(p, k_cur):
             k_next = b.add(k_cur, bk2)
+            if nobranch:
+                emit_load_phase(A_smem, B_smem, b.smin(k_next, b.sub(k_end, c_block_k)), lds_parity=p)
+                return
             with b.scf_if(b.cmp_lt(k_next, k_end)):
                 emit_load_phase(A_smem, B_smem, k_next, lds_parity=p)
 
@@ -3385,6 +3478,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     fence()
                     b.s_wait_tensorcnt(0)
                     b.s_barrier_bare()
+                    if cb and cs < 0:
+                        b.inline_asm(_CL_SIGNAL0, "s,~{scc},~{memory}", [_tdm_wave_id])
                     fence()
                 na, nsa, nsb = rd_head(sp, sk)
                 fence()
@@ -3393,6 +3488,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 if last:
                     # Every wave has read this buffer: refill it with the
                     # tile two ahead (the issuing pair only; none past the end).
+                    if cb:
+                        b.inline_asm("s_barrier_wait -3", "~{memory}")
                     b.inline_asm(f"s_wait_dscnt {pend}", "~{memory}")
                     b.s_barrier_bare()
                     _refill(p, k_cur)
