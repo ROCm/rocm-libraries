@@ -24,7 +24,9 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
+#include "ConvolutionBwdGraphTestUtils.hpp"
 #include "ConvolutionFwdGraphTestUtils.hpp"
+#include "ConvolutionWrwGraphTestUtils.hpp"
 #include "LayernormBwdGraphTestUtils.hpp"
 #include "LayernormFwdGraphTestUtils.hpp"
 #include "MatmulGraphTestUtils.hpp"
@@ -368,6 +370,210 @@ void runConvFwdExecutorVsCpu(const std::vector<int64_t>& xDims,
     }
 }
 
+template <typename T, typename ComputeT = float>
+void runConvBwdExecutorVsCpu(const std::vector<int64_t>& dyDims,
+                             const std::vector<int64_t>& wDims,
+                             const std::vector<int64_t>& dxDims,
+                             const std::vector<int64_t>& padding,
+                             const std::vector<int64_t>& convStride,
+                             const std::vector<int64_t>& dilation,
+                             const std::vector<int64_t>& postPaddingOverride = {})
+{
+    constexpr int64_t DY_UID = 10;
+    constexpr int64_t W_UID = 11;
+    constexpr int64_t DX_UID = 12;
+
+    auto dyStrides = generateStrides(dyDims);
+    auto wStrides = generateStrides(wDims);
+    auto dxStrides = generateStrides(dxDims);
+
+    // An empty override means symmetric padding.
+    const auto& postPadding = postPaddingOverride.empty() ? padding : postPaddingOverride;
+
+    auto graphBuilder
+        = createConvBwdGraphWithPadding(DY_UID,
+                                        W_UID,
+                                        DX_UID,
+                                        dyDims,
+                                        wDims,
+                                        dxDims,
+                                        dyStrides,
+                                        wStrides,
+                                        dxStrides,
+                                        padding,
+                                        postPadding,
+                                        convStride,
+                                        dilation,
+                                        hipdnn_test_sdk::utilities::nativeTypeToDataType<T>(),
+                                        hipdnn_test_sdk::utilities::nativeTypeToDataType<T>());
+
+    auto dyCount = elementCount(dyDims);
+    auto wCount = elementCount(wDims);
+    auto dxCount = elementCount(dxDims);
+
+    // Prepare CPU tensors and fill with deterministic data
+    hipdnn_data_sdk::utilities::Tensor<T> cpuDy(dyDims, dyStrides);
+    hipdnn_data_sdk::utilities::Tensor<T> cpuW(wDims, wStrides);
+    hipdnn_data_sdk::utilities::Tensor<T> cpuDx(dxDims, dxStrides);
+
+    for(size_t i = 0; i < dyCount; ++i)
+    {
+        // Convert size_t -> float -> T since the custom half/bfloat16 types provide explicit
+        // conversions from float
+        static_cast<T*>(cpuDy.rawHostData())[i] = T(static_cast<float>(i + 1));
+    }
+    for(size_t i = 0; i < wCount; ++i)
+    {
+        static_cast<T*>(cpuW.rawHostData())[i] = T(1.0f);
+    }
+
+    // Allocate device buffers (RAII — freed automatically)
+    const hipdnn_data_sdk::utilities::Workspace dDy(dyCount * sizeof(T));
+    const hipdnn_data_sdk::utilities::Workspace dW(wCount * sizeof(T));
+    const hipdnn_data_sdk::utilities::Workspace dDx(dxCount * sizeof(T));
+
+    ASSERT_EQ(hipMemset(dDx.get(), 0, dxCount * sizeof(T)), hipSuccess);
+    ASSERT_EQ(hipMemcpy(dDy.get(), cpuDy.rawHostData(), dyCount * sizeof(T), hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_EQ(hipMemcpy(dW.get(), cpuW.rawHostData(), wCount * sizeof(T), hipMemcpyHostToDevice),
+              hipSuccess);
+
+    // Run GPU graph executor with device pointers
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[DY_UID] = dDy.get();
+    variantPack[W_UID] = dW.get();
+    variantPack[DX_UID] = dDx.get();
+
+    GpuReferenceGraphExecutor gpuExecutor;
+    gpuExecutor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), variantPack);
+
+    // Copy GPU result back to host
+    std::vector<T> gpuDxData(dxCount);
+    ASSERT_EQ(hipMemcpy(gpuDxData.data(), dDx.get(), dxCount * sizeof(T), hipMemcpyDeviceToHost),
+              hipSuccess);
+
+    // Run CPU reference executor with host pointers (same graph)
+    std::unordered_map<int64_t, void*> cpuVariantPack;
+    cpuVariantPack[DY_UID] = cpuDy.rawHostData();
+    cpuVariantPack[W_UID] = cpuW.rawHostData();
+    cpuVariantPack[DX_UID] = cpuDx.rawHostData();
+
+    CpuReferenceGraphExecutorAdapter cpuExecutor;
+    cpuExecutor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), cpuVariantPack);
+
+    // Compare GPU executor output against CPU executor output
+    const auto* cpuResult = static_cast<const T*>(cpuDx.rawHostData());
+    for(size_t i = 0; i < dxCount; ++i)
+    {
+        EXPECT_NEAR(static_cast<float>(gpuDxData[i]),
+                    static_cast<float>(cpuResult[i]),
+                    hipdnn_test_sdk::utilities::conv::getToleranceBwd<T>())
+            << "Mismatch at index " << i;
+    }
+}
+
+template <typename T, typename ComputeT = float>
+void runConvWrwExecutorVsCpu(const std::vector<int64_t>& xDims,
+                             const std::vector<int64_t>& dyDims,
+                             const std::vector<int64_t>& dwDims,
+                             const std::vector<int64_t>& padding,
+                             const std::vector<int64_t>& convStride,
+                             const std::vector<int64_t>& dilation,
+                             const std::vector<int64_t>& postPaddingOverride = {})
+{
+    constexpr int64_t X_UID = 10;
+    constexpr int64_t DY_UID = 11;
+    constexpr int64_t DW_UID = 12;
+
+    auto xStrides = generateStrides(xDims);
+    auto dyStrides = generateStrides(dyDims);
+    auto dwStrides = generateStrides(dwDims);
+
+    // An empty override means symmetric padding.
+    const auto& postPadding = postPaddingOverride.empty() ? padding : postPaddingOverride;
+
+    auto graphBuilder
+        = createConvWrwGraphWithPadding(X_UID,
+                                        DY_UID,
+                                        DW_UID,
+                                        xDims,
+                                        dyDims,
+                                        dwDims,
+                                        xStrides,
+                                        dyStrides,
+                                        dwStrides,
+                                        padding,
+                                        postPadding,
+                                        convStride,
+                                        dilation,
+                                        hipdnn_test_sdk::utilities::nativeTypeToDataType<T>(),
+                                        hipdnn_test_sdk::utilities::nativeTypeToDataType<T>());
+
+    auto xCount = elementCount(xDims);
+    auto dyCount = elementCount(dyDims);
+    auto dwCount = elementCount(dwDims);
+
+    // Prepare CPU tensors and fill with deterministic data
+    hipdnn_data_sdk::utilities::Tensor<T> cpuX(xDims, xStrides);
+    hipdnn_data_sdk::utilities::Tensor<T> cpuDy(dyDims, dyStrides);
+    hipdnn_data_sdk::utilities::Tensor<T> cpuDw(dwDims, dwStrides);
+
+    for(size_t i = 0; i < xCount; ++i)
+    {
+        // Convert size_t -> float -> T since custom half/bfloat16 types provide explicit
+        // conversions from float
+        static_cast<T*>(cpuX.rawHostData())[i] = T(static_cast<float>(i + 1));
+    }
+    for(size_t i = 0; i < dyCount; ++i)
+    {
+        static_cast<T*>(cpuDy.rawHostData())[i] = T(1.0f);
+    }
+
+    // Allocate device buffers (RAII — freed automatically)
+    const hipdnn_data_sdk::utilities::Workspace dX(xCount * sizeof(T));
+    const hipdnn_data_sdk::utilities::Workspace dDy(dyCount * sizeof(T));
+    const hipdnn_data_sdk::utilities::Workspace dDw(dwCount * sizeof(T));
+
+    ASSERT_EQ(hipMemset(dDw.get(), 0, dwCount * sizeof(T)), hipSuccess);
+    ASSERT_EQ(hipMemcpy(dX.get(), cpuX.rawHostData(), xCount * sizeof(T), hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_EQ(hipMemcpy(dDy.get(), cpuDy.rawHostData(), dyCount * sizeof(T), hipMemcpyHostToDevice),
+              hipSuccess);
+
+    // Run GPU graph executor with device pointers
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[X_UID] = dX.get();
+    variantPack[DY_UID] = dDy.get();
+    variantPack[DW_UID] = dDw.get();
+
+    GpuReferenceGraphExecutor gpuExecutor;
+    gpuExecutor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), variantPack);
+
+    // Copy GPU result back to host
+    std::vector<T> gpuDwData(dwCount);
+    ASSERT_EQ(hipMemcpy(gpuDwData.data(), dDw.get(), dwCount * sizeof(T), hipMemcpyDeviceToHost),
+              hipSuccess);
+
+    // Run CPU reference executor with host pointers (same graph)
+    std::unordered_map<int64_t, void*> cpuVariantPack;
+    cpuVariantPack[X_UID] = cpuX.rawHostData();
+    cpuVariantPack[DY_UID] = cpuDy.rawHostData();
+    cpuVariantPack[DW_UID] = cpuDw.rawHostData();
+
+    CpuReferenceGraphExecutorAdapter cpuExecutor;
+    cpuExecutor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), cpuVariantPack);
+
+    // Compare GPU executor output against CPU executor output
+    const auto* cpuResult = static_cast<const T*>(cpuDw.rawHostData());
+    for(size_t i = 0; i < dwCount; ++i)
+    {
+        EXPECT_NEAR(static_cast<float>(gpuDwData[i]),
+                    static_cast<float>(cpuResult[i]),
+                    hipdnn_test_sdk::utilities::conv::getToleranceWrw<T>())
+            << "Mismatch at index " << i;
+    }
+}
+
 template <typename IOType, typename ComputeType = float>
 void runReductionExecutorVsCpu(const std::vector<int64_t>& inDims,
                                const std::vector<int64_t>& outDims,
@@ -602,8 +808,8 @@ TEST(TestGpuReferenceGraphExecutor, UnsupportedNodeTypeThrows)
 {
     SKIP_IF_NO_DEVICES();
 
-    // ConvolutionBwd has no GPU plan yet - should throw
-    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
+    // BlockScaleDequantize has no GPU plan yet - should throw
+    auto builder = hipdnn_test_sdk::utilities::createValidBlockScaleDequantizeGraph();
 
     const std::unordered_map<int64_t, void*> variantPack;
 
@@ -734,6 +940,118 @@ TEST(TestGpuReferenceGraphExecutorBfp16, ConvFwdExecutes)
                                                               {1, 1}, // dilation
                                                               DataType::BFLOAT16,
                                                               0.1);
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, ConvBwdBasicExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvBwdExecutorVsCpu<float>(
+        {1, 1, 2, 2}, {1, 1, 3, 3}, {1, 1, 4, 4}, {0, 0}, {1, 1}, {1, 1});
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, ConvBwdWithPaddingExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvBwdExecutorVsCpu<float>(
+        {1, 1, 4, 4}, {1, 1, 3, 3}, {1, 1, 4, 4}, {1, 1}, {1, 1}, {1, 1});
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, ConvBwdStride2Executes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvBwdExecutorVsCpu<float>(
+        {1, 2, 3, 3}, {2, 1, 3, 3}, {1, 1, 8, 8}, {0, 0}, {2, 2}, {1, 1});
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, ConvBwdDilationExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvBwdExecutorVsCpu<float>(
+        {1, 3, 4, 4}, {3, 2, 3, 3}, {1, 2, 6, 6}, {1, 1}, {1, 1}, {2, 2});
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, ConvBwdAsymmetricPaddingExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvBwdExecutorVsCpu<float>(
+        {1, 3, 6, 5}, {3, 2, 3, 3}, {1, 2, 6, 6}, {2, 0}, {1, 1}, {1, 1}, {0, 1});
+}
+
+TEST(TestGpuReferenceGraphExecutorFp16, ConvBwdExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvBwdExecutorVsCpu<hipdnn_data_sdk::types::half>(
+        {1, 1, 2, 2}, {1, 1, 3, 3}, {1, 1, 4, 4}, {0, 0}, {1, 1}, {1, 1});
+}
+
+TEST(TestGpuReferenceGraphExecutorBfp16, ConvBwdExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvBwdExecutorVsCpu<hipdnn_data_sdk::types::bfloat16>(
+        {1, 1, 2, 2}, {1, 1, 3, 3}, {1, 1, 4, 4}, {0, 0}, {1, 1}, {1, 1});
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, ConvWrwBasicExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvWrwExecutorVsCpu<float>(
+        {1, 1, 4, 4}, {1, 1, 2, 2}, {1, 1, 3, 3}, {0, 0}, {1, 1}, {1, 1});
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, ConvWrwWithPaddingExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvWrwExecutorVsCpu<float>(
+        {1, 1, 4, 4}, {1, 1, 4, 4}, {1, 1, 3, 3}, {1, 1}, {1, 1}, {1, 1});
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, ConvWrwStride2Executes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvWrwExecutorVsCpu<float>(
+        {1, 1, 8, 8}, {1, 2, 3, 3}, {2, 1, 3, 3}, {0, 0}, {2, 2}, {1, 1});
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, ConvWrwDilationExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvWrwExecutorVsCpu<float>(
+        {1, 2, 6, 6}, {1, 3, 4, 4}, {3, 2, 3, 3}, {1, 1}, {1, 1}, {2, 2});
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, ConvWrwAsymmetricPaddingExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvWrwExecutorVsCpu<float>(
+        {1, 2, 6, 6}, {1, 3, 6, 5}, {3, 2, 3, 3}, {2, 0}, {1, 1}, {1, 1}, {0, 1});
+}
+
+TEST(TestGpuReferenceGraphExecutorFp16, ConvWrwExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvWrwExecutorVsCpu<hipdnn_data_sdk::types::half>(
+        {1, 1, 4, 4}, {1, 1, 2, 2}, {1, 1, 3, 3}, {0, 0}, {1, 1}, {1, 1});
+}
+
+TEST(TestGpuReferenceGraphExecutorBfp16, ConvWrwExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvWrwExecutorVsCpu<hipdnn_data_sdk::types::bfloat16>(
+        {1, 1, 4, 4}, {1, 1, 2, 2}, {1, 1, 3, 3}, {0, 0}, {1, 1}, {1, 1});
 }
 
 TEST(TestGpuReferenceGraphExecutorFp32, LayernormFwdIsApplicable)

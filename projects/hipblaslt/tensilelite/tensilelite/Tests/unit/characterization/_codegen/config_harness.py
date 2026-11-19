@@ -372,7 +372,8 @@ def assert_cluster_barrier_balanced(src, base):
     copies of which exactly one runs.
     """
     n_signal, n_wait = _count_cluster_barriers(src)
-    per_tile_arrive = "label_PersistentMC_SkipNextTileArrive:" in src
+    # Persistent clusters require a close-site arrive, independent of its exit label.
+    per_tile_arrive = "label_PersistentLoopClose:" in src
     expected = n_signal if per_tile_arrive else n_signal + 1
     assert n_wait == expected, (
         f"Kernel {base!r}: unexpected cluster barrier balance: "

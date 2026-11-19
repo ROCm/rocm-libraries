@@ -61,6 +61,8 @@ DTYPES = {
 }
 # (q / k head dim, v head dim) -> head_dim value. A v head dim that is not
 # q's gives its own value: the ASM kernels run 192 x 128 (fmha_v3_*/*.csv).
+# 256 is the widest head the gfx942 split-KV decode kernels
+# (hipkernel:Gfx942AttentionUnified3d) are built for.
 _SQUARE_HEAD_DIMS = (1, 64, 128, 192, 256)
 _PAIRED_HEAD_DIMS = (
     (1, 64),

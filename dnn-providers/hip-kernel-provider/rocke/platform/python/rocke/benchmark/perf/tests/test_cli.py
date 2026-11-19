@@ -3,9 +3,10 @@
 """Unit tests for the CLI wiring (no-GPU paths, pure)."""
 import io
 import json
+import os
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 
 import rocke.benchmark.perf.tool.cli as cli_mod
 from rocke.benchmark.perf import schema
@@ -26,6 +27,19 @@ def _rec(arch="gfx950", kernel="k", shape=None, *, busy=None):
         "captured_counters": sorted(counters),
         "verify": {},
     }
+
+
+@contextmanager
+def _code_object(suffix, data):
+    # Close the file before the command reopens it: Windows denies a second open
+    # of a ``NamedTemporaryFile`` that is still open.
+    fd, name = tempfile.mkstemp(suffix=suffix)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        yield name
+    finally:
+        os.unlink(name)
 
 
 def _run(argv):
@@ -161,10 +175,8 @@ class TestOccupancyCmd(unittest.TestCase):
         orig = cli_mod._occupancy.resources
         cli_mod._occupancy.resources = lambda data, arch: fake
         try:
-            with tempfile.NamedTemporaryFile(suffix=".hsaco") as f:
-                f.write(b"\x7fELF fake")
-                f.flush()
-                code, out = _run(["--json", "occupancy", f.name, "--arch", self.ARCH])
+            with _code_object(".hsaco", b"\x7fELF fake") as path:
+                code, out = _run(["--json", "occupancy", path, "--arch", self.ARCH])
         finally:
             cli_mod._occupancy.resources = orig
         self.assertEqual(code, 0)
@@ -176,13 +188,9 @@ class TestOccupancyCmd(unittest.TestCase):
         cli_mod._occupancy.resources = lambda data, arch: fake
         err = io.StringIO()
         try:
-            with tempfile.NamedTemporaryFile(suffix=".hsaco") as f:
-                f.write(b"\x7fELF fake")
-                f.flush()
+            with _code_object(".hsaco", b"\x7fELF fake") as path:
                 with redirect_stderr(err):
-                    code, out = _run(
-                        ["--json", "occupancy", f.name, "--arch", self.ARCH]
-                    )
+                    code, out = _run(["--json", "occupancy", path, "--arch", self.ARCH])
         finally:
             cli_mod._occupancy.resources = orig
         self.assertEqual(code, 0)
@@ -195,12 +203,10 @@ class TestOccupancyCmd(unittest.TestCase):
         cli_mod._occupancy.resources = lambda data, arch: fake
         err = io.StringIO()
         try:
-            with tempfile.NamedTemporaryFile(suffix=".hsaco") as f:
-                f.write(b"\x7fELF fake")
-                f.flush()
+            with _code_object(".hsaco", b"\x7fELF fake") as path:
                 with redirect_stderr(err):
                     code, _ = _run(
-                        ["--json", "occupancy", f.name, "--arch", f"{self.ARCH}:xnack-"]
+                        ["--json", "occupancy", path, "--arch", f"{self.ARCH}:xnack-"]
                     )
         finally:
             cli_mod._occupancy.resources = orig
@@ -211,11 +217,9 @@ class TestOccupancyCmd(unittest.TestCase):
         orig = cli_mod._occupancy.resources
         cli_mod._occupancy.resources = lambda data, arch: {}
         try:
-            with tempfile.NamedTemporaryFile(suffix=".hsaco") as f:
-                f.write(b"x")
-                f.flush()
+            with _code_object(".hsaco", b"x") as path:
                 with self.assertRaises(SystemExit):
-                    _run(["occupancy", f.name, "--arch", self.ARCH])
+                    _run(["occupancy", path, "--arch", self.ARCH])
         finally:
             cli_mod._occupancy.resources = orig
 
@@ -225,11 +229,9 @@ class TestOccupancyCmd(unittest.TestCase):
         llc = find_llvm_tool("llc")
         if llc is None or find_llvm_tool("llvm-readelf") is None:
             self.skipTest("llc or llvm-readelf not found")
-        with tempfile.NamedTemporaryFile(suffix=".o") as f:
-            f.write(llc_code_object(llc, "gfx1030", 64))
-            f.flush()
+        with _code_object(".o", llc_code_object(llc, "gfx1030", 64)) as path:
             with self.assertRaises(SystemExit) as ctx:
-                _run(["occupancy", f.name, "--arch", "gfx1030"])
+                _run(["occupancy", path, "--arch", "gfx1030"])
         self.assertIn("no occupancy model for processor 'gfx1030'", str(ctx.exception))
 
 

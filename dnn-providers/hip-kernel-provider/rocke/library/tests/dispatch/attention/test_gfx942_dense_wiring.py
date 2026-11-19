@@ -35,7 +35,7 @@ from dispatch.attention import (
     iter_registered_attention_combos,
     tuning_spec_with_knobs,
 )
-from dispatch.attention.gfx942_dense import _base_spec
+from dispatch.attention.gfx942_dense import tuned_base_spec
 from kernels.common.attention_dense_spec import (
     AttentionDenseSpec,
     attention_dense_cache_key,
@@ -51,6 +51,14 @@ from rocke.helpers.magic_division import calculate_magic_numbers
 
 _NAME = "attention_gfx942_dense"
 _SPEC_ID = "gfx942_dense"
+# Every gfx942 dense candidate, (name, spec_id): all opt-in, all priority 3.
+_VARIANTS = (
+    (_NAME, _SPEC_ID),
+    ("attention_gfx942_dense_qbminor", "gfx942_dense_qbminor"),
+    ("attention_gfx942_dense_persist_aot", "gfx942_dense_persist_aot"),
+    ("attention_gfx942_dense_btminor_aot", "gfx942_dense_btminor_aot"),
+    ("attention_gfx942_dense_hqswz_aot", "gfx942_dense_hqswz_aot"),
+)
 
 
 def _req(**kw) -> AttentionRequest:
@@ -90,8 +98,8 @@ def _spec(req: AttentionRequest, **knobs) -> Gfx942AttentionDenseSpec:
     return attention_tuning_spec(req, _SPEC_ID).kernel_spec
 
 
-def _candidate():
-    return next(c for c in attention_candidates() if c.name == _NAME)
+def _candidate(name: str = _NAME):
+    return next(c for c in attention_candidates() if c.name == name)
 
 
 class _Gfx942Arch:
@@ -108,68 +116,92 @@ class _Gfx942Arch:
 
 class TestGfx942DenseRegistration(unittest.TestCase):
     def test_candidate_is_registered(self):
-        self.assertIn(_NAME, [c.name for c in attention_candidates()])
+        """A new gfx942 dense candidate must join _VARIANTS, or the opt-in tests
+        below never see it."""
+        registered = {
+            c.name
+            for c in attention_candidates()
+            if c.algorithm == "attention_dense" and c.name.startswith(_NAME)
+        }
+        self.assertEqual(registered, {name for name, _ in _VARIANTS})
 
     def test_spec_id_and_algorithm(self):
-        c = _candidate()
-        self.assertEqual(c.spec_id, _SPEC_ID)
-        self.assertEqual(c.algorithm, "attention_dense")
-        self.assertTrue(c.opt_in)
+        for name, spec_id in _VARIANTS:
+            with self.subTest(spec_id=spec_id):
+                c = _candidate(name)
+                self.assertEqual(c.spec_id, spec_id)
+                self.assertEqual(c.algorithm, "attention_dense")
+                self.assertTrue(c.opt_in)
 
     def test_priority_outranks_every_other_candidate(self):
-        """Documents WHY the opt-in gate matters: nothing else holds this arm back."""
-        c = _candidate()
-        others = [o for o in attention_candidates() if o.name != _NAME]
-        self.assertTrue(all(c.priority <= o.priority for o in others))
+        """Documents WHY the opt-in gate matters: nothing else holds these arms back."""
+        for name, spec_id in _VARIANTS:
+            with self.subTest(spec_id=spec_id):
+                c = _candidate(name)
+                others = [o for o in attention_candidates() if o.name != name]
+                self.assertTrue(all(c.priority <= o.priority for o in others))
 
 
 class TestGfx942DenseOptIn(unittest.TestCase):
     def test_unpinned_requests_never_select_it(self):
         with _Gfx942Arch():
-            for kw in (
-                dict(algorithm="auto", spec_id="auto"),
-                dict(algorithm="auto", spec_id=_SPEC_ID),
-                dict(algorithm="attention_dense", spec_id="auto"),
-            ):
-                with self.subTest(**kw):
-                    ok, why = _candidate().admits(_req(**kw))
-                    self.assertFalse(ok)
-                    self.assertIn("opt-in", why)
+            for name, spec_id in _VARIANTS:
+                for kw in (
+                    dict(algorithm="auto", spec_id="auto"),
+                    dict(algorithm="auto", spec_id=spec_id),
+                    dict(algorithm="attention_dense", spec_id="auto"),
+                ):
+                    with self.subTest(candidate=name, **kw):
+                        ok, why = _candidate(name).admits(_req(**kw))
+                        self.assertFalse(ok)
+                        self.assertIn("opt-in", why)
             routed = dispatch_attention(_req(algorithm="auto", spec_id="auto"))
-            self.assertNotEqual(routed.candidate.name, _NAME)
+            self.assertNotIn(routed.candidate.name, {name for name, _ in _VARIANTS})
 
     def test_routes_on_explicit_pin(self):
         with _Gfx942Arch():
-            r = dispatch_attention(_req())
-            self.assertEqual(r.candidate.name, _NAME)
-            self.assertIsInstance(r.spec, AttentionTuningSpec)
-            self.assertEqual(r.spec.path, "dense")
-            self.assertIsInstance(r.spec.kernel_spec, Gfx942AttentionDenseSpec)
-            self.assertIn("gfx942", r.spec.kernel_name())
-            self.assertNotEqual(r.grid, (0, 0, 0))
+            for name, spec_id in _VARIANTS:
+                with self.subTest(spec_id=spec_id):
+                    r = dispatch_attention(_req(spec_id=spec_id))
+                    self.assertEqual(r.candidate.name, name)
+                    self.assertIsInstance(r.spec, AttentionTuningSpec)
+                    self.assertEqual(r.spec.path, "dense")
+                    self.assertIsInstance(r.spec.kernel_spec, Gfx942AttentionDenseSpec)
+                    self.assertIn("gfx942", r.spec.kernel_name())
+                    self.assertNotEqual(r.grid, (0, 0, 0))
 
     def test_tuning_id_replays_and_unknown_ids_are_refused(self):
         with _Gfx942Arch():
-            req = _req(seqlen_q=8192, seqlen_k=8192)
-            specs = [
-                s
-                for _c, s in islice(
-                    iter_registered_attention_combos(req, candidate_prefix=_NAME), 12
-                )
-            ]
-            for spec in specs:
-                with self.subTest(tuning_id=spec.tuning_id):
-                    got = dispatch_attention(
-                        _req(
-                            seqlen_q=8192,
-                            seqlen_k=8192,
-                            tuning_id=spec.tuning_id,
-                        )
+            for name, spec_id in _VARIANTS:
+                req = _req(spec_id=spec_id, seqlen_q=8192, seqlen_k=8192)
+                # The prefix also matches the longer candidate names; keep this one's.
+                specs = [
+                    s
+                    for _c, s in islice(
+                        (
+                            combo
+                            for combo in iter_registered_attention_combos(
+                                req, candidate_prefix=name
+                            )
+                            if combo[0].name == name
+                        ),
+                        12,
                     )
-                    self.assertEqual(got.spec, spec)
-            ok, why = _candidate().admits(_req(tuning_id="other_wpe2@00"))
-            self.assertFalse(ok)
-            self.assertIn("tuning_id", why)
+                ]
+                with self.subTest(spec_id=spec_id):
+                    self.assertTrue(specs)
+                for spec in specs:
+                    with self.subTest(spec_id=spec_id, tuning_id=spec.tuning_id):
+                        got = dispatch_attention(
+                            dataclasses.replace(req, tuning_id=spec.tuning_id)
+                        )
+                        self.assertEqual(got.spec, spec)
+                with self.subTest(spec_id=spec_id, tuning_id="other_wpe2@00"):
+                    ok, why = _candidate(name).admits(
+                        _req(spec_id=spec_id, tuning_id="other_wpe2@00")
+                    )
+                    self.assertFalse(ok)
+                    self.assertIn("tuning_id", why)
 
 
 class TestGfx942DenseSupportGates(unittest.TestCase):
@@ -220,7 +252,7 @@ class TestGfx942DenseSupportGates(unittest.TestCase):
             for seqlen in (1152, 1000):
                 with self.subTest(seqlen=seqlen):
                     req = _req(seqlen_q=seqlen, seqlen_k=seqlen)
-                    spec = _base_spec(req)
+                    spec = tuned_base_spec(req)
                     self.assertNotEqual(seqlen % spec.block_m, 0)
                     ok, why = _candidate().admits(req)
                     self.assertFalse(ok)
@@ -350,6 +382,246 @@ class TestGfx942DensePersistent(unittest.TestCase):
             )
             self.assertNotIn("nonpersist_decode", dict(persistent.knobs))
             self.assertEqual(persistent.kernel_spec.nonpersist_decode, "auto")
+
+
+class TestGfx942DenseQbMinor(unittest.TestCase):
+    """``gfx942_dense_qbminor`` fixes the grid the hipDNN kernel ingestor launches:
+    one CTA per (query block, query head, batch) at the qb_minor order, unsplit."""
+
+    def test_default_spec_is_the_unsplit_qb_minor_grid(self):
+        with _Gfx942Arch():
+            # Causal MHA at D128 is where the tuned default goes persistent and
+            # auto resolves another block order.
+            for kw in (
+                dict(nhead_q=8, nhead_k=8, seqlen_q=512, seqlen_k=512),
+                dict(hdim_q=64, hdim_v=64),
+                dict(mask_type=0),
+                dict(sliding_window=128),
+            ):
+                with self.subTest(**kw):
+                    req = _req(spec_id="gfx942_dense_qbminor", **kw)
+                    spec = attention_tuning_spec(
+                        req, "gfx942_dense_qbminor"
+                    ).kernel_spec
+                    self.assertFalse(spec.persistent)
+                    self.assertEqual(spec.nonpersist_decode, "qb_minor")
+                    self.assertEqual(spec.kv_segments, 1)
+                    self.assertFalse(spec.window_wave_skip)
+                    self.assertEqual(spec.block_m, 256)
+
+    def test_knob_space_never_leaves_the_grid(self):
+        """Every spec the variant offers launches its default's kind of grid:
+        persistence, the block order and the KV split are scoped out, not merely
+        ignored downstream (block_m stays a knob and sizes the grid)."""
+        with _Gfx942Arch():
+            for kw in (
+                dict(nhead_q=8, nhead_k=8, seqlen_q=512, seqlen_k=512),
+                dict(hdim_q=64, hdim_v=64),
+                dict(sliding_window=512),
+            ):
+                req = _req(spec_id="gfx942_dense_qbminor", **kw)
+                for level in ("production", "full"):
+                    with self.subTest(level=level, **kw):
+                        specs = [
+                            spec.kernel_spec
+                            for candidate, spec in islice(
+                                iter_registered_attention_combos(
+                                    req,
+                                    candidate_prefix="attention_gfx942_dense_qbminor",
+                                    sweep_level=level,
+                                ),
+                                400,
+                            )
+                        ]
+                        self.assertTrue(specs)
+                        self.assertEqual(
+                            {
+                                (s.persistent, s.nonpersist_decode, s.kv_segments)
+                                for s in specs
+                            },
+                            {(False, "qb_minor", 1)},
+                        )
+
+
+class TestGfx942DenseIngestorGrids(unittest.TestCase):
+    """The ``*_aot`` candidates: the other grids the hipDNN kernel ingestor launches,
+    each fixed by its default spec, so its native dispatch can read the grid, decode
+    and CTA count from the descriptor of every spec they offer."""
+
+    _PERSIST = "gfx942_dense_persist_aot"
+    _ORDERS = {
+        "gfx942_dense_btminor_aot": "bt_hkv_minor",
+        "gfx942_dense_hqswz_aot": "hq_minor_swz",
+    }
+    _RUNTIME_DECODES = {"qb_major", "hkv_major", "bt_hkv_minor", "hq_minor_swz"}
+
+    def _specs(self, spec_id, level, **kw):
+        req = _req(
+            spec_id=spec_id, nhead_q=8, nhead_k=8, seqlen_q=512, seqlen_k=512, **kw
+        )
+        name = next(c.name for c in attention_candidates() if c.spec_id == spec_id)
+        return [
+            spec.kernel_spec
+            for candidate, spec in islice(
+                iter_registered_attention_combos(
+                    req, candidate_prefix=name, sweep_level=level
+                ),
+                400,
+            )
+        ]
+
+    def test_persistent_space_holds_explicit_decodes_at_304_ctas(self):
+        """Every spec is on the persistent grid at NP 304 with a decode the native
+        dispatch can pass fast-division kernargs for: never ``auto`` (it resolves
+        from the build shape) and never the shape-derived ``work`` CTA count."""
+        with _Gfx942Arch():
+            for kw in (
+                dict(),
+                dict(mask_type=0),
+                dict(sliding_window=128),
+                dict(sliding_window=1024),
+                dict(dtype="fp16"),
+                dict(emit_lse=True),
+            ):
+                for level in ("production", "full"):
+                    with self.subTest(level=level, **kw):
+                        specs = self._specs(self._PERSIST, level, **kw)
+                        self.assertTrue(specs)
+                        self.assertEqual(
+                            {
+                                (s.persistent, s.num_persistent, s.nonpersist_decode)
+                                for s in specs
+                            },
+                            {(True, 304, "qb_minor")},
+                        )
+                        self.assertLessEqual(
+                            {s.persist_decode for s in specs}, self._RUNTIME_DECODES
+                        )
+                        self.assertEqual({s.kv_segments for s in specs}, {1})
+
+    def test_persistent_default_pins_what_auto_resolves_to(self):
+        """Pinning names the same binary and symbol as ``auto`` at the build shape."""
+        with _Gfx942Arch():
+            for kw, decode in (
+                (dict(), "bt_hkv_minor"),
+                (dict(mask_type=0), "qb_major"),
+                (dict(sliding_window=128), "qb_major"),
+                (dict(sliding_window=512), "bt_hkv_minor"),
+            ):
+                with self.subTest(**kw):
+                    req = _req(
+                        spec_id=self._PERSIST,
+                        nhead_q=8,
+                        nhead_k=8,
+                        seqlen_q=512,
+                        seqlen_k=512,
+                        **kw,
+                    )
+                    spec = attention_tuning_spec(req, self._PERSIST).kernel_spec
+                    self.assertEqual(spec.persist_decode, decode)
+                    auto = dataclasses.replace(spec, persist_decode="auto")
+                    self.assertEqual(auto.resolved_persist_decode, decode)
+                    self.assertEqual(auto.kernel_name(), spec.kernel_name())
+                    self.assertEqual(
+                        attention_dense_cache_key(auto, arch="gfx942"),
+                        attention_dense_cache_key(spec, arch="gfx942"),
+                    )
+
+    def test_chunked_bottom_right_keeps_every_grid(self):
+        """A short bottom-right chunk is where the tuned default splits KV, which
+        turns its grid non-persistent; no ingestor grid may follow it."""
+        chunk = {
+            "nhead_q": 8,
+            "nhead_k": 8,
+            "seqlen_q": 512,
+            "seqlen_k": 2048,
+            "mask_type": AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+        }
+        with _Gfx942Arch():
+            # The default spec itself too: the tuned config re-picks the grid.
+            for tuned in (tuned_base_spec(_req(**chunk)), _spec(_req(**chunk))):
+                self.assertGreater(tuned.kv_segments, 1)
+                self.assertFalse(tuned.persistent)
+            grids = {
+                self._PERSIST: (True, "qb_minor"),
+                "gfx942_dense_qbminor": (False, "qb_minor"),
+                **{spec_id: (False, order) for spec_id, order in self._ORDERS.items()},
+            }
+            for spec_id, (persistent, order) in grids.items():
+                with self.subTest(spec_id=spec_id):
+                    spec = attention_tuning_spec(
+                        _req(spec_id=spec_id, **chunk), spec_id
+                    ).kernel_spec
+                    self.assertTrue(spec.causal_bottom_right)
+                    self.assertEqual(
+                        (spec.persistent, spec.nonpersist_decode, spec.kv_segments),
+                        (persistent, order, 1),
+                    )
+                    if persistent:
+                        self.assertEqual(spec.num_persistent, 304)
+                        self.assertIn(spec.persist_decode, self._RUNTIME_DECODES)
+
+    def test_persistent_grid_is_d128_only(self):
+        """At D64 the grid measured ahead, so the candidate admits no D64 request."""
+        candidate = next(
+            c for c in attention_candidates() if c.spec_id == self._PERSIST
+        )
+        with _Gfx942Arch():
+            ok, why = candidate.admits(
+                _req(spec_id=self._PERSIST, hdim_q=64, hdim_v=64)
+            )
+        self.assertFalse(ok)
+        self.assertIn("D128 only", why)
+
+    def test_block_order_candidates_offer_their_default_only(self):
+        with _Gfx942Arch():
+            for spec_id, order in self._ORDERS.items():
+                for kw in (dict(), dict(hdim_q=64, hdim_v=64), dict(mask_type=0)):
+                    for level in ("production", "full"):
+                        with self.subTest(spec_id=spec_id, level=level, **kw):
+                            specs = self._specs(spec_id, level, **kw)
+                            self.assertTrue(specs)
+                            self.assertEqual(
+                                {
+                                    (
+                                        s.persistent,
+                                        s.nonpersist_decode,
+                                        s.kv_segments,
+                                        s.block_m,
+                                        s.block_n,
+                                        s.lds_row_pad,
+                                        s.pv_priority,
+                                    )
+                                    for s in specs
+                                },
+                                {(False, order, 1, 256, 64, 8, 0)},
+                            )
+
+    def test_no_ingestor_grid_shares_the_qbminor_prefix(self):
+        """test_knob_space_never_leaves_the_grid selects qbminor by name prefix."""
+        names = [
+            c.name
+            for c in attention_candidates()
+            if c.spec_id in {self._PERSIST, *self._ORDERS}
+        ]
+        self.assertEqual(len(names), 3)
+        for name in names:
+            self.assertFalse(name.startswith("attention_gfx942_dense_qbminor"), name)
+
+    def test_tuned_candidate_still_sweeps_the_cta_count(self):
+        """Only a base that pins its decode scopes num_persistent out."""
+        with _Gfx942Arch():
+            specs = [
+                spec.kernel_spec
+                for candidate, spec in islice(
+                    iter_registered_attention_combos(
+                        _req(), candidate_prefix=_NAME, sweep_level="production"
+                    ),
+                    2000,
+                )
+                if candidate.name == _NAME
+            ]
+        self.assertGreater(len({s.num_persistent for s in specs if s.persistent}), 1)
 
 
 class TestGfx942DenseWavesPerEu(unittest.TestCase):
@@ -752,7 +1024,53 @@ class TestGfx942DensePersistentRuntimeShape(unittest.TestCase):
 
 
 class TestGfx942SlidingWindow(unittest.TestCase):
-    """Sliding-window pass-through and capability tests, mirroring gfx950's suite."""
+    """Sliding-window pass-through and capability tests, mirroring gfx950's suite.
+    The key-less-row refusal is gfx942's own: gfx950's kernel zeroes those rows."""
+
+    @staticmethod
+    def _windowed_spec(seqlen_kv, **kw) -> Gfx942AttentionDenseSpec:
+        """512 query rows at 256/64 tiles under a causal 128-key window."""
+        return Gfx942AttentionDenseSpec(
+            batch=1,
+            seqlen_q=512,
+            seqlen_kv=seqlen_kv,
+            num_query_heads=128,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+            sliding_window=128,
+            block_m=256,
+            block_n=64,
+            **kw,
+        )
+
+    def test_supports_rejects_a_window_that_leaves_rows_no_key(self):
+        """Row q keeps keys (q - W, q]; once seqlen_q - seqlen_kv >= W the last rows keep
+        none, and without a sink or the LSE path they would average V. 512/256 at
+        256/64 passes the block-level zero-trip guard (the last block starts at tile 2
+        of 4) yet rows from 383 see no key."""
+        for seqlen_kv, ok_expected in (
+            (256, False),
+            (384, False),
+            (448, True),
+            (512, True),
+        ):
+            with self.subTest(seqlen_kv=seqlen_kv):
+                spec = self._windowed_spec(seqlen_kv)
+                ok, why = supports_attention_dense(spec, arch="gfx942")
+                self.assertEqual(ok, ok_expected, why)
+                if not ok:
+                    self.assertIn("see no key", why)
+
+    def test_supports_accepts_key_less_window_rows_with_sinks_or_lse(self):
+        """Sinks seed the softmax (a key-less row is 0) and the LSE path zeroes
+        key-less rows, so the row rule leaves both alone."""
+        for exempt in ("use_sinks", "emit_lse"):
+            with self.subTest(exempt=exempt):
+                spec = self._windowed_spec(256, **{exempt: True})
+                ok, why = supports_attention_dense(spec, arch="gfx942")
+                self.assertTrue(ok, why)
 
     def test_sliding_window_zero_by_default(self):
         with _Gfx942Arch():
@@ -847,6 +1165,32 @@ class TestGfx942Sinks(unittest.TestCase):
                     ok, why = _candidate().admits(req)
                     self.assertTrue(ok, why)
                     self.assertEqual(dispatch_attention(req).candidate.name, _NAME)
+
+    def test_window_leaving_rows_keyless_admitted_only_with_sinks_or_lse(self):
+        """512/256 at 256/64 with a 128-key window passes the block-level zero-trip
+        guard (the last block's window starts at key tile 2 of 4), yet rows from 383
+        see no key and would average V. Both dense candidates refuse it unless sinks
+        or the LSE path handle those rows."""
+        shape = dict(seqlen_q=512, seqlen_k=256, sliding_window=128)
+        knobs = (("block_m", 256),)
+        by_name = {c.name: c for c in attention_candidates()}
+        with _Gfx942Arch():
+            for name, spec_id in (
+                (_NAME, _SPEC_ID),
+                ("attention_gfx942_dense_qbminor", "gfx942_dense_qbminor"),
+            ):
+                candidate = by_name[name]
+                with self.subTest(candidate=name):
+                    ok, why = candidate.admits(
+                        _req(**shape, spec_id=spec_id, tuning_knobs=knobs)
+                    )
+                    self.assertFalse(ok)
+                    self.assertIn("see no key", why)
+                    for exempt in (dict(use_sinks=True), dict(emit_lse=True)):
+                        ok, why = candidate.admits(
+                            _req(**shape, spec_id=spec_id, tuning_knobs=knobs, **exempt)
+                        )
+                        self.assertTrue(ok, f"{exempt}: {why}")
 
     def test_auto_sinks_request_does_not_select_dense(self):
         """Opt-in still holds for sink requests."""

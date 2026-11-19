@@ -26,8 +26,9 @@ plan's workspace (`packs/Gfx950AttentionUnified2DGeometry.hpp`).
 
   The full space's wide 32x32 geometry (4 warps x 32 rows, KV tile 64) won no graph and is not
   shipped.
-- Batch capacity 511: `num_seqs` 511 bakes 9 binary-search iterations, which resolve at most
-  2^9 - 1 sequences. The engine declines a graph with a larger batch.
+- Batch: any. The kernel takes the batch as the `num_seqs` kernarg and derives its `cu_q`
+  binary-search trip count from it at runtime, so no batch is baked. The KMD still declares
+  `num_seqs` (511); the engine does not read it.
 - Decode (seqlen_q 1) whose GQA group divides 16 is left to `hipkernel:Gfx950AttentionUnified3D`.
 - Fixed in every variant: no sliding window, no sinks, no ALiBi, no softcap, no fp8, 32-bit K/V
   addressing (K/V larger than 0x7FFF0000 bytes is declined).

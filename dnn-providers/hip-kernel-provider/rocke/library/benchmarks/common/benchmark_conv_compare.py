@@ -294,6 +294,8 @@ def _build_implicit_only_args(args) -> list[str]:
         a += ["--split-k", str(args.split_k)]
     if args.split_k_prune is not None:
         a += ["--split-k-prune", str(args.split_k_prune)]
+    if args.two_stage != "auto":
+        a += ["--two-stage", args.two_stage]
     if args.streamk == "off" and (
         args.streamk_reductions is not None or args.streamk_ctas != -1
     ):
@@ -706,6 +708,17 @@ def main() -> int:
         help=(
             "prune split-K sweep when perf drops by PCT%% relative to the best so far. "
             "Only effective with --split-k 0. Forwarded to implicit-GEMM only."
+        ),
+    )
+    implicit_grp.add_argument(
+        "--two-stage",
+        default="auto",
+        choices=["auto", "always", "never"],
+        dest="two_stage",
+        help=(
+            "two-stage (f32 workspace) wgrad split-K kernels: auto, always or "
+            "never, as benchmark_implicit_gemm_conv.py takes it. "
+            "Forwarded to implicit-GEMM only."
         ),
     )
     implicit_grp.add_argument(

@@ -27,6 +27,7 @@
 
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/SdpaLayoutTestSupport.hpp"
 
 /**
  * @file UnifiedAttentionTestGraphs.hpp
@@ -62,49 +63,6 @@ inline constexpr int64_t BOTTOM_RIGHT_CAUSAL = 2;
 
 inline constexpr float SCALE = 0.08838834764831843F;
 
-/// BSHD strides for (B, H, S, D) logical dims -- token-major, head varying fastest.
-inline std::vector<int64_t> bshdStrides(int64_t heads, int64_t sequence, int64_t headSize)
-{
-    return {sequence * heads * headSize, headSize, heads * headSize, 1};
-}
-
-/// BHSD strides for the same dims: head-major.
-inline std::vector<int64_t> bhsdStrides(int64_t heads, int64_t sequence, int64_t headSize)
-{
-    return {heads * sequence * headSize, sequence * headSize, headSize, 1};
-}
-
-/// BSHD axis order with the token row padded past `heads * headSize`: still token-major,
-/// but not gap-free, so it is not a paged cache's layout.
-inline std::vector<int64_t> paddedBshdStrides(int64_t heads, int64_t sequence, int64_t headSize)
-{
-    constexpr int64_t ROW_PAD = 8;
-    const int64_t rowStride = heads * headSize + ROW_PAD;
-    return {sequence * rowStride, headSize, rowStride, 1};
-}
-
-enum class Layout
-{
-    BSHD,
-    BHSD,
-    PADDED_BSHD
-};
-
-inline std::vector<int64_t>
-    stridesFor(Layout layout, int64_t heads, int64_t sequence, int64_t headSize)
-{
-    switch(layout)
-    {
-    case Layout::BHSD:
-        return bhsdStrides(heads, sequence, headSize);
-    case Layout::PADDED_BSHD:
-        return paddedBshdStrides(heads, sequence, headSize);
-    case Layout::BSHD:
-    default:
-        return bshdStrides(heads, sequence, headSize);
-    }
-}
-
 /// An SDPA graph, defaulting to one both engines' tests start from: bf16, D128, B2, Hq 8
 /// over Hkv 2, Sq @p DefaultSeqLenQ over Skv 256, top-left causal. Fields perturb one rule
 /// at a time. Each engine's header names its own default (prefill or decode) as GraphSpec.
@@ -120,10 +78,10 @@ struct BasicGraphSpec
     data_objects::DataType dataType = data_objects::DataType::BFLOAT16;
     std::optional<data_objects::DataType> kDataType;
 
-    Layout qLayout = Layout::BSHD;
-    Layout kLayout = Layout::BSHD;
-    Layout vLayout = Layout::BSHD;
-    Layout oLayout = Layout::BSHD;
+    SdpaLayout qLayout = SdpaLayout::BSHD;
+    SdpaLayout kLayout = SdpaLayout::BSHD;
+    SdpaLayout vLayout = SdpaLayout::BSHD;
+    SdpaLayout oLayout = SdpaLayout::BSHD;
 
     /// Dims of V and O, when they should disagree with the shared values.
     std::optional<int64_t> vSeqLen;
@@ -188,11 +146,12 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const Spec& spec)
     const int64_t oHeads = spec.oHeads.value_or(spec.numQueryHeads);
     const std::vector<int64_t> oDims{spec.batch, oHeads, spec.seqLenQ, spec.headSize};
 
-    const auto qStrides = stridesFor(spec.qLayout, spec.numQueryHeads, spec.seqLenQ, spec.headSize);
-    const auto kStrides = stridesFor(spec.kLayout, spec.numKvHeads, spec.seqLenKv, spec.headSize);
-    const auto vStrides = stridesFor(
+    const auto qStrides
+        = sdpaStrides(spec.qLayout, spec.numQueryHeads, spec.seqLenQ, spec.headSize);
+    const auto kStrides = sdpaStrides(spec.kLayout, spec.numKvHeads, spec.seqLenKv, spec.headSize);
+    const auto vStrides = sdpaStrides(
         spec.vLayout, spec.numKvHeads, spec.vSeqLen.value_or(spec.seqLenKv), spec.headSize);
-    const auto oStrides = stridesFor(spec.oLayout, oHeads, spec.seqLenQ, spec.headSize);
+    const auto oStrides = sdpaStrides(spec.oLayout, oHeads, spec.seqLenQ, spec.headSize);
 
     const auto tensorFor = [&](int64_t uid,
                                data_objects::DataType dataType,

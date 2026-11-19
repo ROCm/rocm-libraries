@@ -247,7 +247,7 @@ def _cases():
         # --- sinks: m/l seeded from sink_ptr[hq] once per work item, before the KV
         #     loop. Default and persistent grids (both decodes), full and causal,
         #     both head sizes, SWA-sink, and a dispatch case that guards the
-        #     gfx942_dense._base_spec use_sinks threading end to end. ---
+        #     gfx942_dense.tuned_base_spec use_sinks threading end to end. ---
         "attention_dense_gfx942/sink_d128_bf16_causal": mk(use_sinks=True),
         "attention_dense_gfx942/sink_d128_fp16_full": mk(
             dtype="fp16", causal=False, use_sinks=True

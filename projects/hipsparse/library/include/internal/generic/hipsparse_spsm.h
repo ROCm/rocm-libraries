@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,26 +28,27 @@
 extern "C" {
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
 /*! \ingroup generic_module
 *  \details
 *  \p hipsparseSpSM_createDescr creates a sparse matrix triangular solve (with multiple rhs) descriptor. It should be
 *  destroyed at the end using \ref hipsparseSpSM_destroyDescr().
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpSM_createDescr(hipsparseSpSMDescr_t* descr);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
 /*! \ingroup generic_module
 *  \details
 *  \p hipsparseSpSM_destroyDescr destroys a sparse matrix triangular solve (with multiple rhs) descriptor and releases all
 *  resources used by the descriptor.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpSM_destroyDescr(hipsparseSpSMDescr_t descr);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \details
 *  \p hipsparseSpSM_bufferSize computes the size of the required user-allocated buffer needed when solving the
@@ -89,7 +90,6 @@ hipsparseStatus_t hipsparseSpSM_destroyDescr(hipsparseSpSMDescr_t descr);
 *          \p pBufferSizeInBytes is nullptr, or \p opA or \p opB is invalid.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is currently not supported.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpSM_bufferSize(hipsparseHandle_t           handle,
                                            hipsparseOperation_t        opA,
@@ -117,6 +117,7 @@ hipsparseStatus_t hipsparseSpSM_bufferSize(hipsparseHandle_t           handle,
                                            size_t*                     pBufferSizeInBytes);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \details
 *  \p hipsparseSpSM_analysis performs the required analysis needed when solving the
@@ -158,7 +159,6 @@ hipsparseStatus_t hipsparseSpSM_bufferSize(hipsparseHandle_t           handle,
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is
 *               currently not supported.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
                                          hipsparseOperation_t        opA,
@@ -186,6 +186,7 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
                                          void*                       externalBuffer);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \brief Sparse triangular system solve
 *
@@ -279,7 +280,6 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is
 *               currently not supported.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_DEPRECATED_MSG(
     "This routine will be removed in a future release. Use hipsparseSpSM_solve_ex going forward")
 HIPSPARSE_EXPORT
@@ -311,6 +311,7 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                                       void*                       externalBuffer);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \brief Sparse triangular system solve
 *
@@ -401,7 +402,6 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is
 *               currently not supported.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpSM_solve_ex(hipsparseHandle_t           handle,
                                          hipsparseOperation_t        opA,

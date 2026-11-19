@@ -2137,7 +2137,7 @@ def _build_tilde_dgrad(
     _smem_dtype: Optional[Type] = (
         BF16 if op.a_dtype == "bf16" else F32 if op.a_dtype == "fp32" else None
     )
-    c_per_lane = op.c_frag_len
+    c_per_lane = op.dst.frag_len
 
     block_m, block_n, block_k = spec.tile_m, spec.tile_n, spec.tile_k
 
@@ -2367,7 +2367,7 @@ def _build_tilde_dgrad(
     mfmas_n = spec.mfmas_per_warp_n
     k_atoms = spec.k_atoms_per_tile_k
 
-    acc_init = b.zero_vec_f32(c_per_lane)
+    acc_init = b.zero_vec_f32(op.srcs[2].frag_len)
     accs = [
         (f"acc_m{mi}_n{ni}", acc_init) for mi in range(mfmas_m) for ni in range(mfmas_n)
     ]
@@ -3581,7 +3581,7 @@ def _emit_dgrad_direct_epilogue_wmma(
     c_M = params["p_dg_M"]
     c_N = params["p_dg_N"]
     dX_desc = make_dgrad_dx_descriptor_dynamic(b, params)
-    c_map = op.c_layout()
+    c_map = op.dst_layout()
     _fp32_out = spec.data.dtype_d == "fp32"
     _bf16_out = spec.data.dtype_d == "bf16"
     _elem_bytes = 4 if _fp32_out else 2
@@ -3599,7 +3599,7 @@ def _emit_dgrad_direct_epilogue_wmma(
                 b.add(block_n_off, warp_n_off),
                 b.const_i32(ni * spec.warp_tile_n),
             )
-            for i in range(op.c_frag_len):
+            for i in range(op.dst.frag_len):
                 row_off, col_off = c_map.coord(b, lane, i)
                 m_val = b.add(atom_m_off, row_off)
                 n_val = b.add(atom_n_off, col_off)
@@ -3660,7 +3660,7 @@ def _emit_dgrad_tilde_direct_epilogue_wmma(
     warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
     warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * spec.warp_tile_n))
 
-    c_map = op.c_layout()
+    c_map = op.dst_layout()
     _fp32_out = spec.data.dtype_d == "fp32"
     _bf16_out = spec.data.dtype_d == "bf16"
     _elem_bytes = 4 if _fp32_out else 2
@@ -3676,7 +3676,7 @@ def _emit_dgrad_tilde_direct_epilogue_wmma(
             atom_n_off = b.add(
                 b.add(block_n_off, warp_n_off), b.const_i32(ni * spec.warp_tile_n)
             )
-            for i in range(op.c_frag_len):
+            for i in range(op.dst.frag_len):
                 row_off, col_off = c_map.coord(b, lane, i)
                 m_val = b.add(atom_m_off, row_off)
                 n_val = b.add(atom_n_off, col_off)

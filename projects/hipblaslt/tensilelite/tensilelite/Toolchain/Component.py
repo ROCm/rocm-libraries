@@ -32,7 +32,7 @@ from subprocess import PIPE, STDOUT, CalledProcessError, check_output, run
 from typing import List, Optional
 
 from ..Common import SemanticVersion, print2
-from ..Common.Architectures import compilerTargetOf, deviceTargetFeaturesOf
+from ..Common.Architectures import compilerTargetOf
 from .Validators import validateToolchain
 
 def _invoke(args: List[str], desc: str=""):
@@ -284,7 +284,6 @@ class Assembler(Component):
             srcPath: The path to the assembly source file.
             destPath: The destination path for the generated object file.
         """
-        features = deviceTargetFeaturesOf(targetGfx)
         targetGfx = compilerTargetOf(targetGfx, self.path)
         self._retargetAssemblySource(targetGfx, srcPath)
         args = self._default_args
@@ -293,7 +292,6 @@ class Assembler(Component):
             args = args + ["-Xclangas", "-target-feature", "-Xclangas", "+real-true16"]
         args = [
             *args,
-            *[a for f in features for a in ("-Xclangas", "-target-feature", "-Xclangas", f)],
             f"-mcpu={targetGfx}",
             "-mwavefrontsize64" if wavefrontSize == 64 else "-mno-wavefrontsize64",
             srcPath,
@@ -366,11 +364,8 @@ class Compiler(Component):
             RuntimeError: If the compilation command fails.
         """
         archFlags = [f"--offload-arch={compilerTargetOf(gfx, self.path)}" for gfx in target_list]
-        # -Xclang reaches every device compile; an alias always builds alone.
-        features = [f for gfx in target_list for f in deviceTargetFeaturesOf(gfx)]
-        featureFlags = [a for f in features for a in ("-Xclang", "-target-feature", "-Xclang", f)]
         args = [
-            *(self.default_args), "-I", include_path, *archFlags, *featureFlags, srcPath, "-c", "-o", destPath
+            *(self.default_args), "-I", include_path, *archFlags, srcPath, "-c", "-o", destPath
         ]
         return _invoke(args, f"Compiling HIP source kernels into objects (.cpp -> .o)")
 
@@ -480,7 +475,9 @@ class Linker(Component):
                 "-Xlinker", f"--build-id={build_id_kind}",
         ]
 
-    def _response_file_args(self, srcPaths: List[str], destPath: str) -> List[str]:
+    def _response_file_args(
+        self, srcPaths: List[str], destPath: str, extraArgs: Optional[List[str]] = None
+    ) -> List[str]:
         """
         Create a response file and return the arguments to pass to the linker.
 
@@ -496,7 +493,7 @@ class Linker(Component):
         responsePath = Path(destPath).with_name(Path(destPath).name + ".linker_args")
         with open(responsePath, "wt") as file:
             file.write(" ".join(srcPaths).replace('\\', '\\\\') if os_name == "nt" else " ".join(srcPaths))
-        return [*(self.default_args), "-o", destPath, f"@{responsePath}"]
+        return [*(self.default_args), *(extraArgs or []), "-o", destPath, f"@{responsePath}"]
 
     def _use_response_file(self, args: List[str]) -> bool:
         """
@@ -511,19 +508,22 @@ class Linker(Component):
         line_length = sum(len(arg) for arg in args) + len(args) - 1
         return line_length >= sysconf("SC_ARG_MAX")
 
-    def __call__(self, srcPaths: List[str], destPath: str):
+    def __call__(self, srcPaths: List[str], destPath: str, threads: Optional[int] = None):
         """
         Links object files into a code object file.
 
         Args:
             srcPaths: A list of paths to object files.
             destPath: A destination path for the generated code object file.
+            threads: Number of threads ld.lld may use. When None, it uses every
+                hardware thread.
         Raises:
             RuntimeError: If linker invocation fails.
         """
-        args = [*(self.default_args), *srcPaths, "-o", destPath]
+        extraArgs = ["-Xlinker", f"--threads={threads}"] if threads else []
+        args = [*(self.default_args), *extraArgs, *srcPaths, "-o", destPath]
         if self._use_response_file(args):
-            args = self._response_file_args(srcPaths, destPath)
+            args = self._response_file_args(srcPaths, destPath, extraArgs)
         return _invoke(args, "Linking assembly object files into code object (*.o -> .co)")
 
 

@@ -17,6 +17,7 @@
 #define ROCKE_IR_INTERNAL_H
 
 #include "rocke/ir.h"
+#include "rocke/strbuf.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -171,6 +172,14 @@ void rocke_i_refuse_non_u8_source(const rocke_op_t* op);
 /* Lane count of a vector type, or 1 for a scalar. */
 int rocke_i_count_of(const rocke_type_t* t);
 
+/* Element count an LDS vector access of width `vec` can actually claim as its
+ * alignment granularity. The natural answer is `vec`, but an LDS tile advances
+ * by its innermost dimension per row, so when that dimension is not a multiple
+ * of `vec` -- what a bank-conflict pad such as lds_k_pad does -- alternate rows
+ * start off the natural boundary. Returns gcd(vec, innermost_dim), or `vec`
+ * when the shape is unavailable. Multiply by the element size for bytes.
+ * Mirrors lower_llvm._smem_vec_align / ir.py smem_store_vN. */
+int rocke_i_smem_vec_align_elems(const rocke_type_t* smem_type, int vec);
 /* VectorType(elem, count) allocated in `arena`, for callers that hold an arena
  * but no builder (the lowerers). `elem` must be non-NULL; NULL on OOM. The
  * name is the one rocke_vector_type gives the same type. */
@@ -249,6 +258,43 @@ const char* rocke_i_global_ptr_to_i64_op_error(const rocke_op_t* op, char* buf, 
  * lowerings use it. */
 const char* rocke_i_trap_op_error(const rocke_op_t* op, char* buf, size_t cap);
 
+/* The error for a built tile.gpu_check_failed op that has operands, results or
+ * regions, or NULL when it is bare (Python
+ * core/ir.py::_gpu_check_failed_op_error, same text). A returned error is
+ * written to `buf`. The verifier and both lowerings use it. */
+const char* rocke_i_gpu_check_failed_op_error(const rocke_op_t* op, char* buf, size_t cap);
+
+/* The code-object symbol of `kernel_name`'s GPU-check word, allocated in
+ * `arena` (Python core/ir.py::gpu_check_word_symbol, same spelling). A wave
+ * whose gpu_checked_value fact is false stores 1 to it and returns; the host reads
+ * it after the launch. */
+const char* rocke_i_gpu_check_word_symbol(rocke_arena_t* arena, const char* kernel_name);
+
+/* Whether `kernel` holds a tile.gpu_check_failed anywhere in its body, nested
+ * regions included: a kernel with a gpu_checked_value, whose false fact only a
+ * host reading the GPU-check word sees. */
+bool rocke_i_kernel_checks_on_gpu(const rocke_kernel_def_t* kernel);
+
+/* The `by` of the range marker rocke_b_gpu_checked_value writes (Python
+ * core/ir.py::GPU_CHECKED_VALUE_WRITER). */
+#define ROCKE_GPU_CHECKED_VALUE_WRITER "gpu_checked_value"
+
+/* Why such a kernel must not be launched from its code object alone (Python
+ * core/ir.py::GPU_CHECK_UNREAD_REASON, same words). */
+#define ROCKE_GPU_CHECK_UNREAD_REASON                                      \
+    "only rocke's runtime reads this kernel's GPU-check word, so a false " \
+    "gpu_checked_value fact would go unseen"
+
+/* Why a kernel whose parameters state facts must not be launched from a launch
+ * plan (Python core/ir.py::PARAM_FACTS_UNCHECKED_REASON, same words). */
+#define ROCKE_PARAM_FACTS_UNCHECKED_REASON                                        \
+    "parameters carry facts, which a launch from a code object or from a launch " \
+    "plan does not check"
+
+/* What a refused launch plan tells its caller to do instead (Python
+ * core/ir.py::LAUNCH_THROUGH_FROM_ARTIFACT, same words). */
+#define ROCKE_LAUNCH_THROUGH_FROM_ARTIFACT "launch it through KernelLauncher.from_artifact"
+
 /* Whether an scf.if_else can carry a result `index` of type `result_type`
  * (Python core/ir.py::_if_else_result_type_error): not an LDS allocation.
  * Otherwise returns false and writes the Python engine's refusal into `err`.
@@ -293,6 +339,33 @@ bool rocke_i_is_buffer_descriptor(const rocke_value_t* value);
  * lowered descriptor (an opaque ptr addrspace(8) / rsrc_t). */
 const char* rocke_i_loop_carried_descriptor_message(int index, char* buf, size_t cap);
 
+/* Mirrors ir._reused_loop_name_message: writes into `buf` the refusal for an
+ * scf.for induction variable or carried value named `name` (as the op records
+ * it, "%<name>") when that name is taken by another value of the same loop or
+ * of a loop it is nested in, and returns `buf`. The serialized IR refers to a
+ * value by its name, so a reused name is ambiguous inside the inner body. The
+ * builder, the IR parser and the verifier use it. */
+const char* rocke_i_reused_loop_name_message(const char* name, char* buf, size_t cap);
+
+/* Mirrors ir._first_reused_loop_name: the first of `names` (the names an
+ * scf.for gives its induction variable and carried values, in that order) that
+ * is already taken, or NULL when all are free. `taken` are the names of the
+ * loops it is nested in; a name is also taken when it repeats an earlier one of
+ * `names`. The builder, the IR parser and the verifier all apply this rule and
+ * refuse with rocke_i_reused_loop_name_message. */
+const char* rocke_i_first_reused_loop_name(const char* const* taken,
+                                           size_t n_taken,
+                                           const char* const* names,
+                                           size_t n_names);
+
+/* Mirrors ir._scf_for_value_names: the names the scf.for `loop` gives its
+ * induction variable and carried values, in that order -- the "iv" attr when it
+ * is a string, then the "name" of each "iter_args" entry that has one -- stored
+ * into `out` when it is non-NULL; returns how many there are. A name is listed
+ * whether or not its type is recorded. The builder, the IR parser and the
+ * verifier collect a loop's names with it. */
+int rocke_i_scf_for_value_names(const rocke_op_t* loop, const char** out);
+
 /* Mirrors ir._scf_for_carried_descriptor_error: the refusal for the scf.for
  * `op` when an iter_arg init (operands[3:]) or a value an scf.yield directly in
  * its body yields is a buffer descriptor, written into `buf`; NULL otherwise.
@@ -327,6 +400,158 @@ const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
                                    char* buf,
                                    size_t cap);
 
+/* ------------------------------------------------------- parameter facts */
+
+/* Receives one message from rocke_param_fact_errors. */
+typedef void (*rocke_param_fact_sink_t)(void* ctx, const char* message);
+
+/* Mirrors param_facts.declaration_errors: hands `sink` every rule the declaration
+ * params[index] breaks, in order, with the Python texts, and returns their
+ * count. `params` is the kernel's parameter list in declaration order (a
+ * relation may name only parameters before `index`). rocke_b_param raises the
+ * first message; rocke_verify reports all of them. (cpp/core/ir/param_facts.cpp) */
+int rocke_param_fact_errors(const rocke_param_t* const* params,
+                            int count,
+                            int index,
+                            rocke_param_fact_sink_t sink,
+                            void* ctx);
+
+/* The range of an integer type a fact may be stated on (Python
+ * param_facts.int_type_limits): for i8, i16, i32, i64 and u8
+ * (param_facts.FACT_INT_TYPES) writes the inclusive [lo, hi], derived from the
+ * type's dtype width and signedness, and returns true; returns false for any
+ * other type. */
+bool rocke_int_type_limits(const rocke_type_t* t, int64_t* lo, int64_t* hi);
+
+/* Whether `p` states an integer fact: one of param_facts.FACT_WORDS (ge, gt, le, lt, eq,
+ * multiple_of) is among its attrs. Pointer attributes are not facts. */
+bool rocke_param_states_facts(const rocke_param_t* p);
+
+/* Whether `key` is one of param_facts.FACT_WORDS. */
+bool rocke_param_is_fact_word(const char* key);
+
+/* One param attr value as a portable-IR document holds it. Each importer turns
+ * its own document node into this, so both read a param's attrs through
+ * rocke_param_opts_set_attr. `str` is borrowed from the document. */
+typedef enum rocke_param_attr_kind
+{
+    ROCKE_PARAM_ATTR_BOOL,
+    ROCKE_PARAM_ATTR_NUMBER,
+    ROCKE_PARAM_ATTR_STRING,
+    ROCKE_PARAM_ATTR_OTHER
+} rocke_param_attr_kind_t;
+
+typedef struct rocke_param_attr_value
+{
+    rocke_param_attr_kind_t kind;
+    bool b;
+    double number;
+    const char* str;
+} rocke_param_attr_value_t;
+
+/* Store attr `key` = `value` of param `param` in *opts: a key rocke_param_opts_t
+ * carries (ROCKE_PARAM_ATTR_KEYS) with a value of its kind. Returns NULL, or the
+ * refusal, written to `buf`, for an unknown key or a value of the wrong kind; a
+ * dropped attr would silently change the lowered kernel. A fact bound is an
+ * integer or a relation's canonical intexpr JSON (a string, kept borrowed; the
+ * builder checks it). (cpp/core/ir/param_facts.cpp) */
+const char* rocke_param_opts_set_attr(rocke_param_opts_t* opts,
+                                      const char* param,
+                                      const char* key,
+                                      const rocke_param_attr_value_t* value,
+                                      char* buf,
+                                      size_t cap);
+
+/* The refusal for a param whose attrs are not an object; the argument is the
+ * param's name. */
+#define ROCKE_PARAM_ATTRS_NOT_OBJECT "param '%s' attrs is not an object"
+
+/* Mirrors ir_print._format_param's facts: appends " {ge = %N, le = 4096}" for
+ * the facts `p` states, nothing when it states none. */
+void rocke_param_facts_print(const rocke_param_t* p, rocke_strbuf_t* out);
+
+/* The canonical JSON (sorted keys, no spaces) of the relation stored in
+ * `text`, with each param leaf renamed through `rename` (NULL keeps names),
+ * allocated in `arena`; NULL when `text` holds no relation. */
+char* rocke_relation_canonical(const char* text,
+                               rocke_arena_t* arena,
+                               const char* (*rename)(void* ctx, const char* name),
+                               void* ctx);
+
+/* Mirrors ir._declaration_text: `p`'s declaration as the author writes it,
+ * b.param("M", I32, ge=1, le=1048576), appended to `out`. */
+void rocke_param_declaration_text(const rocke_param_t* p, rocke_strbuf_t* out);
+
+/* Mirrors intexpr.relation_text with plain leaf names: the relation stored in
+ * `text` as the author writes it (product_of(M, ldc)), or `text` itself when it
+ * holds no relation, appended to `out`. */
+void rocke_relation_display(const char* text, rocke_strbuf_t* out);
+
+/* ------------------------------------------------------- range marker */
+
+/* One end of an arith.assume_range marker (Python IRBuilder._assume_range's ge /
+ * lt and ge_plus / lt_plus): an int when `set`, or the Value `end` plus `plus`
+ * for an end only known at run time. */
+typedef struct rocke_range_end
+{
+    bool set;
+    int64_t value;
+    rocke_value_t* end;
+    int64_t plus;
+} rocke_range_end_t;
+
+/* The facts an arith.assume_range marker records (Python _assume_range's
+ * keywords): ge + ge_plus <= v < lt + lt_plus, v == residue (mod multiple_of;
+ * 1 when unset), and `by`, the writer that checked them (NULL for none). */
+typedef struct rocke_assume_range_opts
+{
+    rocke_range_end_t ge;
+    rocke_range_end_t lt;
+    int64_t multiple_of;
+    bool multiple_of_set;
+    int64_t residue;
+    const char* by;
+} rocke_assume_range_opts_t;
+
+/* Python IRBuilder._assume_range: return `v` marked with facts its caller has
+ * checked or proved (an arith.assume_range marker, which emits nothing).
+ * Internal: a fact stated here is never checked, so only a caller that checked
+ * it first may state it (rocke_b_gpu_checked_value). Refuses bad facts with the
+ * verifier's texts. (cpp/core/ir/range_marker.cpp) */
+rocke_value_t* rocke_b_assume_range(rocke_ir_builder_t* b,
+                                    rocke_value_t* v,
+                                    const rocke_assume_range_opts_t* opts);
+
+/* Mirrors ir._assume_range_errors: hands `sink` every rule an arith.assume_range
+ * marker's attrs and Value ends break, in order, with the Python texts, and
+ * returns their count. `operands` are the marked value and its Value ends
+ * (`num_operands` of them, at least one). The rules include that each Value
+ * end has the marked value's type.
+ * (cpp/core/ir/range_marker.cpp) */
+int rocke_assume_range_errors(const rocke_attr_map_t* attrs,
+                              rocke_value_t* const* operands,
+                              int num_operands,
+                              rocke_param_fact_sink_t sink,
+                              void* ctx);
+
+/* Mirrors ir.assume_range_bound_operands: the marker's ge and lt operands, NULL
+ * for an end it does not state as a Value. */
+void rocke_assume_range_bound_operands(const rocke_op_t* op,
+                                       rocke_value_t** ge,
+                                       rocke_value_t** lt);
+
+/* Whether an op with `opcode` reads memory, so its result is a value no check
+ * has seen: the ops of Python value_sources.MEMORY_READ_OPS (global, buffer,
+ * LDS and cluster loads, LDS transposed reads, atomics). Listed by opcode, not
+ * inferred from purity. (cpp/core/ir/gpu_check.cpp) */
+bool rocke_i_opcode_reads_memory(rocke_opcode_t opcode);
+
+/* Mirrors ir.one_unsigned_compare_checks: whether 0 <= v < end is exactly
+ * v u< end for an i32 or i64 `t` and an end known to lie in [least, most].
+ * Throws ckc::ValueError, with the Python text, for any other `t`.
+ * (cpp/core/ir/gpu_check.cpp) */
+bool rocke_i_one_unsigned_compare_checks(int64_t least, int64_t most, const rocke_type_t* t);
+
 /* ------------------------------------------------------------- DPP helpers */
 
 /* DPP control word that lowers tile.dpp_xor with `xor_mask` (Python
@@ -338,6 +563,68 @@ const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
 int64_t rocke_i_dpp_xor_ctrl(int64_t xor_mask, bool has_row_xmask);
 
 #ifdef __cplusplus
+}
+
+#include <string>
+#include <utility>
+#include <vector>
+
+/* `t`'s name in upper case, as a declaration text writes a type (I32): the
+ * Python texts' `t.name.upper()`. (cpp/core/ir/param_facts.cpp) */
+std::string rocke_i_upper_type_name(const rocke_type_t* t);
+
+/* The end of a value a bound word states: Python param_facts.LOWER_WORDS or
+ * UPPER_WORDS, or both for eq. */
+typedef enum rocke_int_bound_side
+{
+    ROCKE_INT_BOUND_LOWER,
+    ROCKE_INT_BOUND_UPPER,
+    ROCKE_INT_BOUND_BOTH
+} rocke_int_bound_side_t;
+
+/* A fact word that takes a bound, with the rocke_int_facts_t field it fills and
+ * the end it states. */
+struct rocke_int_bound_word_t
+{
+    const char* word;
+    rocke_int_bound_t rocke_int_facts_t::*bound;
+    rocke_int_bound_side_t side;
+};
+
+/* The fact words that take a bound, in Python param_facts._BOUND_WORDS order:
+ * the one table from a word to its field and its end, which the param builder,
+ * the param-fact rules, the GPU-check builder and the param-attr reader all read. */
+inline constexpr rocke_int_bound_word_t ROCKE_INT_BOUND_WORDS[]
+    = {{"ge", &rocke_int_facts_t::ge, ROCKE_INT_BOUND_LOWER},
+       {"gt", &rocke_int_facts_t::gt, ROCKE_INT_BOUND_LOWER},
+       {"le", &rocke_int_facts_t::le, ROCKE_INT_BOUND_UPPER},
+       {"lt", &rocke_int_facts_t::lt, ROCKE_INT_BOUND_UPPER},
+       {"eq", &rocke_int_facts_t::eq, ROCKE_INT_BOUND_BOTH}};
+
+/* "states two lower bounds (ge, gt) -- state one" for each end whose two words
+ * `stated(word)` holds for, the lower end first: a fact states each end once.
+ * The caller prefixes its subject. Python param_facts.two_bounds_refusals. */
+template <typename Stated>
+std::vector<std::string> rocke_int_two_bounds_refusals(Stated stated)
+{
+    std::vector<std::string> refusals;
+    for(const auto& [side, end] :
+        {std::pair{ROCKE_INT_BOUND_LOWER, "lower"}, std::pair{ROCKE_INT_BOUND_UPPER, "upper"}})
+    {
+        std::string words;
+        bool all_stated = true;
+        for(const auto& bound_word : ROCKE_INT_BOUND_WORDS)
+        {
+            if(bound_word.side != side)
+                continue;
+            words += (words.empty() ? "" : ", ") + std::string(bound_word.word);
+            all_stated = all_stated && stated(bound_word.word);
+        }
+        if(all_stated)
+            refusals.push_back(std::string("states two ") + end + " bounds (" + words
+                               + ") -- state one");
+    }
+    return refusals;
 }
 #endif
 

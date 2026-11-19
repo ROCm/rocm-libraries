@@ -429,6 +429,9 @@ struct rocke_lower
     ROCKE_VEC(rocke_ll_lds_prov_t) lds_prov; /* i64 LDS address value -> gname */
     int smem_pool_size; /* total pool size in bytes (rounded to 16) */
     const char* smem_pool_name; /* "@smem_pool.<kernel>" */
+    /* The GPU-check word's symbol once a tile.gpu_check_failed stores to it
+     * (Python _gpu_check_word); NULL until then. */
+    const char* gpu_check_word;
     ROCKE_VEC(rocke_ll_smem_base_cache_t) smem_base_cache; /* per-(block,alloc) base ptr */
 
     /* scf.for yield recording stack (Python _yield_stack: list of list[str]).
@@ -438,6 +441,10 @@ struct rocke_lower
     /* unroll trailing-sync elision marker (Python _unroll_elide_sync_op):
      * points at the specific tile.sync op to skip, or NULL. */
     const rocke_op_t* unroll_elide_sync_op;
+
+    /* The names the headers of the rolled scf.for loops lowered so far define
+     * (Python _loop_header_names; see ll_claim_loop_header_names). */
+    ROCKE_VEC(const char*) loop_header_names;
 
     /* DWARF line-table metadata, or NULL when the kernel was built without
      * location capture (Python self._debug). */

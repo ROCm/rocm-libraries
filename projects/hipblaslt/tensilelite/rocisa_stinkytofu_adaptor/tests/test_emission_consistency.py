@@ -1656,9 +1656,9 @@ class TestDSStoreB96Emission(AdaptorTestCase, _ThreePathEqualityCase):
 class TestWmmaF6Gfx1250Scaled(AdaptorTestCase):
     """gfx1250 F6 WMMA mnemonic is gated on the forceScaledWMMA toggle.
 
-    All three gfx1250 steppings share ISA (12,5,0) and the same caps, so the
+    Both gfx1250 steppings share ISA (12,5,0) and the same caps, so the
     only thing that selects the scaled form is ``rocIsa::setForceScaledWMMA``
-    (true for gfx1250-strict / gfx1250v0, false for base gfx1250). This pins
+    (true for gfx1250-strict, false for base gfx1250). This pins
     the adapter mnemonic against *both* toggle values so the base-vs-strict
     split can't silently regress back to always-scaled.
 

@@ -65,7 +65,9 @@ BenchmarkProblems:
         - HalfPLR: [1]
         - TDMIterateMode: [-1]
         #- TDMSplit: [False,True]
-        - PrefetchGL2: [1]
+        - InitCIterWmma: [1]
+        - SwInstructionPrefetch: [0]
+        - PrefetchGL2: [2]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -90,12 +92,10 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
         - SourceSwap: [True]
-        - InitCIterWmma: [0]
-        - SwInstructionPrefetch: [0]
         - ClusterDim: [[4,4]]
         - ClusterAIDMapping: [-2]
         - StinkyTofuParameters:
-          - {DsReadDrainLatency: 128, DsReadPerCap: 3, DsReadThrottleLatency: 112}
+          - {DsReadDrainLatency: 64, DsReadPerCap: 3, DsReadThrottleLatency: 112}
         - LDSSegmentInterleave: [1]
         - LDSSegmentBRotate: [1]
         - WorkGroupMapping: [1]

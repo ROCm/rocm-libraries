@@ -2,6 +2,11 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM 5.1.0 for ROCm 10.3.0
+
+### Resolved Issues
+* Fixed incorrect output in `device_segmented_topk_air.hpp:choose_pivot_bin` when `radix_bits` does not divide the `key` width.
+
 ## rocPRIM 5.0.0 for ROCm 10.2.0
 
 ### Added

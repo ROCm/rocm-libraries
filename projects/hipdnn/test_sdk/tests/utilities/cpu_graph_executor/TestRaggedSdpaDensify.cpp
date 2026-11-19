@@ -405,7 +405,9 @@ size_t tokenRow(const std::vector<int32_t>& tokens, int64_t b, int64_t tok)
 
 // Ragged Max and Sum_exp are served through the rewrite with seq_len_q lengths. Stats, Max and
 // Sum_exp sit at non-monotonic origins (batch 0 after batch 1); Max + log(Sum_exp) equals Stats,
-// and Stats equals the run with monotonic origins and no Max / Sum_exp.
+// and Stats equals the run with monotonic origins and no Max / Sum_exp. Bottom-right causal
+// masking leaves query 0 of batch 1 (6 queries, 5 keys) with no visible key: that row's Stats and
+// Max are -inf and its Sum_exp is 0, checked exactly because a tolerance check on -inf is NaN.
 TEST(TestRaggedSdpaDensify, RaggedMaxAndSumExpAtNonMonotonicOriginsEqualStats)
 {
     const std::vector<int32_t> statsTokens = {6, 0, 0};
@@ -478,6 +480,17 @@ TEST(TestRaggedSdpaDensify, RaggedMaxAndSumExpAtNonMonotonicOriginsEqualStats)
             {
                 const auto at = tokenRow(statsTokens, b, tok) * H + static_cast<size_t>(h);
                 const auto ref = tokenRow(Q_TOKENS, b, tok) * H + static_cast<size_t>(h);
+                if(std::isinf(statsBase[ref]))
+                {
+                    EXPECT_EQ(statsBase[ref], -std::numeric_limits<float>::infinity())
+                        << "b=" << b << " tok=" << tok << " h=" << h;
+                    EXPECT_EQ(stats[at], statsBase[ref])
+                        << "b=" << b << " tok=" << tok << " h=" << h;
+                    EXPECT_EQ(maxRows[at], statsBase[ref])
+                        << "b=" << b << " tok=" << tok << " h=" << h;
+                    EXPECT_EQ(sumExp[at], 0.0F) << "b=" << b << " tok=" << tok << " h=" << h;
+                    continue;
+                }
                 EXPECT_NEAR(maxRows[at] + std::log(sumExp[at]), stats[at], 1e-5F)
                     << "b=" << b << " tok=" << tok << " h=" << h;
                 EXPECT_NEAR(stats[at], statsBase[ref], 1e-5F)

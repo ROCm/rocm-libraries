@@ -743,6 +743,11 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
         for idx, result in enumerate(sel.results, 1):
             spec = result.spec
             plan = plans[spec.name]
+            # Scoped to this instance alone (unlike `sizes`, which is shared-scratch-wide
+            # across every admitted instance): the struct.error guard below must judge the
+            # instance that actually raised, not the largest instance anywhere in the sweep.
+            inst_sizes = {in_name: In_t.nbytes, "w": W_t.nbytes, out_name: Out_t.nbytes}
+            inst_sizes.update(plan.workspaces)
             entries = [cache.get(step.identity) for step in plan.steps]
             if any(e is None for e in entries):
                 n_missing += 1
@@ -763,76 +768,100 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
                 table = np.array(plan.sub_gemm_table, dtype=np.int32)
                 ptrs["sub_gemms"] = rt.alloc(table.nbytes)
                 rt.memcpy_h2d(ptrs["sub_gemms"], table.ctypes.data, table.nbytes)
+            # Launchers are built fresh per instance (a kernel cache spans
+            # many distinct hsacos, not worth keeping resident across the
+            # whole sweep), so each one's HIP module must be explicitly
+            # unloaded once we're done with it -- Python dropping the
+            # KernelLauncher does not imply hipModuleUnload, and leaving
+            # thousands of sweep-lifetime instances' modules loaded
+            # exhausts device memory well before the sweep ends.
+            launchers: list[KernelLauncher] = []
             try:
-                # Each step bound once: a timed loop that packs per launch
-                # times the host, not a short kernel.
-                bound = [
-                    KernelLauncher(
-                        hsaco=hsaco,
-                        kernel_name=meta["kernel_name"],
-                        signature=list(step.signature),
-                    ).bind(
-                        plan.values(step, ptrs, sizes),
-                        config=LaunchConfig(grid=step.grid, block=step.block, stream=0),
+                try:
+                    for step, (hsaco, meta) in zip(plan.steps, entries):
+                        launchers.append(
+                            KernelLauncher(
+                                hsaco=hsaco,
+                                kernel_name=meta["kernel_name"],
+                                signature=list(step.signature),
+                            )
+                        )
+                    # Each step bound once: a timed loop that packs per
+                    # launch times the host, not a short kernel.
+                    bound = [
+                        launcher.bind(
+                            plan.values(step, ptrs, sizes),
+                            config=LaunchConfig(
+                                grid=step.grid, block=step.block, stream=0
+                            ),
+                        )
+                        for launcher, step in zip(launchers, plan.steps)
+                    ]
+                except struct.error as e:
+                    # A genuine over-2 GiB tensor is the only kernarg a struct.error
+                    # should come from; anything else is a real packing bug and must
+                    # not be swallowed as a silent skip. Judge this instance's own
+                    # kernarg sizes, not the shared-scratch sizing across the whole sweep.
+                    if max(inst_sizes.values()) <= 2**31 - 1:
+                        raise
+                    print(f"  [skip] {spec.name}: tensor over 2 GiB ({e})", flush=True)
+                    n_skipped += 1
+                    continue
+                except (HipError, KeyError) as e:
+                    print(f"  [skip] {spec.name}: {e}", flush=True)
+                    n_skipped += 1
+                    continue
+
+                def run(bound=bound):
+                    for launch in bound:
+                        launch()
+
+                passed = None
+                if ref_out is not None:
+                    stopped, passed = _verify(
+                        rt,
+                        run,
+                        ptrs[out_name],
+                        Out_t,
+                        ref_out,
+                        spec.name,
+                        args.dump_fail,
+                        _u8,
                     )
-                    for step, (hsaco, meta) in zip(plan.steps, entries)
-                ]
-            except struct.error as e:
-                # A genuine over-2 GiB tensor is the only kernarg a struct.error
-                # should come from; anything else is a real packing bug and must
-                # not be swallowed as a silent skip.
-                if max(sizes.values()) <= 2**31 - 1:
-                    raise
-                print(f"  [skip] {spec.name}: tensor over 2 GiB ({e})", flush=True)
-                n_skipped += 1
-                continue
-            except (HipError, KeyError) as e:
-                print(f"  [skip] {spec.name}: {e}", flush=True)
-                n_skipped += 1
-                continue
-
-            def run(bound=bound):
-                for launch in bound:
-                    launch()
-
-            passed = None
-            if ref_out is not None:
-                stopped, passed = _verify(
-                    rt,
-                    run,
-                    ptrs[out_name],
-                    Out_t,
-                    ref_out,
-                    spec.name,
-                    args.dump_fail,
-                    _u8,
+                    if stopped:
+                        return 1
+                    if not passed:
+                        n_failed += 1
+                        rc = 1
+                try:
+                    ms = stop.measure(
+                        run,
+                        warmup=args.warmup,
+                        iters=args.iters,
+                        stream=0,
+                        passed=passed,
+                    )
+                except (HipError, RuntimeError) as e:
+                    print(f"  [skip] {spec.name}: {e}", flush=True)
+                    n_skipped += 1
+                    continue
+                if ms is None:
+                    stop.report(spec.name)
+                    continue
+                m = _Measured(
+                    spec.name, flop / ms * 1e-9, bytes_xfer / ms * 1e-6, ms, passed
                 )
-                if stopped:
-                    return 1
-                if not passed:
-                    n_failed += 1
-                    rc = 1
-            try:
-                ms = stop.measure(
-                    run, warmup=args.warmup, iters=args.iters, stream=0, passed=passed
+                measured.append(m)
+                mark = "*" if spec.name == sel.default_pick else " "
+                print(
+                    f"  [{idx:>{len(str(n))}}/{n}]{mark}{m.tflops:7.1f} TFLOPS  "
+                    f"{ms:8.3f} ms  {spec.name}",
+                    flush=True,
                 )
-            except (HipError, RuntimeError) as e:
-                print(f"  [skip] {spec.name}: {e}", flush=True)
-                n_skipped += 1
-                continue
-            if ms is None:
-                stop.report(spec.name)
-                continue
-            m = _Measured(
-                spec.name, flop / ms * 1e-9, bytes_xfer / ms * 1e-6, ms, passed
-            )
-            measured.append(m)
-            mark = "*" if spec.name == sel.default_pick else " "
-            print(
-                f"  [{idx:>{len(str(n))}}/{n}]{mark}{m.tflops:7.1f} TFLOPS  "
-                f"{ms:8.3f} ms  {spec.name}",
-                flush=True,
-            )
+            finally:
+                synchronize_and_release(0)
+                for launcher in launchers:
+                    launcher.unload()
     finally:
         synchronize_and_release(0)
         for ptr in ptrs.values():

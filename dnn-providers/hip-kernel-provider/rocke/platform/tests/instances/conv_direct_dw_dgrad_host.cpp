@@ -35,7 +35,7 @@
  *   - the forward WMMA validator tail's refusal of an unknown scheduler, which
  *     must carry normalize_scheduler_strategy's text, choices included (and
  *     so must the dgrad WMMA and Winograd GEMM validators), the name quoted
- *     as Python's repr (rocke_py_str_repr);
+ *     as Python's repr (rocke_py_str_repr, the engine's one port);
  *   - the direct wgrad validators' refusal of a dilated problem, which must
  *     carry conv_direct_grouped.dilation_reason's text;
  *   - a zero or negative extent (N, H, W, groups, cpg, kpg, KH, KW) given to
@@ -603,9 +603,10 @@ static void test_fwd_wmma_scheduler_reason(void)
     CHECK(rocke_scheduler_strategy_is_valid(NULL), "NULL strategy refused");
 }
 
-/* rocke_py_str_repr is Python's repr() of a str: the quote choice, the
- * escapes, the snprintf-style length and truncation. The scheduler refusal
- * quotes the name with it, as Python's {value!r}. */
+/* rocke_py_str_repr is Python's repr() of a str (or of None): the quote
+ * choice, the escapes, the snprintf-style length and truncation. The
+ * scheduler refusal quotes the name with it, as Python's {value!r}, and the
+ * IR printer its region labels and list attrs. */
 static void test_py_str_repr(void)
 {
     const char* cases[][2] = {
@@ -618,17 +619,24 @@ static void test_py_str_repr(void)
         {"\x01\x1f\x7f", "'\\x01\\x1f\\x7f'"},
         {"caf\xc3\xa9", "'caf\xc3\xa9'"},
         {"", "''"},
+        {NULL, "None"},
     };
     char out[64];
     for(const auto& c : cases)
     {
         const size_t n = rocke_py_str_repr(c[0], out, sizeof out);
-        CHECK(strcmp(out, c[1]) == 0 && n == strlen(c[1]), "repr(%s) = %s", c[0], out);
+        CHECK(strcmp(out, c[1]) == 0 && n == strlen(c[1]),
+              "repr(%s) = %s",
+              c[0] != NULL ? c[0] : "None",
+              out);
     }
     CHECK(rocke_py_str_repr("abcdef", out, 4) == 8 && strcmp(out, "'ab") == 0,
           "truncated repr: %s",
           out);
     CHECK(rocke_py_str_repr("abc", NULL, 0) == 5, "repr length without a buffer");
+    CHECK(rocke_py_str_repr(NULL, out, 3) == 4 && strcmp(out, "No") == 0,
+          "truncated repr(None): %s",
+          out);
     char reason[ERR_CAP];
     CHECK(rocke_scheduler_strategy_reason("it's", reason, sizeof reason)
               && strcmp(reason,
@@ -637,6 +645,16 @@ static void test_py_str_repr(void)
                      == 0,
           "sched it's: %s",
           reason);
+    char small[8];
+    CHECK(rocke_scheduler_strategy_reason("bogus", small, sizeof small)
+              && strcmp(small, "unsuppo") == 0,
+          "truncated sched reason: %s",
+          small);
+    char mid[34];
+    CHECK(rocke_scheduler_strategy_reason("bogus", mid, sizeof mid)
+              && strcmp(mid, "unsupported scheduler_strategy 'b") == 0,
+          "sched reason cut inside the name: %s",
+          mid);
     const char* prefix = "unsupported scheduler_strategy 'a\\\\b'; expected";
     CHECK(rocke_scheduler_strategy_reason("a\\b", reason, sizeof reason)
               && strncmp(reason, prefix, strlen(prefix)) == 0,

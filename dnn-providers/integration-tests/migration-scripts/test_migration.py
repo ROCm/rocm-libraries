@@ -29,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPT_DIR = Path(__file__).parent
 
@@ -599,6 +600,76 @@ def test_round_trip_expansion():
     print("  PASS: round_trip_expansion")
 
 
+def test_resolve_plain_tensor_scoped_field_from_its_own_entry():
+    """_resolve() must let a non-whitelisted, non-dotted field (e.g. alignment, as
+    used by develop's SdpaBackward bundles) resolve from a tensor's own values.tensors[]
+    entry -- it has no field-name whitelist, mirroring the C++ loader's lookupJsonPath(),
+    which walks any placeholder path through the tensor's own entry with no restriction.
+    """
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from bundle_utils import canon, expand
+
+    g = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+    g["tensors"][0]["alignment"] = 16
+
+    template = {
+        "nodes": [
+            {
+                "type": "ReluAttributes",
+                "name": "",
+                "inputs": {"x_tensor_uid": 0},
+                "outputs": {"y_tensor_uid": 1},
+            }
+        ],
+        "tensors": [
+            {
+                "uid": 0,
+                "name": "",
+                "dims": "${case.dims}",
+                "strides": "${case.strides}",
+                "data_type": "${case.data_type}",
+                "alignment": "${case.alignment}",
+                "virtual": False,
+            },
+            {
+                "uid": 1,
+                "name": "",
+                "dims": "${case.dims}",
+                "strides": "${case.strides}",
+                "data_type": "${case.data_type}",
+                "virtual": False,
+            },
+        ],
+        "io_data_type": "${case.io_data_type}",
+        "compute_data_type": "float",
+        "intermediate_data_type": "float",
+        "name": "",
+    }
+
+    values = {
+        "io_data_type": "float",
+        "tensors": [
+            {
+                "uid": 0,
+                "dims": [2, 3, 4, 5],
+                "strides": [60, 20, 5, 1],
+                "data_type": "float",
+                "alignment": 16,
+            },
+            {
+                "uid": 1,
+                "dims": [2, 3, 4, 5],
+                "strides": [60, 20, 5, 1],
+                "data_type": "float",
+            },
+        ],
+    }
+
+    expanded = expand(template, values)
+    assert canon(expanded) == canon(g), "plain tensor-scoped field did not resolve"
+    print("  PASS: resolve_plain_tensor_scoped_field_from_its_own_entry")
+
+
 def test_case_ids():
     """Case ids are stable, bounded, and unique even for input-range-only diffs."""
     sys.path.insert(0, str(SCRIPT_DIR))
@@ -923,7 +994,7 @@ def test_import_inputs_uid_canonicalized_by_name():
 def _inventory(root):
     """{relative path: file bytes, or None for a directory} under root."""
     return {
-        str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
+        p.relative_to(root).as_posix(): p.read_bytes() if p.is_file() else None
         for p in sorted(root.rglob("*"))
     }
 
@@ -2347,6 +2418,37 @@ def _write_marked_sweep(bundle_dir, rel, graph, marker):
         sweep = {"version": 1, "import_mode": marker, "cases": sweep["cases"]}
     (out / "graph.template.json").write_text(json.dumps(template, indent=2) + "\n")
     (out / "sweep.json").write_text(json.dumps(sweep, indent=2) + "\n")
+
+
+def test_inventory_keys_are_forward_slash_normalized():
+    """_inventory() keys stay forward-slash even when relative_to() would use backslashes."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        nested = bundle_dir / "quick" / "Relu" / "Marked"
+        nested.mkdir(parents=True)
+        (nested / "sweep.json").write_bytes(b"{}")
+
+        class _BackslashRelPath:
+            def __init__(self, posix_str):
+                self._posix = posix_str
+
+            def __str__(self):
+                return self._posix.replace("/", "\\")
+
+            def as_posix(self):
+                return self._posix
+
+        real_relative_to = Path.relative_to
+
+        def fake_relative_to(self, *args, **kwargs):
+            return _BackslashRelPath(real_relative_to(self, *args, **kwargs).as_posix())
+
+        with patch.object(Path, "relative_to", fake_relative_to):
+            keys = _inventory(bundle_dir)
+        assert "quick/Relu/Marked/sweep.json" in keys, keys
+        assert not any("\\" in k for k in keys), keys
+        print("  PASS: inventory_keys_are_forward_slash_normalized")
 
 
 def test_grouped_default_mode_ignores_marked_sweep():
@@ -4214,7 +4316,9 @@ def main() -> int:
 
     tests = [
         test_skeleton_grouping,
+        test_inventory_keys_are_forward_slash_normalized,
         test_round_trip_expansion,
+        test_resolve_plain_tensor_scoped_field_from_its_own_entry,
         test_case_ids,
         test_place_and_verify,
         test_place_keeps_manual_cases,

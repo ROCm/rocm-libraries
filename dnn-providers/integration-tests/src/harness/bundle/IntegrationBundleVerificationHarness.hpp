@@ -109,6 +109,7 @@ public:
         _bundle = std::move(bundle);
         _bundlePath = std::move(path);
         _claimLocator = std::move(claimLocator);
+        _raggedLengthUidsCache.reset();
 
         if(_bundle != nullptr && _bundle->metadata.seed.has_value())
         {
@@ -558,6 +559,11 @@ private:
     // filled input buffer. Runs before any engine or reference reads the inputs.
     std::optional<VerificationOutcome>
         checkRaggedLayouts(const std::unordered_map<int64_t, int64_t>& lengthUids) const;
+    // raggedLengthUids(), computed once per bundle and reused by every later call site
+    // (the graph does not change once the bundle is set). Propagates the same exception
+    // raggedLengthUids() would throw; nothing is cached on a throwing call.
+    const std::unordered_map<int64_t, int64_t>& cachedRaggedLengthUids() const;
+    mutable std::optional<std::unordered_map<int64_t, int64_t>> _raggedLengthUidsCache;
 
     OutputTensors allocateSentinelOutputs(bool onDevice) const;
     // The input set that a variant pack reads: the packed set for a device pack of a

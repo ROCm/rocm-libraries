@@ -54,3 +54,4 @@ Update the status, the notes, and the verification date in the same change that 
 | [0019](./0019_UniversalHeuristicDescriptor.md) | Universal heuristic descriptor (UHD) | In progress |
 | [0020](./0020_UniversalEngineDescriptor.md) | Universal engine descriptor (UED) | In progress |
 | [0022](./0022_PerOpTestPlans.md) | Per-op test plans | Planned |
+| [0024](./0024_CuDNN_V8_Compatibility.md) | cuDNN v8 compatibility layer (reference: [0024 reference](./0024_CuDNN_V8_Compatibility_Reference.md)) | In progress |

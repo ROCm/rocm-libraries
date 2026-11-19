@@ -42,7 +42,7 @@ from . import __version__
 from .Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
                            LIBRARY_LOGIC_DIR, setVerbosity, IsaInfo, makeDebugConfig, \
                            DebugConfig, IsaVersion, coVersionMap
-from .Common.Architectures import ARCH_BUILD_ALIASES, architectureMap, archNameForIsa, \
+from .Common.Architectures import architectureMap, archNameForIsa, \
                                          baseArchName, capOverrideKeyOf, detectGlobalCurrentArch, \
                                          gfxToIsa, steppingArchOf, verifyTargetIdQualifiers
 from .Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
@@ -537,8 +537,7 @@ def archNamesFromConfig(configArchitecture, isaList, archNames):
         if not arch:
             continue
         isa = gfxToIsa(arch)
-        if isa is None or baseArchName(arch) not in architectureMap \
-                or baseArchName(arch) in ARCH_BUILD_ALIASES:
+        if isa is None or baseArchName(arch) not in architectureMap:
             raise ValueError(f"Unrecognized Architecture in config: '{arch}'")
         # Checked here because this is the one place a qualifier is authored by
         # hand; everywhere else it arrives from a list the build already
@@ -796,8 +795,7 @@ def Tensile(userArgs):
             # (gfx1250v1, gfx1250v) still resolves to (12,5,0) and would silently
             # build the shipping stepping. Check the base name, so target IDs and
             # predicates (gfx942:xnack-, gfx950[cu=64]) keep working as before.
-            if isa is None or baseArchName(arch) not in architectureMap \
-                    or baseArchName(arch) in ARCH_BUILD_ALIASES:
+            if isa is None or baseArchName(arch) not in architectureMap:
                 raise ValueError(f"Unrecognized GPU target: '{arch}'")
             isaList.append(isa)
             archNames.append(arch)

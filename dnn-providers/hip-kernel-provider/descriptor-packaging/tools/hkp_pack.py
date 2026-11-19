@@ -165,6 +165,13 @@ def _parse_args(argv):
         "pruned like arch-pruned ones, and a KDP left with none is dropped. "
         "Repeatable; an unknown kind is an error.",
     )
+    p.add_argument(
+        "--require-dvc",
+        action="store_true",
+        help="A model file that is absent while its `<model>.dvc` pointer exists "
+        "(a `dvc pull` that was not run) is an error. Without it the model's UHD "
+        "is left out of the shipped tree with a warning.",
+    )
     return p.parse_args(argv)
 
 
@@ -184,6 +191,7 @@ def main(argv=None):
         source_label=args.source_label,
         exclude_folders=tuple(args.exclude_folder),
         disabled_kinds=tuple(args.disable_kind),
+        require_dvc=args.require_dvc,
     )
     return 0
 

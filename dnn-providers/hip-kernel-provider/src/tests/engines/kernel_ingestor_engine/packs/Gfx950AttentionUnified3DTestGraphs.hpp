@@ -172,7 +172,7 @@ inline double scoreOf(const GraphSpec& graphSpec, const KernelSpec& kernelSpec)
     return scorer(graph.context(), bound.value_or(BoundTokens{}), makeKernel(kernelSpec));
 }
 
-/// The 19-argument segment-kernel ABI the rocKE builder declares, under its own names.
+/// The 22-argument segment-kernel ABI the rocKE builder declares, under its own names.
 inline std::vector<KernelArgument> pythonSegmentAbi()
 {
     constexpr uint32_t POINTER_BYTES = 8;
@@ -199,20 +199,25 @@ inline std::vector<KernelArgument> pythonSegmentAbi()
             scalar("softcap"),
             scalar("num_seqs"),
             scalar("block_table_stride"),
-            scalar("qq_bias_stride_0")};
+            scalar("qq_bias_stride_0"),
+            scalar("num_query_heads"),
+            scalar("num_kv_heads"),
+            scalar("sliding_window")};
 }
 
-/// The 5-pointer reduce-kernel ABI.
+/// The reduce-kernel ABI: 5 pointers and the query head count.
 inline std::vector<KernelArgument> pythonReduceAbi()
 {
     constexpr uint32_t POINTER_BYTES = 8;
+    constexpr uint32_t SCALAR_BYTES = 4;
     const auto buffer
         = [](const char* name) { return KernelArgument{"global_buffer", POINTER_BYTES, 0, name}; };
     return {buffer("output_ptr"),
             buffer("segm_output_ptr"),
             buffer("segm_max_ptr"),
             buffer("segm_expsum_ptr"),
-            buffer("seq_lens_ptr")};
+            buffer("seq_lens_ptr"),
+            KernelArgument{"by_value", SCALAR_BYTES, 0, "num_query_heads"}};
 }
 
 /// A KPACK descriptor for this engine naming an archive that is not there, its `segment`

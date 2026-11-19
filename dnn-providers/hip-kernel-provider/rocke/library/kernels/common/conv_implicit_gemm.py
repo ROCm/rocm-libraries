@@ -1396,8 +1396,6 @@ def _build_implicit_gemm_conv_impl(
     _smem_dtype: Optional[Type] = (
         BF16 if op.a_dtype == "bf16" else F32 if op.a_dtype == "fp32" else None
     )
-    c_per_lane = op.c_frag_len
-
     block_m, block_n, block_k = spec.tile_m, spec.tile_n, spec.tile_k
 
     # ---- Tile-level block/warp/lane decomposition (CK Tile ``BlockGemmShape``) ----
@@ -1558,7 +1556,7 @@ def _build_implicit_gemm_conv_impl(
     mfmas_n = spec.mfmas_per_warp_n
     k_atoms = spec.k_atoms_per_tile_k
 
-    acc_init = b.zero_vec_f32(c_per_lane)
+    acc_init = b.zero_vec_f32(op.srcs[2].frag_len)
     accs = [
         (f"acc_m{mi}_n{ni}", acc_init) for mi in range(mfmas_m) for ni in range(mfmas_n)
     ]

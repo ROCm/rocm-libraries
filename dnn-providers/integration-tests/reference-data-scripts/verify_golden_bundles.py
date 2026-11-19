@@ -14,7 +14,12 @@ from pathlib import Path
 from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "migration-scripts"))
-from bundle_utils import ABSENT_TENSORS_KEY, absent_case_problems  # noqa: E402
+from bundle_utils import (  # noqa: E402
+    ABSENT_TENSORS_KEY,
+    UNRESOLVED,
+    absent_case_problems,
+    walk_dotted_path,
+)
 
 ALLOWED_TIERS = {"quick", "standard", "comprehensive", "full"}
 BUNDLE_SIZE_WARNING_BYTES = 1024 * 1024
@@ -1620,19 +1625,13 @@ def validate_sweep_case(
     require_data: bool,
     result: VerificationResult,
     stats_tensor_uids: set[int] | None = None,
-    tensor_scoped_fields: set[tuple[int, str]] | None = None,
     length_uids: dict[int, int] | None = None,
     absent_uids: set[int] = frozenset(),
+    tensor_scoped_fields: set[tuple[int, str]] | None = None,
 ) -> None:
     if not isinstance(case, dict):
         result.error(sweep_path, f"case {index} is not an object")
         return
-
-    # An absent tensor leaves the template before placeholder expansion, so
-    # its placeholders need no values.
-    tensor_scoped_fields = {
-        (uid, f) for uid, f in tensor_scoped_fields or () if uid not in absent_uids
-    }
 
     case_id = case.get("id")
     if not isinstance(case_id, str) or not case_id:
@@ -1657,22 +1656,39 @@ def validate_sweep_case(
         )
         values = {}
 
+    # An absent tensor leaves the template before placeholder expansion, so its
+    # placeholders need no values.
+    tensor_scoped_fields = {
+        (uid, f) for uid, f in tensor_scoped_fields or () if uid not in absent_uids
+    }
+
     for field_name in sorted(scalar_fields):
         if first_path_token(field_name) not in values:
             result.error(
                 sweep_path,
                 f"case '{case_label}' is missing placeholder value for '{field_name}'",
             )
-    # A placeholder in a tensor field resolves from that tensor's values entry
-    # first, then from the top-level values.
+    # A placeholder on a tensor's own template object resolves the way the C++
+    # loader's resolvePlaceholder() does: first by walking the full (possibly
+    # dotted) path through that tensor's own values.tensors[] entry, then -- if
+    # that walk fails -- by walking the same path through the top-level values
+    # instead. There is no restriction on which field names may be looked up
+    # per-tensor.
     raw_case_tensors = {}
     if isinstance(values.get("tensors"), list):
         for tensor in values["tensors"]:
             if isinstance(tensor, dict) and is_integer(tensor.get("uid")):
                 raw_case_tensors.setdefault(tensor["uid"], tensor)
     for uid, field_name in sorted(tensor_scoped_fields):
-        token = first_path_token(field_name)
-        if token not in values and token not in raw_case_tensors.get(uid, {}):
+        tensor_entry = raw_case_tensors.get(uid)
+        resolved = (
+            walk_dotted_path(tensor_entry, field_name)
+            if tensor_entry is not None
+            else UNRESOLVED
+        )
+        if resolved is UNRESOLVED:
+            resolved = walk_dotted_path(values, field_name)
+        if resolved is UNRESOLVED:
             result.error(
                 sweep_path,
                 f"case '{case_label}' is missing placeholder value for '{field_name}'",
@@ -1919,9 +1935,9 @@ def validate_sweep_bundle(
             require_data,
             result,
             stats_tensor_uids,
-            tensor_scoped_fields,
             length_uids,
             absent_uids,
+            tensor_scoped_fields,
         )
 
 

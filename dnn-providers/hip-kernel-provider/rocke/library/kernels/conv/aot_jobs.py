@@ -61,7 +61,14 @@ Per direction, on top of that:
   two-stage only, load widths derived by the builder), served only to
   depthwise problems whose merged GEMM fits the tile. ``lds_k_outer`` and
   ``prefetch_addr`` follow ``WgradConvSpec.default_lds_k_outer`` /
-  ``default_prefetch_addr`` per geometry.
+  ``default_prefetch_addr`` per geometry. On wave32 (WMMA, gfx1250) the
+  synchronous default-epilogue kernels (split_k = 1 and atomic split-K) are
+  built on the whole grid; the cshuffle epilogue, two-stage split-K and the
+  ``async_dma`` loop (global_load_async_to_lds) only on the
+  ``CACHE_WGRAD_WMMA_GEOMETRIES`` cover. The async loop is built next to the
+  plain K loop of each non-two-stage configuration, once per geometry with
+  the A / B chunk widths the copy picks recorded in the identity
+  (``async_chunk_a`` / ``_b``).
   Opt-in (``streamk_modes``; ``--compile-all --streamk``): stream-K
   kernels, default epilogue only, ``split_k`` = 1, c = 1. At the widest
   vector width W of the dtype (a = W; b in {W, 1}): one per launch mode
@@ -177,6 +184,39 @@ CACHE_WARP_TILE_MN: Tuple[int, ...] = (16, 32)
 # which have no factor of 9 to chase, and widening all three directions costs
 # several times the disk for no measured gain.
 CACHE_WGRAD_EXTRA_TILE_MN: Tuple[int, ...] = (144, 192)
+
+# ---- wave32 (WMMA) wgrad geometries ---------------------------------------
+# The WMMA wgrad variants beyond the synchronous default epilogue (cshuffle,
+# two-stage split-K, the async K loop) are built on these (tile_m, tile_n,
+# tile_k, warp_m, warp_n) only; the default-epilogue kernels keep the whole
+# ladder above. Profiling the wgrad layers of
+# the reference corpora over a pruned grid (tile_m 32..256 bounded by kpg,
+# tile_n 64..256, tile_k 32/64, 4 or 8 waves), with the cached kernels
+# (split_k = 1 default epilogue, split-K cshuffle), each of these was the
+# fastest geometry of at least one layer, and together they hold the fastest
+# measured time of every layer. The rest of the ladder never won one; the JIT
+# sweep still walks it.
+CACHE_WGRAD_WMMA_GEOMETRIES: Tuple[Tuple[int, int, int, int, int], ...] = (
+    (32, 64, 32, 2, 4),
+    (32, 64, 64, 2, 2),
+    (32, 64, 64, 2, 4),
+    (32, 128, 32, 2, 2),
+    (32, 128, 64, 1, 4),
+    (32, 128, 64, 1, 8),
+    (32, 256, 32, 1, 8),
+    (32, 256, 64, 1, 4),
+    (64, 64, 64, 2, 4),
+    (64, 64, 64, 4, 2),
+    (64, 128, 64, 2, 2),
+    (64, 128, 64, 2, 4),
+    (128, 64, 64, 4, 2),
+    (128, 128, 32, 1, 4),
+    (128, 128, 32, 2, 2),
+    (128, 128, 64, 2, 2),
+    (128, 128, 64, 4, 2),
+    (256, 64, 64, 4, 2),
+    (256, 128, 64, 4, 2),
+)
 CACHE_WGRAD_EXTRA_WARP_MN: Tuple[int, ...] = (3, 6)
 # Cap on the f32 accumulator registers each lane holds:
 # (tile_m / warp_m) * (tile_n / warp_n) / wave_size. Above 256 the
@@ -503,6 +543,70 @@ def _fwd_k_loops(pipeline: str) -> List[Tuple[bool, bool]]:
     if pipeline == "mem":
         k_loops.append((False, True))
     return k_loops
+
+
+def _wgrad_k_loops(
+    wave_size: int, pipeline: str, two_stage: bool, target
+) -> List[dict]:
+    """K-loop variants built per wgrad configuration.
+
+    The base loop always. On wave32 (WMMA) next to "mem", except under
+    two-stage, and only on a target with ``global_load_async_to_lds``
+    (gfx1250): the ``async_dma`` loop. :func:`_wgrad_jobs` and
+    :func:`count_jobs` both take the variants from here, so the count stays
+    the number of jobs the walk yields.
+    """
+    loops: List[dict] = [{}]
+    if (
+        wave_size == 32
+        and pipeline == "mem"
+        and not two_stage
+        and target.memory.has_async_global_lds
+    ):
+        loops.append({"async_dma": True})
+    return loops
+
+
+def _wgrad_wmma_cover(mma_family: str, geometry: tuple) -> bool:
+    """Whether a wgrad geometry gets the WMMA variants beyond the plain loop.
+
+    True off WMMA (nothing is restricted there) and, on WMMA, for the
+    :data:`CACHE_WGRAD_WMMA_GEOMETRIES` cover. Outside the cover a WMMA
+    geometry builds only the synchronous default-epilogue kernels.
+    """
+    return mma_family != "wmma" or tuple(geometry[:5]) in CACHE_WGRAD_WMMA_GEOMETRIES
+
+
+def _wgrad_async_chunks(cfg: dict, dtypes, caps: dict, arch: str) -> Optional[dict]:
+    """The gfx1250 async wgrad loaders' chunk widths, for the identity.
+
+    ``{}`` for a synchronous loop; ``None`` when the async loop cannot serve
+    this configuration (the job is skipped). Taken from the builder's own
+    width choice (_wmma_async_vecs) on the probe problem, as the fwd chunks.
+    """
+    if not cfg.get("async_dma"):
+        return {}
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+    from kernels.common.conv_implicit_gemm_wgrad import (
+        WgradConvSpec,
+        _wmma_async_available,
+        _wmma_async_vecs,
+    )
+
+    da, db, dd = dtypes
+    try:
+        spec = WgradConvSpec(
+            problem=_probe_problem("wgrad", caps),
+            data=ConvDataSpec(dtype_a=da, dtype_b=db, dtype_d=dd),
+            **cfg,
+        )
+        ok, _ = _wmma_async_available(spec, arch)
+        if not ok:
+            return None
+        a_vec, b_vec = _wmma_async_vecs(spec)
+    except (ValueError, TypeError):
+        return None
+    return dict(async_chunk_a=a_vec, async_chunk_b=b_vec)
 
 
 def _wgrad_two_stages(split_k: int) -> Tuple[bool, ...]:
@@ -1074,6 +1178,11 @@ def _wgrad_jobs(
     ):
         if not _aot_pipeline("wgrad", pipeline):
             continue
+        in_cover = _wgrad_wmma_cover(
+            mma_family, (tile_m, tile_n, tile_k, warp_m, warp_n)
+        )
+        if epilogue != "default" and not in_cover:
+            continue
         # The K-outer LDS tile, picked per geometry by the predicate the JIT
         # sweep and dispatch use. It is a pure function of arch/dtype/atom, so
         # a shape-generic binary can carry it; leaving it at the spec default
@@ -1112,6 +1221,8 @@ def _wgrad_jobs(
             for two_stage, caps in itertools.product(
                 _wgrad_two_stages(split_k), _layout_caps()
             ):
+                if two_stage and not in_cover:
+                    continue
                 grouped = caps["grouped"]
                 cfg = dict(
                     tile_m=tile_m,
@@ -1137,23 +1248,41 @@ def _wgrad_jobs(
                     # Pinned in the spec and the identity alike, so the host
                     # sizes the scratch and Stage 2 from what was compiled.
                     cfg["ws_replicas"] = _DEFAULT_WS_REPLICAS
-                cfg["prefetch_addr"] = _wgrad_prefetch_addr(arch, cfg)
-                yield BuildJob(
-                    identity=KernelIdentity(
-                        arch=arch,
-                        direction="wgrad",
-                        algorithm="implicit_gemm",
-                        llvm_flavor=flavor,
-                        dtype_a=da,
-                        dtype_b=db,
-                        dtype_d=dd,
-                        grouped=grouped,
-                        **cfg,
-                    ),
-                    direction="wgrad",
-                    spec_kwargs=cfg,
-                    caps=caps,
+                k_loops = (
+                    _wgrad_k_loops(wave_size, pipeline, two_stage, target)
+                    if in_cover
+                    else [{}]
                 )
+                for k_loop in k_loops:
+                    kcfg = dict(cfg, **k_loop)
+                    if k_loop.get("async_dma"):
+                        # The async copy picks its own chunk width (recorded
+                        # below), so A / B widths are left unset: built once
+                        # per geometry, on the widest-vector iteration.
+                        if (vec_a, vec_bc) != (_VECS[-1], _VECS[-1]):
+                            continue
+                        kcfg.update(vector_size_a=None, vector_size_b=None)
+                    kcfg["prefetch_addr"] = _wgrad_prefetch_addr(arch, kcfg)
+                    chunks = _wgrad_async_chunks(kcfg, (da, db, dd), caps, arch)
+                    if chunks is None:
+                        continue
+                    yield BuildJob(
+                        identity=KernelIdentity(
+                            arch=arch,
+                            direction="wgrad",
+                            algorithm="implicit_gemm",
+                            llvm_flavor=flavor,
+                            dtype_a=da,
+                            dtype_b=db,
+                            dtype_d=dd,
+                            grouped=grouped,
+                            **kcfg,
+                            **chunks,
+                        ),
+                        direction="wgrad",
+                        spec_kwargs=kcfg,
+                        caps=caps,
+                    )
         # Stream-K kernels (opt-in). Default epilogue only, so the store is
         # scalar and B takes its own width; split_k stays 1 (stream-K owns the
         # K partition). The workspace reduction reuses the two-stage scratch,
@@ -1727,9 +1856,18 @@ def count_jobs(
                 if fwd_cluster and _fwd_split_cluster_geometry(geo):
                     total += len(CACHE_FWD_SPLIT_K_CLUSTER_DEGREES)
             elif direction == "wgrad":
-                total += (
-                    vecs * sum(len(_wgrad_two_stages(sk)) for sk in split_ks) * layouts
-                )
+                in_cover = _wgrad_wmma_cover(mma_family, geo)
+                if geo[7] != "default" and not in_cover:
+                    continue
+                if in_cover:
+                    stages = sum(len(_wgrad_two_stages(sk)) for sk in split_ks)
+                    # The async loop: once per non-two-stage configuration.
+                    asyncs = len(split_ks) * (
+                        len(_wgrad_k_loops(wave_size, pipeline, False, target)) - 1
+                    )
+                else:
+                    stages, asyncs = len(split_ks), 0
+                total += vecs * stages * layouts + asyncs * layouts
                 total += merged
                 total += layouts * len(
                     _wgrad_streamk_builds(

@@ -40,6 +40,7 @@ add_executable(${SDPA_CASE_FLOW_RUNNER_EXE}
     ${_it_src}/harness/bundle/VariantPackBuilder.cpp
     ${_it_src}/harness/gpu-graph-executor/GpuReferenceGraphExecutor.cpp
     ${_it_src}/harness/input-init/FillInputs.cpp
+    ${_it_src}/harness/input-init/ResampleBackwardInputs.cpp
     ${_it_src}/harness/input-init/SdpaBackwardInputs.cpp
 )
 

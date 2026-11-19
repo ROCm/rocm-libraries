@@ -29,11 +29,11 @@ Why this is a port, not a copy (the CDNA3 deltas)
     parked "1/8 sign-flip" symptom was reproduced-or-disproven before anything was
     lifted: DISPROVEN cross-part (both the 228- and 304-CU parts, bit-identical, no
     sign mismatches), so the vehicle is proven correct rather than merely untested.
-    It is lifted here for D128 (fp16 and bf16) as :func:`_use_cfvst` — the barrier caveat is
-    that V publication becomes an in-loop ``ds_write``, so the tile-START rendezvous
-    needs an lgkmcnt drain (``sync_lds_only``), not a bare barrier. The disproof
-    procedure and its evidence are recorded in the gfx942 dense-prefill
-    optimization plan, which is kept outside the repo.
+    It is lifted here for D128 (fp16 and bf16) as :func:`default_use_cfvst` — the
+    barrier caveat is that V publication becomes an in-loop ``ds_write``, so the
+    tile-START rendezvous needs an lgkmcnt drain (``sync_lds_only``), not a bare
+    barrier. The disproof procedure and its evidence are recorded in the gfx942
+    dense-prefill optimization plan, which is kept outside the repo.
   * **LDS / occupancy.** gfx942 has 64 KB LDS/CU (vs gfx950's 160 KB); occupancy /
     ``num_persistent`` / block sizing must be re-derived for the 228- and 304-CU
     gfx942 parts rather than inherited from the gfx950 spec.
@@ -126,7 +126,7 @@ P5 is deliberately no-op for this kernel (a decision, not code):
     shares the same counter -- see the reverted cfvst-chunking experiment recorded in
     the ``V_ITEMS`` NOTE below.
 
-P1 conflict-free V (:func:`_use_cfvst`): V is stored TRANSPOSED via a perm_b32
+P1 conflict-free V (:func:`default_use_cfvst`): V is stored TRANSPOSED via a perm_b32
 store-path transpose so the PV A-operand read is a contiguous ds_read_b64 instead of
 P0's 4 element-wise ds_read_u16 (128 -> ~32 LDS instrs/tile at D128). Gated to
 **D128**: D64 is VGPR-bound so the register round-trip regresses it. bf16 D128 fits
@@ -211,6 +211,7 @@ from kernels.common.attention_dense_spec import (
     AttentionDenseSpec,
     DENSE_TILE_GEOMETRIES,
     attention_dense_cache_key,
+    check_dense_scale,
     check_dense_spec_preflight,
     partial_tile_reason,
 )
@@ -298,8 +299,8 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     Tri-state fields: ``None`` means "use the measured policy"
     ---------------------------------------------------------
     ``use_cfvst`` / ``use_exp2_fast`` / ``v_row_pad`` / ``use_v_swizzle`` default to
-    ``None``, which resolves through the shipping policy (:func:`_use_cfvst`,
-    :func:`_use_exp2_fast`, :func:`_v_row_pad`, :func:`_use_v_swizzle`). That
+    ``None``, which resolves through the shipping policy (:func:`default_use_cfvst`,
+    :func:`default_use_exp2_fast`, :func:`_v_row_pad`, :func:`_use_v_swizzle`). That
     tri-state is load-bearing: a harness that omits a VALUED field freezes the config
     at whatever the default happened to be the day it was written and then silently
     reports a stale verdict (that is exactly how a real regression got mis-reported
@@ -386,7 +387,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     v_row_pad: int | None = None
 
     # use_cfvst: force the P1 conflict-free perm_b32 store-path V transpose on/off.
-    #   None (default) -> :func:`_use_cfvst`, which owns the measured verdict.
+    #   None (default) -> :func:`default_use_cfvst`, which owns the measured verdict.
     #   Forcing it ON where the policy says OFF is REJECTED by
     #   supports_attention_dense (D64 regresses under it -- VGPR-bound), so this
     #   field can only turn cfvst off, or
@@ -403,9 +404,9 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     use_v_swizzle: bool | None = None
 
     # use_exp2_fast: force the P2 single-instruction exp2 on/off.
-    #   None (default) -> :func:`_use_exp2_fast`, which owns the measured verdict
+    #   None (default) -> :func:`default_use_exp2_fast`, which owns the measured verdict
     #   (on for all configs except bf16 head_dim=128 on the default grid, which
-    #   reverts to plain exp2 -- see _use_exp2_fast for the grid gate).
+    #   reverts to plain exp2 -- see default_use_exp2_fast for the grid gate).
     #   Numerically safe in both directions here -- both softmax arguments are
     #   always <= 0 -- so correctness never depends on it; the gate is pure perf.
     use_exp2_fast: bool | None = None
@@ -539,9 +540,9 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
             )
 
     def resolved_use_cfvst(self) -> bool:
-        """Resolved conflict-free-V decision (``None`` -> :func:`_use_cfvst`)."""
+        """Resolved conflict-free-V decision (``None`` -> :func:`default_use_cfvst`)."""
         if self.use_cfvst is None:
-            return _use_cfvst(self.head_size, self.dtype)
+            return default_use_cfvst(self.head_size, self.dtype)
         return bool(self.use_cfvst)
 
     def resolved_v_row_pad(self) -> int:
@@ -565,9 +566,9 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         return bool(self.use_v_swizzle)
 
     def resolved_use_exp2_fast(self) -> bool:
-        """Resolved exp2_fast decision (``None`` -> :func:`_use_exp2_fast`)."""
+        """Resolved exp2_fast decision (``None`` -> :func:`default_use_exp2_fast`)."""
         if self.use_exp2_fast is None:
-            return _use_exp2_fast(self.head_size, self.dtype, self.persistent)
+            return default_use_exp2_fast(self.head_size, self.dtype, self.persistent)
         return bool(self.use_exp2_fast)
 
     def resolved_waves_per_eu(self) -> int:
@@ -576,7 +577,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         A plain read of the INHERITED field, kept as a named accessor because the
         builder, the name tag and :func:`supports_attention_dense` all need the same
         int and the shared field is typed loosely enough to be worth normalizing in
-        one place. ``dispatch.attention.gfx942_dense._base_spec`` fills it from
+        one place. ``dispatch.attention.gfx942_dense.tuned_base_spec`` fills it from
         :func:`_tuned_waves_per_eu`, so the shipped value tracks the measured policy
         without this class restating it."""
         return int(self.waves_per_eu)
@@ -593,17 +594,18 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         decode divides through host-computed fast-division params
         (:attr:`fastdiv_divisors`), so the grid-stride loop stays multiply-and-shift.
         Sliding-window is on the runtime path: its KV-loop prune reads only the query
-        block, the window and the runtime trip count, and its zero-trip guard in
-        :func:`supports_attention_dense` runs per launch, ahead of the cache lookup.
+        block, the window and the runtime trip count, and its zero-trip guard and
+        empty-row rule in :func:`supports_attention_dense` run per launch, ahead of the
+        cache lookup.
         ``ragged``/``varlen``/``paged`` never reach the builder
         (:func:`supports_attention_dense` rejects them) but stay in the predicate,
         identical to the gfx950 twin, so a later admit lands already excluded.
 
-        Every other knob that forks the body -- :func:`_use_exp2_fast` included --
-        is a function of compile-time config only, never of the problem shape, so
-        none of them can leak a per-shape body past this predicate. Keep it that
-        way: a policy that reads a shape field would make two shapes share a cache
-        key AND a kernel name while lowering to different IR, which neither the
+        Every other knob that forks the body -- :func:`default_use_exp2_fast`
+        included -- is a function of compile-time config only, never of the problem
+        shape, so none of them can leak a per-shape body past this predicate. Keep it
+        that way: a policy that reads a shape field would make two shapes share a
+        cache key AND a kernel name while lowering to different IR, which neither the
         name assert nor this predicate can catch."""
         return not (self.ragged or self.varlen or self.paged)
 
@@ -705,6 +707,8 @@ __all__ = [
     "Gfx942AttentionDenseSpec",
     "supports_attention_dense",
     "bf16_cfvst_supported",
+    "default_use_cfvst",
+    "default_use_exp2_fast",
     "build_attention_dense",
     "attention_dense_grid",
     "attention_dense_block",
@@ -748,13 +752,15 @@ def _tuning_name_tags(spec: "Gfx942AttentionDenseSpec") -> str:
     if vp != _v_row_pad(spec.head_size, spec.dtype, spec.block_n):
         parts.append(f"vrowpad{vp}")
     cfvst = spec.resolved_use_cfvst()
-    if cfvst != _use_cfvst(spec.head_size, spec.dtype):
+    if cfvst != default_use_cfvst(spec.head_size, spec.dtype):
         parts.append("cfvst1" if cfvst else "cfvst0")
     swz = spec.resolved_use_v_swizzle()
-    if swz != (spec.resolved_use_cfvst() and _use_cfvst(spec.head_size, spec.dtype)):
+    if swz != (
+        spec.resolved_use_cfvst() and default_use_cfvst(spec.head_size, spec.dtype)
+    ):
         parts.append("vswz1" if swz else "vswz0")
     e2f = spec.resolved_use_exp2_fast()
-    if e2f != _use_exp2_fast(spec.head_size, spec.dtype, spec.persistent):
+    if e2f != default_use_exp2_fast(spec.head_size, spec.dtype, spec.persistent):
         parts.append("e2f1" if e2f else "e2f0")
     if spec.iglp != _DEFAULT_IGLP:
         parts.append("iglp1" if spec.iglp else "iglp0")
@@ -816,7 +822,7 @@ def _rows_per_instr(head_size: int) -> int:
     return _DMA_ELEMS_PER_INSTR // head_size
 
 
-def _use_exp2_fast(head_size: int, dtype: str, persistent: bool) -> bool:
+def default_use_exp2_fast(head_size: int, dtype: str, persistent: bool) -> bool:
     """Whether softmax uses ``exp2_fast`` (one v_exp_f32, no range-reduction guard).
 
     Enabled for all configs EXCEPT bf16 head_dim=128 on the DEFAULT grid (see the
@@ -859,7 +865,7 @@ def _use_exp2_fast(head_size: int, dtype: str, persistent: bool) -> bool:
     return True
 
 
-def _use_cfvst(head_size: int, dtype: str) -> bool:
+def default_use_cfvst(head_size: int, dtype: str) -> bool:
     """Whether to feed V through the P1 conflict-free perm_b32 store-path transpose.
 
     D128 only (both dtypes). Measured on gfx942:
@@ -947,9 +953,9 @@ def _v_swizzle_width(block_n: int) -> int:
 
 
 def _use_v_swizzle(head_size: int, dtype: str) -> bool:
-    """Policy for the V^T bank-conflict swizzle: rides the :func:`_use_cfvst` gate,
-    since only the transposed-V (D128) store has a V_lds to swizzle."""
-    return _use_cfvst(head_size, dtype)
+    """Policy for the V^T bank-conflict swizzle: rides the :func:`default_use_cfvst`
+    gate, since only the transposed-V (D128) store has a V_lds to swizzle."""
+    return default_use_cfvst(head_size, dtype)
 
 
 def _v_row_pad(head_size: int, dtype: str, block_n: int) -> int:
@@ -965,7 +971,7 @@ def _v_row_pad(head_size: int, dtype: str, block_n: int) -> int:
     separate, independently-sweepable decision (:meth:`resolved_use_v_swizzle`), so the
     pad value and the swizzle no longer silently toggle each other.
     """
-    if not _use_cfvst(head_size, dtype):
+    if not default_use_cfvst(head_size, dtype):
         return 8
     return _v_swizzle_width(block_n) - block_n
 
@@ -990,7 +996,7 @@ def _tuned_waves_per_eu(head_size: int, dtype: str) -> int:
         reaches a 2nd WG/CU. Occupancy there is an LDS-footprint problem (P3 K/V-pad
         or single-buffer work), not a waves-per-eu knob.
 
-    Consumed by the gfx942 dispatch base spec (``_base_spec``) so the kernel_name
+    Consumed by the gfx942 dispatch base spec (``tuned_base_spec``) so the kernel_name
     ``wpe{N}`` tag and the emitted ``amdgpu-waves-per-eu`` attribute always agree.
     """
     if dtype == "bf16" and head_size == 64:
@@ -1253,13 +1259,14 @@ def supports_attention_dense(
     # known-bad, not merely untuned: D64 (rows-per-DMA > 1) is VGPR-bound, so the
     # register round-trip regresses it AND the transposed store no longer matches the
     # packed async-DMA layout the naive path relies on. Turning cfvst OFF is always
-    # legal (it is the naive path), so only the ON direction is gated. See _use_cfvst.
-    if spec.resolved_use_cfvst() and not _use_cfvst(spec.head_size, spec.dtype):
+    # legal (it is the naive path), so only the ON direction is gated. See
+    # default_use_cfvst.
+    if spec.resolved_use_cfvst() and not default_use_cfvst(spec.head_size, spec.dtype):
         return False, (
             f"use_cfvst=True is rejected at D{spec.head_size}/{spec.dtype}: "
             f"the conflict-free-V store is measured-negative there (D64 is VGPR-bound "
             f"and regresses), and it is only tile-exact on the rows-per-DMA==1 path "
-            f"-- see _use_cfvst"
+            f"-- see default_use_cfvst"
         )
     # use_v_swizzle forced ON where there is no transposed-V buffer to swizzle. Only the
     # cfvst path builds V_lds[dim, token]; on the naive path the flag is a no-op, so
@@ -1400,6 +1407,27 @@ def supports_attention_dense(
                 f"count {_n_ktiles} -> zero-trip KV loop -> NaN (well-defined "
                 f"with use_sinks)"
             )
+    # The same window, row by row: row q keeps keys (q - W, q], so once
+    # seqlen_q - seqlen_kv >= W the last rows keep none even where their block
+    # visits tiles. Every score of such a row is the mask value, so the softmax
+    # averages V instead of yielding nothing. Sinks seed the softmax (the row is 0,
+    # softmax([sink]) over no values) and the LSE path zeroes key-less rows
+    # (row_has_key), so both are exempt. The zero-trip guard above still applies with
+    # emit_lse (it exempts sinks only); on tile-divisible shapes every shape it rejects
+    # is also one of these. The hipDNN gfx942 dense pack restates this rule
+    # (packs/AttentionDenseNative.cpp maskFor).
+    if (
+        spec.sliding_window
+        and spec.causal
+        and not spec.use_sinks
+        and not spec.emit_lse
+        and spec.seqlen_q - spec.seqlen_kv >= spec.sliding_window
+    ):
+        return False, (
+            f"sliding_window={spec.sliding_window} over seqlen_q={spec.seqlen_q}, "
+            f"seqlen_kv={spec.seqlen_kv}: rows from {spec.seqlen_kv + spec.sliding_window - 1} "
+            f"see no key and would average V (well-defined with use_sinks or emit_lse)"
+        )
     return True, ""
 
 
@@ -1652,9 +1680,9 @@ def _build_attention_dense_single_buffer(
         V_SWZ_MASK = V_LDROW // 4 - 1
     else:
         # V keeps the natural [token, dim] async-DMA layout (D64: VGPR-bound, cfvst
-        # regresses it -- see _use_cfvst); read element-wise in read_v. No V^T buffer to
-        # swizzle here; default the flags the read_v / _cfvst_store_v closures capture so
-        # a future call on this path is a no-op, not a NameError.
+        # regresses it -- see default_use_cfvst); read element-wise in read_v. No V^T
+        # buffer to swizzle here; default the flags the read_v / _cfvst_store_v
+        # closures capture so a future call on this path is a no-op, not a NameError.
         SWZ_V = False
         V_SWZ_MASK = 0
         V_lds = b.smem_alloc(dtype, [1, BN, LDROW], name_hint="Vlds")
@@ -1741,7 +1769,7 @@ def _build_attention_dense_single_buffer(
         # CFVST-PATH-ONLY. Computing this unconditionally would reject specs the
         # NAIVE V path builds fine: at D64/block_n=32 with a 1024-thread CTA,
         # V_BLOCKS=512 < THREADS=1024 and the check fires even though `read_v` never
-        # touches V_BLOCKS there (D64 is naive-V by _use_cfvst). Raised, not
+        # touches V_BLOCKS there (D64 is naive-V by default_use_cfvst). Raised, not
         # asserted, for the reason stated at the DMA row-split guard above:
         # `python -O` strips asserts, and this one guards a silent wrong answer (an
         # unguarded tail item would read past the tile).
@@ -2204,8 +2232,8 @@ def _build_attention_dense_single_buffer(
             # s) -- exactly exp2_fast's precondition (no overflow; v_exp_f32 flushes
             # large negatives to 0). Cuts ~99 VALU/tile at D128, the dominant
             # MFMA-starving residual once conflict-free V (P1) lands. Enabled by
-            # _use_exp2_fast for every config except bf16 D128 on the default grid,
-            # which reverts to plain exp2; rationale + grid gate in that docstring.
+            # default_use_exp2_fast for every config except bf16 D128 on the default
+            # grid, which reverts to plain exp2; rationale + grid gate in its docstring.
             exp2 = b.exp2_fast if spec.resolved_use_exp2_fast() else b.exp2
             alpha = exp2(b.fsub(m_i, m_new))
 
@@ -2869,7 +2897,8 @@ def run_attention_dense_torch(
 ):
     """High-level framework entry: compile (cached) + launch the gfx942 dense prefill
     kernel on torch tensors. ``q``/``out`` are ``[B, S, Hq, D]`` and ``k``/``v`` are
-    ``[B, Skv, Hkv, D]``, dense contiguous; ``scale`` is the softmax scale (1/sqrt(D)).
+    ``[B, Skv, Hkv, D]``, dense contiguous; ``scale`` is the softmax scale (1/sqrt(D)),
+    in ``[2**-64, 2**4]``: :func:`check_dense_scale` raises for any other.
     ``sinks`` is the per-query-head sink logit ``[Hq]`` in q's dtype, required iff
     ``spec.use_sinks``.
     Returns ``out``. torch is imported lazily by the launcher, so this module stays
@@ -2898,6 +2927,7 @@ def run_attention_dense_torch(
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
+    check_dense_scale(scale)
     if cu_seqlens_q is not None or cu_seqlens_kv is not None:
         raise ValueError(
             "cu_seqlens_* provided but gfx942 attention_dense is dense-only (varlen "

@@ -183,7 +183,7 @@ load_output() {
 load_output || { echo "STOP: sweep input missing, not clean" >&2; exit 1; }
 sed -i.bak 's#users/[A-Za-z0-9._-]*/#users/#g' "$L/pub.content" && rm "$L/pub.content.bak"   # the expected branch prefix
 cat > "$L/sweep-allow.txt" <<'EOF2'
-^(CORR|TESTQ|TESTB|AUTH|BUILD|DEPS|API|ROCK|LEAK|DUP|DOCS|RUN|DRIFT|ORCH|VER|SCOUT|SYNTH)[0-9]*-p?[0-9]+$
+^(CORR|TESTQ|TESTB|AUTH|BUILD|DEPS|API|ROCK|LEAK|DUP|DOCS|RUN|DRIFT|IMPACT|ORCH|VER|SCOUT|SYNTH)[0-9]*-p?[0-9]+$
 ^(handoffs?|worktrees?)$
 ^https?://(github\.com/ROCm/[A-Za-z0-9._-]+|raw\.githubusercontent\.com/ROCm/[A-Za-z0-9._-]+|rocm\.docs\.amd\.com|docs\.amd\.com|www\.amd\.com|example\.com)([/:?#].*)?$
 EOF2
