@@ -1257,6 +1257,101 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
                 "is missing placeholder value for 'io_data_type'", completed.stderr
             )
 
+    def write_dotted_scalar_placeholder_sweep(
+        self, root: Path, types_value: object
+    ) -> None:
+        template_path, sweep_path = self.write_sweep_bundle(
+            root, Path("quick/TestOp/Topology"), []
+        )
+        template = json.loads(template_path.read_text())
+        template["io_data_type"] = "${case.types.io}"
+        template_path.write_text(json.dumps(template))
+        case = self.sweep_case(
+            "dotted",
+            values_overrides={"types": types_value},
+            golden_path=None,
+        )
+        del case["values"]["io_data_type"]
+        sweep_path.write_text(json.dumps({"version": 1, "cases": [case]}))
+
+    def test_sweep_dotted_scalar_placeholder_with_missing_nested_key_fails(
+        self,
+    ) -> None:
+        for types_value in ({"compute": "float"}, "float"):
+            with self.subTest(types=types_value), TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                self.write_dotted_scalar_placeholder_sweep(root, types_value)
+
+                completed = self.run_verifier(root)
+
+                self.assertEqual(completed.returncode, 1)
+                self.assertIn(
+                    "case 'dotted' is missing placeholder value for 'types.io'",
+                    completed.stderr,
+                )
+
+    def test_sweep_dotted_scalar_placeholder_resolves_through_nested_values(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_dotted_scalar_placeholder_sweep(root, {"io": "float"})
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def write_dotted_attribute_placeholder_sweep(
+        self, root: Path, attributes: dict
+    ) -> None:
+        template_path, sweep_path = self.write_sweep_bundle(
+            root, Path("quick/TestOp/Topology"), []
+        )
+        template = json.loads(template_path.read_text())
+        template["nodes"][0]["window"] = "${case.attributes.mask.window}"
+        template_path.write_text(json.dumps(template))
+        case = self.sweep_case(
+            "dotted_attribute",
+            values_overrides={"attributes": attributes},
+            golden_path=None,
+        )
+        sweep_path.write_text(json.dumps({"version": 1, "cases": [case]}))
+
+    def test_sweep_dotted_attribute_placeholder_with_missing_nested_key_fails(
+        self,
+    ) -> None:
+        for attributes in (
+            {"mask": {"causal": True}},
+            {"mask": 4},
+            {"mask.window": 128},
+        ):
+            with self.subTest(attributes=attributes), TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                self.write_dotted_attribute_placeholder_sweep(root, attributes)
+
+                completed = self.run_verifier(root)
+
+                self.assertEqual(completed.returncode, 1)
+                self.assertIn(
+                    "case 'dotted_attribute' is missing placeholder value for "
+                    "'attributes.mask.window'",
+                    completed.stderr,
+                )
+
+    def test_sweep_dotted_attribute_placeholder_resolves_through_nested_values(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_dotted_attribute_placeholder_sweep(
+                root, {"mask": {"window": 128}}
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertNotIn("has unused values.attributes entry", completed.stderr)
+
     def test_sweep_unused_values_entry_warns(self) -> None:
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1388,6 +1483,33 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             completed = self.run_verifier(root)
 
             self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_sweep_tensor_scoped_dims_placeholder_never_falls_back_to_top_level(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            template_path, sweep_path = self.write_sweep_bundle(
+                root, Path("quick/TestOp/Topology"), []
+            )
+            template = json.loads(template_path.read_text())
+            template["tensors"][0]["alignment"] = "${case.dims.0}"
+            template_path.write_text(json.dumps(template))
+            case = self.sweep_case(
+                "top_level_dims",
+                values_overrides={"dims": {"0": 16}},
+                golden_path=None,
+            )
+            sweep_path.write_text(json.dumps({"version": 1, "cases": [case]}))
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "tensor uid 0: case 'top_level_dims' is missing per-tensor "
+                "placeholder value for 'dims.0'",
+                completed.stderr,
+            )
 
     def test_sweep_golden_path_must_reference_tensors_dvc(self) -> None:
         with TemporaryDirectory() as tmpdir:

@@ -471,7 +471,7 @@ inline const nlohmann::json* lookupJsonPath(const nlohmann::json& json, const st
         const auto end = path.find('.', start);
         const auto key
             = path.substr(start, end == std::string::npos ? path.size() - start : end - start);
-        if(!current->is_object() || !current->contains(key))
+        if(key.empty() || !current->is_object() || !current->contains(key))
         {
             return nullptr;
         }
@@ -483,7 +483,7 @@ inline const nlohmann::json* lookupJsonPath(const nlohmann::json& json, const st
         start = end + 1;
     }
 
-    return current;
+    return nullptr;
 }
 
 inline std::optional<std::string> placeholderField(const nlohmann::json& json)

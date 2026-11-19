@@ -974,6 +974,29 @@ class TestCollection:
         assert len(errors) == 1
         assert f"case 'bad': {message}" in errors[0]
 
+    @pytest.mark.parametrize(
+        ("placeholder", "values"),
+        [
+            ("${case.dtype.}", {"dtype": "half"}),
+            ("${case..dtype}", {"": {"dtype": "half"}}),
+            ("${case.dt..ype}", {"dt": {"": {"ype": "half"}}}),
+        ],
+    )
+    def test_placeholder_path_with_an_empty_segment_is_missing(
+        self, bundle_root: Path, placeholder: str, values: dict
+    ) -> None:
+        """No path segment may be empty, even where the values hold an empty key."""
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            cases=[{"id": "bad", "values": values}],
+            template=_graph(io_data_type=placeholder),
+        )
+        errors: list[str] = []
+        assert collect_units(bundle_root, errors) == []
+        assert len(errors) == 1
+        assert f"case 'bad': missing placeholder value '{placeholder}'" in errors[0]
+
     @staticmethod
     def _superset_template() -> dict:
         sink = {"uid": 2, "dims": "${case.dims}", "data_type": "float"}
