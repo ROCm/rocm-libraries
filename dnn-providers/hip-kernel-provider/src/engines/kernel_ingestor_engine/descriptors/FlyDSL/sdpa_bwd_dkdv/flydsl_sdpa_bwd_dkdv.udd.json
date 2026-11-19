@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "d499bd16-c5b6-5ddc-b3e4-a9bfbf7ae875",
+  "name": "flydsl sdpa_bwd_dkdv dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_sdpa_bwd_split.dkdv.dispatch"
+}

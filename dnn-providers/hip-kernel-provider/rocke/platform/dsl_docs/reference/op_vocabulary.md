@@ -50,12 +50,18 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | Op name        | Builder      | LLVM intrinsic                  |
 |----------------|--------------|---------------------------------|
 | `math.exp2`    | `exp2`       | `llvm.exp2.f32`                 |
+| `math.ldexp`   | `ldexp`      | `llvm.ldexp.f32.i32` (`v_ldexp_f32`); HIP `__builtin_ldexpf` |
 | `math.sqrt`    | `sqrt`       | `llvm.sqrt.f32`                 |
 | `math.rsqrt`   | `rsqrt`      | `llvm.amdgcn.rsq.f32`           |
 | `math.tanh`    | `tanh`       | piecewise f32 expansion: OCML polynomial for `abs(x) < 0.625`, otherwise `exp2` + reciprocal; bitwise sign restoration |
 | `math.rcp`     | `rcp`        | `1.0 / v` (hardware reciprocal) |
 
 `exp2`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `fma`, `fmax3`, `fmin3` and `vector_fma` have no f64 lowering and reject f64 inputs in both the LLVM and HIP lowerings. `exp2_fast` rejects f64 in the LLVM lowering and has no HIP lowering for any dtype. `tanh` accepts only f32: the builder rejects any other operand type. `rcp` accepts f64, and `fabs` accepts f64 (`llvm.fabs.f64`, HIP `fabs`).
+
+`ldexp(value, exponent)` is `value * 2^exponent` rounded once, for an f32 value and any i32
+exponent: the power of two is never formed as a float, so a product that `value * exp2(e)` would
+overflow or flush (the factor alone leaves the f32 range) comes out right, and a product beyond the
+f32 range gives the infinity or zero of its sign. Any other operand types are refused.
 
 `clamp_f32(v, lo, hi)` is `fmin(hi, fmax(lo, v))` — folds to `v_med3_f32`.
 
@@ -222,15 +228,27 @@ All MFMAs take three literal immarg constants (`cbsz=0, abid=0, blgp=0`) at the 
 | `scf.if_else` | `scf_if_else(cond, result_types=())` (ctx manager) | conditional branch + then and else blocks + join block; one phi per result |
 | `scf.yield`  | `scf_yield(*values)`   | records yielded values; consumed by enclosing for/if_else |
 | `cf.return`  | (auto-emitted)         | `ret void`                                            |
-| `tile.trap`  | `trap()`               | `call void @llvm.trap()` (`s_trap 2`; gfx11: simulated trap); HIP `__builtin_trap()` |
+| `tile.trap`  | `trap()`               | `call void @llvm.trap()` (`s_trap 2`, or the simulated trap: see below); HIP `__builtin_trap()` |
 | `tile.gpu_check_failed` | (emitted by `gpu_checked_value`) | store 1 to `@rocke_gpu_check_failed_<kernel>`, then `ret void`; HIP `__hip_atomic_store` + `return;`. The launch completes, `rocke.runtime` raises `GpuCheckFailed`, and every output of the launch is undefined |
 
-`trap()` ends the wave at a trap instruction. The AMDGPU backend emits `s_trap 2`; on gfx11 it emits
-its simulated trap instead (`s_trap 2`, then `s_sendmsg`, then an `s_sethalt` loop). What the host
-sees depends on the platform:
+`trap()` ends the wave at a trap instruction. Which instruction depends on the processor the code
+object is compiled for. The docs state it here only; the docstrings and comments point here.
+
+| Compiled for | The AMDGPU backend emits |
+|---|---|
+| gfx1100, gfx1101, gfx1102, gfx1103, gfx11-generic | its simulated trap: `s_trap 2`, then `s_sendmsg`, then an `s_sethalt` loop |
+| any other processor, gfx1150-gfx1154 included | `s_trap 2` |
+
+A target whose compiler does not accept its name is compiled for the generic target its catalog row
+points at (`compiler_target_for_llvm_major`), and gets that target's trap: gfx1154, compiled as
+gfx11-generic by compilers before LLVM 24, gets the simulated trap. `tests/core/test_trap.py` holds
+the same table as its expectation and checks it on every catalogued gfx11 target.
+
+What the host sees when a trap is taken depends on the platform:
 
 - Linux (ROCr): the queue reports an error and the runtime aborts the process.
-- Windows: the HIP runtime never turns the trap into an error; the launch never returns.
+- Windows: on gfx110X GPUs the HIP runtime has been seen not to turn the trap into an error; the
+  launch never returned.
 - Under a debugger: the wave stops at the trap.
 
 None of these lets the process carry on, so a trap is a last resort: put it under an `scf_if` on a

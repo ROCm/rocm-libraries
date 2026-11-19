@@ -24,13 +24,19 @@
 
 import concurrent.futures
 import itertools
+import math
 import os
 import sys
 import time
 
 from joblib import Parallel, delayed
+from joblib import cpu_count as lokyCpuCount
 
-from .Utilities import tqdm
+from .Utilities import printWarning, tqdm
+
+# All pools started concurrently by one machine's pytest-xdist workers together use at most this
+# many processes per available CPU; a single process never uses more than one per CPU.
+OVERSUBSCRIPTION_FACTOR = 2
 
 
 def joblibParallelSupportsGenerator():
@@ -41,24 +47,120 @@ def joblibParallelSupportsGenerator():
     return Version(joblibVer) >= Version("1.4.0")
 
 
+def _kubeCpuRequest():
+    """CPUs requested for the Kubernetes pod (``KUBE_CPU_REQUEST``, e.g. "25" or "8.0"), rounded
+    down and at least 1; None when unset or not a positive number. A request is not a limit, but
+    CI (TheRock) already treats it as the pod's CPU budget."""
+    value = os.environ.get("KUBE_CPU_REQUEST")
+    if not value:
+        return None
+    try:
+        request = float(value)
+    except ValueError:
+        return None
+    if not math.isfinite(request) or request <= 0:
+        return None
+    return max(1, int(request))
+
+
+def availableCPUCount():
+    """CPUs this process may use: the affinity mask, limited by the cgroup CPU quota (loky's
+    cpu_count) and by KUBE_CPU_REQUEST when set."""
+    if os.name == "nt":
+        # Windows supports at most 61 workers because the scheduler uses
+        # WaitForMultipleObjects directly, which has the limit (the limit
+        # is actually 64, but some handles are needed for accounting).
+        count = min(os.cpu_count() or 1, 61)
+    else:
+        count = min(len(os.sched_getaffinity(0)), lokyCpuCount())
+    request = _kubeCpuRequest()
+    if request is not None:
+        count = min(count, request)
+    return max(1, count)
+
+
+def concurrentWorkerCount():
+    """Processes sharing the CPUs: PYTEST_XDIST_WORKER_COUNT (set by pytest-xdist in every
+    worker), else 1. Other ways of running several Tensile processes at once are not detected."""
+    try:
+        return max(1, int(os.environ.get("PYTEST_XDIST_WORKER_COUNT", "1")))
+    except ValueError:
+        return 1
+
+
+def poolSizeBudget():
+    """Pool size for one process: OVERSUBSCRIPTION_FACTOR x the available CPUs shared among the
+    concurrent workers, at most the available CPUs, at least 1."""
+    cpus = availableCPUCount()
+    return max(1, min(cpus, (OVERSUBSCRIPTION_FACTOR * cpus) // concurrentWorkerCount()))
+
+
+def shutdownWorkerPool():
+    """Terminate the idle joblib (loky) worker pool, if one exists.
+
+    loky keeps its workers alive between Parallel calls, including any heap
+    pages their allocators retain after temporary objects are freed. Call this
+    after a phase's results have been consumed to release the workers' private
+    memory. The next ParallelMap2 call creates fresh workers. No-op when no
+    reusable executor exists.
+    """
+    try:
+        from joblib.externals.loky import reusable_executor
+    except ImportError:  # pragma: no cover - joblib without loky
+        return
+    # loky has no public call for "end the reusable pool", so this reaches its
+    # module-level executor. Say so if a joblib upgrade moves it, rather than
+    # silently keeping every worker alive.
+    if not hasattr(reusable_executor, "_executor"):
+        printWarning(
+            "loky's reusable_executor has no _executor attribute; the worker "
+            "pool is not recycled between phases"
+        )
+        return
+    executor = reusable_executor._executor
+    if executor is None:
+        return
+    executor.shutdown(wait=True, kill_workers=False)
+
+
+_libc = None
+
+
+def releaseFreedMemory():
+    """Hand freed heap pages back to the OS (glibc malloc_trim).
+
+    Allocators can retain pages after Python and rocisa objects are freed.
+    malloc_trim can return whole free pages throughout glibc's arenas; it
+    cannot release live allocations or free blocks held by other allocators.
+    A no-op where libc has no malloc_trim.
+    """
+    global _libc
+    if _libc is False:
+        return
+    if _libc is None:
+        try:
+            import ctypes
+
+            _libc = ctypes.CDLL("libc.so.6")
+            _libc.malloc_trim.argtypes = [ctypes.c_size_t]
+            _libc.malloc_trim.restype = ctypes.c_int
+        except (OSError, AttributeError):
+            _libc = False
+            return
+    _libc.malloc_trim(0)
+
+
 def CPUThreadCount(enable=True):
     from .GlobalParameters import globalParameters
 
     if not enable:
         return 1
-    else:
-        if os.name == "nt":
-            # Windows supports at most 61 workers because the scheduler uses
-            # WaitForMultipleObjects directly, which has the limit (the limit
-            # is actually 64, but some handles are needed for accounting).
-            cpu_count = min(os.cpu_count(), 61)
-        else:
-            cpu_count = len(os.sched_getaffinity(0))
-        cpuThreads = globalParameters["CpuThreads"]
-        if cpuThreads == -1:
-            return cpu_count
+    budget = poolSizeBudget()
+    cpuThreads = globalParameters["CpuThreads"]
+    if cpuThreads == -1:
+        return budget
 
-        return min(cpu_count, cpuThreads)
+    return min(budget, cpuThreads)
 
 
 def pcallWithGlobalParamsMultiArg(f, args, newGlobalParameters):
@@ -225,8 +327,8 @@ def ParallelMap2(
     threadCount = min(threadCount, max(len(objects), 1))
     if procs is not None and procs > 0:
         threadCount = min(threadCount, procs)
-    # One task would stay in this process. A native-rocisa handoff needs a new
-    # interpreter so it imports rocisa under ROCISA_BACKEND=rocisa.
+    # One task would stay in this process. A worker handoff needs a new
+    # interpreter so it re-imports rocisa cleanly.
     if spawn_worker:
         threadCount = max(threadCount, 2)
 
