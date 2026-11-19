@@ -149,9 +149,8 @@ namespace TensileLite
                                                    size_t   mxBlockFree,
                                                    bool     unsignedExponentScale)
             {
-                bool const maf = dataInit == InitMode::Maf1_0 || dataInit == InitMode::Maf2_0
-                                 || dataInit == InitMode::Maf2_0UnitScale;
-                return mxBlockFree > 1 && unsignedExponentScale && IsRandomLike(scaleInit) && !maf;
+                return mxBlockFree > 1 && unsignedExponentScale && IsRandomLike(scaleInit)
+                       && !IsMaf(dataInit);
             }
 
             // ----------------------------------------------------------------
