@@ -500,6 +500,7 @@ class TestWgradRdna4Grid(unittest.TestCase):
 
     def test_tile_k_128_axis_is_wgrad_regt_only(self):
         from kernels.conv.aot_jobs import (
+            CACHE_RDNA4_EXTRA_TILE_K_DIRECTIONS,
             CACHE_WGRAD_DEEPK_GEOMETRIES,
             _geometry_list,
             _wgrad_regt_listed_geometries,
@@ -521,7 +522,12 @@ class TestWgradRdna4Grid(unittest.TestCase):
             target = ArchTarget.from_gfx(arch)
             for direction in ("fwd", "dgrad"):
                 with self.subTest(arch=arch, direction=direction):
-                    self.assertFalse(at_128(target, direction))
+                    # Off the axis unless the direction is in the tuple (the
+                    # tuple is ("fwd", "wgrad") once the forward PR is in).
+                    if direction in CACHE_RDNA4_EXTRA_TILE_K_DIRECTIONS:
+                        self.assertTrue(at_128(target, direction))
+                    else:
+                        self.assertFalse(at_128(target, direction))
             geos = at_128(target, "wgrad")
             with self.subTest(arch=arch, direction="wgrad"):
                 self.assertTrue(geos)
