@@ -103,7 +103,7 @@ void hipblas_init_matrix_alternating_sign(hipblas_matrix_type matrix_type,
     auto N   = hA.n();
     auto lda = hA.lda();
 
-    hipblas_fill_seed fill_seed;
+    hipblas_parallel_fill_seeder seeder;
 
     for(int64_t batch_index = 0; batch_index < hA.batch_count(); ++batch_index)
     {
@@ -116,7 +116,7 @@ void hipblas_init_matrix_alternating_sign(hipblas_matrix_type matrix_type,
 #endif
             for(size_t i = 0; i < M; ++i)
             {
-                fill_seed.seed_block(batch_index, i);
+                seeder.reseed_thread_rng(batch_index, i);
                 for(size_t j = 0; j < N; ++j)
                 {
                     auto value     = rand_gen();
@@ -131,7 +131,7 @@ void hipblas_init_matrix_alternating_sign(hipblas_matrix_type matrix_type,
 #endif
             for(size_t i = 0; i < M; ++i)
             {
-                fill_seed.seed_block(batch_index, i);
+                seeder.reseed_thread_rng(batch_index, i);
                 for(size_t j = 0; j < N; ++j)
                 {
                     auto value     = uplo == 'U' ? (j >= i ? rand_gen() : T(0.0f))
@@ -155,7 +155,7 @@ void hipblas_init_vector_alternating_sign(T rand_gen(), T* x, int64_t N, int64_t
     if(incx < 0)
         x -= (N - 1) * incx;
 
-    hipblas_fill_seed fill_seed;
+    hipblas_parallel_fill_seeder seeder;
     int64_t           blocks = (N + hipblas_fill_block_size - 1) / hipblas_fill_block_size;
 
 #ifdef _OPENMP
@@ -163,7 +163,7 @@ void hipblas_init_vector_alternating_sign(T rand_gen(), T* x, int64_t N, int64_t
 #endif
     for(int64_t block = 0; block < blocks; ++block)
     {
-        fill_seed.seed_block(0, block);
+        seeder.reseed_thread_rng(0, block);
         int64_t end = std::min(N, (block + 1) * hipblas_fill_block_size);
         for(int64_t j = block * hipblas_fill_block_size; j < end; ++j)
         {
@@ -178,7 +178,7 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
 {
     using R = real_t<T>;
 
-    hipblas_fill_seed fill_seed;
+    hipblas_parallel_fill_seeder seeder;
 
     for(int64_t batch_index = 0; batch_index < hA.batch_count(); ++batch_index)
     {
@@ -193,7 +193,7 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
 #endif
             for(size_t j = 0; j < N; ++j)
             {
-                fill_seed.seed_block(batch_index, j);
+                seeder.reseed_thread_rng(batch_index, j);
                 for(size_t i = 0; i < M; ++i)
                     A[i + j * lda] = rand_gen();
             }
@@ -205,7 +205,7 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
 #endif
             for(size_t i = 0; i < N; ++i)
             {
-                fill_seed.seed_block(batch_index, i);
+                seeder.reseed_thread_rng(batch_index, i);
                 for(size_t j = 0; j <= i; ++j)
                 {
                     auto value = rand_gen();
@@ -236,7 +236,7 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
 #endif
             for(size_t i = 0; i < N; ++i)
             {
-                fill_seed.seed_block(batch_index, i);
+                seeder.reseed_thread_rng(batch_index, i);
                 for(size_t j = 0; j <= i; ++j)
                 {
                     auto value = rand_gen();
@@ -267,7 +267,7 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
 #endif
             for(size_t j = 0; j < N; ++j)
             {
-                fill_seed.seed_block(batch_index, j);
+                seeder.reseed_thread_rng(batch_index, j);
                 for(size_t i = 0; i < M; ++i)
                 {
                     auto value     = uplo == 'U' ? (j >= i ? rand_gen() : T(0.0f))
@@ -288,7 +288,7 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
 #endif
             for(size_t j = 0; j < N; ++j)
             {
-                fill_seed.seed_block(batch_index, j);
+                seeder.reseed_thread_rng(batch_index, j);
                 for(size_t i = 0; i < M; ++i)
                 {
                     auto value     = uplo == 'U' ? (j >= i ? rand_gen() : T(0.0f))
@@ -370,7 +370,7 @@ void hipblas_init_vector(T rand_gen(), T* x, int64_t N, int64_t incx)
     if(incx < 0)
         x -= (N - 1) * incx;
 
-    hipblas_fill_seed fill_seed;
+    hipblas_parallel_fill_seeder seeder;
     int64_t           blocks = (N + hipblas_fill_block_size - 1) / hipblas_fill_block_size;
 
 #ifdef _OPENMP
@@ -378,7 +378,7 @@ void hipblas_init_vector(T rand_gen(), T* x, int64_t N, int64_t incx)
 #endif
     for(int64_t block = 0; block < blocks; ++block)
     {
-        fill_seed.seed_block(0, block);
+        seeder.reseed_thread_rng(0, block);
         int64_t end = std::min(N, (block + 1) * hipblas_fill_block_size);
         for(int64_t j = block * hipblas_fill_block_size; j < end; ++j)
             x[j * incx] = rand_gen();

@@ -77,7 +77,7 @@ namespace
     {
         host_matrix<T> hA(m, n, lda);
         hipblas_init_matrix(type, uplo, random_generator<T>, hA);
-        // a second fill continues the stream, so it must be reproducible too
+        // a second fill continues the random sequence, so it must be reproducible too
         host_matrix<T> hB(m, n, lda);
         hipblas_init_matrix(type, uplo, random_generator<T>, hB);
         std::vector<T> out(hA.begin(), hA.end());
@@ -123,7 +123,7 @@ namespace
         }
     }
 
-    TEST(hipblas_init, fill_stream_semantics)
+    TEST(hipblas_init, fill_sequence_semantics)
     {
         constexpr int64_t  N = 2 * hipblas_fill_block_size;
         host_vector<float> h1(N), h2(N), h3(N);
@@ -134,10 +134,10 @@ namespace
         hipblas_seedrand();
         hipblas_init_vector(random_generator<float>, h3.data(), N, 1);
 
-        EXPECT_TRUE(h1 == h3) << "a reset stream must reproduce the first fill";
+        EXPECT_TRUE(h1 == h3) << "resetting the sequence must reproduce the first fill";
         EXPECT_FALSE(h1 == h2) << "consecutive fills must not repeat the same data";
 
-        // the caller's stream continues from the same point whatever the thread count
+        // the caller's random sequence continues from the same point whatever the thread count
         expect_independent_of_thread_count<float>([] {
             host_vector<float> hx(N);
             hipblas_init_vector(random_generator<float>, hx.data(), N, 1);
