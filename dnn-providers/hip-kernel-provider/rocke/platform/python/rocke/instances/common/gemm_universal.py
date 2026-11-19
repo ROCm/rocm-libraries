@@ -3502,6 +3502,11 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # half of the K-atom before the last (as the mx_gemm prototype does),
         # without draining this wave's reads; -1 (default): after the barrier.
         cs = int(_os_ra.environ.get("ROCKE_EXP_MX_RA_CS", "-1")) if cb else -1
+        # ROCKE_EXP_MX_RA_NB1=n: in the K-atom before a tile's last, issue the
+        # last reads of this buffer (B's second half of the last K-atom) n
+        # WMMAs into the second half instead of after it, so the drain before
+        # the tile barrier finds them landed; -1 (default): after the half.
+        nb1_at = int(_os_ra.environ.get("ROCKE_EXP_MX_RA_NB1", "-1"))
         if cs >= 0 and k_atoms < 2:
             raise ValueError("ROCKE_EXP_MX_RA_CS needs two K-atoms per tile")
 
@@ -3592,16 +3597,32 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     fence()
                 nb0 = [rd_b(sp, sk, j) for j in range(half)]
                 fence()
-                if cs >= 0 and s + 2 == k_atoms:
-                    wmmas(acc, a, b1, sa, sb, 1, 0, cs)
-                    fence()
-                    b.inline_asm(_CL_SIGNAL0, "s,~{scc},~{memory}", [_tdm_wave_id])
-                    fence()
-                    wmmas(acc, a, b1, sa, sb, 1, cs)
+                nb1 = None
+                if s + 2 == k_atoms and (cs >= 0 or nb1_at >= 0):
+                    # The half's WMMAs with the cluster signal and/or this
+                    # buffer's last reads placed among them.
+                    events = []
+                    if cs >= 0:
+                        events.append((cs, 0, "signal"))
+                    if nb1_at >= 0:
+                        events.append((nb1_at, 1, "reads"))
+                    pos = 0
+                    for at, _, what in sorted(events):
+                        at = min(at, half * mfmas_m)
+                        wmmas(acc, a, b1, sa, sb, 1, pos, at)
+                        fence()
+                        if what == "signal":
+                            b.inline_asm(_CL_SIGNAL0, "s,~{scc},~{memory}", [_tdm_wave_id])
+                        else:
+                            nb1 = [rd_b(sp, sk, half + j) for j in range(half)]
+                        fence()
+                        pos = at
+                    wmmas(acc, a, b1, sa, sb, 1, pos)
                 else:
                     wmmas(acc, a, b1, sa, sb, 1)
                 fence()
-                nb1 = [rd_b(sp, sk, half + j) for j in range(half)]
+                if nb1 is None:
+                    nb1 = [rd_b(sp, sk, half + j) for j in range(half)]
                 a, sa, sb, b0, b1 = na, nsa, nsb, nb0, nb1
             return acc, (a, sa, sb, b0, b1)
 

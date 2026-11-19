@@ -1,0 +1,103 @@
+{
+  "_comment": "mx_env_sweep.py config, from the ATT comparison with the mx_gemm reference: the best kernel (cs0nbpf4) drains this buffer's last 16 B reads right before the tile barrier (about 100 cycles a tile); nb* issue them N WMMAs into the preceding half instead, so they land before the drain. Cluster 4x4. MAF shape; time with --data mxgemm.",
+  "base_env": {
+    "ROCKE_EXP_MX": "1",
+    "ROCKE_EXP_MX_SWZ": "1",
+    "ROCKE_EXP_MX_SCALE_MC": "0",
+    "ROCKE_EXP_MX_KFENCE": "1",
+    "ROCKE_EXP_MX_SCALE_NOCLIP": "1",
+    "ROCKE_EXP_MC_SOLO0": "1"
+  },
+  "variants": [
+    {
+      "name": "cs0nbpf4",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1"
+      }
+    },
+    {
+      "name": "nb16",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_RA_NB1": "16"
+      }
+    },
+    {
+      "name": "nb20",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_RA_NB1": "20"
+      }
+    },
+    {
+      "name": "nb24",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_RA_NB1": "24"
+      }
+    },
+    {
+      "name": "nb28",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_RA_NB1": "28"
+      }
+    }
+  ],
+  "arms": [
+    {
+      "name": "c4x4",
+      "cluster": "4,4"
+    }
+  ],
+  "shapes": [
+    [
+      3072,
+      4096,
+      65536
+    ]
+  ],
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}
