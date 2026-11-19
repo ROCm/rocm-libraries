@@ -1,0 +1,102 @@
+{
+  "_comment": "mx_env_sweep.py config: the MX champion against the one-barrier read-ahead K-loop (ROCKE_EXP_MX_RA=2, barrier 16 WMMAs into the last K-atom (0 for the ra2 control, which leaves no VGPRs for prefetch addresses)) with and without an L2 prefetch of the K tile D ahead (all lines of A and B, the first line per row (l1), or one operand). MAF shape for 96-CU partitions.",
+  "base_env": {
+    "ROCKE_EXP_MX": "1",
+    "ROCKE_EXP_MX_SWZ": "1",
+    "ROCKE_EXP_MX_SCALE_MC": "0",
+    "ROCKE_EXP_MX_KFENCE": "1",
+    "ROCKE_EXP_MX_SCALE_NOCLIP": "1",
+    "ROCKE_EXP_MC_SOLO0": "1"
+  },
+  "variants": [
+    {
+      "name": "mxswz",
+      "env": {}
+    },
+    {
+      "name": "ra2",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0"
+      }
+    },
+    {
+      "name": "ra2b16",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "16"
+      }
+    },
+    {
+      "name": "ra2pf2",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "16",
+        "ROCKE_EXP_GL2_PREFETCH": "2"
+      }
+    },
+    {
+      "name": "ra2pf4",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "16",
+        "ROCKE_EXP_GL2_PREFETCH": "4"
+      }
+    },
+    {
+      "name": "ra2pf8",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "16",
+        "ROCKE_EXP_GL2_PREFETCH": "8"
+      }
+    },
+    {
+      "name": "ra2pf4l1",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "16",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_LINES": "1"
+      }
+    },
+    {
+      "name": "ra2pf4a",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "16",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_OPS": "a"
+      }
+    },
+    {
+      "name": "ra2pf4b",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "16",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_OPS": "b"
+      }
+    }
+  ],
+  "arms": [
+    {
+      "name": "c1x4",
+      "cluster": "1,4"
+    },
+    {
+      "name": "c4x4",
+      "cluster": "4,4"
+    }
+  ],
+  "shapes": [
+    [
+      3072,
+      4096,
+      65536
+    ]
+  ],
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}

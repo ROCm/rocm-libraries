@@ -3282,6 +3282,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         def _tile(p, k_cur, acc, head):
             acc = list(acc)
             a, sa, sb, b0, b1 = head
+            _gl2_prefetch(k_cur)
             for s in range(k_atoms):
                 last = s + 1 == k_atoms
                 sp, sk = (1 - p, 0) if last else (p, s + 1)
