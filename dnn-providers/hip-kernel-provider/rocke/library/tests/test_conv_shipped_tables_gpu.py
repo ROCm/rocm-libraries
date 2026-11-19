@@ -14,10 +14,13 @@ identity labels into a per-session AOT cache (the ``--compile-all`` build path),
 so no prebuilt cache is needed.
 
 Each call writes into a poisoned output and is compared with an f32 torch
-reference; the selections of a deterministic mode are also launched again and
-must reproduce the first output bitwise. The forward ``split_hybrid`` binaries
-are launched at degrees with and without remainder segments, and the wgrad
-knobs no table selects are run on the shipped wgrad binaries they apply to.
+reference. Every selection is launched again over the same workspaces, and each
+rerun is checked against the reference too, so a workspace, slab or flag that a
+launch fails to reset shows up on the second launch; the selections of a
+deterministic mode must also reproduce the first output bitwise. The forward
+``split_hybrid`` binaries are launched at degrees with and without remainder
+segments, and the wgrad knobs no table selects are run on the shipped wgrad
+binaries they apply to.
 
 The CPU tests check that every shipped label still rebuilds a valid kernel
 spec and that every wgrad opt-in still has a shipped binary to run on, which
@@ -238,8 +241,10 @@ def _pin_cases():
 
 
 def _check(plan, cache, *, deterministic: bool, runs: int = 2, seed: int = 1234):
-    """Bind ``plan``, run it into a poisoned output, compare with the f32
-    reference; a deterministic plan reruns ``runs`` times bitwise."""
+    """Bind ``plan`` and launch it ``1 + runs`` times over the same buffers and
+    workspaces, each time into a freshly poisoned output that must match the
+    f32 reference; a deterministic plan must also reproduce its first output
+    bitwise on every rerun."""
     torch = _torch()
     from benchmarks.common import benchmark_implicit_gemm_conv as B
     from benchmarks.common.conv_route_check import _operands, _ref
@@ -259,25 +264,26 @@ def _check(plan, cache, *, deterministic: bool, runs: int = 2, seed: int = 1234)
         B=B,
     )
     try:
-        D.view(torch.int16).fill_(-1)  # bf16 NaN: every element must be written
-        rb.run()
-        torch.cuda.synchronize()
-        first = D.clone()
         ref = _ref(plan.direction, p, A, Bt, torch)
-        out = first.float()
-        assert not torch.isnan(out).any(), "output elements left unwritten (NaN)"
-        err = (out - ref).abs()
-        rel = err.max().item() / max(ref.abs().max().item(), 1.0)
-        mean = err.mean().item() / max(ref.abs().mean().item(), 1e-30)
-        assert rel < MAX_REL and mean < MEAN_REL, (rel, mean)
-        if deterministic:
-            for _ in range(runs):
-                D.view(torch.int16).fill_(-1)
-                rb.run()
-                torch.cuda.synchronize()
+        first = None
+        for launch in range(1 + runs):
+            D.view(torch.int16).fill_(-1)  # bf16 NaN: every element must be written
+            rb.run()
+            torch.cuda.synchronize()
+            out = D.float()
+            assert not torch.isnan(
+                out
+            ).any(), f"launch {launch}: output elements left unwritten (NaN)"
+            err = (out - ref).abs()
+            rel = err.max().item() / max(ref.abs().max().item(), 1.0)
+            mean = err.mean().item() / max(ref.abs().mean().item(), 1e-30)
+            assert rel < MAX_REL and mean < MEAN_REL, (launch, rel, mean)
+            if first is None:
+                first = D.clone()
+            elif deterministic:
                 assert torch.equal(
                     D.view(torch.int16), first.view(torch.int16)
-                ), "a deterministic selection is not bitwise reproducible"
+                ), f"launch {launch}: a deterministic selection is not bitwise reproducible"
     finally:
         torch.cuda.synchronize()
         rb.free(B)
@@ -394,8 +400,8 @@ def _hybrid_cases():
 def test_split_hybrid_degrees(label, cmd, cache_root):
     """A ``split_hybrid`` binary at degrees G with no remainder segments
     (G = S * T), with remainders beside aligned slices (S >= 1, H > 0) and
-    with remainders only (G < T): numerics, and bitwise reruns when the
-    binary is deterministic (``sdet``)."""
+    with remainders only (G < T): numerics on every launch and rerun, and
+    bitwise reruns when the binary is deterministic (``sdet``)."""
     if not _gfx942():
         pytest.skip("needs a gfx942 device")
     case = "hybrid"
@@ -481,8 +487,8 @@ def test_every_wgrad_opt_in_has_a_shipped_base():
 )
 def test_wgrad_opt_in_knobs(knobs, cache_root):
     """An opt-in wgrad knob on a shipped binary, at that binary's problem
-    (reduced) and launch: numerics, and bitwise reruns -- every launch a new
-    pass over the same workspaces -- when the launch is deterministic."""
+    (reduced) and launch, three reruns over the same workspaces: numerics on
+    every launch, and bitwise equality with the first when deterministic."""
     if not _gfx942():
         pytest.skip("needs a gfx942 device")
     from benchmarks.common.det_classify import is_deterministic
