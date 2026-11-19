@@ -1007,6 +1007,49 @@ TEST(TestConvStemBwdKernelMatch, ChannelsLastNeedsWholeVectorsOfOutputChannels)
     EXPECT_FALSE(admits(channelsLastFields(), "gfx942", shape));
 }
 
+TEST(TestConvStemBwdKernelMatch, ChannelsLastSingleElementsServeOnlyPartialVectorsOfChannels)
+{
+    auto single = channelsLastFields();
+    single.vec = 1;
+    // 3-D r(2+1)d stem geometry: 1x7x7 at stride (1, 2, 2), 45 output channels.
+    auto shape = threeDStem(1);
+    shape.channelsLast = true;
+    shape.k = 45;
+    single.ft = 1;
+    EXPECT_TRUE(admits(single, "gfx942", shape));
+    // 16-byte vectors cannot load a 45-channel run.
+    auto vector = single;
+    vector.vec = 8;
+    EXPECT_FALSE(admits(vector, "gfx942", shape));
+    // Even counts that are not whole 8-element vectors too.
+    shape.k = 46;
+    EXPECT_TRUE(admits(single, "gfx942", shape));
+    // Whole vectors of output channels take the vector configs only.
+    shape.k = 48;
+    EXPECT_FALSE(admits(single, "gfx942", shape));
+    EXPECT_TRUE(admits(vector, "gfx942", shape));
+    // Only 1 or 16 bytes.
+    shape.k = 45;
+    auto pair = single;
+    pair.vec = 2;
+    EXPECT_FALSE(admits(pair, "gfx942", shape));
+    // Channels-last dy only.
+    shape.channelsLast = false;
+    EXPECT_FALSE(admits(single, "gfx942", shape));
+    // fp32: 4-element vectors, so 45 channels take single elements too, 44 do not.
+    auto fp32 = fmaFields();
+    fp32.layout = 1;
+    fp32.vec = 1;
+    fp32.ft = 1;
+    shape = threeDStem(1);
+    shape.channelsLast = true;
+    shape.dataType = DataType::FLOAT;
+    shape.k = 45;
+    EXPECT_TRUE(admits(fp32, "gfx942", shape));
+    shape.k = 44;
+    EXPECT_FALSE(admits(fp32, "gfx942", shape));
+}
+
 TEST(TestConvStemBwdKernelMatch, ColumnsCoverEveryChannelTimesPhase)
 {
     // 4 channels at stride 2 take all 16 columns; at stride 4, 3 channels take 48.
@@ -1043,10 +1086,44 @@ TEST(TestConvStemBwdKernelMatch, TheAtomsRunOnTheirArchitectures)
     // gfx950's LDS takes what gfx942's does not.
     gfx950.kc = 128;
     EXPECT_TRUE(admits(gfx950, "gfx950"));
+    const auto problem = parse(specOf(baseShape()));
+    ASSERT_TRUE(problem.has_value());
+    const auto config = configOf(gfx950);
+    ASSERT_GT(conv_stem_bwd::ldsBytesOf(config, 2), 64 * 1024);
+    ASSERT_LE(conv_stem_bwd::ldsBytesOf(config, 2), 160 * 1024);
+    auto legacy = deviceOf("gfx950:sramecc+:xnack-");
+    legacy.sharedMemPerBlock = std::size_t{64} * 1024;
+    EXPECT_TRUE(conv_stem_bwd::stemBwdLaunchFor(*problem, config, legacy).has_value());
     auto big = ConfigFields{};
     big.kc = 128;
     EXPECT_FALSE(admits(big, "gfx942"));
     EXPECT_TRUE(admits(big, "gfx950"));
+}
+
+TEST(TestConvStemBwdKernelMatch, NativeWideWindowUsesTheReportedLdsBoundary)
+{
+    auto shape = baseShape();
+    shape.filter = {7, 7};
+    shape.stride = {1, 1};
+    shape.prePadding = shape.postPadding = {3, 3};
+    auto fields = ConfigFields{};
+    fields.atom = "wmma125_f16";
+    fields.atomId = 17;
+    fields.vec = 1;
+    fields.u = fields.v = 7;
+    fields.sh = fields.sw = 1;
+    fields.th = 8;
+    const auto config = configOf(fields);
+    const auto problem = parse(specOf(shape));
+    ASSERT_TRUE(problem.has_value());
+    const auto required = conv_stem_bwd::ldsBytesOf(config, 2);
+    ASSERT_GT(required, 64 * 1024);
+    ASSERT_LE(required, 320 * 1024);
+    auto device = deviceOf("gfx1250");
+    device.sharedMemPerBlock = static_cast<size_t>(required);
+    EXPECT_TRUE(conv_stem_bwd::stemBwdLaunchFor(*problem, config, device).has_value());
+    device.sharedMemPerBlock -= 1;
+    EXPECT_FALSE(conv_stem_bwd::stemBwdLaunchFor(*problem, config, device).has_value());
 }
 
 TEST(TestConvStemBwdKernelMatch, TheGridLimitsTheSuperRowsPerBlock)

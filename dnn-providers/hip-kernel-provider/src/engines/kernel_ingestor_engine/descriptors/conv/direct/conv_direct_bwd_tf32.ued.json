@@ -36,7 +36,10 @@
     "epi",
     "un",
     "cf",
-    "xpf"
+    "xpf",
+    "dil",
+    "line",
+    "bpu"
   ],
   "behavior_notes": [
     "runtime_compilation"

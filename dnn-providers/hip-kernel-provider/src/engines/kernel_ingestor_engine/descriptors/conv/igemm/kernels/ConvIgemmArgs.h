@@ -12,7 +12,8 @@
 
 /// The convolution: channels-last x and y (N D H W C), filter K T R S C/g (forward) or, for
 /// backward data, transposed to [g][T R S][C/g][K/g]. Backward data reads y (dy) and writes x
-/// (dx). Shapes are runtime; only the tile config is compile-time.
+/// (dx). CF selects direct channels-first output; CF 2 also selects pointwise channels-first
+/// input. Shapes are runtime; only the tile config is compile-time.
 struct K1Args
 {
     void* x;

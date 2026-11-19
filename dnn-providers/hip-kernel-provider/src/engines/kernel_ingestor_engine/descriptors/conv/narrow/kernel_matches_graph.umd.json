@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "8c664754-e679-549a-9918-85448ee33501",
+  "name": "kernel direction, dtype, layout, filter, width stride, narrow channels, atom (device, ship list) match the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.conv_narrow.kernel_match"
+}

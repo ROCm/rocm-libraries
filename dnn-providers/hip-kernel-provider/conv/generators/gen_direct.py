@@ -38,6 +38,9 @@ ATOMS = [
     "wmma11_bf16",
     "wmma12_f16",
     "wmma12_bf16",
+    "wmma125_f16",
+    "wmma125_bf16",
+    "wmma125_f32",
 ]
 INTS = [
     "atom_id",
@@ -70,8 +73,13 @@ INTS = [
     "un",
     "cf",
     "xpf",
+    "dil",
+    "line",
+    "bpu",
 ]
-ROWS0 = dict(rows=0, pw=0, fn=0, wp=0, wq=0, wk=0, pp=0, epi=0, un=0, cf=0)
+ROWS0 = dict(
+    rows=0, pw=0, fn=0, wp=0, wq=0, wk=0, pp=0, epi=0, un=0, cf=0, dil=1, line=0, bpu=1
+)
 STRINGS = ["direction", "dtype", "kind", "atom", "archs"]
 F33, F55, F77, F17, F71, F333, F555 = (
     (1, 3, 3),
@@ -146,12 +154,33 @@ def F(f, bc, tm, tn, nt, vec, ring=1, pipe=0):
     )
 
 
-def RW(atom, f, pw, fn, wp, wq, wk, bc, vec, pp=0, epi=1, math=0, un=1, split=0, cf=0):
+def RW(
+    atom,
+    f,
+    pw,
+    fn,
+    wp,
+    wq,
+    wk,
+    bc,
+    vec,
+    pp=0,
+    epi=1,
+    math=0,
+    un=1,
+    split=0,
+    cf=0,
+    dil=1,
+    line=0,
+    bpu=1,
+):
     """Filter-row reuse kernel (ConvDirectRows.h): LDS DMA (16-byte on gfx950, dword elsewhere),
     16x16 MFMA atoms; 2-D, or 3-D (each output plane walks its depth taps' input planes). un > 1
     (2-D, gfx950): each MFMA's 16 columns are 16 / un columns of un consecutive images. cf 1
     (16-bit): packed channels-first activations read and written in place; cf 2 is the
-    dword-DMA form (even input widths) on any MFMA part.
+    dword-DMA form (even input widths) on any MFMA part. dil (2-D): the filter dilation it serves.
+    line 1 (1 x S filters on one-row images): a tile is wp pw segments of 16 wq columns of the row,
+    staged as one halo line. bpu: persistent blocks resident per unit (their LDS stages together).
     """
     return dict(
         kind="rows",
@@ -186,6 +215,9 @@ def RW(atom, f, pw, fn, wp, wq, wk, bc, vec, pp=0, epi=1, math=0, un=1, split=0,
         un=un,
         cf=cf,
         xpf=0,
+        dil=dil,
+        line=line,
+        bpu=bpu,
     )
 
 
@@ -545,6 +577,84 @@ for dt in ("HALF", "BFLOAT16"):
             for f in (F55, F77, F17, F71)
         ],
     )
+    # Narrow channels: 32- and 64-wide output blocks at 32-channel chunks (16 on the dword-DMA
+    # parts), channels-last and channels-first in place. On K <= 64 outputs (and the C <= 64
+    # reductions of backward data) a 128-wide block leaves half or more of every MMA idle and a
+    # 64-channel chunk half of every step's reduction.
+    add(
+        dt,
+        ["gfx950"],
+        [
+            RW(f"mfma16x32_{e}", F33, 8, 2, 2, 2, 2, 32, 8),
+            RW(f"mfma16x32_{e}", F33, 8, 1, 2, 2, 2, 32, 8),
+            RW(f"mfma16x32_{e}", F33, 8, 2, 2, 2, 2, 32, 8, epi=0, cf=1),
+            RW(f"mfma16x32_{e}", F33, 8, 1, 2, 2, 2, 32, 8, epi=0, cf=1),
+            RW(f"mfma16x32_{e}", F33, 8, 2, 1, 2, 2, 64, 8, epi=0, cf=1),
+        ],
+    )
+    add(
+        dt,
+        ["gfx90a", "gfx942"],
+        [
+            RW(f"mfma16_{e}", F33, 8, 2, 2, 2, 2, 16, 8),
+            RW(f"mfma16_{e}", F33, 8, 1, 2, 2, 2, 16, 8),
+            RW(f"mfma16_{e}", F33, 8, 2, 2, 2, 2, 16, 8, epi=0, cf=1),
+            RW(f"mfma16_{e}", F33, 8, 1, 2, 2, 2, 16, 8, epi=0, cf=1),
+        ],
+    )
+    # Narrow 8-row tiles of 4 waves, two or three resident per unit: the blocks' chunk DMA,
+    # transposes and barriers overlap each other's MMAs, which a K <= 64 tile's short chunks (three
+    # steps of 32 channels) cannot hide alone.
+    add(
+        dt,
+        ["gfx950"],
+        [
+            RW(f"mfma16x32_{e}", F33, 8, 2, 1, 2, 2, 32, 8, epi=0, cf=1, bpu=b)
+            for b in (2, 3)
+        ]
+        + [
+            RW(f"mfma16x32_{e}", F33, 8, 1, 1, 2, 2, 32, 8, epi=0, cf=1, bpu=b)
+            for b in (2, 3)
+        ]
+        + [RW(f"mfma16x32_{e}", F33, 8, 2, 1, 2, 2, 32, 8, bpu=b) for b in (2, 3)],
+    )
+    add(
+        dt,
+        ["gfx90a", "gfx942"],
+        [
+            RW(f"mfma16_{e}", F33, 8, 2, 1, 2, 2, 16, 8, epi=0, cf=1, bpu=2),
+            RW(f"mfma16_{e}", F33, 8, 1, 1, 2, 2, 16, 8, epi=0, cf=1, bpu=2),
+        ],
+    )
+    # Dilated 3x3 (DeepLab's dilation 2 and 4 stages, any channel count): the halo grows by
+    # (3 - 1) d rows and columns and each filter row reads its input rows d apart, still from the
+    # one staged halo; 32-channel chunks keep the larger halo within the LDS.
+    for d in (2, 4):
+        # 8-row tiles two per unit at dilation 2 (dilation 4's halo passes half the LDS).
+        pair = [
+            RW(f"mfma16x32_{e}", F33, 8, 4, 1, 2, 2, 32, 8, epi=0, cf=1, dil=d, bpu=2)
+        ]
+        add(
+            dt,
+            ["gfx950"],
+            (pair if d == 2 else [])
+            + [
+                RW(f"mfma16x32_{e}", F33, 8, 4, 2, 2, 2, 32, 8, dil=d),
+                RW(f"mfma16x32_{e}", F33, 8, 2, 2, 2, 2, 32, 8, dil=d),
+                RW(f"mfma16x32_{e}", F33, 8, 4, 2, 2, 2, 32, 8, epi=0, cf=1, dil=d),
+                RW(f"mfma16x32_{e}", F33, 8, 2, 2, 2, 2, 32, 8, epi=0, cf=1, dil=d),
+            ],
+        )
+        # 64 KiB parts: 8-row tiles at dilation 4.
+        wp = 2 if d == 2 else 1
+        add(
+            dt,
+            ["gfx90a", "gfx942"],
+            [
+                RW(f"mfma16_{e}", F33, 8, 4, wp, 2, 2, 16, 8, dil=d),
+                RW(f"mfma16_{e}", F33, 8, 4, wp, 2, 2, 16, 8, epi=0, cf=1, dil=d),
+            ],
+        )
 
 # gfx908: f16 on the full-rate atoms, bf16 on the half-rate 908 forms.
 add(
@@ -626,6 +736,54 @@ add(
 # 2-D 3x3 shapes, fwd and bwd. Its 16-bit rows (0.80-1.08x, ping-pong never best) and every
 # 3x3x3 rows tile lost there.
 add("FLOAT", ["gfx942"], [RW("mfma16_f32", F33, 8, 2, 2, 2, 2, 8, 4, epi=0)])
+# Line tiles: 1 x S filters on one-row images (1-D audio convolutions, HiFi-GAN's 3/7/11-tap
+# residual stacks at dilation 1, 3 and 5). A wave owns 8 segments of 16 columns of the row, so each
+# weight fragment serves 8 segments and the staged line serves every tap; channels-first (16-bit,
+# in place) and channels-last.
+LINE_GEOMETRIES = [(s, d) for s in (3, 7, 11) for d in (1, 3, 5)]
+for s_, d in LINE_GEOMETRIES:
+    f = (1, 1, s_)
+    L = dict(dil=d, line=1)
+    for dt in ("HALF", "BFLOAT16"):
+        e = x16(dt)
+        add(
+            dt,
+            ["gfx950"],
+            [
+                RW(f"mfma16x32_{e}", f, 8, 4, 1, 2, 2, 32, 8, epi=0, cf=1, bpu=2, **L),
+                RW(f"mfma16x32_{e}", f, 8, 2, 1, 2, 2, 32, 8, epi=0, cf=1, bpu=2, **L),
+                RW(f"mfma16x32_{e}", f, 8, 4, 2, 2, 2, 32, 8, epi=0, cf=1, **L),
+                RW(f"mfma16x32_{e}", f, 8, 2, 2, 2, 2, 32, 8, epi=0, cf=1, **L),
+                RW(f"mfma16x32_{e}", f, 8, 2, 2, 2, 2, 32, 8, **L),
+                RW(f"mfma16x32_{e}", f, 8, 4, 1, 2, 2, 32, 8, **L),
+            ],
+        )
+        add(
+            dt,
+            ["gfx90a", "gfx942"],
+            [
+                RW(f"mfma16_{e}", f, 8, 4, 1, 2, 2, 16, 8, epi=0, cf=1, bpu=2, **L),
+                RW(f"mfma16_{e}", f, 8, 4, 2, 2, 2, 16, 8, epi=0, cf=1, **L),
+                RW(f"mfma16_{e}", f, 8, 2, 2, 2, 2, 16, 8, **L),
+                RW(f"mfma16_{e}", f, 8, 4, 2, 2, 2, 16, 8, **L),
+            ],
+        )
+    add("FLOAT", ["gfx950"], [RW("mfma16_f32", f, 8, 2, 2, 2, 2, 16, 4, epi=0, **L)])
+    add(
+        "FLOAT",
+        ["gfx90a", "gfx942"],
+        [RW("mfma16_f32", f, 8, 2, 2, 2, 2, 8, 4, epi=0, **L)],
+    )
+# Dilated 3x3 fp32 (dilation 2 and 4): the 16-bit dilated tiles at half the chunk.
+for d in (2, 4):
+    add(
+        "FLOAT", ["gfx950"], [RW("mfma16_f32", F33, 8, 2, 2, 2, 2, 16, 4, epi=0, dil=d)]
+    )
+    add(
+        "FLOAT",
+        ["gfx90a", "gfx942"],
+        [RW("mfma16_f32", F33, 8, 2, 2 if d == 2 else 1, 2, 2, 8, 4, epi=0, dil=d)],
+    )
 # 32-wide K blocks (4 x 1 waves): K = 32 layers (nnunet 3-D) waste half a 64-wide block.
 BN32_F32 = [
     M("mfma16_f32", F333, 256, 32, 16, 4, 1, 4, ring=0),
@@ -741,6 +899,33 @@ for fam in ("11", "12"):
         ],
     )
 
+# Native gfx1250 atoms. Keep these separate from the older gfx12 instruction contracts.
+for dt, atom, bc, vec in (
+    ("HALF", "wmma125_f16", 32, 8),
+    ("BFLOAT16", "wmma125_bf16", 32, 8),
+    ("FLOAT", "wmma125_f32", 4, 4),
+):
+    for f in FILTERS2D + [F333]:
+        add(
+            dt,
+            ["gfx1250"],
+            [
+                M(atom, f, 64, 64, bc, 2, 2, vec, ring=nr(f)),
+                M(atom, f, 128, 64, bc, 2, 2, vec, ring=nr(f)),
+                M(atom, f, 64, 64, bc, 2, 2, 1, ring=nr(f)),
+            ],
+        )
+
+add(
+    "FLOAT",
+    ["gfx1250"],
+    [
+        M("wmma125_bf16", F33, 64, 64, 32, 2, 2, 8, **X3),
+        M("wmma125_bf16", F33, 128, 64, 32, 2, 2, 8, **X3),
+        M("wmma125_bf16", F333, 64, 64, 32, 2, 2, 8, ring=0, **X3),
+    ],
+)
+
 # The floor, every arch: FMA for every filter and dtype, a vector form and a scalar (any C) form.
 for dt in ("FLOAT", "HALF", "BFLOAT16"):
     v = 4 if dt == "FLOAT" else 8
@@ -751,7 +936,12 @@ for dt in ("FLOAT", "HALF", "BFLOAT16"):
             [F(f, 8, 8, 4, 16, v, ring=nr(f)), F(f, 4, 4, 8, 8, 1, ring=nr(f))],
         )
 
-ORDER = ["gfx908", "gfx90a", "gfx942", "gfx950", "gfx11", "gfx12", "any"]
+# Extra native candidates follow the existing entries so fallback priorities stay stable.
+for dt, atom in (("HALF", "wmma125_f16"), ("BFLOAT16", "wmma125_bf16")):
+    # Reuse the 3x3 input halo across twice as many output channels per block.
+    add(dt, ["gfx1250"], [M(atom, F33, 64, 128, 32, 2, 4, 8)])
+
+ORDER = ["gfx908", "gfx90a", "gfx942", "gfx950", "gfx11", "gfx12", "gfx1250", "any"]
 kmd, umd, udd = U("kmd"), U("umd"), U("udd")
 write(
     "conv_direct.kmd.json",
@@ -818,7 +1008,14 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
     kernels = []
     for dtype, entries in catalog.items():
         dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
-        for i, (archs, c) in enumerate(merged(entries)):
+        legacy_index = native_index = 0
+        for archs, c in merged(entries):
+            if c["atom"].startswith("wmma125"):
+                priority = 1100 - native_index
+                native_index += 1
+            else:
+                priority = 1000 - legacy_index
+                legacy_index += 1
             groups = (
                 "any" if "any" in archs else ",".join(a for a in ORDER if a in archs)
             )
@@ -826,20 +1023,15 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
             if c["rows"]:
                 # ConvDirectRows.h's two halo stages; the pack gates the same (rowsLdsBytes).
                 eb = 4 if c["atom"] == "mfma16_f32" else 2
-                hh = c["wp"] * c["pw"] + c["r"] - 1
-                lds = (
-                    2
-                    * hh
-                    * c["un"]
-                    * (c["wq"] * 16 // c["un"] + c["s"] - 1)
-                    * c["bc"]
-                    * eb
-                )
+                hh = 1 if c["line"] else c["wp"] * c["pw"] + (c["r"] - 1) * c["dil"]
+                cols = c["wq"] * 16 * (c["wp"] * c["pw"] if c["line"] else 1)
+                reach = (c["s"] - 1) * c["dil"]
+                lds = 2 * hh * c["un"] * (cols // c["un"] + reach) * c["bc"] * eb
                 if c["cf"]:
-                    runs = (7 + c["wq"] * 16 + c["s"] - 1 + 7) // 8
+                    runs = ((7 + cols + reach + 7) // 8 + 1) // 2 * 2
                     lds = lds // 2 + hh * c["bc"] * runs * 16
                 limit = 160 * 1024 if archs <= {"gfx950"} else 64 * 1024
-                assert lds <= limit, (c, archs, lds)
+                assert lds * c["bpu"] <= limit, (c, archs, lds)
                 name = (
                     f"conv_direct.{tag}.{dt}.{c['kd']}x{c['r']}x{c['s']}.{c['atom']}.{mathTag}.rows"
                     f".p{c['pw']}f{c['fn']}.w{c['wp']}x{c['wq']}x{c['wk']}c{c['bc']}.v{c['vec']}"
@@ -847,6 +1039,9 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                     + (f".u{c['un']}" if c["un"] > 1 else "")
                     + (".split" if c["split"] else "")
                     + {0: "", 1: ".cf", 2: ".cfd"}[c["cf"]]
+                    + (f".d{c['dil']}" if c["dil"] > 1 else "")
+                    + (".line" if c["line"] else "")
+                    + (f".b{c['bpu']}" if c["bpu"] > 1 else "")
                 )
             else:
                 name = (
@@ -874,7 +1069,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                         "archs": groups,
                         **{k: c[k] for k in INTS},
                     },
-                    "priority": 1000 - i,
+                    "priority": priority,
                 }
             )
     total += len(kernels)

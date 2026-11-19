@@ -10,6 +10,8 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/TestKernelIngestorEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestLaunchKernelDefinition.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestMultiLaunchEndToEnd.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestRankingTraceSupport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestUnpulledModelsRecord.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestRestoredIngestorPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseAddDispatchHandler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseAddMatchers.cpp
@@ -130,6 +132,7 @@ target_sources(hip_kernel_provider_census_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DCatalogTiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDensePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDenseCatalogTiles.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDenseModelBinding.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionCatalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionDecodePacks.cpp
@@ -150,6 +153,9 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
     # each builds with its family's registration (one with none builds always).
     target_sources(hip_kernel_provider_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvDepthwiseValuProblem.cpp)
+    target_sources(hip_kernel_provider_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuWrwReference.cpp)
+    target_include_directories(hip_kernel_provider_tests PRIVATE "${PROJECT_SOURCE_DIR}/conv/tools")
     if("naive" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
         target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvNaiveProblem.cpp
                                                           ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvEpilogue.cpp
@@ -173,6 +179,11 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
     if("winograd" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
         target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvWinogradProblem.cpp)
     endif()
+    if("winograd_nd" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvWinogradNdProblem.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvWinogradNd.cpp)
+    endif()
     if("direct" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
         target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvDirectProblem.cpp)
     endif()
@@ -187,6 +198,9 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
     endif()
     if("group_valu" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
         target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvGroupValuProblem.cpp)
+    endif()
+    if("narrow" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvNarrowProblem.cpp)
     endif()
     # A family's engine suites load its catalogs and resolve its native symbols, so they
     # build only when the family is served -- its DVC-stored catalogs were pulled
@@ -237,6 +251,9 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
     endif()
     if("group_valu" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
         target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvGroupValu.cpp)
+    endif()
+    if("narrow" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvNarrow.cpp)
     endif()
     if(HIPKERNELPROVIDER_CONV_FAMILIES)
         target_sources(hip_kernel_provider_tests PRIVATE

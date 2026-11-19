@@ -117,6 +117,9 @@ HipblasltGemmPlan::HipblasltGemmPlan(const HipdnnEnginePluginHandle& handle,
         PLUGIN_THROW_IF_FALSE(!(call.epilogue.has_value() && call.accumulate),
                               HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                               "a native epilogue on an accumulating GEMM");
+        PLUGIN_THROW_IF_FALSE(!(call.c.has_value() && call.accumulate),
+                              HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                              "an addend on an accumulating GEMM");
         // Stored shapes: op(a) is m x k, op(b) is k x n.
         PreparedCall prepared{call,
                               {},
@@ -129,7 +132,13 @@ HipblasltGemmPlan::HipblasltGemmPlan(const HipdnnEnginePluginHandle& handle,
                                         call.transposeB ? call.k : call.n,
                                         call.batchCount),
                               layoutFor(call.d, call.m, call.n, call.batchCount),
-                              {}};
+                              {},
+                              std::nullopt};
+        if(call.c.has_value())
+        {
+            prepared.c = layoutFor(*call.c, call.m, call.n, call.batchCount);
+        }
+        const auto& cLayout = prepared.c.has_value() ? *prepared.c : prepared.d;
 
         // TF32 where the call permits it and hipBLASLt has an algorithm for it on this GPU;
         // fp32 otherwise, the fallback TF32 asks for.
@@ -158,7 +167,7 @@ HipblasltGemmPlan::HipblasltGemmPlan(const HipdnnEnginePluginHandle& handle,
                                                                 prepared.desc.matmulDesc(),
                                                                 prepared.a.matrixLayout(),
                                                                 prepared.b.matrixLayout(),
-                                                                prepared.d.matrixLayout(),
+                                                                cLayout.matrixLayout(),
                                                                 prepared.d.matrixLayout(),
                                                                 preference.get(),
                                                                 1,
@@ -202,7 +211,17 @@ void HipblasltGemmPlan::execute(const HipdnnEnginePluginHandle& handle,
         const auto d
             = hipdnn_plugin_sdk::findDeviceBuffer(call.d.uid, deviceBuffers, numDeviceBuffers);
         void* output = operandAddress(d.ptr, call.d);
-        const float beta = call.accumulate ? 1.0f : 0.0f;
+        const float beta = call.accumulate || call.c.has_value() ? 1.0f : 0.0f;
+        // c is d (read only when accumulating), or the addend.
+        const void* addend = output;
+        if(call.c.has_value())
+        {
+            addend = operandAddress(
+                hipdnn_plugin_sdk::findDeviceBuffer(call.c->uid, deviceBuffers, numDeviceBuffers)
+                    .ptr,
+                *call.c);
+        }
+        const auto& cLayout = prepared.c.has_value() ? *prepared.c : prepared.d;
         if(call.epilogue.has_value() && call.epilogue->biasUid.has_value())
         {
             const void* bias = hipdnn_plugin_sdk::findDeviceBuffer(
@@ -215,7 +234,6 @@ void HipblasltGemmPlan::execute(const HipdnnEnginePluginHandle& handle,
                                                 sizeof(bias)));
         }
 
-        // c is d: read only when accumulating.
         THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmul(handle.hipblasltHandle,
                                                    prepared.desc.matmulDesc(),
                                                    &ALPHA,
@@ -224,8 +242,8 @@ void HipblasltGemmPlan::execute(const HipdnnEnginePluginHandle& handle,
                                                    operandAddress(b.ptr, call.b),
                                                    prepared.b.matrixLayout(),
                                                    &beta,
-                                                   output,
-                                                   prepared.d.matrixLayout(),
+                                                   addend,
+                                                   cLayout.matrixLayout(),
                                                    output,
                                                    prepared.d.matrixLayout(),
                                                    &prepared.heuristic.algo,

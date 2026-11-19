@@ -24,39 +24,32 @@
  * @file ConvWrwProblem.hpp
  * @brief The host half of the matrix-core backward-weights engine (CONV_WRW, K3): the graphs it
  *        serves, the config a kernel's metadata declares, and the launch of a config on a
- *        problem (the reduction split, the fp32 partials' workspace and the reduce). Kept apart
+ *        problem (the partial workspace and the reduce, FP64 for loop 10). Kept apart
  *        from the dispatch code so every gate can be tested without a device.
  *
  * The kernel reads x and dy in place, both packed channels-first (N C D H W) or both
- * channels-last (N D H W C), or (the generic loop) through any strides, and writes fp32 partials [split][g][tap][k][c] into the workspace;
+ * channels-last (N D H W C), or (generic loops 8 and 11) through any strides, and writes fp32 partials [split][g][tap][k][c] into the workspace;
  * a second kernel adds the splits in a fixed order and writes dw, packed K C T R S or K T R S C,
  * in its element type (deterministic, no atomics). At one split with dw's channels contiguous
  * (K T R S C, or one tap) a config compiled with the direct store (dws 1) writes dw itself: no
- * workspace, no reduce. The LDS a config takes is the kernels' own
+ * workspace, no reduce. The bounded HALF tap-tiled dws 2 configuration also writes channels-first
+ * filters directly at one split. The LDS a config takes is the kernels' own
  * arithmetic (ConvWrwGeom.h, which the kernels assert their tiles against).
+ * Loop 10 is a separately enumerated gfx1250 FLOAT candidate with runtime geometry, coalesced tiled
+ * loads, FP64 products/partials/final reduction and one final FP32 output rounding. It always
+ * uses bounded workspace and the reduce, even at one split; legacy kernels keep their ABI.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_wrw
 {
 
-/// The atoms a config may name, in atom_id order: K1's matrix-core atoms (no TF32 form), then
-/// the FMA row ring's "fma".
-inline constexpr std::array<std::string_view, 17> ATOMS{"mfma16_f16",
-                                                        "mfma16_bf16",
-                                                        "mfma16_bf16_908",
-                                                        "mfma16_f32",
-                                                        "mfma32_f16",
-                                                        "mfma32_bf16",
-                                                        "mfma32_bf16_908",
-                                                        "mfma32_f32",
-                                                        "mfma16x32_f16",
-                                                        "mfma16x32_bf16",
-                                                        "mfma32x16_f16",
-                                                        "mfma32x16_bf16",
-                                                        "wmma11_f16",
-                                                        "wmma11_bf16",
-                                                        "wmma12_f16",
-                                                        "wmma12_bf16",
-                                                        "fma"};
+/// Atoms in their stable atom_id order: the original K1 matrix atoms (no TF32) and FMA row
+/// ring's "fma", followed by the appended native gfx1250 atoms.
+inline constexpr std::array<std::string_view, 20> ATOMS{
+    "mfma16_f16",    "mfma16_bf16",    "mfma16_bf16_908", "mfma16_f32",
+    "mfma32_f16",    "mfma32_bf16",    "mfma32_bf16_908", "mfma32_f32",
+    "mfma16x32_f16", "mfma16x32_bf16", "mfma32x16_f16",   "mfma32x16_bf16",
+    "wmma11_f16",    "wmma11_bf16",    "wmma12_f16",      "wmma12_bf16",
+    "fma",           "wmma125_f16",    "wmma125_bf16",    "wmma125_f32"};
 
 /// The atom_id of @p atom, or -1 for an unknown one.
 int64_t atomIdOf(std::string_view atom);
@@ -88,6 +81,12 @@ inline constexpr int64_t LOOP_DIRECT = 5; ///< direct (gfx950, 16-bit, persisten
 inline constexpr int64_t LOOP_ROWS_SMALLC = 6; ///< output rows, (channel, tap) N axis (stems)
 inline constexpr int64_t LOOP_ROWS_PACKED = 7; ///< output rows, several narrow rows a step
 inline constexpr int64_t LOOP_GENERIC = 8; ///< generic taps: runtime filter, strides (coverage)
+inline constexpr int64_t LOOP_SMALL_K = 9; ///< gfx1250 channels-last, at most four K per group, FMA
+inline constexpr int64_t LOOP_ACCURATE = 10; ///< runtime tiled FP64 products, partials and fold
+inline constexpr int64_t LOOP_NATIVE_GENERIC
+    = 11; ///< gfx1250 masked 64-bit gathers, flattened positions
+inline constexpr int64_t LOOP_TAP_TILED
+    = 12; ///< gfx1250 GEMM with flattened (tap, channel) columns
 
 /// The activation layouts (CONV_K3_LAYOUT): the graph's x and dy are channels-first (0) or
 /// channels-last (1: transposed into LDS; 2: kept channels-last, read with LDS transpose reads).
@@ -102,20 +101,20 @@ struct WrwConfig
     int64_t atomId = -1;
     int64_t loop = -1;
     int64_t layout = -1;
-    /// Tile: output channels, input channels, positions per reduction step.
+    /// Tile: output channels, input channels (tap x channel for loop 12), reduction positions.
     int64_t bk = 0;
     int64_t bc = 0;
     int64_t bq = 0;
-    /// Filter rows per block (loops 0 and 4); the filter height (loops 1 to 3).
+    /// Filter rows per block (0, 4, 6, 7); ring height (1 to 3); taps a block (8); 0 for 9 to 12.
     int64_t fr = 0;
-    /// The filter width, its stride and its dilation.
+    /// Filter width, stride and dilation; 0 for 9 to 12. Loop 8: s/sw 0, dw shared-window size.
     int64_t s = 0;
     int64_t sw = 0;
     int64_t dw = 0;
-    /// Waves over output and input channels (loops 0 to 2; 0 for loop 3).
+    /// Waves over output and input channels (matrix loops; 0 for FMA loops).
     int64_t wk = 0;
     int64_t wc = 0;
-    /// Output and input channels per thread (loop 3; 0 for loops 0 to 2).
+    /// Output and input channels per thread (FMA loops; loop 9 uses 4 x 1).
     int64_t tk = 0;
     int64_t tc = 0;
     /// Elements per 16-byte global load.
@@ -129,8 +128,8 @@ struct WrwConfig
     int64_t ns = 0;
     /// Loop 5: items a workgroup runs side by side (waves_q: 1, 2 or 4; wk wc wq = 8); else 0.
     int64_t wq = 0;
-    /// 1: the epilogue also writes dw itself, used at one split into K T R S C or one tap
-    /// (CONV_K3_DWS); 0: fp32 partials only, as compiled before the direct store. 0 for loop 5.
+    /// 1: direct dw when channels are contiguous; 2: bounded HALF tap-tiled K C T R S store.
+    /// Both require one split; 0 retains fp32 partials only (mandatory for loop 5).
     int64_t dws = 0;
     /// 1: block-based buffers (CONV_K3_PB), for images past the 32-bit buffer range and admitted
     /// only there: the channels-first K3Tiles loops (0, 1, 6), whose x and dy buffers start at
@@ -145,9 +144,9 @@ struct WrwConfig
     /// The split planner's target blocks per dispatch unit (1, 2, 4 or 8; 1 for loop 5, whose
     /// persistent grid has one workgroup per unit; 8 for small FMA blocks): host-side only.
     int64_t bpu = 0;
-    /// Loop 8 only (the "spec" metadata string): the specialized geometry classes the catalog
-    /// serves on this config's archs, which the generic config declines. ';'-separated keys
-    /// "<atom_id><kind><layout>.<s>.<sw>.<dw>.<fr>", kind R (loop 0, any filter height), C
+    /// Legacy loop 8 only (the "spec" metadata string): specialized geometry classes the
+    /// generic config declines. Atom IDs end at FMA (16); native loops use no spec keys.
+    /// ';'-separated "<atom_id><kind><layout>.<s>.<sw>.<dw>.<fr>", kind R (loop 0, any filter height), C
     /// (loop 6, at most 16 input channels per group), P (loop 1, the filter height fr, height
     /// stride 1 or phases), U (P with align 2: channels-last output channels in any count), G
     /// (loop 2, gfx950, fr at height stride 1) or D (loop 5, gfx950, as G with unit width
@@ -179,8 +178,8 @@ struct WrwProblem
     bool filterChannelsLast = false;
     /// Filter taps (ft fr fs).
     int64_t taps = 0;
-    /// One image of x or of dy spans past the 32-bit buffer range: only block-based buffer
-    /// configs (pb 1) serve it.
+    /// One image of x or dy spans past the 32-bit buffer range: buffer loops require pb 1,
+    /// while the native runtime loops (9 to 12) use 64-bit global addresses.
     bool largeImage = false;
     /// x and dy have unit channel strides, every other stride a whole number of 16-byte vectors
     /// and channels per group whole vectors (packed or not): the generic loop's channels-last
@@ -189,7 +188,31 @@ struct WrwProblem
     /// Elements one image of x / of dy spans through its strides (the packed image when packed).
     int64_t xSpan = 0;
     int64_t ySpan = 0;
+    /// The problem is a width fold's view (widthFoldOf): its dw is written by the fold reduce,
+    /// never by the kernel itself. noFold: not to be folded (three-bf16's split operands).
+    bool folded = false;
+    bool noFold = false;
+    /// A width fold's staged view: the padding's phase the staging shifts x by (0 in place).
+    int64_t foldShift = 0;
 };
+
+/**
+ * @brief The width fold of @p problem: the same backward-weights convolution as a stride-1 one,
+ *        or nullopt where it does not apply.
+ *
+ * A width stride s > 1 dividing the filter width S, at unit width dilation, one group, packed x
+ * and dy (either layout), images within the 32-bit buffer range. Position u s + j of channel c is
+ * folded channel j C + c at position u: the view has C s input channels at unit width stride;
+ * depth and height are unchanged.
+ * - Channels-first x is staged (ConvWrwFoldX) shifted by the padding's phase r = p mod s (p the
+ *   width padding): S / s folded taps at padding (p - r) / s over ceil((L + r) / s) positions,
+ *   rounded up to whole 16-byte vectors (zero, read by no dy position).
+ * - Channels-last x is read in place (its width stride becomes s C), so its width L must be a
+ *   multiple of s: ceil((S - p) / s) + ceil(p / s) folded taps at padding ceil(p / s), the taps
+ *   reaching outside the filter dropped by the fold reduce.
+ * Folded tap tau of folded channel j C + c is dw tap (tau - pre) s + j + p - r of channel c.
+ */
+std::optional<WrwProblem> widthFoldOf(const WrwProblem& problem);
 
 /// Whether specialized key @p key (WrwConfig::spec) serves @p problem on @p gcnArchName: its
 /// atom runs there and takes the graph's element type (G and D, and layout 2, on gfx950 only),
@@ -205,13 +228,13 @@ std::optional<bool>
  *        kernels do not serve it.
  *
  * Everything parseConvNaiveProblem gates (both convolution modes), plus: fp32, fp16 or bf16;
- * x and dy both packed channels-first or both packed channels-last, or (for the generic loop
- * only, which reads them through their strides) any strides; dw packed K C T R S or
+ * x and dy both packed channels-first or both packed channels-last, or (for generic loops 8
+ * and 11, which read them through their strides) any strides; dw packed K C T R S or
  * K T R S C; the batch within 32 bits; per spatial axis the reach of the kernel's 32-bit
  * position arithmetic ((output extent + 512) x stride + filter x dilation + padding) within 32
- * bits, which bounds every extent, padding, stride and dilation; the taps within 32 bits. An
- * image of x or dy spanning past 2^31 bytes is a large image (WrwProblem::largeImage), for the
- * block-based buffer configs alone.
+ * bits, which bounds every extent, padding, stride and dilation; the taps within 32 bits;
+ * tensor byte spans within signed 64 bits. Buffer loops require images within 2^31 bytes,
+ * or block-based buffers (pb 1) with each window within that range. Loops 9 to 12 use 64-bit globals.
  */
 std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context);
 
@@ -225,11 +248,16 @@ int64_t ldsBytesOf(const WrwConfig& config, int elementBytes);
 /// 16-byte channel vectors at each position of a 32-bit LDS word).
 int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave);
 
-/// The LDS a workgroup may use on @p gcnArchName: 160 KiB on gfx950, else 64 KiB.
+/// The LDS a workgroup may use: 320 KiB on gfx1250, 160 KiB on gfx950, else 64 KiB.
 int64_t ldsLimitOf(std::string_view gcnArchName);
 
+/// Quads a block of the deep reduce (ConvWrwReduceDeep, K3ReduceArgs::quads) for @p quads quads
+/// of dw on @p dispatchUnits units: 64, halved (down to 16) while the blocks leave a unit fewer
+/// than two.
+int64_t deepReduceQuads(int64_t quads, int64_t dispatchUnits);
+
 /// The launch of a config on a problem: both kernels' grids and argument blocks, and the
-/// workspace of the fp32 partials.
+/// workspace of the partials (FP64 for loop 10, FP32 otherwise).
 struct WrwLaunch
 {
     unsigned int gridX = 0;
@@ -253,9 +281,21 @@ struct WrwLaunch
     size_t splitYOffset = 0;
     size_t splitBytes = 0;
     K3SplitArgs splitArgs{};
+    /// The width fold (widthFoldOf): the config ran the folded problem; ConvWrwReduceFold
+    /// (reduceFold, reduceGrid x reduceBlock) writes dw. Channels-first x is staged first by
+    /// ConvWrwFoldX (foldStage: foldArgs, foldGrid blocks) at foldOffset of the workspace, which
+    /// the kernel then reads as x.
+    bool fold = false;
+    bool foldStage = false;
+    unsigned int foldGrid = 0;
+    size_t foldOffset = 0;
+    K3FoldArgs foldArgs{};
+    K3ReduceFoldArgs reduceFold{};
+    /// Loop 10 uses K3AccurateArgs / K3AccurateReduceArgs, never the FP32 partial ABI.
+    bool accurate = false;
 };
 
-/// The workspace the splits' fp32 partials may take at most; splits are reduced to fit.
+/// The workspace the splits' partials may take at most; splits are reduced to fit.
 inline constexpr int64_t MAX_WORKSPACE_BYTES = int64_t{1} << 30;
 
 /// The splits the planner wants for a ConvWrw grid of @p blocksXY blocks per split, aiming at
@@ -264,11 +304,13 @@ inline constexpr int64_t MAX_WORKSPACE_BYTES = int64_t{1} << 30;
 /// blocksXY), at most steps / 4, 65535, and as many as keep the workspace within
 /// MAX_WORKSPACE_BYTES; at least 1. Then, of that count down to half of it (64 counts at most),
 /// the one whose grid best fills its last round of dispatchUnits blocks (the most on a tie).
+/// @p partialElementBytes is 8 for loop 10; the unchanged legacy planner defaults to 4.
 int64_t splitsWanted(int64_t blocksXY,
                      int64_t blocksPerUnit,
                      int64_t steps,
                      int64_t partialElems,
-                     int64_t dispatchUnits);
+                     int64_t dispatchUnits,
+                     int64_t partialElementBytes = sizeof(float));
 
 /// The tile reduce's blocks (ConvWrwReduceTile): tiles of tileK output channels by tileC input
 /// channels (a multiple of 4) of one group, by all taps; tilesK x tilesC tiles a group. blocks 0:
@@ -367,7 +409,8 @@ DirectPlan directPlanFor(int64_t tiles,
  * 0 to 2); align 0, or 1 for loop 1, channels-first, sw 1 and widths of x and dy whole vectors,
  * or 2 for loop 1, layout 1 and output channels per group not whole vectors (which the other
  * configs require);
- * ns 2 to 4 for loop 2, else 0; dws 0 or 1 (0 for loop 5); the block within 1024 threads and
+ * ns 2 to 4 for loop 2, else 0; dws 0 or 1 (0 for loop 5), or 2 for the bounded HALF
+ * channels-first tap-tiled configuration; the block within 1024 threads and
  * its load passes within 32; the LDS within the device's; images of at least one vector (channels-first); the grids within
  * the launch limits (x, and the reduce, 2^31 - 1; y and z 65535); bpu 1, 2, 4 or 8. The splits follow
  * splitsWanted at bpu blocks per unit, so a device that reports no dispatch units is declined.

@@ -40,8 +40,9 @@
  *        kernels.
  *
  * The kernel (descriptors/conv/wrw/kernels) is a row-direct implicit GEMM on K1's matrix-core
- * atoms (MFMA on gfx908 to gfx950, WMMA on gfx11 and gfx12), with FMA loops for exact fp32
- * where there is no fp32 matrix core and, on gfx950, a direct loop for 16-bit channels-last
+ * atoms (MFMA on gfx908 to gfx950, WMMA on gfx11/gfx1200/gfx1201, native WMMA on gfx1250),
+ * with FMA loops for exact fp32 where there is no fp32 matrix core and, on gfx950, a direct
+ * loop for 16-bit channels-last
  * unit-stride layers (LDS DMA, swizzled transpose reads, an 8-wave ping-pong, a persistent
  * grid): x and dy are read in place
  * (packed channels-first or channels-last; the generic tier, loop 8, through any strides and
@@ -52,9 +53,13 @@
  * second entry point) adds in split order into dw: deterministic, no atomics. At one split
  * with dw's channels contiguous the kernel writes dw itself and neither the workspace nor the
  * reduce is used (WrwLaunch::dwStore). fp32, fp16 and
- * bf16; shapes are runtime, a config fixes the tile, the loop and the filter width, its stride
- * and dilation. Every config is admitted on correctness alone (wrwLaunchFor); autotune, and UHD
- * once trained, ranks them.
+ * bf16; shapes are runtime, a specialized config fixes the tile, the loop and the filter width,
+ * its stride and dilation. Native generic loop 11 instead tiles one runtime filter tap and
+ * arbitrary packed channel tails using 64-bit masked gathers and the same split-reduction contract.
+ * Loop 10 is an independent FLOAT catalog candidate with FP64 products, partials and final
+ * fold, using a separate source and argument ABI; bindings are refreshed on every launch.
+ * Every config is admitted on correctness alone (wrwLaunchFor); autotune, and UHD once trained,
+ * ranks them.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -73,12 +78,18 @@ constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.conv_wrw.graph_matc
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.conv_wrw.kernel_match";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.conv_wrw.dispatch";
 /// The reduce kernels: the same source as ConvWrw, under other entry points; the launch says
-/// which (the tile reduce for K C T R S at few splits, the row reduce at one split on gfx950).
+/// which (the tile reduce for K C T R S at few splits, the row reduce at one split on gfx950,
+/// the deep quad reduce at many splits).
 constexpr std::string_view REDUCE_ENTRY_POINT = "ConvWrwReduce";
 constexpr std::string_view REDUCE_TILE_ENTRY_POINT = "ConvWrwReduceTile";
 constexpr std::string_view REDUCE_ROWS_ENTRY_POINT = "ConvWrwReduceRows";
+constexpr std::string_view REDUCE_DEEP_ENTRY_POINT = "ConvWrwReduceDeep";
+/// The width fold: the reduce writing the folded taps back to dw, and channels-first x staged.
+constexpr std::string_view REDUCE_FOLD_ENTRY_POINT = "ConvWrwReduceFold";
+constexpr std::string_view FOLD_ENTRY_POINT = "ConvWrwFoldX";
 /// Three-bf16's operand split (math 1), the same source again.
 constexpr std::string_view SPLIT_ENTRY_POINT = "ConvWrwSplit";
+constexpr std::string_view ACCURATE_REDUCE_ENTRY_POINT = "ConvWrwAccurateReduce";
 
 // Tokens the graph match binds.
 constexpr std::string_view X_TOKEN = "conv_wrw.x.uid";
@@ -206,10 +217,38 @@ const std::vector<KernelArgument>& reduceSignature()
     return s_signature;
 }
 
+const std::vector<KernelArgument>& reduceFoldSignature()
+{
+    static const std::vector<KernelArgument> s_signature{
+        {"by_value", static_cast<uint32_t>(sizeof(K3ReduceFoldArgs)), 0, ""}};
+    return s_signature;
+}
+
+const std::vector<KernelArgument>& foldSignature()
+{
+    static const std::vector<KernelArgument> s_signature{
+        {"by_value", static_cast<uint32_t>(sizeof(K3FoldArgs)), 0, ""}};
+    return s_signature;
+}
+
 const std::vector<KernelArgument>& splitSignature()
 {
     static const std::vector<KernelArgument> s_signature{
         {"by_value", static_cast<uint32_t>(sizeof(K3SplitArgs)), 0, ""}};
+    return s_signature;
+}
+
+const std::vector<KernelArgument>& accurateWrwSignature()
+{
+    static const std::vector<KernelArgument> s_signature{
+        {"by_value", static_cast<uint32_t>(sizeof(K3AccurateArgs)), 0, ""}};
+    return s_signature;
+}
+
+const std::vector<KernelArgument>& accurateReduceSignature()
+{
+    static const std::vector<KernelArgument> s_signature{
+        {"by_value", static_cast<uint32_t>(sizeof(K3AccurateReduceArgs)), 0, ""}};
     return s_signature;
 }
 
@@ -221,16 +260,23 @@ public:
     PreparedConvWrw(IngestorKernelCode wrw,
                     std::optional<IngestorKernelCode> reduce,
                     std::optional<IngestorKernelCode> split,
+                    std::optional<IngestorKernelCode> fold,
                     const WrwLaunch& launch,
                     const WrwProblem& problem)
         : _wrw(std::move(wrw))
         , _reduce(std::move(reduce))
         , _split(std::move(split))
+        , _fold(std::move(fold))
+        , _foldReduce(launch.fold)
+        , _foldOffset(launch.foldOffset)
+        , _foldArgs(launch.foldArgs)
+        , _reduceFoldArgs(launch.reduceFold)
         , _args(launch.args)
         , _reduceArgs(launch.reduce)
         , _splitArgs(launch.splitArgs)
         , _splitYOffset(launch.splitYOffset)
         , _splitBytes(launch.splitBytes)
+        , _accurate(launch.accurate)
         , _xUid(problem.xUid)
         , _dyUid(problem.dyUid)
         , _dwUid(problem.dwUid)
@@ -267,16 +313,41 @@ public:
         return _split->kernelForStream(stream);
     }
 
+    bool hasFold() const
+    {
+        return _fold.has_value();
+    }
+
+    compilation::IRunnableKernel& foldForStream(hipStream_t stream) const
+    {
+        return _fold->kernelForStream(stream);
+    }
+
+    /// The reduce is the width fold's (it takes reduceFold's arguments).
+    bool foldReduce() const
+    {
+        return _foldReduce;
+    }
+
+    bool accurate() const
+    {
+        return _accurate;
+    }
+
     void argsFor(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace,
                  K3Args& args,
                  K3ReduceArgs& reduce,
-                 K3SplitArgs& split) const
+                 K3SplitArgs& split,
+                 K3FoldArgs& fold,
+                 K3ReduceFoldArgs& reduceFold) const
     {
         args = _args;
         reduce = _reduceArgs;
         split = _splitArgs;
+        fold = _foldArgs;
+        reduceFold = _reduceFoldArgs;
         args.x = hipdnn_plugin_sdk::findDeviceBuffer(_xUid, deviceBuffers, numDeviceBuffers).ptr;
         args.dy = hipdnn_plugin_sdk::findDeviceBuffer(_dyUid, deviceBuffers, numDeviceBuffers).ptr;
         // Three-bf16: the kernel reads the split operands; the partials follow them.
@@ -291,22 +362,37 @@ public:
             args.dy = split.ys;
             partial += _splitBytes;
         }
-        args.partial = reinterpret_cast<float*>(partial);
-        reduce.partial = reinterpret_cast<const float*>(partial);
+        args.partial = _accurate ? nullptr : reinterpret_cast<float*>(partial);
+        reduce.partial = _accurate ? nullptr : reinterpret_cast<const float*>(partial);
         reduce.dw
             = hipdnn_plugin_sdk::findDeviceBuffer(_dwUid, deviceBuffers, numDeviceBuffers).ptr;
         args.dwOut = reduce.dw;
+        reduceFold.r.partial = reduce.partial;
+        reduceFold.r.dw = reduce.dw;
+        if(_fold.has_value())
+        {
+            // The kernel reads the staged folded x.
+            fold.x = args.x;
+            fold.xf = static_cast<char*>(workspace) + _foldOffset;
+            args.x = fold.xf;
+        }
     }
 
 private:
     IngestorKernelCode _wrw;
     std::optional<IngestorKernelCode> _reduce;
     std::optional<IngestorKernelCode> _split;
+    std::optional<IngestorKernelCode> _fold;
+    bool _foldReduce;
+    size_t _foldOffset;
+    K3FoldArgs _foldArgs;
+    K3ReduceFoldArgs _reduceFoldArgs;
     K3Args _args;
     K3ReduceArgs _reduceArgs;
     K3SplitArgs _splitArgs;
     size_t _splitYOffset;
     size_t _splitBytes;
+    bool _accurate;
     int64_t _xUid;
     int64_t _dyUid;
     int64_t _dwUid;
@@ -322,7 +408,7 @@ public:
     {
     }
 
-    /// The splits' fp32 partials.
+    /// The splits' partials (FP64 for loop 10, FP32 for existing kernels).
     size_t workspaceBytes(const MatchContext& context,
                           const BoundTokens& /*bound*/,
                           const KernelDefinition& kernel) const override
@@ -357,14 +443,20 @@ public:
             options.add(name, value);
         }
 
-        auto wrw = buildIngestorKernelCode(
-            _kernelCompiler, _kpackLoader, context, kernel, options, wrwSignature());
+        auto wrw
+            = buildIngestorKernelCode(_kernelCompiler,
+                                      _kpackLoader,
+                                      context,
+                                      kernel,
+                                      options,
+                                      launch->accurate ? accurateWrwSignature() : wrwSignature());
         std::optional<IngestorKernelCode> reduce;
         if(!launch->dwStore)
         {
             KernelDefinition reduceKernel = kernel;
             // The reduce is the same source under another entry point.
-            std::string_view entry = REDUCE_ENTRY_POINT;
+            std::string_view entry
+                = launch->accurate ? ACCURATE_REDUCE_ENTRY_POINT : REDUCE_ENTRY_POINT;
             if(launch->reduce.tile == 1)
             {
                 entry = REDUCE_TILE_ENTRY_POINT;
@@ -373,9 +465,24 @@ public:
             {
                 entry = REDUCE_ROWS_ENTRY_POINT;
             }
+            else if(launch->reduce.tile == 3)
+            {
+                entry = REDUCE_DEEP_ENTRY_POINT;
+            }
+            else if(launch->reduce.tile == 4)
+            {
+                entry = REDUCE_FOLD_ENTRY_POINT;
+            }
             reduceKernel.source.entryPoint = std::string(entry);
+            const auto& reduceArgs = [&]() -> const std::vector<KernelArgument>& {
+                if(launch->fold)
+                {
+                    return reduceFoldSignature();
+                }
+                return launch->accurate ? accurateReduceSignature() : reduceSignature();
+            }();
             reduce = buildIngestorKernelCode(
-                _kernelCompiler, _kpackLoader, context, reduceKernel, options, reduceSignature());
+                _kernelCompiler, _kpackLoader, context, reduceKernel, options, reduceArgs);
             reduce->setBlockSize(launch->reduceBlock, 1, 1);
             reduce->setGridSize(launch->reduceGrid, 1, 1);
         }
@@ -389,10 +496,24 @@ public:
             split->setBlockSize(256, 1, 1);
             split->setGridSize(launch->splitGrid, 1, 1);
         }
+        std::optional<IngestorKernelCode> fold;
+        if(launch->foldStage)
+        {
+            KernelDefinition foldKernel = kernel;
+            foldKernel.source.entryPoint = std::string(FOLD_ENTRY_POINT);
+            fold = buildIngestorKernelCode(
+                _kernelCompiler, _kpackLoader, context, foldKernel, options, foldSignature());
+            fold->setBlockSize(256, 1, 1);
+            fold->setGridSize(launch->foldGrid, 1, 1);
+        }
         wrw.setBlockSize(launch->block, 1, 1);
         wrw.setGridSize(launch->gridX, launch->gridY, launch->gridZ);
-        return std::make_unique<PreparedConvWrw>(
-            std::move(wrw), std::move(reduce), std::move(split), *launch, *problem);
+        return std::make_unique<PreparedConvWrw>(std::move(wrw),
+                                                 std::move(reduce),
+                                                 std::move(split),
+                                                 std::move(fold),
+                                                 *launch,
+                                                 *problem);
     }
 
     void launch(const Handle& handle,
@@ -410,16 +531,38 @@ public:
         K3Args args{};
         K3ReduceArgs reduce{};
         K3SplitArgs split{};
-        dispatch.argsFor(deviceBuffers, numDeviceBuffers, workspace, args, reduce, split);
+        K3FoldArgs fold{};
+        K3ReduceFoldArgs reduceFold{};
+        dispatch.argsFor(
+            deviceBuffers, numDeviceBuffers, workspace, args, reduce, split, fold, reduceFold);
         const auto stream = handle.getStream();
         if(dispatch.hasSplit())
         {
             dispatch.splitForStream(stream).launch(stream, split);
         }
-        dispatch.wrwForStream(stream).launch(stream, args);
-        if(dispatch.hasReduce())
+        if(dispatch.accurate())
         {
-            dispatch.reduceForStream(stream).launch(stream, reduce);
+            const K3AccurateArgs accurate{args, static_cast<double*>(workspace)};
+            const K3AccurateReduceArgs accurateReduce{reduce,
+                                                      static_cast<const double*>(workspace)};
+            dispatch.wrwForStream(stream).launch(stream, accurate);
+            dispatch.reduceForStream(stream).launch(stream, accurateReduce);
+        }
+        else
+        {
+            if(dispatch.hasFold())
+            {
+                dispatch.foldForStream(stream).launch(stream, fold);
+            }
+            dispatch.wrwForStream(stream).launch(stream, args);
+            if(dispatch.hasReduce() && dispatch.foldReduce())
+            {
+                dispatch.reduceForStream(stream).launch(stream, reduceFold);
+            }
+            else if(dispatch.hasReduce())
+            {
+                dispatch.reduceForStream(stream).launch(stream, reduce);
+            }
         }
     }
 

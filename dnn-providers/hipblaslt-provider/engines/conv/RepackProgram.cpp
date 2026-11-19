@@ -26,7 +26,7 @@ constexpr unsigned int BLOCK_SIZE = 256;
 /// Grid-stride loops cover the rest; a cap keeps the block count a 32-bit launch dimension.
 constexpr long long MAX_BLOCKS = 1LL << 20;
 
-constexpr std::array<const char*, 68> ENTRY_POINTS = {"StridedCopy2",
+constexpr std::array<const char*, 73> ENTRY_POINTS = {"StridedCopy2",
                                                       "StridedCopy4",
                                                       "StridedTranspose2",
                                                       "StridedTranspose4",
@@ -41,6 +41,11 @@ constexpr std::array<const char*, 68> ENTRY_POINTS = {"StridedCopy2",
                                                       "StridedCastEpilogueFloatToFloat",
                                                       "StridedCastEpilogueFloatToHalf",
                                                       "StridedCastEpilogueFloatToBfloat16",
+                                                      "ClampFloat",
+                                                      "ClampHalf",
+                                                      "ClampBfloat16",
+                                                      "Broadcast2",
+                                                      "Broadcast4",
                                                       "Im2Col2",
                                                       "Im2Col4",
                                                       "Im2ColDisjointOutputs2V1",
@@ -118,11 +123,14 @@ void throwOnHiprtcError(hiprtcResult status, const char* what)
 /// The code object of the repack program for @p arch.
 std::vector<char> compile(const std::string& arch)
 {
-    const std::array<const char*, 3> headers = {kernels::CONV_REPACK_ARGS_SOURCE,
+    const std::array<const char*, 4> headers = {kernels::CONV_REPACK_ARGS_SOURCE,
                                                 kernels::CONV_REPACK_DISJOINT_SOURCE,
-                                                kernels::CONV_REPACK_ACTIVATIONS_SOURCE};
-    const std::array<const char*, 3> headerNames
-        = {"ConvRepackArgs.h", "ConvRepackDisjoint.h", "ConvRepackActivations.h"};
+                                                kernels::CONV_REPACK_ACTIVATIONS_SOURCE,
+                                                kernels::CONV_REPACK_EPILOGUE_STEPS_SOURCE};
+    const std::array<const char*, 4> headerNames = {"ConvRepackArgs.h",
+                                                    "ConvRepackDisjoint.h",
+                                                    "ConvRepackActivations.h",
+                                                    "ConvRepackEpilogueSteps.h"};
     hiprtcProgram program = nullptr;
     throwOnHiprtcError(hiprtcCreateProgram(&program,
                                            kernels::CONV_REPACK_SOURCE,
@@ -217,6 +225,10 @@ std::string RepackProgram::entryName(const RepackStep& step)
     {
         return "Im2Col" + bytes;
     }
+    if(std::holds_alternative<BroadcastArgs>(step.args))
+    {
+        return "Broadcast" + bytes;
+    }
     std::string prefix = "Col2Im";
     if(std::holds_alternative<StridedCastArgs>(step.args))
     {
@@ -225,6 +237,10 @@ std::string RepackProgram::entryName(const RepackStep& step)
     else if(std::holds_alternative<StridedCastEpilogueArgs>(step.args))
     {
         prefix = "StridedCastEpilogueFloatTo";
+    }
+    else if(std::holds_alternative<ClampArgs>(step.args))
+    {
+        prefix = "Clamp";
     }
     switch(step.dataType)
     {
@@ -279,6 +295,22 @@ void RepackProgram::launch(const RepackStep& step,
         {
             total /= 4;
         }
+    }
+    else if(auto* broadcast = std::get_if<BroadcastArgs>(&args))
+    {
+        // Sixteen bytes a thread where the rows allow (the kernel checks; a coarser grid only
+        // strides further).
+        broadcast->src = src;
+        broadcast->dst = dst;
+        total = (broadcast->rows * broadcast->channels + 3) / 4;
+    }
+    else if(auto* clamp = std::get_if<ClampArgs>(&args))
+    {
+        // In place: src and dst are the same tensor. Eight 16-bit or four fp32 elements a
+        // thread.
+        clamp->src = src;
+        clamp->dst = dst;
+        total = (clamp->total + 3) / 4;
     }
     else if(auto* im2col = std::get_if<Im2ColArgs>(&args))
     {

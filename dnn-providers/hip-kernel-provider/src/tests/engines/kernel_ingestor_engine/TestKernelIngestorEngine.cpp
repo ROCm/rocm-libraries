@@ -724,6 +724,9 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
 #ifdef HIPDNN_ENGINE_CONV_WINOGRAD
         "hipkernel.conv_winograd.dispatch",
 #endif
+#ifdef HIPDNN_ENGINE_CONV_WINOGRAD_ND
+        "hipkernel.conv_winograd_nd.dispatch",
+#endif
 #ifdef HIPDNN_ENGINE_CONV_DIRECT
         "hipkernel.conv_direct.dispatch",
 #endif
@@ -741,6 +744,10 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
 #endif
 #ifdef HIPDNN_ENGINE_CONV_GROUP_VALU_WRW
         "hipkernel.conv_group_valu_wrw.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_NARROW
+        "hipkernel.conv_narrow.dispatch",
+        "hipkernel.conv_narrow_wrw.dispatch",
 #endif
 #endif
     };

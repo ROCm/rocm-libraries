@@ -48,6 +48,9 @@ ATOMS = [
     "wmma12_f16",
     "wmma12_bf16",
     "fma",
+    "wmma125_f16",
+    "wmma125_bf16",
+    "wmma125_f32",
 ]
 SHAPE = {
     "mfma16_f16": (16, 16, 64),
@@ -61,11 +64,21 @@ SHAPE = {
     "wmma12_f16": (16, 16, 32),
     "wmma12_bf16": (16, 16, 32),
     "fma": (16, 4, 16),
+    "wmma125_f16": (16, 32, 32),
+    "wmma125_bf16": (16, 32, 32),
+    "wmma125_f32": (16, 4, 32),
 }
 # Per dtype, the atoms the catalog carries (gfx950 runs mfma16_* too; its 16 x 32 atoms halve
 # the steps).
 FAMILIES = {
-    "HALF": ["mfma16_f16", "mfma16x32_f16", "wmma11_f16", "wmma12_f16", "fma"],
+    "HALF": [
+        "mfma16_f16",
+        "mfma16x32_f16",
+        "wmma11_f16",
+        "wmma12_f16",
+        "fma",
+        "wmma125_f16",
+    ],
     "BFLOAT16": [
         "mfma16_bf16",
         "mfma16_bf16_908",
@@ -73,8 +86,9 @@ FAMILIES = {
         "wmma11_bf16",
         "wmma12_bf16",
         "fma",
+        "wmma125_bf16",
     ],
-    "FLOAT": ["mfma16_f32", "fma"],
+    "FLOAT": ["mfma16_f32", "fma", "wmma125_f32"],
 }
 # 16-bit FMA configs serve only devices without a matrix core for the type: they ship in
 # conv_stem_bwd_<dtype>_fma906 packs that list these architectures.
@@ -145,7 +159,9 @@ def prefetch_vgprs(e, layout, vec, w, nb, kc, th, tw, wave):
     ev = 16 // e
     wr, wc = th + w - 1, tw + w - 1
     threads = th * wave
-    if layout == 1:
+    if layout == 1 and vec == 1:
+        ua, regs = wr * wc * kc, 1
+    elif layout == 1:
         ua, regs = wr * wc * (kc // ev), 4
     elif vec > 1:
         ua, regs = wr * kc * ((wc + 2 * ev - 2) // ev), 4
@@ -156,6 +172,8 @@ def prefetch_vgprs(e, layout, vec, w, nb, kc, th, tw, wave):
 
 
 def lds_limit(atom):
+    if atom.startswith("wmma125"):
+        return 320 * 1024
     return 160 * 1024 if atom.startswith("mfma16x32") else 64 * 1024
 
 
@@ -180,13 +198,34 @@ def build():
         e = eb(dtype)
         ev = 16 // e
         cfgs = []
-        # 2-D configs first (their order, and so their priorities, as before), then 3-D ones.
+        # 2-D configs first (their order, and so their priorities, as before), then 3-D ones,
+        # space-to-depth, and the channels-last single-element configs of every geometry (dy
+        # one element a unit: output channel counts that are not whole vectors).
+        vector_layouts = [(1, ev), (0, ev), (0, 1)]
         plan = (
-            [(atom, s, w, 0, 0) for atom in atoms for s, w in GEOMETRIES]
-            + [(atom, s, w, ft, 0) for atom in atoms for s, w, ft in GEOMETRIES_3D]
-            + [(atom, 1, w, 0, SPACE_TO_DEPTH) for atom in atoms for w in SD_WINDOWS]
+            [
+                (atom, s, w, 0, 0, vector_layouts)
+                for atom in atoms
+                for s, w in GEOMETRIES
+            ]
+            + [
+                (atom, s, w, ft, 0, vector_layouts)
+                for atom in atoms
+                for s, w, ft in GEOMETRIES_3D
+            ]
+            + [
+                (atom, 1, w, 0, SPACE_TO_DEPTH, vector_layouts)
+                for atom in atoms
+                for w in SD_WINDOWS
+            ]
+            + [(atom, s, w, 0, 0, [(1, 1)]) for atom in atoms for s, w in GEOMETRIES]
+            + [
+                (atom, s, w, ft, 0, [(1, 1)])
+                for atom in atoms
+                for s, w, ft in GEOMETRIES_3D
+            ]
         )
-        for atom, s, w, ft, sd in plan:
+        for atom, s, w, ft, sd, layouts in plan:
             if sd and atom == "fma":
                 continue
             dim, ka, wave = SHAPE[atom]
@@ -204,7 +243,9 @@ def build():
                 if atom == "fma"
                 else [(2, 4), (4, 2), (4, 4), (8, 2)]
             )
-            layouts = [(1, ev), (0, ev), (0, 1)]
+            if atom.startswith("wmma125"):
+                # K32 needs a wider prefetch. Narrow spatial tiles bound registers.
+                tiles += [(8, 1), (16, 1)]
             for nb in nbs(atom, sd or s):
                 for layout, vec in layouts:
                     for kc in kcs:
@@ -317,7 +358,14 @@ def emit(catalog):
         packs = {}
         if kept is not None:
             cfgs = [c for c in cfgs if config_name(dtype, c) in kept]
-        for i, c in enumerate(cfgs):
+        legacy_index = native_index = 0
+        for c in cfgs:
+            if c["atom"].startswith("wmma125"):
+                priority = 1100 - native_index
+                native_index += 1
+            else:
+                priority = 1000 - legacy_index
+                legacy_index += 1
             fam = family_of(c["atom"])
             fam = "fma906" if fam == "fma" and dtype != "FLOAT" else fam
             pack = packs.setdefault(fam, [])
@@ -336,10 +384,10 @@ def emit(catalog):
                         "entry_point": "ConvStemBwd",
                     },
                     "metadata": {"direction": "BWD", "dtype": dtype, **c},
-                    "priority": 1000 - i,
+                    "priority": priority,
                 }
             )
-        # One pack per dtype and atom family (the repository caps a file at 500 KB).
+        # One pack per dtype and atom family, with an explicit generator size bound.
         for fam, pack in sorted(packs.items()):
             fname = f"conv_stem_bwd_{dt}_{fam}.kdp.json"
             write(
@@ -355,7 +403,10 @@ def emit(catalog):
                     "kernelDescriptors": pack,
                 },
             )
-            assert (out / fname).stat().st_size < 500 * 1000, f"{fname} over 500 KB"
+            # (The universe is a bench input, not shipped.)
+            assert (
+                UNIVERSE or (out / fname).stat().st_size < 500 * 1000
+            ), f"{fname} over 500 KB"
             total += len(pack)
     return total
 

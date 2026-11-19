@@ -65,9 +65,11 @@ FAMILIES = {
     "gen_group_valu_wrw.py": "group_valu_wrw",
     "gen_igemm.py": "igemm",
     "gen_igemm_nchw.py": "igemm_nchw",
+    "gen_narrow.py": "narrow",
     "gen_smallc.py": "smallc",
     "gen_conv_stem_bwd.py": "stem_bwd",
     "gen_winograd.py": "winograd",
+    "gen_winograd_nd.py": "winograd_nd",
     "gen_conv_wrw.py": "wrw",
 }
 
@@ -247,9 +249,9 @@ def dvc_add(families: list[str], root: Path) -> None:
     for family in families:
         catalogs += sorted((DESCRIPTORS_DIR / family).glob("*" + CATALOG_SUFFIX))
     rel = [str(c.relative_to(root)) for c in catalogs]
-    # A merge that brought a catalog back into git leaves it in the index; DVC refuses an
-    # output git already tracks.
-    run(["git", "rm", "-q", "--cached", "--ignore-unmatch", "--", *rel], cwd=root)
+    # A merge may stage a different version than regeneration wrote. Remove only the
+    # index entries, even then; keep the regenerated worktree files for DVC.
+    run(["git", "rm", "-q", "-f", "--cached", "--ignore-unmatch", "--", *rel], cwd=root)
     run(["dvc", "add", "-q", *rel], cwd=root)
     for catalog in catalogs:
         ensure_remote(pointer_of(catalog))

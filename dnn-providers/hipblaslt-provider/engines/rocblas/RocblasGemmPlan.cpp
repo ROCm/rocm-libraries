@@ -98,11 +98,20 @@ void RocblasGemmPlan::execute(const HipdnnEnginePluginHandle& handle,
             = hipdnn_plugin_sdk::findDeviceBuffer(call.b.uid, deviceBuffers, numDeviceBuffers);
         const auto d
             = hipdnn_plugin_sdk::findDeviceBuffer(call.d.uid, deviceBuffers, numDeviceBuffers);
+        const void* addend = nullptr;
+        if(call.c.has_value())
+        {
+            addend = operandAddress(
+                hipdnn_plugin_sdk::findDeviceBuffer(call.c->uid, deviceBuffers, numDeviceBuffers)
+                    .ptr,
+                *call.c);
+        }
         rocblas_backend::runGemm(rocblasHandle,
                                  call,
                                  operandAddress(a.ptr, call.a),
                                  operandAddress(b.ptr, call.b),
-                                 operandAddress(d.ptr, call.d));
+                                 operandAddress(d.ptr, call.d),
+                                 addend);
     }
 }
 

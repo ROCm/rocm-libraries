@@ -14,11 +14,13 @@ One document per engine family. Each opens with an **At a glance** summary and t
 | [DIRECT](DIRECT.md) | `CONV_DIRECT_FWD/BWD`, `CONV_DIRECT_FWD/BWD_TF32` (K2) | Stride-1 direct convolution on matrix cores: halo tiles, and filter-row reuse with batch packing. |
 | [WRW](WRW.md) | `CONV_WRW`, `CONV_WRW_TF32` (K3) | Backward weights as a row-direct implicit GEMM with a deterministic split reduction. |
 | [WINOGRAD](WINOGRAD.md) | `CONV_WINOGRAD_FWD/BWD/WRW`, `CONV_WINOGRAD_FWD/BWD_BF16`, `CONV_WINOGRAD_FWD/BWD_F43` (K5) | Winograd 3x3: fused, cooperative and multipass forms in all three directions. |
+| [Dilated Winograd](WINOGRAD.md#dilated-winograd) | `CONV_WINOGRAD_ND_FWD` | Native gfx1250 exact-fp32 F(2,3) on dilation-residue subgrids, with bounded spatial workspace. |
 | [GROUP](GROUP.md) | `CONV_GROUP_FWD/BWD/WRW`, `CONV_GROUP_FWD/BWD_TF32` (K4) | Grouped convolution on block-diagonal matrix-core tiles. |
 | [GROUP_VALU](GROUP_VALU.md) | `CONV_GROUP_VALU_FWD/BWD/WRW` | Grouped and small-group convolution on the vector ALU, lanes along the row; 1-D, 2-D and 3-D. |
 | [DEPTHWISE](DEPTHWISE.md) | `CONV_DEPTHWISE_{MFMA,ROWS,VALU}_FWD/BWD`, `CONV_DEPTHWISE_VALU_WRW` | The depthwise engines, with a selection guide. |
 | [SMALLC](SMALLC.md) | `CONV_SMALLC_FWD/BWD` | Few-channel stems forward, and stride-1 backward data into few channels. |
 | [STEM_BWD](STEM_BWD.md) | `CONV_STEM_BWD` | Backward data for stems (up to 4 input channels) using stride-phase super-pixels. |
+| [NARROW](NARROW.md) | `CONV_NARROW_FWD/BWD/WRW` | At most 8 channels on one side (output layers, stem gradients): taps on the GEMM's N axis, the wide tensor read once. |
 | [FFT](FFT.md) | `CONV_FFT_FWD/BWD/WRW` | Tiled overlap-save FFT convolution for large filters and large-kernel depthwise. |
 | [NAIVE](NAIVE.md) | `CONV_NAIVE_FWD/BWD/WRW` | Coverage-first production kernels for graphs no faster engine serves, admitted within a workload budget. |
 
