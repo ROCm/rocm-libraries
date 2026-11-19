@@ -20,14 +20,13 @@
 // THE SOFTWARE.
 
 #include "hipfft/hipfft.h"
-#include <fftw3.h>
 #include <gtest/gtest.h>
 #include <hip/hip_vector_types.h>
 #include <random>
 #include <vector>
 
-#include "../../shared/fftw_transform.h"
 #include "../../shared/params_gen.h"
+#include "../../shared/reference_fft.h"
 #include "../hipfft_params.h"
 
 DISABLE_WARNING_PUSH
@@ -762,26 +761,34 @@ TEST(hipfftTest, RunR2C)
         EXPECT_TRUE(workSize != 0);
     }
 
-    double ref_in[N];
-    for(size_t i = 0; i < N; i++)
+    std::vector<hostbuf> reference_input(1), reference_output(1);
+    reference_input[0].alloc(N * sizeof(double));
+    reference_output[0].alloc((N / 2 + 1) * sizeof(rocfft_complex<double>));
+    auto* ref_in  = static_cast<double*>(reference_input[0].data());
+    auto* ref_out = static_cast<rocfft_complex<double>*>(reference_output[0].data());
+    auto  ref_p   = reference_fft::make_plan<double>({N},
+                                                     {1},
+                                                     {1},
+                                                  1,
+                                                  N,
+                                                  (N / 2 + 1),
+                                                  fft_transform_type_real_forward,
+                                                  reference_input,
+                                                  reference_output);
+    for(size_t i = 0; i < N; ++i)
         ref_in[i] = in[i];
-
-    fftw_complex* ref_out;
-
-    ref_out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * (N / 2 + 1));
-    fftw_plan_wrapper_t<double> ref_p
-        = fftw_trait<double>::make_wrapper(fftw_plan_dft_r2c_1d(N, ref_in, ref_out, FFTW_ESTIMATE));
-    fftw_execute_type<double>(ref_p);
+    reference_fft::execute<double>(
+        fft_transform_type_real_forward, ref_p, reference_input, reference_output);
 
     double maxv  = 0;
     double nrmse = 0; // normalized root mean square error
     for(size_t i = 0; i < (N / 2 + 1); i++)
     {
-        // printf("element %d: FFTW result %f, %f; hipFFT result %f, %f \n", (int)i, ref_out[i][0], ref_out[i][1], out[i].x, out[i].y);
-        double dr = ref_out[i][0] - out[i].x;
-        double di = ref_out[i][1] - out[i].y;
-        maxv      = fabs(ref_out[i][0]) > maxv ? fabs(ref_out[i][0]) : maxv;
-        maxv      = fabs(ref_out[i][1]) > maxv ? fabs(ref_out[i][1]) : maxv;
+        // printf("element %d: FFTW result %f, %f; hipFFT result %f, %f \n", (int)i, ref_out[i].x, ref_out[i].y, out[i].x, out[i].y);
+        double dr = ref_out[i].x - out[i].x;
+        double di = ref_out[i].y - out[i].y;
+        maxv      = fabs(ref_out[i].x) > maxv ? fabs(ref_out[i].x) : maxv;
+        maxv      = fabs(ref_out[i].y) > maxv ? fabs(ref_out[i].y) : maxv;
 
         nrmse += ((dr * dr) + (di * di));
     }
@@ -789,7 +796,6 @@ TEST(hipfftTest, RunR2C)
     nrmse = sqrt(nrmse);
     nrmse /= maxv;
 
-    fftw_free(ref_out);
     EXPECT_LT(nrmse, type_epsilon_simple<double>());
 }
 
@@ -840,26 +846,34 @@ TEST(hipfftTest, OutplaceOnly)
     ASSERT_EQ(hipFree(d_in), hipSuccess);
     ASSERT_EQ(hipFree(d_out), hipSuccess);
 
-    double ref_in[N_in_const];
-    for(int i = 0; i < N_in_const; i++)
+    std::vector<hostbuf> reference_input(1), reference_output(1);
+    reference_input[0].alloc(N_in_const * sizeof(double));
+    reference_output[0].alloc(N_out_const * sizeof(rocfft_complex<double>));
+    auto* ref_in  = static_cast<double*>(reference_input[0].data());
+    auto* ref_out = static_cast<rocfft_complex<double>*>(reference_output[0].data());
+    auto  ref_p   = reference_fft::make_plan<double>({N_in_const},
+                                                     {1},
+                                                     {1},
+                                                  1,
+                                                  N_in_const,
+                                                  N_out_const,
+                                                  fft_transform_type_real_forward,
+                                                  reference_input,
+                                                  reference_output);
+    for(size_t i = 0; i < N_in_const; ++i)
         ref_in[i] = in[i];
-
-    fftw_complex* ref_out;
-
-    ref_out                           = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * N_out);
-    fftw_plan_wrapper_t<double> ref_p = fftw_trait<double>::make_wrapper(
-        fftw_plan_dft_r2c_1d(N_in, ref_in, ref_out, FFTW_ESTIMATE));
-    fftw_execute_type<double>(ref_p);
+    reference_fft::execute<double>(
+        fft_transform_type_real_forward, ref_p, reference_input, reference_output);
 
     double maxv  = 0;
     double nrmse = 0; // normalized root mean square error
     for(int i = 0; i < N_out; i++)
     {
-        // printf("element %d: FFTW result %f, %f; hipFFT result %f, %f \n", (int)i, ref_out[i][0], ref_out[i][1], out[i].x, out[i].y);
-        double dr = ref_out[i][0] - out[i].x;
-        double di = ref_out[i][1] - out[i].y;
-        maxv      = fabs(ref_out[i][0]) > maxv ? fabs(ref_out[i][0]) : maxv;
-        maxv      = fabs(ref_out[i][1]) > maxv ? fabs(ref_out[i][1]) : maxv;
+        // printf("element %d: FFTW result %f, %f; hipFFT result %f, %f \n", (int)i, ref_out[i].x, ref_out[i].y, out[i].x, out[i].y);
+        double dr = ref_out[i].x - out[i].x;
+        double di = ref_out[i].y - out[i].y;
+        maxv      = fabs(ref_out[i].x) > maxv ? fabs(ref_out[i].x) : maxv;
+        maxv      = fabs(ref_out[i].y) > maxv ? fabs(ref_out[i].y) : maxv;
 
         nrmse += ((dr * dr) + (di * di));
     }
@@ -867,7 +881,6 @@ TEST(hipfftTest, OutplaceOnly)
     nrmse = sqrt(nrmse);
     nrmse /= maxv;
 
-    fftw_free(ref_out);
     ASSERT_LT(nrmse, type_epsilon_simple<double>());
 }
 

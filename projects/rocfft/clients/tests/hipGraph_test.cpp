@@ -23,7 +23,7 @@
 #include "../../shared/gpubuf.h"
 #include "../../shared/hip_object_wrapper.h"
 #include "../../shared/params_gen.h"
-#include "../../shared/rocfft_against_fftw.h"
+#include "../../shared/reference_fft.h"
 #include "../../shared/rocfft_params.h"
 #include "rocfft/rocfft.h"
 #include <gtest/gtest.h>

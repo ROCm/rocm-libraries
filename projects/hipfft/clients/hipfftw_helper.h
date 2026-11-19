@@ -26,7 +26,11 @@
 #include "../shared/environment.h"
 #include "../shared/fft_params.h"
 #include <algorithm>
+#ifdef ROCFFT_REFERENCE_BACKEND_FFTZ
+#include <hipfft/hipfftw.h>
+#else
 #include <fftw3.h>
+#endif
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -163,15 +167,12 @@ struct dynamically_loaded_function_t
 private:
     // address of the desired function, to be fetched from a dynamically loaded shared library
     func_type* func_ptr;
-    // address of the reference function (from linked fftw3)
-    func_type* const reference_func_ptr;
     // symbol of said function
     std::string func_symbol;
 
 public:
-    dynamically_loaded_function_t(const char* symbol, func_type* ref_func_address)
+    dynamically_loaded_function_t(const char* symbol)
         : func_ptr(nullptr)
-        , reference_func_ptr(ref_func_address)
         , func_symbol(symbol)
     {
     }
@@ -183,22 +184,6 @@ public:
         if(!may_be_used())
             throw hipfftw_undefined_function_ptr(dynamically_loaded_hipfftw::get_load_error_info());
         return func_ptr(args...);
-    }
-    template <bool call_reference, typename... Args>
-    func_ret_t<func_type> call(Args... args) const
-    {
-        if constexpr(!call_reference)
-        {
-            return this->operator()(args...);
-        }
-        else
-        {
-            if(!reference_func_ptr)
-                throw hipfftw_undefined_function_ptr(
-                    "Ill-defined reference function pointer for symbol " + func_symbol);
-            return reference_func_ptr(args...);
-        }
-        // unreachable
     }
     void load_implementation()
     {
@@ -242,8 +227,7 @@ struct hipfftw_funcs;
 #define HIPFFTW_STRINGIFY(x) #x
 #define HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, func)                        \
     dynamically_loaded_function_t<decltype(prefix##func)> func                                   \
-        = dynamically_loaded_function_t<decltype(prefix##func)>(HIPFFTW_STRINGIFY(prefix##func), \
-                                                                &(prefix##func));
+        = dynamically_loaded_function_t<decltype(prefix##func)>(HIPFFTW_STRINGIFY(prefix##func));
 
 #define HIPFFTW_FUNCS_SPECIALIZATION(prefix, specialization)                             \
     template <>                                                                          \
@@ -732,7 +716,6 @@ private:
         return valid_candidates[std::hash<std::string>()(token()) % valid_candidates.size()];
     }
 
-    template <bool make_reference_plan = false>
     hipfftw_plan_t<prec>
         make_plan(void* in, void* out, hipfftw_plan_creation_func chosen_creation) const
     {
@@ -765,7 +748,7 @@ private:
             {
                 if(dft_kind == fft_transform_type_real_forward)
                 {
-                    return hipfftw_impl.plan_dft_r2c_1d.template call<make_reference_plan>(
+                    return hipfftw_impl.plan_dft_r2c_1d(
                         int_len_ptr[0],
                         static_cast<hipfftw_real_t<prec>*>(in),
                         static_cast<hipfftw_complex_t<prec>*>(out),
@@ -773,7 +756,7 @@ private:
                 }
                 else if(dft_kind == fft_transform_type_real_inverse)
                 {
-                    return hipfftw_impl.plan_dft_c2r_1d.template call<make_reference_plan>(
+                    return hipfftw_impl.plan_dft_c2r_1d(
                         int_len_ptr[0],
                         static_cast<hipfftw_complex_t<prec>*>(in),
                         static_cast<hipfftw_real_t<prec>*>(out),
@@ -782,7 +765,7 @@ private:
                 else
                 {
 
-                    return hipfftw_impl.plan_dft_1d.template call<make_reference_plan>(
+                    return hipfftw_impl.plan_dft_1d(
                         int_len_ptr[0],
                         static_cast<hipfftw_complex_t<prec>*>(in),
                         static_cast<hipfftw_complex_t<prec>*>(out),
@@ -794,7 +777,7 @@ private:
             {
                 if(dft_kind == fft_transform_type_real_forward)
                 {
-                    return hipfftw_impl.plan_dft_r2c_2d.template call<make_reference_plan>(
+                    return hipfftw_impl.plan_dft_r2c_2d(
                         int_len_ptr[0],
                         int_len_ptr[1],
                         static_cast<hipfftw_real_t<prec>*>(in),
@@ -804,7 +787,7 @@ private:
                 else if(dft_kind == fft_transform_type_real_inverse)
                 {
 
-                    return hipfftw_impl.plan_dft_c2r_2d.template call<make_reference_plan>(
+                    return hipfftw_impl.plan_dft_c2r_2d(
                         int_len_ptr[0],
                         int_len_ptr[1],
                         static_cast<hipfftw_complex_t<prec>*>(in),
@@ -813,7 +796,7 @@ private:
                 }
                 else
                 {
-                    return hipfftw_impl.plan_dft_2d.template call<make_reference_plan>(
+                    return hipfftw_impl.plan_dft_2d(
                         int_len_ptr[0],
                         int_len_ptr[1],
                         static_cast<hipfftw_complex_t<prec>*>(in),
@@ -826,7 +809,7 @@ private:
             {
                 if(dft_kind == fft_transform_type_real_forward)
                 {
-                    return hipfftw_impl.plan_dft_r2c_3d.template call<make_reference_plan>(
+                    return hipfftw_impl.plan_dft_r2c_3d(
                         int_len_ptr[0],
                         int_len_ptr[1],
                         int_len_ptr[2],
@@ -836,7 +819,7 @@ private:
                 }
                 else if(dft_kind == fft_transform_type_real_inverse)
                 {
-                    return hipfftw_impl.plan_dft_c2r_3d.template call<make_reference_plan>(
+                    return hipfftw_impl.plan_dft_c2r_3d(
                         int_len_ptr[0],
                         int_len_ptr[1],
                         int_len_ptr[2],
@@ -846,7 +829,7 @@ private:
                 }
                 else
                 {
-                    return hipfftw_impl.plan_dft_3d.template call<make_reference_plan>(
+                    return hipfftw_impl.plan_dft_3d(
                         int_len_ptr[0],
                         int_len_ptr[1],
                         int_len_ptr[2],
@@ -866,7 +849,7 @@ private:
 
             if(dft_kind == fft_transform_type_real_forward)
             {
-                return hipfftw_impl.plan_dft_r2c.template call<make_reference_plan>(
+                return hipfftw_impl.plan_dft_r2c(
                     rank,
                     int_len_ptr,
                     static_cast<hipfftw_real_t<prec>*>(in),
@@ -875,7 +858,7 @@ private:
             }
             else if(dft_kind == fft_transform_type_real_inverse)
             {
-                return hipfftw_impl.plan_dft_c2r.template call<make_reference_plan>(
+                return hipfftw_impl.plan_dft_c2r(
                     rank,
                     int_len_ptr,
                     static_cast<hipfftw_complex_t<prec>*>(in),
@@ -884,7 +867,7 @@ private:
             }
             else
             {
-                return hipfftw_impl.plan_dft.template call<make_reference_plan>(
+                return hipfftw_impl.plan_dft(
                     rank,
                     int_len_ptr,
                     static_cast<hipfftw_complex_t<prec>*>(in),
@@ -909,7 +892,7 @@ private:
 
             if(dft_kind == fft_transform_type_real_forward)
             {
-                return hipfftw_impl.plan_many_dft_r2c.template call<make_reference_plan>(
+                return hipfftw_impl.plan_many_dft_r2c(
                     rank,
                     int_len_ptr,
                     static_cast<int>(batches[0]),
@@ -925,7 +908,7 @@ private:
             }
             else if(dft_kind == fft_transform_type_real_inverse)
             {
-                return hipfftw_impl.plan_many_dft_c2r.template call<make_reference_plan>(
+                return hipfftw_impl.plan_many_dft_c2r(
                     rank,
                     int_len_ptr,
                     static_cast<int>(batches[0]),
@@ -941,7 +924,7 @@ private:
             }
             else
             {
-                return hipfftw_impl.plan_many_dft.template call<make_reference_plan>(
+                return hipfftw_impl.plan_many_dft(
                     rank,
                     int_len_ptr,
                     static_cast<int>(batches[0]),
@@ -959,10 +942,10 @@ private:
         }
         break;
         case hipfftw_plan_creation_func::PLAN_GURU:
-            return create_guru_plan<make_reference_plan, /* use_guru64 = */ false>(in, out);
+            return create_guru_plan<false>(in, out);
             break;
         case hipfftw_plan_creation_func::PLAN_GURU64:
-            return create_guru_plan<make_reference_plan, /* use_guru64 = */ true>(in, out);
+            return create_guru_plan<true>(in, out);
             break;
         default:
             throw std::runtime_error("hipfftw_helper::make_plan: unknown kind of plan creation");
@@ -971,7 +954,7 @@ private:
         // unreachable
     }
 
-    template <bool make_reference_plan, bool use_guru64>
+    template <bool use_guru64>
     hipfftw_plan_t<prec> create_guru_plan(void* in, void* out) const
     {
         if constexpr(use_guru64)
@@ -999,7 +982,7 @@ private:
         {
             const auto& plan_creation_functor
                 = hipfftw_impl.template get_plan_guru_dft_r2c<use_guru64>();
-            return plan_creation_functor.template call<make_reference_plan>(
+            return plan_creation_functor(
                 rank,
                 dims,
                 batch_rank,
@@ -1012,7 +995,7 @@ private:
         {
             const auto& plan_creation_functor
                 = hipfftw_impl.template get_plan_guru_dft_c2r<use_guru64>();
-            return plan_creation_functor.template call<make_reference_plan>(
+            return plan_creation_functor(
                 rank,
                 dims,
                 batch_rank,
@@ -1025,7 +1008,7 @@ private:
         {
             const auto& plan_creation_functor
                 = hipfftw_impl.template get_plan_guru_dft<use_guru64>();
-            return plan_creation_functor.template call<make_reference_plan>(
+            return plan_creation_functor(
                 rank,
                 dims,
                 batch_rank,
@@ -1976,22 +1959,6 @@ public:
         plan_bundle->creation_io   = {in, out};
         plan_bundle->creation_func = chosen_option;
         plan_bundle->plan_token    = token();
-    }
-
-    // returns a reference FFTW plan for the current configuration
-    // The returned plan is NOT owned by this object!
-    hipfftw_plan_t<prec> get_reference_plan(void*                      in,
-                                            void*                      out,
-                                            hipfftw_plan_creation_func creation_options
-                                            = hipfftw_plan_creation_func::ANY) const
-    {
-        const hipfftw_plan_creation_func chosen_option = get_creation_func(creation_options);
-        if(chosen_option == hipfftw_plan_creation_func::NONE)
-        {
-            return nullptr;
-        }
-        constexpr bool make_reference_plan = true;
-        return make_plan<make_reference_plan>(in, out, chosen_option);
     }
 
     void execute(void*                       execute_in,

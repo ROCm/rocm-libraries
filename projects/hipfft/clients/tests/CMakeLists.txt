@@ -57,6 +57,7 @@ add_custom_command(
 
 set( hipfft-test_source
   gtest_main.cpp
+  reference_backend_test.cpp
   hipfft_accuracy_test.cpp
   simple_test.cpp
   accuracy_test_1D.cpp
@@ -101,58 +102,77 @@ if( NOT HIPFFT_BUILD_SCOPE )
   find_package( hipfft REQUIRED CONFIG PATHS )
 endif()
 
-# searching FFTW with FindFFTW.cmake that is provided by project
-# because distro versions of FFTW does not include the cmake specific
-# helper files
-find_package( FFTW 3.0 MODULE COMPONENTS FLOAT DOUBLE )
-if( FFTW_FOUND )
-  message(STATUS "FFTW found by FindFFTW.cmake")
-else()
-  # searching fftw versions build from source code which contain
-  # cmake helper files like FFTW3Config.cmake
-  find_package(FFTW3 CONFIG QUIET )
-  find_package(FFTW3f CONFIG QUIET )
-  if( FFTW3_FOUND AND FFTW3f_FOUND )
-    message(STATUS "FFTW3 found by using the FFTW3Config.cmake")
-    string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_UPPER)
-    if ( NOT WIN32 )
-      get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
-      get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
-    else()
-      get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
-      get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
-    endif()
-
-    # Look for omp (preferred) or thread libraries. These are not a
-    # hard requirement, but are nice to have to make FFTW run faster.
-    # To simplify the testing, we will not accept a mixed combination
-    # where FFTW is only build agauns the OMP library support and
-    # FFTWF is only build with the THREADS library support.
-    find_library(FFTW_OMP_LIBRARY NAMES fftw3_omp HINTS ${FFTW3_LIBRARY_DIRS})
-    find_library(FFTWF_OMP_LIBRARY NAMES fftw3f_omp HINTS ${FFTW3f_LIBRARY_DIRS})
-    if ( FFTW_OMP_LIBRARY AND FFTWF_OMP_LIBRARY )
-      list( APPEND fftw3_libs ${FFTW_OMP_LIBRARY} )
-      list( APPEND fftw3f_libs ${FFTWF_OMP_LIBRARY} )
-      set( FFTW_MULTITHREAD TRUE )
-    else()
-      find_library( FFTW_THREADS_LIBRARY fftw3_threads HINTS ${FFTW3_LIBRARY_DIRS} )
-      find_library( FFTWF_THREADS_LIBRARY fftw3f_threads HINTS ${FFTW3f_LIBRARY_DIRS} )
-      if ( FFTW_THREADS_LIBRARY AND FFTWF_THREADS_LIBRARY )
-        list( APPEND fftw3_libs ${FFTW_THREADS_LIBRARY} )
-        list( APPEND fftw3f_libs ${FFTWF_THREADS_LIBRARY} )
-        set( FFTW_MULTITHREAD TRUE )
+set( HIPFFT_REFERENCE_BACKEND "FFTW" CACHE STRING "CPU reference FFT backend (FFTW or FFTZ)" )
+set_property( CACHE HIPFFT_REFERENCE_BACKEND PROPERTY STRINGS FFTW FFTZ )
+add_library( hipfft-reference INTERFACE )
+if( HIPFFT_REFERENCE_BACKEND STREQUAL "FFTW" )
+  # searching FFTW with FindFFTW.cmake that is provided by project
+  # because distro versions of FFTW does not include the cmake specific
+  # helper files
+  find_package( FFTW 3.0 MODULE COMPONENTS FLOAT DOUBLE )
+  if( FFTW_FOUND )
+    message(STATUS "FFTW found by FindFFTW.cmake")
+  else()
+    # searching fftw versions build from source code which contain
+    # cmake helper files like FFTW3Config.cmake
+    find_package(FFTW3 CONFIG QUIET )
+    find_package(FFTW3f CONFIG QUIET )
+    if( FFTW3_FOUND AND FFTW3f_FOUND )
+      message(STATUS "FFTW3 found by using the FFTW3Config.cmake")
+      string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_UPPER)
+      if ( NOT WIN32 )
+        get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
+        get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
+      else()
+        get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
+        get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
       endif()
-    endif()
 
-    set (FFTW_FOUND ${FFTW3_FOUND})
-    set (FFTW_INCLUDE_DIRS ${FFTW3_INCLUDE_DIRS})
-    set (FFTW_LIBRARIES ${fftw3_libs} )
-    list( APPEND FFTW_LIBRARIES ${fftw3f_libs} )
+      # Look for omp (preferred) or thread libraries. These are not a
+      # hard requirement, but are nice to have to make FFTW run faster.
+      # To simplify the testing, we will not accept a mixed combination
+      # where FFTW is only build agauns the OMP library support and
+      # FFTWF is only build with the THREADS library support.
+      find_library(FFTW_OMP_LIBRARY NAMES fftw3_omp HINTS ${FFTW3_LIBRARY_DIRS})
+      find_library(FFTWF_OMP_LIBRARY NAMES fftw3f_omp HINTS ${FFTW3f_LIBRARY_DIRS})
+      if ( FFTW_OMP_LIBRARY AND FFTWF_OMP_LIBRARY )
+        list( APPEND fftw3_libs ${FFTW_OMP_LIBRARY} )
+        list( APPEND fftw3f_libs ${FFTWF_OMP_LIBRARY} )
+        set( FFTW_MULTITHREAD TRUE )
+      else()
+        find_library( FFTW_THREADS_LIBRARY fftw3_threads HINTS ${FFTW3_LIBRARY_DIRS} )
+        find_library( FFTWF_THREADS_LIBRARY fftw3f_threads HINTS ${FFTW3f_LIBRARY_DIRS} )
+        if ( FFTW_THREADS_LIBRARY AND FFTWF_THREADS_LIBRARY )
+          list( APPEND fftw3_libs ${FFTW_THREADS_LIBRARY} )
+          list( APPEND fftw3f_libs ${FFTWF_THREADS_LIBRARY} )
+          set( FFTW_MULTITHREAD TRUE )
+        endif()
+      endif()
+
+      set (FFTW_FOUND ${FFTW3_FOUND})
+      set (FFTW_INCLUDE_DIRS ${FFTW3_INCLUDE_DIRS})
+      set (FFTW_LIBRARIES ${fftw3_libs} )
+      list( APPEND FFTW_LIBRARIES ${fftw3f_libs} )
+    endif()
   endif()
+  message(STATUS "FFTW_FOUND: ${FFTW_FOUND}")
+  message(STATUS "FFTW_INCLUDE_DIRS: ${FFTW_INCLUDE_DIRS}")
+  message(STATUS "FFTW_LIBRARIES: ${FFTW_LIBRARIES}")
+  target_include_directories( hipfft-reference INTERFACE ${FFTW_INCLUDE_DIRS} )
+  target_link_libraries( hipfft-reference INTERFACE ${FFTW_LIBRARIES} )
+  if( FFTW_MULTITHREAD )
+    target_compile_definitions( hipfft-reference INTERFACE FFTW_MULTITHREAD )
+  endif()
+elseif( HIPFFT_REFERENCE_BACKEND STREQUAL "FFTZ" )
+  find_package( aocl-fftz CONFIG REQUIRED )
+  target_link_libraries( hipfft-reference INTERFACE aocl-fftz::aocl_fftz )
+  target_compile_definitions( hipfft-reference INTERFACE ROCFFT_REFERENCE_BACKEND_FFTZ )
+  rocm_install( FILES $<TARGET_FILE:aocl-fftz::aocl_fftz>
+    DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT tests )
+else()
+  message( FATAL_ERROR "Unknown HIPFFT_REFERENCE_BACKEND: ${HIPFFT_REFERENCE_BACKEND}" )
 endif()
-message(STATUS "FFTW_FOUND: ${FFTW_FOUND}")
-message(STATUS "FFTW_INCLUDE_DIRS: ${FFTW_INCLUDE_DIRS}")
-message(STATUS "FFTW_LIBRARIES: ${FFTW_LIBRARIES}")
+message( STATUS "hipFFT CPU reference backend: ${HIPFFT_REFERENCE_BACKEND}" )
 
 set( BUILD_WITH_LIB "ROCM" CACHE STRING "Build ${PROJECT_NAME} with ROCM or CUDA libraries" )
 
@@ -282,14 +302,13 @@ foreach( target ${TEST_TARGETS} )
 
   target_include_directories( ${target}
     PRIVATE
-    $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
     $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
   )
 
   target_link_libraries( ${target}
     PRIVATE
     hip::hipfft
-    ${FFTW_LIBRARIES}
+    hipfft-reference
   )
   
   if( BUILD_CLIENTS_TESTS_OPENMP )
@@ -322,6 +341,17 @@ foreach( target ${TEST_TARGETS} )
                         ${TESTS_OUT_DIR})
 
   rocm_install(TARGETS ${target} COMPONENT tests)
+  if( HIPFFT_REFERENCE_BACKEND STREQUAL "FFTZ" )
+    add_custom_command( TARGET ${target} POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:aocl-fftz::aocl_fftz> $<TARGET_FILE_DIR:${target}>
+      VERBATIM )
+    if( UNIX )
+      set_property( TARGET ${target} APPEND PROPERTY BUILD_RPATH "$ORIGIN" )
+      set_property( TARGET ${target} APPEND PROPERTY INSTALL_RPATH "$ORIGIN" )
+    endif()
+  endif()
+
 endforeach()
 
 #Ctest based Test Filter Standardization using test_categories.yaml
@@ -389,20 +419,7 @@ if( BUILD_WITH_LIB STREQUAL "CUDA" )
   endif()
 endif()
 
-if(FFTW_MULTITHREAD)
-  target_compile_options( hipfft-test PRIVATE -DFFTW_MULTITHREAD )
-endif( )
 
-target_link_libraries( hipfft-test
-  PRIVATE
-  Threads::Threads
-  ${CMAKE_DL_LIBS}
-  )
-
-# hipfft-test will opens the hipfftw library but does not link to it
-if( TARGET hipfftw )
-  add_dependencies( hipfft-test hipfftw )
-endif()
 
 if (WIN32)
 

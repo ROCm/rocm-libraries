@@ -1330,10 +1330,10 @@ try
 
     if(ref_results_required)
     {
-        if(!fftw_compare)
+        if(!reference_compare)
         {
             GTEST_SKIP() << "Test requires FFTW comparison for the given parameters "
-                            "(fftw_compare == false in this run)";
+                            "(reference_compare == false in this run)";
         }
         reference_results = make_reference_data(params);
         if(reference_results->needs_computing())

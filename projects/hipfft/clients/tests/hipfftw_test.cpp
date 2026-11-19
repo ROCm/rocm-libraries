@@ -29,7 +29,6 @@
 
 #include <cstdint>
 #include <cstring>
-#include <fftw3.h>
 #include <future>
 #include <gtest/gtest.h>
 #include <memory>
@@ -2637,7 +2636,7 @@ namespace
             {
                 const hipfftw_functional_validation_params<prec>& params = this->GetParam();
 
-                if(!fftw_compare)
+                if(!reference_compare)
                     GTEST_SKIP() << "skipped due to disabled fftw comparison";
 
                 if(!params.can_be_tested())

@@ -130,8 +130,28 @@ There is a gap in that combinations of flags are not currently run in the TheRoc
 
 #### Accuracy tests
 
-Accuracy tests use the `accuracy_test.vs_fftw` filter and Fastest Fourier Transform in the West
-(FFTW) for reference. L2 and L-infinity error-bound scaling for FFT is known analytically and sets
+Accuracy tests retain the `accuracy_test.vs_fftw` filter for compatibility. Select the CPU
+reference at configure time with `ROCFFT_REFERENCE_BACKEND=FFTW` (the default) or `FFTZ`.
+The FFTW backend retains installed-package discovery and the existing `BUILD_FFTW` fallback.
+The FFTZ backend requires an installed `aocl-fftz` CMake package and links its native API;
+it does not use FFTZ's FFTW wrapper or fall back to downloading FFTW. The selected backend
+is printed at startup. The test runtime option `--reference_compare` has the historical
+`--fftw_compare` spelling as an alias. Both control whether to compare with the selected
+reference; neither changes the build's link dependencies.
+
+The adapters are selected by `shared/reference_fft.h`. They provide planning, execution,
+precision-specific plan ownership, cleanup, and optional wisdom support. Buffer conversion,
+callbacks, result caching, asynchronous computation, and accuracy tolerances remain in the
+common test code. FFTZ rejects `--wise` because it does not implement FFTW wisdom. Its native
+runtime is installed beside the tests. The existing workspace reservation heuristic is retained
+for both providers pending measurements of FFTZ peak memory use.
+
+`reference_backend.*` tests check the selected adapter against direct DFTs, including float,
+double, half conversion, odd/prime lengths, multiple dimensions, batches, nonunit strides,
+and new-array execution with reused plans. Run them in each backend build before the GPU
+accuracy suites. A successful adapter check does not replace GPU accuracy coverage.
+
+L2 and L-infinity error-bound scaling for FFT is known analytically and sets
 the allowable numerical error. In `rocfft-test` you can set the precision-based constant multiplier
 (machine epsilon) for half, single, and double precision. If you set that value, numerical error is
 less than or equal to it. The precision-based epsilon values reported at the end of a run can bound

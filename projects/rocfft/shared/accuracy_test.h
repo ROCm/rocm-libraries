@@ -34,10 +34,9 @@
 #include "client_except.h"
 #include "enum_to_string.h"
 #include "fft_params.h"
-#include "fftw_transform.h"
 #include "gpubuf.h"
+#include "reference_fft.h"
 #include "reference_fft_data.h"
-#include "rocfft_against_fftw.h"
 #include "sys_mem.h"
 #include "test_callbacks.h"
 #include "test_params.h"
@@ -89,21 +88,7 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
     }
 }
 
-template <typename Tfloat>
-bool fftw_plan_uses_bluestein(const fftw_plan_wrapper_t<Tfloat>& cpu_plan)
-{
-#ifdef FFTW_HAVE_SPRINT_PLAN
-    char*       print_plan_c_str = fftw_sprint_plan<Tfloat>(cpu_plan);
-    std::string print_plan(print_plan_c_str);
-    free(print_plan_c_str);
-    return print_plan.find("bluestein") != std::string::npos;
-#else
-    // assume worst case (bluestein is always used)
-    return true;
-#endif
-}
-
-// Base gtest class for comparison with FFTW.
+// Base gtest class for comparison with the selected CPU reference backend.
 class accuracy_test : public ::testing::TestWithParam<fft_params>
 {
 protected:
@@ -156,7 +141,7 @@ inline void execute_gpu_fft(Tparams&              params,
 
     // if not comparing, then just executing the GPU FFT is all we
     // need to do
-    if(!fftw_compare)
+    if(!reference_compare)
         return;
 
     ASSERT_TRUE(!gpu_output.empty()) << "no output buffers";
@@ -263,6 +248,39 @@ void assert_init_value(const std::vector<hostbuf>&  output,
     }
 }
 
+template <>
+void assert_init_value(const std::vector<hostbuf>& output,
+                       const size_t                idx,
+                       const rocfft_fp16           orig_value)
+{
+    rocfft_fp16 actual_value = reinterpret_cast<const rocfft_fp16*>(output.front().data())[idx];
+    ASSERT_EQ(actual_value, orig_value) << "index " << idx;
+}
+
+template <>
+void assert_init_value(const std::vector<hostbuf>&       output,
+                       const size_t                      idx,
+                       const rocfft_complex<rocfft_fp16> orig_value)
+{
+    // if this is interleaved, check directly
+    if(output.size() == 1)
+    {
+        rocfft_complex<rocfft_fp16> actual_value
+            = reinterpret_cast<const rocfft_complex<rocfft_fp16>*>(output.front().data())[idx];
+        ASSERT_EQ(actual_value.x, orig_value.x) << "x index " << idx;
+        ASSERT_EQ(actual_value.y, orig_value.y) << "y index " << idx;
+    }
+    else
+    {
+        // planar
+        rocfft_complex<rocfft_fp16> actual_value{
+            reinterpret_cast<const rocfft_fp16*>(output.front().data())[idx],
+            reinterpret_cast<const rocfft_fp16*>(output.back().data())[idx]};
+        ASSERT_EQ(actual_value.x, orig_value.x) << "x index " << idx;
+        ASSERT_EQ(actual_value.y, orig_value.y) << "y index " << idx;
+    }
+}
+
 static const int OUTPUT_INIT_PATTERN = 0xcd;
 template <class Tfloat>
 void check_single_output_stride(const std::vector<hostbuf>& output,
@@ -326,6 +344,13 @@ void check_output_strides(const std::vector<hostbuf>& output, Tparams& params)
             check_single_output_stride<float>(output, 0, length, stride, 0);
         else
             check_single_output_stride<rocfft_complex<float>>(output, 0, length, stride, 0);
+    }
+    else if(params.precision == fft_precision_half)
+    {
+        if(params.otype == fft_array_type_real)
+            check_single_output_stride<rocfft_fp16>(output, 0, length, stride, 0);
+        else
+            check_single_output_stride<rocfft_complex<rocfft_fp16>>(output, 0, length, stride, 0);
     }
     else
     {
@@ -535,10 +560,10 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     //   estimated reservation was too optimistic (too small);
     // - releasing system memory related to the needs for computing reference results as soon as
     //   possible, alleviating pressure for subsequent operations.
-    // TODO: make this object an std::optional<reference_fft_data_t>, set only when `fftw_compare`
+    // TODO: make this object an std::optional<reference_fft_data_t>, set only when `reference_compare`
     // is true when cpu data sets are no longer needed for unrelated aspects.
     reference_fft_data_t reference_results{params.make_params_for_reference_cpu()};
-    if(fftw_compare)
+    if(reference_compare)
     {
         if(reference_results.needs_input_initialization() && is_host_generator(params.igen))
             reference_results.initialize_input(params.igen);
@@ -585,7 +610,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         if(reference_results.needs_input_initialization())
         {
             reference_results.initialize_input(params.igen);
-            if(fftw_compare && reference_results.needs_computing())
+            if(reference_compare && reference_results.needs_computing())
                 reference_results.launch_async_compute();
         }
         reference_results.copy_input_data_in_device_buffers(ibuffer, params);
@@ -595,7 +620,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         params.compute_input(ibuffer);
         reference_results.initialize_input_using(ibuffer, params);
     }
-    if(fftw_compare && reference_results.needs_computing())
+    if(reference_compare && reference_results.needs_computing())
         reference_results.launch_async_compute();
 
     // Create FFT plan - this will also allocate work buffer, but
@@ -663,7 +688,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         reference_results.get_buffers<fft_io::fft_io_in>(), ibuffer, pibuffer, pobuffer);
 
     std::shared_future<VectorNorms> cpu_output_norm;
-    if(fftw_compare)
+    if(reference_compare)
     {
         if(verbose > 3)
             reference_results.print_data<fft_io::fft_io_out>();
@@ -685,7 +710,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
 
     // compute GPU output norm
     std::shared_future<VectorNorms> gpu_norm;
-    if(fftw_compare)
+    if(reference_compare)
         gpu_norm = std::async(std::launch::async, [&]() {
             return norm(gpu_output,
                         params.olength(),
@@ -711,7 +736,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     VectorNorms diff;
 
     std::shared_future<void> compare_output;
-    if(fftw_compare)
+    if(reference_compare)
         compare_output = std::async(std::launch::async, [&]() {
             linf_cutoff
                 = type_epsilon(params.precision) * cpu_output_norm.get().l_inf * log(total_length);
@@ -749,7 +774,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
             params_inverse, *obuffer, pobuffer, pibuffer, roundtrip_output_buffers);
     }
 
-    if(fftw_compare)
+    if(reference_compare)
     {
         ASSERT_TRUE(std::isfinite(cpu_input_norm.get().l_2));
         ASSERT_TRUE(std::isfinite(cpu_input_norm.get().l_inf));

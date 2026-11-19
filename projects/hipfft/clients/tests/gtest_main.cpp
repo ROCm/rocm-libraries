@@ -108,10 +108,10 @@ size_t min_probes_per_dev_for_xt;
 std::string hipfftxt_test_token;
 
 // Control whether we use FFTW's wisdom (which we use to imply FFTW_MEASURE).
-bool use_fftw_wisdom = false;
+bool use_reference_wisdom = false;
 
 // Compare results against FFTW in accuracy tests
-bool fftw_compare = true;
+bool reference_compare = true;
 
 // Cache the last cpu fft that was requested
 reference_fft_data_t reference_fft_data_t::cached_data = reference_fft_data_t::make_default();
@@ -490,7 +490,9 @@ int main(int argc, char* argv[])
                    "manual token for hipfftw functional test")
         ->default_val("");
 
-    app.add_option("--fftw_compare", fftw_compare, "Compare to FFTW in accuracy tests")
+    app.add_option("--reference_compare,--fftw_compare",
+                   reference_compare,
+                   "Compare to the CPU reference in accuracy tests")
         ->default_val(true);
     app.add_option("--mp_lib", mp_lib, "Multi-process library type: none, mpi.")
         ->check(CLI::IsMember({"none", "mpi"}))
@@ -632,7 +634,7 @@ int main(int argc, char* argv[])
                    hipfftxt_test_token,
                    "Token string for manual hipfftXt single-process, multi-GPU tests")
         ->default_val("");
-    app.add_option("-w, --wise", use_fftw_wisdom, "Use FFTW wisdom");
+    app.add_option("-w, --wise", use_reference_wisdom, "Use FFTW wisdom");
     // Filename for fftw and fftwf wisdom.
     std::string fftw_wisdom_filename;
     app.add_option("-W, --wisdomfile", fftw_wisdom_filename, "FFTW3 wisdom filename")
@@ -760,12 +762,10 @@ int main(int argc, char* argv[])
                                                               precompile_file.c_str());
     }
 
-#ifdef FFTW_MULTITHREAD
-    fftw_init_threads();
-    fftwf_init_threads();
-    fftw_plan_with_nthreads(rocfft_concurrency());
-    fftwf_plan_with_nthreads(rocfft_concurrency());
-#endif
+    if(use_reference_wisdom && !reference_fft::supports_wisdom)
+        throw std::invalid_argument("The selected CPU reference backend does not support wisdom");
+    reference_fft::initialize(rocfft_concurrency());
+    std::cout << "CPU reference backend: " << reference_fft::name << std::endl;
 
     system_memory::singleton().set_limit_bytes(ramgb_limit * ONE_GiB);
     std::cout << "Refraining from using more than "
@@ -787,50 +787,13 @@ int main(int argc, char* argv[])
     }
     std::cout << std::endl;
 
-    if(use_fftw_wisdom)
+    if(use_reference_wisdom)
     {
         if(verbose)
         {
             std::cout << "Using " << fftw_wisdom_filename << " wisdom file\n";
         }
-        std::ifstream fftw_wisdom_file(fftw_wisdom_filename);
-        std::string   allwisdom = std::string(std::istreambuf_iterator<char>(fftw_wisdom_file),
-                                            std::istreambuf_iterator<char>());
-
-        std::string fftw_wisdom;
-        std::string fftwf_wisdom;
-
-        bool               load_wisdom  = false;
-        bool               load_fwisdom = false;
-        std::istringstream input;
-        input.str(allwisdom);
-        // Separate the single-precision and double-precision wisdom:
-        for(std::string line; std::getline(input, line);)
-        {
-            if(line.rfind("(fftw", 0) == 0 && line.find("fftw_wisdom") != std::string::npos)
-            {
-                load_wisdom = true;
-            }
-            if(line.rfind("(fftw", 0) == 0 && line.find("fftwf_wisdom") != std::string::npos)
-            {
-                load_fwisdom = true;
-            }
-            if(load_wisdom)
-            {
-                fftw_wisdom.append(line + "\n");
-            }
-            if(load_fwisdom)
-            {
-                fftwf_wisdom.append(line + "\n");
-            }
-            if(line.rfind(")", 0) == 0)
-            {
-                load_wisdom  = false;
-                load_fwisdom = false;
-            }
-        }
-        fftw_import_wisdom_from_string(fftw_wisdom.c_str());
-        fftwf_import_wisdom_from_string(fftwf_wisdom.c_str());
+        reference_fft::import_wisdom(fftw_wisdom_filename);
     }
 
     if(!precompile_file.empty())
@@ -838,15 +801,9 @@ int main(int argc, char* argv[])
 
     auto retval = RUN_ALL_TESTS();
 
-    if(use_fftw_wisdom)
+    if(use_reference_wisdom)
     {
-        std::string fftw_wisdom  = std::string(fftw_export_wisdom_to_string());
-        std::string fftwf_wisdom = std::string(fftwf_export_wisdom_to_string());
-        fftw_wisdom.append(std::string(fftwf_export_wisdom_to_string()));
-        std::ofstream fftw_wisdom_file(fftw_wisdom_filename);
-        fftw_wisdom_file << fftw_wisdom;
-        fftw_wisdom_file << fftwf_wisdom;
-        fftw_wisdom_file.close();
+        reference_fft::export_wisdom(fftw_wisdom_filename);
     }
 
     std::cout << "half precision max l-inf epsilon: " << max_linf_eps_half << std::endl;

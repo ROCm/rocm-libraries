@@ -31,10 +31,9 @@
 
 #include "../../shared/CLI11.hpp"
 #include "../../shared/accuracy_test.h"
-#include "../../shared/fftw_transform.h"
 #include "../../shared/gpubuf.h"
 #include "../../shared/params_gen.h"
-#include "../../shared/rocfft_against_fftw.h"
+#include "../../shared/reference_fft.h"
 #include "../../shared/rocfft_complex.h"
 #include "../../shared/subprocess.h"
 

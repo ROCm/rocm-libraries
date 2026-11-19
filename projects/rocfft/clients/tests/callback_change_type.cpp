@@ -24,8 +24,7 @@
 #include "../../shared/rocfft_params.h"
 
 #include "../../shared/accuracy_test.h"
-#include "../../shared/fftw_transform.h"
-#include "../../shared/rocfft_against_fftw.h"
+#include "../../shared/reference_fft.h"
 #include <gtest/gtest.h>
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(change_type);
@@ -141,7 +140,7 @@ TEST_P(change_type, short_to_float)
         ASSERT_EQ(params.execute(&gpu_input_ptr, &gpu_output_ptr), fft_status_success);
 
         // construct + run FFTW plan
-        auto cpu_plan = fftw_plan_via_rocfft<float>(params.length,
+        auto cpu_plan = reference_fft::make_plan<float>(params.length,
                                                     params.istride,
                                                     params.ostride,
                                                     params.nbatch,
@@ -150,7 +149,7 @@ TEST_P(change_type, short_to_float)
                                                     params.transform_type,
                                                     cpu_input,
                                                     cpu_output);
-        fftw_run<float>(params.transform_type, cpu_plan, cpu_input, cpu_output);
+        reference_fft::execute<float>(params.transform_type, cpu_plan, cpu_input, cpu_output);
 
         // copy rocFFT output back to CPU
         std::vector<hostbuf> gpu_output_copy(1);

@@ -30,16 +30,15 @@
 #include "client_except.h"
 #include "enum_to_string.h"
 #include "fft_params.h"
-#include "fftw_transform.h"
 #include "gpubuf.h"
-#include "rocfft_against_fftw.h"
+#include "reference_fft.h"
 #include "sys_mem.h"
 #include "test_callbacks.h"
 #include "test_params.h"
 
 template <typename Tfloat>
 inline void execute_cpu_fft(const fft_params&            cpu_fft_params,
-                            fftw_plan_wrapper_t<Tfloat>& cpu_plan,
+                            reference_fft::plan<Tfloat>& cpu_plan,
                             std::vector<hostbuf>&        cpu_input,
                             std::vector<hostbuf>&        cpu_output)
 {
@@ -58,17 +57,14 @@ inline void execute_cpu_fft(const fft_params&            cpu_fft_params,
         input_ptr = &cpu_input_copy;
     }
 
-    // run FFTW (which may destroy CPU input)
+    // run reference FFT (which may destroy CPU input)
     apply_load_callback(cpu_fft_params, *input_ptr);
     cpu_fft_params.apply_host_load_ops(*input_ptr);
-    fftw_run<Tfloat>(cpu_fft_params.transform_type, cpu_plan, *input_ptr, cpu_output);
+    reference_fft::execute<Tfloat>(cpu_fft_params.transform_type, cpu_plan, *input_ptr, cpu_output);
     // clean up
-    // ask FFTW to fully clean up, since it tries to cache plan details
+    // ask reference FFT to fully clean up, since it tries to cache plan details
     cpu_plan.reset();
-    if constexpr(std::is_same<Tfloat, double>::value)
-        fftw_cleanup();
-    else
-        fftwf_cleanup();
+    reference_fft::cleanup<Tfloat>();
     cpu_fft_params.apply_host_store_ops(cpu_output);
     apply_store_callback(cpu_fft_params, cpu_output);
 }
@@ -122,43 +118,36 @@ struct reference_fft_data_t
         }
         else
             cpu_input = allocate_host_buffer(params.precision, params.itype, params.isize);
-        // Output buffer and fftw plan are needed iff `fftw_compare` is `true`.
-        if(fftw_compare)
+        // Output buffer and reference FFT plan are needed iff `reference_compare` is `true`.
+        if(reference_compare)
         {
             const auto compute_prec
                 = params.precision == fft_precision_half ? fft_precision_single : params.precision;
-            // Reserve some amount of system memory for the FFTW plan's possible workspace: Use a
-            // conservative estimate for the size of the workspace that the fftw plan may need to
-            // guard against OOM kills. The FFTW workspace is estimated as double (resp. five times)
-            // the maximum size of I/O if all (resp. any) length prime factors do not exceed (resp.
-            // does exceed) 13.
-            const auto estimated_bytes_for_fftw_workspace
-                = std::max(params.isize[0] * var_size<size_t>(compute_prec, params.itype),
-                           params.osize[0] * var_size<size_t>(compute_prec, params.otype))
-                  * (std::any_of(params.length.begin(),
-                                 params.length.end(),
-                                 [](size_t ell) { return ell > 2 && max_prime_factor(ell) > 13; })
-                         ? 5
-                         : 2);
+            const auto estimated_bytes_for_reference_workspace = reference_fft::workspace_bytes(
+                params.length,
+                std::max(params.isize[0] * var_size<size_t>(compute_prec, params.itype),
+                         params.osize[0] * var_size<size_t>(compute_prec, params.otype)));
             try
             {
-                reservation_for_fftw_internal_alloc.set_desired_size(
-                    estimated_bytes_for_fftw_workspace);
+                reservation_for_reference_internal_alloc.set_desired_size(
+                    estimated_bytes_for_reference_workspace);
             }
             catch(const std::invalid_argument& e)
             {
                 // Requested size is too large: reservation cannot be guaranteed
                 std::stringstream info;
-                info
-                    << "Reservation of system memory for FFTW plan's possible workspace (estimated "
+                info << "Reservation of system memory for reference FFT plan's possible workspace "
+                        "(estimated "
                        "size) cannot be guaranteed. Details:\n"
                     << e.what();
                 throw ROCFFT_SKIP{info.str()};
             }
             if(verbose > 3)
             {
-                std::cout << "Reserved " << byte_size_to_str(estimated_bytes_for_fftw_workspace)
-                          << " of system memory temporarily for the fftw plan's possible internal "
+                std::cout << "Reserved "
+                          << byte_size_to_str(estimated_bytes_for_reference_workspace)
+                          << " of system memory temporarily for the reference FFT plan's possible "
+                             "internal "
                              "workspace (temporary reservation)."
                           << std::endl;
             }
@@ -167,7 +156,7 @@ struct reference_fft_data_t
             switch(compute_prec)
             {
             case fft_precision_double:
-                cpu_plan = fftw_plan_via_rocfft<double>(params.length,
+                cpu_plan = reference_fft::make_plan<double>(params.length,
                                                         params.istride,
                                                         params.ostride,
                                                         params.nbatch,
@@ -178,7 +167,7 @@ struct reference_fft_data_t
                                                         cpu_output);
                 break;
             case fft_precision_single:
-                cpu_plan = fftw_plan_via_rocfft<float>(params.length,
+                cpu_plan = reference_fft::make_plan<float>(params.length,
                                                        params.istride,
                                                        params.ostride,
                                                        params.nbatch,
@@ -355,22 +344,23 @@ struct reference_fft_data_t
 
     bool needs_computing() const
     {
-        return fftw_compare && !output_is_set.valid();
+        return reference_compare && !output_is_set.valid();
     }
 
     ~reference_fft_data_t()
     {
-        // Remember the results of the last FFT we computed with FFTW.  Tests
+        // Remember the results of the last FFT we computed with reference FFT.  Tests
         // are ordered so that later cases can often reuse this result.
-        if(input_is_set.valid() && (!fftw_compare || output_is_set.valid()))
+        if(input_is_set.valid() && (!reference_compare || output_is_set.valid()))
         {
             cached_data.swap(*this);
         }
-        if(verbose > 3 && reservation_for_fftw_internal_alloc.size() > 0)
+        if(verbose > 3 && reservation_for_reference_internal_alloc.size() > 0)
         {
-            std::cout << "Releasing temporary reservation of "
-                      << byte_size_to_str(reservation_for_fftw_internal_alloc.size())
-                      << " of system memory (estimated FFTW plan's possible internal workspace)."
+            std::cout
+                << "Releasing temporary reservation of "
+                << byte_size_to_str(reservation_for_reference_internal_alloc.size())
+                << " of system memory (estimated reference FFT plan's possible internal workspace)."
                       << std::endl;
         }
     }
@@ -379,12 +369,12 @@ struct reference_fft_data_t
         return reference_fft_data_t();
     }
 
-    // Note: the FFTW cpu plan is destroyed when the thread completes
+    // Note: the reference FFT cpu plan is destroyed when the thread completes
     void launch_async_compute()
     {
-        if(!fftw_compare)
+        if(!reference_compare)
             throw std::logic_error(
-                "Reference results should not be computed if `fftw_compare` is disabled");
+                "Reference results should not be computed if `reference_compare` is disabled");
         if(!input_is_set.valid())
             throw std::logic_error("Asynchronous computation of reference FFT results mustn't be "
                                    "launched before having set the reference input data");
@@ -396,31 +386,31 @@ struct reference_fft_data_t
             {
             case(fft_precision_double):
                 execute_cpu_fft<double>(
-                    params, std::get<fftw_plan_wrapper_t<double>>(cpu_plan), cpu_input, cpu_output);
+                    params, std::get<reference_fft::plan<double>>(cpu_plan), cpu_input, cpu_output);
                 break;
             case(fft_precision_single):
                 execute_cpu_fft<float>(
-                    params, std::get<fftw_plan_wrapper_t<float>>(cpu_plan), cpu_input, cpu_output);
+                    params, std::get<reference_fft::plan<float>>(cpu_plan), cpu_input, cpu_output);
                 break;
             case(fft_precision_half):
                 // cpu_input and cpu_output must be large enough for computing reference
                 // results in single-precision floating-point arithmetics but the output's
                 // precision is downgraded upon completion of the computation.
                 execute_cpu_fft<rocfft_fp16>(
-                    params, std::get<fftw_plan_wrapper_t<float>>(cpu_plan), cpu_input, cpu_output);
+                    params, std::get<reference_fft::plan<float>>(cpu_plan), cpu_input, cpu_output);
                 break;
             default:
                 throw std::logic_error("Unexpected precision for the CPU plan");
             }
-            if(verbose > 3 && reservation_for_fftw_internal_alloc.size() > 0)
+            if(verbose > 3 && reservation_for_reference_internal_alloc.size() > 0)
             {
-                std::cout
-                    << "Releasing temporary reservation of "
-                    << byte_size_to_str(reservation_for_fftw_internal_alloc.size())
-                    << " of system memory (estimated FFTW plan's possible internal workspace)."
+                std::cout << "Releasing temporary reservation of "
+                          << byte_size_to_str(reservation_for_reference_internal_alloc.size())
+                          << " of system memory (estimated reference FFT plan's possible internal "
+                             "workspace)."
                     << std::endl;
             }
-            reservation_for_fftw_internal_alloc.release();
+            reservation_for_reference_internal_alloc.release();
         });
     }
 
@@ -430,9 +420,9 @@ struct reference_fft_data_t
         static_assert(io == fft_io::fft_io_in || io == fft_io::fft_io_out);
         if constexpr(io == fft_io::fft_io_out)
         {
-            if(!fftw_compare)
+            if(!reference_compare)
                 throw std::runtime_error(
-                    "Reference output data cannot be printed if `fftw_compare` is disabled");
+                    "Reference output data cannot be printed if `reference_compare` is disabled");
         }
 
         auto& flag = io == fft_io::fft_io_in ? input_is_set : output_is_set;
@@ -458,9 +448,9 @@ struct reference_fft_data_t
         static_assert(io == fft_io::fft_io_in || io == fft_io::fft_io_out);
         if constexpr(io == fft_io::fft_io_out)
         {
-            if(!fftw_compare)
+            if(!reference_compare)
                 throw std::runtime_error("Norms of reference output data cannot be computed if "
-                                         "`fftw_compare` is disabled.");
+                                         "`reference_compare` is disabled.");
         }
 
         if(relevant_batch_size > params.nbatch)
@@ -490,9 +480,9 @@ struct reference_fft_data_t
         static_assert(io == fft_io::fft_io_in || io == fft_io::fft_io_out);
         if constexpr(io == fft_io::fft_io_out)
         {
-            if(!fftw_compare)
+            if(!reference_compare)
                 throw std::runtime_error(
-                    "Reference output data is not available if `fftw_compare` is disabled.");
+                    "Reference output data is not available if `reference_compare` is disabled.");
         }
         auto& io_is_set = io == fft_io::fft_io_in ? input_is_set : output_is_set;
         if(!io_is_set.valid())
@@ -558,8 +548,8 @@ private:
         wait_and_invalidate<fft_io::fft_io_out>();
         cpu_input.clear();
         cpu_output.clear();
-        reservation_for_fftw_internal_alloc.release();
-        cpu_plan = fftw_trait<float>::make_wrapper(nullptr);
+        reservation_for_reference_internal_alloc.release();
+        cpu_plan = reference_fft::empty_plan<float>();
     }
 
     void swap(reference_fft_data_t& other)
@@ -577,17 +567,18 @@ private:
         cpu_output.swap(other.cpu_output);
         std::swap(params, other.params);
         std::swap(cpu_plan, other.cpu_plan);
-        reservation_for_fftw_internal_alloc.swap(other.reservation_for_fftw_internal_alloc);
+        reservation_for_reference_internal_alloc.swap(
+            other.reservation_for_reference_internal_alloc);
     }
 
     void async_narrow_precision(fft_precision narrower_prec)
     {
-        if(!input_is_set.valid() || (fftw_compare && !output_is_set.valid()))
+        if(!input_is_set.valid() || (reference_compare && !output_is_set.valid()))
             throw std::logic_error("Precision of reference results cannot be narrowed if input or "
                                    "output data were not set prior.");
         // Avoid data corruption by concurrent threads
         input_is_set.get();
-        if(fftw_compare)
+        if(reference_compare)
             output_is_set.get();
         const auto invalid_ref_prec_excpt = std::logic_error(
             "Invalid precision encountered for reference results to be narrowed");
@@ -600,7 +591,7 @@ private:
             input_is_set = std::async(std::launch::async, [&]() {
                 narrow_precision_inplace<double, float>(cpu_input.front());
             });
-            if(fftw_compare)
+            if(reference_compare)
                 output_is_set = std::async(std::launch::async, [&]() {
                     narrow_precision_inplace<double, float>(cpu_output.front());
                 });
@@ -613,7 +604,7 @@ private:
                 input_is_set = std::async(std::launch::async, [&]() {
                     narrow_precision_inplace<double, rocfft_fp16>(cpu_input.front());
                 });
-                if(fftw_compare)
+                if(reference_compare)
                     output_is_set = std::async(std::launch::async, [&]() {
                         narrow_precision_inplace<double, rocfft_fp16>(cpu_output.front());
                     });
@@ -623,7 +614,7 @@ private:
                 input_is_set = std::async(std::launch::async, [&]() {
                     narrow_precision_inplace<float, rocfft_fp16>(cpu_input.front());
                 });
-                if(fftw_compare)
+                if(reference_compare)
                     output_is_set = std::async(std::launch::async, [&]() {
                         narrow_precision_inplace<float, rocfft_fp16>(cpu_output.front());
                     });
@@ -661,13 +652,13 @@ private:
     fft_params               params;
     std::shared_future<void> input_is_set;
     std::shared_future<void> output_is_set;
-    // FFTW input/output
+    // reference FFT input/output
     std::vector<hostbuf> cpu_input, cpu_output;
-    // CPU (FFTW) plans are either single or double precision
+    // CPU (reference FFT) plans are either single or double precision
     // (no actual half precision plan on CPU)
-    std::variant<fftw_plan_wrapper_t<float>, fftw_plan_wrapper_t<double>> cpu_plan
-        = fftw_trait<float>::make_wrapper(nullptr);
-    system_memory::nonowned_reservation_t reservation_for_fftw_internal_alloc;
+    std::variant<reference_fft::plan<float>, reference_fft::plan<double>> cpu_plan
+        = reference_fft::empty_plan<float>();
+    system_memory::nonowned_reservation_t reservation_for_reference_internal_alloc;
 
     // Private default constructor. (only needed for definition of static cache)
     reference_fft_data_t() = default;

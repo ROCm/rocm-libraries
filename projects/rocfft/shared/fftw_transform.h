@@ -22,58 +22,11 @@
 #ifndef FFTWTRANSFORM_H
 #define FFTWTRANSFORM_H
 
-#include "hostbuf.h"
+#include "reference_fft_common.h"
 #include "rocfft_complex.h"
 #include "test_params.h"
 #include <fftw3.h>
 #include <vector>
-
-// Function to return maximum error for float and double types.
-//
-// Following Schatzman (1996; Accuracy of the Discrete Fourier
-// Transform and the Fast Fourier Transform), the shape of relative
-// l_2 error vs length should look like
-//
-//   epsilon * sqrt(log2(length)).
-//
-// The magic epsilon constants below were chosen so that we get a
-// reasonable upper bound for (all of) our tests.
-//
-// For rocFFT, prime lengths result in the highest error.  As such,
-// the epsilons below are perhaps too loose for pow2 lengths; but they
-// are appropriate for prime lengths.
-template <typename Tfloat>
-inline double type_epsilon();
-template <>
-inline double type_epsilon<rocfft_fp16>()
-{
-    return half_epsilon;
-}
-template <>
-inline double type_epsilon<float>()
-{
-    return single_epsilon;
-}
-template <>
-inline double type_epsilon<double>()
-{
-    return double_epsilon;
-}
-
-static constexpr double default_half_epsilon()
-{
-    return 9.77e-4;
-}
-
-static constexpr double default_single_epsilon()
-{
-    return 3.75e-5;
-}
-
-static constexpr double default_double_epsilon()
-{
-    return 1e-15;
-}
 
 // C++ traits to simplify type selection for FFTW plans, complex and/or real
 // FFTW types, based on the base real type of the floating-point arithmetic of
@@ -121,34 +74,6 @@ template <typename T>
 using fftw_complex_t = typename fftw_trait<T>::complex_t;
 template <typename T>
 using fftw_real_t = typename fftw_trait<T>::real_t;
-
-// Copies the half-precision input buffer to a single-precision buffer.
-static hostbuf half_to_single_copy(const hostbuf& in)
-{
-    hostbuf out;
-    out.alloc(2 * in.size());
-    auto in_begin = reinterpret_cast<const rocfft_fp16*>(in.data());
-    std::copy_n(in_begin, in.size() / sizeof(rocfft_fp16), reinterpret_cast<float*>(out.data()));
-    return out;
-}
-
-// converts a wider precision buffer to a narrower precision, in-place
-template <typename TfloatIn, typename TfloatOut>
-void narrow_precision_inplace(hostbuf& in)
-{
-    // ensure we're actually shrinking the data
-    static_assert(sizeof(TfloatIn) > sizeof(TfloatOut));
-
-    auto readPtr  = reinterpret_cast<const TfloatIn*>(in.data());
-    auto writePtr = reinterpret_cast<TfloatOut*>(in.data());
-    std::copy_n(readPtr, in.size() / sizeof(TfloatIn), writePtr);
-    in.shrink(in.size() / (sizeof(TfloatIn) / sizeof(TfloatOut)));
-}
-
-static void single_to_half_inplace(hostbuf& in)
-{
-    narrow_precision_inplace<float, rocfft_fp16>(in);
-}
 
 // Template wrappers for real-valued FFTW allocators:
 template <typename Tfloat>

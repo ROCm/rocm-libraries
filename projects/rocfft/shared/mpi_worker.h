@@ -38,7 +38,7 @@
 
 reference_fft_data_t reference_fft_data_t::cached_data = reference_fft_data_t::make_default();
 int                  verbose;
-bool                 fftw_compare = true;
+bool                 reference_compare = true;
 
 template <typename T>
 struct is_size_one_array : std::false_type
@@ -502,7 +502,7 @@ static void
 template <typename Tfloat>
 void execute_reference_fft(const fft_params& params, std::vector<hostbuf>& input)
 {
-    fftw_plan_wrapper_t<Tfloat> cpu_plan = fftw_plan_via_rocfft<Tfloat>(params.length,
+    reference_fft::plan<Tfloat> cpu_plan = reference_fft::make_plan<Tfloat>(params.length,
                                                                         params.istride,
                                                                         params.ostride,
                                                                         params.nbatch,
@@ -512,10 +512,10 @@ void execute_reference_fft(const fft_params& params, std::vector<hostbuf>& input
                                                                         input,
                                                                         input);
 
-    fftw_run<Tfloat>(params.transform_type, cpu_plan, input, input);
+    reference_fft::execute<Tfloat>(params.transform_type, cpu_plan, input, input);
 }
 
-bool   use_fftw_wisdom = false;
+bool   use_reference_wisdom = false;
 double half_epsilon    = default_half_epsilon();
 double single_epsilon  = default_single_epsilon();
 double double_epsilon  = default_double_epsilon();
@@ -615,9 +615,9 @@ void exec_testcases(MPI_Comm                          mpi_comm,
     init_local_input<decltype(params), gpubuf>(
         mpi_rank, params, params.ifields.back().bricks, in_elem_size, local_input_ptrs);
 
-    // gather input for FFTW before we transform, in case we're doing an in-place FFT
+    // gather input for CPU reference validation before a possibly in-place FFT
     std::optional<reference_fft_data_t> reference_fft;
-    if(fftw_compare)
+    if(reference_compare)
     {
         hostbuf    ref_input;
         const auto ref_params = params.make_params_for_reference_cpu();
@@ -729,8 +729,8 @@ void exec_testcases(MPI_Comm                          mpi_comm,
         }
     }
 
-    // FFTW Validation
-    if(fftw_compare)
+    // CPU reference validation
+    if(reference_compare)
     {
         std::vector<hostbuf> gpu_output(1);
         VectorNorms          cpu_output_norm;
@@ -849,7 +849,7 @@ int mpi_worker_main(const std::string& description, int argc, char* argv[])
     app.add_option("-N, --ntrial", ntrial, "Number of trials to benchmark")
         ->default_val(1)
         ->check(CLI::PositiveNumber);
-    app.add_flag("--accuracy", fftw_compare, "Check accuracy of an MPI transform")
+    app.add_flag("--accuracy", reference_compare, "Check accuracy of an MPI transform")
         ->excludes(bench_flag);
 
     CLI::Option* opt_token

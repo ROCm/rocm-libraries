@@ -29,9 +29,8 @@
 
 #include "../../shared/CLI11.hpp"
 #include "../../shared/client_except.h"
-#include "../../shared/fftw_transform.h"
 #include "../../shared/gpubuf.h"
-#include "../../shared/rocfft_against_fftw.h"
+#include "../../shared/reference_fft.h"
 #include "../../shared/subprocess.h"
 #include "rocfft/rocfft.h"
 

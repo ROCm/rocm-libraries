@@ -83,6 +83,7 @@ add_custom_command(
 
 set( rocfft-test_source
   gtest_main.cpp
+  reference_backend_test.cpp
   rocfft_accuracy_test.cpp
   bitwise_repro/bitwise_repro_test.cpp
   accuracy_test_1D.cpp	
@@ -141,140 +142,179 @@ endif()
 
 add_executable( rocfft-test ${rocfft-test_source} ${rocfft-test_includes} )
 
-option( BUILD_FFTW "Download and build FFTW" OFF )
+set( ROCFFT_REFERENCE_BACKEND "FFTW" CACHE STRING "CPU reference FFT backend (FFTW or FFTZ)" )
+set_property( CACHE ROCFFT_REFERENCE_BACKEND PROPERTY STRINGS FFTW FFTZ )
+add_library( rocfft-reference INTERFACE )
+if( ROCFFT_REFERENCE_BACKEND STREQUAL "FFTW" )
+  option( BUILD_FFTW "Download and build FFTW" OFF )
 
 
-# look for installed FFTW if we weren't asked to build it
-if( NOT BUILD_FFTW )
-  # searching FFTW with FindFFTW.cmake that is provided by project
-  # because distro versions of FFTW does not include the cmake specific
-  # helper files
-  find_package( FFTW 3.0 MODULE COMPONENTS FLOAT DOUBLE )
-  if( FFTW_FOUND )
-    message(STATUS "FFTW found by FindFFTW.cmake")
-  else()
-    # searching fftw versions build from source code which contain
-    # cmake helper files like FFTW3Config.cmake
-    find_package(FFTW3 CONFIG QUIET )
-    find_package(FFTW3f CONFIG QUIET )
-    if( FFTW3_FOUND AND FFTW3f_FOUND )
-      message(STATUS "FFTW3 found by using the FFTW3Config.cmake")
-      string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_UPPER)
-      if ( NOT WIN32 )
-        get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
-        get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
-      else()
-        get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
-        get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
-      endif()
-
-      # Look for omp (preferred) or thread libraries. These are not a
-      # hard requirement, but are nice to have to make FFTW run faster.
-      # To simplify the testing, we will not accept a mixed combination
-      # where FFTW is only build agauns the OMP library support and
-      # FFTWF is only build with the THREADS library support.
-      find_library(FFTW_OMP_LIBRARY NAMES fftw3_omp HINTS ${FFTW3_LIBRARY_DIRS})
-      find_library(FFTWF_OMP_LIBRARY NAMES fftw3f_omp HINTS ${FFTW3f_LIBRARY_DIRS})
-      if ( FFTW_OMP_LIBRARY AND FFTWF_OMP_LIBRARY )
-        list( APPEND fftw3_libs ${FFTW_OMP_LIBRARY} )
-        list( APPEND fftw3f_libs ${FFTWF_OMP_LIBRARY} )
-        set( FFTW_MULTITHREAD TRUE )
-      else()
-        find_library( FFTW_THREADS_LIBRARY fftw3_threads HINTS ${FFTW3_LIBRARY_DIRS} )
-        find_library( FFTWF_THREADS_LIBRARY fftw3f_threads HINTS ${FFTW3f_LIBRARY_DIRS} )
-        if ( FFTW_THREADS_LIBRARY AND FFTWF_THREADS_LIBRARY )
-          list( APPEND fftw3_libs ${FFTW_THREADS_LIBRARY} )
-          list( APPEND fftw3f_libs ${FFTWF_THREADS_LIBRARY} )
-          set( FFTW_MULTITHREAD TRUE )
+  # look for installed FFTW if we weren't asked to build it
+  if( NOT BUILD_FFTW )
+    # searching FFTW with FindFFTW.cmake that is provided by project
+    # because distro versions of FFTW does not include the cmake specific
+    # helper files
+    find_package( FFTW 3.0 MODULE COMPONENTS FLOAT DOUBLE )
+    if( FFTW_FOUND )
+      message(STATUS "FFTW found by FindFFTW.cmake")
+    else()
+      # searching fftw versions build from source code which contain
+      # cmake helper files like FFTW3Config.cmake
+      find_package(FFTW3 CONFIG QUIET )
+      find_package(FFTW3f CONFIG QUIET )
+      if( FFTW3_FOUND AND FFTW3f_FOUND )
+        message(STATUS "FFTW3 found by using the FFTW3Config.cmake")
+        string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_UPPER)
+        if ( NOT WIN32 )
+          get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
+          get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
+        else()
+          get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
+          get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
         endif()
-      endif()
 
-      set (FFTW_FOUND ${FFTW3_FOUND})
-      set (FFTW_INCLUDE_DIRS ${FFTW3_INCLUDE_DIRS})
-      set (FFTW_LIBRARIES ${fftw3_libs} )
-      list( APPEND FFTW_LIBRARIES ${fftw3f_libs} )
+        # Look for omp (preferred) or thread libraries. These are not a
+        # hard requirement, but are nice to have to make FFTW run faster.
+        # To simplify the testing, we will not accept a mixed combination
+        # where FFTW is only build agauns the OMP library support and
+        # FFTWF is only build with the THREADS library support.
+        find_library(FFTW_OMP_LIBRARY NAMES fftw3_omp HINTS ${FFTW3_LIBRARY_DIRS})
+        find_library(FFTWF_OMP_LIBRARY NAMES fftw3f_omp HINTS ${FFTW3f_LIBRARY_DIRS})
+        if ( FFTW_OMP_LIBRARY AND FFTWF_OMP_LIBRARY )
+          list( APPEND fftw3_libs ${FFTW_OMP_LIBRARY} )
+          list( APPEND fftw3f_libs ${FFTWF_OMP_LIBRARY} )
+          set( FFTW_MULTITHREAD TRUE )
+        else()
+          find_library( FFTW_THREADS_LIBRARY fftw3_threads HINTS ${FFTW3_LIBRARY_DIRS} )
+          find_library( FFTWF_THREADS_LIBRARY fftw3f_threads HINTS ${FFTW3f_LIBRARY_DIRS} )
+          if ( FFTW_THREADS_LIBRARY AND FFTWF_THREADS_LIBRARY )
+            list( APPEND fftw3_libs ${FFTW_THREADS_LIBRARY} )
+            list( APPEND fftw3f_libs ${FFTWF_THREADS_LIBRARY} )
+            set( FFTW_MULTITHREAD TRUE )
+          endif()
+        endif()
+
+        set (FFTW_FOUND ${FFTW3_FOUND})
+        set (FFTW_INCLUDE_DIRS ${FFTW3_INCLUDE_DIRS})
+        set (FFTW_LIBRARIES ${fftw3_libs} )
+        list( APPEND FFTW_LIBRARIES ${fftw3f_libs} )
+      endif()
+    endif()
+    message(STATUS "FFTW_FOUND: ${FFTW_FOUND}")
+    message(STATUS "FFTW_INCLUDE_DIRS: ${FFTW_INCLUDE_DIRS}")
+    message(STATUS "FFTW_LIBRARIES: ${FFTW_LIBRARIES}")
+  endif()
+
+  include( ExternalProject )
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
+    # use extract timestamp for fetched files instead of timestamps in the archive
+    cmake_policy(SET CMP0135 NEW)
+  endif()
+
+  # also try to build FFTW if FFTW isn't present
+  if( BUILD_FFTW OR NOT FFTW_FOUND )
+    set(FFTW_LIBRARIES_DOUBLE
+        ${CMAKE_CURRENT_BINARY_DIR}/src/fftw_double-build/${CMAKE_SHARED_LIBRARY_PREFIX}fftw3_threads${CMAKE_SHARED_LIBRARY_SUFFIX}
+        ${CMAKE_CURRENT_BINARY_DIR}/src/fftw_double-build/${CMAKE_SHARED_LIBRARY_PREFIX}fftw3${CMAKE_SHARED_LIBRARY_SUFFIX})
+    set(FFTW_LIBRARIES_SINGLE
+        ${CMAKE_CURRENT_BINARY_DIR}/src/fftw_single-build/${CMAKE_SHARED_LIBRARY_PREFIX}fftw3f_threads${CMAKE_SHARED_LIBRARY_SUFFIX}
+        ${CMAKE_CURRENT_BINARY_DIR}/src/fftw_single-build/${CMAKE_SHARED_LIBRARY_PREFIX}fftw3f${CMAKE_SHARED_LIBRARY_SUFFIX})
+
+    set(FFTW_CMAKE_ARGS_COMMON
+        -DDISABLE_FORTRAN=ON
+        -DENABLE_AVX2=ON
+        -DENABLE_THREADS=ON
+        -DBUILD_SHARED_LIBS=ON
+        -DBUILD_TESTS=OFF
+        -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER})
+
+    set(FFTW_SRC_URL http://www.fftw.org/fftw-3.3.9.tar.gz CACHE STRING "Location of FFTW source code")
+    set(FFTW_SRC_SHA256 bf2c7ce40b04ae811af714deb512510cc2c17b9ab9d6ddcf49fe4487eea7af3d CACHE STRING "SHA256 hash of FFTW source code")
+
+    # build double-precision FFTW
+    ExternalProject_Add(fftw_double
+                        URL ${FFTW_SRC_URL}
+                        URL_HASH SHA256=${FFTW_SRC_SHA256}
+                        SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/src/fftw
+                        PREFIX ${CMAKE_CURRENT_BINARY_DIR}
+                        CMAKE_ARGS ${FFTW_CMAKE_ARGS_COMMON}
+                        INSTALL_COMMAND ""
+                        BUILD_BYPRODUCTS ${FFTW_LIBRARIES_DOUBLE})
+    ExternalProject_Get_Property( fftw_double source_dir binary_dir )
+
+    # also build single-precision fftw from the same source dir
+    ExternalProject_Add(fftw_single
+                        DOWNLOAD_COMMAND ""
+                        SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/src/fftw
+                        PREFIX ${CMAKE_CURRENT_BINARY_DIR}
+                        CMAKE_ARGS ${FFTW_CMAKE_ARGS_COMMON} -DENABLE_FLOAT=ON
+                        INSTALL_COMMAND ""
+                        BUILD_BYPRODUCTS ${FFTW_LIBRARIES_SINGLE}
+                        DEPENDS fftw_double)
+    ExternalProject_Get_Property( fftw_single source_dir binary_dir )
+
+    set(FFTW_INCLUDE_DIRS
+        ${CMAKE_CURRENT_BINARY_DIR}/src/fftw/api)
+    set(FFTW_LIBRARIES
+        ${FFTW_LIBRARIES_DOUBLE}
+        ${FFTW_LIBRARIES_SINGLE})
+
+    # FFTW we build is always threaded
+    set( FFTW_MULTITHREAD TRUE )
+
+    add_dependencies( rocfft-test fftw_double fftw_single )
+    rocm_install(
+      FILES ${FFTW_LIBRARIES}
+      DESTINATION ${CMAKE_INSTALL_LIBDIR}/fftw
+      COMPONENT clients-common
+    )
+  else()
+    include_directories(${FFTW_INCLUDE_DIRS})
+  endif()
+
+  target_include_directories( rocfft-reference INTERFACE ${FFTW_INCLUDE_DIRS} )
+  target_link_libraries( rocfft-reference INTERFACE ${FFTW_LIBRARIES} )
+  if( FFTW_MULTITHREAD )
+    target_compile_definitions( rocfft-reference INTERFACE FFTW_MULTITHREAD )
+  endif()
+elseif( ROCFFT_REFERENCE_BACKEND STREQUAL "FFTZ" )
+  if( BUILD_FFTW )
+    message( FATAL_ERROR "BUILD_FFTW cannot be used with the FFTZ reference backend" )
+  endif()
+  find_package( aocl-fftz CONFIG REQUIRED )
+  target_link_libraries( rocfft-reference INTERFACE aocl-fftz::aocl_fftz )
+  target_compile_definitions( rocfft-reference INTERFACE ROCFFT_REFERENCE_BACKEND_FFTZ )
+else()
+  message( FATAL_ERROR "Unknown ROCFFT_REFERENCE_BACKEND: ${ROCFFT_REFERENCE_BACKEND}; expected FFTW or FFTZ" )
+endif()
+message( STATUS "rocFFT CPU reference backend: ${ROCFFT_REFERENCE_BACKEND}" )
+
+# Install the native reference runtime beside the tests so an FFTZ build can
+# run without provisioning FFTW or adding a private FFTZ prefix to PATH.
+function( rocfft_reference_runtime target )
+  if( ROCFFT_REFERENCE_BACKEND STREQUAL "FFTZ" )
+    add_custom_command( TARGET ${target} POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:aocl-fftz::aocl_fftz> $<TARGET_FILE_DIR:${target}>
+      VERBATIM )
+    if( UNIX )
+      set_property( TARGET ${target} APPEND PROPERTY BUILD_RPATH "$ORIGIN" )
+      set_property( TARGET ${target} APPEND PROPERTY INSTALL_RPATH "$ORIGIN" )
     endif()
   endif()
-  message(STATUS "FFTW_FOUND: ${FFTW_FOUND}")
-  message(STATUS "FFTW_INCLUDE_DIRS: ${FFTW_INCLUDE_DIRS}")
-  message(STATUS "FFTW_LIBRARIES: ${FFTW_LIBRARIES}")
-endif()
-
-include( ExternalProject )
-if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
-  # use extract timestamp for fetched files instead of timestamps in the archive
-  cmake_policy(SET CMP0135 NEW)
-endif()
-
-# also try to build FFTW if FFTW isn't present
-if( BUILD_FFTW OR NOT FFTW_FOUND )
-  set(FFTW_LIBRARIES_DOUBLE
-      ${CMAKE_CURRENT_BINARY_DIR}/src/fftw_double-build/${CMAKE_SHARED_LIBRARY_PREFIX}fftw3_threads${CMAKE_SHARED_LIBRARY_SUFFIX}
-      ${CMAKE_CURRENT_BINARY_DIR}/src/fftw_double-build/${CMAKE_SHARED_LIBRARY_PREFIX}fftw3${CMAKE_SHARED_LIBRARY_SUFFIX})
-  set(FFTW_LIBRARIES_SINGLE
-      ${CMAKE_CURRENT_BINARY_DIR}/src/fftw_single-build/${CMAKE_SHARED_LIBRARY_PREFIX}fftw3f_threads${CMAKE_SHARED_LIBRARY_SUFFIX}
-      ${CMAKE_CURRENT_BINARY_DIR}/src/fftw_single-build/${CMAKE_SHARED_LIBRARY_PREFIX}fftw3f${CMAKE_SHARED_LIBRARY_SUFFIX})
-
-  set(FFTW_CMAKE_ARGS_COMMON
-      -DDISABLE_FORTRAN=ON
-      -DENABLE_AVX2=ON
-      -DENABLE_THREADS=ON
-      -DBUILD_SHARED_LIBS=ON
-      -DBUILD_TESTS=OFF
-      -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER})
-
-  set(FFTW_SRC_URL http://www.fftw.org/fftw-3.3.9.tar.gz CACHE STRING "Location of FFTW source code")
-  set(FFTW_SRC_SHA256 bf2c7ce40b04ae811af714deb512510cc2c17b9ab9d6ddcf49fe4487eea7af3d CACHE STRING "SHA256 hash of FFTW source code")
-
-  # build double-precision FFTW
-  ExternalProject_Add(fftw_double
-                      URL ${FFTW_SRC_URL}
-                      URL_HASH SHA256=${FFTW_SRC_SHA256}
-                      SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/src/fftw
-                      PREFIX ${CMAKE_CURRENT_BINARY_DIR}
-                      CMAKE_ARGS ${FFTW_CMAKE_ARGS_COMMON}
-                      INSTALL_COMMAND ""
-                      BUILD_BYPRODUCTS ${FFTW_LIBRARIES_DOUBLE})
-  ExternalProject_Get_Property( fftw_double source_dir binary_dir )
-
-  # also build single-precision fftw from the same source dir
-  ExternalProject_Add(fftw_single
-                      DOWNLOAD_COMMAND ""
-                      SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/src/fftw
-                      PREFIX ${CMAKE_CURRENT_BINARY_DIR}
-                      CMAKE_ARGS ${FFTW_CMAKE_ARGS_COMMON} -DENABLE_FLOAT=ON
-                      INSTALL_COMMAND ""
-                      BUILD_BYPRODUCTS ${FFTW_LIBRARIES_SINGLE}
-                      DEPENDS fftw_double)
-  ExternalProject_Get_Property( fftw_single source_dir binary_dir )
-
-  set(FFTW_INCLUDE_DIRS
-      ${CMAKE_CURRENT_BINARY_DIR}/src/fftw/api)
-  set(FFTW_LIBRARIES
-      ${FFTW_LIBRARIES_DOUBLE}
-      ${FFTW_LIBRARIES_SINGLE})
-
-  # FFTW we build is always threaded
-  set( FFTW_MULTITHREAD TRUE )
-
-  add_dependencies( rocfft-test fftw_double fftw_single )
-  rocm_install(
-    FILES ${FFTW_LIBRARIES}
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/fftw
-    COMPONENT clients-common
-  )
-else()
-  include_directories(${FFTW_INCLUDE_DIRS})
+endfunction()
+if( ROCFFT_REFERENCE_BACKEND STREQUAL "FFTZ" )
+  rocm_install( FILES $<TARGET_FILE:aocl-fftz::aocl_fftz>
+    DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT tests )
 endif()
 
 set( rocfft-test_include_dirs
-  $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
   ${ROCM_CLANG_ROOT}/include
   )
 
 set( rocfft-test_link_libs
-  ${FFTW_LIBRARIES}
+  rocfft-reference
   )
 
 option( BUILD_CLIENTS_TESTS_OPENMP "Build tests with OpenMP" ON )
@@ -304,6 +344,8 @@ if( BUILD_CLIENTS_TESTS_OPENMP )
     INSTALL_RPATH "${INSTALL_RPATH}"
   )
 endif()
+
+rocfft_reference_runtime( rocfft-test )
 
 find_package( GTest QUIET )
 
@@ -383,9 +425,6 @@ target_include_directories( rocfft-test PRIVATE ${sqlite_local_SOURCE_DIR} )
 
 set_property( TARGET rocfft-test APPEND PROPERTY LINK_LIBRARIES ${ROCFFT_SQLITE_LIB} )
 
-if(FFTW_MULTITHREAD)
-  target_compile_options( rocfft-test PRIVATE -DFFTW_MULTITHREAD )
-endif( )
 
 set_target_properties( rocfft-test PROPERTIES
   CXX_STANDARD_REQUIRED ON
@@ -497,7 +536,8 @@ if( ROCFFT_MPI_ENABLE )
         INSTALL_RPATH "${INSTALL_RPATH}"
       )
     endif()
-    if( BUILD_FFTW OR NOT FFTW_FOUND )
+    rocfft_reference_runtime( ${worker} )
+    if( ROCFFT_REFERENCE_BACKEND STREQUAL "FFTW" AND (BUILD_FFTW OR NOT FFTW_FOUND) )
       add_dependencies( ${worker} fftw_double fftw_single )
     endif()
     target_include_directories( ${worker}
@@ -505,7 +545,6 @@ if( ROCFFT_MPI_ENABLE )
       ${CMAKE_BINARY_DIR}/include
       ${CMAKE_CURRENT_SOURCE_DIR}/../../library/include/
       ${MPI_C_INCLUDE_PATH}
-      $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
     )
     target_compile_options( ${worker} PRIVATE ${WARNING_FLAGS} )
 
@@ -516,7 +555,7 @@ if( ROCFFT_MPI_ENABLE )
         hip::device
         hiprtc::hiprtc
         MPI::MPI_CXX
-        ${FFTW_LIBRARIES}
+        rocfft-reference
         "mpi_gtl_hsa"
       )
         get_filename_component( MPI_LIBDIR ${MPI_LIBRARY} DIRECTORY )
@@ -530,7 +569,7 @@ if( ROCFFT_MPI_ENABLE )
         hip::device
         hiprtc::hiprtc
         MPI::MPI_CXX
-        ${FFTW_LIBRARIES}
+        rocfft-reference
       )    
     endif()
 
