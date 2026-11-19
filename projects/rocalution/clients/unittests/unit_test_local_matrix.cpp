@@ -3692,15 +3692,19 @@ TEST_P(local_matrix_formats, reads_rocsparseio_files_of_the_other_precision)
 
 TEST(local_matrix_DeathTest, write_file_rsio_failure_ends_the_program)
 {
-    auto A = make_local_matrix(Backend::Host, banded<double>(4));
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        auto A = make_local_matrix(Backend::Host, banded<T>(4));
 #ifdef __linux__
-    // Writes to /dev/full are buffered and fail only when the file is closed
-    EXPECT_LOGGED_EXIT(A->WriteFileRSIO("/dev/full"),
-                       "cannot close file /dev/full.*Fatal error - the program will be "
-                       "terminated.*File: [^;]*local_matrix\\.cpp;");
+        // Writes to /dev/full are buffered and fail only when the file is closed
+        EXPECT_LOGGED_EXIT(A->WriteFileRSIO("/dev/full"),
+                           "cannot close file /dev/full.*Fatal error - the program will be "
+                           "terminated.*File: [^;]*local_matrix\\.cpp;");
 #endif
-    EXPECT_FATAL_ERROR(A->WriteFileRSIO(temp_file("missing") + "/directory/A.rsio"),
-                       "local_matrix\\.cpp");
+        EXPECT_FATAL_ERROR(A->WriteFileRSIO(temp_file("missing") + "/directory/A.rsio"),
+                           "local_matrix\\.cpp");
+    });
 }
 
 // Written in CSR order with 1-based indices. WriteFileMTX does not document how many
