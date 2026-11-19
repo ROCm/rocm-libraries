@@ -216,7 +216,11 @@ the strategy's biggest holes live (see
   stored bit to equal the correctly rounded closed form (a proven zero-ULP
   result for single-pass dense attention), on GQA causal and sliding-window
   cases, and fails if any one-key or denominator mutation of the mask rule, or a
-  head-0 broadcast, goes unrejected. It needs NumPy and HIP only; its CPU
+  head-0 broadcast, goes unrejected. The same entry runs the key-permutation
+  relation on unmasked GQA cases: the outputs for K and V permuted together
+  must agree with the unpermuted ones within a bound derived from the kernel's
+  arithmetic path, and each mutation that breaks the key-value pairing must
+  leave that bound in every head. The lane needs NumPy and HIP only; its CPU
   contracts run in `rocke_library_attention_cpu_pytest`.
 
 - **Nothing else in this document proves the math is right.** Byte-identity
