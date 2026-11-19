@@ -121,6 +121,20 @@ TEST_F(TestSeeds, ReturnsDefaultSeedForOutOfRangeValue)
         << "Expected default seed of 1 when environment variable exceeds valid range";
 }
 
+// Only a plain decimal that fits unsigned int is a seed; anything else, including values
+// a lenient parse would wrap or truncate, selects the default on every platform.
+TEST_F(TestSeeds, ReturnsDefaultSeedForMalformedOrWrappingValues)
+{
+    const std::vector<std::string> rejected = {"-1", "4294967296", "12abc", " 42", "+42", "42 "};
+
+    for(const auto& value : rejected)
+    {
+        hipdnn_data_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", value.c_str());
+
+        EXPECT_EQ(getGlobalTestSeed(), 1u) << "HIPDNN_GLOBAL_TEST_SEED='" << value << "'";
+    }
+}
+
 TEST_F(TestSeeds, ConsistentSeedProducesSameValue)
 {
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "12345");

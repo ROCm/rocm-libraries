@@ -4,10 +4,12 @@
 #pragma once
 
 #include <algorithm>
+#include <charconv>
 #include <cstdlib>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <random>
 #include <string>
+#include <system_error>
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -16,6 +18,8 @@ inline unsigned int getGlobalTestSeed()
 {
     // Fixing generator seeds to a default value of 1 unless overridden by env var.
     // This ensures consistent test runs unless randomness is explicitly desired.
+    // A value that is not RANDOM and not a plain decimal in [0, 4294967295] (sign,
+    // whitespace, trailing characters, out of range) also selects the default.
     constexpr unsigned int DEFAULT_SEED = 1;
 
     auto seedStr = hipdnn_data_sdk::utilities::getEnv("HIPDNN_GLOBAL_TEST_SEED");
@@ -38,15 +42,15 @@ inline unsigned int getGlobalTestSeed()
         return std::random_device{}();
     }
 
-    try
-    {
-        auto seed = std::stoul(seedStr);
-        return static_cast<unsigned int>(seed);
-    }
-    catch(...)
+    unsigned int seed = 0;
+    const char* const first = seedStr.data();
+    const char* const last = first + seedStr.size();
+    const auto [end, error] = std::from_chars(first, last, seed);
+    if(error != std::errc{} || end != last)
     {
         return DEFAULT_SEED;
     }
+    return seed;
 }
 
 } // namespace hipdnn_test_sdk::utilities

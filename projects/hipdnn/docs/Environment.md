@@ -580,11 +580,13 @@ Controls the random number generator seed used across hipDNN tests. This allows 
 | Value        | Description                                                |
 |--------------|------------------------------------------------------------|
 | (not set)    | Uses default seed value of `1` (default behavior)         |
-| `<number>`   | Uses the specified numeric seed (e.g., `42`, `12345`)     |
+| `<number>`   | Uses the specified decimal seed, from `0` to `4294967295` (e.g., `42`, `12345`) |
 | `RANDOM`     | Generates a random seed using `std::random_device`        |
 
 > [!NOTE]
 > The `RANDOM` value is case-insensitive (`random`, `Random`, `RANDOM` all work).
+>
+> Any other value that is not a plain decimal number in the accepted range uses the default seed `1`. This includes an empty value, a sign (`-1`, `+42`), surrounding whitespace, trailing characters (`12abc`) and values above `4294967295`.
 
 **Examples:**
 ```bash
