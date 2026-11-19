@@ -237,7 +237,8 @@ namespace hipblaslt_bench
         return a2a_gemm_values(size_t(arg.K[0]) * arg.N[0], rank, launchIndex);
     }
 
-    // Writes this rank's B for the launch and poisons the gather buffer.
+    // Writes this rank's B for the launch, and C when beta is nonzero, and poisons
+    // the gather buffer.
     inline bool a2a_gemm_write_input(const LauncherEnv& env,
                                      const Arguments&   arg,
                                      RankResources&     res,
@@ -246,11 +247,18 @@ namespace hipblaslt_bench
         const std::vector<hipblasLtBfloat16> b = a2a_gemm_b(arg, env.rank, launchIndex);
         CHECK_HIP_RC(hipMemcpy(res.dB, b.data(), b.size() * sizeof(b[0]), hipMemcpyHostToDevice));
         CHECK_HIP_RC(hipMemset(res.dGather, 0xC7, b.size() * sizeof(b[0])));
+        if(arg.beta != 0.0)
+        {
+            const std::vector<hipblasLtBfloat16> c
+                = a2a_gemm_values(size_t(arg.M[0]) * arg.N[0], env.rank, -2 - launchIndex);
+            CHECK_HIP_RC(
+                hipMemcpy(res.dC, c.data(), c.size() * sizeof(c[0]), hipMemcpyHostToDevice));
+        }
         return true;
     }
 
-    // D must equal a plain GEMM of A with the gathered B: K block s of the
-    // gathered B is block `rank` of rank s's B.
+    // D must equal a plain GEMM of A with the gathered B, and the same C: K block s
+    // of the gathered B is block `rank` of rank s's B.
     inline bool a2a_gemm_check(const LauncherEnv& env,
                                const Arguments&   arg,
                                RankResources&     res,
@@ -271,7 +279,7 @@ namespace hipblaslt_bench
                                gathered.size() * sizeof(hipblasLtBfloat16),
                                hipMemcpyHostToDevice));
 
-        const float alpha = 1.0f, beta = 0.0f;
+        const float alpha = 1.0f, beta = float(arg.beta);
         CHECK_LT_RC(hipblasLtMatmul(res.handle,
                                     res.plainMm,
                                     &alpha,
@@ -280,7 +288,7 @@ namespace hipblaslt_bench
                                     res.dRefB,
                                     res.lay[1],
                                     &beta,
-                                    res.dRefD,
+                                    beta != 0.0f ? res.dC : res.dRefD,
                                     res.lay[2],
                                     res.dRefD,
                                     res.lay[3],
@@ -624,10 +632,11 @@ namespace hipblaslt_bench
     inline auto make_launch(RankResources&                          res,
                             const hipblasLtMatmulHeuristicResult_t& heur,
                             uint32_t&                               launchCount,
-                            hipblasStatus_t&                        lastStatus)
+                            hipblasStatus_t&                        lastStatus,
+                            float                                   beta)
     {
-        return [&res, &heur, &launchCount, &lastStatus](int64_t) {
-            const float    alpha = 1.0f, beta = 0.0f;
+        return [&res, &heur, &launchCount, &lastStatus, beta](int64_t) {
+            const float    alpha   = 1.0f;
             const uint32_t channel = launchCount++ % kCommChannels;
 
             const hipblasStatus_t attrStatus = hipblasLtFusionSetAttribute(

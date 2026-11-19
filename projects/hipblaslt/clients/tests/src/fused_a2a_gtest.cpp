@@ -1762,6 +1762,31 @@ namespace
         EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
     }
 
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, MatmulRejectsAPrologueOnTheEpilogueAttribute)
+    {
+        registerOneRank();
+        DeviceBuffer a(kK * kM * 2), b(kK * kN * 2), d(kM * kN * 2), gather(kK * kN * 2);
+        ASSERT_TRUE(a.ptr && b.ptr && d.ptr && gather.ptr);
+        completeAndAttach(b.ptr, gather.ptr);
+        ASSERT_EQ(attach(HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, nullptr), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(attach(HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE, prologue), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(matmul(a.ptr, b.ptr, d.ptr), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, IsAlgoSupportedRejectsBothSidesAttached)
+    {
+        registerOneRank();
+        completeAndAttach();
+        hipblasLtMatmulAlgo_t algo;
+        if(!firstAlgo(algo))
+            GTEST_SKIP() << "no A2AGemm solution in the loaded library";
+        ASSERT_EQ(isAlgoSupported(algo), HIPBLAS_STATUS_SUCCESS);
+
+        makeEpilogue();
+        ASSERT_EQ(attach(HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE, epilogue), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(isAlgoSupported(algo), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
     TEST_F(FusedA2APrologueDispatch_pre_checkin, RejectsTransposedB)
     {
         registerOneRank();

@@ -92,6 +92,7 @@ namespace
             arg.K[0]       = a2a_gemm_bound_for_world(env.world);
             arg.a2a_extent = arg.K[0];
             arg.a2a_world  = uint8_t(env.world);
+            arg.beta       = 2.0;
             arg.norm_check = 1;
             return arg;
         }
@@ -169,8 +170,8 @@ namespace hipblaslt_bench
         uint32_t                       launchCount = 0;
         hipblasStatus_t                lastStatus  = HIPBLAS_STATUS_SUCCESS;
         std::vector<hipblasLtBfloat16> gold, landed;
-        auto                           launch = make_launch(res, heur, launchCount, lastStatus);
-        const uint32_t                 launches = rank_child_launches();
+        auto           launch   = make_launch(res, heur, launchCount, lastStatus, float(arg.beta));
+        const uint32_t launches = rank_child_launches();
 
         if(collective == Collective::A2AGemm)
         {

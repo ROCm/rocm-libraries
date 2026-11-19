@@ -111,6 +111,12 @@ try
     {
         if(vm["sizem"].defaulted())
             arg.M[0] = 8192;
+        if(!vm["a2a_extent"].defaulted() && arg.a2a_extent != arg.K[0])
+        {
+            hipblaslt_cerr << "error: a2a-gemm gathers all of K; --a2a_extent " << arg.a2a_extent
+                           << " is not K " << arg.K[0] << "\n";
+            return 1;
+        }
         arg.a2a_extent = arg.K[0];
     }
 
@@ -158,11 +164,11 @@ try
     uint32_t                       launchCount = 0;
     hipblasStatus_t                lastStatus  = HIPBLAS_STATUS_SUCCESS;
     std::vector<hipblasLtBfloat16> hostGold, hostLanded;
-    auto                           launch = make_launch(res, heur, launchCount, lastStatus);
-    auto                           check  = [&](int64_t launchIndex) {
+    auto launch = make_launch(res, heur, launchCount, lastStatus, float(arg.beta));
+    auto check  = [&](int64_t launchIndex) {
         return collective == Collective::A2AGemm
-                                              ? a2a_gemm_check(env, arg, res, launchIndex)
-                                              : check_recv(env, arg, res, 0, hostGold, hostLanded);
+                    ? a2a_gemm_check(env, arg, res, launchIndex)
+                    : check_recv(env, arg, res, 0, hostGold, hostLanded);
     };
     auto writeInput = [&](int64_t launchIndex) {
         return collective != Collective::A2AGemm
