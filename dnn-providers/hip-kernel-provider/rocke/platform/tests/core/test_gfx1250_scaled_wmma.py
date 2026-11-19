@@ -506,23 +506,28 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("requires block_k=16", why)
 
-    def test_python_unknown_scaled_atom_reports_supported_operations(self):
-        # The supported-operation listing is a Python lowerer diagnostic.
+    def test_python_unknown_scaled_atom_is_refused_by_the_catalog_gate(self):
+        # An op_id no catalog lists is refused before any scaled-WMMA handler
+        # runs, with the one catalog text, in the LLVM and the HIP lowering.
         for scale16 in (False, True):
             with self.subTest(scale16=scale16):
                 kernel = _build_scaled_atom(scale16=scale16)
                 call = next(op for op in kernel.body.ops if op.name == "tile.mma")
                 mode = "wmma_scale16" if scale16 else "wmma_scale"
-                call.attrs["op_id"] = f"{mode}_f32_16x16x128_fp16_fp16"
-                with self.assertRaisesRegex(
-                    NotImplementedError, "not yet wired for gfx1250"
-                ) as error:
+                op_id = f"{mode}_f32_16x16x128_fp16_fp16"
+                call.attrs["op_id"] = op_id
+                refusal = (
+                    f"tile.{op_id} is not available on gfx1250: "
+                    "its MMA catalog does not list it"
+                )
+                with self.assertRaises(NotImplementedError) as error:
                     _lower_kernel_to_llvm_python(
                         kernel, arch="gfx1250", llvm_flavor="llvm23"
                     )
-                self.assertIn(_scaled_atom("bf8", scale16).op_id, str(error.exception))
-                with self.assertRaisesRegex(NotImplementedError, "no HIP lowering"):
+                self.assertEqual(str(error.exception), refusal)
+                with self.assertRaises(NotImplementedError) as error:
                     lower_kernel_to_hip(kernel, arch="gfx1250")
+                self.assertEqual(str(error.exception), refusal)
 
 
 if __name__ == "__main__":

@@ -27,17 +27,33 @@ import cycle (``lower_llvm`` imports :func:`backend_for` at module top).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Callable, Dict, Tuple, Union
 
 from ..arch import ArchTarget, known_arches, listed_arch_for
 from ..arch.wmma_scale import gfx1250_scaled_wmma
 from ..ir import BF16, F16, F32, I32, I64, Op, VectorType
 from ..llvm_profile import _supports_llvm23_target_ops
+from ..tf32 import tf32_mma_target_error
 from ..wmma import validate_unscaled_wmma
 from .matrix_call_lowering import emit_matrix_call
 from .matrix_calls import MATRIX_CALLS
 from .matrix_operand_forms import f8f6f4_operand_form
 from .wmma_scale import ScaledWmmaLLVM
+
+# The op_ids of the two K=128 f8f6f4 IRBuilder methods, each mapped to the
+# catalog row of the same instruction. Their A and B formats are op attributes,
+# so no catalog row of their own can state them; the MMA catalog gate admits
+# them on a target whose catalog lists that row.
+# TODO: make these builder aliases that emit the per-format catalog op_ids,
+# then delete this table.
+BUILDER_ONLY_MMA_OP_IDS: Mapping[str, str] = MappingProxyType(
+    {
+        "mfma_scale_f32_16x16x128_f8f6f4": "mfma_f32_16x16x128_fp8",
+        "mfma_f32_16x16x128_fp4fp6fp8": "mfma_f32_16x16x128_fp8",
+    }
+)
 
 
 class ISABackend:
@@ -127,10 +143,10 @@ class ISABackend:
     def emit_mma(self, lowerer, op) -> None:
         """Lower a target-neutral ``tile.mma`` op.
 
-        The ``op_id`` attribute selects the concrete atom. An op_id listed in
+        The ``op_id`` attribute selects the concrete atom; the lowerer has
+        passed it through :meth:`require_mma_available`. An op_id listed in
         :data:`~rocke.core.isa.matrix_calls.MATRIX_CALLS` is lowered from its
-        call description, and refused on a target whose MMA catalog does not
-        list it. Every other op_id is rebuilt as the legacy ISA-named
+        call description. Every other op_id is rebuilt as the legacy ISA-named
         op (``tile.<op_id>``) and handed to :meth:`_emit_named_mma`, so the
         emitted text is **byte-identical** to the historical path.
         """
@@ -146,7 +162,6 @@ class ISABackend:
         )
         call = MATRIX_CALLS.get(op_id)
         if call is not None:
-            self._require_catalog_lists(op_id)
             emit_matrix_call(lowerer, named, call)
             return
         if gfx950_scaled_mfma(op_id) is not None:
@@ -157,10 +172,32 @@ class ISABackend:
             return
         self._emit_named_mma(lowerer, named)
 
-    def _require_catalog_lists(self, op_id: str) -> None:
-        """Refuse ``op_id`` unless this target's MMA catalog lists it -- the
-        rule the C++ engine applies too."""
-        if self.arch.mma.by_op_id(op_id) is None:
+    def require_mma_available(self, op_id: str) -> None:
+        """Refuse an MMA ``op_id`` this target cannot lower, before any handler emits.
+
+        Every MMA lowering route calls it: the LLVM and the HIP lowering, for a
+        ``tile.mma`` op and for an op named ``tile.<op_id>``
+        (:func:`~rocke.core.ir.named_mma_op_id`). A TF32 op_id the catalog does
+        not list gets the TF32 diagnostic, a ``ValueError`` naming the targets
+        that list it; any other op_id the catalog gate
+        (:meth:`require_catalog_lists`). The C++ engine runs the same two
+        checks, in the same order, with the same texts.
+        """
+        error = tf32_mma_target_error(op_id, self.arch)
+        if error:
+            raise ValueError(error)
+        self.require_catalog_lists(op_id)
+
+    def require_catalog_lists(self, op_id: str) -> None:
+        """Refuse ``op_id`` unless this target's MMA catalog lists it.
+
+        The catalog gate behind :meth:`require_mma_available`, and in front of
+        the catalog row a matrix call reads. An op_id in
+        :data:`BUILDER_ONLY_MMA_OP_IDS` passes where the catalog lists the row
+        it maps to.
+        """
+        listed_as = BUILDER_ONLY_MMA_OP_IDS.get(op_id, op_id)
+        if self.arch.mma.by_op_id(listed_as) is None:
             raise NotImplementedError(
                 f"tile.{op_id} is not available on {self.arch.gfx}: "
                 "its MMA catalog does not list it"
@@ -169,10 +206,9 @@ class ISABackend:
     def _emit_named_mma(self, lowerer, op) -> None:
         """Emit an MMA op named ``tile.<op_id>`` through its hand-written handler.
 
-        CDNA dispatches it to the lowerer's ``_op_tile_<op_id>`` method. A WMMA
-        ``op_id`` reaching a CDNA backend resolves to the WMMA handler, which
-        calls :meth:`emit_wmma` and correctly raises ``NotImplementedError``
-        (WMMA is an RDNA-only instruction). RDNA backends override this to route
+        CDNA dispatches it to the lowerer's ``_op_tile_<op_id>`` method; a WMMA
+        ``op_id`` never reaches it, because no CDNA catalog lists one and
+        :meth:`emit_mma` refuses it first. RDNA backends override this to route
         through :meth:`emit_wmma`.
         """
         lowerer.lower_op(op)
@@ -243,9 +279,9 @@ class ISABackend:
     def emit_scaled_wmma(self, lowerer, op) -> None:
         """Emit a SCALE/SCALE16 WMMA call for an MMA op named ``tile.<op_id>``.
 
-        The op lowers on any target whose MMA catalog lists its atom and is
-        refused on every other target -- the rule the C++ engine applies too.
-        The intrinsic comes from the resolved operand contract. A and B each
+        It is reached only for a target whose MMA catalog lists the atom: the
+        catalog gate refuses every other target. The intrinsic comes from the
+        resolved operand contract. A and B each
         reach their ``<16 x i32>`` register through the f8f6f4 form of their own
         matrix format (:func:`~rocke.core.isa.matrix_operand_forms.f8f6f4_operand_form`):
         the register words pass unchanged, 64 logical fp8 / bf8 values with one
@@ -256,7 +292,6 @@ class ISABackend:
         if spec is None:
             raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
         name = f"tile.{spec.op_id}"
-        self._require_catalog_lists(spec.op_id)
         if not _supports_llvm23_target_ops(lowerer._flavor):
             raise NotImplementedError(
                 f"{name} requires llvm23 (ROCm 7.13+), got {lowerer._flavor}"

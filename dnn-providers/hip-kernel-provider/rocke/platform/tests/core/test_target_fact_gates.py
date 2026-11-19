@@ -255,16 +255,14 @@ def test_scaled_wmma_follows_the_target_catalog(scale16, arch):
 def test_scaled_wmma_hip_follows_the_target_catalog(scale16, arch):
     atom = _scaled_atom(scale16)
     kernel = _scaled_kernel(atom, scale16)
-    target = ArchTarget.from_gfx(arch)
-    if target.mma.by_op_id(atom.op_id) is not None:
+    if ArchTarget.from_gfx(arch).mma.by_op_id(atom.op_id) is not None:
         lower_hip_with_both_engines(kernel, arch)
     else:
+        # The same catalog gate, and text, as the LLVM lowering above.
         assert_both_engines_reject_hip(
             kernel,
             arch,
             NotImplementedError,
-            f"WMMA op {atom.op_id!r} is not available on {arch} "
-            "(WMMA is an RDNA/gfx11 instruction; this is a "
-            f"{target.family.upper()} target). The MFMA atoms are the "
-            "matrix path on CDNA.",
+            f"tile.{atom.op_id} is not available on {arch}: "
+            "its MMA catalog does not list it",
         )

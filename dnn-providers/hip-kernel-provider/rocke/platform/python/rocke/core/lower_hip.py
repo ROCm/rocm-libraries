@@ -57,6 +57,7 @@ from .ir import (
     element_type,
     dpp_xor_ctrl,
     gpu_check_word_symbol,
+    named_mma_op_id,
     require_streaming_arch,
 )
 from .mfma import validate_mfma
@@ -67,7 +68,7 @@ from .mma_operand import (
     mma_operand_needs_reinterpret,
     mma_operand_value,
 )
-from .tf32 import TF32_MMA, tf32_mma_target_error, tf32_op_error
+from .tf32 import TF32_MMA, tf32_op_error
 
 # No packed-only type has an entry: core/ir.py _refuse_packed_only_value
 # keeps its values out of the IR.
@@ -552,6 +553,9 @@ class _Lowerer:
         error = tf32_op_error(op)
         if error:
             raise ValueError(error)
+        named_op_id = named_mma_op_id(op.name)
+        if named_op_id is not None:
+            backend_for(self.arch).require_mma_available(named_op_id)
         if op.name.startswith("tile.") and gfx1250_scaled_wmma(op.name) is not None:
             self._emit_wmma_gfx1250_scaled(op)
             return
@@ -843,7 +847,10 @@ class _Lowerer:
         directly), so the ``op_id`` is mapped back to the concrete
         ``tile.<op_id>`` op and passed through the shared operation dispatcher.
         This keeps the HIP emission identical to the legacy ISA-named path while
-        the IRBuilder helpers route through :meth:`IRBuilder.mma`.
+        the IRBuilder helpers route through :meth:`IRBuilder.mma`. An op_id the
+        target cannot lower is refused before any handler emits, by the checks
+        the LLVM lowering applies
+        (:meth:`~rocke.core.isa.backend.ISABackend.require_mma_available`).
         """
         op_id = op.attrs["op_id"]
         from .arch.mfma_scale import (
@@ -852,10 +859,9 @@ class _Lowerer:
             MATRIX_FORMATS,
         )
 
+        backend_for(self.arch).require_mma_available(op_id)
         atom = gfx950_scaled_mfma(op_id)
         if atom is not None:
-            if self.arch.gfx != "gfx950":
-                raise NotImplementedError("scaled MFMA requires gfx950")
             error = scaled_mfma_error(op_id, op.operands, op.results)
             if error:
                 raise ValueError(error)
@@ -867,9 +873,6 @@ class _Lowerer:
             )
             return
         if op_id in TF32_MMA:
-            error = tf32_mma_target_error(op_id, self.arch)
-            if error:
-                raise ValueError(error)
             validate_mfma(op)
             a, b, c = op.operands
             self._emit(

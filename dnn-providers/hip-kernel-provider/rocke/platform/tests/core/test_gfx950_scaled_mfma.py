@@ -132,13 +132,19 @@ def test_complete_kernel_golden_and_native_identity(idx, flavor, monkeypatch):
 @pytest.mark.parametrize("arch", ["gfx942", "gfx1201", "gfx1250"])
 def test_wrong_target_rejection(arch):
     k = build_block_scaled_gemm(BlockScaledGemmSpec("reject", 32, 32, 64))
-    with pytest.raises(NotImplementedError, match="requires gfx950"):
+    refusal = (
+        rf"tile\.mfma_gfx950_f32_32x32x64_\w+ is not available on {arch}: "
+        "its MMA catalog does not list it"
+    )
+    with pytest.raises(NotImplementedError, match=f"^{refusal}$"):
         _lower_kernel_to_llvm_python(k, arch=arch, llvm_flavor="llvm23")
-    with pytest.raises(NotImplementedError, match="requires gfx950"):
+    with pytest.raises(NotImplementedError, match=f"^{refusal}$"):
         lower_kernel_to_hip(k, arch=arch)
     engine = pytest.importorskip("rocke_engine")
-    with pytest.raises(RuntimeError, match="requires gfx950"):
+    with pytest.raises(RuntimeError, match=f": {refusal}$"):
         engine.lower_serialized_ir(serialize(k), arch, "llvm23")
+    with pytest.raises(RuntimeError, match=f": {refusal}$"):
+        engine.lower_serialized_ir_hip(serialize(k), arch)
 
 
 def test_native_lowering_preserves_diagnostic(tmp_path):

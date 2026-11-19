@@ -41,6 +41,7 @@ from rocke.core.ir import (
     dtype_to_ir_type,
 )
 from rocke.core.isa import backend as isa_backend
+from rocke.core.isa.backend import BUILDER_ONLY_MMA_OP_IDS
 from rocke.core.isa.matrix_call_lowering import emit_matrix_call
 from rocke.core.isa.matrix_calls import (
     MATRIX_CALLS,
@@ -50,6 +51,8 @@ from rocke.core.isa.matrix_calls import (
     Signedness,
 )
 from rocke.core.isa.matrix_operand_forms import AsIs, EvenHalves, FlavorType, ZeroPadded
+from rocke.core.lower_hip import _GFX11_INTEGER_WMMA
+from rocke.core.lower_hip import _Lowerer as _HipLowerer
 from rocke.core.lower_llvm import (
     LLVM_FLAVOR_LLVM20,
     LLVM_FLAVOR_LLVM22,
@@ -59,6 +62,7 @@ from rocke.core.lower_llvm import (
     _llvm_type,
     _Lowerer,
 )
+from rocke.core.tf32 import TF32_MMA
 from rocke.tests.engines import assert_both_engines_reject, lower_with_both_engines
 
 
@@ -696,20 +700,33 @@ def test_a_table_entry_must_match_the_hand_written_declaration_it_names():
 # ------------------------------------------------------- the table, entry by entry
 
 
-def _hand_written_op_ids() -> set[str]:
-    """Every op_id a hand-written handler lowers."""
-    handled = {
+def _named_mma_handler_op_ids(lowerer: type) -> set[str]:
+    """The MMA op_ids ``lowerer`` lowers through an ``_op_tile_<op_id>`` method."""
+    return {
         name.removeprefix("_op_tile_")
-        for name in dir(_Lowerer)
-        if name.startswith("_op_tile_")
+        for name in dir(lowerer)
+        if name.startswith(("_op_tile_mfma_", "_op_tile_wmma_"))
     }
-    for table in (
-        isa_backend._RDNA_WMMA,
-        isa_backend._RDNA_GFX12_WMMA,
-        isa_backend._GFX1250_WMMA,
-        isa_backend._GFX1250_WMMA_FP8,
-    ):
-        handled |= {name.removeprefix("tile.") for name in table}
+
+
+def _backend_table_op_ids() -> set[str]:
+    """The MMA op_ids the LLVM ISA backends lower from their own WMMA tables."""
+    return {
+        name.removeprefix("tile.")
+        for table in (
+            isa_backend._RDNA_WMMA,
+            isa_backend._RDNA_GFX12_WMMA,
+            isa_backend._GFX1250_WMMA,
+            isa_backend._GFX1250_WMMA_FP8,
+        )
+        for name in table
+    }
+
+
+def _hand_written_op_ids() -> set[str]:
+    """Every op_id the LLVM lowering lowers by hand: its named handlers, the
+    backend tables and the scaled MFMA / WMMA paths."""
+    handled = _named_mma_handler_op_ids(_Lowerer) | _backend_table_op_ids()
     for arch in known_arches():
         for op in ArchTarget.from_gfx(arch).mma.ops:
             if (
@@ -720,8 +737,85 @@ def _hand_written_op_ids() -> set[str]:
     return handled
 
 
+def _hand_written_named_op_ids() -> set[str]:
+    """The MMA op_ids either Python lowerer reaches through a hand-written
+    handler or table named for them, rather than through a MATRIX_CALLS row.
+    The HIP lowering has no table route, so every op_id it lowers is here."""
+    return (
+        _named_mma_handler_op_ids(_Lowerer)
+        | _backend_table_op_ids()
+        | _named_mma_handler_op_ids(_HipLowerer)
+        | set(_GFX11_INTEGER_WMMA)
+    )
+
+
+# The MMA op_ids the Python lowerers still lower through a hand-written handler
+# or table. This set only shrinks: an op_id that gains a handler fails until it
+# is described as a MATRIX_CALLS row instead, and an entry whose last handler is
+# gone must go. (The C++ handlers follow through the both-engine tests.)
+_STILL_HAND_WRITTEN = frozenset(
+    {
+        "mfma_f32_16x16x128_fp4fp6fp8",
+        "mfma_f32_16x16x128_fp8",
+        "mfma_f32_16x16x16_bf16",
+        "mfma_f32_16x16x16_f16",
+        "mfma_f32_16x16x32_bf16",
+        "mfma_f32_16x16x32_bf8",
+        "mfma_f32_16x16x32_f16",
+        "mfma_f32_16x16x32_fp8",
+        "mfma_f32_16x16x4_f32",
+        "mfma_f32_16x16x8_xf32",
+        "mfma_f32_32x32x16_bf16",
+        "mfma_f32_32x32x16_bf8",
+        "mfma_f32_32x32x16_f16",
+        "mfma_f32_32x32x16_fp8",
+        "mfma_f32_32x32x2_f32",
+        "mfma_f32_32x32x4_xf32",
+        "mfma_f32_32x32x8_bf16",
+        "mfma_f32_32x32x8_f16",
+        "mfma_f32_4x4x4_bf16",
+        "mfma_f32_4x4x4_f16",
+        "mfma_f64_16x16x4_f64",
+        "mfma_f64_4x4x4_f64",
+        "mfma_scale_f32_16x16x128_f8f6f4",
+        "wmma_f32_16x16x16_bf16",
+        "wmma_f32_16x16x16_f16",
+        "wmma_gfx1250_f32_16x16x128_fp8_fp8",
+        "wmma_gfx1250_f32_16x16x32_bf16",
+        "wmma_gfx1250_f32_16x16x32_f16",
+        "wmma_gfx1250_f32_16x16x64_bf8_bf8",
+        "wmma_gfx1250_f32_16x16x64_bf8_fp8",
+        "wmma_gfx1250_f32_16x16x64_fp8_bf8",
+        "wmma_gfx1250_f32_16x16x64_fp8_fp8",
+        "wmma_gfx12_f32_16x16x16_bf16",
+        "wmma_gfx12_f32_16x16x16_f16",
+        "wmma_i32_16x16x16_iu4",
+        "wmma_i32_16x16x16_iu4_i4_u4",
+        "wmma_i32_16x16x16_iu4_u4_i4",
+        "wmma_i32_16x16x16_iu4_u4_u4",
+        "wmma_i32_16x16x16_iu8",
+        "wmma_i32_16x16x16_iu8_i8_u8",
+        "wmma_i32_16x16x16_iu8_u8_i8",
+        "wmma_i32_16x16x16_iu8_u8_u8",
+    }
+)
+
+
 def test_an_op_id_has_a_call_description_or_a_handler_never_both():
+    """An op_id has one LLVM lowering; the Python lowerers' hand-written ones
+    only shrink; and every op_id a lowerer handles is an atom some target's
+    catalog lists (so the catalog gate can admit it), or a builder-only op_id
+    mapped to such a row."""
     assert sorted(set(MATRIX_CALLS) & _hand_written_op_ids()) == []
+    hand_written = _hand_written_named_op_ids()
+    assert sorted(hand_written - _STILL_HAND_WRITTEN) == [], "new hand-written handler"
+    assert sorted(_STILL_HAND_WRITTEN - hand_written) == [], "stale ratchet entry"
+    listed = {
+        op.op_id for arch in known_arches() for op in ArchTarget.from_gfx(arch).mma.ops
+    }
+    handled = set(MATRIX_CALLS) | _hand_written_op_ids() | hand_written | set(TF32_MMA)
+    assert sorted(handled - listed - set(BUILDER_ONLY_MMA_OP_IDS)) == []
+    assert set(BUILDER_ONLY_MMA_OP_IDS.values()) <= listed
 
 
 @pytest.mark.parametrize("flavor", LLVM_FLAVORS)
