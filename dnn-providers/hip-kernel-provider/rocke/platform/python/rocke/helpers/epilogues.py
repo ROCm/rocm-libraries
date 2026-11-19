@@ -380,7 +380,7 @@ class CShuffleEpilogue:
     war_barriers: int = 1
     # MFMA path: set by from_grid(); drives lane_to_output in store().
     atom: Optional[MfmaAtom] = None
-    # WMMA path: set by from_grid_op(); uses c_frag_len / c_layout().coord() instead.
+    # WMMA path: set by from_grid_op(); uses dst.frag_len / dst_layout().coord().
     mma_op: Optional["MmaOp"] = None
 
     @property
@@ -404,6 +404,34 @@ class CShuffleEpilogue:
         """
         return (0 if no_alias else war_barriers) + 1
 
+    @staticmethod
+    def pick_store_vec(
+        *,
+        tile_m: int,
+        tile_n: int,
+        block_size: int,
+        max_store_vec: int = 8,
+        out_dtype: str = "f16",
+    ) -> int:
+        """Widest `store_vec` (<= 8, or <= 4 for fp32 output) that spreads the
+        ``tile_m x tile_n`` tile evenly over ``block_size`` threads.
+
+        The single store-width rule: :meth:`from_grid`, :meth:`from_grid_op`
+        and callers that must know the width before building the epilogue
+        (e.g. split-K validators) all use it.
+        """
+        v = min(max_store_vec, 4) if out_dtype == "fp32" else min(max_store_vec, 8)
+        while v > 1:
+            elems = tile_m * tile_n
+            if (
+                tile_n % v == 0
+                and elems // v >= block_size
+                and (elems // v) % block_size == 0
+            ):
+                break
+            v //= 2
+        return v
+
     @classmethod
     def from_grid_op(
         cls,
@@ -414,24 +442,18 @@ class CShuffleEpilogue:
         out_dtype: str = "f16",
         no_alias: bool = False,
     ) -> "CShuffleEpilogue":
-        """Construct for a WMMA (``MmaOp``) accumulator layout.
+        """Construct for a WMMA (``MmaOp``) result layout.
 
-        Uses ``op.c_frag_len`` / ``op.c_layout()`` for the LDS scatter in
+        Uses ``op.dst.frag_len`` / ``op.dst_layout()`` for the LDS scatter in
         place of the MFMA-specific ``atom.lane_to_output``.
         """
-        _fp32_out = out_dtype == "fp32"
-        _max_sv = min(max_store_vec, 4) if _fp32_out else min(max_store_vec, 8)
-        v = _max_sv
-        block_size = grid.block_size
-        while v > 1:
-            ok = (
-                grid.tile_n % v == 0
-                and (grid.tile_m * grid.tile_n) // v >= block_size
-                and ((grid.tile_m * grid.tile_n) // v) % block_size == 0
-            )
-            if ok:
-                break
-            v //= 2
+        v = cls.pick_store_vec(
+            tile_m=grid.tile_m,
+            tile_n=grid.tile_n,
+            block_size=grid.block_size,
+            max_store_vec=max_store_vec,
+            out_dtype=out_dtype,
+        )
         return cls(
             grid=grid, store_vec=v, out_dtype=out_dtype, mma_op=op, no_alias=no_alias
         )
@@ -452,19 +474,13 @@ class CShuffleEpilogue:
         each), so `store_vec` counts f32 elements and is capped at 4
         (= 16 bytes, the hardware buffer_store limit).
         """
-        _fp32_out = out_dtype == "fp32"
-        _max_sv = min(max_store_vec, 4) if _fp32_out else min(max_store_vec, 8)
-        v = _max_sv
-        block_size = grid.block_size
-        while v > 1:
-            ok = (
-                grid.tile_n % v == 0
-                and (grid.tile_m * grid.tile_n) // v >= block_size
-                and ((grid.tile_m * grid.tile_n) // v) % block_size == 0
-            )
-            if ok:
-                break
-            v //= 2
+        v = cls.pick_store_vec(
+            tile_m=grid.tile_m,
+            tile_n=grid.tile_n,
+            block_size=grid.block_size,
+            max_store_vec=max_store_vec,
+            out_dtype=out_dtype,
+        )
         return cls(
             atom=atom, grid=grid, store_vec=v, out_dtype=out_dtype, no_alias=no_alias
         )
@@ -490,10 +506,10 @@ class CShuffleEpilogue:
 
         # Resolve per-lane count and atom tile size from whichever ISA is active.
         if op is not None:
-            _c_per_lane = op.c_frag_len
+            _c_per_lane = op.dst.frag_len
             _atom_m = op.m
             _atom_n = op.n
-            _c_layout = op.c_layout()
+            _c_layout = op.dst_layout()
         else:
             _c_per_lane = atom.c_per_lane
             _atom_m = atom.m
@@ -523,7 +539,7 @@ class CShuffleEpilogue:
         # accumulator is carried in a :class:`StaticDistributedTensor`
         # and published through :func:`store_tile_cshuffle`.
         #
-        # The MMA output layout (``atom.lane_to_output`` / ``op.c_layout().coord()``)
+        # The MMA output layout (``atom.lane_to_output`` / ``op.dst_layout().coord()``)
         # is not a clean ``unmerge`` of the lane id, so the LDS coordinate is
         # supplied via an explicit ``coord_fn`` rather than ``calculate_x``.
         lds_layout = LdsLayout.cshuffle(tile_m=grid.tile_m, tile_n=grid.tile_n)
@@ -585,7 +601,7 @@ class CShuffleEpilogue:
                 tile_n_base = b.add(warp_n_off, b.const_i32(ni * _atom_n))
 
                 if _c_layout is not None:
-                    # WMMA path: use op.c_layout().coord() for the LDS scatter.
+                    # WMMA path: use op.dst_layout().coord() for the LDS scatter.
                     def coord_fn(
                         b_,
                         y_base,
@@ -700,8 +716,9 @@ class CShuffleEpilogue:
         *,
         accs: Sequence[Value],
         dw_ptr: Value,
-        wg_N: Value,
+        wg_N: Optional[Value] = None,
         bounds: Optional[Tuple[Value, Value]] = None,
+        addr_fn=None,
     ) -> None:
         """Split-K variant: cshuffle scatter + barrier, then atomic-adds into dW.
 
@@ -723,6 +740,10 @@ class CShuffleEpilogue:
         ``dw_ptr``  — pointer to the dW global buffer (not a buffer-resource).
         ``wg_N``    — i32 SSA value: wgrad GEMM-N (row stride of dW in elements).
         ``bounds``  — (M, N) i32 pair for OOB guard; same contract as :meth:`store`.
+        ``addr_fn`` — optional ``(b, m, n) -> (element_offset, valid)`` for an
+        output that is not a flat ``m * wg_N + n`` matrix (dgrad's dX); ``valid``
+        (or None) is folded into the guard. A pair's partner is ``offset + 1``,
+        so ``n`` must be contiguous in memory over the store vector.
 
         The caller must zero-initialise dW before launch (atomic-adds only,
         no unconditional store).
@@ -738,10 +759,10 @@ class CShuffleEpilogue:
             )
 
         if op is not None:
-            _c_per_lane = op.c_frag_len
+            _c_per_lane = op.dst.frag_len
             _atom_m = op.m
             _atom_n = op.n
-            _c_layout = op.c_layout()
+            _c_layout = op.dst_layout()
         else:
             _c_per_lane = atom.c_per_lane
             _atom_m = atom.m
@@ -866,6 +887,18 @@ class CShuffleEpilogue:
         c_tile_n_div_vec = b.const_i32(grid.tile_n // sv)
 
         M_bound, N_bound = bounds if bounds is not None else (None, None)
+        if addr_fn is None and wg_N is None:
+            raise ValueError("CShuffleEpilogue.atomic_store: pass wg_N or addr_fn")
+
+        def _addr(m: Value, n: Value) -> Tuple[Value, Optional[Value]]:
+            if addr_fn is None:
+                return b.add(b.mul(m, wg_N), n), None
+            return addr_fn(b, m, n)
+
+        def _and(x: Optional[Value], y: Optional[Value]) -> Optional[Value]:
+            if x is None:
+                return y
+            return x if y is None else b.land(x, y)
 
         for e in range(vecs_per_thread):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), grid.tid)
@@ -881,6 +914,9 @@ class CShuffleEpilogue:
                     n_val = b.add(b.add(grid.block_n_off, col), b.const_i32(s))
                     m_ok = b.cmp_lt(m_val, M_bound) if M_bound is not None else None
                     n_ok = b.cmp_lt(n_val, N_bound) if N_bound is not None else None
+                    if addr_fn is not None:
+                        c_off, a_ok = _addr(m_val, n_val)
+                        m_ok = _and(m_ok, a_ok)
                     if m_ok is not None or n_ok is not None:
                         ok = (
                             b.land(m_ok, n_ok)
@@ -893,7 +929,8 @@ class CShuffleEpilogue:
                                 b.smem_load_vN(c_smem, row, c_smem_col, dtype=F32, n=1),
                                 0,
                             )
-                            c_off = b.add(b.mul(m_val, wg_N), n_val)
+                            if addr_fn is None:
+                                c_off = b.add(b.mul(m_val, wg_N), n_val)
                             b.global_atomic_add(dw_ptr, c_off, v_f32)
                     else:
                         c_smem_col = b.add(col, b.const_i32(s))
@@ -901,7 +938,8 @@ class CShuffleEpilogue:
                             b.smem_load_vN(c_smem, row, c_smem_col, dtype=F32, n=1),
                             0,
                         )
-                        c_off = b.add(b.mul(m_val, wg_N), n_val)
+                        if addr_fn is None:
+                            c_off = b.add(b.mul(m_val, wg_N), n_val)
                         b.global_atomic_add(dw_ptr, c_off, v_f32)
             else:
                 # Paired pk_atomic for bf16/fp16: sv/2 pairs per thread.
@@ -921,7 +959,11 @@ class CShuffleEpilogue:
 
                     smem_col_e = b.add(col, b.const_i32(2 * p))
                     smem_col_o = b.add(col, b.const_i32(2 * p + 1))
-                    c_off_even = b.add(b.mul(m_val, wg_N), n_even)
+                    if addr_fn is None:
+                        c_off_even = b.add(b.mul(m_val, wg_N), n_even)
+                    else:
+                        c_off_even, a_ok = _addr(m_val, n_even)
+                        ok = _and(ok, a_ok)
 
                     def _emit_pair(
                         _cs=c_smem,

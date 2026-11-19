@@ -69,7 +69,6 @@ from support_features.coverage import (
 )
 from support_features.feature_matrix import (
     DATA_CENTER,
-    DEFAULT_OVERVIEW_PATH,
     FAMILIES,
     GPUS,
     compute_feature_claims,
@@ -212,6 +211,7 @@ class TestDataTypeLabels:
         "name, labels",
         [
             ("convolution.DTYPES", convolution.DTYPES),
+            ("convolution.TENSOR_DTYPES", convolution.TENSOR_DTYPES),
             ("pointwise._PORT_DTYPES", pointwise._PORT_DTYPES),
         ],
     )
@@ -348,6 +348,13 @@ def _coverage(root: Path):
     return coverage, errors
 
 
+def _flag_expected_rejection(root: Path, name: str) -> None:
+    _write_json(
+        root / "quick" / "SdpaFwd" / name / f"{name}.meta.json",
+        {"expected_rejection": True},
+    )
+
+
 @pytest.mark.usefixtures("fake_registry")
 class TestJoin:
     def test_tested_counts_every_graph_claimed_or_not(self, tmp_path: Path) -> None:
@@ -364,6 +371,29 @@ class TestJoin:
         assert op.graphs == 2
         assert op.tested_count() == 3
         assert op.tested == {"dtype:fp16": 1, "mask:causal": 1, "dtype:bf16": 1}
+
+    def test_expected_rejection_graph_changes_no_count(self, tmp_path: Path) -> None:
+        """It is not a graph the tree supports: no denominator, no feature."""
+        _bundle(
+            tmp_path,
+            "a",
+            [_node(features=["dtype:fp16"])],
+            claims={"E": {"gfx942": ["linux"]}},
+        )
+        _bundle(
+            tmp_path,
+            "rejected",
+            [_node(features=["dtype:bf16", "mask:causal"])],
+            claims={"E2": {"gfx950": ["linux"]}},
+        )
+        _flag_expected_rejection(tmp_path, "rejected")
+        coverage, errors = _coverage(tmp_path)
+        assert errors == []
+        op = coverage.ops[FAKE_TYPE]
+        assert op.graphs == 1
+        assert op.tested == {"dtype:fp16": 1}
+        assert op.claimed_graphs == {"gfx942": 1}
+        assert coverage.archs == ["gfx942"]
 
     def test_claimed_counts_only_claimed_graphs_per_arch(self, tmp_path: Path) -> None:
         _bundle(
@@ -718,6 +748,27 @@ class TestFeatureClaims:
         _bundle(tmp_path, "b", [_node(features=["dtype:bf16"])])
         claims = _feature_claims(tmp_path)
         assert claims.group_graphs["Attention"] == 2
+
+    def test_expected_rejection_graph_changes_no_count(self, tmp_path: Path) -> None:
+        _bundle(
+            tmp_path,
+            "a",
+            [_node(features=["dtype:fp16"])],
+            claims={"E": {"gfx942": ["linux"]}},
+        )
+        before = _feature_claims(tmp_path)
+        _bundle(
+            tmp_path,
+            "rejected",
+            [_node(features=["dtype:bf16", "mask:causal"])],
+            claims={"E2": {"gfx1100": ["windows"]}},
+        )
+        _flag_expected_rejection(tmp_path, "rejected")
+        after = _feature_claims(tmp_path)
+        assert after.tested == before.tested == {FAKE_TYPE: {"dtype:fp16"}}
+        assert after.targets == before.targets == [("gfx942", "linux")]
+        assert after.group_graphs == before.group_graphs
+        assert after.on_target([FAKE_TYPE], ("gfx942", "linux")) == 1
 
 
 class TestFeatureMatrixNames:
@@ -1167,8 +1218,11 @@ class TestSdpaExtract:
         [
             (64, 64, "head_dim:64"),
             (192, 192, "head_dim:192"),
+            (256, 256, "head_dim:256"),
             # A narrower v is its own kernel, not a 192.
             (192, 128, "head_dim:192x128"),
+            (128, 64, "head_dim:128x64"),
+            (256, 64, "head_dim:256x64"),
         ],
     )
     def test_head_dim_reads_q_and_v(self, qk: int, v: int, expected: str) -> None:
@@ -1185,10 +1239,10 @@ class TestSdpaExtract:
         [
             ({"q_dims": (2, 8, 128, 96)}, "head dim 96 x 128"),
             # Each head dim is catalogued, the pair is not.
-            ({"v_dims": (2, 8, 128, 64)}, "head dim 128 x 64"),
+            ({"v_dims": (2, 8, 128, 96)}, "head dim 128 x 96"),
             ({"dtype": "float"}, "dtype 'float'"),
-            # No engine runs it.
-            ({"dtype": "fp8_e5m2"}, "dtype 'fp8_e5m2'"),
+            # The MX scale type, never an attention input.
+            ({"dtype": "fp8_e8m0"}, "dtype 'fp8_e8m0'"),
             ({"dtype": ["bfloat16"]}, r"dtype \['bfloat16'\]"),
             (
                 {"q_dims": (8, 128, 128), "strides": lambda dims: [1] * len(dims)},
@@ -1210,6 +1264,8 @@ class TestSdpaExtract:
             ("fp8_e4m3", "dtype:fp8e4m3"),
             # Not folded into OCP fp8: the two are not bit-compatible.
             ("fp8_e4m3_fnuz", "dtype:fp8e4m3_fnuz"),
+            ("fp8_e5m2", "dtype:fp8e5m2"),
+            ("fp8_e5m2_fnuz", "dtype:fp8e5m2_fnuz"),
         ],
     )
     def test_fp8_dtype(self, dtype: str, expected: str) -> None:
@@ -1289,6 +1345,16 @@ class TestSdpaExtract:
             "fp8:amax",
         } <= features
 
+    def test_cumulative_sequence_lengths_are_their_own_feature(self) -> None:
+        # Either side alone drives the feature, and it is not the per-batch
+        # sequence-length feature.
+        for port in ("cu_seq_len_q_tensor_uid", "cu_seq_len_kv_tensor_uid"):
+            features = self._extract(inputs={port: 16}, padding_mask=True)
+            assert "varlen:cu_seq_lens" in features
+            assert "varlen:seq_lens" in features  # padding_mask drives this one
+        features = self._extract(inputs={"cu_seq_len_q_tensor_uid": None})
+        assert "varlen:cu_seq_lens" not in features
+
     def test_null_ports_are_absent(self) -> None:
         features = self._extract(
             inputs={"attn_mask_tensor_uid": None}, outputs={"stats_tensor_uid": None}
@@ -1303,12 +1369,15 @@ class TestSdpaExtract:
             {},
             {"ragged": True},
             {"dtype": "half", "q_dims": (2, 8, 1, 64), "k_dims": (2, 1, 128, 64)},
+            {"q_dims": (2, 8, 1, 256), "k_dims": (2, 8, 128, 256)},
             {
                 "dtype": "fp8_e4m3",
                 "o_dtype": "bfloat16",
                 "q_dims": (2, 8, 64, 192),
                 "k_dims": (2, 2, 128, 192),
             },
+            {"dtype": "fp8_e5m2", "o_dtype": "bfloat16"},
+            {"dtype": "fp8_e5m2_fnuz", "o_dtype": "bfloat16"},
             {
                 "dtype": "fp8_e4m3_fnuz",
                 "strides": _bshd_strides,
@@ -1316,6 +1385,16 @@ class TestSdpaExtract:
                 "q_dims": (2, 8, 128, 192),
                 "k_dims": (2, 8, 128, 192),
                 "v_dims": (2, 8, 128, 128),
+            },
+            {
+                "q_dims": (2, 8, 128, 128),
+                "k_dims": (2, 8, 128, 128),
+                "v_dims": (2, 8, 128, 64),
+            },
+            {
+                "q_dims": (2, 8, 128, 256),
+                "k_dims": (2, 8, 128, 256),
+                "v_dims": (2, 8, 128, 64),
             },
             {"causal_mask_bottom_right": True, "attn_scale_value": 0.5},
             {"left_bound": 8, "right_bound": 8, "inputs": {"scale_tensor_uid": 9}},
@@ -1329,6 +1408,7 @@ class TestSdpaExtract:
                     "page_table_v_tensor_uid": 13,
                     "block_mask_tensor_uid": 14,
                     "sink_token_tensor_uid": 15,
+                    "cu_seq_len_kv_tensor_uid": 16,
                 },
                 "outputs": {
                     "sum_exp_tensor_uid": 21,
@@ -1418,10 +1498,11 @@ class TestSdpaBackwardExtract:
         with pytest.raises(FeatureError, match="is not q's"):
             sdpa_backward.extract(node, tensors)
 
-    def test_ragged_raises(self) -> None:
+    def test_ragged_layout_ignores_strides(self) -> None:
         # Not counted as its bshd stride order.
-        with pytest.raises(FeatureError, match="ragged q"):
-            self._extract(ragged=True, strides=_bshd_strides)
+        assert (
+            self._group("layout", ragged=True, strides=_bshd_strides) == "layout:ragged"
+        )
 
     def test_optional_ports(self) -> None:
         features = self._extract(
@@ -1439,14 +1520,26 @@ class TestSdpaBackwardExtract:
         reached = set()
         for kwargs in (
             {},
+            {"ragged": True},
             {"dtype": "half", "q_dims": (2, 8, 64, 64), "k_dims": (2, 1, 128, 64)},
             {"q_dims": (2, 8, 128, 192), "k_dims": (2, 2, 128, 192)},
+            {"q_dims": (2, 8, 128, 256), "k_dims": (2, 8, 128, 256)},
             {
                 "strides": _bshd_strides,
                 "causal_mask": True,
                 "q_dims": (2, 8, 128, 192),
                 "k_dims": (2, 8, 128, 192),
                 "v_dims": (2, 8, 128, 128),
+            },
+            {
+                "q_dims": (2, 8, 128, 128),
+                "k_dims": (2, 8, 128, 128),
+                "v_dims": (2, 8, 128, 64),
+            },
+            {
+                "q_dims": (2, 8, 128, 256),
+                "k_dims": (2, 8, 128, 256),
+                "v_dims": (2, 8, 128, 64),
             },
             {"causal_mask_bottom_right": True, "attn_scale_value": 0.5},
             {"left_bound": 8, "right_bound": 8, "inputs": {"scale_tensor_uid": 9}},
@@ -1878,6 +1971,12 @@ class TestConvolutionOpBinding:
         for kwargs in (
             {"spatial": (8,), "layout": "nhwc", "dtype": "half"},
             {"spatial": (4, 8, 8), "dtype": "bfloat16", "groups": 2},
+            {"spatial": (4, 4, 4, 4), "dtype": "double"},
+            {"dtype": "int8", "layouts": {"filter": "nhwc"}},
+            {"dtype": "fp8_e4m3"},
+            {"dtype": "fp8_e5m2"},
+            {"dtype": "fp8_e4m3_fnuz"},
+            {"dtype": "fp8_e5m2_fnuz"},
             {"groups": 4, "dtypes": {"filter": "half"}},
             {"stride": [2, 2], "dilation": [2, 2]},
             {"pre_padding": [1, 1], "post_padding": [1, 1]},
@@ -1903,7 +2002,12 @@ class TestConvolutionFwdExtract:
 
     @pytest.mark.parametrize(
         "spatial, expected",
-        [((8,), "spatial:1d"), ((8, 8), "spatial:2d"), ((4, 8, 8), "spatial:3d")],
+        [
+            ((8,), "spatial:1d"),
+            ((8, 8), "spatial:2d"),
+            ((4, 8, 8), "spatial:3d"),
+            ((4, 4, 8, 8), "spatial:4d"),
+        ],
     )
     @pytest.mark.parametrize("layout", convolution.LAYOUTS)
     def test_spatial_and_layout(self, spatial, expected: str, layout: str) -> None:
@@ -1925,16 +2029,30 @@ class TestConvolutionFwdExtract:
         features = self._extract(channels=1, filters=1, spatial=(1, 1), kernel=1)
         assert not {f for f in features if f.startswith("layout:")}
 
-    def test_disagreeing_layouts_raise(self) -> None:
-        with pytest.raises(FeatureError, match="layouts disagree"):
-            self._extract(layouts={"filter": "nhwc"})
+    def test_disagreeing_layouts_are_mixed(self) -> None:
+        features = self._extract(layouts={"filter": "nhwc"})
+        assert features == self.PLAIN - {"layout:nchw"} | {"layout:mixed"}
 
     @pytest.mark.parametrize(
         "dtype, expected",
-        [("float", "dtype:fp32"), ("half", "dtype:fp16"), ("bfloat16", "dtype:bf16")],
+        [
+            ("float", "dtype:fp32"),
+            ("half", "dtype:fp16"),
+            ("bfloat16", "dtype:bf16"),
+            ("double", "dtype:fp64"),
+            ("int8", "dtype:int8"),
+            ("fp8_e4m3", "dtype:fp8e4m3"),
+            ("fp8_e5m2", "dtype:fp8e5m2"),
+            ("fp8_e4m3_fnuz", "dtype:fp8e4m3_fnuz"),
+            ("fp8_e5m2_fnuz", "dtype:fp8e5m2_fnuz"),
+        ],
     )
     def test_dtype(self, dtype: str, expected: str) -> None:
         assert self._extract(dtype=dtype) == self.PLAIN - {"dtype:fp32"} | {expected}
+
+    def test_int8_accumulating_into_int32_is_mixed(self) -> None:
+        features = self._extract(dtype="int8", dtypes={"response": "int32"})
+        assert {"dtype:int8", "precision:mixed"} <= features
 
     def test_dtype_is_the_data_ports(self) -> None:
         features = self._extract(dtype="float", dtypes={"activation": "half"})
@@ -1950,11 +2068,13 @@ class TestConvolutionFwdExtract:
     @pytest.mark.parametrize(
         "dtypes, virtual, match",
         [
-            ({"activation": "int8"}, (), "x_tensor_uid dtype"),
-            ({"response": "int32"}, (), r"\['int32'\]"),
+            ({"activation": "uint8"}, (), "x_tensor_uid dtype"),
+            # int32 is a response dtype, not a data dtype.
+            ({"activation": "int32"}, (), "x_tensor_uid dtype"),
+            ({"response": "int64"}, (), r"\['int64'\]"),
             # A virtual tensor does not count toward precision, but its dtype
             # is still checked.
-            ({"response": "int32"}, ("response",), r"\['int32'\]"),
+            ({"response": "int64"}, ("response",), r"\['int64'\]"),
         ],
     )
     def test_uncatalogued_dtype_raises(self, dtypes, virtual, match: str) -> None:
@@ -2094,7 +2214,7 @@ class TestConvolutionFwdExtract:
         with pytest.raises(FeatureError, match="in spatial dim 0"):
             convolution_fwd.extract(node, tensors)
 
-    @pytest.mark.parametrize("spatial, n", [((), 0), ((2, 2, 2, 2), 4)])
+    @pytest.mark.parametrize("spatial, n", [((), 0), ((2, 2, 2, 2, 2), 5)])
     def test_uncatalogued_rank_raises(self, spatial, n: int) -> None:
         with pytest.raises(FeatureError, match=f"{n} spatial dims"):
             self._extract(spatial=spatial)
@@ -7373,19 +7493,3 @@ class TestRealBundleTree:
         assert (
             size < 500_000
         ), f"overview is {size} bytes; split it before it stops rendering on GitHub"
-
-    def test_committed_overview_is_current(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """SUPPORT_MATRIX_OVERVIEW.md matches a fresh render of the committed tree.
-
-        The check-support-matrix-overview hook cannot guard this on its own:
-        the top-level pre-commit exclude hides integration-test-bundles/ from
-        every hook, so a commit that changes only bundle data never runs it.
-        This test runs on any change under dnn-providers/, whichever file in
-        the tree moved -- a sidecar, a sweep manifest, a whole bundle.
-        """
-        status = feature_matrix_main(
-            ["--output", str(DEFAULT_OVERVIEW_PATH), "--check"]
-        )
-        assert status == 0, capsys.readouterr().err

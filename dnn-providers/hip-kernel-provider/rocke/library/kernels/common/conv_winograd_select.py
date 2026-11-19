@@ -205,7 +205,7 @@ class WinogradPlan:
         generalized plans)."""
         if self.kind == "none":
             return "none"
-        if self.kind == "unfused2d":
+        if self.kind in ("unfused2d", "unfused2d_rt"):
             return f"{self.kind}:F({self.tile[0]}x{self.tile[1]},3x3)"
         return f"{self.kind}:{self.variant}"
 

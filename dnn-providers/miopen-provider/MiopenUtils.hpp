@@ -11,6 +11,7 @@
 
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
@@ -42,6 +43,16 @@
         }                                                                               \
     } while(0)
 
+namespace miopen_plugin::miopen_utils
+{
+
+/// @brief True when MIOPEN_FIND_ENFORCE names an enforcing action as MIOpen parses it:
+/// DB_UPDATE, SEARCH, SEARCH_DB_UPDATE or DB_CLEAN (case-insensitive), or a number 2-5 as
+/// std::stoul reads it. Unset, NONE, 1 and values MIOpen cannot use mean "nothing enforced".
+bool envFindEnforceIsSet();
+
+}
+
 /// @brief RAII guard for setting MIOpen tuning policy on a handle.
 ///
 /// This class saves the current tuning policy, sets a new one based on the
@@ -53,17 +64,20 @@
 /// - Search (3): Uses cached results if available, searches only on cache miss
 /// - SearchDbUpdate (4): Always re-searches, ignoring cached results
 ///
-/// Search (3) matches PyTorch's benchmark=true behavior: first run searches and
-/// caches, subsequent runs with same config use the cached optimal kernel.
-/// This is more efficient for production use.
+/// If MIOPEN_FIND_ENFORCE names an enforcing action, the guard sets miopenTuningPolicyNone
+/// so MIOpen applies the environment value instead, as it does for PyTorch.
+///
+/// Batchnorm and fused convolution plans use this guard. Plain convolution plans do
+/// not: they request tuning through Find's exhaustiveSearch argument, as PyTorch does,
+/// so an MIOPEN_FIND_ENFORCE environment setting still applies to them.
 
 class ScopedTuningPolicy
 {
 public:
     /// @brief Construct and set the tuning policy on the handle.
     /// @param handle The MIOpen handle to set the policy on.
-    /// @param benchmarkingEnabled If true, sets policy to miopenTuningPolicySearch.
-    ///                           If false, sets policy to miopenTuningPolicyNone.
+    /// @param benchmarkingEnabled If true and MIOPEN_FIND_ENFORCE enforces nothing, sets policy
+    ///                           to miopenTuningPolicySearch. Otherwise sets miopenTuningPolicyNone.
     ScopedTuningPolicy(miopenHandle_t handle, bool benchmarkingEnabled)
         : _handle(handle)
     {
@@ -76,8 +90,10 @@ public:
             _originalPolicy = miopenTuningPolicyNone; // Fallback
         }
 
-        // Set new policy: Search (3) for benchmarking, None (1) otherwise
-        auto policy = benchmarkingEnabled ? miopenTuningPolicySearch : miopenTuningPolicyNone;
+        // Search (3) for benchmarking, None (1) otherwise. None defers to MIOPEN_FIND_ENFORCE.
+        auto policy = benchmarkingEnabled && !miopen_plugin::miopen_utils::envFindEnforceIsSet()
+                          ? miopenTuningPolicySearch
+                          : miopenTuningPolicyNone;
         status = miopenSetTuningPolicy(_handle, policy);
         if(status != miopenStatusSuccess)
         {
@@ -197,6 +213,19 @@ constexpr size_t paddedConvSpatialDimCount(size_t spatialDimCount)
     return spatialDimCount < MIOPEN_MIN_CONV_SPATIAL_DIM_COUNT ? MIOPEN_MIN_CONV_SPATIAL_DIM_COUNT
                                                                : spatialDimCount;
 }
+
+/// @brief Matches PyTorch's torch.backends.cudnn.benchmark=True for convolution Find.
+///
+/// When benchmarking is enabled, sets the descriptor's find mode to
+/// miopenConvolutionFindModeNormal. The default (DYNAMIC_HYBRID) returns an installed
+/// find-db entry without measuring it and, on a miss, considers only dynamic solvers.
+/// Normal mode skips the installed find-db and, on a user find-db miss, measures every
+/// applicable solver. An existing user find-db entry is reused unmeasured, including one
+/// written by a non-benchmarking run; PyTorch behaves the same. Callers also pass
+/// exhaustiveSearch=true to Find so that solvers without a perf-db entry are tuned.
+/// When benchmarking is disabled the descriptor keeps MIOpen's default find mode.
+void setBenchmarkingFindMode(miopenConvolutionDescriptor_t convDescriptor,
+                             bool benchmarkingEnabled);
 
 using hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue;
 using hipdnn_flatbuffers_sdk::utilities::extractValueFromTensorValue;

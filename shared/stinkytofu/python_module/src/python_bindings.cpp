@@ -711,19 +711,18 @@ NB_MODULE(_stinkytofu, m) {
         .def(
             "set_mubuf",
             [](LogicalInstruction& inst, bool offen, int offset, bool glc, bool slc, bool nt,
-               int scope, int th, bool isStore, int nv, bool lds, bool hasMUBUFConst,
-               bool hasGLCModifier, bool hasSC0Modifier) {
+               int scope, int th, bool isStore, int nv, bool lds, bool hasGLCModifier,
+               bool hasSC0Modifier) {
                 MUBUFScope mScope = static_cast<MUBUFScope>(scope);
                 TemporalHint mTh = static_cast<TemporalHint>(th);
-                inst.mubuf = MUBUFModifiers(offen, offset, glc, slc, nt, lds, isStore,
-                                            hasMUBUFConst, hasGLCModifier, hasSC0Modifier, mScope,
-                                            mTh, static_cast<NonVolatile>(nv));
+                inst.mubuf =
+                    MUBUFModifiers(offen, offset, glc, slc, nt, lds, isStore, hasGLCModifier,
+                                   hasSC0Modifier, mScope, mTh, static_cast<NonVolatile>(nv));
             },
             nb::arg("offen") = false, nb::arg("offset") = 0, nb::arg("glc") = false,
             nb::arg("slc") = false, nb::arg("nt") = false, nb::arg("scope") = 0, nb::arg("th") = -1,
             nb::arg("is_store") = false, nb::arg("nv") = 0, nb::arg("lds") = false,
-            nb::arg("has_mubuf_const") = false, nb::arg("has_glc_modifier") = false,
-            nb::arg("has_sc0_modifier") = false,
+            nb::arg("has_glc_modifier") = false, nb::arg("has_sc0_modifier") = false,
             "Set MUBUF modifiers (offen, offset, glc, slc, nt, scope, th, is_store, nv, lds, caps)")
         .def(
             "set_smem",
@@ -733,6 +732,16 @@ NB_MODULE(_stinkytofu, m) {
             nb::arg("glc") = false, nb::arg("nv") = false, nb::arg("offset") = 0,
             nb::arg("has_scope_modifier") = false,
             "Set SMEM modifiers (glc, nv, offset, has_scope_modifier)")
+        .def(
+            "set_tensor",
+            [](LogicalInstruction& inst, int scope, int th, bool nv, bool isStore) {
+                inst.tensor =
+                    TENSORModifiers(static_cast<MUBUFScope>(scope), static_cast<TemporalHint>(th),
+                                    nv ? NonVolatile::NV : NonVolatile::NV_NONE, isStore);
+            },
+            nb::arg("scope") = 0, nb::arg("th") = -1, nb::arg("nv") = false,
+            nb::arg("is_store") = false,
+            "Set tensor-op cache-policy modifiers (scope, th, nv, is_store) for tensor_load_to_lds")
         .def(
             "add_src",
             [](LogicalInstruction& inst, const StinkyRegister& reg) { inst.srcs.push_back(reg); },

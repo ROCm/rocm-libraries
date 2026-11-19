@@ -107,4 +107,9 @@ namespace hipblaslt_bench_options
         return 2;
     }
 
+    int32_t& post_bench_verify_iters()
+    {
+        static int32_t v = 0;
+        return v;
+    }
 }

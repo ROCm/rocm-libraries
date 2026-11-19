@@ -7,7 +7,13 @@ set(BASE_ARCHITECTURES "")
 # All supported architectures including xnack variants - used for validation of GPU_TARGETS
 set(SUPPORTED_ARCHITECTURES "")
 
-if(HIPSPARSELT_ENABLE_ASAN OR BUILD_ADDRESS_SANITIZER)
+# THEROCK_SANITIZER is checked for the exact value, not with MATCHES: it also
+# takes HOST_ASAN, which instruments the host only and has no say over device
+# targets. Without this arm the staged-package path -- where THEROCK_SANITIZER
+# is the only flag set -- took the else branch, whose list carries the xnack-
+# targets, so a full-ASAN configuration could be built with replay protection
+# off. hipBLASLt's validation does not cover this module's list.
+if(HIPSPARSELT_ENABLE_ASAN OR BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
     # For address sanitizer builds, base and supported are the same
     list(APPEND BASE_ARCHITECTURES "gfx942:xnack+" "gfx950:xnack+" "gfx1250" "gfx1250-strict")
     set(SUPPORTED_ARCHITECTURES ${BASE_ARCHITECTURES})
@@ -16,7 +22,7 @@ else()
 
     set(SUPPORTED_ARCHITECTURES ${BASE_ARCHITECTURES})
     list(APPEND SUPPORTED_ARCHITECTURES "gfx942:xnack+" "gfx942:xnack-" "gfx950:xnack+"
-         "gfx950:xnack-" "gfx1250" "gfx1250-strict"
+         "gfx950:xnack-" "gfx1250" "gfx1250-strict" "gfx1250:xnack-" "gfx1250-strict:xnack-"
     )
 endif()
 
@@ -63,4 +69,122 @@ endfunction()
 # Sets <output_var> to the full list including xnack variants.
 function(hipsparselt_get_supported_architectures output_var)
     set(${output_var} ${SUPPORTED_ARCHITECTURES} PARENT_SCOPE)
+endfunction()
+
+
+
+# The three functions below are a deliberate copy of their tensilelite_*
+# counterparts in hipblaslt/cmake/tensilelite_supported_architectures.cmake, and
+# of compilerTargetOf() in hipblaslt/tensilelite/tensilelite/Common/Architectures.py.
+# All ask the compiler the same question and must keep the same answer, or
+# hip::device and the Tensile code objects part ways.
+#
+# Copied rather than shared: that module also defines SUPPORTED_ARCHITECTURES and
+# BASE_ARCHITECTURES at include time, and hipSPARSELt's lists are narrower, so
+# including it would silently widen what hipsparselt_validate_gpu_targets
+# accepts. It is also only on CMAKE_MODULE_PATH well after this runs.
+
+# Whether the compiler driver accepts a target ID. Asked with -###, a driver dry
+# run: the target ID is validated but nothing is compiled, so a probe costs ~10ms.
+# Answers are remembered for the rest of the configure, so each distinct ID is
+# asked once per configure rather than once per call.
+#
+# A compiler that is not an AMDGPU-aware clang rejects every ID, including bare
+# ones. Callers must treat a lone "no" as "cannot judge" rather than as a verdict
+# about the qualifier; see hipsparselt_normalize_xnack_archs.
+function(hipsparselt_target_id_supported output_var arch)
+    # Remembered in a global property, not a cache entry: the answer is a
+    # property of the compiler that happens to be installed, and a cache entry
+    # would outlive it. An in-place toolchain upgrade keeps the same
+    # CMAKE_CXX_COMPILER path, so nothing would invalidate a cached answer, and
+    # the configure would go on stripping a suffix the new compiler accepts --
+    # while TensileLite, which probes afresh in every process, would not. A
+    # global property is dropped at the end of each configure, so the two cannot
+    # drift apart; the cost is one ~10ms probe per distinct target ID.
+    string(MAKE_C_IDENTIFIER "_HIPSPARSELT_TARGET_ID_OK_${arch}" _cache_key)
+    get_property(_cached GLOBAL PROPERTY ${_cache_key})
+    if(NOT "${_cached}" STREQUAL "")
+        set(${output_var} "${_cached}" PARENT_SCOPE)
+        return()
+    endif()
+
+    # clang needs an input file, but never opens it under -###. Kept empty and
+    # reused so the probe does not depend on anything in the source tree.
+    set(_probe_src "${CMAKE_BINARY_DIR}/hipsparselt_target_id_probe.cpp")
+    if(NOT EXISTS "${_probe_src}")
+        file(WRITE "${_probe_src}" "")
+    endif()
+
+    execute_process(
+        COMMAND "${CMAKE_CXX_COMPILER}"
+                --target=amdgcn-amd-amdhsa "-mcpu=${arch}"
+                # Quoted: unquoted, CMake reads the # as a comment and eats the
+                # rest of the line, leaving clang to read from stdin and fail.
+                "-###" -c -x c++ "${_probe_src}"
+        RESULT_VARIABLE _rc
+        OUTPUT_QUIET ERROR_QUIET)
+
+    if(_rc EQUAL 0)
+        set(_ok ON)
+    else()
+        set(_ok OFF)
+    endif()
+    set_property(GLOBAL PROPERTY ${_cache_key} "${_ok}")
+    set(${output_var} "${_ok}" PARENT_SCOPE)
+endfunction()
+
+# An arch with the xnack qualifier removed, other qualifiers kept in order.
+#
+# Matched exactly, not by prefix, and for the same reason as _withoutXnack in
+# hipblaslt/tensilelite/Common/Architectures.py: the xnack token is dropped only
+# to reach a target the compiler will take, and anything else is left for the
+# compiler to refuse. A prefix match would also eat "xnack-typo", so a
+# misspelling would come back as a bare arch the compiler accepts, and the build
+# would go on with the replay mode nobody asked for.
+function(hipsparselt_strip_xnack output_var arch)
+    string(REPLACE ":" ";" _parts "${arch}")
+    list(POP_FRONT _parts _base)
+    set(_kept "")
+    foreach(_qualifier IN LISTS _parts)
+        if(NOT _qualifier STREQUAL "xnack+" AND NOT _qualifier STREQUAL "xnack-")
+            list(APPEND _kept "${_qualifier}")
+        endif()
+    endforeach()
+    list(JOIN _kept ":" _quals)
+    if(_quals)
+        set(${output_var} "${_base}:${_quals}" PARENT_SCOPE)
+    else()
+        set(${output_var} "${_base}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# Drops the xnack qualifier from the targets the compiler will not take it on.
+# Each arch is put to the compiler, and if the target ID is refused the bare
+# form is tried instead.
+#
+# Detected rather than tabulated, so no list here tracks which target IDs the
+# compiler takes and a change on that side needs no edit.
+#
+# Only the xnack token goes, so other qualifiers survive, and an arch refused
+# for some other reason -- a typo in the processor name -- has to stay an error
+# rather than quietly degrade to its base name. So the stripped form is asked
+# about too, and an arch is left exactly as given unless dropping xnack is what
+# makes it acceptable.
+function(hipsparselt_normalize_xnack_archs output_var)
+    set(_normalized "")
+    foreach(_arch IN LISTS ARGN)
+        set(_result "${_arch}")
+        hipsparselt_target_id_supported(_accepted "${_arch}")
+        if(NOT _accepted)
+            hipsparselt_strip_xnack(_stripped "${_arch}")
+            if(NOT _stripped STREQUAL _arch)
+                hipsparselt_target_id_supported(_stripped_accepted "${_stripped}")
+                if(_stripped_accepted)
+                    set(_result "${_stripped}")
+                endif()
+            endif()
+        endif()
+        list(APPEND _normalized "${_result}")
+    endforeach()
+    set(${output_var} "${_normalized}" PARENT_SCOPE)
 endfunction()

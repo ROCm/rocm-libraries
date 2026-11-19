@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
+import geko.optim.optim as optim_mod
 from geko import pipeline
 from geko.schemas import RunState
 
@@ -567,6 +568,86 @@ def test_run_search_keeps_existing_artifacts_when_winners_unchanged(monkeypatch:
     assert (lib_dir / "keep.txt").is_file()
     assert (build_dir / "keep.txt").is_file()
     assert (bench_dir / "keep.txt").is_file()
+
+
+def _logic_payload(sizes: list) -> dict:
+    return {
+        "ArchitectureName": "gfx950",
+        "ScheduleName": "gfx950",
+        "ProblemType": {
+            "DataType": 7,
+            "DestDataType": 7,
+            "ComputeDataType": 0,
+            "TransposeA": True,
+            "TransposeB": False,
+            "HighPrecisionAccumulate": True,
+        },
+        "DefaultSolution": 0,
+        "Solutions": [{"SolutionIndex": 0, "SolutionNameMin": "kernel"}],
+        "ExactLogic": sizes,
+        "LibraryType": "Equality",
+    }
+
+
+def _write_completed_config(optim_dir: Path, name: str, sizes: list, library_name: str | None = None) -> Path:
+    (optim_dir / f"{name}.yaml").write_text("MatrixInstruction: [16, 16, 16, 1]\n")
+    logic = optim_dir / f"build_{name}" / "3_LibraryLogic"
+    logic.mkdir(parents=True)
+    filename = library_name or f"{name}.yaml"
+    path = logic / filename
+    from geko.library import Library
+
+    Library(_logic_payload(sizes), filename).dump(logic, name=filename)
+    return path
+
+
+def test_process_duplicates_updates_shared_size_performance(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    optim_dir = tmp_path / "optimizations"
+    optim_dir.mkdir()
+    shared = [1024, 1024, 1, 1024]
+    unique = [8, 8, 1, 8]
+    bbs = "gfx950_Cijk_Alik_Bljk_BBS_BH.yaml"
+    hhs = "gfx950_Cijk_Alik_Bljk_HHS_BH.yaml"
+    path_a = _write_completed_config(
+        optim_dir,
+        "BBS_TN_0",
+        [[shared, [3, 100.0]], [unique, [3, 10.0]]],
+        bbs,
+    )
+    path_b = _write_completed_config(optim_dir, "BBS_TN_1", [[shared, [5, 200.0]]], bbs)
+    path_c = _write_completed_config(optim_dir, "HHS_TN_0", [[shared, [1, 50.0]]], hhs)
+
+    created = []
+
+    def _create(_hip, logic_dir, output_dir):
+        created.append((Path(logic_dir), Path(output_dir)))
+
+    def _bench(_hip, bench_file, _output, custom_lib_dir=None, devices=None, cache=False):
+        text = Path(bench_file).read_text()
+        rows = []
+        if "M: 1024" in text:
+            rows.append({"m": 1024, "n": 1024, "batch_count": 1, "k": 1024, "hipblaslt-Gflops": 999.0})
+        if "M: 8" in text:
+            rows.append({"m": 8, "n": 8, "batch_count": 1, "k": 8, "hipblaslt-Gflops": 1.0})
+        return pd.DataFrame(rows)
+
+    monkeypatch.setattr(optim_mod.library, "create", _create)
+    monkeypatch.setattr(optim_mod.bench, "run", _bench)
+
+    optim_mod.process_duplicates(str(tmp_path / "hip"), optim_dir, devices=[0])
+
+    built = {logic.parent.name for logic, _out in created}
+    assert built == {"build_BBS_TN_0", "build_BBS_TN_1"}
+
+    from geko.library import load_library
+
+    lib_a = load_library(path_a)
+    lib_b = load_library(path_b)
+    lib_c = load_library(path_c)
+    assert lib_a.sizes[0] == [shared, [3, 999.0]]
+    assert lib_a.sizes[1] == [unique, [3, 10.0]]
+    assert lib_b.sizes[0] == [shared, [5, 999.0]]
+    assert lib_c.sizes[0] == [shared, [1, 50.0]]
 
 
 def test_run_optimize_requires_existing_workdir(tmp_path: Path) -> None:

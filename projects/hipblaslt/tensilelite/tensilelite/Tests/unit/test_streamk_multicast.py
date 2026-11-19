@@ -333,10 +333,15 @@ class TestMulticastGate:
         from tensilelite.Components.WorkAssignment import StaticGrid
         assignment = StaticGrid()
         for method in (assignment.persistentMulticastPrologueSignal,
-                       assignment.persistentClusterNextTileArrive,
                        assignment.persistentMulticastZeroIterClusterWait):
             module = method(writer=None, kernel=_mc_state(ClusterDim=cluster, ClusterBarrier=False))
             assert not list(module.flatitems())
+        # Disabling the cluster handshake must retain the local TDM handoff.
+        from rocisa.instruction import SBarrier, SWaitCnt
+        kernel = _mc_state(ClusterDim=cluster, ClusterBarrier=False,
+                           enableTDMA=True, enableTDMB=True, NumThreads=128, WavefrontSize=32)
+        handoff = assignment.persistentTileHandoff(writer=None, kernel=kernel)
+        assert [type(item) for item in handoff.flatitems()] == [SWaitCnt, SBarrier]
 
 
 def test_cluster_flags_and_workspace_address_the_same_physical_peer():

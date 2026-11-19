@@ -10,17 +10,18 @@ program order, the last global load must come before the first float op. An
 emitter that loads a tensor after the math has started (the interleaved order
 the simple path keeps) fails it.
 
-Single-wave ``fuse_conv`` is exempt by design where ``late_row_inputs`` says
+Single-wave ``fuse_conv`` is exempt by design where ``auto_late_row_inputs`` says
 so: one wave owns all ``DV`` rows, and hoisting their inputs as well would
 spill, so it loads each row's ``v`` conv inputs, the state and the norm
 inputs where the parent order did (ALGORITHM.md §4.3, "One exception").
 With ``conv_once`` at ``DK = DV = 128``, ``WTK`` 4 or 8 and no
-``waves_per_eu`` floor it loads first like every other tile. The predicate
-and the order on both sides of it are pinned below; a separate test pins that
-the exemption is still in force at the knob-free exempt tile: some loads come
-before the first float op and some after it. The no-new-spill check of the
-tiles that load first and the exempt tile's zero-scratch contract are in
-``test_gdn_decode_fused.py``.
+``waves_per_eu`` floor ``auto`` loads first like every other tile, and the
+``row_loads`` knob forces either order on any single-wave ``fuse_conv`` spec.
+The predicate, the knob and the order on both sides of them are pinned below;
+a separate test pins that the exemption is still in force at the knob-free
+exempt tile: some loads come before the first float op and some after it. The
+no-new-spill check of the tiles that load first and the exempt tile's
+zero-scratch contract are in ``test_gdn_decode_fused.py``.
 
 Reachability: the registered GDN tiles come from dispatch, at their base
 configuration (``dispatch_gdn_decode_bases``). The KDA auto tiles at every
@@ -147,7 +148,7 @@ def _specs():
                     )
                     case = f"fused_{gate}_st{state_dtype}{tag}_w{nw}"
                     if conv and nw == 1:
-                        # the exempt tile (late_row_inputs; module docstring)
+                        # the exempt tile (auto_late_row_inputs; module docstring)
                         # has its own test
                         exempt[case] = spec
                         continue
@@ -158,7 +159,7 @@ def _specs():
                     out[f"{case}_knobs"] = lane
                     if conv and norm:
                         out[f"{case}_knobs_ngo"] = dc.replace(lane, norm_gate_once=True)
-    # single-wave fuse_conv where late_row_inputs lets it load first
+    # single-wave fuse_conv where auto_late_row_inputs lets it load first
     one_wave_knobs = dict(_TILE_KNOBS, waves_per_eu=0)
     for gate in ("gdn", "kda"):
         for state_dtype in ("bf16", "f16", "f32"):
@@ -237,7 +238,7 @@ def test_exempt_tile_loads_some_inputs_first_and_rows_late(case):
     assert late, f"{case}: exemption not in force, every load comes first"
 
 
-# late_row_inputs at the single-wave fuse_conv tile and its neighbours:
+# auto_late_row_inputs at the single-wave fuse_conv tile and its neighbours:
 # (overrides of _ONE_WAVE, keeps the late order). Single-wave conv_once loads
 # first only at DK = DV = 128, WTK 4 or 8 and no waves_per_eu floor; every
 # other single-wave fuse_conv spec keeps the exception.
@@ -280,4 +281,19 @@ def test_late_row_inputs_predicate_and_load_order(case):
     assert late_row_inputs(spec) is keeps_late, case
     late, first_math = _late_loads(spec)
     # the predicate is what the emitter does: late loads exactly where it says
+    assert bool(late) is keeps_late, (case, first_math, late[:4])
+
+
+@pytest.mark.parametrize("order", ["first", "late"])
+@pytest.mark.parametrize("case", sorted(_PREDICATE_CASES))
+def test_row_loads_forces_the_order_on_one_wave_with_fuse_conv(case, order):
+    overrides, auto_late = _PREDICATE_CASES[case]
+    spec = dc.replace(GdnDecodeSpec(), **dict(_ONE_WAVE, **overrides), row_loads=order)
+    assert is_valid_spec(spec, arch=_ARCH)[0], is_valid_spec(spec, arch=_ARCH)[1]
+    # Every case is one wave with fuse_conv except two_waves_no_co and
+    # norm_only, where the knob changes nothing and the order is auto's (first).
+    applies = spec.fuse_conv and spec.num_warps == 1
+    keeps_late = order == "late" if applies else auto_late
+    assert late_row_inputs(spec) is keeps_late, case
+    late, first_math = _late_loads(spec)
     assert bool(late) is keeps_late, (case, first_math, late[:4])

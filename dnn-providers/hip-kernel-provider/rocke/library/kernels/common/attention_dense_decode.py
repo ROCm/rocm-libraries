@@ -656,3 +656,56 @@ PERSIST_DECODES = _registry(
     PersistGqaPair,
     PersistGqaPair2Phase,
 )
+
+
+# The persistent decode's fast division is exact for dividends below 2**30: the
+# mul-hi + dividend add is emitted nsw, and mul-hi(n, magic) < n doubles at most.
+FASTDIV_DIVIDEND_LIMIT = 1 << 30
+
+
+def make_fastdiv(b, rt):
+    """The ``fastdiv`` a runtime-shape persistent body hands :class:`DecodeShape`:
+    ``(umulhi(n, magic) + n) >> shift`` with the ``<d>_magic`` / ``<d>_shift``
+    kernargs in ``rt``, so a grid-stride divide stays mul-hi + add + shift instead
+    of the backend's software integer division. Exact for ``n`` below
+    :data:`FASTDIV_DIVIDEND_LIMIT`, which :func:`fastdiv_kernargs` enforces."""
+
+    def fastdiv(n, d):
+        return b.lshr(b.add(b.umul_hi_i32(n, rt[f"{d}_magic"]), n), rt[f"{d}_shift"])
+
+    return fastdiv
+
+
+def fastdiv_kernargs(spec, arch: str) -> dict[str, int]:
+    """``{<divisor>_magic, <divisor>_shift}`` for every ``spec.fastdiv_divisors``
+    entry, from :func:`rocke.helpers.magic_division.calculate_magic_numbers`. The magic
+    is a uint32 passed as its two's-complement i32 bit pattern, which is what the
+    kernel's unsigned mul-hi reads.
+
+    Raises when a decode dividend can reach :data:`FASTDIV_DIVIDEND_LIMIT` (the
+    work-item count, or the decode's own bound): past it the quotient is wrong with
+    no fault."""
+    if not spec.fastdiv_divisors:
+        return {}
+    from rocke.helpers.magic_division import calculate_magic_numbers
+
+    bound = PERSIST_DECODES[spec.resolved_persist_decode].fastdiv_dividend_bound(spec)
+    if bound >= FASTDIV_DIVIDEND_LIMIT:
+        raise ValueError(
+            f"{arch} attention_dense: persistent decode dividend bound {bound} "
+            f"(the work-item count nqb*Hq*B, or the decode's own) must be below "
+            f"2**30 for the work decode's fast division"
+        )
+    # A runtime-shape persistent body is never ragged, so nqb is exact.
+    value = {
+        "batch": spec.batch,
+        "num_query_heads": spec.num_query_heads,
+        "gqa": spec.num_queries_per_kv,
+        "nqb": spec.seqlen_q // spec.block_m,
+    }
+    out = {}
+    for d in spec.fastdiv_divisors:
+        magic, shift = calculate_magic_numbers(value[d])
+        out[f"{d}_magic"] = magic - (1 << 32) if magic >= (1 << 31) else magic
+        out[f"{d}_shift"] = shift
+    return out

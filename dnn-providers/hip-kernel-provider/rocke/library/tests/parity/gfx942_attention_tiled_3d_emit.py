@@ -11,19 +11,25 @@
 #      build_unified_attention_3d_tiled(spec, arch="gfx942")
 #   2. the REDUCE kernel via
 #      build_unified_attention_reduce_tiled(reduce_spec, arch="gfx942")
-# whose UnifiedAttentionReduceTiledSpec is derived from the same config
-# (head_size / num_query_heads / num_kv_heads / dtype / num_segments).
+# whose UnifiedAttentionReduceTiledSpec is derived from the same config by
+# reduce_spec_for (head_size / num_query_heads / num_kv_heads / dtype /
+# num_segments / waves_per_eu), as build_unified_attention_3d_tiled_module does.
 #
 # Each kernel is lowered with _native_lower(kernel, arch="gfx942") and the two
 # .ll texts are concatenated (segment first, then reduce) to stdout so they can
 # be byte-compared with the C emitter gfx942_attention_tiled_3d_emit.c.
+# prove_parity_binding keeps a copy of _CONFIGS (reduce_emit_lse for the
+# reduce-only _REDUCE_LSE configs, emit_lse where the segment writes LSE too) in
+# platform/cpp/bindings/attention_tiled_parity_configs.py;
+# update it in step.
+import dataclasses
 import sys
 
 from kernels.gfx942.attention_tiled_3d import (
     UnifiedAttention3DTiledSpec,
-    UnifiedAttentionReduceTiledSpec,
     build_unified_attention_3d_tiled,
     build_unified_attention_reduce_tiled,
+    reduce_spec_for,
 )
 
 try:
@@ -303,23 +309,131 @@ _CONFIGS = {
         tile_size_override=16,
         use_wave_page_id_load=True,
     ),
+    18: dict(
+        # num_queries_per_kv=5 does not divide BLOCK_M=16: padded q-block.
+        head_size=128,
+        block_size=16,
+        num_query_heads=40,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+    ),
+    # --- idx19: head_size=192 MHA decode selector spec
+    19: dict(
+        head_size=192,
+        block_size=16,
+        num_query_heads=96,
+        num_kv_heads=96,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_segments=16,
+        num_seqs=1,
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+    ),
+    20: dict(
+        # Reduce with emit_lse (see _REDUCE_LSE): bf16 D128 GQA.
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+    ),
+    21: dict(
+        # Reduce with emit_lse (see _REDUCE_LSE): fp16 D64.
+        head_size=64,
+        block_size=16,
+        num_query_heads=8,
+        num_kv_heads=8,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+    ),
+    22: dict(
+        # Decode GQA with waves_per_eu, which the reduce inherits.
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_decode_grid=True,
+        waves_per_eu=2,
+    ),
 }
+
+# Configs whose REDUCE kernel is built with emit_lse=True (segment unchanged).
+_REDUCE_LSE = frozenset({20, 21})
+
+
+def _strided_decode(head_size, block_size, tile, dtype, num_segments, heads=(32, 8)):
+    """A strided (non-paged) decode spec as the strided decode candidate selects it:
+    one CTA per sequence, streamed K/V, the runtime's auto tile for the block."""
+    return dict(
+        head_size=head_size,
+        block_size=block_size,
+        num_query_heads=heads[0],
+        num_kv_heads=heads[1],
+        dtype=dtype,
+        num_segments=num_segments,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        num_seqs=4,
+        tile_size_override=tile,
+        kv_layout="strided",
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+    )
+
+
+# 23-31: representative strided decode specs spanning the catalog's D x block
+# axes (D64/128/256 x block 16/32/64); 32 is 27 with waves_per_eu=2. They
+# follow the paged configs (0-22): new keys only, never overwrite one.
+_CONFIGS.update(
+    {
+        23: _strided_decode(64, 16, None, "fp16", 64),
+        24: _strided_decode(64, 32, None, "bf16", 16),
+        25: _strided_decode(64, 64, None, "fp16", 8),
+        26: _strided_decode(128, 16, None, "bf16", 60, heads=(16, 16)),
+        27: _strided_decode(128, 32, 16, "fp16", 16),
+        28: _strided_decode(128, 64, 32, "bf16", 2),
+        29: _strided_decode(256, 16, None, "fp16", 22),
+        30: _strided_decode(256, 32, 16, "bf16", 64, heads=(64, 4)),
+        31: _strided_decode(256, 64, 32, "fp16", 8),
+        32: dict(_strided_decode(128, 32, 16, "fp16", 16), waves_per_eu=2),
+    }
+)
 
 
 def _kernels(idx: int):
     if idx not in _CONFIGS:
         raise SystemExit(f"unknown config index {idx}")
     cfg = _CONFIGS[idx]
-    seg_kernel = build_unified_attention_3d_tiled(
-        UnifiedAttention3DTiledSpec(**cfg), arch="gfx942"
-    )
-    red_spec = UnifiedAttentionReduceTiledSpec(
-        head_size=cfg["head_size"],
-        num_query_heads=cfg["num_query_heads"],
-        num_kv_heads=cfg["num_kv_heads"],
-        dtype=cfg["dtype"],
-        num_segments=cfg["num_segments"],
-    )
+    spec = UnifiedAttention3DTiledSpec(**cfg)
+    seg_kernel = build_unified_attention_3d_tiled(spec, arch="gfx942")
+    red_spec = reduce_spec_for(spec)
+    if idx in _REDUCE_LSE:
+        red_spec = dataclasses.replace(red_spec, emit_lse=True)
     red_kernel = build_unified_attention_reduce_tiled(red_spec, arch="gfx942")
     return seg_kernel, red_kernel
 
