@@ -46,11 +46,12 @@ namespace TensileLite
         m_rotatingInfo.push_back(RotatingUnitInfo{sizes, totalSize, 0});
     }
 
-    void RotatingMemory::setOriginalSizes(std::vector<size_t> sizes)
+    void RotatingMemory::raiseOriginalSizes(std::vector<size_t> const& sizes)
     {
-        if(m_rotatingBufferNum != sizes.size())
+        if(m_originalSizes.size() != sizes.size())
             throw std::runtime_error("rotating buffer number is not equal to original size number");
-        m_originalSizes = std::move(sizes);
+        for(size_t j = 0; j < sizes.size(); j++)
+            m_originalSizes[j] = std::max(m_originalSizes[j], sizes[j]);
     }
 
     void RotatingMemory::createRotatingMemory(int32_t mode, size_t rotatingSize)

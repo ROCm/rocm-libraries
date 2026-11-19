@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -618,17 +619,38 @@ TEST(CustomKernelTest, RndSeedDescriptorPacksThroughCustomCall)
     EXPECT_EQ(padding, 0u);
 }
 
-static uint32_t emittedUint32(KernelInvocation const& invocation, size_t index)
+static size_t integerArgBytes(CustomArgType type)
 {
-    uint32_t value = 0;
-    std::memcpy(&value,
-                static_cast<uint8_t const*>(invocation.args.data()) + index * sizeof(value),
-                sizeof(value));
+    switch(type)
+    {
+    case CustomArgType::int8:
+    case CustomArgType::uint8:
+        return 1;
+    case CustomArgType::int16:
+    case CustomArgType::uint16:
+        return 2;
+    case CustomArgType::int32:
+    case CustomArgType::uint32:
+        return 4;
+    case CustomArgType::int64:
+    case CustomArgType::uint64:
+        return 8;
+    default:
+        throw std::logic_error("not an integer kernel argument type");
+    }
+}
+
+// Same-typed kernargs are packed without padding, so slot index sits at index * width.
+// Values are zero-extended, which assumes a little-endian host.
+static uint64_t emittedInteger(KernelInvocation const& invocation, size_t index, size_t width)
+{
+    uint64_t value = 0;
+    std::memcpy(&value, static_cast<uint8_t const*>(invocation.args.data()) + index * width, width);
     return value;
 }
 
 // The byte strides must be computed in integers: a float product rounds to 24 bits.
-static std::array<uint32_t, 4> emittedByteStrides(rocisa::DataType abType,
+static std::array<uint64_t, 4> emittedByteStrides(rocisa::DataType abType,
                                                   rocisa::DataType cdType,
                                                   CustomArgType    type,
                                                   size_t           lda,
@@ -669,17 +691,18 @@ static std::array<uint32_t, 4> emittedByteStrides(rocisa::DataType abType,
     ContractionInputs inputs;
     StreamKSettings   sk;
     KernelInvocation  invocation = solution.generateCustomCall<false>(problem, inputs, device, sk);
-    EXPECT_EQ(invocation.args.size(), 4 * sizeof(uint32_t));
-    return {emittedUint32(invocation, 0),
-            emittedUint32(invocation, 1),
-            emittedUint32(invocation, 2),
-            emittedUint32(invocation, 3)};
+    size_t width = integerArgBytes(type);
+    EXPECT_EQ(invocation.args.size(), 4 * width);
+    return {emittedInteger(invocation, 0, width),
+            emittedInteger(invocation, 1, width),
+            emittedInteger(invocation, 2, width),
+            emittedInteger(invocation, 3, width)};
 }
 
 TEST(CustomKernelTest, ByteStridesAreExactBeyondTheFloatMantissa)
 {
     // 2-byte C/D: 2 * 16777219 = 33554438, which a float cannot represent.
-    std::array<uint32_t, 4> bf16 = emittedByteStrides(
+    std::array<uint64_t, 4> bf16 = emittedByteStrides(
         rocisa::DataType::Float8, rocisa::DataType::BFloat16, CustomArgType::int32, 64, 64, 16777219, 16777219);
     EXPECT_EQ(bf16[0], 64u);
     EXPECT_EQ(bf16[1], 64u);
@@ -688,7 +711,7 @@ TEST(CustomKernelTest, ByteStridesAreExactBeyondTheFloatMantissa)
 
     // 1-byte A/B: 2^26 + 4 needs 27 significant bits.
     constexpr size_t big = (size_t(1) << 26) + 4;
-    std::array<uint32_t, 4> fp8
+    std::array<uint64_t, 4> fp8
         = emittedByteStrides(rocisa::DataType::Float8,
                              rocisa::DataType::BFloat16,
                              CustomArgType::int32,
@@ -702,61 +725,81 @@ TEST(CustomKernelTest, ByteStridesAreExactBeyondTheFloatMantissa)
     EXPECT_EQ(fp8[3], 8u);
 }
 
-// A byte stride must fit the integer type its kernel declares: int32 stops at 2^31 - 1, uint32 at 2^32 - 1.
+// Byte strides of A, B, C and D when only the given tensor gets a non-trivial leading dimension.
+static std::array<uint64_t, 4> emittedByteStridesWithLd(CustomArgType type, size_t tensor, size_t ld)
+{
+    std::array<size_t, 4> lds = {64, 64, 4, 4};
+    lds[tensor]               = ld;
+    return emittedByteStrides(rocisa::DataType::Float8,
+                              rocisa::DataType::BFloat16,
+                              type,
+                              lds[0],
+                              lds[1],
+                              lds[2],
+                              lds[3]);
+}
+
+// A byte stride must fit the integer type its kernel declares: the largest value is accepted and
+// read back exactly, and one more is rejected.
 TEST(CustomKernelTest, ByteStridesMustFitTheirKernelArgumentType)
 {
-    constexpr size_t int32Elements = size_t(1) << 30;
-    std::array<uint32_t, 4> ok     = emittedByteStrides(rocisa::DataType::Float8,
-                                                    rocisa::DataType::BFloat16,
-                                                    CustomArgType::int32,
-                                                    64,
-                                                    64,
-                                                    int32Elements - 1,
-                                                    int32Elements - 1);
-    EXPECT_EQ(ok[2], 2 * (int32Elements - 1));
-    EXPECT_EQ(ok[3], 2 * (int32Elements - 1));
-    EXPECT_THROW(emittedByteStrides(rocisa::DataType::Float8,
-                                    rocisa::DataType::BFloat16,
-                                    CustomArgType::int32,
-                                    64,
-                                    64,
-                                    int32Elements,
-                                    int32Elements),
-                 std::runtime_error);
+    struct Limit
+    {
+        CustomArgType type;
+        uint64_t      max;
+    };
+    std::array<Limit, 8> const limits = {{{CustomArgType::int8, std::numeric_limits<int8_t>::max()},
+                                          {CustomArgType::uint8, std::numeric_limits<uint8_t>::max()},
+                                          {CustomArgType::int16, std::numeric_limits<int16_t>::max()},
+                                          {CustomArgType::uint16, std::numeric_limits<uint16_t>::max()},
+                                          {CustomArgType::int32, std::numeric_limits<int32_t>::max()},
+                                          {CustomArgType::uint32, std::numeric_limits<uint32_t>::max()},
+                                          {CustomArgType::int64, std::numeric_limits<int64_t>::max()},
+                                          {CustomArgType::uint64, std::numeric_limits<uint64_t>::max()}}};
 
-    constexpr size_t int32Bytes = size_t(1) << 31;
-    std::array<uint32_t, 4> fp8 = emittedByteStrides(rocisa::DataType::Float8,
-                                                     rocisa::DataType::BFloat16,
-                                                     CustomArgType::int32,
-                                                     int32Bytes - 1,
-                                                     64,
-                                                     64,
-                                                     64);
-    EXPECT_EQ(fp8[0], int32Bytes - 1);
-    EXPECT_THROW(emittedByteStrides(rocisa::DataType::Float8,
-                                    rocisa::DataType::BFloat16,
-                                    CustomArgType::int32,
-                                    int32Bytes,
-                                    64,
-                                    64,
-                                    64),
-                 std::runtime_error);
+    for(Limit const& limit : limits)
+    {
+        SCOPED_TRACE("argument type " + std::to_string(static_cast<int>(limit.type)));
+        // A and B have 1-byte elements, C and D have 2-byte elements, and the limits are odd.
+        for(size_t tensor = 0; tensor < 4; tensor++)
+        {
+            SCOPED_TRACE("tensor " + std::to_string(tensor));
+            size_t bytesPerElement = tensor < 2 ? 1 : 2;
+            // size_t(-1) asks GEMM_Strides for the default leading dimension, so it is not usable.
+            size_t largestLd = std::min<uint64_t>(limit.max / bytesPerElement,
+                                                  std::numeric_limits<size_t>::max() - 1);
+            std::array<uint64_t, 4> strides = emittedByteStridesWithLd(limit.type, tensor, largestLd);
+            EXPECT_EQ(strides[tensor], largestLd * bytesPerElement);
 
-    constexpr size_t uint32Elements = size_t(1) << 31;
-    std::array<uint32_t, 4> wide    = emittedByteStrides(rocisa::DataType::Float8,
-                                                      rocisa::DataType::BFloat16,
-                                                      CustomArgType::uint32,
-                                                      64,
-                                                      64,
-                                                      uint32Elements - 1,
-                                                      uint32Elements - 1);
-    EXPECT_EQ(wide[2], 2 * (uint32Elements - 1));
-    EXPECT_THROW(emittedByteStrides(rocisa::DataType::Float8,
-                                    rocisa::DataType::BFloat16,
-                                    CustomArgType::uint32,
-                                    size_t(1) << 32,
-                                    64,
-                                    64,
-                                    64),
-                 std::runtime_error);
+            // No larger value fits in size_t for uint64.
+            if(limit.max == std::numeric_limits<uint64_t>::max())
+                continue;
+            size_t overLd = largestLd + 1;
+            EXPECT_GT(overLd * bytesPerElement, limit.max);
+            EXPECT_THROW(emittedByteStridesWithLd(limit.type, tensor, overLd), std::runtime_error);
+        }
+    }
+}
+
+// A byte stride bound to a floating point or boolean kernarg cannot be checked and must be rejected.
+TEST(CustomKernelTest, ByteStridesNeedAnIntegerKernelArgument)
+{
+    for(CustomArgType type : {CustomArgType::float16,
+                              CustomArgType::float32,
+                              CustomArgType::float64,
+                              CustomArgType::boolean})
+    {
+        SCOPED_TRACE("argument type " + std::to_string(static_cast<int>(type)));
+        try
+        {
+            emittedByteStridesWithLd(type, 0, 64);
+            ADD_FAILURE() << "expected std::runtime_error";
+        }
+        catch(std::runtime_error const& e)
+        {
+            EXPECT_NE(std::string(e.what()).find("needs an integer kernel argument"),
+                      std::string::npos)
+                << e.what();
+        }
+    }
 }

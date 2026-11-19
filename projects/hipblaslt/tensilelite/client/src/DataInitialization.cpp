@@ -1299,7 +1299,6 @@ namespace TensileLite
             {
                 m_rm.reset();
                 bool isRMInitPost = false;
-                std::vector<size_t> originalSizes;
                 // A tensor with a pristine buffer is the one that has a non-null input pointer.
                 std::function<std::vector<size_t>(ContractionProblemGemm const&)> getCopySizes
                     = [&](ContractionProblemGemm const& problem) {
@@ -1307,12 +1306,6 @@ namespace TensileLite
                         auto it = m_vdata[t].pristine.find(problem.tensors()[t].dataType());
                         return it != m_vdata[t].pristine.end() && it->second.maxElements != 0;
                     });
-                };
-                std::function<void(std::vector<size_t> const&)> raiseOriginalSizes
-                    = [&](std::vector<size_t> const& sizes) {
-                    originalSizes.resize(sizes.size(), 0);
-                    for(size_t j = 0; j < sizes.size(); j++)
-                        originalSizes[j] = std::max(originalSizes[j], sizes[j]);
                 };
                 for(auto const& p : problemFactory.problems())
                 {
@@ -1347,19 +1340,14 @@ namespace TensileLite
                             isRMInitPost = true;
                         }
                         m_rm->addRotatingSize(getCopySizes(problem));
-                        raiseOriginalSizes(vec_rm);
+                        m_rm->raiseOriginalSizes(vec_rm);
                     }
                     else if(auto ptr = dynamic_cast<ContractionProblemGroupedGemm const*>(p.get()))
                     {
                         const ContractionProblemGroupedGemm& grouped = *ptr;
                         std::vector<size_t>                    vec_rm;
-                        std::vector<size_t>                    copySizes;
                         for(auto const& problem : grouped.gemms)
                         {
-                            std::vector<size_t> tmpCopySizes = getCopySizes(problem);
-                            copySizes.resize(tmpCopySizes.size(), 0);
-                            for(size_t j = 0; j < tmpCopySizes.size(); j++)
-                                copySizes[j] += tmpCopySizes[j];
                             std::vector<size_t> tmp_rm;
                             for(size_t i = 0; i < problem.tensors().size(); i++)
                             {
@@ -1403,12 +1391,9 @@ namespace TensileLite
                             m_rm          = std::make_shared<RotatingMemory>(vec_rm.size());
                             isRMInitPost = true;
                         }
-                        m_rm->addRotatingSize(copySizes);
-                        raiseOriginalSizes(vec_rm);
+                        m_rm->addRotatingSize(vec_rm);
                     }
                 }
-                if(m_rm)
-                    m_rm->setOriginalSizes(originalSizes);
             }
 
             // Init contants
