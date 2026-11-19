@@ -3,6 +3,7 @@
 """EarlyStop: a kernel whose warmup is FACTOR x off the best is not timed."""
 
 import rocke.runtime as rt_mod
+import rocke.runtime.stall_gate as stall_gate_mod
 
 from benchmarks.common.early_stop import EarlyStop
 
@@ -219,6 +220,10 @@ def test_staged_timing_reports_the_median_of_stalled_samples(monkeypatch):
         return [base + 1.0, base, base - 0.1]
 
     monkeypatch.setattr(rt_mod, "time_launches_staged", fake_staged)
+    # EarlyStop asks for the process's stall gate once before the first staged
+    # timing; the real one opens a device, so a host with no GPU cannot run it.
+    gate_checks = []
+    monkeypatch.setattr(stall_gate_mod, "default_gate", lambda: gate_checks.append(1))
     stop = EarlyStop(5.0, after=1, timing="staged")
     assert stop.measure(fast, warmup=3, iters=10) == 1.5
     assert block == [] and staged == [(fast, 3, 10)]
@@ -226,6 +231,7 @@ def test_staged_timing_reports_the_median_of_stalled_samples(monkeypatch):
     assert stop.measure(ok, warmup=3, iters=10) == 3.5
     assert block == [(ok, 0, 1), (ok, 0, 2)]
     assert staged[-1] == (ok, 0, 10)
+    assert gate_checks == [1]
 
 
 def test_the_sweep_flag_picks_the_timing(monkeypatch):
