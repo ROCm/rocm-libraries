@@ -335,11 +335,13 @@ typedef struct rocke_implicit_gemm_conv_spec
     /* split_tail_compact (split_tail): one flat grid -- full tiles, then the
      * tail slice-major -- decoded into the default launch's (x, y, z) (tag stc). */
     bool split_tail_compact; /* default false */
-    /* split_det (1, 2): deterministic split: every non-owner slice stores its
-     * f32 partial tile into its slot of sk_partials and counts in; the owner
-     * (last slice) folds them in slot order and stores D once. 2 moves the
-     * partials through agent-coherent (SC1) buffer accesses. Appends sk_flags
-     * and sk_partials. 3 (per-slice slabs + a separate fold) is Python-only. */
+    /* split_det (1, 2, 3): deterministic split: every non-owner slice stores
+     * its f32 partial tile into its slot of sk_partials and counts in; the
+     * owner (last slice) folds them in slot order and stores D once. 2 moves
+     * the partials through agent-coherent (SC1) buffer accesses. Appends
+     * sk_flags and sk_partials. 3 instead stores every slice's f32 partial
+     * tile into its own [M, K] slab of sk_partials (slot = slice); a separate
+     * fold kernel sums the slabs in slot order into D (not with split_tail). */
     int split_det; /* default 0 */
     /* split_xcd_remap: the whole split launch of one group, slice-major,
      * remapped XCD-contiguously (replaces xcd_remap / chiplet_swizzle). */
@@ -362,7 +364,8 @@ typedef struct rocke_implicit_gemm_conv_spec
     bool no_agpr; /* agpr_alloc "0,0" */
     bool xh_stride_m; /* x-halo A rows M-strided across a wave's MFMAs */
     int fxh_dma; /* x-halo DMA staging schedule (>= 1000: wave-private A) */
-    int xh_yring; /* x-halo input-row ring across the y taps (Python-only) */
+    int xh_yring; /* x-halo input-row ring across the y taps (2 / 4 rows, + 10:
+                   * early reload; + 20, early ring rows, is Python-only) */
     bool xh_pad; /* fxh_dma >= 1000 loop on padded inputs (zero halo from masked DMA) */
 
     /* cshuffle_m_chunks: stage the cshuffle C tile in that many row slabs
