@@ -8,6 +8,7 @@
 #include <optional>
 #include <vector>
 
+#include "common/ConvEpilogueFormulation.hpp"
 #include "common/ConvRepackFormulation.hpp"
 #include "engines/plans/PlanBuilderInterface.hpp"
 #include "engines/plans/PlanInterface.hpp"
@@ -56,8 +57,11 @@ public:
     /// candidate, and @p layout does the same for a layout candidate; tests use them to check
     /// those plans. @p narrowPartials: see NarrowPartials. @p maxBackwardWeightsRepackBytes, when
     /// set, bounds a further backward weights benchmarking candidate's repack workspace.
-    /// @p nativeEpilogue: the backend applies a fused graph's epilogue in its GEMM where the
-    /// pattern and the GEMM allow (hipBLASLt; fuseEpilogue), instead of in a repack pass.
+    /// @p gemmEpilogue: what of a fused graph's epilogue the backend's GEMMs apply themselves
+    /// where the pattern and the GEMM allow (fuseEpilogue), instead of a repack pass. With
+    /// GemmEpilogueSupport::libraryActivations the builder serves only graphs whose chain maps
+    /// to a library activation the exact form does not use (usesLibraryActivation), and only
+    /// with that plan: the builder of the opt-in HIPBLASLT_CONV_LIBRARY_ACTIVATION_ENGINE.
     explicit ConvGemmPlanBuilder(PlanFactory factory,
                                  size_t maxRepackWorkspaceBytes = MAX_REPACK_WORKSPACE_BYTES,
                                  bool tf32 = false,
@@ -66,7 +70,7 @@ public:
                                  ColumnLayout layout = ColumnLayout::FOLLOW_Y,
                                  NarrowPartials narrowPartials = NarrowPartials::NEVER,
                                  std::optional<size_t> maxBackwardWeightsRepackBytes = std::nullopt,
-                                 bool nativeEpilogue = false);
+                                 GemmEpilogueSupport gemmEpilogue = {});
 
     bool isApplicable(
         const HipdnnEnginePluginHandle& handle,
@@ -83,16 +87,19 @@ public:
 private:
     /// The plan calls for @p opGraph in whichever direction it is, or nullopt. @p
     /// wideBackwardWeights: a backward weights plan under maxBackwardWeightsRepackBytes, nullopt
-    /// for another direction or without that cap.
+    /// for another direction or without that cap. @p gemmEpilogue false: a fused graph's
+    /// epilogue in a repack pass, whatever the GEMMs could apply.
     std::optional<ConvGemmPlanCalls>
         callsFor(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                  ColumnLayout layout = ColumnLayout::FOLLOW_Y,
                  bool splitReduction = false,
-                 bool wideBackwardWeights = false) const;
+                 bool wideBackwardWeights = false,
+                 bool gemmEpilogue = true) const;
 
     /// The plan calls this builder runs @p opGraph with: callsFor's default; for a fused graph
-    /// whose default the backend cannot run (the deterministic hipBLASLt engines have no
-    /// workspace-free algorithm for some fp32-output GEMMs), the first other column layout it can.
+    /// whose GEMM epilogue the backend cannot run, the epilogue in a pass; for one whose pass
+    /// plan it cannot run (the deterministic hipBLASLt engines have no workspace-free algorithm
+    /// for some fp32-output GEMMs), the first other column layout it can.
     std::optional<ConvGemmPlanCalls>
         buildableCalls(const HipdnnEnginePluginHandle& handle,
                        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const;
@@ -109,7 +116,7 @@ private:
     ColumnLayout _layout;
     NarrowPartials _narrowPartials;
     std::optional<size_t> _maxBackwardWeightsRepackBytes;
-    bool _nativeEpilogue;
+    GemmEpilogueSupport _gemmEpilogue;
 };
 
 } // namespace hipblaslt_plugin

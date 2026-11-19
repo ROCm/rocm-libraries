@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <optional>
 #include <vector>
 
 #include "HipblasltMatmulDesc.hpp"
@@ -47,6 +48,8 @@ private:
         HipblasltMatrixLayout b;
         HipblasltMatrixLayout d;
         hipblasLtMatmulHeuristicResult_t heuristic{};
+        /// The addend's layout (GemmCall::c); without one, c is d.
+        std::optional<HipblasltMatrixLayout> c;
     };
 
     std::vector<PreparedCall> _calls;
