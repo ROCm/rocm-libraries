@@ -69,6 +69,21 @@ Tests:
              nos6,
              nos7]
 
+# Every diagonal of nos4 is stored and at most 0.44 in magnitude, so the tolerance 1
+# boosts each of them to zero; the ROCm backend reports a zero pivot at row 0.
+- name: csrilu02
+  category: pre_checkin
+  function: csrilu02
+  precision: *single_double_precisions_complex_real
+  M: 1
+  numericboost: [1]
+  boosttol: [1.0]
+  boostval: [0.0]
+  boostvali: [0.0]
+  solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos4]
+
 - name: csrilu02
   category: nightly
   function: csrilu02
