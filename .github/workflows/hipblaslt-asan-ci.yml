@@ -6,6 +6,10 @@ on:
       - opened
       - synchronize
       - reopened
+      # Draft pull requests skip the build and test, so run as soon as one is
+      # marked ready. Converting back to draft cancels an in-progress run.
+      - ready_for_review
+      - converted_to_draft
     paths:
       - "projects/hipblaslt/**"
       - "projects/hipsparselt/**"
@@ -37,6 +41,14 @@ concurrency:
 jobs:
   setup:
     name: "Setup"
+    # Skip drafts unless they carry ci:run-on-draft. The label is read when a
+    # run starts, so it takes effect on the next push. There is no `labeled`
+    # trigger: a run for an unrelated label would post a passing summary that
+    # hides the real result for the same commit.
+    if: >-
+      github.event_name != 'pull_request' ||
+      !github.event.pull_request.draft ||
+      contains(github.event.pull_request.labels.*.name, 'ci:run-on-draft')
     runs-on: ubuntu-24.04
     outputs:
       # Use the same TheRock revision as rocm-libraries' Multi-Arch CI so
@@ -359,15 +371,23 @@ jobs:
     # genuine build or test failures still reach the gate below.
     if: ${{ always() && !cancelled() }}
     needs:
+      - setup
       - build
       - test
     runs-on: ubuntu-24.04
     steps:
       - name: Report and gate
         env:
+          SETUP: ${{ needs.setup.result }}
           BUILD: ${{ needs.build.result }}
           TEST: ${{ needs.test.result }}
         run: |
+          if [[ "$SETUP" == "skipped" ]]; then
+            message="Skipped because the pull request is a draft. Mark it ready for review, or add the ci:run-on-draft label and push, to run hipBLASLt ASAN CI."
+            echo "$message"
+            echo "$message" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           echo "Build (hipBLASLt / hipSPARSELt HOST_ASAN): ${BUILD}"
           echo "Test  (hipBLASLt / hipSPARSELt HOST_ASAN): ${TEST}"
           if [[ "$BUILD" != "success" || "$TEST" != "success" ]]; then

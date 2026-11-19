@@ -668,7 +668,7 @@ the C++ build and test.
 | CPU reference GEMM (`cpu-gemm-driver`, TensileLite C++ gtests) | Yes, in the selected standard tier | Component team | TheRock's TensileLite job runs the installed CTest suite and reports through `Multi-Arch CI Summary`. Math CI separately runs the build-tree cases for C++ coverage. AMAX-D uses thread limits 1, 3 and 8; see [CPU reference GEMM tests](tensilelite/TESTING.md#cpu-reference-gemm-tests) |
 | Integration / smoke tests (client GTest) | Yes | Component team | Validate behavior across key scenarios |
 | Characterization goldens | Yes, when `tensilelite/` is touched | Component team | Asserted by the gating `preliminary` job and by the TensileLite coverage lane. Review every golden diff; never bulk-regenerate |
-| AddressSanitizer build and tests | **No** | Component team | The hipBLASLt ASAN lane runs quick tests for relevant PRs, standard tests nightly, and the selected test type manually, but its summary check is not required. Keep it green anyway |
+| AddressSanitizer build and tests | **No** | Component team | The hipBLASLt ASAN lane runs quick tests for relevant non-draft PRs, standard tests nightly, and the selected test type manually, but its summary check is not required. Keep it green anyway |
 | Code coverage floor and ratchet (TensileLite) | Yes, when `tensilelite/` is touched | Component team / CI | Enforced by the `Component CI: TensileLite coverage` lane, which rolls up to the required `Component CI Summary`. Floors move up only, on the honor system |
 | Formatting and lint (`pre-commit`) | Yes | CI / DevOps | Maintain hooks |
 | Sensitive-word scan (the Math CI job named `static-analysis`) | Yes | CI / DevOps | Gating, but it is a disclosure gate rather than code analysis |
@@ -711,7 +711,8 @@ tracked as a gap.
 
 - The hipBLASLt ASAN lane runs host-only ASAN quick tests on relevant pull requests, standard
   tests nightly, and the selected test type manually. Multi-Arch CI ASAN (host-only ASAN on
-  gfx94X and gfx950) runs on every pull request. Neither is a required check
+  gfx94X and gfx950) runs on every pull request. Both skip draft pull requests unless they carry
+  the `ci:run-on-draft` label. Neither is a required check
 - The characterization-versus-unit coverage summary card
 - The `tensilelite-unit-codecov` and `codecov` checks and the codecov reports
 
