@@ -27,6 +27,7 @@
     "fuse",
     "large",
     "patch",
+    "split_policy",
     "cfx"
   ],
   "behavior_notes": [

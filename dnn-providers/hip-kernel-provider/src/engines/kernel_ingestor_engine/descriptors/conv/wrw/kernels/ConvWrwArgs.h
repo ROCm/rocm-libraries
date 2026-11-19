@@ -15,8 +15,8 @@
 /// x and dy are read in place through their element strides (one of the two packed layouts
 /// the kernel is compiled for); the kernel writes fp32 partials, [split][g][tap][k][c], which
 /// ConvWrwReduce adds in split order into dw. Shapes, padding and the depth/height filter,
-/// stride and dilation are runtime; the filter width, its stride and dilation, and the tile are
-/// compile-time.
+/// stride and dilation are runtime; specialized loops fix the filter width, its stride and
+/// dilation at compile time. Loops 8–12 keep all filter geometry runtime; only their tile is fixed.
 struct K3Args
 {
     const void* x;
@@ -33,7 +33,7 @@ struct K3Args
     /// split evenly over `splits` (the grid's third axis).
     int chunks; ///< width chunks per output row
     int splits;
-    long long steps; ///< rows * chunks
+    long long steps; ///< rows * chunks; loops 9–12: ceil(n * dout * ho * wo / BQ)
     long long stepsPerSplit;
     /// Row-ring kernels: steps per track of the height classes rho < trackLong; the other
     /// classes' tracks have trackLen - 1 (at most ceil(ho / dh) + fr - 1; K3Track).
@@ -47,17 +47,18 @@ struct K3Args
     /// Element strides: x (n, c, d, h, w), dy (n, k, d, h, w).
     long long xs[5];
     long long ys[5];
-    /// Elements of one image of x and of dy (each image is one 32-bit-addressed buffer).
+    /// Elements of one image of x and dy (buffer loops: 32-bit offsets; loops 9–12: 64-bit globals).
     long long xImage;
     long long yImage;
     /// dw elements per split of the partials: groups * taps * (k / groups) * (c / groups).
     long long partialElems;
-    /// Nonzero (one split, dw K T R S C or of one tap): the kernel writes dw itself in its
-    /// element type, channels contiguous, and no reduce runs; `partial` is unused.
+    /// Nonzero at one split: the kernel writes dw itself in its element type; `partial` is
+    /// unused. DWS 1 requires contiguous channels (or one channel); the bounded DWS 2
+    /// tap-tiled epilogue also supports channels-first multi-tap filters.
     int dwStore;
     int flip; ///< nonzero: true convolution, dw written with its taps reflected
     void* dwOut; ///< dw (`dw` is the width dilation)
-    /// dw element strides: k (over all groups) and tap (t r s flattened); c is 1.
+    /// dw element strides: k and flattened tap; c is 1, or `taps` for the DWS 2 epilogue.
     long long dwk;
     long long dwtap;
 };
@@ -112,6 +113,20 @@ struct K3SplitArgs
 /// splits: the quad blocks' four split groups in four threads read faster).
 #define K3_REDUCE_TILE_FLOATS 4096
 #define K3_REDUCE_TILE_MAX_SPLITS 8
+/// Loop 10 has its own ABI: the unchanged K3 geometry plus FP64 partial storage.
+/// geometry.partial and geometry.dwOut are unused; no FP32 workspace alias is dereferenced.
+struct K3AccurateArgs
+{
+    K3Args geometry;
+    double* partial;
+};
+
+/// Fixed-order FP64 fold, rounded once to the graph's FP32 output.
+struct K3AccurateReduceArgs
+{
+    K3ReduceArgs geometry;
+    const double* partial;
+};
 /// The row reduce's channels per block; it takes taps * channels within 4096 floats of LDS.
 #define K3_REDUCE_ROW_CHANNELS 64
 #define K3_REDUCE_ROW_MAX_TAPS 64

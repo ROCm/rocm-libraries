@@ -72,7 +72,7 @@ struct AtomStep
     std::string_view name;
     int ka;
 };
-constexpr std::array<AtomStep, 9> ATOMS{{
+constexpr std::array<AtomStep, 12> ATOMS{{
     {"mfma16_f16", 16},
     {"mfma16_bf16", 16},
     {"mfma16_f32", 4},
@@ -82,6 +82,9 @@ constexpr std::array<AtomStep, 9> ATOMS{{
     {"wmma11_bf16", 16},
     {"wmma12_f16", 16},
     {"wmma12_bf16", 16},
+    {"wmma125_f16", 32},
+    {"wmma125_bf16", 32},
+    {"wmma125_f32", 4},
 }};
 
 constexpr int FMA_THREADS = 256;

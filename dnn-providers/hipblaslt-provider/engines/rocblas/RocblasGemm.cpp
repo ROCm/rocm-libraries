@@ -107,13 +107,21 @@ bool permitsXf32(const GemmCall& call)
            && call.b.dataType == data_objects::DataType::FLOAT;
 }
 
-void runGemm(rocblas_handle handle, const GemmCall& call, const void* a, const void* b, void* d)
+void runGemm(rocblas_handle handle,
+             const GemmCall& call,
+             const void* a,
+             const void* b,
+             void* d,
+             const void* c)
 {
 
     // Host-side scalars, f32 to match the compute type.
     const float alpha = 1.0f;
-    const float beta = call.accumulate ? 1.0f : 0.0f;
+    // c is d (read only when accumulating), or the addend (GemmCall::c).
+    const bool addend = call.c.has_value() && c != nullptr;
+    const float beta = call.accumulate || addend ? 1.0f : 0.0f;
     const auto dType = rocblasDataType(call.d.dataType);
+    const GemmOperand& cOperand = addend ? *call.c : call.d;
 
     // Parenthesized: rocblas.h wraps the function in a variadic compatibility macro for its
     // obsolete workspace arguments, which -Wvariadic-macro-arguments-omitted rejects when they
@@ -137,10 +145,10 @@ void runGemm(rocblas_handle handle, const GemmCall& call, const void* a, const v
                                             static_cast<rocblas_int>(call.b.leadingDimension),
                                             call.b.batchStride,
                                             &beta,
-                                            d, // c is d: read only when accumulating
+                                            addend ? c : d,
                                             dType,
-                                            static_cast<rocblas_int>(call.d.leadingDimension),
-                                            call.d.batchStride,
+                                            static_cast<rocblas_int>(cOperand.leadingDimension),
+                                            cOperand.batchStride,
                                             d,
                                             dType,
                                             static_cast<rocblas_int>(call.d.leadingDimension),

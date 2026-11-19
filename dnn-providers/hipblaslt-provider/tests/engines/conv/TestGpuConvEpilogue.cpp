@@ -97,6 +97,32 @@ ConvGemmPlanBuilder::PlanFactory factoryFor(Backend backend, bool deterministic 
     return nullptr;
 }
 
+/// What @p backend's engines apply of an epilogue in their GEMMs, as HipblasltContainer.cpp
+/// builds them; @p libraryActivations: the opt-in HIPBLASLT_CONV_LIBRARY_ACTIVATION_ENGINE.
+GemmEpilogueSupport gemmSupport(Backend backend, bool libraryActivations = false)
+{
+    return GemmEpilogueSupport{backend == Backend::HIPBLASLT,
+                               backend == Backend::HIPBLASLT && libraryActivations};
+}
+
+/// One step as hipBLASLt's activation epilogues compute it (the library-activation engine):
+/// the chain's values, except relu maps NaN to 0, a clamp (any other relu) NaN to its upper
+/// bound, and swish and tanh GELU -inf to NaN.
+double applyLibraryStep(const Step& step, double v, double input)
+{
+    if(step.mode == PointwiseMode::RELU_FWD && std::isnan(v))
+    {
+        const bool plain = valueOr(step.lowerClip, 0.0) == 0.0 && !step.upperClip.has_value();
+        return plain ? 0.0 : valueOr(step.upperClip, std::numeric_limits<double>::infinity());
+    }
+    if((step.mode == PointwiseMode::SWISH_FWD || step.mode == PointwiseMode::GELU_APPROX_TANH_FWD)
+       && std::isinf(v) && v < 0.0)
+    {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return applyStep(step, v, input);
+}
+
 std::vector<Backend> enabledBackends()
 {
     std::vector<Backend> backends;
@@ -267,7 +293,8 @@ void runFused(const EpilogueCase& convCase,
               const std::vector<Step>& steps,
               Backend backend,
               Specials specials = Specials::NONE,
-              bool deterministic = false)
+              bool deterministic = false,
+              bool libraryActivations = false)
 {
     ConvGemmShape shape = convCase.shape;
     shape.dataType = dataTypeOf<T>();
@@ -281,7 +308,7 @@ void runFused(const EpilogueCase& convCase,
             delete owned;
         });
 
-    const bool native = backend == Backend::HIPBLASLT;
+    const auto support = gemmSupport(backend, libraryActivations);
     const auto narrow = backend == Backend::HIPBLASLT
                             ? ConvGemmPlanBuilder::NarrowPartials::ON_GFX11
                             : ConvGemmPlanBuilder::NarrowPartials::NEVER;
@@ -293,15 +320,16 @@ void runFused(const EpilogueCase& convCase,
                                       convCase.layout,
                                       narrow,
                                       std::nullopt,
-                                      native);
+                                      support);
     if(!builder.isApplicable(*handle, graph.graph()))
     {
+        ASSERT_FALSE(libraryActivations) << "the library-activation engine declined";
         // As unfused: only a backend that finds no algorithm, or rocBLAS refusing to round twice.
         const auto problem = parseConvProblem(graph.graph(), ConvDirection::FORWARD);
         ASSERT_TRUE(problem.has_value()) << "the fused graph was not parsed";
         auto calls = convGemmCalls(*problem, MAX_REPACK_WORKSPACE_BYTES, convCase.layout);
         ASSERT_TRUE(calls.has_value()) << "the formulation declined the convolution";
-        ASSERT_TRUE(fuseEpilogue(*problem, std::move(*calls), native).has_value())
+        ASSERT_TRUE(fuseEpilogue(*problem, std::move(*calls), support).has_value())
             << "fusion declined the plan";
         GTEST_SKIP() << backendName(backend) << " declined a GEMM of this convolution";
     }
@@ -311,7 +339,7 @@ void runFused(const EpilogueCase& convCase,
     {
         const auto problem = parseConvProblem(graph.graph(), ConvDirection::FORWARD);
         auto calls = convGemmCalls(*problem, MAX_REPACK_WORKSPACE_BYTES, convCase.layout);
-        const auto form = fuseEpilogue(*problem, std::move(*calls), native)->epilogueForm;
+        const auto form = fuseEpilogue(*problem, std::move(*calls), support)->epilogueForm;
         ::testing::Test::RecordProperty("epilogue_form", static_cast<int>(form));
     }
 
@@ -496,7 +524,8 @@ void runFused(const EpilogueCase& convCase,
                 const auto& values = operands[i].values;
                 input = values.size() == 1 ? values[0] : values[static_cast<size_t>(channel)];
             }
-            v = applyStep(steps[i], v, input);
+            v = libraryActivations ? applyLibraryStep(steps[i], v, input)
+                                   : applyStep(steps[i], v, input);
             magnitude = std::max(magnitude, std::fabs(v));
         }
         const auto want
@@ -629,6 +658,75 @@ INSTANTIATE_TEST_SUITE_P(,
                                             ::testing::ValuesIn(enabledBackends())),
                          caseName);
 
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
+// The opt-in library-activation engine: hipBLASLt's own relu, clamp, swish and tanh GELU (and
+// sigmoid for fp32) in the GEMM, on the 1x1 shapes in both layouts and an im2col one. Finite
+// values match the chain within the fused tolerance; special values follow the library
+// (applyLibraryStep), the divergence the engine is opt-in for.
+using LibraryChain = std::pair<std::string, std::vector<Step> (*)(DataType)>;
+
+std::vector<LibraryChain> libraryChains()
+{
+    return {
+        {"BiasRelu", [](DataType t) { return std::vector<Step>{bias(t), relu()}; }},
+        {"BiasClamp", [](DataType t) { return std::vector<Step>{bias(t), relu(-0.5F, 0.5F)}; }},
+        {"BiasSilu",
+         [](DataType t) { return std::vector<Step>{bias(t), unary(PointwiseMode::SWISH_FWD)}; }},
+        {"BiasGeluTanh",
+         [](DataType t) {
+             return std::vector<Step>{bias(t), unary(PointwiseMode::GELU_APPROX_TANH_FWD)};
+         }},
+        {"Relu", [](DataType /*t*/) { return std::vector<Step>{relu()}; }},
+    };
+}
+
+class TestGpuConvEpilogueLibrary
+    : public ::testing::TestWithParam<std::tuple<EpilogueCase, LibraryChain>>
+{
+};
+
+TEST_P(TestGpuConvEpilogueLibrary, Finite)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto& [convCase, chain] = GetParam();
+    runFused<float>(
+        convCase, chain.second(DataType::FLOAT), Backend::HIPBLASLT, Specials::NONE, false, true);
+    runFused<Half>(
+        convCase, chain.second(DataType::HALF), Backend::HIPBLASLT, Specials::NONE, false, true);
+    runFused<BFloat16>(convCase,
+                       chain.second(DataType::BFLOAT16),
+                       Backend::HIPBLASLT,
+                       Specials::NONE,
+                       false,
+                       true);
+}
+
+TEST_P(TestGpuConvEpilogueLibrary, SpecialValuesFollowTheLibrary)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto& [convCase, chain] = GetParam();
+    runFused<float>(convCase,
+                    chain.second(DataType::FLOAT),
+                    Backend::HIPBLASLT,
+                    Specials::NAN_INF,
+                    false,
+                    true);
+    runFused<Half>(
+        convCase, chain.second(DataType::HALF), Backend::HIPBLASLT, Specials::NAN_INF, false, true);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvEpilogueLibrary,
+                         ::testing::Combine(::testing::Values(epilogueCases()[0],
+                                                              epilogueCases()[1],
+                                                              epilogueCases()[3]),
+                                            ::testing::ValuesIn(libraryChains())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+#endif
+
 // Real-model fp16 convolutions of the conv census whose fused graphs need an fp32-output GEMM
 // (small n x HW against a long reduction): every engine, the deterministic siblings included,
 // claims the fused graph exactly where it claims the bare convolution, and computes it, or
@@ -755,7 +853,7 @@ TEST_P(TestGpuConvEpilogueClaims, FusedWhereBare)
                                           ? ConvGemmPlanBuilder::NarrowPartials::ON_GFX11
                                           : ConvGemmPlanBuilder::NarrowPartials::NEVER,
                                       std::nullopt,
-                                      backend == Backend::HIPBLASLT);
+                                      gemmSupport(backend));
     const ConvGemmGraph bare(convCase.shape, ConvDirection::FORWARD);
     const FusedConvGraph fused(convCase.shape, chain.second);
     const bool bareClaimed = builder.isApplicable(*handle, bare.graph());
@@ -775,8 +873,7 @@ TEST_P(TestGpuConvEpilogueClaims, FusedWhereBare)
         {
             auto calls = convGemmCalls(*problem, MAX_REPACK_WORKSPACE_BYTES, layout);
             ASSERT_TRUE(calls.has_value());
-            const auto plan
-                = fuseEpilogue(*problem, std::move(*calls), backend == Backend::HIPBLASLT);
+            const auto plan = fuseEpilogue(*problem, std::move(*calls), gemmSupport(backend));
             ASSERT_TRUE(plan.has_value()) << "fusion declined a plan";
             bool refused = false;
             for(const auto& stage : plan->stages)
@@ -907,7 +1004,7 @@ TEST_P(TestGpuConvEpiloguePerf, Time)
                                           ? ConvGemmPlanBuilder::NarrowPartials::ON_GFX11
                                           : ConvGemmPlanBuilder::NarrowPartials::NEVER,
                                       std::nullopt,
-                                      backend == Backend::HIPBLASLT);
+                                      gemmSupport(backend));
     const std::vector<Step> chain{bias(shape.dataType), relu()};
     const ConvGemmGraph bare(shape, ConvDirection::FORWARD);
     const FusedConvGraph fused(shape, chain);
