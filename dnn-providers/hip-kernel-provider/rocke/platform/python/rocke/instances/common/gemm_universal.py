@@ -1966,6 +1966,32 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 _swa = _os_mx.environ.get("ROCKE_EXP_MX_SCALE_WAVE", "") == "a"
                 _sa_mask = _tdm_a_mask if _smc else 0
                 _sb_mask = _tdm_b_mask if _smc else 0
+                # EXPERIMENT (uncommitted idea from the gfx1250 mx_gemm prototype):
+                # ROCKE_EXP_TDM_SPLIT=1 -> every wave issues part of each tile, as
+                # parallel descriptors from all SIMDs: odd waves A, even waves B,
+                # wave w rows (w // 2) * rows / 2 .. + rows / 2 of its operand; the
+                # first wave of an operand also loads its scales. Needs four waves
+                # that all reach this load (the MX read-ahead loop).
+                if _os_mx.environ.get("ROCKE_EXP_TDM_SPLIT") == "1":
+                    if _tdm_waves != 4 or not (_mx and _mx_ra):
+                        raise ValueError("ROCKE_EXP_TDM_SPLIT needs 4 waves and ROCKE_EXP_MX_RA")
+                    c2 = b.const_i32(2)
+                    comp = b.div(_tdm_wave_id, c2)
+                    odd = b.mod(_tdm_wave_id, c2)
+                    pitch = _lds_k * _tdm_elem_bytes
+                    for want, ptr, row_off, rows, extent, lds, batch64, mask, sptr, ssmem, smask in (
+                        (1, A, block_m_off, block_m, M, a_lds, tdm_batch_a, _tdm_a_mask, AS if _mx else None, AS_smem if _mx else None, _sa_mask),
+                        (0, Bp, block_n_off, block_n, N, b_lds, tdm_batch_b, _tdm_b_mask, BS if _mx else None, BS_smem if _mx else None, _sb_mask),
+                    ):
+                        half_rows = rows // 2
+                        with b.scf_if(b.cmp_eq(odd, b.const_i32(want))):
+                            lds_c = b.smem_ptr_add(lds, b.zext(b.mul(comp, b.const_i32(half_rows * pitch)), _I64))
+                            row_c = b.add(row_off, b.mul(comp, b.const_i32(half_rows)))
+                            _issue(ptr, row_c, half_rows, extent, lds_c, batch64, mask)
+                            if _mx:
+                                with b.scf_if(b.cmp_eq(comp, zero)):
+                                    _issue_scale(sptr, row_off, rows, extent, ssmem, smask)
+                    return
                 with b.scf_if(b.cmp_eq(_tdm_wave_id, a_wave)):
                     _issue(A, block_m_off, block_m, M, a_lds, tdm_batch_a, _tdm_a_mask)
                     if _mx:
