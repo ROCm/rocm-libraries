@@ -30,6 +30,7 @@ from typing import Protocol
 import numpy as np
 
 from ._analytical import UNIFORM_QUICK_CASES, UniformCase
+from ._key_translation import KEY_TRANSLATION_QUICK_CASES, KeyTranslationCase
 from ._permutation import PERMUTATION_QUICK_CASES, PermutationCase
 
 _POINTER_ALIGNMENT = 16
@@ -105,6 +106,10 @@ QUICK_SUBJECT_CASES: tuple[tuple[str, UniformCase], ...] = tuple(
 PERMUTATION_SUBJECT_CASES: tuple[tuple[str, PermutationCase], ...] = tuple(
     ("gfx942", case) for case in PERMUTATION_QUICK_CASES
 )
+# The key-translation lane's (arch, case) matrix: same unmasked cases.
+KEY_TRANSLATION_SUBJECT_CASES: tuple[
+    tuple[str, KeyTranslationCase], ...
+] = tuple(("gfx942", case) for case in KEY_TRANSLATION_QUICK_CASES)
 
 
 @dataclass(frozen=True)
