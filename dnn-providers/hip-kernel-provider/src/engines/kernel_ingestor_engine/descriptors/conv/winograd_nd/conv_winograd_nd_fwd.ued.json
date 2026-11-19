@@ -1,0 +1,24 @@
+{
+  "version": "1.0",
+  "id": "3320abf0-dd9b-533d-a45a-01ffe7b2d5ce",
+  "name": "hipkernel:CONV_WINOGRAD_ND_FWD",
+  "graph_match": {
+    "native": "hipkernel.conv_winograd_nd_fwd.graph_match"
+  },
+  "metadata": "402e34a4-77ea-55d3-bba0-c813e6333a9a",
+  "knobs": [
+    "atom",
+    "precision",
+    "gemm_bm",
+    "gemm_bn",
+    "gemm_bk",
+    "chunk_tiles"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ],
+  "numerical_notes": [
+    "winograd",
+    "winograd_tile_4x4"
+  ]
+}

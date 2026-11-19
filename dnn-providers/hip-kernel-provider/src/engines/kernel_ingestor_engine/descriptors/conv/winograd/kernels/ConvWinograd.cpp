@@ -14,18 +14,15 @@
 //   CONV_WINO_LAYOUT     0 NCHW (filter KCRS), 1 NHWC (filter KRSC); fused variants read NCHW
 //   CONV_WINO_M          output tile: 2 for F(2,3), 4 for F(4,3) (multipass fp32 only), 3 for
 //                        F(3,2) (stride 2 by phases; multipass, fused VALU and cooperative)
-//   multipass:  CONV_WINO_GEMM_BM, _BN, _BK          the batched-GEMM tile
+//   multipass:  CONV_WINO_GEMM_BM, _BN, _BK, _WMMA  the batched-GEMM tile and exact fp32 atom
 //   fused VALU: CONV_WINO_BK, _BT, _CCV, _TM, _TN, _PFD  K-block, tile-block, chunk, micro-tile,
 //               prefetch depth (1 or 2 input chunks ahead)
-//   fused WMMA: CONV_WINO_BK, _WAVES, _GFX12         K-block, waves, gfx12 operand layout
-//   register WMMA: CONV_WINO_BK, _TG, _BINS, _F16MATH, _GFX12   K-block, 16-tile groups, bins per
-//                  wave, fp16 packed input-transform math, gfx12 operand layout
-//   register VALU: CONV_WINO_BK, _F16MATH                       K-block, fp16 packed math
-//   cooperative: CONV_WINO_MT, _NT, _KW, _F16MATH, _GFX12, _MFMA, _PF, _TW  16-channel K tiles
-//                  per wave, 16-tile groups, K waves per row, fp16 packed math, gfx12 operand
-//                  layout, CDNA MFMA (wave64) instead of RDNA WMMA, prefetch (1: the next item's
-//                  chunk 0 behind the epilogue), tile waves of the 16-bin layout (0: the
-//                  transform-row layout)
+//   fused WMMA: CONV_WINO_BK, _WAVES, _GFX12, _GFX1250; native gfx1250 uses K32/K4 atoms
+//   register WMMA: CONV_WINO_BK, _TG, _BINS, _F16MATH, _GFX12, _GFX1250
+//   register VALU: CONV_WINO_BK, _F16MATH
+//   cooperative: CONV_WINO_MT, _NT, _KW, _F16MATH, _GFX12, _GFX1250, _MFMA, _PF, _TW, _SB
+//                  output tiles per wave, tile groups, K waves, packed math, matrix atom,
+//                  cross-item prefetch, 16-bin layout tile waves, single input buffer.
 
 #include "ConvWinogradSreg.h"
 #include "ConvWinogradWmmaCoop.h"
@@ -67,7 +64,11 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradInput(K5Args a)
 
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradGemm(K5GemmArgs g)
 {
+#if CONV_WINO_GEMM_WMMA
+    k5GemmWmma<CONV_WINO_GEMM_BM, CONV_WINO_GEMM_BN, CONV_WINO_GEMM_BK>(g);
+#else
     k5Gemm<CONV_WINO_T, CONV_WINO_GEMM_BM, CONV_WINO_GEMM_BN, CONV_WINO_GEMM_BK>(g);
+#endif
 }
 
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradOutput(K5Args a CONV_EPI_PARAM)
@@ -126,7 +127,10 @@ extern "C" __global__ void __launch_bounds__((CONV_WINO_CFG::THREADS)) CONV_WINO
 
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradWmmaFilter(K5Args a)
 {
-    k5WmmaFilterTransform<CONV_WINO_T, K5_NCHW, CONV_WINO_DIR>(a);
+    k5WmmaFilterTransform<CONV_WINO_T,
+                          K5_NCHW,
+                          CONV_WINO_DIR,
+                          K5Wmma<CONV_WINO_T, CONV_WINO_GFX12 != 0>::CC>(a);
 }
 
 extern "C" __global__ void __launch_bounds__(32 * CONV_WINO_WAVES)
@@ -142,7 +146,10 @@ extern "C" __global__ void __launch_bounds__(32 * CONV_WINO_WAVES)
 
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradWmmaFilter(K5Args a)
 {
-    k5WmmaFilterTransform<CONV_WINO_T, K5_NCHW, CONV_WINO_DIR>(a);
+    k5WmmaFilterTransform<CONV_WINO_T,
+                          K5_NCHW,
+                          CONV_WINO_DIR,
+                          K5Wmma<CONV_WINO_T, CONV_WINO_GFX12 != 0>::CC>(a);
 }
 
 extern "C" __global__ void __launch_bounds__((CONV_WINO_WREG_CFG::THREADS))
@@ -204,7 +211,8 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradWmmaFilter(K5Args 
                           K5_NCHW,
                           CONV_WINO_DIR,
                           CONV_WINO_COOP_ATOM::KPL,
-                          CONV_WINO_M>(a);
+                          CONV_WINO_M,
+                          CONV_WINO_COOP_ATOM::CC>(a);
 }
 
 extern "C" __global__ void __launch_bounds__((CONV_WINO_COOP_CFG::THREADS))
