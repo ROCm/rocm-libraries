@@ -41,8 +41,8 @@ typedef enum
     ROCKE_CONV_ARG_I32_PTR, /* "i32*" */
     ROCKE_CONV_ARG_I32, /* "i32"  -- scalar */
     /* "i64" -- scalar. Large-tensor (addr64) ABI; see
-     * library/kernels/conv/docs/large_tensor_addr64_plan.md. Not yet
-     * produced by any arg-name list below. */
+     * library/kernels/conv/docs/large_tensor_addr64_plan.md. Produced by
+     * rocke_conv_arg_names_ex(..., addr64=true, ...) for direction="fwd". */
     ROCKE_CONV_ARG_I64
 } rocke_conv_arg_kind_t;
 
@@ -74,16 +74,25 @@ bool rocke_conv_arg_names(const char* direction,
                           bool two_stage,
                           rocke_conv_arg_list_t* out);
 
-/* As above, plus wgrad's stream-K variant: `streamk` names the reduction
- * ("atomic", "workspace", "linear" or "tree") of a stream-K kernel, or is NULL
- * for a kernel without stream-K. A stream-K list carries the reduction's
- * buffers after ks_count and then the partition block. Returns false for a
- * non-wgrad direction, an unknown reduction, or stream-K combined with
- * two_stage -- the cases conv_arg_names() raises on. */
+/* As above, plus wgrad's stream-K variant and fwd's addr64 large-tensor
+ * variant: `streamk` names the reduction ("atomic", "workspace", "linear" or
+ * "tree") of a stream-K kernel, or is NULL for a kernel without stream-K. A
+ * stream-K list carries the reduction's buffers after ks_count and then the
+ * partition block. `addr64` selects the large-tensor forward-addressing ABI
+ * (see library/kernels/conv/docs/large_tensor_addr64_plan.md section 4):
+ * fwd-only, 2D-only, and mutually exclusive with two_stage (no split-K
+ * builder for it yet) -- widens the byte triple, p_M, and the strides
+ * multiplying a possibly-huge leading coord to i64, and drops the m_ magic
+ * pair (addr64's M-decode is exact division, not magic). Returns false for a
+ * non-wgrad direction with streamk set, an unknown reduction, stream-K
+ * combined with two_stage, addr64 on a non-fwd direction, addr64 combined
+ * with is_3d, or addr64 combined with two_stage -- the cases
+ * conv_arg_names()/_fwd_arg_names() raise on. */
 bool rocke_conv_arg_names_ex(const char* direction,
                              bool is_3d,
                              bool two_stage,
                              const char* streamk,
+                             bool addr64,
                              rocke_conv_arg_list_t* out);
 
 /* Direct grouped conv ABI ("fwd", "dgrad" or "wgrad"); false for any other
