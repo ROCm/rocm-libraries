@@ -108,6 +108,8 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # does not share rocke_library_conv_pytest's CTest budget.
 set(_ROCKE_LIBRARY_CONV_TABLE_TEST_RELPATHS
     "tests/library/tests/test_aot_jobs_from_identity.py"
+    "tests/library/tests/test_conv_dgrad_identity_filters.py"
+    "tests/library/tests/test_conv_fwd_identity_launch.py"
     "tests/library/tests/test_conv_pin_table.py"
     "tests/library/tests/test_conv_routes.py"
     "tests/library/tests/test_conv_pins_dispatch.py"
@@ -175,11 +177,17 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # ROCKE_ENGINE_test_categories_external.yaml lists it beside that entry in the
 # quick and ffm-quick tiers.
 set(_ROCKE_LIBRARY_CONV3D_TEST_RELPATHS
+    "tests/library/tests/test_benchmark_conv_compare_cli.py"
+    "tests/library/tests/test_benchmark_det_pins.py"
+    "tests/library/tests/test_benchmark_num_cus_seed.py"
     "tests/library/tests/test_conv_cpp_binding_knobs.py"
+    "tests/library/tests/test_conv_det_check.py"
     "tests/library/tests/test_conv_dgrad_box_det.py"
     "tests/library/tests/test_conv_dgrad_box_plan.py"
+    "tests/library/tests/test_conv_dgrad_cpp_validator.py"
     "tests/library/tests/test_conv_dgrad_interior.py"
     "tests/library/tests/test_conv_dgrad_interior_cpp.py"
+    "tests/library/tests/test_conv_dgrad_interior_verify.py"
     "tests/library/tests/test_conv_dgrad_pingpong.py"
     "tests/library/tests/test_conv_dgrad_pp_boxes.py"
     "tests/library/tests/test_conv_dgrad_tapk_pp_knobs.py"
@@ -195,27 +203,35 @@ set(_ROCKE_LIBRARY_CONV3D_TEST_RELPATHS
     "tests/library/tests/test_conv_fwd_split_det.py"
     "tests/library/tests/test_conv_fwd_split_store.py"
     "tests/library/tests/test_conv_m_band.py"
-    "tests/library/tests/test_conv_pin_table.py"
-    "tests/library/tests/test_conv_pins_dispatch.py"
-    "tests/library/tests/test_conv_small_grid_knobs.py"
-    "tests/library/tests/test_conv_routes.py"
+    "tests/library/tests/test_conv_route_exec_workspaces.py"
     "tests/library/tests/test_conv_shipped_tables_gpu.py"
+    "tests/library/tests/test_conv_small_grid_knobs.py"
+    "tests/library/tests/test_conv_step_replay.py"
+    "tests/library/tests/test_conv_wgrad_gates.py"
     "tests/library/tests/test_conv_wgrad_lds_bswz.py"
+    "tests/library/tests/test_conv_wgrad_stage2_policy.py"
     "tests/library/tests/test_conv_wgrad_xwin.py"
     "tests/library/tests/test_conv_winograd3d.py"
-    "tests/library/tests/test_derive_conv_pins.py")
+    "tests/library/tests/test_det_classify.py")
 set(_ROCKE_LIBRARY_CONV3D_TESTS "")
 foreach(_rocke_conv3d_test ${_ROCKE_LIBRARY_CONV3D_TEST_RELPATHS})
   string(APPEND _ROCKE_LIBRARY_CONV3D_TESTS
          " \"${ROCKE_TEST_CTEST_REL}${_rocke_conv3d_test}\"")
 endforeach()
-string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_conv3d_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV3D_TESTS} -m \"not gpu\" -v -rs --timeout=60)\n")
-string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "set_tests_properties(rocke_library_conv3d_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
-       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-       "  TIMEOUT 300)\n")
+# The 3-D NDHWC conv targets gfx942 and its host tests are platform-neutral
+# Python: like rocke_library_conv_tf32_lowering_pytest, the entry is not
+# registered on Windows, whose CI shards run close to their step limit.
+if(WIN32)
+  message(STATUS "rocKE: rocke_library_conv3d_pytest not registered on Windows (CI shard time; see comment above)")
+else()
+  string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+         "add_test(rocke_library_conv3d_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV3D_TESTS} -m \"not gpu\" -v -rs --timeout=60)\n")
+  string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+         "set_tests_properties(rocke_library_conv3d_pytest PROPERTIES\n"
+         "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
+         "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+         "  TIMEOUT 300)\n")
+endif()
 
 # Library conv TF32 tests (no GPU required), as two entries:
 #
@@ -670,7 +686,7 @@ set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
     "tests/library/tests/test_conv_winograd_dispatch_gpu.py"
     "tests/library/tests/test_conv_implicit_gemm_numeric.py"
     "tests/library/tests/test_conv_pin_table_gpu.py"
-    "tests/library/tests/test_conv_routes_gpu.py"
+    "tests/library/tests/test_conv_winograd3d_gpu.py"
     "tests/library/tests/test_conv_direct_tf32_mfma.py::TestDirectTf32Gpu"
     "tests/library/tests/test_conv_direct_tf32_scalar.py::TestGpuCorrectness"
     # The sweep sampler (test_sweep_candidates) compiles exact-fp32 grid
