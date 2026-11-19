@@ -5561,6 +5561,112 @@ Tests:
   fast_check: 1
   gpu_arch: '(950|1250)'
 
+# MXFP6 with 128x4 scales (scale mode 1018) and A in HIPBLASLT_ORDER_COL256_R128_EXT: the
+# rocKE kernels at their registered sizes, checked by fast_check with no host reference.
+# integer_exact fp6 data keeps every partial sum an integer below 2^24 (K < 262144), and
+# fast_check reads the dequantized values, so the tiled device order does not reach it.
+# The kernels need alpha 1 and beta 0, which only the ext API sets up. On chips 0x75a0 and
+# 0x75a3 a missing solution fails; other parts decline.
+- name: matmul_fast_check_mx_fp6_tile128x4
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f6_r, b_type: f6_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1018, scaleB: 1018, scale_type: f32_r, swizzle_a: true, swizzle_b: true }
+    - { a_type: bf6_r, b_type: bf6_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1018, scaleB: 1018, scale_type: f32_r, swizzle_a: true, swizzle_b: true }
+    - { a_type: f6_r, b_type: f6_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1018, scaleB: 1018, scale_type: f32_r, swizzle_a: true, swizzle_b: false }
+    - { a_type: bf6_r, b_type: bf6_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1018, scaleB: 1018, scale_type: f32_r, swizzle_a: true, swizzle_b: false }
+  matrix_size:
+    - { M: 4096, N: 4096, K: 2048 }
+    - { M: 4096, N: 4096, K: 6144 }
+    - { M: 32768, N: 4096, K: 2048 }
+    - { M: 32768, N: 4096, K: 6144 }
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  use_ext: 1
+  use_ext_setproblem: 1
+  fast_check_repeat: 2
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  allow_no_solution: 1
+  require_solution_chip_ids: [0x75a0, 0x75a3]
+  gpu_arch: '950'
+
+# The long-K kernels: both types with B tiled at K = 65536 and 131584, and E2M3 with B in
+# HIPBLASLT_ORDER_COL at K = 65536.
+- name: matmul_fast_check_mx_fp6_tile128x4_long_k
+  category: nightly
+  function:
+    matmul:
+    - { a_type: f6_r, b_type: f6_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1018, scaleB: 1018, scale_type: f32_r, swizzle_a: true, swizzle_b: true }
+    - { a_type: bf6_r, b_type: bf6_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1018, scaleB: 1018, scale_type: f32_r, swizzle_a: true, swizzle_b: true }
+  M: [4096]
+  N: [4096]
+  K: [65536, 131584]
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  use_ext: 1
+  use_ext_setproblem: 1
+  fast_check_repeat: 2
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  allow_no_solution: 1
+  require_solution_chip_ids: [0x75a0, 0x75a3]
+  gpu_arch: '950'
+
+- name: matmul_fast_check_mx_fp6_tile128x4_long_k_canonical_b
+  category: nightly
+  function:
+    matmul:
+    - { a_type: f6_r, b_type: f6_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1018, scaleB: 1018, scale_type: f32_r, swizzle_a: true, swizzle_b: false }
+  M: [4096]
+  N: [4096]
+  K: [65536]
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  use_ext: 1
+  use_ext_setproblem: 1
+  fast_check_repeat: 2
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  allow_no_solution: 1
+  require_solution_chip_ids: [0x75a0, 0x75a3]
+  gpu_arch: '950'
+
+# Self-test: one element of D is corrupted after launch 2 of 4. The case passes only if
+# fast_check reports that launch, with the corrupted element, and no other.
+- name: matmul_fast_check_mx_fp6_tile128x4_reports_injected_iteration
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f6_r, b_type: f6_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1018, scaleB: 1018, scale_type: f32_r, swizzle_a: true, swizzle_b: true }
+    - { a_type: bf6_r, b_type: bf6_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1018, scaleB: 1018, scale_type: f32_r, swizzle_a: true, swizzle_b: false }
+  M: [4096]
+  N: [4096]
+  K: [2048]
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  use_ext: 1
+  use_ext_setproblem: 1
+  fast_check_repeat: 4
+  fast_check_inject: 2
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  allow_no_solution: 1
+  require_solution_chip_ids: [0x75a0, 0x75a3]
+  gpu_arch: '950'
+
 - name: matmul_96_complex
   category: pre_checkin
   function:

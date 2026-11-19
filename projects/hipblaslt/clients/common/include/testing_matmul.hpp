@@ -1147,15 +1147,16 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
     if(!arg.gradient && arg.activation_type != hipblaslt_activation_type::none && !arg.use_e)
         return "fast_check checks an activation through E, the pre-activation output, so it "
                "requires use_e";
-    // MX: integer_exact fills fp8 elements with small integers and E8M0 scales with 1, 2 or 4,
-    // and fast_check checks against the dequantized values, so both operands must be MX fp8.
-    if(isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
+    // MX: integer_exact fills fp8 or fp6 elements with small integers and E8M0 scales with 1, 2
+    // or 4, and fast_check checks against the dequantized values, so both operands must be MX.
+    const bool mx = isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB);
+    if(mx)
     {
-        auto isMxFp8 = [](hipDataType t) { return t == HIP_R_8F_E4M3 || t == HIP_R_8F_E5M2; };
         if(!isBlockScaling(arg.scaleA) || !isBlockScaling(arg.scaleB))
             return "fast_check supports MX scales only on both A and B";
-        if(!isMxFp8(TiA) || !isMxFp8(TiB))
-            return "fast_check supports MX scales only with fp8 (E4M3, E5M2) A and B";
+        if(!integer_exact_mx_element_type(TiA) || !integer_exact_mx_element_type(TiB))
+            return "fast_check supports MX scales only with fp8 (E4M3, E5M2) or fp6 (E2M3, "
+                   "E3M2) A and B";
         // integer_exact writes E8M0 scale codes, which a UE4M3 or UE5M3 format would read as
         // other values.
         if(scaleDataType(arg.scaleA) != HIP_R_8F_UE8M0
@@ -1172,7 +1173,13 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
         if(arg.batch_count > 1)
             return "fast_check supports MX scales for a single batch only";
     }
-    if(do_swizzle)
+    // fast_check reads MX operands as the generator's dequantized values in the canonical
+    // layout, so the device order of A and B does not reach it. Only fp6 with 128x4 scales,
+    // whose tiled order integer_exact data covers, is accepted swizzled.
+    const bool mx_fp6_tiled = mx && (TiA == HIP_R_6F_E2M3 || TiA == HIP_R_6F_E3M2)
+                              && arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT
+                              && arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT;
+    if(do_swizzle && !mx_fp6_tiled)
         return "fast_check does not support swizzled A or B";
     // Without a gradient, fast_check models the bias as one value per row of D, which is what
     // bias_source a and d allocate. bias_source b allocates one value per column.
@@ -1183,7 +1190,8 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
     if(arg.bias_vector && arg.bias_stride > 0 && arg.bias_stride < bias_length)
         return "fast_check requires bias_stride to be at least the bias vector's length, "
                + std::to_string(bias_length);
-    for(hipDataType t : {TiA, TiB, To, Tc})
+    // MX operands reach fast_check as fp32 dequantized values.
+    for(hipDataType t : {mx ? HIP_R_32F : TiA, mx ? HIP_R_32F : TiB, To, Tc})
     {
         std::string why;
         if(!fast_check_supported_type(t, &why))
@@ -3628,16 +3636,23 @@ void testing_matmul_with_bias(const Arguments& arg,
         // kernel-ready scale layout for both A and B; nothing to do here.
             if(arg.fast_check)
             {
-                CHECK_HIP_ERROR(fast_check_poison_padding_device(
-                    {dA[i].buf(), TiA, A_row[i], A_col[i], lda[i], stride_a[i]},
-                    num_batches[i],
-                    size_A[i],
-                    stream));
-                CHECK_HIP_ERROR(fast_check_poison_padding_device(
-                    {dB[i].buf(), TiB, B_row[i], B_col[i], ldb[i], stride_b[i]},
-                    num_batches[i],
-                    size_B[i],
-                    stream));
+                // fast_check reads an MX operand through its dequantized values below, so the
+                // packed device bytes of a type it cannot read (fp6) are neither poisoned nor
+                // copied.
+                const bool readA = !isBlockScaling(arg.scaleA) || fast_check_element_size(TiA);
+                const bool readB = !isBlockScaling(arg.scaleB) || fast_check_element_size(TiB);
+                if(readA)
+                    CHECK_HIP_ERROR(fast_check_poison_padding_device(
+                        {dA[i].buf(), TiA, A_row[i], A_col[i], lda[i], stride_a[i]},
+                        num_batches[i],
+                        size_A[i],
+                        stream));
+                if(readB)
+                    CHECK_HIP_ERROR(fast_check_poison_padding_device(
+                        {dB[i].buf(), TiB, B_row[i], B_col[i], ldb[i], stride_b[i]},
+                        num_batches[i],
+                        size_B[i],
+                        stream));
                 CHECK_HIP_ERROR(fast_check_poison_padding_device(
                     {dC[i].buf(), To, M[i], N[i], ldc[i], stride_c[i]},
                     num_batches[i],
@@ -3645,20 +3660,26 @@ void testing_matmul_with_bias(const Arguments& arg,
                     stream));
                 CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
-                fcA[i].reset(
-                    new char[size_t(A_row[i] * A_col[i] * num_batches[i]) * realDataTypeSize(TiA)]);
-                fcB[i].reset(
-                    new char[size_t(B_row[i] * B_col[i] * num_batches[i]) * realDataTypeSize(TiB)]);
-                CHECK_HIP_ERROR(fast_check_copy_region_to_host(
-                    fcA[i].get(),
-                    {dA[i].buf(), TiA, A_row[i], A_col[i], lda[i], stride_a[i]},
-                    num_batches[i],
-                    stream));
-                CHECK_HIP_ERROR(fast_check_copy_region_to_host(
-                    fcB[i].get(),
-                    {dB[i].buf(), TiB, B_row[i], B_col[i], ldb[i], stride_b[i]},
-                    num_batches[i],
-                    stream));
+                if(readA)
+                {
+                    fcA[i].reset(new char[size_t(A_row[i] * A_col[i] * num_batches[i])
+                                          * realDataTypeSize(TiA)]);
+                    CHECK_HIP_ERROR(fast_check_copy_region_to_host(
+                        fcA[i].get(),
+                        {dA[i].buf(), TiA, A_row[i], A_col[i], lda[i], stride_a[i]},
+                        num_batches[i],
+                        stream));
+                }
+                if(readB)
+                {
+                    fcB[i].reset(new char[size_t(B_row[i] * B_col[i] * num_batches[i])
+                                          * realDataTypeSize(TiB)]);
+                    CHECK_HIP_ERROR(fast_check_copy_region_to_host(
+                        fcB[i].get(),
+                        {dB[i].buf(), TiB, B_row[i], B_col[i], ldb[i], stride_b[i]},
+                        num_batches[i],
+                        stream));
+                }
                 fcTypeA[i] = TiA;
                 fcTypeB[i] = TiB;
                 // MX: check against the dequantized values, element times block scale, which the
