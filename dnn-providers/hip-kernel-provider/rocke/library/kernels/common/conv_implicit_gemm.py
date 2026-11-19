@@ -355,6 +355,9 @@ class ImplicitGemmConvSpec:
     # barrier per tile); without it a single buffer is reused behind a second
     # barrier (half the A/B LDS, so more resident workgroups). Costs the
     # registers of one A + B tile slice per thread. Sync-load path only.
+    # Python engine only: the C++ engine has no twin, so the conv binding
+    # refuses a spec that sets it (no kernel is built under its name there)
+    # and the byte-identity gate does not cover it.
     prefetch_regs: bool = False
     # Decode the reduction index once per K tile on the 3-D split-addressing
     # path instead of once per loaded element: when cpg % tile_k == 0 a tile
@@ -444,6 +447,9 @@ class ImplicitGemmConvSpec:
     # every output row boundary to fall on a wave's M extent (Wo a multiple
     # of it), checked per workgroup like the other x-halo conditions.
     # Tags ``xdpp``.
+    # Python engine only: the C++ engine has no twin, so the conv binding
+    # refuses a spec that sets it (no kernel is built under its name there)
+    # and the byte-identity gate does not cover it.
     xh_dpp: bool = False
     # reg_prefetch (1, 2) / single-buffer prefetch_regs / uk_xhalo loops:
     # raise the wave priority (s_setprio
@@ -474,7 +480,12 @@ class ImplicitGemmConvSpec:
     # Stage 2 (:mod:`kernels.common.conv_fwd_split_k_reduce`) sums the slabs and
     # casts into D. Every slab element is written by exactly one CTA (a slice
     # past the reduction stores zeros), so the workspace needs no clearing and
-    # the result is deterministic. 1 (the default) emits none of this.
+    # the result is deterministic. 1 (the default) emits none of this. The
+    # wave64 MFMA split of a 3-D problem (or of a 2-D one with
+    # ``split_atomic``) is the atomic form instead (:func:`fwd_split_k_atomic`):
+    # no workspace, each slice atomic-adds its partial tile into a zeroed D
+    # (``split_atomic_pairs``: packed pairs), or, with ``split_det``, one of
+    # the deterministic stores below.
     split_k: int = 1
     # The atomic form of the wave64 MFMA split binary
     # (:func:`fwd_split_k_atomic`): the same ``ks`` / ``ks_count`` launch
@@ -540,9 +551,12 @@ class ImplicitGemmConvSpec:
     # rows, and the MFMA k order inside a tile is permuted so a lane's
     # a_per_lane * k_atoms elements are contiguous in memory (B is read from
     # LDS in the same order). Only the uniform_k_decode + reg_prefetch=1 loop.
-    # On gfx942 (3-D shapes) the MFMA lane order puts
-    # 16 pixels in 16 consecutive lanes, which the TA cannot coalesce (the TA
-    # stays busy much longer). Opt-in AOT axis only (ROCKE_AOT_FWD_ADIR=1).
+    # The MFMA lane order puts 16 pixels in 16 consecutive lanes, which the
+    # texture unit cannot coalesce. Opt-in AOT axis only
+    # (ROCKE_AOT_FWD_ADIR=1). Tags ``adir``.
+    # Python engine only: the C++ engine has no twin, so the conv binding
+    # refuses a spec that sets it (no kernel is built under its name there)
+    # and the byte-identity gate does not cover it.
     a_direct: bool = False
     # uniform_k_decode loop order: the filter tap (x, then y, then z) advances
     # fastest and the channel chunk outermost, instead of the chunk fastest.
@@ -643,6 +657,9 @@ class ImplicitGemmConvSpec:
     # tile_k 64 fits). The next range's A loads issue in the second tap's
     # [compute B]. Also runs the split-K slices (a slice is a range of
     # (chunk, z, y) steps). Tags ``xsub``.
+    # Python engine only: the C++ engine has no twin, so the conv binding
+    # refuses a spec that sets it (no kernel is built under its name there)
+    # and the byte-identity gate does not cover it.
     xh_subtile: bool = False
     # split_k > 1: no zeroed D from the host. Slice 0 of a split tile zeroes
     # its D tile before its K loop, releases it (agent scope) and raises the
@@ -656,6 +673,9 @@ class ImplicitGemmConvSpec:
     # register sets, loop-carried, alternating), so a load has a whole extra
     # K tile to arrive before its [mem B] store. Costs one more A + B slice of
     # registers per thread. Tags ``ppfd``.
+    # Python engine only: the C++ engine has no twin, so the conv binding
+    # refuses a spec that sets it (no kernel is built under its name there)
+    # and the byte-identity gate does not cover it.
     pp_fetch_deep: bool = False
     # rpf_pingpong 5 (plain loop): split the next tile's global reads between
     # two phases -- 1: the B reads of tile t+1 issue in [mem A] of tile t
@@ -721,7 +741,12 @@ class ImplicitGemmConvSpec:
     # partials ordered by agent-scope release/acquire fences (an L2
     # writeback / invalidate per workgroup); 2: moved by agent-coherent
     # (SC1) buffer stores / loads, the flag ordered by the barrier's
-    # vmcnt(0) -- no L2 maintenance. Tags ``sdet<n>``.
+    # vmcnt(0) -- no L2 maintenance. 3: two-stage -- every contribution
+    # stores its f32 partial tile into its own [M, K] slab of
+    # ``sk_partials`` (:func:`fwd_split_det_slabs`; staged through the
+    # cshuffle LDS in row slabs, :func:`fwd_split_det_slab_m_chunks`) and a
+    # separate fold launch sums the slabs in slot order into D; no flags or
+    # waits; not with split_tail. Tags ``sdet<n>``.
     split_det: int = 0
     # AMDGPU machine-scheduler strategy (the kernel's "amdgpu-sched-strategy"
     # attribute): 0 = LLVM's default, 1 max-ilp, 2 max-memory-clause,

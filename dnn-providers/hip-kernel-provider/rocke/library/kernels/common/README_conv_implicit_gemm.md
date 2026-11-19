@@ -302,12 +302,17 @@ Opt-in identity fields (all default off; AOT env axes in `aot_jobs._fwd_sched_k_
 
 | Field (tag) | Env axis | What it does |
 |---|---|---|
-| `uk_xhalo=n` (`uxh<n>`) | `ROCKE_AOT_FWD_XHALO=4,8` | For stride-1, pad-0, X=3 3-D convs a tile of consecutive output pixels in one (n, d) plane reads one contiguous input range at tap (z, y, 0). The loop runs over (chunk, z, y), stages that range (tile_m + n pixels) once with the three x taps' W tiles side by side, and runs three MFMA phases at row shift x: a third of the A loads, A LDS writes and barriers. Each workgroup checks the conditions (pad, stride, X, packed strides, span) from its kernargs and otherwise runs the plain uniform_k_decode loop. |
+| `uk_xhalo=n` (`uxh<n>`) | `ROCKE_AOT_FWD_XHALO=4,8` | For stride-1, pad-0 (any pad with `xh_pad` on the wave-private DMA loop, `fxh_dma >= 1000`), X=3 3-D convs a tile of consecutive output pixels in one (n, d) plane reads one contiguous input range at tap (z, y, 0). The loop runs over (chunk, z, y), stages that range (tile_m + n pixels) once with the three x taps' W tiles side by side, and runs three MFMA phases at row shift x: a third of the A loads, A LDS writes and barriers. Each workgroup checks the conditions (pad, stride, X, packed strides, span) from its kernargs and otherwise runs the plain uniform_k_decode loop. |
 | `lds_kpack_read` (`kprd`) | `ROCKE_AOT_FWD_KPRD=1` | MFMA k order permuted so a lane's two kk steps are contiguous: one `ds_read_b128` per fragment pair; the lds_xor key moves to the 128-byte span (conflict-free 16-byte phases). |
 | `uk_chunk_group=n` (`cg<n>`) | `ROCKE_AOT_FWD_CG=2` | With `uk_tap_fast`, n channel chunks advance fastest (one 128-B line at tile_k 32), then the tap, then the next group. |
 | `rpf_lds_barrier` (`lbar`) | `ROCKE_AOT_FWD_LBAR=1` | rpf1 barriers drain LDS only (no `vmcnt(0)`). |
 | `rpf_fetch_late` (`flate`) | `ROCKE_AOT_FWD_FLATE=1` | Next tile's loads behind the first LDS reads. |
-| `xh_dpp` (`xdpp`) | `ROCKE_AOT_FWD_XDPP=1` | x-halo: taps 1, 2 shift the previous tap's A fragments through the lanes (DPP) instead of re-reading LDS. |
+| `xh_dpp` (`xdpp`) | `ROCKE_AOT_FWD_XDPP=1` | x-halo: taps 1, 2 shift the previous tap's A fragments through the lanes (DPP) instead of re-reading LDS. Python engine only (see below). |
+| `xh_pad` (`xpd`) | `ROCKE_AOT_FWD_XPD=1` | The wave-private x-halo DMA loop (`fxh_dma >= 1000`) on padded inputs: the DMA masks the padding itself (dilation 1 along D / H). |
+
+`xh_dpp`, `a_direct` (`adir`), `xh_subtile` (`xsub`), `pp_fetch_deep` (`ppfd`) and `prefetch_regs` (`pfr`) are
+Python-engine only: the C++ engine has no twin, so the conv binding refuses a spec that sets one (a `ValueError`
+naming the field) rather than build another kernel under its name, and the byte-identity gate does not cover them.
 | `rpf_setprio=n` (`prio<n>`) | `ROCKE_AOT_FWD_PRIO=1` | `s_setprio n` over the load issue and the MFMA phase. |
 | `defer_mfma` on the x-halo loop | `ROCKE_AOT_FWD_SCHED=..d1..,..d2..` | The last tap's last kk MFMAs (or all of them) run after an LDS-only barrier, interleaved with the next tile's LDS writes. |
 | `waves_per_eu` | `ROCKE_AOT_FWD_WPE=n` | Occupancy target clones of the rpf1 lxor loops (name tag `wpe<n>`). |

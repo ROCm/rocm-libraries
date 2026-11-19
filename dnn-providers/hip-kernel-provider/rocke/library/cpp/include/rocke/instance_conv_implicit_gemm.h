@@ -252,6 +252,11 @@ typedef struct rocke_implicit_gemm_conv_spec
      * row itself (not the 128-byte span). */
     bool lds_xor_rowkey; /* default false */
 
+    /* Not ported (Python engine only): prefetch_regs, xh_dpp, a_direct,
+     * xh_subtile, pp_fetch_deep. This struct has no field for them; the conv
+     * binding refuses a spec dict that sets one to a non-default value, so no
+     * kernel is built here under such a spec's name. */
+
     /* Uniform-tap K loop (uniform_k_decode): when cpg % tile_k == 0 the tile's
      * channel base and filter tap are carried as uniform counters, so the
      * per-element k decode disappears; otherwise the plain fallback loop. */
