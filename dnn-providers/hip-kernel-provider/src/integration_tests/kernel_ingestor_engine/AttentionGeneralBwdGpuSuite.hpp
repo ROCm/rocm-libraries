@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <iterator>
 #include <memory>
@@ -36,6 +37,7 @@
 #include <hipdnn_frontend/knob/KnobSetting.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <nlohmann/json.hpp>
 
 #include "AttentionGeneralBwdGpuCases.generated.hpp"
 #include "ScopedPluginLogCapture.hpp"
@@ -815,7 +817,37 @@ protected:
         return built.graph->execute(_handle, built.buffers, built.workspace);
     }
 
-    /// Checks that each slot selected the kernel the engine's Python reference predicts.
+    /// Whether the installed UED binds a trained ranker to the main slot for this arch: the
+    /// runtime then orders the main candidates by that model, not with the engine's own pick
+    /// first. Read from the descriptor tree the runtime loads; false when it is not found.
+    static bool mainSlotHasTrainedRanker()
+    {
+        const auto root = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR");
+        if(root.empty())
+        {
+            return false;
+        }
+        std::ifstream file(std::filesystem::path(root) / std::string(Arch::ARCH)
+                           / "rocKE/attention_general_bwd/attention_general_bwd.ued.json");
+        const auto ued = nlohmann::json::parse(file, nullptr, false);
+        if(ued.is_discarded() || !ued.contains("slots"))
+        {
+            return false;
+        }
+        for(const auto& slot : ued.at("slots"))
+        {
+            if(slot.value("name", "") == "main" && slot.contains("sort_kernel_catalog")
+               && slot.at("sort_kernel_catalog").contains(std::string(Arch::ARCH)))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Checks that each slot selected the kernel the engine's Python reference predicts. With a
+    /// trained main-slot ranker installed the main slot may select any admitted kernel
+    /// (EveryAdmittedMainKernelMatchesTheReference runs each), so only that it selected one.
     void
         expectSelectedKernels(const GpuCase& c,
                               const hipdnn_test_sdk::utilities::IsolatedLogRecorder& recorder) const
@@ -827,8 +859,18 @@ protected:
                       << " the expected kernels assume; only correctness is checked\n";
             return;
         }
+        const bool trained = mainSlotHasTrainedRanker();
         for(const auto& [slot, id] : {std::pair{"prep", c.prepKernelId}, {"main", c.mainKernelId}})
         {
+            if(trained && std::string_view(slot) == "main")
+            {
+                const auto line
+                    = std::string("engine '") + ENGINE + "' slot 'main' selected kernel ";
+                EXPECT_TRUE(recorder.hasLogContaining(line))
+                    << "expected '" << line << "...'. Captured logs:\n"
+                    << recorder.getRecordedLogsAsString();
+                continue;
+            }
             const auto line = std::string("engine '") + ENGINE + "' slot '" + slot
                               + "' selected kernel " + std::string(id);
             EXPECT_TRUE(recorder.hasLogContaining(line))
