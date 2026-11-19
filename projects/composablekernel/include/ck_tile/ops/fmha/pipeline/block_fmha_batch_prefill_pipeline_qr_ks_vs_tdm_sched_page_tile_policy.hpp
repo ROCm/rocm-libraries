@@ -33,6 +33,17 @@ template <typename Problem, typename Geometry>
 inline constexpr bool fmha_page_tile_d64_quad_reads_v =
     Geometry::kM == 128 && Geometry::kN == 128 && Geometry::kHeadDimQK == 64 &&
     Geometry::kDv == 64 && !fmha_tdm_is_split_partial_v<Problem>;
+
+// D128 M128 page tiles without prepared tile bases: the guarded problems whose code spills on
+// gfx1250 (VGPR spills in 288 of their 354 generated instances, none in any other guarded
+// instance). They keep the shared grouped-drain placement: the full drain that
+// FmhaBatchPrefillPageTileGroupedDrainPlacement adds at the end of each QK stage moved their
+// register allocation, and spill refills of Q fragments then landed on the operands of WMMAs in
+// flight (100 instances; devlog O1 of bp-review-fixes).
+template <typename Problem, typename Geometry>
+inline constexpr bool fmha_page_tile_d128_m128_spills_v =
+    Geometry::kHeadDimQK == 128 && Geometry::kM == 128 &&
+    !fmha_page_tile_d128_prepared_bases_v<Problem, Geometry>;
 } // namespace detail
 
 // Policy of the gfx1250 batch-prefill page-tile pipeline: the scheduled-TDM policy and the
@@ -391,27 +402,138 @@ struct FmhaBatchPrefillPageTileQuadD64N128ReadSchedule
     }
 };
 
+// Grouped-drain placement of the page tile: FmhaTdmSchedGroupedDrainPlacement with a Drain point,
+// the full drain, where that placement has its KeepPending point (after the RAW fence of a QK
+// stage's last row). The fence waits for the last WMMA's result only. Under the hazard note's
+// model (WMMAs do not retire in issue order) it does not prove that the earlier pairs of the group
+// have read their K slices, which the reads after it may refill; the drain does, so the guard
+// does not depend on the waits the compiler adds under expert scheduling. The pairs kept to that
+// point are KeepPending's (those since the previous drain), or the drain's own where the row is a
+// drain row too. Everything else is the shared placement's. The page-tile policy selects it for
+// every guarded problem except the spilling D128 M128 tiles (fmha_page_tile_d128_m128_spills_v),
+// whose stage-end release keeps relying on the waits that expert scheduling adds.
+template <typename Geometry_,
+          index_t QkGroup_        = 4,
+          index_t PvGroup_        = 4,
+          bool QkTailReads_       = true,
+          typename ReadPlacement_ = FmhaTdmSchedScheduleFor<Geometry_>>
+struct FmhaBatchPrefillPageTileGroupedDrainPlacement
+    : FmhaTdmSchedGroupedDrainPlacement<Geometry_, QkGroup_, PvGroup_, QkTailReads_, ReadPlacement_>
+{
+    using Base  = FmhaTdmSchedGroupedDrainPlacement<Geometry_,
+                                                    QkGroup_,
+                                                    PvGroup_,
+                                                    QkTailReads_,
+                                                    ReadPlacement_>;
+    using Point = typename Base::Point;
+    using Kind  = typename Base::Kind;
+    template <Point P>
+    using At = std::integral_constant<Point, P>;
+
+    // The QK rows that end with a full drain in place of the shared placement's KeepPending point.
+    CK_TILE_HOST_DEVICE static constexpr bool QkStageEndDrain(index_t r)
+    {
+        return Base::kQkGroup > 1 && r == Base::kQkWmmasPerStage - 1;
+    }
+    CK_TILE_HOST_DEVICE static constexpr FmhaTdmSchedRowRange QkKeptPairs(index_t r, bool drain)
+    {
+        return QkStageEndDrain(r) ? Base::QkKeptPairs(r, Base::QkDrainRow(r))
+                                  : Base::QkKeptPairs(r, drain);
+    }
+
+    // Base::RunQkRow with one Drain point at a stage's last row (no KeepPending point).
+    template <typename Mode,
+              index_t Stage,
+              index_t Wmma,
+              typename WmmaEmitter,
+              typename ReadEmitter,
+              typename FenceEmitter>
+    CK_TILE_HOST_DEVICE static constexpr void
+    RunQkRow(WmmaEmitter& emit_wmma, ReadEmitter& emit_read, FenceEmitter& emit_fence)
+    {
+        emit_wmma(number<Stage>{}, number<Wmma>{});
+        emit_fence(number<Stage>{}, number<Wmma>{}, At<Point::AfterWmma>{});
+        if constexpr(Base::kQkTailReads || Stage != Base::kNumQkStages - 1)
+        {
+            if constexpr(Base::QkDrainRow(Wmma) || QkStageEndDrain(Wmma))
+                emit_fence(number<Stage>{}, number<Wmma>{}, At<Point::Drain>{});
+            if constexpr(Wmma % Base::kQkMIter == 0 && Wmma > 0)
+                QkReads<Stage, Wmma - 1>(emit_read, emit_fence);
+            if constexpr(Wmma % Base::kQkMIter != Base::kQkMIter - 1 ||
+                         Wmma == Base::kQkWmmasPerStage - 1)
+                QkReads<Stage, Wmma>(emit_read, emit_fence);
+        }
+        emit_fence(number<Stage>{}, number<Wmma>{}, At<Point::AfterTokens>{});
+    }
+
+    private:
+    // Base::QkReads (private there).
+    template <index_t Stage, index_t Row, typename ReadEmitter, typename FenceEmitter>
+    CK_TILE_HOST_DEVICE static constexpr void QkReads(ReadEmitter& emit_read,
+                                                      FenceEmitter& emit_fence)
+    {
+        auto read = [&](auto kind, auto access) {
+            if constexpr(decltype(kind)::value != Kind::IgnoredLegacy)
+                emit_read(kind, access);
+        };
+        Base::ReadPlacement::template VisitQkRowHalf<Stage, Row, false>(read);
+        emit_fence(number<Stage>{}, number<Row>{}, At<Point::BetweenTokenHalves>{});
+        Base::ReadPlacement::template VisitQkRowHalf<Stage, Row, true>(read);
+    }
+};
+
+// The shared placement traits for the page-tile placement: a grouped-drain placement, whose QK
+// tail stage reads PV stage 0's V unless QkTailReads is false.
+template <typename Geometry,
+          index_t QkGroup,
+          index_t PvGroup,
+          bool QkTailReads,
+          typename ReadPlacement>
+inline constexpr bool
+    kIsFmhaTdmSchedGroupedDrain<FmhaBatchPrefillPageTileGroupedDrainPlacement<Geometry,
+                                                                              QkGroup,
+                                                                              PvGroup,
+                                                                              QkTailReads,
+                                                                              ReadPlacement>> =
+        true;
+template <typename Geometry,
+          index_t QkGroup,
+          index_t PvGroup,
+          bool QkTailReads,
+          typename ReadPlacement>
+inline constexpr bool
+    kFmhaTdmSchedQkTailReads<FmhaBatchPrefillPageTileGroupedDrainPlacement<Geometry,
+                                                                           QkGroup,
+                                                                           PvGroup,
+                                                                           QkTailReads,
+                                                                           ReadPlacement>> =
+        QkTailReads;
+
 // Grouped drains of a guarded page-tile problem. The D128 tiles with prepared tile bases read PV
 // stage 0's V in the softmax, so their QK tail stage refills nothing and one drain covers a whole
 // stage (D128 P64: 20 instead of 27 full drains per KV tile). With V0 read in the QK tail stage it
 // stays alive across that stage and the softmax, and whole-stage groups spill it (32 VGPRs): the
-// kept operands take the low 256 registers. The D64 M128 tiles read in groups of four.
+// kept operands take the low 256 registers. The D64 M128 tiles read in groups of four. The spilling
+// D128 M128 tiles keep the shared placement (fmha_page_tile_d128_m128_spills_v).
 template <typename Problem, typename Geometry = FmhaBatchPrefillPageTileGeometryFor<Problem>>
 using FmhaBatchPrefillPageTileGroupedDrainFor = std::conditional_t<
     detail::fmha_page_tile_d128_prepared_bases_v<Problem, Geometry>,
-    FmhaTdmSchedGroupedDrainPlacement<Geometry,
-                                      Geometry::kQkWmmasPerStage / Geometry::kQkMIter,
-                                      Geometry::kPvWmmasPerStage -
-                                          kFmhaTdmSchedPvLastMRow<Geometry>,
-                                      false>,
-    std::conditional_t<detail::fmha_page_tile_d64_quad_reads_v<Problem, Geometry>,
-                       FmhaTdmSchedGroupedDrainPlacement<
-                           Geometry,
-                           4,
-                           4,
-                           true,
-                           FmhaBatchPrefillPageTileQuadD64N128ReadSchedule<Geometry>>,
-                       FmhaTdmSchedGroupedDrainPlacement<Geometry>>>;
+    FmhaBatchPrefillPageTileGroupedDrainPlacement<Geometry,
+                                                  Geometry::kQkWmmasPerStage / Geometry::kQkMIter,
+                                                  Geometry::kPvWmmasPerStage -
+                                                      kFmhaTdmSchedPvLastMRow<Geometry>,
+                                                  false>,
+    std::conditional_t<
+        detail::fmha_page_tile_d64_quad_reads_v<Problem, Geometry>,
+        FmhaBatchPrefillPageTileGroupedDrainPlacement<
+            Geometry,
+            4,
+            4,
+            true,
+            FmhaBatchPrefillPageTileQuadD64N128ReadSchedule<Geometry>>,
+        std::conditional_t<detail::fmha_page_tile_d128_m128_spills_v<Problem, Geometry>,
+                           FmhaTdmSchedGroupedDrainPlacement<Geometry>,
+                           FmhaBatchPrefillPageTileGroupedDrainPlacement<Geometry>>>>;
 
 // Schedule of a page-tile problem: with the WMMA operand guard (the vectorized KV layout) the
 // WMMA-first rows run with grouped drains; otherwise the shared default schedule.
