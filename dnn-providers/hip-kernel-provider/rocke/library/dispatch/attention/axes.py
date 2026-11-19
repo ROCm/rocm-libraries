@@ -164,11 +164,13 @@ DENSE_PROBLEM_FIELDS = frozenset(
         "chiplet_num_xcds",
     }
 )
-# Problem fields only some arches' dense specs declare (the band's right bound,
-# and the KV storage format, whose loader only gfx950 has).
+# Problem fields only some arches' dense specs declare: the band's right bound
+# (gfx950 only), and the KV storage format, which both dense kernels now carry
+# on the shared fp8 sync-dequant loader. It is set from the request and never
+# swept -- a tuning point must not change the KV cache's storage format.
 DENSE_ARCH_PROBLEM_FIELDS: Mapping[str, frozenset] = {
     "gfx950": frozenset({"right_bound", "kv_storage_dtype"}),
-    "gfx942": frozenset(),
+    "gfx942": frozenset({"kv_storage_dtype"}),
 }
 DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {
     "gfx950": frozenset({"persistent", "wide_lds_dma"}),

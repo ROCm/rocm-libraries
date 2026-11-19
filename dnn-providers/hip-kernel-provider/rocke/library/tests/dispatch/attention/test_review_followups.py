@@ -425,13 +425,136 @@ class TestFp8DenseGuards(unittest.TestCase):
             supports_attention_dense(replace(ks, use_sinks=True), arch="gfx950")[0]
         )
 
-    def test_gfx942_dense_rejects_fp8_storage(self):
+    def _gfx942_fp8_spec(self, **over):
+        from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
+
+        return Gfx942AttentionDenseSpec(
+            **{
+                "batch": 2,
+                "seqlen_q": 512,
+                "seqlen_kv": 512,
+                "num_query_heads": 8,
+                "num_kv_heads": 8,
+                "head_size": 64,
+                "block_m": 128,
+                "kv_storage_dtype": "fp8e4m3",
+                **over,
+            }
+        )
+
+    def test_gfx942_dense_candidate_routes_an_fp8_request(self):
+        """An fp8 request must reach the gfx942 dense candidate, not be refused.
+
+        The kernel serving fp8 is useless if the candidate does not advertise
+        the feature: dispatch refuses the request at the capability gate and
+        nothing can reach the new path. This pins the advertisement AND that it
+        sets kv_storage_dtype, since either half alone is a silent no-op.
+        """
+        from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
+
+        def _spec(**over):
+            req = dict(
+                batch=1,
+                nhead_q=16,
+                nhead_k=4,
+                seqlen_q=512,
+                seqlen_k=512,
+                hdim_q=64,
+                hdim_v=64,
+                arch="gfx942",
+                mask_type=1,
+                dtype="bf16",
+            )
+            req.update(over)
+            return tuning_spec_with_knobs(
+                AttentionRequest(**req), "gfx942_dense", {}
+            ).kernel_spec
+
+        self.assertEqual(_spec(use_fp8=True).kv_storage_dtype, "fp8e4m3")
+        # Not set unless asked for: a bf16 request must stay on the DMA path.
+        self.assertIsNone(_spec().kv_storage_dtype)
+        # D128 routes too. What fp8 refuses is the transposed V path, which is a
+        # tile choice, and the D128 tile dispatch ships here leaves it off.
+        d128 = _spec(use_fp8=True, hdim_q=128, hdim_v=128)
+        self.assertEqual(d128.kv_storage_dtype, "fp8e4m3")
+        self.assertFalse(d128.resolved_use_cfvst())
+        # Sinks have no fp8 path, so the combination must not route at all.
+        with self.assertRaises(Exception):
+            _spec(use_fp8=True, use_sinks=True)
+
+    def test_gfx942_dense_serves_fp8_kv_on_the_naive_v_path(self):
+        """gfx942 dense takes fp8 KV where the sync-dequant loader can fill LDS."""
+        from kernels.gfx942.attention_dense import supports_attention_dense
+
+        ok, reason = supports_attention_dense(self._gfx942_fp8_spec(), arch="gfx942")
+        self.assertTrue(ok, reason)
+
+    def test_gfx942_dense_refuses_an_fp8_cache_past_i32_addressing(self):
+        """The fp8 sync loader indexes KV with an i32 ELEMENT offset.
+
+        A wrapped raw-pointer address reads whatever it lands on, unlike the
+        bf16 DMA whose buffer resource bounds it. No separate fp8 gate exists:
+        the shared preflight refuses a cache at or past INT32_LIMIT *bytes*
+        using ``kv_elem_bytes``, which is 1 under fp8, so the shared byte bound
+        IS the element bound this loader needs. This pins that equivalence, so
+        decoupling ``kv_elem_bytes`` from the preflight cannot go unnoticed.
+        """
+        from kernels.gfx942.attention_dense import supports_attention_dense
+
+        # 64 * 65536 * 8 * 64 == 2**31 elements == 2**31 B at 1 byte/element.
+        over = {"batch": 64, "seqlen_kv": 65536, "num_kv_heads": 8, "head_size": 64}
+        ok, reason = supports_attention_dense(
+            self._gfx942_fp8_spec(num_query_heads=8, **over), arch="gfx942"
+        )
+        self.assertFalse(ok)
+        self.assertIn("32-bit buffer-resource limit", reason)
+
+        # Half the keys is half the bytes under fp8, so the same shape fits.
+        ok_half, why_half = supports_attention_dense(
+            self._gfx942_fp8_spec(num_query_heads=8, **{**over, "seqlen_kv": 32768}),
+            arch="gfx942",
+        )
+        self.assertTrue(ok_half, why_half)
+        # The same element count at bf16 KV is twice the bytes, so it is
+        # refused where fp8 is served. kv_elem_bytes is what separates them.
+        ok_bf16, _ = supports_attention_dense(
+            self._gfx942_fp8_spec(
+                num_query_heads=8,
+                kv_storage_dtype=None,
+                **{**over, "seqlen_kv": 32768},
+            ),
+            arch="gfx942",
+        )
+        self.assertFalse(ok_bf16)
+
+    def test_gfx942_dense_refuses_fp8_where_the_loader_cannot_reach(self):
+        """The narrowed guard names each configuration the loader does not serve.
+
+        D128 turns the conflict-free transposed V path on, and the loader
+        cannot fill a transposed V^T V_lds; sinks have no fp8 path. Both must
+        refuse by name rather than lower something wrong.
+        """
+        from kernels.gfx942.attention_dense import supports_attention_dense
+
+        for label, over in (
+            ("cfvst", {"head_size": 128}),
+            ("sinks", {"use_sinks": True}),
+        ):
+            with self.subTest(refusal=label):
+                ok, reason = supports_attention_dense(
+                    self._gfx942_fp8_spec(**over), arch="gfx942"
+                )
+                self.assertFalse(ok)
+                self.assertIn("fp8", reason.lower())
+
+    def test_gfx942_dense_support_check_refuses_another_archs_spec(self):
+        """A concrete gfx950 spec never reaches the fp8 gate: promotion refuses it."""
         from kernels.gfx942.attention_dense import supports_attention_dense
 
         ks = self._fp8_grid_spec()[1].kernel_spec
         ok, reason = supports_attention_dense(ks, arch="gfx942")
         self.assertFalse(ok)
-        self.assertIn("fp8", reason.lower())
+        self.assertIn("promote", reason.lower())
 
     def test_fnuz_fp8_request_is_rejected_on_gfx950(self):
         with self.assertRaisesRegex(ValueError, "OCP|FNUZ"):
@@ -466,7 +589,11 @@ class TestFp8DenseGuards(unittest.TestCase):
         for wrong in ("torch.bfloat16", "torch.float8_e4m3fnuz"):
             kv = SimpleNamespace(dtype=wrong)
             with self.subTest(dtype=wrong):
-                with self.assertRaisesRegex(ValueError, r"fp8 dense expects OCP fp8 k"):
+                # The refusal names the arch: the expected encoding is derived
+                # from the target, FNUZ on gfx9_mfma and OCP on gfx950.
+                with self.assertRaisesRegex(
+                    ValueError, r"fp8 dense on gfx950 expects OCP fp8 k"
+                ):
                     run_attention_dense_torch(
                         spec=spec,
                         q=kv,

@@ -2047,6 +2047,31 @@ def cases():
                 "waves_per_eu": 4,
             },
         ),
+        # fp8 KV on the shared sync-dequant loader. What fp8 refuses is the
+        # conflict-free transposed V path, whose V^T layout the loader cannot
+        # fill, so both head sizes appear here at tiles that leave it off.
+        # These bodies have no C++ mirror, so this golden is the only pin of
+        # their lowered IR.
+        ("fp8_d64_causal_sq512", {"kv_storage_dtype": "fp8e4m3", "head_size": 64}),
+        # D128 with cfvst explicitly off: the tile dispatch ships for an fp8
+        # D128 request. The default D128 base turns cfvst on and is refused.
+        (
+            "fp8_d128_causal_nocfvst_sq512",
+            {"kv_storage_dtype": "fp8e4m3", "block_m": 128, "use_cfvst": False},
+        ),
+        (
+            "fp8_d64_swa_w128_sq512",
+            {"kv_storage_dtype": "fp8e4m3", "head_size": 64, "sliding_window": 128},
+        ),
+        (
+            "fp8_d64_noncausal_sq512",
+            {"kv_storage_dtype": "fp8e4m3", "head_size": 64, "causal": False},
+        ),
+        # fp16 compute/output with fp8 KV: the dequant target follows ``dtype``.
+        (
+            "fp8_fp16_d64_causal_sq512",
+            {"kv_storage_dtype": "fp8e4m3", "head_size": 64, "dtype": "fp16"},
+        ),
     ):
         add(
             "attention_dense",

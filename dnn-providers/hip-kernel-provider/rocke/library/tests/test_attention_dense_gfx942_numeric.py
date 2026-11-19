@@ -143,6 +143,7 @@ def _spec(
     bottom_right=False,
     kv_block_size=0,
     block_m=None,
+    use_fp8=False,
 ):
     """The SHIPPED gfx942 dense spec for a cohort row, built through the dispatch
     candidate (``gfx942_dense`` via ``dispatch.attention``) rather than hand-rolled.
@@ -201,6 +202,7 @@ def _spec(
             dtype=dtype,
             sliding_window=sliding_window,
             use_sinks=use_sinks,
+            use_fp8=use_fp8,
             **(
                 {"layout": "paged", "kv_block_size": kv_block_size}
                 if kv_block_size
@@ -281,6 +283,108 @@ def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, causal):
             f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e}\n{m}"
         ),
     )
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+@pytest.mark.parametrize("causal,sliding_window", [(True, 0), (True, 128), (False, 0)])
+@pytest.mark.parametrize("d,hq,hkv", [(64, 16, 4), (64, 16, 16), (128, 16, 4)])
+def test_fp8_kv_dequant_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, causal, sliding_window):
+    """fp8 KV-dequant dense on gfx942: FNUZ K/V in, dequantised in the loader.
+
+    The encoding is ``float8_e4m3fnuz``, NOT the ``float8_e4m3fn`` the gfx950
+    lane uses: the dequant lowers to identical IR on both targets but gfx942
+    decodes the byte as FNUZ, so feeding it OCP silently produces wrong
+    numbers. This assertion is what confirms that choice on silicon rather
+    than from the ISA docs.
+
+    Both head sizes run, because what fp8 actually refuses is the conflict-free
+    transposed V path (the sync-dequant loader fills the natural [token, dim]
+    V_lds, not V^T), and whether that path is on is a tile choice rather than a
+    head size. The D128 tile dispatch ships here leaves it off.
+
+    The reference attends over the SAME dequantised K/V, so the residual is
+    kernel compute error and not quantisation loss.
+    """
+    import torch
+
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    B, S = 1, 512
+    scale = 1.0 / math.sqrt(d)
+    torch.manual_seed(0)
+    q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt) * 0.3
+    k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt) * 0.3
+    v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt) * 0.3
+
+    fp8_dt = torch.float8_e4m3fnuz
+    fp8_max = torch.finfo(fp8_dt).max
+
+    def _quant(t):
+        s = (t.abs().max().clamp(min=1e-8) / fp8_max).item()
+        return (t.float() / s).clamp(-fp8_max, fp8_max).to(fp8_dt), s
+
+    k_fp8, k_scale = _quant(k)
+    v_fp8, v_scale = _quant(v)
+    k_deq = (k_fp8.float() * k_scale).to(tdt)
+    v_deq = (v_fp8.float() * v_scale).to(tdt)
+
+    # Through the dispatch factory with use_fp8=True, so this runs the binary
+    # routing actually ships rather than one hand-patched to carry the knob.
+    spec = _spec(
+        dtype, d, hq, hkv, False, causal=causal, batch=B, sq=S,
+        sliding_window=sliding_window, use_fp8=True,
+    )  # fmt: skip
+    assert spec.kv_storage_dtype == "fp8e4m3"
+    ok, why = supports_attention_dense(_as_gfx942_spec(spec), arch="gfx942")
+    assert ok, f"fp8 D{d} {dtype} refused: {why}"
+
+    out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+    run_attention_dense_torch(
+        spec=spec, q=q, k=k_fp8, v=v_fp8, out=out, scale=scale,
+        k_scale=k_scale, v_scale=v_scale,
+    )  # fmt: skip
+    torch.cuda.synchronize()
+
+    attn_mask = None
+    if sliding_window:
+        idx = torch.arange(S, device="cuda")
+        delta = idx[:, None] - idx[None, :]
+        attn_mask = (delta >= 0) & (delta < sliding_window)
+    ref = _sdpa_reference(
+        q, k_deq, v_deq, scale, causal=causal and attn_mask is None,
+        attn_mask=attn_mask,
+    )  # fmt: skip
+
+    max_abs = (ref - out.float()).abs().max().item()
+    assert max_abs < 6e-2, (
+        f"fp8 {dtype} D{d} GQA{hq}/{hkv} causal={causal} "
+        f"swa={sliding_window}: max_abs={max_abs:.3e}"
+    )
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+def test_fp8_kv_ocp_encoding_is_refused_on_gfx942(dtype):
+    """Feeding gfx942 the OCP spelling must raise, not silently misread.
+
+    The two e4m3 encodings differ in exponent bias, so an OCP tensor decoded as
+    FNUZ is wrong by a factor of two and nothing downstream would notice.
+    """
+    import torch
+
+    d, hq, hkv, B, S = 64, 16, 4, 1, 512
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    q = torch.zeros(B, S, hq, d, device="cuda", dtype=tdt)
+    kv = torch.zeros(B, S, hkv, d, device="cuda", dtype=torch.float8_e4m3fn)
+    out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+    spec = _spec(dtype, d, hq, hkv, False, use_fp8=True)
+    with pytest.raises(ValueError, match="FNUZ"):
+        run_attention_dense_torch(
+            spec=spec, q=q, k=kv, v=kv, out=out,
+            scale=1.0 / math.sqrt(d), k_scale=1.0, v_scale=1.0,
+        )  # fmt: skip
 
 
 @requires_gfx942_gpu
