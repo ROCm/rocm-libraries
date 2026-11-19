@@ -51,8 +51,21 @@ WGRAD_DET_SPLIT_FIELDS: Tuple[str, ...] = ("ws_store",)
 # ---- low-precision partials ------------------------------------------------
 # (field, value) pairs of deterministic reductions that round every partial
 # sum below f32 before the fold (less accurate than an f32 reduction):
-# ``--deterministic f32`` rejects them as well. ws_store 2 = bf16 slabs.
-LOWP_PARTIAL_FIELDS: Tuple[Tuple[str, int], ...] = (("ws_store", 2), ("pp_box_det", 2))
+# ``--deterministic f32`` rejects them as well. ws_store 2 = bf16 slabs;
+# pp_box_det 2 / 4 = bf16 slots (the two-kernel fold and the in-kernel fold
+# of the same bf16 slot layout; :func:`pbd_slot_bytes`).
+LOWP_PARTIAL_FIELDS: Tuple[Tuple[str, int], ...] = (
+    ("ws_store", 2),
+    ("pp_box_det", 2),
+    ("pp_box_det", 4),
+)
+
+
+def pbd_slot_bytes(pp_box_det: int) -> int:
+    """Bytes per partial slot of a ``pp_box_det`` mode: 2 (bf16) for 2 and 4,
+    else 4 (f32). The launcher sizes the slot buffer with it; the
+    LOWP_PARTIAL_FIELDS entries of pp_box_det are exactly its bf16 modes."""
+    return 2 if int(pp_box_det or 0) in (2, 4) else 4
 
 
 # Reason of the two-way bf16-atomic fwd rule below: deterministic,
@@ -104,10 +117,11 @@ def classify(direction: str, ident, split_k: Optional[int] = None) -> Tuple[bool
             and not getattr(ident, "split_streamk", False)
             and not getattr(ident, "split_hybrid", 0)
         ):
-            # Two contributions into a zeroed (or slice-0-stored)
-            # tile: bf16(a) then round(bf16(a) + bf16(b)) -- IEEE addition
-            # commutes, so either order gives the same bits (a two-way
-            # split_tail launch, checked bitwise). Three or more do not.
+            # Two contributions into a zeroed (or slice-0-stored) tile:
+            # bf16(a) then round(bf16(a) + bf16(b)) -- IEEE addition
+            # commutes, so either order gives the same bits (checked bitwise
+            # with conv_det_check on a two-way split_tail launch). Three or
+            # more do not.
             return True, TWO_WAY_BF16_REASON
         return False, "split-K atomics into D"
     if direction == "dgrad":
@@ -123,6 +137,27 @@ def classify(direction: str, ident, split_k: Optional[int] = None) -> Tuple[bool
             return True, "deterministic split field"
         return False, "split-K atomics into dX"
     return False, f"unknown direction {direction!r}"
+
+
+def _two_way_capable(direction: str, ident) -> bool:
+    """A fwd split binary whose degree-2 launches take the two-way bf16 rule."""
+    return (
+        direction == "fwd"
+        and max(1, int(getattr(ident, "split_k", 1) or 1)) > 1
+        and not _any(ident, FWD_DET_SPLIT_FIELDS)
+        and not getattr(ident, "split_streamk", False)
+        and not getattr(ident, "split_hybrid", 0)
+    )
+
+
+def may_be_deterministic(direction: str, ident, mode: str = "any") -> bool:
+    """Binary-level prefilter: True when *some* launch degree of ``ident`` can
+    be deterministic under ``mode``. :func:`is_deterministic` with the launch's
+    degree stays authoritative; this only keeps the binaries a per-degree check
+    may still accept (a fwd split binary's two-way launches under "any")."""
+    if mode == "any" and _two_way_capable(direction, ident):
+        return True
+    return is_deterministic(direction, ident, None, mode)
 
 
 def is_deterministic(

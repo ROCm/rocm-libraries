@@ -5255,19 +5255,29 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     continue
             args._pin_launch = pin
             if getattr(args, "deterministic", False):
-                from benchmarks.common.det_classify import is_deterministic
+                from benchmarks.common.det_classify import may_be_deterministic
 
+                # Binary level: keep every binary some launch degree of which can
+                # be deterministic; the per-degree check below decides each launch.
                 n_before = len(candidates)
                 candidates = [
                     c
                     for c in candidates
-                    if is_deterministic(direction, c[0], None, args.deterministic)
+                    if may_be_deterministic(direction, c[0], args.deterministic)
                 ]
                 print(
                     f"  --deterministic: {len(candidates)} of {n_before} kernels kept",
                     flush=True,
                 )
                 if not candidates:
+                    if pin is not None:
+                        print(
+                            f"Case {case_idx} {problem.short()} {case_dtype} {direction}: "
+                            f"pinned kernel is not deterministic "
+                            f"(--deterministic {args.deterministic}): {pin}",
+                            flush=True,
+                        )
+                        overall_rc = 1
                     continue
             n_compatible = len(candidates)
             n_vec_pruned = 0
@@ -6340,6 +6350,7 @@ def _pbd_stage2_run(
     """``run1`` followed by the pp_box_det stage-2 fold (conv_dgrad_box_det),
     compiled once per tile geometry in a run (``compiled`` memoises it)."""
     from rocke import compile_kernel
+    from benchmarks.common.det_classify import pbd_slot_bytes
     from kernels.common.conv_dgrad_box_det import (
         DgradBoxDetReduceSpec,
         build_dgrad_box_det_reduce,
@@ -6376,7 +6387,7 @@ def _pbd_stage2_run(
         msplit=msplit,
         unroll=int(os.environ.get("ROCKE_PBD_S2_UNROLL", "1") or 1),
         wave_wg=os.environ.get("ROCKE_PBD_S2_WWG", "0") == "1",
-        slot_bytes=2 if ident.pp_box_det == 2 else 4,
+        slot_bytes=pbd_slot_bytes(ident.pp_box_det),
         load_aux=int(os.environ.get("ROCKE_PBD_S2_LOAD_AUX", "0") or 0),
         pix_pre=os.environ.get("ROCKE_PBD_S2_PIXPRE", "1") == "1",
     )
@@ -7661,9 +7672,11 @@ def _extras_and_grid(
             flat = np.concatenate([flat, np.zeros(max(0, extra), np.int32)])
         _alloc_bytes = flat.nbytes
         if getattr(ident, "pp_box_det", 0):
-            # Deterministic box split-K: header, stage-2 table and the f32
-            # slots follow the table (conv_dgrad_box_det.pp_box_det_pack);
-            # the slots are fully written by stage 1, never cleared.
+            # Deterministic box split-K: header, stage-2 table and the
+            # slots (f32; bf16 for pp_box_det 2 / 4) follow the table
+            # (conv_dgrad_box_det.pp_box_det_pack); the slots are fully
+            # written by stage 1, never cleared.
+            from benchmarks.common.det_classify import pbd_slot_bytes
             from kernels.common.conv_dgrad_box_det import pp_box_det_pack
 
             _w, _lay = pp_box_det_pack(
@@ -7672,7 +7685,7 @@ def _extras_and_grid(
                 tile_m=ident.tile_m,
                 tile_n=ident.tile_n,
                 pp_box_order=getattr(ident, "pp_box_order", 0),
-                slot_bytes=2 if ident.pp_box_det in (2, 4) else 4,
+                slot_bytes=pbd_slot_bytes(ident.pp_box_det),
                 **({"pix_map": pbd_pix_map} if pbd_pix_map is not None else {}),
             )
             flat = np.array(_w, dtype=np.int32)
