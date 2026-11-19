@@ -368,6 +368,20 @@ def _global_byte_address(ptr: Value, idx: Value, cpp_t: str, *, store: bool) -> 
     return f"{base} + (int64_t){_name(idx)} * (int64_t)sizeof({cpp_t})"
 
 
+def _global_atomic_address(
+    ptr: Value, idx: Value, elem: Type, *, store: bool = True, subscript: bool = False
+) -> str:
+    """Form a builtin's typed pointer, after indexing in scalar element units."""
+    if _has_typed_access_base(ptr, elem):
+        if subscript:
+            return f"&{_name(ptr)}[{_name(idx)}]"
+        return f"{_name(ptr)} + {_name(idx)}"
+    cpp_t = _type_to_hip(elem)
+    address = _global_access_address(ptr, idx, elem, store=store)
+    qualifier = "" if store else "const "
+    return f"reinterpret_cast<{qualifier}{cpp_t}*>({address})"
+
+
 # Vector-load/store element type -> ext_vector_type prefix (see the _ROCKE_VEC
 # typedefs in the prologue). fp8/bf8 share the i8 byte-storage view.
 _VEC_PREFIX = {
@@ -2342,8 +2356,8 @@ class _Lowerer:
         ptr, idx, val = op.operands
         cpp_t = _type_to_hip(val.type)
         self._emit(
-            f"{cpp_t} {_name(op.result)} = atomicAdd(&{_name(ptr)}[{_name(idx)}], "
-            f"{_name(val)});"
+            f"{cpp_t} {_name(op.result)} = atomicAdd("
+            f"{_global_atomic_address(ptr, idx, val.type, subscript=True)}, {_name(val)});"
         )
 
     def _op_memref_fence(self, op: Op) -> None:
@@ -2361,7 +2375,8 @@ class _Lowerer:
         scope = _sync_attr(op, "scope", _FENCE_SCOPES)
         ordering = _sync_attr(op, "ordering", _FLAG_STORE_ORDERINGS)
         self._emit(
-            f"__hip_atomic_store(&{_name(ptr)}[{_name(idx)}], {_name(val)}, "
+            f"__hip_atomic_store({_global_atomic_address(ptr, idx, I32, subscript=True)}, "
+            f"{_name(val)}, "
             f"{_HIP_ATOMIC_ORDER[ordering]}, {_HIP_MEMORY_SCOPE[scope]});"
         )
 
@@ -2370,7 +2385,9 @@ class _Lowerer:
         ptr, idx, expect = op.operands
         scope = _sync_attr(op, "scope", _FENCE_SCOPES)
         self._emit(
-            f"while (__hip_atomic_load(&{_name(ptr)}[{_name(idx)}], __ATOMIC_ACQUIRE, "
+            f"while (__hip_atomic_load("
+            f"{_global_atomic_address(ptr, idx, I32, store=False, subscript=True)}, "
+            f"__ATOMIC_ACQUIRE, "
             f"{_HIP_MEMORY_SCOPE[scope]}) != {_name(expect)}) {{}}"
         )
 
@@ -2382,12 +2399,7 @@ class _Lowerer:
         intrinsic. The input is a ``bf16x2`` and the result is the
         pre-add value at the slot.
         """
-        ptr, idx, val = op.operands
-        self._emit(
-            f"bf16x2 {_name(op.result)} = "
-            f"__builtin_amdgcn_global_atomic_fadd_v2bf16("
-            f"{_name(ptr)} + {_name(idx)}, {_name(val)});"
-        )
+        self._emit_packed_global_atomic_add(op, BF16, "bf16x2", "v2bf16")
 
     def _op_memref_global_atomic_add_pk_f16(self, op: Op) -> None:
         """Lower the packed-fp16 atomic add via the AMDGPU builtin.
@@ -2397,11 +2409,23 @@ class _Lowerer:
         intrinsic (gfx940+). The input is a ``half2`` and the result is
         the pre-add value at the slot.
         """
+        self._emit_packed_global_atomic_add(op, F16, "half2", "v2f16")
+
+    def _emit_packed_global_atomic_add(
+        self, op: Op, elem: Type, vector: str, builtin_suffix: str
+    ) -> None:
         ptr, idx, val = op.operands
+        name = _name(op.result)
+        # The index is in scalar halfwords; the transaction itself requires a
+        # four-byte-aligned pair. Clang takes the builtin's alignment from the
+        # pointee type, even when the address has an assume_aligned attribute.
         self._emit(
-            f"half2 {_name(op.result)} = "
-            f"__builtin_amdgcn_global_atomic_fadd_v2f16("
-            f"{_name(ptr)} + {_name(idx)}, {_name(val)});"
+            f"typedef {_type_to_hip(elem)} {name}_aligned __attribute__((aligned(4)));"
+        )
+        address = _global_atomic_address(ptr, idx, elem)
+        self._emit(
+            f"{vector} {name} = __builtin_amdgcn_global_atomic_fadd_{builtin_suffix}("
+            f"reinterpret_cast<{name}_aligned*>({address}), {_name(val)});"
         )
 
     def _op_tile_register_p_from_qk_c(self, op: Op) -> None:
@@ -2517,7 +2541,7 @@ class _Lowerer:
 
     def _op_memref_global_atomic_add_f32(self, op: Op) -> None:
         ptr, idx, val = op.operands
-        self._emit(f"atomicAdd({_name(ptr)} + {_name(idx)}, {_name(val)});")
+        self._emit(f"atomicAdd({_global_atomic_address(ptr, idx, F32)}, {_name(val)});")
 
     # -------------------- tile: LDS vector load / store --------------------
 

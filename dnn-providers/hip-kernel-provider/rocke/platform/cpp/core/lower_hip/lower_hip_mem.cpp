@@ -811,6 +811,35 @@ static rocke_status_t _op_memref_global_store_vN(rocke_h_lowerer_t* lw, const ro
 
 /* ================================ atomics =============================== */
 
+static const char* mem_global_atomic_address(rocke_h_lowerer_t* lw,
+                                             const rocke_value_t* ptr,
+                                             const rocke_value_t* idx,
+                                             const rocke_type_t* elem,
+                                             bool store = true,
+                                             bool subscript = false)
+{
+    if(mem_has_typed_access_base(ptr, elem) && subscript)
+    {
+        const char* address = rocke_arena_printf(
+            &lw->b->arena, "&%s[%s]", rocke_h_name(lw, ptr), rocke_h_name(lw, idx));
+        if(!address)
+            rocke_h_fail(lw, ROCKE_ERR_OOM, "HIP global atomic address: arena allocation failed");
+        return address;
+    }
+    const char* address = mem_global_access_address(lw, ptr, idx, elem, store);
+    if(!mem_has_typed_access_base(ptr, elem))
+    {
+        address = rocke_arena_printf(&lw->b->arena,
+                                     "reinterpret_cast<%s%s*>(%s)",
+                                     store ? "" : "const ",
+                                     rocke_h_type_to_hip(lw, elem),
+                                     address);
+        if(!address)
+            rocke_h_fail(lw, ROCKE_ERR_OOM, "HIP global atomic address: arena allocation failed");
+    }
+    return address;
+}
+
 /* Python _op_memref_global_atomic_add */
 static rocke_status_t _op_memref_global_atomic_add(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
@@ -830,11 +859,10 @@ static rocke_status_t _op_memref_global_atomic_add(rocke_h_lowerer_t* lw, const 
     val = op->operands[2];
     cpp_t = rocke_h_type_to_hip(lw, val->type);
     rocke_h_emitf(lw,
-                  "%s %s = atomicAdd(&%s[%s], %s);",
+                  "%s %s = atomicAdd(%s, %s);",
                   cpp_t,
                   rocke_h_name(lw, op->results[0]),
-                  rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, idx),
+                  mem_global_atomic_address(lw, ptr, idx, val->type, true, true),
                   rocke_h_name(lw, val));
     return lw->status;
 }
@@ -930,13 +958,13 @@ static rocke_status_t _op_memref_global_flag_store(rocke_h_lowerer_t* lw, const 
     }
     scp = hip_sync_attr(lw, op, "scope", k_hip_sync_scopes);
     ord = hip_sync_attr(lw, op, "ordering", k_hip_flag_store_orderings);
-    rocke_h_emitf(lw,
-                  "__hip_atomic_store(&%s[%s], %s, %s, %s);",
-                  rocke_h_name(lw, op->operands[0]),
-                  rocke_h_name(lw, op->operands[1]),
-                  rocke_h_name(lw, op->operands[2]),
-                  hip_atomic_order(ord),
-                  hip_memory_scope(scp));
+    rocke_h_emitf(
+        lw,
+        "__hip_atomic_store(%s, %s, %s, %s);",
+        mem_global_atomic_address(lw, op->operands[0], op->operands[1], rocke_i32(), true, true),
+        rocke_h_name(lw, op->operands[2]),
+        hip_atomic_order(ord),
+        hip_memory_scope(scp));
     return lw->status;
 }
 
@@ -953,12 +981,12 @@ static rocke_status_t _op_memref_global_flag_wait_eq(rocke_h_lowerer_t* lw, cons
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "memref.global_flag_wait_eq: too few operands");
     }
     scp = hip_sync_attr(lw, op, "scope", k_hip_sync_scopes);
-    rocke_h_emitf(lw,
-                  "while (__hip_atomic_load(&%s[%s], __ATOMIC_ACQUIRE, %s) != %s) {}",
-                  rocke_h_name(lw, op->operands[0]),
-                  rocke_h_name(lw, op->operands[1]),
-                  hip_memory_scope(scp),
-                  rocke_h_name(lw, op->operands[2]));
+    rocke_h_emitf(
+        lw,
+        "while (__hip_atomic_load(%s, __ATOMIC_ACQUIRE, %s) != %s) {}",
+        mem_global_atomic_address(lw, op->operands[0], op->operands[1], rocke_i32(), false, true),
+        hip_memory_scope(scp),
+        rocke_h_name(lw, op->operands[2]));
     return lw->status;
 }
 
@@ -978,65 +1006,51 @@ static rocke_status_t _op_memref_global_atomic_add_f32(rocke_h_lowerer_t* lw, co
     idx = op->operands[1];
     val = op->operands[2];
     rocke_h_emitf(lw,
-                  "atomicAdd(%s + %s, %s);",
-                  rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, idx),
+                  "atomicAdd(%s, %s);",
+                  mem_global_atomic_address(lw, ptr, idx, rocke_f32()),
                   rocke_h_name(lw, val));
     return lw->status;
 }
 
-/* Python _op_memref_global_atomic_add_pk_bf16 */
+static rocke_status_t mem_emit_packed_global_atomic_add(rocke_h_lowerer_t* lw,
+                                                        const rocke_op_t* op,
+                                                        const rocke_type_t* elem,
+                                                        const char* vector,
+                                                        const char* builtin_suffix)
+{
+    if(!rocke_h_live(lw))
+        return lw->status;
+    if(op->num_operands < 3 || op->num_results < 1)
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s: bad operand/result count", op->name);
+    const auto* name = rocke_h_name(lw, op->results[0]);
+    // Keep scalar index units but give Clang's packed builtin the required
+    // four-byte pointee alignment. The IR already requires an aligned pair.
+    rocke_h_emitf(lw,
+                  "typedef %s %s_aligned __attribute__((aligned(4)));",
+                  rocke_h_type_to_hip(lw, elem),
+                  name);
+    rocke_h_emitf(lw,
+                  "%s %s = __builtin_amdgcn_global_atomic_fadd_%s("
+                  "reinterpret_cast<%s_aligned*>(%s), %s);",
+                  vector,
+                  name,
+                  builtin_suffix,
+                  name,
+                  mem_global_atomic_address(lw, op->operands[0], op->operands[1], elem),
+                  rocke_h_name(lw, op->operands[2]));
+    return lw->status;
+}
+
 static rocke_status_t _op_memref_global_atomic_add_pk_bf16(rocke_h_lowerer_t* lw,
                                                            const rocke_op_t* op)
 {
-    rocke_value_t *ptr, *idx, *val;
-    if(!rocke_h_live(lw))
-    {
-        return lw->status;
-    }
-    if(op->num_operands < 3 || op->num_results < 1)
-    {
-        return rocke_h_fail(
-            lw, ROCKE_ERR_VALUE, "memref.global_atomic_add_pk_bf16: bad operand/result count");
-    }
-    ptr = op->operands[0];
-    idx = op->operands[1];
-    val = op->operands[2];
-    rocke_h_emitf(lw,
-                  "bf16x2 %s = __builtin_amdgcn_global_atomic_fadd_v2bf16("
-                  "%s + %s, %s);",
-                  rocke_h_name(lw, op->results[0]),
-                  rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, idx),
-                  rocke_h_name(lw, val));
-    return lw->status;
+    return mem_emit_packed_global_atomic_add(lw, op, rocke_bf16(), "bf16x2", "v2bf16");
 }
 
-/* Python _op_memref_global_atomic_add_pk_f16 */
 static rocke_status_t _op_memref_global_atomic_add_pk_f16(rocke_h_lowerer_t* lw,
                                                           const rocke_op_t* op)
 {
-    rocke_value_t *ptr, *idx, *val;
-    if(!rocke_h_live(lw))
-    {
-        return lw->status;
-    }
-    if(op->num_operands < 3 || op->num_results < 1)
-    {
-        return rocke_h_fail(
-            lw, ROCKE_ERR_VALUE, "memref.global_atomic_add_pk_f16: bad operand/result count");
-    }
-    ptr = op->operands[0];
-    idx = op->operands[1];
-    val = op->operands[2];
-    rocke_h_emitf(lw,
-                  "half2 %s = __builtin_amdgcn_global_atomic_fadd_v2f16("
-                  "%s + %s, %s);",
-                  rocke_h_name(lw, op->results[0]),
-                  rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, idx),
-                  rocke_h_name(lw, val));
-    return lw->status;
+    return mem_emit_packed_global_atomic_add(lw, op, rocke_f16(), "half2", "v2f16");
 }
 
 /* Python _op_memref_cooperative_global_store (P14 debug shim) */

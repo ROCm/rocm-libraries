@@ -320,6 +320,68 @@ def test_hip_legacy_fp16_store_rejects_non_fp16_value(engine):
 
 
 @pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("rebased", [False, True])
+@pytest.mark.parametrize(
+    "method,elem,cpp_t,builtin,subscript",
+    [
+        ("global_atomic_add", I32, "int", "atomicAdd", True),
+        ("global_atomic_add", F32, "float", "atomicAdd", True),
+        ("global_atomic_add_f32", F32, "float", "atomicAdd", False),
+        ("global_flag_store", I32, "int", "__hip_atomic_store", True),
+        ("global_flag_wait_eq", I32, "int", "__hip_atomic_load", True),
+        (
+            "global_atomic_add_pk_f16",
+            F16,
+            "fp16",
+            "__builtin_amdgcn_global_atomic_fadd_v2f16",
+            False,
+        ),
+        (
+            "global_atomic_add_pk_bf16",
+            BF16,
+            "bf16",
+            "__builtin_amdgcn_global_atomic_fadd_v2bf16",
+            False,
+        ),
+    ],
+)
+def test_hip_global_atomic_uses_scalar_access_units(
+    engine, rebased, method, elem, cpp_t, builtin, subscript
+):
+    b = IRBuilder("atomic_access")
+    base = b.param("p", PtrType(elem, "global"))
+    packed = method.startswith("global_atomic_add_pk_")
+    idx = b.param("idx", I64 if packed else I32)
+    val = b.param("val", VectorType(elem, 2) if packed else elem)
+    ptr = b.global_ptr_add(base, b.const_i64(16)) if rebased else base
+    getattr(b, method)(ptr, idx, val)
+    b.ret()
+    hip = lower_hip_with_engine(b.kernel, "gfx950", engine=engine)
+    if rebased:
+        match = re.search(r"const char\* (\w+) = \(const char\*\)p \+", hip)
+        assert match is not None
+        byte_base = f"reinterpret_cast<const unsigned char*>({match[1]})"
+        read = method == "global_flag_wait_eq"
+        if not read:
+            byte_base = f"const_cast<unsigned char*>({byte_base})"
+        qualifier = "const " if read else ""
+        address = (
+            f"reinterpret_cast<{qualifier}{cpp_t}*>({byte_base}"
+            f" + (int64_t)idx * (int64_t)sizeof({cpp_t}))"
+        )
+    else:
+        address = "&p[idx]" if subscript else "p + idx"
+    if packed:
+        aligned = re.search(
+            rf"typedef {cpp_t} (\w+) __attribute__\(\(aligned\(4\)\)\);", hip
+        )
+        assert aligned is not None
+        address = f"reinterpret_cast<{aligned[1]}*>({address})"
+    assert f"{builtin}({address}, " in hip
+    assert "__builtin_memcpy" not in hip
+
+
+@pytest.mark.parametrize("engine", ENGINES)
 def test_hip_rebased_scalar_i1_uses_a_byte(engine):
     b = IRBuilder("bool_copy")
     ptr = b.param("p", PtrType(I1, "global"))
