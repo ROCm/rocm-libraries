@@ -1868,12 +1868,14 @@ std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::get
     accKnob.knob_id = K_ACC_TYPE_KNOB_NAME;
     accKnob.description
         = "Accumulator precision for the backward dQ gradient. a32: dQ accumulates in FP32 and a "
-          "dq_convert kernel writes it. a16: dQ accumulates in 16 bits; gfx942 writes dQ "
-          "directly, gfx950 accumulates into a 16-bit buffer that a dq_shuffle kernel writes "
-          "to dQ. a16 is a valid value only for graphs the a16 kernels serve on this device. "
-          "On gfx942 they need S_q == S_kv, S_kv a multiple of 64, D_qk == D_v <= 128 and no "
-          "sliding window, among other limits; on gfx950 they serve the graphs a32 serves "
-          "unless the 16-bit dq_acc of one batch exceeds 4 GiB";
+          "dq_convert kernel writes it. a16: dQ accumulates in 16 bits; on gfx942, and on gfx950 "
+          "at D_qk = 64, the kernel writes dQ directly; on gfx950 at other head dims it "
+          "accumulates into a 16-bit buffer that a dq_shuffle kernel writes to dQ. a16 is a "
+          "valid value only for graphs the a16 kernels serve on this device. The kernels that "
+          "write dQ directly need S_q == S_kv, S_kv a multiple of 64, D_qk == D_v <= 128 and no "
+          "sliding window, among other limits; the gfx950 dq_shuffle ones serve the graphs a32 "
+          "serves, except D_qk == D_v > 128, unless the 16-bit dq_acc of one batch exceeds "
+          "4 GiB";
 
     StringValueT defaultValue;
     defaultValue.value = "a32";

@@ -25,11 +25,13 @@ namespace asm_sdpa_engine
  *   1. ODO    — D reduction: D[b,h,i] = sum_j(O * dO)
  *   2. DQDKDV — dK, dV, and dQ, either accumulated into a dq_acc workspace or
  *               written directly
- *   3. Post   — dQ from dq_acc: DQ_CONVERT (A32) or DQ_SHUFFLE (gfx950 A16)
+ *   3. Post   — dQ from dq_acc: DQ_CONVERT (A32) or DQ_SHUFFLE (gfx950 A16,
+ *               D_qk != 64)
  *
  * With a post kernel the workspace holds a zeroed dq_acc after the D buffer
- * (sdpaBwdDqAccLayout()). Without one (gfx942 A16) DQDKDV accumulates into the
- * dQ output, which execute() zeroes first.
+ * (sdpaBwdDqAccLayout()). Without one (A16 on gfx942, and on gfx950 at
+ * D_qk = 64) DQDKDV accumulates into the dQ output, which execute() zeroes
+ * first.
  */
 class SdpaBwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {

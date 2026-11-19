@@ -69,8 +69,9 @@ Not every row is dispatched:
   group row, and the engine declines head dims above 192 on both archs.
 - **hd192 odo rows (gfx950) for D_qk = 192 with D_v = 128:** odo keys on
   padded hdim_v (128), so these graphs run the hd128 odo row; the hd192 odo
-  rows serve D_qk = D_v = 192. The hd192 dq_convert and dq_shuffle rows serve
-  both: the post stage keys on hdim_q 192.
+  rows serve D_qk = D_v = 192. The hd192 dq_convert rows serve both, since
+  the post stage keys on hdim_q 192; the hd192 dq_shuffle row serves only
+  D_v = 128, because gfx950 ships no A16 dqdkdv row for 192 x 192.
 
 ## Verified Kernel Matrix
 
