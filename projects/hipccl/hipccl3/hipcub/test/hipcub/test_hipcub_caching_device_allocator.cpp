@@ -448,7 +448,7 @@ TEST(HipcubCachingDeviceAllocatorTests, PerThreadStreamReuseAcrossThreads)
     hipcub::CachingDeviceAllocator allocator;
     allocator.debug = true;
 
-    blocking_kernel blocker(hipStreamPerThread);
+    stream_blocker blocker(hipStreamPerThread);
 
     // Allocate on this thread's stream, keep the stream busy, then free the block
     char* d_a;
