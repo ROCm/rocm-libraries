@@ -2,7 +2,7 @@
 
 Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/projects/rocALUTION/en/latest/](https://rocm.docs.amd.com/projects/rocALUTION/en/latest/).
 
-## (Unreleased) rocALUTION
+## (Unreleased) rocALUTION 4.1.2
 
 ### Added
 * Added the generic `amdgcnspirv` SPIR-V target to the default list of GPU architectures.
@@ -103,7 +103,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed `LocalMatrix::Transpose()` of a matrix without entries not swapping the sizes, and leaving the output matrix unchanged when it transposes into another matrix. `LocalMatrix::Transpose()` into a matrix that is not in CSR format no longer aborts, which made FSAI abort when it was built again with a preconditioner matrix format other than CSR. The output matrix gets the format of the transposed matrix, or CSR if the conversion to that format fails.
 * Fixed `LocalStencil::ApplyAdd()` overwriting the output instead of adding to it, and the Laplace stencil on the host ignoring the scalar.
 
-## (Unreleased) rocALUTION 4.1.1
+## rocALUTION 4.1.1 for ROCm 10.2
 
 ### Added
 * Added support for the `gfx1250-strict` architecture.
