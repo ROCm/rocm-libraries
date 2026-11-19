@@ -30,7 +30,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 
 sys.path.insert(0, str(_ROOT / "tools"))
 
-from catalog_fingerprint import catalog_fingerprint  # noqa: E402
+from catalog_fingerprint import catalog_fingerprint, catalog_fingerprints  # noqa: E402
 
 _REPO = _ROOT.parents[3]
 _DESCRIPTORS = (
@@ -233,6 +233,25 @@ def test_the_fingerprint_covers_multi_launch_specs():
     )
 
 
+def test_a_slot_fingerprint_spans_its_packs_and_ignores_the_split():
+    """A slot ranker is trained on every pack serving its slot: one KDP fingerprints as
+    before, and moving a kernel between the slot's KDPs leaves the hash unchanged."""
+
+    def kernel(name, tile):
+        return {
+            "name": name,
+            "kernel_source": {"kind": "rocke", "spec": {"t": tile}},
+            "metadata": {"tile": tile},
+        }
+
+    a, b, c = kernel("a", 1), kernel("b", 2), kernel("c", 3)
+    one = {"kernelDescriptors": [a, b, c]}
+    assert catalog_fingerprints([one]) == catalog_fingerprint(one)
+    split = [{"kernelDescriptors": [a]}, {"kernelDescriptors": [c, b]}]
+    assert catalog_fingerprints(split) == catalog_fingerprint(one)
+    assert catalog_fingerprints(split[:1]) != catalog_fingerprint(one)
+
+
 # ---------------------------------------------------------------------------
 # the shipped rankers: trained on the shipped catalog, bound as configured
 # ---------------------------------------------------------------------------
@@ -311,3 +330,104 @@ class TestShippedRankers:
         for arch, ids in config.engine.heuristics["sort_kernel_catalog"].items():
             missing = sorted(set(ids) - installed)
             assert not missing, f"{arch}: {missing} bound but not under {heuristics}"
+
+
+# ---------------------------------------------------------------------------
+# the shipped slot rankers (RFC 0021): the same gates, per slot
+# ---------------------------------------------------------------------------
+
+
+def _binds_a_slot_ranker(path: Path) -> bool:
+    """Whether any slot of the config binds a trained ``sort_kernel_catalog`` model."""
+    slots = yaml.safe_load(path.read_text()).get("slots") or []
+    return any(
+        (slot.get("heuristics") or {}).get("sort_kernel_catalog") for slot in slots
+    )
+
+
+_SLOT_SELECTIONS = [
+    p
+    for p in sorted((_ROOT / "configs").glob("*.yaml"))
+    if not p.name.endswith(".engine.yaml") and _binds_a_slot_ranker(p)
+]
+
+
+def _bound_slots(config):
+    return [s for s in config.slots if s.heuristics.get("sort_kernel_catalog")]
+
+
+@pytest.mark.parametrize("selection_path", _SLOT_SELECTIONS, ids=lambda p: p.name)
+class TestShippedSlotRankers:
+    @pytest.fixture
+    def config(self, selection_path):
+        return load_config(selection_path)
+
+    @pytest.fixture
+    def bundle(self, config) -> Path:
+        return _DESCRIPTORS / config.authored_subpath
+
+    def test_every_bound_slot_arch_records_its_trained_catalog(self, config):
+        for slot in _bound_slots(config):
+            bound = slot.heuristics["sort_kernel_catalog"]
+            missing = sorted(set(bound) - set(slot.trained_catalog_sha256))
+            assert not missing, (
+                f"{config.engine.name} slot {slot.name!r} binds sort_kernel_catalog for "
+                f"{missing} without slots[{slot.name}].trained_catalog_sha256: record "
+                f"the catalog the models were trained on (tools/catalog_fingerprint.py "
+                f"over every KDP of the slot on that arch)."
+            )
+
+    def test_trained_on_the_shipped_slot_catalog(self, config, bundle):
+        for slot in _bound_slots(config):
+            for arch, trained in slot.trained_catalog_sha256.items():
+                packs = [
+                    p
+                    for p in config.packs
+                    if p.slot == slot.name and (not p.arch or arch in p.arch)
+                ]
+                kdps = [
+                    bundle / "artifacts" / f"{config.kdp_stem(p)}.kdp.json"
+                    for p in packs
+                ]
+                absent = [k for k in kdps if not k.is_file()]
+                if absent:
+                    pytest.skip(
+                        f"shipped KDP not in this checkout (dvc pull): {absent}"
+                    )
+                shipped = catalog_fingerprints(json.loads(k.read_text()) for k in kdps)
+                assert shipped == trained, (
+                    f"{config.engine.name} slot {slot.name!r} {arch} ranker(s) "
+                    f"{slot.heuristics['sort_kernel_catalog'][arch]} were trained on "
+                    f"catalog {trained}, but its KDPs {[k.name for k in kdps]} are now "
+                    f"{shipped}: retrain on the new catalog (hipdnn-uhd skill) and record "
+                    f"the new fingerprint, or remove the binding."
+                )
+
+    def test_the_shipped_ued_binds_the_configured_slot_ids(self, config, bundle):
+        ued = json.loads((bundle / f"{config.engine.slug}.ued.json").read_text())
+        entries = {entry["name"]: entry for entry in ued["slots"]}
+        for slot in _bound_slots(config):
+            catalog = entries[slot.name]["sort_kernel_catalog"]
+            for arch, ids in slot.heuristics["sort_kernel_catalog"].items():
+                assert catalog.get(arch) == ids
+
+    def test_each_bound_slot_id_is_installed(self, config, bundle):
+        for slot in _bound_slots(config):
+            heuristics = bundle / "heuristics"
+            installed_dirs = list(heuristics.glob(f"*/{slot.name}"))
+            if not installed_dirs:
+                pytest.skip(
+                    f"slot {slot.name!r} models not in this checkout (dvc pull): "
+                    f"{heuristics}"
+                )
+            installed = {
+                json.loads(p.read_text())["id"]
+                for d in installed_dirs
+                for p in d.rglob("heuristic.uhd.json")
+            }
+            for arch, ids in slot.heuristics["sort_kernel_catalog"].items():
+                missing = sorted(set(ids) - installed)
+                assert not missing, (
+                    f"slot {slot.name!r} {arch}: {missing} bound but not under "
+                    f"{heuristics}/<ued>/{slot.name}"
+                )

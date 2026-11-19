@@ -533,6 +533,12 @@ class SlotSpec:
     #: The slot's own ``specialization`` block: it partitions this slot's
     #: ``kmd_fields``.
     specialization: dict = field(default_factory=dict)
+    #: Trained rankers `uhd_gen promote` bound for this slot, role -> arch -> UHD
+    #: ids (only ``sort_kernel_catalog``); they follow the native ``default``.
+    heuristics: dict = field(default_factory=dict)
+    #: arch -> `tools/catalog_fingerprint.py` hash of this slot's catalog the models
+    #: bound under ``heuristics.sort_kernel_catalog.<arch>`` were trained on.
+    trained_catalog_sha256: dict = field(default_factory=dict)
 
 
 @dataclass

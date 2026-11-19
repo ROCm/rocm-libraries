@@ -66,6 +66,8 @@ DEFAULT_BUNDLE = (
 )
 TOOL = "dnn-providers/hip-kernel-provider/descriptor-packaging/tools/general_bwd_catalog.py"
 AOT_BUDGET_PER_PACK = 1000
+# The main slot's trained rankers (`uhd_gen promote` bindings), empty until one ships.
+TRAINED_RANKERS = Path(__file__).with_name("general_bwd_trained_rankers.yaml")
 
 MAIN_SOURCE = "kernels/common/attention_bwd.py"
 AUX_SOURCE = "kernels/common/attention_bwd_aux.py"
@@ -340,7 +342,24 @@ def main_kernel(row: C.CatalogRow) -> dict:
     }
 
 
-def _slot(name: str, fields, ranker: bool = False, knob_fields=()) -> dict:
+def trained_rankers(path: Path = TRAINED_RANKERS) -> dict:
+    """The main slot's `heuristics` / `trained_catalog_sha256` entries from @p path,
+    only those that bind something (an empty file adds nothing to the config)."""
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    unknown = set(raw) - {"sort_kernel_catalog", "trained_catalog_sha256"}
+    if unknown:
+        raise CatalogError(f"{path.name}: unknown keys {sorted(unknown)}")
+    out = {}
+    if raw.get("sort_kernel_catalog"):
+        out["heuristics"] = {"sort_kernel_catalog": dict(raw["sort_kernel_catalog"])}
+    if raw.get("trained_catalog_sha256"):
+        out["trained_catalog_sha256"] = dict(raw["trained_catalog_sha256"])
+    return out
+
+
+def _slot(
+    name: str, fields, ranker: bool = False, knob_fields=(), trained=None
+) -> dict:
     kmd = []
     for field, kind, _bound in fields:
         entry = {"name": field, "type": kind}
@@ -363,6 +382,7 @@ def _slot(name: str, fields, ranker: bool = False, knob_fields=()) -> dict:
     if ranker:
         slot["ranker"] = True
         slot["knobs"] = list(MAIN_KNOBS)
+    slot.update(trained or {})
     return slot
 
 
@@ -421,7 +441,13 @@ def build_config() -> dict:
         },
         "slots": [
             _slot("prep", PREP_FIELDS),
-            _slot("main", MAIN_FIELDS, ranker=True, knob_fields=KNOB_FIELDS),
+            _slot(
+                "main",
+                MAIN_FIELDS,
+                ranker=True,
+                knob_fields=KNOB_FIELDS,
+                trained=trained_rankers(),
+            ),
         ],
         "packs": [packs[name] for name in order],
     }
