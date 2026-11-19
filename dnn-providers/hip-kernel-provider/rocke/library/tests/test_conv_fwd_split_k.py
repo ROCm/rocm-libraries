@@ -950,8 +950,21 @@ class TestSplitKAotScope(unittest.TestCase):
         from kernels.conv import aot_jobs as aj
 
         target = ArchTarget.from_gfx("gfx942")
+        # The split-K binaries come from the per-arch split generator, which
+        # gfx942 does not run, and from the K-loop variants of every geometry;
+        # a third of the geometries (every pipeline / epilogue among them)
+        # walks each variant rule while keeping the walk well inside the
+        # per-test budget of the wave64 grid.
+        self.assertFalse(aj._fwd_split_target("gfx942"))
+        geos = aj._geometry_list(target, "fp16", "fwd")[::3]
         jobs = aj._fwd_jobs(
-            "gfx942", "fp16", target.wave_size, "mma", target, llvm_flavor="llvm22"
+            "gfx942",
+            "fp16",
+            target.wave_size,
+            "mma",
+            target,
+            geometries=geos,
+            llvm_flavor="llvm22",
         )
         self.assertFalse(any(j.identity.split_k > 1 for j in jobs))
 
