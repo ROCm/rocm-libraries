@@ -138,6 +138,13 @@ Language style:
 [`style/PYTHON_STYLE.md`](style/PYTHON_STYLE.md),
 [`style/CPP_STYLE.md`](style/CPP_STYLE.md).
 
+## Numerics (NaN, infinity, saturation, encodings)
+
+Before writing or reviewing a conversion, quantizer, clamp, reduction or mask,
+look the dtype up in the dispatch table of
+[`platform/dsl_docs/numerics/README.md`](platform/dsl_docs/numerics/README.md)
+and follow that type's file.
+
 ## Optimization doc routing — READ the matching doc BEFORE optimizing a kernel
 
 The optimization docs under `platform/dsl_docs/optimization/` are the authoritative

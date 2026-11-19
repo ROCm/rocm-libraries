@@ -370,6 +370,8 @@ invariants.
   `dsl_docs/architecture/authoring_model.md`.
 - For optimization work, follow
   `dsl_docs/optimization/runbook_compliance.md`.
+- For numerics questions (NaN, infinity, saturation, fp8 encodings,
+  conversions), use the dispatch table in `dsl_docs/numerics/README.md`.
 - If upstream work reveals a new optimization skill, lever, or reusable tactic,
   add it to the optimization skills docs under `dsl_docs/optimization/`.
 - Document every new optimization as a case-study analysis in the example folder
