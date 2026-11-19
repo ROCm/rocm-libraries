@@ -30,7 +30,6 @@
 #include <cmath>
 #include <complex>
 #include <cstdio>
-#include <cstdlib>
 #include <fstream>
 #include <functional>
 #include <limits>
@@ -1340,37 +1339,25 @@ namespace
     {
         auto to_accelerator = make_local_vector(Backend::Host, a);
         to_accelerator->MoveToAcceleratorAsync();
-        rocalution::_rocalution_sync();
         to_accelerator.reset();
 
         auto to_host = make_local_vector(Backend::Accelerator, a);
         to_host->MoveToHostAsync();
-        rocalution::_rocalution_sync();
         to_host.reset();
     }
 }
 
-// The destructor leaks the other backend object (see the next test), so the destruction
-// runs in a child that ends with _Exit, where the leak does not reach LeakSanitizer
 TEST(local_vector_moves, a_vector_can_be_destroyed_after_an_async_move_without_sync)
 {
     REQUIRE_BACKEND(Backend::Accelerator);
     for_each_type<RealTypes>([&](auto type) {
         using T = typename decltype(type)::type;
 
-        const std::vector<T> a = x<T>();
-        EXPECT_EXIT(
-            {
-                death_test_watchdog();
-                destroy_after_async_moves(a);
-                std::_Exit(0);
-            },
-            testing::ExitedWithCode(0),
-            "");
+        destroy_after_async_moves(x<T>());
     });
 }
 
-// Only LeakSanitizer shows the leak, at the exit of the child. The child stops rocALUTION
+// Only LeakSanitizer shows a leak, at the exit of the child. The child stops rocALUTION
 // first, as LeakSanitizer can hang at the exit of a process whose HIP backend still runs.
 // LeakSanitizer reports every leak of the child, so the case also fails on a HIP runtime
 // that leaks at exit, whatever the destructor does.
@@ -1380,8 +1367,6 @@ TEST(local_vector_moves, a_vector_destroyed_after_an_async_move_without_sync_fre
 #ifndef __SANITIZE_ADDRESS__
     GTEST_SKIP() << "only an ASAN build shows whether the destructor frees both backend objects";
 #endif
-    KNOWN_BUG("~LocalVector frees only the current backend object, so a vector destroyed after "
-              "an async move without Sync() leaks the other one");
     for_each_type<RealTypes>([&](auto type) {
         using T = typename decltype(type)::type;
 
