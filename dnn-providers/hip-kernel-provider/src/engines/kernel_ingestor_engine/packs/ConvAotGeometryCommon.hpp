@@ -11,13 +11,13 @@
 #include <optional>
 #include <string_view>
 
-/// @file Gfx950ConvGeometryCommon.hpp
-/// What the gfx950 conv AOT engines share, whatever their direction: launch geometry,
+/// @file ConvAotGeometryCommon.hpp
+/// What the conv AOT engines (gfx950 and gfx1250) share, whatever their direction: launch geometry,
 /// ceiling and magic-number division, the tensor-size and buffer-overlap checks, the
 /// windowed depthwise kernel's limits and the forward direct kernels' argument block.
 /// Pure helpers with no dependency on one engine's problem shape; each engine's geometry
-/// header (Gfx950ConvDgradGeometry.hpp) brings them into its own namespace.
-namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv
+/// header (ConvDgradAotGeometry.hpp, Gfx950ConvFwdGeometry.hpp) brings them into its own namespace.
+namespace hip_kernel_provider::kernel_ingestor_engine::conv_aot
 {
 
 /// One kernel launch: its grid and its workgroup's x extent.
@@ -131,4 +131,4 @@ constexpr std::array<std::string_view, 14> DIRECT_KERNARG_NAMES{"p_N",
                                                                 "p_D_stride_ho",
                                                                 "p_D_stride_wo"};
 
-} // namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv
+} // namespace hip_kernel_provider::kernel_ingestor_engine::conv_aot
