@@ -1,0 +1,300 @@
+{
+  "capabilities": {
+    "amdgpu.comgr.accepts_processor_name": {
+      "status": "known",
+      "value": {
+        "observations": [
+          {
+            "candidate": "requested",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
+            },
+            "family": "gfx950",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "generic",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
+            },
+            "family": "gfx9-4-generic",
+            "outcome": "accepted"
+          }
+        ],
+        "route": "comgr_llvm_ir_to_hsaco"
+      }
+    },
+    "amdgpu.comgr.explicit_data_layout": {
+      "status": "known",
+      "value": {
+        "observations": [
+          {
+            "candidate": "L0",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
+            },
+            "family": "module",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "L1",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
+            },
+            "family": "module",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "L2",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
+            },
+            "family": "module",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "L3",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
+            },
+            "family": "module",
+            "outcome": "accepted"
+          }
+        ],
+        "route": "comgr_llvm_ir_to_hsaco"
+      }
+    },
+    "amdgpu.comgr.intrinsic.make_buffer_resource.abis": {
+      "status": "known",
+      "value": {
+        "observations": [
+          {
+            "candidate": "p1_i32",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
+            },
+            "family": "make_buffer_resource",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "p1_i64",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
+            },
+            "family": "make_buffer_resource",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "p8_p1_i32",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
+            },
+            "family": "make_buffer_resource",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "p8_p1_i64",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
+            },
+            "family": "make_buffer_resource",
+            "outcome": "accepted"
+          }
+        ],
+        "route": "comgr_llvm_ir_to_hsaco"
+      }
+    },
+    "amdgpu.comgr.intrinsic.mfma_f8f6f4.call_abi": {
+      "status": "known",
+      "value": {
+        "observations": [
+          {
+            "candidate": "current_9",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
+            },
+            "family": "all_mfma_f8f6f4",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "legacy_11",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
+            },
+            "family": "all_mfma_f8f6f4",
+            "outcome": "accepted"
+          }
+        ],
+        "route": "comgr_llvm_ir_to_hsaco"
+      }
+    },
+    "amdgpu.comgr.intrinsic.mfma_fp8_bf8.packed_operand_type": {
+      "status": "known",
+      "value": {
+        "observations": [
+          {
+            "candidate": "v2i32",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
+            },
+            "family": "all_mfma_fp8_bf8",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "i64",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
+            },
+            "family": "all_mfma_fp8_bf8",
+            "outcome": "accepted"
+          }
+        ],
+        "route": "comgr_llvm_ir_to_hsaco"
+      }
+    },
+    "amdgpu.comgr.intrinsic.named_barrier.pointer_address_space": {
+      "status": "known",
+      "value": {
+        "observations": [
+          {
+            "candidate": "as3",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
+            },
+            "family": "all_named_barriers",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "as15",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
+            },
+            "family": "all_named_barriers",
+            "outcome": "accepted"
+          }
+        ],
+        "route": "comgr_llvm_ir_to_hsaco"
+      }
+    }
+  },
+  "compiler": {
+    "dependencies": [],
+    "dependency_identity_complete": true,
+    "library": "libamd_comgr.so.3",
+    "llvm_version": [
+      23,
+      0,
+      0
+    ],
+    "query_library": null,
+    "route": "comgr",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "version_source": "example"
+  },
+  "probe": {
+    "effective_processor": "gfx950",
+    "fingerprint": "13540bb26cc2ca0d991380904388c576c831d679c2e1923bd83dca137dadf4bb",
+    "implementation_sha256": "c5b7514db6974340c4fe07ae6d0b2953676cbef196c7c96ae03fef4764850167",
+    "name": "rocke-comgr-capabilities",
+    "processor": "gfx950",
+    "protocol_sha256": "5dc387c0b1364ea54984981698b386fcad049bdf4f90dfed4461ae91b04d1291",
+    "schema_sha256": "2fa604845aa8f5e0edc7ac95f2889e3b2cd0203684e675da353d752e0f60140b",
+    "target_triple": "amdgcn-amd-amdhsa"
+  }
+}

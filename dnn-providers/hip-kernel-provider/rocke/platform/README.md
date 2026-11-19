@@ -20,8 +20,9 @@ Spec dataclass -> build_*() -> KernelDef -> lower -> .ll -> comgr -> HSACO -> la
 
 ```text
 rocke/platform/
-  python/rocke/   # authoring frontend (import rocke): core, helpers, instances/<arch>,
-                   # runtime, dispatch, analysis, benchmark, heuristics, examples
+  python/rocke/   # authoring frontend (import rocke): compiler, core, helpers,
+                   # instances/<arch>, runtime, dispatch, analysis, benchmark,
+                   # heuristics, examples
   cpp/             # C++20 engine (mirrors the Python layers): core, helpers, instances,
                    # support; include/ckc (public extern "C" ABI); bindings (rocke_engine)
   tests/           # by-layer, language-agnostic; run_all.py is the entrypoint

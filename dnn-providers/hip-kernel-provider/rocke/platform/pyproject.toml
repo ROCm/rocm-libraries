@@ -23,6 +23,9 @@ dependencies = [
     "numpy>=1.24",
 ]
 
+[project.scripts]
+rocke-compiler-capabilities = "rocke.compiler.cli:main"
+
 [project.optional-dependencies]
 # torch must be the ROCm build for your system (install from the ROCm wheel
 # index, not here); see requirements.txt / BUILD.md.

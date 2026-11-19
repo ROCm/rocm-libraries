@@ -11,6 +11,8 @@ The package is organised as four layers:
 
   - `rocke.core`      — SSA IR, lowering passes (LLVM IR / HIP C++),
                          and textual IR printer.
+  - `rocke.compiler`  — measured COMGR capabilities and the canonical
+                         compiler policy consumed by kernel lowering.
   - `rocke.runtime`   — in-process HSACO build + HIP module load +
                          kernel launch (libamd_comgr + libamdhip64 via
                          ctypes).

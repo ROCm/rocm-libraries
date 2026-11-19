@@ -1,0 +1,1102 @@
+{
+  "format": "rocke-comgr-historical-observations/v4",
+  "probe": {
+    "protocol_sha256": {
+      "gfx1250": "67eeac8dd592737b79e21bdb8ba1ffd436fbe0faf5887b4335f78132a5147f34",
+      "gfx950": "5dc387c0b1364ea54984981698b386fcad049bdf4f90dfed4461ae91b04d1291"
+    },
+    "schema_sha256": "2fa604845aa8f5e0edc7ac95f2889e3b2cd0203684e675da353d752e0f60140b"
+  },
+  "public_sources": [
+    "https://github.com/ROCm/TheRock/blob/main/docs/packaging/legacy_per_family_releases.md",
+    "https://github.com/ROCm/TheRock/blob/main/docs/packaging/legacy_multi_arch_releases.md",
+    "https://github.com/ROCm/TheRock/blob/main/RELEASES.md"
+  ],
+  "releases": [
+    {
+      "artifact": "comgr_3.0.0.70000-38~24.04_amd64.deb",
+      "artifact_url": "https://repo.radeon.com/rocm/apt/7.0/pool/main/c/comgr/comgr_3.0.0.70000-38~24.04_amd64.deb",
+      "compiler": {
+        "dependency_identity_complete": true,
+        "dependency_sha256": [],
+        "llvm_version": [
+          20,
+          0,
+          0
+        ],
+        "sha256": "0ffa1893fc55f7ff0e65c1ef68b0e4d22b9fdd177947444dcada011fb2f975ca",
+        "version_source": "COMGR preprocessing"
+      },
+      "id": "7.0.0",
+      "index_url": "https://repo.radeon.com/rocm/apt/7.0/pool/main/c/comgr/",
+      "kind": "deb",
+      "reports": {
+        "gfx950": {
+          "effective_processor": "gfx950",
+          "vector": "74934c572378789b9b64603d7d6574007421ac01f1892c64192340bc8507c477"
+        }
+      }
+    },
+    {
+      "artifact": "comgr_3.0.0.70200-43~24.04_amd64.deb",
+      "artifact_url": "https://repo.radeon.com/rocm/apt/7.2/pool/main/c/comgr/comgr_3.0.0.70200-43~24.04_amd64.deb",
+      "compiler": {
+        "dependency_identity_complete": true,
+        "dependency_sha256": [],
+        "llvm_version": [
+          22,
+          0,
+          0
+        ],
+        "sha256": "20ef37fb99fc7e41ce498f9c7abf510af0ba68d228fae6c4e3c49e3896c1d36b",
+        "version_source": "COMGR preprocessing"
+      },
+      "id": "7.2.0",
+      "index_url": "https://repo.radeon.com/rocm/apt/7.2/pool/main/c/comgr/",
+      "kind": "deb",
+      "reports": {
+        "gfx950": {
+          "effective_processor": "gfx950",
+          "vector": "42bad1df456c4959b4fd612040426a9f48c1dbafd9917eeb4d0e5761d7d4b3af"
+        }
+      }
+    }
+  ],
+  "vectors": {
+    "42bad1df456c4959b4fd612040426a9f48c1dbafd9917eeb4d0e5761d7d4b3af": {
+      "amdgpu.comgr.accepts_processor_name": [
+        {
+          "candidate": "requested",
+          "family": "gfx950",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "generic",
+          "family": "gfx9-4-generic",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.explicit_data_layout": [
+        {
+          "candidate": "L0",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L1",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L2",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L3",
+          "family": "module",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.make_buffer_resource.abis": [
+        {
+          "candidate": "p1_i32",
+          "failed_stage": "compile_source_to_bc",
+          "family": "make_buffer_resource",
+          "outcome": "rejected"
+        },
+        {
+          "candidate": "p1_i64",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p8_p1_i32",
+          "failed_stage": "compile_source_to_bc",
+          "family": "make_buffer_resource",
+          "outcome": "rejected"
+        },
+        {
+          "candidate": "p8_p1_i64",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.mfma_f8f6f4.call_abi": [
+        {
+          "candidate": "current_9",
+          "family": "all_mfma_f8f6f4",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "legacy_11",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_mfma_f8f6f4",
+          "outcome": "rejected"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.mfma_fp8_bf8.packed_operand_type": [
+        {
+          "candidate": "v2i32",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_mfma_fp8_bf8",
+          "outcome": "rejected"
+        },
+        {
+          "candidate": "i64",
+          "family": "all_mfma_fp8_bf8",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.named_barrier.pointer_address_space": [
+        {
+          "candidate": "as3",
+          "family": "all_named_barriers",
+          "outcome": "crash"
+        },
+        {
+          "candidate": "as15",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_named_barriers",
+          "outcome": "rejected"
+        }
+      ]
+    },
+    "5a3bfd3cb53fcbe99bc50d79115319f44b45802e5d088a8e30ea78c1ee6711cb": {
+      "amdgpu.comgr.accepts_processor_name": [
+        {
+          "candidate": "requested",
+          "family": "gfx1250",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.explicit_data_layout": [
+        {
+          "candidate": "L0",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L1",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L2",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L3",
+          "family": "module",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.make_buffer_resource.abis": [
+        {
+          "candidate": "p1_i32",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p1_i64",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p8_p1_i32",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p8_p1_i64",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.mfma_f8f6f4.call_abi": [
+        {
+          "candidate": "current_9",
+          "family": "all_mfma_f8f6f4",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "legacy_11",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_mfma_f8f6f4",
+          "outcome": "rejected"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.mfma_fp8_bf8.packed_operand_type": [
+        {
+          "candidate": "v2i32",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_mfma_fp8_bf8",
+          "outcome": "rejected"
+        },
+        {
+          "candidate": "i64",
+          "family": "all_mfma_fp8_bf8",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.named_barrier.pointer_address_space": [
+        {
+          "candidate": "as3",
+          "family": "all_named_barriers",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "as15",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_named_barriers",
+          "outcome": "rejected"
+        }
+      ]
+    },
+    "74934c572378789b9b64603d7d6574007421ac01f1892c64192340bc8507c477": {
+      "amdgpu.comgr.accepts_processor_name": [
+        {
+          "candidate": "requested",
+          "family": "gfx950",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "generic",
+          "family": "gfx9-4-generic",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.explicit_data_layout": [
+        {
+          "candidate": "L0",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L1",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L2",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L3",
+          "family": "module",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.make_buffer_resource.abis": [
+        {
+          "candidate": "p1_i32",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p1_i64",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p8_p1_i32",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p8_p1_i64",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.mfma_f8f6f4.call_abi": [
+        {
+          "candidate": "current_9",
+          "family": "all_mfma_f8f6f4",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "legacy_11",
+          "family": "all_mfma_f8f6f4",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.mfma_fp8_bf8.packed_operand_type": [
+        {
+          "candidate": "v2i32",
+          "family": "all_mfma_fp8_bf8",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "i64",
+          "family": "all_mfma_fp8_bf8",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.named_barrier.pointer_address_space": [
+        {
+          "candidate": "as3",
+          "family": "all_named_barriers",
+          "outcome": "crash"
+        },
+        {
+          "candidate": "as15",
+          "family": "all_named_barriers",
+          "outcome": "crash"
+        }
+      ]
+    },
+    "7920a4c624e38c5a967db4c4fc4b515a6cd7c176dcbece9ff249b889b11bbade": {
+      "amdgpu.comgr.accepts_processor_name": [
+        {
+          "candidate": "requested",
+          "family": "gfx950",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "generic",
+          "family": "gfx9-4-generic",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.explicit_data_layout": [
+        {
+          "candidate": "L0",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L1",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L2",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L3",
+          "family": "module",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.make_buffer_resource.abis": [
+        {
+          "candidate": "p1_i32",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p1_i64",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p8_p1_i32",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p8_p1_i64",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.mfma_f8f6f4.call_abi": [
+        {
+          "candidate": "current_9",
+          "family": "all_mfma_f8f6f4",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "legacy_11",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_mfma_f8f6f4",
+          "outcome": "rejected"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.mfma_fp8_bf8.packed_operand_type": [
+        {
+          "candidate": "v2i32",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_mfma_fp8_bf8",
+          "outcome": "rejected"
+        },
+        {
+          "candidate": "i64",
+          "family": "all_mfma_fp8_bf8",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.named_barrier.pointer_address_space": [
+        {
+          "candidate": "as3",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_named_barriers",
+          "outcome": "rejected"
+        },
+        {
+          "candidate": "as15",
+          "failed_stage": "codegen_bc_to_relocatable",
+          "family": "all_named_barriers",
+          "outcome": "rejected"
+        }
+      ]
+    },
+    "89638984d804028b11ffbd241797e8a7ae486998d02231be591c53e932b16d79": {
+      "amdgpu.comgr.accepts_processor_name": [
+        {
+          "candidate": "requested",
+          "family": "gfx950",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "generic",
+          "family": "gfx9-4-generic",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.explicit_data_layout": [
+        {
+          "candidate": "L0",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L1",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L2",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L3",
+          "family": "module",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.make_buffer_resource.abis": [
+        {
+          "candidate": "p1_i32",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p1_i64",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p8_p1_i32",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p8_p1_i64",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.mfma_f8f6f4.call_abi": [
+        {
+          "candidate": "current_9",
+          "family": "all_mfma_f8f6f4",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "legacy_11",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_mfma_f8f6f4",
+          "outcome": "rejected"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.mfma_fp8_bf8.packed_operand_type": [
+        {
+          "candidate": "v2i32",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_mfma_fp8_bf8",
+          "outcome": "rejected"
+        },
+        {
+          "candidate": "i64",
+          "family": "all_mfma_fp8_bf8",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.named_barrier.pointer_address_space": [
+        {
+          "candidate": "as3",
+          "family": "all_named_barriers",
+          "outcome": "crash"
+        },
+        {
+          "candidate": "as15",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_named_barriers",
+          "outcome": "rejected"
+        }
+      ]
+    },
+    "b85e376b71a19ee4bd2ceec882c0d883b5f183910c82ac6ff766d8239cf04ea1": {
+      "amdgpu.comgr.accepts_processor_name": [
+        {
+          "candidate": "requested",
+          "family": "gfx1250",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.explicit_data_layout": [
+        {
+          "candidate": "L0",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L1",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L2",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L3",
+          "family": "module",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.make_buffer_resource.abis": [
+        {
+          "candidate": "p1_i32",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p1_i64",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p8_p1_i32",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p8_p1_i64",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.mfma_f8f6f4.call_abi": [
+        {
+          "candidate": "current_9",
+          "family": "all_mfma_f8f6f4",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "legacy_11",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_mfma_f8f6f4",
+          "outcome": "rejected"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.mfma_fp8_bf8.packed_operand_type": [
+        {
+          "candidate": "v2i32",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_mfma_fp8_bf8",
+          "outcome": "rejected"
+        },
+        {
+          "candidate": "i64",
+          "family": "all_mfma_fp8_bf8",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.named_barrier.pointer_address_space": [
+        {
+          "candidate": "as3",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_named_barriers",
+          "outcome": "rejected"
+        },
+        {
+          "candidate": "as15",
+          "family": "all_named_barriers",
+          "outcome": "accepted"
+        }
+      ]
+    },
+    "c2e3d7f4e6e327f2ffe6e0d551682071875c6d691780e74dd64fbdb69427cb39": {
+      "amdgpu.comgr.accepts_processor_name": [
+        {
+          "candidate": "requested",
+          "family": "gfx950",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "generic",
+          "family": "gfx9-4-generic",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.explicit_data_layout": [
+        {
+          "candidate": "L0",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L1",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L2",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L3",
+          "family": "module",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.make_buffer_resource.abis": [
+        {
+          "candidate": "p1_i32",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p1_i64",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p8_p1_i32",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p8_p1_i64",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.mfma_f8f6f4.call_abi": [
+        {
+          "candidate": "current_9",
+          "family": "all_mfma_f8f6f4",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "legacy_11",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_mfma_f8f6f4",
+          "outcome": "rejected"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.mfma_fp8_bf8.packed_operand_type": [
+        {
+          "candidate": "v2i32",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_mfma_fp8_bf8",
+          "outcome": "rejected"
+        },
+        {
+          "candidate": "i64",
+          "family": "all_mfma_fp8_bf8",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.named_barrier.pointer_address_space": [
+        {
+          "candidate": "as3",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_named_barriers",
+          "outcome": "rejected"
+        },
+        {
+          "candidate": "as15",
+          "family": "all_named_barriers",
+          "outcome": "crash"
+        }
+      ]
+    },
+    "d2aaac25c8836bba394e5d7716669f5fb733c2fd71a49f4022b2838acabd92f0": {
+      "amdgpu.comgr.accepts_processor_name": [
+        {
+          "candidate": "requested",
+          "family": "gfx1250",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.explicit_data_layout": [
+        {
+          "candidate": "L0",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L1",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L2",
+          "family": "module",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "L3",
+          "family": "module",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.make_buffer_resource.abis": [
+        {
+          "candidate": "p1_i32",
+          "failed_stage": "compile_source_to_bc",
+          "family": "make_buffer_resource",
+          "outcome": "rejected"
+        },
+        {
+          "candidate": "p1_i64",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "p8_p1_i32",
+          "failed_stage": "compile_source_to_bc",
+          "family": "make_buffer_resource",
+          "outcome": "rejected"
+        },
+        {
+          "candidate": "p8_p1_i64",
+          "family": "make_buffer_resource",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.mfma_f8f6f4.call_abi": [
+        {
+          "candidate": "current_9",
+          "family": "all_mfma_f8f6f4",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "legacy_11",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_mfma_f8f6f4",
+          "outcome": "rejected"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.mfma_fp8_bf8.packed_operand_type": [
+        {
+          "candidate": "v2i32",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_mfma_fp8_bf8",
+          "outcome": "rejected"
+        },
+        {
+          "candidate": "i64",
+          "family": "all_mfma_fp8_bf8",
+          "outcome": "accepted"
+        }
+      ],
+      "amdgpu.comgr.intrinsic.named_barrier.pointer_address_space": [
+        {
+          "candidate": "as3",
+          "family": "all_named_barriers",
+          "outcome": "accepted"
+        },
+        {
+          "candidate": "as15",
+          "failed_stage": "compile_source_to_bc",
+          "family": "all_named_barriers",
+          "outcome": "rejected"
+        }
+      ]
+    }
+  },
+  "weekly": [
+    {
+      "artifact": "7.12.0a20260214",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.12.0a20260214-py3-none-linux_x86_64.whl",
+      "compiler": {
+        "dependency_identity_complete": true,
+        "dependency_sha256": [
+          "4dc7497c856c41da0eb15a12440a9d3c6134f847362872f248327d4f9a90c051",
+          "392c9c898e35de142285504a95fda7b926c4a44e214b4249a980bda3b66fddf0"
+        ],
+        "llvm_version": [
+          22,
+          0,
+          0
+        ],
+        "sha256": "ecfbec0fa7bd90d2affe390e4edfaaabbf8e3a06d96d0c829b6eb74bfc9d3a25",
+        "version_source": "LLVMGetVersion"
+      },
+      "id": "W06",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel",
+      "reports": {
+        "gfx1250": {
+          "effective_processor": "gfx1250",
+          "vector": "d2aaac25c8836bba394e5d7716669f5fb733c2fd71a49f4022b2838acabd92f0"
+        },
+        "gfx950": {
+          "effective_processor": "gfx950",
+          "vector": "42bad1df456c4959b4fd612040426a9f48c1dbafd9917eeb4d0e5761d7d4b3af"
+        }
+      }
+    },
+    {
+      "artifact": "10.1.0a20260819",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-10.1.0a20260819-py3-none-linux_x86_64.whl",
+      "compiler": {
+        "dependency_identity_complete": true,
+        "dependency_sha256": [
+          "dd9ef8c9bca389ba8eed4e73d50f9f53d7ffe135fd8ddee5992cb69542d87585",
+          "91df348af742af0b675dfb670a01e6c0b707810c7a40501b4bdb58be63bdca22"
+        ],
+        "llvm_version": [
+          23,
+          0,
+          0
+        ],
+        "sha256": "21c25fe59d415a37611dc9ca4f57322ab354f5820b24f1a7e68e96c35d1a4afd",
+        "version_source": "LLVMGetVersion"
+      },
+      "id": "W34",
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "kind": "wheel",
+      "reports": {
+        "gfx1250": {
+          "effective_processor": "gfx1250",
+          "vector": "d2aaac25c8836bba394e5d7716669f5fb733c2fd71a49f4022b2838acabd92f0"
+        },
+        "gfx950": {
+          "effective_processor": "gfx950",
+          "vector": "42bad1df456c4959b4fd612040426a9f48c1dbafd9917eeb4d0e5761d7d4b3af"
+        }
+      }
+    },
+    {
+      "artifact": "10.1.0a20260829",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.1.0a20260829-py3-none-linux_x86_64.whl",
+      "compiler": {
+        "dependency_identity_complete": true,
+        "dependency_sha256": [
+          "1796806e53be6229d61e7f048fad95fc5d50eb2d34200067d79660fa856e5003",
+          "7b7e7d1df0027558a64bfdbb7365f6c56486373c74e30d42245c793da110ed40"
+        ],
+        "llvm_version": [
+          24,
+          0,
+          0
+        ],
+        "sha256": "a4be6d50d2a08e1b1eab7156cd4a40ca5f473755a7e0e9027d3926800097c9e6",
+        "version_source": "LLVMGetVersion"
+      },
+      "id": "W35",
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "kind": "wheel",
+      "reports": {
+        "gfx1250": {
+          "effective_processor": "gfx1250",
+          "vector": "5a3bfd3cb53fcbe99bc50d79115319f44b45802e5d088a8e30ea78c1ee6711cb"
+        },
+        "gfx950": {
+          "effective_processor": "gfx950",
+          "vector": "89638984d804028b11ffbd241797e8a7ae486998d02231be591c53e932b16d79"
+        }
+      }
+    },
+    {
+      "artifact": "10.2.0a20261001",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.2.0a20261001-py3-none-linux_x86_64.whl",
+      "compiler": {
+        "dependency_identity_complete": true,
+        "dependency_sha256": [
+          "685dd2527d2f01cfe7de665b5b3e8a7d783257da54015e90172a03479c4bbc2e",
+          "76d9e1cd71ed2843d8537544b22b450d0183ec7c1b5a08c6a6e48ee9d8aa16b8"
+        ],
+        "llvm_version": [
+          24,
+          0,
+          0
+        ],
+        "sha256": "67300af7959a445294000f89080b8632f977523baa71f9bdbe813f1ca29c8ba2",
+        "version_source": "LLVMGetVersion"
+      },
+      "id": "W40",
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "kind": "wheel",
+      "reports": {
+        "gfx1250": {
+          "effective_processor": "gfx1250",
+          "vector": "5a3bfd3cb53fcbe99bc50d79115319f44b45802e5d088a8e30ea78c1ee6711cb"
+        },
+        "gfx950": {
+          "effective_processor": "gfx950",
+          "vector": "89638984d804028b11ffbd241797e8a7ae486998d02231be591c53e932b16d79"
+        }
+      }
+    },
+    {
+      "artifact": "10.2.0a20261008",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.2.0a20261008-py3-none-linux_x86_64.whl",
+      "compiler": {
+        "dependency_identity_complete": true,
+        "dependency_sha256": [
+          "8e1cb2b2c3ceb4bd072f0bfc39207c1757c30c636e347ec655442645095c1775",
+          "ef487f7851ea11a32d8aa2b98b055681e51c3914435fa2cb8ba2e2abaa3ce1b6"
+        ],
+        "llvm_version": [
+          24,
+          0,
+          0
+        ],
+        "sha256": "e55619a578605e10d6c5d40503c82cab73ab4ee59ebe2e3b55c5f8689fe9dbed",
+        "version_source": "LLVMGetVersion"
+      },
+      "id": "W41",
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "kind": "wheel",
+      "reports": {
+        "gfx1250": {
+          "effective_processor": "gfx1250",
+          "vector": "b85e376b71a19ee4bd2ceec882c0d883b5f183910c82ac6ff766d8239cf04ea1"
+        },
+        "gfx950": {
+          "effective_processor": "gfx950",
+          "vector": "c2e3d7f4e6e327f2ffe6e0d551682071875c6d691780e74dd64fbdb69427cb39"
+        }
+      }
+    },
+    {
+      "artifact": "10.2.0a20261022",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.2.0a20261022-py3-none-linux_x86_64.whl",
+      "compiler": {
+        "dependency_identity_complete": true,
+        "dependency_sha256": [],
+        "llvm_version": [
+          24,
+          0,
+          0
+        ],
+        "sha256": "337c5118fde84310833b67cccec2f992717e21b7d6daa91933fe721109fa020c",
+        "version_source": "COMGR preprocessing"
+      },
+      "id": "W43",
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "kind": "wheel",
+      "reports": {
+        "gfx1250": {
+          "effective_processor": "gfx1250",
+          "vector": "b85e376b71a19ee4bd2ceec882c0d883b5f183910c82ac6ff766d8239cf04ea1"
+        },
+        "gfx950": {
+          "effective_processor": "gfx950",
+          "vector": "c2e3d7f4e6e327f2ffe6e0d551682071875c6d691780e74dd64fbdb69427cb39"
+        }
+      }
+    },
+    {
+      "artifact": "10.3.0a20261029",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.3.0a20261029-py3-none-linux_x86_64.whl",
+      "compiler": {
+        "dependency_identity_complete": true,
+        "dependency_sha256": [],
+        "llvm_version": [
+          24,
+          0,
+          0
+        ],
+        "sha256": "ca2daf152f3a5cc51b6bd3f0ad04a6fbe5c5f87f7512d806d6754275478b796c",
+        "version_source": "COMGR preprocessing"
+      },
+      "id": "W44",
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "kind": "wheel",
+      "reports": {
+        "gfx1250": {
+          "effective_processor": "gfx1250",
+          "vector": "b85e376b71a19ee4bd2ceec882c0d883b5f183910c82ac6ff766d8239cf04ea1"
+        },
+        "gfx950": {
+          "effective_processor": "gfx950",
+          "vector": "7920a4c624e38c5a967db4c4fc4b515a6cd7c176dcbece9ff249b889b11bbade"
+        }
+      }
+    },
+    {
+      "artifact": "10.3.0a20261105",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.3.0a20261105-py3-none-linux_x86_64.whl",
+      "compiler": {
+        "dependency_identity_complete": true,
+        "dependency_sha256": [],
+        "llvm_version": [
+          24,
+          0,
+          0
+        ],
+        "sha256": "67e158be994fe59e84551e9fd52a8a658fad0b3f5b53a9e1c46d357e98041ecd",
+        "version_source": "COMGR preprocessing"
+      },
+      "id": "W45",
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "kind": "wheel",
+      "reports": {
+        "gfx1250": {
+          "effective_processor": "gfx1250",
+          "vector": "b85e376b71a19ee4bd2ceec882c0d883b5f183910c82ac6ff766d8239cf04ea1"
+        },
+        "gfx950": {
+          "effective_processor": "gfx950",
+          "vector": "7920a4c624e38c5a967db4c4fc4b515a6cd7c176dcbece9ff249b889b11bbade"
+        }
+      }
+    },
+    {
+      "artifact": "10.3.0a20261112",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.3.0a20261112-py3-none-linux_x86_64.whl",
+      "compiler": {
+        "dependency_identity_complete": true,
+        "dependency_sha256": [
+          "e837ea2722bfe894d07105c6efa308dc08396e57330f18a7d79f48a741061b03",
+          "fdad893fbec0d0f084e6a5fd5a8455f7b23ed769394170c798ba8db5c5f26fb3"
+        ],
+        "llvm_version": [
+          24,
+          0,
+          0
+        ],
+        "sha256": "3ab7d43c44ab02950c1d67f42887f4b56067f8fef007ecabdfe990675b68f727",
+        "version_source": "LLVMGetVersion"
+      },
+      "id": "W46",
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "kind": "wheel",
+      "reports": {
+        "gfx1250": {
+          "effective_processor": "gfx1250",
+          "vector": "5a3bfd3cb53fcbe99bc50d79115319f44b45802e5d088a8e30ea78c1ee6711cb"
+        },
+        "gfx950": {
+          "effective_processor": "gfx950",
+          "vector": "89638984d804028b11ffbd241797e8a7ae486998d02231be591c53e932b16d79"
+        }
+      }
+    }
+  ]
+}

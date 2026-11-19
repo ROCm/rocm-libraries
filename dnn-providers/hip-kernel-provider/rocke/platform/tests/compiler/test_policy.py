@@ -1,0 +1,218 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""Contracts for canonical compiler-policy selection and serialization."""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+
+import pytest
+from rocke.compiler import _support as support
+from rocke.compiler import evidence as E
+from rocke.compiler import model as M
+from rocke.compiler.policy import CompilerPolicy, PolicyResolutionError, resolve_policy
+
+_SHA = "a" * 64
+
+
+def _identity(_: Path | None) -> dict[str, object]:
+    return {
+        "llvm_version": [23, 0, 0],
+        "version_source": "test",
+        "query_library": None,
+        "library": "/test/libamd_comgr.so",
+        "sha256": _SHA,
+        "dependencies": [],
+        "dependency_identity_complete": True,
+    }
+
+
+def _accept_all(
+    requests: list[support.ProbeRequest], **_: object
+) -> dict[str, support.ProbeResult]:
+    return {
+        request.key: support.ProbeResult(
+            request.key,
+            "accepted",
+            evidence={
+                "hsaco_sha256": _SHA,
+                "hsaco_size": 64,
+                "completed_stages": [
+                    "compile_source_to_bc",
+                    "codegen_bc_to_relocatable",
+                    "link_relocatable_to_executable",
+                ],
+            },
+        )
+        for request in requests
+    }
+
+
+def _report(tmp_path: Path) -> dict[str, object]:
+    report, cache_hit = E.load_or_probe(
+        comgr_lib=None,
+        processor="gfx950",
+        cache_dir=tmp_path / "cache",
+        identify=_identity,
+        run=_accept_all,
+    )
+    assert cache_hit is False
+    return report
+
+
+def test_policy_resolver_selects_preferred_independent_capabilities(
+    tmp_path: Path,
+) -> None:
+    report = _report(tmp_path)
+
+    policy = resolve_policy(report)
+
+    assert policy.data_layout == "L3"
+    assert policy.buffer_resource_abi == "p8_p1_i64"
+    assert policy.fp8_packed_operand_type == "i64"
+    assert policy.named_barrier_address_space == 15
+    assert policy.scaled_mfma_call_abi == "current_9"
+    assert CompilerPolicy.from_json(policy.to_json()) == policy
+
+
+def test_policy_resolver_preserves_unsupported_optional_families(
+    tmp_path: Path,
+) -> None:
+    report = _report(tmp_path)
+    for name in (
+        M.CAPABILITY_FP8_PACKING,
+        M.CAPABILITY_NAMED_BARRIER,
+        M.CAPABILITY_SCALED_MFMA,
+    ):
+        for entry in report["capabilities"][name]["value"]["observations"]:
+            entry["outcome"] = "rejected"
+            entry["diagnostic"] = "not supported"
+            entry.pop("evidence")
+
+    policy = resolve_policy(report)
+
+    assert policy.fp8_packed_operand_type is None
+    assert policy.named_barrier_address_space is None
+    assert policy.scaled_mfma_call_abi is None
+
+
+@pytest.mark.parametrize(
+    ("capability", "candidate", "field", "expected"),
+    [
+        *[
+            (M.CAPABILITY_LAYOUT, value, "data_layout", value)
+            for value in ("L3", "L2", "L1", "L0")
+        ],
+        *[
+            (M.CAPABILITY_BUFFER_RESOURCE, value, "buffer_resource_abi", value)
+            for value in ("p8_p1_i64", "p8_p1_i32", "p1_i64", "p1_i32")
+        ],
+        *[
+            (M.CAPABILITY_FP8_PACKING, value, "fp8_packed_operand_type", value)
+            for value in ("i64", "v2i32")
+        ],
+        (M.CAPABILITY_NAMED_BARRIER, "as15", "named_barrier_address_space", 15),
+        (M.CAPABILITY_NAMED_BARRIER, "as3", "named_barrier_address_space", 3),
+        *[
+            (M.CAPABILITY_SCALED_MFMA, value, "scaled_mfma_call_abi", value)
+            for value in ("current_9", "legacy_11")
+        ],
+    ],
+)
+def test_policy_resolver_decision_table(
+    tmp_path: Path,
+    capability: str,
+    candidate: str,
+    field: str,
+    expected: object,
+) -> None:
+    report = _report(tmp_path)
+    for entry in report["capabilities"][capability]["value"]["observations"]:
+        if entry["candidate"] == candidate:
+            continue
+        entry["outcome"] = "rejected"
+        entry["diagnostic"] = "not selected"
+        entry.pop("evidence")
+
+    assert getattr(resolve_policy(report), field) == expected
+
+
+def test_policy_resolver_rejects_missing_required_evidence(tmp_path: Path) -> None:
+    report = _report(tmp_path)
+    observations = report["capabilities"][M.CAPABILITY_LAYOUT]["value"]["observations"]
+    for entry in observations:
+        entry["outcome"] = "rejected"
+        entry["diagnostic"] = "not supported"
+        entry.pop("evidence")
+
+    with pytest.raises(PolicyResolutionError, match="accepted none"):
+        resolve_policy(report)
+
+
+def test_policy_resolver_refuses_unknown_preferred_candidate(tmp_path: Path) -> None:
+    report = _report(tmp_path)
+    observations = report["capabilities"][M.CAPABILITY_LAYOUT]["value"]["observations"]
+    preferred = next(entry for entry in observations if entry["candidate"] == "L3")
+    preferred.clear()
+    preferred.update(
+        {
+            "family": "module",
+            "candidate": "L3",
+            "outcome": "timeout",
+            "diagnostic": "synthetic timeout",
+        }
+    )
+
+    with pytest.raises(PolicyResolutionError, match="L3.*unknown outcome timeout"):
+        resolve_policy(report)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("target_triple", "x86_64", "target_triple='x86_64'"),
+        ("requested_processor", "not-gfx", "requested_processor='not-gfx'"),
+        ("data_layout", "L9", "data_layout='L9'"),
+        ("named_barrier_address_space", 7, "named_barrier_address_space=7"),
+        ("evidence_fingerprint", "bad", "evidence_fingerprint='bad'"),
+    ],
+)
+def test_policy_constructor_rejects_invalid_fields(
+    tmp_path: Path, field: str, value: object, message: str
+) -> None:
+    policy = resolve_policy(_report(tmp_path))
+    fields = dict(policy.__dict__)
+    fields[field] = value
+
+    with pytest.raises(ValueError, match=re.escape(message)):
+        CompilerPolicy(**fields)
+
+
+@pytest.mark.parametrize("value", [True, False, 3.0, 15.0, "3"])
+def test_policy_constructor_rejects_non_integer_address_spaces(
+    tmp_path: Path, value: object
+) -> None:
+    policy = resolve_policy(_report(tmp_path))
+    fields = dict(policy.__dict__)
+    fields["named_barrier_address_space"] = value
+
+    with pytest.raises(TypeError, match="expected an integer or null"):
+        CompilerPolicy(**fields)
+
+
+def test_policy_manifest_rejects_tampering(tmp_path: Path) -> None:
+    document = json.loads(resolve_policy(_report(tmp_path)).to_json())
+    document["data_layout"] = "L0"
+
+    with pytest.raises(ValueError, match="digest does not match"):
+        CompilerPolicy.from_json(json.dumps(document))
+
+
+def test_policy_manifest_matches_packaged_schema(tmp_path: Path) -> None:
+    jsonschema = pytest.importorskip("jsonschema")
+    schema_path = Path(E.__file__).with_name("data") / "policy.schema.json"
+    document = json.loads(resolve_policy(_report(tmp_path)).to_json())
+    jsonschema.validate(document, json.loads(schema_path.read_text(encoding="utf-8")))
