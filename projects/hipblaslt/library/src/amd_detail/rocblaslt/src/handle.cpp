@@ -154,12 +154,12 @@ _rocblaslt_handle::_rocblaslt_handle()
     // stays in device memory: targeting hipHostMalloc(MAPPED) makes it a PCIe
     // AtomicOp, and a root port without an AtomicOp completer (typical of a
     // PCH-attached GPU) drops it. The slot then stays 0 through a later device
-    // sync, so both the host peek and hipblasLtCheckNumericsDrain miss the NaN
-    // (ROCM-30523). STOP_ON_FIRST publishes the winning call_id with a plain
-    // store to a coherent host mirror so scan_D can still peek without syncing.
-    // If that mirror cannot be allocated, drains and teardown still report the
-    // device flag. If hipMalloc itself fails we disable scanning -- the matmul
-    // is unaffected.
+    // sync, so both the host peek and hipblasLtCheckNumericsDrain miss the
+    // NaN. STOP_ON_FIRST publishes the winning call_id with a plain store to a
+    // coherent host mirror so scan_D can still peek without syncing. If that
+    // mirror cannot be allocated, drains and teardown still report the device
+    // flag. If hipMalloc itself fails we disable scanning -- the matmul is
+    // unaffected.
     if(check_numerics != hipblaslt_check_numerics_mode_no_check)
     {
         const hipError_t alloc_err = hipMalloc(&check_numerics_flag, sizeof(uint32_t));

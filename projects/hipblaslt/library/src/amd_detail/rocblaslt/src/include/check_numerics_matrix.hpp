@@ -80,9 +80,9 @@ inline std::string hipblaslt_check_numerics_ts()
 // call_id to host_flag with a plain store (STOP_ON_FIRST mirror; null
 // otherwise). That store is not an atomic: device atomics to mapped host
 // memory require a PCIe AtomicOp completer, which a PCH-attached GPU often
-// lacks (ROCM-30523). With ptr_array set, D is a device array holding one
-// matrix pointer per batch and stride_d is unused. offset_d is added to each
-// matrix pointer in elements.
+// lacks. With ptr_array set, D is a device array holding one matrix pointer
+// per batch and stride_d is unused. offset_d is added to each matrix pointer
+// in elements.
 template <int DIM_X, int DIM_Y, typename T>
 __global__ void hipblaslt_check_nan_kernel(int64_t               m,
                                            int64_t               n,

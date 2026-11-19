@@ -127,8 +127,7 @@ struct _rocblaslt_handle
     // 4-byte device slot; scanner does atomicCAS(0, call_id) so the slot
     // holds the FIRST matmul's call_id whose D contained a NaN. Always a
     // hipMalloc allocation: a device atomic against mapped host memory is a
-    // PCIe AtomicOp, and root ports without an AtomicOp completer drop it
-    // (ROCM-30523).
+    // PCIe AtomicOp, and root ports without an AtomicOp completer drop it.
     uint32_t*             check_numerics_flag          = nullptr;
     // STOP_ON_FIRST host mirror (null otherwise). The CAS winner publishes
     // call_id here with a plain store so scan_D can peek without syncing.

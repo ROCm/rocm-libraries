@@ -345,7 +345,7 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
     // (hipDeviceAttributeHostNativeAtomicSupported == 0, typical of a
     // PCH-attached GPU) may not observe that store; the on-demand drain then
     // emits the single NaN report instead. Either way the call id is reported
-    // once (ROCM-30523).
+    // once.
     int host_native_atomics = 0;
     ASSERT_EQ(hipDeviceGetAttribute(&host_native_atomics,
                                     hipDeviceAttributeHostNativeAtomicSupported,
