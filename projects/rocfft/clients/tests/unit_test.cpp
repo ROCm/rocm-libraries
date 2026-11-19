@@ -35,8 +35,10 @@
 #include <fstream>
 #include <functional>
 #include <gtest/gtest.h>
+#include <iomanip>
 #include <mutex>
 #include <regex>
+#include <sstream>
 #include <thread>
 #include <vector>
 
@@ -978,7 +980,8 @@ static fs::path amdclangpp_exe()
     // look relative to current exe
 #ifdef _WIN32
     char current_exe[MAX_PATH];
-    if(GetModuleFileNameA(nullptr, current_exe, MAX_PATH) == MAX_PATH)
+    auto err = GetModuleFileNameA(nullptr, current_exe, MAX_PATH);
+    if(err == 0 || err == MAX_PATH)
         return {};
     static const char* amdclang_name = "amdclang++.exe";
 #else
@@ -986,6 +989,8 @@ static fs::path amdclangpp_exe()
     auto err = readlink("/proc/self/exe", current_exe, PATH_MAX);
     if(err == -1 || err == PATH_MAX)
         return {};
+    current_exe[err] = '\0';
+
     static const char* amdclang_name = "amdclang++";
 #endif
 
@@ -999,9 +1004,12 @@ TEST(rocfft_UnitTest, rtc_test_harness)
 
     try
     {
+        // NOTE: compiler is searched for relative to current
+        // executable, so this test is expected to be skipped if not
+        // run in an installed ROCm prefix
         auto compiler = amdclangpp_exe();
         if(!fs::exists(compiler))
-            GTEST_SKIP() << "amdclang++ not found";
+            GTEST_SKIP() << "amdclang++ not found at " << compiler;
 
         rocfft_cleanup();
 
@@ -1111,17 +1119,25 @@ TEST(rocfft_UnitTest, rtc_test_harness)
 #endif
             for(i = 0; i < files.size(); ++i)
             {
+                std::stringstream command;
 #ifdef _WIN32
+                static const char* PREFIX = "cmd /S /C \"";
                 // Windows headers need to be told to not break std::min
-                const auto command = compiler.string() + " -DNOMINMAX -x hip -c -std=c++20 -o NUL "
-                                     + files[i].first;
+                static const char* EXTRA_DEFINES = " -DNOMINMAX";
+                static const char* OUTPUT_NULL   = "NUL";
+                static const char* SUFFIX        = "\"";
 #else
-                const auto command
-                    = compiler.string() + " -x hip -c -std=c++20 -o /dev/null " + files[i].first;
+                static const char* PREFIX        = "";
+                static const char* EXTRA_DEFINES = "";
+                static const char* OUTPUT_NULL   = "/dev/null";
+                static const char* SUFFIX        = "";
 #endif
+                command << PREFIX << std::quoted(compiler.string()) << EXTRA_DEFINES
+                        << " -x hip -c -std=c++20 -o " << OUTPUT_NULL << " "
+                        << std::quoted(files[i].first) << SUFFIX;
                 // NOTE: using system() for launching subprocesses for simplicity
                 // and portability
-                files[i].second = std::system(command.c_str());
+                files[i].second = std::system(command.str().c_str());
             }
 
             // check that all compiles succeeded
