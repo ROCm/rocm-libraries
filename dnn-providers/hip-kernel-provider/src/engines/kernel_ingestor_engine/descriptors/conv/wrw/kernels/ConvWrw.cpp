@@ -30,6 +30,7 @@
 //   CONV_K3_ALIGN    1: row-aligned units, unaligned LDS store (loop 1, channels-first)
 //   CONV_K3_NS       LDS stages (loop 2); ring slots (loop 5)
 //   CONV_K3_WQ       loop 5: items side by side (waves_q; wk x wc x wq = 8 waves)
+//   CONV_K3_FLAT     loop 8: 1 steps over BQ consecutive flattened output positions (default 0)
 //   CONV_K3_DWS      1: the epilogue can write dw itself at one split (K3Args::dwStore); 0:
 //                    fp32 partials only (default)
 // Loop 5 (gfx950, 16-bit, channels-last kept, ConvWrwDirect.h) also takes CONV_K3_PP and
@@ -107,6 +108,9 @@ extern "C" __global__ void __launch_bounds__(256) ConvWrwSplit(K3SplitArgs a)
 }
 #endif
 
+#ifndef CONV_K3_FLAT
+#define CONV_K3_FLAT 0
+#endif
 #ifndef CONV_K3_PP
 #define CONV_K3_PP 1
 #endif
@@ -272,7 +276,8 @@ extern "C" __global__ void __launch_bounds__(CONV_K3_THREADS) ConvWrw(K3Args a)
                  1,
                  CONV_K3_VEC,
                  CONV_K3_DW,
-                 0>(a);
+                 0,
+                 CONV_K3_FLAT>(a);
 #elif CONV_K3_LOOP == 8
     // Generic taps: CONV_K3_FR is the taps a block; filter, stride and dilation are runtime.
     k3WrwGeneric<CONV_K3_T,
@@ -286,7 +291,8 @@ extern "C" __global__ void __launch_bounds__(CONV_K3_THREADS) ConvWrw(K3Args a)
                  CONV_K3_WC,
                  CONV_K3_VEC,
                  CONV_K3_DW,
-                 CONV_K3_XCD>(a);
+                 CONV_K3_XCD,
+                 CONV_K3_FLAT>(a);
 #else
     k3WrwRows<CONV_K3_T,
               CONV_K3_ATOM,
