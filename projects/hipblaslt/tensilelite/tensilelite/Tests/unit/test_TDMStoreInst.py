@@ -34,7 +34,7 @@ _PROBLEM_TYPE_KEYS = {
 
 
 def _state(**overrides):
-  """The keys tdmStoreRejectReason and the ExecutionPolicy helpers it calls read, for a TDMStoreInst=2
+  """The keys tdmStoreRejectReason and the ExecutionPolicy helpers it calls read, for a TDMStoreInst=1
   solution inside the supported configurations, with `overrides` applied."""
   problemType = {
     "DestDataType": DataType("b"),
@@ -51,7 +51,7 @@ def _state(**overrides):
     "UseScaleAlphaVec": 0,
   }
   state = {
-    "TDMStoreInst": 2,
+    "TDMStoreInst": 1,
     "ISA": (12, 5, 0),
     "TileProcessingStrategy": "None",
     "WorkAssignment": "StaticGrid",
@@ -552,7 +552,7 @@ def _dest(dest, **problemType):
 
 def test_fp16_c_is_read_back_from_the_staged_tile(gp_gfx1250, gfx1250_iim, assembler, capsys):
   """fp16 C comes back from the staged tile in 16-byte vectors at StoreVectorWidth 8."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, ProblemType=_FP16)
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, ProblemType=_FP16)
   assert sol.get("Valid"), capsys.readouterr().out
   assert sol["StoreVectorWidth"] == 8
   block = _tdmBlock(asm, "1", 8)
@@ -744,7 +744,7 @@ def test_dynamic_gsu_with_epilogue_vectors(gp_gfx1250, gfx1250_iim, assembler, c
   epilogue would run per GSU slice), and with the even AssertFree0ElementMultiple of packed bf16 atomics."""
   extra = {"AssertFree0ElementMultiple": 2} if algorithm == "AtomicDest" else \
     {"ProblemType": {"UseBias": 1, "UseScaleAlphaVec": 1}}
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=3, GlobalSplitU=-1, GlobalSplitUAlgorithm=algorithm,
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, GlobalSplitU=-1, GlobalSplitUAlgorithm=algorithm,
                        AdaptiveGemmGSUA=aga, **extra)
   assert sol.get("Valid"), capsys.readouterr().out
   stores = _stores(asm)
@@ -797,7 +797,7 @@ def test_mbsk_reduced_tile_keeps_buffer_store_with_prefetch_method_1(gp_gfx1250,
   """MbskPrefetchMethod 1: each wave takes the last decrement of its own synchronizer slot and reduces on its own,
   so the reduced tile keeps buffer_store, with no TDM copy and no GSU check; the GSU == 1 store and OptNLL_MBSK,
   which runs at GSU 1 only, keep the block."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=3, GlobalSplitU=2,
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, GlobalSplitU=2,
                        GlobalSplitUAlgorithm="MultipleBufferSingleKernel", MbskPrefetchMethod=1)
   assert sol.get("Valid"), capsys.readouterr().out
   stores = _stores(asm)
@@ -889,11 +889,11 @@ def test_compact_loop_store_tdm_block_outside_the_loop(gp_gfx1250, gfx1250_iim, 
 def test_automatic_store_remap_vector_width(gp_gfx1250, gfx1250_iim, assembler, capsys):
   """StoreRemapVectorWidth=-1 resolves to 0 with SourceSwap and to a remap width without it; TDMStoreInst
   takes both."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, SourceSwap=True, StoreRemapVectorWidth=-1)
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, SourceSwap=True, StoreRemapVectorWidth=-1)
   assert sol.get("Valid"), capsys.readouterr().out
   assert sol["StoreRemapVectorWidth"] == 0
   assert "tensor_store_from_lds " in asm
-  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], TDMStoreInst=2, SourceSwap=False,
+  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], TDMStoreInst=1, SourceSwap=False,
                        StoreRemapVectorWidth=-1, VectorWidthA=1, VectorWidthB=1)
   assert sol.get("Valid"), capsys.readouterr().out
   assert sol["StoreRemapVectorWidth"] > 0 and "tensor_store_from_lds " in asm
@@ -937,7 +937,7 @@ def test_both_factor_dims_use_the_tdm_block(gp_gfx1250, gfx1250_iim, assembler, 
   """Bias and ScaleAlphaVec along N (UseBias 2), or along M or N as the kernel argument picks (UseBias 3):
   generateBetaModules builds the store tree of each factor dim, and with the switch on each of them stores through
   the TDM block."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=3,
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1,
                        ProblemType=_dest(dest, UseBias=useBias, UseScaleAlphaVec=useBias))
   assert sol.get("Valid"), capsys.readouterr().out
   stored, factorDim = set(), None
@@ -981,7 +981,7 @@ def test_mt1_not_a_multiple_of_the_waves(gp_gfx1250, gfx1250_iim, assembler, cap
 def test_scale_cd_scales_through_registers(gp_gfx1250, gfx1250_iim, assembler, capsys, dest):
   """ScaleC and ScaleD are scalars the kernel loads from its arguments into SGPRs: the TDM block of a TDMStoreInst
   kernel multiplies its elements by ScaleD, as the buffer_store path does."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, ProblemType=_dest(dest, UseScaleCD=True))
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, ProblemType=_dest(dest, UseScaleCD=True))
   assert sol.get("Valid"), capsys.readouterr().out
   assert "AddressScaleC" in asm and "AddressScaleD" in asm
   assert re.search(r"^\s*v_\w*mul\w* [^\n]*sgprScaleD", _tdmBlock(asm, "1", 8), re.M)
@@ -1026,7 +1026,7 @@ def test_requires_tdm_in_the_assembler(gp_gfx1250, gfx1250_iim, assembler, capsy
 
   noTdm = copy_isa_info_map(gfx1250_iim)
   noTdm[gfxToIsa("gfx1250")].asmCaps["HasTDM"] = False
-  sol, asm = _emit_asm(noTdm, assembler, TDMStoreInst=2, TDMInst=0)
+  sol, asm = _emit_asm(noTdm, assembler, TDMStoreInst=1, TDMInst=0)
   assert not sol.get("Valid") and asm is None
   assert "TDMStoreInst requires asmCaps HasTDM" in capsys.readouterr().out
 
@@ -1058,7 +1058,7 @@ def test_pap_stages_after_the_main_loop(gp_gfx1250, gfx1250_iim, assembler, caps
   separate region has its own token, no TENSORcnt wait comes between the last WMMA of the tile and the
   first staging store. The tile is MT128x128: a staged MT256x256 tile takes a PAP kernel past MaxLDS."""
   extra = {"ProblemType": {"UseBias": 1, "UseScaleAlphaVec": 1}} if vectors else {}
-  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], TDMStoreInst=2, **_PAP, **extra)
+  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], TDMStoreInst=1, **_PAP, **extra)
   assert sol.get("Valid"), capsys.readouterr().out
   offset, staged = sol["_TDMStoreLdsOffset"], tdmStoreLdsBytes(sol)
   assert not sol["_TDMStoreOverMainLoop"] and offset > 0 and offset % 256 == 0
@@ -1093,7 +1093,7 @@ def test_rap_with_tdm_store_generates(gp_gfx1250, gfx1250_iim, assembler, capsys
 def test_pap_oversized_tile_hits_max_lds(gp_gfx1250, gfx1250_iim, assembler, capsys):
   """Under PrefetchAcrossPersistent the staged tile adds to the main-loop LDS, and develop's MaxLDS reject
   sees the sum: at DepthU 128 the main loop fits without TDMStoreInst and the sum does not."""
-  sol, _ = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, DepthU=128, **_PAP)
+  sol, _ = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, DepthU=128, **_PAP)
   out = capsys.readouterr().out
   assert not sol.get("Valid") and "LDS" in out, out
   sol, _ = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=0, DepthU=128, **_PAP)
@@ -1185,7 +1185,7 @@ def test_staged_tile_goes_after_the_epilogue_vectors(gp_gfx1250, gfx1250_iim, as
   """The bias and ScaleAlphaVec vectors, along M or N, keep LDS offset 0, as without TDMStoreInst, and the TDM
   block stages the D tile from a 256-byte boundary after them: its setup and the descriptors of the C load and
   the D store add that offset."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, StreamK=streamk,
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, StreamK=streamk,
                        ProblemType={"UseBias": useBias, "UseScaleAlphaVec": useBias})
   assert sol.get("Valid"), capsys.readouterr().out
   staged = sol["MacroTile0"] * sol["MacroTile1"] * 2
