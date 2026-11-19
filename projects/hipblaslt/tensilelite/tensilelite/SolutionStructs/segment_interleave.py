@@ -62,11 +62,11 @@ Without MXSA M splitting, buffer placement for both MX scales is:
     ping: [interleaved A/B data][MXSA][MXSB]
     pong: [interleaved A/B data][MXSA][MXSB]
 
-On coarse or contiguous-A [2,2] InMemorySwizzle layouts, MXSA can instead be
-loaded as two M halves, one per SIMD pair, when TDM uses exactly two components.
-The halves occupy separate segments and each contains all K scale groups. The
-builders size the halves before assigning final A/B bases and strides. With split B, each MXSA half follows its component's B
-data; with whole B, it follows A instead and B keeps its baseline addressing.
+MXSA M splitting is optional for [2,2] InMemorySwizzle layouts. It requires two
+TDM components and an M-half TDM row size divisible by 128 bytes. The halves
+occupy separate segments, each with all K scale groups, after their B component
+(or A when B stays whole). Keeping MXSA whole does not disable A/B interleave.
+
 Paired layouts preserve 256-byte alignment for every group. Auto compares the complete
 split candidate with the ordinary layout's LDS reservation and falls back to
 ordinary placement if the candidate needs more LDS.
@@ -175,6 +175,11 @@ def _mxsa_half_layout(state, paired=False):
     # The TDM component IDs must map directly to the two reserved M-half slots.
     if tdmWaveComponents(state, "MXSA")[0] != 2:
         return None
+    mxUnit = state["MatrixInstK"] // pt["MXBlockA"]
+    halfRowBytes = (state["MacroTile0"] // 2) * mxUnit
+    # Keep the ordinary scale layout if the M cut breaks 128-byte alignment.
+    if halfRowBytes % 128:
+        return None
     rawHalf = state["MacroTile0"] * (state["DepthU"] // pt["MXBlockA"]) // 2
     pad, block = state.get("LdsPadMXSA", 0), state.get("LdsBlockSizePerPadMXSA", 0)
     if pad < 0 or block < 0 or (pad > 0 and (block == 0 or rawHalf % block)):
@@ -191,10 +196,11 @@ def _mxsa_half_layout(state, paired=False):
 def _component_offsets(state, bWhole, portSplit):
     """Build final one-buffer A/B and scale positions together.
 
-    Split B: [A0 B0 MXSA0] [A1 B1 MXSA1] [MXSB].
-    Whole B: [A0 MXSA0 B]  [A1 MXSA1]    [MXSB].
-    Aligned placement inserts a segment gap before A1. Each component reserves
-    one independently aligned MXSA slot.
+    With MXSA M splitting:
+      Split B: [A0 B0 MXSA0] [A1 B1 MXSA1] [MXSB].
+      Whole B: [A0 MXSA0 B]  [A1 MXSA1]    [MXSB].
+    Otherwise, omit the MXSA0/1 slots and append the whole MXSA after A/B.
+    Aligned placement inserts a segment gap before A1 in either case.
     """
     base = state["LdsOffsetA"]
     fA = _footprint(state, "A")

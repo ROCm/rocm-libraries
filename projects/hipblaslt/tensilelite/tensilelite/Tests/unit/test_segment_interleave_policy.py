@@ -557,12 +557,10 @@ def test_streamk_pairs_unless_mx_with_shadow_init(derive, mode, mx, shadow_init,
         assert offsets["pairedUsedBytes"] <= sol["LdsNumBytes"] <= sol["MaxLDS"]
     else:
         # The paired swap masks would push these kernels past the SGPR limit.
-        # Keep unpaired buffers, with MXSA M halves inside their components.
+        # Keep unpaired buffers. The 64-byte M-half row keeps MXSA unsplit.
         assert offsets == {
-            "ldsBaseB": 8704, "writeStrideBytes": 93184, "footprintPacked": True,
-            "bBaseline": True, "ldsBaseMXSA": 8448, "ldsBaseMXSB": 101888,
-            "mxsSplitA": True, "mxsaHalfBytes": 256,
-            "mxsaHalfFootprintBytes": 256, "mxsaStrideBytes": 93184,
+            "ldsBaseB": 8448, "writeStrideBytes": 92928, "footprintPacked": True,
+            "bBaseline": True, "ldsBaseMXSA": 101376, "ldsBaseMXSB": 101888,
         }
         assert sol["StoreSwapAddr"] is False
         assert sol["LdsNumBytes"] == 235520
@@ -586,10 +584,7 @@ def test_persistent_prefetch_keeps_unpaired_interleave(derive, mode, mx, strateg
         "bBaseline": True,
     }
     if mx:
-        expected.update(ldsBaseB=8704, writeStrideBytes=93184,
-                        ldsBaseMXSA=8448, ldsBaseMXSB=101888, mxsSplitA=True,
-                        mxsaHalfBytes=256, mxsaHalfFootprintBytes=256,
-                        mxsaStrideBytes=93184)
+        expected.update(ldsBaseMXSA=101376, ldsBaseMXSB=101888)
     assert sol["LDSSegInterleaveOffsets"] == expected
     assert sol["LdsNumBytes"] == (235520 if mx else 232448)
 
@@ -679,7 +674,7 @@ def test_contiguous_a_waves_preserve_data_writer_and_choose_native_stores(derive
     assert interleaved["StoreVectorWidth"] == (1 if source_swap else 8)
     offsets = interleaved["LDSSegInterleaveOffsets"]
     assert offsets["pairedBuffers"]
-    assert offsets["mxsSplitA"] is True
+    assert bool(offsets.get("mxsSplitA")) is (wave_tile == 6)
     assert offsets["pairedUsedBytes"] <= interleaved["LdsNumBytes"]
     for phase in (0, 1):
         starts = [offsets["ldsBaseA"] + component * offsets["writeStrideBytes"]
@@ -688,6 +683,43 @@ def test_contiguous_a_waves_preserve_data_writer_and_choose_native_stores(derive
         segments = [set(range(start // 65536, (start + size - 1) // 65536 + 1))
                     for start in starts]
         assert segments[0].isdisjoint(segments[1])
+
+
+@pytest.mark.parametrize("tile,half_row_bytes,split", [
+    (5, 320, False), (6, 384, True), (7, 448, False), (8, 512, True), (10, 640, True),
+])
+@pytest.mark.parametrize("source_swap", [False, True])
+@pytest.mark.parametrize("dtype,depth_u", [("F8", 256), ("F4", 512)])
+def test_mxsa_split_preserves_128_byte_m_boundary(
+        derive, monkeypatch, tile, half_row_bytes, split, source_swap, dtype, depth_u):
+    import tensilelite.SolutionStructs.segment_interleave as layout
+
+    params = dict(mi=[16, 16, 128, 1, 1, tile, 2, 2, 2],
+                  SourceSwap=source_swap, VectorWidthA=1, VectorWidthB=1,
+                  HalfPLR=0, DepthU=depth_u, WaveTileContiguousA=True,
+                  LDSSegmentBRotate=1, TDMIterateMode=0,
+                  ProblemType={"DataType": dtype, "DestDataType": "S",
+                               "MXBlockA": 32, "MXBlockB": 32})
+    sol, out = derive(1, **params)
+    assert sol["Valid"], out
+    assert sol["WaveTileContiguousA"] and sol["LDSSegmentInterleave"] == 1
+    assert sol["LDSSegmentBRotate"] == 1
+    offsets = sol["LDSSegInterleaveOffsets"]
+    assert bool(offsets.get("mxsSplitA")) is split
+    assert sol["MacroTile0"] // 2 * 4 == half_row_bytes
+    if split:
+        _check_split_mxsa_addresses(sol)
+        for component in (0, 1):
+            for phase in (0, 1):
+                base = (offsets["ldsBaseMXSA"] + component * offsets["mxsaStrideBytes"]
+                        + phase * offsets["bufferStrideMXSA"])
+                assert base % 128 == 0
+    else:
+        # Fall back to the full existing layout, including A/B and both buffers.
+        monkeypatch.setattr(layout, "_mxsa_half_layout", lambda *args, **kwargs: None)
+        ordinary, out = derive(1, **params)
+        assert ordinary["Valid"], out
+        assert _lds_configuration(sol) == _lds_configuration(ordinary)
 
 
 @pytest.mark.parametrize("tile,width,half_plr", [(6, -1, 1), (6, 1, 1), (6, 2, 1),
@@ -1022,7 +1054,8 @@ def test_contiguous_a_scale_loads_match_wmma_rows(
     lane_regs = [_execute_scale_addresses(source, serial)[0] for serial in range(128)]
     _, normalized = _execute_scale_addresses(source, 0)
     offsets = sol["LDSSegInterleaveOffsets"]
-    assert offsets["mxsSplitA"]
+    split = bool(offsets.get("mxsSplitA"))
+    assert split is (tile % 2 == 0)
     buffer_stride = offsets.get("bufferStrideMXSA", sol["LdsOffsetA_Blk"])
     pad = sol["LdsPadMXSA"]
     pad_block = sol["LdsBlockSizePerPadMXSA"]
@@ -1053,8 +1086,13 @@ def test_contiguous_a_scale_loads_match_wmma_rows(
                         if phase:
                             actual ^= regs["v[vgprLocalReadSwapAddrMXSA]"]
                         actual += immediate
-                        expected = offsets["ldsBaseMXSA"] + (wave % 2) * offsets["mxsaStrideBytes"]
-                        expected += phase * buffer_stride + padded(k_offset + (logical_tile * 16 + row_in_tile) * 4)
+                        row = logical_tile * 16 + row_in_tile
+                        expected = offsets["ldsBaseMXSA"] + phase * buffer_stride
+                        if split:
+                            expected += (wave % 2) * offsets["mxsaStrideBytes"]
+                        else:
+                            row += (wave % 2) * tile * 16
+                        expected += padded(k_offset + row * 4)
                         # One dword contains the four K-block scales for this row.
                         assert list(range(actual, actual + 4)) == list(range(expected, expected + 4))
 
@@ -1218,8 +1256,8 @@ def test_contiguous_a_rejects_unimplemented_combinations(derive, overrides, reas
                                                (7, -1, 2), (7, 1, 2)])
 @pytest.mark.parametrize("source_swap", [False, True])
 @pytest.mark.parametrize("dtype,depth_u,pad", [("F8", 256, 16), ("F4", 512, 32)])
-def test_contiguous_a_mx_splits_scales_and_preserves_b_rotate(derive, tile, width, half_plr,
-                                                          source_swap, dtype, depth_u, pad):
+def test_contiguous_a_mx_selects_scale_layout_and_preserves_b_rotate(derive, tile, width, half_plr,
+                                                                  source_swap, dtype, depth_u, pad):
     overrides = dict(mi=[16, 16, 128, 1, 1, tile, 8, 2, 2],
                      SourceSwap=source_swap, VectorWidthA=width, VectorWidthB=4,
                      HalfPLR=half_plr, WaveTileContiguousA=True,
@@ -1243,12 +1281,9 @@ def test_contiguous_a_mx_splits_scales_and_preserves_b_rotate(derive, tile, widt
                 "bufferStrideA", "bufferStrideB", "bufferStrideMXSA", "bufferStrideMXSB",
                 "writeStrideBytes", "pairedUsedBytes"):
         assert reference_offsets[key] == offsets[key]
-    _check_split_mxsa_addresses(rotated)
-    if tile == 7 and dtype == "F4":
-        # MXSA fills the first 64 KiB component. B's logical split still
-        # uses the A/B-only aligned stride, not the new physical spacing.
-        assert offsets["readStrideBytesB"] == 65536
-        assert offsets["writeStrideBytes"] != offsets["readStrideBytesB"]
+    assert bool(offsets.get("mxsSplitA")) is (tile == 6)
+    if tile == 6:
+        _check_split_mxsa_addresses(rotated)
     assert offsets["pairedUsedBytes"] <= rotated["LdsNumBytes"] <= rotated["MaxLDS"]
     assert rotated["StoreVectorWidth"] == (1 if source_swap else 8)
     # A scales pair consecutive tiles; B keeps its VWB4 scale group.
@@ -1266,10 +1301,32 @@ def test_contiguous_a_mx_splits_scales_and_preserves_b_rotate(derive, tile, widt
 
 
 @pytest.mark.parametrize("source_swap", [False, True])
+def test_mxsa_split_preserves_b_rotate_encoding_across_segment_boundary(derive, source_swap):
+    sol, out = derive(
+        1, mi=[16, 16, 128, 1, 1, 6, 8, 2, 2],
+        SourceSwap=source_swap, VectorWidthA=1, VectorWidthB=4,
+        HalfPLR=1, DepthU=512, WaveTileContiguousA=True, LDSSegmentBRotate=1,
+        LdsPadA=128, LdsPadB=64, LdsBlockSizePerPadA=256, LdsBlockSizePerPadB=1024,
+        TDMIterateMode=0,
+        ProblemType={"DataType": "F4", "DestDataType": "S", "MXBlockA": 32, "MXBlockB": 32})
+    assert sol["Valid"], out
+    _check_split_mxsa_addresses(sol)
+    offsets = sol["LDSSegInterleaveOffsets"]
+    # MXSA pushes the component past 64 KiB; B keeps its A/B-only read encoding.
+    ab_bytes = offsets["bufferStrideA"] + offsets["bufferStrideB"]
+    assert ab_bytes == 64512
+    assert ab_bytes + offsets["mxsaHalfBytes"] > 65536
+    assert offsets["readStrideBytesB"] == 65536
+    assert offsets["writeStrideBytes"] != offsets["readStrideBytesB"]
+    from tensilelite.SolutionStructs.segment_interleave import b_rotate_reason
+    assert b_rotate_reason(sol._state) is None
+
+
+@pytest.mark.parametrize("source_swap", [False, True])
 def test_contiguous_a_mxsa_split_budget_keeps_auto_fallback_intact(derive, source_swap):
-    params = dict(mi=[16, 16, 128, 1, 1, 7, 8, 2, 2],
+    params = dict(mi=[16, 16, 128, 1, 1, 6, 8, 2, 2],
                   SourceSwap=source_swap, VectorWidthA=1, VectorWidthB=4,
-                  HalfPLR=2, DepthU=256, WaveTileContiguousA=True,
+                  HalfPLR=0, DepthU=128, WaveTileContiguousA=True,
                   TDMIterateMode=0,
                   ProblemType={"MXBlockA": 32, "MXBlockB": 32})
     ordinary, out = derive(0, **params)
