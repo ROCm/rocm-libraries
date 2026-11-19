@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -53,7 +53,8 @@ extern "C" {
 *  @param[in]
 *  m           number of rows of the sparse BSR matrix.
 *  @param[in]
-*  mb          number of block rows of the sparse BSR matrix.
+*  mb          number of block rows of the sparse BSR matrix. \p mb must equal
+*              ceil(\p m / \p block_dim).
 *  @param[in]
 *  nnzb        number of non-zero blocks of the sparse BSR matrix.
 *  @param[in]
@@ -75,9 +76,9 @@ extern "C" {
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval     rocsparse_status_invalid_size \p m, \p mb, \p nnzb, or \p block_dim is
-*              invalid.
+*              invalid, or \p mb is not ceil(\p m / \p block_dim).
 *  \retval     rocsparse_status_invalid_pointer \p bsr_descr, \p bsr_val,
-*              \p bsr_row_ind, or \p bsr_col_ind pointer is invalid.
+*              \p bsr_row_ptr, or \p bsr_col_ind pointer is invalid.
 */
 /**@{*/
 ROCSPARSE_EXPORT

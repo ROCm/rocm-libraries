@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "internal/conversion/rocsparse_bsrpad_value.h"
+#include "rocsparse_bsr_dims.hpp"
 #include "rocsparse_bsrpad_value.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"
@@ -66,8 +67,10 @@ rocsparse_status rocsparse::bsrpad_value_template(rocsparse_handle          hand
     ROCSPARSE_CHECKARG_ARRAY(7, nnzb, bsr_val);
     ROCSPARSE_CHECKARG_ARRAY(8, mb, bsr_row_ptr);
     ROCSPARSE_CHECKARG_ARRAY(9, nnzb, bsr_col_ind);
-    ROCSPARSE_CHECKARG(1, m, (mb * block_dim < m), rocsparse_status_invalid_size);
-    ROCSPARSE_CHECKARG(1, m, (m <= (mb - 1) * block_dim), rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG(1,
+                       m,
+                       (!rocsparse::bsr_block_count_matches(m, mb, block_dim)),
+                       rocsparse_status_invalid_size);
 
     // Quick return if possible
     if(mb == 0 || nnzb == 0)
@@ -76,7 +79,7 @@ rocsparse_status rocsparse::bsrpad_value_template(rocsparse_handle          hand
     }
 
     // Quick return if possible
-    if(mb * block_dim == m)
+    if(m % block_dim == 0)
     {
         return rocsparse_status_success;
     }
