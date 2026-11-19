@@ -42,6 +42,10 @@ from rocke.instances.gfx942.tf32_mma_probe import (
     build_tf32_mma_probe,
 )
 
+pytestmark = pytest.mark.filterwarnings(
+    "error::rocke.core.lower_llvm.ArchDomainWarning"
+)
+
 
 def test_public_tf32_exports():
     import rocke
