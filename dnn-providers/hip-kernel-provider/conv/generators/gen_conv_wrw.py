@@ -1048,6 +1048,8 @@ UNALIGNED_K = [
         0,
     ),
     ({"FLOAT": "mfma32_f32"}, [(32, 128, 1, 4, 16), (32, 64, 1, 2, 16)], 0),
+    # gfx908 bf16 (no bf16_1k atom): the half-rate 32 x 32 atom.
+    ({"BFLOAT16": "mfma32_bf16_908"}, [(32, 128, 1, 4, 32), (32, 64, 1, 2, 32)], 0),
 ]
 UNALIGNED_K_FILTERS = [("3x3", 3, 3), ("1x1", 1, 1)]
 
@@ -1071,6 +1073,7 @@ def build_unaligned_k():
 SMALLC_ATOMS = [
     ({"HALF": "mfma16x32_f16", "BFLOAT16": "mfma16x32_bf16"}, 1),
     ({"HALF": "mfma16_f16", "BFLOAT16": "mfma16_bf16", "FLOAT": "mfma16_f32"}, 0),
+    ({"BFLOAT16": "mfma16_bf16_908"}, 0),  # gfx908 bf16
     ({"HALF": "wmma11_f16", "BFLOAT16": "wmma11_bf16"}, 0),
     ({"HALF": "wmma12_f16", "BFLOAT16": "wmma12_bf16"}, 0),
     ({"HALF": "wmma125_f16", "BFLOAT16": "wmma125_bf16"}, 0),
@@ -1308,6 +1311,16 @@ GENERIC = [
     # gfx908 to gfx950 (64 KiB of LDS): gfx950's tiles at 32 positions.
     (
         {"HALF": "mfma32_f16", "BFLOAT16": "mfma32_bf16"},
+        0,
+        [
+            (CL, (128, 64, 4, 2, 32), 3),
+            (CL, (64, 64, 2, 2, 32), 5),
+            (CF, (128, 64, 4, 2, 32), 2),
+        ],
+    ),
+    # gfx908 bf16 (no bf16_1k atom): the half-rate 32 x 32 atom, the 32 x 32 tiles.
+    (
+        {"BFLOAT16": "mfma32_bf16_908"},
         0,
         [
             (CL, (128, 64, 4, 2, 32), 3),
