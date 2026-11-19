@@ -26,6 +26,7 @@ from rocke.instances.gfx950.block_scaled_gemm import (
     build_block_scaled_gemm,
     is_valid_spec,
 )
+from rocke.tests.arch_marks import arch_specific
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -51,6 +52,10 @@ class Arithmetic:
         return a + b
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="scaled MFMA exists on gfx950 only; gfx942 refuses it and test_wrong_target_rejection checks the refusal",
+)
 @pytest.mark.parametrize("a,b", list(product(FORMATS, repeat=2)))
 def test_catalog_and_logical_layouts(a, b):
     atom = ArchTarget.from_gfx("gfx950").mma.op_for_shape(
@@ -90,6 +95,10 @@ def test_catalog_and_logical_layouts(a, b):
         assert ArchTarget.from_gfx(target).mma.by_op_id(atom.op_id) is None
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="scaled MFMA exists on gfx950 only; gfx942 refuses it and test_wrong_target_rejection checks the refusal",
+)
 @pytest.mark.parametrize("idx", range(50))
 @pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 def test_complete_kernel_golden_and_native_identity(idx, flavor, monkeypatch):
@@ -147,6 +156,10 @@ def test_wrong_target_rejection(arch):
         engine.lower_serialized_ir_hip(serialize(k), arch)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="scaled MFMA exists on gfx950 only; gfx942 refuses it and test_wrong_target_rejection checks the refusal",
+)
 def test_native_lowering_preserves_diagnostic(tmp_path):
     pytest.importorskip("rocke_engine")
     compiler = shutil.which("cc")
@@ -184,6 +197,10 @@ def test_native_lowering_preserves_diagnostic(tmp_path):
     assert "unknown error" not in child.stderr
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="scaled MFMA exists on gfx950 only; gfx942 refuses it and test_wrong_target_rejection checks the refusal",
+)
 @pytest.mark.parametrize("name_bytes", [255, 256, 512])
 def test_long_native_kernel_names(name_bytes):
     engine = pytest.importorskip("rocke_engine")
@@ -203,6 +220,10 @@ def test_long_native_kernel_names(name_bytes):
         )
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="scaled MFMA exists on gfx950 only; gfx942 refuses it and test_wrong_target_rejection checks the refusal",
+)
 def test_builder_and_serialized_type_rejection():
     atom = next(
         x for x in ArchTarget.from_gfx("gfx950").mma.ops if x.family == "mfma_scaled"
@@ -221,6 +242,10 @@ def test_builder_and_serialized_type_rejection():
         _lower_kernel_to_llvm_python(k, arch="gfx950", llvm_flavor="llvm23")
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="scaled MFMA exists on gfx950 only; gfx942 refuses it and test_wrong_target_rejection checks the refusal",
+)
 @pytest.mark.parametrize(
     "M,N,K,block_k",
     [
@@ -238,6 +263,10 @@ def test_invalid_shape(M, N, K, block_k):
         build_block_scaled_gemm(s)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="scaled MFMA exists on gfx950 only; gfx942 refuses it and test_wrong_target_rejection checks the refusal",
+)
 @pytest.mark.parametrize("mutation", ["payload", "acc", "scale", "arity", "result"])
 def test_serialized_native_contract_rejection(mutation):
     from rocke.core.ir import F32, VectorType
@@ -259,6 +288,10 @@ def test_serialized_native_contract_rejection(mutation):
         engine.lower_serialized_ir(serialize(k), "gfx950", "llvm23")
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="scaled MFMA exists on gfx950 only; gfx942 refuses it and test_wrong_target_rejection checks the refusal",
+)
 @pytest.mark.parametrize("dtype", ["unknown", "fp32", "FP6 ", " BF8", "fp4"])
 def test_native_spec_format_validation(dtype):
     engine = pytest.importorskip("rocke_engine")

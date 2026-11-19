@@ -41,6 +41,7 @@ from rocke.core.arch.target import gfx950_eight_bit_f8f6f4_op_ids, narrow_f8f6f4
 from rocke.core.dtypes import dtype_info
 from rocke.core.ir import I32, IRBuilder, PtrType, VectorType, dtype_to_ir_type
 from rocke.core.lower_llvm import LLVM_FLAVORS
+from rocke.tests.arch_marks import arch_specific
 from rocke.tests.engines import assert_both_engines_reject, lower_with_both_engines
 from rocke.tests.ir_validity import target_instructions
 from rocke.tests.lane_maps import lane_placements
@@ -79,6 +80,10 @@ def _op_id(shape, a: str, b: str) -> str:
     return "mfma_f32_{}x{}x{}_f8f6f4_{}_{}".format(*shape, a, b)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the f8f6f4 MFMA rows exist on gfx950 only; the gfx942 catalog has none",
+)
 def test_gfx950_lists_one_f8f6f4_op_per_format_pair_and_shape():
     pairs = narrow_matrix_format_pairs() + eight_bit_matrix_format_pairs()
     assert len(pairs) == len(set(pairs)) == len(MATRIX_FORMATS) ** 2
@@ -95,6 +100,10 @@ def test_gfx950_lists_one_f8f6f4_op_per_format_pair_and_shape():
     assert sorted(listed) == sorted(_OPS)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the f8f6f4 MFMA rows exist on gfx950 only; the gfx942 catalog has none",
+)
 @pytest.mark.parametrize("shape", list(_SHAPES))
 @pytest.mark.parametrize("a, b", eight_bit_matrix_format_pairs())
 def test_an_8_bit_pair_selects_its_f8f6f4_op(shape, a, b):
@@ -108,6 +117,10 @@ def test_an_8_bit_pair_selects_its_f8f6f4_op(shape, a, b):
     assert selected.k == k
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the f8f6f4 MFMA rows exist on gfx950 only; the gfx942 catalog has none",
+)
 @pytest.mark.parametrize("op_id", list(_OPS))
 def test_an_f8f6f4_row_reads_its_pair_at_its_shape(op_id):
     (m, n, k), a, b = _OPS[op_id]
@@ -160,6 +173,10 @@ def _isa_placements(shape, dtype: str) -> list[tuple[int, int]]:
     return [placed[(lane, value)] for lane in range(64) for value in range(32)]
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the f8f6f4 MFMA rows exist on gfx950 only; the gfx942 catalog has none",
+)
 @pytest.mark.parametrize("op_id", list(_OPS))
 def test_an_f8f6f4_operand_map_is_the_isa_table_of_its_format(op_id):
     """Over 64 lanes x 32 values, A lane l value s sits at the (row, K) the ISA
@@ -258,6 +275,10 @@ def _assert_operand_reaches_the_register(text: str, value: str, dtype: str) -> N
     ), produced
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the f8f6f4 MFMA rows exist on gfx950 only; the gfx942 catalog has none",
+)
 @pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 @pytest.mark.parametrize("op_id", list(_OPS))
 def test_both_engines_call_the_f8f6f4_mfma_with_its_formats(op_id, flavor):
@@ -280,6 +301,10 @@ def test_both_engines_call_the_f8f6f4_mfma_with_its_formats(op_id, flavor):
     _assert_operand_reaches_the_register(text, values[1], b)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the f8f6f4 MFMA rows exist on gfx950 only; the gfx942 catalog has none",
+)
 @pytest.mark.parametrize("shape", list(_SHAPES))
 @pytest.mark.parametrize("dtype", ["fp6e2m3", "fp6e3m2", "fp4e2m1"])
 def test_both_engines_refuse_a_narrow_operand_short_of_its_packed_words(shape, dtype):
@@ -322,6 +347,10 @@ _COMPILED_PAIRS = [
 ]
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the f8f6f4 MFMA rows exist on gfx950 only; the gfx942 catalog has none",
+)
 @pytest.mark.parametrize("shape", list(_SHAPES))
 @pytest.mark.parametrize("a, b", _COMPILED_PAIRS)
 def test_gfx950_compiles_links_and_selects_the_f8f6f4_instruction(shape, a, b):

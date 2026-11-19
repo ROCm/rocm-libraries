@@ -16,10 +16,15 @@ from rocke.instances.gfx950.block_scaled_gemm import (
     BlockScaledGemmSpec,
     build_block_scaled_gemm,
 )
+from rocke.tests.arch_marks import arch_specific
 
 FORMATS = ("fp8", "bf8", "fp6", "bf6", "fp4")
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="scaled MFMA exists on gfx950 only; gfx942 refuses it (test_wrong_target_rejection in tests/core/test_gfx950_scaled_mfma.py checks the refusal)",
+)
 @pytest.mark.parametrize(
     "family,dtype",
     [
@@ -42,6 +47,10 @@ def test_example_builds_real_kernel(family, dtype, output):
     )
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="scaled MFMA exists on gfx950 only; gfx942 refuses it (test_wrong_target_rejection in tests/core/test_gfx950_scaled_mfma.py checks the refusal)",
+)
 @pytest.mark.parametrize(
     "family,count", [("mxfp8", 2), ("mxfp6", 2), ("mxfp4", 1), ("mixed_scaled", 1)]
 )
@@ -77,6 +86,10 @@ def test_default_and_all_case_cli(monkeypatch, family, count):
         assert kw == {"compile_route": "hip"}
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="scaled MFMA exists on gfx950 only; gfx942 refuses it (test_wrong_target_rejection in tests/core/test_gfx950_scaled_mfma.py checks the refusal)",
+)
 @pytest.mark.parametrize("a,b", list(product(FORMATS, repeat=2)))
 @pytest.mark.parametrize("output", ["bf16", "fp16"])
 def test_nontrivial_scale_coverage_and_oracle_sensitivity(a, b, output):
@@ -116,6 +129,10 @@ def test_nontrivial_scale_coverage_and_oracle_sensitivity(a, b, output):
         assert np.isfinite(reference(y)).all()
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="scaled MFMA exists on gfx950 only; gfx942 refuses it (test_wrong_target_rejection in tests/core/test_gfx950_scaled_mfma.py checks the refusal)",
+)
 def test_mixed_rejects_equal_aliases():
     from rocke.examples.gfx950.gemm.mixed_scaled_gemm import make_spec
 

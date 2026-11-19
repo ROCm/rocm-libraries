@@ -44,6 +44,11 @@ from rocke.helpers.mx_scale import (
     largest_safe_mx_scale_code,
 )
 from rocke.instances.common.mx_gemm import MxGemmSpec, build_mx_gemm
+from rocke.tests.arch_marks import COVERED_ARCHES
+
+pytestmark = pytest.mark.filterwarnings(
+    "error::rocke.core.lower_llvm.ArchDomainWarning"
+)
 
 _CODES = 256
 
@@ -137,12 +142,13 @@ def test_non_byte_input_is_rejected():
         decode_mx_scale_e8m0(b, b.const_i32(0))
 
 
-def test_mx_gemm_reads_the_scale_bytes_unsigned_in_both_engines():
+@pytest.mark.parametrize("arch", COVERED_ARCHES)
+def test_mx_gemm_reads_the_scale_bytes_unsigned_in_both_engines(arch):
     # The C++ MX GEMM builder must emit the same LLVM IR as the Python one;
     # backend="both" lowers through each and fails on any byte difference.
     if not _has_cpp_engine():
         pytest.skip("needs the rocke_engine binding")
-    ll = lower_mx_gemm(_mx_gemm_spec(), arch="gfx950", backend="both").llvm_text
+    ll = lower_mx_gemm(_mx_gemm_spec(), arch=arch, backend="both").llvm_text
     assert ll.count("zext i8") >= 2  # the A and the B scale bytes
     assert "sext i8" not in ll
     assert ll.count("icmp eq i32") >= 2  # each byte checked for the NaN code
@@ -187,7 +193,8 @@ def test_scaled_dot_refuses_wrong_types(case, message):
         add_mx_scaled_dot(b, acc, dot, a_codes, b_codes)
 
 
-def test_scaled_dot_scales_with_ldexp_and_selects_nan():
+@pytest.mark.parametrize("arch", COVERED_ARCHES)
+def test_scaled_dot_scales_with_ldexp_and_selects_nan(arch):
     """Each element is ``acc + select(nan, NaN, ldexp(dot, ca + cb - 254))``;
     a byte shared by several elements is read once."""
     b = IRBuilder("mx_scaled_dot_shape")
@@ -200,7 +207,7 @@ def test_scaled_dot_scales_with_ldexp_and_selects_nan():
     total = add_mx_scaled_dot(b, acc, dot, [a_code, a_code], [b_code, b_code])
     b.global_store(out, b.const_i32(0), b.vec_extract(total, 0), align=4)
     b.ret()
-    ll = _lower_kernel_to_llvm_python(b.kernel, arch="gfx950", llvm_flavor="llvm20")
+    ll = _lower_kernel_to_llvm_python(b.kernel, arch=arch, llvm_flavor="llvm20")
     assert ll.count("zext i8") == 2  # each distinct byte read once
     assert ll.count("call float @llvm.ldexp.f32.i32(") == 2
     assert ll.count("float 0x7FF8000000000000") >= 1
@@ -264,12 +271,13 @@ def _skip_unless_comgr_targets(isa: str) -> None:
         pytest.skip(f"the loaded comgr cannot target {isa}")
 
 
-def test_mx_gemm_compiles_for_gfx950():
-    # Compile-checked only: MX GEMM numerics need a gfx950 GPU.
-    _skip_unless_comgr_targets("amdgcn-amd-amdhsa--gfx950")
+@pytest.mark.parametrize("arch", COVERED_ARCHES)
+def test_mx_gemm_compiles_for_each_covered_arch(arch):
+    # Compile-checked only: MX GEMM numerics need a GPU of the matching arch.
+    _skip_unless_comgr_targets(f"amdgcn-amd-amdhsa--{arch}")
     backend = "both" if _has_cpp_engine() else "python"
     artifact = compile_kernel(
-        build_mx_gemm(_mx_gemm_spec(), arch="gfx950"), arch="gfx950", backend=backend
+        build_mx_gemm(_mx_gemm_spec(), arch=arch), arch=arch, backend=backend
     )
     assert artifact.hsaco
 
