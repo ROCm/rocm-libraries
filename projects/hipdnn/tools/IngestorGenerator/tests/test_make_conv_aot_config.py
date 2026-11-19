@@ -431,7 +431,8 @@ _DIRECT_GRID = {
 #: Forward identities per dtype and algorithm of the direct sweep the packaged launch
 #: does not run, and the start of the reason the adapter refuses them with: the
 #: split-C fold, which ships as the second launch of each split-C instance, and the
-#: two MFMA small-channel direct families, not yet in AOT_DIRECT_ALGORITHMS.
+#: four gfx950 MFMA direct families (small-channel, small-K, ping-pong and
+#: flattened-pixel), not yet in AOT_DIRECT_ALGORITHMS.
 _DIRECT_REFUSED = {
     "direct_split_reduce": (4, "'direct_split_reduce' is not packaged"),
     "direct_fwd_smallc_mfma": (
@@ -441,6 +442,14 @@ _DIRECT_REFUSED = {
     "direct_fwd_smallk_mfma": (
         44,
         "direct algorithm 'direct_fwd_smallk_mfma' has no packaged launch",
+    ),
+    "direct_fwd_pp_mfma": (
+        3,
+        "direct algorithm 'direct_fwd_pp_mfma' has no packaged launch",
+    ),
+    "direct_fwd_flex_mfma": (
+        102,
+        "direct algorithm 'direct_fwd_flex_mfma' has no packaged launch",
     ),
 }
 

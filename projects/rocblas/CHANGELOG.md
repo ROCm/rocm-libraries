@@ -3,7 +3,7 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
-## rocBLAS 5.9.0
+## (Unreleased) rocBLAS 5.9.0
 
 ### Added
 
@@ -31,7 +31,7 @@ rocBLAS documentation is available at
 * Fix the rocBLAS library build on Python 3.12 when setuptools is not installed. `library/src/merge_archives.py` imported `distutils.spawn`, which that Python release removed from the standard library, so the archive merge step failed before parsing its arguments. The script now locates `ar` with `shutil.which`.
 * Fix Level 3 `trsm`, including batched and strided-batched forms, returning `rocblas_status_success` when an internal kernel launch fails, for example with `hipErrorInvalidKernelFile` when rocBLAS cannot load its own device code. `B` was left unchanged or partly updated. The left-side `n` = 1 path discarded the status of the internal `trsv` substitution, and the blocked solver for large problems discarded the status of its `gemm_ex` updates; both now return it.
 
-## rocBLAS 5.8.0 
+## rocBLAS 5.8.0 for ROCm 10.2.0
 
 ### Added
 
