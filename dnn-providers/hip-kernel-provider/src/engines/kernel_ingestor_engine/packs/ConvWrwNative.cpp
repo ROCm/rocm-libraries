@@ -30,6 +30,7 @@
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvWrwProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/DeviceUnits.hpp"
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
 
 /**
@@ -168,7 +169,12 @@ std::optional<WrwLaunch> launchOf(const MatchContext& context, const KernelDefin
         {
             return std::nullopt;
         }
-        return conv_wrw::wrwLaunchFor(*problem, configOf(kernel), context.deviceProperties);
+        auto launch = conv_wrw::wrwLaunchFor(*problem, configOf(kernel), context.deviceProperties);
+        if(launch.has_value())
+        {
+            launch->args.xcds = device_units::xcdCount(context.deviceProperties);
+        }
+        return launch;
     }
     catch(const std::out_of_range&)
     {

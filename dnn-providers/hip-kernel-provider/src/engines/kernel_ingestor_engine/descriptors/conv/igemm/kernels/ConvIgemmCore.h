@@ -2478,11 +2478,11 @@ struct K1HaloCf
 };
 
 // ---------------------------------------------------------------------------------------------
-// XCD-contiguous block order. gfx942 and gfx950 deal workgroups to their 8 XCDs round-robin in
-// launch order, and each XCD has its own L2: the blocks sharing an A tile (the n tiles of one m
-// tile) and its halo rows (neighbouring m tiles) land on different L2s. The remap gives each XCD
-// one contiguous range of logical blocks, n tile fastest. A bijection of the grid; elsewhere a
-// no-op.
+// XCD-contiguous block order. gfx942 and gfx950 deal workgroups to their XCDs (6 on MI300A, 8 on
+// MI300X / MI325X / MI350X / MI355X) round-robin in launch order, and each XCD has its own L2: the
+// blocks sharing an A tile (the n tiles of one m tile) and its halo rows (neighbouring m tiles)
+// land on different L2s. The remap gives each of the `xcds` XCDs one contiguous range of logical
+// blocks, n tile fastest. A bijection of the grid; a no-op for one XCD and on other parts.
 
 #if defined(__gfx942__) || defined(__gfx950__)
 #define K1_XCDS 8
@@ -2490,13 +2490,18 @@ struct K1HaloCf
 #define K1_XCDS 1
 #endif
 
-__device__ inline void k1XcdOrder(unsigned& bx, unsigned& by, unsigned& bz)
+__device__ inline void k1XcdOrder(unsigned& bx, unsigned& by, unsigned& bz, int xcds)
 {
+    if(xcds <= 1)
+    {
+        return;
+    }
+    const unsigned x = static_cast<unsigned>(xcds);
     const unsigned gx = gridDim.x, gy = gridDim.y;
     const unsigned total = gx * gy * gridDim.z;
     const unsigned id = blockIdx.x + gx * (blockIdx.y + gy * blockIdx.z);
-    const unsigned per = total / K1_XCDS, rem = total % K1_XCDS;
-    const unsigned xcd = id % K1_XCDS, local = id / K1_XCDS;
+    const unsigned per = total / x, rem = total % x;
+    const unsigned xcd = id % x, local = id / x;
     const unsigned logical
         = xcd < rem ? xcd * (per + 1) + local : rem * (per + 1) + (xcd - rem) * per + local;
     by = logical % gy;
@@ -2623,7 +2628,7 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
     unsigned bx = blockIdx.x, by = blockIdx.y, bz = blockIdx.z;
     if constexpr(XCD != 0 && K1_XCDS > 1)
     {
-        k1XcdOrder(bx, by, bz);
+        k1XcdOrder(bx, by, bz, a.xcds);
     }
     const int splits = a.splits > 1 ? a.splits : 1;
     const int split = static_cast<int>(bz) % splits;
