@@ -1592,6 +1592,6 @@ def test_rap_max_resident_k_tiles_counts_the_tdm_vgpr():
     state = {"ThreadTile0": 8, "ThreadTile1": 16, "StoreVectorWidth": 2, "BufferStore": True, "GlobalSplitU": 0,
              "LoopIters": 1, "MIWaveTileA": 2, "MIInputPerThreadA": 48}
     # ValuC 128, E 64 at V 4 and R 24: the slack 1024 - 128 - 256 - 40 = 600 is 25 k-tiles exactly.
-    for tdm, kTiles in ((0, 25), (1, 24)):
+    for tdm, kTiles in ((False, 25), (True, 24)):
         assert Solution.rapMaxResidentKTiles(dict(state, TDMStoreInst=tdm), problemType, isa, isaInfoMap,
                                              False, False) == kTiles, tdm

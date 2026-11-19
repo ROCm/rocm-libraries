@@ -1314,10 +1314,10 @@ validParameters = { # we need to make sure this matches develop
     "TDMLoadWaveSync": [False, True],
     # Store D through LDS with tensor_store_from_lds in place of buffer_store in the epilogue
     # store paths (Components/TDMStoreInst.py). gfx1250 only.
-    # 0: off
-    # 1: on - every store path of a final-D store, EdgeM, EdgeN and NonEdge, goes through the
-    #    TDM block, so the epilogue keeps one store path and splits only on beta / non-beta
-    "TDMStoreInst": [0, 1],
+    # Off keeps the buffer_store epilogue. On sends every store path of a final-D store,
+    # EdgeM, EdgeN and NonEdge, through the TDM block, so the epilogue keeps one store path
+    # and splits only on beta / non-beta. Off by default.
+    "TDMStoreInst": [False, True],
     # StinkyTofu module-option overrides, e.g. {WmmaBatchSize: 2}. Tuning-only:
     # Solution moves it to the internal _StinkyTofuParameters, which tags the kernel name
     # (only when set) and is dropped from the solution before the logic yaml is written.

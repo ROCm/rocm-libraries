@@ -2894,8 +2894,8 @@
     }),
     'TDMStoreInst': dict({
       'head': list([
-        0,
-        1,
+        False,
+        True,
       ]),
       'len': 2,
       'type': 'list',
