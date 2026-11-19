@@ -513,6 +513,8 @@ class StateValues:
   subtileHoistedStoreInit: Optional[list] = None   # split store-init units hoisted into the loop
   subtileHoistedWriteIndices: Optional[dict] = None  # coord VGPRs hoisted from NGLL
   subtileRecomputeCoords: bool           = False   # recompute store coords INTO existing (hoisted) VGPRs (numIter<PGR)
+  subtileKeepHoistedWriteIndices: bool   = False   # planning emit of the fused store: leave the hoisted indices for the real emit
+  subtileHoistedCleanupDeferred: bool    = False   # that emit skipped cleanupGlobalWrite; whoever keeps its module must run it
   subtileFusedLendVgprs: Optional[list]  = None    # [(base,size)] VGPRs lent to the fused store
   subtileStoreStages: int                = 0       # PLSIN staged store: compute partitions to stage across
   subtileStoreStagesM: int               = 1       # of those, how many split M (1 = N-only split)
