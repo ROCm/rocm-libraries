@@ -252,7 +252,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          # Batches of 22, 21 and 1 token blocks; a short last group at W 3-8.
+          # Batches of 22, 21 and 1 token blocks; groups of two sizes at W 3-8.
           - Exact: {sizes: [3072, 11264, 1, 1024], world: 2}
           - Exact: {sizes: [3072, 11264, 1, 1536], world: 3}
           - Exact: {sizes: [3072, 11264, 1, 2048], world: 4}
@@ -263,7 +263,7 @@ BenchmarkProblems:
           # One batch of 8 blocks: groups of 3/3/2, and 4 groups of 2 for 7 queues.
           - Exact: {sizes: [8192, 2048, 1, 8192], world: 4}
           - Exact: {sizes: [8192, 2048, 1, 8192], world: 8}
-          # Two batches of 16 blocks: groups of 3/3/3/3/3/1.
+          # Two batches of 16 blocks: groups of 3/3/3/3/2/2.
           - Exact: {sizes: [4096, 8192, 1, 4096], world: 8}
           # 7 blocks at odd worlds: groups of 4/3 and 2/2/2/1.
           - Exact: {sizes: [2816, 1792, 1, 1536], world: 3}

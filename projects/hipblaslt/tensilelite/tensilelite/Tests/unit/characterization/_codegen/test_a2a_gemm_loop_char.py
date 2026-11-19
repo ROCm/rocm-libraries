@@ -15,7 +15,8 @@ batch-1 skip and after the loop exit label, never inside the loop body, leave
 the fixed Srd+2 window alone, and count the work-group out after the loop. The
 enqueuer's lanes stop at the group start, and a2aBatchSpan, run on a grid of
 shapes, leaves the batch, the group's first block and the first gathered segment
-in the A2A registers.
+in the A2A registers. The enqueuer's group seed and group loop head, run on a grid
+of batches, visit each queue's peer groups in order.
 """
 
 import itertools
@@ -93,12 +94,23 @@ _SERIAL_LANE0 = re.compile(
     r"|v_mov_b32 v\[vgprSerial\], s\d+"
     r"|global_load_dword v\[vgprSerial\], v\[vgprSerial\], s\[sgprFusedCounterPtr:sgprFusedCounterPtr\+1\] .*\bsc0 sc1\b)")
 
-_BATCH_SPAN_OPS = {
-    "s_mul_i32": lambda a, b: a * b,
-    "s_add_u32": lambda a, b: a + b,
-    "s_sub_u32": lambda a, b: a - b,
-    "s_min_u32": min,
-    "s_max_u32": max,
+# SALU op -> (result, SCC) from (operands, SCC).
+_SALU = {
+    "s_mul_i32": lambda a, b, c: (a * b, c),
+    "s_add_u32": lambda a, b, c: (a + b, a + b > 0xFFFFFFFF),
+    "s_sub_u32": lambda a, b, c: (a - b, b > a),
+    "s_subb_u32": lambda a, b, c: (a - b - c, b + c > a),
+    "s_min_u32": lambda a, b, c: (min(a, b), a < b),
+    "s_max_u32": lambda a, b, c: (max(a, b), a > b),
+    "s_max_i32": lambda a, b, c: (max(_i32(a), _i32(b)), _i32(a) > _i32(b)),
+    "s_cselect_b32": lambda a, b, c: (a if c else b, c),
+}
+_SCMPS = {
+    "s_cmp_eq_u32": lambda a, b: a == b,
+    "s_cmp_gt_u32": lambda a, b: a > b,
+    "s_cmp_ge_u32": lambda a, b: a >= b,
+}
+_OPS = {
     "v_cvt_f64_u32": float,
     "v_rcp_f64": lambda a: 1.0 / a,
     "v_mul_f64": lambda a, b: a * b,
@@ -107,7 +119,24 @@ _BATCH_SPAN_OPS = {
     "v_sub_u32": lambda a, b: a - b,
     "v_add_u32": lambda a, b: a + b,
     "v_readfirstlane_b32": lambda a: a,
+    "v_mov_b32": lambda a: a,
+    "s_mov_b32": lambda a: a,
 }
+
+
+def _i32(x):
+    return x - ((x & 0x80000000) << 1)
+
+
+def _lane(v, L):
+    return v if L == "0" else f"{v}@{L}"
+
+
+def _insts(text):
+    """(op, operands) of the instructions in text."""
+    lines = [line.split("//")[0].strip() for line in text.splitlines()]
+    return [(op, [re.sub(r"v\[(\d+)(?::\d+)?\]", r"v\1", a) for a in args.split(", ")])
+            for op, _, args in (line.partition(" ") for line in lines if line)]
 
 
 def _batch_span(src):
@@ -120,24 +149,54 @@ def _batch_span(src):
     [first] = re.finditer(r"^.*// b \* F *$", src, re.M)
     start = first.start()
     end = src.index("\n", src.index("// first gathered segment = G + 1", start))
-    lines = [line.split("//")[0].strip() for line in src[start:end].splitlines()]
-    return numCu, [(op, [re.sub(r"v\[(\d+)(?::\d+)?\]", r"v\1", a) for a in args.split(", ")])
-                   for op, _, args in (line.partition(" ") for line in lines if line)]
+    return numCu, _insts(src[start:end])
 
 
-def _run_batch_span(insts, regs):
-    """regs after running insts on one lane."""
+def _run(insts, regs):
+    """regs after running insts on one lane; key f"{v}@{L}" is lane L > 0 of VGPR v."""
     lane = True
+    scc = None
     for op, args in insts:
+        vals = [regs[a] if a in regs else int(a, 0) for a in args[op not in _SCMPS:]]
         if op == "v_cmpx_ge_u32":
             lane = regs[args[1]] >= regs[args[2]]
         elif op == "s_mov_b64":
             assert args == ["exec", "-1"], args
             lane = True
+        elif op == "v_readlane_b32":
+            regs[args[0]] = regs[_lane(args[1], args[2])]
+        elif op == "v_writelane_b32":
+            regs[_lane(args[0], args[2])] = vals[0]
+        elif op in _SCMPS:
+            scc = _SCMPS[op](*vals)
+        elif op in _SALU:
+            assert scc is not None or op not in ("s_subb_u32", "s_cselect_b32"), f"{op} before SCC is set"
+            v, scc = _SALU[op](*vals, scc)
+            regs[args[0]] = v & 0xFFFFFFFF
         elif op != "s_nop" and (op != "v_add_u32" or lane):
-            v = _BATCH_SPAN_OPS[op](*(regs[a] if a in regs else int(a, 0) for a in args[1:]))
+            v = _OPS[op](*vals)
             regs[args[0]] = v & 0xFFFFFFFF if isinstance(v, int) else v
+            for key in [k for k in regs if k.startswith(args[0] + "@")]:
+                del regs[key]
     return regs
+
+
+def _group_sizes(n, W):
+    """Block counts of the peer groups of a batch of n blocks, in order."""
+    gk = -(-n // max(W - 1, 1))
+    ng = -(-n // gk)
+    s = ng * gk - n
+    return [gk] * (ng - s) + [gk - 1] * s
+
+
+def _group_of(i, sizes):
+    """(G, the group's first block offset) of block offset i."""
+    lo = 0
+    for g, d in enumerate(sizes):
+        if i < lo + d:
+            return g, lo
+        lo += d
+    raise AssertionError((i, sizes))
 
 
 @pytest.mark.parametrize("group", _GROUPS)
@@ -206,7 +265,7 @@ def test_a2a_gemm_gfx950_emits_assembly(group):
         counts = {p: sum(1 for line in lines if re.fullmatch(p, line)) for p in expected}
         assert counts == expected, f"Kernel {base!r}: A2ASubRounds lines {counts} != {expected}"
         assert "label_SkipTailLoopL:" not in src, f"Kernel {base!r}: tail loop emitted"
-        row = re.search(r"^s_add_u32 (\S+), \1, \S+ +// first block of group i$", src, re.M)
+        row = re.search(r"^s_add_u32 (\S+), \1, \S+ +// first block of group g$", src, re.M)
         bounds = set(re.findall(r"^v_cmp_le_i32 vcc, (\S+), v\d+ +// inside the group\?$", src, re.M))
         assert row and bounds == {row.group(1)}, \
             f"Kernel {base!r}: lanes bounded by {bounds}, not the group start"
@@ -219,21 +278,58 @@ def test_a2a_gemm_gfx950_batch_span():
     [(base, src, _err)] = emit_kernels_from_config(_CONFIG, limit=1, arch=_ARCH,
                                                    size_group_index=_GROUPS[-1])
     numCuReg, insts = _batch_span(src)
-    for numCu, W, F, T in itertools.product((32, 256), (2, 3, 4, 7, 8), (2, 11, 12, 32, 44),
-                                            (2, 7, 8, 44)):
+    assert _group_sizes(16, 8) == [3, 3, 3, 3, 2, 2] and _group_sizes(22, 4) == [8, 7, 7]
+    assert _group_sizes(8, 8) == [2, 2, 2, 2] and _group_sizes(8, 4) == [3, 3, 2]
+    shapes = list(itertools.product((32, 256), range(2, 9), (2, 11, 12, 32, 44), (2, 7, 8, 44)))
+    # F = 1, numCu = n: batches of exactly n blocks, then a short last batch.
+    shapes += [(n, W, 1, 2 * n + max(n // 3, 1)) for W in range(1, 9) for n in range(1, 41)]
+    for numCu, W, F, T in shapes:
         for b in range(T):
-            regs = _run_batch_span(insts, {numCuReg: numCu, "s[sgprA2AW]": W,
-                                           "s[sgprWorkGroup1]": b, "s[sgprNumWorkGroups0]": F,
-                                           "s[sgprNumWorkGroups1]": T})
+            regs = _run(insts, {numCuReg: numCu, "s[sgprA2AW]": W,
+                                "s[sgprWorkGroup1]": b, "s[sgprNumWorkGroups0]": F,
+                                "s[sgprNumWorkGroups1]": T})
             iB = b * F // numCu
             bLo = -(-iB * numCu // F)
             bHi = min(-(-(iB + 1) * numCu // F), T)
-            gk = -(-(bHi - bLo) // max(W - 1, 1))
-            g = (b - bLo) // gk
+            g, gLo = _group_of(b - bLo, _group_sizes(bHi - bLo, W))
             got = [regs[f"s[sgpr{r}]"] for r in ("A2ABlockLo", "A2ABlockCount", "A2AShardIdx",
                                                  "A2AShardCounter")]
-            assert got == [bLo, bHi - bLo, g + 1, bLo + g * gk], \
+            assert got == [bLo, bHi - bLo, g + 1, bLo + gLo], \
                 f"Kernel {base!r}: numCu={numCu} W={W} F={F} T={T} b={b} -> {got}"
+
+
+def test_a2a_gemm_gfx950_group_walk():
+    [(base, src, _err)] = emit_kernels_from_config(_CONFIG, limit=1, arch=_ARCH,
+                                                   size_group_index=_GROUPS[-1])
+    [seed] = re.finditer(r"^[^\n]*// W - 1 *\n[^\n]*// count \+ W-1 *$(?:(?!// count \+ W-1).)*?// NG -> lane 1 *$",
+                         src, re.M | re.S)
+    [walk] = re.finditer(r"^[^\n]*// blocks left on this queue *$.*?// first block of this group *$",
+                         src, re.M | re.S)
+    pre, _, head = walk.group(0).partition("\nlabel_a2a_group_loop")
+    head = head.partition("\n")[2]
+    vGK = int(re.search(r"^v_mov_b32 v(\d+), s\d+ +// GK -> packet state$", seed.group(0), re.M).group(1))
+    for lo, hi in re.findall(r"^v_\w+ v\[?(\d+)(?::(\d+)\])?,", src[seed.end():walk.start()], re.M):
+        assert not int(lo) <= vGK <= int(hi or lo), f"Kernel {base!r}: v{vGK} written before the group loop"
+    qReg = re.search(r"^s_add_u32 \S+, (s\d+), 1 +// i \+ 1$", pre, re.M).group(1)
+    loReg = re.search(r"^s_add_u32 (\S+), \1, (s\d+) +// first block of group g$", pre, re.M).group(2)
+    rowReg, nBlkReg = re.search(r"^s_sub_u32 (\S+), \1, (\S+) +// first block of this group$",
+                                head, re.M).groups()
+    setup, head = _insts(seed.group(0)) + _insts(pre), _insts(head)
+    bLo = 1000
+    for W in range(2, 9):
+        for n in range(1, 71):
+            sizes = _group_sizes(n, W)
+            starts = [sum(sizes[:g]) for g in range(len(sizes))]
+            for i in range(W - 1):
+                regs = _run(setup, {"s[sgprA2AW]": W, "s[sgprA2ABlockCount]": n, qReg: i, loReg: bLo})
+                got, left = [], n
+                while left > 0 and len(got) <= len(sizes):
+                    regs = _run(head, regs)
+                    got.append((regs[rowReg] - bLo, regs[nBlkReg]))
+                    left -= regs[nBlkReg]
+                order = [g for g in itertools.chain(range(i, -1, -1), range(W - 2, i, -1)) if g < len(sizes)]
+                assert got == [(starts[g], sizes[g]) for g in order], \
+                    f"Kernel {base!r}: W={W} n={n} queue {i} places (first, count) {got}"
 
 
 @pytest.mark.parametrize("group", _GROUPS)
