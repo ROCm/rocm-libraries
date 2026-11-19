@@ -264,11 +264,13 @@ class TestStoreScope:
 def test_partially_built_state_is_out_of_scope(kernel):
     """All three gates are asked before the solution dict is finished.
 
-    ``Naming`` calls ``plsinStoreDataTypes`` directly rather than through a
-    guarded gate, and it runs while the data types are still raw values, so the
-    tolerance has to be in the predicate itself. "Out of scope" is the
-    conservative answer: it is what keeps ``PostLoopStoreInNll`` out of the
-    name hash of kernels that can never set it.
+    They are asked during derivation, so the tolerance has to be in the
+    predicates themselves, and "out of scope" is the conservative answer for a
+    gate that decides whether to emit something.
+
+    It is the wrong answer for a kernel name, which has to come out the same
+    whenever it is taken -- so the naming decision does not ask these. See
+    test_plsin_name_guard.
     """
     assert plsinStoreDataTypes(kernel) is False
     assert isPlsinSubtilePath(kernel) is False
