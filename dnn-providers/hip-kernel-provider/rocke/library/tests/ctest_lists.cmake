@@ -172,6 +172,8 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # route tables with their dispatch. Several files also hold GPU classes
 # (marked gpu); -m "not gpu" leaves those to rocke_library_conv3d_gpu_pytest.
 # Their own entry, so they do not share rocke_library_conv_pytest's budget.
+# ROCKE_ENGINE_test_categories_external.yaml lists it beside that entry in the
+# quick and ffm-quick tiers.
 set(_ROCKE_LIBRARY_CONV3D_TEST_RELPATHS
     "tests/library/tests/test_conv_cpp_binding_knobs.py"
     "tests/library/tests/test_conv_dgrad_box_det.py"
@@ -724,9 +726,13 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 
 # Library 3-D NDHWC conv GPU numeric tests: the kernels the shipped gfx942 pin
 # and route tables select, run through dispatch and the route binding against
-# an f32 reference (bitwise reruns for the deterministic selections), and the
-# GPU classes of the 3-D forward knob suites. They skip without a gfx942 device.
-# Their own entry, so they do not eat into rocke_library_gpu_pytest's timeout.
+# an f32 reference on every launch and rerun (bitwise reruns for the
+# deterministic selections), and the GPU classes of the 3-D forward knob
+# suites. They skip without a gfx942 device. Their own entry, so they do not
+# eat into rocke_library_gpu_pytest's timeout; like that entry it has no
+# per-test --timeout (a test first builds the kernels it launches)
+# and ROCKE_ENGINE_test_categories_external.yaml lists it beside that entry in
+# the quick and ffm-quick tiers.
 set(_ROCKE_LIBRARY_CONV3D_GPU_TEST_RELPATHS
     "tests/library/tests/test_conv_shipped_tables_gpu.py"
     "tests/library/tests/test_conv_routes_gpu.py"
