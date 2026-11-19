@@ -21,11 +21,13 @@ of the loop it emits, and its cache identity, label and serving rule.
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace as dc_replace
 from unittest import mock
 
 import kernels.common.conv_implicit_gemm_dgrad as dgrad_mod
 from kernels.common._conv_implicit_gemm_common import ConvProblem
 from kernels.common.conv_implicit_gemm import ConvDataSpec
+from kernels.conv import aot_jobs as aj
 from kernels.common.conv_implicit_gemm_dgrad import (
     DgradConvSpec,
     build_implicit_gemm_conv_dgrad,
@@ -830,6 +832,98 @@ class TestDyHalo(unittest.TestCase):
         self.assertTrue(valid)
         for j in valid[:: max(1, len(valid) // 12)]:
             self.assertEqual(ks.job_for_identity(j.identity).identity, j.identity)
+
+
+def _dgrad_unsplit(base, ident):
+    """The split_k = 1 tilde identity in ``base`` that the split-K ``ident``
+    copies (its uniform_k_decode is the policy's, which the copy turns off)."""
+    for flag in (True, False):
+        cand = dc_replace(ident, split_k=1, vector_size_c=8, uniform_k_decode=flag)
+        if cand in base:
+            return cand
+    return None
+
+
+class TestAotSplitKCover(unittest.TestCase):
+    def test_aot_dgrad_split_k_variants(self):
+        """gfx950 builds one split-K (atomic dX) copy of each 8 / 8 cshuffle tilde
+        kernel on the ``CACHE_DGRAD_SPLIT_K_GEOMETRIES`` cover; no other arch does.
+
+        Each copy is its split_k = 1 tilde kernel with the cover's degree baked, the
+        plain loop (no uniform_k_decode) and a dX width of 2 (one packed atomic pair
+        per lane), and the cache serves it to the problems the tilde kernel serves.
+        """
+        from rocke.core.arch import ArchTarget
+
+        from benchmarks.common.kernel_cache import KernelCache
+
+        cover = aj.CACHE_DGRAD_SPLIT_K_GEOMETRIES
+        assert len(set(cover)) == len(cover)
+        for arch in ("gfx950", "gfx942"):
+            target = ArchTarget.from_gfx(arch)
+            geos = []
+            for tm, tn, tk, wm, wn, wt, pipeline in sorted({g[:7] for g in cover}):
+                atom = target.mma.select_largest_k(
+                    family="mma",
+                    a_dtype="fp16",
+                    b_dtype="fp16",
+                    c_dtype="fp32",
+                    m=wt,
+                    n=wt,
+                )
+                for epilogue in ("cshuffle", "default"):
+                    geos.append((tm, tn, tk, wm, wn, wt, pipeline, epilogue, atom))
+            jobs = list(
+                aj._dgrad_jobs(
+                    arch, "fp16", target.wave_size, "mma", target, 64, geometries=geos
+                )
+            )
+            split = [j for j in jobs if j.identity.split_k > 1]
+            if arch not in aj.CACHE_DGRAD_SPLIT_K_ARCHS:
+                assert not split, arch
+                continue
+            base = {
+                j.identity
+                for j in jobs
+                if j.identity.split_k == 1 and not j.identity.patch
+            }
+            built = set()
+            for j in split:
+                i = j.identity
+                assert (i.stride_h, i.dilation_h) == (0, 0)
+                assert (i.vector_size_a, i.vector_size_b, i.vector_size_c) == (8, 8, 2)
+                assert i.epilogue == "cshuffle"
+                assert not i.uniform_k_decode and not i.tap_outer_k
+                assert f"-sk{i.split_k}-" in i.label()
+                assert _dgrad_unsplit(base, i) is not None, i.label()
+                assert aj.job_for_identity(i).identity == i
+                built.add(
+                    (
+                        i.tile_m,
+                        i.tile_n,
+                        i.tile_k,
+                        i.warp_m,
+                        i.warp_n,
+                        i.warp_tile_m,
+                        i.pipeline,
+                        i.split_k,
+                    )
+                )
+            # Exactly the cover: each entry once (the grouped binary only).
+            assert built == set(cover)
+            assert len(split) == len(cover)
+
+            cache = KernelCache(
+                "/nonexistent-cache-dir-for-a-pure-predicate-test", arch
+            )
+            ident = next(
+                j.identity for j in split if aj._spec_is_valid(j, arch, "fp16")
+            )
+            for s, d in ((1, 1), (2, 1)):
+                p = ConvProblem(
+                    N=1, Hi=16, Wi=16, C=64, K=256, Y=3, X=3, sH=s, sW=s, pH=d, pW=d
+                )
+                assert cache.supports_problem(ident, p)[0], (s, d)
 
 
 if __name__ == "__main__":
