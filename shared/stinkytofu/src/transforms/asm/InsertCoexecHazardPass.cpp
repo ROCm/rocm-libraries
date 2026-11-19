@@ -92,9 +92,10 @@ bool wmmaToWmmaOverlap(const StinkyInstruction& prod, const StinkyInstruction& c
 //===----------------------------------------------------------------------===//
 // In-place WMMA accumulation (gfx1250). A WMMA that takes the previous WMMA's D
 // through the C fast-forward path must write a different accumulator, unless its
-// type allows the same one under InPlaceRule. Only WMMAs count toward "previous".
-// A broken rule stops codegen: switching the accumulator needs a free register
-// range that this pass cannot pick.
+// type allows the same one under InPlaceRule. "Previous" means the instruction
+// right before: any instruction in between breaks the chain. A broken rule stops
+// codegen: switching the accumulator needs a free register range that this pass
+// cannot pick.
 //===----------------------------------------------------------------------===//
 
 enum class InPlaceRule {
@@ -153,29 +154,29 @@ bool differentAB(const StinkyInstruction& x, const StinkyInstruction& y) {
     return xs.size() > 1 && ys.size() > 1 && !xs[0].isOverlap(ys[0]) && !xs[1].isOverlap(ys[1]);
 }
 
-const StinkyInstruction* adjacentWmmaInBlock(const StinkyInstruction& from, bool forward) {
-    for (IRBase* node = forward ? from.getNext() : from.getPrev(); node;
-         node = forward ? node->getNext() : node->getPrev()) {
+// The first real instruction from `node` on, walking in one direction.
+const StinkyInstruction* firstInst(IRBase* node, bool forward) {
+    for (; node; node = forward ? node->getNext() : node->getPrev()) {
         auto* inst = dyn_cast<StinkyInstruction>(node);
-        if (!inst || isPseudoInst(inst)) continue;
-        if (isCall(*inst)) return nullptr;
-        if (isXDLWMMA(*inst)) return inst;
+        if (inst && !isPseudoInst(inst)) return inst;
     }
     return nullptr;
 }
 
-// The nearest XDL WMMA before `from` on every path; from the block end when null.
+const StinkyInstruction* adjacentWmmaInBlock(const StinkyInstruction& from, bool forward) {
+    const StinkyInstruction* inst = firstInst(forward ? from.getNext() : from.getPrev(), forward);
+    return inst && isXDLWMMA(*inst) ? inst : nullptr;
+}
+
+// The XDL WMMAs right before `from` on every path; from the block end when null.
+// A branch ending a predecessor sits in between, so only fallthrough blocks chain.
 void collectPrevWmmas(BasicBlock& bb, const StinkyInstruction* from,
                       std::unordered_set<const BasicBlock*>& visited,
                       std::vector<const StinkyInstruction*>& prev) {
-    for (IRBase* node = from ? from->getPrev() : bb.getTerminator(); node; node = node->getPrev()) {
-        auto* inst = dyn_cast<StinkyInstruction>(node);
-        if (!inst || isPseudoInst(inst)) continue;
-        if (isCall(*inst)) return;
-        if (isXDLWMMA(*inst)) {
-            prev.push_back(inst);
-            return;
-        }
+    if (const StinkyInstruction* inst =
+            firstInst(from ? from->getPrev() : bb.getTerminator(), /*forward=*/false)) {
+        if (isXDLWMMA(*inst)) prev.push_back(inst);
+        return;
     }
     for (BasicBlock* pred : bb.getPredecessors())
         if (visited.insert(pred).second) collectPrevWmmas(*pred, nullptr, visited, prev);
