@@ -47,6 +47,7 @@ from rocisa.instruction import DSLoadD16HIU16, DSLoadU8, SAddCU32, SAddU32, SCBr
   VMulLOU32, VReadfirstlaneB32, VSubU32
 
 from ..AsmMemoryHelpers import dsLoad, dsStore
+from ..Common import persistentSpatialCluster
 from ..ExecutionPolicy import isPersistent
 from ..SolutionStructs.Problem import isFusedA2A
 from .NonTemporal import tdmCacheModifiers
@@ -252,6 +253,26 @@ def _tdmStoreLdsAddress(gwb, module: Module, coordOffset0, coordOffset1, span=0)
   return gwb.tmpVgpr, low
 
 
+def _handoffBarriersLds(kernel):
+  """Whether the persistent tile handoff already ends with a workgroup barrier, so the TDM flush adds none.
+
+  This mirrors the predicate in WorkAssignment.splitPersistentTileHandoff, which is where the handoff
+  decides whether to emit one. It replaced WorkAssignment.handoffFencesLds in develop's AIHPBLAS-5469
+  (#15103, "synchronize persistent TDM LDS reuse"), a fix for the same hazard this flush barrier guards:
+  a slow wave still reading the staged tile when the next tile writes LDS. Where the handoff emits the
+  barrier, a second one here orders nothing and only costs a wait on every tile.
+
+  The queue term is deliberately left out: DynamicWorkQueue's barrier is emitted in beforeReentry, after
+  the exit check, so a workgroup leaving the loop never reaches it and the flush must keep its own.
+  """
+  if kernel.get("DebugPersistentKernelLoopForever", False):
+    return False
+  tdm = (kernel.get("enableTDMA", False) or kernel.get("enableTDMB", False))     and kernel["NumThreads"] > kernel["WavefrontSize"]
+  epilogue = kernel.get("_PersistentVectorEpilogueLds", False) and not kernel["PrefetchAcrossPersistent"]
+  cluster = persistentSpatialCluster(kernel) and kernel.get("ClusterBarrier", True)
+  return bool(tdm or epilogue or cluster)
+
+
 def _stagedTileToken(gwb):
   """The memory token of the staged tile's LDS accesses: that of the main-loop buffer the tile lies over or,
   when it lies after the main-loop buffers (PrefetchAcrossPersistent), the epilogue's token, so StinkyTofu does
@@ -429,7 +450,7 @@ def emitTDMStoreFlush(gwb) -> Module:
 
   Each wave stores ceil(MacroTile1/numWaves) consecutive columns of the tile. In a persistent kernel the next tile
   must not write LDS before every wave's store has read the staged tile: the barrier that ends the tile
-  handoff orders that when the handoff has one (WorkAssignment.handoffFencesLds), and otherwise the flush
+  handoff orders that when the handoff has one (WorkAssignment.splitPersistentTileHandoff), and otherwise the flush
   ends with its own. tensor_dim0/1 bound
   the store to the part of the tile inside D; a wave whose columns all lie at or past the column
   bound skips its store instead of relying on a zero tensor_dim.
@@ -453,6 +474,6 @@ def emitTDMStoreFlush(gwb) -> Module:
       # Nor this one: after the OptNLL store, nothing re-derives it before s_endpgm.
       module.add(SWaitTensorcnt(tensorcnt=0, comment="wait for the TDM store " + STINKY_KEEP))
       module.add(skipStore)
-  if isPersistent(gwb.kernel):
+  if isPersistent(gwb.kernel) and not _handoffBarriersLds(gwb.kernel):
     module.add(kw._syncThreads(gwb.kernel, "every TDM store is done with the staged tile before the next tile writes LDS"))
   return module
