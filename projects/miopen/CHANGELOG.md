@@ -6,6 +6,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
+* [MultiMarginLoss] Fixed incorrect results and HIP kernel launch failures on Windows caused by
+  packing the `p` argument as a 32-bit `long` instead of the kernel's 64-bit integer.
 * [Reduce] Fixed `miopenReduceTensor` returning inf, NaN or imprecise results above 1024 reduced
   elements per output when the compute type is wider than the input type (for example FP16 `AVG`
   with FP32 compute). The workspace size now follows the compute type: allocate the workspace with the
