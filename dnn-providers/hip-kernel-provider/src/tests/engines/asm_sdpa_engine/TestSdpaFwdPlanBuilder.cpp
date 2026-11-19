@@ -833,7 +833,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableCuSeqLenContract)
     }
 }
 
-// Batch mode writes dense FP32 [B, H, Sq] stats. Group mode writes AITER's head-major
+// Batch mode writes packed FP32 [B, H, Sq] stats. Group mode writes AITER's head-major
 // [H, total_q] LSE, so its stats tensor must be ragged on the Q/O offset tensor in token
 // units with a sequence stride of 1.
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableStatsLayoutFollowsBatchMode)
@@ -848,6 +848,12 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableStatsLayoutFollowsBatchMode)
     }
 
     const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const int64_t heads = dims[1];
+    const int64_t seqLenQ = dims[2];
+    // Mutates the packed stats graph that batch mode accepts.
+    const auto withBatchStats = [&](const std::function<void(GraphT&)>& mutate) {
+        return mutateGraph(createBshdSdpaFwdGraph(dims, dims, /*withStats=*/true), mutate);
+    };
     // Mutates the head-major stats graph that group mode accepts.
     const auto withGroupStats = [&](const std::function<void(GraphT&)>& mutate) {
         return mutateGraph(
@@ -862,6 +868,29 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableStatsLayoutFollowsBatchMode)
         {GraphTest{sdpa::withRaggedTensors(createBshdSdpaFwdGraph(dims, dims, /*withStats=*/true),
                                            {"stats"}),
                    "Batch mode with ragged stats"},
+         false},
+        {GraphTest{withBatchStats([](GraphT& graph) {
+                       auto& stats = findTensor(graph, "stats");
+                       stats.dims.pop_back();
+                       stats.strides.pop_back();
+                   }),
+                   "Batch mode with rank-3 packed stats"},
+         true},
+        {GraphTest{withBatchStats([&](GraphT& graph) {
+                       findTensor(graph, "stats").strides
+                           = {heads * (seqLenQ + 64), seqLenQ + 64, 1, 1};
+                   }),
+                   "Batch mode stats with a padded head stride"},
+         false},
+        {GraphTest{withBatchStats([&](GraphT& graph) {
+                       findTensor(graph, "stats").strides = {2 * heads * seqLenQ, seqLenQ, 1, 1};
+                   }),
+                   "Batch mode stats with a padded batch stride"},
+         false},
+        {GraphTest{withBatchStats([&](GraphT& graph) {
+                       findTensor(graph, "stats").strides = {seqLenQ * heads, 1, heads, 1};
+                   }),
+                   "Batch mode stats in token-major [B, Sq, H] order"},
          false},
         {GraphTest{
              withHeadMajorRaggedStats(createRaggedBshdSdpaFwdGraph(dims, dims, /*withStats=*/true)),

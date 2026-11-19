@@ -486,11 +486,13 @@ bool fwdKvRowExtentsFitU32(const hipdnn_flatbuffers_sdk::data_objects::TensorAtt
     return ok;
 }
 
-// Validates the optional stats (LSE) output tensor. Batch mode writes it as dense FP32
-// [B, H, Sq]. Group mode writes AITER's varlen layout [H, total_q]: one FP32 per Q token at
-// h * s_lse_Hs + seqstart_q[b] + s, with no per-token stride, so the stats tensor must be
-// ragged on the Q/O offset table in token units with a sequence stride of 1. Q must already
-// be known to be rank 4.
+// Validates the optional stats (LSE) output tensor. Batch mode writes it as packed FP32
+// [B, H, Sq]: the kernel takes only a head stride (s_lse_Hs), with no batch or sequence
+// stride, and AITER allocates the LSE as a contiguous [B, H, Sq] tensor, so any other
+// layout is declined. Group mode writes AITER's varlen layout [H, total_q]: one FP32 per Q
+// token at h * s_lse_Hs + seqstart_q[b] + s, with no per-token stride, so the stats tensor
+// must be ragged on the Q/O offset table in token units with a sequence stride of 1. Q must
+// already be known to be rank 4.
 static bool
     isSupportedStatsTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& stats,
                            const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
@@ -543,6 +545,21 @@ static bool
                                    || stats.dims()->Get(1) != q.dims()->Get(1)
                                    || stats.dims()->Get(2) != q.dims()->Get(2),
                                "stats tensor shape [B,H,Sq] must match Q tensor");
+
+    if(!group.has_value())
+    {
+        // The stride of a size-1 axis is never used, so it is not checked.
+        const int64_t batch = stats.dims()->Get(0);
+        const int64_t heads = stats.dims()->Get(1);
+        const int64_t seqLenQ = stats.dims()->Get(2);
+        const auto* strides = stats.strides();
+        HIP_KERNEL_RETURN_FALSE_IF(
+            strides == nullptr || strides->size() != statsRank
+                || (batch != 1 && strides->Get(0) != heads * seqLenQ)
+                || (heads != 1 && strides->Get(1) != seqLenQ)
+                || (seqLenQ != 1 && strides->Get(SDPA_SEQ_AXIS) != 1),
+            "batch-mode stats tensor strides must be packed [H * Sq, Sq, 1]");
+    }
     return true;
 }
 
