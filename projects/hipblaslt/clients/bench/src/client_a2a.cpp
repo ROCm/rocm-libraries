@@ -18,10 +18,12 @@ try
     Arguments arg;
     arg.init();
 
-    bool verify = false;
-    bool timing = false;
+    bool verify   = false;
+    bool timing   = false;
+    bool numaBind = false;
     // 0 marks "not given on the command line".
-    int a2a_world = 0;
+    int a2a_world  = 0;
+    int sdmaRotate = kSdmaRotateDefault;
 
     options_description desc("hipblaslt-bench-a2a command line options");
     desc.add_options()
@@ -62,6 +64,17 @@ try
          value<bool>(&arg.adaptive)->default_value(false),
          "Self-size the sample count; runs no --cold_iters warmup")
 
+        ("fused-a2a-sdma-rotate",
+         value<int>(&sdmaRotate)->default_value(kSdmaRotateDefault),
+         "gfx942 and gfx950: move each remote peer SDMA queue this many steps along the even"
+         " xGMI engines 2,4,...,14 from its KFD recommendation; nonzero requires 14 xGMI SDMA"
+         " engines. Ignored on other architectures, which spread the remote peer queues over"
+         " the recommended engines")
+
+        ("numa-bind",
+         value<bool>(&numaBind)->default_value(false),
+         "Prefer the device's NUMA node for this process's memory (MPOL_PREFERRED)")
+
         ("verify,v",
          value<bool>(&verify)->default_value(false),
          "Check every launch of a pass run before the timed one")
@@ -93,6 +106,9 @@ try
     }
     arg.a2a_world = uint8_t(env.world);
 
+    if(numaBind && !prefer_device_numa_node(env.local_rank))
+        return 1;
+
     hipblaslt_bench::TcpRendezvous rendezvous(env, kRendezvousTimeoutSec);
     if(!join_group(env, rendezvous, HIPBLASLT_DEVICE_COMM_MAX_WORLD))
         return 0;
@@ -101,7 +117,7 @@ try
 
     RankResources res;
     res.rendezvous = &rendezvous;
-    if(!setup_rank(env, arg, res))
+    if(!setup_rank(env, arg, res, sdmaRotate))
         return 1;
 
     hipblasLtMatmulHeuristicResult_t heur{};

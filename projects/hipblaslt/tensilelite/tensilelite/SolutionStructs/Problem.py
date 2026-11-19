@@ -548,6 +548,9 @@ _defaultProblemType = {
     "ActivationNoGuard": False,
     # AmaxD
     "OutputAmaxD": False,
+    # Also store every D tile to a second ("peer") D buffer, same layout, passed as an extra
+    # kernel argument: the partitions of a split GEMM then each hold the complete D.
+    "OutputPeerD": False,
     # GemmA2A: the GEMM epilogue PUSHes the first AM feature columns to the peers.
     # A2AGemm: B's K shards are gathered from the peers into a2aBuf one shard at a time.
     "FusedA2A": "Disabled",
@@ -1485,6 +1488,8 @@ class ProblemType(Mapping):
         name.append(f"Aux{self['DataTypeE'].toChar()}")
     if self["OutputAmaxD"]:
       name.append("AmaxD")
+    if self["OutputPeerD"]:
+      name.append("PeerD")
     if self["FusedA2A"] == "GemmA2A":
       name.append("GemmA2A")
     if self["FusedA2A"] == "A2AGemm":

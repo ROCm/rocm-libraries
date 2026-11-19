@@ -53,8 +53,9 @@ namespace
         bool    totalRowsHint = false;
         // Also set the average rows and cols hints.
         bool averageHints = false;
-        // Second call with these shapes (each no larger than in groups); needs !fixedM.
-        std::vector<GroupShape> rerun;
+        // Further calls, one per entry, with these shapes (each no larger than in groups);
+        // needs !fixedM.
+        std::vector<std::vector<GroupShape>> reruns;
     };
 
     constexpr size_t kWorkspace = size_t{64} << 20;
@@ -107,10 +108,15 @@ namespace
         return upload(narrow);
     }
 
+    // A NaN in both FP16 and BF16, which no call in these tests computes.
+    constexpr uint16_t kUnwritten = 0x7FFF;
+
     // One grouped matrix: per-group shape and ld, packed into one buffer.
     struct GroupedMatrix
     {
         std::vector<int64_t> rows, cols, ld;
+        // Columns allocated per group; cols may shrink after init.
+        std::vector<int64_t> allocCols;
         std::vector<size_t> offset;
         std::vector<uint16_t> hostData;
         // Device copy of hostData, with the same layout. This is what hipBLASLt reads and writes.
@@ -126,8 +132,9 @@ namespace
                   hipDataType                 type,
                   std::mt19937&               rng)
         {
-            rows = r;
-            cols = c;
+            rows      = r;
+            cols      = c;
+            allocCols = c;
             ld.resize(r.size());
             offset.resize(r.size());
             size_t total = 0;
@@ -151,6 +158,33 @@ namespace
         float at(hipDataType type, size_t g, int64_t i, int64_t j) const
         {
             return toFloat(type, hostData[offset[g] + size_t(j * ld[g] + i)]);
+        }
+
+        // Fills the device copy with kUnwritten, so a launch's output holds only what that
+        // launch wrote, not what an earlier one did.
+        void resetToUnwritten()
+        {
+            EXPECT_EQ(hipMemsetD16(deviceData, kUnwritten, hostData.size()), hipSuccess);
+        }
+
+        // Every element of out (a device copy of the matrix) outside the first r[g] rows of
+        // the first c[g] columns of each group, ld padding and earlier, larger shapes
+        // included, still holds kUnwritten.
+        void expectWrittenOnlyInside(const std::vector<uint16_t>& out,
+                                     const std::vector<int64_t>&  r,
+                                     const std::vector<int64_t>&  c) const
+        {
+            int written = 0;
+            for(size_t g = 0; g < r.size(); g++)
+                for(int64_t j = 0; j < allocCols[g]; j++)
+                    for(int64_t i = 0; i < ld[g]; i++)
+                    {
+                        size_t e = offset[g] + size_t(j * ld[g] + i);
+                        if((i >= r[g] || j >= c[g]) && out[e] != kUnwritten && written++ < 5)
+                            ADD_FAILURE() << "group " << g << ": (" << i << "," << j
+                                          << ") outside the output was written";
+                    }
+            EXPECT_EQ(written, 0);
         }
 
         GroupedMatrix()                                = default;
@@ -422,6 +456,17 @@ namespace
             return p;
         }
 
+        // Filled with ones, so a kernel that reads a grouped record past the last group gets
+        // invalid pointers and faults, rather than finding zeros or a stale record left by an
+        // earlier allocation at the same address.
+        void* allocWorkspace()
+        {
+            void* ws = nullptr;
+            EXPECT_EQ(hipMalloc(&ws, kWorkspace), hipSuccess);
+            EXPECT_EQ(hipMemset(ws, 0xFF, kWorkspace), hipSuccess);
+            return keep(ws);
+        }
+
         hipblasLtMatrixLayout_t makeLayout(hipDataType                 type,
                                            int                         groupCount,
                                            const std::vector<int64_t>* rows,
@@ -475,14 +520,15 @@ namespace
             const bool transA = tc.opA != HIPBLAS_OP_N;
             const bool transB = tc.opB != HIPBLAS_OP_N;
 
-            // Buffers and leading dimensions fit the larger of the two calls' shapes.
+            // Buffers and leading dimensions fit the largest shapes of all calls.
             std::vector<int64_t> capM = m, capN = n, capK = k;
-            for(size_t g = 0; g < tc.rerun.size(); g++)
-            {
-                capM[g] = std::max(capM[g], tc.rerun[g].m);
-                capN[g] = std::max(capN[g], tc.rerun[g].n);
-                capK[g] = std::max(capK[g], tc.rerun[g].k);
-            }
+            for(const auto& shapes : tc.reruns)
+                for(size_t g = 0; g < shapes.size(); g++)
+                {
+                    capM[g] = std::max(capM[g], shapes[g].m);
+                    capN[g] = std::max(capN[g], shapes[g].n);
+                    capK[g] = std::max(capK[g], shapes[g].k);
+                }
             GroupedMatrix A, B, C, D;
             A.init(transA ? capK : capM, transA ? capM : capK, tc.fixedM, tc.type, rng);
             B.init(transB ? capN : capK, transB ? capK : capN, tc.fixedM, tc.type, rng);
@@ -629,12 +675,11 @@ namespace
                 GTEST_SKIP() << "No grouped solution in the loaded library";
             ASSERT_LE(result.workspaceSize, kWorkspace);
 
-            void* ws = nullptr;
-            ASSERT_EQ(hipMalloc(&ws, kWorkspace), hipSuccess);
-            keep(ws);
+            void* ws = allocWorkspace();
 
             ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
             auto matmulAndCheck = [&]() {
+                D.resetToUnwritten();
                 ASSERT_EQ(hipblasLtMatmul(handle,
                                           desc,
                                           alphaArg,
@@ -685,18 +730,19 @@ namespace
                         }
                     EXPECT_EQ(mismatches, 0);
                 }
+                D.expectWrittenOnlyInside(out, m, n);
             };
             matmulAndCheck();
 
-            if(!tc.rerun.empty())
+            // New shapes go straight into the device arrays the layouts point to; the
+            // heuristic is not run again.
+            for(const auto& shapes : tc.reruns)
             {
-                // New shapes go straight into the device arrays the layouts point to; the
-                // heuristic is not run again.
                 for(int g = 0; g < groups; g++)
                 {
-                    m[g] = tc.rerun[g].m;
-                    n[g] = tc.rerun[g].n;
-                    k[g] = tc.rerun[g].k;
+                    m[g] = shapes[g].m;
+                    n[g] = shapes[g].n;
+                    k[g] = shapes[g].k;
                 }
                 auto rewrite = [&](hipblasLtMatrixLayout_t           layout,
                                    hipblasLtMatrixLayoutAttribute_t attr,
@@ -831,9 +877,7 @@ namespace
                 GTEST_SKIP() << "No grouped MX solution in the loaded library";
             EXPECT_TRUE(isMXKernel(hipblaslt_ext::getKernelNameFromAlgo(handle, result.algo)));
 
-            void* ws = nullptr;
-            ASSERT_EQ(hipMalloc(&ws, kWorkspace), hipSuccess);
-            keep(ws);
+            void* ws = allocWorkspace();
             const float alpha = 2.f, beta = 1.f;
             auto        launch = [&] {
                 return hipblasLtMatmul(handle,
@@ -863,6 +907,7 @@ namespace
                 EXPECT_EQ(launch(), HIPBLAS_STATUS_INVALID_VALUE);
                 return;
             }
+            D.resetToUnwritten();
             ASSERT_EQ(launch(), HIPBLAS_STATUS_SUCCESS);
             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
@@ -892,6 +937,7 @@ namespace
                     }
                 EXPECT_EQ(mismatches, 0);
             }
+            D.expectWrittenOnlyInside(out, m, n);
         }
     };
 
@@ -947,7 +993,7 @@ namespace
         Case tc;
         tc.opA    = HIPBLAS_OP_T;
         tc.groups = {{64, 64, 32}, {48, 32, 64}, {96, 80, 16}, {32, 16, 32}};
-        tc.rerun  = {{16, 64, 8}, {48, 0, 64}, {5, 3, 0}, {32, 16, 31}};
+        tc.reruns = {{{16, 64, 8}, {48, 0, 64}, {5, 3, 0}, {32, 16, 31}}};
         run(tc);
     }
 
@@ -979,7 +1025,7 @@ namespace
         tc.opA           = HIPBLAS_OP_T;
         tc.totalColsHint = true;
         tc.groups        = {{80, 70, 32}, {80, 70, 32}, {80, 70, 32}, {80, 70, 32}};
-        tc.rerun         = {{80, 0, 32}, {80, 270, 32}, {80, 3, 32}, {80, 7, 32}};
+        tc.reruns        = {{{80, 0, 32}, {80, 270, 32}, {80, 3, 32}, {80, 7, 32}}};
         run(tc);
     }
 
@@ -1019,6 +1065,64 @@ namespace
         run(tc);
     }
 
+    // count groups of uneven shapes; one in five is empty (M = 0 or N = 0) and some have
+    // K = 0. Grouped kernels on 64-lane waves search the groups 64 at a time, loading up to
+    // 384 per round trip, so 65 groups cross the first boundary and 385 or more both. Group 0
+    // is not empty: lanes past the last group read group 0's sizes, so a workgroup wrongly
+    // resolved past the last group writes something only if group 0 has tiles.
+    std::vector<GroupShape> unevenGroups(int count)
+    {
+        std::vector<GroupShape> groups;
+        for(int g = 0; g < count; g++)
+            groups.push_back({g % 10 == 1 ? 0 : 8 * (1 + g % 7),
+                              g % 10 == 5 ? 0 : 8 * (1 + g / 7 % 5),
+                              g % 13 == 7 ? 0 : 16 * (1 + g % 3)});
+        return groups;
+    }
+
+    // count groups, all through one heuristic call: its host time grows with the group count.
+    // The first call has equal groups, so the grid sized from the max-rows and max-cols hints
+    // has exactly one workgroup per tile and no surplus workgroup can cover a tile that
+    // another missed. The same launch then runs unevenGroups(count), which fits within the
+    // hints, then only the first and only the last group non-empty, so most workgroups have
+    // no tile and must write nothing. Alpha and beta are per group, so a tile computed with
+    // another group's arguments also gets that group's scalars.
+    Case manyGroups(int count)
+    {
+        Case tc;
+        tc.opA     = HIPBLAS_OP_T;
+        tc.scalars = Scalars::DevicePerGroup;
+        tc.groups.assign(count, {56, 40, 48});
+        tc.reruns.push_back(unevenGroups(count));
+        for(int nonEmpty : {0, count - 1})
+        {
+            std::vector<GroupShape> shapes(count, {0, 40, 48});
+            shapes[nonEmpty] = {56, 40, 48};
+            tc.reruns.push_back(shapes);
+        }
+        return tc;
+    }
+
+    TEST_F(GroupedMatmul, smoke_Fp16TN65Groups)
+    {
+        Case tc;
+        tc.opA    = HIPBLAS_OP_T;
+        tc.groups = unevenGroups(65);
+        run(tc);
+    }
+
+    TEST_F(GroupedMatmul, smoke_Fp16TN400Groups)
+    {
+        run(manyGroups(400));
+    }
+
+    // 400 groups already cross both boundaries; 1000 add more round trips per search at
+    // several times the host-reference cost, so they run outside the smoke tier.
+    TEST_F(GroupedMatmul, pre_checkin_Fp16TN1000Groups)
+    {
+        run(manyGroups(1000));
+    }
+
     // MXFP8 and MXFP4 with per-group scale tensors; K below and between multiples of the
     // kernels' 256 unroll, an empty group, and K = 0.
     const std::vector<GroupShape> kMXShapes = {
@@ -1049,6 +1153,17 @@ namespace
               HIP_R_16F,
               HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT,
               kMXShapes);
+    }
+
+    // An MoE layer's layout: 385 groups (experts) of the same M, few tokens (N) each, and
+    // many groups without tokens. Group 0 has tokens, as in unevenGroups.
+    TEST_F(GroupedMatmul, smoke_MXFP8TNPreSwizzled385Groups)
+    {
+        std::vector<GroupShape> shapes;
+        for(int g = 0; g < 385; g++)
+            shapes.push_back({64, g % 3 == 1 ? 0 : 1 + g % 17, 128});
+        runMX(
+            HIP_R_8F_E4M3, HIP_R_16BF, HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT, shapes);
     }
 
     // A pre-swizzled algo reads its scales in the 32x8 layout, so packed scales must

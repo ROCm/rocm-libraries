@@ -293,6 +293,15 @@ def readCustomKernelConfig(name, directory=None):
         raise RuntimeError(f"Custom kernel '{name}' custom.config must be a YAML mapping")
     return config
 
+def magicSizeSemantic(base, magicDivAlg):
+    """Return the algorithm-specific semantic for a packed-dimension magic divisor."""
+    if magicDivAlg not in (1, 2):
+        raise RuntimeError(
+            f"Unsupported MagicDivAlg {magicDivAlg!r} for packed-dimension "
+            f"{base}: expected 1 or 2")
+    return "%sAlg%d" % (base, magicDivAlg)
+
+
 def _metadataArgToCustomArg(metaArg, kernelName=None):
     """Convert a single amdgpu_metadata .args entry to a CustomKernel arg dict.
 
@@ -355,7 +364,7 @@ def _metadataArgToCustomArg(metaArg, kernelName=None):
     if m:
         return {"type": argType, "semantic": "StrideE%s" % m.group(1)}
 
-    m = re.match(r"(MagicNumberSize|MagicShiftSize)(\w)", name)
+    m = re.match(r"((?:MagicNumberSize|MagicShiftSize)Alg[12])(\w)$", name)
     if m:
         from .Common.Constants import INDEX_CHARS
         idx = INDEX_CHARS.index(m.group(2))

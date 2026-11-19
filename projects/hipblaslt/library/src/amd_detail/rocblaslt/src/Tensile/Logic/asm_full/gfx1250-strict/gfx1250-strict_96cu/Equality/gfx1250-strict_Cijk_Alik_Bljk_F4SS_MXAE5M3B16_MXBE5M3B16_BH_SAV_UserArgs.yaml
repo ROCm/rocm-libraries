@@ -96,7 +96,7 @@
   UseInitialStridesAB: false
   UseInitialStridesCD: false
   UseScaleAB: ''
-  UseScaleAlphaVec: 0
+  UseScaleAlphaVec: 5
   UseScaleCD: false
   isMixMode: false
 - - SolutionIndex: 0

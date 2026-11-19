@@ -1,8 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Host-only unit tests for client string<->enum helpers and compute-input
-// type validation. See README.md in this directory for the
+// Host-only unit tests for client string<->enum helpers and argument type
+// validation. See README.md in this directory for the
 // dual-target build, the HostUnit/smoke_ naming, and the X-macro tripwire
 // pattern used below.
 
@@ -351,4 +351,52 @@ TEST(HostUnitComputeInputType, smoke_RejectsInvalidSingleOverride)
                                    : "Invalid compute_input_typeB i8_r");
         }
     }
+}
+
+TEST(HostUnitBiasType, smoke_UnsupportedTypeWithoutBias)
+{
+    Arguments arg{};
+    arg.init();
+    arg.a_type       = HIP_R_8F_E4M3;
+    arg.b_type       = HIP_R_16F;
+    arg.c_type       = HIP_R_8F_E4M3;
+    arg.d_type       = HIP_R_8F_E4M3;
+    arg.compute_type = HIPBLAS_COMPUTE_32F;
+    arg.bias_vector  = false;
+    arg.bias_type    = HIPBLASLT_DATATYPE_INVALID;
+
+    EXPECT_EQ(derive_unset_bias_type(arg), HIP_R_8F_E4M3);
+
+    arg.bias_type = HIP_R_8F_E5M2;
+    EXPECT_EQ(derive_unset_bias_type(arg), HIP_R_8F_E5M2);
+}
+
+TEST(HostUnitBiasType, smoke_ValidatesTypeWithBias)
+{
+    Arguments arg{};
+    arg.init();
+    arg.a_type       = HIP_R_8F_E4M3;
+    arg.b_type       = HIP_R_16F;
+    arg.c_type       = HIP_R_8F_E4M3;
+    arg.d_type       = HIP_R_8F_E4M3;
+    arg.compute_type = HIPBLAS_COMPUTE_32F;
+    arg.bias_vector  = true;
+
+    for(auto bias_type : {HIPBLASLT_DATATYPE_INVALID, HIP_R_8F_E4M3})
+    {
+        SCOPED_TRACE(bias_type);
+        arg.bias_type = bias_type;
+        try
+        {
+            derive_unset_bias_type(arg);
+            FAIL() << "Expected an unsupported bias type to be rejected";
+        }
+        catch(const std::invalid_argument& error)
+        {
+            EXPECT_STREQ(error.what(), "Invalid bias type f8_r");
+        }
+    }
+
+    arg.bias_type = HIP_R_16F;
+    EXPECT_EQ(derive_unset_bias_type(arg), HIP_R_16F);
 }
