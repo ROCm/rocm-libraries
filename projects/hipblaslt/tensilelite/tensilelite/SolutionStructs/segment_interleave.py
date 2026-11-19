@@ -401,11 +401,10 @@ def evaluate(state):
     # Auto takes only the no-trade-off tight branch; the LDS-growing aligned branch needs 1.
     mode = state.get("LDSSegmentInterleave", -1)
     if mode == 0:                                              return _no("parameter off")
-    # Swizzle-A LSI is not threaded through the swizzle write/read, so keep rejecting it.
-    if pt.get("SwizzleTensorA"):                              return _no("swizzle-A: LSI not threaded (VWA==1 only)")
-    # Swizzle-B CAN interleave: the write already honors ldsBaseB + wtid0*writeStrideBytes, and the swizzle
-    # read stashes segWaveByteOff (lraTileAssignmentSwizzledTDM). Only the tight MIWaveGroup=[2,2] symmetric
-    # case where B spans its whole LDS component (pure-REPLACE branch) is validated; gate the rest below.
+    # Swizzled operands interleave: the TDM write already places component c at ldsBase + c*writeStrideBytes,
+    # and the swizzle read stashes segWaveByteOff (lraTileAssignmentSwizzledTDM) for either operand. Swizzle-A
+    # is always the coarse case (A must span its component, see below); swizzle-B is validated for the tight
+    # MIWaveGroup=[2,2] symmetric case, gated below.
     _swzB = bool(pt.get("SwizzleTensorB"))
     _dtB = pt.get("DataTypeB")
     if _swzB and hasattr(_dtB, "numBytes") and _dtB.numBytes() < 1:
