@@ -192,53 +192,111 @@ rocke_status_t rocke_lds_col_xor_params(int tile_cols, int chunk, int out[4])
     return ROCKE_OK;
 }
 
+/* Keep the legacy immediate order when the loader supplies a col_xor tuple.
+ * The bound form supplies SSA values instead and has no extra flip bit. */
+static rocke_value_t* emit_lds_col_xor(rocke_ir_builder_t* b,
+                                       rocke_value_t* row,
+                                       rocke_value_t* col,
+                                       const int* immediate,
+                                       rocke_value_t* row_shift,
+                                       rocke_value_t* chunk_mask,
+                                       rocke_value_t* chunk_log2)
+{
+    if(immediate != NULL && immediate[0] != 0)
+        row_shift = rocke_b_const_i32(b, immediate[0]);
+    rocke_value_t* r = row_shift ? rocke_b_lshr(b, row, row_shift) : row;
+    if(immediate != NULL)
+        chunk_mask = rocke_b_const_i32(b, immediate[1]);
+    rocke_value_t* sel = rocke_b_land(b, r, chunk_mask);
+    if(immediate != NULL && immediate[3] >= 0)
+    {
+        rocke_value_t* c_flip = rocke_b_const_i32(b, immediate[3]);
+        rocke_value_t* hi = rocke_b_lshr(b, row, c_flip);
+        rocke_value_t* c_one = rocke_b_const_i32(b, 1);
+        sel = rocke_b_xor(b, sel, rocke_b_land(b, hi, c_one));
+    }
+    if(immediate != NULL)
+        chunk_log2 = rocke_b_const_i32(b, immediate[2]);
+    return rocke_b_xor(b, col, rocke_b_shl(b, sel, chunk_log2));
+}
+
+const rocke_lds_column_xor_t rocke_lds_no_swizzle{0, 0, 0, -1};
+const rocke_lds_column_xor_t rocke_lds_row_xor_2x16b{0, 1, 4, -1};
+const rocke_lds_column_xor_t rocke_lds_row_xor_4x16b{0, 2, 4, -1};
+const rocke_lds_column_xor_t rocke_lds_row_xor_8x16b{0, 3, 4, -1};
+
+bool rocke_lds_column_xor_is_identity(const rocke_lds_column_xor_t* layout)
+{
+    return layout != NULL && layout->row_bits == 0 && layout->flip_row_bit == -1;
+}
+
+int rocke_lds_column_xor_chunk_mask(const rocke_lds_column_xor_t* layout)
+{
+    if(layout == NULL || layout->row_bits < 0 || layout->row_bits > 31)
+        return 0;
+    return static_cast<int>((1u << layout->row_bits) - 1u);
+}
+
+int rocke_lds_column_xor_shift_for(const rocke_lds_column_xor_t* layout, int unit_bytes)
+{
+    if(layout == NULL || layout->row_shift < 0 || layout->row_shift > 31 || layout->row_bits < 0
+       || layout->row_bits > 31 || layout->chunk_log2_bytes < 0 || layout->chunk_log2_bytes > 31
+       || layout->flip_row_bit < -1 || layout->flip_row_bit > 31)
+        return -1;
+    if(rocke_lds_column_xor_is_identity(layout))
+        return 0;
+    if(unit_bytes <= 0 || (unit_bytes & (unit_bytes - 1)) != 0)
+        return -1;
+    int shift = layout->chunk_log2_bytes;
+    for(; unit_bytes > 1; unit_bytes >>= 1)
+        --shift;
+    return shift < 0 ? -1 : shift;
+}
+
+rocke_value_t* rocke_lds_column_xor_emit(rocke_ir_builder_t* b,
+                                         rocke_value_t* row,
+                                         rocke_value_t* col,
+                                         const rocke_lds_column_xor_t* layout,
+                                         int unit_bytes)
+{
+    if(!rocke_i_live(b))
+        return NULL;
+    const int shift = rocke_lds_column_xor_shift_for(layout, unit_bytes);
+    if(shift < 0)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "invalid LDS column XOR layout or unit size");
+    if(rocke_lds_column_xor_is_identity(layout))
+        return col;
+    const int terms[4]
+        = {layout->row_shift, rocke_lds_column_xor_chunk_mask(layout), shift, layout->flip_row_bit};
+    return emit_lds_col_xor(b, row, col, terms, NULL, NULL, NULL);
+}
+
+rocke_value_t* rocke_emit_lds_col_xor(rocke_ir_builder_t* b,
+                                      rocke_value_t* row,
+                                      rocke_value_t* col,
+                                      rocke_value_t* row_shift,
+                                      rocke_value_t* chunk_mask,
+                                      rocke_value_t* chunk_log2)
+{
+    if(!rocke_i_live(b))
+        return NULL;
+    if(chunk_mask == NULL || chunk_log2 == NULL)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "emit_lds_col_xor: missing mask or shift");
+    return emit_lds_col_xor(b, row, col, NULL, row_shift, chunk_mask, chunk_log2);
+}
+
 rocke_value_t* rocke_swizzle_lds_col(rocke_ir_builder_t* b,
                                      rocke_value_t* row,
                                      rocke_value_t* col,
                                      const int col_xor[4])
 {
-    rocke_value_t* r;
-    rocke_value_t* sel;
-    rocke_value_t* flip;
-    rocke_value_t* shifted;
-
-    if(b != NULL && b->status != ROCKE_OK)
-    {
+    if(!rocke_i_live(b))
         return NULL;
-    }
     if(col_xor == NULL)
-    {
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "swizzle_lds_col: NULL col_xor");
-    }
-    /* Python (each const_i32 is created right before the op that takes it):
-     *   r = b.lshr(row, b.const_i32(row_shift)) if row_shift else row
-     *   sel = b.land(r, b.const_i32(chunk_mask))
-     *   flip = b.land(b.lshr(row, b.const_i32(flip_shift)), b.const_i32(1))
-     *   sel = b.xor(sel, flip)
-     *   return b.xor(col, b.shl(sel, b.const_i32(chunk_log2)))
-     */
-    r = row;
-    if(col_xor[0] != 0)
-    {
-        rocke_value_t* c_shift = rocke_b_const_i32(b, col_xor[0]);
-        r = rocke_b_lshr(b, row, c_shift);
-    }
-    {
-        rocke_value_t* c_mask = rocke_b_const_i32(b, col_xor[1]);
-        sel = rocke_b_land(b, r, c_mask);
-    }
-    {
-        rocke_value_t* c_flip = rocke_b_const_i32(b, col_xor[3]);
-        rocke_value_t* hi = rocke_b_lshr(b, row, c_flip);
-        rocke_value_t* c_one = rocke_b_const_i32(b, 1);
-        flip = rocke_b_land(b, hi, c_one);
-    }
-    sel = rocke_b_xor(b, sel, flip);
-    {
-        rocke_value_t* c_log2 = rocke_b_const_i32(b, col_xor[2]);
-        shifted = rocke_b_shl(b, sel, c_log2);
-    }
-    return rocke_b_xor(b, col, shifted);
+    return emit_lds_col_xor(b, row, col, col_xor, NULL, NULL, NULL);
 }
 
 rocke_status_t rocke_coalesced_tile_loader_set_col_xor(rocke_coalesced_tile_loader_t* self,

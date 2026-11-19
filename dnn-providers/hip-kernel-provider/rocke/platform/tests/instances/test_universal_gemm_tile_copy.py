@@ -124,6 +124,12 @@ def _cases():
             (32, 64, 96),
         ),
         (
+            "sync_swizzled",
+            TraitSpec(pipeline="compv4", epilogue="default", lds_swizzle=True),
+            "sync",
+            (96,),
+        ),
+        (
             "dtl_swizzled",
             TraitSpec(
                 pipeline="compv4",

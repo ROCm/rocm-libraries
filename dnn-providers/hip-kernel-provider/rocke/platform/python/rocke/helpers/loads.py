@@ -105,18 +105,108 @@ def lds_col_xor_params(tile_cols: int, chunk: int = 8) -> Tuple[int, int, int, i
     return rows_per_cycle.bit_length() - 1, c - 1, chunk.bit_length() - 1, 3
 
 
+def emit_lds_col_xor(
+    b: IRBuilder,
+    row: Value,
+    col: Value,
+    *,
+    row_shift: int | Value = 0,
+    chunk_mask: int | Value,
+    chunk_log2: int | Value,
+    flip_shift: int | None = None,
+) -> Value:
+    """XOR selected row bits into a chunk-aligned column.
+
+    The caller chooses the layout and whether the column is in elements or
+    bytes. A byte column uses a chunk shift measured in bytes. Parameters
+    may be prebound SSA values to hoist their construction out of a loop.
+    With ``flip_shift``, the selected row bit also flips the lowest chunk bit.
+    """
+    r = row
+    if isinstance(row_shift, int):
+        if row_shift:
+            r = b.lshr(row, b.const_i32(row_shift))
+    else:
+        r = b.lshr(row, row_shift)
+    mask = b.const_i32(chunk_mask) if isinstance(chunk_mask, int) else chunk_mask
+    sel = b.land(r, mask)
+    if flip_shift is not None:
+        flip = b.land(b.lshr(row, b.const_i32(flip_shift)), b.const_i32(1))
+        sel = b.xor(sel, flip)
+    step = b.const_i32(chunk_log2) if isinstance(chunk_log2, int) else chunk_log2
+    return b.xor(col, b.shl(sel, step))
+
+
+@dataclass(frozen=True)
+class LdsColumnXor:
+    """Row-bit XOR layout specified in bytes, independent of the column units."""
+
+    row_shift: int
+    row_bits: int
+    chunk_log2_bytes: int
+    flip_row_bit: int | None = None
+
+    def __post_init__(self) -> None:
+        terms = (self.row_shift, self.row_bits, self.chunk_log2_bytes)
+        if self.flip_row_bit is not None:
+            terms += (self.flip_row_bit,)
+        if any(type(term) is not int or not 0 <= term <= 31 for term in terms):
+            raise ValueError("LDS column XOR terms must be integers in [0, 31]")
+
+    @property
+    def is_identity(self) -> bool:
+        return self.row_bits == 0 and self.flip_row_bit is None
+
+    @property
+    def chunk_mask(self) -> int:
+        return (1 << self.row_bits) - 1
+
+    def shift_for(self, unit_bytes: int) -> int:
+        """Chunk shift for columns measured in units of ``unit_bytes`` bytes."""
+        if self.is_identity:
+            return 0
+        if unit_bytes <= 0 or unit_bytes & (unit_bytes - 1):
+            raise ValueError("LDS column units must be a positive power of two bytes")
+        shift = self.chunk_log2_bytes - (unit_bytes.bit_length() - 1)
+        if shift < 0:
+            raise ValueError("LDS column unit is larger than a swizzle chunk")
+        return shift
+
+    def emit(
+        self, b: IRBuilder, row: Value, col: Value, *, unit_bytes: int = 1
+    ) -> Value:
+        """Apply this layout, or return ``col`` without emitting IR for identity."""
+        if self.is_identity:
+            return col
+        return emit_lds_col_xor(
+            b,
+            row,
+            col,
+            row_shift=self.row_shift,
+            chunk_mask=self.chunk_mask,
+            chunk_log2=self.shift_for(unit_bytes),
+            flip_shift=self.flip_row_bit,
+        )
+
+
+NO_SWIZZLE = LdsColumnXor(0, 0, 0)
+ROW_XOR_2x16B = LdsColumnXor(0, 1, 4)
+ROW_XOR_4x16B = LdsColumnXor(0, 2, 4)
+ROW_XOR_8x16B = LdsColumnXor(0, 3, 4)
+
+
 def swizzle_lds_col(b: IRBuilder, row: Value, col: Value, col_xor) -> Value:
-    """``col ^ ((((row >> row_shift) & chunk_mask) ^ ((row >> flip_shift) & 1))
-    << chunk_log2)``: the physical LDS column of logical column ``col`` of tile
-    row ``row`` (both i32). ``col_xor`` is a :func:`lds_col_xor_params` tuple.
-    Writers (:attr:`CoalescedTileLoader.col_xor`) and readers must use the same
-    tuple."""
+    """Apply the loader's :func:`lds_col_xor_params` layout to a column."""
     row_shift, chunk_mask, chunk_log2, flip_shift = col_xor
-    r = b.lshr(row, b.const_i32(row_shift)) if row_shift else row
-    sel = b.land(r, b.const_i32(chunk_mask))
-    flip = b.land(b.lshr(row, b.const_i32(flip_shift)), b.const_i32(1))
-    sel = b.xor(sel, flip)
-    return b.xor(col, b.shl(sel, b.const_i32(chunk_log2)))
+    return emit_lds_col_xor(
+        b,
+        row,
+        col,
+        row_shift=row_shift,
+        chunk_mask=chunk_mask,
+        chunk_log2=chunk_log2,
+        flip_shift=flip_shift,
+    )
 
 
 @dataclass(frozen=True)

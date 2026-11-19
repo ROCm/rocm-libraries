@@ -214,6 +214,12 @@ as `load_fragment`. The tile window computes a physical offset with runtime
 strides; the logical K coordinate determines which elements to zero-fill.
 Preshuffled B uses the same clipping with its packed source offset. The LDS
 placement, including padding, swizzles, and slots, is independent of clipping.
+`LdsColumnXor` describes the column swizzle in byte units. `NO_SWIZZLE` is
+an identity layout; presets such as `ROW_XOR_8x16B` select common bit patterns.
+GEMM derives a layout from its geometry and binds the selector once for MFMA
+reads and synchronous stores. Direct-to-LDS swizzles source coordinates so
+LDS writes remain wave-contiguous; FP64 sub-element chunks use a byte column.
+
 The `compv4` name is not an async switch: `direct_to_lds` selects gfx9 async
 copies through `AsyncTileLoaderSlot.issue_bytes`. GEMM supplies the source
 byte offsets (including source swizzles and FP64 sub-element chunks) and

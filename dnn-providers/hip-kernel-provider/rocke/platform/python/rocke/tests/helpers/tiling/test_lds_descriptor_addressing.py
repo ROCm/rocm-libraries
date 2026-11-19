@@ -92,6 +92,7 @@ _INT_OPS = {
     "arith.mul": lambda x, y: x * y,
     "arith.div": lambda x, y: x // y,
     "arith.mod": lambda x, y: x % y,
+    "arith.and": lambda x, y: x & y,
     "arith.xor": lambda x, y: x ^ y,
     "arith.shl": lambda x, y: x << y,
 }

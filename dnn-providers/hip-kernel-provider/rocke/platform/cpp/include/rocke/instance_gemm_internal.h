@@ -51,6 +51,7 @@
 #include <stdint.h>
 
 #include "rocke/helper_rocke.core.arch.h" /* rocke_mmaop_t, rocke_archtarget_t */
+#include "rocke/helper_rocke.helpers.loads.h" /* rocke_lds_column_xor_t */
 #include "rocke/helper_rocke.helpers.schedule.h" /* rocke_hotloop_inst_list_t, policy */
 #include "rocke/helper_rocke.helpers.tensor_view.h" /* rocke_tensor_view_t, descriptors */
 #include "rocke/instance_gemm_universal.h"
@@ -150,11 +151,9 @@ typedef struct rocke_gemm_build_ctx
 
     /* ---- LDS XOR swizzle (lds_swizzle) -- */
     bool swz; /* _SWZ = spec.trait.lds_swizzle             */
-    int swz_r; /* CK_SWZ_R   (resolved)                     */
-    int swz_w; /* CK_SWZ_W                                  */
-    int swz_l; /* CK_SWZ_L                                  */
+    rocke_lds_column_xor_t lds_xor; /* Resolved layout in byte units. */
     rocke_value_t* c_swr; /* const_i32(swz_r)         (_c_swr)         */
-    rocke_value_t* c_swmod; /* const_i32(1 << swz_w)    (_c_swmod)       */
+    rocke_value_t* c_swmask; /* low swz_w bits, when swizzling is enabled */
     rocke_value_t* c_swl; /* const_i32(swz_l)         (_c_swl)         */
 
     /* ---- batch-axis pointer offsets (SSA; c0 in non-batched mode) -- */
@@ -216,7 +215,6 @@ typedef struct rocke_gemm_build_ctx
     int dtl_halves; /* _DTL_HALVES (0 when a chunk is under one element) */
     int dtl_bytes_per_lane; /* _DTL_BYTES_PER_LANE = dtl_dwords*4        */
     int dtl_elem_bytes; /* _dtl_elem_bytes                           */
-    int dtl_elem_log2; /* log2(dtl_elem_bytes)                      */
     bool dtl_sub_elem; /* _dtl_sub_elem: chunk smaller than an element */
     int dtl_a_chunks; /* (block_m*block_k*elem_bytes)/bytes_per_lane */
     int dtl_b_chunks; /* (block_n*block_k*elem_bytes)/bytes_per_lane */

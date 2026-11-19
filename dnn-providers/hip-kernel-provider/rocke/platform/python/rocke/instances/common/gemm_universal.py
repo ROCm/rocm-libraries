@@ -79,8 +79,11 @@ from ...helpers.loads import (
     AsyncTileLoader,
     AsyncTileLoaderSlot,
     CoalescedTileLoader,
+    LdsColumnXor,
+    NO_SWIZZLE,
     TdmSourceWindow2D,
     TdmTileLoader2D,
+    emit_lds_col_xor,
 )
 from ...helpers.preshuffle import emit_preshuffleb_tile_id
 from ...helpers.spec import WarpTileBlockSizeMixin, choose_load_vec
@@ -1430,7 +1433,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # no extra loads usefully in flight (verified in gemm_wsp3). Kept as a gated
     # lever for measurement / the non-DTL ordered path. Costs D+1x AB LDS.
     _pf_depth = int(_os_hsw.environ.get("ROCKE_EXP_PREFETCH_DEPTH", "1"))
-    # LDS XOR swizzle: ``col ^= ((row >> R) % 2^W) << L``. XOR of any
+    # LDS XOR swizzle: ``col ^= ((row >> R) & (2^W - 1)) << L``. XOR of any
     # deterministic function of ``row`` into ``col`` is correctness-preserving
     # as long as it is applied identically to the LDS store-source + ds_read
     # columns (it is) and stays in [0, block_k).
@@ -1468,16 +1471,24 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     _swz_r = int(_os.environ.get("CK_SWZ_R", str(_def_r)))
     _swz_w = int(_os.environ.get("CK_SWZ_W", str(_def_w)))
     _swz_l = int(_os.environ.get("CK_SWZ_L", str(_def_l)))
-    _c_swr, _c_swmod, _c_swl = (
+    swizzle = (
+        LdsColumnXor(_swz_r, _swz_w, _swz_l + _ilog2(_elem_bytes(spec)))
+        if _SWZ
+        else NO_SWIZZLE
+    )
+    # Retain legacy unused SSA immediates in the disabled kernel path.
+    _c_swr, _c_swmask, _c_swl = (
         b.const_i32(_swz_r),
-        b.const_i32(1 << _swz_w),
-        b.const_i32(_swz_l),
+        b.const_i32(swizzle.chunk_mask if _SWZ else 1 << _swz_w),
+        b.const_i32(swizzle.shift_for(_elem_bytes(spec)) if _SWZ else _swz_l),
     )
 
     def _swz_col(col, row):
-        if not _SWZ:
+        if swizzle.is_identity:
             return col
-        return b.xor(col, b.shl(b.mod(b.lshr(row, _c_swr), _c_swmod), _c_swl))
+        return emit_lds_col_xor(
+            b, row, col, row_shift=_c_swr, chunk_mask=_c_swmask, chunk_log2=_c_swl
+        )
 
     if spec.batched:
         # P57: every wave-uniform i32 derived from the batch axis is
@@ -1911,13 +1922,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         b.add(b.mul(b.add(blk_off, row), K), k_off),
                     )
                     col_b = col
-                    if _SWZ:
-                        col_b = b.xor(
+                    if not swizzle.is_identity:
+                        col_b = emit_lds_col_xor(
+                            b,
+                            row,
                             col,
-                            b.shl(
-                                b.mod(b.lshr(row, _c_swr), _c_swmod),
-                                b.const_i32(_swz_l + _ilog2(_dtl_elem_bytes)),
-                            ),
+                            row_shift=_c_swr,
+                            chunk_mask=_c_swmask,
+                            chunk_log2=b.const_i32(swizzle.chunk_log2_bytes),
                         )
                     return b.add(b.mul(off_elems, c_eb), col_b)
                 off_elems = b.add(

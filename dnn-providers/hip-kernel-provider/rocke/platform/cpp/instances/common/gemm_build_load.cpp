@@ -48,12 +48,13 @@ static bool rocke_gemm_storage_is_fp8(const rocke_type_t* ty)
  *      def _swz_col(col, row):
  *          if not _SWZ:
  *              return col
- *          return b.xor(col, b.shl(b.mod(b.lshr(row, _c_swr), _c_swmod), _c_swl))
+ *          return emit_lds_col_xor(b, row, col, row_shift=_c_swr,
+ *                                  chunk_mask=_c_swmask, chunk_log2=_c_swl)
  *
  *  When swizzle is off (`ctx->swz` false) `col` is returned unchanged, exactly
  *  as the Python closure short-circuits. Applied identically to the LDS store
  *  column and the MFMA ds_read column so the physical address agrees on both
- *  sides (correctness preserved). The constants c_swr / c_swmod / c_swl are
+ *  sides (correctness preserved). The constants c_swr / c_swmask / c_swl are
  *  pre-materialised in the driver build prologue (rocke_build_universal_gemm
  *  in gemm_universal.cpp).
  * ===================================================================== */
@@ -61,14 +62,9 @@ rocke_value_t*
     rocke_gemm_swz_col(rocke_gemm_build_ctx_t* ctx, rocke_value_t* col, rocke_value_t* row)
 {
     rocke_ir_builder_t* b = ctx->b;
-    if(!ctx->swz)
-    {
+    if(rocke_lds_column_xor_is_identity(&ctx->lds_xor))
         return col;
-    }
-    return rocke_b_xor(
-        b,
-        col,
-        rocke_b_shl(b, rocke_b_mod(b, rocke_b_lshr(b, row, ctx->c_swr), ctx->c_swmod), ctx->c_swl));
+    return rocke_emit_lds_col_xor(b, row, col, ctx->c_swr, ctx->c_swmask, ctx->c_swl);
 }
 
 /* _dtl_off_bytes(batch_off, blk_off, row, col): byte offset of one DTL chunk's
@@ -89,11 +85,10 @@ static rocke_value_t* rocke_gemm_dtl_off_bytes(rocke_gemm_build_ctx_t* ctx,
     {
         rocke_value_t* off_elems = rocke_b_add(b, batch_off, rocke_b_add(b, row_term, k_off));
         rocke_value_t* col_b = col;
-        if(ctx->swz)
+        if(!rocke_lds_column_xor_is_identity(&ctx->lds_xor))
         {
-            rocke_value_t* mask = rocke_b_mod(b, rocke_b_lshr(b, row, ctx->c_swr), ctx->c_swmod);
-            rocke_value_t* shift = rocke_b_const_i32(b, ctx->swz_l + ctx->dtl_elem_log2);
-            col_b = rocke_b_xor(b, col, rocke_b_shl(b, mask, shift));
+            rocke_value_t* shift = rocke_b_const_i32(b, ctx->lds_xor.chunk_log2_bytes);
+            col_b = rocke_emit_lds_col_xor(b, row, col, ctx->c_swr, ctx->c_swmask, shift);
         }
         return rocke_b_add(b, rocke_b_mul(b, off_elems, c_eb), col_b);
     }

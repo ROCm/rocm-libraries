@@ -206,6 +206,40 @@ void rocke_coalesced_tile_loader_visit_chunks(rocke_ir_builder_t* b,
  * fixed-shape form; see the Python docstring. */
 rocke_status_t rocke_lds_col_xor_params(int tile_cols, int chunk, int out[4]);
 
+/* Byte-based layout. A flip_row_bit of -1 disables the extra row-bit flip. */
+typedef struct rocke_lds_column_xor
+{
+    int row_shift;
+    int row_bits;
+    int chunk_log2_bytes;
+    int flip_row_bit;
+} rocke_lds_column_xor_t;
+
+extern const rocke_lds_column_xor_t rocke_lds_no_swizzle;
+extern const rocke_lds_column_xor_t rocke_lds_row_xor_2x16b;
+extern const rocke_lds_column_xor_t rocke_lds_row_xor_4x16b;
+extern const rocke_lds_column_xor_t rocke_lds_row_xor_8x16b;
+
+bool rocke_lds_column_xor_is_identity(const rocke_lds_column_xor_t* layout);
+int rocke_lds_column_xor_chunk_mask(const rocke_lds_column_xor_t* layout);
+/* Returns -1 for invalid parameters; identity returns 0 before unit checks. */
+int rocke_lds_column_xor_shift_for(const rocke_lds_column_xor_t* layout, int unit_bytes);
+rocke_value_t* rocke_lds_column_xor_emit(rocke_ir_builder_t* b,
+                                         rocke_value_t* row,
+                                         rocke_value_t* col,
+                                         const rocke_lds_column_xor_t* layout,
+                                         int unit_bytes);
+
+/* Bound no-flip form: col ^ (((row >> row_shift) & chunk_mask) << chunk_log2).
+ * Pass NULL row_shift to skip the right shift. The column and chunk shift
+ * can be in either element or byte coordinates, as chosen by the caller. */
+rocke_value_t* rocke_emit_lds_col_xor(rocke_ir_builder_t* b,
+                                      rocke_value_t* row,
+                                      rocke_value_t* col,
+                                      rocke_value_t* row_shift,
+                                      rocke_value_t* chunk_mask,
+                                      rocke_value_t* chunk_log2);
+
 /* swizzle_lds_col(b, row, col, col_xor):
  *   col ^ ((((row >> row_shift) & chunk_mask) ^ ((row >> flip_shift) & 1))
  *          << chunk_log2)
