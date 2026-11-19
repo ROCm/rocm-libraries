@@ -32,6 +32,9 @@ ATOMS = [
     "wmma11_bf16",
     "wmma12_f16",
     "wmma12_bf16",
+    "wmma125_f16",
+    "wmma125_bf16",
+    "wmma125_f32",
 ]
 INTS = [
     "atom_id",
@@ -67,8 +70,8 @@ def eb(dtype):
 
 def lds_mma(c, e):
     pad = 16 // e
-    if c["atom"].endswith("f32"):
-        # One k per lane: k-major tiles as the FMA kernel's.
+    if c["atom"].startswith("mfma") and c["atom"].endswith("f32"):
+        # One k per MFMA lane: native gfx1250 float2 fragments use the transposed layout.
         smax = c["stride"] * c["taps"]
         chunks = -(-smax // pad)
         cp = (chunks + 1 if chunks % 2 == 0 else chunks) * pad
@@ -256,6 +259,7 @@ def build():
             cfgs = []
             if dtype == "FLOAT":
                 mma = [("mfma16_f32", t) for t in MFMA32F[stride]]
+                mma += [("wmma125_f32", t) for t in MFMA32F[stride]]
                 fma = FMA32[stride]
             else:
                 x = "f16" if dtype == "HALF" else "bf16"
@@ -263,6 +267,7 @@ def build():
                     [("wmma11_" + x, t) for t in WMMA[stride]]
                     + [("wmma12_" + x, t) for t in WMMA[stride]]
                     + [("mfma16_" + x, t) for t in MFMA16[stride]]
+                    + [("wmma125_" + x, t) for t in WMMA[stride]]
                 )
                 fma = [FMA16]
             for atom, (bmq, bn, bk, wm, wn, wp) in mma:
@@ -393,11 +398,11 @@ def build_st1():
         vec = 4 if dtype == "FLOAT" else 8
         bk = 16 if dtype == "FLOAT" else 32
         atoms = (
-            ["mfma16_f32"]
+            ["mfma16_f32", "wmma125_f32"]
             if dtype == "FLOAT"
             else [
                 p + ("f16" if dtype == "HALF" else "bf16")
-                for p in ("wmma11_", "wmma12_", "mfma16_")
+                for p in ("wmma11_", "wmma12_", "mfma16_", "wmma125_")
             ]
         )
         for taps in ST1_TAPS:
@@ -433,11 +438,11 @@ def build_st1():
 def build_t1():
     for dtype in CATALOG:
         atoms = (
-            ["mfma16_f32"]
+            ["mfma16_f32", "wmma125_f32"]
             if dtype == "FLOAT"
             else [
                 p + ("f16" if dtype == "HALF" else "bf16")
-                for p in ("wmma11_", "wmma12_", "mfma16_")
+                for p in ("wmma11_", "wmma12_", "mfma16_", "wmma125_")
             ]
         )
         have = {tuple(sorted(c.items())) for c in CATALOG[dtype]}
@@ -454,11 +459,11 @@ def build_t1():
     for stride in T1_STRIDES:
         for dtype in CATALOG:
             atoms = (
-                ["mfma16_f32"]
+                ["mfma16_f32", "wmma125_f32"]
                 if dtype == "FLOAT"
                 else [
                     p + ("f16" if dtype == "HALF" else "bf16")
-                    for p in ("wmma11_", "wmma12_", "mfma16_")
+                    for p in ("wmma11_", "wmma12_", "mfma16_", "wmma125_")
                 ]
             )
             for flat in (0, 1, stride):
@@ -470,7 +475,7 @@ def build_t1():
 # Three-bf16 (math 1, CONV_IGEMM_NCHW_BWD_TF32's configs): fp32 graphs run a bf16 matrix-core
 # config on dy and w split along K into 3K channels (the kernel's ConvTf32Split), dx written in fp32. Per (atom,
 # stride, taps, flat) the bf16 catalog's first X3_TILES tiles whose LDS (fp32 output tile) fits.
-X3_ATOMS = {"mfma16_bf16", "wmma11_bf16", "wmma12_bf16"}
+X3_ATOMS = {"mfma16_bf16", "wmma11_bf16", "wmma12_bf16", "wmma125_bf16"}
 X3_TILES = 2
 CATALOGX3 = []
 
@@ -495,6 +500,41 @@ def build_x3():
             continue
         tiles.append(c)
         CATALOGX3.append(dict(c, math=1))
+
+
+def kernels_for(catalog, priority=1000):
+    kernels = []
+    for dtype, cfgs in catalog.items():
+        dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16", "FLOATX3": "f32x3"}[
+            dtype
+        ]
+        dtype = "FLOAT" if dtype == "FLOATX3" else dtype
+        for i, c in enumerate(cfgs):
+            kind = (
+                f"w{c['wm']}x{c['wn']}x{c['wp']}"
+                if c["atom"] != "fma"
+                else f"t{c['tq']}x{c['tc']}.s{c['stages']}"
+            )
+            name = f"conv_igemm_nchw.bwd.{dt}.{c['atom']}.{c['bmq']}x{c['bn']}x{c['bk']}.{kind}" f".v{c['vec']}.s{c['stride']}t{c['taps']}" + (
+                f".f{c['flat']}" if c["flat"] else ""
+            ) + (
+                f".h{c['halo']}" if c["halo"] != c["vec"] else ""
+            )
+            kernels.append(
+                {
+                    "version": "1.0",
+                    "id": U(name),
+                    "name": name,
+                    "kernel_source": {
+                        "kind": "embedded_source",
+                        "source_file": "kernels/ConvIgemmNchw.cpp",
+                        "entry_point": "ConvIgemmNchw",
+                    },
+                    "metadata": {"direction": "BWD", "dtype": dtype, **c},
+                    "priority": priority - i,
+                }
+            )
+    return kernels
 
 
 def emit():
@@ -564,38 +604,17 @@ def emit():
             "numerical_notes": ["tensor_core"],
         },
     )
-    kernels = []
-    x3 = []
-    for dtype, cfgs in list(CATALOG.items()) + [("FLOATX3", CATALOGX3)]:
-        dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16", "FLOATX3": "f32x3"}[
-            dtype
-        ]
-        dtype = "FLOAT" if dtype == "FLOATX3" else dtype
-        for i, c in enumerate(cfgs):
-            kind = (
-                f"w{c['wm']}x{c['wn']}x{c['wp']}"
-                if c["atom"] != "fma"
-                else f"t{c['tq']}x{c['tc']}.s{c['stages']}"
-            )
-            name = f"conv_igemm_nchw.bwd.{dt}.{c['atom']}.{c['bmq']}x{c['bn']}x{c['bk']}.{kind}" f".v{c['vec']}.s{c['stride']}t{c['taps']}" + (
-                f".f{c['flat']}" if c["flat"] else ""
-            ) + (
-                f".h{c['halo']}" if c["halo"] != c["vec"] else ""
-            )
-            (x3 if c["math"] else kernels).append(
-                {
-                    "version": "1.0",
-                    "id": U(name),
-                    "name": name,
-                    "kernel_source": {
-                        "kind": "embedded_source",
-                        "source_file": "kernels/ConvIgemmNchw.cpp",
-                        "entry_point": "ConvIgemmNchw",
-                    },
-                    "metadata": {"direction": "BWD", "dtype": dtype, **c},
-                    "priority": 1000 - i - (len(CATALOG["FLOAT"]) if c["math"] else 0),
-                }
-            )
+    kernels = kernels_for(
+        {
+            dtype: [c for c in cfgs if not c["atom"].startswith("wmma125")]
+            for dtype, cfgs in CATALOG.items()
+        }
+    )
+    x3 = kernels_for(
+        {"FLOATX3": [c for c in CATALOGX3 if not c["atom"].startswith("wmma125")]},
+        priority=1000
+        - len([c for c in CATALOG["FLOAT"] if not c["atom"].startswith("wmma125")]),
+    )
     write(
         "conv_igemm_nchw_bwd.kdp.json",
         {
@@ -623,6 +642,26 @@ def emit():
         },
     )
     kernels += x3
+    for dtype, cfgs in list(CATALOG.items()) + [("FLOATX3", CATALOGX3)]:
+        native_kernels = kernels_for(
+            {dtype: [c for c in cfgs if c["atom"].startswith("wmma125")]}, priority=1100
+        )
+        dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16", "FLOATX3": "f32x3"}[
+            dtype
+        ]
+        native_pack = {
+            "version": "1.0",
+            "id": U("kdp.bwd.gfx1250." + dt),
+            "name": "hipkernel:conv_igemm_nchw_bwd_gfx1250_" + dt,
+            "arch": ["gfx1250"],
+            "matchers": [umd],
+            "engine": ued_tf32 if dtype == "FLOATX3" else ued,
+            "dispatch": udd,
+            "kernelDescriptors": native_kernels,
+        }
+        assert len(json.dumps(native_pack, indent=2).encode()) < 500 * 1024
+        write("conv_igemm_nchw_bwd_gfx1250_" + dt + ".kdp.json", native_pack)
+        kernels += native_kernels
     names = [k["name"] for k in kernels]
     assert len(names) == len(set(names)), "duplicate config names"
     tuples = [

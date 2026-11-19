@@ -10,10 +10,12 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/NumericalNote.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
 #include "engines/PlanBuilderEngine.hpp"
+#include "engines/plans/HipblasltMatmulPlanBuilder.hpp"
 #include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
 #include "mocks/MockPlanBuilder.hpp"
 
@@ -281,7 +283,7 @@ TEST(TestPlanBuilderEngine, InitializeExecutionContextSkipsNonApplicableBuilders
     engine.initializeExecutionContext(dummyHandle, mockGraph, ctx);
 }
 
-TEST(TestPlanBuilderEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoApplicableBuilders)
+TEST(TestPlanBuilderEngine, InitializeExecutionContextThrowsInternalErrorIfNoApplicableBuilders)
 {
     auto mockPlanBuilder1 = std::make_unique<MockPlanBuilder>();
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
@@ -301,5 +303,36 @@ TEST(TestPlanBuilderEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoAp
     HipdnnEnginePluginHandle const dummyHandle;
     MockHipdnnEnginePluginExecutionContext ctx;
 
-    engine.initializeExecutionContext(dummyHandle, mockGraph, ctx);
+    try
+    {
+        engine.initializeExecutionContext(dummyHandle, mockGraph, ctx);
+        FAIL() << "initializeExecutionContext must not return a planless context";
+    }
+    catch(const HipdnnPluginException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+    }
+}
+
+// A legal graph the real plan builder does not serve (batchnorm) must not yield a
+// planless context that only fails later, when the plan is requested.
+TEST(TestPlanBuilderEngine, InitializeExecutionContextThrowsInternalErrorForUnservedGraph)
+{
+    PlanBuilderEngine engine(1);
+    engine.addPlanBuilder(std::make_unique<HipblasltMatmulPlanBuilder>());
+
+    auto builder = createValidBatchnormFwdTrainingGraph();
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+    HipdnnEnginePluginHandle const dummyHandle;
+    MockHipdnnEnginePluginExecutionContext ctx;
+
+    try
+    {
+        engine.initializeExecutionContext(dummyHandle, graph, ctx);
+        FAIL() << "initializeExecutionContext must not return a planless context";
+    }
+    catch(const HipdnnPluginException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+    }
 }

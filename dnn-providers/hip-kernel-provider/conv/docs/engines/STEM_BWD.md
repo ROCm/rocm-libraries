@@ -15,7 +15,7 @@ SPDX-License-Identifier:  MIT
 - **Wins when:** RGB stems in training: 7x7 s2 (ResNet, DeepLab, Mask R-CNN), 3x3 s2 NHWC (EfficientNet), patchify (ConvNeXt), 3-D video stems. 1.4-2.3x MIOpen call-weighted on every GPU, up to 5-9x on single graphs.
 - **Loses when:** stride-1 3x3 RGB stems at high resolution (U-Net 512²) against MIOpen's asm Winograd (`ConvWinoRageRxS` / `ConvWinoFuryRxS`, 0.8-0.9x), and one fp32 3x3 stem per CDNA GPU against `ConvAsm3x3U`.
 - **Precision:** fp32 accumulation, the whole reduction in one block, every dx element written once. Deterministic. No numerical notes.
-- **Instances:** 1651 configs in 11 packs (per dtype and architecture family): 1187 vector configs chosen from the universe by a per-config bench on seven architectures, and 464 channels-last single-element twins of the kept channels-last vector configs; 4-9 admitted per graph typically, at most 21.
+- **Instances:** 3034 configs in 12 packs (per dtype and architecture family): 2249 vector configs (chosen from the universe by a per-config bench on seven architectures, plus the native gfx1250 candidates), and 785 channels-last single-element twins of the kept channels-last vector configs; 4-9 admitted per graph typically, at most 21.
 - **vs MIOpen:** replaces `GemmBwdRest` (col2im), the stride-2 Winograd `ConvBinWinogradRxSf3x2`, CK grouped bwd and the HIP direct kernels on stems.
 
 ## Why it exists

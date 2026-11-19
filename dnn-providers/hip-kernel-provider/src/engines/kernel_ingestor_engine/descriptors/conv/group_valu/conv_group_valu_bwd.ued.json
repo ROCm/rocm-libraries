@@ -10,7 +10,8 @@
     "kb",
     "cb",
     "p",
-    "nw"
+    "nw",
+    "layout_id"
   ],
   "behavior_notes": [
     "runtime_compilation"
