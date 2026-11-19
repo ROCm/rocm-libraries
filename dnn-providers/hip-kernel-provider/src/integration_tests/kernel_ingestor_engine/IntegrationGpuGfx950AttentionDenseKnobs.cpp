@@ -248,8 +248,10 @@ std::vector<KnobCase> knobCases()
         // The trained gfx950 ranker takes this one and Cold_D128Hq8Kv8_Bf16NoMask below
         // somewhere the native rule does not (it wants 128/128 here). Both shapes are
         // D128 non-causal, the cohort §6 of the case study calls the weak one, and
-        // neither was in the sweep, so which tile is faster is unmeasured. What is
-        // checked is that the pick is correct: the CPU reference compare runs either way.
+        // neither was in the case study's sweep. The ranker's own corpus does measure that
+        // cohort at short sequence lengths, and 128/64 is the faster of 128/64 and 128/128
+        // there, so these two pins follow the retrained model. What is checked is that
+        // the pick is correct: the CPU reference compare runs either way.
         {"Cold_MmaBfloat16",
          makeShape(BF16, 128, 8, 1, Mask::NO_MASK, BF16, 3, 384, 256),
          COLD,
@@ -452,7 +454,7 @@ std::vector<KnobCase> knobCases()
         {"Cold_D128Hq8Kv8_Bf16NoMask",
          makeShape(BF16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
          COLD,
-         Tile{128, 128}},
+         Tile{128, 64}},
         // An fp16 graph with each explicit mma_core_mode.
         {"Cold_Fp16MmaHalf",
          makeShape(FP16, 128, 16, 16, Mask::BOUNDS_TOP_LEFT, FP16, 2, 256, 512),
