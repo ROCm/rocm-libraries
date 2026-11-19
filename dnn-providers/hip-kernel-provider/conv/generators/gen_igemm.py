@@ -241,7 +241,7 @@ def withPatch(cfgs, tag):
     extra = withSwz(withFlat(extra))
     # gfx950: the same short GEMMs on its 16x16x32 / 32x32x16 atoms with DMA rings (DMA serves
     # the flat reduction too, so ViT's 48-channel runs keep a 2- to 3-deep load ring).
-    for atom in PATCH_DMA_ATOMS & atoms:
+    for atom in [a for a in PATCH_DMA_ATOMS if a in atoms]:
         extra += [
             C(atom, bm, bn, 64, wm, wn, vec=8, xcd=1, swz=1, dma=d)
             for bm, bn, wm, wn in ((64, 64, 2, 2), (64, 128, 2, 2), (128, 128, 2, 2))
@@ -351,6 +351,32 @@ PATCH_TILE = {
 PATCH_TILE["wmma12"] = PATCH_TILE["wmma11"]
 
 
+# split_policy twins (splitPlanFor): 1 runs unsplit, N >= 2 exactly N splits. Every
+# matrix-core gfx9 config that can split gets a no-split twin (an under-filled small problem may
+# run faster unsplit than split plus the reduce launch), and the widest tiles a 32-split twin
+# (past the default's 16, for GEMM-shaped layers with long reductions). The kernel match admits a
+# twin only where its plan differs from the default's, so autotune times distinct plans only.
+SPLIT_POLICY_WIDE = 32
+
+
+def withSplitPolicy(cfgs):
+    out = list(cfgs)
+    for c in cfgs:
+        if (
+            not c["atom"].startswith("mfma")
+            or c["atom"].endswith("_xf32")
+            or c["math"] != "native"
+            or c["patch"]
+            or c["large"]
+            or c["split_policy"]
+        ):
+            continue
+        out.append(dict(c, split_policy=1))
+        if c["bm"] * c["bn"] >= 256 * 128:
+            out.append(dict(c, split_policy=SPLIT_POLICY_WIDE))
+    return out
+
+
 def patchTile(cfgs, tag):
     # The catalog's own 16-bit atoms (its fp32 catalog runs its three-bf16 configs on 16-bit
     # atoms, which the patch tile does not serve).
@@ -370,7 +396,9 @@ def patchTile(cfgs, tag):
     return out
 
 
-PATCH_DMA_ATOMS = {"mfma16x32_f16", "mfma16x32_bf16", "mfma32x16_f16", "mfma32x16_bf16"}
+# In emission order (a tuple, not a set: a set's iteration order follows string hashing, which
+# PYTHONHASHSEED and unrelated edits change). The order is the one the catalogs carry.
+PATCH_DMA_ATOMS = ("mfma32x16_f16", "mfma16x32_f16", "mfma32x16_bf16", "mfma16x32_bf16")
 PATCH_TILES["mfma16_bf16_908"] = [(64, 64, 16, 2, 2, 4), (128, 64, 32, 2, 2, 4)]
 
 
@@ -667,7 +695,7 @@ def kernels_for(catalog, direction, tag, priority=1000):
         )
         # Channels-first-input twins (cfx) are in the legacy catalogs, not the gfx1250 ones.
         if catalog is CATALOG:
-            cfgs = withCfx(cfgs, tag)
+            cfgs = withSplitPolicy(withCfx(cfgs, tag))
         # The measured explicit no-split candidate is appended after all legacy twins,
         # preserving their names, enumeration order and priorities.
         if tag == "bwd" and dtype == "HALF" and catalog is CATALOG125:
@@ -717,7 +745,9 @@ def kernels_for(catalog, direction, tag, priority=1000):
             ) + (
                 ".cfx" if c["cfx"] else ""
             ) + (
-                ".nosplit" if c["split_policy"] else ""
+                ".nosplit"
+                if c["split_policy"] == 1
+                else f".split{c['split_policy']}" if c["split_policy"] else ""
             ) + (
                 ".flex" if c["flex"] else ""
             )
