@@ -110,6 +110,11 @@ times ``HIPBLASLT_TUNING_HOT_ITERS`` timed calls exploring, which may run slower
 memory proportional to the timed calls until it is done; values set for ``tune`` apply to ``online``
 too. The startup notice shows the values ``online`` uses as ``K``, ``R`` and ``cold``.
 
+``online`` keeps state for every key it sees for the life of the process, and explores each key
+called more than ``HIPBLASLT_TUNING_COLD_ITERS`` times and appends its row. Workloads with many
+distinct shapes, such as a varying M, therefore grow memory use, exploration and the cache file with
+each new shape.
+
 While a key is explored, which takes about ``HIPBLASLT_TUNING_MAX_CANDIDATES`` times
 ``HIPBLASLT_TUNING_HOT_ITERS`` calls, consecutive calls of a problem run different kernels, so their
 outputs can differ bitwise. Those calls are also slower: they run lower-ranked candidates, which can
@@ -147,7 +152,10 @@ rows of their own.
 
 A call captured into a HIP graph is never explored or timed, and gets the measured winner if there
 is one. Exploring calls leave a capture in progress valid in every capture mode, whether it is on
-their own thread or another.
+their own thread or another. Captured calls don't count toward exploration, so a key needs about
+``HIPBLASLT_TUNING_COLD_ITERS`` plus ``HIPBLASLT_TUNING_MAX_CANDIDATES`` times
+``HIPBLASLT_TUNING_HOT_ITERS`` calls outside a capture before capture starts, or a cache file that
+already serves it. Otherwise it isn't tuned in that process.
 
 The winner is appended to ``HIPBLASLT_TUNING_CACHE_PATH`` in the row format ``cache`` replays,
 marked incomplete if a candidate could not be timed. The row records the mode that measured it, and
