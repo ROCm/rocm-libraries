@@ -424,7 +424,7 @@ def isStubOnlyArchitecture(architecture: str) -> bool:
 # Translate GPU targets to filter filenames in Tensile_LOGIC directory
 architectureMap = {
   'all':'_', STUB_GFX_TARGET:'none', 'fallback':'hip',
-  'gfx803':'r9nano', 'gfx900':'vega10', 'gfx900:xnack-':'vega10', 'gfx90c':'vega10',
+  'gfx803':'r9nano', 'gfx900':'vega10', 'gfx900:xnack-':'vega10', 'gfx90c':'gfx90c',
   'gfx906':'vega20', 'gfx906:xnack+':'vega20', 'gfx906:xnack-':'vega20',
   'gfx908':'arcturus','gfx908:xnack+':'arcturus', 'gfx908:xnack-':'arcturus',
   'gfx90a':'aldebaran', 'gfx90a:xnack+':'aldebaran', 'gfx90a:xnack-':'aldebaran',
