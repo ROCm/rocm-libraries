@@ -216,7 +216,7 @@ def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
     kernel["EnableMatrixInstruction"] = True
     kernel["AdaptiveGemm"] = 0
     kernel["AdaptiveGemmGSUA"] = 0
-    kernel["TDMStoreInst"] = 0
+    kernel["TDMStoreInst"] = False
     kernel["ActivationFuncCall"] = False
     kernel["ISA"] = [9, 5, 0]
     kernel["KernelLanguage"] = "Assembly"

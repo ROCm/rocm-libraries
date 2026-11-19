@@ -56,8 +56,8 @@ from .NonTemporal import tdmCacheModifiers
 # (Component.py), and GlobalWriteBatch imports Solution, which imports this module.
 
 TDM_STORE_PATHS = {
-  0: (),
-  1: ("EdgeM", "EdgeN", "NonEdge"),
+  False: (),
+  True: ("EdgeM", "EdgeN", "NonEdge"),
 }
 
 # StinkyRemoveWaitCntPass never removes a wait whose comment contains this tag. The TDM block tags
