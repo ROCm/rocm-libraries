@@ -9,7 +9,8 @@ worker processes; one that spills (VGPR or SGPR) is never run.
 
 Timing goes first: ``rounds`` interleaved rounds (order reversed every other
 round), each kernel 1 s idle, ``warmup`` launches, then ``repeat`` launches in
-one event pair, on rand data (normal(0, 0.1) -> e4m3, E8M0 scales 2^-3..2^3).
+one event pair, on rand data (normal(0, 0.1) -> e4m3, E8M0 scales 2^-3..2^3), or
+with ``--data mxgemm`` on the mx_gemm prototype bench's timed inputs.
 Correctness comes last, for the ``--verify-top`` best kernels only, at
 K = 8192: exact on the integer set (scales 2^0..2^1), max relative error under
 the rand bound on the rand set.
@@ -212,7 +213,7 @@ def _swz(np, x, rows, reps=8):
 class _Problem:
     """A/B/C and scale buffers for one shape; rand data and scales loaded."""
 
-    def __init__(self, rt, shape):
+    def __init__(self, rt, shape, data="rand"):
         import numpy as np
 
         from rocke.examples.gfx1250.gemm_perf_fp8.fp8_data import rand_operands
@@ -224,6 +225,19 @@ class _Problem:
         self.c = rt.alloc(m * n * 2)
         self.sa = rt.alloc(m * k // 32)
         self.sb = rt.alloc(n * k // 32)
+        if data == "mxgemm":
+            # The timed inputs of the mx_gemm prototype's bench: uniform e4m3
+            # codes with the exponent MSB clear (finite, |x| < 2), E8M0 scales
+            # 2^-3..2^3, drawn in its order (A, B, A scales, B scales).
+            rng = np.random.default_rng(0x32F4)
+            a8, b8 = (np.bitwise_and(rng.integers(0, 256, (r, k), dtype=np.uint8), 0xBF) for r in (m, n))
+            self._h2d(self.a, a8)
+            self._h2d(self.b, b8)
+            sa = rng.integers(124, 131, (m, k // 32), dtype=np.uint8)
+            sb = rng.integers(124, 131, (k // 32, n), dtype=np.uint8).T.copy()
+            self.scales = (sa, sb)
+            self.swz = None
+            return
         a8, b8, _, _ = rand_operands(np, m, n, k)
         self._h2d(self.a, a8)
         self._h2d(self.b, b8)
@@ -320,6 +334,8 @@ def main():
     ap.add_argument("--free-interval", type=float, default=10.0)
     ap.add_argument("--allow-single", action="store_true")
     ap.add_argument("--no-pair-check", action="store_true", help="do not tag busy batches")
+    ap.add_argument("--data", choices=("rand", "mxgemm"), default="rand",
+                    help="timed inputs: rand (normal(0, 0.1) -> e4m3) or the mx_gemm bench's (uniform codes, |x| < 2)")
     o = ap.parse_args()
 
     cfg = json.loads(o.config.read_text())
@@ -377,7 +393,7 @@ def main():
         w.writerow(["kernel", "M", "N", "K", "round", "tflops", "pair_busy"])
         for shape in cfg["shapes"]:
             shape = tuple(shape)
-            prob = _Problem(rt, shape)
+            prob = _Problem(rt, shape, o.data)
             grid, block = _launch_geometry(spec, shape)
             fl = 2.0 * shape[0] * shape[1] * shape[2]
             for r in range(rounds):

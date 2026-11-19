@@ -1,0 +1,40 @@
+{
+  "_comment": "mx_env_sweep.py config: the MX champion alone (scale swizzle, K-atom fence, scale multicast off, constant scale extents) at three cluster shapes, MAF shape, for timing on a chosen data set (--data rand or mxgemm).",
+  "base_env": {
+    "ROCKE_EXP_MX": "1",
+    "ROCKE_EXP_MX_SWZ": "1",
+    "ROCKE_EXP_MX_SCALE_MC": "0",
+    "ROCKE_EXP_MX_KFENCE": "1",
+    "ROCKE_EXP_MX_SCALE_NOCLIP": "1",
+    "ROCKE_EXP_MC_SOLO0": "1"
+  },
+  "variants": [
+    {
+      "name": "mxswz",
+      "env": {}
+    }
+  ],
+  "arms": [
+    {
+      "name": "c1x1"
+    },
+    {
+      "name": "c1x4",
+      "cluster": "1,4"
+    },
+    {
+      "name": "c4x4",
+      "cluster": "4,4"
+    }
+  ],
+  "shapes": [
+    [
+      3072,
+      4096,
+      65536
+    ]
+  ],
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}
