@@ -7,10 +7,12 @@ The one place that turns a conv problem and a kernel tile into a split-K
 degree and a reduction path. The kernel builders and the benchmark (JIT
 sweep and ``--run-from-cache``) all call :func:`resolve_conv_split_k`, so a
 degree requested as ``split_k=-1`` (auto) comes out the same wherever it is
-resolved -- the benchmark times the degree a builder would build, and a
-builder never re-derives it from different inputs. (The grouped-convolution
-dispatcher serves registered instance lists and registers no wgrad instances,
-so it does not resolve a wgrad degree.)
+resolved with the same ``num_cus`` / ``num_xcds``. Builders and dispatch,
+unless given a concrete degree, resolve for the arch's default part; the
+benchmark resolves for the device it times on, so the two can differ on a
+part with fewer CUs. (The grouped-convolution dispatcher serves registered
+instance lists and registers no wgrad instances, so it does not resolve a
+wgrad degree.)
 
 An auto degree comes from the split-K cost model
 (:mod:`kernels.conv.split_k_planner`) on arches that have one -- and, for
