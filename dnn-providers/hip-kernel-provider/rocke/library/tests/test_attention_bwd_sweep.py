@@ -271,7 +271,10 @@ def test_g4_slicing_is_enumerated_with_block_k4_in_stage_h():
             "slice_db",
             "slice_db_g3",
         }
-        full = sw.schedule_values(c, sw.Release(sw.ALL_RELEASED, "full"))
+        # the stage's extra knobs never set (g4_slicing, block_k4), and the
+        # all-default combination of them keeps every point: the projection
+        # is the same without them
+        full = sw.schedule_values(c, sw.Release(sw.ALL_RELEASED, "full"), extras=False)
         assert {(p["g4_slicing"], p["block_k4"]) for p in full} == {
             (p["g4_slicing"], p["block_k4"]) for p in pts
         }

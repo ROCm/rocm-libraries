@@ -584,8 +584,13 @@ def test_stages_enumerate_the_new_knobs():
     assert all(
         p.get("loop_sync") == "counted" for p in h if p.get("counted_issue") == "late"
     )
-    h_full = sw.schedule_values(c, ALL_FULL)
-    late = [p for p in h_full if p.get("counted_issue") == "late"]
+    # The full level crosses the stage's extra knobs on every product point;
+    # their couplings are decided per point, so two points cover the rules
+    # checked here: the start point and an asm_g13 point.
+    base = sw.schedule_values(c, ALL_FULL, extras=False)
+    pts = [base[0], next(p for p in base if p.get("agpr_route") == "asm_g13")]
+    full = sw.with_extras(c, ALL_FULL, pts, sw.SCHEDULE_EXTRA)
+    late = [p for p in full if p.get("counted_issue") == "late"]
     assert late and all(p.get("loop_sync") == "counted" for p in late)
     assert _values(h, "qdo_stage", "split") == {"split", "loads_first", "joint"}
     assert _values(h, "stats_load", "at_use") == {"at_use", "step_top"}
@@ -601,11 +606,10 @@ def test_stages_enumerate_the_new_knobs():
     # production: one registry knob moved per point
     extra = set(sw.SCHEDULE_EXTRA)
     assert all(len(extra & set(p)) <= 1 for p in h)
-    full = sw.schedule_values(c, ALL_FULL)
     assert _values(full, "stage_order", "g1g3g4") == set(
         tc.backward_axis("stage_order").choices
     )
-    assert len(full) > len(h)
+    assert len(full) > len(sw.with_extras(c, ALL_PROD, pts, sw.SCHEDULE_EXTRA))
     k = sw.minor_values(c, ALL_PROD)
     assert _values(k, "step_order", "qtile_outer") == {"qtile_outer", "head_outer"}
     assert _values(k, "dkv_epilogue", "lds_staged") == {
