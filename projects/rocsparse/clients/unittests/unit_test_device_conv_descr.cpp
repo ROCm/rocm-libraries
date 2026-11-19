@@ -1554,8 +1554,7 @@ namespace
         });
     }
 
-    // rows * ell_cols must fit in int64_t. Only the rocsparse_bell_set_pointers
-    // lines catch the old rows + ell_block_dim - 1 expression.
+    // rows * ell_cols must fit in int64_t, and the block-row count must not overflow.
     TEST_F(ConvDescr, BellSizeOverflow)
     {
         in_both_debug_modes([] {
@@ -1571,8 +1570,9 @@ namespace
             expect_bell(k_max, 1, 2, 1, g_dummy, nullptr, st_size);
             expect_bell(k_max, 1, 2, 1, g_dummy, g_dummy, st_size);
 
-            // rows * ell_cols still fits, and the block-row count is large enough
-            // that the old rows + block_dim - 1 expression overflowed.
+            // rows * ell_cols = 2^63 - 2 is the largest product that fits with
+            // two-wide blocks, and rocsparse_bell_set_pointers still checks both
+            // arrays.
             Spmat d;
             ASSERT_EQ(rocsparse_create_bell_descr(
                           &d, k_max / 2, 1, dir_r, 2, 2, g_dummy, g_dummy, i32, base0, f32),
@@ -1589,6 +1589,32 @@ namespace
             expect_bell(3, 3, 2, 4, g_dummy, g_dummy, st_ok);
             expect_bell(3, 3, 2, 6, g_dummy, g_dummy, st_size);
         });
+
+        // rows need not be a whole number of blocks, so rows = INT64_MAX with
+        // block_dim 2 builds a descriptor. ell_cols is a multiple of block_dim, so it
+        // must be 0 for rows * ell_cols to fit. Both arrays are then empty, and only
+        // the blocked ELL buffer-size query of rocsparse_dense_to_sparse uses the
+        // block-row count. That count is 2^62, and 2^62 int64_t entries do not fit in
+        // size_t. The old (rows + block_dim - 1) / block_dim overflows for this row
+        // count, and the wrapped negative count passed the size check.
+        Spmat max_rows;
+        ASSERT_EQ(rocsparse_create_bell_descr(
+                      &max_rows, k_max, 1, dir_r, 2, 0, nullptr, nullptr, i32, base0, f32),
+                  st_ok);
+        rocsparse_dnmat_descr max_rows_dense = nullptr;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(
+                      &max_rows_dense, k_max, 1, k_max, g_dummy, f32, rocsparse_order_column),
+                  st_ok);
+        size_t max_rows_buffer = 7;
+        EXPECT_EQ(rocsparse_dense_to_sparse(handle,
+                                            max_rows_dense,
+                                            max_rows,
+                                            rocsparse_dense_to_sparse_alg_default,
+                                            &max_rows_buffer,
+                                            nullptr),
+                  st_size);
+        EXPECT_EQ(max_rows_buffer, 7);
+        EXPECT_EQ(rocsparse_destroy_dnmat_descr(max_rows_dense), st_ok);
 
         Spmat small;
         ASSERT_EQ(rocsparse_create_bell_descr(
