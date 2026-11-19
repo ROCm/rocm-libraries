@@ -170,6 +170,13 @@ def test_a_bias_is_declined_on_gfx942():
     assert "bias" in _declined(_biased(arch="gfx942", right_bound=0))
 
 
+@pytest.mark.parametrize("dtype", ["bool", "int32", "fp8_e4m3"])
+def test_a_bias_that_cannot_become_f32_is_declined(dtype):
+    req = _biased((2, 4, 8, 8), dtype)
+    assert {"bias"} <= req.features()
+    assert _declined(req).startswith("bias: ")
+
+
 def test_a_ragged_bias_is_declined():
     t = packed((2, 4, 8, 8), "fp32")
     reason = _declined(_unified_request(bias=SdpaBias(_ragged(t))))

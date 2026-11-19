@@ -26,6 +26,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from kernels.common._sdpa_seqlen import validate_lengths
+from kernels.common.attention_unified import _I32_LIMIT
 from rocke.core.arch import known_arches
 from rocke.dispatch.core import TorchBinding
 from rocke.runtime.torch_interop import device_tensor, empty_workspace, torch_dtype
@@ -40,6 +41,7 @@ from dispatch.attention import (
 from dispatch.attention.common import Alignment, AttentionBand
 
 from .bind_shared import (
+    _KERNEL_ALIGNMENT,
     TORCH_DTYPES,
     Operand,
     asked_band,
@@ -183,9 +185,6 @@ def _scale_reject(req: SdpaRequest) -> tuple[bool, str] | None:
     return None
 
 
-# The kernels index the bias in i32 (``_validate_additive_bias`` in
-# ``kernels/common/attention_unified.py``).
-_BIAS_INDEX_LIMIT = 2**31
 _BIAS_DTYPES = ("fp32", "fp16", "bf16")
 
 
@@ -209,7 +208,7 @@ def _bias_reject(req: SdpaRequest) -> tuple[bool, str] | None:
             f"converted (supported: {', '.join(_BIAS_DTYPES)})"
         )
     b, h, sq, _ = bias.dims
-    if b * h * sq * req.s_kv >= _BIAS_INDEX_LIMIT:
+    if b * h * sq * req.s_kv >= _I32_LIMIT:
         return False, (
             f"bias: dims {bias.dims} expand to {b * h * sq * req.s_kv} f32 "
             f"elements, past the kernels' i32 bias addressing (2**31)"
@@ -332,24 +331,22 @@ def _lengths(given, key: str, operand: Operand, batch: int, extent: int):
 class _BiasPlan:
     """The f32 additive bias the kernels read, from the request's ``bias``.
 
-    The kernels address ``bias[seq * batch_stride + head * head_stride + row *
-    sq_stride + key]`` with the key axis contiguous, and a stride of 0 for a
-    broadcast axis. A caller's bias that is already f32, key-contiguous and
-    ``s_kv`` wide, with a row pitch the kernels accept and an in-range base, is
-    read in place. Any other is copied each launch into a contiguous f32
-    workspace of the same broadcast shape, which converts the dtype and
-    expands a key dim of 1.
+    A caller's bias that is already f32 and ``s_kv`` wide is read in place when
+    the kernels accept its layout; any other is copied each launch into a
+    contiguous f32 workspace, which converts the dtype and expands a key dim of
+    1. The kernel arguments come from the tuning binding's
+    ``_tuning_additive_bias``, which owns the stride, i32 and storage rules.
     """
 
-    def __init__(self, req: SdpaRequest, tensor: Any, device: Any) -> None:
+    def __init__(
+        self, req: SdpaRequest, tensor: Any, attn: Any, problem: Any, q: Any
+    ) -> None:
         import torch
+
+        from dispatch.attention.bindings import _tuning_additive_bias
 
         desc = req.bias.tensor
         check_dtype("bias", tensor, desc)
-        if tensor.device != device:
-            raise ValueError(
-                f"bias: expected a tensor on {device}, got {tensor.device}"
-            )
         if tensor.dim() < 4:
             tensor = tensor[(None,) * (4 - tensor.dim())]
         if tuple(tensor.shape) != tuple(desc.dims):
@@ -357,52 +354,35 @@ class _BiasPlan:
                 f"bias: tensor shape {tuple(tensor.shape)} is not the request's "
                 f"dims {desc.dims}"
             )
-        for n, got, want in zip(desc.dims, tensor.stride(), desc.strides):
-            if n > 1 and got != want:
-                raise ValueError(
-                    f"bias: tensor strides {tuple(tensor.stride())} are not the "
-                    f"request's strides {desc.strides}"
-                )
-        s_kv = req.s_kv
-        dims = desc.dims
-        strides = tuple(0 if n == 1 else st for n, st in zip(dims, tensor.stride()))
-        reach = sum((n - 1) * st for n, st in zip(dims[:3], strides[:3])) + s_kv - 1
-        in_place = (
-            tensor.dtype == torch.float32
-            and dims[3] == s_kv
-            and (s_kv == 1 or strides[3] == 1)
-            and (strides[2] == 0 or strides[2] >= s_kv)
-            and reach < _BIAS_INDEX_LIMIT
-            and tensor.data_ptr() % 16 == 0
-        )
         self.src = tensor
-        if in_place:
-            self.ws = None
-            self.tensor = tensor
-            self.strides = strides[:3]
-            return
-        self.ws = empty_workspace(
-            (dims[0], dims[1], dims[2], s_kv),
-            dtype=torch_dtype("float32"),
-            device=device,
-        )
-        self.tensor = self.ws
-        self.expand = (dims[0], dims[1], dims[2], s_kv)
-        compact = (dims[1] * dims[2] * s_kv, dims[2] * s_kv, s_kv)
-        self.strides = tuple(0 if n == 1 else st for n, st in zip(dims[:3], compact))
+        self.ws = None
+        self.kwargs = None
+        if (
+            tensor.dtype == torch.float32
+            and desc.dims[3] == req.s_kv
+            and tensor.data_ptr() % _KERNEL_ALIGNMENT == 0
+        ):
+            try:
+                self.kwargs = _tuning_additive_bias(
+                    attn, problem, {"attn_bias": tensor, "q": q}
+                )
+            except (ValueError, NotImplementedError):
+                pass  # a layout the kernels refuse: copy it instead
+        if self.kwargs is None:
+            self.expand = (*desc.dims[:3], req.s_kv)
+            self.ws = empty_workspace(
+                self.expand, dtype=torch_dtype("float32"), device=q.device
+            )
+            self.kwargs = _tuning_additive_bias(
+                attn, problem, {"attn_bias": self.ws, "q": q}
+            )
 
     def pack(self) -> None:
         if self.ws is not None:
             self.ws.copy_(self.src.expand(self.expand))
 
     def kernel_args(self) -> dict[str, Any]:
-        batch, head, sq = self.strides
-        return {
-            "additive_bias": self.tensor,
-            "additive_bias_batch_stride": batch,
-            "additive_bias_head_stride": head,
-            "additive_bias_sq_stride": sq,
-        }
+        return self.kwargs
 
 
 class _LaunchPlan:
@@ -513,7 +493,9 @@ class _LaunchPlan:
         self.cu_seqlens_q = device_tensor(cu, dtype=int32, device=device)
         self.seqused_k = device_tensor(self.kv_len, dtype=int32, device=device)
         self.bias = (
-            None if req.bias is None else _BiasPlan(req, tensors["bias"], device)
+            None
+            if req.bias is None
+            else _BiasPlan(req, tensors["bias"], attn, self.problem, self.q_packed)
         )
         self.lse = (
             None

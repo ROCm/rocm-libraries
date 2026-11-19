@@ -803,29 +803,6 @@ def supports_native_unified_attention_3d_tiled(
     )
 
 
-def supports_native_unified_attention_coverage(
-    problem: UnifiedAttentionProblem,
-    arch: str,
-) -> Tuple[bool, str]:
-    """The scalar coverage gate (head size, block size, dtype, features), asked
-    about the LSE-off problem.
-
-    The scalar kernel writes no LSE, so the scalar gate refuses ``emit_lse``. The
-    path's own gate (:func:`unified_lse_path_gate`) rules on LSE; this one never does.
-    """
-    if problem.emit_lse:
-        problem = replace(problem, emit_lse=False)
-    return supports_native_unified_attention(problem, arch=arch)
-
-
-def unified_lse_path_gate(path: str) -> Callable[..., Tuple[bool, str]]:
-    """The gate of ``path`` (``"3d"`` split-KV, else tiled 2D). It owns which
-    arches and features can write LSE."""
-    if path == "3d":
-        return supports_native_unified_attention_3d_tiled
-    return supports_native_unified_attention_tiled
-
-
 _ATTN_CACHE: Dict[Tuple, bytes] = {}
 _ATTN_TILED_CACHE: Dict[Tuple, bytes] = {}
 _ATTN_3D_TILED_CACHE: Dict[Tuple, Tuple[bytes, str, bytes, str]] = {}
