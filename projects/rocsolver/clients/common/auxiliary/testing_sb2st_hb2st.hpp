@@ -27,6 +27,8 @@
 
 #pragma once
 
+#include <limits>
+
 #include "common/misc/client_util.hpp"
 #include "common/misc/clientcommon.hpp"
 #include "common/misc/generate.hpp"
@@ -193,6 +195,16 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
     // input data initialization
     sb2st_hb2st_initData<true, true, T, I>(handle, uplo, n, kd, dAband, ldab, hAband);
 
+    // Poison tau so that any entries left unwritten by hb2st are detected
+    // below. unmtr_hb2st reads tau for every V block, so hb2st must define
+    // all of it.
+    I nt = ceildiv(n - 1, kd);
+    I nv = kd * nt * (nt + 1) / 2;
+    host_strided_batch_vector<T> hTau(nv, 1, nv, 1);
+    for(I j = 0; j < nv; ++j)
+        hTau[0][j] = T(std::numeric_limits<S>::quiet_NaN());
+    CHECK_HIP_ERROR(dTau.transfer_from(hTau));
+
     // execute computations
     // GPU lapack
     CHECK_ROCBLAS_ERROR(rocsolver_sb2st_hb2st(handle, uplo, n, kd, dAband.data(), ldab, dD.data(),
@@ -200,9 +212,17 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
     CHECK_HIP_ERROR(hAbandRes.transfer_from(dAband));
     CHECK_HIP_ERROR(hDRes.transfer_from(dD));
     CHECK_HIP_ERROR(hERes.transfer_from(dE));
+    CHECK_HIP_ERROR(hTau.transfer_from(dTau));
 
     S err = 0;
     *max_err = 0;
+
+    // Check that hb2st defined every tau entry (none is still NaN).
+    for(I j = 0; j < nv; ++j)
+    {
+        err += std::isnan(real(hTau[0][j]));
+    }
+    *max_err = rocblas_max_nan(err, *max_err);
     if constexpr(rocblas_is_complex<T>)
     {
         // Check that diag is real to working precision.

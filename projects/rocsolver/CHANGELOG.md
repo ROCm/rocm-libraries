@@ -13,6 +13,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Resolved issues
 
 * Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
+* Fixed NaN eigenvectors from SYEVD/HEEVD and SYGVD/HEGVD when using the 2-stage tridiagonalization
+  (`rocsolver_alg_mode_2stage`). SB2ST/HB2ST left part of its Householder scalar array uninitialized,
+  and ORMTR_SB2ST/UNMTR_HB2ST later read it.
 ### Known issues
 ### Upcoming changes
 

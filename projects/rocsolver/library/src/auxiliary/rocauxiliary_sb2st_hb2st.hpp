@@ -795,6 +795,14 @@ rocblas_status rocsolver_sb2st_hb2st_template(rocblas_handle handle,
                                 V, 0, ldv, strideV, // V
                                 batch_count);
 
+    // Set tau = 0. Bulge-chasing tasks that reach the last row (nc == 1) and
+    // block columns beyond the last sweep never write their tau entries, but
+    // unmtr_hb2st reads kv tau values for every V block, so they must not be
+    // left uninitialized.
+    rocsolver_laset_template<T>(handle, rocblas_fill_full, I(1), nv, zero, zero, // opts
+                                tau, 0, I(1), strideTau, // tau
+                                batch_count);
+
     const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
 
     // reduct could be size DIMY if use_hemv = false.
