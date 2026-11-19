@@ -5761,6 +5761,18 @@ def _extras_bytes(extras) -> int:
     )
 
 
+def _pinned_launch_deterministic(direction, ident, split_k, args) -> bool:
+    """True unless ``--deterministic`` is set and ``ident`` launched at
+    ``split_k`` (a pinned degree, possibly a :class:`TailSplit`) is not
+    deterministic under it (:func:`benchmarks.common.det_classify.is_deterministic`)."""
+    mode = getattr(args, "deterministic", False)
+    if not mode:
+        return True
+    from benchmarks.common.det_classify import is_deterministic
+
+    return is_deterministic(direction, ident, split_k, mode)
+
+
 def _fast_rank_candidates(
     *,
     args,
@@ -5865,6 +5877,16 @@ def _fast_rank_candidates(
             if ident.label() == want.split()[0] and not any(
                 it[0].label() == ident.label() and str(it[3]) == str(sk) for it in items
             ):
+                # The per-degree --deterministic filter above never saw this
+                # degree: check it here, and fail the case rather than time a
+                # launch the run promised to exclude.
+                if not _pinned_launch_deterministic(direction, ident, sk, args):
+                    print(
+                        f"  pinned launch is not deterministic "
+                        f"(--deterministic {args.deterministic}): {pin}",
+                        flush=True,
+                    )
+                    return 1, False
                 items.append((ident, hsaco_path, meta, sk))
         items = [
             it
