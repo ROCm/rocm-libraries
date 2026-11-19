@@ -1326,6 +1326,48 @@ def yx_buffer_bytes(spec: WinogradYxSpec) -> dict:
     return b
 
 
+def dropin_spec_error(spec: WinogradYxSpec, hz: int, h: int, *, ndhwc_ok: bool = True):
+    """Why the drop-in call cannot run ``spec`` (None if it can).
+
+    The drop-in call (``conv_winograd3d_dropin.Winograd3dDropin`` and the ``winograd``
+    route of ``dispatch.conv_routes``) launches the aux relayout into the c8 layout (or,
+    with ``xin="ndhwc"``, reads NDHWC in place: ``ndhwc_ok``), the main kernel with the
+    arguments (X, U, Y[, E]) and the split-K reduction. Specs that need other launches or
+    arguments are refused: ``frel`` (pre-launch, Xn / F), ``boff`` (BOFF), ``oscale`` (OS),
+    ``bps_out`` / ``yc8h`` (the next layer's c8 output and map), ``xin="r8"`` (no r8
+    relayout), the bps=2 producer map and debugging switches (``dbg``). ``hz`` / ``h``:
+    the zero halo (z, y / x) the relayout adds around the source."""
+    ok, why = is_valid_yx_spec(spec)
+    if not ok:
+        return f"invalid spec: {why}"
+    if spec.dbg:
+        return f"dbg {spec.dbg!r} is a debugging switch (wrong results)"
+    if spec.frel:
+        return "frel needs its pre-launch and the Xn / F arguments"
+    if spec.boff:
+        return "boff adds a BOFF argument (piecewise launches)"
+    if spec.oscale or spec.yc8h or spec.bps_out:
+        return "oscale / yc8h / bps_out: not a drop-in (NDHWC in, NDHWC out) call"
+    if spec.xin == "ndhwc":
+        if not ndhwc_ok:
+            return "xin ndhwc: this call relayouts the input to c8"
+        if spec.bps not in (0, 3):
+            return "drop-in NDHWC: bps 0 / 3"
+        if _xpad(spec) != (hz, h):
+            return f"xpad {_xpad(spec)} is not the problem's zero halo {(hz, h)}"
+        return None
+    if spec.xin != "c8":
+        return f"xin {spec.xin!r}: the drop-in relayout writes the c8 layout"
+    if spec.bps not in (0, 1):
+        return "drop-in: bps 0 / 1"
+    if spec.bps == 1 and (spec.bps_halo != h or _bps_hz(spec) != hz):
+        return (
+            f"bps halo ({spec.bps_halo}, z {_bps_hz(spec)}) is not the relayout halo "
+            f"({h}, z {hz})"
+        )
+    return None
+
+
 def _frel_plan(spec):
     """Fused-relayout schedule: (A slabs pre-relayouted, base voxel, VPW voxels per
     producer workgroup, nwg). Producer p relayouts voxels [base + p*VPW, base + (p+1)*VPW);
@@ -6056,6 +6098,7 @@ __all__ = [
     "build_winograd_yx_wlds_fwd",
     "is_valid_yx_spec",
     "yx_buffer_bytes",
+    "dropin_spec_error",
     "BUFFER_LIMIT",
     "winograd_yx_grid",
     "winograd_yx_weight_transform",

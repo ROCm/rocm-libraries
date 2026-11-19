@@ -64,25 +64,20 @@ class Winograd3dDropin:
         Di, Hi, Wi, C, K = sel._winograd_problem(problem, direction)
         kw = plan.spec_dict
         self.spec = spec = cw.WinogradYxSpec(Di=Di, Hi=Hi, Wi=Wi, C=C, K=K, **kw)
-        ok, why = cw.is_valid_yx_spec(spec)
-        if not ok:
-            raise ValueError(f"invalid spec: {why}")
+        # the launches below: aux (c8 relayout + weight transform, or the weight transform
+        # alone for an NDHWC-direct main kernel -- xin "ndhwc": X / dY read in place, the
+        # zero halo by predication, the prescale in-kernel, bps=3), main (X, U, Y[, E]),
+        # split-K reduction; anything else is refused before any allocation
+        why = cw.dropin_spec_error(spec, hz, h, ndhwc_ok=True)
+        if why:
+            raise ValueError(f"drop-in: {why}")
         self.bps = spec.bps
-        # NDHWC-direct main kernel (xin "ndhwc"): reads X / dY in place, the zero halo by
-        # predication, the prescale in-kernel (bps=3) -- no relayout, only the weight transform
         self.ndhwc = spec.xin == "ndhwc"
-        if self.ndhwc:
-            if self.bps not in (0, 3) or spec.oscale or spec.yc8h:
-                raise ValueError("drop-in NDHWC: bps 0 / 3, no oscale / yc8h")
-            if cw._xpad(spec) != (hz, h):
-                raise ValueError("xpad does not match the problem's zero halo")
-        elif self.bps not in (0, 1) or spec.oscale or spec.yc8h:
-            raise ValueError("drop-in: bps 0 / 1, no oscale / yc8h")
-        if self.bps == 1 and (spec.bps_halo != h or cw._bps_hz(spec) != hz):
-            raise ValueError("bps halo does not match the relayout halo")
-        # source (unpadded) dims of the relayout, the main kernel's output dims
+        # source (unpadded) dims of the relayout, the main kernel's output dims, the
+        # forward filter [K, 3, 3, 3, C] of the problem (both directions)
         self.src = (Di - 2 * hz, Hi - 2 * h, Wi - 2 * h, C)
         self.out = (spec.Do, spec.Ho, spec.Wo, K)
+        self.wshape = (problem.K, 3, 3, 3, problem.C)
         halo = h if hz == h else (hz, h, h)
         odt = "f16" if spec.op_dtype == "f16" else "bf16"
         wtv = plan.wtv or 1
@@ -145,6 +140,10 @@ class Winograd3dDropin:
             signature=sga.build(),
         )
         km = cw.build_winograd_yx(spec)
+        names = [p.name for p in km.params]
+        want = ["X", "U", "Y"] + (["E"] if self.bps in (1, 2) else [])
+        if names != want:
+            raise ValueError(f"drop-in: main kernel arguments {names}, not {want}")
         self.ks = spec.ksplit
         sgm = (
             SignatureBuilder()
@@ -201,15 +200,24 @@ class Winograd3dDropin:
         [Do, Ho, Wo, K] bf16 (Y / dX), allocated when None. Returns y."""
         import torch
 
+        # the kernels' buffer ranges come from the problem, not from the tensors: refuse
+        # any tensor that is not exactly the one they address (shape, dtype, layout,
+        # the workspaces' device)
         x = x.reshape(self.src) if x.dim() == 5 else x
-        if (
-            tuple(x.shape) != self.src
-            or x.dtype != torch.bfloat16
-            or not x.is_contiguous()
+        for nm, t, shape in (("x", x, self.src), ("w", w, self.wshape)) + (
+            (("y", y, self.out),) if y is not None else ()
         ):
-            raise ValueError(
-                f"x: contiguous bf16 {self.src}, got {tuple(x.shape)} {x.dtype}"
-            )
+            if (
+                tuple(t.shape) != shape
+                or t.dtype != torch.bfloat16
+                or not t.is_contiguous()
+                or t.device != self.U.device
+            ):
+                raise ValueError(
+                    f"{nm}: contiguous bf16 {shape} on {self.U.device}, got "
+                    f"{tuple(t.shape)} {t.dtype} {t.device}"
+                    f"{'' if t.is_contiguous() else ' (strided)'}"
+                )
         if y is None:
             y = torch.empty(self.out, device=x.device, dtype=torch.bfloat16)
         ea = {"E": self.E} if self.bps == 1 else {}

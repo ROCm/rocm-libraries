@@ -916,3 +916,60 @@ def test_chained_producer_geometry(monkeypatch):
         assert p.kind == "direct" and "producer" in p.reason
     with pytest.raises(ValueError):
         sel.select_winograd3d(_cp(9), "fwd", producer=prod)  # drop-in takes none
+
+
+# --- drop-in: only specs its launches (aux + main X, U, Y[, E] + reduce) can run ----------
+@pytest.mark.parametrize(
+    "extra,ndhwc_ok,match",
+    [
+        ({"xin": "r8"}, True, "xin 'r8'"),
+        ({"boff": True, "xcd": 0}, True, "BOFF"),
+        ({"bps": 0, "frel": 1, "frel_gap": 8, "xcd": 0}, True, "frel"),
+        ({"dbg": "nofill"}, True, "dbg"),
+        ({"oscale": True, "bps": 0}, True, "oscale"),
+        ({"xin": "ndhwc", "xpad": 1, "bps": 3}, False, "xin ndhwc"),
+        ({"xin": "ndhwc", "xpad": 0, "bps": 0}, True, "xpad"),
+        ({"bps": 1, "bps_halo": 2}, True, "bps halo"),
+    ],
+)
+def test_dropin_spec_error(extra, ndhwc_ok, match):
+    D, H, W, C, K = UNET3D_SHAPES[3]
+    kw = dict(ZSPEC, bps=1, bps_halo=1)
+    kw.update(extra)
+    s = cw.WinogradYxSpec(Di=D, Hi=H, Wi=W, C=C, K=K, **kw)
+    why = cw.dropin_spec_error(s, 1, 1, ndhwc_ok=ndhwc_ok)
+    assert why and match in why, why
+
+
+def test_dropin_spec_error_accepts_the_plain_forms():
+    D, H, W, C, K = UNET3D_SHAPES[3]
+    for kw, ndhwc_ok in (
+        (dict(ZSPEC, bps=1, bps_halo=1), False),
+        (dict(ZSPEC, bps=1, bps_halo=1, ksplit=4, xpf=1), False),
+        (dict(ZSPEC, persist=228, xcd=0), False),
+        (dict(XN, xpad=1, bps=3), True),
+    ):
+        s = cw.WinogradYxSpec(Di=D, Hi=H, Wi=W, C=C, K=K, **kw)
+        assert cw.dropin_spec_error(s, 1, 1, ndhwc_ok=ndhwc_ok) is None, kw
+
+
+@pytest.mark.parametrize("extra", [{"xin": "r8"}, {"boff": True}, {"dbg": "nox"}])
+def test_dropin_wrapper_refuses_unrunnable_specs(extra):
+    """Refused before anything is compiled or allocated (CPU)."""
+    pytest.importorskip("torch")
+    from kernels.common import conv_winograd3d_select as sel
+    from kernels.common.conv_winograd3d_dropin import Winograd3dDropin
+
+    p = _cp_adapter(3)
+    plan = sel.select_winograd3d(p, "fwd")
+    assert plan.kind == "yx"
+    bad = sel.Winograd3dPlan(
+        "yx",
+        tuple(sorted(dict(plan.spec_dict, **extra).items())),
+        plan.wtv,
+        "dropin",
+        "fwd",
+        plan.prescale,
+    )
+    with pytest.raises(ValueError, match="drop-in"):
+        Winograd3dDropin(p, "fwd", bad)
