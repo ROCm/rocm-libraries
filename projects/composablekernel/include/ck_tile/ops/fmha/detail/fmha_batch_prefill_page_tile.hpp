@@ -7,6 +7,16 @@
 
 #include <type_traits>
 
+// Set to 1 by every build rule that compiles a page-tile instance with
+// -mllvm -amdgpu-expert-scheduling-mode (one of the scheduled-TDM FMHA flags that
+// fmha_batch_prefill_qr_tdm_page_tile_kernel.hpp requires). The page tile was validated and
+// measured only in that mode, where the compiler places the VALU dependence waits itself
+// (WAVE_SCHED_MODE). An -mllvm option is invisible to the preprocessor, so the build states it with
+// this define, and both page-tile pipelines refuse to compile without it.
+#ifndef CK_TILE_FMHA_PAGE_TILE_EXPERT_SCHEDULING
+#define CK_TILE_FMHA_PAGE_TILE_EXPERT_SCHEDULING 0
+#endif
+
 namespace ck_tile {
 
 // Independent page-size / tile-size geometry for gfx1250 batch prefill.

@@ -35,9 +35,11 @@ namespace ck_tile {
 // are software conversions (float8_ext.hpp), and would be emitted for gfx1250-strict, which the
 // current compiler does not target. Neither target is validated. Build with
 // the scheduled-TDM FMHA flags (-mllvm -amdgpu-expert-scheduling-mode
-// -fgpu-flush-denormals-to-zero) and one page-tile instance per translation unit, as generated: the
-// generated code depends on what shares the unit, and the measured code is that of such units (a
-// query-tail unit also holds its M128 main kernel, with the same code as in its own unit).
+// -fgpu-flush-denormals-to-zero) and -DCK_TILE_FMHA_PAGE_TILE_EXPERT_SCHEDULING=1, which states the
+// first flag to the pipelines (they do not compile without it), and one page-tile instance per
+// translation unit, as generated: the generated code depends on what shares the unit, and the
+// measured code is that of such units (a query-tail unit also holds its M128 main kernel, with the
+// same code as in its own unit).
 template <typename FmhaPipeline_,
           typename EpiloguePipeline_,
           index_t KvSplits_      = 1,

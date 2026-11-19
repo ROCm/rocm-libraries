@@ -84,6 +84,10 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
     static_assert(CK_TILE_FMHA_FWD_FAST_EXP2,
                   "qr_tdm_sched: every softmax site calls exp2, so log2(e) must be folded into "
                   "scale_s");
+    static_assert(
+        CK_TILE_FMHA_PAGE_TILE_EXPERT_SCHEDULING,
+        "the page tile is built with -mllvm -amdgpu-expert-scheduling-mode: add it and "
+        "-DCK_TILE_FMHA_PAGE_TILE_EXPERT_SCHEDULING=1 (fmha_batch_prefill_page_tile.hpp)");
     // Bias and ALiBi scale the scores into the exp2 domain before the softmax (process_score), so
     // the softmax then runs with a unit scale.
     static constexpr bool kScoresInLog2Domain = BiasEnum != BlockAttentionBiasEnum::NO_BIAS;
