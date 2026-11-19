@@ -111,7 +111,6 @@ rocke_kernel_def_t* rocke_build_gfx950_block_scaled_gemm_new(
         int as_lengths[] = {s->M, groups}, bs_lengths[] = {s->N, groups};
         int as_strides[] = {groups, 1}, bs_strides[] = {1, s->N};
         int c_lengths[] = {s->M, s->N}, c_strides[] = {s->N, 1};
-        rocke_matrix_fragment_layout_t scale_layout = {{{8, 8}, 1, 8, 1}, 1, 2, 32};
         if(rocke_h_make_tensor_desc(
                b, &a_tensor, a_lengths, matrix_strides, 2, rocke_dtype_to_ir_type(da))
                != ROCKE_OK
@@ -124,7 +123,8 @@ rocke_kernel_def_t* rocke_build_gfx950_block_scaled_gemm_new(
            || rocke_h_make_tensor_desc(
                   b, &b_scales, bs_lengths, bs_strides, 2, rocke_dtype_to_ir_type("e8m0"))
                   != ROCKE_OK
-           || rocke_h_make_matrix_fragment_desc(b, &scale_desc, &scale_layout) != ROCKE_OK
+           || rocke_h_make_mma_scale_desc(b, &scale_desc, atom, rocke_arch_target_from_gfx(arch))
+                  != ROCKE_OK
            || rocke_h_make_tensor_desc(
                   b, &c_tensor, c_lengths, c_strides, 2, rocke_dtype_to_ir_type(dc))
                   != ROCKE_OK)

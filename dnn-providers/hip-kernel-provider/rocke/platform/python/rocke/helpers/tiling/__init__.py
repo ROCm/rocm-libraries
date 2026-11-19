@@ -74,6 +74,7 @@ from .fragments import Fragment, TileDesc, fragment_length, make_fragment
 from .layouts import (
     make_matrix_fragment_desc,
     make_mma_accumulator_desc,
+    make_mma_scale_desc,
     make_tile_desc,
 )
 from .scheduling import InstrClass, derive_sched_group_counts
@@ -151,6 +152,7 @@ __all__ = [
     "fragment_length",
     "make_matrix_fragment_desc",
     "make_mma_accumulator_desc",
+    "make_mma_scale_desc",
     "load_mma_traits",
     "MmaTraits",
     "MmaTraitsCatalog",

@@ -4,6 +4,7 @@
 
 import ast
 import inspect
+from dataclasses import replace
 from itertools import product
 
 import pytest
@@ -11,7 +12,7 @@ import pytest
 from rocke.core.arch import ArchTarget
 from rocke.core.ir import I32, VectorType
 from rocke.core.verify import verify
-from rocke.helpers.tiling import make_tile_desc
+from rocke.helpers.tiling import make_mma_scale_desc
 from rocke.helpers.tiling.register_mapper import RegisterMapper
 from rocke.instances.gfx1250.block_scaled_gemm import (
     BlockScaledGemmSpec,
@@ -73,26 +74,29 @@ def test_legacy_consumer_keeps_contiguous_half_wave_payload(a, b, scale, block):
     )
 
 
-@pytest.mark.parametrize("block", (16, 32))
-def test_native_scale_distribution_matches_actual_atom_layouts(block):
-    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
-        family="wmma_scaled",
+def _scale_atom(target, block):
+    mfma = target == "gfx950"
+    m = 32 if mfma else 16
+    return ArchTarget.from_gfx(target).mma.op_for_shape(
+        family="mfma_scaled" if mfma else "wmma_scaled",
         a_dtype="fp4",
-        b_dtype="fp4",
+        b_dtype="fp8",
         c_dtype="fp32",
         scales=("e8m0", "e8m0", block),
-        m=16,
-        n=16,
-        k=128,
+        m=m,
+        n=m,
+        k=64 if mfma else 128,
     )
+
+
+@pytest.mark.parametrize(
+    "target,block", [("gfx950", 32), ("gfx1250", 16), ("gfx1250", 32)]
+)
+def test_native_scale_distribution_matches_actual_atom_layouts(target, block):
+    atom = _scale_atom(target, block)
+    desc = make_mma_scale_desc(atom, target=target)
     count = atom.a_scale_frag_len
-    desc = make_tile_desc(
-        shape=(16, count),
-        thread_dist=(16, 1),
-        thread_tile=(1, count),
-        thread_broadcast=2,
-        wave_size=32,
-    )
+    assert desc.register_count == count
     mapper = RegisterMapper(desc.layout)
     actual = [
         mapper.matrix_coordinates(lane, index)
@@ -104,6 +108,12 @@ def test_native_scale_distribution_matches_actual_atom_layouts(block):
         (column, group)
         for group, column in lane_placements(atom.b_scale_layout(), atom.wave_size)
     ]
+
+
+def test_scale_descriptor_refuses_conflicting_atom_metadata():
+    atom = _scale_atom("gfx1250", 32)
+    with pytest.raises(ValueError, match="registered atom metadata"):
+        make_mma_scale_desc(replace(atom, m=32), target="gfx1250")
 
 
 def test_consumer_does_not_bypass_fragment_loads_or_stores():

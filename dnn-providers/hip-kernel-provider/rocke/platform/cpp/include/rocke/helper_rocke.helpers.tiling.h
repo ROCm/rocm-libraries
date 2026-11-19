@@ -93,6 +93,11 @@ rocke_status_t rocke_h_make_mma_accumulator_desc(rocke_ir_builder_t* b,
                                                  const rocke_mma_op_t* atom,
                                                  const rocke_arch_target_t* target,
                                                  bool result);
+/* Verified native A/B scale map in (free axis, K-group) storage order. */
+rocke_status_t rocke_h_make_mma_scale_desc(rocke_ir_builder_t* b,
+                                           rocke_tiling_tile_desc_t* out,
+                                           const rocke_mma_op_t* atom,
+                                           const rocke_arch_target_t* target);
 rocke_status_t rocke_h_make_fragment(rocke_ir_builder_t* b,
                                      rocke_tiling_fragment_t* out,
                                      const rocke_tiling_tile_desc_t* tile,

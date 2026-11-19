@@ -36,6 +36,7 @@ from ...helpers.tiling import (
     load_fragment,
     make_matrix_fragment_desc,
     make_mma_accumulator_desc,
+    make_mma_scale_desc,
     make_tensor_desc,
     make_tile_desc,
     make_window,
@@ -420,11 +421,6 @@ def build_block_scaled_gemm(
         raise ValueError(f"missing matrix operand contract: {op_id}")
     result_desc = make_mma_accumulator_desc(descriptor_atom, target=arch, result=True)
     if native_scale:
-        # The scale tile encodes the registered maps (B is viewed as N x groups).
-        # Refuse missing or different maps instead of silently assuming that layout.
-        for role in (0, 1):
-            if atom.src_scale_layout(role) != scale_op.atom.src_scale_layout(role):
-                raise ValueError(f"unsupported scale_src{role} layout for {op_id}")
         a_layout, b_layout = scale_op.matrix_layout("a"), scale_op.matrix_layout("b")
     else:
         a_layout = MatrixFragmentLayout(
@@ -541,14 +537,8 @@ def build_block_scaled_gemm(
         )
 
     if native_scale:
-        scale_count = atom.a_scale_frag_len
-        scale_desc = make_tile_desc(
-            shape=(16, scale_count),
-            thread_dist=(16, 1),
-            thread_tile=(1, scale_count),
-            thread_broadcast=2,
-            wave_size=32,
-        )
+        scale_desc = make_mma_scale_desc(atom, target=arch)
+        scale_count = scale_desc.register_count
         scale_a, scale_b = spec.resolved_scale_dtypes()
         a_scales = make_tensor_desc(
             (spec.M, groups), (groups, 1), dtype_to_ir_type(scale_a)
@@ -557,16 +547,23 @@ def build_block_scaled_gemm(
             (spec.N, groups), (1, spec.N), dtype_to_ir_type(scale_b)
         )
     else:
+        # Legacy scales act in the epilogue, not as native MMA operands.
+        # Keep A's per-lane rows and broadcast B's column across half-waves.
+        rows, cols = result_desc.shape
         rows_per_lane = result_desc.register_count
+        wave = descriptor_atom.wave_size
         a_scale_desc = make_tile_desc(
-            shape=(16, 1),
-            thread_dist=(16 // rows_per_lane, 1),
+            shape=(rows, 1),
+            thread_dist=(rows // rows_per_lane, 1),
             thread_tile=(rows_per_lane, 1),
-            thread_broadcast=(1, 16),
-            wave_size=32,
+            thread_broadcast=(1, cols),
+            wave_size=wave,
         )
         b_scale_desc = make_tile_desc(
-            shape=(16, 1), thread_dist=(16, 1), thread_broadcast=2, wave_size=32
+            shape=(cols, 1),
+            thread_dist=(cols, 1),
+            thread_broadcast=wave // cols,
+            wave_size=wave,
         )
         a_scales = make_tensor_desc((spec.M, groups), (groups, 1), scale_ty)
         b_scales = make_tensor_desc((spec.N, groups), (1, spec.N), scale_ty)

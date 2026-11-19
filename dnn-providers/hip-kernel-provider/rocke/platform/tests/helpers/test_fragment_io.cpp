@@ -254,6 +254,33 @@ static bool invalid_tile(bool overflow)
     return ok;
 }
 
+static bool scale_descriptor(const char* gfx, rocke_mma_scale_block_k_t block, bool mfma)
+{
+    const auto* target = rocke_arch_target_from_gfx(gfx);
+    const rocke_mma_scale_filter_t scales = {"e8m0", "e8m0", block};
+    const int m = mfma ? 32 : 16, k = mfma ? 64 : 128;
+    const auto* atom = rocke_mma_catalog_op_for_shape(
+        &target->mma, mfma ? "mfma_scaled" : "wmma_scaled", "fp4", "fp8", "fp32", m, m, k, &scales);
+    if(!atom)
+        return false;
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "scale_descriptor") != ROCKE_OK)
+        return false;
+    rocke_tiling_tile_desc_t tile;
+    const int groups = k / block;
+    bool ok = rocke_h_make_mma_scale_desc(&b, &tile, atom, target) == ROCKE_OK && tile.rank == 2
+              && tile.shape[0] == m && tile.shape[1] == groups
+              && tile.register_count == (mfma ? 1 : groups) && b.kernel->body->num_ops == 0;
+    auto stale = *atom;
+    stale.srcs[1].scale_layout = NULL;
+    ok = ok && rocke_h_make_mma_scale_desc(&b, &tile, &stale, target) == ROCKE_ERR_VALUE
+         && strstr(b.err, "registered atom metadata");
+    if(!ok)
+        fprintf(stderr, "unexpected %s scale descriptor result: %s\n", gfx, b.err);
+    rocke_ir_builder_free(&b);
+    return ok;
+}
+
 int main(int argc, char** argv)
 {
     if(argc == 1)
@@ -266,7 +293,11 @@ int main(int argc, char** argv)
                    || prepare(gfx, "fp8e4m3", "bf8e5m2", role, "b"))
                     return 1;
         const int config[] = {8, 32, 2, 32, 32, 16, 0, 0, 0};
-        return !invalid_tile(false) || !invalid_tile(true) || emit("fp6e2m3", config, false);
+        return !invalid_tile(false) || !invalid_tile(true)
+               || !scale_descriptor("gfx950", ROCKE_MMA_SCALE_K32, true)
+               || !scale_descriptor("gfx1250", ROCKE_MMA_SCALE_K32, false)
+               || !scale_descriptor("gfx1250", ROCKE_MMA_SCALE_K16, false)
+               || emit("fp6e2m3", config, false);
     }
     if(argc == 4 && strcmp(argv[1], "--tf32") == 0)
     {

@@ -16,7 +16,7 @@ from ...helpers.tiling import (
     make_matrix_fragment_desc,
     make_mma_accumulator_desc,
     make_tensor_desc,
-    make_tile_desc,
+    make_mma_scale_desc,
     make_window,
     store_fragment,
 )
@@ -161,9 +161,7 @@ def build_block_scaled_gemm(spec, *, arch="gfx950"):
     groups = spec.K // 32
     a_scales = make_tensor_desc((spec.M, groups), (groups, 1), dtype_to_ir_type("e8m0"))
     b_scales = make_tensor_desc((spec.N, groups), (1, spec.N), dtype_to_ir_type("e8m0"))
-    scale_desc = make_tile_desc(
-        shape=(32, 2), thread_dist=(32, 2), thread_order=(1, 0), wave_size=64
-    )
+    scale_desc = make_mma_scale_desc(atom, target=arch)
     c_tensor = make_tensor_desc(
         (spec.M, spec.N), (spec.N, 1), dtype_to_ir_type(spec.dtype_c)
     )

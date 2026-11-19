@@ -265,6 +265,79 @@ rocke_status_t rocke_h_make_mma_accumulator_desc(rocke_ir_builder_t* b,
     });
 }
 
+rocke_status_t rocke_h_make_mma_scale_desc(rocke_ir_builder_t* b,
+                                           rocke_tiling_tile_desc_t* out,
+                                           const rocke_mma_op_t* atom,
+                                           const rocke_arch_target_t* target)
+{
+    return ckc::guard_status(b, [&]() -> rocke_status_t {
+        if(!rocke_i_live(b))
+            return ROCKE_ERR_VALUE;
+        if(!atom)
+            ckc::raise_status(ROCKE_ERR_TYPE, "scale descriptor requires an MmaOp");
+        if(!target || !out)
+            ckc::raise_status(ROCKE_ERR_VALUE, "invalid scale descriptor arguments");
+        const auto* registered = rocke_mma_catalog_by_op_id(&target->mma, atom->op_id);
+        if(!registered || !atom->family || strcmp(atom->family, registered->family) != 0
+           || atom->m != registered->m || atom->n != registered->n || atom->k != registered->k
+           || atom->wave_size != registered->wave_size)
+            ckc::raise_status(ROCKE_ERR_VALUE,
+                              "scale descriptor requires the registered atom metadata");
+        for(int i = 0; i < 2; ++i)
+        {
+            const auto& src = atom->srcs[i];
+            const auto& expected = registered->srcs[i];
+            if(src.scale_block_size != expected.scale_block_size
+               || src.scale_frag_len != expected.scale_frag_len
+               || src.scale_layout != expected.scale_layout
+               || bool(src.scale_dtype) != bool(expected.scale_dtype)
+               || (src.scale_dtype && strcmp(src.scale_dtype, expected.scale_dtype) != 0))
+                ckc::raise_status(ROCKE_ERR_VALUE,
+                                  "scale descriptor requires the registered atom metadata");
+        }
+        const bool mfma
+            = strcmp(target->gfx, "gfx950") == 0 && strcmp(atom->family, "mfma_scaled") == 0;
+        const bool wmma
+            = strcmp(target->gfx, "gfx1250") == 0 && strcmp(atom->family, "wmma_scaled") == 0;
+        if(!mfma && !wmma)
+            ckc::raise_status(ROCKE_ERR_NOTIMPL, "unmodelled scale layout on target");
+        const int block = atom->srcs[0].scale_block_size;
+        const int m = mfma ? 32 : 16, k = mfma ? 64 : 128, wave = mfma ? 64 : 32;
+        if(atom->m != m || atom->n != m || atom->k != k || atom->wave_size != wave
+           || (block != 32 && !(wmma && block == 16)))
+            ckc::raise_status(ROCKE_ERR_NOTIMPL, "unmodelled scale shape");
+        const int groups = k / block;
+        const int per_lane = mfma ? 1 : groups;
+        const rocke_mma_scale_filter_t scales = {"e8m0", "e8m0", atom->srcs[0].scale_block_size};
+        const auto* profile = rocke_mma_catalog_op_for_shape(
+            &target->mma, atom->family, "fp4", "fp4", "fp32", m, m, k, &scales);
+        for(int i = 0; i < 2; ++i)
+        {
+            const auto* layout = rocke_mma_op_src_scale_layout(atom, i, b);
+            if(!profile || !layout || layout != rocke_mma_op_src_scale_layout(profile, i, b)
+               || layout->frag_len != per_lane)
+                ckc::raise_status(ROCKE_ERR_NOTIMPL, "unmodelled scale operand map");
+        }
+        int shape[] = {m, groups};
+        rocke_h_row_t rows[] = {{&shape[0], 1}, {&shape[1], 1}};
+        int replication[] = {wave / m};
+        int p_major[] = {mfma ? 2 : 0, 1}, p_minor[] = {0, 0};
+        rocke_p_seq_t partitions[] = {{p_major, p_minor, 2}};
+        int y_major[] = {2}, y_minor[] = {0};
+        const auto* encoding = rocke_make_tile_distribution_encoding(b,
+                                                                     wmma ? replication : NULL,
+                                                                     wmma ? 1 : 0,
+                                                                     rows,
+                                                                     2,
+                                                                     partitions,
+                                                                     1,
+                                                                     wmma ? y_major : NULL,
+                                                                     wmma ? y_minor : NULL,
+                                                                     wmma ? 1 : 0);
+        return encoding ? rocke_h_make_tile_desc(b, out, shape, 2, encoding) : ROCKE_ERR_VALUE;
+    });
+}
+
 rocke_status_t rocke_h_make_fragment(rocke_ir_builder_t* b,
                                      rocke_tiling_fragment_t* out,
                                      const rocke_tiling_tile_desc_t* tile,
