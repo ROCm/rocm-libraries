@@ -415,6 +415,115 @@ rocke_value_t* rocke_b_zero_vec_f16(rocke_ir_builder_t* b, int n)
 
 /* ================================ atomics ============================== */
 
+static bool ordered_i32_operands(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx)
+{
+    if(!ptr || !ptr->type || ptr->type->kind != ROCKE_TYPE_PTR || !ptr->type->space
+        || strcmp(ptr->type->space, "global") || !rocke_i_type_is(ptr->type->pointee, "i32"))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "global atomic i32 access expects ptr<i32,global>");
+        return false;
+    }
+    if(!idx || (!rocke_i_type_is(idx->type, "i32") && !rocke_i_type_is(idx->type, "i64")))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "global atomic i32 index must be i32 or i64");
+        return false;
+    }
+    return true;
+}
+
+static bool ordered_scope_ok(rocke_ir_builder_t* b, const char* scope)
+{
+    if(strcmp(scope, "system") && strcmp(scope, "agent"))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown atomic scope '%s'", scope);
+        return false;
+    }
+    return true;
+}
+
+rocke_value_t* rocke_b_global_atomic_load_i32(rocke_ir_builder_t* b,
+    rocke_value_t* ptr,
+    rocke_value_t* idx,
+    const char* ordering,
+    const char* scope)
+{
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    if(ordering == NULL)
+        ordering = "acquire";
+    if(scope == NULL)
+        scope = "system";
+    if(!ordered_i32_operands(b, ptr, idx) || !ordered_scope_ok(b, scope))
+        return NULL;
+    if(strcmp(ordering, "monotonic") && strcmp(ordering, "acquire") && strcmp(ordering, "seq_cst"))
+    {
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "unknown atomic load ordering '%s'", ordering);
+    }
+    rocke_value_t* ops[] = { ptr, idx };
+    rocke_attr_map_t attrs = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &attrs, "ordering", ordering);
+    rocke_attr_set_str(b, &attrs, "scope", scope);
+    return rocke_i_op1(
+        b, ROCKE_OP_MEMREF_GLOBAL_ATOMIC_LOAD_I32, ops, 2, rocke_i32(), &attrs, "atom_load");
+}
+
+void rocke_b_global_atomic_store_i32(rocke_ir_builder_t* b,
+    rocke_value_t* ptr,
+    rocke_value_t* idx,
+    rocke_value_t* value,
+    const char* ordering,
+    const char* scope)
+{
+    if(!rocke_i_live(b))
+        return;
+    if(ordering == NULL)
+        ordering = "release";
+    if(scope == NULL)
+        scope = "system";
+    if(!ordered_i32_operands(b, ptr, idx) || !ordered_scope_ok(b, scope))
+        return;
+    if(!value || !rocke_i_type_is(value->type, "i32"))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "global atomic i32 store value must be i32");
+        return;
+    }
+    if(strcmp(ordering, "monotonic") && strcmp(ordering, "release") && strcmp(ordering, "seq_cst"))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown atomic store ordering '%s'", ordering);
+        return;
+    }
+    rocke_value_t* ops[] = { ptr, idx, value };
+    rocke_attr_map_t attrs = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &attrs, "ordering", ordering);
+    rocke_attr_set_str(b, &attrs, "scope", scope);
+    rocke_i_op0(b, ROCKE_OP_MEMREF_GLOBAL_ATOMIC_STORE_I32, ops, 3, &attrs);
+}
+
+void rocke_b_global_fence(rocke_ir_builder_t* b, const char* ordering, const char* scope)
+{
+    if(!rocke_i_live(b))
+        return;
+    if(ordering == NULL)
+        ordering = "acq_rel";
+    if(scope == NULL)
+        scope = "system";
+    if(!ordered_scope_ok(b, scope))
+        return;
+    if(strcmp(ordering, "acquire") && strcmp(ordering, "release") && strcmp(ordering, "acq_rel")
+        && strcmp(ordering, "seq_cst"))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown fence ordering '%s'", ordering);
+        return;
+    }
+    rocke_attr_map_t attrs = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &attrs, "ordering", ordering);
+    rocke_attr_set_str(b, &attrs, "scope", scope);
+    rocke_i_op0(b, ROCKE_OP_MEMREF_GLOBAL_FENCE, NULL, 0, &attrs);
+}
+
 static bool rocke_i_ordering_ok(const char* ordering)
 {
     /* {monotonic, acquire, release, acq_rel, seq_cst} */

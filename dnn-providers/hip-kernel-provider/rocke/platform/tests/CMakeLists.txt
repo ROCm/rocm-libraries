@@ -26,6 +26,19 @@ if(BUILD_TESTING)
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                rocke_build_id_provenance)
 
+  # Ordered i32 publication primitives and independent C-builder LLVM emitter.
+  add_executable(rocke_ordered_atomics_test core/ordered_atomics_test.cpp)
+  target_link_libraries(rocke_ordered_atomics_test PRIVATE rocke_core)
+  add_test(NAME rocke_ordered_atomics_test COMMAND rocke_ordered_atomics_test)
+  set_tests_properties(rocke_ordered_atomics_test PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_ordered_atomics_test)
+  set_target_properties(rocke_ordered_atomics_test
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_ordered_atomics_test
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_ordered_atomics_test)
+
   # ck.dsl.ir/v1 serializer round-trip + verifier test. Proves
   # lower(parse(serialize(k))) == lower(k) byte-for-byte, serialization
   # idempotence, and a clean verifier pass for the buildable GEMM configs.

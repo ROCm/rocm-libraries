@@ -262,7 +262,24 @@ The scheduled family remains hardware-unvalidated on `gfx950`. **No timings,
 traffic/resource profiles, improvements, or overlap have been established.**
 Timing/profiling on the validated target still needs separate approval. Input-tile
 reuse across output-column tiles and physical traffic/wait attribution remain later
-Stage 3 work; Stage 4 requires evidence justifying staging or separate roles.
+Stage 3 work; production Stage 4 optimization requires evidence justifying staging
+or separate roles.
+
+### Independently authored owner-push reference: in progress
+
+The [pinned source audit](../../../../../dsl_docs/development/distributed_gemm_reference_audit.md)
+distinguishes Pallas ring forwarding from Quack's symmetric-memory owner-push
+runner and from rocKE's immutable direct-peer path. The selected
+[HIP protocol-first reproduction](../../../../../dsl_docs/development/distributed_gemm_owner_push_protocol.md)
+now has paired scoped/ordered i32 atomics, owned asynchronous streams/copies/waits
+and a two-slot CPU generation/reuse model. It adds no mandatory framework or
+communication-library dependency and copies no upstream source.
+
+There is **no complete runnable staged reference yet**. Bounded publish/consume/
+acknowledgement kernels and their separately approved GPU stress gate precede
+local-first generation-gated GEMM integration. Existing correctness passes do not
+validate new publication or reuse semantics, and this is not a timing or overlap
+result. The current CLI still runs only the previously validated paths.
 
 ### Timing and traffic interpretation
 

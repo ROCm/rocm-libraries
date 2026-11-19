@@ -88,6 +88,7 @@ When to drop to the lower-level APIs:
 
 from __future__ import annotations
 
+from .async_peer import PeerAsyncRuntime, PeerEvent, PeerStream
 from .comgr import ComgrError, ComgrTimings, build_hsaco_from_llvm_ir
 from .hip_module import (
     HipError,
@@ -127,6 +128,9 @@ __all__ = [
     "KernelLauncher",
     "LaunchConfig",
     "LaunchSummary",
+    "PeerAsyncRuntime",
+    "PeerEvent",
+    "PeerStream",
     "PipelineLauncher",
     "Runtime",
     "TorchLaunchSummary",

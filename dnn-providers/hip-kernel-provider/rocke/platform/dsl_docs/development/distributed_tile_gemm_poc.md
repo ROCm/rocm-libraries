@@ -11,7 +11,11 @@ blocked and remains pending. Stage 3b adds paired opt-in source-grouped/interlea
 work assignment and bounded CTA grids, with CPU/parity/compiler coverage. A
 separate focused four-GPU `gfx942` correctness gate for the scheduled variants
 passed. The `gfx950` hardware gates remain pending; measured characterization,
-bandwidth, and communication/compute overlap remain unvalidated.
+bandwidth, and communication/compute overlap remain unvalidated. An independently
+authored owner-push reference is now in progress: its paired atomic and CPU-tested
+runtime/reuse foundation is implemented, but no new publication protocol or gated
+GEMM has been validated on GPUs. See the [pinned audit](distributed_gemm_reference_audit.md)
+and [protocol-first reproduction boundary](distributed_gemm_owner_push_protocol.md).
 
 ## Goal and agreed scope
 
@@ -429,7 +433,11 @@ A fused variant may be slower; do not claim a gain from fewer launches alone.
 
 ### Stage 4 — Optional staged/overlapped pipeline
 
-Proceed only after Stage 3 provides a reason to stage tiles or separate roles.
+Production optimization remains evidence-driven: proceed only after Stage 3
+provides a reason to stage tiles or separate roles. Separately, the selected
+[independently authored owner-push reference](distributed_gemm_owner_push_protocol.md)
+reproduces an audited algorithm contract without claiming an improvement. Its
+CPU-tested foundation is not a completed Stage 4 GPU protocol or gated GEMM.
 
 - First evaluate same-CTA loading/prefetch and compute with bounded staging.
 - If needed, evaluate communication and compute CTAs in one persistent launch.
@@ -517,11 +525,17 @@ queued, skipped, or compile-only lane is not a passed hardware test.
 - [x] Validate the focused scheduled variants on four `gfx942` GPUs (Stage 3b correctness gate).
 - [ ] Validate scheduled variants on `gfx950` when a separate allocation is authorized.
 - [ ] Characterize multi-peer schedules against the same-stack baseline (Stage 3).
-- [ ] Decide whether a staged protocol is justified; implement only if needed (Stage 4).
+- [ ] Decide whether a production staged optimization is justified; implement only if needed (Stage 4).
+- [x] Pin/audit Pallas and Quack mathematical, transport, symmetric-memory and completion contracts.
+- [x] Add paired scoped/ordered flag primitives and CPU-tested owner-stream/two-slot reuse foundations for the selected reference adaptation.
+- [ ] Implement bounded publication/consume/acknowledgement kernels and pass a separately authorized GPU protocol gate.
+- [ ] Connect and validate local-first generation-gated GEMM for the independently authored owner-push reference.
 
-**Immediate next action:** separately authorize bounded timing/profiling of the
-validated `gfx942` scheduled variants against their matched same-stack baselines.
-Preserve completed correctness evidence and keep the allocation-blocked `gfx950`
+**Immediate next action:** implement paired bounded publication/consume/acknowledgement
+microkernels and a replayable correctness-only runner; obtain separate authorization
+for their GPU protocol stress gate before GEMM integration. Timing/profiling of the
+existing validated schedules remains separately authorized, not implied by reference
+implementation work. Preserve completed evidence and keep allocation-blocked `gfx950`
 gates explicit. Keep achieved software-performance values in-session or protected
 AMD Confluence, never repository artifacts. A correctness pass is not evidence of
 an improvement, physical traffic bounds, or communication/compute overlap.

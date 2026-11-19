@@ -290,6 +290,7 @@ static const char* const* required_attrs(rocke_opcode_t o, int* n)
     static const char* mma_keys[] = {"op_id"};
     static const char* yield_keys[] = {"num"};
     static const char* asm_keys[] = {"template", "constraints"};
+    static const char* atomic_keys[] = {"ordering", "scope"};
     switch(o)
     {
     case ROCKE_OP_ARITH_CONSTANT:
@@ -308,6 +309,11 @@ static const char* const* required_attrs(rocke_opcode_t o, int* n)
     case ROCKE_OP_TILE_INLINE_ASM:
         *n = 2;
         return asm_keys;
+    case ROCKE_OP_MEMREF_GLOBAL_ATOMIC_LOAD_I32:
+    case ROCKE_OP_MEMREF_GLOBAL_ATOMIC_STORE_I32:
+    case ROCKE_OP_MEMREF_GLOBAL_FENCE:
+        *n = 2;
+        return atomic_keys;
     default:
         *n = 0;
         return NULL;
@@ -319,10 +325,71 @@ static void check_op(verifier_t* v, const rocke_op_t* op);
 
 /* ---- contracts ---- */
 
+static void check_ordered_atomic(verifier_t* v, const rocke_op_t* op)
+{
+    const char* name = op->name;
+    bool fence = op->opcode == ROCKE_OP_MEMREF_GLOBAL_FENCE;
+    bool load = op->opcode == ROCKE_OP_MEMREF_GLOBAL_ATOMIC_LOAD_I32;
+    int operands = fence ? 0 : (load ? 2 : 3);
+    int results = load ? 1 : 0;
+    if(op->num_operands != operands || op->num_results != results)
+    {
+        v_errf(v, op, "%s: expected %d operands / %d results", name, operands, results);
+        return;
+    }
+    const char* ordering = rocke_attr_get_str(&op->attrs, "ordering");
+    bool valid_order = ordering
+        && (strcmp(ordering, "seq_cst") == 0
+            || (fence
+                && (strcmp(ordering, "acquire") == 0 || strcmp(ordering, "release") == 0
+                    || strcmp(ordering, "acq_rel") == 0))
+            || (!fence
+                && (strcmp(ordering, "monotonic") == 0
+                    || strcmp(ordering, load ? "acquire" : "release") == 0)));
+    if(!valid_order)
+    {
+        v_errf(v, op, "%s: invalid ordering", name);
+    }
+    const char* scope = rocke_attr_get_str(&op->attrs, "scope");
+    if(!scope || (strcmp(scope, "system") && strcmp(scope, "agent")))
+    {
+        v_errf(v, op, "%s: invalid scope", name);
+    }
+    if(fence)
+    {
+        return;
+    }
+    const rocke_type_t* pointer = op->operands[0]->type;
+    if(pointer->kind != ROCKE_TYPE_PTR || !pointer->space || strcmp(pointer->space, "global")
+        || !rocke_type_eq(pointer->pointee, rocke_i32()))
+    {
+        v_errf(v, op, "%s: expected ptr<i32,global>", name);
+    }
+    const rocke_type_t* index = op->operands[1]->type;
+    if(!rocke_type_eq(index, rocke_i32()) && !rocke_type_eq(index, rocke_i64()))
+    {
+        v_errf(v, op, "%s: index must be i32 or i64", name);
+    }
+    if(load && !rocke_type_eq(op->results[0]->type, rocke_i32()))
+    {
+        v_errf(v, op, "%s: result must be i32", name);
+    }
+    if(operands == 3 && !rocke_type_eq(op->operands[2]->type, rocke_i32()))
+    {
+        v_errf(v, op, "%s: value must be i32", name);
+    }
+}
+
 static void check_contract(verifier_t* v, const rocke_op_t* op)
 {
     rocke_opcode_t o = op->opcode;
     const char* name = op->name;
+    if (o == ROCKE_OP_MEMREF_GLOBAL_ATOMIC_LOAD_I32 || o == ROCKE_OP_MEMREF_GLOBAL_ATOMIC_STORE_I32
+        || o == ROCKE_OP_MEMREF_GLOBAL_FENCE)
+    {
+        check_ordered_atomic(v, op);
+        return;
+    }
     if(is_binary_same_type(o))
     {
         if(op->num_operands != 2 || op->num_results != 1)

@@ -99,7 +99,9 @@ New to the DSL? Read in this order:
 36. [`reference/op_vocabulary.md`](./reference/op_vocabulary.md)
 37. [`reference/mfma_atom_catalog.md`](./reference/mfma_atom_catalog.md)
 38. [`reference/glossary.md`](./reference/glossary.md)
-39. [`development/distributed_tile_gemm_poc.md`](./development/distributed_tile_gemm_poc.md) — proposed single-node peer-tile gather/GEMM/scatter plan using the existing COMGR + HIP stack
+39. [`development/distributed_tile_gemm_poc.md`](./development/distributed_tile_gemm_poc.md) — single-node peer-tile gather/GEMM/scatter plan using the existing COMGR + HIP stack
+40. [`development/distributed_gemm_reference_audit.md`](./development/distributed_gemm_reference_audit.md) — pinned Pallas/Quack math, transport, symmetric-memory and benchmark contracts
+41. [`development/distributed_gemm_owner_push_protocol.md`](./development/distributed_gemm_owner_push_protocol.md) — independently authored owner-push reproduction; CPU foundation and required GPU protocol gate
 
 ## One-Screen Summary
 

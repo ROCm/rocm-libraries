@@ -120,6 +120,9 @@ _REQUIRED_ATTRS: Dict[str, List[str]] = {
     "tile.mma": ["op_id"],
     "scf.yield": ["num"],
     "tile.inline_asm": ["template", "constraints"],
+    "memref.global_atomic_load_i32": ["ordering", "scope"],
+    "memref.global_atomic_store_i32": ["ordering", "scope"],
+    "memref.global_fence": ["ordering", "scope"],
 }
 
 
@@ -275,8 +278,49 @@ class _Verifier:
 
     # ---- contracts ----
 
+    def _check_ordered_atomic(self, op: Op) -> None:
+        name = op.name
+        if name == "memref.global_fence":
+            operands, results = 0, 0
+            orders = ("acquire", "release", "acq_rel", "seq_cst")
+        elif name == "memref.global_atomic_load_i32":
+            operands, results = 2, 1
+            orders = ("monotonic", "acquire", "seq_cst")
+        else:
+            operands, results = 3, 0
+            orders = ("monotonic", "release", "seq_cst")
+        if len(op.operands) != operands or len(op.results) != results:
+            self.err(f"{name}: expected {operands} operands / {results} results", op)
+            return
+        if op.attrs.get("ordering") not in orders:
+            self.err(f"{name}: invalid ordering", op)
+        if op.attrs.get("scope") not in ("system", "agent"):
+            self.err(f"{name}: invalid scope", op)
+        if not operands:
+            return
+        pointer = op.operands[0].type
+        if (
+            not isinstance(pointer, PtrType)
+            or pointer.space != "global"
+            or pointer.pointee.name != "i32"
+        ):
+            self.err(f"{name}: expected ptr<i32,global>", op)
+        if op.operands[1].type.name not in ("i32", "i64"):
+            self.err(f"{name}: index must be i32 or i64", op)
+        if results and op.results[0].type.name != "i32":
+            self.err(f"{name}: result must be i32", op)
+        if operands == 3 and op.operands[2].type.name != "i32":
+            self.err(f"{name}: value must be i32", op)
+
     def _check_contract(self, op: Op, scope: Dict[str, Value]) -> None:
         name = op.name
+        if name in (
+            "memref.global_atomic_load_i32",
+            "memref.global_atomic_store_i32",
+            "memref.global_fence",
+        ):
+            self._check_ordered_atomic(op)
+            return
         if name in _BINARY_SAME_TYPE:
             if len(op.operands) != 2 or len(op.results) != 1:
                 self.err(

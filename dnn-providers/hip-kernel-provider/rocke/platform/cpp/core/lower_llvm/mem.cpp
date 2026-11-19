@@ -185,6 +185,60 @@ static void op_memref_global_store_typed(rocke_lower_t* L, const rocke_op_t* op)
                    (long long)align);
 }
 
+static const char* ordered_atomic_scope(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const char* scope = ll_attr_str(op, "scope", "");
+    if(strcmp(scope, "system") && strcmp(scope, "agent"))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "unknown atomic scope '%s'", scope);
+    }
+    return strcmp(scope, "system") == 0 ? "" : " syncscope(\"agent\")";
+}
+
+static void op_memref_global_atomic_load_i32(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const char* ordering = ll_attr_str(op, "ordering", "");
+    if(strcmp(ordering, "monotonic") && strcmp(ordering, "acquire") && strcmp(ordering, "seq_cst"))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "unknown atomic load ordering '%s'", ordering);
+    }
+    const char* scope = ordered_atomic_scope(L, op);
+    const char* gep = rocke_ll_fresh(L, "gep");
+    rocke_ll_emitf(L, "  %s = getelementptr inbounds i32, ptr addrspace(1) %s, %s %s", gep,
+        rocke_ll_operand(L, op->operands[0]), rocke_ll_llvm_type(L, op->operands[1]->type),
+        rocke_ll_operand(L, op->operands[1]));
+    rocke_ll_emitf(L, "  %s = load atomic i32, ptr addrspace(1) %s%s %s, align 4", ll_res(op), gep,
+        scope, ordering);
+}
+
+static void op_memref_global_atomic_store_i32(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const char* ordering = ll_attr_str(op, "ordering", "");
+    if(strcmp(ordering, "monotonic") && strcmp(ordering, "release") && strcmp(ordering, "seq_cst"))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "unknown atomic store ordering '%s'", ordering);
+    }
+    const char* scope = ordered_atomic_scope(L, op);
+    const char* gep = rocke_ll_fresh(L, "gep");
+    rocke_ll_emitf(L, "  %s = getelementptr inbounds i32, ptr addrspace(1) %s, %s %s", gep,
+        rocke_ll_operand(L, op->operands[0]), rocke_ll_llvm_type(L, op->operands[1]->type),
+        rocke_ll_operand(L, op->operands[1]));
+    rocke_ll_emitf(L, "  store atomic i32 %s, ptr addrspace(1) %s%s %s, align 4",
+        rocke_ll_operand(L, op->operands[2]), gep, scope, ordering);
+}
+
+static void op_memref_global_fence(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const char* ordering = ll_attr_str(op, "ordering", "");
+    if(strcmp(ordering, "acquire") && strcmp(ordering, "release") && strcmp(ordering, "acq_rel")
+        && strcmp(ordering, "seq_cst"))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "unknown fence ordering '%s'", ordering);
+    }
+    const char* scope = ordered_atomic_scope(L, op);
+    rocke_ll_emitf(L, "  fence%s %s", scope, ordering);
+}
+
 static void op_memref_global_atomic_add(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* ptr = op->operands[0];
@@ -1458,6 +1512,9 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_STORE, op_memref_global_store);
     rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_STORE_TYPED, op_memref_global_store_typed);
     rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_STORE_VN, op_memref_global_store_vN);
+    rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_ATOMIC_LOAD_I32, op_memref_global_atomic_load_i32);
+    rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_ATOMIC_STORE_I32, op_memref_global_atomic_store_i32);
+    rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_FENCE, op_memref_global_fence);
     rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD, op_memref_global_atomic_add);
     rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_F32, op_memref_global_atomic_add_f32);
     rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_BF16,

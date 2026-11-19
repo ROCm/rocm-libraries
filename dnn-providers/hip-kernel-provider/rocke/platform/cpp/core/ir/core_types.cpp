@@ -616,7 +616,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "scf.for",
     "scf.if",
     "scf.yield",
-    "cf.return"};
+    "cf.return",
+    "memref.global_atomic_load_i32",
+    "memref.global_atomic_store_i32",
+    "memref.global_fence"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -842,7 +845,10 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* scf.for    */ false,
     /* scf.if     */ false,
     /* scf.yield  */ false,
-    /* cf.return  */ false};
+    /* cf.return  */ false,
+    /* global_atomic_load_i32  */ false,
+    /* global_atomic_store_i32 */ false,
+    /* global_fence            */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

@@ -397,6 +397,11 @@ typedef enum rocke_opcode
     ROCKE_OP_SCF_YIELD,
     ROCKE_OP_CF_RETURN,
 
+    /* Additive ordered atomics; keep all pre-existing opcode values stable. */
+    ROCKE_OP_MEMREF_GLOBAL_ATOMIC_LOAD_I32,
+    ROCKE_OP_MEMREF_GLOBAL_ATOMIC_STORE_I32,
+    ROCKE_OP_MEMREF_GLOBAL_FENCE,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -752,6 +757,22 @@ rocke_value_t* rocke_b_cvt_pk_bf8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v)
 rocke_value_t* rocke_b_cvt_pk_i8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v);
 
 /* ----- atomics ----- */
+/* Ordered i32 flags: default load acquire/store release, scope system.
+ * System means LLVM default system scope; agent is not remote publication.
+ * No local-only or remote-exclusion metadata is attached to these accesses.
+ */
+rocke_value_t* rocke_b_global_atomic_load_i32(rocke_ir_builder_t* b,
+    rocke_value_t* ptr,
+    rocke_value_t* idx,
+    const char* ordering,
+    const char* scope);
+void rocke_b_global_atomic_store_i32(rocke_ir_builder_t* b,
+    rocke_value_t* ptr,
+    rocke_value_t* idx,
+    rocke_value_t* value,
+    const char* ordering,
+    const char* scope);
+void rocke_b_global_fence(rocke_ir_builder_t* b, const char* ordering, const char* scope);
 rocke_value_t* rocke_b_global_atomic_add(rocke_ir_builder_t* b,
                                          rocke_value_t* ptr,
                                          rocke_value_t* idx,

@@ -968,6 +968,85 @@ class IRBuilder:
             "arith.umul_hi_i32", [a, b_v], [I32], result_name_hint="umh"
         ).result
 
+    @staticmethod
+    def _atomic_i32_operands(ptr: Value, idx: Value) -> None:
+        if (
+            not isinstance(ptr.type, PtrType)
+            or ptr.type.space != "global"
+            or ptr.type.pointee != I32
+        ):
+            raise ValueError("global atomic i32 access expects ptr<i32,global>")
+        if idx.type.name not in ("i32", "i64"):
+            raise ValueError("global atomic i32 index must be i32 or i64")
+
+    @staticmethod
+    def _atomic_scope(scope: str) -> None:
+        if scope not in ("system", "agent"):
+            raise ValueError(f"unknown atomic scope {scope!r}")
+
+    def global_atomic_load_i32(
+        self,
+        ptr: Value,
+        idx: Value,
+        *,
+        ordering: str = "acquire",
+        scope: str = "system",
+    ) -> Value:
+        """Ordered global i32 read, including mapped peer flags when system-scoped.
+
+        System scope lowers to LLVM's default system synchronization scope; agent
+        scope is explicit and must not be used as cross-GPU publication. This
+        access is effectful even when its result is unused. Mapping, atomic-capable
+        memory, producer ordering and allocation lifetimes remain caller contracts.
+        """
+        self._atomic_i32_operands(ptr, idx)
+        self._atomic_scope(scope)
+        if ordering not in ("monotonic", "acquire", "seq_cst"):
+            raise ValueError(f"unknown atomic load ordering {ordering!r}")
+        return self._op(
+            "memref.global_atomic_load_i32",
+            [ptr, idx],
+            [I32],
+            attrs={"ordering": ordering, "scope": scope},
+            result_name_hint="atom_load",
+        ).result
+
+    def global_atomic_store_i32(
+        self,
+        ptr: Value,
+        idx: Value,
+        value: Value,
+        *,
+        ordering: str = "release",
+        scope: str = "system",
+    ) -> None:
+        """Ordered i32 publication without local-only/remote-exclusion metadata."""
+        self._atomic_i32_operands(ptr, idx)
+        self._atomic_scope(scope)
+        if value.type != I32:
+            raise ValueError("global atomic i32 store value must be i32")
+        if ordering not in ("monotonic", "release", "seq_cst"):
+            raise ValueError(f"unknown atomic store ordering {ordering!r}")
+        self._op(
+            "memref.global_atomic_store_i32",
+            [ptr, idx, value],
+            [],
+            attrs={"ordering": ordering, "scope": scope},
+        )
+
+    def global_fence(self, *, ordering: str = "acq_rel", scope: str = "system") -> None:
+        """Explicit LLVM memory fence, not a transfer or cross-GPU barrier.
+
+        A fence does not create peer addressability, wait for other GPUs, or make
+        an unordered ordinary flag poll a publication protocol by itself.
+        """
+        self._atomic_scope(scope)
+        if ordering not in ("acquire", "release", "acq_rel", "seq_cst"):
+            raise ValueError(f"unknown fence ordering {ordering!r}")
+        self._op(
+            "memref.global_fence", [], [], attrs={"ordering": ordering, "scope": scope}
+        )
+
     def global_atomic_add(
         self,
         ptr: Value,

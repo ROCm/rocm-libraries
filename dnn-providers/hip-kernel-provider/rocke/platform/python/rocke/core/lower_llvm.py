@@ -2429,6 +2429,50 @@ class _Lowerer:
             f"  store {elem_ty} {self._operand(val)}, ptr addrspace(1) {gep}, align {align}"
         )
 
+    @staticmethod
+    def _ordered_atomic_scope(op: Op) -> str:
+        scope = op.attrs.get("scope")
+        if scope not in ("system", "agent"):
+            raise ValueError(f"unknown atomic scope {scope!r}")
+        return "" if scope == "system" else ' syncscope("agent")'
+
+    def _op_memref_global_atomic_load_i32(self, op: Op) -> None:
+        ptr, idx = op.operands
+        ordering = op.attrs.get("ordering")
+        if ordering not in ("monotonic", "acquire", "seq_cst"):
+            raise ValueError(f"unknown atomic load ordering {ordering!r}")
+        scope = self._ordered_atomic_scope(op)
+        gep = self._fresh("gep")
+        self._current().emit(
+            f"  {gep} = getelementptr inbounds i32, ptr addrspace(1) {self._operand(ptr)}, "
+            f"{_llvm_type(idx.type)} {self._operand(idx)}"
+        )
+        self._current().emit(
+            f"  {op.result.name} = load atomic i32, ptr addrspace(1) {gep}{scope} {ordering}, align 4"
+        )
+
+    def _op_memref_global_atomic_store_i32(self, op: Op) -> None:
+        ptr, idx, val = op.operands
+        ordering = op.attrs.get("ordering")
+        if ordering not in ("monotonic", "release", "seq_cst"):
+            raise ValueError(f"unknown atomic store ordering {ordering!r}")
+        scope = self._ordered_atomic_scope(op)
+        gep = self._fresh("gep")
+        self._current().emit(
+            f"  {gep} = getelementptr inbounds i32, ptr addrspace(1) {self._operand(ptr)}, "
+            f"{_llvm_type(idx.type)} {self._operand(idx)}"
+        )
+        self._current().emit(
+            f"  store atomic i32 {self._operand(val)}, ptr addrspace(1) {gep}{scope} {ordering}, align 4"
+        )
+
+    def _op_memref_global_fence(self, op: Op) -> None:
+        ordering = op.attrs.get("ordering")
+        if ordering not in ("acquire", "release", "acq_rel", "seq_cst"):
+            raise ValueError(f"unknown fence ordering {ordering!r}")
+        scope = self._ordered_atomic_scope(op)
+        self._current().emit(f"  fence{scope} {ordering}")
+
     def _op_memref_global_atomic_add(self, op: Op) -> None:
         """Lower ``global_atomic_add`` to an LLVM ``atomicrmw`` on
         ``addrspace(1)``. The AMDGPU backend emits ``global_atomic_add``
