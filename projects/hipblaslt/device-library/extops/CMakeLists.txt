@@ -11,6 +11,13 @@ message(STATUS "Architectures to process: ${archs}")
 
 set(previous_target "")
 
+# The environment target orders unpacking and native builds. Their file
+# dependencies also invalidate existing assembly after either input changes.
+set(_extop_codegen_dependencies ${HIPBLASLT_PYTHON_DEPS} ${HIPBLASLT_PYTHON_INPUTS})
+if(TARGET _rocisa)
+    list(APPEND _extop_codegen_dependencies _rocisa)
+endif()
+
 foreach(arch IN LISTS archs)
     message(STATUS "hipblaslt device library extops: Configuring target for architecture ${arch} for hipblasltExtOpLibrary")
     tensilelite_offload_target(offload_arch "${arch}")
@@ -74,7 +81,7 @@ foreach(arch IN LISTS archs)
         COMMAND ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.amax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/A_H_S_256_4_${arch}.s" -t H -d S -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
         COMMAND ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.amax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_256_4_${arch}.s" -t S -d H -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
         COMMENT "Creating Layer Norm, Softmax and Amax Assembly for ${arch}"
-        DEPENDS ${HIPBLASLT_PYTHON_DEPS}
+        DEPENDS ${_extop_codegen_dependencies}
     )
 
     set(output_code_object_file "${CMAKE_CURRENT_BINARY_DIR}/extop_${arch}.co")
