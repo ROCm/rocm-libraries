@@ -57,6 +57,8 @@ from enum import IntEnum
 from operator import index
 from typing import Any, Tuple
 
+from kernels.common._spec_checks import require_bool
+
 # Re-exported, never redeclared: the tiled kernel specs name their band by these
 # ordinals (``mask_type()``), so the ordinals have one home, beside that mapping.
 from kernels.common.attention_mask_type import AttentionMaskType
@@ -952,10 +954,8 @@ class AttentionSpec:
     def __post_init__(self) -> None:
         # identity() and kernel_name() branch on these, so a truthy non-bool
         # (1, "yes") would silently produce another identity: refuse it instead.
-        for name in ("emit_lse", "use_additive_bias"):
-            value = getattr(self, name)
-            if type(value) is not bool:
-                raise ValueError(f"{name} must be a bool, got {type(value).__name__}")
+        require_bool("emit_lse", self.emit_lse)
+        require_bool("use_additive_bias", self.use_additive_bias)
 
     def identity(self) -> dict:
         """``spec_hash`` payload: every field, except ``emit_lse`` and

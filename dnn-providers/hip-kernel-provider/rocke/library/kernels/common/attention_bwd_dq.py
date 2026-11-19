@@ -70,6 +70,7 @@ from rocke.core.codegen_policy import (
 )
 from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType
 from rocke.helpers.attention_band import AttnRuntimeBounds
+from rocke.helpers.grid import xcd_remap_plane
 from rocke.helpers.spec import non_default_fields, salted_kernel_name
 
 from kernels.common._attention_bwd_addr import (
@@ -91,7 +92,6 @@ from kernels.common._attention_bwd_frag import LdsView, ir_type
 from kernels.common._attention_bwd_gemm import lane_and_wave
 from kernels.common._attention_bwd_refusals import spec_digest
 from kernels.common._attention_bwd_sched import DQ_SCHEDS
-from kernels.common._attention_bwd_worklist import xcd_remap_id
 from kernels.common.attention_bwd import (
     BWD_BARRIER_FENCE,
     BWD_DTYPES,
@@ -876,11 +876,9 @@ def _emit_dq(spec: AttnBwdDqSpec, arch: str, *, sentinel: bool = True):
         gx = b.div(b.add(a["S_q_max"], b.sub(rph, one)), rph)
         gx1 = b.select(b.cmp_gt(gx, zero), gx, one)
         gy = b.div(a["h_q"], G) if group else a["h_q"]
-        plane = xcd_remap_id(
-            b, b.add(x, b.mul(gx1, y)), num_wgs=b.mul(gx1, gy), n=a["xcd_n"],
-            chunk=a["xcd_chunk"],
-        )  # fmt: skip
-        x, y = b.mod(plane, gx1), b.div(plane, gx1)
+        x, y = xcd_remap_plane(
+            b, x, y, gx=gx1, gy=gy, num_xcds=a["xcd_n"], chunk=a["xcd_chunk"]
+        )
     seq_q, seq_kv = _decode_sequences(b, s, a, z)
     gk = b.div(a["h_q"], a["h_k"])
     gv = b.div(a["h_q"], a["h_v"])
