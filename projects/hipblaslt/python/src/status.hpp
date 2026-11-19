@@ -20,35 +20,33 @@ namespace hipblaslt_py
         }
     };
 
+    // By number, not by enumerator, so a PR that adds a status to hipblas-common.h can name it
+    // here before the installed ROCm the bindings compile against has it. test_errors.py checks
+    // every name and number against the checkout's header.
     inline const char* status_name(hipblasStatus_t s)
     {
-        switch(s)
+        struct Name
         {
-        case HIPBLAS_STATUS_SUCCESS:
-            return "HIPBLAS_STATUS_SUCCESS";
-        case HIPBLAS_STATUS_NOT_INITIALIZED:
-            return "HIPBLAS_STATUS_NOT_INITIALIZED";
-        case HIPBLAS_STATUS_ALLOC_FAILED:
-            return "HIPBLAS_STATUS_ALLOC_FAILED";
-        case HIPBLAS_STATUS_INVALID_VALUE:
-            return "HIPBLAS_STATUS_INVALID_VALUE";
-        case HIPBLAS_STATUS_MAPPING_ERROR:
-            return "HIPBLAS_STATUS_MAPPING_ERROR";
-        case HIPBLAS_STATUS_EXECUTION_FAILED:
-            return "HIPBLAS_STATUS_EXECUTION_FAILED";
-        case HIPBLAS_STATUS_INTERNAL_ERROR:
-            return "HIPBLAS_STATUS_INTERNAL_ERROR";
-        case HIPBLAS_STATUS_NOT_SUPPORTED:
-            return "HIPBLAS_STATUS_NOT_SUPPORTED";
-        case HIPBLAS_STATUS_ARCH_MISMATCH:
-            return "HIPBLAS_STATUS_ARCH_MISMATCH";
-        case HIPBLAS_STATUS_HANDLE_IS_NULLPTR:
-            return "HIPBLAS_STATUS_HANDLE_IS_NULLPTR";
-        case HIPBLAS_STATUS_INVALID_ENUM:
-            return "HIPBLAS_STATUS_INVALID_ENUM";
-        case HIPBLAS_STATUS_UNKNOWN:
-            return "HIPBLAS_STATUS_UNKNOWN";
-        }
+            int         value;
+            const char* name;
+        };
+        static constexpr Name names[] = {
+            {0, "HIPBLAS_STATUS_SUCCESS"},
+            {1, "HIPBLAS_STATUS_NOT_INITIALIZED"},
+            {2, "HIPBLAS_STATUS_ALLOC_FAILED"},
+            {3, "HIPBLAS_STATUS_INVALID_VALUE"},
+            {4, "HIPBLAS_STATUS_MAPPING_ERROR"},
+            {5, "HIPBLAS_STATUS_EXECUTION_FAILED"},
+            {6, "HIPBLAS_STATUS_INTERNAL_ERROR"},
+            {7, "HIPBLAS_STATUS_NOT_SUPPORTED"},
+            {8, "HIPBLAS_STATUS_ARCH_MISMATCH"},
+            {9, "HIPBLAS_STATUS_HANDLE_IS_NULLPTR"},
+            {10, "HIPBLAS_STATUS_INVALID_ENUM"},
+            {11, "HIPBLAS_STATUS_UNKNOWN"},
+        };
+        for(const Name& n : names)
+            if(n.value == static_cast<int>(s))
+                return n.name;
         return "HIPBLAS_STATUS_<unmapped>";
     }
 

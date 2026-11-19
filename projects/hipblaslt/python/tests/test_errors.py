@@ -2,20 +2,29 @@
 # SPDX-License-Identifier: MIT
 """Every hipblasStatus_t value becomes a HipblasLtError that names it.
 
-The values come from the hipblas-common.h the bindings were built against, so a status added to
-the header later fails here until status.hpp maps it.
+In a source checkout (as in CI) the values come from the checkout's own hipblas-common.h, so a PR
+that adds a status fails here until status.hpp maps it, even when the installed ROCm predates it.
+Otherwise they come from the hipblas-common.h the bindings were built against.
 """
 
-import os
 import re
+from pathlib import Path
 
 import pytest
 
 import hipblaslt
 from hipblaslt import _build_info
 
-_HEADER = os.path.join(
-    _build_info.HIPBLAS_COMMON_INCLUDE_DIR, "hipblas-common", "hipblas-common.h"
+_RELATIVE = Path("hipblas-common") / "hipblas-common.h"
+_IN_TREE = (
+    Path(__file__).resolve().parents[4]
+    / "projects/hipblas-common/library/include"
+    / _RELATIVE
+)
+_HEADER = str(
+    _IN_TREE
+    if _IN_TREE.is_file()
+    else Path(_build_info.HIPBLAS_COMMON_INCLUDE_DIR) / _RELATIVE
 )
 _ENUM = re.compile(r"typedef\s+enum\s*\{(?P<body>[^}]*)\}\s*hipblasStatus_t\s*;", re.S)
 _VALUE = re.compile(r"\b(HIPBLAS_STATUS_\w+)\s*=\s*(\d+)")
