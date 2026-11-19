@@ -76,8 +76,11 @@ the conversion gives (CDNA3 ISA section 7.2, CDNA4 ISA section 7.3):
 
 That is OFP8's non-saturating mode for e4m3. Measured on gfx942: NaN, +-inf
 and finite values from 248 (either sign) all give `0x80`; 247.9 gives `0x7f`.
-gfx950 has not been measured. The `cvt_f32_to_fp8` docstring states the same
-rule ([core/ir.py:3521-3540](../../python/rocke/core/ir.py)).
+Measured on gfx950 ([README](./README.md#the-mode-register)): NaN, +-inf,
+10000 and -10000, 57344, 61440 and 1e30 give NaN; 447, 449 and 464 give 448
+(464 is the tie and rounds down); 247 gives 240 and 248 gives 256. Finite
+inputs between 464 and 10000 were not measured. The `cvt_f32_to_fp8`
+docstring states the same rule ([core/ir.py:3521-3540](../../python/rocke/core/ir.py)).
 
 **Decoding is exact**: every fp8 value, subnormals included, is an f32 value,
 and rocKE keeps subnormals ([README](./README.md#subnormals)). On FNUZ, `0x80`
@@ -121,7 +124,9 @@ On develop, `quantize_scalar_f32`
 `QUANT_MAX_ABS["fp8e4m3"] = 448` on every target
 ([helpers/quant.py:80-84](../../python/rocke/helpers/quant.py)), with
 `clamp_f32`, and its docstring says the hardware saturates (it does not).
-Results:
+Results (the gfx950 column is measured, see the
+[README](./README.md#the-mode-register); `skip_clamp_on_pack=True` measured
+the same as the bare conversion):
 
 | input | gfx950 (OCP) | gfx942 (FNUZ) |
 |---|---|---|

@@ -49,7 +49,10 @@ is 0):
 | finite past 57344 after rounding (from 61440: the tie rounds up, because 57344's mantissa is odd) | +-inf | NaN |
 
 The OCP column is OFP8 Table 3 (non-saturating e5m2) and the ISA table
-(CDNA4 ISA section 7.3); gfx950 has not been measured. FNUZ has no infinity:
+(CDNA4 ISA section 7.3), and gfx950 measures it
+([README](./README.md#the-mode-register)): NaN gives NaN, +-inf gives +-inf,
+61440 and 1e30 give +inf, 57344 stays 57344 and +-10000 gives +-10240.
+Negative finite overflow was not measured. FNUZ has no infinity:
 the CDNA3 ISA's format table (section 7.2, Table 30) gives `0x80` as the BF8
 "INF" code, the same code as NaN, so the gfx942 conversion gives NaN where the
 conversion table lists +-inf. Measured on gfx942: +-inf and values from 61440
@@ -70,8 +73,9 @@ infinity survives: a quantized bf8 tensor from rocKE holds no infinities.
 `QUANT_MAX_ABS["bf8e5m2"]` is 57344, right for both encodings
 ([helpers/quant.py:80-84](../../python/rocke/helpers/quant.py)). The only
 difference from the policy is NaN: `clamp_f32` sends it to -57344 on both
-targets. The unclamped paths (`skip_clamp_on_pack`, the packed 4-wide routes)
-give the bare conversion's results above
+targets. Measured on gfx950: NaN gives -57344, +-inf gives +-57344, and 61440
+and 1e30 give 57344. The unclamped paths (`skip_clamp_on_pack`, the packed
+4-wide routes) give the bare conversion's results above
 ([list](./datatype_fp8_e4m3.md#develop-today)). **Pending**: NaN is kept
 ([Pending changes](./README.md#pending-changes)).
 
