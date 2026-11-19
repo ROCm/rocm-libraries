@@ -566,6 +566,20 @@ TEST(TestConvDeviceUnits, ComputeUnitsArePhysicalAndUnknownCountsAreZero)
     EXPECT_EQ(device_units::computeUnits(deviceOf("gfx1100", -3)), 0);
 }
 
+TEST(TestConvDeviceUnits, XcdCountFollowsTheDieSizeOfTheArchitecture)
+{
+    EXPECT_EQ(device_units::xcdCount(deviceOf("gfx942:sramecc+:xnack-", 304)), 8); // MI300X/MI325X
+    EXPECT_EQ(device_units::xcdCount(deviceOf("gfx942", 228)), 6); // MI300A
+    EXPECT_EQ(device_units::xcdCount(deviceOf("gfx942", 80)), 4); // MI308X
+    EXPECT_EQ(device_units::xcdCount(deviceOf("gfx942", 38)), 1); // one die
+    EXPECT_EQ(device_units::xcdCount(deviceOf("gfx950", 256)), 8);
+    EXPECT_EQ(device_units::xcdCount(deviceOf("gfx950", 32)), 1);
+    EXPECT_EQ(device_units::xcdCount(deviceOf("gfx942", 100)), 1); // no die size divides it
+    EXPECT_EQ(device_units::xcdCount(deviceOf("gfx90a", 104)), 1);
+    EXPECT_EQ(device_units::xcdCount(deviceOf("gfx1151", 20)), 1);
+    EXPECT_EQ(device_units::xcdCount(deviceOf("gfx942", 0)), 1);
+}
+
 // ---------------------------------------------------------------------------
 // Engine wiring: the registered symbols the descriptors name
 // ---------------------------------------------------------------------------

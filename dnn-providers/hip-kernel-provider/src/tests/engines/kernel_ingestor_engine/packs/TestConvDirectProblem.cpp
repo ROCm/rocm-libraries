@@ -1049,8 +1049,11 @@ TEST(TestConvDirectShips, GroupsNameArchitecturesAndFamilies)
 // Planner
 // ---------------------------------------------------------------------------
 
-std::optional<conv_direct::Plan>
-    planOf(const ConvShape& shape, const ConfigFields& fields, const std::string& dtype, int cus)
+std::optional<conv_direct::Plan> planOf(const ConvShape& shape,
+                                        const ConfigFields& fields,
+                                        const std::string& dtype,
+                                        int cus,
+                                        int xcds = 0)
 {
     const auto problem = parse(specFor(shape, ConvDirection::FORWARD));
     const auto config = conv_direct::configOf(kernelOf(fields, dtype));
@@ -1058,7 +1061,61 @@ std::optional<conv_direct::Plan>
     {
         return std::nullopt;
     }
-    return conv_direct::planFor(*problem, *config, cus);
+    return conv_direct::planFor(*problem, *config, cus, xcds);
+}
+
+TEST(TestConvDirectPlan, HaloTilesTakeXcdRunsOfTwoBlocksAComputeUnit)
+{
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.dataType = DataType::HALF;
+    const auto plan = planOf(shape, ConfigFields{}, "HALF", 228, 6);
+    ASSERT_TRUE(plan.has_value());
+    EXPECT_EQ(plan->args.xcds, 6);
+    EXPECT_EQ(plan->args.xcdRun, 2 * 228 / 6);
+    // One XCD (or an unknown count) keeps the launch order.
+    const auto one = planOf(shape, ConfigFields{}, "HALF", 228, 1);
+    ASSERT_TRUE(one.has_value());
+    EXPECT_EQ(one->args.xcds, 0);
+    EXPECT_EQ(one->args.xcdRun, 0);
+    const auto unknown = planOf(shape, ConfigFields{}, "HALF", 228);
+    ASSERT_TRUE(unknown.has_value());
+    EXPECT_EQ(unknown->args.xcds, 0);
+}
+
+TEST(TestConvDirectPlan, SplitGridsKeepTheLaunchOrder)
+{
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.dataType = DataType::FLOAT;
+    shape.n = 1;
+    shape.c = 512;
+    shape.k = 64;
+    shape.input = {7, 7};
+    auto fields = ConfigFields{};
+    fields.atom = "mfma16_f32";
+    fields.bc = 16;
+    fields.vec = 4;
+    fields.bl = 1;
+    fields.split = 1;
+    const auto plan = planOf(shape, fields, "FLOAT", 304, 8);
+    ASSERT_TRUE(plan.has_value());
+    ASSERT_GT(plan->args.splits, 1);
+    EXPECT_EQ(plan->args.xcds, 0);
+}
+
+TEST(TestConvDirectPlan, TiesBreakTowardWholeSixteenPixelRows)
+{
+    // 128 output pixels on a 128-wide map: 16 x 8 and 8 x 16 tiles cost the same (the same halo
+    // and tile count); the 16-wide one keeps every 16-lane fragment within one halo row.
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.dataType = DataType::HALF;
+    shape.input = {128, 128};
+    const auto plan = planOf(shape, ConfigFields{}, "HALF", 64);
+    ASSERT_TRUE(plan.has_value());
+    EXPECT_EQ(plan->args.tw % 16, 0);
+    EXPECT_EQ(plan->args.th * plan->args.tw, 128);
 }
 
 TEST(TestConvDirectPlan, TileFitsTheHaloAndTheWorkspaceHoldsTheWeights)
