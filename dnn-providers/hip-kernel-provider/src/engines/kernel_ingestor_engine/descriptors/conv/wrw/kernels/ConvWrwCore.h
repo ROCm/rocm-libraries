@@ -3113,7 +3113,12 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
     const int yRowStep = a.dh * ys3, xRowStep = ihStep * xs3;
     int oh = 0, ih = 0, yRow = 0, xRow = 0, u = 0, q0c = 0;
     unsigned rowsC = 0;
+    // The image's buffer resources are kept across a track where the ring holds tap rows or a
+    // stage several steps; a one-row filter's single step a stage rebuilds them each step from
+    // the image index, which spares scalar registers that its loop would otherwise spill.
+    constexpr bool KEEP_RSRC = R > 1 || P > 1;
     k3i4 yr, xr;
+    int nC = 0;
     auto startTrack = [&]() {
         const int m = cur.m;
         const bool nOk = cur.n < a.n;
@@ -3126,7 +3131,9 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
         ih = nOk && id >= 0 && id < a.di ? ih : -(1 << 30);
         rowsC = k3RowsOf(m, u, R);
         q0c = cur.chunk * BQ;
-        tiles[0].rsrcOf(a, nOk ? cur.n : 0, yr, xr);
+        nC = nOk ? cur.n : 0;
+        if constexpr(KEEP_RSRC)
+            tiles[0].rsrcOf(a, nC, yr, xr);
     };
     auto advance = [&]() {
         cur.advance(a);
@@ -3173,6 +3180,8 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
         const bool xOk[1] = {static_cast<bool>(
             live & (replayI == 0) & (static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi)))};
         const int xRows[1] = {xRow};
+        if constexpr(!KEEP_RSRC)
+            tiles[0].rsrcOf(a, nC, yr, xr);
         tiles[I].template loadRs<0>(
             a, yr, xr, q0c, static_cast<bool>(live & (oh < a.ho)), yRow, xOk, xRows);
     };
