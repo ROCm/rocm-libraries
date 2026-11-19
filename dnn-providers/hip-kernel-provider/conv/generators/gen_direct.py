@@ -291,6 +291,7 @@ for dt in ("HALF", "BFLOAT16"):
             # stream a wave; 8-wave blocks at one block a CU.
             M(f"mfma16_{e}", F333, 128, 128, 16, 2, 4, 8, ring=0, bl=2),
             M(f"mfma16_{e}", F333, 128, 64, 16, 2, 4, 8, ring=0, bl=2),
+            M(f"mfma16_{e}", F333, 128, 64, 16, 2, 2, 8, ring=0, bl=2),
             M(f"mfma16_{e}", F333, 256, 64, 16, 4, 2, 8, ring=0, bl=2),
             # 2-D 3x3: the xpf twins of the gfx942 halo tiles.
             M(f"mfma16_{e}", F33, 128, 64, 32, 2, 2, 8, xpf=1),
