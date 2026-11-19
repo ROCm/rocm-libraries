@@ -159,7 +159,9 @@ def prefetch_vgprs(e, layout, vec, w, nb, kc, th, tw, wave):
     ev = 16 // e
     wr, wc = th + w - 1, tw + w - 1
     threads = th * wave
-    if layout == 1:
+    if layout == 1 and vec == 1:
+        ua, regs = wr * wc * kc, 1
+    elif layout == 1:
         ua, regs = wr * wc * (kc // ev), 4
     elif vec > 1:
         ua, regs = wr * kc * ((wc + 2 * ev - 2) // ev), 4
@@ -196,13 +198,34 @@ def build():
         e = eb(dtype)
         ev = 16 // e
         cfgs = []
-        # 2-D configs first (their order, and so their priorities, as before), then 3-D ones.
+        # 2-D configs first (their order, and so their priorities, as before), then 3-D ones,
+        # space-to-depth, and the channels-last single-element configs of every geometry (dy
+        # one element a unit: output channel counts that are not whole vectors).
+        vector_layouts = [(1, ev), (0, ev), (0, 1)]
         plan = (
-            [(atom, s, w, 0, 0) for atom in atoms for s, w in GEOMETRIES]
-            + [(atom, s, w, ft, 0) for atom in atoms for s, w, ft in GEOMETRIES_3D]
-            + [(atom, 1, w, 0, SPACE_TO_DEPTH) for atom in atoms for w in SD_WINDOWS]
+            [
+                (atom, s, w, 0, 0, vector_layouts)
+                for atom in atoms
+                for s, w in GEOMETRIES
+            ]
+            + [
+                (atom, s, w, ft, 0, vector_layouts)
+                for atom in atoms
+                for s, w, ft in GEOMETRIES_3D
+            ]
+            + [
+                (atom, 1, w, 0, SPACE_TO_DEPTH, vector_layouts)
+                for atom in atoms
+                for w in SD_WINDOWS
+            ]
+            + [(atom, s, w, 0, 0, [(1, 1)]) for atom in atoms for s, w in GEOMETRIES]
+            + [
+                (atom, s, w, ft, 0, [(1, 1)])
+                for atom in atoms
+                for s, w, ft in GEOMETRIES_3D
+            ]
         )
-        for atom, s, w, ft, sd in plan:
+        for atom, s, w, ft, sd, layouts in plan:
             if sd and atom == "fma":
                 continue
             dim, ka, wave = SHAPE[atom]
@@ -223,7 +246,6 @@ def build():
             if atom.startswith("wmma125"):
                 # K32 needs a wider prefetch. Narrow spatial tiles bound registers.
                 tiles += [(8, 1), (16, 1)]
-            layouts = [(1, ev), (0, ev), (0, 1)]
             for nb in nbs(atom, sd or s):
                 for layout, vec in layouts:
                     for kc in kcs:
@@ -381,7 +403,10 @@ def emit(catalog):
                     "kernelDescriptors": pack,
                 },
             )
-            assert (out / fname).stat().st_size < 500 * 1000, f"{fname} over 500 KB"
+            # (The universe is a bench input, not shipped.)
+            assert (
+                UNIVERSE or (out / fname).stat().st_size < 500 * 1000
+            ), f"{fname} over 500 KB"
             total += len(pack)
     return total
 

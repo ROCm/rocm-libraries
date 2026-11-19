@@ -448,14 +448,13 @@ void runCase(ConvShape shape, ConvDirection direction)
         });
         EXPECT_EQ(mismatches, 0);
     }
-    // Forward fp32 has FMA configs everywhere; 16-bit has MMA configs on the matrix-core GPUs (no
-    // bf16 ones on gfx908). Backward ships to the matrix-core GPUs only (fp32 by MFMA on CDNA,
-    // by FMA on gfx11 / gfx12).
+    // Forward fp32 has FMA configs everywhere; 16-bit has MMA configs on the matrix-core GPUs
+    // (bf16 on gfx908's half-rate atom). Backward ships to the matrix-core GPUs only (fp32 by
+    // MFMA on CDNA, by FMA on gfx11 / gfx12).
     const auto arch = std::string(currentDeviceProperties().gcnArchName);
     const bool mma = (arch.rfind("gfx9", 0) == 0 && arch.rfind("gfx906", 0) != 0)
                      || arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0;
-    const bool bf16On908 = arch.rfind("gfx908", 0) == 0 && std::is_same_v<T, BFloat16>;
-    if((std::is_same_v<T, float> && (!backward || mma)) || (mma && !bf16On908))
+    if(mma || (std::is_same_v<T, float> && !backward))
     {
         EXPECT_GE(ran, 1) << "no catalog config serves this case";
     }

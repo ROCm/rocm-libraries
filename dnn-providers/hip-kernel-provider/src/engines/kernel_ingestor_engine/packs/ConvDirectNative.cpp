@@ -294,7 +294,10 @@ std::optional<Tile>
         const double tiles
             = static_cast<double>(divUp(a.ho, th)) * static_cast<double>(divUp(a.wo, tw));
         const double cost = tiles * (pixels + 0.5 * (th + config.r - 1) * (tw + config.s - 1));
-        if(bestCost < 0 || cost < bestCost)
+        // On a tie, a width of whole 16-pixel runs: a 16-lane A fragment then reads 16
+        // consecutive halo pixels of one row (one pass over the LDS banks) instead of two rows.
+        const bool whole = tw % 16 == 0 && best.tw % 16 != 0;
+        if(bestCost < 0 || cost < bestCost || (cost == bestCost && whole))
         {
             bestCost = cost;
             best.th = th;
@@ -595,6 +598,15 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         // Channels-first halo tiles: 16-bit matrix-core, register-path weights, no split.
         return std::nullopt;
     }
+    // The cross-chunk prefetch (absent: 0): halo tiles with register-path weights,
+    // channels-last.
+    config.xpf = intField(kernel, "xpf").value_or(0);
+    if(config.xpf != 0
+       && (config.xpf != 1 || config.rows || config.atom == "fma" || config.bl != 0
+           || config.cf != 0))
+    {
+        return std::nullopt;
+    }
     config.math = math == 1;
     const bool known
         = std::any_of(FILTERS.begin(),
@@ -704,7 +716,7 @@ bool configRunsOn(const Config& config, std::string_view gcnArchName)
 }
 
 std::optional<Plan>
-    planFor(const DirectProblem& problem, const Config& config, int64_t computeUnits)
+    planFor(const DirectProblem& problem, const Config& config, int64_t computeUnits, int xcds)
 {
     const auto& a = problem.args;
     if(computeUnits < 1)
@@ -884,6 +896,13 @@ std::optional<Plan>
     plan.grid[0] = static_cast<unsigned int>(gridX);
     plan.grid[1] = static_cast<unsigned int>(columnBlocks);
     plan.grid[2] = static_cast<unsigned int>(k2.splits);
+    // XCD-local tile runs (halo tiles, one split): the XCD count of the device, and runs of two
+    // blocks per compute unit of an XCD, the blocks it starts together.
+    // Rows configs walk their tiles in per-XCD shares of the same count.
+    k2.xcds = (config.rows || k2.splits == 1) && xcds > 1 ? xcds : 0;
+    k2.xcdRun = k2.xcds > 1 && !config.rows
+                    ? static_cast<int>(std::max<int64_t>(1, 2 * computeUnits / k2.xcds))
+                    : 0;
     if(config.rows)
     {
         // One 1-D grid of at most bpu blocks per unit; the kernel walks the tiles.
@@ -1058,8 +1077,10 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
     {
         return std::nullopt;
     }
-    const auto plan = conv_direct::planFor(
-        *problem, *config, device_units::dispatchUnits(context.deviceProperties));
+    const auto plan = conv_direct::planFor(*problem,
+                                           *config,
+                                           device_units::dispatchUnits(context.deviceProperties),
+                                           device_units::xcdCount(context.deviceProperties));
     if(!plan.has_value())
     {
         return std::nullopt;
@@ -1285,6 +1306,11 @@ public:
             if(config.cf != 0)
             {
                 options.add("CONV_DIRECT_CF", std::to_string(config.cf));
+            }
+            // Defined only when set, so every other config compiles as before.
+            if(config.xpf != 0)
+            {
+                options.add("CONV_DIRECT_XPF", std::to_string(config.xpf));
             }
         }
 

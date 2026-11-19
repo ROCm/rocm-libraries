@@ -21,12 +21,12 @@
 //   CONV_IGEMM_CFX      1: 1-D problems read the gathered activation in place from packed
 //                       channels-first memory and write the output channels-first (K1_BUFFER 1;
 //                       the matrix-core kernel with CF 1, or the FMA kernel)
-//   CONV_IGEMM_FLEX     the flex tile: BM 256 x BN 256 or 128 over flattened output positions,
-//                       eight waves in two groups (ping-pong). 1: 16x16x32 atoms (gfx950, 16-bit),
-//                       both operands by LDS DMA (k1ConvFlex, ConvIgemmFlex.h); 2: 16x16x16 and
-//                       16x16x4 atoms (gfx942), one LDS stage fed from registers (k1ConvFlexReg,
-//                       ConvIgemmFlexReg.h; the pack picks the form by the atom); defined only when
-//                       set
+//   CONV_IGEMM_FLEX     the flex tile over flattened output positions, eight waves in two groups
+//                       (ping-pong). 1: gfx950 16-bit 16x16x32 atoms, BM 256 x BN 256, 192 or 128,
+//                       both operands by LDS DMA (k1ConvFlex, ConvIgemmFlex.h); 2: gfx942 16x16x16
+//                       and 16x16x4 atoms, BM 256 x BN 128, one LDS stage fed from registers
+//                       (k1ConvFlexReg, ConvIgemmFlexReg.h; the pack picks the form by the atom);
+//                       defined only when set
 //   K1_BUFFER           0 when a block's rows could span 2^31 bytes (64-bit global loads)
 //   K1_LARGE            1: 64-bit positions within an image (large-image configs, images past
 //                       2^31 - 1 pixels)

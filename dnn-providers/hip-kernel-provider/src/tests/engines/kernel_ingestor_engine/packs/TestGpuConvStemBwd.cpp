@@ -47,7 +47,7 @@
  * 2x2 at stride 2, 3x3 / 5x5 / 7x7 / 1x1 at stride 1, 4x4 and 11x11 at stride 4), 1, 3 and 4
  * input channels, channels-first and channels-last dy (dx and the filter in either layout),
  * rows of dy that are and are not whole vectors, output channel counts no chunk divides,
- * partial tiles, asymmetric padding, true convolution and a 3-D graph of depth 1. Each compiled
+ * channels-last output channel counts that are not whole vectors (2-D and 3-D), partial tiles, asymmetric padding, true convolution and a 3-D graph of depth 1. Each compiled
  * config's static LDS is checked against the host's arithmetic (ldsBytesOf) once.
  */
 namespace
@@ -395,6 +395,20 @@ std::vector<DeviceCase> deviceCases()
     auto convolution3d = stem3d(3, 16, {3, 21, 30}, 3, 7, 2, 3);
     convolution3d.mode = ConvMode::CONVOLUTION;
     cases.push_back({"Stem3x7x7S2TrueConvolution", convolution3d});
+    // Channels-last dy whose output channels are not whole 16-byte vectors (single-element
+    // configs): r(2+1)d's 45-channel 3-D stem, other 3-D and 2-D geometries, and dx and the
+    // filter channels-first beside them.
+    cases.push_back(
+        {"Stem1x7x7S2PlanesNdhwcPartialVectors", stem3d(3, 45, {3, 21, 30}, 1, 7, 2, 3, true)});
+    cases.push_back(
+        {"Stem3x7x7S2TapsNdhwcPartialVectors", stem3d(3, 21, {3, 17, 26}, 3, 7, 2, 3, true)});
+    cases.push_back(
+        {"Stem3x3x3S1NdhwcPartialVectors", stem3d(1, 13, {4, 10, 20}, 3, 3, 1, 1, true)});
+    cases.push_back({"Stem7x7S2NhwcPartialVectors", stem(3, 7, {23, 30}, 7, 2, 3, true)});
+    cases.push_back({"Patchify4x4S4NhwcPartialVectors", stem(3, 13, {28, 36}, 4, 4, 0, true)});
+    cases.push_back({"DxAndFilterChannelsFirstUnderNdhwcPartialVectors",
+                     stem3d(3, 45, {2, 21, 30}, 1, 7, 2, 3, true),
+                     true});
     return cases;
 }
 

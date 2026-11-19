@@ -321,7 +321,11 @@ std::optional<StemBwdLaunch>
     // The layout and its vector.
     if(config.layout == LAYOUT_CHANNELS_LAST)
     {
-        if(!problem.dyChannelsLast || config.vec != ev || a.k % ev != 0)
+        // Vectors of channels: K whole vectors. Single elements serve only the output channel
+        // counts that are not (r(2+1)d's 45, say), whose channel runs vectors cannot load.
+        const bool wholeK = a.k % ev == 0;
+        if(!problem.dyChannelsLast || (config.vec != ev && config.vec != 1)
+           || (config.vec == ev) != wholeK)
         {
             return std::nullopt;
         }

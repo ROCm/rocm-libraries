@@ -137,6 +137,10 @@ struct WrwConfig
     /// whose buffers start each step at the first element the block can read (its step windows
     /// within the range; any layout and strides). 0 elsewhere.
     int64_t pb = 0;
+    /// Loop 8 only, 1: a reduction step is bq consecutive positions of the flattened (image,
+    /// output depth, row, column) order (CONV_K3_FLAT), admitted where the output rows are
+    /// shorter than bq, beside the specialized configs; x and dy are each one buffer. 0 elsewhere.
+    int64_t flat = 0;
     /// The split planner's target blocks per dispatch unit (1, 2, 4 or 8; 1 for loop 5, whose
     /// persistent grid has one workgroup per unit; 8 for small FMA blocks): host-side only.
     int64_t bpu = 0;
@@ -184,7 +188,31 @@ struct WrwProblem
     /// Elements one image of x / of dy spans through its strides (the packed image when packed).
     int64_t xSpan = 0;
     int64_t ySpan = 0;
+    /// The problem is a width fold's view (widthFoldOf): its dw is written by the fold reduce,
+    /// never by the kernel itself. noFold: not to be folded (three-bf16's split operands).
+    bool folded = false;
+    bool noFold = false;
+    /// A width fold's staged view: the padding's phase the staging shifts x by (0 in place).
+    int64_t foldShift = 0;
 };
+
+/**
+ * @brief The width fold of @p problem: the same backward-weights convolution as a stride-1 one,
+ *        or nullopt where it does not apply.
+ *
+ * A width stride s > 1 dividing the filter width S, at unit width dilation, one group, packed x
+ * and dy (either layout), images within the 32-bit buffer range. Position u s + j of channel c is
+ * folded channel j C + c at position u: the view has C s input channels at unit width stride;
+ * depth and height are unchanged.
+ * - Channels-first x is staged (ConvWrwFoldX) shifted by the padding's phase r = p mod s (p the
+ *   width padding): S / s folded taps at padding (p - r) / s over ceil((L + r) / s) positions,
+ *   rounded up to whole 16-byte vectors (zero, read by no dy position).
+ * - Channels-last x is read in place (its width stride becomes s C), so its width L must be a
+ *   multiple of s: ceil((S - p) / s) + ceil(p / s) folded taps at padding ceil(p / s), the taps
+ *   reaching outside the filter dropped by the fold reduce.
+ * Folded tap tau of folded channel j C + c is dw tap (tau - pre) s + j + p - r of channel c.
+ */
+std::optional<WrwProblem> widthFoldOf(const WrwProblem& problem);
 
 /// Whether specialized key @p key (WrwConfig::spec) serves @p problem on @p gcnArchName: its
 /// atom runs there and takes the graph's element type (G and D, and layout 2, on gfx950 only),
@@ -223,6 +251,11 @@ int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave);
 /// The LDS a workgroup may use: 320 KiB on gfx1250, 160 KiB on gfx950, else 64 KiB.
 int64_t ldsLimitOf(std::string_view gcnArchName);
 
+/// Quads a block of the deep reduce (ConvWrwReduceDeep, K3ReduceArgs::quads) for @p quads quads
+/// of dw on @p dispatchUnits units: 64, halved (down to 16) while the blocks leave a unit fewer
+/// than two.
+int64_t deepReduceQuads(int64_t quads, int64_t dispatchUnits);
+
 /// The launch of a config on a problem: both kernels' grids and argument blocks, and the
 /// workspace of the partials (FP64 for loop 10, FP32 otherwise).
 struct WrwLaunch
@@ -248,6 +281,16 @@ struct WrwLaunch
     size_t splitYOffset = 0;
     size_t splitBytes = 0;
     K3SplitArgs splitArgs{};
+    /// The width fold (widthFoldOf): the config ran the folded problem; ConvWrwReduceFold
+    /// (reduceFold, reduceGrid x reduceBlock) writes dw. Channels-first x is staged first by
+    /// ConvWrwFoldX (foldStage: foldArgs, foldGrid blocks) at foldOffset of the workspace, which
+    /// the kernel then reads as x.
+    bool fold = false;
+    bool foldStage = false;
+    unsigned int foldGrid = 0;
+    size_t foldOffset = 0;
+    K3FoldArgs foldArgs{};
+    K3ReduceFoldArgs reduceFold{};
     /// Loop 10 uses K3AccurateArgs / K3AccurateReduceArgs, never the FP32 partial ABI.
     bool accurate = false;
 };

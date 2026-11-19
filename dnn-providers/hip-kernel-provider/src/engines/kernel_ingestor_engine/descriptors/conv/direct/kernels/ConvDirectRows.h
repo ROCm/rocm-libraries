@@ -92,6 +92,18 @@ __device__ inline void k2rBarrier()
     __builtin_amdgcn_sched_barrier(0);
 }
 
+/// XCDs the rows tile walk shares the tiles over: the device's count (a.xcds), and the
+/// compile-time count on gfx950, where every part has 8.
+__device__ inline int k2rXcds(const K2Args& a)
+{
+#if defined(__gfx950__)
+    (void)a;
+    return K1_XCDS;
+#else
+    return K1_XCDS > 1 && a.xcds > 1 ? a.xcds : 1;
+#endif
+}
+
 /// Four fp32 accumulators as four TO. gfx950 rounds bf16 pairs in hardware (v_cvt_pk_bf16_f32):
 /// bit-identical to k1FloatToBf for every non-NaN input (checked exhaustively), and NaNs stay
 /// quiet NaNs; one instruction per pair instead of the software round's six or so per value.
@@ -448,7 +460,7 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_E
         return static_cast<int>(l & (WAVE - 1));
     };
 
-    // Tile walk: XCD x of K1_XCDS holds blocks b = x mod X (dispatch is round-robin) and owns a
+    // Tile walk: XCD x of the a.xcds XCDs holds blocks b = x mod X (dispatch is round-robin) and owns a
     // share of the logical tiles proportional to its block count; its blocks take them
     // round-robin, so concurrent blocks of one XCD work on neighbouring tiles (shared L2).
     const int kBlocks = (a.k + BN - 1) / BN;
@@ -459,9 +471,10 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_E
     const long long tiles = static_cast<long long>(a.tilesW) * a.tilesH * imgGroups * kBlocks;
     const long long total = SPLIT ? tiles * a.splits : tiles;
     const int gsz = static_cast<int>(gridDim.x);
-    const int xcd = static_cast<int>(blockIdx.x) % K1_XCDS;
-    const int local = static_cast<int>(blockIdx.x) / K1_XCDS;
-    auto cum = [&](int x) { return x * (gsz / K1_XCDS) + (x < gsz % K1_XCDS ? x : gsz % K1_XCDS); };
+    const int nx = k2rXcds(a);
+    const int xcd = static_cast<int>(blockIdx.x) % nx;
+    const int local = static_cast<int>(blockIdx.x) / nx;
+    auto cum = [&](int x) { return x * (gsz / nx) + (x < gsz % nx ? x : gsz % nx); };
     const int bpx = cum(xcd + 1) - cum(xcd);
     const int tEnd = static_cast<int>(total * cum(xcd + 1) / gsz);
     const int tFirst = static_cast<int>(total * cum(xcd) / gsz) + local;
@@ -1188,7 +1201,7 @@ __device__ __attribute__((always_inline)) void k2ConvRows3d(const K2Args& a CONV
         return static_cast<int>(l & (WAVE - 1));
     };
 
-    // Tile walk: XCD x of K1_XCDS holds blocks b = x mod X (dispatch is round-robin) and owns a
+    // Tile walk: XCD x of the a.xcds XCDs holds blocks b = x mod X (dispatch is round-robin) and owns a
     // share of the logical tiles proportional to its block count; its blocks take them
     // round-robin, so concurrent blocks of one XCD work on neighbouring tiles (shared L2).
     const int kBlocks = (a.k + BN - 1) / BN;
@@ -1196,9 +1209,10 @@ __device__ __attribute__((always_inline)) void k2ConvRows3d(const K2Args& a CONV
     if constexpr(KD > 1)
         total *= a.dout;
     const int gsz = static_cast<int>(gridDim.x);
-    const int xcd = static_cast<int>(blockIdx.x) % K1_XCDS;
-    const int local = static_cast<int>(blockIdx.x) / K1_XCDS;
-    auto cum = [&](int x) { return x * (gsz / K1_XCDS) + (x < gsz % K1_XCDS ? x : gsz % K1_XCDS); };
+    const int nx = k2rXcds(a);
+    const int xcd = static_cast<int>(blockIdx.x) % nx;
+    const int local = static_cast<int>(blockIdx.x) / nx;
+    auto cum = [&](int x) { return x * (gsz / nx) + (x < gsz % nx ? x : gsz % nx); };
     const int bpx = cum(xcd + 1) - cum(xcd);
     const int tEnd = static_cast<int>(total * cum(xcd + 1) / gsz);
     const int tFirst = static_cast<int>(total * cum(xcd) / gsz) + local;
@@ -1762,9 +1776,10 @@ __device__ __attribute__((always_inline)) void k2ConvRowsCf(const K2Args& a CONV
     const int kBlocks = (a.k + BN - 1) / BN;
     const long long total = static_cast<long long>(a.tilesW) * a.tilesH * a.n * kBlocks;
     const int gsz = static_cast<int>(gridDim.x);
-    const int xcd = static_cast<int>(blockIdx.x) % K1_XCDS;
-    const int local = static_cast<int>(blockIdx.x) / K1_XCDS;
-    auto cum = [&](int x) { return x * (gsz / K1_XCDS) + (x < gsz % K1_XCDS ? x : gsz % K1_XCDS); };
+    const int nx = k2rXcds(a);
+    const int xcd = static_cast<int>(blockIdx.x) % nx;
+    const int local = static_cast<int>(blockIdx.x) / nx;
+    auto cum = [&](int x) { return x * (gsz / nx) + (x < gsz % nx ? x : gsz % nx); };
     const int bpx = cum(xcd + 1) - cum(xcd);
     const int tEnd = static_cast<int>(total * cum(xcd + 1) / gsz);
     const int tFirst = static_cast<int>(total * cum(xcd) / gsz) + local;
@@ -2163,9 +2178,10 @@ __device__ __attribute__((always_inline)) void k2ConvRowsCf3d(const K2Args& a CO
     if constexpr(KD > 1)
         total *= a.dout;
     const int gsz = static_cast<int>(gridDim.x);
-    const int xcd = static_cast<int>(blockIdx.x) % K1_XCDS;
-    const int local = static_cast<int>(blockIdx.x) / K1_XCDS;
-    auto cum = [&](int x) { return x * (gsz / K1_XCDS) + (x < gsz % K1_XCDS ? x : gsz % K1_XCDS); };
+    const int nx = k2rXcds(a);
+    const int xcd = static_cast<int>(blockIdx.x) % nx;
+    const int local = static_cast<int>(blockIdx.x) / nx;
+    auto cum = [&](int x) { return x * (gsz / nx) + (x < gsz % nx ? x : gsz % nx); };
     const int bpx = cum(xcd + 1) - cum(xcd);
     const int tEnd = static_cast<int>(total * cum(xcd + 1) / gsz);
     const int tFirst = static_cast<int>(total * cum(xcd) / gsz) + local;

@@ -533,6 +533,7 @@ struct ConfigFields
     int64_t ring = 1, bl = 0, split = 0;
     int64_t tm = 0, tn = 0, nt = 0, threads = 0, pipe = 0;
     int64_t rows = 0, pw = 0, fn = 0, wp = 0, wq = 0, wk = 0, pp = 0, epi = 0, un = 0, cf = 0;
+    int64_t xpf = 0; ///< written only when set (an absent field reads as 0)
     int64_t dil = 1;
     int64_t line = 0;
     int64_t bpu = 1;
@@ -620,6 +621,10 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"dil", f.dil},
                        {"line", f.line},
                        {"bpu", f.bpu}};
+    if(f.xpf != 0)
+    {
+        kernel.metadata["xpf"] = f.xpf;
+    }
     return kernel;
 }
 
@@ -949,6 +954,50 @@ TEST(TestConvDirectKernelMatch, ChannelsFirstRowsTakePackedChannelsFirstActivati
     }
 }
 
+TEST(TestConvDirectKernelMatch, CrossChunkPrefetchTakesRegisterPathHaloTiles)
+{
+    ConfigFields f;
+    f.xpf = 1;
+    EXPECT_TRUE(admits(f, "gfx942"));
+    auto bf16 = f;
+    bf16.atom = "mfma16_bf16";
+    EXPECT_TRUE(admits(bf16, "gfx942", baseShape(), "BFLOAT16"));
+    // Each field one at a time: the knob's range, register-path weights, channels-last halo.
+    const std::vector<std::pair<std::string, std::function<void(ConfigFields&)>>> mutations{
+        {"xpf", [](ConfigFields& g) { g.xpf = 2; }},
+        {"negative", [](ConfigFields& g) { g.xpf = -1; }},
+        {"bl", [](ConfigFields& g) { g.bl = 1; }},
+    };
+    for(const auto& [name, mutate] : mutations)
+    {
+        auto g = f;
+        mutate(g);
+        EXPECT_FALSE(admits(g, "gfx942")) << name;
+    }
+    // Not the rows or FMA kernels, nor the channels-first halo tile.
+    auto rows = rowsFields();
+    EXPECT_TRUE(admits(rows, "gfx950"));
+    rows.xpf = 1;
+    EXPECT_FALSE(admits(rows, "gfx950"));
+    auto fma = fmaFields(8);
+    EXPECT_TRUE(admits(fma, "gfx942"));
+    fma.xpf = 1;
+    EXPECT_FALSE(admits(fma, "gfx942"));
+    ConfigFields cf;
+    cf.atom = "wmma11_f16";
+    cf.archs = "gfx11";
+    cf.wm = 2;
+    cf.wn = 4;
+    cf.bn = 128;
+    cf.bc = 16;
+    cf.cf = 1;
+    auto shape = baseShape();
+    shape.input = {7, 16};
+    EXPECT_TRUE(admits(cf, "gfx1101", shape));
+    cf.xpf = 1;
+    EXPECT_FALSE(admits(cf, "gfx1101", shape));
+}
+
 TEST(TestConvDirectKernelMatch, ChannelsFirstHaloTilesTakePackedChannelsFirstActivations)
 {
     ConfigFields f;
@@ -1239,8 +1288,11 @@ TEST(TestConvDirectShips, GroupsNameArchitecturesAndFamilies)
 // Planner
 // ---------------------------------------------------------------------------
 
-std::optional<conv_direct::Plan>
-    planOf(const ConvShape& shape, const ConfigFields& fields, const std::string& dtype, int cus)
+std::optional<conv_direct::Plan> planOf(const ConvShape& shape,
+                                        const ConfigFields& fields,
+                                        const std::string& dtype,
+                                        int cus,
+                                        int xcds = 0)
 {
     const auto problem = parse(specFor(shape, ConvDirection::FORWARD));
     const auto config = conv_direct::configOf(kernelOf(fields, dtype));
@@ -1248,7 +1300,76 @@ std::optional<conv_direct::Plan>
     {
         return std::nullopt;
     }
-    return conv_direct::planFor(*problem, *config, cus);
+    return conv_direct::planFor(*problem, *config, cus, xcds);
+}
+
+TEST(TestConvDirectPlan, HaloTilesTakeXcdRunsOfTwoBlocksAComputeUnit)
+{
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.dataType = DataType::HALF;
+    const auto plan = planOf(shape, ConfigFields{}, "HALF", 228, 6);
+    ASSERT_TRUE(plan.has_value());
+    EXPECT_EQ(plan->args.xcds, 6);
+    EXPECT_EQ(plan->args.xcdRun, 2 * 228 / 6);
+    // One XCD (or an unknown count) keeps the launch order.
+    const auto one = planOf(shape, ConfigFields{}, "HALF", 228, 1);
+    ASSERT_TRUE(one.has_value());
+    EXPECT_EQ(one->args.xcds, 0);
+    EXPECT_EQ(one->args.xcdRun, 0);
+    const auto unknown = planOf(shape, ConfigFields{}, "HALF", 228);
+    ASSERT_TRUE(unknown.has_value());
+    EXPECT_EQ(unknown->args.xcds, 0);
+}
+
+TEST(TestConvDirectPlan, RowsTilesWalkPerXcdShares)
+{
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.dataType = DataType::HALF;
+    shape.input = {32, 32};
+    auto fields = rowsFields();
+    fields.archs = "gfx942";
+    fields.atom = "mfma16_f16";
+    const auto plan = planOf(shape, fields, "HALF", 228, 6);
+    ASSERT_TRUE(plan.has_value());
+    EXPECT_EQ(plan->args.xcds, 6);
+    EXPECT_EQ(plan->args.xcdRun, 0);
+}
+
+TEST(TestConvDirectPlan, SplitGridsKeepTheLaunchOrder)
+{
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.dataType = DataType::FLOAT;
+    shape.n = 1;
+    shape.c = 512;
+    shape.k = 64;
+    shape.input = {7, 7};
+    auto fields = ConfigFields{};
+    fields.atom = "mfma16_f32";
+    fields.bc = 16;
+    fields.vec = 4;
+    fields.bl = 1;
+    fields.split = 1;
+    const auto plan = planOf(shape, fields, "FLOAT", 304, 8);
+    ASSERT_TRUE(plan.has_value());
+    ASSERT_GT(plan->args.splits, 1);
+    EXPECT_EQ(plan->args.xcds, 0);
+}
+
+TEST(TestConvDirectPlan, TiesBreakTowardWholeSixteenPixelRows)
+{
+    // 128 output pixels on a 128-wide map: 16 x 8 and 8 x 16 tiles cost the same (the same halo
+    // and tile count); the 16-wide one keeps every 16-lane fragment within one halo row.
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.dataType = DataType::HALF;
+    shape.input = {128, 128};
+    const auto plan = planOf(shape, ConfigFields{}, "HALF", 64);
+    ASSERT_TRUE(plan.has_value());
+    EXPECT_EQ(plan->args.tw % 16, 0);
+    EXPECT_EQ(plan->args.th * plan->args.tw, 128);
 }
 
 TEST(TestConvDirectPlan, TileFitsTheHaloAndTheWorkspaceHoldsTheWeights)

@@ -130,6 +130,10 @@ struct Config
     /// Rows on packed channels-first activations in place (2-D, 16-bit, gfx950): the halo is
     /// fetched as it lies and transposed in LDS, the output stored channels-first; no staging.
     int cf = 0;
+    /// Halo tile with register-path weights (BL 0), channels-last: 1 prefetches the weight
+    /// fragments across channel chunks, skips ring sets by scalar branches and pads 16-bit halo
+    /// rows by 8 bytes (CONV_DIRECT_XPF); 0 elsewhere.
+    int xpf = 0;
     /// Filter dilation (2-D rows configs; 1 elsewhere): the config serves exactly this dilation of
     /// the axes its filter spans.
     int dil = 1;
@@ -220,7 +224,7 @@ struct Plan
  * at most 16 splits.
  */
 std::optional<Plan>
-    planFor(const DirectProblem& problem, const Config& config, int64_t computeUnits);
+    planFor(const DirectProblem& problem, const Config& config, int64_t computeUnits, int xcds = 0);
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::conv_direct
 

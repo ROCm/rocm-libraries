@@ -61,6 +61,30 @@
 #define K3_LOOP_INLINE
 #endif
 
+/// Unsigned magic division by a runtime divisor d >= 1 (uniform): n / d for 0 <= n < 2^31 is a
+/// high multiply, an add and a shift.
+struct K3Magic
+{
+    unsigned mul = 1, sh = 0;
+};
+__device__ inline K3Magic k3MagicOf(int d)
+{
+    K3Magic m;
+    unsigned s = 0;
+    while((1u << s) < static_cast<unsigned>(d))
+        ++s;
+    m.sh = s;
+    m.mul = static_cast<unsigned>(((static_cast<unsigned long long>((1ull << s) - d)) << 32)
+                                      / static_cast<unsigned long long>(d)
+                                  + 1);
+    return m;
+}
+__device__ inline int k3MagicDiv(int n, K3Magic m)
+{
+    return static_cast<int>((__umulhi(static_cast<unsigned>(n), m.mul) + static_cast<unsigned>(n))
+                            >> m.sh);
+}
+
 /// Compile-time loop: f(K3Int<0>{}) .. f(K3Int<N - 1>{}).
 template <int V>
 struct K3Int
@@ -1846,6 +1870,11 @@ __device__ K3_LOOP_INLINE void k3WrwRows(const K3Args& a)
 // Channels-last (LAYOUT 1): units of VEC contiguous channels at one position, scattered into
 // the channel rows. Two LDS buffers, one barrier per step. Admitted only where no specialized
 // config is (the host's two-tier rule).
+// FLAT 1: a step is BQ consecutive positions of the flattened (image, output depth, row, column)
+// order, so output rows shorter than BQ (small maps) fill the step instead of padding it; each
+// position is decomposed by magic division, and x and dy are each one buffer (the host keeps
+// them within the 32-bit buffer range). Served where the output rows are shorter than BQ,
+// beside the specialized configs.
 // Below.
 template <class Atom, class T>
 __device__ inline typename Atom::frag k3FragAtRt(const T* p, int off);
@@ -1892,9 +1921,12 @@ template <class T,
           int WC,
           int VEC,
           int WX = 0,
-          int XCD = 0>
+          int XCD = 0,
+          int FLAT = 0>
 __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
 {
+    static_assert(FLAT == 0 || (WX == 0 && CONV_K3_PB == 0),
+                  "K3 generic flat positions: no shared window, whole-tensor buffers");
     // The FMA form (K3FmaGeneric): (BK / TKF) x (BC / TCF) threads, no fragments.
     constexpr int TKF = K3GenericFma<Atom>::TK, TCF = K3GenericFma<Atom>::TC;
     constexpr bool FMA = TKF > 0;
@@ -2018,7 +2050,7 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
         }
     };
     int n = 0, od = 0, oh = 0, chunk = 0;
-    if(begin < end)
+    if(begin < end && FLAT == 0)
     {
         const long long rowIndex = begin / a.chunks;
         chunk = static_cast<int>(begin - rowIndex * a.chunks);
@@ -2027,6 +2059,25 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
         od = static_cast<int>(r2 % a.dout);
         n = static_cast<int>(r2 / a.dout);
     }
+    // FLAT: the step's first flattened position, and magic divisors of the output extents.
+    int pos0 = FLAT != 0 ? static_cast<int>(begin * BQ) : 0;
+    const int positions = a.n * a.dout * a.ho * a.wo;
+    K3Magic mWo, mHo, mDo;
+    if constexpr(FLAT != 0)
+    {
+        mWo = k3MagicOf(a.wo);
+        mHo = k3MagicOf(a.ho);
+        mDo = k3MagicOf(a.dout);
+    }
+    // Flattened position p (0 <= p < positions) as image, output depth, row and column.
+    auto posOf = [&](int p, int& pn, int& pd, int& ph, int& pw) {
+        const int r = k3MagicDiv(p, mWo);
+        pw = p - r * a.wo;
+        const int r2 = k3MagicDiv(r, mHo);
+        ph = r - r2 * a.ho;
+        pn = k3MagicDiv(r2, mDo);
+        pd = r2 - pn * a.dout;
+    };
     auto tapOf = [&](int t, bool& tok, int& dD, int& dH, int& dW) {
         tok = false;
         dD = dH = dW = 0;
@@ -2041,7 +2092,7 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
             }
     };
     auto issue = [&](bool live) {
-        live = live && n < a.n;
+        live = live && (FLAT != 0 || n < a.n);
         // Image n's buffers: their batch strides bound them (32-bit offsets within). With
         // block-based buffers (CONV_K3_PB, images past the 32-bit range) each step's buffers
         // start at the first element the block can read in it (its first channel, the output
@@ -2054,8 +2105,10 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
             yOrg = (g * kg + k0) * ys1 + od * ys2 + oh * ys3 + chunk * BQ * ys4;
             xOrg = (g * cg + c0) * xs1 + id0 * xs2 + ih0 * xs3 + iw0 * xs4;
         }
-        const k3i4 yr = k3Rsrc4(static_cast<const T*>(a.dy) + n * ys0 + yOrg, a.yImage * sizeof(T));
-        const k3i4 xr = k3Rsrc4(static_cast<const T*>(a.x) + n * xs0 + xOrg, a.xImage * sizeof(T));
+        // FLAT: the whole tensors are the buffers (the image index is part of each offset).
+        const long long yImg = FLAT != 0 ? 0 : n * ys0, xImg = FLAT != 0 ? 0 : n * xs0;
+        const k3i4 yr = k3Rsrc4(static_cast<const T*>(a.dy) + yImg + yOrg, a.yImage * sizeof(T));
+        const k3i4 xr = k3Rsrc4(static_cast<const T*>(a.x) + xImg + xOrg, a.xImage * sizeof(T));
         if constexpr(CL)
         {
 #pragma unroll
@@ -2067,10 +2120,17 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
 #pragma unroll
                 for(int w = 0; w < KW; ++w)
                 {
-                    const int ow = chunk * BQ + qg * KW + w;
-                    const bool ok = live & (u < A_UNITS) & (ow < a.wo) & (k < kg);
-                    const long long off
-                        = (g * kg + k) * ys1 + od * ys2 + oh * ys3 + ow * ys4 - yOrg;
+                    int pn = n, pd = od, ph = oh, ow = chunk * BQ + qg * KW + w;
+                    bool in = ow < a.wo;
+                    if constexpr(FLAT != 0)
+                    {
+                        const int q = pos0 + qg * KW + w;
+                        in = q < positions;
+                        posOf(in ? q : 0, pn, pd, ph, ow);
+                    }
+                    const bool ok = live & (u < A_UNITS) & in & (k < kg);
+                    const long long off = (g * kg + k) * ys1 + (FLAT != 0 ? pn * ys0 : 0) + pd * ys2
+                                          + ph * ys3 + ow * ys4 - yOrg;
                     k3Load(ra[p * KW + w],
                            yr,
                            ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
@@ -2108,6 +2168,28 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
                 int dD, dH, dW;
                 tapOf(t, tok, dD, dH, dW);
                 const int c = c0 + cv * VEC;
+                if constexpr(FLAT != 0)
+                {
+                    // Each position its own row: image, depth and height per word.
+#pragma unroll
+                    for(int w = 0; w < KW; ++w)
+                    {
+                        const int q = pos0 + qg * KW + w;
+                        const bool in = q < positions;
+                        int pn, pd, ph, ow;
+                        posOf(in ? q : 0, pn, pd, ph, ow);
+                        const int id = pd * a.sd + dD, ih = ph * a.sh + dH, iw = ow * a.sw + dW;
+                        const bool ok = live & in & (u < B_UNITS) & tok & (c < cg) & (id >= 0)
+                                        & (id < a.di) & (ih >= 0) & (ih < a.hi) & (iw >= 0)
+                                        & (iw < a.wi);
+                        const long long off
+                            = (g * cg + c) * xs1 + pn * xs0 + id * xs2 + ih * xs3 + iw * xs4;
+                        k3Load(rb[p * KW + w],
+                               xr,
+                               ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
+                    }
+                    continue;
+                }
                 const int id = od * a.sd + dD, ih = oh * a.sh + dH;
                 const bool rowOk = live & (u < B_UNITS) & tok & (c < cg) & (id >= 0) & (id < a.di)
                                    & (ih >= 0) & (ih < a.hi);
@@ -2126,9 +2208,16 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
             }
             return;
         }
-        const int ow = chunk * BQ + j;
-        const bool qOk = live & (ow < a.wo);
-        const long long yPos = od * ys2 + oh * ys3 + ow * ys4;
+        int pn = n, pd = od, ph = oh, ow = chunk * BQ + j;
+        bool in = ow < a.wo;
+        if constexpr(FLAT != 0)
+        {
+            const int q = pos0 + j;
+            in = q < positions;
+            posOf(in ? q : 0, pn, pd, ph, ow);
+        }
+        const bool qOk = live & in;
+        const long long yPos = (FLAT != 0 ? pn * ys0 : 0) + pd * ys2 + ph * ys3 + ow * ys4;
 #pragma unroll
         for(int p = 0; p < A_PASSES; ++p)
         {
@@ -2145,10 +2234,11 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
             bool tok;
             int dD, dH, dW;
             tapOf(t, tok, dD, dH, dW);
-            const int id = od * a.sd + dD, ih = oh * a.sh + dH, iw = ow * a.sw + dW;
+            const int id = pd * a.sd + dD, ih = ph * a.sh + dH, iw = ow * a.sw + dW;
             const bool ok = qOk & tok & (c < cg) & (id >= 0) & (id < a.di) & (ih >= 0) & (ih < a.hi)
                             & (iw >= 0) & (iw < a.wi);
-            const long long off = (g * cg + c) * xs1 + id * xs2 + ih * xs3 + iw * xs4 - xOrg;
+            const long long off = (g * cg + c) * xs1 + (FLAT != 0 ? pn * xs0 : 0) + id * xs2
+                                  + ih * xs3 + iw * xs4 - xOrg;
             k3Load(rb[p], xr, ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
         }
     };
@@ -2239,6 +2329,11 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
         }
     };
     auto advance = [&]() {
+        if constexpr(FLAT != 0)
+        {
+            pos0 += BQ;
+            return;
+        }
         if(++chunk == a.chunks)
         {
             chunk = 0;
@@ -4755,6 +4850,243 @@ __device__ inline void k3Reduce(const K3ReduceArgs& a)
 #if defined(__gfx950__)
             // Many splits of a small dw wait on non-temporal latency on gfx950 (c64 at 150
             // splits: 8.8 against 4.6 us); fewer read faster non-temporally.
+            if(a.splits >= 64)
+                add(K3Int<0>{});
+            else
+                add(K3Int<1>{});
+#else
+            add(K3Int<1>{});
+#endif
+        }
+        else
+        {
+            for(int sp = grp; sp < a.splits; sp += 4)
+                for(int j = 0; j < 4 && c + j < a.cg; ++j)
+                    sum[j] += src[sp * a.partialElems + j];
+        }
+    }
+    if(grp > 0)
+        part[grp - 1][lane] = sum;
+    k1LdsBarrier();
+    if(grp != 0 || !live)
+        return;
+    sum += part[0][lane];
+    sum += part[1][lane];
+    sum += part[2][lane];
+    const int k = static_cast<int>(r1 % a.kg);
+    const long long r2 = r1 / a.kg;
+    const int tap = static_cast<int>(r2 % a.taps);
+    const int g = static_cast<int>(r2 / a.taps);
+    const int wtap = a.flip ? a.taps - 1 - tap : tap;
+    T* o = dw + (static_cast<long long>(g) * a.kg + k) * a.wk + wtap * a.wtap;
+    for(int j = 0; j < 4 && c + j < a.cg; ++j)
+        o[(c + j) * a.wc] = K1Elem<T>::store(sum[j]);
+}
+
+/// The width fold's staging (ConvWrwFoldX, channels-first x): a block takes a tile of one row
+/// of x, `tu` folded positions by s phases (K3_FOLD_TILE elements at most), reads it into LDS
+/// (zero outside the row, shifted by `shift`) and writes each phase's run of positions to folded
+/// channel j C + c of the same row. Rows of whole 16-byte vectors (x's width and the folded
+/// width, which the host pads to whole vectors) move by 16-byte loads and stores; any other row
+/// element by element. A bitwise copy.
+template <class T>
+__device__ inline void k3FoldX(const K3FoldArgs& a)
+{
+    constexpr int VEC = 16 / static_cast<int>(sizeof(T));
+    typedef typename K1Raw<16>::type Vec;
+    __shared__ __attribute__((aligned(16))) T tile[K3_FOLD_TILE + VEC];
+    const int tu = K3_FOLD_TILE / a.s / VEC * VEC; // folded positions a tile, whole vectors
+    const long long tilesPerRow = (a.u + tu - 1) / tu;
+    const long long row = blockIdx.x / tilesPerRow;
+    const int u0 = static_cast<int>(blockIdx.x - row * tilesPerRow) * tu;
+    const int un = a.u - u0 < tu ? a.u - u0 : tu;
+    const T* x = static_cast<const T*>(a.x) + row * a.width;
+    const long long first = static_cast<long long>(u0) * a.s - a.shift;
+    const int span = un * a.s;
+    const bool vec = a.width % VEC == 0 && a.u % VEC == 0;
+    int off = 0;
+    if(vec)
+    {
+        // The aligned run of vectors covering [first, first + span): off elements before first.
+        const long long base = first >= 0 ? first / VEC * VEC : -((-first + VEC - 1) / VEC) * VEC;
+        off = static_cast<int>(first - base);
+        const int vectors = (off + span + VEC - 1) / VEC;
+        for(int v = static_cast<int>(threadIdx.x); v < vectors; v += blockDim.x)
+        {
+            const long long p = base + static_cast<long long>(v) * VEC;
+            Vec raw{};
+            if(p >= 0 && p < a.width)
+                raw = *reinterpret_cast<const Vec*>(x + p);
+            *reinterpret_cast<Vec*>(tile + v * VEC) = raw;
+        }
+    }
+    else
+    {
+        for(int e = static_cast<int>(threadIdx.x); e < span; e += blockDim.x)
+        {
+            const long long p = first + e;
+            tile[e] = p >= 0 && p < a.width ? x[p] : T{};
+        }
+    }
+    k1LdsBarrier();
+    const long long chanRows = static_cast<long long>(a.c) * a.planes; // rows of one image
+    const long long n = row / chanRows;
+    const long long rest = row - n * chanRows; // c planes + dh
+    T* xf = static_cast<T*>(a.xf) + (n * a.s * chanRows + rest) * a.u + u0;
+    const long long phaseStride = chanRows * a.u;
+    if(vec)
+    {
+        // A thread a run of VEC positions of one phase: one 16-byte store. Phases fastest across
+        // the threads, so a wave's LDS reads spread over the banks (runs fastest put every
+        // thread's read VEC s elements apart, on the same few banks).
+        const int runs = un / VEC;
+        for(int e = static_cast<int>(threadIdx.x); e < runs * a.s; e += blockDim.x)
+        {
+            const int j = e % a.s, u = e / a.s * VEC;
+            T v[VEC];
+#pragma unroll
+            for(int k = 0; k < VEC; ++k)
+                v[k] = tile[off + (u + k) * a.s + j];
+            Vec raw;
+            __builtin_memcpy(&raw, v, sizeof(raw));
+            *reinterpret_cast<Vec*>(xf + j * phaseStride + u) = raw;
+        }
+    }
+    else
+    {
+        for(int e = static_cast<int>(threadIdx.x); e < span; e += blockDim.x)
+        {
+            const int j = e / un, u = e - j * un;
+            xf[j * phaseStride + u] = tile[u * a.s + j];
+        }
+    }
+}
+
+/// The width fold's reduce (ConvWrwReduceFold): the quad reduce's sum of the folded partials
+/// (`a.r`: c the folded channels, taps the folded taps, `quads` a block), each folded (channel
+/// j C + c, tap) element written to dw tap (tau - pre) s + j + pad of the graph's filter, and
+/// dropped outside it. Every dw element is one folded element.
+template <class T>
+__device__ inline void k3ReduceFold(const K3ReduceFoldArgs& f)
+{
+    typedef float f4 __attribute__((ext_vector_type(4)));
+    constexpr int DEPTH = 4; // the quad reduce's loads in flight: fold grids are wide
+    __shared__ f4 part[3][K3_REDUCE_DEEP_MAX_QUADS];
+    const K3ReduceArgs& a = f.r;
+    T* dw = static_cast<T*>(a.dw);
+    const int nq = a.quads;
+    const int cq = (a.cg + 3) / 4;
+    const long long quads = a.elems / a.cg * cq;
+    const bool vec = (a.cg % 4) == 0;
+    const int lane = static_cast<int>(threadIdx.x) % nq, grp = static_cast<int>(threadIdx.x) / nq;
+    const long long i = static_cast<long long>(blockIdx.x) * nq + lane;
+    const bool live = i < quads;
+    const int c = live ? static_cast<int>(i % cq) * 4 : 0;
+    const long long r1 = live ? i / cq : 0;
+    const float* src = a.partial + r1 * a.cg + c;
+    f4 sum = {0.0f, 0.0f, 0.0f, 0.0f};
+    if(live)
+    {
+        if(vec)
+        {
+            int sp = grp;
+            for(; sp + 4 * (DEPTH - 1) < a.splits; sp += 4 * DEPTH)
+            {
+                f4 v[DEPTH];
+#pragma unroll
+                for(int j = 0; j < DEPTH; ++j)
+                    v[j] = k3PartialLoad<true>(
+                        reinterpret_cast<const f4*>(src + (sp + 4 * j) * a.partialElems));
+#pragma unroll
+                for(int j = 0; j < DEPTH; ++j)
+                    sum += v[j];
+            }
+            for(; sp < a.splits; sp += 4)
+                sum += k3PartialLoad<true>(reinterpret_cast<const f4*>(src + sp * a.partialElems));
+        }
+        else
+        {
+            for(int sp = grp; sp < a.splits; sp += 4)
+                for(int j = 0; j < 4 && c + j < a.cg; ++j)
+                    sum[j] += src[sp * a.partialElems + j];
+        }
+    }
+    if(grp > 0)
+        part[grp - 1][lane] = sum;
+    k1LdsBarrier();
+    if(grp != 0 || !live)
+        return;
+    sum += part[0][lane];
+    sum += part[1][lane];
+    sum += part[2][lane];
+    // r1 over [tap][k] (groups 1): the folded tap (outer, tau) and the output channel.
+    const int k = static_cast<int>(r1 % a.kg);
+    const int tap = static_cast<int>(r1 / a.kg);
+    const int tau = tap % f.fw;
+    const int outer = tap / f.fw;
+    for(int e = 0; e < 4 && c + e < a.cg; ++e)
+    {
+        const int cf = c + e;
+        const int j = cf / f.c;
+        const int t = (tau - f.pre) * f.s + j + f.pad;
+        if(t < 0 || t >= f.filterW)
+            continue;
+        const long long flat = static_cast<long long>(outer) * f.filterW + t;
+        const long long wt = f.flip ? static_cast<long long>(f.outer) * f.filterW - 1 - flat : flat;
+        dw[k * f.wk + static_cast<long long>(cf - j * f.c) * f.wc + wt * f.wtap]
+            = K1Elem<T>::store(sum[e]);
+    }
+}
+
+/// The quad reduce for many splits (ConvWrwReduceDeep): the same association as k3Reduce (four
+/// split groups, group j adding splits j, j + 4, ... in order, then the groups in order), so dw
+/// is bitwise the same. A block is `a.quads` quads (16, 32 or 64) by the 4 groups, so a small dw
+/// spreads over more blocks, and a thread keeps 16 partial loads in flight before adding them in
+/// split order: k3Reduce's 4 leave a long split walk waiting on load latency (c32 k32 3x3 at
+/// 500 splits: 36 blocks, 14 us for 18 MB).
+template <class T>
+__device__ inline void k3ReduceDeep(const K3ReduceArgs& a)
+{
+    typedef float f4 __attribute__((ext_vector_type(4)));
+    constexpr int DEPTH = 16;
+    __shared__ f4 part[3][K3_REDUCE_DEEP_MAX_QUADS];
+    T* dw = static_cast<T*>(a.dw);
+    const int nq = a.quads;
+    const int cq = (a.cg + 3) / 4;
+    const long long quads = a.elems / a.cg * cq;
+    const bool vec = (a.cg % 4) == 0;
+    const int lane = static_cast<int>(threadIdx.x) % nq, grp = static_cast<int>(threadIdx.x) / nq;
+    const long long i = static_cast<long long>(blockIdx.x) * nq + lane;
+    const bool live = i < quads;
+    // i over [g][tap][k][c / 4] (the partials' order), c fastest.
+    const int c = live ? static_cast<int>(i % cq) * 4 : 0;
+    const long long r1 = live ? i / cq : 0;
+    const float* src = a.partial + r1 * a.cg + c;
+    f4 sum = {0.0f, 0.0f, 0.0f, 0.0f};
+    if(live)
+    {
+        if(vec)
+        {
+            const auto add = [&](auto nt) {
+                constexpr bool NT = decltype(nt)::value != 0;
+                int sp = grp;
+                for(; sp + 4 * (DEPTH - 1) < a.splits; sp += 4 * DEPTH)
+                {
+                    f4 v[DEPTH];
+#pragma unroll
+                    for(int j = 0; j < DEPTH; ++j)
+                        v[j] = k3PartialLoad<NT>(
+                            reinterpret_cast<const f4*>(src + (sp + 4 * j) * a.partialElems));
+#pragma unroll
+                    for(int j = 0; j < DEPTH; ++j)
+                        sum += v[j];
+                }
+                for(; sp < a.splits; sp += 4)
+                    sum += k3PartialLoad<NT>(
+                        reinterpret_cast<const f4*>(src + sp * a.partialElems));
+            };
+#if defined(__gfx950__)
+            // As k3Reduce: plain loads from 64 splits on gfx950, non-temporal below.
             if(a.splits >= 64)
                 add(K3Int<0>{});
             else

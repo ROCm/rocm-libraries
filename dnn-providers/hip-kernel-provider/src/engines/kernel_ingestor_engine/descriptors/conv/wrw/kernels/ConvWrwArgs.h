@@ -88,14 +88,53 @@ struct K3ReduceArgs
     /// K3_REDUCE_TILE_MAX_SPLITS splits), a block a tile of tileK output channels by tileC
     /// input channels of one group (tilesK x tilesC tiles a group), written as contiguous runs;
     /// 2: ConvWrwReduceRows (K C T R S of at most K3_REDUCE_ROW_MAX_TAPS taps at one split, on
-    /// gfx950); 0: ConvWrwReduce, quads of channels of one tap and output channel. All sum in
+    /// gfx950); 0: ConvWrwReduce, quads of channels of one tap and output channel; 3:
+    /// ConvWrwReduceDeep, the quad reduce with `quads` quads a block and 16 loads a thread in
+    /// flight (many splits into few quads); 4: ConvWrwReduceFold (K3ReduceFoldArgs). All sum in
     /// the same order.
     int tile;
     int tileK;
     int tileC;
     int tilesK;
     int tilesC;
-    int padding0; ///< keeps the struct size a multiple of 8 on host and device alike
+    int quads; ///< tile 3: quads a block (16, 32 or 64; 4 threads each); unused otherwise
+};
+
+/// The width fold (a width stride s dividing the filter width, groups 1). Channels-first x is
+/// staged by ConvWrwFoldX as x'[n][j C + c][d][h][u] = x[n][c][d][h][u s + j - shift] (zero
+/// outside the row; shift = the width padding mod s, so the folded filter has exactly S / s
+/// taps); channels-last x is x'[n][d][h][u][j C + c] = x[n][d][h][u s + j][c] already. The
+/// config runs the stride-1 problem over x', and ConvWrwReduceFold writes its taps back to dw:
+/// folded channel j C + c, tap tau -> dw tap (tau - pre) s + j + pad (taps outside dropped).
+struct K3FoldArgs
+{
+    const void* x;
+    void* xf;
+    long long rows; ///< n x c x d x h: the rows of x
+    long long planes; ///< d x h
+    long long width; ///< x's width L
+    int c; ///< x's channels
+    int s; ///< the fold (the width stride)
+    int u; ///< folded width, ceil((L + shift) / s)
+    int shift; ///< the padding's phase: x' position u s + j reads x position u s + j - shift
+};
+
+/// ConvWrwReduceFold: the quad reduce of the folded problem's partials (`r`, its geometry: c the
+/// folded channels, taps the folded taps) in the deep reduce's order, written to the graph's dw.
+struct K3ReduceFoldArgs
+{
+    K3ReduceArgs r;
+    long long wk; ///< dw strides: output channel, input channel, tap (t r s flattened)
+    long long wc;
+    long long wtap;
+    int c; ///< the graph's input channels (folded channel j C + c)
+    int s; ///< the fold
+    int fw; ///< folded filter width
+    int pre; ///< folded width padding, ceil(pad / s)
+    int pad; ///< the graph's width padding less the staged shift
+    int filterW; ///< the graph's filter width
+    int outer; ///< filter depth x height (taps outside the width)
+    int flip; ///< true convolution: dw taps reflected
 };
 
 /// Three-bf16 (an fp32 graph, a config of math 1: the TF32 engine's): ConvWrwSplit writes
@@ -133,5 +172,14 @@ struct K3AccurateReduceArgs
 /// The row reduce's channels per block; it takes taps * channels within 4096 floats of LDS.
 #define K3_REDUCE_ROW_CHANNELS 64
 #define K3_REDUCE_ROW_MAX_TAPS 64
+/// The deep quad reduce: at least this many splits, the quad reduce's grid at most a
+/// 1 / K3_REDUCE_DEEP_UNIT_SHARE of the dispatch units (where its few waves wait on load latency;
+/// wider grids are bandwidth-bound and ran 1-3% slower deep on gfx950), and the most quads a
+/// block.
+#define K3_REDUCE_DEEP_MIN_SPLITS 32
+#define K3_REDUCE_DEEP_UNIT_SHARE 3
+#define K3_REDUCE_DEEP_MAX_QUADS 64
+/// ConvWrwFoldX's tile: x elements of one row a block stages through LDS.
+#define K3_FOLD_TILE 2048
 
 // NOLINTEND(modernize-avoid-c-arrays,modernize-macro-to-enum)
