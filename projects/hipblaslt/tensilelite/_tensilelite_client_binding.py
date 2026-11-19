@@ -188,7 +188,8 @@ def validate_client(client: Path, installation: Installation) -> None:
     An installed package must match the client's ``--source-revision`` exactly,
     including any dirty suffix. An editable install compares the commit only:
     a different commit fails, and differing recorded source states warn.
-    If either source revision is unavailable, allow use with a warning.
+    If both source revisions are unavailable, allow use with a warning.
+    If only one is unavailable, reject pairing.
     """
     if not client.is_absolute():
         raise ClientBindingError(f"Client path must be absolute: {client}")
@@ -226,14 +227,35 @@ def validate_client(client: Path, installation: Installation) -> None:
                 f"Package source revision is not a git commit: {package_revision!r}\n" + details
             ) from exc
 
-    if package_revision is None or client_commit is None:
+    if package_revision is None and client_commit is None:
         warnings.warn(
-            "Source compatibility could not be verified because a source revision "
-            "is unavailable. Use a client built from the same source as this package.\n" + details,
+            "Source compatibility could not be verified because neither the package "
+            "nor the client has a source revision. Use a client built from the same "
+            "source as this package.\n" + details,
             ClientBindingWarning,
             stacklevel=2,
         )
         return
+
+    if package_revision is None or client_commit is None:
+        hint = _rebuild_hint(installation)
+        if package_revision is None:
+            if installation.editable:
+                hint = (
+                    "Use an editable Git checkout, or rebuild the client from the same "
+                    "unstamped source tree without a revision override."
+                )
+            else:
+                hint = (
+                    "Build a non-editable package with TENSILELITE_SOURCE_REVISION set "
+                    "to its known source revision, or build both components from the "
+                    "same unstamped source tree."
+                )
+        raise ClientBindingError(
+            "Cannot pair tensilelite with this client because only one has a source revision.\n"
+            + details
+            + hint
+        )
 
     if not installation.editable:
         if client_revision != package_revision:

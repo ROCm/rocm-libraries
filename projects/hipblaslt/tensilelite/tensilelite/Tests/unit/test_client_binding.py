@@ -527,17 +527,41 @@ def test_editable_install_accepts_the_same_source_state(tmp_path, monkeypatch, r
 
 
 @pytest.mark.parametrize("editable", [False, True])
-@pytest.mark.parametrize("package, client", [(None, _SHA), (_SHA, "none"), (None, "none")])
-def test_missing_source_revision_warns_and_allows_pairing(
-    tmp_path, monkeypatch, editable, package, client
-):
-    queries = _fake_client(monkeypatch, revision=client)
+def test_both_source_revisions_missing_warns_and_allows_pairing(tmp_path, monkeypatch, editable):
+    queries = _fake_client(monkeypatch, revision="none")
     with pytest.warns(binding.ClientBindingWarning, match="could not be verified") as warning:
         binding.validate_client(
-            _client(tmp_path), _installation(tmp_path, revision=package, editable=editable)
+            _client(tmp_path), _installation(tmp_path, revision=None, editable=editable)
         )
     assert "same source" in str(warning[0].message)
+    assert "neither the package nor the client has a source revision" in str(warning[0].message)
     assert queries == ["--source-revision", "--build-rocm"]
+
+
+@pytest.mark.parametrize("editable", [False, True])
+@pytest.mark.parametrize(
+    "package, client", [(None, _SHA), (None, _DIRTY), (_SHA, "none"), (_DIRTY, "none")]
+)
+def test_exactly_one_source_revision_missing_rejects_pairing(
+    tmp_path, monkeypatch, editable, package, client
+):
+    queries = _fake_client(monkeypatch, revision=client, build_rocm="7.12.0rc1 full")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(binding.ClientBindingError, match="only one") as error:
+            binding.validate_client(
+                _client(tmp_path), _installation(tmp_path, revision=package, editable=editable)
+            )
+    message = str(error.value)
+    assert f"tensilelite source revision: {package or 'none'}" in message
+    assert f"client source revision: {client}" in message
+    assert "client build ROCm: 7.12.0rc1 full" in message
+    assert queries == ["--source-revision", "--build-rocm"]
+    if package is None:
+        expected_hint = "editable Git checkout" if editable else "TENSILELITE_SOURCE_REVISION"
+        assert expected_hint in message
+    else:
+        assert "tensilelite-configure-client" in message
 
 
 @pytest.mark.parametrize("editable", [False, True])
