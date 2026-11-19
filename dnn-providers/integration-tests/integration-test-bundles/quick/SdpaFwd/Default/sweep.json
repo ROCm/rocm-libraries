@@ -1360,6 +1360,594 @@
         "seed": 42,
         "generator": "import_graph.py"
       }
+    },
+    {
+      "id": "bhsd_mha_fp16_1_32_512_128_causal_br",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              65536,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              65536,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              65536,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              32,
+              512,
+              128
+            ],
+            "strides": [
+              2097152,
+              65536,
+              128,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.08838834764831843,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "hand-authored SdpaFwd layout case for the dense attention engines: the Default graph template with strided Q, K, V and O, verified by the GPU reference executor (no golden data)",
+        "notes": "BHSD storage (head stride S*D), MHA 32 heads, D128, S512, causal bottom-right",
+        "seed": 42,
+        "generator": "import_graph.py"
+      }
+    },
+    {
+      "id": "bhsd_gqa_bf16_1_16_2_384_128_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              384,
+              128
+            ],
+            "strides": [
+              98304,
+              49152,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              384,
+              128
+            ],
+            "strides": [
+              786432,
+              49152,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              384,
+              128
+            ],
+            "strides": [
+              786432,
+              49152,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              2,
+              384,
+              128
+            ],
+            "strides": [
+              98304,
+              49152,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.08838834764831843,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "hand-authored SdpaFwd layout case for the dense attention engines: the Default graph template with strided Q, K, V and O, verified by the GPU reference executor (no golden data)",
+        "notes": "BHSD storage, GQA 16/2 heads, D128, S384, causal bottom-right",
+        "seed": 42,
+        "generator": "import_graph.py"
+      }
+    },
+    {
+      "id": "qkv_packed_mha_bf16_1_4_512_128_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              4,
+              512,
+              128
+            ],
+            "strides": [
+              786432,
+              128,
+              1536,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              4,
+              512,
+              128
+            ],
+            "strides": [
+              786432,
+              128,
+              1536,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              4,
+              512,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              4,
+              512,
+              128
+            ],
+            "strides": [
+              786432,
+              128,
+              1536,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.08838834764831843,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "hand-authored SdpaFwd layout case for the dense attention engines: the Default graph template with strided Q, K, V and O, verified by the GPU reference executor (no golden data)",
+        "notes": "packed QKV stride pattern (token stride 3*H*D, head stride D), MHA 4 heads, D128, S512; O packed BSHD",
+        "seed": 42,
+        "generator": "import_graph.py"
+      }
+    },
+    {
+      "id": "qkv_packed_gqa_bf16_1_16_2_384_128_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              384,
+              128
+            ],
+            "strides": [
+              983040,
+              128,
+              2560,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              384,
+              128
+            ],
+            "strides": [
+              983040,
+              128,
+              2560,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              384,
+              128
+            ],
+            "strides": [
+              786432,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              2,
+              384,
+              128
+            ],
+            "strides": [
+              983040,
+              128,
+              2560,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.08838834764831843,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "hand-authored SdpaFwd layout case for the dense attention engines: the Default graph template with strided Q, K, V and O, verified by the GPU reference executor (no golden data)",
+        "notes": "packed QKV stride pattern (token stride (Hq+2*Hkv)*D), GQA 16/2 heads, D128, S384; O packed BSHD",
+        "seed": 42,
+        "generator": "import_graph.py"
+      }
+    },
+    {
+      "id": "sbhd_fp16_2_8_512_64_causal_tl",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              512,
+              64,
+              1024,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              512,
+              64,
+              1024,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              512,
+              64,
+              1024,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              512,
+              64,
+              1024,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.125,
+          "attributes__diagonal_alignment": "TOP_LEFT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "hand-authored SdpaFwd layout case for the dense attention engines: the Default graph template with strided Q, K, V and O, verified by the GPU reference executor (no golden data)",
+        "notes": "SBHD storage (sequence outermost), MHA 8 heads, D64, B2, S512, causal top-left",
+        "seed": 42,
+        "generator": "import_graph.py"
+      }
+    },
+    {
+      "id": "padded_token_o_bhsd_bf16_2_8_1024_64_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              8,
+              1024,
+              64
+            ],
+            "strides": [
+              589824,
+              64,
+              576,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              8,
+              1024,
+              64
+            ],
+            "strides": [
+              589824,
+              64,
+              576,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              8,
+              1024,
+              64
+            ],
+            "strides": [
+              524288,
+              65536,
+              64,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              8,
+              1024,
+              64
+            ],
+            "strides": [
+              589824,
+              64,
+              576,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.125,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "hand-authored SdpaFwd layout case for the dense attention engines: the Default graph template with strided Q, K, V and O, verified by the GPU reference executor (no golden data)",
+        "notes": "BSHD with 64 spare elements per token for Q, K, V and O in BHSD, MHA 8 heads, D64, B2, S1024, causal bottom-right",
+        "seed": 42,
+        "generator": "import_graph.py"
+      }
+    },
+    {
+      "id": "bhsd_batch_slice_fp16_2_8_512_64_causal_tl",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              524288,
+              32768,
+              64,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              524288,
+              32768,
+              64,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              262144,
+              32768,
+              64,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              8,
+              512,
+              64
+            ],
+            "strides": [
+              524288,
+              32768,
+              64,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.125,
+          "attributes__diagonal_alignment": "TOP_LEFT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "hand-authored SdpaFwd layout case for the dense attention engines: the Default graph template with strided Q, K, V and O, verified by the GPU reference executor (no golden data)",
+        "notes": "BHSD view of every second batch of a larger buffer for Q, K, V; O dense BHSD, MHA 8 heads, D64, B2, S512, causal top-left",
+        "seed": 42,
+        "generator": "import_graph.py"
+      }
     }
   ]
 }
