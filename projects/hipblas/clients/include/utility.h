@@ -140,7 +140,7 @@ private:
     uint64_t m_state;
 };
 
-// The fixed seed every stream starts from
+// The fixed seed every random sequence starts from
 extern const hipblas_rng_t g_hipblas_seed;
 
 // Engine used by the random generators below. It is thread_local so that threads never share
@@ -148,37 +148,40 @@ extern const hipblas_rng_t g_hipblas_seed;
 // parallel fill calls them from many threads.
 extern thread_local hipblas_rng_t t_hipblas_rng;
 
-// Reset the calling thread's stream (mainly to ensure repeatability of failures in a given suite)
+// Reset the calling thread's random sequence (mainly to ensure repeatability of failures in a given
+// suite)
 inline void hipblas_seedrand()
 {
     t_hipblas_rng = g_hipblas_seed;
 }
 
-// Seeding for one parallel fill. The fill draws one seed from the calling thread's stream when
-// it starts, and every block of elements is generated from an engine seeded with that seed and
-// the block's position. The values therefore do not depend on which thread writes a block, so a
-// fill produces the same data for any number of OpenMP threads and any schedule. The calling
-// thread also writes blocks, which reseeds its engine, so its stream is restored when the fill
-// ends: the next fill continues from the same point whatever the thread count.
-class hipblas_fill_seed
+// Seeding for one parallel fill, done through each thread's own engine (t_hipblas_rng). The fill
+// draws one seed from the calling thread's random sequence when it starts, and every thread
+// reseeds its t_hipblas_rng from that seed and the position of each block it writes. The values
+// therefore do not depend on which thread writes a block, so a fill produces the same data for any
+// number of OpenMP threads and any schedule. The calling thread also writes blocks, which reseeds
+// its engine, so its random sequence is restored when the fill ends: the next fill continues from
+// the same point whatever the thread count.
+class hipblas_parallel_fill_seeder
 {
 public:
-    hipblas_fill_seed()
+    hipblas_parallel_fill_seeder()
         : m_seed(t_hipblas_rng())
         , m_saved(t_hipblas_rng)
     {
     }
 
-    ~hipblas_fill_seed()
+    ~hipblas_parallel_fill_seeder()
     {
         t_hipblas_rng = m_saved;
     }
 
-    hipblas_fill_seed(const hipblas_fill_seed&) = delete;
-    hipblas_fill_seed& operator=(const hipblas_fill_seed&) = delete;
+    hipblas_parallel_fill_seeder(const hipblas_parallel_fill_seeder&) = delete;
+    hipblas_parallel_fill_seeder& operator=(const hipblas_parallel_fill_seeder&) = delete;
 
-    // Call in the parallel loop before generating the values of block `block` of batch `batch`
-    void seed_block(uint64_t batch, uint64_t block) const
+    // Call in the parallel loop, before generating the values of block `block` of batch `batch`:
+    // reseeds the calling thread's t_hipblas_rng
+    void reseed_thread_rng(uint64_t batch, uint64_t block) const
     {
         t_hipblas_rng = hipblas_rng_t(mix(mix(m_seed ^ batch) ^ block));
     }
