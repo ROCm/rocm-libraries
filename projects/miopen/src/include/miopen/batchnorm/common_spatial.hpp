@@ -258,19 +258,96 @@ inline void DefaultConfigSpatialSingle(const miopen::batchnorm::ProblemDescripti
     // Variant 1 is supported by every layout and problem
     valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
 
-    // NHWC supports only variant 1. NCHW supports also variants 0 and 3: all of them are added
-    // so that they are explored by tuning.
+    int n, c, h, w;
+    std::tie(n, c, h, w) = tien<4>(problem.GetXDesc().GetLengths());
+
+    unsigned int in_cstride = h * w;
+    unsigned int in_nhw     = n * in_cstride;
+
+    bool bfpmixparm =
+        problem.GetXDesc().GetType() == miopenHalf && problem.GetBnScale().GetType() == miopenFloat
+            ? true
+            : false;
+
+    bool bbfpmixparam = problem.GetXDesc().GetType() == miopenBFloat16 &&
+                                problem.GetBnScale().GetType() == miopenFloat
+                            ? true
+                            : false;
+
+    // NCHW supports also variants 0 and 3 which can be much faster than
+    // variant 1 but have more restrictions. Here we decide if we use variant
+    // 0, 1, 3
+    // In case variant 0 or 3 are selected, we add also variant 1 for tuning.
+    // Almost always variant 0 and 3 will be faster than variant 1 but
+    // we add the latter for tuning to be sure and because it is cheap
     if(!problem.IsLayoutNHWC())
     {
-        int n, c, h, w;
-        std::tie(n, c, h, w) = tien<4>(problem.GetXDesc().GetLengths());
-
-        valid_kernels.push_back(GetKernelIdFromVariant(3, 1));
-        // Variant 0 uses one thread per HW element. As in the heuristics, it is only
-        // considered for small HW dimensions.
-        if(h * w <= 512)
+        if(problem.GetDirection() == miopen::batchnorm::Direction::Backward)
         {
-            valid_kernels.push_back(GetKernelIdFromVariant(0, 1));
+            if((in_cstride < 200) && (in_cstride > 60) && bfpmixparm)
+            {
+                return;
+            }
+
+            // N*H*W < 32M and H*W > 1024
+            // use batchnorm variant#1 implementation which parallelize
+            // work groups over channels and loop through NHW.
+            if(in_nhw < (32 * 1024 * 1024) && in_cstride > 1024)
+            {
+                return;
+            }
+            // N*H*W < 32M and H*W > 512
+            // use batchnorm variant#1 or variant#3 implementation which
+            // parallelize work groups over channels and loop through N.
+            else if(in_nhw < (32 * 1024 * 1024) && in_cstride > 512)
+            {
+                if(n < 32)
+                {
+                    valid_kernels.push_back(GetKernelIdFromVariant(3, 1));
+                    return;
+                }
+            }
+            // H*W < 512  use batchnorm variant#0 or variant#3 implementation
+            // based on batch size and H*W
+            else if(in_cstride <= 512)
+            {
+                if((n > 64) && (in_cstride > 160))
+                {
+                    valid_kernels.push_back(GetKernelIdFromVariant(3, 1));
+                    return;
+                }
+                else
+                {
+                    valid_kernels.push_back(GetKernelIdFromVariant(0, 1));
+                    return;
+                }
+            }
+        }
+        else
+        {
+            // clang-format off
+            if(in_cstride > 512 && in_cstride <= 1024 && n < 32)
+            {
+                valid_kernels.push_back(GetKernelIdFromVariant(3, 1));
+                return;
+            }
+
+            if( (in_nhw < 33554432 && in_cstride > 1024) ||
+            ((n >= 256) && (in_cstride > 60) && (bfpmixparm || bbfpmixparam)) ||
+            ((in_cstride > 512) && (bfpmixparm || bbfpmixparam)))
+            {
+                if(in_cstride <= 512)
+                {
+                    valid_kernels.push_back(GetKernelIdFromVariant(0, 1));
+                }
+                return;
+            }
+            else if(in_cstride <= 512)
+            {
+                valid_kernels.push_back(GetKernelIdFromVariant(0, 1));
+                return;
+            }
+            // clang-format on
         }
     }
 }
