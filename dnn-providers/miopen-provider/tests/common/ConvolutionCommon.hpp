@@ -248,6 +248,15 @@ inline const std::vector<int64_t> MIXED_LAYOUT_2D_DX_STRIDES = {4096, 256, 16, 1
 inline constexpr hipdnn_flatbuffers_sdk::data_objects::DataType MIXED_LAYOUT_2D_DATA_TYPE
     = hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16;
 
+// The 1D bf16 convolution of the same mixed-layout bundle, in the same roles: dy and dx are
+// channels-first and w is channels-last.
+inline const std::vector<int64_t> MIXED_LAYOUT_1D_DY_DIMS = {8, 32, 16};
+inline const std::vector<int64_t> MIXED_LAYOUT_1D_DY_STRIDES = {512, 16, 1};
+inline const std::vector<int64_t> MIXED_LAYOUT_1D_W_DIMS = {32, 16, 1};
+inline const std::vector<int64_t> MIXED_LAYOUT_1D_W_STRIDES = {16, 1, 16};
+inline const std::vector<int64_t> MIXED_LAYOUT_1D_DX_DIMS = {8, 16, 16};
+inline const std::vector<int64_t> MIXED_LAYOUT_1D_DX_STRIDES = {256, 16, 1};
+
 // The reason the fused applicability check gives for the graph of cbaGraphWithFloatBiasOnHalfGraph.
 inline constexpr const char* FLOAT_BIAS_ON_HALF_GRAPH_REASON
     = "Bias tensor data type FLOAT must equal the convolution input data type HALF";
