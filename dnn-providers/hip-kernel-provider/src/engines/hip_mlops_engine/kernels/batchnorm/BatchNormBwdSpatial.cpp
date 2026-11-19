@@ -421,7 +421,6 @@ struct BatchNormBwdSpatialImpl<1>
                      && hip_plugin_bn_config::spatial_size >= 4096)
         {
             ComputeReadVecType read4;
-            // Intentional divergence from MIOpen, see ALMIOPEN-3141
             for(unsigned int k = lid * read_size; k < less4; k += grprd)
             {
                 read4 = hip_kernel_provider::cast<ComputeReadVecType>(
