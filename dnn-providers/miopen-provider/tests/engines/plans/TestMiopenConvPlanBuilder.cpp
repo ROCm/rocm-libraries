@@ -316,45 +316,36 @@ static ConvGraphSpec aboveSizeLimitSpec()
 
 static flatbuffers::FlatBufferBuilder createGraph(ConvKind kind, const ConvGraphSpec& spec)
 {
+    const std::vector<int64_t> noPadding = {0, 0};
+    const std::vector<int64_t> unitStep = {1, 1};
+
+    // The three factories take the same arguments in the same order (x or dx, w or dw, y or dy).
+    const auto build = [&](const auto& factory) {
+        return factory(spec.dx.dims,
+                       spec.dx.strides,
+                       spec.w.dims,
+                       spec.w.strides,
+                       spec.dy.dims,
+                       spec.dy.strides,
+                       noPadding,
+                       noPadding,
+                       unitStep,
+                       unitStep,
+                       spec.dataType);
+    };
+
     if(kind == ConvKind::FORWARD)
     {
-        return hipdnn_test_sdk::utilities::createValidConvFwdGraph(spec.dx.dims,
-                                                                   spec.dx.strides,
-                                                                   spec.w.dims,
-                                                                   spec.w.strides,
-                                                                   spec.dy.dims,
-                                                                   spec.dy.strides,
-                                                                   {0, 0},
-                                                                   {0, 0},
-                                                                   {1, 1},
-                                                                   {1, 1},
-                                                                   spec.dataType);
+        // The forward factory has one more defaulted parameter, so it is reached through a lambda.
+        return build([](const auto&... args) {
+            return hipdnn_test_sdk::utilities::createValidConvFwdGraph(args...);
+        });
     }
     if(kind == ConvKind::DATA)
     {
-        return hipdnn_test_sdk::utilities::createValidConvBwdGraph(spec.dx.dims,
-                                                                   spec.dx.strides,
-                                                                   spec.w.dims,
-                                                                   spec.w.strides,
-                                                                   spec.dy.dims,
-                                                                   spec.dy.strides,
-                                                                   {0, 0},
-                                                                   {0, 0},
-                                                                   {1, 1},
-                                                                   {1, 1},
-                                                                   spec.dataType);
+        return build(hipdnn_test_sdk::utilities::createValidConvBwdGraph);
     }
-    return hipdnn_test_sdk::utilities::createValidConvWrwGraph(spec.dx.dims,
-                                                               spec.dx.strides,
-                                                               spec.w.dims,
-                                                               spec.w.strides,
-                                                               spec.dy.dims,
-                                                               spec.dy.strides,
-                                                               {0, 0},
-                                                               {0, 0},
-                                                               {1, 1},
-                                                               {1, 1},
-                                                               spec.dataType);
+    return build(hipdnn_test_sdk::utilities::createValidConvWrwGraph);
 }
 
 // The graph builders give all three tensors one data type; this sets them individually, in the
