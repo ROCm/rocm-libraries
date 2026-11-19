@@ -649,12 +649,31 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
     set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
 
-    # The pinned TheRock supplies NumPy and ml_dtypes and installs the staged
-    # rocKE wheels before invoking CTest, so the platform GPU tests can run.
-    set(ROCKE_INSTALL_PYTHON_TESTS ON)
-    set(ROCKE_INSTALL_PLATFORM_PYTEST ON)
+    # In provider mode everything rocKE installs besides the plugin is test
+    # content under bin/hip_kernel_provider/, so every test gate follows
+    # HIPKERNELPROVIDER_ENABLE_TESTS: a build with tests OFF stages no rocKE
+    # test payload and does not build the rocKE C++ test targets. The pinned
+    # TheRock supplies NumPy and ml_dtypes and installs the staged rocKE wheels
+    # before invoking CTest, so the platform GPU tests can run.
+    set(ROCKE_INSTALL_TESTS ${HIPKERNELPROVIDER_ENABLE_TESTS})
+    set(ROCKE_INSTALL_PYTHON_TESTS ${HIPKERNELPROVIDER_ENABLE_TESTS})
+    set(ROCKE_INSTALL_PLATFORM_PYTEST ${HIPKERNELPROVIDER_ENABLE_TESTS})
+    # In provider mode the rocke package and its wheels install beside the tests.
+    set(ROCKE_INSTALL_PYTHON_PACKAGE ${HIPKERNELPROVIDER_ENABLE_TESTS})
+    if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
+        set(ROCKE_INSTALL_TEST_GPU_REFERENCES OFF)
+    endif()
+    # The headers, the ckc CMake package and the static archives belong to no
+    # component of the hipkernelprovider artifact and nothing in the provider
+    # consumes them, so a provider build does not install them.
+    set(ROCKE_INSTALL_DEVELOPMENT OFF)
 
-    add_subdirectory(rocke)
+    # Scope BUILD_TESTING to rocke/ so the rocKE C++ test targets follow the
+    # provider's own test switch without changing the rest of this project.
+    block()
+        set(BUILD_TESTING ${HIPKERNELPROVIDER_ENABLE_TESTS})
+        add_subdirectory(rocke)
+    endblock()
 else()
     message(STATUS "rocKE features disabled")
 endif()
