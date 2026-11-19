@@ -30,10 +30,11 @@ struct K2Args
     /// writes fp32 partials ws[z][output element] for ConvDirectReduce to add in order.
     int splits, cps;
     /// XCDs the device deals workgroups to round-robin in launch order (each with its own L2).
-    /// Above 1 (and with one split), the kernels remap their block index so each XCD runs one
-    /// contiguous range of tiles, column blocks fastest: neighbouring halos meet in one L2.
+    /// Above 1 (and with one split), the kernels remap their block index so each XCD runs runs of
+    /// `xcdRun` consecutive tiles (column blocks fastest): neighbouring halos meet in one L2,
+    /// while the grid as a whole still advances in launch order.
     int xcds;
-    int padding1;
+    int xcdRun;
     float* ws;
 };
 
