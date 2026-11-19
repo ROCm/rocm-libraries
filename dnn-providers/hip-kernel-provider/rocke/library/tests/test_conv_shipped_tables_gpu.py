@@ -431,10 +431,12 @@ WGRAD_OPT_INS = (
     {"ws_tree": 1},
     {"ws_store": 1, "ws_replicas": 1024},
     {"ws_lc": 1},
-    {"ws_gred": 1},
+    # ws_gred runs in the two-group x-window loop only (xwin_groups 2, xwin_gn 0).
+    {"ws_gred": 1, "xwin_groups": 2, "xwin_gn": 0},
     {"plain_pp": 1},
     {"plain_pp": 2},
-    {"xwin_gn": 2},
+    # xwin_gn 2 is shipped; 1 is the other grouping of the two-group window.
+    {"xwin_gn": 1, "xwin_groups": 2},
     {"xwin_rot": 1},
     {"xwin_kord": 1},
     {"xwin_bq": 1},
