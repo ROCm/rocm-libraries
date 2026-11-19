@@ -25,6 +25,32 @@
 
 #include "rocke/instance_gemm_internal.h"
 
+/* Reuse each A fragment across atom columns and each B fragment across atom
+ * rows. Mirrors the cluster emission in _gemm_compute_tile.py. */
+static void rocke_gemm_accumulate_mfma_fragments(rocke_gemm_build_ctx_t* ctx,
+                                                  rocke_value_t* const* a_rows,
+                                                  rocke_value_t* const* b_cols,
+                                                  rocke_value_t** accs)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const bool prioritize = ctx->swz && ctx->sched_hints;
+    for(int mi = 0; mi < ctx->mfmas_m; ++mi)
+    {
+        if(prioritize)
+            rocke_b_s_setprio(b, 1);
+        for(int ni = 0; ni < ctx->mfmas_n; ++ni)
+        {
+            const int flat = mi * ctx->mfmas_n + ni;
+            accs[flat] = rocke_gemm_emit_mma(b, ctx->op, a_rows[mi], b_cols[ni], accs[flat]);
+        }
+        if(prioritize)
+        {
+            rocke_b_s_setprio(b, 0);
+            rocke_b_sched_barrier(b, 0);
+        }
+    }
+}
+
 /* ===================================================================== *
  *  emit_mfma_phase
  *
@@ -167,26 +193,7 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
                                                    ctx->storage_dtype);
         }
 
-        /* _mma_cluster(a_rows, b_cols): bracket each m-row's MFMA cluster
-         * with s_setprio(1)/(0) + sched_barrier(0) only when both the
-         * swizzle (reference-faithful mode) AND the schedule-hint policy are
-         * on. _sched_hints defaults OFF on gfx950 (take the measured uplift). */
-        for(mi = 0; mi < mfmas_m; ++mi)
-        {
-            if(ctx->swz && ctx->sched_hints)
-                rocke_b_s_setprio(b, 1);
-            for(ni = 0; ni < mfmas_n; ++ni)
-            {
-                int flat = mi * mfmas_n + ni;
-                out_accs[flat]
-                    = rocke_gemm_emit_mma(b, ctx->op, a_rows[mi], b_cols[ni], out_accs[flat]);
-            }
-            if(ctx->swz && ctx->sched_hints)
-            {
-                rocke_b_s_setprio(b, 0);
-                rocke_b_sched_barrier(b, 0);
-            }
-        }
+        rocke_gemm_accumulate_mfma_fragments(ctx, a_rows, b_cols, out_accs);
     }
 
     /* Quantitative two-stage HotLoop schedule, issued ONCE per K-tile.
@@ -215,10 +222,20 @@ void rocke_gemm_emit_compute_and_epilogue(rocke_gemm_build_ctx_t* ctx)
     rocke_gemm_emit_epilogue(ctx);
 }
 
-/* ===================================================================== *
- *  _emit_kloop_db: compv4 double-buffered K-loop (non-DTL, VGPR-staged).
- * ===================================================================== */
-void rocke_gemm_emit_kloop_db(rocke_gemm_build_ctx_t* ctx)
+/* GemmKLoop.ping_pong: publish the current slot and retire the previous
+ * readers before allowing the next issue to overwrite their slot. */
+static void rocke_gemm_publish_and_retire(rocke_ir_builder_t* b, bool direct_to_lds)
+{
+    if(direct_to_lds)
+    {
+        rocke_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
+        rocke_b_s_barrier_bare(b);
+    }
+    else
+        rocke_b_sync(b);
+}
+
+static void rocke_gemm_emit_kloop_ping_pong(rocke_gemm_build_ctx_t* ctx, bool direct_to_lds)
 {
     rocke_ir_builder_t* b = ctx->b;
     rocke_value_t* c1_i32;
@@ -228,12 +245,19 @@ void rocke_gemm_emit_kloop_db(rocke_gemm_build_ctx_t* ctx)
     rocke_for_t for_op;
     int i;
 
-    c1_i32 = rocke_b_const_i32(b, 1);
-    /* K-loop upper bound is the slice end (k_upper == K when not split-K). */
-    K_minus_one_tile = rocke_b_sub(b, ctx->k_upper, ctx->c_block_k);
-
-    /* Prologue: issue tile 0's load into half 0 (slice base k_lo in split-K). */
-    rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, ctx->k_lo, 0, NULL);
+    /* Preserve the original SSA construction order for both policies. */
+    if(direct_to_lds)
+    {
+        rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, ctx->k_lo, 0, NULL);
+        K_minus_one_tile = rocke_b_sub(b, ctx->k_upper, ctx->c_block_k);
+        c1_i32 = rocke_b_const_i32(b, 1);
+    }
+    else
+    {
+        c1_i32 = rocke_b_const_i32(b, 1);
+        K_minus_one_tile = rocke_b_sub(b, ctx->k_upper, ctx->c_block_k);
+        rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, ctx->k_lo, 0, NULL);
+    }
 
     /* loop_args = [("par", c0)] + list(accs) */
     loop_args[0].name = "par";
@@ -265,9 +289,8 @@ void rocke_gemm_emit_kloop_db(rocke_gemm_build_ctx_t* ctx)
         rocke_value_t* new_accs[ROCKE_GEMM_MAX_ACCS];
         rocke_value_t* yield_vals[1 + ROCKE_GEMM_MAX_ACCS];
 
-        /* Start-of-iter barrier (compv4 non-TDM path; TDM never reaches kloop_db). */
-        rocke_b_sync(b);
-        /* Issue next-tile global->VGPR->LDS copy into the other half. */
+        rocke_gemm_publish_and_retire(b, direct_to_lds);
+        /* Issue the next K tile into the retired slot, then consume the current slot. */
         rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k_next, 0, next_parity);
         rocke_gemm_emit_mfma_phase(
             ctx, ctx->A_smem, ctx->B_smem, acc_iter, num_acc_iter, 0, parity, new_accs);
@@ -286,7 +309,7 @@ void rocke_gemm_emit_kloop_db(rocke_gemm_build_ctx_t* ctx)
         int num_tail = for_op.op->num_results - 1;
         rocke_value_t* epi_accs[ROCKE_GEMM_MAX_ACCS];
 
-        rocke_b_sync(b);
+        rocke_gemm_publish_and_retire(b, direct_to_lds);
         rocke_gemm_emit_mfma_phase(
             ctx, ctx->A_smem, ctx->B_smem, tail_accs, num_tail, 0, final_parity, epi_accs);
 
@@ -294,6 +317,11 @@ void rocke_gemm_emit_kloop_db(rocke_gemm_build_ctx_t* ctx)
             ctx->for_results[i] = epi_accs[i];
         ctx->num_for_results = num_tail;
     }
+}
+
+void rocke_gemm_emit_kloop_db(rocke_gemm_build_ctx_t* ctx)
+{
+    rocke_gemm_emit_kloop_ping_pong(ctx, /*direct_to_lds=*/false);
 }
 
 /* ===================================================================== *
@@ -356,86 +384,9 @@ void rocke_gemm_emit_kloop_simple(rocke_gemm_build_ctx_t* ctx)
  * ===================================================================== */
 void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
 {
-    rocke_ir_builder_t* b = ctx->b;
-    int loads_per_tile;
-    rocke_value_t* K_minus_one_tile;
-    rocke_value_t* c1_i32;
-    rocke_iter_arg_t loop_args[1 + ROCKE_GEMM_MAX_ACCS];
-    int num_loop_args;
-    rocke_for_t for_op;
-    int i;
-
-    loads_per_tile = ctx->dtl_a_passes + ctx->dtl_b_passes;
-    /* vmcnt is 6 bits on gfx950 (max 63); saturates at 63 and loses the prefetch. */
-    if(loads_per_tile > 63)
-    {
+    /* Preserve the existing cutoff for the non-prefetched fallback. */
+    if(ctx->dtl_a_passes + ctx->dtl_b_passes > 63)
         rocke_gemm_emit_kloop_simple(ctx);
-        return;
-    }
-
-    /* Prologue: load tile 0 into half 0 (slice base k_lo in split-K). */
-    rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, ctx->k_lo, 0, NULL);
-
-    K_minus_one_tile = rocke_b_sub(b, ctx->k_upper, ctx->c_block_k);
-    c1_i32 = rocke_b_const_i32(b, 1);
-
-    loop_args[0].name = "par";
-    loop_args[0].init = ctx->c0;
-    for(i = 0; i < ctx->num_accs; ++i)
-    {
-        loop_args[1 + i].name = ctx->acc_names[i];
-        loop_args[1 + i].init = ctx->acc_inits[i];
-    }
-    num_loop_args = 1 + ctx->num_accs;
-
-    for_op = rocke_b_scf_for_iter(b,
-                                  ctx->k_lo,
-                                  K_minus_one_tile,
-                                  ctx->c_block_k,
-                                  loop_args,
-                                  num_loop_args,
-                                  "k0",
-                                  /*unroll=*/false,
-                                  /*elide_trailing_barrier=*/true);
-
-    rocke_b_region_enter(b, for_op.body);
-    {
-        rocke_value_t* parity = for_op.iter_vars[0];
-        rocke_value_t* const* acc_iter = &for_op.iter_vars[1];
-        int num_acc_iter = for_op.num_iter_vars - 1;
-        rocke_value_t* next_parity = rocke_b_sub(b, c1_i32, parity);
-        rocke_value_t* k_next = rocke_b_add(b, for_op.iv, ctx->c_block_k);
-        rocke_value_t* new_accs[ROCKE_GEMM_MAX_ACCS];
-        rocke_value_t* yield_vals[1 + ROCKE_GEMM_MAX_ACCS];
-
-        /* Single-barrier software pipeline: ONE s_waitcnt + ONE WG barrier. */
-        rocke_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
-        rocke_b_s_barrier_bare(b);
-        rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k_next, 0, next_parity);
-        rocke_gemm_emit_mfma_phase(
-            ctx, ctx->A_smem, ctx->B_smem, acc_iter, num_acc_iter, 0, parity, new_accs);
-
-        yield_vals[0] = next_parity;
-        for(i = 0; i < num_acc_iter; ++i)
-            yield_vals[1 + i] = new_accs[i];
-        rocke_b_scf_yield(b, yield_vals, 1 + num_acc_iter);
-    }
-    rocke_b_region_leave(b);
-
-    /* Epilogue: drain the final tile's loads, rendezvous, MFMA last tile. */
-    {
-        rocke_value_t* final_parity = for_op.op->results[0];
-        rocke_value_t* const* tail_accs = &for_op.op->results[1];
-        int num_tail = for_op.op->num_results - 1;
-        rocke_value_t* epi_accs[ROCKE_GEMM_MAX_ACCS];
-
-        rocke_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
-        rocke_b_s_barrier_bare(b);
-        rocke_gemm_emit_mfma_phase(
-            ctx, ctx->A_smem, ctx->B_smem, tail_accs, num_tail, 0, final_parity, epi_accs);
-
-        for(i = 0; i < num_tail; ++i)
-            ctx->for_results[i] = epi_accs[i];
-        ctx->num_for_results = num_tail;
-    }
+    else
+        rocke_gemm_emit_kloop_ping_pong(ctx, /*direct_to_lds=*/true);
 }

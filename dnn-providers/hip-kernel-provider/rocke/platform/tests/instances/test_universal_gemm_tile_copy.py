@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Coverage for the synchronous UniversalGemm coalesced tile copy."""
+"""Coverage for UniversalGemm tile copies and runtime K schedules."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from rocke.helpers.loads import CoalescedTileLoader
+from rocke.instances.common._gemm_kloop import GemmKLoop
 from rocke.instances.common.gemm_universal import (
     TileSpec,
     TraitSpec,
@@ -19,7 +20,7 @@ from rocke.instances.common.gemm_universal import (
 )
 
 
-def _build(*, pad_k: bool):
+def _build(trait: TraitSpec):
     spec = UniversalGemmSpec(
         name="universal_gemm_tile_copy",
         tile=TileSpec(
@@ -33,32 +34,80 @@ def _build(*, pad_k: bool):
             warp_tile_n=16,
             warp_tile_k=16,
         ),
-        trait=TraitSpec(pipeline="mem", epilogue="default", pad_k=pad_k),
+        trait=trait,
     )
     copies = []
+    schedules = []
     load = CoalescedTileLoader.load
+    single = GemmKLoop.single_buffered
+    ping_pong = GemmKLoop.ping_pong
 
-    def record(loader, builder, **kwargs):
+    def record_load(loader, builder, **kwargs):
         copies.append((loader.tile_rows, loader.tile_cols, loader.load_vec))
         return load(loader, builder, **kwargs)
 
-    with patch.object(CoalescedTileLoader, "load", record):
+    def record_single(loop):
+        schedules.append("single")
+        return single(loop)
+
+    def record_ping_pong(loop, *, direct_to_lds):
+        schedules.append("async" if direct_to_lds else "sync")
+        return ping_pong(loop, direct_to_lds=direct_to_lds)
+
+    with (
+        patch.object(CoalescedTileLoader, "load", record_load),
+        patch.object(GemmKLoop, "single_buffered", record_single),
+        patch.object(GemmKLoop, "ping_pong", record_ping_pong),
+    ):
         kernel = build_universal_gemm(spec, arch="gfx950")
-    return spec, kernel, copies
+    return spec, kernel, copies, schedules
+
+
+def _cases():
+    return (
+        ("coalesced", TraitSpec(pipeline="mem", epilogue="default"), "single", (96,)),
+        (
+            "legacy_tail",
+            TraitSpec(pipeline="mem", epilogue="default", pad_k=True),
+            "single",
+            (91,),
+        ),
+        (
+            "sync_ping_pong",
+            TraitSpec(pipeline="compv4", epilogue="default"),
+            "sync",
+            (32, 64, 96),
+        ),
+        (
+            "dtl_ping_pong",
+            TraitSpec(
+                pipeline="compv4",
+                epilogue="default",
+                direct_to_lds=True,
+                dtl_prefetch=True,
+            ),
+            "async",
+            (32, 64, 96),
+        ),
+    )
 
 
 class TestUniversalGemmTileCopy(unittest.TestCase):
-    def test_copy_selection(self):
-        for pad_k in (False, True):
-            with self.subTest(pad_k=pad_k):
-                _, _, copies = _build(pad_k=pad_k)
-                self.assertEqual(copies, [] if pad_k else [(64, 32, 8)] * 2)
+    def _build_case(self, label, trait, schedule):
+        spec, kernel, copies, schedules = _build(trait)
+        self.assertEqual(copies, [(64, 32, 8)] * 2 if label == "coalesced" else [])
+        self.assertEqual(schedules, [schedule])
+        return spec, kernel
+
+    def test_copy_and_schedule_selection(self):
+        for label, trait, schedule, _ in _cases():
+            with self.subTest(case=label):
+                self._build_case(label, trait, schedule)
 
     def test_gfx950_numeric(self):
         import numpy as np
 
         from rocke.helpers.compile import compile_kernel
-        from rocke.instances.common.manifest_runner.utils import as_u8_buffer
         from rocke.runtime.hip_module import Runtime, get_device_arch
 
         if get_device_arch() != "gfx950":
@@ -66,38 +115,54 @@ class TestUniversalGemmTileCopy(unittest.TestCase):
 
         rt = Runtime()
         rng = np.random.default_rng(2301)
-        for label, K, pad_k in (("coalesced", 96, False), ("legacy_tail", 91, True)):
-            with self.subTest(copy=label, k=K):
-                spec, kernel, copies = _build(pad_k=pad_k)
-                self.assertEqual(len(copies), 0 if pad_k else 2)
+        for label, trait, schedule, k_sizes in _cases():
+            with self.subTest(case=label):
+                spec, kernel = self._build_case(label, trait, schedule)
                 artifact = compile_kernel(kernel, arch="gfx950", backend="python")
-                print(json.dumps({"case": label, "phase": "compiled", "isa": artifact.isa}))
-
-                M, N = 128, 192
-                A = rng.integers(-3, 4, (M, K), dtype=np.int16).astype(np.float16)
-                B = rng.integers(-3, 4, (N, K), dtype=np.int16).astype(np.float16)
-                C = np.full((M, N), np.nan, dtype=np.float16)
-                with ExitStack() as stack:
-                    mod = rt.load_module(artifact.hsaco)
-                    stack.callback(mod.unload)
-                    ptrs = []
-                    for array in (A, B, C):
-                        ptr = rt.alloc(array.nbytes)
-                        stack.callback(rt.free, ptr)
-                        rt.memcpy_h2d(ptr, as_u8_buffer(array), array.nbytes)
-                        ptrs.append(ptr)
-                    rt.launch_blocking(
-                        mod.get_function(artifact.kernel_name),
-                        (N // spec.tile.tile_n, M // spec.tile.tile_m, 1),
-                        (spec.block_size, 1, 1),
-                        struct.pack("<QQQiii", *ptrs, M, N, K),
+                print(
+                    json.dumps(
+                        {"case": label, "phase": "compiled", "isa": artifact.isa}
                     )
-                    print(json.dumps({"case": label, "phase": "launched"}))
-                    rt.memcpy_d2h(as_u8_buffer(C), ptrs[2], C.nbytes)
+                )
+                for k in k_sizes:
+                    with self.subTest(k=k):
+                        self._launch_and_compare(rt, spec, artifact, rng, label, k)
 
-                ref = (A.astype(np.float32) @ B.astype(np.float32).T).astype(np.float16)
-                np.testing.assert_array_equal(C, ref)
-                print(json.dumps({"case": label, "phase": "numeric_pass", "elements": C.size}))
+    @staticmethod
+    def _launch_and_compare(rt, spec, artifact, rng, label, k):
+        import numpy as np
+
+        from rocke.instances.common.manifest_runner.utils import as_u8_buffer
+
+        m, n = 128, 192
+        a = rng.integers(-3, 4, (m, k), dtype=np.int16).astype(np.float16)
+        b = rng.integers(-3, 4, (n, k), dtype=np.int16).astype(np.float16)
+        c = np.full((m, n), np.nan, dtype=np.float16)
+        with ExitStack() as stack:
+            mod = rt.load_module(artifact.hsaco)
+            stack.callback(mod.unload)
+            ptrs = []
+            for array in (a, b, c):
+                ptr = rt.alloc(array.nbytes)
+                stack.callback(rt.free, ptr)
+                rt.memcpy_h2d(ptr, as_u8_buffer(array), array.nbytes)
+                ptrs.append(ptr)
+            rt.launch_blocking(
+                mod.get_function(artifact.kernel_name),
+                (n // spec.tile.tile_n, m // spec.tile.tile_m, 1),
+                (spec.block_size, 1, 1),
+                struct.pack("<QQQiii", *ptrs, m, n, k),
+            )
+            print(json.dumps({"case": label, "k": k, "phase": "launched"}))
+            rt.memcpy_d2h(as_u8_buffer(c), ptrs[2], c.nbytes)
+
+        ref = (a.astype(np.float32) @ b.astype(np.float32).T).astype(np.float16)
+        np.testing.assert_array_equal(c, ref)
+        print(
+            json.dumps(
+                {"case": label, "k": k, "phase": "numeric_pass", "elements": c.size}
+            )
+        )
 
 
 if __name__ == "__main__":

@@ -224,29 +224,28 @@ B_view.tile(origin=(block_n0, k0)).load_vec(...)
 
 Tail predicates guard `block_m0 + row < M`, `block_n0 + row < N`, `k0 + col < K`. The buffer-resource path routes invalid lanes to `INT32_MAX` so the DW3-bounds-checked load returns zero.
 
-## Compute Loop
+## Compute and K Schedules
 
-```text
-acc = zero f32 accumulators (one vector per warp's MFMA fragment)
+The non-TDM [`GemmKLoop`](../../python/rocke/instances/common/_gemm_kloop.py)
+composes two callbacks: `issue(k, slot)` stages both operands at a K element
+offset, and `compute(accs, slot)` consumes that LDS slot. The loop chooses the
+slot and carries the accumulators across a runtime `scf_for_iter`.
 
-for k0 in scf_for(0, K, tile_k):
- load A tile (sync or async)
- load B tile (sync or async)
- s_waitcnt + sync as needed
+- **Single-buffered:** issue, publish, compute, retire the readers before the
+  next issue into the same slot.
+- **Synchronous ping-pong:** issue tile zero into slot zero. Each loop step
+  publishes the current tile and retires earlier reads, issues the next tile
+  into the other slot, and computes from the current slot. Drain and compute
+  the final tile without another issue.
+- **Direct-to-LDS ping-pong:** use the same runtime loop shape with a full VMEM
+  and LDS wait followed by a workgroup barrier *before* issuing the next copy.
+  TDM retains a separate loop and completion policy.
 
- for kk in static_for(0, tile_k, atom.k):
- for warp_m fragment in static_for(...):
- A_frag = smem_load_vN_f16(A_smem, ...)
- for warp_n fragment in static_for(...):
- B_frag = smem_load_vN_f16(B_smem, ...)
- for output fragment in static_for(...):
- acc = atom.emit(b, A_frag, B_frag, acc)
- schedule_policy.emit_after_mfma_step(b, atom_idx)
-
- yield updated acc
-```
-
-`scf_for_iter` carries the per-lane accumulators across the K loop. `static_for` (Python-time unrolling) is used inside the K tile to keep the MFMA / DS_READ schedule visible to the scheduler.
+Inside one K tile, [`accumulate_mfma_tile`](../../python/rocke/instances/common/_gemm_compute_tile.py)
+reads each A atom row once for reuse across N, and each B atom column once for
+reuse across M. Lane and LDS addressing stay in the bound fragment readers.
+The inner atom loops are unrolled at build time. WMMA still uses its own
+fragment-loading contract.
 
 `scheduler in ("intrawave", "interwave")` selects the `SchedulePolicy` flavor (intra-wave or inter-wave overlap groups).
 

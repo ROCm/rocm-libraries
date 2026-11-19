@@ -77,6 +77,8 @@ from ...helpers.io import io_ir_type
 from ...helpers.loads import CoalescedTileLoader
 from ...helpers.spec import WarpTileBlockSizeMixin, choose_load_vec
 from ...helpers.tensor_view import make_global_view, make_tile_window
+from ._gemm_compute_tile import accumulate_mfma_tile
+from ._gemm_kloop import GemmKLoop
 from ._gemm_kloop_tdm import TdmKLoop
 
 
@@ -2463,8 +2465,6 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # the warp_gemm_dispatcher inner loop.
         k_blk_kbase = b.mul(k_blk, b.const_i32(a_per_lane))
 
-        new_accs: List[Value] = list(iter_vars)
-
         # ---- per-fragment LDS read helpers (shared by the legacy and PLR
         # emission paths). Each returns one ds_read'd operand fragment for the
         # given K-atom step ``kk`` and atom-row/col index. Pure address arith +
@@ -2505,30 +2505,17 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 b, B_src, b_row, _swz_col(col_base, swz_row), b_per_lane, storage_dtype
             )
 
-        def _mma_cluster(a_rows, b_cols) -> None:
-            # Reference-faithful MFMA clusters: bracket each m-row's MFMA
-            # cluster with s_setprio(1)/(0) + a sched_barrier(0) fence so the
-            # post-RA scheduler keeps the matrix pipe at high priority through
-            # the cluster and cannot float the surrounding ds_read/buffer_load
-            # across it. Enabled with lds_swizzle (the reference-faithful mode).
-            for mi in range(mfmas_m):
-                if _SWZ and _sched_hints:
-                    b.s_setprio(1)
-                for ni in range(mfmas_n):
-                    flat = mi * mfmas_n + ni
-                    new_accs[flat] = _emit_mma(
-                        b, op, a_rows[mi], b_cols[ni], new_accs[flat]
-                    )
-                if _SWZ and _sched_hints:
-                    b.s_setprio(0)
-                    b.sched_barrier(0)
-
-        for kk in range(k_atoms):
-            # We compute one A load per atom-row and reuse across N.
-            a_rows = [_read_a(kk, mi) for mi in range(mfmas_m)]
-            # B load per atom-col, reused across M.
-            b_cols = [_read_b(kk, ni) for ni in range(mfmas_n)]
-            _mma_cluster(a_rows, b_cols)
+        new_accs = accumulate_mfma_tile(
+            b,
+            k_atoms=k_atoms,
+            m_atoms=mfmas_m,
+            n_atoms=mfmas_n,
+            accs=iter_vars,
+            read_a=_read_a,
+            read_b=_read_b,
+            mma=lambda a, bb, acc: _emit_mma(b, op, a, bb, acc),
+            prioritize_clusters=_SWZ and _sched_hints,
+        )
 
         # Quantitative two-stage HotLoop schedule (E3, E6 L1).
         #
@@ -2587,123 +2574,35 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 waves=_tdm_waves,
                 wave_id=_tdm_wave_id,
             ).emit()
-        elif _prefetch:
-            _emit_kloop_prefetch()
-        elif _db:
-            _emit_kloop_db()
         else:
-            _emit_kloop_simple()
+            loop = GemmKLoop(
+                b=b,
+                issue=lambda k, slot: emit_load_phase(A_smem, B_smem, k, lds_parity=slot),
+                compute=lambda acc, slot: emit_mfma_phase(
+                    A_smem, B_smem, acc, lds_parity=slot
+                ),
+                accs=accs,
+                k_lo=k_lo,
+                k_upper=_k_upper,
+                k_step=c_block_k,
+                c0=c0,
+            )
+            if _prefetch:
+                _for_results = _emit_kloop_prefetch(loop)
+            elif _db:
+                _for_results = loop.ping_pong(direct_to_lds=False)
+            else:
+                _for_results = loop.single_buffered()
         _emit_epilogue()
-
-    def _emit_kloop_db() -> None:
-        """compv4 double-buffered K-loop (non-DTL, VGPR-staged).
-
-        Two LDS half-buffers per operand. Each iteration issues the
-        *next* K-tile's global->VGPR->LDS copy into the half the MFMAs
-        are not reading, so the global-load + ds_write traffic overlaps
-        the current tile's ds_reads + MFMAs. ``parity`` is carried as an
-        i32 iter-arg and flips each step.
-
-        Barrier discipline (single barrier per iter, placed at the
-        *start*, half ``p`` = current read, ``p^1`` = next write):
-          * sync() : drains the previous iter's ds_writes (so half p,
-                     loaded last iter, is RAW-safe to read) AND the
-                     previous iter's ds_reads (so half p^1 is WAR-safe to
-                     overwrite), then barriers all waves.
-          * issue load -> half(p^1)   (next tile, overlaps this MFMA)
-          * MFMA <- half(p)
-        The prologue issues tile 0's load into half 0 (no barrier — the
-        loop's first start-sync covers it); the epilogue runs the final
-        tile's MFMA from the last-written half after one drain barrier.
-        """
-        c1_i32 = b.const_i32(1)
-        K_minus_one_tile = b.sub(_k_upper, c_block_k)
-
-        # Prologue: issue tile 0's load into half 0. The first iteration's
-        # start-sync drains these ds_writes before the MFMA reads half 0.
-        # In split-K mode tile 0 is the slice base ``k_lo``.
-        emit_load_phase(A_smem, B_smem, k_lo, lds_parity=0)
-
-        loop_args = [("par", c0)] + list(accs)
-        for_op = b.scf_for_iter(
-            k_lo, K_minus_one_tile, c_block_k, loop_args, iv_name="k0"
-        )
-        with for_op as (k0, iter_vars):
-            parity = iter_vars[0]
-            acc_iter = iter_vars[1:]
-            next_parity = b.sub(c1_i32, parity)
-            k_next = b.add(k0, c_block_k)
-            # Start-of-iter barrier: makes half(parity) RAW-safe to read
-            # (its load was issued last iter / prologue) and half(next)
-            # WAR-safe to overwrite (its reads finished last iter).
-            b.sync()
-            # Issue next-tile global->VGPR->LDS copy into the other half;
-            # this VMEM + ds_write stream overlaps the MFMAs below.
-            emit_load_phase(A_smem, B_smem, k_next, lds_parity=next_parity)
-            new_accs = emit_mfma_phase(A_smem, B_smem, acc_iter, lds_parity=parity)
-            b.scf_yield(next_parity, *new_accs)
-
-        # Epilogue: drain the last in-loop load (it wrote the K-1 tile
-        # into half ``final_parity``), barrier, then MFMA that tile.
-        final_parity = for_op.results[0]
-        b.sync()
-        epi_accs = emit_mfma_phase(
-            A_smem, B_smem, for_op.results[1:], lds_parity=final_parity
-        )
-        nonlocal _for_results
-        _for_results = epi_accs
 
     # K-loop upper bound: full ``K`` (byte-identical) or the split-K slice
     # end ``k_hi``. Computed lazily so the non-split path's SSA is unchanged.
     _k_upper = K if k_hi is None else k_hi
 
-    def _emit_kloop_simple() -> None:
-        for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, accs, iv_name="k0")
-        with for_op as (k0, iter_vars):
-            # Single-buffer, load-then-compute pipeline (``mem``,
-            # ``compv3``, and the cshuffle-epilogue ``compv4`` that opts
-            # out of AB double-buffering). compv4 with the direct epilogue
-            # instead routes through ``_emit_kloop_db``; the scheduler
-            # hints in ``emit_mfma_phase`` carry the in-tile interleave.
-            emit_load_phase(A_smem, B_smem, k0)
-            b.sync()
-
-            new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
-
-            b.sync()
-            b.scf_yield(*new_accs)
-        nonlocal _for_results
-        _for_results = for_op.results
-
-    def _emit_kloop_prefetch() -> None:
-        """Software-pipelined K-loop with DTLA ping-pong.
-
-        Structure:
-          prologue:        DTLA load tile 0 -> half 0
-          for k in [0, K-block_k) step block_k:
-              parity = (k / block_k) & 1   ; next_parity = parity ^ 1
-              DTLA load tile k+block_k -> half (parity ^ 1)
-              s_waitcnt vmcnt(loads_in_flight_for_next_tile) ; barrier
-              MFMA from half parity
-              ; no end-barrier — half (parity ^ 1) has its own LDS region
-          epilogue:        ; last tile already loaded into the final parity
-              s_waitcnt vmcnt(0) ; barrier
-              MFMA from final parity
-
-        The post-issue ``s_waitcnt vmcnt(N)`` keeps N loads (= next
-        tile's count) in flight while the current tile drains, so the
-        loop's MFMA work overlaps the next tile's HBM transfers.
-        """
-        loads_per_tile = _dtl_a_passes + _dtl_b_passes
-        # vmcnt is 6 bits on gfx950 (max 63). If next-tile loads exceed
-        # that, we'd saturate and the prefetch buys nothing extra.
-        if loads_per_tile > 63:
-            # Fall back to the non-prefetched path; the constant would
-            # have to be encoded as 63 either way.
-            _emit_kloop_simple()
-            return
-
-        nonlocal _for_results
+    def _emit_kloop_prefetch(loop: GemmKLoop) -> Sequence[Value]:
+        # Preserve the existing cutoff for the non-prefetched fallback.
+        if _dtl_a_passes + _dtl_b_passes > 63:
+            return loop.single_buffered()
 
         # Fully-unrolled fixed-K variant (ROCKE_EXP_UNROLL_K): no scf.for
         # backedge; Python-unroll the K-tiles with static (compile-time) parity
@@ -2718,9 +2617,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             acc = [a for (_n, a) in accs]
             # Prologue: issue the first D tiles' loads into rings 0..D-1.
             for j in range(min(D, trip)):
-                emit_load_phase(
-                    A_smem, B_smem, b.const_i32(j * tk), lds_parity=j % nbuf
-                )
+                loop.issue(b.const_i32(j * tk), j % nbuf)
             # Steady state: per tile i, drain (vmcnt(0): buffer_load_lds is
             # out-of-order, so a partial drain would be incorrect), barrier,
             # issue tile i+D's load, then MFMA tile i from ring i%nbuf. With the
@@ -2731,60 +2628,11 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 b.s_barrier_bare()
                 nj = i + D
                 if nj < trip:
-                    emit_load_phase(
-                        A_smem, B_smem, b.const_i32(nj * tk), lds_parity=nj % nbuf
-                    )
-                acc = emit_mfma_phase(A_smem, B_smem, acc, lds_parity=i % nbuf)
-            _for_results = acc
-            return
+                    loop.issue(b.const_i32(nj * tk), nj % nbuf)
+                acc = loop.compute(acc, i % nbuf)
+            return acc
 
-        # Prologue: load tile 0 into half 0 (the slice base in split-K mode).
-        emit_load_phase(A_smem, B_smem, k_lo, lds_parity=0)
-
-        # Loop bounds: iterate k in [k_lo, k_hi - block_k), so the last tile
-        # is handled by the epilogue (which doesn't need to issue a
-        # next-tile load).
-        K_minus_one_tile = b.sub(_k_upper, c_block_k)
-        # iter_args: (parity_i32, acc...). parity flips each iter.
-        c1_i32 = b.const_i32(1)
-        loop_args = [("par", c0)] + list(accs)
-        for_op = b.scf_for_iter(
-            k_lo, K_minus_one_tile, c_block_k, loop_args, iv_name="k0"
-        )
-        with for_op as (k0, iter_vars):
-            parity = iter_vars[0]
-            acc_iter = iter_vars[1:]
-            next_parity = b.sub(c1_i32, parity)  # 1 - parity (0/1 only)
-            k_next = b.add(k0, c_block_k)
-            # Single-barrier software pipeline: ONE s_waitcnt + ONE WG barrier
-            # per K-tile (vs the prior WAR+RAW two-barrier form, which halved
-            # the available MFMA-shadow time at 1 WG/CU). The single barrier
-            # serves both hazards because we issue the next-tile write AFTER it:
-            #   * vmcnt(0)  -> the current tile's DTL loads (issued last iter
-            #                  into half(parity)) have landed: RAW-safe to read.
-            #   * lgkmcnt(0)-> the previous iter's ds_reads of half(next_parity)
-            #                  have drained: WAR-safe to overwrite that half.
-            #   * s_barrier -> WG rendezvous so the freshly-loaded current half
-            #                  is visible to every wave before any MFMA reads it.
-            # The async next-tile load is issued AFTER the barrier (cannot race
-            # the just-drained reads -> no second barrier needed) but BEFORE the
-            # MFMAs (its HBM transfer overlaps the matrix work). The prior
-            # structure issued that write BEFORE draining, which both raced and
-            # forced the extra barrier this collapses away.
-            b.s_waitcnt(vmcnt=0, lgkmcnt=0)
-            b.s_barrier_bare()
-            emit_load_phase(A_smem, B_smem, k_next, lds_parity=next_parity)
-            new_accs = emit_mfma_phase(A_smem, B_smem, acc_iter, lds_parity=parity)
-            b.scf_yield(next_parity, *new_accs)
-
-        # Epilogue: drain the final tile's loads, rendezvous, MFMA last tile.
-        final_parity = for_op.results[0]
-        b.s_waitcnt(vmcnt=0, lgkmcnt=0)
-        b.s_barrier_bare()
-        epi_accs = emit_mfma_phase(
-            A_smem, B_smem, for_op.results[1:], lds_parity=final_parity
-        )
-        _for_results = epi_accs
+        return loop.ping_pong(direct_to_lds=True)
 
     _for_results: Sequence[Value] = ()
 
