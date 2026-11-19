@@ -47,45 +47,29 @@ namespace hiptensor
         {
         }
 
-        bool initArgs(std::vector<double> const&                   scalarValues,
-                      std::vector<std::vector<std::size_t>> const& inLengthsArray,
-                      std::vector<std::vector<std::size_t>> const& inStridesArray,
-                      std::vector<std::vector<int32_t>> const&     inModesArray,
-                      std::vector<std::vector<std::size_t>> const& outLengthsArray,
-                      std::vector<std::vector<std::size_t>> const& outStridesArray,
-                      std::vector<std::vector<int32_t>> const&     outModesArray,
-                      std::vector<hiptensorOperator_t> const&      operators,
-                      std::vector<const void*> const&              inBuffers,
-                      std::vector<void*> const&                    outBuffers) override
+        ElementwiseArgs makeArgs(std::vector<double> const&                   scalarValues,
+                                 std::vector<std::vector<std::size_t>> const& inLengthsArray,
+                                 std::vector<std::vector<std::size_t>> const& inStridesArray,
+                                 std::vector<std::vector<int32_t>> const&     inModesArray,
+                                 std::vector<std::vector<std::size_t>> const& outLengthsArray,
+                                 std::vector<std::vector<std::size_t>> const& outStridesArray,
+                                 std::vector<std::vector<int32_t>> const&     outModesArray,
+                                 std::vector<hiptensorOperator_t> const&      operators,
+                                 std::vector<const void*> const&              inBuffers,
+                                 std::vector<void*> const& outBuffers) const override
         {
             using Base   = ElementwiseSolution;
             using Traits = MetaTraits<DeviceOp>;
 
-            // Clear out the previous arguments
-            resetArgs();
+            ElementwiseArgs args;
 
             // Promote to derived class for necessary functions such as
             // MakeArgumentPointer and MakeInvokerPointer.
             auto* deviceOp = dynamic_cast<DeviceOp*>(Base::mDeviceOp.get());
             if(deviceOp == nullptr)
             {
-                return false;
+                return {};
             }
-
-            auto findThreadDim = [](std::string argValues) -> uint32_t {
-                if(!argValues.empty())
-                {
-                    std::string kernelName = argValues.substr(0, argValues.find('<'));
-                    if(kernelName == "DeviceElementwiseImpl"
-                       || kernelName == "ReferencePermutation")
-                    {
-                        int beg = argValues.find(',');
-                        int end = argValues.find(',', beg + 1);
-                        return std::stoi(argValues.substr(beg + 1, end - beg));
-                    }
-                }
-                return 1;
-            };
 
             auto isColMajorStrides = HiptensorOptions::instance()->isColMajorStrides();
 
@@ -100,7 +84,7 @@ namespace hiptensor
             constexpr auto nDim = static_cast<std::size_t>(Traits::NDim);
             if(refModes.size() != nDim || outLengthsArray[0].size() != nDim)
             {
-                return false;
+                return {};
             }
 
             std::array<index_t, Traits::NDim> deviceInputLengths;
@@ -126,7 +110,7 @@ namespace hiptensor
                                               inModesArray[i]);
                 if(strides.size() != nDim)
                 {
-                    return false;
+                    return {};
                 }
                 convertVectorToCkArray(strides, deviceInputStrides[i]);
             }
@@ -141,7 +125,7 @@ namespace hiptensor
                                               outModesArray[i]);
                 if(strides.size() != nDim)
                 {
-                    return false;
+                    return {};
                 }
                 convertVectorToCkArray(strides, deviceOutputStrides[i]);
             }
@@ -157,7 +141,15 @@ namespace hiptensor
                 if constexpr(std::is_same_v<typename Traits::ScaleOp,
                                             ck::tensor_operation::element_wise::PassThrough>)
                 {
-                    Base::mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
+                    // This kernel only moves data: it ignores alpha and the operator on A, so
+                    // it cannot solve a call that needs either. A plan keeps the kernel of its
+                    // first call, and a later call may scale.
+                    if(scalarValues[0] != 1.0 || operators[0] != HIPTENSOR_OP_IDENTITY)
+                    {
+                        return {};
+                    }
+
+                    args.mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
                         deviceInputLengths,
                         deviceInputStrides,
                         deviceOutputStrides,
@@ -172,7 +164,7 @@ namespace hiptensor
 
                     // According to the definition of elementwise permute \f$B_{\Pi^B(i_0,i_1,...,i_n)} = \alpha \Psi(A_{\Pi^A(i_0,i_1,...,i_n)}))\f$
                     // No operations can be applied to B so that the `opB` which is from descriptor B should be ignored.
-                    Base::mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
+                    args.mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
                         deviceInputLengths,
                         deviceInputStrides,
                         deviceOutputStrides,
@@ -188,7 +180,7 @@ namespace hiptensor
             else if constexpr(Traits::InstanceType
                               == ElementwiseInstanceType_t::ELEMENTWISE_BINARY_OP)
             {
-                Base::mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
+                args.mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
                     deviceInputLengths,
                     deviceInputStrides,
                     deviceOutputStrides,
@@ -209,7 +201,7 @@ namespace hiptensor
             else if constexpr(Traits::InstanceType
                               == ElementwiseInstanceType_t::ELEMENTWISE_TRINARY_OP)
             {
-                Base::mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
+                args.mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
                     deviceInputLengths,
                     deviceInputStrides,
                     deviceOutputStrides,
@@ -238,21 +230,16 @@ namespace hiptensor
             }
 
             // Initialize the invoker
-            Base::mInvokerPtr = std::move(deviceOp->MakeInvokerPointer());
-
-            // Fill problem metrics
-            Base::mDim = Traits::NDim;
+            args.mInvokerPtr = std::move(deviceOp->MakeInvokerPointer());
 
             // Size count
-            Base::mSize = std::accumulate(
+            args.mSize = std::accumulate(
                 outLengthsArray[0].cbegin(), outLengthsArray[0].cend(), 1, std::multiplies{});
 
             // Arg test
-            Base::mValid = deviceOp->IsSupportedArgument(Base::mInvokerArgPtr.get());
+            args.mValid = deviceOp->IsSupportedArgument(args.mInvokerArgPtr.get());
 
-            Base::mThreadDim = findThreadDim(deviceOp->GetTypeString());
-
-            return mValid;
+            return args;
         }
     };
 

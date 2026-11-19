@@ -28,6 +28,7 @@
 
 #include <miopen/invoke_params.hpp>
 #include <miopen/tensor.hpp>
+#include <cstdint>
 
 namespace miopen {
 namespace multimarginloss {
@@ -46,7 +47,7 @@ struct InvokeParams : public miopen::InvokeParams
     ConstData_t w = nullptr;
     Data_t o      = nullptr;
 
-    long p;
+    int64_t p;
     float margin;
 
     Data_t workspace           = nullptr;

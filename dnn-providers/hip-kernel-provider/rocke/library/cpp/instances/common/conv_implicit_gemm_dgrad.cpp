@@ -492,6 +492,9 @@ static bool _dgrad_dy_halo_ok(const rocke_dgrad_conv_spec_t* s, char* reason, si
 // Arch-aware spec validation (Python is_valid_dgrad_spec)
 // ---------------------------------------------------------------------------
 
+/* Defined with the epilogue helpers below. */
+static int _dgrad_split_k_cshuffle_store_vec(const rocke_dgrad_conv_spec_t* spec);
+
 bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                                     const char* arch,
                                     char* reason,
@@ -699,6 +702,23 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                      dd,
                      cpg);
             return false;
+        }
+        /* The split-K cshuffle epilogue atomic-adds 16-bit dX in packed
+         * pairs, so its store width must be even (Python
+         * _dgrad_split_k_cshuffle_store_vec). */
+        if(packed && s->epilogue && strcmp(s->epilogue, "cshuffle") == 0)
+        {
+            const int sv = _dgrad_split_k_cshuffle_store_vec(s);
+            if(sv % 2 != 0)
+            {
+                snprintf(reason,
+                         reason_cap,
+                         "split_k > 1 with the cshuffle epilogue and dtype_d='%s' needs an "
+                         "even dX store width (packed <2 x dtype> atomic pairs); got %d",
+                         dd,
+                         sv);
+                return false;
+            }
         }
     }
 
@@ -1481,6 +1501,19 @@ static int _dgrad_store_vec(const rocke_dgrad_conv_spec_t* spec)
         if(cpg % v == 0)
             return v;
     return 1;
+}
+
+/* The dX width the split-K cshuffle epilogue atomic-adds with -- mirrors Python
+ * _dgrad_split_k_cshuffle_store_vec (rocke_cshuffle_epilogue_from_grid's pick
+ * for _dgrad_store_vec). */
+static int _dgrad_split_k_cshuffle_store_vec(const rocke_dgrad_conv_spec_t* spec)
+{
+    const bool is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
+    return rocke_cshuffle_pick_store_vec(spec->tile_m,
+                                         spec->tile_n,
+                                         spec->warp_m * spec->warp_n * spec->wave_size,
+                                         _dgrad_store_vec(spec),
+                                         is_fp32_d);
 }
 
 static rocke_value_t* _dgrad_dx_addr_fn(rocke_ir_builder_t* b,
@@ -2669,7 +2702,8 @@ static void _emit_dgrad_tilde_cshuffle_epilogue(rocke_ir_builder_t* b,
                                                 rocke_value_t* c_C,
                                                 rocke_value_t* c_group_base,
                                                 rocke_value_t* patch_xc,
-                                                rocke_value_t* patch_row)
+                                                rocke_value_t* patch_row,
+                                                rocke_value_t* atomic_dx_ptr)
 {
     tilde_dx_ctx_t ctx = _make_tilde_dx_ctx(hw_tilde,
                                             w_tilde_slice,
@@ -2689,6 +2723,22 @@ static void _emit_dgrad_tilde_cshuffle_epilogue(rocke_ir_builder_t* b,
     int max_store_vec = _dgrad_store_vec(spec);
     rocke_cshuffle_epilogue_t epi = rocke_cshuffle_epilogue_from_grid(atom, grid, max_store_vec);
     epi.out_dtype = spec->dtype_d;
+    /* Split-K (MFMA): atomic-add the staged tile into dX through the same
+     * address function (Python atomic_dx_ptr). */
+    if(atomic_dx_ptr != NULL)
+    {
+        rocke_cshuffle_epilogue_atomic_store_addr(b,
+                                                  &epi,
+                                                  accs,
+                                                  num_accs,
+                                                  atomic_dx_ptr,
+                                                  NULL,
+                                                  _tilde_dx_addr_fn,
+                                                  &ctx,
+                                                  bounds_m,
+                                                  bounds_n);
+        return;
+    }
     rocke_cshuffle_epilogue_store(
         b, &epi, accs, num_accs, _tilde_dx_addr_fn, &ctx, dx_rsrc, bounds_m, bounds_n);
 }
@@ -3576,7 +3626,35 @@ static rocke_kernel_def_t*
     auto dispatch_dgrad_epilogue = [&](rocke_value_t* const* epi_accs_, int n_epi) {
         bool is_split_k_atomic_ = (spec->split_k > 1);
         bool is_strided_ = rocke_dgrad_conv_spec_is_strided(spec);
-        if(!is_split_k_atomic_ && !is_strided_)
+        bool use_cshuffle_sk_ = (spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0);
+        if(is_split_k_atomic_ && use_cshuffle_sk_ && !is_wmma)
+        {
+            /* Split-K MFMA cshuffle: the staged tile is atomic-added into dX
+             * (Python: _emit_dgrad_tilde_cshuffle_epilogue(atomic_dx_ptr=dX)). */
+            _emit_dgrad_tilde_cshuffle_epilogue(b,
+                                                spec,
+                                                atom,
+                                                &grid,
+                                                epi_accs_,
+                                                n_epi,
+                                                dx_rsrc,
+                                                rec_gemm_m,
+                                                c_dg_N,
+                                                &hw_div,
+                                                &w_div,
+                                                rec_d_h_stride,
+                                                rec_d_h_offset,
+                                                rec_d_w_stride,
+                                                rec_d_w_offset,
+                                                c_Hi,
+                                                c_Wi,
+                                                c_C,
+                                                c_group_base,
+                                                patch_xc,
+                                                patch_row,
+                                                dX);
+        }
+        else if(!is_split_k_atomic_ && !is_strided_)
         {
             if(is_wmma)
             {
@@ -3662,7 +3740,8 @@ static rocke_kernel_def_t*
                                                     c_C,
                                                     c_group_base,
                                                     patch_xc,
-                                                    patch_row);
+                                                    patch_row,
+                                                    NULL);
             else
                 _emit_dgrad_tilde_direct_epilogue(b,
                                                   spec,
