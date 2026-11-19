@@ -637,6 +637,35 @@ TEST(DataInitializationMafNonMX, GeneratorFlagKeepsTheMafData)
     EXPECT_EQ(dataInit.cpuBytes(ContractionProblemGemm::TENSOR::A, f8, a.size()), asBytes(a));
     EXPECT_EQ(dataInit.cpuBytes(ContractionProblemGemm::TENSOR::B, f8, b.size()), asBytes(b));
 }
+
+// Maf2_0 E8M0 scales are 2^(k - 11), k ~ Binomial(21, 0.5): half of them are at most 2^-1
+// (byte 0x7E). With two free elements per scaling tile the client keeps one draw per tile; the
+// tile maximum would leave only a quarter at or below 0x7E. Checks the scales the client writes.
+TEST(DataInitializationMafScaleTiles, Maf2_0KeepsTheBinomialScalesWithFreeBlocks)
+{
+    using namespace TensileLite::Client;
+    auto args = makeMXLaunchArgs({{128, 128, 1, 512}});
+    setOption(args, "mx-a-free-block", 2);
+    for(auto const* name : {"init-a", "init-b", "init-mx-a", "init-mx-b"})
+        setOption(args, name, InitMode::Maf2_0);
+    ClientProblemFactory factory(args);
+    CPUInputProbe        dataInit(args, factory);
+    auto const&          gemm = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[0]);
+    dataInit.initializeCPUInputs(gemm);
+
+    auto const scales = dataInit.cpuBytes(ContractionProblemGemm::TENSOR::MXSA,
+                                          gemm.mxsa().dataType(),
+                                          gemm.mxsa().totalAllocatedBytes());
+    size_t     drawn = 0, atMostHalf = 0;
+    for(uint8_t s : scales)
+        if(s != 0) // K-block padding stays 0; binomial scales are 0x74..0x89
+        {
+            drawn++;
+            atMostHalf += s <= 0x7E;
+        }
+    ASSERT_GE(drawn, 512u);
+    EXPECT_NEAR(double(atMostHalf) / drawn, 0.5, 0.08);
+}
 #endif
 
 // =============================================================================
@@ -1124,6 +1153,30 @@ TEST(VaryMXScaleFreeTiles, SkipsMafScales)
     for(auto mode : {InitMode::Maf1_0, InitMode::Maf2_0, InitMode::Maf2_0UnitScale})
         EXPECT_FALSE(dt::shouldVaryMXScaleFreeTiles(mode, InitMode::Random, 2, true))
             << TensileLite::Client::ToString(mode);
+}
+
+// The free-dim downsample keeps each tile's largest E8 scale, except for the MAF modes, whose
+// scales are prescribed and would be skewed by the maximum; those keep the first of each tile.
+TEST(DownsampleMXScaleFreeDim, MafKeepsTheFirstScaleOfEachTile)
+{
+    using TensileLite::Client::InitMode;
+    EXPECT_TRUE(dt::takeMXScaleTileMax(InitMode::Random, true));
+    EXPECT_FALSE(dt::takeMXScaleTileMax(InitMode::Random, false));
+    for(auto mode : {InitMode::Maf1_0, InitMode::Maf2_0, InitMode::Maf2_0UnitScale})
+    {
+        EXPECT_FALSE(dt::takeMXScaleTileMax(mode, true)) << TensileLite::Client::ToString(mode);
+        std::vector<uint8_t> const src = {0x70, 0x80, 0x85, 0x75}; // 2 tiles x 2 rows, 1 K-block
+        std::vector<uint8_t>       dst(2, 0);
+        dt::downsampleMXScaleFreeDim(dst.data(),
+                                     src.data(),
+                                     /*compactFreeDim=*/4,
+                                     /*kBlocks=*/1,
+                                     /*mxBlockFree=*/2,
+                                     /*elemBytes=*/1,
+                                     /*kFast=*/true,
+                                     dt::takeMXScaleTileMax(mode, true));
+        EXPECT_EQ(dst, (std::vector<uint8_t>{0x70, 0x85})) << TensileLite::Client::ToString(mode);
+    }
 }
 
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
