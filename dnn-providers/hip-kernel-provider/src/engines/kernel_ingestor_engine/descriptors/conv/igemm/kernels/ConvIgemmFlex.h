@@ -54,8 +54,14 @@ __device__ inline void k1FlexBarrier()
     __builtin_amdgcn_sched_barrier(0);
 }
 
+/// Output positions per image of a gather.
+__device__ inline K1Pos spatialOf(const K1Gather& gather)
+{
+    return static_cast<K1Pos>(gather.out[0]) * gather.out[1] * gather.out[2];
+}
+
 template <class T, class Atom, int DIR, int BN>
-__device__ void k1ConvFlex(const K1Args& a CONV_EPI_FN_PARAM)
+__device__ __attribute__((always_inline)) void k1ConvFlex(const K1Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = 64, DIM = 16;
     constexpr int BM = 256;
@@ -97,9 +103,57 @@ __device__ void k1ConvFlex(const K1Args& a CONV_EPI_FN_PARAM)
     const int wave = __builtin_amdgcn_readfirstlane(tid / WAVE);
     const int grp = wave / 4, wx = wave % 2, wk = (wave / 2) % 2;
 
-    // Steps: slices (outer) x taps (t, r, s, inner).
-    const int taps0 = gather.taps[0], taps1 = gather.taps[1], taps2 = gather.taps[2];
-    const int nTaps = taps0 * taps1 * taps2;
+    // Steps: slices (outer) x taps (t, r, s, inner), over the depth and height taps that reach
+    // the input for some row of the tile (tapRange): where the input is padded, as in backward
+    // data of an unpadded forward layer over few planes, the others multiply zeros only.
+    const int taps2 = gather.taps[2];
+    int q0 = 0, q1 = gather.taps[0], r0 = 0, r1 = gather.taps[1];
+    {
+        const long long last = (m0 + BM < gather.rows ? m0 + BM : gather.rows) - 1;
+        const K1Pos plane = static_cast<K1Pos>(gather.out[1]) * gather.out[2];
+        const long long imgF = m0 / spatialOf(gather), imgL = last / spatialOf(gather);
+        const K1Pos restF = static_cast<K1Pos>(m0 - imgF * spatialOf(gather));
+        const K1Pos restL = static_cast<K1Pos>(last - imgL * spatialOf(gather));
+        const int odF = static_cast<int>(restF / plane), odL = static_cast<int>(restL / plane);
+        // The tap range of axis a over output positions [oF, oL]: taps whose input lies in the
+        // image for some position (the positions' inputs are monotonic in the tap).
+        auto tapRange = [&](int ax, int oF, int oL, int& lo, int& hi) __attribute__((always_inline))
+        {
+            int qlo = gather.taps[ax], qhi = 0;
+            for(int q = 0; q < gather.taps[ax]; ++q)
+            {
+                const int iF = oF * gather.stride[ax] - gather.pad[ax] + q * gather.step[ax];
+                const int iL = oL * gather.stride[ax] - gather.pad[ax] + q * gather.step[ax];
+                const int iMin = iF < iL ? iF : iL, iMax = iF < iL ? iL : iF;
+                if(iMax >= 0 && iMin < gather.in[ax])
+                {
+                    qlo = q < qlo ? q : qlo;
+                    qhi = q + 1;
+                }
+            }
+            // No tap reaches: one tap still runs, so the rows' zeros are written.
+            lo = qhi > qlo ? qlo : 0;
+            hi = qhi > qlo ? qhi : 1;
+        };
+        if(imgF == imgL)
+        {
+            tapRange(0, odF, odL, q0, q1);
+            if(odF == odL)
+            {
+                tapRange(1,
+                         static_cast<int>((restF - odF * plane) / gather.out[2]),
+                         static_cast<int>((restL - odL * plane) / gather.out[2]),
+                         r0,
+                         r1);
+            }
+        }
+        q0 = __builtin_amdgcn_readfirstlane(q0);
+        q1 = __builtin_amdgcn_readfirstlane(q1);
+        r0 = __builtin_amdgcn_readfirstlane(r0);
+        r1 = __builtin_amdgcn_readfirstlane(r1);
+    }
+    const int taps0 = gather.taps[0], taps1 = gather.taps[1];
+    const int nTaps = (q1 - q0) * (r1 - r0) * taps2;
     const int total = nTaps * ((red + KS - 1) / KS);
     // Split z: steps [bound(z), bound(z + 1)), bounds on whole loop bodies but the last.
     auto bound = [&](int z) __attribute__((always_inline))
@@ -196,8 +250,8 @@ __device__ void k1ConvFlex(const K1Args& a CONV_EPI_FN_PARAM)
         c.c0 = sl * KS;
         c.qs = tap % taps2;
         tap /= taps2;
-        c.qr = tap % taps1;
-        c.qt = tap / taps1;
+        c.qr = r0 + tap % (r1 - r0);
+        c.qt = q0 + tap / (r1 - r0);
         return c;
     };
     auto advance = [&](Cursor & c) __attribute__((always_inline))
@@ -206,12 +260,12 @@ __device__ void k1ConvFlex(const K1Args& a CONV_EPI_FN_PARAM)
         if(++c.qs == taps2)
         {
             c.qs = 0;
-            if(++c.qr == taps1)
+            if(++c.qr == r1)
             {
-                c.qr = 0;
-                if(++c.qt == taps0)
+                c.qr = r0;
+                if(++c.qt == q1)
                 {
-                    c.qt = 0;
+                    c.qt = q0;
                     c.c0 += KS;
                 }
             }
