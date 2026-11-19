@@ -459,14 +459,10 @@ static void lower_pk_atomic_add(rocke_lower_t* L,
     const char* gep = rocke_ll_fresh(L, "gep");
     const char* ordering = ll_attr_str(op, "ordering", "monotonic");
     rocke_ll_require_global_header_ptr(L, op_name, ptr, "ptr");
-    /* An explicit "syncscope" (IRBuilder syncscope=) or "scope" (IRBuilder
-     * scope=) attr on the op overrides the per-dtype default scope, as in
-     * Python; "system" is LLVM's default and has no clause (below). */
+    /* An explicit "syncscope" attr (IRBuilder syncscope=) on the op overrides
+     * the per-dtype default scope, as in Python; "system" is LLVM's default
+     * and has no clause (below). */
     const char* attr_scope = ll_attr_str(op, "syncscope", NULL);
-    if(!attr_scope || !attr_scope[0])
-    {
-        attr_scope = ll_attr_str(op, "scope", NULL);
-    }
     if(attr_scope && attr_scope[0])
     {
         scope = attr_scope;

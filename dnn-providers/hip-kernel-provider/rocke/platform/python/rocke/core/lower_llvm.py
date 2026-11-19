@@ -2261,10 +2261,11 @@ class _Lowerer:
                         # reading it, on every iteration (and closes the
                         # iteration with a barrier): nothing it touches is
                         # live across the back edge, so its uses keep their
-                        # straight-line intervals. Three names for it:
-                        # ``smem_iter_local`` (fwd stream-K segments),
-                        # ``smem_per_iteration`` (IRBuilder.scf_for_iter)
-                        # and ``lds_iter_local`` (dgrad stream-K).
+                        # straight-line intervals. ``smem_iter_local`` is the
+                        # attribute (IRBuilder.scf_for_iter's
+                        # smem_per_iteration sets it); ``smem_per_iteration``
+                        # and ``lds_iter_local`` are accepted as aliases of
+                        # it. The C++ engine reads the same three.
                         walk(r.ops, loop_end=loop_end)
                     elif op.name == "scf.for":
                         # Conservative loop liveness: a value written on one
@@ -3813,11 +3814,10 @@ class _Lowerer:
             ", !amdgpu.no.remote.memory !1"
             ", !amdgpu.ignore.denormal.mode !1"
         )
-        # An explicit "syncscope" (IRBuilder syncscope=) or "scope" (IRBuilder
-        # scope=) attr on the op overrides the per-dtype default scope;
-        # "system" is LLVM's default and has no clause (_llvm_syncscope). The
-        # mirror reads the same attrs.
-        scope = op.attrs.get("syncscope") or op.attrs.get("scope") or scope
+        # An explicit "syncscope" attr (IRBuilder syncscope=) on the op
+        # overrides the per-dtype default scope; "system" is LLVM's default
+        # and has no clause (_llvm_syncscope). The mirror reads the same attr.
+        scope = op.attrs.get("syncscope") or scope
         sync = _llvm_syncscope(scope) if scope else ""
         self._current().emit(
             f"  {op.result.name} = atomicrmw fadd ptr addrspace(1) {gep}, "

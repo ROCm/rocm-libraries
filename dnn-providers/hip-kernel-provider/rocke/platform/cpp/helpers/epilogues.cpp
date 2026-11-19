@@ -451,7 +451,7 @@ static void epi_atomic_pairs_batched(rocke_ir_builder_t* b,
             rocke_b_region_enter(b, ifo.then_region);
         }
         rocke_b_global_atomic_add_pk_bf16_ex(
-            b, dw_ptr, c_off, it_v[e], NULL, epi->atomic_syncscope, NULL);
+            b, dw_ptr, c_off, it_v[e], NULL, epi->atomic_syncscope);
         if(ok != NULL)
             rocke_b_region_leave(b);
     }
@@ -618,7 +618,7 @@ static void epi_store_m_chunked(rocke_ir_builder_t* b,
                 rocke_value_t* sidx[2] = {row, col};
                 rocke_value_t* vec = rocke_b_smem_load_vN(b, c_smem, sidx, 2, rocke_bf16(), 2);
                 rocke_b_global_atomic_add_pk_bf16_ex(
-                    b, dw_ptr, c_off, vec, NULL, epi->atomic_syncscope, NULL);
+                    b, dw_ptr, c_off, vec, NULL, epi->atomic_syncscope);
                 if(okp != NULL)
                     rocke_b_region_leave(b);
             }
@@ -676,8 +676,7 @@ static void epi_store_m_chunked(rocke_ir_builder_t* b,
                                                          c_off,
                                                          rocke_b_vec_pack(b, el2, 2, v_e->type),
                                                          NULL,
-                                                         epi->atomic_syncscope,
-                                                         NULL);
+                                                         epi->atomic_syncscope);
                     if(okp != NULL)
                         rocke_b_region_leave(b);
                 }
@@ -1431,7 +1430,7 @@ static void cshuffle_epilogue_atomic_store_impl(rocke_ir_builder_t* b,
                     rocke_value_t* idx[2] = {row, col0};
                     rocke_value_t* vec = rocke_b_smem_load_vN(b, c_smem, idx, 2, rocke_bf16(), 2);
                     rocke_b_global_atomic_add_pk_bf16_ex(
-                        b, dw_ptr, off, vec, NULL, epi->atomic_syncscope, NULL);
+                        b, dw_ptr, off, vec, NULL, epi->atomic_syncscope);
                 }
             }
             rocke_b_region_leave(b);
@@ -1481,7 +1480,7 @@ static void cshuffle_epilogue_atomic_store_impl(rocke_ir_builder_t* b,
             rocke_value_t* idx[2] = {row, col};
             rocke_value_t* vec = rocke_b_smem_load_vN(b, c_smem, idx, 2, rocke_bf16(), 2);
             rocke_b_global_atomic_add_pk_bf16_ex(
-                b, dw_ptr, c_off, vec, NULL, epi->atomic_syncscope, NULL);
+                b, dw_ptr, c_off, vec, NULL, epi->atomic_syncscope);
             if(ok != NULL)
                 rocke_b_region_leave(b);
         }
@@ -1657,7 +1656,7 @@ static void cshuffle_epilogue_atomic_store_impl(rocke_ir_builder_t* b,
                         elems2[1] = v_o;
                         vec = rocke_b_vec_pack(b, elems2, 2, v_e->type);
                         rocke_b_global_atomic_add_pk_bf16_ex(
-                            b, dw_ptr, c_off_even, vec, NULL, epi->atomic_syncscope, NULL);
+                            b, dw_ptr, c_off_even, vec, NULL, epi->atomic_syncscope);
                     }
                     else
                     {

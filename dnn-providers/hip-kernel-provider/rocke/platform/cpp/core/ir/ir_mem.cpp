@@ -872,7 +872,7 @@ rocke_value_t* rocke_b_global_atomic_add_pk_bf16(rocke_ir_builder_t* b,
                                                  rocke_value_t* value,
                                                  const char* ordering)
 {
-    return rocke_b_global_atomic_add_pk_bf16_ex(b, ptr, idx, value, ordering, NULL, NULL);
+    return rocke_b_global_atomic_add_pk_bf16_ex(b, ptr, idx, value, ordering, NULL);
 }
 
 rocke_value_t* rocke_b_global_atomic_add_pk_bf16_ex(rocke_ir_builder_t* b,
@@ -880,8 +880,7 @@ rocke_value_t* rocke_b_global_atomic_add_pk_bf16_ex(rocke_ir_builder_t* b,
                                                     rocke_value_t* idx,
                                                     rocke_value_t* value,
                                                     const char* ordering,
-                                                    const char* syncscope,
-                                                    const char* scope)
+                                                    const char* syncscope)
 {
     rocke_value_t* ops[3];
     rocke_attr_map_t a;
@@ -907,14 +906,9 @@ rocke_value_t* rocke_b_global_atomic_add_pk_bf16_ex(rocke_ir_builder_t* b,
     a = rocke_i_attrs(b);
     rocke_attr_set_str(b, &a, "elem_type", "bf16");
     rocke_attr_set_int(b, &a, "vec", 2);
-    if(syncscope != NULL && scope != NULL && scope[0])
-        return (rocke_value_t*)rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "global_atomic_add_pk_bf16: give syncscope or scope, not both");
     rocke_attr_set_str(b, &a, "ordering", ordering);
     if(syncscope != NULL)
         rocke_attr_set_str(b, &a, "syncscope", syncscope);
-    if(scope != NULL && scope[0])
-        rocke_attr_set_str(b, &a, "scope", scope);
     return rocke_i_op1(
         b, ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_BF16, ops, 3, value->type, &a, "atom_bf16");
 }

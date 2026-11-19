@@ -1289,9 +1289,9 @@ static void
                    || rocke_attr_get_bool(&op->attrs, "lds_iter_local", false)))
             {
                 /* Mirrors Python: a loop whose body rewrites every allocation
-                 * it uses before reading it keeps straight-line intervals
-                 * (smem_iter_local, smem_per_iteration or
-                 * lds_iter_local). */
+                 * it uses before reading it keeps straight-line intervals.
+                 * smem_iter_local is the attribute; smem_per_iteration and
+                 * lds_iter_local are accepted as aliases of it. */
                 child_loop_end = loop_end;
             }
             else if(op->opcode == ROCKE_OP_SCF_FOR)

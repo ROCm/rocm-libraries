@@ -3763,20 +3763,16 @@ class IRBuilder:
         *,
         ordering: str = "monotonic",
         syncscope: Optional[str] = None,
-        scope: Optional[str] = None,
     ) -> Value:
         """Packed-bf16 atomic add: two bf16 lanes per transaction.
 
         ``syncscope`` (``None`` = LLVM's default system scope, which sets SC1
         on gfx94x and performs the atomic beyond the L2) may name ``"agent"``:
-        device scope, performed in the L2 (SC1 clear). Omitted from the op's
-        attributes when ``None``, so existing kernels are unchanged.
-
-        ``scope`` (default None = LLVM's system scope): the same, recorded as
-        the op's ``scope`` attribute -- e.g. ``"workgroup"``: on gfx942 a
-        narrower scope keeps the atomic in the XCD's L2, which is only
-        correct when every atomic to the address comes from that XCD. Give
-        at most one of the two.
+        device scope, performed in the L2 (SC1 clear), or a narrower one such
+        as ``"workgroup"``, which on gfx942 keeps the atomic in the XCD's L2
+        and is only correct when every atomic to the address comes from that
+        XCD. Omitted from the op's attributes when ``None``, so existing
+        kernels are unchanged.
 
         Lowers to AMDGPU's ``llvm.amdgcn.global.atomic.fadd.v2bf16``
         intrinsic (gfx940+); returns the pre-add value. ``value``
@@ -3787,10 +3783,6 @@ class IRBuilder:
         """
         if ordering not in ("monotonic", "acquire", "release", "acq_rel", "seq_cst"):
             raise ValueError(f"unknown ordering {ordering!r}")
-        if syncscope is not None and scope:
-            raise ValueError(
-                "global_atomic_add_pk_bf16: give syncscope or scope, not both"
-            )
         if not isinstance(value.type, VectorType):
             raise ValueError(
                 f"global_atomic_add_pk_bf16 expects <2 x bf16> input, "
@@ -3810,7 +3802,6 @@ class IRBuilder:
                 "vec": 2,
                 "ordering": ordering,
                 **({"syncscope": syncscope} if syncscope is not None else {}),
-                **({"scope": scope} if scope else {}),
             },
             result_name_hint="atom_bf16",
         ).result
@@ -7793,7 +7784,8 @@ class IRBuilder:
         smem_per_iteration: no LDS contents live across the back edge (the
         body ends in a workgroup barrier and rewrites every LDS buffer it
         reads before reading it), so LDS allocations are aliased by one
-        iteration's liveness instead of the whole loop's. Default False.
+        iteration's liveness instead of the whole loop's: sets the loop's
+        ``smem_iter_local`` attribute. Default False.
 
         No init may be a buffer descriptor (see
         :func:`_loop_carried_descriptor_message`), and no name may be taken by
@@ -7827,7 +7819,7 @@ class IRBuilder:
                 "num_iter_args": len(iter_args),
                 "unroll": unroll,
                 "elide_trailing_barrier": elide_trailing_barrier,
-                **({"smem_per_iteration": True} if smem_per_iteration else {}),
+                **({"smem_iter_local": True} if smem_per_iteration else {}),
             },
             results=results,
             regions=[body],
