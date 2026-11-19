@@ -61,6 +61,7 @@ from rocke.instances.gfx1250.mx_gemm import (
     HalfWalk,
     MxGemmSpec,
     PanelWalk,
+    RingWalk,
     RowMaps,
     ScaleRegisters,
     TileCompute,
@@ -122,6 +123,17 @@ _PAIRS = {
     "local_prefetch": 1,
     "half_b_order": "late",
     "wave_map": "pairs",
+}
+# walk "ring" fields on the 256x256x256 tile: read-ahead, B in halves (late),
+# fixed read bases (the walk itself is not given: these test its model).
+_RING = {
+    "tile_m": 256,
+    "tile_n": 256,
+    "tile_k": 256,
+    "local_prefetch": 1,
+    "half_plr": "b",
+    "half_b_order": "late",
+    "read_bases": "fixed",
 }
 
 
@@ -921,6 +933,285 @@ class MxGemmSpecTest(unittest.TestCase):
                     (tile + ahead, op, panel)
                     for op, panel, ahead in HalfWalk.refills(half)
                 ]
+
+    def test_ring_layout(self):
+        """walk "ring": a part is 16 groups of 8 rows of 512 B, 16 B after
+        each group; a part's scales are two tiles of 8 K-steps of 544 B (512 B
+        and a 16 B pad after every 256 B). The four scale rings come first,
+        then the four data parts, all on 256 B boundaries, so a split base
+        (512 B under a lane's base) stays positive, and the LDS holds it all.
+        Rows and scales of a part never overlap."""
+        ring = RingWalk
+        self.assertEqual((ring.PERIOD, ring.PERIOD_LINES), (16, 6))
+        self.assertEqual(ring.group_bytes(), 4112)
+        self.assertEqual(ring.part_bytes(), 65792)
+        self.assertEqual(ring.scale_step_bytes(), 544)
+        self.assertEqual(ring.scale_ring_bytes(), 8704)
+        self.assertEqual(ring.lds_bytes(), 297984)
+        self.assertLessEqual(ring.lds_bytes(), 320 * 1024)
+        spans = []
+        for operand, component in ring.PARTS:
+            scale = ring.scale_base(operand, component)
+            data = ring.data_base(operand, component)
+            spans += [(scale, ring.scale_ring_bytes()), (data, ring.part_bytes())]
+            self.assertEqual(scale % 256, 0)
+            self.assertEqual(data % 256, 0)
+            self.assertGreaterEqual(data, ring.PITCH)
+        spans.sort()
+        self.assertEqual(spans[0][0], 0)
+        for (start, size), (after, _) in zip(spans, spans[1:]):
+            self.assertEqual(start + size, after)
+        self.assertEqual(sum(size for _, size in spans), ring.lds_bytes())
+        rows = [ring.row_offset(row) for row in range(ring.PART_ROWS)]
+        self.assertEqual(len(set(rows)), ring.PART_ROWS)
+        self.assertEqual(rows[-1] + ring.PITCH + ring.ROW_PAD, ring.part_bytes())
+        scales = {
+            ring.scale_offset(step, row) + j
+            for step in range(2 * ring.SCALE_STEPS)
+            for row in range(ring.PART_ROWS)
+            for j in range(4)
+        }
+        self.assertEqual(len(scales), 2 * ring.SCALE_STEPS * ring.PART_ROWS * 4)
+        self.assertLess(max(scales), ring.scale_ring_bytes())
+
+    def test_ring_schedule(self):
+        """A period is 16 K-steps and six lines. Line L is last read in
+        K-step 2, 5, 7, 10, 13 or 15 of a period, and that K-step's late
+        refill loads line L + 2 into its slot (then the next scale tile at
+        the end of a scale tile), which the K-steps first read three K-steps
+        later; the K-step before each refill signals the cluster. Only
+        K-steps 5 and 10 read across the end of a row's 512 B. The TDM waits
+        are the same in every period."""
+        ring = RingWalk
+        self.assertEqual([ring.last(line) for line in range(6)], [2, 5, 7, 10, 13, 15])
+        self.assertEqual(
+            [ring.first(line + 2) for line in range(6)], [5, 8, 10, 13, 16, 18]
+        )
+        refills = {
+            step: ring.refills(step)
+            for step in range(ring.PERIOD)
+            if ring.refills(step)
+        }
+        self.assertEqual(
+            refills,
+            {
+                2: [("line", 2)],
+                5: [("line", 3)],
+                7: [("line", 4), ("scales", 2)],
+                10: [("line", 5)],
+                13: [("line", 6)],
+                15: [("line", 7), ("scales", 3)],
+            },
+        )
+        for step in range(3 * ring.PERIOD):
+            period, local = divmod(step, ring.PERIOD)
+            shifted = [
+                (kind, index + period * (6 if kind == "line" else 2))
+                for kind, index in ring.refills(local)
+            ]
+            self.assertEqual(ring.refills(step), shifted)
+            for kind, index in ring.refills(step):
+                first = ring.first_use((kind, index))
+                self.assertGreaterEqual(first - step, 3, (step, kind, index))
+        self.assertEqual(
+            [step for step in range(ring.PERIOD) if ring.signals(step)],
+            [1, 4, 6, 9, 12, 14],
+        )
+        self.assertEqual(
+            ring.prologue(),
+            [("line", 0), ("scales", 0), ("line", 1), ("scales", 1)],
+        )
+        waits = {key: count for key, count in ring.waits().items() if count is not None}
+        self.assertEqual(waits, {"prologue": 2, 1: 1, 4: 0, 7: 0, 9: 1, 12: 0, 15: 0})
+        for k_reads in K_READS:
+            spec = _spec6(*_MAF_MED[0], **_RING, k_reads=k_reads)
+            wraps = {
+                step
+                for step in range(ring.PERIOD)
+                for offset, _ in spec.lane_reads
+                for half in (0, 1)
+                if ring.offset(step) + offset + half * spec.lane_half_bytes
+                >= ring.PITCH
+            }
+            with self.subTest(k_reads=k_reads):
+                self.assertEqual(wraps, {5, 10})
+
+    def test_ring_reads_find_tdm_writes(self):
+        """Over three periods of one part (A and B parts are alike), with the
+        TDM waits of :meth:`RingWalk.waits` (the wait in K-step q comes before
+        the K-step's late refill, and the next K-step's reads after both):
+        every byte a lane reads, of its rows at its K-step's K and of its
+        scales, is the byte the TDM wrote there, and no load in flight writes
+        the slot it reads. Contiguous and chunked reads."""
+        ring = RingWalk
+        rows = ring.PART_ROWS
+
+        def label(row, byte):
+            return row << 16 | byte
+
+        for k_reads in K_READS:
+            spec = _spec6(*_MAF_MED[0], **_RING, k_reads=k_reads)
+            self.assertIsNone(ring.reason(spec))
+            half_bytes = spec.lane_half_bytes
+            data = np.full(ring.part_bytes(), -1, np.int64)
+            scales = np.full(ring.scale_ring_bytes(), -1, np.int64)
+            issued, pending = [], []
+
+            def land(load):
+                kind, index = load
+                if kind == "line":
+                    first = index * ring.LINE
+                    for row in range(rows):
+                        at = ring.row_offset(row) + index % ring.SLOTS * ring.LINE
+                        data[at : at + ring.LINE] = [
+                            label(row, x) for x in range(first, first + ring.LINE)
+                        ]
+                    return
+                for local in range(ring.SCALE_STEPS):
+                    step = index * ring.SCALE_STEPS + local
+                    for row in range(rows):
+                        at = ring.scale_offset(step, row)
+                        scales[at : at + 4] = [
+                            label(row, 4 * step + j) for j in range(4)
+                        ]
+
+            def issue(loads):
+                issued.extend(loads)
+                pending.extend(loads)
+
+            def wait(count):
+                if count is None:
+                    return
+                for load in issued[: len(issued) - count]:
+                    if load in pending:
+                        land(load)
+                        pending.remove(load)
+
+            def busy(kind, slot, slots):
+                return any(k == kind and i % slots == slot for k, i in pending)
+
+            def check(step):
+                for half, lane, repeat in itertools.product(
+                    (0, 1), range(16), range(8)
+                ):
+                    row = lane * 8 + repeat
+                    base = ring.row_offset(lane * 8) + half * half_bytes
+                    for offset, words in spec.lane_reads:
+                        split, imm = ring.read(step, offset, half_bytes)
+                        at = (
+                            base - split * half * ring.PITCH + ring.PITCH * repeat + imm
+                        )
+                        start = ring.row_offset(row)
+                        self.assertGreaterEqual(at, start)
+                        self.assertLessEqual(at + 4 * words, start + ring.PITCH)
+                        self.assertFalse(
+                            busy("line", (at - start) // ring.LINE, ring.SLOTS)
+                        )
+                        k = step * ring.STEP_BYTES + half * half_bytes + offset
+                        np.testing.assert_array_equal(
+                            data[at : at + 4 * words],
+                            [label(row, k + j) for j in range(4 * words)],
+                            err_msg=f"{k_reads} step {step} row {row} half {half}",
+                        )
+                tile = step // ring.SCALE_STEPS
+                self.assertFalse(
+                    busy("scales", tile % ring.SCALE_SLOTS, ring.SCALE_SLOTS)
+                )
+                for lane in range(16):
+                    for chunk in (0, 16):
+                        at = ring.scale_offset(step, lane * 8) + chunk
+                        want = [
+                            label(lane * 8 + chunk // 4 + i, 4 * step + j)
+                            for i in range(4)
+                            for j in range(4)
+                        ]
+                        np.testing.assert_array_equal(scales[at : at + 16], want)
+
+            waits = ring.waits()
+            issue(ring.prologue())
+            wait(waits["prologue"])
+            check(0)
+            for step in range(3 * ring.PERIOD - 1):
+                wait(waits[step % ring.PERIOD])
+                issue(ring.refills(step))
+                check(step + 1)
+
+    def test_ring_reads_spread_over_bank_groups(self):
+        """Every ring read and scale read of a lane half's 16 lanes starts on
+        16 different 16 B bank groups (64 banks of 4 B), at every K-step of a
+        period and every repeat."""
+        ring = RingWalk
+        for k_reads in K_READS:
+            spec = _spec6(*_MAF_MED[0], **_RING, k_reads=k_reads)
+            half_bytes = spec.lane_half_bytes
+            for step, half, repeat in itertools.product(
+                range(ring.PERIOD), (0, 1), range(8)
+            ):
+                for offset, _ in spec.lane_reads:
+                    split, imm = ring.read(step, offset, half_bytes)
+                    base = half * half_bytes - split * half * ring.PITCH
+                    groups = {
+                        (ring.row_offset(lane * 8) + base + ring.PITCH * repeat + imm)
+                        // 16
+                        % 16
+                        for lane in range(16)
+                    }
+                    with self.subTest(k_reads=k_reads, step=step, half=half):
+                        self.assertEqual(len(groups), 16)
+        for step, chunk in itertools.product(range(ring.PERIOD), (0, 16)):
+            groups = {
+                (ring.scale_offset(step, lane * 8) + chunk) // 16 % 16
+                for lane in range(16)
+            }
+            self.assertEqual(len(groups), 16)
+
+    def test_ring_reason(self):
+        """walk "ring" takes FP6 at the 256x256x256 tile, wave_group 2x2 and
+        the 16x16 WMMA, read-ahead with B in halves (ahead or late), fixed
+        read bases, row-major A and B, whole 256 tiles and K a multiple of
+        2048 (one period), either read mode; nothing else."""
+        for (m, n, k), order, k_reads, cluster in itertools.product(
+            _MAF_MED, ("ahead", "late"), K_READS, ((4, 4, 1), (2, 4, 1))
+        ):
+            spec = _spec6(
+                m,
+                n,
+                k,
+                **{**_RING, "half_b_order": order},
+                k_reads=k_reads,
+                cluster_dim=cluster,
+            )
+            with self.subTest(spec=spec.kernel_name()):
+                self.assertIsNone(RingWalk.reason(spec))
+        base = _spec6(*_MAF_MED[0], **_RING, k_reads="contiguous", scale_swap="wait")
+        self.assertIsNone(RingWalk.reason(base))
+        self.assertIsNone(RingWalk.reason(replace(base, wmma_reuse="b")))
+        for fields, words in (
+            (
+                {
+                    "a_dtype": "fp8",
+                    "b_dtype": "fp8",
+                    "k_reads": "chunked",
+                    "scale_swap": "read",
+                },
+                "FP6",
+            ),
+            ({"tile_k": 512}, "256x256x256"),
+            ({"tile_n": 128}, "256x256x256"),
+            ({"wave_group": (4, 1)}, "wave_group"),
+            ({"half_plr": "none", "half_b_order": "ahead"}, "half_plr"),
+            ({"read_bases": "loop"}, "read_bases"),
+            ({"lds_buffers": 3}, "lds_buffers"),
+            ({"tiled_operands": "ab"}, "row-major"),
+            ({"a_lds_pad": LdsPad(16, 1536)}, "pads"),
+            ({"M": 3000}, "multiples of 256"),
+            ({"K": 65536 - 1024}, "multiple of 2048"),
+            ({"cluster_dim": (3, 4, 1)}, "tile:"),
+        ):
+            with self.subTest(fields=fields):
+                reason = RingWalk.reason(replace(base, **fields))
+                self.assertIsNotNone(reason)
+                self.assertIn(words, reason)
 
     def test_scale_register_halves(self):
         """Lanes 0-15 hold the first half of an operand's repeats, lanes

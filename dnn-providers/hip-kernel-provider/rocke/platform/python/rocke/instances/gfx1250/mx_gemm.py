@@ -3452,6 +3452,278 @@ class HalfPipeline(PanelPipeline):
         return [results[h * n_acc : (h + 1) * n_acc] for h in range(2)]
 
 
+class RingWalk:
+    """``walk`` "ring" (FP6, the 256x256x256 tile, read-ahead with B in
+    halves): A and B stay row-major and every TDM load is whole 256 B lines.
+
+    The tile's four 128-row parts (A rows 0..127 and 128..255, B likewise;
+    a TDM component each, loaded by one wave as :class:`TdmLoader`'s) keep
+    two 256 B line slots per row. Line ``L`` of a row's K bytes (bytes
+    ``256 L`` to ``256 L + 255``) lands in slot ``L % 2``, so byte ``x`` of
+    a row sits at ``x % 512`` of the row's 512 B. 16 B follow every 8 rows:
+    a lane half's 16 lanes read rows 8 apart (:class:`RowMaps`), and each pad
+    moves the next 8 rows onto the next 16 B bank group. K-step ``q`` reads
+    bytes ``96 q`` to ``96 q + 95``; the offsets repeat every ``PERIOD``
+    K-steps (six lines). One TDM load fills one line slot of a part: 128
+    rows of 256 B, a 256 B pad after every 256 B, iterate mode over the 16
+    groups of 8 rows. Line ``L + 2`` goes into slot ``L % 2`` in the K-step
+    that last reads line ``L``, once the cluster has read it.
+
+    A part's scales are a ring of ``SCALE_SLOTS`` tiles of ``SCALE_STEPS``
+    K-steps (512 B a K-step, a 16 B pad after every 256 B); tile ``t + 2``
+    goes into tile ``t``'s slot in the K-step that last reads tile ``t``. A
+    period holds a whole number of scale tiles, so each K-step of a period
+    reads the same slots in every period. The LDS holds the four scale
+    rings, then the four data parts.
+
+    A lane reads its 8 rows of a part (its M- or N-repeats) from one 8-row
+    group, 512 B apart: from its base (the group plus its lane half's
+    offset) plus ``512 * repeat`` and the read's immediate, or from the
+    split base, lane half 1's base less 512 B, where only lane half 1's
+    bytes wrap past the row's 512 B (:meth:`read`)."""
+
+    LINE = _GL2_LINE_BYTES
+    SLOTS = 2
+    PITCH = SLOTS * LINE
+    GROUP_ROWS = 8
+    ROW_PAD = _DATA_PAD_BYTES
+    PART_ROWS = _PANEL_ROWS
+    STEP_BYTES = _ATOM_K * 6 // 8
+    PERIOD = PITCH // gcd(STEP_BYTES, PITCH)
+    PERIOD_LINES = PERIOD * STEP_BYTES // LINE
+    SCALE_STEPS = 8
+    SCALE_SLOTS = 2
+    SCALE_PAD = LdsPad(_MXS_PAD_BYTES, _MXS_BLOCK_BYTES)
+    PARTS = (("a", 0), ("a", 1), ("b", 0), ("b", 1))
+
+    # -- LDS layout ----------------------------------------------------------
+
+    @classmethod
+    def group_bytes(cls) -> int:
+        return cls.GROUP_ROWS * cls.PITCH + cls.ROW_PAD
+
+    @classmethod
+    def part_bytes(cls) -> int:
+        return cls.PART_ROWS // cls.GROUP_ROWS * cls.group_bytes()
+
+    @classmethod
+    def row_offset(cls, row, ops=IntOps):
+        """Offset of row ``row`` of a part from the part's base."""
+        return ops.add(
+            ops.mul(ops.div(row, cls.GROUP_ROWS), cls.group_bytes()),
+            ops.mul(ops.mod(row, cls.GROUP_ROWS), cls.PITCH),
+        )
+
+    @classmethod
+    def scale_step_bytes(cls) -> int:
+        """Bytes of one K-step of a part's scales, with the pad."""
+        size = cls.PART_ROWS * 4
+        return size + size // cls.SCALE_PAD.block_bytes * cls.SCALE_PAD.pad_bytes
+
+    @classmethod
+    def scale_tile_bytes(cls) -> int:
+        return cls.SCALE_STEPS * cls.scale_step_bytes()
+
+    @classmethod
+    def scale_ring_bytes(cls) -> int:
+        return cls.SCALE_SLOTS * cls.scale_tile_bytes()
+
+    @classmethod
+    def part(cls, operand: str, component: int) -> int:
+        return cls.PARTS.index((operand, component))
+
+    @classmethod
+    def scale_base(cls, operand: str, component: int) -> int:
+        return cls.part(operand, component) * cls.scale_ring_bytes()
+
+    @classmethod
+    def data_base(cls, operand: str, component: int) -> int:
+        return (
+            len(cls.PARTS) * cls.scale_ring_bytes()
+            + cls.part(operand, component) * cls.part_bytes()
+        )
+
+    @classmethod
+    def lds_bytes(cls) -> int:
+        return len(cls.PARTS) * (cls.scale_ring_bytes() + cls.part_bytes())
+
+    @classmethod
+    def scale_offset(cls, step: int, row, ops=IntOps):
+        """Offset, from the part's scale base, of the four E8M0 scales of
+        row ``row`` at K-step ``step``."""
+        tile, local = divmod(step, cls.SCALE_STEPS)
+        linear = ops.mul(row, 4)
+        pad = ops.mul(
+            ops.div(linear, cls.SCALE_PAD.block_bytes), cls.SCALE_PAD.pad_bytes
+        )
+        start = (tile % cls.SCALE_SLOTS) * cls.scale_tile_bytes()
+        return ops.add(start + local * cls.scale_step_bytes(), ops.add(linear, pad))
+
+    @classmethod
+    def at(cls, load, operand: str, component: int) -> int:
+        """LDS offset where a part's load ``load`` lands: ``("line", L)``
+        at its slot of row 0, ``("scales", t)`` at its scale tile."""
+        kind, index = load
+        if kind == "line":
+            return cls.data_base(operand, component) + (index % cls.SLOTS) * cls.LINE
+        start = (index % cls.SCALE_SLOTS) * cls.scale_tile_bytes()
+        return cls.scale_base(operand, component) + start
+
+    # -- The K stream --------------------------------------------------------
+
+    @classmethod
+    def offset(cls, step: int) -> int:
+        """Where K-step ``step``'s first byte of a row sits in the row's
+        512 B."""
+        return step * cls.STEP_BYTES % cls.PITCH
+
+    @classmethod
+    def lines(cls, step: int) -> range:
+        """The lines K-step ``step`` reads."""
+        start = step * cls.STEP_BYTES
+        return range(start // cls.LINE, (start + cls.STEP_BYTES - 1) // cls.LINE + 1)
+
+    @classmethod
+    def first(cls, line: int) -> int:
+        """The first K-step that reads line ``line``."""
+        return max(0, (cls.LINE * line - cls.STEP_BYTES) // cls.STEP_BYTES + 1)
+
+    @classmethod
+    def last(cls, line: int) -> int:
+        """The last K-step that reads line ``line``."""
+        return (cls.LINE * (line + 1) - 1) // cls.STEP_BYTES
+
+    @classmethod
+    def read(cls, step: int, offset: int, half_bytes: int) -> tuple[bool, int]:
+        """``(split, immediate)`` of a lane's read at ``offset`` from its
+        lane half's first byte of K-step ``step``, lane half 1 being
+        ``half_bytes`` further: from the lane's base, or with ``split`` from
+        the split base, which only lane half 1's bytes need. The reader adds
+        ``512 * repeat``. A read never crosses the 512 B of a row: its offset
+        and ``half_bytes`` are multiples of its size."""
+        position = cls.offset(step) + offset
+        if position >= cls.PITCH:
+            return False, position - cls.PITCH
+        return position + half_bytes >= cls.PITCH, position
+
+    # -- Loads and waits -----------------------------------------------------
+
+    @classmethod
+    def first_use(cls, load) -> int:
+        kind, index = load
+        return cls.first(index) if kind == "line" else index * cls.SCALE_STEPS
+
+    @classmethod
+    def prologue(cls) -> list[tuple[str, int]]:
+        """Loads before the loop: the first two lines and scale tiles, in the
+        order the K-steps first read them (a line before scales)."""
+        loads = [("line", line) for line in range(cls.SLOTS)]
+        loads += [("scales", tile) for tile in range(cls.SCALE_SLOTS)]
+        return sorted(loads, key=lambda load: (cls.first_use(load), load[0]))
+
+    @classmethod
+    def needs(cls, step: int) -> list[tuple[str, int]]:
+        """Loads that K-step ``step`` reads first."""
+        loads = [("line", line) for line in cls.lines(step) if cls.first(line) == step]
+        if step % cls.SCALE_STEPS == 0:
+            loads.append(("scales", step // cls.SCALE_STEPS))
+        return loads
+
+    @classmethod
+    def refills(cls, step: int) -> list[tuple[str, int]]:
+        """Loads of K-step ``step``'s late refill, in issue order: line
+        ``L + 2`` for the line ``L`` it last reads, then scale tile ``t + 2``
+        if it is the last K-step of tile ``t``. A wave issues them for its
+        part; ``step`` counts from the first K tile, so a period ``p`` later
+        the lines are ``6 p`` and the scale tiles ``2 p`` further."""
+        loads = [
+            ("line", line + cls.SLOTS)
+            for line in cls.lines(step)
+            if cls.last(line) == step
+        ]
+        if (step + 1) % cls.SCALE_STEPS == 0:
+            loads.append(("scales", step // cls.SCALE_STEPS + cls.SCALE_SLOTS))
+        return loads
+
+    @classmethod
+    def signals(cls, step: int) -> bool:
+        """Whether K-step ``step`` signals the cluster, once it has issued
+        the next K-step's reads: the next K-step's late refill reloads a
+        slot those reads were the last of."""
+        return bool(cls.refills(step + 1))
+
+    @classmethod
+    def waits(cls) -> dict:
+        """``s_wait_tensorcnt`` counts: ``"prologue"`` before K-step 0's
+        reads, and ``q`` (``0 <= q < PERIOD``) in K-step ``q`` of a period,
+        before the next K-step's reads and ahead of the K-step's late refill
+        (``None``: nothing new to wait for). The counts are the same in every
+        period."""
+        issued = list(cls.prologue())
+
+        def count(needed):
+            if not needed:
+                return None
+            return len(issued) - 1 - max(issued.index(load) for load in needed)
+
+        counts = {"prologue": count(cls.needs(0))}
+        for step in range(3 * cls.PERIOD):
+            value = count(cls.needs(step + 1))
+            key = step % cls.PERIOD
+            if key in counts:
+                assert counts[key] == value, (key, counts[key], value)
+            counts[key] = value
+            issued += cls.refills(step)
+        return counts
+
+    # -- Validation ----------------------------------------------------------
+
+    @classmethod
+    def reason(cls, spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
+        """Why ``walk`` "ring" cannot take ``spec``, else ``None``."""
+        walk = "walk 'ring'"
+        if spec.a_dtype != "fp6" or spec.b_dtype != "fp6":
+            return f"{walk} is for FP6"
+        if (spec.tile_m, spec.tile_n, spec.tile_k) != (256, 256, 256):
+            return f"{walk} needs the 256x256x256 tile"
+        if tuple(spec.wave_group) != (2, 2) or spec.mma != "16x16" or spec.pairs:
+            return f"{walk} needs wave_group 2x2, the 16x16 WMMA and wave_map 'rows'"
+        if not spec.half_b:
+            return f"{walk} needs local_prefetch 1 and half_plr 'b'"
+        if spec.lds_buffers != 2 or spec.scale_regs:
+            # The ring replaces the buffers; scales are staged in it.
+            return f"{walk} takes no lds_buffers and scales 'lds'"
+        if not spec.fixed_bases:
+            return f"{walk} needs read_bases 'fixed'"
+        if spec.tiled_operands != "none":
+            return f"{walk} reads row-major A and B (tiled_operands 'none')"
+        pads = (
+            spec.a_lds_pad,
+            spec.b_lds_pad,
+            spec.a_scale_lds_pad,
+            spec.b_scale_lds_pad,
+        )
+        if any(pad is not None for pad in pads):
+            return f"{walk} pads its LDS itself (no *_lds_pad)"
+        if spec.edge_m or spec.edge_n:
+            return f"{walk} needs M and N to be multiples of 256"
+        period_k = cls.PERIOD * _ATOM_K
+        if spec.K % period_k:
+            # The loop runs whole periods of the ring.
+            return f"{walk} needs K to be a multiple of {period_k}"
+        if spec.wide_a or spec.wide_b:
+            return f"{walk} needs A and B under 2 GiB each"
+        # The rest as the 256x256x256 tile with loop read bases: the ring's
+        # scales keep one stride per K-step whatever their pad.
+        reason = validate(replace(spec, walk="tile", read_bases="loop"), arch)
+        if reason:
+            return f"{walk} tile: {reason}"
+        capacity = ArchTarget.from_gfx(arch).lds_capacity_bytes
+        if cls.lds_bytes() > capacity:
+            return f"{walk}: LDS {cls.lds_bytes()} B exceeds {capacity} B"
+        return None
+
+
 class Epilogue:
     """``alpha * acc + beta * C`` stored as one vector per accumulator slot;
     the ``beta == 0`` path never reads C. FP8 saturates as hipBLASLt (+-inf
