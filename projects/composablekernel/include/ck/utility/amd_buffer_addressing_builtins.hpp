@@ -1394,6 +1394,75 @@ __device__ void amd_async_load_global_to_lds_assembly(const T* global_base_ptr,
     }
 }
 
+#define CK_ASYNC_LOAD_MASKED_ASM(SUF)                                                            \
+    asm volatile("s_and_saveexec_b32 %0, %5\n\t"                                                 \
+                 "global_load_async_to_lds_" SUF " %1, %2, %3, offset:%4\n\t"                    \
+                 "s_and_not1_b32 exec_lo, %0, %5\n\t"                                            \
+                 "ds_store_" SUF " %1 %6, offset:%4\n\t"                                         \
+                 "s_mov_b32 exec_lo %0"                                                          \
+                 : "=&s"(save_exec)                                                              \
+                 : "v"(static_cast<uint32_t>(reinterpret_cast<uint64_t>(lds_ptr))),              \
+                   "v"(static_cast<uint32_t>((global_offset - static_dst_offset_) * sizeof(T))), \
+                   "s"(reinterpret_cast<uint64_t>(global_ptr)),                                  \
+                   "n"(static_cast<uint32_t>(static_dst_offset_ * sizeof(T))),                   \
+                   "s"(valid_mask),                                                              \
+                   "v"(dst_vector_t(0))                                                          \
+                 : "memory", "scc")
+
+// Same as amd_async_load_global_to_lds_assembly, but the validity is passed as a wave lane mask
+// (one bit per lane, e.g. from __builtin_amdgcn_ballot_w32) instead of a per-lane bool. This avoids
+// materializing the validity as a VGPR flag and comparing it back to exec.
+template <typename T,
+          index_t NumElemsPerThread,
+          index_t static_dst_offset,
+          bool is_uniform_src_ptr          = true,
+          AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence>
+__device__ void amd_async_load_global_to_lds_assembly_mask(const T* global_base_ptr,
+                                                           const index_t global_offset,
+                                                           T* lds_base_ptr,
+                                                           const index_t lds_offset,
+                                                           const uint32_t valid_mask)
+{
+    constexpr auto bytes_per_thread = sizeof(T) * NumElemsPerThread;
+    using dst_vector_t              = typename vector_type_maker_t<T, NumElemsPerThread>::type;
+
+    constexpr index_t offset_limit = 1 << 16;
+    constexpr uint32_t static_dst_offset_ =
+        math::min(static_dst_offset, static_cast<index_t>(offset_limit / sizeof(T) - 1));
+
+    __attribute__((address_space(1))) const T* global_ptr =
+        reinterpret_cast<__attribute__((address_space(1))) T*>(
+            reinterpret_cast<uintptr_t>(global_base_ptr));
+    __attribute__((address_space(3))) T* lds_ptr =
+        reinterpret_cast<__attribute__((address_space(3))) T*>(reinterpret_cast<uintptr_t>(
+            lds_base_ptr + lds_offset + (static_dst_offset - static_dst_offset_)));
+
+    uint32_t save_exec;
+    if constexpr(bytes_per_thread == 1)
+    {
+        CK_ASYNC_LOAD_MASKED_ASM("b8");
+    }
+    else if constexpr(bytes_per_thread == 4)
+    {
+        CK_ASYNC_LOAD_MASKED_ASM("b32");
+    }
+    else if constexpr(bytes_per_thread == 8)
+    {
+        CK_ASYNC_LOAD_MASKED_ASM("b64");
+    }
+    else if constexpr(bytes_per_thread == 16)
+    {
+        CK_ASYNC_LOAD_MASKED_ASM("b128");
+    }
+    else
+    {
+        static_assert(bytes_per_thread == 1 || bytes_per_thread == 4 || bytes_per_thread == 8 ||
+                          bytes_per_thread == 16,
+                      "bytes_per_thread must be 1, 4, 8, or 16");
+    }
+}
+#undef CK_ASYNC_LOAD_MASKED_ASM
+
 template <AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence,
           typename TdmDesc>
 __device__ void amd_tensor_load_to_lds(const TdmDesc& tdm_desc)
