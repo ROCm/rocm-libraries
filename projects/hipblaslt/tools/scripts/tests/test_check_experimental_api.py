@@ -36,7 +36,7 @@ def _copy_tree(dst: Path) -> Path:
     real = cea.DirTree(_REAL_ROOT)
     files = [cea.MAIN_HEADER]
     files += real.glob(cea.HEADER_DIR, cea.FEATURE_HEADER_GLOB)
-    files += real.glob(cea.CONTRACT_DIR, cea.CONTRACT_GLOB)
+    files += cea.contract_files(real)
     for rel in files:
         (dst / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(_REAL_ROOT / rel, dst / rel)
@@ -390,3 +390,194 @@ def test_main_exit_codes(trees, capsys):
     out = capsys.readouterr().out
     assert "[DEMO] removed  function hipblasLtExperimentalDemoAlignSize" in out
     assert "FAILED" in out
+
+
+# --- C++ features ----------------------------------------------------------------------------
+
+_PG_HEADER = f"{cea.HEADER_DIR}/hipblaslt-experimental-partitioned-gemm.h"
+_PG = "hipblaslt_experimental::PartitionedGemm"
+_PG_COUNT = "        HIPBLASLT_EXPORT size_t getPartitionCount() const;\n"
+_PG_WORKSPACE = "HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);"
+_PG_PIMPL = "        std::unique_ptr<PartitionedGemmImpl> pimpl;\n"
+_PG_BATCH = "        Batch = 4,"
+
+
+def _bump_pg(root: Path) -> None:
+    _bump_macro(root, _PG_HEADER, "HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM")
+
+
+def _add_cpp_feature(root: Path, body: str, name: str = "cpp") -> None:
+    (root / cea.HEADER_DIR / f"hipblaslt-experimental-{name}.h").write_text(
+        f"#pragma once\n#define HIPBLASLT_EXPERIMENTAL_{name.upper()} 1\n{body}\n", encoding="utf-8"
+    )
+
+
+def test_cpp_header_declarations():
+    surface = cea.load_surface(cea.DirTree(_REAL_ROOT))
+    decls = {k for k, (f, _) in surface.decls.items() if f == "PARTITIONED_GEMM"}
+    assert f"class {_PG}" in decls
+    assert f"method {_PG}::getPartitionCount()const" in decls
+    assert f"method {_PG}::setMaxWorkspaceBytes(size_t)" in decls
+    # Overloads are separate declarations; parameter names are not part of the key.
+    runs = sorted(k for k in decls if k.startswith(f"method {_PG}::run("))
+    assert len(runs) == 2
+    assert f"method {_PG}::initialize(const hipblasLtMatmulAlgo_t&,const std::vector<void*>&,bool,"\
+           "const std::vector<hipStream_t>&)" in decls
+    assert surface.enums["enumerator hipblaslt_experimental::SplitDim::Batch"] == 4
+    # Private members are layout, not API.
+    assert not any("PartitionedGemmImpl" in k for k in decls if not k.startswith("class "))
+    assert "pimpl" in surface.decls[f"class {_PG}"][1]
+
+
+def test_cpp_adding_a_method_passes_without_bump(trees):
+    base, head = trees
+    _edit(head, _PG_HEADER, _PG_COUNT, _PG_COUNT + "        HIPBLASLT_EXPORT int getNewThing() const;\n")
+    report = _check(base, head)
+    assert report.ok and not report.breaking, report.errors
+    assert f"added    method {_PG}::getNewThing()const (PARTITIONED_GEMM)" in report.notes
+
+
+def test_cpp_adding_an_overload_passes_without_bump(trees):
+    base, head = trees
+    _edit(head, _PG_HEADER, _PG_WORKSPACE, _PG_WORKSPACE + "\n        HIPBLASLT_EXPORT void setMaxWorkspaceBytes(const std::vector<size_t>& perPartition);")
+    report = _check(base, head)
+    assert report.ok and not report.breaking, report.errors
+
+
+def test_cpp_renaming_a_parameter_is_no_change(trees):
+    base, head = trees
+    _edit(head, _PG_HEADER, _PG_WORKSPACE, "HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t bytes);")
+    report = _check(base, head)
+    assert report.ok and not report.breaking and not report.notes, report.notes
+
+
+def test_cpp_removing_a_method_needs_bump(trees):
+    base, head = trees
+    _edit(head, _PG_HEADER, _PG_COUNT, "")
+    report = _check(base, head)
+    assert not report.ok
+    assert f"removed  method {_PG}::getPartitionCount()const" in report.breaking["PARTITIONED_GEMM"]
+    _bump_pg(head)
+    assert _check(base, head).ok
+
+
+def test_cpp_new_parameter_list_is_a_removal_and_an_addition(trees):
+    base, head = trees
+    _edit(head, _PG_HEADER, _PG_WORKSPACE, "HIPBLASLT_EXPORT void setMaxWorkspaceBytes(uint64_t workspaceBytes);")
+    assert not _check(base, head).ok
+    _bump_pg(head)
+    report = _check(base, head)
+    assert report.ok, report.errors
+
+
+@pytest.mark.parametrize("old,new", [
+    (_PG_COUNT, "        HIPBLASLT_EXPORT int64_t getPartitionCount() const;\n"),  # return type
+    ("storePeerD = false);", "storePeerD = true);"),  # default argument
+    (_PG_COUNT, "        HIPBLASLT_EXPORT size_t getPartitionCount() const noexcept;\n"),  # qualifier
+])
+def test_cpp_changing_a_method_in_place_is_never_allowed(trees, old, new):
+    base, head = trees
+    _edit(head, _PG_HEADER, old, new)
+    _bump_pg(head)
+    report = _check(base, head)
+    assert any(e.startswith(f"changed method {_PG}::") and "in place" in e for e in report.errors), report.errors
+
+
+@pytest.mark.parametrize("member", [
+    "        int extra = 0;\n",  # a data member
+    "        HIPBLASLT_EXPORT virtual void hook();\n",  # a virtual function (vtable)
+])
+def test_cpp_changing_a_class_layout_is_never_allowed(trees, member):
+    base, head = trees
+    _edit(head, _PG_HEADER, _PG_PIMPL, _PG_PIMPL + member)
+    _bump_pg(head)
+    report = _check(base, head)
+    assert any(e.startswith(f"changed class {_PG} in place") for e in report.errors), report.errors
+
+
+def test_cpp_private_method_is_not_api(trees):
+    base, head = trees
+    _edit(head, _PG_HEADER, _PG_PIMPL, _PG_PIMPL + "        void helper();\n")
+    report = _check(base, head)
+    assert report.ok and not report.notes, report.notes
+
+
+def test_cpp_scoped_enum_value_is_never_changed(trees):
+    base, head = trees
+    _edit(head, _PG_HEADER, _PG_BATCH, "        Batch = 5,")
+    _raise_high_water(head)
+    _bump_pg(head)
+    report = _check(base, head)
+    assert any("changed value of enumerator hipblaslt_experimental::SplitDim::Batch" in e for e in report.errors)
+
+
+def test_cpp_scoped_enum_value_is_never_reused(trees):
+    base, head = trees
+    _edit(head, _PG_HEADER, _PG_BATCH, f"{_PG_BATCH}\n        K = 1,")
+    report = _check(base, head)
+    assert any("SplitDim::K has value 1, at or below" in e for e in report.errors), report.errors
+
+
+def test_cpp_new_scoped_enumerator_above_high_water_passes(trees):
+    base, head = trees
+    _edit(head, _PG_HEADER, _PG_BATCH, f"{_PG_BATCH}\n        K = {_NEXT_ENUM},")
+    _raise_high_water(head)
+    report = _check(base, head)
+    assert report.ok and not report.breaking, report.errors
+
+
+def test_cpp_scoped_enumerator_needs_explicit_value(trees):
+    base, head = trees
+    _edit(head, _PG_HEADER, _PG_BATCH, f"{_PG_BATCH}\n        K,")
+    report = _check(base, head)
+    assert any("SplitDim::K needs an explicit value" in e for e in report.errors), report.errors
+
+
+def test_cpp_template_is_rejected(trees):
+    base, head = trees
+    _add_cpp_feature(head, "namespace hipblaslt_experimental { template <typename T> T twice(T x); }")
+    report = _check(base, head)
+    assert any("templates are not supported" in e for e in report.errors), report.errors
+
+
+def test_cpp_inline_bodies_and_braced_initializers():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = _copy_tree(Path(tmp))
+        _add_cpp_feature(root, """
+namespace hipblaslt_experimental::nested
+{
+    struct Options
+    {
+        int  count{2};
+        bool on = true;
+        int  twice() const { return count * 2; }
+        HIPBLASLT_EXPORT void set(const std::vector<int>& v = {}, int n = 1);
+    };
+    inline int helper(int x) { if(x) { return 1; } return 0; }
+    enum class Mode : int { A = 7, B = 8 };
+}
+""")
+        surface = cea.load_surface(cea.DirTree(root))
+    decls = {k for k, (f, _) in surface.decls.items() if f == "CPP"}
+    scope = "hipblaslt_experimental::nested"
+    assert f"class {scope}::Options" in decls
+    assert f"method {scope}::Options::twice()const" in decls
+    assert f"method {scope}::Options::set(const std::vector<int>&,int)" in decls
+    assert f"function {scope}::helper(int)" in decls
+    assert surface.decls[f"enum {scope}::Mode"][1] == "enum class:int"
+    assert surface.enums[f"enumerator {scope}::Mode::B"] == 8
+    layout = surface.decls[f"class {scope}::Options"][1]
+    assert "count{2}" in layout and "on=true" in layout and "twice" not in layout
+
+
+def test_contract_header_counts_as_contract(trees):
+    base, head = trees
+    for root in trees:
+        (root / cea.CONTRACT_DIR / "contract_partitioned_gemm_more_helpers.hpp").write_text("inline int f() { return 1; }\n")
+    _edit(head, f"{cea.CONTRACT_DIR}/contract_partitioned_gemm_more_helpers.hpp", "return 1", "return 2")
+    report = _check(base, head)
+    assert not report.ok
+    assert any("changed contract test" in c for c in report.breaking["PARTITIONED_GEMM"])
+    assert cea.feature_of_contract("x/contract_gemm_a2a_helpers.hpp", {"GEMM_A2A"}) == "GEMM_A2A"

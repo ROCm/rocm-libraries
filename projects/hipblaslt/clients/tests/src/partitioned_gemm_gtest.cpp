@@ -14,7 +14,7 @@
 //                                    two partitions skip without a DPX GPU.
 
 #define ROCM_ENABLE_EXPERIMENTAL_APIS 1
-#include "partitioned_gemm_test_helpers.hpp"
+#include "experimental/contract_partitioned_gemm_helpers.hpp"
 
 using namespace partitioned_gemm_test;
 

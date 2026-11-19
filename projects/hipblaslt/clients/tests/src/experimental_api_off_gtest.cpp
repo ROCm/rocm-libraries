@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 // Without ROCM_ENABLE_EXPERIMENTAL_APIS, the experimental header must declare nothing, so a
-// consumer's feature checks take the fallback path. Checked at compile time.
+// consumer's feature checks take the fallback path. Checked at compile time. hipblaslt-test links
+// roc::hipblaslt_experimental, which defines the switch for every file, so undefine it first.
+#undef ROCM_ENABLE_EXPERIMENTAL_APIS
 #define ROCM_ENABLE_EXPERIMENTAL_APIS 0
 #include <hipblaslt/hipblaslt-experimental.h>
 

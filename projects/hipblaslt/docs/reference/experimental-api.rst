@@ -33,11 +33,17 @@ per-library switch.
    #define ROCM_ENABLE_EXPERIMENTAL_APIS 1
    #include <hipblaslt/hipblaslt-experimental.h>
 
-Alternatively, set the define from your build system, for example with CMake:
+CMake consumers can link ``roc::hipblaslt_experimental`` instead of ``roc::hipblaslt``. It is
+``roc::hipblaslt`` plus the define, and it is exported with the hipBLASLt package but not listed in
+``hipblaslt_LIBRARIES``:
 
 .. code-block:: cmake
 
-   target_compile_definitions(my_target PRIVATE ROCM_ENABLE_EXPERIMENTAL_APIS=1)
+   find_package(hipblaslt CONFIG REQUIRED)
+   target_link_libraries(my_target PRIVATE roc::hipblaslt_experimental)
+
+Any other build system can set the define, for example
+``target_compile_definitions(my_target PRIVATE ROCM_ENABLE_EXPERIMENTAL_APIS=1)``.
 
 Defining it to ``0`` turns the experimental API off explicitly. Including the header without the
 switch is not an error, so code that checks for features (below) builds either way.
@@ -81,7 +87,10 @@ experimental enumerator graduates, it is assigned a new value in the stable enum
 
 Experimental enumerator values are never renumbered or reused, even after the enumerator is
 removed. ``HIPBLASLT_EXPERIMENTAL_ENUM_HIGH_WATER`` records the highest value ever assigned and
-only increases. A removed value is rejected with ``HIPBLAS_STATUS_INVALID_VALUE``.
+only increases. A removed value is rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. The mark is
+shared by every experimental enum, C++ scoped enums included, so a new enum's first value is
+above it: one library-wide number is what lets the check compare only two versions of the
+headers and still never reuse a value.
 
 Lifecycle
 =========
@@ -93,6 +102,20 @@ Lifecycle
   change to one, including adding a member, gives it a new name, and the functions that use it
   get new names too. Each breaking change increments the feature's revision
   and is listed under an ``Experimental`` heading in the CHANGELOG.
+* C++ features follow the same rule, applied to what decides which symbol a caller binds to and
+  what memory it assumes:
+
+  * A function or method is identified by its scope, name and parameter types. Adding a method
+    or an overload is an addition. Removing one is a breaking change. A different parameter list
+    is a different overload, so changing one is a removal plus an addition. The return type,
+    default arguments and qualifiers (``const``, ``noexcept``, ``= delete``) never change under
+    the same parameter list. Renaming a parameter is not a change.
+  * A class's layout is its bases, its data members and its virtual functions. Any change to it
+    gives the class a new name. A class that keeps its state behind a private pointer to an
+    implementation (as ``PartitionedGemm`` does) can then gain methods freely. Private methods
+    are not part of the API.
+  * Templates are not allowed in experimental headers, because they can't be compared without
+    instantiating them.
 * An experimental feature ships in at most four ROCm releases, counted from the release that
   introduced it (patch releases don't count). Revision increments don't reset this. By then it
   either graduates to the stable API or is removed. A feature can be extended by one release,
@@ -119,16 +142,21 @@ These rules are checked automatically, so they cannot be forgotten.
   missing its revision macro, or if there are too many features.
 * Each feature has contract tests in ``clients/tests/src/experimental/contract_<feature>*_gtest.cpp``.
   They define the feature's promised behavior. Adding a contract test is free; changing or
-  deleting one is a breaking change.
+  deleting one is a breaking change. Headers they share, such as test helpers, are named
+  ``contract_<feature>*.hpp`` in the same directory and are part of the contract too. Every CI
+  lane checks part of the contract: a feature that is limited to some architectures has a
+  contract test that it refuses on the others, so lanes without the supported hardware don't
+  just skip.
 * ``tools/scripts/check_experimental_api.py`` runs on every pull request that touches the
   experimental API. It compares the declarations and contract tests with the target branch and
   fails if:
 
-  * a function, struct, union, typedef or enumerator was changed in place, an enumerator value
-    was reused, or
+  * a function, C++ method, struct, union, typedef, C++ class layout or enumerator was changed in
+    place, an enumerator value was reused, or
     ``HIPBLASLT_EXPERIMENTAL_ENUM_HIGH_WATER`` went down or is too low;
-  * a declaration or contract test was removed or changed without incrementing that feature's
-    revision;
+  * a declaration, contract test or contract header was removed or changed without incrementing
+    that feature's revision;
+  * a header declares a template;
   * a revision went backwards, or a new feature doesn't start at revision 1 or higher.
 
   It warns when a revision was incremented with no breaking change. Run it locally with:
