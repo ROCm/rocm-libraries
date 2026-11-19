@@ -1208,6 +1208,57 @@ TEST(TestGfx1151WmmaAttentionMatchers, DecodeWorkspaceMirrorsTheDispatcherPlan)
     EXPECT_EQ(workspaceOf(GraphSpec{}, prefillKernel(96, 96), gfx1201), 0U);
 }
 
+/// An unmasked single-token graph at @p batch with head width @p headSize: one workgroup per
+/// batch entry on either engine (Hq = Hk = Sq = Skv = 1), so the batch is the launch grid.
+GraphSpec singleTokenGraph(int64_t batch, int64_t headSize)
+{
+    GraphSpec spec = unmaskedGraph();
+    spec.batch = batch;
+    spec.queryHeads = 1;
+    spec.kvHeads = 1;
+    spec.queryLength = 1;
+    spec.kvLength = 1;
+    spec.headSize = headSize;
+    return spec;
+}
+
+TEST(TestGfx1151WmmaAttentionMatchers, PrefillDeclinesAGridPastOneLaunchAxis)
+{
+    // d = 8 has no decode bucket, so the graph stays on prefill: B workgroups of 256
+    // threads. 2^24 x 256 = 2^32 work-items passes HIP's 4294967295 limit; 2^24 - 1 fits.
+    const auto kernel = prefillKernel(64, 64);
+    EXPECT_FALSE(matchesKernel(singleTokenGraph(int64_t{1} << 24, 8), kernel));
+    EXPECT_TRUE(matchesKernel(singleTokenGraph((int64_t{1} << 24) - 1, 8), kernel));
+}
+
+TEST(TestGfx1151WmmaAttentionMatchers, DecodeDeclinesAGridPastOneLaunchAxis)
+{
+    // d = 16 is the 64 bucket, decoded on the object's 128-thread workgroups: B workgroups.
+    // 2^25 x 128 = 2^32 work-items passes the limit; 2^25 - 1 fits.
+    const auto kernel = decodeKernel(64);
+    EXPECT_FALSE(matchesKernel(singleTokenGraph(int64_t{1} << 25, 16), kernel));
+    EXPECT_TRUE(matchesKernel(singleTokenGraph((int64_t{1} << 25) - 1, 16), kernel));
+}
+
+TEST(TestGfx1151WmmaAttentionMatchers, PrefillDeclinesWhatDecodeDeclinesForItsGrid)
+{
+    // Past decode's grid limit the dispatcher's decode plan is nullopt, so the graph falls to
+    // prefill, whose own grid (2^25 workgroups x 256 threads) is past the limit too: no
+    // engine serves it.
+    const GraphSpec graph = singleTokenGraph(int64_t{1} << 25, 16);
+    EXPECT_FALSE(matchesKernel(graph, decodeKernel(64)));
+    EXPECT_FALSE(matchesKernel(graph, prefillKernel(64, 64)));
+}
+
+TEST(TestGfx1151WmmaAttentionMatchers, PrefillGridLimitFollowsTheDescriptorsBlockSize)
+{
+    // A descriptor may declare up to 1024 threads: 2^22 x 1024 = 2^32 work-items.
+    auto kernel = prefillKernel(64, 64);
+    kernel.blockSize = 1024;
+    EXPECT_FALSE(matchesKernel(singleTokenGraph(int64_t{1} << 22, 8), kernel));
+    EXPECT_TRUE(matchesKernel(singleTokenGraph((int64_t{1} << 22) - 1, 8), kernel));
+}
+
 // -----------------------------------------------------------------------------
 // Score and selection
 // -----------------------------------------------------------------------------
