@@ -152,7 +152,10 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
     constexpr int EV = 16 / static_cast<int>(sizeof(T)); // elements per 16-byte unit
     static_assert(FMA ? NB >= 1 : NB % DIM == 0, "stem bwd columns");
     static_assert(KC % KA == 0 && KC % EV == 0, "stem bwd chunk");
-    static_assert(CL || CFV == 1 || CFV == EV, "stem bwd channels-first vector");
+    static_assert(CFV == 1 || CFV == EV, "stem bwd dy vector");
+    // Channels-last single elements (CLS): output channel counts that are not whole 16-byte
+    // vectors (and so channel runs that are not 16-byte aligned), one channel a load unit.
+    constexpr bool CLS = CL && CFV == 1;
     // Space-to-depth reads every other dy column: no aligned column vectors.
     // Space-to-depth from channels-first column vectors (SDV): a vector of dy columns holds both
     // sub-columns of its super-columns, so a chunk takes one sub-row and both sub-columns of KH =
@@ -184,14 +187,17 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
         = k1Rsrc(a.b, static_cast<long long>(NB) * UV * a.kp * sizeof(T));
 
     // Loads of a chunk, issued into registers a chunk ahead and stored after the compute:
-    // A units (CL: EV channels at one (row, col); CF vectors: EV aligned columns of one (row, k)
-    // row, CFV = EV; CF scalars: one element) and B units (EV k of one (n, uv)).
+    // A units (CL: EV channels at one (row, col); CLS: one channel at one (row, col); CF vectors:
+    // EV aligned columns of one (row, k) row, CFV = EV; CF scalars: one element) and B units (EV
+    // k of one (n, uv)).
     // Aligned column vectors covering the window (SDV: its SD WC dy columns).
     constexpr int NCU = ((SDV ? SD * WC : WC) + 2 * EV - 2) / EV;
-    constexpr int UA = CL ? WR * WC * (KC / EV) : (CFV > 1 ? WR * KH * NCU : WR * WC * KC);
+    constexpr int UA
+        = CL ? WR * WC * (KC / (CLS ? 1 : EV)) : (CFV > 1 ? WR * KH * NCU : WR * WC * KC);
     constexpr int UB = NB * UV * (KC / EV);
     constexpr int PA = (UA + THREADS - 1) / THREADS, PB = (UB + THREADS - 1) / THREADS;
-    typedef typename K1If<(CL || CFV > 1), Raw16, typename K1Raw<sizeof(T)>::type>::type RawA;
+    typedef
+        typename K1If<((CL && !CLS) || CFV > 1), Raw16, typename K1Raw<sizeof(T)>::type>::type RawA;
     RawA ra[PA];
     Raw16 rb[PB];
     // The window's first dy column (SDV: of its super-columns) and the aligned vector before it.
@@ -233,7 +239,15 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
         {
             const int e = tid + p * THREADS;
             int y, x, k;
-            if constexpr(CL)
+            if constexpr(CLS)
+            {
+                // Consecutive lanes on consecutive channels of one (row, col).
+                const int kk = e % KC, rc = e / KC;
+                y = r0 + rc / WC;
+                x = c0 + rc % WC;
+                k = kb0 + kk;
+            }
+            else if constexpr(CL)
             {
                 const int kv = e % (KC / EV), rc = e / (KC / EV);
                 y = r0 + rc / WC;
@@ -289,7 +303,11 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
             const int e = tid + p * THREADS;
             if(UA % THREADS != 0 && e >= UA)
                 continue;
-            if constexpr(CL)
+            if constexpr(CLS)
+            {
+                As[(e / KC) * KCP + e % KC] = __builtin_bit_cast(T, ra[p]);
+            }
+            else if constexpr(CL)
             {
                 const int kv = e % (KC / EV), rc = e / (KC / EV);
                 *reinterpret_cast<Raw16*>(As + rc * KCP + kv * EV) = ra[p];
