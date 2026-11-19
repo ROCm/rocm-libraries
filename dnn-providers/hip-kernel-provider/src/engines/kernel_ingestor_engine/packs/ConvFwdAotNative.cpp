@@ -1165,6 +1165,13 @@ std::vector<bool> aotCandidateFilter(const MatchContext& context,
         {
             continue;
         }
+        // prepared.instance is a std::variant holding one alternative per kernel, and
+        // std::get_if on the other alternative yields nullptr. So the two implicit-GEMM
+        // paths below are exclusive without an `if constexpr(isGfx1250(E))`: the
+        // gfx950 engines hold conv::AotInstance (the first path) or conv::DirectInstance,
+        // the gfx1250 one gfx1250::CatalogKernel (the second path, which wraps a gemm
+        // only for its implicit-GEMM rows). A kernel never reaches both, so it is never
+        // keyed twice.
         // A merged instance records derived widths (0), so no width comparison applies
         // to it: like a direct one, it stays.
         if(const auto* gemm = std::get_if<conv::AotInstance>(&*prepared.instance);
