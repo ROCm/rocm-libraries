@@ -969,6 +969,8 @@ def _execute_scale_addresses(source, serial):
             result = values[0] ^ values[1]
         elif op == "v_lshrrev_b32":
             result = values[1] >> values[0]
+        elif op == "s_lshr_b32":
+            result = values[0] >> values[1]
         elif op == "v_lshlrev_b32":
             result = values[1] << values[0]
         elif op == "v_lshl_add_u32":
