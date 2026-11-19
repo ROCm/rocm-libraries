@@ -13,6 +13,9 @@ hipBLASLt built by ``install.sh -c -a gfx1250-strict --skip_rocroller``:
   python3 .github/scripts/gfx1250_blas_tests.py hipblaslt [--gtest-filter=FILTER]
   python3 .github/scripts/gfx1250_blas_tests.py tensilelite [--pytest-k=EXPR]
 
+`select` reads a PR's changed files on stdin and says which of them the job must test:
+  git diff --name-only origin/develop... | python3 .github/scripts/gfx1250_blas_tests.py select
+
 Every subcommand runs in gfx1250-strict mode (HSA_DISABLE_GFX12_STRICT=0). Test output
 goes through scrub_test_log.py before it reaches the console or a log file, because the
 job log is public. A failed hipBLASLt test is listed with the command that reruns it.
@@ -113,6 +116,50 @@ def in_filter(name, gtest_filter):
         return any(fnmatch.fnmatchcase(name, p) for p in patterns.split(":") if p)
 
     return matches(pos or "*") and not matches(neg)
+
+
+# --------------------------------------------------------------------------- select
+
+# Changes that can affect this job; the rest of the monorepo can't. ci-env holds
+# therock-ref: a bump runs the job, so a compiler change shows up as the SDK warning.
+RELEVANT = re.compile(
+    r"^(projects/hipblaslt|shared/(origami|stinkytofu|mxdatagenerator)|cmake)/"
+    r"|^\.github/workflows/gfx1250_hipblaslt_tensilelite_test\.yml$"
+    r"|^\.github/actions/ci-env/action\.yml$"
+    r"|^\.github/scripts/(gfx1250_blas_tests|scrub_test_log)\.py$"
+)
+DOCS = re.compile(r"(^|/)docs/|\.(md|rst)$")
+# hipBLASLt's own library and clients: TensileLite's tests build and test only tensilelite/.
+HIPBLASLT_ONLY = re.compile(r"^projects/hipblaslt/(library|clients)/")
+
+
+def select(_args):
+    """Which suites a PR's changed files (stdin, one per line) need: the job runs unless only
+    docs or unrelated paths changed, and TensileLite's tests run unless only hipBLASLt's own
+    library and clients changed. Writes run= and tensilelite= to GITHUB_OUTPUT (or stdout).
+    """
+    code = [
+        f
+        for f in (line.strip() for line in sys.stdin)
+        if RELEVANT.search(f) and not DOCS.search(f)
+    ]
+    run = bool(code)
+    tensilelite = any(not HIPBLASLT_ONLY.search(f) for f in code)
+    if not run:
+        print(
+            "::notice::Skipping: no change outside docs to hipBLASLt, TensileLite or the TheRock pin"
+        )
+    elif not tensilelite:
+        print(
+            "::notice::Skipping the TensileLite tests: only hipBLASLt's library and clients changed"
+        )
+    lines = f"run={str(run).lower()}\ntensilelite={str(tensilelite).lower()}\n"
+    if os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+            f.write(lines)
+    else:
+        print(lines, end="")
+    return 0
 
 
 # ---------------------------------------------------------------------------- checks
@@ -547,6 +594,7 @@ def run_tensilelite(args):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("select", help=select.__doc__.splitlines()[0])
     sub.add_parser("check-compiler", help=check_compiler.__doc__.splitlines()[0])
     sub.add_parser("check-runtime", help=check_runtime.__doc__.splitlines()[0])
     hip = sub.add_parser("hipblaslt", help="run the hipBLASLt gtest suite")
@@ -572,6 +620,7 @@ def main(argv=None):
     os.environ["PYTHONUNBUFFERED"] = "1"
     sys.stdout.reconfigure(encoding="utf-8", errors="surrogateescape")
     command = {
+        "select": select,
         "check-compiler": check_compiler,
         "check-runtime": check_runtime,
         "hipblaslt": run_hipblaslt,

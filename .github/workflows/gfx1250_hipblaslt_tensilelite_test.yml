@@ -14,7 +14,9 @@
 # (ROCm/TheRock#8350) and gfx1250-strict runners are available in TheRock CI.
 #
 # Per-PR: on pull_request, for non-draft PRs by ROCm org members (forks included)
-# that touch hipBLASLt/TensileLite or this workflow. The org label comes from
+# that touch hipBLASLt/TensileLite or this workflow outside docs; the TensileLite
+# tests are skipped when only hipBLASLt's library and clients change
+# (gfx1250_blas_tests.py select). The org label comes from
 # pr-org-label.yml, so a PR opened before it is labelled runs once the label lands.
 # PR code runs on the self-hosted runner only after that gate.
 # Nightly: develop at 03:00 UTC (7 pm PST, 8 pm PDT; GitHub cron is UTC).
@@ -68,7 +70,15 @@ jobs:
       pull-requests: read
     outputs:
       run: ${{ steps.g.outputs.run }}
+      tensilelite: ${{ steps.g.outputs.tensilelite }}
     steps:
+      - name: Checkout the job's scripts
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
       - id: g
         env:
           GH_TOKEN: ${{ github.token }}
@@ -83,7 +93,7 @@ jobs:
           set -euo pipefail
           skip() { echo "::notice::Skipping: $*"; echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; }
           if [ "$EVENT" = "workflow_dispatch" ] || [ "$EVENT" = "schedule" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+            printf 'run=true\ntensilelite=true\n' >> "$GITHUB_OUTPUT"; exit 0
           fi
           ORG_LABELS='["organization: ROCm","organization: streamhpc"]'
           # A label event only matters when it is the org label arriving.
@@ -96,12 +106,8 @@ jobs:
           # labels from org membership; non-members never get them.
           jq -e --argjson org "$ORG_LABELS" 'any(.[]; . as $x | $org | index($x) != null)' <<<"$LABELS" >/dev/null \
             || skip "PR #$PR has no ROCm org label"
-          FILES="$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename')"
-          # ci-env/action.yml holds therock-ref: a bump PR runs the job, so a compiler change
-          # shows up there as the SDK compiler warning.
-          grep -qE '^(projects/hipblaslt|shared/(origami|stinkytofu|mxdatagenerator)|cmake)/|^\.github/workflows/gfx1250_hipblaslt_tensilelite_test\.yml$|^\.github/actions/ci-env/action\.yml$' <<<"$FILES" \
-            || skip "PR #$PR does not touch hipBLASLt, TensileLite or the TheRock pin"
-          echo "run=true" >> "$GITHUB_OUTPUT"
+          gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename' \
+            | python3 .github/scripts/gfx1250_blas_tests.py select
 
   gfx1250-tests:
     name: gfx1250-strict hipBLASLt + TensileLite
@@ -282,7 +288,7 @@ jobs:
         id: tensilelite
         timeout-minutes: 350
         # Runs even if the hipBLASLt build or tests failed, but not if setup did.
-        if: ${{ !cancelled() && steps.strict.outcome == 'success' && (github.event_name != 'workflow_dispatch' || inputs.run_tensilelite) }}
+        if: ${{ !cancelled() && steps.strict.outcome == 'success' && needs.gate.outputs.tensilelite == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_tensilelite) }}
         env:
           TL_PYTEST_K: ${{ inputs.tensilelite_pytest_k }}
         run: |
