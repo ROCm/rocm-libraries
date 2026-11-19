@@ -852,8 +852,7 @@ _MX_CODEGEN_FLAGS = (
 # know -amdgpu-coerce-illegal-types). Mirror that probe so the bridge matches
 # Old-TE wherever the compiler accepts it and stays buildable where it does not.
 _MX_PROBED_CODEGEN_FLAGS = (("-mllvm", "-amdgpu-coerce-illegal-types=1"),)
-# comp_tdm_scheduled only, as its CMake targets (example 56, tests, tile_engine): rocKE's comgr
-# options but the machine scheduler, which the pipeline's hot loop hints steer.
+# comp_tdm_scheduled only, as its CMake targets (example 56, tests, tile_engine)
 _MX_TDM_SCHEDULED_FLAGS = (
     "-mllvm",
     "-amdgpu-expert-scheduling-mode",

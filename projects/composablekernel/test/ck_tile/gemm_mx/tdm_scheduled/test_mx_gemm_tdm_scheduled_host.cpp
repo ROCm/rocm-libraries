@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // Host-only checks of MxGemmPipelineAgBgCrCompTDMScheduled's compile-time rules: the LDS layout of
-// the hipBLASLt solutions, the lane chunks of a K step, and the policy building and rejecting
-// Problems and policies.
+// the maf, mab and medium instances, the lane chunks of a K step, and the policy building and
+// rejecting Problems and policies.
 
 #include <algorithm>
 #include <string>
@@ -45,8 +45,8 @@ using ProblemOf = ck_tile::MxGemmTdmScheduledProblem<
                                   ck_tile::sequence<AtomM, 16, 128>>,
     Traits>;
 
-/// LdsOffsetA / ldsBaseB with the component stride, LdsOffsetMXSA / MXSB, LdsOffsetA_Blk and
-/// LdsNumBytes of a Problem and policy that build and run M x N x K.
+/// The LDS layout of a Problem and policy that build and run M x N x K: the B and A bases and
+/// component strides, the B and A scale bases, the buffer stride and the LDS size.
 template <typename P, typename Policy>
 void check_layout(index_t M, index_t N, index_t K, const index_t (&want)[8])
 {
@@ -69,8 +69,14 @@ void check_layout(index_t M, index_t N, index_t K, const index_t (&want)[8])
         EXPECT_EQ(got[i], want[i]) << "field " << i;
 }
 
-// The LDS layouts of the matching hipBLASLt solutions (its A is this pipeline's B).
-TEST(MxGemmTdmScheduledHost, LayoutMatchesTheHipblasltSolutions)
+// The LDS layouts of the maf and mab FP4 instances and FP8 variants of mab and medium, each valid
+// for its problem. An operand is two components (one per wave pair) of tile / 2 rows of
+// tile_k / k_per_byte bytes, padded 16 B per pad block; a scale region is 2 x rows x K steps x 4 B.
+// The scale regions, and B's two components when not interleaved, are rounded up to 2048 bits of
+// elements (512 B for FP4, 256 B for 8-bit). The second buffer starts at the buffer stride, the
+// power of two above the buffer when both fit in the 320 KiB of LDS; the LDS size is the stride
+// plus the buffer.
+TEST(MxGemmTdmScheduledHost, LdsLayoutOfTheTunedInstances)
 {
     using ck_tile::fp8_t;
     using ck_tile::pk_fp4_t;
@@ -78,22 +84,34 @@ TEST(MxGemmTdmScheduledHost, LayoutMatchesTheHipblasltSolutions)
     using MabTu    = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, true, false, false>;
     using MediumTu = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, true, false>;
     {
+        // 128 rows of 256 B: A pads 16 B per 1 KiB (33280); B loads in iterate mode, 8 rows per
+        // 2064 B (33024). Interleaved B0, A0, A1, B1 (B stride 33024 + 2 x 33280), then the B
+        // scales (4096 B, 16 B per 256: 4352, rounded to 4608) and the A scales (4096 B). The
+        // 141312 B buffer and a 256 KiB stride exceed the LDS: stride 141312, LDS 2 x 141312.
         SCOPED_TRACE("maf fp4");
         check_layout<ProblemOf<pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32>, Default>(
             4096, 4096, 65536, {0, 99584, 33024, 33280, 132608, 137216, 141312, 282624});
     }
     {
+        // Not interleaved: B (8 rows of 256 B, 16 B per 256: 2176) twice, rounded to 4608; the B
+        // scales (256 B, rounded to 512) and the A scales (4096 B); A (128 rows, 16 B per 1 KiB:
+        // 33280) at 9216. Buffer 75776, stride 131072: LDS 131072 + 75776.
         SCOPED_TRACE("mab fp4");
         check_layout<ProblemOf<pk_fp4_t, fp8_t, 256, 16, 512, 4, 1, 16, 1, 4>, MabTu>(
             65536, 16, 65536, {0, 2176, 9216, 33280, 4608, 5120, 131072, 206848});
     }
     {
+        // As mab fp4 with 2 K steps and 256 B rounding: B twice (4352), the B scales (128 B,
+        // rounded to 256), the A scales (2048 B), A at 6656. Buffer 73216: LDS 131072 + 73216.
         SCOPED_TRACE("mab fp8");
         using WideA = ck_tile::MxTdmScheduledGemmTraits<false, false, true>;
         check_layout<ProblemOf<fp8_t, fp8_t, 256, 16, 256, 4, 1, 16, 1, 4, WideA>, MabTu>(
             65536, 16, 65536, {0, 2176, 6656, 33280, 4352, 4608, 131072, 204288});
     }
     {
+        // 64 rows of 256 B, 16 B per 1 KiB: 16640 per component. B0 and A0 share the first
+        // 64 KiB segment, B1 and A1 the second (strides 65536), then the B and A scales
+        // (1024 B each). Buffer 100864, stride 131072: LDS 131072 + 100864.
         SCOPED_TRACE("medium fp8");
         check_layout<ProblemOf<fp8_t, fp8_t, 128, 128, 256, 2, 2, 16>, MediumTu>(
             2048, 2048, 65536, {0, 65536, 16640, 65536, 98816, 99840, 131072, 231936});

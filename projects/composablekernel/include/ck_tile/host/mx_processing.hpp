@@ -97,7 +97,7 @@ inline constexpr index_t kScaleGroupK = 32;
 /// [ceil(K / 128)][rows][4]: K step s of row r is the int32 at (s * rows + r) * 4, its byte g the
 /// scale of K values s * 128 + g * 32 .. + 31, and the groups of a partial last K step are
 /// zero-padded. This is preShuffleScaleBuffer_gfx1250 with MThreadPerXdl = rows, after a copy
-/// that drops the row stride; the same bytes as hipBLASLt's preSwizzleScalesGFX1250.
+/// that drops the row stride.
 CK_TILE_HOST std::vector<uint8_t>
 mx_scale_to_kmajor(const uint8_t* natural, index_t rows, long_index_t K, long_index_t row_stride)
 {

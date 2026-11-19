@@ -948,7 +948,7 @@ struct PassThrough
     }
 };
 
-/// Clamps a float to fp8 e4m3's range as hipBLASLt does before converting: +-inf to NaN, NaN
+/// Clamps a float to fp8 e4m3's range before converting: +-inf to NaN, NaN
 /// kept, finite values to +-448 (the conversion itself does not saturate).
 struct SaturateFp8E4M3
 {

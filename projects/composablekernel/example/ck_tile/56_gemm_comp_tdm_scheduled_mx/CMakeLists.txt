@@ -10,8 +10,10 @@ if(GPU_TARGETS MATCHES "gfx125")
   set(_comp_tdm_scheduled_mx_archs ${SUPPORTED_GPU_TARGETS})
   list(FILTER _comp_tdm_scheduled_mx_archs INCLUDE REGEX "^gfx125")
   set_property(TARGET ${EXAMPLE_COMP_TDM_SCHEDULED_MX} PROPERTY HIP_ARCHITECTURES ${_comp_tdm_scheduled_mx_archs})
-  # rocKE's comgr options but the machine scheduler, which the pipeline's hot loop hints steer.
-  # CK_TDM_SCHEDULED_SOURCE_ORDER keeps the source order as the schedule (scheduler off).
+  # Expert scheduling mode, no post-RA machine scheduler, and register class priority over
+  # globalness in the greedy allocator. The machine scheduler stays on, steered by the pipeline's
+  # hot loop hints; CK_TDM_SCHEDULED_SOURCE_ORDER turns it off and keeps the source order as the
+  # schedule.
   option(CK_TDM_SCHEDULED_SOURCE_ORDER "comp_tdm_scheduled: source order schedule, misched off" OFF)
   target_compile_options(${EXAMPLE_COMP_TDM_SCHEDULED_MX} PRIVATE
       "SHELL:-mllvm -amdgpu-expert-scheduling-mode")
