@@ -43,6 +43,11 @@ void write_array(const std::string_view type_name,
     rocrand_tools::write_preamble(os, "bin2typed")
         << "#include \"rocrand/rocrandapi.h\"\n"
         << "\n"
+        << "namespace rocrand_device\n"
+        << "{\n"
+        << "namespace detail\n"
+        << "{\n"
+        << "\n"
         << "// clang-format off\n"
         << "extern \"C\" ROCRANDAPI const " << type_name << " " << symbol << '[' << size_elements
         << "] =\n"
@@ -60,7 +65,11 @@ void write_array(const std::string_view type_name,
         os << "0x" << std::hex << std::setw(sizeof(T) * 2) << std::setfill('0') << values[k]
            << ", ";
     }
-    os << '\n' << "};\n";
+    os << '\n'
+       << "};\n"
+       << "} // end namespace detail\n"
+       << "} // end namespace rocrand_device\n"
+       << "\n";
 }
 
 bool write_as_array_of(const std::string_view type,
