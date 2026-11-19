@@ -90,6 +90,20 @@ TensorSpec channelsLast(const std::vector<int64_t>& dims, DataType dataType = Da
     return withStrides(dims, packedStrides(dims, true), dataType);
 }
 
+// Packed `dims` in channels-last or channels-first order.
+TensorSpec packedTensor(const std::vector<int64_t>& dims,
+                        bool channelsLastLayout,
+                        DataType dataType = DataType::FLOAT)
+{
+    return channelsLastLayout ? channelsLast(dims, dataType) : channelsFirst(dims, dataType);
+}
+
+// The layout in the words of a failure trace.
+const char* layoutLabel(bool channelsLastLayout)
+{
+    return channelsLastLayout ? "channels-last" : "channels-first";
+}
+
 flatbuffers::FlatBufferBuilder buildTensor(int64_t uid, const TensorSpec& spec)
 {
     flatbuffers::FlatBufferBuilder builder;
@@ -205,6 +219,12 @@ const char* roleName(ConvOp op, Role role)
     return op == ConvOp::BACKWARD_DATA ? "dx" : "x";
 }
 
+// A tensor role in a failure trace, named as in backward data.
+std::string roleTrace(Role role)
+{
+    return std::string("tensor ") + roleName(ConvOp::BACKWARD_DATA, role);
+}
+
 struct ConvCase
 {
     const char* name;
@@ -256,10 +276,10 @@ ConvCase uniformCase(const RankShapes& shapes,
                      bool channelsLastLayout,
                      DataType dataType = DataType::FLOAT)
 {
-    const auto make = [channelsLastLayout, dataType](const std::vector<int64_t>& dims) {
-        return channelsLastLayout ? channelsLast(dims, dataType) : channelsFirst(dims, dataType);
-    };
-    return {"uniform", make(shapes.y), make(shapes.w), make(shapes.x)};
+    return {"uniform",
+            packedTensor(shapes.y, channelsLastLayout, dataType),
+            packedTensor(shapes.w, channelsLastLayout, dataType),
+            packedTensor(shapes.x, channelsLastLayout, dataType)};
 }
 
 // Strides of `dims` with the padding of one dimension: in the physical order of the layout
@@ -367,18 +387,35 @@ void expectForwardDeclined(const TensorSpec& x,
     expectDeclined(forwardCase("forward", x, w, y), reason, FORWARD_OPS);
 }
 
-// Both backward operations decline the tensors because the tensor at `offender` is channels-last
-// and not packed, and say so under that tensor's name in the operation.
-void expectChannelsLastNonPackedDeclined(const ConvCase& tensors, Role offender)
+// The reason a validator gives, as a function of the name that the offending tensor has in the
+// operation, which differs by operation.
+using ReasonOf = std::function<std::string(const char* name)>;
+
+// Every operation of `ops` declines the tensors with the reason `reasonOf` gives for the name that
+// the tensor at `offender` has in that operation. Reasons open with the operation name, so the
+// match is on "<operation>: <reason>".
+void expectDeclinedAtRole(const ConvCase& tensors,
+                          Role offender,
+                          const ReasonOf& reasonOf,
+                          const std::vector<ConvOp>& ops = ALL_OPS)
 {
     SCOPED_TRACE(tensors.name);
-    for(const ConvOp op : BACKWARD_OPS)
+    for(const ConvOp op : ops)
     {
+        const char* name = roleName(op, offender);
         SCOPED_TRACE(operationName(op));
-        const std::string reason = std::string(operationName(op)) + ": tensor "
-                                   + roleName(op, offender) + " is channels-last and not packed";
-        EXPECT_THAT(declineReason(op, tensors), ::testing::HasSubstr(reason));
+        SCOPED_TRACE(name);
+        EXPECT_THAT(declineReason(op, tensors),
+                    ::testing::HasSubstr(std::string(operationName(op)) + ": " + reasonOf(name)));
     }
+}
+
+// Forward declines the tensors for a non-packed tensor, and both backward operations accept them:
+// the non-packed tensor is not channels-last.
+void expectForwardDeclinedBackwardAccepted(const ConvCase& tensors)
+{
+    expectDeclined(tensors, PACKED_REASON, FORWARD_OPS);
+    expectAccepted(tensors, BACKWARD_OPS);
 }
 
 // Backward data size rule. Literal values, so a wrong limit in the implementation is caught.
@@ -444,6 +481,16 @@ std::string strideOverflowReason(const char* name)
 {
     return std::string("tensor ") + name
            + " has strides whose packing arithmetic overflows a 64-bit integer";
+}
+
+std::string channelsLastNonPackedReason(const char* name)
+{
+    return std::string("tensor ") + name + " is channels-last and not packed";
+}
+
+std::string negativeDimReason(const char* name)
+{
+    return std::string("tensor ") + name + " has a negative dim";
 }
 
 struct OverflowingStrides
@@ -747,10 +794,7 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesBiasDataTypeDifferentFromInput)
             const auto builder = editTensor(cbaGraphOfDataType(inputType),
                                             "bias",
                                             [biasType](auto& t) { t.data_type = biasType; });
-            const std::string reason = std::string("Bias tensor data type ")
-                                       + fb::EnumNameDataType(biasType)
-                                       + " must equal the convolution input data type "
-                                       + fb::EnumNameDataType(inputType);
+            const std::string reason = test_conv_common::biasDataTypeReason(biasType, inputType);
 
             EXPECT_THAT(layoutDeclineReason(builder), ::testing::HasSubstr(reason));
             EXPECT_THAT(layoutDeclineReason(biasAsFirstAddOperand(builder)),
@@ -765,6 +809,8 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesFloatBiasOnHalfGraphWithFloatInt
 {
     EXPECT_THAT(layoutDeclineReason(test_conv_common::cbaGraphWithFloatBiasOnHalfGraph()),
                 ::testing::HasSubstr(test_conv_common::FLOAT_BIAS_ON_HALF_GRAPH_REASON));
+    EXPECT_EQ(std::string(test_conv_common::FLOAT_BIAS_ON_HALF_GRAPH_REASON),
+              test_conv_common::biasDataTypeReason(DataType::FLOAT, DataType::HALF));
 }
 
 // The bias data type is compared with the convolution input and with nothing else. With the input
@@ -797,10 +843,7 @@ TEST(TestMiopenConvApplicabilityChecks, BiasDataTypeIsComparedWithTheInputNotThe
             // The bias has the type of the weights.
             const auto weightsTypedBias
                 = editTensor(mixed, "bias", [weightsType](auto& t) { t.data_type = weightsType; });
-            const std::string reason = std::string("Bias tensor data type ")
-                                       + fb::EnumNameDataType(weightsType)
-                                       + " must equal the convolution input data type "
-                                       + fb::EnumNameDataType(inputType);
+            const std::string reason = test_conv_common::biasDataTypeReason(weightsType, inputType);
 
             EXPECT_THAT(layoutDeclineReason(weightsTypedBias), ::testing::HasSubstr(reason));
             EXPECT_THAT(layoutDeclineReason(biasAsFirstAddOperand(weightsTypedBias)),
@@ -945,8 +988,8 @@ TEST(TestMiopenConvApplicabilityChecks, AcceptsUniformPackedAtEveryRank)
     {
         for(const bool channelsLastLayout : {false, true})
         {
-            SCOPED_TRACE("rank " + std::to_string(shapes.x.size())
-                         + (channelsLastLayout ? " channels-last" : " channels-first"));
+            SCOPED_TRACE("rank " + std::to_string(shapes.x.size()) + " "
+                         + layoutLabel(channelsLastLayout));
             expectAccepted(uniformCase(shapes, channelsLastLayout));
         }
     }
@@ -1034,9 +1077,8 @@ TEST(TestMiopenConvApplicabilityChecks, BackwardAcceptsNonPackedChannelsFirst)
 
             for(size_t level = 0; level + 1 < dims.size(); ++level)
             {
-                SCOPED_TRACE("rank " + std::to_string(dims.size()) + ", tensor "
-                             + std::to_string(static_cast<int>(role)) + ", padded level "
-                             + std::to_string(level));
+                SCOPED_TRACE("rank " + std::to_string(dims.size()) + ", " + roleTrace(role)
+                             + ", padded level " + std::to_string(level));
                 const TensorSpec padded = paddedTensor(dims, /*channelsLastLayout=*/false, level);
                 ASSERT_FALSE(isTensorPacked(padded.dims, padded.strides));
 
@@ -1057,17 +1099,17 @@ TEST(TestMiopenConvApplicabilityChecks, AcceptsEmptyTensorsWithSaneDims)
     {
         for(const bool channelsLastLayout : {false, true})
         {
-            const std::string layout = channelsLastLayout ? " channels-last" : " channels-first";
+            const std::string layout = std::string(" ") + layoutLabel(channelsLastLayout);
             const ConvCase base = uniformCase(shapes, channelsLastLayout);
             const auto empty = [channelsLastLayout](std::vector<int64_t> dims) {
                 dims[0] = 0;
-                return channelsLastLayout ? channelsLast(dims) : channelsFirst(dims);
+                return packedTensor(dims, channelsLastLayout);
             };
 
             for(const Role role : ROLES)
             {
-                SCOPED_TRACE("rank " + std::to_string(shapes.x.size()) + layout + ", tensor "
-                             + std::to_string(static_cast<int>(role)) + " empty");
+                SCOPED_TRACE("rank " + std::to_string(shapes.x.size()) + layout + ", "
+                             + roleTrace(role) + " empty");
                 expectAccepted(withTensorAt(base, role, empty(tensorAt(base, role).dims)));
             }
 
@@ -1100,14 +1142,13 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesEmptyTensorsWhoseZeroExtentIsNot
         {
             auto dims = convXDims;
             dims[zeroIndex] = 0;
-            const TensorSpec empty = channelsLastLayout ? channelsLast(dims) : channelsFirst(dims);
+            const TensorSpec empty = packedTensor(dims, channelsLastLayout);
             ASSERT_FALSE(isTensorPacked(empty.dims, empty.strides));
 
             for(const Role role : ROLES)
             {
-                SCOPED_TRACE((channelsLastLayout ? "channels-last " : "channels-first ")
-                             + vecToString(dims) + ", tensor "
-                             + std::to_string(static_cast<int>(role)));
+                SCOPED_TRACE(std::string(layoutLabel(channelsLastLayout)) + " " + vecToString(dims)
+                             + ", " + roleTrace(role));
                 expectDeclined(withTensorAt(base, role, empty), LAYOUT_REASON);
             }
         }
@@ -1132,9 +1173,8 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesEmptyTensorsWhoseZeroExtentIsNot
 
         for(const Role role : ROLES)
         {
-            SCOPED_TRACE((unitBatch.channelsLastLayout ? "channels-last " : "channels-first ")
-                         + vecToString(unitBatch.dims) + ", tensor "
-                         + std::to_string(static_cast<int>(role)));
+            SCOPED_TRACE(std::string(layoutLabel(unitBatch.channelsLastLayout)) + " "
+                         + vecToString(unitBatch.dims) + ", " + roleTrace(role));
             expectDeclined(withTensorAt(base, role, empty), LAYOUT_REASON);
         }
     }
@@ -1167,9 +1207,8 @@ TEST(TestMiopenConvApplicabilityChecks, AcceptsEmptyTensorsWithoutAZeroStrideAxi
 
         for(const Role role : ROLES)
         {
-            SCOPED_TRACE((unitBatch.channelsLastLayout ? "channels-last " : "channels-first ")
-                         + vecToString(unitBatch.dims) + ", tensor "
-                         + std::to_string(static_cast<int>(role)));
+            SCOPED_TRACE(std::string(layoutLabel(unitBatch.channelsLastLayout)) + " "
+                         + vecToString(unitBatch.dims) + ", " + roleTrace(role));
             expectAccepted(withTensorAt(base, role, empty));
         }
     }
@@ -1429,7 +1468,10 @@ TEST(TestMiopenConvApplicabilityChecks, BackwardDeclinesNonPackedChannelsLast)
                 const TensorSpec padded = paddedTensor(dims, /*channelsLastLayout=*/true, level);
                 ASSERT_FALSE(isTensorPacked(padded.dims, padded.strides));
 
-                expectChannelsLastNonPackedDeclined(withTensorAt(base, role, padded), role);
+                expectDeclinedAtRole(withTensorAt(base, role, padded),
+                                     role,
+                                     channelsLastNonPackedReason,
+                                     BACKWARD_OPS);
             }
         }
     }
@@ -1452,10 +1494,8 @@ TEST(TestMiopenConvApplicabilityChecks, BroadcastAxisIsJudgedLikeAnyNonPackedTen
         const TensorSpec broadcast = withStrides(tensorAt(base, role).dims, strides);
         ASSERT_FALSE(isTensorPacked(broadcast.dims, broadcast.strides));
 
-        SCOPED_TRACE("tensor " + std::to_string(static_cast<int>(role)) + " broadcast");
-        const ConvCase tensors = withTensorAt(base, role, broadcast);
-        expectDeclined(tensors, PACKED_REASON, FORWARD_OPS);
-        expectAccepted(tensors, BACKWARD_OPS);
+        SCOPED_TRACE(roleTrace(role) + " broadcast");
+        expectForwardDeclinedBackwardAccepted(withTensorAt(base, role, broadcast));
     }
 }
 
@@ -1661,14 +1701,7 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesDimsWhoseElementCountOverflows)
 
         for(const Role role : ROLES)
         {
-            for(const ConvOp op : ALL_OPS)
-            {
-                SCOPED_TRACE(operationName(op));
-                SCOPED_TRACE(roleName(op, role));
-                const std::string actual = declineReason(op, withTensorAt(packed, role, huge));
-                EXPECT_THAT(actual, ::testing::HasSubstr(overflowReason(roleName(op, role))));
-                EXPECT_THAT(actual, ::testing::HasSubstr(operationName(op)));
-            }
+            expectDeclinedAtRole(withTensorAt(packed, role, huge), role, overflowReason);
         }
     }
 }
@@ -1689,14 +1722,7 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesStridesWhoseArithmeticOverflows)
 
         for(const Role role : ROLES)
         {
-            for(const ConvOp op : ALL_OPS)
-            {
-                SCOPED_TRACE(operationName(op));
-                SCOPED_TRACE(roleName(op, role));
-                const std::string actual = declineReason(op, withTensorAt(packed, role, huge));
-                EXPECT_THAT(actual, ::testing::HasSubstr(strideOverflowReason(roleName(op, role))));
-                EXPECT_THAT(actual, ::testing::HasSubstr(operationName(op)));
-            }
+            expectDeclinedAtRole(withTensorAt(packed, role, huge), role, strideOverflowReason);
         }
     }
 }
@@ -1723,16 +1749,13 @@ TEST(TestMiopenConvApplicabilityChecks, StrideOverflowFollowsThePackingSumOrder)
 
     for(const Role role : ROLES)
     {
+        expectDeclinedAtRole(
+            withTensorAt(packed, role, partialSumOverflows), role, strideOverflowReason);
+
         for(const ConvOp op : ALL_OPS)
         {
             SCOPED_TRACE(operationName(op));
             SCOPED_TRACE(roleName(op, role));
-
-            const std::string overflowing
-                = declineReason(op, withTensorAt(packed, role, partialSumOverflows));
-            EXPECT_THAT(overflowing,
-                        ::testing::HasSubstr(strideOverflowReason(roleName(op, role))));
-            EXPECT_THAT(overflowing, ::testing::HasSubstr(operationName(op)));
 
             const std::string fitting
                 = declineReason(op, withTensorAt(packed, role, partialSumsFit));
@@ -1794,11 +1817,9 @@ TEST(TestMiopenConvApplicabilityChecks, StridesOnTheRepresentableLimitAreJudgedB
 
     for(const Role role : ROLES)
     {
-        SCOPED_TRACE("tensor " + std::to_string(static_cast<int>(role)));
+        SCOPED_TRACE(roleTrace(role));
 
-        const ConvCase spanCase = withTensorAt(base, role, spanReachesMax);
-        expectDeclined(spanCase, PACKED_REASON, FORWARD_OPS);
-        expectAccepted(spanCase, BACKWARD_OPS);
+        expectForwardDeclinedBackwardAccepted(withTensorAt(base, role, spanReachesMax));
 
         expectDeclined(withTensorAt(base, role, termIsMin), LAYOUT_REASON);
     }
@@ -1853,13 +1874,12 @@ TEST(TestMiopenConvApplicabilityChecks, PackingVerdictAgreesWithIsTensorPacked)
             {
                 for(const int64_t padding : {1, 2, 4, 8})
                 {
-                    rows.push_back(
-                        {std::string(channelsLastClass ? "channels-last" : "channels-first")
-                             + " padded at level " + std::to_string(level) + " by "
-                             + std::to_string(padding),
-                         paddedTensor(dims, channelsLastClass, level, padding).strides,
-                         channelsLastClass,
-                         false});
+                    rows.push_back({std::string(layoutLabel(channelsLastClass))
+                                        + " padded at level " + std::to_string(level) + " by "
+                                        + std::to_string(padding),
+                                    paddedTensor(dims, channelsLastClass, level, padding).strides,
+                                    channelsLastClass,
+                                    false});
                 }
             }
         }
@@ -1880,9 +1900,8 @@ TEST(TestMiopenConvApplicabilityChecks, PackingVerdictAgreesWithIsTensorPacked)
 
             for(const auto& row : rowsOf(dims))
             {
-                SCOPED_TRACE("rank " + std::to_string(dims.size()) + ", tensor "
-                             + std::to_string(static_cast<int>(role)) + ", " + row.name
-                             + ", strides " + vecToString(row.strides));
+                SCOPED_TRACE("rank " + std::to_string(dims.size()) + ", " + roleTrace(role) + ", "
+                             + row.name + ", strides " + vecToString(row.strides));
                 const TensorSpec tensor = withStrides(dims, row.strides);
                 ASSERT_EQ(isTensorPacked(tensor.dims, tensor.strides), row.packed);
 
@@ -1930,12 +1949,6 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesNegativeDims)
 
     for(const Role role : ROLES)
     {
-        for(const ConvOp op : ALL_OPS)
-        {
-            SCOPED_TRACE(operationName(op));
-            EXPECT_THAT(declineReason(op, withTensorAt(packed, role, negative)),
-                        ::testing::HasSubstr(std::string("tensor ") + roleName(op, role)
-                                             + " has a negative dim"));
-        }
+        expectDeclinedAtRole(withTensorAt(packed, role, negative), role, negativeDimReason);
     }
 }

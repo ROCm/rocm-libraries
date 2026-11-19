@@ -257,7 +257,19 @@ inline const std::vector<int64_t> MIXED_LAYOUT_1D_W_STRIDES = {16, 1, 16};
 inline const std::vector<int64_t> MIXED_LAYOUT_1D_DX_DIMS = {8, 16, 16};
 inline const std::vector<int64_t> MIXED_LAYOUT_1D_DX_STRIDES = {256, 16, 1};
 
-// The reason the fused applicability check gives for the graph of cbaGraphWithFloatBiasOnHalfGraph.
+// The reason the fused applicability check gives when the bias data type differs from the data
+// type of the convolution input.
+inline std::string biasDataTypeReason(hipdnn_flatbuffers_sdk::data_objects::DataType bias,
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType input)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType;
+    return std::string("Bias tensor data type ") + EnumNameDataType(bias)
+           + " must equal the convolution input data type " + EnumNameDataType(input);
+}
+
+// The reason for the graph of cbaGraphWithFloatBiasOnHalfGraph, which is biasDataTypeReason(FLOAT,
+// HALF), as the literal (a const char*) that the table of declined graphs of the fused builder
+// test holds.
 inline constexpr const char* FLOAT_BIAS_ON_HALF_GRAPH_REASON
     = "Bias tensor data type FLOAT must equal the convolution input data type HALF";
 
