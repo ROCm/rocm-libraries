@@ -62,8 +62,8 @@ void d_vector_set_pad_length(size_t pad)
     g_DVEC_PAD = pad;
 }
 
-const hipblas_rng_t        hipblas_seed(69069); // A fixed seed to start at
-thread_local hipblas_rng_t hipblas_rng = hipblas_seed;
+const hipblas_rng_t        g_hipblas_seed(69069); // A fixed seed to start at
+thread_local hipblas_rng_t t_hipblas_rng = g_hipblas_seed;
 
 int64_t c_i32_overflow = int64_t(std::numeric_limits<int32_t>::max()) + 1; // 2147483648
 
