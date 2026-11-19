@@ -4166,7 +4166,7 @@ Tests:
   require_solution_chip_ids: [0x75a0, 0x75a3]
   gpu_arch: '950'
 
-# gfx1151 W4A16: TN, complete quantization groups, K divisible by 64.
+# gfx1150 and gfx1151 W4A16: TN, complete quantization groups, K divisible by 64.
 # Every scale mode (G32/64/128, symmetric and _ZP) under both encodings, on a prefill size
 # (256 tokens) and on 1 to 5 tokens (the decode kernels, one set per token count).
 - name: matmul_w4a16
@@ -4189,7 +4189,7 @@ Tests:
   initialization: hpl
   unit_check: 0
   norm_check: 1
-  gpu_arch: '1151'
+  gpu_arch: '115[01]'
 
 # Asymmetric, odd M: partial last 8-row zero-point word, and a last decode wave with one row.
 - name: matmul_w4a16
@@ -4214,7 +4214,7 @@ Tests:
   initialization: hpl
   unit_check: 0
   norm_check: 1
-  gpu_arch: '1151'
+  gpu_arch: '115[01]'
 
 # Padded lda (a multiple of 8, not of 32) for the decode and tile kernels.
 - name: matmul_w4a16
@@ -4239,7 +4239,7 @@ Tests:
   initialization: hpl
   unit_check: 0
   norm_check: 1
-  gpu_arch: '1151'
+  gpu_arch: '115[01]'
 
 # K a multiple of 64 but not of 128 (17 x 64): the tiles with DepthU 128 are not eligible and
 # the ones with DepthU 64 run. K is a whole number of scale groups, so 32 is its smallest step;
@@ -4261,7 +4261,7 @@ Tests:
   initialization: hpl
   unit_check: 0
   norm_check: 1
-  gpu_arch: '1151'
+  gpu_arch: '115[01]'
 
 # Decode kernels (1, 2, 3, 4 and 5 tokens) with a K remainder: K an odd multiple of 32 (33 x 32 and
 # 65 x 32) does not fill the last DepthU iteration, which runs masked.
@@ -4291,7 +4291,7 @@ Tests:
   initialization: hpl
   unit_check: 0
   norm_check: 1
-  gpu_arch: '1151'
+  gpu_arch: '115[01]'
 
 # Same via the ext API; only use_ext_setproblem 1 (api_method cpp) reads
 # setInt4EncodingA and the w4a16 modes from GemmProblemType/GemmEpilogue.
@@ -4314,7 +4314,7 @@ Tests:
   initialization: hpl
   unit_check: 0
   norm_check: 1
-  gpu_arch: '1151'
+  gpu_arch: '115[01]'
 
 - name: matmul_mx_all_kernels
   category: nightly

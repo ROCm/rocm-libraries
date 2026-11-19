@@ -261,10 +261,25 @@ TEST_CASE("GEMM: W4A16 decode kernels are ranked, not rejected", "[gemm][w4a16][
   // (2200 cycles per us).
   REQUIRE(latency > 30.0 * 2200.0);
   REQUIRE(latency < 60.0 * 2200.0);
-  // Only gfx1151 has the model: elsewhere the tile model rejects a dot2 W4A16 config.
+  // Only gfx1150 and gfx1151 have the model: elsewhere the tile model rejects a dot2 W4A16 config.
   const double other = origami::gemm::compute_total_latency(problem, make_hardware(950),
                                                             make_w4a16_decode_config(2, 2, 512, 32));
   REQUIRE(other == std::numeric_limits<double>::max());
+}
+
+TEST_CASE("GEMM: W4A16 decode kernels are ranked on gfx1150", "[gemm][w4a16][decode]") {
+  auto hardware = make_w4a16_gfx1151_hardware();
+  hardware.arch = origami::hardware_t::architecture_t::gfx1150;
+  hardware.N_CU = 16;
+  // fp16 too: the decode model does not depend on the tile model's fp16 switch.
+  for (auto mi_dtype : {origami::data_type_t::Half, origami::data_type_t::BFloat16}) {
+    const auto problem = make_w4a16_decode_problem(4096, 2, 4096, mi_dtype);
+    const double latency
+        = origami::gemm::compute_total_latency(problem, hardware, make_w4a16_decode_config(2, 2, 512, 32));
+    // 8.4 MB of weights at gfx1150's DRAM bandwidth (about 80 GB/s): 100-160 us.
+    REQUIRE(latency > 100.0 * 2200.0);
+    REQUIRE(latency < 160.0 * 2200.0);
+  }
 }
 
 TEST_CASE("GEMM: W4A16 decode model terms", "[gemm][w4a16][decode]") {
