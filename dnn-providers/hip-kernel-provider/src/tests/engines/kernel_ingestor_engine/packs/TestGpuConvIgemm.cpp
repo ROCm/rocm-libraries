@@ -2346,7 +2346,9 @@ TEST(TestConvIgemmSplitPlan, ExplicitNoSplitPreservesStagingAcrossOccupancyAndRe
 
 TEST(TestConvIgemmCatalog, NoSplitRejectsUnsupportedPolicyAndExecutionDomains)
 {
-    auto shape = dense(40, 64, {7, 9}, {1, 1}, {0, 0}, false);
+    // 512 output channels: the default plan splits backward data on gfx1250 (16 k-steps), so the
+    // no-split candidate is a distinct plan and served.
+    auto shape = dense(40, 512, {7, 9}, {1, 1}, {0, 0}, false);
     shape.dataType = DataType::HALF;
     const auto direction = ConvDirection::BACKWARD_DATA;
     const auto pack = packFor(direction);
@@ -2355,7 +2357,7 @@ TEST(TestConvIgemmCatalog, NoSplitRejectsUnsupportedPolicyAndExecutionDomains)
     ASSERT_TRUE(bound.has_value());
     const auto candidate = nativeContractKernel(direction);
     ASSERT_TRUE(matchesKernel(pack, supported.context(), candidate, *bound));
-    for(const int policy : {-1, 2})
+    for(const int policy : {-1, static_cast<int>(conv_igemm::MAX_SPLIT_POLICY) + 1})
     {
         auto invalid = candidate;
         invalid.metadata["split_policy"] = int64_t{policy};
@@ -2387,6 +2389,164 @@ TEST(TestConvIgemmCatalog, NoSplitRejectsUnsupportedPolicyAndExecutionDomains)
     const auto channelsLastBound = matchesGraph(pack, channelsLast.context());
     ASSERT_TRUE(channelsLastBound.has_value());
     EXPECT_FALSE(matchesKernel(pack, channelsLast.context(), candidate, *channelsLastBound));
+}
+
+TEST(TestConvIgemmSplitPlan, ExplicitSplitCountsAreExactWhereFeasible)
+{
+    // 2048 channels x 9 taps: 576 k-steps of 32.
+    const auto deep
+        = parsedProblem(dense(2048, 128, {8, 8}, {3, 3}, {1, 1}, true), ConvDirection::FORWARD);
+    const auto device = deviceOf("gfx942", 304);
+    for(const int policy : {2, 32, 64})
+    {
+        const auto plan = conv_igemm::splitPlanFor(deep, 128, 128, 32, device, 0, false, policy);
+        EXPECT_EQ(plan.splits, policy);
+        EXPECT_GE(plan.partialOffset, deep.workspaceBytes);
+        EXPECT_EQ(plan.workspaceBytes,
+                  plan.partialOffset
+                      + static_cast<size_t>(policy) * static_cast<size_t>(plan.outElems)
+                            * sizeof(float));
+    }
+    EXPECT_EQ(conv_igemm::splitPlanFor(deep, 128, 128, 32, device).splits, 16);
+    EXPECT_EQ(conv_igemm::splitPlanFor(deep, 128, 128, 32, device, 0, false, 1).splits, 1);
+    // 32 channels x 9 taps: 9 k-steps, so 16 splits would leave some without one: none.
+    const auto shallow
+        = parsedProblem(dense(32, 128, {8, 8}, {3, 3}, {1, 1}, true), ConvDirection::FORWARD);
+    const auto infeasible = conv_igemm::splitPlanFor(shallow, 128, 128, 32, device, 0, false, 16);
+    EXPECT_EQ(infeasible.splits, 1);
+    EXPECT_EQ(infeasible.workspaceBytes, shallow.workspaceBytes);
+    EXPECT_EQ(conv_igemm::splitPlanFor(shallow, 128, 128, 32, device, 0, false, 9).splits, 9);
+    // Patch configs never split, whatever the policy.
+    EXPECT_EQ(conv_igemm::splitPlanFor(deep, 128, 128, 32, device, 0, true, 32).splits, 1);
+    EXPECT_THROW(conv_igemm::splitPlanFor(
+                     deep, 128, 128, 32, device, 0, false, conv_igemm::MAX_SPLIT_POLICY + 1),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_THROW(conv_igemm::splitPlanFor(deep, 128, 128, 32, device, 0, false, -1),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestConvIgemmSplitPlan, ResidentBlocksFollowThreadsLdsAndAccumulators)
+{
+    // 128 x 128 x 32, 4 waves, fp16: LDS 256 x 40 x 2 = 20 KiB (3 a 64 KiB CU), 128 registers
+    // (4 waves a SIMD, so 4 blocks): 3.
+    EXPECT_EQ(conv_igemm::residentBlocksOf(128, 128, 32, 256, 64, 1, 0, 2, "gfx942"), 3);
+    // gfx950's 160 KiB: the registers bound it, 4.
+    EXPECT_EQ(conv_igemm::residentBlocksOf(128, 128, 32, 256, 64, 1, 0, 2, "gfx950"), 4);
+    // 256 x 256: 256 accumulators + 64 registers, one wave a SIMD: one block of 4 waves.
+    EXPECT_EQ(conv_igemm::residentBlocksOf(256, 256, 32, 256, 64, 1, 0, 2, "gfx950"), 1);
+    // 512 threads (8 waves), 256 x 128: 128 registers, 16 waves a CU: 2 blocks.
+    EXPECT_EQ(conv_igemm::residentBlocksOf(256, 128, 32, 512, 64, 1, 0, 2, "gfx950"), 2);
+    // Three DMA stages of 64-wide k-steps: LDS 3 x 256 x 72 x 2 = 108 KiB: one block on gfx950.
+    EXPECT_EQ(conv_igemm::residentBlocksOf(128, 128, 64, 256, 64, 1, 3, 2, "gfx950"), 1);
+    // Not a gfx9 CU, or the FMA kernel: the split plan's arch default.
+    EXPECT_EQ(conv_igemm::residentBlocksOf(128, 128, 32, 256, 32, 1, 0, 2, "gfx1201"), 0);
+    EXPECT_EQ(conv_igemm::residentBlocksOf(128, 128, 32, 256, 32, 1, 0, 2, "gfx1250"), 0);
+    EXPECT_EQ(conv_igemm::residentBlocksOf(64, 64, 16, 256, 0, 1, 0, 4, "gfx942"), 0);
+    // A config one block a CU holds fills the device with half the default's blocks: 40 tiles
+    // on 304 CUs split 16 ways at two blocks a CU (the cap), 8 at one.
+    const auto wide
+        = parsedProblem(dense(1024, 1280, {16, 16}, {3, 3}, {1, 1}, true), ConvDirection::FORWARD);
+    const auto device = deviceOf("gfx942", 304);
+    EXPECT_EQ(conv_igemm::splitPlanFor(wide, 128, 128, 32, device).splits, 16);
+    EXPECT_EQ(conv_igemm::splitPlanFor(wide, 128, 128, 32, device, 0, false, 0, 1).splits, 8);
+    EXPECT_EQ(conv_igemm::splitPlanFor(wide, 128, 128, 32, device, 0, false, 0, 3).splits, 16);
+}
+
+TEST(TestConvIgemmCatalog, SplittableMatrixCoreConfigsHaveSplitPolicyTwins)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        const auto& kernels = catalog(direction);
+        const auto knobsOf = [](const auto& kernel) {
+            std::vector<std::string> fields;
+            for(const auto& [key, value] : kernel.metadata.items())
+            {
+                if(key != "split_policy")
+                {
+                    fields.push_back(key + "=" + value.dump());
+                }
+            }
+            std::sort(fields.begin(), fields.end());
+            return fields;
+        };
+        int nosplit = 0;
+        int wide = 0;
+        for(const auto& kernel : kernels)
+        {
+            const auto atom = kernel.getStringMetadata("atom");
+            if(kernel.getIntMetadata("split_policy") != 0 || atom.rfind("mfma", 0) != 0
+               || atom.find("xf32") != std::string::npos
+               || kernel.getStringMetadata("math") != "native"
+               || kernel.getIntMetadata("patch") != 0 || kernel.getIntMetadata("large") != 0)
+            {
+                continue;
+            }
+            SCOPED_TRACE(kernel.name);
+            const auto knobs = knobsOf(kernel);
+            const auto twin = [&](int64_t policy) {
+                return std::count_if(kernels.begin(), kernels.end(), [&](const auto& other) {
+                    return other.getIntMetadata("split_policy") == policy
+                           && knobsOf(other) == knobs;
+                });
+            };
+            EXPECT_EQ(twin(1), 1);
+            nosplit += 1;
+            if(kernel.getIntMetadata("bm") * kernel.getIntMetadata("bn") >= 256 * 128)
+            {
+                EXPECT_EQ(twin(32), 1);
+                ++wide;
+            }
+        }
+        EXPECT_GT(nosplit, 0);
+        EXPECT_GT(wide, 0);
+    }
+}
+
+TEST(TestConvIgemmCatalog, SplitPolicyTwinsServeOnlyPlansTheDefaultDoesNotRun)
+{
+    const auto direction = ConvDirection::FORWARD;
+    const auto pack = packFor(direction);
+    const auto& kernels = catalog(direction);
+    const auto find = [&](int64_t policy) {
+        return std::find_if(kernels.begin(), kernels.end(), [&](const auto& kernel) {
+            return kernel.getStringMetadata("atom") == "mfma32_f16"
+                   && kernel.getIntMetadata("bm") == 256 && kernel.getIntMetadata("bn") == 128
+                   && kernel.getIntMetadata("cf") == 0 && kernel.getIntMetadata("cfx") == 0
+                   && kernel.getIntMetadata("xcd") == 0 && kernel.getIntMetadata("swz") == 0
+                   && kernel.getIntMetadata("pack") == 0 && kernel.getIntMetadata("fuse") == 0
+                   && kernel.getIntMetadata("split_policy") == policy;
+        });
+    };
+    const auto plainAt = find(0);
+    const auto noneAt = find(1);
+    const auto split32At = find(32);
+    ASSERT_NE(plainAt, kernels.end());
+    ASSERT_NE(noneAt, kernels.end());
+    ASSERT_NE(split32At, kernels.end());
+    const auto& plain = *plainAt;
+    const auto& none = *noneAt;
+    const auto& split32 = *split32At;
+    const auto served = [&](const ConvShape& shape, const auto& kernel) {
+        auto s = shape;
+        s.dataType = DataType::HALF;
+        const GraphFixture fixture(buildGraph(specFor(s, direction)), deviceOf("gfx942", 304));
+        const auto bound = matchesGraph(pack, fixture.context());
+        return bound.has_value() && matchesKernel(pack, fixture.context(), kernel, *bound);
+    };
+    // Deep and under-filled (one tile, 576 k-steps): the default splits 16 ways, so no-split and
+    // 32 splits are distinct plans.
+    const auto deep = dense(2048, 128, {8, 8}, {3, 3}, {1, 1}, true);
+    EXPECT_TRUE(served(deep, plain));
+    EXPECT_TRUE(served(deep, none));
+    EXPECT_TRUE(served(deep, split32));
+    // Filled (1024 tiles of 256 x 128 against 608 wanted): the default does not split, so the
+    // no-split twin is the same plan.
+    const auto filled = dense(256, 256, {256, 256}, {3, 3}, {1, 1}, true);
+    EXPECT_TRUE(served(filled, plain));
+    EXPECT_FALSE(served(filled, none));
+    // 9 k-steps cannot take 32 splits.
+    const auto shallow = dense(32, 128, {8, 8}, {3, 3}, {1, 1}, true);
+    EXPECT_FALSE(served(shallow, split32));
 }
 
 TEST(TestConvIgemmSplitPlan, ADeviceWithoutUnitsGetsNoSplitAndNoConfig)

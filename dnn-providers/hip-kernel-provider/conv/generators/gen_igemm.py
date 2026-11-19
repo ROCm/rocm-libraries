@@ -348,6 +348,32 @@ PATCH_TILE = {
 PATCH_TILE["wmma12"] = PATCH_TILE["wmma11"]
 
 
+# split_policy twins (splitPlanFor): 1 runs unsplit, N >= 2 exactly N splits. Every
+# matrix-core gfx9 config that can split gets a no-split twin (an under-filled small problem may
+# run faster unsplit than split plus the reduce launch), and the widest tiles a 32-split twin
+# (past the default's 16, for GEMM-shaped layers with long reductions). The kernel match admits a
+# twin only where its plan differs from the default's, so autotune times distinct plans only.
+SPLIT_POLICY_WIDE = 32
+
+
+def withSplitPolicy(cfgs):
+    out = list(cfgs)
+    for c in cfgs:
+        if (
+            not c["atom"].startswith("mfma")
+            or c["atom"].endswith("_xf32")
+            or c["math"] != "native"
+            or c["patch"]
+            or c["large"]
+            or c["split_policy"]
+        ):
+            continue
+        out.append(dict(c, split_policy=1))
+        if c["bm"] * c["bn"] >= 256 * 128:
+            out.append(dict(c, split_policy=SPLIT_POLICY_WIDE))
+    return out
+
+
 def patchTile(cfgs, tag):
     # The catalog's own 16-bit atoms (its fp32 catalog runs its three-bf16 configs on 16-bit
     # atoms, which the patch tile does not serve).
@@ -662,7 +688,7 @@ def kernels_for(catalog, direction, tag, priority=1000):
         )
         # Channels-first-input twins (cfx) are in the legacy catalogs, not the gfx1250 ones.
         if catalog is CATALOG:
-            cfgs = withCfx(cfgs, tag)
+            cfgs = withSplitPolicy(withCfx(cfgs, tag))
         # The measured explicit no-split candidate is appended after all legacy twins,
         # preserving their names, enumeration order and priorities.
         if tag == "bwd" and dtype == "HALF" and catalog is CATALOG125:
@@ -703,7 +729,9 @@ def kernels_for(catalog, direction, tag, priority=1000):
             ) + (
                 ".cfx" if c["cfx"] else ""
             ) + (
-                ".nosplit" if c["split_policy"] else ""
+                ".nosplit"
+                if c["split_policy"] == 1
+                else f".split{c['split_policy']}" if c["split_policy"] else ""
             )
             kernels.append(
                 {
