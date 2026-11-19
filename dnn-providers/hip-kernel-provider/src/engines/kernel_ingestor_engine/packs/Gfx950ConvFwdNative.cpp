@@ -35,9 +35,9 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/LaunchKernelDefinition.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvAotGraphPredicates.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950ConvFwdAotSelection.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp"
-#include "engines/kernel_ingestor_engine/packs/Gfx950ConvGraphPredicates.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -114,9 +114,9 @@ const data_objects::TensorAttributes* findTensor(const MatchContext& context, in
     return it == tensors.end() ? nullptr : it->second;
 }
 
-using gfx950_conv::hasPackedNhwcStrides;
-using gfx950_conv::hasSpatialRankTwo;
-using gfx950_conv::isDeviceTensor;
+using conv_aot::hasPackedNhwcStrides;
+using conv_aot::hasSpatialRankTwo;
+using conv_aot::isDeviceTensor;
 
 /// Whether @p output is packed NHWK with @p matched's inferred convolution dimensions.
 /// hipDNN's frontend infers a sole, non-virtual graph output's dims/strides during

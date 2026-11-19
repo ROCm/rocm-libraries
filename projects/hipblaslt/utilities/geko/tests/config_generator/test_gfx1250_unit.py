@@ -11,10 +11,6 @@ from geko.config_generator.fork_params import optimization_param as opt_param
 from geko.config_generator.fork_params import post_processor as base_pp
 from geko.config_generator.fork_params.hw_profiles.gfx1250 import optimization_param as g1250_opt
 from geko.config_generator.fork_params.hw_profiles.gfx1250 import post_processor as g1250_pp
-from geko.config_generator.fork_params.hw_profiles.gfx1250.cluster_dim import (
-    select_cluster_dims,
-    tile_grid,
-)
 from geko.config_generator.mi_designer import MFMAParameters
 from geko.config_generator.shared_utils import ForkParameter, SizeContext
 from geko.schemas import GemmConfig, GemmType
@@ -348,237 +344,91 @@ def test_couple_cluster_dim_expands_mi_groups_per_shape(monkeypatch: pytest.Monk
     assert all("ClusterDim" in entry for entry in coupled)
 
 
-# The published gfx1250 MXFP4/NVFP4 MAF kernel: 512x128 unswapped, 256x256 with
-# SourceSwap=True.
-_MI_32X16 = [32, 16, 128, 1, 1, 8, 4, 2, 2]
-_MI_SQUARE = [16, 16, 128, 1, 1, 8, 8, 2, 2]
-_SIZE_4096X3072 = (4096, 3072, 1, 65536)
+# ---------------------------------------------------------------------------
+# TDMFuse: profile pin + _GFX1250TDMFuseOneWave
+# ---------------------------------------------------------------------------
 
 
-def _mx_f4_cfg(streamk: bool = False) -> dict:
-    return _cfg(arch="gfx1250_96cu", dt="F4", streamk=streamk, mx=True)
+@pytest.mark.parametrize("combo", _GA_COMBOS)
+def test_gfx1250_ga_profile_pins_tdm_fuse_1(combo: dict) -> None:
+    profile = g1250_opt.GFX1250GAParams(_cfg(**combo))
+    ctx = SizeContext(M=128, N=128, B=1, K=128)
+    assert profile.tdm_fuse(ctx).values == [1]
 
 
-def _profile_cluster_shapes() -> list:
-    """The ClusterDim shapes the gfx1250 GA profile offers before coupling."""
-    params, _ = g1250_opt.GFX1250GAParams(_mx_f4_cfg()).generate_for_size(_SIZE_4096X3072)
-    return [list(s) for s in params["ClusterDim"].values]
+def test_gfx1250_heuristic_profile_leaves_tdm_fuse_unset() -> None:
+    profile = g1250_opt.GFX1250Params(_cfg(dt="H"))
+    params, _ = profile.generate_for_size((4096, 4096, 1, 8192))
+    assert "TDMFuse" not in params
 
 
-def _ss(values, active: bool = True) -> ForkParameter:
-    return ForkParameter(name="SourceSwap", values=values, active=active)
+def test_mi_num_waves() -> None:
+    assert g1250_pp._mi_num_waves(_mi_entry([16, 16, 32, 1, 1, 8, 8, 2, 2])) == 4
+    assert g1250_pp._mi_num_waves(_mi_entry([16, 16, 32, 1, 1, 8, 8, 1, 1])) == 1
+    lsu = {
+        **_mi_entry([16, 16, 32, 1, 1, 8, 8, 1, 1]),
+        "WorkGroup": ForkParameter(name="WorkGroup", values=[16, 16, 2]),
+    }
+    assert g1250_pp._mi_num_waves(lsu) == 2
+    assert g1250_pp._mi_num_waves(_mi_entry([1, 2, 3])) == 0
+    assert g1250_pp._mi_num_waves({}) == 0
 
 
-def _coupled_shapes(mi: list, source_swap=None, entry_source_swap=None) -> list:
-    """ClusterDim shapes the GA post-processor couples to one MI entry at 4096x3072."""
-    fork = {"ClusterDim": ForkParameter(name="ClusterDim", values=_profile_cluster_shapes())}
-    if source_swap is not None:
-        fork["SourceSwap"] = source_swap
-    entry = _mi_entry(mi)
-    if entry_source_swap is not None:
-        entry["SourceSwap"] = entry_source_swap
-    ctx = SizeContext(M=4096, N=3072, B=1, K=65536)
-    _, coupled = _ga_pp().couple_cluster_dim(fork, [entry], ctx)
-    return [e["ClusterDim"].values[0] for e in coupled]
+def test_tdm_fuse_one_wave_noop_without_one_wave_mi() -> None:
+    pp = _ga_pp()
+    groups = [_mi_entry([16, 16, 32, 1, 1, 8, 8, 2, 2]), _mi_entry([16, 16, 32, 1, 1, 4, 4, 2, 1])]
+    ctx = SizeContext(M=128, N=128, B=1, K=128)
+
+    f1, g1 = pp.keep_one_wave_tdm_fuse_zero({}, groups, ctx)
+    assert g1 is groups
+
+    fork = {"TDMFuse": ForkParameter(name="TDMFuse", values=[1])}
+    f2, g2 = pp.keep_one_wave_tdm_fuse_zero(fork, groups, ctx)
+    assert g2 is groups
+    assert f2["TDMFuse"].values == [1]
 
 
-def _selected(macro_tile: tuple) -> list:
-    grid = tile_grid(4096, 3072, macro_tile)
-    return [list(s) for s in select_cluster_dims(_profile_cluster_shapes(), grid, macro_tile)]
+def test_tdm_fuse_one_wave_moves_into_mi_groups() -> None:
+    pp = _ga_pp()
+    four = _mi_entry([16, 16, 32, 1, 1, 8, 8, 2, 2])
+    one = _mi_entry([16, 16, 32, 1, 1, 1, 1, 1, 1])
+    one_lsu2 = {
+        **_mi_entry([16, 16, 32, 1, 1, 1, 1, 1, 1]),
+        "WorkGroup": ForkParameter(name="WorkGroup", values=[16, 16, 2]),
+    }
+    fork = {"TDMFuse": ForkParameter(name="TDMFuse", values=[1])}
+    ctx = SizeContext(M=16, N=16, B=1, K=128)
+
+    new_fork, coupled = pp.keep_one_wave_tdm_fuse_zero(fork, [four, one, one_lsu2], ctx)
+    assert "TDMFuse" not in new_fork
+    assert [e["TDMFuse"].values for e in coupled] == [[1], [0], [1]]
 
 
-def test_source_swapped_macro_tile_matches_tensile_effective_mi() -> None:
-    swapped = g1250_pp._source_swapped_macro_tile
-    assert base_pp.mi_macro_tile(_mi_entry(_MI_32X16)) == (512, 128)
-    assert swapped(_MI_32X16, (512, 128)) == (256, 256)
-    assert swapped([16, 32, 128, 1, 1, 4, 8, 2, 2], (128, 512)) == (256, 256)
-    assert swapped(_MI_SQUARE, (256, 256)) == (256, 256)
+def test_tdm_fuse_one_wave_keeps_zero_when_profile_offers_it() -> None:
+    pp = _ga_pp()
+    fork = {"TDMFuse": ForkParameter(name="TDMFuse", values=[0, 1])}
+    groups = [_mi_entry([16, 16, 32, 1, 1, 1, 1, 1, 1]), _mi_entry([16, 16, 32, 1, 1, 8, 8, 2, 2])]
+    ctx = SizeContext(M=16, N=16, B=1, K=128)
+    _, coupled = pp.keep_one_wave_tdm_fuse_zero(fork, groups, ctx)
+    assert [e["TDMFuse"].values for e in coupled] == [[0], [0, 1]]
 
 
-def test_source_swap_values_defaults_and_precedence() -> None:
-    values = g1250_pp._source_swap_values
-    entry = _mi_entry(_MI_32X16)
-    assert values({}, entry) == [False]
-    assert values({"SourceSwap": _ss([True], active=False)}, entry) == [False]
-    assert values({"SourceSwap": _ss([False, True])}, entry) == [False, True]
-    own = {**entry, "SourceSwap": _ss([True])}
-    assert values({"SourceSwap": _ss([False, True])}, own) == [True]
-    assert values({"SourceSwap": _ss([])}, entry) == [False]
-    assert values({"SourceSwap": _ss(True)}, entry) == [True]
-
-
-def test_couple_cluster_dim_adds_the_source_swap_tile_shapes() -> None:
-    unswapped = _selected((512, 128))
-    swapped = _selected((256, 256))
-    # Among equal-size shapes the least-traffic one differs: [2, 8] at 512x128, [4, 4] at 256x256.
-    assert [2, 8] in unswapped and [4, 4] not in unswapped
-    assert [4, 4] in swapped and [2, 8] not in swapped
-
-    shapes = _coupled_shapes(_MI_32X16, _ss([False, True]))
-    assert [4, 4] in shapes and [2, 8] in shapes
-    assert sorted(map(tuple, shapes)) == sorted({tuple(s) for s in unswapped + swapped})
-    assert shapes == sorted(shapes, key=lambda s: (s[0] * s[1], s[0]))
-
-    assert _coupled_shapes(_MI_32X16, _ss([True])) == swapped
-    # An MI group's own SourceSwap wins over the flat parameter.
-    assert _coupled_shapes(_MI_32X16, _ss([False]), _ss([True])) == swapped
-
-
-def test_couple_cluster_dim_unchanged_without_source_swap_true() -> None:
-    unswapped = _selected((512, 128))
-    assert _coupled_shapes(_MI_32X16) == unswapped
-    assert _coupled_shapes(_MI_32X16, _ss([False])) == unswapped
-    assert _coupled_shapes(_MI_32X16, _ss([False, True], active=False)) == unswapped
-
-
-def test_couple_cluster_dim_square_mi_ignores_source_swap() -> None:
-    expected = _selected((256, 256))
-    assert _coupled_shapes(_MI_SQUARE, _ss([False, True])) == expected
-    assert _coupled_shapes(_MI_SQUARE) == expected
-
-
-def _shapes_by_mi_and_swap(groups: list) -> dict:
-    out: dict = {}
-    for e in groups:
-        key = (tuple(e["MatrixInstruction"].values), e["SourceSwap"].values[0])
-        out.setdefault(key, []).append(e["ClusterDim"].values[0])
-    return out
-
-
-@pytest.mark.parametrize("streamk", [False, True])
-def test_ga_postprocessor_ranks_each_source_swap_entry_on_its_own_tile(streamk: bool) -> None:
-    """Profile output through the full GA post-processor, as the generator runs it.
-
-    _GFX1250SourceSwapSplit leaves one SourceSwap value per MI entry, so the
-    ClusterDim coupling ranks every entry on the tile it builds, not a union.
-    """
-    cfg = _mx_f4_cfg(streamk)
-    params, _ = g1250_opt.GFX1250GAParams(cfg).generate_for_size(_SIZE_4096X3072)
-    assert True in params["SourceSwap"].values
-    groups = [_mi_entry(_MI_SQUARE), _mi_entry(_MI_32X16)]
-    new_fork, coupled = g1250_pp.GFX1250GAPostProcessor(cfg).apply(params, groups, _SIZE_4096X3072)
-    assert "SourceSwap" not in new_fork and "ClusterDim" not in new_fork
-    # Tensile reads group values literally: every one stays single-valued.
-    assert all(
-        len(fp.values) == 1 for e in coupled for k, fp in e.items() if k != "MatrixInstruction"
+def test_tdm_fuse_one_wave_survives_cluster_dim_coupling(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        base_pp.MIDesign,
+        "calculate_mfma_parameters",
+        lambda _mi: MFMAParameters(MT0=256, MT1=352, TT0=1, TT1=1, WG0=1, WG1=1, MIBlockM=1),
     )
-    by_key = _shapes_by_mi_and_swap(coupled)
-    square = _selected((256, 256))
-    assert by_key[(tuple(_MI_SQUARE), False)] == square
-    assert by_key[(tuple(_MI_SQUARE), True)] == square
-    assert by_key[(tuple(_MI_32X16), False)] == _selected((512, 128))
-    assert by_key[(tuple(_MI_32X16), True)] == _selected((256, 256))
-
-
-@pytest.mark.parametrize("dt", ["F4", "F8"])
-@pytest.mark.parametrize("streamk", [False, True])
-def test_ga_profile_and_postprocessor_offer_the_published_mxfp4_cluster(
-    streamk: bool, dt: str
-) -> None:
-    """The shipped MXFP4/NVFP4 MAF MI, SourceSwap and cluster are reachable.
-
-    Runs for MX F4 and F8 data. F4 also stands for NVFP4, which differs from
-    MXFP4 only in the MX block size and scale type; the GA profile and these
-    post-process steps only check whether the problem is MX.
-
-    [32, 16, 128, 1, 1, 8, 4, 2, 2] with SourceSwap=True builds 256x256 and
-    ships with ClusterDim [4, 4]; with SourceSwap=False it builds 512x128, where
-    [2, 8] is the least-traffic shape of that cluster size at 4096x3072.
-    """
-    cfg = _cfg(arch="gfx1250_96cu", dt=dt, streamk=streamk, mx=True)
-    params, _ = g1250_opt.GFX1250GAParams(cfg).generate_for_size(_SIZE_4096X3072)
-    pp = g1250_pp.GFX1250GAPostProcessor(cfg)
-    new_fork, groups = pp.apply(params, [_mi_entry(_MI_32X16)], _SIZE_4096X3072)
-    assert "SourceSwap" not in new_fork
-    by_key = _shapes_by_mi_and_swap(groups)
-    swapped = by_key[(tuple(_MI_32X16), True)]
-    unswapped = by_key[(tuple(_MI_32X16), False)]
-    assert swapped == _selected((256, 256))
-    assert [4, 4] in swapped and [2, 8] not in swapped
-    assert unswapped == _selected((512, 128))
-    assert [2, 8] in unswapped and [4, 4] not in unswapped
-
-
-# ---------------------------------------------------------------------------
-# _GFX1250SourceSwapSplit
-# ---------------------------------------------------------------------------
-
-
-def test_mi_is_square() -> None:
-    assert g1250_pp._mi_is_square(_mi_entry(_MI_SQUARE)) is True
-    assert g1250_pp._mi_is_square(_mi_entry(_MI_32X16)) is False
-    assert g1250_pp._mi_is_square(_mi_entry([16, 32, 128, 1, 1, 4, 8, 2, 2])) is False
-    # Unreadable entries count as square, so the split never acts on them.
-    assert g1250_pp._mi_is_square(_mi_entry([16])) is True
-    assert g1250_pp._mi_is_square({}) is True
-
-
-def _cd(values: list, active: bool = True) -> ForkParameter:
-    return ForkParameter(name="ClusterDim", values=values, active=active)
-
-
-def test_source_swap_split_noop_cases() -> None:
     pp = _ga_pp()
-    ctx = SizeContext(M=4096, N=3072, B=1, K=65536)
-    mixed = [_mi_entry(_MI_SQUARE), _mi_entry(_MI_32X16)]
-    cd = _cd([[1, 1], [2, 2]])
-
-    # Missing entirely.
-    _, g1 = pp.split_source_swap({"ClusterDim": cd}, mixed, ctx)
-    assert g1 is mixed
-
-    # Only False offered: nothing to split.
-    fork = {"SourceSwap": _ss([False]), "ClusterDim": cd}
-    f2, g2 = pp.split_source_swap(fork, mixed, ctx)
-    assert g2 is mixed and f2["SourceSwap"].values == [False]
-
-    # Inactive.
-    fork = {"SourceSwap": _ss([False, True], active=False), "ClusterDim": cd}
-    _, g3 = pp.split_source_swap(fork, mixed, ctx)
-    assert g3 is mixed
-
-    # All MIs square: both values build the same tile, so the flat parameter stays.
-    square = [_mi_entry(_MI_SQUARE), _mi_entry([16, 16, 128, 1, 1, 4, 16, 2, 2])]
-    fork = {"SourceSwap": _ss([False, True]), "ClusterDim": cd}
-    f4, g4 = pp.split_source_swap(fork, square, ctx)
-    assert g4 is square and f4["SourceSwap"].values == [False, True]
-
-    # No ClusterDim axis to rank (absent, single shape as on gfx1250-strict, or inactive).
-    for fork in (
-        {"SourceSwap": _ss([False, True])},
-        {"SourceSwap": _ss([False, True]), "ClusterDim": _cd([[1, 1]])},
-        {"SourceSwap": _ss([False, True]), "ClusterDim": _cd([[1, 1], [2, 2]], active=False)},
-    ):
-        f5, g5 = pp.split_source_swap(fork, mixed, ctx)
-        assert g5 is mixed and f5["SourceSwap"].values == [False, True]
-
-
-def test_source_swap_split_gives_every_mi_both_values() -> None:
-    pp = _ga_pp()
-    fork = {"SourceSwap": _ss([False, True]), "ClusterDim": _cd([[1, 1], [2, 2]])}
-    ctx = SizeContext(M=4096, N=3072, B=1, K=65536)
-
-    new_fork, split = pp.split_source_swap(fork, [_mi_entry(_MI_SQUARE), _mi_entry(_MI_32X16)], ctx)
-    assert "SourceSwap" not in new_fork and "ClusterDim" in new_fork
-    pairs = [(e["MatrixInstruction"].values[:2], e["SourceSwap"].values) for e in split]
-    assert pairs == [
-        ([16, 16], [False]), ([16, 16], [True]), ([32, 16], [False]), ([32, 16], [True]),
-    ]
-
-
-def test_ga_post_processor_runs_source_swap_split_before_cluster_dim() -> None:
-    pp = _ga_pp()
-    order = pp._post_process_methods
-    assert order.index("drop_mi_group_gsu") < order.index("split_source_swap")
-    assert order.index("split_source_swap") < order.index("couple_cluster_dim")
-    fork = {"SourceSwap": _ss([False, True]), "ClusterDim": _cd([[1, 1], [2, 2]])}
-    groups = [_mi_entry(_MI_SQUARE), _mi_entry([32, 16, 128, 1, 1, 4, 8, 2, 2])]
-    new_fork, coupled = pp.apply(fork, groups, (4096, 3072, 1, 65536))
-    assert "SourceSwap" not in new_fork and "ClusterDim" not in new_fork
-    for mi in ([16, 16], [32, 16]):
-        entries = [e for e in coupled if e["MatrixInstruction"].values[:2] == mi]
-        assert {e["SourceSwap"].values[0] for e in entries} == {False, True}
-    assert all("ClusterDim" in e for e in coupled)
+    fork = {
+        "TDMFuse": ForkParameter(name="TDMFuse", values=[1]),
+        "ClusterDim": ForkParameter(name="ClusterDim", values=[[1, 1], [2, 1], [2, 2]]),
+    }
+    groups = [_mi_entry([16, 16, 32, 1, 1, 8, 8, 1, 1]), _mi_entry([16, 16, 32, 1, 1, 8, 8, 2, 2])]
+    f2, g2 = pp.apply(fork, groups, (4096, 4096, 1, 16))
+    assert "TDMFuse" not in f2
+    assert {tuple(e["TDMFuse"].values) for e in g2 if e["MatrixInstruction"].values[7:] == [1, 1]} == {(0,)}
+    assert {tuple(e["TDMFuse"].values) for e in g2 if e["MatrixInstruction"].values[7:] == [2, 2]} == {(1,)}
 
 
 # ---------------------------------------------------------------------------
@@ -619,3 +469,82 @@ def test_gfx1250_ga_postprocessor_apply_runs_every_mixin(monkeypatch: pytest.Mon
     f2, g2 = pp.apply(fork, groups, (4096, 4096, 1, 16))
     assert isinstance(f2, dict)
     assert isinstance(g2, list)
+
+
+# ---------------------------------------------------------------------------
+# SourceSwap: profile values + _GFX1250SourceSwapCoupling
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("combo", _GA_COMBOS)
+def test_gfx1250_ga_profile_offers_both_source_swap_values(combo: dict) -> None:
+    profile = g1250_opt.GFX1250GAParams(_cfg(**combo))
+    ctx = SizeContext(M=128, N=128, B=1, K=128)
+    assert profile.source_swap(ctx).values == [False, True]
+
+
+def test_mi_is_square() -> None:
+    assert g1250_pp._mi_is_square(_mi_entry([16, 16, 32, 1, 1, 8, 8, 2, 2])) is True
+    assert g1250_pp._mi_is_square(_mi_entry([32, 16, 128, 1, 1, 8, 4, 2, 2])) is False
+    assert g1250_pp._mi_is_square(_mi_entry([1])) is True
+    assert g1250_pp._mi_is_square({}) is True
+
+
+def test_source_swap_coupling_noop_cases() -> None:
+    pp = _ga_pp()
+    ctx = SizeContext(M=4096, N=3072, B=1, K=65536)
+    mixed = [_mi_entry([16, 16, 128, 1, 1, 8, 8, 2, 2]), _mi_entry([32, 16, 128, 1, 1, 8, 4, 2, 2])]
+
+    # Missing entirely.
+    f1, g1 = pp.pin_non_square_source_swap({}, mixed, ctx)
+    assert g1 is mixed
+
+    # Only False offered: nothing to pin.
+    fork = {"SourceSwap": ForkParameter(name="SourceSwap", values=[False])}
+    f2, g2 = pp.pin_non_square_source_swap(fork, mixed, ctx)
+    assert g2 is mixed and f2["SourceSwap"].values == [False]
+
+    # Inactive.
+    fork = {"SourceSwap": ForkParameter(name="SourceSwap", values=[False, True], active=False)}
+    f3, g3 = pp.pin_non_square_source_swap(fork, mixed, ctx)
+    assert g3 is mixed
+
+    # All MIs square: the flat parameter stays.
+    square = [_mi_entry([16, 16, 128, 1, 1, 8, 8, 2, 2]), _mi_entry([16, 16, 128, 1, 1, 4, 16, 2, 2])]
+    fork = {"SourceSwap": ForkParameter(name="SourceSwap", values=[False, True])}
+    f4, g4 = pp.pin_non_square_source_swap(fork, square, ctx)
+    assert g4 is square and f4["SourceSwap"].values == [False, True]
+
+
+def test_source_swap_coupling_pins_non_square_mi_to_false() -> None:
+    pp = _ga_pp()
+    square = _mi_entry([16, 16, 128, 1, 1, 8, 8, 2, 2])
+    rect = _mi_entry([32, 16, 128, 1, 1, 8, 4, 2, 2])
+    fork = {"SourceSwap": ForkParameter(name="SourceSwap", values=[False, True])}
+    ctx = SizeContext(M=4096, N=3072, B=1, K=65536)
+
+    new_fork, coupled = pp.pin_non_square_source_swap(fork, [square, rect], ctx)
+    assert "SourceSwap" not in new_fork
+    pairs = [(e["MatrixInstruction"].values[:2], e["SourceSwap"].values) for e in coupled]
+    assert pairs == [([16, 16], [False]), ([16, 16], [True]), ([32, 16], [False])]
+
+
+def test_ga_post_processor_runs_source_swap_before_cluster_dim(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        base_pp.MIDesign,
+        "calculate_mfma_parameters",
+        lambda _mi: MFMAParameters(MT0=256, MT1=256, TT0=1, TT1=1, WG0=1, WG1=1, MIBlockM=1),
+    )
+    pp = _ga_pp()
+    fork = {
+        "SourceSwap": ForkParameter(name="SourceSwap", values=[False, True]),
+        "ClusterDim": ForkParameter(name="ClusterDim", values=[[1, 1], [2, 2]]),
+    }
+    groups = [_mi_entry([16, 16, 128, 1, 1, 8, 8, 2, 2]), _mi_entry([32, 16, 128, 1, 1, 4, 8, 2, 2])]
+    new_fork, coupled = pp.apply(fork, groups, (4096, 3072, 1, 65536))
+    assert "SourceSwap" not in new_fork and "ClusterDim" not in new_fork
+    rect = [e for e in coupled if e["MatrixInstruction"].values[:2] == [32, 16]]
+    square = [e for e in coupled if e["MatrixInstruction"].values[:2] == [16, 16]]
+    assert rect and all(e["SourceSwap"].values == [False] for e in rect)
+    assert {e["SourceSwap"].values[0] for e in square} == {False, True}
+    assert all("ClusterDim" in e for e in coupled)

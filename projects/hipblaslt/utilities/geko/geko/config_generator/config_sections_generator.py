@@ -31,12 +31,6 @@ def _cluster_variant_cost_offsets(mi_groups: Sequence[Dict[str, Any]]) -> np.nda
     drawn as many times more often as it has shapes. Adding ln(n) / scale to
     each of the n variants divides each variant's probability by n, so the MI
     as a whole keeps the probability its cost gives it.
-
-    Only ClusterDim is left out of the key. The gfx1250 SourceSwap split gives
-    every MI one entry per SourceSwap value, and keeping SourceSwap in the key
-    gives each value an equal share, as a flat SourceSwap would, however many
-    ClusterDim shapes each value's tile keeps. Every MI is split alike, so the
-    MIs' relative sampling mass does not change.
     """
     keys: List[Optional[tuple]] = [
         tuple((name, repr(fp.values)) for name, fp in entry.items() if name != "ClusterDim")
@@ -255,6 +249,7 @@ class ConfigSectionGenerator:
             params['DataInitTypeMXSB'] = 3
             if self.config["ARCH"].startswith("gfx950"):
                 params['MXScaleFormat'] = 1
+        params.update(self.config.get("DATA_INIT") or {})
         return params
 
     def _resolve_bias_type(self) -> Optional[str]:
