@@ -5728,15 +5728,12 @@ class Solution(collections.abc.Mapping):
             reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support GRVW{tc} ({GRVW_TC}) != swizzle lane size ({laneSize})")
             return
 
-      # The gfx942 DirectToVgpr swizzle read delivers the swizzled tensor's fragments in a fixed
-      # lane->register layout, so its VectorWidth must be 1. The gfx1250 swizzled-TDM read
-      # re-decomposes a VW-strided free dimension (see _localReadSwizzledTDM), so VW>1 is allowed there.
+      # The rejects below guard the gfx1250 swizzled-TDM path only. The gfx942 DirectToVgpr swizzle
+      # path (no TDM) keeps the rules it had before the TDM path existed: a LibraryLogic carries
+      # swizzle-A kernels with VectorWidthA > 1 there, which must stay valid.
       if state["ProblemType"]["SwizzleTensorA"]:
         # The subtile path has its own layout rules; these guard the DTV and swizzled-TDM paths.
         if not state["UseSubtileImpl"]:
-          if state["VectorWidthA"] != 1 and not swizzleAIsTDM:
-            reject(state, printRejectionReason, f"SwizzleTensorA requires VectorWidthA == 1 (got {state['VectorWidthA']})")
-            return
           # VW>1 swizzle-A hits the same VWA-way LDS bank conflict as swizzle-B with VWB>1 (mOStride =
           # MI_M*DepthU is a multiple of the 256B bank cycle). Break it the same way: a 16B pad per
           # mO-tile, deposited through TDM iterate-mode. VW==1 stays unpadded and byte-identical.
@@ -5751,7 +5748,7 @@ class Solution(collections.abc.Mapping):
             assert state["LdsPadA"] * bpeA == 16, "swizzled-TDM A pad must be 16 bytes"
             state["_TDMIterateModeA"] = True
             state["TDMIterateMode"] = state["TDMIterateMode"] | 1              # kernel naming (bit0 = A)
-          else:
+          elif swizzleAIsTDM:
             # Swizzle reads from a contiguous, unpadded LDS layout at fixed offsets; any LDS pad shifts
             # the data out from under those offsets. And the swizzle builds its own TDM descriptor.
             if state["LdsPadA"] != 0 or state["LdsBlockSizePerPadA"] != 0:
@@ -5793,7 +5790,7 @@ class Solution(collections.abc.Mapping):
             assert state["LdsPadB"] * bpeB == 16, "swizzled-TDM B pad must be 16 bytes"
             state["_TDMIterateModeB"] = True
             state["TDMIterateMode"] = state["TDMIterateMode"] | 2              # kernel naming (bit1 = B)
-          else:
+          elif swizzleBIsTDM:
             # Swizzle reads from a contiguous, unpadded LDS layout at fixed offsets; any LDS pad shifts
             # the data out from under those offsets. And the swizzle builds its own TDM descriptor.
             if state["LdsPadB"] != 0 or state["LdsBlockSizePerPadB"] != 0:
