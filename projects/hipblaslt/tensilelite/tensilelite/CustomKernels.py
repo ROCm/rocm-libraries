@@ -100,6 +100,7 @@ _METADATA_NAME_TO_SEMANTIC = {
     "batchOffsetC":           "BatchOffsetC",
     "batchOffsetA":           "BatchOffsetA",
     "batchOffsetB":           "BatchOffsetB",
+    "RNDSeed":                "RNDSeed",
 }
 
 _ACTIVATION_ARG_INDEX = {

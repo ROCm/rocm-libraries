@@ -64,6 +64,10 @@ namespace rocalution
         * segment between the bounds then still contains 0. The number of iterations grows
         * with the ratio of the bounds, and the iteration can diverge if the spectrum extends
         * beyond the bound that is farther from 0.
+        *
+        * ReBuildNumeric() keeps the eigenvalues. When new values of the operator change
+        * them, call Set() again; this needs no Build(). Clear() and a Build() of a built
+        * solver drop them, so call Set() again after these.
         */
         ROCALUTION_EXPORT
         void Set(ValueType lambda_min, ValueType lambda_max);
