@@ -1702,7 +1702,17 @@ class KernelComponentFactoryGfx1151(KernelComponentFactoryGfx115):
         result = super().get_hdim_tile_size_dict(dtype)
         if dtype in cls._DT_FP16_BF16:
             # num_cus is HIP's multiProcessorCount, which counts WGPs (2 CUs) here.
+            # With at most one M64 block per CU a key step costs a fixed latency, so
+            # 32-key steps only pay off when they save half a 64-key step of a short
+            # key loop. With more blocks they also win on long loops without bias.
             few_blocks = "get_num_blocks(64) <= 2 * num_cus"
+            half_step = "(a.seqlen_k - 1) % 64 < 32"
+            n32_d64_constraint = (
+                "a.max_seqlen_q <= 8192 && a.seqlen_k > 0 && a.seqlen_k <= 1024 && "
+                f"({few_blocks} ? ({half_step} && a.seqlen_k <= 96) : ({half_step} || "
+                "(get_num_blocks(64) >= 4 * num_cus && "
+                "t.bias_type != bias_enum::elementwise_bias)))"
+            )
             # Whole-K/V staging loses to QK32/PV32 with few blocks and on key loops of
             # up to four 64-key steps.
             k64_d64_constraint = (
@@ -1710,7 +1720,8 @@ class KernelComponentFactoryGfx1151(KernelComponentFactoryGfx115):
                 "t.bias_type == bias_enum::elementwise_bias) && "
                 f"!({few_blocks}) && a.seqlen_k > 256"
             )
-            result[(64, 64)] = [FmhaFwdTileSize( 64,  64,  64,  64,  64,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint(k64_d64_constraint))] + result[(64, 64)]  # fmt: skip
+            result[(64, 64)] = [FmhaFwdTileSize( 64,  32,  64,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint(n32_d64_constraint)),
+                               FmhaFwdTileSize( 64,  64,  64,  64,  64,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint(k64_d64_constraint))] + result[(64, 64)]  # fmt: skip
             result[(128, 128)] = [FmhaFwdTileSize( 64,  32, 128, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)] + result[(128, 128)]  # fmt: skip
         return result
 

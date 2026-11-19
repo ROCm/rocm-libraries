@@ -86,7 +86,7 @@ class TestGfx1151Codegen(unittest.TestCase):
             for k in _kernels(["gfx1151"])
             if k.F_hdim == 64 and _plain(k) and k.F_pipeline.F_bias == "bias"
         }
-        self.assertEqual(d64, {(64, 64, 64), (64, 64, 32)})
+        self.assertEqual(d64, {(64, 32, 64), (64, 64, 64), (64, 64, 32)})
 
 
 if __name__ == "__main__":
