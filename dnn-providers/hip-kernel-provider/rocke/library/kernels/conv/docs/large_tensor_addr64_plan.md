@@ -1,7 +1,9 @@
 # Plan: wariant `addr64` kerneli conv fwd dla tensorów > 2 GiB
 
-Status: faza 0 zaimplementowana i scalona. Z fazy 1 (sekcja 7) zaimplementowane
-i **zweryfikowane na realnym GPU (gfx950)** są prymitywy z sekcji 3/5:
+Status: faza 0 zaimplementowana i scalona. Z fazy 1 (sekcja 7) **każdy
+prymityw jest teraz zaimplementowany i zweryfikowany na realnym GPU
+(gfx950)** — włącznie z pełnym łańcuchem origin→deskryptor→realna pamięć:
+
 - `tile_origin_decode_i64`, `carry_decode_i32` (+ mirror C++), transform
   `UnmergeAddr64`/`unmerge_addr64` — i64 M-decode `m0 -> (n0,ho0,wo0)` raz na
   WG + i32 per-lane carry, bez magic division.
@@ -12,23 +14,85 @@ i **zweryfikowane na realnym GPU (gfx950)** są prymitywy z sekcji 3/5:
   dzieje się dziś w i32 we współdzielonym helperze geometrii (każda rodzina
   kerneli MMA-tile, nie tylko conv), więc i64 origin musi powstać tam, nie
   dopiero w pochodnej `block_m_off_v`.
+- `DirectEpilogue.store`/`CShuffleEpilogue.store(..., m_origin_i64=...)`
+  (`platform/python/rocke/helpers/epilogues.py`) — drugie współdzielone
+  miejsce z tym samym mnożeniem (`block_m_off`-pochodna + bounds check
+  `m < p_M`); opt-in, zero wpływu domyślnie.
+- `make_a_descriptor_addr64`/`make_d_descriptor_addr64` +
+  `addr64_a_origin_bytes`/`addr64_d_origin_bytes`
+  (`_conv_implicit_gemm_common.py`) — deskryptory A/D bez współrzędnej `n`
+  (i jej stride'u), origin i64 = `n0 * stride_n` (tylko ten człon — `hi`/`wi`/
+  `ho`/`wo` zostają bezwzględne per-lane, bo Hi/Wi/Ho/Wo nigdy nie zależą od
+  N, więc i32 jest tam bezpieczne).
 - ABI (sekcja 4): `conv_arg_names(direction="fwd", addr64=True)` + mirror C++,
   2D/non-split-K/non-3D only.
 
-Test GPU (`platform/tests/instances/test_addr64_gpu_numeric.py`, 10/10 PASS na
-gfx950): `make_tile_buffer_resource` z prawdziwą alokacją > 4 GiB (odczyt
-poprawnej wartości) i z originem > 4 GiB względem małej alokacji (clamp do
-zera, bez faulta); `tile_origin_decode_i64`+`carry_decode_i32` kontra
-referencja w czystym Pythonie dla obu scenariuszy (ogromne N, ogromne Ho*Wo).
+Testy GPU (gfx950): `platform/tests/instances/test_addr64_gpu_numeric.py`
+(15/15: `make_tile_buffer_resource` z alokacją > 4 GiB, clamp do zera,
+M-decode kontra referencja Python, epilog bounds-check kontra referencja) i
+`library/tests/test_conv_addr64_descriptor.py` (10/10: deskryptory A/D kontra
+referencja Python + **odczyt z prawdziwego bufora NHWC** przez cały łańcuch
+origin→deskryptor, zgodny z indeksowaniem numpy — złapał i naprawił realny
+błąd podwójnego liczenia originu, patrz commit `f8de3ad9cdf`).
 
 Żadna rodzina kerneli jeszcze nie buduje ścieżki `addr64`
-(`validate()` odmawia `addr64=True`) — prymitywy są gotowe i zweryfikowane,
-ale **nie podłączone** do `build_implicit_gemm_conv`. Zakres: wszystkie
-rodziny **forward** convolution w `library/kernels/common/` i ich mirrory C++
-w `library/cpp/`.
+(`validate()` odmawia `addr64=True`) — **wszystkie prymitywy są gotowe i
+zweryfikowane**, ale nie podłączone do `build_implicit_gemm_conv`. Zakres:
+wszystkie rodziny **forward** convolution w `library/kernels/common/` i ich
+mirrory C++ w `library/cpp/`.
 
-**Co blokuje podłączenie do rzeczywistego kernela (dwa osobne, współdzielone
-miejsca, oba wymagają namysłu przed zmianą):**
+**Dokładna lista miejsc do zmiany w `conv_implicit_gemm.py` /
+`conv_abi.py` (zmapowana, nieporuszona — to już "zwykłe", choć delikatne,
+podłączenie gotowych kawałków, nie nowy projekt):**
+
+1. `conv_abi.conv_fwd_problem_block` nie ma parametru `addr64` — potrzebny,
+   żeby `emit_param_block(b, conv_fwd_problem_block(is_3d=..., addr64=...))`
+   (wołane w `conv_implicit_gemm.py` przy budowie `params`) wyemitował i64
+   dla stride'u `_n` itd.
+2. `A_bytes`/`B_bytes`/`D_bytes` w `conv_implicit_gemm.py` są dziś
+   zadeklarowane wprost jako `b.param(..., I32)` (osobno od `params`,
+   ~linia 1415) — muszą przełączyć się na i64 pod `spec.addr64`.
+3. `grid = WarpGrid.from_atom(...).bind(b, ...)` (~linia 1528-1536):
+   dodać `m_origin_i64=spec.addr64`.
+4. Policzyć raz, zaraz po bindzie, gdy `spec.addr64`: `m0_i64 =
+   grid.block_m_off_i64`; `tile_origin_decode_i64` na `(p_Ho, p_Wo)`
+   zwiniętych do i64; `origin_coords = [trunc(n0), trunc(ho0), trunc(wo0)]`.
+5. Buffer resources A/D (~linia 1726-1731): pod `spec.addr64` użyć
+   `addr64_a_origin_bytes`/`addr64_d_origin_bytes` +
+   `make_tile_buffer_resource` zamiast `make_buffer_resource(..., num_bytes=
+   A_bytes)`. B zostaje bez zmian.
+6. Konstrukcja deskryptorów (~linia 1708-1715): pod `spec.addr64` wywołać
+   `make_a_descriptor_addr64`/`make_d_descriptor_addr64` zamiast `_dynamic`.
+7. `a_descriptor` (~linia 1748-1772) i `d_addr`'s `D_desc` (~linia 2291-2305):
+   pod `spec.addr64`, `m_val` przekazywany do deskryptora to lokalna delta
+   (`row`), nie `block_m_off_v + row` — analogicznie do poprawki w epilogu.
+8. Wywołania `epi.store(...)` (~linia 2357-2363, 2384-2392): dodać
+   `m_origin_i64=m0_i64 if spec.addr64 else None`.
+9. `validate()`: zamiast bezwarunkowego zakazu, odrzucać `addr64=True` tylko
+   dla: `is_3d`, `split_k>1`, `split_k_cluster>0`, `group_merge>1`,
+   `problem.groups>1`, `is_pointwise`, `chiplet_swizzle` (ta ścieżka liczy
+   `block_m_off_v` inaczej, z pominięciem `grid.block_m_off`/`_i64` — p.
+   linia ~1591), i WMMA/`op.family != "mfma"`.
+10. **Host (`kernels/common/conv_args.py` / dispatch):** wartości
+    `A_bytes`/`D_bytes`/`p_M`/stride'y `_n` to dziś zwykłe Python inty —
+    działają automatycznie z i64 packing (ABI-kind-sterowane), ale
+    *rozmiar siatki* (`p_num_pid_m` i grid launch) wciąż musi się mieścić w
+    limitach hosta/HIP — nieobjęte tym planem (sekcja 6), host musi
+    przekazać poprawny grid dla danego M niezależnie od addr64.
+
+**Nieporuszony dotąd brak zgodny z regułą byte-identity:** cała ta lista
+dotyczy wyłącznie silnika Pythona. C++ mirror *ciała* kernela (nie tylko ABI,
+które już ma mirror) nie istnieje — `platform/AGENTS.md`'s "Any op/instance/
+atom/fusion/arch change must be made in **both** engines in the same
+change" wymaga tego przed mergem; ten plan nie próbuje portować całego
+`build_implicit_gemm_conv` do C++. Dopóki to nie powstanie, `addr64=True`
+kernel nie powinien wejść do rodziny `conv_implicit_gemm` sprawdzanej przez
+`check_byte_identity.py` (żaden nowy config parity tam dla addr64).
+
+---
+
+Starsza notatka (zachowana dla kontekstu — rozwiązana przez punkty 6/7
+powyżej):
 
 1. **Łańcuch deskryptora A/D.** `make_a_descriptor_dynamic`/
    `make_d_descriptor_dynamic` (`_conv_implicit_gemm_common.py`) liczą
