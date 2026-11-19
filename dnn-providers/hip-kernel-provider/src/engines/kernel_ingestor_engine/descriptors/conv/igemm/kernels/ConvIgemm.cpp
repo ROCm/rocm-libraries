@@ -14,6 +14,7 @@
 //   CONV_IGEMM_PACK     1: k-steps of whole taps (reduction channels per tap divide BK); 2: the
 //                       flat reduction (taps x channels in k-steps of BK)
 //   CONV_IGEMM_CF       1: the output is written packed channels-first (matrix-core kernel only)
+//                       2: bounded HALF pointwise input and output are both channels-first
 //   CONV_IGEMM_SWZ      1: XOR-swizzled LDS tiles read in whole 16-byte chunks (16-bit, VEC 8)
 //   CONV_IGEMM_DMA      2 to 4: gfx950 buffer loads straight into a ring of that many swizzled
 //                       LDS stages (SWZ 1, K1_BUFFER 1)

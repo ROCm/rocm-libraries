@@ -20,9 +20,22 @@ def write(name, obj):
     (out / name).write_text(json.dumps(obj, indent=2) + "\n")
 
 
-INTS = ["cb", "kb", "p", "fr", "fs", "sw", "dw", "pw", "nw", "dot2", "ring"]
+INTS = [
+    "cb",
+    "kb",
+    "p",
+    "fr",
+    "fs",
+    "sw",
+    "dw",
+    "pw",
+    "nw",
+    "dot2",
+    "ring",
+    "layout_id",
+]
 STRINGS = ["dtype", "layout"]
-KNOBS = ["cb", "kb", "p", "nw", "dot2", "ring"]
+KNOBS = ["cb", "kb", "p", "nw", "dot2", "ring", "layout_id"]
 
 # Filter classes: (rows, columns, width stride, width dilation, width pre-padding).
 F3 = (3, 3, 1, 1, 1)
@@ -118,7 +131,7 @@ DW_TILES = {
     F7: {"pass": [(1, 1, 4, 2), (1, 1, 8, 2)], "ring": [(1, 1, 4, 2)]},
 }
 RDNA = ["gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152"]
-RDNA += ["gfx1200", "gfx1201"]
+RDNA += ["gfx1200", "gfx1201", "gfx1250"]
 # group -> (archs, tiles, layouts)
 PACKS = {
     # No matrix core for the type (gfx906), or a vector unit fast enough to matter (gfx908).
@@ -223,6 +236,7 @@ for group, (archs, tiles_of, layouts) in PACKS.items():
                                     "metadata": {
                                         "dtype": dtype,
                                         "layout": layout,
+                                        "layout_id": 0 if layout == "nchw" else 1,
                                         "cb": cb,
                                         "kb": kb,
                                         "p": p,

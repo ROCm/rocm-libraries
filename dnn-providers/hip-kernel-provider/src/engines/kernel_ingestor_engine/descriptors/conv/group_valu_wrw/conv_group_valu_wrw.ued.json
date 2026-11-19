@@ -12,7 +12,8 @@
     "p",
     "nw",
     "dot2",
-    "ring"
+    "ring",
+    "layout_id"
   ],
   "behavior_notes": [
     "runtime_compilation"

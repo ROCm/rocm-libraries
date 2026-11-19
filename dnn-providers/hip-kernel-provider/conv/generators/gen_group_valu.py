@@ -21,9 +21,9 @@ def write(name, obj):
     (out / name).write_text(json.dumps(obj, indent=2) + "\n")
 
 
-INTS = ["kb", "cb", "p", "fd", "fr", "fs", "sw", "dw", "pw", "nw"]
+INTS = ["kb", "cb", "p", "fd", "fr", "fs", "sw", "dw", "pw", "nw", "layout_id"]
 STRINGS = ["direction", "dtype", "layout"]
-KNOBS = ["kb", "cb", "p", "nw"]
+KNOBS = ["kb", "cb", "p", "nw", "layout_id"]
 
 # Filter classes: (depth, rows, columns, width stride, width dilation, width pre-padding).
 F3 = (1, 3, 3, 1, 1, 1)
@@ -94,7 +94,7 @@ TILES_MMA = {
     },
 }
 RDNA = ["gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152"]
-RDNA += ["gfx1200", "gfx1201"]
+RDNA += ["gfx1200", "gfx1201", "gfx1250"]
 # group -> (archs, tiles, layouts). Both packs ship every tile in both layouts; autotune picks.
 PACKS = {
     "valu": (["gfx906", "gfx908"], TILES_VALU, ("nchw", "nhwc")),
@@ -181,6 +181,7 @@ for group, (archs, tiles_of, layouts) in PACKS.items():
                                     "direction": direction,
                                     "dtype": dtype,
                                     "layout": layout,
+                                    "layout_id": 0 if layout == "nchw" else 1,
                                     "kb": kb,
                                     "cb": cb,
                                     "p": p,
