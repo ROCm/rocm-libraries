@@ -3,7 +3,8 @@
 
 """CPU-only checks of the Winograd conv3d research prototype (kernels/common/conv_winograd3d.py).
 
-GPU correctness is exercised by ``benchmarks/common/benchmark_winograd3d.py --verify``.
+GPU correctness: ``test_conv_winograd3d_gpu.py`` (the shipped route specs, the scaled
+prescale path, determinism, the pad copy) and ``benchmarks/common/benchmark_winograd3d.py``.
 """
 
 import pytest
