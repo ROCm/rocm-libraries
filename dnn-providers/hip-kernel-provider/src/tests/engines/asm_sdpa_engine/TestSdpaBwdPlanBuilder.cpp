@@ -1877,7 +1877,7 @@ struct HeadDimCase
 };
 
 // gfx942 and gfx950: 64 <= D <= 192, D % 8 == 0, D_qk == D_v (mha.py
-// can_impl_fmha_v3_bwd; on gfx950 the C++ mha_bwd() path, since the Python gate
+// can_impl_fmha_v3_bwd; on gfx950 the C++ fmha_v3_bwd() path, since the Python gate
 // can_impl_fmha_v3_bwd_gfx950 sends hd64 and 128 < D <= 192 to CK). gfx950 also
 // serves D_qk = 192 with D_v = 128.
 const std::vector<HeadDimCase> K_HEAD_DIM_CASES = {

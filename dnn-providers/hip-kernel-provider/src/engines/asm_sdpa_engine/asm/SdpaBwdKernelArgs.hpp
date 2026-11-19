@@ -20,7 +20,7 @@
 //   - Added static_assert on sizeof to catch ABI drift
 //   - Added detailed field documentation for all three backward kernels
 //   - Organized by pipeline: odo → dqdkdv → dq_convert or dq_shuffle (no post
-//     stage for gfx942 A16)
+//     stage for gfx942 A16, and gfx950 A16 at D_qk = 64)
 // =============================================================================
 
 #pragma once

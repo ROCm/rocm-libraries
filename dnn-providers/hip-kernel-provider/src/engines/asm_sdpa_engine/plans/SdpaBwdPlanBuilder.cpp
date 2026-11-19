@@ -539,12 +539,13 @@ size_t dispatchLogIndex(const std::string& archId,
 // Why the a16 accumulator cannot serve a backward graph that isApplicable
 // accepted on archId, followed by the dispatch inputs, or std::nullopt when it
 // can. isApplicable resolves the A32 rows only, and the A16 kernels serve fewer
-// graphs: every gfx942 A16 row is pssk = 0, which needs S_q == S_kv,
-// S_kv % 64 == 0, the pssk = 0 stride layout and tensors that span at most
-// 4 GiB, and neither arch ships A16 rows for every mask and head dim. AITER's
-// Python layer sends these graphs to CK (aiter/ops/mha.py
-// can_impl_fmha_v3_bwd()). getCustomKnobs offers a16 only when this returns
-// std::nullopt, and buildPlan declines an a16 request with the reason.
+// graphs: every gfx942 A16 row and every gfx950 hd64 A16 row is pssk = 0,
+// which needs S_q == S_kv, S_kv % 64 == 0, the pssk = 0 stride layout and
+// tensors that span at most 4 GiB, and neither arch ships A16 rows for every
+// mask and head dim. AITER's Python layer sends these graphs to CK
+// (aiter/ops/mha.py can_impl_fmha_v3_bwd()). getCustomKnobs offers a16 only
+// when this returns std::nullopt, and buildPlan declines an a16 request with
+// the reason.
 std::optional<std::string>
     a16DeclineReason(const std::string& archId,
                      const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
@@ -711,8 +712,8 @@ bool isBatchShapeSupported(const std::string& archId, int64_t headDimQk, int64_t
     // gfx942: aiter/ops/mha.py can_impl_fmha_v3_bwd() (:2729-2731), `hdim_q ==
     // hdim_v` and `hdim_q >= 64 and hdim_q <= 192`. gfx950 ships hd64 and
     // hd192 rows for the same range (the gfx942 kernels rebuilt, `_recompile`),
-    // and AITER's C++ entry point mha_bwd() runs them (fmha_v3_bwd() has no
-    // head-dim gate besides `% 8`); only its Python gate
+    // and fmha_v3_bwd(), which mha_bwd() calls before its CK fallback, has no
+    // head-dim gate besides `% 8`. Only the Python gate
     // can_impl_fmha_v3_bwd_gfx950() (:2851-2854) sends them to CK, as a routing
     // choice. gfx950 also serves D_qk = 192 with D_v = 128.
     if(!isSupportedArch(archId))
@@ -1327,7 +1328,7 @@ bool SdpaBwdPlanBuilder::isApplicable(
     }
     const auto& request = classified.request;
 
-    // Windows AITER sends to CK (see bwd_dispatch::isBatchWindowSupported).
+    // Windows no ASM kernel serves (see bwd_dispatch::isBatchWindowSupported).
     HIP_KERNEL_RETURN_FALSE_IF(
         classified.maskType == MaskType::SLIDING_WINDOW
             && !bwd_dispatch::isBatchWindowSupported(deviceString, headDimQk),
@@ -1872,10 +1873,11 @@ std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::get
           "at D_qk = 64, the kernel writes dQ directly; on gfx950 at other head dims it "
           "accumulates into a 16-bit buffer that a dq_shuffle kernel writes to dQ. a16 is a "
           "valid value only for graphs the a16 kernels serve on this device. The kernels that "
-          "write dQ directly need S_q == S_kv, S_kv a multiple of 64, D_qk == D_v <= 128 and no "
-          "sliding window, among other limits; the gfx950 dq_shuffle ones serve the graphs a32 "
-          "serves, except D_qk == D_v > 128, unless the 16-bit dq_acc of one batch exceeds "
-          "4 GiB";
+          "write dQ directly (gfx942 D_qk == D_v <= 128, gfx950 D_qk == D_v == 64) need "
+          "S_q == S_kv, S_kv a multiple of 64 and no sliding window, and on gfx950 no "
+          "bottom-right causal mask, among other limits; the gfx950 dq_shuffle ones serve the "
+          "graphs a32 serves, except D_qk == D_v > 128, unless the 16-bit dq_acc of one batch "
+          "exceeds 4 GiB";
 
     StringValueT defaultValue;
     defaultValue.value = "a32";

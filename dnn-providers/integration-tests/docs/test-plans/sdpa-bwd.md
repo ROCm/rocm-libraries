@@ -966,10 +966,10 @@ The accumulator comes from the engine knob `hipkernel.sdpa.bwd.accumulator_type`
 The bundles run the default, A32. The provider GPU test `IntegrationGpuSdpaBackward.cpp` runs A32 and
 A16 on both architectures against the CPU backward reference (Out of scope here). It fills each input
 tensor from its own seed, checks each accumulator against its own tolerance, and has Smoke and
-Comprehensive tiers. The A16 kernels serve fewer graphs: on gfx942 they need Sq = Skv, Skv a multiple
-of 64, matching Q/dO and K/V strides, and every Q, K, V, dO, dK and dV tensor within 2^32 bytes, and
-neither arch ships A16 kernels for every mask and head dim. Plan build fails with BAD_PARAM for an A16
-request those kernels cannot serve.
+Comprehensive tiers. The A16 kernels serve fewer graphs: on gfx942, and on gfx950 at Dqk = 64, they
+need Sq = Skv, Skv a multiple of 64, matching Q/dO and K/V strides, and every Q, K, V, dO, dK and dV
+tensor within 2^32 bytes, and neither arch ships A16 kernels for every mask and head dim. Plan build
+fails with BAD_PARAM for an A16 request those kernels cannot serve.
 
 The engine declines:
 
@@ -986,7 +986,8 @@ assembly backward serves it on gfx1250 only. Three cases AITER's Python layer se
 purpose: Sq ≤ 16 on gfx942 and gfx950 (AITER's choice there is for speed, not correctness); gfx942
 bands with left bound 0 and right bound 0 or unbounded (AITER's Python gate does not count them as
 windows; the band kernel computes them); and on gfx950 Dqk = Dv = 64 and 128 < D ≤ 192, whose
-kernels are the gfx942 ones rebuilt for gfx950 and which AITER's C++ `mha_bwd()` runs.
+kernels are the gfx942 ones rebuilt for gfx950 and which AITER's C++ `fmha_v3_bwd()` runs, since it
+has no head-dim gate besides `% 8`.
 
 A dispatch outside the
 [Verified Kernel Matrix](../../../hip-kernel-provider/src/engines/asm_sdpa_engine/asm/asm_kernels/README.md#verified-kernel-matrix)

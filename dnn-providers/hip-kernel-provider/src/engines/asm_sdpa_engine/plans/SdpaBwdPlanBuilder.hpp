@@ -109,7 +109,7 @@ HeadDims paddedHeadDims(const std::string& archId, int hdimQ, int hdimV);
 // gfx950 D_qk = 192 with D_v = 128. On gfx950 this serves hd64 and
 // 128 < D <= 192 with D_qk == D_v, which AITER's Python gate
 // (aiter/ops/mha.py can_impl_fmha_v3_bwd_gfx950()) sends to CK as a routing
-// choice although its C++ mha_bwd() runs them.
+// choice although fmha_v3_bwd() has no head-dim gate besides `% 8`.
 bool isBatchShapeSupported(const std::string& archId, int64_t headDimQk, int64_t headDimV);
 
 // False for a batch-mode sliding window (MaskType::SLIDING_WINDOW) that no

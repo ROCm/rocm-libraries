@@ -87,8 +87,9 @@ follows AITER's choice of kernel (the gate in `aiter/ops/mha.py` and
 - The engine serves three kinds of graphs AITER's Python layer sends to CK:
   Sq ≤ 16; gfx942 bands with left bound 0 and right bound 0 or unbounded; and
   on gfx950 the hd64 and 128 < D ≤ 192 (D_qk = D_v) head dims, whose rows are
-  the gfx942 kernels rebuilt (`_recompile`) and which AITER's C++ `mha_bwd()`
-  runs ([SDPA backward test plan §4.6](../../../../../../integration-tests/docs/test-plans/sdpa-bwd.md#46-asm_sdpa_engine-scope)).
+  the gfx942 kernels rebuilt (`_recompile`) and which AITER's C++
+  `fmha_v3_bwd()` runs, since it has no head-dim gate besides `% 8`
+  ([SDPA backward test plan §4.6](../../../../../../integration-tests/docs/test-plans/sdpa-bwd.md#46-asm_sdpa_engine-scope)).
 
 A dispatch whose kernel has been checked on a GPU against the CPU backward
 reference, at the head dims it runs, is **verified**.
@@ -124,8 +125,9 @@ those rows by (`pssk`, `pddv`), accumulator and mask.
 | gfx950 | fp16 | 192 x 192 | (1, 1) A32, 0-2 |
 
 The GPU runs are `IntegrationGpuSdpaBwdBf16` and `IntegrationGpuSdpaBwdFp16`
-(instances `Smoke` and `Comprehensive`), which passed on MI300X (gfx942) and
-MI355X (gfx950) in PR #15484. Each row in the table is selected by at least one
+(instances `Smoke` and `Comprehensive`). The gfx950 64 x 64 and 192 x 192 rows
+passed on MI355X (gfx950) in PR #16337; the other rows passed on MI300X (gfx942)
+and MI355X (gfx950) in PR #15484. Each row in the table is selected by at least one
 of those cases at the row's own head dims.
 
 The gfx950 192 x 128 rows carry `pssk = 1` and `pddv = 1` in their CSV,
