@@ -43,7 +43,10 @@ long-standing dispatcher rule instead: the CK formula
 atomic whenever it can be built, else the workspace, else no split. The kernel
 builders and the benchmark, which used to feed the CK formula unmerged
 per-group dims, get it on the launched geometry (merged dims, launched group
-count).
+count). The CK-formula auto degree of a 16-bit dtype is also held to
+:data:`ATOMIC_16BIT_MAX_SPLIT_K` on the packed atomic: dgrad, which has no
+workspace, comes down to it; a wgrad request free to pick its reduction moves to
+the workspace above it (else it comes down to it, as for ``override``).
 
 ``override`` forces the degree of an auto request: ``1`` forces no split, an
 integer ``n >= 2`` forces that degree, held to what the kernel can build --
@@ -110,7 +113,9 @@ __all__ = [
 # slice rounds its partial into the 16-bit output, so the error grows with the
 # degree: on the gfx950 wgrad corpus the verify gate fails broadly from 256 on,
 # while the f32 workspace reduction passes at every degree. An override is held
-# to it too; only an explicit degree is the caller's own.
+# to it too, and so is the CK-formula fallback of both dgrad and wgrad (wgrad
+# moves to the workspace first where one fits); only an explicit degree is the
+# caller's own.
 ATOMIC_16BIT_MAX_SPLIT_K = 128
 
 # ws_bytes is an i32 kernarg, so a two-stage workspace above this overflows it.
@@ -158,6 +163,8 @@ class WgradSplitPolicy:
       per-group tiles are small.
     * ``min_slice_k`` -- the shallowest K-slice worth a CTA; shallower slices pay
       the fixed per-CTA cost and one more atomic pass for little work.
+      ``grouped_min_slice_k`` overrides it for a grouped launch (``groups > 1``);
+      ``None`` keeps ``min_slice_k``.
     * ``max_degree`` / ``max_degree_by_dtype`` -- the cap, overridable per dW
       dtype. A packed 16-bit atomic rounds the running sum in dW on every add,
       so with same-sign partials the relative error grows with the degree, up
@@ -174,6 +181,7 @@ class WgradSplitPolicy:
     min_slice_k: int
     max_degree: int
     max_degree_by_dtype: tuple[tuple[str, int], ...] = ()
+    grouped_min_slice_k: int | None = None
 
     def degree_cap(self, dtype_d: str) -> int:
         return dict(self.max_degree_by_dtype).get(dtype_d, self.max_degree)
@@ -212,12 +220,17 @@ def atomic_rounding_degree_cap(fraction_bits: int, tol: float = WGRAD_TOLERANCE)
 # inputs then exceed that tolerance (at 16, one 1.0 partial followed by fifteen
 # 2**-8 ones rounds back to 1.0, a 5.5% error).
 #
+# Ungrouped launches slice K down to 256 elements; grouped ones keep a
+# 2048-element floor, because shallower slices regressed grouped shapes such as
+# ResNeXt g32.
+#
 # fp16 has its own policy (_WGRAD_SPLIT_POLICY_BY_DTYPE below).
 _WGRAD_SPLIT_POLICY: dict[str, WgradSplitPolicy] = {
     "gfx1250": WgradSplitPolicy(
         target_ctas=2048,
         grouped_target_ctas=4096,
-        min_slice_k=2048,
+        min_slice_k=256,
+        grouped_min_slice_k=2048,
         max_degree=128,
         max_degree_by_dtype=(("bf16", atomic_rounding_degree_cap(7)),),
     ),
@@ -226,7 +239,7 @@ _WGRAD_SPLIT_POLICY: dict[str, WgradSplitPolicy] = {
 # Per-dtype overrides of _WGRAD_SPLIT_POLICY, keyed by (arch, dW dtype).
 #
 # gfx1250 fp16: fill to 1024 CTAs (2048 grouped) with K slices as shallow as
-# 512. Fitted on a sample of wgrad shapes with every cached split-K binary
+# 64 (512 grouped). Fitted on a sample of wgrad shapes with every cached split-K binary
 # timed at every degree 2..128 and verified, once the packed fp16 atomic was
 # no longer fenced (it is an atomicrmw now). fp16 was not split automatically
 # before (cap 1): that cap was a symptom of the fenced atomic.
@@ -241,7 +254,8 @@ _WGRAD_SPLIT_POLICY_BY_DTYPE: dict[tuple[str, str], WgradSplitPolicy] = {
     ("gfx1250", "fp16"): WgradSplitPolicy(
         target_ctas=1024,
         grouped_target_ctas=2048,
-        min_slice_k=512,
+        min_slice_k=64,
+        grouped_min_slice_k=512,
         max_degree=128,
         max_degree_by_dtype=(("fp16", atomic_rounding_degree_cap(10)),),
     ),
@@ -426,10 +440,15 @@ def select_split_k_wgrad(
         n_groups = groups
         target = policy.grouped_target_ctas if n_groups > 1 else policy.target_ctas
         grid_no_split = base_grid * n_groups
+        min_slice = (
+            policy.grouped_min_slice_k
+            if n_groups > 1 and policy.grouped_min_slice_k is not None
+            else policy.min_slice_k
+        )
         # Every bound is folded into one cap, so nothing applied after it can
         # raise the degree past any of them.
         cap = min(
-            wg_K // policy.min_slice_k,
+            wg_K // min_slice,
             policy.degree_cap(dtype_d),
             MAX_GRID_DIM_Z // n_groups,
         )
@@ -439,7 +458,7 @@ def select_split_k_wgrad(
             base_grid,
             target,
             f"{arch} wgrad policy ({dtype_d}): min(floor({target} / "
-            f"{grid_no_split}), floor({wg_K} / {policy.min_slice_k}), "
+            f"{grid_no_split}), floor({wg_K} / {min_slice}), "
             f"{policy.degree_cap(dtype_d)}) = {split_k}",
         )
 
@@ -724,7 +743,7 @@ def _resolve_wgrad(
                 legacy.split_k,
                 f"CK formula ({legacy.reason}); no split: {atomic_why}",
             )
-        return _rule(legacy.split_k, f"CK formula ({legacy.reason})", atomic_cap=False)
+        return _rule(legacy.split_k, f"CK formula ({legacy.reason})", atomic_cap=True)
 
     reductions = []
     if reduction in ("auto", "atomic") and atomic_ok:
@@ -868,11 +887,14 @@ def _resolve_dgrad(
     if split_k != -1:
         return ConvSplitK(split_k, False, split_k, f"explicit split_k={split_k}")
     wave_size = ArchTarget.from_gfx(arch).wave_size
+    # tf32 is fp32 storage: the builder checks the output dtype, not the
+    # logical one.
+    store_dtype = "fp32" if dtype == "tf32" else dtype
     if override is not None:
         # Held to what the kernel can build: an unbuildable split becomes 1
         # rather than a spec the builder then rejects, and the 16-bit atomic
         # stays within its accuracy limit (dgrad has no workspace to move to).
-        ok, why = dgrad_split_k_available(p, dtype, wave_size=wave_size)
+        ok, why = dgrad_split_k_available(p, store_dtype, wave_size=wave_size)
         cap = ATOMIC_16BIT_MAX_SPLIT_K if _is_16bit(dtype) else MAX_GRID_DIM_Z
         degree = min(override, cap) if ok else 1
         if not ok and override != 1:
@@ -884,10 +906,9 @@ def _resolve_dgrad(
         return ConvSplitK(degree, False, override, f"override split_k={override}{note}")
     m, n, k = _dg_M(p), _dg_N(p), _dg_K(p)
     cost = split_k_cost_model(arch, num_cus, num_xcds)
-    if cost is not None:
-        ok, why = dgrad_split_k_available(p, dtype, wave_size=wave_size)
-        if not ok:
-            return ConvSplitK(1, False, 1, f"no split: {why}")
+    ok, why = dgrad_split_k_available(p, store_dtype, wave_size=wave_size)
+    if not ok:
+        return ConvSplitK(1, False, 1, f"no split: {why}")
     if cost is None:
         legacy = select_split_k_wgrad(
             wg_M=m,
@@ -898,9 +919,16 @@ def _resolve_dgrad(
             tile_k=tile_k,
             arch=arch,
         )
-        return ConvSplitK(
-            legacy.split_k, False, legacy.split_k, f"CK formula ({legacy.reason})"
-        )
+        degree = legacy.split_k
+        reason = f"CK formula ({legacy.reason})"
+        if _is_16bit(dtype) and degree > ATOMIC_16BIT_MAX_SPLIT_K:
+            # dgrad has no workspace to move to: the packed 16-bit atomic stays
+            # within its accuracy limit, as the dgrad override and the fitted
+            # planner hold it. (The wgrad CK-formula fallback moves to its
+            # workspace instead, or is held to the same limit.)
+            degree = ATOMIC_16BIT_MAX_SPLIT_K
+            reason += f", held to the 16-bit atomic limit {ATOMIC_16BIT_MAX_SPLIT_K}"
+        return ConvSplitK(degree, False, legacy.split_k, reason)
     waves = max(1, block_size // wave_size)
     # The group rides grid y, the slice grid z: groups multiply the CTAs but do
     # not share the z budget.

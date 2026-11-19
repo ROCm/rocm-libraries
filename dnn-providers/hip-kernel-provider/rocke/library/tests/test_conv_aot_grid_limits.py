@@ -122,3 +122,33 @@ def test_gfx950_packed_wgrad_atomics_store_two_wide(dtype):
     assert aj._wgrad_vec_c("gfx950", dtype, "cshuffle", 8, 2, True) == 8
     assert aj._wgrad_vec_c("gfx950", "fp32", "cshuffle", 4, 2, False) == 4
     assert aj._wgrad_vec_c("gfx950", dtype, "default", 8, 2, False) == 1
+
+
+@pytest.mark.parametrize("gfx", ["gfx1250", "gfx1151", "gfx1201"])
+def test_wmma_wgrad_deepk_geometries_only_valid_on_their_arches(gfx):
+    """The deep-K wgrad geometries survive the spec prefilter, with the
+    cover's variants, on gfx1250 only: the RDNA parts lack the LDS for a
+    64x64x512 16-bit tile pair (128 KB vs a 64 KB cap), and
+    :func:`aj._spec_is_valid` (the validator, not a per-arch list) refuses
+    every such job there.
+    """
+    # Hard-coded so that emptying CACHE_WGRAD_DEEPK_GEOMETRIES does not let the
+    # test self-validate.
+    expected = {
+        (64, 64, 256, 4, 4),
+        (64, 64, 512, 4, 4),
+        (128, 128, 128, 4, 4),
+    }
+    target = ArchTarget.from_gfx(gfx)
+    found: dict = {}
+    for job in aj._wgrad_jobs(gfx, "fp16", 32, "wmma", target, (1,)):
+        i = job.identity
+        geo = (i.tile_m, i.tile_n, i.tile_k, i.warp_m, i.warp_n)
+        if geo in expected and aj._spec_is_valid(job, gfx, "fp16"):
+            found.setdefault(geo, set()).add(i.async_dma)
+    if gfx == "gfx1250":
+        assert set(found) == expected
+        # On the cover: the async loop next to the synchronous one.
+        assert all(v == {False, True} for v in found.values())
+    else:
+        assert not found

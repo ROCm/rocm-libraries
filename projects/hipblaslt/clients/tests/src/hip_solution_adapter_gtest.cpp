@@ -4,32 +4,35 @@
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <deque>
+#include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <utility>
+#include <vector>
 
 #ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
 #include "local_kernel_test_common.hpp"
 
 #include <unistd.h>
 
-#include <atomic>
-#include <chrono>
-#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <future>
 #include <stdexcept>
-#include <thread>
-#include <vector>
 #endif
 
 namespace
 {
     constexpr char primary[] = "/library/primary.co";
+    constexpr char other[]   = "/library/other.co";
     constexpr char helper[]  = "/library/Kernels.so-000-gfx942.hsaco";
     constexpr char minus[]   = "/library/Kernels.so-000-gfx942-xnack-.hsaco";
     constexpr char plus[]    = "/library/Kernels.so-000-gfx942-xnack+.hsaco";
@@ -38,8 +41,11 @@ namespace
     {
         std::deque<std::pair<std::string, hipError_t>> expected;
         std::map<hipModule_t, std::unique_ptr<int>>    live;
+        std::vector<hipModule_t>                       functionModules;
         hipError_t                                     lastError = hipSuccess;
         unsigned                                       unloads   = 0;
+        // Runs once, inside the next module unload.
+        std::function<void()> onUnload;
     };
 
     // Each test owns this state and destroys the adapter before releasing it.
@@ -48,6 +54,7 @@ namespace
     hipError_t moduleLoad(hipModule_t* module, const char* path);
     hipError_t moduleUnload(hipModule_t module);
     hipError_t getLastError();
+    hipError_t getFunction(hipFunction_t* function, hipModule_t module, const char* name);
 
     class HipSolutionAdapterTest : public ::testing::Test
     {
@@ -55,9 +62,10 @@ namespace
         void SetUp() override
         {
             hipLoads = &loads;
-            adapter  = std::make_unique<TensileLite::hip::SolutionAdapter>(
-                TensileLite::hip::SolutionAdapter::ModuleApi{
-                    moduleLoad, moduleUnload, getLastError});
+            TensileLite::hip::SolutionAdapter::ModuleApi api{
+                moduleLoad, moduleUnload, getLastError};
+            api.getFunction = getFunction;
+            adapter         = std::make_unique<TensileLite::hip::SolutionAdapter>(api);
         }
 
         void TearDown() override
@@ -116,12 +124,23 @@ namespace
     {
         EXPECT_EQ(hipLoads->live.erase(module), 1u) << "double or unowned module unload";
         ++hipLoads->unloads;
+        if(auto hook = std::exchange(hipLoads->onUnload, nullptr))
+            hook();
         return hipSuccess;
     }
 
     hipError_t getLastError()
     {
         return std::exchange(hipLoads->lastError, hipSuccess);
+    }
+
+    // Every module exports every kernel; the handle is the module's.
+    hipError_t getFunction(hipFunction_t* function, hipModule_t module, const char*)
+    {
+        EXPECT_EQ(hipLoads->live.count(module), 1u) << "kernel lookup in an unloaded module";
+        hipLoads->functionModules.push_back(module);
+        *function = reinterpret_cast<hipFunction_t>(module);
+        return hipSuccess;
     }
 
     TEST_F(HipSolutionAdapterTest,
@@ -240,6 +259,138 @@ namespace
         EXPECT_EQ(adapter->numRotationModules(), 1);
         EXPECT_EQ(loads.unloads, 4u);
         EXPECT_EQ(loads.live.size(), 2u);
+    }
+
+    // Recovery resets every cached kernel handle, so the next lookup resolves
+    // the kernel in a reloaded module instead of returning an unloaded one's.
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_KernelLookupAfterRecoveryUsesReloadedModule)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        ASSERT_EQ(adapter->initKernel("kernel"), hipSuccess);
+        ASSERT_EQ(adapter->initKernel("kernel"), hipSuccess);
+        ASSERT_EQ(loads.functionModules.size(), 1u) << "the second lookup hits the cache";
+
+        expectLoad(primary, GetParam());
+        expectLoad(helper);
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+
+        ASSERT_EQ(adapter->initKernel("kernel"), hipSuccess);
+        ASSERT_EQ(loads.functionModules.size(), 2u)
+            << "the handle cached before recovery was reused";
+        EXPECT_EQ(loads.live.count(loads.functionModules.back()), 1u);
+    }
+
+    // Recovery marks every loaded file as not loaded, so the next lookup loads
+    // it again instead of trusting a module that recovery unloaded.
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_FindCodeObjectReloadsAfterRecovery)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        expectLoad(other);
+        EXPECT_FALSE(adapter->FindCodeObject("other.co"));
+        EXPECT_TRUE(adapter->FindCodeObject("other.co"));
+
+        expectLoad(primary, GetParam());
+        expectLoad(helper);
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        EXPECT_EQ(loads.unloads, 2u);
+
+        expectLoad(other);
+        EXPECT_FALSE(adapter->FindCodeObject("other.co"));
+        EXPECT_TRUE(adapter->FindCodeObject("other.co"));
+        EXPECT_EQ(loads.live.size(), 3u);
+    }
+
+    // Recovery unloads the old modules after releasing the adapter lock. A load
+    // that lands meanwhile belongs to the new module set: it is kept, and the
+    // adapter unloads it exactly once when destroyed.
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_LoadDuringRecoveryUnloadIsKept)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        loads.onUnload = [this] { EXPECT_EQ(adapter->loadCodeObjectFile(other), hipSuccess); };
+
+        expectLoad(primary, GetParam());
+        expectLoad(other);
+        expectLoad(helper);
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        EXPECT_EQ(loads.unloads, 1u) << "only the old helper is unloaded";
+        EXPECT_EQ(loads.live.size(), 3u) << "the module loaded during recovery is still live";
+        EXPECT_TRUE(adapter->FindCodeObject("other.co"));
+    }
+
+    // Recovery runs while FindCodeObject holds the file's load mutex.
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_RecoveryInsideFindCodeObjectReloadsFiles)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        expectLoad(primary);
+        EXPECT_FALSE(adapter->FindCodeObject("primary.co"));
+        expectLoad(other, GetParam());
+        expectLoad(helper);
+        expectLoad(other);
+        EXPECT_FALSE(adapter->FindCodeObject("other.co"));
+        EXPECT_TRUE(adapter->FindCodeObject("other.co"));
+        expectLoad(primary);
+        EXPECT_FALSE(adapter->FindCodeObject("primary.co")) << "recovery unloaded it";
+        EXPECT_TRUE(adapter->FindCodeObject("primary.co"));
+        EXPECT_EQ(loads.live.size(), 3u);
+    }
+
+    std::mutex                 fileLoadsMutex;
+    std::map<std::string, int> fileLoads;
+    std::atomic<int>           liveFileModules{0};
+    std::atomic<uintptr_t>     nextFileModule{0};
+
+    // Slow enough that concurrent callers overlap the load.
+    hipError_t slowFileLoad(hipModule_t* module, const char* path)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        {
+            std::lock_guard<std::mutex> guard(fileLoadsMutex);
+            ++fileLoads[path];
+        }
+        ++liveFileModules;
+        *module = reinterpret_cast<hipModule_t>(++nextFileModule);
+        return hipSuccess;
+    }
+
+    hipError_t fileUnload(hipModule_t)
+    {
+        --liveFileModules;
+        return hipSuccess;
+    }
+
+    hipError_t noFileLoadError()
+    {
+        return hipSuccess;
+    }
+
+    TEST(HipSolutionAdapterConcurrentLoad, smoke_ConcurrentFirstUseLoadsEachFileOnce)
+    {
+        fileLoads.clear();
+        liveFileModules = 0;
+        {
+            TensileLite::hip::SolutionAdapter adapter(TensileLite::hip::SolutionAdapter::ModuleApi{
+                slowFileLoad, fileUnload, noFileLoadError});
+            adapter.codeObjectDir("/library");
+            std::vector<std::thread> threads;
+            for(int i = 0; i < 16; i++)
+                threads.emplace_back(
+                    [&adapter, i]() { adapter.FindCodeObject(i % 2 ? "a.co" : "b.co"); });
+            for(auto& thread : threads)
+                thread.join();
+            EXPECT_EQ(fileLoads,
+                      (std::map<std::string, int>{{"/library/a.co", 1}, {"/library/b.co", 1}}));
+            EXPECT_EQ(liveFileModules.load(), 2);
+            EXPECT_TRUE(adapter.FindCodeObject("a.co"));
+            EXPECT_TRUE(adapter.FindCodeObject("b.co"));
+        }
+        EXPECT_EQ(liveFileModules.load(), 0) << "the adapter unloads every module";
     }
 
 #ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
