@@ -10,8 +10,10 @@ removed. Raw byte-padded rows and wider slots still use the raw-layout tiling
 adapter rather than a second transport implementation. New kernels should use
 the descriptor-driven verbs directly.
 
-HIP lowering of a rebased pointer adds the memory operation's element index
-using the access type's byte width. The rebase itself is still a byte offset.
+HIP loads, stores, and global atomics add the memory operation's element index
+using the access type's byte width, even when the pointer is represented as a
+byte base. The rebase itself is still a byte offset. Packed FP16/BF16 atomics
+index scalar halfwords and require four-byte alignment for the pair.
 This applies beyond packed MMA fragments: grouped MoE rebases FP16/BF16 weights
 by expert before issuing typed loads. Address emission is covered in both HIP
 lowerers; the full grouped FP16 kernel is tested through the Python HIP route
@@ -49,7 +51,7 @@ requirements. Its old paths and line numbers refer to that starting revision.
 
 Paths in the tables are relative to `platform/`.
 
-| Concern | Current locations | Intended ownership |
+| Concern | Before migration | Ownership after migration |
 | --- | --- | --- |
 | Pointer, storage element, and storage vector types | `python/rocke/helpers/mma_io.py:31-59` | New `python/rocke/core/ir_storage.py` with native core counterpart; retain `core/storage.py` as the bit-storage rule owner |
 | MMA logical operand type | `python/rocke/helpers/mma_io.py:62-74` | `python/rocke/core/mma_operand.py`; keep lowering admission strict |
@@ -62,7 +64,7 @@ Paths in the tables are relative to `platform/`.
 
 ### Consumer locations
 
-| Consumer | Input and output migration sites | Constraints |
+| Consumer | Input and output sites before migration | Constraints |
 | --- | --- | --- |
 | `python/rocke/instances/gfx950/block_scaled_gemm.py` | A/B loads 154/164, scale reads 177/178, C store 183 | All five formats and independent A/B; live FP6/FP4 carrier counts 6/4 padded to 8 only for the atom |
 | `cpp/instances/gfx950/block_scaled_gemm.cpp` | A/B loads 111/113 and adjacent scale/output code | Author natively using the same descriptor and operand bridge |
@@ -77,7 +79,7 @@ Update tiling `emit.py`, `fragments.py`, and `mma/driver.py`; tiling tests
 tests `test_dtypes.py`, `test_optimization_barrier.py`, and the type tests split
 out of `test_mma_io.py`. These are utility users, not transport consumers.
 
-## Test and build inventory
+## Test and build migration inventory
 
 - Split `tests/core/test_mma_io.py` by contract: storage types, encoded packing,
   generic vector-access lowering, and descriptor-driven fragment transport.
