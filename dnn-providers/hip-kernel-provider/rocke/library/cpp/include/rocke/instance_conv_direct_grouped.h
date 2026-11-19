@@ -604,8 +604,12 @@ typedef struct rocke_direct_depthwise_tiled_spec
 #define ROCKE_DCONV_DW_TILED_UNROLL_MAX_FMAS 6144
 
 /* Blocks a persistent direct-conv kernel is launched with: 8 XCDs x 32
- * workgroups. Twin of Python's DIRECT_PERSISTENT_BLOCKS. */
-#define ROCKE_DIRECT_PERSISTENT_BLOCKS 256
+ * workgroups, the constants the generic kernel decodes its cells against.
+ * Twins of Python's DIRECT_PERSISTENT_{NUM_XCD,BLOCKS_PER_XCD,BLOCKS}. */
+#define ROCKE_DIRECT_PERSISTENT_NUM_XCD 8
+#define ROCKE_DIRECT_PERSISTENT_BLOCKS_PER_XCD 32
+#define ROCKE_DIRECT_PERSISTENT_BLOCKS \
+    (ROCKE_DIRECT_PERSISTENT_NUM_XCD * ROCKE_DIRECT_PERSISTENT_BLOCKS_PER_XCD)
 /* Largest filter extent the dgrad mode takes (Python: _DW_TILED_DGRAD_MAX_K). */
 #define ROCKE_DCONV_DW_TILED_DGRAD_MAX_K 64
 

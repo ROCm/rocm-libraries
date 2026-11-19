@@ -4322,12 +4322,11 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
     PERSISTENT = spec.persistent_grid
 
     # ---- Persistent grid: decode XCD and workgroup positions ----
-    # 256 = 8 XCDs × 32 blocks per XCD.
+    # DIRECT_PERSISTENT_BLOCKS = 8 XCDs x 32 blocks per XCD.
     # Each block processes multiple cells in a runtime loop, keeping weights
     # in registers across all cells (weights are the SAME for groups=1).
-    NUM_XCD = 8
-    BLOCKS_PER_XCD = 32
-    TOTAL_PERSISTENT = NUM_XCD * BLOCKS_PER_XCD  # = 256
+    NUM_XCD = DIRECT_PERSISTENT_NUM_XCD
+    BLOCKS_PER_XCD = DIRECT_PERSISTENT_BLOCKS_PER_XCD
 
     if PERSISTENT:
         # Cell counts follow the runtime shape; only the tile geometry
@@ -14574,8 +14573,11 @@ def build_direct_dgrad(
 # ---------------------------------------------------------------------------
 
 # Blocks a persistent DirectConvSpec kernel is launched with: 8 XCDs x 32
-# workgroups, the same constant the kernel decodes its cells against.
-DIRECT_PERSISTENT_BLOCKS = 256
+# workgroups, the same constants the kernel decodes its cells against. C twins:
+# ROCKE_DIRECT_PERSISTENT_{NUM_XCD,BLOCKS_PER_XCD,BLOCKS}.
+DIRECT_PERSISTENT_NUM_XCD = 8
+DIRECT_PERSISTENT_BLOCKS_PER_XCD = 32
+DIRECT_PERSISTENT_BLOCKS = DIRECT_PERSISTENT_NUM_XCD * DIRECT_PERSISTENT_BLOCKS_PER_XCD
 
 
 def direct_launch_geometry(spec) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
