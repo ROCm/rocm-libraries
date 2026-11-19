@@ -69,6 +69,7 @@ from ._permutation_path import (
     _F32_INITIAL_MAX,
     _F32_ONE,
     REDERIVE,
+    _replace_once,
     classify_unmasked_path,
     expected_chain_counts,
     expected_path_counts,
@@ -1153,14 +1154,6 @@ def test_modeled_path_counts_at_the_shipped_tile() -> None:
         "value_chain_length_8": 2,
         "probability_packs": 8,
     }
-
-
-def _replace_once(old: str, new: str) -> Callable[[str], str]:
-    def edit(ir: str) -> str:
-        assert old in ir, f"edit target {old!r} not in the lowered IR"
-        return ir.replace(old, new, 1)
-
-    return edit
 
 
 def _substitute_once(pattern: str, replacement: str) -> Callable[[str], str]:

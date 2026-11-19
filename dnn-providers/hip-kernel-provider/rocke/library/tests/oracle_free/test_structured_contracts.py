@@ -45,6 +45,27 @@ import pytest
 from rocke.numeric.bf16 import f32_to_bf16
 
 from ._analytical import encode_bits, target_bits
+from ._permutation_path import (
+    _BPERMUTE,
+    _CAST_TYPE,
+    _DECLARE,
+    _EXP2,
+    _F32_INITIAL_MAX,
+    _F32_LOG2E,
+    _F32_ONE,
+    _F32_ZERO,
+    _FP_FLAGS,
+    _FP_MODE_ATTRIBUTES,
+    _FP_TYPE,
+    _INSTRUCTION,
+    _MAXNUM,
+    _MFMA_ATOM,
+    _NO_OP_BITCAST,
+    _VALUE,
+    _Instruction,
+    _parse,
+    _replace_once,
+)
 from ._structured_analytical import (
     A_DIV_DOMAIN,
     A_QK_EXPONENTS,
@@ -167,22 +188,9 @@ from .test_contracts import _fake_tuning_spec
 
 _REDERIVE = "re-derive the path model"
 
-# LLVM spells FP32 constants as the hex of the equivalent double.
-_F32_LOG2E = "0x3FF7154760000000"
-_F32_ONE = "0x3FF0000000000000"
-_F32_ZERO = "0x0000000000000000"
-_F32_MASKED = "0xC6293E5940000000"  # -1e30, the masked score and initial row max
+# -1e30: the masked score, and the initial row maximum.
+_F32_MASKED = _F32_INITIAL_MAX
 
-_MFMA_ATOM = {
-    "fp16": "llvm.amdgcn.mfma.f32.32x32x8f16",
-    "bf16": "llvm.amdgcn.mfma.f32.32x32x8bf16.1k",
-}
-_CAST_TYPE = {"fp16": "half", "bf16": "bfloat"}
-_EXP2 = "llvm.amdgcn.exp2.f32"
-_MAXNUM = "llvm.maxnum.f32"
-_BPERMUTE = "llvm.amdgcn.ds.bpermute"
-
-_FP_FLAGS = ("fast", "contract", "afn", "reassoc", "nnan", "ninf", "nsz", "arcp")
 _FP_OPCODES = ("fadd", "fsub", "fmul", "fdiv", "frem", "fneg", "fptrunc", "fpext")
 # What may touch a floating-point value: the arithmetic the model has a step
 # for, and the instructions that only move its bits (loads, vector packing,
@@ -199,53 +207,6 @@ _FP_BIT_MOVES = (
     "phi",
     "select",
 )
-_FP_TYPE = re.compile(r"\b(float|half|bfloat|double)\b")
-_FP_MODE_ATTRIBUTES = (
-    "denormal-fp-math",
-    "unsafe-fp-math",
-    "no-nans-fp-math",
-    "no-infs-fp-math",
-    "approx-func-fp-math",
-    "no-signed-zeros-fp-math",
-)
-
-_INSTRUCTION = re.compile(r"^\s*(%[-\w.]+) = (.+)$")
-_VALUE = re.compile(r"%[-\w.]+")
-_CALLEE = re.compile(r"@([-\w.]+)\(")
-_DECLARE = re.compile(r"^declare (.+?) @([-\w.]+)\((.*)\)")
-_NO_OP_BITCAST = re.compile(r"bitcast (\S+(?: x \S+>)?) %[-\w.]+ to (\S+(?: x \S+>)?)$")
-
-
-@dataclass(frozen=True)
-class _Instruction:
-    name: str
-    opcode: str
-    text: str
-    operands: tuple[str, ...]
-
-
-def _parse(ir: str) -> dict[str, _Instruction]:
-    """Map each SSA name to its defining instruction.
-
-    ``opcode`` is the first word, or the callee for a call. ``operands`` lists
-    the SSA values the instruction reads, in order, excluding the callee."""
-    instructions: dict[str, _Instruction] = {}
-    for line in ir.splitlines():
-        match = _INSTRUCTION.match(line)
-        if not match:
-            continue
-        name, text = match.groups()
-        if re.match(r"(?:tail |musttail |notail )?call ", text):
-            callee = _CALLEE.search(text)
-            opcode = callee.group(1) if callee else "call"
-            arguments = text[callee.end() :] if callee else text
-        else:
-            opcode = text.split()[0]
-            arguments = text[len(opcode) :]
-        instructions[name] = _Instruction(
-            name, opcode, text, tuple(_VALUE.findall(arguments))
-        )
-    return instructions
 
 
 @dataclass
@@ -771,14 +732,6 @@ def test_ir_contract_pins_the_dense_path_model(case: DenseShape) -> None:
 
 def _first_line(ir: str, marker: str) -> str:
     return next(line for line in ir.splitlines() if marker in line)
-
-
-def _replace_once(old: str, new: str):
-    def edit(ir: str) -> str:
-        assert old in ir, f"edit target {old!r} not in the lowered IR"
-        return ir.replace(old, new, 1)
-
-    return edit
 
 
 def _append_to_line(marker: str, suffix: str):

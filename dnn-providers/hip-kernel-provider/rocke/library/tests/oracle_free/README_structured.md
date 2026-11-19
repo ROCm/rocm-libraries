@@ -26,15 +26,17 @@ derived on the CPU without evaluating attention (see "Prediction: Tier B").
 | `_structured_subject.py` | the raw-bit subject adapter: dispatch resolution and the launch |
 
 The fixtures, the prediction and the analyzer are this check's own. What does
-not depend on the logits is shared with the uniform-probability check in this
-directory ([README.md](README.md)), which covers the zero-Q case, and has one
-home there:
+not depend on the logits is shared with the other checks in this directory
+([README.md](README.md)) and has one home: the uniform-probability check, which
+covers the zero-Q case, for the first three rows, and the key-permutation
+relation for the last.
 
 | Shared | Home |
 |---|---|
 | the FP16/BF16 formats, exact encoding and decoding of raw bits, exact rounding of a rational target | `_analytical.py` |
 | the raw-bit observation: exposure names, one exposure per name, coverage of every key | `_analytical.py` |
 | the checks of the raw-bit host arrays and of the device buffers, the NaN prefill of the output | `_dense_subject.py` |
+| the parser of the lowered IR (SSA name to defining instruction), the constants the path contracts classify with, the one-edit IR mutator | `_permutation_path.py` |
 
 ## Cases
 
