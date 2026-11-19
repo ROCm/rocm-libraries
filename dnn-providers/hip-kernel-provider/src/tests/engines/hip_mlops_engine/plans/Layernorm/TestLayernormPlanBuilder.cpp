@@ -426,11 +426,15 @@ TEST_F(TestLayernormPlanBuilder, GetCustomKnobsReturnsEmptyBprop)
 
 TEST_F(TestLayernormPlanBuilder, ElementCountAtTheKernelIndexLimit)
 {
-    constexpr int64_t LAST_FITTING = int64_t{UINT32_MAX} - 1;
     for(const bool backward : {false, true})
     {
         SCOPED_TRACE(backward ? "backward" : "forward");
-        for(const auto [columns, expected] : {std::pair{LAST_FITTING, true},
+        // Forward is bounded by the element index. Backward's LayernormBwdScaleBias launches
+        // ceil(columns / 1024) blocks of 1024 threads, so its last column count whose launch stays
+        // below 2^32 threads is 2^32 - 1024.
+        const int64_t lastFitting = backward ? (int64_t{1} << 32) - 1024 : int64_t{UINT32_MAX} - 1;
+        for(const auto [columns, expected] : {std::pair{lastFitting, true},
+                                              std::pair{lastFitting + 1, false},
                                               std::pair{int64_t{UINT32_MAX}, false},
                                               std::pair{(int64_t{1} << 32) + 1, false}})
         {

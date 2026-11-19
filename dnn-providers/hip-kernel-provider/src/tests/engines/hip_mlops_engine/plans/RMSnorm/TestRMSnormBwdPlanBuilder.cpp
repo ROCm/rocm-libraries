@@ -635,8 +635,11 @@ TEST_F(TestRMSnormBwdPlanBuilder, GetCustomKnobsReturnsEmptyActivation)
 
 TEST_F(TestRMSnormBwdPlanBuilder, ElementCountAtTheKernelIndexLimit)
 {
-    constexpr int64_t LAST_FITTING = int64_t{UINT32_MAX} - 1;
+    // RMSnormBwdScaleBias launches ceil(columns / 256) blocks of 256 threads, so the last
+    // column count whose launch stays below 2^32 threads is 2^32 - 256.
+    constexpr int64_t LAST_FITTING = (int64_t{1} << 32) - 256;
     for(const auto [columns, expected] : {std::pair{LAST_FITTING, true},
+                                          std::pair{LAST_FITTING + 1, false},
                                           std::pair{int64_t{UINT32_MAX}, false},
                                           std::pair{(int64_t{1} << 32) + 1, false}})
     {
