@@ -404,6 +404,11 @@ def test_per_side_ragged_and_lse_forms():
         (thd(ragged_offset_multipliers={**mults, "lse": 4}), "RAGGED_FORMAT", "lse"),
         (thd(ragged_offset_multipliers={**mults, "x": 4}), "RAGGED_FORMAT", "unknown"),
         (thd(ragged_offset_multipliers={**mults, "k": 0}), "RAGGED_FORMAT", "outside"),
+        (
+            thd(ragged_offset_multipliers={**mults, "k": -128}),
+            "RAGGED_FORMAT",
+            "outside",
+        ),
         (thd(ragged_offset_multipliers={"q": 2**31}), "RAGGED_FORMAT", "outside"),
         (thd(ragged_offset_dtype="mixed"), "RAGGED_FORMAT", "dtype"),
         (thd(ragged_same_table=False), "RAGGED_FORMAT", "offset table"),

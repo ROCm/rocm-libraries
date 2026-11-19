@@ -294,6 +294,16 @@ def check_attn_bwd_tensors(req, tensors: Mapping[str, TensorMeta]) -> None:
                 _fail("TENSOR_EXTENT", f"{n}: needs {need} bytes, holds {m.nbytes}")
 
 
+def _thd_tensor_tokens(req, tensors: Mapping[str, TensorMeta], role: str):
+    """Token count of a THD tensor (``None``: ``lse`` of a dense per-batch form)."""
+    m = _meta(tensors, role)
+    if role != "lse":
+        return m.shape[0]
+    if req.lse_ragged is False:
+        return None
+    return m.shape[2] if len(m.shape) == 4 else m.shape[0]
+
+
 def check_attn_bwd_lengths(
     req,
     *,
@@ -303,6 +313,7 @@ def check_attn_bwd_lengths(
     offsets_kv=None,
     tokens_q: int | None = None,
     tokens_kv: int | None = None,
+    tensors: Mapping[str, TensorMeta] | None = None,
 ) -> None:
     """Check host-visible length data of a general-family request.
 
@@ -314,9 +325,13 @@ def check_attn_bwd_lengths(
     or K's multiplier), each span at most ``s_q`` / ``s_kv``; the end token
     of every sequence within ``max_total_q`` / ``max_total_kv`` (when both are given)
     and within ``tokens_q`` / ``tokens_kv`` (the tensors' token extents, when
-    given), else ``RAGGED_RANGE``. Arguments left ``None`` are not checked.
+    given), else ``RAGGED_RANGE``. With ``tensors`` (as for
+    :func:`check_attn_bwd_tensors`), the end token of each table must also lie
+    within the token count of every tensor of its side (q o do dq and a ragged
+    lse; k v dk dv), each against its own allocation. Arguments left ``None``
+    are not checked.
     """
-    from kernels.common.attention_bwd_plan import _ragged_mult
+    from kernels.common.attention_bwd_plan import _KV_SIDE, _Q_SIDE, _ragged_mult
 
     for name, vals, cap in (("seq_len_q", seq_len_q, req.s_q),
                             ("seq_len_kv", seq_len_kv, req.s_kv)):  # fmt: skip
@@ -335,6 +350,7 @@ def check_attn_bwd_lengths(
         ("offsets_q", offsets_q, "q", req.s_q, req.max_total_q, tokens_q),
         ("offsets_kv", offsets_kv, "k", req.s_kv, req.max_total_kv, tokens_kv),
     )
+    side_roles = {"q": (*_Q_SIDE, "lse"), "k": _KV_SIDE}
     for name, vals, tensor, cap, total, toks in sides:
         if vals is None:
             continue
@@ -365,6 +381,13 @@ def check_attn_bwd_lengths(
             if toks is not None and tok[i + 1] > toks:
                 _fail("RAGGED_RANGE", f"{name}: sequence {i} ends at token "
                       f"{tok[i + 1]} past the tensor's {toks} tokens")  # fmt: skip
+        if tensors is None:
+            continue
+        for role in side_roles[tensor]:
+            have = _thd_tensor_tokens(req, tensors, role)
+            if have is not None and tok[-1] > have:
+                _fail("RAGGED_RANGE", f"{name}: the offsets end at token {tok[-1]} "
+                      f"past {role}'s {have} tokens")  # fmt: skip
 
 
 def check_attn_dense_bwd_tensors(

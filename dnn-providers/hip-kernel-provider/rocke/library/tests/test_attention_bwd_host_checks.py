@@ -204,6 +204,49 @@ def test_thd_offsets_per_side_multipliers():
     check_attn_bwd_lengths(half, offsets_kv=[0, 4, 6])
 
 
+def test_thd_offsets_end_within_every_tensor_of_the_side():
+    """The end token of each table must lie inside every tensor of its side,
+    each against its own token count, not only the caller's ``tokens_*``."""
+    req = _req(layout="thd")
+    q, kv = 512, 128
+    offs_q, offs_kv = [0, 100 * q, 228 * q], [0, 96 * kv, 96 * kv]
+    good = _general_tensors(req, tokens=(228, 96))
+    check_attn_bwd_lengths(req, offsets_q=offs_q, offsets_kv=offs_kv, tensors=good)
+
+    def short(role, tokens):
+        t = dict(good)
+        m = good[role]
+        shape = (tokens, *m.shape[1:])
+        t[role] = _meta(shape, m.strides, m.dtype)
+        return t
+
+    for role, tokens, name in (
+        ("o", 227, "offsets_q"),
+        ("dq", 100, "offsets_q"),
+        ("v", 95, "offsets_kv"),
+        ("dk", 1, "offsets_kv"),
+        ("dv", 0, "offsets_kv"),
+    ):
+        with pytest.raises(ValueError, match=f"^RAGGED_RANGE: {name}: .*past {role}'s"):
+            check_attn_bwd_lengths(
+                req, offsets_q=offs_q, offsets_kv=offs_kv, tensors=short(role, tokens)
+            )
+    # a ragged lse is a Q-side tensor: rank 2 [T, H_q] and the batched [B, H_q, T, 1]
+    lse = good["lse"]
+    t = dict(good, lse=_meta((227, req.h_q), lse.strides, "fp32"))
+    with pytest.raises(ValueError, match="past lse's 227 tokens"):
+        check_attn_bwd_lengths(req, offsets_q=offs_q, tensors=t)
+    batched = _meta((req.b, req.h_q, 227, 1), (0, 227, 1, 1), "fp32")
+    with pytest.raises(ValueError, match="past lse's 227 tokens"):
+        check_attn_bwd_lengths(req, offsets_q=offs_q, tensors=dict(good, lse=batched))
+    # a side whose table is not given is not checked
+    check_attn_bwd_lengths(req, offsets_q=offs_q, tensors=short("v", 1))
+    with _code("MISSING_TENSOR"):
+        check_attn_bwd_lengths(
+            req, offsets_q=offs_q, tensors={k: v for k, v in good.items() if k != "do"}
+        )
+
+
 def test_tensor_meta_of_a_torch_like_tensor():
     class Storage:
         def nbytes(self):
