@@ -1460,7 +1460,7 @@ class TestGpuConvWrwRingInfinities : public ::testing::TestWithParam<DeviceCase>
 /// The catalog's matrix-core ring configs.
 const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& ringCatalog()
 {
-    static const auto ring = [] {
+    static const auto s_ring = [] {
         std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> out;
         for(const auto& kernel : catalog())
         {
@@ -1471,7 +1471,7 @@ const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& ringCatalog()
         }
         return out;
     }();
-    return ring;
+    return s_ring;
 }
 
 TEST_P(TestGpuConvWrwRingInfinities, Float)
