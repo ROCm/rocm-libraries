@@ -689,9 +689,19 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         }
         else
         {
-            lo = rocke_b_to_sgpr_u32(b, rocke_b_div(b, rocke_b_mul(b, w, T), ctx->fwd_p_ks_count));
+            /* floor(w * T / G) as w * (T / G) + w * (T % G) / G: w * T
+             * overflows i32 on large problems, these terms do not (G < 2^15). */
+            rocke_value_t* G = ctx->fwd_p_ks_count;
+            rocke_value_t* q = rocke_b_div(b, T, G);
+            rocke_value_t* r = rocke_b_mod(b, T, G);
+            auto part = [&](rocke_value_t* w_) -> rocke_value_t* {
+                rocke_value_t* wq = rocke_b_mul(b, w_, q);
+                rocke_value_t* wr = rocke_b_div(b, rocke_b_mul(b, w_, r), G);
+                return rocke_b_add(b, wq, wr);
+            };
+            lo = rocke_b_to_sgpr_u32(b, part(w));
             rocke_value_t* w1 = rocke_b_add(b, w, c1);
-            hi = rocke_b_to_sgpr_u32(b, rocke_b_div(b, rocke_b_mul(b, w1, T), ctx->fwd_p_ks_count));
+            hi = rocke_b_to_sgpr_u32(b, part(w1));
             t0 = rocke_b_div(b, lo, kt);
             rocke_value_t* t1 = rocke_b_div(b, rocke_b_sub(b, hi, c1), kt);
             rocke_value_t* lt = rocke_b_cmp_lt(b, lo, hi);

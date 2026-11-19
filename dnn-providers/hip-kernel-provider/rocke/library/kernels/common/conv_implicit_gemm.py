@@ -3009,10 +3009,16 @@ def _build_implicit_gemm_conv_impl(
                 b.select(_shy_prim, _c1, b.smax(b.sub(_shy_r1, _shy_r0), c0))
             )
         else:
-            _fsk_lo = b.to_sgpr_u32(b.div(b.mul(_fsk_w, _fsk_T), p_ks_count))
-            _fsk_hi = b.to_sgpr_u32(
-                b.div(b.mul(b.add(_fsk_w, _c1), _fsk_T), p_ks_count)
-            )
+            # floor(w * T / G) as w * (T / G) + w * (T % G) / G: w * T
+            # overflows i32 on large problems, these terms do not (G < 2^15).
+            _fsk_q = b.div(_fsk_T, p_ks_count)
+            _fsk_r = b.mod(_fsk_T, p_ks_count)
+
+            def _fsk_at(w_):
+                return b.add(b.mul(w_, _fsk_q), b.div(b.mul(w_, _fsk_r), p_ks_count))
+
+            _fsk_lo = b.to_sgpr_u32(_fsk_at(_fsk_w))
+            _fsk_hi = b.to_sgpr_u32(_fsk_at(b.add(_fsk_w, _c1)))
             _fsk_t0 = b.div(_fsk_lo, _fsk_kt)
             _fsk_t1 = b.div(b.sub(_fsk_hi, _c1), _fsk_kt)
             _fsk_nseg = b.select(
