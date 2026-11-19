@@ -137,7 +137,7 @@ archs = ["gfx940", "gfx941", "gfx942"]
 filters = [
     "*_SdpaFwdPlan_*.fp8_e4m3_fnuz_*",
 ]
-reason = "ALMIOPEN-3125: FP8_E4M3_FNUZ inputs give a wrong or non-finite O"
+reason = "ALMIOPEN-2273: fp8 q/k/v descales passed by value are ignored, so O is wrong or non-finite"
 
 # SdpaFwdPlan cases whose run-time attention scale is zero. The engine refuses them at execute.
 [[test_skips]]
