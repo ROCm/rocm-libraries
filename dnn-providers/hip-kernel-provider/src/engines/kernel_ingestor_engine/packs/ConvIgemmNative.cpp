@@ -995,7 +995,7 @@ FlexTailSplit flexTailSplit(
     }
     const long long tiles = rowTiles * rowWidth;
     long long bestCost = divUp(tiles, units) * kSteps;
-    auto consider = [&](long long first) {
+    const auto consider = [&](long long first) {
         const long long tail = (rowTiles - first) * rowWidth;
         for(long long splits = 2; splits <= MAX_SPLITS; ++splits)
         {
@@ -2141,7 +2141,7 @@ public:
                                                   channelsFirstOutput ? pixels : 1,
                                                   a.k);
         }
-        auto launchConv = [&](compilation::IRunnableKernel& conv) {
+        const auto launchConv = [&](compilation::IRunnableKernel& conv) {
             if(fused)
             {
                 conv.launch(stream, args, epiArgs);
