@@ -1925,6 +1925,10 @@ def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:
             "xwin_rows / xwin_groups / xwin_pp / xwin_mrow / xwin_gn / xwin_bq / "
             "xwin_aq / xwin_pps / xwin_rot / xwin_kord need xwin"
         )
+    elif spec.ws_lc or spec.ws_gred:
+        # The ws_lc / ws_gred epilogues are written for the xwin atoms (their
+        # gates run in _xwin_conflict); without xwin they only rename.
+        return "ws_lc / ws_gred need xwin"
     if spec.sep_addr not in (0, 1, 2):
         return f"sep_addr must be 0, 1 or 2 (got {spec.sep_addr})"
     if spec.sep_addr and (spec.group_merge > 1 or spec.problem.is_pointwise):
@@ -2061,6 +2065,11 @@ def _staged_chunks_conflict(spec: "WgradConvSpec", label: str) -> str:
     chunks = _sync_staged_chunks(spec)
     if chunks is not None:
         for operand, n in zip("AB", chunks):
+            # The xwin loop loads B (the X window) in its own fixed-width
+            # units, and A too when xwin_rows > 1; only the A tile of
+            # xwin_rows 1 goes through the synchronous loader.
+            if spec.xwin and (operand == "B" or spec.xwin_rows > 1):
+                continue
             if n > _PGR_MAX_STAGED_CHUNKS:
                 return (
                     f"{label} carries at most {_PGR_MAX_STAGED_CHUNKS} "
@@ -3169,10 +3178,10 @@ def _wgrad_epilogue_lds_bytes(spec: WgradConvSpec) -> int:
     wave of both groups (xwin's atoms hold 4 accumulators per lane).
     """
     n = 0
-    if spec.ws_lc:
+    if spec.ws_lc and spec.xwin:
         w = 16 * (spec.mfmas_per_warp_n // spec.xwin)
         n = max(n, (spec.block_size // spec.wave_size) * 16 * (w + 4) * 4)
-    if spec.ws_gred:
+    if spec.ws_gred and spec.xwin:
         n = max(n, 2 * (spec.warp_m * spec.warp_n) * 2 * 64 * 4 * 4)
     return n
 

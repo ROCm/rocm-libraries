@@ -789,6 +789,14 @@ static bool wgrad_sync_staged_chunks(const rocke_implicit_gemm_conv_wgrad_spec_t
     return true;
 }
 
+/* Python _staged_chunks_conflict: whether operand i (0 = A, 1 = B) goes
+ * through the synchronous loader. The xwin loop loads B (the X window) in its
+ * own fixed-width units, and A too when xwin_rows > 1. */
+static bool wgrad_staged_operand_charged(const rocke_implicit_gemm_conv_wgrad_spec_t* s, int i)
+{
+    return !(s->xwin && (i == 1 || s->xwin_rows > 1));
+}
+
 /* Python _kp_line_conflict: kp_line re-decodes the k-packed row-mode store of
  * the synchronous M-outer loaders, so at least one operand must take
  * row_kpack (the builder's kpack_ok choice) and every operand that does must
@@ -1148,7 +1156,7 @@ static bool wgrad_branch_conflict(const rocke_implicit_gemm_conv_wgrad_spec_t* s
         int chunks[2];
         if(wgrad_sync_staged_chunks(s, chunks))
             for(int i = 0; i < 2; ++i)
-                if(chunks[i] > ROCKE_CTL_MAX_VECS_PER_THREAD)
+                if(wgrad_staged_operand_charged(s, i) && chunks[i] > ROCKE_CTL_MAX_VECS_PER_THREAD)
                     BR_REJECT("prefetch_regs carries at most %d global loads per thread per "
                               "operand; the %s tile needs %d (use a wider vector or a smaller "
                               "tile)",
@@ -1704,7 +1712,7 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         {
             for(int i = 0; i < 2; ++i)
             {
-                if(chunks[i] > ROCKE_CTL_MAX_VECS_PER_THREAD)
+                if(wgrad_staged_operand_charged(s, i) && chunks[i] > ROCKE_CTL_MAX_VECS_PER_THREAD)
                 {
                     if(reason && reason_cap)
                         snprintf(

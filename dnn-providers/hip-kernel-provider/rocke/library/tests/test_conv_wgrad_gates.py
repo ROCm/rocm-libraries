@@ -215,6 +215,17 @@ def _gated():
     return out
 
 
+def _python_only_gated():
+    """(label, spec, arch, reason substring) that Python refuses on its own
+    rule; the C++ engine refuses them earlier, as knobs it does not port."""
+    out = []
+    for idx in (0, 16, 109, 111):
+        spec, arch = _emitter_spec(idx)
+        for kw in (dict(ws_lc=1), dict(ws_gred=1)):
+            out.append((f"no_xwin_{idx}_{kw}", replace(spec, **kw), arch, "need xwin"))
+    return out
+
+
 def _admitted():
     """(label, spec, arch): the near twins of the gated specs, which build."""
     s110, a110 = _emitter_spec(110)
@@ -274,6 +285,11 @@ def _admitted():
     for idx in (113, 120, 127, 133, 137, 139):
         spec, arch = _emitter_spec(idx)
         out.append((f"parity_{idx}", spec, arch))
+    # The xwin loop loads the X window in its own units: a narrow B vector
+    # does not count against the staged-load cap.
+    for idx in (137, 139):
+        spec, arch = _emitter_spec(idx)
+        out.append((f"parity_{idx}_vb1", replace(spec, vector_size_b=1), arch))
     return out
 
 
@@ -282,6 +298,17 @@ class TestPythonWgradGates(unittest.TestCase):
         from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
 
         for label, spec, arch, why in _gated():
+            with self.subTest(label):
+                ok, reason = is_valid_wgrad_spec(spec, arch)
+                self.assertFalse(ok)
+                self.assertIn(why, reason)
+
+    def test_python_only_knobs_need_xwin(self):
+        # ws_lc / ws_gred are written for the xwin atoms: without xwin the
+        # validator refuses them (it used to divide by xwin = 0).
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        for label, spec, arch, why in _python_only_gated():
             with self.subTest(label):
                 ok, reason = is_valid_wgrad_spec(spec, arch)
                 self.assertFalse(ok)
@@ -297,7 +324,7 @@ class TestPythonWgradGates(unittest.TestCase):
     def test_spec_only_rules_raise_in_validate(self):
         # The knob rules live in the gate validate() shares, so a builder call
         # fails with the reason rather than building a renamed kernel.
-        for label, spec, _arch, why in _gated():
+        for label, spec, _arch, why in _gated() + _python_only_gated():
             if "lds" in label:
                 continue  # the LDS budget needs the arch
             with self.subTest(label):
