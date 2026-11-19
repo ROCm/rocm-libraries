@@ -574,7 +574,7 @@ TEST(TestConvDeviceUnits, XcdCountFollowsTheDieSizeOfTheArchitecture)
     EXPECT_EQ(device_units::xcdCount(deviceOf("gfx942", 38)), 1); // one die
     EXPECT_EQ(device_units::xcdCount(deviceOf("gfx950", 256)), 8);
     EXPECT_EQ(device_units::xcdCount(deviceOf("gfx950", 32)), 1);
-    EXPECT_EQ(device_units::xcdCount(deviceOf("gfx942", 100)), 1); // no die size divides it
+    EXPECT_EQ(device_units::xcdCount(deviceOf("gfx942", 90)), 1); // no die size divides it
     EXPECT_EQ(device_units::xcdCount(deviceOf("gfx90a", 104)), 1);
     EXPECT_EQ(device_units::xcdCount(deviceOf("gfx1151", 20)), 1);
     EXPECT_EQ(device_units::xcdCount(deviceOf("gfx942", 0)), 1);
