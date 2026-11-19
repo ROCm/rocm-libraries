@@ -410,7 +410,7 @@ BenchmarkProblems:
           - Exact: [128, 128, 3, 512]
           - Exact:
               sizes: [200, 100, 2, 200]
-              stridesA: [1, 200, 45000]
+              stridesA: [1, 200, 50000]
   -
     - # ProblemType, TN, F8 swizzle-A, multi-wave, VectorWidthA = 2 and 4 (the swizzled read re-decomposes
       # the VW-strided M into (mO, mI); same path as swizzle-B VWB>1). Includes a tail-K size.

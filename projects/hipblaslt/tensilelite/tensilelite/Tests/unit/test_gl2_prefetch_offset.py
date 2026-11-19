@@ -131,6 +131,7 @@ from gpu_test_helpers import (  # noqa: E402
 TARGET = "gfx1250"
 HAS_GFX1250 = GFX_TARGET == TARGET
 WAVESIZE = 32
+HOST_PAD_K_BYTES = 64   # host K padding of a swizzled-TDM operand (SwizzledTdmGeometry.PAD_K_BYTES)
 GLOBAL_PREFETCH_SIZE = 256
 
 
@@ -407,8 +408,8 @@ CONFIGS = [
     GL2Config("ab_swizzled_tdm_nl2", [_A(True, 64, swizzled_tdm=True),
                                        _B(False, 64, swizzled_tdm=True)],
               depth_u=256, num_threads=32, cluster=(1, 1)),
-    # Runtime K is not swizzleK-aligned. The physical row stride must use the
-    # host-padded K extent (alignUp(2033, 32) == 2048), not raw SizeL.
+    # Runtime K is not padK-aligned. The physical row stride must use the
+    # host-padded K extent (alignUp(2033, 64) == 2048), not raw SizeL.
     GL2Config("ab_swizzled_tdm_padded_k", [_A(True, 64, swizzled_tdm=True),
                                             _B(False, 64, swizzled_tdm=True)],
               depth_u=128, cluster=(2, 2), size_l=2033),
@@ -943,6 +944,7 @@ def build_kernel(cfg, with_prefetch=False):
             mi = cfg.matrix_inst_m if t.subtc == "A" else cfg.matrix_inst_n
             inner_k = round(16 / t.bpe)
             tp["swizzleK"] = inner_k * (WAVESIZE // mi)
+            tp["swizzlePadK"] = round(HOST_PAD_K_BYTES / t.bpe)
         comp.init(w, kernel, tp)
         assert tp["gl2nc"] == tensor_dims(t, cfg)[3], \
             f"{t.tc}: gl2nc {tp['gl2nc']} != expected {tensor_dims(t, cfg)[3]}"
@@ -1349,11 +1351,11 @@ def _footprint_geometry(spec, cfg, stage, batch, group):
         coal_to_mt=spec.is_mx or spec.tlu,   # MT offset & clamp land in coal (else perp)
         shift=shift, swizzled=spec.swizzled_tdm)
     if spec.swizzled_tdm:
-        # Swizzled-TDM rows are outer MI rows `MI * alignUp(SizeL, swizzleK)`
+        # Swizzled-TDM rows are outer MI rows `MI * alignUp(SizeL, padK)`
         # elements apart; each row's DepthU slice (coal elements) is contiguous.
         mi = cfg.matrix_inst_m if spec.subtc == "A" else cfg.matrix_inst_n
-        swizzle_k = round(16 / spec.bpe) * (WAVESIZE // mi)
-        padded_k = (cfg.size_l + swizzle_k - 1) // swizzle_k * swizzle_k
+        pad_k = round(HOST_PAD_K_BYTES / spec.bpe)
+        padded_k = (cfg.size_l + pad_k - 1) // pad_k * pad_k
         g.row_stride_bytes = round(mi * padded_k * spec.bpe)
         g.last_valid_row = (size_free - 1) // mi
     return g

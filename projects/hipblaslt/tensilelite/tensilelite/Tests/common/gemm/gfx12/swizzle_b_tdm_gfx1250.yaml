@@ -897,7 +897,7 @@ BenchmarkProblems:
           - Exact: [128, 128, 2, 512]
           - Exact:
               sizes: [100, 200, 2, 400]
-              stridesB: [1, 400, 90000]
+              stridesB: [1, 400, 100000]
           - Exact:
               sizes: [128, 128, 2, 400]
               stridesB: [1, 512, 70000]
@@ -973,7 +973,7 @@ BenchmarkProblems:
           - Exact: [100, 200, 1, 200]
           - Exact:
               sizes: [100, 200, 2, 400]
-              stridesB: [1, 400, 100000]
+              stridesB: [1, 400, 120000]
         - ActivationArgs:
           - [Enum: none]
   -

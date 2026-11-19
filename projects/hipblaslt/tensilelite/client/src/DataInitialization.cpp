@@ -938,16 +938,30 @@ namespace TensileLite
             return stream;
         }
 
+        // K elements a swizzled tensor's rows are padded to. gfx942 pads to its swizzle K block;
+        // gfx1250 swizzles in smaller K blocks (32 B) but pads to 64 B as well. Flattening the K block
+        // indices gives the same bytes for either block size, so with the same padding the layout is
+        // identical on both architectures and one hipblasLtOrder_t (COL16_4R*, K in 64 B) covers both.
+        size_t swizzledPaddedKUnit(size_t swizzleK, float elementBytes, bool isGfx1250)
+        {
+            if(!isGfx1250)
+                return swizzleK;
+            const size_t padK = static_cast<size_t>(64.0f / elementBytes);
+            return std::max(swizzleK, padK);
+        }
+
         size_t getSwizzledTensorNumAllocatedElements(const TensorDescriptor& desc,
                                                      size_t                  miM_N,
                                                      size_t                  miK,
-                                                     size_t                  packK)
+                                                     size_t                  packK,
+                                                     bool                    isGfx1250)
         {
             // TODO: currently [0][1] = k, (m or n) is based on TN, need to make this generic in the future
             const auto k         = desc.sizes()[0];
             const auto m_n       = desc.sizes()[1];
             const auto b         = desc.sizes()[2];
-            const auto swizzleK  = miK * packK;
+            const auto swizzleK
+                = swizzledPaddedKUnit(miK * packK, desc.elementBytes(), isGfx1250);
             const auto paddedM_N = DGen::roundUp(m_n, miM_N);
             const auto paddedK   = DGen::roundUp(k, swizzleK);
             const auto perBatch  = paddedM_N * paddedK;
@@ -1116,7 +1130,7 @@ namespace TensileLite
                             size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
                             calculateKforSwizzling(dataType, MiK, MiKv, PackK, m_isGfx1250);
                             numAllocatedElements = getSwizzledTensorNumAllocatedElements(
-                                problem.tensors()[i], MiM_N, MiK, PackK);
+                                problem.tensors()[i], MiM_N, MiK, PackK, m_isGfx1250);
                             numAllocatedBytes = multiplyElementSize(
                                 numAllocatedElements, rocisa::GetElementSize(dataType));
                         }
@@ -1746,7 +1760,7 @@ namespace TensileLite
                         calculateKforSwizzling(problem.tensors()[i].dataType(), MiK, MiKv, PackK, m_isGfx1250);
                         padding = pUnit.maxElements
                                   - getSwizzledTensorNumAllocatedElements(
-                                      problem.tensors()[i], MiM_N, MiK, PackK);
+                                      problem.tensors()[i], MiM_N, MiK, PackK, m_isGfx1250);
                     }
                 }
                 padding = multiplyElementSize(
@@ -2923,7 +2937,8 @@ namespace TensileLite
                             size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
                             calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK, m_isGfx1250);
                             swizzlePadding
-                                = getSwizzledTensorNumAllocatedElements(desc, MiM_N, MiK, PackK)
+                                = getSwizzledTensorNumAllocatedElements(
+                                      desc, MiM_N, MiK, PackK, m_isGfx1250)
                                   - desc.totalAllocatedElements();
                         }
 
@@ -3200,9 +3215,12 @@ namespace TensileLite
                         ? size_t(MiKv * PackK * desc.elementBytes()) : MiKv;
                     size_t effPackK = isSubByte ? size_t(1) : PackK;
 
+                    // K is padded to a whole number of swizzle K blocks (see swizzledPaddedKUnit);
+                    // the effective element is one byte for sub-byte types.
+                    const size_t padUnitK = swizzledPaddedKUnit(
+                        effMiK * effPackK, effectiveElem, m_isGfx1250);
                     ::Tensor::Manipulation::Shape paddedShape{
-                        DGen::roundUp(tiledSize, MiM_N),
-                        DGen::roundUp(effUnrolled, effMiK * effPackK)};
+                        DGen::roundUp(tiledSize, MiM_N), DGen::roundUp(effUnrolled, padUnitK)};
                     // Batched: each batch is swizzled on its own and placed at the problem's
                     // batch stride, which the kernel also uses to step between batches. The
                     // source keeps the descriptor's leading dimension; the swizzled layout is
@@ -3223,7 +3241,8 @@ namespace TensileLite
                            << batchStride << " is smaller than one padded swizzled batch ("
                            << perBatchNative << " elements = alignUp(" << tiledSize << ", "
                            << MiM_N << ") x alignUp(" << unrolledSize << ", "
-                           << MiK * PackK << "))";
+                           << swizzledPaddedKUnit(MiK * PackK, desc.elementBytes(), m_isGfx1250)
+                           << "))";
                         throw std::runtime_error(ss.str());
                     }
                     if(isSubByte && srcLd != unrolledSize)
