@@ -41,11 +41,14 @@ namespace rocsparse
                       "BLOCKSIZE must be a power of two.");
 
         int tid = hipThreadIdx_x;
-        I   gid = BLOCKSIZE * hipBlockIdx_x + tid;
+
+        // Keep the grid-stride arithmetic wide even when I is 32-bit.
+        const int64_t gid    = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + tid;
+        const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
 
         T dotc = static_cast<T>(0);
 
-        for(I idx = gid; idx < nnz; idx += hipGridDim_x * BLOCKSIZE)
+        for(int64_t idx = gid; idx < nnz; idx += stride)
         {
             dotc = rocsparse::fma<T>(y[x_ind[idx] - idx_base], rocsparse::conj(x_val[idx]), dotc);
         }
