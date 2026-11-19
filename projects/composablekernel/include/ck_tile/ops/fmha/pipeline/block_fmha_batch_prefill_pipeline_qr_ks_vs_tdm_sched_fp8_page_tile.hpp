@@ -83,6 +83,10 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTile
     static_assert(CK_TILE_FMHA_FWD_FAST_EXP2,
                   "qr_tdm_sched: every softmax site calls exp2, so log2(e) must be folded into "
                   "scale_s");
+    static_assert(
+        CK_TILE_FMHA_PAGE_TILE_EXPERT_SCHEDULING,
+        "the page tile is built with -mllvm -amdgpu-expert-scheduling-mode: add it and "
+        "-DCK_TILE_FMHA_PAGE_TILE_EXPERT_SCHEDULING=1 (fmha_batch_prefill_page_tile.hpp)");
 
     // Scope of the FP8 page tile: per-tensor FP8 Q / K / V / P with BF16 O; D64/V64 M128 or M64,
     // N128 tiles of P64 pages from the vectorized x = 16 pool through a vLLM block table; no sink

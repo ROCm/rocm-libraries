@@ -272,9 +272,11 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
             CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${head_dim}
             CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=${causal}
             ${ARGN})
-        # fmha_reference.hpp compares floats exactly by design.
+        # fmha_reference.hpp compares floats exactly by design. The define states the expert
+        # scheduling flag to the page-tile pipelines (fmha_batch_prefill_page_tile.hpp).
         target_compile_options(${target} PRIVATE -Wno-float-equal
             -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
+        target_compile_definitions(${target} PRIVATE CK_TILE_FMHA_PAGE_TILE_EXPERT_SCHEDULING=1)
         set(FMHA_QR_TDM_SCHED_TEST_TARGETS ${FMHA_QR_TDM_SCHED_TEST_TARGETS} PARENT_SCOPE)
     endfunction()
 
@@ -437,6 +439,7 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         add_qr_tdm_sched_gtest(${target} test_batch_prefill_fp8_${source}.cpp)
         target_compile_options(${target} PRIVATE -Wno-float-equal
             -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
+        target_compile_definitions(${target} PRIVATE CK_TILE_FMHA_PAGE_TILE_EXPERT_SCHEDULING=1)
         if(name MATCHES "_m64$")
             target_compile_definitions(${target} PRIVATE CK_TILE_FMHA_FP8_OPERAND_LAYOUT_TEST_M64=1)
         endif()
