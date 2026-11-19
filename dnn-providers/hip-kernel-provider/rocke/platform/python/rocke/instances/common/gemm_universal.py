@@ -3312,6 +3312,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         if cb and not _os_ra.environ.get("ROCKE_EXP_CLUSTER"):
             cb = False  # no cluster launch: the workgroup barrier is enough
         cw = int(_os_ra.environ.get("ROCKE_EXP_MX_RA_CW", "16"))
+        # ROCKE_EXP_MX_RA_CS=n: signal the cluster early, n WMMAs into the second
+        # half of the K-atom before the last (as the mx_gemm prototype does),
+        # without draining this wave's reads; -1 (default): after the barrier.
+        cs = int(_os_ra.environ.get("ROCKE_EXP_MX_RA_CS", "-1")) if cb else -1
+        if cs >= 0 and k_atoms < 2:
+            raise ValueError("ROCKE_EXP_MX_RA_CS needs two K-atoms per tile")
 
         def wmmas(acc, a, bh, sa, sb, which, lo=0, hi=None):
             order = [(j, mi) for j in range(half) for mi in range(mfmas_m)]
@@ -3346,7 +3352,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         # This workgroup is done with the buffer: tell the
                         # cluster (wave 0 only), and refill only once every
                         # member has said so, ``cw`` WMMAs later.
-                        b.inline_asm(_CL_SIGNAL0, "s,~{scc},~{memory}", [_tdm_wave_id])
+                        if cs < 0:
+                            b.inline_asm(_CL_SIGNAL0, "s,~{scc},~{memory}", [_tdm_wave_id])
                         fence()
                         na, nsa, nsb = rd_head(sp, sk)
                         fence()
@@ -3392,7 +3399,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     fence()
                 nb0 = [rd_b(sp, sk, j) for j in range(half)]
                 fence()
-                wmmas(acc, a, b1, sa, sb, 1)
+                if cs >= 0 and s + 2 == k_atoms:
+                    wmmas(acc, a, b1, sa, sb, 1, 0, cs)
+                    fence()
+                    b.inline_asm(_CL_SIGNAL0, "s,~{scc},~{memory}", [_tdm_wave_id])
+                    fence()
+                    wmmas(acc, a, b1, sa, sb, 1, cs)
+                else:
+                    wmmas(acc, a, b1, sa, sb, 1)
                 fence()
                 nb1 = [rd_b(sp, sk, half + j) for j in range(half)]
                 a, sa, sb, b0, b1 = na, nsa, nsb, nb0, nb1
