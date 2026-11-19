@@ -365,9 +365,9 @@ every CI host, so a failed allocation there points at a client bug, a low estima
 process taking the memory, rather than a shortage the preflight could see. Two environment
 variables control these checks:
 
-- `HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP` overrides both rules. `0` makes every memory stop a skip.
-  Any other value makes every one a failure, so a large-memory run can require that every case
-  ran.
+- `HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP` uses the defaults above when unset or empty. `0` makes
+  every memory stop a skip. Any other nonempty value makes every one a failure, so a large-memory
+  run can require that every case ran.
 - `HIPBLASLT_TEST_CHECK_MEMORY_ESTIMATE=1` (Linux) compares each estimate of 256 MiB or more with
   the rise in the process's peak resident memory, and fails a case that used more than its
   estimate plus 10% and 256 MiB. The first case in a process is left out, because it also loads
