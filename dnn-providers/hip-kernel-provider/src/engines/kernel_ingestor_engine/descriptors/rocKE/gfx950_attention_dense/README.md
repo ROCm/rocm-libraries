@@ -64,6 +64,14 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx950AttentionDense`.
   build. The native `score` symbol is the fallback, reached when no model loads, which in
   practice means a build whose `model.bin` was never pulled. The two do not always agree,
   and the knob suite's cold cases pin where they differ.
+- **The trained models cover the 60-kernel catalog, bias kernels included, but were not
+  shown a bias graph.** They were retrained on this catalog (52 collapsed kernels plus 8
+  additive-bias kernels), and `engine.trained_catalog_sha256` pins it. The corpus tool
+  cannot yet emit a graph that carries an `attn_mask`, so no training graph has a bias
+  candidate (AICK-3322). That does not change a choice today: the 8 bias kernels are one
+  per head size, dtype and mask, all at 128/64, so a graph with an `attn_mask` has one
+  bias kernel to pick. It starts to matter when a second bias tile is added, which needs
+  that corpus option and another retrain.
 - **The native symbol reads the problem.** `preferredTile()` picks a tile from head size,
   mask and `seqlen_q`, and candidates are ranked by closeness to it, with the historical
   ascending `(block_m, block_n)` order as the tie-break. It is no longer a fixed
