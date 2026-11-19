@@ -85,7 +85,7 @@ __device__ __attribute__((always_inline)) void k1ConvFlex(const K1Args& a CONV_E
     K1TapMap map;
     int g, phase;
     unsigned bx = blockIdx.x, by = blockIdx.y, bz = blockIdx.z;
-    k1XcdOrder(bx, by, bz, K1_XCDS);
+    k1XcdOrder(bx, by, bz, K1_XCDS); // gfx950: 8 XCDs
     const int splits = a.splits > 1 ? a.splits : 1;
     const int split = static_cast<int>(bz) % splits;
     k1Setup<DIR>(a, static_cast<int>(bz) / splits, gather, map, g, phase);

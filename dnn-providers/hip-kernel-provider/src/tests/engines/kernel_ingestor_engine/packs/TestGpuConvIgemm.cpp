@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -820,7 +821,7 @@ INSTANTIATE_TEST_SUITE_P(,
                                                                                          : "Bwd");
                          });
 
-/// The flex tile (gfx950): flattened-position tiles whose 256 rows straddle planes and images,
+/// The flex tile (gfx950 LDS-DMA form, gfx942 register-staged form): flattened-position tiles whose 256 rows straddle planes and images,
 /// reduction channels and output channels that are not whole k-steps or tiles, odd depths, depth
 /// strides, groups, dilation, filters past 3 taps, and a deep reduction over a tiny grid (split-K).
 struct FlexCase
@@ -863,6 +864,14 @@ std::vector<FlexCase> flexCases()
     cases.push_back({"Ndhwc3x3x3ConvolutionMode", convolution, true});
     cases.push_back(
         {"Ncdhw3x3x3Staged", dense(32, 40, {6, 7, 5}, {3, 3, 3}, {1, 1, 1}, false), true});
+    // A few row tiles past whole rounds of 228 and of 304 units (MI300A, MI325X): the
+    // register-staged form splits only those (the tail split) on the matching device.
+    for(const int64_t rows : {236, 310})
+    {
+        auto tail = dense(128, 16, {rows, 256}, {3, 3}, {1, 1}, true);
+        tail.n = 1;
+        cases.push_back({"Nhwc3x3TailSplit" + std::to_string(rows) + "RowTiles", tail, false});
+    }
     return cases;
 }
 
@@ -874,10 +883,16 @@ protected:
     void run()
     {
         SKIP_IF_NO_DEVICES();
-        const auto properties = currentDeviceProperties();
-        if(hipdnn_plugin_sdk::stripArchFeatures(properties.gcnArchName) != "gfx950")
+        // The properties outlive the arch view into their name.
+        const auto device = currentDeviceProperties();
+        const auto arch = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName);
+        if(arch != "gfx950" && arch != "gfx942")
         {
-            GTEST_SKIP() << "flex tiles run on gfx950 only";
+            GTEST_SKIP() << "flex tiles run on gfx950 and gfx942 only";
+        }
+        if(std::is_same_v<T, float> && arch != "gfx942")
+        {
+            GTEST_SKIP() << "fp32 flex tiles are the gfx942 form's";
         }
         const auto& [flexCase, direction, infinities] = GetParam();
         if(direction == ConvDirection::BACKWARD_DATA && !flexCase.backward)
@@ -896,6 +911,11 @@ TEST_P(TestGpuConvIgemmFlex, Half)
 TEST_P(TestGpuConvIgemmFlex, BFloat16)
 {
     run<BFloat16>();
+}
+
+TEST_P(TestGpuConvIgemmFlex, Float)
+{
+    run<float>();
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -2732,7 +2752,44 @@ TEST(TestConvIgemmSplitPlan, FlexSplitsWithinOneRoundIntoTheFewestStepsPerSplit)
               3);
 }
 
-TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950TilesThatDeclineEveryOtherKnob)
+TEST(TestConvIgemmSplitPlan, FlexTailSplitSplitsTheRowTilesPastTheWholeRounds)
+{
+    // 256 row tiles of 2 tiles, 216 k-steps, 228 units: 228 row tiles fill two rounds and the
+    // other 56 tiles split 4 ways into one more round (2 x 216 + 54 + 14 k-steps).
+    const auto tail = conv_igemm::flexTailSplit(256, 2, 216, 228, true);
+    EXPECT_EQ(tail.splitRowTile, 228);
+    EXPECT_EQ(tail.splits, 4);
+    // With the tail kept in the launch (a fused epilogue), every row tile splits or none does:
+    // 7 rounds of 72 + 14 beat 3 rounds of 216.
+    const auto whole = conv_igemm::flexTailSplit(256, 2, 216, 228, false);
+    EXPECT_EQ(whole.splitRowTile, 0);
+    EXPECT_EQ(whole.splits, 3);
+    // 128 tiles under one round of 228 units, 432 k-steps: 5 splits run 3 rounds of 87 + 14.
+    const auto under = conv_igemm::flexTailSplit(32, 4, 432, 228, true);
+    EXPECT_EQ(under.splitRowTile, 0);
+    EXPECT_EQ(under.splits, 5);
+    // Whole rounds exactly, or a reduction too short to pay a split: unsplit.
+    EXPECT_EQ(conv_igemm::flexTailSplit(228, 2, 216, 228, true).splits, 1);
+    EXPECT_EQ(conv_igemm::flexTailSplit(32, 4, 16, 228, true).splits, 1);
+    // The register-staged plan of a single row tile splits all of it, partials of the whole
+    // output.
+    auto deep = dense(512, 256, {3, 4, 5}, {3, 3, 3}, {1, 1, 1}, true);
+    deep.n = 1;
+    const auto problem = parsedProblem(deep, ConvDirection::FORWARD);
+    const auto plan = conv_igemm::splitPlanFor(
+        problem, 256, 128, 64, deviceOf("gfx942", 228), 0, false, 0, 1, 2);
+    EXPECT_GT(plan.splits, 1);
+    EXPECT_EQ(plan.splitRowTile, 0);
+    EXPECT_EQ(plan.partialElems, plan.outElems);
+    // An explicit split policy splits every row tile: partials of the whole output.
+    const auto explicitPlan = conv_igemm::splitPlanFor(
+        problem, 256, 128, 64, deviceOf("gfx942", 228), 0, false, 4, 1, 2);
+    EXPECT_EQ(explicitPlan.splits, 4);
+    EXPECT_EQ(explicitPlan.splitRowTile, 0);
+    EXPECT_EQ(explicitPlan.partialElems, explicitPlan.outElems);
+}
+
+TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950OrGfx942TilesThatDeclineEveryOtherKnob)
 {
     auto shape = dense(32, 48, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, true);
     shape.dataType = DataType::HALF;
@@ -2754,17 +2811,24 @@ TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950TilesThatDeclineEveryOtherKnob)
                 continue;
             }
             SCOPED_TRACE(kernel.name);
+            // The LDS-DMA form (16x16x32 atoms) is gfx950's, the register-staged form gfx942's:
+            // 128-byte k-steps either way.
+            const bool dma = kernel.getStringMetadata("atom").rfind("mfma16x32_", 0) == 0;
+            const bool fp32 = kernel.getStringMetadata("dtype") == "FLOAT";
             EXPECT_EQ(kernel.getIntMetadata("flex"), 1);
             EXPECT_EQ(kernel.getIntMetadata("bm"), 256);
-            EXPECT_EQ(kernel.getIntMetadata("bk"), 64);
+            EXPECT_EQ(kernel.getIntMetadata("bk"), fp32 ? 32 : 64);
             EXPECT_EQ(kernel.getIntMetadata("xcd"), 1);
             if(kernel.getStringMetadata("dtype") != "HALF")
             {
                 continue;
             }
             ++flex;
-            EXPECT_TRUE(matchesKernel(pack, gfx950.context(), kernel, *bound950));
-            EXPECT_FALSE(matchesKernel(pack, gfx942.context(), kernel, *bound942));
+            const auto& home = dma ? gfx950 : gfx942;
+            const auto& homeBound = dma ? *bound950 : *bound942;
+            EXPECT_TRUE(matchesKernel(pack, home.context(), kernel, homeBound));
+            EXPECT_FALSE(matchesKernel(
+                pack, (dma ? gfx942 : gfx950).context(), kernel, dma ? *bound942 : *bound950));
             for(const auto& [field, value] :
                 std::initializer_list<std::pair<const char*, int64_t>>{{"flex", 2},
                                                                        {"bm", 128},
@@ -2789,11 +2853,11 @@ TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950TilesThatDeclineEveryOtherKnob)
                 SCOPED_TRACE(field);
                 auto mutated = kernel;
                 mutated.metadata[field] = value;
-                EXPECT_FALSE(matchesKernel(pack, gfx950.context(), mutated, *bound950));
+                EXPECT_FALSE(matchesKernel(pack, home.context(), mutated, homeBound));
             }
             auto atom = kernel;
             atom.metadata["atom"] = std::string("mfma32x16_f16");
-            EXPECT_FALSE(matchesKernel(pack, gfx950.context(), atom, *bound950));
+            EXPECT_FALSE(matchesKernel(pack, home.context(), atom, homeBound));
         }
         // Backward data in stride phases and filters past ten taps on an axis decline.
         auto strided = shape;
@@ -2807,16 +2871,19 @@ TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950TilesThatDeclineEveryOtherKnob)
             {
                 continue;
             }
-            const GraphFixture fixture(buildGraph(specFor(declined, direction)),
-                                       deviceOf("gfx950", 256));
-            const auto bound = matchesGraph(pack, fixture.context());
-            ASSERT_TRUE(bound.has_value());
-            for(const auto& kernel : catalog(direction))
+            for(const auto& device :
+                {deviceOf("gfx950", 256), deviceOf("gfx942:sramecc+:xnack-", 304)})
             {
-                if(kernel.getIntMetadata("flex") != 0)
+                const GraphFixture fixture(buildGraph(specFor(declined, direction)), device);
+                const auto bound = matchesGraph(pack, fixture.context());
+                ASSERT_TRUE(bound.has_value());
+                for(const auto& kernel : catalog(direction))
                 {
-                    EXPECT_FALSE(matchesKernel(pack, fixture.context(), kernel, *bound))
-                        << kernel.name;
+                    if(kernel.getIntMetadata("flex") != 0)
+                    {
+                        EXPECT_FALSE(matchesKernel(pack, fixture.context(), kernel, *bound))
+                            << kernel.name;
+                    }
                 }
             }
         }
@@ -2824,14 +2891,18 @@ TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950TilesThatDeclineEveryOtherKnob)
         auto huge = dense(64, 64, {4096, 4096}, {3, 3}, {1, 1}, true);
         huge.n = 1;
         huge.dataType = DataType::HALF;
-        const GraphFixture big(buildGraph(specFor(huge, direction)), deviceOf("gfx950", 256));
-        const auto bigBound = matchesGraph(pack, big.context());
-        ASSERT_TRUE(bigBound.has_value());
-        for(const auto& kernel : catalog(direction))
+        for(const auto& device : {deviceOf("gfx950", 256), deviceOf("gfx942:sramecc+:xnack-", 304)})
         {
-            if(kernel.getIntMetadata("flex") != 0)
+            const GraphFixture big(buildGraph(specFor(huge, direction)), device);
+            const auto bigBound = matchesGraph(pack, big.context());
+            ASSERT_TRUE(bigBound.has_value());
+            for(const auto& kernel : catalog(direction))
             {
-                EXPECT_FALSE(matchesKernel(pack, big.context(), kernel, *bigBound)) << kernel.name;
+                if(kernel.getIntMetadata("flex") != 0)
+                {
+                    EXPECT_FALSE(matchesKernel(pack, big.context(), kernel, *bigBound))
+                        << kernel.name;
+                }
             }
         }
     }
