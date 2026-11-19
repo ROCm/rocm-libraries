@@ -8,8 +8,8 @@
 # run_rocjitsu_hipblaslt_gemm_race_checks.sh:
 #   random-gemms  Fixed-seed sampled GEMMs for the emulated target.
 #
-# The small per-PR race checks are a TheRock test (hipblaslt-rocjitsu-race),
-# not part of this workflow.
+# The small race smoke runner is installed with hipBLASLt for TheRock to
+# schedule separately (planned in ROCm/TheRock#9914).
 #
 # Each run emulates one GPU target: amdgpu_families selects the TheRock
 # artifact group to fetch and amdgpu_targets the target whose kernels and
