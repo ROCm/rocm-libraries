@@ -23,6 +23,10 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * `tensilelite-client` now moves each remote peer's SDMA queue off KFD's recommended engine by default (`--fused-a2a-sdma-rotate`, default `-1`), in both fused modes. Remote peer queues need an even xGMI SDMA engine from KFD, and a nonzero rotation also needs 14 xGMI SDMA engines; on other nodes pass `--fused-a2a-sdma-rotate=0`.
 * `hipblaslt.h` no longer includes `<regex>`, which none of the hipBLASLt headers use. Code that uses `std::regex` must include `<regex>` itself.
 
+### Optimized
+
+* Improved gfx950 performance of skinny FP8 TN GEMMs with one to four tokens, scalar or no A and B scales, BF16 or FP16 output and no bias or a bias of the output type (`torch._scaled_mm` with per-tensor scales) by routing them to vLLM's wave-split-K FP8 custom kernels.
+
 ### Resolved issues
 
 * Fixed `hipblaslt-bench` and `hipblaslt-test` rejecting a compute-input type override for A alone and accepting an unsupported override for B alone.

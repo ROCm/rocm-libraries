@@ -22,6 +22,7 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
+#include <hipblaslt/hipblaslt_float8.h>
 
 // hipblaslt-test links roc::tensilelite-host (through hipblaslt-clients-common),
 // so the solution metadata the launch gate reasons from is available here even
@@ -313,12 +314,23 @@ namespace
         // HIPBLAS_OP_T stores A as k x m (lda = k), the layout the gfx950
         // skinny custom kernels take.
         hipblasOperation_t transA = HIPBLAS_OP_N;
-        // The type of C and D. The skinny custom kernels write D in A's type.
+        // The type of C and D. The skinny custom kernels write D in A's type,
+        // or in BF16 or FP16 for FP8 A and B.
         hipDataType dType = HIP_R_32F;
+        // The bias vector's type with useBias. The skinny custom kernels add a
+        // bias of D's type.
+        hipDataType biasType = HIP_R_32F;
+        // Neither 1 nor a power of two, alpha times the dot product rounds, so
+        // an epilogue that fuses it with the bias in some rows only shows.
+        float alpha = 1.0f;
+        // Scalar A and B scales, which an FP8 GEMM takes.
+        bool scaleAB = false;
     };
 
     size_t elementSizeOf(hipDataType type)
     {
+        if(type == HIP_R_8F_E4M3)
+            return 1;
         return type == HIP_R_32F ? sizeof(float) : sizeof(uint16_t);
     }
 
@@ -327,15 +339,25 @@ namespace
     // reference below must see the same numbers the kernel does, or its
     // order-sensitivity self-check describes a different problem.
     //
-    // HIP_R_16BF uses hip_bfloat16 and HIP_R_16F _Float16. hipBLASLt leaves
-    // mxDataGenerator off on Windows, so this harness cannot depend on DGen
-    // headers.
+    // HIP_R_16BF uses hip_bfloat16, HIP_R_16F _Float16 and HIP_R_8F_E4M3
+    // (OCP, gfx950's FP8) hipblaslt_f8. hipBLASLt leaves mxDataGenerator off on
+    // Windows, so this harness cannot depend on DGen headers.
     std::vector<uint8_t> encodeOperand(std::vector<float>& values, hipDataType type)
     {
         std::vector<uint8_t> bytes(values.size() * elementSizeOf(type));
         if(type == HIP_R_32F)
         {
             std::memcpy(bytes.data(), values.data(), bytes.size());
+            return bytes;
+        }
+        if(type == HIP_R_8F_E4M3)
+        {
+            for(size_t idx = 0; idx < values.size(); ++idx)
+            {
+                const hipblaslt_f8 fp8(values[idx]);
+                std::memcpy(&bytes[idx], &fp8, 1);
+                values[idx] = static_cast<float>(fp8);
+            }
             return bytes;
         }
 
@@ -377,6 +399,7 @@ namespace
             if(m_layoutA)
                 hipblasLtMatrixLayoutDestroy(m_layoutA);
             static_cast<void>(hipFree(m_deviceWorkspace));
+            static_cast<void>(hipFree(m_deviceScales));
             static_cast<void>(hipFree(m_deviceBias));
             static_cast<void>(hipFree(m_deviceD));
             static_cast<void>(hipFree(m_deviceB));
@@ -420,7 +443,9 @@ namespace
             }
 
             if(m_problem.useBias
-               && hipMalloc(&m_deviceBias, static_cast<size_t>(m) * sizeof(float)) != hipSuccess)
+               && hipMalloc(&m_deviceBias,
+                            static_cast<size_t>(m) * elementSizeOf(m_problem.biasType))
+                      != hipSuccess)
             {
                 skipReason = "hipMalloc failed for bias vector of length " + std::to_string(m);
                 return false;
@@ -472,11 +497,10 @@ namespace
             {
                 // Constant bias across rows: identical A rows + identical bias
                 // keeps the row-uniformity assertion meaningful.
-                std::vector<float> bias(static_cast<size_t>(m), 0.125f);
-                if(hipMemcpy(m_deviceBias,
-                             bias.data(),
-                             bias.size() * sizeof(float),
-                             hipMemcpyHostToDevice)
+                std::vector<float>         bias(static_cast<size_t>(m), 0.125f);
+                const std::vector<uint8_t> biasBytes = encodeOperand(bias, m_problem.biasType);
+                if(hipMemcpy(
+                       m_deviceBias, biasBytes.data(), biasBytes.size(), hipMemcpyHostToDevice)
                    != hipSuccess)
                 {
                     skipReason = "hipMemcpy of bias failed";
@@ -484,7 +508,7 @@ namespace
                 }
 
                 const hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_BIAS;
-                const hipDataType         biasType = HIP_R_32F;
+                const hipDataType         biasType = m_problem.biasType;
                 if(hipblasLtMatmulDescSetAttribute(m_desc,
                                                    HIPBLASLT_MATMUL_DESC_EPILOGUE,
                                                    &epilogue,
@@ -502,6 +526,30 @@ namespace
                           != HIPBLAS_STATUS_SUCCESS)
                 {
                     ADD_FAILURE() << "Setting bias epilogue attributes must succeed";
+                    return false;
+                }
+            }
+
+            if(m_problem.scaleAB)
+            {
+                const float scales[2] = {1.5f, 0.625f};
+                if(hipMalloc(&m_deviceScales, sizeof(scales)) != hipSuccess
+                   || hipMemcpy(m_deviceScales, scales, sizeof(scales), hipMemcpyHostToDevice)
+                          != hipSuccess)
+                {
+                    skipReason = "hipMalloc or hipMemcpy of the A and B scales failed";
+                    return false;
+                }
+                float* scaleA = static_cast<float*>(m_deviceScales);
+                float* scaleB = scaleA + 1;
+                if(hipblasLtMatmulDescSetAttribute(
+                       m_desc, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, &scaleA, sizeof(scaleA))
+                       != HIPBLAS_STATUS_SUCCESS
+                   || hipblasLtMatmulDescSetAttribute(
+                          m_desc, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, &scaleB, sizeof(scaleB))
+                          != HIPBLAS_STATUS_SUCCESS)
+                {
+                    ADD_FAILURE() << "Setting the A and B scale pointers must succeed";
                     return false;
                 }
             }
@@ -626,7 +674,7 @@ namespace
 
             static_cast<void>(hipMemsetAsync(m_deviceD, 0, m_hostD.size(), m_stream));
 
-            const float           alpha = 1.0f;
+            const float           alpha = m_problem.alpha;
             const float           beta  = 0.0f;
             hipblasLtMatmulAlgo_t algo  = candidate.algo;
 
@@ -687,7 +735,7 @@ namespace
         // cannot run it on this problem.
         bool runnable(hipblasLtMatmulHeuristicResult_t& candidate, std::string& reason)
         {
-            const float alpha    = 1.0f;
+            const float alpha    = m_problem.alpha;
             const float beta     = 0.0f;
             size_t      required = 0;
             if(hipblaslt_ext::matmulIsAlgoSupported(m_handle,
@@ -767,11 +815,13 @@ namespace
                 for(auto& value : m_hostB)
                     value = smallSample(rng);
                 std::uniform_real_distribution<float> mantissaOf{1.0f, 2.0f};
-                m_aVector[0] = m_aVector[static_cast<size_t>(k / 2)]
-                    = std::ldexp(mantissaOf(rng), 12);
+                // E4M3 holds at most 448.
+                const int largeExponent = m_problem.abType == HIP_R_8F_E4M3 ? 7 : 12;
+                m_aVector[0]            = m_aVector[static_cast<size_t>(k / 2)]
+                    = std::ldexp(mantissaOf(rng), largeExponent);
                 for(int64_t col = 0; col < n; ++col)
                 {
-                    const float large                             = std::ldexp(mantissaOf(rng), 12);
+                    const float large = std::ldexp(mantissaOf(rng), largeExponent);
                     m_hostB[static_cast<size_t>(col * k)]         = large;
                     m_hostB[static_cast<size_t>(col * k + k / 2)] = -large;
                 }
@@ -840,6 +890,7 @@ namespace
         void*                   m_deviceB         = nullptr;
         void*                   m_deviceD         = nullptr;
         void*                   m_deviceBias      = nullptr;
+        void*                   m_deviceScales    = nullptr;
         void*                   m_deviceWorkspace = nullptr;
         std::vector<float>      m_aVector;
         std::vector<float>      m_hostB;
@@ -1158,6 +1209,42 @@ namespace
     {
         checkDefaultPicksUniform({4096, 3, 256, HIP_R_16BF, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
                                  "wvSpltK_bf16_tn_m4");
+    }
+
+    // FP8 A and B with scalar scales: the wvSplitKQ kernels.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnF8Bf16_4096x1x4096)
+    {
+        checkDefaultPicksUniform({4096,
+                                  1,
+                                  4096,
+                                  HIP_R_8F_E4M3,
+                                  0,
+                                  false,
+                                  HIPBLAS_OP_T,
+                                  HIP_R_16BF,
+                                  HIP_R_32F,
+                                  1.0f,
+                                  true},
+                                 "wvSplitKQ_vllm_f8_bf16_tn_n1_");
+    }
+
+    // m odd: the last YTILE = 2 row tile is partial. n * K is past the 160 KB
+    // LDS stage, so the last token's tail comes from global memory. A bias of
+    // D's type with alpha 0.7: alpha * dot rounds before the bias is added.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnF8F16BiasTail_1031x4x41984)
+    {
+        checkDefaultPicksUniform({1031,
+                                  4,
+                                  41984,
+                                  HIP_R_8F_E4M3,
+                                  0,
+                                  true,
+                                  HIPBLAS_OP_T,
+                                  HIP_R_16F,
+                                  HIP_R_16F,
+                                  0.7f,
+                                  true},
+                                 "wvSplitKQ_vllm_f8_f16_tn_n4_");
     }
 
     // OCP FP6 code of halves / 2. Every |halves| <= 8 is exact in both E2M3 and E3M2.
