@@ -53,6 +53,7 @@ from rocke.helpers.quant import (
     dequantize_scalar_to_f32,
     quant_max_abs,
     quantize_scalar_f32,
+    quantize_prescaled_f32,
 )
 
 
@@ -432,7 +433,8 @@ def test_quantize_scalar_f32_i8_clamps_without_a_nan_select(engine):
 )
 def test_quantize_scalar_f32_refusals(inputs, message):
     """The C++ engine's rocke_b_quantize_scalar_f32 refuses with the same texts
-    (tests/core/test_storage.cpp)."""
+    (tests/core/test_storage.cpp); the quantize_prescaled_f32 check is Python
+    only."""
     b = IRBuilder("quantize_refusal")
     constants = {"f32": b.const_f32(1.0), "i32": b.const_i32(0)}
     value, inv_scale = (constants[name] for name in inputs)
@@ -441,6 +443,14 @@ def test_quantize_scalar_f32_refusals(inputs, message):
             b, value, inv_scale=inv_scale, qdtype="fp8e4m3", arch="gfx90a"
         )
     assert str(error.value) == message
+    if inputs[0] != "f32":
+        # quantize_prescaled_f32, the clamp and conversion without the multiply,
+        # refuses a non-f32 value the same way (Python only: no C++ caller).
+        with pytest.raises(ValueError) as error:
+            quantize_prescaled_f32(b, value, qdtype="fp8e4m3", arch="gfx950")
+        assert str(error.value) == (
+            f"quantize_prescaled_f32 expects f32 input, got {inputs[0]}"
+        )
 
 
 def _quant_instances():

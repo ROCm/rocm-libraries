@@ -64,7 +64,7 @@ A by-file map of the `rocke` package. Symbols listed are the primary contents (p
 | `helpers/io.py` | `io_ir_type`, `load_scalar`, `load_scalar_as_f32`, `load_vec`, `load_vec_as_f32`, `pack_f32_to`, `store_scalar`, `store_scalar_from_f32`, `store_vec`. |
 | `helpers/reduction.py` | `ReduceCombine`, `block_lds_reduce`. |
 | `helpers/spec.py` | `IOSpecRule`, `validate_io`, `SignatureBuilder`, `kernel_name_join`, `ceil_div_grid`, `ptr_type_str`, `sig_param`, `sig_scalar`; host integer and naming utilities (no IR): `ceil_div`, `align_up`, `non_default_fields`, `salted_kernel_name`. |
-| `helpers/quant.py` | `QDType`, `quant_ir_type`, `quant_max_abs`, `quantize_scalar_f32`, `dequantize_scalar_to_f32`, `ir_to_qdtype`. |
+| `helpers/quant.py` | `QDType`, `quant_ir_type`, `quant_max_abs`, `quantize_scalar_f32`, `quantize_prescaled_f32`, `dequantize_scalar_to_f32`, `ir_to_qdtype`. |
 | `helpers/scan.py` | `lds_zero_i32`, `block_histogram_i32`, `block_exclusive_scan_i32`. Block-wide cooperative scan + histogram primitives. |
 | `helpers/persistent.py` | `build_persistent_counter_init`, `persistent_tile_loop` (ctx-manager), `persistent_tile_for_each` (functional). Persistent-grid pattern shared with StreamK. |
 | `helpers/streamk.py` | `StreamKPartition`, `StreamKReductionStrategy`, `compute_streamk_grid_size`, `emit_streamk_decode`, `streamk_num_macro_tiles`. Tile-id decode + grid sizing for the StreamK GEMM family. |

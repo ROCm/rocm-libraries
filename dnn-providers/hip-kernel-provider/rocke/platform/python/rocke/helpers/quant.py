@@ -27,7 +27,10 @@ This module exposes the small set of helpers every quantised op needs:
 * :func:`quant_ir_type` — map a recognized dtype string to the IR :class:`Type`.
 * :func:`quant_max_abs` — that clamp bound for a dtype on a target.
 * :func:`quantize_scalar_f32` — the one-element quant fast path
-  (``cvt_f32_to_<qd>(clamp(x * inv_scale, -max, max))``, NaN kept).
+  (``cvt_f32_to_<qd>(clamp(x * inv_scale, -max, max))``, NaN kept for
+  fp8 / bf8).
+* :func:`quantize_prescaled_f32` — the same clamp and conversion for a value
+  the caller has already scaled.
 * :func:`dequantize_scalar_to_f32` — the dual; auto-dispatches on the
   input value's IR type.
 
@@ -65,6 +68,7 @@ __all__ = [
     "quant_ir_type",
     "quant_max_abs",
     "quantize_scalar_f32",
+    "quantize_prescaled_f32",
     "store_packed_chunk_local",
 ]
 
@@ -140,8 +144,8 @@ def quant_ir_type(qdtype: str) -> Type:
 
 
 def quant_max_abs(qdtype: str, *, arch: str) -> float:
-    """Clamp magnitude (positive) of :func:`quantize_scalar_f32` for
-    ``qdtype`` on ``arch``.
+    """Clamp magnitude (positive) of :func:`quantize_scalar_f32` and
+    :func:`quantize_prescaled_f32` for ``qdtype`` on ``arch``.
 
     ``127`` for i8 (CK Tile's symmetric range). For fp8e4m3 / bf8e5m2, the
     largest finite value of the encoding ``arch`` converts to
@@ -171,30 +175,8 @@ def quantize_scalar_f32(
     qdtype: str,
     arch: str,
 ) -> Value:
-    """Quantise one f32 scalar to ``qdtype`` as ``arch`` encodes it.
-
-    Pipeline (single hardware path per output dtype):
-
-    .. code-block:: text
-
-        scaled  = x_f32 * inv_scale
-        clamped = clamp_f32(scaled, -quant_max_abs, +quant_max_abs)
-        result  = cvt_f32_to_<qdtype>(scaled if isnan(scaled) else clamped)
-
-    For fp8 / bf8 the clamp is what makes the conversion saturate: the
-    hardware conversion does not, so a value past the encoding's largest
-    finite value (and +-inf) would become NaN, or +-inf for OCP bf8. The
-    bound is that of ``arch``'s encoding (:func:`quant_max_abs`), so finite
-    values and +-inf convert to finite values. A NaN is converted as it is
-    and stays NaN (the encoding's NaN code); ``clamp_f32`` alone would turn
-    it into the negative bound.
-
-    For i8 the clamp sets the output range: ``cvt_f32_to_i8_sat`` alone
-    saturates to ``[-128, 127]``, and the clamp narrows that to the
-    symmetric ``[-127, 127]`` of the CK Tile reference. i8 has no NaN; a NaN
-    input gives -127. (The i8 path does not use ``v_cvt_pk_i16_i32``; that
-    instruction does saturate, but to the i16 range, so it would not bound
-    an i8 result either.)
+    """Quantise one f32 scalar to ``qdtype`` as ``arch`` encodes it:
+    ``quantize_prescaled_f32(b, x_f32 * inv_scale, qdtype=qdtype, arch=arch)``.
 
     ``inv_scale`` is in the *natural* direction (``inv_scale = 1 / scale``
     where ``scale = amax / quant_max``). Pre-computing the reciprocal
@@ -214,15 +196,84 @@ def quantize_scalar_f32(
         raise ValueError(
             f"quantize_scalar_f32 expects f32 inv_scale, got {inv_scale.type.name}"
         )
+    # The bounds come before the multiply: IR value names follow op order,
+    # and both engines' quantizing kernels are blessed with this order.
+    canon, c_neg, c_pos = _quant_bounds(b, qdtype, arch=arch)
+    scaled = b.fmul(x_f32, inv_scale)
+    return _saturate_and_convert(b, scaled, canon=canon, c_neg=c_neg, c_pos=c_pos)
+
+
+def quantize_prescaled_f32(
+    b: IRBuilder,
+    scaled_f32: Value,
+    *,
+    qdtype: str,
+    arch: str,
+) -> Value:
+    """Convert one f32 scalar that is already scaled to ``qdtype`` as
+    ``arch`` encodes it, clamped to the dtype's range (NaN kept for fp8 /
+    bf8).
+
+    Pipeline (single hardware path per output dtype):
+
+    .. code-block:: text
+
+        clamped = clamp_f32(scaled_f32, -quant_max_abs, +quant_max_abs)
+        result  = cvt_f32_to_<qdtype>(scaled_f32 if isnan(scaled_f32) else clamped)
+
+    For fp8 / bf8 the clamp is what makes the conversion saturate: the
+    hardware conversion does not, so a value past the encoding's largest
+    finite value (and +-inf) would become NaN, or +-inf for OCP bf8. The
+    bound is that of ``arch``'s encoding (:func:`quant_max_abs`), so finite
+    values and +-inf convert to finite values. A NaN is converted as it is
+    and stays NaN (the encoding's NaN code); ``clamp_f32`` alone would turn
+    it into the negative bound.
+
+    For i8 the clamp sets the output range: ``cvt_f32_to_i8_sat`` alone
+    saturates to ``[-128, 127]``, and the clamp narrows that to the
+    symmetric ``[-127, 127]`` of the CK Tile reference. i8 has no NaN; a NaN
+    input gives -127. (The i8 path does not use ``v_cvt_pk_i16_i32``; that
+    instruction does saturate, but to the i16 range, so it would not bound
+    an i8 result either.)
+
+    Use it where the kernel scales the value some other way than
+    :func:`quantize_scalar_f32`'s multiply, for example by dividing by the
+    scale. Returns a value whose IR type is the quant dtype. Raises
+    ``ValueError`` for an fp8 / bf8 dtype on a target with no known
+    encoding (:func:`quant_max_abs`).
+    """
+    if scaled_f32.type.name != "f32":
+        raise ValueError(
+            f"quantize_prescaled_f32 expects f32 input, got {scaled_f32.type.name}"
+        )
+    canon, c_neg, c_pos = _quant_bounds(b, qdtype, arch=arch)
+    return _saturate_and_convert(b, scaled_f32, canon=canon, c_neg=c_neg, c_pos=c_pos)
+
+
+def _quant_bounds(
+    b: IRBuilder, qdtype: str, *, arch: str
+) -> tuple[QDType, Value, Value]:
+    """``(canon, -bound, +bound)``: the canonical name of ``qdtype`` and the
+    clamp bounds of :func:`quant_max_abs` as f32 constants (``+bound``
+    emitted first)."""
     canon = _canon(qdtype)
     qmax = quant_max_abs(canon, arch=arch)
     c_pos = b.const_f32(qmax)
     c_neg = b.const_f32(-qmax)
-    scaled = b.fmul(x_f32, inv_scale)
-    clamped = b.clamp_f32(scaled, c_neg, c_pos)
+    return canon, c_neg, c_pos
+
+
+def _saturate_and_convert(
+    b: IRBuilder, scaled_f32: Value, *, canon: QDType, c_neg: Value, c_pos: Value
+) -> Value:
+    """The rule both quantize helpers share: clamp ``scaled_f32`` to
+    ``[c_neg, c_pos]`` and convert it to ``canon``, keeping a NaN for fp8 /
+    bf8 (see :func:`quantize_prescaled_f32`). The caller builds the bounds,
+    so it decides where they sit in the IR."""
+    clamped = b.clamp_f32(scaled_f32, c_neg, c_pos)
     if canon == "i8":
         return b.cvt_f32_to_i8_sat(clamped)
-    saturated = b.select(b.fcmp("uno", scaled, scaled), scaled, clamped)
+    saturated = b.select(b.fcmp("uno", scaled_f32, scaled_f32), scaled_f32, clamped)
     if canon == "fp8e4m3":
         return b.cvt_f32_to_fp8(saturated)
     if canon == "bf8e5m2":

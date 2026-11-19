@@ -88,6 +88,7 @@ The `helpers/quant.py` module wraps these into:
 
 ```text
 quantize_scalar_f32(b, x_f32, *, inv_scale, qdtype, arch) -> Value
+quantize_prescaled_f32(b, scaled_f32, *, qdtype, arch) -> Value
 dequantize_scalar_to_f32(b, x_q, *, scale) -> Value
 ```
 
@@ -96,7 +97,9 @@ scale`); pre-computing the reciprocal once per row amortises one
 `v_rcp_f32` over the whole row, which is the same trick CK Tile's
 SmoothQuant pipeline uses. `dequantize_scalar_to_f32` takes the
 **forward** scale so the two are symmetric: `dequant(quant(x, inv_s),
-s) == x` modulo quantisation error.
+s) == x` modulo quantisation error. `quantize_prescaled_f32` is the same clamp
+and conversion for a value the kernel has already scaled some other way,
+for example `x / scale`.
 
 Use the helpers in instance code rather than re-deriving the clamp +
 rounding sequence; every quant kernel

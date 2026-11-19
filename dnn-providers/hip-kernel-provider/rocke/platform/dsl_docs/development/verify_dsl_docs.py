@@ -270,6 +270,7 @@ _imp(
         "quant_ir_type",
         "quant_max_abs",
         "quantize_scalar_f32",
+        "quantize_prescaled_f32",
     ],
 )
 

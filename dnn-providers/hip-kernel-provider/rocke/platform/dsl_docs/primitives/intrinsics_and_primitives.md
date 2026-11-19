@@ -704,6 +704,7 @@ QDType
 quant_ir_type(qdtype)
 quant_max_abs(qdtype, *, arch) # quant range bound on arch
 quantize_scalar_f32(b, v, *, inv_scale, qdtype, arch)
+quantize_prescaled_f32(b, scaled, *, qdtype, arch) # same clamp + cvt, already scaled
 dequantize_scalar_to_f32(b, v, scale, qdtype, ...)
 ir_to_qdtype(ir_type)
 ```

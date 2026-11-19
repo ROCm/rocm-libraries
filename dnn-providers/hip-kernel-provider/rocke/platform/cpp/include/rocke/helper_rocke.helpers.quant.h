@@ -12,6 +12,10 @@
  *   quantize_scalar_f32(b, x, inv_scale=,
  *                       qdtype=, arch=)           ->  rocke_b_quantize_scalar_f32()
  *
+ * Python's quantize_prescaled_f32 (the same clamp and conversion for a value
+ * the caller has already scaled) has no C port yet; port it when a C++
+ * builder needs it.
+ *
  * rocke_quant_ir_type delegates to rocke_dtype_to_ir_type for nominal types,
  * preserving the existing quant aliases and adding FP4/FP6 recognition.
  * Returns a borrowed static singleton or NULL for an unsupported name.

@@ -30,12 +30,14 @@ from ...core.ir import (
     KernelDef,
     PtrType,
     Type,
+    Value,
 )
 from ...helpers.attention import (
     PagedKvDescriptor,
     dequant_bf8x8_to_dtype,
     dequant_fp8x8_to_dtype,
 )
+from ...helpers.quant import quantize_prescaled_f32
 
 _SUPPORTED_ARCH = "gfx1250"
 _QWEN_KV_HEADS = 4
@@ -158,15 +160,17 @@ class Qwen3KvAppendRopeSpec:
         )
 
 
-def _quantize_for_kv_store(b: IRBuilder, v: object, storage_dtype: str, scale: object):
+def _quantize_for_kv_store(
+    b: IRBuilder, value_f32: Value, storage_dtype: str, scale: Value, *, arch: str
+) -> Value:
+    """``value_f32`` as the cache stores it: bf16, or ``value_f32 / scale``
+    saturated to ``arch``'s fp8 / bf8 range (NaN kept) by
+    :func:`~rocke.helpers.quant.quantize_prescaled_f32`."""
     if storage_dtype == "bf16":
-        return b.cast_f32_to(v, BF16)
-    scaled = b.fdiv(v, scale)
-    if storage_dtype == "fp8e4m3":
-        return b.cvt_f32_to_fp8(scaled)
-    if storage_dtype == "bf8e5m2":
-        return b.cvt_f32_to_bf8(scaled)
-    raise ValueError(f"unsupported KV storage dtype {storage_dtype!r}")
+        return b.cast_f32_to(value_f32, BF16)
+    return quantize_prescaled_f32(
+        b, b.fdiv(value_f32, scale), qdtype=storage_dtype, arch=arch
+    )
 
 
 def build_qwen3_kv_append_rope(
@@ -252,8 +256,12 @@ def build_qwen3_kv_append_rope(
         kv_head=kv_head,
         dim=dim,
     )
-    k_store = _quantize_for_kv_store(b, key_f, spec.kv_storage_dtype, k_scale)
-    v_store = _quantize_for_kv_store(b, value_f, spec.kv_storage_dtype, v_scale)
+    k_store = _quantize_for_kv_store(
+        b, key_f, spec.kv_storage_dtype, k_scale, arch=arch
+    )
+    v_store = _quantize_for_kv_store(
+        b, value_f, spec.kv_storage_dtype, v_scale, arch=arch
+    )
     store_align = 1 if spec.kv_storage_dtype != "bf16" else 2
     b.global_store(k_cache, out_idx, k_store, align=store_align)
     b.global_store(v_cache, out_idx, v_store, align=store_align)
