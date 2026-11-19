@@ -2850,19 +2850,11 @@ def _yx_lds16_floats(spec) -> int:
     return f
 
 
-import os as _os
-
-# wave_reduce lowering of the prescale's max reductions (0 LLVM default, 1 iterative, 2 DPP)
-_WRED = int(_os.environ.get("ROCKE_WINO_WRED", "-1"))  # -1: swizzle butterfly
-
-
 def _wave_max_i32(b, v):
     """Wave-uniform max of a non-negative i32: 5 ds_swizzle xor steps inside each 32-lane
     half, then the two halves' lane 0 via readlane (llvm.amdgcn.wave.reduce lowers to a
     64-iteration readlane loop here).
     """
-    if _WRED >= 0:
-        return b.readfirstlane(b.wave_reduce(v, "max", strategy=_WRED))
     for x in (1, 2, 4, 8, 16):
         v = b.smax(v, b.warp_shuffle_xor(v, x))
     return b.smax(b.readlane(v, b.const_i32(0)), b.readlane(v, b.const_i32(32)))
@@ -4362,12 +4354,7 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
     elif spec.bps:
         # the first chunks' loads do not depend on the scale: issue them before the map
         # reduction resolves (its load latency is otherwise exposed per workgroup)
-        PRE = _os.environ.get("ROCKE_WINO_PRE", "")
-        pre = (
-            load_fill(ci(0)),
-            load_fill(ci(min(1, n_chunks - 1))) if "r" in PRE else None,
-            load_b(ci(0)) if "b" in PRE else None,
-        )
+        pre = (load_fill(ci(0)), None, None)
         s_in_, s_out_, e_sc = _bps_scales(b, spec, E, z0, tb, lane, n_ent)
         BPS.update(s_in2=b.vector_splat(s_in_, 2), s_out=s_out_)
         if spec.bps_win:
