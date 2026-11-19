@@ -501,6 +501,75 @@ static int make_cfg_3d_xh(int idx, rocke_dgrad_conv_spec_t* spec, const char** a
  * _gfx942_3d_any() in the Python emitter. */
 static int make_cfg_3d_any(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
 {
+    if(idx >= 128 && idx <= 132)
+    {
+        /* knob values both validators refuse; mirrors _GFX942_3D_BAD */
+        static const int base[5] = {57, 58, 77, 57, 77};
+        const int r = make_cfg_3d_any(base[idx - 128], spec, arch);
+        if(idx == 128)
+            spec->b_kpack = 3;
+        else if(idx == 129)
+            spec->tap_outer_k = false;
+        else if(idx == 130)
+            spec->problem.pW = 1;
+        else if(idx == 131)
+            spec->tapk_prefetch = 2;
+        else
+            spec->xh_defer = 128;
+        return r;
+    }
+    if(idx >= 122 && idx <= 124)
+    {
+        /* the shipped x-halo pin forms: 77 + m_band 8 + xh_dx_wmask; 81 with
+         * xh_order 6, xh_defer 3, xh_dx_wmask; t256x128x16 with b_kpack 4,
+         * tapk_prefetch 1, xh_order 2, m_band 16, xh_dx_wmask */
+        const int r = make_cfg_3d_xh(idx == 123 ? 81 : 77, spec, arch);
+        spec->xh_dx_wmask = true;
+        if(idx == 122)
+            spec->m_band = 8;
+        else if(idx == 123)
+        {
+            spec->xh_order = 6;
+            spec->xh_defer = 3;
+        }
+        else
+        {
+            spec->tile_n = 128;
+            spec->tile_k = 16;
+            spec->b_kpack = 4;
+            spec->tapk_prefetch = 1;
+            spec->xh_order = 2;
+            spec->xh_defer = 0;
+            spec->m_band = 16;
+        }
+        return r;
+    }
+    if(idx >= 125 && idx <= 127)
+    {
+        /* the shipped box forms: pp_boxes 8 / 77 split-K with pp_box_det 1;
+         * pp_boxes 8 unsplit with tapk_pp_epi 2 */
+        const int r = make_cfg_3d(57, spec, arch);
+        spec->tapk_prefetch = 1;
+        spec->b_kpack = 4;
+        spec->tapk_pingpong = 4;
+        spec->lds_xor = true;
+        spec->xcd_remap = 6;
+        spec->epi_lds_barriers = true;
+        spec->tapk_pp_sched = idx == 127 ? 5 : 2;
+        spec->pp_boxes = idx == 126 ? 77 : 8;
+        if(idx == 127)
+        {
+            spec->tapk_pp_epi = 2;
+            spec->pp_box_order = 2;
+            return r;
+        }
+        spec->split_k = idx == 125 ? 8 : 4;
+        spec->pp_box_order = 1;
+        spec->pp_box_det = 1;
+        if(idx == 125)
+            spec->pp_box_cus = 684;
+        return r;
+    }
     if(idx >= 113 && idx <= 115)
     {
         /* xh_dx_wmask on 77 (linear store), 77 without xh_epi_lin, and 81 */

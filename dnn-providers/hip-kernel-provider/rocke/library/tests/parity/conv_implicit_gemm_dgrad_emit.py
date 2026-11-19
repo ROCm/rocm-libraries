@@ -1786,6 +1786,65 @@ _GFX942_3D_XH[120] = dict(_GFX942_3D_XH[118], xh_dx_wmask=True)
 _GFX942_3D_XH[121] = dict(_GFX942_3D_XH[119], xh_dx_wmask=True)
 
 
+# 122-124: knob combinations of the shipped gfx942 x-halo pins on 77's loop:
+# m_band 8 with xh_dx_wmask; the y-ring 81 with xh_order 6, xh_defer 3 and
+# xh_dx_wmask; the t256x128x16 tile with b_kpack 4, tapk_prefetch 1,
+# xh_order 2 and m_band 16.
+_GFX942_3D_XH[122] = dict(_GFX942_3D_XH[77], xh_dx_wmask=True, m_band=8)
+_GFX942_3D_XH[123] = dict(_GFX942_3D_XH[81], xh_order=6, xh_defer=3, xh_dx_wmask=True)
+_GFX942_3D_XH[124] = dict(
+    _GFX942_3D_XH[77],
+    tile_n=128,
+    tile_k=16,
+    b_kpack=4,
+    tapk_prefetch=1,
+    xh_order=2,
+    xh_defer=0,
+    m_band=16,
+    xh_dx_wmask=True,
+)
+# 125-127: the shipped box forms: pp_boxes 8 split-K with pp_box_det 1, the
+# pp_box_cus budget and epi_lds_barriers; pp_boxes 77 split-K with pp_box_det
+# 1 and epi_lds_barriers; pp_boxes 8 unsplit with tapk_pp_epi 2.
+_GFX942_3D_PP[125] = dict(
+    _T128,
+    tapk_pp_sched=2,
+    split_k=8,
+    pp_boxes=8,
+    pp_box_cus=684,
+    pp_box_order=1,
+    pp_box_det=1,
+    epi_lds_barriers=True,
+)
+_GFX942_3D_PP[126] = dict(
+    _T128,
+    tapk_pp_sched=2,
+    split_k=4,
+    pp_boxes=77,
+    pp_box_order=1,
+    pp_box_det=1,
+    epi_lds_barriers=True,
+)
+_GFX942_3D_PP[127] = dict(
+    _T128,
+    tapk_pp_sched=5,
+    tapk_pp_epi=2,
+    pp_boxes=8,
+    pp_box_order=2,
+    epi_lds_barriers=True,
+)
+# 128-132: knob values both validators refuse (the C++ builder would divide
+# by b_kpack 3, or build a kernel whose preconditions do not hold): (config,
+# knob overrides, problem overrides).
+_GFX942_3D_BAD = {
+    128: (57, dict(b_kpack=3), {}),
+    129: (58, dict(tap_outer_k=False), {}),
+    130: (77, {}, dict(pW=1)),
+    131: (57, dict(tapk_prefetch=2), {}),
+    132: (77, dict(xh_defer=128), {}),
+}
+
+
 def _gfx942_3d_xh_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1910,6 +1969,14 @@ _GFX942_3D_OFFSET = 14
 
 def _gfx942_3d_any(idx: int):
     """The gfx942 3-D configs below by their own number (from 57)."""
+    if idx in _GFX942_3D_BAD:
+        import dataclasses
+
+        base, kw, pkw = _GFX942_3D_BAD[idx]
+        spec, arch = _gfx942_3d_any(base)
+        if pkw:
+            kw = dict(kw, problem=dataclasses.replace(spec.problem, **pkw))
+        return dataclasses.replace(spec, **kw), arch
     if idx in _GFX942_3D:
         return _gfx942_3d_spec(idx)
     if idx in _GFX942_3D_PP:
