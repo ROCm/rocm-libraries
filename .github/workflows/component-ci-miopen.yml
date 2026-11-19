@@ -292,13 +292,13 @@ jobs:
           # Tier labels are set only inside the flag's block, so a wrapper check registered
           # outside it would have none, TheRock would never select it, and nothing else
           # would notice.
-          listing=$(ctest --test-dir parity-off -N -R '^(wrapper_abi_check|wrapper_bare_link_check|forwarding_failure_modes)')
+          listing=$(ctest --test-dir parity-off -N -R '^(wrapper_abi_check|wrapper_bare_link_check|forwarding_failure_modes|wrapper_reentry_macro)')
           printf '%s\n' "$listing" | grep -q '^Total Tests: 0$' || {
             echo "the wrapper-off tree registers a wrapper check"
             printf '%s\n' "$listing"
             exit 1
           }
-          if grep -Eq '^add_test\((wrapper_abi_check|wrapper_bare_link_check|forwarding_failure_modes)' "parity-off/$packaged"; then
+          if grep -Eq '^add_test\((wrapper_abi_check|wrapper_bare_link_check|forwarding_failure_modes|wrapper_reentry_macro)' "parity-off/$packaged"; then
             echo "the packaged test list registers a wrapper check without MIOPEN_ENABLE_HIPDNN_WRAPPER"
             exit 1
           fi
