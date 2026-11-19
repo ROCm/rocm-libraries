@@ -82,7 +82,7 @@ constexpr attention_dense::AttentionDenseArch gfx950Arch()
     arch.geometry = &gfx950Geometry;
     // No catalog variant carries a non-zero sliding_window, so a windowed mask has no
     // spelling here.
-    arch.windowReachesKeys = nullptr;
+    arch.servesWindows = false;
     // No catalog variant writes LSE, so every stats output declines under 'stats'.
     arch.candidateWritesLse = nullptr;
     arch.currentContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2,
