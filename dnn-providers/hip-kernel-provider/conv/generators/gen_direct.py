@@ -365,6 +365,11 @@ for dt in ("HALF", "BFLOAT16"):
             RW(f"mfma16x32_{e}", F333, 8, 2, 2, 3, 2, 32, 8),
             RW(f"mfma16x32_{e}", F333, 8, 2, 2, 2, 2, 64, 8),
             RW(f"mfma16x32_{e}", F333, 8, 4, 2, 2, 2, 64, 8),
+            # 32-wide 3x3x3 tiles of 1024 pixels (32 x 32 and 16 x 64): 32-channel outputs (nnU-Net
+            # c32 / c64 -> k32, 128^3-160^3), where the 64-wide tile leaves half of every MMA
+            # idle: 1.3-1.6x over the best 3x3x3 tile before them (MI355X kernel bench).
+            RW(f"mfma16x32_{e}", F333, 8, 1, 4, 2, 2, 32, 8),
+            RW(f"mfma16x32_{e}", F333, 8, 2, 2, 4, 1, 32, 8),
             # Packed channels-first activations in place (no staging transposes): the 256-wide K
             # tile at 64- and 32-channel chunks, the 16 x 32 tile, and the 20-row tile for 40^2.
             RW(f"mfma16x32_{e}", F33, 8, 4, 1, 2, 4, 64, 8, epi=0, cf=1),
