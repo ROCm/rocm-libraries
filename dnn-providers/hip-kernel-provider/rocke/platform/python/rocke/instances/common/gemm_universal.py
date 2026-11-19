@@ -3507,6 +3507,17 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # WMMAs into the second half instead of after it, so the drain before
         # the tile barrier finds them landed; -1 (default): after the half.
         nb1_at = int(_os_ra.environ.get("ROCKE_EXP_MX_RA_NB1", "-1"))
+        # ROCKE_EXP_MX_RA_SPLITBAR=1 (RA=2): split the tile barrier. Each wave
+        # drains this buffer's reads and its fill of the next tile and signals
+        # at the end of the K-atom before the last; it waits BAR WMMAs into the
+        # last, so wave skew up to that is hidden.
+        splitbar = _mx_ra_one and _os_ra.environ.get("ROCKE_EXP_MX_RA_SPLITBAR") == "1"
+        if splitbar and k_atoms < 2:
+            raise ValueError("ROCKE_EXP_MX_RA_SPLITBAR needs two K-atoms per tile")
+        # ROCKE_EXP_MX_RA_PRO=1: the prologue waits for tile 0 only (each wave
+        # issues two loads a tile with ROCKE_EXP_TDM_SPLIT=2), not tile 1 too.
+        pro_partial = (_os_ra.environ.get("ROCKE_EXP_MX_RA_PRO") == "1"
+                       and _os_ra.environ.get("ROCKE_EXP_TDM_SPLIT") == "2")
         if cs >= 0 and k_atoms < 2:
             raise ValueError("ROCKE_EXP_MX_RA_CS needs two K-atoms per tile")
 
@@ -3539,9 +3550,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     fence()
                     wmmas(acc, a, b0, sa, sb, 0, 0, bar_at)
                     fence()
-                    b.inline_asm("s_wait_dscnt 0", "~{memory}")
-                    b.s_wait_tensorcnt(0)
-                    b.s_barrier_bare()
+                    if splitbar:
+                        b.s_barrier_wait(_WG_WAIT)
+                    else:
+                        b.inline_asm("s_wait_dscnt 0", "~{memory}")
+                        b.s_wait_tensorcnt(0)
+                        b.s_barrier_bare()
                     if cb:
                         # This workgroup is done with the buffer: tell the
                         # cluster (wave 0 only), and refill only once every
@@ -3623,6 +3637,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 fence()
                 if nb1 is None:
                     nb1 = [rd_b(sp, sk, half + j) for j in range(half)]
+                if splitbar and s + 2 == k_atoms:
+                    # This wave is done with the buffer and has its fill of the
+                    # next tile: signal; the wait is BAR WMMAs into the last K-atom.
+                    fence()
+                    b.inline_asm("s_wait_dscnt 0", "~{memory}")
+                    b.s_wait_tensorcnt(0)
+                    b.s_barrier_signal(_WG_SIGNAL)
+                    fence()
                 a, sa, sb, b0, b1 = na, nsa, nsb, nb0, nb1
             return acc, (a, sa, sb, b0, b1)
 
@@ -3632,7 +3654,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             b.inline_asm(_CL_SYNC, "~{scc},~{memory}")
         emit_load_phase(A_smem, B_smem, k_lo, lds_parity=0)
         emit_load_phase(A_smem, B_smem, b.add(k_lo, c_block_k), lds_parity=1)
-        b.s_wait_tensorcnt(0)
+        b.s_wait_tensorcnt(2 if pro_partial else 0)
         b.s_barrier_bare()
         a0, sa0, sb0 = rd_head(0, 0)
         head0 = (a0, sa0, sb0, [rd_b(0, 0, j) for j in range(half)],
