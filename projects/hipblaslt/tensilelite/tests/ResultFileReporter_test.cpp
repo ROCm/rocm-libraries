@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
+#include <Tensile/FusedA2A.hpp>
 
 #include "ResultFileReporter.hpp"
 
@@ -46,6 +47,7 @@ namespace
             args["csv-export-extra-cols"].value()   = false;
             args["csv-merge-same-problems"].value() = false;
             args["performance-metric"].value()      = TensileLite::PerformanceMetric::Auto;
+            args["fused-a2a"].value()               = TensileLite::FusedA2A::Disabled;
             return args;
         }
 
