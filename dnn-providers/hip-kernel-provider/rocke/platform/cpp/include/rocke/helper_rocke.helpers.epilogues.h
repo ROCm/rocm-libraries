@@ -187,6 +187,13 @@ typedef struct rocke_cshuffle_epilogue
 rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_make(const rocke_mfma_atom_t* atom,
                                                        const rocke_warp_grid_t* grid);
 
+/* CShuffleEpilogue.pick_store_vec: the widest store width (<= max_store_vec,
+ * and <= 4 for fp32 output) that spreads a tile_m x tile_n tile evenly over
+ * block_size threads. The single store-width rule shared by from_grid,
+ * from_grid_op and callers that need the width before building the epilogue. */
+int rocke_cshuffle_pick_store_vec(
+    int tile_m, int tile_n, int block_size, int max_store_vec, bool fp32_out);
+
 /* CShuffleEpilogue.from_grid(atom, grid, max_store_vec=8):
  * pick the widest store_vec that distributes the tile evenly over block_size.
  * For fp32 output store_vec is capped at 4 (= 16 bytes, hw limit). */

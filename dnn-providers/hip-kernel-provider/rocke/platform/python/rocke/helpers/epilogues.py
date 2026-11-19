@@ -404,6 +404,34 @@ class CShuffleEpilogue:
         """
         return (0 if no_alias else war_barriers) + 1
 
+    @staticmethod
+    def pick_store_vec(
+        *,
+        tile_m: int,
+        tile_n: int,
+        block_size: int,
+        max_store_vec: int = 8,
+        out_dtype: str = "f16",
+    ) -> int:
+        """Widest `store_vec` (<= 8, or <= 4 for fp32 output) that spreads the
+        ``tile_m x tile_n`` tile evenly over ``block_size`` threads.
+
+        The single store-width rule: :meth:`from_grid`, :meth:`from_grid_op`
+        and callers that must know the width before building the epilogue
+        (e.g. split-K validators) all use it.
+        """
+        v = min(max_store_vec, 4) if out_dtype == "fp32" else min(max_store_vec, 8)
+        while v > 1:
+            elems = tile_m * tile_n
+            if (
+                tile_n % v == 0
+                and elems // v >= block_size
+                and (elems // v) % block_size == 0
+            ):
+                break
+            v //= 2
+        return v
+
     @classmethod
     def from_grid_op(
         cls,
@@ -419,19 +447,13 @@ class CShuffleEpilogue:
         Uses ``op.dst.frag_len`` / ``op.dst_layout()`` for the LDS scatter in
         place of the MFMA-specific ``atom.lane_to_output``.
         """
-        _fp32_out = out_dtype == "fp32"
-        _max_sv = min(max_store_vec, 4) if _fp32_out else min(max_store_vec, 8)
-        v = _max_sv
-        block_size = grid.block_size
-        while v > 1:
-            ok = (
-                grid.tile_n % v == 0
-                and (grid.tile_m * grid.tile_n) // v >= block_size
-                and ((grid.tile_m * grid.tile_n) // v) % block_size == 0
-            )
-            if ok:
-                break
-            v //= 2
+        v = cls.pick_store_vec(
+            tile_m=grid.tile_m,
+            tile_n=grid.tile_n,
+            block_size=grid.block_size,
+            max_store_vec=max_store_vec,
+            out_dtype=out_dtype,
+        )
         return cls(
             grid=grid, store_vec=v, out_dtype=out_dtype, mma_op=op, no_alias=no_alias
         )
@@ -452,19 +474,13 @@ class CShuffleEpilogue:
         each), so `store_vec` counts f32 elements and is capped at 4
         (= 16 bytes, the hardware buffer_store limit).
         """
-        _fp32_out = out_dtype == "fp32"
-        _max_sv = min(max_store_vec, 4) if _fp32_out else min(max_store_vec, 8)
-        v = _max_sv
-        block_size = grid.block_size
-        while v > 1:
-            ok = (
-                grid.tile_n % v == 0
-                and (grid.tile_m * grid.tile_n) // v >= block_size
-                and ((grid.tile_m * grid.tile_n) // v) % block_size == 0
-            )
-            if ok:
-                break
-            v //= 2
+        v = cls.pick_store_vec(
+            tile_m=grid.tile_m,
+            tile_n=grid.tile_n,
+            block_size=grid.block_size,
+            max_store_vec=max_store_vec,
+            out_dtype=out_dtype,
+        )
         return cls(
             atom=atom, grid=grid, store_vec=v, out_dtype=out_dtype, no_alias=no_alias
         )

@@ -1509,18 +1509,11 @@ static int _dgrad_store_vec(const rocke_dgrad_conv_spec_t* spec)
 static int _dgrad_split_k_cshuffle_store_vec(const rocke_dgrad_conv_spec_t* spec)
 {
     const bool is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
-    const int cap = is_fp32_d ? 4 : 8;
-    const int want = _dgrad_store_vec(spec);
-    int v = want < cap ? want : cap;
-    const int threads = spec->warp_m * spec->warp_n * spec->wave_size;
-    const int elems = spec->tile_m * spec->tile_n;
-    while(v > 1)
-    {
-        if(spec->tile_n % v == 0 && elems / v >= threads && (elems / v) % threads == 0)
-            break;
-        v /= 2;
-    }
-    return v;
+    return rocke_cshuffle_pick_store_vec(spec->tile_m,
+                                         spec->tile_n,
+                                         spec->warp_m * spec->warp_n * spec->wave_size,
+                                         _dgrad_store_vec(spec),
+                                         is_fp32_d);
 }
 
 static rocke_value_t* _dgrad_dx_addr_fn(rocke_ir_builder_t* b,

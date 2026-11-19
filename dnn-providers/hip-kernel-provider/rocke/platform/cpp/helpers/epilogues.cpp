@@ -349,28 +349,32 @@ rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_make(const rocke_mfma_atom_t* 
     return epi;
 }
 
+int rocke_cshuffle_pick_store_vec(
+    int tile_m, int tile_n, int block_size, int max_store_vec, bool fp32_out)
+{
+    /* Mirrors Python: cap at 8; for fp32 output store_vec counts f32 elements,
+     * so cap at 4 (=16 bytes hw limit). */
+    const int cap = fp32_out ? 4 : 8;
+    int v = max_store_vec < cap ? max_store_vec : cap;
+    while(v > 1)
+    {
+        bool ok = (tile_n % v == 0) && ((tile_m * tile_n) / v >= block_size)
+                  && (((tile_m * tile_n) / v) % block_size == 0);
+        if(ok)
+            break;
+        v /= 2;
+    }
+    return v;
+}
+
 rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_from_grid(const rocke_mfma_atom_t* atom,
                                                             const rocke_warp_grid_t* grid,
                                                             int max_store_vec)
 {
     rocke_cshuffle_epilogue_t epi = rocke_cshuffle_epilogue_make(atom, grid);
-    int v;
-    int block_size = rocke_warp_grid_block_size(grid);
-    /* For fp32 output store_vec counts f32 elements; cap at 4 (=16 bytes hw limit). */
-    bool _fp32_out = epi.out_dtype != NULL
-                     && (epi.out_dtype[0] == 'f' && epi.out_dtype[1] == 'p'
-                         && epi.out_dtype[2] == '3' && epi.out_dtype[3] == '2');
-    int _max_sv = (_fp32_out && max_store_vec > 4) ? 4 : max_store_vec;
-    v = _max_sv;
-    while(v > 1)
-    {
-        bool ok = (grid->tile_n % v == 0) && ((grid->tile_m * grid->tile_n) / v >= block_size)
-                  && (((grid->tile_m * grid->tile_n) / v) % block_size == 0);
-        if(ok)
-            break;
-        v /= 2;
-    }
-    epi.store_vec = v;
+    /* epi.out_dtype is the f16 default here; the caller sets it afterwards. */
+    epi.store_vec = rocke_cshuffle_pick_store_vec(
+        grid->tile_m, grid->tile_n, rocke_warp_grid_block_size(grid), max_store_vec, false);
     return epi;
 }
 
@@ -379,32 +383,16 @@ rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_from_grid_op(const rocke_mmaop
                                                                int max_store_vec)
 {
     rocke_cshuffle_epilogue_t epi;
-    int v;
-    int block_size;
-    bool _fp32_out;
-    int _max_sv;
     epi.atom = NULL;
     epi.mma_op = op;
     epi.grid = *grid;
-    epi.store_vec = 8;
     epi.smem_name_hint = "C_smem";
     epi.out_dtype = "f16";
     epi.war_barriers = 1;
     epi.no_alias = false;
-    block_size = rocke_warp_grid_block_size(grid);
     /* fp32_out cap: caller sets epi.out_dtype after construction; default f16 */
-    _fp32_out = false;
-    _max_sv = (_fp32_out && max_store_vec > 4) ? 4 : max_store_vec;
-    v = _max_sv;
-    while(v > 1)
-    {
-        bool ok = (grid->tile_n % v == 0) && ((grid->tile_m * grid->tile_n) / v >= block_size)
-                  && (((grid->tile_m * grid->tile_n) / v) % block_size == 0);
-        if(ok)
-            break;
-        v /= 2;
-    }
-    epi.store_vec = v;
+    epi.store_vec = rocke_cshuffle_pick_store_vec(
+        grid->tile_m, grid->tile_n, rocke_warp_grid_block_size(grid), max_store_vec, false);
     return epi;
 }
 

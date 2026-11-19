@@ -3797,22 +3797,16 @@ def _dgrad_store_vec(spec: DgradConvSpec) -> int:
 def _dgrad_split_k_cshuffle_store_vec(spec: DgradConvSpec) -> int:
     """The dX width the split-K cshuffle epilogue atomic-adds with.
 
-    ``CShuffleEpilogue.from_grid``'s pick for ``_dgrad_store_vec``: the widest
-    power of two up to it (8, or 4 for an fp32 dX) that spreads the tile evenly
-    over the block. A 16-bit dX needs it even (packed atomic pairs).
+    ``CShuffleEpilogue.from_grid``'s pick for ``_dgrad_store_vec``. A 16-bit dX
+    needs it even (packed atomic pairs).
     """
-    v = min(_dgrad_store_vec(spec), 4 if spec.data.dtype_d == "fp32" else 8)
-    threads = spec.warp_m * spec.warp_n * spec.wave_size
-    elems = spec.tile_m * spec.tile_n
-    while v > 1:
-        if (
-            spec.tile_n % v == 0
-            and elems // v >= threads
-            and (elems // v) % threads == 0
-        ):
-            break
-        v //= 2
-    return v
+    return CShuffleEpilogue.pick_store_vec(
+        tile_m=spec.tile_m,
+        tile_n=spec.tile_n,
+        block_size=spec.warp_m * spec.warp_n * spec.wave_size,
+        max_store_vec=_dgrad_store_vec(spec),
+        out_dtype=spec.data.dtype_d,
+    )
 
 
 def _dgrad_stride1_dx_addr(
