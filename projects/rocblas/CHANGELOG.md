@@ -3,7 +3,7 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
-## rocBLAS 5.9.0
+## (Unreleased) rocBLAS 5.9.0
 
 ### Added
 
@@ -31,7 +31,7 @@ rocBLAS documentation is available at
 * Fix the rocBLAS library build on Python 3.12 when setuptools is not installed. `library/src/merge_archives.py` imported `distutils.spawn`, which that Python release removed from the standard library, so the archive merge step failed before parsing its arguments. The script now locates `ar` with `shutil.which`.
 * Fix Level 3 `gemm` and `gemm_ex`, including batched and strided-batched forms, returning `rocblas_status_success` with columns of `C` never written when the Tensile backend needs more than 65535 tiles along `n`, for example `m = 16`, `n = 2^21 + 1`, `k = 32` with `f16_r` inputs and `f32_r` output on gfx1200 with `ROCBLAS_USE_HIPBLASLT=0`. Tensile maps the column tiles of `C` to the y dimension of the grid, which HIP limits to 65535 workgroups (`maxGridSize[1]`), and launches its kernels without that check. On gfx1200 the columns past 65536 tiles were never written. Such problems now run as several launches over column ranges of `C` with the same Tensile solution.
 
-## rocBLAS 5.8.0 
+## rocBLAS 5.8.0 for ROCm 10.2.0
 
 ### Added
 
