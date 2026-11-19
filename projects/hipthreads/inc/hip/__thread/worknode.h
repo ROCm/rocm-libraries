@@ -154,8 +154,8 @@ struct WorkNode_Header {
      */
     __device__ WorkNode_Header **lock();
 
-    /// Unlock after inline query (e.g. get_width), where node hasn't moved and we know *link_to_self == nullptr.
-    __device__ void unlockActive();
+    /// Put the worknode at location and unlock, without updating link_to_self (e.g. back where it was locked from).
+    __device__ void restoreAndUnlock(WorkNode_Header **location);
 
     /// Move the worknode to *new_location and unlock.
     __device__ void moveAndUnlock(WorkNode_Header **new_location);
