@@ -1108,6 +1108,16 @@ def identity_supports_problem(
     ):
         return False, "uk_nopad serves unpadded problems only"
 
+    # fwd launch rules the binary's kernargs cannot honour (eqx channel order /
+    # store runs, split_zero_first runs, stream-K groups, xh_yring dilation):
+    # the predicate is_valid_spec_for_problem asks.
+    if identity.direction == "fwd" and not identity.is_direct:
+        from kernels.common.conv_implicit_gemm import fwd_launch_problem_reason
+
+        _why = fwd_launch_problem_reason(identity, problem)
+        if _why is not None:
+            return False, _why
+
     # wgrad epi_quad_xpose: 4 consecutive dW columns per 8-byte store, which
     # must stay inside one filter tap's channel run.
     if (
@@ -1321,7 +1331,46 @@ def identity_supports_problem(
             return False, "tapk_xhalo serves pW == 0 only"
         if identity.tapk_pp_xhalo and int(getattr(problem, "pW", 0)) != 0:
             return False, "tapk_pp_xhalo serves pW == 0 only"
-        if getattr(identity, "xh_tap_rsrc", False):
+        _yz = max(
+            int(getattr(problem, "Y", 1) or 1),
+            (
+                int(getattr(problem, "Z", 1) or 1)
+                if getattr(problem, "is_3d", False)
+                else 1
+            ),
+        )
+        if (identity.xh_fast_a or getattr(identity, "xh_dlds", 0)) and _yz > 3:
+            # Their (z, y) tap masks have a bit for filters of up to 3 per axis.
+            return False, "xh_fast_a / xh_dlds serve filters of up to 3 along y and z"
+        if (
+            getattr(identity, "xh_yring", 0)
+            and identity.direction == "dgrad"
+            and int(getattr(problem, "Y", 0) or 0) != identity.filter_w
+        ):
+            # The ring unrolls the build filter's rows; the validator builds it
+            # for Y == X only, and the identity records X (filter_w).
+            return False, "xh_yring (dgrad) serves filters with Y == X only"
+        _tap_rsrc = getattr(identity, "xh_tap_rsrc", False) or getattr(
+            identity, "xh_dlds", 0
+        ) in (4, 5, 6)
+        if _tap_rsrc:
+            # The tap-in-base dY resource starts at the tile's tap offset
+            # (pD - z) * Ho * Wo * K + (pH - y) * Wo * K + k: its size, dY
+            # minus that offset, must stay positive, or the bit-30 / bit-31
+            # marked rows stop reading zero.
+            _is3 = bool(getattr(problem, "is_3d", False))
+            _K = int(getattr(problem, "K", 1) or 1)
+            _Ho, _Wo = int(problem.Ho), int(problem.Wo)
+            _Do = int(problem.Do) if _is3 else 1
+            _pD = int(getattr(problem, "pD", 0) or 0) if _is3 else 0
+            _pH = int(getattr(problem, "pH", 0) or 0)
+            _n = int(getattr(problem, "N", 1) or 1)
+            if ((_pD * _Ho + _pH) * _Wo + 1) * _K > _n * _Do * _Ho * _Wo * _K:
+                return False, (
+                    "a tap-in-base dY resource (xh_tap_rsrc / xh_dlds 4-6) needs "
+                    "every tap offset inside dY"
+                )
+        if _tap_rsrc:
             # xh_tap_rsrc marks an out-of-range dY row with offset bit 30 (in
             # elements): dY (bounded by the padded input extents) < 2^30.
             def _e(a, p_):
@@ -1337,7 +1386,7 @@ def identity_supports_problem(
                 * int(getattr(problem, "K", 1) or 1)
             )
             if dy_bound >= (1 << 30):
-                return False, "xh_tap_rsrc serves dY below 2^30 elements"
+                return False, "xh_tap_rsrc / xh_dlds 4-6 serve dY below 2^30 elements"
         if getattr(identity, "xh_yring", 0) and identity.direction == "dgrad":
             # The dgrad y-ring is built for one dX row width (its slots and
             # loads per y step are baked).
