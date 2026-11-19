@@ -16,15 +16,3 @@
     executor.queue<device_adjacent_find_benchmark<input_type, 5 , config>>();
     executor.queue<device_adjacent_find_benchmark<input_type, 9 , config>>();
 {% endblock %}
-
-{% block get_time %}
-    double sum = 0;
-    double n = 0;
-
-    for(const double & x : executor.get_all_bytes_per_second()){
-        sum += (1000.0 * primbench::GiB) / x;
-        n++;
-    }
-
-    return sum / n;
-{% endblock %}

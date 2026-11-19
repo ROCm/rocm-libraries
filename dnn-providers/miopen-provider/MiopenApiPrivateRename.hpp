@@ -2,7 +2,8 @@
 // SPDX-License-Identifier:  MIT
 //
 // GENERATED FILE. Do not edit.
-// Source: projects/miopen/include/miopen/miopen.h
+// Source: projects/miopen/include/miopen/miopen.h and
+//         projects/miopen/src/include/miopen/miopen_internal.h
 // Regenerate: python3 projects/miopen/script/generate_wrapper_sources.py
 //
 // Symbol-rename header for the hipDNN MIOpen provider, force-included (-include,
@@ -19,14 +20,12 @@
 //
 // It is generated from the same list as the library's own
 // src/private/miopen_private_rename.h, so the two cannot differ: it renames
-// exactly the entry points declared in <miopen/miopen.h>. It holds only
-// #defines, so it is safe to force-include everywhere.
-//
-// The three miopenConvolution*GetWorkSpaceSizeRange entry points are deliberately
-// not renamed. They are exported with MIOPEN_EXPORT from src/convolution_api.cpp
-// but never declared in <miopen/miopen.h>, so the split leaves them on
-// libMIOpen_private.so under their original names. The provider declares them in
-// MiopenApi.hpp and binds them directly.
+// every entry point declared in <miopen/miopen.h> or in the library's
+// src/include/miopen/miopen_internal.h, which includes the three
+// miopenConvolution*GetWorkSpaceSizeRange entry points that the provider
+// declares itself in MiopenApi.hpp. Those declarations are renamed with the rest
+// and bind the private library's _impl symbols. It holds only #defines, so it is
+// safe to force-include everywhere.
 #pragma once
 
 #define miopenGetErrorString miopenGetErrorString_impl
@@ -305,3 +304,13 @@
 #define miopenMultiMarginLossForward miopenMultiMarginLossForward_impl
 #define miopenSetTuningPolicy miopenSetTuningPolicy_impl
 #define miopenGetTuningPolicy miopenGetTuningPolicy_impl
+#define miopenConvolutionABBackwardWeightsGetWorkSpaceSize \
+    miopenConvolutionABBackwardWeightsGetWorkSpaceSize_impl
+#define miopenConvolutionForwardGetWorkSpaceSizeRange \
+    miopenConvolutionForwardGetWorkSpaceSizeRange_impl
+#define miopenConvolutionBackwardDataGetWorkSpaceSizeRange \
+    miopenConvolutionBackwardDataGetWorkSpaceSizeRange_impl
+#define miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange \
+    miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange_impl
+#define miopenHiddenSetConvolutionFindMode miopenHiddenSetConvolutionFindMode_impl
+#define miopenHiddenGetConvolutionFindMode miopenHiddenGetConvolutionFindMode_impl
