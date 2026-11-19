@@ -651,7 +651,8 @@ def test_ga_post_processor_runs_source_swap_split_before_cluster_dim() -> None:
     order = pp._post_process_methods
     assert order.index("drop_mi_group_gsu") < order.index("keep_one_wave_tdm_fuse_zero")
     assert order.index("keep_one_wave_tdm_fuse_zero") < order.index("couple_lds_segment_interleave")
-    assert order.index("couple_lds_segment_interleave") < order.index("split_source_swap")
+    assert order.index("couple_lds_segment_interleave") < order.index("couple_temporal_hint")
+    assert order.index("couple_temporal_hint") < order.index("split_source_swap")
     assert order.index("split_source_swap") < order.index("couple_cluster_dim")
     fork = {"SourceSwap": _ss([False, True]), "ClusterDim": _cd([[1, 1], [2, 2]])}
     groups = [_mi_entry(_MI_SQUARE), _mi_entry([32, 16, 128, 1, 1, 4, 8, 2, 2])]
@@ -943,13 +944,126 @@ def test_ga_pipeline_couples_lds_segment_interleave_and_tdm_fuse(streamk: bool) 
         shapes: dict = {}
         for e in coupled:
             if e["MatrixInstruction"].values == mi:
-                key = (_lsi_tdm(e), e["SourceSwap"].values[0])
+                key = (_lsi_tdm(e), _th(e), e["SourceSwap"].values[0])
                 shapes.setdefault(key, []).append(e["ClusterDim"].values[0])
         per_swap: dict = {}
-        for (pair, swap), s in shapes.items():
+        for (pair, th, swap), s in shapes.items():
             per_swap.setdefault(swap, []).append(s)
         for lists in per_swap.values():
             assert len(lists) >= 2 and all(s == lists[0] and s for s in lists)
+
+
+# ---------------------------------------------------------------------------
+# _GFX1250TemporalHintCoupling
+# ---------------------------------------------------------------------------
+
+
+def _th_param(name: str, values: list, active: bool = True) -> ForkParameter:
+    return ForkParameter(name=name, values=values, active=active)
+
+
+def _th_fork(a=(0, 1), b=(0, 1), active: bool = True) -> dict:
+    return {
+        "TemporalHintA": _th_param("TemporalHintA", list(a), active),
+        "TemporalHintB": _th_param("TemporalHintB", list(b), active),
+        "TemporalHintD": _th_param("TemporalHintD", [0, 1]),
+    }
+
+
+def _th(entry: dict):
+    if "TemporalHintA" not in entry:
+        return None
+    return entry["TemporalHintA"].values[0], entry["TemporalHintB"].values[0]
+
+
+def _with_tdm(entry: dict, tdm: int) -> dict:
+    return {**entry, "TDMFuse": _tdm([tdm])}
+
+
+def test_temporal_hint_coupling_pairs_hints_with_each_entry_tdm_fuse() -> None:
+    pp = _ga_pp()
+    groups = [_with_tdm(_mi_entry(_MI_32X16), 0), _with_tdm(_mi_entry(_MI_32X16), 1)]
+    f2, coupled = pp.couple_temporal_hint(_th_fork(), groups, _LSI_CTX)
+    assert "TemporalHintA" not in f2 and "TemporalHintB" not in f2
+    assert f2["TemporalHintD"].values == [0, 1]
+    assert [(e["TDMFuse"].values[0], _th(e)) for e in coupled] == [
+        (0, (0, 0)), (0, (1, 1)),
+        (1, (0, 0)), (1, (0, 1)), (1, (1, 0)), (1, (1, 1)),
+    ]
+    assert _single_valued(coupled)
+
+
+def test_temporal_hint_coupling_keeps_only_agreeing_pairs_on_tdm_fuse_0() -> None:
+    """One flat hint multi-valued, the other single: TDMFuse 0 keeps the pair that agrees."""
+    pp = _ga_pp()
+    groups = [_with_tdm(_mi_entry(_MI_ONE_WAVE), 0), _with_tdm(_mi_entry(_MI_32X16), 1)]
+    _, coupled = pp.couple_temporal_hint(_th_fork(a=(0, 1), b=(1,)), groups, _LSI_CTX)
+    assert [(e["TDMFuse"].values[0], _th(e)) for e in coupled] == [
+        (0, (1, 1)), (1, (0, 1)), (1, (1, 1)),
+    ]
+
+
+def test_temporal_hint_coupling_with_flat_tdm_fuse() -> None:
+    """TDMFuse still flat: a flat 0 couples the hints, a flat 1 leaves them flat."""
+    pp = _ga_pp()
+    groups = [_mi_entry(_MI_32X16)]
+    f2, coupled = pp.couple_temporal_hint({**_th_fork(), "TDMFuse": _tdm([0])}, groups, _LSI_CTX)
+    assert "TemporalHintA" not in f2 and f2["TDMFuse"].values == [0]
+    assert [_th(e) for e in coupled] == [(0, 0), (1, 1)]
+    fork = {**_th_fork(), "TDMFuse": _tdm([1])}
+    f3, g3 = pp.couple_temporal_hint(fork, groups, _LSI_CTX)
+    assert g3 is groups and f3["TemporalHintA"].values == [0, 1]
+
+
+@pytest.mark.parametrize(
+    "fork",
+    [
+        {},
+        {"TemporalHintA": _th_param("TemporalHintA", [0, 1])},
+        _th_fork(active=False),
+        _th_fork(a=(0,), b=(1,)),
+    ],
+    ids=["missing", "only-a", "inactive", "single-valued"],
+)
+def test_temporal_hint_coupling_noop(fork: dict) -> None:
+    pp = _ga_pp()
+    groups = [_with_tdm(_mi_entry(_MI_32X16), 0)]
+    f2, g2 = pp.couple_temporal_hint(dict(fork), groups, _LSI_CTX)
+    assert g2 is groups
+    assert set(f2) == set(fork)
+
+
+def test_temporal_hint_coupling_noop_when_an_entry_has_no_single_tdm_fuse() -> None:
+    pp = _ga_pp()
+    groups = [_with_tdm(_mi_entry(_MI_32X16), 0), _mi_entry(_MI_32X16)]
+    f2, g2 = pp.couple_temporal_hint(_th_fork(), groups, _LSI_CTX)
+    assert g2 is groups and "TemporalHintA" in f2
+
+
+@pytest.mark.parametrize("streamk", [False, True])
+def test_ga_pipeline_couples_temporal_hint_with_tdm_fuse(streamk: bool) -> None:
+    """Profile output through the full GA post-processor: no TDMFuse 0 entry carries
+    disagreeing hints, and TDMFuse 1 entries keep every pair."""
+    cfg = _cfg(arch="gfx1250_96cu", dt="F4", streamk=streamk, mx=True)
+    params, _ = g1250_opt.GFX1250GAParams(cfg).generate_for_size(_LSI_SIZE)
+    assert params["TemporalHintA"].values == [0, 1] and params["TemporalHintB"].values == [0, 1]
+    groups = [_mi_entry(_MI_32X16), _mi_entry(_MI_NO_INTERLEAVE), _mi_entry(_MI_ONE_WAVE)]
+    f2, coupled = g1250_pp.GFX1250GAPostProcessor(cfg).apply(params, groups, _LSI_SIZE)
+    assert not {"TemporalHintA", "TemporalHintB"} & set(f2)
+    assert "TemporalHintD" in f2
+    assert _single_valued(coupled)
+    variants: dict = {}
+    for e in coupled:
+        variants.setdefault(tuple(e["MatrixInstruction"].values), set()).add((_lsi_tdm(e), _th(e)))
+    agree = [(0, 0), (1, 1)]
+    every = [(0, 0), (0, 1), (1, 0), (1, 1)]
+    assert variants[tuple(_MI_32X16)] == (
+        {((0, 0), p) for p in agree} | {((0, 1), p) for p in every} | {((1, 0), p) for p in agree}
+    )
+    assert variants[tuple(_MI_NO_INTERLEAVE)] == (
+        {((0, 0), p) for p in agree} | {((0, 1), p) for p in every}
+    )
+    assert variants[tuple(_MI_ONE_WAVE)] == {((0, 0), p) for p in agree}
 
 
 # ---------------------------------------------------------------------------

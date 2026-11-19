@@ -126,6 +126,25 @@ def test_lds_segment_interleave_variants_share_their_mi_sampling_mass() -> None:
     assert weights[:3].sum() == pytest.approx(weights[3:].sum()) == pytest.approx(1.0)
 
 
+def test_temporal_hint_variants_share_their_mi_sampling_mass() -> None:
+    """TemporalHintA/B pairs coupled per TDMFuse split one MI's mass like the other variants."""
+    mi_a = [32, 16, 128, 1, 1, 8, 4, 2, 2]
+    mi_b = [16, 16, 128, 1, 1, 4, 4, 2, 4]
+
+    def th(entry: dict, a: int, b: int) -> dict:
+        return {
+            **entry,
+            "TemporalHintA": ForkParameter(name="TemporalHintA", values=[a]),
+            "TemporalHintB": ForkParameter(name="TemporalHintB", values=[b]),
+        }
+
+    entries = [th(_variant(_entry(mi_a), 0, 0), x, x) for x in (0, 1)]
+    entries += [th(_variant(_entry(mi_a), 0, 1), x, y) for x in (0, 1) for y in (0, 1)]
+    entries += [_variant(_entry(mi_b), 0, 1)]
+    weights = np.exp(-DUCTILE_COST_SCALE * _cluster_variant_cost_offsets(entries))
+    assert weights[:6].sum() == pytest.approx(weights[6]) == pytest.approx(1.0)
+    assert len(set(np.round(weights[:6], 6))) == 1
+
 def test_source_swap_entries_keep_their_own_share() -> None:
     """SourceSwap is not a variant field: each SourceSwap entry of an MI keeps the mass
     of a separate MI, as without the LDSSegmentInterleave / TDMFuse split."""

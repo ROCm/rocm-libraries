@@ -297,7 +297,8 @@ class _GFX1250SegmentInterleaveLayout:
       * every MI gets an entry per other LDSSegmentInterleave value (0) and
         per TDMFuse value: TDMFuse 0, the layout the 1 entries use, and every
         TDMFuse value the MI already had (the profile's 1, which keeps
-        TemporalHintA/B independent; see ``GFX1250GAParams.tdm_fuse``). A
+        TemporalHintA/B independent; see ``GFX1250GAParams.tdm_fuse`` and
+        _GFX1250TemporalHintCoupling, which runs next). A
         one-wave MI keeps only TDMFuse 0, as _GFX1250TDMFuseOneWave decided;
       * an MI that can interleave (:func:`_can_interleave`) also gets one
         entry with ``LDSSegmentInterleave=1`` and ``TDMFuse=0``. MIs that
@@ -352,6 +353,75 @@ class _GFX1250SegmentInterleaveLayout:
         del fork_params["LDSSegmentInterleave"]
         if flat_tdm is not None:
             del fork_params["TDMFuse"]
+        return fork_params, coupled
+
+
+def _flat_values(fp):
+    """The values of an active flat parameter as a list, or None."""
+    if fp is None or not fp.active:
+        return None
+    return fp.values if isinstance(fp.values, list) else [fp.values]
+
+
+class _GFX1250TemporalHintCoupling:
+    """Couple TemporalHintA/B with each MI group entry's TDMFuse.
+
+    Under ``TDMFuse=0`` A and B share one ``tensor_load_to_lds`` whose th bits
+    are instruction-wide, and TensileLite emits a TemporalHint there only when
+    TemporalHintA and TemporalHintB agree (Solution.py, Components/NonTemporal.py):
+    (0, 1) and (1, 0) build the (0, 0) code under another kernel name, so Ductile
+    would build and time them as separate kernels. Under ``TDMFuse > 0`` A and B
+    have descriptor sets of their own and every (A, B) pair builds its own kernel.
+
+    So once TDMFuse lives in the MI groups (_GFX1250TDMFuseOneWave,
+    _GFX1250SegmentInterleaveLayout), the flat TemporalHintA/B move into the MI
+    groups as well, one single-valued entry per pair: entries with ``TDMFuse > 0``
+    get every (A, B) pair of the flat values, entries with ``TDMFuse = 0`` only the
+    agreeing pairs (A == B). The flat parameters are dropped, so no draw carries
+    a TemporalHint that cannot take effect. TemporalHintD is not affected.
+
+    The step does nothing when TemporalHintA or TemporalHintB is missing or
+    inactive, when both are single-valued, or when some entry's TDMFuse is not a
+    single value. With TDMFuse still flat (no MI group carries it), it couples
+    only a flat ``TDMFuse: [0]``; a flat value above 0 keeps every pair, so the
+    hints stay flat.
+    """
+
+    @mark_post_process
+    def couple_temporal_hint(
+        self,
+        fork_params: Dict[str, ForkParameter],
+        mi_groups: GroupDimension,
+        ctx: SizeContext,
+    ) -> Tuple[Dict[str, ForkParameter], GroupDimension]:
+        a = _flat_values(fork_params.get("TemporalHintA"))
+        b = _flat_values(fork_params.get("TemporalHintB"))
+        if not mi_groups or not a or not b or (len(a) < 2 and len(b) < 2):
+            return fork_params, mi_groups
+        flat_tdm = _flat_values(fork_params.get("TDMFuse"))
+        if not any("TDMFuse" in e for e in mi_groups) and flat_tdm != [0]:
+            return fork_params, mi_groups
+        tdms = []
+        for entry in mi_groups:
+            own = entry.get("TDMFuse")
+            values = own.values if own is not None else flat_tdm
+            if values is not None and not isinstance(values, list):
+                values = [values]
+            if not values or len(values) != 1:
+                return fork_params, mi_groups
+            tdms.append(values[0])
+        every_pair = [(x, y) for x in a for y in b]
+        agreeing = [(x, x) for x in a if x in b] or every_pair[:1]
+        coupled = []
+        for entry, tdm in zip(mi_groups, tdms):
+            for x, y in agreeing if tdm == 0 else every_pair:
+                coupled.append({
+                    **entry,
+                    "TemporalHintA": self._make_param("TemporalHintA", [x]),
+                    "TemporalHintB": self._make_param("TemporalHintB", [y]),
+                })
+        del fork_params["TemporalHintA"]
+        del fork_params["TemporalHintB"]
         return fork_params, coupled
 
 
@@ -527,12 +597,13 @@ class _GFX1250ClusterDimCoupling:
 # Each per-shape copy inherits its entry's SourceSwap, LDSSegmentInterleave and
 # TDMFuse. The steps therefore run as: _GFX1250WaveTileFilter,
 # _GFX1250GeometryNarrowing, _GFX1250DropMIGroupGSU, _GFX1250TDMFuseOneWave,
-# _GFX1250SegmentInterleaveLayout, _GFX1250SourceSwapSplit,
-# _GFX1250ClusterDimCoupling.
+# _GFX1250SegmentInterleaveLayout, _GFX1250TemporalHintCoupling,
+# _GFX1250SourceSwapSplit, _GFX1250ClusterDimCoupling.
 class GFX1250GAPostProcessor(
     GFX1250GAOrigamiPolicy,
     _GFX1250ClusterDimCoupling,
     _GFX1250SourceSwapSplit,
+    _GFX1250TemporalHintCoupling,
     _GFX1250SegmentInterleaveLayout,
     _GFX1250TDMFuseOneWave,
     _GFX1250DropMIGroupGSU,

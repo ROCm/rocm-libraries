@@ -563,7 +563,10 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
         TemporalHintA and TemporalHintB agree: of the four (A, B) pairs swept
         below, (0, 1) and (1, 0) both build the (0, 0) kernel and only (1, 1)
         differs. TDMFuse=1 gives A and B a descriptor set each, so every pair
-        builds its own kernel.
+        builds its own kernel. Once TDMFuse is coupled per MI group,
+        ``_GFX1250TemporalHintCoupling`` in post_processor.py moves
+        TemporalHintA/B into the groups and gives TDMFuse=0 entries only the
+        agreeing pairs.
 
         TDMFuse 1-3 need more than one wave; ``_GFX1250TDMFuseOneWave`` in
         post_processor.py keeps one-wave MIs at TDMFuse=0. TDMFuse>0 also rules
@@ -1027,7 +1030,9 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
         couples the two per MI group: each MI that can interleave gets an
         LDSSegmentInterleave=1 entry with TDMFuse=0, and every MI keeps
         LDSSegmentInterleave=0 entries with TDMFuse 0 and 1, so TDMFuse=1's
-        independent temporal hints stay in the search for 0. MIs whose
+        independent temporal hints stay in the search for 0
+        (``_GFX1250TemporalHintCoupling`` then pairs the hints with each
+        entry's TDMFuse). MIs whose
         MIWaveGroup or LocalSplitU cannot interleave stay at 0.
         """
         return self._make_param("LDSSegmentInterleave", [0, 1])
@@ -1056,10 +1061,18 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
     # load tensor ("TemporalHint=7 is reserved for loads").
     @param
     def temporal_hint_a(self, ctx: SizeContext) -> ForkParameter:
+        """[0, 1], independent of TemporalHintB only under TDMFuse > 0.
+
+        Under TDMFuse=0 A and B share one TDM load, so only agreeing pairs differ
+        (see ``tdm_fuse``). When TDMFuse is coupled per MI group,
+        ``_GFX1250TemporalHintCoupling`` moves TemporalHintA/B into the groups
+        with every pair for TDMFuse > 0 and the agreeing pairs for TDMFuse = 0.
+        """
         return self._make_param("TemporalHintA", [0, 1])
 
     @param
     def temporal_hint_b(self, ctx: SizeContext) -> ForkParameter:
+        """[0, 1]; coupled with TDMFuse like TemporalHintA (see ``temporal_hint_a``)."""
         return self._make_param("TemporalHintB", [0, 1])
 
     @param

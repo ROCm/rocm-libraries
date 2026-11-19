@@ -25,18 +25,22 @@ DUCTILE_COST_SCALE = 0.25
 
 
 # MI group fields a post-processor expands one MI into several entries over:
-# ClusterDim shapes (gfx1250 _GFX1250ClusterDimCoupling) and the
+# ClusterDim shapes (gfx1250 _GFX1250ClusterDimCoupling), the
 # LDSSegmentInterleave / TDMFuse pairs of gfx1250
-# _GFX1250SegmentInterleaveLayout. SourceSwap is not one of them, so an MI
-# split per SourceSwap value keeps one share per value, as before.
-_MI_VARIANT_FIELDS = frozenset({"ClusterDim", "LDSSegmentInterleave", "TDMFuse"})
+# _GFX1250SegmentInterleaveLayout and the TemporalHintA / TemporalHintB pairs
+# of gfx1250 _GFX1250TemporalHintCoupling. SourceSwap is not one of them, so an
+# MI split per SourceSwap value keeps one share per value, as before.
+_MI_VARIANT_FIELDS = frozenset(
+    {"ClusterDim", "LDSSegmentInterleave", "TDMFuse", "TemporalHintA", "TemporalHintB"}
+)
 
 
 def _cluster_variant_cost_offsets(mi_groups: Sequence[Dict[str, Any]]) -> np.ndarray:
     """Cost offsets that keep each MI's sampling mass independent of its variants.
 
     An MI group entry repeated once per ClusterDim shape, or per
-    LDSSegmentInterleave / TDMFuse pair, would otherwise be drawn as many
+    LDSSegmentInterleave / TDMFuse or TemporalHintA / TemporalHintB pair,
+    would otherwise be drawn as many
     times more often as it has variants. Adding ln(n) / scale to each of the
     n variants divides each variant's probability by n, so the MI as a whole
     keeps the probability its cost gives it.
