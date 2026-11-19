@@ -55,7 +55,7 @@ class Tuner(BaseTuner):
 
 
             # Memory size constraint
-            if block_size * ipt * element_size >= 65536:
+            if block_size * ipt * element_size >= self.shared_mem:
                 return False
 
             return True

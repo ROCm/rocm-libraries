@@ -58,7 +58,7 @@ class Tuner(BaseTuner):
             ipt = params["ipt"]
 
             # Memory size constraint
-            if block_size * ipt * TYPE_CONFIGS[types["value_type"]].size >= 65536:
+            if block_size * ipt * TYPE_CONFIGS[types["value_type"]].size >= self.shared_mem:
                 return False
             return True
 

@@ -69,7 +69,6 @@ class Tuner(BaseTuner):
 
     def _get_restrictions(self, types: Dict[str, Any]) -> Callable[[dict], bool]:
         key_size = TYPE_CONFIGS[types["key_type"]].size
-        TUNING_SHARED_MAX = 65536
 
         def validate(params):
             bs = params['block_size_x']
@@ -87,10 +86,10 @@ class Tuner(BaseTuner):
                 return False
 
             if types["value_type"] == "rocprim::empty_type":
-                return key_size * bs * ipt < TUNING_SHARED_MAX 
+                return key_size * bs * ipt < self.shared_mem 
             else:
                 val_size = TYPE_CONFIGS[types["value_type"]].size
-                return (key_size + val_size) * bs * ipt <= TUNING_SHARED_MAX
+                return (key_size + val_size) * bs * ipt <= self.shared_mem
 
         return validate
 

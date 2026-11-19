@@ -55,13 +55,11 @@ class Tuner(BaseTuner):
         
         element_size = TYPE_CONFIGS[types["value_type"]].size
         # based on legacy tuning 
-        MAX_SHARED_MEM = 65536
-
         def validate(params):
             block_size = params['block_size_x']
             ipt = params['ipt']
 
-            max_ipt = (MAX_SHARED_MEM // (block_size * element_size * 2 )) + element_size
+            max_ipt = (self.shared_mem // (block_size * element_size * 2 )) + element_size
 
             return ipt < max_ipt
 

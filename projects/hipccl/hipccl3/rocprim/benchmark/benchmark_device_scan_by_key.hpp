@@ -300,7 +300,7 @@ struct device_scan_by_key_benchmark_generator
             {
                 // Limit items per thread to not over-use shared memory
                 static constexpr unsigned int max_items_per_thread = ::rocprim::min<size_t>(
-                    65536
+                    TUNING_SHARED_MEMORY_MAX
                         / (block_size
                            * (sizeof(KeyType) + sizeof(ValueType)
                               + (sizeof(KeyType) == 16 && sizeof(ValueType) == 1))),

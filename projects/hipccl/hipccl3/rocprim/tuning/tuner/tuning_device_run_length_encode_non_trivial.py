@@ -59,7 +59,6 @@ class Tuner(BaseTuner):
         # using OffsetCountPairT = ::rocprim::tuple<unsigned int, unsigned int>; sizeof(OffsetCountPairT)
         offset_size = 8
         key_size = TYPE_CONFIGS[types['key_type']].size
-        max_shared_memory = 65536
         #static constexpr unsigned int min_items_per_thread_exponent = 3u;
         min_ipt_exp = 3
 
@@ -71,7 +70,7 @@ class Tuner(BaseTuner):
             ipt  = params['ipt'] 
             block_load_func = params['block_load_func']
 
-            max_ipt = max_shared_memory // (bs * max_size_per_element)
+            max_ipt = self.shared_mem // (bs * max_size_per_element)
             max_ipt_exp = max(log2(max_ipt) // 1, min_ipt_exp) - 1
 
             is_load_warp_transpose = block_load_func == "::rocprim::block_load_method::block_load_warp_transpose"
