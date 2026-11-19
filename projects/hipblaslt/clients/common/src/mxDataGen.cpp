@@ -421,6 +421,59 @@ void makeIntegerExactMX(std::vector<uint8_t>& dataBytes,
     }
 }
 
+std::vector<float> restrideReference(std::vector<float> dense,
+                                      size_t             rows,
+                                      size_t             cols,
+                                      size_t             stride)
+{
+    if(stride == rows)
+        return dense;
+
+    std::vector<float> strided(stride * cols);
+    for(size_t col = 0; col < cols; ++col)
+        std::memcpy(strided.data() + col * stride,
+                    dense.data() + col * rows,
+                    rows * sizeof(float));
+    return strided;
+}
+
+template <typename DT>
+void restrideMXData(std::vector<uint8_t> const& unpackedDense,
+                    void*                       data,
+                    size_t                      rows,
+                    size_t                      cols,
+                    size_t                      stride)
+{
+    if(stride == rows)
+    {
+        if constexpr(std::is_same_v<DT, DGen::ocp_e5m2_mxfp8>
+                     || std::is_same_v<DT, DGen::ocp_e4m3_mxfp8>)
+            std::memcpy(data, unpackedDense.data(), unpackedDense.size());
+        else
+            packData<DT>(unpackedDense, static_cast<uint8_t*>(data));
+        return;
+    }
+
+    size_t const outputElements = stride * (cols - 1) + rows;
+    if constexpr(std::is_same_v<DT, DGen::ocp_e5m2_mxfp8>
+                 || std::is_same_v<DT, DGen::ocp_e4m3_mxfp8>)
+    {
+        auto* output = static_cast<uint8_t*>(data);
+        std::memset(output, 0, outputElements);
+        for(size_t col = 0; col < cols; ++col)
+            std::memcpy(output + col * stride, unpackedDense.data() + col * rows, rows);
+    }
+    else
+    {
+        std::vector<uint8_t> stridedUnpacked(outputElements);
+        for(size_t col = 0; col < cols; ++col)
+            std::memcpy(stridedUnpacked.data() + col * stride,
+                        unpackedDense.data() + col * rows,
+                        rows);
+        packData<DT>(stridedUnpacked, static_cast<uint8_t*>(data));
+    }
+}
+
 template <typename T, typename DT>
 std::vector<float> generateData(T                           dgen,
                                 void*                       data,
@@ -436,6 +489,10 @@ std::vector<float> generateData(T                           dgen,
                                 bool                        integerExact = false)
 {
     using namespace DGen;
+
+    if(strides[1] < sizes[0])
+        throw std::invalid_argument(
+            "MX leading dimension must be at least the stored row count");
 
     // The non-K-major reference indexes scales canonically, whereas these device
     // swizzles use a different grid. Do not return inconsistent exact reference values.
@@ -472,14 +529,12 @@ std::vector<float> generateData(T                           dgen,
             + std::to_string(elementsPerMXBlock) + ", got " + std::to_string(sizes[1]));
 
     dgen.setSeed(seed);
-    dgen.generate(sizes, strides, opt);
+    dgen.generate(sizes, {1, sizes[0]}, opt);
 
     std::vector<uint8_t> dataBytes = dgen.getDataBytes();
     std::vector<uint8_t> scaleBytes = dgen.getScaleBytes();
     if(integerExact)
         makeIntegerExactMX<DT>(dataBytes, scaleBytes, isMatrixA);
-
-    std::memcpy(data, dataBytes.data(), dataBytes.size() * sizeof(uint8_t));
 
     // Apply per-architecture scale swizzle on top of the natural-packed
     // scales mxDataGenerator wrote. Layouts are mutually exclusive by
@@ -524,13 +579,6 @@ std::vector<float> generateData(T                           dgen,
         // Number of scale rows in scaleBytes. The generator emits one scale per
         // (MN, K block) pair, so scaleBytes.size() == mnExtent * kBlocks and the
         // row count divides straight back out.
-        //
-        // This is read from the buffer instead of from sizes[] because the
-        // generator sizes the buffer from the strides it was passed, which can
-        // span more rows than M*N when the caller pads its leading dimension.
-        // The swizzle rejects any grid whose product is not exactly
-        // scaleBytes.size(), so the grid has to describe the buffer that exists,
-        // not the logical extent.
         size_t const mnExtent
             = (kBlocks > 0 && scaleBytes.size() % kBlocks == 0)
                   ? scaleBytes.size() / kBlocks
@@ -605,8 +653,21 @@ std::vector<float> generateData(T                           dgen,
     {
         // For (1) transposed matrixA and (2) non-transposed matrixB,
         // return the reference float directly since they are aligned already.
+        // FP4/FP6 generator bytes are packed, so restride them as unpacked elements.
+        if constexpr(std::is_same_v<DT, DGen::ocp_e5m2_mxfp8>
+                     || std::is_same_v<DT, DGen::ocp_e4m3_mxfp8>)
+            restrideMXData<DT>(dataBytes, data, sizes[0], sizes[1], strides[1]);
+        else
+            restrideMXData<DT>(unpackData<DT>(dataBytes, sizes[0] * sizes[1]),
+                                data,
+                                sizes[0],
+                                sizes[1],
+                                strides[1]);
+
         if(!integerExact)
-            return dgen.getReferenceFloat();
+            return restrideReference(
+                dgen.getReferenceFloat(), sizes[0], sizes[1], strides[1]);
+
         // The generator's reference floats describe its own values, which integerExact replaced;
         // recompute them from the bytes, over the generator's whole buffer of stride * cols
         // elements as its own reference does, so a padded leading dimension keeps its layout.
@@ -625,7 +686,7 @@ std::vector<float> generateData(T                           dgen,
                 ref[idx]
                     = DGen::toFloat<DT>(scaleBytes.data(), dataBytes.data(), scaleIndex, dataIndex);
         }
-        return ref;
+        return restrideReference(std::move(ref), sizes[0], sizes[1], strides[1]);
     }
 
     // For types smaller than 8-bit, mxDataGenerator returns packed data (i.e., two FP4 will be
@@ -635,8 +696,8 @@ std::vector<float> generateData(T                           dgen,
     {
         auto ret = getAlignedFloat<DT>(
             dataBytes, scaleBytes, {sizes[0], sizes[1]}, elementsPerMXBlock, isMatrixA);
-        std::memcpy(data, dataBytes.data(), dataBytes.size() * sizeof(uint8_t));
-        return ret;
+        restrideMXData<DT>(dataBytes, data, sizes[0], sizes[1], strides[1]);
+        return restrideReference(std::move(ret), sizes[0], sizes[1], strides[1]);
     }
     else if constexpr(std::is_same_v<DT, DGen::ocp_e3m2_mxfp6>
                       || std::is_same_v<DT, DGen::ocp_e2m3_mxfp6>)
@@ -645,9 +706,9 @@ std::vector<float> generateData(T                           dgen,
         auto         unpackedDataBytes = unpackData<DT>(dataBytes, elementCount);
         auto ret               = getAlignedFloat<DT>(
             unpackedDataBytes, scaleBytes, {sizes[0], sizes[1]}, elementsPerMXBlock, isMatrixA);
-        // GPU expects the data are packed
-        packData<DT>(unpackedDataBytes, static_cast<uint8_t*>(data));
-        return ret;
+        // GPU expects the data are packed in the caller's padded leading dimension.
+        restrideMXData<DT>(unpackedDataBytes, data, sizes[0], sizes[1], strides[1]);
+        return restrideReference(std::move(ret), sizes[0], sizes[1], strides[1]);
     }
     else if constexpr(std::is_same_v<DT, DGen::ocp_e2m1_mxfp4>
                       || std::is_same_v<DT, DGen::ocp_e2m1_mxfp4_e5m3>
@@ -657,9 +718,9 @@ std::vector<float> generateData(T                           dgen,
         auto         unpackedDataBytes = unpackData<DT>(dataBytes, elementCount);
         auto ret               = getAlignedFloat<DT>(
             unpackedDataBytes, scaleBytes, {sizes[0], sizes[1]}, elementsPerMXBlock, isMatrixA);
-        // GPU expects the data are packed
-        packData<DT>(unpackedDataBytes, static_cast<uint8_t*>(data));
-        return ret;
+        // GPU expects the data are packed in the caller's padded leading dimension.
+        restrideMXData<DT>(unpackedDataBytes, data, sizes[0], sizes[1], strides[1]);
+        return restrideReference(std::move(ret), sizes[0], sizes[1], strides[1]);
     }
     else
     {
