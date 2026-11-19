@@ -1241,8 +1241,9 @@ TEST(TestFlydslSdpaBwdMergedKernel, DeclinesARecordMissingAField)
 
 TEST(TestFlydslSdpaBwdMergedKernel, DeclinesALaunchGridPastInt32)
 {
-    // One block per tile of one row: B * (Hk * Sk + Hq * Sq) blocks.
-    // A one-thread block keeps the work-item bound out of reach.
+    // One block per tile of one row: B * (Hk * Sk + Hq * Sq) = B * 256 blocks at the default
+    // shape. A one-thread block keeps the work-item bound out of reach: 2^23 batches make 2^31
+    // blocks, past int32 workgroups and under 2^32 work-items.
     RowSpec tiny = plainRow();
     tiny.blockKv = 1;
     tiny.blockM = 1;
@@ -1250,7 +1251,7 @@ TEST(TestFlydslSdpaBwdMergedKernel, DeclinesALaunchGridPastInt32)
     Shape fits;
     fits.batch = int64_t{1} << 20;
     Shape overflows;
-    overflows.batch = int64_t{1} << 26;
+    overflows.batch = int64_t{1} << 23;
     EXPECT_TRUE(serves(specOf(fits), tiny));
     EXPECT_FALSE(serves(specOf(overflows), tiny));
     expectBadParam([&] { static_cast<void>(dumpOf(specOf(overflows), tiny)); });

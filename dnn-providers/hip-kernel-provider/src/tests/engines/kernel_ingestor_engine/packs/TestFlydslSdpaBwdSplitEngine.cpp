@@ -2461,6 +2461,17 @@ TEST(TestFlydslSdpaBwdSplitKernel, ADkdvU2RowIsDeclinedWhenItsValueOnlyLaunchLea
     // Over the K heads the same extent is x, which may be as wide as int32.
     row.grid = GRID_DKDV_HEADS_FIRST;
     EXPECT_TRUE(serves(Slot::DKDV, spec, row));
+    // At 1024 threads the dV-only x extent holds 2^22 - 1 workgroups before it passes 2^32
+    // work-items; the dK-only launch is one workgroup wide in x.
+    row.blockThreads = 1024;
+    const auto valueHeads = [](int64_t heads) {
+        auto wide = withValueHeads(baseSpec(), 1, heads);
+        wide.heads = heads;
+        wide.batch = 1;
+        return wide;
+    };
+    EXPECT_TRUE(serves(Slot::DKDV, valueHeads((int64_t{1} << 22) - 1), row));
+    EXPECT_FALSE(serves(Slot::DKDV, valueHeads(int64_t{1} << 22), row));
 }
 
 TEST(TestFlydslSdpaBwdSplitLaunch,

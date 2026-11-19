@@ -433,8 +433,9 @@ std::optional<GraphFacts> readFacts(const BoundTokens& bound)
 
 /**
  * @brief Kernel-scoped applicability: the object's class, dtype, dropout, head-dim tile,
- *        dB store and GQA packing against the graph, and a launch grid that fits int32 (the
- *        bias staging contract is graph_match's, BI-8).
+ *        dB store and GQA packing against the graph, and a launch grid within int32
+ *        workgroups and 32-bit work-items on its x axis (the bias staging contract is
+ *        graph_match's, BI-8).
  */
 bool flydslSdpaBwdMergedKernelMatches(const MatchContext& /*context*/,
                                       const BoundTokens& bound,

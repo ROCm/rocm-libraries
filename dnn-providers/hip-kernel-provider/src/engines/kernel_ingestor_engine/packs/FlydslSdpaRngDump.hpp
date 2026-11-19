@@ -407,8 +407,9 @@ inline std::optional<DropoutMaskLaunch>
     const int64_t threads = mask.getIntMetadata(std::string(DROPOUT_MASK_THREADS_FIELD));
     const auto draws = rngDumpDraws(batch, heads, seqLenQ, seqLenKv);
     const auto planes = checkedProduct({batch, heads});
+    const int64_t gridX = threads > 0 && draws.has_value() ? (*draws + threads - 1) / threads : 0;
     if(threads <= 0 || !draws.has_value() || *draws > INT32_LIMIT || !planes.has_value()
-       || !launchAxisFits((*draws + threads - 1) / threads, threads))
+       || !launchAxisFits(gridX, threads))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -416,7 +417,7 @@ inline std::optional<DropoutMaskLaunch>
     }
     auto code = buildIngestorKernelCode(kpackLoader, context, mask, dropoutMaskSignature());
     code.setBlockSize(static_cast<unsigned int>(threads), 1, 1);
-    code.setGridSize(static_cast<unsigned int>((*draws + threads - 1) / threads), 1, 1);
+    code.setGridSize(static_cast<unsigned int>(gridX), 1, 1);
     return DropoutMaskLaunch(std::move(code), dump, *planes, seqLenQ, seqLenKv);
 }
 

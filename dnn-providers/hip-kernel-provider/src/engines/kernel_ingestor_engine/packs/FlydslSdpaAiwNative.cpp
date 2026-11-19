@@ -329,11 +329,6 @@ bool flydslSdpaAiwKernelMatches(const MatchContext& context,
     }
 
     const auto binding = flydslSdpaRdnaBinding(bound);
-    // The padded-row fill launch spans the same heads with its own workgroup size.
-    if(fillsPaddedRows(binding) && !launchAxisFits(problem.numHeads, FILL_THREADS))
-    {
-        return false;
-    }
     if(integerMetadata(kernel, CAUSAL_FIELD) != (needsMask(binding) ? 1 : 0))
     {
         return false;
@@ -415,10 +410,12 @@ bool flydslSdpaAiwKernelMatches(const MatchContext& context,
     }
 
     // A padded graph's padded rows are written by the object's fill kernel: an object that
-    // names none, or a fill grid past its y extent, declines the graph.
+    // names none, or a fill grid past its y extent or past its x extent (the same heads at the
+    // fill's own workgroup size), declines the graph.
     if(fillsPaddedRows(binding)
        && (stringMetadata(kernel, FILL_SYMBOL_FIELD).value_or("").empty()
-           || (problem.seqLenQ + FILL_ROWS - 1) / FILL_ROWS > GRID_YZ_LIMIT))
+           || (problem.seqLenQ + FILL_ROWS - 1) / FILL_ROWS > GRID_YZ_LIMIT
+           || !launchAxisFits(problem.numHeads, FILL_THREADS)))
     {
         return false;
     }
