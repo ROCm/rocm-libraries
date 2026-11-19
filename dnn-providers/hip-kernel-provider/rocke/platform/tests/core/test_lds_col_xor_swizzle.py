@@ -127,6 +127,27 @@ def test_named_layouts_share_the_same_mapping_in_byte_and_element_units(layout, 
             assert layout.emit(b, row, col * 2) == element_col * 2
 
 
+@pytest.mark.parametrize(
+    "terms", [(-1, 3, 4), (0, 32, 4), (0, 3, 32), (0, 3, 4, -1), (True, 3, 4)]
+)
+def test_layout_rejects_invalid_bit_terms(terms):
+    with pytest.raises(ValueError, match=r"LDS column XOR terms must be integers"):
+        LdsColumnXor(*terms)
+
+
+@pytest.mark.parametrize("unit_bytes", [0, -2, 3])
+def test_layout_rejects_invalid_unit_width(unit_bytes):
+    with pytest.raises(ValueError, match="LDS column units must be a positive power"):
+        ROW_XOR_8x16B.shift_for(unit_bytes)
+
+
+def test_layout_rejects_unit_wider_than_chunk():
+    with pytest.raises(
+        ValueError, match="LDS column unit is larger than a swizzle chunk"
+    ):
+        ROW_XOR_8x16B.shift_for(32)
+
+
 @pytest.mark.parametrize("r,w,shift", [(0, 0, 3), (0, 3, 3), (3, 1, 4)])
 @pytest.mark.parametrize("elem_bytes", [1, 2, 8])
 def test_mask_swizzle_matches_gemm_remainder_in_element_or_byte_units(

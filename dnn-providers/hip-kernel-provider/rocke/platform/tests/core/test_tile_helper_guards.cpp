@@ -44,9 +44,23 @@ static bool check_geometry(int load_vec, int block_size, bool valid)
     return passed;
 }
 
+static bool check_layout()
+{
+    const rocke_lds_column_xor_t bad_terms[]
+        = {{-1, 3, 4, -1}, {0, 32, 4, -1}, {0, 3, 32, -1}, {0, 3, 4, -2}};
+    for(const auto& layout : bad_terms)
+        if(rocke_lds_column_xor_shift_for(&layout, 2) != -1)
+            return false;
+    const auto* layout = &rocke_lds_row_xor_8x16b;
+    return rocke_lds_column_xor_shift_for(layout, 0) == -1
+           && rocke_lds_column_xor_shift_for(layout, 3) == -1
+           && rocke_lds_column_xor_shift_for(layout, 32) == -1
+           && rocke_lds_column_xor_shift_for(layout, 2) == 3;
+}
+
 int main()
 {
-    return check_geometry(0, 64, false) && check_geometry(2, 0, false)
+    return check_layout() && check_geometry(0, 64, false) && check_geometry(2, 0, false)
                    && check_geometry(-1, 64, false) && check_geometry(2, -1, false)
                    && check_geometry(2, 64, true)
                ? 0
