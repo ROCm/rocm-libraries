@@ -238,7 +238,7 @@ def withPatch(cfgs, tag):
     extra = withSwz(withFlat(extra))
     # gfx950: the same short GEMMs on its 16x16x32 / 32x32x16 atoms with DMA rings (DMA serves
     # the flat reduction too, so ViT's 48-channel runs keep a 2- to 3-deep load ring).
-    for atom in PATCH_DMA_ATOMS & atoms:
+    for atom in [a for a in PATCH_DMA_ATOMS if a in atoms]:
         extra += [
             C(atom, bm, bn, 64, wm, wn, vec=8, xcd=1, swz=1, dma=d)
             for bm, bn, wm, wn in ((64, 64, 2, 2), (64, 128, 2, 2), (128, 128, 2, 2))
@@ -393,7 +393,9 @@ def patchTile(cfgs, tag):
     return out
 
 
-PATCH_DMA_ATOMS = {"mfma16x32_f16", "mfma16x32_bf16", "mfma32x16_f16", "mfma32x16_bf16"}
+# In emission order (a tuple, not a set: a set's iteration order follows string hashing, which
+# PYTHONHASHSEED and unrelated edits change). The order is the one the catalogs carry.
+PATCH_DMA_ATOMS = ("mfma32x16_f16", "mfma16x32_f16", "mfma32x16_bf16", "mfma16x32_bf16")
 PATCH_TILES["mfma16_bf16_908"] = [(64, 64, 16, 2, 2, 4), (128, 64, 32, 2, 2, 4)]
 
 
