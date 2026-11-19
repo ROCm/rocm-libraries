@@ -90,6 +90,21 @@ def test_override_is_fine_when_nothing_or_itself_is_loaded():
     )
 
 
+def test_hardlinked_library_names_are_the_same_loaded_file(tmp_path):
+    name = L.library_file_name(sys.platform)
+    loaded = tmp_path / name
+    loaded.write_bytes(b"library")
+    alias_dir = tmp_path / "alias"
+    alias_dir.mkdir()
+    alias = alias_dir / name
+    os.link(loaded, alias)
+    paths = [str(loaded), str(alias)]
+
+    L.check_override_can_take_effect(str(alias), [str(loaded)], sys.platform)
+    L.check_single_hipblaslt(str(alias), paths, sys.platform)
+    assert L.loaded_hipblaslt(paths, sys.platform) == [str(loaded)]
+
+
 def test_windows_module_names_are_matched_case_insensitively():
     loaded = [r"C:\torch\lib\LIBHIPBLASLT.DLL"]
     with pytest.raises(L.HipblasLtLoadError):

@@ -148,6 +148,11 @@ def _base(path: str, platform: str) -> str:
 
 
 def _same_file(a: str, b: str, platform: str) -> bool:
+    if (platform == "win32") == (sys.platform == "win32"):
+        try:
+            return os.path.samefile(a, b)
+        except OSError:
+            pass
     return _canon(a, platform) == _canon(b, platform)
 
 
