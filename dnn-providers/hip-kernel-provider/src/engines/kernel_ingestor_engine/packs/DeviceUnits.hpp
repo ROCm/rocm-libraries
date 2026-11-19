@@ -48,4 +48,26 @@ inline int64_t computeUnits(const hipdnn_plugin_sdk::ingestor::DeviceProperties&
     return reportsWorkgroupProcessors(device.gcnArchName) ? 2 * units : units;
 }
 
+/// The XCDs (accelerator dies, each with its own L2) the device deals workgroups to round-robin
+/// in launch order: gfx942 dies hold 38 CUs (MI300X / MI325X 8, MI300A 6) or 20 (MI308X 4),
+/// gfx950 dies 32 (MI350X / MI355X 8). 1 elsewhere, and for a partition of one die.
+inline int xcdCount(const hipdnn_plugin_sdk::ingestor::DeviceProperties& device)
+{
+    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName);
+    const int cus = device.multiProcessorCount;
+    if(cus <= 0)
+    {
+        return 1;
+    }
+    if(arch == "gfx942")
+    {
+        return cus % 38 == 0 ? cus / 38 : (cus % 20 == 0 ? cus / 20 : 1);
+    }
+    if(arch == "gfx950")
+    {
+        return cus % 32 == 0 ? cus / 32 : 1;
+    }
+    return 1;
+}
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine::device_units

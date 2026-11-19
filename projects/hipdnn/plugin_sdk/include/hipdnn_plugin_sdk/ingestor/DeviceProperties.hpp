@@ -43,9 +43,6 @@ struct DeviceProperties
     int memoryClockRate = 0;
     /// LDS bytes available to one workgroup; 0 if unresolved.
     std::size_t sharedMemPerBlock = 0;
-    /// Accelerator complex dies (XCDs) the device deals workgroups to round-robin, each with its
-    /// own L2 (gfx942: 6 on MI300A, 8 on MI300X / MI325X; gfx950: 8); 0 if unresolved.
-    int xccCount = 0;
 };
 
 /// Theoretical peak HBM bandwidth in bytes/second, or 0 when either input is

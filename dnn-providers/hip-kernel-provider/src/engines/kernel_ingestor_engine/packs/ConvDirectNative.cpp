@@ -999,7 +999,7 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
     const auto plan = conv_direct::planFor(*problem,
                                            *config,
                                            device_units::dispatchUnits(context.deviceProperties),
-                                           context.deviceProperties.xccCount);
+                                           device_units::xcdCount(context.deviceProperties));
     if(!plan.has_value())
     {
         return std::nullopt;
