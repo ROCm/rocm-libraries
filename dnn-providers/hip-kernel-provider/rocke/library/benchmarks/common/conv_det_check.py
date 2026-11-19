@@ -7,10 +7,17 @@ print it, ``<label> [@split_k=<d>[/full<t>]]``), binds it exactly as
 ``benchmark_implicit_gemm_conv.py --run-from-cache`` does, and
 
 * **determinism** (default): launches it ``--runs`` times (>= 20) on the same
-  inputs, each launch into a freshly allocated, zeroed output buffer with a
-  freshly allocated launch scratch (``--batch`` launches queued back to back
-  before they are read back), and compares every output bitwise with the
-  first. Reports identical yes/no, the number of differing launches and the
+  inputs and compares every output bitwise with the first. By default the
+  launches are steady state, as a caller runs a bound kernel call after call:
+  ``--batch`` bindings (each its own output and launch scratch, the scratch
+  zeroed once at binding) are each relaunched until ``--runs`` launches are
+  done, so counters and slots the kernel must reset itself are reused; the
+  output is re-initialised before every launch (``--output-init``: zeroed, as
+  the benchmark's verify does, or poisoned with 0xFF bytes to check the call
+  writes or clears every element itself). ``--fresh`` binds every launch anew
+  instead (a freshly allocated, zeroed output and launch scratch each). The
+  ``--batch`` launches of a round are queued back to back before they are read
+  back. Reports identical yes/no, the number of differing launches and the
   max ulp difference. ``--save FILE`` writes the first output (and its
   sha256) so a run on another GPU can be compared with ``--against FILE``.
 * **accuracy** (``--acc``): max / mean / L2 relative error of the output vs an
@@ -23,8 +30,9 @@ Data: ``--data train`` (default) is training-like -- x ~ N(0,1), W Kaiming
 normal (std sqrt(2 / (C*Z*Y*X))), dY ~ N(0,1); ``--data uniform`` is the
 benchmark's U(-1, 1).
 
-Prints one ``RESULT {json}`` line. Exit status 0 when deterministic (or
-``--no-det``), 1 when outputs differ, 2 on usage errors.
+Prints one ``RESULT {json}`` line. Exit status 0 when every check run passed
+(deterministic -- not checked with ``--no-det`` -- and, with ``--against``,
+identical to FILE), 1 when outputs differ, 2 on usage errors.
 
 Example::
 
@@ -249,6 +257,19 @@ def main(argv=None) -> int:
     )
     ap.add_argument("--no-det", action="store_true", help="skip the determinism runs")
     ap.add_argument(
+        "--fresh",
+        action="store_true",
+        help="bind every launch anew (fresh zeroed output and launch scratch) instead of "
+        "relaunching --batch bindings (steady state, the default)",
+    )
+    ap.add_argument(
+        "--output-init",
+        choices=["zero", "poison"],
+        default="zero",
+        help="steady state: the output before every launch -- zeroed, or 0xFF bytes "
+        "(NaN in 16-bit dtypes) for a call that must write or clear all of it",
+    )
+    ap.add_argument(
         "--acc", action="store_true", help="accuracy vs the fp64/fp32 reference"
     )
     ap.add_argument("--ref", default="fp64", choices=["fp64", "fp32"])
@@ -265,20 +286,7 @@ def main(argv=None) -> int:
     import torch
 
     from benchmarks.common import benchmark_implicit_gemm_conv as big
-
-    try:
-        from benchmarks.common.det_classify import classify
-    except (
-        ImportError
-    ):  # run from another worktree that lacks it: use the copy beside this file
-        import importlib.util
-
-        _spec = importlib.util.spec_from_file_location(
-            "_det_classify", Path(__file__).with_name("det_classify.py")
-        )
-        _mod = importlib.util.module_from_spec(_spec)
-        _spec.loader.exec_module(_mod)
-        classify = _mod.classify
+    from benchmarks.common.det_classify import classify
     from benchmarks.common.kernel_cache import KernelCache
     from benchmarks.common.module_cache import ModuleCache
     from rocke.runtime import synchronize_and_release
@@ -379,43 +387,65 @@ def main(argv=None) -> int:
     n_diff, worst_ulp, n_done, worst_rel = 0, 0, 0, 0.0
     t0 = time.time()
     runs = 1 if args.no_det else max(1, args.runs)
-    while n_done < runs:
-        nb = min(args.batch, runs - n_done)
-        bufs, live = [], []
-        runs_fn = []
-        for _ in range(nb):
+    init = 0xFF if (args.output_init == "poison" and not args.fresh) else 0
+
+    def _compare(d):
+        nonlocal outs_first, n_diff, worst_ulp, worst_rel
+        o = torch.empty_like(D_t)
+        rt.memcpy_d2h(u8(o), d, D_t.nbytes)
+        if outs_first is None:
+            outs_first = o
+        elif not torch.equal(o.view(torch.uint8), outs_first.view(torch.uint8)):
+            n_diff += 1
+            worst_ulp = max(worst_ulp, max_ulp(o, outs_first))
+            f0 = outs_first.float()
+            worst_rel = max(
+                worst_rel,
+                float((o.float() - f0).abs().max() / f0.abs().max().clamp(min=1e-30)),
+            )
+
+    steady = []  # (output, run) of the reused bindings
+    steady_live: list = []
+    if not args.fresh:
+        for _ in range(min(max(1, args.batch), runs)):
             d = rt.alloc(D_t.nbytes)
-            rt.memset(d, 0, D_t.nbytes)
-            run, _lbl = bind(d, live)
-            bufs.append(d)
-            runs_fn.append(run)
+            run, _lbl = bind(d, steady_live)
+            steady.append((d, run))
+    while n_done < runs:
+        nb = min(max(1, args.batch), runs - n_done)
+        if args.fresh:
+            bufs, live, runs_fn = [], [], []
+            for _ in range(nb):
+                d = rt.alloc(D_t.nbytes)
+                rt.memset(d, 0, D_t.nbytes)
+                run, _lbl = bind(d, live)
+                bufs.append(d)
+                runs_fn.append(run)
+        else:
+            bufs = [d for d, _ in steady[:nb]]
+            runs_fn = [run for _, run in steady[:nb]]
+            for d in bufs:
+                rt.memset(d, init, D_t.nbytes)
         for run in runs_fn:  # queued back to back, one drain
             run()
         synchronize_and_release()
         for d in bufs:
-            o = torch.empty_like(D_t)
-            rt.memcpy_d2h(u8(o), d, D_t.nbytes)
-            if outs_first is None:
-                outs_first = o
-            elif not torch.equal(o.view(torch.uint8), outs_first.view(torch.uint8)):
-                n_diff += 1
-                worst_ulp = max(worst_ulp, max_ulp(o, outs_first))
-                f0 = outs_first.float()
-                worst_rel = max(
-                    worst_rel,
-                    float(
-                        (o.float() - f0).abs().max() / f0.abs().max().clamp(min=1e-30)
-                    ),
-                )
-            rt.free(d)
+            _compare(d)
+            if args.fresh:
+                rt.free(d)
             n_done += 1
-        big._free_extras(rt, live)
+        if args.fresh:
+            big._free_extras(rt, live)
+    for d, _ in steady:
+        rt.free(d)
+    big._free_extras(rt, steady_live)
     sha = hashlib.sha256(
         outs_first.contiguous().view(torch.uint8).numpy().tobytes()
     ).hexdigest()
     result.update(
         {
             "runs": n_done,
+            "launch_mode": "fresh" if args.fresh else f"steady/{args.output_init}",
             "identical": n_diff == 0,
             "n_differing_runs": n_diff,
             "max_ulp": worst_ulp,
@@ -452,8 +482,8 @@ def main(argv=None) -> int:
     rt.free(A_dev)
     rt.free(B_dev)
     print("RESULT " + json.dumps(result), flush=True)
-    ok = result["identical"] and result.get("against_identical", True)
-    return 0 if (ok or args.no_det) else 1
+    ok = (args.no_det or result["identical"]) and result.get("against_identical", True)
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
