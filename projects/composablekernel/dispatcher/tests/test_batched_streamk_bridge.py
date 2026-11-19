@@ -243,6 +243,13 @@ class TestBatchedCtypesSource(unittest.TestCase):
         self.assertIn('std::getenv("CK_TILE_STREAMK_BUDGET_PCT")', budget_hdr)
         self.assertEqual(gu.STREAMK_BUDGET_ENV, "CK_TILE_STREAMK_BUDGET_PCT")
 
+    def test_padded_leading_stride_validation_and_final_batch_extent(self):
+        text = self.SRC.read_text()
+        self.assertIn("const std::int64_t min_bs = (outer - 1) * s + inner;", text)
+        self.assertIn("if(batch_count > 1 && bs < min_bs)", text)
+        self.assertIn("static_cast<std::size_t>(batch_count - 1)", text)
+        self.assertIn("__builtin_add_overflow(total_elems, static_cast<std::size_t>(min_bs)", text)
+
 
 class TestStreamKCodegenReset(unittest.TestCase):
     def test_atomic_reset_covers_every_batch(self):

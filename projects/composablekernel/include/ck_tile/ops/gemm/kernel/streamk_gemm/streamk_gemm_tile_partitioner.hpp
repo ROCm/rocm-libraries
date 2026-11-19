@@ -196,6 +196,12 @@ struct StreamKTilePartitionerBase
     CK_TILE_HOST_DEVICE index_t get_workspace_size(index_t acc_element_bytes) const noexcept;
 
     /**
+     * @brief Returns true if the problem dimensions, workgroup budget, and total tile/iteration
+     * counts are positive and fit within `index_t`.
+     */
+    CK_TILE_HOST_DEVICE bool is_valid() const noexcept;
+
+    /**
      * @brief Returns the number of macro tiles in the C tensors of all batches.
      */
     CK_TILE_HOST_DEVICE index_t get_num_tiles() const noexcept;

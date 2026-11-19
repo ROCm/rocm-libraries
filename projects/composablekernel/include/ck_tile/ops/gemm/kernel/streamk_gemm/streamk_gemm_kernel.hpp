@@ -320,8 +320,13 @@ struct StreamKKernel
                                                          int num_cu    = NumCU(),
                                                          int occupancy = Occupancy())
     {
-        const index_t max_active_wgs = num_cu * occupancy;
-        const int num_xccs           = get_num_xccs();
+        const long_index_t wgs = static_cast<long_index_t>(num_cu) * occupancy;
+        const index_t max_active_wgs =
+            (num_cu > 0 && occupancy > 0 &&
+             wgs <= static_cast<long_index_t>(std::numeric_limits<index_t>::max()))
+                ? static_cast<index_t>(wgs)
+                : 0;
+        const int num_xccs = get_num_xccs();
         return StreamKKernelArgs{host_args, max_active_wgs, num_xccs, num_cu};
     }
 
@@ -387,26 +392,73 @@ struct StreamKKernel
             }
             return false;
         };
+        if(kargs.M < 1 || kargs.N < 1 || kargs.K < 1)
+        {
+            return reject("M, N, and K must be at least 1");
+        }
         if(kargs.batch_count < 1)
         {
             return reject("batch_count must be at least 1");
         }
-        if(kargs.batch_count > 1 &&
-           (kargs.batch_stride_A < static_cast<long_index_t>(kargs.M) * kargs.K ||
-            kargs.batch_stride_B < static_cast<long_index_t>(kargs.K) * kargs.N ||
-            kargs.batch_stride_E < static_cast<long_index_t>(kargs.M) * kargs.N))
+        auto min_batch_stride_2d =
+            [](auto layout, index_t rows, index_t cols, index_t stride, long_index_t& min_bs) {
+                constexpr bool is_row =
+                    std::is_same_v<remove_cvref_t<decltype(layout)>, tensor_layout::gemm::RowMajor>;
+                const long_index_t outer = is_row ? rows : cols;
+                const long_index_t inner = is_row ? cols : rows;
+                if(stride < inner)
+                {
+                    return false;
+                }
+                min_bs = (outer - 1) * static_cast<long_index_t>(stride) + inner;
+                return true;
+            };
+        long_index_t min_bs_a = 0;
+        long_index_t min_bs_b = 0;
+        long_index_t min_bs_e = 0;
+        const bool b_packed_descriptor =
+            GemmPipeline::BlockGemmShape::PermuteB || GemmPipeline::Preshuffle;
+        const bool valid_leading_strides =
+            min_batch_stride_2d(ALayout{}, kargs.M, kargs.K, kargs.stride_As[0], min_bs_a) &&
+            (b_packed_descriptor ||
+             min_batch_stride_2d(BLayout{}, kargs.K, kargs.N, kargs.stride_Bs[0], min_bs_b)) &&
+            min_batch_stride_2d(CLayout{}, kargs.M, kargs.N, kargs.stride_E, min_bs_e);
+        if(b_packed_descriptor)
         {
-            return reject("the batch strides of A, B, and C must be at least M * K, K * N, and "
-                          "M * N");
+            min_bs_b = static_cast<long_index_t>(kargs.K) * kargs.N;
+        }
+        if(!valid_leading_strides)
+        {
+            return reject("leading strides of A, B, and C must be at least their contiguous "
+                          "dimensions");
+        }
+        if(kargs.batch_count > 1 &&
+           (kargs.batch_stride_A < min_bs_a || kargs.batch_stride_B < min_bs_b ||
+            kargs.batch_stride_E < min_bs_e))
+        {
+            return reject("the batch strides of A, B, and C must cover each operand's layout and "
+                          "leading stride without overlap");
         }
         // The partitioner numbers the K iterations of all tiles of all batches with index_t.
-        const long_index_t num_iters = static_cast<long_index_t>(kargs.batch_count) *
-                                       integer_divide_ceil(kargs.M, TilePartitioner::MPerBlock) *
-                                       integer_divide_ceil(kargs.N, TilePartitioner::NPerBlock) *
-                                       integer_divide_ceil(kargs.K, TilePartitioner::KPerBlock);
-        if(num_iters > std::numeric_limits<index_t>::max())
+        constexpr long_index_t kMaxIndex = std::numeric_limits<index_t>::max();
+        const long_index_t tiles_per_batch =
+            integer_divide_ceil(static_cast<long_index_t>(kargs.M),
+                                static_cast<long_index_t>(TilePartitioner::MPerBlock)) *
+            integer_divide_ceil(static_cast<long_index_t>(kargs.N),
+                                static_cast<long_index_t>(TilePartitioner::NPerBlock));
+        const long_index_t iters_per_tile =
+            integer_divide_ceil(static_cast<long_index_t>(kargs.K),
+                                static_cast<long_index_t>(TilePartitioner::KPerBlock));
+        if(tiles_per_batch > kMaxIndex ||
+           tiles_per_batch * static_cast<long_index_t>(kargs.batch_count) > kMaxIndex ||
+           tiles_per_batch * static_cast<long_index_t>(kargs.batch_count) * iters_per_tile >
+               kMaxIndex)
         {
             return reject("the K iterations of all output tiles exceed the index_t range");
+        }
+        if(!kargs.tile_partitioner.is_valid())
+        {
+            return reject("the tile partitioner configuration is invalid");
         }
         if constexpr(UniversalGemmKernel::kIsTdmPipeline)
         {

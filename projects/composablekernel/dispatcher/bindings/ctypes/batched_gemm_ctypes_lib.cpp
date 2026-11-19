@@ -40,8 +40,10 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
@@ -275,39 +277,114 @@ int dispatcher_run_batched(const void* A,
         return -1;
     }
 
-    // split-K count: <= 0 falls back to 1 (no split), matching the TE default.
-    const ck_tile::index_t kbatch = static_cast<ck_tile::index_t>(k_batch > 0 ? k_batch : 1);
+    const std::int64_t kbatch_i64 = k_batch > 0 ? k_batch : 1;
+    auto fits_i32 = [](std::int64_t v) { return v <= static_cast<std::int64_t>(INT32_MAX); };
+    if(!fits_i32(M) || !fits_i32(N) || !fits_i32(K) || !fits_i32(batch_count) ||
+       !fits_i32(kbatch_i64))
+    {
+        std::cerr << "dispatcher_run_batched: a dimension/batch value exceeds the 32-bit index "
+                     "range\n";
+        if(time_ms)
+        {
+            *time_ms = -1.0f;
+        }
+        return -1;
+    }
+    const ck_tile::index_t kbatch = static_cast<ck_tile::index_t>(kbatch_i64);
 
-    // Resolve leading strides: <= 0 -> packed default (matches TE profiler /
-    // ck_tile::get_default_stride behaviour), respecting each operand's own
-    // row/col-major layout. For rcr this yields stride_A=K, stride_B=K,
-    // stride_C=N.
-    const std::int64_t sa = default_stride(M, K, stride_A, operand_is_row_major(kLayoutA));
-    const std::int64_t sb = default_stride(K, N, stride_B, operand_is_row_major(kLayoutB));
-    const std::int64_t sc = default_stride(M, N, stride_C, operand_is_row_major(kLayoutC));
+    // Resolve leading strides (<= 0 -> packed default), enforce non-overlapping
+    // batch strides derived from each operand's layout and leading stride, and
+    // size the device/copy buffers through the final batch's full element span
+    // ((batch_count - 1) * batch_stride + (outer - 1) * stride + inner) so a
+    // padded leading stride never under-allocates the final batch.
+    auto resolve_operand = [&](std::int64_t rows,
+                               std::int64_t cols,
+                               std::int64_t stride_in,
+                               std::int64_t batch_stride_in,
+                               bool is_row,
+                               std::size_t elem_bytes,
+                               std::int64_t& stride_out,
+                               std::int64_t& batch_stride_out,
+                               std::size_t& bytes_out) -> bool {
+        const std::int64_t outer = is_row ? rows : cols;
+        const std::int64_t inner = is_row ? cols : rows;
+        const std::int64_t s     = default_stride(rows, cols, stride_in, is_row);
+        if(s < inner || !fits_i32(s))
+        {
+            return false;
+        }
+        const std::int64_t min_bs = (outer - 1) * s + inner;
+        const std::int64_t slab   = outer * s;
+        const std::int64_t bs     = batch_stride_in > 0 ? batch_stride_in : slab;
+        if(batch_count > 1 && bs < min_bs)
+        {
+            return false;
+        }
+        if constexpr(!is_streamk_kernel<SelectedKernel>::value)
+        {
+            if(!fits_i32(bs))
+            {
+                return false;
+            }
+        }
+        std::size_t total_elems = 0;
+        if(__builtin_mul_overflow(static_cast<std::size_t>(batch_count - 1),
+                                  static_cast<std::size_t>(bs),
+                                  &total_elems) ||
+           __builtin_add_overflow(total_elems, static_cast<std::size_t>(min_bs), &total_elems) ||
+           __builtin_mul_overflow(total_elems, elem_bytes, &bytes_out))
+        {
+            return false;
+        }
+        stride_out       = s;
+        batch_stride_out = bs;
+        return true;
+    };
 
-    // Batch strides: <= 0 -> packed default (contiguous per-batch slab). The
-    // packed slab spans the RESOLVED leading stride (sa/sb/sc), not the bare
-    // shape, so a non-packed leading stride (padded rows/cols) is honoured: a
-    // row-major operand's slab is rows*leading and a col-major operand's slab is
-    // cols*leading. Deriving the default from M*K/K*N/M*N would under-size the
-    // buffer and cause out-of-bounds access whenever stride_A/B/C is padded. A
-    // caller may still pass an even LARGER batch stride (extra inter-slab
-    // padding); the element-count / allocation below is sized from the resolved
-    // value so that layout is honoured too.
-    const std::int64_t bsa =
-        batch_stride_A > 0 ? batch_stride_A : (operand_is_row_major(kLayoutA) ? M : K) * sa;
-    const std::int64_t bsb =
-        batch_stride_B > 0 ? batch_stride_B : (operand_is_row_major(kLayoutB) ? K : N) * sb;
-    const std::int64_t bsc =
-        batch_stride_C > 0 ? batch_stride_C : (operand_is_row_major(kLayoutC) ? M : N) * sc;
-
-    // Total element counts across all batches, sized from the RESOLVED batch
-    // stride so that a padded (non-packed) batch stride allocates enough for the
-    // last batch's slab plus its padding.
-    const std::int64_t a_elems = bsa * batch_count;
-    const std::int64_t b_elems = bsb * batch_count;
-    const std::int64_t c_elems = bsc * batch_count;
+    std::int64_t sa     = 0;
+    std::int64_t sb     = 0;
+    std::int64_t sc     = 0;
+    std::int64_t bsa    = 0;
+    std::int64_t bsb    = 0;
+    std::int64_t bsc    = 0;
+    std::size_t a_bytes = 0;
+    std::size_t b_bytes = 0;
+    std::size_t c_bytes = 0;
+    if(!resolve_operand(M,
+                        K,
+                        stride_A,
+                        batch_stride_A,
+                        operand_is_row_major(kLayoutA),
+                        sizeof(ADataType),
+                        sa,
+                        bsa,
+                        a_bytes) ||
+       !resolve_operand(K,
+                        N,
+                        stride_B,
+                        batch_stride_B,
+                        operand_is_row_major(kLayoutB),
+                        sizeof(BDataType),
+                        sb,
+                        bsb,
+                        b_bytes) ||
+       !resolve_operand(M,
+                        N,
+                        stride_C,
+                        batch_stride_C,
+                        operand_is_row_major(kLayoutC),
+                        sizeof(CDataType),
+                        sc,
+                        bsc,
+                        c_bytes))
+    {
+        std::cerr << "dispatcher_run_batched: invalid or overflowing leading/batch stride\n";
+        if(time_ms)
+        {
+            *time_ms = -1.0f;
+        }
+        return -1;
+    }
 
     const ADataType* A_host = static_cast<const ADataType*>(A);
     const BDataType* B_host = static_cast<const BDataType*>(B);
@@ -326,55 +403,34 @@ int dispatcher_run_batched(const void* A,
             (void)hipFree(C_dev);
     };
 
-    // ck_tile::index_t is 32-bit: reject any dimension / stride / batch value
-    // that would not fit before the static_casts into BatchedGemmHostArgs below,
-    // so an out-of-range problem fails loudly instead of silently truncating.
-    {
-        auto fits_i32 = [](std::int64_t v) { return v <= static_cast<std::int64_t>(INT32_MAX); };
-        if(!fits_i32(M) || !fits_i32(N) || !fits_i32(K) || !fits_i32(sa) || !fits_i32(sb) ||
-           !fits_i32(sc) || !fits_i32(bsa) || !fits_i32(bsb) || !fits_i32(bsc) ||
-           !fits_i32(batch_count) || !fits_i32(kbatch))
-        {
-            std::cerr << "dispatcher_run_batched: a dimension/stride/batch value exceeds the "
-                         "32-bit index range\n";
-            if(time_ms)
-            {
-                *time_ms = -1.0f;
-            }
-            return -1;
-        }
-    }
-
     hipError_t err;
-    if((err = hipMalloc(&A_dev, a_elems * sizeof(ADataType))) != hipSuccess)
+    if((err = hipMalloc(&A_dev, a_bytes)) != hipSuccess)
     {
         cleanup();
         return fail_hip("hipMalloc(A)", err);
     }
-    if((err = hipMalloc(&B_dev, b_elems * sizeof(BDataType))) != hipSuccess)
+    if((err = hipMalloc(&B_dev, b_bytes)) != hipSuccess)
     {
         cleanup();
         return fail_hip("hipMalloc(B)", err);
     }
-    if((err = hipMalloc(&C_dev, c_elems * sizeof(CDataType))) != hipSuccess)
+    if((err = hipMalloc(&C_dev, c_bytes)) != hipSuccess)
     {
         cleanup();
         return fail_hip("hipMalloc(C)", err);
     }
 
-    if((err = hipMemcpy(A_dev, A_host, a_elems * sizeof(ADataType), hipMemcpyHostToDevice)) !=
-       hipSuccess)
+    if((err = hipMemcpy(A_dev, A_host, a_bytes, hipMemcpyHostToDevice)) != hipSuccess)
     {
         cleanup();
         return fail_hip("hipMemcpy(A H2D)", err);
     }
-    if((err = hipMemcpy(B_dev, B_host, b_elems * sizeof(BDataType), hipMemcpyHostToDevice)) !=
-       hipSuccess)
+    if((err = hipMemcpy(B_dev, B_host, b_bytes, hipMemcpyHostToDevice)) != hipSuccess)
     {
         cleanup();
         return fail_hip("hipMemcpy(B H2D)", err);
     }
-    if((err = hipMemset(C_dev, 0, c_elems * sizeof(CDataType))) != hipSuccess)
+    if((err = hipMemset(C_dev, 0, c_bytes)) != hipSuccess)
     {
         cleanup();
         return fail_hip("hipMemset(C)", err);
@@ -442,8 +498,7 @@ int dispatcher_run_batched(const void* A,
         return -2;
     }
 
-    if((err = hipMemcpy(C_host, C_dev, c_elems * sizeof(CDataType), hipMemcpyDeviceToHost)) !=
-       hipSuccess)
+    if((err = hipMemcpy(C_host, C_dev, c_bytes, hipMemcpyDeviceToHost)) != hipSuccess)
     {
         cleanup();
         return fail_hip("hipMemcpy(C D2H)", err);
