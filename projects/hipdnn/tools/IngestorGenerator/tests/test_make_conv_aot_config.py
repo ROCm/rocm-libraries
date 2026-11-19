@@ -131,6 +131,17 @@ def test_seed_config_is_what_the_tool_generates(seed_specs):
     )
 
 
+def test_generated_kmd_field_types_are_the_shipped_gfx950_ones(seed_specs):
+    """The per-arch string-field set (``string_fields``) types every gfx950 KMD
+    field as the shipped descriptor does, name for name and type for type, so
+    the generated gfx950 KDP schema is unchanged."""
+    shipped = json.loads((_SHIPPED_DIR / "gfx950_conv_fwd_aot.kmd.json").read_text())
+    generated = tool.build_config(seed_specs, _SEED_ENGINE)["kmd_fields"]
+    assert [(f["name"], f["type"]) for f in generated] == [
+        (f["name"], f["type"]) for f in shipped["fields"]
+    ]
+
+
 def test_shipped_bundle_is_its_catalog_with_instance_derived_ids(bundle):
     engine, folder, specs, sharding = bundle
     slug = tool.engine_slug(engine)
