@@ -85,6 +85,14 @@ class TestWgradWmmaSpec(unittest.TestCase):
             ({}, dict(waves_k=3, waves_c=1), "2, 4, 8 or 16 waves"),
             ({}, dict(waves_k=-1, waves_c=-2), "waves_k and waves_c >= 1"),
             ({}, dict(waves_k=0, waves_c=4), "waves_k and waves_c >= 1"),
+            ({}, dict(waves_k=4, waves_c=0), "waves_k and waves_c >= 1"),
+            # Both rules hit: the dW-size rule comes first (the C++ engine
+            # runs the same order).
+            (
+                dict(C=8192, K=8192),
+                dict(waves_k=0),
+                "fp32 dW of 2415919104 B exceeds the 32-bit",
+            ),
             ({}, dict(tiles_k=3), "tiles_k / tiles_c"),
             ({}, dict(q_steps=3), "q_steps in (1, 2)"),
             ({}, dict(waves_k=2, waves_c=2, rows=3, tdm=True), "spread evenly"),
@@ -254,6 +262,8 @@ class TestWgradWmmaEngines(unittest.TestCase):
             (dict(K=12), {}),
             ({}, dict(waves_k=3, waves_c=1)),
             ({}, dict(waves_k=0)),
+            ({}, dict(waves_k=4, waves_c=0)),
+            (dict(C=8192, K=8192), dict(waves_k=0)),
             ({}, dict(tiles_c=0)),
             ({}, dict(q_steps=0)),
             ({}, dict(waves_k=2, waves_c=2, rows=3, tdm=True)),
