@@ -43,6 +43,10 @@ _4WARP_SPEC = "gfx942_u2d_gfx942_4warp_nw1_mw32_t64_llvm"
 
 requires_gfx942_gpu = requires_gpu("gfx942")
 
+# Seen by the process that imports this module: in a case's process, ``results``' allocator
+# settings must already be there, since importing a module can initialize the GPU.
+_ALLOC_CONF_AT_IMPORT = os.environ.get("PYTORCH_HIP_ALLOC_CONF")
+
 
 def _tail_buffer(numel, dtype):
     """Empty tensor of ``numel`` elements at the end of its own allocation (>= 10 MiB gets its own
@@ -202,7 +206,8 @@ def _max_abs_vs_reference(x, seqs, hq, hkv, d, window):
 
 
 def _run(c):
-    """Launch one case (in its own process); return (max_abs vs the fp32 reference, kernel name)."""
+    """Launch one case (in its own process); return (max_abs vs the fp32 reference, kernel name,
+    allocator settings at import)."""
     import torch
 
     x = _paged_inputs(c)
@@ -210,7 +215,7 @@ def _run(c):
     args = (c["seqs"], c["hq"], c["hkv"], c["d"])
     name = launch(x, *args, c["bs"], c["dt"], c["window"])
     torch.cuda.synchronize()  # an out-of-bounds read surfaces here as a HIP error
-    return _max_abs_vs_reference(x, *args, c["window"]), name
+    return _max_abs_vs_reference(x, *args, c["window"]), name, _ALLOC_CONF_AT_IMPORT
 
 
 def _case(id, seqs, hq, hkv, d, bs, suffix, **kw):
@@ -322,7 +327,8 @@ def results(request):
 
 
 def _check(results, case):
-    worst, name = result(results, case["id"])
+    worst, name, alloc_conf = result(results, case["id"])
+    assert (alloc_conf or "").endswith("expandable_segments:False"), alloc_conf
     assert name.endswith(case["suffix"]), name
     assert worst <= TOL
 
