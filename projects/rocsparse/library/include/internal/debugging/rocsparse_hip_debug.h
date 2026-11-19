@@ -136,7 +136,8 @@ ROCSPARSE_EXPORT int32_t rocsparse_hip_debug_state(void);
    * \details Start HIP debug.
    *  @param[in]
    *  handle      the pointer to the handle to the rocSPARSE library context, this pointer is allowed to be null.
-   *  p_error        error descriptor, reserved for future use. A null pointer can be passed.
+   *  @param[out]
+   *  p_error     error descriptor, reserved for future use. A null pointer can be passed.
  *  \retval rocsparse_status_success if the operation completed successfully, otherwise see \ref rocsparse_status.
  */
 ROCSPARSE_EXPORT rocsparse_status rocsparse_hip_debug_start(rocsparse_handle handle,
