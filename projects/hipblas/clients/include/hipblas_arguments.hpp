@@ -425,7 +425,7 @@ namespace ArgumentsHelper
             func("compute_type", hip_datatype2string(arg.compute_type));
         };
 };
-// clang-format on
+    // clang-format on
 
 #else
 
