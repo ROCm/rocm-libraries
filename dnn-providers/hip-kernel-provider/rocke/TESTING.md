@@ -216,7 +216,11 @@ the strategy's biggest holes live (see
   stored bit to equal the correctly rounded closed form (a proven zero-ULP
   result for single-pass dense attention), on GQA causal and sliding-window
   cases, and fails if any one-key or denominator mutation of the mask rule, or a
-  head-0 broadcast, goes unrejected. It needs NumPy and HIP only; its CPU
+  head-0 broadcast, goes unrejected. The same entry runs the key-permutation
+  relation on unmasked GQA cases: the outputs for K and V permuted together
+  must agree with the unpermuted ones within a bound derived from the kernel's
+  arithmetic path, and each mutation that breaks the key-value pairing must
+  leave that bound in every head. The lane needs NumPy and HIP only; its CPU
   contracts run in `rocke_library_attention_cpu_pytest`.
 
 - **Nothing else in this document proves the math is right.** Byte-identity
@@ -554,16 +558,22 @@ Expected crashes and timeouts whose normalized evidence still matches are not
 retried; changed evidence, unexpected verdicts, and unclassified outcomes still
 receive a contention-free retry.
 
-The broader structure and compiler-probe units remain source-only in
-`platform/tests/tools/test_arch_domain_artifact.py`. Host-only column and
-support-policy checks in `platform/tests/tools/test_arch_domain_support.py` run in
-both source pytest and the installed `rocke_pytest_*` CI parts, using the staged
-generator in installed artifacts. They read every column from the imported
-package, validate its records and filename/flavor agreement, and require canonical
-serialization without a compiler or active-flavor filter. The synthetic controls
-check loss-fail, gain-pass, invalid records, method/metadata guards, effective-probe
-contracts, and processor consistency for both gfx942 and gfx950 without a real
-compiler. Source-only CLI controls additionally check early live-provenance and
+Generator and compiler-probe units remain source-only in
+`platform/tests/tools/test_arch_domain_artifact.py`. Column-structure and
+support-policy checks live together in
+`platform/tests/tools/test_arch_domain_support.py`, which runs in both source
+pytest and the installed `rocke_pytest_runtime_tools` entry in the provider's quick
+PR CI tier, using the staged generator in installed artifacts. They read every
+column from the imported package, validate its records and filename/flavor
+agreement, match its architecture list to the wired architectures, and require
+canonical serialization with one contract per line. They also pin recorded
+immediate witnesses and the measured `global.load.lds` support boundary. These
+checks need no compiler or active-flavor filter. Declaration coverage rejects
+stale keys in every column; missing measurements fail for the host flavor and
+are reported as skips for other flavors. The synthetic controls check loss-fail,
+gain-pass, invalid records, method/metadata guards, effective-probe contracts,
+and processor consistency for both gfx942 and gfx950 without a real compiler.
+Source-only CLI controls additionally check early live-provenance and
 final-document admission in write/check modes. Normal pytest and the
 `ROCKE_BACKEND=both` pytest pass do not re-run the compiler sweep. The dedicated
 CTest is categorized as standard in both build-tree and installed manifests, so
