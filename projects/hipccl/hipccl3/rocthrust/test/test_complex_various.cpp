@@ -246,14 +246,14 @@ TYPED_TEST(VariousComplexTest, log1p)
     });
 }
 
-TYPED_TEST(VariousComplexTest, log1pf)
+TEST(VariousComplexTest, log1pf)
 {
   run_rng_test<float, true>(
     [](const float& x) {
       return std::log1pf(x);
     },
     [](const float& x) {
-      return thrust::detail::complex::log1pf(x);
+      return thrust::detail::complex::log1p(x);
     });
 }
 #  endif
