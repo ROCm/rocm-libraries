@@ -30,10 +30,11 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_ROCM_PATH = SCRIPT_DIR.parents[2]
 TENSILELITE_CONFIG = SCRIPT_DIR / "rocjitsu_race_smoke_tensilelite.yaml"
-# Each workload takes a few seconds. Together these limits must stay well
-# below the CI step timeout (15 minutes in TheRock) so a hang is reported here.
-HIPBLASLT_BENCH_TIMEOUT_SECONDS = 60
-TENSILELITE_TIMEOUT_SECONDS = 120
+# Leave headroom for slower CPU runners, including TensileLite code generation
+# and compilation. The combined limits stay below TheRock's 15-minute test
+# timeout so workload failures can be reported before the CI step expires.
+HIPBLASLT_BENCH_TIMEOUT_SECONDS = 180
+TENSILELITE_TIMEOUT_SECONDS = 420
 
 # AMDGPU family prefix -> (GPU target, rocjitsu device config).
 TARGETS = {
