@@ -24,6 +24,8 @@
  *
  *******************************************************************************/
 
+#include <cmath>
+#include <cstdint>
 #include <tuple>
 
 #include <gtest/gtest.h>
