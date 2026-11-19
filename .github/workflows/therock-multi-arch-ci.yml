@@ -233,6 +233,14 @@ jobs:
         }}
       repository: ROCm/TheRock
       ref: users/geomin12/changed-projects-one-at-a-time
+      # Build scoping. setup feeds this to configure_multi_arch_ci.py, which
+      # maps the projects to artifacts and narrows the stage's
+      # -DTHEROCK_ENABLE_* flags. Passing it unconditionally is safe: TheRock
+      # only acts on it when every changed project maps to an artifact that
+      # sets changed_projects_enabled in BUILD_TOPOLOGY.toml, and otherwise
+      # falls back to a full build. The flag lives in TheRock, so the decision
+      # cannot be made here.
+      changed_projects: ${{ needs.configure.outputs.changed_projects }}
       # Pass external repo info for stage-impact analysis.
       external_repo: >-
         {
