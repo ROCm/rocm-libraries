@@ -168,6 +168,35 @@ inline HeadPadLayout headPadLayout(int64_t heads, int64_t sequence, int64_t widt
     return HeadPadLayout{sequence * heads * width, width, heads * width};
 }
 
+/// One padded operand's copy launch: grid y is its planes (batch x heads), grid x covers its
+/// planeThreads (sequence x padded units per row).
+struct HeadPadPlaneExtents
+{
+    int64_t planes = 0;
+    int64_t planeThreads = 0;
+};
+
+/**
+ * @brief The copy launch of an operand @p batch x @p heads x @p sequence rows of @p paddedUnits
+ *        16-bit units, or nullopt when it does not fit: more planes than `GRID_YZ_LIMIT` workgroups
+ *        on y, more plane threads than int32 on x, or an overflow.
+ *
+ * One definition for buildHeadPadGraph(), which declines such a graph, and headPadPlan(), which
+ * launches the copy.
+ */
+inline std::optional<HeadPadPlaneExtents>
+    headPadPlaneExtents(int64_t batch, int64_t heads, int64_t sequence, int64_t paddedUnits)
+{
+    const auto planes = checkedProduct({batch, heads});
+    const auto planeThreads = checkedProduct({sequence, paddedUnits});
+    if(!planes.has_value() || !planeThreads.has_value() || *planes > GRID_YZ_LIMIT
+       || *planeThreads > INT32_LIMIT)
+    {
+        return std::nullopt;
+    }
+    return HeadPadPlaneExtents{*planes, *planeThreads};
+}
+
 /**
  * @brief The per-batch length tensors the copies of packed operands read: the query side's
  *        (Q and O) and the key side's (K and V), each NO_SEQ_LEN when a sequence's token count
@@ -311,7 +340,8 @@ struct HeadPadGraph
 /**
  * @brief The padded graph for @p context (the file comment), or nullptr when an operand cannot
  *        be copied: Q, K, V and O each headPadCopyable, and O's elements distinct, since the copy
- *        back writes each once. Also nullptr unless K has Q's head dim and O has V's, for a
+ *        back writes each once, and each padded operand's copy launch headPadPlaneExtents().
+ *        Also nullptr unless K has Q's head dim and O has V's, for a
  *        packed graph the kernels' binding declines (headPadLengths()), and when one packed
  *        tensor is both a query-side and a key-side operand whose lengths differ
  *        (headPadOperandLengths()).
@@ -372,6 +402,14 @@ inline std::shared_ptr<const HeadPadGraph> buildHeadPadGraph(const MatchContext&
         }
         const int64_t heads = tensor->dims.at(HEAD_AXIS);
         const int64_t sequence = tensor->dims.at(SEQ_AXIS);
+        if(!headPadPlaneExtents(tensor->dims.at(BATCH_AXIS),
+                                heads,
+                                sequence,
+                                width * *headPadUnitsPerElement(tensor->data_type))
+                .has_value())
+        {
+            return nullptr;
+        }
         const auto layout = headPadLayout(heads, sequence, width);
         tensor->dims.at(HEAD_DIM_AXIS) = width;
         tensor->strides = {layout.batch, layout.head, layout.sequence, 1};
@@ -613,11 +651,10 @@ inline HeadPadPlan
         const int64_t heads = dims->Get(HEAD_AXIS);
         const int64_t sequence = dims->Get(SEQ_AXIS);
         const auto elements = checkedProduct({dims->Get(BATCH_AXIS), sequence, heads, width});
-        const auto planeThreads = checkedProduct({sequence, width * units});
-        const auto planes = checkedProduct({dims->Get(BATCH_AXIS), heads});
+        const auto extents
+            = headPadPlaneExtents(dims->Get(BATCH_AXIS), heads, sequence, width * units);
         const auto layout = headPadLayout(heads, sequence, width);
-        if(!elements.has_value() || !planeThreads.has_value() || !planes.has_value()
-           || *planeThreads > INT32_LIMIT || *planes > INT32_LIMIT
+        if(!elements.has_value() || !extents.has_value()
            || *elements > std::numeric_limits<int64_t>::max() / (2 * units))
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -635,8 +672,8 @@ inline HeadPadPlan
         result.padded
             = HeadPadLayout{layout.batch * units, layout.head * units, layout.sequence * units};
         result.bytes = static_cast<size_t>(*elements * 2 * units);
-        result.planeThreads = *planeThreads;
-        result.planes = *planes;
+        result.planeThreads = extents->planeThreads;
+        result.planes = extents->planes;
         return result;
     };
     for(const int64_t uid : {qUid, kUid, vUid})

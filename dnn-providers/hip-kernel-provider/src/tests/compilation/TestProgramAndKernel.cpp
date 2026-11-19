@@ -317,6 +317,47 @@ TEST(TestKernelLaunchLimit, RefusesAGridPastOneAxisBeforeAnyHipCall)
     }
 }
 
+TEST(TestKernelLaunchLimit, RefusesAGridPastOneAxisWorkgroupLimitBeforeAnyHipCall)
+{
+    // One workgroup per work-item fits the work-item limit; HIP's workgroup limits are
+    // INT32_MAX on x and 65536 on y and z.
+    struct Case
+    {
+        int axis;
+        unsigned int grid;
+        const char* expectedGrid;
+        const char* expectedLimit;
+    };
+    const Case cases[] = {{0, 1U << 31, "grid 2147483648", "at most 2147483647 workgroups"},
+                          {1, 65537, "grid 65537", "at most 65536 workgroups"},
+                          {2, 65537, "grid 65537", "at most 65536 workgroups"}};
+    const char axes[] = {'x', 'y', 'z'};
+    for(const Case& testCase : cases)
+    {
+        Kernel kernel(nullptr, "k", Kernel::NO_DEVICE);
+        kernel.setBlockSize(1, 1, 1);
+        kernel.setGridSize(testCase.axis == 0 ? testCase.grid : 1,
+                           testCase.axis == 1 ? testCase.grid : 1,
+                           testCase.axis == 2 ? testCase.grid : 1);
+        try
+        {
+            kernel.launch(nullptr);
+            FAIL() << "expected axis " << axes[testCase.axis] << " to be refused";
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+        {
+            const std::string what = error.what();
+            EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM) << what;
+            EXPECT_NE(what.find("kernel 'k'"), std::string::npos) << what;
+            EXPECT_NE(what.find(std::string("axis ") + axes[testCase.axis] + ", "),
+                      std::string::npos)
+                << what;
+            EXPECT_NE(what.find(testCase.expectedGrid), std::string::npos) << what;
+            EXPECT_NE(what.find(testCase.expectedLimit), std::string::npos) << what;
+        }
+    }
+}
+
 TEST(TestLaunchLimits, LaunchAxisFitsPinsTheBoundary)
 {
     EXPECT_TRUE(launchAxisFits((1 << 22) - 1, 1024));

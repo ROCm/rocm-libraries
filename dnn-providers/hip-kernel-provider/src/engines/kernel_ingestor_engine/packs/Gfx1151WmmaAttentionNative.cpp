@@ -1888,6 +1888,16 @@ std::optional<DecodePlan> catalogDecodePlan(const Problem& problem,
     return decodePlanFor(problem, mask, traits, device);
 }
 
+/// The prefill kernel's x extent, one workgroup per (batch, query tile, query head)
+/// (wmma_fmha_fwd_v2_grid: heads fastest, then query tile and batch). A plain product: a
+/// dense or non-ragged Q keeps batch * heads * seqLenQ under 2^27, and a ragged slice keeps
+/// heads * seqLenQ under 2^27 with batch at most 2^31 - 1, so it stays under 2^58.
+int64_t prefillGrid(const Problem& problem, const ObjectTraits& traits)
+{
+    const int64_t queryTiles = (problem.seqLenQ + traits.blockM - 1) / traits.blockM;
+    return problem.batch * queryTiles * problem.queryHeads;
+}
+
 /// The kernel matcher of one engine: @p decodeEngine selects which of the two kernels
 /// it admits.
 bool kernelMatchesFor(bool decodeEngine,
@@ -1943,8 +1953,7 @@ bool kernelMatchesFor(bool decodeEngine,
         return false;
     }
     // A prefill object serves any widths up to its buckets.
-    const int64_t queryTiles = (problem->seqLenQ + traits->blockM - 1) / traits->blockM;
-    const int64_t grid = problem->batch * queryTiles * problem->queryHeads;
+    const int64_t grid = prefillGrid(*problem, *traits);
     return problem->headDimQ <= traits->headSize && problem->headDimV <= traits->headSizeV
            && grid <= I32_MAX && compilation::launchAxisFits(grid, traits->blockSize);
 }
@@ -2374,9 +2383,7 @@ public:
         {
             auto code
                 = buildIngestorKernelCode(_kpackLoader, context, kernel, prefillSignature(traits));
-            // wmma_fmha_fwd_v2_grid: heads fastest, then query tile and batch.
-            const int64_t queryTiles = (problem.seqLenQ + traits.blockM - 1) / traits.blockM;
-            const int64_t grid = problem.batch * queryTiles * problem.queryHeads;
+            const int64_t grid = prefillGrid(problem, traits);
             requireLaunchRange(grid, I32_MAX, "prefill grid");
             if(!compilation::launchAxisFits(grid, traits.blockSize))
             {

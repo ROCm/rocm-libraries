@@ -1219,6 +1219,30 @@ TEST(TestFlydslSdpaRdnaKernelMatch, ADecodeObjectDeclinesAMainLaunchPastThirtyTw
     EXPECT_FALSE(matches(batches(int64_t{1} << 24)));
 }
 
+TEST(TestFlydslSdpaRdnaKernelMatch, ADecodeObjectDeclinesAMergeLaunchPastThirtyTwoBitWorkItems)
+{
+    // 16 query heads over one KV head and one-row sequences: one split, so the main grid is
+    // the batch (128 threads, far inside 2^32 work-items) and the merge grid is batch * 16
+    // workgroups of 64 threads, which holds 2^26 - 1 before it passes 2^32 work-items: a batch
+    // of 2^22 declines and 2^22 - 1 is served.
+    const auto decode = makeFlydslSdpaRdnaKernel("bf16", 16, 0, 16, 32, 1, 0, 16, 1);
+    const auto matches = [&decode](int64_t batch) {
+        SdpaGraphSpec spec;
+        spec.batch = batch;
+        spec.heads = 16;
+        spec.kvHeads = 1;
+        spec.seqLenQ = 1;
+        spec.seqLenKv = 1;
+        spec.headDim = 16;
+        const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+        const auto bound = matchesGraph(FLYDSL_SDPA_RDNA_DECODE, fixture.context());
+        return bound.has_value()
+               && matchesKernel(FLYDSL_SDPA_RDNA_DECODE, fixture.context(), decode, *bound);
+    };
+    EXPECT_TRUE(matches((int64_t{1} << 22) - 1));
+    EXPECT_FALSE(matches(int64_t{1} << 22));
+}
+
 TEST(TestFlydslSdpaRdnaKernelMatch, AWideGenericDecodeTierServesMultiplesOfEightUpTo512)
 {
     // Kernel modification 30: the generic decode tier up to 512, its columns split four
