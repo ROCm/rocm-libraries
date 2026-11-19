@@ -413,20 +413,21 @@ struct K2HaloLoad
                           : -1;
         }
     }
-    // Input plane id (in range), channel chunk c0.
-    __device__ void load(int id, int c0)
+    // Input plane id, channel chunk c0. `valid` false (the driver's past-the-end step) reads
+    // zeros without an access. The offsets are selected by masks, not branches: a branch on a
+    // lane-varying test splits the loads into paths, and the wait for them merges to vmcnt(0).
+    __device__ void load(int id, int c0, bool valid)
     {
         const int c = c0 + kv;
-        const bool cOk = c < cIn;
-        const int base = id * planeElems + c;
+        const unsigned live = 0u - static_cast<unsigned>(valid && c < cIn);
+        const int base = (valid ? id : 0) * planeElems + c;
 #pragma unroll
         for(int p = 0; p < PASSES; ++p)
         {
-            const unsigned off
-                = cOk && hOff[p] >= 0
-                      ? static_cast<unsigned>((base + hOff[p]) * static_cast<int>(sizeof(T)))
-                      : K1_OUT_OF_RANGE;
-            r[p] = k1BufferLoad<Raw>(rsrc, off);
+            const unsigned m = live & ~static_cast<unsigned>(hOff[p] >> 31);
+            const unsigned in
+                = static_cast<unsigned>((base + hOff[p]) * static_cast<int>(sizeof(T)));
+            r[p] = k1BufferLoad<Raw>(rsrc, (in & m) | (K1_OUT_OF_RANGE & ~m));
         }
     }
     // Pixel-major: buf[pix * LDC + c].
@@ -533,18 +534,19 @@ struct K2HaloLoadCf
                           : -1;
         }
     }
-    __device__ void load(int id, int c0)
+    // `valid` false (the driver's past-the-end step) reads zeros without an access.
+    __device__ void load(int id, int c0, bool valid)
     {
 #pragma unroll
         for(int p = 0; p < PASSES; ++p)
         {
             const int c = c0 + cg8[p];
-            const int base
-                = (c * chanElems + id * planeElems + sOff[p]) * static_cast<int>(sizeof(T));
+            const int base = (c * chanElems + (valid ? id : 0) * planeElems + sOff[p])
+                             * static_cast<int>(sizeof(T));
 #pragma unroll
             for(int i = 0; i < 8; ++i)
             {
-                const bool ok = cg8[p] >= 0 && sOff[p] >= 0 && c + i < cIn;
+                const bool ok = valid && cg8[p] >= 0 && sOff[p] >= 0 && c + i < cIn;
                 r[p][i] = k1BufferLoad<Raw>(
                     rsrc,
                     ok ? static_cast<unsigned>(base + i * chanElems * static_cast<int>(sizeof(T)))
@@ -722,7 +724,10 @@ __device__ inline void k2StaticFor(F&& f)
 // The block's main loop, shared by both kernels. Double-buffered halo: each step waits on one
 // barrier, loads the next step's halo to registers (pf, called by the multiply where it suits
 // the vmcnt order), multiplies the current stage, then stores the registers to the other stage.
-//   load(plane, cc)                     next halo chunk to registers
+// The last step loads (zeros, no access) and stores too, into the stage no step reads again: with
+// the same memory operations on every path, the compiler's waits for the halo count only the
+// loads issued after it, where a conditional prefetch made them vmcnt(0) at every step.
+//   load(plane, cc, valid)              next halo chunk to registers (zeros unless valid)
 //   commit(stage)                       registers to LDS stage
 //   ring(stage, cc, jj, K2Int<u>, pf, nx)  RING: multiply the stage into the sets of plane jj (u = jj % KD)
 //   tap(stage, cc, t, pf, nx)              !RING: multiply the stage with depth tap t into set 0
@@ -753,7 +758,7 @@ __device__ inline void k2Drive(const K2Block& b,
         cur.init(planes, nCh, first, di);
         if(cur.more())
         {
-            load(cur.plane(), 0);
+            load(cur.plane(), 0, true);
             commit(0);
             cur.advance();
         }
@@ -770,21 +775,16 @@ __device__ inline void k2Drive(const K2Block& b,
                     {
                         __syncthreads();
                         const bool more = cur.more();
-                        auto pf = [&]() {
-                            if(more)
-                                load(cur.plane(), cur.cc);
-                        };
+                        auto pf = [&]() { load(cur.plane(), cur.cc, more); };
                         auto nx = [&](int& t, int& c) {
                             t = 0;
                             c = cur.cc;
                             return more;
                         };
                         ring(stage, cc, jj, U, pf, nx);
+                        commit(stage ^ 1);
                         if(more)
-                        {
-                            commit(stage ^ 1);
                             cur.advance();
-                        }
                         stage ^= 1;
                     }
                 }
@@ -799,7 +799,7 @@ __device__ inline void k2Drive(const K2Block& b,
         cur.init(b.dsEff, KD, nCh, first, di);
         if(cur.more())
         {
-            load(cur.plane(), 0);
+            load(cur.plane(), 0, true);
             commit(0);
             cur.advance();
         }
@@ -813,21 +813,16 @@ __device__ inline void k2Drive(const K2Block& b,
                 {
                     __syncthreads();
                     const bool more = cur.more();
-                    auto pf = [&]() {
-                        if(more)
-                            load(cur.plane(), cur.cc);
-                    };
+                    auto pf = [&]() { load(cur.plane(), cur.cc, more); };
                     auto nx = [&](int& tn, int& c) {
                         tn = cur.t;
                         c = cur.cc;
                         return more;
                     };
                     tap(stage, cc, t, pf, nx);
+                    commit(stage ^ 1);
                     if(more)
-                    {
-                        commit(stage ^ 1);
                         cur.advance();
-                    }
                     stage ^= 1;
                 }
             }
@@ -1100,11 +1095,13 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
                 }
 #endif
             };
+            // Past the last chunk the tail reloads this chunk's first steps (unused): the same
+            // loads on every path keep the compiler's waits exact.
             auto loadB = [&](int q, Frag(&bf)[NB][FN]) {
                 if(q < NQ)
                     loadBAt(cc, dt, q, bf);
-                else if(more)
-                    loadBAt(cnx, dtn, q - NQ, bf);
+                else
+                    loadBAt(more ? cnx : cc, dtn, q - NQ, bf);
             };
             // Weight fragments PD steps ahead, in a ring indexed by compile-time step numbers. PD from
             // a ~16-VGPR budget: deep for fp32 (one VGPR per fragment), one step for big fragments.
@@ -1369,6 +1366,17 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
         = SPLIT ? reinterpret_cast<TS*>(
                       a.ws + static_cast<long long>(blockIdx.z) * a.n * a.dout * a.ho * a.wo * a.k)
                 : reinterpret_cast<TS*>(a.y);
+    // The channels-last store's arguments as separate scalars and the block's output base
+    // (elements): read from the argument block inside the epilogue they reload whole spilled
+    // argument registers on every store.
+    const int eK = __builtin_amdgcn_readfirstlane(a.k);
+    const int eWo = __builtin_amdgcn_readfirstlane(a.wo);
+    const int eTw = __builtin_amdgcn_readfirstlane(a.tw);
+    const int eHo = __builtin_amdgcn_readfirstlane(a.ho);
+    const long long ePlane = static_cast<long long>(eHo) * eWo * eK;
+    const long long eBase
+        = static_cast<long long>(b.img) * __builtin_amdgcn_readfirstlane(a.dout) * ePlane
+          + (static_cast<long long>(b.oh0) * eWo + b.ow0) * eK;
     // Epilogue: per DIM-row slab, accumulators to the wave's LDS strip, then 16-byte rows to
     // global. The strips use the halo stage not holding the next chunk: all waves are done with it
     // after the barrier, and the next chunk's barrier orders the strips before its reuse.
@@ -1472,21 +1480,18 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
                     const int col = (v - rr * RV) * VO;
                     const int m = wm * WTM + i * DIM + rr;
                     const int nn = n0 + wn * WTN + col;
-                    if(m >= tilePix || nn >= a.k)
+                    if(m >= tilePix || nn >= eK)
                         continue;
-                    const int ohl = m / a.tw, owl = m - ohl * a.tw;
-                    const int oh = b.oh0 + ohl, ow = b.ow0 + owl;
-                    if(oh >= a.ho || ow >= a.wo)
+                    const int ohl = m / eTw, owl = m - ohl * eTw;
+                    if(b.oh0 + ohl >= eHo || b.ow0 + owl >= eWo)
                         continue;
                     const long long o
-                        = (((static_cast<long long>(b.img) * a.dout + od) * a.ho + oh) * a.wo + ow)
-                              * a.k
-                          + nn;
-                    if(nn + VO <= a.k && a.k % VO == 0)
+                        = eBase + od * ePlane + static_cast<long long>(ohl * eWo + owl) * eK + nn;
+                    if(nn + VO <= eK && eK % VO == 0)
                         *reinterpret_cast<Raw*>(out + o)
                             = *reinterpret_cast<const Raw*>(strip + rr * OLD + col);
                     else
-                        for(int e = 0; e < VO && nn + e < a.k; ++e)
+                        for(int e = 0; e < VO && nn + e < eK; ++e)
                             out[o + e] = strip[rr * OLD + col + e];
                 }
             }
@@ -1504,7 +1509,7 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
         a.pd,
         a.di,
         nChL,
-        [&](int plane, int cc) { ld.load(plane, (cb + cc) * BC); },
+        [&](int plane, int cc, bool valid) { ld.load(plane, (cb + cc) * BC, valid); },
         [&](int stage) { ld.template storePixels<LDC>(lds + stage * SLOT); },
         ring,
         tap,
@@ -1784,7 +1789,7 @@ __device__ void k2ConvFma(const K2Args& a CONV_EPI_FN_PARAM)
         a.pd,
         a.di,
         (a.c + BC - 1) / BC,
-        [&](int plane, int cc) { ld.load(plane, cc * BC); },
+        [&](int plane, int cc, bool valid) { ld.load(plane, cc * BC, valid); },
         [&](int stage) { ld.template storeChannels<LDH>(lds + stage * STAGE); },
         ring,
         tap,
