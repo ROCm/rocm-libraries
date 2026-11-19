@@ -34,7 +34,7 @@ _PROBLEM_TYPE_KEYS = {
 
 
 def _state(**overrides):
-  """The keys tdmStoreRejectReason and the ExecutionPolicy helpers it calls read, for a TDMStoreInst=1
+  """The keys tdmStoreRejectReason and the ExecutionPolicy helpers it calls read, for a TDMStoreInst=True
   solution inside the supported configurations, with `overrides` applied."""
   problemType = {
     "DestDataType": DataType("b"),
@@ -51,7 +51,7 @@ def _state(**overrides):
     "UseScaleAlphaVec": 0,
   }
   state = {
-    "TDMStoreInst": 1,
+    "TDMStoreInst": True,
     "ISA": (12, 5, 0),
     "TileProcessingStrategy": "None",
     "WorkAssignment": "StaticGrid",
@@ -150,7 +150,7 @@ def test_accepts_supported_options(overrides):
 
 
 def test_disabled_is_not_validated():
-  assert tdmStoreRejectReason(_state(TDMStoreInst=0, ISA=(9, 5, 0), GlobalSplitU=4)) is None
+  assert tdmStoreRejectReason(_state(TDMStoreInst=False, ISA=(9, 5, 0), GlobalSplitU=4)) is None
 
 
 _OUTPUT = "TDMStoreInst supports fp32 D, fp64, complex float and complex double D from accumulators of their type, " \
@@ -193,11 +193,14 @@ def test_accepts_persistent_policies(overrides):
 
 
 def test_the_switch_matches_the_valid_values_and_on_covers_every_path():
-  """TDMStoreInst is 0 or 1 only, and 1 sends every store path of a final-D store through the TDM
-  block, so the epilogue keeps one store path and splits only on beta / non-beta."""
-  assert list(TDM_STORE_PATHS) == validParameters["TDMStoreInst"] == [0, 1]
-  assert TDM_STORE_PATHS[0] == ()
-  assert set(TDM_STORE_PATHS[1]) == {"EdgeM", "EdgeN", "NonEdge"}
+  """TDMStoreInst is False or True only, and True sends every store path of a final-D store through
+  the TDM block, so the epilogue keeps one store path and splits only on beta / non-beta."""
+  assert list(TDM_STORE_PATHS) == validParameters["TDMStoreInst"] == [False, True]
+  # bool == int in python, so the list comparison alone passes against [0, 1] too. The validator
+  # keys on type() rather than isinstance, so the type is the thing that has to be pinned.
+  assert [type(v) for v in validParameters["TDMStoreInst"]] == [bool, bool]
+  assert TDM_STORE_PATHS[False] == ()
+  assert set(TDM_STORE_PATHS[True]) == {"EdgeM", "EdgeN", "NonEdge"}
 
 
 def _blocks(tdm, edge=True, atomic=False, accumulation=None, vectorWidths=(8, 1), bpe=2, mpm=0):
@@ -220,7 +223,7 @@ def test_the_switch_picks_blocks_of_the_store_width_cascade(svw, adaptive):
   cascade = [svw, 1] if adaptive == 0 else [w for w in (8, 4, 2, 1) if w <= svw]
   edgeM = {w for w in cascade if w < svw} | {min(cascade)}
   expected = {0: set(), 1: edgeM | {svw}}
-  for tdm in (0, 1):
+  for tdm in (False, True):
     assert _blocks(tdm, vectorWidths=cascade) == expected[tdm], (tdm, cascade)
     assert _blocks(tdm, edge=False, vectorWidths=cascade[:1]) == ({svw} if tdm else set()), tdm
   # With edge blocks the picked set is now the whole cascade, at every store vector width.
@@ -335,7 +338,7 @@ def _kernel(tdmStore):
 
 
 def test_kernel_name_token_only_when_enabled():
-  """TDMStoreInst=0 keeps every existing kernel name; TDMStoreInst=1 adds the TDMSI1 token, which
+  """TDMStoreInst=False keeps every existing kernel name; TDMStoreInst=True adds the TDMSI1 token, which
   stays apart from the TDMS0 or TDMS1 of TDMSplit."""
   tdm = 1
   off = getKernelNameMin(_kernel(0), False)
@@ -458,7 +461,7 @@ def _outside(asm):
 
 # Off has no TDM block, so it is emitted with the default TDMInst only. TDMInst is the load-side
 # instruction count -- a different parameter despite the similar name -- and these pairs cross the two.
-_TDM_TDMINST = [(0, 3)] + [(1, tdmInst) for tdmInst in (0, 3)]
+_TDM_TDMINST = [(False, 3)] + [(True, tdmInst) for tdmInst in (0, 3)]
 
 
 @pytest.mark.parametrize("sourceSwap", [False, True])
@@ -514,7 +517,7 @@ def test_turning_it_on_only_adds_the_tdm_blocks(gp_gfx1250, gfx1250_iim, assembl
   alignment of the columns, and a kernel with it on equals its switched-off twin outside the blocks it
   stores through the TDM block."""
   asms = {}
-  for tdm in (0, 1):
+  for tdm in (False, True):
     sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, AdaptiveGemm=adaptive)
     assert sol.get("Valid"), capsys.readouterr().out
     asms[tdm] = asm
@@ -552,7 +555,7 @@ def _dest(dest, **problemType):
 
 def test_fp16_c_is_read_back_from_the_staged_tile(gp_gfx1250, gfx1250_iim, assembler, capsys):
   """fp16 C comes back from the staged tile in 16-byte vectors at StoreVectorWidth 8."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, ProblemType=_FP16)
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, ProblemType=_FP16)
   assert sol.get("Valid"), capsys.readouterr().out
   assert sol["StoreVectorWidth"] == 8
   block = _tdmBlock(asm, "1", 8)
@@ -744,7 +747,7 @@ def test_dynamic_gsu_with_epilogue_vectors(gp_gfx1250, gfx1250_iim, assembler, c
   epilogue would run per GSU slice), and with the even AssertFree0ElementMultiple of packed bf16 atomics."""
   extra = {"AssertFree0ElementMultiple": 2} if algorithm == "AtomicDest" else \
     {"ProblemType": {"UseBias": 1, "UseScaleAlphaVec": 1}}
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, GlobalSplitU=-1, GlobalSplitUAlgorithm=algorithm,
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, GlobalSplitU=-1, GlobalSplitUAlgorithm=algorithm,
                        AdaptiveGemmGSUA=aga, **extra)
   assert sol.get("Valid"), capsys.readouterr().out
   stores = _stores(asm)
@@ -797,7 +800,7 @@ def test_mbsk_reduced_tile_keeps_buffer_store_with_prefetch_method_1(gp_gfx1250,
   """MbskPrefetchMethod 1: each wave takes the last decrement of its own synchronizer slot and reduces on its own,
   so the reduced tile keeps buffer_store, with no TDM copy and no GSU check; the GSU == 1 store and OptNLL_MBSK,
   which runs at GSU 1 only, keep the block."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, GlobalSplitU=2,
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, GlobalSplitU=2,
                        GlobalSplitUAlgorithm="MultipleBufferSingleKernel", MbskPrefetchMethod=1)
   assert sol.get("Valid"), capsys.readouterr().out
   stores = _stores(asm)
@@ -841,7 +844,7 @@ def test_e_kernel_tdm_blocks_keep_the_masked_side_effects(gp_gfx1250, gfx1250_ii
   and keeps the E stores of the switched-off block; an edge TDM block is that edge block, with its vector width, its masks
   and its C loads, so no element outside D reaches E or the epilogue."""
   tdm = 1
-  _, base = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=0, ProblemType=_AUX_E, **_AUX_E_SOLUTION)
+  _, base = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=False, ProblemType=_AUX_E, **_AUX_E_SOLUTION)
   sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, ProblemType=_AUX_E, **_AUX_E_SOLUTION)
   assert base and sol.get("Valid"), capsys.readouterr().out
   ref, blocks = _storeBlocks(base), _storeBlocks(asm)
@@ -889,11 +892,11 @@ def test_compact_loop_store_tdm_block_outside_the_loop(gp_gfx1250, gfx1250_iim, 
 def test_automatic_store_remap_vector_width(gp_gfx1250, gfx1250_iim, assembler, capsys):
   """StoreRemapVectorWidth=-1 resolves to 0 with SourceSwap and to a remap width without it; TDMStoreInst
   takes both."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, SourceSwap=True, StoreRemapVectorWidth=-1)
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, SourceSwap=True, StoreRemapVectorWidth=-1)
   assert sol.get("Valid"), capsys.readouterr().out
   assert sol["StoreRemapVectorWidth"] == 0
   assert "tensor_store_from_lds " in asm
-  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], TDMStoreInst=1, SourceSwap=False,
+  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], TDMStoreInst=True, SourceSwap=False,
                        StoreRemapVectorWidth=-1, VectorWidthA=1, VectorWidthB=1)
   assert sol.get("Valid"), capsys.readouterr().out
   assert sol["StoreRemapVectorWidth"] > 0 and "tensor_store_from_lds " in asm
@@ -926,7 +929,7 @@ def test_srvw_tdm_blocks_skip_the_remap(gp_gfx1250, gfx1250_iim, assembler, caps
 def test_sav_device_scalar_bit_is_along_m(gp_gfx1250, gfx1250_iim, assembler, capsys):
   """UseScaleAlphaVec 5 is the vector along M with the device-scalar bit, which only changes how the vector
   preload selects alpha, so a TDMStoreInst kernel stores through the TDM block as with UseScaleAlphaVec 1."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, ProblemType={"UseBias": 1, "UseScaleAlphaVec": 5})
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, ProblemType={"UseBias": 1, "UseScaleAlphaVec": 5})
   assert sol.get("Valid"), capsys.readouterr().out
   assert sol["ProblemType"]["UseScaleAlphaVec"] == 5 and "tensor_store_from_lds " in asm
 
@@ -937,7 +940,7 @@ def test_both_factor_dims_use_the_tdm_block(gp_gfx1250, gfx1250_iim, assembler, 
   """Bias and ScaleAlphaVec along N (UseBias 2), or along M or N as the kernel argument picks (UseBias 3):
   generateBetaModules builds the store tree of each factor dim, and with the switch on each of them stores through
   the TDM block."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1,
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True,
                        ProblemType=_dest(dest, UseBias=useBias, UseScaleAlphaVec=useBias))
   assert sol.get("Valid"), capsys.readouterr().out
   stored, factorDim = set(), None
@@ -981,7 +984,7 @@ def test_mt1_not_a_multiple_of_the_waves(gp_gfx1250, gfx1250_iim, assembler, cap
 def test_scale_cd_scales_through_registers(gp_gfx1250, gfx1250_iim, assembler, capsys, dest):
   """ScaleC and ScaleD are scalars the kernel loads from its arguments into SGPRs: the TDM block of a TDMStoreInst
   kernel multiplies its elements by ScaleD, as the buffer_store path does."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, ProblemType=_dest(dest, UseScaleCD=True))
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, ProblemType=_dest(dest, UseScaleCD=True))
   assert sol.get("Valid"), capsys.readouterr().out
   assert "AddressScaleC" in asm and "AddressScaleD" in asm
   assert re.search(r"^\s*v_\w*mul\w* [^\n]*sgprScaleD", _tdmBlock(asm, "1", 8), re.M)
@@ -1007,14 +1010,14 @@ def test_c_load_takes_the_hints_of_c(gp_gfx1250, gfx1250_iim, assembler, capsys)
   survives in the same kernel to compare against; the reference comes from the switched-off twin, which
   is what this pins: the cache hints of C are preserved across the change of transport."""
   hints = dict(TemporalHintC=3, NonTemporalC=2)
-  solOff, asmOff = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=0, **hints)
+  solOff, asmOff = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=False, **hints)
   assert solOff.get("Valid"), capsys.readouterr().out
   bufferLoad = re.search(r"^\s*buffer_load\S* [^\n]*s\[sgprSrdC:[^\n]*", asmOff, re.M)
   assert bufferLoad, "TDMStoreInst 0 must still read C with buffer_load"
   expected = _cacheTokens(bufferLoad.group(0))
   assert "th" in expected
 
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, **hints)
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, **hints)
   assert sol.get("Valid"), capsys.readouterr().out
   load = re.search(r"^\s*tensor_load_to_lds [^\n]*", _tdmBlock(asm, "1", 8), re.M)
   assert load, "the TDM block must load C with tensor_load_to_lds"
@@ -1026,7 +1029,7 @@ def test_requires_tdm_in_the_assembler(gp_gfx1250, gfx1250_iim, assembler, capsy
 
   noTdm = copy_isa_info_map(gfx1250_iim)
   noTdm[gfxToIsa("gfx1250")].asmCaps["HasTDM"] = False
-  sol, asm = _emit_asm(noTdm, assembler, TDMStoreInst=1, TDMInst=0)
+  sol, asm = _emit_asm(noTdm, assembler, TDMStoreInst=True, TDMInst=0)
   assert not sol.get("Valid") and asm is None
   assert "TDMStoreInst requires asmCaps HasTDM" in capsys.readouterr().out
 
@@ -1058,7 +1061,7 @@ def test_pap_stages_after_the_main_loop(gp_gfx1250, gfx1250_iim, assembler, caps
   separate region has its own token, no TENSORcnt wait comes between the last WMMA of the tile and the
   first staging store. The tile is MT128x128: a staged MT256x256 tile takes a PAP kernel past MaxLDS."""
   extra = {"ProblemType": {"UseBias": 1, "UseScaleAlphaVec": 1}} if vectors else {}
-  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], TDMStoreInst=1, **_PAP, **extra)
+  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], TDMStoreInst=True, **_PAP, **extra)
   assert sol.get("Valid"), capsys.readouterr().out
   offset, staged = sol["_TDMStoreLdsOffset"], tdmStoreLdsBytes(sol)
   assert not sol["_TDMStoreOverMainLoop"] and offset > 0 and offset % 256 == 0
@@ -1093,10 +1096,10 @@ def test_rap_with_tdm_store_generates(gp_gfx1250, gfx1250_iim, assembler, capsys
 def test_pap_oversized_tile_hits_max_lds(gp_gfx1250, gfx1250_iim, assembler, capsys):
   """Under PrefetchAcrossPersistent the staged tile adds to the main-loop LDS, and develop's MaxLDS reject
   sees the sum: at DepthU 128 the main loop fits without TDMStoreInst and the sum does not."""
-  sol, _ = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, DepthU=128, **_PAP)
+  sol, _ = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, DepthU=128, **_PAP)
   out = capsys.readouterr().out
   assert not sol.get("Valid") and "LDS" in out, out
-  sol, _ = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=0, DepthU=128, **_PAP)
+  sol, _ = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=False, DepthU=128, **_PAP)
   assert sol.get("Valid"), capsys.readouterr().out
 
 
@@ -1143,7 +1146,7 @@ def test_flush_has_no_duplicate_persistent_barrier(gp_gfx1250, gfx1250_iim, asse
   LDS. Without TDM
   loads a StaticGrid StreamK 3 handoff has no barrier, and the flush keeps its own. The PAP kernel and the
   control are MT128x128, like the PAP tests above."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=mi, TDMStoreInst=1, TDMInst=3, **policy)
+  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=mi, TDMStoreInst=True, TDMInst=3, **policy)
   assert sol.get("Valid"), capsys.readouterr().out
   assert _FLUSH_BARRIER not in asm and "tensor_store_from_lds " in asm
   lines = asm.splitlines()
@@ -1156,7 +1159,7 @@ def test_flush_has_no_duplicate_persistent_barrier(gp_gfx1250, gfx1250_iim, asse
     assert handoff is not None, lines[end]
     writes = [code for code in map(_code, lines[end:handoff]) if code.startswith(("ds_store", "ds_write", "tensor_load_to_lds"))]
     assert not writes, (lines[end], writes[:2])
-  csol, control = _emit_asm(gfx1250_iim, assembler, mi=_MT128, TDMStoreInst=1, TDMInst=0, StreamK=3)
+  csol, control = _emit_asm(gfx1250_iim, assembler, mi=_MT128, TDMStoreInst=True, TDMInst=0, StreamK=3)
   assert csol.get("Valid") and control, capsys.readouterr().out
   assert _FLUSH_BARRIER in control
 
@@ -1185,7 +1188,7 @@ def test_staged_tile_goes_after_the_epilogue_vectors(gp_gfx1250, gfx1250_iim, as
   """The bias and ScaleAlphaVec vectors, along M or N, keep LDS offset 0, as without TDMStoreInst, and the TDM
   block stages the D tile from a 256-byte boundary after them: its setup and the descriptors of the C load and
   the D store add that offset."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, StreamK=streamk,
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, StreamK=streamk,
                        ProblemType={"UseBias": useBias, "UseScaleAlphaVec": useBias})
   assert sol.get("Valid"), capsys.readouterr().out
   staged = sol["MacroTile0"] * sol["MacroTile1"] * 2
@@ -1215,7 +1218,7 @@ def test_staged_tile_over_main_loop_property(gp_gfx1250, gfx1250_iim, assembler,
   """Without PrefetchAcrossPersistent the staged tile lies over the main-loop buffers (_TDMStoreOverMainLoop):
   it starts at 0, or at the first 256-byte boundary after the epilogue vectors, and the setup fences the
   main-loop LDS. TDMStoreInst 0 reserves no tile."""
-  for tdm in (0, 1):
+  for tdm in (False, True):
     sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, **deepcopy(overrides))
     assert sol.get("Valid"), capsys.readouterr().out
     offset = sol["_TDMStoreLdsOffset"]
@@ -1256,7 +1259,7 @@ def test_store_vector_width_1_stores_the_one_masked_block(gp_gfx1250, gfx1250_ii
   NonEdge path goes through the TDM block as well. With bias and ScaleAlphaVec the vectors keep LDS
   offset 0."""
   kernels = {}
-  for tdm in (0, 1):
+  for tdm in (False, True):
     sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, StoreVectorWidth=1, AdaptiveGemm=adaptive,
                          **({"ProblemType": {"UseBias": 1, "UseScaleAlphaVec": 1}} if vectors else {}))
     assert sol.get("Valid"), capsys.readouterr().out
@@ -1278,7 +1281,7 @@ def test_store_vector_width_1_stores_the_one_masked_block(gp_gfx1250, gfx1250_ii
 
 
 def test_solution_rejects_with_the_reason(gp_gfx1250, gfx1250_iim, assembler, capsys):
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, GlobalSplitU=2)
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, GlobalSplitU=2)
   assert not sol.get("Valid") and asm is None
   assert "TDMStoreInst requires GlobalSplitU=1 or -1, or MultipleBufferSingleKernel" in capsys.readouterr().out
 
