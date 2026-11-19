@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,7 @@
 #include "../utils/allocate_free.hpp"
 #include "../utils/log.hpp"
 
+#include <algorithm>
 #include <math.h>
 
 namespace rocalution
@@ -263,6 +264,54 @@ namespace rocalution
 
             this->iter_ctrl_.Clear();
 
+            // The operator may have been reset to a matrix of the same sparsity pattern, which
+            // the low precision matrix keeps
+            this->op_h_ = this->op_;
+
+            assert(this->op_h_->GetLocalM() == this->op_l_->GetLocalM());
+            assert(this->op_h_->GetLocalN() == this->op_l_->GetLocalN());
+            assert(this->op_h_->GetLocalNnz() == this->op_l_->GetLocalNnz());
+
+            // Copy the new values into the low precision matrix
+            PtrType*    row_offset   = NULL;
+            int*        col          = NULL;
+            PtrType*    row_offset_l = NULL;
+            int*        col_l        = NULL;
+            ValueTypeH* val_h        = NULL;
+            ValueTypeL* val_l        = NULL;
+
+            allocate_host(this->op_h_->GetLocalM() + 1, &row_offset);
+            allocate_host(this->op_h_->GetLocalNnz(), &col);
+            allocate_host(this->op_h_->GetLocalM() + 1, &row_offset_l);
+            allocate_host(this->op_h_->GetLocalNnz(), &col_l);
+            allocate_host(this->op_h_->GetLocalNnz(), &val_l);
+            allocate_host(this->op_h_->GetLocalNnz(), &val_h);
+
+            this->op_h_->CopyToCSR(row_offset, col, val_h);
+
+            // CopyToCSR() copies on the backend of the matrix, and UpdateValuesCSR() moves the
+            // matrix to the host anyway
+            this->op_l_->MoveToHost();
+            this->op_l_->CopyToCSR(row_offset_l, col_l, val_l);
+
+            assert(std::equal(row_offset, row_offset + this->op_h_->GetLocalM() + 1, row_offset_l));
+            assert(std::equal(col, col + this->op_h_->GetLocalNnz(), col_l));
+
+            for(int64_t i = 0; i < this->op_h_->GetLocalNnz(); ++i)
+            {
+                val_l[i] = static_cast<ValueTypeL>(val_h[i]);
+            }
+
+            this->op_l_->UpdateValuesCSR(val_l);
+            this->op_l_->MoveToAccelerator();
+
+            free_host(&row_offset);
+            free_host(&col);
+            free_host(&row_offset_l);
+            free_host(&col_l);
+            free_host(&val_l);
+            free_host(&val_h);
+
             if(this->Solver_L_ != NULL)
             {
                 this->Solver_L_->ReBuildNumeric();
@@ -392,7 +441,7 @@ namespace rocalution
             return;
         }
 
-        while(!this->iter_ctrl_.CheckResidual(res, this->index_))
+        do
         {
             // cast to lower precision
 
@@ -433,7 +482,7 @@ namespace rocalution
             this->op_h_->Apply(*this->x_h_, &this->r_h_);
             this->r_h_.ScaleAdd(static_cast<ValueTypeH>(-1), rhs);
             res = this->Norm_(this->r_h_);
-        }
+        } while(!this->iter_ctrl_.CheckResidual(res, this->index_));
 
         log_debug(this, "MixedPrecisionDC::SolveNonPrecond_()", " #*# end");
     }
