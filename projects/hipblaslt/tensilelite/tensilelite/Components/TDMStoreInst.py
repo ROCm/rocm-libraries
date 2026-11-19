@@ -63,6 +63,9 @@ TDM_STORE_PATHS = {
 # the waits that WaitCntInsertion does not re-derive.
 STINKY_KEEP = "[stinky-keep]"
 
+# The DS instruction offset field is 16-bit unsigned.
+DS_OFFSET_MAX = 0xFFFF
+
 
 def hasEpilogueSideEffects(pt):
   """Whether the epilogue writes or reduces per-element outputs beyond C and D (E, Gradient, gate residual,
@@ -219,14 +222,34 @@ def emitTDMStoreSetup(gwb) -> Module:
   return module
 
 
-def _tdmStoreLdsAddress(gwb, module: Module, coordOffset0, coordOffset1):
+def tdmStoreLdsSplit(offset, span=0):
+  """Split a staged-tile byte offset into (fold into the address register, DS instruction offset).
+
+  span is how far ABOVE the returned offset the caller will still address. An element wider than one DS
+  instruction is written piece by piece as offset + piece * width, so the piece that has to fit the 16-bit
+  field is the LAST one, not the first. Checking only the element's own offset lets a vector that starts
+  just under 64 KiB emit offset:65536 for its second piece, which the assembler rejects with
+  "expected a 16-bit unsigned offset".
+
+  Folding a whole multiple of 64 KiB keeps the fold cheap, but only while the remainder still leaves room
+  for the span; otherwise the element's whole offset is folded, which puts its pieces in [0, span].
+  """
+  if offset + span <= DS_OFFSET_MAX:
+    return 0, offset
+  high = offset & ~DS_OFFSET_MAX
+  if (offset - high) + span > DS_OFFSET_MAX:
+    high = offset
+  return high, offset - high
+
+
+def _tdmStoreLdsAddress(gwb, module: Module, coordOffset0, coordOffset1, span=0):
   """Return the VGPR and DS offset of element (coordOffset0, coordOffset1) of the staged tile."""
   offset = (coordOffset1 * gwb.kernel["MacroTile0"] + coordOffset0) * gwb.parentWriter.states.bpeCexternalGSU1
-  if offset <= 0xFFFF:
-    return gwb.tdmStoreLdsBase, offset
-  # The DS instruction offset has 16 bits.
-  module.add(VAddU32(dst=vgpr(gwb.tmpVgpr), src0=vgpr(gwb.tdmStoreLdsBase), src1=hex(offset & ~0xFFFF), comment="LDS offset above 64 KiB"))
-  return gwb.tmpVgpr, offset & 0xFFFF
+  high, low = tdmStoreLdsSplit(offset, span)
+  if not high:
+    return gwb.tdmStoreLdsBase, low
+  module.add(VAddU32(dst=vgpr(gwb.tmpVgpr), src0=vgpr(gwb.tdmStoreLdsBase), src1=hex(high), comment="LDS offset above 64 KiB"))
+  return gwb.tmpVgpr, low
 
 
 def _stagedTileToken(gwb):
@@ -249,7 +272,10 @@ def emitTDMStoreLoadCElement(gwb, addrCalc, data, vc0) -> Module:
   module = Module("TDMStoreLoadCElement")
   kw = gwb.parentWriter
   bpl = kw.states.bpeCexternalGSU1 * gwb.gwvw
-  addr, offset = _tdmStoreLdsAddress(gwb, module, addrCalc.coordOffset0, addrCalc.coordOffset1)
+  # A DS load reads at most 16 bytes, so the vector is read in pieces at offset + piece * width and the LAST
+  # piece is the one that has to fit the 16-bit field.
+  addr, offset = _tdmStoreLdsAddress(gwb, module, addrCalc.coordOffset0, addrCalc.coordOffset1,
+                                     span=max(0, bpl - min(bpl, 16)))
   comment = "load C element (%u, %u)" % (addrCalc.coordOffset0, addrCalc.coordOffset1)
   memToken = MemTokenData([_stagedTileToken(gwb)])
   if bpl == 2 and gwb.kernel["ProblemType"]["DestDataType"].isHalf() and not kw.states.HHH_WMMA and vc0 % 2:
@@ -284,7 +310,9 @@ def emitTDMStoreStaging(gwb, stagedElements) -> Module:
   numRegs = max(1, width // kw.states.bpr)
   regsPerElement = max(1, kw.states.bpeCexternalGSU1 // kw.states.bpr)
   for sumIdx, coordOffset0, coordOffset1 in stagedElements:
-    addr, offset = _tdmStoreLdsAddress(gwb, module, coordOffset0, coordOffset1)
+    # dsStore writes at most 32 bytes, so a wider vector is staged at offset + piece * width; the last piece
+    # is what has to fit the 16-bit field.
+    addr, offset = _tdmStoreLdsAddress(gwb, module, coordOffset0, coordOffset1, span=max(0, bps - width))
     for piece in range(bps // width):
       src = vgpr(formatting(sumIdx * regsPerElement + piece * numRegs, "ValuC+", kw.states.c.startVgprValu), numRegs)
       module.add(dsStore(width, dstAddr=vgpr(addr), src=src, ds=DSModifiers(offset=offset + piece * width),

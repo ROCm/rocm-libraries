@@ -15,8 +15,9 @@ from rocisa.enum import CacheScope, NonVolatile, TemporalHint
 from tensilelite.Common.DataType import DataType
 from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Common.ValidParameters import validParameters
-from tensilelite.Components.TDMStoreInst import STINKY_KEEP, TDM_STORE_PATHS, storesFinalD, tdmStoreBlocks, \
-  tdmStoreLdsBytes, tdmStoreModifiers, tdmStoreRejectReason
+from tensilelite.Components.GlobalWriteBatch import GlobalWriteBatchWriter
+from tensilelite.Components.TDMStoreInst import DS_OFFSET_MAX, STINKY_KEEP, hasEpilogueSideEffects, TDM_STORE_PATHS, storesFinalD, \
+  tdmStoreBlocks, tdmStoreLdsBytes, tdmStoreLdsSplit, tdmStoreModifiers, tdmStoreRejectReason
 from tensilelite.SolutionStructs.Naming import getKernelNameMin
 
 from emit_test_helpers import assert_every_vector_preload_barriers, emit_asm
@@ -1317,3 +1318,52 @@ def test_local_split_u_stages_each_element_after_the_lsu_offset(gp_gfx1250, gfx1
                 and not _code(line).startswith(("s_", "v_cmp", "buffer_store", "ds_store", "tensor_"))]
     staging = [line for line in block if "stage D element" in line]
     assert staging and all(operands(line)[0] == operands(block[setup])[0] for line in staging)
+
+
+# The DS offset field is 16-bit unsigned. An element wider than one DS instruction is staged as
+# offset + piece * width, so the piece that has to fit is the LAST one. Checking only the element's own
+# offset let a vector starting near the top of a 64 KiB page emit offset:65536, which the assembler rejects
+# with "expected a 16-bit unsigned offset".
+
+@pytest.mark.parametrize("offset, span", [
+  (0, 0), (0, 32), (DS_OFFSET_MAX, 0), (DS_OFFSET_MAX - 32, 32),
+  (0xFFE0, 32), (0xFFF0, 16), (0x10000, 0), (0x1FFE0, 32), (0x20000, 32),
+  (((128 - 1) * 256 + 255) * 4, 32),   # fp32 D over 128 columns per wave: the element alone passes 64 KiB
+  (((128 - 1) * 256 + 255) * 8, 32),   # fp64 D over the same tile
+])
+def test_lds_split_keeps_every_piece_inside_the_ds_offset_field(offset, span):
+  """Every piece the caller addresses fits the 16-bit field, and the fold plus the offset still name the same
+  byte of the staged tile."""
+  high, low = tdmStoreLdsSplit(offset, span)
+  assert high + low == offset, "the split must address the same byte"
+  assert low >= 0, "a DS offset is unsigned"
+  assert low + span <= DS_OFFSET_MAX, "last piece %u does not fit the 16-bit DS offset field" % (low + span)
+
+
+def test_lds_split_only_folds_when_it_has_to():
+  """An element that fits with its span is addressed straight off the base register, with no extra VALU."""
+  assert tdmStoreLdsSplit(0x1234, 32) == (0, 0x1234)
+  assert tdmStoreLdsSplit(DS_OFFSET_MAX, 0) == (0, DS_OFFSET_MAX)
+  assert tdmStoreLdsSplit(DS_OFFSET_MAX, 1)[0] != 0, "one byte past what fits does fold"
+
+
+def test_lds_split_folds_whole_pages_while_the_span_still_fits():
+  """The fold stays a multiple of 64 KiB where it can, so the DS offsets keep addressing within one page."""
+  assert tdmStoreLdsSplit(0x10010, 16) == (0x10000, 0x10)
+
+
+def test_lds_split_folds_the_whole_offset_when_the_page_remainder_cannot_hold_the_span():
+  """At the top of a page the remainder has no room for the span, so the element's whole offset is folded and
+  its pieces start at 0. Without a span the same offset still fits inline: it is the span that forces this."""
+  assert tdmStoreLdsSplit(0xFFE0, 0) == (0, 0xFFE0)
+  assert tdmStoreLdsSplit(0xFFE0, 32) == (0xFFE0, 0)
+
+
+def test_lds_split_is_not_the_masking_form_that_emitted_offset_65536():
+  """The original code folded `offset & ~0xFFFF` and returned `offset & 0xFFFF`, never consulting the span, so
+  an element at 0x1FFE0 staged in 32-byte pieces emitted offset:65536. Pin that case."""
+  offset, span = 0x1FFE0, 32
+  assert (offset & 0xFFFF) + span > DS_OFFSET_MAX, "premise: the masking form overflows here"
+  high, low = tdmStoreLdsSplit(offset, span)
+  assert high + low == offset
+  assert low + span <= DS_OFFSET_MAX
