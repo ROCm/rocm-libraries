@@ -282,6 +282,64 @@ static bool scale_descriptor(const char* gfx, rocke_mma_scale_block_k_t block, b
     return ok;
 }
 
+static bool scale_refusal(const rocke_arch_target_t* target,
+                          const rocke_mma_op_t* atom,
+                          rocke_status_t status,
+                          const char* expected)
+{
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "scale_refusal") != ROCKE_OK)
+        return false;
+    rocke_tiling_tile_desc_t tile;
+    const bool ok = rocke_h_make_mma_scale_desc(&b, &tile, atom, target) == status
+                    && strcmp(b.err, expected) == 0 && b.kernel->body->num_ops == 0;
+    if(!ok)
+        fprintf(stderr, "expected scale refusal '%s', got '%s'\n", expected, b.err);
+    rocke_ir_builder_free(&b);
+    return ok;
+}
+
+static bool scale_descriptor_refusals()
+{
+    const auto* gfx942 = rocke_arch_target_from_gfx("gfx942");
+    const auto* tf32
+        = rocke_mma_catalog_op_for_shape(&gfx942->mma, "mma", "tf32", "tf32", "fp32", 16, 16, 8);
+    if(!tf32 || !scale_refusal(gfx942, NULL, ROCKE_ERR_TYPE, "scale descriptor requires an MmaOp")
+       || !scale_refusal(gfx942, tf32, ROCKE_ERR_NOTIMPL, "unmodelled scale layout on 'gfx942'"))
+        return false;
+
+    auto target = *rocke_arch_target_from_gfx("gfx1250");
+    const rocke_mma_scale_filter_t scales = {"e8m0", "e8m0", ROCKE_MMA_SCALE_K32};
+    const auto* atom = rocke_mma_catalog_op_for_shape(
+        &target.mma, "wmma_scaled", "fp4", "fp8", "fp32", 16, 16, 128, &scales);
+    const auto* profile = rocke_mma_catalog_op_for_shape(
+        &target.mma, "wmma_scaled", "fp4", "fp4", "fp32", 16, 16, 128, &scales);
+    if(!atom || !profile)
+        return false;
+    // Register our modified row so refusal happens in the profile check, not
+    // the supplied-versus-registered metadata check.
+    rocke_mma_op_t rows[] = {*atom, *profile};
+    target.mma = {rows, 2};
+    char message[256];
+    rows[0].m = 32;
+    snprintf(message, sizeof(message), "unmodelled scale shape for '%s'", atom->op_id);
+    if(!scale_refusal(&target, &rows[0], ROCKE_ERR_NOTIMPL, message))
+        return false;
+
+    rows[0] = *atom;
+    auto wrong_b = *atom->srcs[1].scale_layout;
+    wrong_b.fn = atom->srcs[0].scale_layout->fn;
+    rows[0].srcs[1].scale_layout = &wrong_b;
+    snprintf(message, sizeof(message), "unmodelled scale_src1 map for '%s'", atom->op_id);
+    if(!scale_refusal(&target, &rows[0], ROCKE_ERR_NOTIMPL, message))
+        return false;
+
+    rows[0] = *atom;
+    target.mma.num_ops = 1;
+    snprintf(message, sizeof(message), "unmodelled scale_src0 map for '%s'", atom->op_id);
+    return scale_refusal(&target, &rows[0], ROCKE_ERR_NOTIMPL, message);
+}
+
 int main(int argc, char** argv)
 {
     if(argc == 1)
@@ -294,7 +352,7 @@ int main(int argc, char** argv)
                    || prepare(gfx, "fp8e4m3", "bf8e5m2", role, "b"))
                     return 1;
         const int config[] = {8, 32, 2, 32, 32, 16, 0, 0, 0};
-        return !invalid_tile(false) || !invalid_tile(true)
+        return !invalid_tile(false) || !invalid_tile(true) || !scale_descriptor_refusals()
                || !scale_descriptor("gfx950", ROCKE_MMA_SCALE_K32, true)
                || !scale_descriptor("gfx1250", ROCKE_MMA_SCALE_K32, false)
                || !scale_descriptor("gfx1250", ROCKE_MMA_SCALE_K16, false)

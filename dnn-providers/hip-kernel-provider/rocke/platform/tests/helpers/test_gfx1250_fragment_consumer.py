@@ -5,12 +5,13 @@
 import ast
 import importlib
 import inspect
+import re
 from dataclasses import replace
 from itertools import product
 
 import pytest
 
-from rocke.core.arch import ArchTarget
+from rocke.core.arch import ArchTarget, MmaCatalog
 from rocke.core.ir import I32, VectorType
 from rocke.core.verify import verify
 from rocke.helpers.tiling import make_mma_scale_desc
@@ -109,6 +110,51 @@ def test_native_scale_distribution_matches_actual_atom_layouts(target, block):
         (column, group)
         for group, column in lane_placements(atom.b_scale_layout(), atom.wave_size)
     ]
+
+
+def test_scale_descriptor_refuses_non_atom():
+    with pytest.raises(TypeError, match=r"^scale descriptor requires an MmaOp$"):
+        make_mma_scale_desc(None, target="gfx950")
+
+
+def test_scale_descriptor_refuses_unmodelled_target():
+    target = ArchTarget.from_gfx("gfx942")
+    atom = target.mma.op_for_shape(
+        family="mma", a_dtype="tf32", b_dtype="tf32", c_dtype="fp32", m=16, n=16, k=8
+    )
+    assert atom is not None
+    with pytest.raises(
+        NotImplementedError, match=r"^unmodelled scale layout on 'gfx942'$"
+    ):
+        make_mma_scale_desc(atom, target=target.gfx)
+
+
+@pytest.mark.parametrize("case", ("shape", "map", "missing-profile"))
+def test_scale_descriptor_refuses_unmodelled_catalog_entry(monkeypatch, case):
+    target = ArchTarget.from_gfx("gfx1250")
+    atom = _scale_atom(target.gfx, 32)
+    if case == "shape":
+        atom = replace(atom, m=32)
+        message = f"unmodelled scale shape for '{atom.op_id}'"
+    elif case == "map":
+        src = atom.srcs[1]
+        # Leave slot count, wave and role intact but give B a different map.
+        layout = replace(atom.b_scale_layout(), fn=atom.a_scale_layout().fn)
+        src = replace(src, scale=replace(src.scale, layout=layout))
+        atom = replace(atom, srcs=(atom.srcs[0], src, atom.srcs[2]))
+        message = f"unmodelled scale_src1 map for '{atom.op_id}'"
+    else:
+        message = f"unmodelled scale_src0 map for '{atom.op_id}'"
+    ops = [atom]
+    if case != "missing-profile":
+        ops.extend(op for op in target.mma.ops if op.op_id != atom.op_id)
+    # The row itself is registered; these tests must reach the profile guards
+    # rather than simply reject supplied metadata that differs from the catalog.
+    catalog = MmaCatalog(ops)
+    assert catalog.by_op_id(atom.op_id) is atom
+    monkeypatch.setattr(ArchTarget, "from_gfx", lambda _: replace(target, mma=catalog))
+    with pytest.raises(NotImplementedError, match=f"^{re.escape(message)}$"):
+        make_mma_scale_desc(atom, target=target.gfx)
 
 
 def test_scale_descriptor_refuses_conflicting_atom_metadata():

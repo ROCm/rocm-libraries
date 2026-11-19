@@ -17,9 +17,9 @@ def make_mma_scale_desc(atom: MmaOp, *, target: str) -> TileDesc:
     each lane the complete scale row and broadcasts across both half-waves.
     Only the verified symmetric map profiles are supported.
     """
-    catalog = ArchTarget.from_gfx(target).mma
     if not isinstance(atom, MmaOp):
         raise TypeError("scale descriptor requires an MmaOp")
+    catalog = ArchTarget.from_gfx(target).mma
     registered = catalog.by_op_id(atom.op_id)
     if registered is None or atom != registered:
         raise ValueError("scale descriptor requires the registered atom metadata")
@@ -53,7 +53,11 @@ def make_mma_scale_desc(atom: MmaOp, *, target: str) -> TileDesc:
     )
     for role in (0, 1):
         layout = atom.src_scale_layout(role)
-        if layout != profile.src_scale_layout(role) or layout.frag_len != per_lane:
+        if (
+            profile is None
+            or layout != profile.src_scale_layout(role)
+            or layout.frag_len != per_lane
+        ):
             raise NotImplementedError(
                 f"unmodelled scale_src{role} map for {atom.op_id!r}"
             )

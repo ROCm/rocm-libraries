@@ -300,12 +300,14 @@ rocke_status_t rocke_h_make_mma_scale_desc(rocke_ir_builder_t* b,
         const bool wmma
             = strcmp(target->gfx, "gfx1250") == 0 && strcmp(atom->family, "wmma_scaled") == 0;
         if(!mfma && !wmma)
-            ckc::raise_status(ROCKE_ERR_NOTIMPL, "unmodelled scale layout on target");
+            throw ckc::NotImplError(
+                ckc::format_error("unmodelled scale layout on '%s'", target->gfx));
         const int block = atom->srcs[0].scale_block_size;
         const int m = mfma ? 32 : 16, k = mfma ? 64 : 128, wave = mfma ? 64 : 32;
         if(atom->m != m || atom->n != m || atom->k != k || atom->wave_size != wave
            || (block != 32 && !(wmma && block == 16)))
-            ckc::raise_status(ROCKE_ERR_NOTIMPL, "unmodelled scale shape");
+            throw ckc::NotImplError(
+                ckc::format_error("unmodelled scale shape for '%s'", atom->op_id));
         const int groups = k / block;
         const int per_lane = mfma ? 1 : groups;
         const rocke_mma_scale_filter_t scales = {"e8m0", "e8m0", atom->srcs[0].scale_block_size};
@@ -316,7 +318,8 @@ rocke_status_t rocke_h_make_mma_scale_desc(rocke_ir_builder_t* b,
             const auto* layout = rocke_mma_op_src_scale_layout(atom, i, b);
             if(!profile || !layout || layout != rocke_mma_op_src_scale_layout(profile, i, b)
                || layout->frag_len != per_lane)
-                ckc::raise_status(ROCKE_ERR_NOTIMPL, "unmodelled scale operand map");
+                throw ckc::NotImplError(
+                    ckc::format_error("unmodelled scale_src%d map for '%s'", i, atom->op_id));
         }
         int shape[] = {m, groups};
         rocke_h_row_t rows[] = {{&shape[0], 1}, {&shape[1], 1}};
