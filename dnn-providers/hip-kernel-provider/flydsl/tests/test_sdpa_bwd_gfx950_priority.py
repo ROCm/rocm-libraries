@@ -185,7 +185,7 @@ def policy_default_hashes(kind: str) -> set[str]:
     """The Spec hashes of the rows of no knob that the nondeterministic list does not name."""
     hashes = set()
     for row in instances_for(f"sdpa_bwd_{kind}", SDPA_BWD_TARGET):
-        spec = to_spec(row)
+        spec = to_spec(row, "gfx950")
         if not spec.knobs and spec.hash() not in LISTED:
             hashes.add(spec.hash())
     return hashes

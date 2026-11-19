@@ -34,30 +34,30 @@ from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES, COMMON_VALU
 Inclusive range for params tuning, edit these to adjust tuning grid range.
 """
 BLOCK_SIZES = [128, 256, 512, 1024]
-IPT = [2 ** i for i in range(17)]
+IPT = [2**i for i in range(17)]
 
 
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name='device_merge_sort_block_merge')
+        return TunerArgs(algo_full_name="device_merge_sort_block_merge")
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
 
     def _get_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
         params = OrderedDict()
-        
-        #These are required to match legacy tuner and to ensure migrate.py works correctly 
-        params['odd_even_block_size'] = [256]
-        params['odd_even_ipt'] = [1]
-        params['odd_even_size_limit'] = [(1 << 17) + 70000]
-        params['partition_block_size'] = [128]
-        params['partition_ipt'] = [1]
 
-        params['block_size_x'] = BLOCK_SIZES
-        params['ipt'] = IPT
-        
+        # These are required to match legacy tuner and to ensure migrate.py works correctly
+        params["odd_even_block_size"] = [256]
+        params["odd_even_ipt"] = [1]
+        params["odd_even_size_limit"] = [(1 << 17) + 70000]
+        params["partition_block_size"] = [128]
+        params["partition_ipt"] = [1]
+
+        params["block_size_x"] = BLOCK_SIZES
+        params["ipt"] = IPT
+
         return params
 
     def _get_restrictions(self, types: Dict[str, Any]) -> Callable[[dict], bool]:
@@ -66,15 +66,17 @@ class Tuner(BaseTuner):
 
         max_shared_memory = 65536
         max_size_per_element = key_size + val_size
+
         def validate(params):
-            block_size = params['block_size_x']
-            ipt = params['ipt']
+            block_size = params["block_size_x"]
+            ipt = params["ipt"]
             max_ipt = max_shared_memory // (block_size * max_size_per_element)
 
             max_ipt_exponent = log2(max_ipt) - 1
 
-            return ipt <= (2 ** max_ipt_exponent)
-
+            # Items per block above 1024 can exceed the block_sort tile the benchmark
+            # pre-sorts with (hipErrorAssert -> inf), and confgen discards them anyway.
+            return ipt <= (2**max_ipt_exponent) and block_size * ipt <= 1024
 
         return validate
 

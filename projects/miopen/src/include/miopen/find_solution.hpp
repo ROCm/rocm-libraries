@@ -204,13 +204,16 @@ auto FindSolutionImpl(rank<1>,
         if(perf_cfg.empty() && !enforce.IsDbClean(context) &&
            !(context.do_search || enforce.IsSearch(context)))
         {
+            const auto default_desc = [&] {
+                return s.GetDefaultPerformanceConfig(context, problem).ToString();
+            };
             std::remove_const_t<decltype(ai::lgbm::pcfg::MaybePickConfig(
-                s.SolverDbId(), problem, context.GetStream()))>
+                s.SolverDbId(), problem, context.GetStream(), default_desc))>
                 ranked;
             {
                 ScopedTimeLogger pcfg_pick_timer(s.SolverDbId() + " lgbm_pcfg.MaybePickConfig");
-                ranked =
-                    ai::lgbm::pcfg::MaybePickConfig(s.SolverDbId(), problem, context.GetStream());
+                ranked = ai::lgbm::pcfg::MaybePickConfig(
+                    s.SolverDbId(), problem, context.GetStream(), default_desc);
             }
             const bool stop_on_default = env::enabled(MIOPEN_DEBUG_LGBM_PCFG_STOP_ON_DEFAULT);
             using PerformanceConfig    = decltype(s.GetDefaultPerformanceConfig(context, problem));
