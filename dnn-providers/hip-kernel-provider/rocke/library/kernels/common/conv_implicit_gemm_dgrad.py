@@ -7762,7 +7762,7 @@ def _build_tilde_dgrad(
         # Each segment rewrites the A/B tiles (prologue) and the C staging
         # (epilogue) before reading them, and ends in a barrier: the LDS
         # allocations may alias as in straight-line code.
-        loop.op.attrs["lds_iter_local"] = True
+        loop.op.attrs["smem_iter_local"] = True
         with loop as seg:
             tile = b.add(tile_a, seg)
             if compact:
@@ -10134,7 +10134,7 @@ def _build_tilde_dgrad(
         tid0 = tid
         loop = b.scf_for(b.block_id_x(), n_items, stride, iv_name="xi")
         loop.op.attrs["elide_trailing_barrier"] = False
-        loop.op.attrs["smem_per_iteration"] = True
+        loop.op.attrs["smem_iter_local"] = True
         with loop as item:
             # The thread id through an empty asm tied to the tile index:
             # everything derived from it is rebuilt per tile instead of being
