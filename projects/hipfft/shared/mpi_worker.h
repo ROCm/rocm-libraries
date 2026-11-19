@@ -669,7 +669,8 @@ void exec_testcases(MPI_Comm                          mpi_comm,
                 = get_rank_jit_state(p, "store_callback", false, jit_callback_op::STORE);
         }
 
-        p.create_plan();
+        if(p.create_plan() != fft_status_success)
+            throw std::runtime_error("FFT plan creation failure");
     }
 
     for(size_t i = 0; i < testcases.size(); ++i)
@@ -711,8 +712,10 @@ void exec_testcases(MPI_Comm                          mpi_comm,
             start = std::chrono::steady_clock::now();
         }
 
-        all_params[testcase].execute(reinterpret_cast<void**>(local_input_ptrs.data()),
-                                     reinterpret_cast<void**>(local_output_ptrs.data()));
+        if(all_params[testcase].execute(reinterpret_cast<void**>(local_input_ptrs.data()),
+                                        reinterpret_cast<void**>(local_output_ptrs.data()))
+           != fft_status_success)
+            throw std::runtime_error("FFT plan execution failure");
 
         if(run_bench)
         {

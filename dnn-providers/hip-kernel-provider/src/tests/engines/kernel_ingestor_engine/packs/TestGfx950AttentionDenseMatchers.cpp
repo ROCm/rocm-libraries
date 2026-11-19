@@ -64,8 +64,6 @@ struct KernelSpec
 {
     std::string dtype = "BF16";
     int64_t headSize = HEAD_SIZE;
-    int64_t numQueryHeads = HEADS;
-    int64_t numKvHeads = HEADS;
     int64_t seqLenQ = SEQ;
     int64_t seqLenKv = SEQ;
     int64_t batch = BATCH;
@@ -100,8 +98,6 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(const KernelSpec& spec)
     kernel.metadata = {
         {std::string("dtype"), spec.dtype},
         {std::string("head_size"), spec.headSize},
-        {std::string("num_query_heads"), spec.numQueryHeads},
-        {std::string("num_kv_heads"), spec.numKvHeads},
         {std::string("seqlen_q"), spec.seqLenQ},
         {std::string("seqlen_kv"), spec.seqLenKv},
         {std::string("batch"), spec.batch},
@@ -209,8 +205,6 @@ KernelSpec canonicalD128H9()
 {
     KernelSpec spec = canonicalAligned();
     spec.headSize = 128;
-    spec.numQueryHeads = 9;
-    spec.numKvHeads = 9;
     spec.causal = 0;
     return spec;
 }
@@ -239,8 +233,6 @@ std::vector<KernelSpec> d64H32Cohort()
 {
     KernelSpec spec = canonicalAligned();
     spec.headSize = 64;
-    spec.numQueryHeads = 32;
-    spec.numKvHeads = 32;
     spec.causal = 0;
     return cohortOf(spec, d64Tiles());
 }
@@ -278,8 +270,6 @@ KernelSpec raggedRecord2016()
 {
     KernelSpec spec;
     spec.headSize = 64;
-    spec.numQueryHeads = 64;
-    spec.numKvHeads = 8;
     spec.causal = 1;
     spec.ragged = 1;
     spec.batch = 1;
@@ -294,8 +284,6 @@ std::vector<KernelSpec> d64H64Kv8Cohort()
 {
     KernelSpec spec = canonicalAligned();
     spec.headSize = 64;
-    spec.numQueryHeads = 64;
-    spec.numKvHeads = 8;
     spec.causal = 1;
     return cohortOf(spec, d64Tiles());
 }
@@ -322,8 +310,6 @@ KernelSpec vitSemantic()
     KernelSpec spec = canonicalAligned();
     spec.dtype = "FP16";
     spec.headSize = 64;
-    spec.numQueryHeads = 12;
-    spec.numKvHeads = 12;
     spec.causal = 0;
     return spec;
 }
@@ -1461,11 +1447,19 @@ TEST(TestGfx950AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherHeadSi
     EXPECT_FALSE(matchesKernel(d128Graph, d64Candidate));
 }
 
-TEST(TestGfx950AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherHeadCount)
+TEST(TestGfx950AttentionDenseKernelMatch, OneCandidateServesEveryHeadCount)
 {
-    KernelSpec kernel;
-    kernel.numQueryHeads = HEADS * 2;
-    EXPECT_FALSE(matchesKernel(GraphSpec{}, kernel));
+    // The metadata carries no head counts: the kernel reads them as kernargs from the
+    // graph, so one candidate matches MHA, GQA, MQA and non-power-of-two head counts.
+    const KernelSpec kernel;
+    for(const auto& [queryHeads, kvHeads] : std::vector<std::pair<int64_t, int64_t>>{
+            {1, 1}, {6, 3}, {64, 8}, {9, 9}, {HEADS * 2, HEADS}})
+    {
+        GraphSpec graph;
+        graph.numQueryHeads = queryHeads;
+        graph.numKvHeads = kvHeads;
+        EXPECT_TRUE(matchesKernel(graph, kernel)) << "Hq=" << queryHeads << " Hkv=" << kvHeads;
+    }
 }
 
 TEST(TestGfx950AttentionDenseKernelMatch, RefusesACandidateBakedForTheOtherMask)
@@ -1579,8 +1573,6 @@ TEST(TestGfx950AttentionDenseTileMatch, D128GqaCausalRuntimeBatchAdmitsAllSixTil
     graph.seqLenKv = 1536;
 
     KernelSpec semantic = canonicalAligned();
-    semantic.numQueryHeads = 32;
-    semantic.numKvHeads = 8;
     semantic.causal = 1;
 
     EXPECT_EQ(admittedTiles(graph, cohortOf(semantic, d128Tiles())), tileSetOf(d128Tiles()));
@@ -1654,9 +1646,11 @@ TEST(TestGfx950AttentionDenseTileMatch, AlternativeTilesKeepTheSemanticFieldComp
     otherDtype.dtype = "FP16";
     EXPECT_FALSE(matchesKernel(graph, otherDtype));
 
-    KernelSpec otherHeads = match;
+    // Head counts are not metadata: another head configuration still matches.
+    GraphSpec otherHeads = graph;
+    otherHeads.numQueryHeads = 12;
     otherHeads.numKvHeads = 3;
-    EXPECT_FALSE(matchesKernel(graph, otherHeads));
+    EXPECT_TRUE(matchesKernel(otherHeads, match));
 
     KernelSpec otherMask = match;
     otherMask.causal = 1;
@@ -1813,46 +1807,6 @@ TEST(TestGfx950AttentionDenseTileMatch, EachLengthIsJudgedAgainstEachCandidateTi
 // consumes it: the order a cold (unbenchmarked) plan build tries candidates in.
 // ---------------------------------------------------------------------------
 
-TEST(TestGfx950AttentionDenseScore, BaselineFirstThenAscendingTilesWhateverTheIdOrder)
-{
-    // D64 S1024 admits all seven tiles. Ids are assigned twice -- ascending with the
-    // expected order, then descending -- so an order the id tie-break decided would
-    // differ between the two runs.
-    const std::vector<Tile> expected{
-        {256, 64}, {128, 32}, {128, 64}, {128, 128}, {256, 32}, {256, 128}, {256, 256}};
-    const GraphSpec graph = d64H32Noncausal(1024, 1024);
-
-    for(const bool descendingIds : {false, true})
-    {
-        SCOPED_TRACE(descendingIds ? "descending ids" : "ascending ids");
-        auto cohort = d64H32Cohort();
-        for(std::size_t i = 0; i < cohort.size(); ++i)
-        {
-            const auto& tile = expected.at(i);
-            auto& candidate = cohort.at(i);
-            candidate.blockM = tile.first;
-            candidate.blockN = tile.second;
-            candidate.idByte = static_cast<unsigned>(descendingIds ? std::size_t{0x70} - i
-                                                                   : std::size_t{0x10} + i);
-        }
-        EXPECT_EQ(coldOrder(graph, cohort), expected);
-    }
-}
-
-TEST(TestGfx950AttentionDenseScore, BestApplicableAlternativeLeadsWhenTheBaselineCannotServe)
-{
-    // Sq 384 rules out every block_m 256 tile, the baseline included. Ids descend against
-    // the authoring order, so the selector's ascending-id tie-break alone would put
-    // 128/128 first.
-    auto cohort = d128H9Cohort();
-    for(std::size_t i = 0; i < cohort.size(); ++i)
-    {
-        cohort.at(i).idByte = static_cast<unsigned>(std::size_t{0x80} - i);
-    }
-    EXPECT_EQ(coldOrder(d128H9Noncausal(1, 384, 512), cohort),
-              (std::vector<Tile>{{128, 32}, {128, 64}, {128, 128}}));
-}
-
 TEST(TestGfx950AttentionDenseScore, ScoresEveryTileDeterministicallyAsAPositiveFiniteWeight)
 {
     // The properties the selector relies on beyond the order itself: a scorer that drifts
@@ -1867,6 +1821,100 @@ TEST(TestGfx950AttentionDenseScore, ScoresEveryTileDeterministicallyAsAPositiveF
         EXPECT_EQ(score, scoreOf(candidate));
         EXPECT_GT(score, 0.0);
         EXPECT_TRUE(std::isfinite(score));
+    }
+}
+
+/// One shape and the tile order the scorer must produce for it.
+///
+/// The orders are the measured rule's: closeness to `preferredTile` for the shape's
+/// cohort, block_m weighted above block_n, then ascending (block_m, block_n) as the
+/// remainder. Both cohorts here carry `causal = 0`, so both take the non-causal
+/// thresholds.
+///
+/// A table rather than one test each, so adding a case is a data edit.
+struct ColdOrderCase
+{
+    const char* name;
+    GraphSpec graph;
+    std::vector<KernelSpec> cohort;
+    std::vector<Tile> expected;
+};
+
+std::vector<ColdOrderCase> coldOrderCases()
+{
+    return {
+        // All seven D64 tiles are legal at S1024, so this pins the full order. D64
+        // non-causal takes block_m 256 from 1024, and block_n 128 everywhere outside
+        // D128 causal, so 256/128 leads and the rest fall back lexicographically.
+        {"d64 s1024 non-causal, every tile legal",
+         d64H32Noncausal(1024, 1024),
+         d64H32Cohort(),
+         {{256, 128}, {256, 32}, {256, 64}, {256, 256}, {128, 128}, {128, 32}, {128, 64}}},
+        // Sq 384 rules out every block_m 256 tile, the preferred one included, so only
+        // the block_n bonus separates what is left: 128/128 leads on that alone.
+        {"d128 sq384 non-causal, preferred block_m cannot serve",
+         d128H9Noncausal(1, 384, 512),
+         d128H9Cohort(),
+         {{128, 128}, {128, 32}, {128, 64}}},
+        // The causal cohort, which is the one the rule treats differently: D128 causal is
+        // the only cohort preferring block_n 64, and below its 4096 threshold it wants the
+        // narrow query tile too. Both halves of the preference show here as 128/64 first.
+        {"d128 s256 causal, both preferences differ from the non-causal cohorts",
+         GraphSpec{},
+         cohortOf(canonicalAligned(), d128Tiles()),
+         {{128, 64}, {128, 32}, {128, 128}, {256, 64}, {256, 32}, {256, 128}}},
+    };
+}
+
+TEST(TestGfx950AttentionDenseScore, RanksEachShapeInItsExpectedOrderWhateverTheIdOrder)
+{
+    // Ids are assigned twice -- ascending with the expected order, then descending --
+    // so an order the selector's descriptor-id tie-break decided would differ between
+    // the two runs and fail here rather than looking like a ranking.
+    for(const auto& testCase : coldOrderCases())
+    {
+        SCOPED_TRACE(testCase.name);
+        ASSERT_FALSE(testCase.expected.empty());
+        // Only the ids move. The cohort keeps its authored tiles, so a case may expect
+        // fewer tiles than the cohort holds: kernelMatches drops the ones the shape
+        // cannot use before anything is ranked.
+        for(const bool descendingIds : {false, true})
+        {
+            SCOPED_TRACE(descendingIds ? "descending ids" : "ascending ids");
+            auto cohort = testCase.cohort;
+            for(std::size_t i = 0; i < cohort.size(); ++i)
+            {
+                cohort.at(i).idByte = static_cast<unsigned>(descendingIds ? std::size_t{0x70} - i
+                                                                          : std::size_t{0x10} + i);
+            }
+            EXPECT_EQ(coldOrder(testCase.graph, cohort), testCase.expected);
+        }
+    }
+}
+
+TEST(TestGfx950AttentionDenseScore, NeverRanksATileThatCannotServeTheShape)
+{
+    // Holds whatever `tilePreference` becomes. Scoring runs after kernelMatches, so a
+    // tile in the ranking is a tile the engine will launch: one that does not divide
+    // both lengths would read past the operands or drop the remainder, and no ordering
+    // is a defence against that. Shapes chosen so each rules out a different slice of
+    // the tile set rather than all or nothing.
+    const std::vector<std::pair<const char*, GraphSpec>> shapes{
+        {"d128 sq384: no block_m 256", d128H9Noncausal(1, 384, 512)},
+        {"d128 skv192: only block_n 32 and 64", d128H9Noncausal(1, 1024, 192)},
+        {"d64 skv128: every tile but block_n 256", d64H32Noncausal(1024, 128)},
+    };
+    for(const auto& [name, graph] : shapes)
+    {
+        SCOPED_TRACE(name);
+        const auto cohort = graph.headSize == 64 ? d64H32Cohort() : d128H9Cohort();
+        const auto ranked = coldOrder(graph, cohort);
+        EXPECT_FALSE(ranked.empty()) << "a servable shape must rank at least one tile";
+        for(const auto& [blockM, blockN] : ranked)
+        {
+            EXPECT_EQ(graph.seqLenQ % blockM, 0) << blockM << "/" << blockN;
+            EXPECT_EQ(graph.seqLenKv % blockN, 0) << blockM << "/" << blockN;
+        }
     }
 }
 
