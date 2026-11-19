@@ -1980,6 +1980,18 @@ TEST(TestConvWrwCatalog, EveryMatrixArchHasAGenericTierPerDtypeAndLayout)
             {
                 continue;
             }
+            // RDNA fp32 runs the FMA form, whose pack lists the RDNA architectures: a build for
+            // other targets installs no copy of it.
+            const bool rdna = std::string(arch).rfind("gfx11", 0) == 0
+                              || std::string(arch).rfind("gfx12", 0) == 0;
+            if(rdna && std::string(dtype) == "FLOAT"
+               && std::none_of(catalog().begin(), catalog().end(), [](const auto& kernel) {
+                      return kernel.getStringMetadata("atom") == "fma"
+                             && kernel.getIntMetadata("loop") == conv_wrw::LOOP_GENERIC;
+                  }))
+            {
+                continue;
+            }
             for(const int64_t layout :
                 {conv_wrw::LAYOUT_CHANNELS_FIRST, conv_wrw::LAYOUT_CHANNELS_LAST})
             {
