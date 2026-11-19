@@ -398,10 +398,13 @@ bool sumFits(int64_t a, int64_t b)
 // True when hipdnn_data_sdk::utilities::isTensorPacked evaluates without signed overflow for
 // `dims` (non-negative, with a product that fits, see saturatingExtent) and any `strides`: it
 // sums the terms (dim - 1) * stride in dim order, starting from 0, and then adds 1 to the sum. The
-// check replays exactly that arithmetic, so it declines only strides that overflow it and accepts
-// every stride, negative ones included, that the helper evaluates without overflow. The test
-// PackingVerdictAgreesWithIsTensorPacked pins that the replay and the helper agree on strides that
-// do not overflow and have no broadcast axis.
+// check replays exactly that arithmetic in that order, so it declines only strides for which a
+// term, a partial sum or the final sum plus 1 overflows (a partial sum counts even when the full
+// sum fits) and accepts every other stride, negative ones included. It is an overflow guard only:
+// the packed verdict is isTensorPacked's own (see readTensor), and the guard is conservative
+// where isTensorPacked returns early on a broadcast axis. DeclinesStridesWhoseArithmeticOverflows
+// and StrideOverflowFollowsThePackingSumOrder pin its boundary and its order;
+// PackingVerdictAgreesWithIsTensorPacked pins that it does not decline non-overflowing strides.
 bool packingArithmeticFits(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
 {
     int64_t space = 0;

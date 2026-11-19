@@ -1753,6 +1753,49 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesStridesWhoseArithmeticOverflows)
     }
 }
 
+// The overflow check forms the partial sums of (dim - 1) * stride in dim order, as isTensorPacked
+// does, so which strides overflow depends on the order. With dims [2, 2, 2] every term is the
+// stride itself.
+// - [INT64_MAX, 1, -INT64_MAX]: the partial sums are INT64_MAX, then INT64_MAX + 1, which
+//   overflows, so every operation declines it for overflow although the full sum is 1 and a
+//   reverse-order replay would accept it. isTensorPacked is not asked for it, as it would overflow.
+// - [-INT64_MAX, 1, INT64_MAX]: the partial sums are -INT64_MAX, -INT64_MAX + 1, then 1, and the
+//   final sum plus 1 is 2, so nothing overflows and a reverse-order replay (INT64_MAX, then
+//   INT64_MAX + 1) would decline it for overflow. The element count 8 is not the span 2, so the
+//   tensor is not packed, and its stride order [2, 1, 0] is neither layout, so every operation
+//   declines it by the layout rule instead.
+TEST(TestMiopenConvApplicabilityChecks, StrideOverflowFollowsThePackingSumOrder)
+{
+    constexpr int64_t MAX_VALUE = std::numeric_limits<int64_t>::max();
+
+    const ConvCase packed = uniformCase(convShapes(), false);
+    const TensorSpec partialSumOverflows = withStrides({2, 2, 2}, {MAX_VALUE, 1, -MAX_VALUE});
+    const TensorSpec partialSumsFit = withStrides({2, 2, 2}, {-MAX_VALUE, 1, MAX_VALUE});
+    ASSERT_FALSE(isTensorPacked(partialSumsFit.dims, partialSumsFit.strides));
+
+    for(const Role role : ROLES)
+    {
+        for(const ConvOp op : ALL_OPS)
+        {
+            SCOPED_TRACE(operationName(op));
+            SCOPED_TRACE(roleName(op, role));
+
+            const std::string overflowing
+                = declineReason(op, withTensorAt(packed, role, partialSumOverflows));
+            EXPECT_THAT(overflowing,
+                        ::testing::HasSubstr(strideOverflowReason(roleName(op, role))));
+            EXPECT_THAT(overflowing, ::testing::HasSubstr(operationName(op)));
+
+            const std::string fitting
+                = declineReason(op, withTensorAt(packed, role, partialSumsFit));
+            EXPECT_THAT(fitting, ::testing::HasSubstr(LAYOUT_REASON));
+            EXPECT_THAT(
+                fitting,
+                ::testing::Not(::testing::HasSubstr(strideOverflowReason(roleName(op, role)))));
+        }
+    }
+}
+
 // Large strides whose arithmetic fits are judged as before, by layout and packing alone: a packed
 // tensor of 2^40 elements is accepted, a non-packed channels-first tensor with large strides is
 // declined by forward for not being packed and accepted by backward, and a tensor with a negative
@@ -1813,13 +1856,14 @@ TEST(TestMiopenConvApplicabilityChecks, StridesOnTheRepresentableLimitAreJudgedB
     }
 }
 
-// The validators decide packing with a replay of isTensorPacked's arithmetic (so that they can
-// decline strides that overflow it first). This pins that the two agree where neither overflows and
-// no dim above 1 has stride 0 (a broadcast axis, where the validators decline on overflow before
-// the SDK function is asked): forward declines x as "not packed" exactly when isTensorPacked is
-// false for it, and never for overflow, at ranks 3, 4 and 5. w and y are packed in x's layout class
-// so that the layout rule does not pre-empt the packing rule; the reordered rows are packed and are
-// declined by the layout rule instead, so they must not be declined as not packed.
+// The overflow check before isTensorPacked (the replay of its arithmetic) must not decline strides
+// whose arithmetic fits, and the packed verdict is isTensorPacked's own, which the validators read
+// from it directly. This pins that for rows none of which is near a limit: forward declines x as
+// "not packed" exactly when isTensorPacked is false for it, and never for overflow, at ranks 3, 4
+// and 5. It does not pin the replay's arithmetic against the SDK function (the overflow rows do,
+// above). w and y are packed in x's layout class so that the layout rule does not pre-empt the
+// packing rule; the reordered rows are packed and are declined by the layout rule instead, so they
+// must not be declined as not packed.
 TEST(TestMiopenConvApplicabilityChecks, PackingVerdictAgreesWithIsTensorPacked)
 {
     struct PackingRow
