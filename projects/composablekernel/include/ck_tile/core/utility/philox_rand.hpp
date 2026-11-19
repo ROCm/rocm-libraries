@@ -110,12 +110,33 @@ class philox
 #endif
     }
 
+#if defined(__gfx1250__)
+    // gfx1250: v_mad_u64_u32 returns the lo and the hi word of the 32x32 product in one
+    // instruction, at about the cost of a single v_mul_hi_u32. The compiler does not select it
+    // (a 64-bit product lowers to v_mul_u64, a * b + __umulhi(a, b) to v_mul_lo_u32 +
+    // v_mul_hi_u32), hence the inline asm. The multiplier is an immediate operand, so there is no
+    // extra move. Not volatile, so the compiler can still schedule/CSE it. The result is a 2 x
+    // 32-bit vector instead of a 64-bit integer so that the xors in philox_single_round stay
+    // 32-bit and fuse into v_xor3_b32. Same result as mulhilo32(M, b).
+    template <unsigned int M>
+    CK_TILE_DEVICE uint2 mulhilo32_const(const unsigned int b) const
+    {
+        uint32x2_t p;
+        asm("v_mad_u64_u32 %0, null, %1, %2, 0" : "=v"(p) : "C"(M), "v"(b));
+        return make_uint2(p[0], p[1]);
+    }
+#endif
+
     CK_TILE_HOST_DEVICE uint4 philox_single_round(const uint4 ctr, const uint2 key) const
     {
-
+#if defined(__gfx1250__)
+        uint2 res0 = mulhilo32_const<kPhiloxSA>(ctr.x);
+        uint2 res1 = mulhilo32_const<kPhiloxSB>(ctr.z);
+#else
         uint2 res0 = mulhilo32(kPhiloxSA, ctr.x);
         uint2 res1 = mulhilo32(kPhiloxSB, ctr.z);
-        uint4 ret  = {res1.y ^ ctr.y ^ key.x, res1.x, res0.y ^ ctr.w ^ key.y, res0.x};
+#endif
+        uint4 ret = {res1.y ^ ctr.y ^ key.x, res1.x, res0.y ^ ctr.w ^ key.y, res0.x};
         return ret;
     }
 
