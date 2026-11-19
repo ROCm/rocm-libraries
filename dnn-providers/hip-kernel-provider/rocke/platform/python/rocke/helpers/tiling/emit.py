@@ -746,8 +746,14 @@ def _swizzle_lds_positions(b: Any, positions: list) -> list:
     if len(positions) < 2:
         return positions
     outer, m = positions[-2], positions[-1]
-    # Keep the legacy eight-position mapping, defined in f16 units.
-    m_swz = ROW_XOR_8x16B.emit(b, outer, m, unit_bytes=2)
+    # Keep the built-in tiling IR and numeric address-map builder on remainder.
+    m_swz = b.xor(
+        m,
+        b.shl(
+            b.mod(outer, b.const_i32(1 << ROW_XOR_8x16B.row_bits)),
+            b.const_i32(ROW_XOR_8x16B.shift_for(unit_bytes=2)),
+        ),
+    )
     return positions[:-1] + [m_swz]
 
 
