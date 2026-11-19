@@ -138,7 +138,7 @@ Measured with autotune (fresh cache), our engines and the BLAS engines, 20 itera
   - Backward data on 3-5 of 18 stem graphs on the CDNA GPUs (1 on gfx1101): 3x3 stride-1 RGB stems and single-channel 3-D stems.
   - Backward weights on 7 of 16 output-layer graphs on gfx908 and 4 on gfx1101, none on gfx950. On gfx942, 1 output-layer graph and 2 single-channel 3-D stems.
 - **gfx908:** the backward-weights and backward-data gains include the gfx908 bf16 atoms of `CONV_WRW` and `CONV_SMALLC`, which serve those bf16 graphs there for the first time (Wan and VAE heads 1.4-3.6x).
-- **Control set:** 60 graphs no narrow config serves gave a geomean of 1.000-1.003 on every GPU, with no repeatable regression on the CDNA GPUs. On gfx1101, same-engine graphs drift by up to 10% between rounds on that node. A four-round interleaved recheck of the three it flagged put them at parity (0.96-1.07x).
+- **Control set:** 60 graphs no narrow config serves gave a geomean of 1.000-1.003 on every GPU, with no repeatable regression on the CDNA GPUs. On gfx1101, same-engine graphs drift by up to 10% between rounds on that node. A four-round interleaved recheck of the three graphs it flagged found no repeatable regression. Per-round ratios were 0.99-1.12 on the two `CONV_WRW` graphs and 0.89-1.01 on the rocBLAS control, whose engine is unchanged.
 
 ## Numerical precision
 
