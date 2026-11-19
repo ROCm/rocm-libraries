@@ -113,8 +113,9 @@ __all__ = [
 # slice rounds its partial into the 16-bit output, so the error grows with the
 # degree: on the gfx950 wgrad corpus the verify gate fails broadly from 256 on,
 # while the f32 workspace reduction passes at every degree. An override is held
-# to it too, and so is the CK-formula fallback of both dgrad and wgrad; only an
-# explicit degree is the caller's own.
+# to it too, and so is the CK-formula fallback of both dgrad and wgrad (wgrad
+# moves to the workspace first where one fits); only an explicit degree is the
+# caller's own.
 ATOMIC_16BIT_MAX_SPLIT_K = 128
 
 # ws_bytes is an i32 kernarg, so a two-stage workspace above this overflows it.
@@ -888,10 +889,9 @@ def _resolve_dgrad(
         return ConvSplitK(degree, False, override, f"override split_k={override}{note}")
     m, n, k = _dg_M(p), _dg_N(p), _dg_K(p)
     cost = split_k_cost_model(arch, num_cus, num_xcds)
-    if cost is not None:
-        ok, why = dgrad_split_k_available(p, dtype, wave_size=wave_size)
-        if not ok:
-            return ConvSplitK(1, False, 1, f"no split: {why}")
+    ok, why = dgrad_split_k_available(p, dtype, wave_size=wave_size)
+    if not ok:
+        return ConvSplitK(1, False, 1, f"no split: {why}")
     if cost is None:
         legacy = select_split_k_wgrad(
             wg_M=m,

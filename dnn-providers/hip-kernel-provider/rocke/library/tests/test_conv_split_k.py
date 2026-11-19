@@ -93,7 +93,11 @@ def _previous_rule(problem, arch, dtype, tile, gm, split_k):
         if gm == 1 or p is DEPTHWISE
     ],
 )
-def test_unfitted_arch_keeps_the_previous_rule(problem, dtype, tile, gm, split_k):
+def test_unfitted_arch_keeps_the_previous_rule_below_the_atomic_cap(
+    problem, dtype, tile, gm, split_k
+):
+    # None of these shapes reaches a 16-bit CK degree above
+    # ATOMIC_16BIT_MAX_SPLIT_K; the fallback tests below cover that region.
     got = _wgrad(problem, "gfx90a", dtype, tile, group_merge=gm, split_k=split_k)
     assert (got.split_k, got.two_stage) == _previous_rule(
         problem, "gfx90a", dtype, tile, gm, split_k
@@ -422,6 +426,18 @@ def test_dgrad_split_k_available_accepts_fp32_odd_channels():
     from kernels.common.conv_implicit_gemm_dgrad import dgrad_split_k_available
 
     assert dgrad_split_k_available(ODD_CPG, "fp32") == (True, "ok")
+
+
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+def test_dgrad_fallback_does_not_split_what_the_kernel_cannot_build(dtype):
+    # gfx942 has no fitted cost model, so this is the CK-formula fallback; an
+    # odd cpg cannot take a 16-bit split-K dX atomic, so it stays unsplit.
+    kw = dict(arch="gfx942", tile_m=64, tile_n=64, tile_k=32, block_size=256)
+    r = resolve_conv_split_k("dgrad", ODD_CPG, dtype=dtype, **kw)
+    assert (r.split_k, r.two_stage) == (1, False)
+    assert "even channels-per-group" in r.reason
+    # fp32 has no such limit and keeps its CK-formula degree.
+    assert resolve_conv_split_k("dgrad", ODD_CPG, dtype="fp32", **kw).split_k > 1
 
 
 # Long dY reduction (K=2048) into a small dX: the CK formula asks for 608.
