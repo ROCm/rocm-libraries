@@ -321,6 +321,15 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
         spec->trait.epilogue = "cshuffle";
         spec->block_size = 1024;
         break;
+    case 38:
+        spec->name = "universal_gemm_tile_copy";
+        spec->tile = TILE(64, 64, 32, 2, 2, 1, 16, 16, 16);
+        spec->trait.pipeline = "mem";
+        spec->trait.epilogue = "default";
+        spec->trait.pad_k = true;
+        spec->trait.preshuffle_b = true;
+        spec->block_size = 256;
+        break;
     default:
         return -1;
     }
