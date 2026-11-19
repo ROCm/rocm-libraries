@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -407,11 +408,60 @@ bool matches(float got, float want, float tolerance)
     return std::fabs(got - want) <= tolerance;
 }
 
+/// Bytes of NaN guard placed before and after the input in the guarded runs.
+constexpr size_t GUARD_BYTES = size_t{64} * 1024;
+
+/// The input the reduction reads, copied between two NaN guards (all-ones bytes: NaN in fp32,
+/// fp16 and bf16): a kernel that read outside the tensor and used the value would put NaN into
+/// outputs whose reference is finite.
+class GuardedInput
+{
+public:
+    GuardedInput(const void* device, size_t bytes)
+    {
+        EXPECT_EQ(hipMalloc(&_base, bytes + 2 * GUARD_BYTES), hipSuccess);
+        EXPECT_EQ(hipMemset(_base, 0xFF, bytes + 2 * GUARD_BYTES), hipSuccess);
+        EXPECT_EQ(
+            hipMemcpy(
+                static_cast<char*>(_base) + GUARD_BYTES, device, bytes, hipMemcpyDeviceToDevice),
+            hipSuccess);
+    }
+    GuardedInput(const GuardedInput&) = delete;
+    GuardedInput& operator=(const GuardedInput&) = delete;
+    ~GuardedInput()
+    {
+        if(_base != nullptr)
+        {
+            (void)hipFree(_base);
+        }
+    }
+    void* data() const
+    {
+        return static_cast<char*>(_base) + GUARD_BYTES;
+    }
+
+private:
+    void* _base = nullptr;
+};
+
+/// Bytes a strided tensor spans (its largest element offset plus one element).
+template <typename T>
+size_t spanBytes(const Tensor<T>& tensor)
+{
+    int64_t last = 0;
+    for(size_t i = 0; i < tensor.dims().size(); ++i)
+    {
+        last += (tensor.dims()[i] - 1) * tensor.strides()[i];
+    }
+    return static_cast<size_t>(last + 1) * sizeof(T);
+}
+
 template <typename T>
 void runCase(ConvShape shape,
              ConvDirection direction,
              Math math = Math::NATIVE,
-             bool infinities = false)
+             bool infinities = false,
+             bool guarded = false)
 {
     shape.dataType = dataTypeOf<T>();
     const auto spec = specFor(shape, direction);
@@ -492,10 +542,17 @@ void runCase(ConvShape shape,
         }
 
         written.fillWithSentinelValue();
+        Tensor<T>& read = forward ? x : y;
+        std::optional<GuardedInput> guard;
+        if(guarded)
+        {
+            guard.emplace(read.rawDeviceData(), spanBytes(read));
+        }
+        void* readData = guard.has_value() ? guard->data() : read.rawDeviceData();
         const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
-            hipdnnPluginDeviceBuffer_t{X_UID, x.rawDeviceData()},
+            hipdnnPluginDeviceBuffer_t{X_UID, forward ? readData : x.rawDeviceData()},
             hipdnnPluginDeviceBuffer_t{W_UID, w.rawDeviceData()},
-            hipdnnPluginDeviceBuffer_t{Y_UID, y.rawDeviceData()}};
+            hipdnnPluginDeviceBuffer_t{Y_UID, forward ? y.rawDeviceData() : readData}};
         const Handle handle;
         handler.launch(
             handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
@@ -564,6 +621,67 @@ TEST_P(TestGpuConvDirect, BFloat16)
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvDirect,
                          ::testing::Combine(::testing::ValuesIn(deviceCases()),
+                                            ::testing::Values(ConvDirection::FORWARD,
+                                                              ConvDirection::BACKWARD_DATA)),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name
+                                    + (std::get<1>(info.param) == ConvDirection::FORWARD ? "Fwd"
+                                                                                         : "Bwd");
+                         });
+
+/// The input between NaN guards, on graphs whose blocks reach the input's first and last rows
+/// and planes: the halo loads past the image (and a block's step after its last plane, which
+/// loads nothing) must take no value from outside the tensor. Depth is split over several blocks
+/// of a few planes each; infinities are planted at the input's first and middle elements.
+std::vector<DeviceCase> guardedCases()
+{
+    std::vector<DeviceCase> cases;
+    auto deep = dense(40, 24, {13, 6, 9}, {3, 3, 3}, {1, 1, 1}, true);
+    deep.n = 1;
+    cases.push_back({"Ndhwc3x3x3DepthBlocks", deep});
+    cases.push_back({"Ndhwc3x3x3Pad0", dense(16, 40, {7, 5, 6}, {3, 3, 3}, {0, 0, 0}, true)});
+    cases.push_back({"Ncdhw3x3x3", dense(16, 24, {6, 5, 7}, {3, 3, 3}, {1, 1, 1}, false)});
+    cases.push_back({"Nhwc3x3", dense(24, 40, {13, 11}, {3, 3}, {1, 1}, true)});
+    cases.push_back({"Nchw3x3Runs", dense(72, 40, {21, 40}, {3, 3}, {2, 2}, false)});
+    return cases;
+}
+
+class TestGpuConvDirectGuarded
+    : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
+{
+};
+
+TEST_P(TestGpuConvDirectGuarded, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, false, true);
+}
+
+TEST_P(TestGpuConvDirectGuarded, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<Half>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, false, true);
+}
+
+TEST_P(TestGpuConvDirectGuarded, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, false, true);
+}
+
+TEST_P(TestGpuConvDirectGuarded, BFloat16Infinities)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, true, true);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvDirectGuarded,
+                         ::testing::Combine(::testing::ValuesIn(guardedCases()),
                                             ::testing::Values(ConvDirection::FORWARD,
                                                               ConvDirection::BACKWARD_DATA)),
                          [](const auto& info) {

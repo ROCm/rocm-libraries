@@ -413,21 +413,25 @@ struct K2HaloLoad
                           : -1;
         }
     }
-    // Input plane id (in range), channel chunk c0.
+    // Input plane id (in range), channel chunk c0. The offsets are selected by masks, not
+    // branches: a branch on a lane-varying test splits the loads into paths, and the compiler's
+    // wait for them merges to vmcnt(0).
     __device__ void load(int id, int c0)
     {
         const int c = c0 + kv;
-        const bool cOk = c < cIn;
+        const unsigned live = 0u - static_cast<unsigned>(c < cIn);
         const int base = id * planeElems + c;
 #pragma unroll
         for(int p = 0; p < PASSES; ++p)
         {
-            const unsigned off
-                = cOk && hOff[p] >= 0
-                      ? static_cast<unsigned>((base + hOff[p]) * static_cast<int>(sizeof(T)))
-                      : K1_OUT_OF_RANGE;
-            r[p] = k1BufferLoad<Raw>(rsrc, off);
+            const unsigned m = live & ~static_cast<unsigned>(hOff[p] >> 31);
+            const unsigned in
+                = static_cast<unsigned>((base + hOff[p]) * static_cast<int>(sizeof(T)));
+            r[p] = k1BufferLoad<Raw>(rsrc, (in & m) | (K1_OUT_OF_RANGE & ~m));
         }
+        // Keeps the loads where they are issued: branch-free loads are otherwise sunk into the
+        // commit's per-pass branch, right before their LDS store, with nothing to hide them.
+        asm volatile("" ::: "memory");
     }
     // Pixel-major: buf[pix * LDC + c].
     template <int LDC>
@@ -846,6 +850,8 @@ __device__ inline void k2Drive(const K2Block& b,
 // TO: output type (T, or fp32 for the three-bf16 form whose operands are bf16).
 // SPLIT 1: split-C config; the block reduces chunks [z cps, (z+1) cps) and the epilogue writes fp32
 // partials to ws[z] (k2SplitReduce finishes). SPLIT 0 writes TO to y and needs splits = 1.
+// Always inlined into its kernel: the largest register-path tiles otherwise compile to a call
+// that spills its registers to scratch.
 template <class T,
           class Atom,
           int KD,
@@ -865,7 +871,7 @@ template <class T,
           int CF = 0,
           int CF_RUN = 2,
           int XPF = 0>
-__device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
+__device__ __attribute__((always_inline)) void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = Atom::WAVE;
     constexpr int THREADS = WM * WN * WAVE;
@@ -1100,10 +1106,13 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
                 }
 #endif
             };
+            // The tail loads the next chunk's first steps on every path: past the last chunk the
+            // cursor's chunk and tap are back at the first (in range, unused), and the same loads
+            // on every path keep the compiler's waits exact.
             auto loadB = [&](int q, Frag(&bf)[NB][FN]) {
                 if(q < NQ)
                     loadBAt(cc, dt, q, bf);
-                else if(more)
+                else
                     loadBAt(cnx, dtn, q - NQ, bf);
             };
             // Weight fragments PD steps ahead, in a ring indexed by compile-time step numbers. PD from
@@ -1532,7 +1541,7 @@ template <class T,
           int RING = 1,
           int PIPE = 0,
           int HALO = k2HaloMax((THREADS / NT) * TM, R, S)>
-__device__ void k2ConvFma(const K2Args& a CONV_EPI_FN_PARAM)
+__device__ __attribute__((always_inline)) void k2ConvFma(const K2Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int BN = NT * TN;
     constexpr int LDH = HALO + 1;
