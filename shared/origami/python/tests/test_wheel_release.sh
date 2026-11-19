@@ -32,6 +32,20 @@ pass "built ${whl}"
 listing="$("$python" -m zipfile -l "$whl")"
 echo "$listing"
 
+"$python" - "$whl" <<'PY'
+import sys
+import zipfile
+
+with zipfile.ZipFile(sys.argv[1]) as wheel:
+    unexpected = [
+        name for name in wheel.namelist()
+        if not (name.startswith("origami/") or name.split("/", 1)[0].endswith(".dist-info"))
+    ]
+if unexpected:
+    raise SystemExit("Unexpected wheel entries outside the package and metadata:\n" + "\n".join(unexpected))
+PY
+pass "all wheel entries belong to the package or distribution metadata"
+
 so_entries="$(echo "$listing" | awk '{print $1}' | grep -E '\.so($|\.)' || true)"
 n_so="$(printf '%s' "$so_entries" | grep -c . || true)"
 [ "$n_so" = "1" ] || fail "expected exactly one shared object in the wheel, found ${n_so}:

@@ -52,6 +52,7 @@ wheel.exclude = [
     "*.md",
     "*.sh",
     "tests/*",
+    "bin/origami/tests/**",
     "csrc/*",
     "**/__pycache__",
     "**/*.pyc",

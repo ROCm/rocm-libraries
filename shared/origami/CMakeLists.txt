@@ -8,7 +8,7 @@ project(Origami VERSION 1.0.0 LANGUAGES CXX)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 option(ORIGAMI_BUILD_FROM_SOURCE "Build liborigami from this tree instead of finding an installed one." ON)
-option(ORIGAMI_BUILD_SHARED_LIBS "Build shared libraries." ${PROJECT_IS_TOP_LEVEL})
+option(ORIGAMI_BUILD_SHARED_LIBS "Build shared libraries." ON)
 option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
 option(ORIGAMI_PYTHON_ENABLE_WARNINGS "Enable compiler warnings for Python extension build" OFF)
 option(ORIGAMI_BUILD_TESTING "Build tests." OFF)
