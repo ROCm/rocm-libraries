@@ -429,6 +429,9 @@ struct K2HaloLoad
                 = static_cast<unsigned>((base + hOff[p]) * static_cast<int>(sizeof(T)));
             r[p] = k1BufferLoad<Raw>(rsrc, (in & m) | (K1_OUT_OF_RANGE & ~m));
         }
+        // Keeps the loads here: unconditional loads are otherwise sunk into the commit's
+        // per-pass branch, right before their LDS store, and wait there with nothing to hide.
+        asm volatile("" ::: "memory");
     }
     // Pixel-major: buf[pix * LDC + c].
     template <int LDC>
