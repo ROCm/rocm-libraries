@@ -312,7 +312,7 @@ class TestFeatureRemap:
 
 class TestEncodingVersionAtInference:
     @staticmethod
-    def _dir(tmp_path, engine_name, version):
+    def _dir(tmp_path, engine_name, version, arch=None):
         import lightgbm as lgb
 
         from feature_engine import feature_engine_class
@@ -325,14 +325,32 @@ class TestEncodingVersionAtInference:
         spec = {"feature_engine": engine_name, "feature_names": names}
         if version is not None:
             spec["feature_encoding_version"] = version
+        if arch is not None:
+            spec["arch"] = arch
         (tmp_path / "feature_spec.json").write_text(json.dumps(spec))
         return tmp_path
 
     def test_a_matching_version_loads(self, tmp_path):
         from predict import Predictor
 
-        d = self._dir(tmp_path, "GemmUniversalVecFeatureEngine", 1)
+        d = self._dir(tmp_path, "GemmUniversalVecFeatureEngine", 2)
         assert Predictor(d) is not None
+
+    def test_a_version_1_model_for_another_arch_loads(self, tmp_path):
+        # Version 2 only re-encodes gfx1250-only traits (comp_async, comp_tdm,
+        # comp_tdm_v2, tdm), so a version-1 gfx950 model gets identical values.
+        from predict import Predictor
+
+        d = self._dir(tmp_path, "GemmUniversalVecFeatureEngine", 1, arch="gfx950")
+        assert Predictor(d) is not None
+
+    @pytest.mark.parametrize("arch", ["gfx1250", None])
+    def test_a_version_1_model_for_gfx1250_or_no_arch_is_refused(self, tmp_path, arch):
+        from predict import Predictor
+
+        d = self._dir(tmp_path, "GemmUniversalVecFeatureEngine", 1, arch=arch)
+        with pytest.raises(ValueError, match="trained at version 1"):
+            Predictor(d)
 
     def test_a_vec_model_with_no_version_is_refused(self, tmp_path):
         from predict import Predictor
