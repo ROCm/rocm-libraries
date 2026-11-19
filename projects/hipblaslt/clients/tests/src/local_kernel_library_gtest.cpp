@@ -564,7 +564,7 @@ TEST(LocalKernelLibrary, smoke_FindAllAppliesSoftwarePredicate)
     auto plain                                       = makeSolution(problem);
     auto dynamicQueue                                = makeSolution(problem);
     dynamicQueue->sizeMapping.tileProcessingStrategy = TileProcessingStrategy::StreamK;
-    dynamicQueue->sizeMapping.workAssignment         = WorkAssignment::DynamicWorkQueue;
+    dynamicQueue->sizeMapping.workAssignment         = StreamK::WorkAssignment::DynamicWorkQueue;
     library.addSolutions({plain, dynamicQueue});
 
     EXPECT_EQ(library.findAll(problem, gpu, SolutionLibrarySearchType::DEFAULT),

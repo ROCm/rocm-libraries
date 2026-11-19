@@ -471,7 +471,7 @@ TEST(SolutionState, RecordFromDerivedState)
     EXPECT_EQ(size.staggerU, 0);
     EXPECT_EQ(size.magicDivAlg, 1);
     EXPECT_EQ(size.tileProcessingStrategy, TileProcessingStrategy::None);
-    EXPECT_EQ(size.workAssignment, WorkAssignment::StaticGrid);
+    EXPECT_EQ(size.workAssignment, StreamK::WorkAssignment::StaticGrid);
     EXPECT_EQ(size.globalAccumulation, 0);
     EXPECT_EQ(size.expertSchedulingMode, 0);
     EXPECT_FALSE(size.OneLDSBuffer);
@@ -578,7 +578,7 @@ TEST(SolutionState, ClusterStreamKAcceptsPersistentLoopArgsVersion2)
     options.persistentLoopArgsVersion = 2;
     auto solution                     = build(options);
     EXPECT_EQ(solution->sizeMapping.tileProcessingStrategy, TileProcessingStrategy::StreamK);
-    EXPECT_EQ(solution->sizeMapping.workAssignment, WorkAssignment::StaticGrid);
+    EXPECT_EQ(solution->sizeMapping.workAssignment, StreamK::WorkAssignment::StaticGrid);
     EXPECT_EQ(solution->sizeMapping.clusterDim, TensileLite::dim3(2, 1, 1));
     EXPECT_EQ(solution->internalArgsSupport.persistentLoopArgsVersion, 2);
     EXPECT_EQ(solution->internalArgsSupport.version, 3);
@@ -592,7 +592,7 @@ TEST(SolutionState, DataParallelAcceptsPersistentLoopArgsVersion1)
     options.persistentLoopArgsVersion = 1;
     auto solution                     = build(options);
     EXPECT_EQ(solution->sizeMapping.tileProcessingStrategy, TileProcessingStrategy::DataParallel);
-    EXPECT_EQ(solution->sizeMapping.workAssignment, WorkAssignment::StaticGrid);
+    EXPECT_EQ(solution->sizeMapping.workAssignment, StreamK::WorkAssignment::StaticGrid);
     EXPECT_EQ(solution->internalArgsSupport.persistentLoopArgsVersion, 1);
     EXPECT_EQ(solution->internalArgsSupport.version, 3);
 }

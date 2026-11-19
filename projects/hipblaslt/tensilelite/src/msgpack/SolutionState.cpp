@@ -586,8 +586,8 @@ namespace TensileLite
         // Tensile/ExecutionPolicy.py.
         struct ExecutionPolicy
         {
-            TileProcessingStrategy strategy   = TileProcessingStrategy::None;
-            WorkAssignment         assignment = WorkAssignment::StaticGrid;
+            TileProcessingStrategy  strategy   = TileProcessingStrategy::None;
+            StreamK::WorkAssignment assignment = StreamK::WorkAssignment::StaticGrid;
 
             bool persistent() const
             {
@@ -633,9 +633,9 @@ namespace TensileLite
                     "WorkAssignment must be StaticGrid, DynamicWorkQueue, or Hybrid");
             }
             if(policy.strategy == TileProcessingStrategy::None)
-                policy.assignment = WorkAssignment::StaticGrid;
+                policy.assignment = StreamK::WorkAssignment::StaticGrid;
             else if(policy.persistentDataParallel()
-                    && policy.assignment != WorkAssignment::StaticGrid)
+                    && policy.assignment != StreamK::WorkAssignment::StaticGrid)
                 throw std::runtime_error(std::string(toString(policy.strategy))
                                          + " supports WorkAssignment=StaticGrid only");
             if(selectors.persistentLoop

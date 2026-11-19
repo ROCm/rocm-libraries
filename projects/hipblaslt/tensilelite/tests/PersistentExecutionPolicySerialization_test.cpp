@@ -261,9 +261,9 @@ namespace
 
     TEST(PersistentExecutionPolicyTest, NonPersistentAssignmentsDoNotActivateSchedulingOrDataParallelArgsV1)
     {
-        for(auto assignment : {WorkAssignment::StaticGrid,
-                               WorkAssignment::DynamicWorkQueue,
-                               WorkAssignment::Hybrid})
+        for(auto assignment : {StreamK::WorkAssignment::StaticGrid,
+                               StreamK::WorkAssignment::DynamicWorkQueue,
+                               StreamK::WorkAssignment::Hybrid})
         {
             ContractionSolution solution;
             solution.sizeMapping.workAssignment = assignment;

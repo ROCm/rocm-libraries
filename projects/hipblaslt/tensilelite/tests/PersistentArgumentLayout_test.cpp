@@ -35,7 +35,7 @@ namespace
     {
         solution.kernelName = "prebuilt_data_parallel_symbol";
         solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
-        solution.sizeMapping.workAssignment = WorkAssignment::StaticGrid;
+        solution.sizeMapping.workAssignment = StreamK::WorkAssignment::StaticGrid;
         solution.sizeMapping.macroTile = TensileLite::dim3(128, 128, 1);
         solution.sizeMapping.depthU = 64;
         solution.sizeMapping.workGroupSize = TensileLite::dim3(256, 1, 1);

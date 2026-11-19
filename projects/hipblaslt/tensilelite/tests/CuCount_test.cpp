@@ -240,7 +240,7 @@ TEST_F(CuCountFallbackTest, CpxAndSpxIndependent)
 TEST(PersistentDataParallelTest, UsesHardwareCuCount)
 {
     ContractionSolution solution;
-    solution.sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
+    solution.sizeMapping.workAssignment = TensileLite::StreamK::WorkAssignment::StaticGrid;
     solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::DataParallel;
     solution.sizeMapping.macroTile             = TensileLite::dim3(128, 128, 1);
     solution.sizeMapping.depthU                = 64;
@@ -259,7 +259,7 @@ TEST(PersistentDataParallelTest, UsesHardwareCuCount)
 TEST(PersistentDataParallelTest, FixedGridOverridesHardwareCuCount)
 {
     ContractionSolution solution;
-    solution.sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
+    solution.sizeMapping.workAssignment = TensileLite::StreamK::WorkAssignment::StaticGrid;
     solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::DataParallel;
     solution.sizeMapping.macroTile             = TensileLite::dim3(128, 128, 1);
     solution.sizeMapping.depthU                = 64;
@@ -278,7 +278,7 @@ TEST(PersistentDataParallelTest, FixedGridOverridesHardwareCuCount)
 TEST(PersistentDataParallelTest, DoesNotRequestPartialWorkspace)
 {
     ContractionSolution solution;
-    solution.sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
+    solution.sizeMapping.workAssignment = TensileLite::StreamK::WorkAssignment::StaticGrid;
     solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::DataParallel;
     solution.sizeMapping.streamKAtomic         = 0;
     solution.sizeMapping.macroTile             = TensileLite::dim3(256, 256, 1);
@@ -356,7 +356,7 @@ namespace
     void initStreamK5Solution(ContractionSolution& solution)
     {
         solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
-        solution.sizeMapping.workAssignment = TensileLite::WorkAssignment::Hybrid;
+        solution.sizeMapping.workAssignment = TensileLite::StreamK::WorkAssignment::Hybrid;
         solution.sizeMapping.macroTile         = TensileLite::dim3(128, 128, 1);
         solution.sizeMapping.depthU            = 64;
         solution.sizeMapping.workGroupSize     = TensileLite::dim3(256, 1, 1);
@@ -393,7 +393,7 @@ namespace
                                    size_t               depthU)
     {
         solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
-        solution.sizeMapping.workAssignment = TensileLite::WorkAssignment::Hybrid;
+        solution.sizeMapping.workAssignment = TensileLite::StreamK::WorkAssignment::Hybrid;
         solution.sizeMapping.macroTile         = macroTile;
         solution.sizeMapping.depthU            = depthU;
         solution.sizeMapping.workGroupSize     = TensileLite::dim3(16, 16, 1);
@@ -420,7 +420,7 @@ namespace
         pack.tiles        = problem.getNumTiles(solution.sizeMapping, 1);
         pack.itersPerTile = std::max(size_t{1}, problem.getItersPerTile(solution.sizeMapping));
 
-        if(solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::Hybrid)
+        if(solution.sizeMapping.workAssignment == TensileLite::StreamK::WorkAssignment::Hybrid)
         {
             pack.effectiveDynamic = solution.streamK5EffectiveDynamic(problem, hardware);
             pack.reduction        = pack.effectiveDynamic ? origami::reduction_t::tree
@@ -462,7 +462,7 @@ namespace
     void initEquality512Solution(ContractionSolution& solution, int streamK)
     {
         solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
-        solution.sizeMapping.workAssignment = (streamK == 4 ? TensileLite::WorkAssignment::DynamicWorkQueue : streamK == 5 ? TensileLite::WorkAssignment::Hybrid : TensileLite::WorkAssignment::StaticGrid);
+        solution.sizeMapping.workAssignment = (streamK == 4 ? TensileLite::StreamK::WorkAssignment::DynamicWorkQueue : streamK == 5 ? TensileLite::StreamK::WorkAssignment::Hybrid : TensileLite::StreamK::WorkAssignment::StaticGrid);
         solution.sizeMapping.macroTile          = TensileLite::dim3(64, 64, 1);
         solution.sizeMapping.depthU             = 16;
         solution.sizeMapping.workGroupSize      = TensileLite::dim3(256, 1, 1);
@@ -621,7 +621,7 @@ TEST(StreamKSmCountTargetTest, SmCountTargetChangesReductionAndGrid)
     // streamK=3 on the gfx950 analytical device (256 CUs), k_split_aware selector.
     StreamK5AnalyticalEnv env;
     env.solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
-    env.solution.sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
+    env.solution.sizeMapping.workAssignment = TensileLite::StreamK::WorkAssignment::StaticGrid;
     env.device.persistentDynamicGrid         = static_cast<int>(origami::grid_selection_t::k_split_aware);
 
     // Make smCountTarget the sole grid budget source (AMDGPU defaults, explicit).
@@ -1154,7 +1154,7 @@ TEST(StreamKFlagBound, DynamicQueueGridStopsBeforeTheNextBlock)
 {
     StreamK5AnalyticalEnv env;
     env.solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
-    env.solution.sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
+    env.solution.sizeMapping.workAssignment = TensileLite::StreamK::WorkAssignment::DynamicWorkQueue;
     pinGridToWholeFlagRegion(env);
     auto problem = makeFlagBoundProblem();
 
@@ -1167,7 +1167,7 @@ TEST(StreamKFlagBound, StaticGridKeepsTheWholeBlock)
     // work-queue prefix would cost it grid it is entitled to.
     StreamK5AnalyticalEnv env;
     env.solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
-    env.solution.sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
+    env.solution.sizeMapping.workAssignment = TensileLite::StreamK::WorkAssignment::StaticGrid;
     pinGridToWholeFlagRegion(env);
     auto problem = makeFlagBoundProblem();
 
@@ -1345,7 +1345,7 @@ TEST_P(DataParallelLaunchLimitsTest, PackedGridFitsHipWorkItemLimit)
     // geometry. The additional workgroup sizes check the HIP limit's scaling.
     initBenchStreamK5Solution(solution, TensileLite::dim3(32, 32, 1), 16);
     solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
-    solution.sizeMapping.workAssignment = WorkAssignment::StaticGrid;
+    solution.sizeMapping.workAssignment = StreamK::WorkAssignment::StaticGrid;
     solution.sizeMapping.workGroupSize = param.workGroup;
     solution.sizeMapping.matrixInstruction = {16, 16, 4, 1};
     solution.sizeMapping.workGroupMapping = 1;
