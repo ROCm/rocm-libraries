@@ -250,7 +250,8 @@ def _parseInstruction(lineNo: int, text: str, symbols: Dict[str, Optional[int]],
     if mnemonic.startswith(_OTHER_PREFIXES):
         return op
     if not (mnemonic.startswith("s_") or mnemonic.startswith("v_")):
-        raise SgprHazardError(f"unknown instruction {text!r}")
+        raise SgprHazardError(f"unknown instruction {text!r}: if it has no SGPR operands, add its "
+                              "prefix to _OTHER_PREFIXES in tensilelite/SgprHazards.py")
 
     operands = _splitOperands(operandText)
     if mnemonic == "s_branch" or _COND_BRANCH.match(mnemonic):
@@ -284,7 +285,8 @@ def _parseInstruction(lineNo: int, text: str, symbols: Dict[str, Optional[int]],
         elif _SALU_DST.match(mnemonic) or mnemonic == "s_call_b64":
             hasDst = True
         elif hasSgpr:
-            raise SgprHazardError(f"unknown SALU instruction {mnemonic!r} with SGPR operands")
+            raise SgprHazardError(f"unknown SALU instruction {mnemonic!r} with SGPR operands: add it "
+                                  "to _SALU_DST or _SALU_NO_DST in tensilelite/SgprHazards.py")
         else:
             hasDst = False
         for i, r in enumerate(regs):
@@ -309,7 +311,8 @@ def _parseInstruction(lineNo: int, text: str, symbols: Dict[str, Optional[int]],
     else:
         nDst = 1  # VGPR destination
         if regs and regs[0] is not None:
-            raise SgprHazardError(f"unknown VALU instruction {mnemonic!r} writing an SGPR")
+            raise SgprHazardError(f"unknown VALU instruction {mnemonic!r} writing an SGPR: add it to "
+                                  "_VALU_SDST1 or _VALU_SDST2 in tensilelite/SgprHazards.py")
         if _VALU_SDST2.match(mnemonic) and len(regs) > 1 and regs[1] is not None:
             op.defs.append(regs[1])
             nDst = 2
@@ -613,6 +616,13 @@ def _mergeWait(raw: str, w: int) -> str:
             code = field_.sub(f"depctr_{name}(0)", code) if field_.search(code) else \
                 f"{code} depctr_{name}(0)"
     return f"{code} {sep}{comment}" if sep else code
+
+
+def withSgprHazardWaits(asm: str, archCaps) -> str:
+    """*asm* with the waits added when rocisa reports the hazard for the target, else *asm*."""
+    if not archCaps["HasVALUReadSGPRHazard"]:
+        return asm
+    return insertSgprHazardWaits(asm)[0]
 
 
 def insertSgprHazardWaits(asm: str) -> Tuple[str, int]:
