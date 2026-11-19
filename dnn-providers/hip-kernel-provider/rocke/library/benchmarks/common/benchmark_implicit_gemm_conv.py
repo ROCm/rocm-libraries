@@ -608,9 +608,24 @@ def _rank_results(results: list, what: str = "") -> "tuple[list, list]":
     return rank_verified(results, lambda r: r.tflops, lambda r: r.passed, what)
 
 
-# Byte the dX buffer is filled with before a dx_interior verify launch: bf16
-# 0x7F7F (3.39e38), so an untouched voxel is told from a written one.
+# Byte the dX buffer is filled with before a dx_interior verify launch (every
+# byte of it); an untouched voxel is told from a written one bytewise
+# (:func:`_dxi_shell_bad`), so it holds for any dtype.
 _DXI_SENTINEL_BYTE = 0x7F
+
+
+def _dxi_shell_bad(out_cpu, halo, zero: bool) -> int:
+    """Shell voxels (``halo`` mask) of a ``dx_interior`` launch's output that
+    are wrong: not exactly 0 (zero-fill), or (skip) not still holding the
+    sentinel -- compared byte by byte, every byte ``_DXI_SENTINEL_BYTE``, so it
+    holds in any dtype (the pattern is NaN in fp16)."""
+    import torch
+
+    if zero:
+        return int((out_cpu.float()[halo] != 0).sum())
+    eb = out_cpu.element_size()
+    raw = out_cpu.contiguous().view(torch.uint8).reshape(*out_cpu.shape, eb)
+    return int((raw != _DXI_SENTINEL_BYTE).any(-1)[halo].sum())
 
 
 def _verify_interior(
@@ -651,12 +666,7 @@ def _verify_interior(
     ref_scale = ref.abs().max().clamp(min=1.0)
     diff = (out - ref).abs()[comp]
     rel_err = float(diff.max() / ref_scale)
-    sentinel = float(
-        torch.tensor([0x7F7F], dtype=torch.int16).view(torch.bfloat16).float()
-    )
-    hv = out[halo]
-    want = 0.0 if zero else sentinel
-    n_bad = int((hv != want).sum())
+    n_bad = _dxi_shell_bad(out_cpu, halo, zero)
     ok = rel_err < 5e-2 and n_bad == 0
     status = (
         f"PASS (rel_err={rel_err:.2e}, max_abs={float(diff.max()):.2e}; "
@@ -5545,20 +5555,38 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         # reported and not timed, so it can never rank; so is
                         # one whose launch fails.
                         try:
-                            stopped, passed = _verify_kernel(
-                                rt=rt,
-                                launch_fn=run,
-                                out_dev=D_dev,
-                                out_t=D_t,
-                                zero_init_out=True,
-                                ref_out=ref_out,
-                                kernel_name=label,
-                                dump_fail=args.dump_fail,
-                                u8=_u8,
-                                arch=arch,
-                                compute_dtype=case_dtype,
-                                ref_floor=conv_fill.ref_floor(direction),
-                            )
+                            if direction == "dgrad" and getattr(
+                                ident, "dx_interior", 0
+                            ):
+                                # an interior launch leaves (or zeroes) the
+                                # shell: checked as the fast-rank path does
+                                passed = _verify_interior(
+                                    rt=rt,
+                                    run=run,
+                                    ident=ident,
+                                    problem=problem,
+                                    out_dev=D_dev,
+                                    out_t=D_t,
+                                    ref_out=ref_out,
+                                    label=label,
+                                    u8=_u8,
+                                )
+                                stopped = False
+                            else:
+                                stopped, passed = _verify_kernel(
+                                    rt=rt,
+                                    launch_fn=run,
+                                    out_dev=D_dev,
+                                    out_t=D_t,
+                                    zero_init_out=True,
+                                    ref_out=ref_out,
+                                    kernel_name=label,
+                                    dump_fail=args.dump_fail,
+                                    u8=_u8,
+                                    arch=arch,
+                                    compute_dtype=case_dtype,
+                                    ref_floor=conv_fill.ref_floor(direction),
+                                )
                         except (HipError, RuntimeError) as e:
                             print(f"  verify {label}: FAIL({e})", flush=True)
                             # A launch that raised can leave work queued
