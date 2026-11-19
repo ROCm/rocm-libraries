@@ -212,6 +212,32 @@ static bool hasAiterCompatibleRaggedAddressing(
     return true;
 }
 
+// The gfx950 bf16 head-dim-256 kernels index K/V by the query head, so they compute only
+// equal Q and KV head counts. AITER sends GQA/MQA for them to CK.
+//
+// Known limitation, not declined: these kernels round Q * scale * log2(e) to bf16 before
+// Q*K^T, where the hd128 and hd192x128 kernels keep that factor in fp32, so their error
+// grows with the attention scale. At 1/sqrt(256) they meet the bf16 tolerance (1e-2); at
+// scale 1.0, which a graph gets when it sets no scale, a group-mode case reaches an error
+// of about 0.016. The limit is in AITER's kernels, which AITER launches at any scale too, so
+// the engine adds no precision bound on the scale for them.
+static bool kernelServesHeadCounts(const std::string& archId,
+                                   const std::string& dataTypeId,
+                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k)
+{
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
+    const int64_t qHeads = q.dims()->Get(1);
+    const int64_t kvHeads = k.dims()->Get(1);
+    HIP_KERNEL_RETURN_FALSE_IF(
+        archId == "gfx950" && dataTypeId == "bf16" && q.dims()->Get(3) == 256 && qHeads != kvHeads,
+        "gfx950 bf16 head dim 256 kernels do not support GQA/MQA (q heads: "
+            + std::to_string(qHeads) + ", kv heads: " + std::to_string(kvHeads) + ")");
+    return true;
+}
+
 static bool isMi308Device(hipStream_t stream)
 {
     // Seeded, not left indeterminate: a concrete stream's hipStreamGetDevice query can
@@ -330,21 +356,132 @@ static bool wouldFwdByteStridesFitUint32(
     return ok;
 }
 
+bool fwdKvRowExtentsFitU32(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+                           const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+                           int64_t inputBytes)
+{
+    constexpr auto K_U32_MAX_AS_I64 = static_cast<int64_t>(UINT32_MAX);
+    const int64_t seqLenKv = k.dims()->Get(SDPA_SEQ_AXIS);
+
+    auto extentFits
+        = [&](const char* name, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& t) {
+              const int64_t seqStride = t.strides()->Get(SDPA_SEQ_AXIS);
+              // seqLenKv * seqStride * inputBytes <= UINT32_MAX, evaluated by division so
+              // no product is formed.
+              const bool fits = seqLenKv >= 0 && seqStride >= 0 && inputBytes > 0
+                                && (seqLenKv == 0 || seqStride == 0
+                                    || seqStride <= K_U32_MAX_AS_I64 / inputBytes / seqLenKv);
+              if(!fits)
+              {
+                  HIPDNN_PLUGIN_LOG_INFO("SDPA: per-head row byte extent reaches 2^32 (tensor="
+                                         << name << ", seqlen_kv=" << seqLenKv << ", seq_stride="
+                                         << seqStride << ", elementBytes=" << inputBytes << ")");
+              }
+              return fits;
+          };
+
+    bool ok = true;
+    ok &= extentFits("k", k);
+    ok &= extentFits("v", v);
+    return ok;
+}
+
+// Validates the optional stats (LSE) output tensor that the kernel writes as dense
+// FP32 [B, H, Sq]. Q must already be known to be rank 4.
+static bool
+    isSupportedStatsTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& stats,
+                           const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
+    HIP_KERNEL_RETURN_FALSE_IF(stats.virtual_(), "stats tensor must not be virtual");
+    HIP_KERNEL_RETURN_FALSE_IF(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&stats),
+                               "stats tensor must not be pass-by-value");
+
+    HIP_KERNEL_RETURN_FALSE_IF(stats.data_type() != DataType::FLOAT,
+                               "stats tensor datatype must be FP32 (Actual type: "
+                                   + EnumNameDataType(stats.data_type()) + ")");
+
+    const auto statsRank = stats.dims()->size();
+    HIP_KERNEL_RETURN_FALSE_IF(
+        statsRank != 3 && statsRank != 4,
+        "stats tensor must be rank 3 [B,H,Sq] or rank 4 [B,H,Sq,1] (Actual rank: "
+            + std::to_string(statsRank) + ")");
+
+    if(statsRank == 4)
+    {
+        HIP_KERNEL_RETURN_FALSE_IF(stats.dims()->Get(3) != 1,
+                                   "stats tensor rank-4 last dim must be 1 (Actual: "
+                                       + std::to_string(stats.dims()->Get(3)) + ")");
+    }
+
+    HIP_KERNEL_RETURN_FALSE_IF(stats.dims()->Get(0) != q.dims()->Get(0)
+                                   || stats.dims()->Get(1) != q.dims()->Get(1)
+                                   || stats.dims()->Get(2) != q.dims()->Get(2),
+                               "stats tensor shape [B,H,Sq] must match Q tensor");
+    return true;
+}
+
+// Checks every byte offset the kernel forms in 32 bits: the per-field strides,
+// the Ts product and, for hd192x128, the K/V per-head row extent. `inputBytes`
+// is the resolved Q/K/V element size and `tsQo` the matched row's Q-tile size.
+static bool fwdByteRangesFitU32(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                                const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+                                const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+                                const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o,
+                                const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* stats,
+                                int64_t inputBytes,
+                                int64_t tsQo)
+{
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
+    HIP_KERNEL_RETURN_FALSE_IF(!wouldFwdByteStridesFitUint32(q, k, v, o, stats, inputBytes),
+                               "Forward byte strides overflow uint32_t kernarg fields");
+
+    // s_Ts = tileSizeQo * qStrideRow * inBytesPerElement (SdpaFwdArgsBuilder) is
+    // the one forward kernarg that is a product rather than a single stride, and
+    // it is formed in unsigned int, so it wraps for Q sequence strides the
+    // per-field check above accepts. The resolved row's ts_qo folds into the
+    // element size so the product is never formed outside the predicate.
+    // Mirrors the backward Ts check.
+    HIP_KERNEL_RETURN_FALSE_IF(!plan_utils::byteStrideFitsU32(
+                                   "Ts (ts_qo * stride_q)", q.strides()->Get(2), inputBytes * tsQo),
+                               "Forward Ts product overflows the uint32_t s_Ts kernarg field");
+
+    // The hd192x128 kernels on both architectures address each K and V head
+    // through a 32-bit buffer offset, so a head whose rows span 2^32 bytes or
+    // more is out of their reach even when every per-field stride fits. Ports
+    // AITER's can_impl_fmha_v3_fwd rule (aiter/ops/mha.py, batch and varlen).
+    const bool isHd192x128 = q.dims()->Get(3) == 192 && v.dims()->Get(3) == 128;
+    HIP_KERNEL_RETURN_FALSE_IF(isHd192x128 && !fwdKvRowExtentsFitU32(k, v, inputBytes),
+                               "hd192x128 K or V per-head row extent reaches 2^32 bytes");
+    return true;
+}
+
 unsigned int SdpaFwdPlanBuilder::maxThreadsPerBlock(const fmha_v3_fwdConfig& config) const
 {
     return static_cast<unsigned int>(config.max_flat_workgroup_size);
 }
 
+unsigned int fwdConfigBlockDimX(const fmha_v3_fwdConfig& config)
+{
+    return fwdBlockDimX(config.arch,
+                        static_cast<unsigned int>(config.hdim_q),
+                        static_cast<unsigned int>(config.hdim_v),
+                        config.dtype == "bf16",
+                        static_cast<BatchMode>(config.mode) == BatchMode::GROUP);
+}
+
 // A kernel launched with more threads per block than its code object's
-// max_flat_workgroup_size fails at hipModuleLaunchKernel. The block comes from
-// the row's head dims, which equal the graph's (the row lookup matches them
-// exactly), so it is the block computeFwdLaunchParams launches with in batch
-// and group mode alike.
+// max_flat_workgroup_size fails at hipModuleLaunchKernel.
 std::optional<std::string>
     SdpaFwdPlanBuilder::launchLimitViolation(const fmha_v3_fwdConfig& config) const
 {
-    const unsigned int blockDimX = fwdBlockDimX(static_cast<unsigned int>(config.hdim_q),
-                                                static_cast<unsigned int>(config.hdim_v));
+    const unsigned int blockDimX = fwdConfigBlockDimX(config);
     const unsigned int maxThreads = maxThreadsPerBlock(config);
     if(blockDimX <= maxThreads)
     {
@@ -571,34 +708,10 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                    "stats_tensor_uid not found in tensor map");
 
         statsTensor = statsIt->second;
-
-        HIP_KERNEL_RETURN_FALSE_IF(statsTensor->virtual_(), "stats tensor must not be virtual");
-        HIP_KERNEL_RETURN_FALSE_IF(
-            hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(statsTensor),
-            "stats tensor must not be pass-by-value");
-
-        HIP_KERNEL_RETURN_FALSE_IF(statsTensor->data_type() != DataType::FLOAT,
-                                   "stats tensor datatype must be FP32 (Actual type: "
-                                       + EnumNameDataType(statsTensor->data_type()) + ")");
-
-        const auto statsRank = statsTensor->dims()->size();
-        HIP_KERNEL_RETURN_FALSE_IF(
-            statsRank != 3 && statsRank != 4,
-            "stats tensor must be rank 3 [B,H,Sq] or rank 4 [B,H,Sq,1] (Actual rank: "
-                + std::to_string(statsRank) + ")");
-
-        if(statsRank == 4)
+        if(!isSupportedStatsTensor(*statsTensor, *qTensor))
         {
-            HIP_KERNEL_RETURN_FALSE_IF(statsTensor->dims()->Get(3) != 1,
-                                       "stats tensor rank-4 last dim must be 1 (Actual: "
-                                           + std::to_string(statsTensor->dims()->Get(3)) + ")");
+            return false;
         }
-
-        // Shape comparison is safe now — Q rank-4 is validated above.
-        HIP_KERNEL_RETURN_FALSE_IF(statsTensor->dims()->Get(0) != qTensor->dims()->Get(0)
-                                       || statsTensor->dims()->Get(1) != qTensor->dims()->Get(1)
-                                       || statsTensor->dims()->Get(2) != qTensor->dims()->Get(2),
-                                   "stats tensor shape [B,H,Sq] must match Q tensor");
     }
 
     HIP_KERNEL_RETURN_FALSE_IF(qTensor->data_type() != kTensor->data_type()
@@ -616,7 +729,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
     // the gfx942 fp8 forward kernels consume, so it is declined here with a specific
     // message rather than the generic "unsupported datatype" one below. Inputs are
     // proven same-type above, so checking q is sufficient. Remove once gfx950 OCP
-    // fp8 forward kernels are wired in.
+    // fp8 forward kernels are wired in, and port with them AITER's power-of-two GQA
+    // ratio requirement for fp8 (can_impl_fmha_v3_fwd in aiter/ops/mha.py), which the
+    // gfx942 fp8 objects do not need because they divide by the ratio in full.
     HIP_KERNEL_RETURN_FALSE_IF(
         qTensor->data_type() == DataType::FP8_E4M3,
         "gfx942 fp8 SDPA requires FP8_E4M3_FNUZ inputs; OCP FP8_E4M3 (gfx950/MI350) is a "
@@ -629,21 +744,25 @@ bool SdpaFwdPlanBuilder::isApplicable(
             + ") and input tensors must have datatype BFLOAT16 or FP8_E4M3_FNUZ (Actual type: "
             + EnumNameDataType(qTensor->data_type()) + ")");
 
-    // mma_core_mode is the MMA operand precision. The bf16 kernels run 16-bit MFMA on
-    // the graph's own bf16 inputs, so UNSET (the provider's choice), HALF and BFLOAT16
-    // all describe them. HALF is accepted on bf16 graphs because the cuDNN frontend,
-    // and hipDNN's cuDNN-compatibility shim, write HALF into Graph::sdpa() whenever
-    // the caller leaves the field unset. The fp8 kernels run fp8 MFMA, which no 16-bit
-    // mode describes, so they still require UNSET. An allow-list, so an enum value
-    // added later declines until judged.
+    // mma_core_mode selects the MMA path of the attention matmuls (cuDNN semantics); it is
+    // not the element or the accumulator type. The bf16 kernels run the 16-bit path, which
+    // cuDNN's Graph::sdpa() and hipDNN's cuDNN shim write as HALF for fp16 and bf16 alike;
+    // BFLOAT16 is accepted as its equivalent. The fp8 kernels run the FP8 path, which cuDNN
+    // spells FP8_E4M3 (the sdpa_fp8() default) or FP8_E5M2 and treats as one path. The mode
+    // does not name the input encoding or the precision: that comes from the tensor types,
+    // checked above (FP8_E4M3_FNUZ only). UNSET leaves the choice to the engine. An
+    // allow-list, so an enum value added later declines until judged.
     const auto mmaCoreMode = attrs.mma_core_mode();
     const bool isSixteenBitMmaMode
         = mmaCoreMode == DataType::HALF || mmaCoreMode == DataType::BFLOAT16;
     const bool mmaCoreModeSupported
-        = mmaCoreMode == DataType::UNSET || (dataTypeId == "bf16" && isSixteenBitMmaMode);
+        = mmaCoreMode == DataType::UNSET || (dataTypeId == "bf16" && isSixteenBitMmaMode)
+          || (dataTypeId == "fp8bf16"
+              && (mmaCoreMode == DataType::FP8_E4M3 || mmaCoreMode == DataType::FP8_E5M2));
     HIP_KERNEL_RETURN_FALSE_IF(
         !mmaCoreModeSupported,
-        "mma_core_mode must be UNSET, or HALF/BFLOAT16 for bf16 inputs (Actual value: "
+        "mma_core_mode must be UNSET, or HALF or BFLOAT16 for bf16 inputs, or FP8_E4M3 or "
+        "FP8_E5M2 for FP8_E4M3_FNUZ inputs (Actual value: "
             + EnumNameDataType(mmaCoreMode) + ", inputs: " + EnumNameDataType(qTensor->data_type())
             + ")");
 
@@ -725,25 +844,23 @@ bool SdpaFwdPlanBuilder::isApplicable(
             + std::to_string(static_cast<int>(getBf16ConvertMode(attrs, dataTypeId)))
             + " batch = " + std::to_string(static_cast<int>(batchMode)));
 
+    if(!kernelServesHeadCounts(deviceString, dataTypeId, *qTensor, *kTensor))
+    {
+        return false;
+    }
+
     // Q/K/V byte strides and the Ts product are scaled by the resolved input
     // size, which the datatype checks above have narrowed to bf16 or fp8bf16.
-    const int64_t inputBytes = fwdInputBytesPerElement(dataTypeId);
-
-    HIP_KERNEL_RETURN_FALSE_IF(!wouldFwdByteStridesFitUint32(
-                                   *qTensor, *kTensor, *vTensor, *oTensor, statsTensor, inputBytes),
-                               "Forward byte strides overflow uint32_t kernarg fields");
-
-    // s_Ts = tileSizeQo * qStrideRow * inBytesPerElement (SdpaFwdArgsBuilder) is
-    // the one forward kernarg that is a product rather than a single stride, and
-    // it is formed in unsigned int, so it wraps for Q sequence strides the
-    // per-field check above accepts. The resolved row's ts_qo folds into the
-    // element size so the product is never formed outside the predicate.
-    // Mirrors the backward Ts check.
-    HIP_KERNEL_RETURN_FALSE_IF(
-        !plan_utils::byteStrideFitsU32("Ts (ts_qo * stride_q)",
-                                       qTensor->strides()->Get(2),
-                                       inputBytes * cfg_fmha_fwd.at(key).ts_qo),
-        "Forward Ts product overflows the uint32_t s_Ts kernarg field");
+    if(!fwdByteRangesFitU32(*qTensor,
+                            *kTensor,
+                            *vTensor,
+                            *oTensor,
+                            statsTensor,
+                            fwdInputBytesPerElement(dataTypeId),
+                            cfg_fmha_fwd.at(key).ts_qo))
+    {
+        return false;
+    }
 
     // Decline a kernel that cannot take the block it would be launched with, so
     // the graph falls through to another engine instead of failing at launch.
