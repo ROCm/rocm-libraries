@@ -2794,3 +2794,10 @@ def test_cache_applies_runtime_launch_limits(tmp_path):
     assert not ok and "even channels-per-group" in why
     ok, why = cache.supports_problem(split_k_dgrad, depthwise)
     assert not ok and "even channels-per-group" in why
+    # Only a 16-bit dX uses the packed atomic: bf16 is refused the same way,
+    # fp32 takes an odd cpg.
+    from dataclasses import replace
+
+    ok, why = cache.supports_problem(replace(split_k_dgrad, dtype_d="bf16"), odd_cpg)
+    assert not ok and "even channels-per-group" in why
+    assert cache.supports_problem(replace(split_k_dgrad, dtype_d="fp32"), odd_cpg)[0]

@@ -224,7 +224,7 @@ resolver's `override` argument forces it (the benchmark sets it from
 `ROCKE_CONV_SPLIT_K`); the resolver itself reads no environment. On the CK-formula
 fallback a bf16/fp16 degree above `ATOMIC_16BIT_MAX_SPLIT_K` (128) is not run on
 the packed atomic: `reduction="auto"` moves it to the f32 workspace when one
-fits, and `reduction="atomic"` holds it to 128.
+fits (else holds it to 128 on the atomic), and `reduction="atomic"` holds it to 128.
 
 ### Split-K cshuffle atomic epilogue
 

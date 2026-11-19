@@ -746,6 +746,7 @@ IDENTITY_CAPABILITY_FIELDS = (
     "vector_size_a",
     "vector_size_b",
     "vector_size_c",
+    "wave_size",
     "dtype_d",
     "split_k",
     "two_stage",
