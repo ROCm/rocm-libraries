@@ -2,11 +2,13 @@
 // SPDX-License-Identifier:  MIT
 
 //#include "hipdnn_frontend/Types.hpp"
+#include <array>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -494,9 +496,15 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, TensorTypesPreservedInRoundTrip
     EXPECT_EQ(tensorMap[K_RESAMPLE_FWD_TENSOR_INDEX_UID]->name, "index");
 }
 
-TEST_F(IntegrationResampleFwdDescriptorLowering, GenerateIndexNotMaxPoolRejectedAtValidate)
+// generate_index is ignored for average pooling, as in cuDNN: validate accepts it and the
+// lowered operation carries generate_index false and no index tensor.
+TEST_F(IntegrationResampleFwdDescriptorLowering, GenerateIndexIgnoredForAvgpool)
 {
-    for(auto mode : {ResampleMode::AVGPOOL_EXCLUDE_PADDING, ResampleMode::AVGPOOL_INCLUDE_PADDING})
+    const std::array<std::pair<ResampleMode, ResampleModeSdk>, 2> modes = {{
+        {ResampleMode::AVGPOOL_EXCLUDE_PADDING, ResampleModeSdk::AVGPOOL_EXCLUDE_PADDING},
+        {ResampleMode::AVGPOOL_INCLUDE_PADDING, ResampleModeSdk::AVGPOOL_INCLUDE_PADDING},
+    }};
+    for(const auto& [mode, sdkMode] : modes)
     {
         SCOPED_TRACE(static_cast<int>(mode));
 
@@ -526,10 +534,35 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, GenerateIndexNotMaxPoolRejected
         EXPECT_EQ(index, nullptr);
 
         auto result = graph->validate();
-        EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.err_msg;
-        EXPECT_NE(result.err_msg.find("generate_index is only supported for MAXPOOL"),
-                  std::string::npos)
-            << result.err_msg;
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        result = graph->build_operation_graph_via_descriptors(_handle);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        auto rawDesc = graph->get_raw_graph_descriptor();
+        ASSERT_NE(rawDesc, nullptr);
+
+        size_t serializedSize = 0;
+        ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
+                  HIPDNN_STATUS_SUCCESS);
+        ASSERT_GT(serializedSize, 0u);
+
+        std::vector<uint8_t> serializedData(serializedSize);
+        ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
+                      rawDesc, serializedSize, &serializedSize, serializedData.data()),
+                  HIPDNN_STATUS_SUCCESS);
+
+        hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
+        hipdnn_flatbuffers_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+
+        ASSERT_EQ(graphT.nodes.size(), 1u);
+        auto* opNode = graphT.nodes[0]->attributes.AsResampleFwdAttributes();
+        ASSERT_NE(opNode, nullptr);
+
+        EXPECT_EQ(opNode->resample_mode, sdkMode);
+        ASSERT_TRUE(opNode->generate_index.has_value());
+        EXPECT_FALSE(opNode->generate_index.value());
+        EXPECT_FALSE(opNode->index_tensor_uid.has_value());
     }
 }
 

@@ -206,8 +206,8 @@ public:
     /**
      * @brief Request the max-pool index output
      *
-     * Index generation is supported only with ResampleMode::MAXPOOL: validation rejects
-     * generate_index set to true with any other resample mode with INVALID_VALUE.
+     * generate_index is ignored for modes other than ResampleMode::MAXPOOL, as in cuDNN: no
+     * index output is created and the operation is lowered with generate_index false.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     ResampleFwdAttributes& set_generate_index(bool value)

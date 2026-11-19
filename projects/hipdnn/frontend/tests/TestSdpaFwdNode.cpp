@@ -449,7 +449,8 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsAttnMaskBroadcastLeadingDims)
 }
 
 // A positive dropout_probability needs the seed and offset tensors its Philox mask is drawn
-// from; probability 0 and a custom dropout mask with its scale need neither.
+// from; probability 0 and a custom dropout mask with its scale need neither. A custom mask
+// with any dropout_probability is rejected.
 namespace
 {
 SdpaAttributes makeDropoutAttrs()
@@ -519,11 +520,22 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsZeroDropoutWithoutSeed)
 TEST(TestSdpaFwdNode, PreValidateSucceedsCustomDropoutMaskWithoutSeed)
 {
     auto attrs = makeDropoutAttrs();
-    attrs.set_dropout_probability(0.1f);
     attrs.set_dropout(makeTensor4D(2, 8, 16, 32), makeTensor4D(1, 1, 1, 1));
 
     auto err = preValidateDropout(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsDropoutProbabilityWithCustomMask)
+{
+    auto attrs = makeDropoutAttrs();
+    attrs.set_dropout_probability(0.1f);
+    attrs.set_dropout(makeTensor4D(2, 8, 16, 32), makeTensor4D(1, 1, 1, 1));
+
+    auto err = preValidateDropout(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
+    EXPECT_NE(err.err_msg.find("custom dropout mask and dropout_probability"), std::string::npos)
+        << err.err_msg;
 }
 
 TEST(TestSdpaFwdNode, PreValidateFailsAttnScaleTensorAndValueBothSet)

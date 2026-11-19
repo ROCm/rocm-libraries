@@ -258,12 +258,17 @@ public:
             }
         }
 
-        // Rule 6d: a positive dropout_probability draws its mask from the seed and offset
-        // tensors; a custom dropout mask with its scale needs neither. cuDNN builds no RNG at
-        // probability 0.
-        const bool customDropout = attributes.get_dropout_mask() && attributes.get_dropout_scale();
+        // Rule 6d: the dropout mask comes either from dropout_probability (Philox, drawn from
+        // the seed and offset tensors) or from a custom dropout mask with its scale, never
+        // both: cuDNN rejects a custom mask with any dropout_probability. A positive
+        // probability needs seed and offset; cuDNN builds no RNG at probability 0.
+        HIPDNN_RETURN_IF_TRUE(
+            attributes.dropout_probability.has_value() && attributes.get_dropout_mask(),
+            ErrorCode::ATTRIBUTE_NOT_SET,
+            "SdpaFwdNode: using both a custom dropout mask and dropout_probability is "
+            "ill-formed");
         HIPDNN_RETURN_IF_TRUE(attributes.dropout_probability.has_value()
-                                  && attributes.dropout_probability.value() > 0.0f && !customDropout
+                                  && attributes.dropout_probability.value() > 0.0f
                                   && (!attributes.get_seed() || !attributes.get_offset()),
                               ErrorCode::ATTRIBUTE_NOT_SET,
                               "SdpaFwdNode: dropout_probability requires seed and offset tensors");

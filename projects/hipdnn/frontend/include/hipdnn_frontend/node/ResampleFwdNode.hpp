@@ -58,11 +58,9 @@ public:
                                    + std::to_string(static_cast<int>(attributes.get_padding_mode()))
                                    + " is not supported by hipDNN lowering");
 
-        const bool generateIndex = attributes.get_generate_index().value_or(false);
-        HIPDNN_RETURN_IF_TRUE(generateIndex
-                                  && attributes.get_resample_mode() != ResampleMode::MAXPOOL,
-                              ErrorCode::INVALID_VALUE,
-                              "ResampleFwdNode generate_index is only supported for MAXPOOL");
+        // generate_index is ignored for modes other than MAXPOOL, as in cuDNN
+        const bool generateIndex = attributes.get_generate_index().value_or(false)
+                                   && attributes.get_resample_mode() == ResampleMode::MAXPOOL;
         if(generateIndex && !attributes.get_index())
         {
             return {ErrorCode::ATTRIBUTE_NOT_SET,
@@ -226,7 +224,17 @@ public:
         std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
         std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
     {
-        return detail::createResampleFwdOperation(attributes, tensorDescs, operations);
+        if(attributes.get_resample_mode() == ResampleMode::MAXPOOL
+           || !attributes.get_generate_index().value_or(false))
+        {
+            return detail::createResampleFwdOperation(attributes, tensorDescs, operations);
+        }
+
+        // generate_index is ignored for modes other than MAXPOOL, so engines never see the
+        // flag without an index tensor.
+        auto loweredAttributes = attributes;
+        loweredAttributes.set_generate_index(false);
+        return detail::createResampleFwdOperation(loweredAttributes, tensorDescs, operations);
     }
 
     Error unpack_from_descriptor(

@@ -1,15 +1,22 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
 #include <hipdnn_frontend/node/ResampleFwdNode.hpp>
 
+#include "fake_backend/MockHipdnnBackend.hpp"
+
+#include <array>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -543,24 +550,17 @@ TEST(TestResampleFwdNode, PreValidateAcceptsExactlyThePaddingModesLoweringMaps)
     }
 }
 
-TEST(TestResampleFwdNode, PreValidateRejectsGenerateIndexForAvgpool)
+TEST(TestResampleFwdNode, PreValidateAcceptsGenerateIndexForAvgpool)
 {
     for(const auto mode :
         {ResampleMode::AVGPOOL_EXCLUDE_PADDING, ResampleMode::AVGPOOL_INCLUDE_PADDING})
     {
+        // generate_index is ignored for average pooling, so no index tensor is needed
         auto attr = makeX8x8Attributes();
         attr.set_resample_mode(mode).set_generate_index(true);
 
-        auto error = preValidate(attr);
-        EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE) << error.err_msg;
-
-        // An index tensor does not make index generation valid for average pooling
-        auto indexTensor = std::make_shared<TensorAttributes>();
-        indexTensor->set_data_type(DataType::INT32);
-        attr.set_index(indexTensor);
-
-        error = preValidate(std::move(attr));
-        EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE) << error.err_msg;
+        auto error = preValidate(std::move(attr));
+        EXPECT_EQ(error.code, ErrorCode::OK) << error.err_msg;
     }
 }
 
@@ -687,4 +687,124 @@ TEST(TestResampleFwdNode, GetNodeTypeReturnsResampleFwd)
     const GraphAttributes graphAttrs;
     const ResampleFwdNode node(ResampleFwdAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::RESAMPLE_FWD);
+}
+
+namespace
+{
+class TestResampleFwdNodeCreateOperation : public ::testing::Test
+{
+protected:
+    std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>> _mockBackend;
+    std::array<char, 8> _fakeDescriptors{};
+    size_t _nextDescriptor = 0;
+    std::vector<bool> _sentGenerateIndex;
+
+    void SetUp() override
+    {
+        using ::testing::_;
+        using ::testing::Return;
+
+        _mockBackend = std::make_shared<::testing::NiceMock<Mock_hipdnn_backend>>();
+        hipdnn_frontend::detail::IHipdnnBackend::setInstance(_mockBackend);
+
+        ON_CALL(*_mockBackend, backendCreateDescriptor(_, _))
+            .WillByDefault([this](hipdnnBackendDescriptorType_t,
+                                  hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = reinterpret_cast<hipdnnBackendDescriptor_t>(
+                    std::addressof(_fakeDescriptors[_nextDescriptor++ % _fakeDescriptors.size()]));
+                return HIPDNN_STATUS_SUCCESS;
+            });
+        ON_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
+            .WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
+        ON_CALL(*_mockBackend,
+                backendSetAttribute(
+                    _, HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT, HIPDNN_TYPE_BOOLEAN, 1, _))
+            .WillByDefault([this](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  const void* value) {
+                _sentGenerateIndex.push_back(*static_cast<const bool*>(value));
+                return HIPDNN_STATUS_SUCCESS;
+            });
+        ON_CALL(*_mockBackend, backendFinalize(_)).WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
+        ON_CALL(*_mockBackend, backendDestroyDescriptor(_))
+            .WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
+    }
+
+    void TearDown() override
+    {
+        hipdnn_frontend::detail::IHipdnnBackend::resetInstance();
+        _mockBackend.reset();
+    }
+
+    // makeX8x8Attributes() with the uids, data types and strides lowering needs.
+    static ResampleFwdAttributes makeLowerableX8x8Attributes()
+    {
+        auto attr = makeX8x8Attributes();
+        attr.get_x()
+            ->set_uid(1)
+            .set_name("X")
+            .set_data_type(DataType::FLOAT)
+            .set_stride({192, 64, 8, 1});
+        attr.get_y()
+            ->set_uid(2)
+            .set_name("Y")
+            .set_data_type(DataType::FLOAT)
+            .set_stride({48, 16, 4, 1});
+        attr.set_compute_data_type(DataType::FLOAT);
+        return attr;
+    }
+
+    static Error preValidateAndCreateOperation(ResampleFwdAttributes attr)
+    {
+        const GraphAttributes graphAttributes;
+        const ResampleFwdNode node(std::move(attr), graphAttributes);
+
+        auto error = node.pre_validate_node();
+        if(!error.is_good())
+        {
+            return error;
+        }
+
+        std::unordered_map<int64_t, hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor>
+            tensorDescs;
+        std::vector<hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor> operations;
+        return node.create_operation(tensorDescs, operations);
+    }
+};
+} // namespace
+
+TEST_F(TestResampleFwdNodeCreateOperation, AvgpoolLowersGenerateIndexFalse)
+{
+    for(const auto mode :
+        {ResampleMode::AVGPOOL_EXCLUDE_PADDING, ResampleMode::AVGPOOL_INCLUDE_PADDING})
+    {
+        SCOPED_TRACE(static_cast<int>(mode));
+        _sentGenerateIndex.clear();
+
+        auto attr = makeLowerableX8x8Attributes();
+        attr.set_resample_mode(mode).set_generate_index(true);
+
+        auto error = preValidateAndCreateOperation(std::move(attr));
+        ASSERT_TRUE(error.is_good()) << error.get_message();
+        EXPECT_EQ(_sentGenerateIndex, std::vector<bool>{false});
+    }
+}
+
+TEST_F(TestResampleFwdNodeCreateOperation, MaxpoolWithIndexLowersGenerateIndexTrue)
+{
+    auto attr = makeLowerableX8x8Attributes();
+    auto indexTensor = std::make_shared<TensorAttributes>();
+    indexTensor->set_uid(3)
+        .set_name("Index")
+        .set_data_type(DataType::INT32)
+        .set_dim({1, 3, 4, 4})
+        .set_stride({48, 16, 4, 1});
+    attr.set_index(indexTensor);
+    attr.set_resample_mode(ResampleMode::MAXPOOL).set_generate_index(true);
+
+    auto error = preValidateAndCreateOperation(std::move(attr));
+    ASSERT_TRUE(error.is_good()) << error.get_message();
+    EXPECT_EQ(_sentGenerateIndex, std::vector<bool>{true});
 }
