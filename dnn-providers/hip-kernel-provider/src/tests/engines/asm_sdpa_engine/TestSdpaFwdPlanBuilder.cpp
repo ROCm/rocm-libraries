@@ -22,7 +22,6 @@
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
-#include "engines/asm_sdpa_engine/plans/SdpaFwdLaunchParams.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlan.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
@@ -338,54 +337,59 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
                                       false,
                                       true),
                    "compute_data_type != FLOAT"},
-         false},
-        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
-                                      {4, 8, 256, 128},
-                                      DataType::BFLOAT16,
-                                      DataType::FLOAT,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      DataType::HALF),
-                   "mma_core_mode = HALF (cuDNN-frontend default) on bf16 inputs"},
-         true},
-        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
-                                      {4, 8, 256, 128},
-                                      DataType::BFLOAT16,
-                                      DataType::FLOAT,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      DataType::BFLOAT16),
-                   "mma_core_mode = BFLOAT16 on bf16 inputs"},
-         true},
-        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
-                                      {4, 8, 256, 128},
-                                      DataType::BFLOAT16,
-                                      DataType::FLOAT,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      DataType::FLOAT),
-                   "mma_core_mode = FLOAT"},
          false}};
 
     for(const auto& [test, applicability] : applicabilityTests)
     {
         EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
             << test.message;
+    }
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableBf16MmaCoreModePolicy)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // HALF is cuDNN's 16-bit MMA path; BFLOAT16 is accepted as its equivalent.
+    const std::vector<std::pair<DataType, bool>> policy = {
+        {DataType::UNSET, true},
+        {DataType::HALF, true},
+        {DataType::BFLOAT16, true},
+        {DataType::FLOAT, false},
+        {DataType::FP8_E4M3, false},
+        {DataType::FP8_E5M2, false},
+        {DataType::FP8_E8M0, false},
+        {DataType::FP8_E4M3_FNUZ, false},
+        {DataType::FP8_E5M2_FNUZ, false},
+    };
+
+    for(const auto& [mode, accepted] : policy)
+    {
+        const auto builder = createSdpaFwdGraph({4, 8, 256, 128},
+                                                {4, 8, 256, 128},
+                                                DataType::BFLOAT16,
+                                                DataType::FLOAT,
+                                                false,
+                                                false,
+                                                false,
+                                                false,
+                                                false,
+                                                false,
+                                                false,
+                                                mode);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, graph), accepted)
+            << "bf16 inputs, mma_core_mode = " << EnumNameDataType(mode);
     }
 }
 
@@ -404,8 +408,8 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAlignment)
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, aligned.graphWrapper())) << aligned.message;
 }
 
-// The decline sits exactly at the block each kernel is launched with: hd192x128
-// kernels launch 256 threads and the others 512, in batch and group mode.
+// The decline sits exactly at the block each kernel is launched with: 256 threads
+// for hd192x128 kernels and the group-mode bf16 hd256/gfx950 kernel, 512 for the others.
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesKernelBelowLaunchBlock)
 {
     SKIP_IF_NO_DEVICES();
@@ -420,8 +424,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesKernelBelowLaunchBlock)
     for(const auto& config : getConfigsForArch(deviceString, cfg_fmha_fwd))
     {
         const GraphTest test{configToCompatibleGraph(config), config.co_name};
-        const unsigned int blockDimX = fwdBlockDimX(static_cast<unsigned int>(config.hdim_q),
-                                                    static_cast<unsigned int>(config.hdim_v));
+        const unsigned int blockDimX = fwdConfigBlockDimX(config);
         EXPECT_TRUE(
             SdpaFwdPlanBuilderWithMaxThreads(blockDimX).isApplicable(_handle, test.graphWrapper()))
             << test.message;
@@ -472,6 +475,18 @@ auto createRaggedBshdSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256
                                   const std::vector<int64_t>& vDims = {4, 8, 256, 128})
 {
     return sdpa::withRaggedTensors(createBshdSdpaFwdGraph(qDims, vDims), {"q", "k", "v", "o"});
+}
+
+// Requests the bottom-right causal band (left bound unbounded, right bound 0) that the
+// causal registry rows serve.
+flatbuffers::FlatBufferBuilder withBottomRightCausalMask(flatbuffers::FlatBufferBuilder&& builder)
+{
+    return mutateGraph(std::move(builder), [](GraphT& graph) {
+        auto* attrs = graph.nodes.front()->attributes.AsSdpaAttributes();
+        attrs->right_bound = 0;
+        attrs->diagonal_alignment
+            = hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    });
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedVariations)
@@ -531,6 +546,49 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedVariations)
                    "Dense Q, K, V, O with only STATS ragged -> STATS is an unsupported ragged "
                    "tensor"},
          false}};
+
+    for(const auto& [test, applicability] : applicabilityTests)
+    {
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
+            << test.message;
+    }
+}
+
+// The gfx950 bf16 hd256 kernels are group-mode only and index K/V by the query head, so
+// GQA/MQA declines for head dim 256, with or without a causal mask, while it stays
+// accepted for head dim 128.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableGfx950Hd256DeclinesGqa)
+{
+    SKIP_IF_NO_DEVICES();
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx950")
+    {
+        GTEST_SKIP() << "head dim 256 forward kernels are gfx950-only";
+    }
+
+    const std::vector<std::pair<GraphTest, bool>> applicabilityTests
+        = {{GraphTest{createRaggedBshdSdpaFwdGraph({4, 8, 256, 256}, {4, 8, 256, 256}),
+                      "Group mode hd256 with equal head counts"},
+            true},
+           {GraphTest{withBottomRightCausalMask(
+                          createRaggedBshdSdpaFwdGraph({4, 8, 256, 256}, {4, 8, 256, 256})),
+                      "Causal group mode hd256 with equal head counts"},
+            true},
+           {GraphTest{withBottomRightCausalMask(
+                          createRaggedBshdSdpaFwdGraph({4, 8, 256, 256}, {4, 2, 256, 256})),
+                      "Causal group mode hd256 with GQA"},
+            false},
+           {GraphTest{createRaggedBshdSdpaFwdGraph({4, 8, 256, 256}, {4, 2, 256, 256}),
+                      "Group mode hd256 with GQA"},
+            false},
+           {GraphTest{createRaggedBshdSdpaFwdGraph({4, 8, 256, 256}, {4, 1, 256, 256}),
+                      "Group mode hd256 with MQA"},
+            false},
+           {GraphTest{createRaggedBshdSdpaFwdGraph({4, 8, 256, 128}, {4, 2, 256, 128}),
+                      "Group mode hd128 with GQA"},
+            true},
+           {GraphTest{createBshdSdpaFwdGraph({4, 8, 256, 256}, {4, 8, 256, 256}),
+                      "Batch mode hd256 has no kernel"},
+            false}};
 
     for(const auto& [test, applicability] : applicabilityTests)
     {
@@ -1466,11 +1524,11 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithNonScalarDescale)
         << "fp8 inputs with non-scalar (per-[B, H_kv]) descales must be rejected";
 }
 
-// The fp8 kernels run fp8 MFMA, so a 16-bit mma_core_mode (HALF, the cuDNN-frontend
-// default that is accepted for bf16 inputs) does not describe them and must decline.
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithHalfMmaCoreMode)
+// The mode names the MMA path: cuDNN treats FP8_E4M3 (the sdpa_fp8() default) and FP8_E5M2
+// as one FP8 path. The FP8_E4M3_FNUZ input encoding is a separate check.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableFp8MmaCoreModePolicy)
 {
-    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     SKIP_IF_NO_DEVICES();
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
@@ -1478,19 +1536,27 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithHalfMmaCoreMode)
         GTEST_SKIP() << "fp8 forward kernels are gfx942-only";
     }
 
-    auto unsetBuilder = createSdpaFwdFp8Graph(
-        /*withDescale=*/true, {1, 1, 1, 1}, /*qStrides=*/{}, /*vStrides=*/{}, DataType::UNSET);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper unsetGraph(
-        unsetBuilder.GetBufferPointer(), unsetBuilder.GetSize());
-    ASSERT_TRUE(_planBuilder.isApplicable(_handle, unsetGraph))
-        << "control: fp8 inputs with scalar descales and UNSET mma_core_mode are accepted";
+    const std::vector<std::pair<DataType, bool>> policy = {
+        {DataType::UNSET, true},
+        {DataType::FP8_E4M3, true},
+        {DataType::FP8_E5M2, true},
+        {DataType::HALF, false},
+        {DataType::BFLOAT16, false},
+        {DataType::FLOAT, false},
+        {DataType::FP8_E8M0, false},
+        {DataType::FP8_E4M3_FNUZ, false},
+        {DataType::FP8_E5M2_FNUZ, false},
+    };
 
-    auto halfBuilder = createSdpaFwdFp8Graph(
-        /*withDescale=*/true, {1, 1, 1, 1}, /*qStrides=*/{}, /*vStrides=*/{}, DataType::HALF);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper halfGraph(
-        halfBuilder.GetBufferPointer(), halfBuilder.GetSize());
-    EXPECT_FALSE(_planBuilder.isApplicable(_handle, halfGraph))
-        << "fp8 inputs with mma_core_mode = HALF must be rejected";
+    for(const auto& [mode, accepted] : policy)
+    {
+        const auto builder = createSdpaFwdFp8Graph(
+            /*withDescale=*/true, {1, 1, 1, 1}, /*qStrides=*/{}, /*vStrides=*/{}, mode);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, graph), accepted)
+            << "FP8_E4M3_FNUZ inputs, mma_core_mode = " << EnumNameDataType(mode);
+    }
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
@@ -2380,6 +2446,117 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableBoundsEachFp8VByteStrideField)
         EXPECT_TRUE(isApplicableWithV(field.strideIndex, K_BF16_PAST_LIMIT));
         EXPECT_TRUE(isApplicableWithV(field.strideIndex, K_FP8_STRIDE_LIMIT));
         EXPECT_FALSE(isApplicableWithV(field.strideIndex, K_FP8_STRIDE_LIMIT + 1));
+    }
+}
+
+// =============================================================================
+// hd192x128 K/V per-head row extent
+// =============================================================================
+
+// The hd192x128 kernels need S_kv * seq stride * element bytes below 2^32 for K
+// and for V. With S_kv = 256 bf16 rows, the largest sequence stride that fits is
+// UINT32_MAX / 512 = 2^23 - 1, and one more element makes the extent exactly
+// 2^32. Both strides clear the per-field byte-stride guard, so only the extent
+// rule separates them.
+constexpr int64_t K_EXTENT_SEQ_LEN_KV = 256;
+constexpr int64_t K_EXTENT_BF16_BYTES = 2;
+constexpr int64_t K_EXTENT_STRIDE_LIMIT
+    = static_cast<int64_t>(UINT32_MAX) / (K_EXTENT_BF16_BYTES * K_EXTENT_SEQ_LEN_KV);
+
+// A bf16 graph with one batch, so no batch stride bounds a head's extent, whose
+// K and V are BSHD with the given sequence strides. Q and O stay contiguous BSHD.
+flatbuffers::FlatBufferBuilder
+    createGraphWithKvSeqStrides(int64_t kSeqStride, int64_t vSeqStride, int64_t headDimQk = 192)
+{
+    const std::vector<int64_t> qDims = {1, 8, K_EXTENT_SEQ_LEN_KV, headDimQk};
+    const std::vector<int64_t> kDims = {1, 8, K_EXTENT_SEQ_LEN_KV, headDimQk};
+    const std::vector<int64_t> vDims = {1, 8, K_EXTENT_SEQ_LEN_KV, 128};
+    const std::vector<int64_t> oDims = {1, 8, K_EXTENT_SEQ_LEN_KV, 128};
+    const std::vector<int64_t> bshd = {3, 1, 2, 0};
+
+    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        qDims,
+        hipdnn_data_sdk::utilities::generateStrides(qDims, bshd),
+        kDims,
+        {kSeqStride, headDimQk, kSeqStride, 1},
+        vDims,
+        {vSeqStride, 128, vSeqStride, 1},
+        oDims,
+        hipdnn_data_sdk::utilities::generateStrides(oDims, bshd),
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+}
+
+// Runs the predicate on the graph's K and V descriptors at the bf16 element size.
+// Only descriptors are read, so these run without a device.
+bool kvRowExtentsFit(flatbuffers::FlatBufferBuilder&& builder)
+{
+    const GraphTest test{std::move(builder), ""};
+    const auto graph = test.graphWrapper();
+    const auto& attrs = graph.nodeWrappers()
+                            .front()
+                            ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
+    const auto& tensorMap = graph.getTensorMap();
+    return fwdKvRowExtentsFitU32(*tensorMap.at(attrs.k_tensor_uid()),
+                                 *tensorMap.at(attrs.v_tensor_uid()),
+                                 K_EXTENT_BF16_BYTES);
+}
+
+TEST(TestSdpaFwdKvRowExtent, AcceptsExtentsJustBelow2Pow32)
+{
+    EXPECT_TRUE(
+        kvRowExtentsFit(createGraphWithKvSeqStrides(K_EXTENT_STRIDE_LIMIT, K_EXTENT_STRIDE_LIMIT)));
+}
+
+TEST(TestSdpaFwdKvRowExtent, DeclinesWhenEitherExtentReaches2Pow32)
+{
+    EXPECT_FALSE(kvRowExtentsFit(
+        createGraphWithKvSeqStrides(K_EXTENT_STRIDE_LIMIT + 1, K_EXTENT_STRIDE_LIMIT)));
+    EXPECT_FALSE(kvRowExtentsFit(
+        createGraphWithKvSeqStrides(K_EXTENT_STRIDE_LIMIT, K_EXTENT_STRIDE_LIMIT + 1)));
+}
+
+// The rule belongs to the hd192x128 kernels on both architectures, in batch and
+// group mode. An hd128 graph with the same strides has no such limit.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableBoundsTheHd192x128KvRowExtent)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    constexpr int64_t K_FITS = K_EXTENT_STRIDE_LIMIT;
+    constexpr int64_t K_REACHES = K_EXTENT_STRIDE_LIMIT + 1;
+    const auto ragged = [](flatbuffers::FlatBufferBuilder&& builder) {
+        return sdpa::withRaggedTensors(std::move(builder), {"q", "k", "v", "o"});
+    };
+
+    const std::vector<std::pair<GraphTest, bool>> applicabilityTests
+        = {{GraphTest{createGraphWithKvSeqStrides(K_FITS, K_FITS),
+                      "Batch mode, K and V extents just below 2^32"},
+            true},
+           {GraphTest{createGraphWithKvSeqStrides(K_REACHES, K_FITS), "Batch mode, K extent 2^32"},
+            false},
+           {GraphTest{createGraphWithKvSeqStrides(K_FITS, K_REACHES), "Batch mode, V extent 2^32"},
+            false},
+           {GraphTest{ragged(createGraphWithKvSeqStrides(K_FITS, K_FITS)),
+                      "Group mode, K and V extents just below 2^32"},
+            true},
+           {GraphTest{ragged(createGraphWithKvSeqStrides(K_REACHES, K_REACHES)),
+                      "Group mode, K and V extents 2^32"},
+            false},
+           {GraphTest{createGraphWithKvSeqStrides(K_REACHES, K_REACHES, /*headDimQk=*/128),
+                      "hd128 with the same strides"},
+            true}};
+
+    for(const auto& [test, applicability] : applicabilityTests)
+    {
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
+            << test.message;
     }
 }
 
