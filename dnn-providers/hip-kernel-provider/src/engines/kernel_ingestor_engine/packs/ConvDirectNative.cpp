@@ -825,11 +825,20 @@ std::optional<Plan>
     plan.grid[0] = static_cast<unsigned int>(gridX);
     plan.grid[1] = static_cast<unsigned int>(columnBlocks);
     plan.grid[2] = static_cast<unsigned int>(k2.splits);
-    // XCD-contiguous block order (halo tiles, one split): the XCD count of the device.
+    // XCD-local tile runs (halo tiles, one split): the XCD count of the device, and runs of two
+    // blocks per compute unit of an XCD, the blocks it starts together.
     k2.xcds = !config.rows && k2.splits == 1 && xcds > 1 ? xcds : 0;
+    k2.xcdRun
+        = k2.xcds > 1 ? static_cast<int>(std::max<int64_t>(1, 2 * computeUnits / k2.xcds)) : 0;
     if(const char* env = std::getenv("HKP_K2_XCDS"); env != nullptr && !config.rows)
     {
         k2.xcds = std::atoi(env); // A/B only
+    }
+    if(const char* env = std::getenv("HKP_K2_XCDRUN"); env != nullptr && k2.xcds > 1)
+    {
+        // A/B only; 0: one contiguous range per XCD.
+        k2.xcdRun = std::atoi(env) > 0 ? std::atoi(env)
+                                       : static_cast<int>(divUp(gridX * columnBlocks, k2.xcds));
     }
     if(config.rows)
     {
