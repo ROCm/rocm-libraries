@@ -214,7 +214,6 @@ constexpr attention_dense::AttentionDenseArch gfx942Arch()
     arch.tokens.biasStrideHead = "gfx942_attention_dense.bias.stride_head";
     arch.tokens.biasStrideQuery = "gfx942_attention_dense.bias.stride_query";
     // The head fields of the KMD are canonical build inputs, never compared.
-    arch.matchesHeadCounts = false;
     arch.isSupportedTile = &isSupportedGfx942AttentionDenseTile;
     arch.geometry = &gfx942Geometry;
     arch.windowReachesKeys = &gfx942AttentionDenseWindowReachesKeys;

@@ -656,7 +656,11 @@ def test_a_multi_launch_selection_writes_and_reloads_its_launches(tmp_path):
     selection = tmp_path / "selection.yaml"
     selection.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     shipped = load_config(selection).packs[0].kernels
-    subset = {k.name: k for k in shipped[::97]}
+    # A sparse subset, sized from the catalog rather than a literal stride: the
+    # point is several kernels that are not adjacent, and a fixed stride silently
+    # becomes a single-element subset when the catalog shrinks under it.
+    stride = max(1, len(shipped) // 4)
+    subset = {k.name: k for k in shipped[::stride]}
     assert len(subset) > 1
 
     variant_reduce.write_selection(selection, list(subset), tmp_path / "reduced.yaml")
