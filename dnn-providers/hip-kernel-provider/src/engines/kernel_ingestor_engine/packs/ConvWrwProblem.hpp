@@ -137,6 +137,10 @@ struct WrwConfig
     /// whose buffers start each step at the first element the block can read (its step windows
     /// within the range; any layout and strides). 0 elsewhere.
     int64_t pb = 0;
+    /// Loop 8 only, 1: a reduction step is bq consecutive positions of the flattened (image,
+    /// output depth, row, column) order (CONV_K3_FLAT), admitted where the output rows are
+    /// shorter than bq, beside the specialized configs; x and dy are each one buffer. 0 elsewhere.
+    int64_t flat = 0;
     /// The split planner's target blocks per dispatch unit (1, 2, 4 or 8; 1 for loop 5, whose
     /// persistent grid has one workgroup per unit; 8 for small FMA blocks): host-side only.
     int64_t bpu = 0;

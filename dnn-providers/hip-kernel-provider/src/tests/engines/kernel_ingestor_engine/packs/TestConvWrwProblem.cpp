@@ -509,6 +509,7 @@ struct ConfigFields
     int64_t loop = 1, layout = 0;
     int64_t bk = 64, bc = 64, bq = 32, fr = 3, s = 3, sw = 1, dw = 1, wk = 2, wc = 2, vec = 8;
     int64_t tk = 0, tc = 0, xcd = 0, align = 0, ns = 0, bpu = 2, wq = 0, dws = 1, pb = 0, math = 0;
+    int64_t flat = 0; ///< written only when set (an absent field reads as 0)
     /// The generic loop's specialized classes (metadata of loop 8 only).
     std::string spec;
 };
@@ -610,6 +611,10 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
     {
         kernel.metadata["spec"] = f.spec;
     }
+    if(f.flat != 0)
+    {
+        kernel.metadata["flat"] = f.flat;
+    }
     return kernel;
 }
 
@@ -641,6 +646,7 @@ WrwConfig configOf(const ConfigFields& f)
     c.pb = f.pb;
     c.spec = f.spec;
     c.math = f.math;
+    c.flat = f.flat;
     return c;
 }
 
@@ -1513,40 +1519,40 @@ TEST(TestConvWrwKernelMatch, GenericBlockBuffersServeLargeImagesThroughStepWindo
     // pb 1 on a small image: declined (the specialized and per-image configs serve it).
     EXPECT_FALSE(admits(f, "gfx942", channelsLastShape()));
     // Channels-first: the step window spans the block's channel planes (2.2 GB 33000 x 33000
-    // fp16 planes are past it) but only the columns a chunk reaches (one 2^31-byte row at
-    // width stride 2^20 is within it).
+    // fp16 planes are past it) but only the columns a chunk reaches (eight 2^28-byte rows at
+    // width stride 2^17 are within it).
     auto planes = baseShape();
-    planes.c = 2;
+    planes.c = 8;
     planes.k = 1; // one dy plane: the x window alone past the range
     planes.input = {33000, 33000};
     planes.prePadding = planes.postPadding = {1, 1};
     auto cf = genericFields();
     cf.pb = 1;
     EXPECT_FALSE(admits(cf, "gfx942", planes));
-    // The dy window alone: one 0.8 GB x plane, 8 dy planes of it (7 more in the window).
+    // The dy window alone: 0.2 GB planes, x's window 7 more of them (within), dy's 15 more
+    // (past); at 11 dy planes the window (10 more, 2.0 GB) is within and the image past.
     auto dyPlanes = baseShape();
     dyPlanes.n = 1;
-    dyPlanes.c = 1;
-    dyPlanes.k = 8;
-    dyPlanes.input = {20000, 20000};
+    dyPlanes.c = 8;
+    dyPlanes.k = 16;
+    dyPlanes.input = {10000, 10000};
     EXPECT_FALSE(admits(cf, "gfx942", dyPlanes));
-    dyPlanes.k = 2;
-    dyPlanes.input = {20000, 30000}; // 1 more 1.2 GB dy plane: within
+    dyPlanes.k = 11;
     EXPECT_TRUE(admits(cf, "gfx942", dyPlanes));
     auto row = baseShape();
     row.n = 1;
-    row.c = 1;
+    row.c = 8;
     row.k = 8;
-    row.input = {1, int64_t{1} << 30}; // fp16: 2^31 bytes in one row
+    row.input = {1, int64_t{1} << 27}; // fp16: 2^28 bytes a row, 2^31 an image
     row.filter = {1, 1};
     row.prePadding = row.postPadding = {0, 0};
-    row.stride = {1, int64_t{1} << 20};
+    row.stride = {1, int64_t{1} << 17};
     EXPECT_TRUE(admits(cf, "gfx942", row));
     auto cfLarge = large;
     cfLarge.channelsLast = false;
-    cfLarge.c = 2;
+    cfLarge.c = 8;
     cfLarge.k = 1;
-    cfLarge.input = {33000, 16500}; // two 1.1 GB planes: window within, image past
+    cfLarge.input = {14000, 10000}; // eight 0.28 GB planes: window within, image past
     EXPECT_TRUE(admits(cf, "gfx942", cfLarge));
     // A specialized block-buffer class (lower case) declines the generic twin.
     cf.spec = "4r0.3.2.1.0";
@@ -3019,13 +3025,14 @@ TEST(TestConvWrwKernelMatch, TheGenericLoopServesStridedOperandsAlone)
     EXPECT_FALSE(matchesKernel(PACK, fixture.context(), kernel, *bound));
     // Elements take any channel count (no whole vectors), in either packed layout too.
     auto odd = baseShape();
-    odd.c = 5;
+    odd.c = 9;
     odd.k = 7;
     EXPECT_TRUE(admits(genericFields(), "gfx942", odd));
     odd.channelsLast = true;
     EXPECT_TRUE(admits(genericFields(), "gfx942", odd));
     EXPECT_FALSE(admits(genericClFields(), "gfx942", odd));
-    // Images smaller than a vector (one channel of 5 positions).
+    // Images smaller than a vector (one channel of 5 positions): the rows decline them, and
+    // the generic loop declines them as a stem.
     auto tiny = baseShape();
     tiny.c = 1;
     tiny.k = 2;
@@ -3033,7 +3040,57 @@ TEST(TestConvWrwKernelMatch, TheGenericLoopServesStridedOperandsAlone)
     tiny.filter = {1, 3};
     tiny.prePadding = tiny.postPadding = {0, 0};
     EXPECT_FALSE(admits(rowsFields(), "gfx942", tiny));
-    EXPECT_TRUE(admits(genericFields(), "gfx942", tiny));
+    EXPECT_FALSE(admits(genericFields(), "gfx942", tiny));
+}
+
+TEST(TestConvWrwKernelMatch, FlatPositionsServeRowsShorterThanAStep)
+{
+    auto f = genericFields();
+    f.flat = 1;
+    // 12-column output rows, 32 positions a step.
+    EXPECT_TRUE(admits(f, "gfx942"));
+    // A row as long as the step: the row chunks run full there.
+    auto wide = baseShape();
+    wide.input = {10, 32};
+    EXPECT_TRUE(admits(genericFields(), "gfx942", wide));
+    EXPECT_FALSE(admits(f, "gfx942", wide));
+    // Beside the specialized classes: a spec key serving the graph declines the plain generic
+    // config only.
+    auto served = genericFields();
+    served.spec = "4R0.3.1.1.0"; // the 3x3 output rows' class, which serves the base graph
+    EXPECT_FALSE(admits(served, "gfx942"));
+    served.flat = 1;
+    EXPECT_TRUE(admits(served, "gfx942"));
+    // Each field one at a time: the knob's range, the generic loop, no window, no block-based
+    // buffers.
+    const std::vector<std::pair<std::string, std::function<void(ConfigFields&)>>> mutations{
+        {"flat", [](ConfigFields& g) { g.flat = 2; }},
+        {"loop",
+         [](ConfigFields& g) {
+             g = ConfigFields{};
+             g.flat = 1;
+         }},
+        {"dw",
+         [](ConfigFields& g) {
+             g.layout = 1;
+             g.dw = 8;
+         }},
+        {"pb", [](ConfigFields& g) { g.pb = 1; }},
+    };
+    for(const auto& [name, mutate] : mutations)
+    {
+        auto g = f;
+        mutate(g);
+        EXPECT_FALSE(admits(g, "gfx942")) << name;
+    }
+    // Steps of 32 flattened positions over every image; x and dy whole-tensor buffers.
+    const auto launch = launchOf(f);
+    ASSERT_TRUE(launch.has_value());
+    const auto& a = launch->args;
+    EXPECT_EQ(a.chunks, 1);
+    EXPECT_EQ(a.steps, (2 * 10 * 12 + 31) / 32);
+    EXPECT_EQ(a.xImage, int64_t{2} * 24 * 10 * 12);
+    EXPECT_EQ(a.yImage, int64_t{2} * 40 * 10 * 12);
 }
 
 TEST(TestConvWrwLaunch, TheGenericLoopReadsTheGraphsStridesAndSpans)
@@ -3111,6 +3168,96 @@ TEST(TestConvWrwKernelMatch, TheGenericLoopLeavesWidelyDilatedSmallFiltersToBlas
     EXPECT_TRUE(admits(genericFields(), "gfx942", dilated({1, 10}, {1, 6})));
     EXPECT_TRUE(admits(genericFields(), "gfx942", dilated({2, 5}, {6, 1})));
     EXPECT_FALSE(admits(genericFields(), "gfx942", dilated({1, 9}, {1, 6})));
+    // gfx11 and gfx12's matrix atoms keep them (BLAS is slow there): dilation 6 and 12 admit.
+    // gfx12's FMA form (fp32) declines them, gfx11's admits.
+    const auto wmma = [](const char* atom) {
+        auto f = genericFields();
+        f.atom = atom;
+        f.atomId = conv_wrw::atomIdOf(atom);
+        f.wk = 4;
+        f.wc = 2;
+        return f;
+    };
+    EXPECT_TRUE(admits(wmma("wmma11_f16"), "gfx1101", dilated({3, 3}, {6, 6})));
+    EXPECT_TRUE(admits(wmma("wmma11_f16"), "gfx1100", dilated({3, 3}, {12, 12})));
+    EXPECT_TRUE(admits(wmma("wmma11_f16"), "gfx1151", dilated({3, 3}, {6, 1})));
+    EXPECT_TRUE(admits(wmma("wmma12_f16"), "gfx1201", dilated({3, 3}, {6, 6})));
+    EXPECT_TRUE(admits(wmma("wmma12_f16"), "gfx1200", dilated({3, 3}, {12, 12})));
+    const auto fp32Dilated = [&](std::vector<int64_t> d) {
+        auto shape = dilated({3, 3}, std::move(d));
+        shape.dataType = DataType::FLOAT;
+        return shape;
+    };
+    EXPECT_TRUE(admits(genericFmaFields(), "gfx1201", fp32Dilated({5, 5})));
+    EXPECT_FALSE(admits(genericFmaFields(), "gfx1201", fp32Dilated({6, 6})));
+    EXPECT_TRUE(admits(genericFmaFields(), "gfx1100", fp32Dilated({6, 6})));
+}
+
+TEST(TestConvWrwKernelMatch, TheGenericLoopLeavesNarrowGroupsToTheVectorEngines)
+{
+    // groups x (c / groups, k / groups): fewer than 16 input and fewer than 16 output channels
+    // a group declines (depthwise, ResNeXt-class); a group as wide as 16 on either side admits.
+    const auto grouped = [](int64_t groups, int64_t cg, int64_t kg, bool channelsLast) {
+        auto shape = baseShape();
+        shape.groups = groups;
+        shape.c = groups * cg;
+        shape.k = groups * kg;
+        shape.channelsLast = channelsLast;
+        return shape;
+    };
+    auto wmma11 = genericClFields();
+    wmma11.atom = "wmma11_f16";
+    wmma11.atomId = conv_wrw::atomIdOf("wmma11_f16");
+    wmma11.bk = 64;
+    wmma11.bc = 64;
+    wmma11.wk = 4;
+    wmma11.wc = 2;
+    // Channels-first elements on gfx942, channel vectors on gfx1101.
+    EXPECT_TRUE(admits(genericFields(), "gfx942", grouped(4, 16, 16, false)));
+    EXPECT_FALSE(admits(genericFields(), "gfx942", grouped(4, 15, 15, false)));
+    EXPECT_TRUE(admits(genericFields(), "gfx942", grouped(4, 15, 16, false)));
+    EXPECT_TRUE(admits(genericFields(), "gfx942", grouped(4, 16, 15, false)));
+    EXPECT_FALSE(admits(genericFields(), "gfx942", grouped(64, 1, 1, false)));
+    EXPECT_FALSE(admits(genericFields(), "gfx942", grouped(32, 1, 2, false)));
+    EXPECT_TRUE(admits(wmma11, "gfx1101", grouped(2, 16, 16, true)));
+    EXPECT_FALSE(admits(wmma11, "gfx1101", grouped(2, 8, 8, true)));
+    // One group is not narrow, however few its channels.
+    EXPECT_TRUE(admits(genericFields(), "gfx942", grouped(1, 8, 8, false)));
+    // The FMA form too (fp32 on RDNA), past its own few-channel gate.
+    const auto fp32 = [&](int64_t groups, int64_t cg, int64_t kg) {
+        auto shape = grouped(groups, cg, kg, false);
+        shape.dataType = DataType::FLOAT;
+        return shape;
+    };
+    EXPECT_TRUE(admits(genericFmaFields(), "gfx1201", fp32(2, 16, 16)));
+    EXPECT_FALSE(admits(genericFmaFields(), "gfx1201", fp32(2, 8, 8)));
+}
+
+TEST(TestConvWrwKernelMatch, TheGenericLoopLeavesStemsAndNarrowRowsToBlas)
+{
+    // Fewer than 8 input channels a group (stems) decline, on the matrix atoms as in the FMA
+    // form.
+    auto stem = baseShape();
+    stem.c = 7;
+    EXPECT_FALSE(admits(genericFields(), "gfx942", stem));
+    stem.c = 8;
+    EXPECT_TRUE(admits(genericFields(), "gfx942", stem));
+    // Output rows of fewer than 4 positions decline: 3x3 unpadded on 5 columns gives 3, on 6
+    // gives 4.
+    auto narrow = baseShape();
+    narrow.prePadding = narrow.postPadding = {0, 0};
+    narrow.input = {10, 5};
+    EXPECT_FALSE(admits(genericFields(), "gfx942", narrow));
+    narrow.input = {10, 6};
+    EXPECT_TRUE(admits(genericFields(), "gfx942", narrow));
+    // The flattened-position form fills its steps across rows: it keeps the 3-column rows,
+    // and the stems' decline still holds for it.
+    auto flat = genericFields();
+    flat.flat = 1;
+    narrow.input = {10, 5};
+    EXPECT_TRUE(admits(flat, "gfx942", narrow));
+    stem.c = 7;
+    EXPECT_FALSE(admits(flat, "gfx942", stem));
 }
 
 TEST(TestConvWrwLaunch, TheGenericWindowGroupsWidthTapsPerFilterRow)
