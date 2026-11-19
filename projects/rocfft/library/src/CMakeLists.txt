@@ -110,6 +110,13 @@ find_package (Python3 3.6 COMPONENTS Interpreter REQUIRED)
 
 add_subdirectory( device )
 
+# default folder of solution maps that will be built in library,
+# user can specify their own arch and folder.  Set before the tests
+# subdirectory so the tests can point at the same folder.
+if( NOT ROCFFT_SOLUTION_MAP_DIR )
+  set( ROCFFT_SOLUTION_MAP_DIR ${CMAKE_SOURCE_DIR}/library/solution_map CACHE STRING "RocFFT solution map directory" )
+endif()
+
 if( ROCFFT_BUILD_INTERNAL_TESTS )
   add_subdirectory( tests )
 endif()
@@ -235,12 +242,6 @@ add_custom_command(
 set( gen_solutions ${CMAKE_BINARY_DIR}/library/src/solutions.cpp )
 set( solship_py ${CMAKE_SOURCE_DIR}/library/src/device/solution-shipping.py )
 
-# default folder of solution maps that will be built in library,
-# user can specify their own arch and folder
-if( NOT ROCFFT_SOLUTION_MAP_DIR )
-  set( ROCFFT_SOLUTION_MAP_DIR ${CMAKE_SOURCE_DIR}/library/solution_map CACHE STRING "RocFFT solution map directory" )
-endif()
-
 file(GLOB solution_map_files "${ROCFFT_SOLUTION_MAP_DIR}/*.dat")
 
 add_custom_command(
@@ -254,7 +255,6 @@ add_custom_command(
 # The following is a list of implementation files defining the library
 set( rocfft_source
   auxiliary.cpp
-  data_layout.cpp
   exec_info.cpp
   plan.cpp
   transform.cpp
@@ -324,6 +324,11 @@ add_library( rocfft-rtc-cache OBJECT
 target_link_libraries( rocfft-rtc-cache PUBLIC ${ROCFFT_SQLITE_LIB} )
 target_link_std_experimental_filesystem( rocfft-rtc-cache )
 
+# data set descriptions, used for plan building and kernel launching
+add_library( rocfft-data-set OBJECT
+  data_set.cpp
+)
+
 # generating kernels from TreeNodes and launching them
 add_library( rocfft-rtc-launch OBJECT
   rtc_kernel.cpp
@@ -355,6 +360,7 @@ foreach( target
   rocfft-rtc-subprocess
   rocfft-rtc-gen
   rocfft-rtc-cache
+  rocfft-data-set
   rocfft-rtc-launch
   rocfft-solution-map
   rocfft-tuning-helper
@@ -366,6 +372,7 @@ foreach( target
   )
   set_target_properties( ${target} PROPERTIES
     CXX_VISIBILITY_PRESET "hidden"
+    C_VISIBILITY_PRESET "hidden"
     VISIBILITY_INLINES_HIDDEN ON
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
@@ -507,6 +514,7 @@ endforeach()
 
 rocfft_link_internal_lib( rocfft generator )
 rocfft_link_internal_lib( rocfft rocfft-function-pool )
+rocfft_link_internal_lib( rocfft rocfft-data-set )
 rocfft_link_internal_lib( rocfft rocfft-rtc-launch )
 rocfft_link_internal_lib( rocfft rocfft-solution-map )
 rocfft_link_internal_lib( rocfft rocfft-tuning-helper )
@@ -515,6 +523,7 @@ target_link_std_experimental_filesystem( rocfft )
 target_link_libraries( rocfft_kernel_config_search PRIVATE
   ${ROCFFT_HOST_LINK_LIBS}
   generator
+  rocfft-data-set
   rocfft-rtc-launch
   rocfft-function-pool
   )
@@ -535,6 +544,7 @@ if( ROCFFT_BUILD_OFFLINE_TUNER )
     rocfft
     generator
     rocfft-function-pool
+    rocfft-data-set
     rocfft-rtc-launch
     rocfft-solution-map
     rocfft-tuning-helper
@@ -543,6 +553,7 @@ if( ROCFFT_BUILD_OFFLINE_TUNER )
     rocfft
     generator
     rocfft-function-pool
+    rocfft-data-set
     rocfft-rtc-launch
     rocfft-solution-map
     rocfft-tuning-helper

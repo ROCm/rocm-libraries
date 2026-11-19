@@ -2,16 +2,21 @@
 // SPDX-License-Identifier: MIT
 
 // The C++ heuristic query must apply a workspace limit from 2 GiB to UINT32_MAX as the C query
-// does. Kernels address the workspace with 32-bit offsets, so both APIs reject anything larger.
+// does. Kernels address the workspace with 32-bit offsets, so both APIs clamp anything larger to
+// UINT32_MAX. Callers pass SIZE_MAX to mean "no limit", so a larger value must not be an error.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 
+#include <Tensile/SolutionLibrary.hpp>
+
 #include <cstdint>
 #include <limits>
 #include <tuple>
 #include <vector>
+
+#include "../../../library/src/amd_detail/rocblaslt/src/include/get_all_search_type_for_test.hpp"
 
 namespace
 {
@@ -40,7 +45,7 @@ namespace
         return out;
     }
 
-    // The buffers are never read: only the heuristic queries run.
+    // The buffers hold no data: the tests check statuses and heuristic results only.
     class HeuristicWorkspaceLimit : public ::testing::Test
     {
     protected:
@@ -87,7 +92,8 @@ namespace
         }
 
         hipblasStatus_t cHeuristic(uint64_t                                       limit,
-                                   std::vector<hipblasLtMatmulHeuristicResult_t>& out)
+                                   std::vector<hipblasLtMatmulHeuristicResult_t>& out,
+                                   int requested = kRequested)
         {
             hipblasLtMatmulPreference_t pref   = nullptr;
             hipblasStatus_t             status = hipblasLtMatmulPreferenceCreate(&pref);
@@ -95,7 +101,7 @@ namespace
                 return status;
             status = hipblasLtMatmulPreferenceSetAttribute(
                 pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &limit, sizeof(limit));
-            out.assign(kRequested, {});
+            out.assign(requested, {});
             int count = 0;
             if(status == HIPBLAS_STATUS_SUCCESS)
                 status = hipblasLtMatmulAlgoGetHeuristic(handle,
@@ -105,7 +111,7 @@ namespace
                                                          layoutD,
                                                          layoutD,
                                                          pref,
-                                                         kRequested,
+                                                         requested,
                                                          out.data(),
                                                          &count);
             out.resize(status == HIPBLAS_STATUS_SUCCESS ? count : 0);
@@ -139,7 +145,8 @@ namespace
         }
 
         hipblasStatus_t cppHeuristic(uint64_t                                       limit,
-                                     std::vector<hipblasLtMatmulHeuristicResult_t>& out)
+                                     std::vector<hipblasLtMatmulHeuristicResult_t>& out,
+                                     int requested = kRequested)
         {
             hipblaslt_ext::Gemm gemm(handle,
                                      HIPBLAS_OP_N,
@@ -154,7 +161,7 @@ namespace
                 return status;
             hipblaslt_ext::GemmPreference pref;
             pref.setMaxWorkspaceBytes(limit);
-            return gemm.algoGetHeuristic(kRequested, pref, out);
+            return gemm.algoGetHeuristic(requested, pref, out);
         }
     };
 
@@ -173,19 +180,52 @@ namespace
         }
     }
 
-    // Every entry point that takes a workspace size or limit rejects it before selecting or
-    // launching a kernel, so no solution library is needed.
-    TEST_F(HeuristicWorkspaceLimit, smoke_RejectsWorkspaceAboveUint32Max)
+    // The preference stores a limit above UINT32_MAX as UINT32_MAX, so no solution library is
+    // needed.
+    TEST_F(HeuristicWorkspaceLimit, smoke_PreferenceClampsLimitAboveUint32Max)
     {
         for(uint64_t limit : {4 * kGiB, std::numeric_limits<uint64_t>::max()})
         {
             SCOPED_TRACE(limit);
-            EXPECT_EQ(setLimit(limit), HIPBLAS_STATUS_INVALID_VALUE);
+            hipblasLtMatmulPreference_t pref = nullptr;
+            ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipblasLtMatmulPreferenceSetAttribute(
+                          pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &limit, sizeof(limit)),
+                      HIPBLAS_STATUS_SUCCESS);
+            uint64_t stored  = 0;
+            size_t   written = 0;
+            EXPECT_EQ(
+                hipblasLtMatmulPreferenceGetAttribute(pref,
+                                                      HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                                      &stored,
+                                                      sizeof(stored),
+                                                      &written),
+                HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(stored, kUint32Max);
+            hipblasLtMatmulPreferenceDestroy(pref);
+        }
+    }
 
-            std::vector<hipblasLtMatmulHeuristicResult_t> results;
-            EXPECT_EQ(cppHeuristic(limit, results), HIPBLAS_STATUS_INVALID_VALUE);
-            EXPECT_TRUE(results.empty());
+    // Every entry point that takes a workspace size or limit treats a value above UINT32_MAX
+    // as UINT32_MAX.
+    TEST_F(HeuristicWorkspaceLimit, smoke_ClampsWorkspaceAboveUint32Max)
+    {
+        // Results at the cap are the reference. Solutions that fit the real buffer are run.
+        std::vector<hipblasLtMatmulHeuristicResult_t> capped, fitting;
+        if(cHeuristic(kUint32Max, capped) != HIPBLAS_STATUS_SUCCESS || capped.empty()
+           || cHeuristic(kWorkspace, fitting) != HIPBLAS_STATUS_SUCCESS || fitting.empty())
+            GTEST_SKIP() << "No solution for this problem in the loaded library";
 
+        for(uint64_t limit : {4 * kGiB, std::numeric_limits<uint64_t>::max()})
+        {
+            SCOPED_TRACE(limit);
+            std::vector<hipblasLtMatmulHeuristicResult_t> c, cpp;
+            ASSERT_EQ(cHeuristic(limit, c), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(summary(c), summary(capped));
+            ASSERT_EQ(cppHeuristic(limit, cpp), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(summary(cpp), summary(capped));
+
+            // The algo's own workspace limit keeps the kernel inside the real buffer.
             EXPECT_EQ(hipblasLtMatmul(handle,
                                       desc,
                                       &alpha,
@@ -198,11 +238,12 @@ namespace
                                       layoutD,
                                       d,
                                       layoutD,
-                                      nullptr,
+                                      &fitting.front().algo,
                                       ws,
                                       limit,
                                       nullptr),
-                      HIPBLAS_STATUS_INVALID_VALUE);
+                      HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
 
             hipblaslt_ext::Gemm gemm(handle,
                                      HIPBLAS_OP_N,
@@ -214,8 +255,46 @@ namespace
                                      HIPBLAS_COMPUTE_32F);
             ASSERT_EQ(setProblem(gemm), HIPBLAS_STATUS_SUCCESS);
             gemm.setMaxWorkspaceBytes(limit);
-            hipblasLtMatmulAlgo_t algo{};
-            EXPECT_EQ(gemm.initialize(algo, ws), HIPBLAS_STATUS_INVALID_VALUE);
+            hipblasLtMatmulAlgo_t algo = fitting.front().algo;
+            EXPECT_EQ(gemm.initialize(algo, ws), HIPBLAS_STATUS_SUCCESS);
         }
+    }
+
+    // Ranking a single algo does not call getAllSolutions. Asking for more algos
+    // than the ranking returns does, through both top-up call sites, and the
+    // search type is the no-ranking one. The hook is cleared before each query.
+    TEST_F(HeuristicWorkspaceLimit, smoke_TopUpPassesNoRankingSearch)
+    {
+        constexpr int kNoCall = -1;
+        constexpr int kNoRank
+            = static_cast<int>(TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING);
+        constexpr int kMany = 100000;
+
+        std::vector<hipblasLtMatmulHeuristicResult_t> results;
+        rocblaslt_testing_reset_last_get_all_search_type_for_test();
+        if(cHeuristic(kWorkspace, results, 1) != HIPBLAS_STATUS_SUCCESS || results.empty())
+            GTEST_SKIP() << "No solution for this problem in the loaded library";
+        EXPECT_EQ(rocblaslt_testing_last_get_all_search_type_for_test(), kNoCall)
+            << "hipblasLtMatmulAlgoGetHeuristic called getAllSolutions while the ranking "
+               "already filled the request";
+
+        rocblaslt_testing_reset_last_get_all_search_type_for_test();
+        ASSERT_EQ(cHeuristic(kWorkspace, results, kMany), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_LT(results.size(), static_cast<size_t>(kMany));
+        EXPECT_EQ(rocblaslt_testing_last_get_all_search_type_for_test(), kNoRank)
+            << "topUpWithSizeIndependentSolutions did not pass a no-ranking search";
+
+        rocblaslt_testing_reset_last_get_all_search_type_for_test();
+        ASSERT_EQ(cppHeuristic(kWorkspace, results, 1), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(results.size(), 1u);
+        EXPECT_EQ(rocblaslt_testing_last_get_all_search_type_for_test(), kNoCall)
+            << "rocblaslt_algo_get_heuristic_cpp called getAllSolutions while the ranking "
+               "already filled the request";
+
+        rocblaslt_testing_reset_last_get_all_search_type_for_test();
+        ASSERT_EQ(cppHeuristic(kWorkspace, results, kMany), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_LT(results.size(), static_cast<size_t>(kMany));
+        EXPECT_EQ(rocblaslt_testing_last_get_all_search_type_for_test(), kNoRank)
+            << "rocblaslt_algo_get_heuristic_cpp top-up did not pass a no-ranking search";
     }
 } // namespace

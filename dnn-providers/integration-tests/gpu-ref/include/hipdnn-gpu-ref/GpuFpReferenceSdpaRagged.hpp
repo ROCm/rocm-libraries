@@ -5,6 +5,7 @@
 
 #include <hipdnn-gpu-ref/GpuFpReferenceSdpa.hpp>
 #include <hipdnn_data_sdk/types/Fp8E4M3.hpp>
+#include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/detail/RaggedTokenBoundaries.hpp>
 
@@ -32,15 +33,19 @@ struct RaggedOffsetMultipliers
 };
 
 // GPU reference for ragged forward SDPA (RFC-0014), the ragged twin of GpuFpReferenceSdpa.
-// Tensors are rank-4 [B, S, H, D] with the sequence at axis 1, packed token by token with no
-// per-batch padding:
-//   q = [B, Sq,  H,  D ]   k = [B, Skv, Hk, D ]
-//   v = [B, Skv, Hv, Dv]   o = [B, Sq,  H,  Dv]
-// raggedOffsetQ/K/V/O are INT32 [B+1, 1, 1, 1] cumulative offsets, scaled to elements by
-// `offsetMultipliers`. Batch b starts at element offset[b] and has
-// (offset[b+1] - offset[b]) / strides[1] tokens. O must match Q's token boundaries and V must
-// match K's.
-// The optional LSE is [B, Sq, H, 1], ragged if raggedOffsetLse is given, else dense.
+// Tensors are logical rank-4 [B, H, S, D] with the sequence at SDPA_SEQ_AXIS (2) and any
+// non-aliasing strides (token-major, head-major, padded token stride, shifted or non-monotonic
+// origins):
+//   q = [B, H,  Sq,  D ]   k = [B, Hk, Skv, D ]
+//   v = [B, Hv, Skv, Dv]   o = [B, H,  Sq,  Dv]
+// raggedOffsetQ/K/V/O are INT32 [B+1, 1, 1, 1] offset tables (entry b at b * strides()[0]), scaled to elements by
+// `offsetMultipliers`: batch b starts at element offset[b]. Its length is seqLenQ[b] (Q, O, LSE)
+// or seqLenKv[b] (K, V) when those INT32 [B, 1, 1, 1] tensors are given (element b at
+// b * strides()[0]), else
+// min((offset[b+1] - offset[b]) / strides[2], S_max). Each layout must satisfy the Data SDK
+// ragged container rules (raggedFootprint). O and the LSE must have Q's per-batch lengths and V
+// K's.
+// The optional LSE is [B, H, Sq, 1], ragged if raggedOffsetLse is given, else dense.
 // Softmax numerics match the dense reference. Supports GQA/MQA and per-batch causal and
 // sliding window. No bias, alibi or dropout, since the ASM v3 path gates them off.
 class GpuFpReferenceSdpaRagged
@@ -71,7 +76,9 @@ public:
                     hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
                     hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
                     hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr,
-                    const RaggedOffsetMultipliers& offsetMultipliers = {})
+                    const RaggedOffsetMultipliers& offsetMultipliers = {},
+                    hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenQ = nullptr,
+                    hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr)
     {
         // fp8 is input-only: the kernel can decode fp8 but not encode it (AITER writes bf16).
         static_assert(!std::is_same_v<ODataType, hipdnn_data_sdk::types::fp8_e4m3>,
@@ -86,61 +93,96 @@ public:
                        raggedOffsetO.dims()});
 
         const auto batch = q.dims()[0];
-        const auto numHeads = q.dims()[2];
+        const auto numHeads = q.dims()[1];
         const auto headDim = q.dims()[3];
-        const auto numHeadsK = k.dims()[2];
-        const auto numHeadsV = v.dims()[2];
+        const auto numHeadsK = k.dims()[1];
+        const auto numHeadsV = v.dims()[1];
         const auto headDimV = v.dims()[3];
 
-        // Elements per token: H*D for Q, Hk*D for K.
-        const auto seqStrideQ = q.strides()[1];
-        const auto seqStrideKv = k.strides()[1];
-
-        // Offsets may live only on the device (plan path), so read them back and check them here.
-        // Every ragged tensor must use the RFC-0014 layout, and tensors that share a packing must
-        // agree on every batch length.
+        // Offsets and lengths may live only on the device (plan path), so read them back and
+        // check them here. Every ragged tensor must be a valid ragged container layout, and
+        // tensors that share a length must agree on every batch length.
+        constexpr auto SEQ_AXIS = hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS;
         const std::string who = "GpuFpReferenceSdpaRagged";
-        const auto tokenBoundaries = [&](hipdnn_data_sdk::utilities::TensorBase<int32_t>& offsets,
-                                         int64_t multiplier,
-                                         const std::vector<int64_t>& dims,
-                                         const std::vector<int64_t>& strides,
-                                         const char* name) {
-            hipdnn_test_sdk::detail::requireTokenMajorRaggedLayout(dims, strides, who, name);
-            if(offsets.strides()[0] != 1)
+        const auto readSeqLens = [&](hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLen,
+                                     const char* name) -> std::optional<std::vector<int64_t>> {
+            if(seqLen == nullptr)
             {
-                throw std::invalid_argument(who + ": " + name
-                                            + " ragged_offset must be contiguous");
+                return std::nullopt;
             }
+            if(!hipdnn_data_sdk::utilities::detail::isBatchAxisVector(seqLen->dims(), batch))
+            {
+                throw std::invalid_argument(who + ": " + name + " must have shape [B, 1, 1, 1]");
+            }
+            return readStridedValues(
+                seqLen->memory().deviceData(), batch, seqLen->strides()[0], who + ": " + name);
+        };
+        const auto seqLensQ = readSeqLens(seqLenQ, "seq_len_q");
+        const auto seqLensKv = readSeqLens(seqLenKv, "seq_len_kv");
+        const auto batchesOf = [&](hipdnn_data_sdk::utilities::TensorBase<int32_t>& offsets,
+                                   int64_t multiplier,
+                                   const std::vector<int64_t>& dims,
+                                   const std::vector<int64_t>& strides,
+                                   const std::optional<std::vector<int64_t>>& seqLens,
+                                   const char* name) {
             if(multiplier < 1)
             {
                 throw std::invalid_argument(who + ": " + name
                                             + " ragged_offset_multiplier must be >= 1 (got "
                                             + std::to_string(multiplier) + ")");
             }
-            auto elementOffsets = readRaggedOffsets(offsets.memory().deviceData(), batch + 1);
+            if(strides[SEQ_AXIS] <= 0)
+            {
+                throw std::invalid_argument(who + ": " + name
+                                            + " sequence stride must be positive (got "
+                                            + std::to_string(strides[SEQ_AXIS]) + ")");
+            }
+            auto elementOffsets = readStridedValues(offsets.memory().deviceData(),
+                                                    batch + 1,
+                                                    offsets.strides()[0],
+                                                    who + ": " + name + " ragged_offset");
             for(auto& offset : elementOffsets)
             {
                 offset *= multiplier;
             }
-            return hipdnn_test_sdk::detail::raggedTokenBoundaries(
-                elementOffsets, strides[1], dims[1], who, name);
+            try
+            {
+                auto batches = hipdnn_data_sdk::utilities::detail::raggedBatches(
+                    elementOffsets,
+                    seqLens.has_value() ? &*seqLens : nullptr,
+                    strides[SEQ_AXIS],
+                    dims[SEQ_AXIS]);
+                hipdnn_data_sdk::utilities::detail::raggedFootprint(
+                    dims, strides, SEQ_AXIS, batches);
+                return batches;
+            }
+            catch(const std::invalid_argument& e)
+            {
+                throw std::invalid_argument(who + ": " + name + ": " + e.what());
+            }
         };
         const auto& mult = offsetMultipliers;
-        const auto qTokens = tokenBoundaries(raggedOffsetQ, mult.q, q.dims(), q.strides(), "Q");
-        const auto kTokens = tokenBoundaries(raggedOffsetK, mult.k, k.dims(), k.strides(), "K");
-        hipdnn_test_sdk::detail::requireMatchingTokenBoundaries(
-            qTokens,
+        const auto qBatches
+            = batchesOf(raggedOffsetQ, mult.q, q.dims(), q.strides(), seqLensQ, "Q");
+        const auto kBatches
+            = batchesOf(raggedOffsetK, mult.k, k.dims(), k.strides(), seqLensKv, "K");
+        hipdnn_test_sdk::detail::requireMatchingRaggedLengths(
+            qBatches.lengths,
             "Q",
-            tokenBoundaries(raggedOffsetO, mult.o, o.dims(), o.strides(), "O"),
+            batchesOf(raggedOffsetO, mult.o, o.dims(), o.strides(), seqLensQ, "O").lengths,
             "O",
             who);
-        hipdnn_test_sdk::detail::requireMatchingTokenBoundaries(
-            kTokens,
+        hipdnn_test_sdk::detail::requireMatchingRaggedLengths(
+            kBatches.lengths,
             "K",
-            tokenBoundaries(raggedOffsetV, mult.v, v.dims(), v.strides(), "V"),
+            batchesOf(raggedOffsetV, mult.v, v.dims(), v.strides(), seqLensKv, "V").lengths,
             "V",
             who);
-        const int64_t totalQ = qTokens.back();
+        int64_t totalQ = 0;
+        for(const auto length : qBatches.lengths)
+        {
+            totalQ += length;
+        }
 
         // An absent scale is 1.0 (no scaling), as in cuDNN and the dense reference.
         const float scale = attnScaleValue.value_or(1.0F);
@@ -157,11 +199,11 @@ public:
             // One value per query token. Sq must match Q's, or a dense LSE's rows would spill
             // into the next batch.
             const auto& lseDims = lse->dims();
-            if(lseDims.size() != 4 || lseDims[0] != batch || lseDims[1] != q.dims()[1]
-               || lseDims[2] != numHeads || lseDims[3] != 1)
+            if(lseDims.size() != 4 || lseDims[0] != batch || lseDims[1] != numHeads
+               || lseDims[2] != q.dims()[SEQ_AXIS] || lseDims[3] != 1)
             {
-                throw std::invalid_argument("GpuFpReferenceSdpaRagged: lse must be rank-4 [B, Sq, "
-                                            "H, 1] with Q's B, Sq, H");
+                throw std::invalid_argument("GpuFpReferenceSdpaRagged: lse must be rank-4 [B, H, "
+                                            "Sq, 1] with Q's B, H, Sq");
             }
             lsePtr = lse->memory().deviceData();
             lseStrides = lse->strides();
@@ -173,10 +215,11 @@ public:
                         "GpuFpReferenceSdpaRagged: raggedOffsetLse must be rank-4 [B+1, 1, 1, 1]");
                 }
                 raggedOffsetLsePtr = raggedOffsetLse->memory().deviceData();
-                hipdnn_test_sdk::detail::requireMatchingTokenBoundaries(
-                    qTokens,
+                hipdnn_test_sdk::detail::requireMatchingRaggedLengths(
+                    qBatches.lengths,
                     "Q",
-                    tokenBoundaries(*raggedOffsetLse, mult.lse, lseDims, lseStrides, "LSE"),
+                    batchesOf(*raggedOffsetLse, mult.lse, lseDims, lseStrides, seqLensQ, "LSE")
+                        .lengths,
                     "LSE",
                     who);
             }
@@ -199,19 +242,28 @@ public:
             return;
         }
 
-        launchSdpaRaggedFwd(q.memory().deviceData(),
-                            k.memory().deviceData(),
-                            v.memory().deviceData(),
-                            o.memory().deviceData(),
-                            lsePtr,
-                            raggedOffsetLsePtr,
-                            raggedOffsetQ.memory().deviceData(),
-                            raggedOffsetK.memory().deviceData(),
-                            mult.q,
-                            mult.k,
-                            mult.lse,
-                            seqStrideQ,
-                            seqStrideKv,
+        RaggedLaunchTensors tensors;
+        tensors.q = q.memory().deviceData();
+        tensors.k = k.memory().deviceData();
+        tensors.v = v.memory().deviceData();
+        tensors.o = o.memory().deviceData();
+        tensors.lse = lsePtr;
+        tensors.offsetQ = raggedOffsetQ.memory().deviceData();
+        tensors.offsetK = raggedOffsetK.memory().deviceData();
+        tensors.offsetV = raggedOffsetV.memory().deviceData();
+        tensors.offsetO = raggedOffsetO.memory().deviceData();
+        tensors.offsetLse = raggedOffsetLsePtr;
+        tensors.multipliers = mult;
+        tensors.offsetStrideQ = raggedOffsetQ.strides()[0];
+        tensors.offsetStrideK = raggedOffsetK.strides()[0];
+        tensors.offsetStrideV = raggedOffsetV.strides()[0];
+        tensors.offsetStrideO = raggedOffsetO.strides()[0];
+        tensors.offsetStrideLse = raggedOffsetLse != nullptr ? raggedOffsetLse->strides()[0] : 0;
+        tensors.seqLenQ = seqLenQ != nullptr ? seqLenQ->memory().deviceData() : nullptr;
+        tensors.seqLenKv = seqLenKv != nullptr ? seqLenKv->memory().deviceData() : nullptr;
+        tensors.seqLenQStride = seqLenQ != nullptr ? seqLenQ->strides()[0] : 0;
+        tensors.seqLenKvStride = seqLenKv != nullptr ? seqLenKv->strides()[0] : 0;
+        launchSdpaRaggedFwd(tensors,
                             dq.ptr,
                             dq.batchStride,
                             dq.headStride,
@@ -227,7 +279,8 @@ public:
                             o.strides(),
                             lseStrides,
                             batch,
-                            totalQ,
+                            q.dims()[SEQ_AXIS],
+                            k.dims()[SEQ_AXIS],
                             numHeads,
                             numHeadsK,
                             numHeadsV,
@@ -293,23 +346,23 @@ private:
         if(qDims.size() != 4 || kDims.size() != 4 || vDims.size() != 4 || oDims.size() != 4)
         {
             throw std::invalid_argument(
-                "GpuFpReferenceSdpaRagged: q/k/v/o must all be rank-4 [B, S, H, D] tensors");
+                "GpuFpReferenceSdpaRagged: q/k/v/o must all be rank-4 [B, H, S, D] tensors");
         }
         // RFC-0014: ragged_offset is INT32 [B+1, 1, 1, 1].
         for(const auto& d : raggedOffsetDims)
         {
-            if(d.size() != 4 || d[0] != qDims[0] + 1 || d[1] != 1 || d[2] != 1 || d[3] != 1)
+            if(!hipdnn_data_sdk::utilities::detail::isBatchAxisVector(d, qDims[0] + 1))
             {
-                throw std::invalid_argument(
-                    "GpuFpReferenceSdpaRagged: raggedOffsetQ/K/V/O must be rank-4 [B+1, 1, 1, 1]");
+                throw std::invalid_argument("GpuFpReferenceSdpaRagged: raggedOffsetQ/K/V/O must "
+                                            "have shape [B + 1, 1, 1, 1]");
             }
         }
 
         const auto batch = qDims[0];
-        const auto numHeads = qDims[2];
+        const auto numHeads = qDims[1];
         const auto headDim = qDims[3];
-        const auto numHeadsK = kDims[2];
-        const auto numHeadsV = vDims[2];
+        const auto numHeadsK = kDims[1];
+        const auto numHeadsV = vDims[1];
         const auto headDimV = vDims[3];
 
         if(batch <= 0 || numHeads <= 0 || headDim <= 0 || numHeadsK <= 0 || numHeadsV <= 0
@@ -322,7 +375,7 @@ private:
         {
             throw std::invalid_argument("GpuFpReferenceSdpaRagged: batch dimension mismatch");
         }
-        if(vDims[1] != kDims[1])
+        if(vDims[2] != kDims[2])
         {
             throw std::invalid_argument(
                 "GpuFpReferenceSdpaRagged: K and V sequence extents (S_max) must match");
@@ -336,31 +389,48 @@ private:
             throw std::invalid_argument(
                 "GpuFpReferenceSdpaRagged: numHeads must be divisible by numHeadsK and numHeadsV");
         }
-        if(oDims[1] != qDims[1] || oDims[2] != numHeads || oDims[3] != headDimV)
+        if(oDims[1] != numHeads || oDims[2] != qDims[2] || oDims[3] != headDimV)
         {
             throw std::invalid_argument(
-                "GpuFpReferenceSdpaRagged: output shape must be [B, Sq, H, Dv]");
+                "GpuFpReferenceSdpaRagged: output shape must be [B, H, Sq, Dv]");
         }
     }
 
-    // Copies `count` INT32 offsets from a contiguous ragged_offset table on the device.
-    static std::vector<int64_t> readRaggedOffsets(const void* raggedOffsetPtr, int64_t count);
+    // Copies the `count` INT32 values of a ragged_offset table or seq_len tensor, value b at
+    // b * stride on the device. A stride is only meaningful, and so only validated, with more than one value.
+    static std::vector<int64_t>
+        readStridedValues(const void* ptr, int64_t count, int64_t stride, const std::string& name);
 
     // --- Kernel launcher, defined in GpuFpReferenceSdpaRagged.cpp ---
 
-    static void launchSdpaRaggedFwd(const void* qPtr,
-                                    const void* kPtr,
-                                    const void* vPtr,
-                                    void* oPtr,
-                                    void* lsePtr,
-                                    const void* raggedOffsetLsePtr,
-                                    const void* raggedOffsetQPtr,
-                                    const void* raggedOffsetKvPtr,
-                                    int64_t offsetMultiplierQ,
-                                    int64_t offsetMultiplierKv,
-                                    int64_t offsetMultiplierLse,
-                                    int64_t seqStrideQ,
-                                    int64_t seqStrideKv,
+    // Device pointers of one launch. Optional ones are nullptr.
+    struct RaggedLaunchTensors
+    {
+        const void* q = nullptr;
+        const void* k = nullptr;
+        const void* v = nullptr;
+        void* o = nullptr;
+        void* lse = nullptr;
+        const void* offsetQ = nullptr;
+        const void* offsetK = nullptr;
+        const void* offsetV = nullptr;
+        const void* offsetO = nullptr;
+        const void* offsetLse = nullptr;
+        RaggedOffsetMultipliers multipliers;
+        // Batch-axis strides (elements) of the offset tables; 0 when not bound.
+        int64_t offsetStrideQ = 0;
+        int64_t offsetStrideK = 0;
+        int64_t offsetStrideV = 0;
+        int64_t offsetStrideO = 0;
+        int64_t offsetStrideLse = 0;
+        const void* seqLenQ = nullptr;
+        const void* seqLenKv = nullptr;
+        // Batch-axis strides (elements) of the seq_len tensors; 0 when not bound.
+        int64_t seqLenQStride = 0;
+        int64_t seqLenKvStride = 0;
+    };
+
+    static void launchSdpaRaggedFwd(const RaggedLaunchTensors& tensors,
                                     const void* descaleQPtr,
                                     int64_t descaleQBatchStride,
                                     int64_t descaleQHeadStride,
@@ -376,7 +446,8 @@ private:
                                     const std::vector<int64_t>& oTensorStrides,
                                     const std::vector<int64_t>& lseTensorStrides,
                                     int64_t batch,
-                                    int64_t totalQ,
+                                    int64_t seqMaxQ,
+                                    int64_t seqMaxKv,
                                     int64_t numHeads,
                                     int64_t numHeadsK,
                                     int64_t numHeadsV,

@@ -77,6 +77,13 @@ inline double hash_prob(const int seed, const std::string& token)
         GTEST_SKIP();                                                                          \
     }
 
+// Macro to skip a test if only quick tests are requested
+#define SKIP_ON_QUICK_TESTS()                       \
+    if(quick_tests_only)                            \
+    {                                               \
+        GTEST_SKIP() << "skipping for quick tests"; \
+    }
+
 template <typename T, std::enable_if_t<std::is_arithmetic_v<T>, bool> = true>
 std::vector<T> merge_and_sort_values(const std::vector<std::vector<T>>& set_of_vecs,
                                      size_t max_num_elem = std::numeric_limits<size_t>::max())

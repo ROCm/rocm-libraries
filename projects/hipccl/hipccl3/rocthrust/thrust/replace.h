@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -148,7 +155,7 @@ void replace(ForwardIterator first, ForwardIterator last, const T& old_value, co
  *  \tparam DerivedPolicy The name of the derived execution policy.
  *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
  * Iterator</a>, \p ForwardIterator is mutable, and \p ForwardIterator's \c value_type is convertible to \p Predicate's
- * \c argument_type. \tparam Predicate is a model of <a
+ * argument type. \tparam Predicate is a model of <a
  * href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>. \tparam T is a model of <a
  * href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>, and \p T is convertible to \p
  * ForwardIterator's \c value_type.
@@ -164,7 +171,7 @@ void replace(ForwardIterator first, ForwardIterator last, const T& old_value, co
  *  ...
  *  struct is_less_than_zero
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x < 0;
@@ -211,7 +218,7 @@ THRUST_HOST_DEVICE void replace_if(
  *
  *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
  * Iterator</a>, \p ForwardIterator is mutable, and \p ForwardIterator's \c value_type is convertible to \p Predicate's
- * \c argument_type. \tparam Predicate is a model of <a
+ * argument type. \tparam Predicate is a model of <a
  * href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>. \tparam T is a model of <a
  * href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>, and \p T is convertible to \p
  * ForwardIterator's \c value_type.
@@ -225,7 +232,7 @@ THRUST_HOST_DEVICE void replace_if(
  *  ...
  *  struct is_less_than_zero
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x < 0;
@@ -274,7 +281,7 @@ void replace_if(ForwardIterator first, ForwardIterator last, Predicate pred, con
  *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
  * Iterator</a>, and \p ForwardIterator is mutable. \tparam InputIterator is a model of <a
  * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>, and \p InputIterator's \c
- * value_type is convertible to \p Predicate's \c argument_type. \tparam Predicate is a model of <a
+ * value_type is convertible to \p Predicate's argument type. \tparam Predicate is a model of <a
  * href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>. \tparam T is a model of <a
  * href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>, and \p T is convertible to \p
  * ForwardIterator's \c value_type.
@@ -290,7 +297,7 @@ void replace_if(ForwardIterator first, ForwardIterator last, Predicate pred, con
  *
  *  struct is_less_than_zero
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x < 0;
@@ -346,7 +353,7 @@ THRUST_HOST_DEVICE void replace_if(
  *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
  * Iterator</a>, and \p ForwardIterator is mutable. \tparam InputIterator is a model of <a
  * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>, and \p InputIterator's \c
- * value_type is convertible to \p Predicate's \c argument_type. \tparam Predicate is a model of <a
+ * value_type is convertible to \p Predicate's argument type. \tparam Predicate is a model of <a
  * href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>. \tparam T is a model of <a
  * href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>, and \p T is convertible to \p
  * ForwardIterator's \c value_type.
@@ -360,7 +367,7 @@ THRUST_HOST_DEVICE void replace_if(
  *
  *  struct is_less_than_zero
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x < 0;
@@ -530,7 +537,7 @@ replace_copy(InputIterator first, InputIterator last, OutputIterator result, con
  *  \tparam DerivedPolicy The name of the derived execution policy.
  *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
  Iterator</a>,
- *          and \p InputIterator's \c value_type is convertible to \p Predicate's \c argument_type.
+ *          and \p InputIterator's \c value_type is convertible to \p Predicate's argument type.
  *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output
  Iterator</a>.
  *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
@@ -547,7 +554,7 @@ replace_copy(InputIterator first, InputIterator last, OutputIterator result, con
  *
  *  struct is_less_than_zero
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x < 0;
@@ -601,7 +608,7 @@ THRUST_HOST_DEVICE OutputIterator replace_copy_if(
  *
  *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
  Iterator</a>,
- *          and \p InputIterator's \c value_type is convertible to \p Predicate's \c argument_type.
+ *          and \p InputIterator's \c value_type is convertible to \p Predicate's argument type.
  *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output
  Iterator</a>.
  *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
@@ -617,7 +624,7 @@ THRUST_HOST_DEVICE OutputIterator replace_copy_if(
  *
  *  struct is_less_than_zero
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x < 0;
@@ -672,7 +679,7 @@ replace_copy_if(InputIterator first, InputIterator last, OutputIterator result, 
  *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
  * Iterator</a>. \tparam InputIterator2 is a model of <a
  * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a> and \p InputIterator2's \c
- * value_type is convertible to \p Predicate's \c argument_type. \tparam OutputIterator is a model of <a
+ * value_type is convertible to \p Predicate's argument type. \tparam OutputIterator is a model of <a
  * href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>. \tparam Predicate is a model
  * of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>. \tparam T is a model of <a
  * href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>, and \p T is convertible to \p
@@ -689,7 +696,7 @@ replace_copy_if(InputIterator first, InputIterator last, OutputIterator result, 
  *
  *  struct is_less_than_zero
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x < 0;
@@ -755,7 +762,7 @@ THRUST_HOST_DEVICE OutputIterator replace_copy_if(
  *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
  * Iterator</a>. \tparam InputIterator2 is a model of <a
  * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a> and \p InputIterator2's \c
- * value_type is convertible to \p Predicate's \c argument_type. \tparam OutputIterator is a model of <a
+ * value_type is convertible to \p Predicate's argument type. \tparam OutputIterator is a model of <a
  * href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>. \tparam Predicate is a model
  * of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>. \tparam T is a model of <a
  * href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>, and \p T is convertible to \p
@@ -771,7 +778,7 @@ THRUST_HOST_DEVICE OutputIterator replace_copy_if(
  *
  *  struct is_less_than_zero
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x < 0;

@@ -43,6 +43,8 @@ int rocke_schedule_dtype_bytes(const char* dtype)
         return 1;
     if(strcmp(dtype, "f32") == 0)
         return 4;
+    if(strcmp(dtype, "fp64") == 0)
+        return 8;
     return -1; /* Python: raise ValueError(...) */
 }
 

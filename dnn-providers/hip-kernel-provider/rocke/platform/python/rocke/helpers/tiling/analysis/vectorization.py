@@ -4,7 +4,7 @@
 """Vectorization model -- the b128-capped hardware-transaction pattern of a memory access. PURE calc (no
 matplotlib): the shared backend that visualization, skills, and agents all ground on. GENERIC -- a function of
 a distribution's ``{(lane,reg)->coord}`` map + an ``addr_fn`` (from the tensor's real strides), never a fixed
-descriptor or an assumed row/col-major order."""
+descriptor or an assumed memory order."""
 
 from __future__ import annotations
 

@@ -41,14 +41,16 @@ inline std::vector<PaddingMode> getPaddingModes()
 // Layouts
 // ===========================================================================
 
+// Resample kernels index purely by strides (P2), so parameterized cases are channel-first only.
+// Channel-last is covered by the explicit TestGpuResample{Fwd,Bwd}RefChannelLast.* TESTs.
 inline std::vector<TensorLayout> getResample4DLayouts()
 {
-    return {TensorLayout::NCHW, TensorLayout::NHWC};
+    return {TensorLayout::NCHW};
 }
 
 inline std::vector<TensorLayout> getResample5DLayouts()
 {
-    return {TensorLayout::NCDHW, TensorLayout::NDHWC};
+    return {TensorLayout::NCDHW};
 }
 
 // ===========================================================================
@@ -118,7 +120,7 @@ inline std::vector<ResampleTestShape> getResampleMedium5DShapes()
 }
 
 // ===========================================================================
-// Large shapes - Full/weekly tier CI execution (Comprehensive / nightly)
+// Large shapes - Comprehensive / nightly tier CI execution (fp32 only)
 // ===========================================================================
 
 inline std::vector<ResampleTestShape> getResampleLarge4DShapes()
@@ -147,6 +149,7 @@ inline std::vector<ResampleTestShape> getResampleLarge5DShapes()
 
 // ==========================================================================
 // Cartesian product of shapes, layouts, resample modes, and padding modes
+// (NEG_INF_PAD is generated for MAXPOOL only)
 // ==========================================================================
 
 inline std::vector<ResampleTestCase>
@@ -167,6 +170,15 @@ inline std::vector<ResampleTestCase>
             {
                 for(const auto& paddingMode : paddingModes)
                 {
+                    // P3: PADDING_MODE is read only for MAXPOOL (GpuRefResampleFwd.cpp:114,
+                    // CpuFpReferenceResampleFwd.hpp:81-84), so AVGPOOL x NEG_INF_PAD is a
+                    // byte-identical duplicate of AVGPOOL x ZERO_PAD.
+                    if(paddingMode == PaddingMode::NEG_INF_PAD
+                       && resampleMode != ResampleMode::MAXPOOL)
+                    {
+                        continue;
+                    }
+
                     cases.emplace_back(shape.xDims,
                                        layout,
                                        shape.prePadding,

@@ -21,6 +21,7 @@
  * graph for its whole lifetime -- abandoned intermediate arrays are reclaimed in
  * bulk when the arena is destroyed, exactly mirroring Python GC lifetime.
  */
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -444,8 +445,42 @@ static const char* constant_ity(const rocke_type_t* t)
     return "i32";
 }
 
+/* Python _int_width(t): bit width of an integer constant's type (the folder's
+ * three widths). */
+static int int_width(const rocke_type_t* t)
+{
+    if(t && t->name)
+    {
+        if(strcmp(t->name, "i1") == 0)
+            return 1;
+        if(strcmp(t->name, "i64") == 0)
+            return 64;
+    }
+    return 32;
+}
+
+/* Python _wrap_to_width(value, t): `value` as the hardware holds it in an
+ * integer of type `t`. The fold result stands for a fixed-width register, so it
+ * wraps as two's complement: an i32 sum of 2^31 - 1 and 1 (defined for
+ * add_nuw) reads back as -2^31, which is what later signed folds must compare.
+ * An i1 keeps 0 / 1, the form the compare folds and the printers use. */
+static int64_t wrap_to_width(int64_t value, const rocke_type_t* t)
+{
+    const int width = int_width(t);
+    if(width == 1)
+        return value & 1;
+    if(width == 64)
+        return value;
+    const uint64_t mask = ((uint64_t)1 << width) - 1;
+    const uint64_t bits = (uint64_t)value & mask;
+    const uint64_t sign = (uint64_t)1 << (width - 1);
+    /* Sign-extend without a signed overflow: (bits ^ sign) - sign. */
+    return (int64_t)((bits ^ sign) - sign);
+}
+
 /* Python _const_int(v): returns the int value of a constant operand iff its op
- * is "arith.constant" with ity in {i1,i32,i64}. *out is set; returns true. */
+ * is "arith.constant" with ity in {i1,i32,i64}, read at the constant's width.
+ * *out is set; returns true. */
 static bool const_int(const rocke_value_t* v, int64_t* out)
 {
     rocke_op_t* op;
@@ -467,21 +502,17 @@ static bool const_int(const rocke_value_t* v, int64_t* out)
     /* Python int(op.attrs["value"]). Constant ints are stored as INT; tolerate
      * a FLOAT just in case (truncate toward zero). */
     if(val->kind == ROCKE_ATTR_INT)
-    {
         *out = val->u.i;
-        return true;
-    }
-    if(val->kind == ROCKE_ATTR_FLOAT)
-    {
+    else if(val->kind == ROCKE_ATTR_FLOAT)
         *out = (int64_t)val->u.f;
-        return true;
-    }
-    if(val->kind == ROCKE_ATTR_BOOL)
-    {
+    else if(val->kind == ROCKE_ATTR_BOOL)
         *out = val->u.b ? 1 : 0;
-        return true;
-    }
-    return false;
+    else
+        return false;
+    /* Read at the constant's width, as folded results are written: an i32
+     * literal 0x80000000 and a folded i32 sum of the same bits are one value. */
+    *out = wrap_to_width(*out, v->type);
+    return true;
 }
 
 /* Python _try_fold(op): returns true and writes *out for a foldable integer op
@@ -492,6 +523,10 @@ static bool try_fold(const rocke_op_t* op, int64_t* out)
     int i;
     if(op->num_results != 1)
         return false;
+    /* Python: the marker is its first operand; a runtime end (operand 1) does
+     * not stop a constant marked value from folding. */
+    if(op->opcode == ROCKE_OP_ARITH_ASSUME_RANGE)
+        return op->num_operands >= 1 && const_int(op->operands[0], out);
     /* Every foldable op takes 1..3 operands; a different arity cannot be one. */
     if(op->num_operands < 1 || op->num_operands > 3)
         return false;
@@ -507,34 +542,35 @@ static bool try_fold(const rocke_op_t* op, int64_t* out)
     case ROCKE_OP_ARITH_ADD:
         if(op->num_operands != 2)
             return false;
-        *out = ints[0] + ints[1];
+        /* Unsigned arithmetic: wraps at 64 bits where a signed sum would be
+         * undefined, matching Python's sum wrapped to i64. */
+        *out = (int64_t)((uint64_t)ints[0] + (uint64_t)ints[1]);
         return true;
     case ROCKE_OP_ARITH_SUB:
         if(op->num_operands != 2)
             return false;
-        *out = ints[0] - ints[1];
+        *out = (int64_t)((uint64_t)ints[0] - (uint64_t)ints[1]);
         return true;
     case ROCKE_OP_ARITH_MUL:
         if(op->num_operands != 2)
             return false;
-        *out = ints[0] * ints[1];
+        *out = (int64_t)((uint64_t)ints[0] * (uint64_t)ints[1]);
         return true;
     case ROCKE_OP_ARITH_DIV:
-        if(op->num_operands != 2 || ints[1] == 0)
-            return false;
-        /* Python int(ints[0] / ints[1]): float division truncated toward 0. */
-        *out = (int64_t)((double)ints[0] / (double)ints[1]);
-        return true;
     case ROCKE_OP_ARITH_MOD:
-        if(op->num_operands != 2 || ints[1] == 0)
+        if(op->num_operands != 2)
             return false;
-        /* Python % is floored; mirror it (C99 % truncates toward zero). */
+        /* Python _signed_quotient: C's / and % round toward zero, as LLVM's
+         * sdiv and srem do. A zero divisor, or a quotient past the signed
+         * range (the minimum value divided by -1), is left to run. */
         {
-            int64_t a = ints[0], bm = ints[1];
-            int64_t r = a % bm;
-            if(r != 0 && ((r < 0) != (bm < 0)))
-                r += bm;
-            *out = r;
+            const int64_t a = ints[0], d = ints[1];
+            if(d == 0 || (a == INT64_MIN && d == -1))
+                return false;
+            const int64_t quotient = a / d;
+            if(quotient != wrap_to_width(quotient, op->results[0]->type))
+                return false;
+            *out = op->opcode == ROCKE_OP_ARITH_DIV ? quotient : a % d;
         }
         return true;
     case ROCKE_OP_ARITH_AND:
@@ -548,6 +584,15 @@ static bool try_fold(const rocke_op_t* op, int64_t* out)
         *out = ints[0] | ints[1];
         return true;
     case ROCKE_OP_ARITH_ZEXT:
+        if(op->num_operands != 1)
+            return false;
+        /* Zero-extend: the operand read as unsigned at its own width. */
+        {
+            const int width = int_width(op->operands[0]->type);
+            const uint64_t mask = width == 64 ? ~(uint64_t)0 : (((uint64_t)1 << width) - 1);
+            *out = (int64_t)((uint64_t)ints[0] & mask);
+        }
+        return true;
     case ROCKE_OP_ARITH_SEXT:
         if(op->num_operands != 1)
             return false;
@@ -564,6 +609,14 @@ static bool try_fold(const rocke_op_t* op, int64_t* out)
             pred = "lt"; /* op.attrs.get("pred", "lt") */
         a = ints[0];
         bc = ints[1];
+        if(strcmp(pred, "ult") == 0)
+        {
+            /* Unsigned at the operand width: -1 reads as the largest value. */
+            int width = int_width(op->operands[0]->type);
+            uint64_t mask = width == 64 ? ~(uint64_t)0 : (((uint64_t)1 << width) - 1);
+            *out = (((uint64_t)a & mask) < ((uint64_t)bc & mask));
+            return true;
+        }
         if(strcmp(pred, "lt") == 0)
             *out = (a < bc);
         else if(strcmp(pred, "le") == 0)
@@ -593,7 +646,8 @@ static bool try_fold(const rocke_op_t* op, int64_t* out)
 /* Rewrite `op` in place into an arith.constant of integer value `value`.
  * Python:
  *   op.name = "arith.constant"; op.operands = []
- *   op.attrs = {"value": value, "ity": _constant_ity(op.result.type)}
+ *   op.attrs = {"value": _wrap_to_width(value, op.result.type),
+ *               "ity": _constant_ity(op.result.type)}
  *   op.regions = []
  */
 static void fold_to_constant(rocke_ir_builder_t* b, rocke_op_t* op, int64_t value)
@@ -606,7 +660,7 @@ static void fold_to_constant(rocke_ir_builder_t* b, rocke_op_t* op, int64_t valu
     op->regions = NULL;
     op->num_regions = 0;
     rocke_attr_map_init(&op->attrs);
-    rocke_attr_set_int(b, &op->attrs, "value", value);
+    rocke_attr_set_int(b, &op->attrs, "value", wrap_to_width(value, rty));
     rocke_attr_set_str(b, &op->attrs, "ity", constant_ity(rty));
 }
 

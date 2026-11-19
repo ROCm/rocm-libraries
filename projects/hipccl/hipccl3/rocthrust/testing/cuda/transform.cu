@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -371,8 +371,6 @@ struct sum_five
   }
 };
 
-// The following test cannot be compiled because of a bug in the conversion of thrust::tuple on MSVC 2017
-#if !_CCCL_COMPILER(MSVC2017)
 // we specialize zip_function for sum_five, but do nothing in the call operator so the test below would fail if the
 // zip_function is actually called (and not unwrapped)
 THRUST_NAMESPACE_BEGIN
@@ -437,4 +435,3 @@ void TestTransformZipIteratorUnwrapping()
   }
 }
 DECLARE_UNITTEST(TestTransformZipIteratorUnwrapping);
-#endif // !_CCCL_COMPILER(MSVC2017)

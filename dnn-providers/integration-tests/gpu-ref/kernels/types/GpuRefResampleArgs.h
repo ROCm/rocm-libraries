@@ -41,3 +41,22 @@ struct ResampleFwdArgs
     long long window[3];
     // NOLINTEND(modernize-avoid-c-arrays)
 };
+
+struct ResampleBwdArgs
+{
+    const void* dy;
+    const void* index;
+    void* dx;
+    long long n;
+    long long c;
+
+    // NOLINTBEGIN(modernize-avoid-c-arrays)
+    long long dySpatialDims[3];
+    long long dyStrides[5];
+    long long dxSpatialDims[3];
+    long long dxStrides[5];
+    long long prePadding[3];
+    long long stride[3];
+    long long window[3];
+    // NOLINTEND(modernize-avoid-c-arrays)
+};

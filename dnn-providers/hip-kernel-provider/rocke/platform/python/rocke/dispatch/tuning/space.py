@@ -47,10 +47,14 @@ class KnobSpace:
     variant_id: str
     candidate_name: str
 
-    # A field swept outside the pruned walk, or None. The walk checks a knob
-    # set once and only rebuilds it per :meth:`outer_values` value, so the
-    # drop rules (:meth:`base_value`, :meth:`inert`) must not read it.
+    # A field swept outside the pruned walk, or None. A stream checks a knob
+    # set at the base's value and rebuilds it per :meth:`outer_values` value.
     outer_knob: ClassVar[Optional[str]] = None
+    # The knobs whose drop rules (:meth:`base_value`, :meth:`inert`) read the
+    # :attr:`outer_knob`; no other knob's may. A knob set holding one is
+    # canonicalized again at every outer value, so it is listed where that
+    # value keeps the knob and dropped where it does not.
+    outer_dependent_knobs: ClassVar[frozenset] = frozenset()
 
     # ------------------------------------------------------------ must define
     def axes(self, base) -> Tuple[KnobAxis, ...]:
@@ -98,7 +102,9 @@ class KnobSpace:
     def inert(self, base, kernel) -> Mapping[str, str]:
         """``{knob: why}`` for fields of ``kernel`` the body does not read, or
         whose explicit value restates a policy. Like :meth:`base_value`, it
-        must not depend on the :attr:`outer_knob`."""
+        must not depend on the :attr:`outer_knob` except for the
+        :attr:`outer_dependent_knobs` (``kernel`` is built at the outer value
+        being canonicalized)."""
         return {}
 
     def validate(self, base, kernel) -> Tuple[bool, str]:
@@ -150,8 +156,11 @@ class KnobSpace:
     def is_valid(self, base, knobs: Mapping[str, object]) -> bool:
         """Walk pruning: by default a prefix is valid when it is already
         canonical -- nothing in it would be dropped or refused -- and passes
-        :meth:`validate`. Stops at the first reason, since the walk only needs
-        a verdict."""
+        :meth:`validate`. A prefix that drops only
+        :attr:`outer_dependent_knobs` at the base's outer value is still valid
+        where it is canonical and legal at another of the full level's
+        :meth:`outer_values`. Stops at the first reason, since the walk only
+        needs a verdict."""
         knobs = dict(knobs)
         if self.refuse(base, knobs):
             return False
@@ -164,11 +173,31 @@ class KnobSpace:
             return False
         if len(self.prefilter(base, knobs)) != len(knobs):
             return False
+        built = {**fixed, **knobs}
         try:
-            kernel = self.build(base, {**fixed, **knobs})
+            kernel = self.build(base, built)
         except BUILD_ERRORS:
             return False
-        if self._droppable(base, kernel, knobs, knob_requirements(axes)):
+        requires = knob_requirements(axes)
+        drop = self._droppable(base, kernel, knobs, requires)
+        if not drop:
+            return self.validate(base, kernel)[0]
+        if not drop <= self.outer_dependent_knobs:
+            return False
+        return any(
+            self._canonical_at(base, built, knobs, requires, outer)
+            for outer in self.outer_values(base, "full")
+            if outer is not None
+        )
+
+    def _canonical_at(self, base, built, knobs, requires, outer) -> bool:
+        """Whether ``knobs`` (``built`` with the fixed ones) build at
+        ``outer``, keep every knob there, and pass :meth:`validate`."""
+        try:
+            kernel = self.build(base, self._with_outer(built, outer))
+        except BUILD_ERRORS:
+            return False
+        if self._droppable(base, kernel, knobs, requires):
             return False
         return self.validate(base, kernel)[0]
 
@@ -214,26 +243,43 @@ class KnobSpace:
 
     def _checked(self, base, knobs: Mapping[str, object], outer):
         """``(kernel, canonical_knobs, why)``; ``kernel`` is None if refused."""
+        knobs, why = self._admitted(base, knobs)
+        if why:
+            return None, knobs, why
+        return self._settled(base, knobs, outer)
+
+    def _admitted(self, base, knobs: Mapping[str, object]) -> Tuple[dict, str]:
+        """``knobs`` minus the fixed and out-of-scope ones, typed and
+        prefiltered, or the reason they are refused before any build."""
         knobs = dict(knobs)
         why = self.refuse(base, knobs)
         if why:
-            return None, knobs, why
+            return knobs, why
         fixed = self.fixed(base)
         moved = sorted(k for k, v in knobs.items() if k in fixed and v != fixed[k])
         if moved:
-            return None, knobs, f"{moved} are fixed by {self.candidate_name}"
+            return knobs, f"{moved} are fixed by {self.candidate_name}"
         knobs = {k: v for k, v in knobs.items() if k not in fixed}
         axes = self.axes(base)
         in_scope = axis_knob_names(axes)
         stray = sorted(set(knobs) - in_scope - self.known_knobs(base))
         if stray:
-            return None, knobs, f"{stray} are not tunable on {self.candidate_name}"
+            return knobs, f"{stray} are not tunable on {self.candidate_name}"
         # A known knob this problem does not read is inert here, not illegal.
-        knobs, why = _typed({k: v for k, v in knobs.items() if k in in_scope}, axes)
+        knobs, why = typed_knobs(
+            {k: v for k, v in knobs.items() if k in in_scope}, axes
+        )
         if why:
-            return None, knobs, why
-        knobs = self.prefilter(base, knobs)
-        requires = knob_requirements(axes)
+            return knobs, why
+        return self.prefilter(base, knobs), ""
+
+    def _settled(self, base, knobs: Mapping[str, object], outer):
+        """Admitted ``knobs`` built at ``outer``, minus whatever the drop rules
+        drop on that build (until nothing more drops), then validated:
+        ``(kernel, canonical_knobs, why)``, ``kernel`` None if refused."""
+        fixed = self.fixed(base)
+        requires = knob_requirements(self.axes(base))
+        knobs = dict(knobs)
         kernel = None
         for _ in range(len(knobs) + 1):
             try:
@@ -298,6 +344,11 @@ class KnobSpace:
         product of all axes -- consume it through :meth:`sample` unless the
         space is known to be small. Either way each ``tuning_id`` is yielded
         once.
+
+        A knob set is checked at the base's outer value (one refused there is
+        skipped) and rebuilt per outer value; one holding an
+        :attr:`outer_dependent_knobs` knob is canonicalized again at each,
+        drop rules included.
         """
         if level not in SWEEP_LEVELS:
             raise ValueError(
@@ -315,35 +366,45 @@ class KnobSpace:
         )
         # Walk points are unique, but two can canonicalize to the same knobs
         # (a lenient is_valid, an axis whose declared default is not the
-        # kernel's), so every stream is deduped by id. The set holds one short
-        # string per spec emitted, which only a full, unsampled walk makes large.
+        # kernel's, a knob one outer value drops), so every stream is deduped
+        # by id. The set holds one short string per spec emitted, which only a
+        # full, unsampled walk makes large.
         seen: set[str] = set()
         fixed = self.fixed(base)
         for knobs in knob_sets:
-            kernel, canonical, _why = self._checked(base, knobs, None)
+            admitted, why = self._admitted(base, knobs)
+            if why:
+                continue
+            kernel, canonical, _why = self._settled(base, admitted, None)
             if kernel is None:
                 continue
+            per_outer = not self.outer_dependent_knobs.isdisjoint(admitted)
             for outer in self.outer_values(base, level):
-                spec = self._at_outer(base, kernel, fixed, canonical, outer)
-                if spec is None or spec.tuning_id in seen:
+                if outer is None:
+                    at, knobs_at = kernel, canonical
+                elif per_outer:
+                    at, knobs_at, _why = self._settled(base, admitted, outer)
+                else:
+                    at, knobs_at = (
+                        self._rebuilt(base, fixed, canonical, outer),
+                        canonical,
+                    )
+                if at is None:
+                    continue
+                spec = self._finish(base, at, knobs_at, outer)
+                if spec.tuning_id in seen:
                     continue
                 seen.add(spec.tuning_id)
                 yield spec
 
-    def _at_outer(self, base, kernel, fixed, canonical, outer):
-        """The checked knob set at one outer value: rebuild and revalidate
-        only, since the drop rules never read the outer knob."""
-        if outer is not None:
-            try:
-                kernel = self.build(
-                    base, self._with_outer({**fixed, **canonical}, outer)
-                )
-            except BUILD_ERRORS:
-                return None
-            ok, _why = self.validate(base, kernel)
-            if not ok:
-                return None
-        return self._finish(base, kernel, canonical, outer)
+    def _rebuilt(self, base, fixed, canonical, outer):
+        """A knob set checked at the base's outer value, rebuilt and
+        revalidated at ``outer``; None if refused there."""
+        try:
+            kernel = self.build(base, self._with_outer({**fixed, **canonical}, outer))
+        except BUILD_ERRORS:
+            return None
+        return kernel if self.validate(base, kernel)[0] else None
 
     def sample(self, base, n: int, seed: int) -> Iterator:
         """Up to ``n`` distinct random legal specs from the full space, deduped
@@ -400,7 +461,7 @@ class KnobSpace:
         )
 
 
-def _typed(knobs: Mapping[str, object], axes) -> Tuple[dict, str]:
+def typed_knobs(knobs: Mapping[str, object], axes) -> Tuple[dict, str]:
     """``knobs`` with each value in the type its axis declares, or the reason
     one has no lossless conversion. Equal values of different types (``True``
     and ``1``, ``2`` and ``2.0``) hash alike, so they must canonicalize alike."""

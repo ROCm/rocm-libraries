@@ -27,6 +27,7 @@
 #pragma once
 
 #include <Tensile/Tensile.hpp>
+#include <atomic>
 #include <optional>
 
 namespace TensileLite
@@ -85,6 +86,8 @@ namespace TensileLite
             gfx1151 = 1151,
             gfx1152 = 1152,
             gfx1153 = 1153,
+            gfx1170 = 1170,
+            gfx1171 = 1171,
             gfx1200 = 1200,
             gfx1201 = 1201,
             gfx1250 = 1250
@@ -176,6 +179,14 @@ namespace TensileLite
             {
                 return Processor::gfx1153;
             }
+            else if(archName.find("gfx1170") != std::string::npos)
+            {
+                return Processor::gfx1170;
+            }
+            else if(archName.find("gfx1171") != std::string::npos)
+            {
+                return Processor::gfx1171;
+            }
             else if(archName.find("gfx1200") != std::string::npos)
             {
                 return Processor::gfx1200;
@@ -237,6 +248,10 @@ namespace TensileLite
                 return "gfx1152";
             case AMDGPU::Processor::gfx1153:
                 return "gfx1153";
+            case AMDGPU::Processor::gfx1170:
+                return "gfx1170";
+            case AMDGPU::Processor::gfx1171:
+                return "gfx1171";
             case AMDGPU::Processor::gfx1200:
                 return "gfx1200";
             case AMDGPU::Processor::gfx1201:
@@ -272,7 +287,28 @@ namespace TensileLite
         size_t      fixedStaggerUMapping     = std::numeric_limits<size_t>::max();
         size_t      fixedStaggerU            = std::numeric_limits<size_t>::max();
         size_t      fixedStaggerUStrideShift = std::numeric_limits<size_t>::max();
-        mutable int isStandardCUs            = -1; // -1: unset, 0:false, 1:true
+        // Lazily computed by isStandardCU(); -1: unset, 0:false, 1:true.
+        // Readers may observe this while it is published, so the store is atomic.
+        // AMDGPU is copied as a cache key. std::atomic is not copyable, so a copy
+        // snapshots the current value.
+        struct LazyFlag
+        {
+            LazyFlag() = default;
+            LazyFlag(LazyFlag const& other)
+                : value(other.value.load())
+            {
+            }
+            LazyFlag& operator=(LazyFlag const& other)
+            {
+                value.store(other.value.load());
+                return *this;
+            }
+
+            std::atomic<int> value{-1};
+        };
+        static_assert(sizeof(LazyFlag) == sizeof(int) && alignof(LazyFlag) == alignof(int),
+                      "LazyFlag must keep the size and alignment of the int it replaced");
+        mutable LazyFlag isStandardCUs;
         std::string deviceName;
 
         virtual bool   isStandardCU() const;

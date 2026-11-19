@@ -578,7 +578,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         return stmts;
     }
 
-    Function generate_lds_to_reg_input_function()
+    virtual Function generate_lds_to_reg_input_function()
     {
         std::string function_name = "lds_to_reg_input_length" + std::to_string(length) + "_device";
 
@@ -606,7 +606,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         return f;
     }
 
-    Function generate_lds_from_reg_output_function()
+    virtual Function generate_lds_from_reg_output_function()
     {
         std::string function_name
             = "lds_from_reg_output_length" + std::to_string(length) + "_device";
@@ -635,7 +635,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         return f;
     }
 
-    Function generate_device_function()
+    virtual Function generate_device_function()
     {
         std::string function_name
             = "forward_full_pass_length" + std::to_string(length) + "_" + tiling_name() + "_device";

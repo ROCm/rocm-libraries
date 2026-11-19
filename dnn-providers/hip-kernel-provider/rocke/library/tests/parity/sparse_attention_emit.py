@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: MIT
 #
 # tests/parity/sparse_attention_emit.py -- Python reference emitter for the
-# sparse-attention forward parity harness. Selects one of 6 sampled configs by
-# argv[1] (0..5), builds either a JengaSparseSpec via build_jenga_sparse_attention
+# sparse-attention forward parity harness. Selects one of 7 sampled configs by
+# argv[1] (0..6), builds either a JengaSparseSpec via build_jenga_sparse_attention
 # or a VsaSparseSpec via build_vsa_sparse_attention (arch="gfx950") and prints
 # lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared with
 # the C emitter sparse_attention_emit.c.
@@ -96,6 +96,21 @@ def _kernel(idx: int):
             use_wave_ballot_scatter=False,
         )
         return build_vsa_sparse_attention(spec, arch="gfx950")
+    if idx == 6:
+        # Sparsity blocks of 3 query rows and 48 keys: the row -> block and K-tile -> block
+        # magic divisions are by 3. A power-of-two divisor has multiplier 1 and makes the
+        # magic sum just the dividend; these make the sums carry a real multiply-high term.
+        spec = JengaSparseSpec(
+            common=FmhaCommonSpec(
+                shape=FmhaShape(64, 8, 8),
+                dtype="f16",
+            ),
+            seqlen_q=48,
+            seqlen_k=144,
+            block_q=3,
+            block_k=48,
+        )
+        return build_jenga_sparse_attention(spec, arch="gfx950")
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -107,7 +122,7 @@ def main() -> int:
     return run_emit(
         _kernel,
         _emit_build,
-        usage="usage: sparse_attention_emit.py <config_index 0..5> [mode]\n",
+        usage="usage: sparse_attention_emit.py <config_index 0..6> [mode]\n",
     )
 
 

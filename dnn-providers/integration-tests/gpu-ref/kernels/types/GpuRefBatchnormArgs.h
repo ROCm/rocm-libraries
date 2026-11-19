@@ -52,3 +52,19 @@ struct BatchnormFwdTrainArgs
     long long c;
     long long hw;
 };
+
+struct BatchnormBwdArgs
+{
+    const void* dy;
+    const void* input;
+    const void* scale;
+    void* dx;
+    void* dscale;
+    void* dbias;
+    const void* mean;
+    const void* invVariance;
+    double epsilon;
+    long long n;
+    long long c;
+    long long hw;
+};

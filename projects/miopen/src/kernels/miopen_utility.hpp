@@ -25,8 +25,8 @@
  *******************************************************************************/
 #pragma once
 
-#if HIP_PACKAGE_VERSION_FLAT < 7000000000ULL
-#ifdef MIOPEN_HIP_RUNTIME_COMPILE
+// Minimal std::forward for runtime compilation without a host C++ standard library.
+#if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !__has_include(<utility>)
 
 #include "miopen_type_traits.hpp" // std::remove_reference
 
@@ -50,7 +50,4 @@ constexpr T&& forward(typename remove_reference<T>::type&& t_) noexcept
 
 #include <utility>
 
-#endif
-#else
-#include <utility>
 #endif

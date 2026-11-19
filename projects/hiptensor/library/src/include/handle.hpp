@@ -26,28 +26,13 @@
 
 #pragma once
 
-#include <new>
-
-#include <hip/hip_runtime_api.h>
-
-#include "hip_device.hpp"
+#include <hiptensor/hiptensor_types.h>
 
 namespace hiptensor
 {
-    // hiptensorHandle_t wrapper object
-    struct Handle
-    {
-    public:
-        Handle()  = default;
-        ~Handle() = default;
-
-        static Handle  createHandle(int64_t* buff); // Calls constructor for all member variables
-        static void    destroyHandle(int64_t* buff); // Calls destructor for all member variables
-        static Handle* toHandle(int64_t* buff); // Reinterprets input buffer as Handle class
-
-        HipDevice getDevice();
-
-    private:
-        HipDevice mDevice;
-    };
+    // Kernels are selected for the device a handle was created on, so every API that launches
+    // work must run with that device current on the calling thread.
+    // Returns HIPTENSOR_STATUS_HIP_ERROR if the current device cannot be queried and
+    // HIPTENSOR_STATUS_ARCH_MISMATCH if it differs from the handle's device.
+    hiptensorStatus_t checkHandleDevice(const hiptensorHandle_t handle, char const* apiFuncName);
 } // namespace hiptensor

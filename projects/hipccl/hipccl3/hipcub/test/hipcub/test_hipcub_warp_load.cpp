@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -232,14 +232,14 @@ TYPED_TEST(HipcubWarpLoadTest, WarpLoadGuarded)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using T = typename TestFixture::params::type;
-    constexpr unsigned warp_size = TestFixture::params::warp_size;
-    constexpr ::hipcub::WarpLoadAlgorithm algorithm = TestFixture::params::algorithm;
-    constexpr unsigned items_per_thread = 4;
-    constexpr unsigned block_size = 1024;
-    constexpr unsigned items_count = items_per_thread * block_size;
-    constexpr int valid_items = warp_size / 4;
-    constexpr T oob_default = std::numeric_limits<T>::max();
+    using T                                                = typename TestFixture::params::type;
+    constexpr unsigned                    warp_size        = TestFixture::params::warp_size;
+    constexpr ::hipcub::WarpLoadAlgorithm algorithm        = TestFixture::params::algorithm;
+    constexpr unsigned                    items_per_thread = 4;
+    constexpr unsigned                    block_size       = 1024;
+    constexpr unsigned                    items_count      = items_per_thread * block_size;
+    constexpr int                         valid_items      = warp_size / 4;
+    constexpr T                           oob_default      = _HIPCUB_STD::numeric_limits<T>::max();
 
     SKIP_IF_UNSUPPORTED_WARP_SIZE(warp_size);
 

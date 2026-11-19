@@ -28,6 +28,11 @@ TESTS_DEFINE(ZipIteratorStableSortByKeyTests, TestParams);
 
 TYPED_TEST(ZipIteratorStableSortByKeyTests, TestZipIteratorStableSortByKey)
 {
+  // Temporarily disable this test on gfx115x on Windows until we can determine the root cause.
+  // TODO: remove this after the root cause has been found and fixed properly.
+  if (temp_skip::should_skip())
+    GTEST_SKIP() << "Skipping test on gfx1151 Windows systems due to known issues.";
+
   using T = typename TestFixture::input_type;
   using namespace thrust;
 

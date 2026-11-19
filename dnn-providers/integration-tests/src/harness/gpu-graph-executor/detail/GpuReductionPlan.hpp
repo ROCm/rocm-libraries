@@ -118,6 +118,8 @@ public:
             return false;
         }
 
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         return !anyOperandIsRuntimePassByValue(
             tensorMap, {nodeAttributes->in_tensor_uid(), nodeAttributes->out_tensor_uid()});
     }

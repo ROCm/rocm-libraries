@@ -193,7 +193,7 @@ def test_fp4_catalog_signature_and_lowering(path, scale_type):
 @pytest.mark.parametrize(
     "changes",
     [
-        {"dtype_b": "fp8"},
+        {"dtype_b": "i8"},
         {"matrix_path": "wmma"},
         {"K": 192},
         {"scale_dtype": "fp32"},

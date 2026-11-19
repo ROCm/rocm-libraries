@@ -93,6 +93,30 @@ namespace hipdnn_frontend::detail
         attributes.set_seq_len_kv(seqLenKvTensor);
     }
 
+    // Unpack cu_seq_len_q tensor
+    std::shared_ptr<graph::TensorAttributes> cuSeqLenQTensor;
+    HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC,
+                                            tensorMap,
+                                            cuSeqLenQTensor,
+                                            "sdpa CU_SEQ_LEN_Q tensor"));
+    if(cuSeqLenQTensor)
+    {
+        attributes.set_cu_seq_len_q(cuSeqLenQTensor);
+    }
+
+    // Unpack cu_seq_len_kv tensor
+    std::shared_ptr<graph::TensorAttributes> cuSeqLenKvTensor;
+    HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC,
+                                            tensorMap,
+                                            cuSeqLenKvTensor,
+                                            "sdpa CU_SEQ_LEN_KV tensor"));
+    if(cuSeqLenKvTensor)
+    {
+        attributes.set_cu_seq_len_kv(cuSeqLenKvTensor);
+    }
+
     // Unpack seed tensor
     std::shared_ptr<graph::TensorAttributes> seedTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,

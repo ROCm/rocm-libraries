@@ -31,8 +31,17 @@ from hkp_pack.desk_check import (
     toc_key_uniqueness,
 )
 from hkp_pack.errors import HkpPackError
-from hkp_pack.pipeline import run_pipeline
-from pack_helpers import _EXAMPLES, _ROOT_IDS, _TOOL, _read, _require_bundles, _run_cli
+from pack_helpers import (
+    _EXAMPLES,
+    _ROOT_IDS,
+    _TOOL,
+    GENERIC_TARGETS,
+    GENERIC_TARGETS_JSON,
+    _read,
+    _require_bundles,
+    _run_cli,
+    run_pipeline,
+)
 
 ARCH = "gfx950"
 
@@ -71,19 +80,53 @@ class TestInvariant2DuplicateMatcherTuples:
         unreachable. The runtime refuses a duplicate only on an arch both kernels
         reach."""
         kernels = self._twins(["gfx942"], ["gfx950"])
-        assert duplicate_matcher_tuples(kernels, ("dtype",)) == {}
+        assert duplicate_matcher_tuples(kernels, ("dtype",), GENERIC_TARGETS) == {}
 
     def test_one_tuple_on_a_shared_arch_is_still_a_duplicate(self):
         """Control for the case above: arch scoping narrows the check rather than
         switching it off. A single overlapping arch is enough."""
         kernels = self._twins(["gfx942", "gfx950"], ["gfx950"])
-        assert duplicate_matcher_tuples(kernels, ("dtype",)) == {("FLOAT",): 2}
+        assert duplicate_matcher_tuples(kernels, ("dtype",), GENERIC_TARGETS) == {
+            ("FLOAT",): 2
+        }
 
-    def test_an_arch_less_kernel_collides_with_every_arch(self):
-        """An absent arch is the wildcard `arch_matches` reads it as, so it
-        reaches the other kernel's device and the two are a real collision."""
+    def test_an_arch_less_kernel_inherits_the_kdp_arch_and_collides_with_an_explicit_one(
+        self,
+    ):
+        """An arch-less kernel inherits the KDP list, so it ties an explicit gfx942 one."""
         kernels = self._twins(None, ["gfx942"])
-        assert duplicate_matcher_tuples(kernels, ("dtype",)) == {("FLOAT",): 2}
+        assert duplicate_matcher_tuples(
+            kernels, ("dtype",), GENERIC_TARGETS, ["gfx942"]
+        ) == {("FLOAT",): 2}
+
+    def test_a_tie_beaten_on_every_device_it_reaches_is_still_a_duplicate(self):
+        """Generic kernels outranked on every member still tie at the generic tier."""
+        kernels = [
+            {"name": n, "metadata": {"dtype": "FLOAT"}, "arch": a}
+            for n, a in (
+                ("g1", ["gfx12-generic"]),
+                ("g2", ["gfx12-generic"]),
+                ("e0", ["gfx1200"]),
+                ("e1", ["gfx1201"]),
+            )
+        ]
+        assert duplicate_matcher_tuples(kernels, ("dtype",), GENERIC_TARGETS) == {
+            ("FLOAT",): 2
+        }
+
+    @pytest.mark.parametrize(
+        "left, right",
+        [
+            (["gfx11-generic"], None),
+            (["gfx11-generic"], ["gfx1100"]),
+            (["gfx99-generic"], ["gfx99-generic"]),
+        ],
+        ids=["generic_vs_arch_less", "generic_vs_its_member", "unknown_generics"],
+    )
+    def test_lists_that_never_tie_at_one_tier_do_not_collide(self, left, right):
+        """A generic outranks arch-less and loses to its own member; unknown matches nothing."""
+        kernels = self._twins(left, right)
+        assert duplicate_matcher_tuples(kernels, ("dtype",), GENERIC_TARGETS) == {}
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +205,9 @@ class TestInvariantsOnARealHipPack:
         assert declared == ("block_size", "dtype")
         assert all(k["kernel_source"].get("toc_key") for k in kernels)
 
-        assert duplicate_matcher_tuples(kernels, declared) == duplicates
+        assert (
+            duplicate_matcher_tuples(kernels, declared, GENERIC_TARGETS) == duplicates
+        )
         assert toc_key_uniqueness(kernels) == (distinct_toc, 2)
         # Both variants compile from one entry point, so they share a symbol;
         # invariant 4 tolerates that because toc_key tells them apart.
@@ -234,7 +279,13 @@ class TestCliEndToEnd:
         """No default: a run whose mode is unstated cannot be read back out of a
         log, and the weaker result would read as the stronger."""
         proc = subprocess.run(
-            [sys.executable, str(_TOOL), str(_variant_set(tmp_path, packed=True))],
+            [
+                sys.executable,
+                str(_TOOL),
+                "--generic-targets-json",
+                str(GENERIC_TARGETS_JSON),
+                str(_variant_set(tmp_path, packed=True)),
+            ],
             capture_output=True,
             text=True,
         )
@@ -353,7 +404,10 @@ class TestDriftAndTupleFieldsAreIndependent:
     def test_narrowing_drift_fields_silences_drift_but_keeps_the_tuple(self):
         kernels = self._two_variants_with_a_translated_field()
         coupled = DeskCheckReport(
-            kernels, fields=("layout", "head_size"), mode="structural"
+            kernels,
+            fields=("layout", "head_size"),
+            mode="structural",
+            generic_targets=GENERIC_TARGETS,
         )
         # The premise: with one shared list, `layout` false-positives.
         assert coupled.drift == [("nhwc", "layout"), ("nchw", "layout")]
@@ -363,6 +417,7 @@ class TestDriftAndTupleFieldsAreIndependent:
             fields=("layout", "head_size"),
             drift_fields=("head_size",),
             mode="structural",
+            generic_targets=GENERIC_TARGETS,
         )
         assert narrowed.drift == [], "drift comparison should have dropped layout"
         assert narrowed.duplicate_tuples == {}, (
@@ -379,6 +434,7 @@ class TestDriftAndTupleFieldsAreIndependent:
             fields=("dtype", "head_size"),
             drift_fields=("head_size",),
             mode="structural",
+            generic_targets=GENERIC_TARGETS,
         )
         assert report.duplicate_tuples == {}, (
             "dtype was dropped from the DRIFT comparison only -- it must "
@@ -395,6 +451,7 @@ class TestDriftAndTupleFieldsAreIndependent:
             fields=("dtype", "head_size"),
             drift_fields=("head_size",),
             mode="structural",
+            generic_targets=GENERIC_TARGETS,
         )
         assert report.duplicate_tuples == {("BFLOAT16", 64): 2}
         assert not report.ok
@@ -407,7 +464,12 @@ class TestDriftAndTupleFieldsAreIndependent:
         -> `return tuple(fields[:1])`."""
         kernels = self._two_variants_differing_only_in_dtype()
         kernels[0]["metadata"]["head_size"] = 999  # real drift
-        report = DeskCheckReport(kernels, fields=("dtype",), mode="structural")
+        report = DeskCheckReport(
+            kernels,
+            fields=("dtype",),
+            mode="structural",
+            generic_targets=GENERIC_TARGETS,
+        )
         assert report.fields == ("dtype",)
         assert report.drift_fields == ("dtype", "head_size")
         assert report.drift == [("bf16", "head_size")]
@@ -434,12 +496,19 @@ class TestHeterogeneousMetadataTupleIdentity:
         ]
 
     def test_absent_field_is_distinguishing_not_a_collision(self):
-        assert duplicate_matcher_tuples(self._mixed(), ("head_size", "block_n")) == {}
+        assert (
+            duplicate_matcher_tuples(
+                self._mixed(), ("head_size", "block_n"), GENERIC_TARGETS
+            )
+            == {}
+        )
 
     def test_result_is_independent_of_kernel_order(self):
         fields = ("head_size", "block_n")
-        forward = duplicate_matcher_tuples(self._mixed(), fields)
-        reverse = duplicate_matcher_tuples(list(reversed(self._mixed())), fields)
+        forward = duplicate_matcher_tuples(self._mixed(), fields, GENERIC_TARGETS)
+        reverse = duplicate_matcher_tuples(
+            list(reversed(self._mixed())), fields, GENERIC_TARGETS
+        )
         assert forward == reverse == {}
 
     def test_two_kernels_both_missing_the_field_still_collide(self):
@@ -447,7 +516,9 @@ class TestHeterogeneousMetadataTupleIdentity:
         two kernels are indistinguishable to the matcher and must collide."""
         kernels = self._mixed()
         del kernels[0]["metadata"]["block_n"]
-        assert duplicate_matcher_tuples(kernels, ("head_size", "block_n")) == {(64,): 2}
+        assert duplicate_matcher_tuples(
+            kernels, ("head_size", "block_n"), GENERIC_TARGETS
+        ) == {(64,): 2}
 
     def test_absent_marker_distinguishes_only_when_some_kernel_declares_it(self):
         """Complement of the case above: once any kernel declares the field,
@@ -461,9 +532,9 @@ class TestHeterogeneousMetadataTupleIdentity:
             }
         ]
         # Two kernels share (64, absent); the block_n=64 one stands alone.
-        assert duplicate_matcher_tuples(kernels, ("head_size", "block_n")) == {
-            (64, "<absent>"): 2
-        }
+        assert duplicate_matcher_tuples(
+            kernels, ("head_size", "block_n"), GENERIC_TARGETS
+        ) == {(64, "<absent>"): 2}
 
 
 @pytest.mark.quick
@@ -550,10 +621,12 @@ class TestMatcherFieldsComeFromTheBundlesOwnContract:
         kdp = self._bundle(tmp_path, ("head_size", "waves_per_eu"))
         kernels, fields = load_variant_set(kdp)
         assert fields == ("head_size", "waves_per_eu")
-        assert duplicate_matcher_tuples(kernels, fields) == {}
+        assert duplicate_matcher_tuples(kernels, fields, GENERIC_TARGETS) == {}
         # The premise: waves_per_eu is not in the generic list, so the same
         # two kernels are indistinguishable under it.
-        assert duplicate_matcher_tuples(kernels, DEFAULT_MATCHER_FIELDS) == {(64,): 2}
+        assert duplicate_matcher_tuples(
+            kernels, DEFAULT_MATCHER_FIELDS, GENERIC_TARGETS
+        ) == {(64,): 2}
         proc = _run_cli(str(kdp))
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert "duplicate matcher tuples: none" in proc.stdout
@@ -582,9 +655,9 @@ class TestMatcherFieldsComeFromTheBundlesOwnContract:
         """
         assert metadata_identity_fields([{"name": "k"}]) == ()
         assert duplicate_matcher_tuples(
-            [{"name": "a"}, {"name": "b"}], ()
+            [{"name": "a"}, {"name": "b"}], (), GENERIC_TARGETS
         ) == duplicate_matcher_tuples(
-            [{"name": "a"}, {"name": "b"}], ("dtype", "batch")
+            [{"name": "a"}, {"name": "b"}], ("dtype", "batch"), GENERIC_TARGETS
         )
 
     def test_an_explicit_field_still_outranks_the_declaration(self, tmp_path):
@@ -669,7 +742,9 @@ class TestDriftFieldsAreNotBoundedByTheDeclaredContract:
         assert "block_m" not in DEFAULT_MATCHER_FIELDS
         assert metadata_spec_drift(kernels, DEFAULT_MATCHER_FIELDS) == []
         assert metadata_spec_drift(kernels, declared) == []
-        report = DeskCheckReport(kernels, fields=declared, mode="structural")
+        report = DeskCheckReport(
+            kernels, fields=declared, mode="structural", generic_targets=GENERIC_TARGETS
+        )
         assert report.drift == [("narrow", "block_m")]
 
     def test_drift_field_still_narrows_deliberately(self, tmp_path):
@@ -703,7 +778,9 @@ class TestDriftFieldsAreNotBoundedByTheDeclaredContract:
         kdp.write_text(json.dumps(doc))
 
         kernels, declared = load_variant_set(kdp)
-        report = DeskCheckReport(kernels, fields=declared, mode="structural")
+        report = DeskCheckReport(
+            kernels, fields=declared, mode="structural", generic_targets=GENERIC_TARGETS
+        )
         assert report.fields == self._NARROW_CONTRACT
         assert "block_m" in report.drift_fields
         assert report.drift == []
@@ -862,7 +939,7 @@ class TestAKdpPathMatchingNothingIsReportedNotRaised:
     def test_full_mode_lookup_raises_a_named_finding(self, tmp_path):
         typo = self._typo_beside_a_real_shard(tmp_path)
         with pytest.raises(HkpPackError, match="typo.kdp.json"):
-            compiled_agreement(typo)
+            compiled_agreement(typo, GENERIC_TARGETS)
 
     @pytest.mark.parametrize("mode", MODES)
     def test_the_cli_prints_the_finding_rather_than_a_traceback(self, tmp_path, mode):

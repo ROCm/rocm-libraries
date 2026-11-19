@@ -77,7 +77,6 @@ public:
         const Handle& handle,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
-private:
     /// Extract Flash2FwdParams from a validated SDPA graph.
     static Flash2FwdParams
         extractParams(const Handle& handle,

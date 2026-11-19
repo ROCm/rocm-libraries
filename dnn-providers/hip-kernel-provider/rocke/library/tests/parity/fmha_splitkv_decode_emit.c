@@ -2,8 +2,8 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/fmha_splitkv_decode_emit.c -- C-side emitter for the split-KV
- * decode FMHA parity harness. Selects one of 6 sampled FmhaFwdSplitKvDecodeSpec
- * configs by argv[1] (0..5) and a phase by argv[2] ("seg" or "reduce"), builds
+ * decode FMHA parity harness. Selects one of 7 sampled FmhaFwdSplitKvDecodeSpec
+ * configs by argv[1] (0..6) and a phase by argv[2] ("seg" or "reduce"), builds
  * rocke_fmha_splitkv_decode_spec_t identically to the Python emitter
  * fmha_splitkv_decode_emit.py, and lowers the chosen kernel to LLVM .ll via the
  * convenience lower entries (arch gfx950, flavor AUTO), printing the .ll to
@@ -72,6 +72,13 @@ static int make_spec(int idx, rocke_fmha_splitkv_decode_spec_t* spec)
         common.mask_mode = ROCKE_FMHA_MASK_CAUSAL;
         *spec = rocke_fmha_splitkv_decode_spec_default(common, 2, 128);
         break;
+    case 6: /* H128 q40 kv8 f16 none, batch2, segs8: head -> KV-head divides by 5 */
+        shape = rocke_fmha_shape_default(128, 40, 8);
+        common = rocke_fmha_common_spec_default(shape);
+        common.dtype = "f16";
+        common.mask_mode = ROCKE_FMHA_MASK_NONE;
+        *spec = rocke_fmha_splitkv_decode_spec_default(common, 2, 8);
+        break;
     default:
         return -1;
     }
@@ -82,7 +89,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..5> [<seg|reduce>|<ll|ir|verify>]\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..6> [<seg|reduce>|<ll|ir|verify>]\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

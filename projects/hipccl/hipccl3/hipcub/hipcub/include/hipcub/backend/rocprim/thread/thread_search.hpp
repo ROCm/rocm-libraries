@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -32,6 +32,8 @@
 
 #include "../../../config.hpp"
 
+#include _HIPCUB_STD_INCLUDE(functional)
+
 #include <iterator>
 
 BEGIN_HIPCUB_NAMESPACE
@@ -55,8 +57,8 @@ __host__ __device__ __forceinline__ void MergePathSearch(
     OffsetT         b_len,
     CoordinateT&    path_coordinate)
 {
-    OffsetT split_min = CUB_MAX(diagonal - b_len, 0);
-    OffsetT split_max = CUB_MIN(diagonal, a_len);
+    OffsetT split_min = _HIPCUB_STD::max(diagonal - b_len, 0);
+    OffsetT split_max = _HIPCUB_STD::min(diagonal, a_len);
 
     while (split_min < split_max)
     {
@@ -73,7 +75,7 @@ __host__ __device__ __forceinline__ void MergePathSearch(
         }
     }
 
-    path_coordinate.x = CUB_MIN(split_min, a_len);
+    path_coordinate.x = _HIPCUB_STD::min(split_min, a_len);
     path_coordinate.y = diagonal - split_min;
 }
 

@@ -1,0 +1,23 @@
+{
+  "version": "1.1",
+  "id": "d5c00000-0000-4000-8000-000000000001",
+  "name": "hipkernel:SlottedHsaco",
+  "graph_match": {
+    "native": "hipkernel.slotted_hsaco.graph_match"
+  },
+  "shared_workspace": "ws.bytes",
+  "slots": [
+    {
+      "name": "prep",
+      "metadata": "d5c00000-0000-4000-8000-000000000002"
+    },
+    {
+      "name": "dkdv",
+      "metadata": "d5c00000-0000-4000-8000-000000000003"
+    },
+    {
+      "name": "dq",
+      "metadata": "d5c00000-0000-4000-8000-000000000004"
+    }
+  ]
+}

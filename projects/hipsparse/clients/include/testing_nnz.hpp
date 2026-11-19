@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -50,8 +51,7 @@ void testing_nnz_bad_arg(const Arguments& argus)
     static constexpr int                  lda       = M;
     static constexpr hipsparseDirection_t dirA      = HIPSPARSE_DIRECTION_ROW;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descrA = unique_ptr_descr->descr;
@@ -160,8 +160,7 @@ void testing_nnz(Arguments argus)
     int                  lda  = argus.lda;
     hipsparseDirection_t dirA = argus.dirA;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descrA = unique_ptr_descr->descr;

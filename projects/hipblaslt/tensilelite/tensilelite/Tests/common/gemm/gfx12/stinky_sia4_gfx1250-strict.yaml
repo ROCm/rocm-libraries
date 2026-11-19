@@ -1,0 +1,445 @@
+# skip-gfx1250-strict: exceeds the 1200 s per-test timeout on gfx1250-strict HW CI; drop once trimmed or split (AIHPBLAS-5624).
+# ScheduleIterAlg 4 crossed with InitCIterWmma -1 and 0.
+# Dtype, layout, scale, and LDS-pad coverage already lives in the other gfx1250
+# YAMLs, which themselves set ScheduleIterAlg: [4]. This file only keeps one
+# problem per family so that -1/0 init is still compiled under SIA 4.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
+GlobalParameters:
+  PrintSolutionRejectionReason: True
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: False
+  BoundsCheck: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  PruneSparseMode: 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeD: 2
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: True
+  Architecture: gfx1250-strict
+  CpuThreads: 1
+  KeepBuildTmp: True
+  PrintLevel: 2
+  CodeObjectVersion: "4"
+
+BenchmarkProblems:
+  -
+    - # BF16 TN
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - TDMInst: [3]
+        - LDSTrInst: [False]
+        - ScheduleIterAlg: [4]
+        - InitCIterWmma: [-1, 0]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - GlobalSplitU: [1]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 128]
+  -
+    - # FP16 -> FP32, pointer swap
+      OperationType: GEMM
+      DataType: h
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+        - DepthU: [32]
+        - TDMInst: [3]
+        - LDSTrInst: [False]
+        - ScheduleIterAlg: [4]
+        - InitCIterWmma: [-1, 0]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ExpandPointerSwap: [true]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 128]
+  -
+    - # FP32 TN, K tail
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: False
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 1, 1, 2, 2]
+        - DepthU: [16]
+        - TDMInst: [3]
+        - LDSTrInst: [False]
+        - ScheduleIterAlg: [4]
+        - InitCIterWmma: [-1, 0]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 129]
+  -
+    - # MXF4 TN, block 32, E8. Other scale types are in mxf4_gfx1250.yaml.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: e8
+      DataTypeMXSB: e8
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2]
+        - DepthU: [128]
+        - TDMInst: [3]
+        - ScheduleIterAlg: [4]
+        - InitCIterWmma: [-1, 0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - SourceSwap: [true]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+  -
+    - # F6 TN
+      OperationType: GEMM
+      DataType: F6
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2]
+        - DepthU: [128]
+        - TDMInst: [3]
+        - ScheduleIterAlg: [4]
+        - InitCIterWmma: [-1, 0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - SourceSwap: [true]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 272]
+  -
+    - # MX F6, block 32, E8
+      OperationType: GEMM
+      DataType: F6
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: e8
+      DataTypeMXSB: e8
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2]
+        - DepthU: [128]
+        - TDMInst: [3]
+        - ScheduleIterAlg: [4]
+        - InitCIterWmma: [-1, 0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - SourceSwap: [true]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+  -
+    - # F4 TN, no MX. NN/NT/TT stay in f4_gfx1250.yaml.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2]
+        - DepthU: [128]
+        - TDMInst: [3]
+        - ScheduleIterAlg: [4]
+        - InitCIterWmma: [-1, 0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - SourceSwap: [true]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 264]
+  -
+    - # F4 x F6, BF16 store
+      OperationType: GEMM
+      MacDataTypeA: F4
+      MacDataTypeB: F6
+      DataType: F4
+      DestDataType: B
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2]
+        - DepthU: [128]
+        - TDMInst: [3]
+        - ScheduleIterAlg: [4]
+        - InitCIterWmma: [-1, 0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - SourceSwap: [true]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 272]
+  -
+    - # MX F4 x F6, block 32
+      OperationType: GEMM
+      MacDataTypeA: F4
+      MacDataTypeB: F6
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: e8
+      DataTypeMXSB: e8
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2]
+        - DepthU: [128]
+        - TDMInst: [3]
+        - ScheduleIterAlg: [4]
+        - InitCIterWmma: [-1, 0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - SourceSwap: [true]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+  -
+    - # BF6 TN
+      OperationType: GEMM
+      DataType: B6
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2]
+        - DepthU: [128]
+        - TDMInst: [3]
+        - ScheduleIterAlg: [4]
+        - InitCIterWmma: [-1, 0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - SourceSwap: [true]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+  -
+    - # MX F8 x F4, block 32
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: F4
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: E8
+      DataTypeMXSB: E8
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2]
+        - DepthU: [128]
+        - TDMInst: [3]
+        - ScheduleIterAlg: [4]
+        - InitCIterWmma: [-1, 0]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - SourceSwap: [true]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]

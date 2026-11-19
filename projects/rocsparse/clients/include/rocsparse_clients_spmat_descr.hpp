@@ -340,6 +340,7 @@ namespace rocsparse_clients
 
         bool             is_square() const;
         int64_t          get_nrows() const;
+        int64_t          get_nnz() const;
         int64_t          get_stride() const;
         int64_t          get_batch_count() const;
         rocsparse_format get_format() const;

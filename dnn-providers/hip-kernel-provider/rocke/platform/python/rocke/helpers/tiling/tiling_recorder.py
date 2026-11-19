@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from math import ceil
 from typing import Any, Callable, Iterator
 
+from ...core.ir import Type
+
 # --------------------------------------------------------------------------------------------------
 # Recorded node model
 # --------------------------------------------------------------------------------------------------
@@ -64,6 +66,19 @@ class PipelineTransaction:
         return self.tile_desc.layout
 
     @property
+    def tensor(self) -> Any:
+        """The memory ``TensorDesc`` this load / store addressed, rebuilt from the recorded lengths,
+        strides and dtype (the addressing facts). The address replays use it for LDS transactions,
+        whose lengths are ints."""
+        from .descriptors import make_tensor_desc
+
+        if self.kind == "fill":
+            raise ValueError(
+                "a fill transaction moves no memory -- it has no tensor descriptor"
+            )
+        return make_tensor_desc(self.lengths, self.strides, Type(self.dtype_name))
+
+    @property
     def op_fanout(self) -> int:
         """Hardware mem-ops this verb emits: one wide op per ``vw`` registers."""
         if self.kind == "fill":
@@ -91,10 +106,10 @@ class PipelineOp:
     c_canon: Any = None
     atom_shape: tuple[int, ...] | None = None
     atom_count: int = 0  # number of `tile.mma` the TileMma call explodes into
-    a_free_atoms: int = (
-        1  # free-dim atom counts (m_sub / n_sub) -- for the per-atom K-match soundness gate
-    )
-    b_free_atoms: int = 1
+    # The MMA's A and B math dtypes: the one home views read operand widths and labels from.
+    # Required on an "mma" op, absent on a transform.
+    a_dtype: Type | None = None
+    b_dtype: Type | None = None
     note: str = ""
     produces: int | None = (
         None  # id() of the SSA Value this op yields (transform / mma output)
@@ -102,6 +117,26 @@ class PipelineOp:
     consumes: tuple[
         int, ...
     ] = ()  # id()s of the SSA Values this op reads (operands / transform src)
+
+    def __post_init__(self) -> None:
+        dtypes = (self.a_dtype, self.b_dtype)
+        if self.kind == "mma" and None in dtypes:
+            raise ValueError(
+                f"PipelineOp failed - kind='mma' with a_dtype={self.a_dtype!r}, "
+                f"b_dtype={self.b_dtype!r}, expected the MMA's A and B IR types (TileMma.a_dtype, "
+                "TileMma.b_dtype)"
+            )
+        for role, dtype in zip("ab", dtypes):
+            if dtype is not None and not isinstance(dtype, Type):
+                raise TypeError(
+                    f"PipelineOp failed - {role}_dtype={dtype!r} "
+                    f"({type(dtype).__name__}), expected an IR type such as rocke.core.ir.F16"
+                )
+        if self.kind != "mma" and dtypes != (None, None):
+            raise ValueError(
+                f"PipelineOp failed - kind={self.kind!r} with operand dtypes, expected none: "
+                "only an 'mma' op has A and B operands"
+            )
 
 
 @dataclass
@@ -187,7 +222,7 @@ class _Recorder:
         if kind == "store" and space == "global":
             vw = 1
         else:
-            vw = _access_vw(tile_desc, tensor.strides, tensor.dtype.name, swizzle)
+            vw = _access_vw(tile_desc, tensor, swizzle)
         node = PipelineTransaction(
             kind=kind,
             seq=self._next(),
@@ -288,8 +323,8 @@ class _Recorder:
                 c_canon=c_canon,
                 atom_shape=tuple(mma.atom_shape),
                 atom_count=atom_count,
-                a_free_atoms=m_sub,
-                b_free_atoms=n_sub,
+                a_dtype=mma.a_dtype,
+                b_dtype=mma.b_dtype,
                 note="TileMma",
                 produces=produces,
                 consumes=tuple(consumes),
@@ -308,11 +343,11 @@ class _Recorder:
             )
 
 
-def _access_vw(tile_desc: Any, strides: Any, dtype_name: str, swizzle: Any) -> int:
+def _access_vw(tile_desc: Any, tensor: Any, swizzle: Any) -> int:
     """The vw the emit would choose for this access (reuse the validated bank-conflict helper)."""
     from .lds_conflict import access_width
 
-    return access_width(tile_desc, tuple(strides), dtype_name, swizzle)
+    return access_width(tile_desc, tensor, swizzle)
 
 
 def _namespaces(build_fn: Callable) -> list[dict]:
@@ -561,10 +596,9 @@ def _elem_addresses(t: PipelineTransaction, n_lanes: int) -> dict[tuple[int, int
     origin = tuple(int(o) for o in t.origin)  # Milestone 0: constant LDS origins
     accesses, vw = addr_map(
         t.tile_desc,
-        tuple(t.strides),
+        t.tensor,
         origin=origin,
         n_lanes=n_lanes,
-        dtype_name=t.dtype_name,
         lds_swizzle=t.swizzle,
     )
     out: dict[tuple[int, int], int] = {}

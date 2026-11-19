@@ -859,6 +859,50 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwWithSavedStats)
     }
 }
 
+TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingLargeOffsetMatchesDoubleCompute)
+{
+    Tensor<float> inputTensor({1, 1, 1, 8});
+    Tensor<float> outputFloatCompute({1, 1, 1, 8});
+    Tensor<float> outputDoubleCompute({1, 1, 1, 8});
+    Tensor<float> scaleTensor({1, 1});
+    Tensor<float> biasTensor({1, 1});
+    Tensor<float> meanFloatCompute({1, 1});
+    Tensor<float> meanDoubleCompute({1, 1});
+    Tensor<float> invVarianceFloatCompute({1, 1});
+    Tensor<float> invVarianceDoubleCompute({1, 1});
+
+    for(int64_t w = 0; w < 8; ++w)
+    {
+        inputTensor.setHostValue(1000.0f + (w % 2 == 0 ? -0.01f : 0.01f), 0, 0, 0, w);
+    }
+    scaleTensor.setHostValue(1.0f, 0, 0);
+    biasTensor.setHostValue(0.0f, 0, 0);
+
+    CpuFpReferenceBatchnorm::fwdTraining<float, float, float, float, float>(
+        inputTensor,
+        scaleTensor,
+        biasTensor,
+        outputFloatCompute,
+        BATCHNORM_DEFAULT_EPSILON,
+        0.1,
+        &meanFloatCompute,
+        &invVarianceFloatCompute);
+    CpuFpReferenceBatchnorm::fwdTraining<float, float, float, float, double>(
+        inputTensor,
+        scaleTensor,
+        biasTensor,
+        outputDoubleCompute,
+        BATCHNORM_DEFAULT_EPSILON,
+        0.1,
+        &meanDoubleCompute,
+        &invVarianceDoubleCompute);
+
+    const auto floatInvVariance = invVarianceFloatCompute.getHostValue(0, 0);
+    const auto doubleInvVariance = invVarianceDoubleCompute.getHostValue(0, 0);
+    EXPECT_TRUE(std::isfinite(floatInvVariance));
+    EXPECT_NEAR(floatInvVariance, doubleInvVariance, 1e-2f);
+}
+
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwWithRunningStats)
 {
     Tensor<float> inputTensor({2, 3, 4, 4});

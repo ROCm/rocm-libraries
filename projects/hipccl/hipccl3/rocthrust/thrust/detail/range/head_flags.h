@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -30,7 +30,6 @@
 #include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
-#include <thrust/sequence_access.h>
 #include <thrust/tuple.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -38,9 +37,9 @@ namespace detail
 {
 
 template <typename RandomAccessIterator,
-          typename BinaryPredicate = thrust::equal_to<typename thrust::iterator_value<RandomAccessIterator>::type>,
+          typename BinaryPredicate = equal_to<it_value_t<RandomAccessIterator>>,
           typename ValueType       = bool,
-          typename IndexType       = typename thrust::iterator_difference<RandomAccessIterator>::type>
+          typename IndexType       = it_difference_t<RandomAccessIterator>>
 class head_flags
 {
 public:

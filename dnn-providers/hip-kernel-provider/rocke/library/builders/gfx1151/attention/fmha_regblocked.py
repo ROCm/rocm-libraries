@@ -36,7 +36,7 @@ every score/accumulator fragment carries as a packed
 :class:`~rocke.helpers.WmmaTensor` (one SSA vector, no f32 cast), each
 ``m_repeat * n_repeat`` matmul is one :func:`~rocke.helpers.wmma_mma`, the
 online-softmax rescale is one ``tile.scale``, the per-slot lane decode is
-``tile.coord`` off the atom's verified ``c_layout``, and the O epilogue is
+``tile.coord`` off the atom's verified result layout, and the O epilogue is
 :func:`~rocke.helpers.store_wmma_tile`. The cooperative K/V LDS staging and the
 P->A LDS transpose are NOT WMMA-tile ops, so they stay on the raw LDS-view path.
 Each tile op lowers to the exact same single instruction the raw path emitted
@@ -146,8 +146,9 @@ def _declare_params(b: IRBuilder):
 def build_wmma_fmha_regblocked(cfg: RegBlockedCfg, arch: str = "gfx1151") -> KernelDef:
     atom = WmmaAtom.f16_16x16x16()
     wave = atom.wave_size  # 32
-    a_map = atom.a_layout(arch)
-    c_map = atom.c_layout(arch)
+    op = atom.mma_op(arch)
+    a_map = op.src_layout(0)
+    dst_map = op.dst_layout()
     c_frag = atom.c_per_lane  # 8
     if cfg.double_buffer:
         # Prefetch path is gated behind the base single-buffer result; only
@@ -404,7 +405,7 @@ def build_wmma_fmha_regblocked(cfg: RegBlockedCfg, arch: str = "gfx1151") -> Ker
         for mr in range(MR):
             for nr in range(NR):
                 for r in range(c_frag):
-                    row_rel, col_k = c_map.coord(b, lane, r)
+                    row_rel, col_k = dst_map.coord(b, lane, r)
                     P_lds.store_scalar(
                         b,
                         [wave_id, row_rel, col_k],

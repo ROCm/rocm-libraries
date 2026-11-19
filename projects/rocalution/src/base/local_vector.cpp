@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -444,10 +444,9 @@ namespace rocalution
                                      "*** info: LocalVector::MoveToHostAsync() accelerator to host "
                                      "transfer (synced)");
                 }
-
                 // MoveToAcceleratorAsync();
-                if((_rocalution_available_accelerator() == true)
-                   && (this->vector_ == this->vector_host_))
+                else if((_rocalution_available_accelerator() == true)
+                        && (this->vector_ == this->vector_host_))
                 {
                     _rocalution_sync();
 
@@ -507,14 +506,12 @@ namespace rocalution
             current_backend_name = _rocalution_backend_name[this->local_backend_.backend];
         }
 
-        LOG_INFO("LocalVector"
-                 << " name=" << this->object_name_ << ";"
-                 << " size=" << this->GetSize() << ";"
-                 << " prec=" << 8 * sizeof(ValueType) << "bit;"
-                 << " host backend={" << _rocalution_host_name[0] << "};"
-                 << " accelerator backend={"
-                 << _rocalution_backend_name[this->local_backend_.backend] << "};"
-                 << " current=" << current_backend_name);
+        LOG_INFO("LocalVector" << " name=" << this->object_name_ << ";"
+                               << " size=" << this->GetSize() << ";"
+                               << " prec=" << 8 * sizeof(ValueType) << "bit;" << " host backend={"
+                               << _rocalution_host_name[0] << "};" << " accelerator backend={"
+                               << _rocalution_backend_name[this->local_backend_.backend] << "};"
+                               << " current=" << current_backend_name);
     }
 
     template <typename ValueType>

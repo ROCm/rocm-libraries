@@ -82,7 +82,7 @@ def _smoke_python_engine() -> tuple[str, str]:
 
     kernel = _build_smoke_kernel()
     ir_text = serialize(kernel)
-    ll_text = lower_kernel_to_llvm(kernel)
+    ll_text = lower_kernel_to_llvm(kernel, arch="gfx950")
     if "rocke_install_smoke" not in ll_text:
         raise RuntimeError("Python engine smoke did not lower the expected kernel")
     return ir_text, ll_text

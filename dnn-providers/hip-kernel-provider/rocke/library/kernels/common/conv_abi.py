@@ -37,12 +37,14 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 __all__ = [
+    "STREAMK_REDUCTIONS",
     "ArgSpec",
     "conv_arg_names",
     "conv_args_signature",
     "conv_desc_names",
     "conv_direct_arg_names",
     "conv_direct_args_signature",
+    "conv_direct_transform_signature",
     "conv_fwd_problem_block",
     "conv_manifest_args_signature",
 ]
@@ -107,8 +109,13 @@ def _grid() -> List[ArgSpec]:
     return [("p_num_pid_m", "i32"), ("p_num_pid_n", "i32")]
 
 
-def _fwd_arg_names(*, is_3d: bool = False) -> List[ArgSpec]:
-    """Forward implicit-GEMM conv: ``A`` (N[D]HWC), ``B`` (K[Z]YXC), ``D`` (N[D]HWK)."""
+def _fwd_arg_names(*, is_3d: bool = False, split_k: bool = False) -> List[ArgSpec]:
+    """Forward implicit-GEMM conv: ``A`` (N[D]HWC), ``B`` (K[Z]YXC), ``D`` (N[D]HWK).
+
+    ``split_k`` is the split-K binary's ABI: the fp32 workspace its slices
+    store into, then the slice width and degree (wgrad's ``ks`` /
+    ``ks_count``).
+    """
     out: List[ArgSpec] = [
         ("A", "a"),
         ("B", "b"),
@@ -138,6 +145,9 @@ def _fwd_arg_names(*, is_3d: bool = False) -> List[ArgSpec]:
     # k -> ([z,] y, x, c): divisors cpg, X[, Y].
     out += _magic("k_", (["Y"] if is_3d else []) + ["X", "cpg"])
     out += _grid()
+    if split_k:
+        out += [("ws_ptr", "f32*"), ("ws_bytes", "i32")]
+        out += [("ks", "i32"), ("ks_count", "i32")]
     return out
 
 
@@ -151,10 +161,28 @@ def conv_fwd_problem_block(*, is_3d: bool = False) -> List[ArgSpec]:
     return _fwd_arg_names(is_3d=is_3d)[_LEADING_ARGS:]
 
 
+# Stream-K reductions of the wgrad kernel, as ABI selectors.
+STREAMK_REDUCTIONS = ("atomic", "workspace", "linear", "tree")
+
+# The stream-K launch block: the host-computed iteration partition. The kernel
+# is shape- and pool-agnostic, so every value the partition derives from the
+# launch shape and the CTA pool arrives here rather than being baked in.
+_STREAMK_SCALARS = (
+    "sk_iters_per_tile",  # ceil(wg_K / tile_k): MAC iterations per output tile
+    "sk_dp_tiles",  # tiles owned whole by data-parallel CTAs / the DP sweep
+    "sk_ctas",  # stream-K CTAs (0 for an all-data-parallel partition)
+    "sk_iters_per_cta",  # base iterations per stream-K CTA; never 0 (a divisor)
+    "sk_extra_iters",  # the first sk_extra_iters stream-K CTAs own one more
+    "sk_pool",  # the CTA pool; the persistent launch's DP-sweep stride
+    "sk_tree_rounds",  # pairwise rounds the tree fixup runs
+)
+
+
 def _wgrad_arg_names(
     *,
     is_3d: bool = False,
     two_stage: bool = False,
+    streamk: Optional[str] = None,
 ) -> List[ArgSpec]:
     """Weight-gradient conv: ``dY`` (N[D]HWK), ``X`` (N[D]HWC), ``dW`` (K[Z]YXC).
 
@@ -181,6 +209,13 @@ def _wgrad_arg_names(
     two cases one removes the pair of ABI flags that used to select between
     them -- and with them the chance of building a kernel against one variant
     and launching it with the other.
+
+    ``streamk`` names the stream-K reduction of a stream-K kernel, ``None``
+    otherwise. The ``workspace`` reduction reuses the two-stage scratch pair;
+    ``linear`` and ``tree`` add their flag and partial buffers after
+    ``ks_count``, and every reduction then appends the partition block
+    (``_STREAMK_SCALARS``). A stream-K kernel ignores ``ks``/``ks_count`` --
+    it partitions K itself -- but keeps them so the prefix is unchanged.
     """
     out: List[ArgSpec] = [
         ("dY", "a"),
@@ -210,12 +245,16 @@ def _wgrad_arg_names(
     out += _magic("n_", (["Y"] if is_3d else []) + ["X", "cpg"])
     out += _grid()
     # ---- variant-specific extras ----
-    if two_stage:
+    if two_stage or streamk == "workspace":
         out += [("ws_ptr", "f32*"), ("ws_bytes", "i32")]
     # The split-K slice width and degree, always. `ks` alone is not enough:
     # decoding block_id_z needs the number of slices, which is a different
     # quantity from how wide each one is.
     out += [("ks", "i32"), ("ks_count", "i32")]
+    if streamk in ("linear", "tree"):
+        out += [("sk_flags", "i32*"), ("sk_partials", "f32*")]
+    if streamk is not None:
+        out += [(name, "i32") for name in _STREAMK_SCALARS]
     return out
 
 
@@ -256,9 +295,9 @@ def _dgrad_arg_names(*, is_3d: bool = False) -> List[ArgSpec]:
     out += [("p_dX_stride_hi", "i32"), ("p_dX_stride_wi", "i32")]
     # Only the ``m`` decode needs magic pairs, for the dX store descriptor:
     # ``m -> (n, [di,] hi, wi)`` divides by Wi, then Hi[, then Di]. The dY / W
-    # load descriptors decode ``m`` and ``k`` with plain runtime div/mod
-    # against fields of the tilde sub-GEMM record, not through an
-    # unmerge_magic chain, so they have no divisor to precompute a pair for.
+    # load descriptors and the strided epilogues decode ``m`` and ``k`` by
+    # fields of the tilde sub-GEMM record, which differ per record; their
+    # magic pairs ride in sub_gemm_buf (see pack_sub_gemm_buffer), not here.
     out += _magic("m_", (["Di"] if is_3d else []) + ["Hi", "Wi"])
     out += _grid()
     # The tilde decomposition record buffer is always present.
@@ -271,6 +310,7 @@ def conv_arg_names(
     direction: str = "fwd",
     is_3d: bool = False,
     two_stage: bool = False,
+    streamk: Optional[str] = None,
 ) -> List[ArgSpec]:
     """The implicit-GEMM conv kernarg ABI for one direction.
 
@@ -281,18 +321,35 @@ def conv_arg_names(
     callers that already dispatch on it (the manifest emitter, the grouped
     dispatcher, the AOT cache) stop branching.
 
-    ``two_stage`` belongs to wgrad's deterministic epilogue and is rejected
-    elsewhere rather than ignored: silently accepting it would hand back a
-    signature that does not match any kernel the flag can build.
+    ``two_stage`` is wgrad's deterministic epilogue, and on fwd the split-K
+    binary (fp32 workspace slabs + a Stage 2 reduce). dgrad has neither, so it
+    is rejected there rather than ignored: silently accepting it would hand
+    back a signature that does not match any kernel the flag can build.
+
+    ``streamk`` (wgrad only) is the stream-K reduction, or ``None`` for a
+    kernel without stream-K. Stream-K partitions K itself, so it excludes the
+    two-stage split-K variant.
     """
-    if two_stage and direction != "wgrad":
+    if two_stage and direction not in ("wgrad", "fwd"):
         raise ValueError(
-            f"two_stage is a wgrad-only variant (got direction={direction!r})"
+            f"two_stage is a wgrad / fwd split-K variant (got direction={direction!r})"
         )
+    if streamk is not None:
+        if direction != "wgrad":
+            raise ValueError(
+                f"streamk is a wgrad-only variant (got direction={direction!r})"
+            )
+        if streamk not in STREAMK_REDUCTIONS:
+            raise ValueError(
+                f"unknown stream-K reduction {streamk!r}; expected one of "
+                f"{STREAMK_REDUCTIONS}"
+            )
+        if two_stage:
+            raise ValueError("streamk and two_stage are exclusive: both partition K_wg")
     if direction == "fwd":
-        return _fwd_arg_names(is_3d=is_3d)
+        return _fwd_arg_names(is_3d=is_3d, split_k=two_stage)
     if direction == "wgrad":
-        return _wgrad_arg_names(is_3d=is_3d, two_stage=two_stage)
+        return _wgrad_arg_names(is_3d=is_3d, two_stage=two_stage, streamk=streamk)
     if direction == "dgrad":
         return _dgrad_arg_names(is_3d=is_3d)
     raise ValueError(
@@ -403,7 +460,8 @@ def _conv_signature(
     The name list is the ABI; this only attaches manifest types to it, so the
     signature can never drift from what the kernel builders declare.
     """
-    _ir = {"fp16": "f16", "bf16": "bf16", "fp32": "f32"}
+    # ``tf32`` is a compute mode over fp32 tensors, so its pointers are f32.
+    _ir = {"fp16": "f16", "bf16": "bf16", "fp32": "f32", "tf32": "f32"}
 
     def _ptr(dt: str) -> str:
         return f"ptr<{_ir.get(dt, dt)}, global>"
@@ -431,20 +489,24 @@ def conv_args_signature(
     dtype_d: Optional[str] = None,
     is_3d: bool = False,
     two_stage: bool = False,
+    streamk: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Implicit-GEMM conv launch signature for one direction.
 
     ``direction`` is ``"fwd"``, ``"wgrad"`` or ``"dgrad"``; ``dtype`` sets all
     three operand types unless ``dtype_b`` / ``dtype_d`` override them, which
     mixed-precision configs need. ``two_stage`` adds wgrad's f32 workspace
-    pair and is rejected for the other two directions.
+    pair and is rejected for the other two directions; ``streamk`` selects a
+    stream-K wgrad kernel's ABI by its reduction.
 
     One entry point rather than three: the direction is already a value every
     caller has in hand, so making it an argument removes the per-direction
     branch each of them used to carry.
     """
     return _conv_signature(
-        conv_arg_names(direction=direction, is_3d=is_3d, two_stage=two_stage),
+        conv_arg_names(
+            direction=direction, is_3d=is_3d, two_stage=two_stage, streamk=streamk
+        ),
         dtype,
         dtype_b or dtype,
         dtype_d or dtype,
@@ -464,6 +526,20 @@ def conv_direct_args_signature(
     return _conv_signature(
         conv_direct_arg_names(direction=direction), dtype, dtype, dtype_d
     )
+
+
+def conv_direct_transform_signature(
+    dtype: str = "fp16", runtime_channels: bool = False
+) -> List[Dict[str, Any]]:
+    """Launch signature of the MFMA dgrad's weight-transform kernels: source,
+    destination and their byte sizes, then -- for the runtime-channel ones --
+    the per-group channel counts."""
+    from kernels.common.conv_direct_grouped import DIRECT_WEIGHT_TRANSFORM_RTC_ARGS
+
+    names = [("A", "a"), ("D", "d"), ("A_bytes", "i32"), ("D_bytes", "i32")]
+    if runtime_channels:
+        names += [(n, "i32") for n in DIRECT_WEIGHT_TRANSFORM_RTC_ARGS]
+    return _conv_signature(names, dtype, dtype, dtype)
 
 
 def conv_manifest_args_signature(

@@ -44,16 +44,30 @@ rocke_portable_ir_replay_cli --bundle b.cbor --key gemm_f16 --arch gfx950
 
 `test_portable_ir.py` (pytest) — CI wiring for the Python-side drivers, which
 live in `python/rocke/portable_ir/drivers/` because they need the Python front
-end to author artifacts. Runs the in-package unit tests, the recorder-coverage
-sweep, the byte-identity parity matrix, and a standalone-binary byte-identity
-check. The last two skip with an actionable reason when `librocke.so` or the
-CLI has not been built.
+end to author artifacts. The lanes are deliberately separated:
+
+| lane | marker/artifact policy | claim |
+| --- | --- | --- |
+| in-package unit modules | always; never builds native artifacts | codecs, ABI, guards, launch plans, freshness policy |
+| recorder coverage | always; pure Python | every buildable family records without gaps |
+| shared-engine parity | `integration`; source-matched library | C++ replay LLVM is byte-identical for each supported, buildable family/arch cell |
+| standalone replay | explicit source-matched or installed-manifest-validated CLI | deployment-shaped replay is byte-identical |
+| recipe rolling | `integration` for shared-engine replay; explicit CLI for standalone replay | sampled and held-out recipes replay exactly |
+| CTest decoder/VM units | configured CMake build | hermetic native decoder and VM behavior |
+
+Direct pytest builds source/build-recipe-keyed artifacts on demand: CLI-only
+lanes resolve only the CLI, while integration lanes validate the complete
+shared-engine/CLI bundle. The normal `tests/run_all.py` path configures,
+preflights, and supplies both binaries from its build root, so an unrelated
+local cache cannot affect that gate. A deliberately supplied foreign CMake build
+root cannot own rocKE targets; in that exceptional case pytest resolves the same
+source-keyed artifacts used by direct invocation.
 
 ## The gate that matters
 
-Byte-identity, not equivalence: for every production kernel and every target
-arch, the `.ll` from replaying the artifact must equal the Python lowerer's
-`.ll` byte for byte. Concrete recipes carry `exact_names`, so the VM reproduces
+Byte-identity, not equivalence: for every supported, buildable production
+kernel/target-arch cell, the `.ll` from replaying the artifact must equal the
+Python lowerer's `.ll` byte for byte. Concrete recipes carry `exact_names`, so the VM reproduces
 Python's SSA naming rather than merely an isomorphic graph. That is strong
 enough to catch reordering and naming drift that an HSACO comparison would
 hide.
@@ -61,6 +75,31 @@ hide.
 ```
 export ROCKE_ONLINE_LIB=<path>/librocke.so
 python -m rocke.portable_ir.drivers.parity_matrix [--verbose]
+```
+
+An explicitly selected library or replay CLI must have the content build ID of
+the current portable-IR native bundle: the engine/CLI sources and their CMake
+build recipes. A stale or mixed build fails once with both IDs and a rebuild
+command instead of producing one mismatch per kernel. Without environment overrides,
+local discovery uses a content-addressed temporary cache and builds the current
+bundle ID when it is absent.
+
+The full local path owns all of its artifacts and is the closest CI equivalent:
+
+```
+python tests/run_all.py
+```
+
+Cases that require a shared engine or compile replayed artifacts carry the
+`integration` marker. Standalone CLI consumers remain in the installed quick
+lane: CTest supplies the prebuilt CLI and its build-generated provenance
+manifest, so those tests neither discover `librocke` nor build native code. The
+remaining unit, recorder, roller, codec, and coverage tier never constructs
+native artifacts; a few unit modules opportunistically exercise an
+already-supplied source-matched engine:
+
+```
+python -m pytest tests/portable_ir -m "not integration"
 ```
 
 Device coverage is separate, since it needs a GPU:

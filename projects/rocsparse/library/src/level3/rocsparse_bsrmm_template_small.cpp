@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "bsrmm_device_small.h"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -185,8 +186,11 @@ namespace rocsparse
         constexpr uint32_t BSRMMNN_DIM = 64;
         constexpr uint32_t SUB_WF_SIZE = 8;
 
-        const dim3 bsrmm_blocks((m - 1) / (BSRMMNN_DIM / SUB_WF_SIZE) + 1,
-                                (n - 1) / SUB_WF_SIZE + 1);
+        // grid.x and grid.y are clamped to the device limits; the kernel
+        // grid-strides over both (see bsrmmnn_small_blockdim_device).
+        const dim3 bsrmm_blocks(rocsparse::get_grid_size_x(
+                                    handle, (m - 1) / (BSRMMNN_DIM / SUB_WF_SIZE) + 1, BSRMMNN_DIM),
+                                rocsparse::get_grid_size_y(handle, (n - 1) / SUB_WF_SIZE + 1));
         const dim3 bsrmm_threads(BSRMMNN_DIM);
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsrmmnn_small_blockdim_kernel<BSRMMNN_DIM, SUB_WF_SIZE, 2>),

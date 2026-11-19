@@ -204,7 +204,7 @@ class FindMatchedSubtreesTest(unittest.TestCase):
         # inside it -- longest-prefix match, not a fixed 2-segment truncation.
         prefixes = {"projects/hipblaslt", "projects/hipblaslt/tensilelite"}
         result = sut.find_matched_subtrees(
-            ["projects/hipblaslt/tensilelite/Tensile/KernelWriter.py"], prefixes
+            ["projects/hipblaslt/tensilelite/tensilelite/KernelWriter.py"], prefixes
         )
         self.assertEqual(result, ["projects/hipblaslt/tensilelite"])
 
@@ -219,7 +219,7 @@ class FindMatchedSubtreesTest(unittest.TestCase):
         prefixes = {"projects/hipblaslt", "projects/hipblaslt/tensilelite"}
         result = sut.find_matched_subtrees(
             [
-                "projects/hipblaslt/tensilelite/Tensile/KernelWriter.py",
+                "projects/hipblaslt/tensilelite/tensilelite/KernelWriter.py",
                 "projects/hipblaslt/library/src/Handle.cpp",
             ],
             prefixes,

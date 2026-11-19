@@ -339,13 +339,11 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         arguments["CCompiler"],
         arguments["Assembler"],
         arguments["OffloadBundler"],
-        arguments["HipConfig"],
     ) = validateToolchain(
         arguments["CxxCompiler"],
         arguments["CCompiler"],
         arguments["Assembler"],
         arguments["OffloadBundler"],
-        ToolchainDefaults.HIP_CONFIG,
     )
     if args.NoEnumerate:
         arguments["ROCmAgentEnumeratorPath"] = False

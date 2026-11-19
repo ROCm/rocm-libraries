@@ -14,6 +14,7 @@
 #include <vector>
 
 #include <hip/hip_runtime.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 #include "hipdnn_backend.h"
@@ -105,6 +106,22 @@ public:
     virtual void setStream(hipStream_t stream) const;
     virtual std::vector<int64_t> getApplicableEngineIds(const GraphDescriptor* graphDesc,
                                                         bool findFirst = false) const;
+
+    /// @brief Asks whether one explicitly chosen engine applies to a graph.
+    ///
+    /// Only the plugin that owns @p engineId is queried, under the same API-version gating and
+    /// ID validation as getApplicableEngineIds(). Unlike that query, which skips a plugin that
+    /// cannot answer so the remaining plugins still contribute engines, a failure of the owning
+    /// plugin propagates unchanged: it is the real reason the engine cannot be used. A plugin
+    /// that does not own @p engineId is never consulted.
+    ///
+    /// @param engineId  Engine ID to test.
+    /// @param graphDesc Graph the engine would run; must not be null.
+    /// @return true when the owning plugin lists the engine as applicable; false when the
+    ///         engine is unknown, gated out, or not offered for the graph.
+    /// @throws HipdnnException whatever the owning plugin's query throws.
+    [[nodiscard]] virtual bool isEngineApplicable(int64_t engineId,
+                                                  const GraphDescriptor* graphDesc) const;
     virtual size_t getWorkspaceSize(int64_t engineId,
                                     const hipdnnPluginConstData_t* engineConfig,
                                     const GraphDescriptor* graphDesc) const;
@@ -181,6 +198,22 @@ public:
 
     virtual std::string toString() const;
 
+    /// Owns a validated bounded page independently of the plugin allocation.
+    virtual std::vector<uint8_t> enumerateCandidates(int64_t engineId,
+                                                     const hipdnnPluginConstData_t& engineConfig,
+                                                     const GraphDescriptor* graph,
+                                                     uint64_t offset,
+                                                     uint64_t limit) const;
+
+    /// Queries one engine without changing applicability, in the config's ranking metric
+    /// (empty = default; unregistered throws BAD_PARAM). The host-owned result always carries
+    /// that metric; malformed or other-metric answers are returned as INVALID.
+    virtual hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
+        getEnginePrediction(const hipdnnPluginConstData_t& engineConfig,
+                            const hipdnnPluginConstData_t& opGraph,
+                            hipdnnEnginePredictionKind_t kind,
+                            bool evaluate = true) const;
+
 protected:
     // Note: _pm member is inherited from PluginResourceManagerBase
 
@@ -192,6 +225,14 @@ private:
                                   hipdnnPluginConstData_t* engineDetails) const;
     virtual void destroyEngineDetails(int64_t engineId,
                                       hipdnnPluginConstData_t* engineDetails) const;
+
+    /// @brief Shared core of getApplicableEngineIds() and isEngineApplicable().
+    /// @param pinnedEngineId When set, only that engine's owning plugin is queried and its
+    ///                       failure propagates; otherwise every plugin is queried and a
+    ///                       failing plugin is skipped.
+    std::vector<int64_t> queryApplicableEngineIds(const GraphDescriptor* graphDesc,
+                                                  bool findFirst,
+                                                  std::optional<int64_t> pinnedEngineId) const;
 
     [[nodiscard]] virtual hipdnnEnginePluginExecutionContext_t
         createExecutionContext(int64_t engineId,

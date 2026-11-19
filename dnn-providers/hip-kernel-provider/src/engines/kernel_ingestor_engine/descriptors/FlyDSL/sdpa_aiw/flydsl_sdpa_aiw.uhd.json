@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "0e5fcbbc-c60b-5ee6-99b2-1908e1084328",
+  "name": "flydsl sdpa_aiw selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.flydsl_sdpa_aiw.score"
+  }
+}

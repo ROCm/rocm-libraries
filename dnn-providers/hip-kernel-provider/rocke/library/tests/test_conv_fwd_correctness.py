@@ -9,8 +9,10 @@ Coverage:
   - Pipelines: mem, compv3, compv4, basic (MFMA arches); mem, wavelet (WMMA/gfx1250)
   - Epilogues: default, cshuffle
   - Shapes: regular 3x3, pointwise 1x1, strided 2x2, dilated, padded, large channel
-  - Dtypes: fp16, bf16
-  - Corner cases: single-element output, groups=2, groups=4 (cpg not div-by-8), asymmetric HW
+  - Dtypes: fp16, bf16; fp32 storage with fp32 or TF32 compute
+    (``TestConvFwdFp32Tf32Correctness``, 2-D and 3-D)
+  - Corner cases: single-element output, groups=2, groups=4 (cpg not div-by-8), asymmetric HW,
+    grouped pointwise 1x1
 
 Requires a ROCm GPU and torch. Run:
     PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
@@ -23,11 +25,13 @@ import ctypes
 import importlib.util
 import unittest
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from rocke.runtime.hip_module import get_device_arch
 
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
+if _HAS_TORCH:
+    from builders.common.conv_reference import tf32_reference_inputs, tf32_reference_tol
 
 if _HAS_TORCH:
     # Let torch claim the process HIP context before rocke's runtime binds it.
@@ -77,6 +81,12 @@ class _Shape:
     dH: int = 1
     dW: int = 1
     groups: int = 1
+    # 3-D only (NDHWC); ``None`` for a 2-D shape.
+    Di: Optional[int] = None
+    Z: Optional[int] = None
+    sD: Optional[int] = None
+    pD: Optional[int] = None
+    dD: Optional[int] = None
 
 
 # Shapes designed to stay small (fast compile + run) while exercising
@@ -173,6 +183,13 @@ _SHAPES: List[_Shape] = [
         pW=1,
         groups=4,
     ),
+    # --- grouped pointwise 1x1: the pointwise fast path with groups > 1. A's
+    # pixel row is all C channels, B is bounded by the within-group filter and
+    # D's rows are all K channels; addressing any of them per group (cpg/kpg)
+    # leaves (G-1)/G of the output unwritten and the rest computed from group
+    # 0's weights.
+    _Shape("1x1_g2_N1H8W8C32K32", N=1, Hi=8, Wi=8, C=32, K=32, Y=1, X=1, groups=2),
+    _Shape("1x1_g4_N2H8W8C32K64", N=2, Hi=8, Wi=8, C=32, K=64, Y=1, X=1, groups=4),
 ]
 
 # Tile config: (tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn)
@@ -189,6 +206,28 @@ _DTYPES = ("fp16", "bf16")
 
 _TOL = {"fp16": 5e-2, "bf16": 5e-2}
 
+# fp32 storage. ``tf32`` is not a storage dtype: it builds
+# ``ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32")``.
+_FP32_DTYPES = ("fp32", "tf32")
+_STORAGE = {"fp16": "fp16", "bf16": "bf16", "fp32": "fp32", "tf32": "fp32"}
+
+
+def _tolerance(dtype: str, arch: str) -> float:
+    """Peak-relative error bound for ``dtype`` on ``arch``.
+
+    fp32 and gfx950 TF32 are checked against an fp64 reference of the exact
+    inputs. The bf16x3 emulation is close to fp32, and the 1e-4 bound fails a
+    single bf16 pass or a dropped cross term. gfx942 hardware TF32 ignores the
+    low 13 mantissa bits, so its reference is computed from inputs masked the
+    same way (``conv_reference.tf32_reference_inputs``). That leaves only accumulation error,
+    and the fp32 bound applies.
+    """
+    if dtype == "fp32":
+        return 1e-4
+    if dtype == "tf32":
+        return tf32_reference_tol(arch)
+    return _TOL[dtype]
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -199,6 +238,39 @@ def _u8(t):
     import torch  # noqa: F401 — only called when torch is available
 
     return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
+
+
+def _conv_reference_fp64(A, B, problem):
+    """fp64 CPU reference (NHWC / NDHWC out).
+
+    Deliberately not ``conv_reference``: that runs an fp32 convolution on the
+    GPU, which torch may route through TF32 (``allow_tf32`` /
+    ``conv.fp32_precision``), so the reference could share the error under
+    test. An fp64 CPU convolution has no TF32 path at all.
+    """
+    import torch.nn.functional as F
+
+    p = problem
+    cpg = p.C // p.groups
+    if not p.is_3d:
+        out = F.conv2d(
+            A.cpu().double().permute(0, 3, 1, 2),
+            B.cpu().double()[..., :cpg].permute(0, 3, 1, 2),
+            stride=(p.sH, p.sW),
+            padding=(p.pH, p.pW),
+            dilation=(p.dH, p.dW),
+            groups=p.groups,
+        )
+        return out.permute(0, 2, 3, 1).contiguous()
+    out = F.conv3d(
+        A.cpu().double().permute(0, 4, 1, 2, 3),
+        B.cpu().double()[..., :cpg].permute(0, 4, 1, 2, 3),
+        stride=(p.sD, p.sH, p.sW),
+        padding=(p.pD, p.pH, p.pW),
+        dilation=(p.dD, p.dH, p.dW),
+        groups=p.groups,
+    )
+    return out.permute(0, 2, 3, 4, 1).contiguous()
 
 
 def _select_warp_tile_k(arch: str, dtype: str, warp_tile_mn: int, tile_k: int) -> int:
@@ -228,6 +300,7 @@ def _run_one(
     dtype: str,
     pipeline: str,
     epilogue: str,
+    group_merge: int = 1,
     **spec_extra,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one conv kernel.
@@ -236,6 +309,12 @@ def _run_one(
     the spec; they are tagged into the test kernel's name.
 
     Returns ``(passed, reason)`` where ``reason`` is non-empty on skip or failure.
+
+    ``group_merge`` folds ``Gm`` depthwise groups into one GEMM tile. It changes
+    only the *launch geometry* and the emitted kernel -- the reference, the
+    tensors, and the tolerance are untouched, because a merged kernel must
+    produce bit-comparable output to the unmerged one. That is the entire claim
+    this test exists to check.
     """
     import torch
 
@@ -282,7 +361,13 @@ def _run_one(
         dH=shape.dH,
         dW=shape.dW,
         groups=shape.groups,
+        Di=shape.Di,
+        Z=shape.Z,
+        sD=shape.sD,
+        pD=shape.pD,
+        dD=shape.dD,
     )
+    storage = _STORAGE[dtype]
 
     # For wavelet on the small test tile (warp_m=warp_n=1, n_math_warps=1),
     # num_load_waves must be <= n_math_warps to avoid the over-provisioning warning.
@@ -293,7 +378,12 @@ def _run_one(
             f"test_conv_fwd_{shape.id}_{dtype}_{pipeline}_{epilogue}"
             + "".join(f"_{k}" for k, v in sorted(spec_extra.items()) if v)
         ),
-        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        data=ConvDataSpec(
+            dtype_a=storage,
+            dtype_b=storage,
+            dtype_d=storage,
+            mma_dtype="tf32" if dtype == "tf32" else None,
+        ),
         tile_m=tile_m,
         tile_n=tile_n,
         # Force scalar stores for the default epilogue so the vec_c constraint
@@ -310,6 +400,7 @@ def _run_one(
         epilogue=epilogue,
         groups=shape.groups,
         num_load_waves=_num_load_waves,
+        group_merge=group_merge,
         **spec_extra,
     )
 
@@ -329,22 +420,43 @@ def _run_one(
     except Exception as e:
         return False, f"compile failed: {e}"
 
-    _torch_dtype = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
+    _torch_dtype = {
+        "fp16": torch.float16,
+        "bf16": torch.bfloat16,
+        "fp32": torch.float32,
+    }[storage]
+    _depth = (problem.Di,) if problem.is_3d else ()
+    _filt = (problem.Z,) if problem.is_3d else ()
+    _out_depth = (problem.Do,) if problem.is_3d else ()
     torch.manual_seed(0)
     A_t = (
-        torch.empty(problem.N, problem.Hi, problem.Wi, problem.C)
+        torch.empty(problem.N, *_depth, problem.Hi, problem.Wi, problem.C)
         .uniform_(-1.0, 1.0)
         .to(_torch_dtype)
     )
     B_t = (
-        torch.empty(problem.K, problem.Y, problem.X, problem.C // problem.groups)
+        torch.empty(
+            problem.K, *_filt, problem.Y, problem.X, problem.C // problem.groups
+        )
         .uniform_(-1.0, 1.0)
         .to(_torch_dtype)
     )
-    D_t = torch.empty(problem.N, problem.Ho, problem.Wo, problem.K, dtype=_torch_dtype)
+    D_t = torch.empty(
+        problem.N, *_out_depth, problem.Ho, problem.Wo, problem.K, dtype=_torch_dtype
+    )
 
     # Reference
-    if arch == "gfx1250":
+    if storage == "fp32":
+        # fp64 on the CPU: an fp32 GPU reference may itself run as TF32.
+        if dtype == "tf32":
+            ref = _conv_reference_fp64(
+                tf32_reference_inputs(A_t, arch),
+                tf32_reference_inputs(B_t, arch),
+                problem,
+            )
+        else:
+            ref = _conv_reference_fp64(A_t, B_t, problem)
+    elif arch == "gfx1250":
         ref = conv_reference_gfx1250(A_t, B_t, problem, out_dtype=_torch_dtype)
     else:
         ref = conv_reference(A_t, B_t, problem, out_dtype=_torch_dtype)
@@ -355,9 +467,11 @@ def _run_one(
     D_dev = rt.alloc(D_t.nbytes)
     rt.memcpy_h2d(A_dev, _u8(A_t), A_t.nbytes)
     rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
-    rt.memset(D_dev, 0, D_t.nbytes)
+    # NaN sentinel (0xFFFF is a NaN in fp16 and bf16): an output the kernel
+    # never writes fails the comparison instead of passing as a zero.
+    rt.memset(D_dev, 0xFF, D_t.nbytes)
 
-    sig = conv_args_signature(dtype, is_3d=problem.is_3d)
+    sig = conv_args_signature(storage, is_3d=problem.is_3d)
     try:
         launcher = KernelLauncher(
             hsaco=artifact.hsaco,
@@ -370,9 +484,17 @@ def _run_one(
         rt.free(D_dev)
         return False, f"kernel load failed: {e}"
 
-    gx = (problem.N_gemm + tile_n - 1) // tile_n
-    gy = (problem.M + tile_m - 1) // tile_m
-    grid = (gx, gy, problem.groups)
+    # Launch over the MERGED dims. These are identical to the true dims at
+    # ``group_merge == 1``, so this is not a behaviour change for the existing
+    # cases -- but under merge the true ``N_gemm`` is 1 while the tile covers
+    # ``Gm`` columns, and the true ``groups`` is ``Gm x`` the number of tiles
+    # that exist. Launching off ``problem`` would under-cover N and over-launch
+    # z, i.e. Gm-1 of every Gm outputs never written and Gm CTAs racing on the
+    # ones that are. Host and device must agree here; see the same computation
+    # in ``implicit_gemm_conv_grid``.
+    gx = (spec.grid_N_gemm + tile_n - 1) // tile_n
+    gy = (spec.grid_M + tile_m - 1) // tile_m
+    grid = (gx, gy, spec.grid_groups)
     block = (spec.launch_block_size, 1, 1)
 
     values = ConvArgs.from_problem(
@@ -393,12 +515,12 @@ def _run_one(
     rt.free(B_dev)
     rt.free(D_dev)
 
-    out_f32 = D_cpu.float()
-    ref_f32 = ref.float().cpu()
+    out_f32 = D_cpu.double() if storage == "fp32" else D_cpu.float()
+    ref_f32 = ref.cpu().to(out_f32.dtype)
     abs_diff = (out_f32 - ref_f32).abs()
     ref_scale = ref_f32.abs().max().clamp(min=1.0)
     rel_err = float(abs_diff.max() / ref_scale)
-    tol = _TOL[dtype]
+    tol = _tolerance(dtype, arch)
     passed = rel_err < tol
     if not passed:
         return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
@@ -465,6 +587,299 @@ class TestConvFwdCorrectness(unittest.TestCase):
         self._sweep_pipeline("wavelet")
 
 
+# 3-D shapes (NDHWC). Small, like ``_SHAPES``; they exercise the depth axis
+# of the A descriptor and the 3-D launch ABI.
+_SHAPES_3D: List[_Shape] = [
+    _Shape(
+        "3d_3x3x3_N1D4H6W6C32K32",
+        N=1,
+        Hi=6,
+        Wi=6,
+        C=32,
+        K=32,
+        Y=3,
+        X=3,
+        pH=1,
+        pW=1,
+        Di=4,
+        Z=3,
+        sD=1,
+        pD=1,
+        dD=1,
+    ),
+    _Shape(
+        "3d_3x3x3_s2_N1D6H8W8C16K16",
+        N=1,
+        Hi=8,
+        Wi=8,
+        C=16,
+        K=16,
+        Y=3,
+        X=3,
+        sH=2,
+        sW=2,
+        pH=1,
+        pW=1,
+        Di=6,
+        Z=3,
+        sD=2,
+        pD=1,
+        dD=1,
+    ),
+    _Shape(
+        "3d_1x1x1_N2D3H5W5C32K32",
+        N=2,
+        Hi=5,
+        Wi=5,
+        C=32,
+        K=32,
+        Y=1,
+        X=1,
+        Di=3,
+        Z=1,
+        sD=1,
+        pD=0,
+        dD=1,
+    ),
+    _Shape(
+        "3d_3x3x3_g2_N1D4H6W6C32K32",
+        N=1,
+        Hi=6,
+        Wi=6,
+        C=32,
+        K=32,
+        Y=3,
+        X=3,
+        pH=1,
+        pW=1,
+        groups=2,
+        Di=4,
+        Z=3,
+        sD=1,
+        pD=1,
+        dD=1,
+    ),
+]
+
+
+@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "no GPU")
+class TestConvFwdFp32Tf32Correctness(unittest.TestCase):
+    """fp32 storage, fp32 or TF32 compute, 2-D and 3-D.
+
+    TF32 runs only on MFMA targets with a TF32 atom (gfx942 native XF32, gfx950
+    BF16x3). Elsewhere every TF32 case reports "skip (no atom)". On those
+    targets a sweep that skipped every case fails rather than passing vacuously.
+    """
+
+    def _sweep(self, pipeline: str, shapes, **knobs) -> None:
+        if not _IS_MFMA:
+            self.skipTest("fp32/TF32 forward coverage is MFMA-only here")
+        ran = 0
+        for dtype in _FP32_DTYPES:
+            for shape in shapes:
+                for epilogue in _EPILOGUES:
+                    with self.subTest(shape=shape.id, dtype=dtype, epilogue=epilogue):
+                        ok, why = _run_one(
+                            GPU_ARCH, shape, dtype, pipeline, epilogue, **knobs
+                        )
+                        label = f"{shape.id} {dtype} {pipeline}/{epilogue} {knobs}"
+                        self.assertTrue(ok, f"FAIL {label} on {GPU_ARCH}: {why}")
+                        # Every shape here builds for fp32 and TF32 on MFMA;
+                        # a skip means the gate rejected something it must
+                        # admit.
+                        self.assertFalse(
+                            why.startswith("skip"), f"{label} was skipped: {why}"
+                        )
+                        ran += 1
+        self.assertGreater(ran, 0)
+
+    def test_2d_mem(self):
+        self._sweep("mem", _SHAPES)
+
+    def test_2d_compv3(self):
+        self._sweep("compv3", _SHAPES)
+
+    def test_2d_compv4(self):
+        self._sweep("compv4", _SHAPES)
+
+    def test_2d_basic(self):
+        self._sweep("basic", _SHAPES)
+
+    def test_3d_mem(self):
+        self._sweep("mem", _SHAPES_3D)
+
+    def test_3d_compv4(self):
+        self._sweep("compv4", _SHAPES_3D)
+
+    def test_double_buffered_odd_tiles(self):
+        for knob in ("async_dma", "unroll_k"):
+            with self.subTest(knob=knob):
+                self._sweep(
+                    "mem", TestConvFwdDoubleBufferedOddTiles._CASES, **{knob: True}
+                )
+
+
+def _assert_case_ran(test, ok: bool, why: str) -> None:
+    """Fail unless the case was actually built, launched and compared.
+
+    ``_run_one`` reports an unbuildable spec as ``(True, "skip (...)")`` so a
+    sweep can step past configs an arch does not support. A test that only
+    asserts ``ok`` therefore passes when every one of its cases was skipped.
+    The wgrad copy of this guard exists because the merged cases there silently
+    skipped their entire ``group_merge > 1`` axis; the same trap is live here,
+    since the gate rejects every merged spec on a ``groups == 1`` shape.
+    """
+    test.assertTrue(ok, why)
+    test.assertFalse(why.startswith("skip"), f"case was skipped rather than run: {why}")
+
+
+# Depthwise shapes for the merged-groups axis. ``groups == C == K`` is the case
+# the whole feature exists for: the per-group channel count is 1, so unmerged
+# loads and stores are both single-element.
+_DW_SHAPES: List[_Shape] = [
+    _Shape(
+        "dw3x3_N2H14W14C64",
+        N=2,
+        Hi=14,
+        Wi=14,
+        C=64,
+        K=64,
+        Y=3,
+        X=3,
+        pH=1,
+        pW=1,
+        groups=64,
+    ),
+    # stride-2: Ho/Wo halved, so the M decode differs from the A-load's Hi/Wi.
+    _Shape(
+        "dw3x3_s2_N1H16W16C32",
+        N=1,
+        Hi=16,
+        Wi=16,
+        C=32,
+        K=32,
+        Y=3,
+        X=3,
+        sH=2,
+        sW=2,
+        pH=1,
+        pW=1,
+        groups=32,
+    ),
+    # Non-square filter with asymmetric pad: catches a (y, x) decode that was
+    # only ever exercised on Y == X.
+    _Shape(
+        "dw5x3_N1H12W12C32",
+        N=1,
+        Hi=12,
+        Wi=12,
+        C=32,
+        K=32,
+        Y=5,
+        X=3,
+        pH=2,
+        pW=1,
+        groups=32,
+    ),
+]
+
+
+@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "no GPU")
+class TestConvFwdGroupMergeNumerics(unittest.TestCase):
+    """On-GPU numerics for ``group_merge`` -- the claim the host-side gate cannot make.
+
+    Merging computes ``Gm x`` more MACs than it needs and relies on the diagonal
+    mask on the B load to zero every redundant one. Nothing host-side proves
+    that: the IR shows a wider load fired, not that the extra products cancel.
+    Only comparing against the same reference the unmerged path uses does.
+    """
+
+    def _check(self, shape: _Shape, dtype: str, epilogue: str, gm: int) -> None:
+        ok, why = _run_one(GPU_ARCH, shape, dtype, "mem", epilogue, group_merge=gm)
+        _assert_case_ran(self, ok, why)
+
+    def test_merged_matches_reference(self):
+        ran = 0
+        for shape in _DW_SHAPES:
+            for gm in (2, 4, 8, 16):
+                if shape.groups % gm:
+                    continue
+                for dtype in _DTYPES:
+                    with self.subTest(shape=shape.id, dtype=dtype, gm=gm):
+                        self._check(shape, dtype, "cshuffle", gm)
+                        ran += 1
+        self.assertGreater(ran, 0, "no merged case ran -- the axis is vacuous")
+
+    def test_unmerged_baseline_still_passes(self):
+        # Pins the comparison: if the depthwise shapes themselves were broken,
+        # the merged test above would be comparing two wrongs.
+        for shape in _DW_SHAPES:
+            with self.subTest(shape=shape.id):
+                self._check(shape, _DTYPES[0], "cshuffle", 1)
+
+    def test_merged_double_buffered_loops(self):
+        # unroll_k steps the K loop two tiles at a time over the runtime
+        # extent, which under merge is the in-kernel product K_gemm*Gm; an odd
+        # merged tile count (Y*X*Gm = 9*Gm over tile_k = 32 at Gm = 2) leaves
+        # the trailing phase past it, which must read zero.
+        if not _IS_MFMA:
+            self.skipTest("unroll_k is MFMA-only (WMMA conv rejects it)")
+        shape = _DW_SHAPES[0]
+        for gm in (2, 8):
+            with self.subTest(gm=gm):
+                ok, why = _run_one(
+                    GPU_ARCH,
+                    shape,
+                    _DTYPES[0],
+                    "mem",
+                    "cshuffle",
+                    group_merge=gm,
+                    unroll_k=True,
+                )
+                _assert_case_ran(self, ok, why)
+
+    def test_merged_direct_epilogue(self):
+        # Every case above stores through cshuffle, because merged kpg derives
+        # vec_c > 1. _run_one pins vector_size_c=1 for the default epilogue,
+        # which reaches the direct epilogue -- its store bound and group base
+        # are merge-routed too.
+        for shape in _DW_SHAPES:
+            for gm in (4, 8):
+                if shape.groups % gm:
+                    continue
+                with self.subTest(shape=shape.id, gm=gm):
+                    ok, why = _run_one(
+                        GPU_ARCH,
+                        shape,
+                        _DTYPES[0],
+                        "mem",
+                        "default",
+                        group_merge=gm,
+                    )
+                    _assert_case_ran(self, ok, why)
+
+    def test_merged_wavelet(self):
+        # The wavelet load waves fetch B through their own loader; it must
+        # take the merged (diagonal-masked) B descriptor like the sync path.
+        if not _IS_WMMA:
+            self.skipTest("wavelet is WMMA/gfx1250 only")
+        for shape in _DW_SHAPES:
+            for gm in (4, 16):
+                if shape.groups % gm:
+                    continue
+                for epilogue in _EPILOGUES:
+                    with self.subTest(shape=shape.id, gm=gm, epilogue=epilogue):
+                        ok, why = _run_one(
+                            GPU_ARCH,
+                            shape,
+                            _DTYPES[0],
+                            "wavelet",
+                            epilogue,
+                            group_merge=gm,
+                        )
+                        _assert_case_ran(self, ok, why)
+
+
 @unittest.skipIf(_skip_reason(), _skip_reason())
 class TestConvFwdDoubleBufferedOddTiles(unittest.TestCase):
     """async_dma / unroll_k with an odd K-tile count.
@@ -472,12 +887,15 @@ class TestConvFwdDoubleBufferedOddTiles(unittest.TestCase):
     Both loops compute two tiles per step over a runtime extent, so the last
     step's second tile lies past K_gemm and must read as zero. tile_k = 32:
     C=32 gives K_gemm = 3*3*32 = 288 = 9 full tiles; C=16 gives 144 = 5 tiles,
-    the last one partial.
+    the last one partial. The grouped pointwise case runs the flat fast path's
+    per-group A/B addressing through both loaders (K_gemm = cpg = 8, one
+    partial tile).
     """
 
     _CASES = (
         _Shape("odd9_N2H8W8C32K32", N=2, Hi=8, Wi=8, C=32, K=32, Y=3, X=3, pH=1, pW=1),
         _Shape("odd5_N2H8W8C16K32", N=2, Hi=8, Wi=8, C=16, K=32, Y=3, X=3, pH=1, pW=1),
+        _Shape("1x1_g4_N2H8W8C32K64", N=2, Hi=8, Wi=8, C=32, K=64, Y=1, X=1, groups=4),
     )
 
     def _sweep(self, **knobs) -> None:

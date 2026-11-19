@@ -25,6 +25,7 @@
 
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/HwRegHelpers.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
@@ -238,12 +239,20 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         }
     }
 
+    // Adaptor / Python logical IR carries HWRegContainer as a LiteralString
+    // ("hwreg(HW_REG_IB_STS2,6,4)"). Resolve it here — ToStinkyAsmPass already
+    // has the target arch — so emit matches the rocisa converter (numeric id).
+    auto canonicalizeHwregOperands = [arch](std::vector<StinkyRegister>& regs) {
+        for (auto& r : regs) r = HwReg::canonicalizeOperand(arch, r);
+    };
+
     if (!irInst->dests.empty() && !hwHasDestField) {
         // HW has no dest field — logical dests are really src operands.
         std::vector<StinkyRegister> merged;
         merged.reserve(irInst->dests.size() + irInst->srcs.size());
         merged.insert(merged.end(), irInst->dests.begin(), irInst->dests.end());
         merged.insert(merged.end(), irInst->srcs.begin(), irInst->srcs.end());
+        canonicalizeHwregOperands(merged);
         asmInst->setSrcRegs(merged);
     } else {
         std::vector<StinkyRegister> destRegs = irInst->dests;
@@ -302,6 +311,8 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
             }
         }
 
+        canonicalizeHwregOperands(destRegs);
+        canonicalizeHwregOperands(srcRegs);
         if (!destRegs.empty()) {
             asmInst->setDestRegs(destRegs);
         }
@@ -334,8 +345,22 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         const logical::Opcode op = irInst->getOpcode();
         if (op == logical::VAddCOU32 || op == logical::VSubCoU32 || op == logical::VAddCCOU32) {
             const StinkyRegister vcc = StinkyRegister::getVCCRegister(getWaveFrontSize(arch));
-            asmInst->addDestReg(vcc);  // carry-out (dst1)
-            if (op == logical::VAddCCOU32) {
+            // Add VCC only when the operand list does not already carry it. The factory /
+            // adaptor logical path DROPS VCC, so it must be re-attached here. But the
+            // rocisa->logical converter KEEPS it (CommonInstruction::getDstParams returns
+            // {dst, dst1=VCC} and getSrcParams keeps the _ci carry-in), so re-adding
+            // unconditionally would emit a duplicate "vcc_lo" operand and diverge from
+            // path 1. Guard each side independently so both paths converge.
+            auto contains = [&vcc](const std::vector<StinkyRegister>& regs) {
+                for (const auto& r : regs) {
+                    if (r == vcc) return true;
+                }
+                return false;
+            };
+            if (!contains(asmInst->getDestRegs())) {
+                asmInst->addDestReg(vcc);  // carry-out (dst1)
+            }
+            if (op == logical::VAddCCOU32 && !contains(asmInst->getSrcRegs())) {
                 asmInst->addSrcReg(vcc);  // carry-in (src2)
             }
         }
@@ -350,8 +375,23 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
     if (irInst->ds.has_value()) {
         asmInst->addModifier<DSModifiers>(irInst->ds.value());
     }
+    if (irInst->flat.has_value()) {
+        asmInst->addModifier<FLATModifiers>(irInst->flat.value());
+    }
+    if (irInst->global.has_value()) {
+        asmInst->addModifier<GLOBALModifiers>(irInst->global.value());
+    }
+    if (irInst->cacheScope.has_value()) {
+        asmInst->addModifier<CacheScopeModifiers>(irInst->cacheScope.value());
+    }
     if (irInst->mubuf.has_value()) {
         asmInst->addModifier<MUBUFModifiers>(irInst->mubuf.value());
+    }
+    if (irInst->smem.has_value()) {
+        asmInst->addModifier<SMEMModifiers>(irInst->smem.value());
+    }
+    if (irInst->tensor.has_value()) {
+        asmInst->addModifier<TENSORModifiers>(irInst->tensor.value());
     }
     if (irInst->dpp.has_value()) {
         asmInst->addModifier<DPPModifiers>(irInst->dpp.value());
@@ -368,16 +408,56 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
     if (irInst->memtoken.has_value()) {
         asmInst->addModifier<MemTokenData>(MemTokenData{irInst->memtoken.value()});
     }
+    if (irInst->longBranchLabel.has_value()) {
+        // s_setpc_b64 long-branches jump to a compile-time-known label via a
+        // computed address (register operand only, no label operand). Attach the
+        // target as LabelData so CFGBuilderPass builds the CFG edge -- mirroring the
+        // rocisa->asm path (ToStinkyTofuUtils::legalizeInstruction SSetPCB64 branch).
+        // Without it the jump target (e.g. the FactorDim=1 epilogue) is unreachable
+        // in the CFG and InsertWaitAluModulePass skips it, leaving mandatory
+        // s_wait_alu hazard guards uninserted.
+        asmInst->addModifier<LabelData>(LabelData{irInst->longBranchLabel.value()});
+    }
+    if (irInst->callTargets.has_value()) {
+        // s_swappc_b64 callee labels. The rocisa->asm path attaches the same
+        // CallTargetData in ToStinkyTofuUtils::legalizeInstruction (SSwapPCB64).
+        // Calls have no label operand to fall back on (getCallTargets reads only
+        // this modifier), so carrying it through logical IR is mandatory for the
+        // asm IR to match path 1 rather than merely the emitted text.
+        asmInst->addModifier<CallTargetData>(CallTargetData{irInst->callTargets.value()});
+    }
+    // Regular (non-long) branches carry their target as a LiteralString src operand
+    // (rocisa getSrcParams()={labelName}); getBranchTargets() resolves it and the
+    // emitter prints it, so the assembly text already matches. Path 1 additionally
+    // attaches LabelData in legalizeInstruction, so attach it here too -- otherwise
+    // the asm IR differs from path 1 by this modifier. Long branches (s_setpc_b64)
+    // already received LabelData from longBranchLabel above (guard skips them), and
+    // register-target returns carry no LiteralString operand (type check skips them).
+    if (isBranch(*asmInst) && asmInst->getModifier<LabelData>() == nullptr &&
+        !asmInst->getSrcRegs().empty()) {
+        const StinkyRegister& target = asmInst->getSrcRegs()[0];
+        if (target.dataType == StinkyRegister::Type::LiteralString) {
+            asmInst->addModifier<LabelData>(LabelData{target.getLiteralString()});
+        }
+    }
     if (irInst->swaitcnt.has_value()) {
-        // Per-counter wait values {vlcnt, vscnt, dlcnt, dscnt, kmcnt} forwarded
-        // from the logical SWaitCnt. The rocisa->asm path attaches the same
-        // SWaitCntData in handleSWaitCntModifiers so legalizeWaitCnt (invoked in
-        // lowerToAsm) can split the combined s_waitcnt into the gfx12+ typed
-        // waits. Without it the adaptor's s_waitcnt reaches O3 as an opaque
-        // combined wait that waitReconstruction() cannot rebuild, so it is never
-        // removed/re-inserted and perturbs scheduling.
+        // {vlcnt, vscnt, dlcnt, dscnt, kmcnt, maxLgkmcnt, maxVmcnt}. The rocisa
+        // path attaches the same SWaitCntData so legalizeWaitCnt can split a
+        // combined s_waitcnt into the gfx12+ typed waits. maxLgkmcnt and
+        // maxVmcnt default to -1; the combined s_waitcnt emitter mins summed
+        // lgkmcnt/vmcnt only when a max is present. Typed loadcnt/dscnt are
+        // already clamped to MaxLoadcnt/MaxDscnt before they arrive here.
         const auto& w = irInst->swaitcnt.value();
-        asmInst->addModifier<SWaitCntData>(SWaitCntData{w[0], w[1], w[2], w[3], w[4]});
+        asmInst->addModifier<SWaitCntData>(SWaitCntData{w[0], w[1], w[2], w[3], w[4], w[5], w[6]});
+    }
+    if (irInst->sdelayalu.has_value()) {
+        // s_delay_alu data carried from the adaptor's SDelayAlu shim. The
+        // rocisa->asm path attaches the same SDelayAluData in
+        // convertSDelayAluData; without it the emitter's s_delay_alu custom
+        // operand path (StinkyAsmEmitter) asserts on the missing modifier, and
+        // O0 kernels (RemoveDelayAlu gated off) would otherwise diverge from
+        // native in the downstream wait/hazard passes.
+        asmInst->addModifier<SDelayAluData>(irInst->sdelayalu.value());
     }
 
     // MFMA/SMFMA/MXMFMA: attach MFMAModifiers so downstream passes
@@ -387,9 +467,17 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         MFMAModifiers mod;
         if (irInst->getOpcode() == logical::MFMA) {
             const MFMAData* data = irInst->asMFMA();
-            if (data && data->neg) {
-                mod.negBits.negLo = {1, 1, 0};
-                mod.negBits.numSrcs = 2;
+            if (data) {
+                mod.reuseA = data->reuseA;
+                mod.reuseB = data->reuseB;
+                if (data->neg) {
+                    // rocisa MFMAInstruction::getArgStr: HasWMMA_V1 prints
+                    // neg_lo:[1,1,1]; otherwise neg_lo:[1,1]. The adaptor stores
+                    // that width in negSrcs. Any other value keeps the 2-source form.
+                    const int nSrcs = data->negSrcs == 3 ? 3 : 2;
+                    mod.negBits.numSrcs = static_cast<uint8_t>(nSrcs);
+                    mod.negBits.negLo = {1, 1, static_cast<uint8_t>(nSrcs == 3 ? 1 : 0)};
+                }
             }
             // gfx1250 f8f6f4-family WMMA carries per-matrix input formats
             // (matrix_a_fmt:MATRIX_FMT_FP6 ...). Emit them via MatrixFmtModifiers.
@@ -401,6 +489,7 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
             }
         } else if (irInst->getOpcode() == logical::SMFMA) {
             const SMFMAData* data = irInst->asSMFMA();
+            // SMFMA getArgStr always prints neg_lo:[1,1], including when HasWMMA_V1 is set.
             if (data && data->neg) {
                 mod.negBits.negLo = {1, 1, 0};
                 mod.negBits.numSrcs = 2;
@@ -426,17 +515,21 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
                 MatrixScaleFmt scaleFmtA = scaleFmtFromStr(data->mxScaleATypeStr);
                 MatrixScaleFmt scaleFmtB = scaleFmtFromStr(data->mxScaleBTypeStr);
                 if (!data->matrixAFmt.empty() || !data->matrixBFmt.empty() ||
-                    scaleFmtA != MatrixScaleFmt::NONE || scaleFmtB != MatrixScaleFmt::NONE) {
+                    scaleFmtA != MatrixScaleFmt::NONE || scaleFmtB != MatrixScaleFmt::NONE ||
+                    data->mxScaleASel != 0 || data->mxScaleBSel != 0) {
                     MatrixFmtModifiers fmts;
                     if (!data->matrixAFmt.empty()) fmts.fmtA = parseMatrixFmt(data->matrixAFmt);
                     if (!data->matrixBFmt.empty()) fmts.fmtB = parseMatrixFmt(data->matrixBFmt);
                     fmts.scaleFmtA = scaleFmtA;
                     fmts.scaleFmtB = scaleFmtB;
+                    fmts.scaleSelA = data->mxScaleASel;
+                    fmts.scaleSelB = data->mxScaleBSel;
                     asmInst->addModifier<MatrixFmtModifiers>(fmts);
                 }
             }
         }
         asmInst->addModifier<MFMAModifiers>(mod);
+        asmInst->resolveMatrixFmtOverrides();
     }
 
     return asmInst;
@@ -457,9 +550,11 @@ class ToStinkyAsmPassImpl : public Pass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
-        GfxArchID arch =
-            getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
-                         passCtx.getGemmTileConfig().arch[2]);
+        // resolveArchId (not the triple-only getGfxArchID) so a kernel targeting a
+        // stepping that shares its ISA triple with another (gfx1250 vs gfx1250v0)
+        // selects the matching per-arch cost table, mirroring toStinkyTofuModule.
+        const GemmTileConfig& tileConfig = passCtx.getGemmTileConfig();
+        GfxArchID arch = resolveArchId(tileConfig.arch, tileConfig.archName);
 
         // Process all basic blocks
         for (BasicBlock& bb : func) {
@@ -484,6 +579,9 @@ class ToStinkyAsmPassImpl : public Pass {
 
             if (irNode->getType() == IRBase::IRType::LogicalIR) {
                 LogicalInstruction* logicalInst = cast<LogicalInstruction>(irNode);
+                std::optional<SBarrierLogicalData> barrierData;
+                if (const SBarrierLogicalData* data = logicalInst->asSBarrier())
+                    barrierData = *data;
 
                 // Lower to assembly
                 StinkyInstruction* asmInst = createAsmFromIR(logicalInst, arch);
@@ -513,16 +611,20 @@ class ToStinkyAsmPassImpl : public Pass {
                     // legalizations below so, e.g., v_cmpx gets its EXEC dest first.
                     legalizeImplicitSpecialRegisters(asmInst, getWaveFrontSize(arch));
 
-                    // gfx1250 (and other RDNA) have no ds_*_b192 encoding. Match
-                    // rocisa's DSStoreB192/DSLoadB192::toString(), which always splits
-                    // into a b128 + b64 pair. The rocisa->stinky conversion path handles
-                    // this in ToStinkyTofuUtils::legalizeInstruction; the logical->asm
-                    // path (adaptor / PyLogicalModule) must do the same here. VGPR MSB
-                    // is materialized later by InsertVgprMsbPass, so pass hasVgprMsb=false.
+                    // gfx1250 (and other RDNA) have no ds_*_b192 / ds_store_b256
+                    // encoding. Match rocisa's DSStoreB192/DSLoadB192/DSStoreB256
+                    // ::toString(), which always splits into a b128 + b64/b128 pair.
+                    // The rocisa->stinky conversion path handles this in
+                    // ToStinkyTofuUtils::legalizeInstruction; the logical->asm path
+                    // (adaptor / PyLogicalModule) must do the same here. VGPR MSB
+                    // is materialized later by InsertVgprMsbPass, so these splits
+                    // do not apply an MSB offset themselves.
                     if (asmInst->getUnifiedOpcode() == GFX::ds_store_b192) {
-                        legalizeDSStoreB192(asmInst, irBuilder, arch, /*hasVgprMsb=*/false);
+                        legalizeDSStoreB192(asmInst, irBuilder, arch);
                     } else if (asmInst->getUnifiedOpcode() == GFX::ds_load_b192) {
-                        legalizeDSLoadB192(asmInst, irBuilder, arch, /*hasVgprMsb=*/false);
+                        legalizeDSLoadB192(asmInst, irBuilder, arch);
+                    } else if (asmInst->getUnifiedOpcode() == GFX::ds_store_b256) {
+                        legalizeDSStoreB256(asmInst, irBuilder, arch);
                     } else if (asmInst->getUnifiedOpcode() == GFX::s_barrier) {
                         // gfx1250 has no plain s_barrier; it must split into
                         // s_barrier_signal -1 / s_barrier_wait -1. The rocisa->stinky
@@ -532,7 +634,13 @@ class ToStinkyAsmPassImpl : public Pass {
                         // (before the asm pipeline) is also required so the workgroup
                         // s_barrier_wait -1 exists as a distinct instruction for
                         // InsertClusterBarrierPass to anchor its Rule 3/4 handshakes on.
-                        legalizeBarrier(asmInst, irBuilder, arch);
+                        if (barrierData) {
+                            const int barrierId = barrierData->clusterBarrier ? -3 : -1;
+                            legalizeBarrier(asmInst, irBuilder, arch, barrierId,
+                                            barrierData->separate, barrierData->wait);
+                        } else {
+                            legalizeBarrier(asmInst, irBuilder, arch);
+                        }
                     } else if (asmInst->is(InstFlag::IF_VCmpX)) {
                         // gfx10/11/12 (RDNA, CMPXWritesSGPR=false) have no
                         // scheduler-visible exec-writing v_cmpx form; split into
@@ -565,6 +673,23 @@ class ToStinkyAsmPassImpl : public Pass {
                         // spurious opaque barrier. legalizeWaitCnt no-ops when the
                         // SWaitCntData modifier is absent or the arch is not gfx12.5.
                         legalizeWaitCnt(asmInst, irBuilder, arch);
+                    } else if (asmInst->getUnifiedOpcode() == GFX::v_nop &&
+                               !asmInst->getSrcRegs().empty()) {
+                        // v_nop carries its repeat count as the src0 literal (rocisa
+                        // VNop::getSrcParams()={count}). Expand into `count` separate
+                        // v_nop (or erase when count<=1) exactly as the rocisa->asm
+                        // path does in ToStinkyTofuUtils::legalizeInstruction
+                        // (GFX::v_nop -> legalizeVNop), so the asm IR matches path 1.
+                        // Guard on a non-empty src list: the Logical IR `VNop` opcode
+                        // is defined with numOperands=0 (LogicalInstructionDefs.inc), so
+                        // a bare VNop() carries NO src0 count register at all -- unlike
+                        // the rocisa path, which always attaches one. Calling
+                        // legalizeVNop() unconditionally made getSrcReg(0) (srcRegs.at(0))
+                        // throw std::out_of_range on a plain logical VNop, crashing
+                        // LogicalToAsmComprehensive.AllInstructionsAllArchitectures.
+                        // A bare, operand-less v_nop is already a single real nop, so
+                        // skipping legalization here is correct -- nothing to expand.
+                        legalizeVNop(asmInst, irBuilder, arch);
                     }
                     continue;
                 }

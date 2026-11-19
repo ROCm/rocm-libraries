@@ -246,7 +246,7 @@ Tests:
   precision: *double_only_precisions_complex
   M: 1
   N: 1
-  K: [63]
+  K: [1, 63]
   ld_multiplier_B: [1]
   ld_multiplier_C: [3]
   alpha_alphai: *alpha_range_quick

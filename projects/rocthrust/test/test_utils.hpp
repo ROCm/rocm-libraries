@@ -389,7 +389,7 @@ inline auto get_random_data(size_t size, T, T, seed_type seed) ->
   return data;
 }
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(_LIBCPP_VERSION)
 template <class T>
 inline auto get_random_data(size_t size, T min, T max, seed_type seed) ->
   typename std::enable_if_t<std::is_same_v<T, signed char> || (std::is_same_v<T, char> && std::is_signed_v<char>),
@@ -426,7 +426,7 @@ inline auto get_random_data(size_t size, T min, T max, seed_type seed) ->
 template <class T>
 inline auto get_random_data(size_t size, T min, T max, seed_type seed) -> typename std::enable_if_t<
   rocprim::is_integral<T>::value && !std::is_same_v<T, bool>
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(_LIBCPP_VERSION)
     && !std::is_same_v<T, signed char> && !std::is_same_v<T, unsigned char> && !std::is_same_v<T, char>
 #endif
   ,

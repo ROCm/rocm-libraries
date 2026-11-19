@@ -1119,6 +1119,16 @@ rocblas_status rocsolver_sytrs_template(rocblas_handle handle,
     }
 #endif
 
+#ifndef NDEBUG
+    {
+        if((work != nullptr) && (size_work > 0))
+        {
+            int value = 0xFF;
+            HIP_CHECK(hipMemsetAsync(work, value, size_work, stream));
+        }
+    }
+#endif
+
     const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
     I const warp_size = props->warpSize;
     I const max_blocks = 64 * 1024 - 3;

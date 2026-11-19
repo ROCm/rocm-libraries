@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -15,11 +15,7 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/config.h>
-
-// need to suppress deprecation warnings for execute_with_allocator_and_dependencies here and inside type traits
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
+#include <thrust/detail/libcxx_wrapper/__cccl_config.h>
 #include <thrust/detail/seq.h>
 #include <thrust/system/cpp/detail/par.h>
 #include <thrust/system/hip/detail/par.h>
@@ -117,10 +113,6 @@ struct TestAllocatorAttachment
     test_temporary_allocation_valid(policy(alloc));
     test_temporary_allocation_valid(policy(const_alloc));
     test_temporary_allocation_valid(policy(&test_memory_resource));
-
-    test_temporary_allocation_valid(policy(std::allocator<int>()).after(1));
-    test_temporary_allocation_valid(policy(alloc).after(1));
-    test_temporary_allocation_valid(policy(const_alloc).after(1));
   }
 };
 
@@ -145,5 +137,3 @@ TYPED_TEST(AllocatorAwarePoliciesTests, TestAllocatorAttachment)
   TestAllocatorAttachment<T> test;
   test();
 }
-
-THRUST_SUPPRESS_DEPRECATED_POP

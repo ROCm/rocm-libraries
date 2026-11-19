@@ -1,26 +1,50 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The register-side value objects: a :class:`TileDesc` (logical layout) and the
-:class:`Fragment` (its realized per-lane registers).
+"""The register-side types: a :class:`TileDesc` (logical layout) and the :class:`Fragment` (its
+realized per-lane registers).
 
 This is the REGISTER side of the surface, the counterpart to
-:mod:`rocke.helpers.tiling.descriptors` (the memory side). It is pure data (no IRBuilder): a
-`TileDesc` says *where each element lives* in lanes/registers (a shape + a
-:class:`~rocke.helpers.tiling.encoding.WarpDistributionEncoding`), and a `Fragment` binds that layout to
-an element `dtype` and the SSA value holding the registers. The IR verbs in
+:mod:`rocke.helpers.tiling.descriptors` (the memory side). It never emits IR (no IRBuilder). A
+`TileDesc` is a frozen value saying *where each element lives* in lanes/registers (a shape + a
+:class:`~rocke.helpers.tiling.encoding.WarpDistributionEncoding`). A `Fragment` binds that layout
+to an element `dtype` and holds the SSA `value` with the registers; `value` is its only mutable
+field, and every write to it is checked against the layout and dtype. The IR verbs in
 :mod:`rocke.helpers.tiling.emit` fill / load / store the `Fragment`.
+
+Terminology: a *register* here is one logical element slot of the fragment's `dtype`
+(``register_count`` slots per lane), not a physical 32-bit VGPR. The fragment's `dtype` is the
+logical number format; the SSA `value` holds the registers in the fragment's *storage type*
+(:attr:`Fragment.storage_type`), derived from the dtype and never supplied: the vector of its
+storage dtype (:func:`rocke.core.storage.storage_dtype`, the one rule) built by
+:func:`rocke.helpers.mma_io.storage_vector_type` -- ``vec<f16 x n>`` for f16, ``vec<i32 x n>`` for
+tf32, and ``vec<i32 x n*bits/32>`` for a packed sub-byte dtype such as fp4e2m1.
+
+LLVM packs a byte-or-wider vector into VGPRs itself: a gfx90a MFMA A operand of ``vec<f16x4>``
+occupies two 32-bit registers, and a 64-bit element occupies two. A sub-byte element has no LLVM
+value type, so its registers are packed low-bit-first into whole i32 words
+(:func:`rocke.core.storage.register_packing`), and ``n * bits`` must be a multiple of 32.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
+from ...core.dtypes import dtype_info
+from ...core.ir import Type, Value, VectorType
+from ...core.storage import is_register_packed, packed_word_range, register_packing
+from ..mma_io import storage_vector_type
 from .encoding import WarpDistributionEncoding
 from .register_mapper import RegisterMapper
 
-__all__ = ["TileDesc", "Fragment", "make_fragment", "fragment_length"]
+__all__ = [
+    "Fragment",
+    "TileDesc",
+    "fragment_dtype_ok",
+    "fragment_length",
+    "make_fragment",
+    "storage_slots",
+]
 
 
 def fragment_length(encoding: WarpDistributionEncoding) -> int:
@@ -113,18 +137,226 @@ class TileDesc:
         )
 
 
-@dataclass
+def fragment_dtype_ok(dtype: object) -> tuple[bool, str]:
+    """Whether `dtype` can be a fragment's element type: a scalar IR `Type` (``F16``, ``F32``, ...),
+    not a string token and not a composite (vector / pointer / LDS) type."""
+    # Exact type, not isinstance: every scalar dtype is a bare `Type`, and its only subclasses
+    # (VectorType, PtrType, SmemType) are composites. A future scalar subclass would need an
+    # isinstance check that excludes those three instead.
+    if type(dtype) is Type:
+        return True, "ok"
+    return False, (
+        f"Fragment dtype must be a scalar IR Type (e.g. F16, F32) -- got {dtype!r} "
+        f"({type(dtype).__name__})"
+    )
+
+
+def storage_slots(dtype: Type, register_count: int, start: int, length: int) -> range:
+    """The elements of a fragment's storage vector (:func:`~rocke.helpers.mma_io.storage_vector_type`)
+    that hold logical registers ``[start, start + length)`` of a `register_count`-register `dtype`
+    fragment -- the one rule for where a fragment's registers sit in its storage vector.
+
+    A byte-or-wider dtype holds one register per element, so the slots are the registers' own
+    indices. A packed dtype holds them low-bit-first in 32-bit words
+    (:func:`~rocke.core.storage.packed_word_range`), so the slots are the words that hold them, and
+    `start` and `length` must be multiples of the dtype's whole-word group (8 registers at 4 bits,
+    16 at 6); anything else raises ``ValueError``, as does a range past the fragment's end.
+    """
+    packing = register_packing(dtype.name, register_count)
+    if packing is not None:
+        return packed_word_range(packing, start, length)
+    end = start + length
+    if start < 0 or length < 1 or end > register_count:
+        raise ValueError(
+            f"storage_slots failed - registers [{start}, {end}), expected a non-empty range "
+            f"inside the fragment's {register_count} registers"
+        )
+    return range(start, end)
+
+
+def _reinterpret_fix(dtype: Type, storage: VectorType) -> str:
+    """The fix for registers given in `dtype`'s own type where a fragment holds them as `storage`:
+    reinterpret them, which changes no bits."""
+    return (
+        f"{dtype.name} registers are held as their storage type {storage.elem.name}; "
+        f"reinterpret them with b.bitcast(value, VectorType({storage.elem.name.upper()}, "
+        f"{storage.count}))"
+    )
+
+
+def _element_fix(subject: str, got: Type, dtype: Type, storage: VectorType) -> str:
+    """The fix for registers of element type `got` where the fragment holds `storage`: a logical
+    `dtype` value is reinterpreted to its storage type (:func:`_reinterpret_fix`); any other
+    element type is a different fragment."""
+    if got == dtype:
+        return _reinterpret_fix(dtype, storage)
+    return f"{subject} {got.name}, not {storage.elem.name}; build the Fragment at {got.name}"
+
+
+def _fragment_value_type_ok(
+    tile_desc: TileDesc, dtype: Type, value: object
+) -> tuple[bool, str]:
+    """Whether `value` can hold the registers of a `tile_desc` fragment at element `dtype`: an IR
+    `Value` of the fragment's storage type (:func:`~rocke.helpers.mma_io.storage_vector_type`).
+
+    A single-register fragment is a ``vec<storage x 1>`` vector, never a bare scalar. A value of the
+    logical vector type of a dtype stored differently (``vec<tf32x8>``), or anything but the words of a
+    packed dtype, is refused with the storage type to use. This checks the register TYPE only: a value
+    of the right type whose registers are in the wrong order, or an SSA value used outside the scope
+    that defines it, is not caught here.
+    """
+    expected = storage_vector_type(dtype, tile_desc.register_count)
+    where = f"for TileDesc(shape={tile_desc.shape})"
+    if not isinstance(value, Value):
+        return False, (
+            f"Fragment value must be an IR Value of type {expected.name} {where} -- got "
+            f"{type(value).__name__} {value!r}"
+        )
+    got = f"Fragment value expected {expected.name} {where}, got"
+    if value.type == expected:
+        return True, "ok"
+    if is_register_packed(dtype.name):
+        words = expected.count
+        return False, (
+            f"{got} {value.type.name} -- {dtype.name} registers are held packed, "
+            f"{tile_desc.register_count} elements of {dtype_info(dtype.name).encoded_bits} bits "
+            f"in {words} i32 {'word' if words == 1 else 'words'}; build them with load_fragment "
+            "or fill_fragment"
+        )
+    if expected.elem != dtype and value.type == VectorType(dtype, expected.count):
+        return False, f"{got} {value.type.name} -- " + _reinterpret_fix(dtype, expected)
+    if not isinstance(value.type, VectorType):
+        if type(value.type) is not Type:
+            return False, (
+                f"{got} non-vector {value.type.name} -- a fragment holds registers, not a memory "
+                "handle; read memory into one with load_fragment"
+            )
+        if tile_desc.register_count == 1:
+            fix = f"wrap the single register as a vec<{expected.elem.name}x1>"
+        else:
+            fix = (
+                f"this TileDesc lays out {tile_desc.register_count} registers per lane; pass "
+                "them as one vector"
+            )
+        if value.type != expected.elem:
+            fix += "; and " + _element_fix(
+                "the register is", value.type, dtype, expected
+            )
+        return False, f"{got} scalar {value.type.name} -- {fix}"
+    fixes: list[str] = []
+    if value.type.count != expected.count:
+        fixes.append(
+            f"the value holds {value.type.count} registers per lane but this TileDesc lays out "
+            f"{expected.count}; wrap it in a new Fragment using the TileDesc that produced "
+            "these registers, or, if they are one MMA atom's result, drive the whole tile "
+            "through TileMma instead of raw b.mma"
+        )
+    if value.type.elem != expected.elem:
+        fixes.append(
+            _element_fix("the registers are", value.type.elem, dtype, expected)
+        )
+    return False, f"{got} {value.type.name} -- " + "; and ".join(fixes)
+
+
 class Fragment:
-    """Per-lane register data for a tile: the `tile_desc` that lays it out, its element
-    `dtype`, and the SSA `value` holding the registers. Build it from ``(tile_desc, dtype)``;
-    `fill` or `load` sets `value`."""
+    """Per-lane register data for a tile: the `tile_desc` that lays it out, its logical element
+    `dtype`, and the SSA `value` holding the registers in the dtype's :attr:`storage_type`.
 
-    tile_desc: TileDesc
-    dtype: Any
-    value: Any = None
+    `tile_desc` and `dtype` are fixed at construction (read-only); `dtype` must be a scalar IR
+    `Type` (``F16``, ``F32``, ``TF32``, ``FP4E2M1``, ...) -- a string token or a vector / pointer /
+    LDS type raises ``TypeError``, as does a `tile_desc` that is not a :class:`TileDesc`; a packed
+    dtype whose ``register_count`` elements do not fill whole 32-bit words raises ``ValueError``.
+    `value` is the one mutable field, because a kernel re-binds it every K step
+    (``accumulator.value = b.mma(...)`` for a single-atom tile -- wave shape == atom shape, one
+    ``b.mma``; a multi-atom tile is driven through `TileMma`). Every write, construction included,
+    must be of type :attr:`storage_type` (``vec<dtype x register_count>`` for every arithmetic
+    dtype); anything else raises ``ValueError`` naming the expected and actual type. A too-short
+    vector would otherwise still lower, and every register slice past its end would extract
+    out-of-range vector elements as LLVM poison -- a silent wrong answer; a too-long one would
+    silently drop its extra registers. A wrong element type mislabels every register.
+
+    A fragment constructed without a value is unfilled: reading `value` raises ``ValueError``
+    until registers are written (`fill_fragment`, or a checked ``value =`` write), and assigning
+    ``None`` later is rejected. `load_fragment`, `transform_fragment`, and `TileMma` return a new,
+    filled `Fragment`. Two fragments compare equal only if they are the same object.
+    """
+
+    __slots__ = ("_tile_desc", "_dtype", "_storage_type", "_value")
+
+    def __init__(
+        self, tile_desc: TileDesc, dtype: Type, value: Value | None = None
+    ) -> None:
+        if not isinstance(tile_desc, TileDesc):
+            raise TypeError(
+                "Fragment tile_desc must be a TileDesc (from make_tile_desc, or a TileMma's "
+                f"a_desc / b_desc / c_desc) -- got {type(tile_desc).__name__} {tile_desc!r}"
+            )
+        ok, why = fragment_dtype_ok(dtype)
+        if not ok:
+            raise TypeError(why)
+        self._tile_desc = tile_desc
+        self._dtype = dtype
+        self._storage_type = storage_vector_type(dtype, tile_desc.register_count)
+        self._value: Value | None = None
+        if value is not None:
+            self.value = value
+
+    @property
+    def tile_desc(self) -> TileDesc:
+        """The register layout; fixed at construction."""
+        return self._tile_desc
+
+    @property
+    def dtype(self) -> Type:
+        """The logical element type; fixed at construction."""
+        return self._dtype
+
+    @property
+    def storage_type(self) -> VectorType:
+        """The register vector type of :attr:`value`, derived from :attr:`dtype` and the tile:
+        ``vec<i32 x register_count>`` for tf32, ``vec<i32 x words>`` for a packed sub-byte dtype,
+        ``vec<dtype x register_count>`` otherwise."""
+        return self._storage_type
+
+    @property
+    def value(self) -> Value:
+        """The SSA :attr:`storage_type` vector holding this lane's registers."""
+        if self._value is None:
+            raise ValueError(
+                f"Fragment(shape={self._tile_desc.shape}, dtype={self._dtype.name}) not filled -- "
+                "call fill_fragment(b, fragment, 0), or use the Fragment load_fragment returns"
+            )
+        return self._value
+
+    @value.setter
+    def value(self, value: Value) -> None:
+        if value is None:
+            raise ValueError(
+                f"Fragment value cannot be None -- assign a {self._storage_type.name}, or build a new "
+                "unfilled Fragment with make_fragment"
+            )
+        ok, why = _fragment_value_type_ok(self._tile_desc, self._dtype, value)
+        if not ok:
+            raise ValueError(why)
+        self._value = value
+
+    def __repr__(self) -> str:
+        registers = (
+            "<unfilled>"
+            if self._value is None
+            else f"{self._value!r}: {self._value.type.name}"
+        )
+        return (
+            f"Fragment(shape={self._tile_desc.shape}, dtype={self._dtype.name}, "
+            f"value={registers})"
+        )
 
 
-def make_fragment(tile_desc: TileDesc, dtype: Any, value: Any = None) -> Fragment:
-    """Free factory: a `Fragment` for `tile_desc` at element `dtype` (registers set by
-    `fill_fragment` / `load_fragment`)."""
+def make_fragment(
+    tile_desc: TileDesc, dtype: Type, value: Value | None = None
+) -> Fragment:
+    """Free factory: a `Fragment` for `tile_desc` at logical element `dtype`. Without `value` it is
+    unfilled until its first write (`fill_fragment`, or a checked ``value =`` write); a given
+    `value` is checked like any other write (see `Fragment`). `load_fragment` builds and returns a
+    filled fragment itself."""
     return Fragment(tile_desc, dtype, value)

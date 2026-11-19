@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "7c4bf4ac-2f88-4fc0-9058-301c5153fb17",
+  "name": "kernel dtype matches the graph's dtype",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.gfx1151_wmma_attention.kernel_match"
+}

@@ -28,6 +28,7 @@ from rocke.benchmark.perf import harness as _harness
 from rocke.benchmark.perf import occupancy as _occupancy
 from rocke.benchmark.perf import report as _report
 from rocke.benchmark.perf import schema as _schema
+from rocke.core.arch import parse_target_id, processor_from_target_id
 from . import selfcheck as _selfcheck
 from . import store as _store
 from .artifacts import ArtifactBundle
@@ -148,18 +149,24 @@ def _cmd_occupancy(a: argparse.Namespace) -> int:
             data = f.read()
     except OSError as e:
         raise SystemExit(f"occupancy: cannot read {a.hsaco}: {e}")
-    res = _occupancy.resources(data, a.arch)
+    try:
+        # --arch is read with the same rules as the code object's target note, so
+        # amdgcn-amd-amdhsa--gfx942, amdgcn-amd-amdhsa-unknown-gfx942 and
+        # gfx942:xnack- all name the processor gfx942.
+        target_id = parse_target_id(a.arch)
+        res = _occupancy.resources(data, target_id)
+    except ValueError as e:
+        raise SystemExit(f"occupancy: {e}")
     if not res:
         raise SystemExit(
             "occupancy: could not read ELF notes "
             "(need llvm-readelf and a valid HSACO)"
         )
     target = res.get("target_arch")
-    requested = (a.arch or "").split(":", 1)[0]
-    if target and target != requested:
+    if target and target != processor_from_target_id(target_id):
         # The occupancy model follows the binary, so say so rather than letting a
         # stale --arch look like it was honoured. Feature suffixes (e.g. :xnack-)
-        # do not change the family model and are ignored for this comparison.
+        # do not change the processor model and are ignored for this comparison.
         print(
             f"warning: {a.hsaco} is built for {target}, not --arch {a.arch}; "
             f"occupancy computed for {target}",

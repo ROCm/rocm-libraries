@@ -249,6 +249,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uR2wOlrA6hT
   KernelNameMin: Cijk_Alik_Bljk_BSS_BH_Bias_HAS_SAV_UserArgs_MT32x32x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA128_LBSPPB128_MIWT1_1_SS0_TLDS1_WG32_4_1
   SolutionNameMin: Cijk_Alik_Bljk_BSS_BH_Bias_HAS_SAV_UserArgs_MT32x32x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_GSU1_LBSPPA128_LBSPPB128_MIWT1_1_SS0_SU32_SUM1_SUS256_TLDS1_WG32_4_1_WGM8
   AssignedDerivedParameters: true
@@ -380,6 +381,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 2
 - SolutionIndex: 1
+  SolutionUID: 0uR2wOlqlKIz
   KernelNameMin: Cijk_Alik_Bljk_BSS_BH_Bias_HAS_SAV_UserArgs_MT32x32x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA128_LBSPPB128_MIWT1_1_SS1_TLDS1_WG32_4_1
   SolutionNameMin: Cijk_Alik_Bljk_BSS_BH_Bias_HAS_SAV_UserArgs_MT32x32x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_GSU1_LBSPPA128_LBSPPB128_MIWT1_1_SS1_SU32_SUM1_SUS256_TLDS1_WG32_4_1_WGM8
   AssignedDerivedParameters: true
@@ -512,6 +514,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 2
 - SolutionIndex: 2
+  SolutionUID: 0uR2wOlqhN98
   KernelNameMin: Cijk_Alik_Bljk_BSS_BH_Bias_HAS_SAV_UserArgs_MT32x96x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA128_LBSPPB128_MIWT1_3_SS1_TLDS1_WG32_4_1
   SolutionNameMin: Cijk_Alik_Bljk_BSS_BH_Bias_HAS_SAV_UserArgs_MT32x96x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_GSU1_LBSPPA128_LBSPPB128_MIWT1_3_SS1_SU32_SUM1_SUS256_TLDS1_WG32_4_1_WGM8
   AssignedDerivedParameters: true
@@ -644,6 +647,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 2
 - SolutionIndex: 3
+  SolutionUID: 0uR2wOlrOJcb
   KernelNameMin: Cijk_Alik_Bljk_BSS_BH_Bias_HAS_SAV_UserArgs_MT96x96x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA128_LBSPPB128_MIWT3_3_SS1_TLDS1_WG32_4_1
   SolutionNameMin: Cijk_Alik_Bljk_BSS_BH_Bias_HAS_SAV_UserArgs_MT96x96x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_GSU1_LBSPPA128_LBSPPB128_MIWT3_3_SS1_SU32_SUM1_SUS256_TLDS1_WG32_4_1_WGM8
   AssignedDerivedParameters: true
@@ -776,6 +780,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 2
 - SolutionIndex: 4
+  SolutionUID: 0uR2wOlr2cIp
   KernelNameMin: Cijk_Alik_Bljk_BSS_BH_Bias_HAS_SAV_UserArgs_MT64x16x64_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA2048_LBSPPB512_MIWT1_1_SS1_TLDS0_WG64_2_1
   SolutionNameMin: Cijk_Alik_Bljk_BSS_BH_Bias_HAS_SAV_UserArgs_MT64x16x64_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_GSU1_LBSPPA2048_LBSPPB512_MIWT1_1_SS1_SU32_SUM1_SUS256_TLDS0_WG64_2_1_WGM8
   AssignedDerivedParameters: true

@@ -60,6 +60,76 @@ Definitions:
 
 
 Tests:
+# Quick
+- name: spic0
+  category: quick
+  function: spic0
+  precision: *single_only_precisions
+  M_N:
+    - { M: 50, N: 50 }
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_zero]
+  indextype: *i32
+  batch_count: [1]
+
+- name: spic0
+  category: quick
+  function: spic0
+  precision: *single_only_precisions
+  M_N:
+    - { M: 1536, N: 1536 }
+    - { M: 3072, N: 3072 }
+    - { M: 6144, N: 6144 }
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_random, rocsparse_matrix_tridiagonal, rocsparse_matrix_pentadiagonal]
+  indextype: *i32
+  batch_count: [1]
+
+- name: spic0
+  category: quick
+  function: spic0
+  precision: *single_only_precisions
+  M_N:
+    - { M: 24576, N: 24576 }
+    - { M: 40960, N: 40960 }
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_tridiagonal, rocsparse_matrix_pentadiagonal]
+  indextype: *i32
+  batch_count: [1]
+
+- name: spic0
+  category: quick
+  function: spic0
+  precision: *single_only_precisions
+  M_N:
+    - { M: 768, N: 768 }
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_random]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+  indextype: *i32
+  batch_count: [1]
+
+- name: spic0
+  category: quick
+  function: spic0
+  precision: *single_only_precisions
+  M: 1
+  N: 1
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos3, nos7, qc2534, mplate]
+  indextype: *i32
+  batch_count: [1]
 
 - name: spic0_extra
   category: quick
@@ -71,59 +141,40 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   batch_count: [1,2]
 
-- name: spic0
-  category: quick
+# Pre_checkin
+# AISPARSE-690: grid.y is clamped and the kernels grid-stride over the batch.
+# batch_count is past the device grid.y limit, so the last instances are reached
+# only by the stride loop. pre_checkin, because the host reference factorizes
+# every batch. The BSR entry checks launch success only: the random BSR
+# generator always reports a symbolic pivot.
+- name: spic0_large_batch_count
+  category: pre_checkin
   function: spic0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
+  precision: *single_precision
+  M_N:
+    - { M: 64, N: 64 }
   transA: [rocsparse_operation_none]
-  apol: *all_rocsparse_analysis_policy
-  baseA: *all_rocsparse_index_base
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_zero]
-  indextype: *i32
-  batch_count: [1,2]
-
-- name: spic0
-  category: quick
-  function: spic0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
-  transA: [rocsparse_operation_none]
-  apol: *all_rocsparse_analysis_policy
-  baseA: *all_rocsparse_index_base
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
   formatA: [rocsparse_format_csr]
   matrix: [rocsparse_matrix_random]
   indextype: *i32
-  batch_count: [2,3]
+  batch_count: [70000]
 
-- name: spic0
-  category: quick
+- name: spic0_large_batch_count
+  category: pre_checkin
   function: spic0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_bsr_range_quick
+  precision: *single_precision
+  M_N:
+    - { M: 16, N: 16 }
   block_dim: [4]
   apol: [rocsparse_analysis_policy_reuse]
-  baseA: *all_rocsparse_index_base
-  direction: *all_rocsparse_direction
-  matrix: [rocsparse_matrix_zero]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
   formatA: [rocsparse_format_bsr]
-  indextype: *i32
-  batch_count: [1,2,4]
-
-- name: spic0
-  category: quick
-  function: spic0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_bsr_range_quick
-  block_dim: [4]
-  apol: [rocsparse_analysis_policy_reuse]
-  baseA: *all_rocsparse_index_base
-  direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_random]
-  formatA: [rocsparse_format_bsr]
   indextype: *i32
-  batch_count: [8]
+  batch_count: [70000]
 
 - name: spic0_bad_arg
   category: pre_checkin
@@ -144,7 +195,6 @@ Tests:
   formatA: [rocsparse_format_bsr]
   indextype: *i32
   batch_count: [1,4]
-
 
 - name: spic0_file
   category: pre_checkin
@@ -176,7 +226,6 @@ Tests:
   formatA: [rocsparse_format_bsr]
   indextype: *i32
 
-
 - name: spic0_file
   category: pre_checkin
   function: spic0
@@ -191,7 +240,6 @@ Tests:
   filename: [Chevron2]
   indextype: *i64
 
-
 - name: spic0
   category: pre_checkin
   function: spic0
@@ -204,7 +252,6 @@ Tests:
   matrix: [rocsparse_matrix_random]
   indextype: *i32
   batch_count: [1,4]
-
 
 - name: spic0_file
   category: pre_checkin
@@ -224,8 +271,6 @@ Tests:
              nos2]
   indextype: *i64i32
 
-
-
 - name: spic0_extra
   category: pre_checkin
   function: spic0_extra
@@ -243,7 +288,6 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron3]
   indextype: *i32
-
 
 - name: spic0_graph_test
   category: pre_checkin
@@ -351,7 +395,7 @@ Tests:
   formatA: [rocsparse_format_bsr]
   indextype: *i32
 
-
+# Nightly
 - name: spic0_file
   category: nightly
   function: spic0
@@ -414,7 +458,6 @@ Tests:
   formatA: [rocsparse_format_bsr]
   indextype: *i32
 
-
 - name: spic0
   category: nightly
   function: spic0
@@ -463,7 +506,6 @@ Tests:
   indextype: *i32
   batch_count: [2]
 
-
 - name: spic0_file
   category: nightly
   function: spic0
@@ -493,27 +535,6 @@ Tests:
   filename: [Chevron4]
   indextype: *i32
 
-
-- name: spic0_file
-  category: stress
-  function: spic0
-  precision: *single_double_precisions
-  M: 1
-  N: 1
-  transA: [rocsparse_operation_none]
-  apol: *all_rocsparse_analysis_policy
-  baseA: *all_rocsparse_index_base
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [ASIC_320k]
-  skip_hardware: gfx940, gfx941
-  indextype: *i32
-
-
-
-
-
-# Nightly
 - name: spic0
   category: nightly
   function: spic0
@@ -560,7 +581,6 @@ Tests:
   formatA: [rocsparse_format_bsr]
   indextype: *i32
 
-
 - name: spic0_file
   category: nightly
   function: spic0
@@ -577,6 +597,22 @@ Tests:
   indextype: *i32
 
 # Stress
+
+- name: spic0_file
+  category: stress
+  function: spic0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: *all_rocsparse_analysis_policy
+  baseA: *all_rocsparse_index_base
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [ASIC_320k]
+  skip_hardware: gfx940, gfx941
+  indextype: *i32
+
 - name: spic0_file
   category: stress
   function: spic0
@@ -592,5 +628,3 @@ Tests:
   skip_hardware: gfx940, gfx941
   formatA: [rocsparse_format_bsr]
   indextype: *i32
-
-

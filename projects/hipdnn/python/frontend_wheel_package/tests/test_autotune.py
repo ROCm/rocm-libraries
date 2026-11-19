@@ -88,6 +88,24 @@ def test_autotune_enums():
     assert hipdnn.PrimingFailurePolicy.BENCHMARK_UNPRIMED.name == "BENCHMARK_UNPRIMED"
 
 
+def test_prediction_heuristic_modes_are_distinct():
+    """Python can request either prediction policy without aliasing fallback."""
+    assert hipdnn.HeuristicMode.A != hipdnn.HeuristicMode.B
+    assert hipdnn.HeuristicMode.A != hipdnn.HeuristicMode.FALLBACK
+    assert hipdnn.HeuristicMode.B != hipdnn.HeuristicMode.FALLBACK
+
+
+def test_ranking_metric_accepts_only_registered_names():
+    """A rejected metric is reported as an Error and leaves the requested one in force."""
+    graph = hipdnn.Graph()
+    assert graph.get_ranking_metric() == "tflops"
+    assert graph.set_ranking_metric("time").is_good()
+    assert graph.get_ranking_metric() == "time"
+    for name in ("latency", "TIME", ""):
+        assert graph.set_ranking_metric(name).is_bad(), name
+        assert graph.get_ranking_metric() == "time"
+
+
 def test_autotune_cache_write_outcome_enum():
     """AutotuneCacheWriteOutcome exposes every C++ enumerator."""
     names = {
@@ -398,7 +416,7 @@ def test_plan_index_primitives_on_empty_plan_list():
     assert build.is_bad()
     assert "out of bounds" in build.get_message()
 
-    executed = graph.execute_plan_at_index(_NullHandle(), {1: 1}, 0, 0)
+    executed = graph.execute_plan_at_index(helpers.NullHandle(), {1: 1}, 0, 0)
     assert executed.is_bad()
     assert "out of bounds" in executed.get_message()
 
@@ -499,19 +517,15 @@ def test_create_execution_plan_ext_takes_knob_settings():
     """create_execution_plan_ext() accepts optional knob overrides from Python."""
     graph = hipdnn.Graph()
 
-    # No graph is built, so both forms fail -- what matters is that the knob
-    # settings argument exists and accepts KnobSetting objects.
+    # No graph is built, so both forms report an error; a missing or mistyped
+    # knob_settings parameter would raise TypeError instead.
     assert graph.create_execution_plan_ext(0).is_bad()
-    error = graph.create_execution_plan_ext(0, [hipdnn.KnobSetting("tile.size", 64)])
-    assert error.is_bad()
-    assert error.get_message()
-
-
-class _NullHandle:
-    """Stand-in for a Handle whose get() yields a null pointer."""
-
-    def get(self):
-        return 0
+    assert graph.create_execution_plan_ext(
+        0, [hipdnn.KnobSetting("tile.size", 64)]
+    ).is_bad()
+    assert graph.create_execution_plan_ext(
+        0, knob_settings=[hipdnn.KnobSetting("tile.size", 64)]
+    ).is_bad()
 
 
 @pytest.mark.parametrize(
@@ -534,14 +548,14 @@ def test_autotune_rejects_invalid_config(field, value, expected):
     # Config validation runs before the handle and variant pack are looked at,
     # so this needs neither a device nor an engine.
     with pytest.raises(RuntimeError) as excinfo:
-        hipdnn.Graph().autotune(_NullHandle(), {1: 1}, config=cfg)
+        hipdnn.Graph().autotune(helpers.NullHandle(), {1: 1}, config=cfg)
     assert expected in str(excinfo.value)
 
 
 def test_autotune_rejects_null_handle():
     """A null handle raises RuntimeError instead of dereferencing it."""
     with pytest.raises(RuntimeError) as excinfo:
-        hipdnn.Graph().autotune(_NullHandle(), {1: 1})
+        hipdnn.Graph().autotune(helpers.NullHandle(), {1: 1})
     assert "handle must not be null" in str(excinfo.value)
 
 

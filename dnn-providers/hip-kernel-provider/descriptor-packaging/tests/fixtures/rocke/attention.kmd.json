@@ -1,6 +1,6 @@
 {
   "version": "0.1",
-  "id": "kmd-attention",
+  "id": "708868ca-ec18-5137-a483-6afd39449ec2",
   "name": "Attention metadata",
   "fields": [{ "name": "family", "type": "string" }]
 }

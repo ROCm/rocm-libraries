@@ -29,9 +29,11 @@
 DEF_ARCH(Gfx1250,
     .major = 12, .minor = 5, .stepping = 0,
     .wavefront = 32,
-    .maxVGPR = 256, .maxSGPR = 102, .maxAGPR = 0,
+    .maxVGPR = 1024, .maxSGPR = 106, .maxAGPR = 0,
     .totalVgprPerSimd = 1024,  // physical VGPR file per SIMD (wave32)
-    .vgprAllocGranule = 8,     // VGPR allocation granule (wave32, static allocation)
+    .vgprAllocGranule = 16,    // VGPR allocation granule (wave32, static allocation).
+    .maxWavesPerSimd = 10,     // wave slots per SIMD, the limit once registers stop binding
+    .packedWorkitemId = 1,     // X, Y and Z share v0, so one VGPR arrives filled
     .defaultCycle = 1, .defaultLatency = 1,
     .d16Writes32BitVgpr = 1)
 
@@ -175,6 +177,17 @@ DEF_FORMAT(VOP1,
         {D0, vdst, vgpr, 32},
         {S0, src0, src, 32},
     },
+)
+
+// Architected no-operand vector NOP.  It shares the VOP1 encoding class but
+// does not inherit VOP1's ordinary destination/source operand fields.
+DEF_FORMAT(VOP1_NO_OPERANDS,
+    .microcode = MC_VOP1,
+    .unit = VALU,
+    .encoding = {32},
+    .maxOperands = 0,
+    .cost = {1, 5},
+    .flags = {VALU},
 )
 
 // Vector 2-operand (32-bit encoding)
@@ -473,6 +486,7 @@ DEF_FORMAT(WMMA,
     .maxOperands = 4,
     .cost = {1, 8},
     .coissue = 0x00CC,
+    .wmmaQueueDepth = 8,
     .flags = {WMMA},
     .fields = {
         {D0, vdst, vgpr, 256},
@@ -508,6 +522,7 @@ DEF_FORMAT(SWMMA,
     .maxOperands = 5,
     .cost = {1, 8},
     .coissue = 0x00C0,
+    .wmmaQueueDepth = 8,
     .flags = {SWMMA},
     .fields = {
         {D0, vdst, vgpr, 256, RW},
@@ -532,6 +547,7 @@ DEF_FORMAT(MXWMMA,
     .maxOperands = 4,
     .cost = {1, 8},
     .coissue = 0x00C0,
+    .wmmaQueueDepth = 8,
     .flags = {MXWMMA},
 )
 
@@ -546,6 +562,7 @@ DEF_FORMAT(MXWMMA_SCALE,
     // overrides below without needing an override of its own.
     // (Keep literal field names out of .def comments: the parser substring-matches them.)
     .blockedScale = 0x0001,
+    .wmmaQueueDepth = 5,
     .maxOperands = 6,
     .encoding = {128},
     .fields = {
@@ -569,6 +586,7 @@ DEF_FORMAT(MXWMMA_SCALE16,
     // overrides below without needing an override of its own.
     // (Keep literal field names out of .def comments: the parser substring-matches them.)
     .blockedScale = 0x0001,
+    .wmmaQueueDepth = 5,
     .maxOperands = 6,
     .encoding = {128},
     .fields = {
@@ -782,6 +800,20 @@ DEF_FORMAT(TENSOR,
     .unit = TensorUnit,
     .maxOperands = 4,
     .flags = {TENSORLoadToLds},
+    .fields = {
+        {S0, vaddr0, sgpr, 128},
+        {S1, vaddr1, sgpr, 256},
+        {S2, vaddr2, sreg, 128},
+        {S3, vaddr3, sreg, 128},
+    },
+)
+
+// tensor_store_from_lds: same VIMAGE tensor operands as TENSOR (descriptor groups 0 to 3,
+// the last two optional), but not tagged TENSORLoadToLds, which marks a load.
+DEF_FORMAT(TENSOR_STORE,
+    .parent = VIMAGE,
+    .unit = TensorUnit,
+    .maxOperands = 4,
     .fields = {
         {S0, vaddr0, sgpr, 128},
         {S1, vaddr1, sgpr, 256},

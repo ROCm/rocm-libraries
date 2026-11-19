@@ -18,6 +18,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/copy.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/iterator/detail/minimum_system.h>
@@ -88,7 +95,7 @@ RandomAccessIterator2 overlapped_copy(
   RandomAccessIterator1 last,
   RandomAccessIterator2 result)
 {
-  using value_type = typename thrust::iterator_value<RandomAccessIterator1>::type;
+  using value_type = thrust::detail::it_value_t<RandomAccessIterator1>;
 
   // make a temporary copy of [first,last), and copy into it first
   thrust::detail::temporary_array<value_type, DerivedPolicy> temp(exec, first, last);

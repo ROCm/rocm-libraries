@@ -47,3 +47,11 @@ target_sources(hipblaslt
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt_xfloat32.h"
 )
+
+if(HIPBLASLT_ENABLE_LOCAL_KERNELS)
+    target_sources(hipblaslt
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt-local-kernel.h>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/hipblaslt-local-kernel.h>
+    )
+endif()

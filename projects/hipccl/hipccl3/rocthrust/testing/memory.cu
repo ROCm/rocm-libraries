@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -26,6 +26,17 @@
 #include <iostream>
 
 #include <unittest/unittest.h>
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <iterator>
+#endif
+
+// WAR NVIDIA/cccl#1731
+// Some tests miscompile for non-CUDA backends on MSVC 2017 and 2019 (though 2022 is fine).
+// This is due to a bug in the compiler that breaks __THRUST_DEFINE_HAS_MEMBER_FUNCTION.
+#if defined(_MSC_VER) && _MSC_VER <= 1929 && THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  define WAR_BUG_1731
+#endif
 
 // Define a new system class, as the my_system one is already used with a thrust::sort template definition
 // that calls back into sort.cu
@@ -258,16 +269,18 @@ get_temporary_buffer(my_memory_system& system, std::ptrdiff_t n)
   return thrust::make_pair(thrust::pointer<T, my_memory_system>(result.first.get()), result.second);
 }
 
+// [NON-CCCL PARITY BEGIN]
 template <typename Pointer>
 void return_temporary_buffer(my_memory_system& system, Pointer p, std::ptrdiff_t n)
 {
   system.validate_dispatch();
 
   thrust::device_system_tag device_sys;
-  thrust::pointer<typename thrust::iterator_traits<Pointer>::value_type, 
-                           thrust::device_system_tag> device_ptr(p.get());
+  thrust::pointer<typename _THRUST_STD::iterator_traits<Pointer>::value_type, thrust::device_system_tag> device_ptr(
+    p.get());
   thrust::return_temporary_buffer(device_sys, device_ptr, n);
 }
+// [NON-CCCL PARITY END]
 
 void TestGetTemporaryBufferDispatchExplicit()
 {
@@ -291,6 +304,8 @@ void TestGetTemporaryBufferDispatchExplicit()
 }
 DECLARE_UNITTEST(TestGetTemporaryBufferDispatchExplicit);
 
+#ifndef WAR_BUG_1731
+
 void TestGetTemporaryBufferDispatchImplicit()
 {
   if (are_same(thrust::device_system_tag(), thrust::system::cpp::tag()))
@@ -307,6 +322,7 @@ void TestGetTemporaryBufferDispatchImplicit()
 
     // call something we know will invoke get_temporary_buffer
     my_memory_system sys(0);
+
     thrust::sort(sys, vec.begin(), vec.end());
 
     ASSERT_EQUAL(true, thrust::is_sorted(vec.begin(), vec.end()));
@@ -314,6 +330,8 @@ void TestGetTemporaryBufferDispatchImplicit()
   }
 }
 DECLARE_UNITTEST(TestGetTemporaryBufferDispatchImplicit);
+
+#endif
 
 void TestTemporaryBufferOldCustomization()
 {

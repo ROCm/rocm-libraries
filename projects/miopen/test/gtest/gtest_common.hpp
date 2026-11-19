@@ -148,8 +148,9 @@ enum class Gpu : int
     gfx103X = 1 << 6,
     gfx110X = 1 << 7,
     gfx115X = 1 << 8,
-    gfx120X = 1 << 9,
-    gfx125X = 1 << 10,
+    gfx117X = 1 << 9,
+    gfx120X = 1 << 10,
+    gfx125X = 1 << 11,
     gfxLast = Gpu::gfx125X, // \note Change the value when adding a new device
     All     = -1
 };
@@ -223,6 +224,7 @@ public:
     std::size_t GetMaxComputeUnits() const override;
     std::size_t GetWavefrontWidth() const override;
     std::size_t GetMaxMemoryAllocSize() const override;
+    std::size_t GetAvailableMemory() const override;
 
     bool CooperativeLaunchSupported() const override;
 

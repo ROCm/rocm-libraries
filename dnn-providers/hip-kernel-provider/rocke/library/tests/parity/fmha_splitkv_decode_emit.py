@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: MIT
 #
 # tests/parity/fmha_splitkv_decode_emit.py -- Python reference emitter for the
-# split-KV decode FMHA parity harness. Selects one of 6 sampled
-# FmhaFwdSplitKvDecodeSpec configs by argv[1] (0..5) and a phase by argv[2]
+# split-KV decode FMHA parity harness. Selects one of 7 sampled
+# FmhaFwdSplitKvDecodeSpec configs by argv[1] (0..6) and a phase by argv[2]
 # ("seg" or "reduce"), builds via build_fmha_fwd_splitkv_decode_segment /
 # build_fmha_fwd_splitkv_decode_reduce and prints
 # _native_lower(arch='gfx950') to stdout so it can be byte-compared with
@@ -89,13 +89,26 @@ def _spec(idx: int) -> FmhaFwdSplitKvDecodeSpec:
             batch=2,
             num_segments=128,
         )
+    if idx == 6:
+        # 40 query heads over 8 KV heads: the head -> KV-head magic division is by 5. A
+        # power-of-two divisor has multiplier 1 and makes the magic sum just the dividend;
+        # this one makes the sum carry a real multiply-high term.
+        return FmhaFwdSplitKvDecodeSpec(
+            common=FmhaCommonSpec(
+                shape=FmhaShape(head_size=128, num_query_heads=40, num_kv_heads=8),
+                dtype="f16",
+                mask_mode="none",
+            ),
+            batch=2,
+            num_segments=8,
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
 def main() -> int:
     if len(sys.argv) < 2:
         sys.stderr.write(
-            "usage: fmha_splitkv_decode_emit.py <config_index 0..5> [<seg|reduce>|<ll|ir|verify>]\n"
+            "usage: fmha_splitkv_decode_emit.py <config_index 0..6> [<seg|reduce>|<ll|ir|verify>]\n"
         )
         return 2
     idx = int(sys.argv[1])

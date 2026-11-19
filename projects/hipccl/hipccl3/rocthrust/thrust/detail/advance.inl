@@ -17,55 +17,56 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/advance.h>
-#include <thrust/system/detail/generic/advance.h>
-#include <thrust/iterator/iterator_traits.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/has_nested_type.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
+#include <thrust/iterator/iterator_traits.h>
+#include <thrust/system/detail/generic/advance.h>
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <iterator>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
 __THRUST_DEFINE_HAS_NESTED_TYPE(has_difference_type, difference_type)
 
 template <typename InputIterator, typename Distance>
-THRUST_HOST_DEVICE
-void advance(InputIterator& i, Distance n)
+THRUST_HOST_DEVICE void advance(InputIterator& i, Distance n)
 {
   thrust::system::detail::generic::advance(i, n);
 }
 
 template <typename InputIterator>
-THRUST_HOST_DEVICE
-InputIterator next(
-  InputIterator i
-, typename iterator_traits<InputIterator>::difference_type n = 1
-)
+THRUST_HOST_DEVICE InputIterator next(InputIterator i, thrust::detail::it_difference_t<InputIterator> n = 1)
 {
   thrust::system::detail::generic::advance(i, n);
   return i;
 }
 
 template <typename BidirectionalIterator>
-THRUST_HOST_DEVICE
-BidirectionalIterator prev(
-  BidirectionalIterator i
-, typename iterator_traits<BidirectionalIterator>::difference_type n = 1
-)
+THRUST_HOST_DEVICE BidirectionalIterator
+prev(BidirectionalIterator i, thrust::detail::it_difference_t<BidirectionalIterator> n = 1)
 {
   thrust::system::detail::generic::advance(i, -n);
   return i;
 }
 
+// FIXME(bgruber): what does this prevent against?
 template <typename BidirectionalIterator>
 THRUST_HOST_DEVICE
-typename detail::disable_if<
-  has_difference_type<iterator_traits<BidirectionalIterator> >::value
-, BidirectionalIterator
->::type prev(
-  BidirectionalIterator i
-, typename detail::pointer_traits<BidirectionalIterator>::difference_type n = 1
-)
+typename detail::disable_if<has_difference_type<_THRUST_STD::iterator_traits<BidirectionalIterator>>::value,
+                            BidirectionalIterator>::type
+prev(BidirectionalIterator i, typename detail::pointer_traits<BidirectionalIterator>::difference_type n = 1)
 {
   thrust::system::detail::generic::advance(i, -n);
   return i;

@@ -99,8 +99,8 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockOffset)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        int distance
-            = rand() % std::min(size_t(10), block_size / 2) - std::min(size_t(10), block_size / 2);
+        int distance = rand() % _HIPCUB_STD::min(size_t(10), block_size / 2)
+                       - _HIPCUB_STD::min(size_t(10), block_size / 2);
         SCOPED_TRACE(testing::Message()
                      << "with seed= " << seed_value << " & distance = " << distance);
         // Generate data
@@ -183,7 +183,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockRotate)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        int distance = rand() % std::min(size_t(5), block_size / 2);
+        int distance = rand() % _HIPCUB_STD::min(size_t(5), block_size / 2);
         SCOPED_TRACE(testing::Message()
                      << "with seed= " << seed_value << " & distance = " << distance);
         // Generate data

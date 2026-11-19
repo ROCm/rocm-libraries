@@ -1,5 +1,7 @@
 #pragma once
 
+#include <hipconv/export.hpp>
+
 #include <array>
 #include <cstddef>
 #include <optional>
@@ -57,26 +59,26 @@ inline constexpr std::array all_algorithms{Algorithm::Grouped,
 inline constexpr std::array input_data_types{DataType::fp16, DataType::bf16, DataType::tf32};
 
 // Return the size in bytes of the given data-type.
-size_t sizeof_data_type(DataType dtype);
+HIPCONV_API size_t sizeof_data_type(DataType dtype);
 
-auto to_string(Direction dir) -> char const*;
+HIPCONV_API auto to_string(Direction dir) -> char const*;
 
-auto to_string(DataType dtype) -> char const*;
+HIPCONV_API auto to_string(DataType dtype) -> char const*;
 
-auto to_string(Algorithm algo) -> char const*;
+HIPCONV_API auto to_string(Algorithm algo) -> char const*;
 
 // Parse an algorithm name (the inverse of to_string(Algorithm)).
 //
 // Returns nullopt for any string that is not one of
 // grouped|depthwise|direct|explicit_gemm.
-std::optional<Algorithm> parse_algorithm(std::string_view name);
+HIPCONV_API std::optional<Algorithm> parse_algorithm(std::string_view name);
 
 // Parse a supported input data-type name (fp16|bf16|tf32).
 //
 // This is the set of dtypes the driver accepts for a layer's input, a subset of
 // DataType: fp32, fp8, and bf8 are valid DataType values but not input tags, so
 // they return nullopt. Returns nullopt for any unrecognized string.
-std::optional<DataType> parse_data_type(std::string_view name);
+HIPCONV_API std::optional<DataType> parse_data_type(std::string_view name);
 
 // Parse a direction name into a mask of Direction bits.
 //
@@ -86,7 +88,7 @@ std::optional<DataType> parse_data_type(std::string_view name);
 //
 // The accepted spelling is lowercase, which is what the command line and the spec
 // files use; to_string(Direction) is capitalized, so this is not its strict inverse.
-std::optional<int> parse_direction_mask(std::string_view name);
+HIPCONV_API std::optional<int> parse_direction_mask(std::string_view name);
 
 // The tensor order (i.e. layout).
 enum TensorOrder
@@ -214,7 +216,22 @@ struct ConvParams
         {
             return false;
         }
-        return true;
+        return !output_is_empty();
+    }
+
+    // True when, on some used axis, the dilated filter is wider than the padded input.
+    //
+    // Computed without division, so it is defined for any stride. compute_output_size
+    // cannot detect this case: its division truncates toward zero, so it reports an
+    // extent of 1 for an overhang shorter than the stride.
+    bool output_is_empty() const
+    {
+        auto overhangs = [](long long x, long long kx, long long pad, long long dilation) {
+            return dilation * (kx - 1) + 1 > x + 2 * pad;
+        };
+        return overhangs(w, kw, pad_w, dilation_w) ||
+               (dims >= 2 && overhangs(h, kh, pad_h, dilation_h)) ||
+               (dims >= 3 && overhangs(d, kd, pad_d, dilation_d));
     }
 
     // The conv2d layer this one is equivalent to, or a copy when there is none.
@@ -225,7 +242,7 @@ struct ConvParams
     // not reduce comes back unchanged, and since every kernel in the tree serves
     // two-dimensional layers only, it goes on to match nothing, exactly as it
     // would have without the call. See docs/unfolded-conv3d.md.
-    ConvParams unfolded() const;
+    HIPCONV_API ConvParams unfolded() const;
 
     // The operator name implied by dims, for display and for spec cross-checks.
     const char* op_name() const

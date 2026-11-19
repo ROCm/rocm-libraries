@@ -187,6 +187,69 @@ spec = GemmSpec(
 - Better overlaps with MFMA execution
 - **Requirement:** ROCm 6.1+ and gfx950 ISA support
 
+### LDS DMA and the backend's conservative waits
+
+`buffer_load ... lds` (gfx942 too, one dword per lane) completes on `vmcnt`.
+Unless it can prove otherwise, the backend (SIInsertWaitcnts) assumes any
+later LDS read may alias an in-flight LDS DMA and inserts `s_waitcnt vmcnt(0)`
+before it. That serialises the DMA latency into compute, and it defeats
+spreading DMA issue between MFMAs: every read after a DMA waits for it.
+
+rocke pools LDS allocations into one global, so the backend cannot tell
+buffers apart on its own. Set the kernel attribute
+`b.kernel.attrs["lds_alias_scopes"] = True` and both lowering engines attach
+`!alias.scope` / `!noalias` metadata to `smem_load_vN`, `smem_store_vN` and
+`async_buffer_load_lds_addr` (the DMA's destination is traced through
+`smem_addr_of` / `smem_ptr_add`). Each allocation gets its own scope and is
+`noalias` only against allocations whose pooled byte ranges are disjoint, so
+liveness-shared bytes stay "may alias". A read then waits only for DMA into its
+own allocation -- e.g. the slot being computed on, not the slot being filled.
+The attribute assumes `smem_ptr_add` offsets stay inside the base allocation.
+
+On llvm23, `buffer_load_lds_async` with `asyncmark` / `wait_asyncmark` is the
+other way out: async DMA is synchronised only by the explicit marks.
+
+### Cache policy of the copies
+
+`async_buffer_load_lds_addr` takes the buffer cache-policy bits (`coherency=`). Name
+them with `cache_policy_from_name` (`"all"`, `"global"`, `"stream"`, `"nt"`; the bits
+per arch are in [`ir_model.md`](../../../ir_lowering/ir_model.md)). Use `"stream"`
+(the NT bit only; `"nt"` also sets SC0) for data that is read exactly once per call and
+is larger than the last-level cache, such as the K/V of a large single-token decode
+(`_kv_cache_policy_3d` streams only above 256 MiB; smaller K/V keeps `"all"` so the next
+call can hit in it), so it does not evict lines something else will reuse.
+Judge it on data that is
+not cache-resident between launches: replaying the same small input keeps it warm for
+the baseline and makes the hint look like a regression. See runbook
+[§6.6](../../optimization_runbook.md#66-caches).
+
+### Async DMA does not pay for a narrow operand that must be converted
+
+When the operand arriving from HBM is narrower than the compute dtype and has to
+be converted before the MFMA reads it (fp8 KV dequantised to bf16/fp16, for
+example), the conversion has to happen somewhere, and that placement decides the
+loader more than the load mechanism does.
+
+Two shapes are available:
+
+- **Sync dequant.** `global_load` the narrow bytes into registers, convert in
+  registers, `smem_store` the wide result. One trip through LDS, one barrier.
+- **Two-phase async DMA.** DMA the narrow bytes into a staging LDS slab, barrier,
+  then read the slab back, convert, and write the wide result to a second LDS
+  buffer. The DMA covers its own latency, but the data crosses LDS twice.
+
+On the gfx950 dense prefill fp8 KV path the sync-dequant loader measured faster
+on the aligned prefill cohort, and the two-phase prototype was dropped. The
+second phase pays an extra full LDS round trip and a second block-wide barrier,
+and the staging slab competes for the LDS budget that sets occupancy, which
+together outweigh the latency the DMA hides. The conversion in the sync path
+rides on registers that are already live for the load, so it is close to free.
+
+Reach for async DMA when the bytes land in their final layout and dtype. When a
+conversion stands between the load and the MFMA, cost the extra LDS round trip
+before assuming the DMA wins, and measure both on the target cohort: the result
+is shape-dependent, and a wider operand or a tile with LDS to spare can flip it.
+
 ## Register Budget
 
 Prefetch stages consume **arch_vgpr** (architectural VGPRs) for buffering:

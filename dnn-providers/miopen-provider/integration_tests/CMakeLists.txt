@@ -7,6 +7,7 @@ find_package(Threads REQUIRED)
 # otherwise find installed packages (true standalone)
 if(NOT TARGET hipdnn_test_sdk)
     find_package(hipdnn_test_sdk CONFIG REQUIRED)
+    find_package(hipdnn_frontend CONFIG QUIET OPTIONAL_COMPONENTS cudnn_compatibility)
 endif()
 if(NOT TARGET hipdnn_plugin_sdk)
     find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
@@ -16,6 +17,7 @@ add_executable(
     miopen_plugin_integration_tests
     main.cpp
     IntegrationGpuBatchnormUnsupportedDataTypes.cpp
+    IntegrationGpuBatchnormSavedStatsNotRequested.cpp
     IntegrationGpuBatchnormTrainingUnhappySpatial.cpp
     IntegrationGpuBatchnormUnhappyActivation.cpp
     IntegrationGpuBatchnormUnhappyLayouts.cpp
@@ -23,6 +25,12 @@ add_executable(
     IntegrationGpuDeterministic.cpp
     IntegrationGpuPassByValue.cpp
 )
+
+# Superbuild: the hipDNN option; standalone: the installed frontend's cudnn_compatibility component.
+if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY OR hipdnn_frontend_cudnn_compatibility_FOUND)
+    target_sources(miopen_plugin_integration_tests PRIVATE IntegrationGpuCudnnShimDeterministic.cpp
+                                                           IntegrationGpuCudnnV8ShimDeterministic.cpp)
+endif()
 
 target_compile_options(miopen_plugin_integration_tests PRIVATE ${MIOPENPROVIDER_WARNING_COMPILE_OPTIONS})
 

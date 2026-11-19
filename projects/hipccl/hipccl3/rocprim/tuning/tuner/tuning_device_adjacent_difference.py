@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from typing import Optional, OrderedDict, Callable
+from typing import Optional, OrderedDict, Callable, Dict, Any
 import sys
 import os
 
@@ -49,17 +49,11 @@ class Tuner(BaseTuner):
         params['ipt'] = IPT
         return params
 
-    def _get_key_type_name(self) -> str:
-        return "value_type"
-
-    def _get_value_type_name(self):
-        return ""
-
     def _get_restrictions(
-        self, value_type: str, _: Optional[str] = None
+        self, types: Dict[str, Any]
     ) -> Callable[[dict], bool]:
-        element_size = TYPE_CONFIGS[value_type].size
-
+        
+        element_size = TYPE_CONFIGS[types["value_type"]].size
         # based on legacy tuning 
         MAX_SHARED_MEM = 65536
 
@@ -76,7 +70,7 @@ class Tuner(BaseTuner):
     def tune_all(self) -> None:
         """Tune for all value type combinations"""
         for val_type in COMMON_KEY_TYPES:
-            self.tune_type(val_type)
+            self.tune_type({"value_type" : val_type})
 
 
 if __name__ == "__main__":

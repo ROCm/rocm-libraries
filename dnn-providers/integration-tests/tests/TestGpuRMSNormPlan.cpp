@@ -7,14 +7,15 @@
 #include <unordered_map>
 #include <vector>
 
+#include "RaggedGraphTestUtils.hpp"
 #include "ScalarTestUtils.hpp"
+#include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/gpu-graph-executor/detail/GpuRMSNormPlan.hpp"
 #include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
@@ -70,6 +71,26 @@ TEST(TestGpuRMSNormFwdPlanBuilder, IsApplicable)
     EXPECT_NE(nodeAttributes, nullptr);
     tensorMapCopy.erase(nodeAttributes->x_tensor_uid());
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graph.getNode(0), tensorMapCopy));
+}
+
+TEST(TestGpuRMSNormFwdPlanBuilder, IsNotApplicableForRaggedTensors)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+
+    const GpuRMSNormFwdPlanBuilder<DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT>
+        patient;
+
+    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    ASSERT_TRUE(patient.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
+
+    auto ragged = markFirstTensorRagged(builder.GetBufferPointer());
+    auto raggedWrap
+        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
+    EXPECT_FALSE(patient.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
 TEST(TestGpuRMSNormFwdPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)
@@ -215,6 +236,27 @@ TEST(TestGpuRMSNormBwdPlanBuilder, IsApplicable)
     EXPECT_NE(nodeAttributes, nullptr);
     tensorMapCopy.erase(nodeAttributes->dy_tensor_uid());
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graph.getNode(0), tensorMapCopy));
+}
+
+TEST(TestGpuRMSNormBwdPlanBuilder, IsNotApplicableForRaggedTensors)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
+
+    const GpuRMSNormBwdPlanBuilder<DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT>
+        patient;
+
+    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    ASSERT_TRUE(patient.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
+
+    auto ragged = markFirstTensorRagged(builder.GetBufferPointer());
+    auto raggedWrap
+        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
+    EXPECT_FALSE(patient.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
 TEST(TestGpuRMSNormBwdPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)
@@ -440,7 +482,7 @@ void runFwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     cpuVariantPack[nodeAttributes->scale_tensor_uid()] = scaleTensor.rawHostData();
     cpuVariantPack[nodeAttributes->y_tensor_uid()] = cpuY.rawHostData();
 
-    CpuReferenceGraphExecutor cpuExecutor;
+    hipdnn_integration_tests::CpuReferenceGraphExecutorAdapter cpuExecutor;
     cpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), cpuVariantPack);
     cpuY.markHostModified();
 
@@ -615,7 +657,7 @@ void runBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     cpuVariantPack[nodeAttributes->dscale_tensor_uid()] = dCpuScaleTensor.rawHostData();
     cpuVariantPack[nodeAttributes->dbias_tensor_uid().value()] = dCpuBiasTensor.rawHostData();
 
-    CpuReferenceGraphExecutor cpuExecutor;
+    hipdnn_integration_tests::CpuReferenceGraphExecutorAdapter cpuExecutor;
     cpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), cpuVariantPack);
     dxCpuTensor.markHostModified();
     dCpuScaleTensor.markHostModified();

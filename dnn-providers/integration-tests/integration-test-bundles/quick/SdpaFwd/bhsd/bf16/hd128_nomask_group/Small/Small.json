@@ -48,7 +48,7 @@
                 "right_bound": null,
                 "max_seq_len_kv": null,
                 "diagonal_alignment": "TOP_LEFT",
-                "mma_core_mode": "float",
+                "mma_core_mode": "unset",
                 "implementation": "AUTO"
             }
         }
@@ -130,9 +130,15 @@
             "uid": 5,
             "name": "SeqLenQ",
             "dims": [
-                4
+                3,
+                1,
+                1,
+                1
             ],
             "strides": [
+                1,
+                1,
+                1,
                 1
             ],
             "data_type": "int32",
@@ -142,9 +148,15 @@
             "uid": 6,
             "name": "SeqLenKv",
             "dims": [
-                4
+                3,
+                1,
+                1,
+                1
             ],
             "strides": [
+                1,
+                1,
+                1,
                 1
             ],
             "data_type": "int32",

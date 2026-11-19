@@ -10,7 +10,6 @@
 #include "HeuristicPlugin.hpp"
 #include "HipdnnException.hpp"
 #include "PluginCore.hpp"
-#include <hipdnn_backend/version.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>

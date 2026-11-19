@@ -27,11 +27,12 @@ from .common import (
     AttentionRequest,
     AttentionSpec,
     FAMILY,
-    _problem,
+    attention_problem,
     _request_errors,
     _selector_matches,
 )
 from .candidate import make_tuning_candidate
+from .tuning_specs import NUM_SEGMENTS
 from .unified_rules import AttentionGeometryVariant
 
 
@@ -81,8 +82,8 @@ def _variants():
     for tile in ("1x", "half"):
         # ``half`` is translated below by the explicit builder through a
         # concrete token; use per-block variants because it is only legal for
-        # block sizes >=32.
-        for segments in (8, 16, 32, 64, 128):
+        # block sizes >=32. Segment count 0 is the dispatcher's split rule's.
+        for segments in NUM_SEGMENTS + (0,):
             yield AttentionGeometryVariant(
                 arch="gfx942",
                 path="3d",
@@ -94,6 +95,11 @@ def _variants():
 
 
 GFX942_TUNING_VARIANTS = tuple(_variants())
+
+# The gfx942 dense_pipe candidate's algorithm (see
+# _make_gfx942_dense_pipe_candidate), named so a caller outside this package
+# (the SDPA gate) does not have to reconstruct the literal.
+GFX942_DENSE_PIPE_ALGORITHM = "dense_pipe"
 
 
 def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
@@ -123,15 +129,17 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
-        problem = _problem(req)
+        problem = attention_problem(req)
         ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
-        if problem.select_path() != "2d":
+        if problem.select_path(req.arch) != "2d":
             return False, "problem routes to 3D, not 2D"
+        if not problem.default_mask:
+            return False, "gfx942 tiled 2D implements only bottom-right causal"
         from kernels.common.attention_unified import _enable_gfx942_fp16_flash
 
-        if not _enable_gfx942_fp16_flash(problem):
+        if not _enable_gfx942_fp16_flash(problem, req.arch):
             return False, "gfx942 fp16 flash not eligible for this shape"
         return True, "ok"
 
@@ -140,7 +148,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
-        problem = _problem(req)
+        problem = attention_problem(req)
         return AttentionSpec(
             path="2d",
             head_size=problem.head_size,
@@ -154,7 +162,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
     candidate = KernelCandidate(
         name=name,
         family=FAMILY,
-        algorithm="dense_pipe",
+        algorithm=GFX942_DENSE_PIPE_ALGORITHM,
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=5,
@@ -167,7 +175,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
             ),
             # ``_enable_gfx942_fp16_flash`` is the real narrowing; fp8 is
             # unsupported, but the unified body already shifts causal masking.
-            supports_features=ATTENTION_FEATURES - {"fp8"},
+            supports_features=ATTENTION_FEATURES - {"fp8", "band", "full_attention"},
         ),
         _supports=support,
         select_spec=select,

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -33,12 +33,11 @@
 #endif // no system header
 
 #include <thrust/detail/contiguous_storage.h>
+#include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/detail/type_traits.h>
-#include <thrust/iterator/detail/iterator_traits.h>
 #include <thrust/iterator/detail/normal_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/reverse_iterator.h>
-#include <thrust/sequence_access.h>
 
 #include _THRUST_STD_INCLUDE(utility)
 
@@ -194,7 +193,8 @@ public:
    *  \param first The beginning of the range.
    *  \param last The end of the range.
    */
-  template <typename InputIterator, _THRUST_STD::enable_if_t<is_cpp17_input_iterator<InputIterator>::value, int> = 0>
+  template <typename InputIterator,
+            _THRUST_STD::enable_if_t<::internal::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
   vector_base(InputIterator first, InputIterator last);
 
   /*! This constructor builds a vector_base from a range.
@@ -202,7 +202,8 @@ public:
    *  \param last The end of the range.
    *  \param alloc The allocator to use by this vector_base.
    */
-  template <typename InputIterator, _THRUST_STD::enable_if_t<is_cpp17_input_iterator<InputIterator>::value, int> = 0>
+  template <typename InputIterator,
+            _THRUST_STD::enable_if_t<::internal::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
   vector_base(InputIterator first, InputIterator last, const Alloc& alloc);
 
   /*! The destructor erases the elements.
@@ -504,12 +505,6 @@ private:
   template <typename InputIterator>
   void range_init(InputIterator first, InputIterator last);
 
-  template <typename InputIterator>
-  void range_init(InputIterator first, InputIterator last, thrust::incrementable_traversal_tag);
-
-  template <typename ForwardIterator>
-  void range_init(ForwardIterator first, ForwardIterator last, thrust::random_access_traversal_tag);
-
   void value_init(size_type n);
 
   void fill_init(size_type n, const T& x);
@@ -544,14 +539,6 @@ private:
   // this method performs assignment from a range
   template <typename InputIterator>
   void range_assign(InputIterator first, InputIterator last);
-
-  // this method performs assignment from a range of RandomAccessIterators
-  template <typename RandomAccessIterator>
-  void range_assign(RandomAccessIterator first, RandomAccessIterator last, thrust::random_access_traversal_tag);
-
-  // this method performs assignment from a range of InputIterators
-  template <typename InputIterator>
-  void range_assign(InputIterator first, InputIterator last, thrust::incrementable_traversal_tag);
 
   // this method performs assignment from a fill value
   void fill_assign(size_type n, const T& x);

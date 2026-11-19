@@ -1,0 +1,6 @@
+outs:
+- path: scircuit.tar.gz
+  remote: sparse-matrices
+  md5: 3e62f7ea83914f7e20019aefb2a5176f
+  size: 8635362
+  hash: md5

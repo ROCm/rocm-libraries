@@ -60,6 +60,12 @@ extern "C" {
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval rocsparse_status_invalid_pointer \p mat_A, \p mat_B, \p descr, or \p buffer_size pointer is invalid.
+*  \retval rocsparse_status_not_implemented a batched matrix is passed, the formats of \p mat_A,
+*          \p mat_B and \p mat_C differ, the format is not \ref rocsparse_format_csr at an
+*          analysis stage, the data type of \p mat_A, \p mat_B or \p mat_C differs from
+*          \ref rocsparse_spgeam_input_compute_datatype, or
+*          \ref rocsparse_spgeam_input_operation_A or \ref rocsparse_spgeam_input_operation_B
+*          is \ref rocsparse_operation_transpose or \ref rocsparse_operation_conjugate_transpose.
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle,
@@ -133,7 +139,6 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="spgeam_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B / C / compute_type
 *  <tr><td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f64_r
@@ -143,7 +148,6 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *
 *  \par Uniform Index Types:
 *  <table>
-*  <caption id="spgeam_csr_uniform_indextype">CSR Uniform Index Types</caption>
 *  <tr><th>CSR Row offset                 <th>CSR Column indices
 *  <tr><td>rocsparse_indextype_i32</td>   <td>rocsparse_indextype_i32</td>
 *  <tr><td>rocsparse_indextype_i64</td>   <td>rocsparse_indextype_i64</td>
@@ -151,7 +155,6 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *
 *  \par Mixed Index Types:
 *  <table>
-*  <caption id="spgeam_csr_mixed_indextype">CSR Mixed Index Types</caption>
 *  <tr><th>CSR Row offset                 <th>CSR Column indices
 *  <tr><td>rocsparse_indextype_i64</td>   <td>rocsparse_indextype_i32</td>
 *  </table>
@@ -198,6 +201,12 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval rocsparse_status_invalid_pointer \p mat_A, \p mat_B, \p mat_C, \p descr, or \p buffer_size pointer is invalid.
+*  \retval rocsparse_status_not_implemented a batched matrix is passed, the formats of \p mat_A,
+*          \p mat_B and \p mat_C differ, the format is not \ref rocsparse_format_csr, the data
+*          type of \p mat_A, \p mat_B or \p mat_C differs from
+*          \ref rocsparse_spgeam_input_compute_datatype, or
+*          \ref rocsparse_spgeam_input_operation_A or \ref rocsparse_spgeam_input_operation_B
+*          is \ref rocsparse_operation_transpose or \ref rocsparse_operation_conjugate_transpose.
 *
 *  \par First Example
 *  \snippet example_rocsparse_spgeam_1.cpp doc example

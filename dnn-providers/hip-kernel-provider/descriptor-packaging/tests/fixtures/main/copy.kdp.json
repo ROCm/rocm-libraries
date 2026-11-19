@@ -8,7 +8,7 @@
   "matchers": [
     "umd-copy"
   ],
-  "engine": "ued-copy",
+  "engine": "cea428aa-55b6-56f9-9826-48b52829958b",
   "dispatch": "udd-copy",
   "kernelDescriptors": [
     {
@@ -36,8 +36,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "ued-copy",
-              "kmd_id": "kmd-copy",
+              "engine_id": "cea428aa-55b6-56f9-9826-48b52829958b",
+              "kmd_id": "ddbd74eb-0cf2-5cea-b567-ab8e0bed17e3",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "block_size",

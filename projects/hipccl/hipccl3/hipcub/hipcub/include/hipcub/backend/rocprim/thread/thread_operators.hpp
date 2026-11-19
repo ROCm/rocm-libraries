@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -38,12 +38,14 @@
 #include <rocprim/type_traits.hpp> // IWYU pragma: export
 #include <rocprim/type_traits_functions.hpp>
 
+#include _HIPCUB_STD_INCLUDE(functional)
+
 #include <hip/hip_bf16.h>
 
 BEGIN_HIPCUB_NAMESPACE
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Equality
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::equal_to<T> instead.") Equality
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE inline constexpr bool operator()(T&& t, U&& u) const
@@ -52,8 +54,8 @@ struct Equality
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Inequality
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::not_equal_to<T> instead.") Inequality
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE inline constexpr bool operator()(T&& t, U&& u) const
@@ -62,9 +64,9 @@ struct Inequality
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-template <class EqualityOp>
-struct InequalityWrapper
+//! deprecated [Since 5.0]
+template<class EqualityOp>
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::not_equal_to<T> instead.") InequalityWrapper
 {
     EqualityOp op;
 
@@ -78,8 +80,8 @@ struct InequalityWrapper
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Sum
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::plus<T> instead.") Sum
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE inline constexpr auto operator()(T&& t, U&& u) const -> decltype(auto)
@@ -88,8 +90,8 @@ struct Sum
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Difference
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::minus<T> instead") Difference
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE inline constexpr auto operator()(T&& t, U&& u) const -> decltype(auto)
@@ -98,8 +100,8 @@ struct Difference
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Division
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::divides<T> instead") Division
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE inline constexpr auto operator()(T&& t, U&& u) const -> decltype(auto)
@@ -108,26 +110,24 @@ struct Division
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Max
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::maximum<T> instead.") Max
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<T, U>::type
         operator()(T&& t, U&& u) const
     {
-        // TODO: change to use hip::std::max after libhipcxx is ready
         return (((u) > (t)) ? (u) : (t));
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Min
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::minimum<T> instead.") Min
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<T, U>::type
         operator()(T&& t, U&& u) const
     {
-        // TODO: change to use hip::std::min after libhipcxx is ready
         return (((u) < (t)) ? (u) : (t));
     }
 };
@@ -256,30 +256,6 @@ struct ReduceByKeyOp
     }
 };
 
-template <typename BinaryOpT>
-struct BinaryFlip
-{
-    BinaryOpT binary_op;
-
-    HIPCUB_HOST_DEVICE
-    explicit BinaryFlip(BinaryOpT binary_op) : binary_op(binary_op)
-    {
-    }
-
-    template<typename T, typename U>
-    HIPCUB_DEVICE auto operator()(T&& t, U&& u) -> decltype(auto)
-    {
-        return binary_op(std::forward<U>(u), std::forward<T>(t));
-    }
-};
-
-template <typename BinaryOpT>
-HIPCUB_HOST_DEVICE
-BinaryFlip<BinaryOpT> MakeBinaryFlip(BinaryOpT binary_op)
-{
-    return BinaryFlip<BinaryOpT>(binary_op);
-}
-
 namespace internal
 {
 
@@ -300,7 +276,7 @@ struct [[deprecated(
     constexpr uint32_t
         operator()(int32_t t, int32_t u) const
     {
-        return HIPCUB_MIN(t, u);
+        return _HIPCUB_STD::min(t, u);
     }
 };
 
@@ -314,7 +290,7 @@ struct [[deprecated(
     constexpr uint32_t
         operator()(uint32_t t, uint32_t u) const
     {
-        return HIPCUB_MIN(t, u);
+        return _HIPCUB_STD::min(t, u);
     }
 };
 
@@ -330,7 +306,7 @@ struct [[deprecated(
     __half2
         operator()(__half2 t, __half2 u) const
     {
-        return HIPCUB_MIN(t, u);
+        return _HIPCUB_STD::min(t, u);
     }
 };
 #endif // !defined(__HIP_NO_HALF_OPERATORS__)
@@ -346,7 +322,7 @@ struct [[deprecated("SIMD intrinsics are currently not supported on HIP, use Min
     __hip_bfloat162
         operator()(__hip_bfloat162 t, __hip_bfloat162 u) const
     {
-        return HIPCUB_MIN(t, u);
+        return _HIPCUB_STD::min(t, u);
     }
 };
 
@@ -367,7 +343,7 @@ struct [[deprecated(
     constexpr uint32_t
         operator()(int32_t t, int32_t u) const
     {
-        return HIPCUB_MAX(t, u);
+        return _HIPCUB_STD::max(t, u);
     }
 };
 
@@ -381,7 +357,7 @@ struct [[deprecated(
     constexpr uint32_t
         operator()(uint32_t t, uint32_t u) const
     {
-        return HIPCUB_MAX(t, u);
+        return _HIPCUB_STD::max(t, u);
     }
 };
 
@@ -396,7 +372,7 @@ struct [[deprecated(
     __half2
         operator()(__half2 t, __half2 u) const
     {
-        return HIPCUB_MAX(t, u);
+        return _HIPCUB_STD::max(t, u);
     }
 };
 #endif // !defined(__HIP_NO_HALF_OPERATORS__)
@@ -411,7 +387,7 @@ struct [[deprecated("SIMD intrinsics are currently not supported on HIP, use Max
     __hip_bfloat162
         operator()(__hip_bfloat162 t, __hip_bfloat162 u) const
     {
-        return HIPCUB_MAX(t, u);
+        return _HIPCUB_STD::max(t, u);
     }
 };
 
@@ -583,7 +559,7 @@ namespace detail
 // Non-void value type.
 template<typename IteratorT, typename FallbackT>
 using non_void_value_t =
-    typename std::conditional<std::is_same<IteratorT, void>::value, FallbackT, IteratorT>::type;
+    typename std::conditional<std::is_same_v<IteratorT, void>, FallbackT, IteratorT>::type;
 
 /// Intermediate accumulator type.
 template<typename Invokable, typename InputT, typename InitT = InputT>
@@ -594,16 +570,16 @@ using accumulator_t = ::rocprim::accumulator_t<Invokable, InputT, InitT>;
 //
 // /// The output value type
 // using OutputT =
-//     typename If<(Equals<typename std::iterator_traits<OutputIteratorT>::value_type,
+//     typename If<(Equals<it_value_t<OutputIteratorT>,
 //                         void>::VALUE),           // OutputT =  (if output iterator's value type is void) ?
-//                 typename std::iterator_traits<
-//                     InputIteratorT>::value_type, // ... then the input iterator's value type,
-//                 typename std::iterator_traits<OutputIteratorT>::value_type>::
+//                 it_value_t<
+//                     InputIteratorT>,             // ... then the input iterator's value type,
+//                 it_value_t<OutputIteratorT>>::
 //         Type;                                    // ... else the output iterator's value type
 //
 // rocPRIM (as well as Thrust) uses result type of BinaryFunction instead (if not void):
 //
-// using input_type = typename std::iterator_traits<InputIterator>::value_type;
+// using input_type = detail::it_value_t<InputIteratorT>;
 // using result_type = ::rocprim::accumulator_t<BinaryFunction, input_type>;
 //
 // For short -> float using Sum()
@@ -618,8 +594,8 @@ template<
 >
 struct convert_result_type_wrapper
 {
-    using input_type  = typename std::iterator_traits<InputIteratorT>::value_type;
-    using output_type = typename std::iterator_traits<OutputIteratorT>::value_type;
+    using input_type  = detail::it_value_t<InputIteratorT>;
+    using output_type = it_value_t<OutputIteratorT>;
     using result_type = non_void_value_t<output_type, input_type>;
 
     convert_result_type_wrapper(BinaryFunction op) : op(op) {}
@@ -660,7 +636,7 @@ convert_result_type(BinaryFunction op)
 template<class BinaryFunction, class InputIteratorT, class InitT>
 struct convert_binary_result_type_wrapper
 {
-    using input_type  = typename std::iterator_traits<InputIteratorT>::value_type;
+    using input_type  = detail::it_value_t<InputIteratorT>;
     using init_type   = InitT;
     using accum_type  = accumulator_t<BinaryFunction, input_type, init_type>;
 

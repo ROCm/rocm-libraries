@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -43,6 +43,11 @@
 
 #if defined(__HIPSTDPAR__)
 
+#  include <thrust/detail/config/namespace.h>
+#  include <thrust/system/hip/detail/util.h>
+
+#  include <hip/hip_runtime_api.h>
+
 #  include <cstddef>
 #  include <cstdio>
 #  include <cstdlib>
@@ -51,9 +56,6 @@
 #  include <new>
 #  include <type_traits>
 #  include <utility>
-
-#  include <hip/hip_runtime_api.h>
-#  include <thrust/system/hip/detail/util.h>
 
 namespace hipstd
 {
@@ -193,12 +195,18 @@ public:
 #  else
     hipError_t status = ::hipMalloc(reinterpret_cast<void**>(&fn_ptr_), sizeof(Fn));
 #  endif
-    ::thrust::hip_rocprim::throw_on_error(status, "hipstdpar: failed to allocate device callable");
+    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(status, "hipstdpar: failed to allocate device callable");
     ::new (static_cast<void*>(fn_ptr_)) Fn(::std::move(fn));
   }
 
   device_callable_guard(const device_callable_guard&)            = delete;
   device_callable_guard& operator=(const device_callable_guard&) = delete;
+
+  device_callable_guard(device_callable_guard&& other) noexcept : fn_ptr_(other.fn_ptr_)
+  {
+    other.fn_ptr_ = nullptr;
+  }
+  device_callable_guard& operator=(device_callable_guard&&) = delete;
 
   ~device_callable_guard()
   {
@@ -223,7 +231,7 @@ public:
     fn_ptr_->~Fn();
     hipError_t status = ::hipFree(fn_ptr_);
     fn_ptr_           = nullptr;
-    ::thrust::hip_rocprim::throw_on_error(status, "hipstdpar: failed to free device callable");
+    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(status, "hipstdpar: failed to free device callable");
   }
 
 private:
@@ -236,11 +244,83 @@ struct callable_proxy
   Fn* fn_ptr;
 
   template <typename... Args>
-  THRUST_HIP_FUNCTION void operator()(Args&&... args) const
+  THRUST_HIP_FUNCTION auto operator()(Args&&... args) const
+    -> decltype((*fn_ptr)(std::forward<Args>(args)...))
   {
-    (*fn_ptr)(::std::forward<Args>(args)...);
+    return (*fn_ptr)(::std::forward<Args>(args)...);
   }
 };
+
+// Owns the guard (if needed) and produces the right callable to pass to Call.
+template <typename Fn>
+struct device_fn_entry
+{
+    using fn_t = ::std::decay_t<Fn>;
+    static constexpr bool is_trivial = ::std::is_trivially_destructible_v<fn_t>;
+
+    ::std::conditional_t<is_trivial, fn_t, device_callable_guard<fn_t>> storage;
+
+    device_fn_entry(Fn fn) : storage(::std::move(fn)) {}
+
+    decltype(auto) get()
+    {
+        if constexpr (is_trivial)
+            return ::std::move(storage);
+        else
+            return callable_proxy<fn_t>{storage.get()};
+    }
+
+    void destroy()
+    {
+        if constexpr (!is_trivial)
+            storage.destroy_and_free();
+    }
+};
+
+template <typename Call, typename... Fns>
+auto with_device_callables(Call call, const char* sync_error, Fns... fns)
+{
+    constexpr bool all_trivial =
+        (::std::is_trivially_destructible_v<::std::decay_t<Fns>> && ...);
+
+    if constexpr (all_trivial)
+    {
+        return call(::std::move(fns)...);
+    }
+    else
+    {
+        auto entries = ::std::make_tuple(device_fn_entry<Fns>(::std::move(fns))...);
+
+        auto invoke = [&]() -> decltype(auto) {
+            try
+            {
+                return ::std::apply(
+                    [&call](auto&... e) -> decltype(auto) { return call(e.get()...); },
+                    entries);
+            }
+            catch (...)
+            {
+                (void) ::hipDeviceSynchronize();
+                throw;
+            }
+        };
+
+        using result_t = decltype(invoke());
+        if constexpr (::std::is_void_v<result_t>)
+        {
+            invoke();
+            ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), sync_error);
+            ::std::apply([](auto&... e) { (e.destroy(), ...); }, entries);
+        }
+        else
+        {
+            auto result = invoke();
+            ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), sync_error);
+            ::std::apply([](auto&... e) { (e.destroy(), ...); }, entries);
+            return result;
+        }
+    }
+}
 
 } // namespace detail
 } // namespace hipstd

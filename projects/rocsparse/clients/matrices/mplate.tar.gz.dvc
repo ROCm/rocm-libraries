@@ -1,0 +1,6 @@
+outs:
+- path: mplate.tar.gz
+  remote: sparse-matrices
+  md5: ad5963d0a39a943fcb0dc2b119d5b22a
+  size: 499620
+  hash: md5

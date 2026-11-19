@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,11 +23,10 @@
 #include "common_test_header.hpp"
 
 // required rocprim headers
-#include <hipcub/config.hpp>
 #include <hipcub/block/block_adjacent_difference.hpp>
 #include <hipcub/block/block_load.hpp>
 #include <hipcub/block/block_store.hpp>
-#include <hipcub/thread/thread_operators.hpp>
+#include <hipcub/config.hpp>
 
 template<
     class T,
@@ -72,25 +71,25 @@ struct custom_op2
 };
 
 using ParamsSubtract
-    = ::testing::Types<params_subtract<unsigned int, int, hipcub::Sum, 64U, 1>,
+    = ::testing::Types<params_subtract<unsigned int, int, test_utils::plus, 64U, 1>,
                        params_subtract<int, bool, custom_op1, 128U, 1>,
                        params_subtract<float, int, custom_op2, 256U, 1>,
                        params_subtract<test_utils::half, int, custom_op1, 256U, 1>,
                        params_subtract<test_utils::bfloat16, int, custom_op2, 256U, 1>,
                        params_subtract<int, bool, custom_op1, 256U, 1>,
 
-                       params_subtract<float, int, hipcub::Sum, 37U, 1>,
+                       params_subtract<float, int, test_utils::plus, 37U, 1>,
                        params_subtract<long long, char, custom_op1, 510U, 1>,
                        params_subtract<unsigned int, long long, custom_op2, 162U, 1>,
-                       params_subtract<unsigned char, bool, hipcub::Sum, 255U, 1>,
+                       params_subtract<unsigned char, bool, test_utils::plus, 255U, 1>,
 
                        params_subtract<int, char, custom_op1, 64U, 2>,
                        params_subtract<int, short, custom_op2, 128U, 4>,
-                       params_subtract<unsigned short, unsigned char, hipcub::Sum, 256U, 7>,
+                       params_subtract<unsigned short, unsigned char, test_utils::plus, 256U, 7>,
                        params_subtract<short, short, custom_op1, 512U, 8>,
 
                        params_subtract<double, int, custom_op2, 33U, 5>,
-                       params_subtract<double, unsigned int, hipcub::Sum, 464U, 2>,
+                       params_subtract<double, unsigned int, test_utils::plus, 464U, 2>,
                        params_subtract<unsigned short, int, custom_op1, 100U, 3>,
                        params_subtract<short, bool, custom_op2, 234U, 9>>;
 
@@ -254,7 +253,7 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractLeft)
 
     using output_type = typename TestFixture::params_subtract::output;
 
-    using stored_type = std::conditional_t<std::is_same<output_type, bool>::value, int, output_type>;
+    using stored_type = std::conditional_t<std::is_same_v<output_type, bool>, int, output_type>;
 
     constexpr size_t block_size = TestFixture::params_subtract::block_size;
     constexpr size_t items_per_thread = TestFixture::params_subtract::items_per_thread;
@@ -337,8 +336,8 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractLeft)
         ASSERT_NO_FATAL_FAILURE(
             test_utils::assert_near(output,
                                     expected,
-                                    std::max(test_utils::precision<type>::value,
-                                             test_utils::precision<stored_type>::value)));
+                                    _HIPCUB_STD::max(test_utils::precision<type>::value,
+                                                     test_utils::precision<stored_type>::value)));
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output));
@@ -356,7 +355,7 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractLeftPartialTile)
 
     using output_type = typename TestFixture::params_subtract::output;
 
-    using stored_type = std::conditional_t<std::is_same<output_type, bool>::value, int, output_type>;
+    using stored_type = std::conditional_t<std::is_same_v<output_type, bool>, int, output_type>;
 
     constexpr size_t block_size = TestFixture::params_subtract::block_size;
     constexpr size_t items_per_thread = TestFixture::params_subtract::items_per_thread;
@@ -458,8 +457,8 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractLeftPartialTile)
         ASSERT_NO_FATAL_FAILURE(
             test_utils::assert_near(output,
                                     expected,
-                                    std::max(test_utils::precision<type>::value,
-                                             test_utils::precision<stored_type>::value)));
+                                    _HIPCUB_STD::max(test_utils::precision<type>::value,
+                                                     test_utils::precision<stored_type>::value)));
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_tile_sizes));
@@ -478,7 +477,7 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractRight)
 
     using output_type = typename TestFixture::params_subtract::output;
 
-    using stored_type = std::conditional_t<std::is_same<output_type, bool>::value, int, output_type>;
+    using stored_type = std::conditional_t<std::is_same_v<output_type, bool>, int, output_type>;
 
     constexpr size_t block_size = TestFixture::params_subtract::block_size;
     constexpr size_t items_per_thread = TestFixture::params_subtract::items_per_thread;
@@ -561,8 +560,8 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractRight)
         ASSERT_NO_FATAL_FAILURE(
             test_utils::assert_near(output,
                                     expected,
-                                    std::max(test_utils::precision<type>::value,
-                                             test_utils::precision<stored_type>::value)));
+                                    _HIPCUB_STD::max(test_utils::precision<type>::value,
+                                                     test_utils::precision<stored_type>::value)));
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output));
@@ -580,7 +579,7 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractRightPartialTile)
 
     using output_type = typename TestFixture::params_subtract::output;
 
-    using stored_type = std::conditional_t<std::is_same<output_type, bool>::value, int, output_type>;
+    using stored_type = std::conditional_t<std::is_same_v<output_type, bool>, int, output_type>;
 
     constexpr size_t block_size = TestFixture::params_subtract::block_size;
     constexpr size_t items_per_thread = TestFixture::params_subtract::items_per_thread;
@@ -682,8 +681,8 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractRightPartialTile)
         // clang-format off
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected,
             is_add_op::value
-                ? std::max(test_utils::precision<type>::value, test_utils::precision<stored_type>::value)
-                : std::is_same<type, stored_type>::value 
+                ? _HIPCUB_STD::max(test_utils::precision<type>::value, test_utils::precision<stored_type>::value)
+                : std::is_same_v<type, stored_type> 
                     ? 0 
                     : test_utils::precision<stored_type>::value));
         // clang-format on

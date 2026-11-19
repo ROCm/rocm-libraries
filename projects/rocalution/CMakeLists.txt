@@ -21,7 +21,7 @@
 #
 # ########################################################################
 
-cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 # Consider removing this in the future
 # This should appear before the project command, because it does not use FORCE
@@ -37,8 +37,6 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH})
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
      ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-     ${ROCM_PATH}/lib/cmake/hip
-     ${ROCM_PATH}/hip/cmake
      ${ROCM_PATH}/cmake)
 
 # Root of the rocm-libraries monorepo (for shared infrastructure like CTest categories)
@@ -89,12 +87,14 @@ include(cmake/Dependencies.cmake)
 
 if(BUILD_ADDRESS_SANITIZER)
   set(DEFAULT_AMDGPU_TARGETS
+    amdgcnspirv
     gfx908:xnack+
     gfx90a:xnack+
     gfx942:xnack+
   )
 else()
   set(DEFAULT_AMDGPU_TARGETS
+    amdgcnspirv
     gfx803
     gfx900:xnack-
     gfx906:xnack-
@@ -123,26 +123,73 @@ set(AMDGPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "Target default GPUs
 # Don't force, users should be able to override GPU_TARGETS at the command line if desired
 set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to build for")
 
-include(CheckLanguage)
 include(CMakeDependentOption)
-check_language(HIP)
-cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
-if(USE_HIPCXX)
-  enable_language(HIP)
+if(WIN32)
+  # On Windows, the HIP sources are compiled as C++ by the HIP-capable
+  # CMAKE_CXX_COMPILER and get their device flags from hip::device
+  find_package(hip CONFIG QUIET PATHS ${HIP_DIR} ${ROCM_PATH})
+  set(ROCALUTION_HIP_AVAILABLE ${hip_FOUND})
 else()
-  find_package(HIP MODULE) # hip_add_library is only provided by the find module
-  if(NOT HIP_FOUND)
-    message("-- HIP not found. Compiling WITHOUT HIP support.")
+  # The HIP sources are compiled by CMAKE_HIP_COMPILER, so the host sources
+  # can be built with any C++ compiler. check_language() reports a compiler
+  # that fails as not found, which would silently build without HIP, so it
+  # only runs when no ROCm compiler is found here. CMake rejects hipcc as HIP
+  # compiler, so a hipcc HIPCXX is replaced with the amdclang++ next to it.
+  # check_language() caches a HIP compiler it doesn't find as NOTFOUND and
+  # then skips its search, so search again until a compiler is found.
+  if(DEFINED CMAKE_HIP_COMPILER AND NOT CMAKE_HIP_COMPILER)
+    unset(CMAKE_HIP_COMPILER CACHE)
   endif()
+  if(NOT DEFINED CMAKE_HIP_COMPILER)
+    set(_rocalution_hip_bin_dirs)
+    if(ROCM_PATH)
+      list(APPEND _rocalution_hip_bin_dirs "${ROCM_PATH}/bin")
+    endif()
+    if("$ENV{HIPCXX}" MATCHES "hipcc")
+      message(STATUS "Ignoring HIPCXX=$ENV{HIPCXX}: CMake does not support hipcc as HIP compiler")
+      find_program(_rocalution_hipcc "$ENV{HIPCXX}" NO_CACHE)
+      if(_rocalution_hipcc)
+        get_filename_component(_rocalution_hipcc_dir "${_rocalution_hipcc}" DIRECTORY)
+        list(APPEND _rocalution_hip_bin_dirs "${_rocalution_hipcc_dir}")
+      endif()
+    elseif(NOT "$ENV{HIPCXX}" STREQUAL "")
+      set(CMAKE_HIP_COMPILER "$ENV{HIPCXX}" CACHE FILEPATH "HIP compiler")
+    endif()
+    if(NOT "$ENV{ROCM_PATH}" STREQUAL "")
+      list(APPEND _rocalution_hip_bin_dirs "$ENV{ROCM_PATH}/bin")
+    endif()
+    list(APPEND _rocalution_hip_bin_dirs /opt/rocm/bin)
+    foreach(_dir IN LISTS _rocalution_hip_bin_dirs)
+      if(NOT DEFINED CMAKE_HIP_COMPILER AND EXISTS "${_dir}/amdclang++")
+        set(CMAKE_HIP_COMPILER "${_dir}/amdclang++" CACHE FILEPATH "HIP compiler")
+      endif()
+    endforeach()
+  endif()
+  include(CheckLanguage)
+  check_language(HIP)
+  set(ROCALUTION_HIP_AVAILABLE ${CMAKE_HIP_COMPILER})
 endif()
 
-cmake_dependent_option(SUPPORT_HIP "Compile WITH HIP support" ON "USE_HIPCXX OR HIP_FOUND" OFF)
+cmake_dependent_option(SUPPORT_HIP "Compile WITH HIP support" ON ROCALUTION_HIP_AVAILABLE OFF)
+if(NOT ROCALUTION_HIP_AVAILABLE)
+  message("-- HIP not found. Compiling WITHOUT HIP support.")
+endif()
 
 # HIP related library dependencies
 if(SUPPORT_HIP)
-  if( CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
-    find_package( hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm )
-  endif( )
+  if(NOT WIN32)
+    # Without CMAKE_HIP_ARCHITECTURES, enabling HIP detects the architecture
+    # of the local GPU
+    if(NOT DEFINED CMAKE_HIP_ARCHITECTURES AND GPU_TARGETS)
+      set(CMAKE_HIP_ARCHITECTURES "${GPU_TARGETS}" CACHE STRING "HIP architectures")
+    endif()
+    enable_language(HIP)
+    # CMake doesn't apply CMAKE_CXX_COMPILER_LAUNCHER to HIP sources
+    if(NOT CMAKE_HIP_COMPILER_LAUNCHER AND CMAKE_CXX_COMPILER_LAUNCHER)
+      set(CMAKE_HIP_COMPILER_LAUNCHER "${CMAKE_CXX_COMPILER_LAUNCHER}")
+    endif()
+  endif()
+  find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
   find_package(rocblas REQUIRED)
   find_package(rocsparse REQUIRED)
   find_package(rocprim REQUIRED)
@@ -150,13 +197,50 @@ if(SUPPORT_HIP)
 endif()
 
 if(BUILD_CODE_COVERAGE)
-  add_compile_options(-fprofile-arcs -ftest-coverage)
-  add_link_options(--coverage -lgcov)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "BUILD_CODE_COVERAGE requires a clang compiler, e.g. amdclang++")
+  endif()
+  # The profile runtime is linked into the library with link options, which a
+  # static library does not have, so rocalution-test would write no profile
+  if(NOT BUILD_SHARED_LIBS)
+    message(FATAL_ERROR "BUILD_CODE_COVERAGE requires BUILD_SHARED_LIBS=ON")
+  endif()
+
+  # Locate the host profile runtime so coverage targets can link it directly.
+  # Passing -fprofile-instr-generate to a HIP link instead puts the device
+  # profile runtime into the device image, and the HIP runtime then aborts while
+  # dumping the profile at process exit (AISPARSE-778).
+  #
+  # The profile runtime is not self-contained: its ROCm platform object pulls in
+  # the device-drain and symbol-interception helpers, so those archives have to
+  # be named too. Link them as a group, since they reference each other.
+  set(ROCALUTION_PROFILE_RUNTIME)
+  foreach(_rt clang_rt.profile clang_rt.profile_rocm
+              clang_rt.interception clang_rt.sanitizer_common)
+    foreach(_suffix "-x86_64" "")
+      execute_process(COMMAND ${CMAKE_CXX_COMPILER}
+                              --print-file-name=lib${_rt}${_suffix}.a
+                      OUTPUT_VARIABLE _rt_path OUTPUT_STRIP_TRAILING_WHITESPACE)
+      if(EXISTS "${_rt_path}")
+        list(APPEND ROCALUTION_PROFILE_RUNTIME "${_rt_path}")
+        break()
+      endif()
+    endforeach()
+  endforeach()
+  if(NOT ROCALUTION_PROFILE_RUNTIME)
+    message(FATAL_ERROR
+      "BUILD_CODE_COVERAGE: could not locate the clang profile runtime")
+  endif()
+  message(STATUS "Host profile runtime: ${ROCALUTION_PROFILE_RUNTIME}")
+  set(ROCALUTION_PROFILE_RUNTIME
+      -Wl,--start-group ${ROCALUTION_PROFILE_RUNTIME} -Wl,--end-group
+      ${CMAKE_DL_LIBS} -lpthread -lrt)
 endif()
 
 if(BUILD_ADDRESS_SANITIZER)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -fsanitize=address -shared-libasan")
     add_link_options(-fuse-ld=lld)
 endif()
 
@@ -253,48 +337,111 @@ if(BUILD_CODE_COVERAGE)
   # > make coverage GTEST_FILTER=<>
   # will run:
   #  > make coverage_analysis GTEST_FILTER=<> (analyze tests)
-  #  > make coverage_output (generate html documentation)
+  # and then write the lcov and html reports to coverage-report
   #
+
+  # The unit tests run unfiltered: GTEST_FILTER selects rocalution-test cases,
+  # and make passes it to the environment, where gtest would read it. The
+  # lifecycle tests run through CTest, one process per test. The executables
+  # contain the same library objects as librocalution, and so the same %m
+  # signature, so their profiles get names of their own.
+  set(COVERAGE_UNIT_TEST_COMMANDS)
+  if(TARGET rocalution-unit-test)
+    set(COVERAGE_UNIT_TEST_COMMANDS
+      COMMAND ${CMAKE_COMMAND} -E env --unset=GTEST_FILTER LLVM_PROFILE_FILE="./coverage-report/profraw/rocalution-coverage_unit_%m.profraw" ./clients/staging/rocalution-unit-test
+      COMMAND ${CMAKE_COMMAND} -E env --unset=GTEST_FILTER LLVM_PROFILE_FILE="${CMAKE_BINARY_DIR}/coverage-report/profraw/rocalution-coverage_lifecycle_%m.profraw" ${CMAKE_CTEST_COMMAND} -R "^lifecycle" --output-on-failure
+    )
+  endif()
 
   #
   # Run coverage analysis
   #
   add_custom_target(coverage_analysis
+    COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-    COMMAND ./clients/staging/rocalution-test --gtest_filter=\"\${GTEST_FILTER}\"
+    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocalution-coverage_%m.profraw" ./clients/staging/rocalution-test --gtest_filter=\"\${GTEST_FILTER}\"
+    COMMAND ${CMAKE_COMMAND} -DPROFRAW_DIR=${CMAKE_BINARY_DIR}/coverage-report/profraw -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckCoverageProfile.cmake
+    ${COVERAGE_UNIT_TEST_COMMANDS}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running rocalution coverage analysis"
     )
 
   add_dependencies(coverage_analysis rocalution)
+  if(TARGET rocalution-unit-test)
+    add_dependencies(coverage_analysis rocalution-unit-test rocalution-unit-test-lifecycle)
+  endif()
 
-  #
-  # Prepare coverage output
-  # This little script is generated because the option '--gcov-tool <program name>' of lcov cannot take arguments.
-  #
-  add_custom_target(coverage_output
+  find_program(
+    LLVM_PROFDATA
+    llvm-profdata
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  find_program(
+    LLVM_COV
+    llvm-cov
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  # Each instrumented library writes its own profile (%m), and llvm-cov needs
+  # every one of them as an object to attribute the counters
+  set(COVERAGE_OBJECTS -object $<TARGET_FILE:rocalution>)
+  if(TARGET rocalution_hip)
+    list(APPEND COVERAGE_OBJECTS -object $<TARGET_FILE:rocalution_hip>)
+  endif()
+  # The unit tests link the library objects instead of the library
+  if(TARGET rocalution-unit-test)
+    list(APPEND COVERAGE_OBJECTS
+      -object $<TARGET_FILE:rocalution-unit-test>
+      -object $<TARGET_FILE:rocalution-unit-test-lifecycle>)
+  endif()
+
+  # llvm-cov does not process the LCOV_EXCL_START/LCOV_EXCL_STOP markers. The
+  # exported report is filtered for those, and for sources that are not part of
+  # the library, e.g. ROCm headers or the logging utilities
+  set(COVERAGE_FILTER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/scripts/filter_lcov_exclusions.py")
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+  # Multi-node code can only run in a build with MPI, so it is excluded otherwise
+  set(COVERAGE_FILTER_OPTIONS)
+  if(NOT SUPPORT_MPI)
+    list(APPEND COVERAGE_FILTER_OPTIONS --no-mpi)
+  endif()
+  find_program(GENHTML genhtml)
+
+  if(GENHTML)
+    set(COVERAGE_HTML_COMMAND
+      COMMAND ${GENHTML} ./coverage-report/coverage.info --output-directory ./coverage-report --title rocalution --legend --demangle-cpp --quiet
+    )
+  else()
+    message(STATUS "genhtml not found - using llvm-cov show (exclusion markers not reflected in HTML)")
+    set(COVERAGE_HTML_COMMAND
+      COMMAND ${LLVM_COV} show ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocalution.profdata -format=html -output-dir=coverage-report
+    )
+  endif()
+
+  add_custom_target(
+    coverage
     DEPENDS coverage_analysis
-    COMMAND mkdir -p lcoverage
-    COMMENT "Preparing coverage output directory"
-    )
-
-  #
-  # Generate coverage output.
-  #
-  add_custom_command(TARGET coverage_output
-    COMMAND lcov --directory . --base-directory . --capture -o lcoverage/raw_main_coverage.info
-    COMMAND lcov --remove lcoverage/raw_main_coverage.info "'${CMAKE_SOURCE_DIR}/src/utils/*'" "'${CMAKE_SOURCE_DIR}/src/base/host/host_io.*'" "'${CMAKE_SOURCE_DIR}/clients/*'" "'${CMAKE_SOURCE_DIR}/build/*'" "'/opt/*'" "'/usr/*'" -o lcoverage/main_coverage.info
-    COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage
-    COMMENT "Generating HTML coverage report"
-    )
-
-  add_custom_target(coverage DEPENDS coverage_output COMMENT "Building coverage report")
+    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocalution-coverage_*.profraw -o ./coverage-report/rocalution.profdata
+    COMMAND ${LLVM_COV} report ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocalution.profdata
+    COMMAND ${LLVM_COV} export ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocalution.profdata -format=lcov > ./coverage-report/coverage-raw.info
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_filter_lcov_exclusions.py
+    COMMAND ${Python3_EXECUTABLE} ${COVERAGE_FILTER_SCRIPT} ${COVERAGE_FILTER_OPTIONS} ./coverage-report/coverage-raw.info ./coverage-report/coverage.info
+    ${COVERAGE_HTML_COMMAND}
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Building coverage report"
+  )
 
   #
   # Coverage cleanup
   #
   add_custom_target(coverage_cleanup
-    COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Cleaning up coverage data files"
     )

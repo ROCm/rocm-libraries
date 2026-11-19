@@ -11,6 +11,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <memory>
 #include <numeric>
+#include <type_traits>
 #include <vector>
 
 using namespace hipdnn_data_sdk::utilities;
@@ -467,7 +468,7 @@ TEST(TestTypeErasedIteratorPacked, LinearIndexAccess)
 TEST(TestTypeErasedIteratorRagged, UsesRaggedCompositeIndex)
 {
     auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
-    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
+    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
 
     auto it = tensor.begin();
 
@@ -488,12 +489,35 @@ TEST(TestTypeErasedIteratorRagged, UsesRaggedCompositeIndex)
     EXPECT_EQ(count, 20);
 }
 
+// The iterator walks the live rows `s < lengths[b]` of each batch from its origin: with seq_len
+// bound, the origin is offsets[b] (offsets[b + 1] is not read) and rows past the length are never
+// visited.
+TEST(TestTypeErasedIteratorRagged, IteratesLiveRowsFromEachOrigin)
+{
+    const std::vector<int64_t> dims = {2, 1, 4, 2};
+    const std::vector<int64_t> strides = {8, 2, 2, 1};
+    auto offsets = makeOffsetAux<int32_t>({10, 0, 0}); // origins at rows 5 and 0
+    auto lengths = makeOffsetAux<int32_t>({2, 3});
+    RaggedTensor<float> tensor(dims, strides, K_SEQ_AXIS, offsets, std::nullopt, 1, lengths);
+    tensor.fillWithValue(0.0f);
+
+    const auto* base = static_cast<const float*>(tensor.memory().hostData());
+    std::vector<int64_t> visited;
+    for(auto it = tensor.begin(); it != tensor.end(); ++it)
+    {
+        visited.push_back(static_cast<const float*>(*it) - base);
+    }
+
+    // Batch 0: rows 5, 6 (addresses 10..13); batch 1: rows 0..2 (addresses 0..5).
+    EXPECT_EQ(visited, (std::vector<int64_t>{10, 11, 12, 13, 0, 1, 2, 3, 4, 5}));
+}
+
 TEST(TestTypeErasedIteratorRagged, ShallowUsesRaggedCompositeIndex)
 {
     // Same geometry, over a borrowed buffer.
     auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     std::vector<float> backing(20, 0.0f);
-    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
+    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
 
     auto it = tensor.begin();
 

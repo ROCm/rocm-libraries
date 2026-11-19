@@ -14,6 +14,10 @@ import numpy as np
 import pytest
 from rocke.examples.gfx942 import tf32_numerics as numerics
 from rocke.runtime import comgr, hip_module
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
 
 def _run_mocked_cli(fault: str, output_dir: str) -> None:
@@ -104,21 +108,22 @@ def test_cli_validation_survives_optimization(tmp_path, optimization, fault):
     env["ROCKE_BACKEND"] = "python"
     if optimization == "environment":
         env["PYTHONOPTIMIZE"] = "1"
-    command = [sys.executable]
-    if optimization == "flag":
-        command.append("-O")
-    command += [
+    command = rocke_python_command(
         "-c",
-        (
-            "import runpy, sys; "
-            "runpy.run_path(sys.argv[1])['_run_mocked_cli'](sys.argv[2], sys.argv[3])"
-        ),
+        "import runpy, sys; "
+        "runpy.run_path(sys.argv[1])['_run_mocked_cli'](sys.argv[2], sys.argv[3])",
         str(Path(__file__).resolve()),
         fault,
         str(tmp_path),
-    ]
+        interpreter_flags=("-O",) if optimization == "flag" else (),
+    )
     result = subprocess.run(
-        command, env=env, capture_output=True, text=True, timeout=60, check=False
+        command,
+        env=rocke_subprocess_env(env),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
     report = json.loads((tmp_path / "results.json").read_text())
     if fault == "none":

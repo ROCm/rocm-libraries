@@ -36,10 +36,33 @@ extern "C" {
  * arch_specs.json). All fields point at static storage. The `mma` array is the
  * already-built catalog for that arch (op rows enriched with frag lengths and
  * layout-map pointers at table-build time, mirroring _build_mma_op). */
+/* What the universal GEMM admits on an arch (arch_specs.json "gemm"; Python
+ * GemmCapabilities). Unlike the hardware facts in rocke_arch_target_t, a flag
+ * here records that the GEMM path has been built and verified on the arch. It
+ * lives in this internal row rather than the public descriptor, so it is not
+ * part of the binary ABI. */
+typedef struct rocke_ati_gemm_caps
+{
+    /* WMMA warp-tile atoms {m, n, k} of the WMMA path, sorted; none on MFMA
+     * targets. */
+    const int (*wmma_atoms)[3];
+    int num_wmma_atoms;
+    bool fp8_ab; /* fp8/bf8 A and B with a 16-bit C */
+    bool wmma_cshuffle; /* the cshuffle epilogue on the WMMA path */
+    /* The cshuffle C tile reuses the A/B LDS: budget max(AB, C), not AB + C. */
+    bool cshuffle_lds_aliased;
+} rocke_ati_gemm_caps_t;
+
 typedef struct rocke_ati_arch_row
 {
     const char* gfx;
     const rocke_arch_target_t* target; /* fully-built singleton descriptor */
+    /* The generic target this row takes its facts from (arch_specs.json
+     * "facts_of"), or NULL for a row that holds its own facts. */
+    const char* facts_of;
+    /* Its "gemm" block, or NULL for none. A facts_of row leaves it NULL and
+     * takes its generic's (see rocke_ati_gemm_caps). */
+    const rocke_ati_gemm_caps_t* gemm;
 } rocke_ati_arch_row_t;
 
 /* The registry of all known arches, sorted by gfx token (so rocke_known_arches
@@ -55,6 +78,22 @@ extern const int rocke_ati_arch_registry_len;
  * of rocke_known_arches). Defined in bucket 0 alongside the registry so both stay
  * in sync. */
 extern const char* const rocke_ati_known_arches[];
+
+/* One catalogued LLVM generic processor and its NULL-terminated concrete
+ * members (arch_specs.json "generic_targets"). */
+typedef struct rocke_ati_generic_row
+{
+    const char* generic;
+    const char* const* members;
+} rocke_ati_generic_row_t;
+
+/* Generic target rows, terminated by a row whose .generic == NULL. Defined in
+ * bucket 0. */
+extern const rocke_ati_generic_row_t rocke_ati_generic_targets[];
+
+/* The GEMM capabilities of t, following facts_of like the other facts. Never
+ * NULL: an arch without a "gemm" block (or an unknown one) gets all-off caps. */
+const rocke_ati_gemm_caps_t* rocke_ati_gemm_caps(const rocke_arch_target_t* t);
 
 #ifdef __cplusplus
 } /* extern "C" */

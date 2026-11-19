@@ -65,7 +65,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
         const long_index_t split_k_stride_b,
         bool split_k_offset_hack)
 {
-#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__)
+#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__) || defined(__gfx117__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         const index_t g_idx = __builtin_amdgcn_readfirstlane(blockIdx.z);
@@ -170,7 +170,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
         const long_index_t split_k_stride_b,
         bool split_k_offset_hack)
 {
-#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__)
+#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__) || defined(__gfx117__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         // offset base pointer for each work-group
@@ -1577,7 +1577,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
                 const auto num_k_loop = gemm_arg.AK0 / (K0PerBlock / K1);
                 if constexpr(BlkGemmPipelineVer != BlockGemmPipelineVersion::v1)
                 {
-                    if(num_k_loop <= GridwiseGemm64::BlockwiseGemmPipe::PrefetchStages)
+                    if(num_k_loop <= GridwiseGemm32::BlockwiseGemmPipe::PrefetchStages)
                     {
                         return false;
                     }
@@ -1606,7 +1606,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
         {
             return false;
         }
-        if(is_gfx11_supported() && arg.k_batch_ > 1)
+        if((is_gfx11_supported() || is_gfx117_supported()) && arg.k_batch_ > 1)
         {
             return false;
         }

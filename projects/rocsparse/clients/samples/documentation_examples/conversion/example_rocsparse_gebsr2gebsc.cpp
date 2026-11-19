@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -96,7 +96,7 @@ int main()
         hipMalloc((void**)&dbsr_val_T, sizeof(float) * nnzb_A * row_block_dim * col_block_dim));
 
     rocsparse_handle handle;
-    rocsparse_create_handle(&handle);
+    ROCSPARSE_CHECK(rocsparse_create_handle(&handle));
 
     // Obtain the temporary buffer size
     size_t buffer_size;

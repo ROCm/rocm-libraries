@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "5b80adb3-cf20-5b37-ae11-d53f136f97d8",
+  "name": "flydsl sdpa_aiw: kernel variant fits the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.flydsl_sdpa_aiw.kernel_match"
+}

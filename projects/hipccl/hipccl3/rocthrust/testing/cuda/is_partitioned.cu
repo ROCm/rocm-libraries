@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ void TestIsPartitionedDevice(ExecutionPolicy exec)
 {
   size_t n = 1000;
 
-  n = thrust::max<size_t>(n, 2);
+  n = ::cuda::std::max<size_t>(n, 2);
 
   thrust::device_vector<int> v = unittest::random_integers<int>(n);
 

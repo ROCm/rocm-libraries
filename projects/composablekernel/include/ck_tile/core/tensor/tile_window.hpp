@@ -396,22 +396,28 @@ struct tile_window_with_static_distribution
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
                 if constexpr(Begin <= iAccess && iAccess < End)
                 {
-                    constexpr auto idx_ys_start      = SFC_Ys::get_index(iAccess);
-                    constexpr auto lds_access_offset = [&]() {
+                    constexpr auto idx_ys_start     = SFC_Ys::get_index(iAccess);
+                    const index_t lds_access_offset = [&]() {
                         constexpr auto idx_off_ys = SFC_Ys::get_step_between(number<0>{}, iAccess);
                         constexpr auto adapter_ys_offset = make_tensor_adaptor_coordinate(
                             tile_dstr.get_ps_ys_to_xs_adaptor(),
                             container_concat(array<index_t, Base::NDimP>{0},
                                              to_array<index_t, idx_off_ys.size()>(idx_off_ys)));
-                        constexpr auto coord_ys_offset = make_tensor_coordinate(
-                            typename Base::BottomTensorView{}.get_tensor_descriptor(),
+                        // The ys index step is compile-time, but the descriptor's lengths and
+                        // strides are not necessarily so. A default-constructed BottomTensorView
+                        // has zero strides, which resolves every access past the first to offset
+                        // 0 whenever the descriptor is built from runtime extents; take the
+                        // offset from the real descriptor instead.
+                        const auto coord_ys_offset = make_tensor_coordinate(
+                            this->get_bottom_tensor_view().get_tensor_descriptor(),
                             adapter_ys_offset.get_bottom_index());
                         return coord_ys_offset.get_offset();
                     }();
                     const vector_t vec_value =
-                        this->get_bottom_tensor_view()
-                            .template get_vectorized_elements<vector_t, lds_access_offset>(
-                                bottom_tensor_thread_coord, linear_off, bool_constant<true>{});
+                        this->get_bottom_tensor_view().template get_vectorized_elements<vector_t>(
+                            bottom_tensor_thread_coord,
+                            linear_off + lds_access_offset,
+                            bool_constant<true>{});
                     static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
                         constexpr auto idx_ys = generate_tuple(
                             [&](auto jj) {
@@ -493,26 +499,30 @@ struct tile_window_with_static_distribution
                     // data index [y0, y1, ...]
                     constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
 
-                    // Compute compile-time offset from access 0 to current access
-                    constexpr auto lds_access_offset = [&]() {
+                    // offset from access 0 to current access
+                    const index_t lds_access_offset = [&]() {
                         constexpr auto idx_off_ys = SFC_Ys::get_step_between(number<0>{}, iAccess);
                         constexpr auto adapter_ys_offset = make_tensor_adaptor_coordinate(
                             tile_dstr.get_ps_ys_to_xs_adaptor(),
                             container_concat(array<index_t, Base::NDimP>{0},
                                              to_array<index_t, idx_off_ys.size()>(idx_off_ys)));
-                        constexpr auto coord_ys_offset = make_tensor_coordinate(
-                            typename Base::BottomTensorView{}.get_tensor_descriptor(),
+                        // The ys index step is compile-time, but the descriptor's lengths and
+                        // strides are not necessarily so. A default-constructed BottomTensorView
+                        // has zero strides, which resolves every access past the first to offset
+                        // 0 whenever the descriptor is built from runtime extents; take the
+                        // offset from the real descriptor instead.
+                        const auto coord_ys_offset = make_tensor_coordinate(
+                            this->get_bottom_tensor_view().get_tensor_descriptor(),
                             adapter_ys_offset.get_bottom_index());
                         return coord_ys_offset.get_offset();
                     }();
 
-                    // read from bottom tensor with compile-time offset
+                    // read from bottom tensor
                     const vector_t vec_value =
-                        this->get_bottom_tensor_view()
-                            .template get_vectorized_elements<vector_t, lds_access_offset>(
-                                bottom_tensor_thread_coord,
-                                linear_off,
-                                bool_constant<oob_conditional_check>{});
+                        this->get_bottom_tensor_view().template get_vectorized_elements<vector_t>(
+                            bottom_tensor_thread_coord,
+                            linear_off + lds_access_offset,
+                            bool_constant<oob_conditional_check>{});
                     // write into distributed tensor
                     static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
                         constexpr auto idx_ys = generate_tuple(
@@ -681,15 +691,14 @@ struct tile_window_with_static_distribution
         });
     }
 
-    // TODO: currently async load only implemented in inline asm
+    // Each issue writes LDS at p_data_ + size_per_buf + size_per_wave * warp_id + k *
+    // size_per_issue (k counts the preceding issues that advanced the destination).
     template <typename LdsTileWindow_,
               index_t i_access_unsupport_ = -1,
-              bool oob_conditional_check  = true,
-              bool pre_nop                = false>
+              bool oob_conditional_check  = true>
     CK_TILE_DEVICE void async_load_raw(LdsTileWindow_&& lds_tile,
                                        number<i_access_unsupport_>          = {},
-                                       bool_constant<oob_conditional_check> = {},
-                                       bool_constant<pre_nop>               = {}) const
+                                       bool_constant<oob_conditional_check> = {}) const
     {
         using LdsTileWindow = remove_cvref_t<LdsTileWindow_>;
         // using LdsTensorView = typename LdsTileWindow::BottomTensorView;
@@ -717,10 +726,10 @@ struct tile_window_with_static_distribution
             size_per_buf;
 
         // Use VALU so the compiler can optimize redundant/repeated computations
-        const index_t m0_init_value =
+        const index_t lds_init_offset =
             size_per_buf + size_per_wave * get_warp_id(/*ReturnSgpr=*/bool_constant<false>{});
-        m0_set_with_memory(
-            amd_wave_read_first_lane(m0_init_value)); // This should be wave independent
+        // Byte offset of the current issue's LDS destination; must be wave uniform.
+        index_t lds_offset = amd_wave_read_first_lane(lds_init_offset);
 
         using Traits = typename Base::Traits;
 
@@ -736,17 +745,13 @@ struct tile_window_with_static_distribution
             auto bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
-                constexpr auto iAccess  = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
-                constexpr auto pre_nop_ = [&]() {
-                    if constexpr(pre_nop && iCoord == 0 && iCoordAccess == 0)
-                        return bool_constant<true>{};
-                    else
-                        return bool_constant<false>{};
-                }();
+                constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
 
                 // read from bottom tensor
+                auto* smem_issue =
+                    reinterpret_cast<LdsDataType*>(reinterpret_cast<char*>(smem) + lds_offset);
                 this->get_bottom_tensor_view().template async_get_vectorized_elements_raw<vector_t>(
-                    smem, bottom_tensor_thread_coord, 0, pre_nop_);
+                    smem_issue, bottom_tensor_thread_coord, 0);
 
                 // move thread coordinate
                 if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
@@ -760,7 +765,7 @@ struct tile_window_with_static_distribution
                     Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
                         window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
 
-                    m0_inc_with_memory(size_per_issue);
+                    lds_offset += size_per_issue;
                 }
             });
         });
@@ -974,13 +979,15 @@ struct tile_window_with_static_distribution
     template <typename TDMConfig_,
               typename LdsTileWindow_,
               typename GatherIndexView_,
-              index_t i_access_ = -1,
-              bool full_tile_   = false>
+              index_t i_access_        = -1,
+              bool full_tile_          = false,
+              bool RematerializeStride = false>
     CK_TILE_DEVICE auto tdm_load_to_lds(const TDMConfig_& tdm_config,
                                         LdsTileWindow_&& lds_tile,
                                         const GatherIndexView_& gather_index_view,
-                                        number<i_access_>         = {},
-                                        bool_constant<full_tile_> = {}) const
+                                        number<i_access_>                  = {},
+                                        bool_constant<full_tile_>          = {},
+                                        bool_constant<RematerializeStride> = {}) const
     {
         using LdsTileWindow = remove_cvref_t<LdsTileWindow_>;
         using LdsDataType   = typename LdsTileWindow::DataType;
@@ -998,10 +1005,22 @@ struct tile_window_with_static_distribution
         const auto& lds_tensor_descriptor  = lds_bottom_tensor_view.get_tensor_descriptor();
         auto smem_base_ptr                 = lds_bottom_tensor_view.get_buffer_view().p_data_;
 
-        const auto& glb_tensor_descriptor = this->get_bottom_tensor_view().get_tensor_descriptor();
+        const auto& glb_tensor_descriptor = this->bottom_tensor_view_.get_tensor_descriptor();
 
-        // Use cached computation for global strides
-        auto&& global_strides = get_cached_global_strides();
+        auto global_strides = get_cached_global_strides();
+        if constexpr(RematerializeStride)
+        {
+            static_assert(Base::NDimBottomTensor == 2 && Traits::PackedSize == 1);
+            auto unit       = make_zero_multi_index<2>();
+            unit(I0)        = 1;
+            const index_t s = glb_tensor_descriptor.calculate_offset(unit);
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
+            // Keep the clamped descriptor word local to this TDM issue.
+            asm volatile("s_max_i32 %0, %1, 1" : "=s"(global_strides(I0)) : "s"(s) : "scc");
+#else
+            global_strides(I0) = max(s, index_t{1});
+#endif
+        }
 
         auto process_coord = [&](auto iCoord) {
             auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0]; // without origin
@@ -1182,7 +1201,7 @@ struct tile_window_with_static_distribution
         // Use cached computation for global strides (same as tdm_load_to_lds)
         auto&& global_strides = get_cached_global_strides();
 
-        const auto& glb_tensor_descriptor = this->get_bottom_tensor_view().get_tensor_descriptor();
+        const auto& glb_tensor_descriptor = this->bottom_tensor_view_.get_tensor_descriptor();
 
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0]; // without origin
@@ -1339,7 +1358,7 @@ struct tile_window_with_static_distribution
         using Traits = typename Base::Traits;
 
         auto&& global_strides             = get_cached_global_strides();
-        const auto& glb_tensor_descriptor = this->get_bottom_tensor_view().get_tensor_descriptor();
+        const auto& glb_tensor_descriptor = this->bottom_tensor_view_.get_tensor_descriptor();
 
         // Use window lengths (X-space) instead of ys_to_d lengths (Y-space)
         constexpr auto win_lengths = typename Base::WindowLengths{};
@@ -1426,7 +1445,7 @@ struct tile_window_with_static_distribution
 
         static constexpr index_t num_tensor_dims = BottomTensorView_::get_num_of_dimension();
 
-        const auto& glb_tensor_descriptor = this->get_bottom_tensor_view().get_tensor_descriptor();
+        const auto& glb_tensor_descriptor = this->bottom_tensor_view_.get_tensor_descriptor();
 
         const auto lds_window_origin       = lds_tile.get_window_origin();
         const auto& lds_bottom_tensor_view = lds_tile.get_bottom_tensor_view();
@@ -1979,10 +1998,9 @@ struct tile_window_with_static_distribution
     {
         if(!tensor_cache_initialized_)
         {
-            using Traits = typename Base::Traits;
-            const auto& glb_tensor_descriptor =
-                this->get_bottom_tensor_view().get_tensor_descriptor();
-            cached_global_strides_ = generate_array(
+            using Traits                      = typename Base::Traits;
+            const auto& glb_tensor_descriptor = this->bottom_tensor_view_.get_tensor_descriptor();
+            cached_global_strides_            = generate_array(
                 [&](auto i) {
                     auto unit_vec   = make_zero_multi_index<Base::NDimBottomTensor>();
                     unit_vec(i)     = 1;

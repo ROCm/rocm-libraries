@@ -1,0 +1,6 @@
+outs:
+- path: mac_econ_fwd500.tar.gz
+  remote: sparse-matrices
+  md5: f1b0e56fbb75d1d6862874e3d7d33060
+  size: 12051668
+  hash: md5

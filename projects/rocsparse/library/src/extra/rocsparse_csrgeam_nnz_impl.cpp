@@ -27,6 +27,7 @@
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrgeam.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_primitives.hpp"
 #include "rocsparse_utility.hpp"
 
@@ -67,7 +68,10 @@ namespace rocsparse
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::csrgeam_nnz_multipass_device<CSRGEAM_DIM, 32>),
-                    dim3((m - 1) / (CSRGEAM_DIM / 32) + 1),
+                    dim3(rocsparse::get_grid_size_x(
+                        handle,
+                        (static_cast<int64_t>(m) - 1) / (CSRGEAM_DIM / 32) + 1,
+                        CSRGEAM_DIM)),
                     dim3(CSRGEAM_DIM),
                     0,
                     stream,
@@ -86,7 +90,10 @@ namespace rocsparse
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::csrgeam_nnz_multipass_device<CSRGEAM_DIM, 32>),
-                    dim3((m - 1) / (CSRGEAM_DIM / 32) + 1),
+                    dim3(rocsparse::get_grid_size_x(
+                        handle,
+                        (static_cast<int64_t>(m) - 1) / (CSRGEAM_DIM / 32) + 1,
+                        CSRGEAM_DIM)),
                     dim3(CSRGEAM_DIM),
                     0,
                     stream,
@@ -115,7 +122,10 @@ namespace rocsparse
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::csrgeam_nnz_multipass_device<CSRGEAM_DIM, 64>),
-                    dim3((m - 1) / (CSRGEAM_DIM / 64) + 1),
+                    dim3(rocsparse::get_grid_size_x(
+                        handle,
+                        (static_cast<int64_t>(m) - 1) / (CSRGEAM_DIM / 64) + 1,
+                        CSRGEAM_DIM)),
                     dim3(CSRGEAM_DIM),
                     0,
                     stream,
@@ -134,7 +144,10 @@ namespace rocsparse
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::csrgeam_nnz_multipass_device<CSRGEAM_DIM, 64>),
-                    dim3((m - 1) / (CSRGEAM_DIM / 64) + 1),
+                    dim3(rocsparse::get_grid_size_x(
+                        handle,
+                        (static_cast<int64_t>(m) - 1) / (CSRGEAM_DIM / 64) + 1,
+                        CSRGEAM_DIM)),
                     dim3(CSRGEAM_DIM),
                     0,
                     stream,
@@ -301,7 +314,8 @@ namespace rocsparse
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrgeam_nnz_multipass_device<CSRGEAM_DIM, 32>),
-                dim3((m - 1) / (CSRGEAM_DIM / 32) + 1),
+                dim3(rocsparse::get_grid_size_x(
+                    handle, (static_cast<int64_t>(m) - 1) / (CSRGEAM_DIM / 32) + 1, CSRGEAM_DIM)),
                 dim3(CSRGEAM_DIM),
                 0,
                 stream,
@@ -319,7 +333,8 @@ namespace rocsparse
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrgeam_nnz_multipass_device<CSRGEAM_DIM, 64>),
-                dim3((m - 1) / (CSRGEAM_DIM / 64) + 1),
+                dim3(rocsparse::get_grid_size_x(
+                    handle, (static_cast<int64_t>(m) - 1) / (CSRGEAM_DIM / 64) + 1, CSRGEAM_DIM)),
                 dim3(CSRGEAM_DIM),
                 0,
                 stream,
@@ -372,14 +387,15 @@ namespace rocsparse
 
         // Checks the exclusive scan for integer overflow. If overflow detected, sets the
         // last entry in csr_row_ptr_C to -1
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrgeam_check_row_ptr<256>),
-                                           dim3(((m + 1) - 1) / 256 + 1),
-                                           dim3(256),
-                                           0,
-                                           stream,
-                                           m,
-                                           csr_row_ptr_C,
-                                           descr_C->base);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csrgeam_check_row_ptr<256>),
+            dim3(rocsparse::get_grid_size_x(handle, static_cast<int64_t>(m) / 256 + 1, 256)),
+            dim3(256),
+            0,
+            stream,
+            m,
+            csr_row_ptr_C,
+            descr_C->base);
 
         // Extract the number of non-zero elements of C
         if(handle->pointer_mode == rocsparse_pointer_mode_host || called_from_spgeam)
@@ -509,13 +525,26 @@ namespace rocsparse
         // Quick return if possible
         if(m == 0 || n == 0 || (nnz_A == 0 && nnz_B == 0))
         {
-            if(handle->pointer_mode == rocsparse_pointer_mode_host)
+            // rocsparse_spgeam analysis is documented to run before C exists,
+            // so the nonzero count is stored on the descriptor.
+            if(called_from_spgeam && descr != nullptr)
             {
-                *nnz_C = 0;
+                descr->nnz_C = 0;
             }
-            else
+
+            // nnz_C is null when the caller has not supplied C.
+            if(nnz_C != nullptr)
             {
-                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(nnz_C, 0, sizeof(I), handle->stream));
+                // spgeam passes &mat_C->nnz, a host field, even in device pointer mode.
+                if(handle->pointer_mode == rocsparse_pointer_mode_host || called_from_spgeam)
+                {
+                    *nnz_C = 0;
+                }
+                else
+                {
+                    RETURN_IF_HIP_ERROR(
+                        rocsparse_hipMemsetAsync(nnz_C, 0, sizeof(I), handle->stream));
+                }
             }
 
             if(nnz_A == 0 && nnz_B == 0)
@@ -524,6 +553,13 @@ namespace rocsparse
                 {
                     RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset(
                         handle, m + 1, static_cast<I>(descr_C->base), csr_row_ptr_C));
+                }
+                else if(called_from_spgeam && descr != nullptr && descr->csr_row_ptr_C != nullptr)
+                {
+                    // The descriptor row pointer is base 0. Fill it so a later
+                    // compute or symbolic compute copies a valid empty pattern into C.
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset(
+                        handle, m + 1, int64_t(0), descr->indextype, descr->csr_row_ptr_C));
                 }
             }
             return rocsparse_status_success;

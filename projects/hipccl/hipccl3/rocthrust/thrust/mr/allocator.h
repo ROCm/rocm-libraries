@@ -22,6 +22,16 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#include <thrust/detail/config.h>
+
 #include <thrust/detail/config/memory_resource.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/mr/polymorphic_adaptor.h>
@@ -83,7 +93,7 @@ public:
   template <typename U>
   struct rebind
   {
-    /*! The typedef \p other gives the type of the rebound \p allocator.
+    /*! The alias \p other gives the type of the rebound \p allocator.
      */
     using other = allocator<U, MR>;
   };
@@ -187,7 +197,7 @@ public:
   template <typename U>
   struct rebind
   {
-    /*! The typedef \p other gives the type of the rebound \p stateless_resource_allocator.
+    /*! The alias \p other gives the type of the rebound \p stateless_resource_allocator.
      */
     using other = stateless_resource_allocator<U, Upstream>;
   };

@@ -79,6 +79,7 @@ extern "C" __global__ void LayernormBwdRef(LayernormBwdArgs args)
         tmpmean = ltmp1[0];
         auto pvar = ltmp2[0] / ltmp3[0];
         tmprstd = rsqrtf(pvar + epsilon);
+        __syncthreads();
         workspace[gid] = tmpmean;
         workspace[gid + OUTER_SIZE * STRIDE] = tmprstd;
         if(!mean)

@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -142,7 +149,7 @@ InputIterator find(InputIterator first, InputIterator last, const T& value);
  *
  *  struct greater_than_four
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x > 4;
@@ -151,7 +158,7 @@ InputIterator find(InputIterator first, InputIterator last, const T& value);
  *
  *  struct greater_than_ten
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x > 10;
@@ -204,7 +211,7 @@ THRUST_HOST_DEVICE InputIterator find_if(
  *
  *  struct greater_than_four
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x > 4;
@@ -213,7 +220,7 @@ THRUST_HOST_DEVICE InputIterator find_if(
  *
  *  struct greater_than_ten
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x > 10;
@@ -267,7 +274,7 @@ InputIterator find_if(InputIterator first, InputIterator last, Predicate pred);
  *
  *  struct greater_than_four
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x > 4;
@@ -276,7 +283,7 @@ InputIterator find_if(InputIterator first, InputIterator last, Predicate pred);
  *
  *  struct greater_than_ten
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x > 10;
@@ -329,7 +336,7 @@ THRUST_HOST_DEVICE InputIterator find_if_not(
  *
  *  struct greater_than_four
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x > 4;
@@ -338,7 +345,7 @@ THRUST_HOST_DEVICE InputIterator find_if_not(
  *
  *  struct greater_than_ten
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x > 10;

@@ -145,6 +145,9 @@ add_subdirectory(linkage)
 # Checks that the public headers compile as C (see ROCM-28020)
 add_subdirectory(c_compile)
 
+# Sobol static teardown after hipDeviceReset(). Not a gtest binary.
+add_subdirectory(sobol_exit)
+
 # Add tests for the internal APIs
 add_subdirectory(internal)
 

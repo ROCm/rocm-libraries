@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -121,7 +121,8 @@ auto warp_inclusive_scan_kernel(T* device_input, T* device_output)
 
     using wscan_t = hipcub::WarpScan<T, LogicalWarpSize>;
     __shared__ typename wscan_t::TempStorage storage[warps_no];
-    auto scan_op = hipcub::Sum();
+
+    auto scan_op = test_utils::plus{};
     wscan_t(storage[warp_id]).InclusiveScan(value, value, scan_op);
 
     device_output[index] = value;
@@ -272,7 +273,7 @@ auto warp_inclusive_scan_initial_value_kernel(T* device_input, T* device_output,
 
     using wscan_t = hipcub::WarpScan<T, LogicalWarpSize>;
     __shared__ typename wscan_t::TempStorage storage[warps_no];
-    auto                                     scan_op = hipcub::Sum();
+    auto                                     scan_op = test_utils::plus{};
     wscan_t(storage[warp_id]).InclusiveScan(value, value, initial_value, scan_op);
 
     device_output[index] = value;
@@ -445,7 +446,7 @@ auto warp_inclusive_scan_reduce_kernel(T* device_input,
     __shared__ typename wscan_t::TempStorage storage[warps_no];
     if(hipBlockIdx_x%2 == 0)
     {
-        auto scan_op = hipcub::Sum();
+        auto scan_op = test_utils::plus{};
         wscan_t(storage[warp_id]).InclusiveScan(value, value, scan_op, reduction);
     }
     else
@@ -630,7 +631,8 @@ auto warp_inclusive_scan_reduce_initial_value_kernel(T* device_input,
 
     using wscan_t = hipcub::WarpScan<T, LogicalWarpSize>;
     __shared__ typename wscan_t::TempStorage storage[warps_no];
-    wscan_t(storage[warp_id]).InclusiveScan(value, value, initial_value, hipcub::Sum(), reduction);
+    wscan_t(storage[warp_id])
+        .InclusiveScan(value, value, initial_value, test_utils::plus{}, reduction);
 
     device_output[index] = value;
     if((hipThreadIdx_x % LogicalWarpSize) == 0)
@@ -817,7 +819,8 @@ auto warp_exclusive_scan_kernel(T* device_input, T* device_output, T init)
 
     using wscan_t = hipcub::WarpScan<T, LogicalWarpSize>;
     __shared__ typename wscan_t::TempStorage storage[warps_no];
-    auto scan_op = hipcub::Sum();
+
+    auto scan_op = test_utils::plus{};
     wscan_t(storage[warp_id]).ExclusiveScan(value, value, init, scan_op);
 
     device_output[index] = value;
@@ -975,7 +978,8 @@ auto warp_exclusive_scan_reduce_kernel(T* device_input,
 
     using wscan_t = hipcub::WarpScan<T, LogicalWarpSize>;
     __shared__ typename wscan_t::TempStorage storage[warps_no];
-    auto scan_op = hipcub::Sum();
+
+    auto scan_op = test_utils::plus{};
     wscan_t(storage[warp_id]).ExclusiveScan(value, value, init, scan_op, reduction);
 
     device_output[index] = value;
@@ -1169,7 +1173,8 @@ auto warp_scan_kernel(T* device_input,
 
     using wscan_t = hipcub::WarpScan<T, LogicalWarpSize>;
     __shared__ typename wscan_t::TempStorage storage[warps_no];
-    auto scan_op = hipcub::Sum();
+
+    auto scan_op = test_utils::plus{};
     wscan_t(storage[warp_id]).Scan(input, inclusive_output, exclusive_output, init, scan_op);
 
     device_inclusive_output[index] = inclusive_output;

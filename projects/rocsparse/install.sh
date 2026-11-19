@@ -35,7 +35,7 @@ function display_help()
   echo "    [-h|--help] prints this help message"
 #  echo "    [--prefix] Specify an alternate CMAKE_INSTALL_PREFIX for cmake"
   echo "    [-i|--install] install after build"
-  echo "    [-d|--dependencies] install build dependencies"
+  echo "    [-d|--dependencies] install build dependencies from the distro package manager (GoogleTest is not installed)"
   echo "    [-a|--architecture] Set GPU architecture target(s), e.g., all, gfx000, gfx900, gfx906:xnack-;gfx908:xnack-"
   echo "    [-c|--clients] build library clients too (combines with -i & -d)"
   echo "    [-o|--clients-only] build clients only"
@@ -466,8 +466,8 @@ fi
 # If matrices_dir_install has been set up then install matrices dir and exit.
 #
 if ! [[ "${matrices_dir_install}" == "" ]];then
-    cmake -DCMAKE_CXX_COMPILER=${cxx_compiler}  -DCMAKE_C_COMPILER=${cc_compiler} -DPROJECT_BINARY_DIR=${matrices_dir_install} -DCMAKE_MATRICES_DIR=${matrices_dir_install} -DROCM_PATH=${rocm_path} -DCMAKE_INSTALL_LIBDIR=lib -P ./cmake/ClientMatrices.cmake
-    exit 0
+    cmake -DCMAKE_CXX_COMPILER=${cxx_compiler}  -DCMAKE_C_COMPILER=${cc_compiler} "-DPROJECT_BINARY_DIR=${matrices_dir_install}" "-DCMAKE_MATRICES_DIR=${matrices_dir_install}" -DALLOW_FETCH_DEPS=ON -DROCM_PATH=${rocm_path} -DCMAKE_INSTALL_LIBDIR=lib -P ./cmake/ClientMatrices.cmake
+    exit $?
 fi
 
 #
@@ -483,7 +483,8 @@ if ! [[ "${matrices_dir}" == "" ]];then
     # Let's 'reinstall' to the specified location to check if all good
     # Will be fast if everything already exists as expected.
     # This is to prevent any empty directory.
-    cmake -DCMAKE_CXX_COMPILER=${cxx_compiler}  -DCMAKE_C_COMPILER=${cc_compiler}  -DPROJECT_BINARY_DIR=${matrices_dir} -DCMAKE_MATRICES_DIR=${matrices_dir} -DROCM_PATH=${rocm_path} -DCMAKE_INSTALL_LIBDIR=lib -P ./cmake/ClientMatrices.cmake
+    cmake -DCMAKE_CXX_COMPILER=${cxx_compiler}  -DCMAKE_C_COMPILER=${cc_compiler}  "-DPROJECT_BINARY_DIR=${matrices_dir}" "-DCMAKE_MATRICES_DIR=${matrices_dir}" -DALLOW_FETCH_DEPS=ON -DROCM_PATH=${rocm_path} -DCMAKE_INSTALL_LIBDIR=lib -P ./cmake/ClientMatrices.cmake
+    check_exit_code "$?"
 fi
 
 build_dir=./build
@@ -530,15 +531,6 @@ fi
 if [[ "${install_dependencies}" == true ]]; then
 
   install_packages
-
-  # The following builds googletest from source, installs into cmake default /usr/local
-  pushd .
-    printf "\033[32mBuilding \033[33mgoogletest\033[32m from source; installing into \033[33m/usr/local\033[0m\n"
-    mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
-    ${cmake_executable} ../../deps
-    make -j$(nproc)
-    elevate_if_not_root make install_deps
-  popd
 fi
 
 if [[ "${build_relocatable}" == true ]]; then

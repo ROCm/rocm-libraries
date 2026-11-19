@@ -28,6 +28,7 @@
 extern "C" {
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \details
 *  \p hipsparseSpMV_bufferSize computes the user-allocated buffer size required when computing the
@@ -46,13 +47,13 @@ extern "C" {
 *  @param[in]
 *  opA                 matrix operation type.
 *  @param[in]
-*  alpha               scalar \f$\alpha\f$.
+*  alpha               scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA                sparse matrix descriptor.
 *  @param[in]
 *  vecX                dense vector descriptor.
 *  @param[in]
-*  beta                scalar \f$\beta\f$.
+*  beta                scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  vecY                dense vector descriptor.
 *  @param[in]
@@ -61,6 +62,7 @@ extern "C" {
 *  alg                 SpMV algorithm for the SpMV computation.
 *  @param[out]
 *  pBufferSizeInBytes  number of bytes of the temporary storage buffer.
+*                      \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
@@ -69,7 +71,6 @@ extern "C" {
 *          or vector dimensions are incompatible.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is currently not supported.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
                                            hipsparseOperation_t        opA,
@@ -95,6 +96,7 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
                                            size_t*                     pBufferSizeInBytes);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \details
 *  \p hipsparseSpMV_preprocess performs analysis on the sparse matrix \f$op(A)\f$ when computing the
@@ -114,13 +116,13 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
 *  @param[in]
 *  opA             matrix operation type.
 *  @param[in]
-*  alpha           scalar \f$\alpha\f$.
+*  alpha           scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA            matrix descriptor.
 *  @param[in]
 *  vecX            vector descriptor.
 *  @param[in]
-*  beta            scalar \f$\beta\f$.
+*  beta            scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  vecY            vector descriptor.
 *  @param[in]
@@ -136,7 +138,6 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
 *               currently not supported.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
                                            hipsparseOperation_t        opA,
@@ -162,6 +163,7 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
                                            void*                       externalBuffer);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \brief Compute the sparse matrix multiplication with a dense vector.
 *
@@ -195,7 +197,6 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  be performed.
 *
 *  <table>
-*  <caption id="spmv_csr_algorithms">CSR/CSC Algorithms</caption>
 *  <tr><th>CSR/CSC Algorithms
 *  <tr><td>HIPSPARSE_SPMV_CSR_ALG1</td>
 *  <tr><td>HIPSPARSE_SPMV_CSR_ALG2</td>
@@ -203,20 +204,17 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  </table>
 *
 *  <table>
-*  <caption id="spmv_coo_algorithms">COO Algorithms</caption>
 *  <tr><th>COO Algorithms
 *  <tr><td>HIPSPARSE_SPMV_COO_ALG1</td>
 *  <tr><td>HIPSPARSE_SPMV_COO_ALG2</td>
 *  </table>
 *
 *  <table>
-*  <caption id="spmv_bsr_algorithms">BSR Algorithms</caption>
 *  <tr><th>BSR Algorithms
 *  <tr><td>HIPSPARSE_SPMV_BSR_ALG1</td>
 *  </table>
 *
 *  <table>
-*  <caption id="spmv_sell_algorithms">SELL Algorithms</caption>
 *  <tr><th>SELL Algorithms
 *  <tr><td>HIPSPARSE_SPMV_SELL_ALG1</td>
 *  </table>
@@ -228,7 +226,6 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="spmv_uniform">Uniform Precisions</caption>
 *  <tr><th>A / X / Y / compute_type
 *  <tr><td>HIP_R_32F
 *  <tr><td>HIP_R_64F
@@ -238,7 +235,6 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *
 *  \par Mixed Precisions:
 *  <table>
-*  <caption id="spmv_mixed">Mixed Precisions</caption>
 *  <tr><th>A / X      <th>Y          <th>compute_type
 *  <tr><td>HIP_R_8I   <td>HIP_R_32I  <td>HIP_R_32I
 *  <tr><td>HIP_R_8I   <td>HIP_R_32F  <td>HIP_R_32F
@@ -250,7 +246,6 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *
 *  \par Mixed-regular Real Precisions
 *  <table>
-*  <caption id="spmv_mixed_regular_real">Mixed-regular real precisions</caption>
 *  <tr><th>A         <th>X / Y / compute_type
 *  <tr><td>HIP_R_32F <td>HIP_R_64F
 *  <tr><td>HIP_C_32F <td>HIP_C_64F
@@ -258,7 +253,6 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *
 *  \par Mixed-regular Complex Precisions
 *  <table>
-*  <caption id="spmv_mixed_regular_complex">Mixed-regular Complex precisions</caption>
 *  <tr><th>A         <th>X / Y / compute_type
 *  <tr><td>HIP_R_32F <td>HIP_C_32F
 *  <tr><td>HIP_R_64F <td>HIP_C_64F
@@ -288,13 +282,13 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  @param[in]
 *  opA             matrix operation type.
 *  @param[in]
-*  alpha           scalar \f$\alpha\f$.
+*  alpha           scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA            matrix descriptor.
 *  @param[in]
 *  vecX            vector descriptor.
 *  @param[in]
-*  beta            scalar \f$\beta\f$.
+*  beta            scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  vecY            vector descriptor.
 *  @param[in]
@@ -310,7 +304,6 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
 *               currently not supported.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
                                 hipsparseOperation_t        opA,

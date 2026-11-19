@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,6 @@
 #include "benchmark_utils.hpp"
 
 #include <hipcub/device/device_histogram.hpp>
-#include <hipcub/iterator/transform_input_iterator.hpp>
 
 template<class T>
 std::vector<T>
@@ -408,7 +407,7 @@ struct num_limits
 {
     static constexpr T max()
     {
-        return std::numeric_limits<T>::max();
+        return _HIPCUB_STD::numeric_limits<T>::max();
     };
 };
 

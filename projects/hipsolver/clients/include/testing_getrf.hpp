@@ -154,10 +154,10 @@ void testing_getrf_bad_arg()
         CHECK_HIP_ERROR(dIpiv.memcheck());
         CHECK_HIP_ERROR(dInfo.memcheck());
 
-        int size_dW, size_hW;
+        SIZE size_dW, size_hW;
         CHECK_ROCBLAS_ERROR(hipsolver_getrf_bufferSize(
             API, handle, params, m, n, dA.data(), lda, &size_dW, &size_hW, bc));
-        int                            size_dW_elems = (size_dW + sizeof(T) - 1) / sizeof(T);
+        SIZE                           size_dW_elems = (size_dW + sizeof(T) - 1) / sizeof(T);
         host_strided_batch_vector<T>   hWork(size_hW, 1, size_hW, 1);
         device_strided_batch_vector<T> dWork(size_dW_elems, 1, size_dW_elems, 1);
         if(size_dW)

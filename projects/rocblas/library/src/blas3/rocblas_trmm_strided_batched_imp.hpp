@@ -65,6 +65,8 @@ namespace
         if(!handle)
             return rocblas_status_invalid_handle;
 
+        rocblas_internal_api_scope api_scope(handle, rocblas_trmm_strided_batched_name<T>);
+
         RETURN_ZERO_DEVICE_MEMORY_SIZE_IF_QUERIED(handle);
 
         T        alpha_h, beta_h;

@@ -1,0 +1,300 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+"""R6 -- gfx1250 rich GEMM (SB / XF32-emulation) characterization (CPU-only).
+
+Exercises gfx1250-specific codegen arms in ``KernelWriterAssembly.py`` that
+are only reachable on WMMA_V3 architectures (gfx1250).  The key gate is
+``is_wmma_v3 = asmCaps["HasWMMA_V3"]`` combined with
+``kernel["UseF32XEmulation"]``, which is set by Solution.py when
+``F32XdlMathOp=X`` (XFloat32, enum=10) is requested on a WMMA_V3 arch.
+
+Target missing ranges in tensilelite/KernelWriterAssembly.py:
+  8646-8651  is_wmma_v3+UseF32XEmulation branch (vgprPerSet0Group=1)
+  8669-8674  is_wmma_v3+UseF32XEmulation multiplyBy for group==0
+  8680-8687  is_wmma_v3+UseF32XEmulation kOffsetA for group>0
+  9403-9439  UseF32XEmulation 3-MFMA chain (src0_h*src1_h, cross terms)
+  7964-7966  UseScaleAlphaVec sgpr->vgpr address (loadScaleAlphaVec arm)
+  8080-8083  UseScaleAlphaVec post-loop address setup
+ 13340-13348 UseScaleAlphaVec vgprPool checkOut (allocTmpSgpr block)
+ 13358-13365 shiftSrd gfx125x block (version[:2]==(12,5))
+ 14760-14810 UseScaleAlphaVec bias-D epilogue
+ 14871-14960 BiasDataTypeList multi-type loop in writeBiasToGlobal
+
+Config: DataType=S (float32), F32XdlMathOp=X (XFloat32 emulation), NT layout,
+WavefrontSize=32, TDMInst=3, UseScaleAB=Scalar, UseScaleAlphaVec=1,
+BiasDataTypeList=[s,b], Activation=True (hipblaslt_all), BiasSrc=D.
+Fork on StaggerU x ScheduleIterAlg x WorkGroupMapping (4 permutations;
+dedup yields 2 unique kernels, both with err==0).
+
+Pure-assert test; no syrupy snapshot required.
+"""
+
+import os
+import re
+
+import pytest
+import yaml
+
+from config_harness import emit_kernels_from_config, solutions_from_config
+
+pytestmark = pytest.mark.unit
+
+_ARCH = "gfx1250"
+
+_CONFIG = os.path.join(
+    os.path.dirname(__file__),
+    "data",
+    "test_data",
+    "_designed",
+    "gfx1250",
+    "rich_gemm_sb.yaml",
+)
+
+
+def test_r6_rich_gfx1250_emits_assembly():
+    """F32->XF32 rich GEMM emits real gfx1250 AMDGCN assembly with err==0."""
+    results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
+    assert len(results) >= 1, (
+        f"Expected >=1 kernel from rich_gemm_sb.yaml, got {len(results)}. "
+        "Check that DataType=S + F32XdlMathOp=X + gfx1250 WMMA_V3 is valid."
+    )
+    for base, src, err in results:
+        assert err == 0, f"Kernel {base!r} emitted with err={err}, expected 0"
+        assert src and len(src.splitlines()) > 100, (
+            f"Kernel {base!r} source suspiciously short ({len(src.splitlines())} lines)"
+        )
+        assert ".amdgcn_target" in src, f"Kernel {base!r} missing .amdgcn_target"
+        assert "gfx1250" in src, f"Kernel {base!r} missing gfx1250 arch marker"
+        assert base.startswith("Cijk_"), f"Unexpected basename: {base!r}"
+
+
+def test_r6_rich_gfx1250_xf32_emulation_present():
+    """F32->XF32 kernels contain the UseF32XEmulation 3-MFMA chain marker.
+
+    KernelWriterAssembly.py lines 9403-9418 emit ``src0_h`` / ``src1_h``
+    labels when ``UseF32XEmulation=True``, splitting the f32 input into
+    high-half (``src0_h``) and low-half operands for the 3-MFMA expansion.
+    This string is canonical across gfx1250 XF32 emulation kernels.
+    """
+    results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
+    assert len(results) >= 1, "Need at least one kernel to check XF32 markers"
+    found_xf32 = False
+    for base, src, err in results:
+        if err != 0 or not src:
+            continue
+        # KWA 9408-9418: UseF32XEmulation splits input into src0_h/src1_h halves
+        if "src0_h" in src or "src1_h" in src:
+            found_xf32 = True
+        # Verify the gfx1250 WMMA_V3 target is present
+        assert "gfx1250" in src, f"Kernel {base!r}: missing gfx1250 target string"
+    assert found_xf32, (
+        "Expected at least one kernel containing 'src0_h' (UseF32XEmulation "
+        "3-MFMA chain, KWA 9408-9418) — check F32XdlMathOp=X on gfx1250"
+    )
+
+
+def test_r6_rich_gfx1250_bias_and_scale_present():
+    """F32->XF32 kernels contain bias and scale alpha-vec address setup.
+
+    KernelWriterAssembly.py lines 13340-13348 and 14760-14810 emit moves
+    and checks for UseScaleAlphaVec. The comment ``addrScaleAlphaVec``
+    appears in the allocation block (13341) and the post-loop setup (8080).
+    The bias write path (14871+) uses ``BiasDataTypeList`` iteration.
+    """
+    results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
+    assert len(results) >= 1, "Need at least one kernel to check bias/scale"
+    found_scale = False
+    found_bias = False
+    for base, src, err in results:
+        if err != 0 or not src:
+            continue
+        src_lower = src.lower()
+        if "scalealphavec" in src_lower or "addressscale" in src_lower:
+            found_scale = True
+        if "bias" in src_lower:
+            found_bias = True
+    assert found_scale, (
+        "Expected at least one kernel to reference ScaleAlphaVec "
+        "(KWA 13340-13348, 7964, 8080) — check UseScaleAlphaVec=1"
+    )
+    assert found_bias, (
+        "Expected at least one kernel to reference bias "
+        "(KWA 14760-14960) — check UseBias=1, BiasSrc=D"
+    )
+
+
+@pytest.fixture
+def scalar_config(tmp_path):
+    with open(_CONFIG) as stream:
+        config = yaml.safe_load(stream)
+    config["BenchmarkProblems"][0][0]["UseScaleAlphaVec"] = 5
+    path = tmp_path / "rich_scalar_gemm.yaml"
+    path.write_text(yaml.safe_dump(config))
+    return path
+
+
+def test_r6_rich_gfx1250_device_scalar_alpha_dispatch_present(scalar_config):
+    """Device scalar mode schedules its value load before the common Alpha consumer."""
+    results = emit_kernels_from_config(scalar_config, limit=8, arch=_ARCH)
+    assert len(results) >= 1, "Need at least one kernel to check scalar-alpha dispatch"
+    for base, src, err in results:
+        assert err == 0, f"Kernel {base!r} emitted with err={err}, expected 0"
+        assert "_SB_" in base, f"Kernel {base!r} is not the expected strided-batched path"
+        assert "device scalar alpha bit" in src
+        assert "save scalar alpha in ArgType bit 9" in src
+        assert "load device scalar alpha pointer" in src
+        assert "replace inline alpha with ScaleAlphaVec[0]" in src
+        assert "device scalar uses ScaleAlphaVec identity" in src
+        assert "device scalar skips vector load" not in src
+        assert "device scalar skips ScaleAlphaVec LDS store" not in src
+        assert "device scalar skips ScaleAlphaVec LDS load" not in src
+        assert "device scalar skips vector alpha preparation" not in src
+        assert "label_DeviceScalarAlphaPreparationDone" not in src
+
+        identity_select = src.index("device scalar uses ScaleAlphaVec identity")
+        vector_load = src.index("Load ScaleAlphaVec", identity_select)
+        identity_mask = src.index("1. mul 1 if 0", vector_load)
+        lds_store = src.index("store scaleAlpha", identity_mask)
+        lds_load = src.index("load scaleAlpha", lds_store)
+        factor_multiply = src.index("*= ScaleAlphaVec", lds_load)
+        assert identity_select < vector_load < identity_mask < lds_store
+        assert lds_store < lds_load < factor_multiply
+
+        # The runtime selector changes only the staged factor. ScaleAlphaVec
+        # multiplication remains in the legacy per-element/store schedule,
+        # rather than being hoisted into one branch-guarded batch.
+        interleaved = False
+        gw_blocks = re.split(r"(?=^label_GW_)", src, flags=re.MULTILINE)
+        for block in gw_blocks:
+            factor_positions = [
+                match.start()
+                for match in re.finditer(r"\*= ScaleAlphaVec", block)
+            ]
+            store_positions = [
+                match.start() for match in re.finditer(r"store D", block)
+            ]
+            if (
+                len(factor_positions) > 1
+                and store_positions
+                and factor_positions[0] < store_positions[0] < factor_positions[-1]
+            ):
+                interleaved = True
+                break
+        assert interleaved, (
+            f"Kernel {base!r} must keep ScaleAlphaVec multiplies interleaved "
+            "with the existing per-element output schedule"
+        )
+
+        alpha_load_marker = "replace inline alpha with ScaleAlphaVec[0]"
+        late_wait_marker = "wait for scheduled device scalar alpha"
+        alpha_consumer_marker = "Short circuit condition if Alpha == 0"
+        alpha_loads = [
+            match.start() for match in re.finditer(re.escape(alpha_load_marker), src)
+        ]
+        late_waits = [
+            match.start() for match in re.finditer(re.escape(late_wait_marker), src)
+        ]
+
+        assert alpha_loads, f"Kernel {base!r} has no device scalar-alpha value load"
+        assert len(late_waits) == 1, (
+            f"Kernel {base!r} must share exactly one scheduled scalar-alpha wait, "
+            f"found {len(late_waits)}"
+        )
+        late_wait = late_waits[0]
+        assert all(alpha_load < late_wait for alpha_load in alpha_loads), (
+            f"Kernel {base!r} must issue every device scalar-alpha value load "
+            "before the shared scheduled wait"
+        )
+
+        # Both routed/non-routed prologue clones issue the value load before
+        # reaching a common late wait. Ensure the latest clone still leaves
+        # real, alpha-independent setup work in that latency-hiding window.
+        for alpha_load in alpha_loads:
+            load_block_end = src.index("label_DeviceScalarAlphaDone", alpha_load)
+            assert "wait for device scalar alpha" not in src[
+                alpha_load + len(alpha_load_marker):load_block_end
+            ], f"Kernel {base!r} still waits immediately after a device scalar-alpha load"
+
+            scheduling_window = src[alpha_load + len(alpha_load_marker):late_wait]
+            independent_instructions = [
+                line.strip()
+                for line in scheduling_window.splitlines()
+                if re.match(r"^(?:s|v)_[a-z0-9_]+\b", line.strip())
+                and not line.strip().startswith(
+                    ("s_wait_", "s_bitcmp1_", "s_cbranch_")
+                )
+                and "sgprAlpha" not in line
+            ]
+            assert independent_instructions, (
+                f"Kernel {base!r} has no independent prologue instruction between "
+                "a device scalar-alpha load and its scheduled wait"
+            )
+
+        alpha_consumer = src.index(alpha_consumer_marker)
+        assert late_wait < alpha_consumer, (
+            f"Kernel {base!r} must complete the scheduled scalar-alpha load "
+            "before the common Alpha==0 shortcut"
+        )
+
+        # The same generated kernel also handles vector alpha. Its late wait
+        # must remain behind the runtime ArgType[9] guard so vector mode does
+        # not drain unrelated scalar-memory traffic.
+        late_wait_window = src[max(alpha_loads):alpha_consumer]
+        assert re.search(
+            r"s_bitcmp1_b32[^\n]*, 9[^\n]*device scalar alpha\?\n"
+            r"s_cbranch_scc0[^\n]*label_DeviceScalarAlphaReady[^\n]*"
+            r"vector alpha has no scheduled scalar load\n"
+            r"s_wait_kmcnt 0[^\n]*wait for scheduled device scalar alpha",
+            late_wait_window,
+        ), f"Kernel {base!r} is missing the vector-mode guard around the late wait"
+
+        if "skip buffer deref is size of summation is 0" in src:
+            assert all(
+                alpha_load < src.index("skip buffer deref is size of summation is 0")
+                for alpha_load in alpha_loads
+            )
+
+
+def test_r6_rich_gfx1250_conversion_uses_scalar_alpha_element_zero(scalar_config):
+    """Post-GSU conversion replaces inline alpha with the device scalar."""
+    from tensilelite.KernelHelperNaming import initConversionKernelObjects
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
+    import codegen_harness as _ch
+
+    sols = solutions_from_config(scalar_config, arch=_ARCH, limit_solutions=1)
+    assert sols, "Need one solution to generate the conversion helper"
+    kernels = generateKernelObjectsFromSolutions(sols)
+    assert kernels, "Need one generated kernel to derive production helper state"
+    _assembler, iim = _ch._toolchain()
+    conversions = initConversionKernelObjects(kernels[0], iim)
+    assert conversions, "Need at least one conversion helper"
+    conversion = conversions[0]
+    err, src = conversion.getSourceFileString()
+    header = conversion.getHeaderFileString()
+
+    assert err == 0
+    assert kernels[0]["ProblemType"]["UseScaleAlphaVec"] == 5
+    assert "_DSA_PostGSU" in conversion.getKernelName()
+    assert "_GG_" in header
+    assert "_GG_" in src
+    assert "unsigned int deviceScalarAlpha;" in header
+    assert "if(arg.deviceScalarAlpha){" in src
+    assert "arg.alpha = arg.ScaleAlphaVec[0];" in src
+    assert "if(arg.ScaleAlphaVec != nullptr && !arg.deviceScalarAlpha){" in src
+    assert "ScaleAlphaVec[arg.deviceScalarAlpha ? 0 :" not in src
+
+    kernels[0]["ProblemType"]["UseScaleAlphaVec"] = 1
+    legacy_conversions = initConversionKernelObjects(kernels[0], iim)
+    legacy = legacy_conversions[0]
+    legacy_err, legacy_src = legacy.getSourceFileString()
+    legacy_header = legacy.getHeaderFileString()
+
+    assert legacy_err == 0
+    assert "_DSA_PostGSU" not in legacy.getKernelName()
+    assert "_GG_" in legacy_header
+    assert "_GG_" in legacy_src
+    assert "unsigned int deviceScalarAlpha;" not in legacy_header
+    assert "arg.deviceScalarAlpha" not in legacy_src
+    assert "arg.ScaleAlphaVec[" in legacy_src

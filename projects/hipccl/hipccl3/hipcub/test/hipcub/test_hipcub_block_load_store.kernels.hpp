@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -148,15 +148,15 @@ __launch_bounds__(BlockSize) __global__
     };
 
     // The input value type
-    using InputT = typename std::iterator_traits<InputIteratorT>::value_type;
+    using InputT = hipcub::detail::it_value_t<InputIteratorT>;
 
     // The output value type
     using OutputT = typename std::conditional<
-        (std::is_same<typename std::iterator_traits<OutputIteratorT>::value_type,
-                      void>::value), // OutputT =  (if output iterator's value type is void) ?
-        typename std::iterator_traits<InputIteratorT>::value_type, // ... then the input iterator's
+        (std::is_same_v<hipcub::detail::it_value_t<OutputIteratorT>,
+                        void>), // OutputT =  (if output iterator's value type is void) ?
+        hipcub::detail::it_value_t<InputIteratorT>, // ... then the input iterator's
         // value type,
-        typename std::iterator_traits<OutputIteratorT>::value_type>::
+        hipcub::detail::it_value_t<OutputIteratorT>>::
         type; // ... else the output iterator's value type
 
     // Threadblock load/store abstraction types
@@ -191,7 +191,7 @@ __launch_bounds__(BlockSize) __global__
     __syncthreads();
 
     // reset data
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(unsigned int item = 0; item < ItemsPerThread; ++item)
         data[item] = OutputT();
 

@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <gtest/gtest.h>
 
 #include "core/Context.hpp"
@@ -13,12 +14,16 @@
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
 
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/MockNode.hpp>
 #include <optional>
+#include <ostream>
+#include <string>
+#include <vector>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
@@ -86,6 +91,7 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseForThre
 {
     const MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(3));
+    EXPECT_CALL(mockGraph, getGraph()).Times(::testing::AnyNumber());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, mockGraph));
 }
@@ -97,6 +103,55 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsTrueForValid
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, IdentityIsApplicableAndBuildsPlan)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+        true, false, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+    setupMockCompileChain();
+    Context ctx;
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_TRUE(ctx.hasValidPlan());
+}
+
+TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, BackwardReluIsNotApplicable)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+        true, false, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    Context ctx;
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, LeakyReluIsNotApplicable)
+{
+    for(const auto slope : {0.0f, 0.1f})
+    {
+        SCOPED_TRACE(slope);
+        auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+            true,
+            false,
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+            {588, 196, 14, 1},
+            {1, 3, 14, 14},
+            slope);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+
+        EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+        Context ctx;
+        EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+                     hipdnn_plugin_sdk::HipdnnPluginException);
+    }
 }
 
 TEST_F(TestBatchnormFwdTrainingActivPlanBuilder,
@@ -679,15 +734,16 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, SingleNodeVirtualInputTensorInv
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
-TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, SingleNodeVirtualMeanTensorInvalid)
+TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, SingleNodeBothSavedStatisticsVirtualIsAccepted)
 {
+    // Both saved statistics virtual and no running statistics: the saved pair is not requested.
     const flatbuffers::FlatBufferBuilder builder
-        = createInvalidBatchnormFwdTrainingGraph(false, true);
+        = createInvalidBatchnormFwdTrainingGraph(false, true, true);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
 TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, SingleNodeVirtualInvVarTensorInvalid)
@@ -903,6 +959,155 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, TwoNodeVirtualActOutTensorInval
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// ============================================================================
+// Fused training + activation: running and saved statistics must be complete
+// ============================================================================
+
+namespace
+{
+using hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributesT;
+
+struct FusedStatsMutation
+{
+    std::string name;
+    std::function<void(BatchnormAttributesT&)> mutate;
+};
+
+std::ostream& operator<<(std::ostream& os, const FusedStatsMutation& value)
+{
+    return os << value.name;
+}
+
+flatbuffers::FlatBufferBuilder
+    mutatedFusedTrainingGraph(const std::function<void(BatchnormAttributesT&)>& mutate)
+{
+    auto base = createValidBatchnormFwdTrainingActivGraph(true, true);
+    return hipdnn_test_sdk::utilities::mutateGraph(
+        base, [&mutate](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+            mutate(*graph.nodes.at(0)->attributes.AsBatchnormAttributes());
+        });
+}
+
+std::vector<FusedStatsMutation> fusedStatsMutations()
+{
+    return {
+        {"MissingPrevRunningMean", [](auto& a) { a.prev_running_mean_tensor_uid.reset(); }},
+        {"MissingPrevRunningVariance", [](auto& a) { a.prev_running_variance_tensor_uid.reset(); }},
+        {"MissingMomentum", [](auto& a) { a.momentum_tensor_uid.reset(); }},
+        {"MissingNextRunningMean", [](auto& a) { a.next_running_mean_tensor_uid.reset(); }},
+        {"MissingNextRunningVariance", [](auto& a) { a.next_running_variance_tensor_uid.reset(); }},
+        {"SaveMeanWithoutInvVariance", [](auto& a) { a.inv_variance_tensor_uid.reset(); }},
+        {"SaveInvVarianceWithoutMean", [](auto& a) { a.mean_tensor_uid.reset(); }},
+        {"UnresolvableEpsilon", [](auto& a) { a.epsilon_tensor_uid = 9999; }},
+    };
+}
+} // namespace
+
+class TestBatchnormFusedTrainingStatsDecline : public ::testing::TestWithParam<FusedStatsMutation>
+{
+protected:
+    MockKernelCompiler _mockKernelCompiler;
+    MockDevicePropertyProvider _mockDevicePropertyProvider;
+    BatchnormFwdTrainingPlanBuilder _planBuilder{_mockKernelCompiler, _mockDevicePropertyProvider};
+    Handle _dummyHandle;
+};
+
+TEST_P(TestBatchnormFusedTrainingStatsDecline, IsNotApplicable)
+{
+    auto builder = mutatedFusedTrainingGraph(GetParam().mutate);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+INSTANTIATE_TEST_SUITE_P(Mutations,
+                         TestBatchnormFusedTrainingStatsDecline,
+                         ::testing::ValuesIn(fusedStatsMutations()),
+                         [](const ::testing::TestParamInfo<FusedStatsMutation>& info) {
+                             return info.param.name;
+                         });
+
+TEST_F(TestBatchnormFusedTrainingStatsDecline, RuntimeEpsilonIsApplicable)
+{
+    auto base = createValidBatchnormFwdTrainingActivGraph(true, true);
+    auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+        base, [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+            const auto epsilonUid
+                = graph.nodes.at(0)->attributes.AsBatchnormAttributes()->epsilon_tensor_uid;
+            for(auto& tensor : graph.tensors)
+            {
+                if(tensor->uid == epsilonUid)
+                {
+                    tensor->is_runtime_pass_by_value = true;
+                    tensor->value.Reset();
+                }
+            }
+        });
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestBatchnormFusedTrainingStatsDecline, GraphWithoutSavedStatisticsIsApplicable)
+{
+    auto builder = mutatedFusedTrainingGraph([](BatchnormAttributesT& a) {
+        a.mean_tensor_uid.reset();
+        a.inv_variance_tensor_uid.reset();
+    });
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestBatchnormFwdTrainingActivPlanBuilder,
+       DeclinesRunningStatisticsThatAreNotSavedStatisticShaped)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+    using hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT;
+
+    const auto isApplicable = [this](const flatbuffers::FlatBufferBuilder& builder) {
+        const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        return _planBuilder.isApplicable(_dummyHandle, graph);
+    };
+    ASSERT_TRUE(isApplicable(createValidBatchnormFwdTrainingActivGraph(true, true)));
+
+    const std::vector<std::pair<std::string, std::function<void(TensorAttributesT&)>>> mutations
+        = {{"dtype", [](TensorAttributesT& tensor) { tensor.data_type = DataType::HALF; }},
+           {"channel length", [](TensorAttributesT& tensor) {
+                tensor.dims = {1, 4, 1, 1};
+                tensor.strides = {4, 1, 1, 1};
+            }}};
+    for(const char* name : {"prev_running_mean",
+                            "prev_running_variance",
+                            "next_running_mean",
+                            "next_running_variance"})
+    {
+        for(const auto& mutation : mutations)
+        {
+            const auto& mutate = mutation.second;
+            SCOPED_TRACE(std::string(name) + " " + mutation.first);
+            auto builder = mutateGraph(createValidBatchnormFwdTrainingActivGraph(true, true),
+                                       [&](GraphT& graph) {
+                                           for(auto& tensor : graph.tensors)
+                                           {
+                                               if(tensor->name == name)
+                                               {
+                                                   mutate(*tensor);
+                                               }
+                                           }
+                                       });
+            EXPECT_FALSE(isApplicable(builder));
+        }
+    }
+
+    auto builder
+        = mutateGraph(createValidBatchnormFwdTrainingActivGraph(true, true), [](GraphT& graph) {
+              graph.nodes.at(0)->attributes.AsBatchnormAttributes()->momentum_tensor_uid = 9999;
+          });
+    EXPECT_FALSE(isApplicable(builder));
 }
 
 } // namespace hip_kernel_provider::batchnorm::test

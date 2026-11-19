@@ -55,6 +55,7 @@ In addition:
 
 * GPU threads have private stacks.
   Never capture by reference (``[&]``) a variable that lives on the launching thread's stack; shared data must live in heap or global memory.
+  Those stacks are also small by default, which affects what a callable can keep in local variables; see :ref:`the execution model <execution-model>`.
 * Do not capture a pointer or reference to shared memory (LDS, ``__shared__``).
   Shared memory is private to a single block/workgroup, but ``hip::wthread``s may run in different blocks, so such an address is meaningless to another thread.
   Shared data must live in global device memory (for example, memory from ``hipMalloc``).

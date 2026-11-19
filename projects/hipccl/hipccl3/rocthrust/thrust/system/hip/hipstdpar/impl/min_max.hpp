@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,7 @@
 
 #if defined(__HIPSTDPAR__)
 
+#  include <thrust/detail/config/namespace.h>
 #  include <thrust/execution_policy.h>
 #  include <thrust/extrema.h>
 
@@ -58,7 +59,7 @@ inline I max_element(execution::parallel_unsequenced_policy, I f, I l)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::max_element(::thrust::device, f, l);
+  return THRUST_NS_QUALIFIER::max_element(THRUST_NS_QUALIFIER::device, f, l);
 }
 
 template <typename I, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -77,7 +78,7 @@ inline I max_element(execution::parallel_unsequenced_policy, I f, I l, R r)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::max_element(::thrust::device, f, l, ::std::move(r));
+  return THRUST_NS_QUALIFIER::max_element(THRUST_NS_QUALIFIER::device, f, l, ::std::move(r));
 }
 
 template <typename I,
@@ -105,7 +106,7 @@ inline I min_element(execution::parallel_unsequenced_policy, I f, I l)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::min_element(::thrust::device, f, l);
+  return THRUST_NS_QUALIFIER::min_element(THRUST_NS_QUALIFIER::device, f, l);
 }
 
 template <typename I, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -124,7 +125,7 @@ inline I min_element(execution::parallel_unsequenced_policy, I f, I l, R r)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::min_element(::thrust::device, f, l, ::std::move(r));
+  return THRUST_NS_QUALIFIER::min_element(THRUST_NS_QUALIFIER::device, f, l, ::std::move(r));
 }
 
 template <typename I,
@@ -152,7 +153,7 @@ inline pair<I, I> minmax_element(execution::parallel_unsequenced_policy, I f, I 
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  auto [m, M] = ::thrust::minmax_element(::thrust::device, f, l);
+  auto [m, M] = THRUST_NS_QUALIFIER::minmax_element(THRUST_NS_QUALIFIER::device, f, l);
 
   return {::std::move(m), ::std::move(M)};
 }
@@ -173,7 +174,7 @@ inline pair<I, I> minmax_element(execution::parallel_unsequenced_policy, I f, I 
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  auto [m, M] = ::thrust::minmax_element(::thrust::device, f, l, ::std::move(r));
+  auto [m, M] = THRUST_NS_QUALIFIER::minmax_element(THRUST_NS_QUALIFIER::device, f, l, ::std::move(r));
 
   return {::std::move(m), ::std::move(M)};
 }
