@@ -805,14 +805,15 @@ namespace
                    const std::vector<GroupShape>&              shapes,
                    std::optional<hipblasLtMatmulMatrixScale_t> launchAs = std::nullopt)
         {
-            runMX(elemType, elemType, outType, mode, shapes);
+            runMX(elemType, elemType, outType, mode, shapes, launchAs);
         }
 
-        void runMX(hipDataType                    typeA,
-                   hipDataType                    typeB,
-                   hipDataType                    outType,
-                   hipblasLtMatmulMatrixScale_t   mode,
-                   const std::vector<GroupShape>& shapes)
+        void runMX(hipDataType                                 typeA,
+                   hipDataType                                 typeB,
+                   hipDataType                                 outType,
+                   hipblasLtMatmulMatrixScale_t                mode,
+                   const std::vector<GroupShape>&              shapes,
+                   std::optional<hipblasLtMatmulMatrixScale_t> launchAs = std::nullopt)
         {
             const bool preSwizzled  = mode == HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
             const MXScaleMode scale = mxScaleMode(mode);

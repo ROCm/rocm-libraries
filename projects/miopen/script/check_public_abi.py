@@ -21,43 +21,45 @@ nm/readelf, no shell, no locale-dependent sorting) and asserts:
      flag-off build cannot silently acquire a new runtime dependency.
 
 ``check-wrapper`` -- run on a MIOPEN_ENABLE_HIPDNN_WRAPPER=ON build. Under the
-flag the public surface is split: the thin wrapper libMIOpen.so re-exports only
-the miopen.h public-header contract, while a handful of baseline exports that
-were never in miopen.h (experimental miopen_internal.h APIs and the "Hidden"
-MIGraphX shims) stay on libMIOpen_private.so under their original names. The
-wrapper also exports a few functions of its own that report on hipDNN
-forwarding; a flag-off build has no forwarding, so they are in no baseline.
+flag the public surface is split, but the thin wrapper libMIOpen.so re-exports
+every entry point the flag-off libMIOpen.so exports, so a consumer that links a
+bare -lMIOpen (pkg-config, a hand-written makefile, a CMake configure-time probe
+such as MIGraphX's) resolves the same symbols it did before. That includes the
+entry points that are not in miopen.h: the ones src/include/miopen/miopen_internal.h
+declares (experimental and "Hidden" MIGraphX functions). The private library
+carries every one of them under its _impl name. The wrapper also exports a few
+functions of its own that report on hipDNN forwarding; a flag-off build has no
+forwarding, so they are in no baseline.
 
   1. SONAME is libMIOpen.so.1 (unchanged).
-  2. The wrapper's exported public C API set equals
-     ``(baseline - excluded) | wrapper-only``.
+  2. The wrapper's exported public C API set equals ``baseline | wrapper-only``.
   3. No wrapper-only symbol is in the baseline. A function both builds export
-     belongs in miopen.h and the baseline, not in the wrapper-only list.
+     belongs in the baseline, not in the wrapper-only list.
   4. No ``*_impl`` symbols are exported from the wrapper.
   5. libMIOpen_private IS in DT_NEEDED, and libhipdnn_backend is NOT: the
      wrapper opens the backend on first use, so a machine without hipDNN must
      still be able to load libMIOpen.so.
-  6. With ``--public-header``, no excluded or wrapper-only symbol is declared in
-     miopen.h, so the exclusion file cannot hide a real miopen.h entry point,
-     and a function both builds export cannot hide in the wrapper-only list.
-  7. Every excluded symbol is still exported, un-suffixed, from the private
-     library (``--private-lib``), so the carve-out cannot drop a symbol from
-     the whole installed surface.
-  8. With ``--private-lib``, the libraries are co-versioned: their SONAME majors
+  6. With ``--public-header``, no wrapper-only symbol is declared in miopen.h,
+     so a function both builds export cannot hide in the wrapper-only list.
+  7. With ``--private-lib``, the libraries are co-versioned: their SONAME majors
      agree and the wrapper's DT_NEEDED entry names that same major, so the
      wrapper cannot bind to an implementation it was not built against.
-  9. With ``--private-lib``, every ``miopenFoo_impl`` the private library
+  8. With ``--private-lib``, every ``miopenFoo_impl`` the private library
      exports has a matching ``miopenFoo`` on the wrapper; otherwise it is
      unreachable through libMIOpen.so.
-  10. Optionally (``--needed-baseline``), the full DT_NEEDED list matches a
-      committed baseline. Opt-in because it names ROCm soversions and the
-      platform's loader, so it changes with routine ROCm updates.
+  9. Optionally (``--needed-baseline``), the full DT_NEEDED list matches a
+     committed baseline. Opt-in because it names ROCm soversions and the
+     platform's loader, so it changes with routine ROCm updates.
+ 10. With ``--plugin`` (repeatable), each CK plugin references MIOpen's C entry
+     points only by their ``_impl`` names. A plugin compiled without the
+     private rename still links and loads where the wrapper is already in the
+     process, so only its undefined symbols show it. ELF only.
 
 Both gates also read a Windows build's DLLs (MIOpen.dll and MIOpen_private.dll; the
 wrapper's import table must not name hipdnn_backend.dll). The DLL name in the export
 table stands in for the SONAME and the import tables for DT_NEEDED, matched without
 regard to case as the Windows loader does. A DLL name carries no version, so
-co-versioning (8) instead requires the wrapper to import the private DLL under its own
+co-versioning (7) instead requires the wrapper to import the private DLL under its own
 name and both version resources to record the same file version. The committed
 DT_NEEDED baseline names Linux libraries and does not apply.
 
@@ -82,8 +84,8 @@ flag-on configuration, so unlike the two gates above it can run in a lint lane
 on every PR. It covers only what generation cannot replace.
 script/generate_wrapper_sources.py writes the rename headers, miopen_impl.h, the
 provider's rename mirror and the pass-through stubs in wrapper_passthrough.cpp
-from include/miopen/miopen.h, and its --check mode is the gate for all of them,
-signatures included. What is left here:
+from include/miopen/miopen.h and src/include/miopen/miopen_internal.h, and its
+--check mode is the gate for all of them, signatures included. What is left here:
 
   1. The stubs in src/private/wrapper.cpp, the few with logic of their own. Each
      must forward to its own _impl symbol and nothing else.
@@ -95,14 +97,13 @@ signatures included. What is left here:
      never route to hipDNN, and nobody notices until the entry point joins the
      forwarding set and keeps running MIOpen anyway.
 
-  2. The three miopenConvolution*GetWorkSpaceSizeRange entry points. These are
-     exported with MIOPEN_EXPORT but never declared in miopen.h, so the
-     generator does not see them. Their definitions in src/convolution_api.cpp
-     are the reference, and the declaration in the hipDNN provider's
-     MiopenApi.hpp must match it. MIOpen's own callers share the declaration in
-     src/include/miopen/miopen_internal.h, which the compiler checks against the
-     definitions. The provider cannot include MIOpen's internal headers, so its
-     copy stays by hand and stays checked here.
+  2. The three miopenConvolution*GetWorkSpaceSizeRange entry points as the
+     hipDNN provider spells them. The provider cannot include MIOpen's internal
+     headers, so MiopenApi.hpp keeps a hand-written copy of their prototypes.
+     Their definitions in src/convolution_api.cpp are the reference; MIOpen's
+     own callers share the declaration in src/include/miopen/miopen_internal.h,
+     which the compiler checks against the definitions, and the generator reads
+     that header for the rename and the wrapper stubs.
 
   3. The wrapper's own functions, which only a flag-on build exports. They are
      declared in include_wrapper/miopen/hipdnn_forwarding.h, never in miopen.h,
@@ -704,7 +705,7 @@ If this change to the public C API is intentional, regenerate the baseline with:
   projects/miopen/script/check_public_abi.py dump-symbols <lib> \\
       -o projects/miopen/test/public_abi/public_symbols.baseline
 and rerun projects/miopen/script/generate_wrapper_sources.py to regenerate the
-wrapper's derived files from miopen.h.
+wrapper's derived files from miopen.h and src/include/miopen/miopen_internal.h.
 A baseline change is an ABI change and requires API review -- do not regenerate
 the baseline just to turn this gate green.
 A function that only the flag-on wrapper exports does not go in the baseline:
@@ -787,9 +788,19 @@ without the wrapper.""".rstrip()
 SUPERSET_REMEDY = """
 The private library exports a renamed entry point that the wrapper does not
 re-export under its public name, so nothing outside libMIOpen_private.so can
-call it. Only entry points declared in miopen.h are renamed, and the wrapper's
-stubs are generated from the same declarations, so the generated files are
-stale: rerun projects/miopen/script/generate_wrapper_sources.py.""".rstrip()
+call it. Only entry points declared in miopen.h or miopen_internal.h are renamed,
+and the wrapper's stubs are generated from the same declarations, so the
+generated files are stale: rerun
+projects/miopen/script/generate_wrapper_sources.py.""".rstrip()
+
+PLUGIN_REMEDY = """
+A CK plugin must call MIOpen's C entry points by their _impl names: with the
+split on, libMIOpen_private.so exports only those. A plain name resolves only in a
+process that has already loaded the wrapper, and fails to load (undefined symbol)
+in one that has just the private library. Compile the plugin with the same rename
+as MIOpen_private: miopen_apply_private_rename() in
+projects/miopen/src/CMakeLists.txt, called from
+projects/miopen/src/ck_impl/CMakeLists.txt.""".rstrip()
 
 PROVIDER_REMEDY = """
 --require-provider was passed, so the provider's MiopenApi.hpp must be readable
@@ -979,9 +990,10 @@ def render_signature(sig: tuple[str, ...]) -> str:
     return f"{sig[0]}({', '.join(sig[1:])})"
 
 
-# The value each macro has while miopen.h and hipdnn_forwarding.h are read, as
-# the library's build sees it. Conditionals are evaluated against this table
-# rather than flattened, so an #else branch cannot contribute declarations.
+# The value each macro has while miopen.h, miopen_internal.h and
+# hipdnn_forwarding.h are read, as the library's build sees it. Conditionals are
+# evaluated against this table rather than flattened, so an #else branch cannot
+# contribute declarations.
 # MIOPEN_BETA_API is defined for the whole build in CMakeLists.txt. The include
 # guard reads as undefined because this is the first time the header is seen.
 # __cplusplus and __clang__ only guard text that declares no entry point.
@@ -990,6 +1002,7 @@ KNOWN_MACROS = {
     "__cplusplus": True,
     "__clang__": True,
     "MIOPEN_GUARD_MIOPEN_H_": False,
+    "GUARD_MIOPEN_INTERNAL_H_": False,
 }
 
 _COMMENT_OR_LITERAL_RE = re.compile(
@@ -1115,6 +1128,8 @@ class EntryPoint:
     ret: str
     params: tuple[Param, ...]
     line: int
+    # The header the declaration was read from, for error messages.
+    source: str = "miopen.h"
 
 
 def parse_param(text: str, function: str, where: str) -> Param:
@@ -1170,6 +1185,8 @@ def parse_public_header(
                 " declaration; only plain function declarations are supported"
             )
         declaration = " ".join(text[match.end() : end].split())
+        # miopen_internal.h spells its declarations MIOPEN_EXPORT extern "C" <ret>.
+        declaration = declaration.replace('extern "C"', " ").strip()
         parsed = _HEADER_DECL_RE.fullmatch(declaration)
         if parsed is None or not parsed.group("ret").strip():
             raise AbiError(
@@ -1194,7 +1211,11 @@ def parse_public_header(
                     raise AbiError(f"{where}: {name}: empty parameter")
                 params.append(parse_param(piece, name, where))
         entries[name] = EntryPoint(
-            name=name, ret=squash(parsed.group("ret")), params=tuple(params), line=line
+            name=name,
+            ret=squash(parsed.group("ret")),
+            params=tuple(params),
+            line=line,
+            source=what,
         )
     if not entries and not allow_empty:
         raise AbiError(f"no MIOPEN_EXPORT declarations found in {what}")
@@ -1494,11 +1515,10 @@ def check_plugin_symbols(plugin: Library) -> bool:
             "stripped, or not a MIOpen plugin?)"
         )
     impl = {n for n in required if IMPL_RE.match(n)}
-    stray = sorted(n for n in required - impl if n not in RANGE_ENTRY_POINTS)
+    stray = sorted(required - impl)
     if not stray:
         print(
-            f"PASS: all {len(impl)} MIOpen entry points the plugin needs are _impl "
-            f"ones (plus {len(required & RANGE_ENTRY_POINTS)} unrenamed range functions)"
+            f"PASS: all {len(impl)} MIOpen entry points the plugin needs are _impl ones"
         )
         return True
     print("FAIL: plugin needs public MIOpen entry points, which the wrapper serves:")
@@ -1524,28 +1544,6 @@ def check_needed_baseline(lib: Library, baseline_path: str) -> bool:
     return False
 
 
-def check_excluded_not_public(excluded: set[str], header_path: str) -> bool:
-    path = Path(header_path)
-    if not path.is_file():
-        raise AbiError(f"public header not found: {path}")
-    text = path.read_text(encoding="utf-8", errors="replace")
-    offenders = sorted(s for s in excluded if re.search(rf"\b{re.escape(s)}\b", text))
-    if not offenders:
-        print(
-            f"PASS: no excluded symbol appears in {path.name} "
-            f"({len(excluded)} checked)"
-        )
-        return True
-    print(
-        f"FAIL: excluded-symbols file lists entry points that ARE declared in "
-        f"{path.name}. Excluding a real public API silently removes it from "
-        "libMIOpen.so:"
-    )
-    for sym in offenders:
-        print(f"  {sym}")
-    return False
-
-
 def check_wrapper_only_not_public(wrapper_only: set[str], header_path: str) -> bool:
     path = Path(header_path)
     if not path.is_file():
@@ -1568,24 +1566,6 @@ def check_wrapper_only_not_public(wrapper_only: set[str], header_path: str) -> b
         "in the wrapper-only list:"
     )
     for sym in offenders:
-        print(f"  {sym}")
-    return False
-
-
-def check_excluded_on_private(excluded: set[str], private: Library) -> bool:
-    exported = private.defined_dynamic_functions()
-    missing = sorted(excluded - exported)
-    if not missing:
-        print(
-            f"PASS: all {len(excluded)} excluded symbols are still exported "
-            f"un-suffixed from {Path(private.path).name}"
-        )
-        return True
-    print(
-        f"FAIL: excluded symbols are absent from {Path(private.path).name} -- they "
-        "have vanished from the entire installed surface (renamed by mistake?):"
-    )
-    for sym in missing:
         print(f"  {sym}")
     return False
 
@@ -1716,6 +1696,50 @@ def check_impl_superset(wrapper: Library, private: Library) -> bool:
     for sym in missing:
         print(f"  {sym}")
     print(SUPERSET_REMEDY)
+    return False
+
+
+def plain_entry_points(path: str) -> list[str] | None:
+    """Return the plugin's plain-named MIOpen entry points, or None for a DLL.
+
+    The library is opened here, so it is released on return; check_plugins_renamed
+    then holds at most one plugin's bytes at a time, however many there are.
+    """
+    plugin = open_library(path, "CK plugin")
+    if plugin.naming is not ELF_NAMING:
+        return None
+    return sorted(
+        s
+        for s in plugin.required_functions()
+        if PUBLIC_API_RE.match(s) and not s.endswith("_impl")
+    )
+
+
+def check_plugins_renamed(paths: list[str]) -> bool:
+    """A CK plugin must call MIOpen's C entry points by their _impl names.
+
+    The private library exports only those. A plugin built without the rename
+    still links, since plugins are not linked with --no-undefined, and loads
+    wherever the wrapper is already in the process, so nothing else notices.
+    DLLs are skipped: a Windows link fails on the missing import anyway.
+    """
+    offenders: dict[str, list[str]] = {}
+    checked = 0
+    for path in paths:
+        plain = plain_entry_points(path)
+        if plain is None:
+            print(f"SKIP: {Path(path).name} is not an ELF file")
+            continue
+        checked += 1
+        if plain:
+            offenders[Path(path).name] = plain
+    if not offenders:
+        print(f"PASS: {checked} CK plugin(s) reference only _impl entry points")
+        return True
+    print("FAIL: CK plugins reference MIOpen entry points by their plain name:")
+    for name, symbols in sorted(offenders.items()):
+        print(f"  {name}: {', '.join(symbols)}")
+    print(PLUGIN_REMEDY)
     return False
 
 
@@ -1982,19 +2006,10 @@ def cmd_check(args) -> int:
 def cmd_check_wrapper(args) -> int:
     lib = open_library(args.lib, "wrapper library")
     baseline = read_symbol_list(args.baseline, "baseline symbols file")
-    excluded = read_symbol_list(args.excluded, "excluded symbols file")
     wrapper_only = read_symbol_list(args.wrapper_only, "wrapper-only symbols file")
 
     ok = check_soname(lib)
 
-    # A stale exclusion entry (a symbol no longer in the baseline at all) would
-    # silently mask real drift, so reject it before using the set.
-    stray = sorted(excluded - baseline)
-    if stray:
-        print("FAIL: excluded-symbols file lists symbols absent from the baseline:")
-        for sym in stray:
-            print(f"  {sym}")
-        ok = False
     shared = sorted(wrapper_only & baseline)
     if shared:
         print(
@@ -2007,8 +2022,8 @@ def cmd_check_wrapper(args) -> int:
 
     ok &= check_symbols(
         lib,
-        (baseline - excluded) | wrapper_only,
-        "wrapper public API set == (baseline - excluded) + wrapper-only",
+        baseline | wrapper_only,
+        "wrapper public API set == baseline + wrapper-only",
         BASELINE_REMEDY,
     )
     ok &= check_no_impl(lib, "wrapper")
@@ -2019,13 +2034,14 @@ def cmd_check_wrapper(args) -> int:
         ok &= check_needed_baseline(lib, args.needed_baseline)
 
     if args.public_header:
-        ok &= check_excluded_not_public(excluded, args.public_header)
         ok &= check_wrapper_only_not_public(wrapper_only, args.public_header)
     if args.private_lib:
         private = open_private_library(args.private_lib, lib, "wrapper")
-        ok &= check_excluded_on_private(excluded, private)
         ok &= check_coversioned(lib, private)
         ok &= check_impl_superset(lib, private)
+
+    if args.plugin:
+        ok &= check_plugins_renamed(args.plugin)
 
     print(f"wrapper public-abi symbol check: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
@@ -2287,7 +2303,6 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("check-wrapper", help="gate a flag-on wrapper build")
     p.add_argument("lib", help="path to the built wrapper libMIOpen.so or MIOpen.dll")
     p.add_argument("--baseline", required=True, help="committed public symbol baseline")
-    p.add_argument("--excluded", required=True, help="committed excluded symbol list")
     p.add_argument(
         "--wrapper-only",
         required=True,
@@ -2297,21 +2312,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--private-lib",
         help="path to libMIOpen_private.so or MIOpen_private.dll; when given, "
-        "every excluded symbol "
-        "must still be exported from it under its original name, the two "
-        "libraries must be co-versioned, and every renamed entry point it "
+        "the two libraries must be co-versioned, and every renamed entry point it "
         "exports must have a wrapper stub",
     )
     p.add_argument(
         "--public-header",
-        help="path to include/miopen/miopen.h; when given, no excluded or "
-        "wrapper-only symbol may be declared there",
+        help="path to include/miopen/miopen.h; when given, no wrapper-only "
+        "symbol may be declared there",
     )
     p.add_argument(
         "--needed-baseline",
         help="optional committed DT_NEEDED baseline (Linux only; an error for a DLL); "
         "when given, the full runtime dependency list must match it exactly. The "
         "private-library and hipDNN-backend entries are checked either way",
+    )
+    p.add_argument(
+        "--plugin",
+        action="append",
+        default=[],
+        help="path to a CK plugin library (repeatable); when given, it must reference "
+        "MIOpen's C entry points only by their _impl names",
     )
     p.set_defaults(func=cmd_check_wrapper)
 

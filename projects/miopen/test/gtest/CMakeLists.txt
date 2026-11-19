@@ -424,7 +424,7 @@ endfunction()
 # tier-only entry does not match; elsewhere it selects `-LE ex_gpu`, which only the bare entry
 # matches. The bare entry also keeps the name other tooling selects by.
 function(miopen_add_wrapper_check NAME)
-  cmake_parse_arguments(CHECK "" "FAIL_REGULAR_EXPRESSION" "COMMAND;ENVIRONMENT;ENVIRONMENT_MODIFICATION" ${ARGN})
+  cmake_parse_arguments(CHECK "" "" "COMMAND;ENVIRONMENT;ENVIRONMENT_MODIFICATION;PROPERTIES" ${ARGN})
   foreach(CHECK_GPU_LABEL "" ${MIOPEN_FORWARDING_PARITY_GPU_LABELS})
     set(CHECK_ENTRY_NAME ${NAME})
     set(CHECK_LABELS ${MIOPEN_FORWARDING_PARITY_TIER_LABELS})
@@ -441,9 +441,8 @@ function(miopen_add_wrapper_check NAME)
       set_tests_properties(${CHECK_ENTRY_NAME} PROPERTIES
         ENVIRONMENT_MODIFICATION "${CHECK_ENVIRONMENT_MODIFICATION}")
     endif()
-    if(CHECK_FAIL_REGULAR_EXPRESSION)
-      set_tests_properties(${CHECK_ENTRY_NAME} PROPERTIES
-        FAIL_REGULAR_EXPRESSION "${CHECK_FAIL_REGULAR_EXPRESSION}")
+    if(CHECK_PROPERTIES)
+      set_tests_properties(${CHECK_ENTRY_NAME} PROPERTIES ${CHECK_PROPERTIES})
     endif()
   endforeach()
 endfunction()
@@ -513,6 +512,7 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
             test_check_wrapper_registration
             test_check_wrapper_abi
             test_miopen_wrapper_libs
+            test_check_bare_link
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
   set_tests_properties(test_forwarding_parity_scripts PROPERTIES
     LABELS "${MIOPEN_FORWARDING_PARITY_TIER_LABELS}"
@@ -521,13 +521,37 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     ENVIRONMENT_MODIFICATION
       "PYTHONPATH=path_list_prepend:${CMAKE_CURRENT_SOURCE_DIR};PYTHONPATH=path_list_prepend:${PROJECT_SOURCE_DIR}/script")
 
+  # The plugins sit beside libMIOpen in the build tree, so a build that makes plugin targets
+  # must also contain them here; --require-plugins turns a missing one into a failure rather
+  # than a skipped check. The packaged entry below leaves it off: an installed test layout
+  # may carry no plugin. ck_impl makes no targets when no GPU target has CK support.
+  set(MIOPEN_WRAPPER_ABI_CHECK_PLUGIN_ARGS)
+  if(MIOPEN_USE_COMPOSABLEKERNEL)
+    get_property(MIOPEN_CK_PLUGIN_TARGETS DIRECTORY ${PROJECT_SOURCE_DIR}/src/ck_impl
+      PROPERTY BUILDSYSTEM_TARGETS)
+    if(MIOPEN_CK_PLUGIN_TARGETS)
+      set(MIOPEN_WRAPPER_ABI_CHECK_PLUGIN_ARGS --require-plugins)
+    endif()
+  endif()
+
   miopen_add_wrapper_check(wrapper_abi_check
     COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/script/check_wrapper_abi.py
       --lib-dir $<TARGET_FILE_DIR:MIOpen>
+      ${MIOPEN_WRAPPER_ABI_CHECK_PLUGIN_ARGS}
       --baseline ${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline
-      --excluded ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt
       --wrapper-only ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_only_symbols.txt
       --public-header ${PROJECT_SOURCE_DIR}/include/miopen/miopen.h
+  )
+
+  # Links against a bare -lMIOpen, like a pkg-config user or a configure-time probe,
+  # and fails if the wrapper lacks a baseline symbol. SKIP_RETURN_CODE: the script
+  # exits 77 where it cannot apply (Windows).
+  miopen_add_wrapper_check(wrapper_bare_link_check
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/script/check_bare_link.py
+      --lib-dir $<TARGET_FILE_DIR:MIOpen>
+      --baseline ${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline
+      --compiler ${CMAKE_CXX_COMPILER}
+    PROPERTIES SKIP_RETURN_CODE 77
   )
 
   # A backend that hipDNN loads and then refuses. It has the real backend's file name, so it
@@ -573,7 +597,7 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     COMMAND $<TARGET_FILE:${MIOPEN_WRAPPER_ROUTING_TEST}> --gtest_filter=CPU_WrapperRoutingReentryMacro_NONE.*
     ENVIRONMENT "MIOPEN_HIPDNN_FORWARDING=1"
     ENVIRONMENT_MODIFICATION "MIOPEN_DISABLE_HIPDNN_FOR=unset:"
-    FAIL_REGULAR_EXPRESSION "\\[  SKIPPED \\]|Running 0 tests")
+    PROPERTIES FAIL_REGULAR_EXPRESSION "\\[  SKIPPED \\]|Running 0 tests")
 endif()
 
 if( MIOPEN_TEST_DISCRETE )
@@ -655,8 +679,13 @@ endif()
 # files, which the build-tree entry already covers.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
   miopen_append_installed_wrapper_check(wrapper_abi_check
-    "\"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/check_wrapper_abi.py\" \"--baseline\" \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/public_symbols.baseline\" \"--excluded\" \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/wrapper_excluded_symbols.txt\" \"--wrapper-only\" \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/wrapper_only_symbols.txt\""
+    "\"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/check_wrapper_abi.py\" \"--baseline\" \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/public_symbols.baseline\" \"--wrapper-only\" \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/wrapper_only_symbols.txt\""
     "")
+  # No --compiler: the package has none to name, so the script looks for one and skips
+  # (exit 77) where there is none.
+  miopen_append_installed_wrapper_check(wrapper_bare_link_check
+    "\"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/check_bare_link.py\" \"--baseline\" \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/public_symbols.baseline\""
+    " SKIP_RETURN_CODE 77")
 endif()
 
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE)
@@ -691,6 +720,7 @@ if( NOT ENABLE_ASAN_PACKAGING )
     install(
         PROGRAMS
           "${PROJECT_SOURCE_DIR}/script/check_wrapper_abi.py"
+          "${PROJECT_SOURCE_DIR}/script/check_bare_link.py"
           "${PROJECT_SOURCE_DIR}/script/check_public_abi.py"
           "${PROJECT_SOURCE_DIR}/script/miopen_wrapper_libs.py"
           "${PROJECT_SOURCE_DIR}/script/run_forwarding_parity.py"
@@ -702,7 +732,6 @@ if( NOT ENABLE_ASAN_PACKAGING )
     install(
         FILES
           "${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline"
-          "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt"
           "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_only_symbols.txt"
           "${CMAKE_CURRENT_SOURCE_DIR}/known_forwarding_divergences.txt"
         DESTINATION ${MIOPEN_WRAPPER_TESTS_INSTALL_DIR}

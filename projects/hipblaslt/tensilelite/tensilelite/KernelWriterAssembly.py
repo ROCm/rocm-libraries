@@ -10633,8 +10633,21 @@ class KernelWriterAssembly(KernelWriter):
             # PGR=2 and EPS and no SuppressNoLoadLoop case, need to jump to EvenExit
             jumpLabel = Label(self.rapLabel("LoopEnd%s_evenexit%s%s"%(loopChar, strNta, strNtb)), "" )
 
-        module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
-                  comment="do not enter Loop%s"%loopChar ))
+        if self._needsLoopSkipPGRSync(kernel):
+          # The token planner walks the loop body linearly, so the first NGLL is
+          # planned as if entered from the loop exit. Skipping the loop enters it
+          # straight from the prologue, with the second prefetched tile still in
+          # flight: drain it and sync before the NGLL reads it.
+          continueLabel = Label(self.labels.getUniqueNamePrefix("AfterLoopSkipPGRSync"), "")
+          module.add(SCBranchSCC0(labelName=continueLabel.getLabelName(), \
+                    comment="enter Loop%s, skip loop-skip PGR synchronization"%loopChar))
+          module.add(self._wait(kernel, tPA, tPB, 0, -1, -1, "wait for prefetched PGR TDM loads"))
+          module.add(self._syncThreads(kernel, "loop-skip PGR bypass sync", skipForceWaitcnt0=True))
+          module.add(SBranch(labelName=jumpLabel.getLabelName(), comment="do not enter Loop%s"%loopChar))
+          module.add(continueLabel)
+        else:
+          module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
+                    comment="do not enter Loop%s"%loopChar ))
 
       # A one-trip loop has no preceding closeLoop.  Prefetch the next
       # persistent tile before entering its sole/final trip.

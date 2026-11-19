@@ -74,10 +74,10 @@ Why it is set up this way:
 - **Tier labels are `quick`, `standard`, `comprehensive` and `full`,** so the harness runs in
   every tier lane. Not `ffm-quick`/`ffm-full`: those run a fixed list of patterns on a tight
   time budget.
-- **`wrapper_abi_check` and `forwarding_failure_modes` get the same split.** They need no GPU,
-  but on an architecture that `test_categories.yaml` declares, the runner selects
-  `-L ^<tier>$ -L ^ex_gpu_<arch>$`, which an entry with only tier labels does not match. Each
-  therefore also has one entry per `ex_gpu_*` label, such as
+- **`wrapper_abi_check`, `wrapper_bare_link_check` and `forwarding_failure_modes` get the same
+  split.** They need no GPU, but on an architecture that `test_categories.yaml` declares, the
+  runner selects `-L ^<tier>$ -L ^ex_gpu_<arch>$`, which an entry with only tier labels does
+  not match. Each therefore also has one entry per `ex_gpu_*` label, such as
   `wrapper_abi_check_ex_gpu_gfx110X`, so TheRock's GPU jobs run them. `miopen_add_wrapper_check`
   registers the build-tree entries and `miopen_append_installed_wrapper_check` the packaged ones.
   Select the bare entry by name with `ctest -R '^wrapper_abi_check$'`.
@@ -94,9 +94,9 @@ Why it is set up this way:
 - **No build-tree entry without a GPU.** The shim tests are all `GPU_` tests.
 
 The packaged test list (`bin/MIOpen/CTestTestfile.cmake`) is generated from
-`test_categories.yaml` and does not see `add_test()` calls, so the harness entries and
-`wrapper_abi_check` are written into it separately. Without that, `ctest -L forwarding_parity`
-on a packaged build would select nothing and pass. The packaged entries are not tied to
+`test_categories.yaml` and does not see `add_test()` calls, so the harness entries,
+`wrapper_abi_check` and `wrapper_bare_link_check` are written into it separately. Without that,
+`ctest -L forwarding_parity` on a packaged build would select nothing and pass. The packaged entries are not tied to
 `MIOPEN_NO_GPU`, which describes the build machine; packages are often built without a GPU and
 tested elsewhere. Only the single-binary build (`MIOPEN_TEST_DISCRETE=OFF`) ships them.
 
@@ -115,10 +115,15 @@ that load them. The parity harness puts that directory first on `LD_LIBRARY_PATH
 and on `PATH` on Windows.
 
 `wrapper_abi_check` (`script/check_wrapper_abi.py`) checks the wrapper's exported ABI from the
-two built libraries. It also checks the wrapper's list of required shared libraries
-(`DT_NEEDED`): `libMIOpen_private` must be on it and `libhipdnn_backend` must not, so the
-hipDNN backend is opened on first use rather than required at load time. The full list is
-also committed as `test/public_abi/wrapper_needed.baseline` (Linux only), but the ctest entry
+two built libraries and any CK plugins beside them. It also checks the wrapper's list of
+required shared libraries (`DT_NEEDED`): `libMIOpen_private` must be on it and `libhipdnn_backend` must not, so the
+hipDNN backend is opened on first use rather than required at load time. It also fails if a
+`libMIOpenCKGroupedConv_*.so` beside the libraries references a MIOpen entry point by its plain
+name instead of its `_impl` name. This part is skipped when no plugin sits beside the libraries
+(a build without CK, or an installed layout with none) and always on Windows. The build-tree
+entry passes `--require-plugins` when plugin targets exist, so there a missing plugin fails
+instead of skipping; the usual cause is building only `MIOpen` and `MIOpen_private`. The full
+list is also committed as `test/public_abi/wrapper_needed.baseline` (Linux only), but the ctest entry
 does not compare against it, because it names ROCm soversions and the x86-64 loader and would
 fail on every ROCm update. To compare it by hand, pass `--needed-baseline
 test/public_abi/wrapper_needed.baseline` to `script/check_wrapper_abi.py`. On Windows it reads
@@ -127,6 +132,17 @@ imported and `hipdnn_backend.dll` must not), and their version resources, which 
 the same file version because a DLL name carries none. It loads neither library, so it needs
 no GPU and is registered whenever the flag is on. The packaged copy leaves out
 `--public-header`, which compares two source files that the build-tree entry already checks.
+
+`wrapper_bare_link_check` (`script/check_bare_link.py`) links a program that takes the address
+of every symbol in `public_symbols.baseline` against `-L<lib dir> -lMIOpen` alone, the way a
+pkg-config user or a configure-time `check_library_exists(MIOpen <symbol> ...)` probe does,
+and fails if any is unresolved. `wrapper_abi_check` says the wrapper exports a symbol; this
+says a consumer that does not name `libMIOpen_private` can use it. It never runs the program.
+The build-tree entry names the CMake C++ compiler. The packaged entry names none, so the
+script looks for `$CXX`, `c++`, `clang++` or `g++`, and skips (exit 77, which ctest reports as
+skipped) if there is none. It skips on Windows too, where an import library already fails the
+link for a symbol the DLL does not export. `test_check_bare_link` builds two small libraries
+shaped like a wrapper build and covers the check itself.
 
 `test_forwarding_parity_scripts` tests the harness scripts themselves. It needs no GPU or
 build output, so it carries only the tier labels. The component CI runs it in its

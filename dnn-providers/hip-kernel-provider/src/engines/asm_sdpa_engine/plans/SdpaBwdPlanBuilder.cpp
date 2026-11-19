@@ -504,10 +504,17 @@ bool SdpaBwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(attrs.alibi_mask(), "alibi_mask must be false");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.padding_mask(), "padding_mask must be false");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), "attn_mask tensor not supported");
+    // No dropout tensor either: AITER's keep mask (8-bit randoms per 32x32 tile) is not the
+    // Philox stream the FlyDSL SDPA engines' forwards draw, so this backward could not replay
+    // the mask another engine's forward dropped with.
     HIP_KERNEL_RETURN_FALSE_IF(attrs.seed_tensor_uid(), "seed tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.offset_tensor_uid(), "offset tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_mask_tensor_uid(),
                                "dropout_mask tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_scale_tensor_uid(),
+                               "dropout_scale tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_scale_inv_tensor_uid(),
+                               "dropout_scale_inv tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dbias_tensor_uid(), "dbias tensor not supported");
 
     // Accept scale_tensor_uid only when it is a runtime pass-by-value scalar

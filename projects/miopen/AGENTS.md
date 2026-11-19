@@ -107,7 +107,7 @@ Adding a convolution solver requires all integration points:
 6. Document the solver's `MIOPEN_DEBUG_CONV_*` disable variable in `docs/reference/env_variables.rst` and add a `CHANGELOG.md` entry.
 7. Reuse `test/gtest/unit_conv_solver*.hpp` fixtures and `unit_conv_solver_<SolverName>.cpp` naming to cover applicability and numerical correctness.
 
-Public entry-point changes must keep the five artifacts listed at the top of `script/check_public_abi.py` in sync (public header, `_impl` declarations, private rename header, `src/private/wrapper.cpp` stubs, and the provider's `MiopenApiPrivateRename.hpp`). The `miopen-public-private-headers` pre-commit hook runs `check_public_abi.py check-headers`. Do not change ABI baselines/exclusion lists simply to conceal drift.
+Public entry-point changes touch two hand-written headers: `include/miopen/miopen.h` (the public contract) and `src/include/miopen/miopen_internal.h` (exported entry points that are not part of it: experimental APIs, the MIGraphX `miopenHidden*` shims, `GetWorkSpaceSizeRange`). `script/generate_wrapper_sources.py` writes everything derived from them (`_impl` declarations, the private rename header, the pass-through stubs and the provider's `MiopenApiPrivateRename.hpp`) and `--check` gates it in pre-commit and CI. Entry points that need logic of their own have stubs in `src/private/wrapper.cpp`, and the provider's hand-written copy of the `GetWorkSpaceSizeRange` prototypes in `MiopenApi.hpp` is compared with the definitions; the `miopen-public-private-headers` pre-commit hook runs `check_public_abi.py check-headers` for both. With the wrapper on, `libMIOpen.so` must export every symbol in `test/public_abi/public_symbols.baseline` (plus the wrapper-only functions), so a bare `-lMIOpen` link and a configure-time probe resolve what they did before the split. Do not change ABI baselines simply to conceal drift.
 
 ## Important Files
 
@@ -170,13 +170,14 @@ python3 -m pytest script/test_check_public_abi.py script/test_check_plugin_reent
 # PYTHONPATH; the rest are in script/.
 (cd script && PYTHONPATH=../test/gtest python3 -m unittest \
   test_check_wrapper_abi test_miopen_wrapper_libs test_run_forwarding_parity \
-  test_compare_forwarding_runs test_forwarding_parity_gpu_labels test_check_wrapper_registration)
+  test_compare_forwarding_runs test_forwarding_parity_gpu_labels test_check_wrapper_registration \
+  test_check_bare_link)
 # Wrapper-ON builds, after building miopen-tests (the libraries, forwarding_failure_probe,
 # and the fake hipDNN backend). Only wrapper_reentry_macro needs a device: a visible one, but no
 # compute. It runs the miopen_gtest (or, in a discrete build, test_wrapper_routing) re-entry
 # tests with forwarding on:
 ctest --test-dir build --output-on-failure --no-tests=error \
-  -R '^(wrapper_abi_check|forwarding_failure_modes|wrapper_reentry_macro|test_forwarding_parity_scripts)$'
+  -R '^(wrapper_abi_check|wrapper_bare_link_check|forwarding_failure_modes|wrapper_reentry_macro|test_forwarding_parity_scripts)$'
 # Wrapper-ON superbuild with the provider: the miopen-with-provider preset plus
 # -DMIOPEN_ENABLE_HIPDNN_WRAPPER=ON and -DROCM_LIBS_ENABLE_ROOT_CTEST=ON (the preset alone enables
 # neither, and then no plugin entry is registered). The first two need
