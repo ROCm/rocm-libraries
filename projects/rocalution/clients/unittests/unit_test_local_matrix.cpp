@@ -1039,6 +1039,16 @@ TYPED_TEST(local_matrix, conversion_falls_back_to_csr_for_unsuitable_matrices)
                   std::string::npos)
             << log;
     }
+
+    // A BCSR matrix falls back too when the new block dimension does not divide
+    // its sizes, instead of keeping its own
+    auto B = make_local_matrix(this->backend(), ref, Format{BCSR, 2});
+    expect_matrix(*B, ref, Format{BCSR, 2}, this->backend());
+    std::string log = logged([&] { B->ConvertToBCSR(5); });
+    expect_matrix(*B, ref, csr_format, this->backend());
+    EXPECT_NE(log.find("Matrix conversion to BCSR failed, falling back to CSR format"),
+              std::string::npos)
+        << log;
 }
 
 TEST_P(local_matrix_formats, moves_keep_the_format_and_the_values)
@@ -2224,9 +2234,10 @@ TEST_P(local_matrix_formats, matrix_add_scales_and_adds)
         // The result keeps the block dimension of the matrix, not the summand's
         if(is(BCSR))
         {
-            auto B = make(a);
-            B->MatrixAdd(*make_local_matrix(backend(), b, Format{BCSR, 3}), 2, -1, false);
-            expect_kept(*B, add(a, 2, b, -1), scaled_tol<T>(1e-14));
+            const Format other{BCSR, format().blockdim == 2 ? 3 : 2};
+            auto         A = make(a);
+            A->MatrixAdd(*make_local_matrix(backend(), b, other), 2, -1, false);
+            expect_kept(*A, add(a, 2, b, -1), scaled_tol<T>(1e-14));
         }
 
         auto A = make(a);
@@ -2688,6 +2699,15 @@ TEST_P(local_matrix_formats, writes_and_reads_rocsparseio_files)
         auto C = make_local_matrix(backend(), spd<T>(4));
         C->ReadFileRSIO(file, true);
         expect_matrix(*C, ref, csr_format, backend());
+
+        // A BCSR matrix that keeps its format also keeps its block dimension
+        if(is(BCSR))
+        {
+            const Format other{BCSR, format().blockdim == 2 ? 3 : 2};
+            auto         D = make_local_matrix(backend(), spd<T>(6), other);
+            D->ReadFileRSIO(file, true);
+            expect_matrix(*D, ref, other, backend());
+        }
         std::remove(file.c_str());
 
         if(backend() == Backend::Accelerator && !is(CSR))
