@@ -117,8 +117,7 @@ namespace
             });
             expect_independent_of_thread_count<double>([incx] {
                 host_vector<double> hx(N, incx);
-                hipblas_init_vector_alternating_sign(
-                    random_generator<double>, hx.data(), N, incx);
+                hipblas_init_vector_alternating_sign(random_generator<double>, hx.data(), N, incx);
                 return std::vector<double>(hx.begin(), hx.end());
             });
         }
