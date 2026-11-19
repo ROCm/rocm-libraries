@@ -4,8 +4,7 @@
 """``MatMulNBits`` gfx1151 instance: public surface + family dispatch.
 
 fp16-activation / packed-int4-weight matmul for the Qwen3.5-9B group-of-32
-workload. See ``dsl_docs/architecture/matmul_nbits_plan.md`` for the full plan
-and :mod:`rocke.instances.common._matmul_nbits_common` for the shared spec,
+workload. See :mod:`rocke.instances.common._matmul_nbits_common` for the shared spec,
 validator, signature, grid, and 64-row outer-loop helpers.
 
 Milestone 1 (this change) ships the spec and host-side helpers plus a

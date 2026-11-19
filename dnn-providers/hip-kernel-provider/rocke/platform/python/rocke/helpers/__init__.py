@@ -72,7 +72,7 @@ barriers, wrong epilogue indexing).
 
 See `python/rocke/helpers/README.md` for a top-to-bottom worked
 example that uses every helper in this module, and
-`python/rocke/TRANSFORM_DAG.md` for how the coord-transform algebra
+`dsl_docs/architecture/transform_dag.md` for how the coord-transform algebra
 in `rocke.helpers.transforms` composes with these helpers to build full
 convolution kernels in the CK Tile style.
 """

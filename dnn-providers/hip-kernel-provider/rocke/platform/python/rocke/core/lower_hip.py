@@ -2091,7 +2091,7 @@ class _Lowerer:
         :func:`_type_to_hip` (``f32x4``) — the historical
         ``vec<f32x4>`` spelling was not a real C++ type and broke
         ``hipcc --genco`` on the attention kernels that consume this
-        cvt (HIP_LOWERINGS_REPORT.md §4a).
+        cvt.
         """
         (v,) = op.operands
         nice = _name(op.result)
@@ -2391,7 +2391,7 @@ class _Lowerer:
         + the rank-N linear index; ``atomicAdd`` selects the
         ``ds_add_u32`` / ``ds_pk_add_f32`` instruction at codegen.
 
-        HIP_LOWERINGS_REPORT.md §4b: the historical implementation
+        The historical implementation
         passed ``_name(smem)`` (the SSA name like ``lds_hist6``)
         rather than the actual ``__shared__`` array
         (``lds_hist6_storage`` from ``smem.op.attrs["_storage"]``);

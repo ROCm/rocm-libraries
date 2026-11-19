@@ -12,8 +12,7 @@ threadgroup, the full MoE per-expert path:
       -> reshape through LDS (Hidden stays in LDS, never HBM)
       -> GEMM2 (down) -> weighted atomic reduce into Y.
 
-See ``examples/gfx950/fused_mega_moe/docs/BUILD_SPEC.md`` for the authoritative
-build specification.
+The authoritative build specification is not in the tree.
 
 STATUS: COMPLETE (f16 + bf16, single launch).
 
@@ -111,7 +110,7 @@ class FusedMegaKernelSpec:
 
     The mega-kernel fuses gate+up+silu+down+reduce for one sorted-token
     M-block over one ``TILE_N_INTER`` slice of the inter dimension. Tiling is
-    locked by BUILD_SPEC Section 1.1:
+    locked as follows:
 
     * ``tile_m`` = sorted tokens per m-block (pyisa ``sub_x``), default 32.
     * ``tile_n_inter`` = inter columns this TG owns (pyisa ``sub_gu``); this is
@@ -521,7 +520,7 @@ def build_moe_fused_mega_gemm(
 
     storage_dtype = _storage_dtype(u_gu)
 
-    # ---- params (BUILD_SPEC Section 3.1) -------------------------------
+    # ---- params --------------------------------------------------------
     A = b.param(
         "A", PtrType(storage_dtype, "global"), noalias=True, readonly=True, align=16
     )

@@ -11,11 +11,10 @@ int4 weights, group-of-32 scales). The kernel computes::
 with ``A`` / ``C`` fp16 row-major, ``B`` packed two signed int4 per byte, and
 one scale per ``(n, k // group_size)`` group.
 
-The three planned specializations (``large_n`` / ``skinny_n`` / ``decode_gemv``;
-see ``dsl_docs/architecture/matmul_nbits_plan.md``) share their operand layout,
-validity rules, signature, grid, and the 64-row outer-loop driver. Those live
-here so the per-family bodies only add what differs. The public dispatcher and
-the per-family validity extras live in
+The three planned specializations (``large_n`` / ``skinny_n`` / ``decode_gemv``)
+share their operand layout, validity rules, signature, grid, and the 64-row
+outer-loop driver. Those live here so the per-family bodies only add what
+differs. The public dispatcher and the per-family validity extras live in
 :mod:`rocke.instances.common.matmul_nbits`.
 
 This module is Milestone 1: spec, validator, signature, grid, and the
@@ -295,8 +294,7 @@ def matmul_nbits_outer_tiles(
 # ---------------------------------------------------------------------
 #
 # The v1 ``row_k_contiguous`` layout is deliberately the simplest thing that
-# verifies (see ``dsl_docs/architecture/matmul_nbits_plan.md`` "Packing And
-# Layout"):
+# verifies:
 #
 #   * B is logical signed int4 ``[N, K]`` in ``[-8, 7]``;
 #   * two values pack per byte, K contiguous inside each N row:

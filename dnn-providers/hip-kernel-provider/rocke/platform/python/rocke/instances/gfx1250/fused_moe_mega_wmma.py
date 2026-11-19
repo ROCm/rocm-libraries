@@ -113,7 +113,7 @@ class FusedMegaWmmaSpec:
 
     The mega-kernel fuses gate+up+silu+down+reduce for one sorted-token
     M-block over one ``tile_n_inter`` slice of the inter dimension. Tiling
-    mirrors the gfx950 mega (BUILD_SPEC Section 1.1) with the WMMA wave32
+    mirrors the gfx950 mega with the WMMA wave32
     block size:
 
     * ``tile_m`` = sorted tokens per m-block, default 16 (one WMMA M atom).

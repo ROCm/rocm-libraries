@@ -126,7 +126,7 @@ rocke_status_t rocke_moe_mega_build_ctx_init(rocke_moe_mega_build_ctx_t* ctx,
     ctx->storage_dtype = rocke_mega_storage_dtype(u_gu);
     const rocke_type_t* storage_dtype = ctx->storage_dtype;
 
-    /* ---- params (BUILD_SPEC Section 3.1, lines 464-496) ----------------- */
+    /* ---- params ------------------------------------------------------------ */
     const rocke_type_t* ptr_storage = rocke_ptr_type(b, storage_dtype, "global");
     {
         rocke_param_opts_t ro16;

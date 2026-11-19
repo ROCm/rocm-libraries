@@ -4,7 +4,6 @@
 
 Kernel code lives in ``crc_interleaved_gemm.py``; this re-exports the public API so
 ``from rocke.helpers.tiling.kernels.tiling_gemm_crc_demo import build_crc_gemm`` keeps working.
-Docs + renders: ``docs/`` (``design_report.md``, ``viz/``). Throwaway scripts: ``tmp/``.
 """
 from .crc_interleaved_gemm import (
     benchmark_crc,
