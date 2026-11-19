@@ -1490,7 +1490,7 @@ public:
             std::move(inputs),
             std::vector<MatchDescriptor>{},
             std::move(dispatches),
-            GRAPH_MATCH,
+            NativeGraphMatch{GRAPH_MATCH},
             SHARED_TOKEN,
             "engine 'slotted fixture'",
             KernelIngestorStateManager<StubHandle>::DEFAULT_CATALOG_CACHE_CAPACITY,

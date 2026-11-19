@@ -1071,7 +1071,7 @@ std::unique_ptr<KernelIngestorStateManager<TestHandle>>
         std::vector<DispatchDescriptor>{{DISPATCH_ID, "test dispatch", "test.dispatch"}},
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(CONSTANT_SCORE_SYMBOL),
-        "test.graph");
+        NativeGraphMatch{"test.graph"});
 }
 
 /// KnobFilterContext narrows its stored plan to GenericPlan, which the benchmarking-on
@@ -3261,7 +3261,7 @@ std::unique_ptr<KernelIngestorStateManager<TestHandle>> makeOneSlotTwoKernelStat
         std::move(slots),
         std::vector<MatchDescriptor>{},
         std::vector<DispatchDescriptor>{{DISPATCH_ID, "test dispatch", "test.dispatch"}},
-        "test.graph",
+        NativeGraphMatch{"test.graph"},
         std::string{},
         "engine 'slot fixture'");
 }

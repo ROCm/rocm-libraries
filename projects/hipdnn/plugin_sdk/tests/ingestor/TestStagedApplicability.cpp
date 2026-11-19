@@ -966,7 +966,7 @@ std::unique_ptr<StagedEngine> makeSlottedEngine(const IDeviceResolver<StubHandle
     auto owned = std::make_unique<Manager>(std::move(slots),
                                            std::move(matchers),
                                            makeStubDispatches(),
-                                           GRAPH_SYMBOL,
+                                           NativeGraphMatch{GRAPH_SYMBOL},
                                            WS_BYTES,
                                            "engine 'slotted staged fixture'");
     if(manager != nullptr)
