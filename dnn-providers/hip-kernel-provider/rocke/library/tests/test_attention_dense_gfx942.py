@@ -30,6 +30,7 @@ what keeps the gfx950 goldens untouched by anything in this file.
 """
 
 import dataclasses
+import functools
 import hashlib
 import inspect
 import re
@@ -169,6 +170,8 @@ def _lower(kd, arch: str = "gfx942") -> str:
     )
 
 
+# Memoized: the injectivity cases rebuild each base spec once per field.
+@functools.cache
 def _ir_body_sha(spec, *, arch: str = "gfx942", build=build_attention_dense) -> str:
     """SHA of the lowered IR with the kernel SYMBOL normalised out.
 
@@ -268,9 +271,6 @@ _UNBUILDABLE_SPEC_FIELDS = frozenset(
     {
         "varlen",
         "ragged",
-        "paged",
-        "block_size",
-        "num_kv_blocks",
     }
 )
 
@@ -302,9 +302,9 @@ _SPEC_PERTURBATIONS = {
     "sliding_window": (64, 128),  # multiples of block_n=64; base is causal
     "ragged": (),  # unbuildable
     "varlen": (),  # unbuildable
-    "paged": (),  # unbuildable (not yet supported)
-    "block_size": (),  # unbuildable (paged-only, paged not supported)
-    "num_kv_blocks": (),  # unbuildable (paged-only, paged not supported)
+    "paged": (False, True),  # legal only at the paged base
+    "block_size": (32, 64),  # paged-only
+    "num_kv_blocks": (128, 512),  # paged-only
     "block_m": (128, 512),
     "block_n": (32, 128),
     "waves_per_eu": (3, 4),
@@ -357,6 +357,8 @@ _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
 # lds_num_buffers no longer implicitly enables V prefetch. Every other knob is
 # also perturbed inside the combined pipeline body,
 # including iglp_mode (iglp base) and the persistent-grid fields (persistent base).
+# The paged base is the one baked-shape arm, and the only one paged/block_size/
+# num_kv_blocks can be perturbed at.
 _INJECTIVITY_BASES = {
     "d128_fp16_cfvst": dict(head_size=128, dtype="fp16"),
     "d128_fp16_cfvst_iglp": dict(head_size=128, dtype="fp16", iglp=True),
@@ -421,6 +423,14 @@ _INJECTIVITY_BASES = {
         seqlen_q=4096,
         seqlen_kv=4096,
         num_query_heads=32,
+    ),
+    "paged_d128_fp16": dict(
+        head_size=128,
+        dtype="fp16",
+        sliding_window=256,
+        paged=True,
+        block_size=16,
+        num_kv_blocks=256,
     ),
 }
 
@@ -539,9 +549,10 @@ def test_kernel_name_covers_every_baked_parameter(field):
         base_spec = _spec(**base_kw)
         ok, why = supports_attention_dense(base_spec, arch="gfx942")
         assert ok, f"base {base_id} must be in scope: {why}"
-        assert set(base_spec.runtime_param_fields) == _RUNTIME_PARAM_FIELDS, (
+        expected_runtime = _RUNTIME_PARAM_FIELDS if not base_spec.paged else set()
+        assert set(base_spec.runtime_param_fields) == expected_runtime, (
             f"base {base_id} declares runtime fields "
-            f"{base_spec.runtime_param_fields}, expected {sorted(_RUNTIME_PARAM_FIELDS)}"
+            f"{base_spec.runtime_param_fields}, expected {sorted(expected_runtime)}"
         )
         base_name = gfx942_kernel_name(base_spec)
         base_sha = _ir_body_sha(base_spec)
@@ -568,7 +579,7 @@ def test_kernel_name_covers_every_baked_parameter(field):
             decode_flipped = alt_spec.persistent and (
                 alt_spec.resolved_persist_decode != base_spec.resolved_persist_decode
             )
-            if runtime_field and not decode_flipped:
+            if runtime_field and base_spec.runtime_shape and not decode_flipped:
                 runtime_tried += 1
                 runtime_tried_persistent += int(alt_spec.persistent)
                 moved = [
@@ -864,6 +875,30 @@ def test_supports_rejects_modes_deferred_to_later_phases(kw, marker):
     assert marker in why
 
 
+_PAGED = dict(sliding_window=256, paged=True, block_size=16, num_kv_blocks=256)
+
+
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+def test_paged_is_supported_and_takes_the_dma_v_path(dtype):
+    """Paged builds at both dtypes and resolves cfvst off by policy, so its name
+    carries no ``cfvst0`` override tag."""
+    spec = _spec(dtype=dtype, **_PAGED)
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, why
+    assert not spec.resolved_use_cfvst()
+    assert not spec.resolved_use_v_swizzle()
+    assert "cfvst" not in gfx942_kernel_name(spec)
+    params = [p.name for p in build_attention_dense(spec, arch="gfx942").params]
+    assert params[-3:] == ["block_tables", "kv_lens", "block_table_stride"]
+
+
+def test_paged_rejects_forced_cfvst():
+    ok, why = supports_attention_dense(
+        _spec(dtype="fp16", use_cfvst=True, **_PAGED), arch="gfx942"
+    )
+    assert not ok and "paged" in why
+
+
 def test_bottom_right_is_supported_without_a_window():
     """Bottom-right causal is the plain causal band shifted by seqlen_kv - seqlen_q;
     a window cannot shift with it, so that combination stays rejected."""
@@ -946,14 +981,22 @@ def test_supports_rejects_block_n_larger_than_the_query_tile():
     assert not ok and "block_n" in why
 
 
-def test_supports_rejects_sliding_window_past_seqlen_kv():
-    """SWA + causal where the last query block's window starts past seqlen_kv:
-    start_tile >= n_up -> zero-trip KV loop -> l == 0 -> rcp(0) -> NaN. Same class
-    as the block_n zero-trip guards above."""
-    ok, why = supports_attention_dense(
-        _spec(seqlen_q=1024, seqlen_kv=256, sliding_window=128), arch="gfx942"
+@pytest.mark.parametrize("use_sinks", [False, True])
+@pytest.mark.parametrize("persistent", [False, True])
+def test_supports_accepts_window_past_seqlen_kv(persistent, use_sinks):
+    """The last query block's window starts past seqlen_kv. Its rows see no key and
+    the kernel writes 0 for them (the sink seed with sinks, the row_has_key store
+    mask without), so the shape is admitted on both grids and builds."""
+    spec = _spec(
+        seqlen_q=1024,
+        seqlen_kv=256,
+        sliding_window=128,
+        use_sinks=use_sinks,
+        persistent=persistent,
     )
-    assert not ok and "sliding_window" in why
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, why
+    build_attention_dense(spec, arch="gfx942")
 
 
 def test_supports_accepts_sliding_window_in_range():
@@ -968,24 +1011,6 @@ def test_supports_accepts_sinks_alone_and_with_sliding_window():
     for kw in (dict(), dict(sliding_window=128), dict(persistent=True)):
         ok, why = supports_attention_dense(_spec(use_sinks=True, **kw), arch="gfx942")
         assert ok, f"{kw}: {why}"
-
-
-@pytest.mark.parametrize("persistent", [False, True])
-def test_supports_accepts_empty_window_with_sinks(persistent):
-    """With sinks the zero-trip KV loop leaves l at the l0 = 1 seed and o at zero, so
-    the empty-window rows output 0 (softmax over the sink alone) instead of NaN. The
-    guard is lifted for sinks only; the same shape without sinks is still rejected
-    by test_supports_rejects_sliding_window_past_seqlen_kv."""
-    spec = _spec(
-        seqlen_q=1024,
-        seqlen_kv=256,
-        sliding_window=128,
-        use_sinks=True,
-        persistent=persistent,
-    )
-    ok, why = supports_attention_dense(spec, arch="gfx942")
-    assert ok, why
-    build_attention_dense(spec, arch="gfx942")
 
 
 def _sink_seed_sites(kernel):
@@ -2096,7 +2121,7 @@ def test_v_row_pad_policy_matches_the_cfvst_swizzle_matrix(
     any tile width; 8 (no swizzle) everywhere else. This
     pins the derived values so a future edit that flips one arm updates this on purpose.
     """
-    assert _v_row_pad(head_size, dtype, block_n) == expected
+    assert _v_row_pad(head_size, dtype, block_n, False) == expected
 
 
 @pytest.mark.parametrize("block_n", [32, 64, 128])
@@ -2106,10 +2131,10 @@ def test_cfvst_swizzle_engages_at_every_block_n(block_n):
     turns off (a constant pad dropped it + wasted LDS at block_n != 64). The non-cfvst
     path stays unpadded (no swizzle)."""
     for dtype in ("fp16", "bf16"):
-        v_ldrow = block_n + _v_row_pad(128, dtype, block_n)
+        v_ldrow = block_n + _v_row_pad(128, dtype, block_n, False)
         assert v_ldrow == _v_swizzle_width(block_n), (dtype, block_n, v_ldrow)
         assert v_ldrow >= 64 and (v_ldrow & (v_ldrow - 1)) == 0, (block_n, v_ldrow)
-    assert _v_row_pad(64, "bf16", block_n) == 8
+    assert _v_row_pad(64, "bf16", block_n, False) == 8
 
 
 @pytest.mark.parametrize("block_n", [64, 32])
@@ -2129,7 +2154,7 @@ def test_cfvst_swizzle_is_emitted_in_ir_with_matching_store_read_mask(block_n):
     import re
 
     spec = _spec(head_size=128, dtype="fp16", block_n=block_n)
-    expected_mask = (block_n + _v_row_pad(128, "fp16", block_n)) // 4 - 1
+    expected_mask = (block_n + _v_row_pad(128, "fp16", block_n, False)) // 4 - 1
 
     def _swz_masks(ir):
         consts = {int(c) for c in re.findall(r"\band i32 [^,]+, (\d+)", ir)}

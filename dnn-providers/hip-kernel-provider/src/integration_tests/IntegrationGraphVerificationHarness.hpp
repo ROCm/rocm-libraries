@@ -190,6 +190,7 @@ protected:
 
         if(!run.referenceReady)
         {
+            ASSERT_NO_FATAL_FAILURE(prepareReferenceInputs(run.gpuBundle, run.cpuBundle));
             ASSERT_NO_FATAL_FAILURE(executeCpuGraph(graph, run.cpuBundle));
             run.referenceReady = true;
         }
@@ -383,6 +384,16 @@ protected:
         }
     }
 
+    /// Runs after the GPU graph and before the CPU reference's first run. A suite whose
+    /// reference reads an engine output as its input (SDPA's Philox dropout reads the engine's
+    /// RNG dump as its explicit mask, SEM-015) copies it from @p gpuBundle into @p cpuBundle
+    /// here. Does nothing by default.
+    virtual void prepareReferenceInputs(
+        [[maybe_unused]] hipdnn_test_sdk::utilities::GraphTensorBundle& gpuBundle,
+        [[maybe_unused]] hipdnn_test_sdk::utilities::GraphTensorBundle& cpuBundle)
+    {
+    }
+
     /// Called with the workspace each GPU execute is about to receive, before the execute.
     /// A suite whose engine must not depend on the workspace's prior contents overrides this
     /// to fill it with a pattern; the default leaves the fresh allocation as it is.
@@ -453,6 +464,13 @@ private:
                             hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
         gpuBundle.addTensor(*tensorAttr,
                             hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
+
+        // A ragged tensor's offset table is an input the variant pack must carry, but the
+        // node lists only its primary tensors.
+        if(tensorAttr->has_ragged_offset())
+        {
+            tryAddTensorToBundles(tensorAttr->get_ragged_offset(), cpuBundle, gpuBundle);
+        }
     }
 };
 

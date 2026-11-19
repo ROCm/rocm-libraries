@@ -42,6 +42,7 @@
 #include <cstddef>
 #include <limits>
 #include <mutex>
+#include <numeric>
 #include <sstream>
 #include <vector>
 
@@ -936,6 +937,43 @@ namespace TensileLite
                 }
             };
 
+            // A problem with a peer D buffer runs only kernels that store to it, and the reverse.
+            struct PeerDCheck : public Predicate_CRTP<PeerDCheck, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                bool value;
+
+                PeerDCheck() = default;
+                PeerDCheck(bool value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "PeerDCheck";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.outputPeerD() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "prob_peerD=" << problem.outputPeerD() << " == sol_peerD=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
             struct BetaZero : public Predicate_CRTP<BetaZero, ContractionProblemGemm>
             {
                 enum
@@ -1531,6 +1569,213 @@ namespace TensileLite
                     std::ostringstream details;
                     details << "C:" << problem.c().strides()[1] << "*"
                             << problem.c().elementBytes() << "*" << value << "<2^32";
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
+            // PrefetchGL2SAddr holds each lane's offset into the GL2 prefetch
+            // footprint in one VGPR, computed in elements before the bpe scaling,
+            // so the element and the byte offset must both fit in 32 bits. MX
+            // scales and TLU metadata step by the whole free size per row, so for a
+            // K-contiguous A or B they can overflow while the data offset fits.
+            struct GL2PrefetchSAddrOffsetLimitCheck
+                : public Predicate_CRTP<GL2PrefetchSAddrOffsetLimitCheck, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                GL2PrefetchSAddrCheckPacket value;
+
+                GL2PrefetchSAddrOffsetLimitCheck() = default;
+                GL2PrefetchSAddrOffsetLimitCheck(GL2PrefetchSAddrCheckPacket value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "GL2PrefetchSAddrOffsetLimitCheck";
+                }
+
+                // Last row of the perpendicular extent plus the last coalesced
+                // element. The kernel clamps both extents to the tensor edge along
+                // a free dimension, but not the perpendicular one along K.
+                static size_t maxOffsetElements(TensorDescriptor const& tensor,
+                                                bool                    tlu,
+                                                size_t                  depthU,
+                                                size_t                  clusterMT)
+                {
+                    size_t perp = tlu ? depthU : std::min(clusterMT, tensor.sizes()[1]);
+                    size_t coal = tlu ? std::min(clusterMT, tensor.sizes()[0]) : depthU;
+                    if(perp == 0 || coal == 0)
+                        return 0;
+                    return (perp - 1) * tensor.strides()[1] + (coal - 1);
+                }
+
+                // Scales are stored K-block-major whatever the data layout: a row
+                // holds mxUnit scales for each of the ceil(Size / MXBlockFree)
+                // scale rows, and the tile spans DepthU / MatrixInstK rows. The
+                // coalesced index stops at the cluster's scale rows and the edge.
+                static size_t maxScaleOffsetElements(size_t freeSize,
+                                                     size_t depthU,
+                                                     size_t matrixInstK,
+                                                     size_t mxBlock,
+                                                     size_t mxBlockFree,
+                                                     size_t clusterMT)
+                {
+                    if(mxBlock == 0 || matrixInstK == 0 || freeSize == 0 || clusterMT == 0)
+                        return 0;
+                    size_t perp = depthU / matrixInstK;
+                    if(perp == 0)
+                        return 0;
+                    size_t mxTile = std::max<size_t>(1, mxBlockFree);
+                    size_t mxUnit = std::max<size_t>(1, matrixInstK / mxBlock);
+                    size_t pitch  = (freeSize + mxTile - 1) / mxTile * mxUnit;
+                    // Scale rows one cluster can touch, including a tile that
+                    // starts partway through a row (see mxTdmTileM).
+                    size_t maxPhase = mxTile - std::gcd(clusterMT, mxTile);
+                    size_t cluster  = (maxPhase + clusterMT + mxTile - 1) / mxTile * mxUnit;
+                    size_t coal     = std::min(cluster, pitch - mxUnit + 1);
+                    return (perp - 1) * pitch + (coal - 1);
+                }
+
+                static bool fits32(size_t elements, float elementBytes)
+                {
+                    const uint64_t TWO_POW_32 = 4294967296;
+                    return elements < TWO_POW_32
+                           && multiplyElementSize(elements, elementBytes) < TWO_POW_32;
+                }
+
+                // The kernel walks the sparse operand with the compressed strides.
+                static TensorDescriptor const& tensorA(ContractionProblemGemm const& problem)
+                {
+                    return problem.sparse() == 1 ? problem.compressed() : problem.a();
+                }
+
+                static TensorDescriptor const& tensorB(ContractionProblemGemm const& problem)
+                {
+                    return problem.sparse() == 2 ? problem.compressed() : problem.b();
+                }
+
+                size_t maxOffsetA(ContractionProblemGemm const& problem) const
+                {
+                    return maxOffsetElements(
+                        tensorA(problem), value.tluA, value.depthUA, value.clusterMT0);
+                }
+
+                size_t maxOffsetB(ContractionProblemGemm const& problem) const
+                {
+                    return maxOffsetElements(
+                        tensorB(problem), value.tluB, value.depthUB, value.clusterMT1);
+                }
+
+                size_t maxOffsetMXSA(ContractionProblemGemm const& problem) const
+                {
+                    return maxScaleOffsetElements(problem.freeSizeA(0),
+                                                  value.depthU,
+                                                  value.matrixInstK,
+                                                  value.mxBlockA,
+                                                  value.mxBlockFreeA,
+                                                  value.clusterMT0);
+                }
+
+                size_t maxOffsetMXSB(ContractionProblemGemm const& problem) const
+                {
+                    return maxScaleOffsetElements(problem.freeSizeB(0),
+                                                  value.depthU,
+                                                  value.matrixInstK,
+                                                  value.mxBlockB,
+                                                  value.mxBlockFreeB,
+                                                  value.clusterMT1);
+                }
+
+                bool checksMetadata(ContractionProblemGemm const& problem) const
+                {
+                    return value.metadata && problem.sparse() != 0;
+                }
+
+                size_t maxOffsetMetadata(ContractionProblemGemm const& problem) const
+                {
+                    if(!checksMetadata(problem))
+                        return 0;
+                    return maxOffsetElements(problem.metadata(),
+                                             value.tluMetadata,
+                                             value.depthUMetadata,
+                                             value.clusterMTMetadata);
+                }
+
+                // A problem without scales has no scale tensor; E8M0 is one byte.
+                static float scaleBytes(TensorDescriptor const& scales)
+                {
+                    return scales.dimensions() > 0 ? scales.elementBytes() : 1.0f;
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return fits32(maxOffsetA(problem), problem.a().elementBytes())
+                           && fits32(maxOffsetB(problem), problem.b().elementBytes())
+                           && fits32(maxOffsetMXSA(problem), scaleBytes(problem.mxsa()))
+                           && fits32(maxOffsetMXSB(problem), scaleBytes(problem.mxsb()))
+                           && (!checksMetadata(problem)
+                               || fits32(maxOffsetMetadata(problem),
+                                         problem.metadata().elementBytes()));
+                }
+
+                virtual std::string toString() const override
+                {
+                    return concatenate(this->type(),
+                                       "(TLUA:",
+                                       value.tluA,
+                                       ", TLUB:",
+                                       value.tluB,
+                                       ", DUA:",
+                                       value.depthUA,
+                                       ", DUB:",
+                                       value.depthUB,
+                                       ", ClusterMT0:",
+                                       value.clusterMT0,
+                                       ", ClusterMT1:",
+                                       value.clusterMT1,
+                                       ", DU:",
+                                       value.depthU,
+                                       ", MIK:",
+                                       value.matrixInstK,
+                                       ", MXBlockA:",
+                                       value.mxBlockA,
+                                       ", MXBlockB:",
+                                       value.mxBlockB,
+                                       ", MXBlockFreeA:",
+                                       value.mxBlockFreeA,
+                                       ", MXBlockFreeB:",
+                                       value.mxBlockFreeB,
+                                       ", Metadata:",
+                                       value.metadata,
+                                       ", TLUMetadata:",
+                                       value.tluMetadata,
+                                       ", DUMetadata:",
+                                       value.depthUMetadata,
+                                       ", ClusterMTMetadata:",
+                                       value.clusterMTMetadata,
+                                       ")");
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool               rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "A:" << maxOffsetA(problem) << "*" << problem.a().elementBytes()
+                            << "<2^32, B:" << maxOffsetB(problem) << "*"
+                            << problem.b().elementBytes()
+                            << "<2^32, MXSA:" << maxOffsetMXSA(problem) << "*"
+                            << scaleBytes(problem.mxsa())
+                            << "<2^32, MXSB:" << maxOffsetMXSB(problem) << "*"
+                            << scaleBytes(problem.mxsb()) << "<2^32";
+                    if(checksMetadata(problem))
+                        details << ", Metadata:" << maxOffsetMetadata(problem) << "<2^32";
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
@@ -2882,36 +3127,80 @@ namespace TensileLite
                 }
             };
 
-            struct FusedGemmA2A : public Predicate_CRTP<FusedGemmA2A, ContractionProblemGemm>
+            // MX scale layout of the solution. The host does not tell formats below
+            // kFirstExactFormat apart, so they match each other; a later format on
+            // either side must equal the other side.
+            struct MXScaleFormatEquals
+                : public Predicate_CRTP<MXScaleFormatEquals, ContractionProblemGemm>
             {
                 enum
                 {
                     HasIndex = false,
                     HasValue = true
                 };
-                bool value;
+                static constexpr int kFirstExactFormat = 3;
 
-                FusedGemmA2A() = default;
-                FusedGemmA2A(bool value)
+                int value = 0;
+
+                MXScaleFormatEquals() = default;
+                MXScaleFormatEquals(int value)
                     : value(value)
                 {
                 }
 
                 static std::string Type()
                 {
-                    return "FusedGemmA2A";
+                    return "MXScaleFormatEquals";
                 }
 
                 bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    return problem.fusedGemmA2A() == value;
+                    if(value < kFirstExactFormat && problem.mxScaleFormat() < kFirstExactFormat)
+                        return true;
+                    return problem.mxScaleFormat() == value;
+                }
+
+                bool debugEval(ContractionProblemGemm const& problem,
+                               std::ostream&                 stream) const override
+                {
+                    bool               rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "prob=" << problem.mxScaleFormat() << " matches sol=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
+            struct FusedA2AEqual : public Predicate_CRTP<FusedA2AEqual, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                FusedA2A value = FusedA2A::Disabled;
+
+                FusedA2AEqual() = default;
+                FusedA2AEqual(FusedA2A value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "FusedA2A";
+                }
+
+                bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.fusedA2A() == value;
                 }
 
                 bool debugEval(ContractionProblemGemm const& problem,
                                std::ostream&                 stream) const override
                 {
                     return debugEvalCmp(
-                        problem, stream, "prob", problem.fusedGemmA2A(), "==", "sol", value);
+                        problem, stream, "prob", problem.fusedA2A(), "==", "sol", value);
                 }
             };
 
@@ -2938,7 +3227,7 @@ namespace TensileLite
 
                 bool fits(ContractionProblemGemm const& problem) const
                 {
-                    if(!problem.fusedGemmA2A())
+                    if(problem.fusedA2A() != FusedA2A::GemmA2A)
                         return true;
                     const int64_t world = problem.world();
                     const int64_t am    = problem.fusedA2AExtent();
@@ -2968,7 +3257,7 @@ namespace TensileLite
                 {
                     bool               rv = fits(problem);
                     std::ostringstream details;
-                    if(problem.fusedGemmA2A())
+                    if(problem.fusedA2A() == FusedA2A::GemmA2A)
                     {
                         const auto& d = problem.d();
                         details << "world=" << problem.world() << " am=" << problem.fusedA2AExtent()
@@ -2983,6 +3272,74 @@ namespace TensileLite
                                " (am/world)>>3 < 2^14, mStride == 1, ldd % 8 == 0,"
                                " ldd>>3 < 2^19, batch == 1)";
                     }
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
+            // value is the solution's DepthU * A2ASubRounds.
+            struct A2AGemmShape : public Predicate_CRTP<A2AGemmShape, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int64_t value;
+
+                A2AGemmShape() = default;
+                A2AGemmShape(int64_t value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "A2AGemmShape";
+                }
+
+                bool fits(ContractionProblemGemm const& problem) const
+                {
+                    const int64_t world = problem.world();
+                    const int64_t k     = problem.boundSize(0);
+                    if(world == 0 || value <= 0 || k <= 0 || problem.getParams().gsuc()
+                       || problem.batchMode() != ContractionProblemGemm::BATCHMODE::STRIDED)
+                        return false;
+                    for(size_t i = 0; i < problem.batchIndices().size(); i++)
+                        if(problem.batchSize(i) != 1)
+                            return false;
+                    auto const&   b        = problem.b();
+                    const int64_t rowBytes = (k / world) * (int64_t)b.elementBytes();
+                    return problem.fusedA2AExtent() == k && k % (world * value) == 0
+                           && rowBytes / 16 <= (1 << 14)
+                           && ((int64_t)problem.freeSizeB(0) * rowBytes) % 128 == 0
+                           && b.strides()[problem.boundIndices()[0].b] == 1
+                           && (int64_t)b.strides()[problem.freeIndicesB()[0].i] == k;
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return fits(problem);
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool               rv = fits(problem);
+                    std::ostringstream details;
+                    auto const&        b = problem.b();
+                    details << "world=" << problem.world() << " K=" << problem.boundSize(0)
+                            << " extent=" << problem.fusedA2AExtent()
+                            << " N=" << problem.freeSizeB(0) << " DU*S=" << value
+                            << " bpeB=" << b.elementBytes()
+                            << " strideBK=" << b.strides()[problem.boundIndices()[0].b]
+                            << " strideBN=" << b.strides()[problem.freeIndicesB()[0].i]
+                            << " gsuc=" << problem.getParams().gsuc()
+                            << " batchMode=" << problem.batchMode()
+                            << " (need world >= 1, extent == K, K % (world*DU*S) == 0,"
+                               " (K/world)*bpeB/16 <= 2^14, N*(K/world)*bpeB % 128 == 0,"
+                               " strideBK == 1, strideBN == K, batch == 1, gsuc == 0,"
+                               " batchMode == 0 (strided))";
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }

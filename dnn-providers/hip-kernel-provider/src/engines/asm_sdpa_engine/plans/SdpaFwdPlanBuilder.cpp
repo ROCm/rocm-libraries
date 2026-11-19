@@ -5,10 +5,13 @@
 #include "asm/AsmKernelPath.hpp"
 #include "asm_fmha_v3_fwd_configs.hpp"
 #include "core/Utils.hpp"
+#include "plans/SdpaFwdLaunchParams.hpp"
 #include "plans/SdpaFwdPlan.hpp"
 #include "plans/SdpaPlanUtils.hpp"
 
 #include <cmath>
+#include <exception>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -209,6 +212,32 @@ static bool hasAiterCompatibleRaggedAddressing(
     return true;
 }
 
+// The gfx950 bf16 head-dim-256 kernels index K/V by the query head, so they compute only
+// equal Q and KV head counts. AITER sends GQA/MQA for them to CK.
+//
+// Known limitation, not declined: these kernels round Q * scale * log2(e) to bf16 before
+// Q*K^T, where the hd128 and hd192x128 kernels keep that factor in fp32, so their error
+// grows with the attention scale. At 1/sqrt(256) they meet the bf16 tolerance (1e-2); at
+// scale 1.0, which a graph gets when it sets no scale, a group-mode case reaches an error
+// of about 0.016. The limit is in AITER's kernels, which AITER launches at any scale too, so
+// the engine adds no precision bound on the scale for them.
+static bool kernelServesHeadCounts(const std::string& archId,
+                                   const std::string& dataTypeId,
+                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k)
+{
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
+    const int64_t qHeads = q.dims()->Get(1);
+    const int64_t kvHeads = k.dims()->Get(1);
+    HIP_KERNEL_RETURN_FALSE_IF(
+        archId == "gfx950" && dataTypeId == "bf16" && q.dims()->Get(3) == 256 && qHeads != kvHeads,
+        "gfx950 bf16 head dim 256 kernels do not support GQA/MQA (q heads: "
+            + std::to_string(qHeads) + ", kv heads: " + std::to_string(kvHeads) + ")");
+    return true;
+}
+
 static bool isMi308Device(hipStream_t stream)
 {
     // Seeded, not left indeterminate: a concrete stream's hipStreamGetDevice query can
@@ -327,21 +356,195 @@ static bool wouldFwdByteStridesFitUint32(
     return ok;
 }
 
-static std::string getKernelTocKey(std::string coName, const std::string& archId, bool isMi308)
+bool fwdKvRowExtentsFitU32(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+                           const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+                           int64_t inputBytes)
 {
-    if(archId == "gfx942")
+    constexpr auto K_U32_MAX_AS_I64 = static_cast<int64_t>(UINT32_MAX);
+    const int64_t seqLenKv = k.dims()->Get(SDPA_SEQ_AXIS);
+
+    auto extentFits
+        = [&](const char* name, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& t) {
+              const int64_t seqStride = t.strides()->Get(SDPA_SEQ_AXIS);
+              // seqLenKv * seqStride * inputBytes <= UINT32_MAX, evaluated by division so
+              // no product is formed.
+              const bool fits = seqLenKv >= 0 && seqStride >= 0 && inputBytes > 0
+                                && (seqLenKv == 0 || seqStride == 0
+                                    || seqStride <= K_U32_MAX_AS_I64 / inputBytes / seqLenKv);
+              if(!fits)
+              {
+                  HIPDNN_PLUGIN_LOG_INFO("SDPA: per-head row byte extent reaches 2^32 (tensor="
+                                         << name << ", seqlen_kv=" << seqLenKv << ", seq_stride="
+                                         << seqStride << ", elementBytes=" << inputBytes << ")");
+              }
+              return fits;
+          };
+
+    bool ok = true;
+    ok &= extentFits("k", k);
+    ok &= extentFits("v", v);
+    return ok;
+}
+
+// Validates the optional stats (LSE) output tensor that the kernel writes as dense
+// FP32 [B, H, Sq]. Q must already be known to be rank 4.
+static bool
+    isSupportedStatsTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& stats,
+                           const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
+    HIP_KERNEL_RETURN_FALSE_IF(stats.virtual_(), "stats tensor must not be virtual");
+    HIP_KERNEL_RETURN_FALSE_IF(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&stats),
+                               "stats tensor must not be pass-by-value");
+
+    HIP_KERNEL_RETURN_FALSE_IF(stats.data_type() != DataType::FLOAT,
+                               "stats tensor datatype must be FP32 (Actual type: "
+                                   + EnumNameDataType(stats.data_type()) + ")");
+
+    const auto statsRank = stats.dims()->size();
+    HIP_KERNEL_RETURN_FALSE_IF(
+        statsRank != 3 && statsRank != 4,
+        "stats tensor must be rank 3 [B,H,Sq] or rank 4 [B,H,Sq,1] (Actual rank: "
+            + std::to_string(statsRank) + ")");
+
+    if(statsRank == 4)
     {
-        auto pos = coName.rfind('/');
-        if(isMi308)
-        {
-            coName = coName.substr(0, pos + 1) + "MI308/" + coName.substr(pos + 1);
-        }
-        else
-        {
-            coName = coName.substr(0, pos + 1) + "MI300/" + coName.substr(pos + 1);
-        }
+        HIP_KERNEL_RETURN_FALSE_IF(stats.dims()->Get(3) != 1,
+                                   "stats tensor rank-4 last dim must be 1 (Actual: "
+                                       + std::to_string(stats.dims()->Get(3)) + ")");
     }
-    return asm_kernels::getAsmKernelTocKey(coName);
+
+    HIP_KERNEL_RETURN_FALSE_IF(stats.dims()->Get(0) != q.dims()->Get(0)
+                                   || stats.dims()->Get(1) != q.dims()->Get(1)
+                                   || stats.dims()->Get(2) != q.dims()->Get(2),
+                               "stats tensor shape [B,H,Sq] must match Q tensor");
+    return true;
+}
+
+// Checks every byte offset the kernel forms in 32 bits: the per-field strides,
+// the Ts product and, for hd192x128, the K/V per-head row extent. `inputBytes`
+// is the resolved Q/K/V element size and `tsQo` the matched row's Q-tile size.
+static bool fwdByteRangesFitU32(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                                const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+                                const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+                                const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o,
+                                const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* stats,
+                                int64_t inputBytes,
+                                int64_t tsQo)
+{
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
+    HIP_KERNEL_RETURN_FALSE_IF(!wouldFwdByteStridesFitUint32(q, k, v, o, stats, inputBytes),
+                               "Forward byte strides overflow uint32_t kernarg fields");
+
+    // s_Ts = tileSizeQo * qStrideRow * inBytesPerElement (SdpaFwdArgsBuilder) is
+    // the one forward kernarg that is a product rather than a single stride, and
+    // it is formed in unsigned int, so it wraps for Q sequence strides the
+    // per-field check above accepts. The resolved row's ts_qo folds into the
+    // element size so the product is never formed outside the predicate.
+    // Mirrors the backward Ts check.
+    HIP_KERNEL_RETURN_FALSE_IF(!plan_utils::byteStrideFitsU32(
+                                   "Ts (ts_qo * stride_q)", q.strides()->Get(2), inputBytes * tsQo),
+                               "Forward Ts product overflows the uint32_t s_Ts kernarg field");
+
+    // The hd192x128 kernels on both architectures address each K and V head
+    // through a 32-bit buffer offset, so a head whose rows span 2^32 bytes or
+    // more is out of their reach even when every per-field stride fits. Ports
+    // AITER's can_impl_fmha_v3_fwd rule (aiter/ops/mha.py, batch and varlen).
+    const bool isHd192x128 = q.dims()->Get(3) == 192 && v.dims()->Get(3) == 128;
+    HIP_KERNEL_RETURN_FALSE_IF(isHd192x128 && !fwdKvRowExtentsFitU32(k, v, inputBytes),
+                               "hd192x128 K or V per-head row extent reaches 2^32 bytes");
+    return true;
+}
+
+unsigned int SdpaFwdPlanBuilder::maxThreadsPerBlock(const fmha_v3_fwdConfig& config) const
+{
+    return static_cast<unsigned int>(config.max_flat_workgroup_size);
+}
+
+unsigned int fwdConfigBlockDimX(const fmha_v3_fwdConfig& config)
+{
+    return fwdBlockDimX(config.arch,
+                        static_cast<unsigned int>(config.hdim_q),
+                        static_cast<unsigned int>(config.hdim_v),
+                        config.dtype == "bf16",
+                        static_cast<BatchMode>(config.mode) == BatchMode::GROUP);
+}
+
+// A kernel launched with more threads per block than its code object's
+// max_flat_workgroup_size fails at hipModuleLaunchKernel.
+std::optional<std::string>
+    SdpaFwdPlanBuilder::launchLimitViolation(const fmha_v3_fwdConfig& config) const
+{
+    const unsigned int blockDimX = fwdConfigBlockDimX(config);
+    const unsigned int maxThreads = maxThreadsPerBlock(config);
+    if(blockDimX <= maxThreads)
+    {
+        return std::nullopt;
+    }
+    return "Kernel " + config.knl_name + " accepts at most " + std::to_string(maxThreads)
+           + " threads per block but is launched with " + std::to_string(blockDimX);
+}
+
+// isApplicable's launch-limit decline, kept out of isApplicable, which sits at
+// clang-tidy's readability-function-size limit.
+bool SdpaFwdPlanBuilder::acceptsLaunchBlock(const fmha_v3_fwdConfig& config) const
+{
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
+    const auto violation = launchLimitViolation(config);
+    HIP_KERNEL_RETURN_FALSE_IF(violation.has_value(), *violation);
+    return true;
+}
+
+// False when the node sets an attribute none of the forward kernels read.
+static bool
+    servesOptionalAttributes(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
+    // Dropout operands the kernels never read: a graph that carries one asks for dropout
+    // or its debug output, which these kernels do not produce. seed and offset are inert
+    // at dropout_probability 0, and a non-zero probability is declined below.
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_mask_tensor_uid(),
+                               "dropout_mask tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_scale_tensor_uid(),
+                               "dropout_scale tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.rng_dump_tensor_uid(), "rng_dump tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.block_mask_tensor_uid(), "block_mask tensor not supported");
+    // The plan writes only the output and the optional stats tensor, never max or sum_exp.
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.max_tensor_uid() || attrs.sum_exp_tensor_uid(),
+                               "max and sum_exp output tensors not supported");
+    // max_seq_len_kv sizes a paged K/V cache, which is not honored.
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.max_seq_len_kv().has_value(), "max_seq_len_kv not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
+                                   && attrs.dropout_probability().value() != 0.f,
+                               "dropout_probability must be unset or zero (Actual value: "
+                                   + std::to_string(attrs.dropout_probability().value()) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.alibi_mask(), "alibi_mask must be false");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.padding_mask(), "padding_mask must be false");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), // Change to bias
+                               "attn_mask tensor not supported");
+
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_k_tensor_uid(),
+                               "page_table_k tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(),
+                               "page_table_v tensor not supported");
+    // Attention sinks join the softmax denominator; the vendored kernels have no sink input.
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.sink_token_tensor_uid(), "sink_token tensor not supported");
+    // The plan writes a stats tensor only when generate_stats asks for one.
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.stats_tensor_uid().has_value() && !hasStatsOutput(attrs),
+                               "stats_tensor_uid is set but generate_stats is not");
+
+    return true;
 }
 
 bool SdpaFwdPlanBuilder::isApplicable(
@@ -357,6 +560,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
     // rather than risk a mismatch (RFC 0008 §4.6).
     HIP_KERNEL_RETURN_FALSE_IF(opGraph.getGraph().is_override_shape_enabled(),
                                "Graph has override shapes enabled");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !hip_kernel_provider::core::utils::hasNoStrayRaggedOffsetMultiplier(opGraph.getTensorMap()),
+        "ragged_offset_multiplier is set on a tensor without a ragged offset");
     HIP_KERNEL_RETURN_FALSE_IF(
         !hip_kernel_provider::core::utils::hasOnly16ByteAlignedTensors(opGraph.getTensorMap()),
         "All tensors must be aligned to a multiple of 16 bytes");
@@ -387,22 +593,10 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                "Compute data type must be FLOAT");
 
     const auto& attrs = nodeWrappers.front()->attributesAs<SdpaAttributes>();
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
-                                   && attrs.dropout_probability().value() != 0.f,
-                               "dropout_probability must be unset or zero (Actual value: "
-                                   + std::to_string(attrs.dropout_probability().value()) + ")");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.alibi_mask(), "alibi_mask must be false");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.padding_mask(), "padding_mask must be false");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), // Change to bias
-                               "attn_mask tensor not supported");
-
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_k_tensor_uid(),
-                               "page_table_k tensor not supported");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(),
-                               "page_table_v tensor not supported");
-    // Attention sinks join the softmax denominator; the vendored kernels have no sink input.
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.sink_token_tensor_uid(), "sink_token tensor not supported");
-
+    if(!servesOptionalAttributes(attrs))
+    {
+        return false;
+    }
     // Accept scale_tensor_uid only when it is a runtime pass-by-value scalar
     // (RFC 0016).  Non-pass-by-value scale tensors are not supported.
     if(attrs.scale_tensor_uid().has_value())
@@ -414,6 +608,11 @@ bool SdpaFwdPlanBuilder::isApplicable(
         HIP_KERNEL_RETURN_FALSE_IF(
             !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scaleIt->second),
             "scale tensor must be pass-by-value (compile-time constant or runtime)");
+    }
+
+    if(!plan_utils::isAttnScaleApplicable(attrs, opGraph.getTensorMap(), HIP_KERNEL_LOG_PREFIX))
+    {
+        return false;
     }
 
     const auto& tensorMap = opGraph.getTensorMap();
@@ -444,9 +643,12 @@ bool SdpaFwdPlanBuilder::isApplicable(
               + static_cast<int>(vTensor->ragged_offset_tensor_uid().has_value())
               + static_cast<int>(oTensor->ragged_offset_tensor_uid().has_value());
 
+        // Folded into one check: the function sits at clang-tidy's readability-function-size limit.
         HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_kv_tensor_uid().has_value()
-                                       || attrs.seq_len_q_tensor_uid().has_value(),
-                                   "SEQ_LENS_Q and SEQ_LENS_KV not supported");
+                                       || attrs.seq_len_q_tensor_uid().has_value()
+                                       || attrs.cu_seq_len_q_tensor_uid().has_value()
+                                       || attrs.cu_seq_len_kv_tensor_uid().has_value(),
+                                   "SEQ_LENS_Q/KV and CU_SEQ_LEN_Q/KV not supported");
 
         HIP_KERNEL_RETURN_FALSE_IF(numberRagged != 0 && numberRagged != 4,
                                    "Either all or none of Q, K, V or O must be ragged");
@@ -474,6 +676,15 @@ bool SdpaFwdPlanBuilder::isApplicable(
         !wouldFwdDimsFitKernargFields(*qTensor, *kTensor, *vTensor),
         "Tensor dimensions overflow the 32-bit kernarg fields that carry them");
 
+    // The kernel derives the GQA ratio as Hq / Hkv and indexes K, V and O with Q's batch,
+    // so the four tensors must agree on every extent they share.
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !plan_utils::hasConsistentFwdShapes(*qTensor, *kTensor, *vTensor, *oTensor),
+        "Q, K, V and O dimensions are inconsistent: every dimension must be positive, "
+        "K and V must share batch, head count and sequence length, the batch must match Q, "
+        "K's head size must match Q's, Hq must be a multiple of Hkv, and O must be "
+        "[B, Hq, Sq, Dv]");
+
     if(batchMode == BatchMode::GROUP
        && !hasAiterCompatibleRaggedAddressing(tensorMap, *qTensor, *kTensor, *vTensor, *oTensor))
     {
@@ -497,34 +708,10 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                    "stats_tensor_uid not found in tensor map");
 
         statsTensor = statsIt->second;
-
-        HIP_KERNEL_RETURN_FALSE_IF(statsTensor->virtual_(), "stats tensor must not be virtual");
-        HIP_KERNEL_RETURN_FALSE_IF(
-            hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(statsTensor),
-            "stats tensor must not be pass-by-value");
-
-        HIP_KERNEL_RETURN_FALSE_IF(statsTensor->data_type() != DataType::FLOAT,
-                                   "stats tensor datatype must be FP32 (Actual type: "
-                                       + EnumNameDataType(statsTensor->data_type()) + ")");
-
-        const auto statsRank = statsTensor->dims()->size();
-        HIP_KERNEL_RETURN_FALSE_IF(
-            statsRank != 3 && statsRank != 4,
-            "stats tensor must be rank 3 [B,H,Sq] or rank 4 [B,H,Sq,1] (Actual rank: "
-                + std::to_string(statsRank) + ")");
-
-        if(statsRank == 4)
+        if(!isSupportedStatsTensor(*statsTensor, *qTensor))
         {
-            HIP_KERNEL_RETURN_FALSE_IF(statsTensor->dims()->Get(3) != 1,
-                                       "stats tensor rank-4 last dim must be 1 (Actual: "
-                                           + std::to_string(statsTensor->dims()->Get(3)) + ")");
+            return false;
         }
-
-        // Shape comparison is safe now — Q rank-4 is validated above.
-        HIP_KERNEL_RETURN_FALSE_IF(statsTensor->dims()->Get(0) != qTensor->dims()->Get(0)
-                                       || statsTensor->dims()->Get(1) != qTensor->dims()->Get(1)
-                                       || statsTensor->dims()->Get(2) != qTensor->dims()->Get(2),
-                                   "stats tensor shape [B,H,Sq] must match Q tensor");
     }
 
     HIP_KERNEL_RETURN_FALSE_IF(qTensor->data_type() != kTensor->data_type()
@@ -534,12 +721,6 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                    + ", k tensor: " + EnumNameDataType(kTensor->data_type())
                                    + ", v tensor: " + EnumNameDataType(vTensor->data_type()) + ")");
 
-    HIP_KERNEL_RETURN_FALSE_IF(
-        kTensor->dims()->Get(1) != vTensor->dims()->Get(1),
-        "k tensor and v tensor must shared the same head count (Actual value: k = "
-            + std::to_string(kTensor->dims()->Get(1))
-            + " v = " + std::to_string(vTensor->dims()->Get(1)) + ")");
-
     auto dataTypeId = getDataTypeIdentifier(
         qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type());
 
@@ -548,7 +729,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
     // the gfx942 fp8 forward kernels consume, so it is declined here with a specific
     // message rather than the generic "unsupported datatype" one below. Inputs are
     // proven same-type above, so checking q is sufficient. Remove once gfx950 OCP
-    // fp8 forward kernels are wired in.
+    // fp8 forward kernels are wired in, and port with them AITER's power-of-two GQA
+    // ratio requirement for fp8 (can_impl_fmha_v3_fwd in aiter/ops/mha.py), which the
+    // gfx942 fp8 objects do not need because they divide by the ratio in full.
     HIP_KERNEL_RETURN_FALSE_IF(
         qTensor->data_type() == DataType::FP8_E4M3,
         "gfx942 fp8 SDPA requires FP8_E4M3_FNUZ inputs; OCP FP8_E4M3 (gfx950/MI350) is a "
@@ -561,21 +744,25 @@ bool SdpaFwdPlanBuilder::isApplicable(
             + ") and input tensors must have datatype BFLOAT16 or FP8_E4M3_FNUZ (Actual type: "
             + EnumNameDataType(qTensor->data_type()) + ")");
 
-    // mma_core_mode is the MMA operand precision. The bf16 kernels run 16-bit MFMA on
-    // the graph's own bf16 inputs, so UNSET (the provider's choice), HALF and BFLOAT16
-    // all describe them. HALF is accepted on bf16 graphs because the cuDNN frontend,
-    // and hipDNN's cuDNN-compatibility shim, write HALF into Graph::sdpa() whenever
-    // the caller leaves the field unset. The fp8 kernels run fp8 MFMA, which no 16-bit
-    // mode describes, so they still require UNSET. An allow-list, so an enum value
-    // added later declines until judged.
+    // mma_core_mode selects the MMA path of the attention matmuls (cuDNN semantics); it is
+    // not the element or the accumulator type. The bf16 kernels run the 16-bit path, which
+    // cuDNN's Graph::sdpa() and hipDNN's cuDNN shim write as HALF for fp16 and bf16 alike;
+    // BFLOAT16 is accepted as its equivalent. The fp8 kernels run the FP8 path, which cuDNN
+    // spells FP8_E4M3 (the sdpa_fp8() default) or FP8_E5M2 and treats as one path. The mode
+    // does not name the input encoding or the precision: that comes from the tensor types,
+    // checked above (FP8_E4M3_FNUZ only). UNSET leaves the choice to the engine. An
+    // allow-list, so an enum value added later declines until judged.
     const auto mmaCoreMode = attrs.mma_core_mode();
     const bool isSixteenBitMmaMode
         = mmaCoreMode == DataType::HALF || mmaCoreMode == DataType::BFLOAT16;
     const bool mmaCoreModeSupported
-        = mmaCoreMode == DataType::UNSET || (dataTypeId == "bf16" && isSixteenBitMmaMode);
+        = mmaCoreMode == DataType::UNSET || (dataTypeId == "bf16" && isSixteenBitMmaMode)
+          || (dataTypeId == "fp8bf16"
+              && (mmaCoreMode == DataType::FP8_E4M3 || mmaCoreMode == DataType::FP8_E5M2));
     HIP_KERNEL_RETURN_FALSE_IF(
         !mmaCoreModeSupported,
-        "mma_core_mode must be UNSET, or HALF/BFLOAT16 for bf16 inputs (Actual value: "
+        "mma_core_mode must be UNSET, or HALF or BFLOAT16 for bf16 inputs, or FP8_E4M3 or "
+        "FP8_E5M2 for FP8_E4M3_FNUZ inputs (Actual value: "
             + EnumNameDataType(mmaCoreMode) + ", inputs: " + EnumNameDataType(qTensor->data_type())
             + ")");
 
@@ -657,27 +844,27 @@ bool SdpaFwdPlanBuilder::isApplicable(
             + std::to_string(static_cast<int>(getBf16ConvertMode(attrs, dataTypeId)))
             + " batch = " + std::to_string(static_cast<int>(batchMode)));
 
+    if(!kernelServesHeadCounts(deviceString, dataTypeId, *qTensor, *kTensor))
+    {
+        return false;
+    }
+
     // Q/K/V byte strides and the Ts product are scaled by the resolved input
     // size, which the datatype checks above have narrowed to bf16 or fp8bf16.
-    const int64_t inputBytes = fwdInputBytesPerElement(dataTypeId);
+    if(!fwdByteRangesFitU32(*qTensor,
+                            *kTensor,
+                            *vTensor,
+                            *oTensor,
+                            statsTensor,
+                            fwdInputBytesPerElement(dataTypeId),
+                            cfg_fmha_fwd.at(key).ts_qo))
+    {
+        return false;
+    }
 
-    HIP_KERNEL_RETURN_FALSE_IF(!wouldFwdByteStridesFitUint32(
-                                   *qTensor, *kTensor, *vTensor, *oTensor, statsTensor, inputBytes),
-                               "Forward byte strides overflow uint32_t kernarg fields");
-
-    // s_Ts = tileSizeQo * qStrideRow * inBytesPerElement (SdpaFwdArgsBuilder) is
-    // the one forward kernarg that is a product rather than a single stride, and
-    // it is formed in unsigned int, so it wraps for Q sequence strides the
-    // per-field check above accepts. The resolved row's ts_qo folds into the
-    // element size so the product is never formed outside the predicate.
-    // Mirrors the backward Ts check.
-    HIP_KERNEL_RETURN_FALSE_IF(
-        !plan_utils::byteStrideFitsU32("Ts (ts_qo * stride_q)",
-                                       qTensor->strides()->Get(2),
-                                       inputBytes * cfg_fmha_fwd.at(key).ts_qo),
-        "Forward Ts product overflows the uint32_t s_Ts kernarg field");
-
-    return true;
+    // Decline a kernel that cannot take the block it would be launched with, so
+    // the graph falls through to another engine instead of failing at launch.
+    return acceptsLaunchBlock(cfg_fmha_fwd.at(key));
 }
 
 size_t SdpaFwdPlanBuilder::getMaxWorkspaceSize(
@@ -907,10 +1094,17 @@ void SdpaFwdPlanBuilder::buildPlan(
     }
     config = cfg_fmha_fwd.at(kernelKey);
 
+    if(const auto launchViolation = launchLimitViolation(config))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "SdpaFwdPlanBuilder::buildPlan: "
+                                                           + *launchViolation);
+    }
+
     params.tileSizeQo = static_cast<unsigned int>(config.ts_qo);
 
     // Load kernel module from kpack archive
-    auto tocKey = getKernelTocKey(config.co_name, deviceString, isMi308);
+    auto tocKey = asm_kernels::getFwdKernelTocKey(config.co_name, deviceString, isMi308);
 
     HIPDNN_PLUGIN_LOG_INFO("Using kernel with tocKey: " << tocKey << " arch: " << deviceString);
 

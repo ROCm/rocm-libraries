@@ -5,7 +5,7 @@
 | Root | Packages | Installed in product? |
 |------|----------|-----------------------|
 | `platform/python` | `rocke` (authoring SDK + engine frontend) | yes (wheel / CMake) |
-| `library`         | `kernels`, `builders`, `dispatch` (SDPA/MHA) | **no** — build-time only |
+| `library`         | `kernels`, `builders`, `dispatch` (SDPA/MHA, conv, ...) | **no** for the Python (build-time only); the C++ mirrors in `library/cpp` ship in the `ckc` package (see "C++ engine") |
 
 The package import name is `rocke`; the SDPA product lives under separate
 top-level packages. Because the two halves sit under different roots, every
@@ -137,4 +137,11 @@ Override the roots for out-of-tree consumption with `ROCKE_PLATFORM_ROOT`,
 
 The platform C++ engine (`platform/cpp/` → `librocke_core.a`) and its
 `rocke_engine` pybind binding are built by CMake, not pip, and are intentionally
-not part of any wheel. See `platform/BUILD.md`.
+not part of any wheel. See `platform/BUILD.md`. The same configure also builds
+the library families' C++ mirrors (`library/cpp/` → `librocke_library.a`, beside
+`librocke_core.a`) and, with `ROCKE_BUILD_PYBIND=ON`, their `rocke_library_engine`
+binding beside `rocke_engine`; `-DROCKE_BUILD_LIBRARY_CPP=OFF` skips them.
+`cmake --install` puts the library archive and headers into the same `ckc`
+package: a C/C++ consumer of a library family (e.g. the conv API in
+`rocke/instance_conv_*.h`) links `ckc::rocke_library`, which brings
+`ckc::rocke_core` with it.

@@ -1,0 +1,50 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+TestParameters:
+  marks: [skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict] # not supported yet
+
+# One grouped problem of 400 gemms of different sizes (the client packs every problem size
+# into one grouped problem). Grouped kernels on 64-lane waves search the gemms 64 at a time
+# and load up to 384 per round trip, so 400 gemms cross both boundaries. The client launches
+# exactly one workgroup per tile, so no workgroup lands past the last tile here; the
+# GroupedMatmul gtests in hipBLASLt, whose grid comes from size hints, cover that path.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: -1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      GroupedGemm:   True
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 8, 1,  1,   2, 2,  2,2 ]
+        - DepthU: [32]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - SourceSwap: [true]
+        - GlobalSplitU: [1, 2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [8, 8, 160], [16, 16, 320], [1], [64] ]
