@@ -24,11 +24,13 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LGBM_PCFG)
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <map>
 #include <mutex>
 #include <shared_mutex>
 #include <numeric>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <unordered_map>
@@ -142,13 +144,20 @@ void FillProblemPrefix(std::vector<double>& prefix,
         prefix.push_back(static_cast<double>(GfxCode(model, gfx_id)));
 }
 
-// Score every candidate in the bucket and return their indices ordered
+/// Candidate indices ordered best->worst by predicted speed, with their scores in the same order.
+struct RankedOrder
+{
+    std::vector<std::uint32_t> order;
+    std::vector<double> scores;
+};
+
+// Score every candidate in the bucket and return their indices and scores ordered
 // best->worst by predicted speed (lambdarank: higher score = faster). The sort
 // is stable, so equal scores keep catalog order.
-std::vector<std::uint32_t> RankOrder(const LgbmForest& forest,
-                                     const SolverModel& model,
-                                     const std::vector<double>& prefix,
-                                     const std::vector<Candidate>& cands)
+RankedOrder RankOrder(const LgbmForest& forest,
+                      const SolverModel& model,
+                      const std::vector<double>& prefix,
+                      const std::vector<Candidate>& cands)
 {
     std::vector<LgbmEntry> row(static_cast<std::size_t>(model.feat_count));
     // Fill the constant problem+GPU prefix once.
@@ -173,72 +182,77 @@ std::vector<std::uint32_t> RankOrder(const LgbmForest& forest,
     std::stable_sort(order.begin(), order.end(), [&](std::uint32_t a, std::uint32_t b) {
         return scores[a] > scores[b];
     });
-    return order;
-}
-
-std::vector<std::string> Descriptors(const std::vector<Candidate>& cands,
-                                     const std::vector<std::uint32_t>& order)
-{
-    std::vector<std::string> ranked;
-    ranked.reserve(order.size());
+    RankedOrder ranked;
+    ranked.scores.reserve(order.size());
     for(const auto idx : order)
-        ranked.push_back(cands[idx].desc);
+        ranked.scores.push_back(scores[idx]);
+    ranked.order = std::move(order);
     return ranked;
 }
 
-// Score every candidate in the bucket and return their descriptors ordered
+RankedConfigs Descriptors(const std::vector<Candidate>& cands, const RankedOrder& ranked)
+{
+    RankedConfigs configs;
+    configs.descs.reserve(ranked.order.size());
+    for(const auto idx : ranked.order)
+        configs.descs.push_back(cands[idx].desc);
+    configs.scores = ranked.scores;
+    return configs;
+}
+
+// Score every candidate in the bucket and return their descriptors and scores ordered
 // best->worst by predicted speed. A "" element denotes the solver default
 // config. The caller walks this order and takes the first descriptor that
 // passes IsValidPerformanceConfig.
-std::vector<std::string> RankBucket(const LgbmForest& forest,
-                                    const SolverModel& model,
-                                    const std::vector<double>& prefix,
-                                    const std::vector<Candidate>& cands)
+RankedConfigs RankBucket(const LgbmForest& forest,
+                         const SolverModel& model,
+                         const std::vector<double>& prefix,
+                         const std::vector<Candidate>& cands)
 {
     if(cands.empty())
         return {};
     return Descriptors(cands, RankOrder(forest, model, prefix, cands));
 }
 
-/// Process-wide memo of RankBucket's order. The order depends only on the solver's model and the
-/// bucket's candidates (both fixed once the metadata is loaded) and on the feature prefix, which
-/// holds every problem and GPU input the model reads; the key is the solver, the bucket key
+/// Process-wide memo of RankBucket's order and scores. They depend only on the solver's model and
+/// the bucket's candidates (both fixed once the metadata is loaded) and on the feature prefix,
+/// which holds every problem and GPU input the model reads; the key is the solver, the bucket key
 /// (arch, direction, data type) and the prefix itself. Scoring a bucket runs the forest once per
 /// candidate (about 1.6 ms for 200 candidates on gfx1100) on every perf-db miss, so a problem
-/// queried again reuses its order. Bounded: an entry is about 1 KB, and the memo starts over at
-/// 100k entries.
+/// queried again reuses its ranking. Bounded: an entry is about 3 KB for a 200-candidate bucket,
+/// and the memo starts over at 100k entries.
 class RankOrderCache
 {
 public:
     using Key = std::tuple<std::string, std::string, std::vector<double>>;
 
     template <class Compute>
-    std::vector<std::uint32_t> GetOrCompute(const Key& key, Compute&& compute)
+    RankedOrder GetOrCompute(const Key& key, Compute&& compute)
     {
         {
             std::shared_lock lock{mutex};
             if(const auto it = entries.find(key); it != entries.end())
                 return it->second;
         }
-        auto order = compute();
+        auto ranked = compute();
         std::unique_lock lock{mutex};
         if(entries.size() >= Capacity && entries.find(key) == entries.end())
             entries.clear();
-        entries.try_emplace(key, order);
-        return order;
+        entries.try_emplace(key, ranked);
+        return ranked;
     }
 
 private:
     static constexpr std::size_t Capacity = 100000;
     std::shared_mutex mutex;
-    std::map<Key, std::vector<std::uint32_t>> entries;
+    std::map<Key, RankedOrder> entries;
 };
 
-std::vector<std::string> RankBucketCached(const std::string& solver_name,
-                                          const std::string& bucket_key,
-                                          const SolverModel& model,
-                                          const std::vector<double>& prefix,
-                                          const std::vector<Candidate>& cands)
+RankedConfigs RankBucketCached(const std::string& solver_name,
+                               const std::string& bucket_key,
+                               const SolverModel& model,
+                               const std::vector<double>& prefix,
+                               const std::vector<Candidate>& cands)
 {
     if(cands.empty())
         return {};
@@ -246,10 +260,10 @@ std::vector<std::string> RankBucketCached(const std::string& solver_name,
     if(std::any_of(prefix.begin(), prefix.end(), [](double v) { return std::isnan(v); }))
         return Descriptors(cands, RankOrder(*model.forest, model, prefix, cands));
     static RankOrderCache cache;
-    const auto order = cache.GetOrCompute({solver_name, bucket_key, prefix}, [&] {
+    const auto ranked = cache.GetOrCompute({solver_name, bucket_key, prefix}, [&] {
         return RankOrder(*model.forest, model, prefix, cands);
     });
-    return Descriptors(cands, order);
+    return Descriptors(cands, ranked);
 }
 
 // The grouped-conv XDLOPS solvers ship a two-tower kernel-tuning-net (KTN)
@@ -280,26 +294,66 @@ bool TwoTowerCoversSolver(const std::string& solver_name, const std::string& gfx
            kTwoTowerSolvers.end();
 }
 
-// Solvers held out of the perf-config picker regardless of a shipped model.
-//
-// ConvHipConv's model was trained on an older hipconv config vocabulary and
-// over-selects a slow config, regressing OOTB. hipconv's config descriptors (and
-// kernel set) have since changed and are now version-tagged, so the model must be
-// retrained on current-hipconv data before it can be trusted. Gated here, rather
-// than by dropping the section from lgbm_pcfg.bin, so re-enabling is a one-line
-// revert once a retrained model ships.
-bool HeldOutOfPicker(const std::string& solver_name) { return solver_name == "ConvHipConv"; }
-
 } // namespace
+
+// ConvHipConv on gfx1250, every direction: the model retrained on hipconv v0.5 configs was trained
+// on gfx950 data only and has no gfx1250 buckets, and no model has been checked on gfx1250
+// hardware.
+//
+// Gated here, rather than by dropping the gfx1250 buckets from lgbm_pcfg.bin, so enabling them is
+// a one-line change.
+bool HeldOutOfPicker(const std::string& solver_name,
+                     const std::string& gfx_id,
+                     conv::Direction /*direction*/)
+{
+    return solver_name == "ConvHipConv" && gfx_id.starts_with("gfx1250");
+}
+
+// ConvHipConv on gfx950, backward weights: the pick is used only when its score exceeds the
+// default config's score by more than this margin. Otherwise the solver runs its default config.
+constexpr double kConvHipConvWrwGfx950Margin = 7.5;
+
+std::optional<double>
+DefaultMargin(const std::string& solver_name, const std::string& gfx_id, conv::Direction direction)
+{
+    if(solver_name == "ConvHipConv" && gfx_id.starts_with("gfx950") &&
+       direction == conv::Direction::BackwardWeights)
+        return kConvHipConvWrwGfx950Margin;
+    return std::nullopt;
+}
+
+std::vector<std::string>
+KeepAboveDefaultMargin(const RankedConfigs& ranked, const std::string& default_desc, double margin)
+{
+    const auto it = std::find(ranked.descs.begin(), ranked.descs.end(), default_desc);
+    // The default is not among the scored candidates, so there is nothing to compare against.
+    if(it == ranked.descs.end())
+        return {};
+    const double bar = ranked.scores[static_cast<std::size_t>(it - ranked.descs.begin())] + margin;
+
+    std::vector<std::string> kept;
+    for(std::size_t i = 0; i < ranked.descs.size() && ranked.scores[i] > bar; ++i)
+        kept.push_back(ranked.descs[i]);
+    return kept;
+}
 
 std::vector<std::string> PickConfig(const std::string& solver_name,
                                     const conv::ProblemDescription& problem,
-                                    const Handle& handle)
+                                    const Handle& handle,
+                                    const std::function<std::string()>& default_desc)
 {
-    if(HeldOutOfPicker(solver_name))
+    // Hold-out first: it needs only the device name, so a held-out combination never loads the
+    // solver's model (Find parses and caches it under the metadata mutex).
+    std::string gfx_id;
     {
-        MIOPEN_LOG_I2("lgbm_pcfg: " << solver_name
-                                    << " held out of the picker pending a retrained model");
+        ScopedTimeLogger t("lgbm_pcfg.PickConfig.GetDeviceName");
+        gfx_id = handle.GetDeviceName();
+    }
+
+    if(HeldOutOfPicker(solver_name, gfx_id, problem.GetDirection()))
+    {
+        MIOPEN_LOG_I2("lgbm_pcfg: " << solver_name << " held out of the picker on " << gfx_id
+                                    << ", direction " << problem.GetDirectionStr());
         return {};
     }
 
@@ -315,12 +369,6 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
     const SolverModel* model = meta.Find(solver_name);
     if(model == nullptr || !model->forest)
         return {}; // no perf-config model for this solver
-
-    std::string gfx_id;
-    {
-        ScopedTimeLogger t("lgbm_pcfg.PickConfig.GetDeviceName");
-        gfx_id = handle.GetDeviceName();
-    }
 
     // Two-tower KTN takes precedence where it applies: defer to the solver's own
     // default-config path (which runs it) rather than preempting it here.
@@ -351,17 +399,28 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
         FillProblemPrefix(prefix, problem, handle, gfx_id, *model);
     }
 
-    std::vector<std::string> ranked;
+    RankedConfigs ranked;
     {
         ScopedTimeLogger t("lgbm_pcfg.PickConfig.RankBucket(" + std::to_string(bit->second.size()) +
                            " cands)");
         ranked = RankBucketCached(solver_name, key, *model, prefix, bit->second);
     }
-    if(!ranked.empty())
-        MIOPEN_LOG_I2("lgbm_pcfg: "
-                      << solver_name << " ranked " << ranked.size() << " configs, top=\""
-                      << (ranked.front().empty() ? "<default>" : ranked.front()) << "\"");
-    return ranked;
+    if(ranked.descs.empty())
+        return {};
+
+    MIOPEN_LOG_I2(
+        "lgbm_pcfg: " << solver_name << " ranked " << ranked.descs.size() << " configs, top=\""
+                      << (ranked.descs.front().empty() ? "<default>" : ranked.descs.front())
+                      << "\"");
+
+    if(const auto margin = DefaultMargin(solver_name, gfx_id, problem.GetDirection()))
+    {
+        auto kept = KeepAboveDefaultMargin(ranked, default_desc(), *margin);
+        MIOPEN_LOG_I2("lgbm_pcfg: " << solver_name << " " << kept.size()
+                                    << " configs score above the default by more than " << *margin);
+        return kept;
+    }
+    return std::move(ranked.descs);
 }
 
 std::vector<std::string> ScorePickForTest(const std::string& solver_name,
@@ -387,13 +446,13 @@ std::vector<std::string> ScorePickForTest(const std::string& solver_name,
             return {};
         cands.push_back(Candidate{cand_descs[i], cand_args[i]});
     }
-    return RankBucket(*model->forest, *model, prob_feature_prefix, cands);
+    return RankBucket(*model->forest, *model, prob_feature_prefix, cands).descs;
 }
 
-std::vector<std::string> RankBucketForTest(const std::string& solver_name,
-                                           const std::string& bucket_key,
-                                           const std::vector<double>& prob_feature_prefix,
-                                           bool cached)
+RankedConfigs RankBucketForTest(const std::string& solver_name,
+                                const std::string& bucket_key,
+                                const std::vector<double>& prob_feature_prefix,
+                                bool cached)
 {
     const auto& meta = LgbmPcfgMetadata::Get();
     if(!meta.IsReady())
@@ -412,13 +471,14 @@ std::vector<std::string> RankBucketForTest(const std::string& solver_name,
 
 std::vector<std::string> MaybePickConfig(const std::string& solver_db_id,
                                          const conv::ProblemDescription& problem,
-                                         const Handle& handle)
+                                         const Handle& handle,
+                                         const std::function<std::string()>& default_desc)
 {
     // Env gate lives here so the MIOPEN_DEBUG_LGBM_PCFG declaration has a single
     // home and the generic FindSolutionImpl template stays env-var agnostic.
     if(env::disabled(MIOPEN_DEBUG_LGBM_PCFG))
         return {};
-    return PickConfig(solver_db_id, problem, handle);
+    return PickConfig(solver_db_id, problem, handle, default_desc);
 }
 
 } // namespace pcfg
