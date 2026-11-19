@@ -383,3 +383,44 @@ TEST(TestRegimeFocus, AFloorIsAskedOfEveryRegimeNoQuotaNames)
     EXPECT_EQ(floors.size(), declaredRegimeLabels(metadata).size() - 1);
     EXPECT_EQ(floors.at("decode_long_gqa").pins, (std::map<std::string, int64_t>{{"seqlen_q", 1}}));
 }
+TEST(TestRegimeFocus, AFocusedSearchRealisesTheDeclaredValueWeightsAndProbesOnlyTheLanesItNeeds)
+{
+    // layout 2:1:1, scale 2:1:1, window 3:1:1:1 in sdpa_fwd. The regime quota and floor path
+    // splits its need over categorical lanes, so a lane-even split would make every value 1/3
+    // (window none 1/4) however the main search is weighted.
+    const auto metadata = shippedSdpa();
+    std::string error;
+    const auto focus = compileRegimeFocus(metadata, "decode_long_mha", error);
+    ASSERT_TRUE(focus.has_value()) << error;
+    ExplorationRequest request;
+    request.budgetPerCombination = 600;
+    request.budgetGrowthLimit = 4;
+    request.pointsPerCombination = 20;
+    request.seed = 5;
+
+    const auto found = exploreRegime(metadata, *focus, request, 600, SERVES_EVERYTHING, {}, {});
+
+    ASSERT_GE(found.problems.size(), 600u);
+    const auto shareOf = [&found](const std::string& parameter, const std::string& value) {
+        size_t held = 0;
+        for(const auto& point : found.problems)
+        {
+            held += std::get<std::string>(point.at(parameter)) == value ? 1 : 0;
+        }
+        return static_cast<double>(held) / static_cast<double>(found.problems.size());
+    };
+    EXPECT_NEAR(shareOf("layout", "bshd"), 0.5, 0.1);
+    EXPECT_NEAR(shareOf("layout", "bhsd"), 0.25, 0.1);
+    EXPECT_NEAR(shareOf("scale", "inv_sqrt_d"), 0.5, 0.1);
+    EXPECT_NEAR(shareOf("window", "none"), 0.5, 0.1);
+    EXPECT_NEAR(shareOf("window", "local_128"), 1.0 / 6.0, 0.08);
+
+    // A floor of 60 needs at most 60 lanes of the declared lanes; running each of them once would
+    // cost its whole budget, which is what the search used to do.
+    const auto few = exploreRegime(metadata, *focus, request, 60, SERVES_EVERYTHING, {}, {});
+    ASSERT_GE(few.problems.size(), 60u);
+    size_t total = 0;
+    detail::categoricalCombinations(metadata.parameters, request.maxCombinations, total);
+    EXPECT_LT(few.proposed, static_cast<int64_t>(total) * request.budgetPerCombination / 8)
+        << "proposed " << few.proposed << " over " << total << " lanes";
+}

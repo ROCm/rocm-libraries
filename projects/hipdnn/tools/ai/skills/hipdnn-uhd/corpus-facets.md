@@ -75,6 +75,16 @@ pack-coverage engine adds its entry there on its branch.
 - `--anchor-scaling` keeps the declared archetype/neighbourhood mixture at a large `--count`;
   without it the anchored share falls as exploration fills the set. It changes the set, so it
   is part of the set's identity like `--count` and `--seed`.
+- A graph's name lists every parameter, so the new SDPA facets change it:
+  `..._is_causaltrue_seqlen_k512_seqlen_q1` is now
+  `..._is_causaltrue_layoutbshd_scaleinv_sqrt_d_seqlen_k512_seqlen_q1_windownone`. The `.fb`
+  file, `results/<name>.csv` and `--problem-id` follow the name; the `benchmark` key (the
+  content key, `graph_key` in `hipdnn_bench`) of a BSHD, `inv_sqrt_d`, no-window problem is the
+  same as before. Join an old set to a new one by `benchmark`, never by name.
+- A `--model-shapes` CSV with no `layout`, `scale` or `window` column reads as `bshd`,
+  `inv_sqrt_d` and `none` (the operation file's `model_shape_defaults`); `manifest.json`'s
+  `reports.model_shapes[].defaulted` counts the rows that took one. Any other missing column,
+  `alignment` or `generate_stats` included, still refuses the row.
 - `--include-extremes` takes the served point at each end of every numeric parameter first;
   `--ceiling` is the largest extent searched. Every manifest records `served_extent` (how far
   the search reached; a maximum near the ceiling is marked `at_search_ceiling`).

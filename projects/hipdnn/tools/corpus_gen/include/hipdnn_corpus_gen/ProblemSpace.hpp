@@ -9,6 +9,7 @@
 #include <hipdnn_corpus_gen/WorkloadSampling.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <iterator>
@@ -278,6 +279,139 @@ inline bool satisfiesConstraints(const OperationMetadata& metadata, const Proble
     return true;
 }
 
+/// Whether any parameter weights its values (Parameter::weights).
+inline bool anyWeighted(const std::vector<Parameter>& parameters)
+{
+    return std::any_of(parameters.begin(), parameters.end(), [](const Parameter& parameter) {
+        return !parameter.weights.empty();
+    });
+}
+
+/// How large each of @p combinations is relative to the average: the product, over weighted
+/// parameters, of its value's weight over the mean weight (Parameter::relativeWeight). 1 for
+/// every combination when nothing is weighted. The one definition the main search and the
+/// regime focus share, so both realise the declared shares.
+inline std::vector<double> combinationSizes(const std::vector<Parameter>& parameters,
+                                            const std::vector<ProblemPoint>& combinations)
+{
+    std::vector<double> sizes(combinations.size(), 1.0);
+    for(size_t index = 0; index < combinations.size(); ++index)
+    {
+        for(const auto& parameter : parameters)
+        {
+            const auto found = combinations[index].find(parameter.name);
+            if(!parameter.weights.empty() && found != combinations[index].end())
+            {
+                sizes[index] *= parameter.relativeWeight(std::get<std::string>(found->second));
+            }
+        }
+    }
+    return sizes;
+}
+
+/// A reproducible pseudo-random key for part @p index under @p seed (splitmix64): the tie-break
+/// of apportion, so equal remainders are not always settled in favour of the earliest parts,
+/// which the enumeration order would turn into a bias toward the first value of the leading
+/// parameters.
+inline uint64_t tieKey(uint64_t seed, size_t index)
+{
+    uint64_t z = seed + 0x9e3779b97f4a7c15ULL * (static_cast<uint64_t>(index) + 1);
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    return z ^ (z >> 31);
+}
+
+/// Splits @p total into whole parts in proportion to @p sizes. The parts sum to @p total exactly
+/// and each is its ideal share rounded down or up (a per-part ceiling or rounding would not sum,
+/// and over a few points the error is the share).
+///
+/// The rounded-up units are not the largest remainders: when every ideal is below one (a need
+/// of 60 over 864 parts), "largest remainder" hands every unit to the biggest parts and no
+/// small part ever gets one. They are drawn by systematic sampling over the remainders instead,
+/// in the order of @p tieKeys (index order when none are given), from a start the keys fix:
+/// each part gets its extra unit with probability equal to its remainder, so the expected share
+/// of every part, and of every value the parts group, is its size's.
+inline std::vector<int64_t> apportion(int64_t total,
+                                      const std::vector<double>& sizes,
+                                      const std::vector<uint64_t>& tieKeys = {})
+{
+    std::vector<int64_t> parts(sizes.size(), 0);
+    double sum = 0.0;
+    for(const auto size : sizes)
+    {
+        sum += size;
+    }
+    if(total <= 0 || sizes.empty() || !(sum > 0.0))
+    {
+        return parts;
+    }
+    std::vector<double> remainder(sizes.size(), 0.0);
+    int64_t given = 0;
+    for(size_t i = 0; i < sizes.size(); ++i)
+    {
+        const double ideal = static_cast<double>(total) * sizes[i] / sum;
+        parts[i] = static_cast<int64_t>(std::floor(ideal));
+        given += parts[i];
+        remainder[i] = ideal - static_cast<double>(parts[i]);
+    }
+
+    std::vector<size_t> order(sizes.size());
+    for(size_t i = 0; i < order.size(); ++i)
+    {
+        order[i] = i;
+    }
+    uint64_t mixed = 0x9e3779b97f4a7c15ULL;
+    if(!tieKeys.empty())
+    {
+        std::stable_sort(order.begin(), order.end(), [&tieKeys](size_t left, size_t right) {
+            return tieKeys[left] < tieKeys[right];
+        });
+        for(const auto key : tieKeys)
+        {
+            mixed = (mixed ^ key) * 0xbf58476d1ce4e5b9ULL;
+        }
+    }
+    // The start in [0, 1): the keys' own, or the middle (plain rounding of the running total).
+    double start = tieKeys.empty() ? 0.5 : static_cast<double>(mixed >> 11) / 9007199254740992.0;
+
+    std::vector<bool> extra(sizes.size(), false);
+    double running = 0.0;
+    int64_t lastCount = static_cast<int64_t>(std::floor(start));
+    for(const auto index : order)
+    {
+        running += remainder[index];
+        const auto count = static_cast<int64_t>(std::floor(running + start));
+        if(count > lastCount && given < total)
+        {
+            ++parts[index];
+            extra[index] = true;
+            ++given;
+        }
+        lastCount = count;
+    }
+    // Rounding in the running sum can leave one unit unplaced: give it to the largest remainder
+    // not yet raised.
+    while(given < total)
+    {
+        size_t best = sizes.size();
+        for(const auto index : order)
+        {
+            if(!extra[index] && (best == sizes.size() || remainder[index] > remainder[best]))
+            {
+                best = index;
+            }
+        }
+        if(best == sizes.size())
+        {
+            break;
+        }
+        ++parts[best];
+        extra[best] = true;
+        ++given;
+    }
+    return parts;
+}
+
 /// The cross product of declared regime buckets and common values (§4.3.2, §4.3.5), used to
 /// seed the search: these combinations are realistic by construction, unlike independent draws.
 /// Parameters with neither take their floor and are left to the walk. Strided to @p limit;
@@ -468,37 +602,29 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
     // Per-combination state kept for the growth pass. The memo makes growing affordable: a
     // longer walk from the same seed retraces the shorter one, answered from here.
     std::vector<FeasibleSetRequest> searches(combinations.size());
-    // How large each combination is relative to the average (Parameter::weights): the product,
-    // over weighted parameters, of its value's weight over the mean weight. Every combination is
-    // 1 when nothing is weighted, and then the sizes below are exactly the unweighted ones.
-    std::vector<double> sizes(combinations.size(), 1.0);
-    const bool weighted
-        = std::any_of(metadata.parameters.begin(),
-                      metadata.parameters.end(),
-                      [](const Parameter& parameter) { return !parameter.weights.empty(); });
+    // How large each combination is relative to the average (Parameter::weights); 1 for every
+    // combination when nothing is weighted, and then the counts below are the unweighted ones.
+    const bool weighted = detail::anyWeighted(metadata.parameters);
+    const auto sizes = detail::combinationSizes(metadata.parameters, combinations);
+    // The first pass's per-combination problem count: pointsPerCombination for each, or the
+    // whole first pass (pointsPerCombination x combinations) split by size, largest remainder,
+    // with at least one each so no combination (and so no declared value) is dropped.
+    std::vector<int64_t> firstPass(combinations.size(), request.pointsPerCombination);
     if(weighted)
     {
-        for(size_t index = 0; index < combinations.size(); ++index)
+        std::vector<uint64_t> keys(combinations.size());
+        for(size_t i = 0; i < keys.size(); ++i)
         {
-            for(const auto& parameter : metadata.parameters)
-            {
-                const auto found = combinations[index].find(parameter.name);
-                if(!parameter.weights.empty() && found != combinations[index].end())
-                {
-                    sizes[index] *= parameter.relativeWeight(std::get<std::string>(found->second));
-                }
-            }
+            keys[i] = detail::tieKey(request.seed, i);
+        }
+        firstPass = detail::apportion(
+            request.pointsPerCombination * static_cast<int64_t>(combinations.size()), sizes, keys);
+        for(auto& count : firstPass)
+        {
+            count = std::max<int64_t>(1, count);
         }
     }
-    // The per-combination problem count: pointsPerCombination, scaled by the combination's size.
-    const auto pointsFor = [&](size_t index) {
-        return weighted
-                   ? std::max<int64_t>(
-                         1,
-                         static_cast<int64_t>(std::llround(
-                             static_cast<double>(request.pointsPerCombination) * sizes[index])))
-                   : request.pointsPerCombination;
-    };
+    const auto pointsFor = [&firstPass](size_t index) { return firstPass[index]; };
     std::vector<size_t> anchoredCounts(combinations.size(), 0);
     std::vector<std::map<Shape, bool>> answered(combinations.size());
     /// Held points the search reached, per combination.
@@ -770,21 +896,35 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             break;
         }
 
-        double growableSize = 0.0;
-        for(const auto index : growable)
+        // Each combination's share of what is missing: equal (rounded up) when nothing is
+        // weighted, else the need split by size with the largest remainder, so the shares sum to
+        // the need instead of giving every small combination a whole point a round.
+        std::vector<int64_t> shares(growable.size());
+        if(weighted)
         {
-            growableSize += sizes[index];
+            std::vector<double> growableSizes;
+            std::vector<uint64_t> growableKeys;
+            for(const auto index : growable)
+            {
+                growableSizes.push_back(sizes[index]);
+                growableKeys.push_back(detail::tieKey(request.seed, index));
+            }
+            shares = detail::apportion(need, growableSizes, growableKeys);
         }
-        // Each combination's share of what is missing: equal when nothing is weighted.
-        const auto shareFor = [&](size_t index) {
-            return weighted ? static_cast<int64_t>(std::ceil(static_cast<double>(need)
-                                                             * sizes[index] / growableSize))
-                            : (need + static_cast<int64_t>(growable.size()) - 1)
-                                  / static_cast<int64_t>(growable.size());
-        };
-        for(const auto index : growable)
+        else
         {
-            const auto share = shareFor(index);
+            shares.assign(growable.size(),
+                          (need + static_cast<int64_t>(growable.size()) - 1)
+                              / static_cast<int64_t>(growable.size()));
+        }
+        for(size_t slot = 0; slot < growable.size(); ++slot)
+        {
+            const auto index = growable[slot];
+            const auto share = shares[slot];
+            if(share == 0)
+            {
+                continue;
+            }
             auto& result = corpus.combinations[index];
             auto& search = searches[index];
             const auto oracle = oracleFor(index);

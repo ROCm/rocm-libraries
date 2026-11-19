@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <random>
 #include <set>
 #include <string>
 #include <vector>
@@ -462,6 +463,8 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
         int64_t reached = 0;
         bool saturated = false;
         bool capped = false;
+        /// Probed already; the weighted search probes a lane when it first has a share to grow.
+        bool probed = false;
     };
     std::vector<Lane> lanes(served.size());
 
@@ -560,12 +563,12 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
         return sum;
     };
 
-    // Probe each lane at the first pass's probe budget, as the main search does: a combination
-    // the engine does not serve in this regime is set aside before it is given the full budget
-    // and its doublings. The memo keeps the probe's answers for the lanes that go on.
-    if(request.probeBudget < request.budgetPerCombination)
-    {
-        for(auto& lane : lanes)
+    // Probe a lane at the first pass's probe budget, as the main search does: a combination the
+    // engine does not serve in this regime is set aside before it is given the full budget and
+    // its doublings. The memo keeps the probe's answers for the lanes that go on.
+    const auto probe = [&](Lane& lane) {
+        lane.probed = true;
+        if(request.probeBudget < request.budgetPerCombination)
         {
             lane.search.oracleBudget = request.probeBudget;
             lane.search.targetCount = 1;
@@ -576,6 +579,27 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
                 lane.saturated = true;
             }
         }
+    };
+
+    // Unweighted, every lane is probed up front and the need is split evenly. Weighted (864 lanes
+    // for SDPA), the need is split by combination size over every open lane, by largest
+    // remainder (ties broken by a seeded hash, not by position), and only a lane that receives
+    // a share is probed and run: at most `need` lanes, however many are declared, and a share
+    // each way that keeps the realised share of every value at its weight. A lane that declines
+    // hands its share back, and the next round splits what is still missing.
+    const bool weighted = detail::anyWeighted(metadata.parameters);
+    const auto sizes = detail::combinationSizes(metadata.parameters, served);
+    std::vector<uint64_t> tieKeys(lanes.size());
+    for(size_t i = 0; i < lanes.size(); ++i)
+    {
+        tieKeys[i] = detail::tieKey(request.seed, i);
+    }
+    if(!weighted)
+    {
+        for(auto& lane : lanes)
+        {
+            probe(lane);
+        }
     }
 
     // Split what is still wanted over the lanes not yet spent, so a combination that cannot
@@ -584,21 +608,49 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
     {
         const auto need = wanted - total();
         std::vector<Lane*> open;
-        for(auto& lane : lanes)
+        std::vector<double> openSizes;
+        std::vector<uint64_t> openKeys;
+        for(size_t i = 0; i < lanes.size(); ++i)
         {
+            auto& lane = lanes[i];
             if(!lane.saturated && !lane.capped)
             {
                 open.push_back(&lane);
+                openSizes.push_back(sizes[i]);
+                openKeys.push_back(tieKeys[i]);
             }
         }
         if(need <= 0 || open.empty())
         {
             break;
         }
-        const auto share
-            = (need + static_cast<int64_t>(open.size()) - 1) / static_cast<int64_t>(open.size());
-        for(auto* lane : open)
+        std::vector<int64_t> shares(open.size());
+        if(weighted)
         {
+            shares = detail::apportion(need, openSizes, openKeys);
+        }
+        else
+        {
+            shares.assign(open.size(),
+                          (need + static_cast<int64_t>(open.size()) - 1)
+                              / static_cast<int64_t>(open.size()));
+        }
+        for(size_t slot = 0; slot < open.size(); ++slot)
+        {
+            auto* lane = open[slot];
+            const auto share = shares[slot];
+            if(share == 0)
+            {
+                continue;
+            }
+            if(!lane->probed)
+            {
+                probe(*lane);
+                if(lane->saturated)
+                {
+                    continue;
+                }
+            }
             const auto target = static_cast<int64_t>(lane->fresh.size()) + share;
             lane->search.targetCount = target;
             // Run at the current budget first (a larger target re-tessellates existing

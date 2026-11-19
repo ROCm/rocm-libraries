@@ -471,4 +471,22 @@ TEST(TestOperationMetadata, AValueWithoutAWeightWeighsOneAndWeightsAreRelativeTo
     EXPECT_DOUBLE_EQ(load.metadata->find("forward_phase")->relativeWeight("TRAINING"), 1.0);
 }
 
+TEST(TestOperationMetadata, AModelShapeDefaultMustBeADeclaredValueOfAnEnumParameter)
+{
+    const auto errorFor = [](const std::string& defaults) {
+        auto declaration = layernormMetadata();
+        declaration["model_shape_defaults"] = nlohmann::json::parse(defaults);
+        const auto load = parseOperationMetadata(declaration);
+        return load.errors.empty() ? std::string() : load.errors.front();
+    };
+
+    EXPECT_TRUE(errorFor(R"({"dtype": "fp32"})").empty());
+    EXPECT_NE(errorFor(R"({"dtype": "fp8"})").find("a value it does not declare"),
+              std::string::npos);
+    EXPECT_NE(errorFor(R"({"nothing": "fp32"})").find("not a declared enum parameter"),
+              std::string::npos);
+    EXPECT_NE(errorFor(R"({"batch": "1"})").find("not a declared enum parameter"),
+              std::string::npos);
+}
+
 } // namespace hipdnn_corpus_gen

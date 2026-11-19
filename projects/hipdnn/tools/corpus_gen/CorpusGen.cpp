@@ -1251,7 +1251,8 @@ int runGenerator(const std::vector<std::string>& args)
                                {"rows", report.rows},
                                {"other_operation", report.otherOperation},
                                {"unusable", report.unusable},
-                               {"first_problem", report.firstProblem}});
+                               {"first_problem", report.firstProblem},
+                               {"defaulted", report.defaulted}});
         }
 
         auto request = options.exploration;

@@ -12,6 +12,7 @@
 #include "OperationsDir.hpp"
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <string>
 
 /// @file TestModelShapeSource.cpp
@@ -211,7 +212,7 @@ TEST(TestModelShapeSource, NoOracleIsAppliedSoAShapeNobodyServesStillArrives)
     EXPECT_EQ(report.unusable, 0);
 }
 
-TEST(TestModelShapeSource, AFileThatPredatesAParameterReadsItAtTheCatalogConstant)
+TEST(TestModelShapeSource, AFileThatPredatesAParameterReadsItAtItsDeclaredDefaultAndSaysSo)
 {
     const TempTree tree("predates");
     const auto metadata = shippedSdpa();
@@ -226,6 +227,30 @@ TEST(TestModelShapeSource, AFileThatPredatesAParameterReadsItAtTheCatalogConstan
     EXPECT_EQ(entries.front().point.at("layout"), ParameterValue{std::string("bshd")});
     EXPECT_EQ(entries.front().point.at("scale"), ParameterValue{std::string("inv_sqrt_d")});
     EXPECT_EQ(entries.front().point.at("window"), ParameterValue{std::string("none")});
+    // The manifest can say which columns were filled in, and for how many rows.
+    EXPECT_EQ(report.defaulted,
+              (std::map<std::string, int64_t>{{"layout", 1}, {"scale", 1}, {"window", 1}}));
+}
+
+TEST(TestModelShapeSource, AFileMissingAColumnWithNoDeclaredDefaultIsStillRefused)
+{
+    const TempTree tree("no_default");
+    const auto metadata = shippedSdpa();
+    ModelShapeReport report;
+
+    // No q.alignment, and sdpa_fwd's pack constants answer for alignment (top_left) and
+    // generate_stats (false): a recorded KV-cache decode is bottom_right, so filling the pack's
+    // answer in would pass a different problem off as the recorded one.
+    const std::string noAlignment
+        = "q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,q.head_dim,q.is_causal,q.dtype\n"
+          "4,32,8,1,4096,128,true,bf16\n";
+    const auto entries = readModelShapes(metadata, tree.write("m.csv", noAlignment), report);
+
+    EXPECT_TRUE(entries.empty());
+    EXPECT_EQ(report.unusable, 1);
+    EXPECT_NE(report.firstProblem.find("no value for 'alignment'"), std::string::npos)
+        << report.firstProblem;
+    EXPECT_TRUE(report.defaulted.empty());
 }
 
 TEST(TestModelShapeSource, AColumnThatIsThereIsReadNotReplacedByTheConstant)

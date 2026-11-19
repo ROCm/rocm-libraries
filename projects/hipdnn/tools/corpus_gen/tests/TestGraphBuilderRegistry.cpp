@@ -22,6 +22,8 @@
 #include <map>
 #include <numeric>
 #include <optional>
+#include <random>
+#include <set>
 #include <string>
 #include <tuple>
 #include <variant>
@@ -1352,16 +1354,17 @@ TEST(TestGraphBuilderRegistry, EverySdpaLayoutStridesEachOperandAsItIsNamed)
 
 TEST(TestGraphBuilderRegistry, EverySdpaScaleWritesTheAttributeItNames)
 {
-    // head_dim 64: 1/sqrt(D) = 0.125. jitter scales it by 0.5 + (seqlen_k % 16) / 8, so it moves
-    // with seqlen_k: 32 % 16 = 0 gives 0.5, 37 % 16 = 5 gives 1.125.
+    // head_dim 64: 1/sqrt(D) = 0.125. jitter scales it by 0.5 + 0.15 * r with
+    // r = (seqlen_k + 3 * seqlen_q + batch + head_dim) % 13: here seqlen_k 32 gives r = 146 % 13 =
+    // 3, a factor of 0.95, and seqlen_k 37 gives r = 8, a factor of 1.7.
     for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
     {
         const auto metadata = shipped(operation);
         const std::vector<std::tuple<std::string, int64_t, float>> cases{{"inv_sqrt_d", 32, 0.125F},
                                                                          {"inv_sqrt_d", 37, 0.125F},
                                                                          {"unit", 32, 1.0F},
-                                                                         {"jitter", 32, 0.0625F},
-                                                                         {"jitter", 37, 0.140625F}};
+                                                                         {"jitter", 32, 0.11875F},
+                                                                         {"jitter", 37, 0.2125F}};
         for(const auto& [scale, seqlenK, expected] : cases)
         {
             auto point = attentionPoint(operation, "bshd");
@@ -1375,6 +1378,71 @@ TEST(TestGraphBuilderRegistry, EverySdpaScaleWritesTheAttributeItNames)
             EXPECT_FLOAT_EQ(*node.scale, expected)
                 << operation << " " << scale << " seqlen_k " << seqlenK;
         }
+    }
+}
+
+TEST(TestGraphBuilderRegistry, JitterIsNeverTheStandardScaleAndSpreadsOverTheShapesAModelUses)
+{
+    // The failure it guards: a factor that is 0.5 on every power-of-two extent (so the scale is
+    // a function of head_dim again), or exactly 1 on some residue (so jitter is the inv_sqrt_d
+    // graph under another name, which deduplicates away).
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        const auto metadata = shipped(operation);
+        const auto scaleFor = [&](const ProblemPoint& base, const std::string& scale) {
+            auto point = base;
+            point["scale"] = scale;
+            const auto built = buildGraphFor(metadata, point);
+            EXPECT_TRUE(built.ok()) << built.error;
+            return built.ok() ? scaleAndBand(built.bytes).scale.value_or(0.0F) : 0.0F;
+        };
+
+        // Every residue of seqlen_k: thirteen distinct factors, none the standard scale.
+        std::set<float> residues;
+        for(int64_t seqlenK = 32; seqlenK < 32 + 13; ++seqlenK)
+        {
+            auto point = attentionPoint(operation, "bshd");
+            point["seqlen_k"] = seqlenK;
+            const auto jitter = scaleFor(point, "jitter");
+            EXPECT_NE(jitter, scaleFor(point, "inv_sqrt_d"))
+                << operation << " seqlen_k " << seqlenK;
+            EXPECT_GE(jitter, 0.125F * 0.5F - 1e-6F) << operation;
+            EXPECT_LE(jitter, 0.125F * 2.3F + 1e-6F) << operation;
+            residues.insert(jitter);
+        }
+        EXPECT_EQ(residues.size(), 13U) << operation;
+
+        // The recorded configurations: power-of-two sequence lengths and few batches. The
+        // factor must still vary across them rather than sit on one value.
+        std::mt19937_64 rng(3);
+        // Factors to three decimals: the ratio of two float scales carries rounding noise.
+        std::set<int64_t> onArchetypes;
+        for(const auto& archetype : metadata.archetypes)
+        {
+            for(int i = 0; i < 40; ++i)
+            {
+                ProblemPoint categorical{{"alignment", std::string("top_left")},
+                                         {"dtype", std::string("fp16")},
+                                         {"layout", std::string("bshd")}};
+                if(operation == "sdpa_fwd")
+                {
+                    categorical["generate_stats"] = false;
+                    categorical["window"] = std::string("none");
+                }
+                categorical["scale"] = std::string("jitter");
+                const auto drawn = detail::drawFromArchetype(metadata, archetype, categorical, rng);
+                if(!drawn.has_value())
+                {
+                    continue;
+                }
+                const auto jitter = scaleFor(*drawn, "jitter");
+                const auto standard = scaleFor(*drawn, "inv_sqrt_d");
+                EXPECT_NE(jitter, standard) << operation << " " << archetype.name;
+                onArchetypes.insert(std::llround(1000.0 * static_cast<double>(jitter)
+                                                 / static_cast<double>(standard)));
+            }
+        }
+        EXPECT_GE(onArchetypes.size(), 6U) << operation << " jitter barely varies on archetypes";
     }
 }
 

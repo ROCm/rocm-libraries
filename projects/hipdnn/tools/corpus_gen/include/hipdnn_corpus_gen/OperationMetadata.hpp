@@ -276,6 +276,10 @@ struct OperationMetadata
     /// See KernelCatalogSource.hpp. Empty means the operation has no kernel pool.
     KernelCatalog kernelCatalog;
 
+    /// Parameters a model-shape CSV may lack a column for, and what its rows then mean. Distinct
+    /// from the pack constants: a parameter absent from both is still refused.
+    std::map<std::string, ParameterValue> modelShapeDefaults;
+
     GraphBuilderSpec graphBuilder;
 
     /// Declared tensor contents (proposed §4 addition). Absent means all zeros.
@@ -807,6 +811,31 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
         }
     }
 
+    // What a model-shape file that predates a parameter means by it. Enums only, and each value
+    // must be a declared one: a default no shape could take would be a corpus of other problems.
+    // Named: `items()` over the temporary `value()` returns would dangle.
+    const auto shapeDefaults = root.value("model_shape_defaults", nlohmann::json::object());
+    for(const auto& [key, value] : shapeDefaults.items())
+    {
+        const auto* parameter = metadata.find(key);
+        if(parameter == nullptr || parameter->type != ParameterType::ENUM)
+        {
+            load.errors.push_back("model_shape_defaults names '" + key
+                                  + "', which is not a declared enum parameter");
+        }
+        else if(!value.is_string()
+                || std::find(
+                       parameter->values.begin(), parameter->values.end(), value.get<std::string>())
+                       == parameter->values.end())
+        {
+            load.errors.push_back("model_shape_defaults sets '" + key
+                                  + "' to a value it does not declare");
+        }
+        else
+        {
+            metadata.modelShapeDefaults[key] = value.get<std::string>();
+        }
+    }
     if(root.contains("graph_builder"))
     {
         const auto& builder = root.at("graph_builder");

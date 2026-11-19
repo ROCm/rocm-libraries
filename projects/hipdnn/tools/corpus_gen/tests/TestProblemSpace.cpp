@@ -714,37 +714,63 @@ TEST(TestProblemSpace, EveryShippedSdpaCombinationIsExploredAndNoDeclaredValueIs
     }
 }
 
-TEST(TestProblemSpace, TheShippedSdpaConstraintsAdmitCrossAttentionOnlyWithoutACausalMask)
+TEST(TestProblemSpace, TheShippedSdpaConstraintsKeepOnlyProblemsThatAreDistinctAndHaveKeys)
 {
     std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json");
     ASSERT_TRUE(file.good());
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
     ASSERT_TRUE(parsed.ok());
 
-    const auto admits
-        = [&](int64_t seqlenQ, int64_t seqlenK, bool causal, const std::string& window) {
-              const ProblemPoint point{{"batch", int64_t{1}},
-                                       {"heads", int64_t{8}},
-                                       {"heads_kv", int64_t{8}},
-                                       {"seqlen_q", seqlenQ},
-                                       {"seqlen_k", seqlenK},
-                                       {"head_dim", int64_t{64}},
-                                       {"is_causal", causal},
-                                       {"alignment", std::string("top_left")},
-                                       {"dtype", std::string("fp16")},
-                                       {"generate_stats", false},
-                                       {"layout", std::string("bshd")},
-                                       {"scale", std::string("inv_sqrt_d")},
-                                       {"window", window}};
-              return detail::satisfiesConstraints(*parsed.metadata, point);
-          };
+    struct Candidate
+    {
+        int64_t seqlenQ = 2048;
+        int64_t seqlenK = 2048;
+        int64_t heads = 8;
+        int64_t headsKv = 8;
+        bool causal = true;
+        std::string window = "none";
+        std::string layout = "bshd";
+        std::string alignment = "top_left";
+    };
+    const auto admits = [&](const Candidate& c) {
+        const ProblemPoint point{{"batch", int64_t{1}},
+                                 {"heads", c.heads},
+                                 {"heads_kv", c.headsKv},
+                                 {"seqlen_q", c.seqlenQ},
+                                 {"seqlen_k", c.seqlenK},
+                                 {"head_dim", int64_t{64}},
+                                 {"is_causal", c.causal},
+                                 {"alignment", c.alignment},
+                                 {"dtype", std::string("fp16")},
+                                 {"generate_stats", false},
+                                 {"layout", c.layout},
+                                 {"scale", std::string("inv_sqrt_d")},
+                                 {"window", c.window}};
+        return detail::satisfiesConstraints(*parsed.metadata, point);
+    };
 
-    EXPECT_TRUE(admits(4096, 77, false, "none")) << "cross attention is bidirectional";
-    EXPECT_FALSE(admits(4096, 77, true, "none")) << "a causal mask needs seqlen_q <= seqlen_k";
-    EXPECT_TRUE(admits(2048, 2048, true, "none"));
-    EXPECT_TRUE(admits(2048, 2048, true, "local_1024"));
-    EXPECT_TRUE(admits(2048, 2048, false, "local_1024"))
-        << "the frontend accepts a left bound under any mask";
+    // Cross attention is bidirectional; a causal mask needs seqlen_q <= seqlen_k.
+    EXPECT_TRUE(admits({4096, 77, 8, 8, false}));
+    EXPECT_FALSE(admits({4096, 77, 8, 8, true}));
+    EXPECT_TRUE(admits({2048, 2048, 8, 8, true, "local_1024"}));
+    // The frontend accepts a left bound under any mask.
+    EXPECT_TRUE(admits({2048, 2048, 8, 8, false, "local_1024"}));
+    // A window over more queries than keys: top-left, every row from seqlen_k + N - 1 on keeps
+    // no key (90% of the rows at 2048 x 77, local_128), so the softmax is over nothing.
+    EXPECT_FALSE(admits({2048, 77, 8, 8, false, "local_128"}));
+    EXPECT_FALSE(admits({4096, 77, 8, 8, false, "local_4096"}));
+    // The anchor is a distinct problem where the mask is causal OR windowed and seqlen_q <
+    // seqlen_k, and pinned to top_left everywhere else.
+    EXPECT_TRUE(admits({128, 4096, 8, 8, true, "none", "bshd", "bottom_right"}));
+    EXPECT_TRUE(admits({128, 4096, 8, 8, false, "local_128", "bshd", "bottom_right"}));
+    EXPECT_FALSE(admits({128, 4096, 8, 8, false, "none", "bshd", "bottom_right"}));
+    // Extents of 1 make kv_bhsd the same graph as bhsd (seqlen_q 1, one head) or as bshd
+    // (seqlen_k 1, one kv head), so it is not listed there.
+    EXPECT_FALSE(admits({1, 4096, 1, 1, true, "none", "kv_bhsd"}));
+    EXPECT_TRUE(admits({1, 4096, 8, 1, true, "none", "kv_bhsd"}));
+    EXPECT_TRUE(admits({2, 4096, 1, 1, true, "none", "kv_bhsd"}));
+    EXPECT_FALSE(admits({1, 1, 8, 1, false, "none", "kv_bhsd"}));
+    EXPECT_TRUE(admits({1, 1, 8, 1, false, "none", "bhsd"}));
 }
 
 namespace
@@ -807,10 +833,10 @@ TEST(TestProblemSpace, AWeightedValueRealisesItsShareOfTheFirstPassAndOfTheGrown
     }
 }
 
-TEST(TestProblemSpace, EqualWeightsAreExactlyNoWeights)
+TEST(TestProblemSpace, EqualWeightsAreNoWeights)
 {
-    // Weights are relative: declaring every value equal must not move a single problem, and a
-    // declaration without weights is the unweighted exploration.
+    // Weights are relative: declaring every value equal must not move a single first-pass
+    // problem or any value's share.
     for(const int64_t target : {int64_t{0}, int64_t{250}})
     {
         ExplorationRequest request;
@@ -822,8 +848,83 @@ TEST(TestProblemSpace, EqualWeightsAreExactlyNoWeights)
         const auto equal = exploreProblemSpace(
             weightedToy(R"(, "weights": {"a": 3, "b": 3, "c": 3})"), request, ACCEPT_EVERYTHING);
 
-        EXPECT_EQ(described(equal), described(absent)) << "target " << target;
+        if(target == 0)
+        {
+            EXPECT_EQ(described(equal), described(absent));
+        }
+        else
+        {
+            // Growing splits the need exactly (largest remainder) where the unweighted search
+            // rounds each share up, so the points differ; the shares must not.
+            EXPECT_NEAR(shareOf(equal, "layout", "a"), shareOf(absent, "layout", "a"), 0.03);
+            EXPECT_NEAR(shareOf(equal, "layout", "b"), shareOf(absent, "layout", "b"), 0.03);
+        }
     }
+}
+
+TEST(TestProblemSpace, ApportionSplitsByLargestRemainderAndSumsExactly)
+{
+    // 5 exactly for the heavy part; the two equal ones split the other 5 as 3 and 2, and which
+    // gets the odd one is the tie-break's, not a fixed position.
+    const auto split = detail::apportion(10, {2.0, 1.0, 1.0});
+    EXPECT_EQ(split[0], 5);
+    EXPECT_EQ(split[1] + split[2], 5);
+    // A ceiling per part would give four here (1 each) and a rounding per part two or none.
+    for(const int64_t total : {int64_t{1}, int64_t{3}, int64_t{7}, int64_t{50}, int64_t{1001}})
+    {
+        const auto parts = detail::apportion(total, {0.25, 0.75, 1.5, 0.25, 1.25});
+        int64_t sum = 0;
+        for(const auto part : parts)
+        {
+            sum += part;
+        }
+        EXPECT_EQ(sum, total);
+    }
+    EXPECT_EQ(detail::apportion(0, {1.0, 1.0}), (std::vector<int64_t>{0, 0}));
+
+    // Every ideal below one: 300 over 864 parts of two sizes. A largest-remainder split gives
+    // nearly all 300 units to the heavy parts; the light ones must keep their share of them.
+    std::vector<double> sizes(864, 1.0);
+    std::vector<uint64_t> keys(864);
+    for(size_t i = 0; i < sizes.size(); ++i)
+    {
+        sizes[i] = i % 3 == 0 ? 2.0 : 0.5;
+        keys[i] = detail::tieKey(3, i);
+    }
+    const auto spread = detail::apportion(300, sizes, keys);
+    int64_t heavy = 0;
+    int64_t all = 0;
+    for(size_t i = 0; i < spread.size(); ++i)
+    {
+        all += spread[i];
+        heavy += i % 3 == 0 ? spread[i] : 0;
+    }
+    EXPECT_EQ(all, 300);
+    // The 288 heavy parts weigh 576 of 576 + 288 = 864: two thirds.
+    EXPECT_NEAR(static_cast<double>(heavy) / 300.0, 2.0 / 3.0, 0.07);
+}
+
+TEST(TestProblemSpace, AWeightedValueKeepsItsShareAtASmallPointsPerCombination)
+{
+    // 0.75 of two points rounds to two, and 1.5 of two to three: a per-combination rounding
+    // (and a per-combination ceiling when growing) puts every small value above its weight.
+    // The split of the whole first pass by largest remainder lands exactly on 2:1:1.
+    ExplorationRequest request;
+    request.pointsPerCombination = 2;
+    request.seed = 14;
+    const auto corpus
+        = exploreProblemSpace(weightedToy(R"(, "weights": {"a": 2})"), request, ACCEPT_EVERYTHING);
+    // Exact for the heavy value; the two equal light ones split what is left, and a tie in the
+    // remainders goes to the earlier, so one of them may hold a point more than the other.
+    EXPECT_NEAR(shareOf(corpus, "layout", "a"), 0.5, 0.01);
+    EXPECT_NEAR(shareOf(corpus, "layout", "b") + shareOf(corpus, "layout", "c"), 0.5, 0.01);
+
+    request.pointsPerCombination = 2;
+    request.corpusTarget = 400;
+    const auto grown
+        = exploreProblemSpace(weightedToy(R"(, "weights": {"a": 2})"), request, ACCEPT_EVERYTHING);
+    EXPECT_NEAR(shareOf(grown, "layout", "a"), 0.5, 0.03);
+    EXPECT_NEAR(shareOf(grown, "layout", "b") + shareOf(grown, "layout", "c"), 0.5, 0.03);
 }
 
 } // namespace hipdnn_corpus_gen

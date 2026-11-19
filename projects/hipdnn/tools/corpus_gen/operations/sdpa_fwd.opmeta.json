@@ -44,7 +44,7 @@
         "top_left",
         "bottom_right"
       ],
-      "description": "Which corner the causal diagonal is anchored at. Only a distinct problem where the mask is causal and seqlen_q < seqlen_k; the constraint below pins it to top_left everywhere else, so the sweep does not spend half its budget measuring each shape twice. An engine that serves one anchor and refuses the other is removed from a comparison by the corpus rather than by a measurement, which is why this is a declared axis rather than a fixed choice."
+      "description": "Which corner the diagonal is anchored at. Only a distinct problem where the mask is causal or windowed and seqlen_q < seqlen_k; the constraint below pins it to top_left everywhere else, so the sweep does not spend half its budget measuring each shape twice. An engine that serves one anchor and refuses the other is removed from a comparison by the corpus rather than by a measurement, which is why this is a declared axis rather than a fixed choice."
     },
     "dtype": {
       "type": "enum",
@@ -70,7 +70,7 @@
         "bhsd": 1,
         "kv_bhsd": 1
       },
-      "description": "Memory order of the attention operands; dims stay (B, H, S, D) and the order lives in the strides. bshd (default) is token-major for every tensor, [S*H*D, D, H*D, 1]. bhsd is head-major for every tensor, [H*S*D, S*D, D, 1]. kv_bhsd is the decode KV cache: Q, O (and dO, dQ) token-major and K, V (and dK, dV) head-major. Statistics stay row-major. Which layouts an engine serves differs a great deal, so this is a declared axis and the engine oracle filters it; it is not part of the regime label."
+      "description": "Memory order of the attention operands; dims stay (B, H, S, D) and the order lives in the strides. bshd (default) is token-major for every tensor, [S*H*D, D, H*D, 1]. bhsd is head-major for every tensor, [H*S*D, S*D, D, 1]. kv_bhsd is the decode KV cache: Q, O (and dO, dQ) token-major and K, V (and dK, dV) head-major. Statistics stay row-major. Which layouts an engine serves differs a great deal, so this is a declared axis and the engine oracle filters it; it is not part of the regime label. Extents of 1 make layouts alias (with seqlen_q 1 and heads 1, kv_bhsd is bhsd; with seqlen_k 1 and heads_kv 1, it is bshd), so the constraints below leave kv_bhsd out of those points: the same graph would otherwise be listed under two layouts."
     },
     "scale": {
       "type": "enum",
@@ -84,7 +84,7 @@
         "unit": 1,
         "jitter": 1
       },
-      "description": "The attention scale. inv_sqrt_d (default) is 1/sqrt(head_dim). unit is 1.0, a model that folds the scale into Q. jitter is 1/sqrt(head_dim) times (0.5 + (seqlen_k % 16) / 8), a deterministic stand-in for an arbitrary scale in [0.5, 2.375] times the standard one. Never 0: a zero scale means unset and omits the attribute."
+      "description": "The attention scale. inv_sqrt_d (default) is 1/sqrt(head_dim). unit is 1.0, a model that folds the scale into Q. jitter is 1/sqrt(head_dim) times (0.5 + 0.15 * r) for r = (seqlen_k + 3*seqlen_q + batch + head_dim) % 13, a deterministic stand-in for an arbitrary scale in [0.5, 2.3] times the standard one. The modulus is 13 so that power-of-two extents, which fill the archetypes, spread over 12 of the 13 residues instead of landing on one, and no residue gives exactly 1 (so jitter is never the inv_sqrt_d graph). Never 0: a zero scale means unset and omits the attribute."
     },
     "window": {
       "type": "enum",
@@ -100,7 +100,7 @@
         "local_1024": 1,
         "local_4096": 1
       },
-      "description": "Sliding window: local_N keeps the N keys ending at the diagonal (left bound N; the right bound is whatever the mask sets, 0 under a causal mask). none (default) has no left bound. The left bound is never 0, which the frontend rejects. The frontend accepts a left bound under any mask, so the window is not tied to a causal mask here; an engine that serves windows only causally is filtered by the oracle."
+      "description": "Sliding window: local_N keeps the N keys ending at the diagonal (left bound N; the right bound is whatever the mask sets, 0 under a causal mask). none (default) has no left bound. The left bound is never 0, which the frontend rejects. The frontend accepts a left bound under any mask, so the window is not tied to a causal mask here; an engine that serves windows only causally is filtered by the oracle. A window with seqlen_q > seqlen_k is excluded: with the diagonal anchored top-left, every query row from seqlen_k + N - 1 on would keep no key at all."
     }
   },
   "stratification_axis": "arithmetic_intensity",
@@ -290,9 +290,85 @@
           ]
         },
         {
+          "and": [
+            {
+              "!=": [
+                "$q.window",
+                "none"
+              ]
+            },
+            {
+              "<": [
+                "$q.seqlen_q",
+                "$q.seqlen_k"
+              ]
+            }
+          ]
+        },
+        {
           "==": [
             "$q.alignment",
             "top_left"
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "!=": [
+            "$q.layout",
+            "kv_bhsd"
+          ]
+        },
+        {
+          ">": [
+            "$q.heads",
+            1
+          ]
+        },
+        {
+          ">": [
+            "$q.seqlen_q",
+            1
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "!=": [
+            "$q.layout",
+            "kv_bhsd"
+          ]
+        },
+        {
+          ">": [
+            "$q.heads_kv",
+            1
+          ]
+        },
+        {
+          ">": [
+            "$q.seqlen_k",
+            1
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "==": [
+            "$q.window",
+            "none"
+          ]
+        },
+        {
+          "<=": [
+            "$q.seqlen_q",
+            "$q.seqlen_k"
           ]
         }
       ]
@@ -337,6 +413,12 @@
       "scale": "inv_sqrt_d",
       "window": "none"
     }
+  },
+  "// model_shape_defaults": "A model-shape CSV written before one of these parameters was declared has no column for it; the file's rows then mean the default named here. Only these: a parameter with no column and no entry here (alignment, generate_stats, ...) is refused, since filling it in would pass off an unrecorded shape as recorded. The pack `constants` above answer for kernel packs and are not used for shape files.",
+  "model_shape_defaults": {
+    "layout": "bshd",
+    "scale": "inv_sqrt_d",
+    "window": "none"
   },
   "graph_builder": {
     "function": "sdpaForward",
@@ -639,11 +721,23 @@
                           "*": [
                             {
                               "%": [
-                                "$q.seqlen_k",
-                                16
+                                {
+                                  "+": [
+                                    "$q.seqlen_k",
+                                    {
+                                      "*": [
+                                        3,
+                                        "$q.seqlen_q"
+                                      ]
+                                    },
+                                    "$q.batch",
+                                    "$q.head_dim"
+                                  ]
+                                },
+                                13
                               ]
                             },
-                            0.125
+                            0.15
                           ]
                         }
                       ]
@@ -735,7 +829,7 @@
     ],
     "// types": "Operands carry the declared dtype; accumulation and the score matrix are fp32. Left to default, compute follows io and every fp16/bf16 graph is uniform half precision, which hip-kernel-provider's SdpaFwdPlanBuilder refuses outright ('Compute data type must be FLOAT') and the ingestor engines decline at graph_match -- a live-engine corpus then admits nothing, indistinguishable from naming an engine that does not exist. The training forward's softmax statistics are fp32.",
     "// layout": "BSHD (the default): dims stay (B, H, S, D) and the layout lives in the strides, token-major, as the shipped bundles lay them out. Not row-major: strides_of would give BHSD, and rocKE's dense kernels take no stride kernargs -- stride_q_tok is baked as Hq*D -- so their matcher (hasBshdStrides) declines every BHSD graph. AITER serves BSHD too, so the default keeps both engines in the contest. The `layout` parameter adds bhsd (head-major, [H*S*D, S*D, D, 1]) and kv_bhsd (Q/O token-major, K/V head-major, the decode KV cache); the batch stride is the same in both orders, so only the head and sequence strides differ. An engine that serves only some of them is filtered by the oracle, per combination, not by a measurement.",
-    "// scale": "attnScale is stated, not left to the schema's optional: rocKE's dense matcher declines a graph with no attn_scale_value (the scale is a required f32 kernarg and guessing 1/sqrt(D) is what it refuses to do), so omitting it empties a rocKE corpus. inv_sqrt_d, 1/sqrt(head_dim), is the standard scale and what the shipped bundles carry; `unit` is 1.0 and `jitter` multiplies the standard scale by 0.5 to 2.375 so the scale is not a pure function of head_dim. Never 0, which reads as unset. leftBound is declared only for a windowed problem; elsewhere the argument resolves to nothing and the builder leaves the bound unset."
+    "// scale": "attnScale is stated, not left to the schema's optional: rocKE's dense matcher declines a graph with no attn_scale_value (the scale is a required f32 kernarg and guessing 1/sqrt(D) is what it refuses to do), so omitting it empties a rocKE corpus. inv_sqrt_d, 1/sqrt(head_dim), is the standard scale and what the shipped bundles carry; `unit` is 1.0 and `jitter` multiplies the standard scale by 0.5 to 2.3 (never exactly 1) so the scale is not a pure function of head_dim. Never 0, which reads as unset. leftBound is declared only for a windowed problem; elsewhere the argument resolves to nothing and the builder leaves the bound unset."
   },
   "archetypes": [
     {
