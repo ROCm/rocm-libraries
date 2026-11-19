@@ -1,33 +1,67 @@
 # Plan: wariant `addr64` kerneli conv fwd dla tensorów > 2 GiB
 
-Status: faza 0 (helpery platformy, `KernelIdentity.addr64` / `ImplicitGemmConvSpec.addr64`,
-odblokowany kind `"i64"` w ABI) zaimplementowana i scalona. Z fazy 1 (sekcja 7)
-zaimplementowane są na razie tylko prymitywy M-decode z sekcji 3/5:
-`tile_origin_decode_i64`, `carry_decode_i32` (+ mirror C++) i transform
-`UnmergeAddr64`/`unmerge_addr64` — każdy z testem, **ale jeszcze nieużywane
-przez żaden builder**. Żadna rodzina kerneli jeszcze nie buduje ścieżki
-`addr64` (`validate()` odmawia `addr64=True`). Zakres: wszystkie rodziny
-**forward** convolution w `library/kernels/common/` i ich mirrory C++ w
-`library/cpp/`.
+Status: faza 0 zaimplementowana i scalona. Z fazy 1 (sekcja 7) zaimplementowane
+i **zweryfikowane na realnym GPU (gfx950)** są prymitywy z sekcji 3/5:
+- `tile_origin_decode_i64`, `carry_decode_i32` (+ mirror C++), transform
+  `UnmergeAddr64`/`unmerge_addr64` — i64 M-decode `m0 -> (n0,ho0,wo0)` raz na
+  WG + i32 per-lane carry, bez magic division.
+- `make_tile_buffer_resource` (Faza 0) — origin i64 scalaryzowany do SGPR,
+  `num_records` clamp do `2^31-1`.
+- `WarpGrid.bind(..., m_origin_i64=True)` (`platform/python/rocke/helpers/geometry.py`)
+  — i64-owy odpowiednik `block_m_off` (`block_id * tile_m`), bo to mnożenie
+  dzieje się dziś w i32 we współdzielonym helperze geometrii (każda rodzina
+  kerneli MMA-tile, nie tylko conv), więc i64 origin musi powstać tam, nie
+  dopiero w pochodnej `block_m_off_v`.
+- ABI (sekcja 4): `conv_arg_names(direction="fwd", addr64=True)` + mirror C++,
+  2D/non-split-K/non-3D only.
 
-**Odkryta komplikacja przy podłączaniu M-decode (do rozwiązania przed dalszą
-fazą 1):** `make_a_descriptor_dynamic`/`make_d_descriptor_dynamic`
-(`_conv_implicit_gemm_common.py`) liczą *bezwzględny* offset jako
-`sum(coord_i * stride_i)` po całym łańcuchu transformacji — łącznie z
-dekodowanym `n`, mnożonym przez `stride_n`. Podmiana samego
-`spatial_unmerge_dynamic` na `UnmergeAddr64` (który też produkuje bezwzględne
-`(n, ho, wo)`) nie usuwa więc przepełnienia i32: `n * stride_n` to dokładnie
-ten iloczyn, który `addr64` ma ominąć dla dużego `N`. Zgodnie z modelem z
-sekcji 2, ten iloczyn musi wejść w skład **originu** (liczony raz na WG, w
-i64, przez `make_tile_buffer_resource`), a per-lane arytmetyka i32 może
-liczyć wyłącznie ograniczoną deltę w obrębie kafla. Najbliższy gotowy budulec
-do tego podziału to `DynamicTensorDescriptor.offset_i64_split`/`offset_i64`
-(`platform/python/rocke/helpers/transforms.py`, już używane gdzie indziej dla
-wzorca „jeden duży wskaźnik bazowy + reszta i32”) — raczej niż bezpośrednie
-użycie `UnmergeAddr64`'s bezwzględnych współrzędnych w istniejącym łańcuchu
-`make_a/d_descriptor_dynamic`. To wymaga przeprojektowania, jak origin trafia
-do `a_offset_split`/`d_addr` (skąd dziś biorą `m_val`), zanim którykolwiek
-builder implicit-GEMM będzie mógł bezpiecznie ustawić `addr64=True`.
+Test GPU (`platform/tests/instances/test_addr64_gpu_numeric.py`, 10/10 PASS na
+gfx950): `make_tile_buffer_resource` z prawdziwą alokacją > 4 GiB (odczyt
+poprawnej wartości) i z originem > 4 GiB względem małej alokacji (clamp do
+zera, bez faulta); `tile_origin_decode_i64`+`carry_decode_i32` kontra
+referencja w czystym Pythonie dla obu scenariuszy (ogromne N, ogromne Ho*Wo).
+
+Żadna rodzina kerneli jeszcze nie buduje ścieżki `addr64`
+(`validate()` odmawia `addr64=True`) — prymitywy są gotowe i zweryfikowane,
+ale **nie podłączone** do `build_implicit_gemm_conv`. Zakres: wszystkie
+rodziny **forward** convolution w `library/kernels/common/` i ich mirrory C++
+w `library/cpp/`.
+
+**Co blokuje podłączenie do rzeczywistego kernela (dwa osobne, współdzielone
+miejsca, oba wymagają namysłu przed zmianą):**
+
+1. **Łańcuch deskryptora A/D.** `make_a_descriptor_dynamic`/
+   `make_d_descriptor_dynamic` (`_conv_implicit_gemm_common.py`) liczą
+   *bezwzględny* offset jako `sum(coord_i * stride_i)` po całym łańcuchu
+   transformacji — łącznie z dekodowanym `n`, mnożonym przez `stride_n`.
+   Podmiana samego `spatial_unmerge_dynamic` na `UnmergeAddr64` (który też
+   produkuje bezwzględne `(n, ho, wo)`) nie usuwa więc przepełnienia i32:
+   `n * stride_n` to dokładnie ten iloczyn, który `addr64` ma ominąć dla
+   dużego `N`. Ten iloczyn musi wejść w skład **originu** (i64, przez
+   `make_tile_buffer_resource`, już gotowe), a per-lane arytmetyka i32 może
+   liczyć wyłącznie ograniczoną deltę w obrębie kafla — czyli deskryptor dla
+   `addr64` powinien w ogóle nie nosić współrzędnej `n` (ani jej stride'u) w
+   swoim łańcuchu `coord_names`/`strides`, bo ten wkład jest już wliczony w
+   origin. Najbliższy gotowy budulec: `DynamicTensorDescriptor.offset_i64_split`/
+   `offset_i64` (`platform/python/rocke/helpers/transforms.py`), wzorzec
+   „jeden duży wskaźnik bazowy + reszta i32” już używany gdzie indziej.
+2. **Epilog store'u D (odkryte przy czytaniu `d_addr`'s wywołujących).**
+   `d_addr` nie jest wołane bezpośrednio w `conv_implicit_gemm.py` — jest
+   przekazywane jako `addr_fn=d_addr` do `CShuffleEpilogue.store`/
+   `DirectEpilogue.store` (`platform/python/rocke/helpers/epilogues.py`),
+   które **same** liczą `m_val` z `block_m_off_v` + offset per-warp/lane
+   (ten sam i32-mnożenie problem co w geometry.py) i maskują go przeciw
+   `bounds=(p_M, c_N_bound)` (`m_val < p_M`, i32 compare). Te klasy epilogu są
+   współdzielone z innymi rodzinami kerneli (GEMM, prawdopodobnie attention),
+   więc `addr64` wymaga **dwóch** osobnych zmian we współdzielonym kodzie
+   (geometrii — już zrobione — i epilogu — jeszcze nie), nie tylko w
+   `conv_implicit_gemm.py` samym.
+
+Dopiero po (1) i (2) którykolwiek builder implicit-GEMM może bezpiecznie
+ustawić `addr64=True`. Oba punkty mają teraz solidne, zweryfikowane na GPU
+building blocks (origin i64, M-decode) do wykorzystania — brakuje
+przeprojektowania samego łańcucha offsetu i epilogu, co jest osobnym,
+większym zadaniem niż dodanie kolejnego prymitywu.
 
 ## 1. Cel i zasady
 
