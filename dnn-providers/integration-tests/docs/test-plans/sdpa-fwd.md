@@ -926,19 +926,19 @@ that the engine is correct for it. Examples:
   and every case with a Stats layout that the kernel cannot address. The
   result depends on the input data and on the memory contents.
 
-ALMIOPEN-3123 and ALMIOPEN-3124 are an exception to this rule: their entries
-cover the cases observed to fail, not every case with the trigger. The
-uncovered cases keep running, and the engine declines them or they pass.
-ALMIOPEN-3123 has 2,360 trigger cases with no entry. Before the ALMIOPEN-3123
-fix (rocm-libraries #15768), 156 of them ran: 153 passed on gfx942 and gfx950,
-and 3 passed on gfx942 but were declined on gfx950. The rest were declined on
-both. With the fix, `ASM_SDPA_ENGINE` declines a graph that has a block mask,
-or a dropout mask and a dropout scale. On the `quick`, `standard` and
+ALMIOPEN-3124 is an exception to this rule: its entries cover the cases
+observed to fail, not every case with the trigger. The uncovered cases keep
+running, and the engine declines them. ALMIOPEN-3124 has 313 trigger cases
+with no entry, all declined on gfx942 and gfx950.
+
+ALMIOPEN-3123 has no entry. With its fix (rocm-libraries #15768),
+`ASM_SDPA_ENGINE` declines a graph that has a block mask, or a dropout mask
+and a dropout scale. The engine declines, on gfx942 and gfx950 with both
+fills, the 445 trigger cases that failed before the fix (207 `standard`, 111
+`comprehensive` and 127 `full`). On the `quick`, `standard` and
 `comprehensive` tiers, the fix moved 123 cases on gfx942 and 120 on gfx950
-from passed to declined, and no case failed. The `full` tier was not run after
-the fix. The ALMIOPEN-3123 entries stay until a run without them shows that
-the engine declines every case that they match (section 10.4).
-ALMIOPEN-3124 has 313 trigger cases with no entry, all declined on both.
+from passed to declined, and no case failed. The other `full` tier trigger
+cases were not run after the fix.
 
 The `ASM_SDPA_ENGINE` results on the `SdpaFwdPlan` cases with the fix, per
 tier (each tier's own cases), with the GPU reference and the default fill:
@@ -946,8 +946,8 @@ tier (each tier's own cases), with the GPU reference and the default fill:
 | Tier | Cases | gfx942 passed / declined / skipped | gfx950 passed / declined / skipped |
 |---|---|---|---|
 | quick | 1,500 | 170 / 1,204 / 126 | 150 / 1,342 / 8 |
-| standard | 9,519 | 320 / 7,625 / 1,574 | 302 / 8,080 / 1,137 |
-| comprehensive | 4,622 | 151 / 3,843 / 628 | 137 / 4,042 / 443 |
+| standard | 9,519 | 320 / 7,832 / 1,367 | 302 / 8,287 / 930 |
+| comprehensive | 4,622 | 151 / 3,954 / 517 | 137 / 4,153 / 332 |
 
 No case failed. A skipped case matches a `[[test_skips]]` entry of
 `ASM_SDPA_ENGINE.toml`. The skips differ by GPU because the `FP8_E4M3_FNUZ`
