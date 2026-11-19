@@ -944,6 +944,41 @@ TYPED_TEST(local_matrix, set_data_ptr_csr_replaces_a_matrix_with_entries)
     expect_matrix(*A, ref, csr_format, this->backend());
 }
 
+// Diagonal 1 has no entry in the last row, so the value 12 is stored in its padding
+TEST(local_matrix_dia, leave_data_ptr_dia_returns_the_arrays_with_their_padding)
+{
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const std::vector<int> offsets = {0, 1};
+        std::vector<T>         values(12);
+        std::iota(values.begin(), values.end(), T(1));
+
+        int* offset = nullptr;
+        T*   val    = nullptr;
+        rocalution::allocate_host(2, &offset);
+        rocalution::allocate_host(12, &val);
+        std::copy(offsets.begin(), offsets.end(), offset);
+        std::copy(values.begin(), values.end(), val);
+
+        LocalMatrix<T> A;
+        A.SetDataPtrDIA(&offset, &val, "A", 12, 6, 6, 2);
+        ASSERT_EQ(A.GetFormat(), DIA);
+
+        int num_diag = 0;
+        A.LeaveDataPtrDIA(&offset, &val, num_diag);
+        ASSERT_EQ(num_diag, 2);
+        EXPECT_EQ(std::vector<int>(offset, offset + 2), offsets);
+        EXPECT_EQ(std::vector<T>(val, val + 12), values);
+        EXPECT_EQ(A.GetM(), 0);
+        EXPECT_EQ(A.GetN(), 0);
+        EXPECT_EQ(A.GetNnz(), 0);
+
+        rocalution::free_host(&offset);
+        rocalution::free_host(&val);
+    });
+}
+
 TEST_P(local_matrix_formats, clone_and_copy_between_backends)
 {
     for_each_type<RealTypes>([&](auto type) {
@@ -1387,7 +1422,7 @@ TEST(local_matrix_moves, repeated_async_moves_before_sync_do_nothing)
     });
 }
 
-// A pending CopyFromAsync() into a host matrix does not turn the move into a no-op
+// A pending CopyFromAsync() does not turn the async move that follows into a no-op
 TEST(local_matrix_moves, an_async_move_after_a_pending_copy_from_async_is_not_skipped)
 {
     REQUIRE_BACKEND(Backend::Accelerator);
@@ -1395,26 +1430,42 @@ TEST(local_matrix_moves, an_async_move_after_a_pending_copy_from_async_is_not_sk
         using T = typename decltype(type)::type;
 
         const Csr<T> ref = banded<T>();
-        auto         src = make_local_matrix(Backend::Host, ref);
-
-        BackendObjectCounter objects;
+        for(const Backend from : {Backend::Host, Backend::Accelerator})
         {
-            auto A = empty_local_matrix<T>(Backend::Host);
-            A->CopyFromAsync(*src);
-            EXPECT_EQ(objects.live("HostMatrix"), 1);
-            A->MoveToAcceleratorAsync();
-            A->Sync();
-            EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 1);
-            EXPECT_EQ(objects.live("HostMatrix"), 0);
-            if(!expect_location(A, Backend::Accelerator))
+            const Backend to = from == Backend::Host ? Backend::Accelerator : Backend::Host;
+            SCOPED_TRACE("to the " + backend_name(to));
+            const std::string from_objects
+                = from == Backend::Host ? "HostMatrix" : "HIPAcceleratorMatrix";
+            const std::string to_objects
+                = to == Backend::Host ? "HostMatrix" : "HIPAcceleratorMatrix";
+            auto src = make_local_matrix(from, ref);
+
+            BackendObjectCounter objects;
             {
-                return;
+                auto A = empty_local_matrix<T>(from);
+                A->CopyFromAsync(*src);
+                EXPECT_EQ(objects.live(from_objects), 1);
+                if(to == Backend::Accelerator)
+                {
+                    A->MoveToAcceleratorAsync();
+                }
+                else
+                {
+                    A->MoveToHostAsync();
+                }
+                A->Sync();
+                EXPECT_EQ(objects.live(to_objects), 1);
+                EXPECT_EQ(objects.live(from_objects), 0);
+                if(!expect_location(A, to))
+                {
+                    continue;
+                }
+                EXPECT_TRUE(A->Check());
+                expect_matrix(*A, ref, csr_format, to);
             }
-            EXPECT_TRUE(A->Check());
-            expect_matrix(*A, ref, csr_format, Backend::Accelerator);
+            EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 0);
+            EXPECT_EQ(objects.live("HostMatrix"), 0);
         }
-        EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 0);
-        EXPECT_EQ(objects.live("HostMatrix"), 0);
     });
 }
 
@@ -3652,7 +3703,8 @@ TEST(local_matrix_DeathTest, write_file_rsio_failure_ends_the_program)
                        "local_matrix\\.cpp");
 }
 
-// Written in CSR order with 1-based indices and 12 significant digits
+// Written in CSR order with 1-based indices. WriteFileMTX does not document how many
+// digits it writes, so 1/3 is read back and checked to a relative 1e-11.
 TYPED_TEST(local_matrix, write_file_mtx_writes_the_matrix_market_text)
 {
     using T = typename TypeParam::value_type;
@@ -3675,17 +3727,25 @@ TYPED_TEST(local_matrix, write_file_mtx_writes_the_matrix_market_text)
     in.close();
     std::remove(file.c_str());
 
-    const std::string third = std::is_same<T, float>::value ? "0.333333343267" : "0.333333333333";
-    EXPECT_EQ(text.str(),
-              "%%MatrixMarket matrix coordinate real general\n"
-              "3 3 5\n"
-              "1 1 1\n"
-              "1 3 "
-                  + third
-                  + "\n"
-                    "2 2 3\n"
-                    "3 1 -4\n"
-                    "3 3 5\n");
+    const std::string s    = text.str();
+    const std::string head = "%%MatrixMarket matrix coordinate real general\n"
+                             "3 3 5\n"
+                             "1 1 1\n"
+                             "1 3 ";
+    const std::string tail = "\n"
+                             "2 2 3\n"
+                             "3 1 -4\n"
+                             "3 3 5\n";
+    ASSERT_GT(s.size(), head.size() + tail.size()) << s;
+    EXPECT_EQ(s.substr(0, head.size()), head);
+    EXPECT_EQ(s.substr(s.size() - tail.size()), tail);
+
+    std::istringstream entry(s.substr(head.size(), s.size() - head.size() - tail.size()));
+    T                  third = 0;
+    entry >> third;
+    EXPECT_FALSE(entry.fail()) << entry.str();
+    EXPECT_TRUE(entry.eof()) << entry.str();
+    EXPECT_NEAR(third, static_cast<T>(1) / 3, 1e-11 / 3) << entry.str();
 }
 
 TYPED_TEST(local_matrix, read_file_mtx_reads_a_hand_written_file)
@@ -4343,239 +4403,248 @@ TEST(local_matrix_preconditions, violations_end_the_program)
 // the file, the function and the whole expression.
 TEST(local_matrix_preconditions, null_pointer_arguments_end_the_program)
 {
-    const int64_t n = 100;
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
 
-    LocalMatrix<double>   E;
-    LocalMatrix<double>   F;
-    LocalVector<double>   v;
-    LocalVector<bool>     connections;
-    LocalVector<int>      ints;
-    LocalVector<int64_t>  aggregates;
-    LocalMatrix<double>*  no_matrix  = nullptr;
-    LocalMatrix<double>** no_matrix2 = nullptr;
-    LocalVector<double>*  no_vector  = nullptr;
-    LocalVector<int>*     no_ints    = nullptr;
+        const int64_t n = 100;
 
-    std::vector<int>     int_array(n, 0);
-    std::vector<PtrType> ptr_array(n + 1, 0);
-    std::vector<double>  val_array(n, 0.0);
-    int*                 p     = int_array.data();
-    PtrType*             o     = ptr_array.data();
-    double*              d     = val_array.data();
-    int*                 null  = nullptr;
-    PtrType*             nullo = nullptr;
-    double*              nulld = nullptr;
-    int                  k     = 0;
-    double               beta  = 0;
+        LocalMatrix<T>       E;
+        LocalMatrix<T>       F;
+        LocalVector<T>       v;
+        LocalVector<bool>    connections;
+        LocalVector<int>     ints;
+        LocalVector<int64_t> aggregates;
+        LocalMatrix<T>*      no_matrix  = nullptr;
+        LocalMatrix<T>**     no_matrix2 = nullptr;
+        LocalVector<T>*      no_vector  = nullptr;
+        LocalVector<int>*    no_ints    = nullptr;
 
-    LocalMatrix<double> A;
-    A.AllocateCSR("A", n, n, n);
+        std::vector<int>     int_array(n, 0);
+        std::vector<PtrType> ptr_array(n + 1, 0);
+        std::vector<T>       val_array(n, 0.0);
+        int*                 p     = int_array.data();
+        PtrType*             o     = ptr_array.data();
+        T*                   d     = val_array.data();
+        int*                 null  = nullptr;
+        PtrType*             nullo = nullptr;
+        T*                   nulld = nullptr;
+        int                  k     = 0;
+        T                    beta  = 0;
 
-    auto at = [](const std::string& function) {
-        return "local_matrix\\.cpp:[0-9]+: .*::" + function + "\\(.*";
-    };
+        LocalMatrix<T> A;
+        A.AllocateCSR("A", n, n, n);
 
-    // Extractions
-    LocalMatrix<double>   sub;
-    LocalMatrix<double>*  row_of_subs[1] = {&sub};
-    LocalMatrix<double>** subs[1]        = {row_of_subs};
-    EXPECT_ASSERT_DEATH(E.ExtractSubMatrix(0, 0, n, n, no_matrix),
-                        at("ExtractSubMatrix") + "[^*]mat != NULL");
-    EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, null, p, subs),
-                        at("ExtractSubMatrices") + "row_offset != NULL");
-    EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, p, null, subs),
-                        at("ExtractSubMatrices") + "col_offset != NULL");
-    EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, p, p, nullptr),
-                        at("ExtractSubMatrices") + "[^*]mat != NULL");
-    EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, p, p, &no_matrix2),
-                        at("ExtractSubMatrices") + "\\*mat != NULL");
-    EXPECT_ASSERT_DEATH(E.ExtractDiagonal(no_vector), at("ExtractDiagonal") + "vec_diag != NULL");
-    EXPECT_ASSERT_DEATH(E.ExtractInverseDiagonal(no_vector),
-                        at("ExtractInverseDiagonal") + "vec_inv_diag != NULL");
-    EXPECT_ASSERT_DEATH(E.ExtractL(no_matrix, true), at("ExtractL") + "L != NULL");
-    EXPECT_ASSERT_DEATH(E.ExtractU(no_matrix, true), at("ExtractU") + "U != NULL");
-    EXPECT_ASSERT_DEATH(E.ExtractColumnVector(0, no_vector),
-                        at("ExtractColumnVector") + "vec != NULL");
-    EXPECT_ASSERT_DEATH(E.ExtractRowVector(0, no_vector), at("ExtractRowVector") + "vec != NULL");
+        auto at = [](const std::string& function) {
+            return "local_matrix\\.cpp:[0-9]+: .*::" + function + "\\(.*";
+        };
 
-    // Orderings
-    EXPECT_ASSERT_DEATH(E.CMK(no_ints), at("CMK") + "permutation != NULL");
-    EXPECT_ASSERT_DEATH(E.RCMK(no_ints), at("RCMK") + "permutation != NULL");
-    EXPECT_ASSERT_DEATH(E.ConnectivityOrder(no_ints),
-                        at("ConnectivityOrder") + "permutation != NULL");
-    EXPECT_ASSERT_DEATH(E.MultiColoring(k, &p, &ints),
-                        at("MultiColoring") + "\\*size_colors == NULL");
-    EXPECT_ASSERT_DEATH(E.MultiColoring(k, &null, no_ints),
-                        at("MultiColoring") + "permutation != NULL");
-    EXPECT_ASSERT_DEATH(E.MaximalIndependentSet(k, no_ints),
-                        at("MaximalIndependentSet") + "permutation != NULL");
-    EXPECT_ASSERT_DEATH(E.ZeroBlockPermutation(k, no_ints),
-                        at("ZeroBlockPermutation") + "permutation != NULL");
+        // Extractions
+        LocalMatrix<T>   sub;
+        LocalMatrix<T>*  row_of_subs[1] = {&sub};
+        LocalMatrix<T>** subs[1]        = {row_of_subs};
+        EXPECT_ASSERT_DEATH(E.ExtractSubMatrix(0, 0, n, n, no_matrix),
+                            at("ExtractSubMatrix") + "[^*]mat != NULL");
+        EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, null, p, subs),
+                            at("ExtractSubMatrices") + "row_offset != NULL");
+        EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, p, null, subs),
+                            at("ExtractSubMatrices") + "col_offset != NULL");
+        EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, p, p, nullptr),
+                            at("ExtractSubMatrices") + "[^*]mat != NULL");
+        EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, p, p, &no_matrix2),
+                            at("ExtractSubMatrices") + "\\*mat != NULL");
+        EXPECT_ASSERT_DEATH(E.ExtractDiagonal(no_vector),
+                            at("ExtractDiagonal") + "vec_diag != NULL");
+        EXPECT_ASSERT_DEATH(E.ExtractInverseDiagonal(no_vector),
+                            at("ExtractInverseDiagonal") + "vec_inv_diag != NULL");
+        EXPECT_ASSERT_DEATH(E.ExtractL(no_matrix, true), at("ExtractL") + "L != NULL");
+        EXPECT_ASSERT_DEATH(E.ExtractU(no_matrix, true), at("ExtractU") + "U != NULL");
+        EXPECT_ASSERT_DEATH(E.ExtractColumnVector(0, no_vector),
+                            at("ExtractColumnVector") + "vec != NULL");
+        EXPECT_ASSERT_DEATH(E.ExtractRowVector(0, no_vector),
+                            at("ExtractRowVector") + "vec != NULL");
 
-    // Solves, factorizations and products
-    EXPECT_ASSERT_DEATH(E.LSolve(v, no_vector), at("LSolve") + "out != NULL");
-    EXPECT_ASSERT_DEATH(E.USolve(v, no_vector), at("USolve") + "out != NULL");
-    EXPECT_ASSERT_DEATH(E.LLSolve(v, no_vector), at("LLSolve") + "out != NULL");
-    EXPECT_ASSERT_DEATH(E.LLSolve(v, v, no_vector), at("LLSolve") + "out != NULL");
-    EXPECT_ASSERT_DEATH(E.LUSolve(v, no_vector), at("LUSolve") + "out != NULL");
-    EXPECT_ASSERT_DEATH(E.QRSolve(v, no_vector), at("QRSolve") + "out != NULL");
-    EXPECT_ASSERT_DEATH(E.ItLSolve(1, 0, true, v, no_vector), at("ItLSolve") + "out != NULL");
-    EXPECT_ASSERT_DEATH(E.ItUSolve(1, 0, true, v, no_vector), at("ItUSolve") + "out != NULL");
-    EXPECT_ASSERT_DEATH(E.ItLLSolve(1, 0, true, v, no_vector), at("ItLLSolve") + "out != NULL");
-    EXPECT_ASSERT_DEATH(E.ItLLSolve(1, 0, true, v, v, no_vector), at("ItLLSolve") + "out != NULL");
-    EXPECT_ASSERT_DEATH(E.ItLUSolve(1, 0, true, v, no_vector), at("ItLUSolve") + "out != NULL");
-    EXPECT_ASSERT_DEATH(E.ICFactorize(no_vector), at("ICFactorize") + "inv_diag != NULL");
-    EXPECT_ASSERT_DEATH(E.Householder(0, beta, no_vector), at("Householder") + "vec != NULL");
-    EXPECT_ASSERT_DEATH(E.Apply(v, no_vector), at("Apply") + "out != NULL");
-    EXPECT_ASSERT_DEATH(E.ApplyAdd(v, 1.0, no_vector), at("ApplyAdd") + "out != NULL");
-    EXPECT_ASSERT_DEATH(E.CreateFromMap(ints, n, n, no_matrix),
-                        at("CreateFromMap") + "pro != NULL");
+        // Orderings
+        EXPECT_ASSERT_DEATH(E.CMK(no_ints), at("CMK") + "permutation != NULL");
+        EXPECT_ASSERT_DEATH(E.RCMK(no_ints), at("RCMK") + "permutation != NULL");
+        EXPECT_ASSERT_DEATH(E.ConnectivityOrder(no_ints),
+                            at("ConnectivityOrder") + "permutation != NULL");
+        EXPECT_ASSERT_DEATH(E.MultiColoring(k, &p, &ints),
+                            at("MultiColoring") + "\\*size_colors == NULL");
+        EXPECT_ASSERT_DEATH(E.MultiColoring(k, &null, no_ints),
+                            at("MultiColoring") + "permutation != NULL");
+        EXPECT_ASSERT_DEATH(E.MaximalIndependentSet(k, no_ints),
+                            at("MaximalIndependentSet") + "permutation != NULL");
+        EXPECT_ASSERT_DEATH(E.ZeroBlockPermutation(k, no_ints),
+                            at("ZeroBlockPermutation") + "permutation != NULL");
 
-    // Copies of the arrays
-    EXPECT_ASSERT_DEATH(E.UpdateValuesCSR(nulld), at("UpdateValuesCSR") + "val != NULL");
-    EXPECT_ASSERT_DEATH(E.CopyFromCSR(nullo, p, d), at("CopyFromCSR") + "row_offsets != NULL");
-    EXPECT_ASSERT_DEATH(A.CopyFromCSR(o, null, d), at("CopyFromCSR") + "col != NULL");
-    EXPECT_ASSERT_DEATH(A.CopyFromCSR(o, p, nulld), at("CopyFromCSR") + "val != NULL");
-    EXPECT_ASSERT_DEATH(E.CopyToCSR(nullo, p, d), at("CopyToCSR") + "row_offsets != NULL");
-    EXPECT_ASSERT_DEATH(A.CopyToCSR(o, null, d), at("CopyToCSR") + "col != NULL");
-    EXPECT_ASSERT_DEATH(A.CopyToCSR(o, p, nulld), at("CopyToCSR") + "val != NULL");
-    EXPECT_ASSERT_DEATH(E.CopyFromCOO(null, p, d), at("CopyFromCOO") + "row != NULL");
-    EXPECT_ASSERT_DEATH(E.CopyFromCOO(p, null, d), at("CopyFromCOO") + "col != NULL");
-    EXPECT_ASSERT_DEATH(E.CopyFromCOO(p, p, nulld), at("CopyFromCOO") + "val != NULL");
-    EXPECT_ASSERT_DEATH(E.CopyToCOO(null, p, d), at("CopyToCOO") + "row != NULL");
-    EXPECT_ASSERT_DEATH(E.CopyToCOO(p, null, d), at("CopyToCOO") + "col != NULL");
-    EXPECT_ASSERT_DEATH(E.CopyToCOO(p, p, nulld), at("CopyToCOO") + "val != NULL");
-    EXPECT_ASSERT_DEATH(E.CopyFromHostCSR(nullo, p, d, "E", n, n, n),
-                        at("CopyFromHostCSR") + "row_offset != NULL");
-    EXPECT_ASSERT_DEATH(E.CopyFromHostCSR(o, null, d, "E", n, n, n),
-                        at("CopyFromHostCSR") + "col != NULL");
-    EXPECT_ASSERT_DEATH(E.CopyFromHostCSR(o, p, nulld, "E", n, n, n),
-                        at("CopyFromHostCSR") + "val != NULL");
+        // Solves, factorizations and products
+        EXPECT_ASSERT_DEATH(E.LSolve(v, no_vector), at("LSolve") + "out != NULL");
+        EXPECT_ASSERT_DEATH(E.USolve(v, no_vector), at("USolve") + "out != NULL");
+        EXPECT_ASSERT_DEATH(E.LLSolve(v, no_vector), at("LLSolve") + "out != NULL");
+        EXPECT_ASSERT_DEATH(E.LLSolve(v, v, no_vector), at("LLSolve") + "out != NULL");
+        EXPECT_ASSERT_DEATH(E.LUSolve(v, no_vector), at("LUSolve") + "out != NULL");
+        EXPECT_ASSERT_DEATH(E.QRSolve(v, no_vector), at("QRSolve") + "out != NULL");
+        EXPECT_ASSERT_DEATH(E.ItLSolve(1, 0, true, v, no_vector), at("ItLSolve") + "out != NULL");
+        EXPECT_ASSERT_DEATH(E.ItUSolve(1, 0, true, v, no_vector), at("ItUSolve") + "out != NULL");
+        EXPECT_ASSERT_DEATH(E.ItLLSolve(1, 0, true, v, no_vector), at("ItLLSolve") + "out != NULL");
+        EXPECT_ASSERT_DEATH(E.ItLLSolve(1, 0, true, v, v, no_vector),
+                            at("ItLLSolve") + "out != NULL");
+        EXPECT_ASSERT_DEATH(E.ItLUSolve(1, 0, true, v, no_vector), at("ItLUSolve") + "out != NULL");
+        EXPECT_ASSERT_DEATH(E.ICFactorize(no_vector), at("ICFactorize") + "inv_diag != NULL");
+        EXPECT_ASSERT_DEATH(E.Householder(0, beta, no_vector), at("Householder") + "vec != NULL");
+        EXPECT_ASSERT_DEATH(E.Apply(v, no_vector), at("Apply") + "out != NULL");
+        EXPECT_ASSERT_DEATH(E.ApplyAdd(v, 1.0, no_vector), at("ApplyAdd") + "out != NULL");
+        EXPECT_ASSERT_DEATH(E.CreateFromMap(ints, n, n, no_matrix),
+                            at("CreateFromMap") + "pro != NULL");
 
-    // AMG
-    EXPECT_ASSERT_DEATH(E.AMGGreedyAggregate(0.1, nullptr, &aggregates, &aggregates),
-                        at("AMGGreedyAggregate") + "connections != NULL");
-    EXPECT_ASSERT_DEATH(E.AMGGreedyAggregate(0.1, &connections, nullptr, &aggregates),
-                        at("AMGGreedyAggregate") + "aggregates != NULL");
-    EXPECT_ASSERT_DEATH(E.AMGGreedyAggregate(0.1, &connections, &aggregates, nullptr),
-                        at("AMGGreedyAggregate") + "aggregate_root_nodes != NULL");
-    EXPECT_ASSERT_DEATH(
-        E.AMGSmoothedAggregation(0.1, connections, aggregates, aggregates, no_matrix),
-        at("AMGSmoothedAggregation") + "prolong != NULL");
-    EXPECT_ASSERT_DEATH(E.AMGUnsmoothedAggregation(aggregates, aggregates, no_matrix),
-                        at("AMGUnsmoothedAggregation") + "prolong != NULL");
-    EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(0.1, k, no_ints, k, &null, k, 0),
-                        at("InitialPairwiseAggregation") + "[^*r]G != NULL");
-    EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(0.1, k, &ints, k, &p, k, 0),
-                        at("InitialPairwiseAggregation") + "\\*rG == NULL");
-    EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(F, 0.1, k, no_ints, k, &null, k, 0),
-                        at("InitialPairwiseAggregation") + "[^*r]G != NULL");
-    EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(F, 0.1, k, &ints, k, &p, k, 0),
-                        at("InitialPairwiseAggregation") + "\\*rG == NULL");
-    EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(0.1, k, no_ints, k, &p, k, 0),
-                        at("FurtherPairwiseAggregation") + "[^*r]G != NULL");
-    EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(0.1, k, &ints, k, &null, k, 0),
-                        at("FurtherPairwiseAggregation") + "\\*rG != NULL");
-    EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(F, 0.1, k, no_ints, k, &p, k, 0),
-                        at("FurtherPairwiseAggregation") + "[^*r]G != NULL");
-    EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(F, 0.1, k, &ints, k, &null, k, 0),
-                        at("FurtherPairwiseAggregation") + "\\*rG != NULL");
-    EXPECT_ASSERT_DEATH(E.CoarsenOperator(no_matrix, n, n, ints, n, p, n),
-                        at("CoarsenOperator") + "Ac != NULL");
-    EXPECT_ASSERT_DEATH(E.CoarsenOperator(&F, n, n, ints, n, null, n),
-                        at("CoarsenOperator") + "[^*]rG != NULL");
+        // Copies of the arrays
+        EXPECT_ASSERT_DEATH(E.UpdateValuesCSR(nulld), at("UpdateValuesCSR") + "val != NULL");
+        EXPECT_ASSERT_DEATH(E.CopyFromCSR(nullo, p, d), at("CopyFromCSR") + "row_offsets != NULL");
+        EXPECT_ASSERT_DEATH(A.CopyFromCSR(o, null, d), at("CopyFromCSR") + "col != NULL");
+        EXPECT_ASSERT_DEATH(A.CopyFromCSR(o, p, nulld), at("CopyFromCSR") + "val != NULL");
+        EXPECT_ASSERT_DEATH(E.CopyToCSR(nullo, p, d), at("CopyToCSR") + "row_offsets != NULL");
+        EXPECT_ASSERT_DEATH(A.CopyToCSR(o, null, d), at("CopyToCSR") + "col != NULL");
+        EXPECT_ASSERT_DEATH(A.CopyToCSR(o, p, nulld), at("CopyToCSR") + "val != NULL");
+        EXPECT_ASSERT_DEATH(E.CopyFromCOO(null, p, d), at("CopyFromCOO") + "row != NULL");
+        EXPECT_ASSERT_DEATH(E.CopyFromCOO(p, null, d), at("CopyFromCOO") + "col != NULL");
+        EXPECT_ASSERT_DEATH(E.CopyFromCOO(p, p, nulld), at("CopyFromCOO") + "val != NULL");
+        EXPECT_ASSERT_DEATH(E.CopyToCOO(null, p, d), at("CopyToCOO") + "row != NULL");
+        EXPECT_ASSERT_DEATH(E.CopyToCOO(p, null, d), at("CopyToCOO") + "col != NULL");
+        EXPECT_ASSERT_DEATH(E.CopyToCOO(p, p, nulld), at("CopyToCOO") + "val != NULL");
+        EXPECT_ASSERT_DEATH(E.CopyFromHostCSR(nullo, p, d, "E", n, n, n),
+                            at("CopyFromHostCSR") + "row_offset != NULL");
+        EXPECT_ASSERT_DEATH(E.CopyFromHostCSR(o, null, d, "E", n, n, n),
+                            at("CopyFromHostCSR") + "col != NULL");
+        EXPECT_ASSERT_DEATH(E.CopyFromHostCSR(o, p, nulld, "E", n, n, n),
+                            at("CopyFromHostCSR") + "val != NULL");
 
-    // SetDataPtr*: the array pointer and the array
-    EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(nullptr, &p, &d, "E", n, n, n),
-                        at("SetDataPtrCOO") + "[^*]row != NULL");
-    EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, nullptr, &d, "E", n, n, n),
-                        at("SetDataPtrCOO") + "[^*]col != NULL");
-    EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, &p, nullptr, "E", n, n, n),
-                        at("SetDataPtrCOO") + "[^*]val != NULL");
-    EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&null, &p, &d, "E", n, n, n),
-                        at("SetDataPtrCOO") + "\\*row != NULL");
-    EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, &null, &d, "E", n, n, n),
-                        at("SetDataPtrCOO") + "\\*col != NULL");
-    EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, &p, &nulld, "E", n, n, n),
-                        at("SetDataPtrCOO") + "\\*val != NULL");
-    // CSR row offsets are PtrType, MCSR ones int
-    auto expect_set_offsets_death = [&](const std::string& f, auto set, auto offsets) {
-        SCOPED_TRACE(f);
-        decltype(offsets) none = nullptr;
-        EXPECT_ASSERT_DEATH(set(nullptr, &p, &d), at(f) + "[^*]row_offset != NULL");
-        EXPECT_ASSERT_DEATH(set(&offsets, nullptr, &d), at(f) + "[^*]col != NULL");
-        EXPECT_ASSERT_DEATH(set(&offsets, &p, nullptr), at(f) + "[^*]val != NULL");
-        EXPECT_ASSERT_DEATH(set(&none, &p, &d), at(f) + "\\*row_offset != NULL");
-        EXPECT_ASSERT_DEATH(set(&offsets, &null, &d), at(f) + "\\*col != NULL");
-        EXPECT_ASSERT_DEATH(set(&offsets, &p, &nulld), at(f) + "\\*val != NULL");
-    };
-    expect_set_offsets_death(
-        "SetDataPtrCSR",
-        [&](PtrType** row_offset, int** col, double** val) {
-            E.SetDataPtrCSR(row_offset, col, val, "E", n, n, n);
-        },
-        o);
-    expect_set_offsets_death(
-        "SetDataPtrMCSR",
-        [&](int** row_offset, int** col, double** val) {
-            E.SetDataPtrMCSR(row_offset, col, val, "E", n, n, n);
-        },
-        p);
-    EXPECT_ASSERT_DEATH(E.SetDataPtrELL(nullptr, &d, "E", n, n, n, n),
-                        at("SetDataPtrELL") + "[^*]col != NULL");
-    EXPECT_ASSERT_DEATH(E.SetDataPtrELL(&p, nullptr, "E", n, n, n, n),
-                        at("SetDataPtrELL") + "[^*]val != NULL");
-    EXPECT_ASSERT_DEATH(E.SetDataPtrELL(&null, &d, "E", n, n, n, n),
-                        at("SetDataPtrELL") + "\\*col != NULL");
-    EXPECT_ASSERT_DEATH(E.SetDataPtrELL(&p, &nulld, "E", n, n, n, n),
-                        at("SetDataPtrELL") + "\\*val != NULL");
-    EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(nullptr, &d, "E", n, n, n, n),
-                        at("SetDataPtrDIA") + "[^*_]offset != NULL");
-    EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(&p, nullptr, "E", n, n, n, n),
-                        at("SetDataPtrDIA") + "[^*]val != NULL");
-    EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(&null, &d, "E", n, n, n, n),
-                        at("SetDataPtrDIA") + "\\*offset != NULL");
-    EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(&p, &nulld, "E", n, n, n, n),
-                        at("SetDataPtrDIA") + "\\*val != NULL");
-    EXPECT_ASSERT_DEATH(E.SetDataPtrDENSE(nullptr, "E", n, n),
-                        at("SetDataPtrDENSE") + "[^*]val != NULL");
-    EXPECT_ASSERT_DEATH(E.SetDataPtrDENSE(&nulld, "E", n, n),
-                        at("SetDataPtrDENSE") + "\\*val != NULL");
+        // AMG
+        EXPECT_ASSERT_DEATH(E.AMGGreedyAggregate(0.1, nullptr, &aggregates, &aggregates),
+                            at("AMGGreedyAggregate") + "connections != NULL");
+        EXPECT_ASSERT_DEATH(E.AMGGreedyAggregate(0.1, &connections, nullptr, &aggregates),
+                            at("AMGGreedyAggregate") + "aggregates != NULL");
+        EXPECT_ASSERT_DEATH(E.AMGGreedyAggregate(0.1, &connections, &aggregates, nullptr),
+                            at("AMGGreedyAggregate") + "aggregate_root_nodes != NULL");
+        EXPECT_ASSERT_DEATH(
+            E.AMGSmoothedAggregation(0.1, connections, aggregates, aggregates, no_matrix),
+            at("AMGSmoothedAggregation") + "prolong != NULL");
+        EXPECT_ASSERT_DEATH(E.AMGUnsmoothedAggregation(aggregates, aggregates, no_matrix),
+                            at("AMGUnsmoothedAggregation") + "prolong != NULL");
+        EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(0.1, k, no_ints, k, &null, k, 0),
+                            at("InitialPairwiseAggregation") + "[^*r]G != NULL");
+        EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(0.1, k, &ints, k, &p, k, 0),
+                            at("InitialPairwiseAggregation") + "\\*rG == NULL");
+        EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(F, 0.1, k, no_ints, k, &null, k, 0),
+                            at("InitialPairwiseAggregation") + "[^*r]G != NULL");
+        EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(F, 0.1, k, &ints, k, &p, k, 0),
+                            at("InitialPairwiseAggregation") + "\\*rG == NULL");
+        EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(0.1, k, no_ints, k, &p, k, 0),
+                            at("FurtherPairwiseAggregation") + "[^*r]G != NULL");
+        EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(0.1, k, &ints, k, &null, k, 0),
+                            at("FurtherPairwiseAggregation") + "\\*rG != NULL");
+        EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(F, 0.1, k, no_ints, k, &p, k, 0),
+                            at("FurtherPairwiseAggregation") + "[^*r]G != NULL");
+        EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(F, 0.1, k, &ints, k, &null, k, 0),
+                            at("FurtherPairwiseAggregation") + "\\*rG != NULL");
+        EXPECT_ASSERT_DEATH(E.CoarsenOperator(no_matrix, n, n, ints, n, p, n),
+                            at("CoarsenOperator") + "Ac != NULL");
+        EXPECT_ASSERT_DEATH(E.CoarsenOperator(&F, n, n, ints, n, null, n),
+                            at("CoarsenOperator") + "[^*]rG != NULL");
 
-    // LeaveDataPtr*: every output array must be NULL on entry
-    auto expect_leave_death
-        = [&](const std::string& f, const std::string& first, auto leave, auto rows) {
-              SCOPED_TRACE(f);
-              decltype(rows) none = nullptr;
-              EXPECT_ASSERT_DEATH(leave(&rows, &null, &nulld), at(f) + "\\*" + first + " == NULL");
-              EXPECT_ASSERT_DEATH(leave(&none, &p, &nulld), at(f) + "\\*col == NULL");
-              EXPECT_ASSERT_DEATH(leave(&none, &null, &d), at(f) + "\\*val == NULL");
-          };
-    expect_leave_death(
-        "LeaveDataPtrCOO",
-        "row",
-        [&](int** row, int** col, double** val) { E.LeaveDataPtrCOO(row, col, val); },
-        p);
-    expect_leave_death(
-        "LeaveDataPtrCSR",
-        "row_offset",
-        [&](PtrType** row_offset, int** col, double** val) {
-            E.LeaveDataPtrCSR(row_offset, col, val);
-        },
-        o);
-    expect_leave_death(
-        "LeaveDataPtrMCSR",
-        "row_offset",
-        [&](int** row_offset, int** col, double** val) {
-            E.LeaveDataPtrMCSR(row_offset, col, val);
-        },
-        p);
-    EXPECT_ASSERT_DEATH(E.LeaveDataPtrELL(&p, &nulld, k), at("LeaveDataPtrELL") + "\\*col == NULL");
-    EXPECT_ASSERT_DEATH(E.LeaveDataPtrELL(&null, &d, k), at("LeaveDataPtrELL") + "\\*val == NULL");
-    EXPECT_ASSERT_DEATH(E.LeaveDataPtrDIA(&p, &nulld, k),
-                        at("LeaveDataPtrDIA") + "\\*offset == NULL");
-    EXPECT_ASSERT_DEATH(E.LeaveDataPtrDIA(&null, &d, k), at("LeaveDataPtrDIA") + "\\*val == NULL");
-    EXPECT_ASSERT_DEATH(E.LeaveDataPtrDENSE(&d), at("LeaveDataPtrDENSE") + "\\*val == NULL");
+        // SetDataPtr*: the array pointer and the array
+        EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(nullptr, &p, &d, "E", n, n, n),
+                            at("SetDataPtrCOO") + "[^*]row != NULL");
+        EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, nullptr, &d, "E", n, n, n),
+                            at("SetDataPtrCOO") + "[^*]col != NULL");
+        EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, &p, nullptr, "E", n, n, n),
+                            at("SetDataPtrCOO") + "[^*]val != NULL");
+        EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&null, &p, &d, "E", n, n, n),
+                            at("SetDataPtrCOO") + "\\*row != NULL");
+        EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, &null, &d, "E", n, n, n),
+                            at("SetDataPtrCOO") + "\\*col != NULL");
+        EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, &p, &nulld, "E", n, n, n),
+                            at("SetDataPtrCOO") + "\\*val != NULL");
+        // CSR row offsets are PtrType, MCSR ones int
+        auto expect_set_offsets_death = [&](const std::string& f, auto set, auto offsets) {
+            SCOPED_TRACE(f);
+            decltype(offsets) none = nullptr;
+            EXPECT_ASSERT_DEATH(set(nullptr, &p, &d), at(f) + "[^*]row_offset != NULL");
+            EXPECT_ASSERT_DEATH(set(&offsets, nullptr, &d), at(f) + "[^*]col != NULL");
+            EXPECT_ASSERT_DEATH(set(&offsets, &p, nullptr), at(f) + "[^*]val != NULL");
+            EXPECT_ASSERT_DEATH(set(&none, &p, &d), at(f) + "\\*row_offset != NULL");
+            EXPECT_ASSERT_DEATH(set(&offsets, &null, &d), at(f) + "\\*col != NULL");
+            EXPECT_ASSERT_DEATH(set(&offsets, &p, &nulld), at(f) + "\\*val != NULL");
+        };
+        expect_set_offsets_death(
+            "SetDataPtrCSR",
+            [&](PtrType** row_offset, int** col, T** val) {
+                E.SetDataPtrCSR(row_offset, col, val, "E", n, n, n);
+            },
+            o);
+        expect_set_offsets_death(
+            "SetDataPtrMCSR",
+            [&](int** row_offset, int** col, T** val) {
+                E.SetDataPtrMCSR(row_offset, col, val, "E", n, n, n);
+            },
+            p);
+        EXPECT_ASSERT_DEATH(E.SetDataPtrELL(nullptr, &d, "E", n, n, n, n),
+                            at("SetDataPtrELL") + "[^*]col != NULL");
+        EXPECT_ASSERT_DEATH(E.SetDataPtrELL(&p, nullptr, "E", n, n, n, n),
+                            at("SetDataPtrELL") + "[^*]val != NULL");
+        EXPECT_ASSERT_DEATH(E.SetDataPtrELL(&null, &d, "E", n, n, n, n),
+                            at("SetDataPtrELL") + "\\*col != NULL");
+        EXPECT_ASSERT_DEATH(E.SetDataPtrELL(&p, &nulld, "E", n, n, n, n),
+                            at("SetDataPtrELL") + "\\*val != NULL");
+        EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(nullptr, &d, "E", n, n, n, n),
+                            at("SetDataPtrDIA") + "[^*_]offset != NULL");
+        EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(&p, nullptr, "E", n, n, n, n),
+                            at("SetDataPtrDIA") + "[^*]val != NULL");
+        EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(&null, &d, "E", n, n, n, n),
+                            at("SetDataPtrDIA") + "\\*offset != NULL");
+        EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(&p, &nulld, "E", n, n, n, n),
+                            at("SetDataPtrDIA") + "\\*val != NULL");
+        EXPECT_ASSERT_DEATH(E.SetDataPtrDENSE(nullptr, "E", n, n),
+                            at("SetDataPtrDENSE") + "[^*]val != NULL");
+        EXPECT_ASSERT_DEATH(E.SetDataPtrDENSE(&nulld, "E", n, n),
+                            at("SetDataPtrDENSE") + "\\*val != NULL");
+
+        // LeaveDataPtr*: every output array must be NULL on entry
+        auto expect_leave_death
+            = [&](const std::string& f, const std::string& first, auto leave, auto rows) {
+                  SCOPED_TRACE(f);
+                  decltype(rows) none = nullptr;
+                  EXPECT_ASSERT_DEATH(leave(&rows, &null, &nulld),
+                                      at(f) + "\\*" + first + " == NULL");
+                  EXPECT_ASSERT_DEATH(leave(&none, &p, &nulld), at(f) + "\\*col == NULL");
+                  EXPECT_ASSERT_DEATH(leave(&none, &null, &d), at(f) + "\\*val == NULL");
+              };
+        expect_leave_death(
+            "LeaveDataPtrCOO",
+            "row",
+            [&](int** row, int** col, T** val) { E.LeaveDataPtrCOO(row, col, val); },
+            p);
+        expect_leave_death(
+            "LeaveDataPtrCSR",
+            "row_offset",
+            [&](PtrType** row_offset, int** col, T** val) {
+                E.LeaveDataPtrCSR(row_offset, col, val);
+            },
+            o);
+        expect_leave_death(
+            "LeaveDataPtrMCSR",
+            "row_offset",
+            [&](int** row_offset, int** col, T** val) { E.LeaveDataPtrMCSR(row_offset, col, val); },
+            p);
+        EXPECT_ASSERT_DEATH(E.LeaveDataPtrELL(&p, &nulld, k),
+                            at("LeaveDataPtrELL") + "\\*col == NULL");
+        EXPECT_ASSERT_DEATH(E.LeaveDataPtrELL(&null, &d, k),
+                            at("LeaveDataPtrELL") + "\\*val == NULL");
+        EXPECT_ASSERT_DEATH(E.LeaveDataPtrDIA(&p, &nulld, k),
+                            at("LeaveDataPtrDIA") + "\\*offset == NULL");
+        EXPECT_ASSERT_DEATH(E.LeaveDataPtrDIA(&null, &d, k),
+                            at("LeaveDataPtrDIA") + "\\*val == NULL");
+        EXPECT_ASSERT_DEATH(E.LeaveDataPtrDENSE(&d), at("LeaveDataPtrDENSE") + "\\*val == NULL");
+    });
 }
 
 // As on the host (host_matrix_csr_DeathTest), IC(0) of a row without a diagonal
