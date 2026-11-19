@@ -2438,10 +2438,26 @@ class Solution(collections.abc.Mapping):
       # the arm tests drive it with. An unknown depth is not a reason to hold:
       # the hold applies where the deeper unroll is known to be in play.
       fp8DepthFits = plsinDataTypes(state) or state.get("DepthU", 0) <= 128
+      # gfx950 holds one 131072-register unified VGPR file per CU, so an
+      # N-thread workgroup is allowed 131072/N registers per thread: 512 at four
+      # waves, which is above the 256 architectural cap and so never binds, and
+      # exactly 256 at eight. An MT256x256 MIWaveTile [8,4] kernel already
+      # spends 128 of those on accumulators, which leaves the fused store's arch
+      # registers (152 measured) over the budget -- judgeRegisterBudget then
+      # returns its occupancy verdict, the kernel is emitted as a shell, and a
+      # problem whose only solution is that kernel has none left.
+      #
+      # Held on the thread count rather than the register peak because the peak
+      # is not known until the store is emitted, and the budget is. Every MXFP8
+      # entry in the shipped logic is two or four waves, so no library kernel
+      # loses the store to this. fp4 keeps its existing scope, and an unknown
+      # thread count is not a reason to hold, as with DepthU above.
+      fp8WaveFits = plsinDataTypes(state) or state.get("NumThreads", 0) <= 256
       registerFail = ((not spillFree)
                       or (not storeFitsVgpr)
                       or (not mxBlockScaleSgprFits)
-                      or (not fp8DepthFits))
+                      or (not fp8DepthFits)
+                      or (not fp8WaveFits))
       # Schedule feasibility is not decided here: LogicalScheduler works from exact
       # producer/consumer ranges, and a schedule with no safe group falls back
       # without extracting terminal MFMAs.

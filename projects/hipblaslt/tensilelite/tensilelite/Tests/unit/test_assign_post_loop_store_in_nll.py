@@ -127,6 +127,12 @@ _DISABLE_CASES = [
     ("fp8 scaled on A only",  dict(ProblemType={"DataTypeA": DataType("float8"),
                                                 "DataTypeB": DataType("float8"),
                                                 "MXBlockB": 0})),
+    # Eight waves halve the per-thread unified VGPR budget to exactly the 256
+    # arch cap, and MIWaveTile [8,4] spends 128 of it on accumulators, so the
+    # fused store's arch registers put the kernel over the occupancy limit.
+    ("fp8 at eight waves",    dict(ProblemType={"DataTypeA": DataType("float8"),
+                                                "DataTypeB": DataType("float8")},
+                                   MIWaveTile=[8, 4], NumThreads=512)),
 ]
 
 
@@ -158,6 +164,13 @@ _STILL_ELIGIBLE_CASES = [
     ("fp8 at DepthU 128",     dict(ProblemType={"DataTypeA": DataType("float8"),
                                                 "DataTypeB": DataType("float8")},
                                    DepthU=128)),
+    # Both fp8 holds are one-sided in the same way the depth hold is: the wave
+    # budget binds at eight waves and not at four, and neither reaches fp4,
+    # whose shipped scope includes tiles this would otherwise withdraw.
+    ("fp8 at four waves",     dict(ProblemType={"DataTypeA": DataType("float8"),
+                                                "DataTypeB": DataType("float8")},
+                                   MIWaveTile=[8, 4], NumThreads=256)),
+    ("fp4 at eight waves",    dict(MIWaveTile=[8, 4], NumThreads=512)),
     # The scale requirement is fp8's alone. fp4 reaches the subtile path
     # block-scaled, so asking it of fp4 would be free -- and wrong: the one
     # unscaled-fp4 case the gate already relies on is MX skew above.
