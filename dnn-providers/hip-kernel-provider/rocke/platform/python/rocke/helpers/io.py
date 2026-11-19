@@ -20,7 +20,7 @@ the most common dtype-promote-on-read pattern.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import Literal
 
 from ..core.ir import BF16, F16, IRBuilder, TemporalHint, Type, Value
@@ -30,6 +30,8 @@ __all__ = [
     "DType",
     "concat_tree",
     "io_ir_type",
+    "iter_global_fragment_scalars",
+    "load_clipped_global_fragment",
     "load_lane_slice_f32",
     "load_scalar",
     "load_scalar_as_f32",
@@ -77,6 +79,72 @@ def load_scalar(b: IRBuilder, ptr: Value, idx: Value, *, dtype: str) -> Value:
     if dtype == "bf16":
         return b.global_load_bf16(ptr, idx)
     raise ValueError(f"unsupported I/O dtype {dtype!r}")
+
+
+def iter_global_fragment_scalars(
+    b: IRBuilder,
+    ptr: Value,
+    offset: Value,
+    *,
+    dtype: Type,
+    n: int,
+    align: int,
+    mask: Value | None = None,
+    pad: Value | None = None,
+    clip: tuple[Value, Value] | None = None,
+) -> Iterator[Value]:
+    """Read a fragment as scalar storage units, optionally clipping invalid units.
+
+    ``offset`` is the physical start, including any runtime strides. A shared
+    ``mask`` applies to the whole run. Alternatively ``clip=(position, bound)``
+    tests each unit against an exclusive logical bound independently of its
+    physical address. Masked units read safe element zero and return ``pad``.
+    The caller must ensure ``ptr[0]`` exists when clipping an access.
+    """
+    if n <= 0 or (mask is not None and clip is not None):
+        raise ValueError(
+            "a fragment needs positive width and at most one clipping mode"
+        )
+    if (mask is not None or clip is not None) and pad is None:
+        raise ValueError("a clipped fragment needs a pad value")
+    for i in range(n):
+        step = b.const_i32(i) if i else None
+        address = offset if step is None else b.add(offset, step)
+        valid = mask
+        if clip is not None:
+            position, bound = clip
+            valid = b.cmp_lt(position if step is None else b.add(position, step), bound)
+        if valid is None:
+            yield b.global_load(ptr, address, dtype, align=align)
+        else:
+            assert pad is not None
+            yield b.masked_global_load(ptr, address, valid, pad, dtype, align=align)
+
+
+def load_clipped_global_fragment(
+    b: IRBuilder,
+    ptr: Value,
+    offset: Value,
+    position: Value,
+    bound: Value,
+    *,
+    dtype: Type,
+    n: int,
+) -> Value:
+    """Load a contiguous window run and zero-fill units past its logical bound.
+
+    Returns a scalar for ``n=1`` or a packed vector ready for an LDS store.
+    Addresses can use runtime strides; the clip is expressed in logical units.
+    """
+    if n <= 0:
+        raise ValueError("fragment needs positive width")
+    pad = b.vec_extract(b.zero_vec(dtype, 1), 0)
+    values = list(
+        iter_global_fragment_scalars(
+            b, ptr, offset, dtype=dtype, n=n, align=1, pad=pad, clip=(position, bound)
+        )
+    )
+    return values[0] if n == 1 else b.vec_pack(values, dtype)
 
 
 def load_scalar_as_f32(b: IRBuilder, ptr: Value, idx: Value, *, dtype: str) -> Value:

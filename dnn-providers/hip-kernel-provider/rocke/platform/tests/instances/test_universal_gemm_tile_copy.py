@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from rocke.helpers.loads import CoalescedTileLoader
+from rocke.instances.common import gemm_universal
 from rocke.instances.common._gemm_kloop import GemmKLoop
 from rocke.instances.common.gemm_universal import (
     TileSpec,
@@ -58,17 +59,30 @@ def _build(trait: TraitSpec):
         patch.object(CoalescedTileLoader, "load", record_load),
         patch.object(GemmKLoop, "single_buffered", record_single),
         patch.object(GemmKLoop, "ping_pong", record_ping_pong),
+        patch.object(
+            gemm_universal,
+            "load_clipped_global_fragment",
+            wraps=gemm_universal.load_clipped_global_fragment,
+        ) as clipped_reads,
     ):
         kernel = build_universal_gemm(spec, arch="gfx950")
-    return spec, kernel, copies, schedules
+    return spec, kernel, copies, schedules, clipped_reads.call_count
 
 
 def _cases():
     return (
         ("coalesced", TraitSpec(pipeline="mem", epilogue="default"), "single", (96,)),
         (
-            "legacy_tail",
+            "clipped_tail",
             TraitSpec(pipeline="mem", epilogue="default", pad_k=True),
+            "single",
+            (65, 91),
+        ),
+        (
+            "preshuffled_tail",
+            TraitSpec(
+                pipeline="mem", epilogue="default", pad_k=True, preshuffle_b=True
+            ),
             "single",
             (91,),
         ),
@@ -94,9 +108,10 @@ def _cases():
 
 class TestUniversalGemmTileCopy(unittest.TestCase):
     def _build_case(self, label, trait, schedule):
-        spec, kernel, copies, schedules = _build(trait)
+        spec, kernel, copies, schedules, clipped_reads = _build(trait)
         self.assertEqual(copies, [(64, 32, 8)] * 2 if label == "coalesced" else [])
         self.assertEqual(schedules, [schedule])
+        self.assertEqual(bool(clipped_reads), trait.pad_k)
         return spec, kernel
 
     def test_copy_and_schedule_selection(self):
@@ -138,11 +153,24 @@ class TestUniversalGemmTileCopy(unittest.TestCase):
         a = rng.integers(-3, 4, (m, k), dtype=np.int16).astype(np.float16)
         b = rng.integers(-3, 4, (n, k), dtype=np.int16).astype(np.float16)
         c = np.full((m, n), np.nan, dtype=np.float16)
+        b_storage = b
+        if spec.trait.preshuffle_b:
+            tile_n, tile_k = spec.tile.tile_n, spec.tile.tile_k
+            k_tiles = (k + tile_k - 1) // tile_k
+            # Fill the physically allocated but logically clipped K tail with
+            # nonzero data so a missed clip changes the result.
+            padded = np.full((n, k_tiles * tile_k), 17, dtype=b.dtype)
+            padded[:, :k] = b
+            b_storage = np.ascontiguousarray(
+                padded.reshape(n // tile_n, tile_n, k_tiles, tile_k).transpose(
+                    2, 0, 1, 3
+                )
+            )
         with ExitStack() as stack:
             mod = rt.load_module(artifact.hsaco)
             stack.callback(mod.unload)
             ptrs = []
-            for array in (a, b, c):
+            for array in (a, b_storage, c):
                 ptr = rt.alloc(array.nbytes)
                 stack.callback(rt.free, ptr)
                 rt.memcpy_h2d(ptr, as_u8_buffer(array), array.nbytes)

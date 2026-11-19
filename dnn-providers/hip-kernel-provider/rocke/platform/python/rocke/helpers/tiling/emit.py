@@ -32,6 +32,7 @@ from ...core.storage import (
     storage_group,
     storage_to_elements,
 )
+from ..io import iter_global_fragment_scalars
 from ..mma_io import storage_element_type, storage_vector_type
 from .descriptors import TensorDesc, TensorWindow
 from .encoding import WarpDistributionEncoding
@@ -1062,14 +1063,10 @@ def load_fragment(
                 )
             if zero is None:
                 zero = _zero_scalar(b, dtype)
-        for i, slot in enumerate(slots):
-            unit_address = address if i == 0 else b.add(address, b.const_i32(i))
-            if mask is None:
-                loaded = b.global_load(ptr, unit_address, unit, align=align)
-            else:
-                loaded = b.masked_global_load(
-                    ptr, unit_address, mask, zero, unit, align=align
-                )
+        scalars = iter_global_fragment_scalars(
+            b, ptr, address, dtype=unit, n=len(slots), align=align, mask=mask, pad=zero
+        )
+        for slot, loaded in zip(slots, scalars):
             value = b.vec_insert(value, loaded, slot)
     return Fragment(tile_desc, dtype, value)
 

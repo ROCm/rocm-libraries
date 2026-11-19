@@ -299,6 +299,12 @@ void rocke_tile_window_load_vec_scalars(rocke_ir_builder_t* b,
                                         int n,
                                         rocke_value_t** out);
 
+/* TileWindow.element_offset: flat element offset including the window origin. */
+rocke_value_t* rocke_tile_window_element_offset(rocke_ir_builder_t* b,
+                                                const rocke_tile_window_t* w,
+                                                rocke_value_t* const* local_indices,
+                                                int num_indices);
+
 /* TileWindow.load_scalar(b, *local_indices). */
 rocke_value_t* rocke_tile_window_load_scalar(rocke_ir_builder_t* b,
                                              const rocke_tile_window_t* w,

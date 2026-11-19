@@ -89,6 +89,18 @@ rocke_value_t* rocke_b_load_scalar(rocke_ir_builder_t* b,
                                    rocke_value_t* idx,
                                    const char* dtype);
 
+/* Read a contiguous fragment from `offset` and zero-fill units whose logical
+ * coordinate `position + i` reaches `bound`. `offset` can include runtime
+ * strides. `ptr[0]` must be safe to read for masked units. Returns a scalar
+ * for n==1 or a packed vector for n>1. */
+rocke_value_t* rocke_b_load_clipped_global_fragment(rocke_ir_builder_t* b,
+                                                    rocke_value_t* ptr,
+                                                    rocke_value_t* offset,
+                                                    rocke_value_t* position,
+                                                    rocke_value_t* bound,
+                                                    const rocke_type_t* dtype,
+                                                    int n);
+
 /* C99 port of rocke.helpers.io.load_scalar_as_f32:
  *
  *     def load_scalar_as_f32(b, ptr, idx, *, dtype) -> Value:

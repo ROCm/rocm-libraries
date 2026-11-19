@@ -209,9 +209,12 @@ A/B `TileWindow`s select the source rectangles, their descriptors turn local
 coordinates into global element offsets, and the loader emits the global load
 and LDS store for each lane. The K loop still owns the workgroup barriers.
 
-Other synchronous configurations retain their specialized copies, including
-padded tails, pre-shuffled B, and nontrivial LDS destination mappings. The
-`compv4` name is not an async switch: `direct_to_lds` selects the gfx9 async
+For synchronous copies with `pad_k`, A and B use the same masked scalar loads
+as `load_fragment`. The tile window computes a physical offset with runtime
+strides; the logical K coordinate determines which elements to zero-fill.
+Preshuffled B uses the same clipping with its packed source offset. The LDS
+placement, including padding, swizzles, and slots, is independent of clipping.
+The `compv4` name is not an async switch: `direct_to_lds` selects the gfx9 async
 copy path, and `dtl_prefetch` selects its ping-pong schedule.
 
 The gfx1250 `tdm` path uses [`TdmTileLoader2D`](../../python/rocke/helpers/loads.py)

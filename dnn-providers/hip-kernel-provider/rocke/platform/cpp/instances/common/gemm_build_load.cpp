@@ -28,13 +28,9 @@
 #include <string.h>
 
 #include "rocke/helper_rocke.helpers.grid.h" /* rocke_chiplet_aware_super_tile_dynamic */
+#include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.loads.h"
 #include "rocke/instance_gemm_internal.h"
-
-/* Widest global A/B load vector, in elements: the 4-dword buffer_load limit is
- * 16 bytes, so a 1-byte operand tops out at 16 elements. The pad_k gather
- * arrays below are sized to this. */
-#define ROCKE_GEMM_MAX_LOAD_VEC 16
 
 /* storage_dtype in (FP8E4M3, BF8E5M2) -- the 8-bit A/B operands of the gfx1250
  * low-bit WMMA path, which the f16/bf16 storage paths never produce. */
@@ -164,6 +160,50 @@ static rocke_value_t* rocke_gemm_tile_source(rocke_ir_builder_t* b,
     indices[2] = rocke_b_add(b, tile->origin[2], col);
     *valid = NULL;
     return rocke_tensor_descriptor_offset(b, &tile->view->desc, indices, 3);
+}
+
+static rocke_value_t* rocke_gemm_load_k_clipped(rocke_gemm_build_ctx_t* ctx,
+                                                rocke_value_t* ptr,
+                                                rocke_value_t* offset,
+                                                rocke_value_t* k_off,
+                                                rocke_value_t* col,
+                                                int load_vec)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* position = rocke_b_add(b, k_off, col);
+    return rocke_b_load_clipped_global_fragment(
+        b, ptr, offset, position, ctx->K, ctx->storage_dtype, load_vec);
+}
+
+static rocke_value_t* rocke_gemm_load_sync_window(rocke_gemm_build_ctx_t* ctx,
+                                                  const rocke_tile_window_t* tile,
+                                                  rocke_value_t* row,
+                                                  rocke_value_t* col,
+                                                  rocke_value_t* k_off,
+                                                  int load_vec)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* indices[3] = {rocke_b_const_i32(b, 0), row, col};
+    if(ctx->spec->trait.pad_k)
+    {
+        rocke_value_t* offset = rocke_tile_window_element_offset(b, tile, indices, 3);
+        return rocke_gemm_load_k_clipped(ctx, tile->view->base, offset, k_off, col, load_vec);
+    }
+    if(load_vec == 1)
+        return rocke_tile_window_load_scalar(b, tile, indices, 3);
+    return rocke_tile_window_load_vec(b, tile, indices, 3, load_vec);
+}
+
+static void rocke_gemm_store_sync_window(rocke_ir_builder_t* b,
+                                         const rocke_tile_window_t* tile,
+                                         rocke_value_t* const* indices,
+                                         rocke_value_t* value,
+                                         int load_vec)
+{
+    if(load_vec == 1)
+        rocke_tile_window_store_scalar(b, tile, indices, 2, value, 0);
+    else
+        rocke_tile_window_store_vec(b, tile, indices, 2, value, load_vec);
 }
 
 void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
@@ -411,16 +451,6 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
     int load_vec = ctx->load_vec;
     bool db = ctx->db;
 
-    /* The pad_k sub-paths below gather load_vec scalars into a fixed
-     * ROCKE_GEMM_MAX_LOAD_VEC-element array before packing. load_vec is capped
-     * at 16/elem_bytes by rocke_choose_load_vec, so with a 1-byte operand it is
-     * exactly 16 -- the array is full with no headroom. Clamp rather than
-     * overrun if that invariant ever moves. */
-    if(load_vec > ROCKE_GEMM_MAX_LOAD_VEC)
-    {
-        load_vec = ROCKE_GEMM_MAX_LOAD_VEC;
-    }
-
     /* a_global_tile / b_global_tile / a_lds_tile / b_lds_tile. */
     rocke_tile_window_t a_global_tile, b_global_tile, a_lds_tile, b_lds_tile;
     {
@@ -483,19 +513,6 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
                 : (parity_imm ? rocke_b_add(b, (rvar), rocke_b_const_i32(b, parity_imm * (blk))) \
                               : (rvar))))
 
-#define PADK_VALID(elem_col) rocke_b_cmp_lt(b, rocke_b_add(b, k_off, (elem_col)), ctx->K)
-/* _zero_storage_scalar(): cast_f32_to has no 8-bit arm, and the cvt_f32_to_fp8
- * route would burn a conversion intrinsic to produce a byte we already know:
- * +0.0 is all-zero in both e4m3 and e5m2, and both lower to i8, so truncating a
- * zero i32 is the whole job. fp64 takes an f64 constant. */
-#define STORAGE_ZERO()                                                   \
-    (rocke_gemm_storage_is_fp8(ctx->storage_dtype)                       \
-         ? rocke_b_trunc(b, rocke_b_const_i32(b, 0), ctx->storage_dtype) \
-     : rocke_type_eq(ctx->storage_dtype, rocke_f64())                    \
-         ? rocke_b_const_f64(b, 0.0)                                     \
-         : rocke_b_cast_f32_to(b, rocke_b_const_f32(b, 0.0), ctx->storage_dtype))
-#define MASK_STORAGE(value, valid) rocke_b_select(b, (valid), (value), STORAGE_ZERO())
-
     /* A-load loop. */
     for(int e = 0; e < ctx->a_vecs_per_thread; ++e)
     {
@@ -505,42 +522,10 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
         rocke_value_t* row = rocke_b_div(b, vec_idx, ctx->c_block_k_div_vec);
         rocke_value_t* col_v = rocke_b_mod(b, vec_idx, ctx->c_block_k_div_vec);
         rocke_value_t* col = (load_vec > 1) ? rocke_b_mul(b, col_v, ctx->c_load_vec) : col_v;
-        if(spec->trait.pad_k)
-        {
-            rocke_value_t* comps[ROCKE_GEMM_MAX_LOAD_VEC];
-            rocke_value_t* a_val;
-            for(int i = 0; i < load_vec; ++i)
-            {
-                rocke_value_t* elem_col = i ? rocke_b_add(b, col, rocke_b_const_i32(b, i)) : col;
-                rocke_value_t* valid = PADK_VALID(elem_col);
-                rocke_value_t* safe_col
-                    = rocke_b_select(b, valid, elem_col, rocke_b_const_i32(b, 0));
-                rocke_value_t* gidx[3] = {rocke_b_const_i32(b, 0), row, safe_col};
-                rocke_value_t* raw = rocke_tile_window_load_scalar(b, &a_global_tile, gidx, 3);
-                comps[i] = MASK_STORAGE(raw, valid);
-            }
-            a_val = (load_vec == 1) ? comps[0]
-                                    : rocke_b_vec_pack(b, comps, load_vec, ctx->storage_dtype);
-            rocke_value_t* lidx[2] = {LD_ROW(row, ctx->block_m), rocke_gemm_swz_col(ctx, col, row)};
-            if(load_vec == 1)
-                rocke_tile_window_store_scalar(b, &a_lds_tile, lidx, 2, a_val, 0);
-            else
-                rocke_tile_window_store_vec(b, &a_lds_tile, lidx, 2, a_val, load_vec);
-        }
-        else if(load_vec == 1)
-        {
-            rocke_value_t* gidx[3] = {rocke_b_const_i32(b, 0), row, col};
-            rocke_value_t* a_val = rocke_tile_window_load_scalar(b, &a_global_tile, gidx, 3);
-            rocke_value_t* lidx[2] = {LD_ROW(row, ctx->block_m), rocke_gemm_swz_col(ctx, col, row)};
-            rocke_tile_window_store_scalar(b, &a_lds_tile, lidx, 2, a_val, 0);
-        }
-        else
-        {
-            rocke_value_t* gidx[3] = {rocke_b_const_i32(b, 0), row, col};
-            rocke_value_t* a_val = rocke_tile_window_load_vec(b, &a_global_tile, gidx, 3, load_vec);
-            rocke_value_t* lidx[2] = {LD_ROW(row, ctx->block_m), rocke_gemm_swz_col(ctx, col, row)};
-            rocke_tile_window_store_vec(b, &a_lds_tile, lidx, 2, a_val, load_vec);
-        }
+        rocke_value_t* a_val
+            = rocke_gemm_load_sync_window(ctx, &a_global_tile, row, col, k_off, load_vec);
+        rocke_value_t* lidx[2] = {LD_ROW(row, ctx->block_m), rocke_gemm_swz_col(ctx, col, row)};
+        rocke_gemm_store_sync_window(b, &a_lds_tile, lidx, a_val, load_vec);
     }
 
     /* B-load branch. */
@@ -566,50 +551,16 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
             rocke_value_t* row = rocke_b_div(b, vec_idx, ctx->c_block_k_div_vec);
             rocke_value_t* col_v = rocke_b_mod(b, vec_idx, ctx->c_block_k_div_vec);
             rocke_value_t* col = (load_vec > 1) ? rocke_b_mul(b, col_v, ctx->c_load_vec) : col_v;
+            rocke_value_t* b_val;
             if(spec->trait.pad_k)
-            {
-                rocke_value_t* comps[ROCKE_GEMM_MAX_LOAD_VEC];
-                rocke_value_t* b_val;
-                for(int i = 0; i < load_vec; ++i)
-                {
-                    rocke_value_t* elem_col
-                        = i ? rocke_b_add(b, col, rocke_b_const_i32(b, i)) : col;
-                    rocke_value_t* valid = PADK_VALID(elem_col);
-                    rocke_value_t* raw_off = rocke_b_add(
-                        b,
-                        base_off,
-                        rocke_b_add(
-                            b, rocke_b_mul(b, vec_idx, ctx->c_load_vec), rocke_b_const_i32(b, i)));
-                    rocke_value_t* safe_off = rocke_b_select(b, valid, raw_off, base_off);
-                    rocke_value_t* raw
-                        = rocke_b_global_load(b, ctx->Bp, safe_off, ctx->storage_dtype, 0);
-                    comps[i] = MASK_STORAGE(raw, valid);
-                }
-                b_val = (load_vec == 1) ? comps[0]
-                                        : rocke_b_vec_pack(b, comps, load_vec, ctx->storage_dtype);
-                rocke_value_t* lidx[2]
-                    = {LD_ROW(row, ctx->block_n), rocke_gemm_swz_col(ctx, col, row)};
-                if(load_vec == 1)
-                    rocke_tile_window_store_scalar(b, &b_lds_tile, lidx, 2, b_val, 0);
-                else
-                    rocke_tile_window_store_vec(b, &b_lds_tile, lidx, 2, b_val, load_vec);
-            }
+                b_val = rocke_gemm_load_k_clipped(ctx, ctx->Bp, glob_off, k_off, col, load_vec);
             else if(load_vec == 1)
-            {
-                rocke_value_t* b_val
-                    = rocke_b_global_load(b, ctx->Bp, glob_off, ctx->storage_dtype, 0);
-                rocke_value_t* lidx[2]
-                    = {LD_ROW(row, ctx->block_n), rocke_gemm_swz_col(ctx, col, row)};
-                rocke_tile_window_store_scalar(b, &b_lds_tile, lidx, 2, b_val, 0);
-            }
+                b_val = rocke_b_global_load(b, ctx->Bp, glob_off, ctx->storage_dtype, 0);
             else
-            {
-                rocke_value_t* b_val
+                b_val
                     = rocke_b_global_load_vN(b, ctx->Bp, glob_off, ctx->storage_dtype, load_vec, 0);
-                rocke_value_t* lidx[2]
-                    = {LD_ROW(row, ctx->block_n), rocke_gemm_swz_col(ctx, col, row)};
-                rocke_tile_window_store_vec(b, &b_lds_tile, lidx, 2, b_val, load_vec);
-            }
+            rocke_value_t* lidx[2] = {LD_ROW(row, ctx->block_n), rocke_gemm_swz_col(ctx, col, row)};
+            rocke_gemm_store_sync_window(b, &b_lds_tile, lidx, b_val, load_vec);
         }
     }
     else
@@ -621,52 +572,12 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
             rocke_value_t* row = rocke_b_div(b, vec_idx, ctx->c_block_k_div_vec);
             rocke_value_t* col_v = rocke_b_mod(b, vec_idx, ctx->c_block_k_div_vec);
             rocke_value_t* col = (load_vec > 1) ? rocke_b_mul(b, col_v, ctx->c_load_vec) : col_v;
-            if(spec->trait.pad_k)
-            {
-                rocke_value_t* comps[ROCKE_GEMM_MAX_LOAD_VEC];
-                rocke_value_t* b_val;
-                for(int i = 0; i < load_vec; ++i)
-                {
-                    rocke_value_t* elem_col
-                        = i ? rocke_b_add(b, col, rocke_b_const_i32(b, i)) : col;
-                    rocke_value_t* valid = PADK_VALID(elem_col);
-                    rocke_value_t* safe_col
-                        = rocke_b_select(b, valid, elem_col, rocke_b_const_i32(b, 0));
-                    rocke_value_t* gidx[3] = {rocke_b_const_i32(b, 0), row, safe_col};
-                    rocke_value_t* raw = rocke_tile_window_load_scalar(b, &b_global_tile, gidx, 3);
-                    comps[i] = MASK_STORAGE(raw, valid);
-                }
-                b_val = (load_vec == 1) ? comps[0]
-                                        : rocke_b_vec_pack(b, comps, load_vec, ctx->storage_dtype);
-                rocke_value_t* lidx[2]
-                    = {LD_ROW(row, ctx->block_n), rocke_gemm_swz_col(ctx, col, row)};
-                if(load_vec == 1)
-                    rocke_tile_window_store_scalar(b, &b_lds_tile, lidx, 2, b_val, 0);
-                else
-                    rocke_tile_window_store_vec(b, &b_lds_tile, lidx, 2, b_val, load_vec);
-            }
-            else if(load_vec == 1)
-            {
-                rocke_value_t* gidx[3] = {rocke_b_const_i32(b, 0), row, col};
-                rocke_value_t* b_val = rocke_tile_window_load_scalar(b, &b_global_tile, gidx, 3);
-                rocke_value_t* lidx[2]
-                    = {LD_ROW(row, ctx->block_n), rocke_gemm_swz_col(ctx, col, row)};
-                rocke_tile_window_store_scalar(b, &b_lds_tile, lidx, 2, b_val, 0);
-            }
-            else
-            {
-                rocke_value_t* gidx[3] = {rocke_b_const_i32(b, 0), row, col};
-                rocke_value_t* b_val
-                    = rocke_tile_window_load_vec(b, &b_global_tile, gidx, 3, load_vec);
-                rocke_value_t* lidx[2]
-                    = {LD_ROW(row, ctx->block_n), rocke_gemm_swz_col(ctx, col, row)};
-                rocke_tile_window_store_vec(b, &b_lds_tile, lidx, 2, b_val, load_vec);
-            }
+            rocke_value_t* b_val
+                = rocke_gemm_load_sync_window(ctx, &b_global_tile, row, col, k_off, load_vec);
+            rocke_value_t* lidx[2] = {LD_ROW(row, ctx->block_n), rocke_gemm_swz_col(ctx, col, row)};
+            rocke_gemm_store_sync_window(b, &b_lds_tile, lidx, b_val, load_vec);
         }
     }
-#undef MASK_STORAGE
-#undef STORAGE_ZERO
-#undef PADK_VALID
 #undef LD_ROW
 }
 

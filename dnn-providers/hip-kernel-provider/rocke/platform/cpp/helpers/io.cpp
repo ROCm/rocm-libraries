@@ -38,6 +38,32 @@ static int rocke_io_is_vec_width(int n)
     return n == 2 || n == 4 || n == 8;
 }
 
+rocke_value_t* rocke_b_load_clipped_global_fragment(rocke_ir_builder_t* b,
+                                                    rocke_value_t* ptr,
+                                                    rocke_value_t* offset,
+                                                    rocke_value_t* position,
+                                                    rocke_value_t* bound,
+                                                    const rocke_type_t* dtype,
+                                                    int n)
+{
+    if(!rocke_i_live(b))
+        return NULL;
+    if(n <= 0)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "fragment needs positive width");
+    rocke_value_t* pad = rocke_b_vec_extract(b, rocke_b_zero_vec(b, dtype, 1), 0);
+    std::vector<rocke_value_t*> values;
+    values.reserve(n);
+    for(int i = 0; i < n; ++i)
+    {
+        rocke_value_t* step = i ? rocke_b_const_i32(b, i) : NULL;
+        rocke_value_t* address = step ? rocke_b_add(b, offset, step) : offset;
+        rocke_value_t* coord = step ? rocke_b_add(b, position, step) : position;
+        rocke_value_t* valid = rocke_b_cmp_lt(b, coord, bound);
+        values.push_back(rocke_b_masked_global_load(b, ptr, address, valid, pad, dtype, 1));
+    }
+    return n == 1 ? values[0] : rocke_b_vec_pack(b, values.data(), n, dtype);
+}
+
 const rocke_type_t* rocke_io_ir_type(const char* dtype)
 {
     if(dtype == NULL)

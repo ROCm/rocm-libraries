@@ -864,6 +864,10 @@ class TileWindow:
             )
         return tuple(b.add(o, li) for o, li in zip(self.origin, local_indices))
 
+    def element_offset(self, b: IRBuilder, *local_indices: Value) -> Value:
+        """Flat offset in elements, using the view's strides (including SSA strides)."""
+        return self.view.desc.offset(b, self._global_indices(b, local_indices))
+
     # ---- scalar ops ----
 
     def load_scalar(self, b: IRBuilder, *local_indices: Value) -> Value:

@@ -73,7 +73,7 @@ from ...core.ir import (
     dtype_to_ir_type,
     encode_tdm_padding,
 )
-from ...helpers.io import io_ir_type
+from ...helpers.io import io_ir_type, load_clipped_global_fragment
 from ...helpers.loads import CoalescedTileLoader, TdmSourceWindow2D, TdmTileLoader2D
 from ...helpers.spec import WarpTileBlockSizeMixin, choose_load_vec
 from ...helpers.tensor_view import make_global_view, make_tile_window
@@ -2066,79 +2066,32 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
             return row, col_v, col
 
-        def _pad_k_valid(elem_col: Value) -> Value:
-            return b.cmp_lt(b.add(k_off, elem_col), K)
+        def _load_k_clipped(ptr: Value, offset: Value, col: Value) -> Value:
+            return load_clipped_global_fragment(
+                b, ptr, offset, b.add(k_off, col), K, dtype=storage_dtype, n=load_vec
+            )
 
-        def _zero_storage_scalar() -> Value:
-            if storage_dtype in (FP8E4M3, BF8E5M2):
-                # cast_f32_to has no 8-bit arm, and the cvt_f32_to_fp8 route
-                # would burn a conversion intrinsic to produce a byte we
-                # already know: +0.0 is all-zero in both e4m3 and e5m2, and
-                # both lower to i8, so truncating a zero i32 is the whole job.
-                return b.trunc(b.const_i32(0), storage_dtype)
-            if storage_dtype == F64:
-                return b.const_f64(0.0)
-            return b.cast_f32_to(b.const_f32(0.0), storage_dtype)
-
-        def _mask_storage_scalar(value: Value, valid: Value) -> Value:
-            return b.select(valid, value, _zero_storage_scalar())
-
-        def _load_a_pad_k(row: Value, col: Value, n: int) -> Value:
-            vals: List[Value] = []
-            for i in range(n):
-                elem_col = b.add(col, b.const_i32(i)) if i else col
-                valid = _pad_k_valid(elem_col)
-                safe_col = b.select(valid, elem_col, b.const_i32(0))
-                raw = a_global_tile.load_scalar(b, b.const_i32(0), row, safe_col)
-                vals.append(_mask_storage_scalar(raw, valid))
-            return vals[0] if n == 1 else b.vec_pack(vals, storage_dtype)
-
-        def _load_b_pad_k(row: Value, col: Value, n: int) -> Value:
-            vals: List[Value] = []
-            for i in range(n):
-                elem_col = b.add(col, b.const_i32(i)) if i else col
-                valid = _pad_k_valid(elem_col)
-                safe_col = b.select(valid, elem_col, b.const_i32(0))
-                raw = b_global_tile.load_scalar(b, b.const_i32(0), row, safe_col)
-                vals.append(_mask_storage_scalar(raw, valid))
-            return vals[0] if n == 1 else b.vec_pack(vals, storage_dtype)
-
-        def _load_preshuffled_b_pad_k(
-            base_off: Value, vec_idx: Value, col: Value, n: int
-        ) -> Value:
-            vals: List[Value] = []
-            for i in range(n):
-                elem_col = b.add(col, b.const_i32(i)) if i else col
-                valid = _pad_k_valid(elem_col)
-                raw_off = b.add(
-                    base_off, b.add(b.mul(vec_idx, c_load_vec), b.const_i32(i))
+        def _load_sync_window(tile, row: Value, col: Value) -> Value:
+            indices = (b.const_i32(0), row, col)
+            if spec.trait.pad_k:
+                return _load_k_clipped(
+                    tile.view.base, tile.element_offset(b, *indices), col
                 )
-                safe_off = b.select(valid, raw_off, base_off)
-                raw = b.global_load(Bp, safe_off, storage_dtype)
-                vals.append(_mask_storage_scalar(raw, valid))
-            return vals[0] if n == 1 else b.vec_pack(vals, storage_dtype)
+            if load_vec == 1:
+                return tile.load_scalar(b, *indices)
+            return tile.load_vec(b, *indices, n=load_vec)
+
+        def _store_sync_window(tile, row: Value, col: Value, value: Value) -> None:
+            if load_vec == 1:
+                tile.store_scalar(b, row, col, value=value)
+            else:
+                tile.store_vec(b, row, col, value=value, n=load_vec)
 
         for e in range(a_vecs_per_thread):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row, col_v, col = _vec_rc(vec_idx)
-            if load_vec == 1:
-                a_val = (
-                    _load_a_pad_k(row, col, 1)
-                    if spec.trait.pad_k
-                    else a_global_tile.load_scalar(b, b.const_i32(0), row, col)
-                )
-                a_lds_tile.store_scalar(
-                    b, _ld_a_row(row), _swz_col(col, row), value=a_val
-                )
-            else:
-                a_val = (
-                    _load_a_pad_k(row, col, load_vec)
-                    if spec.trait.pad_k
-                    else a_global_tile.load_vec(b, b.const_i32(0), row, col, n=load_vec)
-                )
-                a_lds_tile.store_vec(
-                    b, _ld_a_row(row), _swz_col(col, row), value=a_val, n=load_vec
-                )
+            row, _, col = _vec_rc(vec_idx)
+            a_val = _load_sync_window(a_global_tile, row, col)
+            _store_sync_window(a_lds_tile, _ld_a_row(row), _swz_col(col, row), a_val)
         # B-load branch.
         #
         # Canonical (row-major B): each lane reads ``load_vec`` halves at
@@ -2170,49 +2123,24 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             for e in range(b_vecs_per_thread):
                 vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
                 glob_off = b.add(base_off, b.mul(vec_idx, c_load_vec))
-                row, col_v, col = _vec_rc(vec_idx)
-                if load_vec == 1:
-                    b_val = (
-                        _load_preshuffled_b_pad_k(base_off, vec_idx, col, 1)
-                        if spec.trait.pad_k
-                        else b.global_load(Bp, glob_off, storage_dtype)
-                    )
-                    b_lds_tile.store_scalar(
-                        b, _ld_b_row(row), _swz_col(col, row), value=b_val
-                    )
+                row, _, col = _vec_rc(vec_idx)
+                if spec.trait.pad_k:
+                    b_val = _load_k_clipped(Bp, glob_off, col)
+                elif load_vec == 1:
+                    b_val = b.global_load(Bp, glob_off, storage_dtype)
                 else:
-                    b_val = (
-                        _load_preshuffled_b_pad_k(base_off, vec_idx, col, load_vec)
-                        if spec.trait.pad_k
-                        else b.global_load_vN(Bp, glob_off, storage_dtype, load_vec)
-                    )
-                    b_lds_tile.store_vec(
-                        b, _ld_b_row(row), _swz_col(col, row), value=b_val, n=load_vec
-                    )
+                    b_val = b.global_load_vN(Bp, glob_off, storage_dtype, load_vec)
+                _store_sync_window(
+                    b_lds_tile, _ld_b_row(row), _swz_col(col, row), b_val
+                )
         else:
             for e in range(b_vecs_per_thread):
                 vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-                row, col_v, col = _vec_rc(vec_idx)
-                if load_vec == 1:
-                    b_val = (
-                        _load_b_pad_k(row, col, 1)
-                        if spec.trait.pad_k
-                        else b_global_tile.load_scalar(b, b.const_i32(0), row, col)
-                    )
-                    b_lds_tile.store_scalar(
-                        b, _ld_b_row(row), _swz_col(col, row), value=b_val
-                    )
-                else:
-                    b_val = (
-                        _load_b_pad_k(row, col, load_vec)
-                        if spec.trait.pad_k
-                        else b_global_tile.load_vec(
-                            b, b.const_i32(0), row, col, n=load_vec
-                        )
-                    )
-                    b_lds_tile.store_vec(
-                        b, _ld_b_row(row), _swz_col(col, row), value=b_val, n=load_vec
-                    )
+                row, _, col = _vec_rc(vec_idx)
+                b_val = _load_sync_window(b_global_tile, row, col)
+                _store_sync_window(
+                    b_lds_tile, _ld_b_row(row), _swz_col(col, row), b_val
+                )
 
     def _emit_frag_smem_load(
         src: Value,
