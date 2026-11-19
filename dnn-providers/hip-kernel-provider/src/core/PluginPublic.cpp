@@ -91,7 +91,8 @@ extern "C" HIPDNN_PLUGIN_EXPORT void
         limit);
 }
 
-/// The implicit-GEMM kernel launches hipkernel:Gfx950ConvDgradAot has made inside this
+/// The implicit-GEMM kernel launches hipkernel:Gfx950ConvDgradAot and
+/// hipkernel:Gfx1250ConvDgradAot have made inside this
 /// loaded plugin, one per batch slice, so a test can tell a sliced launch from a whole
 /// one. FOR TESTS ONLY, exported for the same reason as the hooks above.
 extern "C" HIPDNN_PLUGIN_EXPORT int64_t

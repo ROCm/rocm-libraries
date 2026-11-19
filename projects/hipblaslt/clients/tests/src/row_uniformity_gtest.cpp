@@ -1624,6 +1624,10 @@ namespace
             MXFp6Case{"E2M3_K2048", HIP_R_6F_E2M3, 2048, "rocke_gemm_mx_e2m3_e2m3_", true},
             MXFp6Case{"E3M2_K2048", HIP_R_6F_E3M2, 2048, "rocke_gemm_mx_e3m2_e3m2_", true},
             MXFp6Case{
+                "E2M3_K2048_CanonicalB", HIP_R_6F_E2M3, 2048, "rocke_gemm_mx_e2m3_e2m3_", false},
+            MXFp6Case{
+                "E3M2_K2048_CanonicalB", HIP_R_6F_E3M2, 2048, "rocke_gemm_mx_e3m2_e3m2_", false},
+            MXFp6Case{
                 "E2M3_M32768_K6144", HIP_R_6F_E2M3, 6144, "rocke_gemm_mx_e2m3_e2m3_", true, 32768},
             MXFp6Case{
                 "E3M2_M32768_K6144", HIP_R_6F_E3M2, 6144, "rocke_gemm_mx_e3m2_e3m2_", true, 32768},

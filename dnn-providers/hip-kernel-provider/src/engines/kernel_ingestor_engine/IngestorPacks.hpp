@@ -342,7 +342,8 @@ void resetGfx1250ConvDgradAotModuleCache();
 /// plan build actually reads; this function runs inside the plugin. FOR TESTS ONLY.
 void setConvDgradAotBatchChunkByteLimitForTesting(int64_t limit);
 
-/// The implicit-GEMM kernel launches hipkernel:Gfx950ConvDgradAot has made in this
+/// The implicit-GEMM kernel launches hipkernel:Gfx950ConvDgradAot and
+/// hipkernel:Gfx1250ConvDgradAot have made in this
 /// process, one per batch slice: how a test sees that a plan ran sliced. FOR TESTS ONLY.
 int64_t convDgradAotImplicitLaunchCountForTesting();
 

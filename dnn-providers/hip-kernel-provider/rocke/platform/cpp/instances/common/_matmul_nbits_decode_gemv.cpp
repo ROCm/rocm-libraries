@@ -42,7 +42,7 @@
  *             b.global_store(C, b.add(b.mul(m, cN), n), out_h)
  *     return b.kernel
  *
- * The Python `global_load(ptr, idx, dtype)` defaults align=1; we pass align<=0
+ * The Python `global_load(ptr, idx, dtype)` defaults align=1; we pass align 0
  * (=> 1) to the C entry point to match. `global_store(ptr, idx, value)` likewise
  * defaults align=1.
  */

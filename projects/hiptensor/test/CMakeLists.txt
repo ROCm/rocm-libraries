@@ -455,8 +455,10 @@ endif()
 # Test entries for the install-tree category filters.
 #
 # Two building-block lists keep the three filters distinct in intent:
-#   _HIPTENSOR_HOST_TESTS   - host-only (non-device) tests. They take no config and
-#                             no run-count flags.
+#   _HIPTENSOR_HOST_TESTS   - tests that take no config and no run-count flags. Some
+#                             of them (e.g. concurrency_test) still run on the GPU;
+#                             listing them here only keeps them out of the
+#                             per-config and FFM families below.
 #   _HIPTENSOR_DEVICE_TESTS - device tests. Each runs with --hot_runs 1 --cold_runs 0
 #                             and, where applicable, a custom config via -y.
 #
@@ -477,6 +479,7 @@ endif()
 
 set(_HIPTENSOR_HOST_TESTS
   batched_contraction_test
+  concurrency_test
   contraction_mode_test
   elementwise_cpu_test
   elementwise_mode_test

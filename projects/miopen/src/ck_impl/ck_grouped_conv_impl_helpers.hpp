@@ -327,14 +327,15 @@ bool CheckIsArgSupportedCommon(const miopen::conv::ProblemDescription& problem,
                                const std::string& kernel_id,
                                bool use_tf32)
 {
+    // Strict: a TF32 request checks the TF32 instance set only (no silent FP32 fallback), matching
+    // FillValidKernels/the 3D path. The TF32->FP32 availability fallback is applied one level up
+    // (IsArgsSupportedTf32Aware for restored configs; the lazy walk's FP32 second pass), so a TF32
+    // request never picks an FP32-only kernel while a lower-ranked TF32 kernel applies.
     if constexpr(std::is_same_v<DataType, float>)
     {
-        if(use_tf32 &&
-           miopen::solver::IsCKArgsSupported<DeviceOpPtrs<DataType, ck::tf32_t>, CKArgsType>(
-               problem, kernel_id))
-        {
-            return true;
-        }
+        if(use_tf32)
+            return miopen::solver::IsCKArgsSupported<DeviceOpPtrs<DataType, ck::tf32_t>,
+                                                     CKArgsType>(problem, kernel_id);
     }
     return miopen::solver::IsCKArgsSupported<DeviceOpPtrs<DataType, DataType>, CKArgsType>(
         problem, kernel_id);

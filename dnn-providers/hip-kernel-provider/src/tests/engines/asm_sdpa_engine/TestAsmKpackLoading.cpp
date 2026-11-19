@@ -26,7 +26,7 @@
 
 #include "asm_fmha_v3_fwd_configs.hpp"
 #include "engines/asm_sdpa_engine/asm/AsmKernelPath.hpp"
-#include "engines/asm_sdpa_engine/plans/SdpaFwdLaunchParams.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaKernelUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 
@@ -254,8 +254,7 @@ TEST(TestGpuSdpaFwdLaunchLimits, TableMatchesKernelMaxThreadsPerBlock)
         }
 
         EXPECT_EQ(config.max_flat_workgroup_size, smallestLimit);
-        EXPECT_LE(fwdBlockDimX(static_cast<unsigned int>(config.hdim_q),
-                               static_cast<unsigned int>(config.hdim_v)),
+        EXPECT_LE(fwdConfigBlockDimX(config),
                   static_cast<unsigned int>(config.max_flat_workgroup_size));
         ++checked;
     }
