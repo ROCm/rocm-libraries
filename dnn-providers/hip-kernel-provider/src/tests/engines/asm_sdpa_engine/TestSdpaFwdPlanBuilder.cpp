@@ -833,9 +833,10 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableCuSeqLenContract)
     }
 }
 
-// Batch mode writes packed FP32 [B, H, Sq] stats. Group mode writes AITER's head-major
-// [H, total_q] LSE, so its stats tensor must be ragged on the Q/O offset tensor in token
-// units with a sequence stride of 1.
+// Batch mode writes FP32 [B, H, Sq] stats with strides [H * s_h, s_h, 1], s_h >= Sq: the
+// kernel takes only the head stride and steps batches by H * s_h, even when H == 1. Group
+// mode writes AITER's head-major [H, total_q] LSE, so its stats tensor must be ragged on the
+// Q/O offset tensor in token units with a sequence stride of 1.
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableStatsLayoutFollowsBatchMode)
 {
     SKIP_IF_NO_DEVICES();
@@ -853,6 +854,12 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableStatsLayoutFollowsBatchMode)
     // Mutates the packed stats graph that batch mode accepts.
     const auto withBatchStats = [&](const std::function<void(GraphT&)>& mutate) {
         return mutateGraph(createBshdSdpaFwdGraph(dims, dims, /*withStats=*/true), mutate);
+    };
+    const std::vector<int64_t> singleHeadDims = {4, 1, 256, 128};
+    // Mutates the packed stats graph of a single-head batch-mode graph.
+    const auto withSingleHeadBatchStats = [&](const std::function<void(GraphT&)>& mutate) {
+        return mutateGraph(
+            createBshdSdpaFwdGraph(singleHeadDims, singleHeadDims, /*withStats=*/true), mutate);
     };
     // Mutates the head-major stats graph that group mode accepts.
     const auto withGroupStats = [&](const std::function<void(GraphT&)>& mutate) {
@@ -881,6 +888,22 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableStatsLayoutFollowsBatchMode)
                            = {heads * (seqLenQ + 64), seqLenQ + 64, 1, 1};
                    }),
                    "Batch mode stats with a padded head stride"},
+         true},
+        {GraphTest{withBatchStats([&](GraphT& graph) {
+                       findTensor(graph, "stats").strides
+                           = {heads * (seqLenQ - 1), seqLenQ - 1, 1, 1};
+                   }),
+                   "Batch mode stats with a head stride below Sq"},
+         false},
+        {GraphTest{withSingleHeadBatchStats([&](GraphT& graph) {
+                       findTensor(graph, "stats").strides = {seqLenQ, seqLenQ, 1, 1};
+                   }),
+                   "Batch mode single-head stats with packed strides"},
+         true},
+        {GraphTest{withSingleHeadBatchStats([&](GraphT& graph) {
+                       findTensor(graph, "stats").strides = {seqLenQ, 1, 1, 1};
+                   }),
+                   "Batch mode single-head stats with a head stride below Sq"},
          false},
         {GraphTest{withBatchStats([&](GraphT& graph) {
                        findTensor(graph, "stats").strides = {2 * heads * seqLenQ, seqLenQ, 1, 1};

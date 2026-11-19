@@ -447,10 +447,11 @@ static bool wouldFwdByteStridesFitUint32(
     if(stats != nullptr)
     {
         // LSE/stats: rank 3 [B, H_q, S_q] or rank 4 [B, H_q, S_q, 1] in FP32;
-        // only batch and head strides reach the kernel.
+        // only the head stride reaches the kernel, which steps batches by H_q * head stride.
         const auto* statsStrides = stats->strides();
-        ok &= plan_utils::byteStrideFitsU32("batch_stride_lse", statsStrides->Get(0), K_FP32_BYTES);
         ok &= plan_utils::byteStrideFitsU32("nhead_stride_lse", statsStrides->Get(1), K_FP32_BYTES);
+        ok &= plan_utils::byteStrideFitsU32(
+            "batch_stride_lse", stats->dims()->Get(1) * statsStrides->Get(1), K_FP32_BYTES);
     }
 
     return ok;
@@ -486,13 +487,14 @@ bool fwdKvRowExtentsFitU32(const hipdnn_flatbuffers_sdk::data_objects::TensorAtt
     return ok;
 }
 
-// Validates the optional stats (LSE) output tensor. Batch mode writes it as packed FP32
-// [B, H, Sq]: the kernel takes only a head stride (s_lse_Hs), with no batch or sequence
-// stride, and AITER allocates the LSE as a contiguous [B, H, Sq] tensor, so any other
-// layout is declined. Group mode writes AITER's varlen layout [H, total_q]: one FP32 per Q
-// token at h * s_lse_Hs + seqstart_q[b] + s, with no per-token stride, so the stats tensor
-// must be ragged on the Q/O offset table in token units with a sequence stride of 1. Q must
-// already be known to be rank 4.
+// Validates the optional stats (LSE) output tensor. Batch mode writes FP32 [B, H, Sq]
+// element (b, h, s) at (b * H + h) * s_lse_Hs + s: the kernel takes only a head stride
+// (s_lse_Hs), with no batch or sequence stride, and steps batches by H * s_lse_Hs. The
+// strides must therefore be [H * s_h, s_h, 1] with s_h >= Sq so rows of different heads do
+// not overlap; any other layout is declined. Group mode writes AITER's varlen layout
+// [H, total_q]: one FP32 per Q token at h * s_lse_Hs + seqstart_q[b] + s, with no per-token
+// stride, so the stats tensor must be ragged on the Q/O offset table in token units with a
+// sequence stride of 1. Q must already be known to be rank 4.
 static bool
     isSupportedStatsTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& stats,
                            const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
@@ -548,17 +550,20 @@ static bool
 
     if(!group.has_value())
     {
-        // The stride of a size-1 axis is never used, so it is not checked.
+        // The kernel steps batches by H * head stride even when H == 1, so the head stride is
+        // checked whenever B > 1 or H > 1. The batch and sequence strides are unused, and not
+        // checked, when their axis has size 1.
         const int64_t batch = stats.dims()->Get(0);
         const int64_t heads = stats.dims()->Get(1);
         const int64_t seqLenQ = stats.dims()->Get(2);
         const auto* strides = stats.strides();
         HIP_KERNEL_RETURN_FALSE_IF(
             strides == nullptr || strides->size() != statsRank
-                || (batch != 1 && strides->Get(0) != heads * seqLenQ)
-                || (heads != 1 && strides->Get(1) != seqLenQ)
+                || (batch != 1 && strides->Get(0) != heads * strides->Get(1))
+                || ((batch != 1 || heads != 1) && strides->Get(1) < seqLenQ)
                 || (seqLenQ != 1 && strides->Get(SDPA_SEQ_AXIS) != 1),
-            "batch-mode stats tensor strides must be packed [H * Sq, Sq, 1]");
+            "batch-mode stats tensor strides must be [H * s_h, s_h, 1] with head stride s_h >= Sq "
+            "(the kernel derives the batch offset from the head stride)");
     }
     return true;
 }

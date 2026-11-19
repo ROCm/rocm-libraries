@@ -97,7 +97,8 @@ struct SdpaFwdParams
     unsigned int oStrideBatch;
 
     // LSE tensor stride (in elements).  The forward kernel args struct
-    // (fmha_fwd_v3_args) only exposes s_lse_Hs — no batch stride field.
+    // (fmha_fwd_v3_args) only exposes s_lse_Hs — no batch stride field; batch mode
+    // steps batches by q_head_num * s_lse_Hs.
     unsigned int lseStrideHead = 0;
 
     // Tile size
