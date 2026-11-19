@@ -47,9 +47,11 @@ export PATH="$venv/bin:$PATH"
 if [[ ${XENG_SKIP_DVC:-0} != 1 ]]; then
     echo "== dvc pull"
     desc=dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors
+    # --force: the checkout is re-synced to each new tip, and DVC otherwise refuses to replace
+    # outputs pulled for an earlier tip whose pointers have since changed.
     (
         cd "$src"
-        dvc pull -r ingestor --recursive "$desc"
+        dvc pull --force -r ingestor --recursive "$desc"
     )
 fi
 
