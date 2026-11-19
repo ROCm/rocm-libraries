@@ -294,6 +294,21 @@ std::vector<DeviceCase> deviceCases()
     cases.push_back({"NhwcSmallChannels", dense(3, 16, {17, 15}, {3, 3}, {1, 1}, true)});
     cases.push_back({"NhwcWide", dense(32, 48, {5, 70}, {3, 3}, {1, 1}, true)});
     cases.push_back({"NhwcMultiBlock", dense(136, 152, {17, 23}, {3, 3}, {1, 1}, true)});
+    // Wider column tiles must handle a full block followed by a partial one, including an
+    // unaligned final output vector. In backward data the graph's C/K exchange roles, so the
+    // mirrored case reaches that scalar epilogue while keeping the reduction divisible by 8.
+    auto outputTail = dense(40, 133, {9, 15}, {3, 3}, {1, 1}, true);
+    outputTail.n = 3;
+    cases.push_back({"Nhwc3x3OutputVectorTail", outputTail});
+    auto inputTail = dense(133, 40, {11, 9}, {3, 3}, {0, 0}, false);
+    inputTail.n = 3;
+    cases.push_back({"Nchw3x3InputVectorTail", inputTail});
+    // One image, several spatial and channel blocks, a partial reduction chunk in either
+    // direction, and asymmetric halos after reflection/staging.
+    auto wideConvolution = padded(dense(72, 168, {9, 15}, {3, 3}, {1, 1}, false), {2, 0}, {0, 1});
+    wideConvolution.n = 1;
+    wideConvolution.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"Nchw3x3WideAsymmetricConvolutionMode", wideConvolution});
     cases.push_back({"Nhwc5x5", dense(32, 48, {19, 23}, {5, 5}, {2, 2}, true)});
     cases.push_back({"Nchw5x5Asymmetric",
                      padded(dense(24, 40, {11, 13}, {5, 5}, {1, 1}, false), {2, 1}, {1, 2})});
@@ -623,12 +638,199 @@ INSTANTIATE_TEST_SUITE_P(,
                                                                                          : "Bwd");
                          });
 
+/// Dilated 3x3 graphs (the 2-D rows configs' `dil`), narrow-channel graphs (the 32- and 64-wide
+/// rows tiles) and one-row images under 1 x S filters (the line configs), on the MFMA parts that
+/// ship the rows kernels. Elsewhere the dilated and one-row graphs have no config and are skipped.
+class TestGpuConvDirectRowsShapes
+    : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
+{
+};
+
+bool rowsArch()
+{
+    const auto arch = std::string(currentDeviceProperties().gcnArchName);
+    return arch.rfind("gfx90a", 0) == 0 || arch.rfind("gfx94", 0) == 0
+           || arch.rfind("gfx950", 0) == 0;
+}
+
+TEST_P(TestGpuConvDirectRowsShapes, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!rowsArch())
+    {
+        GTEST_SKIP() << "no rows configs on this architecture";
+    }
+    runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()));
+}
+
+TEST_P(TestGpuConvDirectRowsShapes, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!rowsArch())
+    {
+        GTEST_SKIP() << "no rows configs on this architecture";
+    }
+    runCase<Half>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()));
+}
+
+TEST_P(TestGpuConvDirectRowsShapes, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!rowsArch())
+    {
+        GTEST_SKIP() << "no rows configs on this architecture";
+    }
+    runCase<BFloat16>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()));
+}
+
+/// +inf and -inf in the input through the dilated and narrow configs.
+TEST_P(TestGpuConvDirectRowsShapes, HalfInfinities)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!rowsArch())
+    {
+        GTEST_SKIP() << "no rows configs on this architecture";
+    }
+    runCase<Half>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, true);
+}
+
+ConvShape dilatedBy(ConvShape shape, int64_t dilation)
+{
+    shape.dilation.assign(shape.input.size(), dilation);
+    return shape;
+}
+
+std::vector<DeviceCase> rowsShapeCases()
+{
+    std::vector<DeviceCase> cases;
+    // Dilation 2 and 4, channels-last and channels-first (widths of whole 16-byte runs, so the
+    // in-place configs serve them), "same" and unpadded, asymmetric pads, convolution mode; extents
+    // and channel counts off the tiles and chunks.
+    cases.push_back({"Nhwc3x3Dil2", dilatedBy(dense(24, 40, {13, 21}, {3, 3}, {2, 2}, true), 2)});
+    cases.push_back(
+        {"Nchw3x3Dil2Runs", dilatedBy(dense(40, 72, {11, 24}, {3, 3}, {2, 2}, false), 2)});
+    cases.push_back(
+        {"Nhwc3x3Dil4Pad0", dilatedBy(dense(16, 24, {17, 19}, {3, 3}, {0, 0}, true), 4)});
+    cases.push_back(
+        {"Nchw3x3Dil4RunsAsymmetric",
+         dilatedBy(padded(dense(24, 40, {14, 32}, {3, 3}, {4, 4}, false), {4, 3}, {2, 5}), 4)});
+    auto convolution = dilatedBy(dense(24, 40, {13, 21}, {3, 3}, {2, 2}, true), 2);
+    convolution.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"Nhwc3x3Dil2ConvolutionMode", convolution});
+    // More tiles than a device runs at once: blocks walk tiles and prefetch.
+    auto manyTiles = dilatedBy(dense(72, 24, {64, 64}, {3, 3}, {2, 2}, false), 2);
+    manyTiles.n = 4;
+    cases.push_back({"Nchw3x3Dil2ManyTiles", manyTiles});
+    // Narrow outputs and reductions: 24, 32 and 64 output channels, 32 and 64 input channels,
+    // both layouts; many tiles so the narrow tiles' blocks walk.
+    cases.push_back({"Nchw3x3NarrowK", dense(64, 24, {21, 40}, {3, 3}, {1, 1}, false)});
+    cases.push_back({"Nhwc3x3NarrowK", dense(64, 32, {21, 37}, {3, 3}, {1, 1}, true)});
+    auto narrowMany = dense(32, 64, {48, 64}, {3, 3}, {1, 1}, false);
+    narrowMany.n = 6;
+    cases.push_back({"Nchw3x3NarrowManyTiles", narrowMany});
+    // One-row images under 1 x S filters (the line configs): 2-D of one row and 1-D, dilated and
+    // not, widths of whole 16-byte runs (channels-first in place) and not, asymmetric pads,
+    // convolution mode, and more tiles than a device runs at once.
+    auto rowDilated = dense(32, 40, {1, 200}, {1, 11}, {0, 25}, false);
+    rowDilated.dilation = {1, 5};
+    cases.push_back({"Nchw1x11Dil5Row", rowDilated});
+    auto rowNhwc = dense(24, 48, {1, 131}, {1, 7}, {0, 9}, true);
+    rowNhwc.dilation = {1, 3};
+    cases.push_back({"Nhwc1x7Dil3Row", rowNhwc});
+    cases.push_back({"Nchw1x3RowAsymmetric",
+                     padded(dense(64, 64, {1, 96}, {1, 3}, {0, 1}, false), {0, 2}, {0, 0})});
+    cases.push_back({"Ncl11", dense(32, 32, {160}, {11}, {5}, false)});
+    auto nclDilated = dense(40, 24, {136}, {3}, {5}, true);
+    nclDilated.dilation = {5};
+    cases.push_back({"Nlc3Dil5", nclDilated});
+    auto rowConvolution = dense(16, 32, {1, 64}, {1, 7}, {0, 3}, false);
+    rowConvolution.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"Nchw1x7RowConvolutionMode", rowConvolution});
+    auto rowMany = dense(40, 24, {1, 2048}, {1, 7}, {0, 3}, false);
+    rowMany.n = 4;
+    cases.push_back({"Nchw1x7RowManyTiles", rowMany});
+    return cases;
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvDirectRowsShapes,
+                         ::testing::Combine(::testing::ValuesIn(rowsShapeCases()),
+                                            ::testing::Values(ConvDirection::FORWARD,
+                                                              ConvDirection::BACKWARD_DATA)),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name
+                                    + (std::get<1>(info.param) == ConvDirection::FORWARD ? "Fwd"
+                                                                                         : "Bwd");
+                         });
+
 // ---- Host-only: the shipped catalog ----
+
+TEST(TestConvDirectCatalog, LineConfigsServeEveryGeometryAndDtypeOnTheRowsArchitectures)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        for(const int width : {3, 7, 11})
+        {
+            for(const int dilation : {1, 3, 5})
+            {
+                for(const char* dtype : {"FLOAT", "HALF", "BFLOAT16"})
+                {
+                    for(const char* arch : {"gfx90a", "gfx942", "gfx950"})
+                    {
+                        const auto& kernels = catalog(direction);
+                        const bool served
+                            = std::any_of(kernels.begin(), kernels.end(), [&](const auto& k) {
+                                  const auto config = conv_direct::configOf(k);
+                                  return config.has_value() && config->line == 1
+                                         && config->s == width && config->dil == dilation
+                                         && k.getStringMetadata("dtype") == dtype
+                                         && conv_direct::configRunsOn(*config, arch);
+                              });
+                        EXPECT_TRUE(served) << "1 x " << width << " dilation " << dilation << " "
+                                            << dtype << " " << arch;
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST(TestConvDirectCatalog, DilatedConfigsServeEveryDtypeOnTheRowsArchitectures)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        for(const int dilation : {2, 4})
+        {
+            for(const char* dtype : {"FLOAT", "HALF", "BFLOAT16"})
+            {
+                for(const char* arch : {"gfx90a", "gfx942", "gfx950"})
+                {
+                    const auto& kernels = catalog(direction);
+                    const bool served
+                        = std::any_of(kernels.begin(), kernels.end(), [&](const auto& k) {
+                              const auto config = conv_direct::configOf(k);
+                              return config.has_value() && config->dil == dilation
+                                     && k.getStringMetadata("dtype") == dtype && !config->math
+                                     && conv_direct::configRunsOn(*config, arch);
+                          });
+                    EXPECT_TRUE(served) << "dilation " << dilation << " " << dtype << " " << arch;
+                }
+            }
+        }
+    }
+}
 
 TEST(TestConvDirectCatalog, EveryConfigParsesAndRunsSomewhere)
 {
-    static constexpr std::array<const char*, 8> ARCHS{
-        "gfx906", "gfx908", "gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1151", "gfx1201"};
+    static constexpr std::array<const char*, 9> ARCHS{"gfx906",
+                                                      "gfx908",
+                                                      "gfx90a",
+                                                      "gfx942",
+                                                      "gfx950",
+                                                      "gfx1100",
+                                                      "gfx1151",
+                                                      "gfx1201",
+                                                      "gfx1250"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         ASSERT_FALSE(catalog(direction).empty());
@@ -647,8 +849,15 @@ TEST(TestConvDirectCatalog, EveryConfigParsesAndRunsSomewhere)
 
 TEST(TestConvDirectCatalog, EveryFilterAndDtypeHasAConfigOnEveryArchitecture)
 {
-    static constexpr std::array<const char*, 8> ARCHS{
-        "gfx906", "gfx908", "gfx90a", "gfx942", "gfx950", "gfx1030", "gfx1151", "gfx1201"};
+    static constexpr std::array<const char*, 9> ARCHS{"gfx906",
+                                                      "gfx908",
+                                                      "gfx90a",
+                                                      "gfx942",
+                                                      "gfx950",
+                                                      "gfx1030",
+                                                      "gfx1151",
+                                                      "gfx1201",
+                                                      "gfx1250"};
     for(const auto& filter : conv_direct::FILTERS)
     {
         for(const char* dtype : {"FLOAT", "HALF", "BFLOAT16"})

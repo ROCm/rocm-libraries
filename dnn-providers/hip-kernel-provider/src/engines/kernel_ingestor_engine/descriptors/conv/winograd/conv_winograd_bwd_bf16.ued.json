@@ -21,7 +21,10 @@
     "bins",
     "f16math",
     "pf",
-    "sb"
+    "sb",
+    "variant_id",
+    "layout_id",
+    "atom"
   ],
   "behavior_notes": [
     "runtime_compilation"

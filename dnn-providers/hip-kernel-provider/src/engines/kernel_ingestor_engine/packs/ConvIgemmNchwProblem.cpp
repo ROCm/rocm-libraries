@@ -63,6 +63,10 @@ struct AtomShape
 AtomShape shapeOf(std::string_view atom)
 {
     const bool f32 = atom.size() >= 3 && atom.substr(atom.size() - 3) == "f32";
+    if(atom.substr(0, 7) == "wmma125")
+    {
+        return {16, f32 ? 4 : 32};
+    }
     if(atom.substr(0, 6) == "mfma16")
     {
         return {16, f32 ? 4 : 16};
@@ -247,9 +251,10 @@ int64_t ldsBytesOf(const NchwConfig& config, int elementBytes)
     // The output tile: dx's element type (fp32 for three-bf16), over the operand tiles.
     const int outBytes = config.math == 1 ? 4 : elementBytes;
     const int64_t out = config.bn * (config.bmq * config.stride + 16 / outBytes) * outBytes;
-    if(config.atom.size() >= 3 && config.atom.substr(config.atom.size() - 3) == "f32")
+    if(config.atom.substr(0, 4) == "mfma" && config.atom.size() >= 3
+       && config.atom.substr(config.atom.size() - 3) == "f32")
     {
-        // One k per lane: k-major tiles as the FMA kernel's (no transposing stores).
+        // MFMA fp32 has one k per lane; native gfx1250 float2 fragments are transposed.
         const int64_t chunks = divUp(smax, pad);
         const int64_t cp = (chunks % 2 == 0 ? chunks + 1 : chunks) * pad;
         return std::max(config.bk * ((wq + pad) + config.bn * cp + pad) * elementBytes, out);
@@ -284,10 +289,13 @@ bool threeBf16Pays(const NchwProblem& problem, std::string_view gcnArchName)
 {
     // Timed against the best exact config on 12 top fp32 K7 shapes: 0.05-0.74x on
     // gfx950, gfx942 and gfx90a; on gfx1201 (exact on FMA) 1.07x and 1.46x for 3-D 3x3x3 at
-    // stride 2 and 0.15-0.79x elsewhere. Admitted only there.
+    // stride 2 and 0.15-0.79x elsewhere. The catalog admits only that geometry on RDNA,
+    // including native gfx1250 BF16 atoms; these legacy timings do not rank its new configs.
     const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
     const auto& a = problem.base.args;
-    const bool rdna = arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0;
+    const bool rdna = conv_igemm::atomRunsOn("wmma11_bf16", arch)
+                      || conv_igemm::atomRunsOn("wmma12_bf16", arch)
+                      || conv_igemm::atomRunsOn("wmma125_bf16", arch);
     return rdna && problem.base.spatialRank == 3 && a.stride[0] >= 2 && a.stride[1] >= 2
            && a.stride[2] >= 2 && a.filter[0] * a.filter[1] * a.filter[2] >= 27;
 }

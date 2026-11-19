@@ -54,17 +54,19 @@
  * phase-scattered on store backward; multipass, fused VALU and cooperative WMMA), forward and
  * backward data (the filter rotated and its K/C roles swapped in the
  * filter pre-pass), both convolution modes (a reflected filter, in the same pre-pass), groups,
- * and any padding. Three variants, each one HIPRTC source with runtime shapes:
+ * and any padding. Six variants, each one HIPRTC source with runtime shapes:
  * - multipass: filter transform, input transform, a batched GEMM per Winograd position, output
  *   transform; NCHW and NHWC read natively; the batch is sliced to keep the transformed-input
  *   and product buffers under the engine's workspace limit (or, as a separate config, inside the
  *   last-level cache of an RDNA device);
  * - fused VALU: one persistent kernel, all architectures (NCHW);
- * - fused WMMA: one persistent kernel on gfx11 / gfx12, fp16 and bf16 (NCHW);
- * - fused WMMA with register-built operands (gfx11 / gfx12, fp16 and bf16, NCHW): each wave owns
- *   one transform row and builds its B fragments from the loaded input rows in registers;
+ * - fused WMMA: one persistent kernel on gfx11 / gfx1200-1201 (fp16/bf16) or native gfx1250
+ *   (K32 fp16/bf16, exact K4 fp32), NCHW;
+ * - fused WMMA with register-built operands (gfx11 / gfx1200-1201 / gfx1250, fp16 and bf16,
+ *   NCHW): each wave owns one transform row and builds its B fragments in registers;
  * - fused VALU with register operands (wave64 gfx9, fp32 and fp16, NCHW): lane = tile, the
  *   transformed filter is a wave-uniform operand through the scalar cache.
+ * - fused cooperative WMMA/MFMA: one input transform per block chunk, shared across K waves;
  * The register variants' fp16 configs with f16math do the input transform in packed fp16 (two
  * roundings, as MIOpen's asm kernels do); the others transform in fp32 and round once.
  * Operands in a layout the variant does not read are staged through the workspace. All
@@ -396,9 +398,33 @@ std::optional<WinogradProblem> parseWinogradProblem(const MatchContext& context,
         }
     }
 
-    const Layout x = layoutOf(a.xStrides, {a.n, a.c, 1, a.inSpatial[1], a.inSpatial[2]});
-    const Layout y = layoutOf(a.yStrides, {a.n, a.k, 1, a.outSpatial[1], a.outSpatial[2]});
-    problem.activations = x == y ? x : Layout::OTHER;
+    const std::array<long long, CONV_NAIVE_TENSOR_DIMS> xExtents
+        = {a.n, a.c, 1, a.inSpatial[1], a.inSpatial[2]};
+    const std::array<long long, CONV_NAIVE_TENSOR_DIMS> yExtents
+        = {a.n, a.k, 1, a.outSpatial[1], a.outSpatial[2]};
+    if(hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName) == "gfx1250")
+    {
+        // Extent-one axes can match either order: classify the native pair jointly.
+        if(packedIn(a.xStrides, xExtents, NCHW_ORDER) && packedIn(a.yStrides, yExtents, NCHW_ORDER))
+        {
+            problem.activations = Layout::NCHW;
+        }
+        else if(packedIn(a.xStrides, xExtents, NHWC_ORDER)
+                && packedIn(a.yStrides, yExtents, NHWC_ORDER))
+        {
+            problem.activations = Layout::NHWC;
+        }
+        else
+        {
+            problem.activations = Layout::OTHER;
+        }
+    }
+    else
+    {
+        const Layout x = layoutOf(a.xStrides, xExtents);
+        const Layout y = layoutOf(a.yStrides, yExtents);
+        problem.activations = x == y ? x : Layout::OTHER;
+    }
     // Filter (k, c/g, r, s): KCRS packed is the channels-first order, KRSC the channels-last.
     problem.filter = layoutOf(a.wStrides, {a.k, a.c / a.groups, 1, 3, 3});
     problem.base = *base;
@@ -455,6 +481,13 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             return value < 0 || value > 4096 ? -1 : static_cast<int>(value);
         };
         config.m = intField("m");
+        config.atom = intField("atom");
+        // Strings are readable labels; these integer knobs identify every compiled contract.
+        if(intField("variant_id") != static_cast<int>(config.variant)
+           || intField("layout_id") != (config.layout == Layout::NCHW ? 0 : 1))
+        {
+            return std::nullopt;
+        }
         config.gemmBm = intField("gemm_bm");
         config.gemmBn = intField("gemm_bn");
         config.gemmBk = intField("gemm_bk");
@@ -489,6 +522,62 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
            || (config.variant != Variant::COOP && config.variant != Variant::FUSED
                && config.pf != 0)
            || (config.variant != Variant::COOP && config.sb != 0))
+        {
+            return std::nullopt;
+        }
+        const bool matrix = config.variant == Variant::WMMA || config.variant == Variant::WREG
+                            || config.variant == Variant::COOP;
+        const bool nativeMultipass
+            = config.variant == Variant::MULTIPASS && config.arch == "gfx1250";
+        const int expectedAtom = [&]() {
+            if(config.variant == Variant::WRW)
+            {
+                if(config.arch == "any")
+                {
+                    return 0;
+                }
+                if(config.arch == "gfx11")
+                {
+                    return 1;
+                }
+                if(config.arch == "gfx12")
+                {
+                    return 2;
+                }
+                if(config.arch == "gfx9")
+                {
+                    return 3;
+                }
+                return config.arch == "gfx950" ? 6 : -1;
+            }
+            if(nativeMultipass)
+            {
+                return 5;
+            }
+            if(!matrix)
+            {
+                return 0;
+            }
+            if(config.arch == "gfx11")
+            {
+                return 1;
+            }
+            if(config.arch == "gfx12")
+            {
+                return 2;
+            }
+            if(isCdna(config))
+            {
+                return 3;
+            }
+            if(config.arch == "gfx1250")
+            {
+                return config.atom == 5 ? 5 : 4;
+            }
+            return -1;
+        }();
+        if(config.atom != expectedAtom
+           || (config.atom == 5 && config.variant != Variant::WMMA && !nativeMultipass))
         {
             return std::nullopt;
         }
@@ -537,12 +626,23 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             break;
         }
         case Variant::MULTIPASS:
-            // The GEMM's 16 x 16 threads own runs of 4 rows and columns; its tile loads split
-            // evenly over 256 threads.
+            // Both GEMMs split tile loads evenly over 256 threads. Native FP32 WMMA
+            // uses 64-row / 32-column blocks and exact K4 instructions.
             if((config.m < 2 || config.m > 4) || config.gemmBm < 64 || config.gemmBm % 64 != 0
-               || config.gemmBn < 64 || config.gemmBn % 64 != 0 || config.gemmBk < 1
+               || config.gemmBn < (nativeMultipass ? 32 : 64)
+               || config.gemmBn % (nativeMultipass ? 32 : 64) != 0 || config.gemmBk < 1
+               || (nativeMultipass && config.gemmBk % 4 != 0)
                || (config.gemmBm * config.gemmBk) % 256 != 0
-               || (config.gemmBn * config.gemmBk) % 256 != 0 || config.arch != "any")
+               || (config.gemmBn * config.gemmBk) % 256 != 0
+               || (!nativeMultipass && config.arch != "any"))
+            {
+                return std::nullopt;
+            }
+            if(nativeMultipass
+               && (static_cast<long long>(config.gemmBm) * (config.gemmBk + 4)
+                   + static_cast<long long>(config.gemmBk) * (config.gemmBn + 4))
+                          * 4
+                      > 65536)
             {
                 return std::nullopt;
             }
@@ -568,7 +668,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         }
         case Variant::WMMA:
             if(config.m != 2 || config.layout != Layout::NCHW || config.llcPlan
-               || (config.arch != "gfx11" && config.arch != "gfx12")
+               || (config.arch != "gfx11" && config.arch != "gfx12" && config.arch != "gfx1250")
                || (config.bk != 32 && config.bk != 64) || (config.waves != 4 && config.waves != 8))
             {
                 return std::nullopt;
@@ -588,7 +688,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
                 perRow = 2;
             }
             if(config.m != 2 || config.layout != Layout::NCHW || config.llcPlan
-               || (config.arch != "gfx11" && config.arch != "gfx12")
+               || (config.arch != "gfx11" && config.arch != "gfx12" && config.arch != "gfx1250")
                || (config.bk != 32 && config.bk != 64) || perRow == 0
                || (config.bt != 16 && config.bt != 32 && config.bt != 64)
                || config.waves != 4 * perRow * (config.bt / 16)
@@ -627,12 +727,14 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             // F(2,3), or F(3,2) for stride 2 by phases. The single input buffer (sb) is CDNA's.
             const bool cdna = isCdna(config);
             if((config.m != 2 && config.m != 3) || config.layout != Layout::NCHW || config.llcPlan
-               || (config.arch != "gfx11" && config.arch != "gfx12" && !cdna)
+               || (config.arch != "gfx11" && config.arch != "gfx12" && config.arch != "gfx1250"
+                   && !cdna)
                || (config.waves != 4 && config.waves != 8 && config.waves != 16
                    && (config.waves != 32 || cdna))
                || (config.bt != 16 && config.bt != 32 && config.bt != 64)
                || (mt != 1 && mt != 2 && mt != 4) || (!cdna && mt * (config.bt / 16) > 4)
-               || (config.sb != 0 && !cdna))
+               || (config.sb != 0 && !cdna)
+               || (config.atom == 4 && (config.bt > 32 || config.m != 2 || config.pf != 0)))
             {
                 return std::nullopt;
             }
@@ -661,6 +763,16 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
 bool configRunsOn(const Config& config, std::string_view gcnArchName)
 {
     const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
+    const auto legacyMatrixRunsOn = [&] {
+        if(config.arch == "gfx11")
+        {
+            return arch == "gfx1100" || arch == "gfx1101" || arch == "gfx1102" || arch == "gfx1103"
+                   || arch == "gfx1150" || arch == "gfx1151" || arch == "gfx1152"
+                   || arch == "gfx1153" || arch == "gfx11-generic";
+        }
+        return config.arch == "gfx12"
+               && (arch == "gfx1200" || arch == "gfx1201" || arch == "gfx12-generic");
+    };
     switch(config.variant)
     {
     case Variant::WRW:
@@ -675,9 +787,11 @@ bool configRunsOn(const Config& config, std::string_view gcnArchName)
         }
         if(config.arch == "gfx11" || config.arch == "gfx12")
         {
-            return arch.size() > 5 && arch.substr(0, 5) == config.arch;
+            return legacyMatrixRunsOn();
         }
         return true;
+    case Variant::MULTIPASS:
+        return config.atom == 5 ? arch == "gfx1250" : true;
     case Variant::COOP:
         // Per-chip configs, tuned for their LDS, register files and clocks.
         if(config.arch == "gfx942")
@@ -694,12 +808,20 @@ bool configRunsOn(const Config& config, std::string_view gcnArchName)
             return arch == "gfx908" || arch == "gfx90a" || arch == "gfx940" || arch == "gfx941"
                    || arch == "gfx942" || arch == "gfx950";
         }
-        return arch.size() > 5 && arch.substr(0, 5) == config.arch;
+        if(config.arch == "gfx1250")
+        {
+            return arch == "gfx1250";
+        }
+        return legacyMatrixRunsOn();
     case Variant::FUSED:
         return config.arch == "any" || (arch.size() > 5 && arch.substr(0, 5) == config.arch);
     case Variant::WMMA:
     case Variant::WREG:
-        return arch.size() > 5 && arch.substr(0, 5) == config.arch;
+        if(config.arch == "gfx1250")
+        {
+            return arch == "gfx1250";
+        }
+        return legacyMatrixRunsOn();
     case Variant::SREG:
         // Wave64 with v_dot2_f32_f16: gfx906 and later gfx9.
         return arch.size() > 4 && arch.substr(0, 4) == "gfx9" && arch != "gfx900"
@@ -1003,6 +1125,15 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     }
 
     long long uBytes = 0;
+    long long matrixChunk = 16;
+    if(config.atom == 4)
+    {
+        matrixChunk = 32;
+    }
+    else if(config.atom == 5)
+    {
+        matrixChunk = 4;
+    }
     switch(config.variant)
     {
     case Variant::MULTIPASS:
@@ -1016,11 +1147,11 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     }
     case Variant::WMMA:
     case Variant::WREG:
-        uBytes = groups * 16 * cgo * divUp(cgi, 16) * 16 * eb;
+        uBytes = groups * 16 * cgo * divUp(cgi, matrixChunk) * matrixChunk * eb;
         break;
     case Variant::COOP:
         // Fragment-major units of 16 out channels (k5CoopFilterTransform).
-        uBytes = groups * 16 * divUp(cgo, 16) * 16 * divUp(cgi, 16) * 16 * eb;
+        uBytes = groups * 16 * divUp(cgo, 16) * 16 * divUp(cgi, matrixChunk) * matrixChunk * eb;
         break;
     case Variant::SREG:
     {
@@ -1146,7 +1277,10 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     {
         plan.mainThreads = static_cast<unsigned int>(32 * config.waves);
         const long long items = groups * divUp(cgo, config.bk) * divUp(tiles, 32);
-        if(!grid(plan.filterBlocks, divUp(groups * cgo * divUp(cgi, 16) * 16, 256), 1, 1))
+        if(!grid(plan.filterBlocks,
+                 divUp(groups * cgo * divUp(cgi, matrixChunk) * matrixChunk, 256),
+                 1,
+                 1))
         {
             return std::nullopt;
         }
@@ -1158,7 +1292,10 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     {
         plan.mainThreads = static_cast<unsigned int>(32 * config.waves);
         const long long items = groups * divUp(cgo, config.bk) * divUp(tiles, config.bt);
-        if(!grid(plan.filterBlocks, divUp(groups * cgo * divUp(cgi, 16) * 16, 256), 1, 1))
+        if(!grid(plan.filterBlocks,
+                 divUp(groups * cgo * divUp(cgi, matrixChunk) * matrixChunk, 256),
+                 1,
+                 1))
         {
             return std::nullopt;
         }
@@ -1180,7 +1317,10 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
         // and up: large C x K; re-reading it per tile block dominates), else K blocks fastest.
         // CDNA's caches hold it either way (measured neutral to 7% slower): K blocks fastest.
         plan.args.order = !isCdna(config) && uBytes / groups >= (4LL << 20) ? 1 : 0;
-        if(!grid(plan.filterBlocks, divUp(groups * cgo * divUp(cgi, 16) * 16, 256), 1, 1))
+        if(!grid(plan.filterBlocks,
+                 divUp(groups * cgo * divUp(cgi, matrixChunk) * matrixChunk, 256),
+                 1,
+                 1))
         {
             return std::nullopt;
         }
@@ -1365,9 +1505,8 @@ struct Resolved
 
 /// The problem, config and plan of @p kernel on @p context, or nullopt where it does not apply:
 /// its direction and dtype are the graph's, its instructions exist on the device (WMMA
-/// family, wave64 gfx9), F(4,3) only for fp32, WMMA
-/// only for fp16 / bf16, the register VALU
-/// variant not for bf16, packed-fp16 transform math only for fp16, and it has a plan.
+/// family, wave64 gfx9), F(4,3) only for fp32, native gfx1250 WMMA K4 for exact fp32, other
+/// matrix atoms for fp16 / bf16, register VALU not for bf16, packed-fp16 math only for fp16.
 std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinition& kernel)
 {
     const auto direction = directionFor(kernel);
@@ -1433,8 +1572,9 @@ std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinit
     const bool noBf16Mfma
         = config->variant == Variant::COOP && isCdna(*config) && bf16
           && hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName) == "gfx908";
-    if((config->m == 4 && !fp32) || (wmmaFamily && fp32)
-       || (config->variant == Variant::SREG && bf16) || !f16MathOk || noBf16Mfma)
+    const bool matrixTypeOk = config->atom == 5 ? fp32 : !wmmaFamily || !fp32;
+    if((config->m == 4 && !fp32) || !matrixTypeOk || (config->variant == Variant::SREG && bf16)
+       || !f16MathOk || noBf16Mfma)
     {
         return std::nullopt;
     }
@@ -1589,6 +1729,7 @@ public:
         options.add("CONV_WINO_GEMM_BM", std::to_string(config.gemmBm));
         options.add("CONV_WINO_GEMM_BN", std::to_string(config.gemmBn));
         options.add("CONV_WINO_GEMM_BK", std::to_string(config.gemmBk));
+        options.add("CONV_WINO_GEMM_WMMA", std::string(multipass && config.atom == 5 ? "1" : "0"));
         options.add("CONV_WINO_BK", std::to_string(config.bk));
         options.add("CONV_WINO_BT", std::to_string(config.bt));
         options.add("CONV_WINO_CCV", std::to_string(config.ccv));
@@ -1596,6 +1737,7 @@ public:
         options.add("CONV_WINO_TN", std::to_string(config.tn));
         options.add("CONV_WINO_WAVES", std::to_string(config.waves));
         options.add("CONV_WINO_GFX12", std::string(config.arch == "gfx12" ? "1" : "0"));
+        options.add("CONV_WINO_GFX1250", std::string(config.arch == "gfx1250" ? "1" : "0"));
         options.add("CONV_WINO_TG", std::to_string(std::max(1, config.bt / 16)));
         options.add("CONV_WINO_BINS", std::to_string(config.bins));
         options.add("CONV_WINO_F16MATH", std::string(config.f16Math ? "1" : "0"));

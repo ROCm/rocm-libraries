@@ -1,0 +1,6 @@
+outs:
+- md5: 13d564749641e6f82eb251a59722fa55
+  size: 40922
+  hash: md5
+  path: conv_wrw_f16_taptiled1250.kdp.json
+  remote: ingestor

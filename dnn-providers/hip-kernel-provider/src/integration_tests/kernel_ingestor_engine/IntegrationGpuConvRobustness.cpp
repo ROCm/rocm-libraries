@@ -8,6 +8,7 @@
 #include <cstring>
 #include <memory>
 #include <ostream>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -23,6 +24,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_frontend/detail/EngineQueries.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
@@ -110,7 +112,13 @@ std::shared_ptr<TensorAttributes> tensor(int64_t uid,
     return attributes;
 }
 
-std::shared_ptr<Graph> buildGraph(const ConvSpec& spec)
+class InspectableConvGraph : public Graph
+{
+public:
+    using Graph::get_raw_graph_descriptor;
+};
+
+std::shared_ptr<InspectableConvGraph> buildGraph(const ConvSpec& spec)
 {
     const std::vector<int64_t> x = {spec.n, spec.c, spec.h, spec.w};
     const std::vector<int64_t> w = {spec.k, spec.c / spec.groups, spec.r, spec.s};
@@ -119,7 +127,7 @@ std::shared_ptr<Graph> buildGraph(const ConvSpec& spec)
     const std::vector<int64_t> stride = {spec.stride, spec.stride};
     const std::vector<int64_t> dilation = {1, 1};
 
-    auto graph = std::make_shared<Graph>();
+    auto graph = std::make_shared<InspectableConvGraph>();
     graph->set_name("conv_robustness")
         .set_io_data_type(spec.dataType)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -412,6 +420,57 @@ protected:
         verifyBuiltGraph(context, 0);
     }
 };
+
+TEST_F(IntegrationGpuConvRobustness, SingletonSpatialLayoutsHaveDistinctCandidates)
+{
+    if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
+    {
+        GTEST_SKIP() << "no production descriptor catalogs are installed";
+    }
+    const auto properties = hip_kernel_provider_common::getDeviceProperties(_stream);
+    const std::string arch(hipdnn_plugin_sdk::stripArchFeatures(properties.gcnArchName));
+    for(const auto* name : {"hipkernel:CONV_GROUP_VALU_BWD", "hipkernel:CONV_GROUP_VALU_WRW"})
+    {
+        std::set<std::string> availableLayouts;
+        detail::forEachServedKernel({name, arch.c_str()}, [&](const auto& kernel) {
+            const auto layout = kernel.metadata.find("layout");
+            if(layout != kernel.metadata.end())
+            {
+                if(const auto* value = std::get_if<std::string>(&layout->second))
+                {
+                    availableLayouts.insert(*value);
+                }
+            }
+        });
+        if(availableLayouts != std::set<std::string>{"nchw", "nhwc"})
+        {
+            GTEST_SKIP() << name << " does not ship both layouts for " << arch;
+        }
+    }
+    for(const auto direction : {Direction::BWD, Direction::WRW})
+    {
+        ConvSpec value;
+        value.direction = direction;
+        value.n = 4;
+        value.c = direction == Direction::BWD ? 256 : 8;
+        value.k = 8;
+        value.h = value.w = 1;
+        auto graph = buildGraph(value);
+        ASSERT_FALSE(graph->build_operation_graph(_handle).is_bad());
+        const auto name = direction == Direction::BWD ? "hipkernel:CONV_GROUP_VALU_BWD"
+                                                      : "hipkernel:CONV_GROUP_VALU_WRW";
+        EngineCandidatePage page;
+        const auto result = hipdnn_frontend::detail::getEngineCandidates(
+            graph->get_raw_graph_descriptor(), engineId(name), page);
+        ASSERT_FALSE(result.is_bad()) << result.err_msg;
+        std::set<std::string> layouts;
+        for(const auto& candidate : page.candidates)
+        {
+            layouts.insert(candidate.kernelFeatures.at("kernel.layout").get<std::string>());
+        }
+        EXPECT_EQ(layouts, (std::set<std::string>{"nchw", "nhwc"}));
+    }
+}
 
 // A compile that fails costs its engine only: with the naive engine preferred and its program
 // failing to compile, the graph is served by another engine, and one warning names the program.

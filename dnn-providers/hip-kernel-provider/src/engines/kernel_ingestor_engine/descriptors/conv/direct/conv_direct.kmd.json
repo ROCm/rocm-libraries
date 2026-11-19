@@ -142,6 +142,18 @@
     {
       "name": "xpf",
       "type": "int"
+    },
+    {
+      "name": "dil",
+      "type": "int"
+    },
+    {
+      "name": "line",
+      "type": "int"
+    },
+    {
+      "name": "bpu",
+      "type": "int"
     }
   ]
 }

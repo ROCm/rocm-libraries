@@ -6,12 +6,14 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -22,6 +24,7 @@
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <nlohmann/json.hpp>
 
@@ -102,24 +105,24 @@ std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog(ConvDirection
                             / HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR);
         }
         std::array<std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>, 2> catalogs;
-        // Each direction's exact engine's catalog, then its TF32 engine's (CONV_IGEMM_*_TF32).
-        for(size_t index = 0; index < 2 * catalogs.size(); ++index)
+        // Each direction's exact, TF32 and architecture-qualified catalogs.
+        for(size_t i = 0; i < catalogs.size(); ++i)
         {
-            const size_t i = index / 2;
-            const std::string file = std::string(i == 0 ? "conv_igemm_fwd" : "conv_igemm_bwd")
-                                     + (index % 2 == 0 ? "" : "_tf32") + ".kdp.json";
-            std::filesystem::path found;
+            const std::string prefix = i == 0 ? "conv_igemm_fwd" : "conv_igemm_bwd";
+            const std::string suffix = ".kdp.json";
+            std::vector<std::filesystem::path> found;
             for(const auto& root : roots)
             {
                 std::error_code error;
                 for(auto it = std::filesystem::recursive_directory_iterator(root, error);
-                    !error && found.empty()
-                    && it != std::filesystem::recursive_directory_iterator();
+                    !error && it != std::filesystem::recursive_directory_iterator();
                     it.increment(error))
                 {
-                    if(it->path().filename() == file)
+                    const auto file = it->path().filename().string();
+                    if(file.rfind(prefix, 0) == 0 && file.size() >= suffix.size()
+                       && file.compare(file.size() - suffix.size(), suffix.size(), suffix) == 0)
                     {
-                        found = it->path();
+                        found.push_back(it->path());
                     }
                 }
                 if(!found.empty())
@@ -129,33 +132,11 @@ std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog(ConvDirection
             }
             if(found.empty())
             {
-                throw std::runtime_error("no " + file + " beside the provider or this test binary");
+                throw std::runtime_error("no " + prefix
+                                         + "*.kdp.json beside the provider or this test binary");
             }
-            std::ifstream stream(found);
-            const auto pack = nlohmann::json::parse(stream);
-            for(const auto& descriptor : pack.at("kernelDescriptors"))
-            {
-                hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
-                kernel.name = descriptor.at("name").get<std::string>();
-                kernel.source.kind = hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE;
-                kernel.source.sourceFile
-                    = descriptor.at("kernel_source").at("source_file").get<std::string>();
-                kernel.source.entryPoint
-                    = descriptor.at("kernel_source").at("entry_point").get<std::string>();
-                for(const auto& [key, value] : descriptor.at("metadata").items())
-                {
-                    if(value.is_string())
-                    {
-                        kernel.metadata[key] = value.get<std::string>();
-                    }
-                    else
-                    {
-                        kernel.metadata[key] = value.get<int64_t>();
-                    }
-                }
-                kernel.priority = descriptor.at("priority").get<int64_t>();
-                catalogs[i].push_back(std::move(kernel));
-            }
+            std::sort(found.begin(), found.end());
+            catalogs[i] = readDistinctEmbeddedKernelCatalog(found);
         }
         return catalogs;
     }();
@@ -442,7 +423,10 @@ void runCase(ConvShape shape,
              ConvDirection direction,
              Math math = Math::NATIVE,
              bool infinities = false,
-             Configs configs = Configs::ANY)
+             Configs configs = Configs::ANY,
+             unsigned int seed = 1234,
+             bool noSplitOnly = false,
+             bool channelsFirstInputOnly = false)
 {
     shape.dataType = dataTypeOf<T>();
     const auto spec = specFor(shape, direction);
@@ -454,10 +438,9 @@ void runCase(ConvShape shape,
     Tensor<T> x(spec.x.dims, spec.x.strides);
     Tensor<T> w(spec.w.dims, spec.w.strides);
     Tensor<T> y(spec.y.dims, spec.y.strides);
-    constexpr unsigned int SEED = 1234;
     const bool forward = direction == ConvDirection::FORWARD;
-    (forward ? x : y).fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
-    w.fillTensorWithRandomValues(-1.0f, 1.0f, SEED + 1);
+    (forward ? x : y).fillTensorWithRandomValues(-1.0f, 1.0f, seed);
+    w.fillTensorWithRandomValues(-1.0f, 1.0f, seed + 1);
     if(infinities)
     {
         plantInfinities(forward ? x : y);
@@ -504,6 +487,14 @@ void runCase(ConvShape shape,
     {
         const bool xf32 = kernel.getStringMetadata("atom").find("xf32") != std::string::npos;
         const bool split = kernel.getStringMetadata("math") == "bf16x3";
+        if(noSplitOnly && kernel.getIntMetadata("split_policy") != 1)
+        {
+            continue;
+        }
+        if(channelsFirstInputOnly && kernel.getIntMetadata("cf") != 2)
+        {
+            continue;
+        }
         if(!matchesKernel(pack, fixture.context(), kernel, *bound)
            || (xf32 || split) != (math == Math::TF32))
         {
@@ -741,6 +732,56 @@ INSTANTIATE_TEST_SUITE_P(,
                                                                                          : "Bwd");
                          });
 
+TEST(TestGpuConvIgemmNoSplit, IndependentlySeededBackwardDataTails)
+{
+    SKIP_IF_NO_DEVICES();
+    if(hipdnn_plugin_sdk::stripArchFeatures(currentDeviceProperties().gcnArchName) != "gfx1250")
+    {
+        GTEST_SKIP() << "native no-split candidate requires gfx1250";
+    }
+    for(const int k : {40, 264})
+    {
+        auto shape = dense(40, k, {7, 9}, {3, 3}, {1, 1}, false);
+        shape.n = 1;
+        for(const unsigned int seed : {7919u, 104729u})
+        {
+            runCase<Half>(
+                shape, ConvDirection::BACKWARD_DATA, Math::NATIVE, false, Configs::ANY, seed, true);
+        }
+    }
+}
+
+TEST(TestGpuConvIgemmChannelsFirstInput, PointwiseSpatialChannelAndSplitTails)
+{
+    SKIP_IF_NO_DEVICES();
+    if(hipdnn_plugin_sdk::stripArchFeatures(currentDeviceProperties().gcnArchName) != "gfx1250")
+    {
+        GTEST_SKIP() << "native channels-first input candidate requires gfx1250";
+    }
+    for(const int64_t c : {40, 520})
+    {
+        for(const auto& input : {std::vector<int64_t>{40}, {5, 8}, {2, 5, 4}})
+        {
+            auto shape = dense(c,
+                               49,
+                               input,
+                               std::vector<int64_t>(input.size(), 1),
+                               std::vector<int64_t>(input.size(), 0),
+                               false);
+            shape.n = 1;
+            shape.mode = ConvMode::CONVOLUTION;
+            runCase<Half>(shape,
+                          ConvDirection::FORWARD,
+                          Math::NATIVE,
+                          false,
+                          Configs::ANY,
+                          7919u,
+                          false,
+                          true);
+        }
+    }
+}
+
 class TestGpuConvIgemm : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
 {
 };
@@ -780,8 +821,11 @@ bool hasTf32Forms()
 {
     const auto properties = currentDeviceProperties();
     const std::string arch(hipdnn_plugin_sdk::stripArchFeatures(properties.gcnArchName));
-    return arch == "gfx908" || arch == "gfx90a" || arch == "gfx942" || arch == "gfx950"
-           || arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0;
+    return conv_igemm::atomRunsOn("mfma16_bf16_908", arch)
+           || conv_igemm::atomRunsOn("mfma16_bf16", arch)
+           || conv_igemm::atomRunsOn("wmma11_bf16", arch)
+           || conv_igemm::atomRunsOn("wmma12_bf16", arch)
+           || conv_igemm::atomRunsOn("wmma125_bf16", arch);
 }
 
 std::vector<DeviceCase> tf32Cases()
@@ -871,6 +915,124 @@ INSTANTIATE_TEST_SUITE_P(,
 conv_igemm::IgemmProblem haloProblem(
     ConvDirection direction, int c, int h, int filter, int pad, int stride, int dilation);
 
+class TestConvIgemmCatalogReader : public ::testing::Test
+{
+protected:
+    hipdnn_test_sdk::utilities::ScopedDirectory _directory
+        = hipdnn_test_sdk::utilities::claimScratchDirectory("igemm-catalog");
+
+    static nlohmann::json record(const std::string& id)
+    {
+        return {{"version", "1.0"},
+                {"id", id},
+                {"name", "catalog-contract"},
+                {"kernel_source",
+                 {{"kind", "embedded_source"},
+                  {"source_file", "kernels/ConvIgemm.cpp"},
+                  {"entry_point", "ConvIgemm"}}},
+                {"metadata", {{"dtype", "HALF"}, {"vec", 8}}},
+                {"priority", 1000},
+                {"arch", {"gfx942"}}};
+    }
+
+    std::filesystem::path shard(const std::string& name, const nlohmann::json& records) const
+    {
+        const auto path = _directory.path() / (name + ".kdp.json");
+        std::ofstream stream;
+        stream.exceptions(std::ios::failbit | std::ios::badbit);
+        stream.open(path);
+        stream << nlohmann::json{{"kernelDescriptors", records}};
+        return path;
+    }
+};
+
+TEST_F(TestConvIgemmCatalogReader, SameIdShardsRetainEveryDistinctKernelAndArch)
+{
+    const std::string firstId = "00000000-0000-0000-0000-000000000001";
+    const std::string secondId = "00000000-0000-0000-0000-000000000002";
+    const std::string thirdId = "00000000-0000-0000-0000-000000000003";
+    auto first = record(firstId);
+    auto second = record(secondId);
+    second["name"] = "distinct-id-same-metadata";
+    auto third = record(thirdId);
+    third["metadata"]["vec"] = 1;
+    const auto a = shard("gfx942", nlohmann::json::array({first, second}));
+    first["arch"] = {"gfx950"};
+    const auto b = shard("gfx950", nlohmann::json::array({first, third}));
+
+    const auto kernels = readDistinctEmbeddedKernelCatalog({a, b});
+    ASSERT_EQ(kernels.size(), 3u);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::toString(kernels[0].kernelId), firstId);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::toString(kernels[1].kernelId), secondId);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::toString(kernels[2].kernelId), thirdId);
+    EXPECT_EQ(kernels[0].arch, (std::vector<std::string>{"gfx942", "gfx950"}));
+    EXPECT_EQ(kernels[1].getIntMetadata("vec"), 8);
+    EXPECT_EQ(kernels[2].getIntMetadata("vec"), 1);
+}
+
+TEST_F(TestConvIgemmCatalogReader, AnUnqualifiedCopyRemainsUnrestricted)
+{
+    auto kernel = record("00000000-0000-0000-0000-000000000001");
+    const auto a = shard("gfx942", nlohmann::json::array({kernel}));
+    kernel.erase("arch");
+    const auto b = shard("unqualified", nlohmann::json::array({kernel}));
+    kernel["arch"] = {"gfx950"};
+    const auto c = shard("gfx950", nlohmann::json::array({kernel}));
+    const auto kernels = readDistinctEmbeddedKernelCatalog({a, b, c});
+    ASSERT_EQ(kernels.size(), 1u);
+    EXPECT_TRUE(kernels[0].arch.empty());
+}
+
+TEST_F(TestConvIgemmCatalogReader, ConflictingCopiesFailInsteadOfChoosingTheFirst)
+{
+    const auto original = record("00000000-0000-0000-0000-000000000001");
+    const auto a = shard("first", nlohmann::json::array({original}));
+    for(const char* field : {"name", "kernel_source", "metadata", "priority"})
+    {
+        SCOPED_TRACE(field);
+        auto changed = original;
+        if(std::string_view(field) == "name")
+        {
+            changed["name"] = "conflicting-name";
+        }
+        else if(std::string_view(field) == "kernel_source")
+        {
+            changed["kernel_source"]["entry_point"] = "ConflictingKernel";
+        }
+        else if(std::string_view(field) == "metadata")
+        {
+            changed["metadata"]["vec"] = 4;
+        }
+        else
+        {
+            changed["priority"] = 999;
+        }
+        const auto b = shard("conflicting", nlohmann::json::array({changed}));
+        EXPECT_THROW(readDistinctEmbeddedKernelCatalog({a, b}), std::runtime_error);
+    }
+}
+
+TEST_F(TestConvIgemmCatalogReader, MalformedCopiesAreValidatedBeforeDeduplication)
+{
+    const auto original = record("00000000-0000-0000-0000-000000000001");
+    const auto a = shard("first", nlohmann::json::array({original}));
+    for(const char* field : {"id", "kernel_source", "metadata", "priority", "arch"})
+    {
+        SCOPED_TRACE(field);
+        auto malformed = original;
+        malformed[field] = nullptr;
+        const auto b = shard("malformed", nlohmann::json::array({malformed}));
+        EXPECT_THROW(readDistinctEmbeddedKernelCatalog({a, b}), std::exception);
+    }
+    for(const auto& value : {nlohmann::json(true), nlohmann::json(8.5)})
+    {
+        auto malformed = original;
+        malformed["metadata"]["vec"] = value;
+        const auto b = shard("malformed-knob", nlohmann::json::array({malformed}));
+        EXPECT_THROW(readDistinctEmbeddedKernelCatalog({a, b}), std::runtime_error);
+    }
+}
+
 TEST(TestConvIgemmCatalog, EveryAtomIsKnownAndRunsSomewhere)
 {
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
@@ -880,8 +1042,8 @@ TEST(TestConvIgemmCatalog, EveryAtomIsKnownAndRunsSomewhere)
             const auto& atom = kernel.getStringMetadata("atom");
             SCOPED_TRACE(kernel.name);
             ASSERT_TRUE(conv_igemm::atomNamed(atom).has_value());
-            static constexpr std::array<const char*, 7> ARCHS{
-                "gfx908", "gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1151", "gfx1201"};
+            static constexpr std::array<const char*, 8> ARCHS{
+                "gfx908", "gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1151", "gfx1201", "gfx1250"};
             const bool somewhere = std::any_of(ARCHS.begin(), ARCHS.end(), [&](const char* arch) {
                 return conv_igemm::atomRunsOn(atom, arch);
             });
@@ -901,6 +1063,13 @@ TEST(TestConvIgemmCatalog, AtomsRunOnlyWhereTheirInstructionsExist)
     EXPECT_TRUE(conv_igemm::atomRunsOn("wmma11_f16", "gfx1151"));
     EXPECT_FALSE(conv_igemm::atomRunsOn("wmma11_f16", "gfx1201"));
     EXPECT_TRUE(conv_igemm::atomRunsOn("wmma12_bf16", "gfx1201"));
+    EXPECT_FALSE(conv_igemm::atomRunsOn("wmma12_bf16", "gfx1250"));
+    for(const auto* atom : {"wmma125_f16", "wmma125_bf16", "wmma125_f32"})
+    {
+        EXPECT_TRUE(conv_igemm::atomRunsOn(atom, "gfx1250:xnack-"));
+        EXPECT_FALSE(conv_igemm::atomRunsOn(atom, "gfx1201"));
+        EXPECT_FALSE(conv_igemm::atomRunsOn(atom, "gfx942"));
+    }
     EXPECT_TRUE(conv_igemm::atomRunsOn("fma", "gfx906"));
     EXPECT_FALSE(conv_igemm::atomRunsOn("no_such_atom", "gfx942"));
 }
@@ -909,9 +1078,10 @@ TEST(TestConvIgemmCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its knob tuple: within one direction and
     // dtype (what one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 21> KNOBS{
-        "atom", "math",    "bm",   "bn", "bk",  "wm",  "wn",   "threads", "vec",   "stages", "xcd",
-        "halo", "wdirect", "pack", "cf", "swz", "dma", "fuse", "large",   "patch", "cfx"};
+    static constexpr std::array<const char*, 22> KNOBS{
+        "atom", "math",   "bm",    "bn",    "bk",           "wm",   "wn", "threads",
+        "vec",  "stages", "xcd",   "halo",  "wdirect",      "pack", "cf", "swz",
+        "dma",  "fuse",   "large", "patch", "split_policy", "cfx"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         std::vector<std::string> tuples;
@@ -930,29 +1100,6 @@ TEST(TestConvIgemmCatalog, KnobsTellApartEveryConfigOfAGraph)
             tuples.push_back(tuple);
         }
     }
-}
-
-TEST(TestConvIgemmCatalog, HaloConfigsAreSingleStageMatrixCoreAndNoTwoStageTilesShip)
-{
-    int halos = 0;
-    int xcds = 0;
-    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
-    {
-        for(const auto& kernel : catalog(direction))
-        {
-            SCOPED_TRACE(kernel.name);
-            // Every catalog arch has 64 KB of LDS a workgroup, where the second buffer loses.
-            EXPECT_EQ(kernel.getIntMetadata("stages"), 1);
-            if(kernel.getIntMetadata("halo") != 0)
-            {
-                ++halos;
-                EXPECT_NE(kernel.getStringMetadata("atom"), "fma");
-            }
-            xcds += kernel.getIntMetadata("xcd") != 0 ? 1 : 0;
-        }
-    }
-    EXPECT_GT(halos, 0);
-    EXPECT_GT(xcds, 0);
 }
 
 TEST(TestConvIgemmCatalog, DirectFilterConfigsAreBackwardDataOnlyAndPackingIsNotHalo)
@@ -1023,8 +1170,10 @@ TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOu
         for(const auto& kernel : kernels)
         {
             SCOPED_TRACE(kernel.name);
-            // Channels-first-input configs are twins of channels-first-output ones (their own test).
-            if(kernel.getIntMetadata("cfx") != 0)
+            // Channels-first-input configs are twins of channels-first-output ones (their own test);
+            // the no-split and channels-first-input-and-output candidates are single configs.
+            if(kernel.getIntMetadata("cfx") != 0 || kernel.getIntMetadata("split_policy") != 0
+               || kernel.getIntMetadata("cf") == 2)
             {
                 continue;
             }
@@ -1042,8 +1191,8 @@ TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOu
             }
             const auto tuple = tupleOf(kernel);
             const auto twin = std::count_if(kernels.begin(), kernels.end(), [&](const auto& other) {
-                return other.getIntMetadata("cf") != 0 && other.getIntMetadata("cfx") == 0
-                       && tupleOf(other) == tuple;
+                return other.getIntMetadata("cf") == 1 && other.getIntMetadata("cfx") == 0
+                       && other.getIntMetadata("split_policy") == 0 && tupleOf(other) == tuple;
             });
             EXPECT_EQ(twin, eligible ? 1 : 0);
             twins += static_cast<int>(twin);
@@ -1119,6 +1268,89 @@ TEST(TestConvIgemmCatalog, EveryPlainNativeConfigHasAFlatReductionTwin)
         }
         EXPECT_GT(flat, 0);
     }
+}
+
+/// Fixed native matcher contracts, independent of which GPU catalogs this install staged.
+/// Installed-catalog inventory and knob uniqueness are checked separately above.
+hipdnn_plugin_sdk::ingestor::KernelDefinition nativeContractKernel(ConvDirection direction)
+{
+    hipdnn_plugin_sdk::ingestor::KernelDefinition kernel{};
+    const bool forward = direction == ConvDirection::FORWARD;
+    kernel.name = forward ? "channels-first-input-contract" : "no-split-contract";
+    kernel.metadata = {{"direction", std::string(forward ? "FWD" : "BWD")},
+                       {"dtype", std::string("HALF")},
+                       {"atom", std::string("wmma125_f16")},
+                       {"math", std::string("native")},
+                       {"bm", int64_t{64}},
+                       {"bn", int64_t{64}},
+                       {"bk", int64_t{32}},
+                       {"wm", int64_t{2}},
+                       {"wn", int64_t{2}},
+                       {"threads", int64_t{0}},
+                       {"vec", int64_t{8}},
+                       {"stages", int64_t{1}},
+                       {"xcd", int64_t{0}},
+                       {"halo", int64_t{0}},
+                       {"wdirect", int64_t{0}},
+                       {"pack", int64_t{0}},
+                       {"cf", int64_t{forward ? 2 : 1}},
+                       {"swz", int64_t{0}},
+                       {"dma", int64_t{0}},
+                       {"fuse", int64_t{0}},
+                       {"large", int64_t{0}},
+                       {"patch", int64_t{0}},
+                       {"split_policy", int64_t{forward ? 0 : 1}},
+                       {"cfx", int64_t{0}}};
+    return kernel;
+}
+
+TEST(TestConvIgemmCatalog, ChannelsFirstInputRejectsUnsupportedGeometryAndAlignment)
+{
+    const auto kernel = nativeContractKernel(ConvDirection::FORWARD);
+    const auto pack = packFor(ConvDirection::FORWARD);
+    const auto base = dense(40, 49, {5, 8}, {1, 1}, {0, 0}, false);
+    const auto accepts
+        = [&](ConvShape shape, int64_t alignment = 16, int64_t weightAlignment = 16) {
+              shape.dataType = DataType::HALF;
+              auto spec = specFor(shape, ConvDirection::FORWARD);
+              spec.x.alignment = alignment;
+              spec.w.alignment = weightAlignment;
+              const GraphFixture fixture(buildGraph(spec), deviceOf("gfx1250", 256));
+              const auto bound = matchesGraph(pack, fixture.context());
+              return bound.has_value() && matchesKernel(pack, fixture.context(), kernel, *bound);
+          };
+    EXPECT_TRUE(accepts(base));
+    EXPECT_FALSE(accepts(base, 2));
+    auto changed = base;
+    changed.channelsLast = true;
+    EXPECT_FALSE(accepts(changed));
+    changed = base;
+    changed.input = {5, 7};
+    EXPECT_FALSE(accepts(changed));
+    changed = base;
+    changed.filter = {3, 3};
+    changed.prePadding = changed.postPadding = {1, 1};
+    EXPECT_FALSE(accepts(changed));
+    changed = base;
+    changed.stride = {2, 2};
+    EXPECT_FALSE(accepts(changed));
+    changed = base;
+    changed.postPadding = {1, 0};
+    EXPECT_FALSE(accepts(changed));
+    changed = base;
+    changed.k = 48;
+    changed.groups = 2;
+    EXPECT_FALSE(accepts(changed));
+    changed = base;
+    changed.input = {65536, 65536};
+    EXPECT_FALSE(accepts(changed));
+    changed = base;
+    changed.c = int64_t{2147483640};
+    EXPECT_FALSE(accepts(changed)); // The loader's channel cursor must not overflow int.
+    changed = base;
+    changed.input = {536870912, 1};
+    EXPECT_TRUE(accepts(changed)); // Large packed tensors use the 64-bit input loader.
+    EXPECT_FALSE(accepts(changed, 16, 2)); // Its vector filter loads also need aligned pointers.
 }
 
 TEST(TestConvIgemmCatalog, FlatReductionServesOnlyChannelsItsKStepDoesNotDivide)
@@ -1410,7 +1642,7 @@ TEST(TestConvIgemmCatalog, ChannelsFirstOutputProblemsStageNoOutput)
         problem.w.bytes = 5000;
         problem.y.needed = problem.y.transpose = true;
         problem.y.bytes = 300;
-        const auto direct = conv_igemm::withoutOutputStaging(problem);
+        const auto direct = conv_igemm::withoutActivationStaging(problem, false);
         if(direction == ConvDirection::FORWARD)
         {
             EXPECT_TRUE(direct.x.needed);
@@ -1500,7 +1732,7 @@ TEST(TestConvIgemmCatalog, ChannelsFirstInputProblemsStageNoInput)
         problem.y.needed = problem.y.transpose = true;
         problem.y.bytes = 300;
         const auto direct
-            = conv_igemm::withoutInputStaging(conv_igemm::withoutOutputStaging(problem));
+            = conv_igemm::withoutInputStaging(conv_igemm::withoutActivationStaging(problem, false));
         EXPECT_FALSE(direct.x.needed);
         EXPECT_FALSE(direct.y.needed);
         EXPECT_TRUE(direct.w.needed);
@@ -2029,6 +2261,88 @@ TEST(TestConvIgemmSplitPlan, RdnaSplitsOnlyBelowOneBlockPerWgpAndKeepsSixtyFourK
     EXPECT_EQ(splitsOf(backward, "gfx1100", 12), 1);
 }
 
+TEST(TestConvIgemmSplitPlan, ExplicitNoSplitPreservesStagingAcrossOccupancyAndReduction)
+{
+    for(const bool channelsLast : {false, true})
+    {
+        for(const int k : {32, 512})
+        {
+            auto shape = dense(40, k, {7, 9}, {1, 1}, {0, 0}, channelsLast);
+            shape.n = 1;
+            const auto problem = parsedProblem(shape, ConvDirection::BACKWARD_DATA);
+            for(const int units : {1, 128})
+            {
+                const auto device = deviceOf("gfx1250:xnack-", units);
+                const auto automatic = conv_igemm::splitPlanFor(problem, 64, 64, 32, device);
+                const auto explicitPlan
+                    = conv_igemm::splitPlanFor(problem, 64, 64, 32, device, 0, false, 1);
+                const int expectedSplits = units == 128 && k == 512 ? 2 : 1;
+                EXPECT_EQ(automatic.splits, expectedSplits);
+                EXPECT_EQ(explicitPlan.splits, 1);
+                EXPECT_EQ(explicitPlan.partialOffset, 0);
+                EXPECT_EQ(explicitPlan.workspaceBytes, problem.workspaceBytes);
+                EXPECT_EQ(explicitPlan.outElems, 7 * 9 * 40);
+                if(expectedSplits > 1)
+                {
+                    EXPECT_GE(automatic.partialOffset, problem.workspaceBytes);
+                    EXPECT_EQ(automatic.workspaceBytes,
+                              automatic.partialOffset
+                                  + 2 * static_cast<size_t>(explicitPlan.outElems) * sizeof(float));
+                }
+                else
+                {
+                    EXPECT_EQ(automatic.workspaceBytes, explicitPlan.workspaceBytes);
+                }
+            }
+        }
+    }
+}
+
+TEST(TestConvIgemmCatalog, NoSplitRejectsUnsupportedPolicyAndExecutionDomains)
+{
+    auto shape = dense(40, 64, {7, 9}, {1, 1}, {0, 0}, false);
+    shape.dataType = DataType::HALF;
+    const auto direction = ConvDirection::BACKWARD_DATA;
+    const auto pack = packFor(direction);
+    const GraphFixture supported(buildGraph(specFor(shape, direction)), deviceOf("gfx1250", 128));
+    const auto bound = matchesGraph(pack, supported.context());
+    ASSERT_TRUE(bound.has_value());
+    const auto candidate = nativeContractKernel(direction);
+    ASSERT_TRUE(matchesKernel(pack, supported.context(), candidate, *bound));
+    for(const int policy : {-1, 2})
+    {
+        auto invalid = candidate;
+        invalid.metadata["split_policy"] = int64_t{policy};
+        EXPECT_FALSE(matchesKernel(pack, supported.context(), invalid, *bound));
+    }
+    auto wrongDirection = candidate;
+    wrongDirection.metadata["direction"] = std::string("FWD");
+    const auto forwardPack = packFor(ConvDirection::FORWARD);
+    const GraphFixture forward(buildGraph(specFor(shape, ConvDirection::FORWARD)),
+                               deviceOf("gfx1250", 128));
+    const auto forwardBound = matchesGraph(forwardPack, forward.context());
+    ASSERT_TRUE(forwardBound.has_value());
+    EXPECT_FALSE(matchesKernel(forwardPack, forward.context(), wrongDirection, *forwardBound));
+    auto wrongType = candidate;
+    wrongType.metadata["dtype"] = std::string("FLOAT");
+    shape.dataType = DataType::FLOAT;
+    const GraphFixture fp32(buildGraph(specFor(shape, direction)), deviceOf("gfx1250", 128));
+    const auto fp32Bound = matchesGraph(pack, fp32.context());
+    ASSERT_TRUE(fp32Bound.has_value());
+    EXPECT_FALSE(matchesKernel(pack, fp32.context(), wrongType, *fp32Bound));
+    shape.dataType = DataType::HALF;
+    const GraphFixture older(buildGraph(specFor(shape, direction)), deviceOf("gfx1201", 64));
+    const auto olderBound = matchesGraph(pack, older.context());
+    ASSERT_TRUE(olderBound.has_value());
+    EXPECT_FALSE(matchesKernel(pack, older.context(), candidate, *olderBound));
+    shape.channelsLast = true;
+    const GraphFixture channelsLast(buildGraph(specFor(shape, direction)),
+                                    deviceOf("gfx1250", 128));
+    const auto channelsLastBound = matchesGraph(pack, channelsLast.context());
+    ASSERT_TRUE(channelsLastBound.has_value());
+    EXPECT_FALSE(matchesKernel(pack, channelsLast.context(), candidate, *channelsLastBound));
+}
+
 TEST(TestConvIgemmSplitPlan, ADeviceWithoutUnitsGetsNoSplitAndNoConfig)
 {
     const auto deep
@@ -2233,6 +2547,15 @@ std::vector<FusedShape> fusedShapes()
     shapes.push_back({"Patch16x16Rgb", patchShape(3, 40, {32, 48}, 16, true)});
     shapes.push_back({"Patch4x4Rgb", patchShape(3, 24, {12, 20}, 4, true)});
     shapes.push_back({"Patch2x2ChannelsFirst", patchShape(16, 24, {6, 10}, 2, false)});
+    // Native gfx1250 cf=2: no activation staging, with channel/output tails. The long
+    // reduction also exercises the fused split-K reduce on its channels-first output.
+    for(const int64_t c : {40, 520})
+    {
+        auto pointwise = dense(c, 49, {5, 8}, {1, 1}, {0, 0}, false);
+        pointwise.n = 1;
+        shapes.push_back(
+            {c == 40 ? "PointwiseChannelsFirst" : "PointwiseChannelsFirstSplitK", pointwise});
+    }
     return shapes;
 }
 
