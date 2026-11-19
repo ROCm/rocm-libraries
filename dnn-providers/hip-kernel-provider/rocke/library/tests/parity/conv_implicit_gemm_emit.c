@@ -1125,6 +1125,13 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const cha
         spec->defer_mfma = idx == 125 ? 2 : 0;
         spec->defer_mfma_per_write = idx == 125 ? 3 : 0;
         return 0;
+    case 152:
+        /* 55 + split_k=2, split_atomic: rejected (a 3-D split is atomic already) */
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->split_k = 2;
+        spec->split_atomic = true;
+        return 0;
     case 148:
     case 149:
     case 150:
@@ -1338,6 +1345,16 @@ static int make_cfg_3d_base(int idx, rocke_implicit_gemm_conv_spec_t* spec, cons
         spec->tile_m = 128;
         spec->warp_m = 2;
         spec->warp_n = 2;
+        return 0;
+    case 151:
+        /* 55 on the 2-D 16x16 problem + split_k=2, split_atomic: the wave64
+         * MFMA atomic split-K on a 2-D problem */
+        spec->problem = rocke_conv_problem_make(1, 16, 16, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 2;
+        set_dtype(spec, "bf16");
+        set_t256(spec);
+        spec->split_k = 2;
+        spec->split_atomic = true;
         return 0;
     default:
         return -1;

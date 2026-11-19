@@ -1027,6 +1027,9 @@ _GFX942_3D_OFFSET = 32
 #  144-145: 84 / 87 + pp_end_guard
 #  146-147: 55 / 54 + split_addr_k_decode
 #  148-150: 115 / 119 / 114 + xh_pad (the x-halo DMA loop on padded inputs)
+#  151: 55 on the 2-D 16x16 problem + split_k=2, split_atomic (the wave64 MFMA
+#       atomic split-K on a 2-D problem)
+#  152: 55 + split_k=2, split_atomic: rejected by both engines (3-D)
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1452,6 +1455,14 @@ def _gfx942_3d_spec(idx: int):
     knobs[148] = (55, dict(knobs[115][1], xh_pad=True))
     knobs[149] = (55, dict(knobs[119][1], xh_pad=True))
     knobs[150] = (55, dict(_s4, xh_pad=True))
+    # 151-152: split_atomic, which selects the atomic split-K form on a 2-D
+    # wave64 problem (a 3-D split is atomic already, so 152 is rejected).
+    cfgs[151] = (
+        _cp(N=1, Hi=16, Wi=16, C=128, K=128, fy=3, fx=3, pH=1, pW=1, groups=2),
+        "bf16",
+        dict(t256, split_k=2, split_atomic=True),
+    )
+    knobs[152] = (55, dict(split_k=2, split_atomic=True))
     if idx in _pp:
         knobs[idx] = (55, dict(_s3, **_pp[idx]))
     extra = {}
