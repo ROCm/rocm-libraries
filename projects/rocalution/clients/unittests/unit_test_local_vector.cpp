@@ -1331,9 +1331,8 @@ TEST(local_vector_moves, sync_after_move_to_accelerator_async_ends_on_the_accele
 
 namespace
 {
-    // The destruction follows the device synchronization, so the transfer has ended and
-    // only the backend switch of Sync() is missing. This does not destroy a vector during a
-    // pending transfer.
+    // The vectors are destroyed while the transfer is pending, so the destructor has to
+    // complete it
     template <typename T>
     void destroy_after_async_moves(const std::vector<T>& a)
     {
@@ -1499,26 +1498,16 @@ TEST(local_vector_moves, without_an_accelerator_async_calls_keep_the_entries_rea
     });
 }
 
-// The destruction runs in a child, so a destructor that rejects the pending Sync() fails
-// this case rather than the whole binary. It also runs in builds without an accelerator.
+// Also runs in builds without an accelerator
 TEST(local_vector_moves, a_copy_from_async_destination_can_be_destroyed_without_sync)
 {
     for_each_type<RealTypes>([&](auto type) {
         using T = typename decltype(type)::type;
 
-        const std::vector<T> a = x<T>();
-        EXPECT_EXIT(
-            {
-                death_test_watchdog();
-                auto src = make_local_vector(Backend::Host, a);
-                auto v   = std::make_unique<LocalVector<T>>();
-                v->CopyFromAsync(*src);
-                rocalution::_rocalution_sync();
-                v.reset();
-                std::_Exit(0);
-            },
-            testing::ExitedWithCode(0),
-            "");
+        auto src = make_local_vector(Backend::Host, x<T>());
+        auto v   = std::make_unique<LocalVector<T>>();
+        v->CopyFromAsync(*src);
+        v.reset();
     });
 }
 
