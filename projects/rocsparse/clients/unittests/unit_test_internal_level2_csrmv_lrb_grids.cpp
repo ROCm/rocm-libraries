@@ -708,8 +708,7 @@ TEST_F(CsrmvLrbGrids, analysis_rejects_row_longer_than_2_pow_31)
                                          rocsparse_index_base_zero,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);
-    ASSERT_EQ(rocsparse_create_dnvec_descr(
-                  &descrs.x, row_len, d_x.ptr, rocsparse_datatype_f32_r),
+    ASSERT_EQ(rocsparse_create_dnvec_descr(&descrs.x, row_len, d_x.ptr, rocsparse_datatype_f32_r),
               rocsparse_status_success);
     ASSERT_EQ(rocsparse_create_dnvec_descr(&descrs.y, 1, d_y.ptr, rocsparse_datatype_f32_r),
               rocsparse_status_success);
