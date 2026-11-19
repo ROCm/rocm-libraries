@@ -55,6 +55,7 @@ def _log(msg: str) -> None:
 
 
 def _spec():
+    """The swept spec; ROCKE_EXP_SWEEP_LDS_PAD (a variant env, default 48) sets lds_k_pad."""
     from rocke.instances.common.gemm_universal import (
         DataSpec,
         TileSpec,
@@ -67,7 +68,7 @@ def _spec():
         tile=TileSpec(tile_m=256, tile_n=256, tile_k=256, warp_m=2, warp_n=2, warp_k=1,
                       warp_tile_m=16, warp_tile_n=16, warp_tile_k=128),
         trait=TraitSpec(pipeline="mem", scheduler="intrawave", epilogue="cshuffle", tdm=True,
-                        tdm_depth=2, lds_k_pad=48, pad_m=False, pad_n=False, pad_k=False,
+                        tdm_depth=2, lds_k_pad=int(os.environ.get("ROCKE_EXP_SWEEP_LDS_PAD", "48")), pad_m=False, pad_n=False, pad_k=False,
                         split_barrier=True, tdm_alternate_issuers=True, tdm_early_refill=True),
         data=DataSpec(dtype_a="fp8e4m3", dtype_b="fp8e4m3", dtype_c="bf16",
                       dtype_acc="fp32", layout="RCR"),
