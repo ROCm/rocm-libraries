@@ -2361,11 +2361,17 @@ struct K1HaloCf
 
 __device__ inline void k1XcdOrder(unsigned& bx, unsigned& by, unsigned& bz, int xcds)
 {
+#if defined(__gfx950__)
+    // Every gfx950 part has 8.
+    (void)xcds;
+    constexpr unsigned x = K1_XCDS;
+#else
     if(xcds <= 1)
     {
         return;
     }
     const unsigned x = static_cast<unsigned>(xcds);
+#endif
     const unsigned gx = gridDim.x, gy = gridDim.y;
     const unsigned total = gx * gy * gridDim.z;
     const unsigned id = blockIdx.x + gx * (blockIdx.y + gy * blockIdx.z);
