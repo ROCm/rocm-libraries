@@ -59,9 +59,13 @@ inline int xcdCount(const hipdnn_plugin_sdk::ingestor::DeviceProperties& device)
     {
         return 1;
     }
-    if(arch == "gfx942")
+    if(arch == "gfx942" && cus % 38 == 0)
     {
-        return cus % 38 == 0 ? cus / 38 : (cus % 20 == 0 ? cus / 20 : 1);
+        return cus / 38;
+    }
+    if(arch == "gfx942" && cus % 20 == 0)
+    {
+        return cus / 20;
     }
     if(arch == "gfx950")
     {
