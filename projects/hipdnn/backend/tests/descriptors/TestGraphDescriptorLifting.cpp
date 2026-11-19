@@ -332,8 +332,9 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvolutionParameters)
     auto xDesc = createFinalizedTensor(K_FPROP_TENSOR_X_UID);
     auto wDesc = createFinalizedTensor(
         K_FPROP_TENSOR_W_UID, toVec(K_FPROP_TENSOR_W_DIMS), toVec(K_FPROP_TENSOR_W_STRIDES));
-    auto yDesc = createFinalizedTensor(
-        K_FPROP_TENSOR_Y_UID, toVec(K_FPROP_TENSOR_Y_DIMS), toVec(K_FPROP_TENSOR_Y_STRIDES));
+    // Spatial extents consistent with the custom padding, stride and dilation:
+    // (32 + 2 + 4 - 2 * (3 - 1) - 1) / 2 + 1 = 17 and (32 + 3 + 5 - 2 * (3 - 1) - 1) / 2 + 1 = 18.
+    auto yDesc = createFinalizedTensor(K_FPROP_TENSOR_Y_UID, {1, 64, 17, 18}, {19584, 306, 18, 1});
 
     auto convWrapper = createDescriptor<ConvolutionFwdOperationDescriptor>();
     auto convDesc = convWrapper->asDescriptor<ConvolutionFwdOperationDescriptor>();

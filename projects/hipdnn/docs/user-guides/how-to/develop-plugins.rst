@@ -184,7 +184,7 @@ Other requirements:
 - The string is owned by the plugin and must stay valid for the lifetime of the loaded library. Use a string literal or an entry in a static table; returning a stack buffer is a use-after-free.
 - On any status other than ``HIPDNN_PLUGIN_STATUS_SUCCESS``, hipDNN doesn't read ``*name``. ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` is the supported way to leave an engine unnamed; any other failure is treated as a plugin defect and drops that engine with an error naming the status.
 - The engine ID must be the hash of the reported name, so that ``engineNameToId(name) == engineId``. Deriving both from ``HIPDNN_REGISTER_ENGINE`` satisfies this automatically. hipDNN verifies it when it loads the plugin and drops any engine that fails; see :ref:`engine-name-conflicts`.
-- The name must not parse as an engine ID. hipDNN replaces a name such as ``1234`` or ``0xFF`` with the hexadecimal form of the engine's own ID and logs a warning naming the plugin, the engine, and the replaced name.
+- The name must not parse as an engine ID, unless it is registered with ``HIPDNN_REGISTER_ENGINE``, which keeps its registered ID. hipDNN replaces an unregistered name such as ``1234`` or ``0xFF`` with the hexadecimal form of the engine's own ID and logs a warning naming the plugin, the engine, and the replaced name.
 - The implementation must be thread-safe.
 
 ``getEngineName`` is optional. The entry point is emitted whether or not your container defines the member; when the member is absent, it reports ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` and hipDNN names the engine itself.

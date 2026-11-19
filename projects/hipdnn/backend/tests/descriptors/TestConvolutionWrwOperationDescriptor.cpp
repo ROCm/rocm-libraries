@@ -18,6 +18,7 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -116,6 +117,70 @@ protected:
         _unfinalizedTensor.reset();
     }
 };
+
+namespace
+{
+
+std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims)
+{
+    std::vector<int64_t> strides(dims.size(), 1);
+    for(size_t i = dims.size() - 1; i > 0; --i)
+    {
+        strides[i - 1] = strides[i] * dims[i];
+    }
+    return strides;
+}
+
+// Finalizes a wgrad descriptor built from packed tensors with the given dims, zero padding,
+// unit dilation and the given stride.
+void finalizeWgradWithShape(const std::vector<int64_t>& xDims,
+                            const std::vector<int64_t>& dwDims,
+                            const std::vector<int64_t>& dyDims,
+                            const std::vector<int64_t>& stride)
+{
+    auto xTensor = createFinalizedTensor(K_WGRAD_TENSOR_X_UID, xDims, packedStrides(xDims));
+    auto dwTensor = createFinalizedTensor(K_WGRAD_TENSOR_DW_UID, dwDims, packedStrides(dwDims));
+    auto dyTensor = createFinalizedTensor(K_WGRAD_TENSOR_DY_UID, dyDims, packedStrides(dyDims));
+    HipdnnBackendDescriptor* xPtr = xTensor.get();
+    HipdnnBackendDescriptor* dwPtr = dwTensor.get();
+    HipdnnBackendDescriptor* dyPtr = dyTensor.get();
+
+    auto wrapper = createDescriptor<ConvolutionWrwOperationDescriptor>();
+    auto desc = wrapper->asDescriptor<ConvolutionWrwOperationDescriptor>();
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_X,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&xPtr));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DW,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&dwPtr));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DY,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&dyPtr));
+
+    const auto count = static_cast<int64_t>(stride.size());
+    const std::vector<int64_t> padding(stride.size(), 0);
+    const std::vector<int64_t> dilation(stride.size(), 1);
+    desc->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS, HIPDNN_TYPE_INT64, count, padding.data());
+    desc->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS, HIPDNN_TYPE_INT64, count, padding.data());
+    desc->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES, HIPDNN_TYPE_INT64, count, stride.data());
+    desc->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_DILATIONS, HIPDNN_TYPE_INT64, count, dilation.data());
+    auto computeType = HIPDNN_DATA_FLOAT;
+    desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    auto convMode = HIPDNN_CROSS_CORRELATION;
+    desc->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
+
+    desc->finalize();
+}
+
+} // namespace
 
 // =============================================================================
 // Lifecycle Tests
@@ -264,6 +329,24 @@ TEST_F(TestConvolutionWrwOperationDescriptor, FinalizeFailsWithoutConvMode)
     getDescriptor()->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+
+// =============================================================================
+// Finalize Tests - Spatial Shape Consistency
+// =============================================================================
+
+TEST_F(TestConvolutionWrwOperationDescriptor, FinalizeFailsWithHugeStrideInconsistentWithDims)
+{
+    // The output width must be (4 - 1) / stride + 1 = 1 for any stride > 3, not 4.
+    ASSERT_THROW_HIPDNN_STATUS(
+        finalizeWgradWithShape({4, 4, 4, 4}, {4, 4, 1, 1}, {4, 4, 4, 4}, {1, 100000}),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestConvolutionWrwOperationDescriptor, FinalizeAcceptsStrideThatFloorsTheOutput)
+{
+    // (5 - 1) / 2 + 1 = 3.
+    ASSERT_NO_THROW(finalizeWgradWithShape({1, 1, 5, 5}, {1, 1, 1, 1}, {1, 1, 3, 3}, {2, 2}));
 }
 
 // =============================================================================

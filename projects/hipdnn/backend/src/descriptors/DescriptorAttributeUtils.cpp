@@ -577,13 +577,13 @@ void getTensorDescriptorArray(const std::vector<std::shared_ptr<TensorDescriptor
                 HIPDNN_STATUS_BAD_PARAM,
                 std::string(errorPrefix) + ": requestedElementCount is negative");
 
-    const auto copyCount = std::min(requestedElementCount, count);
     if(elementCount != nullptr)
     {
-        *elementCount = copyCount;
+        *elementCount = count;
     }
 
     auto outDescs = static_cast<HipdnnBackendDescriptor**>(arrayOfElements);
+    auto copyCount = std::min(requestedElementCount, count);
     for(int64_t i = 0; i < copyCount; ++i)
     {
         outDescs[i] = HipdnnBackendDescriptor::packDescriptor(descSource[static_cast<size_t>(i)]);

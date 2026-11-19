@@ -223,8 +223,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescript
  *
  * This function retrieves the values of an attribute of a descriptor. attributeName is the name of
  * the attribute whose value is requested. attributeType is the type of attribute.
- * requestedElementCount is the number of elements to be potentially retrieved. An element count is
- * stored in elementCount, as described for that parameter. The retrieved values are stored
+ * requestedElementCount is the number of elements to be potentially retrieved. The number of
+ * elements for the requested attribute is stored in elementCount. The retrieved values are stored
  * in arrayOfElements. When the attribute is expected to have a single value, arrayOfElements can be
  * pointer to the output value. This function will return HIPDNN_STATUS_NOT_INTIALIZED if the
  * descriptor has not been successfully finalized using hipdnnBackendFinalize()
@@ -240,17 +240,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescript
  * @param  [in]   attributeType            The type of attribute
  * @param  [in]   requestedElementCount    Number of elements to output to arrayOfElements. Must not
  *                                         be negative
- * @param  [out]  elementCount             Output pointer for an element count. For an array
- *                                         attribute, a requestedElementCount of 0, or a null
- *                                         arrayOfElements where the attribute accepts one as a
- *                                         count query, stores the number of elements the attribute
- *                                         has and writes nothing. Otherwise
- *                                         hipdnnBackendGetAttribute() writes the least of that
- *                                         number and requestedElementCount elements to
- *                                         arrayOfElements and stores the number it wrote. An
- *                                         attribute that cannot be read in part reports
- *                                         HIPDNN_STATUS_BAD_PARAM when requestedElementCount is
- *                                         less than the number of elements it has
+ * @param  [out]  elementCount             Output pointer for the number of elements the descriptor
+ *                                         attribute has. Note that hipdnnBackendGetAttribute() will
+ *                                         only write the least of this and requestedElementCount
+ *                                         elements to arrayOfElements
  * @param  [out]  arrayOfElements          Array of elements of the datatype of the attributeType. The
  *                                         data type of the attributeType is listed in the mapping
  *                                         table of hipdnnBackendAttributeType_t
