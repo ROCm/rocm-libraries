@@ -50,10 +50,11 @@ def _emit_dual_period_kernel(plr=1, mi=_MI_8X4):
     return src
 
 
-def _codegen_kernel(plr=1, mx=True, mi=_MI_8X4, extra=None):
+def _codegen_kernel(plr=1, mx=True, mi=_MI_8X4, extra=None, debug=None):
     """Run codegen on the dual-period geometry, or a plain-FP8 kernel when not mx.
 
-    ``extra`` overrides solution parameters, e.g. to make the kernel persistent."""
+    ``extra`` overrides solution parameters, e.g. to make the kernel persistent;
+    ``debug`` sets DebugConfig fields, e.g. enableAsserts."""
     from tensilelite.Common.Architectures import gfxToIsa
     from tensilelite.Common.Capabilities import makeIsaInfoMap
     from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
@@ -108,7 +109,7 @@ def _codegen_kernel(plr=1, mx=True, mi=_MI_8X4, extra=None):
     import rocisa
 
     kernels = generateKernelObjectsFromSolutions([sol])
-    kwa = KernelWriterAssembly(asm, DebugConfig())
+    kwa = KernelWriterAssembly(asm, DebugConfig(**(debug or {})))
     for kernel in kernels:
         ri = rocisa.rocIsa.getInstance()
         ri.init(tuple(kernel["ISA"]), shutil.which(cxx))
@@ -809,3 +810,26 @@ def test_back_edge_sync_gate(override, gated):
               "PrefetchAcrossPersistent": 0}
     kernel.update(override)
     assert PersistentKernelState().persistentBackEdgeSyncsLds(kernel) is gated
+
+
+_EPOCH_ASSERT = "assert: local start on a scale epoch"
+
+
+def test_streamk_local_start_is_asserted_on_a_scale_epoch():
+    """The tail takes its scale phase from global K, which is only this
+    workgroup's phase when its StreamK range starts on a whole scale epoch."""
+    res = _codegen_kernel(extra=_PERSISTENT, debug={"enableAsserts": True})
+    assert res.err == 0, "kernel codegen failed (err=%s)" % res.err
+    src = res.src.decode(errors="replace") if isinstance(res.src, (bytes, bytearray)) else res.src
+    code = [_code(ln) for ln in src.splitlines() if _code(ln)]
+    at = [i for i, ln in enumerate(src.splitlines()) if _EPOCH_ASSERT in ln]
+    assert at, "no epoch assert in the StreamK tile index"
+    for ln in (src.splitlines()[i] for i in at):
+        assert re.match(r"s_and_b32 s\S+, s\[sgprStreamKLocalStart\], 1$", _code(ln)), ln
+    start = code.index(_code(src.splitlines()[at[0]]))
+    assert any(c.startswith("v_cmpx_ne_u32") for c in code[start + 1:start + 4]), \
+        code[start:start + 4]
+
+
+def test_streamk_epoch_assert_is_absent_without_asserts(persistent_src):
+    assert _EPOCH_ASSERT not in persistent_src
