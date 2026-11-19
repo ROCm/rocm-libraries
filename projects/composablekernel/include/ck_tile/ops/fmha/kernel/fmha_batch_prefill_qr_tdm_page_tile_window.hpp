@@ -336,8 +336,9 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
     // queue id of tile tile0 + j (this wave's page for P64, the tile's page for P>=128), 0 past
     // the loop or where the wave's page holds no valid row (the queue's dummy id), and no table
     // entry past the sequence is read: a tile below num_total_loop (derived from seqlen_k_ through
-    // the mask tile range) lies inside seqlen_k_, and the table holds a valid id for every page an
-    // attended key falls in (the launch contract). A tile's id is one readlane into an SGPR, which
+    // the mask tile range) lies inside seqlen_k_, and the table holds a valid id for every page of
+    // the sequence in a visited tile (the launch contract, fmha_fwd.hpp; a visited tile's pages
+    // need not hold an attended key). A tile's id is one readlane into an SGPR, which
     // keeps the page address of the TDM issue on the scalar unit (see load_fragment_id). The load
     // goes through the global address space: a flat load would also count in DScnt, on which the
     // loop's partial LDS waits rely.
@@ -404,7 +405,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         // tile_index < num_total_loop (precondition: num_total_loop is derived from this window's
         // seqlen_k_ through the mask tile range) puts logical_origin inside seqlen_k_; the origin
         // is non-negative and 128-aligned (the mask's tile range), and the table holds a valid id
-        // for every page an attended key falls in (the launch contract).
+        // for every page of the sequence in a visited tile (the launch contract, fmha_fwd.hpp).
         const long_index_t logical_origin =
             static_cast<long_index_t>(first_origin) + static_cast<long_index_t>(tile_index) * 128;
         const index_t logical_page = static_cast<index_t>(logical_origin / PageSize_);
