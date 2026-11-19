@@ -44,6 +44,36 @@ def is_cache_resident(funcname, prec, row, machine_spec_dict):
     footprint = perf_model.footprint_bytes(funcname, prec, row)
     return footprint is not None and footprint < CACHE_RESIDENT_FACTOR * l2_mb * 1024 * 1024
 
+MARKERS = ('o', 's', '^', 'v', 'D', 'P', 'X', '*', '<', '>')
+
+
+def series_styles(count):
+    """Distinct (color, marker) pairs for `count` plotted series."""
+    if count <= 10:
+        colors = plt.get_cmap('tab10').colors[:count]
+    elif count <= 20:
+        # tab20 comes in dark/light pairs of one hue; use all dark shades before the light ones
+        tab20  = plt.get_cmap('tab20').colors
+        colors = (tab20[0::2] + tab20[1::2])[:count]
+    else:
+        colors = cm.rainbow(np.linspace(0, 1, count))
+    return [(colors[i], MARKERS[i % len(MARKERS)]) for i in range(count)]
+
+
+def chart_size(count):
+    """Figure size in inches: a fixed plot width, and a height that grows with the number of series."""
+    return (10, max(7.0, 3.0 + 0.3 * count))
+
+
+def finish_chart(axes):
+    """Major and minor grid on both axes, and the legend to the right of the plot."""
+    axes.minorticks_on()
+    axes.grid(True, which='major', linewidth=0.7, alpha=0.7)
+    axes.grid(True, which='minor', linestyle=':', linewidth=0.5, alpha=0.5)
+    axes.set_axisbelow(True)
+    axes.legend(fontsize=9, loc='upper left', bbox_to_anchor=(1.01, 1.0), borderaxespad=0.)
+
+
 def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_list, machine_spec_dict, savedir, theo_max, perf_vs_perf, size_arg = 'N', filename_stem=None, rows_dicts1=None):
     """
     plots gflops data from dictionaries, one plot for each common precision present in all dictionaries.
@@ -69,14 +99,16 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
 
     gflops_dict0 = gflops_dicts1[0]
     for prec in sorted(gflops_dict0.keys()):
-        colors=iter(cm.rainbow(np.linspace(0,1,len(gflops_dicts1))))
-        figure, axes = plt.subplots(figsize=(7,7))
+        # style only the series this precision actually has
+        drawn  = sum(1 for d1, d2 in zip(gflops_dicts1, gflops_dicts2) if prec in d1 and prec in d2)
+        styles = iter(series_styles(drawn))
+        figure, axes = plt.subplots(figsize=chart_size(drawn))
 
         ratio_max = 1.0
         for gflops_dict1, gflops_dict2, funcname, const_args_dict, rows_dict1 in zip(gflops_dicts1, gflops_dicts2, funcname_list, const_args_dicts, rows_dicts1):
-            cur_color = next(colors)
             if prec not in gflops_dict1 or prec not in gflops_dict2:
                 continue
+            cur_color, marker = next(styles)
             gflops1 = gflops_dict1[prec]
             gflops2 = gflops_dict2[prec]
             map1 = {int(t[0]): float(t[1]) for t in gflops1}
@@ -133,14 +165,13 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
 
             function_label = function_label + " :  " + const_args_dict[prec]
 
-            axes.plot(sorted_sizes1, sorted_gflops1, '-', color=cur_color, label=function_label)
-            axes.scatter([x for x, r in zip(sorted_sizes1, resident) if not r],
-                         [y for y, r in zip(sorted_gflops1, resident) if not r],
-                         color=cur_color)
+            axes.plot(sorted_sizes1, sorted_gflops1, '-', color=cur_color, marker=marker,
+                      label=function_label)
             if any(resident):
+                # draw cache-resident points hollow on top of the line's filled markers
                 axes.scatter([x for x, r in zip(sorted_sizes1, resident) if r],
                              [y for y, r in zip(sorted_gflops1, resident) if r],
-                             facecolors='none', edgecolors=cur_color)
+                             facecolors='white', edgecolors=cur_color, marker=marker, zorder=3)
 
         if not axes.has_data():
             plt.close(figure)
@@ -169,12 +200,8 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
         else:
             axes.set_xlabel(str(size_arg))
 
-        # magic numbers from performancereport.py to make plots look nice
-        axes.legend(fontsize=10, bbox_to_anchor=(0., 1.02, 1., .102), loc='lower left',
-                    mode='expand', borderaxespad=0.)
-        figure.tight_layout(rect=(0,0.05,1.0,0.94))
-
-        figure.suptitle(title, y=0.96)
+        finish_chart(axes)
+        axes.set_title(title)
 
         filename = ''
         if filename_stem:
@@ -188,7 +215,8 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
         if not os.path.exists(savedir):
             os.makedirs(savedir)
         out_dir = savedir if os.path.isabs(savedir) else os.path.join(os.getcwd(), savedir)
-        figure.savefig(os.path.join(out_dir, filename), dpi=100)
+        # bbox_inches='tight' widens the image to include the legend instead of shrinking the plot
+        figure.savefig(os.path.join(out_dir, filename), dpi=100, bbox_inches='tight')
         plt.close(figure)
 
 
@@ -261,7 +289,8 @@ def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achie
             x_lo, x_hi = min(x_lo, ridge / 4), max(x_hi, ridge * 4)
         x = np.logspace(np.log10(x_lo), np.log10(x_hi), 200)
 
-        figure, axes = plt.subplots(figsize=(8, 7))
+        funcs = sorted({pt['function'] for pt in pts})
+        figure, axes = plt.subplots(figsize=chart_size(len(funcs) + 3))
 
         def roof(bw, pk):
             y = np.full_like(x, np.inf)
@@ -280,31 +309,28 @@ def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achie
             axes.plot(x, roof(gbps * achievable_bw_frac, peak), color='gray', linestyle=':', linewidth=1,
                       label=f"{achievable_bw_frac:.0%} of bandwidth")
 
-        funcs = sorted({pt['function'] for pt in pts})
-        colors = cm.rainbow(np.linspace(0, 1, len(funcs)))
-        for funcname, color in zip(funcs, colors):
+        for funcname, (color, marker) in zip(funcs, series_styles(len(funcs))):
             fpts = [pt for pt in pts if pt['function'] == funcname]
             label = perf_model.PRECISIONS[prec][0] + funcname
             solid = [pt for pt in fpts if not pt['cache_resident']]
             hollow = [pt for pt in fpts if pt['cache_resident']]
-            axes.scatter([pt['ai'] for pt in solid], [pt['gflops'] for pt in solid], color=color, label=label)
+            axes.scatter([pt['ai'] for pt in solid], [pt['gflops'] for pt in solid], color=color,
+                         marker=marker, label=label)
             if hollow:
                 axes.scatter([pt['ai'] for pt in hollow], [pt['gflops'] for pt in hollow],
-                             facecolors='none', edgecolors=color,
+                             facecolors='none', edgecolors=color, marker=marker,
                              label=label if not solid else None)
 
         axes.set_xscale('log')
         axes.set_yscale('log')
         axes.set_xlabel('arithmetic intensity (FLOP / byte)')
         axes.set_ylabel('GFLOP/s')
-        axes.grid(True, which='both', linewidth=0.3)
         if machine_spec_dict.get('l2_mb'):
             axes.annotate(f"hollow: bytes moved < {CACHE_RESIDENT_FACTOR} x L2 (cache-resident)",
                           xy=(0.01, 0.01), xycoords='axes fraction', fontsize=8)
-        axes.legend(fontsize=9, loc='lower right')
-        figure.suptitle(f"{title}  {prec}")
-        figure.tight_layout(rect=(0, 0, 1.0, 0.96))
-        figure.savefig(os.path.join(savedir, f"roofline_{stem}_{prec}"), dpi=100)
+        finish_chart(axes)
+        axes.set_title(f"{title}  {prec}")
+        figure.savefig(os.path.join(savedir, f"roofline_{stem}_{prec}"), dpi=100, bbox_inches='tight')
         plt.close(figure)
 
 
