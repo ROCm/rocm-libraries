@@ -135,6 +135,13 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
       skGrid > numMTs ? math::safe_ceil_div(skGrid, numCUs) : math::safe_ceil_div(numMTs, numCUs);
   auto split_factor = math::safe_ceil_div(skGrid, numMTs * batch);
 
+  // A single XCD (one L2 domain, e.g. RDNA parts) has nothing to remap across XCDs: WGMXCC, chunk
+  // and K-coherent split are meaningless there, but WGM still orders the tiles for L2 reuse.
+  // Every XCD-specific rule below is skipped for it, so multi-XCD results are unchanged.
+  const bool singleXCD = (numXCD == 1);
+  // skGrid == 0 (no grid resolved) is one split, not zero.
+  if (singleXCD) split_factor = std::max<decltype(split_factor)>(split_factor, 1);
+
   // Stream-K fixup deadlock prevention:
   // When the SK grid doesn't evenly divide tiles, some workgroups produce partial
   // results combined via a spin-wait fixup loop.
@@ -160,7 +167,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
 
     // If we are using chunking, we use the minimum of the number of tiles per XCD and the number of CUs per XCD.
     size_t out_wgmxccchunk = use_chunk ? std::min(math::safe_ceil_div(numMTs, numXCD), numCUsPerXCD) : 0;
-    if (sk_has_partial_tiles) out_wgmxccchunk = 0;
+    if (sk_has_partial_tiles || singleXCD) out_wgmxccchunk = 0;
     // If we are using wgmxcc, we use the number of XCDs.
     size_t out_wgmxcc = use_wgmxcc ? numXCD : 1;
     // If we are using wgm, we use the number of tiles in the smaller dimension.
@@ -188,7 +195,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
 
     if (numMTs == 1 || numTotalTiles <= numXCD) {
       wgmxccchunk = 0;
-      wgmxcc      = 0;
+      wgmxcc      = singleXCD ? 1 : 0;
       wgm         = 1;
     } else {
       wgmxccchunk = (numCUsPerXCD / numMTs) * numMTs;
@@ -198,7 +205,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
         wgm = std::min(defaultWGM, static_cast<int32_t>(numMT_N));
     }
 
-    if (sk_has_partial_tiles) wgmxccchunk = 0;
+    if (sk_has_partial_tiles || singleXCD) wgmxccchunk = 0;
     return workgroup_mapping_t{0, wgmxccchunk, wgmxcc, wgm};
   }
 
@@ -285,7 +292,12 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   // -------------------
   size_t out_wgmxcc = defaultWGMXCC;
 
-  if (split_factor % numXCD == 0) {
+  if (singleXCD) {
+    // One XCD: no XCC remap, no chunking, no K-coherent reorder. WGM below still applies.
+    out_wgmxcc       = 1;
+    out_wgmxccsplitk = 0;
+    out_wgmxccchunk  = 0;
+  } else if (split_factor % numXCD == 0) {
     // The hardware round-robin dispatch already distributes k-splits evenly.
     // No mapping needed (and K-Coherent would just add overhead).
     out_wgmxcc = 0;

@@ -370,15 +370,19 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
   const size_t numMTs      = grid_m * grid_n;
   const size_t cus_per_xcd = N_CU / NUM_XCD;
 
+  // A single XCD (one L2 domain) has nothing to remap across XCDs: WGMXCC and chunking are
+  // meaningless, but WGM still orders the tiles for L2 reuse.  Mirrors select_workgroup_mapping.
+  const bool single_xcd = (NUM_XCD == 1);
+
   // Batch case
   if (batch > 1) {
     const size_t numMTs_total = numMTs * batch;
     if (numMTs == 1 || numMTs_total <= NUM_XCD)
-      return {0, 0, 0, 1};
+      return {0, 0, single_xcd ? size_t{1} : size_t{0}, 1};
     const int32_t default_wgm = static_cast<int32_t>(std::ceil(std::sqrt(cus_per_xcd)));
     const int32_t wgm = (grid_m > 1 && grid_n > 1)
         ? std::min(default_wgm, static_cast<int32_t>(grid_n)) : 1;
-    return {0, (cus_per_xcd / numMTs) * numMTs, NUM_XCD, wgm};
+    return {0, single_xcd ? size_t{0} : (cus_per_xcd / numMTs) * numMTs, NUM_XCD, wgm};
   }
 
 
@@ -389,7 +393,8 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
     bool use_wgmxcc   = (grid_m != 1 && grid_n != 1);
     size_t out_wgmxcc = use_wgmxcc ? NUM_XCD : 1;
     bool use_chunk =
-        use_wgmxcc && ((numMTs < N_CU && numMTs % NUM_XCD == 0) || (numMTs % N_CU == 0));
+        use_wgmxcc && !single_xcd &&
+        ((numMTs < N_CU && numMTs % NUM_XCD == 0) || (numMTs % N_CU == 0));
     size_t out_chunk = use_chunk ? std::min(math::safe_ceil_div(numMTs, NUM_XCD), cus_per_xcd) : 0;
 
     if (nta > 3 && ntb < 4)
@@ -402,7 +407,9 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
 
   // WGMXCC
   size_t out_wgmxcc;
-  if (splitting_factor % NUM_XCD == 0)
+  if (single_xcd)
+    out_wgmxcc = 1;  // no XCC remap; WGM below still applies
+  else if (splitting_factor % NUM_XCD == 0)
     out_wgmxcc = 0;
   else if (numMTs <= NUM_XCD)
     out_wgmxcc = 0;
@@ -424,7 +431,8 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
     return {0, 0, out_wgmxcc, static_cast<int32_t>(grid_n)};
 
   // Build candidate list
-  size_t wgm_cap = std::min(grid_n, numWGsPerXCD / 2);
+  // The candidate bitmask below holds bits 0..63.
+  size_t wgm_cap = std::min<size_t>(std::min(grid_n, numWGsPerXCD / 2), 63);
   if (wgm_cap == 0) return {0, 0, out_wgmxcc, 1};
 
   // Bitmask of candidates: bit i set means i is a WGM candidate.
@@ -441,7 +449,7 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
 
   // Evaluate L2 cost for last XCD in the first timestep
   const size_t total          = numMTs;
-  const size_t last_xcd       = NUM_XCD - 2;
+  const size_t last_xcd       = NUM_XCD > 1 ? NUM_XCD - 2 : 0;
   const size_t group_size     = total >= NUM_XCD ? total / NUM_XCD : total;
   const size_t tiles_this_xcd = std::min(cus_per_xcd, group_size);
   const size_t start          = last_xcd * group_size;
