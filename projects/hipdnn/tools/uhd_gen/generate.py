@@ -49,11 +49,19 @@ from .features import (
 )
 from .dataset.training_table import best_per_shape, slot_training_rows
 from .knobs import graph_bound_twins
-from .provenance import ROLES, descriptor_id, snapshot_provenance
+from .provenance import (
+    CODEGEN_REVISION,
+    ROLES,
+    descriptor_id,
+    hard_provenance,
+    shared_provenance,
+    snapshot_provenance,
+)
 from .immediate import (
     LABEL_STATISTIC,
     ROLE,
     binding_identity,
+    measured_provenance,
     parse_engine_id,
     normalize_row,
     normalize_corpus,
@@ -356,6 +364,49 @@ def _eval_benchmarks(path: str) -> set[str]:
     return set(listed)
 
 
+def _join_provenance(
+    provenance: dict | None, collections: list
+) -> tuple[dict, str | None]:
+    """The provenance a run's immediate metric collections were measured under, and a
+    warning when their code objects come from different compilers.
+
+    `collections` holds what `training_binding` returns for each collection. Each
+    keeps the hard provenance (`hard_provenance`) of the first and of `provenance`, a
+    dataset's when the rows come from one (`load_dataset`), whose contributions have
+    already decided its `codegen_revision`. Otherwise every row decides it at once
+    (`measured_provenance`).
+    """
+    first = (
+        provenance if provenance is not None else collections[0][1]["trained_against"]
+    )
+    if any(
+        hard_provenance(binding["trained_against"]) != hard_provenance(first)
+        for _, binding, _ in collections
+    ):
+        raise ValueError(
+            "the engine's descriptor provenance changed between metric collections"
+        )
+    if provenance is not None:
+        return provenance, None
+    return measured_provenance(pd.concat([frame for frame, _, _ in collections]))
+
+
+def _as_trained(frame: pd.DataFrame, provenance: dict) -> pd.DataFrame:
+    """`frame` with every row's binding recording the `codegen_revision` of `provenance`,
+    the run's, so the model `train` fits on these rows records what the run does."""
+    codegen = provenance.get(CODEGEN_REVISION)
+
+    def recorded(text: str) -> str:
+        binding = json.loads(text)
+        trained = hard_provenance(binding["trained_against"])
+        binding["trained_against"] = (
+            trained if codegen is None else {**trained, CODEGEN_REVISION: codegen}
+        )
+        return json.dumps(binding)
+
+    return frame.assign(binding=frame["binding"].map(recorded))
+
+
 def write_collection(
     stage: Path,
     *,
@@ -383,16 +434,17 @@ def write_collection(
     """
     immediate = role == ROLE
     selector_revision = None
+    if immediate:
+        collections = [
+            training_binding(normalize_corpus(pd.DataFrame(rows[source]), repeats=True))
+            for source in sources
+        ]
+        provenance, warning = _join_provenance(provenance, collections)
+        if warning:
+            logger.warning("%s", warning)
+        selector_revision = collections[-1][1]["selector_revision"]
     for source in sources:
         frame = pd.DataFrame(rows[source])
-        if immediate:
-            _, binding = training_binding(normalize_corpus(frame, repeats=True))
-            if provenance is not None and binding["trained_against"] != provenance:
-                raise ValueError(
-                    "the engine's descriptor provenance changed between metric collections"
-                )
-            provenance = binding["trained_against"]
-            selector_revision = binding["selector_revision"]
         name = _corpus_name(sources, source)
         frame.to_csv(stage / f"{name}.csv", index=False, lineterminator="\n")
         write_json(stage / f"{name}.json", _absent_as_null(rows[source]))
@@ -597,6 +649,10 @@ def load_dataset(
     Contributions are read oldest to newest by `collected_at`, only those whose purpose is in
     `purposes`; the counts of repeats set aside and of rows removed are returned. Binding mismatches are refused when a contribution is added; this refuses
     another role, an unmeasured metric, or contradicting knob addressing.
+
+    `provenance` records a `codegen_revision` only when every chosen contribution records
+    the same one; contributions measured with different compilers train together, and
+    `warnings` says so.
     """
     directory, chosen = dataset_contributions(
         directory, role=role, purposes=purposes, only=only
@@ -625,12 +681,15 @@ def load_dataset(
     for contribution in chosen:
         published.update(contribution["published"])
     first = chosen[0]
+    # The binding is the one every contribution shares; their code objects may differ.
+    provenance, warning = shared_provenance(c["trained_against"] for c in chosen)
     return {
         "rows": rows,
         "published": published,
         "superseded_rows": superseded,
         "excluded_rows": excluded,
-        "provenance": first["trained_against"],
+        "provenance": provenance,
+        "warnings": [warning] if warning else [],
         "knob_encodings": knob_encodings,
         "shipping_knobs": first["shipping_knobs"],
         "collection_knobs": first["collection_knobs"],
@@ -2459,6 +2518,8 @@ def run_generate(args: argparse.Namespace) -> int:
                 sum(excluded.values()),
                 excluded,
             )
+            for warning in measured["warnings"]:
+                logger.warning("%s", warning)
         rows, published, commands = (
             measured["rows"],
             measured["published"],
@@ -2505,22 +2566,28 @@ def run_generate(args: argparse.Namespace) -> int:
                 )
         if any(not rows[source] for source in sources):
             raise ValueError("the benchmark produced no successful valid timings")
+        warnings = list(measured.get("warnings", []))
+        if immediate:
+            measured_bindings = {
+                source: training_binding(normalize_corpus(pd.DataFrame(rows[source])))
+                for source in sources
+            }
+            provenance, warning = _join_provenance(
+                provenance, list(measured_bindings.values())
+            )
+            if warning:
+                logger.warning("%s", warning)
+                warnings.append(warning)
+            if args.engine and any(
+                args.engine
+                not in (binding["engine"], provenance.get("ued", {}).get("id"))
+                for _, binding, _ in measured_bindings.values()
+            ):
+                raise ValueError("--engine does not match the collected engine binding")
         for source in sources:
             frame = pd.DataFrame(rows[source])
             if immediate:
-                frame, binding = training_binding(normalize_corpus(frame))
-                if provenance is not None and binding["trained_against"] != provenance:
-                    raise ValueError(
-                        "the engine's descriptor provenance changed between metric collections"
-                    )
-                provenance = binding["trained_against"]
-                if args.engine and args.engine not in (
-                    binding["engine"],
-                    provenance.get("ued", {}).get("id"),
-                ):
-                    raise ValueError(
-                        "--engine does not match the collected engine binding"
-                    )
+                frame = _as_trained(measured_bindings[source][0], provenance)
             elif frame.duplicated(["benchmark", "device", "kernel"]).any():
                 raise ValueError(
                     "the graph/device corpus contains duplicate candidate measurements"
@@ -2716,6 +2783,9 @@ def run_generate(args: argparse.Namespace) -> int:
             )
             if not args.recall:
                 _drop_slice_warning(report)
+            # What the measurements, or the dataset's contributions, say about how they
+            # were measured.
+            report["warnings"] = [*report.get("warnings", []), *warnings]
             write_json(report_path, report)
             models.append(
                 {

@@ -29,6 +29,11 @@
 {"name":"single_slot_is_global","base":"slot","patch":[{"op":"replace","path":"/trained_against/slot","value":"global"}],"reject":true,"uhd_gen":"trained_against.slot 'global' is not a valid slot name"},
 {"name":"single_slot_has_an_uppercase_letter","base":"slot","patch":[{"op":"replace","path":"/trained_against/slot","value":"Prep"}],"reject":true,"uhd_gen":"trained_against.slot 'Prep' is not a valid slot name"},
 {"name":"single_slot_is_not_a_string","base":"slot","patch":[{"op":"replace","path":"/trained_against/slot","value":3}],"reject":true,"uhd_gen":"is not a valid slot name"},
-{"name":"selector_revision_with_a_slot","base":"slot","patch":[{"op":"replace","path":"/trained_against","value":{"selector_revision":"r","slot":"dkdv"}}],"reject":true,"uhd_gen":"slot requires kmd"}
+{"name":"selector_revision_with_a_slot","base":"slot","patch":[{"op":"replace","path":"/trained_against","value":{"selector_revision":"r","slot":"dkdv"}}],"reject":true,"uhd_gen":"slot requires kmd"},
+{"name":"codegen_revision_beside_selector_revision","base":"v10","patch":[{"op":"replace","path":"/trained_against","value":{"selector_revision":"r","codegen_revision":"c"}}]},
+{"name":"codegen_revision_beside_descriptor_refs","base":"v10","patch":[{"op":"add","path":"/trained_against/codegen_revision","value":"c"}]},
+{"name":"codegen_revision_alone","base":"v10","patch":[{"op":"replace","path":"/trained_against","value":{"codegen_revision":"c"}}],"reject":true},
+{"name":"codegen_revision_is_empty","base":"v10","patch":[{"op":"add","path":"/trained_against/codegen_revision","value":""}],"reject":true},
+{"name":"codegen_revision_is_not_a_string","base":"v10","patch":[{"op":"add","path":"/trained_against/codegen_revision","value":3}],"reject":true}
 ]
 }

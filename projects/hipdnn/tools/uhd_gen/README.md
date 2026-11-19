@@ -304,7 +304,9 @@ It validates everything before writing anything, and refuses rather than half-su
   [Optional features are read through a default](#optional-features-are-read-through-a-default));
 - a `predict_engine` model for a descriptor-backed engine must record
   `trained_against.selector_revision`, which the runtime compares with the engine's
-  current selector revision. Every binding `hipdnn_bench` records carries it.
+  current selector revision. Every binding `hipdnn_bench` records carries it. A binding may
+  also carry `trained_against.codegen_revision`, a digest of the engine's code objects; the
+  model records it only when every measurement it trains on reports the same one.
 
 ## `evaluate`: regret against the best kernel that was measured
 
@@ -1157,6 +1159,18 @@ The binding's `provider_build` (the loaded plugin's name, version and API versio
 diagnostic, never a compatibility key: measurements from two builds reporting one selector
 revision are repeats of each other. A model recording a different revision, or none, is
 refused -- the engine stays applicable and reports UNAVAILABLE naming both revisions.
+
+`trained_against.codegen_revision` is recorded, never a compatibility key. It digests the
+bytes of the engine's code objects, so a compiler change moves it while the selector revision
+stays put. The runtime binds a model whose `codegen_revision` differs from the engine's and
+logs one warning. `uhd_gen` does the same where it checks a model against the bindings
+measurements or runtime predictions carry (`evaluate`), and never refuses measurements that
+differ only in it (collections, datasets, repeats of one shape). A model
+records the `codegen_revision` only when every measurement it trains on reports the same
+one; measurements from different compilers train together, the model records none, and the
+evaluation report's `warnings` says so. A `--provenance` or `--descriptor-tree` snapshot
+names the contract only: a `codegen_revision` it records that differs from the
+measurements' is warned about, and the model records the measurements'.
 Start a fresh consumer process after installing a model: a compiled model is cached
 for the lifetime of the engine that owns it.
 

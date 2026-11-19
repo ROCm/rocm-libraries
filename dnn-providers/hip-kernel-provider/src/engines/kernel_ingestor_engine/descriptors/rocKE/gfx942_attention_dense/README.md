@@ -113,13 +113,11 @@ TFLOPS scores it reports for them, are extrapolated. Retrain it when the catalog
 `tests/test_trained_rankers.py` in the IngestorGenerator fails when the shipped KDP no longer
 matches the fingerprint the configs record.
 
-The L1 `predict_engine` (predicts the engine's TFLOPS) is held. Its selector revision digests every
-code object packed at build time, and this bundle's code objects are compiled by the CI toolchain on
-every build, so a TheRock compiler bump that changes their bytes makes the runtime refuse it (and
-`TestGfx942AttentionDenseModelBinding` fail). One was trained (it read `graph.flops` as well) and
-went stale at the next pin bump. It follows once a policy for compiler-only drift is agreed; until
-then `TestGfx942AttentionDenseModelBinding.TheBoundL1EnginePredictorLoadsAndMatchesThisBuild` checks
-that no L1 loads.
+No L1 `predict_engine` (predicts the engine's TFLOPS) ships yet, and
+`TestGfx942AttentionDenseModelBinding.TheBoundL1EnginePredictorLoadsAndMatchesThisBuild` checks that
+none loads. An L1's selector revision digests the code identity of every kernel packed at build time,
+so retrain it when the L2, the catalog or the kernels' code changes. A compiler that only rebuilds
+the code objects moves its codegen revision instead: the runtime still binds it and logs a warning.
 
 How the L2 was trained (the `hipdnn-uhd` skill; `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_gen`), on
 one gfx942 device with the catalog compiled by CI's COMGR:
