@@ -73,6 +73,10 @@ void registerConvFftSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& sc
 void resetConvFftModuleCache();
 void registerConvGroupValuSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvGroupValuModuleCache();
+void registerConvNarrowSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvNarrowModuleCache();
+void registerConvNarrowWrwSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvNarrowWrwModuleCache();
 void registerConvGroupValuWrwSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvGroupValuWrwModuleCache();
 void registerConvIgemmSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
