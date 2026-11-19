@@ -17,6 +17,14 @@
 #   4  -- fp16 output, wg_M=64, wg_N=576, gfx942
 #   5  -- bf16 output, wg_M=32, wg_N=72,  gfx950
 #   6  -- fp16 output, custom tile_m=8, tile_n=32, gfx950
+#   7  -- ws_replicas=1 (the fold elided), gfx950
+#   8  -- bf16 output, ws_replicas=4, gfx950
+#   9-17 -- the vector / looped folds (vec, rezero, ws_bf16, fold_loop,
+#         slab_par) on the bf16 64x576 problem, gfx942; 17 (fold_loop on a
+#         grouped fold) both engines must reject
+#   18-21 -- both engines must reject: ws_bf16 on the scalar fold, slab_par
+#         without fold_loop, vec=32 and fold_loop=128 (past the widest vector
+#         and the deepest loop the folds hold)
 from kernels.common.conv_wgrad_workspace_reduce import (
     WgradReduceSpec,
     build_conv_wgrad_workspace_reduce,
@@ -118,8 +126,9 @@ def _spec(idx: int):
             ),
             "gfx950",
         )
-    # 9-17: the vector / looped folds (vec, rezero, ws_bf16, fold_loop,
-    # slab_par) on the bf16 64x576 problem. Keep in lockstep with the C emitter.
+    # 9-21: the vector / looped folds (vec, rezero, ws_bf16, fold_loop,
+    # slab_par) on the bf16 64x576 problem; 17-21 both engines must reject.
+    # Keep in lockstep with the C emitter.
     _v = {
         9: dict(vec=4),
         10: dict(vec=4, rezero=1),
@@ -130,6 +139,10 @@ def _spec(idx: int):
         15: dict(vec=4, ws_replicas=2, dtype_d="fp32"),
         16: dict(rezero=1),
         17: dict(vec=4, fold_loop=4, groups=2),
+        18: dict(ws_bf16=True),
+        19: dict(vec=4, slab_par=4),
+        20: dict(vec=32),
+        21: dict(vec=4, ws_replicas=256, fold_loop=128, tile_m=1),
     }
     if idx in _v:
         kw = dict(dtype_d="bf16")

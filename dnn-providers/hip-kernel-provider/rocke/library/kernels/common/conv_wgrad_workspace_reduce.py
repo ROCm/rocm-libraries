@@ -68,6 +68,40 @@ from kernels.common.conv_implicit_gemm_wgrad import (
 _DEFAULT_TILE_M = 4
 _DEFAULT_TILE_N = 64  # block_size = tile_m * tile_n = 256
 
+# The widest ``vec`` (an f32 slab load of at most 8 elements) and the deepest
+# ``fold_loop`` a spec may ask for. The C++ twin holds one value per vector lane and per looped slab load in fixed
+# arrays of these sizes (ROCKE_WGRAD_REDUCE_MAX_VEC / _MAX_FOLD_LOOP), so both
+# engines refuse anything past them.
+_MAX_VEC = 8
+_MAX_FOLD_LOOP = 64
+
+
+def wgrad_reduce_spec_conflict(spec: "WgradReduceSpec") -> str:
+    """Why ``spec``'s vector / looped fold knobs cannot be built, or ``""``.
+
+    Mirrored, reason for reason, by ``rocke_wgrad_reduce_is_valid_spec``.
+    """
+    v = spec.vec
+    if v not in (1, 2, 4, _MAX_VEC):
+        return f"WgradReduceSpec.vec must be 1, 2, 4 or {_MAX_VEC} (got {v})"
+    if v > 1 and _wg_N(spec.problem) % v:
+        return (
+            f"WgradReduceSpec.vec={v} must divide the dW row length "
+            f"wg_N={_wg_N(spec.problem)}"
+        )
+    if spec.ws_bf16 and v <= 1:
+        return "WgradReduceSpec.ws_bf16 needs vec > 1"
+    if not 0 <= spec.fold_loop <= _MAX_FOLD_LOOP:
+        return (
+            f"WgradReduceSpec.fold_loop must be 0..{_MAX_FOLD_LOOP} "
+            f"(got {spec.fold_loop})"
+        )
+    if spec.slab_par < 1:
+        return f"WgradReduceSpec.slab_par must be >= 1 (got {spec.slab_par})"
+    if spec.slab_par > 1 and not spec.fold_loop:
+        return "WgradReduceSpec.slab_par needs fold_loop"
+    return ""
+
 
 @dataclass(frozen=True)
 class WgradReduceSpec:
@@ -96,8 +130,8 @@ class WgradReduceSpec:
     # constant rather than restating it, so the two cannot drift.
     ws_replicas: int = _DEFAULT_WS_REPLICAS
     # Elements per thread along N ("v<n>", 4: one 16-byte f32 load per slab
-    # and one 8-byte bf16 / 16-byte f32 store per thread). Needs wg_N % vec
-    # == 0 (the launcher checks). Default 1: the scalar kernel, unchanged.
+    # and one 8-byte bf16 / 16-byte f32 store per thread). 1, 2, 4 or 8,
+    # dividing wg_N. Default 1: the scalar kernel, unchanged.
     vec: int = 1
     # 1 = the fold also stores zeros back into every scratch element it
     # read ("rz1"), leaving the scratch zero for the next launch -- the
@@ -112,13 +146,13 @@ class WgradReduceSpec:
     # iteration, each thread summing its slabs strictly in slab order -- for
     # the per-slice slabs of ws_store at large split degrees, where R loads
     # per thread would not fit the registers. Needs vec > 1. Tags ``fl<n>``.
-    # Default 0: unchanged.
+    # At most 64. Default 0: unchanged.
     fold_loop: int = 0
     # With fold_loop: the slabs are spread over ``slab_par`` thread groups
     # of tile_m * tile_n threads (group p folds slabs p, p + P, ... in
     # order); the P partials are then summed in group order through LDS.
-    # The workgroup is tile_m * tile_n * slab_par threads. Tags ``sp<n>``.
-    # Default 1.
+    # The workgroup is tile_m * tile_n * slab_par threads. Needs fold_loop.
+    # Tags ``sp<n>``. Default 1.
     slab_par: int = 1
 
     @property
@@ -175,6 +209,10 @@ def build_conv_wgrad_workspace_reduce(
     tile_n = spec.tile_n
     BS = spec.block_size  # tile_m * tile_n — one thread per output element
     _is_fp32_out = spec.dtype_d in ("fp32", "f32")
+
+    _why = wgrad_reduce_spec_conflict(spec)
+    if _why:
+        raise ValueError(_why)
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = BS

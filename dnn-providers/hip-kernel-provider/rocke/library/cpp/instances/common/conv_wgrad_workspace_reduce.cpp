@@ -35,6 +35,12 @@
 #ifndef ROCKE_WGRAD_REDUCE_DEFAULT_WS_REPLICAS
 #define ROCKE_WGRAD_REDUCE_DEFAULT_WS_REPLICAS 8
 #endif
+/* The widest vec (an f32 slab load of at most 8 elements) and the deepest
+ * fold_loop (Python _MAX_VEC / _MAX_FOLD_LOOP):
+ * the folds hold one value per vector lane and per looped slab load in fixed
+ * arrays of these sizes, so the validator refuses anything past them. */
+#define ROCKE_WGRAD_REDUCE_MAX_VEC 8
+#define ROCKE_WGRAD_REDUCE_MAX_FOLD_LOOP 64
 
 /* ---- spec helpers -------------------------------------------------------- */
 
@@ -140,6 +146,59 @@ bool rocke_wgrad_reduce_is_valid_spec(const rocke_wgrad_reduce_spec_t* spec,
             snprintf(reason, reason_cap, "dtype_d must be fp16/bf16/fp32 (got '%s')", dtype_d);
         return false;
     }
+    /* Python wgrad_reduce_spec_conflict, reason for reason. */
+    const int v = spec->vec;
+    if(v != 1 && v != 2 && v != 4 && v != ROCKE_WGRAD_REDUCE_MAX_VEC)
+    {
+        if(reason)
+            snprintf(reason,
+                     reason_cap,
+                     "WgradReduceSpec.vec must be 1, 2, 4 or %d (got %d)",
+                     ROCKE_WGRAD_REDUCE_MAX_VEC,
+                     v);
+        return false;
+    }
+    if(v > 1 && spec->wg_N % v)
+    {
+        if(reason)
+            snprintf(reason,
+                     reason_cap,
+                     "WgradReduceSpec.vec=%d must divide the dW row length wg_N=%d",
+                     v,
+                     spec->wg_N);
+        return false;
+    }
+    if(spec->ws_bf16 && v <= 1)
+    {
+        if(reason)
+            snprintf(reason, reason_cap, "WgradReduceSpec.ws_bf16 needs vec > 1");
+        return false;
+    }
+    if(spec->fold_loop < 0 || spec->fold_loop > ROCKE_WGRAD_REDUCE_MAX_FOLD_LOOP)
+    {
+        if(reason)
+            snprintf(reason,
+                     reason_cap,
+                     "WgradReduceSpec.fold_loop must be 0..%d (got %d)",
+                     ROCKE_WGRAD_REDUCE_MAX_FOLD_LOOP,
+                     spec->fold_loop);
+        return false;
+    }
+    if(spec->slab_par < 1)
+    {
+        if(reason)
+            snprintf(reason,
+                     reason_cap,
+                     "WgradReduceSpec.slab_par must be >= 1 (got %d)",
+                     spec->slab_par);
+        return false;
+    }
+    if(spec->slab_par > 1 && !spec->fold_loop)
+    {
+        if(reason)
+            snprintf(reason, reason_cap, "WgradReduceSpec.slab_par needs fold_loop");
+        return false;
+    }
     return true;
 }
 
@@ -228,7 +287,7 @@ static void wr_emit_vec_fold(rocke_ir_builder_t* b,
                                b, ws_base, rocke_b_mul(b, rocke_b_const_i32(b, r), grp_stride));
             parts[r] = rocke_b_global_load_vN(b, ws_ptr, off, lt, v, 0);
         }
-        rocke_value_t* tot[16];
+        rocke_value_t* tot[ROCKE_WGRAD_REDUCE_MAX_VEC];
         for(int r = 0; r < reps; ++r)
             for(int i = 0; i < v; ++i)
             {
@@ -298,7 +357,7 @@ static void wr_emit_loop_fold(rocke_ir_builder_t* b,
     rocke_value_t* base = P == 1 ? elem_safe : rocke_b_add(b, elem_safe, rocke_b_mul(b, p_v, slab));
     const int step_slabs = P * U;
     const int n_main = R / step_slabs;
-    rocke_value_t* acc[16];
+    rocke_value_t* acc[ROCKE_WGRAD_REDUCE_MAX_VEC];
     bool have = false;
     if(n_main)
     {
@@ -314,7 +373,7 @@ static void wr_emit_loop_fold(rocke_ir_builder_t* b,
         rocke_b_region_enter(b, loop.body);
         {
             rocke_value_t* off0 = rocke_b_add(b, base, rocke_b_mul(b, loop.iv, stride_it));
-            rocke_value_t* vals[64][16];
+            rocke_value_t* vals[ROCKE_WGRAD_REDUCE_MAX_FOLD_LOOP][ROCKE_WGRAD_REDUCE_MAX_VEC];
             for(int u = 0; u < U; ++u)
             {
                 rocke_value_t* off
@@ -323,7 +382,7 @@ static void wr_emit_loop_fold(rocke_ir_builder_t* b,
                           : rocke_b_add(b, off0, rocke_b_mul(b, slab, rocke_b_const_i32(b, u * P)));
                 wr_load(b, spec, ws_ptr, off, v, vals[u]);
             }
-            rocke_value_t* tot[16];
+            rocke_value_t* tot[ROCKE_WGRAD_REDUCE_MAX_VEC];
             for(int i = 0; i < v; ++i)
                 tot[i] = rocke_b_vec_extract(b, loop.iter_vars[0], i);
             for(int u = 0; u < U; ++u)
@@ -348,7 +407,7 @@ static void wr_emit_loop_fold(rocke_ir_builder_t* b,
             const int r_first = r0 + u * P;
             rocke_value_t* off
                 = rocke_b_add(b, base, rocke_b_mul(b, slab, rocke_b_const_i32(b, r_first)));
-            rocke_value_t* vals[16];
+            rocke_value_t* vals[ROCKE_WGRAD_REDUCE_MAX_VEC];
             if(r_first + P <= R)
                 wr_load(b, spec, ws_ptr, off, v, vals);
             else
@@ -383,14 +442,14 @@ static void wr_emit_loop_fold(rocke_ir_builder_t* b,
         rocke_value_t* p0 = rocke_b_cmp_eq(b, p_v, rocke_b_const_i32(b, 0));
         rocke_if_t g = rocke_b_scf_if(b, rocke_b_land(b, in_bounds, p0));
         rocke_b_region_enter(b, g.then_region);
-        rocke_value_t* tot[16];
+        rocke_value_t* tot[ROCKE_WGRAD_REDUCE_MAX_VEC];
         for(int q = 0; q < P; ++q)
         {
             rocke_value_t* qi = rocke_b_const_i32(b, q);
             rocke_value_t* ci = rocke_b_mul(b, e_v, rocke_b_const_i32(b, v));
             rocke_value_t* li[2] = {qi, ci};
             rocke_value_t* pv = rocke_b_smem_load_vN_f32(b, sm, li, 2, v);
-            rocke_value_t* xs[16];
+            rocke_value_t* xs[ROCKE_WGRAD_REDUCE_MAX_VEC];
             for(int i = 0; i < v; ++i)
                 xs[i] = rocke_b_vec_extract(b, pv, i);
             for(int i = 0; i < v; ++i)

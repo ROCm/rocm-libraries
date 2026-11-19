@@ -18,6 +18,12 @@
  *   4  fp16 output, wg_M=64, wg_N=576, gfx942
  *   5  bf16 output, wg_M=32, wg_N=72, gfx950
  *   6  fp16 output, custom tile_m=8, tile_n=32, wg_M=64, wg_N=576, gfx950
+ *   7  ws_replicas=1 (the fold elided), gfx950
+ *   8  bf16 output, ws_replicas=4, gfx950
+ *   9-17 the vector / looped folds on bf16 wg_M=64, wg_N=576, gfx942 (17 both
+ *        engines must reject)
+ *   18-21 both engines must reject: ws_bf16 on the scalar fold, slab_par
+ *        without fold_loop, vec=32, fold_loop=128
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -128,6 +134,25 @@ static int make_cfg(int idx, rocke_wgrad_reduce_spec_t* spec, const char** arch)
             spec->tile_m = 1;
         if(idx == 17)
             spec->groups = 2;
+        return 0;
+    case 18: /* both engines must reject: ws_bf16 on the scalar fold */
+    case 19: /* slab_par without fold_loop */
+    case 20: /* vec past the widest the folds hold */
+    case 21: /* fold_loop past the deepest the folds hold */
+        spec->wg_M = 64;
+        spec->wg_N = 576;
+        spec->dtype_d = "bf16";
+        spec->problem_short = "N1H4W4C64_K64Y3X3";
+        *arch = "gfx942";
+        spec->ws_bf16 = idx == 18;
+        spec->vec = idx == 18 ? 1 : idx == 20 ? 32 : 4;
+        spec->slab_par = idx == 19 ? 4 : 1;
+        if(idx == 21)
+        {
+            spec->ws_replicas = 256;
+            spec->fold_loop = 128;
+            spec->tile_m = 1;
+        }
         return 0;
     default:
         return -1;
