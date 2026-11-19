@@ -197,6 +197,8 @@ def test_the_tables_are_package_data():
     from pathlib import Path
 
     lib = Path(cp.__file__).resolve().parents[1]
+    if not (lib / "pyproject.toml").is_file():
+        pytest.skip("the installed test tree carries no pyproject.toml")
     data = tomllib.loads((lib / "pyproject.toml").read_text())
     patterns = data["tool"]["setuptools"]["package-data"]["dispatch"]
     files = [

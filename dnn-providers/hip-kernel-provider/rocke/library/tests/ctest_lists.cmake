@@ -100,6 +100,31 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
         "  TIMEOUT 180)\n")
 
+# Library conv pin and route table CPU tests (no GPU): every label of the
+# shipped tables rebuilds its kernel IR from the label alone, the tables load,
+# refuse what their kernels cannot serve and dispatch, and the kernel job read
+# off an identity is the one the AOT generators build. Their own entry, with
+# the conv entry's labels and PYTHONPATH, so building IR for every pinned case
+# does not share rocke_library_conv_pytest's CTest budget.
+set(_ROCKE_LIBRARY_CONV_TABLE_TEST_RELPATHS
+    "tests/library/tests/test_aot_jobs_from_identity.py"
+    "tests/library/tests/test_conv_pin_table.py"
+    "tests/library/tests/test_conv_routes.py"
+    "tests/library/tests/test_conv_pins_dispatch.py"
+    "tests/library/tests/test_derive_conv_pins.py")
+set(_ROCKE_LIBRARY_CONV_TABLE_TESTS "")
+foreach(_rocke_conv_table_test ${_ROCKE_LIBRARY_CONV_TABLE_TEST_RELPATHS})
+  string(APPEND _ROCKE_LIBRARY_CONV_TABLE_TESTS
+         " \"${ROCKE_TEST_CTEST_REL}${_rocke_conv_table_test}\"")
+endforeach()
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_conv_tables_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_TABLE_TESTS} -v -rs --timeout=120)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_conv_tables_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+        "  TIMEOUT 600)\n")
+
 # The forward AOT-packaging cross-check gets its own entry: it samples far more of
 # the sweep's identity space than the other conv files above, so its slowest cases
 # (building and comparing IR for a sampled instance) exceed both the shared entry's
@@ -593,6 +618,8 @@ set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
     "tests/library/tests/test_conv_winograd_gen_gpu.py"
     "tests/library/tests/test_conv_winograd_dispatch_gpu.py"
     "tests/library/tests/test_conv_implicit_gemm_numeric.py"
+    "tests/library/tests/test_conv_pin_table_gpu.py"
+    "tests/library/tests/test_conv_routes_gpu.py"
     "tests/library/tests/test_conv_direct_tf32_mfma.py::TestDirectTf32Gpu"
     "tests/library/tests/test_conv_direct_tf32_scalar.py::TestGpuCorrectness"
     # The sweep sampler (test_sweep_candidates) compiles exact-fp32 grid
