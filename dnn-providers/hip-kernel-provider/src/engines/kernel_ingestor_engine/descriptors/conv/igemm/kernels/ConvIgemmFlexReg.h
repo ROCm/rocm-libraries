@@ -16,7 +16,9 @@
 // prefetched in registers (16-byte buffer loads, four X and BN / 64 W granules a thread) one step
 // ahead, so a load has a whole step to land.
 //
-// Waves: two groups of four, the BN / 2-channel halves of the block. A step is four phases,
+// Waves: two groups of four, the BN / 2-channel halves of the block; a group's four waves split
+// the 256 positions, so a wave owns 64 positions x BN / 2 channels (the square wave tile reads
+// the fewest LDS bytes a step: 64 X and 64 W rows). A step is four phases,
 // each ended by a barrier, and the second group runs one phase behind the first:
 //   [mem A]     every fragment read of the step (two 64-byte halves of the slice);
 //   [compute A] the first half's MMAs at raised priority;
@@ -46,8 +48,8 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
     constexpr int KS = GR * GE; // reduction channels a step
     constexpr int NG = BM * GR, NGW = BN * GR; // granules of the X and W tiles
     constexpr int XL = NG / THREADS, WL = NGW / THREADS; // granules a thread: X, W
-    constexpr int WN = BN / 4; // a wave's output channels
-    constexpr int FM = 128 / DIM, FN = WN / DIM; // a wave's position x channel fragments
+    constexpr int WM = BM / 4, WN = BN / 2; // a wave's output positions and channels
+    constexpr int FM = WM / DIM, FN = WN / DIM; // a wave's position x channel fragments
     constexpr int MPG = GE / Atom::KPL; // MMAs a granule
     typedef typename K1Raw<16>::type Raw16;
     typedef typename Atom::frag Frag;
@@ -79,7 +81,7 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
     const int tid = threadIdx.x;
     const int lane = tid % WAVE;
     const int wave = __builtin_amdgcn_readfirstlane(tid / WAVE);
-    const int grp = wave / 4, wx = wave % 2, wk = (wave / 2) % 2;
+    const int grp = wave / 4, wx = wave % 4;
 
     // Steps over the depth and height taps that reach the input for some row of the tile.
     const int taps2 = gather.taps[2];
@@ -291,7 +293,7 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
             acc[i][j] = typename Atom::acc{};
 
     const int fr16 = lane % DIM, fg = lane / DIM;
-    const int xRow0 = wx * 128 + fr16, wRow0 = grp * (BN / 2) + wk * WN + fr16;
+    const int xRow0 = wx * WM + fr16, wRow0 = grp * WN + fr16;
     auto at = [&](int r, int hf) __attribute__((always_inline))
     {
         return r * GR + ((4 * hf + fg) ^ (r % 8));
@@ -370,7 +372,7 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
     // of fragment row i.
     const long long outChans = DIR == K1_FORWARD ? a.k : a.c;
     const long long chanBase = static_cast<long long>(g) * ncols;
-    const int nl = n0 + grp * (BN / 2) + wk * WN + 4 * fg;
+    const int nl = n0 + grp * WN + 4 * fg;
     const bool vec = (ncols & 3) == 0;
     if(splits > 1)
     {
@@ -378,7 +380,7 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
 #pragma unroll
         for(int i = 0; i < FM; ++i)
         {
-            const long long m = m0 + wx * 128 + i * DIM + fr16;
+            const long long m = m0 + wx * WM + i * DIM + fr16;
             if(m >= gather.rows)
                 continue;
 #pragma unroll
@@ -413,7 +415,7 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
 #pragma unroll
     for(int i = 0; i < FM; ++i)
     {
-        const long long m = m0 + wx * 128 + i * DIM + fr16;
+        const long long m = m0 + wx * WM + i * DIM + fr16;
         if(m >= gather.rows)
             continue;
 #pragma unroll
