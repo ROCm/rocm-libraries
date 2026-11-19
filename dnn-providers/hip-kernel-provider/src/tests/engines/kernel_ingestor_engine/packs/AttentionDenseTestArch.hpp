@@ -71,18 +71,23 @@ inline std::string
 }
 
 /// The completed metadata prepare() reads before the signature comparison: head_size, the
-/// (block_m, block_n) tile and, on gfx942, the qb_minor grid as the KMD defaults complete
-/// it.
+/// (block_m, block_n) tile and, on gfx942, the qb_minor grid and the baseline body knobs
+/// (lds_num_buffers, v_reg_prefetch) as the KMD defaults complete them.
 inline hipdnn_plugin_sdk::ingestor::MetadataValues completedAttentionDenseMetadata(
     const AttentionDenseTestArch& arch, int64_t headSize, int64_t blockM, int64_t blockN)
 {
     hipdnn_plugin_sdk::ingestor::MetadataValues metadata{
+        // A record completes to the grid body: the KMD default of the field the stride rule reads.
+        {std::string("ragged"), int64_t{0}},
         {std::string("head_size"), headSize},
         {std::string("block_m"), blockM},
         {std::string("block_n"), blockN},
     };
     if(arch.completesGridOrder)
     {
+        // The baseline body: one K buffer, no V prefetch. It reads the strides.
+        metadata[std::string("lds_num_buffers")] = int64_t{1};
+        metadata[std::string("v_reg_prefetch")] = int64_t{0};
         metadata[std::string("persistent")] = int64_t{0};
         metadata[std::string("num_persistent")] = int64_t{304};
         metadata[std::string("persist_decode")] = std::string("auto");

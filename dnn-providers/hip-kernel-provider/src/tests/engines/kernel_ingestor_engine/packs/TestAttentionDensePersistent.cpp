@@ -13,7 +13,9 @@
 
 #include <gtest/gtest.h>
 
+#include "engines/kernel_ingestor_engine/packs/AttentionDenseCommon.hpp"
 #include "engines/kernel_ingestor_engine/packs/AttentionDensePersistent.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseLaunchValues.hpp"
 
 /**
  * @file TestAttentionDensePersistent.cpp
@@ -186,7 +188,7 @@ TEST(TestAttentionDensePersistent, FastDivPairDividesExactlyBelowTheDividendBoun
 }
 
 /// Every name requireSignatureMatch compares: the pairs follow the shape in the decode's own
-/// divisor order, and lse_ptr follows them.
+/// divisor order, lse_ptr follows them, and the twelve strides come last.
 TEST(TestAttentionDensePersistent, FastDivNamesFollowTheSignatureThePythonDeclares)
 {
     ASSERT_EQ(std::size(SIGNATURE_GOLDENS), 14U);
@@ -201,6 +203,29 @@ TEST(TestAttentionDensePersistent, FastDivNamesFollowTheSignatureThePythonDeclar
         if(golden.lse)
         {
             names += " lse_ptr";
+        }
+        for(const auto name : attention_dense::DENSE_STRIDE_NAMES)
+        {
+            names += " " + std::string(name);
+        }
+        EXPECT_EQ(names, golden.names) << golden.grid << " lse " << golden.lse;
+    }
+}
+
+/// The argument list the gfx942 engine's current contract launches on each grid, with and
+/// without LSE (attention_dense::kernelSignature), name for name the one
+/// attention_dense_signature declares: the engine and the Python cannot drift apart without
+/// this failing on a host.
+TEST(TestAttentionDensePersistent, TheEngineLaunchesTheArgumentsThePythonDeclares)
+{
+    const auto abi = gfx942AttentionDenseArch().currentContract.abi;
+    for(const auto& golden : SIGNATURE_GOLDENS)
+    {
+        std::string names;
+        for(const auto& argument :
+            attention_dense::kernelSignature(abi, gridOf(golden.grid), golden.lse))
+        {
+            names += (names.empty() ? "" : " ") + argument.name;
         }
         EXPECT_EQ(names, golden.names) << golden.grid << " lse " << golden.lse;
     }

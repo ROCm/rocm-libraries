@@ -15,8 +15,25 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx950AttentionDense`.
   `num_query_heads` / `num_kv_heads` as kernargs from the graph, so one variant per
   (dtype, head_size, causal, tile) serves every head configuration. Each variant is
   built at the canonical 8 / 8 (a spec field, not metadata).
-- Fixed in every variant: batch 1, seqlen_q 512, seqlen_kv 512, no sliding window, not ragged,
-  not varlen, not paged, not persistent.
+- Fixed in every variant: no sliding window, not ragged, not varlen, not paged, not persistent.
+- Shape: each variant is built at batch 1, seqlen_q 512 and seqlen_kv 512, but batch and both
+  sequence lengths are runtime kernel arguments. A variant serves a graph whose seqlen_q is a
+  multiple of its block_m and seqlen_kv a multiple of its block_n.
+- Layouts: Q, K, V and O may be any `[B, S, H, D]` view whose strides the engine's host predicate
+  admits (`packs/AttentionDenseStrides.hpp`, the C++ twin of rocKE's
+  `dense_strides_admit`), so BSHD, BHSD, batch slices and packed QKV graphs are served. Every
+  variant takes the twelve `stride_{q,k,v,o}_{batch,head,token}` arguments last and reads them.
+  The head-dim stride must be 1, every stride of an axis longer than 1 a multiple of 8 elements
+  (a token stride at least the head size), no operand may overlap itself, each operand must
+  declare a base alignment that is a multiple of 16 bytes, and the slabs must stay inside the kernel's
+  32-bit offsets. Any other graph is declined with an INFO line naming the reason (`operand`,
+  `alignment`, `head_dim_stride`, `stride_alignment`, `overlap` or `size_limit`). A graph that
+  declares another alignment is declined first, with `alignment`, before its layout is
+  judged; the stride predicate's own `pointer_alignment` reason is the second line for the
+  same rule and is what refuses a plan when it is prepared.
+- Saved plans: new plans are saved under `hipkernel.gfx950_attention_dense.dispatch.v3`, which
+  records the twelve strides. Plans saved under `dispatch.v1` and `dispatch.v2` still restore and
+  launch their own older 8- and 10-argument kernels.
 
 ## Files
 

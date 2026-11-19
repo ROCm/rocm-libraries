@@ -41,25 +41,50 @@ inline constexpr std::string_view GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
 
 /// Contract v2: the same values, and the launch also passes num_query_heads and
 /// num_kv_heads (10 kernel arguments), for kernels that read the head counts at runtime.
-/// New plans are saved under it.
+/// Its handler stays registered so plans saved under it still load.
 inline constexpr std::string_view GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2
     = "hipkernel.gfx950_attention_dense.dispatch.v2";
 
+/// The strided contract, v3: v2's values with `stride_layout` replaced by the twelve
+/// element strides (attention_dense::DENSE_STRIDE_NAMES), and the launch passes v2's ten
+/// arguments and then those strides (22 kernel arguments), for kernels that read every
+/// stride at runtime. It also saves the kernel's `block_n` and `reads_strides` (whether its
+/// body reads them, see candidateReadsStrides: 1 for the grid body and the persistent work
+/// orders that decode through the shape arguments, 0 for the ragged body and the gqa_pair work
+/// orders, whose plans hold packed strides only). New plans are saved under it.
+/// Its version is spelled only here: the next free number of this dispatch name.
+inline constexpr std::string_view GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED
+    = "hipkernel.gfx950_attention_dense.dispatch.v3";
+
 /// The values of the `hipkernel.gfx950_attention_dense.dispatch.v1` and `.v2` contracts,
-/// which share one value set (attention_dense::launchValues): the sixteen both arches save.
+/// which share one value set (attention_dense::launchValues): the sixteen both arches save
+/// without strides, `stride_layout` among them.
 hipdnn_plugin_sdk::ingestor::MetadataValues gfx950AttentionDenseLaunchValues(
+    const AttentionDenseBinding& binding, const AttentionDenseProblem& problem, int64_t blockM);
+
+/// The values of the strided contract (GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED), which
+/// new plans are saved under: the fifteen both arches share, the binding's twelve strides,
+/// its block_n and its reads-strides flag.
+hipdnn_plugin_sdk::ingestor::MetadataValues gfx950AttentionDenseStridedLaunchValues(
     const AttentionDenseBinding& binding, const AttentionDenseProblem& problem, int64_t blockM);
 
 /// Everything a gfx950 dense-attention launch is computed from.
 using Gfx950AttentionDenseLaunchInputs = AttentionDenseLaunchInputs;
 
-/// Reads the values of the `hipkernel.gfx950_attention_dense.dispatch.v1` or `.v2`
-/// contract (one value set; the versions differ only in the kernel arguments the launch
-/// passes). `block_m` must be 128 or 256, the two gfx950 builds. For every other rule, and
-/// the one gfx950 exception to them, see attention_dense::readLaunchInputs.
+/// The engine's arch descriptor: its current and legacy contracts, each with the kernel
+/// arguments it launches (attention_dense::kernelSignature), and the per-candidate rules the
+/// shared matching and dispatch apply. Process-lifetime.
+const attention_dense::AttentionDenseArch& gfx950AttentionDenseArch();
+
+/// Reads the values of the strided contract, or of the `hipkernel.gfx950_attention_dense.
+/// dispatch.v1` or `.v2` contract (one value set; those two differ only in the kernel
+/// arguments the launch passes). `block_m` must be 128 or 256, the two gfx950 builds. For
+/// every other rule, the strides included, and the one gfx950 exception to them, see
+/// attention_dense::readLaunchInputs.
 ///
-/// @throws HipdnnPluginException with a load refusal when the dispatch name is neither
-///         contract, or when a value is missing, extra, of another type or out of range.
+/// @throws HipdnnPluginException with a load refusal when the dispatch name is none of the
+///         three contracts, or when a value is missing, extra, of another type or out of
+///         range.
 Gfx950AttentionDenseLaunchInputs readGfx950AttentionDenseLaunchInputs(
     const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs);
 

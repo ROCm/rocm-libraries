@@ -5,6 +5,7 @@
 
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include <gtest/gtest.h>
 
@@ -46,35 +47,49 @@ TEST(TestIngestorDispatchAliases, EachVersionedAliasResolvesToTheSameHandler)
     expectOneHandler("hipkernel.pointwise.dispatch", POINTWISE_DISPATCH_SYMBOL_V1);
     expectOneHandler("hipkernel.conv_fwd.dispatch", CONV_FWD_DISPATCH_SYMBOL_V1);
     expectOneHandler("hipkernel.gfx950_attention_dense.dispatch",
-                     GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2);
+                     GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED);
+    expectOneHandler("hipkernel.gfx942_attention_dense.dispatch",
+                     GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED);
 }
 
 // A superseded contract keeps its own handler, so a plan saved under it still restores
-// and launches the arguments its code object takes, not the current contract's.
+// and launches the arguments its code object takes, not the current contract's: on gfx950
+// v1 (eight arguments) and v2 (ten), on gfx942 v1 (no strides).
 TEST(TestIngestorDispatchAliases, ASupersededContractKeepsItsOwnHandler)
 {
     registerNativeIngestorSymbols();
 
-    const auto* current
-        = DispatchRegistry<Handle>::tryResolve("hipkernel.gfx950_attention_dense.dispatch");
-    const auto* v1 = DispatchRegistry<Handle>::tryResolve(
-        std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1));
+    for(const auto& [unversioned, superseded] :
+        {std::pair<std::string_view, std::string_view>{"hipkernel.gfx950_attention_dense.dispatch",
+                                                       GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1},
+         std::pair<std::string_view, std::string_view>{"hipkernel.gfx950_attention_dense.dispatch",
+                                                       GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2},
+         std::pair<std::string_view, std::string_view>{"hipkernel.gfx942_attention_dense.dispatch",
+                                                       GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1}})
+    {
+        const auto* current = DispatchRegistry<Handle>::tryResolve(std::string(unversioned));
+        const auto* legacy = DispatchRegistry<Handle>::tryResolve(std::string(superseded));
 
-    ASSERT_NE(v1, nullptr) << GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1 << " is not registered";
-    EXPECT_NE(v1, current) << GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
-                           << " resolves to the current contract's handler";
+        ASSERT_NE(legacy, nullptr) << superseded << " is not registered";
+        EXPECT_NE(legacy, current) << superseded << " resolves to the current contract's handler";
+    }
+
+    EXPECT_NE(DispatchRegistry<Handle>::tryResolve(
+                  std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1)),
+              DispatchRegistry<Handle>::tryResolve(
+                  std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2)))
+        << "gfx950's v1 and v2 launch different argument lists, so they need their own handlers";
 }
 
-// gfx942 has one contract. Its versioned name resolves to the handler of the unversioned
-// one, so a plan saved through the catalog's handler names that same handler, and it has
-// no version it never defined.
-TEST(TestIngestorDispatchAliases, Gfx942AttentionDenseHasOneContractOnItsCatalogHandler)
+// No dense engine answers to a version it never defined: the next number past each
+// engine's strided contract.
+TEST(TestIngestorDispatchAliases, AttentionDenseHasNoVersionItNeverDefined)
 {
     registerNativeIngestorSymbols();
 
-    expectOneHandler("hipkernel.gfx942_attention_dense.dispatch",
-                     GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1);
-    EXPECT_EQ(DispatchRegistry<Handle>::tryResolve("hipkernel.gfx942_attention_dense.dispatch.v2"),
+    EXPECT_EQ(DispatchRegistry<Handle>::tryResolve("hipkernel.gfx950_attention_dense.dispatch.v4"),
+              nullptr);
+    EXPECT_EQ(DispatchRegistry<Handle>::tryResolve("hipkernel.gfx942_attention_dense.dispatch.v3"),
               nullptr);
 }
 

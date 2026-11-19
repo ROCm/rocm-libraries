@@ -38,30 +38,55 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 /// `<d>_magic`, `<d>_shift` i32 pair per fast-division divisor of its decode (2 or 3
 /// pairs); and to a kernel that writes LSE last lse_ptr, the stats output: 10, 11, 14, 15,
 /// 16 or 17 arguments. The grid is (nqb, Hq, B), (B, Hq, nqb) or (8 nqb, Hq / 8, B) at the
-/// qb_minor, bt_hkv_minor or hq_minor_swz order, or (num_persistent, 1, 1). New plans are
-/// saved under it. Versions are per dispatch name, so this is gfx942's first contract, not
-/// gfx950's v1.
+/// qb_minor, bt_hkv_minor or hq_minor_swz order, or (num_persistent, 1, 1). Versions are per
+/// dispatch name, so this is gfx942's first contract, not gfx950's v1. Its handler stays
+/// registered so plans saved under it still load.
 inline constexpr std::string_view GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
     = "hipkernel.gfx942_attention_dense.dispatch.v1";
 
+/// The strided contract, v2: v1's values with `stride_layout` replaced by the twelve
+/// element strides (attention_dense::DENSE_STRIDE_NAMES), and the launch passes v1's
+/// arguments and then those strides last (22, 23, 26, 27, 28 or 29 kernel arguments), for
+/// kernels that read every stride at runtime. It also saves the kernel's `block_n` and
+/// `reads_strides` (whether its body reads them: 0 for the KDB and VPF pipelines, whose plans
+/// hold packed strides only). New plans are saved under it. Its version is spelled only here:
+/// the next free number of this dispatch name.
+inline constexpr std::string_view GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED
+    = "hipkernel.gfx942_attention_dense.dispatch.v2";
+
 /// The values of the `hipkernel.gfx942_attention_dense.dispatch.v1` contract
-/// (attention_dense::launchValues): the sixteen both arches save, and, as gfx942 serves
-/// stats and grids, `stats.uid`, `grid_order`, `persist_decode` and `num_persistent`.
+/// (attention_dense::launchValues): the sixteen both arches save without strides,
+/// `stride_layout` among them, and, as gfx942 serves stats and grids, `stats.uid`,
+/// `grid_order`, `persist_decode` and `num_persistent`.
 hipdnn_plugin_sdk::ingestor::MetadataValues
     gfx942AttentionDenseLaunchValues(const AttentionDenseBinding& binding,
                                      const AttentionDenseProblem& problem,
                                      int64_t blockM,
                                      const attention_dense::AttentionDenseGrid& grid = {});
 
+/// The values of the strided contract (GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED), which
+/// new plans are saved under: v1's with `stride_layout` replaced by the binding's twelve
+/// strides, its block_n and its reads-strides flag.
+hipdnn_plugin_sdk::ingestor::MetadataValues
+    gfx942AttentionDenseStridedLaunchValues(const AttentionDenseBinding& binding,
+                                            const AttentionDenseProblem& problem,
+                                            int64_t blockM,
+                                            const attention_dense::AttentionDenseGrid& grid = {});
+
 /// Everything a gfx942 dense-attention launch is computed from.
 using Gfx942AttentionDenseLaunchInputs = AttentionDenseLaunchInputs;
 
-/// Reads the values of the `hipkernel.gfx942_attention_dense.dispatch.v1` contract.
-/// `block_m` must be one gfx942 builds: a positive multiple of 32 within a 1024-thread CTA.
-/// For every other rule, including those for the stats and grid values, see
-/// attention_dense::readLaunchInputs.
+/// The engine's arch descriptor: its current and legacy contracts, each with the kernel
+/// arguments it launches (attention_dense::kernelSignature), and the per-candidate rules the
+/// shared matching and dispatch apply. Process-lifetime.
+const attention_dense::AttentionDenseArch& gfx942AttentionDenseArch();
+
+/// Reads the values of the strided contract or of `hipkernel.gfx942_attention_dense.
+/// dispatch.v1`. `block_m` must be one gfx942 builds: a positive multiple of 32 within a
+/// 1024-thread workgroup. For every other rule, including those for the strides, the stats and
+/// the grid values, see attention_dense::readLaunchInputs.
 ///
-/// @throws HipdnnPluginException with a load refusal when the dispatch name is not the
+/// @throws HipdnnPluginException with a load refusal when the dispatch name is neither
 ///         contract, or when a value is missing, extra, of another type or out of range.
 Gfx942AttentionDenseLaunchInputs readGfx942AttentionDenseLaunchInputs(
     const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs);

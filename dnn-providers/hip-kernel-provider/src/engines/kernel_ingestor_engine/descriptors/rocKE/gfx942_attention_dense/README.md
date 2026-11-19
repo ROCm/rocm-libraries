@@ -53,6 +53,23 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
 - Batch, sequence lengths and both head counts are runtime kernel arguments, so every
   variant serves any shape its tile divides. Each variant is built at batch 1,
   seqlen_q = seqlen_kv = 512 and 8 query/KV heads.
+- Layouts: Q, K, V and O may be any `[B, S, H, D]` view whose strides the engine's host predicate
+  admits (`packs/AttentionDenseStrides.hpp`, the C++ twin of rocKE's `dense_strides_admit`), so
+  BSHD, BHSD, batch slices and packed QKV graphs are served. Every variant takes the twelve
+  `stride_{q,k,v,o}_{batch,head,token}` arguments last (after `lse_ptr` where there is one).
+  The grid and persistent variants read them; the `v_reg_prefetch` and `lds_num_buffers` 2
+  pipelines ignore them, so a graph whose operands are not packed BSHD never matches those.
+  The head-dim stride must be 1, every stride of an axis longer than 1 a multiple of 8 elements
+  (a token stride at least the head size), no operand may overlap itself, each operand must
+  declare a base alignment that is a multiple of 16 bytes, and the slabs must stay inside the kernel's
+  32-bit offsets. Any other graph is declined with an INFO line naming the reason (`operand`,
+  `alignment`, `head_dim_stride`, `stride_alignment`, `overlap` or `size_limit`). A graph that
+  declares another alignment is declined first, with `alignment`, before its layout is
+  judged; the stride predicate's own `pointer_alignment` reason is the second line for the
+  same rule and is what refuses a plan when it is prepared.
+- Saved plans: new plans are saved under `hipkernel.gfx942_attention_dense.dispatch.v2`, which
+  records the twelve strides. Plans saved under `dispatch.v1` still restore and launch their
+  own older kernel arguments.
 - Each grid is held fixed by its registry candidate: `gfx942_dense_qbminor`,
   `gfx942_dense_btminor_aot`, `gfx942_dense_hqswz_aot` and `gfx942_dense_persist_aot`.
 - Not covered by this engine (follow-ups). A graph-level gap is declined with an INFO line
@@ -75,7 +92,9 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
     other than 64 and 128, FP32 and FP8 data types, dropout, additive / ALiBi / block
     masks, scale tensors, and the Max and Sum_exp outputs. The shipped tiles are block_m
     64, 128, 256 and 512 with block_n 32, 64 and 128, per cell as listed in the selection.
-  - Addressing limit: K/V under 2^31 bytes and Q/O under 2^31 elements (32-bit offsets).
+  - Addressing limit: K/V under 2^31 bytes and Q/O under 2^31 elements (32-bit offsets). With strided
+    operands the same limits also hold per batch-and-head slab, where a K/V slab counts the two
+    tiles a load may reach past the data.
   - Design limit: FLOAT accumulation, so a DOUBLE compute type is declined.
 
 ## Files

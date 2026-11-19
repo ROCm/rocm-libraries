@@ -7,6 +7,7 @@
 
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseGeometry.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseLaunchValues.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/AttentionDenseCatalogTileTestSupport.hpp"
 
 /**
@@ -35,6 +36,21 @@ TEST(TestGfx950AttentionDenseCatalogTiles, EveryShippedKernelsTileIsOneTheEngine
 {
     expectEveryShippedAttentionDenseTileIsLaunchable(GFX950_ATTENTION_DENSE_ENGINE_NAME,
                                                      &isSupportedGfx950AttentionDenseTile);
+}
+
+/// Every shipped kernel takes exactly the arguments the engine's current contract launches.
+TEST(TestGfx950AttentionDenseCatalogTiles, EveryShippedKernelTakesTheArgumentsTheEngineLaunches)
+{
+    expectEveryShippedAttentionDenseKernelTakesTheLaunchedArguments(
+        GFX950_ATTENTION_DENSE_ENGINE_NAME, gfx950AttentionDenseArch());
+}
+
+/// Every shipped kernel is judged by the engine as rocKE judges it: it reads its strides, or the
+/// engine would hand it a strided graph it cannot address. Also one flip of each body class.
+TEST(TestGfx950AttentionDenseCatalogTiles, EveryShippedKernelReadsItsStridesAsRockeSaysItDoes)
+{
+    expectEveryShippedAttentionDenseKernelReadsItsStridesAsRockeSaysItDoes(
+        GFX950_ATTENTION_DENSE_ENGINE_NAME, "gfx950", gfx950AttentionDenseArch());
 }
 
 } // namespace
