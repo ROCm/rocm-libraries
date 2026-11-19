@@ -140,6 +140,17 @@ namespace TensileLite
                     }
                 }
             }
+            // Whether downsampleMXScaleFreeDim keeps each tile's largest E8 scale (passed as its
+            // unsignedExponentScale). The MAF data modes prescribe their scale distribution, and
+            // a tile maximum skews it: with two free elements per tile, P(scale <= median) drops
+            // from 1/2 to 1/4. Their data codes do not depend on the scale (MAF2.0 draws each
+            // scale on its own; MAF1.0 and unit scale are constant), so they keep the first scale
+            // of each tile, which is itself one draw from the prescribed distribution.
+            inline bool takeMXScaleTileMax(InitMode dataInit, bool unsignedExponentScale)
+            {
+                return unsignedExponentScale && !IsMaf(dataInit);
+            }
+
             // Whether initOneMXSide applies varyMXScaleFreeTiles: random-like scale
             // init on E8 scales with a free-dim block above one. The MAF data modes
             // prescribe their scales (MAF1.0 0.5, MAF2.0 drawn, unit scale 1.0), so
