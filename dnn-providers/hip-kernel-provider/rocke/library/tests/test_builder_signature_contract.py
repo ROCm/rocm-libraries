@@ -385,6 +385,21 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_winograd_gen.WinogradGenSpec": ("ax_x", "ax_y", "problem"),
     # Fused 1-D Winograd forward
     "kernels.common.conv_winograd_fused_1d_wmma.FusedWino1DSpec": ("ax", "problem"),
+    # Deterministic dgrad box reduction: the stage-1 tile and warp layout it
+    # reads its partial slabs in. They describe the binary it pairs with, so no
+    # default could be right.
+    "kernels.common.conv_dgrad_box_det.DgradBoxDetReduceSpec": (
+        "tile_m",
+        "tile_n",
+        "warp_m",
+        "warp_n",
+    ),
+    # The dgrad halo zero-fill: extents are kernel arguments, every field defaulted.
+    "kernels.common.conv_dgrad_interior.DgradHaloZeroSpec": (),
+    # 3-D Winograd F(2x2x2, 3x3x3) (gfx942): the input extents and channels.
+    "kernels.common.conv_winograd3d.Winograd3dSpec": ("C", "Di", "Hi", "K", "Wi"),
+    "kernels.common.conv_winograd3d.WinogradXSpec": ("C", "Di", "Hi", "K", "Wi"),
+    "kernels.common.conv_winograd3d.WinogradYxSpec": ("C", "Di", "Hi", "K", "Wi"),
 }
 
 
