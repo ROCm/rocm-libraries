@@ -292,6 +292,15 @@ std::vector<DeclineCase> declineCases()
                               [](json& g) { tensorOf(g, K_UID)["ragged_offset_multiplier"] = 7; });
          },
          "RAGGED_FORMAT"},
+        {"RAGGED_FORMAT_StatsMultiplierOfTheDataTensors",
+         [thd] {
+             return graphWith(thd, [](json& g) {
+                 // One multiplier for every tensor: the stats [T, H, 1] cannot share Q's.
+                 tensorOf(g, STATS_UID)["ragged_offset_multiplier"]
+                     = tensorOf(g, Q_UID)["ragged_offset_multiplier"];
+             });
+         },
+         "RAGGED_FORMAT"},
         {"SEQ_LEN_FORMAT",
          [] {
              return graphWith({}, [](json& g) {
