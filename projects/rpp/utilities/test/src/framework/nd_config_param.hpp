@@ -77,7 +77,7 @@ enum class NdShape { VectorAligned, Tail };
 struct NdConfig {
     RppBackend backend;
     DType dtypeIn, dtypeOut;
-    Rpp32u nDim;  // per-sample rank: 2, 3 or 4
+    Rpp32u nDim;  // per-sample rank: 1, 2, 3 or 4
     NdShape shape;
 };
 
@@ -85,6 +85,8 @@ struct NdConfig {
 inline NdDims nd_extents(Rpp32u nDim, NdShape shape = NdShape::VectorAligned) {
     const bool tail = shape == NdShape::Tail;
     switch (nDim) {
+        case 1:
+            return tail ? NdDims{2, 45} : NdDims{2, 48};
         case 3:
             return tail ? NdDims{2, 5, 12, 19} : NdDims{2, 5, 12, 16};
         case 4:

@@ -46,6 +46,7 @@ namespace {
 // slice is not rank-agnostic: it dispatches on numDims and on the descriptor's layout, which must
 // agree with the rank:
 //
+//   numDims 2 -> (N,W)           layout NCHW   -- 1D audio signal, no channel axis
 //   numDims 3 -> (N,H,W)         layout NCHW   -- no channel axis
 //   numDims 4 -> (N,C,H,W)       layout NCHW   -- planar, C must be 1 or 3
 //              (N,H,W,C)       layout NHWC   -- packed, C = 3
@@ -81,6 +82,8 @@ constexpr Rpp32u kChannels = 3;
 NdDims slice_extents(Rpp32u nDim, SliceLayout layout) {
     const bool planar = layout == SliceLayout::Planar;
     switch (nDim) {
+        case 1:
+            return {2, 45};  // N,W
         case 2:
             return {2, 24, 32};  // N,H,W
         case 3:
@@ -93,15 +96,15 @@ NdDims slice_extents(Rpp32u nDim, SliceLayout layout) {
 }
 
 RpptLayout rpp_layout(Rpp32u nDim, SliceLayout layout) {
-    if (nDim == 2) return RpptLayout::NCHW;  // (N,H,W): the numDims==2 path takes no channel axis
+    if (nDim <= 2) return RpptLayout::NCHW;  // (N,W) and (N,H,W) take no channel axis
     if (nDim == 3) return layout == SliceLayout::Planar ? RpptLayout::NCHW : RpptLayout::NHWC;
     return layout == SliceLayout::Planar ? RpptLayout::NCDHW : RpptLayout::NDHWC;
 }
 
-// Which per-sample axis holds the channels, or -1 when there is none (rank 2). Planar layouts put
-// it first, packed layouts last.
+// Which per-sample axis holds the channels, or -1 when there is none (rank 1 or 2). Planar layouts
+// put it first, packed layouts last.
 int channel_axis(Rpp32u nDim, SliceLayout layout) {
-    if (nDim == 2) return -1;
+    if (nDim <= 2) return -1;
     return layout == SliceLayout::Planar ? 0 : static_cast<int>(nDim) - 1;
 }
 
@@ -220,22 +223,22 @@ constexpr char kHipDenseSkip[] =
 TEST_P(SliceTest, Correctness) {
     const NdConfig cfg = GetParam().cfg;
     const SliceParams p = GetParam().op;
-    if (p.layout == SliceLayout::Planar) GTEST_SKIP() << kPlanarSkip;
+    if (p.layout == SliceLayout::Planar && cfg.nDim > 1) GTEST_SKIP() << kPlanarSkip;
     if (p.kind == SliceKind::DensePadded && cfg.backend == RPP_HIP_BACKEND)
         GTEST_SKIP() << kHipDenseSkip;
     dispatch_dtype<DType::U8, DType::F32>(
         cfg.dtypeIn, [&](auto tag) { run_slice<Element<decltype(tag)>>(cfg, p); });
 }
 
-// U8 and F32 are the conversions the header documents. Rank 2 has no channel axis, so it is planar
-// only. PaddedTail is packed-only.
+// U8 and F32 are the conversions the header documents. Ranks 1 and 2 have no channel axis, so they
+// are planar only; rank 1 is the audio path. PaddedTail is packed-only.
 std::vector<NdWithParams<SliceParams>> slice_configs() {
     std::vector<NdWithParams<SliceParams>> out;
     // slice_extents() supplies the extents, so the shape axis is not varied.
     for (const NdConfig& cfg :
-         make_nd_configs({DType::U8, DType::F32}, {2, 3, 4}, {NdShape::VectorAligned}))
+         make_nd_configs({DType::U8, DType::F32}, {1, 2, 3, 4}, {NdShape::VectorAligned}))
         for (SliceLayout layout : {SliceLayout::Planar, SliceLayout::Packed}) {
-            if (cfg.nDim == 2 && layout == SliceLayout::Packed) continue;
+            if (cfg.nDim <= 2 && layout == SliceLayout::Packed) continue;
             for (SliceKind kind : {SliceKind::Inside, SliceKind::Padded, SliceKind::PaddedTail,
                                    SliceKind::DensePadded}) {
                 if (kind == SliceKind::PaddedTail && layout != SliceLayout::Packed) continue;
