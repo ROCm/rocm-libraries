@@ -4,9 +4,9 @@
 
 Every distinct selection of ``dispatch/conv_route_tables`` (``direct``,
 ``padcopy_halo`` and ``winograd`` routes) and of ``dispatch/conv_pin_tables``
-(each mode) is dispatched, bound and launched exactly as production does it
+(each mode) is dispatched, bound and launched exactly as the routed dispatch does it
 (:func:`dispatch.conv_routes.dispatch_conv_route` /
-:func:`dispatch.conv_routes.dispatch_conv_production` and
+:func:`dispatch.conv_routes.dispatch_conv_routed` and
 :class:`benchmarks.common.conv_route_exec.RouteBinding`), on a reduced problem of
 the case's own form: the same channels, height, width, padding and launch, fewer
 depth planes where the plane is large. The pinned kernels are built from their
@@ -309,7 +309,7 @@ def _pin_plan(row: dict, case: str):
     cmd, label = _reduced(row["cmd"], row["kernel"])
     pins = _pins({case: dict(row, cmd=cmd, kernel=label)}, "reduced")
     req = cp.request_from_miopen_cmd(cmd, ARCH)
-    return cr.dispatch_conv_production(req, None, pins), label
+    return cr.dispatch_conv_routed(req, None, pins), label
 
 
 # ---------------------------------------------------------------------------
@@ -412,7 +412,7 @@ def test_split_hybrid_degrees(label, cmd, cache_root):
     for G in sorted({2 * T, 2 * T + max(1, T // 3), max(2, T // 2)}):
         pins = _pins({case: {"cmd": cmd, "kernel": f"{label} @split_k={G}"}}, "hybrid")
         req = cp.request_from_miopen_cmd(cmd, ARCH)
-        plan = cr.dispatch_conv_production(req, None, pins)
+        plan = cr.dispatch_conv_routed(req, None, pins)
         _check(plan, cache, deterministic=det)
 
 
@@ -500,7 +500,7 @@ def test_wgrad_opt_in_knobs(knobs, cache_root):
     cmd, full = _reduced(cmd, full)
     pins = _pins({"opt_in": {"cmd": cmd, "kernel": full}}, "opt-in")
     req = cp.request_from_miopen_cmd(cmd, ARCH)
-    plan = cr.dispatch_conv_production(req, None, pins)
+    plan = cr.dispatch_conv_routed(req, None, pins)
     m = re.search(r"@split_k=(\d+)", full)
     det = is_deterministic(
         "wgrad", decode(label), int(m.group(1)) if m else None, "any"
