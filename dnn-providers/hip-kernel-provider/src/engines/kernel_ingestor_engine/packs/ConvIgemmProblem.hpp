@@ -246,6 +246,8 @@ struct SplitPlan
 /// under-filled grid.
 /// @p splitPolicy: 0 uses the analytic default; 1 explicitly disables split-K for the qualified
 /// gfx1250 HALF backward-data configs, independently of patch configs' @p noSplit.
+/// @p flex (flex tiles, one block per CU): split only within one round of the device's units,
+/// into the count whose k-steps per split plus a fixed split cost is least (flexSplits).
 SplitPlan splitPlanFor(const IgemmProblem& problem,
                        int64_t bm,
                        int64_t bn,
@@ -253,7 +255,17 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
                        const hipdnn_plugin_sdk::ingestor::DeviceProperties& device,
                        int64_t pack = 0,
                        bool noSplit = false,
-                       int64_t splitPolicy = 0);
+                       int64_t splitPolicy = 0,
+                       bool flex = false);
+
+/// The flex tile's split count: the tiles times the splits stay within one block per unit, and
+/// among those counts the one whose k-steps per split plus FLEX_SPLIT_COST is least; 1 when the
+/// tiles already fill the units or no split saves steps.
+long long flexSplits(long long tiles, long long kSteps, long long units);
+
+/// The flex tile's fixed cost of one more split, in its 64-channel k-steps (the partials'
+/// round trip and the reduce launch).
+inline constexpr long long FLEX_SPLIT_COST = 14;
 
 /// Whether tap packing serves @p problem with a @p bk k-step: the reduction channels per tap
 /// are fewer than bk and divide it.

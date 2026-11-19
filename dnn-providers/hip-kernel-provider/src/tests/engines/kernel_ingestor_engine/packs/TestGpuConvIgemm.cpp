@@ -416,6 +416,7 @@ enum class Configs
     ANY,
     PATCH,
     CFX,
+    FLEX,
 };
 
 template <typename T>
@@ -508,7 +509,8 @@ void runCase(ConvShape shape,
             continue;
         }
         if((configs == Configs::PATCH && kernel.getIntMetadata("patch") == 0)
-           || (configs == Configs::CFX && kernel.getIntMetadata("cfx") == 0))
+           || (configs == Configs::CFX && kernel.getIntMetadata("cfx") == 0)
+           || (configs == Configs::FLEX && kernel.getIntMetadata("flex") == 0))
         {
             continue;
         }
@@ -815,6 +817,96 @@ INSTANTIATE_TEST_SUITE_P(,
                                                                                          : "Bwd");
                          });
 
+/// The flex tile (gfx950): flattened-position tiles whose 256 rows straddle planes and images,
+/// reduction channels and output channels that are not whole k-steps or tiles, odd depths, depth
+/// strides, groups, dilation, filters past 3 taps, and a deep reduction over a tiny grid (split-K).
+struct FlexCase
+{
+    std::string name;
+    ConvShape shape;
+    bool backward; ///< backward data at unit stride is served too
+};
+
+std::vector<FlexCase> flexCases()
+{
+    std::vector<FlexCase> cases;
+    auto odd = dense(72, 136, {5, 9, 11}, {3, 3, 3}, {1, 1, 1}, true);
+    odd.n = 3;
+    cases.push_back({"Ndhwc3x3x3OddDepthRaggedChannels", odd, true});
+    cases.push_back(
+        {"Ndhwc3x3x3NoPadding", dense(64, 64, {7, 6, 9}, {3, 3, 3}, {0, 0, 0}, true), true});
+    auto depthStride = dense(40, 48, {9, 6, 7}, {3, 3, 3}, {1, 1, 1}, true);
+    depthStride.stride = {2, 1, 1};
+    cases.push_back({"Ndhwc3x3x3DepthStride2", depthStride, false});
+    auto split = dense(512, 256, {3, 4, 5}, {3, 3, 3}, {1, 1, 1}, true);
+    split.n = 1;
+    cases.push_back({"Ndhwc3x3x3DeepReductionSplit", split, true});
+    auto groups = dense(64, 80, {9, 10}, {3, 3}, {1, 1}, true);
+    groups.groups = 2;
+    cases.push_back({"Nhwc3x3Groups2", groups, true});
+    auto dilated = dense(32, 40, {12, 13}, {3, 3}, {2, 2}, true);
+    dilated.dilation = {2, 2};
+    cases.push_back({"Nhwc3x3Dilation2", dilated, true});
+    auto wide = dense(24, 264, {11, 14}, {5, 3}, {0, 2}, true);
+    wide.prePadding = {2, 1};
+    wide.postPadding = {0, 3};
+    cases.push_back({"Nhwc5x3AsymmetricPadding", wide, true});
+    auto strided = dense(48, 32, {13, 11}, {3, 3}, {1, 1}, true);
+    strided.stride = {2, 2};
+    cases.push_back({"Nhwc3x3Stride2", strided, false});
+    cases.push_back({"Ndhwc1x1x1", dense(64, 136, {3, 5, 7}, {1, 1, 1}, {0, 0, 0}, true), true});
+    auto convolution = dense(32, 40, {6, 7, 5}, {3, 3, 3}, {1, 1, 1}, true);
+    convolution.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"Ndhwc3x3x3ConvolutionMode", convolution, true});
+    auto channelsFirst = dense(32, 40, {6, 7, 5}, {3, 3, 3}, {1, 1, 1}, false);
+    cases.push_back({"Ncdhw3x3x3Staged", channelsFirst, true});
+    return cases;
+}
+
+class TestGpuConvIgemmFlex
+    : public ::testing::TestWithParam<std::tuple<FlexCase, ConvDirection, bool>>
+{
+protected:
+    template <typename T>
+    void run()
+    {
+        SKIP_IF_NO_DEVICES();
+        if(hipdnn_plugin_sdk::stripArchFeatures(currentDeviceProperties().gcnArchName) != "gfx950")
+        {
+            GTEST_SKIP() << "flex tiles run on gfx950 only";
+        }
+        const auto& [flexCase, direction, infinities] = GetParam();
+        if(direction == ConvDirection::BACKWARD_DATA && !flexCase.backward)
+        {
+            GTEST_SKIP() << "strided backward data runs in stride phases, which flex tiles decline";
+        }
+        runCase<T>(flexCase.shape, direction, Math::NATIVE, infinities, Configs::FLEX);
+    }
+};
+
+TEST_P(TestGpuConvIgemmFlex, Half)
+{
+    run<Half>();
+}
+
+TEST_P(TestGpuConvIgemmFlex, BFloat16)
+{
+    run<BFloat16>();
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvIgemmFlex,
+                         ::testing::Combine(::testing::ValuesIn(flexCases()),
+                                            ::testing::Values(ConvDirection::FORWARD,
+                                                              ConvDirection::BACKWARD_DATA),
+                                            ::testing::Bool()),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name
+                                    + (std::get<1>(info.param) == ConvDirection::FORWARD ? "Fwd"
+                                                                                         : "Bwd")
+                                    + (std::get<2>(info.param) ? "Infinities" : "");
+                         });
+
 /// Whether the device has TF32-class K1 configs: bf16 matrix cores where three bf16 products
 /// are admitted (gfx908 included), and gfx942's xf32.
 bool hasTf32Forms()
@@ -1078,10 +1170,10 @@ TEST(TestConvIgemmCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its knob tuple: within one direction and
     // dtype (what one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 22> KNOBS{
-        "atom", "math",   "bm",    "bn",    "bk",           "wm",   "wn", "threads",
-        "vec",  "stages", "xcd",   "halo",  "wdirect",      "pack", "cf", "swz",
-        "dma",  "fuse",   "large", "patch", "split_policy", "cfx"};
+    static constexpr std::array<const char*, 23> KNOBS{
+        "atom", "math",   "bm",    "bn",    "bk",           "wm",   "wn",  "threads",
+        "vec",  "stages", "xcd",   "halo",  "wdirect",      "pack", "cf",  "swz",
+        "dma",  "fuse",   "large", "patch", "split_policy", "cfx",  "flex"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         std::vector<std::string> tuples;
@@ -1179,11 +1271,12 @@ TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOu
             }
             const bool cf = kernel.getIntMetadata("cf") != 0;
             // Patch backward data writes channels-last dx only; the patch tile has no twins.
-            const bool eligible = kernel.getStringMetadata("atom") != "fma"
-                                  && kernel.getIntMetadata("pack") == 0
-                                  && kernel.getIntMetadata("patch") != 2
-                                  && (direction != ConvDirection::BACKWARD_DATA
-                                      || kernel.getIntMetadata("patch") == 0);
+            // Flex tiles write channels-last outputs only.
+            const bool eligible
+                = kernel.getStringMetadata("atom") != "fma" && kernel.getIntMetadata("pack") == 0
+                  && kernel.getIntMetadata("patch") != 2 && kernel.getIntMetadata("flex") == 0
+                  && (direction != ConvDirection::BACKWARD_DATA
+                      || kernel.getIntMetadata("patch") == 0);
             if(cf)
             {
                 EXPECT_TRUE(eligible);
@@ -1245,7 +1338,7 @@ TEST(TestConvIgemmCatalog, EveryPlainNativeConfigHasAFlatReductionTwin)
                 = kernel.getIntMetadata("halo") == 0 && kernel.getIntMetadata("wdirect") == 0
                   && (kernel.getIntMetadata("swz") == 0 || swizzledPatch)
                   && kernel.getIntMetadata("cf") == 0 && kernel.getIntMetadata("fuse") == 0
-                  && kernel.getIntMetadata("patch") != 2
+                  && kernel.getIntMetadata("patch") != 2 && kernel.getIntMetadata("flex") == 0
                   && kernel.getStringMetadata("math") == "native";
             if(kernel.getIntMetadata("pack") == 2)
             {
@@ -1300,7 +1393,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition nativeContractKernel(ConvDirection
                        {"large", int64_t{0}},
                        {"patch", int64_t{0}},
                        {"split_policy", int64_t{forward ? 0 : 1}},
-                       {"cfx", int64_t{0}}};
+                       {"cfx", int64_t{0}},
+                       {"flex", int64_t{0}}};
     return kernel;
 }
 
@@ -2379,6 +2473,117 @@ TEST(TestConvIgemmSplitPlan, ADeviceWithoutUnitsGetsNoSplitAndNoConfig)
             EXPECT_GT(served, 0) << arch;
         }
     }
+}
+
+TEST(TestConvIgemmSplitPlan, FlexSplitsWithinOneRoundIntoTheFewestStepsPerSplit)
+{
+    // 88 tiles of 216 k-steps on 256 units: 2 splits fit one round (3 would not).
+    EXPECT_EQ(conv_igemm::flexSplits(88, 216, 256), 2);
+    // 64 tiles of 432 k-steps: 4 splits, 108 + 14 steps.
+    EXPECT_EQ(conv_igemm::flexSplits(64, 432, 256), 4);
+    // A grid that fills the units, or a reduction too short to gain from a split, runs unsplit.
+    EXPECT_EQ(conv_igemm::flexSplits(256, 432, 256), 1);
+    EXPECT_EQ(conv_igemm::flexSplits(64, 20, 256), 1);
+    // One tile of a deep reduction: at most 16 splits.
+    EXPECT_EQ(conv_igemm::flexSplits(1, 4096, 256), 16);
+    // The plan applies it to the flex tile's grid (one 256 x 256 tile, 27 x 8 k-steps of 64).
+    auto deep = dense(512, 256, {3, 4, 5}, {3, 3, 3}, {1, 1, 1}, true);
+    deep.n = 1;
+    const auto problem = parsedProblem(deep, ConvDirection::FORWARD);
+    EXPECT_EQ(
+        conv_igemm::splitPlanFor(problem, 256, 256, 64, deviceOf("gfx950", 256), 0, false, 0, true)
+            .splits,
+        conv_igemm::flexSplits(1, 216, 256));
+}
+
+TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950TilesThatDeclineEveryOtherKnob)
+{
+    auto shape = dense(32, 48, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, true);
+    shape.dataType = DataType::HALF;
+    int flex = 0;
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        const auto pack = packFor(direction);
+        const GraphFixture gfx950(buildGraph(specFor(shape, direction)), deviceOf("gfx950", 256));
+        const GraphFixture gfx942(buildGraph(specFor(shape, direction)),
+                                  deviceOf("gfx942:sramecc+:xnack-", 304));
+        const auto bound950 = matchesGraph(pack, gfx950.context());
+        const auto bound942 = matchesGraph(pack, gfx942.context());
+        ASSERT_TRUE(bound950.has_value() && bound942.has_value());
+        for(const auto& kernel : catalog(direction))
+        {
+            if(kernel.getIntMetadata("flex") == 0)
+            {
+                continue;
+            }
+            SCOPED_TRACE(kernel.name);
+            EXPECT_EQ(kernel.getIntMetadata("flex"), 1);
+            EXPECT_EQ(kernel.getIntMetadata("bm"), 256);
+            EXPECT_EQ(kernel.getIntMetadata("bk"), 64);
+            EXPECT_EQ(kernel.getIntMetadata("xcd"), 1);
+            if(kernel.getStringMetadata("dtype") != "HALF")
+            {
+                continue;
+            }
+            ++flex;
+            EXPECT_TRUE(matchesKernel(pack, gfx950.context(), kernel, *bound950));
+            EXPECT_FALSE(matchesKernel(pack, gfx942.context(), kernel, *bound942));
+            for(const auto& [field, value] : std::initializer_list<std::pair<const char*, int64_t>>{
+                    {"flex", 2},    {"bm", 128},  {"bn", 64},    {"bk", 32}, {"wm", 2},
+                    {"wn", 4},      {"vec", 4},   {"stages", 2}, {"xcd", 0}, {"halo", 1},
+                    {"wdirect", 1}, {"pack", 2},  {"cf", 1},     {"swz", 1}, {"dma", 2},
+                    {"fuse", 2},    {"large", 1}, {"patch", 1},  {"cfx", 1}, {"split_policy", 1}})
+            {
+                SCOPED_TRACE(field);
+                auto mutated = kernel;
+                mutated.metadata[field] = value;
+                EXPECT_FALSE(matchesKernel(pack, gfx950.context(), mutated, *bound950));
+            }
+            auto atom = kernel;
+            atom.metadata["atom"] = std::string("mfma32x16_f16");
+            EXPECT_FALSE(matchesKernel(pack, gfx950.context(), atom, *bound950));
+        }
+        // Backward data in stride phases and filters past ten taps on an axis decline.
+        auto strided = shape;
+        strided.stride = {2, 2, 2};
+        auto longFilter = dense(32, 48, {5, 6, 13}, {1, 1, 11}, {0, 0, 5}, true);
+        longFilter.dataType = DataType::HALF;
+        for(const auto& [declined, forwardToo] :
+            std::initializer_list<std::pair<ConvShape, bool>>{{strided, false}, {longFilter, true}})
+        {
+            if(!forwardToo && direction == ConvDirection::FORWARD)
+            {
+                continue;
+            }
+            const GraphFixture fixture(buildGraph(specFor(declined, direction)),
+                                       deviceOf("gfx950", 256));
+            const auto bound = matchesGraph(pack, fixture.context());
+            ASSERT_TRUE(bound.has_value());
+            for(const auto& kernel : catalog(direction))
+            {
+                if(kernel.getIntMetadata("flex") != 0)
+                {
+                    EXPECT_FALSE(matchesKernel(pack, fixture.context(), kernel, *bound))
+                        << kernel.name;
+                }
+            }
+        }
+        // A block whose images span past 2^31 bytes declines (32-bit buffer offsets).
+        auto huge = dense(64, 64, {4096, 4096}, {3, 3}, {1, 1}, true);
+        huge.n = 1;
+        huge.dataType = DataType::HALF;
+        const GraphFixture big(buildGraph(specFor(huge, direction)), deviceOf("gfx950", 256));
+        const auto bigBound = matchesGraph(pack, big.context());
+        ASSERT_TRUE(bigBound.has_value());
+        for(const auto& kernel : catalog(direction))
+        {
+            if(kernel.getIntMetadata("flex") != 0)
+            {
+                EXPECT_FALSE(matchesKernel(pack, big.context(), kernel, *bigBound)) << kernel.name;
+            }
+        }
+    }
+    EXPECT_GT(flex, 0);
 }
 
 TEST(TestConvIgemmCatalog, BufferSpanIsWholeImagesFromTheBlocksFirstImage)

@@ -967,6 +967,23 @@ std::optional<Grid> gridFor(const IgemmProblem& problem, int64_t bm, int64_t bn)
         static_cast<unsigned int>(x), static_cast<unsigned int>(y), static_cast<unsigned int>(z)};
 }
 
+long long flexSplits(long long tiles, long long kSteps, long long units)
+{
+    constexpr long long MAX_SPLITS = 16;
+    long long best = 1;
+    long long bestSteps = kSteps;
+    for(long long splits = 2; splits <= MAX_SPLITS && tiles * splits <= units; ++splits)
+    {
+        const long long steps = divUp(kSteps, splits) + FLEX_SPLIT_COST;
+        if(steps < bestSteps)
+        {
+            best = splits;
+            bestSteps = steps;
+        }
+    }
+    return best;
+}
+
 SplitPlan splitPlanFor(const IgemmProblem& problem,
                        int64_t bm,
                        int64_t bn,
@@ -974,7 +991,8 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
                        const hipdnn_plugin_sdk::ingestor::DeviceProperties& device,
                        int64_t pack,
                        bool noSplit,
-                       int64_t splitPolicy)
+                       int64_t splitPolicy,
+                       bool flex)
 {
     if((splitPolicy != 0 && splitPolicy != 1)
        || (splitPolicy == 1
@@ -1033,7 +1051,8 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
     }
     const long long wanted = device_units::dispatchUnits(device) * blocksPerUnit;
     long long splits
-        = tiles >= wanted
+        = flex ? flexSplits(tiles, iterations, device_units::dispatchUnits(device))
+          : tiles >= wanted
               ? 1
               : std::min({divUp(wanted, tiles), iterations / minIterations, MAX_SPLITS});
     while(splits > 1
@@ -1076,6 +1095,8 @@ constexpr long long BUFFER_LIMIT = std::numeric_limits<int>::max();
 constexpr long long COPY_MAX_BLOCKS = 1LL << 20;
 /// Work items one dispatch addresses per grid dimension (the packet's 32-bit grid size).
 constexpr long long MAX_DISPATCH_ITEMS = std::numeric_limits<uint32_t>::max();
+/// Filter taps along one axis the flex tile serves (one in-image bit per tap of each axis).
+constexpr long long FLEX_MAX_TAPS = 10;
 
 constexpr std::string_view X_TOKEN = "conv_igemm.x.uid";
 constexpr std::string_view W_TOKEN = "conv_igemm.w.uid";
@@ -1151,6 +1172,7 @@ struct Tile
     int64_t patch = 0; ///< patch convolutions as one GEMM (withPatchView, K1_PATCH)
     int64_t cfx = 0; ///< 1-D channels-first activations read in place (CONV_IGEMM_CFX)
     int64_t splitPolicy = 0; ///< 0 automatic split-K, 1 no split-K
+    int64_t flex = 0; ///< the flex tile (CONV_IGEMM_FLEX): gfx950, flattened positions, ping-pong
 
     int64_t blockThreads() const
     {
@@ -1220,6 +1242,19 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.patch = kernel.getIntMetadata("patch");
     tile.splitPolicy = kernel.getIntMetadata("split_policy");
     tile.cfx = kernel.getIntMetadata("cfx");
+    tile.flex = kernel.metadata.count("flex") != 0 ? kernel.getIntMetadata("flex") : 0;
+    // The flex tile: 256 positions x 256 or 128 channels of 16-bit 16x16x32 atoms on 4 x 2 waves,
+    // 64-channel k-steps, 8-wide vectors, XCD order; every other variant knob off.
+    if(tile.flex != 0
+       && (tile.flex != 1 || (tile.atom != "mfma16x32_f16" && tile.atom != "mfma16x32_bf16")
+           || tile.split || tile.bm != 256 || (tile.bn != 256 && tile.bn != 128) || tile.bk != 64
+           || tile.wm != 4 || tile.wn != 2 || tile.vec != 8 || tile.stages != 1 || tile.xcd != 1
+           || tile.halo != 0 || tile.wdirect != 0 || tile.pack != 0 || tile.cf != 0 || tile.swz != 0
+           || tile.dma != 0 || tile.fuse != 0 || tile.large != 0 || tile.patch != 0 || tile.cfx != 0
+           || tile.splitPolicy != 0))
+    {
+        return std::nullopt;
+    }
     // Channels-first input: the matrix-core kernel's halo loop (halo h: h input pixels a row) with
     // the channels-first output, or the FMA kernel without a halo; native math, plain tiles.
     if(tile.cfx != 0
@@ -1463,6 +1498,15 @@ bool kernelMatches(const MatchContext& context,
     if(tile->dma != 0
        && (hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName) != "gfx950"
            || !bufferLoads(*problem)))
+    {
+        return false;
+    }
+    // The flex tile: gfx950, 32-bit buffer offsets, backward data at unit stride (one phase),
+    // and at most FLEX_MAX_TAPS taps along each filter axis (its per-row in-image tap bits).
+    if(tile->flex != 0
+       && (hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName) != "gfx950"
+           || !bufferLoads(*problem) || problem->phases != 1 || a.ft > FLEX_MAX_TAPS
+           || a.fr > FLEX_MAX_TAPS || a.fs > FLEX_MAX_TAPS))
     {
         return false;
     }
@@ -1718,7 +1762,8 @@ public:
                                         context.deviceProperties,
                                         tile->pack,
                                         tile->patch != 0,
-                                        tile->splitPolicy)
+                                        tile->splitPolicy,
+                                        tile->flex != 0)
             .workspaceBytes;
     }
 
@@ -1783,6 +1828,10 @@ public:
         {
             options.add("CONV_IGEMM_CFX", std::to_string(tile->cfx));
         }
+        if(tile->flex != 0)
+        {
+            options.add("CONV_IGEMM_FLEX", std::to_string(tile->flex));
+        }
         const int waves = conv_igemm::occupancyTarget(tile->atom,
                                                       tile->bm,
                                                       tile->bn,
@@ -1804,7 +1853,8 @@ public:
                                                    context.deviceProperties,
                                                    tile->pack,
                                                    tile->patch != 0,
-                                                   tile->splitPolicy);
+                                                   tile->splitPolicy,
+                                                   tile->flex != 0);
         // The fused epilogue: in the convolution, and in the split-K reduce that writes the
         // output when the reduction is split. Fusion off adds no option, so the code is that of
         // an unfused build.
