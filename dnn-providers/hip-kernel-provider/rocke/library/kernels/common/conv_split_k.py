@@ -873,11 +873,14 @@ def _resolve_dgrad(
     if split_k != -1:
         return ConvSplitK(split_k, False, split_k, f"explicit split_k={split_k}")
     wave_size = ArchTarget.from_gfx(arch).wave_size
+    # tf32 is fp32 storage: the builder checks the output dtype, not the
+    # logical one.
+    store_dtype = "fp32" if dtype == "tf32" else dtype
     if override is not None:
         # Held to what the kernel can build: an unbuildable split becomes 1
         # rather than a spec the builder then rejects, and the 16-bit atomic
         # stays within its accuracy limit (dgrad has no workspace to move to).
-        ok, why = dgrad_split_k_available(p, dtype, wave_size=wave_size)
+        ok, why = dgrad_split_k_available(p, store_dtype, wave_size=wave_size)
         cap = ATOMIC_16BIT_MAX_SPLIT_K if _is_16bit(dtype) else MAX_GRID_DIM_Z
         degree = min(override, cap) if ok else 1
         if not ok and override != 1:
@@ -889,7 +892,7 @@ def _resolve_dgrad(
         return ConvSplitK(degree, False, override, f"override split_k={override}{note}")
     m, n, k = _dg_M(p), _dg_N(p), _dg_K(p)
     cost = split_k_cost_model(arch, num_cus, num_xcds)
-    ok, why = dgrad_split_k_available(p, dtype, wave_size=wave_size)
+    ok, why = dgrad_split_k_available(p, store_dtype, wave_size=wave_size)
     if not ok:
         return ConvSplitK(1, False, 1, f"no split: {why}")
     if cost is None:

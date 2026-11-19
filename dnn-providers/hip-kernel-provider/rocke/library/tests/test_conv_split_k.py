@@ -440,6 +440,14 @@ def test_dgrad_fallback_does_not_split_what_the_kernel_cannot_build(dtype):
     assert resolve_conv_split_k("dgrad", ODD_CPG, dtype="fp32", **kw).split_k > 1
 
 
+def test_dgrad_fallback_splits_tf32_like_fp32():
+    # tf32 is fp32 storage; the buildable-split check must see fp32, not the
+    # logical dtype, or gfx942 tf32 dgrad would silently run unsplit.
+    kw = dict(arch="gfx942", tile_m=64, tile_n=64, tile_k=32, block_size=256)
+    r = resolve_conv_split_k("dgrad", FALLBACK_DGRAD, dtype="tf32", **kw)
+    assert r.split_k == r.requested > 1
+
+
 # Long dY reduction (K=2048) into a small dX: the CK formula asks for 608.
 FALLBACK_DGRAD = ConvProblem(N=1, Hi=8, Wi=8, C=64, K=2048, Y=3, X=3, pH=1, pW=1)
 
@@ -804,7 +812,7 @@ def test_wmma_auto_without_float_atomics_runs_unsplit(arch):
 
 
 # A deep reduction into a small output: forward splits on gfx1250, dgrad splits
-# everywhere; DENSE splits wgrad.
+# on CDNA only; DENSE splits wgrad.
 DEEP_K = ConvProblem(N=1, Hi=7, Wi=7, C=2048, K=512, Y=3, X=3, pH=1, pW=1)
 
 
