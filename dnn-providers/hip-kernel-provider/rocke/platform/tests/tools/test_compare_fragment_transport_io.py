@@ -53,6 +53,15 @@ def test_oracle_refuses_unknown_operations_instead_of_skipping_them():
         tool.run(b.kernel, {}, 0, {}, {}, 0, 0)
 
 
+def test_oracle_refuses_unmodelled_comparison_predicate():
+    tool = _tool()
+    b = IRBuilder("unmodelled_predicate")
+    # A legal IR comparison that the intentionally bounded oracle doesn't model.
+    b.cmp_le(b.const_i32(1), b.const_i32(2))
+    with pytest.raises(NotImplementedError, match=r"^le$"):
+        tool.run(b.kernel, {}, 0, {}, {}, 0, 0)
+
+
 def test_bf16_decode_uses_high_half_of_fp32_bits():
     tool = _tool()
     assert tool.floating(bytes.fromhex("803f"), BF16) == 1.0

@@ -57,6 +57,11 @@ def test_accumulator_descriptor_matches_every_registered_coordinate(
     ] == lane_placements(layout, atom.wave_size)
 
 
+def test_accumulator_descriptor_refuses_non_atom():
+    with pytest.raises(TypeError, match="accumulator descriptor requires an MmaOp"):
+        make_mma_accumulator_desc(None, target="gfx950")
+
+
 def test_gfx1250_profile_is_not_borrowed_for_other_wmma_targets():
     atom = ArchTarget.from_gfx("gfx1151").mma.op_for_shape(
         family="wmma", a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", m=16, n=16, k=16

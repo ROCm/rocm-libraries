@@ -3,6 +3,7 @@
 """gfx1250 consumers retain native/legacy operand and scale-coordinate contracts."""
 
 import ast
+import importlib
 import inspect
 from dataclasses import replace
 from itertools import product
@@ -114,6 +115,28 @@ def test_scale_descriptor_refuses_conflicting_atom_metadata():
     atom = _scale_atom("gfx1250", 32)
     with pytest.raises(ValueError, match="registered atom metadata"):
         make_mma_scale_desc(replace(atom, m=32), target="gfx1250")
+
+
+def test_legacy_consumer_refuses_a_missing_descriptor_atom(monkeypatch):
+    instance = importlib.import_module("rocke.instances.gfx1250.block_scaled_gemm")
+    spec = BlockScaledGemmSpec(
+        "missing_atom",
+        16,
+        16,
+        64,
+        dtype_a="fp8",
+        dtype_b="bf8",
+        matrix_path="wmma",
+        block_k=64,
+        scale_dtype="fp32",
+    )
+    assert instance.is_valid_spec(spec, arch="gfx1250")[0]
+    # Simulate a stale legacy op-ID mapping after shape/format admission.
+    monkeypatch.setattr(instance, "_wmma_op_id", lambda *_: "missing_legacy_wmma_op")
+    with pytest.raises(
+        ValueError, match="missing matrix operand contract: missing_legacy_wmma_op"
+    ):
+        build_block_scaled_gemm(spec)
 
 
 def test_consumer_does_not_bypass_fragment_loads_or_stores():

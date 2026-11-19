@@ -4,6 +4,7 @@
 
 import errno
 import importlib.util
+from types import SimpleNamespace
 
 import pytest
 from rocke.assets import platform_tools_dir
@@ -81,6 +82,29 @@ def test_compiler_multicall_symlink_keeps_its_driver_name(tmp_path):
             pytest.skip(f"cannot create symlinks: {exc}")
         raise
     assert _tool().compiler_driver_path(str(driver)) == str(driver)
+
+
+def test_compile_arm_preserves_diagnostics_and_refuses_failed_assembly(
+    tmp_path, monkeypatch
+):
+    tool = _tool()
+    out = tmp_path / "candidate"
+
+    def run(command, **kwargs):
+        if kwargs["check"]:
+            assert command[1] == "-c"
+            return SimpleNamespace(stdout="emitted IR\n")
+        assert command[0] == "synthetic-compiler"
+        assert "-mcpu=gfx950" in command
+        return SimpleNamespace(returncode=17, stdout="tool banner\n", stderr="bad IR\n")
+
+    monkeypatch.setattr(tool, "subprocess", SimpleNamespace(run=run))
+    with pytest.raises(RuntimeError, match=r"compiler failed \(17\): .*compiler\.log"):
+        tool.compile_arm(
+            tmp_path, {"target": "gfx950"}, "llvm23", "synthetic-compiler", out
+        )
+    assert (out / "compiler.log").read_text(encoding="utf-8") == "tool banner\nbad IR\n"
+    assert not (out / "kernel.s").exists()
 
 
 def test_case_inventory_covers_widths_mixed_formats_and_preparations():

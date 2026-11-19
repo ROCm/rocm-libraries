@@ -98,6 +98,15 @@ def test_native_scaled_operand_preparation_emits_identical_ir(target, a, b, role
     assert result.stdout == serialize(builder.kernel)
 
 
+def test_non_fragment_operand_is_refused_before_emission():
+    atom, _, _ = _contract("gfx950", "fp4e2m1", "fp4e2m1", "a")
+    builder = IRBuilder("invalid_fragment")
+    before = serialize(builder.kernel)
+    with pytest.raises(TypeError, match="requires a Fragment"):
+        prepare_scaled_mma_operand(builder, atom, "a", None)
+    assert serialize(builder.kernel) == before
+
+
 def test_missing_atom_is_refused_before_emission():
     _, desc, dtype = _contract("gfx950", "fp4e2m1", "fp4e2m1", "a")
     builder = IRBuilder("missing_atom")
