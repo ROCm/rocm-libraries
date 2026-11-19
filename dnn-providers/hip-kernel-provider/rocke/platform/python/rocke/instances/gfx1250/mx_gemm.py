@@ -134,7 +134,7 @@ WMMA_REUSE = ("none", "a", "b", "ab")
 SCALES = ("lds", "registers")
 SCALE_SWAPS = ("read", "wait")
 READ_ISSUES = ("block", "interleave")
-WALKS = ("tile", "panels", "halves")
+WALKS = ("tile", "panels", "halves", "ring")
 READ_BASES = ("loop", "fixed")
 WAVE_MAPS = ("rows", "pairs")
 TILED_OPERANDS = ("none", "a", "b", "ab")
@@ -273,7 +273,12 @@ class MxGemmSpec:
     of a half, four A rows and eight B fragments a K-step, where a pass
     reads four of each for half the WMMAs. A panels have a slot each; B
     panels share a slot of two, one per K tile parity, so the next tile's B
-    loads while this tile's is read (:class:`HalfWalk`).
+    loads while this tile's is read (:class:`HalfWalk`). ``"ring"`` (FP6, the
+    256x256x256 tile, read-ahead with B in halves, ``read_bases`` "fixed",
+    ``k_reads`` "contiguous") keeps two 256 B line slots per row of A and B, so the TDM loads whole
+    lines of the row-major operands, one line slot of 128 rows at a time,
+    each as soon as the cluster has read the line before it in that slot
+    (:class:`RingWalk`); its K loop runs a period of 16 K-steps.
 
     ``read_bases`` is where the LDS read addresses come from: ``"loop"``
     computes each fragment's address next to its reads; ``"fixed"`` (the
@@ -566,6 +571,10 @@ class MxGemmSpec:
     def halves(self) -> bool:
         return self.walk == "halves"
 
+    @property
+    def ring(self) -> bool:
+        return self.walk == "ring"
+
     def tiled(self, operand: str) -> bool:
         """Whether ``operand`` (``"a"`` / ``"b"``) is stored tile by tile."""
         return self.tiled_operands in (operand, "ab")
@@ -676,6 +685,8 @@ class MxGemmSpec:
 
     @property
     def lds_bytes(self) -> int:
+        if self.ring:
+            return RingWalk.lds_bytes()
         if self.halves:
             return HalfWalk.lds_bytes(self.lds_layout)
         buffers = _PANEL_SLOTS if self.panels else self.lds_buffers
@@ -723,6 +734,7 @@ class MxGemmSpec:
                 "ril": self.read_issue == "interleave",
                 "pw": self.walk == "panels",
                 "pwh": self.halves,
+                "rg": self.ring,
                 "rbf": self.fixed_bases,
                 "wmp": self.pairs,
                 f"ipf{self.inst_prefetch}": self.inst_prefetch > 0,
@@ -1068,6 +1080,9 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
             return "read_issue 'interleave' with 'contiguous' reads needs scale_swap 'wait'"
     if spec.walk not in WALKS:
         return f"walk must be one of {WALKS}"
+    if spec.ring:
+        # The rest as the 256x256x256 tile (RingWalk.reason).
+        return RingWalk.reason(spec, arch)
     if spec.panels:
         reason = _panel_reason(spec, arch)
         if reason:
@@ -1724,6 +1739,154 @@ class PanelTdmLoader(TdmLoader):
         )
 
 
+class RingTdmLoader(TdmLoader):
+    """``walk`` "ring": a wave's loads of its part (even waves a B part, odd
+    waves an A part, component ``wave // 2``; :class:`RingWalk`). A line
+    load copies line ``L`` of the part's 128 rows (256 B at byte ``256 L``
+    of each row) into a line slot: 8 rows per iteration, the 256 B pad after
+    every 256 B making the 512 B pitch, 16 iterations of a group and its
+    16 B pad. A scale load copies a scale tile, the part's 512 B of each of
+    8 K-steps. The descriptors are built once for line 0 and scale tile 0
+    in their slot 0; each load patches the LDS offset, the global address
+    and the extent left."""
+
+    def _lds_offset(self, at):
+        # Ring loads take LDS byte offsets, not buffer parities.
+        return at
+
+    def _line_descriptor(self, operand: str, component):
+        k = self.k
+        b, ops = k.b, k.ops
+        _, block, _, mask = self._operand(operand)
+        base_ptr = k.params["A"] if operand == "a" else k.params["B"]
+        rows = RingWalk.PART_ROWS
+        row0 = ops.add(block, ops.mul(component, rows))
+        lds = ops.add(
+            RingWalk.data_base(operand, 0), ops.mul(component, RingWalk.part_bytes())
+        )
+        return b.tdm_descriptor_2d(
+            b.global_ptr_add(base_ptr, ops.v(ops.mul(row0, k.packed_k))),
+            self.lds_ptr(lds),
+            elem_bytes=1,
+            tensor_dim0=k.packed_k,
+            tensor_dim1=self._rows_left(operand, row0),
+            row_stride=k.packed_k,
+            tile_dim0=RingWalk.LINE,
+            tile_dim1=RingWalk.GROUP_ROWS,
+            workgroup_mask=mask,
+            iterate_count=rows // RingWalk.GROUP_ROWS,
+            lds_increment=RingWalk.group_bytes(),
+            global_increment=ops.v(ops.mul(k.packed_k, RingWalk.GROUP_ROWS)),
+            **tdm_pad_fields(RingWalk.LINE, RingWalk.PITCH - RingWalk.LINE),
+        )
+
+    def _scale_descriptor(self, operand: str, component):
+        """Swizzled scales ``[K/128][MN][4]``: the part's 512 B of each of a
+        scale tile's K-steps."""
+        k = self.k
+        b, ops, p = k.b, k.ops, k.params
+        _, block, extent, mask = self._operand(operand)
+        base_ptr = p["A_scale"] if operand == "a" else p["B_scale"]
+        rows = RingWalk.PART_ROWS
+        lds = ops.add(
+            RingWalk.scale_base(operand, 0),
+            ops.mul(component, RingWalk.scale_ring_bytes()),
+        )
+        row_stride = ops.mul(extent, 4)
+        col0 = ops.mul(ops.add(block, ops.mul(component, rows)), 4)
+        pad = RingWalk.SCALE_PAD
+        return b.tdm_descriptor_2d(
+            b.global_ptr_add(base_ptr, ops.v(col0)),
+            self.lds_ptr(lds),
+            elem_bytes=1,
+            tensor_dim0=b.sub(ops.v(row_stride), ops.v(col0)),
+            tensor_dim1=ops.v(k.k_atoms()),
+            row_stride=ops.v(row_stride),
+            tile_dim0=rows * 4,
+            tile_dim1=RingWalk.SCALE_STEPS,
+            workgroup_mask=mask,
+            **tdm_pad_fields(pad.block_bytes, pad.pad_bytes),
+        )
+
+    def hoist(self) -> None:
+        """Both descriptors of this wave's part, selected by wave parity."""
+        k = self.k
+        b, ops, c0, p = k.b, k.ops, k.c0, k.params
+        even0 = b.cmp_eq(ops.mod(k.wave, 2), c0)
+        self.even = even0
+        component0 = ops.div(k.wave, 2)
+
+        def selected(b_desc, a_desc):
+            return [b.select(even0, x, y) for x, y in zip(b_desc, a_desc)]
+
+        self.data = selected(
+            self._line_descriptor("b", component0),
+            self._line_descriptor("a", component0),
+        )
+        self.scale = selected(
+            self._scale_descriptor("b", component0),
+            self._scale_descriptor("a", component0),
+        )
+        self.scale_stride = b.select(
+            even0, ops.v(ops.mul(p["N"], 4)), ops.v(ops.mul(p["M"], 4))
+        )
+
+    def issue_line(self, k0, line: int) -> None:
+        """Line ``line`` of the period at ``k0`` (``RingWalk.refills``
+        counts lines from the period's first) into its slot. Past the row's
+        end it loads one of the row's last two lines again, into a slot no
+        K-step reads any more."""
+        k = self.k
+        b, ops = k.b, k.ops
+        byte = ops.v(ops.add(k.spec.k_bytes(k0, ops), line * RingWalk.LINE))
+        again = b.sub(k.packed_k, ops.v(RingWalk.PITCH - line % 2 * RingWalk.LINE))
+        byte = b.select(b.cmp_lt(byte, k.packed_k), byte, again)
+        left = b.sub(k.packed_k, byte)
+        c16 = b.const_i32(16)
+        w2 = b.vec_extract(self.data[1], 2)
+        words = {
+            1: b.shl(left, c16),
+            2: b.lor(b.land(w2, b.const_i32(-0x10000)), b.lshr(left, c16)),
+        }
+        at = line % RingWalk.SLOTS * RingWalk.LINE
+        b.tensor_load_to_lds(*self._patched(self.data, at, byte, words))
+
+    def issue_scales(self, k0, tile: int) -> None:
+        """Scale tile ``tile`` of the period at ``k0`` into its slot; past
+        the end one of the last two tiles again."""
+        k = self.k
+        b, ops = k.b, k.ops
+        steps = RingWalk.SCALE_STEPS
+        k_step = ops.v(ops.add(ops.div(k0, _ATOM_K), tile * steps))
+        atoms = ops.v(k.k_atoms())
+        again = b.sub(atoms, ops.v(steps * (RingWalk.SCALE_SLOTS - tile % 2)))
+        k_step = b.select(b.cmp_lt(k_step, atoms), k_step, again)
+        steps_left = b.sub(atoms, k_step)
+        c16 = b.const_i32(16)
+        s2, s3 = b.vec_extract(self.scale[1], 2), b.vec_extract(self.scale[1], 3)
+        at = tile % RingWalk.SCALE_SLOTS * RingWalk.scale_tile_bytes()
+        b.tensor_load_to_lds(
+            *self._patched(
+                self.scale,
+                at,
+                b.mul(k_step, self.scale_stride),
+                {
+                    2: b.lor(b.land(s2, b.const_i32(0xFFFF)), b.shl(steps_left, c16)),
+                    3: b.lor(
+                        b.land(s3, b.const_i32(-0x10000)), b.lshr(steps_left, c16)
+                    ),
+                },
+            )
+        )
+
+    def issue_load(self, k0, load) -> None:
+        kind, index = load
+        if kind == "line":
+            self.issue_line(k0, index)
+        else:
+            self.issue_scales(k0, index)
+
+
 class Gl2Prefetcher:
     """PrefetchGL2: the cluster's A/B and scale lines of a tile ahead, split
     over every thread of the cluster, one 256 B line each."""
@@ -1763,15 +1926,7 @@ class Gl2Prefetcher:
             data_lines = row_bytes // _GL2_LINE_BYTES
             if not data_lines and ahead_parity == 0:
                 data_lines = 1
-        if spec.has_cluster:
-            cluster_m0 = b.sub(
-                ops.v(k.block_m), ops.v(ops.mul(k.cluster_wy, spec.tile_m))
-            )
-            cluster_n0 = b.sub(
-                ops.v(k.block_n), ops.v(ops.mul(k.cluster_wx, spec.tile_n))
-            )
-        else:
-            cluster_m0, cluster_n0 = k.block_m, k.block_n
+        cluster_m0, cluster_n0 = self._cluster_origin()
 
         def last_inside(value, limit, edge: bool):
             """``value``, or ``limit - 1`` past a partial tile's end."""
@@ -1875,6 +2030,25 @@ class Gl2Prefetcher:
                 p["A_scale"], p["M"], cluster_m0, cluster_y * spec.tile_m, spec.edge_m
             )
             categories.append((a_scale_lines, a_scale_address))
+        self._distribute(categories)
+
+    def _cluster_origin(self):
+        """The first A and B rows of the workgroup's cluster."""
+        k = self.k
+        b, ops, spec = k.b, k.ops, k.spec
+        if not spec.has_cluster:
+            return k.block_m, k.block_n
+        cluster_m0 = b.sub(ops.v(k.block_m), ops.v(ops.mul(k.cluster_wy, spec.tile_m)))
+        cluster_n0 = b.sub(ops.v(k.block_n), ops.v(ops.mul(k.cluster_wx, spec.tile_n)))
+        return cluster_m0, cluster_n0
+
+    def _distribute(self, categories) -> None:
+        """One line prefetch per thread of the cluster for each of the
+        ``(count, address)`` categories' lines, in rounds of the cluster's
+        threads."""
+        k = self.k
+        b, ops, spec = k.b, k.ops, k.spec
+        cluster_x, cluster_y, _ = spec.cluster_dim
         starts = []
         total = 0
         for count, _ in categories:
@@ -1914,6 +2088,58 @@ class Gl2Prefetcher:
                 # are prefetched more than once.
                 index = ops.add(ops.mod(thread, remaining), round_start)
             prefetch_round(round_start, index)
+
+    def prefetch_ring(self, k0, loads) -> None:
+        """``walk`` "ring": the cluster's lines of the ``loads`` of the
+        period at ``k0`` (``("line", L)``: line ``L`` of every A and B row,
+        ``("scales", t)``: scale tile ``t`` of A and B). Past the end the last
+        line or scale tile is prefetched again."""
+        k = self.k
+        b, ops, spec, p = k.b, k.ops, k.spec, k.params
+        cluster_x, cluster_y, _ = spec.cluster_dim
+        cluster_m0, cluster_n0 = self._cluster_origin()
+        operands = (
+            (cluster_y * spec.tile_m, p["A"], p["A_scale"], p["M"], cluster_m0),
+            (cluster_x * spec.tile_n, p["B"], p["B_scale"], p["N"], cluster_n0),
+        )
+        steps = RingWalk.SCALE_STEPS
+        categories = []
+        for kind, index in loads:
+            if kind == "line":
+                byte = ops.v(ops.add(spec.k_bytes(k0, ops), index * RingWalk.LINE))
+                last = b.sub(k.packed_k, ops.v(RingWalk.LINE))
+                byte = b.smin(byte, last)
+                for rows, base_ptr, _, _, row0 in operands:
+
+                    def line(i, base_ptr=base_ptr, row0=row0, byte=byte):
+                        row = ops.add(row0, i)
+                        offset = ops.add(ops.mul(row, k.packed_k), byte)
+                        return b.global_ptr_add(base_ptr, ops.v(offset))
+
+                    categories.append((rows, line))
+                continue
+            k_step = ops.v(ops.add(ops.div(k0, _ATOM_K), index * steps))
+            k_step = b.smin(k_step, b.sub(ops.v(k.k_atoms()), ops.v(steps)))
+            for rows, _, base_ptr, extent, mn0 in operands:
+                per_step = rows * 4 // _GL2_LINE_BYTES
+
+                def scale_line(
+                    i,
+                    base_ptr=base_ptr,
+                    extent=extent,
+                    mn0=mn0,
+                    per_step=per_step,
+                    k_step=k_step,
+                ):
+                    row = ops.add(k_step, ops.div(i, per_step))
+                    offset = ops.add(
+                        ops.add(ops.mul(row, ops.mul(extent, 4)), ops.mul(mn0, 4)),
+                        ops.mul(ops.mod(i, per_step), _GL2_LINE_BYTES),
+                    )
+                    return b.global_ptr_add(base_ptr, ops.v(offset))
+
+                categories.append((steps * per_step, scale_line))
+        self._distribute(categories)
 
 
 class ScaleRegisters:
@@ -2315,6 +2541,72 @@ class LdsReader:
         return [self.b_fragment(buffer, rn, step) for rn in range(first, first + count)]
 
 
+class RingReader(LdsReader):
+    """``walk`` "ring": reads from the line slots. ``step`` is the K-step
+    of a period (``buffer`` is unused). Per operand a lane keeps a base, its
+    row group in the part it reads plus its lane half's offset, and a split
+    base, lane half 1's 512 B lower; each read takes one of them, ``512 *
+    repeat`` and its immediate (:meth:`RingWalk.read`). A lane's scales of a
+    K-step are its base in the scale ring plus the K-step's offset."""
+
+    def fix_bases(self, buffers=None) -> None:
+        k = self.k
+        b, ops, spec = k.b, k.ops, k.spec
+        identity = b.inline_asm(
+            f"s_mov_b32 $0, {self._IDENTITY:#x}", "=s", result_type=I32
+        )
+
+        def keep(value):
+            # As LdsReader.fix_bases: opaque to LLVM, kept in a register.
+            value = ops.v(value)
+            return b.perm_b32(value, value, identity)
+
+        # The lane's row group: rows 8 * lane_col .. 8 * lane_col + 7.
+        group = ops.mul(k.lane_col, RingWalk.group_bytes())
+        half = ops.mul(k.lane_half, spec.lane_half_bytes)
+        self.fixed = {}
+        for operand, component in (("a", k.wave_m), ("b", k.wave_n)):
+            part = ops.add(
+                RingWalk.data_base(operand, 0),
+                ops.mul(component, RingWalk.part_bytes()),
+            )
+            base = ops.v(ops.add(ops.add(part, group), half))
+            split = b.sub(base, ops.v(ops.mul(k.lane_half, RingWalk.PITCH)))
+            self.fixed[operand] = keep(base)
+            self.fixed[operand, "split"] = keep(split)
+            scales = ops.add(
+                RingWalk.scale_base(operand, 0),
+                ops.mul(component, RingWalk.scale_ring_bytes()),
+            )
+            row = ops.mul(k.lane_col, RingWalk.GROUP_ROWS)
+            self.fixed[f"{operand}_scale"] = keep(
+                ops.add(scales, RingWalk.scale_offset(0, row, ops))
+            )
+
+    def _fixed_scale_base(self, buffer, name: str, step, first: int = 0):
+        offset = RingWalk.scale_offset(step % RingWalk.PERIOD, 0)
+        return self.k.ops.add(self.fixed[name], offset)
+
+    def _ring_fragment(self, operand: str, repeat: int, step: int):
+        k = self.k
+        spec = k.spec
+        parts = []
+        for offset, words in spec.lane_reads:
+            split, imm = RingWalk.read(
+                step % RingWalk.PERIOD, offset, spec.lane_half_bytes
+            )
+            base = self.fixed[operand, "split"] if split else self.fixed[operand]
+            at = k.ops.add(base, RingWalk.PITCH * repeat + imm)
+            parts.append(self.load_i32(at, words))
+        return self._assemble(parts)
+
+    def a_fragment(self, buffer, rm, step):
+        return self._ring_fragment("a", rm, step)
+
+    def b_fragment(self, buffer, rn, step):
+        return self._ring_fragment("b", rn, step)
+
+
 @dataclass
 class _Hooks:
     """Refill events inside one tile (see :class:`Pipeline`)."""
@@ -2471,6 +2763,25 @@ class TileCompute:
         if steps == 1 and hooks.signal is not None:
             hooks.signal()
 
+    @staticmethod
+    def _hooks_at(hooks, step: int, steps: int):
+        """``(refill, late_refill, signal before the late refill, signal
+        after the half's first WMMAs)`` of K-step ``step``, each ``None`` if
+        the K-step has none. A :class:`_Hooks` refills in the tile's last
+        K-step and signals in the one before (just before the late refill
+        with one K-step); a callable gives each K-step its own
+        (``walk`` "ring"), its signal placed as a second-to-last K-step's."""
+        if callable(hooks):
+            each = hooks(step)
+            return each.refill, each.late_refill, None, each.signal
+        last = step + 1 == steps
+        return (
+            hooks.refill if last else None,
+            hooks.late_refill if last else None,
+            hooks.signal if last and steps == 1 else None,
+            hooks.signal if step + 2 == steps else None,
+        )
+
     def _run_half_b(self, parity, accumulators, head, next_parity, hooks, steps):
         k, reader = self.k, self.reader
         spec = k.spec
@@ -2485,11 +2796,13 @@ class TileCompute:
         for step in range(steps):
             a_frags, a_scales, b_scales = head
             last = step + 1 == steps
+            refill, late, signal_early, signal = self._hooks_at(hooks, step, steps)
+            if refill is not None:
+                refill()
             if not last:
                 head = reader.head(buffer, step + 1)
                 next_first = reader.b_group(buffer, step + 1, 0, half)
             else:
-                hooks.refill()
                 head = reader.head(next_buffer, 0)
                 next_first = reader.b_group(next_buffer, 0, 0, half)
             for which in (0, 1):
@@ -2497,12 +2810,11 @@ class TileCompute:
                     next_second = reader.b_group(buffer, step + 1, half, half)
                 elif which == 1:
                     next_second = reader.b_group(next_buffer, 0, half, half)
-                if which == 1 and last:
-                    self._signal_before_late(hooks, steps)
-                    hooks.late_refill()
-                signal_here = (
-                    hooks.signal is not None and which == 1 and step + 2 == steps
-                )
+                if which == 1 and late is not None:
+                    if signal_early is not None:
+                        signal_early()
+                    late()
+                signal_here = signal is not None and which == 1
                 self._wait(spec.reads_per_step)
                 if which == 0:
                     a_scales, b_scales = self._wmma_scales(a_scales, b_scales)
@@ -2511,7 +2823,7 @@ class TileCompute:
                 for rm, j in order:
                     rn = which * half + j
                     if signal_here and issued == spec.signal_wmmas:
-                        hooks.signal()
+                        signal()
                     issued += 1
                     mma(
                         rm,
@@ -2523,7 +2835,7 @@ class TileCompute:
                         reuse_b=reuse_b and rm + 1 < rm_count,
                     )
                 if signal_here and issued == spec.signal_wmmas:
-                    hooks.signal()
+                    signal()
             if not last:
                 b_halves = [next_first, next_second]
         return out, (*head, [next_first, next_second])
@@ -2543,19 +2855,19 @@ class TileCompute:
             a_frags, a_scales, b_scales = head
             last = step + 1 == steps
             source = (next_buffer, 0) if last else (buffer, step + 1)
+            refill, late, signal_early, signal = self._hooks_at(hooks, step, steps)
             next_first = None
             for which in (0, 1):
-                if which == 1 and last:
-                    self._signal_before_late(hooks, steps)
-                    hooks.late_refill()
-                signal_here = (
-                    hooks.signal is not None and which == 1 and step + 2 == steps
-                )
+                if which == 1 and late is not None:
+                    if signal_early is not None:
+                        signal_early()
+                    late()
+                signal_here = signal is not None and which == 1
                 self._wait(waits[which])
                 if which == 0:
                     a_scales, b_scales = self._wmma_scales(a_scales, b_scales)
-                    if last:
-                        hooks.refill()
+                    if refill is not None:
+                        refill()
                     head = reader.head(*source)
                 else:
                     next_first = reader.b_group(*source, 0, half)
@@ -2564,7 +2876,7 @@ class TileCompute:
                     for rm in range(rm_count):
                         rn = which * half + j
                         if signal_here and issued == spec.signal_wmmas:
-                            hooks.signal()
+                            signal()
                         issued += 1
                         mma(
                             rm,
@@ -2576,7 +2888,7 @@ class TileCompute:
                             reuse_b=reuse_b and rm + 1 < rm_count,
                         )
                 if signal_here and issued == spec.signal_wmmas:
-                    hooks.signal()
+                    signal()
             b_halves = [next_first, reader.b_group(*source, half, half)]
         return out, (*head, b_halves)
 
@@ -3695,6 +4007,10 @@ class RingWalk:
             return f"{walk} takes no lds_buffers and scales 'lds'"
         if not spec.fixed_bases:
             return f"{walk} needs read_bases 'fixed'"
+        if not spec.contiguous_k:
+            # Chunked reads are 8 B pairs whose two offsets reach 2040 B,
+            # under the ring's immediates.
+            return f"{walk} needs k_reads 'contiguous'"
         if spec.tiled_operands != "none":
             return f"{walk} reads row-major A and B (tiled_operands 'none')"
         pads = (
@@ -3722,6 +4038,130 @@ class RingWalk:
         if cls.lds_bytes() > capacity:
             return f"{walk}: LDS {cls.lds_bytes()} B exceeds {capacity} B"
         return None
+
+
+class RingPipeline:
+    """``walk`` "ring" (read-ahead, B in halves): the K loop over periods of
+    16 K-steps, each the 256x256 tile's compute with :class:`RingWalk`'s
+    events in its K-steps: the TDM wait before the next K-step's reads, the
+    cluster signal once a slot's last reads are issued, and the late refill
+    of the slot in the next K-step. ``gl2_prefetch_distance`` lines ahead of
+    each line refill (and one scale tile ahead of a scale refill) go to GL2
+    with it."""
+
+    # The reader's buffer: the ring has one, the K-step picks the offsets.
+    RING = ()
+
+    def __init__(
+        self, k: _Kernel, tdm: RingTdmLoader, gl2: Gl2Prefetcher, tile: TileCompute
+    ):
+        self.k = k
+        self.tdm = tdm
+        self.gl2 = gl2
+        self.tile = tile
+        self.counts = RingWalk.waits()
+
+    def _prefetched(self, loads) -> list:
+        """The loads ``gl2_prefetch_distance`` lines (one scale tile) after
+        ``loads``."""
+        distance = self.k.spec.gl2_prefetch_distance
+        if not distance:
+            return []
+        return [
+            (kind, index + (distance if kind == "line" else 1)) for kind, index in loads
+        ]
+
+    def hooks(self, k0, step: int) -> _Hooks:
+        k = self.k
+        b, spec = k.b, k.spec
+        count = self.counts[step]
+        loads = RingWalk.refills(step)
+
+        def refill() -> None:
+            k.fence()
+            b.s_wait_tensorcnt(count)
+            b.s_barrier_bare()
+            k.fence()
+
+        def signal() -> None:
+            k.fence()
+            b.inline_asm(_CLUSTER_SIGNAL_WAVE0_ASM, "s,~{scc},~{memory}", [k.wave])
+            k.fence()
+
+        def late(pending: int | None = None) -> None:
+            k.fence()
+            if spec.has_cluster:
+                b.inline_asm(_CLUSTER_WAIT_ASM, "~{memory}")
+            # Every wave's reads of the slots before the barrier; the next
+            # K-step's reads (other slots) may stay in flight.
+            if pending is None:
+                pending = spec.late_pending_reads
+            b.inline_asm(f"s_wait_dscnt {min(pending, _DSCNT_MAX)}", "~{memory}")
+            b.s_barrier_bare()
+            for load in loads:
+                self.tdm.issue_load(k0, load)
+            ahead = self._prefetched(loads)
+            if ahead:
+                self.gl2.prefetch_ring(k0, ahead)
+            k.fence()
+
+        has_signal = spec.has_cluster and RingWalk.signals(step)
+        return _Hooks(
+            refill=refill if count is not None else None,
+            signal=signal if has_signal else None,
+            late_refill=late if loads else None,
+        )
+
+    def run(self) -> list:
+        k, tile = self.k, self.tile
+        b, spec, c0 = k.b, k.spec, k.c0
+        n_acc = spec.wave_repeat_m * spec.wave_repeat_n
+        k.cluster_sync()
+        prologue = RingWalk.prologue()
+        for load in prologue:
+            self.tdm.issue_load(c0, load)
+        distance = spec.gl2_prefetch_distance
+        if distance:
+            lines = [("line", RingWalk.SLOTS + i) for i in range(distance)]
+            self.gl2.prefetch_ring(c0, lines + [("scales", RingWalk.SCALE_SLOTS)])
+        b.s_wait_tensorcnt(self.counts["prologue"])
+        b.s_barrier_bare()
+        b.inline_asm("", "~{memory}")
+        tile.reader.fix_bases()
+        acc = [b.zero_vec_f32(spec.atom.c_frag_len) for _ in range(n_acc)]
+        head_values = tile.flatten(tile.first_head(self.RING))
+        n_head = len(head_values)
+        carried = [(f"acc{i}", v) for i, v in enumerate(acc)] + [
+            (f"head{i}", v) for i, v in enumerate(head_values)
+        ]
+        loop = b.scf_for_iter(
+            c0,
+            k.params["K"],
+            b.const_i32(RingWalk.PERIOD * _ATOM_K),
+            carried,
+            iv_name="k0",
+            elide_trailing_barrier=False,
+        )
+        with loop as (k0, values):
+            acc = list(values[:n_acc])
+            head = tile.unflatten(list(values[n_acc:]))
+            acc, head = tile.run(
+                self.RING,
+                acc,
+                hooks=lambda step: self.hooks(k0, step),
+                head=head,
+                next_parity=self.RING,
+                steps=RingWalk.PERIOD,
+            )
+            b.scf_yield(*acc, *tile.flatten(head))
+        assert len(loop.results) == n_acc + n_head
+        results = list(loop.results[:n_acc])
+        # No workgroup may exit while a TDM load into its LDS is in flight:
+        # with multicast, peers' loads write here too.
+        b.s_wait_tensorcnt(0)
+        if spec.has_cluster:
+            k.cluster_sync()
+        return results
 
 
 class Epilogue:
@@ -3959,6 +4399,20 @@ def _build_panels(k: _Kernel) -> None:
         Epilogue(kq, RowMaps(kq)).emit(final[2 * a + b_panel])
 
 
+def _build_ring(k: _Kernel) -> None:
+    """``walk`` "ring": the 256x256x256 tile's compute over the line slots
+    (:class:`RingPipeline`), stored as the tile's."""
+    b = k.b
+    k.shared = b.smem_alloc(I8, [k.spec.lds_bytes], name_hint="ab_tdm")
+    k.shared_addr = b.smem_addr_of(k.shared)
+    rows = RowMaps(k)
+    tdm = RingTdmLoader(k)
+    tdm.hoist()
+    tile = TileCompute(k, RingReader(k, rows))
+    final = RingPipeline(k, tdm, Gl2Prefetcher(k), tile).run()
+    Epilogue(k, rows).emit(final)
+
+
 def build_mx_gemm(spec: MxGemmSpec, *, arch: str = "gfx1250") -> KernelDef:
     reason = validate(spec, arch)
     if reason:
@@ -4029,6 +4483,10 @@ def build_mx_gemm(spec: MxGemmSpec, *, arch: str = "gfx1250") -> KernelDef:
 
     if spec.panels:
         _build_panels(k)
+        b.ret()
+        return b.kernel
+    if spec.ring:
+        _build_ring(k)
         b.ret()
         return b.kernel
     rows = RowMaps(k)

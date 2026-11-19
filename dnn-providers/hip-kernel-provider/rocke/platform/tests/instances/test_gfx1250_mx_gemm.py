@@ -124,8 +124,8 @@ _PAIRS = {
     "half_b_order": "late",
     "wave_map": "pairs",
 }
-# walk "ring" fields on the 256x256x256 tile: read-ahead, B in halves (late),
-# fixed read bases (the walk itself is not given: these test its model).
+# walk "ring" at the 256x256x256 tile: read-ahead, B in halves (late), fixed
+# bases, contiguous reads.
 _RING = {
     "tile_m": 256,
     "tile_n": 256,
@@ -134,6 +134,8 @@ _RING = {
     "half_plr": "b",
     "half_b_order": "late",
     "read_bases": "fixed",
+    "k_reads": "contiguous",
+    "walk": "ring",
 }
 
 
@@ -510,7 +512,7 @@ class MxGemmSpecTest(unittest.TestCase):
         read-ahead, M and N multiples of 256 and K of 1024; they tag the
         name. Panels take four panel slots of LDS and a 128x128 pass; halves
         two A slots and two B slots of two panels, and a 128x256 half."""
-        self.assertEqual(WALKS, ("tile", "panels", "halves"))
+        self.assertEqual(WALKS, ("tile", "panels", "halves", "ring"))
         for walk, suffix, pass_n in ((_PANELS, "_pw", 128), (_HALVES, "_pwh", 256)):
             for fields in (
                 {"half_plr": "none"},
@@ -1024,7 +1026,7 @@ class MxGemmSpecTest(unittest.TestCase):
         waits = {key: count for key, count in ring.waits().items() if count is not None}
         self.assertEqual(waits, {"prologue": 2, 1: 1, 4: 0, 7: 0, 9: 1, 12: 0, 15: 0})
         for k_reads in K_READS:
-            spec = _spec6(*_MAF_MED[0], **_RING, k_reads=k_reads)
+            spec = _spec6(*_MAF_MED[0], **_RING | {"k_reads": k_reads})
             wraps = {
                 step
                 for step in range(ring.PERIOD)
@@ -1050,8 +1052,7 @@ class MxGemmSpecTest(unittest.TestCase):
             return row << 16 | byte
 
         for k_reads in K_READS:
-            spec = _spec6(*_MAF_MED[0], **_RING, k_reads=k_reads)
-            self.assertIsNone(ring.reason(spec))
+            spec = _spec6(*_MAF_MED[0], **_RING | {"k_reads": k_reads})
             half_bytes = spec.lane_half_bytes
             data = np.full(ring.part_bytes(), -1, np.int64)
             scales = np.full(ring.scale_ring_bytes(), -1, np.int64)
@@ -1142,7 +1143,7 @@ class MxGemmSpecTest(unittest.TestCase):
         period and every repeat."""
         ring = RingWalk
         for k_reads in K_READS:
-            spec = _spec6(*_MAF_MED[0], **_RING, k_reads=k_reads)
+            spec = _spec6(*_MAF_MED[0], **_RING | {"k_reads": k_reads})
             half_bytes = spec.lane_half_bytes
             for step, half, repeat in itertools.product(
                 range(ring.PERIOD), (0, 1), range(8)
@@ -1165,25 +1166,42 @@ class MxGemmSpecTest(unittest.TestCase):
             }
             self.assertEqual(len(groups), 16)
 
+    def test_ring_validate_and_name(self):
+        """validate() takes walk "ring" by :meth:`RingWalk.reason`; the
+        kernel name ends in the ring's tag and the LDS is the ring's."""
+        spec = _spec6(*_MAF_MED[1], **_RING, scale_swap="wait")
+        self.assertIsNone(validate(spec))
+        self.assertIn("_rg", spec.kernel_name())
+        self.assertNotIn("_rg", replace(spec, walk="tile").kernel_name())
+        self.assertEqual(spec.lds_bytes, RingWalk.lds_bytes())
+        for bad in (
+            replace(spec, K=65536 + 1024),
+            replace(spec, read_bases="loop"),
+            replace(spec, tile_k=512),
+        ):
+            with self.subTest(bad=bad.kernel_name()):
+                self.assertIsNotNone(validate(bad))
+                self.assertEqual(validate(bad), RingWalk.reason(bad))
+
     def test_ring_reason(self):
         """walk "ring" takes FP6 at the 256x256x256 tile, wave_group 2x2 and
         the 16x16 WMMA, read-ahead with B in halves (ahead or late), fixed
-        read bases, row-major A and B, whole 256 tiles and K a multiple of
-        2048 (one period), either read mode; nothing else."""
-        for (m, n, k), order, k_reads, cluster in itertools.product(
-            _MAF_MED, ("ahead", "late"), K_READS, ((4, 4, 1), (2, 4, 1))
+        read bases, contiguous reads, row-major A and B, whole 256 tiles and K
+        a multiple of 2048 (one period); nothing else."""
+        for (m, n, k), order, swap, cluster in itertools.product(
+            _MAF_MED, ("ahead", "late"), SCALE_SWAPS, ((4, 4, 1), (2, 4, 1))
         ):
             spec = _spec6(
                 m,
                 n,
                 k,
-                **{**_RING, "half_b_order": order},
-                k_reads=k_reads,
+                **_RING | {"half_b_order": order},
+                scale_swap=swap,
                 cluster_dim=cluster,
             )
             with self.subTest(spec=spec.kernel_name()):
                 self.assertIsNone(RingWalk.reason(spec))
-        base = _spec6(*_MAF_MED[0], **_RING, k_reads="contiguous", scale_swap="wait")
+        base = _spec6(*_MAF_MED[0], **_RING, scale_swap="wait")
         self.assertIsNone(RingWalk.reason(base))
         self.assertIsNone(RingWalk.reason(replace(base, wmma_reuse="b")))
         for fields, words in (
@@ -1201,6 +1219,7 @@ class MxGemmSpecTest(unittest.TestCase):
             ({"wave_group": (4, 1)}, "wave_group"),
             ({"half_plr": "none", "half_b_order": "ahead"}, "half_plr"),
             ({"read_bases": "loop"}, "read_bases"),
+            ({"k_reads": "chunked", "scale_swap": "read"}, "contiguous"),
             ({"lds_buffers": 3}, "lds_buffers"),
             ({"tiled_operands": "ab"}, "row-major"),
             ({"a_lds_pad": LdsPad(16, 1536)}, "pads"),
@@ -2772,6 +2791,58 @@ class MxGemmIrTest(unittest.TestCase):
             "@llvm.amdgcn.cvt.pk.fp8.f32", _llvm(_spec(tile_m=128, tile_n=128))
         )
 
+    def test_ring_kernel(self):
+        """walk "ring": a loop pass is a period, 16 K-steps of 64 WMMAs; a
+        wave issues four TDM loads before the loop (lines 0 and 1, scale
+        tiles 0 and 1) and eight in it (six lines, two scale tiles), waits
+        for them with :meth:`RingWalk.waits`' counts in K-step order, and
+        with a cluster signals and waits for it once per refill K-step. The
+        LDS reads are the scales and rows of the first K-step and of the 16
+        of a pass."""
+        load = re.compile(r"= load (<\d+ x i32>|i32), ptr addrspace\(3\)")
+        signal = '"s_cmp_eq_u32 $0, 0\\0As_cbranch_scc0 1\\0As_barrier_signal -3"'
+        for (m, n, k), fields in (
+            (_MAF_MED[0], {"scale_swap": "wait"}),
+            (
+                _MAF_MED[1],
+                {"half_b_order": "ahead", "cluster_dim": (2, 4, 1)},
+            ),
+            ((512, 512, 4096), {"cluster_dim": (1, 1, 1), "wmma_reuse": "b"}),
+        ):
+            spec = _spec6(m, n, k, **_RING | fields)
+            with self.subTest(spec.kernel_name()):
+                self.assertIsNone(validate(spec))
+                llvm = _llvm(spec)
+                self.assertEqual(len(re.findall(_WMMA, llvm)), 16 * 64)
+                self.assertEqual(
+                    len(
+                        re.findall(
+                            r"call void @llvm\.amdgcn\.tensor\.load\.to\.lds", llvm
+                        )
+                    ),
+                    12,
+                )
+                waits = [
+                    int(w) for w in re.findall(r"s\.wait\.tensorcnt\(i16 (\d+)\)", llvm)
+                ]
+                counts = RingWalk.waits()
+                loop = [
+                    counts[q] for q in range(RingWalk.PERIOD) if counts[q] is not None
+                ]
+                self.assertEqual(waits, [counts["prologue"], *loop, 0])
+                per_step = (
+                    spec.a_scale_reads
+                    + spec.b_scale_reads
+                    + len(spec.lane_reads) * (spec.wave_repeat_m + spec.wave_repeat_n)
+                )
+                self.assertEqual(len(load.findall(llvm)), 17 * per_step)
+                refills = sum(1 for q in range(RingWalk.PERIOD) if RingWalk.refills(q))
+                cluster = spec.has_cluster
+                self.assertEqual(
+                    llvm.count('asm sideeffect "s_barrier_wait -3"'), refills * cluster
+                )
+                self.assertEqual(llvm.count(signal), refills * cluster)
+
 
 class MxGemmBenchReferenceTest(unittest.TestCase):
     def test_block_reference_is_the_full_reference_sliced(self):
@@ -3345,6 +3416,16 @@ class MxGemmHostBuildTest(unittest.TestCase):
                     {"half_plr": "none", "read_bases": "fixed"},
                     {"half_plr": "b"},
                     {"half_plr": "b", "half_b_order": "late"},
+                )
+            ),
+            # The ring at MAF and MED: B in halves late and ahead, scale swaps
+            # after the wait and at the read.
+            *(
+                _spec6(*shape, cluster_dim=cluster, **_RING | f)
+                for shape, cluster in zip(_MAF_MED, ((4, 4, 1), (2, 4, 1)))
+                for f in (
+                    {"scale_swap": "wait", "wmma_reuse": "b"},
+                    {"half_b_order": "ahead"},
                 )
             ),
             # Interleaved reads at the MAB tiling (one N-repeat, one-word B
@@ -4161,6 +4242,40 @@ class MxGemmDeviceTest(unittest.TestCase):
                     tiled_operands="ab",
                     **_DIRECT,
                 ),
+            ]
+            # The ring: one and two periods, clusters 1x1, 2x2 and 4x4, B in
+            # halves late and ahead, scale swaps after the wait and at the
+            # read, without GL2 prefetch.
+            + [
+                _spec6(*problem, **_RING | fields)
+                for problem, fields in (
+                    (
+                        (512, 512, 4096),
+                        {
+                            "cluster_dim": (1, 1, 1),
+                            "scale_swap": "wait",
+                            "wmma_reuse": "b",
+                        },
+                    ),
+                    ((512, 512, 4096), {"cluster_dim": (2, 2, 1)}),
+                    (
+                        (512, 512, 2048),
+                        {
+                            "cluster_dim": (2, 2, 1),
+                            "half_b_order": "ahead",
+                            "scale_swap": "wait",
+                        },
+                    ),
+                    ((1024, 1024, 4096), {"cluster_dim": (4, 4, 1)}),
+                    (
+                        (1024, 1024, 4096),
+                        {
+                            "cluster_dim": (4, 4, 1),
+                            "half_b_order": "ahead",
+                            "gl2_prefetch_distance": 0,
+                        },
+                    ),
+                )
             ]
         ):
             with self.subTest(spec.kernel_name()):
