@@ -28,6 +28,7 @@
 #include <string.h>
 
 #include "rocke/helper_rocke.helpers.grid.h" /* rocke_chiplet_aware_super_tile_dynamic */
+#include "rocke/helper_rocke.helpers.loads.h"
 #include "rocke/instance_gemm_internal.h"
 
 /* Widest global A/B load vector, in elements: the 4-dword buffer_load limit is
@@ -169,6 +170,22 @@ static void rocke_gemm_tdm_issue(rocke_gemm_build_ctx_t* ctx,
     rocke_b_tensor_load_to_lds(b, groups[0], groups[1], groups[2], groups[3], groups[4], 0);
 }
 
+/* Full-tile source offsets for the synchronous coalesced-copy helper. */
+static rocke_value_t* rocke_gemm_tile_source(rocke_ir_builder_t* b,
+                                            rocke_value_t* row,
+                                            rocke_value_t* col,
+                                            rocke_value_t** valid,
+                                            void* user)
+{
+    const rocke_tile_window_t* tile = (const rocke_tile_window_t*)user;
+    rocke_value_t* indices[3];
+    indices[0] = tile->origin[0];
+    indices[1] = rocke_b_add(b, tile->origin[1], row);
+    indices[2] = rocke_b_add(b, tile->origin[2], col);
+    *valid = NULL;
+    return rocke_tensor_descriptor_offset(b, &tile->view->desc, indices, 3);
+}
+
 void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                                 rocke_value_t* A_dst,
                                 rocke_value_t* B_dst,
@@ -192,8 +209,6 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
     const rocke_gemm_universal_spec_t* spec = ctx->spec;
     const rocke_gemm_tile_spec_t* t = &spec->tile;
     const rocke_type_t* I64 = rocke_i64();
-    (void)A_dst; /* Python emit_load_phase's A_dst/B_dst args are unused in body. */
-    (void)B_dst;
 
     /* ----------------------- TDM path ----------------------- *
      * Mirrors Python's `if spec.trait.tdm:` branch at the top of emit_load_phase.
@@ -435,6 +450,38 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
         rocke_value_t* b_gorigin[3] = {ctx->batch_off_b, ctx->block_n_off, k_off};
         rocke_make_tile_window(&a_global_tile, &ctx->a_view, a_glen, a_gorigin, 3);
         rocke_make_tile_window(&b_global_tile, &ctx->b_view, b_glen, b_gorigin, 3);
+
+        if(strcmp(ctx->arch, "gfx950") == 0 && rocke_type_eq(ctx->storage_dtype, rocke_f16())
+           && strcmp(spec->trait.pipeline, "mem") == 0 && !spec->batched
+           && spec->trait.split_k == 1 && !spec->trait.pad_m && !spec->trait.pad_n
+           && !spec->trait.pad_k && !spec->trait.preshuffle_b && !ctx->two_buf && !ctx->lds_pad
+           && !ctx->swz)
+        {
+            rocke_coalesced_tile_loader_t loader = {};
+            loader.tile_cols = ctx->block_k;
+            loader.block_size = ctx->threads;
+            loader.load_vec = load_vec;
+            loader.oob_sentinel = INT32_MAX;
+            loader.tile_rows = ctx->block_m;
+            rocke_coalesced_tile_loader_load(b,
+                                             &loader,
+                                             ctx->tid,
+                                             A_dst,
+                                             rocke_gemm_tile_source,
+                                             &a_global_tile,
+                                             NULL,
+                                             a_global_tile.view->base);
+            loader.tile_rows = ctx->block_n;
+            rocke_coalesced_tile_loader_load(b,
+                                             &loader,
+                                             ctx->tid,
+                                             B_dst,
+                                             rocke_gemm_tile_source,
+                                             &b_global_tile,
+                                             NULL,
+                                             b_global_tile.view->base);
+            return;
+        }
 
         int a_llen[2] = {ctx->block_m, ctx->block_k};
         int b_llen[2] = {ctx->block_n, ctx->block_k};

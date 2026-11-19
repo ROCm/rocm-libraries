@@ -74,6 +74,7 @@ from ...core.ir import (
     encode_tdm_padding,
 )
 from ...helpers.io import io_ir_type
+from ...helpers.loads import CoalescedTileLoader
 from ...helpers.spec import WarpTileBlockSizeMixin, choose_load_vec
 from ...helpers.tensor_view import make_global_view, make_tile_window
 from ._gemm_kloop_tdm import TdmKLoop
@@ -1991,6 +1992,43 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             lengths=(1, block_n, block_k),
             origin=(batch_off_b, block_n_off, k_off),
         )
+        # The raw-pointer loader has no tail masking. Start with the existing
+        # full-tile contract and an identity LDS placement; keep the specialized
+        # paths below for tails, packed B, and nontrivial LDS addressing.
+        if (
+            arch == "gfx950"
+            and storage_dtype == F16
+            and spec.trait.pipeline == "mem"
+            and not spec.batched
+            and spec.trait.split_k == 1
+            and not (spec.trait.pad_m or spec.trait.pad_n or spec.trait.pad_k)
+            and not spec.trait.preshuffle_b
+            and not (_two_buf or _lds_pad or _SWZ)
+        ):
+            def copy_full_tile(src, dst, rows):
+                batch_base, row_base, col_base = src.origin
+                desc = src.view.desc
+
+                def source(builder, row, col):
+                    indices = (
+                        batch_base,
+                        builder.add(row_base, row),
+                        builder.add(col_base, col),
+                    )
+                    return desc.offset(builder, indices), None
+
+                CoalescedTileLoader(
+                    tile_rows=rows,
+                    tile_cols=block_k,
+                    block_size=spec.block_size,
+                    load_vec=load_vec,
+                    use_buffer_rsrc=False,
+                ).load(b, tid=tid, smem_dst=dst, descriptor=source, ptr=src.view.base)
+
+            copy_full_tile(a_global_tile, A_dst, block_m)
+            copy_full_tile(b_global_tile, B_dst, block_n)
+            return
+
         a_lds_tile = make_tile_window(
             a_lds_view,
             lengths=(block_m, block_k),

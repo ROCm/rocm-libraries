@@ -202,9 +202,18 @@ LDS allocations are part of the algorithm. They control:
 
 ## Data Movement
 
-`pipeline in ("mem", "compv3")`: sync path via `CoalescedTileLoader` (`buffer/global load -> VGPR -> LDS store`).
+The non-batched, unpadded gfx950 FP16 `mem` path with ordinary B storage and
+packed single-buffer LDS is the plain GEMM example for `CoalescedTileLoader`.
+In [`emit_load_phase`](../../python/rocke/instances/common/gemm_universal.py), the
+A/B `TileWindow`s select the source rectangles, their descriptors turn local
+coordinates into global element offsets, and the loader emits the global load
+and LDS store for each lane. The K loop still owns the workgroup barriers.
 
-`pipeline = "compv4"`: async path via `AsyncTileLoader` (`raw_ptr_buffer_load_lds`), double-buffered, with `s_waitcnt(vmcnt=0)` before each MFMA phase consumes the freshly-loaded slab.
+Other synchronous configurations retain their specialized copies, including
+padded tails, pre-shuffled B, and nontrivial LDS destination mappings. The
+`compv4` name is not an async switch: `direct_to_lds` selects the gfx9 async
+copy path, and `dtl_prefetch` selects its ping-pong schedule. TDM has a separate
+copy and completion contract.
 
 GEMM descriptor (`make_global_view + make_tile_window`):
 
