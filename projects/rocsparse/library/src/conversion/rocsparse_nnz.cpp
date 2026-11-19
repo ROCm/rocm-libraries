@@ -244,7 +244,8 @@ rocsparse_status rocsparse::nnz_impl(rocsparse_handle          handle,
                          (const void*&)A,
                          ld,
                          (const void*&)nnz_per_row_columns,
-                         (const void*&)nnz_total_dev_host_ptr);
+                         (const void*&)nnz_total_dev_host_ptr,
+                         nnz_total_pointer_mode);
 
     const rocsparse_status status = rocsparse::nnz_checkarg(handle,
                                                             dir,
