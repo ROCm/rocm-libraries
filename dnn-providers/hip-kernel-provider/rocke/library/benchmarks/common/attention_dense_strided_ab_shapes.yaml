@@ -1,0 +1,64 @@
+# Stride-aware dense attention A/B shape list: the grid family of the frozen LLM-prefill
+# shape set (13 rows). Read by attention_dense_strided_ab.py (--shapes).
+#
+# Source: library/benchmarks/gfx950/attention/prefill/dense_prefill_table_sweep.py MODELS
+# (batch 1, sq == sk, causal or not): Llama-3-8B 32/8 D128, Llama-3-70B 64/8 D128, Llama-2-7B
+# 32/32 D128 (MHA), d64-serving-GQA8 64/8 D64, crossed over GQA and MHA, D64 and D128, no mask and
+# causal, fp16 and bf16, sequence 1k-16k. Added beyond the table, each for a stated reason:
+#   - d64-MHA 32/32 and d64-GQA4 32/8 (D64): the table has no D64 MHA.
+#   - "TPn" rows = the same model's per-GPU head slice under n-way tensor parallelism (Hq/n,
+#     Hkv/n): the realistic way a prefill grid is under-filled, which is where the dispatcher
+#     keeps the grid body (work items < 256) and where a KV split pays.
+#   - select: gfx950_dense_qbminor (pinned, the factory's default spec for that candidate): the
+#     grid at long sequences. The auto dispatcher never picks the grid body above 2k for these
+#     head counts, but a kernel ingestor can launch this grid.
+#   - KV-segment grid (k01-k03): the factory splits KV only for a moving bottom-right diagonal
+#     (chunked prefill, sq < sk), and those specs bake the shape. So these rows take the
+#     factory's grid spec (pinned gfx950_dense_grid, sq == sk, runtime shape) and change ONE field
+#     with dataclasses.replace: kv_segments = the factory's own split rule (dense_kv_segments with
+#     the max_kv_segments_for_extent cap, as _base_spec applies it) on that grid ("rule").
+# Not in the list: chunked prefill / bottom-right causal (compile-time shape), D256 (no gfx950
+# dense candidate serves it), sliding window, sinks, LSE.
+#
+# Fields: id, model (label only), batch, hq, hkv, d, sq, sk, dtype (fp16 | bf16);
+#   mask: none | causal_tl (top-left, = the table's mask_type 1) | causal_br;
+#   select: auto (dispatch_attention with layout='dense' and the arch's CU count) or a pinned
+#     spec_id (attention_tuning_spec, its default spec);
+#   override: spec fields set with dataclasses.replace after the factory (documented above);
+#   layouts: the storage layouts to time, any of bshd | bhsd | packed_qkv | batch_slice
+#     (default [bshd]); --layouts on the command line filters them;
+#   expect: the dispatcher's choice for packed BSHD at the time of writing (candidate, body,
+#     variant, block_m, block_n, kv_segments). The harness re-checks it in every arm tree and
+#     reports a difference; it never changes what is timed.
+shapes:
+  - {id: g01, model: Llama-3-8B, batch: 1, hq: 32, hkv: 8, d: 128, sq: 1024, sk: 1024, mask: none, dtype: fp16, select: auto, layouts: [bshd],
+     expect: {candidate: attention_gfx950_dense_grid, body: grid, variant: grid, block_m: 256, block_n: 64, kv_segments: 1}}
+  - {id: g02, model: Llama-2-7B, batch: 1, hq: 32, hkv: 32, d: 128, sq: 1024, sk: 1024, mask: none, dtype: bf16, select: auto, layouts: [bshd],
+     expect: {candidate: attention_gfx950_dense_grid, body: grid, variant: grid, block_m: 256, block_n: 64, kv_segments: 1}}
+  - {id: g03, model: d64-GQA4, batch: 1, hq: 32, hkv: 8, d: 64, sq: 1024, sk: 1024, mask: causal_tl, dtype: bf16, select: auto, layouts: [bshd],
+     expect: {candidate: attention_gfx950_dense_grid, body: grid, variant: grid, block_m: 256, block_n: 64, kv_segments: 1}}
+  - {id: g04, model: d64-MHA, batch: 1, hq: 32, hkv: 32, d: 64, sq: 1024, sk: 1024, mask: none, dtype: fp16, select: auto, layouts: [bshd],
+     expect: {candidate: attention_gfx950_dense_grid, body: grid, variant: grid, block_m: 256, block_n: 64, kv_segments: 1}}
+  - {id: g05, model: Llama-3-8B TP2, batch: 1, hq: 16, hkv: 4, d: 128, sq: 2048, sk: 2048, mask: none, dtype: bf16, select: auto, layouts: [bshd],
+     expect: {candidate: attention_gfx950_dense_grid, body: grid, variant: grid, block_m: 256, block_n: 64, kv_segments: 1}}
+  - {id: g06, model: d64-serving-GQA8 TP4, batch: 1, hq: 16, hkv: 2, d: 64, sq: 2048, sk: 2048, mask: causal_tl, dtype: fp16, select: auto, layouts: [bshd],
+     expect: {candidate: attention_gfx950_dense_grid, body: grid, variant: grid, block_m: 256, block_n: 64, kv_segments: 1}}
+  # ---------------- grid family: KV-segment grid (factory grid spec + kv_segments rule) ----------------
+  - {id: k01, model: Llama-3-70B TP8, batch: 1, hq: 8, hkv: 1, d: 128, sq: 4096, sk: 4096, mask: causal_tl, dtype: fp16, select: gfx950_dense_grid, layouts: [bshd],
+     override: {kv_segments: rule},
+     expect: {candidate: attention_gfx950_dense_grid, body: grid, variant: grid_kvseg, block_m: 256, block_n: 64, kv_segments: 4}}
+  - {id: k02, model: Llama-3-8B TP4, batch: 1, hq: 8, hkv: 2, d: 128, sq: 2048, sk: 2048, mask: none, dtype: bf16, select: gfx950_dense_grid, layouts: [bshd],
+     override: {kv_segments: rule},
+     expect: {candidate: attention_gfx950_dense_grid, body: grid, variant: grid_kvseg, block_m: 256, block_n: 64, kv_segments: 8}}
+  - {id: k03, model: d64-serving-GQA8 TP8, batch: 1, hq: 8, hkv: 1, d: 64, sq: 4096, sk: 4096, mask: causal_tl, dtype: bf16, select: gfx950_dense_grid, layouts: [bshd],
+     override: {kv_segments: rule},
+     expect: {candidate: attention_gfx950_dense_grid, body: grid, variant: grid_kvseg, block_m: 256, block_n: 64, kv_segments: 4}}
+  # ---------------- grid family: pinned qbminor grid at long sequences ----------------
+  - {id: h01, model: Llama-3-8B, batch: 1, hq: 32, hkv: 8, d: 128, sq: 4096, sk: 4096, mask: causal_tl, dtype: fp16, select: gfx950_dense_qbminor, layouts: [bshd],
+     expect: {candidate: attention_gfx950_dense_qbminor, body: grid, variant: grid_qbminor, block_m: 256, block_n: 64, kv_segments: 1}}
+  - {id: h02, model: Llama-3-8B, batch: 1, hq: 32, hkv: 8, d: 128, sq: 16384, sk: 16384, mask: none, dtype: bf16, select: gfx950_dense_qbminor, layouts: [bshd],
+     expect: {candidate: attention_gfx950_dense_qbminor, body: grid, variant: grid_qbminor, block_m: 256, block_n: 64, kv_segments: 1}}
+  - {id: h03, model: d64-serving-GQA8, batch: 1, hq: 64, hkv: 8, d: 64, sq: 8192, sk: 8192, mask: causal_tl, dtype: fp16, select: gfx950_dense_qbminor, layouts: [bshd],
+     expect: {candidate: attention_gfx950_dense_qbminor, body: grid, variant: grid_qbminor, block_m: 256, block_n: 64, kv_segments: 1}}
+  - {id: h04, model: Llama-2-7B, batch: 1, hq: 32, hkv: 32, d: 128, sq: 8192, sk: 8192, mask: none, dtype: bf16, select: gfx950_dense_qbminor, layouts: [bshd],
+     expect: {candidate: attention_gfx950_dense_qbminor, body: grid, variant: grid_qbminor, block_m: 256, block_n: 64, kv_segments: 1}}
