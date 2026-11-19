@@ -140,7 +140,8 @@ static int prepare(const char* gfx,
     return status;
 }
 
-static int emit(const char* dtype, const int* config, bool print, bool batch = false)
+static int
+    emit(const char* dtype, const int* config, bool print, bool batch = false, bool reverse = false)
 {
     const int words = config[0], rows = config[1], groups = config[2];
     const int chunk = config[3], count = config[4], alignment = config[5];
@@ -175,7 +176,7 @@ static int emit(const char* dtype, const int* config, bool print, bool batch = f
     lengths[lead] = rows * 3;
     lengths[lead + 1] = k * 3;
     strides[lead] = k * 3;
-    strides[lead + 1] = 1;
+    strides[lead + 1] = reverse ? -1 : 1;
     if(batch)
     {
         if(uint64_t(rows * 3) * (k * 3) > INT_MAX)
@@ -316,12 +317,15 @@ int main(int argc, char** argv)
     }
     if(argc == 6 && strcmp(argv[1], "--prepare") == 0)
         return prepare(argv[2], argv[3], argv[4], argv[5]);
-    if(argc != 12 || (strcmp(argv[1], "--emit") != 0 && strcmp(argv[1], "--emit-batch") != 0))
+    if(argc != 12)
         return 2;
     const bool batch = strcmp(argv[1], "--emit-batch") == 0;
+    const bool reverse = strcmp(argv[1], "--emit-reversed") == 0;
+    if(!batch && !reverse && strcmp(argv[1], "--emit") != 0)
+        return 2;
     int config[9];
     for(int i = 0; i < 9; ++i)
         if(!parse_int(argv[i + 3], &config[i]))
             return 2;
-    return emit(argv[2], config, true, batch);
+    return emit(argv[2], config, true, batch, reverse);
 }

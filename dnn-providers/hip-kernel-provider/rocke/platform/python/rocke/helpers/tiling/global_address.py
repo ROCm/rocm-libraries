@@ -14,7 +14,7 @@ import math
 
 from ...core.dtypes import dtype_info
 from ...core.ir import I32, IRBuilder, PtrType, Value
-from ...core.storage import BitPacking, elements_to_storage
+from ...core.storage import BitPacking, elements_to_storage, is_register_packed
 from .descriptors import TensorWindow
 from .fragments import TileDesc
 
@@ -111,12 +111,19 @@ def storage_displacement(
     window: TensorWindow,
     tile: TileDesc,
     coordinates: tuple[int, ...],
-    constant_origin: int,
+    constant_origin: int = 0,
 ) -> int:
-    """Constant storage offset of a complete run, relative to its runtime byte base."""
+    """Constant storage offset from a lane base, with optional literal origin.
+
+    Non-packed displacements are signed, unlike element counts for allocation.
+    Packed admission still requires whole-word runs and nonnegative offsets.
+    """
     lead = window.tensor.rank - len(tile.shape)
     elements = constant_origin + sum(
         delta * window.tensor.strides[lead + axis]
         for axis, delta in enumerate(coordinates)
     )
-    return elements_to_storage(window.tensor.dtype.name, elements)
+    dtype = window.tensor.dtype.name
+    return (
+        elements_to_storage(dtype, elements) if is_register_packed(dtype) else elements
+    )

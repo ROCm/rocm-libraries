@@ -401,7 +401,6 @@ def _register_index(
     tile_desc: TileDesc,
     base_index: Any,
     register: int,
-    dtype: Any,
 ) -> Any:
     """The register's storage-unit index: the lane base index (already in storage units, see
     :func:`_unit_index`) plus the register's compile-time coordinate offset linearized by the tensor
@@ -409,14 +408,7 @@ def _register_index(
     the backend vectorizer can merge; it is bit-exact with :func:`_address` of the register's
     positions by linearity. For every byte-or-wider dtype a unit is an element."""
     deltas = _register_coord_offsets(tile_desc.layout, register)
-    lead = _leading_rank(window, len(deltas))
-    offset = elements_to_storage(
-        dtype.name,
-        sum(
-            delta * window.tensor.strides[lead + axis]
-            for axis, delta in enumerate(deltas)
-        ),
-    )
+    offset = storage_displacement(window, tile_desc, deltas)
     return base_index if offset == 0 else b.add(base_index, b.const_i32(offset))
 
 
@@ -925,7 +917,7 @@ def _lds_index(
     element's swizzled address does not depend on the rank of the tile that reaches it.
     """
     if not lds_swizzle:
-        return _register_index(b, window, tile_desc, base_index, register, dtype)
+        return _register_index(b, window, tile_desc, base_index, register)
     coords = emit_tensor_coordinates(b, tile_desc.layout, thread, register)
     lead = _leading_rank(window, len(coords))
     leading = [_as_value(b, window.origin[axis]) for axis in range(lead)]
@@ -1302,7 +1294,7 @@ def store_fragment(
     base_index = _unit_index(b, base_index, out_dtype)
     for register in range(0, tile_desc.register_count, step):
         positions = _register_positions(b, tile_desc, base_positions, register)
-        address = _register_index(b, window, tile_desc, base_index, register, out_dtype)
+        address = _register_index(b, window, tile_desc, base_index, register)
         slots = storage_slots(fragment.dtype, tile_desc.register_count, register, step)
         units = [_stored_unit(b, fragment, slot, out_dtype) for slot in slots]
         mask = _clip_mask(b, window, positions, tile_desc.shape)

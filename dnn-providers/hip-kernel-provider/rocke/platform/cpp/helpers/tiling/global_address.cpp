@@ -128,5 +128,10 @@ int64_t rocke_i_tiling_storage_displacement(const rocke_tiling_window_t* window,
     for(int axis = 0; axis < tile->rank; ++axis)
         elements += coordinates[axis] * window->tensor->strides[lead + axis];
     const int bits = rocke_dtype_info(window->tensor->dtype->name)->encoded_bits;
-    return bits < 8 ? (elements * bits + 31) / 32 : elements;
+    if(bits >= 8)
+        return elements;
+    if(elements < 0)
+        throw ckc::ValueError(
+            ckc::format_error("element count must be at least 0, got %lld", (long long)elements));
+    return (elements / 32) * bits + ((elements % 32) * bits + 31) / 32;
 }

@@ -52,7 +52,7 @@ for rows, clip in product((16, 32), (0, 1)):
     _CASES.append(("fp32", 2, rows, 64 // rows, 2, 2, 4, clip, 0, 1))
 
 
-def build_case(case, *, batch=False):
+def build_case(case, *, batch=False, reverse=False):
     dtype, words, rows, groups, chunk, count, alignment, clip, dynamic, narrow = case
     logical = dtype_to_ir_type(dtype)
     output_dtype = F16 if narrow else logical
@@ -68,7 +68,8 @@ def build_case(case, *, batch=False):
     out = b.param("OUT", PtrType(storage_ir_type(output_dtype.name), "global"))
     k = count * groups
     lengths = (None, rows * 3, k * 3) if batch else (rows * 3, k * 3)
-    strides = (rows * 3 * k * 3, k * 3, 1) if batch else (k * 3, 1)
+    stride = -1 if reverse else 1
+    strides = (rows * 3 * k * 3, k * 3, stride) if batch else (k * 3, stride)
     tensor = make_tensor_desc(lengths, strides, logical)
     destination = make_tensor_desc(tensor.lengths, tensor.strides, output_dtype)
     batch_origin = (b.param("batch", I32),) if batch else ()
@@ -113,9 +114,23 @@ def test_python_descriptor_transport_verifies_and_lowers(case, batch):
     assert "define" in lower_kernel_to_llvm(kernel, arch=target, llvm_flavor="llvm23")
 
 
-@pytest.mark.parametrize("batch", (False, True))
-@pytest.mark.parametrize("case", _CASES)
-def test_native_descriptor_transport_emits_identical_ir(case, batch):
+def test_reversed_global_fragment_has_signed_storage_displacements():
+    case = ("fp32", 2, 32, 2, 2, 2, 4, 0, 0, 0)
+    kernel = build_case(case, reverse=True)
+    assert not verify(kernel)
+    assert not any(op.name == "tile.global_ptr_add" for op in kernel.body.ops)
+    stores = [op for op in kernel.body.ops if op.name == "memref.global_store_typed"]
+    assert len(stores) == 2
+    offset = stores[1].operands[1].op.operands[1]
+    assert offset.op.attrs["value"] == -1
+
+
+@pytest.mark.parametrize(
+    "case,batch,reverse",
+    [(case, batch, False) for case in _CASES for batch in (False, True)]
+    + [(("fp32", 2, 32, 2, 2, 2, 4, 0, 0, 0), False, True)],
+)
+def test_native_descriptor_transport_emits_identical_ir(case, batch, reverse):
     executable = os.environ.get("ROCKE_FRAGMENT_IO_TEST")
     if not executable:
         pytest.skip("set ROCKE_FRAGMENT_IO_TEST to the built native fragment emitter")
@@ -123,7 +138,7 @@ def test_native_descriptor_transport_emits_identical_ir(case, batch):
     actual = subprocess.run(
         [
             executable,
-            "--emit-batch" if batch else "--emit",
+            "--emit-batch" if batch else "--emit-reversed" if reverse else "--emit",
             case[0],
             *map(str, case[1:]),
         ],
@@ -132,4 +147,4 @@ def test_native_descriptor_transport_emits_identical_ir(case, batch):
         text=True,
         timeout=30,
     )
-    assert actual.stdout == serialize(build_case(case, batch=batch))
+    assert actual.stdout == serialize(build_case(case, batch=batch, reverse=reverse))

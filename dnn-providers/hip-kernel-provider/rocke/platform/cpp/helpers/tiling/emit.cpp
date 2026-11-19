@@ -422,7 +422,7 @@ rocke_status_t rocke_h_store_fragment(rocke_ir_builder_t* b,
         const int align = cap_alignment(access.unit_bytes, alignment_bytes);
         for(int reg = 0; reg < tile->register_count; reg += access.step)
         {
-            int64_t deltas[ROCKE_TILING_MAX_RANK], offset = 0;
+            int64_t deltas[ROCKE_TILING_MAX_RANK];
             rocke_value_t* positions[ROCKE_TILING_MAX_RANK];
             rocke_i_tiling_register_offsets(tile, reg, deltas);
             for(int axis = 0; axis < tile->rank; ++axis)
@@ -431,9 +431,9 @@ rocke_status_t rocke_h_store_fragment(rocke_ir_builder_t* b,
                     = deltas[axis]
                           ? rocke_b_add(b, base_positions[axis], rocke_b_const_i32(b, deltas[axis]))
                           : base_positions[axis];
-                offset += deltas[axis] * window->tensor->strides[access.lead + axis];
             }
-            const int64_t unit_offset = storage_count(access, offset);
+            const int64_t unit_offset
+                = rocke_i_tiling_storage_displacement(window, tile, deltas, 0);
             auto* address = unit_offset
                                 ? rocke_b_add(b, base_index, rocke_b_const_i32(b, unit_offset))
                                 : base_index;
