@@ -32,8 +32,8 @@
 # CTest runs. The tier rule gives a category whose name is not a tier only its
 # own name as a label. Thus python-standard lists the standard, comprehensive
 # and full labels itself. The pytest-scaling runner and counted-sync entries
-# start at comprehensive so nightly/full runs own them without adding work to
-# quick/standard pre-merge and post-merge runs.
+# start at comprehensive so they add no work to quick/standard pre-merge and
+# post-merge runs.
 #
 # The pinned GPU reference entries are regex patterns, unlike most
 # entries here: rocke/platform/CMakeLists.txt registers
@@ -60,10 +60,10 @@
 # part gets the same labels, including the quick, standard and ffm-quick
 # tiers.
 #
-# The comprehensive tier holds tests run only by scheduled CI: its entries
-# get only the comprehensive and full labels, so a `ctest -L '^quick$'` or
-# `-L '^standard$'` run (pull-request and push CI) skips them and the
-# scheduled (nightly) run, which selects `-L '^comprehensive$'`, runs them.
+# The comprehensive tier holds tests for scheduled CI only: its entries get
+# only the comprehensive and full labels, so a `ctest -L '^quick$'` or
+# `-L '^standard$'` run (TheRock pull-request and push CI) skips them. Which CI job
+# runs them is in rocke/TESTING.md section 5.0.2.
 test_categories:
   quick:
     description: "rocKE pre-registered smoke/golden/unit checks (C++ + Python)"
