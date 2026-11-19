@@ -46,7 +46,11 @@ def test_custom_kernel_legacy_name_is_resolved(assembler, isa_info_map, monkeypa
     # Legacy flat CustomKernelName + an (empty) config -> the merge branch runs
     # and the solution constructs normally (no handwritten-kernel path).
     seen = []
-    monkeypatch.setattr(L, "getCustomKernelConfig", lambda name, isp, kernelConfig=None: seen.append(name) or {})
+    monkeypatch.setattr(
+        L,
+        "getCustomKernelConfig",
+        lambda name, isp, directory=None, kernelConfig=None, *, problemType=None: seen.append(name) or {},
+    )
     data = _raw_dict()
     data["Solutions"][0]["CustomKernelName"] = "synthetic_legacy_kernel"
     # Present InternalSupportParams -> the isp-extraction branch also runs.
@@ -67,7 +71,7 @@ def test_custom_kernel_mapping_name_skipped_on_missing_config(
     # an aggregate "Skipped N" warning. Appending (rather than replacing) keeps
     # the vendored fixture's solution-index table intact so only the new,
     # dropped kernel is exercised.
-    def _raise(name, isp, kernelConfig=None):
+    def _raise(name, isp, directory=None, kernelConfig=None, *, problemType=None):
         raise RuntimeError("no custom.config")
 
     monkeypatch.setattr(L, "getCustomKernelConfig", _raise)
@@ -89,7 +93,9 @@ def test_custom_kernel_mapping_name_skipped_on_missing_config(
 
 def test_custom_kernel_bad_matrix_instruction_raises(assembler, isa_info_map, monkeypatch):
     monkeypatch.setattr(
-        L, "getCustomKernelConfig", lambda name, isp, kernelConfig=None: {"MatrixInstruction": [1, 2, 3]}
+        L,
+        "getCustomKernelConfig",
+        lambda name, isp, directory=None, kernelConfig=None, *, problemType=None: {"MatrixInstruction": [1, 2, 3]},
     )
     data = _raw_dict()
     data["Solutions"][0]["CustomKernelName"] = "bad_mi_kernel"
