@@ -767,6 +767,54 @@ IgemmProblem withoutInputStaging(const IgemmProblem& problem)
     return direct;
 }
 
+IgemmProblem withChannelsFirstLineView(const IgemmProblem& problem)
+{
+    const auto& b = problem.base.args;
+    if(b.inSpatial[0] == 1 && b.inSpatial[1] == 1)
+    {
+        return problem; // already 1-D
+    }
+    long long pixels = 1;
+    for(int axis = 0; axis < SPATIAL; ++axis)
+    {
+        if(b.filter[axis] != 1 || b.stride[axis] != 1 || b.prePadding[axis] != 0
+           || b.outSpatial[axis] != b.inSpatial[axis])
+        {
+            return problem;
+        }
+        pixels *= b.inSpatial[axis];
+    }
+    if(problem.largeImage || pixels > INT_LIMIT || !inputPackedChannelsFirst(problem)
+       || !outputPackedChannelsFirst(problem))
+    {
+        return problem;
+    }
+    IgemmProblem view = problem;
+    auto& v = view.base.args;
+    for(int axis = 0; axis < SPATIAL - 1; ++axis)
+    {
+        v.inSpatial[axis] = 1;
+        v.outSpatial[axis] = 1;
+    }
+    v.inSpatial[SPATIAL - 1] = pixels;
+    v.outSpatial[SPATIAL - 1] = pixels;
+    // Packed channels-first strides of the line (the axes of extent 1 take any stride).
+    for(auto* strides : {v.xStrides, v.yStrides})
+    {
+        strides[2] = pixels;
+        strides[3] = pixels;
+        strides[4] = 1;
+    }
+    auto& a = view.args;
+    a.di = 1;
+    a.hi = 1;
+    a.wi = static_cast<int>(pixels);
+    a.dout = 1;
+    a.ho = 1;
+    a.wo = static_cast<int>(pixels);
+    return view;
+}
+
 namespace
 {
 
@@ -967,6 +1015,40 @@ std::optional<Grid> gridFor(const IgemmProblem& problem, int64_t bm, int64_t bn)
         static_cast<unsigned int>(x), static_cast<unsigned int>(y), static_cast<unsigned int>(z)};
 }
 
+int64_t residentBlocksOf(int64_t bm,
+                         int64_t bn,
+                         int64_t bk,
+                         int64_t threads,
+                         int64_t wave,
+                         int64_t stages,
+                         int64_t dma,
+                         int elementBytes,
+                         std::string_view gcnArchName)
+{
+    if(wave < 1 || threads < 1 || elementBytes < 1
+       || device_units::reportsWorkgroupProcessors(gcnArchName)
+       || hipdnn_plugin_sdk::stripArchFeatures(gcnArchName) == "gfx1250")
+    {
+        return 0;
+    }
+    const bool gfx950 = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName) == "gfx950";
+    const long long wavesPerBlock = divUp(threads, wave);
+    // Blocks of fewer than 8 waves keep the default's 2: their split plans measured faster at 2
+    // than at an occupancy-derived 1 (wide and DMA tiles on gfx950 and MI325X, 6-8%).
+    if(wavesPerBlock < 8)
+    {
+        return 0;
+    }
+    const long long lds = std::max<long long>(1, dma != 0 ? dma : stages) * (bm + bn)
+                          * (bk + 16 / elementBytes) * elementBytes;
+    const long long ldsPerCu = gfx950 ? 160 * 1024 : 64 * 1024;
+    const long long registers = divUp(bm * bn / threads + 64, 8) * 8;
+    const long long wavesPerSimd = std::clamp<long long>(512 / registers, 1, 8);
+    const long long byWaves = 4 * wavesPerSimd / wavesPerBlock;
+    const long long byLds = ldsPerCu / std::max<long long>(lds, 1);
+    return std::max<long long>(1, std::min(byWaves, byLds));
+}
+
 SplitPlan splitPlanFor(const IgemmProblem& problem,
                        int64_t bm,
                        int64_t bn,
@@ -974,13 +1056,10 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
                        const hipdnn_plugin_sdk::ingestor::DeviceProperties& device,
                        int64_t pack,
                        bool noSplit,
-                       int64_t splitPolicy)
+                       int64_t splitPolicy,
+                       int64_t residentBlocks)
 {
-    if((splitPolicy != 0 && splitPolicy != 1)
-       || (splitPolicy == 1
-           && (hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) != "gfx1250"
-               || problem.direction != ConvDirection::BACKWARD_DATA
-               || problem.base.dataType != hipdnn_flatbuffers_sdk::data_objects::DataType::HALF)))
+    if(splitPolicy < 0 || splitPolicy > MAX_SPLIT_POLICY)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                        "conv_igemm: unsupported split policy");
@@ -994,7 +1073,16 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
     // short-reduction controls. This policy is independent of physical CU accounting.
     const bool wgps = device_units::reportsWorkgroupProcessors(device.gcnArchName);
     const bool gfx1250 = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) == "gfx1250";
-    const long long blocksPerUnit = wgps || gfx1250 ? 1 : 2;
+    // gfx9: the config's resident blocks a CU where known (residentBlocksOf), at most 2.
+    long long blocksPerUnit = 2;
+    if(wgps || gfx1250)
+    {
+        blocksPerUnit = 1;
+    }
+    else if(residentBlocks > 0)
+    {
+        blocksPerUnit = std::min<long long>(residentBlocks, 2);
+    }
     const long long minIterations = [&]() -> long long {
         if(gfx1250)
         {
@@ -1032,10 +1120,28 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
         iterations = divUp(phaseTaps * reduction, bk);
     }
     const long long wanted = device_units::dispatchUnits(device) * blocksPerUnit;
+    const bool underFilled = tiles < wanted;
+    if(splitPolicy >= 2)
+    {
+        // Exactly splitPolicy splits of an under-filled grid, each of at least one k-iteration,
+        // within the partials' and the grid's limits; otherwise none (the kernel match declines
+        // the config).
+        if(!underFilled || splitPolicy > iterations
+           || splitPolicy * plan.outElems * static_cast<long long>(sizeof(float))
+                  > MAX_PARTIAL_BYTES
+           || grid->z * splitPolicy > MAX_GRID_YZ)
+        {
+            return plan;
+        }
+        plan.splits = static_cast<int>(splitPolicy);
+        plan.partialOffset = alignUp(problem.workspaceBytes);
+        plan.workspaceBytes
+            = plan.partialOffset + static_cast<size_t>(splitPolicy * plan.outElems) * sizeof(float);
+        return plan;
+    }
     long long splits
-        = tiles >= wanted
-              ? 1
-              : std::min({divUp(wanted, tiles), iterations / minIterations, MAX_SPLITS});
+        = !underFilled ? 1
+                       : std::min({divUp(wanted, tiles), iterations / minIterations, MAX_SPLITS});
     while(splits > 1
           && (splits * plan.outElems * static_cast<long long>(sizeof(float)) > MAX_PARTIAL_BYTES
               || grid->z * splits > MAX_GRID_YZ))
@@ -1150,7 +1256,7 @@ struct Tile
     int64_t large = 0; ///< 64-bit positions within an image (K1_LARGE): images past 2^31 - 1 px
     int64_t patch = 0; ///< patch convolutions as one GEMM (withPatchView, K1_PATCH)
     int64_t cfx = 0; ///< 1-D channels-first activations read in place (CONV_IGEMM_CFX)
-    int64_t splitPolicy = 0; ///< 0 automatic split-K, 1 no split-K
+    int64_t splitPolicy = 0; ///< 0 automatic split-K, 1 none, N >= 2 exactly N (splitPlanFor)
 
     int64_t blockThreads() const
     {
@@ -1237,7 +1343,7 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
             || tile.split))
        || tile.bm < 1 || tile.bn < 1 || tile.bk < 1 || tile.vec < 1 || tile.blockThreads() < 1
        || (tile.xcd != 0 && tile.xcd != 1) || (tile.cfx == 0 && tile.halo != 0 && tile.halo != 1)
-       || (tile.splitPolicy != 0 && tile.splitPolicy != 1)
+       || tile.splitPolicy < 0 || tile.splitPolicy > conv_igemm::MAX_SPLIT_POLICY
        || (tile.halo != 0 && (tile.info.wave == 0 || tile.stages != 1))
        || (tile.wdirect != 0 && tile.wdirect != 1) || tile.pack < 0 || tile.pack > 2
        || (tile.pack != 0 && (tile.halo != 0 || tile.wdirect != 0)) || tile.cf < 0 || tile.cf > 2
@@ -1289,6 +1395,22 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
 /// problems the 32-bit buffer offsets address. A patch config serves only patch convolutions
 /// (withPatchView), and every check above applies to the problem as it runs it; in backward data
 /// it writes channels-last dx (no channels-first output) with a channel vector dividing S C.
+/// The config's resident blocks a CU for the split plan (conv_igemm::residentBlocksOf).
+int64_t residentBlocksFor(const Tile& tile,
+                          const conv_igemm::IgemmProblem& problem,
+                          const hipdnn_plugin_sdk::ingestor::DeviceProperties& device)
+{
+    return conv_igemm::residentBlocksOf(tile.bm,
+                                        tile.bn,
+                                        tile.bk,
+                                        tile.blockThreads(),
+                                        tile.info.wave,
+                                        tile.stages,
+                                        tile.dma,
+                                        problem.elementBytes,
+                                        device.gcnArchName);
+}
+
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
@@ -1359,11 +1481,9 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    if(tile->splitPolicy == 1
-       && (hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName) != "gfx1250"
-           || *direction != ConvDirection::BACKWARD_DATA
-           || kernel.getStringMetadata("dtype") != "HALF" || tile->atom != "wmma125_f16"
-           || tile->split))
+    // An explicit split policy: not on the three-bf16 split form or the patch configs, which
+    // never split.
+    if(tile->splitPolicy != 0 && (tile->split || tile->patch != 0))
     {
         return false;
     }
@@ -1399,8 +1519,9 @@ bool kernelMatches(const MatchContext& context,
     if(tile->cfx != 0)
     {
         // Channels-first input read in place: a packed channels-first activation and output (the
-        // FMA kernel writes it itself), a 1-D problem the channels-first loaders fit, and 32-bit
-        // buffer offsets.
+        // FMA kernel writes it itself), a 1-D problem (or a pointwise one, as its 1-D line) the
+        // channels-first loaders fit, and 32-bit buffer offsets.
+        problem = conv_igemm::withChannelsFirstLineView(*problem);
         const auto arch
             = hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName);
         conv_igemm::CfxTile fit;
@@ -1501,6 +1622,35 @@ bool kernelMatches(const MatchContext& context,
             }
         }
     }
+    // An explicit split policy only where its plan differs from the default's (and, for N
+    // splits, is exactly N): autotune then times distinct plans only.
+    if(tile->splitPolicy != 0)
+    {
+        const auto resident = residentBlocksFor(*tile, *problem, context.deviceProperties);
+        const auto automatic = conv_igemm::splitPlanFor(*problem,
+                                                        tile->bm,
+                                                        tile->bn,
+                                                        tile->bk,
+                                                        context.deviceProperties,
+                                                        tile->pack,
+                                                        false,
+                                                        0,
+                                                        resident);
+        const auto chosen = conv_igemm::splitPlanFor(*problem,
+                                                     tile->bm,
+                                                     tile->bn,
+                                                     tile->bk,
+                                                     context.deviceProperties,
+                                                     tile->pack,
+                                                     false,
+                                                     tile->splitPolicy,
+                                                     resident);
+        if(chosen.splits == automatic.splits
+           || (tile->splitPolicy >= 2 && chosen.splits != tile->splitPolicy))
+        {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -1530,7 +1680,7 @@ std::optional<IgemmProblem>
     }
     if(problem.has_value() && tile.cfx != 0)
     {
-        problem = conv_igemm::withoutInputStaging(*problem);
+        problem = conv_igemm::withoutInputStaging(conv_igemm::withChannelsFirstLineView(*problem));
     }
     return problem;
 }
@@ -1711,14 +1861,16 @@ public:
         {
             return 0;
         }
-        return conv_igemm::splitPlanFor(*problem,
-                                        tile->bm,
-                                        tile->bn,
-                                        tile->bk,
-                                        context.deviceProperties,
-                                        tile->pack,
-                                        tile->patch != 0,
-                                        tile->splitPolicy)
+        return conv_igemm::splitPlanFor(
+                   *problem,
+                   tile->bm,
+                   tile->bn,
+                   tile->bk,
+                   context.deviceProperties,
+                   tile->pack,
+                   tile->patch != 0,
+                   tile->splitPolicy,
+                   residentBlocksFor(*tile, *problem, context.deviceProperties))
             .workspaceBytes;
     }
 
@@ -1797,14 +1949,16 @@ public:
             options.add("CONV_IGEMM_WAVES_MAX", std::to_string(waves));
         }
 
-        const auto plan = conv_igemm::splitPlanFor(*problem,
-                                                   tile->bm,
-                                                   tile->bn,
-                                                   tile->bk,
-                                                   context.deviceProperties,
-                                                   tile->pack,
-                                                   tile->patch != 0,
-                                                   tile->splitPolicy);
+        const auto plan = conv_igemm::splitPlanFor(
+            *problem,
+            tile->bm,
+            tile->bn,
+            tile->bk,
+            context.deviceProperties,
+            tile->pack,
+            tile->patch != 0,
+            tile->splitPolicy,
+            residentBlocksFor(*tile, *problem, context.deviceProperties));
         // The fused epilogue: in the convolution, and in the split-K reduce that writes the
         // output when the reduction is split. Fusion off adds no option, so the code is that of
         // an unfused build.

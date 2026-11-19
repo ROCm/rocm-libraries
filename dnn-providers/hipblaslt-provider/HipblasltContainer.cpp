@@ -24,6 +24,7 @@
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_CONV
 #include "engines/conv/ConvGemmPlanBuilder.hpp"
+#include "engines/conv/ConvLibraryActivations.hpp"
 #include "engines/conv/ConvRepackWorkspaceCap.hpp"
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
 #include "engines/hipblaslt/HipblasltGemmPlan.hpp"
@@ -97,7 +98,7 @@ HipblasltContainer::HipblasltContainer()
                                         ConvGemmPlanBuilder::NarrowPartials narrowPartials,
                                         Notes numericalNotes,
                                         bool reducedPrecisionReduction = false,
-                                        bool nativeEpilogue = false) {
+                                        GemmEpilogueSupport gemmEpilogue = {}) {
             auto engine
                 = std::make_unique<PlanBuilderEngine>(engineId, false, std::move(numericalNotes));
             engine->addPlanBuilder(std::make_unique<ConvGemmPlanBuilder>(std::move(factory),
@@ -108,7 +109,7 @@ HipblasltContainer::HipblasltContainer()
                                                                          ColumnLayout::FOLLOW_Y,
                                                                          narrowPartials,
                                                                          wrwRepackCap,
-                                                                         nativeEpilogue));
+                                                                         gemmEpilogue));
             _engineManager->addEngine(std::move(engine));
         };
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
@@ -120,40 +121,56 @@ HipblasltContainer::HipblasltContainer()
     };
     // hipBLASLt on gfx11 may round the parts of a long reduction to a 16-bit output.
     constexpr auto HIPBLASLT_NARROW = ConvGemmPlanBuilder::NarrowPartials::ON_GFX11;
+    // hipBLASLt's bias and the activations it computes as the chain does, in its GEMM.
+    constexpr GemmEpilogueSupport HIPBLASLT_GEMM_EPILOGUE{true, false};
     addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_ENGINE_ID,
                   hipblasltGemm(false),
                   false,
                   HIPBLASLT_NARROW,
                   Notes{NONDETERMINISTIC},
                   false,
-                  true);
+                  HIPBLASLT_GEMM_EPILOGUE);
     addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_ENGINE_DETERMINISTIC_ID,
                   hipblasltGemm(true),
                   false,
                   HIPBLASLT_NARROW,
                   Notes{},
                   false,
-                  true);
+                  HIPBLASLT_GEMM_EPILOGUE);
     addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_TF32_ENGINE_ID,
                   hipblasltGemm(false),
                   true,
                   HIPBLASLT_NARROW,
                   Notes{TF32, NONDETERMINISTIC},
                   false,
-                  true);
+                  HIPBLASLT_GEMM_EPILOGUE);
     addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC_ID,
                   hipblasltGemm(true),
                   true,
                   HIPBLASLT_NARROW,
                   Notes{TF32},
                   false,
-                  true);
+                  HIPBLASLT_GEMM_EPILOGUE);
     addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_RPR_ENGINE_ID,
                   hipblasltGemm(false),
                   false,
                   HIPBLASLT_NARROW,
                   Notes{RPR, NONDETERMINISTIC},
                   true);
+    // Opt-in: the fused activations hipBLASLt computes with other special values. Deterministic
+    // (hipBLASLt offered no workspace, as the *_DETERMINISTIC engines).
+    if(convLibraryActivationsEnabled())
+    {
+        HIPDNN_PLUGIN_LOG_INFO(CONV_LIBRARY_ACTIVATIONS_ENV_NAME
+                               << " set: offering HIPBLASLT_CONV_LIBRARY_ACTIVATION_ENGINE");
+        addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_LIBRARY_ACTIVATION_ENGINE_ID,
+                      hipblasltGemm(true),
+                      false,
+                      HIPBLASLT_NARROW,
+                      Notes{},
+                      false,
+                      GemmEpilogueSupport{true, true});
+    }
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
     const auto rocblasGemm = [](bool deterministic) -> ConvGemmPlanBuilder::PlanFactory {

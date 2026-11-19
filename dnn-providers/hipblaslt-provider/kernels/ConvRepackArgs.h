@@ -102,6 +102,33 @@ struct StridedCastEpilogueArgs
     ConvRepackEpilogue epilogue;
 };
 
+/// data[i] = lower where data[i] <= lower, upper where data[i] >= upper, else unchanged (NaN
+/// included), for the `total` elements of a dense tensor of the entry point's type, in place
+/// (`src` is `dst`). The relu / clamp tail of a fused epilogue whose GEMM already wrote the
+/// rounded result: with both bounds exact in that type, clamping the rounded value gives the
+/// rounding of the clamped one, so the result still has one rounding. Elements left unchanged
+/// are not written back.
+struct ClampArgs
+{
+    const void* src;
+    void* dst;
+    long long total;
+    float lower;
+    float upper;
+};
+
+/// dst[c * rows + r] = src[c * srcStride] for every r < rows and c < channels: a column-major
+/// rows x channels matrix whose every row is the per-channel vector src, in the entry point's
+/// element size. The broadcast bias a fused epilogue's GEMM adds as its C.
+struct BroadcastArgs
+{
+    const void* src;
+    void* dst;
+    long long rows;
+    long long channels;
+    long long srcStride;
+};
+
 /// The convolution geometry im2col and col2im share. Every problem is described as 3-D: missing
 /// leading spatial axes have extent 1, pad 0, stride 1, dilation 1 and tensor stride 0.
 ///

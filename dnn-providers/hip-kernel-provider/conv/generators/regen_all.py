@@ -65,6 +65,7 @@ FAMILIES = {
     "gen_group_valu_wrw.py": "group_valu_wrw",
     "gen_igemm.py": "igemm",
     "gen_igemm_nchw.py": "igemm_nchw",
+    "gen_narrow.py": "narrow",
     "gen_smallc.py": "smallc",
     "gen_conv_stem_bwd.py": "stem_bwd",
     "gen_winograd.py": "winograd",

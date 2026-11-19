@@ -13,6 +13,7 @@
 
 #include "ConvRepackActivations.h"
 #include "ConvRepackArgs.h"
+#include "ConvRepackEpilogueSteps.h"
 
 namespace
 {

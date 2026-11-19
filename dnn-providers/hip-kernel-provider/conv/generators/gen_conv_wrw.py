@@ -118,6 +118,7 @@ INTS = [
     "wq",
     "dws",
     "pb",
+    "flat",
     "math",
 ]
 STRINGS = ["direction", "dtype", "atom"]
@@ -597,6 +598,7 @@ RDNA16 = [
 # for narrow channel counts and long filters, a tall one for 128+ channels.
 RDNA_1D = [(32, 32, 2, 2, 64), (128, 32, 4, 2, 64)]
 ONE_D = {
+    "1x2",
     "1x3",
     "1x3d3",
     "1x3d5",
@@ -616,6 +618,13 @@ EXTRA_TILES = {
     # fp32's 32-position windows at dilation 24 / 36 overflow 64 KiB: 16 positions.
     ("mfma32_f32", ("3x3d12", "3x3d24", "3x3d36")): [(64, 64, 2, 2, 16)],
     ("mfma32_", ("1x16s8",)): [(64, 32, 2, 1, 16)],
+    # The width fold's 1x2 rows over C x s channels (HiFi-GAN 1x16 stride 8): wide channel tiles
+    # on the 32 x 32 atoms every CDNA part runs (the gfx950 pack is at its size cap).
+    ("mfma32_", ("1x2",)): [
+        (128, 128, 4, 2, 64),
+        (128, 128, 4, 2, 32),
+        (256, 64, 4, 2, 64),
+    ],
     ("mfma16_f32", ("3x3s2r1", "2x2s2r1")): [(32, 32, 2, 2, 32)],
     # RDNA 3x3 (deeplab dilations, unet2d), measured on gfx1100: 32-position tiles, up to 128 x 64.
     (
@@ -717,11 +726,14 @@ FILTERS = [
     ("1x1", 1, 1, 1, 1, 1, [0, 1], [0, 1], None),
     ("1x3", 3, 1, 1, 1, 1, [0, -1], [0, 1], None),
     # HiFi-GAN's dilated 1-D rows, in both layouts (channels-last otherwise falls to the
-    # generic tier, or to BLAS on gfx11).
+    # generic tier).
     ("1x3d5", 3, 1, 5, 1, 1, [0, -1], [0, 1], None),
     # HiFi-GAN's dilation-3 1x3 (the d5 row's tiles).
     ("1x3d3", 3, 1, 3, 1, 1, [0, -1], [0, 1], None),
     ("1x4", 4, 1, 1, 1, 1, [0, -1], [0], None),
+    # Two-tap rows: the width fold's HiFi-GAN class (1x16 stride 8 is 1x2 stride 1 over C x 8
+    # channels, widthFoldOf) on the 1x4 row's tiles.
+    ("1x2", 2, 1, 1, 1, 1, [0, -1], [0], None),
     ("1x7", 7, 1, 1, 1, 1, [-1], [0], None),
     ("1x7d3", 7, 1, 3, 1, 1, [-1], [0], None),
     ("1x7d5", 7, 1, 5, 1, 1, [-1], [0], None),
@@ -729,8 +741,8 @@ FILTERS = [
     ("1x11d3", 11, 1, 3, 1, 1, [-1], [0], None),
     ("1x11d5", 11, 1, 5, 1, 1, [-1], [0], None),
     # Dilated 3x3 rows in both layouts: without channels-last configs a channels-last deeplab
-    # ASPP layer (d4 / d24 / d36) has no specialized config, the generic tier declines it (d6+)
-    # or has no gfx11 config, and it falls to the BLAS path (30x on gfx1100).
+    # ASPP layer (d4 / d24 / d36) has no specialized config, the generic tier declines it (d6+,
+    # except on gfx11) and it falls to the BLAS path (30x on gfx1100).
     ("3x3d4", 3, 1, 4, 3, 1, [0, -1], [0], None),
     # SSD300's dilation-6 3x3 (the d4 row's tiles).
     ("3x3d6", 3, 1, 6, 3, 1, [0, -1], [0], None),
@@ -920,7 +932,7 @@ def C(atom, loop, layout, tile, s, sw, dw, fr, vec, xcd, align, ns):
         bpu=0,
         wq=0,
     )
-    return dict(c, dws=dws_of(c), pb=0, math=0)
+    return dict(c, dws=dws_of(c), pb=0, flat=0, math=0)
 
 
 def D(atom, tile, s, dw, fr, ns):
@@ -950,6 +962,7 @@ def D(atom, tile, s, dw, fr, ns):
         wq=wq,
         dws=0,
         pb=0,
+        flat=0,
         math=0,
     )
 
@@ -1046,6 +1059,8 @@ UNALIGNED_K = [
         0,
     ),
     ({"FLOAT": "mfma32_f32"}, [(32, 128, 1, 4, 16), (32, 64, 1, 2, 16)], 0),
+    # gfx908 bf16 (no bf16_1k atom): the half-rate 32 x 32 atom.
+    ({"BFLOAT16": "mfma32_bf16_908"}, [(32, 128, 1, 4, 32), (32, 64, 1, 2, 32)], 0),
 ]
 # 1x7: HiFi-GAN's output layer (one output channel), which has 32 input channels: also tiles 32
 # input channels wide (atom family prefix -> tiles), so a block's channel tile is not half empty.
@@ -1076,6 +1091,7 @@ def build_unaligned_k():
 SMALLC_ATOMS = [
     ({"HALF": "mfma16x32_f16", "BFLOAT16": "mfma16x32_bf16"}, 1),
     ({"HALF": "mfma16_f16", "BFLOAT16": "mfma16_bf16", "FLOAT": "mfma16_f32"}, 0),
+    ({"BFLOAT16": "mfma16_bf16_908"}, 0),  # gfx908 bf16
     ({"HALF": "wmma11_f16", "BFLOAT16": "wmma11_bf16"}, 0),
     ({"HALF": "wmma12_f16", "BFLOAT16": "wmma12_bf16"}, 0),
     ({"HALF": "wmma125_f16", "BFLOAT16": "wmma125_bf16"}, 0),
@@ -1282,7 +1298,8 @@ def build_pb():
 
 # The generic tier (loop 8): few configs of runtime filter, strides and dilation, each declined
 # wherever a specialized config's class serves (its "spec", written by emit). (atoms per dtype,
-# xcd, [(layout, (bk, bc, wk, wc, bq), taps a block[, shared-window dw])]), the measured best per arch: gfx950 on
+# xcd, [(layout, (bk, bc, wk, wc, bq), taps a block[, shared-window dw])][, the tiles with a
+# block-based buffer twin, default all]), the measured best per arch: gfx950 on
 # 2-D 5x5 / 7x7 and 3-D 1x5x5 channels-last fp16 (1.5-1.9x over the BLAS path), gfx1201 on the
 # same and 1-D k3 (1.7-3.2x).
 GENERIC = [
@@ -1320,24 +1337,20 @@ GENERIC = [
             (CF, (128, 64, 4, 2, 32), 2),
         ],
     ),
+    # gfx908 bf16 (no bf16_1k atom): the half-rate 32 x 32 atom, the 32 x 32 tiles.
+    (
+        {"BFLOAT16": "mfma32_bf16_908"},
+        0,
+        [
+            (CL, (128, 64, 4, 2, 32), 3),
+            (CL, (64, 64, 2, 2, 32), 5),
+            (CF, (128, 64, 4, 2, 32), 2),
+        ],
+    ),
     (
         {"FLOAT": "mfma32_f32"},
         0,
         [(CF, (64, 64, 2, 2, 16), 3), (CL, (64, 64, 2, 2, 16), 3)],
-    ),
-    # gfx11: gfx12's tiles (the same 16 x 16 WMMA steps and 64 KiB of LDS). Without them a
-    # graph no gfx11 specialized config serves (a channels-last 5x5, or channels that are not
-    # whole vectors: r(2+1)d's 230 and 45) goes to the BLAS path.
-    (
-        {"HALF": "wmma11_f16", "BFLOAT16": "wmma11_bf16"},
-        0,
-        [
-            (CL, (64, 64, 4, 2, 32), 5),
-            (CL, (128, 64, 4, 2, 32), 3),
-            (CL, (64, 32, 4, 2, 32), 9),
-            (CF, (64, 64, 4, 2, 32), 2),
-            (CL, (128, 64, 4, 2, 32), 5, 16),
-        ],
     ),
     # The FMA form, fp32 where no matrix core takes it (RDNA; tiles (bk, bc, tk, tc, bq)),
     # measured on gfx1201 against the BLAS path: 5x5 1.6x, 1-D k9 1.4x, 3x3 s3 4.2x, 5x5x5 3.5x.
@@ -1383,19 +1396,91 @@ def build_gfx11_cl():
     return dropped
 
 
+# Flattened positions (flat 1): steps of bq consecutive positions of the flattened (image, depth,
+# row, column) order, for output rows shorter than bq (small 2-D and 3-D maps with wide channels:
+# GEMM-shaped wrw). Twins of the generic configs without a shared window, plus wider tiles: one
+# or two taps of 128 x 128 channels a block.
+GENERIC_FLAT = [
+    (
+        {"HALF": "mfma32x16_f16", "BFLOAT16": "mfma32x16_bf16"},
+        1,
+        [(CL, (128, 128, 2, 2, 32), 2), (CL, (128, 128, 2, 2, 32), 3)],
+    ),
+    (
+        {"HALF": "mfma32_f16", "BFLOAT16": "mfma32_bf16"},
+        0,
+        [
+            (CL, (128, 128, 2, 2, 32), 1),
+            (CL, (128, 128, 2, 2, 32), 2),
+            (CL, (128, 128, 4, 2, 32), 2),
+        ],
+    ),
+]
+
+
+# gfx11's generic tier, built after GENERIC_FLAT (its own entries: the tiles, then the tiles
+# with a block-based buffer twin).
+GENERIC_GFX11 = [
+    # gfx11 (wave32, 16 x 16 x 16 WMMA), chosen by a greedy cover of 19 candidate tiles timed on
+    # gfx1101 over the corpus wrw layers BLAS serves there and the specialized classes' layers.
+    # Channels-first elements: 128 x 64 at 2 taps for wide channel counts, 64 x 64 at 3, 64 x 64
+    # on 4 waves at 1 tap for short maps, 32 x 32 for few output channels (HiFi-GAN's 1-channel
+    # outputs, 1.34x the BLAS path where 64 x 64 gives 1.15x). Channel vectors: 64 x 32 at 9 taps
+    # and the shared windows for unit width stride. Within 1.2% of all 19 (geomean) on
+    # channels-first layers and 7% on channels-last. Block-based buffer twins on one tile a
+    # layout only (images past 2 GiB; listed last, the "pb" set); flattened-position twins on
+    # every tile without a shared window, as in GENERIC.
+    (
+        {"HALF": "wmma11_f16", "BFLOAT16": "wmma11_bf16"},
+        0,
+        [
+            (CF, (128, 64, 4, 2, 32), 2),
+            (CF, (64, 64, 4, 2, 32), 3),
+            (CF, (64, 64, 2, 2, 32), 1),
+            (CF, (32, 32, 2, 2, 32), 3),
+            (CL, (64, 32, 4, 2, 32), 9),
+            (CL, (128, 64, 4, 2, 32), 5, 16),
+            (CL, (64, 64, 4, 2, 32), 9, 8),
+        ],
+        {0, 4},
+    ),
+]
+
+
 def build_generic():
     dropped = 0
-    for atoms, xcd, tiles in GENERIC:
+
+    def add(entries):
+        dropped = 0
+        for atoms, xcd, tiles, *pb_tiles in entries:
+            for dtype, atom in atoms.items():
+                for t, (lay, tile, taps, *window) in enumerate(tiles):
+                    wx = window[0] if window else 0  # dw: shared-window positions
+                    c = C(
+                        atom, 8, lay, tile, 0, 0, wx, taps, 16 // eb(dtype), xcd, 0, 0
+                    )
+                    if valid(c, dtype):
+                        CATALOG[dtype].extend(with_bpu(c))
+                        # Its block-based buffer twin: images past the 32-bit buffer range
+                        # (every tile, or the entry's "pb" set).
+                        if not pb_tiles or t in pb_tiles[0]:
+                            CATALOG[dtype].extend(with_bpu(dict(c, pb=1)))
+                        if not wx:
+                            CATALOG[dtype].extend(with_bpu(dict(c, flat=1)))
+                    else:
+                        dropped += 1
+        return dropped
+
+    dropped += add(GENERIC)
+    for atoms, xcd, tiles in GENERIC_FLAT:
         for dtype, atom in atoms.items():
-            for lay, tile, taps, *window in tiles:
-                wx = window[0] if window else 0  # dw: shared-window positions
-                c = C(atom, 8, lay, tile, 0, 0, wx, taps, 16 // eb(dtype), xcd, 0, 0)
+            for lay, tile, taps in tiles:
+                c = C(atom, 8, lay, tile, 0, 0, 0, taps, 16 // eb(dtype), xcd, 0, 0)
                 if valid(c, dtype):
-                    CATALOG[dtype].extend(with_bpu(c))
-                    # Its block-based buffer twin: images past the 32-bit buffer range.
-                    CATALOG[dtype].extend(with_bpu(dict(c, pb=1)))
+                    CATALOG[dtype].extend(with_bpu(dict(c, flat=1)))
                 else:
                     dropped += 1
+    dropped += add(GENERIC_GFX11)
     return dropped
 
 
@@ -1793,9 +1878,10 @@ def dws_of(c):
 
 
 def family_of(c):
-    """The pack a config ships in: the direct loop, gfx950's 16 x 32 / 32 x 16 atoms, the other
-    MFMA atoms, RDNA's WMMA per generation (gfx11, gfx12), gfx1250's native packs, or the FMA
-    loops. The 32 x 32 atom's packed rows ship in a pack without gfx950, which has its own
+    """The pack a config ships in: the direct loop, gfx950's 16 x 32 / 32 x 16 atoms (3-wide
+    filters in one pack, every other width in a second, each under the 500 KB file cap), the
+    other MFMA atoms, RDNA's WMMA per generation (gfx11, gfx12), gfx1250's native packs, or the
+    FMA loops. The 32 x 32 atom's packed rows ship in a pack without gfx950, which has its own
     measured packed-rows tiles.
     """
     if c["loop"] == 10:
@@ -1819,7 +1905,7 @@ def family_of(c):
     if c["atom"].startswith("wmma12"):
         return "rdna12"
     if c["atom"].startswith(("mfma16x32", "mfma32x16")):
-        return "gfx950"
+        return "gfx950" if c["s"] == 3 else "gfx950b"
     return "cdna"
 
 
@@ -1947,6 +2033,7 @@ def emit():
                 f".{thr}.fr{c['fr']}s{c['s']}sw{c['sw']}dw{c['dw']}"
                 f".v{c['vec']}.x{c['xcd']}a{c['align']}n{c['ns']}b{c['bpu']}"
                 + (".pb" if c["pb"] else "")
+                + (".flat" if c["flat"] else "")
             )
             if native:
                 name += f".dws{c['dws']}"
