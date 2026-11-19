@@ -36,6 +36,12 @@ Accuracy (bf16 transformed operands, f32 transforms and accumulation): peak-norm
 max error 5-6e-3 on uniform(-1,1) data, against 2-4e-3 for the direct conv (the
 benchmark's bf16 tolerance is 5e-2).
 
+Status: Python-only family (no C++ twin yet, so no parity emitter or golden). It is opt-in
+and experimental: nothing in the default dispatch, the AOT jobs or the provider reaches it;
+it runs through explicit route tables (``dispatch.conv_routes``: the ``winograd`` and
+``padcopy_halo`` routes), the drop-in wrapper, the benchmarks and the tests. Both engines
+lower its kernels from the serialized IR.
+
 Buffer range: every kernel here addresses its tensors through 32-bit buffer descriptors and
 32-bit offsets, so each buffer it touches must stay below ``BUFFER_LIMIT`` bytes; the
 validators (``is_valid_yx_spec`` / ``is_valid_spec`` / ``is_valid_x_spec``) and the builders
