@@ -35,16 +35,26 @@ echo "$listing"
 "$python" - "$whl" <<'PY'
 import sys
 import zipfile
+from email import message_from_bytes
 
 with zipfile.ZipFile(sys.argv[1]) as wheel:
     unexpected = [
         name for name in wheel.namelist()
         if not (name.startswith("origami/") or name.split("/", 1)[0].endswith(".dist-info"))
     ]
+    metadata_name = next(name for name in wheel.namelist() if name.endswith(".dist-info/METADATA"))
+    metadata = message_from_bytes(wheel.read(metadata_name))
+    requirements = metadata.get_all("Requires-Dist", [])
+    if "rocm" not in metadata.get_all("Provides-Extra", []) or not any(
+        requirement.startswith("rocm[libraries]") and 'extra == "rocm"' in requirement
+        for requirement in requirements
+    ):
+        raise SystemExit("Wheel metadata does not declare the rocm runtime extra")
 if unexpected:
     raise SystemExit("Unexpected wheel entries outside the package and metadata:\n" + "\n".join(unexpected))
 PY
 pass "all wheel entries belong to the package or distribution metadata"
+pass "wheel metadata declares the rocm runtime extra"
 
 so_entries="$(echo "$listing" | awk '{print $1}' | grep -E '\.so($|\.)' || true)"
 n_so="$(printf '%s' "$so_entries" | grep -c . || true)"
@@ -55,6 +65,7 @@ ${so_entries}"
 pass "wheel ships exactly one shared object, the extension for this ABI"
 
 echo "$listing" | grep -q "origami/__init__.py" || fail "__init__.py missing from wheel"
+echo "$listing" | grep -q "origami/_rocm_init.py" || fail "_rocm_init.py missing from wheel"
 echo "$listing" | grep -q "origami/selector.py" || fail "selector.py missing from wheel"
 echo "$listing" | grep -q "origami/origami.py" || fail "origami.py alias missing from wheel"
 pass "pure Python files recorded in wheel"
@@ -96,22 +107,14 @@ fi
 venv="$workdir/venv"
 "$python" -m venv "$venv"
 "$venv/bin/python" -m pip install --quiet --force-reinstall --no-deps "$whl"
-ld_parts=()
-
-if [ -n "${ORIGAMI_RUNTIME_LIB_DIR:-}" ]; then
-    ld_parts+=("$ORIGAMI_RUNTIME_LIB_DIR")
+if [ -n "${ORIGAMI_ROCM_SDK_REQUIREMENT:-}" ]; then
+    "$venv/bin/python" -m pip install --quiet "$ORIGAMI_ROCM_SDK_REQUIREMENT"
 fi
-
-if [ -n "${LD_LIBRARY_PATH:-}" ]; then
-    ld_parts+=("$LD_LIBRARY_PATH")
-fi
-
-if [ ${#ld_parts[@]} -gt 0 ]; then
-    export LD_LIBRARY_PATH="$(IFS=:; echo "${ld_parts[*]}")"
-fi
+# Do not let loader overrides mask missing runtime setup.
+unset LD_LIBRARY_PATH LD_PRELOAD
 "$venv/bin/python" -c "import origami; print('imported origami', origami.__version__)" \
-    || fail "import origami failed (is liborigami.so.1 on the loader path?)"
-pass "import succeeds with runtime on loader path"
+    || fail "import origami failed (install ROCm Python packages or configure the system runtime)"
+pass "import succeeds without LD_LIBRARY_PATH or LD_PRELOAD"
 
 "$venv/bin/python" -W error::DeprecationWarning -c "import origami" \
     || fail "importing the origami package emits a DeprecationWarning"

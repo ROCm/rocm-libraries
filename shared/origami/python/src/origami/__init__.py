@@ -8,7 +8,11 @@ Python bindings for the Origami C++ library.
 """
 
 try:
-    # Import the compiled extension module
+    from ._rocm_init import initialize as _initialize_rocm
+
+    _initialize_rocm()
+    del _initialize_rocm
+
     from ._pyorigami import (
         # Enums
         architecture_t,
@@ -191,4 +195,3 @@ except ImportError:
     # Do not raise this error if import fails - compiled Origami bindings still
     # work without the dedicated Python selectors
     pass
-
