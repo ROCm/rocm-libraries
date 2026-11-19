@@ -26973,6 +26973,14 @@ class KernelWriterAssembly(KernelWriter):
     comp = GL2PrefetchLoad.find(self)
     tpList = self.gl2PrefetchTpList(kernel, tPA, tPB)
 
+    # A StreamK work item starts StreamKLocalStart iterations into its tile, like
+    # the TDM K-offset (tdmApplyTileKOffset); DP-only kernels always start at 0.
+    if isPersistent(kernel) and not isPersistentDataParallel(kernel):
+      for tp in tpList:
+        mod.add(comp.setIncrement(self, kernel, tp))
+        mod.add(comp.calculateStartAddr(self, kernel, tp, kStartSgprName="StreamKLocalStart"))
+      return mod
+
     if not comp.isGSUEnabled(kernel):
       for tp in tpList:
         mod.add(comp.setIncrement(self, kernel, tp))
