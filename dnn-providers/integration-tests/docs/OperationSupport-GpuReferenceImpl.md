@@ -59,6 +59,7 @@ The following table lists the operations currently executable through the GPU gr
 | BatchNorm Forward Inference with Variance | FP16, BFP16, FP32 | Stride-based | GPU Reference | Same signatures as BatchNorm Forward Inference |
 | BatchNorm Forward Training | FP16, BFP16, FP32 | Stride-based | GPU Reference | Mean/variance outputs optional |
 | BatchNorm Backward | FP16, BFP16, FP32 | Packed channel-first or channel-last | GPU Reference | Saved mean/inv-variance optional; FP32 compute and scale/bias gradients |
+| BlockScale Quantize / Dequantize | FP4 E2M1, FP6 E2M3/E3M2, FP8 E4M3/E5M2, FP16, BFP16, FP32 | Stride-based | GPU Reference | Compact MX formats use FP8 E8M0 scales; FP32 compute |
 | Layernorm Forward | FP16, BFP16, FP32 | Stride-based | GPU Reference | Mean/inv-variance outputs optional |
 | Layernorm Backward | FP16, BFP16, FP32 | Stride-based | GPU Reference | Mean/inv-variance optional |
 | RMSNorm Forward | FP16, BFP16, FP32 | Stride-based | GPU Reference |  |
@@ -76,9 +77,8 @@ The following table lists the operations currently executable through the GPU gr
 
 | Operation | Executor behavior | `gpu-ref` library |
 |-----------|-------------------|-------------------|
-| BlockScale Quantize / Dequantize | `ReferenceCapabilityError` | None |
 | MoE Grouped Matmul (forward and backward) | "Unsupported node type" error | None |
-| Pointwise ternary (`BINARY_SELECT`), `MAX`, `MIN`, `CMP_GT` | Not applicable (plan builders reject the mode) | Not implemented |
+| Pointwise modes the GPU lacks (see [Pointwise Modes](#pointwise-modes)) | Not applicable (plan builders reject the mode) | Not implemented |
 | Custom operations | `ReferenceCapabilityError` | None |
 
 Operations with a `gpu-ref` library entry but no executor plan can be called directly from C++ code
@@ -94,6 +94,18 @@ but are not reachable through graph-level verification.
 | Convolution Backward Data | `GpuConvolutionBwdPlanBuilder` | `GpuConvolutionBwdSignatureKey` | Data gradient (dgrad) |
 | Convolution Backward Weights | `GpuConvolutionWrwPlanBuilder` | `GpuConvolutionWrwSignatureKey` | Weight gradient (wgrad) |
 | Matmul | `GpuMatmulPlanBuilder` | `GpuMatmulSignatureKey` | Generic matrix multiplication |
+
+### BlockScale Operations
+
+Quantize and dequantize support matching input/output dimensions of rank 1 to 5,
+with independent input, output and scale strides. Block sizes must be positive;
+scale dimensions must match the block partition. Quantize defaults to the last
+axis when `axis` is absent. Dequantize aligns its block-size vector to the trailing
+dimensions and supports `is_negative_scale`.
+
+Both GPU plans decline runtime pass-by-value operands, which are host pointers
+rather than device buffers. HIP FP4/FP6/FP8 headers are needed at run time only for
+block-scale kernels; other GPU reference kernels remain self-contained.
 
 ### BatchNormalization Operations
 
@@ -159,8 +171,8 @@ The GPU executor accepts a subset of the pointwise modes the CPU reference imple
 
 | Group | GPU modes | Modes the CPU reference has that GPU lacks |
 |-------|-----------|---------------------------------------------|
-| Unary | IDENTITY, ABS, NEG, RELU_FWD, SIGMOID_FWD, TANH_FWD, GELU_FWD, GELU_APPROX_TANH_FWD, SWISH_FWD | - (GPU additionally supports IDENTITY) |
-| Binary | ADD, SUB, MUL, RELU_BWD, SIGMOID_BWD, TANH_BWD | MAX, MIN, CMP_GT |
+| Unary | IDENTITY, ABS, NEG, RELU_FWD, SIGMOID_FWD, TANH_FWD, GELU_FWD, GELU_APPROX_TANH_FWD, SWISH_FWD | EXP, LOG, SQRT, RSQRT, RECIPROCAL, SIN, TAN, ERF, CEIL, FLOOR, ELU_FWD, SOFTPLUS_FWD, LOGICAL_NOT, GEN_INDEX |
+| Binary | ADD, SUB, MUL, RELU_BWD, SIGMOID_BWD, TANH_BWD | DIV, ADD_SQUARE, MAX, MIN, CMP_EQ, CMP_NEQ, CMP_GT, CMP_GE, CMP_LT, CMP_LE, LOGICAL_AND, LOGICAL_OR, GELU_BWD, GELU_APPROX_TANH_BWD, SWISH_BWD, ELU_BWD, SOFTPLUS_BWD |
 | Ternary | - | BINARY_SELECT |
 
 Pointwise nodes use `FP32` compute and no `BOOLEAN` tensors. A pointwise node with a runtime
@@ -179,6 +191,7 @@ Design, the full feature table for both references, and how they are tested:
 |---------|--------------------|---------------------|
 | Log-sum-exp `stats` output | Supported | Supported (`FP32`): dense `[B, H, Sq, 1]`, or ragged with its own `INT32` `ragged_offset` in any layout the ragged container accepts (`[H, T]` or `[T, H]`), with Q's per-batch lengths |
 | Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch; matches the CPU reference | Supported, both or neither: they bound the per-batch lengths. Without them each `ragged_offset` block, clamped to `S_max`, is the length |
+| Cumulative sequence lengths (`cu_seq_len_q` / `cu_seq_len_kv`, cuDNN 9.24+, 9.25+ when mixed with `seq_len_*` on the other side; forward only) | Not supported | Not supported |
 | FP8 (descale) inputs | `FP8_E4M3`, `FP8_E5M2` and their FNUZ forms, with `BFP16` output; requires all three `FLOAT` Q/K/V descales (scalar or `[B, H_kv, 1, 1]`; a paged K or V needs a scalar), rejected for other inputs. Q/K/V are dequantized on the device first, as in the CPU reference. cuDNN `sdpa_fp8` softmax and output scaling (`scale_s` with `descale_s`, `scale_o`, `amax_s`, `amax_o`; one-element `FLOAT`; not with dropout) as in the CPU reference (SEM-024); `BFP16` or input-format FP8 output | `FP8_E4M3` with `BFP16` output. Optional `FLOAT` Q/K/V descales (scalar `[1]` or per KV head `[B, H_kv, 1, 1]`) for any registered dtype; softmax descale, softmax/output scales and amax go through the dense rewrite |
 | Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported: K/V read in place through INT32 page tables, as the CPU reference (SEM-009) | Through the dense rewrite (ragged Q over paged K/V) |
 | ALiBi (`alibi_mask`) | Supported: cuDNN slopes, `(skv - sq) * slope(h)` added after the bias; needs top-left causal (`right_bound = 0`) (SEM-021) | Through the dense rewrite |
@@ -244,9 +257,9 @@ host validator.
 | Resample Backward | Yes | Yes |
 | SDPA Forward | Yes (FP8 E4M3, E5M2 and their FNUZ forms; variable seq. len.; ragged BFP16 and FP8 E4M3 native, other dtypes through the dense rewrite) | Yes (dense incl. FP8 E4M3, E5M2 and their FNUZ forms and variable seq. len.; ragged incl. FP8 E4M3) |
 | SDPA Backward | Yes | Yes (dense; ragged through the dense rewrite) |
-| BlockScale Quantize / Dequantize | Yes | No |
-| Pointwise Unary | Yes (no IDENTITY) | Yes (incl. IDENTITY) |
-| Pointwise Binary | Yes (incl. MAX, MIN, CMP_GT) | Yes (ADD, SUB, MUL and the three backward modes) |
+| BlockScale Quantize / Dequantize | Yes | Yes |
+| Pointwise Unary | Yes (incl. IDENTITY, the math, ELU, softplus, logical and GEN_INDEX modes) | Yes (incl. IDENTITY) |
+| Pointwise Binary | Yes (arithmetic, comparison, logical and backward modes, incl. MAX, MIN, CMP_GT) | Yes (ADD, SUB, MUL and the three backward modes) |
 | Pointwise Ternary | Yes (BINARY_SELECT) | No |
 
 ## Operations Required of the GPU Reference in Bundle Verification

@@ -8,6 +8,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
@@ -30,7 +31,7 @@ TEST(TestHipMlopsEngine, ConstructorAndId)
 // Workspace Size
 // ============================================================================
 
-TEST(TestHipMlopsEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilders)
+TEST(TestHipMlopsEngine, WorkspaceSizeThrowsInternalErrorIfNoPlanBuilders)
 {
     const HipMlopsEngine engine(1);
 
@@ -38,7 +39,15 @@ TEST(TestHipMlopsEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilders)
     const MockGraph mockGraph;
     const MockEngineConfig mockConfig;
 
-    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 0u);
+    try
+    {
+        static_cast<void>(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig));
+        FAIL() << "a workspace query with no plan builders must throw";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+    }
 }
 
 TEST(TestHipMlopsEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
@@ -94,7 +103,7 @@ TEST(TestHipMlopsEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
     EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 45000u);
 }
 
-TEST(TestHipMlopsEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
+TEST(TestHipMlopsEngine, WorkspaceSizeThrowsInternalErrorIfNoPlanBuilderApplies)
 {
     auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
@@ -107,7 +116,15 @@ TEST(TestHipMlopsEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
     const MockGraph mockGraph;
     const MockEngineConfig mockConfig;
 
-    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 0u);
+    try
+    {
+        static_cast<void>(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig));
+        FAIL() << "a workspace query with no applicable builder must throw";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+    }
 }
 
 // ============================================================================
@@ -192,6 +209,40 @@ TEST(TestHipMlopsEngine, Non16ByteAlignmentFlipsApplicableGraphToRejected)
         engine.addPlanBuilder(std::move(mockPlanBuilder));
         Handle dummyHandle;
         EXPECT_FALSE(engine.isApplicable(dummyHandle, misalignedGraph));
+    }
+}
+
+TEST(TestHipMlopsEngine, RaggedOffsetMultiplierWithoutRaggedOffsetFlipsApplicableGraphToRejected)
+{
+    // A multiplier other than 1 means something only beside a ragged offset; on a dense tensor
+    // the engine declines before any plan builder is consulted.
+    auto baseBuilder = createValidMatmulGraph();
+    const GraphWrapper baseGraph(baseBuilder.GetBufferPointer(), baseBuilder.GetSize());
+
+    {
+        auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+        EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+            .WillRepeatedly(::testing::Return(true));
+
+        HipMlopsEngine engine(0);
+        engine.addPlanBuilder(std::move(mockPlanBuilder));
+        Handle dummyHandle;
+        EXPECT_TRUE(engine.isApplicable(dummyHandle, baseGraph));
+    }
+
+    auto strayBuilder = mutateGraph(createValidMatmulGraph(), [](auto& graph) {
+        graph.tensors.front()->ragged_offset_multiplier = 2;
+    });
+    const GraphWrapper strayGraph(strayBuilder.GetBufferPointer(), strayBuilder.GetSize());
+
+    {
+        auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+        EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_)).Times(0);
+
+        HipMlopsEngine engine(0);
+        engine.addPlanBuilder(std::move(mockPlanBuilder));
+        Handle dummyHandle;
+        EXPECT_FALSE(engine.isApplicable(dummyHandle, strayGraph));
     }
 }
 
@@ -390,7 +441,7 @@ TEST(TestHipMlopsEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
     engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
 }
 
-TEST(TestHipMlopsEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoApplicableBuilders)
+TEST(TestHipMlopsEngine, InitializeExecutionContextThrowsInternalErrorIfNoBuilderApplies)
 {
     auto mockPlanBuilder1 = std::make_unique<MockPlanBuilder>();
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
@@ -422,5 +473,13 @@ TEST(TestHipMlopsEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoAppli
     const MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
-    engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
+    try
+    {
+        engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
+        FAIL() << "a context with no plan must not be created";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+    }
 }

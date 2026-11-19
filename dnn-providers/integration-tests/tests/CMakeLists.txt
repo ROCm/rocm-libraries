@@ -46,6 +46,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuReferenceGraphExecutor.cpp
     TestGpuBatchnormBwdPlan.cpp
     TestGpuBatchnormBwdSignatureKey.cpp
+    TestGpuBlockScalePlan.cpp
     TestGpuBatchnormFwdTrainPlan.cpp
     TestGpuBatchnormFwdTrainSignatureKey.cpp
     TestGpuConvolutionBwdPlan.cpp
@@ -64,8 +65,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuSdpaBwdPlan.cpp
     TestGpuSdpaFwdPlan.cpp
     TestGpuSdpaFwdPlanZeroDropout.cpp
-    TestGpuSdpaFwdPlanVllmForm.cpp
-    TestGpuSdpaFwdPlanSeqLenKvOnly.cpp
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:TestGpuSdpaFwdPlanVllmForm.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:TestGpuSdpaFwdPlanSeqLenKvOnly.cpp>
     TestGpuSdpaPagedFwdPlan.cpp
     TestGpuRaggedSdpaDensify.cpp
     TestGpuRaggedSdpaMapping.cpp
@@ -152,6 +153,7 @@ add_unit_test_target(hipdnn_integration_tests_unit_tests ${CMAKE_CURRENT_BINARY_
 
 add_executable(hipdnn_gpu_ref_tests
     gpu-ref/main.cpp
+    gpu-ref/TestGpuFpReferenceBlockScale.cpp
     gpu-ref/TestGpuFpReferencePointwise.cpp
     gpu-ref/TestGpuFpReferenceConvolution.cpp
     gpu-ref/TestGpuFpReferenceSdpa.cpp

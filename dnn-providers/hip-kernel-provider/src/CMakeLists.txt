@@ -211,6 +211,9 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         gfx942 unified_3d Gfx942AttentionUnified3d HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
             hipkernel_Gfx942AttentionUnified3d.toml
             HIPKERNELPROVIDER_GFX942_ATTENTION_UNIFIED_3D_INTEGRATION_CATEGORIES_YAML
+        gfx942 unified_2d Gfx942AttentionUnified2D HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
+            hipkernel_Gfx942AttentionUnified2D.toml
+            HIPKERNELPROVIDER_GFX942_ATTENTION_UNIFIED_2D_INTEGRATION_CATEGORIES_YAML
         gfx942 dense Gfx942AttentionDense HKP_GFX942_ATTENTION_DENSE_GTEST_FILTER
             hipkernel_Gfx942AttentionDense.toml
             HIPKERNELPROVIDER_GFX942_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML
@@ -305,8 +308,9 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         "quick_RMSNorm_Variant3.*"
         "quick_RMSNormBackward_Variant2.*"
         "quick_SdpaFwd_*.*"
-        "quick_SdpaBackward_Default.*"
+        "quick_SdpaBackward_*.*"
         "-*DISABLED*"
+        "quick_SdpaBackward_*_fwd_pair*"
         "*_SdpaFwd_bhsd_fp16_hd128_causal_gqa4_Small.*"
         "*_SdpaFwd_bhsd_fp16_hd128_causal_mha_Small.*"
     )
@@ -461,6 +465,55 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         endif()
         set(${out_var} "${_file}" PARENT_SCOPE)
     endfunction()
+
+    # The packaged forward AOT-instance engine's own external-integration-check:
+    # dnn-providers/integration-tests/integration-test-bundles/*/Gfx950ConvFwd/ claims
+    # hipkernel:Gfx950ConvFwdAot, but nothing short of this target checks that claim --
+    # IntegrationGpuGfx950ConvFwd.cpp (integration_tests/) is the provider's own suite,
+    # built from rocKE's sweep grid directly, and never reads these bundle files. Routed
+    # into gfx950's own census shard (INSTALL_DESTINATION/INSTALL_STAGING_KEY) and
+    # categorized, like the pinned attention engines below, rather than the common
+    # arch-neutral file: without a tier, ctest -L standard never selected it. Gated on
+    # hkp_product_ships_engine_for_arch for gfx950: a build whose `product` root ships
+    # only another bundle reads as absent rather than a missing-engine failure.
+    set(_hkp_conv_fwd_aot_available FALSE)
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_product_ships_engine_for_arch(_hkp_conv_fwd_aot_available "hipkernel:Gfx950ConvFwdAot" gfx950)
+    endif()
+    if(_hkp_conv_fwd_aot_available AND TARGET hipdnn_integration_tests)
+        _hkp_census_external_test_file(_hkp_conv_fwd_aot_shard_ctest gfx950)
+        set(_hkp_conv_fwd_aot_config "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950ConvFwdAot.toml")
+        hkp_reserve_census_shard(_hkp_conv_fwd_aot_shard_dest gfx950 FILES "${_hkp_conv_fwd_aot_config}")
+
+        set(_hkp_conv_fwd_aot_category_args "")
+        if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+            list(APPEND _hkp_conv_fwd_aot_category_args
+                TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_GFX950_CONV_FWD_AOT_INTEGRATION_CATEGORIES_YAML}"
+                INSTALL_TEST_FILE "${_hkp_conv_fwd_aot_shard_ctest}"
+                TEST_NAME_PREFIX ${PROJECT_NAME}-gfx950-conv-fwd-aot-external-integration
+            )
+        endif()
+
+        add_external_integration_test_target(
+            TARGET_NAME    ${PROJECT_NAME}-gfx950-conv-fwd-aot-external-integration-check
+            PLUGIN_TARGET  hip_kernel_provider
+            ENGINE_NAME    "hipkernel:Gfx950ConvFwdAot"
+            INSTALL_SUBDIR hip_kernel_provider
+            INSTALL_DESTINATION "${_hkp_conv_fwd_aot_shard_dest}"
+            INSTALL_STAGING_KEY hkp_census_gfx950
+            TEST_CONFIG    "${_hkp_conv_fwd_aot_config}"
+            ENVIRONMENT    ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            ${_hkp_conv_fwd_aot_category_args}
+        )
+        message(STATUS "Created ${PROJECT_NAME}-gfx950-conv-fwd-aot-external-integration-check target")
+    elseif(NOT _hkp_conv_fwd_aot_available)
+        message(STATUS "hipkernel:Gfx950ConvFwdAot not shipped by this configuration - "
+                       "skipping gfx950-conv-fwd-aot-external-integration-check")
+    else()
+        message(STATUS "hipdnn_integration_tests not found - skipping "
+                       "gfx950-conv-fwd-aot-external-integration-check")
+    endif()
 
     # One engine-pinned external integration entry per HKP_PINNED_ATTENTION_ENGINES engine,
     # serving the bundles its filter variable names (the unified 3D engines serve only
@@ -662,6 +715,81 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "Created the FlyDSL external integration targets (one per engine and architecture)")
     endif()
 
+    # The FlyDSL SDPA backward engines, hipkernel:flydsl_sdpa_bwd_split and
+    # hipkernel:flydsl_sdpa_bwd_merged. Split ships gfx950, gfx942 and gfx90a content and gfx11-generic
+    # content, which the pack expands to every gfx11 member this build targets; merged
+    # ships gfx950 only. Each (engine, architecture) the product ships gets its own
+    # engine-pinned target in that architecture's shard, for the reason the gfx950 dense
+    # registration above sets out: pruning an artifact to another architecture removes the
+    # entry along with the engine it names. An engine the product does not ship for an
+    # architecture registers nothing there. The gfx950 shard's external file is the one
+    # created above; another shard's is created on its first registration here, truncated
+    # for the same reason.
+    foreach(_hkp_bwd_engine IN ITEMS split merged)
+        string(TOUPPER "${_hkp_bwd_engine}" _hkp_bwd_engine_upper)
+        foreach(_hkp_bwd_arch IN LISTS HKP_FLYDSL_SDPA_BWD_ARCHS)
+            set(_hkp_bwd_ships FALSE)
+            if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+                hkp_product_ships_engine_for_arch(_hkp_bwd_ships
+                    "hipkernel:flydsl_sdpa_bwd_${_hkp_bwd_engine}" ${_hkp_bwd_arch})
+            endif()
+            if(NOT (HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPDNN_ENABLE_KERNEL_INGESTOR
+                    AND HIPDNN_ENABLE_SDPA AND _hkp_bwd_ships
+                    AND TARGET hipdnn_integration_tests))
+                continue()
+            endif()
+
+            # The shard names this TOML, so it is reserved with the shard as well as
+            # passed as TEST_CONFIG; hkp_reserve_census_shard() says why. It is the
+            # per-architecture file the gpu-reference registration shares.
+            hkp_flydsl_sdpa_bwd_arch_toml(_hkp_bwd_toml ${_hkp_bwd_engine} ${_hkp_bwd_arch})
+            hkp_reserve_census_shard(_hkp_bwd_shard_dest ${_hkp_bwd_arch} FILES "${_hkp_bwd_toml}")
+            set(_hkp_bwd_shard_args
+                INSTALL_DESTINATION "${_hkp_bwd_shard_dest}"
+                INSTALL_STAGING_KEY hkp_census_${_hkp_bwd_arch})
+
+            set(_hkp_bwd_category_args "")
+            if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+                set(_hkp_bwd_external_ctest
+                    "${CMAKE_CURRENT_BINARY_DIR}/census_external_${_hkp_bwd_arch}_CTestTestfile.cmake")
+                get_property(_hkp_bwd_file_known GLOBAL PROPERTY
+                             HKP_CENSUS_EXTERNAL_TEST_FILE_${_hkp_bwd_arch} SET)
+                if(NOT _hkp_bwd_file_known)
+                    file(WRITE "${_hkp_bwd_external_ctest}" "")
+                    set_property(GLOBAL PROPERTY
+                        HKP_CENSUS_EXTERNAL_TEST_FILE_${_hkp_bwd_arch} "${_hkp_bwd_external_ctest}")
+                endif()
+                list(APPEND _hkp_bwd_category_args
+                    TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_FLYDSL_SDPA_BWD_${_hkp_bwd_engine_upper}_INTEGRATION_CATEGORIES_YAML}"
+                    INSTALL_TEST_FILE "${_hkp_bwd_external_ctest}"
+                    TEST_NAME_PREFIX ${PROJECT_NAME}-flydsl-sdpa-bwd-${_hkp_bwd_engine}-${_hkp_bwd_arch}-external-integration
+                )
+            endif()
+
+            add_external_integration_test_target(
+                TARGET_NAME    ${PROJECT_NAME}-flydsl-sdpa-bwd-${_hkp_bwd_engine}-${_hkp_bwd_arch}-external-integration-check
+                PLUGIN_TARGET  hip_kernel_provider
+                ENGINE_NAME    "hipkernel:flydsl_sdpa_bwd_${_hkp_bwd_engine}"
+                INSTALL_SUBDIR hip_kernel_provider
+                TEST_CONFIG    "${_hkp_bwd_toml}"
+                ${_hkp_bwd_shard_args}
+                GTEST_FILTER   "quick_SdpaBackward_*:standard_SdpaBackward_*:comprehensive_SdpaBackward_*:full_SdpaBackward_*:-*_fwd_pair*"
+                ENVIRONMENT    ${TEST_ENVIRONMENT}
+                ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+                ${_hkp_bwd_category_args}
+            )
+            message(STATUS "Created ${PROJECT_NAME}-flydsl-sdpa-bwd-${_hkp_bwd_engine}-${_hkp_bwd_arch}-external-integration-check target")
+            _hkp_add_graph_capture_lane(
+                ${PROJECT_NAME}-flydsl-sdpa-bwd-${_hkp_bwd_engine}-${_hkp_bwd_arch}
+                "${_hkp_bwd_external_ctest}"
+                ENGINE_NAME    "hipkernel:flydsl_sdpa_bwd_${_hkp_bwd_engine}"
+                INSTALL_SUBDIR hip_kernel_provider
+                TEST_CONFIG    "${_hkp_bwd_toml}"
+                ${_hkp_bwd_shard_args}
+            )
+        endforeach()
+    endforeach()
+
     # Second drain of the common external staging, after every registration above.
     #
     # The first drain sits beside the cross-provider target, far higher up, so it can
@@ -692,6 +820,14 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             if(COMMAND apply_ctest_category_labels)
                 apply_ctest_category_labels(
                     "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
+                    "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                )
+                # If the cross-provider target was absent, this is the first drain
+                # and therefore the first chance to categorize rocKE's staged
+                # CTests. When the first drain already ran, reapplying the same
+                # categories after late registration is harmless.
+                apply_ctest_category_labels(
+                    "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
                     "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
                 )
             endif()
