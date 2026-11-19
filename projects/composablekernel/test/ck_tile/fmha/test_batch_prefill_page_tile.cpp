@@ -1445,6 +1445,22 @@ TYPED_TEST(PageTileForward, MatchesReferenceSink)
     }
 }
 
+// A copy of h whose table entries of the pages lying entirely in keys [begin, end) of every
+// sequence hold `id` (the vLLM table and the SGLang list alike). The pool, the logical data and h's
+// own table stay as they are, so the reference of h still describes the problem.
+[[maybe_unused]] HostProblem WithTablePages(HostProblem h, int begin, int end, int32_t id)
+{
+    auto& l = h.layout;
+    for(int b = 0; b < l.batch(); ++b)
+        for(int page = 0; page * kPage < l.seqlen_k[b]; ++page)
+            if(page * kPage >= begin && (page + 1) * kPage <= end)
+            {
+                l.block_table[b * l.table_stride + page] = id;
+                l.kv_page_indices[l.kv_indptr[b] + page] = id;
+            }
+    return h;
+}
+
 // Sink instance: no attended key falls in the pages between the sink tile and the first window
 // tile, so their table entries may hold anything. Out-of-range ids there must leave the output
 // bitwise equal to the plain table's, and correct.
@@ -1454,21 +1470,6 @@ TYPED_TEST(PageTileForward, SkippedSinkPages)
         GTEST_SKIP() << "sink instance only";
     else
     {
-        // A copy of h whose table entries of the pages lying entirely in keys [begin, end) of
-        // every sequence hold `id` (the vLLM table and the SGLang list alike). The pool, the
-        // logical data and h's own table stay as they are, so the reference of h still describes
-        // the problem.
-        const auto with_table_pages = [](HostProblem h, int begin, int end, int32_t id) {
-            auto& l = h.layout;
-            for(int b = 0; b < l.batch(); ++b)
-                for(int page = 0; page * kPage < l.seqlen_k[b]; ++page)
-                    if(page * kPage >= begin && (page + 1) * kPage <= end)
-                    {
-                        l.block_table[b * l.table_stride + page] = id;
-                        l.kv_page_indices[l.kv_indptr[b] + page] = id;
-                    }
-            return h;
-        };
         // One sequence, bottom-right: the first query row attends keys from
         // (3000 - 300) - 300 = 2400 on, so the key tiles between the sink tile (keys 0..127) and
         // the tile of key 2400 are never visited.
@@ -1481,7 +1482,7 @@ TYPED_TEST(PageTileForward, SkippedSinkPages)
         DeviceProblem base_device(h);
         const auto base_output = Run<TypeParam>(h, base_device, window);
         const auto poisoned =
-            with_table_pages(h, skipped_begin, skipped_end, std::numeric_limits<int32_t>::min());
+            WithTablePages(h, skipped_begin, skipped_end, std::numeric_limits<int32_t>::min());
         ASSERT_NE(poisoned.layout.block_table, h.layout.block_table) << "no page was skipped";
         DeviceProblem d(poisoned);
         const auto o       = Run<TypeParam>(poisoned, d, window);
@@ -1495,6 +1496,174 @@ TYPED_TEST(PageTileForward, SkippedSinkPages)
         ASSERT_EQ(o.size(), base_output.size());
         EXPECT_EQ(std::memcmp(o.data(), base_output.data(), o.size() * sizeof(OData)), 0)
             << "the table entries of skipped pages changed the output";
+    }
+}
+
+// The launch contract's page read set (fmha_fwd.hpp, page tables): the kernel reads the entry of
+// every page of the sequence that overlaps a 128-key tile it visits and uses the page even where
+// no key of it is attended (a masked key enters P * V with P = 0, and 0 * NaN = NaN); it reads no
+// other entry. ExpectPageReadSet changes only table entries of one problem: the pages wholly in
+// the unvisited keys point at a NaN page (a page in use turns rows non-finite), then hold an
+// out-of-range id (a read goes outside the pool), and the output must stay bitwise equal; the
+// control points one page of a visited tile at the NaN page, and exactly the rows of the query
+// tiles that the contract says visit it must turn non-finite. The control shows that the NaN page
+// is seen when the kernel uses it, and, where the page holds no attended key, that the contract
+// must require its entry.
+
+// The last pool page that no table entry names, its K and V rows set to NaN in h; -1 if every
+// page is named.
+[[maybe_unused]] int32_t AddNanPage(HostProblem& h)
+{
+    const auto& l = h.layout;
+    std::vector<bool> named(l.num_total_pages, false);
+    for(const auto id : l.block_table)
+        if(id >= 0 && id < l.num_total_pages)
+            named[id] = true;
+    int32_t page = l.num_total_pages - 1;
+    while(page >= 0 && named[page])
+        --page;
+    if(page < 0)
+        return page;
+    const std::size_t page_elements = static_cast<std::size_t>(kPage) * l.kv_heads * h.head_dim;
+    const std::size_t first         = static_cast<std::size_t>(page) * page_elements;
+    std::fill_n(h.k.begin() + first, page_elements, ck_tile::numeric<Data>::quiet_NaN());
+    std::fill_n(h.v.begin() + first, page_elements, ck_tile::numeric<Data>::quiet_NaN());
+    return page;
+}
+
+[[maybe_unused]] std::size_t NonFiniteCount(const std::vector<OData>& o)
+{
+    return static_cast<std::size_t>(std::count_if(o.begin(), o.end(), [](OData x) {
+        return !std::isfinite(ck_tile::type_convert<float>(x));
+    }));
+}
+
+[[maybe_unused]] bool BitwiseEqual(const std::vector<OData>& a, const std::vector<OData>& b)
+{
+    return a.size() == b.size() && std::memcmp(a.data(), b.data(), a.size() * sizeof(OData)) == 0;
+}
+
+// The contract's visited keys of query tile `tile` of a one-sequence problem without sink tokens:
+// the key tiles from the first to the last key that any of its kTileM rows (the last tile's rows
+// past the query length too) can attend under the window, as [first, end).
+[[maybe_unused]] std::pair<int, int> VisitedKeys(const Layout& l, const Window& w, int tile)
+{
+    const int q_len     = l.q_length(0);
+    const int k_len     = l.seqlen_k[0];
+    const int offset    = w.top_left ? 0 : k_len - q_len;
+    const int first_row = tile * kTileM;
+    const int last_row  = first_row + kTileM - 1;
+    const int first     = w.left < 0 ? 0 : std::max(0, first_row + offset - w.left);
+    const int last = w.right < 0 ? k_len - 1 : std::min(k_len - 1, last_row + offset + w.right);
+    return {first / 128 * 128, last / 128 * 128 + 128};
+}
+
+// Runs h under the window with its own table, with the entries of the pages wholly in keys
+// [unvisited_begin, unvisited_end) pointed at a NaN page and then holding an out-of-range id, and
+// with the page holding control_key pointed at the NaN page. The control must turn exactly the
+// rows the contract predicts non-finite: every valid row, in every head, of each query tile whose
+// visited keys (VisitedKeys) overlap the control page.
+template <typename M>
+void ExpectPageReadSet(const char* name,
+                       HostProblem h,
+                       const Window& window,
+                       int unvisited_begin,
+                       int unvisited_end,
+                       int control_key)
+{
+    const auto& l = h.layout;
+    ASSERT_EQ(l.batch(), 1);
+    const int q_len          = l.q_length(0);
+    const int control_begin  = control_key / kPage * kPage;
+    const int control_end    = std::min(control_begin + kPage, l.seqlen_k[0]);
+    std::size_t control_rows = 0;
+    for(int tile = 0; tile * kTileM < q_len; ++tile)
+    {
+        const auto [first_key, end_key] = VisitedKeys(l, window, tile);
+        ASSERT_TRUE(unvisited_end <= first_key || end_key <= unvisited_begin)
+            << "query tile " << tile << " visits keys [" << first_key << ", " << end_key << ")";
+        if(control_begin < end_key && first_key < control_end)
+            control_rows += static_cast<std::size_t>(std::min<int>(kTileM, q_len - tile * kTileM));
+    }
+    const std::size_t predicted = control_rows * static_cast<std::size_t>(l.q_heads * h.head_dim);
+    ASSERT_GT(predicted, 0u) << "the control page lies outside the read set";
+
+    const int32_t nan_page = AddNanPage(h);
+    ASSERT_GE(nan_page, 0) << "every pool page is named";
+    const auto run = [&](const HostProblem& p) {
+        DeviceProblem d(p);
+        return Run<M>(p, d, window);
+    };
+    const auto nan_unvisited = WithTablePages(h, unvisited_begin, unvisited_end, nan_page);
+    const auto poisoned =
+        WithTablePages(h, unvisited_begin, unvisited_end, std::numeric_limits<int32_t>::min());
+    ASSERT_NE(nan_unvisited.layout.block_table, h.layout.block_table) << "no unvisited page";
+    const auto control = WithTablePages(h, control_begin, control_begin + kPage, nan_page);
+    ASSERT_NE(control.layout.block_table, h.layout.block_table) << "no control page";
+
+    const auto base     = run(h);
+    const auto o_nan    = run(nan_unvisited);
+    const auto o_poison = run(poisoned);
+    const auto o_ctrl   = run(control);
+    std::cout << "page_tile P" << kPage << " D" << M::kHeadDim << " M" << kTileM << " "
+              << (kSglang ? "sglang " : "") << name << " base_nonfinite=" << NonFiniteCount(base)
+              << " nan_same=" << BitwiseEqual(o_nan, base)
+              << " poison_same=" << BitwiseEqual(o_poison, base)
+              << " control_nonfinite=" << NonFiniteCount(o_ctrl) << " predicted=" << predicted
+              << '\n';
+    EXPECT_EQ(NonFiniteCount(base), 0u);
+    EXPECT_TRUE(BitwiseEqual(o_nan, base)) << "a NaN page of an unvisited key tile was used";
+    EXPECT_TRUE(BitwiseEqual(o_poison, base))
+        << "an out-of-range id of an unvisited key tile changed the output";
+    EXPECT_EQ(NonFiniteCount(o_ctrl), predicted)
+        << "the control page reached other rows than the visited tiles of the contract";
+}
+
+// The mask's first key tile. q 300, k 3000, bottom-right, left window 300: the first query row
+// attends keys from (3000 - 300) - 300 = 2400 on, so every query tile (M128 and M64) starts at key
+// tile [2304, 2432) or later, and none visits the pages wholly below key 2304. The control page
+// (holding key 2304) holds no attended key up to P64. Sink tokens: SkippedSinkPages.
+TYPED_TEST(PageTileForward, UnvisitedTilePages)
+{
+    if constexpr(!TypeParam::kCausal)
+        GTEST_SKIP() << "windows apply to the masked model";
+    else if constexpr(kKvSplits == 2)
+        GTEST_SKIP() << "the KV split takes no left window (see CheckLaunch)";
+    else
+    {
+        const Case shape{"long", 4, 2, {300}, {3000}};
+        const int first_tile = ((3000 - 300) - 300) / 128 * 128;
+        ExpectPageReadSet<TypeParam>(
+            "unvisited tiles",
+            MakeProblem(shape, Mapping::Permuted, TypeParam::kHeadDim, true, 83),
+            Window{false, 300, 0},
+            0,
+            first_tile,
+            first_tile);
+    }
+}
+
+// Padded query rows. q 129, k 1500, top-left, right window 100: the one row of the last query
+// tile attends keys up to 228, but the tile's rows past the query length count in the mask's tile
+// range and reach key 255 + 100 (M128) or 191 + 100 (M64), so that tile also visits key tile
+// [256, 384). No query tile visits the pages wholly from key 384 on. The control page (holding key
+// 256) holds no attended key up to P256.
+TYPED_TEST(PageTileForward, PaddedRowPages)
+{
+    if constexpr(!TypeParam::kCausal)
+        GTEST_SKIP() << "windows apply to the masked model";
+    else if constexpr(kKvSplits == 2)
+        GTEST_SKIP() << "the KV split takes bottom-right masks only (see CheckLaunch)";
+    else
+    {
+        const Case shape{"padded", 4, 2, {129}, {1500}};
+        ExpectPageReadSet<TypeParam>(
+            "padded rows",
+            MakeProblem(shape, Mapping::Permuted, TypeParam::kHeadDim, true, 89),
+            Window{true, -1, 100},
+            384,
+            std::numeric_limits<int>::max(),
+            256);
     }
 }
 
