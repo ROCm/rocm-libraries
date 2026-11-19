@@ -32,7 +32,7 @@
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_dgrad_aot
 {
 
-// The helpers both gfx950 conv engines share (ConvAotGeometryCommon.hpp).
+// The helpers the conv AOT engines share (ConvAotGeometryCommon.hpp).
 using conv_aot::bufferRangesDoNotOverlap;
 using conv_aot::ceilDiv;
 using conv_aot::DIRECT_KERNARG_NAMES;
