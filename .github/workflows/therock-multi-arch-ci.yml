@@ -13,7 +13,11 @@
 
 name: TheRock Multi-Arch CI
 
-# TheRock ref: pinned to ROCm/TheRock commit 11621df52cb7e5790ab7a37515098cde8faed4ab.
+# TheRock ref: TEMPORARILY pointed at the branch
+# users/geomin12/changed-projects-one-at-a-time, which gates changed_projects
+# build scoping on a per-artifact changed_projects_enabled flag in
+# BUILD_TOPOLOGY.toml and opts in the rand artifact. Restore a pinned SHA
+# before merging.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
 
 on:
@@ -142,7 +146,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: 11621df52cb7e5790ab7a37515098cde8faed4ab # 2026-11-17
+          ref: users/geomin12/changed-projects-one-at-a-time
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -184,7 +188,7 @@ jobs:
 
   setup:
     needs: [ci-env, configure]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@11621df52cb7e5790ab7a37515098cde8faed4ab # 2026-11-17
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@users/geomin12/changed-projects-one-at-a-time
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI.
@@ -228,7 +232,7 @@ jobs:
           'off'
         }}
       repository: ROCm/TheRock
-      ref: 11621df52cb7e5790ab7a37515098cde8faed4ab # 2026-11-17
+      ref: users/geomin12/changed-projects-one-at-a-time
       # Pass external repo info for stage-impact analysis.
       external_repo: >-
         {
@@ -250,7 +254,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@11621df52cb7e5790ab7a37515098cde8faed4ab # 2026-11-17
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@users/geomin12/changed-projects-one-at-a-time
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -264,7 +268,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 11621df52cb7e5790ab7a37515098cde8faed4ab # 2026-11-17
+      ref: users/geomin12/changed-projects-one-at-a-time
     permissions:
       contents: read
       id-token: write
@@ -277,7 +281,7 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@11621df52cb7e5790ab7a37515098cde8faed4ab # 2026-11-17
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@users/geomin12/changed-projects-one-at-a-time
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -290,7 +294,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 11621df52cb7e5790ab7a37515098cde8faed4ab # 2026-11-17
+      ref: users/geomin12/changed-projects-one-at-a-time
     permissions:
       contents: read
       id-token: write
@@ -398,7 +402,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: 11621df52cb7e5790ab7a37515098cde8faed4ab # 2026-11-17
+          ref: users/geomin12/changed-projects-one-at-a-time
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
