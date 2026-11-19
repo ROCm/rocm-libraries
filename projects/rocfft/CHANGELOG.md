@@ -22,6 +22,8 @@ Documentation for rocFFT is available at
   factors silently falling back to running the transform on a single device.  Such plans may now
   perform better.
 * Fixed a crash in `rocfft_execute` for in-place multi-device plans when `out_buffer` is null.
+* Fixed data races on work memory that could cause sporadic incorrect results for
+  multi-device transforms requiring work memory.
 
 ## rocFFT 1.0.41 for ROCm 10.2
 
