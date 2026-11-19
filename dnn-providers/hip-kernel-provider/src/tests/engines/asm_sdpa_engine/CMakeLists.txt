@@ -22,6 +22,16 @@ if(TARGET asm_kernel_kpack)
     add_dependencies(hip_kernel_provider_tests asm_kernel_kpack)
 endif()
 
+# Add include path for codegen-generated headers (e.g., asm_fmha_v3_fwd_configs.hpp).
+# The engine's codegen runs whether or not hipDNN has SDPA, and TestAsmKpackLoading's
+# forward launch-limit test reads the generated table.
+target_include_directories(hip_kernel_provider_tests PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/../../../engines/asm_sdpa_engine/generated
+)
+
+# Ensure codegen runs before compiling the tests
+add_dependencies(hip_kernel_provider_tests asm_kernel_codegen)
+
 if(NOT HIPDNN_ENABLE_SDPA)
     message(WARNING
             "ENABLE_ASM_SDPA_ENGINE is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
@@ -42,11 +52,3 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/TestSdpaFwdCase.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/AsmSdpaConfigHelpers.cpp
 )
-
-# Add include path for codegen-generated headers (e.g., asm_fmha_v3_fwd_configs.hpp)
-target_include_directories(hip_kernel_provider_tests PRIVATE
-    ${CMAKE_CURRENT_BINARY_DIR}/../../../engines/asm_sdpa_engine/generated
-)
-
-# Ensure codegen runs before compiling the tests
-add_dependencies(hip_kernel_provider_tests asm_kernel_codegen)

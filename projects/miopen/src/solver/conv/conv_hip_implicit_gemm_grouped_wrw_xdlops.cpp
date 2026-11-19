@@ -113,12 +113,11 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::ModelApplyTokenKTN(
             index     = heuristic_indexes[0];
 
             const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+            // Use the TF32-aware check (TF32 with an FP32 availability fallback) rather than a bare
+            // UseTF32() flag, so a float+TF32 problem whose KTN pick is FP32-only still validates.
             bool valid_split_k =
-                loader.IsLoaded() && loader.IsArgsSupported(CKSolverType::GrpConvWrw,
-                                                            problem,
-                                                            kernel_id,
-                                                            problem.GetInDataType(),
-                                                            problem.UseTF32());
+                loader.IsLoaded() &&
+                loader.IsArgsSupportedTf32Aware(CKSolverType::GrpConvWrw, problem, kernel_id);
 
             if(valid_split_k)
                 return true;
@@ -356,24 +355,21 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
     {
         bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
-        auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
-            return loader.FillValidKernels(
-                CKSolverType::GrpConvWrw, p, p.GetInDataType(), try_tf32);
-        };
-
         auto ktn_runner = [this](const ExecutionContext& c, const ProblemDescription& p) {
             return RunKTNGeneric(*this, c, p);
         };
 
-        auto ck_val_creator = MakeCKValidatorCreator(
-            loader, CKSolverType::GrpConvWrw, problem.GetInDataType(), mode_use_tf32);
+        auto ck_val_creator = MakeCKValidatorCreator(loader,
+                                                     CKSolverType::GrpConvWrw,
+                                                     problem.GetInDataType(),
+                                                     mode_use_tf32,
+                                                     k2DWrwSolverConfig.uses_split_k);
 
         if(RunAIHeuristics(k2DWrwSolverConfig,
                            state,
                            ctx,
                            problem,
                            is_deterministic,
-                           fill_valid_kernels,
                            ktn_runner,
                            ck_val_creator,
                            mode_use_tf32))
