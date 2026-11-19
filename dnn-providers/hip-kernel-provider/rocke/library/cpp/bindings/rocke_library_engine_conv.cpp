@@ -26,6 +26,7 @@
 #include <cstring>
 #include <deque>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "conv_knob_fields.hpp"
@@ -90,6 +91,23 @@ void refuse_unported_conv_field(const py::dict& d, const char* family, const cha
                           + "' has no C++ engine twin (non-default value)");
 }
 
+/* A conv-spec dict key the spec builder does not read at all (a dataclass field
+ * the binding was never taught, or a typo): refused (ValueError) instead of
+ * building the default kernel under the spec's name. ``known`` is every key the
+ * family's builder reads or refuses by name. */
+void refuse_unknown_conv_keys(const py::dict& d,
+                              const char* family,
+                              const std::unordered_set<std::string>& known)
+{
+    for(const auto& kv : d)
+    {
+        const std::string key = py::str(kv.first);
+        if(known.count(key) == 0)
+            throw py::value_error(std::string("rocke_library_engine: ") + family
+                                  + " has no spec field '" + key + "'");
+    }
+}
+
 /* Fill a rocke_conv_problem_t from a "problem" sub-dict (used by
  * conv_implicit_gemm and img2col, which share the same field set). */
 void fill_conv_problem(rocke_conv_problem_t* p, const py::dict& d)
@@ -147,6 +165,25 @@ void fill_conv_acc_epilogue(rocke_conv_acc_epilogue_t* e, const py::dict& d)
         e->has_clamp_max = true;
         e->clamp_max = d["clamp_max"].cast<double>();
     }
+}
+
+/* acc_epilogue on a family whose C++ spec cannot carry a fused epilogue into
+ * its kernel: absent, None or an identity dict is the default; any other
+ * epilogue would be dropped (the default kernel under the spec's name), so it
+ * is refused (ValueError). */
+void refuse_non_identity_acc_epilogue(const py::dict& d, const char* family)
+{
+    if(!d.contains("acc_epilogue") || d["acc_epilogue"].is_none())
+        return;
+    if(!py::isinstance<py::dict>(d["acc_epilogue"]))
+        throw py::value_error(std::string("rocke_library_engine: ") + family
+                              + " field 'acc_epilogue' must be a dict");
+    rocke_conv_acc_epilogue_t e = rocke_conv_acc_epilogue_default();
+    fill_conv_acc_epilogue(&e, d["acc_epilogue"].cast<py::dict>());
+    if(!rocke_conv_acc_epilogue_is_identity(&e))
+        throw py::value_error(std::string("rocke_library_engine: ") + family
+                              + " field 'acc_epilogue' has no C++ engine twin "
+                                "(non-identity epilogue)");
 }
 
 rocke_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
@@ -2057,6 +2094,59 @@ rocke_implicit_gemm_conv_wgrad_spec_t conv_wgrad_build_spec(const py::dict& d,
     ROCKE_CONV_WGRAD_KNOB_FIELDS(ROCKE_KNOB_INT, ROCKE_KNOB_BOOL)
 #undef ROCKE_KNOB_INT
 #undef ROCKE_KNOB_BOOL
+    /* The C++ wgrad spec has no fused accumulator epilogue and no explicit
+     * LDS layout object: refuse what it would drop. */
+    refuse_non_identity_acc_epilogue(d, "conv_wgrad");
+    refuse_unported_conv_field(d, "conv_wgrad", "lds_layout");
+    static const std::unordered_set<std::string> known = [] {
+        std::unordered_set<std::string> k = {"problem",
+                                             "tile_m",
+                                             "tile_n",
+                                             "tile_k",
+                                             "warp_m",
+                                             "warp_n",
+                                             "warp_tile_m",
+                                             "warp_tile_n",
+                                             "warp_tile_k",
+                                             "wave_size",
+                                             "split_k",
+                                             "two_stage",
+                                             "ws_replicas",
+                                             "prefetch_addr",
+                                             "register_prefetch",
+                                             "prefetch_global_regs",
+                                             "streamk_ctas",
+                                             "group_merge",
+                                             "async_dma",
+                                             "unroll_k",
+                                             "lds_k_outer",
+                                             "chiplet_swizzle",
+                                             "chiplet_wgm",
+                                             "chiplet_num_xcds",
+                                             "chiplet_chunk_size",
+                                             "lds_k_pad",
+                                             "waves_per_eu",
+                                             "vector_size_a",
+                                             "vector_size_b",
+                                             "vector_size_c",
+                                             "name",
+                                             "streamk",
+                                             "streamk_reduction",
+                                             "dtype_a",
+                                             "dtype_b",
+                                             "dtype_d",
+                                             "mma_dtype",
+                                             "pipeline",
+                                             "epilogue",
+                                             "dtype_acc",
+                                             "acc_epilogue",
+                                             "lds_layout"};
+#define ROCKE_KNOB_KEY(f) k.insert(#f);
+        ROCKE_CONV_WGRAD_KNOB_FIELDS(ROCKE_KNOB_KEY, ROCKE_KNOB_KEY)
+#undef ROCKE_KNOB_KEY
+        return k;
+    }();
+    refuse_unknown_conv_keys(d, "conv_wgrad", known);
     return s;
 }
 
@@ -2191,6 +2281,64 @@ rocke_dgrad_conv_spec_t conv_dgrad_build_spec(const py::dict& d, std::deque<std:
 #undef ROCKE_KNOB_INT
 #undef ROCKE_KNOB_BOOL
     refuse_unported_conv_field(d, "conv_dgrad", "cshuffle_no_alias");
+    /* The C++ dgrad builder applies a fused accumulator epilogue, but its
+     * kernel name does not carry the epilogue's tag (Python's does): a
+     * non-identity epilogue would build a kernel under another kernel's
+     * name, so it is refused here. An explicit LDS layout object has no dict
+     * form the binding reads. */
+    refuse_non_identity_acc_epilogue(d, "conv_dgrad");
+    refuse_unported_conv_field(d, "conv_dgrad", "lds_layout");
+    static const std::unordered_set<std::string> known = [] {
+        std::unordered_set<std::string> k = {"problem",
+                                             "name",
+                                             "pipeline",
+                                             "epilogue",
+                                             "dtype_a",
+                                             "dtype_b",
+                                             "dtype_d",
+                                             "dtype_acc",
+                                             "mma_dtype",
+                                             "tile_m",
+                                             "tile_n",
+                                             "tile_k",
+                                             "warp_m",
+                                             "warp_n",
+                                             "warp_tile_m",
+                                             "warp_tile_n",
+                                             "warp_tile_k",
+                                             "wave_size",
+                                             "async_dma",
+                                             "unroll_k",
+                                             "lds_k_outer",
+                                             "chiplet_swizzle",
+                                             "chiplet_wgm",
+                                             "chiplet_num_xcds",
+                                             "chiplet_chunk_size",
+                                             "split_k",
+                                             "num_load_waves",
+                                             "max_sub_gemms",
+                                             "uniform_k_decode",
+                                             "patch",
+                                             "tap_outer_k",
+                                             "xcd_tile_order",
+                                             "dy_halo",
+                                             "dy_halo_setprio",
+                                             "dy_halo_kouter_pad",
+                                             "halo_max_wo",
+                                             "lds_k_pad",
+                                             "waves_per_eu",
+                                             "vector_size_a",
+                                             "vector_size_b",
+                                             "vector_size_c",
+                                             "cshuffle_no_alias",
+                                             "acc_epilogue",
+                                             "lds_layout"};
+#define ROCKE_KNOB_KEY(f) k.insert(#f);
+        ROCKE_CONV_DGRAD_KNOB_FIELDS(ROCKE_KNOB_KEY, ROCKE_KNOB_KEY)
+#undef ROCKE_KNOB_KEY
+        return k;
+    }();
+    refuse_unknown_conv_keys(d, "conv_dgrad", known);
     return s;
 }
 
@@ -2371,6 +2519,31 @@ rocke_wgrad_reduce_spec_t conv_wgrad_reduce_build_spec(const py::dict& d,
         if(dict_str(d, "problem_short", v))
             s.problem_short = keep(v);
     }
+    /* The vector / looped fold knobs: dropped, a vec = 4 dict would build the
+     * scalar fold (covering a quarter of the vec grid's dW), a ws_bf16 one
+     * would read bf16 slabs as f32 and a rezero one would leave the scratch
+     * dirty while the launcher skips its clear. */
+#define ROCKE_KNOB_INT(f) s.f = dict_int(d, #f, s.f);
+#define ROCKE_KNOB_BOOL(f) s.f = dict_bool(d, #f, s.f);
+    ROCKE_CONV_WGRAD_REDUCE_KNOB_FIELDS(ROCKE_KNOB_INT, ROCKE_KNOB_BOOL)
+#undef ROCKE_KNOB_INT
+#undef ROCKE_KNOB_BOOL
+    static const std::unordered_set<std::string> known = [] {
+        std::unordered_set<std::string> k = {"tile_m",
+                                             "tile_n",
+                                             "wg_M",
+                                             "wg_N",
+                                             "groups",
+                                             "ws_replicas",
+                                             "dtype_d",
+                                             "name",
+                                             "problem_short"};
+#define ROCKE_KNOB_KEY(f) k.insert(#f);
+        ROCKE_CONV_WGRAD_REDUCE_KNOB_FIELDS(ROCKE_KNOB_KEY, ROCKE_KNOB_KEY)
+#undef ROCKE_KNOB_KEY
+        return k;
+    }();
+    refuse_unknown_conv_keys(d, "conv_wgrad_reduce", known);
     return s;
 }
 
@@ -2756,11 +2929,10 @@ void register_conv(py::module_& m)
         py::arg("spec"),
         py::arg("arch"),
         "C port of is_valid_dgrad_spec: (ok, reason), reason 'ok' when accepted.");
-    /* conv_wgrad_reduce is used by the byte-identity gate
-     * (platform/tools/check_byte_identity.py) and by external callers driving
-     * Stage 2 via the Python engine API directly.  The benchmark drives Stage 2
-     * via the Python instance layer (rocke.instances.common.conv_wgrad_workspace_reduce),
-     * not through this binding, so the registration may appear unused in that context. */
+    /* conv_wgrad_reduce serves external callers driving Stage 2 through the
+     * C++ engine; library/tests/test_conv_cpp_binding_knobs.py pins it to the
+     * Python engine. The benchmark builds Stage 2 through the Python
+     * kernels.common.conv_wgrad_workspace_reduce, not through this binding. */
     reg3("conv_wgrad_reduce",
          conv_wgrad_reduce_lower_llvm,
          conv_wgrad_reduce_serialize_ir,

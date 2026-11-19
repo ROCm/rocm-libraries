@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 /*
  * library/cpp/bindings/conv_knob_fields.hpp -- the K-loop / epilogue knob fields of the
- * implicit-GEMM conv specs (fwd, dgrad, wgrad) that the rocke_library_engine spec
- * builders read from the Python dict by name.
+ * implicit-GEMM conv specs (fwd, dgrad, wgrad) and of the wgrad Stage 2 fold that the
+ * rocke_library_engine spec builders read from the Python dict by name.
  *
  * Each list is an X-macro: X_INT(field) for an int field, X_BOOL(field) for a
  * bool field. The field name is the C struct member and the Python dataclass
@@ -140,5 +140,13 @@
     X_INT(xwin_kord)                                \
     X_INT(ws_lc)                                    \
     X_INT(ws_gred)
+
+/* WgradReduceSpec (the two-stage wgrad Stage 2 fold) knobs. */
+#define ROCKE_CONV_WGRAD_REDUCE_KNOB_FIELDS(X_INT, X_BOOL) \
+    X_INT(vec)                                             \
+    X_INT(rezero)                                          \
+    X_BOOL(ws_bf16)                                        \
+    X_INT(fold_loop)                                       \
+    X_INT(slab_par)
 
 #endif /* ROCKE_BINDINGS_CONV_KNOB_FIELDS_HPP */

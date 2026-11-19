@@ -9,6 +9,13 @@ the Python-dict path of the ``rocke_library_engine`` binding (what
 that together set every knob field the emitters exercise, the binding lowers
 the dataclass' dict to the Python engine's LLVM IR. A dict field the binding
 dropped would build the default kernel under the knob's name and fail here.
+
+The dgrad / wgrad / Stage 2 bindings also refuse a key they do not read, so a
+dataclass field added without a binding twin fails every case below rather
+than building the default kernel. A field the C++ spec cannot carry (a fused
+accumulator epilogue on wgrad, and on dgrad until its kernel name carries the
+epilogue tag; an explicit LDS layout object) is refused unless it is the
+default.
 """
 
 from __future__ import annotations
@@ -52,7 +59,11 @@ _FWD = (
     180,
 )
 _DGRAD = (1, 8, 34, 50, 52, 87, 101, 116, 127, 128, 129, 130)
-_WGRAD = (10, 17, 18, 20, 22, 33, 114, 117, 133, 139, 140, 141, 142)
+_WGRAD = (10, 17, 18, 20, 22, 33, 114, 117, 133, 139, 140, 141, 142, 143, 144)
+# Stage 2 fold configs that build: the scalar folds and the vector / looped
+# ones (vec, rezero, ws_bf16, fold_loop, slab_par); 16-21 both engines refuse.
+_REDUCE = tuple(range(16))
+_REDUCE_REFUSED = (16, 17, 18, 19, 20, 21)
 
 
 def _engine():
@@ -75,18 +86,38 @@ def _emitter_spec(module: str, idx: int):
 
 def _flat_dict(spec) -> dict:
     """A dgrad / wgrad dataclass as the flat dict the binding reads."""
+    from kernels.conv.engine_bridge import _conv_acc_epilogue_to_dict
+
     d = {
         f.name: getattr(spec, f.name)
         for f in dataclasses.fields(spec)
         if f.name not in ("problem", "data", "acc_epilogue", "lds_layout")
         and getattr(spec, f.name) is not None
     }
+    d["acc_epilogue"] = _conv_acc_epilogue_to_dict(spec.acc_epilogue)
     d["problem"] = {
         k: v for k, v in dataclasses.asdict(spec.problem).items() if v is not None
     }
     d["dtype_a"] = spec.data.dtype_a
     d["dtype_b"] = spec.data.dtype_b
     d["dtype_d"] = spec.data.dtype_d
+    return d
+
+
+def _reduce_dict(spec) -> dict:
+    """A WgradReduceSpec as the dict the conv_wgrad_reduce binding reads."""
+    from kernels.common.conv_wgrad_workspace_reduce import _wg_M, _wg_N
+
+    d = {
+        f.name: getattr(spec, f.name)
+        for f in dataclasses.fields(spec)
+        if f.name != "problem"
+    }
+    d.update(
+        wg_M=_wg_M(spec.problem),
+        wg_N=_wg_N(spec.problem),
+        problem_short=spec.problem.short(),
+    )
     return d
 
 
@@ -146,16 +177,88 @@ class TestConvBindingForwardsKnobs(unittest.TestCase):
     def test_wgrad(self):
         from kernels.common.conv_implicit_gemm_wgrad import (
             build_implicit_gemm_conv_wgrad,
+            is_valid_wgrad_spec,
         )
 
         eng = _engine()
         for idx in _WGRAD:
             spec, arch = _emitter_spec("conv_implicit_gemm_wgrad_emit", idx)
             with self.subTest(idx=idx):
+                d = _flat_dict(spec)
                 self.assertEqual(
-                    eng.conv_wgrad_lower_llvm(_flat_dict(spec), arch),
+                    tuple(eng.conv_wgrad_is_valid_spec(d, arch)),
+                    is_valid_wgrad_spec(spec, arch),
+                )
+                self.assertEqual(
+                    eng.conv_wgrad_lower_llvm(d, arch),
                     _python_ll(build_implicit_gemm_conv_wgrad, spec, arch),
                 )
+
+    def test_wgrad_reduce(self):
+        # The Stage 2 binding reads every fold knob: dropped, a vec=4 dict
+        # would build the scalar fold under the vector fold's grid.
+        from kernels.common.conv_wgrad_workspace_reduce import (
+            build_conv_wgrad_workspace_reduce,
+        )
+
+        eng = _engine()
+        for idx in _REDUCE:
+            if idx in _REDUCE_REFUSED:
+                continue
+            spec, arch = _emitter_spec("conv_wgrad_workspace_reduce_emit", idx)
+            with self.subTest(idx=idx):
+                self.assertEqual(
+                    eng.conv_wgrad_reduce_lower_llvm(_reduce_dict(spec), arch),
+                    _python_ll(build_conv_wgrad_workspace_reduce, spec, arch),
+                )
+        for idx in _REDUCE_REFUSED:
+            spec, arch = _emitter_spec("conv_wgrad_workspace_reduce_emit", idx)
+            with self.subTest(idx=idx):
+                with self.assertRaises(ValueError):
+                    build_conv_wgrad_workspace_reduce(spec, arch=arch)
+                with self.assertRaises(RuntimeError):
+                    eng.conv_wgrad_reduce_lower_llvm(_reduce_dict(spec), arch)
+
+    def test_refuses_a_key_it_does_not_read(self):
+        eng = _engine()
+        wg, warch = _emitter_spec("conv_implicit_gemm_wgrad_emit", 10)
+        dg, darch = _emitter_spec("conv_implicit_gemm_dgrad_emit", 91)
+        rd, rarch = _emitter_spec("conv_wgrad_workspace_reduce_emit", 9)
+        for call, d, arch in (
+            (eng.conv_wgrad_lower_llvm, _flat_dict(wg), warch),
+            (eng.conv_wgrad_is_valid_spec, _flat_dict(wg), warch),
+            (eng.conv_dgrad_lower_llvm, _flat_dict(dg), darch),
+            (eng.conv_dgrad_is_valid_spec, _flat_dict(dg), darch),
+            (eng.conv_wgrad_reduce_lower_llvm, _reduce_dict(rd), rarch),
+        ):
+            with self.subTest(call=call.__name__):
+                call(d, arch)
+                with self.assertRaisesRegex(ValueError, "no spec field 'bogus_knob'"):
+                    call(dict(d, bogus_knob=1), arch)
+
+    def test_refuses_a_fused_epilogue_it_cannot_carry(self):
+        # wgrad has no C++ epilogue twin; the C++ dgrad builder has one but
+        # its kernel name lacks the epilogue tag. The identity epilogue (what
+        # _flat_dict passes for every case above) is admitted.
+        from kernels.common._conv_implicit_gemm_common import (
+            ConvAccumulatorEpilogue,
+        )
+        from kernels.conv.engine_bridge import _conv_acc_epilogue_to_dict
+
+        eng = _engine()
+        relu = _conv_acc_epilogue_to_dict(ConvAccumulatorEpilogue(scale=2.0, relu=True))
+        wg, warch = _emitter_spec("conv_implicit_gemm_wgrad_emit", 0)
+        dg, darch = _emitter_spec("conv_implicit_gemm_dgrad_emit", 91)
+        for call, d, arch in (
+            (eng.conv_wgrad_lower_llvm, _flat_dict(wg), warch),
+            (eng.conv_dgrad_lower_llvm, _flat_dict(dg), darch),
+        ):
+            with self.subTest(call=call.__name__):
+                call(dict(d, acc_epilogue=None), arch)
+                with self.assertRaisesRegex(ValueError, "acc_epilogue"):
+                    call(dict(d, acc_epilogue=relu), arch)
+                with self.assertRaisesRegex(ValueError, "lds_layout"):
+                    call(dict(d, lds_layout="xor_swizzled"), arch)
 
     def test_3d_problem_without_is_3d_key(self):
         # dataclasses.asdict(ConvProblem) has no is_3d key: the depth fields
