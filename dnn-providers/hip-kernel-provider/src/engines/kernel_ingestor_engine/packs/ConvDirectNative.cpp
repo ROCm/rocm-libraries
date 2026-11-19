@@ -822,9 +822,11 @@ std::optional<Plan>
     plan.grid[2] = static_cast<unsigned int>(k2.splits);
     // XCD-local tile runs (halo tiles, one split): the XCD count of the device, and runs of two
     // blocks per compute unit of an XCD, the blocks it starts together.
-    k2.xcds = !config.rows && k2.splits == 1 && xcds > 1 ? xcds : 0;
-    k2.xcdRun
-        = k2.xcds > 1 ? static_cast<int>(std::max<int64_t>(1, 2 * computeUnits / k2.xcds)) : 0;
+    // Rows configs walk their tiles in per-XCD shares of the same count.
+    k2.xcds = (config.rows || k2.splits == 1) && xcds > 1 ? xcds : 0;
+    k2.xcdRun = k2.xcds > 1 && !config.rows
+                    ? static_cast<int>(std::max<int64_t>(1, 2 * computeUnits / k2.xcds))
+                    : 0;
     if(config.rows)
     {
         // One 1-D grid of at most one block per unit; the kernel walks the tiles.

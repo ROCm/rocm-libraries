@@ -1083,6 +1083,21 @@ TEST(TestConvDirectPlan, HaloTilesTakeXcdRunsOfTwoBlocksAComputeUnit)
     EXPECT_EQ(unknown->args.xcds, 0);
 }
 
+TEST(TestConvDirectPlan, RowsTilesWalkPerXcdShares)
+{
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.dataType = DataType::HALF;
+    shape.input = {32, 32};
+    auto fields = rowsFields();
+    fields.archs = "gfx942";
+    fields.atom = "mfma16_f16";
+    const auto plan = planOf(shape, fields, "HALF", 228, 6);
+    ASSERT_TRUE(plan.has_value());
+    EXPECT_EQ(plan->args.xcds, 6);
+    EXPECT_EQ(plan->args.xcdRun, 0);
+}
+
 TEST(TestConvDirectPlan, SplitGridsKeepTheLaunchOrder)
 {
     auto shape = baseShape();
