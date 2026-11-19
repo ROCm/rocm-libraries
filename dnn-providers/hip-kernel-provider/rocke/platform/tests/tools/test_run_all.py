@@ -10,6 +10,7 @@ default-on step needs its ``--no-...`` flag added to the argv lists below.
 import importlib.util
 import inspect
 import json
+import os
 from pathlib import Path
 import subprocess
 import shutil
@@ -215,7 +216,14 @@ def test_ctest_readiness_and_failure_propagation(
         assert "ctest: SKIPPED" in capsys.readouterr().out
 
 
-def test_gemm_gpu_runner_keeps_selected_package_from_other_checkout(runner, tmp_path):
+@pytest.mark.parametrize(
+    "python_path_roots",
+    [(), ("other", "selected"), ("selected", "other")],
+    ids=["cwd-only", "other-first", "selected-first"],
+)
+def test_gemm_gpu_runner_keeps_selected_package_from_other_checkout(
+    runner, tmp_path, python_path_roots
+):
     selected = tmp_path / "selected"
     tests = selected / "tests"
     tools = selected / "tools"
@@ -236,10 +244,17 @@ def test_gemm_gpu_runner_keeps_selected_package_from_other_checkout(runner, tmp_
         (package / "tests" / "universal_gemm_gpu_gate.py").write_text(
             f"print({marker!r})\n", encoding="utf-8"
         )
-    shutil.copy2(
-        runner.ROCKE / "python/rocke/tests/subprocess_launcher.py",
-        selected / "python/rocke/tests/subprocess_launcher.py",
-    )
+        # Both checkouts can launch a gate, so a wrong import could exit green.
+        shutil.copy2(
+            runner.ROCKE / "python/rocke/tests/subprocess_launcher.py",
+            package / "tests" / "subprocess_launcher.py",
+        )
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    if python_path_roots:
+        env["PYTHONPATH"] = os.pathsep.join(
+            str(tmp_path / root / "python") for root in python_path_roots
+        )
     result = subprocess.run(
         [
             sys.executable,
@@ -255,6 +270,7 @@ def test_gemm_gpu_runner_keeps_selected_package_from_other_checkout(runner, tmp_
             "gfx950",
         ],
         cwd=tmp_path / "other" / "python",
+        env=env,
         capture_output=True,
         text=True,
         check=True,

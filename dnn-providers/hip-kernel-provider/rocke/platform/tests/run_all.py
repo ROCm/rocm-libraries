@@ -41,11 +41,10 @@ ROCKE = Path(__file__).resolve().parents[1]  # tests -> rocKE
 TESTS = ROCKE / "tests"
 TOOLS = ROCKE / "tools"
 
-# Same sys.path bootstrap as tests/conftest.py, so the runner can read shared
-# constants (e.g. backend.CPP_UNPORTED_ARCHES) out of the package it is testing
-# instead of restating them here and letting the two drift.
-if str(ROCKE / "python") not in sys.path:
-    sys.path.insert(0, str(ROCKE / "python"))
+# Prefer the package beside this runner for shared constants and subprocess
+# launchers, even if a different checkout precedes it on PYTHONPATH.
+_source_python_root = str(ROCKE / "python")
+sys.path[:] = [_source_python_root, *(p for p in sys.path if p != _source_python_root)]
 # Source runs keep helpers under tools/. Installed tests stage the same helper
 # beside the arch-domain generator instead. Bootstrap the first complete home so
 # importing this runner by path never depends on another test's sys.path changes.
