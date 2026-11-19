@@ -332,10 +332,12 @@ def _main() -> None:
     args = parser.parse_args()
     if args.worker is not None:
         _worker(args.worker)
-    elif not math.isfinite(args.timeout) or args.timeout <= 0:
-        parser.error("timeout must be positive and finite")
-    else:
-        print(json.dumps(asdict(probe_torch_rocm(timeout=args.timeout)), indent=2))
+        return
+    try:
+        report = probe_torch_rocm(timeout=args.timeout)
+    except ValueError as exc:
+        parser.error(str(exc))
+    print(json.dumps(asdict(report), indent=2))
 
 
 if __name__ == "__main__":

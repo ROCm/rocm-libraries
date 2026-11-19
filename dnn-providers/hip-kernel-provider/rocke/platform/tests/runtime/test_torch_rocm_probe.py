@@ -207,6 +207,11 @@ def test_combined_hip_and_comgr_evidence(monkeypatch, hip, comgr):
             "torch_import_error",
             "dependency missing",
         ),
+        (
+            "import rocke_probe_missing_torch_dependency",
+            "torch_import_error",
+            "rocke_probe_missing_torch_dependency",
+        ),
         ("import os; os._exit(19)", "worker_error", "status 19"),
     ],
 )
@@ -232,6 +237,41 @@ def test_reports_native_crash(monkeypatch):
     assert result.worker_status == "crashed"
     assert "-11" in result.reason
     assert result.stderr == "native loader failure"
+
+
+@pytest.mark.parametrize("timeout", [0, -1, float("inf"), float("nan")])
+def test_invalid_timeout_is_rejected_before_observing_or_spawning(monkeypatch, timeout):
+    def unexpected(*args, **kwargs):
+        pytest.fail("invalid timeout must be rejected before inventory or spawning")
+
+    monkeypatch.setattr(probe, "_snapshot", unexpected)
+    monkeypatch.setattr(probe.subprocess, "run", unexpected)
+    with pytest.raises(ValueError, match="timeout must be positive and finite"):
+        probe.probe_torch_rocm(timeout=timeout)
+
+
+@pytest.mark.parametrize("timeout", ["30", "-1"])
+def test_module_cli(tmp_path, timeout):
+    (tmp_path / "torch.py").write_text("__version__ = 'cli fixture'\n", encoding="utf-8")
+    result = subprocess.run(
+        rocke_python_command("-m", "rocke.runtime.torch_rocm_probe", f"--timeout={timeout}"),
+        cwd=tmp_path,
+        env=rocke_subprocess_env(python_paths=[tmp_path]),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    if timeout == "-1":
+        assert result.returncode == 2
+        assert not result.stdout
+        assert "error: timeout must be positive and finite" in result.stderr
+        return
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["status"] == "inconclusive"
+    assert report["worker_status"] == "imported"
+    assert report["torch_version"] == "cli fixture"
 
 
 def test_bounds_subprocess_runtime(tmp_path, monkeypatch):
