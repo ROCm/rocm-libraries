@@ -27,6 +27,7 @@
 #include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include "KernelIngestorTestFixtures.hpp"
 
@@ -357,9 +358,9 @@ double firstL1Feature(const double* values, size_t count)
     return count == 0 ? 0.0 : values[0];
 }
 
-/// A descriptor-backed engine's `predict_engine` model answers only for the selector revision
-/// it was trained against, as on the opaque-engine path.
-TEST(TestIngestorGenericEngine, AnEngineModelAnswersOnlyForTheSelectorItWasTrainedAgainst)
+/// A descriptor-backed engine's `predict_engine` model trained against another selector
+/// revision is still used, with a warning, as on the opaque-engine path.
+TEST(TestIngestorGenericEngine, AnEngineModelForAnotherSelectorIsUsedWithAWarning)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
     constexpr const char* L1_SYMBOL = "hipdnn.kernel_ingestor.test.generic_engine.l1_cu_count";
@@ -402,12 +403,16 @@ TEST(TestIngestorGenericEngine, AnEngineModelAnswersOnlyForTheSelectorItWasTrain
     EXPECT_EQ(current.status, PredictionStatus::AVAILABLE) << current.reason;
     EXPECT_DOUBLE_EQ(current.value, 304.0);
 
-    // Wrong build, not a bad model: UNAVAILABLE, naming both revisions.
+    // Wrong build, not a bad model: still used, with one warning naming both revisions. The
+    // warning is once per process per (engine, metric, arch), so only this test asserts it.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const auto stale = evaluate("selector-old");
-    EXPECT_EQ(stale.status, PredictionStatus::UNAVAILABLE);
-    EXPECT_NE(stale.reason.find("selector-old"), std::string::npos) << stale.reason;
-    EXPECT_NE(stale.reason.find("selector-new"), std::string::npos) << stale.reason;
-    EXPECT_DOUBLE_EQ(stale.value, 0.0);
+    EXPECT_EQ(stale.status, PredictionStatus::AVAILABLE) << stale.reason;
+    EXPECT_DOUBLE_EQ(stale.value, 304.0);
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_WARN, "was trained against selector-old, engine reports selector-new"))
+        << recorder.getRecordedLogsAsString();
 
     // Nothing to compare against is a contract failure, as on the opaque-engine path.
     const auto unrecorded = evaluate("");
@@ -1188,9 +1193,11 @@ TEST(TestIngestorGenericEngine, UnslottedGoldenDefaultSelectorRevisionIsTheUedId
     const auto current = evaluate(expected);
     EXPECT_EQ(current.status, PredictionStatus::AVAILABLE) << current.reason;
 
+    // Another revision is still used; the warning is asserted by
+    // AnEngineModelForAnotherSelectorIsUsedWithAWarning.
     const auto stale = evaluate("selector-old");
-    EXPECT_EQ(stale.status, PredictionStatus::UNAVAILABLE);
-    EXPECT_NE(stale.reason.find(", engine reports " + expected), std::string::npos) << stale.reason;
+    EXPECT_EQ(stale.status, PredictionStatus::AVAILABLE) << stale.reason;
+    EXPECT_EQ(stale.value, current.value);
 
     hipdnn_plugin_sdk::uhd::NativeScorerRegistry::unregisterSymbol(L1_SYMBOL);
 }

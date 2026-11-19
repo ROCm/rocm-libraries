@@ -38,8 +38,9 @@ namespace
 
 /// `hip-kernel-provider/hip-mlops/<digest>`: a configure-time digest of everything that
 /// decides which kernel a graph gets and the code it runs (HipMlopsSelectorRevision.cmake).
-/// A deployed L1 model must record this exact string as `trained_against.selector_revision`
-/// (RFC 0019 §4.1) or the loader refuses it.
+/// A deployed L1 model records this string as `trained_against.selector_revision` (RFC 0019
+/// §4.1); one recording another is used with a warning, and the shipped-model test fails
+/// the build.
 #ifndef HKP_HIP_MLOPS_REVISION
 // Without a digest, report a revision no shipped model can match.
 #define HKP_HIP_MLOPS_REVISION "undetermined"
@@ -87,6 +88,13 @@ void bindDeclaredL1Models(hipdnn_plugin_sdk::uhd::EngineModelBinding& binding)
         for(const auto& [arch, refusal] : byArch)
         {
             binding.markUnusable(metric, arch, refusal.status, refusal.reason);
+        }
+    }
+    for(const auto& [metric, byArch] : resolved.stale)
+    {
+        for(const auto& [arch, reason] : byArch)
+        {
+            binding.markStale(metric, arch, reason);
         }
     }
 }

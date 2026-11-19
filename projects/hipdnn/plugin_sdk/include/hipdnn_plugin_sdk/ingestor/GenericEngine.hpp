@@ -20,6 +20,7 @@
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginTypeTraits.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
@@ -132,8 +133,10 @@ public:
         }
         // RFC 0019 §3.1: the UED role map is this engine's L1 binding, keyed by each UHD's metric.
         // §4.1 selector_revision is re-checked here because this engine's selector also covers
-        // its rankers, packs, kernels and native symbols; an L1 model measured against another
-        // selector changes which engine is chosen.
+        // its rankers, packs, kernels and native symbols. A model measured against another
+        // selector is still bound, with a warning: an estimate for slightly changed code ranks
+        // engines better than none, and the provider's build-time gate keeps shipped models
+        // current.
         for(const auto& [metric, byArch] : predictions)
         {
             for(const auto& [arch, descriptor] : byArch)
@@ -148,19 +151,20 @@ public:
                                 "model records no trained_against.selector_revision, so it "
                                 "cannot be matched to a provider build");
                 }
-                else if(descriptor.trainedAgainstSelectorRevision != _selectorRevision)
-                {
-                    refuseModel(metric,
-                                arch,
-                                descriptor,
-                                hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE,
-                                "model was trained against "
-                                    + descriptor.trainedAgainstSelectorRevision
-                                    + ", engine reports " + _selectorRevision);
-                }
                 else
                 {
                     _binding.bind(metric, arch, UhdKernelHeuristic::configFrom(descriptor));
+                    if(descriptor.trainedAgainstSelectorRevision != _selectorRevision)
+                    {
+                        _binding.markStale(
+                            metric,
+                            arch,
+                            "model=" + toString(descriptor.id) + " was trained against "
+                                + descriptor.trainedAgainstSelectorRevision + ", engine reports "
+                                + _selectorRevision + " (set " + SELECTOR_DUMP_DIR_ENV
+                                + " to write this build's selector and compare "
+                                  "it with the training build's)");
+                    }
                 }
             }
         }
@@ -324,7 +328,10 @@ public:
                                        arch,
                                        features,
                                        evaluate && kind == HIPDNN_ENGINE_PREDICTION_ENGINE);
-        reportRefusal(metric, arch);
+        if(result.status != hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::AVAILABLE)
+        {
+            reportRefusal(metric, arch);
+        }
         if(!result.binding_json.empty())
         {
             auto binding = nlohmann::json::parse(result.binding_json);
@@ -393,14 +400,30 @@ private:
         _binding.markUnusable(metric, arch, status, reason);
     }
 
-    /// Logs why the model for (@p metric, @p arch) was refused, once per process, when a
-    /// request on that architecture meets it: selection then ranks this engine in static order
-    /// without saying so. Not at construction, where every other architecture's model in the
-    /// set (each trained against its own architecture's selector) would be reported too.
+    /// Logs why the model serving (@p metric, device @p arch) was refused, once per process,
+    /// when a request on that architecture meets it: selection then ranks this engine in static
+    /// order without saying so. Not at construction, where every other architecture's model in
+    /// the set (each trained against its own architecture's selector) would be reported too.
+    /// @param arch The device `gcnArchName`; refusals are keyed as declared (`default` or a
+    ///             prefix), so the most specific matching key is the one reported.
     void reportRefusal(const std::string& metric, const std::string& arch) const
     {
-        const auto refusal = _refusals.find({metric, arch});
-        if(refusal == _refusals.end())
+        const std::string* refusal = nullptr;
+        std::string matched;
+        for(const auto& [key, reason] : _refusals)
+        {
+            const auto& target = key.second;
+            if(key.first == metric
+               && ((target == "default" && matched.empty())
+                   || (target != "default" && archMatches(arch, target, ArchMatchMode::PREFIX)
+                       && (matched.empty() || matched == "default"
+                           || target.size() > matched.size()))))
+            {
+                refusal = &reason;
+                matched = target;
+            }
+        }
+        if(refusal == nullptr)
         {
             return;
         }
@@ -408,14 +431,14 @@ private:
         static std::set<std::string> s_logged;
         {
             const std::lock_guard<std::mutex> lock(s_mutex);
-            if(!s_logged.insert(_engine.name + '\n' + metric + '\n' + arch).second)
+            if(!s_logged.insert(_engine.name + '\n' + metric + '\n' + matched).second)
             {
                 return;
             }
         }
         HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '"
-                                << _engine.name << "' metric='" << metric << "' arch='" << arch
-                                << "' engine-prediction " << refusal->second
+                                << _engine.name << "' metric='" << metric << "' arch='" << matched
+                                << "' engine-prediction " << *refusal
                                 << "; the engine is ranked without an estimate. Set "
                                 << SELECTOR_DUMP_DIR_ENV
                                 << " to write this build's selector and compare it with the "
