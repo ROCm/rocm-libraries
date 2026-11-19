@@ -102,8 +102,10 @@ namespace rocsparse
         if(buffer_size == nullptr)
         {
             ROCSPARSE_CHECKARG_POINTER(5, temp_buffer);
+            // The count goes to the host-side descriptor, whatever the handle's pointer mode.
             if(mat_B->format == rocsparse_format_coo)
             {
+                I nnz;
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::nnz_impl(handle,
                                                               rocsparse_direction_row,
                                                               mat_A->order,
@@ -113,11 +115,14 @@ namespace rocsparse
                                                               (const T*)mat_A->const_values,
                                                               mat_A->ld,
                                                               (I*)temp_buffer,
-                                                              (I*)&mat_B->nnz));
+                                                              &nnz,
+                                                              rocsparse_pointer_mode_host));
+                mat_B->nnz = nnz;
                 return rocsparse_status_success;
             }
             else if(mat_B->format == rocsparse_format_csr)
             {
+                I nnz;
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::nnz_impl(handle,
                                                               rocsparse_direction_row,
                                                               mat_A->order,
@@ -127,11 +132,14 @@ namespace rocsparse
                                                               (const T*)mat_A->const_values,
                                                               mat_A->ld,
                                                               (I*)temp_buffer,
-                                                              (I*)&mat_B->nnz));
+                                                              &nnz,
+                                                              rocsparse_pointer_mode_host));
+                mat_B->nnz = nnz;
                 return rocsparse_status_success;
             }
             else if(mat_B->format == rocsparse_format_csc)
             {
+                I nnz;
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::nnz_impl(handle,
                                                               rocsparse_direction_column,
                                                               mat_A->order,
@@ -141,7 +149,9 @@ namespace rocsparse
                                                               (const T*)mat_A->const_values,
                                                               mat_A->ld,
                                                               (I*)temp_buffer,
-                                                              (I*)&mat_B->nnz));
+                                                              &nnz,
+                                                              rocsparse_pointer_mode_host));
+                mat_B->nnz = nnz;
                 return rocsparse_status_success;
             }
             else if(mat_B->format == rocsparse_format_bell)
