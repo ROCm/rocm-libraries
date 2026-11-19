@@ -13,10 +13,16 @@ from __future__ import annotations
 import unittest
 
 from rocke.run_manifest import register_manifest_runner, registered_manifest_kinds
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
-# Every kind the pre-registry branch chain handled. Losing one of these is a
-# silent loss of the ability to run an already-emitted manifest, so the list is
-# spelled out rather than derived.
+# Every kind the pre-registry branch chain handled, plus the ones added since.
+# Losing one of these is a silent loss of the ability to run an already-emitted
+# manifest, so the list is spelled out rather than derived. Equality rather than
+# a subset check: a kind appearing here unannounced means two families are now
+# both claiming to own one buffer layout, which is as much a bug as a loss.
 _CHAIN_KINDS = frozenset(
     {
         "batched_gemm_fp16",
@@ -27,6 +33,7 @@ _CHAIN_KINDS = frozenset(
         "deep_fused_conv_pool_i8i4",
         "elementwise_fp16",
         "gemm_fp16",
+        "gemm_fp8",
         "gemm_iu8",
         "layernorm_fp16",
         "matmul_nbits_fp16",
@@ -74,33 +81,27 @@ class TestRunnerRegistry(unittest.TestCase):
         self.assertIn("gemm_fp16", registered_manifest_kinds())
 
     def test_running_a_manifest_does_not_require_the_dispatcher(self):
-        # Most manifest workflows never touch dispatch: ten of the fourteen
-        # registered kinds have no candidate at all (gemm_iu8, matmul_nbits,
-        # the deep-fused conv pools, the simple ops...), and the examples that
+        # Most manifest workflows never touch dispatch: eleven of the fifteen
+        # registered kinds have no candidate at all (gemm_fp8, gemm_iu8,
+        # matmul_nbits, the deep-fused conv pools, the simple ops...), and the
+        # examples that
         # emit them build a spec, compile, and shell out to this module. If
         # `bind` ever became a precondition rather than one more registerable
         # adapter, those all break. Importing dispatch here is the first step
         # down that road, so fail on it directly.
-        import os
         import subprocess
-        import sys
 
         probe = (
             "import rocke.run_manifest, sys; "
             "leaked = sorted(m for m in sys.modules if m.startswith('rocke.dispatch')); "
             "print(leaked)"
         )
-        # A fresh interpreter inherits the environment but not the sys.path this
-        # suite arranges, so hand that down. Without it `import rocke` fails in a
-        # checkout and the probe reports an import error rather than a leak.
-        env = dict(os.environ)
-        env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
         out = subprocess.run(
-            [sys.executable, "-c", probe],
+            rocke_python_command("-c", probe),
             capture_output=True,
             text=True,
             check=True,
-            env=env,
+            env=rocke_subprocess_env(),
         )
         self.assertEqual(
             out.stdout.strip(), "[]", "run_manifest must not pull in dispatch"
@@ -145,6 +146,52 @@ class TestRunnerRegistry(unittest.TestCase):
         message = str(ctx.exception)
         self.assertIn("no_such_kind", message)
         self.assertIn("gemm_fp16", message)
+        self.assertIn("runner_module", message)
+
+    def test_runner_module_is_imported_before_kind_lookup(self):
+        import json
+        import sys
+        import tempfile
+        from pathlib import Path
+
+        from rocke.run_manifest import resolve_manifest_runner
+        from rocke import run_manifest as rm
+
+        kind = "kda_test_only_kind"
+        self.assertNotIn(kind, rm.registered_manifest_kinds())
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "ck_test_kda_runner.py").write_text(
+                "from rocke.run_manifest import register_manifest_runner\n"
+                "def _builder(manifest, shape, verify):\n"
+                "    raise AssertionError('not called')\n"
+                "register_manifest_runner('kda_test_only_kind', _builder)\n"
+            )
+            sys.path.insert(0, tmp)
+            try:
+                builder = resolve_manifest_runner(
+                    {
+                        "kind": kind,
+                        "runner_module": "ck_test_kda_runner",
+                    }
+                )
+                self.assertEqual(builder.__name__, "_builder")
+                self.assertIn(kind, rm.registered_manifest_kinds())
+            finally:
+                sys.path.remove(tmp)
+                rm._RUNNERS.pop(kind, None)
+                sys.modules.pop("ck_test_kda_runner", None)
+
+    def test_missing_runner_module_is_an_import_error(self):
+        from rocke.run_manifest import resolve_manifest_runner
+
+        with self.assertRaises(ImportError):
+            resolve_manifest_runner(
+                {
+                    "kind": "no_such_kind",
+                    "runner_module": "ck_test_no_such_runner_module",
+                }
+            )
 
 
 if __name__ == "__main__":

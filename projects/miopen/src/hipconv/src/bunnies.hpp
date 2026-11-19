@@ -1,5 +1,8 @@
 #pragma once
 
+#include "packed_ops.h"
+#include "tensor_view.hpp"
+
 #include <hip/hip_bf16.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
@@ -7,6 +10,7 @@
 #include <array>
 #include <concepts>
 #include <functional>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -15,6 +19,9 @@ namespace bunnies
 
 using int16x4   = __attribute__((ext_vector_type(4))) int16_t;
 using int32x2   = __attribute__((ext_vector_type(2))) int32_t;
+using int32x4   = __attribute__((ext_vector_type(4))) int32_t;
+using int32x8   = __attribute__((ext_vector_type(8))) int32_t;
+using int32x16  = __attribute__((ext_vector_type(16))) int32_t;
 using uint32x2  = __attribute__((ext_vector_type(2))) uint32_t;
 using uint32x3  = __attribute__((ext_vector_type(3))) uint32_t;
 using uint32x4  = __attribute__((ext_vector_type(4))) uint32_t;
@@ -82,18 +89,29 @@ constexpr auto test(uint32_t flags, wmma_flag flag) -> bool
 
 enum class fpfmt : int
 {
-    e11m52 = 0x400, // fp64
-    e8m23  = 0x200, // fp32
-    e5m10  = 0x100, // fp16
-    e8m7   = 0x101, // bf16
-    e4m3   = 0x80,  // fp8
-    e5m2   = 0x81,  // bf8
-    e2m3   = 0x60,  // fp6
-    e3m2   = 0x61,  // bf6
-    e2m1   = 0x40,  // fp4
+    e11m52            = 0x400, // fp64
+    e8m23             = 0x200, // fp32
+    e8m10             = 0x201, // tf32
+    e8m10_e8m7x2split = 0x202, // bf16x2
+    e5m10             = 0x100, // fp16
+    e8m7              = 0x101, // bf16
+    e4m3              = 0x80,  // fp8
+    e5m2              = 0x81,  // bf8
+    e2m3              = 0x60,  // fp6
+    e3m2              = 0x61,  // bf6
+    e2m1              = 0x40,  // fp4
     // scale layouts (unsigned)
     ue8m0 = 0x1080,
 };
+// The bunnies format of DT's values; tf32 maps to e8m10 although stored as fp32.
+template <hipconv::DataType DT>
+constexpr fpfmt fpfmt_of = DT == hipconv::DataType::fp16   ? fpfmt::e5m10
+                           : DT == hipconv::DataType::bf16 ? fpfmt::e8m7
+                           : DT == hipconv::DataType::tf32 ? fpfmt::e8m10
+                           : DT == hipconv::DataType::fp32 ? fpfmt::e8m23
+                           : DT == hipconv::DataType::fp8  ? fpfmt::e4m3
+                                                           : fpfmt::e5m2;
+
 constexpr auto bits_per_item(fpfmt f)
 {
     return (static_cast<int>(f) >> 4) & 0xFF;
@@ -120,6 +138,7 @@ template <fpfmt Fmt> constexpr bool is_8bit_scale = is_wide_scale<Fmt, 8>;
 template <fpfmt Fmt> struct base_storage_type { using type = uint32_t; };
 template <> struct base_storage_type<fpfmt::e11m52> { using type = double; };
 template <> struct base_storage_type<fpfmt::e8m23> { using type = float; };
+template <> struct base_storage_type<fpfmt::e8m10> { using type = float; };
 template <> struct base_storage_type<fpfmt::e5m10> { using type = _Float16; };
 template <> struct base_storage_type<fpfmt::e8m7> { using type = __bf16; };
 template <> struct base_storage_type<fpfmt::ue8m0> { using type = int; };
@@ -161,13 +180,14 @@ constexpr auto next_power_of_two(T x) -> T
 }
 
 template <typename F, int... Is>
-__device__ constexpr void static_unroll(std::integer_sequence<int, Is...> trips, F&& f)
+__device__ __forceinline__ constexpr void static_unroll(std::integer_sequence<int, Is...> trips,
+                                                        F&& f)
 {
     (f(std::integral_constant<int, Is>()), ...);
 }
 
 template <int TripCount, typename F>
-__device__ constexpr void static_unroll(F&& f)
+__device__ __forceinline__ constexpr void static_unroll(F&& f)
 {
     static_unroll(std::make_integer_sequence<int, TripCount>{}, std::forward<F>(f));
 }
@@ -250,200 +270,11 @@ inline __device__ void tile_cast(Dest& dest, Src const& src)
     }
 }
 
-///////////////////////////
-///////// Memref //////////
-///////////////////////////
-
-template <typename IdxT = int>
-struct slice
-{
-    IdxT offset = 0, size = 0;
-};
-
-namespace detail
-{
-template <typename IdxT>
-__device__ auto offset(IdxT i)
-{
-    return i;
-}
-template <typename IdxT>
-__device__ auto offset(slice<IdxT> i)
-{
-    return i.offset;
-}
-template <typename IdxT>
-__device__ auto size(IdxT i)
-{
-    return 0;
-}
-template <typename IdxT>
-__device__ auto size(slice<IdxT> i)
-{
-    return i.size;
-}
-} // namespace detail
-
-template <int Dim, typename IdxT = int, typename OffsetT = IdxT>
-struct tensor_view
-{
-    static constexpr int dim = Dim;
-    using tuple_t            = std::array<IdxT, Dim>;
-
-    OffsetT offset;
-    std::array<IdxT, Dim> shape, stride;
-
-    __device__ auto delta(std::array<IdxT, Dim> const& idx) const -> IdxT
-    {
-        IdxT p = 0;
-#pragma unroll
-        for(int i = 0; i < Dim; ++i)
-        {
-            p += idx[i] * stride[i];
-        }
-        return p;
-    }
-    template <std::integral... I>
-    __device__ auto delta(I... idx) const -> IdxT
-    {
-        static_assert(sizeof...(I) == Dim);
-
-        std::array<IdxT, Dim> offsets = {static_cast<IdxT>(idx)...};
-        return delta(offsets);
-    }
-    __device__ auto operator()(std::array<IdxT, Dim> const& idx) const -> OffsetT
-    {
-        return offset + delta(idx);
-    }
-    template <std::integral... I>
-    __device__ auto operator()(I... idx) const -> OffsetT
-    {
-        return offset + delta(std::forward<I>(idx)...);
-    }
-
-    // Checks whether a multi-index is within bounds; does not check whether index is negative
-    __device__ auto in_bounds(std::array<IdxT, Dim> const& idx) const -> bool
-    {
-        bool ok = true;
-#pragma unroll
-        for(int i = 0; i < Dim; ++i)
-        {
-            ok = ok && idx[i] < shape[i];
-        }
-        return ok;
-    }
-    template <std::integral... I>
-    __device__ auto in_bounds(I... idx) const -> bool
-    {
-        std::array<IdxT, Dim> offsets = {static_cast<IdxT>(idx)...};
-        return in_bounds(offsets);
-    }
-    // Checks whether a multi-index is within bounds; checks that indices are non-negative
-    __device__ auto in_bounds_maybe_negative(std::array<IdxT, Dim> const& idx) const -> bool
-    {
-        bool ok = true;
-#pragma unroll
-        for(int i = 0; i < Dim; ++i)
-        {
-            ok = ok && idx[i] >= 0 && idx[i] < shape[i];
-        }
-        return ok;
-    }
-    template <std::integral... I>
-    __device__ auto in_bounds_maybe_negative(I... idx) const -> bool
-    {
-        std::array<IdxT, Dim> offsets = {static_cast<IdxT>(idx)...};
-        return in_bounds_maybe_negative(offsets);
-    }
-
-    template <typename... I>
-    __device__ auto subview(I&&... idx_or_slice) const
-    {
-        static_assert(sizeof...(I) == Dim);
-        static_assert(((std::is_same_v<std::decay_t<I>, IdxT> ||
-                        std::is_same_v<std::decay_t<I>, slice<IdxT>>) &&
-                       ...));
-
-        constexpr int SubDim = (static_cast<int>(std::is_same_v<I, slice<IdxT>>) + ...);
-
-        std::array<IdxT, Dim> offsets  = {detail::offset(idx_or_slice)...};
-        std::array<bool, Dim> is_slice = {std::is_same_v<I, slice<IdxT>>...};
-
-        OffsetT suboffset = offset;
-        std::array<IdxT, SubDim> subshape, substride;
-        int j = 0;
-#pragma unroll
-        for(int i = 0; i < Dim; ++i)
-        {
-            suboffset += offsets[i] * stride[i];
-            if(is_slice[i])
-            {
-                subshape[j]  = shape[i];
-                substride[j] = stride[i];
-                ++j;
-            }
-        }
-        return tensor_view<SubDim, IdxT, OffsetT>(suboffset, subshape, substride);
-    }
-};
-
-template <int Dim, typename T, typename IdxT = int>
-using memref = tensor_view<Dim, IdxT, T*>;
-
-template <int Dim, typename IdxT = int, typename OffsetT = IdxT>
-__device__ auto
-make_view(OffsetT offset, std::array<IdxT, Dim> const& shape, std::array<IdxT, Dim> const& stride)
-{
-    return tensor_view<Dim, IdxT, OffsetT>{offset, shape, stride};
-}
-
-template <int Dim, typename IdxT = int, typename OffsetT = IdxT>
-__device__ auto make_view_col_major(std::array<IdxT, Dim> const& shape)
-{
-    std::array<IdxT, Dim> stride;
-    stride[0] = 1;
-    for(int mode = 0; mode < Dim - 1; ++mode)
-    {
-        stride[mode + 1] = stride[mode] * shape[mode];
-    }
-    return tensor_view<Dim, IdxT, OffsetT>{0, shape, stride};
-}
-
-template <int Dim, typename IdxT = int, typename OffsetT = IdxT>
-__device__ auto make_view_row_major(std::array<IdxT, Dim> const& shape)
-{
-    std::array<IdxT, Dim> stride;
-    stride[Dim - 1] = 1;
-    for(int mode = Dim - 1; mode > 0; --mode)
-    {
-        stride[mode - 1] = stride[mode] * shape[mode];
-    }
-    return tensor_view<Dim, IdxT, OffsetT>{0, shape, stride};
-}
-
-template <int Dim, typename T, typename IdxT = int>
-__device__ auto
-make_memref(T* ptr, std::array<IdxT, Dim> const& shape, std::array<IdxT, Dim> const& stride)
-{
-    return make_view<Dim, IdxT, T*>(ptr, shape, stride);
-}
-
-template <int Dim, typename T, typename IdxT = int>
-__device__ auto make_memref_col_major(std::array<IdxT, Dim> const& shape)
-{
-    return make_view_col_major<Dim, IdxT, T*>(shape);
-}
-
-template <int Dim, typename T, typename IdxT = int>
-__device__ auto make_memref_row_major(std::array<IdxT, Dim> const& shape)
-{
-    return make_view_row_major<Dim, IdxT, T*>(shape);
-}
 
 ///////////////////////////
 ///////// Actions /////////
 ///////////////////////////
-//
+
 __device__ __forceinline__ auto lane_id() -> int
 {
     return threadIdx.x % warpSize;
@@ -454,8 +285,60 @@ __device__ __forceinline__ auto wave_id() -> int
     return __builtin_amdgcn_readfirstlane(threadIdx.x / warpSize);
 }
 
+// Lane index within the wave, from mbcnt so v0 (threadIdx.x) can die; LICM cannot hoist the asm.
+__device__ __forceinline__ auto volatile_lane_id() -> int
+{
+    int result;
+    asm volatile("v_mbcnt_lo_u32_b32 %0, -1, 0\n\t"
+                 "v_mbcnt_hi_u32_b32 %0, -1, %0"
+                 : "=v"(result));
+    return result;
+}
+
+// Whether pin_sgpr pins. Its asm takes an SGPR, which holds a value only where the compiler proves
+// it uniform: at -O0 values are reloaded from the stack, which is per lane, and where lambdas stay
+// out of line, at -Oz or under -fno-inline, their arguments are VGPRs and what they capture lives
+// on the stack. -Os defines the same macros as -Oz.
+#if defined(__OPTIMIZE__) && !defined(__OPTIMIZE_SIZE__) && !defined(__NO_INLINE__)
+constexpr bool enable_pin_sgpr = true;
+#else
+constexpr bool enable_pin_sgpr = false;
+#endif
+
+// x in an SGPR; LICM cannot hoist the asm or what is computed from it. Without enable_pin_sgpr it
+// returns x as is.
+template <class T>
+__device__ __forceinline__ auto pin_sgpr(T x) -> T
+{
+    if constexpr(enable_pin_sgpr)
+        asm volatile("" : "+s"(x));
+    return x;
+}
+
+// x in a VGPR; LICM cannot hoist the asm or what is computed from it.
+template <class T>
+__device__ __forceinline__ auto pin_vgpr(T x) -> T
+{
+    asm volatile("" : "+v"(x));
+    return x;
+}
+
+// Keeps the instructions that write a's and b's blocks ahead of this point.
+//
+// One asm statement per pair of blocks: a separate asm for each tile's block raised VGPR use and
+// scratch.
+template <reg_tile_concept RegTile>
+__device__ __forceinline__ void pin(RegTile& a, RegTile& b)
+{
+#pragma unroll
+    for(int mb = 0; mb < RegTile::row_blocks; ++mb)
+#pragma unroll
+        for(int nb = 0; nb < RegTile::col_blocks; ++nb)
+            asm volatile("" : "+v"(a.block(mb, nb).data), "+v"(b.block(mb, nb).data));
+}
+
 template <int num_rounds, int num_waves, typename F>
-__device__ void wave_distribute(int wave, F&& f)
+__device__ constexpr void wave_distribute(int wave, F&& f)
 {
     constexpr int num_rounds_per_wave = num_rounds / num_waves;
     constexpr int remainder_rounds    = num_rounds - num_rounds_per_wave * num_waves;
@@ -742,17 +625,38 @@ __device__ __forceinline__ void global_store(T* global_ptr, RegTile& rt, VOffset
     }
 }
 
+// One plane's storage vector: `.data`, or `.big` / `.small` of a split matrix.
+template <bool Small, typename Block>
+__device__ auto* block_storage(Block& block)
+{
+    if constexpr(requires { block.data; })
+        return &block.data;
+    else if constexpr(Small)
+        return &block.small;
+    else
+        return &block.big;
+}
+
 // Drives a tiled register load: for each block/round it maps the lane's element
 // to a (row,col) coord, asks `map` for the source offset, and issues LoadInst.
 // Address-space-agnostic (the LoadInst + `base` pointer decide LDS vs global),
 // so despite historical usage it is not LDS-specific.
-template <typename LoadInst, reg_tile_concept RegTile, typename MemT, typename Map>
+// `Plane` and `Small` load one plane of a split tile: Plane is the 16-bit matrix the plane is read
+// as, `Small` the member it fills. By default the tile loads as its own matrix.
+template <typename LoadInst,
+          typename Plane = void,
+          bool Small     = false,
+          reg_tile_concept RegTile,
+          typename MemT,
+          typename Map>
 __device__ void load_tile(RegTile& rt, MemT* base, Map&& map)
 {
+    using matrix = std::conditional_t<std::is_void_v<Plane>, typename RegTile::matrix, Plane>;
+
     using ld_t                        = typename LoadInst::type;
-    constexpr int bpi                 = bits_per_item(RegTile::matrix::fmt);
+    constexpr int bpi                 = bits_per_item(matrix::fmt);
     constexpr int num_items_per_round = LoadInst::bits_per_load / bpi;
-    constexpr int num_rounds          = RegTile::matrix::num_items / num_items_per_round;
+    constexpr int num_rounds          = matrix::num_items / num_items_per_round;
     const int lane                    = lane_id();
 #pragma unroll
     for(int mb = 0; mb < RegTile::row_blocks; ++mb)
@@ -764,10 +668,11 @@ __device__ void load_tile(RegTile& rt, MemT* base, Map&& map)
             for(int rnd = 0; rnd < num_rounds; ++rnd)
             {
                 const auto laneitem = LoadInst::map(lane, rnd * num_items_per_round, bpi);
-                const auto coord    = RegTile::matrix::map(laneitem);
+                const auto coord    = matrix::map(laneitem);
                 const int offset    = map(mb, nb, coord[0], coord[1]);
                 LoadInst::load(base + offset,
-                               reinterpret_cast<ld_t*>(&rt.block(mb, nb).data) + rnd);
+                               reinterpret_cast<ld_t*>(block_storage<Small>(rt.block(mb, nb))) +
+                                   rnd);
             }
         }
     }
@@ -813,14 +718,20 @@ __device__ void load_sparse(RegTile& rt, MemT* ptr_base, Map&& map, NonZeroMap&&
     }
 }
 
-template <typename StoreInst, reg_tile_concept RegTile, typename MemT, typename Map>
-__device__ void store_tile(RegTile& rt, MemT* base, Map&& map)
+// store_tile's body, with the lane from lane_of().
+// Calling lane_id inside keeps its range [0, 64) known where store_tile_lane is not inlined.
+template <typename StoreInst,
+          reg_tile_concept RegTile,
+          typename MemT,
+          typename Map,
+          typename LaneOf>
+__device__ void store_tile_lane(RegTile& rt, MemT* base, Map&& map, LaneOf&& lane_of)
 {
     using st_t                        = typename StoreInst::type;
     constexpr int bpi                 = bits_per_item(RegTile::matrix::fmt);
     constexpr int num_items_per_round = StoreInst::bits_per_store / bpi;
     constexpr int num_rounds          = RegTile::matrix::num_items / num_items_per_round;
-    const int lane                    = lane_id();
+    const int lane                    = lane_of();
 #pragma unroll
     for(int mb = 0; mb < RegTile::row_blocks; ++mb)
     {
@@ -838,6 +749,20 @@ __device__ void store_tile(RegTile& rt, MemT* base, Map&& map)
             }
         }
     }
+}
+
+template <typename StoreInst, reg_tile_concept RegTile, typename MemT, typename Map>
+__device__ __forceinline__ void store_tile(RegTile& rt, MemT* base, Map&& map)
+{
+    store_tile_lane<StoreInst>(rt, base, std::forward<Map>(map), [] { return lane_id(); });
+}
+
+// lane is a parameter so a caller can pass volatile_lane_id, which keeps LICM from hoisting the
+// addresses.
+template <typename StoreInst, reg_tile_concept RegTile, typename MemT, typename Map>
+__device__ __forceinline__ void store_tile(RegTile& rt, MemT* base, Map&& map, int lane)
+{
+    store_tile_lane<StoreInst>(rt, base, std::forward<Map>(map), [lane] { return lane; });
 }
 
 // Prefetch MxN matrix stored in row-major format, i.e. address calculation is m * stride + n

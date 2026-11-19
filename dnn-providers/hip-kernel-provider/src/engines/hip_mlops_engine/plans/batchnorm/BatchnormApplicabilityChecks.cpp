@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 
 #include "BatchnormApplicabilityChecks.hpp"
 #include "core/Utils.hpp"
@@ -32,6 +33,18 @@ void BatchnormValidator::validateSpatialDimensions(const std::vector<int64_t>& i
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "The product of the batch size and spatial dimensions must be greater than 1 for "
             "batchnorm.");
+    }
+}
+
+void BatchnormValidator::validateDimensionCount(size_t numDims)
+{
+    constexpr size_t MIN_SUPPORTED_DIMS = 3;
+    constexpr size_t MAX_SUPPORTED_DIMS = 5;
+
+    if(numDims < MIN_SUPPORTED_DIMS || numDims > MAX_SUPPORTED_DIMS)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Only 3D, 4D or 5D tensors supported.");
     }
 }
 
@@ -162,6 +175,10 @@ void BatchnormValidator::checkTensorShapesSupported(const std::vector<int64_t>& 
 
     validateConsistentShapes(
         ioTensorIds, ioDims, "All IO tensors for batchnorm must have the same shape.");
+    validateElementCountFitsUint32(
+        ioDims,
+        "Batchnorm kernels size and index tensors with 32-bit unsigned arithmetic; the IO "
+        "tensor has too many elements.");
 
     // Check that scale and bias tensors must have the same shape
     if(!affineTensorIds.empty())
@@ -303,6 +320,18 @@ void BatchnormValidator::checkInferenceTensorConfigSupported(
         = {bnInfAttr.mean_tensor_uid(), bnInfAttr.inv_variance_tensor_uid()};
 
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, false);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.x_tensor_uid()).data_type();
+    auto yDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.y_tensor_uid()).data_type();
+    if(xDataType != yDataType && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm inference requires that x and y are the same type or that y is of type "
+            "float");
+    }
 }
 
 void BatchnormValidator::checkInferenceVarianceExtTensorConfigSupported(
@@ -314,7 +343,21 @@ void BatchnormValidator::checkInferenceVarianceExtTensorConfigSupported(
     const std::vector<int64_t> statTensorIds
         = {bnInfAttr.mean_tensor_uid(), bnInfAttr.variance_tensor_uid()};
 
+    checkEpsilonSupported(bnInfAttr.epsilon_tensor_uid());
+
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, false);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.x_tensor_uid()).data_type();
+    auto yDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.y_tensor_uid()).data_type();
+    if(xDataType != yDataType && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm inference requires that x and y are the same type or that y is of type "
+            "float");
+    }
 }
 
 void BatchnormValidator::checkInferenceActivationTensorConfigSupported(
@@ -333,6 +376,18 @@ void BatchnormValidator::checkInferenceActivationTensorConfigSupported(
 
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, false);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.x_tensor_uid()).data_type();
+    auto yDataType
+        = core::utils::findTensorAttributes(_tensorMap, actAttr.out_0_tensor_uid()).data_type();
+    if(xDataType != yDataType && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm inference requires that x and y are the same type or that y is of type "
+            "float");
+    }
 }
 
 void BatchnormValidator::checkInferenceVarianceExtActivationTensorConfigSupported(
@@ -346,12 +401,114 @@ void BatchnormValidator::checkInferenceVarianceExtActivationTensorConfigSupporte
         = {bnInfAttr.scale_tensor_uid(), bnInfAttr.bias_tensor_uid()};
     const std::vector<int64_t> statTensorIds
         = {bnInfAttr.mean_tensor_uid(), bnInfAttr.variance_tensor_uid()};
+
+    checkEpsilonSupported(bnInfAttr.epsilon_tensor_uid());
     const std::vector<int64_t> intermediateTensorIds
         = {bnInfAttr.y_tensor_uid(), actAttr.in_0_tensor_uid()};
 
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, false);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.x_tensor_uid()).data_type();
+    auto yDataType
+        = core::utils::findTensorAttributes(_tensorMap, actAttr.out_0_tensor_uid()).data_type();
+    if(xDataType != yDataType && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm inference requires that x and y are the same type or that y is of type "
+            "float");
+    }
 }
+
+namespace
+{
+using BatchnormAttrs = hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes;
+
+// The training plan updates running statistics only when all five operands are
+// present; any other combination would drop them silently.
+void checkRunningStatsComplete(const BatchnormAttrs& bnAttr)
+{
+    const int present = static_cast<int>(bnAttr.prev_running_mean_tensor_uid().has_value())
+                        + static_cast<int>(bnAttr.prev_running_variance_tensor_uid().has_value())
+                        + static_cast<int>(bnAttr.momentum_tensor_uid().has_value())
+                        + static_cast<int>(bnAttr.next_running_mean_tensor_uid().has_value())
+                        + static_cast<int>(bnAttr.next_running_variance_tensor_uid().has_value());
+    if(present != 0 && present != 5)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm forward training requires prev_running_mean, prev_running_variance, "
+            "momentum, next_running_mean and next_running_variance together or not at all.");
+    }
+}
+
+// When the plan updates running statistics it reads prev and writes next with the saved-statistic
+// layout, so the four statistic operands are validated like the saved ones (FLOAT, packed, the
+// shape derived from the IO tensor); momentum is resolved as a scalar operand at plan build.
+void addRunningStats(
+    const BatchnormAttrs& bnAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    std::vector<int64_t>& statTensorIds)
+{
+    if(!bnAttr.prev_running_mean_tensor_uid().has_value())
+    {
+        return;
+    }
+    statTensorIds.push_back(bnAttr.prev_running_mean_tensor_uid().value());
+    statTensorIds.push_back(bnAttr.prev_running_variance_tensor_uid().value());
+    statTensorIds.push_back(bnAttr.next_running_mean_tensor_uid().value());
+    statTensorIds.push_back(bnAttr.next_running_variance_tensor_uid().value());
+    hipdnn_plugin_sdk::makeScalarOperand(
+        tensorMap, bnAttr.momentum_tensor_uid().value(), "Momentum");
+}
+
+// The plan writes saved statistics only when both saved mean and saved inv_variance
+// are present, so exactly one of them would never be written.
+void checkSavedStatsPair(const BatchnormAttrs& bnAttr)
+{
+    if(bnAttr.mean_tensor_uid().has_value() != bnAttr.inv_variance_tensor_uid().has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm forward training requires saved mean and saved inv_variance together or "
+            "not at all.");
+    }
+}
+} // namespace
+
+namespace batchnorm
+{
+
+bool hasUnrequestedSavedPair(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    if(!bnAttr.mean_tensor_uid().has_value() || !bnAttr.inv_variance_tensor_uid().has_value())
+    {
+        return false;
+    }
+
+    if(bnAttr.prev_running_mean_tensor_uid().has_value()
+       || bnAttr.prev_running_variance_tensor_uid().has_value()
+       || bnAttr.next_running_mean_tensor_uid().has_value()
+       || bnAttr.next_running_variance_tensor_uid().has_value()
+       || bnAttr.momentum_tensor_uid().has_value())
+    {
+        return false;
+    }
+
+    return core::utils::findTensorAttributes(tensorMap, bnAttr.mean_tensor_uid().value()).virtual_()
+           && core::utils::findTensorAttributes(tensorMap, bnAttr.inv_variance_tensor_uid().value())
+                  .virtual_();
+}
+
+} // namespace batchnorm
 
 void BatchnormValidator::checkFwdTrainingTensorConfigSupported(
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr)
@@ -363,20 +520,44 @@ void BatchnormValidator::checkFwdTrainingTensorConfigSupported(
             "Batchnorm forward training does not support peer statistics");
     }
 
+    checkRunningStatsComplete(bnAttr);
+    checkSavedStatsPair(bnAttr);
+    checkEpsilonSupported(bnAttr.epsilon_tensor_uid());
+
     const std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), bnAttr.y_tensor_uid()};
     const std::vector<int64_t> affineTensorIds
         = {bnAttr.scale_tensor_uid(), bnAttr.bias_tensor_uid()};
+    // A saved pair that is virtual in both tensors is not requested: the plan never reads or
+    // writes it, so the role-specific checks skip it.
+    const bool unrequestedSavedPair = batchnorm::hasUnrequestedSavedPair(bnAttr, _tensorMap);
     std::vector<int64_t> statTensorIds;
-    if(bnAttr.mean_tensor_uid().has_value())
+    if(!unrequestedSavedPair)
     {
-        statTensorIds.push_back(bnAttr.mean_tensor_uid().value());
-    }
-    if(bnAttr.inv_variance_tensor_uid().has_value())
-    {
-        statTensorIds.push_back(bnAttr.inv_variance_tensor_uid().value());
+        if(bnAttr.mean_tensor_uid().has_value())
+        {
+            statTensorIds.push_back(bnAttr.mean_tensor_uid().value());
+        }
+        if(bnAttr.inv_variance_tensor_uid().has_value())
+        {
+            statTensorIds.push_back(bnAttr.inv_variance_tensor_uid().value());
+        }
     }
 
+    addRunningStats(bnAttr, _tensorMap, statTensorIds);
+
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, true);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnAttr.x_tensor_uid()).data_type();
+    auto yDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnAttr.y_tensor_uid()).data_type();
+    if(xDataType != yDataType && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm forward training requires that x and y are the same type or that y is of "
+            "type float");
+    }
 }
 
 void BatchnormValidator::checkFwdTrainingActivationTensorConfigSupported(
@@ -391,6 +572,10 @@ void BatchnormValidator::checkFwdTrainingActivationTensorConfigSupported(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm forward training does not support peer statistics");
     }
+
+    checkRunningStatsComplete(bnAttr);
+    checkSavedStatsPair(bnAttr);
+    checkEpsilonSupported(bnAttr.epsilon_tensor_uid());
 
     const std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), actAttr.out_0_tensor_uid()};
     const std::vector<int64_t> affineTensorIds
@@ -407,8 +592,22 @@ void BatchnormValidator::checkFwdTrainingActivationTensorConfigSupported(
     const std::vector<int64_t> intermediateTensorIds
         = {bnAttr.y_tensor_uid(), actAttr.in_0_tensor_uid()};
 
+    addRunningStats(bnAttr, _tensorMap, statTensorIds);
+
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, true);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnAttr.x_tensor_uid()).data_type();
+    auto yDataType
+        = core::utils::findTensorAttributes(_tensorMap, actAttr.out_0_tensor_uid()).data_type();
+    if(xDataType != yDataType && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm forward training requires that x and y are the same type or that y is of "
+            "type float");
+    }
 }
 
 void BatchnormValidator::checkBwdTensorConfigSupported(
@@ -435,6 +634,27 @@ void BatchnormValidator::checkBwdTensorConfigSupported(
     }
 
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, true);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.x_tensor_uid()).data_type();
+    auto dyDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.dy_tensor_uid()).data_type();
+    auto dxDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.dx_tensor_uid()).data_type();
+    if(xDataType != dxDataType)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm backward requires that x and dx are the same type");
+    }
+    if(xDataType != dyDataType
+       && dyDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm backward requires that x and dy are the same type or that dy is of type "
+            "float");
+    }
 }
 
 void BatchnormValidator::checkBwdActivationTensorConfigSupported(
@@ -481,52 +701,41 @@ void BatchnormValidator::checkBwdActivationTensorConfigSupported(
 
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, true);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.x_tensor_uid()).data_type();
+    auto dyDataType
+        = core::utils::findTensorAttributes(_tensorMap, actAttr.in_0_tensor_uid()).data_type();
+    auto dxDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.dx_tensor_uid()).data_type();
+    if(xDataType != dxDataType)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm backward requires that x and dx are the same type");
+    }
+    if(xDataType != dyDataType
+       && dyDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm backward requires that x and dy are the same type or that dy is of type "
+            "float");
+    }
 }
 
 // --- Activation Mode Validators ---
 
-namespace
-{
-
-void checkActivationModeSupported(
-    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activAttr, bool isBwd)
-{
-    // hip-kernel-provider batchnorm supports: PASSTHRU, RELU, CLIPPEDRELU, CLAMP (no Leaky ReLU)
-
-    if(activAttr.operation() == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY)
-    {
-        return;
-    }
-
-    if(activAttr.operation()
-       == (isBwd ? hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD
-                 : hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD))
-    {
-        if(!activAttr.relu_lower_clip_slope())
-        {
-            return;
-        }
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm fused activation does not support Leaky ReLU.");
-    }
-
-    throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Unsupported activation mode for batchnorm fusion.");
-}
-
-} // namespace
-
 void BatchnormValidator::checkFwdActivationModeSupported(
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activAttr)
 {
-    checkActivationModeSupported(activAttr, false);
+    checkNormalizationActivationModeSupported(activAttr, false, "Batchnorm");
 }
 
 void BatchnormValidator::checkBwdActivationModeSupported(
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activAttr)
 {
-    checkActivationModeSupported(activAttr, true);
+    checkNormalizationActivationModeSupported(activAttr, true, "Batchnorm");
 }
 
 } // namespace hip_kernel_provider

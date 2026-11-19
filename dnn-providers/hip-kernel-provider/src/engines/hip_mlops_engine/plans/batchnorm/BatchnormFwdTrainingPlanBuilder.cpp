@@ -10,6 +10,8 @@
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormApplicabilityChecks.hpp"
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormFwdTrainingPlan.hpp"
 
+using namespace hip_kernel_provider::core::utils;
+
 namespace hip_kernel_provider::batchnorm
 {
 
@@ -23,6 +25,8 @@ bool isNodeActivFwd(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttribu
     // Check if operation is supported for batchnorm fusion
     switch(attr.operation())
     {
+    case PointwiseMode::IDENTITY:
+        return true;
     case PointwiseMode::RELU_FWD:
         break; // Continue to parameter validation
     default:
@@ -158,8 +162,10 @@ void checkTensorVirtuality1Node(
             "Batchnorm training tensors must be non-virtual for 1-node graph");
     }
 
-    // Optional mean/variance tensors must be non-virtual if present
-    if(bnAttr.mean_tensor_uid().has_value())
+    // Optional mean/variance tensors must be non-virtual if present, except a saved pair that is
+    // virtual in both tensors, which is not requested.
+    const bool unrequestedSavedPair = hasUnrequestedSavedPair(bnAttr, tensorMap);
+    if(!unrequestedSavedPair && bnAttr.mean_tensor_uid().has_value())
     {
         const auto& bnTensorMean
             = findTensorAttributes(tensorMap, bnAttr.mean_tensor_uid().value());
@@ -170,7 +176,7 @@ void checkTensorVirtuality1Node(
         }
     }
 
-    if(bnAttr.inv_variance_tensor_uid().has_value())
+    if(!unrequestedSavedPair && bnAttr.inv_variance_tensor_uid().has_value())
     {
         const auto& bnTensorInvVar
             = findTensorAttributes(tensorMap, bnAttr.inv_variance_tensor_uid().value());
@@ -362,12 +368,10 @@ void BatchnormFwdTrainingPlanBuilder::buildPlan(
     else if(opGraph.nodeCount() == 2)
     {
         // Batchnorm training + activation fusion
-        const auto& bnAttr
-            = opGraph.getNodeWrapper(0)
-                  .attributesAs<hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes>();
-        const auto& activAttr
-            = opGraph.getNodeWrapper(1)
-                  .attributesAs<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>();
+        const auto& bnAttr = checkBatchnormNode(opGraph.getNodeWrapper(0));
+        const auto& activAttr = checkActivationNode(opGraph.getNodeWrapper(1), bnAttr);
+        BatchnormValidator validator(opGraph.getTensorMap());
+        validator.checkFwdTrainingActivationTensorConfigSupported(bnAttr, activAttr);
 
         BatchnormFwdTrainingParams params(bnAttr, activAttr, opGraph.getTensorMap());
         auto plan = std::make_unique<BatchnormFwdTrainingPlan>(std::move(params));

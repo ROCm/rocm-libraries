@@ -570,8 +570,8 @@ static void check_dense_to_sparse(rocsparse_handle     handle,
                                              offsets.ptr,
                                              nullptr,
                                              nullptr,
-                                             it_of<int32_t>(),
-                                             it_of<int32_t>(),
+                                             it_of<rocsparse_int>(),
+                                             it_of<rocsparse_int>(),
                                              base,
                                              dt_of<T>()),
                   rocsparse_status_success);
@@ -585,17 +585,18 @@ static void check_dense_to_sparse(rocsparse_handle     handle,
                                              offsets.ptr,
                                              nullptr,
                                              nullptr,
-                                             it_of<int32_t>(),
-                                             it_of<int32_t>(),
+                                             it_of<rocsparse_int>(),
+                                             it_of<rocsparse_int>(),
                                              base,
                                              dt_of<T>()),
                   rocsparse_status_success);
     }
     else
     {
-        ASSERT_EQ(rocsparse_create_coo_descr(
-                      &sp, m, n, 0, nullptr, nullptr, nullptr, it_of<int32_t>(), base, dt_of<T>()),
-                  rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_create_coo_descr(
+                &sp, m, n, 0, nullptr, nullptr, nullptr, it_of<rocsparse_int>(), base, dt_of<T>()),
+            rocsparse_status_success);
     }
 
     // Stage 1: query buffer size.
@@ -780,8 +781,8 @@ namespace
                                           row_ptr.ptr,
                                           col_ind.ptr,
                                           val.ptr,
-                                          rocsparse_indextype_i32,
-                                          rocsparse_indextype_i32,
+                                          it_of<rocsparse_int>(),
+                                          it_of<rocsparse_int>(),
                                           rocsparse_index_base_zero,
                                           rocsparse_datatype_f32_r);
     }
@@ -842,7 +843,7 @@ TEST_F(ConversionSparseToSparse, csr_to_coo)
                                          coo_row.ptr,
                                          coo_col.ptr,
                                          coo_val.ptr,
-                                         rocsparse_indextype_i32,
+                                         it_of<rocsparse_int>(),
                                          rocsparse_index_base_zero,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);
@@ -873,7 +874,7 @@ TEST_F(ConversionSparseToSparse, coo_to_csr)
                                          coo_row.ptr,
                                          coo_col.ptr,
                                          coo_val.ptr,
-                                         rocsparse_indextype_i32,
+                                         it_of<rocsparse_int>(),
                                          rocsparse_index_base_zero,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);
@@ -906,8 +907,8 @@ TEST_F(ConversionSparseToSparse, csr_to_csc)
                                          csc_col_ptr.ptr,
                                          csc_row_ind.ptr,
                                          csc_val.ptr,
-                                         rocsparse_indextype_i32,
-                                         rocsparse_indextype_i32,
+                                         it_of<rocsparse_int>(),
+                                         it_of<rocsparse_int>(),
                                          rocsparse_index_base_zero,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);
@@ -938,7 +939,7 @@ TEST_F(ConversionSparseToSparse, invalid_args)
                                          coo_row.ptr,
                                          coo_col.ptr,
                                          coo_val.ptr,
-                                         rocsparse_indextype_i32,
+                                         it_of<rocsparse_int>(),
                                          rocsparse_index_base_zero,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);
@@ -1062,8 +1063,8 @@ namespace
                                                  offsets.ptr,
                                                  nullptr,
                                                  nullptr,
-                                                 it_of<int32_t>(),
-                                                 it_of<int32_t>(),
+                                                 it_of<rocsparse_int>(),
+                                                 it_of<rocsparse_int>(),
                                                  base,
                                                  dt_of<T>()),
                       rocsparse_status_success);
@@ -1077,8 +1078,8 @@ namespace
                                                  offsets.ptr,
                                                  nullptr,
                                                  nullptr,
-                                                 it_of<int32_t>(),
-                                                 it_of<int32_t>(),
+                                                 it_of<rocsparse_int>(),
+                                                 it_of<rocsparse_int>(),
                                                  base,
                                                  dt_of<T>()),
                       rocsparse_status_success);
@@ -1199,7 +1200,7 @@ TEST_F(ConversionSparseToSparse, batched_source_create)
                                          coo_row.ptr,
                                          coo_col.ptr,
                                          coo_val.ptr,
-                                         rocsparse_indextype_i32,
+                                         it_of<rocsparse_int>(),
                                          rocsparse_index_base_zero,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);

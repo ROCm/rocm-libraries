@@ -508,6 +508,24 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeMX_ScaleA_DramTileDistribution()
     {
+#if defined(CK_USE_GFX1250) && CK_TILE_USE_WMMA
+        using Shape                       = typename Problem::BlockGemmShape;
+        using Warps                       = typename Shape::BlockWarps;
+        constexpr index_t MWarps          = Warps::at(I0);
+        constexpr index_t NWarps          = Warps::at(I1);
+        constexpr index_t WarpM           = Shape::WarpTile::at(I0);
+        constexpr index_t MRepeat         = Shape::kM / (MWarps * WarpM);
+        constexpr index_t ReplicatedLanes = get_warp_size() / WarpM;
+        // Match the packed M/N iteration order of the async block GEMM.
+        return make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<NWarps, ReplicatedLanes>,
+                tuple<sequence<MWarps, MRepeat, WarpM>, sequence<Shape::kK / 128, 1>>,
+                tuple<sequence<1, 0>, sequence<0, 1>>,
+                tuple<sequence<0, 0>, sequence<1, 2>>,
+                sequence<1, 2, 2>,
+                sequence<1, 0, 1>>{});
+#else
         using BlockGemmShape = typename Problem::BlockGemmShape;
         using BlockWarps     = typename BlockGemmShape::BlockWarps;
         using WarpTile       = typename BlockGemmShape::WarpTile;
@@ -543,11 +561,30 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
                                        tuple<sequence<0, 0>, sequence<1, 2>>,
                                        sequence<2, 1, 2>,
                                        sequence<0, 1, 2>>{});
+#endif
     }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeMX_ScaleB_DramTileDistribution()
     {
+#if defined(CK_USE_GFX1250) && CK_TILE_USE_WMMA
+        using Shape                       = typename Problem::BlockGemmShape;
+        using Warps                       = typename Shape::BlockWarps;
+        constexpr index_t MWarps          = Warps::at(I0);
+        constexpr index_t NWarps          = Warps::at(I1);
+        constexpr index_t WarpN           = Shape::WarpTile::at(I1);
+        constexpr index_t NRepeat         = Shape::kN / (NWarps * WarpN);
+        constexpr index_t ReplicatedLanes = get_warp_size() / WarpN;
+        // Match the packed M/N iteration order of the async block GEMM.
+        return make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<MWarps, ReplicatedLanes>,
+                tuple<sequence<NWarps, NRepeat, WarpN>, sequence<Shape::kK / 128, 1>>,
+                tuple<sequence<0, 1>, sequence<0, 1>>,
+                tuple<sequence<0, 0>, sequence<1, 2>>,
+                sequence<1, 2, 2>,
+                sequence<1, 0, 1>>{});
+#else
         using BlockGemmShape = typename Problem::BlockGemmShape;
         using BlockWarps     = typename BlockGemmShape::BlockWarps;
         using WarpTile       = typename BlockGemmShape::WarpTile;
@@ -583,6 +620,7 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
                                        tuple<sequence<0, 0>, sequence<1, 2>>,
                                        sequence<2, 1, 2>,
                                        sequence<0, 1, 2>>{});
+#endif
     }
 
     template <typename Problem>
@@ -620,10 +658,18 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         return make_tuple(number<AccVGPRNum>{}, number<TotalInputVGPRNum>{});
     }
 
-    // this function is used to get SubTile Number
+    // K sub-tile count: the register estimate's request, rounded up to a divisor of the number of
+    // warp GEMMs in the K tile
     template <typename Problem>
     CK_TILE_DEVICE static constexpr auto GetPipelineSubTileNum()
     {
+        constexpr index_t KPerBlock        = Problem::BlockGemmShape::kK;
+        constexpr index_t KPerTile         = Problem::BlockGemmShape::WarpTile::at(Base::I2);
+        constexpr index_t max_sub_tile_num = KPerBlock / KPerTile;
+        // Protects the sub-tile split: a K tile shorter than one warp tile has no warp GEMMs.
+        static_assert(max_sub_tile_num > 0,
+                      "Async pipelines: KPerBlock must be at least WarpTile::K.");
+
         constexpr auto estimated_vgpr = GetEstimatedVgprCount<Problem>();
 
         constexpr auto acc_vgpr_num   = estimated_vgpr.at(number<0>{});
@@ -636,7 +682,10 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
                                              ? 2
                                              : 4;
 
-        return number<sub_tile_num>{};
+        // The LDS GEMM windows (KPerBlock / count long) and, with EnableSubTile, the block GEMM
+        // use the count, so it must divide the number of warp GEMMs in the K tile
+        // (max_sub_tile_num).
+        return number<Base::GetDividingSubTileNum(sub_tile_num, max_sub_tile_num)>{};
     }
 
     template <typename Problem, bool IsScale = false>

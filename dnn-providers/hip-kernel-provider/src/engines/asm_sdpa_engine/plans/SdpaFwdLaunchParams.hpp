@@ -5,8 +5,8 @@
 
 #include "SdpaFwdParams.hpp"
 
-#include <algorithm>
 #include <cstdint>
+#include <string>
 
 namespace asm_sdpa_engine
 {
@@ -20,10 +20,34 @@ struct SdpaFwdLaunchParams
     uint32_t tuneOpt;
 };
 
-// Ports AITER's forward grid math. Causal masks halve the Q-tile grid via
-// ceiling division; the kernel load-balances the full Q range onto the
-// surviving workgroups. The hd192x128/gfx942 path swaps gridDimX/Y, uses
-// blockDimX=256, and forces tuneOpt=0.
+// Threads per block the forward kernel is launched with: hd192x128 kernels use
+// 4 wavefronts (256 threads) on all architectures, as does the group-mode bf16
+// hd256/gfx950 kernel; the others use 8 wavefronts (512 threads).
+// SdpaFwdPlanBuilder checks this value against the resolved kernel's
+// max_flat_workgroup_size, so it is the only place the block is chosen.
+inline unsigned int fwdBlockDimX(const std::string& arch,
+                                 unsigned int headDimQk,
+                                 unsigned int headDimV,
+                                 bool isBf16,
+                                 bool isGroupMode)
+{
+    const bool isHd192x128 = headDimQk == 192U && headDimV == 128U;
+    const bool isHd256Bf16Gfx950Group
+        = arch == "gfx950" && headDimQk == 256U && isBf16 && isGroupMode;
+    return (isHd192x128 || isHd256Bf16Gfx950Group) ? 256U : 512U;
+}
+
+// Ports AITER's forward grid math (get_grid_dim, mha_fwd.cu). Batch mode sets
+// gridDimX = ceil(Q-tiles / tgDiv) (causal masks set tgDiv=2, halving the grid),
+// gridDimY = nhead, gridDimZ = batch. Two flat overrides follow AITER's order:
+// hd192x128/gfx942 lays out gridDimX = nhead / gridDimY = full Q-tiles (no tgDiv)
+// with tuneOpt=0; group (ragged) mode then remaps to
+// gridDimX = nhead / gridDimY = batch / gridDimZ = ceil(Q-tiles / tgDiv). hipDNN's
+// group tensors are logical [B, H, S, D] with batch carried by gridDimY, so Q-tiles
+// come from the per-batch seqLen S (not a packed total_q); per-batch ragged offsets
+// locate each batch's tokens. The hd192x128 kernel uses 256-wide blocks on all
+// architectures. The gfx950 bf16 hd256 kernel never merges causal Q-tiles (tgDiv=1)
+// and uses 256-wide blocks in group mode.
 inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
 {
     SdpaFwdLaunchParams lp{};
@@ -33,14 +57,20 @@ inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
         return lp; // zero guard — matches bwd KernelTiles::gridDim() pattern
     }
 
-    const bool isHd192x128Gfx942
-        = params.headDimQk == 192 && params.headDimV == 128 && params.archString == "gfx942";
+    const bool isGfx942 = params.archString == "gfx942";
+    const bool isGroupMode = params.group.has_value();
+    const bool isHd192x128 = params.headDimQk == 192 && params.headDimV == 128;
+    const bool isHd192x128Gfx942 = isHd192x128 && isGfx942;
+    // inBytesPerElement is 2 only for bf16 inputs (1 for fp8).
+    const bool isBf16 = params.inBytesPerElement == 2U;
+    const bool isHd256Bf16Gfx950
+        = params.archString == "gfx950" && params.headDimQk == 256 && isBf16;
     const bool masked = params.maskType != plan_utils::MaskType::NO_MASK;
 
     // tune_opt: default 5; downgrade to 3 when masked and either nhead is
     // not 8-aligned or seqLen exceeds 16K; override 0 for hd192x128/gfx942.
     uint32_t tuneOpt = 5;
-    if(masked && ((params.numHeadsQ % 8 != 0) || (params.seqLenQ > 16384)))
+    if(masked && ((params.numHeadsQ % 8 != 0) || (params.seqLenQ > 16384U)))
     {
         tuneOpt = 3;
     }
@@ -50,33 +80,46 @@ inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
     }
     lp.tuneOpt = tuneOpt;
 
-    // gridDimX = ceil(seqLenQ / tileSizeQo)
-    unsigned int gridDimX = (params.seqLenQ + params.tileSizeQo - 1U) / params.tileSizeQo;
-
-    // Halve the causal Q-tile grid; ceiling division keeps a single tile at 1.
-    // hd192x128/gfx942 is excluded (its swap path never halves).
-    // TODO: port AITER's group-mode gdz remap when group mode lands.
-    if(masked && !isHd192x128Gfx942)
+    // tgDiv=2 merges the causal head/tail Q-tiles onto shared workgroups; the
+    // group hd192x128/gfx942 and the bf16 hd256/gfx950 kernels keep them separate
+    // (tgDiv=1).
+    unsigned int tgDiv = masked ? 2U : 1U;
+    if((isGfx942 && isGroupMode && isHd192x128) || isHd256Bf16Gfx950)
     {
-        gridDimX = (gridDimX + 1U) / 2U;
+        tgDiv = 1U;
     }
 
-    unsigned int gridDimY = params.numHeadsQ;
+    // Group mode: hipDNN's S_q is the maximum per-batch Q length, so every batch gets
+    // ceil(S_q / tileSizeQo) tiles and the kernel reads each batch's real length from the
+    // ptr_qseq offsets. Precondition, not checked: S_q >= max_b(offset[b+1] - offset[b]).
+    // An understated S_q launches too few tiles and silently leaves the tail rows of the
+    // longer batches unwritten. Checking it would need a device-to-host copy of the offset
+    // tensor and a stream sync before every launch, so it stays a caller contract.
+    const unsigned int qTiles = (params.seqLenQ + params.tileSizeQo - 1U) / params.tileSizeQo;
 
-    // hd192x128/gfx942: swap X/Y and use 256-wide blocks.
+    unsigned int gdx = (qTiles + tgDiv - 1U) / tgDiv;
+    unsigned int gdy = params.numHeadsQ;
+    unsigned int gdz = params.batchSize;
+
     if(isHd192x128Gfx942)
     {
-        std::swap(gridDimX, gridDimY);
-        lp.blockDimX = 256;
+        gdx = params.numHeadsQ;
+        gdy = qTiles; // full tile count, no tgDiv
+        gdz = params.batchSize;
     }
-    else
+    if(isGroupMode)
     {
-        lp.blockDimX = 512;
+        gdx = params.numHeadsQ;
+        gdy = params.batchSize;
+        gdz = (qTiles + tgDiv - 1U) / tgDiv;
     }
 
-    lp.gridDimX = gridDimX;
-    lp.gridDimY = gridDimY;
-    lp.gridDimZ = params.batchSize;
+    lp.gridDimX = gdx;
+    lp.gridDimY = gdy;
+    lp.gridDimZ = gdz;
+
+    lp.blockDimX
+        = fwdBlockDimX(params.archString, params.headDimQk, params.headDimV, isBf16, isGroupMode);
 
     return lp;
 }

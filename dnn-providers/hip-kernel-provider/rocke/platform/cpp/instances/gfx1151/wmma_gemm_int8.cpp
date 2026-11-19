@@ -133,8 +133,15 @@ bool rocke_wmma_gemm_int8_is_valid_spec(const rocke_wmma_gemm_int8_spec_t* spec,
      * Operands are int8 in memory but dequantized to f16 before the MMA, so the
      * *compute* atom we gate on is the fp16 WMMA 16x16x16 one.
      * op_for_shape returns NULL when the shape/dtype combo is absent. */
-    if(rocke_archtarget_op_for_shape(
-           target, "wmma", "fp16", "fp16", "fp32", ROCKE_WMMA_M, ROCKE_WMMA_N, ROCKE_WMMA_K)
+    if(rocke_archtarget_op_for_shape(target,
+                                     "wmma",
+                                     "fp16",
+                                     "fp16",
+                                     "fp32",
+                                     ROCKE_WMMA_M,
+                                     ROCKE_WMMA_N,
+                                     ROCKE_WMMA_K,
+                                     nullptr)
        == NULL)
     {
         snprintf(buf,
@@ -386,7 +393,7 @@ rocke_kernel_def_t* rocke_build_wmma_gemm_int8(rocke_ir_builder_t* b,
             /* idx = b.add(b.mul(out_row, N), out_col) */
             idx = rocke_b_add(b, rocke_b_mul(b, out_row, Nparam), out_col);
             /* b.global_store(C, idx, h) */
-            rocke_b_global_store(b, C, idx, h, /*align=*/-1);
+            rocke_b_global_store(b, C, idx, h, /*align=*/0);
         }
 
         /* return b.kernel -- no explicit cf.return (added at lowering); matches Python IR. */

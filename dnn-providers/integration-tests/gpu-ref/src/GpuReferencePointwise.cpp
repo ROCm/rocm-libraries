@@ -1,16 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
-#include "hipdnn-gpu-ref/detail/GpuRefHelpers.hpp"
 #include <cstring>
 #include <hipdnn-gpu-ref/GpuReferencePointwise.hpp>
 
-#include <hipdnn-gpu-ref/detail/GpuRefHipError.hpp>
+#include <hipdnn-gpu-ref/detail/GpuRefHelpers.hpp>
 #include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
+#include <hipdnn-gpu-ref/detail/GpuRefLaunch.hpp>
 
 #include <cstdint>
 #include <functional>
 #include <hip/hip_runtime.h>
-#include <limits>
 #include <numeric>
 #include <stdexcept>
 #include <string>
@@ -23,37 +22,6 @@ namespace
 
 // Shared argument and stride structs — single definition used by both host and device (HipRTC).
 #include <GpuRefPointwiseArgs.h> // NOLINT(misc-include-cleaner)
-
-void launchKernel(hipFunction_t function, int64_t numBlocks, void* argsPtr, size_t argsSize)
-{
-    detail::assertValidGridSize(numBlocks, 1, 1);
-    if(numBlocks > static_cast<int64_t>(std::numeric_limits<unsigned>::max()))
-    {
-        throw std::runtime_error("Grid size exceeds hipModuleLaunchKernel limit");
-    }
-
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
-    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
-                      argsPtr,
-                      HIP_LAUNCH_PARAM_BUFFER_SIZE,
-                      &argsSize,
-                      HIP_LAUNCH_PARAM_END};
-
-    detail::throwOnHipError(hipModuleLaunchKernel(function,
-                                                  static_cast<unsigned int>(numBlocks),
-                                                  1,
-                                                  1,
-                                                  GpuReferencePointwise::BLOCK_SIZE,
-                                                  1,
-                                                  1,
-                                                  0,
-                                                  nullptr,
-                                                  nullptr,
-                                                  config),
-                            "hipModuleLaunchKernel failed");
-
-    detail::throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
-}
 
 // For each input tensor, compute broadcast-aware strides to enable each thread in the HIP kernel
 // execution grid can to load the correct input element.
@@ -133,8 +101,7 @@ void GpuReferencePointwise::launchUnary(
         = compiler.getOrCompile("GpuRefPointwiseUnary.cpp", defines, "PointwiseUnaryRef");
 
     // Use output dims to calculate launch grid dimensions due to broadcasting rules
-    const int64_t numElements
-        = std::accumulate(outputDims.begin(), outputDims.end(), int64_t{1}, std::multiplies<>());
+    const int64_t numElements = detail::elementCount(outputDims);
     int64_t numBlocks = numElements / GpuReferencePointwise::BLOCK_SIZE;
     numBlocks += (numElements % GpuReferencePointwise::BLOCK_SIZE == 0) ? 0 : 1;
 
@@ -155,7 +122,7 @@ void GpuReferencePointwise::launchUnary(
     args.upperClip = upperClip;
     args.swishBeta = swishBeta;
 
-    launchKernel(kernel.function(), numBlocks, &args, sizeof(args));
+    detail::launchKernel1d(kernel.function(), numBlocks, BLOCK_SIZE, &args, sizeof(args));
 }
 
 void GpuReferencePointwise::launchBinary(
@@ -205,8 +172,7 @@ void GpuReferencePointwise::launchBinary(
         = compiler.getOrCompile("GpuRefPointwiseBinary.cpp", defines, "PointwiseBinaryRef");
 
     // Use output dims to calculate launch grid dimensions due to broadcasting rules
-    const int64_t numElements
-        = std::accumulate(outputDims.begin(), outputDims.end(), int64_t{1}, std::multiplies<>());
+    const int64_t numElements = detail::elementCount(outputDims);
     int64_t numBlocks = numElements / GpuReferencePointwise::BLOCK_SIZE;
     numBlocks += (numElements % GpuReferencePointwise::BLOCK_SIZE == 0) ? 0 : 1;
 
@@ -230,7 +196,7 @@ void GpuReferencePointwise::launchBinary(
     args.lowerSlope = lowerSlope;
     args.upperClip = upperClip;
 
-    launchKernel(kernel.function(), numBlocks, &args, sizeof(args));
+    detail::launchKernel1d(kernel.function(), numBlocks, BLOCK_SIZE, &args, sizeof(args));
 }
 
 } // namespace hipdnn_gpu_ref

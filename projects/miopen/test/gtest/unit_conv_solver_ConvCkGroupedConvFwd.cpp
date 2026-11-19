@@ -134,7 +134,7 @@ auto GetTestParams(miopenDataType_t /*datatype*/)
 // wavefronts; the matching depthwise instance set is selected per arch at build time.
 #if MIOPEN_BACKEND_HIP
     Gpu supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx110X |
-                           Gpu::gfx115X | Gpu::gfx120X;
+                           Gpu::gfx115X | Gpu::gfx120X | Gpu::gfx125X;
 #else
     Gpu supportedDevices = Gpu::None;
 #endif

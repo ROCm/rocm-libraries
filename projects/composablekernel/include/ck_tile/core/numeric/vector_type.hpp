@@ -29,6 +29,13 @@ struct vector_traits
     static constexpr index_t vector_size = 1;
 };
 
+template <fp8_interpretation I>
+struct vector_traits<float8_format_t<I>>
+{
+    using scalar_type                    = typename native_t<float8_format_t<I>>::type;
+    static constexpr index_t vector_size = 1;
+};
+
 // specialization for ext_vector_type()
 template <typename T, index_t N>
 struct vector_traits<T __attribute__((ext_vector_type(N))), void>
@@ -69,8 +76,16 @@ using fp16x16_t = _Float16 __attribute__((ext_vector_type(16)));
 using fp16x32_t = _Float16 __attribute__((ext_vector_type(32)));
 using fp16x64_t = _Float16 __attribute__((ext_vector_type(64)));
 
-using llvm_fp16x8_t  = __fp16 __attribute__((ext_vector_type(8)));
-using llvm_fp16x16_t = __fp16 __attribute__((ext_vector_type(16)));
+// Element type used to spell the operands of the AMDGPU f16 builtins.
+#if CK_TILE_USE_LLVM_BUILTIN_FLOAT16
+using llvm_fp16_t = _Float16;
+#else
+using llvm_fp16_t = __fp16;
+#endif
+
+using llvm_fp16x4_t  = llvm_fp16_t __attribute__((ext_vector_type(4)));
+using llvm_fp16x8_t  = llvm_fp16_t __attribute__((ext_vector_type(8)));
+using llvm_fp16x16_t = llvm_fp16_t __attribute__((ext_vector_type(16)));
 
 // bf16
 // using bf16_t = ...

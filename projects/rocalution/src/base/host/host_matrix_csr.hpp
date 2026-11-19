@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -446,6 +446,27 @@ namespace rocalution
                                         BaseMatrix<ValueType>*       prolong_gst,
                                         BaseVector<int64_t>*         global_ghost_col) const;
 
+        virtual bool RSMMExtPISplit(const BaseVector<int>&  CFmap,
+                                    const BaseVector<bool>& S,
+                                    BaseVector<int>*        f2c,
+                                    BaseVector<int>*        f2f,
+                                    BaseMatrix<ValueType>*  A_FF,
+                                    BaseMatrix<ValueType>*  A_FC) const;
+        virtual bool RSMMExtPIScale(const BaseVector<int>&       CFmap,
+                                    const BaseVector<int>&       f2f,
+                                    const BaseMatrix<ValueType>& A_FC,
+                                    BaseMatrix<ValueType>*       A_FF) const;
+        virtual bool RSInterpolationTruncation(float trunc_factor, int max_elmts);
+        virtual bool RSMMExtPEScale(const BaseVector<int>& CFmap,
+                                    const BaseVector<int>& f2f,
+                                    BaseMatrix<ValueType>* A_FC,
+                                    BaseMatrix<ValueType>* A_FF) const;
+        virtual bool RSMMExtPIAssembleP(const BaseVector<int>&       CFmap,
+                                        const BaseVector<int>&       f2c,
+                                        const BaseVector<int>&       f2f,
+                                        const BaseMatrix<ValueType>& W,
+                                        BaseMatrix<ValueType>*       prolong) const;
+
         virtual bool FSAI(int power, const BaseMatrix<ValueType>* pattern);
         virtual bool SPAI(void);
 
@@ -520,6 +541,10 @@ namespace rocalution
                                  BaseVector<int64_t>*         global_col);
 
     private:
+        // End of the strictly lower part of row ai, the position of its diagonal. The rows of
+        // a factor can store zeros above the diagonal.
+        PtrType LLDiagonal_(int ai) const;
+
         MatrixCSR<ValueType, int, PtrType> mat_;
 
         bool L_diag_unit_;

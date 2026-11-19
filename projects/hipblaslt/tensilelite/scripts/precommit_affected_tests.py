@@ -21,8 +21,8 @@ import sys
 from pathlib import Path
 
 TL_REL = Path("projects/hipblaslt/tensilelite")
-TESTS_REL = Path("Tensile/Tests/unit")
-SRC_REL = Path("Tensile")
+TESTS_REL = Path("tensilelite/Tests/unit")
+SRC_REL = Path("tensilelite")
 
 BROAD_TRIGGER_PARTS = (
     "conftest.py",
@@ -36,7 +36,7 @@ BROAD_TRIGGER_PARTS = (
 MATCH_TOO_MANY_FRACTION = 0.40
 
 IMPORT_MODULE_RE = re.compile(r"""import_module\(\s*["']([\w.]+)["']""")
-DOTTED_STRING_RE = re.compile(r"""["'](Tensile\.[\w.]+)["']""")
+DOTTED_STRING_RE = re.compile(r"""["'](tensilelite\.[\w.]+)["']""")
 
 
 def log(msg: str = "") -> None:
@@ -71,7 +71,7 @@ def staged_files(root: Path) -> list[Path]:
 
 
 def module_dotted(rel_to_tl: Path) -> str | None:
-    """``Tensile/Common/Utilities.py`` -> ``Tensile.Common.Utilities``."""
+    """``tensilelite/Common/Utilities.py`` -> ``tensilelite.Common.Utilities``."""
     if rel_to_tl.suffix != ".py":
         return None
     parts = list(rel_to_tl.with_suffix("").parts)
@@ -220,13 +220,13 @@ def classify_staged(tl_staged: list[Path]):
             broad_reasons.append(rel_str)
         elif rel.parts[:1] == ("rocisa",):
             broad_reasons.append(rel_str + " (native ext)")
-        elif rel.parts[:3] == ("Tensile", "Tests", "unit") and rel.name.startswith("test_"):
+        elif rel.parts[:3] == ("tensilelite", "Tests", "unit") and rel.name.startswith("test_"):
             changed_tests.add(rel)
-        elif rel.parts[:2] == ("Tensile", "Tests"):
+        elif rel.parts[:2] == ("tensilelite", "Tests"):
             broad_reasons.append(rel_str + " (test support)")
         elif rel.suffix != ".py":
             ignored.append(rel)
-        elif rel.parts[:1] == ("Tensile",):
+        elif rel.parts[:1] == ("tensilelite",):
             changed_sources.append(rel)
         else:
             ignored.append(rel)

@@ -3,7 +3,14 @@
 
 """Shared helper functions for hipDNN Python binding tests."""
 
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import numpy as np
+import pytest
 
 import hipdnn_frontend as hipdnn
 
@@ -50,6 +57,17 @@ def create_float_graph():
     graph.set_intermediate_data_type(hipdnn.DataType.FLOAT)
     graph.set_compute_data_type(hipdnn.DataType.FLOAT)
     return graph
+
+
+class NullHandle:
+    """Stand-in for a Handle whose get() yields a null pointer.
+
+    Calls that reject their input before using the handle need no device with it,
+    and pygraph takes an explicit one instead of creating its own.
+    """
+
+    def get(self):
+        return 0
 
 
 def build_all_plans(graph, handle=None):
@@ -150,3 +168,60 @@ def call_attribute_methods(value, calls):
         assert (
             actual == expected
         ), f"{getter} returned {actual!r}, expected {expected!r}"
+
+
+# Child-process probes, in probes/.
+#
+# The session's conftest pins test_good_plugin in ABSOLUTE mode, and that engine
+# declares no knobs and cannot prime, so knob and priming behaviour needs another
+# plugin. hipdnnSetEnginePluginPaths_ext refuses to re-pin while a handle is
+# alive and would change the engine set every later test sees, so each probe
+# runs in its own interpreter and loads exactly one plugin file: the engine set
+# is then fixed, and plugins added to the test directory later cannot perturb
+# these results. probes/ holds scripts, not test modules; pytest does not
+# collect them, and importing one would perform that very re-pin.
+PROBE_DIR = Path(__file__).parent / "probes"
+
+
+def run_plugin_probe(probe, plugin, reason):
+    """Run probes/`probe` in a child process against exactly one test plugin.
+
+    `plugin` is the plugin file name; the child loads it in ABSOLUTE mode, so the
+    engine set is exactly that plugin's. Returns the JSON report the child
+    prints, and fails the calling test with the child's stderr if it exits
+    non-zero.
+    """
+    stub = stub_engine_path()
+    if stub is None:
+        pytest.skip("no test plugin directory known")
+    plugin_path = Path(stub).parent / plugin
+    if not plugin_path.is_file():
+        pytest.skip(f"{plugin_path} not installed; {reason}")
+
+    env = dict(os.environ)
+    env["HIPDNN_TEST_PROBE_PLUGIN"] = str(plugin_path)
+    env.pop("HIPDNN_TEST_GOOD_PLUGIN_PATH", None)
+    completed = subprocess.run(
+        [sys.executable, str(PROBE_DIR / probe)],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return json.loads(completed.stdout.strip().splitlines()[-1])
+
+
+def canonical_graph_json(graph):
+    """Return graph.to_json() parsed, with its tensors ordered by UID.
+
+    Parity tests compare two graphs built the same way through different APIs.
+    The serialized form is only reproducible when every tensor carries an
+    explicit UID: the frontend assigns missing UIDs in hash-set order.
+    """
+    document = json.loads(graph.to_json())
+    if "tensors" in document:
+        document["tensors"] = sorted(
+            document["tensors"], key=lambda tensor: tensor["uid"]
+        )
+    return document

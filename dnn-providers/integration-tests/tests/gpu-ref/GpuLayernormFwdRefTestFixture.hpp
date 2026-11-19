@@ -5,6 +5,7 @@
 
 #include "LayernormShapeCatalog.hpp"
 #include <gtest/gtest.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn-gpu-ref/GpuFpReferenceLayernorm.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
@@ -21,6 +22,7 @@ using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities::layernorm;
 using namespace hipdnn_gpu_ref;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 using namespace gpu_layernorm_ref_test;
 
 template <typename XDataType,
@@ -41,16 +43,18 @@ void runGpuVsCpuLayernormFwd(const std::vector<int64_t>& ioDims,
     const unsigned int seed = getGlobalTestSeed();
 
     auto xTensor = Tensor<XDataType>(ioDims, layout);
-    xTensor.fillWithRandomValues(
-        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed);
+    fillWithRandomValues(
+        xTensor, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed);
     auto scaleTensor = Tensor<ScaleBiasDataType>(scaleBiasDims, layout);
-    scaleTensor.fillWithRandomValues(static_cast<ScaleBiasDataType>(-fillRange),
-                                     static_cast<ScaleBiasDataType>(fillRange),
-                                     seed + 1);
+    fillWithRandomValues(scaleTensor,
+                         static_cast<ScaleBiasDataType>(-fillRange),
+                         static_cast<ScaleBiasDataType>(fillRange),
+                         seed + 1);
     auto biasTensor = Tensor<ScaleBiasDataType>(scaleBiasDims, layout);
-    biasTensor.fillWithRandomValues(static_cast<ScaleBiasDataType>(-fillRange),
-                                    static_cast<ScaleBiasDataType>(fillRange),
-                                    seed + 2);
+    fillWithRandomValues(biasTensor,
+                         static_cast<ScaleBiasDataType>(-fillRange),
+                         static_cast<ScaleBiasDataType>(fillRange),
+                         seed + 2);
     auto yCpu = Tensor<YDataType>(ioDims, layout);
     auto yGpu = Tensor<YDataType>(ioDims, layout);
     auto meanCpu = optionalTensors ? Tensor<MeanRstdDataType>(meanRstdDims, layout)
@@ -61,6 +65,11 @@ void runGpuVsCpuLayernormFwd(const std::vector<int64_t>& ioDims,
                                    : Tensor<MeanRstdDataType>({});
     auto rstdGpu = optionalTensors ? Tensor<MeanRstdDataType>(meanRstdDims, layout)
                                    : Tensor<MeanRstdDataType>({});
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+    biasTensor.memory().hostData();
 
     GpuFpReferenceLayernorm::
         fprop<XDataType, ScaleBiasDataType, YDataType, MeanRstdDataType, ComputeDataType>(

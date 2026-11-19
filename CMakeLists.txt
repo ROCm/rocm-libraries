@@ -50,6 +50,8 @@ set(DEFAULT_COMPONENTS
 
 set(AVAILABLE_COMPONENTS
     ${DEFAULT_COMPONENTS}
+    # shared, opt-in
+    mosaic
     # dnn
     hipdnn
     hipdnn-integration-tests
@@ -124,6 +126,14 @@ if(ROCM_LIBS_ENABLE_ROOT_CTEST AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/shared/ct
 endif()
 
 
+# This superbuild mirrors a developer environment: it supplies several
+# third-party dependencies by fetching them (see rocm_libs_declare_shared_deps
+# below), so subprojects are permitted to fetch what it does not supply.
+# Deliberately not FORCE'd -- an explicit -DALLOW_FETCH_DEPS=OFF still wins.
+set(ALLOW_FETCH_DEPS ON CACHE BOOL
+    "Allow fetching third-party dependencies the build environment does not provide"
+)
+
 # --- Shared third-party dependencies ---
 # Declare libraries that more than one subproject would otherwise fetch
 # independently (e.g. nlohmann_json used by both hipdnn and miopen).
@@ -173,6 +183,14 @@ if("origami" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         COMPONENT origami
         PREFIX_PATH shared
         EXPECT_TARGET roc::origami
+    )
+endif()
+
+if("mosaic" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT mosaic
+        PREFIX_PATH shared
+        EXPECT_TARGET roc::mosaic
     )
 endif()
 

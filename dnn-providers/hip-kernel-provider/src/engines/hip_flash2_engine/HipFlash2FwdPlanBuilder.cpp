@@ -64,24 +64,40 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
                                    && attrs.dropout_probability().value() != 0.f,
                                "dropout not supported");
+    // Operands the kernel never reads: the scale comes from attn_scale_value (1.0 when
+    // unset), and the dropout, block-mask and fp8 quantization tensors have no kernel input.
+    // seed and offset are inert at dropout_probability 0, which is the only value served.
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.scale_tensor_uid(), "scale tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_mask_tensor_uid(),
+                               "dropout_mask tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_scale_tensor_uid(),
+                               "dropout_scale tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.rng_dump_tensor_uid(), "rng_dump tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.block_mask_tensor_uid(), "block_mask tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.descale_q_tensor_uid() || attrs.descale_k_tensor_uid()
+                                   || attrs.descale_v_tensor_uid() || attrs.descale_s_tensor_uid(),
+                               "fp8 descale tensors not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.amax_s_tensor_uid() || attrs.amax_o_tensor_uid(),
+                               "fp8 amax tensors not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.scale_s_tensor_uid() || attrs.scale_o_tensor_uid(),
+                               "fp8 scale_s/scale_o tensors not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.max_tensor_uid() || attrs.sum_exp_tensor_uid(),
+                               "max and sum_exp output tensors not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.max_seq_len_kv().has_value(), "max_seq_len_kv not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.alibi_mask(), "alibi_mask not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.padding_mask(), "padding_mask not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), "attn_mask tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_k_tensor_uid(), "page_table_k not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(), "page_table_v not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.sink_token_tensor_uid(), "sink_token not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.generate_stats().value_or(false),
                                "LSE stats output not supported");
-    // K2: reject mask types the kernel does not implement
-    {
-        const auto maskType = asm_sdpa_engine::plan_utils::getMaskType(attrs);
-        HIP_KERNEL_RETURN_FALSE_IF(
-            maskType != asm_sdpa_engine::plan_utils::MaskType::NO_MASK
-                && maskType != asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL,
-            "Only NO_MASK and TOP_LEFT_CAUSAL are supported");
-    }
     HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_q_tensor_uid().has_value()
                                    || attrs.seq_len_kv_tensor_uid().has_value(),
                                "variable-length (group) batch mode not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.cu_seq_len_q_tensor_uid().has_value()
+                                   || attrs.cu_seq_len_kv_tensor_uid().has_value(),
+                               "cumulative sequence lengths (cu_seq_len_q/kv) not supported");
 
     // Tensor shapes
     const auto& tensorMap = opGraph.getTensorMap();
@@ -90,10 +106,66 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     auto* vTensor = tensorMap.at(attrs.v_tensor_uid());
     auto* oTensor = tensorMap.at(attrs.o_tensor_uid());
 
+    // Every buffer is read or written through a device pointer; a virtual tensor has none.
+    HIP_KERNEL_RETURN_FALSE_IF(qTensor->virtual_(), "Q tensor must not be virtual");
+    HIP_KERNEL_RETURN_FALSE_IF(kTensor->virtual_(), "K tensor must not be virtual");
+    HIP_KERNEL_RETURN_FALSE_IF(vTensor->virtual_(), "V tensor must not be virtual");
+    HIP_KERNEL_RETURN_FALSE_IF(oTensor->virtual_(), "O tensor must not be virtual");
+
     HIP_KERNEL_RETURN_FALSE_IF(qTensor->dims()->size() != 4, "Q must be rank-4");
     HIP_KERNEL_RETURN_FALSE_IF(kTensor->dims()->size() != 4, "K must be rank-4");
     HIP_KERNEL_RETURN_FALSE_IF(vTensor->dims()->size() != 4, "V must be rank-4");
     HIP_KERNEL_RETURN_FALSE_IF(oTensor->dims()->size() != 4, "O must be rank-4");
+
+    // Flash2FwdParams narrows every one of these dims to int (extractParams)
+    // and the kernel args struct keeps them int, so a dim that does not fit
+    // would be dispatched as a different shape. Batch has no other guard at
+    // all: it only ever reaches the kernel as gridDimY. Checked before the
+    // casts below, which are the first narrowing.
+    {
+        namespace plan_utils = asm_sdpa_engine::plan_utils;
+        bool dimsFit = true;
+        dimsFit &= plan_utils::dimFitsI32("batch", qTensor->dims()->Get(0));
+        dimsFit &= plan_utils::dimFitsI32("num_heads_q", qTensor->dims()->Get(1));
+        dimsFit &= plan_utils::dimFitsI32("num_heads_kv", kTensor->dims()->Get(1));
+        dimsFit &= plan_utils::dimFitsI32("seq_len_q", qTensor->dims()->Get(2));
+        dimsFit &= plan_utils::dimFitsI32("seq_len_kv", kTensor->dims()->Get(2));
+        dimsFit &= plan_utils::dimFitsI32("head_dim_qk", qTensor->dims()->Get(3));
+        dimsFit &= plan_utils::dimFitsI32("head_dim_v", vTensor->dims()->Get(3));
+        HIP_KERNEL_RETURN_FALSE_IF(!dimsFit,
+                                   "Tensor dimensions overflow the 32-bit fields that carry them");
+    }
+
+    // The int gate above only proves seq_len_kv survives the narrowing. The KV
+    // tile count the kernels form from it needs one more tile of headroom.
+    HIP_KERNEL_RETURN_FALSE_IF(
+        kTensor->dims()->Get(2) > K_FLASH2_MAX_SEQ_LEN_KV,
+        "seq_len_kv exceeds " + std::to_string(K_FLASH2_MAX_SEQ_LEN_KV)
+            + ", the largest value whose KV tile count does not overflow int (actual: "
+            + std::to_string(kTensor->dims()->Get(2)) + ")");
+
+    // K2: reject mask types the kernel does not implement
+    {
+        auto maskType = asm_sdpa_engine::plan_utils::MaskType::NO_MASK;
+        try
+        {
+            const auto band = asm_sdpa_engine::plan_utils::makeCoveringBoundsUnbound(
+                asm_sdpa_engine::plan_utils::resolveDiagonalBand(attrs),
+                qTensor->dims()->Get(2),
+                kTensor->dims()->Get(2));
+            maskType = asm_sdpa_engine::plan_utils::getMaskType(
+                band.leftBound, band.rightBound, band.alignment);
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+        {
+            HIPDNN_PLUGIN_LOG_INFO(std::string{HIP_KERNEL_LOG_PREFIX} + e.what());
+            return false;
+        }
+        HIP_KERNEL_RETURN_FALSE_IF(
+            maskType != asm_sdpa_engine::plan_utils::MaskType::NO_MASK
+                && maskType != asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL,
+            "Only NO_MASK and TOP_LEFT_CAUSAL are supported");
+    }
 
     // Data type: FP16 only
     const auto qType = qTensor->data_type();
@@ -213,12 +285,8 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
         }
     }
 
-    const Flash2Selection sel = selectFlash2Config(params.batch,
-                                                   params.num_heads_q,
-                                                   params.seq_len_q,
-                                                   params.head_dim,
-                                                   params.causal,
-                                                   cuCount);
+    const Flash2Selection sel = selectFlash2Config(
+        params.batch, params.numHeadsQ, params.seqLenQ, params.headDim, params.causal, cuCount);
 
     // Split-K execution is not yet plumbed through execute() (it needs a second
     // merge launch plus a workspace pointer). Record the decision, run single
@@ -246,11 +314,11 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
             params.qPerCta = K_FLASH2_LEGACY.qPerCta;
         }
     }
-    const char* funcName = flash2KernelName(params.head_dim);
+    const char* funcName = flash2KernelName(params.headDim);
     if(funcName == nullptr)
     {
         const std::string msg = "HipFlash2FwdPlanBuilder::buildPlan -- unsupported head_dim="
-                                + std::to_string(params.head_dim);
+                                + std::to_string(params.headDim);
         HIPDNN_PLUGIN_LOG_ERROR(msg);
         throw std::runtime_error(msg);
     }
@@ -324,11 +392,10 @@ std::vector<data_objects::KnobT>
 }
 
 // ---------------------------------------------------------------------------
-// extractParams (private helper) -- Finding 1 fix: restored missing body
+// extractParams -- Finding 1 fix: restored missing body
 // ---------------------------------------------------------------------------
-Flash2FwdParams
-    HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
-                                           const flatbuffer_utilities::IGraph& opGraph) const
+Flash2FwdParams HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
+                                                       const flatbuffer_utilities::IGraph& opGraph)
 {
     Flash2FwdParams p{};
 
@@ -341,38 +408,41 @@ Flash2FwdParams
     p.vUid = attrs.v_tensor_uid();
     p.oUid = attrs.o_tensor_uid();
 
-    auto* Q = tensorMap.at(p.qUid);
-    auto* K = tensorMap.at(p.kUid);
-    auto* V = tensorMap.at(p.vUid);
-    auto* O = tensorMap.at(p.oUid);
+    auto* q = tensorMap.at(p.qUid);
+    auto* k = tensorMap.at(p.kUid);
+    auto* v = tensorMap.at(p.vUid);
+    auto* o = tensorMap.at(p.oUid);
 
-    p.batch = static_cast<int>(Q->dims()->Get(0));
-    p.num_heads_q = static_cast<int>(Q->dims()->Get(1));
-    p.seq_len_q = static_cast<int>(Q->dims()->Get(2));
-    p.head_dim = static_cast<int>(Q->dims()->Get(3));
+    p.batch = static_cast<int>(q->dims()->Get(0));
+    p.numHeadsQ = static_cast<int>(q->dims()->Get(1));
+    p.seqLenQ = static_cast<int>(q->dims()->Get(2));
+    p.headDim = static_cast<int>(q->dims()->Get(3));
 
-    p.num_heads_k = static_cast<int>(K->dims()->Get(1));
-    p.seq_len_kv = static_cast<int>(K->dims()->Get(2));
+    p.numHeadsK = static_cast<int>(k->dims()->Get(1));
+    p.seqLenKv = static_cast<int>(k->dims()->Get(2));
 
-    p.attn_scale = 0.0f;
-    if(attrs.attn_scale_value().has_value())
-        p.attn_scale = attrs.attn_scale_value().value();
+    p.attnScale = attnScaleFor(attrs);
 
-    p.causal = attrs.causal_mask();
+    const auto band = asm_sdpa_engine::plan_utils::makeCoveringBoundsUnbound(
+        asm_sdpa_engine::plan_utils::resolveDiagonalBand(attrs),
+        q->dims()->Get(2),
+        k->dims()->Get(2));
+    p.causal
+        = asm_sdpa_engine::plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment)
+          == asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL;
 
-    auto toI64 = [](int64_t v) { return static_cast<int64_t>(v); };
-    p.q_stride_batch = toI64(Q->strides()->Get(0));
-    p.q_stride_head = toI64(Q->strides()->Get(1));
-    p.q_stride_seq = toI64(Q->strides()->Get(2));
-    p.k_stride_batch = toI64(K->strides()->Get(0));
-    p.k_stride_head = toI64(K->strides()->Get(1));
-    p.k_stride_seq = toI64(K->strides()->Get(2));
-    p.v_stride_batch = toI64(V->strides()->Get(0));
-    p.v_stride_head = toI64(V->strides()->Get(1));
-    p.v_stride_seq = toI64(V->strides()->Get(2));
-    p.o_stride_batch = toI64(O->strides()->Get(0));
-    p.o_stride_head = toI64(O->strides()->Get(1));
-    p.o_stride_seq = toI64(O->strides()->Get(2));
+    p.qStrideBatch = q->strides()->Get(0);
+    p.qStrideHead = q->strides()->Get(1);
+    p.qStrideSeq = q->strides()->Get(2);
+    p.kStrideBatch = k->strides()->Get(0);
+    p.kStrideHead = k->strides()->Get(1);
+    p.kStrideSeq = k->strides()->Get(2);
+    p.vStrideBatch = v->strides()->Get(0);
+    p.vStrideHead = v->strides()->Get(1);
+    p.vStrideSeq = v->strides()->Get(2);
+    p.oStrideBatch = o->strides()->Get(0);
+    p.oStrideHead = o->strides()->Get(1);
+    p.oStrideSeq = o->strides()->Get(2);
 
     return p;
 }

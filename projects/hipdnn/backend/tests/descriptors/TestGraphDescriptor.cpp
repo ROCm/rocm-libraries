@@ -16,7 +16,11 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <nlohmann/json.hpp>
+#include <unordered_map>
 #include <vector>
+
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 using namespace hipdnn_backend;
 using hipdnn_backend::test_utilities::ScopedBackendDescriptor;
@@ -1221,4 +1225,280 @@ TEST_F(TestGraphDescriptor, HasRaggedTensorsSurvivesJsonRoundTrip)
         GraphDescriptor::createFromJsonGraph(fromJson, jsonStr.c_str(), jsonStr.size()));
 
     EXPECT_TRUE(fromJson.hasRaggedTensors());
+}
+
+// ============================================================================
+// GraphDescriptor::hasCuSeqLen() (SDPA cumulative sequence lengths)
+// ============================================================================
+
+namespace
+{
+flatbuffers::FlatBufferBuilder
+    makeSdpaFwdGraph(hipdnn_test_sdk::utilities::CuSeqLenSides cuSeqLenSides)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_test_sdk::utilities::CuSeqLenSides;
+    const std::vector<int64_t> dims = {2, 8, 16, 64};
+    const std::vector<int64_t> strides = {8192, 1024, 64, 1};
+    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(dims,
+                                                               strides,
+                                                               dims,
+                                                               strides,
+                                                               dims,
+                                                               strides,
+                                                               dims,
+                                                               strides,
+                                                               DataType::HALF,
+                                                               DataType::FLOAT,
+                                                               /*withAttnMask=*/false,
+                                                               /*withScale=*/false,
+                                                               /*withStats=*/false,
+                                                               /*alibiMask=*/false,
+                                                               /*paddingMask=*/cuSeqLenSides
+                                                                   != CuSeqLenSides::NONE,
+                                                               /*causalMask=*/false,
+                                                               /*overrideShapeEnabled=*/false,
+                                                               DataType::UNSET,
+                                                               cuSeqLenSides);
+}
+
+hipdnn_data_sdk::utilities::Version stampedVersion(GraphDescriptor& descriptor)
+{
+    descriptor.buildSerializedGraph();
+    const auto serialized = descriptor.getSerializedGraph();
+    const auto* graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(
+        static_cast<const uint8_t*>(serialized.ptr));
+    return hipdnn_plugin_sdk::fromEngineApiVersion(graph->min_required_engine_api_version());
+}
+} // namespace
+
+TEST_F(TestGraphDescriptor, HasCuSeqLenFalseForEmptyDescriptor)
+{
+    const GraphDescriptor descriptor;
+    EXPECT_FALSE(descriptor.hasCuSeqLen());
+}
+
+TEST_F(TestGraphDescriptor, HasCuSeqLenFalseForSdpaGraphWithoutCuSeqLen)
+{
+    auto builder = makeSdpaFwdGraph(hipdnn_test_sdk::utilities::CuSeqLenSides::NONE);
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    EXPECT_FALSE(descriptor.hasCuSeqLen());
+    EXPECT_LT(stampedVersion(descriptor),
+              hipdnn_data_sdk::utilities::Version{hipdnn_plugin_sdk::K_CU_SEQ_LEN_MIN_API_VERSION});
+}
+
+TEST_F(TestGraphDescriptor, HasCuSeqLenFalseForNonSdpaGraph)
+{
+    auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    EXPECT_FALSE(descriptor.hasCuSeqLen());
+}
+
+TEST_F(TestGraphDescriptor, HasCuSeqLenTrueAndStampsCuSeqLenFloorForSdpaGraphWithCuSeqLen)
+{
+    auto builder = makeSdpaFwdGraph(hipdnn_test_sdk::utilities::CuSeqLenSides::BOTH);
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    EXPECT_TRUE(descriptor.hasCuSeqLen());
+    EXPECT_EQ(stampedVersion(descriptor),
+              hipdnn_data_sdk::utilities::Version{hipdnn_plugin_sdk::K_CU_SEQ_LEN_MIN_API_VERSION});
+}
+
+// The frontend accepts the mixed forms (cu_seq_len on one side, seq_len on the other), so
+// either side alone must flag the graph and stamp the 1.6.0 floor; otherwise such a graph would
+// reach plugins that know nothing about cu_seq_len.
+TEST_F(TestGraphDescriptor, HasCuSeqLenTrueAndStampsFloorWhenOnlyOneSideIsCumulative)
+{
+    using hipdnn_test_sdk::utilities::CuSeqLenSides;
+    for(const auto sides : {CuSeqLenSides::Q, CuSeqLenSides::KV})
+    {
+        SCOPED_TRACE(static_cast<int>(sides));
+        auto builder = makeSdpaFwdGraph(sides);
+        auto serializedGraph = builder.Release();
+
+        GraphDescriptor descriptor;
+        descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+        EXPECT_TRUE(descriptor.hasCuSeqLen());
+        EXPECT_EQ(
+            stampedVersion(descriptor),
+            hipdnn_data_sdk::utilities::Version{hipdnn_plugin_sdk::K_CU_SEQ_LEN_MIN_API_VERSION});
+    }
+}
+
+TEST_F(TestGraphDescriptor, HasCuSeqLenSurvivesSerializationRoundTrip)
+{
+    auto builder = makeSdpaFwdGraph(hipdnn_test_sdk::utilities::CuSeqLenSides::BOTH);
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor original;
+    original.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+    original.buildSerializedGraph();
+    const auto serialized = original.getSerializedGraph();
+
+    GraphDescriptor revived;
+    revived.deserializeGraph(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
+
+    EXPECT_TRUE(revived.hasCuSeqLen());
+}
+
+TEST_F(TestGraphDescriptor, HasCuSeqLenSurvivesJsonRoundTrip)
+{
+    auto builder = makeSdpaFwdGraph(hipdnn_test_sdk::utilities::CuSeqLenSides::BOTH);
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor original;
+    original.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+    original.buildSerializedGraph();
+    const auto jsonStr = original.getSerializedJsonGraph();
+
+    GraphDescriptor fromJson;
+    ASSERT_NO_THROW(
+        GraphDescriptor::createFromJsonGraph(fromJson, jsonStr.c_str(), jsonStr.size()));
+
+    EXPECT_TRUE(fromJson.hasCuSeqLen());
+}
+
+// The ragged-offset aux must be re-emitted into the tensor list when the graph
+// is rebuilt from its operations, carrying its dims/strides/dtype, with X still
+// resolving to it.
+TEST_F(TestGraphDescriptor, RaggedOffsetAuxEmittedIntoTensorsOnReserialize)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    using hipdnn_tests::constants::K_FPROP_TENSOR_RAGGED_OFFSET_DIMS;
+    using hipdnn_tests::constants::K_FPROP_TENSOR_RAGGED_OFFSET_STRIDES;
+    using hipdnn_tests::constants::K_FPROP_TENSOR_RAGGED_OFFSET_UID;
+    using hipdnn_tests::constants::K_FPROP_TENSOR_X_UID;
+
+    auto builder = test_utilities::createValidGraphWithRaggedTensor();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+    descriptor.buildSerializedGraph();
+
+    const auto serialized = descriptor.getSerializedGraph();
+    auto graph = UnPackGraph(static_cast<const uint8_t*>(serialized.ptr));
+    ASSERT_NE(graph, nullptr);
+
+    std::unordered_map<int64_t, const TensorAttributesT*> tensorMap;
+    for(const auto& t : graph->tensors)
+    {
+        tensorMap[t->uid] = t.get();
+    }
+
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_RAGGED_OFFSET_UID), 0u)
+        << "ragged-offset aux must be emitted into the re-serialized tensor list.";
+    const auto* aux = tensorMap.at(K_FPROP_TENSOR_RAGGED_OFFSET_UID);
+    EXPECT_EQ(aux->data_type, DataType::INT64);
+    EXPECT_EQ(aux->dims, hipdnn_tests::toVec(K_FPROP_TENSOR_RAGGED_OFFSET_DIMS));
+    EXPECT_EQ(aux->strides, hipdnn_tests::toVec(K_FPROP_TENSOR_RAGGED_OFFSET_STRIDES));
+
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_X_UID), 0u);
+    const auto* xTensor = tensorMap.at(K_FPROP_TENSOR_X_UID);
+    ASSERT_TRUE(xTensor->ragged_offset_tensor_uid.has_value());
+    EXPECT_EQ(xTensor->ragged_offset_tensor_uid.value(), K_FPROP_TENSOR_RAGGED_OFFSET_UID);
+    EXPECT_NE(tensorMap.count(xTensor->ragged_offset_tensor_uid.value()), 0u)
+        << "X's ragged_offset_tensor_uid must resolve within the tensor list.";
+}
+
+// The ragged-offset aux must survive a JSON round-trip: deserialize -> JSON ->
+// createFromJsonGraph -> re-serialize must still emit the aux with its
+// dims/strides/dtype and keep X resolving to it. Guards the JSON path (Path C),
+// which HasRaggedTensorsSurvivesJsonRoundTrip cannot (it only checks the link).
+TEST_F(TestGraphDescriptor, RaggedOffsetAuxEmittedIntoTensorsOnJsonRoundTrip)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    using hipdnn_tests::constants::K_FPROP_TENSOR_RAGGED_OFFSET_DIMS;
+    using hipdnn_tests::constants::K_FPROP_TENSOR_RAGGED_OFFSET_STRIDES;
+    using hipdnn_tests::constants::K_FPROP_TENSOR_RAGGED_OFFSET_UID;
+    using hipdnn_tests::constants::K_FPROP_TENSOR_X_UID;
+
+    auto builder = test_utilities::createValidGraphWithRaggedTensor();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor original;
+    original.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+    original.buildSerializedGraph();
+    const auto jsonStr = original.getSerializedJsonGraph();
+
+    GraphDescriptor fromJson;
+    ASSERT_NO_THROW(
+        GraphDescriptor::createFromJsonGraph(fromJson, jsonStr.c_str(), jsonStr.size()));
+    fromJson.buildSerializedGraph();
+
+    const auto serialized = fromJson.getSerializedGraph();
+    auto graph = UnPackGraph(static_cast<const uint8_t*>(serialized.ptr));
+    ASSERT_NE(graph, nullptr);
+
+    std::unordered_map<int64_t, const TensorAttributesT*> tensorMap;
+    for(const auto& t : graph->tensors)
+    {
+        tensorMap[t->uid] = t.get();
+    }
+
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_RAGGED_OFFSET_UID), 0u)
+        << "ragged-offset aux must survive the JSON round-trip.";
+    const auto* aux = tensorMap.at(K_FPROP_TENSOR_RAGGED_OFFSET_UID);
+    EXPECT_EQ(aux->data_type, DataType::INT64);
+    EXPECT_EQ(aux->dims, hipdnn_tests::toVec(K_FPROP_TENSOR_RAGGED_OFFSET_DIMS));
+    EXPECT_EQ(aux->strides, hipdnn_tests::toVec(K_FPROP_TENSOR_RAGGED_OFFSET_STRIDES));
+
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_X_UID), 0u);
+    const auto* xTensor = tensorMap.at(K_FPROP_TENSOR_X_UID);
+    ASSERT_TRUE(xTensor->ragged_offset_tensor_uid.has_value());
+    EXPECT_EQ(xTensor->ragged_offset_tensor_uid.value(), K_FPROP_TENSOR_RAGGED_OFFSET_UID);
+    EXPECT_NE(tensorMap.count(xTensor->ragged_offset_tensor_uid.value()), 0u)
+        << "X's ragged_offset_tensor_uid must resolve within the tensor list.";
+}
+
+// A tensor whose ragged_offset_tensor_uid names an aux that is absent from the
+// tensor list must be rejected on deserialize.
+TEST_F(TestGraphDescriptor, DeserializeDanglingRaggedOffsetUidThrows)
+{
+    auto builder = test_utilities::createValidGraphWithRaggedTensor(/*includeAux=*/false);
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    ASSERT_THROW_HIPDNN_STATUS(
+        descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size()),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+// A virtual ragged-offset aux has no backing storage and must be rejected.
+TEST_F(TestGraphDescriptor, DeserializeVirtualRaggedAuxThrows)
+{
+    auto builder = test_utilities::createValidGraphWithRaggedTensor(/*includeAux=*/true,
+                                                                    /*auxVirtual=*/true);
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    ASSERT_THROW_HIPDNN_STATUS(
+        descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size()),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+// A ragged-offset aux may not itself carry a ragged offset; nesting is rejected.
+TEST_F(TestGraphDescriptor, DeserializeNestedRaggedAuxThrows)
+{
+    auto builder = test_utilities::createValidGraphWithRaggedTensor(/*includeAux=*/true,
+                                                                    /*auxVirtual=*/false,
+                                                                    /*auxNested=*/true);
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    ASSERT_THROW_HIPDNN_STATUS(
+        descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size()),
+        HIPDNN_STATUS_BAD_PARAM);
 }

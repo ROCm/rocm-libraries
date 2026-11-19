@@ -67,10 +67,10 @@ python -m rocke
 Build and verify one generated example:
 
 ```bash
-export PYTHONPATH=python
+export PYTHONPATH=python:../library
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
-python -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+python -m builders.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 python -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 
@@ -78,7 +78,7 @@ Run the core unit test suite (the IR/lowering tests need no GPU; ~20
 harness/timer tests require a GPU):
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python:../library \
   python tests/test_rocke.py
 ```
 
@@ -137,8 +137,9 @@ milliseconds per launch.
 
 ## Requirements
 Recommended stack (what the example READMEs' numbers are reproduced on):
-- **ROCm 7.2** with HIP runtime and `libamd_comgr` (also works on ROCm 7.0.x —
-  set `ROCKE_LLVM_FLAVOR=llvm22` if your `comgr` is 7.2 but `/opt/rocm` is older).
+- **ROCm 7.2** with HIP runtime and `libamd_comgr` (also works on ROCm 7.0.x).
+  AUTO queries the loaded COMGR compiler’s LLVM version. An explicit
+  `ROCKE_LLVM_FLAVOR` supports offline emission; it does not select the compiler.
 - **PyTorch 2.12 (+rocm7.2 build)** in a virtual environment — the wheel bundles
   the `libamd_comgr` the DSL prefers, so the venv selects the build toolchain.
 - **Python 3.12**; plus `numpy` (references) and `ruff` (lint).

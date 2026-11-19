@@ -143,7 +143,7 @@ if (NOT BUILD_WITH_LIB STREQUAL "CUDA")
 
   if(GPU_TARGETS STREQUAL "all")
     rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-      TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250"
+      TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171;gfx1200;gfx1201;gfx1250"
     )
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
   endif()
@@ -181,9 +181,11 @@ elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
   message(FATAL_ERROR "Only C++14 and C++17 are supported")
 endif()
 
-# HIP on Windows: xhip is required with clang++ to get __half defined
+# HIP on Windows: xhip is required with clang++ to get __half defined.
+# Scope it to C++ so it does not leak onto C sources (e.g. the C-compile
+# tests), where -xhip is both unnecessary and incompatible with -std=gnu11.
 if (WIN32)
-  add_compile_options(-xhip)
+  add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-xhip>")
 endif()
 
 if(BUILD_ADDRESS_SANITIZER AND BUILD_SHARED_LIBS)
@@ -245,8 +247,15 @@ else()
 endif()
 
 if(BUILD_CODE_COVERAGE)
-  target_compile_options(hiprand PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(hiprand PUBLIC -fprofile-instr-generate)
+  target_compile_options(hiprand PRIVATE
+    -g
+    -O0
+    "SHELL:-Xarch_host -fprofile-instr-generate"
+    "SHELL:-Xarch_host -fcoverage-mapping"
+  )
+  target_link_options(hiprand PUBLIC
+    "SHELL:-Xarch_host -fprofile-instr-generate"
+  )
 endif()
 
 rocm_create_package(

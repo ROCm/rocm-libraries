@@ -1,0 +1,68 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S08 calLRVW: gfx1250 HasWMMA_V3 explicit-LRVW reject sites.
+#
+# Target missing lines in Tensile/SolutionStructs/Solution.py calLRVW():
+#   3523 : HasWMMA_V3 + LocalReadVectorWidthA != maxLRVWA + TransposeLDS
+#          -> reject "gfx1250 requires lrvwA == {maxLRVWA}"
+#   3558 : same for B side (reject does NOT return, so B check also runs)
+#
+# Gate: EnableMatrixInstruction true, HasWMMA_V3 (gfx1250), TransposeLDS=1,
+#       explicit non-(-1) LocalReadVectorWidthA/B not equal to maxLRVW.
+#   MAX_NUM_DS_LOAD_BYTES = 16; FP16 numBytes=2 -> maxLRVWA=maxLRVWB=8.
+#   Set LocalReadVectorWidthA=LocalReadVectorWidthB=4 (non-max) -> both reject.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 4, 4, 2, 2]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - LDSTrInst: [True]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StaggerU: [0]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [-1]
+        - LocalReadVectorWidthA: [4]
+        - LocalReadVectorWidthB: [4]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - SourceSwap: [True]
+        - ExpandPointerSwap: [False]
+        - WavefrontSize: [32]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]

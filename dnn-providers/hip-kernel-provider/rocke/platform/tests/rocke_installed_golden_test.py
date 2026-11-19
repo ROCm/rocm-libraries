@@ -12,7 +12,7 @@ emitted IR changed.
 
 It is intended to run directly from an installed staging prefix, co-located with
 the ``rocke`` package, the ``rocke_ir_parity_harness`` module, and the golden
-JSON under ``golden/``. It fixes up ``sys.path`` before importing anything, so
+shard directory under ``golden/``. It fixes up ``sys.path`` before importing anything, so
 RockCI can execute it from a staged test artifact:
 
   python rocke_installed_golden.py
@@ -53,10 +53,10 @@ def _add_installed_python_paths() -> None:
     if (harness_dir / "rocke_ir_parity_harness.py").is_file():
         if harness_dir not in found:
             found.append(harness_dir)
-    # The harness' attention families build library kernels, so `kernels` and
-    # `builders` must resolve too. They are staged under tests/library/ in an
-    # install (the destination TheRock's test-artifact globs capture) and live in
-    # the sibling library tree in a checkout.
+    # Some harness families (attention and KDA) build library kernels, so
+    # `kernels` and `builders` must resolve too. They are staged under
+    # tests/library/ in an install (the destination TheRock's test-artifact
+    # globs capture) and live in the sibling library tree in a checkout.
     lib_roots = [script.parent / "tests" / "library"]
     if len(script.parents) > 2:
         lib_roots.append(script.parents[2] / "library")
@@ -71,10 +71,10 @@ def _add_installed_python_paths() -> None:
 
 def _find_golden() -> Path:
     script = Path(__file__).resolve()
-    name = "rocke_representative_ir_sha256.json"
-    # Co-located layouts: <dir>/golden/<name> (installed) or a sibling golden/
-    # dir one level up. Fall back to the in-source tests/golden/ when run from a
-    # checkout.
+    # The golden is a directory of per-family JSON shards. Co-located layouts:
+    # <dir>/golden/<name> (installed) or a sibling golden/ dir one level up.
+    # Fall back to the in-source tests/golden/ when run from a checkout.
+    name = "rocke_representative_ir_sha256"
     candidates = [
         script.parent / "golden" / name,
         script.parent / name,
@@ -82,7 +82,7 @@ def _find_golden() -> Path:
         script.parents[1] / "tests" / "golden" / name,
     ]
     for cand in candidates:
-        if cand.is_file():
+        if cand.is_dir():
             return cand
     raise SystemExit(
         "golden not found; looked in:\n  " + "\n  ".join(str(c) for c in candidates)
@@ -92,7 +92,10 @@ def _find_golden() -> Path:
 def main() -> int:
     _add_installed_python_paths()
 
-    from rocke_ir_parity_harness import GOLDEN_FLAVORS, check_golden
+    from rocke_ir_parity_harness import (
+        GOLDEN_FLAVORS,
+        check_golden,
+    )
 
     golden = _find_golden()
     flavors = ", ".join(GOLDEN_FLAVORS)
@@ -100,7 +103,7 @@ def main() -> int:
     if drift:
         print(f"rocKE installed golden gate: FAIL ({flavors})\n  " + "\n  ".join(drift))
         return 1
-    print(f"rocKE installed golden gate: PASS ({flavors}, golden={golden.name})")
+    print(f"rocKE installed golden gate: PASS " f"({flavors}, golden={golden.name})")
     return 0
 
 

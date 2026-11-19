@@ -531,6 +531,8 @@ typedef enum hipblasClientProcessor
     gfx1151 = 1151,
     gfx1152 = 1152,
     gfx1153 = 1153,
+    gfx1170 = 1170,
+    gfx1171 = 1171,
     gfx1200 = 1200,
     gfx1201 = 1201,
     gfx1250 = 1250

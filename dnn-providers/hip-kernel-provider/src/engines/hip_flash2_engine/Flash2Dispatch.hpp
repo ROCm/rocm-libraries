@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 
@@ -104,11 +105,7 @@ inline Flash2Selection selectFlash2Config(
     if(ctas256 < scaled(128) && seqLenQ >= 1024 && headDim == 128)
     {
         const long long denom = (ctas256 > 0) ? ctas256 : 1;
-        long long nsplit = (scaled(256) + denom - 1) / denom;
-        if(nsplit < 2)
-            nsplit = 2;
-        if(nsplit > 4)
-            nsplit = 4;
+        const long long nsplit = std::clamp<long long>((scaled(256) + denom - 1) / denom, 2, 4);
         // Record the split factor but do NOT return: the variant still has to
         // be chosen by the rules below. Returning here pinned every starved
         // shape to w8q2k4 and suppressed the tiny-grid rule underneath it
@@ -150,11 +147,17 @@ inline Flash2Selection selectFlash2Config(
     if(causal)
     {
         if(seqLenQ <= 1024 && ctas256 < scaled(200))
+        {
             sel.variant = K_FLASH2_W8Q1K4;
+        }
         else if(seqLenQ >= 1024 && ctas384 >= scaled(256))
+        {
             sel.variant = K_FLASH2_W8Q3K2;
+        }
         else
+        {
             sel.variant = K_FLASH2_W8Q2K4;
+        }
         return sel;
     }
 
@@ -163,12 +166,16 @@ inline Flash2Selection selectFlash2Config(
     // count or very long sequences. The discriminator is HEAD COUNT, not
     // batch*heads: the win case (B=2 H=16) and the loss case (B=1 H=32) both
     // have batch*heads == 32, so a rule on the product cannot separate them.
-    if(numHeadsQ <= 16 && seqLenQ >= 3072)
+    // Both conditions below select the same variant, so they are combined
+    // into one branch rather than two identical bodies.
+    if((numHeadsQ <= 16 && seqLenQ >= 3072) || seqLenQ >= 8192)
+    {
         sel.variant = K_FLASH2_W8Q3K2;
-    else if(seqLenQ >= 8192)
-        sel.variant = K_FLASH2_W8Q3K2;
+    }
     else
+    {
         sel.variant = K_FLASH2_W8Q2K4;
+    }
     return sel;
 }
 
@@ -178,7 +185,9 @@ inline Flash2Selection selectFlash2Config(
 inline size_t flash2WorkspaceBytes(int batch, int numHeadsQ, int seqLenQ, int headDim, int splitK)
 {
     if(splitK <= 1)
+    {
         return 0;
+    }
     const size_t rows = static_cast<size_t>(batch) * static_cast<size_t>(numHeadsQ)
                         * static_cast<size_t>(splitK) * static_cast<size_t>(seqLenQ);
     return rows * static_cast<size_t>(headDim) * sizeof(float) // partial O

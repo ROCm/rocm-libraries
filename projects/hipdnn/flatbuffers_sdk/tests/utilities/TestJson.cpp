@@ -18,6 +18,7 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -141,7 +142,8 @@ TEST(TestJson, GraphToJsonAndBack)
             context = "(valid batchnorm forward training graph)";
             break;
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes:
-            graphBuilder = hipdnn_test_sdk::utilities::createPointwiseGraph();
+            graphBuilder = hipdnn_test_sdk::utilities::createPointwiseGraph(
+                hipdnn_test_sdk::utilities::PointwiseGraphSpec::fullyPopulated());
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid pointwise graph)";
             break;
@@ -235,6 +237,16 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid MoE grouped matmul backward graph)";
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::GdnAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidGdnGraph();
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid GDN graph)";
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::KdaAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidKdaGraph();
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid KDA graph)";
+            break;
         default:
             FAIL() << "Unhandled NodeAttributes enum value";
             break;
@@ -242,6 +254,71 @@ TEST(TestJson, GraphToJsonAndBack)
 
         toJsonAndBackTestSuite(graph, context);
     }
+}
+
+// Each cumulative sequence length UID has its own writer and reader line, so each side is
+// round-tripped alone: dropping one line must lose that side.
+TEST(TestJson, SdpaCuSeqLenRoundTripsPerSide)
+{
+    using hipdnn_test_sdk::utilities::CuSeqLenSides;
+    const std::vector<int64_t> dims = {2, 8, 16, 64};
+    const std::vector<int64_t> strides = {8192, 1024, 64, 1};
+    for(const auto sides : {CuSeqLenSides::Q, CuSeqLenSides::KV})
+    {
+        const bool qSide = sides == CuSeqLenSides::Q;
+        SCOPED_TRACE(qSide ? "cu_seq_len_q" : "cu_seq_len_kv");
+        auto graphBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(dims,
+                                                                                strides,
+                                                                                dims,
+                                                                                strides,
+                                                                                dims,
+                                                                                strides,
+                                                                                dims,
+                                                                                strides,
+                                                                                DataType::HALF,
+                                                                                DataType::FLOAT,
+                                                                                false,
+                                                                                false,
+                                                                                false,
+                                                                                false,
+                                                                                true,
+                                                                                false,
+                                                                                false,
+                                                                                DataType::UNSET,
+                                                                                sides);
+        const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
+        const auto* sdpa = graph->nodes()->Get(0)->attributes_as_SdpaAttributes();
+        ASSERT_NE(sdpa, nullptr);
+        ASSERT_EQ(sdpa->cu_seq_len_q_tensor_uid().has_value(), qSide);
+        ASSERT_EQ(sdpa->cu_seq_len_kv_tensor_uid().has_value(), !qSide);
+
+        toJsonAndBackTestSuite(graph, qSide ? "cu_seq_len_q" : "cu_seq_len_kv");
+    }
+}
+
+// Graphs serialized before cu_seq_len existed omit both keys; the reader must treat them as absent.
+TEST(TestJson, SdpaGraphWithoutCuSeqLenKeysStillLoads)
+{
+    auto sourceBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
+    const auto* source = GetGraph(sourceBuilder.GetBufferPointer());
+    nlohmann::json graphJson = *source;
+
+    auto& inputs = graphJson.at("nodes").at(0).at("inputs");
+    ASSERT_EQ(inputs.erase("cu_seq_len_q_tensor_uid"), 1U);
+    ASSERT_EQ(inputs.erase("cu_seq_len_kv_tensor_uid"), 1U);
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::json::to<Graph>(builder, graphJson));
+    const auto* loaded = GetGraph(builder.GetBufferPointer());
+
+    const auto* sdpa = loaded->nodes()->Get(0)->attributes_as_SdpaAttributes();
+    ASSERT_NE(sdpa, nullptr);
+    EXPECT_FALSE(sdpa->cu_seq_len_q_tensor_uid().has_value());
+    EXPECT_FALSE(sdpa->cu_seq_len_kv_tensor_uid().has_value());
+
+    const auto* sourceSdpa = source->nodes()->Get(0)->attributes_as_SdpaAttributes();
+    EXPECT_EQ(sdpa->q_tensor_uid(), sourceSdpa->q_tensor_uid());
+    EXPECT_EQ(sdpa->o_tensor_uid(), sourceSdpa->o_tensor_uid());
 }
 
 TEST(TestJson, GraphVersionSerializesToJson)
@@ -348,6 +425,47 @@ TEST(TestJson, MoeGroupedMatmulBwdRoundTrip)
     EXPECT_EQ(outputs.at("dweight_tensor_uid").get<int64_t>(), 4);
 
     toJsonAndBackTestSuite(graph, "(MoE grouped matmul backward)");
+}
+
+// GraphToJsonAndBack covers one graph per node type; these cover the second
+// GDN and KDA graphs, whose flag values differ from the first ones.
+TEST(TestJson, GdnSafeGateRoundTrip)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidGdnSafeGateGraph();
+    toJsonAndBackTestSuite(GetGraph(graphBuilder.GetBufferPointer()), "(GDN safe-gate graph)");
+}
+
+TEST(TestJson, KdaStatePoolRoundTrip)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidKdaStatePoolGraph();
+    toJsonAndBackTestSuite(GetGraph(graphBuilder.GetBufferPointer()), "(KDA state-pool graph)");
+}
+
+TEST(TestJson, LinearAttentionRejectsUnknownGateDomain)
+{
+    const std::vector<std::pair<std::string, flatbuffers::FlatBufferBuilder>> graphs = [] {
+        std::vector<std::pair<std::string, flatbuffers::FlatBufferBuilder>> result;
+        result.emplace_back("GDN", hipdnn_test_sdk::utilities::createValidGdnGraph());
+        result.emplace_back("KDA", hipdnn_test_sdk::utilities::createValidKdaGraph());
+        return result;
+    }();
+
+    for(const auto& [op, graphBuilder] : graphs)
+    {
+        const nlohmann::json validJson = *GetGraph(graphBuilder.GetBufferPointer());
+        for(const nlohmann::json& gateDomain : {nlohmann::json("Linear"),
+                                                nlohmann::json("LOG"),
+                                                nlohmann::json("exp"),
+                                                nlohmann::json(1)})
+        {
+            nlohmann::json graphJson = validJson;
+            graphJson.at("nodes").at(0).at("attributes")["gate_domain"] = gateDomain;
+            flatbuffers::FlatBufferBuilder builder;
+            EXPECT_THROW((void)hipdnn_flatbuffers_sdk::json::to<Graph>(builder, graphJson),
+                         std::runtime_error)
+                << op << " gate_domain " << gateDomain.dump();
+        }
+    }
 }
 
 namespace
@@ -549,6 +667,7 @@ TEST(TestJson, TensorAttributesRaggedOffsetAndAlignmentRoundTrip)
     const int64_t uid = 5;
     const int64_t raggedOffsetUid = 42;
     const int64_t alignment = 128;
+    const int64_t raggedOffsetMultiplier = 512;
     const std::vector<int64_t> dims = {4, 8, 1, 1};
     const std::vector<int64_t> strides = {8, 1, 1, 1};
 
@@ -564,7 +683,8 @@ TEST(TestJson, TensorAttributesRaggedOffsetAndAlignmentRoundTrip)
                                                    /*value*/ 0,
                                                    false,
                                                    flatbuffers::Optional<int64_t>(raggedOffsetUid),
-                                                   alignment);
+                                                   alignment,
+                                                   raggedOffsetMultiplier);
     builder.Finish(attrOffset);
 
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
@@ -573,11 +693,13 @@ TEST(TestJson, TensorAttributesRaggedOffsetAndAlignmentRoundTrip)
     ASSERT_TRUE(attr->ragged_offset_tensor_uid().has_value());
     EXPECT_EQ(attr->ragged_offset_tensor_uid().value(), raggedOffsetUid);
     EXPECT_EQ(attr->alignment(), alignment);
+    EXPECT_EQ(attr->ragged_offset_multiplier(), raggedOffsetMultiplier);
 
     // JSON round-trip
     const nlohmann::json attrJson = *attr;
     EXPECT_EQ(attrJson.at("ragged_offset_tensor_uid").get<int64_t>(), raggedOffsetUid);
     EXPECT_EQ(attrJson.at("alignment").get<int64_t>(), alignment);
+    EXPECT_EQ(attrJson.at("ragged_offset_multiplier").get<int64_t>(), raggedOffsetMultiplier);
 
     flatbuffers::FlatBufferBuilder roundTripBuilder;
     auto newAttrOffset
@@ -588,6 +710,26 @@ TEST(TestJson, TensorAttributesRaggedOffsetAndAlignmentRoundTrip)
     ASSERT_TRUE(newAttr->ragged_offset_tensor_uid().has_value());
     EXPECT_EQ(newAttr->ragged_offset_tensor_uid().value(), raggedOffsetUid);
     EXPECT_EQ(newAttr->alignment(), alignment);
+    EXPECT_EQ(newAttr->ragged_offset_multiplier(), raggedOffsetMultiplier);
+}
+
+// A JSON entry omitting ragged_offset_multiplier deserializes to the schema default (1),
+// keeping legacy graphs byte-identical.
+TEST(TestJson, TensorAttributesOmittedRaggedOffsetMultiplierDefaultsToOne)
+{
+    const nlohmann::json attrJson = {{"uid", 7},
+                                     {"name", "legacy"},
+                                     {"data_type", DataType::FLOAT},
+                                     {"dims", std::vector<int64_t>{4, 8, 1, 1}},
+                                     {"strides", std::vector<int64_t>{8, 1, 1, 1}},
+                                     {"virtual", false}};
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_flatbuffers_sdk::json::to<TensorAttributes>(builder, attrJson);
+    builder.Finish(attrOffset);
+
+    auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+    EXPECT_EQ(attr->ragged_offset_multiplier(), 1);
 }
 
 TEST(TestJson, TensorAttributesDefaultAlignmentAndNoRaggedOffset)

@@ -27,6 +27,10 @@ pad(name, lo, hi)                    # bounds check; coord value unchanged
 pad_dynamic(name, lo=None, hi=None)  # lo/hi may be SSA values
 embed(upper, into, strides, offset, lo, hi)
                                       # affine map + bounds check
+embed_dynamic(upper, lower, strides, offset=0, lo=None, hi=None)
+                                      # embed; any of these may be SSA values
+unmerge_magic_dynamic(upper, into, magic_triples)
+                                      # unmerge by runtime magic division
 unmerge(upper, into, dims)            # split flat coord into N
 merge(upper, into, dims)              # inverse of unmerge for packed shapes
 indirect(upper, into, table, base)    # consume coord; produce lower via i32 table lookup
@@ -106,6 +110,27 @@ wo = m % Wo
 ```
 
 Also used for `k -> r, s, c`, attention `token/dim` decomposition, and tile-local lane decomposition.
+
+### Runtime-shape (AOT) variants
+
+An AOT kernel does not know the problem shape when it is built, so every
+shape-dependent constant of a descriptor becomes a kernel argument:
+
+- `embed_dynamic(upper, lower, strides, offset=0, lo=None, hi=None)` -- `embed`
+  whose strides, offset and bounds may each be an `int` (folded) or an i32 SSA
+  `Value` (e.g. `p_sH`, `p_pH`, `p_Hi`).
+- `unmerge_magic_dynamic(upper, into, magic_triples)` -- `unmerge` whose
+  divisions use host-computed magic numbers: one `(mult, shift, dim)` triple per
+  coordinate after the first, each an `int` or a `Value`. The host computes the
+  triples once per launch (`ConvArgs` does it for conv), so the kernel divides
+  by a runtime extent with a multiply-high and a shift.
+- `DynamicTensorDescriptor.create(name, coord_names=..., strides=...)` -- a
+  descriptor whose base strides are runtime `Value`s; `transform(...)` and
+  `offset(...)` work as for `TensorDescriptor`, only the final stride multiply
+  uses the runtime strides.
+
+The C++ engine mirrors all three (`helper_rocke.helpers.transforms.h`), and the
+`dynamic_helpers` parity family byte-compares the two engines on them.
 
 ### `merge`
 

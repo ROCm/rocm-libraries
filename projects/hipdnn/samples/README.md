@@ -10,6 +10,7 @@
      * CMake
      * Ninja
      * ROCm (for HIP runtime)
+     * GoogleTest including GoogleMock, for the separately built example engine plugin's tests
    - A ROCm-compatible GPU is required to run the samples
 
 2. **Build Samples:** From this `samples` directory:
@@ -18,19 +19,38 @@
    cmake -G Ninja ..
    ninja
    ```
-   - Note: If you have installed hipdnn to a custom location you just need to specify the `CMAKE_PREFIX_PATH` to point to the install location.  Ensure you specify the full path and not a relative one.
+   - In the [developer image](../dockerfiles/README.md), GoogleTest/GoogleMock and spdlog are installed automatically in `/usr/local`, so no manual dependency download, install, additional prefix, or fetch flag is needed for those packages.
 
-The sample executables will be created in the `build` directory.
+Outside the image, use a complete set of installed packages. From the `samples/build` directory, choose one configuration:
+
+```bash
+# Installed packages only, using absolute paths.
+cmake -G Ninja -DALLOW_FETCH_DEPS=OFF \
+    -DCMAKE_PREFIX_PATH="/path/to/hipdnn-install;/path/to/rocm;/path/to/dependencies" ..
+
+# Alternatively, let the nested example plugin fetch missing GoogleTest.
+cmake -G Ninja -DALLOW_FETCH_DEPS=ON \
+    -DCMAKE_PREFIX_PATH="/path/to/hipdnn-install;/path/to/rocm;/path/to/dependencies" ..
+```
+
+The combined prefixes must provide the hipDNN frontend, test, plugin, data, and FlatBuffers SDK packages and their transitive dependencies (including FlatBuffers and nlohmann_json when enabled), HIP/HIPRTC, and GoogleTest including GoogleMock. A custom hipDNN install prefix alone is not necessarily sufficient. You can use `GTest_DIR` for an installed GoogleTest package instead of adding its prefix. The `ON` alternative only fetches GoogleTest, not hipDNN, HIP, or other SDK dependencies. This separate samples configure does not inherit the fetch setting from a previous hipDNN build; it forwards its own `ALLOW_FETCH_DEPS` to the nested plugin, including an explicit `OFF`.
+
+The sample executables will be created in the `build/bin` directory. Each executable name has the prefix `hipdnn_sample_` (for example, `hipdnn_sample_conv_fprop`).
 
 ## Running Samples
 
-All samples accept the following command line options:
-- `--verify-cpu` - Enable CPU reference validation of results
-- `--help` - Displays help message
+The batchnorm, convolution, SDPA, and serialization samples use the shared parser in [`utils/Helpers.hpp`](./utils/Helpers.hpp). They accept these command line options:
+- `--verify-cpu` (`-vc`) - Enable CPU reference validation of results
+- `--dtype <fp32|fp16|bf16>` - Run only one data type (default: all three)
+- `--layout <nchw|nhwc>` - Run only one layout (SDPA: `<bhsd|bshd>`)
+- `--engine-id <id>` or `--engine-name <name>` - Prefer a specific engine
+- `--help` (`-h`) - Displays help message and the full list of options for the sample
+
+The knobs, autotune, dynamic, and cuDNN shim samples have their own options. Use `--help` where the sample supports it.
 
 Example:
 ```bash
-./build/conv_forward --verify-cpu
+./build/bin/hipdnn_sample_conv_fprop --verify-cpu
 ```
 
 ## Profiling Samples
@@ -39,7 +59,7 @@ Samples can be profiled using ROCprofiler-SDK (`rocprofv3`), included in ROCm ve
 
 ```bash
 # Profile a sample with system trace and perfetto output format
-rocprofv3 --sys-trace -f pftrace -o ./profile_output -- ./bn_inference
+rocprofv3 --sys-trace -f pftrace -o ./profile_output -- ./build/bin/hipdnn_sample_bn_inference
 ```
 
 Since `rocprofv3` has limited host-side tracing, `hipDeviceSynchronize()` calls can be added to gauge granular performance.
@@ -54,7 +74,7 @@ HIP_CHECK(hipDeviceSynchronize()); // Await completion and record in trace for a
 
 ## Available Samples
 
-All samples are templated for mixed-precision execution with Fp32, Fp16, and Bfp16 input/output data types, with Fp32 intermediate accumulation.
+The batchnorm, convolution, SDPA, and serialization samples are templated for mixed-precision execution with Fp32, Fp16, and Bfp16 input/output data types, with Fp32 intermediate accumulation.
 
 > [!TIP]
 > 💡 Set `HIPDNN_LOG_LEVEL=info` to observe detailed logs from the samples.
@@ -356,7 +376,7 @@ Executes the forward pass of a scaled dot-product attention (SDPA) operation on 
 - For query `Q`, key `K`, and value `V` tensors of shape `(B, H, S, D)`, the attention output is computed as:
 
     ```python
-    O = softmax(Q @ K^T / sqrt(D)) @ V
+    O = softmax(scale * Q @ K^T) @ V
     ```
 
     where:
@@ -364,9 +384,11 @@ Executes the forward pass of a scaled dot-product attention (SDPA) operation on 
     - `H` = number of attention heads
     - `S` = sequence length
     - `D` = head dimension
+    - `scale` = the attention scale; the sample sets `1/sqrt(D)`. A graph that sets no scale gets 1.0 (no scaling).
 
 - Supports both `BHSD` (row-major) and `BSHD` (sequence-major) memory layouts via strides.
 - Configurations without engine support are gracefully skipped.
+- Built only when hipDNN is configured with `HIPDNN_ENABLE_SDPA`.
 
 ### [**`SerializationRoundTrip`**](./serialization/SerializationRoundTrip.cpp)
 
@@ -377,12 +399,11 @@ Demonstrates graph serialization and deserialization (round-trip) using hipDNN's
 Demonstrates how to use hipDNN's engine configuration knobs system for runtime parameter tuning.
 
 **What This Sample Shows:**
-1. **Querying Available Knobs**: How to discover what knobs an engine supports
+1. **Querying Available Knobs**: How to discover what knobs an engine supports (`get_knobs_for_engine` and `get_knob_lookup_for_engine`)
 2. **Knob Metadata**: Understanding knob types, constraints, and default values
-3. **Setting Knob Values**: Creating execution plans with custom knob settings
-4. **Knob Validation**: Validating settings against knob constraints
-5. **Knob Value Types**: Using integer, float, and string knobs
-6. **Real Execution**: Running graphs with different knob configurations
+3. **Setting Knob Values**: Creating execution plans with custom knob settings (`create_execution_plan_ext`)
+4. **Knob Validation**: Validating settings against knob constraints (`Knob::validate`)
+5. **Real Execution**: Running a batchnorm inference graph with default or benchmarking knob settings
 
 **Common Knobs:**
 - `global.benchmarking` (int64, 0-1): Enable MIOpen kernel benchmarking for optimal performance
@@ -390,30 +411,69 @@ Demonstrates how to use hipDNN's engine configuration knobs system for runtime p
 
 **Usage:**
 ```bash
-./knobs_usage                # Run all demonstrations including graph execution
-./knobs_usage --skip-execution  # Show knob API demonstrations only (faster)
+./build/bin/hipdnn_sample_knobs_usage              # Run all demonstrations with default knobs
+./build/bin/hipdnn_sample_knobs_usage --benchmark  # Execute with global.benchmarking=1
 ```
 
 **Key Features:**
-- Comprehensive demonstration of the knobs API
+- Demonstration of the knobs API
 - Shows both query and configuration workflows
 - Demonstrates validation and error handling
-- Includes real graph execution with different knob configurations
-- Educational sample with detailed console output
+- Includes real graph execution with the selected knob configuration
+- Educational sample with console output
 
 **Sample Output Sections:**
-- Section 1: Query available knobs and their metadata
-- Section 2: Use knob lookup map for specific knobs
-- Section 3: Create execution plan with default knobs
-- Section 4: Set custom knob values
-- Section 5: Validate knob settings against constraints
-- Section 6: Demonstrate different knob value types
-- Section 7-8: Execute graphs with different knob configurations
+- `Querying Knobs (vector)`: List available knobs and their metadata
+- `Querying Knobs (map)`: Use the knob lookup map for a specific knob
+- `Setting KnobSettings`: Create an execution plan with custom knob values
+- `Validating KnobSettings`: Validate knob settings against constraints
+- `Execution OK`: Execute the graph and print the first output values
 
 **Related Documentation:**
 - [hipDNN Knobs Documentation](../docs/Knobs.md) - Complete knobs guide
 - [HowTo Guide](../docs/HowTo.md#configuring-engine-knobs) - Quick start
-- [MIOpen Provider Knobs](../../dnn-providers/miopen-provider/docs/Knobs.md) - Provider-specific knobs
+- [MIOpen Provider Knobs](../../../dnn-providers/miopen-provider/docs/Knobs.md) - Provider-specific knobs
 
 > [!NOTE]
 > This sample is educational and demonstrates the knobs API. It is not a performance benchmark or validation test.
+
+### [**`AutotuneSample`**](./autotune/AutotuneSample.cpp)
+
+Demonstrates the hipDNN autotune API end-to-end on a convolution graph. The target is `hipdnn_sample_autotune`.
+
+The sample runs six scenarios. Use `--scenario=N` to run only one:
+1. Quick autotune (`add_all_engines`, then autotune and execute)
+2. Exhaustive autotune with a ranked result table
+3. Filtered autotune (`get_engine_configs`, workspace filter, `add_engine_configs`)
+4. Autotune with `AutotuneStorageConfig` to save results to a config file
+5. Compiled-plan autotune (`create_execution_plans`, `build_plans`, autotune)
+6. Manual benchmark loop with timing and workspace filtering
+
+Other options: `--large` (larger tensors), `--strategy=stable|average`, and `--iterations=N`. The sample accepts `--verify-cpu` but ignores it.
+
+### [**`DynamicBackendLoading`**](./dynamic/DynamicBackendLoading.cpp)
+
+Shows the runtime-load frontend target `hipdnn_frontend_dynamic`. The sample links only `hipdnn_frontend_dynamic`, not `libhipdnn_backend`. Creating the handle opens the backend at runtime. The sample runs an all-ones 1x1 convolution and checks that each output element equals the input channel count. The target is `hipdnn_sample_dynamic_backend_loading`. It takes no options.
+
+## cuDNN Compatibility Shim Samples
+
+Built when hipDNN is built with `-DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON`, or, in a standalone samples build, when the installed `hipdnn_frontend` provides the `cudnn_compatibility` component. They use cuDNN frontend spellings through the compatibility layer; see the [cuDNN compatibility layer guide](../docs/cudnn-shim.md).
+
+- [`cudnn_shim/ConvFprop.cpp`](./cudnn_shim/ConvFprop.cpp): builds and validates a convolution forward graph (host only).
+- [`cudnn_shim/Matmul.cpp`](./cudnn_shim/Matmul.cpp): builds and validates a batched matmul graph (host only).
+- [`cudnn_shim/Layernorm.cpp`](./cudnn_shim/Layernorm.cpp): builds and validates a layernorm forward graph (host only).
+- [`cudnn_shim/Pointwise.cpp`](./cudnn_shim/Pointwise.cpp): builds and validates a binary pointwise graph (host only).
+- [`cudnn_shim/SdpaRoundTrip.cpp`](./cudnn_shim/SdpaRoundTrip.cpp): builds and validates an SDPA forward graph (host only; also needs `HIPDNN_ENABLE_SDPA`).
+- [`cudnn_shim/HipifyConvFprop.cpp`](./cudnn_shim/HipifyConvFprop.cpp): a cuDNN frontend convolution forward program after textual hipify, with each rewritten line marked `// cuDNN:`. Runs on a GPU and checks the output.
+- [`cudnn_shim/ConvFpropV8.cpp`](./cudnn_shim/ConvFpropV8.cpp): a convolution forward built with the v0.x builders (cuDNN v8 API). Runs on a GPU and checks the output; `--overhead` reports the compatibility layer's per-call cost, and `--enforce-budget` makes that report fail when over budget.
+- [`cudnn_shim/ConvDgradV8.cpp`](./cudnn_shim/ConvDgradV8.cpp), [`cudnn_shim/ConvWgradV8.cpp`](./cudnn_shim/ConvWgradV8.cpp): convolution backward data and backward filter built the way PyTorch builds them. Run on a GPU and check the output. Each also tries a true-convolution (`CUDNN_CONVOLUTION`) and an asymmetric-padding variant; MIOpen rejects both, so they are skipped and their output has not been checked on any provider.
+- [`cudnn_shim/ConvBiasReluV8.cpp`](./cudnn_shim/ConvBiasReluV8.cpp): a fused convolution, bias and ReLU built with the v0.x builders. Runs on a GPU and checks the output. Its ctest waives the floor on gfx90a, where the MIOpen provider disables conv + bias + activation fusion ([rocm-libraries#5409](https://github.com/ROCm/rocm-libraries/issues/5409)).
+- [`cudnn_shim/MatmulBiasActV8.cpp`](./cudnn_shim/MatmulBiasActV8.cpp): a matmul with bias and activation built with the v0.x builders. Runs on a GPU and checks the output when the hipBLASLt provider is loaded; skipped elsewhere, including gfx115x on Windows, where hipBLASLt declines matmul.
+- [`cudnn_shim/PointwiseReluV8.cpp`](./cudnn_shim/PointwiseReluV8.cpp): a pointwise ReLU built with the v0.x builders. Runs on a GPU and checks the output; the bf16 variants have no MIOpen engine and are skipped.
+- [`cudnn_shim/BatchnormV8.cpp`](./cudnn_shim/BatchnormV8.cpp): batch norm forward training and backward built with the v0.x norm builders. Runs on a GPU and checks the output.
+- [`cudnn_shim/LayernormV8.cpp`](./cudnn_shim/LayernormV8.cpp), [`cudnn_shim/ResampleV8.cpp`](./cudnn_shim/ResampleV8.cpp): layer norm forward training and backward, and average and max pooling forward and backward, built with the v0.x builders. Run on a GPU and check the output only when hip-kernel-provider is loaded; skipped otherwise.
+- [`cudnn_shim/ReductionV8.cpp`](./cudnn_shim/ReductionV8.cpp): per-channel ADD and MAX reductions built with the v0.x builders. No provider implements reduction yet, so every variant is skipped and its output check has never run; the sample starts checking when a provider claims reduction.
+
+The v8 samples print `RESULT ran=<n> skipped=<m>`; a variant with no applicable engine is skipped, and a sample in which no variant ran prints `SKIPPED`. `--require-ran <n>` fails the run when fewer than `n` variants ran, and `--require-variant <name>` (repeatable) fails it when the named variant did not run; the name is the one a `Skipping variant:` line shows, without a parenthesized note after it, such as resample backward max-pooling's `(needs the forward plan for its index)`. `--waive-arch <stem>` (repeatable) drops both checks on a device whose base arch, without feature suffixes, starts with the stem: `gfx90a` matches `gfx90a:xnack+`, and `gfx11` matches every gfx11 device. The run prints `NOTE: floor waived on <arch> (--waive-arch <stem>)`, and numeric mismatches still fail it. They run the heuristics' first engine config, so they reject `--engine-id` and `--engine-name`.
+
+Each v8 ctest passes a floor, the number of fp32 variants MIOpen runs on every device unless the test waives that device's arch, and, where the floor is above 0, names fp32 NCHW variants that must run (see `CMakeLists.txt`). Matmul needs the hipBLASLt provider, and layer norm and resample need hip-kernel-provider. TheRock's `hipdnn-samples` job loads only the MIOpen provider, so these three samples report Skipped there and their floors are 0. A TheRock change makes that job load the hipBLASLt and hip-kernel providers; their floors rise once the TheRock version that rocm-libraries CI uses includes it. The `hipdnn-samples` superbuild preset builds the hipBLASLt provider but not hip-kernel-provider.

@@ -1,0 +1,231 @@
+{
+ "_provenance": "Trimmed verbatim from a real dnn-benchmark run (dnn-benchmarking 73fff8a, --validate pytorch, --engine -8518255706404043867 = hipkernel:Gfx950AttentionDense 0x89C9139111D7C3A5, gfx950 MI355X, 2026-10-01): the first 2 of 16 graphs, rows unchanged; metadata counts restated for 2 graphs and hostname replaced.",
+ "metadata": {
+  "timestamp": "2026-10-01T00:22:21.342882+00:00",
+  "hostname": "fixture-host",
+  "total_graphs": 2,
+  "total_combinations": 4,
+  "pass_combinations": 4,
+  "fail_combinations": 0,
+  "skip_combinations": 0,
+  "error_combinations": 0,
+  "pytorch_sdpa_backend_requested": "default",
+  "pytorch_rocm_fa_library_requested": null,
+  "rocm_version": "7.16.26332",
+  "cuda_version": null,
+  "cudnn_version": null,
+  "gpu_model": "AMD Instinct MI355X",
+  "gpu_arch": "gfx950",
+  "python_version": "3.12.3",
+  "hipdnn_version": "0.2.0",
+  "cpu_model": "AMD EPYC 9575F 64-Core Processor",
+  "cpu_count": 256,
+  "numa_nodes": 2,
+  "total_ram_gb": 3023.38,
+  "kernel_version": "6.8.0-31-generic",
+  "gpu_compute_units": null,
+  "gpu_hbm_gb": null,
+  "gpu_pcie_link": null,
+  "amdgpu_driver_version": null,
+  "host_rss_mb": 2560.65234375,
+  "host_ram_available_mb": 2900206.140625,
+  "vram_used_mb": null,
+  "vram_total_mb": null
+ },
+ "graphs": [
+  {
+   "graph_name": "fp16_b4_hq48_kv48_sq1024_skv1024_d128_causal",
+   "graph_path": "/work/corpus_hq48/fp16_b4_hq48_kv48_sq1024_skv1024_d128_causal.json",
+   "results": [
+    {
+     "provider": "pytorch",
+     "engine_id": 0,
+     "engine_name": "pytorch",
+     "engine_version": "2.15.0a0+rocm10.1.0a20260822",
+     "started_at": "2026-10-01T00:20:23.521778+00:00",
+     "status": "success",
+     "cpu_build_time_ms": 0.15097809955477715,
+     "gpu_kernel_stats": {
+      "mean_ms": 0.21438550904393197,
+      "median_ms": 0.21316200494766235,
+      "std_ms": 0.0047651962871101405,
+      "min_ms": 0.2106820046901703,
+      "max_ms": 0.25272199511528015,
+      "p95_ms": 0.21900394409894944,
+      "p99_ms": 0.23173399388790142,
+      "total_ms": 21.438550904393196
+     },
+     "host_stats": {
+      "mean_ms": 0.02526000840589404,
+      "median_ms": 0.02223451156169176,
+      "std_ms": 0.02696566351914364,
+      "min_ms": 0.02140994183719158,
+      "max_ms": 0.2917349338531494,
+      "p95_ms": 0.025135022588074204,
+      "p99_ms": 0.038517743814737916,
+      "total_ms": 2.526000840589404
+     },
+     "elapsed_time_ms": 121.08540791086853,
+     "analytical_flops": 51589939200,
+     "analytical_io_bytes": 201326592,
+     "derived_tflops_per_s": 240.6409809602764,
+     "derived_gbytes_per_s": 939.0867549669324,
+     "cpu_user_time_per_iter_us": 200.00000000000017,
+     "cpu_kernel_time_per_iter_us": 0.0,
+     "correctness": {
+      "passed": false,
+      "execution_success": true,
+      "tolerance_match": null,
+      "rtol": 1e-05,
+      "atol": 1e-06,
+      "error_message": "Reference provider timing row; no comparison performed"
+     }
+    },
+    {
+     "provider": "engine_-0x7636ec6eee283c5b",
+     "engine_id": -8518255706404043867,
+     "engine_name": "engine_-0x7636ec6eee283c5b",
+     "engine_version": "0.2.0.48963e8e156",
+     "started_at": "2026-10-01T00:20:23.643177+00:00",
+     "status": "success",
+     "plugin_path": "/work/bench-ext/ws/.venv/lib/python3.12/site-packages/_rocm_sdk_libraries/lib/hipdnn_plugins/engines",
+     "cpu_build_time_ms": 5.51364803686738,
+     "gpu_kernel_stats": {
+      "mean_ms": 0.14312540918588637,
+      "median_ms": 0.14122100174427032,
+      "std_ms": 0.003638501320647682,
+      "min_ms": 0.13976100087165833,
+      "max_ms": 0.15616199374198914,
+      "p95_ms": 0.15032300651073455,
+      "p99_ms": 0.15334940791130067,
+      "total_ms": 14.312540918588638
+     },
+     "host_stats": {
+      "mean_ms": 0.012483515311032534,
+      "median_ms": 0.012344913557171822,
+      "std_ms": 0.0006284250704219649,
+      "min_ms": 0.011680182069540024,
+      "max_ms": 0.016770092770457268,
+      "p95_ms": 0.01318356953561306,
+      "p99_ms": 0.014858306385576735,
+      "total_ms": 1.2483515311032534
+     },
+     "elapsed_time_ms": 147.19494385644794,
+     "workspace_bytes": 0,
+     "analytical_flops": 51589939200,
+     "analytical_io_bytes": 201326592,
+     "derived_tflops_per_s": 360.4526931552507,
+     "derived_gbytes_per_s": 1406.6446562156125,
+     "cpu_user_time_per_iter_us": 200.00000000000017,
+     "cpu_kernel_time_per_iter_us": 0.0,
+     "correctness": {
+      "passed": true,
+      "execution_success": true,
+      "tolerance_match": true,
+      "rtol": 0.001,
+      "atol": 0.001,
+      "max_abs_diff": 0.00048828125,
+      "max_rel_diff": 0.0011055831564590335
+     }
+    }
+   ]
+  },
+  {
+   "graph_name": "fp16_b4_hq48_kv48_sq1024_skv1024_d128_noncausal",
+   "graph_path": "/work/corpus_hq48/fp16_b4_hq48_kv48_sq1024_skv1024_d128_noncausal.json",
+   "results": [
+    {
+     "provider": "pytorch",
+     "engine_id": 0,
+     "engine_name": "pytorch",
+     "engine_version": "2.15.0a0+rocm10.1.0a20260822",
+     "started_at": "2026-10-01T00:20:24.147636+00:00",
+     "status": "success",
+     "cpu_build_time_ms": 0.10723806917667389,
+     "gpu_kernel_stats": {
+      "mean_ms": 0.2139354793727398,
+      "median_ms": 0.21242200583219528,
+      "std_ms": 0.006898520523343969,
+      "min_ms": 0.20700199902057648,
+      "max_ms": 0.24844199419021606,
+      "p95_ms": 0.2236870527267456,
+      "p99_ms": 0.24052199289202694,
+      "total_ms": 21.39354793727398
+     },
+     "host_stats": {
+      "mean_ms": 0.018988382071256638,
+      "median_ms": 0.017510028555989265,
+      "std_ms": 0.011240596510314107,
+      "min_ms": 0.016750069335103035,
+      "max_ms": 0.1293469686061144,
+      "p95_ms": 0.021629920229315754,
+      "p99_ms": 0.028587712440640255,
+      "total_ms": 1.8988382071256638
+     },
+     "elapsed_time_ms": 65.8018970862031,
+     "analytical_flops": 103079215104,
+     "analytical_io_bytes": 201326592,
+     "derived_tflops_per_s": 481.82384430216496,
+     "derived_gbytes_per_s": 941.0621959026658,
+     "cpu_user_time_per_iter_us": 300.0000000000025,
+     "cpu_kernel_time_per_iter_us": 0.0,
+     "correctness": {
+      "passed": false,
+      "execution_success": true,
+      "tolerance_match": null,
+      "rtol": 1e-05,
+      "atol": 1e-06,
+      "error_message": "Reference provider timing row; no comparison performed"
+     }
+    },
+    {
+     "provider": "engine_-0x7636ec6eee283c5b",
+     "engine_id": -8518255706404043867,
+     "engine_name": "engine_-0x7636ec6eee283c5b",
+     "engine_version": "0.2.0.48963e8e156",
+     "started_at": "2026-10-01T00:20:24.213617+00:00",
+     "status": "success",
+     "plugin_path": "/work/bench-ext/ws/.venv/lib/python3.12/site-packages/_rocm_sdk_libraries/lib/hipdnn_plugins/engines",
+     "cpu_build_time_ms": 4.790271166712046,
+     "gpu_kernel_stats": {
+      "mean_ms": 0.15318144962191582,
+      "median_ms": 0.14886099845170975,
+      "std_ms": 0.009019425517483217,
+      "min_ms": 0.14524099230766296,
+      "max_ms": 0.1767210066318512,
+      "p95_ms": 0.17447394356131554,
+      "p99_ms": 0.17660319596529006,
+      "total_ms": 15.318144962191582
+     },
+     "host_stats": {
+      "mean_ms": 0.01260785385966301,
+      "median_ms": 0.012440024875104427,
+      "std_ms": 0.0007861434507517124,
+      "min_ms": 0.011709984391927719,
+      "max_ms": 0.01634005457162857,
+      "p95_ms": 0.013809034135192631,
+      "p99_ms": 0.015765873249620203,
+      "total_ms": 1.260785385966301
+     },
+     "elapsed_time_ms": 76.9609808921814,
+     "workspace_bytes": 0,
+     "analytical_flops": 103079215104,
+     "analytical_io_bytes": 201326592,
+     "derived_tflops_per_s": 672.9223111442102,
+     "derived_gbytes_per_s": 1314.3013889535357,
+     "cpu_user_time_per_iter_us": 100.00000000000232,
+     "cpu_kernel_time_per_iter_us": 0.0,
+     "correctness": {
+      "passed": true,
+      "execution_success": true,
+      "tolerance_match": true,
+      "rtol": 0.001,
+      "atol": 0.001,
+      "max_abs_diff": 0.00048828125,
+      "max_rel_diff": 0.0009765625
+     }
+    }
+   ]
+  }
+ ]
+}

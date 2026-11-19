@@ -21,10 +21,13 @@
 //    cross-lane coalesced, but correct for any symmetric variant.
 
 #include "config.h"
+#include "bunnies.hpp"
 #include "layer_pars.h"
+#include "mathutil.h"
 #include "memory.h"
 #include "packed_ops.h"
 #include "types.h"
+#include "unfold_chunks.h"
 #include "wave_compute_index.h"
 
 #include <hip/hip_runtime.h>
@@ -43,13 +46,17 @@ class OutputWriter
     static constexpr int Kwg      = cfg.wave_k();
     static constexpr int block_k  = cfg.block_k();
 
-    // Unfold needs a staged Kwg (Kwg_k16 in {4, 2}).
+    // Unfold needs a staged Kwg (Kwg_k16 in {2, 3, 4}).
     //
     // store_staged (full-K) and store_partial_k (the rare straddling wave) both decode
     // the (n_local, w) pixel, but emit() does not.
-    static_assert(cfg.unfold_n == 1 || (Kwg_k16 == 4 || Kwg_k16 == 2),
+    static_assert(cfg.unfold_n == 1 || (Kwg_k16 >= 2 && Kwg_k16 <= 4),
                   "batch-unfold (unfold_n > 1) requires a staged-store Kwg "
-                  "(wave_k16 in {4, 2}); emit() does not handle the unfold pixel decode");
+                  "(wave_k16 in {2, 3, 4}); emit() does not handle the unfold pixel decode");
+
+    // store_partial_k has no chunk decode.
+    static_assert(!cfg.unfold_chunks || cfg.k_divisible,
+                  "an unfold_chunks config must be k_divisible");
 
     // Buffer-descriptor data format (same constant the input/weights loaders use).
     static constexpr int kRsrcDataFormat = 1 << 15;
@@ -73,9 +80,18 @@ public:
     static constexpr int kStageRowFp16      = kStageBlocksPerRow * 4; // 64: swizzled row width
     static constexpr int kStageWaveFp16     = 16 * kStageRowFp16; // 1024: one wave's 16-pixel row
     // All waves in the workgroup stage into disjoint slots of one buffer.
-    static constexpr int kStageBufFp16  = cfg.num_waves() * kStageWaveFp16;
-    static constexpr int kNumStageBufs  = 2; // tic/toc
-    static constexpr int stage_lds_fp16 = kNumStageBufs * kStageBufFp16;
+    static constexpr int kStageBufFp16 = cfg.num_waves() * kStageWaveFp16;
+    static constexpr int kNumStageBufs = 2; // tic/toc
+
+    // True when write() routes through the LDS-staged wide store. The narrow register
+    // store ignores the staging pointer, so a config taking it reserves nothing.
+    static constexpr bool stages_output = (Kwg_k16 == 4 || cfg.unfold_n > 1);
+
+    static constexpr int stage_lds_fp16 = stages_output ? kNumStageBufs * kStageBufFp16 : 0;
+
+    // The staged path's LDS swizzle and b64 opcodes are 16-bit only.
+    static_assert(!stages_output || sizeof(datatype_t) == 2,
+                  "the LDS-staged wide store assumes a 2-byte output element");
 
     __device__ OutputWriter(const OutputPars& pars,
                             datatype_t* out,
@@ -91,40 +107,57 @@ public:
         , out_(out)
         // Per-wave staging slot: the global wave id picks a disjoint 1024-fp16 region.
         //
-        // K partitions and waves never alias, so no __syncthreads is needed.
-        , stage_(stage_lds +
-                 __builtin_amdgcn_readfirstlane((wave_k_idx * (cfg.waves_p * cfg.waves_q) + wave) *
-                                                kStageWaveFp16))
+        // K partitions and waves never alias, so no __syncthreads is needed. A config
+        // taking the narrow store reserves nothing and is passed nullptr, which must
+        // not be offset.
+        , stage_(stages_output ? stage_lds + __builtin_amdgcn_readfirstlane(
+                                                 (wave_k_idx * (cfg.waves_p * cfg.waves_q) + wave) *
+                                                 kStageWaveFp16)
+                               : nullptr)
         // readfirstlane pins these wave-uniform bases to SGPRs.
         //
         // Else the threadIdx-derived values stay in VGPRs across the whole loop and
         // spill under K128's pressure. Lane-within-wave mappings are recomputed from
-        // mbcnt instead (see volatile_lane_id()), so they need not survive the loop.
+        // mbcnt instead (see bunnies::volatile_lane_id()), so they need not survive the loop.
         , wave_p_base_(__builtin_amdgcn_readfirstlane(block_p + WaveComputeIndex<cfg>(wave).p()))
         , wave_q_base_(__builtin_amdgcn_readfirstlane(block_q + WaveComputeIndex<cfg>(wave).q()))
         , wg_k_base_(__builtin_amdgcn_readfirstlane(block_k_idx * block_k + wave_k_idx * Kwg))
         // Global image index this q-wave's first packed image starts at (unfold only).
         //
         // 0 for the standard tile; the per-lane n_local is added in the store loop.
+        //
+        // unfold_chunks: the group's first image.
         , wave_img_base_(__builtin_amdgcn_readfirstlane(
-              block_n * cfg.unfold_n + WaveComputeIndex<cfg>(wave).wave_image_base()))
+              cfg.unfold_chunks
+                  ? chunk_group(block_n, cfg.unfold_n, chunks_per_row(pars)).image0
+                  : block_n * cfg.unfold_n + WaveComputeIndex<cfg>(wave).wave_image_base()))
         // This wave's image base relative to the folded output base (see the fold in
         // the body). Standard tile: 0. Unfold: the q-wave's first packed image within
         // the tile's nu-image window (block_n's contribution is folded into the base).
-        , img_rel_base_(cfg.unfold_n == 1 ? 0 : WaveComputeIndex<cfg>(wave).wave_image_base())
+        , img_rel_base_(cfg.unfold_n == 1 || cfg.unfold_chunks
+                            ? 0
+                            : WaveComputeIndex<cfg>(wave).wave_image_base())
+        // unfold_chunks: this q-wave's first slot as a chunk offset from the group's image0.
+        , wave_chunk0_(cfg.unfold_chunks
+                           ? __builtin_amdgcn_readfirstlane(
+                                 chunk_group(block_n, cfg.unfold_n, chunks_per_row(pars)).chunk0 +
+                                 WaveComputeIndex<cfg>(wave).wave_image_base())
+                           : 0)
         , block_g_idx_(block_g_idx)
     {
         // Fold this tile's image origin into the 64-bit base so the 32-bit store
         // offsets only span the tile's images.
         //
-        // The whole output may exceed 4 GiB (NUM_RECORDS is 32-bit); one image (nu
-        // images under batch-unfold) fits. The store loops address relative to the
+        // The whole output may exceed 4 GiB (NUM_RECORDS is 32-bit); one image (nu under
+        // batch-unfold, two under unfold_chunks) fits. The store loops address relative to the
         // fold via img_rel_base_, while N/Wo/Ho guards stay absolute. The hardware
         // bounds-checks every store against NUM_RECORDS, dropping offsets past the
         // window. img0 stays a constructor local so its 64-bit live range does not
         // span the round and spill the writer (see img_rel_base_).
-        const size_t img_stride = static_cast<size_t>(pars_.Ho) * pars_.Wo * pars_.K_per_pixel();
-        const size_t img0       = static_cast<size_t>(block_n) * cfg.unfold_n;
+        const size_t img_stride   = static_cast<size_t>(pars_.Ho) * pars_.Wo * pars_.K_per_pixel();
+        const size_t img0         = cfg.unfold_chunks ? static_cast<size_t>(wave_img_base_)
+                                                      : static_cast<size_t>(block_n) * cfg.unfold_n;
+        constexpr int window_imgs = cfg.unfold_chunks ? 2 : cfg.unfold_n;
 
         // large_tensor: also fold this wave's absolute output-row origin into the base.
         //
@@ -145,7 +178,7 @@ public:
         // the exact-K store, but the clamp keeps a padded last row inside the tensor).
         const size_t window_span =
             cfg.large_tensor ? static_cast<size_t>(wave_p) * row_stride * sizeof(datatype_t)
-                             : static_cast<size_t>(cfg.unfold_n) * img_stride * sizeof(datatype_t);
+                             : static_cast<size_t>(window_imgs) * img_stride * sizeof(datatype_t);
         const size_t remaining_bytes =
             (static_cast<size_t>(pars_.N) * img_stride - img0 * img_stride - row_off) *
             sizeof(datatype_t);
@@ -193,25 +226,32 @@ public:
 private:
     using vec4_t = decltype(packed_convert<datatype_t>(fp32x4_t{}));
 
-    // Raw store-payload type for the buffer_store builtins: vec4_t (4 fp16) = b64.
+    // Raw store-payload types for the buffer_store builtins: a lane's 4-contiguous-K
+    // run is vec4_t, which is 8 bytes (b64) at 2 bytes per channel and 16 (b128) at 4.
     using u32x2_t = __attribute__((ext_vector_type(2))) uint32_t;
+    using u32x4_t = __attribute__((ext_vector_type(4))) uint32_t;
 
     // buffer_store helpers: byte offset = elem_off * sizeof(elem), soffset 0.
-    __device__ void store_b64(int elem_off, vec4_t r) const
+    __device__ void store_vec4(int elem_off, vec4_t r) const
     {
-        __builtin_amdgcn_raw_buffer_store_b64(__builtin_bit_cast(u32x2_t, r),
-                                              out_rsrc_,
-                                              elem_off * static_cast<int>(sizeof(datatype_t)),
-                                              0,
-                                              kStoreCachePolicy);
+        const int byte_off = elem_off * static_cast<int>(sizeof(datatype_t));
+        if constexpr(sizeof(datatype_t) == 4)
+            __builtin_amdgcn_raw_buffer_store_b128(
+                __builtin_bit_cast(u32x4_t, r), out_rsrc_, byte_off, 0, kStoreCachePolicy);
+        else
+            __builtin_amdgcn_raw_buffer_store_b64(
+                __builtin_bit_cast(u32x2_t, r), out_rsrc_, byte_off, 0, kStoreCachePolicy);
     }
-    __device__ void store_b16(int elem_off, datatype_t v) const
+    // One output channel, for the arbitrary-K path's per-channel guarded store.
+    __device__ void store_elem(int elem_off, datatype_t v) const
     {
-        __builtin_amdgcn_raw_buffer_store_b16(__builtin_bit_cast(uint16_t, v),
-                                              out_rsrc_,
-                                              elem_off * static_cast<int>(sizeof(datatype_t)),
-                                              0,
-                                              kStoreCachePolicy);
+        const int byte_off = elem_off * static_cast<int>(sizeof(datatype_t));
+        if constexpr(sizeof(datatype_t) == 4)
+            __builtin_amdgcn_raw_buffer_store_b32(
+                __builtin_bit_cast(uint32_t, v), out_rsrc_, byte_off, 0, kStoreCachePolicy);
+        else
+            __builtin_amdgcn_raw_buffer_store_b16(
+                __builtin_bit_cast(uint16_t, v), out_rsrc_, byte_off, 0, kStoreCachePolicy);
     }
 
     template <int K16>
@@ -238,7 +278,7 @@ private:
     template <int K16, bool CheckBounds>
     __device__ void emit(const fp32x4_t (&acc)[wave_p][wave_q16][Kwg_k16])
     {
-        const int lane_idx = volatile_lane_id();
+        const int lane_idx = bunnies::volatile_lane_id();
         const int q_lane   = lane_idx % 16;       // Q within the q16 group
         const int k_bank   = (lane_idx / 16) * 4; // K offset of this lane's bank
 
@@ -273,9 +313,9 @@ private:
 #pragma unroll
                 for(int k16 = 0; k16 < K16; ++k16)
                 {
-                    // One dwordx2: 4 contiguous K = k16*16 + k_bank + {0..3}.
+                    // 4 contiguous K = k16*16 + k_bank + {0..3}.
                     const vec4_t r = packed_convert<datatype_t>(acc[p][q16][k16]);
-                    store_b64(px_off + k16 * 16, r);
+                    store_vec4(px_off + k16 * 16, r);
                 }
             }
         }
@@ -283,14 +323,14 @@ private:
 
     // Narrow store for the wave straddling the real-K boundary (arbitrary-K path).
     //
-    // Same lane mapping as emit(), but each channel goes out as a scalar fp16 guarded
-    // by k_out < K_per_group, so padding is never written. P and Q always
+    // Same lane mapping as emit(), but each channel goes out as one scalar element
+    // guarded by k_out < K_per_group, so padding is never written. P and Q always
     // bounds-checked (this wave is rare; no full-tile fast path). Unfold tiles decode
     // the packed (image, column) here too, using the pre-transpose write-side pixel
     // (q16*16 + q_lane), unlike store_staged's post-transpose read-side index.
     __device__ void store_partial_k(const fp32x4_t (&acc)[wave_p][wave_q16][Kwg_k16])
     {
-        const int lane_idx = volatile_lane_id();
+        const int lane_idx = bunnies::volatile_lane_id();
         const int q_lane   = lane_idx % 16;       // Q within the q16 group
         const int k_bank   = (lane_idx / 16) * 4; // K offset of this lane's bank
 
@@ -349,7 +389,7 @@ private:
                     {
                         // Channel within the group; skip if it is K-padding.
                         if(lane_k_in_group + k16 * 16 + a < k_real)
-                            store_b16(px_off + k16 * 16 + a, r[a]);
+                            store_elem(px_off + k16 * 16 + a, r[a]);
                     }
                 }
             }
@@ -375,7 +415,7 @@ private:
 
     // LDS-staged wide store, one P-row at a time.
     //
-    // Per row: ds_write_b64 the 4-K runs, ds_read_b64 the transpose, store_b64.
+    // Per row: ds_write_b64 the 4-K runs, ds_read_b64 the transpose, store_vec4.
     // Double-buffered (tic/toc) with the write running one row ahead so its LDS
     // latency overlaps the read. The shared lgkmcnt FIFO orders it: each row issues
     // its read, then the NEXT row's write, then drains only the reads; the next
@@ -387,21 +427,26 @@ private:
         // Pin wave_q16 == 1: the staging loop has no q16 dimension.
         static_assert(wave_q16 == 1, "store_staged does not handle wave_q16 > 1");
         constexpr int K16 = Kwg_k16; // b64 writes per row (4 at K64, 2 at K32)
-        constexpr int lpp = Kwg / 4; // lanes per pixel (16 at K64, 8 at K32)
+        // Lanes per pixel (16 at K64, 8 at K32).
+        //
+        // At K48 a pixel's 12 lanes do not divide the 64-lane wave, so K48 reads back as K64
+        // and lanes 12-15 of each pixel store nothing.
+        constexpr int lpp = (K16 == 3 ? 64 : Kwg) / 4;
         constexpr int rd_passes =
             16 / (64 / lpp); // 16 pixels / (64/lpp) per pass (4 at K64, 2 at K32)
 
-        // volatile_lane_id() cannot be hoisted out of the round loop.
+        // bunnies::volatile_lane_id() cannot be hoisted out of the round loop.
         //
         // It and its stage_off swizzle chain materialize here in the low-pressure
         // writer tail rather than spanning the round and spilling at K128's ceiling.
-        const int lane_idx = volatile_lane_id();
+        const int lane_idx = bunnies::volatile_lane_id();
         // Write side: lane holds Q = L%16, K = k16*16 + (L/16)*4 + {0..3}.
         const int w_q     = lane_idx % 16;
         const int w_kbank = (lane_idx / 16) * 4;
         // Read side: lane holds 4 contiguous K of one pixel (b64).
         const int r_pixel0 = lane_idx / lpp;       // pixel within a 4-pixel pass
         const int r_kbase  = (lane_idx % lpp) * 4; // 4-K block this lane reads
+        const bool r_k_in  = lpp * 4 == Kwg || r_kbase < Kwg;
 
         const int Kpp        = pars_.K_per_pixel();
         const int row_stride = pars_.Wo * Kpp;
@@ -433,8 +478,13 @@ private:
             const int buf       = p & 1;
             datatype_t* rd_base = stage_ + buf * kStageBufFp16;
 
-            // Drain this row's stage write before reading it back.
+            // Drain this row's stage write and order the lanes' accesses before reading it back.
+            //
+            // Lanes read other lanes' writes, and the look-ahead write overwrites the buffer read
+            // two rows earlier. s_waitcnt is not convergent, so on divergent paths the compiler
+            // may move one lane's access past another's; __syncwarp is convergent.
             wait_lgkmcnt_all();
+            __syncwarp();
 
             const int p_out = wave_p_base_ + p;
             const bool p_in = p_out < pars_.Ho;
@@ -472,8 +522,20 @@ private:
                 if constexpr(cfg.unfold_n == 1)
                 {
                     const int q_out = wave_q_base_ + pixel;
-                    if(p_in && q_out < pars_.Wo)
-                        store_b64(p_base + q_out * Kpp + r_kbase, v[rp]);
+                    if(r_k_in && p_in && q_out < pars_.Wo)
+                        store_vec4(p_base + q_out * Kpp + r_kbase, v[rp]);
+                }
+                else if constexpr(cfg.unfold_chunks)
+                {
+                    constexpr int w_unfold = cfg.w_unfold();
+                    const SlotChunk sc =
+                        slot_chunk(wave_chunk0_, pixel / w_unfold, chunks_per_row(pars_));
+                    const int w_out = sc.chunk * w_unfold + pixel % w_unfold;
+                    const bool n_in = wave_img_base_ + sc.image < pars_.N;
+                    if(r_k_in && p_in && n_in && w_out < pars_.Wo)
+                        store_vec4(p_base + sc.image * static_cast<int>(img_stride) + w_out * Kpp +
+                                       r_kbase,
+                                   v[rp]);
                 }
                 else
                 {
@@ -487,28 +549,18 @@ private:
                     const bool n_in        = wave_img_base_ + n_local < pars_.N;
                     // img_stride is size_t for the large_tensor overflow guard; unfold
                     // configs are never > 2 GiB, so the image term fits int here.
-                    if(p_in && n_in && w_out < pars_.Wo)
-                        store_b64(p_base + static_cast<int>(n_local * img_stride) + w_out * Kpp +
-                                      r_kbase,
-                                  v[rp]);
+                    if(r_k_in && p_in && n_in && w_out < pars_.Wo)
+                        store_vec4(p_base + static_cast<int>(n_local * img_stride) + w_out * Kpp +
+                                       r_kbase,
+                                   v[rp]);
                 }
             }
         }
     }
 
-    // Lane within wave, from mbcnt on the exec mask (not threadIdx.x).
-    //
-    // Reading threadIdx.x here would keep v0 live across the whole loop and spill it
-    // under K128's pressure; mbcnt has no such dependence. Emitted as volatile asm so
-    // LICM cannot hoist it to round setup, where its live range would spill and each
-    // reload's s_waitcnt vmcnt would drain the cross-round prefetch (see store_staged).
-    __device__ static int volatile_lane_id()
+    __device__ static int chunks_per_row(const OutputPars& pars)
     {
-        int result;
-        asm volatile("v_mbcnt_lo_u32_b32 %0, -1, 0\n\t"
-                     "v_mbcnt_hi_u32_b32 %0, -1, %0"
-                     : "=v"(result));
-        return result;
+        return divup(pars.Wo, cfg.w_unfold());
     }
 
     const OutputPars& pars_;
@@ -520,6 +572,7 @@ private:
     int wg_k_base_;
     int wave_img_base_;
     int img_rel_base_; // this wave's image base relative to the folded out_rsrc_ base
+    int wave_chunk0_;
     int block_g_idx_;
 };
 

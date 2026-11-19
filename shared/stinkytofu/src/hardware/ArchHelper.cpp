@@ -25,7 +25,9 @@
 #include <cassert>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <utility>
 
 #include "stinkytofu/Config/Config.h"
 
@@ -39,6 +41,25 @@ namespace {
 #include "arch_headers/ArchHelper_includes.inc"
 
 namespace stinkytofu {
+namespace {
+// Alternate spellings of a registered identity. One stepping can be known by more than one
+// name: this tree registers gfx1250 A0 as "gfx1250v0", while the toolchain and the runtime
+// call it "gfx1250-strict" (the LLVM processor name, which ROCr also reports for A0 parts).
+// Kernels tagged with either spelling must land on the same cost tables, so a new spelling is
+// a row here rather than a branch at each call site.
+constexpr std::pair<std::string_view, std::string_view> archNameAliases[] = {
+    {"gfx1250-strict", "gfx1250v0"},
+};
+
+// The registered identity `name` denotes, or `name` itself when it is not an alias.
+std::string_view canonicalArchName(std::string_view name) {
+    for (const auto& [alias, identity] : archNameAliases) {
+        if (alias == name) return identity;
+    }
+    return name;
+}
+}  // namespace
+
 ArchHelper::ArchHelper() {
 // Populate the fixed list of architecture infos
 #define STINKYTOFU_ARCH(archName) \
@@ -69,8 +90,9 @@ const ArchHelper::ArchInfo* ArchHelper::getArchInfo(uint32_t major, uint32_t min
 }
 
 const ArchHelper::ArchInfo* ArchHelper::getArchInfo(const std::string& name) const {
+    const std::string_view identity = canonicalArchName(name);
     for (const auto& archInfo : registeredArchInfos) {
-        if (archInfo && archInfo->name == name) {
+        if (archInfo && archInfo->name == identity) {
             return archInfo.get();
         }
     }
@@ -91,9 +113,10 @@ const GfxArchID ArchHelper::getGfxArchID(uint32_t major, uint32_t minor, uint32_
 }
 
 GfxArchID ArchHelper::getGfxArchID(const std::string& name) const {
+    const std::string_view identity = canonicalArchName(name);
     for (size_t i = 0; i < registeredArchInfos.size(); ++i) {
         const auto& archInfo = registeredArchInfos[i];
-        if (archInfo && archInfo->name == name) {
+        if (archInfo && archInfo->name == identity) {
             return static_cast<GfxArchID>(
                 i);  // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
         }

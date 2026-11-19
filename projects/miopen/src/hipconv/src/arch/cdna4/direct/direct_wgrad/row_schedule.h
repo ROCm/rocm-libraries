@@ -82,6 +82,43 @@ struct RowSchedule
     // Position j carries delta row delta_row(iter) - (kh - 1) + j, pairing with filter row
     // kh - 1 - j.
     constexpr int reg_slot(int iter, int j) const { return (iter + j) % kh; }
+
+    // ---- row tiles ----
+    //
+    // A loader addresses its rows with a 32-bit soffset of row * row_stride, which overflows
+    // once an image passes 2 GiB. A tiled config folds the tile's origin into the 64-bit base
+    // instead. Zero is untiled, which every config that does not need this keeps.
+    //
+    // Both loaders take the same origin, so neither carries a negative offset: delta leads S by
+    // pad_h, and the prologue runs only in tile 0.
+    int rows_per_tile = 0;
+
+    constexpr bool tiled() const { return rows_per_tile > 0; }
+
+    // Tiles the main loop runs, and the iteration and origin each starts at.
+    constexpr int tiles() const
+    {
+        return tiled() ? (iterations() + rows_per_tile - 1) / rows_per_tile : 1;
+    }
+    constexpr int tile_first_iter(int tile) const { return tiled() ? tile * rows_per_tile : 0; }
+    constexpr int tile_origin(int tile) const { return tile_first_iter(tile); }
+
+    // Iterations in a tile, which the last one may cut short.
+    constexpr int tile_iterations(int tile) const
+    {
+        if(!tiled())
+            return iterations();
+        const int left = iterations() - tile_first_iter(tile);
+        return left < rows_per_tile ? left : rows_per_tile;
+    }
+
+    // Rows each loader reaches from the tile origin, which is what its window has to span.
+    //
+    // A tile issues prefetch_rows past its last iteration, and those loads resolve through the
+    // tile's own base rather than the next one's, so the window carries the lookahead. Delta
+    // additionally leads S by pad_h.
+    constexpr int s_tile_rows() const { return rows_per_tile + prefetch_rows; }
+    constexpr int delta_tile_rows() const { return rows_per_tile + pad_h + prefetch_rows; }
 };
 
 } // namespace hipconv::cdna4::direct_wgrad

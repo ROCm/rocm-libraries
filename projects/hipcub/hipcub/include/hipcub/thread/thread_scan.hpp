@@ -35,6 +35,8 @@
  #ifndef HIPCUB_THREAD_THREAD_SCAN_HPP_
  #define HIPCUB_THREAD_THREAD_SCAN_HPP_
 
+#include <hip/hip_common.h>
+
  #ifdef __HIP_PLATFORM_AMD__
     #include "../backend/rocprim/thread/thread_scan.hpp" // IWYU pragma: export
 #elif defined(__HIP_PLATFORM_NVIDIA__)

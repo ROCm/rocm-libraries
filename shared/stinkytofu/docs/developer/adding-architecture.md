@@ -11,6 +11,7 @@ Adding a new architecture involves:
 2. Creating the architecture folder with `.def` files and `.cpp` (Step 3)
 3. Updating generated-file lists: Config.h.in, tablegen CMakeLists, RocisaArchInfo (Step 4)
 4. Implementing Rocisa-related header (Step 5)
+5. Pipeline and allocation-rules TUs for a new ISA triple (Step 6 and 7)
 
 **Instruction definitions and costs** are in `.def` files; tablegen generates `*_init.inc`, `*_costs.inc`. The `defineGfxXXXInsts` and cost application are **auto-generated** from `GfxArchDefines_block.inc.in` and the `DEF_ARCH` block. You only provide the maps in `GfxXXX.cpp`.
 
@@ -94,7 +95,16 @@ DEF_ARCH(GfxYourArch,
     .wavefront = 64,            // 64 for CDNA, 32 for RDNA
     .maxVGPR = 256, .maxSGPR = 102, .maxAGPR = 256,
     .totalVgprPerSimd = 512,    // physical VGPR file per SIMD
-    .vgprAllocGranule = 8,
+    .vgprAllocGranule = 8,      // what the hardware reserves in; confirm it rather
+                                // than copy it. Assemble `.amdhsa_next_free_vgpr N`
+                                // for the target and disassemble: the value you get
+                                // back is the granule at work.
+    .maxWavesPerSimd = 8,       // wave slots per SIMD. Occupancy is capped here once
+                                // a kernel is small enough that registers stop binding
+    .packedWorkitemId = 1,      // 1 when the dispatch packs X, Y and Z into v0, so one
+                                // VGPR arrives filled however many dimensions are
+                                // enabled. 0 for the unpacked convention, one VGPR per
+                                // enabled dimension. LLVM calls this `packed-tid`.
     .defaultCycle = 4, .defaultLatency = 4)   // 4 for CDNA, 1 for RDNA
 ```
 
@@ -237,6 +247,12 @@ void BackendRegistry::registerAllBackends() {
 
 Finally, add the source file to `src/pipeline/backend/CMakeLists.txt`.
 
+### Step 7: Allocation rules (new ISA triple)
+
+A new triple needs a rules TU even if the table is empty at first — that is how a stepping shares its parent's rows with no duplicate, and how a later rule is one row rather than a policy edit. Copy `src/transforms/asm/ra/target/Gfx1250AllocationRules.cpp`, key on the same literal triple style `{major, minor, stepping}`, add the source to that directory's `CMakeLists.txt`, and add the anchor to `AllocationRulesRegistry::registerAll()`.
+
+How to fill in a row, Off → Audit → Active, and example rows are [register allocation](register-allocation.md) section 14. Skip this for a stepping of an existing chip: the registry is keyed by triple, so Gfx1250v0 picks up Gfx1250's table the same way it picks up the pipeline.
+
 ---
 
 ## Summary Checklist
@@ -256,6 +272,7 @@ Finally, add the source file to `src/pipeline/backend/CMakeLists.txt`.
   - [ ] Create `src/pipeline/backend/GfxYourArchBackend.cpp` with pipeline, registrar, and anchor function
   - [ ] Add anchor call to `BackendRegistry::registerAllBackends()` in `BackendRegistry.cpp`
   - [ ] Add source to `src/pipeline/backend/CMakeLists.txt`
+  - [ ] Create `src/transforms/asm/ra/target/GfxYourArchAllocationRules.cpp`, add it to that `CMakeLists.txt`, and add the anchor to `AllocationRulesRegistry::registerAll()`
 - [ ] Rebuild and test:
   ```bash
   cd build && cmake .. && cmake --build . -j && ctest -j
@@ -302,16 +319,23 @@ library was built with, so a v0-only build hands callers v0's cost table transpa
 
 ## Running a tensilelite YAML through stinkytofu
 
-tensilelite reaches stinkytofu through `rocisa`. Two switches drive it:
+tensilelite reaches stinkytofu through native `rocisa`: the rocisa -> logical -> asm lowering
+(`toStinkyTofuModule`) is compiled directly into `_rocisa`, so there is no separate backend shim
+and no per-process redirect to set up. Two things drive it:
 
-- **Per-solution:** set `ScheduleIterAlg: 4` in the solution. `Solution.py` remaps this to
+- **Per-solution opt-in:** set `ScheduleIterAlg: 4` in the solution. `Solution.py` remaps this to
   `_StinkyTofuOptLevel=3` and rejects it if rocisa was built without the stinkytofu backend or
   the ISA has no backend.
-- **Per-process:** `ROCISA_BACKEND=stinkytofu` redirects `import rocisa` to the
-  `rocisa_stinkytofu_adaptor` shim (backed by `_stinkytofu.so`) instead of native `_rocisa`.
+- **Lowering path (module option):** `LowerViaLogicalIR` selects the logical-IR lowering path
+  inside `toStinkyTofuModule` (KernelWriter builds rocisa, which is lowered rocisa -> logical IR
+  -> asm IR). It defaults to on; override it with the `StinkyTofuLowerViaLogicalIR` global
+  parameter or a `StinkyTofuModuleOptions` entry.
 
 ```bash
-export PYTHONPATH=/path/to/shared/stinkytofu/build/lib:$PYTHONPATH
-export ROCISA_BACKEND=stinkytofu
-./Tensile/bin/Tensile config.yaml ./out    # config.yaml uses ScheduleIterAlg: 4
+# rocisa already contains the stinkytofu backend; just run a solution that opts in.
+../../projects/hipblaslt/tensilelite/tensilelite/bin/Tensile config.yaml ./out    # config.yaml uses ScheduleIterAlg: 4
 ```
+
+> **Removed:** the old `ROCISA_BACKEND=stinkytofu` env switch and the `rocisa_stinkytofu_adaptor`
+> Python shim no longer exist. stinkytofu is linked into `_rocisa` and reached natively; the
+> rocisa -> logical conversion lives in C++ (`src/conversion/rocisa/ToStinkyTofuUtils.cpp`).

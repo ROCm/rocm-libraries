@@ -22,19 +22,26 @@ glue instead of ~40.
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
+import operator
 from dataclasses import dataclass, field
-from typing import List, Optional, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 
 __all__ = [
     "IOSpecRule",
     "SignatureBuilder",
     "WarpTileBlockSizeMixin",
+    "align_up",
+    "ceil_div",
     "ceil_div_grid",
     "choose_load_vec",
     "derive_block_size",
     "kernel_name_join",
+    "non_default_fields",
     "ptr_type_str",
+    "salted_kernel_name",
     "sig_param",
     "sig_scalar",
     "validate_io",
@@ -270,10 +277,73 @@ def ceil_div_grid(*dims: Tuple[int, int]) -> Tuple[int, int, int]:
     for total, tile in dims:
         if int(tile) <= 0:
             raise ValueError(f"tile must be positive, got {tile}")
-        out.append((int(total) + int(tile) - 1) // int(tile))
+        out.append(ceil_div(int(total), int(tile)))
     while len(out) < 3:
         out.append(1)
     return (out[0], out[1], out[2])
+
+
+# ---------------------------------------------------------------------
+# ceil_div / align_up (host integer arithmetic)
+# ---------------------------------------------------------------------
+
+
+def ceil_div(a: int, b: int) -> int:
+    """``ceil(a / b)`` of two integers (``b != 0``), exact for any sign.
+
+    Host arithmetic only (tile counts, grids, workspace sizes); it never
+    emits IR. Integer-like values (``numpy`` integers, ``bool``) are
+    accepted through :func:`operator.index`; anything else raises
+    ``TypeError``.
+    """
+    a, b = operator.index(a), operator.index(b)
+    return -(-a // b)
+
+
+def align_up(n: int, mult: int) -> int:
+    """``n`` rounded up to the next multiple of ``mult`` (``mult > 0``)."""
+    return ceil_div(n, mult) * operator.index(mult)
+
+
+# ---------------------------------------------------------------------
+# non_default_fields / salted_kernel_name (spec-keyed kernel names)
+# ---------------------------------------------------------------------
+
+
+def non_default_fields(
+    spec: object, *, skip: Iterable[str] = ()
+) -> Tuple[Tuple[str, object], ...]:
+    """``(name, value)`` of every field of the dataclass ``spec`` whose value
+    differs from its declared default, in field order.
+
+    Fields without a plain default (the required problem shape, and a
+    ``default_factory`` field) and the fields named in ``skip`` are left out.
+    """
+    skipped = frozenset(skip)
+    out = []
+    for f in dataclasses.fields(spec):
+        if f.name in skipped or f.default is dataclasses.MISSING:
+            continue
+        value = getattr(spec, f.name)
+        if value != f.default:
+            out.append((f.name, value))
+    return tuple(out)
+
+
+def salted_kernel_name(base: str, salted: Iterable[Tuple[str, object]]) -> str:
+    """``base`` when ``salted`` is empty, else ``base`` plus ``_`` and the first
+    10 hex digits of the SHA-1 of ``repr`` of the ``(name, value)`` pairs
+    sorted by name.
+
+    One spec class keys one kernel per distinct configuration: the fields
+    spelled out in ``base`` stay readable, every other non-default field is
+    folded into the salt (see :func:`non_default_fields`).
+    """
+    items = sorted(salted, key=lambda kv: kv[0])
+    if not items:
+        return base
+    digest = hashlib.sha1(repr(items).encode()).hexdigest()
+    return f"{base}_{digest[:10]}"
 
 
 # ---------------------------------------------------------------------

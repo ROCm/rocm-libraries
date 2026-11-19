@@ -456,19 +456,16 @@ namespace rocisa
             elif divisor >= 3:
                 shift = 32+1
             */
-            int shift   = 32 + 1;
-            int magic   = ((1ULL << shift) / divisor) + 1;
-            int magicHi = magic >> 16;
-            int magicLo = magic & 0xFFFF;
+            int shift = 32 + 1;
+            int magic = ((1ULL << shift) / divisor) + 1;
 
-            module->addT<SMovB32>(tmpSgpr1, 0, "STATIC_DIV: divisor=" + std::to_string(divisor));
-            module->addT<SMulI32>(tmpSgpr, magicHi, dRegSgpr, "tmp1 = dividend * magic hi");
-            module->addT<SLShiftLeftB64>(tmp2Sgpr, 16, tmp2Sgpr, "left shift 16 bits");
-            module->addT<SMulI32>(qRegSgpr, dRegSgpr, magicLo, "tmp0 = dividend * magic lo");
-            module->addT<SAddU32>(tmpSgpr, qRegSgpr, tmpSgpr, "add lo");
-            module->addT<SAddCU32>(tmpSgpr1, tmpSgpr1, 0, "add hi");
+            // Keep dividend * magic as a full 64-bit product in tmp2Sgpr; a 32-bit
+            // product wraps once dividend * magic reaches 2^32.
+            module->addT<SMulHIU32>(
+                tmpSgpr1, dRegSgpr, magic, "STATIC_DIV: divisor=" + std::to_string(divisor));
+            module->addT<SMulI32>(tmpSgpr, dRegSgpr, magic, "tmp = dividend * magic");
             module->addT<SLShiftRightB64>(
-                tmp2Sgpr, shift, tmp2Sgpr, "tmp1 = (dividend * magic) << shift");
+                tmp2Sgpr, shift, tmp2Sgpr, "tmp = (dividend * magic) >> shift");
             module->addT<SMovB32>(qRegSgpr, tmpSgpr, "quotient");
 
             if(doRemainder)
@@ -550,17 +547,14 @@ namespace rocisa
             elif divisor >= 3:
                 shift = 32+1
             */
-            int shift   = 32 + 1;
-            int magic   = ((1ULL << shift) / divisor) + 1;
-            int magicHi = magic >> 16;
-            int magicLo = magic & 0xFFFF;
+            int shift = 32 + 1;
+            int magic = ((1ULL << shift) / divisor) + 1;
 
-            module->addT<SMovB32>(tmpSgpr1, 0, "STATIC_DIV: divisor=" + std::to_string(divisor));
-            module->addT<SMulI32>(tmpSgpr, magicHi, dRegSgpr, "tmp1 = dividend * magic hi");
-            module->addT<SLShiftLeftB64>(tmp2Sgpr, 16, tmp2Sgpr, "left shift 16 bits");
-            module->addT<SMulI32>(qRegSgpr, dRegSgpr, magicLo, "tmp0 = dividend * magic lo");
-            module->addT<SAddU32>(tmpSgpr, qRegSgpr, tmpSgpr, "add lo");
-            module->addT<SAddCU32>(tmpSgpr1, tmpSgpr1, 0, "add hi");
+            // Keep dividend * magic as a full 64-bit product in tmp2Sgpr; a 32-bit
+            // product wraps once dividend * magic reaches 2^32.
+            module->addT<SMulHIU32>(
+                tmpSgpr1, dRegSgpr, magic, "STATIC_DIV: divisor=" + std::to_string(divisor));
+            module->addT<SMulI32>(tmpSgpr, dRegSgpr, magic, "tmp = dividend * magic");
             module->addT<SLShiftRightB64>(tmp2Sgpr, shift, tmp2Sgpr, "tmp0 = quotient");
             module->addT<SMulI32>(tmpSgpr1, tmpSgpr, divisor, "tmp1 = quotient * divisor");
             module->addT<SCmpLgU32>(
@@ -779,21 +773,6 @@ namespace rocisa
 
         auto pEXEC = MAKE(EXEC);
 
-        module->addT<VCvtU32toF32>(tmpVgpr, divRegSgpr, std::nullopt, dComment);
-        module->addT<VRcpIFlagF32>(tmpVgpr, tmpVgpr, dComment);
-        module->addT<VCvtU32toF32>(tmpVgpr1, dRegSgpr, std::nullopt, dComment);
-        module->addT<VMulF32>(tmpVgpr, tmpVgpr, tmpVgpr1, std::nullopt, dComment);
-        module->addT<VCvtF32toU32>(tmpVgpr, tmpVgpr, std::nullopt, dComment);
-        module->addT<VMulU32U24>(tmpVgpr1, tmpVgpr, divRegSgpr, dComment);
-        module->addT<VSubU32>(tmpVgpr1, dRegSgpr, tmpVgpr1, dComment);
-        module->addT<VCmpXEqU32>(pEXEC, tmpVgpr1, divRegSgpr, std::nullopt, dComment);
-        module->addT<VAddU32>(tmpVgpr, 1, tmpVgpr, dComment);
-
-        if(doRemainder)
-        {
-            module->addT<VMovB32>(tmpVgpr1, 0, std::nullopt, rComment);
-        }
-
         auto resetExec = [module, pEXEC](int wavewidth) {
             if(wavewidth == 64)
             {
@@ -804,18 +783,34 @@ namespace rocisa
                 module->addT<SMovB32>(pEXEC, -1, "Reset exec");
             }
         };
-        resetExec(wavewidth);
-        module->addT<VCmpXGtU32>(
-            pEXEC, tmpVgpr1, divRegSgpr, std::nullopt, "overflow happened in remainder");
-        module->addT<VSubU32>(tmpVgpr, tmpVgpr, 1, "quotient - 1");
 
-        if(doRemainder)
+        // Exact for every 32-bit dividend and nonzero divisor (the LLVM AMDGPU
+        // udiv32 expansion). The 0x4f7ffffe scale (2^32 - 512) keeps the
+        // reciprocal estimate below 2^32 / divisor for a 1-ulp v_rcp_iflag_f32,
+        // which the Newton step and the two corrections below rely on. The scale
+        // move sits between v_rcp_iflag_f32 and its consumer because gfx942,
+        // gfx950 and gfx1250 need one wait state there.
+        module->addT<VCvtU32toF32>(tmpVgpr, divRegSgpr, std::nullopt, dComment);
+        module->addT<VRcpIFlagF32>(tmpVgpr, tmpVgpr, dComment);
+        module->addT<VMovB32>(tmpVgpr1, std::string("0x4f7ffffe"), std::nullopt, "2^32 - 512");
+        module->addT<VMulF32>(tmpVgpr, tmpVgpr1, tmpVgpr, std::nullopt, "2^32 / divisor");
+        module->addT<VCvtF32toU32>(tmpVgpr, tmpVgpr, std::nullopt, dComment);
+        module->addT<VMulLOU32>(tmpVgpr1, tmpVgpr, divRegSgpr, "refine 2^32 / divisor");
+        module->addT<VSubU32>(tmpVgpr1, 0, tmpVgpr1, "refine 2^32 / divisor");
+        module->addT<VMulHIU32>(tmpVgpr1, tmpVgpr, tmpVgpr1, "refine 2^32 / divisor");
+        module->addT<VAddU32>(tmpVgpr, tmpVgpr, tmpVgpr1, "refine 2^32 / divisor");
+        module->addT<VMulHIU32>(tmpVgpr, dRegSgpr, tmpVgpr, dComment);
+        module->addT<VMulLOU32>(tmpVgpr1, tmpVgpr, divRegSgpr, dComment);
+        module->addT<VSubU32>(tmpVgpr1, dRegSgpr, tmpVgpr1, doRemainder ? rComment : dComment);
+        for(int i = 0; i < 2; ++i)
         {
-            module->addT<VMulU32U24>(tmpVgpr1, tmpVgpr, divRegSgpr, "re-calculate remainder");
-            module->addT<VSubU32>(tmpVgpr1, dRegSgpr, tmpVgpr1, "re-calculate remainder");
+            module->addT<VCmpXGeU32>(
+                pEXEC, tmpVgpr1, divRegSgpr, std::nullopt, "remainder >= divisor?");
+            module->addT<VAddU32>(tmpVgpr, 1, tmpVgpr, "quotient + 1");
+            module->addT<VSubU32>(tmpVgpr1, tmpVgpr1, divRegSgpr, "remainder - divisor");
+            resetExec(wavewidth);
         }
 
-        resetExec(wavewidth);
         module->addT<VReadfirstlaneB32>(qRegSgpr, tmpVgpr, "quotient");
 
         if(doRemainder)

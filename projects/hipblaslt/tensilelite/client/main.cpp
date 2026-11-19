@@ -27,6 +27,7 @@
 #include <Tensile/Contractions.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/EmbeddedLibrary.hpp>
+#include <Tensile/FusedA2A.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/hip/HipHardware.hpp>
@@ -34,13 +35,17 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include "BenchmarkTimer.hpp"
+#include "ClientConfig.hpp"
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
+#include "DeviceContext.hpp"
 #include "HardwareMonitorListener.hpp"
 #include "MetaRunListener.hpp"
 #include "ProgressListener.hpp"
 #include "ReferenceValidator.hpp"
+#include "SplitPlacement.hpp"
 #include "SolutionIterator.hpp"
+#include "SynchronizerValidator.hpp"
 #include "TimingEvents.hpp"
 #include "TimingInstrumentation.hpp"
 
@@ -54,9 +59,6 @@
 #include "ProgramOptions.hpp"
 #include "Utility.hpp"
 
-#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
-#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
-#endif
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
 #include "Profiler.hpp"
 #endif
@@ -75,6 +77,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <sstream>
 
 namespace TensileLite
@@ -223,15 +226,22 @@ namespace TensileLite
                 ("f32-xdl-math-op",          po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Use xf32 compute for float input and output matrices.")
                 ("mx-a-block",               po::value<int>()->default_value(0), "block of mx datatype input matrix A")
                 ("mx-b-block",               po::value<int>()->default_value(0), "block of mx datatype input matrix B")
+                ("mx-a-free-block",          po::value<int>()->default_value(1), "free-dimension (M) extent of one mx scaling tile for matrix A; 1 = one scale per row")
+                ("mx-b-free-block",          po::value<int>()->default_value(1), "free-dimension (N) extent of one mx scaling tile for matrix B; 1 = one scale per column")
                 ("mx-a-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::E8), "type of mx datatype input matrix A")
                 ("mx-b-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::E8), "type of mx datatype input matrix B")
                 ("swizzle-tensor-a",         po::value<bool>()->default_value(false), "Swizzle input tensor A.")
                 ("swizzle-tensor-b",         po::value<bool>()->default_value(false), "Swizzle input tensor B.")
+                ("fused-a2a",                po::value<FusedA2A>()->default_value(FusedA2A::Disabled), "Fused A2A mode: Disabled, GemmA2A (all-to-all PUSH from the GEMM epilogue) or A2AGemm (B's K shards gathered from the peers into a2aBuf one shard at a time).")
+                ("split-devices",          po::value<int>()->default_value(1), "Split each problem across N consecutive devices (device-idx .. device-idx+N-1), one stream each, and run the slices concurrently. Devices 0..N-2 get size/N, the last device gets the rest. --split-dim M: A is split, B replicated. --split-dim N: B is split, A replicated. Each device writes its slice into its own full-size D at the slice's final offset (nothing goes to a peer); the slices are read back and validated after the timed run. Reported time is the slowest device; reported GFlops are for the full problem. Needs the all-solutions run (no --best-solution). For partitioned GPUs (e.g. NPS2: N=2). 1 = off.")
+                ("split-dim",              po::value<std::string>()->default_value("M"), "Dimension --split-devices splits: M or N.")
+                ("split-placement",        po::value<std::string>()->default_value("RRRR"), "With --split-devices, one letter each for A, B, C, D: R = a copy on every device, S = one copy that the other devices access over peer access. Only the operand the split does not cut (B for --split-dim M, A for --split-dim N) and D can be shared; a shared operand is the copy of the last device, and the other devices validate against its data. A shared D is the one of device-idx, and every device writes its slice into it.")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
                 ("sparse",                   po::value<int>()->default_value(0), "A or B matrix is sparse matrix.")
                 ("strided-batched",          po::value<bool>()->default_value(true), "Use strided-batched or general batched")
+                ("batch-mode",               po::value<int>()->default_value(0), "Runtime batch ABI: 0=strided, 1=pointer array")
                 ("grouped-gemm",             po::value<bool>()->default_value(false), "Use grouped gemm")
                 ("kernel-language",          po::value<KernelLanguage>()->default_value(KernelLanguage::Any), "Select kernel language.")
                 ("deterministic-mode",       po::value<bool>()->default_value(false), "Enforce deterministic summation patterns"
@@ -254,11 +264,17 @@ namespace TensileLite
                 ("init-scaleAlphaVec",       po::value<InitMode>()->default_value(InitMode::One), "Initialization for scaleAlphaVec")
                 ("init-mx-a",                po::value<InitMode>()->default_value(InitMode::One), "Initialization for MX Scale for A")
                 ("init-mx-b",                po::value<InitMode>()->default_value(InitMode::One), "Initialization for MX Scale for B")
+                ("mx-data-generator",        po::value<int>()->default_value(-1), "A/B data source. -1: mxDataGenerator for MX inputs only. 1: mxDataGenerator for A/B, MX or not (non-MX A/B must be FP8/BF8). 0: init-a/init-b like non-MX inputs, MX or not, with MX scales from init-mx-a/init-mx-b (MX FP8/BF8/FP4 data).")
                 ("pristine-on-gpu",          po::value<bool>()->default_value(true), "Keep a pristine copy of inputs on GPU for performance")
                 ("c-equal-d",                po::value<bool>()->default_value(false), "C equals D")
                 ("print-valids",             po::value<bool>()->default_value(false), "Print values that pass validation")
                 ("print-max",                po::value<int>()->default_value(-1), "Max number of values to print")
                 ("num-elements-to-validate", po::value<int>()->default_value(0), "Number of elements to validate")
+                ("check-synchronizer",       po::value<bool>()->default_value(true),
+                "Fail the run if a StreamK, GSU MBSK or output-amax kernel leaves the shared Synchronizer buffer nonzero on exit."
+                " Solutions known not to use the buffer are skipped.")
+                ("validate-after-enqueues",  po::value<bool>()->default_value(false),
+                "Validate final output and synchronizer state after each enqueue group; requires c-equal-d=false.")
                 ("bounds-check",             po::value<BoundsCheckMode>()->default_value(BoundsCheckMode::Disable),
                 "1:Use sentinel values to check memory boundaries."
                 "2:Memory bound check by front guard page"
@@ -279,6 +295,12 @@ namespace TensileLite
                 ("dump-tensors",             po::value<bool>()->default_value(false), "Binary dump tensors instead of printing.")
 
                 ("device-idx",               po::value<int>()->default_value(0), "Device index")
+                ("world",                    po::value<std::vector<int>>()->default_value(std::vector<int>()), "Fused GEMM+A2A: device count of each problem, one value per problem-size.")
+                ("fused-a2a-extent",         po::value<std::vector<int>>()->default_value(std::vector<int>()), "Fused GEMM+A2A: extent that goes all-to-all, one value per problem-size: leading feature (M) count for GemmA2A, reduction (K) count for A2AGemm (defaults to K).")
+                ("world-filter",             po::value<std::vector<int>>()->default_value(std::vector<int>()), "Fused GEMM+A2A: run only the problems whose world is listed; empty runs all.")
+                ("fused-a2a-drain-recv",     po::value<int>()->default_value(1), "Runtime drainRecv flag passed to the fused kernel (1=on): the kernel exits only once this card's recv buffer is complete.")
+                ("fused-a2a-drain-send",     po::value<int>()->default_value(1), "Runtime drainSend flag passed to the fused kernel (1=on): the kernel exits only once this card's engines have finished reading D[0:AM), so D can be reused on stream order alone. Independent of --fused-a2a-drain-recv.")
+                ("fused-a2a-sdma-rotate",    po::value<int>(), "Fused A2A, gfx942 and gfx950: move each remote peer SDMA queue this many steps along the even xGMI engines 2,4,...,14 from its KFD recommendation; nonzero requires 14 xGMI SDMA engines. Ignored on other architectures, which spread the remote peer queues over the recommended engines. The loopback queue uses engine 0. Defaults to -1.")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
 
                 ("num-warmups",              po::value<int>()->default_value(0), "Number of warmups to run")
@@ -344,6 +366,10 @@ namespace TensileLite
                 ("solution-start-idx",       po::value<int>()->default_value(-1), "First solution to run")
                 ("num-solutions",            po::value<int>()->default_value(-1), "Number of solutions to run")
                 ("best-solution",            po::value<bool>()->default_value(false), "Best solution benchmark mode")
+                ("require-selected-solution", po::value<bool>()->default_value(false), "Requires --best-solution: a problem for which "
+                                                                                       "the library selects no solution is an error "
+                                                                                       "(non-zero exit) and is skipped, instead of "
+                                                                                       "running library solution 0.")
 
                 ("results-file",             po::value<std::string>()->default_value("results.csv"), "File name to write results.")
                 ("log-file",                 po::value<std::string>(),                               "File name for output log.")
@@ -372,12 +398,15 @@ namespace TensileLite
                 ("activation-no-guard",          po::value<bool>()->default_value(false), "Use activation guard to deall with nan outputs.")
                 ("activation-additional-args",vector_default_empty<std::string>(), "Activation additional floating-point number arguments.")
                 ("activation-enum-args",      po::value<std::vector<ActivationType>>()->default_value(std::vector<ActivationType>(1, ActivationType::None), "[]"), "Activation enum argument.")
-                ("streamk-hybrid-mode",       po::value<std::vector<int>>()->default_value(std::vector<int>(1, 0), "[0]"), "StreamK=5 hybrid-mode toggle values. Each element runs the problem once with setParams().setStreamKTileSchedulingMode(value); accepts {0=OFF (static), 1=ON (dynamic per-XCD work-queue), 2=AUTO (heuristic)}. Use [0, 1] in sweep YAMLs to deterministically exercise both SK5 sub-paths in one run. Use [2] (or `--streamk-hybrid-mode 2` to override a YAML default of [0]) to run the AUTO heuristic end-to-end on a real problem.")
+                ("hybrid-assignment-policy", po::value<std::vector<std::string>>(), "Launch policy for a selected WorkAssignment=Hybrid kernel: Default, DynamicWorkQueue, or Auto. Default preserves the existing behavior, including the heuristic when sm_count_target is positive. Each value runs the problem once.")
+                ("streamk-hybrid-mode",       po::value<std::vector<int>>(), "Legacy alias for hybrid-assignment-policy: 0=Default, 1=DynamicWorkQueue, 2=Auto. Conflicting explicit aliases are rejected.")
+                ("uniform-summation-order",   po::value<int>()->default_value(-1), "Override uniform summation order setting: -1=use default, 0=off, 1=on.")
                 ("use-bias",                  po::value<int>()->default_value(0), "Use bias.")
                 ("bias-source",               po::value<int>()->default_value(3), "Bias source.")
                 ("use-scaleAB",               po::value<std::string>()->default_value(""), "Use scaleAB.")
                 ("use-scaleCD",               po::value<bool>()->default_value(false), "Use scaleCD.")
-                ("use-scaleAlphaVec",         po::value<int>()->default_value(0), "Use scaleAlphaVec.")
+                ("use-scaleAlphaVec",         po::value<int>()->default_value(0), "Alpha support: 0=host, 1/2/3=M/N/MN vector, 5/6/7=vector plus device scalar.")
+                ("device-scalar-alpha",       po::value<bool>(), "Override the runtime alpha mode; defaults to the scalar bit in use-scaleAlphaVec.")
                 ("bias-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Bias data type args.")
                 ("use-gate-residual",         po::value<bool>()->default_value(false), "Use gate residual.")
                 ("gate-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Gate residual data type args.")
@@ -404,6 +433,7 @@ namespace TensileLite
                 ("rotating-buffer-size",      po::value<int32_t>()->default_value(0), "Size of rotating buffer in the unit of MB.")
                 ("rotating-buffer-mode",      po::value<int32_t>()->default_value(0), "Rotating mode.")
                 ("output-amaxD",              po::value<bool>()->default_value(false), "Output AmaxD.")
+                ("output-peerD",              po::value<bool>()->default_value(false), "Every device also stores D into the other device's D (needs --split-devices 2): both end up with the complete D.")
                 ("timing-instrumentation",    po::value<bool>()->default_value(false)->implicit_value(true), "Enable detailed timing instrumentation output to stderr.")
                 ("rocprof-counter",           vector_default_empty<std::string>(), "Rocprof counters.")
                 ("metadata-layout",           po::value<int32_t>()->default_value(0), "Sparse Metadata Layout")
@@ -411,252 +441,6 @@ namespace TensileLite
             // clang-format on
 
             return options;
-        }
-
-        /** Dump parsed program options to a text file for comparison (Boost vs replacement).
-         *  Set env TENSILE_DUMP_OPTIONS=1 to enable. Writes to /tmp/tensilelite_program_options_dump.txt */
-        void DumpProgramOptionsToFile(po::variables_map const& args, char const* path)
-        {
-            std::ofstream out(path);
-            if(!out)
-            {
-                std::cerr << "TENSILE_DUMP_OPTIONS: failed to open " << path << " for write\n";
-                return;
-            }
-            out << "# program_options dump (one key=value per line; vectors as size then "
-                   "elements)\n";
-#define DUMP_OPT(K, T)                                          \
-    do                                                          \
-    {                                                           \
-        if(args.count(K))                                       \
-        {                                                       \
-            try                                                 \
-            {                                                   \
-                out << (K) << "=" << args[(K)].as<T>() << "\n"; \
-            }                                                   \
-            catch(...)                                          \
-            {                                                   \
-                out << (K) << "=(as<" #T "> failed)\n";         \
-            }                                                   \
-        }                                                       \
-    } while(0)
-#define DUMP_VEC(K, T)                                          \
-    do                                                          \
-    {                                                           \
-        if(args.count(K))                                       \
-        {                                                       \
-            try                                                 \
-            {                                                   \
-                auto const& v = args[(K)].as<std::vector<T>>(); \
-                out << (K) << ".size=" << v.size();             \
-                for(size_t i = 0; i < v.size(); ++i)            \
-                    out << " " << v[i];                         \
-                out << "\n";                                    \
-            }                                                   \
-            catch(...)                                          \
-            {                                                   \
-                out << (K) << "=(vector as failed)\n";          \
-            }                                                   \
-        }                                                       \
-    } while(0)
-#define DUMP_VECVEC(K)                                                            \
-    do                                                                            \
-    {                                                                             \
-        if(args.count(K))                                                         \
-        {                                                                         \
-            try                                                                   \
-            {                                                                     \
-                auto const& v = args[(K)].as<std::vector<std::vector<size_t>>>(); \
-                out << (K) << ".size=" << v.size() << "\n";                       \
-                for(size_t i = 0; i < v.size(); ++i)                              \
-                {                                                                 \
-                    out << (K) << "[" << i << "]=";                               \
-                    for(size_t j = 0; j < v[i].size(); ++j)                       \
-                        out << (j ? " " : "") << v[i][j];                         \
-                    out << "\n";                                                  \
-                }                                                                 \
-            }                                                                     \
-            catch(...)                                                            \
-            {                                                                     \
-                out << (K) << "=(vecvec failed)\n";                               \
-            }                                                                     \
-        }                                                                         \
-    } while(0)
-            if(args.count("config-file"))
-            {
-                try
-                {
-                    auto const& v = args["config-file"].as<std::vector<std::string>>();
-                    out << "config-file.size=" << v.size() << "\n";
-                    for(size_t i = 0; i < v.size(); ++i)
-                        out << "config-file[" << i << "]=" << v[i] << "\n";
-                }
-                catch(...)
-                {
-                    out << "config-file=(failed)\n";
-                }
-            }
-            DUMP_OPT("library-file", std::string);
-            if(args.count("code-object"))
-            {
-                try
-                {
-                    auto const& v = args["code-object"].as<std::vector<std::string>>();
-                    out << "code-object.size=" << v.size() << "\n";
-                    for(size_t i = 0; i < v.size(); ++i)
-                        out << "code-object[" << i << "]=" << v[i] << "\n";
-                }
-                catch(...)
-                {
-                    out << "code-object=(failed)\n";
-                }
-            }
-            DUMP_OPT("performance-metric", PerformanceMetric);
-            DUMP_OPT("problem-identifier", std::string);
-            DUMP_OPT("type", rocisa::DataType);
-            DUMP_OPT("a-type", rocisa::DataType);
-            DUMP_OPT("b-type", rocisa::DataType);
-            DUMP_OPT("c-type", rocisa::DataType);
-            DUMP_OPT("d-type", rocisa::DataType);
-            DUMP_OPT("e-type", rocisa::DataType);
-            DUMP_OPT("amaxD-type", rocisa::DataType);
-            DUMP_OPT("alpha-type", rocisa::DataType);
-            DUMP_OPT("beta-type", rocisa::DataType);
-            DUMP_OPT("compute-input-type", rocisa::DataType);
-            DUMP_OPT("f32-xdl-math-op", rocisa::DataType);
-            DUMP_OPT("swizzle-tensor-a", bool);
-            DUMP_OPT("swizzle-tensor-b", bool);
-            DUMP_OPT("activation-compute-type", rocisa::DataType);
-            DUMP_OPT("high-precision-accumulate", bool);
-            DUMP_OPT("sparse", int);
-            DUMP_OPT("strided-batched", bool);
-            DUMP_OPT("grouped-gemm", bool);
-            DUMP_OPT("kernel-language", KernelLanguage);
-            DUMP_OPT("deterministic-mode", bool);
-            DUMP_OPT("init-seed", unsigned int);
-            DUMP_OPT("init-a", InitMode);
-            DUMP_OPT("init-b", InitMode);
-            DUMP_OPT("init-c", InitMode);
-            DUMP_OPT("init-d", InitMode);
-            DUMP_OPT("init-e", InitMode);
-            DUMP_OPT("init-gate", InitMode);
-            DUMP_OPT("init-alpha", InitMode);
-            DUMP_OPT("init-beta", InitMode);
-            DUMP_OPT("init-bias", InitMode);
-            DUMP_OPT("init-scaleA", InitMode);
-            DUMP_OPT("init-scaleB", InitMode);
-            DUMP_OPT("init-scaleC", InitMode);
-            DUMP_OPT("init-scaleD", InitMode);
-            DUMP_OPT("init-scaleAlphaVec", InitMode);
-            DUMP_OPT("pristine-on-gpu", bool);
-            DUMP_OPT("c-equal-d", bool);
-            DUMP_OPT("num-elements-to-validate", int);
-            DUMP_OPT("bounds-check", BoundsCheckMode);
-            DUMP_OPT("prune-mode", PruneSparseMode);
-            DUMP_OPT("device-idx", int);
-            DUMP_OPT("use-default-stream", bool);
-            DUMP_OPT("num-warmups", int);
-            DUMP_OPT("sync-after-warmups", bool);
-            DUMP_OPT("num-benchmarks", int);
-            DUMP_OPT("num-enqueues-per-sync", int);
-            DUMP_OPT("max-enqueues-per-sync", int);
-            DUMP_OPT("num-syncs-per-benchmark", int);
-            DUMP_OPT("skip-slow-solution-ratio", float);
-            DUMP_OPT("min-flops-per-sync", size_t);
-            DUMP_OPT("use-gpu-timer", bool);
-            DUMP_OPT("sleep-percent", int);
-            DUMP_OPT("hardware-monitor", bool);
-            DUMP_OPT("perf-l2-read-hits", double);
-            DUMP_OPT("perf-l2-write-hits", double);
-            DUMP_OPT("perf-l2-read-bw-mul", double);
-            DUMP_OPT("perf-read-efficiency", double);
-            DUMP_OPT("csv-export-extra-cols", bool);
-            DUMP_OPT("csv-merge-same-problems", bool);
-            DUMP_OPT("PrintWinnersOnly", bool);
-            DUMP_VECVEC("problem-size");
-            if(args.count("prob-sol-map"))
-            {
-                try
-                {
-                    auto const& m = args["prob-sol-map"].as<std::map<int, int>>();
-                    out << "prob-sol-map.size=" << m.size() << "\n";
-                    for(auto const& p : m)
-                        out << "prob-sol-map " << p.first << "=" << p.second << "\n";
-                }
-                catch(...)
-                {
-                    out << "prob-sol-map=(failed)\n";
-                }
-            }
-            DUMP_VECVEC("a-strides");
-            DUMP_VECVEC("b-strides");
-            DUMP_VECVEC("c-strides");
-            DUMP_VECVEC("d-strides");
-            DUMP_VECVEC("e-strides");
-            DUMP_VECVEC("bias-strides");
-            DUMP_VECVEC("gate-strides");
-            DUMP_OPT("problem-start-idx", int);
-            DUMP_OPT("num-problems", int);
-            DUMP_OPT("solution-start-idx", int);
-            DUMP_OPT("num-solutions", int);
-            DUMP_OPT("best-solution", bool);
-            DUMP_OPT("results-file", std::string);
-            DUMP_OPT("log-file", std::string);
-            DUMP_OPT("log-file-append", bool);
-            DUMP_OPT("log-level", LogLevel);
-            DUMP_OPT("library-update-file", std::string);
-            DUMP_OPT("library-update-comment", bool);
-            DUMP_OPT("exit-on-error", bool);
-            DUMP_OPT("selection-only", bool);
-            DUMP_OPT("max-workspace-size", size_t);
-            DUMP_OPT("granularity-threshold", double);
-            DUMP_OPT("activation-type", ActivationType);
-            DUMP_OPT("activation-no-guard", bool);
-            if(args.count("activation-additional-args"))
-            {
-                try
-                {
-                    auto const& v
-                        = args["activation-additional-args"].as<std::vector<std::vector<double>>>();
-                    out << "activation-additional-args.size=" << v.size() << "\n";
-                    for(size_t i = 0; i < v.size(); ++i)
-                    {
-                        out << "activation-additional-args[" << i << "]=";
-                        for(size_t j = 0; j < v[i].size(); ++j)
-                            out << (j ? "," : "") << v[i][j];
-                        out << "\n";
-                    }
-                }
-                catch(...)
-                {
-                    out << "activation-additional-args=(failed)\n";
-                }
-            }
-            DUMP_VEC("activation-enum-args", ActivationType);
-            DUMP_VEC("streamk-hybrid-mode", int);
-            DUMP_OPT("use-bias", int);
-            DUMP_OPT("bias-source", int);
-            DUMP_OPT("use-scaleAB", std::string);
-            DUMP_OPT("use-scaleCD", bool);
-            DUMP_OPT("use-scaleAlphaVec", int);
-            DUMP_VEC("bias-type-args", rocisa::DataType);
-            DUMP_OPT("use-gate-residual", bool);
-            DUMP_VEC("gate-type-args", rocisa::DataType);
-            DUMP_VEC("factor-dim-args", int);
-            DUMP_VEC("icache-flush-args", bool);
-            DUMP_OPT("use-e", bool);
-            DUMP_OPT("use-gradient", bool);
-            DUMP_OPT("use-user-args", bool);
-            DUMP_OPT("rotating-buffer-size", int32_t);
-            DUMP_OPT("rotating-buffer-mode", int32_t);
-            DUMP_OPT("icache-rotate-copies", int);
-            DUMP_OPT("icache-rotate-size", int);
-            DUMP_OPT("output-amaxD", bool);
-            DUMP_OPT("timing-instrumentation", bool);
-#undef DUMP_OPT
-#undef DUMP_VEC
-#undef DUMP_VECVEC
-            std::cerr << "TENSILE_DUMP_OPTIONS: wrote " << path << "\n";
         }
 
         std::shared_ptr<Hardware> GetHardware(po::variables_map const& args)
@@ -673,16 +457,6 @@ namespace TensileLite
             HIP_CHECK_EXC(hipSetDevice(deviceIdx));
 
             return hip::GetCurrentDevice();
-        }
-
-        hipStream_t GetStream(po::variables_map const& args)
-        {
-            if(args["use-default-stream"].as<bool>())
-                return 0;
-
-            hipStream_t stream;
-            HIP_CHECK_EXC(hipStreamCreate(&stream));
-            return stream;
         }
 
         std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>>
@@ -882,6 +656,11 @@ namespace TensileLite
                 throw std::runtime_error("rocprof-counter is provided but client is not built with -DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK.");
             }
 #endif
+            // Only TopSolutionIterator, which --best-solution selects, reads the option; without
+            // it the check would silently not run.
+            if(args["require-selected-solution"].as<bool>() && !args["best-solution"].as<bool>())
+                throw std::runtime_error(
+                    "--require-selected-solution applies only with --best-solution");
             fix_data_types(args);
 
             parse_arg_ints(args, "problem-size");
@@ -1016,6 +795,54 @@ namespace TensileLite
         }
 #endif // defined(__linux__)
 
+        void checkFusedA2AArgs(po::variables_map const& args)
+        {
+            const int toValidate = args["num-elements-to-validate"].as<int>();
+            if(toValidate > 0)
+                throw std::runtime_error(
+                    concatenate("[fused-a2a] --num-elements-to-validate=",
+                                toValidate,
+                                " is not supported. Use -1 for all, 0 for none."));
+            for(auto name : {"init-a", "init-b"})
+                if(!IsRandomLike(args[name].as<InitMode>()))
+                    throw std::runtime_error(
+                        concatenate("[fused-a2a] --",
+                                    name,
+                                    " must be Random, RandomNarrow, RandomNegPosLimited or "
+                                    "UniformLowPrecision; got ",
+                                    args[name].as<InitMode>()));
+            if(args["device-idx"].as<int>() != 0)
+                throw std::runtime_error(
+                    "[fused-a2a] only --device-idx=0 is supported. Use HIP_VISIBLE_DEVICES to "
+                    "pick the set.");
+            auto const& flush = args["icache-flush-args"].as<std::vector<bool>>();
+            if(std::find(flush.begin(), flush.end(), true) != flush.end())
+                throw std::runtime_error(
+                    "[fused-a2a] --icache-flush-args is not supported; leave it at false.");
+            if(args["fused-a2a-drain-recv"].as<int>() == 0)
+                throw std::runtime_error(
+                    "[fused-a2a] --fused-a2a-drain-recv=0 is not supported; leave it at 1.");
+            if(args["fused-a2a-drain-send"].as<int>() == 0)
+                throw std::runtime_error(
+                    "[fused-a2a] --fused-a2a-drain-send=0 is not supported; leave it at 1.");
+            if(args["use-user-args"].as<bool>())
+                throw std::runtime_error("[fused-a2a] --use-user-args is not supported.");
+            if(!args["library-update-file"].as<std::string>().empty())
+                throw std::runtime_error("[fused-a2a] --library-update-file is not supported.");
+            if(args["fused-a2a"].as<FusedA2A>() == FusedA2A::A2AGemm
+               && args["batch-mode"].as<int>() != 0)
+                throw std::runtime_error(
+                    "[fused-a2a] A2AGemm supports only --batch-mode=0 (strided).");
+            if(args["rotating-buffer-size"].as<int32_t>() > 0
+               && args["rotating-buffer-mode"].as<int32_t>() == 1)
+                throw std::runtime_error(
+                    "[fused-a2a] --rotating-buffer-mode=1 is not supported; use mode 0.");
+            if(!args["world-filter"].as<std::vector<int>>().empty()
+               && !args["prob-sol-map"].as<std::map<int, int>>().empty())
+                throw std::runtime_error(
+                    "[fused-a2a] --world-filter cannot be combined with --prob-sol-map.");
+        }
+
     } // namespace Client
 } // namespace TensileLite
 
@@ -1024,7 +851,29 @@ int main(int argc, const char* argv[])
     using namespace TensileLite;
     using namespace TensileLite::Client;
 
+    auto const mainStart     = TimingClock::now();
+    auto const mainStartWall = std::chrono::system_clock::now();
+
+    // Declared first => destroyed last among main()'s locals. Stamps the wall clock once
+    // every local (dataInit, library, hip buffers, ...) has been destroyed so the Python
+    // side can separate "locals destruction" from "static destruction / process exit".
+    struct LocalsDestroyedStamp
+    {
+        ~LocalsDestroyedStamp()
+        {
+            if(g_timingInstrumentationEnabled)
+            {
+                auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                              std::chrono::system_clock::now().time_since_epoch())
+                              .count();
+                std::clog << "TIMING_TS:main_locals_destroyed:" << ns << "\n";
+                std::clog.flush();
+            }
+        }
+    } localsDestroyedStamp;
+
     auto args = parse_args(argc, argv);
+    auto const argsParsed = TimingClock::now();
 
     // Enable timing instrumentation if requested
     g_timingInstrumentationEnabled = args["timing-instrumentation"].as<bool>();
@@ -1038,18 +887,144 @@ int main(int argc, const char* argv[])
     std::cout << std::endl << "srand seed is set to " << seed << std::endl << std::endl;
     srand(seed);
 
-    ClientProblemFactory problemFactory(args);
-
+    // Timing buffer is initialized before the problem factory so timers inside it work.
+    auto const preCalibration = TimingClock::now();
     initTimingBuffer();
     calibrateTimingOverhead();
+    auto const calibrated = TimingClock::now();
 
-    std::shared_ptr<Hardware> hardware;
-    hipStream_t              stream;
+    // --split-devices: check the split arguments before ClientProblemFactory slices the problems
+    // with them.
+    {
+        auto const placement = args["split-placement"].as<std::string>();
+        auto const splitDim  = args["split-dim"].as<std::string>();
+        const bool split     = args["split-devices"].as<int>() > 1;
+        // --split-dim first: the placement rules depend on it.
+        if(split && splitDim != "M" && splitDim != "N")
+            throw std::runtime_error("--split-dim must be M or N");
+        // The format is checked even without a split; the sharing rules only apply to one.
+        auto const err = split ? splitPlacementError(placement, splitDim == "N")
+                               : splitPlacementFormatError(placement);
+        if(!err.empty())
+            throw std::runtime_error(err);
+        if(args["output-peerD"].as<bool>()
+           && (args["split-devices"].as<int>() != 2 || placement[3] != 'R'))
+            throw std::runtime_error("--output-peerD needs --split-devices 2 and a replicated D");
+    }
+
+    ClientProblemFactory problemFactory(args);
+    auto const factoryDone = TimingClock::now();
+    // These happen before the timing buffer exists; record them now.
+    if(g_timingInstrumentationEnabled)
+    {
+        g_timingBuffer.push_back(TimingRec{
+            "main_parse_args",
+            std::chrono::duration<double, std::milli>(argsParsed - mainStart).count()});
+        g_timingBuffer.push_back(TimingRec{
+            "main_timing_calibration",
+            std::chrono::duration<double, std::milli>(calibrated - preCalibration).count()});
+        g_timingBuffer.push_back(TimingRec{
+            "main_problem_factory",
+            std::chrono::duration<double, std::milli>(factoryDone - calibrated).count()});
+    }
+
+    const FusedA2A fusedMode = args["fused-a2a"].as<FusedA2A>();
+    bool           fusedA2A  = fusedMode != FusedA2A::Disabled;
+    if(fusedA2A)
+        checkFusedA2AArgs(args);
+    auto const& worldFilter = args["world-filter"].as<std::vector<int>>();
+    if(!fusedA2A && !worldFilter.empty())
+        throw std::runtime_error("--world-filter applies only with --fused-a2a");
+    if(!fusedA2A && args.count("fused-a2a-sdma-rotate"))
+        throw std::runtime_error("--fused-a2a-sdma-rotate applies only with --fused-a2a");
+
+    auto problems        = problemFactory.problems();
+    int  firstProblemIdx = args["problem-start-idx"].as<int>();
+    int  numProblems     = args["num-problems"].as<int>();
+    if(numProblems < 0)
+        numProblems = problems.size();
+    int lastProblemIdx = firstProblemIdx + numProblems - 1;
+
+    std::vector<int> problemIdxs;
+    for(int i = firstProblemIdx; i <= lastProblemIdx; i++)
+        if(worldFilter.empty()
+           || std::count(worldFilter.begin(), worldFilter.end(), (int)problems[i]->world()))
+            problemIdxs.push_back(i);
+
+    std::shared_ptr<Hardware>                   hardware;
+    std::vector<std::shared_ptr<DeviceContext>> devices;
     {
         ScopedTimer timer("hip_initialization");
-        hardware = GetHardware(args);
-        stream   = GetStream(args);
+        hardware     = GetHardware(args);
+        size_t world = 1;
+        for(int i : problemIdxs)
+            world = std::max<size_t>(world, problems[i]->world());
+        if(fusedA2A)
+        {
+            int deviceCount = 0;
+            HIP_CHECK_EXC(hipGetDeviceCount(&deviceCount));
+            if(world > (size_t)deviceCount)
+                throw std::runtime_error(concatenate("[fused-a2a] the selected problems need ",
+                                                     world,
+                                                     " devices, found ",
+                                                     deviceCount,
+                                                     ". Narrow them with --world-filter."));
+        }
+        int splitM = args["split-devices"].as<int>();
+        if(splitM < 1)
+            throw std::runtime_error("--split-devices must be >= 1");
+        if(splitM > 1 && fusedA2A)
+            throw std::runtime_error("--split-devices cannot be combined with --fused-a2a");
+        if(splitM > 1 && args["use-user-args"].as<bool>())
+            throw std::runtime_error("--split-devices does not support --use-user-args");
+        if(splitM > 1 && args["grouped-gemm"].as<bool>())
+            throw std::runtime_error("--split-devices does not support --grouped-gemm");
+        // With C = D each device's C is redirected to its own zeroed full-size D, so beta * C would
+        // read zeros: the combination is not supported.
+        if(splitM > 1 && args["c-equal-d"].as<bool>())
+            throw std::runtime_error("--split-devices does not support --c-equal-d");
+        // Each device's D is replaced by an exact-size full output, which has none of the
+        // padding (and no maxElements metadata) that the bounds check puts around D.
+        if(splitM > 1 && args["bounds-check"].as<BoundsCheckMode>() != BoundsCheckMode::Disable)
+            throw std::runtime_error("--split-devices does not support --bounds-check");
+        if(splitM > 1 && args["best-solution"].as<bool>())
+            throw std::runtime_error(
+                "--split-devices needs the all-solutions run (not --best-solution): a "
+                "library-selected solution is not checked against each slice");
+        if(splitM > 1)
+            world = splitM;
+
+        if(splitM > 1)
+        {
+            int deviceCount = 0;
+            HIP_CHECK_EXC(hipGetDeviceCount(&deviceCount));
+            if(args["device-idx"].as<int>() + splitM > deviceCount)
+                throw std::runtime_error(concatenate("--split-devices=",
+                                                     splitM,
+                                                     " needs devices ",
+                                                     args["device-idx"].as<int>(),
+                                                     "..",
+                                                     args["device-idx"].as<int>() + splitM - 1,
+                                                     " but only ",
+                                                     deviceCount,
+                                                     " are visible"));
+        }
+
+        std::vector<int> deviceIds(world);
+        std::iota(deviceIds.begin(), deviceIds.end(), args["device-idx"].as<int>());
+        const int sdmaRotate = args.count("fused-a2a-sdma-rotate")
+                                   ? args["fused-a2a-sdma-rotate"].as<int>()
+                                   : kFusedA2ASdmaRotateDefault;
+        for(int id : deviceIds)
+            devices.push_back(
+                std::make_shared<DeviceContext>(id,
+                                                args["use-default-stream"].as<bool>(),
+                                                fusedA2A ? kCommFlagsBytes : 0,
+                                                fusedA2A ? deviceIds : std::vector<int>{},
+                                                sdmaRotate));
     }
+    std::shared_ptr<DeviceContext>              device0 = devices[0];
+    std::vector<std::shared_ptr<DeviceContext>> active;
 
     std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library;
     {
@@ -1059,13 +1034,27 @@ int main(int argc, const char* argv[])
             throw std::runtime_error("Failed to load solution library");
     }
 
-    TensileLite::hip::SolutionAdapter adapter;
+    auto filename = args["library-file"].as<std::string>();
+
+    size_t      directoryPos     = filename.rfind('/');
+    std::string libraryDirectory = filename;
+    if(directoryPos != std::string::npos)
+        libraryDirectory.resize(directoryPos + 1);
+    else
+        libraryDirectory = '.';
+
+    // A failed primary code-object load may ask the adapter to reload its
+    // helper HSACOs. Record that context before the first load can enter the
+    // recovery path; actual helper loading remains below.
+    forEachDevice(devices, [&](DeviceContext& ctx) {
+        ctx.adapter->setLazyLoadingContext(hardware->archName(), libraryDirectory);
+    });
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
     RocProfiler::getInstance().start();
 #endif
     {
         ScopedTimer timer("code_object_loading");
-        LoadCodeObjects(args, adapter);
+        forEachDevice(devices, [&](DeviceContext& ctx) { LoadCodeObjects(args, *ctx.adapter); });
     }
 
     // I-cache rotation: load N extra independent hipModule_t copies of every
@@ -1078,9 +1067,11 @@ int main(int argc, const char* argv[])
         {
             ScopedTimer timer("icache_rotate_extra_copies_loading");
             auto const& filenames = args["code-object"].as<std::vector<std::string>>();
-            for(auto const& filename : filenames)
-                HIP_CHECK_EXC(adapter.loadCodeObjectFileExtraCopies(filename,
-                                                                    icacheRotateCopies));
+            forEachDevice(devices, [&](DeviceContext& ctx) {
+                for(auto const& filename : filenames)
+                    HIP_CHECK_EXC(
+                        ctx.adapter->loadCodeObjectFileExtraCopies(filename, icacheRotateCopies));
+            });
             std::cout << "Loaded " << icacheRotateCopies
                       << " extra rotation copies of each --code-object for I-cache test"
                       << " (total = " << (icacheRotateCopies + 1) << " modules)"
@@ -1091,34 +1082,30 @@ int main(int argc, const char* argv[])
     RocProfiler::getInstance().stop();
 #endif
 
-    auto filename = args["library-file"].as<std::string>();
-
-    size_t      directoryPos     = filename.rfind('/');
-    std::string libraryDirectory = filename;
-    if(directoryPos != std::string::npos)
-        libraryDirectory.resize(directoryPos + 1);
-    else
-        libraryDirectory = '.';
-
     {
         ScopedTimer timer("lazy_loading_init");
-        auto result = adapter.initializeLazyLoading(hardware->archName(), libraryDirectory);
-        if(result != hipSuccess)
-        {
-            std::string str = "Lazy loading failed. (" + std::to_string(int(result)) + ").";
-            std::runtime_error(str.c_str());
-        }
+        forEachDevice(devices, [&](DeviceContext& ctx) {
+            auto result
+                = ctx.adapter->initializeLazyLoading(hardware->archName(), libraryDirectory);
+            if(result != hipSuccess)
+                throw std::runtime_error("Lazy loading failed. (" + std::to_string(int(result))
+                                         + ").");
+        });
     }
 
-    auto problems        = problemFactory.problems();
-    int  firstProblemIdx = args["problem-start-idx"].as<int>();
-    int  numProblems     = args["num-problems"].as<int>();
-    if(numProblems < 0)
-        numProblems = problems.size();
-    int lastProblemIdx = firstProblemIdx + numProblems - 1;
+    // I-cache rotation (explicit --icache-rotate-copies=N): the main --code-object
+    // rotation copies were loaded above (before lazy-load init), but the helper
+    // bundle (Kernels.so) only becomes available in m_modules after
+    // initializeLazyLoading. Mirror it into the rotation slots now so helper
+    // kernels (PostGSU / betaOnly / reduction / conversion) resolve under rotation.
+    {
+        int icacheRotateCopies = args["icache-rotate-copies"].as<int>();
+        if(icacheRotateCopies > 0)
+            forEachDevice(devices, [&](DeviceContext& ctx) {
+                HIP_CHECK_EXC(ctx.adapter->loadHelperKernelExtraCopies(icacheRotateCopies));
+            });
+    }
 
-    int         firstSolutionIdx = args["solution-start-idx"].as<int>();
-    int         numSolutions     = args["num-solutions"].as<int>();
     bool        gpuTimer         = args["use-gpu-timer"].as<bool>();
     bool        runKernels       = !args["selection-only"].as<bool>();
     bool        exitOnError      = args["exit-on-error"].as<bool>();
@@ -1133,19 +1120,17 @@ int main(int argc, const char* argv[])
         exit(1);
     }
 
-    if(firstSolutionIdx < 0)
-        firstSolutionIdx = library->solutions.begin()->first;
-
-    if(numSolutions < 0)
     {
-        auto iter = library->solutions.end();
-        iter--;
-    }
-
-    std::shared_ptr<DataInitialization> dataInit;
-    {
+        // Re-seed before data init: HIP runtime init above may consume rand() non-deterministically
+        srand(seed);
         ScopedTimer timer("data_init_setup");
-        dataInit = std::make_shared<DataInitialization>(args, problemFactory);
+        forEachDeviceIndexed(devices, [&](DeviceContext& ctx, size_t d) {
+            // Each device sizes its buffers for its own slice of M (the full problem when the
+            // split is off).
+            ctx.dataInit
+                = std::make_shared<DataInitialization>(args, problemFactory.sliceFactory(d));
+            ctx.dataInit->setSlice(&problemFactory, d);
+        });
     }
 
     std::shared_ptr<SolutionIterator> solutionIterator;
@@ -1155,12 +1140,15 @@ int main(int argc, const char* argv[])
     }
 
     MetaRunListener listeners;
-    std::shared_ptr<BenchmarkTimer> benchmarkTimer;
-    float                           flushTimeMs{};
+    std::shared_ptr<BenchmarkTimer>        benchmarkTimer;
+    std::shared_ptr<SynchronizerValidator> synchronizerValidator;
+    float                                  flushTimeMs{};
 
     {
         ScopedTimer timer("listener_setup");
-        listeners.addListener(dataInit);
+        for(auto const& ctx : devices)
+            listeners.addListener(ctx->dataInit);
+        solutionIterator->setSplit(&problemFactory);
         listeners.addListener(solutionIterator);
         listeners.addListener(std::make_shared<ProgressListener>(args));
 
@@ -1168,9 +1156,19 @@ int main(int argc, const char* argv[])
         {
             bool hasIcacheFlush
                 = std::any_of(begin(icacheFlushArgs), end(icacheFlushArgs), [](auto i) { return i; });
-            flushTimeMs = hasIcacheFlush ? estimate_flush_kernel_time(stream, gpuTimer) : 0.f;
-            listeners.addListener(std::make_shared<ReferenceValidator>(args, dataInit));
+            flushTimeMs
+                = hasIcacheFlush ? estimate_flush_kernel_time(device0->stream, gpuTimer) : 0.f;
+            // Before ReferenceValidator: postSolution runs listeners in
+            // reverse, so the dirty-buffer verdict lands after the reference
+            // one rather than being overwritten by it.
+            synchronizerValidator = std::make_shared<SynchronizerValidator>(args);
+            auto referenceValidator = std::make_shared<ReferenceValidator>(args);
+            synchronizerValidator->setSplit(&problemFactory);
+            referenceValidator->setSplit(&problemFactory);
+            listeners.addListener(synchronizerValidator);
+            listeners.addListener(referenceValidator);
             benchmarkTimer = std::make_shared<BenchmarkTimer>(args, *hardware, flushTimeMs * 1000);
+            benchmarkTimer->setSplit(&problemFactory);
             listeners.addListener(benchmarkTimer);
             listeners.addListener(std::make_shared<HardwareMonitorListener>(args));
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
@@ -1202,12 +1200,162 @@ int main(int argc, const char* argv[])
         }
 
         listeners.setReporter(reporters);
+        listeners.setDevices(&active);
     }
 
     // ReferenceValidator validator(args, dataInit);
     // BenchmarkTimer timer(args);
 
     reporters->report(ResultKey::ProblemCount, problemFactory.problems().size());
+
+    // --split-devices: every device holds a full-size D and writes its slice at the slice's final
+    // offset with the full strides, into its own memory. Nothing is written to a peer; an
+    // all-gather would copy each slice region into the peers' D at the same offset.
+    std::vector<std::vector<std::shared_ptr<void>>> fullOutputs; // [device][rotating slot]
+    // Pointer-array batches: the kernels take one pointer per batch (batchA/B/C/D) instead of the
+    // scalar pointers, so every redirected D also needs its own pointer array on the device.
+    std::vector<std::vector<std::shared_ptr<void>>> fullBatchD; // [device][rotating slot]
+    // One host word per device: the target of the stream write that publishes a device's writes
+    // into another device's D (see launchAll).
+    std::vector<std::shared_ptr<void>> publishWords; // [device]
+    auto attachFullOutput = [&](ContractionProblem* problem, size_t firstSlot, size_t endSlot) {
+        if(problemFactory.numSlices() < 2)
+            return;
+        auto const* full = dynamic_cast<ContractionProblemGemm const*>(problem);
+        if(full == nullptr)
+            throw std::runtime_error("--split-devices needs a plain GEMM problem");
+        const size_t bytes = static_cast<size_t>(full->d().totalAllocatedElements()
+                                                 * full->d().elementBytes());
+        // R = every device has its own copy, S = one copy that the other devices use.
+        auto const placement = args["split-placement"].as<std::string>();
+        auto const shared    = [&](size_t tensor) { return placement[tensor] == 'S'; };
+        // A shared D is the first device's. The only shared input is the operand the split does not
+        // cut, the same size on every device, so the last device's copy is simply the one used.
+        // ReferenceValidator uses the same owner for its reference data.
+        const size_t inputOwner  = devices.size() - 1;
+        const bool   sharedInput = shared(0) || shared(1) || shared(2);
+        // The other devices reach a shared tensor over peer access. An OutputPeerD kernel also
+        // writes the other device's D, so every device needs access to every other one.
+        if(placement.find('S') != std::string::npos || full->outputPeerD())
+            for(size_t d = 0; d < devices.size(); d++)
+                for(size_t other = 0; other < devices.size(); other++)
+                {
+                    const bool toSharedD     = shared(3) && other == 0;
+                    const bool toSharedInput = sharedInput && other == inputOwner;
+                    if(other == d || (!full->outputPeerD() && !toSharedD && !toSharedInput))
+                        continue;
+                    ScopedDevice device(devices[d]->deviceId);
+                    hipError_t   pe = hipDeviceEnablePeerAccess(devices[other]->deviceId, 0);
+                    if(pe != hipSuccess && pe != hipErrorPeerAccessAlreadyEnabled)
+                        HIP_CHECK_EXC(pe);
+                    static_cast<void>(hipGetLastError());
+                }
+        const bool pointerArray
+            = full->batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY
+              || !full->stridedBatched();
+        fullOutputs.resize(devices.size());
+        fullBatchD.resize(devices.size());
+        std::vector<size_t> sliceBytes(devices.size(), 0);
+        for(size_t d = 0; d < devices.size(); d++)
+        {
+            const int    id     = devices[d]->deviceId;
+            ScopedDevice device(id);
+            auto const   freeOnDevice = [id](void* q) {
+                int previous = 0;
+                static_cast<void>(hipGetDevice(&previous));
+                static_cast<void>(hipSetDevice(id));
+                static_cast<void>(hipFree(q));
+                static_cast<void>(hipSetDevice(previous));
+            };
+            auto&        slots = fullOutputs[d];
+            while(slots.size() < endSlot && !(d > 0 && shared(3)))
+            {
+                void* p = nullptr;
+                HIP_CHECK_EXC(hipMalloc(&p, bytes));
+                HIP_CHECK_EXC(hipMemset(p, 0, bytes));
+                slots.emplace_back(p, freeOnDevice);
+            }
+            // D keeps the full strides in every slice, so its batches sit at the same distance
+            // from the slice's start on every device.
+            std::vector<size_t> batchOffsets;
+            if(pointerArray)
+                batchOffsets = problemFactory.sliceBatchOffsets(
+                    problem, d, ContractionProblemGemm::TENSOR::D);
+            auto& batchArrays = fullBatchD[d];
+            while(pointerArray && batchArrays.size() < endSlot)
+            {
+                void* p = nullptr;
+                HIP_CHECK_EXC(
+                    hipMalloc(&p, std::max<size_t>(1, batchOffsets.size()) * sizeof(void*)));
+                batchArrays.emplace_back(p, freeOnDevice);
+            }
+            const size_t offsetBytes = static_cast<size_t>(
+                problemFactory.sliceOffsetInD(problem, d) * full->d().elementBytes());
+            sliceBytes[d] = offsetBytes;
+            for(size_t r = firstSlot; r < endSlot; r++)
+            {
+                auto& inputs = dynamic_cast<ContractionInputs&>(*devices[d]->inputArr[r]);
+                auto& dBase  = d > 0 && shared(3) ? fullOutputs[0][r] : slots[r];
+                void* dest   = static_cast<char*>(dBase.get()) + offsetBytes;
+                const bool inPlace = inputs.c == inputs.d;
+                if(inPlace)
+                    inputs.c = dest;
+                inputs.d = dest;
+                if(pointerArray)
+                {
+                    // One pointer per batch into the redirected D, kept on this device.
+                    std::vector<void*> batches;
+                    for(size_t offset : batchOffsets)
+                        batches.push_back(static_cast<char*>(dest) + offset);
+                    HIP_CHECK_EXC(hipMemcpy(batchArrays[r].get(),
+                                            batches.data(),
+                                            batches.size() * sizeof(void*),
+                                            hipMemcpyHostToDevice));
+                    inputs.batchD = static_cast<void* const*>(batchArrays[r].get());
+                    if(inPlace)
+                        inputs.batchC = static_cast<void const* const*>(batchArrays[r].get());
+                }
+                if(d != inputOwner && sharedInput)
+                {
+                    // A shared tensor is read through the owner's pointers, and through its batch
+                    // pointer array. This loop never changes the owner's A, B or C (its C is not
+                    // in place: --c-equal-d is refused with a split).
+                    auto const& owner = dynamic_cast<ContractionInputs const&>(
+                        *devices[inputOwner]->inputArr[r]);
+                    if(shared(0))
+                    {
+                        inputs.a      = owner.a;
+                        inputs.batchA = owner.batchA;
+                        inputs.scaleA = owner.scaleA;
+                        inputs.mxsa   = owner.mxsa;
+                    }
+                    if(shared(1))
+                    {
+                        inputs.b      = owner.b;
+                        inputs.batchB = owner.batchB;
+                        inputs.scaleB = owner.scaleB;
+                        inputs.mxsb   = owner.mxsb;
+                    }
+                    if(shared(2) && !inPlace)
+                    {
+                        inputs.c      = owner.c;
+                        inputs.batchC = owner.batchC;
+                    }
+                }
+            }
+        }
+        // OutputPeerD: device d also stores its slice into the other device's full D, at the
+        // same offset, so each ends up with the complete D.
+        if(full->outputPeerD())
+            for(size_t d = 0; d < devices.size(); d++)
+            {
+                const size_t peer = (d + 1) % devices.size();
+                for(size_t r = firstSlot; r < endSlot; r++)
+                {
+                    auto& inputs = dynamic_cast<ContractionInputs&>(*devices[d]->inputArr[r]);
+                    inputs.peerD = static_cast<char*>(fullOutputs[peer][r].get()) + sliceBytes[d];                }
+            }
+    };
 
     bool  useUserArgs = args["use-user-args"].as<bool>();
     void* dUA         = nullptr;
@@ -1232,22 +1380,35 @@ int main(int argc, const char* argv[])
             // for scope across all problem / iterations, accumulate continuously
             // to avoid starting from copy 0 for each problem
             size_t rotationLaunchIdx = 0;
-            for(int problemIdx = firstProblemIdx; problemIdx <= lastProblemIdx; problemIdx++)
+            for(int problemIdx : problemIdxs)
             {
+                // Declared first => destroyed last: problem_total covers the whole body,
+                // problem_teardown covers destruction of the body's locals (see mark() below).
+                ScopedTimer          problemTotalTimer("problem_total");
+                ScopeTeardownTimer   problemTeardownTimer("problem_teardown");
                 auto problem = problems[problemIdx].get();
+                active.assign(devices.begin(),
+                              devices.begin()
+                                  + (problemFactory.numSlices() > 1 ? devices.size()
+                                                                    : problem->world()));
 
-                reporters->report(ResultKey::ProblemIndex, problemIdx);
-                reporters->report(ResultKey::ProblemProgress,
-                                  concatenate(problemIdx, "/", lastProblemIdx));
+                {
+                    ScopedTimer timer("problem_report_index");
+                    reporters->report(ResultKey::ProblemIndex, problemIdx);
+                    reporters->report(ResultKey::ProblemProgress,
+                                      concatenate(problemIdx, "/", lastProblemIdx));
+                }
 
                 {
                     ScopedTimer timer("pre_problem");
                     listeners.preProblem(problem);
                 }
-                std::shared_ptr<ProblemInputs> inputs;
                 {
                     ScopedTimer timer("gpu_input_preparation");
-                    inputs = dataInit->prepareGPUInputs(problem);
+                    forEachDeviceIndexed(active, [&](DeviceContext& ctx, size_t d) {
+                        ctx.inputs = ctx.dataInit->prepareGPUInputs(
+                            problemFactory.sliceProblem(problem, d));
+                    });
                 }
 
                 size_t warmupInvocations    = listeners.numWarmupRuns();
@@ -1255,12 +1416,25 @@ int main(int argc, const char* argv[])
                 size_t enq                  = listeners.numEnqueuesPerSync();
                 size_t maxRotatingBufferNum = std::max(warmupInvocations, syncs * enq);
 
-                std::vector<std::shared_ptr<ProblemInputs>> inputArr;
+                {
+                    // Nothing may still be writing into the previous problem's outputs.
+                    forEachDevice(devices,
+                                  [](DeviceContext&) { static_cast<void>(hipDeviceSynchronize()); });
+                    fullOutputs.clear();
+                    fullBatchD.clear();
+                }
+
                 {
                     ScopedTimer timer("rotating_buffer_preparation");
-                    inputArr = dataInit->prepareRotatingGPUOutput(
-                        maxRotatingBufferNum, problem, inputs, stream);
-                    static_cast<void>(hipDeviceSynchronize());
+                    forEachDeviceIndexed(active, [&](DeviceContext& ctx, size_t d) {
+                        ctx.inputArr = ctx.dataInit->prepareRotatingGPUOutput(
+                            maxRotatingBufferNum,
+                            problemFactory.sliceProblem(problem, d),
+                            ctx.inputs,
+                            ctx.stream);
+                        static_cast<void>(hipDeviceSynchronize());
+                    });
+                    attachFullOutput(problem, 0, device0->inputArr.size());
                 }
 
                 // I-cache rotation auto-load: when --icache-rotate-copies=-1,
@@ -1281,13 +1455,13 @@ int main(int argc, const char* argv[])
                 // problems reuse the same N.
                 {
                     int icacheArg = args["icache-rotate-copies"].as<int>();
-                    if(icacheArg == -1 && adapter.numRotationModules() == 1)
+                    if(icacheArg == -1 && device0->adapter->numRotationModules() == 1)
                     {
                         auto const& filenames
                             = args["code-object"].as<std::vector<std::string>>();
 
                         // Term 1: align with data rotation cycle.
-                        int extrasFromDataInit = static_cast<int>(inputArr.size()) - 1;
+                        int extrasFromDataInit = static_cast<int>(device0->inputArr.size()) - 1;
 
                         // Term 2: cache-overflow term.
 #if defined(__linux__)
@@ -1328,9 +1502,17 @@ int main(int argc, const char* argv[])
                         if(extras > 0)
                         {
                             ScopedTimer timer("icache_rotate_extra_copies_loading");
-                            for(auto const& filename : filenames)
-                                HIP_CHECK_EXC(adapter.loadCodeObjectFileExtraCopies(
-                                    filename, extras));
+                            forEachDevice(devices, [&](DeviceContext& ctx) {
+                                for(auto const& filename : filenames)
+                                    HIP_CHECK_EXC(ctx.adapter->loadCodeObjectFileExtraCopies(
+                                        filename, extras));
+                                // Mirror the helper bundle (Kernels.so) into every
+                                // rotation slot so helper kernels (PostGSU / betaOnly /
+                                // reduction / conversion) resolve under rotation instead
+                                // of only from copy 0. The helper is already loaded into
+                                // m_modules by initializeLazyLoading at this point.
+                                HIP_CHECK_EXC(ctx.adapter->loadHelperKernelExtraCopies(extras));
+                            });
                         }
 #if defined(__linux__)
                         std::cout << "[icache-rotate] auto extras = max("
@@ -1359,6 +1541,8 @@ int main(int argc, const char* argv[])
                 bool resetInput = true;
                 while(solutionIterator->moreSolutionsInProblem())
                 {
+                    ScopedTimer        solutionTotalTimer("solution_total");
+                    ScopeTeardownTimer solutionTeardownTimer("solution_teardown");
                     std::shared_ptr<ContractionSolution> solution;
                     {
                         ScopedTimer timer("solution_selection");
@@ -1367,156 +1551,330 @@ int main(int argc, const char* argv[])
                     if(solution == nullptr)
                         throw std::runtime_error("Could not find a solution");
 
+                    // WorkgroupMappingXCCCheck admits CU-fallback solutions on the basis that
+                    // they launch at WGMXCC=1, as hipBLASLt does; zero keeps the solution's own
+                    // mapping.
+                    if(auto gemm = dynamic_cast<ContractionProblemGemm*>(problem);
+                       gemm && !fusedA2A)
+                        gemm->setParams().setWGMXCC(solution->isFallbackForHW(*hardware) ? 1 : 0);
+
                     {
                         ScopedTimer timer("pre_solution");
                         listeners.preSolution(solution.get());
                     }
-                    if(solutionIterator->runCurrentSolution() && runKernels)
+                    bool deviceLost = false;
+                    bool runThisSolution = false;
+                    {
+                        ScopedTimer timer("run_current_solution_check");
+                        runThisSolution = solutionIterator->runCurrentSolution() && runKernels;
+                    }
+                    if(runThisSolution)
                     {
                         try
                         {
+                            checkFusedA2ASolution(*problem, *solution, *hardware, active.size());
+                            resetCommBuffers(*problem, active);
                             while(listeners.needMoreRunsInSolution())
                             {
+                                ScopedTimer        runIterTotalTimer("run_iteration_total");
+                                ScopeTeardownTimer runIterTeardownTimer("run_iteration_teardown");
                                 if(resetInput)
                                 {
                                     ScopedTimer timer("gpu_input_reset");
-                                    auto inputs = dataInit->prepareGPUInputs(problem);
-                                    inputArr[0] = inputs;
+                                    struct ResetScope
+                                    {
+                                        ResetScope() { g_inGpuInputReset = true; }
+                                        ~ResetScope() { g_inGpuInputReset = false; }
+                                    } resetScope;
+                                    forEachDeviceIndexed(
+                                        active, [&](DeviceContext& ctx, size_t d) {
+                                            ctx.inputArr[0] = ctx.dataInit->prepareGPUInputs(
+                                                problemFactory.sliceProblem(problem, d));
+                                        });
+                                    attachFullOutput(problem, 0, 1);
                                 }
                                 resetInput = true;
+                                synchronizerValidator->beginRunIteration();
 
-                                std::vector<std::vector<KernelInvocation>> kernels;
+                                std::vector<std::vector<std::vector<KernelInvocation>>> kernels;
                                 {
-                                    ScopedTimer timer("kernel_solving");
-                                    for(size_t r = 0; r < inputArr.size(); r++)
-                                    {
-                                        auto kernel = useUserArgs
-                                                          ? solution->solveTensileGPU((*problem),
-                                                                                      *inputArr[r],
-                                                                                      *hardware,
-                                                                                      &dUA,
-                                                                                      &dUAHost,
-                                                                                      nullptr,
-                                                                                      0,
-                                                                                      stream)
-                                                          : solution->solve((*problem),
-                                                                            *inputArr[r],
-                                                                            *hardware,
-                                                                            nullptr,
-                                                                            0,
-                                                                            stream);
-                                        kernels.push_back(kernel);
-                                    }
+                                    ScopedTimer  timer("kernel_solving");
+                                    const size_t slots    = device0->inputArr.size();
+                                    const size_t channels = fusedA2A ? kCommChannels : 1;
+                                    kernels.assign(
+                                        std::lcm(slots, channels),
+                                        std::vector<std::vector<KernelInvocation>>(active.size()));
+                                    for(size_t k = 0; k < kernels.size(); k++)
+                                        for(size_t d = 0; d < active.size(); d++)
+                                        {
+                                            auto&                ctx = *active[d];
+                                            ScopedDevice         device(ctx.deviceId);
+                                            ContractionInputs    scratch;
+                                            ProblemInputs const* inputs = rankInputs(scratch,
+                                                                                     *problem,
+                                                                                     active,
+                                                                                     d,
+                                                                                     k);
+                                            // --split-devices: the device solves its own slice
+                                            ContractionProblem const& deviceProblem
+                                                = *problemFactory.sliceProblem(problem, d);
+                                            kernels[k][d]
+                                                = useUserArgs
+                                                      ? solution->solveTensileGPU(deviceProblem,
+                                                                                  *inputs,
+                                                                                  *hardware,
+                                                                                  &dUA,
+                                                                                  &dUAHost,
+                                                                                  nullptr,
+                                                                                  0,
+                                                                                  ctx.stream)
+                                                      : solution->solve(deviceProblem,
+                                                                        *inputs,
+                                                                        *hardware,
+                                                                        nullptr,
+                                                                        0,
+                                                                        ctx.stream);
+                                        }
                                 }
 
+                                auto const   warmupSetupStart  = TimingClock::now();
                                 size_t       warmupInvocations = listeners.numWarmupRuns();
-                                size_t       warmupEventCount  = kernels[0].size();
-                                TimingEvents warmupStartEvents(warmupInvocations, warmupEventCount);
-                                TimingEvents warmupStopEvents(warmupInvocations, warmupEventCount);
+                                size_t       warmupEventCount  = kernels[0][0].size();
+                                TimingEvents warmupStartEvents(
+                                    active, warmupInvocations, warmupEventCount);
+                                TimingEvents warmupStopEvents(
+                                    active, warmupInvocations, warmupEventCount);
+                                recordTimingSince("warmup_events_setup", warmupSetupStart);
 
                                 // I-cache rotation counter: increments per launchKernels call
                                 // and selects which hipModule_t copy services the next launch.
                                 // numRotationModules()==1 → no rotation (always copy 0).
-                                int  nRotationModules = adapter.numRotationModules();
-                                auto rotateAndSelect  = [&]() {
-                                    adapter.selectRotationCopy(
-                                        (int)(rotationLaunchIdx++ % (size_t)nRotationModules));
+                                auto rotateAndSelect = [&]() {
+                                    for(auto const& ctx : devices)
+                                        ctx->adapter->selectRotationCopy(
+                                            (int)(rotationLaunchIdx
+                                                  % (size_t)ctx->adapter->numRotationModules()));
+                                    rotationLaunchIdx++;
                                 };
+
+                                // Whoever writes memory of another device publishes it, as
+                                // hipBLASLt's PartitionedGemm::run() does: every device but the
+                                // owner of a shared D, and every device of an OutputPeerD kernel.
+                                // A stream write after the kernels makes those writes visible to
+                                // the other devices.
+                                auto const* splitGemm
+                                    = dynamic_cast<ContractionProblemGemm const*>(problem);
+                                const bool split = problemFactory.numSlices() > 1;
+                                const bool sharedD
+                                    = split && args["split-placement"].as<std::string>()[3] == 'S';
+                                const bool peerD   = split && splitGemm && splitGemm->outputPeerD();
+                                auto       publish = [&](size_t d) {
+                                    if(!peerD && !(sharedD && d > 0))
+                                        return;
+                                    if(publishWords.size() < active.size())
+                                        publishWords.resize(active.size());
+                                    if(!publishWords[d])
+                                    {
+                                        void* word = nullptr;
+                                        HIP_CHECK_EXC(hipHostMalloc(&word,
+                                                                    sizeof(uint64_t),
+                                                                    hipHostMallocCoherent
+                                                                        | hipHostMallocMapped));
+                                        publishWords[d] = std::shared_ptr<void>(word, [](void* q) {
+                                            static_cast<void>(hipHostFree(q));
+                                        });
+                                    }
+                                    HIP_CHECK_EXC(hipStreamWriteValue64(
+                                        active[d]->stream, publishWords[d].get(), 1, 0));
+                                };
+
+                                // One counter across warmups, the profiler run and every sync.
+                                size_t launchIdx = 0;
+                                auto   launchAll = [&](TimingEvents const* startEvents,
+                                                     TimingEvents const* stopEvents,
+                                                     size_t              invocation) {
+                                    auto const& launch = kernels[launchIdx++ % kernels.size()];
+                                    for(size_t d = 0; d < active.size(); d++)
+                                    {
+                                        auto&        ctx = *active[d];
+                                        ScopedDevice device(ctx.deviceId);
+                                        if(startEvents)
+                                            HIP_CHECK_EXC(ctx.adapter->launchKernels(
+                                                launch[d],
+                                                ctx.stream,
+                                                startEvents->card(d)[invocation],
+                                                stopEvents->card(d)[invocation]));
+                                        else
+                                            HIP_CHECK_EXC(ctx.adapter->launchKernels(
+                                                launch[d], ctx.stream, nullptr, nullptr));
+                                        publish(d);
+                                    }
+                                };
+
+                                // Whether this run iteration launched anything (for the
+                                // end-of-iteration attribution sync below).
+                                bool iterationLaunched = false;
 
                                 if(warmupInvocations > 0)
                                 {
                                     {
                                         ScopedTimer timer("warmup_runs");
                                         listeners.preWarmup();
-                                        HIP_CHECK_EXC(adapter.launchKernels(kernels[0],
-                                                                            stream,
-                                                                            warmupStartEvents[0],
-                                                                            warmupStopEvents[0]));
+                                        launchAll(&warmupStartEvents, &warmupStopEvents, 0);
+                                        iterationLaunched = true;
+                                    }
+
+                                    // Attribution only: wait for warmup 0 under its own timer, so
+                                    // the validators' readbacks do not absorb the kernel's runtime.
+                                    // Not done without instrumentation, to keep the launch/host
+                                    // overlap of production runs.
+                                    if(g_timingInstrumentationEnabled)
+                                    {
+                                        ScopedTimer timer("warmup_first_sync");
+                                        forEachDevice(active, [](DeviceContext& ctx) {
+                                            HIP_CHECK_EXC(hipStreamSynchronize(ctx.stream));
+                                        });
                                     }
 
                                     {
                                         ScopedTimer timer("validate_warmups");
                                         listeners.validateWarmups(
-                                            inputs, warmupStartEvents, warmupStopEvents);
+                                            {0}, warmupStartEvents, warmupStopEvents);
                                     }
 
                                     {
                                         ScopedTimer timer("warmup_runs");
                                         for(int i = 1; i < warmupInvocations; i++)
-                                        {
-                                            size_t kIdx = i % kernels.size();
-                                            HIP_CHECK_EXC(adapter.launchKernels(kernels[kIdx],
-                                                                                stream,
-                                                                                warmupStartEvents[i],
-                                                                                warmupStopEvents[i]));
-                                        }
-                                        listeners.postWarmup(
-                                            warmupStartEvents, warmupStopEvents, stream);
+                                            launchAll(&warmupStartEvents, &warmupStopEvents, i);
+                                        listeners.postWarmup(warmupStartEvents, warmupStopEvents);
                                     }
                                 }
 
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
-                                TimingEvents ProfilerStartEvents(1, warmupEventCount);
-                                TimingEvents ProfilerStopEvents(1, warmupEventCount);
+                                TimingEvents ProfilerStartEvents(active, 1, warmupEventCount);
+                                TimingEvents ProfilerStopEvents(active, 1, warmupEventCount);
                                 listeners.preProfiler();
                                 rotateAndSelect();
-                                HIP_CHECK_EXC(adapter.launchKernels(kernels[warmupInvocations % kernels.size()],
-                                                                    stream,
-                                                                    ProfilerStartEvents[0],
-                                                                    ProfilerStopEvents[0]));
+                                launchAll(&ProfilerStartEvents, &ProfilerStopEvents, 0);
+                                iterationLaunched = true;
                                 listeners.postProfiler();
 #endif
 
                                 size_t syncs      = listeners.numSyncs();
                                 size_t enq        = listeners.numEnqueuesPerSync();
-                                size_t eventCount = gpuTimer ? kernels[0].size() : 0;
+                                size_t eventCount = gpuTimer ? warmupEventCount : 0;
+                                size_t slotCount  = device0->inputArr.size();
 
                                 {
                                     ScopedTimer timer("benchmark_runs");
-                                    listeners.preSyncs();
+                                    {
+                                        ScopedTimer preSyncsTimer("benchmark_pre_syncs");
+                                        listeners.preSyncs();
+                                    }
                                     if(enq)
                                         for(int i = 0; i < syncs; i++)
                                         {
-                                            TimingEvents startEvents(enq, eventCount);
-                                            TimingEvents stopEvents(enq, eventCount);
+                                            // Declared first => destroyed last: times the event
+                                            // destruction at the end of the iteration (mark() below).
+                                            ScopeTeardownTimer eventsTeardownTimer(
+                                                "benchmark_events_teardown");
+                                            auto const eventsSetupStart = TimingClock::now();
+                                            TimingEvents startEvents(active, enq, eventCount);
+                                            TimingEvents stopEvents(active, enq, eventCount);
+                                            std::vector<size_t> slots;
+                                            for(size_t j = 0; j < std::min(enq, slotCount); j++)
+                                                slots.push_back((launchIdx + j) % slotCount);
+                                            recordTimingSince("benchmark_events_setup",
+                                                              eventsSetupStart);
 
                                             {
                                                 ScopedTimer kernelTimer("gpu_kernel_execution");
-                                                listeners.preEnqueues(stream);
+                                                listeners.preEnqueues();
 
                                                 for(int j = 0; j < enq; j++)
                                                 {
-                                                    size_t kIdx = ((i * enq) + j) % kernels.size();
                                                     rotateAndSelect();
-                                                    HIP_CHECK_EXC(adapter.launchKernels(
-                                                        kernels[kIdx], stream, nullptr, nullptr));
+                                                    launchAll(nullptr, nullptr, 0);
+                                                    iterationLaunched = true;
 
                                                     if(icacheFlush)
                                                     {
-                                                        hipLaunchKernelGGL(
-                                                            flush_icache, flushGridSize, 64, 0, stream);
+                                                        hipLaunchKernelGGL(flush_icache,
+                                                                           flushGridSize,
+                                                                           64,
+                                                                           0,
+                                                                           device0->stream);
                                                     }
                                                 }
 
-                                                listeners.postEnqueues(startEvents, stopEvents, stream);
+                                                listeners.postEnqueues(startEvents, stopEvents);
                                             }
-                                            listeners.validateEnqueues(inputs, startEvents, stopEvents);
+                                            {
+                                                ScopedTimer validateEnqueuesTimer(
+                                                    "benchmark_validate_enqueues");
+                                                listeners.validateEnqueues(
+                                                    slots, startEvents, stopEvents);
+                                            }
+                                            eventsTeardownTimer.mark();
                                         }
 
-                                    listeners.postSyncs();
+                                    {
+                                        ScopedTimer postSyncsTimer("benchmark_post_syncs");
+                                        listeners.postSyncs();
+                                    }
+                                }
+
+                                // Attribution only: wait for everything this iteration queued
+                                // (e.g. warmups 1..N-1 with SyncsPerBenchmark: 0) under its own
+                                // timer. Otherwise the next solution's first blocking call (e.g.
+                                // its input reset or GPU readback validation) or an
+                                // end-of-iteration check would absorb it. Inside the try: a kernel
+                                // fault surfacing here takes the device-lost path below.
+                                if(g_timingInstrumentationEnabled && iterationLaunched)
+                                {
+                                    ScopedTimer timer("run_iteration_sync");
+                                    forEachDevice(active, [](DeviceContext& ctx) {
+                                        HIP_CHECK_EXC(hipStreamSynchronize(ctx.stream));
+                                    });
                                 }
 
                                 if(useUserArgs)
                                 {
                                     solution->relaseDeviceUserArgs(dUA, dUAHost);
                                 }
+
+                                // Check the Synchronizer after all of this iteration's launches,
+                                // before the next iteration's input reset (GuardPageAll runs two
+                                // iterations). The verdict is reported in postSolution. It can
+                                // throw, so it follows the release of the user args.
+                                synchronizerValidator->checkRunIteration();
+                                runIterTeardownTimer.mark();
                             }
+                            forEachDevice(active, [](DeviceContext&) {
+                                HIP_CHECK_EXC(hipDeviceSynchronize());
+                            });
                         }
                         catch(std::runtime_error const& err)
                         {
                             reporters->report(ResultKey::Validation, "INVALID");
                             reporters->log(LogLevel::Error,
                                            concatenate("Exception occurred: ", err.what(), "\n"));
+                            // A sticky error (e.g. a kernel memory fault) leaves the device unusable.
+                            for(auto const& ctx : devices)
+                            {
+                                hipError_t syncErr = hipSetDevice(ctx->deviceId);
+                                if(syncErr == hipSuccess)
+                                    syncErr = hipDeviceSynchronize();
+                                if(syncErr != hipSuccess)
+                                {
+                                    deviceLost = true;
+                                    reporters->log(LogLevel::Error,
+                                                   concatenate("Device unusable (",
+                                                               hipGetErrorName(syncErr),
+                                                               "), aborting.\n"));
+                                }
+                            }
+                            static_cast<void>(hipSetDevice(device0->deviceId));
                         }
                     }
 
@@ -1524,12 +1882,13 @@ int main(int argc, const char* argv[])
                         ScopedTimer timer("post_solution");
                         listeners.postSolution();
                     }
+                    solutionTeardownTimer.mark();
 
-                    if(exitOnError && listeners.error() > 0)
+                    if(deviceLost || (exitOnError && listeners.error() > 0))
                     {
                         flushTimingBuffer();
                         // error range in shell is [0-255]
-                        return std::min(listeners.error(), 255);
+                        return std::clamp(listeners.error(), 1, 255);
                     }
                 }
 
@@ -1537,6 +1896,7 @@ int main(int argc, const char* argv[])
                     ScopedTimer timer("post_problem");
                     listeners.postProblem();
                 }
+                problemTeardownTimer.mark();
             }
         }
 
@@ -1554,10 +1914,22 @@ int main(int argc, const char* argv[])
     // has already drained and cleared it, so the record would be lost.
     {
         auto flushStart = TimingClock::now();
+        recordTimingSince("main_total", mainStart);
         flushTimingBuffer();
         auto flushMs = std::chrono::duration<double, std::milli>(
             TimingClock::now() - flushStart).count();
         std::clog << "TIMING:flush_timing_buffer:" << flushMs << "\n";
+        if(g_timingInstrumentationEnabled)
+        {
+            // Wall-clock stamps so the Python side can split process startup / teardown.
+            auto toNs = [](std::chrono::system_clock::time_point t) {
+                return std::chrono::duration_cast<std::chrono::nanoseconds>(t.time_since_epoch())
+                    .count();
+            };
+            std::clog << "TIMING_TS:main_start:" << toNs(mainStartWall) << "\n"
+                      << "TIMING_TS:main_end:" << toNs(std::chrono::system_clock::now()) << "\n";
+            std::clog.flush();
+        }
     }
 
     // error range in shell is [0-255]

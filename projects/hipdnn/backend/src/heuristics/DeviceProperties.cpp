@@ -42,7 +42,7 @@ hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT queryDeviceProperties(hi
     }
 
     int deviceId = 0;
-    auto status = hipStreamGetDevice(handle->getStream(), &deviceId);
+    const auto status = handle->getDevice(&deviceId);
     if(status != hipSuccess)
     {
         throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,

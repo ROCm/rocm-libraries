@@ -45,6 +45,7 @@
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE);
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CK_DEFAULT_KERNELS)
 
 namespace miopen {
@@ -140,12 +141,13 @@ static const std::vector<std::string> ranked_gemm_3d_grp_fwd_navi = {
 void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::DefaultKernelFromList(
     const ExecutionContext& ctx)
 {
-    const auto dev_name = ctx.GetStream().GetDeviceName();
-    const bool is_gfx11 = StartsWith(dev_name, "gfx11");
-    const bool is_gfx12 = StartsWith(dev_name, "gfx12");
+    const auto dev_name  = ctx.GetStream().GetDeviceName();
+    const bool is_gfx11  = StartsWith(dev_name, "gfx110") || StartsWith(dev_name, "gfx115");
+    const bool is_gfx117 = StartsWith(dev_name, "gfx117");
+    const bool is_gfx12  = StartsWith(dev_name, "gfx12");
 
     auto* ranked_p = &ranked_gemm_3d_grp_fwd;
-    if(is_gfx11 || is_gfx12)
+    if(is_gfx11 || is_gfx12 || is_gfx117)
         ranked_p = &ranked_gemm_3d_grp_fwd_navi;
 
     const auto ranked_1st_applicable = *ranked_p;
@@ -207,8 +209,11 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
     }
 
     // 2. Hard-coded heuristics for BF16/FP16 on gfx942 and gfx950 only
+    //    (set MIOPEN_DEBUG_..._HARDCODE=0 to skip and fall through to the AI model)
     if((problem.GetInDataType() == miopenBFloat16 || problem.GetInDataType() == miopenHalf) &&
-       (ctx.GetStream().GetDeviceName() == "gfx942" || ctx.GetStream().GetDeviceName() == "gfx950"))
+       (ctx.GetStream().GetDeviceName() == "gfx942" ||
+        ctx.GetStream().GetDeviceName() == "gfx950") &&
+       !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE))
     {
         MIOPEN_LOG_I2("Step 2: Attempting hard-coded heuristics for "
                       << (problem.GetInDataType() == miopenBFloat16 ? "BF16" : "FP16"));
@@ -362,13 +367,11 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
 
         bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
-        auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
-            return loader.FillValidKernels(
-                CKSolverType::GrpConv3dFwd, p, p.GetInDataType(), try_tf32);
-        };
-
-        auto ck_val_creator = MakeCKValidatorCreator(
-            loader, CKSolverType::GrpConv3dFwd, problem.GetInDataType(), mode_use_tf32);
+        auto ck_val_creator = MakeCKValidatorCreator(loader,
+                                                     CKSolverType::GrpConv3dFwd,
+                                                     problem.GetInDataType(),
+                                                     mode_use_tf32,
+                                                     k3DFwdSolverConfig.uses_split_k);
 
         // Note: No KTN runner needed for 3D (supports_ktn = false)
         if(RunAIHeuristics(k3DFwdSolverConfig,
@@ -376,7 +379,6 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
                            ctx,
                            problem,
                            false,
-                           fill_valid_kernels,
                            nullptr,
                            ck_val_creator,
                            mode_use_tf32))
@@ -409,9 +411,13 @@ bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::SetNextValue(
 {
     if(valid_kernels.empty())
     {
-        // For generic search, we want all available kernels, not heuristic selection
+        // For generic search we want all available kernels, not heuristic selection.
+        // InitValidKernels seeds index/kernel_id to element 0 -- required, because
+        // GenericSearch's ComputedIterator skips configs whose IsValid() is false, so an
+        // unset kernel_id would silently start enumeration at valid_kernels[1].
         InitValidKernels(problem);
-        assert(!valid_kernels.empty());
+        if(valid_kernels.empty())
+            return false;
         return true;
     }
     if((index + 1) < valid_kernels.size())
@@ -513,8 +519,7 @@ bool ConvHipImplicitGemm3DGroupFwdXdlops::IsApplicable(const ExecutionContext& c
 {
     if(env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS))
         return false;
-    if(problem.GetConv().attribute.deterministic)
-        return false;
+    // No deterministic gate: forward never uses split-K, so every instance is deterministic.
     if(problem.HasMixedDataTypes())
         return false;
     if(!problem.IsDirectionForward())
@@ -577,8 +582,7 @@ ConvSolution ConvHipImplicitGemm3DGroupFwdXdlops::GetSolution(
     if(!loader.IsLoaded())
         return ConvSolution{miopenStatusInternalError};
 
-    return loader.GetSolution(
-        CKSolverType::GrpConv3dFwd, ctx, problem, config.kernel_id, config.UseTF32());
+    return loader.GetSolutionTf32Aware(CKSolverType::GrpConv3dFwd, ctx, problem, config.kernel_id);
 }
 
 } // namespace conv

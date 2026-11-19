@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -17,14 +19,57 @@
 
 // Tolerance resolution shared by both verification harnesses. Reads per-op,
 // per-dtype numbers from TestTolerances.hpp and aggregates them into a single
-// atol/rtol pair for each output tensor. TOML per-test overrides are applied
-// last. See ALMIOPEN-2216 for the DynamicTolerances upgrade path.
+// atol/rtol pair for each output tensor. An fp8 output uses one step of its format.
+//
+// TOML per-test overrides apply to engine output only. They are read from an
+// engine's own config file, so they say how far that engine may drift — never how
+// far our checked-in golden data may. Reference validation calls defaultTolerance()
+// and can never be loosened by an engine's config. See ALMIOPEN-2216 for the
+// DynamicTolerances upgrade path.
 
 namespace hipdnn_integration_tests::tolerance
 {
 
 namespace fb = hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 namespace data = hipdnn_flatbuffers_sdk::data_objects;
+
+// Bounds of an allclose check: |ref - out| <= atol + rtol * |ref|.
+struct Tolerance
+{
+    float atol;
+    float rtol;
+};
+
+// One quantization step of an fp8 format at every magnitude. epsilon() is the step
+// relative to the low end of a binade, so rtol covers one step in the normal range.
+// Subnormals have a fixed step of denorm_min(), which atol covers.
+template <typename T>
+inline Tolerance fp8StepTolerance()
+{
+    return {static_cast<float>(std::numeric_limits<T>::denorm_min()),
+            static_cast<float>(std::numeric_limits<T>::epsilon())};
+}
+
+// An fp8 output gets one step of its format, whichever op produced it.
+inline std::optional<Tolerance> fp8OutputTolerance(data::DataType dataType)
+{
+    using DT = data::DataType;
+    namespace types = hipdnn_data_sdk::types;
+
+    switch(dataType)
+    {
+    case DT::FP8_E4M3:
+        return fp8StepTolerance<types::fp8_e4m3>();
+    case DT::FP8_E4M3_FNUZ:
+        return fp8StepTolerance<types::fp8_e4m3_fnuz>();
+    case DT::FP8_E5M2:
+        return fp8StepTolerance<types::fp8_e5m2>();
+    case DT::FP8_E5M2_FNUZ:
+        return fp8StepTolerance<types::fp8_e5m2_fnuz>();
+    default:
+        return std::nullopt;
+    }
+}
 
 // Per-op tolerance for one node attribute type, at a fixed element type T.
 // Maps a flatbuffer NodeAttributes tag onto the corresponding TestTolerances.hpp
@@ -60,6 +105,7 @@ inline float toleranceForNodeAttributes(data::NodeAttributes attrType)
     case NA::ReductionAttributes:
         return tol::reduction::getTolerance<T>();
     case NA::RMSNormAttributes:
+    case NA::RMSNormBackwardAttributes:
         return tol::rmsnorm::getTolerance<T>();
     case NA::PointwiseAttributes:
         return tol::pointwise::getTolerance<T>();
@@ -69,6 +115,9 @@ inline float toleranceForNodeAttributes(data::NodeAttributes attrType)
     case NA::SdpaAttributes:
     case NA::SdpaBackwardAttributes:
         return tol::sdpa::getToleranceFwd<T>();
+    case NA::ResampleFwdAttributes:
+    case NA::ResampleBwdAttributes:
+        return tol::resample::getTolerance<T>();
     default:
         return 1e-3f;
     }
@@ -152,7 +201,40 @@ inline float outputOpTolerance(const fb::GraphWrapper& wrapper, data::DataType d
     return toleranceForNode(rootAttr, dataType);
 }
 
-// Resolve atol/rtol for an output tensor: policy-selected default, then TOML override.
+// The policy-selected default for one output tensor, with no per-test override.
+// An fp8 output gets fp8OutputTolerance(); every other output uses the per-op value as
+// both atol and rtol.
+//
+// This is what a reference-vs-golden comparison uses. TOML overrides live in an
+// engine's own config file (config/<ENGINE>.toml), so they describe how far *that
+// engine* may drift; applying one to our own checked-in golden data would loosen
+// the gate that is supposed to be measuring the data.
+inline Tolerance defaultTolerance(const fb::GraphWrapper& wrapper,
+                                  data::DataType dataType,
+                                  TolerancePolicy policy = TolerancePolicy::MAX_ACROSS_NODES)
+{
+    if(const auto fp8 = fp8OutputTolerance(dataType))
+    {
+        return *fp8;
+    }
+
+    float value = 0.0f;
+    switch(policy)
+    {
+    case TolerancePolicy::MAX_ACROSS_NODES:
+        value = maxAcrossNodes(wrapper, dataType);
+        break;
+    case TolerancePolicy::OUTPUT_OP_TOLERANCE:
+        value = outputOpTolerance(wrapper, dataType);
+        break;
+    default:
+        throw std::invalid_argument("unknown TolerancePolicy");
+    }
+    return {value, value};
+}
+
+// Resolve atol/rtol for an output tensor an *engine* produced: policy-selected
+// default, then the engine's TOML override.
 inline void resolveTolerance(const fb::GraphWrapper& wrapper,
                              data::DataType dataType,
                              const std::string& testName,
@@ -160,20 +242,9 @@ inline void resolveTolerance(const fb::GraphWrapper& wrapper,
                              float& rtol,
                              TolerancePolicy policy = TolerancePolicy::MAX_ACROSS_NODES)
 {
-    float defaultTolerance = 1e-3f;
-    switch(policy)
-    {
-    case TolerancePolicy::MAX_ACROSS_NODES:
-        defaultTolerance = maxAcrossNodes(wrapper, dataType);
-        break;
-    case TolerancePolicy::OUTPUT_OP_TOLERANCE:
-        defaultTolerance = outputOpTolerance(wrapper, dataType);
-        break;
-    default:
-        throw std::invalid_argument("unknown TolerancePolicy");
-    }
-    atol = defaultTolerance;
-    rtol = defaultTolerance;
+    const auto tolerance = defaultTolerance(wrapper, dataType, policy);
+    atol = tolerance.atol;
+    rtol = tolerance.rtol;
     applyTomlToleranceOverride(testName, atol, rtol);
 }
 

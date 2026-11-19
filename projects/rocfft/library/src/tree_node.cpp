@@ -19,6 +19,7 @@
 // THE SOFTWARE.
 
 #include "tree_node.h"
+#include "../../shared/arithmetic.h"
 #include "../../shared/precision_type.h"
 #include "../../shared/ptrdiff.h"
 #include "function_pool.h"
@@ -29,6 +30,7 @@
 #include "rocfft_mpi.h"
 #include "twiddles.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <sstream>
@@ -62,6 +64,16 @@ TreeNode::~TreeNode()
     {
         Repo::ReleaseTwiddle1D(twiddles_large);
         twiddles_large = nullptr;
+    }
+    if(twiddles_off_dim)
+    {
+        Repo::ReleaseTwiddle1D(twiddles_off_dim);
+        twiddles_off_dim = nullptr;
+    }
+    if(twiddles_pp)
+    {
+        Repo::ReleaseTwiddlePP(twiddles_pp);
+        twiddles_pp = nullptr;
     }
     if(chirp)
     {
@@ -130,26 +142,38 @@ void LeafNode::GetKernelPartialPassFactors()
     }
     case 1: // work along y will be split between x and z
     {
+        std::stringstream msg;
+        std::stringstream factors_msg;
+
+        msg << "work in the off-dimension = ";
+
+        factors_msg << "radix-(";
+        for(const auto factor : kernelFactorsPP)
+            factors_msg << factor << ",";
+        factors_msg.seekp(-1, std::ios_base::end);
+        factors_msg << ") pass(es)";
+
+        auto root_transform_type = GetRootPlanTransformType();
+
         if(scheme == CS_KERNEL_STOCKHAM_PP)
         {
-            std::stringstream msg;
-            msg << "work in the off-dimension:" << std::endl;
-            msg << "\t     radix: [";
-            for(const auto factor : kernelFactorsPP)
-                msg << " " << factor;
-            msg << " ] pass(es) + Hadamard product with twiddle factors. \n";
-            comments.push_back(msg.str());
+
+            if(root_transform_type == rocfft_transform_type_real_inverse)
+                msg << "local data transposition + " << factors_msg.str() << ".";
+            else
+                msg << factors_msg.str() << " + Hadamard product with twiddle factors.";
         }
         if(scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
         {
-            std::stringstream msg;
-            msg << "work in the off-dimension:" << std::endl;
-            msg << "\t     local data transposition + radix: [";
-            for(const auto factor : kernelFactorsPP)
-                msg << " " << factor;
-            msg << " ] pass(es). \n";
-            comments.push_back(msg.str());
+            if(root_transform_type == rocfft_transform_type_real_inverse)
+                msg << factors_msg.str() << " + Hadamard product with twiddle factors.";
+            else
+                msg << "local data transposition + " << factors_msg.str() << ".";
         }
+
+        msg << "\n";
+
+        comments.push_back(msg.str());
 
         break;
     }
@@ -263,15 +287,15 @@ void LeafNode::Print(rocfft_ostream& os, int indent) const
 
 bool LeafNode::CreateDevKernelArgs()
 {
-    devKernArg = kargs_create(length, inStride, outStride, iDist, oDist);
-    return (devKernArg != nullptr);
+    return devKernArg.create(length, inStride, outStride, iDist, oDist, GetKIntType());
 }
 
 bool LeafNode::CreateDeviceResources()
 {
-    if(need_chirp)
+    if(NeedsChirp())
     {
-        std::tie(chirp, chirp_size) = Repo::GetChirp(lengthBlueN, precision, deviceProp);
+        std::tie(chirp, chirp_size)
+            = Repo::GetChirp(blue->get_transform_length(), precision, deviceProp);
     }
 
     if(need_twd_table)
@@ -289,6 +313,25 @@ bool LeafNode::CreateDeviceResources()
     }
 
     return CreateLargeTwdTable();
+}
+
+bool LeafNode::CreatePartialPassDeviceResources(size_t off_dim_length)
+{
+    twd_attach_halfN = (ebtype != EmbeddedType::NONE);
+
+    // Create twiddle tables for partial pass along ppOffDim
+    std::tie(twiddles_off_dim, twiddles_off_dim_size)
+        = Repo::GetTwiddles1D(product(kernelFactorsPP.begin(), kernelFactorsPP.end()),
+                              GetTwiddleTableLengthLimit(),
+                              precision,
+                              deviceProp,
+                              0,
+                              twd_attach_halfN,
+                              kernelFactorsPP);
+    std::tie(twiddles_pp, twiddles_pp_size)
+        = Repo::GetTwiddlesPP(off_dim_length, precision, deviceProp);
+
+    return LeafNode::CreateDeviceResources();
 }
 
 void LeafNode::SetupGridParam(GridParam& gp)
@@ -364,31 +407,6 @@ void LeafNode::SetupGridParam(GridParam& gp)
 // grid params are set up by RTC
 void TransposeNode::SetupGridParam_internal(GridParam& gp) {}
 
-IndexType TransposeNode::GetKernelIndexType() const
-{
-    auto idx_limit = GetU32KernelIndexLimit();
-
-    // No scalar_type reinterpretation by this kernel (see rtc_transpose_gen.cpp).
-    // INT32_MAX, not UINT32_MAX: the compiler may sign-extend 32-bit indices to 64-bit.
-    if(MaxKernelIndex(io_data_label::INPUT) > idx_limit
-       || MaxKernelIndex(io_data_label::OUTPUT) > idx_limit)
-    {
-        return IndexType::U64;
-    }
-    return IndexType::U32;
-}
-
-size_t LeafNode::MaxKernelIndex(io_data_label io) const
-{
-    // Offsets (iOffset/oOffset) are applied to base pointers before
-    // launch (see powX.cpp) and don't affect kernel index arithmetic.
-    const auto& io_stride = io == io_data_label::INPUT ? inStride : outStride;
-    const auto& io_dist   = io == io_data_label::INPUT ? iDist : oDist;
-    const auto  io_length = io == io_data_label::INPUT ? length : GetOutputLength();
-    // compute_ptrdiff returns the buffer size (one-past-the-end).
-    return compute_ptrdiff(io_length, io_stride, batch, io_dist) - 1;
-}
-
 void TreeNode::SetTransposeOutputLength()
 {
     switch(scheme)
@@ -433,9 +451,9 @@ void TreeNode::CollapseContiguousDims()
     collapsible_axes.push_back(length.size());
 
     // TODO: replace members TreeNode::length, TreeNode::outputLength, TreeNode::inStride,
-    // TreeNode::outStride, etc. by data_layout_t instances and introduce a (static)
-    //    data_layout_t::compress_batch_axes_consistently_in(data_layout_t& layout_0,
-    //                                                       data_layout_t& layout_1
+    // TreeNode::outStride, etc. by data_set_t instances and introduce a (static)
+    //    data_set_t::compress_batch_axes_consistently_in(data_set_t& layout_0,
+    //                                                       data_set_t& layout_1
     //                                                       [, ...]);
     // which handle compression of batch axes consistently across two (or more) data layouts.
 
@@ -544,12 +562,13 @@ bool TreeNode::IsBluesteinChirpSetup()
     // setup nodes must be under a bluestein parent. multi-kernel fused
     // bluestein is an exception to this rule as the first two chirp + padding
     // nodes are under an L1D_CC node.
-    if(typeBlue != BT_MULTI_KERNEL_FUSED && (parent == nullptr || parent->scheme != CS_BLUESTEIN))
+    if(GetBluesteinType() != BT_MULTI_KERNEL_FUSED
+       && (parent == nullptr || parent->scheme != CS_BLUESTEIN))
         return false;
     // bluestein could either be 3-kernel plan (so-called single kernel Bluestein),
     // meaning the first two are setup kernels, or multi-kernel bluestein (fused or non-fused)
     // where only the first is setup
-    switch(parent->typeBlue)
+    switch(parent->GetBluesteinType())
     {
     case BluesteinType::BT_NONE:
         return false;
@@ -558,10 +577,24 @@ bool TreeNode::IsBluesteinChirpSetup()
     case BluesteinType::BT_MULTI_KERNEL:
         return this == parent->childNodes[0].get();
     case BluesteinType::BT_MULTI_KERNEL_FUSED:
-        return (fuseBlue == BFT_FWD_CHIRP) ? true : false;
+        return GetBluesteinFuseType() == BFT_FWD_CHIRP;
     }
 
     throw std::runtime_error("unexpected bluestein plan shape");
+}
+
+bool TreeNode::NeedsChirp() const
+{
+    const auto fuse = GetBluesteinFuseType();
+    switch(scheme)
+    {
+    case CS_KERNEL_STOCKHAM_BLOCK_CC:
+        return fuse == BFT_FWD_CHIRP || fuse == BFT_FWD_CHIRP_MUL;
+    case CS_KERNEL_STOCKHAM_BLOCK_RC:
+        return fuse == BFT_INV_CHIRP_MUL;
+    default:
+        return false;
+    }
 }
 
 MultiPlanItem::MultiPlanItem() {}

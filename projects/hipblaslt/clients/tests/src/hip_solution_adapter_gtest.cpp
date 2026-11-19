@@ -1,0 +1,631 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include <Tensile/hip/HipSolutionAdapter.hpp>
+#include <gtest/gtest.h>
+
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <deque>
+#include <functional>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
+
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+#include "local_kernel_test_common.hpp"
+
+#include <unistd.h>
+
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <future>
+#include <stdexcept>
+#endif
+
+namespace
+{
+    constexpr char primary[] = "/library/primary.co";
+    constexpr char other[]   = "/library/other.co";
+    constexpr char helper[]  = "/library/Kernels.so-000-gfx942.hsaco";
+    constexpr char minus[]   = "/library/Kernels.so-000-gfx942-xnack-.hsaco";
+    constexpr char plus[]    = "/library/Kernels.so-000-gfx942-xnack+.hsaco";
+
+    struct HipLoads
+    {
+        std::deque<std::pair<std::string, hipError_t>> expected;
+        std::map<hipModule_t, std::unique_ptr<int>>    live;
+        std::vector<hipModule_t>                       functionModules;
+        hipError_t                                     lastError = hipSuccess;
+        unsigned                                       unloads   = 0;
+        // Runs once, inside the next module unload.
+        std::function<void()> onUnload;
+    };
+
+    // Each test owns this state and destroys the adapter before releasing it.
+    HipLoads* hipLoads = nullptr;
+
+    hipError_t moduleLoad(hipModule_t* module, const char* path);
+    hipError_t moduleUnload(hipModule_t module);
+    hipError_t getLastError();
+    hipError_t getFunction(hipFunction_t* function, hipModule_t module, const char* name);
+
+    class HipSolutionAdapterTest : public ::testing::Test
+    {
+    protected:
+        void SetUp() override
+        {
+            hipLoads = &loads;
+            TensileLite::hip::SolutionAdapter::ModuleApi api{
+                moduleLoad, moduleUnload, getLastError};
+            api.getFunction = getFunction;
+            adapter         = std::make_unique<TensileLite::hip::SolutionAdapter>(api);
+        }
+
+        void TearDown() override
+        {
+            adapter.reset();
+            EXPECT_TRUE(loads.live.empty()) << "adapter leaked module handles";
+            EXPECT_TRUE(loads.expected.empty()) << "expected module loads did not run";
+            hipLoads = nullptr;
+        }
+
+        void expectLoad(const char* path, hipError_t error = hipSuccess)
+        {
+            loads.expected.emplace_back(path, error);
+        }
+
+        void expectHelperFailure(hipError_t error)
+        {
+            expectLoad(helper, error);
+            expectLoad(minus, error);
+            expectLoad(plus, error);
+        }
+
+        HipLoads                                           loads;
+        std::unique_ptr<TensileLite::hip::SolutionAdapter> adapter;
+    };
+
+    class HipSolutionAdapterRecoveryTest : public HipSolutionAdapterTest,
+                                           public ::testing::WithParamInterface<hipError_t>
+    {
+    };
+
+    hipError_t moduleLoad(hipModule_t* module, const char* path)
+    {
+        // Unexpected recursive recovery fails the test and returns a non-retryable
+        // error, rather than hanging the test process or exhausting its stack.
+        if(hipLoads->expected.empty())
+        {
+            ADD_FAILURE() << "unexpected module load: " << path;
+            return hipErrorInvalidValue;
+        }
+        auto [expectedPath, error] = hipLoads->expected.front();
+        hipLoads->expected.pop_front();
+        EXPECT_EQ(expectedPath, path);
+        if(error == hipSuccess)
+        {
+            auto storage = std::make_unique<int>(0);
+            *module      = reinterpret_cast<hipModule_t>(storage.get());
+            hipLoads->live.emplace(*module, std::move(storage));
+        }
+        else
+            hipLoads->lastError = error;
+        return error;
+    }
+
+    hipError_t moduleUnload(hipModule_t module)
+    {
+        EXPECT_EQ(hipLoads->live.erase(module), 1u) << "double or unowned module unload";
+        ++hipLoads->unloads;
+        if(auto hook = std::exchange(hipLoads->onUnload, nullptr))
+            hook();
+        return hipSuccess;
+    }
+
+    hipError_t getLastError()
+    {
+        return std::exchange(hipLoads->lastError, hipSuccess);
+    }
+
+    // Every module exports every kernel; the handle is the module's.
+    hipError_t getFunction(hipFunction_t* function, hipModule_t module, const char*)
+    {
+        EXPECT_EQ(hipLoads->live.count(module), 1u) << "kernel lookup in an unloaded module";
+        hipLoads->functionModules.push_back(module);
+        *function = reinterpret_cast<hipFunction_t>(module);
+        return hipSuccess;
+    }
+
+    TEST_F(HipSolutionAdapterTest,
+           smoke_ContextDoesNotLoadHelpersAndInitializationDoesNotDuplicateThem)
+    {
+        adapter->setLazyLoadingContext("gfx942:sramecc+:xnack-", "/library");
+        EXPECT_TRUE(loads.live.empty());
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942:sramecc+:xnack-", "/library"), hipSuccess);
+        EXPECT_EQ(adapter->initializeLazyLoading("gfx942", "/library/"), hipSuccess);
+        EXPECT_EQ(loads.live.size(), 2u);
+    }
+
+    TEST_F(HipSolutionAdapterTest, smoke_XnackFallbackRegistersHelperWithoutDuplicateLoads)
+    {
+        expectLoad(helper, hipErrorFileNotFound);
+        expectLoad(minus);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942:sramecc+:xnack-", "/library"), hipSuccess);
+        EXPECT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        EXPECT_EQ(loads.live.size(), 1u);
+    }
+
+    TEST_F(HipSolutionAdapterTest, smoke_OutOfMemoryDoesNotEnterRecovery)
+    {
+        adapter->setLazyLoadingContext("gfx942", "/library");
+        expectLoad(primary, hipErrorOutOfMemory);
+        EXPECT_EQ(adapter->loadCodeObjectFile(primary), hipErrorOutOfMemory);
+        EXPECT_EQ(loads.unloads, 0u);
+    }
+
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_MissingContextPreservesPrimaryError)
+    {
+        expectLoad(primary, GetParam());
+        EXPECT_EQ(adapter->loadCodeObjectFile(primary), GetParam());
+        EXPECT_EQ(loads.unloads, 0u);
+    }
+
+    TEST_P(HipSolutionAdapterRecoveryTest,
+           smoke_EarlyContextAllowsRecoveryBeforeHelperInitialization)
+    {
+        adapter->setLazyLoadingContext("gfx942:sramecc+:xnack-", "/library");
+        expectLoad(primary, GetParam());
+        expectLoad(helper);
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        EXPECT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        EXPECT_EQ(loads.live.size(), 2u);
+    }
+
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_RecoveryUnloadsOldModulesAndRestoresHelpers)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        expectLoad(primary, GetParam());
+        expectLoad(helper);
+        expectLoad(primary);
+        EXPECT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        EXPECT_EQ(loads.unloads, 1u);
+        EXPECT_EQ(loads.live.size(), 2u);
+    }
+
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_MissingHelpersPreservePrimaryError)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        expectLoad(primary, GetParam());
+        expectHelperFailure(hipErrorFileNotFound);
+        EXPECT_EQ(adapter->loadCodeObjectFile(primary), GetParam());
+        EXPECT_EQ(loads.unloads, 1u);
+        EXPECT_TRUE(loads.live.empty());
+    }
+
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_RecoverableHelperErrorsDoNotRecurse)
+    {
+        adapter->setLazyLoadingContext("gfx942", "/library");
+        expectLoad(primary, hipErrorLaunchFailure);
+        expectHelperFailure(GetParam());
+        EXPECT_EQ(adapter->loadCodeObjectFile(primary), hipErrorLaunchFailure);
+        EXPECT_TRUE(loads.live.empty());
+    }
+
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_DirectHelperInitializationDoesNotRecurse)
+    {
+        expectHelperFailure(GetParam());
+        EXPECT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), GetParam());
+        EXPECT_EQ(loads.unloads, 0u);
+    }
+
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_FailedPrimaryRetryIsReturnedWithoutAnotherRecovery)
+    {
+        adapter->setLazyLoadingContext("gfx942", "/library");
+        expectLoad(primary, hipErrorLaunchFailure);
+        expectLoad(helper);
+        expectLoad(primary, GetParam());
+        EXPECT_EQ(adapter->loadCodeObjectFile(primary), GetParam());
+        EXPECT_EQ(loads.live.size(), 1u);
+    }
+
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_RecoveryReclaimsRotationCopies)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        expectLoad(primary);
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFileExtraCopies(primary, 2), hipSuccess);
+        adapter->selectRotationCopy(2);
+        ASSERT_EQ(adapter->numRotationModules(), 3);
+        expectLoad(primary, GetParam());
+        expectLoad(helper);
+        expectLoad(primary);
+        EXPECT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        EXPECT_EQ(adapter->numRotationModules(), 1);
+        EXPECT_EQ(loads.unloads, 4u);
+        EXPECT_EQ(loads.live.size(), 2u);
+    }
+
+    // Recovery resets every cached kernel handle, so the next lookup resolves
+    // the kernel in a reloaded module instead of returning an unloaded one's.
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_KernelLookupAfterRecoveryUsesReloadedModule)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        ASSERT_EQ(adapter->initKernel("kernel"), hipSuccess);
+        ASSERT_EQ(adapter->initKernel("kernel"), hipSuccess);
+        ASSERT_EQ(loads.functionModules.size(), 1u) << "the second lookup hits the cache";
+
+        expectLoad(primary, GetParam());
+        expectLoad(helper);
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+
+        ASSERT_EQ(adapter->initKernel("kernel"), hipSuccess);
+        ASSERT_EQ(loads.functionModules.size(), 2u)
+            << "the handle cached before recovery was reused";
+        EXPECT_EQ(loads.live.count(loads.functionModules.back()), 1u);
+    }
+
+    // Recovery marks every loaded file as not loaded, so the next lookup loads
+    // it again instead of trusting a module that recovery unloaded.
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_FindCodeObjectReloadsAfterRecovery)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        expectLoad(other);
+        EXPECT_FALSE(adapter->FindCodeObject("other.co"));
+        EXPECT_TRUE(adapter->FindCodeObject("other.co"));
+
+        expectLoad(primary, GetParam());
+        expectLoad(helper);
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        EXPECT_EQ(loads.unloads, 2u);
+
+        expectLoad(other);
+        EXPECT_FALSE(adapter->FindCodeObject("other.co"));
+        EXPECT_TRUE(adapter->FindCodeObject("other.co"));
+        EXPECT_EQ(loads.live.size(), 3u);
+    }
+
+    // Recovery unloads the old modules after releasing the adapter lock. A load
+    // that lands meanwhile belongs to the new module set: it is kept, and the
+    // adapter unloads it exactly once when destroyed.
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_LoadDuringRecoveryUnloadIsKept)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        loads.onUnload = [this] { EXPECT_EQ(adapter->loadCodeObjectFile(other), hipSuccess); };
+
+        expectLoad(primary, GetParam());
+        expectLoad(other);
+        expectLoad(helper);
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        EXPECT_EQ(loads.unloads, 1u) << "only the old helper is unloaded";
+        EXPECT_EQ(loads.live.size(), 3u) << "the module loaded during recovery is still live";
+        EXPECT_TRUE(adapter->FindCodeObject("other.co"));
+    }
+
+    // Recovery runs while FindCodeObject holds the file's load mutex.
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_RecoveryInsideFindCodeObjectReloadsFiles)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        expectLoad(primary);
+        EXPECT_FALSE(adapter->FindCodeObject("primary.co"));
+        expectLoad(other, GetParam());
+        expectLoad(helper);
+        expectLoad(other);
+        EXPECT_FALSE(adapter->FindCodeObject("other.co"));
+        EXPECT_TRUE(adapter->FindCodeObject("other.co"));
+        expectLoad(primary);
+        EXPECT_FALSE(adapter->FindCodeObject("primary.co")) << "recovery unloaded it";
+        EXPECT_TRUE(adapter->FindCodeObject("primary.co"));
+        EXPECT_EQ(loads.live.size(), 3u);
+    }
+
+    std::mutex                 fileLoadsMutex;
+    std::map<std::string, int> fileLoads;
+    std::atomic<int>           liveFileModules{0};
+    std::atomic<uintptr_t>     nextFileModule{0};
+
+    // Slow enough that concurrent callers overlap the load.
+    hipError_t slowFileLoad(hipModule_t* module, const char* path)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        {
+            std::lock_guard<std::mutex> guard(fileLoadsMutex);
+            ++fileLoads[path];
+        }
+        ++liveFileModules;
+        *module = reinterpret_cast<hipModule_t>(++nextFileModule);
+        return hipSuccess;
+    }
+
+    hipError_t fileUnload(hipModule_t)
+    {
+        --liveFileModules;
+        return hipSuccess;
+    }
+
+    hipError_t noFileLoadError()
+    {
+        return hipSuccess;
+    }
+
+    TEST(HipSolutionAdapterConcurrentLoad, smoke_ConcurrentFirstUseLoadsEachFileOnce)
+    {
+        fileLoads.clear();
+        liveFileModules = 0;
+        {
+            TensileLite::hip::SolutionAdapter adapter(TensileLite::hip::SolutionAdapter::ModuleApi{
+                slowFileLoad, fileUnload, noFileLoadError});
+            adapter.codeObjectDir("/library");
+            std::vector<std::thread> threads;
+            for(int i = 0; i < 16; i++)
+                threads.emplace_back(
+                    [&adapter, i]() { adapter.FindCodeObject(i % 2 ? "a.co" : "b.co"); });
+            for(auto& thread : threads)
+                thread.join();
+            EXPECT_EQ(fileLoads,
+                      (std::map<std::string, int>{{"/library/a.co", 1}, {"/library/b.co", 1}}));
+            EXPECT_EQ(liveFileModules.load(), 2);
+            EXPECT_TRUE(adapter.FindCodeObject("a.co"));
+            EXPECT_TRUE(adapter.FindCodeObject("b.co"));
+        }
+        EXPECT_EQ(liveFileModules.load(), 0) << "the adapter unloads every module";
+    }
+
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+    using TensileLite::hip::SolutionAdapter;
+
+    constexpr char local[] = "/payload/local.co";
+
+    // A local code object that does not load (built for another architecture,
+    // say) is caller input, not memory pressure: the shipped modules stay.
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_LocalCodeObjectFailureDoesNotEnterRecovery)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        expectLoad(local, GetParam());
+        EXPECT_EQ(adapter->loadLocalCodeObject(local), GetParam());
+        EXPECT_EQ(loads.unloads, 0u);
+        EXPECT_EQ(loads.live.size(), 2u);
+        EXPECT_EQ(adapter->localCodeObjectCount(), 0u);
+        EXPECT_TRUE(adapter->FindCodeObject("primary.co")) << "the shipped module is still loaded";
+    }
+
+    TEST_F(HipSolutionAdapterTest, smoke_LocalCodeObjectLoadsOncePerPath)
+    {
+        expectLoad(local);
+        ASSERT_EQ(adapter->loadLocalCodeObject(local), hipSuccess);
+        EXPECT_EQ(adapter->loadLocalCodeObject(local), hipSuccess);
+        EXPECT_TRUE(adapter->FindCodeObject(local));
+        EXPECT_EQ(adapter->localCodeObjectCount(), 1u);
+    }
+
+    // What a device that did not register a payload does the first time it
+    // runs one of its kernels.
+    TEST_F(HipSolutionAdapterTest, smoke_FindCodeObjectLoadsLocalCodeObjectOnFirstUse)
+    {
+        expectLoad(local);
+        EXPECT_FALSE(adapter->FindCodeObject(local));
+        EXPECT_TRUE(adapter->FindCodeObject(local));
+        EXPECT_EQ(adapter->localCodeObjectCount(), 1u);
+    }
+
+    TEST_F(HipSolutionAdapterTest, smoke_FailedLocalCodeObjectIsRetried)
+    {
+        expectLoad(local, hipErrorNoBinaryForGpu);
+        EXPECT_FALSE(adapter->FindCodeObject(local));
+        expectLoad(local);
+        EXPECT_FALSE(adapter->FindCodeObject(local));
+        EXPECT_EQ(adapter->localCodeObjectCount(), 1u);
+    }
+
+    TEST_F(HipSolutionAdapterTest, smoke_OnlyAbsolutePathsAreLocalCodeObjects)
+    {
+        EXPECT_TRUE(SolutionAdapter::isLocalCodeObject(local));
+        EXPECT_FALSE(SolutionAdapter::isLocalCodeObject("primary.co"));
+        EXPECT_FALSE(SolutionAdapter::isLocalCodeObject("payload/local.co"));
+        EXPECT_FALSE(SolutionAdapter::isLocalCodeObject(""));
+    }
+
+    // hipModuleLoad can crash inside the runtime on such a file.
+    TEST_F(HipSolutionAdapterTest, smoke_TruncatedLocalCodeObjectIsNotLoaded)
+    {
+        auto path = std::filesystem::temp_directory_path()
+                    / ("hipblaslt-truncated-" + std::to_string(getpid()) + ".co");
+
+        // An ELF64 header whose section table lies past the end of the file.
+        std::vector<unsigned char> elf(64, 0);
+        elf[0]    = 0x7f;
+        elf[1]    = 'E';
+        elf[2]    = 'L';
+        elf[3]    = 'F';
+        elf[4]    = 2;
+        elf[5]    = 1;
+        elf[0x29] = 0x10; // e_shoff = 4096
+        elf[0x3A] = 64; // e_shentsize
+        elf[0x3C] = 4; // e_shnum
+
+        // A compressed offload bundle, the shipped format, that records a
+        // larger size than the file has.
+        std::vector<unsigned char> ccob(64, 0);
+        ccob[0] = 'C';
+        ccob[1] = 'C';
+        ccob[2] = 'O';
+        ccob[3] = 'B';
+        ccob[4] = 3; // version
+        ccob[6] = 1; // method
+        ccob[9] = 0x10; // total size = 4096
+
+        for(auto const* bytes : {&elf, &ccob})
+        {
+            std::ofstream(path, std::ios::binary)
+                .write(reinterpret_cast<char const*>(bytes->data()), bytes->size());
+            EXPECT_EQ(adapter->loadLocalCodeObject(path.string()), hipErrorInvalidImage);
+            EXPECT_EQ(adapter->localCodeObjectCount(), 0u);
+        }
+        std::filesystem::remove(path);
+    }
+
+    std::atomic<int> localLoads{0};
+    std::atomic<int> localUnloads{0};
+
+    hipError_t slowLocalLoad(hipModule_t* module, const char*)
+    {
+        int n = ++localLoads;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        *module = reinterpret_cast<hipModule_t>(static_cast<uintptr_t>(n));
+        return hipSuccess;
+    }
+
+    hipError_t throwingLocalLoad(hipModule_t*, const char*)
+    {
+        throw std::length_error("basic_string::_M_create");
+    }
+
+    hipError_t countLocalUnload(hipModule_t)
+    {
+        ++localUnloads;
+        return hipSuccess;
+    }
+
+    hipError_t noLastError()
+    {
+        return hipSuccess;
+    }
+
+    TEST(HipSolutionAdapterLocalCodeObject, smoke_ConcurrentFirstUseLoadsOnce)
+    {
+        localLoads   = 0;
+        localUnloads = 0;
+        {
+            SolutionAdapter adapter(
+                SolutionAdapter::ModuleApi{slowLocalLoad, countLocalUnload, noLastError});
+            std::vector<std::thread> threads;
+            for(int i = 0; i < 8; i++)
+                threads.emplace_back([&]() { adapter.FindCodeObject(local); });
+            for(auto& thread : threads)
+                thread.join();
+            EXPECT_EQ(localLoads.load(), 1);
+            EXPECT_EQ(adapter.localCodeObjectCount(), 1u);
+        }
+        EXPECT_EQ(localUnloads.load(), 1) << "the adapter unloads the local module";
+    }
+
+    TEST(HipSolutionAdapterLocalCodeObject, smoke_LoadThatThrowsIsAnError)
+    {
+        SolutionAdapter adapter(
+            SolutionAdapter::ModuleApi{throwingLocalLoad, countLocalUnload, noLastError});
+        EXPECT_EQ(adapter.loadLocalCodeObject(local), hipErrorInvalidImage);
+        EXPECT_EQ(adapter.localCodeObjectCount(), 0u);
+    }
+
+    constexpr char otherLocal[] = "/payload/other.co";
+
+    std::atomic<bool> holdLocalLoad{false};
+    std::atomic<bool> localLoadStarted{false};
+
+    // Loads of `local` wait until holdLocalLoad is cleared.
+    hipError_t heldLocalLoad(hipModule_t* module, const char* path)
+    {
+        if(std::string(path) == local)
+        {
+            localLoadStarted = true;
+            while(holdLocalLoad.load())
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        *module = reinterpret_cast<hipModule_t>(static_cast<uintptr_t>(++localLoads));
+        return hipSuccess;
+    }
+
+    TEST(HipSolutionAdapterLocalCodeObject, smoke_LoadsOfDifferentPathsDoNotWait)
+    {
+        localLoads       = 0;
+        localUnloads     = 0;
+        holdLocalLoad    = true;
+        localLoadStarted = false;
+        {
+            SolutionAdapter adapter(
+                SolutionAdapter::ModuleApi{heldLocalLoad, countLocalUnload, noLastError});
+            std::thread slow([&]() { EXPECT_EQ(adapter.loadLocalCodeObject(local), hipSuccess); });
+            while(!localLoadStarted.load())
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+            auto other = std::async(std::launch::async,
+                                    [&]() { return adapter.loadLocalCodeObject(otherLocal); });
+            EXPECT_EQ(other.wait_for(std::chrono::seconds(5)), std::future_status::ready)
+                << "the load of another path waited for the slow one";
+
+            holdLocalLoad = false;
+            slow.join();
+            EXPECT_EQ(other.get(), hipSuccess);
+            EXPECT_EQ(adapter.localCodeObjectCount(), 2u);
+        }
+        EXPECT_EQ(localUnloads.load(), 2);
+    }
+
+    // The check that refuses truncated files accepts every code object this
+    // build ships, whatever its layout.
+    TEST_F(HipSolutionAdapterTest, smoke_ShippedCodeObjectsAreNotRefused)
+    {
+        std::vector<std::string> files;
+        for(auto const& root : local_kernel_test::libraryRoots())
+        {
+            std::error_code ec;
+            for(auto const& entry : std::filesystem::recursive_directory_iterator(root, ec))
+            {
+                auto extension = entry.path().extension();
+                if(entry.is_regular_file() && (extension == ".co" || extension == ".hsaco"))
+                    files.push_back(std::filesystem::absolute(entry.path()).string());
+            }
+            if(!files.empty())
+                break;
+        }
+        ASSERT_FALSE(files.empty()) << "no code objects in this build's library";
+
+        std::map<std::string, int> layouts;
+        for(auto const& file : files)
+        {
+            char magic[8] = {};
+            std::ifstream(file, std::ios::binary).read(magic, sizeof(magic));
+            std::string head(magic, sizeof(magic));
+            layouts[head.rfind("CCOB", 0) == 0       ? "compressed offload bundle"
+                    : head.rfind("__CLANG_", 0) == 0 ? "offload bundle"
+                    : head.compare(1, 3, "ELF") == 0 ? "ELF"
+                                                     : "other"]++;
+
+            expectLoad(file.c_str());
+            EXPECT_EQ(adapter->loadLocalCodeObject(file), hipSuccess) << file;
+        }
+        for(auto const& [layout, count] : layouts)
+            std::printf("%d %s file(s)\n", count, layout.c_str());
+    }
+#endif
+
+    INSTANTIATE_TEST_SUITE_P(RecoverableErrors,
+                             HipSolutionAdapterRecoveryTest,
+                             ::testing::Values(hipErrorLaunchFailure, hipErrorNoBinaryForGpu));
+
+} // namespace

@@ -35,6 +35,7 @@
 #pragma once
 
 #include "ck_tile/dispatcher/kernel_key.hpp"
+#include "ck_tile/dispatcher/arch_specs_generated.hpp"
 #include <sstream>
 #include <string>
 #include <iostream>
@@ -277,7 +278,7 @@ class KernelConfig
         key.algorithm.scheduler       = scheduler_type;
         key.algorithm.epilogue        = epilogue_type;
         key.algorithm.block_size      = block_size;
-        key.algorithm.double_buffer   = true;
+        key.algorithm.double_buffer   = arch_specs::requires_double_smem_buffer(pipeline_type);
         key.algorithm.persistent      = false;
         key.algorithm.preshuffle      = preshuffle;
         key.algorithm.transpose_c     = false;

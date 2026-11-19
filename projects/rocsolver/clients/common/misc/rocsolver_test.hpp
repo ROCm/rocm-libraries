@@ -47,8 +47,8 @@ namespace fs = std::experimental::filesystem;
 #include <rocblas/rocblas.h>
 
 #ifdef ROCSOLVER_CLIENTS_TEST
-#define ROCSOLVER_TEST_CHECK(T, max_error, tol) ASSERT_LE((max_error), (tol)*get_epsilon<T>())
-#define ROCSOLVER_TEST_CHECK2(err2, err1) ASSERT_LE((err2), (err1))
+#define ROCSOLVER_TEST_CHECK(T, max_error, tol) EXPECT_LE((max_error), (tol)*get_epsilon<T>())
+#define ROCSOLVER_TEST_CHECK2(err2, err1) EXPECT_LE((err2), (err1))
 #else // ROCSOLVER_CLIENTS_BENCH
 #define ROCSOLVER_TEST_CHECK(T, max_error, tol)
 #define ROCSOLVER_TEST_CHECK2(err2, err1)

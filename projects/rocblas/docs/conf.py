@@ -34,3 +34,16 @@ for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
 
 extensions = globals().get("extensions", []) + ["sphinxcontrib.datatemplates"]
+
+# Theme-related settings
+html_theme = "rocm_docs_theme"
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-libraries",
+    "path_to_docs": "projects/rocblas/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+}
+# Generate llms.txt (https://llmstxt.org/)
+rocm_docs_generate_llms = True

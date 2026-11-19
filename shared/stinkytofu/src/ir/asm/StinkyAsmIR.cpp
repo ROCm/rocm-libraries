@@ -23,6 +23,7 @@
 
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
+#include <cassert>
 #include <cstdint>
 #include <iostream>  // TODO: don't use iostream.
 #include <ostream>
@@ -55,6 +56,61 @@ void StinkyInstruction::dump() const {
 void StinkyInstruction::dump(std::ostream& out) const {
     AsmPrinter printer(out);
     printer.print(*this);
+}
+
+void StinkyInstruction::attachSSA(AttachedSSA ssa) {
+    clearAttachedSSA();
+    attachedSSA_ = std::move(ssa);
+    for (size_t i = 0; i < attachedSSA_->results.size(); ++i) {
+        StinkySSAValue* value = attachedSSA_->results[i];
+        if (value != nullptr) value->bindDef(this, static_cast<uint16_t>(i));
+    }
+    for (size_t i = 0; i < attachedSSA_->operands.size(); ++i) {
+        if (attachedSSA_->operands[i])
+            attachedSSA_->operands[i]->bindOwner(this, static_cast<uint16_t>(i));
+    }
+}
+
+void StinkyInstruction::clearAttachedSSA() {
+    if (!attachedSSA_) return;
+    for (StinkySSAValue* value : attachedSSA_->results) {
+        if (value != nullptr && value->defOp() == this) value->unbindDef();
+    }
+    attachedSSA_.reset();
+}
+
+size_t StinkyInstruction::getNumSSAResults() const {
+    return attachedSSA_ ? attachedSSA_->results.size() : 0;
+}
+
+StinkySSAValue* StinkyInstruction::getSSAResult(size_t i) const {
+    assert(attachedSSA_ && "getSSAResult requires attached SSA");
+    return attachedSSA_->results.at(i);
+}
+
+size_t StinkyInstruction::getNumSSAOperands() const {
+    return attachedSSA_ ? attachedSSA_->operands.size() : 0;
+}
+
+StinkyOpOperand* StinkyInstruction::getSSAOperand(size_t i) {
+    assert(attachedSSA_ && "getSSAOperand requires attached SSA");
+    return attachedSSA_->operands.at(i).get();
+}
+
+const StinkyOpOperand* StinkyInstruction::getSSAOperand(size_t i) const {
+    assert(attachedSSA_ && "getSSAOperand requires attached SSA");
+    return attachedSSA_->operands.at(i).get();
+}
+
+StinkySSAValue* StinkyInstruction::getSSAOperandValue(size_t i) const {
+    const StinkyOpOperand* operand = getSSAOperand(i);
+    return operand != nullptr ? operand->value() : nullptr;
+}
+
+void StinkyInstruction::setSSAOperandValue(size_t i, StinkySSAValue* v) {
+    StinkyOpOperand* operand = getSSAOperand(i);
+    assert(operand != nullptr);
+    operand->setValue(v);
 }
 
 void StinkyInstruction::resolveMatrixFmtOverrides() {

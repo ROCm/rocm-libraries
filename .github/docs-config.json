@@ -101,6 +101,11 @@
         "rtd_alias": "rocWMMA"
     },
     {
+        "folder":  "rpp",
+        "rtd_slug": "advanced-micro-devices-rpp",
+        "rtd_alias": "RPP"
+    },
+    {
         "folder":  "stinkytofu",
         "rtd_slug": "advanced-micro-devices-stinkytofu",
         "rtd_alias": "StinkyTofu"

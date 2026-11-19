@@ -42,6 +42,18 @@
 #define ROCSPARSE_KERNEL(MAX_THREADS_PER_BLOCK) \
     __launch_bounds__(MAX_THREADS_PER_BLOCK) static __global__
 #define ROCSPARSE_DEVICE_ILF static __device__ __forceinline__
+
+// The standard attribute is allowed on enumerators from C++17 and C23. Older C and C++ use the GNU
+// form, which gcc and clang accept there.
+#if(defined(__cplusplus) && __cplusplus >= 201703L)   \
+    || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) \
+    || (!defined(__cplusplus) && defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L)
+#define ROCSPARSE_DEPRECATED_MSG(MSG) [[deprecated(MSG)]]
+#elif defined(__GNUC__) || defined(__clang__)
+#define ROCSPARSE_DEPRECATED_MSG(MSG) __attribute__((__deprecated__(MSG)))
+#else
+#define ROCSPARSE_DEPRECATED_MSG(MSG)
+#endif
 /// \endcond
 
 /*! \ingroup types_module
@@ -286,7 +298,6 @@ typedef struct _rocsparse_spic0_descr* rocsparse_spic0_descr;
  */
 typedef struct _rocsparse_spilu0_descr* rocsparse_spilu0_descr;
 
-#ifdef ROCSPARSE_WITH_ILDLT0
 /*! \ingroup types_module
  * \brief \p rocsparse_spildlt0_descr is a structure holding the rocSPARSE spildlt0
  * descriptor data. It must be initialized using
@@ -294,6 +305,15 @@ typedef struct _rocsparse_spilu0_descr* rocsparse_spilu0_descr;
  * end using rocsparse_spildlt0_descr_destroy().
  */
 typedef struct _rocsparse_spildlt0_descr* rocsparse_spildlt0_descr;
+
+#if defined(ROCSPARSE_WITH_SPSORT)
+/*! \ingroup types_module
+ * \brief \p rocsparse_spsort_descr is a structure holding the rocSPARSE spsort
+ * descriptor data. It must be initialized using
+ * the rocsparse_spsort_descr_create() routine. It should be destroyed at the
+ * end using rocsparse_spsort_descr_destroy().
+ */
+typedef struct _rocsparse_spsort_descr* rocsparse_spsort_descr;
 #endif
 
 #ifdef __cplusplus
@@ -392,6 +412,41 @@ typedef enum rocsparse_fill_mode_
     rocsparse_fill_mode_lower = 0, /**< Lower triangular part is stored. */
     rocsparse_fill_mode_upper = 1 /**< Upper triangular part is stored. */
 } rocsparse_fill_mode;
+
+/*! \ingroup types_module
+ *  \brief Select whether a solve stage performs a triangular or diagonal-only solve.
+ *
+ *  \details
+ *  The \ref rocsparse_solve_mode selects, for \ref rocsparse_sptrsv and
+ *  \ref rocsparse_sptrsm, whether the compute stage performs the regular triangular
+ *  solve or a diagonal-only solve that reuses the diagonal positions collected during
+ *  the analysis stage. The diagonal-only mode is intended for the diagonal step of a
+ *  factored solve such as \f$L D L^H\f$; how the diagonal values are treated is then
+ *  selected separately by \ref rocsparse_diagonal_modifier.
+ */
+typedef enum rocsparse_solve_mode_
+{
+    rocsparse_solve_mode_triangular
+    = 0, /**< Regular triangular solve \f$op(A) \, y = \alpha \, x\f$ (default). */
+    rocsparse_solve_mode_diagonal = 1 /**< Diagonal solve \f$D \, y = \alpha \, x\f$. */
+} rocsparse_solve_mode;
+
+/*! \ingroup types_module
+ *  \brief Select the function applied to each diagonal value in a diagonal solve.
+ *
+ *  \details
+ *  When \ref rocsparse_solve_mode is \ref rocsparse_solve_mode_diagonal, the
+ *  \ref rocsparse_diagonal_modifier selects the element-wise function \f$f\f$ applied to
+ *  each diagonal entry \f$d\f$ before the solve: \ref rocsparse_diagonal_modifier_none uses
+ *  \f$d\f$, while \ref rocsparse_diagonal_modifier_absolute uses \f$|d|\f$, which turns
+ *  \f$L |D| L^H\f$ into an HPD operator (a valid inner product for Hermitian Krylov methods
+ *  even when \f$D\f$ is indefinite). It has no effect for a triangular solve.
+ */
+typedef enum rocsparse_diagonal_modifier_
+{
+    rocsparse_diagonal_modifier_none     = 0, /**< Use \f$d\f$ (default). */
+    rocsparse_diagonal_modifier_absolute = 1 /**< Use \f$|d|\f$. */
+} rocsparse_diagonal_modifier;
 
 /*! \ingroup types_module
  *  \brief Specify whether the matrix is stored sorted or not.
@@ -557,15 +612,14 @@ typedef enum rocsparse_data_status_
  */
 typedef enum rocsparse_indextype_
 {
-// The deprecated u16 index type is removed from the public enum when
-// ROCSPARSE_WITH_U16_REMOVED is defined, but it is retained internally
-// (ROCSPARSE_KEEP_INTERNAL_U16) so that the library can still recognize and
-// gracefully reject the value without triggering -Wswitch warnings.
-#if !defined(ROCSPARSE_WITH_U16_REMOVED) || defined(ROCSPARSE_KEEP_INTERNAL_U16)
-    rocsparse_indextype_u16
-    [[deprecated("rocsparse_indextype_u16 is no longer supported and will be removed in a future "
-                 "release. Use "
-                 "rocsparse_indextype_i32 or rocsparse_indextype_i64 instead.")]]
+// The deprecated u16 index type is retained internally (ROCSPARSE_KEEP_INTERNAL_U16)
+// so that the library can still recognize and gracefully reject the value without
+// triggering -Wswitch warnings.
+#ifdef ROCSPARSE_KEEP_INTERNAL_U16
+    rocsparse_indextype_u16 ROCSPARSE_DEPRECATED_MSG(
+        "rocsparse_indextype_u16 is no longer supported and will be removed "
+        "in a future release. Use rocsparse_indextype_i32 or "
+        "rocsparse_indextype_i64 instead.")
     = 1, /**< 16-bit unsigned integer. \deprecated This index type is unsupported and will be
             removed in a future release. Use \ref rocsparse_indextype_i32 or \ref
             rocsparse_indextype_i64 instead. */
@@ -703,8 +757,10 @@ typedef enum rocsparse_itilu0_alg_
     = 2, /**< Asynchronous ITILU0 algorithm with explicit storage splitting. */
     rocsparse_itilu0_alg_sync_split
     = 3, /**< Synchronous ITILU0 algorithm with explicit storage splitting. */
-    rocsparse_itilu0_alg_sync_split_fusion [[deprecated]]
-    = 4 /**< Semi-synchronous ITILU0 algorithm with explicit storage splitting. */
+    rocsparse_itilu0_alg_sync_split_fusion ROCSPARSE_DEPRECATED_MSG(
+        "rocsparse_itilu0_alg_sync_split_fusion is deprecated and will be removed in a future "
+        "release.")
+    = 4 /**< Semi-synchronous ITILU0 algorithm with explicit storage splitting. \deprecated This algorithm will be removed in a future release. */
 } rocsparse_itilu0_alg;
 
 /*! \ingroup types_module
@@ -817,8 +873,10 @@ typedef enum rocsparse_spmv_alg_
     rocsparse_spmv_alg_csr_lrb      = 7, /**< CSR SpMV algorithm 3 (LRB) for CSR matrices. */
     rocsparse_spmv_alg_csr_nnzsplit = 8, /**< CSR SpMV algorithm 4 (nnzsplit) for CSR matrices. */
     rocsparse_spmv_alg_sell         = 9, /**< SLICED ELL SpMV algorithm for SLICED ELL matrices. */
-    rocsparse_spmv_alg_csr_stream [[deprecated]]
-    = rocsparse_spmv_alg_csr_rowsplit /**< CSR SpMV algorithm 2 (stream) for CSR matrices. */
+    rocsparse_spmv_alg_csr_stream ROCSPARSE_DEPRECATED_MSG(
+        "rocsparse_spmv_alg_csr_stream is deprecated and will be removed in a future release. Use "
+        "rocsparse_spmv_alg_csr_rowsplit instead.")
+    = rocsparse_spmv_alg_csr_rowsplit /**< CSR SpMV algorithm 2 (stream) for CSR matrices. \deprecated This algorithm will be removed in a future release. Use \ref rocsparse_spmv_alg_csr_rowsplit instead. */
 } rocsparse_spmv_alg;
 
 /*! \ingroup types_module
@@ -932,7 +990,10 @@ typedef enum rocsparse_spmm_alg_
 typedef enum rocsparse_sddmm_alg_
 {
     rocsparse_sddmm_alg_default = 0, /**< Default sddmm algorithm for the given format. */
-    rocsparse_sddmm_alg_dense   = 1 /**< Sddmm algorithm using dense blas operations. */
+    rocsparse_sddmm_alg_dense ROCSPARSE_DEPRECATED_MSG(
+        "rocsparse_sddmm_alg_dense is deprecated and will be removed in a "
+        "future release. Use rocsparse_sddmm_alg_default instead.")
+    = 1 /**< Sddmm algorithm using dense blas operations. \deprecated This algorithm will be removed in a future release. Use \ref rocsparse_sddmm_alg_default instead. */
 } rocsparse_sddmm_alg;
 
 /*! \ingroup types_module
@@ -1051,7 +1112,9 @@ typedef enum rocsparse_sptrsv_input_
     rocsparse_sptrsv_input_scalar_datatype, /**< Select scalar datatype \ref rocsparse_datatype for input on a SpTRSV descriptor. */
     rocsparse_sptrsv_input_compute_datatype, /**< Select compute datatype \ref rocsparse_datatype for input on a SpTRSV descriptor. */
     rocsparse_sptrsv_input_scalar_alpha, /**< Select scalar alpha pointer for input on a SpTRSV descriptor. */
-    rocsparse_sptrsv_input_analysis_policy /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSV descriptor. */
+    rocsparse_sptrsv_input_analysis_policy, /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSV descriptor. */
+    rocsparse_sptrsv_input_solve_mode, /**< Select the solve mode \ref rocsparse_solve_mode for input on a SpTRSV descriptor. */
+    rocsparse_sptrsv_input_diagonal_modifier /**< Select the diagonal modifier \ref rocsparse_diagonal_modifier for input on a SpTRSV descriptor. */
 } rocsparse_sptrsv_input;
 
 /*! \ingroup types_module
@@ -1105,7 +1168,9 @@ typedef enum rocsparse_sptrsm_input_
     rocsparse_sptrsm_input_compute_datatype, /**< Select compute datatype \ref rocsparse_datatype for input on a SpTRSM descriptor. */
     rocsparse_sptrsm_input_scalar_datatype, /**< Select scalar datatype \ref rocsparse_datatype for input on a SpTRSM descriptor. */
     rocsparse_sptrsm_input_scalar_alpha, /**< Select scalar alpha pointer for input on a SpTRSM descriptor. This datatype is used as the compute type. */
-    rocsparse_sptrsm_input_analysis_policy /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSM descriptor. */
+    rocsparse_sptrsm_input_analysis_policy, /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSM descriptor. */
+    rocsparse_sptrsm_input_solve_mode, /**< Select the solve mode \ref rocsparse_solve_mode for input on a SpTRSM descriptor. */
+    rocsparse_sptrsm_input_diagonal_modifier /**< Select the diagonal modifier \ref rocsparse_diagonal_modifier for input on a SpTRSM descriptor. */
 } rocsparse_sptrsm_input;
 
 /*! \ingroup types_module
@@ -1117,6 +1182,11 @@ typedef enum rocsparse_sptrsm_input_
 typedef enum rocsparse_sptrsm_output_
 {
     rocsparse_sptrsm_output_zero_pivot_position /**< Get zero pivot \p int64_t based position for output from the SpTRSM descriptor and synchronously return zero_pivot. */
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+    ,
+    rocsparse_sptrsm_output_singularity, /**< Get the type of \ref rocsparse_singularity detected during SpTRSM calculation for output from the SpTRSM descriptor. */
+    rocsparse_sptrsm_output_singularity_position /**< Get the singularity \p int64_t based position for output from the SpTRSM descriptor. */
+#endif
 } rocsparse_sptrsm_output;
 
 /*! \ingroup types_module
@@ -1225,7 +1295,6 @@ typedef enum rocsparse_spilu0_output_
     rocsparse_spilu0_output_singularity_position, /**< Get the singularity \p int64_t based position for output from the SpILU0 descriptor. */
 } rocsparse_spilu0_output;
 
-#ifdef ROCSPARSE_WITH_ILDLT0
 /*! \ingroup types_module
  *  \brief List of SpILDLT0 algorithms.
  *
@@ -1265,13 +1334,13 @@ typedef enum rocsparse_spildlt0_input_
     rocsparse_spildlt0_input_boost_tolerance, /**< Select diagonal boosting tolerance on a SpILDLT0 descriptor. */
     rocsparse_spildlt0_input_boost_value, /**< Select diagonal boosting value on a SpILDLT0 descriptor. */
     rocsparse_spildlt0_input_singularity_tolerance, /**< Select singularity tolerance for input on a SpILDLT0 descriptor. */
-    rocsparse_spildlt0_input_diag [[deprecated(
+    rocsparse_spildlt0_input_diag ROCSPARSE_DEPRECATED_MSG(
         "rocsparse_spildlt0_input_diag is deprecated and "
         "will be removed in a future "
         "release. The diagonal D is always stored in-place "
         "on the (implicit unit) diagonal "
         "of the L factor and can be read back from "
-        "there.")]], /**< Optionally set the device pointer to a dense array of \p m * \p batch_count real-valued entries that receives a copy of the diagonal \f$D\f$ as an output of SpILDLT0 (\p m entries per batch, batch \p b at offset \p b * \p m). \f$D\f$ is always real, even for complex matrices (\p float* for \p s and \p c, \p double* for \p d and \p z). \deprecated \f$D\f$ is always stored in-place on the (implicit unit) diagonal of the \f$L\f$ factor; read it back from there instead. */
+        "there."), /**< Optionally set the device pointer to a dense array of \p m * \p batch_count real-valued entries that receives a copy of the diagonal \f$D\f$ as an output of SpILDLT0 (\p m entries per batch, batch \p b at offset \p b * \p m). \f$D\f$ is always real, even for complex matrices (\p float* for \p s and \p c, \p double* for \p d and \p z). \deprecated \f$D\f$ is always stored in-place on the (implicit unit) diagonal of the \f$L\f$ factor; read it back from there instead. */
 } rocsparse_spildlt0_input;
 
 /*! \ingroup types_module
@@ -1285,7 +1354,6 @@ typedef enum rocsparse_spildlt0_output_
     rocsparse_spildlt0_output_singularity, /**< Get the type of \ref rocsparse_singularity detected during SpILDLT0 calculation for output from the SpILDLT0 descriptor. */
     rocsparse_spildlt0_output_singularity_position, /**< Get the singularity \p int64_t based position for output from the SpILDLT0 descriptor. */
 } rocsparse_spildlt0_output;
-#endif /* ROCSPARSE_WITH_ILDLT0 */
 
 /*! \ingroup types_module
  *  \brief List of SpGEAM stages.
@@ -1347,6 +1415,46 @@ typedef enum rocsparse_spgeam_alg_
 {
     rocsparse_spgeam_alg_default = 0 /**< Default SpGEAM algorithm for the given format. */
 } rocsparse_spgeam_alg;
+
+#if defined(ROCSPARSE_WITH_SPSORT)
+/*! \ingroup types_module
+ *  \brief List of SpSort algorithms.
+ *
+ *  \details
+ *  This is a list of supported \ref rocsparse_spsort_alg types that are used to sort a sparse
+ *  matrix.
+ */
+typedef enum rocsparse_spsort_alg_
+{
+    rocsparse_spsort_alg_default    = 0, /**< Default SpSort algorithm (radix sort). */
+    rocsparse_spsort_alg_radix_sort = 1, /**< Radix sort based SpSort algorithm. */
+} rocsparse_spsort_alg;
+
+/*! \ingroup types_module
+  *  \brief List of inputs to the SpSort descriptor.
+  *
+  *  \details
+  *  This is a list of possible inputs to the SpSort descriptor.
+  */
+typedef enum rocsparse_spsort_input_
+{
+    rocsparse_spsort_input_alg, /**< Select algorithm \ref rocsparse_spsort_alg for input on a SpSort descriptor. */
+    rocsparse_spsort_input_direction, /**< Select sorting direction \ref rocsparse_direction for input on a SpSort descriptor. Only used by the COO format. */
+} rocsparse_spsort_input;
+
+/*! \ingroup types_module
+  *  \brief List of SpSort stages.
+  *
+  *  \details
+  *  This is a list of possible stages during SpSort computation. The stages must be executed
+  *  in the order \ref rocsparse_spsort_stage_analysis, then \ref rocsparse_spsort_stage_compute.
+  */
+typedef enum rocsparse_spsort_stage_
+{
+    rocsparse_spsort_stage_analysis, /**< Analysis of the data. */
+    rocsparse_spsort_stage_compute /**< Performs the actual SpSort computation. */
+} rocsparse_spsort_stage;
+#endif
 
 /*! \ingroup types_module
  *  \brief List of gpsv algorithms.

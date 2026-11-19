@@ -134,6 +134,48 @@ class TestDiff(unittest.TestCase):
         self.assertEqual(d["current"], 1.2)
         self.assertAlmostEqual(d["pct_change"], 20.0)
 
+    def test_compares_profiled_duration_when_neither_run_has_wall(self):
+        # Launcher prints no PerfJSON: both records are timed from the profiler's
+        # dispatch duration, which is comparable against itself.
+        base, cur = _rec(), _rec()
+        base["profiled"] = {"ms_median": 2.0}
+        cur["profiled"] = {"ms_median": 2.4}
+        d = report.diff(base, cur)
+        self.assertFalse(d["metric_mismatch"])
+        self.assertEqual(d["metric"], "profiled_ms_median")
+        self.assertAlmostEqual(d["pct_change"], 20.0)
+
+    def test_profiled_never_compared_against_wall(self):
+        # Profiled timing carries profiler overhead a wall run does not, so pairing
+        # the two would report a fake regression.
+        base = _rec(ms=2.0)
+        cur = _rec()
+        cur["profiled"] = {"ms_median": 2.4}
+        d = report.diff(base, cur)
+        self.assertTrue(d["metric_mismatch"])
+        self.assertNotIn("pct_change", d)
+
+    def test_profiled_different_sources_are_not_compared(self):
+        base, cur = _rec(), _rec()
+        base["profiled"] = {"ms_median": 2.0}
+        base["timing_source"] = "perfjson"
+        cur["profiled"] = {"ms_median": 2.4}
+        cur["timing_source"] = "rocprofv3_duration"
+        d = report.diff(base, cur)
+        self.assertTrue(d["metric_mismatch"])
+        self.assertNotIn("pct_change", d)
+
+    def test_profiled_same_rocprof_source_is_compared(self):
+        base, cur = _rec(), _rec()
+        base["profiled"] = {"ms_median": 2.0}
+        base["timing_source"] = "rocprofv3_duration"
+        cur["profiled"] = {"ms_median": 2.4}
+        cur["timing_source"] = "rocprofv3_duration"
+        d = report.diff(base, cur)
+        self.assertFalse(d["metric_mismatch"])
+        self.assertEqual(d["metric"], "profiled_ms_median")
+        self.assertAlmostEqual(d["pct_change"], 20.0)
+
     def test_spread_surfaced_from_aggregate(self):
         cur = _rec(busy=1100, total=1000, spread={"busy_cycles_pct": 3.5})
         d = report.diff(_rec(busy=1000, total=1000), cur)
@@ -149,14 +191,21 @@ class TestDiff(unittest.TestCase):
 
 class TestFormatting(unittest.TestCase):
     def test_format_record_smoke(self):
-        rec = _rec(
-            busy=1000, total=1050, waves=16384, spread={"busy_cycles_pct": 2.1}, n=5
-        )
-        txt = report.format_record(rec)
-        self.assertIn("gfx950", txt)
-        self.assertIn("busy_cycles", txt)
-        self.assertIn("n=5", txt)
-        self.assertIn("panel", txt)
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                rec = _rec(
+                    arch=arch,
+                    busy=1000,
+                    total=1050,
+                    waves=16384,
+                    spread={"busy_cycles_pct": 2.1},
+                    n=5,
+                )
+                txt = report.format_record(rec)
+                self.assertIn(arch, txt)
+                self.assertIn("busy_cycles", txt)
+                self.assertIn("n=5", txt)
+                self.assertIn("panel", txt)
 
     def test_format_diff_smoke(self):
         txt = report.format_diff(

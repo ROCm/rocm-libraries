@@ -46,6 +46,7 @@
 
 #include "ck_tile/dispatcher/dispatcher.hpp"
 #include "ck_tile/dispatcher/registry.hpp"
+#include "ck_tile/dispatcher/arch_specs_generated.hpp"
 #include "ck_tile/dispatcher/backends/generated_tile_backend.hpp"
 
 namespace ck_tile {
@@ -673,7 +674,7 @@ struct KernelKeyBuilder
         key.algorithm.scheduler       = scheduler;
         key.algorithm.epilogue        = epilogue;
         key.algorithm.block_size      = block_size;
-        key.algorithm.double_buffer   = true;
+        key.algorithm.double_buffer   = arch_specs::requires_double_smem_buffer(pipeline);
         key.algorithm.persistent      = false;
         key.algorithm.preshuffle      = preshuffle;
         key.algorithm.transpose_c     = false;

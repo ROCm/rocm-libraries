@@ -1,0 +1,238 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include "stinkytofu/transforms/asm/dag/SchedulingKnobHeuristics.hpp"
+
+#include <algorithm>
+#include <cassert>
+#include <cmath>
+#include <iostream>
+#include <ostream>
+#include <string>
+
+#include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+
+// Enable via PassManagerDebugConfig::addDebugOnly("SchedulingKnobHeuristics")
+// or `StinkyTofuDebugPass: "SchedulingKnobHeuristics"` in YAML.
+#define DEBUG_TYPE "SchedulingKnobHeuristics"
+
+namespace stinkytofu {
+
+// Preserves the existing gfx1250 boundary for the common 56-cycle ds_load and 8-cycle WMMA:
+// eleven windows provide 88 cycles, leaving 32 cycles after the load returns.
+constexpr int kQueueFillSafetyMarginCycles = 32;
+
+ResolvedSchedulingKnobs staticSchedulingKnobDefaults(const std::array<int, 3>&) {
+    ResolvedSchedulingKnobs out;
+    out.clusterBarrierRule3SignalLeadCycles = kStaticDefaultClusterBarrierRule3SignalLeadCycles;
+    out.clusterBarrierRule3SignalLeadCyclesSource = SchedulingKnobSource::StaticDefault;
+    out.reduceClusterBarrierPerLoop = kStaticDefaultReduceClusterBarrierPerLoop;
+    out.reduceClusterBarrierPerLoopSource = SchedulingKnobSource::StaticDefault;
+    out.queueFillSafetyMarginCycles = kQueueFillSafetyMarginCycles;
+    out.queueFillSafetyMarginCyclesSource = SchedulingKnobSource::StaticDefault;
+    out.tensorLoadWmmaSpace = kStaticDefaultTensorLoadWmmaSpace;
+    out.tensorLoadWmmaSpaceSource = SchedulingKnobSource::StaticDefault;
+    out.tensorLoadDsLoadGapCycles = kStaticDefaultTensorLoadDsLoadGapCycles;
+    out.tensorLoadDsLoadGapCyclesSource = SchedulingKnobSource::StaticDefault;
+    return out;
+}
+
+SchedulingIRStats countMainLoopSchedulingIRStats(const StinkyAsmModule& module) {
+    SchedulingIRStats stats;
+    auto range = module.findGroupRange(std::string(kMainLoopGroupName));
+    if (!range) return stats;
+
+    auto [begin, end] = *range;
+    for (auto it = begin; it != end; ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (!inst) continue;
+        if (isMatrixInstruction(*inst)) {
+            ++stats.wmmaCount;
+            stats.sumWmmaLatencyCycles += inst->latencyCycles;
+        } else if (isDSRead(*inst)) {
+            ++stats.dsLoadCount;
+        }
+    }
+    return stats;
+}
+
+SchedulingKnobOverrides schedulingKnobOverridesFromModuleOptions(
+    const StinkyAsmModule::ModuleOptions& opts) {
+    SchedulingKnobOverrides out;
+    // Rule3 lead: <0 unset; 0 means co-locate signal and wait.
+    if (opts.ClusterBarrierRule3SignalLeadCycles >= 0)
+        out.clusterBarrierRule3SignalLeadCycles = opts.ClusterBarrierRule3SignalLeadCycles;
+    // One handshake per loop: <0 unset; 0 off; >0 on.
+    if (opts.ReduceClusterBarrierPerLoop >= 0)
+        out.reduceClusterBarrierPerLoop = opts.ReduceClusterBarrierPerLoop != 0;
+    // Space and gap: <0 unset. 0 is an explicit off, not the unset sentinel.
+    if (opts.TensorLoadWmmaSpace >= 0) out.tensorLoadWmmaSpace = opts.TensorLoadWmmaSpace;
+    if (opts.TensorLoadDsLoadGapCycles >= 0)
+        out.tensorLoadDsLoadGapCycles = opts.TensorLoadDsLoadGapCycles;
+    return out;
+}
+
+SchedulingFeatures schedulingFeaturesFromModule(const StinkyAsmModule& module) {
+    const auto& opts = module.getModuleOptions();
+    SchedulingFeatures features;
+    features.arch = module.getArch();
+    features.stats = countMainLoopSchedulingIRStats(module);
+    features.tileA0 = opts.TileA0;
+    features.tileB0 = opts.TileB0;
+    features.waveGroup0 = opts.WaveGroup0;
+    features.waveGroup1 = opts.WaveGroup1;
+    features.prefetchGlobalRead = opts.PrefetchGlobalRead;
+    features.prefetchLocalRead = opts.PrefetchLocalRead;
+    return features;
+}
+
+ResolvedSchedulingKnobs HeuristicSchedulingKnobPolicy::propose(const SchedulingFeatures& features,
+                                                               const HWModel&) const {
+    assert(!features.stats.degenerate());
+    ResolvedSchedulingKnobs out;
+
+    // Longer main-loop WMMA latency budgets get a larger Rule3 signal lead.
+    out.clusterBarrierRule3SignalLeadCycles = features.stats.sumWmmaLatencyCycles > 500 ? 200 : 100;
+    out.clusterBarrierRule3SignalLeadCyclesSource = SchedulingKnobSource::Policy;
+
+    // One handshake cadence when the main-loop WMMA latency budget is long and
+    // each ds_load has at least 5 cycles of that budget.
+    const int sumWmmaLatency = features.stats.sumWmmaLatencyCycles;
+    const int dsLoads = features.stats.dsLoadCount;
+    out.reduceClusterBarrierPerLoop =
+        sumWmmaLatency > 2500 && dsLoads > 0 && sumWmmaLatency / dsLoads >= 5;
+    out.reduceClusterBarrierPerLoopSource = SchedulingKnobSource::Policy;
+    out.queueFillSafetyMarginCycles = kQueueFillSafetyMarginCycles;
+    out.queueFillSafetyMarginCyclesSource = SchedulingKnobSource::Policy;
+
+    // One pair for every schedulable main loop. Measured on the K>=1024 OOB
+    // winners only (see kPolicyTensorLoadWmmaSpace); K is not available here.
+    // A feature split (dtype, wave tile, cluster, estimated WMMA count) did not
+    // stay ahead of this constant once single-run spikes were removed.
+    out.tensorLoadWmmaSpace = kPolicyTensorLoadWmmaSpace;
+    out.tensorLoadWmmaSpaceSource = SchedulingKnobSource::Policy;
+    out.tensorLoadDsLoadGapCycles = kPolicyTensorLoadDsLoadGapCycles;
+    out.tensorLoadDsLoadGapCyclesSource = SchedulingKnobSource::Policy;
+
+    return out;
+}
+
+ResolvedSchedulingKnobs resolveSchedulingKnobs(const SchedulingFeatures& features,
+                                               const SchedulingKnobOverrides& overrides,
+                                               const SchedulingKnobPolicy& policy) {
+    const ResolvedSchedulingKnobs defaults = staticSchedulingKnobDefaults(features.arch);
+    const HWModel& hw = hwModelForArch(features.arch);
+
+    ResolvedSchedulingKnobs proposed = defaults;
+    if (!features.stats.degenerate()) {
+        proposed = policy.propose(features, hw);
+    }
+
+    ResolvedSchedulingKnobs out = defaults;
+
+    if (overrides.clusterBarrierRule3SignalLeadCycles.has_value()) {
+        out.clusterBarrierRule3SignalLeadCycles = *overrides.clusterBarrierRule3SignalLeadCycles;
+        out.clusterBarrierRule3SignalLeadCyclesSource = SchedulingKnobSource::User;
+    } else if (!features.stats.degenerate()) {
+        out.clusterBarrierRule3SignalLeadCycles = proposed.clusterBarrierRule3SignalLeadCycles;
+        out.clusterBarrierRule3SignalLeadCyclesSource = SchedulingKnobSource::Policy;
+    } else {
+        out.clusterBarrierRule3SignalLeadCycles = defaults.clusterBarrierRule3SignalLeadCycles;
+        out.clusterBarrierRule3SignalLeadCyclesSource = SchedulingKnobSource::StaticDefault;
+    }
+
+    if (overrides.reduceClusterBarrierPerLoop.has_value()) {
+        out.reduceClusterBarrierPerLoop = *overrides.reduceClusterBarrierPerLoop;
+        out.reduceClusterBarrierPerLoopSource = SchedulingKnobSource::User;
+    } else if (!features.stats.degenerate()) {
+        out.reduceClusterBarrierPerLoop = proposed.reduceClusterBarrierPerLoop;
+        out.reduceClusterBarrierPerLoopSource = SchedulingKnobSource::Policy;
+    } else {
+        out.reduceClusterBarrierPerLoop = defaults.reduceClusterBarrierPerLoop;
+        out.reduceClusterBarrierPerLoopSource = SchedulingKnobSource::StaticDefault;
+    }
+
+    if (!features.stats.degenerate()) {
+        out.queueFillSafetyMarginCycles = proposed.queueFillSafetyMarginCycles;
+        out.queueFillSafetyMarginCyclesSource = SchedulingKnobSource::Policy;
+    } else {
+        out.queueFillSafetyMarginCycles = defaults.queueFillSafetyMarginCycles;
+        out.queueFillSafetyMarginCyclesSource = SchedulingKnobSource::StaticDefault;
+    }
+
+    if (overrides.tensorLoadWmmaSpace.has_value()) {
+        out.tensorLoadWmmaSpace = *overrides.tensorLoadWmmaSpace;
+        out.tensorLoadWmmaSpaceSource = SchedulingKnobSource::User;
+    } else if (!features.stats.degenerate()) {
+        out.tensorLoadWmmaSpace = proposed.tensorLoadWmmaSpace;
+        out.tensorLoadWmmaSpaceSource = SchedulingKnobSource::Policy;
+    } else {
+        out.tensorLoadWmmaSpace = defaults.tensorLoadWmmaSpace;
+        out.tensorLoadWmmaSpaceSource = SchedulingKnobSource::StaticDefault;
+    }
+
+    if (overrides.tensorLoadDsLoadGapCycles.has_value()) {
+        out.tensorLoadDsLoadGapCycles = *overrides.tensorLoadDsLoadGapCycles;
+        out.tensorLoadDsLoadGapCyclesSource = SchedulingKnobSource::User;
+    } else if (!features.stats.degenerate()) {
+        out.tensorLoadDsLoadGapCycles = proposed.tensorLoadDsLoadGapCycles;
+        out.tensorLoadDsLoadGapCyclesSource = SchedulingKnobSource::Policy;
+    } else {
+        out.tensorLoadDsLoadGapCycles = defaults.tensorLoadDsLoadGapCycles;
+        out.tensorLoadDsLoadGapCyclesSource = SchedulingKnobSource::StaticDefault;
+    }
+
+    return out;
+}
+
+ResolvedSchedulingKnobs resolveSchedulingKnobsForModule(const StinkyAsmModule& module,
+                                                        const SchedulingKnobPolicy& policy) {
+    return resolveSchedulingKnobs(
+        schedulingFeaturesFromModule(module),
+        schedulingKnobOverridesFromModuleOptions(module.getModuleOptions()), policy);
+}
+
+ResolvedSchedulingKnobs resolveSchedulingKnobsForModule(const StinkyAsmModule& module) {
+    HeuristicSchedulingKnobPolicy policy;
+    return resolveSchedulingKnobsForModule(module, policy);
+}
+
+const char* schedulingKnobSourceName(SchedulingKnobSource source) {
+    switch (source) {
+        case SchedulingKnobSource::User:
+            return "user";
+        case SchedulingKnobSource::Policy:
+            return "policy";
+        case SchedulingKnobSource::StaticDefault:
+            return "static";
+    }
+    return "unknown";
+}
+
+void logResolvedSchedulingKnobs(std::ostream& os, std::string_view moduleName,
+                                const SchedulingFeatures& features,
+                                const ResolvedSchedulingKnobs& resolved) {
+    os << "[SchedulingKnobs] module=" << moduleName << " wmma=" << features.stats.wmmaCount
+       << " dsLoad=" << features.stats.dsLoadCount
+       << " sumWmmaLat=" << features.stats.sumWmmaLatencyCycles
+       << " rule3SignalLeadCycles=" << resolved.clusterBarrierRule3SignalLeadCycles << "("
+       << schedulingKnobSourceName(resolved.clusterBarrierRule3SignalLeadCyclesSource) << ")"
+       << " reduceClusterBarrierPerLoop=" << resolved.reduceClusterBarrierPerLoop << "("
+       << schedulingKnobSourceName(resolved.reduceClusterBarrierPerLoopSource) << ")"
+       << " queueFillSafetyMarginCycles=" << resolved.queueFillSafetyMarginCycles << "("
+       << schedulingKnobSourceName(resolved.queueFillSafetyMarginCyclesSource) << ")"
+       << " tensorLoadWmmaSpace=" << resolved.tensorLoadWmmaSpace << "("
+       << schedulingKnobSourceName(resolved.tensorLoadWmmaSpaceSource) << ")"
+       << " tensorLoadDsLoadGapCycles=" << resolved.tensorLoadDsLoadGapCycles << "("
+       << schedulingKnobSourceName(resolved.tensorLoadDsLoadGapCyclesSource) << ")";
+    os << "\n";
+}
+
+void logResolvedSchedulingKnobsIfDebug(std::string_view moduleName,
+                                       const SchedulingFeatures& features,
+                                       const ResolvedSchedulingKnobs& resolved) {
+    PASS_DEBUG(logResolvedSchedulingKnobs(std::cerr, moduleName, features, resolved));
+}
+
+}  // namespace stinkytofu

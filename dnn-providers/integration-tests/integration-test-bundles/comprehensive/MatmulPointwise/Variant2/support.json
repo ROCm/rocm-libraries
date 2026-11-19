@@ -1,0 +1,45 @@
+{
+  "claims": {
+    "HIPBLASLT_ENGINE": [
+      {
+        "cases": [
+          "2_3_16_128_bfp16_nchw_operationrelu_fwd_rlo0_norhi_ef36ce",
+          "2_3_16_128_fp16_nchw_operationswish_fwd_norlo_norhi_7fd5df",
+          "2_3_16_128_fp16_nchw_operationswish_fwd_norlo_norhi_ca75ea",
+          "2_3_16_128_fp32_nchw_operationswish_fwd_norlo_norhi_03a8fb",
+          "3_16_128_bfp16_ncl_operationgelu_approx_tanh_fwd_norlo_norhi_d42dc7",
+          "3_16_128_bfp16_ncl_operationswish_fwd_norlo_norhi_6de5d0",
+          "3_16_128_fp16_ncl_operationgelu_approx_tanh_fwd_norlo_norhi_a060e6",
+          "3_16_128_fp16_ncl_operationrelu_fwd_rlo0_norhi_725f79",
+          "3_16_128_fp32_ncl_operationgelu_approx_tanh_fwd_norlo_norhi_254ca1",
+          "3_16_128_fp32_ncl_operationrelu_fwd_rlo0_norhi_852683"
+        ],
+        "support": {
+          "gfx1101": [
+            "linux",
+            "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux"
+          ],
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

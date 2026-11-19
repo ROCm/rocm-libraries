@@ -24,10 +24,13 @@
 #include "rocsparse.h"
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_handle.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "rocsparse_convert_array.hpp"
+
+#include <sstream>
 
 namespace rocsparse
 {
@@ -43,26 +46,41 @@ namespace rocsparse
                                                    const rocsparse_index_base source_indexbase_,
                                                    size_t*                    count_out_of_limits_)
     {
-        const size_t      tid = hipThreadIdx_x;
-        const size_t      gid = tid + BLOCKSIZE * hipBlockIdx_x;
+        // AISPARSE-686. `BLOCKSIZE * hipBlockIdx_x` is unsigned-int arithmetic -- both
+        // operands are unsigned int -- so it wrapped at 2^32 before it was ever
+        // assigned to a size_t, and there was no grid-stride loop to cover a grid.x
+        // that the caller clamped against the device limit.
+        //
+        // Block-uniform stride bound: `base` is built from hipBlockIdx_x,
+        // hipGridDim_x, a kernel argument and a compile-time constant -- no
+        // hipThreadIdx_x -- so every thread of a block runs the same number of
+        // iterations and reaches the single __syncthreads() below together. The
+        // out-of-range count is accumulated per thread and reduced once, so the block
+        // reduction and its atomic stay outside the loop and keep running exactly
+        // once per block, as before.
+        const size_t      tid    = hipThreadIdx_x;
+        const size_t      stride = static_cast<size_t>(BLOCKSIZE) * hipGridDim_x;
         __shared__ size_t shd[BLOCKSIZE];
-        if(gid < nitems_)
+
+        size_t out_of_limits = 0;
+        for(size_t base = static_cast<size_t>(BLOCKSIZE) * hipBlockIdx_x; base < nitems_;
+            base += stride)
         {
-            const SOURCE s = source_[gid];
-            if(s > std::numeric_limits<TARGET>::max() || s < std::numeric_limits<TARGET>::min())
+            const size_t gid = base + tid;
+            if(gid < nitems_)
             {
-                shd[tid] = 1;
-            }
-            else
-            {
-                target_[gid] = static_cast<TARGET>(s) - source_indexbase_ + target_indexbase_;
-                shd[tid]     = 0;
+                const SOURCE s = source_[gid];
+                if(s > std::numeric_limits<TARGET>::max() || s < std::numeric_limits<TARGET>::min())
+                {
+                    ++out_of_limits;
+                }
+                else
+                {
+                    target_[gid] = static_cast<TARGET>(s) - source_indexbase_ + target_indexbase_;
+                }
             }
         }
-        else
-        {
-            shd[tid] = 0;
-        }
+        shd[tid] = out_of_limits;
 
         __syncthreads();
         rocsparse::blockreduce_sum<BLOCKSIZE>(tid, shd);
@@ -84,26 +102,31 @@ namespace rocsparse
                                          const size_t  source_inc_,
                                          size_t*       count_out_of_limits_)
     {
-        const size_t      tid = hipThreadIdx_x;
-        const size_t      gid = tid + BLOCKSIZE * hipBlockIdx_x;
+        // AISPARSE-686. Same unsigned-int wrap, same missing stride loop and the same
+        // block-uniform bound as copy_indexbase_iarray_mix_safe above.
+        const size_t      tid    = hipThreadIdx_x;
+        const size_t      stride = static_cast<size_t>(BLOCKSIZE) * hipGridDim_x;
         __shared__ size_t shd[BLOCKSIZE];
-        if(gid < nitems_)
+
+        size_t out_of_limits = 0;
+        for(size_t base = static_cast<size_t>(BLOCKSIZE) * hipBlockIdx_x; base < nitems_;
+            base += stride)
         {
-            const SOURCE s = source_[gid * source_inc_];
-            if(s > std::numeric_limits<TARGET>::max() || s < std::numeric_limits<TARGET>::min())
+            const size_t gid = base + tid;
+            if(gid < nitems_)
             {
-                shd[tid] = 1;
-            }
-            else
-            {
-                target_[gid * target_inc_] = static_cast<TARGET>(s);
-                shd[tid]                   = 0;
+                const SOURCE s = source_[gid * source_inc_];
+                if(s > std::numeric_limits<TARGET>::max() || s < std::numeric_limits<TARGET>::min())
+                {
+                    ++out_of_limits;
+                }
+                else
+                {
+                    target_[gid * target_inc_] = static_cast<TARGET>(s);
+                }
             }
         }
-        else
-        {
-            shd[tid] = 0;
-        }
+        shd[tid] = out_of_limits;
 
         __syncthreads();
         rocsparse::blockreduce_sum<BLOCKSIZE>(tid, shd);
@@ -130,13 +153,19 @@ namespace rocsparse
 
         static constexpr uint32_t BLOCKSIZE = 1024;
 
+        if(nitems_ == 0)
+        {
+            host_num_invalid[0] = 0;
+            return rocsparse_status_success;
+        }
+
         size_t* dnum_out_of_range_values = (size_t*)handle_->buffer;
         RETURN_IF_HIP_ERROR(
             rocsparse_hipMemsetAsync(dnum_out_of_range_values, 0, sizeof(size_t), handle_->stream));
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::copy_indexbase_iarray_mix_safe<BLOCKSIZE, TARGET, SOURCE>),
-            dim3((nitems_ - 1) / BLOCKSIZE + 1),
+            dim3(rocsparse::get_grid_size_x(handle_, (nitems_ - 1) / BLOCKSIZE + 1, BLOCKSIZE)),
             dim3(BLOCKSIZE),
             0,
             handle_->stream,
@@ -240,13 +269,19 @@ namespace rocsparse
 
         static constexpr uint32_t BLOCKSIZE = 1024;
 
+        if(nitems_ == 0)
+        {
+            host_num_invalid[0] = 0;
+            return rocsparse_status_success;
+        }
+
         size_t* dnum_out_of_range_values = (size_t*)handle_->buffer;
         RETURN_IF_HIP_ERROR(
             rocsparse_hipMemsetAsync(dnum_out_of_range_values, 0, sizeof(size_t), handle_->stream));
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::copy_iarray_mix_safe<BLOCKSIZE, TARGET, SOURCE>),
-            dim3((nitems_ - 1) / BLOCKSIZE + 1),
+            dim3(rocsparse::get_grid_size_x(handle_, (nitems_ - 1) / BLOCKSIZE + 1, BLOCKSIZE)),
             dim3(BLOCKSIZE),
             0,
             handle_->stream,
@@ -334,17 +369,10 @@ namespace rocsparse
         // LCOV_EXCL_STOP
     }
 
+    // Pairs without a specialization below have no kernel.
     template <typename TARGET, typename SOURCE, class FILTER = void>
     struct copy_farray_mix_safe_kernel_t
     {
-        template <uint32_t BLOCKSIZE>
-        __launch_bounds__(BLOCKSIZE) __global__
-            static void run(const size_t             nitems_,
-                            TARGET*                  target_,
-                            const SOURCE*            source_,
-                            floating_data_t<SOURCE>* conversion_error_)
-        {
-        }
     };
 
     template <typename TARGET, typename SOURCE>
@@ -363,10 +391,20 @@ namespace rocsparse
                             const SOURCE*            source_,
                             floating_data_t<SOURCE>* conversion_error_)
         {
-            const size_t tid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-            if(tid < nitems_)
+            // AISPARSE-686. `BLOCKSIZE * hipBlockIdx_x` is unsigned-int arithmetic, so
+            // it wrapped at 2^32 before it was ever assigned to a size_t, and there
+            // was no grid-stride loop behind a clamped grid.x. Block-uniform bound:
+            // hipBlockIdx_x, hipGridDim_x, a kernel argument and a compile-time
+            // constant only.
+            const size_t stride = static_cast<size_t>(BLOCKSIZE) * hipGridDim_x;
+            for(size_t base = static_cast<size_t>(BLOCKSIZE) * hipBlockIdx_x; base < nitems_;
+                base += stride)
             {
-                target_[tid] = source_[tid];
+                const size_t tid = base + hipThreadIdx_x;
+                if(tid < nitems_)
+                {
+                    target_[tid] = source_[tid];
+                }
             }
         };
     };
@@ -387,11 +425,21 @@ namespace rocsparse
                             const SOURCE*            source_,
                             floating_data_t<SOURCE>* conversion_error_)
         {
-            const size_t tid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-            if(tid < nitems_)
+            // AISPARSE-686. `BLOCKSIZE * hipBlockIdx_x` is unsigned-int arithmetic, so
+            // it wrapped at 2^32 before it was ever assigned to a size_t, and there
+            // was no grid-stride loop behind a clamped grid.x. Block-uniform bound:
+            // hipBlockIdx_x, hipGridDim_x, a kernel argument and a compile-time
+            // constant only.
+            const size_t stride = static_cast<size_t>(BLOCKSIZE) * hipGridDim_x;
+            for(size_t base = static_cast<size_t>(BLOCKSIZE) * hipBlockIdx_x; base < nitems_;
+                base += stride)
             {
-                target_[tid] = {static_cast<floating_data_t<TARGET>>(source_[tid]),
-                                static_cast<floating_data_t<TARGET>>(0)};
+                const size_t tid = base + hipThreadIdx_x;
+                if(tid < nitems_)
+                {
+                    target_[tid] = {static_cast<floating_data_t<TARGET>>(source_[tid]),
+                                    static_cast<floating_data_t<TARGET>>(0)};
+                }
             }
         }
     };
@@ -412,22 +460,34 @@ namespace rocsparse
                             const SOURCE*            source_,
                             floating_data_t<SOURCE>* conversion_error_)
         {
-            const size_t tid = hipThreadIdx_x;
-            const size_t gid = tid + BLOCKSIZE * hipBlockIdx_x;
+            // AISPARSE-686. Same unsigned-int wrap and same missing stride loop as the
+            // rest of this file. Block-uniform bound (hipBlockIdx_x, hipGridDim_x,
+            // kernel argument, compile-time constant), so every thread reaches the
+            // single __syncthreads() below together; the per-thread running maximum
+            // keeps the block reduction and its atomic outside the loop, exactly one
+            // of each per block as before.
+            const size_t tid    = hipThreadIdx_x;
+            const size_t stride = static_cast<size_t>(BLOCKSIZE) * hipGridDim_x;
             __shared__ floating_data_t<SOURCE> shd[BLOCKSIZE];
-            if(gid < nitems_)
+
+            floating_data_t<SOURCE> err = floating_data_t<SOURCE>(0);
+            for(size_t base = static_cast<size_t>(BLOCKSIZE) * hipBlockIdx_x; base < nitems_;
+                base += stride)
             {
-                const SOURCE s  = source_[gid];
-                const SOURCE sf = floating_data_t<SOURCE>(s);
-                const TARGET t{static_cast<floating_data_t<TARGET>>(sf),
-                               static_cast<floating_data_t<TARGET>>(0)};
-                shd[tid]     = rocsparse::abs(s - sf);
-                target_[gid] = t;
+                const size_t gid = base + tid;
+                if(gid < nitems_)
+                {
+                    const SOURCE s  = source_[gid];
+                    const SOURCE sf = floating_data_t<SOURCE>(s);
+                    const TARGET t{static_cast<floating_data_t<TARGET>>(sf),
+                                   static_cast<floating_data_t<TARGET>>(0)};
+
+                    const floating_data_t<SOURCE> e = rocsparse::abs(s - sf);
+                    err                             = (e > err) ? e : err;
+                    target_[gid]                    = t;
+                }
             }
-            else
-            {
-                shd[tid] = floating_data_t<SOURCE>(0);
-            }
+            shd[tid] = err;
 
             __syncthreads();
             rocsparse::blockreduce_max<BLOCKSIZE>(tid, shd);
@@ -454,25 +514,37 @@ namespace rocsparse
                             const SOURCE*            source_,
                             floating_data_t<SOURCE>* conversion_error_)
         {
-            const size_t tid = hipThreadIdx_x;
-            const size_t gid = tid + BLOCKSIZE * hipBlockIdx_x;
+            // AISPARSE-686. Same unsigned-int wrap and same missing stride loop as the
+            // rest of this file. Block-uniform bound (hipBlockIdx_x, hipGridDim_x,
+            // kernel argument, compile-time constant), so every thread reaches the
+            // single __syncthreads() below together; the per-thread running maximum
+            // keeps the block reduction and its atomic outside the loop, exactly one
+            // of each per block as before.
+            const size_t tid    = hipThreadIdx_x;
+            const size_t stride = static_cast<size_t>(BLOCKSIZE) * hipGridDim_x;
             __shared__ floating_data_t<SOURCE> shd[BLOCKSIZE];
-            if(gid < nitems_)
-            {
-                const SOURCE s = source_[gid];
 
-                TARGET t(static_cast<floating_data_t<TARGET>>(std::real(s)),
-                         static_cast<floating_data_t<TARGET>>(std::imag(s)));
-
-                const SOURCE sback{static_cast<floating_data_t<SOURCE>>(std::real(t)),
-                                   static_cast<floating_data_t<SOURCE>>(std::imag(t))};
-                shd[tid]     = rocsparse::abs(s - sback);
-                target_[gid] = t;
-            }
-            else
+            floating_data_t<SOURCE> err = floating_data_t<SOURCE>(0);
+            for(size_t base = static_cast<size_t>(BLOCKSIZE) * hipBlockIdx_x; base < nitems_;
+                base += stride)
             {
-                shd[tid] = floating_data_t<SOURCE>(0);
+                const size_t gid = base + tid;
+                if(gid < nitems_)
+                {
+                    const SOURCE s = source_[gid];
+
+                    TARGET t(static_cast<floating_data_t<TARGET>>(std::real(s)),
+                             static_cast<floating_data_t<TARGET>>(std::imag(s)));
+
+                    const SOURCE sback{static_cast<floating_data_t<SOURCE>>(std::real(t)),
+                                       static_cast<floating_data_t<SOURCE>>(std::imag(t))};
+
+                    const floating_data_t<SOURCE> e = rocsparse::abs(s - sback);
+                    err                             = (e > err) ? e : err;
+                    target_[gid]                    = t;
+                }
             }
+            shd[tid] = err;
 
             __syncthreads();
             rocsparse::blockreduce_max<BLOCKSIZE>(tid, shd);
@@ -499,12 +571,22 @@ namespace rocsparse
                             const SOURCE*            source_,
                             floating_data_t<SOURCE>* conversion_error_)
         {
-            const size_t tid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-            if(tid < nitems_)
+            // AISPARSE-686. `BLOCKSIZE * hipBlockIdx_x` is unsigned-int arithmetic, so
+            // it wrapped at 2^32 before it was ever assigned to a size_t, and there
+            // was no grid-stride loop behind a clamped grid.x. Block-uniform bound:
+            // hipBlockIdx_x, hipGridDim_x, a kernel argument and a compile-time
+            // constant only.
+            const size_t stride = static_cast<size_t>(BLOCKSIZE) * hipGridDim_x;
+            for(size_t base = static_cast<size_t>(BLOCKSIZE) * hipBlockIdx_x; base < nitems_;
+                base += stride)
             {
-                const SOURCE s = source_[tid];
-                target_[tid]
-                    = TARGET{static_cast<double>(std::real(s)), static_cast<double>(std::imag(s))};
+                const size_t tid = base + hipThreadIdx_x;
+                if(tid < nitems_)
+                {
+                    const SOURCE s = source_[tid];
+                    target_[tid]   = TARGET{static_cast<double>(std::real(s)),
+                                          static_cast<double>(std::imag(s))};
+                }
             }
         }
     };
@@ -521,20 +603,32 @@ namespace rocsparse
                             const SOURCE*            source_,
                             floating_data_t<SOURCE>* conversion_error_)
         {
-            const size_t tid = hipThreadIdx_x;
-            const size_t gid = tid + BLOCKSIZE * hipBlockIdx_x;
+            // AISPARSE-686. Same unsigned-int wrap and same missing stride loop as the
+            // rest of this file. Block-uniform bound (hipBlockIdx_x, hipGridDim_x,
+            // kernel argument, compile-time constant), so every thread reaches the
+            // single __syncthreads() below together; the per-thread running maximum
+            // keeps the block reduction and its atomic outside the loop, exactly one
+            // of each per block as before.
+            const size_t tid    = hipThreadIdx_x;
+            const size_t stride = static_cast<size_t>(BLOCKSIZE) * hipGridDim_x;
             __shared__ floating_data_t<SOURCE> shd[BLOCKSIZE];
-            if(gid < nitems_)
+
+            floating_data_t<SOURCE> err = floating_data_t<SOURCE>(0);
+            for(size_t base = static_cast<size_t>(BLOCKSIZE) * hipBlockIdx_x; base < nitems_;
+                base += stride)
             {
-                const SOURCE s = source_[gid];
-                const TARGET t = static_cast<TARGET>(s);
-                shd[tid]       = rocsparse::abs(s - static_cast<SOURCE>(t));
-                target_[gid]   = t;
+                const size_t gid = base + tid;
+                if(gid < nitems_)
+                {
+                    const SOURCE s = source_[gid];
+                    const TARGET t = static_cast<TARGET>(s);
+
+                    const floating_data_t<SOURCE> e = rocsparse::abs(s - static_cast<SOURCE>(t));
+                    err                             = (e > err) ? e : err;
+                    target_[gid]                    = t;
+                }
             }
-            else
-            {
-                shd[tid] = floating_data_t<SOURCE>(0);
-            }
+            shd[tid] = err;
 
             __syncthreads();
             rocsparse::blockreduce_max<BLOCKSIZE>(tid, shd);
@@ -543,6 +637,19 @@ namespace rocsparse
                 shd[0] = rocsparse::atomic_max(conversion_error_, shd[0]);
             }
         }
+    };
+
+    template <typename KERNEL, uint32_t BLOCKSIZE, class FILTER = void>
+    struct has_run_kernel_t : std::false_type
+    {
+    };
+
+    template <typename KERNEL, uint32_t BLOCKSIZE>
+    struct has_run_kernel_t<KERNEL,
+                            BLOCKSIZE,
+                            std::void_t<decltype(&KERNEL::template run<BLOCKSIZE>)>>
+        : std::true_type
+    {
     };
 
     template <typename TARGET, typename SOURCE>
@@ -554,27 +661,46 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        const SOURCE*             source_   = (const SOURCE*)source__;
-        const TARGET*             target_   = (const TARGET*)target__;
+        if(nitems_ == 0)
+        {
+            host_error[0] = 0;
+            return rocsparse_status_success;
+        }
+
+        using kernel_t = rocsparse::copy_farray_mix_safe_kernel_t<TARGET, SOURCE>;
         static constexpr uint32_t BLOCKSIZE = 1024;
-        floating_data_t<SOURCE>*  derr      = (floating_data_t<SOURCE>*)handle_->buffer;
-        floating_data_t<SOURCE>   herr;
-        RETURN_IF_HIP_ERROR(
-            rocsparse_hipMemsetAsync(derr, 0, sizeof(floating_data_t<SOURCE>), handle_->stream));
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::copy_farray_mix_safe_kernel_t<TARGET, SOURCE>::template run<BLOCKSIZE>),
-            dim3((nitems_ - 1) / BLOCKSIZE + 1),
-            dim3(BLOCKSIZE),
-            0,
-            handle_->stream,
-            nitems_,
-            (TARGET*)target_,
-            (const SOURCE*)source_,
-            (floating_data_t<SOURCE>*)derr);
-        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
-            &herr, derr, sizeof(floating_data_t<SOURCE>), hipMemcpyDeviceToHost, handle_->stream));
-        host_error[0] = static_cast<double>(herr);
-        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
+        if constexpr(!rocsparse::has_run_kernel_t<kernel_t, BLOCKSIZE>::value)
+        {
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                rocsparse_status_not_implemented,
+                "the conversion between these two data types is not implemented");
+        }
+        else
+        {
+            const SOURCE*            source_ = (const SOURCE*)source__;
+            const TARGET*            target_ = (const TARGET*)target__;
+            floating_data_t<SOURCE>* derr    = (floating_data_t<SOURCE>*)handle_->buffer;
+            floating_data_t<SOURCE>  herr;
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                derr, 0, sizeof(floating_data_t<SOURCE>), handle_->stream));
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (kernel_t::template run<BLOCKSIZE>),
+                dim3(rocsparse::get_grid_size_x(handle_, (nitems_ - 1) / BLOCKSIZE + 1, BLOCKSIZE)),
+                dim3(BLOCKSIZE),
+                0,
+                handle_->stream,
+                nitems_,
+                (TARGET*)target_,
+                (const SOURCE*)source_,
+                (floating_data_t<SOURCE>*)derr);
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&herr,
+                                                         derr,
+                                                         sizeof(floating_data_t<SOURCE>),
+                                                         hipMemcpyDeviceToHost,
+                                                         handle_->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
+            host_error[0] = static_cast<double>(herr);
+        }
         return rocsparse_status_success;
     }
 
@@ -885,8 +1011,9 @@ rocsparse_status rocsparse::convert_array(rocsparse_handle   handle_,
                                                                         source_,
                                                                         &conversion_error_max));
 
-        std::cout << "rocsparse_convert_array numerical conversion error " << conversion_error_max
-                  << " invalid data." << std::endl;
+        std::ostringstream message;
+        message << "rocsparse_convert_array numerical conversion error " << conversion_error_max;
+        rocsparse::log_debug(handle_, message.str());
         return rocsparse_status_success;
     }
 }

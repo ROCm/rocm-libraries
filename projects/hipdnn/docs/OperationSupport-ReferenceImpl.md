@@ -5,12 +5,21 @@ This document provides a comprehensive overview of the operations currently supp
 > [!IMPORTANT]
 > ⚠️ **The CPU Reference Implementation is for testing and validation purposes only.** This implementation provides ground-truth results for validating GPU implementations and is not optimized for performance.
 
+> [!NOTE]
+> A GPU-based reference implementation also exists in the integration test project. See
+> [GPU Reference Implementation - Operation Support](../../../dnn-providers/integration-tests/docs/OperationSupport-GpuReferenceImpl.md) for the operations it covers.
+
 ## Purpose
 
 The CPU Reference Implementation serves as:
 - **Reference Implementation**: Provides ground-truth results for validating GPU implementations
 - **Testing Infrastructure**: Enables comprehensive testing of graph execution
 - **Validation Tool**: Ensures correctness of GPU-accelerated operations
+
+It is exposed through `CpuReferenceGraphExecutor`
+(`test_sdk/include/hipdnn_test_sdk/utilities/cpu_graph_executor/`), which executes a serialized
+graph node by node. A node is accepted only if a plan builder is registered for its
+**signature key** (operation + datatypes) and that builder's `isApplicable` check passes.
 
 ## Current Operation Support
 
@@ -25,10 +34,24 @@ The following table lists all operations currently supported in the CPU Referenc
 | Convolution Backward Data | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
 | Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
 | Convolution Backward Weights | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
-| Matmul | FP16, BFP16, FP32 | NCHW, NCDHW | CPU Reference |  |
-| Pointwise Unary | FP16, BFP16, FP32 | All | CPU Reference |  |
-| Pointwise Binary | FP16, BFP16, FP32 | All | CPU Reference |  |
-| Pointwise Ternary | FP16, BFP16, FP32 | All | CPU Reference | BINARY_SELECT with BOOLEAN mask |
+| Matmul | FP16, BFP16, FP32 | Any rank >= 2 | CPU Reference | Batch dims broadcast; ragged tensors rejected |
+| MoE Grouped Matmul Forward | FP16, BFP16, FP32 | Op-defined | CPU Reference | Ragged tensors rejected |
+| MoE Grouped Matmul Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference |  |
+| Layernorm Forward | FP16, BFP16, FP32 | All | CPU Reference | Normalizes the trailing `normalizedDimCount` dims; mean/inv-variance outputs optional |
+| Layernorm Backward | FP16, BFP16, FP32 | All | CPU Reference | `mean` and `inv_variance` must be provided together or not at all |
+| RMSNorm Forward | FP16, BFP16, FP32 | All | CPU Reference | Input rank >= 2; scale rank equals input rank |
+| RMSNorm Backward | FP16, BFP16, FP32 | All | CPU Reference | Input rank >= 2; requires the inverse-RMS tensor |
+| Reduction | FP16, BFP16, FP32 | All | CPU Reference | Ragged tensors rejected; see [Reduction Modes](#reduction-modes) |
+| Resample Forward | FP16, BFP16, FP32 | Op-defined | CPU Reference | MAXPOOL / AVGPOOL modes only; optional INT32 index output |
+| Resample Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference | Same modes as forward; MAXPOOL requires the INT32 index tensor |
+| SDPA Forward (dense) | FP16, BFP16, FP32, FP8 (E4M3, E5M2 and their FNUZ forms) | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
+| SDPA Forward (ragged) | Native: BFP16, FP8 E4M3; other dtypes through the dense rewrite | Op-defined | CPU Reference | Selected when a Q/K/V/O tensor carries a `ragged_offset`; see [SDPA Restrictions](#sdpa-restrictions) |
+| SDPA Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
+| BlockScale Quantize | FP32, FP16, BFP16 in; FP8, FP6, FP4 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
+| BlockScale Dequantize | FP8, FP6, FP4 in; FP32, FP16, BFP16 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
+| Pointwise Unary | FP16, BFP16, FP32, FP64, INT32, FP8 | All | CPU Reference | `LOGICAL_NOT` is BOOLEAN only; `GEN_INDEX` outputs INT32; INT32 supports a subset of modes, see below |
+| Pointwise Binary | FP16, BFP16, FP32, FP64, INT32, FP8 | All | CPU Reference | `CMP_*` outputs BOOLEAN and also accepts INT32 inputs; `LOGICAL_AND`/`LOGICAL_OR` are BOOLEAN only |
+| Pointwise Ternary | FP16, BFP16, FP32, FP64, INT32, BOOLEAN, FP8 | All | CPU Reference | BINARY_SELECT with BOOLEAN mask |
 
 ## Implementation Details
 
@@ -54,17 +77,170 @@ The following table lists all operations currently supported in the CPU Referenc
 | Operation | Plan Builder | Signature Key | Description |
 |-----------|-------------|---------------|-------------|
 | Matmul | `MatmulPlanBuilder` | `MatmulSignatureKey` | Generic matrix multiplication |
+| MoE Grouped Matmul Forward | `MoeGroupedMatmulPlanBuilder` | `MoeGroupedMatmulSignatureKey` | Mixture-of-experts grouped matrix multiplication |
+| MoE Grouped Matmul Backward | `MoeGroupedMatmulBwdPlanBuilder` | `MoeGroupedMatmulBwdSignatureKey` | Gradient of the grouped matrix multiplication |
+
+### Normalization Operations
+
+| Operation | Plan Builder | Signature Key | Description |
+|-----------|-------------|---------------|-------------|
+| Layernorm Forward | `LayernormFpropPlanBuilder` | `LayernormFpropSignatureKey` | Layer normalization forward pass |
+| Layernorm Backward | `LayernormBpropPlanBuilder` | `LayernormBpropSignatureKey` | Layer normalization gradients |
+| RMSNorm Forward | `RMSNormFwdPlanBuilder` | `RMSNormFwdSignatureKey` | RMS normalization forward pass |
+| RMSNorm Backward | `RMSNormBwdPlanBuilder` | `RMSNormBwdSignatureKey` | RMS normalization gradients |
+
+### Reduction, Resample and SDPA Operations
+
+| Operation | Plan Builder | Signature Key | Description |
+|-----------|-------------|---------------|-------------|
+| Reduction | `ReductionPlanBuilder` | `ReductionSignatureKey` | Reduction over the dimensions where the output size is 1 |
+| Resample Forward | `ResampleFwdPlanBuilder` | `ResampleFwdSignatureKey` | Pooling-style resampling |
+| Resample Backward | `ResampleBwdPlanBuilder` | `ResampleBwdSignatureKey` | Resampling gradient |
+| SDPA Forward (dense) | `SdpaFwdPlanBuilder` | `SdpaFwdSignatureKey` | Scaled dot-product attention forward pass |
+| SDPA Forward (ragged) | `SdpaRaggedFwdPlanBuilder` | `SdpaRaggedFwdSignatureKey` | Packed (RFC-0014 ragged) attention forward pass |
+| SDPA Backward | `SdpaBwdPlanBuilder` | `SdpaBwdSignatureKey` | Scaled dot-product attention gradients |
+
+### Block-Scale Quantization Operations
+
+| Operation | Plan Builder | Signature Key | Description |
+|-----------|-------------|---------------|-------------|
+| BlockScale Quantize | `BlockScaleQuantizePlanBuilder` | `BlockScaleQuantizeSignatureKey` | Quantize to a narrow type with per-block scales |
+| BlockScale Dequantize | `BlockScaleDequantizePlanBuilder` | `BlockScaleDequantizeSignatureKey` | Dequantize a narrow type with per-block scales |
 
 ### Pointwise Operations
 
 | Operation Type | Plan Builder | Signature Key | Supported Operations |
 |----------------|-------------|---------------|---------------------|
-| Unary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | RELU_FWD, SIGMOID_FWD, TANH_FWD, ABS, NEG, GELU_FWD, GELU_APPROX_TANH_FWD, SWISH_FWD |
-| Binary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | ADD, SUB, MUL, CMP_GT, RELU_BWD, SIGMOID_BWD, TANH_BWD |
+| Unary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | RELU_FWD, SIGMOID_FWD, TANH_FWD, ABS, NEG, GELU_FWD, GELU_APPROX_TANH_FWD, SWISH_FWD, IDENTITY, EXP, LOG, SQRT, RSQRT, RECIPROCAL, SIN, TAN, ERF, CEIL, FLOOR, ELU_FWD, SOFTPLUS_FWD, LOGICAL_NOT (BOOLEAN only), GEN_INDEX (INT32 output only) |
+| Binary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | ADD, SUB, MUL, DIV, ADD_SQUARE, MAX, MIN, CMP_EQ, CMP_NEQ, CMP_GT, CMP_GE, CMP_LT, CMP_LE, LOGICAL_AND (BOOLEAN only), LOGICAL_OR (BOOLEAN only), RELU_BWD, SIGMOID_BWD, TANH_BWD, GELU_BWD, GELU_APPROX_TANH_BWD, SWISH_BWD, ELU_BWD, SOFTPLUS_BWD |
 | Ternary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | BINARY_SELECT (BOOLEAN mask) |
 
-`CMP_GT` outputs must have their tensor data type explicitly set to `BOOLEAN`; generic
-pointwise output inference otherwise uses the graph's intermediate data type.
+The pointwise reference honors the node `compute_data_type`: a plan is only built for a registered
+(input, compute, output) tuple, and operations that perform arithmetic evaluate their intermediate
+math in that compute type before rounding to the output type. A node whose compute type has no
+registered tuple is declined.
+
+`CMP_*` and `LOGICAL_*` outputs must have their tensor data type explicitly set to `BOOLEAN`, and
+`GEN_INDEX` outputs must be set to `INT32`; generic pointwise output inference otherwise uses the
+graph's intermediate data type.
+
+`GEN_INDEX` requires `axis_tensor_uid` in the range `0..rank-1` of the output tensor. A node with no
+axis, or an axis outside that range, is declined by `isApplicable`. cuDNN documents the same valid
+range for its pointwise axis attribute.
+
+Scalar attributes (`relu_*`, `swish_beta`, `elu_alpha`, `softplus_beta`) that a mode does not use are
+ignored, as in cuDNN.
+
+A pointwise node is declined, rather than failing at execution, when an input does not broadcast to
+the output shape.
+
+Input operands may be scalars: a baked compile-time constant, a runtime scalar with a default, or a
+pure runtime scalar read from the variant pack. A scalar is treated as a one-element tensor that
+broadcasts to the output shape.
+
+Each (input, compute, output) tuple is registered explicitly, and a node with any other tuple is
+declined. FP16 and BFP16 nodes compute in FP32. Their arithmetic and backward binary modes also
+register same-type compute (FP16 in FP16, BFP16 in BFP16); the comparison modes and `BINARY_SELECT`
+compute in FP32 only. Beyond FP16, BFP16 and FP32, the reference registers FP64, INT32, BOOLEAN and the FP8
+formats `FP8_E4M3` and `FP8_E5M2`:
+
+- FP64 computes in FP64 and supports every mode except the BOOLEAN-only logical modes, including all
+  `CMP_*` modes and `GEN_INDEX`.
+- INT32 computes in FP32, so integer values above 2^24 lose exactness in arithmetic; comparisons of
+  integer inputs are exact. It supports `RELU_FWD`, `ADD`, `SUB`, `MUL`, `MAX`, `MIN`, the `CMP_*`
+  modes and `BINARY_SELECT`; every other mode is declined. `ABS` and `NEG` are declined because
+  their result overflows `int32` for `INT32_MIN`.
+- BOOLEAN supports `BINARY_SELECT` and the logical modes.
+- FP8 inputs compute in FP32 and produce an output in the input's FP8 format or FP32. They support
+  the unary and binary modes, `CMP_GT` and `BINARY_SELECT`; the other `CMP_*` modes are declined.
+- `CMP_GT` also accepts inputs of different floating-point types: FP32 with FP16, FP32 with BFP16,
+  FP16 with BFP16, and FP32 with FP64, each in both orders. Other pairs, such as FP16 with FP64 or
+  BFP16 with FP64, and the other `CMP_*` modes with mixed inputs, are declined.
+
+## Operation Restrictions
+
+### Reduction Modes
+
+`ADD`, `AVG`, `AMAX`, `NORM1`, `NORM2`, `MUL`, `MUL_NO_ZEROS`, `MIN_OP`, `MAX_OP`. Input and output must
+have the same rank; each output dimension must equal the input dimension or be 1, and at least one
+dimension must be reduced.
+
+### SDPA Restrictions
+
+Design, the full feature table for both references, and how they are tested:
+[SdpaReferenceImplementations.md](SdpaReferenceImplementations.md).
+
+| Feature | Dense SDPA Forward | Ragged SDPA Forward | SDPA Backward |
+|---------|--------------------|---------------------|---------------|
+| Log-sum-exp `stats` output | Supported | Supported (`FP32`): dense `[B, H, Sq, 1]`, or ragged with its own `INT32` `ragged_offset` in any layout the ragged container accepts (`[H, T]` or `[T, H]`), with Q's per-batch lengths | Required input |
+| Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch | Supported, both or neither: they bound the per-batch lengths. Without them each `ragged_offset` block, clamped to `S_max`, is the length | Supported (same rules as dense forward) |
+| Cumulative sequence lengths (`cu_seq_len_q` / `cu_seq_len_kv`, cuDNN 9.24+, 9.25+ when mixed with `seq_len_*` on the other side; forward only) | Not supported (CPU and GPU references) | Not supported | Not applicable (forward-only) |
+| Diagonal band (`left_bound`, `right_bound`, `diagonal_alignment`) | cuDNN semantics: `left_bound = L` keeps L keys up to and including the diagonal, `right_bound = R` keeps R keys past it; `left_bound = 0` is rejected | Same | Same |
+| Dropout with an explicit mask (`dropout_mask` FLOAT [B or 1, H or 1, Sq, Skv] + one-element `dropout_scale`; backward also `dropout_scale_inv`) | Supported | Through the dense rewrite | Supported |
+| Philox dropout (`dropout_probability`, seed, offset) | Supported only with an `rng_dump` output (FLOAT [B, H, Sq, Skv]): the engine's dumped keep mask is applied as the explicit mask with scale 1/(1−p). Without `rng_dump`, not supported | Through the dense rewrite (same rule) | Not supported (the backward node has no `rng_dump`) |
+| ALiBi (`alibi_mask`) | Supported: cuDNN slopes, `(skv - sq) * slope(h)` added after the bias; needs top-left causal (`right_bound = 0`) (SEM-021) | Through the dense rewrite | Supported (same rules) |
+| `padding_mask` without both seq_len tensors | Not supported | Not supported | Not supported |
+| Additive attention bias (`attn_mask`) | Supported | Through the dense rewrite | Supported |
+| Bias gradient (`dbias` output) | - | - | Supported when a bias is set; `dbias` must have the bias tensor's shape and dtype |
+| Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported: K, V or both, each with its own block size; table width `ceil(max_seq_len_kv / block_size)`; an unset extent is inferred as cuDNN does (SEM-009) | Through the dense rewrite (ragged Q over paged K/V) | - |
+| Attention sink (`sink_token`, FLOAT [1, H, 1, 1]) | Supported; the log-sum-exp `stats` include the sink | Through the dense rewrite | Not supported (the backward node has no sink input) |
+| Block-sparse attention (`block_mask`, UINT8, one bit per 128 x 128 tile; SEM-025) | Supported | Through the dense rewrite (below) | - |
+| Softmax max / sum-exp stats outputs (cuDNN `Max`, `Sum_exp`; FLOAT [B, H, Sq, 1]) | Supported: `Max` includes the sink logit; a row with no live key and no sink has `Max` = -inf, `Sum_exp` = 0 | Through the dense rewrite (below) | - |
+| Ragged tensors | Through the dense rewrite (below) | Required on every Q/K/V/O | Through the dense rewrite (below) |
+| FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs. cuDNN `sdpa_fp8` softmax and output scaling: `scale_s` with `descale_s`, `scale_o`, and the `amax_s` / `amax_o` outputs, each a one-element `FLOAT` tensor (SEM-024); not with dropout | Optional `FLOAT` Q/K/V descales (scalar `[1]` or per KV head `[B, H_kv, 1, 1]`) for any registered dtype; softmax descale, softmax/output scales and amax go through the dense rewrite | - |
+
+"Not supported" means the reference reports the graph as not applicable. Every attribute is implemented,
+declined, or an accepted engine hint (`generate_stats`, `mma_core_mode`, `implementation`, `compute_data_type`).
+"Through the dense rewrite" means the native ragged plan declines the feature and the executor runs the
+graph through the dense rewrite (below) under the dense column's rules.
+Dense FP8 forward is registered for `FP8_E4M3`, `FP8_E4M3_FNUZ`, `FP8_E5M2` and `FP8_E5M2_FNUZ` inputs
+with `BFP16` output or an output in the input's FP8 format; ragged
+FP8 forward for `FP8_E4M3` inputs with `BFP16` output.
+
+The ragged plan matches the GPU reference's ragged plan. It needs RFC-0014 tensors with logical
+`[B, H, S, D]` dims, an `INT32` `ragged_offset` aux on every primary, and strides the ragged container
+accepts: token-major, head-major, a padded token stride, and shifted or non-monotonic origins with
+`seq_len`. The container rejects layouts that alias. Applicability sees only graph attributes, not offset values: layouts that depend on the values are rejected when the tensor is built (bundle load), or with `std::invalid_argument` at execute for callers passing raw pointers. Per-batch lengths come from `seq_len_q/kv` when
+bound (both or neither; a `padding_mask` only with both, as `isSupportedSdpaPadding`), else from the
+`ragged_offset` blocks clamped to `S_max`. A node is keyed as ragged when any of its Q/K/V/O tensors
+has a `ragged_offset`. The ragged plan needs all four to be ragged, and the dense plan rejects any
+ragged tensor. So a partly ragged node is declined by both plans and left to the dense rewrite, which declines it too.
+
+Ragged graphs the native ragged plan declines, and ragged backward graphs, run through the dense
+rewrite when it accepts them (`RaggedSdpaDensify.hpp`): the packed tensors are unpacked into dense padded ones with the
+per-batch lengths (`seq_len` when supplied, else the offset blocks) as `seq_len_q/kv`, the dense plan
+runs, and the outputs are packed back. They therefore support everything the dense forward and
+backward columns list. The rewrite serves `Max` and `Sum_exp` (bound by `seq_len_q`), `INT64`
+offsets and ragged Q over non-ragged paged K/V. What it declines (for example a `ragged_offset` on
+paged K/V, a non-`INT32` `seq_len`) is listed in RFC 0014 §4.10; such a graph is unsupported.
+
+The semantics the references implement (cuDNN's), and every place where cuDNN, PyTorch, vLLM and
+FlashAttention-style kernels disagree, are recorded in the [SDPA semantics register](SdpaSemanticsRegister.md).
+A row with no live key produces O = 0 and LSE = -inf in forward and contributes zero to every gradient in
+backward.
+
+### Resample Modes
+
+Forward and backward accept `MAXPOOL`, `AVGPOOL_EXCLUDE_PADDING` and `AVGPOOL_INCLUDE_PADDING` with
+`NEG_INF_PAD` or `ZERO_PAD` padding. The signature key's index type is either unset (no index tensor)
+or `INT32` (index tensor present).
+
+### Block-Scale Quantization
+
+Narrow types are `FP8_E4M3`, `FP8_E5M2`, `FP6_E2M3`, `FP6_E3M2` and `FP4_E2M1`, with `FP8_E8M0` scales.
+Non-narrow tuples (`FP32` input to `FP32` / `FP16` / `BFP16` output for quantize; `FP32` / `FP16` / `BFP16`
+input with `FP32` scale for dequantize) are also registered.
+
+## Use in the Integration Tests
+
+The integration test project selects this implementation with `--verification-mode cpu` (or as the last
+step of the default `auto` chain). The harness only registers bundles for CPU validation when every
+node type in the graph is in its CPU-required set. That set is a subset of the operations above:
+BatchNorm (all four variants), Layernorm (forward/backward), RMSNorm (forward/backward), Pointwise and
+SDPA Forward (see `ReferenceOpCoverage.cpp` in the integration test project). SDPA bundles are
+additionally limited to `quick`-tier bundles with a bounded working set, to keep CPU time down. See the
+[integration test docs](../../../dnn-providers/integration-tests/docs/running-tests.md#verification-modes)
+for the verification modes.
 
 ## Legend
 
@@ -72,12 +248,19 @@ pointwise output inference otherwise uses the graph's intermediate data type.
 - **FP16**: Half-precision floating point (16-bit)
 - **BFP16**: Brain floating point (16-bit)
 - **FP32**: Single-precision floating point (32-bit)
+- **FP8 (E4M3, E5M2, E4M3_FNUZ, E8M0)**: 8-bit floating point; E8M0 is the exponent-only block scale type
+- **FP6 (E2M3, E3M2), FP4 (E2M1)**: Micro-scaling (MX) narrow floating point types, used by block-scale quantization only
+- **INT32**: Index tensors (resample), `GEN_INDEX` outputs, and inputs of `CMP_*` and `BINARY_SELECT`
+- **BOOLEAN**: Comparison and logical outputs, and `BINARY_SELECT` masks
 
 ### Layouts
 - **NCHW**: Batch, Channels, Height, Width (2D, channel-first)
 - **NHWC**: Batch, Height, Width, Channels (2D, channel-last)
 - **NCDHW**: Batch, Channels, Depth, Height, Width (3D, channel-first)
 - **NDHWC**: Batch, Depth, Height, Width, Channels (3D, channel-last)
+- **All**: Any stride layout; the operation does not constrain dimension ordering
+- **Any rank >= 2**: Matmul `(...batch, M, K)` x `(...batch, K, N)`
+- **Op-defined**: Dimension ordering is fixed by the operation's definition, not by a layout name
 
 > **Note:** The layout names (NCHW, NHWC, etc.) describe the **memory layout** controlled by
 > strides. Dimension ordering is operation-specific: convolution and batch normalization use
@@ -95,5 +278,6 @@ For detailed information on adding new operations or datatypes to the CPU Refere
 ## Related Documentation
 
 - [hipDNN Operation Support](./OperationSupport.md) - Central hub for hipDNN operation support
+- [GPU Reference Implementation - Operation Support](../../../dnn-providers/integration-tests/docs/OperationSupport-GpuReferenceImpl.md) - GPU counterpart in the integration test project
 - [CPU Graph Executor Design](./rfcs/0001_CpuGraphExecutorDesign.md) - Detailed architecture documentation
-- [Testing Plan](./testing/TestPlan.md) - Testing strategy and procedures
+- [Release Testing](./testing/RELEASE_TESTING.md) - Testing strategy and procedures

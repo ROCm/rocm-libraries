@@ -1,0 +1,7 @@
+{
+  "version": "0.1",
+  "id": "umd-attention",
+  "name": "Attention matcher",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.attention.match"
+}

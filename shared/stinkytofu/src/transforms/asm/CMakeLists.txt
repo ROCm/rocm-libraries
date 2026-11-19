@@ -11,7 +11,10 @@ target_sources(stinkytofu_objs PRIVATE
     SwInstructionPrefetchAbsDynamicPass.cpp
     PhiPlacement.cpp
     BuildDefUseChain.cpp
+    DefUseAnalysisCleanup.cpp
     CFGBuilderPass.cpp
+    FlattenCFGPass.cpp
+    StinkyUnreachableBlockElimPass.cpp
     LongBranchLoweringPass.cpp
     PeepholeOptimizationPass.cpp
     DeadCodeEliminationPass.cpp
@@ -19,15 +22,17 @@ target_sources(stinkytofu_objs PRIVATE
     AsmMovePropagationPass.cpp
     LegalizationUtils.cpp
     ExecMaskGrouping.cpp
+    TieExecMaskedWritesPass.cpp
     StinkyDAGSchedulerPass.cpp
     dag/RegionDAG.cpp
-    WaitAwareScheduleRepairPass.cpp
+    dag/SchedulingKnobHeuristics.cpp
     StinkyMergeBarrierPass.cpp
     SetMatrixReusePass.cpp
     StinkyWaitCntInsertionPass.cpp
-    Gfx1250HazardPass.cpp
+    Gfx1250XnackHazardPass.cpp
     waitcnt/WaitDataflow.cpp
     waitcnt/ShallowPredPromotion.cpp
+    waitcnt/WmmaRunWaitMerge.cpp
     StinkyRemoveWaitCntPass.cpp
     RemoveDscntPass.cpp
     StinkyRemoveNopPass.cpp
@@ -44,6 +49,7 @@ target_sources(stinkytofu_objs PRIVATE
     InsertDelayAluPass.cpp
     LoopRegionRemarkPass.cpp
     RemoveWaitAluPass.cpp
+    PrefetchBridgeSubstitutionPass.cpp
     InsertWaitAluPass.cpp
     EstimateAsmCyclesPass.cpp
     InsertCoexecHazardPass.cpp
@@ -51,3 +57,6 @@ target_sources(stinkytofu_objs PRIVATE
     StinkyWmmaVgprReorderPass.cpp
     FlattenCalleesPass.cpp
 )
+
+add_subdirectory(ra)
+add_subdirectory(ssa)

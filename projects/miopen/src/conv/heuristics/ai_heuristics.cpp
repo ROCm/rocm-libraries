@@ -32,15 +32,35 @@
 //   4. Kernel tuning AI models (sequential prediction of kernel parameters)
 
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <miopen/md5.hpp>
+#if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
+#include <miopen/conv/heuristics/lgbm_pick.hpp>
+#include <miopen/any_solver.hpp>
+#endif
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK || MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <fdeep/fdeep.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/env.hpp>
 
 #include <any>
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <fstream>
+#include <map>
 #include <mutex>
+#include <unordered_map>
 
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
+// Disable the precomputed config-tower embedding table. With no table the config vocabulary is
+// empty (the fdeep config encoder is not shipped), so SelectBestVocabCandidate finds nothing and
+// selection falls back to the non-AI heuristic. Default: use the table when a
+// {arch}_{solver}_kernel_config_embeddings.bin is present.
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_ENABLE_LGBM_SELECTOR)
+// Bypass TunaNet and the KTN / two-tower kernel-tuning models, keeping only the LGBM
+// heuristics. See common::LgbmOnly().
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LGBM_ONLY)
 
 // 3D AI heuristics - now declared properly in header
 // No need for local forward declarations since we include the header
@@ -214,11 +234,162 @@ MIOPEN_INTERNALS_EXPORT std::size_t EngineeredConvFeatureCount(int spatial_dim)
         .size();
 }
 
+// Fixed positional order of the base derived block (18 names), matching EngineeredConvFeatures and
+// the training preprocessor's derived_feature_names(); log_d_in is appended for 3D. Single source
+// shared by DefaultDerivedFeatureNames and the EngineeredConvFeaturesByName base block below.
+static constexpr std::array<const char*, 18> kBaseDerivedFeatureNames = {"log_flops",
+                                                                         "log_gemm_m",
+                                                                         "log_gemm_n",
+                                                                         "log_gemm_k",
+                                                                         "gemm_m_over_n",
+                                                                         "gemm_m_over_k",
+                                                                         "gemm_n_over_k",
+                                                                         "log_gemm_size",
+                                                                         "log_work_per_cu",
+                                                                         "spatial_reduction",
+                                                                         "filter_coverage",
+                                                                         "channel_ratio",
+                                                                         "group_density",
+                                                                         "log_h_in",
+                                                                         "log_w_in",
+                                                                         "log_c_in",
+                                                                         "log_c_out",
+                                                                         "log_batch"};
+
+MIOPEN_INTERNALS_EXPORT std::vector<std::string> DefaultDerivedFeatureNames(int spatial_dim)
+{
+    std::vector<std::string> names(kBaseDerivedFeatureNames.begin(),
+                                   kBaseDerivedFeatureNames.end());
+    if(spatial_dim == 3) // log_d_in is appended after the base block (3D only)
+        names.emplace_back("log_d_in");
+    return names;
+}
+
+MIOPEN_INTERNALS_EXPORT std::vector<float>
+EngineeredConvFeaturesByName(std::size_t N,
+                             std::size_t C_in,
+                             std::size_t C_out,
+                             std::size_t H_in,
+                             std::size_t W_in,
+                             std::size_t H_out,
+                             std::size_t W_out,
+                             std::size_t K_h,
+                             std::size_t K_w,
+                             std::size_t groups,
+                             std::size_t num_cu,
+                             ConvDirection direction,
+                             int spatial_dim,
+                             std::size_t D_in,
+                             std::size_t D_out,
+                             std::size_t K_d,
+                             std::size_t phys_in_channels,
+                             miopenDataType_t data_type,
+                             const std::vector<std::string>& names)
+{
+    // Self-describing engineered features: compute the standard engineered block plus the optional
+    // GEMM-dim tile-divisibility (divfeat) features into a name->value map, then emit them in the
+    // order the model's metadata ``derived_features`` list requests. A model opts into extra
+    // engineered features purely by listing their names in its metadata - no code flags. Must stay
+    // in sync with ConvInputPreprocessor.derived_feature_names()/compute_derived_features() in the
+    // MIOpenFF training repo (feature-parity gtest).
+
+    // Base engineered block, in canonical order (identical math/order to EngineeredConvFeatures).
+    const auto base = EngineeredConvFeatures(N,
+                                             C_in,
+                                             C_out,
+                                             H_in,
+                                             W_in,
+                                             H_out,
+                                             W_out,
+                                             K_h,
+                                             K_w,
+                                             groups,
+                                             num_cu,
+                                             direction,
+                                             spatial_dim,
+                                             D_in,
+                                             D_out,
+                                             K_d);
+    std::map<std::string, float> by_name;
+    for(std::size_t i = 0; i < kBaseDerivedFeatureNames.size(); ++i)
+        by_name[kBaseDerivedFeatureNames[i]] = base[i];
+    if(spatial_dim == 3) // log_d_in is appended after the base block (3D only)
+        by_name["log_d_in"] = base[kBaseDerivedFeatureNames.size()];
+
+    // GEMM dims for the divfeat features. Same direction switch as EngineeredConvFeatures; computed
+    // exactly (not reconstructed from the log features) so tile-alignment is not perturbed by
+    // rounding. cpg_in/is_depthwise use the physical input-channel count (phys_in_channels),
+    // matching the training preprocessor, which reads the un-swapped data in_channels.
+    std::size_t g               = groups < 1 ? 1 : groups;
+    const double v_out          = static_cast<double>(D_out) * H_out * W_out;
+    const double v_filt         = static_cast<double>(K_d) * K_h * K_w;
+    const double n_v_out_over_g = static_cast<double>(N) * v_out / static_cast<double>(g);
+    const double cin_over_g     = static_cast<double>(C_in) / static_cast<double>(g);
+    const double cout_over_g    = static_cast<double>(C_out) / static_cast<double>(g);
+    const double cin_filter     = static_cast<double>(C_in) * v_filt;
+    const double cout_filter    = static_cast<double>(C_out) * v_filt;
+    double gemm_m = 0.0, gemm_n = 0.0, gemm_k = 0.0;
+    switch(direction)
+    {
+    case ConvDirection::Forward:
+        gemm_m = n_v_out_over_g;
+        gemm_n = cin_over_g;
+        gemm_k = cout_filter;
+        break;
+    case ConvDirection::BackwardData:
+        gemm_m = cout_over_g;
+        gemm_n = cin_filter;
+        gemm_k = n_v_out_over_g;
+        break;
+    case ConvDirection::BackwardWeights:
+        gemm_m = n_v_out_over_g;
+        gemm_n = cin_filter;
+        gemm_k = cout_over_g;
+        break;
+    }
+    const auto tile_waste = [](double x, double tile) -> float {
+        const double v  = x < 1.0 ? 1.0 : x;
+        const double up = std::ceil(v / tile) * tile;
+        return static_cast<float>((up - v) / up);
+    };
+    // dtype-aware K-pack: INT8 needs K % 4, FP16/BF16 K % 2, FP32 K % 1.
+    const double kpack    = data_type == miopenInt8 ? 4.0 : (data_type == miopenFloat ? 1.0 : 2.0);
+    const double cpg_in   = static_cast<double>(phys_in_channels) / static_cast<double>(g);
+    by_name["waste_m16"]  = tile_waste(gemm_m, 16);
+    by_name["waste_m32"]  = tile_waste(gemm_m, 32);
+    by_name["waste_m64"]  = tile_waste(gemm_m, 64);
+    by_name["waste_m128"] = tile_waste(gemm_m, 128);
+    by_name["waste_n16"]  = tile_waste(gemm_n, 16);
+    by_name["waste_n32"]  = tile_waste(gemm_n, 32);
+    by_name["waste_n64"]  = tile_waste(gemm_n, 64);
+    by_name["waste_n128"] = tile_waste(gemm_n, 128);
+    by_name["waste_k8"]   = tile_waste(gemm_k, 8);
+    by_name["waste_k16"]  = tile_waste(gemm_k, 16);
+    by_name["waste_k32"]  = tile_waste(gemm_k, 32);
+    by_name["kpack_ok"]   = (std::fmod(std::round(gemm_k), kpack) < 0.5) ? 1.0f : 0.0f;
+    by_name["log_cpg_in"] = static_cast<float>(std::log1p(cpg_in));
+    by_name["is_depthwise"] = (cpg_in <= 1.0) ? 1.0f : 0.0f;
+    by_name["k_small"]      = (gemm_k < 32.0) ? 1.0f : 0.0f;
+
+    std::vector<float> out;
+    out.reserve(names.size());
+    for(const auto& name : names)
+    {
+        const auto it = by_name.find(name);
+        if(it == by_name.end())
+            MIOPEN_THROW("EngineeredConvFeaturesByName: unknown derived feature '" + name + "'");
+        out.push_back(it->second);
+    }
+    return out;
+}
+
 bool IsTunaNetCategoricalFeature(const std::string& name)
 {
     return name == "in_layout" || name == "fil_layout" || name == "out_layout" ||
            name == "precision" || name == "direction";
 }
+
+bool LgbmOnly() { return env::enabled(MIOPEN_DEBUG_LGBM_ONLY); }
 } // namespace common
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
@@ -684,6 +855,11 @@ static bool HasNDTunaNetSupport(const std::string& device)
     return (device == "gfx942" || device == "gfx950");
 }
 
+bool HasBundledTunaNetModels(const std::string& device)
+{
+    return HasLegacyTunaNetSupport(device) || HasNDTunaNetSupport(device);
+}
+
 std::unique_ptr<Model> GetModel(const std::string& device)
 {
     // Legacy 2D models only - caller should check HasLegacyTunaNetSupport() first
@@ -932,23 +1108,38 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
     {
         auto cached_result = GetCachedPrediction(problem, device, is3d);
         if(!cached_result.empty())
+        {
+            // A cache hit short-circuits BEFORE the TunaNet/lgbm blocks, so this
+            // run shows no model log lines even though either could have produced
+            // the cached entry on an earlier call for this problem+device.
+            MIOPEN_LOG_I2("AI predict: cache hit for " << device << " (" << cached_result.size()
+                                                       << " solvers); TunaNet/lgbm not re-run");
             return cached_result;
+        }
     }
 
-    // Strategy:
-    // 1. Try ND model first (for gfx942/gfx950, supports both 2D and 3D)
-    // 2. Fall back to legacy model (for gfx908/gfx90a, 2D only)
-    // 3. Return empty vector to trigger WTI fallback for unsupported architectures
-    //
+    // Selection order: TunaNet -> LGBM -> WTI.
+    // TunaNet (the mature per-arch fdeep models) is preferred where it has a model
+    // that supports the problem. The cross-arch LGBM selector is the fallback: it
+    // covers architectures/problems TunaNet cannot serve (no per-arch model, or the
+    // problem is outside the model's supported set). Only if neither produces a
+    // prediction do we fall back to the non-AI WTI heuristic.
+
+    // 1. TunaNet.
     // Any failure inside this block (including a model that fdeep cannot load -- e.g. a
     // model exported in an incompatible format, which throws a non-miopen std::exception)
-    // is swallowed and turned into an empty result, so the caller degrades to the non-AI
-    // heuristic instead of failing the convolution. This is the predictor's contract: it
-    // returns a prediction or nothing, but never throws.
+    // is swallowed so we fall through to the LGBM selector instead of failing the
+    // convolution. This is the predictor's contract: it returns a prediction or nothing,
+    // but never throws.
     try
     {
-        // Try ND model first (preferred for gfx942/gfx950)
-        if((is2d || is3d) && HasNDTunaNetSupport(device))
+        if(common::LgbmOnly())
+        {
+            MIOPEN_LOG_I2("TunaNet bypassed via MIOPEN_DEBUG_LGBM_ONLY for " << device
+                                                                             << "; trying LGBM");
+        }
+        // ND model (for gfx942/gfx950, supports both 2D and 3D).
+        else if((is2d || is3d) && HasNDTunaNetSupport(device))
         {
             int dim                        = is3d ? 3 : 2;
             std::unique_ptr<ModelND> model = GetNDModel(device, dim);
@@ -960,13 +1151,11 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
                 return ProcessAndCachePredictions(
                     problem, device, true, predictions, model->GetSolverMap());
             }
-            // If ND model failed for this architecture, don't try legacy - go to WTI
-            MIOPEN_LOG_I2("ND TunaNet not applicable for this problem on " << device);
-            return {};
+            MIOPEN_LOG_I2("ND TunaNet not applicable for this problem on " << device
+                                                                           << "; trying LGBM");
         }
-
-        // Fall back to legacy 2D model (for gfx908/gfx90a only)
-        if(is2d && HasLegacyTunaNetSupport(device))
+        // Legacy 2D model (for gfx908/gfx90a only).
+        else if(is2d && HasLegacyTunaNetSupport(device))
         {
             std::unique_ptr<Model> model = GetModel(device);
 
@@ -977,20 +1166,51 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
                 return ProcessAndCachePredictions(
                     problem, device, false, predictions, model->metadata.solver_map);
             }
-            MIOPEN_LOG_I2("Legacy TunaNet not applicable for this problem on " << device);
-            return {};
+            MIOPEN_LOG_I2("Legacy TunaNet not applicable for this problem on " << device
+                                                                               << "; trying LGBM");
         }
     }
     catch(const std::exception& e)
     {
-        MIOPEN_LOG_W("TunaNet prediction failed (" << e.what()
-                                                   << "); falling back to non-AI heuristic");
-        return {};
+        MIOPEN_LOG_W("TunaNet prediction failed (" << e.what() << "); trying LGBM selector");
     }
 
-    // No TunaNet model available for this device/problem combination
-    // Return empty vector to trigger WTI fallback
-    MIOPEN_LOG_I2("No TunaNet model available for " << device << ", falling back to WTI");
+    // 2. LGBM selector fallback: cross-arch dispatcher trained on perf-DB data.
+    // Returns the full solver vocabulary ranked by predicted speed; the caller
+    // (GetSolutionsFallback) walks this list and applies IsApplicable lazily, exactly
+    // like the TunaNet path -- so no applicability check is done here. Enabled by
+    // default (active for all architectures the model covers); set
+    // MIOPEN_ENABLE_LGBM_SELECTOR=0 to force selection straight to WTI.
+    if(!env::disabled(MIOPEN_ENABLE_LGBM_SELECTOR))
+    {
+        // Same never-throw contract as the TunaNet block: swallow any failure
+        // (model load, filesystem, allocation) and fall through to WTI rather
+        // than propagating out of the predictor.
+        try
+        {
+            const auto ranked = ai::lgbm::PickSolverRanked(problem, ctx.GetStream());
+            if(!ranked.empty())
+            {
+                MIOPEN_LOG_I2("lgbm: returning " << ranked.size() << " ranked solvers");
+                std::vector<std::any> any_sol(ranked.begin(), ranked.end());
+                StorePredictionCache(problem, device, any_sol);
+                return ranked;
+            }
+            MIOPEN_LOG_I2("lgbm: abstained for " << device << ", falling back to WTI");
+        }
+        catch(const std::exception& e)
+        {
+            MIOPEN_LOG_W("LGBM prediction failed (" << e.what() << "); falling back to WTI");
+        }
+    }
+    else
+    {
+        MIOPEN_LOG_I2("lgbm: disabled via MIOPEN_ENABLE_LGBM_SELECTOR=0 for " << device
+                                                                              << ", using WTI");
+    }
+
+    // 3. WTI last: no AI prediction available, trigger the non-AI heuristic fallback.
+    MIOPEN_LOG_I2("No AI prediction for " << device << ", falling back to WTI");
     return {};
 }
 
@@ -1106,31 +1326,40 @@ ExtractTunaNetNDFeatures(const conv::ProblemDescription& problem,
         features.push_back(TunaNetRawFeatureValue(feature_name, problem, isFwd));
     }
 
-    const auto gemm_dir = problem.GetDirection() == conv::Direction::Forward
-                              ? common::ConvDirection::Forward
-                          : problem.GetDirection() == conv::Direction::BackwardData
-                              ? common::ConvDirection::BackwardData
-                              : common::ConvDirection::BackwardWeights;
-    const auto derived =
-        (spatial_dim == 3)
-            ? common::EngineeredConvFeatures(N,
-                                             C_in,
-                                             C_out,
-                                             H_in,
-                                             W_in,
-                                             H_out,
-                                             W_out,
-                                             K_h,
-                                             K_w,
-                                             groups,
-                                             num_cu,
-                                             gemm_dir,
-                                             3,
-                                             D_in,
-                                             D_out,
-                                             K_d)
-            : common::EngineeredConvFeatures(
-                  N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
+    const auto gemm_dir       = problem.GetDirection() == conv::Direction::Forward
+                                    ? common::ConvDirection::Forward
+                                : problem.GetDirection() == conv::Direction::BackwardData
+                                    ? common::ConvDirection::BackwardData
+                                    : common::ConvDirection::BackwardWeights;
+    const auto& derived_names = metadata.GetDerivedFeatureNames();
+    // A model that lists derived_features uses them (covers the optional divfeat set); one with
+    // none falls back to the default base block, so the extractor always drives the named builder
+    // rather than branching to positional EngineeredConvFeatures. cpg_in needs the physical
+    // input-channel count: pass the direction-normalized C_in, not problem.GetInChannels() (the
+    // forward-output channel for backward problems, where MIOpen stores in=y).
+    std::vector<std::string> default_names;
+    if(derived_names.empty())
+        default_names = common::DefaultDerivedFeatureNames(spatial_dim);
+    const auto& names  = derived_names.empty() ? default_names : derived_names;
+    const auto derived = common::EngineeredConvFeaturesByName(N,
+                                                              C_in,
+                                                              C_out,
+                                                              H_in,
+                                                              W_in,
+                                                              H_out,
+                                                              W_out,
+                                                              K_h,
+                                                              K_w,
+                                                              groups,
+                                                              num_cu,
+                                                              gemm_dir,
+                                                              (spatial_dim == 3) ? 3 : 2,
+                                                              D_in,
+                                                              D_out,
+                                                              K_d,
+                                                              /*phys_in_channels=*/C_in,
+                                                              problem.GetInDataType(),
+                                                              names);
     features.insert(features.end(), derived.begin(), derived.end());
     return features;
 }
@@ -1543,6 +1772,11 @@ bool ModelSetParams(const std::string& arch,
                     bool transform_features,
                     std::function<bool(std::size_t, std::string)> validator)
 {
+    if(common::LgbmOnly())
+    {
+        MIOPEN_LOG_I2("KTN bypassed via MIOPEN_DEBUG_LGBM_ONLY for " << solver << " on " << arch);
+        return false;
+    }
     using model_type = decltype(GetModel(arch, solver));
     model_type model;
     try
@@ -1669,47 +1903,237 @@ std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& featur
     return tensors[0].to_vector();
 }
 
-std::vector<std::vector<float>>
-EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_candidates,
-                             const std::string& arch,
-                             const std::string& solver)
+// Precomputed config-tower vocabulary (v3 config-embedding table).
+//
+// The config tower is a pure function of (arch, solver, kernel-config): its output does not depend
+// on the convolution problem. The set of kernel configs a solver can emit is finite, so every
+// config-tower embedding is computed once, offline, and shipped as a lookup table
+// ({arch}_{solver}_kernel_config_embeddings.bin) together with the kernel id of each row. At
+// runtime the selection path ranks that whole vocabulary by the two-tower score and walks it
+// best-first, checking applicability lazily -- no fdeep config encoder, no FillValidKernels.
+// Shipping the table lets us drop the ~450 KB-per-solver _kernel_config_encoder.tn.model entirely;
+// the config encoders are not shipped, so there is no fdeep fallback. Only the v3 format (which
+// carries the trailing kernel-id block) is understood: a missing/rejected/older table yields an
+// empty vocab and selection falls through to the non-AI heuristic.
+
+// A loaded v3 config-embedding table: the ordered kernel-id vocabulary and the parallel embedding
+// matrix (same row order), consumed by the rank-then-lazy-applicability selection path. Both are
+// empty for a sentinel-only or truncated table, and for an absent or rejected file.
+struct ConfigEmbeddingTable
 {
+    bool present = false;
+    std::vector<std::string> vocab;                   // kernel ids, row order, sentinels dropped
+    std::vector<std::vector<float>> vocab_embeddings; // parallel to vocab
+};
 
-    if(encoded_candidates.empty() || encoded_candidates[0].empty())
-        MIOPEN_THROW(miopenStatusInternalError,
-                     "Empty candidates provided to kernel config encoder");
-
-    std::string key = arch + "_" + solver + "_kernel_config_encoder";
-    std::string path =
-        (GetSystemDbPath() / (arch + "_" + solver + "_kernel_config_encoder.tn.model")).string();
-
-    MIOPEN_LOG_I2("Loading a Two-towers submodel from: " << path);
-    const auto model = GetFdeepModel(path, key);
-
-    // By default, use predict_multi (multi-threaded); use single-threaded loop only if env var is
-    // set
-    bool use_single = env::enabled(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT);
-
-    std::vector<std::vector<float>> result;
-    std::vector<fdeep::tensors> inputs_vec;
-    inputs_vec.reserve(encoded_candidates.size());
-    for(const auto& candidate : encoded_candidates)
+// Parse a v3 config-embedding file at `path`, verifying its md5 against the input encoder at
+// `enc_path`. Pure function of the two paths (empty vocab on any rejection): the cached
+// GetConfigEmbeddingTable derives both from (arch, solver); the loader tests pass temp files.
+ConfigEmbeddingTable ParseConfigEmbeddingTable(const std::string& path, const std::string& enc_path)
+{
+    ConfigEmbeddingTable table;
+    std::ifstream is(path, std::ios::binary);
+    if(is.good())
     {
-        fdeep::tensor t(fdeep::tensor_shape(candidate.size()), candidate);
-        inputs_vec.push_back(fdeep::tensors{t}); // wrap tensor in a vector
+        char magic[4] = {};
+        is.read(magic, 4);
+        std::uint32_t version = 0, key_dim = 0, emb_dim = 0, num_rows = 0, key_dtype = 0,
+                      emb_dtype = 0;
+        auto get = [&](std::uint32_t& v) { is.read(reinterpret_cast<char*>(&v), sizeof(v)); };
+        get(version);
+        get(key_dim);
+        get(emb_dim);
+        get(num_rows);
+        get(key_dtype);
+        get(emb_dtype);
+        // v3 appends a 32-char lowercase-hex md5 of the SHIPPED input encoder the table was
+        // generated alongside (same training run). A table whose embedded hash does not match the
+        // installed input encoder is ignored (fail closed -> non-AI heuristic) rather than scoring
+        // with embeddings from a different run. The input encoder IS shipped, so this guard fires
+        // in production too. Only v3 is accepted; earlier formats carry no kernel-id block, hence
+        // no usable vocabulary.
+        std::string table_enc_md5;
+        if(version == 3)
+        {
+            table_enc_md5.resize(32);
+            is.read(table_enc_md5.data(), 32);
+        }
+        const std::uint32_t header_bytes = 60u; // v3: magic[4] + 6x u32 + 32-byte md5
+        // Only the format this build understands: v3, fp32 keys and fp32 embeddings. Validate the
+        // header against the actual file size before trusting num_rows, so a corrupt count cannot
+        // drive a huge reserve/allocation.
+        const std::uint64_t row_bytes = static_cast<std::uint64_t>(key_dim) * sizeof(float) +
+                                        static_cast<std::uint64_t>(emb_dim) * sizeof(float);
+        is.seekg(0, std::ios::end);
+        const std::uint64_t file_size = is ? static_cast<std::uint64_t>(is.tellg()) : 0;
+        is.seekg(header_bytes, std::ios::beg);
+        // v3 appends a variable-length kernel-id block after the rows, so its total size is only
+        // bounded below by the row region. Bound num_rows by division (num_rows * row_bytes can
+        // overflow u64 for a crafted header, wrapping the product small), and cap key_dim/emb_dim
+        // so a corrupt header cannot drive a huge per-row key/embedding allocation.
+        constexpr std::uint32_t max_dim = 1u << 16; // 65536 floats per key/embedding is ample
+        const std::uint64_t body_bytes  = file_size > header_bytes ? file_size - header_bytes : 0;
+        bool header_ok = is.good() && std::memcmp(magic, "MICE", 4) == 0 && version == 3 &&
+                         key_dtype == 0 && emb_dtype == 0 && key_dim > 0 && key_dim <= max_dim &&
+                         emb_dim > 0 && emb_dim <= max_dim && row_bytes != 0 &&
+                         num_rows <= body_bytes / row_bytes;
+        // Verify the table's embedded hash against the shipped input encoder, failing closed when
+        // they differ (models refreshed but the table not regenerated, or a mixed/stale install).
+        // The input encoder is always shipped, so this fires in production; a broken install
+        // missing it has no AI path anyway, so an absent file is tolerated.
+        if(header_ok)
+        {
+            std::ifstream enc(enc_path, std::ios::binary | std::ios::ate);
+            std::string enc_bytes;
+            if(enc.good())
+            {
+                const std::streamoff enc_sz = enc.tellg();
+                enc_bytes.resize(static_cast<std::size_t>(enc_sz));
+                enc.seekg(0, std::ios::beg);
+                enc.read(enc_bytes.data(), static_cast<std::streamsize>(enc_sz));
+            }
+            if(!enc_bytes.empty() && miopen::md5(enc_bytes) != table_enc_md5)
+            {
+                MIOPEN_LOG_W(
+                    "Config embedding table "
+                    << path
+                    << " does not match the installed input encoder (md5 mismatch); "
+                       "ignoring table; config encoding falls back to the non-AI heuristic");
+                header_ok = false;
+            }
+        }
+        if(header_ok)
+        {
+            // Read the rows in order, keeping each embedding; the fp32 key is read only to advance
+            // past it (the old exact-match key map is gone -- the vocab is ranked by id).
+            std::vector<std::vector<float>> ordered_emb;
+            ordered_emb.reserve(num_rows);
+            std::vector<float> key(key_dim);
+            std::vector<float> emb(emb_dim);
+            std::uint32_t read_rows = 0;
+            for(; read_rows < num_rows; ++read_rows)
+            {
+                is.read(reinterpret_cast<char*>(key.data()),
+                        static_cast<std::streamsize>(key_dim * sizeof(float)));
+                is.read(reinterpret_cast<char*>(emb.data()),
+                        static_cast<std::streamsize>(emb_dim * sizeof(float)));
+                if(!is.good())
+                    break;
+                ordered_emb.push_back(emb);
+            }
+            // Read the trailing kernel-id block (num_rows length-prefixed strings) and pair each
+            // non-empty kernel_id with its row embedding. A short row region or a truncated/corrupt
+            // kernel-id block leaves the table absent -> empty vocab -> non-AI heuristic.
+            bool vocab_ok = (read_rows == num_rows);
+            if(vocab_ok)
+            {
+                table.vocab.reserve(num_rows);
+                table.vocab_embeddings.reserve(num_rows);
+                // Reject an absurd kernel-id length (> 1 MiB) instead of trusting the stored size.
+                constexpr std::uint32_t max_kernel_id_bytes = 1u << 20;
+                for(std::uint32_t r = 0; r < num_rows; ++r)
+                {
+                    std::uint32_t len = 0;
+                    is.read(reinterpret_cast<char*>(&len), sizeof(len));
+                    if(!is.good() || len > max_kernel_id_bytes)
+                    {
+                        vocab_ok = false;
+                        break;
+                    }
+                    std::string kid(len, '\0');
+                    if(len > 0)
+                        is.read(kid.data(), static_cast<std::streamsize>(len));
+                    if(!is.good())
+                    {
+                        vocab_ok = false;
+                        break;
+                    }
+                    if(!kid.empty()) // skip sentinel rows (no kernel_id)
+                    {
+                        table.vocab.push_back(std::move(kid));
+                        table.vocab_embeddings.push_back(ordered_emb[r]);
+                    }
+                }
+            }
+            table.present = vocab_ok;
+            if(!table.present)
+            {
+                MIOPEN_LOG_W("Config embedding table at "
+                             << path
+                             << " is truncated/corrupt; config encoding falls back to the "
+                                "non-AI heuristic");
+                table.vocab.clear();
+                table.vocab_embeddings.clear();
+            }
+            else
+            {
+                MIOPEN_LOG_I2("Loaded config embedding table " << path << " (" << num_rows
+                                                               << " rows, " << table.vocab.size()
+                                                               << " vocab)");
+            }
+        }
     }
-    auto outputs = model->predict_multi(inputs_vec, !use_single); // parallelly = !use_single
-    if(outputs.size() != inputs_vec.size())
-        MIOPEN_THROW(miopenStatusInternalError, "predict_multi returned wrong number of outputs");
-    for(const auto& out : outputs)
-    {
-        if(out.empty())
-            MIOPEN_THROW(miopenStatusInternalError,
-                         "Kernel config encoder returned empty tensor list");
-        result.push_back(out[0].to_vector());
-    }
-    return result;
+    return table;
 }
+
+// Load and cache one {arch}_{solver}_kernel_config_embeddings.bin (md5-checked against the shipped
+// input encoder). A missing/invalid file is cached as an absent (empty) table so we attempt disk
+// I/O only once per (arch, solver).
+const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
+                                                    const std::string& solver)
+{
+    static std::map<std::string, ConfigEmbeddingTable> tables;
+    static std::mutex tables_mutex;
+
+    const std::string cache_key = arch + "_" + solver;
+    std::lock_guard<std::mutex> lock(tables_mutex);
+    auto it = tables.find(cache_key);
+    if(it != tables.end())
+        return it->second;
+
+    const auto path =
+        (GetSystemDbPath() / (arch + "_" + solver + "_kernel_config_embeddings.bin")).string();
+    const auto enc_path =
+        (GetSystemDbPath() / (arch + "_" + solver + "_input_encoder.tn.model")).string();
+    return tables.emplace(cache_key, ParseConfigEmbeddingTable(path, enc_path)).first->second;
+}
+
+// Test hook: parse a config-embedding .bin at bin_path (md5-checked against the input encoder at
+// input_encoder_path) and return its kernel-id vocabulary. Empty on any rejection. Lets the loader
+// tests craft temp files instead of writing into the installed system db.
+MIOPEN_INTERNALS_EXPORT std::vector<std::string>
+LoadConfigEmbeddingVocabFromFile(const std::string& bin_path, const std::string& input_encoder_path)
+{
+    return ParseConfigEmbeddingTable(bin_path, input_encoder_path).vocab;
+}
+
+// Ordered kernel-id vocabulary for the rank-then-lazy-applicability selection path. Empty unless a
+// valid v3 table is installed for (arch, solver), and empty when the precomputed-table kill switch
+// is set -- selection then finds nothing and falls through to the non-AI heuristic.
+MIOPEN_INTERNALS_EXPORT const std::vector<std::string>&
+GetConfigEmbeddingVocab(const std::string& arch, const std::string& solver)
+{
+    if(env::enabled(MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB))
+    {
+        static const std::vector<std::string> empty;
+        return empty;
+    }
+    return GetConfigEmbeddingTable(arch, solver).vocab;
+}
+
+// Embeddings for GetConfigEmbeddingVocab, as a contiguous matrix (same order), so the scorer reads
+// them directly instead of copying every embedding per selection call.
+MIOPEN_INTERNALS_EXPORT const std::vector<std::vector<float>>&
+GetConfigEmbeddingMatrix(const std::string& arch, const std::string& solver)
+{
+    if(env::enabled(MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB))
+    {
+        static const std::vector<std::vector<float>> empty;
+        return empty;
+    }
+    return GetConfigEmbeddingTable(arch, solver).vocab_embeddings;
+}
+
 } // namespace candidate_selection
 
 } // namespace tuning

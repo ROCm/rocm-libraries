@@ -25,6 +25,7 @@
 #include "rocsparse_utility.hpp"
 
 #include "rocsparse_dense2bell.hpp"
+#include "rocsparse_grid.hpp"
 
 #include "dense2bell.h"
 
@@ -63,12 +64,13 @@ rocsparse_status rocsparse::dense2bell_nnz_template(rocsparse_handle          ha
     const int64_t mb = (m + ell_block_size - 1) / ell_block_size;
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::dense2bell_nnz_kernel<256>),
-                                       dim3(mb),
+                                       dim3(rocsparse::get_grid_size_x(handle, mb, 256)),
                                        dim3(256),
                                        0,
                                        stream,
                                        m,
                                        n,
+                                       mb,
                                        A,
                                        ld,
                                        order,
@@ -162,12 +164,13 @@ rocsparse_status rocsparse::dense2bell_template(rocsparse_handle          handle
     RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(bell_val, 0, sizeof(T) * m * ell_cols, stream));
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::dense2bell_fill_kernel<256>),
-                                       dim3(mb),
+                                       dim3(rocsparse::get_grid_size_x(handle, mb, 256)),
                                        dim3(256),
                                        0,
                                        stream,
                                        m,
                                        n,
+                                       mb,
                                        A,
                                        ld,
                                        order,

@@ -18,20 +18,21 @@
  * plans/operands, acc inits, down setup) is owned by rocke_moe_mega_build_ctx_init
  * (a peer TU declared in the internal header); the STAGE 1..5 body is owned by
  * rocke_moe_mega_emit_body (peer TU). This TU owns only:
- *   1. deriving u_gu / u_down scratch + running the two validity gates,
+ *   1. deriving u_gu / u_down scratch + running the three validity gates,
  *   2. setting the builder attrs,
  *   3. driving ctx_init then emitting the scf_if(expert_idx >= 0) guard around
  *      rocke_moe_mega_emit_body,
  *   4. returning b->kernel.
  *
  * Byte-identical builder-call sequence (Python build_moe_fused_mega_gemm):
- *   u_gu  = spec.gate_up_universal_spec(); is_valid_gemm_spec(u_gu)   (448-451)
- *   u_down= spec.down_universal_spec();    is_valid_gemm_spec(u_down) (452-455)
- *   b.kernel.attrs["max_workgroup_size"] = spec.block_size           (458)
- *   if waves_per_eu is not None: attrs["waves_per_eu"] = ...          (459-460)
- *   <whole prologue>                  -> rocke_moe_mega_build_ctx_init  (462-634)
- *   with b.scf_if(b.cmp_ge(expert_idx, c0)): _emit_body()            (737-738)
- *   return b.kernel                                                   (740)
+ *   u_gu  = spec.gate_up_universal_spec(); is_valid_gemm_spec(u_gu)   (497-500)
+ *   u_down= spec.down_universal_spec();    is_valid_gemm_spec(u_down) (501-504)
+ *   validate_mega_lds_budget(_lds_allocs(spec), arch)                 (505-507)
+ *   b.kernel.attrs["max_workgroup_size"] = spec.block_size            (510)
+ *   if waves_per_eu is not None: attrs["waves_per_eu"] = ...          (511-512)
+ *   <whole prologue>                  -> rocke_moe_mega_build_ctx_init  (514-688)
+ *   with b.scf_if(b.cmp_ge(expert_idx, c0)): _emit_body()             (791-792)
+ *   return b.kernel                                                   (794)
  */
 #include <stdlib.h>
 #include <string.h>
@@ -68,7 +69,7 @@ rocke_kernel_def_t* rocke_build_moe_fused_mega_gemm(rocke_ir_builder_t* b,
     }
 
     /* ---- u_gu = spec.gate_up_universal_spec(); is_valid_gemm_spec gate ---- *
-     * Python (448-451):
+     * Python (497-500):
      *   u_gu = spec.gate_up_universal_spec()
      *   ok, why = is_valid_gemm_spec(u_gu, arch=arch)
      *   if not ok: raise ValueError(f"invalid fused-mega gate+up GEMM spec: {why}")
@@ -82,7 +83,7 @@ rocke_kernel_def_t* rocke_build_moe_fused_mega_gemm(rocke_ir_builder_t* b,
     }
 
     /* ---- u_down = spec.down_universal_spec(); is_valid_gemm_spec gate ---- *
-     * Python (452-455):
+     * Python (501-504):
      *   u_down = spec.down_universal_spec()
      *   ok, why = is_valid_gemm_spec(u_down, arch=arch)
      *   if not ok: raise ValueError(f"invalid fused-mega down GEMM spec: {why}")
@@ -95,8 +96,28 @@ rocke_kernel_def_t* rocke_build_moe_fused_mega_gemm(rocke_ir_builder_t* b,
         return NULL;
     }
 
+    /* ---- whole-kernel LDS budget gate ---- *
+     * Python (505-507):
+     *   ok, why = validate_mega_lds_budget(_lds_allocs(spec), arch)
+     *   if not ok: raise ValueError(f"invalid fused-mega spec: {why}")
+     * The two gates above validate the gate/up and down GEMMs as INDEPENDENT
+     * universal specs; neither sees Hidden_smem or the fact that all five
+     * buffers coexist, so a tiling that passes both can still overrun the
+     * per-WG budget (a kernel-load failure instead of a spec rejection). */
+    {
+        rocke_mega_lds_alloc_t allocs[ROCKE_MOE_MEGA_LDS_ALLOCS];
+        const char* why = NULL;
+        rocke_moe_fused_mega_lds_allocs(&u_gu, &u_down, allocs);
+        if(!rocke_validate_mega_lds_budget(b, allocs, ROCKE_MOE_MEGA_LDS_ALLOCS, arch, &why))
+        {
+            rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "invalid fused-mega spec: %s", (why != NULL) ? why : "");
+            return NULL;
+        }
+    }
+
     /* ---- builder attrs ---- *
-     * Python (458-460):
+     * Python (510-512):
      *   b.kernel.attrs["max_workgroup_size"] = spec.block_size
      *   if spec.trait.waves_per_eu is not None:
      *       b.kernel.attrs["waves_per_eu"] = spec.trait.waves_per_eu
@@ -107,7 +128,7 @@ rocke_kernel_def_t* rocke_build_moe_fused_mega_gemm(rocke_ir_builder_t* b,
         rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->trait.waves_per_eu);
     }
 
-    /* ---- whole prologue into the ctx ---- (Python 462-634)
+    /* ---- whole prologue into the ctx ---- (Python 514-688)
      * params -> geometry -> thread decode -> per-expert B byte bases -> LDS
      * allocs -> views -> plans/operands -> acc inits -> down setup. On a
      * builder error the sticky status is set; bail with NULL. */
@@ -121,7 +142,7 @@ rocke_kernel_def_t* rocke_build_moe_fused_mega_gemm(rocke_ir_builder_t* b,
     }
 
     /* ---- guarded body ---- *
-     * Python (737-738):
+     * Python (791-792):
      *   with b.scf_if(b.cmp_ge(expert_idx, c0)):
      *       _emit_body()
      * Empty tail block (BlockExpertIds == -1) skips all work. */
@@ -136,7 +157,7 @@ rocke_kernel_def_t* rocke_build_moe_fused_mega_gemm(rocke_ir_builder_t* b,
     {
         return NULL;
     }
-    /* Python (740): return b.kernel */
+    /* Python (794): return b.kernel */
     return b->kernel;
 }
 

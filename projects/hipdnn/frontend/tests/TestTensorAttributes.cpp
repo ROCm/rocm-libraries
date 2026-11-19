@@ -183,6 +183,75 @@ TEST(TestTensorAttributes, ValidateFailsOnNonPositiveDimension)
     }
 }
 
+TEST(TestTensorAttributes, ValidateFailsOnNegativeStride)
+{
+    const std::vector<std::pair<std::vector<int64_t>, std::string>> cases
+        = {{{-1, 1, 1}, "Tensor x strides must be non-negative, got -1 on axis 0"},
+           {{6, -2, 1}, "Tensor x strides must be non-negative, got -2 on axis 1"},
+           {{6, 3, -1}, "Tensor x strides must be non-negative, got -1 on axis 2"}};
+
+    for(const auto& [stride, expectedMessage] : cases)
+    {
+        TensorAttributes tensor;
+        tensor.set_name("x");
+        tensor.set_dim({2, 2, 3});
+        tensor.set_stride(stride);
+        tensor.set_data_type(DataType::FLOAT);
+
+        const auto err = tensor.validate();
+        EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE)
+            << "Strides: " << hipdnn_data_sdk::utilities::vecToString(stride);
+        EXPECT_EQ(err.get_message(), expectedMessage)
+            << "Strides: " << hipdnn_data_sdk::utilities::vecToString(stride);
+    }
+}
+
+TEST(TestTensorAttributes, ValidateReportsLowestNegativeStrideAxis)
+{
+    TensorAttributes tensor;
+    tensor.set_name("x");
+    tensor.set_dim({2, 2, 3});
+    tensor.set_stride({-6, -3, 1});
+    tensor.set_data_type(DataType::FLOAT);
+
+    const auto err = tensor.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(err.get_message(), "Tensor x strides must be non-negative, got -6 on axis 0");
+}
+
+TEST(TestTensorAttributes, ValidateSucceedsWithZeroAndPositiveStrides)
+{
+    const std::vector<std::vector<int64_t>> testStrides
+        = {{0, 0, 1}, {0, 0, 0}, {6, 3, 1}, {1, 6, 2}};
+
+    for(const auto& stride : testStrides)
+    {
+        TensorAttributes tensor;
+        tensor.set_name("x");
+        tensor.set_dim({2, 2, 3});
+        tensor.set_stride(stride);
+        tensor.set_data_type(DataType::FLOAT);
+
+        const auto err = tensor.validate();
+        EXPECT_EQ(err.code, ErrorCode::OK)
+            << "Strides: " << hipdnn_data_sdk::utilities::vecToString(stride) << ", "
+            << err.get_message();
+    }
+}
+
+TEST(TestTensorAttributes, ValidateReportsNonPositiveDimensionBeforeNegativeStride)
+{
+    TensorAttributes tensor;
+    tensor.set_name("x");
+    tensor.set_dim({2, 0, 3});
+    tensor.set_stride({6, -3, 1});
+    tensor.set_data_type(DataType::FLOAT);
+
+    const auto err = tensor.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(err.get_message(), "Tensor x must have only positive dimensions");
+}
+
 TEST(TestTensorAttributes, ValidateDataType)
 {
     TensorAttributes tensor;
@@ -283,6 +352,100 @@ TEST(TestTensorAttributes, RaggedOffsetMethodChainingReturnsThis)
 
     const TensorAttributes& ref2 = tensor.set_alignment(32);
     EXPECT_EQ(&ref2, &tensor);
+}
+
+TEST(TestTensorAttributes, SetAndGetRaggedOffsetMultiplier)
+{
+    TensorAttributes tensor;
+    EXPECT_EQ(tensor.get_ragged_offset_multiplier(), 1);
+    EXPECT_FALSE(tensor.has_ragged_offset_multiplier());
+
+    tensor.set_ragged_offset_multiplier(512);
+    EXPECT_EQ(tensor.get_ragged_offset_multiplier(), 512);
+    EXPECT_TRUE(tensor.has_ragged_offset_multiplier());
+
+    tensor.set_ragged_offset_multiplier(1);
+    EXPECT_FALSE(tensor.has_ragged_offset_multiplier());
+
+    const TensorAttributes& ref = tensor.set_ragged_offset_multiplier(64);
+    EXPECT_EQ(&ref, &tensor);
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnRaggedOffsetMultiplierBelowOne)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({4, 1, 1, 1});
+    tensor.set_stride({1, 1, 1, 1});
+    tensor.set_data_type(DataType::FLOAT);
+    auto aux = std::make_shared<TensorAttributes>();
+    tensor.set_ragged_offset(aux);
+    tensor.set_ragged_offset_multiplier(0);
+    EXPECT_EQ(tensor.validate().code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnMultiplierWithoutRaggedOffset)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({4, 1, 1, 1});
+    tensor.set_stride({1, 1, 1, 1});
+    tensor.set_data_type(DataType::FLOAT);
+    tensor.set_ragged_offset_multiplier(512);
+    EXPECT_EQ(tensor.validate().code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestTensorAttributes, ValidateSucceedsWithMultiplierAndRaggedOffset)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({4, 1, 1, 1});
+    tensor.set_stride({1, 1, 1, 1});
+    tensor.set_data_type(DataType::FLOAT);
+    auto aux = std::make_shared<TensorAttributes>();
+    tensor.set_ragged_offset(aux);
+    tensor.set_ragged_offset_multiplier(512);
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnNegativeRaggedOffsetStride)
+{
+    TensorAttributes tensor;
+    tensor.set_name("x");
+    tensor.set_dim({4, 1, 1, 1});
+    tensor.set_stride({1, 1, 1, 1});
+    tensor.set_data_type(DataType::FLOAT);
+    auto offset = std::make_shared<TensorAttributes>();
+    offset->set_name("offs");
+    offset->set_stride({-1, 1, 1, 1});
+    tensor.set_ragged_offset(offset);
+
+    const auto err = tensor.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(err.get_message(),
+              "Tensor x ragged offset offs strides must be non-negative, got -1 on axis 0");
+}
+
+TEST(TestTensorAttributes, ValidateSucceedsWithZeroStrideRaggedOffset)
+{
+    TensorAttributes tensor;
+    tensor.set_name("x");
+    tensor.set_dim({4, 1, 1, 1});
+    tensor.set_stride({1, 1, 1, 1});
+    tensor.set_data_type(DataType::FLOAT);
+    auto offset = std::make_shared<TensorAttributes>();
+    offset->set_name("offs");
+    offset->set_stride({0, 1, 1, 1});
+    tensor.set_ragged_offset(offset);
+
+    const auto err = tensor.validate();
+    EXPECT_EQ(err.code, ErrorCode::OK) << err.get_message();
+}
+
+TEST(TestTensorAttributes, ValidateSucceedsWithDefaultRaggedOffsetMultiplier)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({4, 1, 1, 1});
+    tensor.set_stride({1, 1, 1, 1});
+    tensor.set_data_type(DataType::FLOAT);
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
 }
 TEST(TestTensorAttributes, ValidateSucceedsOnRuntimeWithDefaultTensor)
 {

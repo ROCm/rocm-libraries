@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <iostream>
 #include <set>
@@ -33,6 +34,7 @@
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
+#include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/UtilsOrigami.hpp>
 
 #include <tensilelitehost/export.h>
@@ -53,8 +55,6 @@ namespace TensileLite
     {
         std::vector<std::pair<int, std::shared_ptr<MySolution>>> solution_list;
         std::vector<origami::config_t>                           origami_config_list;
-
-        mutable std::atomic<bool> lastFindTopRetAll = false;
 
         static std::string Type()
         {
@@ -170,9 +170,22 @@ namespace TensileLite
             const bool debug = Debug::Instance().printPropertyEvaluation();
 
             auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
-                const bool hwMatch   = (*(solution->hardwarePredicate))(hardware);
-                const bool probMatch = (*(solution->problemPredicate))(problem);
-                const bool predicateMatch = hwMatch && probMatch;
+                Task task(hardware, problem, *solution);
+                const bool hwMatch = (*(solution->hardwarePredicate))(hardware);
+                // With uniform summation order off, the filter stays
+                // hardwarePredicate && problemPredicate, plus device-scalar capability.
+                // The extra conjuncts in
+                // softwarePredicate() (taskPredicate, StreamK dynamic queue) are
+                // real filters, so they stay behind the check.
+                const bool swMatch = problem.getParams().uniformSummationOrder() != 0
+                                         ? softwarePredicate(SolutionLibrarySearchType::DEFAULT,
+                                                             task,
+                                                             hardware,
+                                                             *solution,
+                                                             problem)
+                                         : (*(solution->problemPredicate))(problem)
+                                               && solution->deviceScalarAlphaSupported(problem);
+                const bool predicateMatch = hwMatch && swMatch;
 
                 if(debug)
                 {
@@ -180,6 +193,7 @@ namespace TensileLite
                         std::cout, "Prediction: " + solution->name());
                     solution->hardwarePredicate->debugEval(hardware, std::cout);
                     solution->problemPredicate->debugEval(problem, std::cout);
+                    solution->taskPredicate->debugEval(task, std::cout);
                     PredicateDebugger::printFooter(std::cout, predicateMatch);
                 }
 
@@ -227,14 +241,7 @@ namespace TensileLite
                     }
                 }
             }
-            // can't reach the requested number, means findTop already done its best
-            lastFindTopRetAll = (rv.size() < numSolutions);
             return rv;
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const override
-        {
-            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>

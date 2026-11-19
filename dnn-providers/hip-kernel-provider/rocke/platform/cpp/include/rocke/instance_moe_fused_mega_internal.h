@@ -55,6 +55,7 @@
 #include <stddef.h>
 
 #include "rocke/helper_rocke.helpers.tensor_view.h" /* rocke_tensor_view_t           */
+#include "rocke/helper_rocke.instances.common._moe_fused_mega_lds.h" /* LDS budget    */
 #include "rocke/helper_rocke.instances.common.moe_gemm_fused.h"
 #include "rocke/instance_gemm_universal.h" /* rocke_gemm_universal_spec_t   */
 #include "rocke/instance_moe_fused_mega.h" /* public spec + build entry  */
@@ -73,6 +74,30 @@ extern "C" {
  * gate/up path keeps two such groups (gate + up). 64 matches the gemm/conv
  * internal-header convention and is generous headroom. */
 #define ROCKE_MOE_MEGA_MAX_ACCS 64
+
+/* ===================================================================== *
+ *  WHOLE-KERNEL LDS ACCOUNTING (Python `_lds_allocs`)
+ *
+ *  The five buffers the prologue allocates, in emitter declaration order:
+ *  A_smem, Bg_smem, Bu_smem, Hidden_smem, Bd_smem. All five are declared before
+ *  any of them is first used and all five are referenced, so the emitted
+ *  @smem_pool is their aligned sum -- the gate/up operands are NOT reused for
+ *  the down operand (see _moe_fused_mega_lds.h for why the packer cannot alias
+ *  them). Emits no IR; the public driver feeds the result to
+ *  rocke_validate_mega_lds_budget before touching the builder.
+ * ===================================================================== */
+
+#define ROCKE_MOE_MEGA_LDS_ALLOCS 5
+
+/* Python `_lds_allocs(spec)` re-derives spec.gate_up_tile() / spec.down_tile()
+ * and _storage_dtype(spec.gate_up_universal_spec()); the C driver already holds
+ * those as u_gu->tile / u_down->tile / rocke_moe_storage_dtype(u_gu), so they
+ * are passed in rather than recomputed. Writes ROCKE_MOE_MEGA_LDS_ALLOCS
+ * entries into `out`. Keep in lock-step with the b.smem_alloc calls in
+ * rocke_moe_mega_build_ctx_init. */
+void rocke_moe_fused_mega_lds_allocs(const rocke_gemm_universal_spec_t* u_gu,
+                                     const rocke_gemm_universal_spec_t* u_down,
+                                     rocke_mega_lds_alloc_t out[ROCKE_MOE_MEGA_LDS_ALLOCS]);
 
 /* ===================================================================== *
  *  rocke_moe_mega_build_ctx_t

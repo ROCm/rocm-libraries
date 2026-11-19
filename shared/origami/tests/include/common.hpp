@@ -94,7 +94,8 @@ inline origami::config_t make_config(size_t mt_m,
                                      int occupancy                 = 1,
                                      int non_temporal_a            = 0,
                                      int non_temporal_b            = 0,
-                                     int stream_k                  = 5) {
+                                     int stream_k                  = 5,
+                                     origami::dim3_t cluster_dim   = {1, 1, 1}) {
   origami::config_t config;
   config.mt.m                     = mt_m;
   config.mt.n                     = mt_n;
@@ -109,6 +110,7 @@ inline origami::config_t make_config(size_t mt_m,
   config.cache_hints_b            = non_temporal_b;
   config.stream_k                 = stream_k;
   if (stream_k == 0) { config.grid_selection = origami::grid_selection_t::data_parallel; }
+  config.cluster_dim              = cluster_dim;
   return config;
 }
 
@@ -152,9 +154,10 @@ inline origami::hardware_t make_hardware(int gpu_arch) {
     parallel_mi_cu             = 1;
     mem_bw_per_wg_coefficients = std::make_tuple(0, 0.008, 0);
   } else if (gpu_arch == 1250) {
-    // TODO: using gfx950 placeholders for most fields, update lds_capacity and l2_capacity later
+    // TODO: using gfx950 placeholders for most fields, update lds_capacity later
     auto hw                       = make_hardware(950);
     hw.arch                       = origami::hardware_t::architecture_t::gfx1250;
+    hw.L2_capacity                = 96ull << 20;  // one AID's L2
     hw.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.016, 0);
     return hw;
   }

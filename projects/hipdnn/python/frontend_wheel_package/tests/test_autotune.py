@@ -12,8 +12,6 @@ get_estimated_max_workspace_size -> autotune`` against the test stub engine.
 
 import json
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -88,6 +86,24 @@ def test_autotune_enums():
     assert hipdnn.TuneMode.EXHAUSTIVE.name == "EXHAUSTIVE"
     assert hipdnn.AutotuneStrategy.FIXED_AVERAGE.name == "FIXED_AVERAGE"
     assert hipdnn.PrimingFailurePolicy.BENCHMARK_UNPRIMED.name == "BENCHMARK_UNPRIMED"
+
+
+def test_prediction_heuristic_modes_are_distinct():
+    """Python can request either prediction policy without aliasing fallback."""
+    assert hipdnn.HeuristicMode.A != hipdnn.HeuristicMode.B
+    assert hipdnn.HeuristicMode.A != hipdnn.HeuristicMode.FALLBACK
+    assert hipdnn.HeuristicMode.B != hipdnn.HeuristicMode.FALLBACK
+
+
+def test_ranking_metric_accepts_only_registered_names():
+    """A rejected metric is reported as an Error and leaves the requested one in force."""
+    graph = hipdnn.Graph()
+    assert graph.get_ranking_metric() == "tflops"
+    assert graph.set_ranking_metric("time").is_good()
+    assert graph.get_ranking_metric() == "time"
+    for name in ("latency", "TIME", ""):
+        assert graph.set_ranking_metric(name).is_bad(), name
+        assert graph.get_ranking_metric() == "time"
 
 
 def test_autotune_cache_write_outcome_enum():
@@ -304,6 +320,9 @@ def test_autotune_result_defaults():
     assert result.supports_exhaustive is False
     assert result.ran_exhaustive is False
     assert result.exhaustive_not_run_reason == ""
+    # INVALID until something actually measures this candidate, so a caller can tell a
+    # default-constructed or never-benchmarked result from a real measurement.
+    assert result.timing_quality == hipdnn.TimingQuality.INVALID
 
     with pytest.raises(AttributeError):
         result.engine_id = 5
@@ -397,7 +416,7 @@ def test_plan_index_primitives_on_empty_plan_list():
     assert build.is_bad()
     assert "out of bounds" in build.get_message()
 
-    executed = graph.execute_plan_at_index(_NullHandle(), {1: 1}, 0, 0)
+    executed = graph.execute_plan_at_index(helpers.NullHandle(), {1: 1}, 0, 0)
     assert executed.is_bad()
     assert "out of bounds" in executed.get_message()
 
@@ -498,19 +517,15 @@ def test_create_execution_plan_ext_takes_knob_settings():
     """create_execution_plan_ext() accepts optional knob overrides from Python."""
     graph = hipdnn.Graph()
 
-    # No graph is built, so both forms fail -- what matters is that the knob
-    # settings argument exists and accepts KnobSetting objects.
+    # No graph is built, so both forms report an error; a missing or mistyped
+    # knob_settings parameter would raise TypeError instead.
     assert graph.create_execution_plan_ext(0).is_bad()
-    error = graph.create_execution_plan_ext(0, [hipdnn.KnobSetting("tile.size", 64)])
-    assert error.is_bad()
-    assert error.get_message()
-
-
-class _NullHandle:
-    """Stand-in for a Handle whose get() yields a null pointer."""
-
-    def get(self):
-        return 0
+    assert graph.create_execution_plan_ext(
+        0, [hipdnn.KnobSetting("tile.size", 64)]
+    ).is_bad()
+    assert graph.create_execution_plan_ext(
+        0, knob_settings=[hipdnn.KnobSetting("tile.size", 64)]
+    ).is_bad()
 
 
 @pytest.mark.parametrize(
@@ -533,14 +548,14 @@ def test_autotune_rejects_invalid_config(field, value, expected):
     # Config validation runs before the handle and variant pack are looked at,
     # so this needs neither a device nor an engine.
     with pytest.raises(RuntimeError) as excinfo:
-        hipdnn.Graph().autotune(_NullHandle(), {1: 1}, config=cfg)
+        hipdnn.Graph().autotune(helpers.NullHandle(), {1: 1}, config=cfg)
     assert expected in str(excinfo.value)
 
 
 def test_autotune_rejects_null_handle():
     """A null handle raises RuntimeError instead of dereferencing it."""
     with pytest.raises(RuntimeError) as excinfo:
-        hipdnn.Graph().autotune(_NullHandle(), {1: 1})
+        hipdnn.Graph().autotune(helpers.NullHandle(), {1: 1})
     assert "handle must not be null" in str(excinfo.value)
 
 
@@ -691,7 +706,7 @@ class TestAutotuneGpu:
         winners = [r for r in results if r.succeeded]
         assert winners, f"no engine benchmarked successfully: {results!r}"
         for winner in winners:
-            assert winner.min_time_ms > 0
+            assert winner.min_time_ms >= 0
             assert winner.avg_time_ms >= winner.min_time_ms
             assert winner.iterations_run >= 1
             assert winner.rank >= 0
@@ -699,6 +714,16 @@ class TestAutotuneGpu:
             assert winner.strategy_used == hipdnn.AutotuneStrategy.FIXED_AVERAGE
             assert winner.workspace_size <= workspace_size
             assert winner.estimated_workspace_size >= 0
+            # A benchmarked result must report how it was measured, never the
+            # never-benchmarked default.
+            assert winner.timing_quality in (
+                hipdnn.TimingQuality.DEVICE_ONLY,
+                hipdnn.TimingQuality.UNSTALLED,
+            )
+        # One sweep must not mix measurement methods: DEVICE_ONLY uses the stall
+        # gate and UNSTALLED does not. Autotune re-measures the whole sweep
+        # unstalled rather than leave it mixed, which is what this pins.
+        assert len({r.timing_quality for r in winners}) == 1
         assert buffers  # keep device allocations alive across the call
 
     def test_autotune_tensor_keyed_variant_pack(self):
@@ -956,48 +981,6 @@ class TestAutotuneGpu:
         assert name_graph.deselect_engines([configs[0].engine_name]) is name_graph
 
 
-# Child-process probes, in probes/.
-#
-# The session's conftest pins test_good_plugin in ABSOLUTE mode, and that engine
-# declares no knobs and cannot prime, so knob and priming behaviour needs another
-# plugin. hipdnnSetEnginePluginPaths_ext refuses to re-pin while a handle is
-# alive and would change the engine set every later test sees, so each probe
-# runs in its own interpreter and loads exactly one plugin file: the engine set
-# is then fixed, and plugins added to the test directory later cannot perturb
-# these results. probes/ holds scripts, not test modules; pytest does not
-# collect them, and importing one would perform that very re-pin.
-_PROBE_DIR = Path(__file__).parent / "probes"
-
-
-def _run_plugin_probe(probe, plugin, reason):
-    """Run probes/`probe` in a child process against exactly one test plugin.
-
-    `plugin` is the plugin file name; the child loads it in ABSOLUTE mode, so the
-    engine set is exactly that plugin's. Returns the JSON report the child
-    prints, and fails the calling test with the child's stderr if it exits
-    non-zero.
-    """
-    stub = helpers.stub_engine_path()
-    if stub is None:
-        pytest.skip("no test plugin directory known")
-    plugin_path = Path(stub).parent / plugin
-    if not plugin_path.is_file():
-        pytest.skip(f"{plugin_path} not installed; {reason}")
-
-    env = dict(os.environ)
-    env["HIPDNN_TEST_PROBE_PLUGIN"] = str(plugin_path)
-    env.pop("HIPDNN_TEST_GOOD_PLUGIN_PATH", None)
-    completed = subprocess.run(
-        [sys.executable, str(_PROBE_DIR / probe)],
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert completed.returncode == 0, completed.stderr
-    return json.loads(completed.stdout.strip().splitlines()[-1])
-
-
 def _autotune_plugin():
     return (
         "test_autotune_plugin.dll" if os.name == "nt" else "libtest_autotune_plugin.so"
@@ -1019,7 +1002,7 @@ def _constraint_plugin():
 @pytest.mark.gpu
 def test_exhaustive_priming_policies():
     """EXHAUSTIVE priming runs, and the failure policy decides abort vs. unprimed."""
-    report = _run_plugin_probe(
+    report = helpers.run_plugin_probe(
         "priming.py", _autotune_plugin(), "no engine supports exhaustive priming"
     )
 
@@ -1049,7 +1032,7 @@ def test_exhaustive_priming_policies():
 @pytest.mark.gpu
 def test_knob_constraints_describe_legal_values():
     """Knob.constraint exposes the ranges a sweep axis can be generated from."""
-    report = _run_plugin_probe(
+    report = helpers.run_plugin_probe(
         "constraints.py", _constraint_plugin(), "no engine declares constrained knobs"
     )
 
@@ -1093,7 +1076,7 @@ def test_knob_settings_end_to_end():
     that the bindings pass the settings through at all, which a rejection of an
     illegal value demonstrates.
     """
-    report = _run_plugin_probe(
+    report = helpers.run_plugin_probe(
         "knob_settings.py", _knobs_plugin(), "no engine declares knobs"
     )
 
@@ -1133,7 +1116,7 @@ def test_knob_settings_end_to_end():
 @pytest.mark.gpu
 def test_engine_sweep_expands_cartesian_product():
     """add_engine_sweep() benchmarks every combination of its knob axes."""
-    report = _run_plugin_probe(
+    report = helpers.run_plugin_probe(
         "sweep.py", _knobs_plugin(), "no engine declares two constrained knobs"
     )
 

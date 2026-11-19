@@ -145,7 +145,8 @@ bool rocke_wmma_gemm_gfx1151_is_valid_spec(const rocke_wmma_gemm_gfx1151_spec_t*
                                      "fp32",
                                      ROCKE_WMMA_M,
                                      ROCKE_WMMA_N,
-                                     ROCKE_WMMA_K)
+                                     ROCKE_WMMA_K,
+                                     nullptr)
        == NULL)
     {
         snprintf(buf,
@@ -321,10 +322,9 @@ rocke_kernel_def_t* rocke_build_wmma_gemm_gfx1151(rocke_ir_builder_t* b,
             rocke_value_t* yield_vals[1];
 
             /* a_frag = b.global_load_vN_f16(A, b.add(a_base, k0), 16) */
-            a_frag = rocke_b_global_load_vN_f16(b, A, rocke_b_add(b, a_base, k0), 16, /*align=*/-1);
+            a_frag = rocke_b_global_load_vN_f16(b, A, rocke_b_add(b, a_base, k0), 16, /*align=*/0);
             /* b_frag = b.global_load_vN_f16(Bp, b.add(b_base, k0), 16) */
-            b_frag
-                = rocke_b_global_load_vN_f16(b, Bp, rocke_b_add(b, b_base, k0), 16, /*align=*/-1);
+            b_frag = rocke_b_global_load_vN_f16(b, Bp, rocke_b_add(b, b_base, k0), 16, /*align=*/0);
             /* nacc = b.wmma_f32_16x16x16_f16(a_frag, b_frag, acc) */
             nacc = rocke_b_wmma_f32_16x16x16_f16(b, a_frag, b_frag, acc_v);
             /* b.scf_yield(nacc) */
@@ -360,7 +360,7 @@ rocke_kernel_def_t* rocke_build_wmma_gemm_gfx1151(rocke_ir_builder_t* b,
             /* idx = b.add(b.mul(out_row, N), out_col) */
             idx = rocke_b_add(b, rocke_b_mul(b, out_row, Nparam), out_col);
             /* b.global_store(C, idx, h) */
-            rocke_b_global_store(b, C, idx, h, /*align=*/-1);
+            rocke_b_global_store(b, C, idx, h, /*align=*/0);
         }
 
         /* return b.kernel -- no explicit cf.return (added at lowering); matches Python IR. */

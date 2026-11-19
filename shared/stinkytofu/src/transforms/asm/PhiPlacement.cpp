@@ -34,6 +34,7 @@
 #include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
 
 namespace {
 using namespace stinkytofu;
@@ -179,16 +180,7 @@ std::vector<ReachMap> computeReachOut(const std::vector<BasicBlock*>& rpo,
 //----------------------------------------------------------------------
 
 void removeExistingPhis(Function& func) {
-    for (BasicBlock& bb : func) {
-        for (auto it = bb.begin(); it != bb.end();) {
-            auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-            if (inst != nullptr && inst->getUnifiedOpcode() == GFX::PHI) {
-                it = bb.eraseIR(it);
-            } else {
-                ++it;
-            }
-        }
-    }
+    removeAnalysisPhis(func);
 }
 
 //----------------------------------------------------------------------

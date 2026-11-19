@@ -347,4 +347,21 @@ Tests:
       - scal_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
       - scal_strided_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
 
+  - name: scal_stride_alpha_ILP64
+    category: pre_checkin
+    arguments:
+      - { N: 2, incx: 1, stride_x: 2, batch_count: *c_grid_yz_require_passes }
+    alpha_beta: *alpha_beta_range_small
+    stride_scale: [ 1 ]
+    alpha_beta_stride: true
+    stride_c: [ 1 ] # alpha stride
+    pointer_mode_host: false
+    api: [ C_64 ]
+    os_flags: [ LINUX ]
+    function:
+      - scal_batched:  *single_precision
+      - scal_strided_batched:  *single_precision
+      - scal_batched_ex: *half_precision
+      - scal_strided_batched_ex: *half_precision
+
 ...

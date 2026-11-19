@@ -1,0 +1,44 @@
+{% extends "common/base.cpp.jinja2" %}
+{% block config_constructor -%}
+    rocprim::histogram_config<rocprim::kernel_config<{{ config.block_size_x }}, {{ config.ipt }}>, {{ config.max_grid_size }}, {{ config.shared_impl_max_bins }}, {{ config.shared_impl_histograms }}, rocprim::kernel_config<1024, 4>>
+{%- endblock %}
+
+{% block type_definitions %}
+    using value_type = {{ value_type }};
+    constexpr unsigned int channels = {{ channels }};
+    constexpr unsigned int active_channels = {{ active_channels }};
+{% endblock %}
+
+{% block benchmark_type %}
+    using benchmark_type = device_multi_histogram_even_benchmark<value_type, channels, active_channels, config>;
+{% endblock %}
+
+{% block benchmark_queue %}
+    // (bins, scale) pairs matching benchmark_device_histogram.cpp. The scale changes how
+    // low-entropy inputs spread over the bins, so it affects atomic contention.
+    std::vector<std::pair<unsigned int, size_t>> m_cases;
+    if constexpr(std::is_same<value_type, int8_t>::value)
+    {
+        m_cases = { {16, 8}, {127, 1} };
+    }
+    else if constexpr(std::is_same<value_type, rocprim::int128_t>::value)
+    {
+        m_cases = { {16, 16}, {256, 1} };
+    }
+    else
+    {
+        constexpr size_t scale = std::is_same<value_type, int64_t>::value ? 12345
+                                 : sizeof(value_type) == 2                 ? 5 // short, half
+                                                                           : 1234;
+        // 10000 bins triggers the global memory implementation
+        m_cases = { {10, scale}, {100, scale}, {1000, scale}, {10000, scale} };
+    }
+
+    for(const auto& [bins, scale] : m_cases)
+    {
+        for(int entropy_reduction : {0, 2, 4, 6})
+        {
+            executor.queue<benchmark_type>(bins, scale, entropy_reduction);
+        }
+    }
+{% endblock %}

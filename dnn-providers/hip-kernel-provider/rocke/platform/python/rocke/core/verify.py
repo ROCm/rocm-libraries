@@ -17,14 +17,20 @@ Checks performed:
 * **Type consistency** — for the op classes whose contract the IR fixes
   (elementwise arith with matching operand/result types, vector ops over
   vector types, ``vector.extract`` element typing, ``scf.for`` iter-arg /
-  result / yield typing).
+  result typing).
 * **Arity / result counts** — per-opcode operand and result counts where the
   builder guarantees them (binary arith, ``cf.return``, ``scf.yield``, etc.).
 * **Region well-formedness** — ``scf.for`` / ``scf.if`` carry their required
-  regions; loop-carried values are typed; the kernel body ends in a terminator.
+  regions; loop-carried values are typed; the kernel body ends in a terminator;
+  every ``scf.yield`` is directly in an ``scf.for`` body or a branch of an
+  ``scf.if_else`` with results; a loop's carried-value counts agree, its
+  ``iter_args`` metadata describes them and its results share their types, and
+  its body yields them once, at its end, with their types (``_scf_for_error``).
 * **Attr maps** — required keys present per opcode; enum-valued attrs legal.
 * **Vector / smem / addrspace sanity** — vector widths > 0, smem shapes
   positive, pointer address spaces from the known set.
+* **Block size** -- a kernel sets at most one of ``workgroup_size`` (exact) and
+  ``max_workgroup_size`` (an upper bound).
 
 Standard library only.
 """
@@ -35,6 +41,25 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Set
 
 from .ir import (
+    _FENCE_ORDERINGS,
+    _FENCE_SCOPES,
+    _FLAG_STORE_ORDERINGS,
+    _ORPHAN_YIELD_ERROR,
+    _assume_range_errors,
+    param_fact_errors,
+    _buffer_op_bytes,
+    _if_else_yields,
+    _global_ptr_offset_op_error,
+    _global_ptr_to_i64_op_error,
+    _int_add_wrap_error,
+    _int_cmp_pred_error,
+    _is_flag_ptr,
+    _first_reused_loop_name,
+    _orphan_yield,
+    _reused_loop_name_message,
+    _scf_for_error,
+    _scf_for_region_error,
+    _scf_for_value_names,
     KernelDef,
     Op,
     Region,
@@ -43,7 +68,12 @@ from .ir import (
     VectorType,
     PtrType,
     SmemType,
+    _gpu_check_failed_op_error,
+    GPU_CHECK_FAILED_OP,
+    _ldexp_op_error,
+    _trap_op_error,
 )
+from .value_sources import ASSUME_RANGE_OP
 
 ERROR = "error"
 WARNING = "warning"
@@ -108,6 +138,13 @@ _UNARY_SAME_TYPE = {
 # Comparison ops: 2 operands, 1 i1 result; require a 'pred' attr.
 _CMP_OPS = {"arith.cmp", "arith.fcmp"}
 
+# The two block-size kernel attrs state one fact two ways; a kernel sets one.
+_BOTH_WORKGROUP_SIZES = (
+    "kernel sets both workgroup_size and max_workgroup_size -- set one: "
+    "workgroup_size is the exact launch block size, max_workgroup_size an upper "
+    "bound on it"
+)
+
 # Legal pointer address spaces.
 _ADDR_SPACES = {"global", "constant", "shared", "lds", "private"}
 
@@ -117,9 +154,13 @@ _REQUIRED_ATTRS: Dict[str, List[str]] = {
     "arith.constant": ["value", "ity"],
     "arith.cmp": ["pred"],
     "arith.fcmp": ["pred"],
+    ASSUME_RANGE_OP: ["multiple_of", "residue"],
     "tile.mma": ["op_id"],
     "scf.yield": ["num"],
     "tile.inline_asm": ["template", "constraints"],
+    "memref.fence": ["scope", "ordering"],
+    "memref.global_flag_store": ["scope", "ordering"],
+    "memref.global_flag_wait_eq": ["scope"],
 }
 
 
@@ -132,6 +173,9 @@ class _Verifier:
     def __init__(self, kernel: KernelDef) -> None:
         self.kernel = kernel
         self.diags: List[Diagnostic] = []
+        # The induction-variable and carried-value names of the scf.for loops
+        # whose body is being checked, outermost first.
+        self._enclosing_loop_names: tuple[str, ...] = ()
 
     def err(self, msg: str, op: Optional[Op] = None) -> None:
         self.diags.append(
@@ -156,11 +200,17 @@ class _Verifier:
     # ---- entry ----
 
     def run(self) -> List[Diagnostic]:
+        attrs = self.kernel.attrs
+        if "workgroup_size" in attrs and "max_workgroup_size" in attrs:
+            self.err(_BOTH_WORKGROUP_SIZES)
+
         # Top-level scope: kernel params.
         scope: Dict[str, Value] = {}
         param_names: Set[str] = set()
-        for p in self.kernel.params:
+        for index, p in enumerate(self.kernel.params):
             self._check_type(p.type, f"param {p.name!r}", None)
+            for message in param_fact_errors(self.kernel.params, index):
+                self.err(message)
             vname = f"%{p.name}"
             if vname in scope:
                 self.err(f"duplicate kernel parameter id {vname!r}")
@@ -168,6 +218,11 @@ class _Verifier:
             param_names.add(vname)
 
         self._check_region(self.kernel.body, scope, is_kernel_body=True)
+        # The kernel body takes no yields; an scf.for or scf.if_else checks the
+        # yields its own regions hold.
+        orphan = _orphan_yield(self.kernel.body.ops)
+        if orphan is not None:
+            self.err(_ORPHAN_YIELD_ERROR, orphan)
         return self.diags
 
     # ---- type sanity ----
@@ -256,8 +311,10 @@ class _Verifier:
                 scope[r.name] = r
 
         # 5) nested regions, with block-defined values registered first. Use a
-        # scope that excludes this op's own (not-yet-computed) results.
-        if op.regions:
+        # scope that excludes this op's own (not-yet-computed) results. An
+        # scf.for is checked even with no region, so a loop without its body is
+        # refused.
+        if op.regions or op.name == "scf.for":
             region_scope = {
                 name: val for name, val in scope.items() if name in names_before_results
             }
@@ -276,6 +333,18 @@ class _Verifier:
     # ---- contracts ----
 
     def _check_contract(self, op: Op, scope: Dict[str, Value]) -> None:
+        from .tf32 import tf32_op_error
+
+        from .arch.mfma_scale import scaled_mfma_error
+
+        mx_error = (
+            scaled_mfma_error(op.attrs.get("op_id", ""), op.operands, op.results)
+            if op.name == "tile.mma"
+            else None
+        )
+        error = mx_error or tf32_op_error(op)
+        if error:
+            self.err(error, op)
         name = op.name
         if name in _BINARY_SAME_TYPE:
             if len(op.operands) != 2 or len(op.results) != 1:
@@ -297,6 +366,10 @@ class _Verifier:
                     f"{name}: result type {r.type.name} != operand type {a.type.name}",
                     op,
                 )
+            if name == "arith.add":
+                wrap_error = _int_add_wrap_error(op.attrs.get("wrap"), a.type.name)
+                if wrap_error:
+                    self.err(wrap_error, op)
         elif name in _UNARY_SAME_TYPE:
             if len(op.operands) != 1 or len(op.results) != 1:
                 self.err(
@@ -309,6 +382,12 @@ class _Verifier:
                 self.err(
                     f"{name}: result type {op.results[0].type.name} != "
                     f"operand type {op.operands[0].type.name}",
+                    op,
+                )
+            if name == "math.tanh" and op.operands[0].type.name != "f32":
+                self.err(
+                    f"math.tanh requires f32 operand, got "
+                    f"{op.operands[0].type.name}",
                     op,
                 )
         elif name in _CMP_OPS:
@@ -326,6 +405,27 @@ class _Verifier:
                 self.err(
                     f"{name}: result must be i1, got {op.results[0].type.name}", op
                 )
+            if name == "arith.cmp":
+                pred_error = _int_cmp_pred_error(op.attrs.get("pred"), a.type.name)
+                if pred_error:
+                    self.err(pred_error, op)
+        elif name == ASSUME_RANGE_OP:
+            if len(op.operands) not in (1, 2, 3) or len(op.results) != 1:
+                self.err(
+                    f"{name}: expected 1 to 3 operands / 1 result, got "
+                    f"{len(op.operands)} / {len(op.results)}",
+                    op,
+                )
+                return
+            v = op.operands[0]
+            if op.results[0].type != v.type:
+                self.err(
+                    f"{name}: result type {op.results[0].type.name} != "
+                    f"operand type {v.type.name}",
+                    op,
+                )
+            for message in _assume_range_errors(op.attrs, op.operands):
+                self.err(message, op)
         elif name == "arith.select":
             if len(op.operands) != 3 or len(op.results) != 1:
                 self.err(f"{name}: expected 3 operands / 1 result", op)
@@ -367,15 +467,81 @@ class _Verifier:
                     f"{len(op.operands)}",
                     op,
                 )
+        elif name == "scf.if_else":
+            try:
+                _if_else_yields(op)
+            except (TypeError, ValueError) as error:
+                self.err(str(error), op)
+        elif name in ("tile.buffer_load_vN", "tile.buffer_store_vN"):
+            try:
+                _buffer_op_bytes(op)
+            except (TypeError, ValueError) as error:
+                self.err(str(error), op)
         elif name == "cf.return":
             if op.operands or op.results:
                 self.err(f"{name}: must have no operands and no results", op)
+        elif name == "memref.fence":
+            if op.operands or op.results:
+                self.err(f"{name}: must have no operands and no results", op)
+            self._check_sync_attrs(op, _FENCE_ORDERINGS)
+        elif name in ("memref.global_flag_store", "memref.global_flag_wait_eq"):
+            if len(op.operands) != 3 or op.results:
+                self.err(
+                    f"{name}: expected 3 operands / 0 results, got "
+                    f"{len(op.operands)} / {len(op.results)}",
+                    op,
+                )
+                return
+            ptr, idx, val = op.operands
+            if not _is_flag_ptr(ptr.type):
+                self.err(
+                    f"{name}: expected a global i32 pointer, got {ptr.type.name}", op
+                )
+            for what, v in (("index", idx), ("value", val)):
+                if v.type.name != "i32":
+                    self.err(f"{name}: {what} must be i32, got {v.type.name}", op)
+            orderings = (
+                _FLAG_STORE_ORDERINGS if name == "memref.global_flag_store" else None
+            )
+            self._check_sync_attrs(op, orderings)
+        elif name == "tile.global_ptr_offset":
+            error = _global_ptr_offset_op_error(op)
+            if error:
+                self.err(error, op)
+        elif name == "tile.global_ptr_to_i64":
+            error = _global_ptr_to_i64_op_error(op)
+            if error:
+                self.err(error, op)
+        elif name == "math.ldexp":
+            error = _ldexp_op_error(op)
+            if error:
+                self.err(error, op)
+        elif name == "tile.trap":
+            error = _trap_op_error(op)
+            if error:
+                self.err(error, op)
+        elif name == GPU_CHECK_FAILED_OP:
+            error = _gpu_check_failed_op_error(op)
+            if error:
+                self.err(error, op)
+
+    def _check_sync_attrs(self, op: Op, orderings) -> None:
+        """Scope / ordering values of a fence or flag op (presence is checked
+        by the required-attrs pass, so a missing key is not reported twice)."""
+        scope = op.attrs.get("scope")
+        if isinstance(scope, str) and scope not in _FENCE_SCOPES:
+            self.err(f"{op.name}: unknown scope '{scope}'", op)
+        ordering = op.attrs.get("ordering")
+        if orderings is not None and isinstance(ordering, str):
+            if ordering not in orderings:
+                self.err(f"{op.name}: unknown ordering '{ordering}'", op)
 
     # ---- scf.for ----
 
     def _check_scf_for(self, op: Op, scope: Dict[str, Value]) -> None:
-        if not op.regions:
-            self.err("scf.for missing its body region", op)
+        region_error = _scf_for_region_error(op)
+        if region_error is not None:
+            self.err(region_error, op)
             return
         if "iv" not in op.attrs or "iv_type" not in op.attrs:
             self.err("scf.for missing 'iv' / 'iv_type' attrs", op)
@@ -392,27 +558,11 @@ class _Verifier:
                 break
 
         iter_meta = op.attrs.get("iter_args", []) or []
-        if isinstance(iter_meta, list):
-            if len(iter_meta) != len(iter_inits):
-                self.err(
-                    f"scf.for: {len(iter_meta)} iter_args declared but "
-                    f"{len(iter_inits)} init operands",
-                    op,
-                )
-            if len(op.results) != len(iter_inits):
-                self.err(
-                    f"scf.for: {len(op.results)} results but {len(iter_inits)} "
-                    f"iter-args",
-                    op,
-                )
-            # result types must match init types
-            for res, init in zip(op.results, iter_inits):
-                if res.type != init.type:
-                    self.err(
-                        f"scf.for: result type {res.type.name} != iter init "
-                        f"type {init.type.name}",
-                        op,
-                    )
+        # The carried values (their counts, metadata and result types) and the
+        # body's yields: one rule for the verifier and every lowering.
+        loop_error = _scf_for_error(op)
+        if loop_error is not None:
+            self.err(loop_error, op)
 
         # body scope: copy + iv + iter-arg block values
         body_scope = dict(scope)
@@ -431,30 +581,17 @@ class _Verifier:
                     bv = Value(name=entry["name"], type=init.type)
                     body_scope[entry["name"]] = bv
                     body_block_values.append(bv)
+        # Hand-built IR can reuse a loop name the builder and parsers refuse.
+        loop_names = _scf_for_value_names(op)
+        reused = _first_reused_loop_name(self._enclosing_loop_names, loop_names)
+        if reused is not None:
+            self.err(_reused_loop_name_message(reused), op)
 
         body = op.regions[0]
+        enclosing = self._enclosing_loop_names
+        self._enclosing_loop_names = enclosing + tuple(loop_names)
         self._check_region(body, body_scope)
-
-        # body should end in scf.yield matching iter-arg types (if any iter-args)
-        if iter_inits:
-            if not body.ops or body.ops[-1].name != "scf.yield":
-                self.err("scf.for with iter-args: body must end in scf.yield", op)
-            else:
-                yld = body.ops[-1]
-                if len(yld.operands) != len(iter_inits):
-                    self.err(
-                        f"scf.yield yields {len(yld.operands)} values but loop "
-                        f"carries {len(iter_inits)} iter-args",
-                        yld,
-                    )
-                else:
-                    for yv, init in zip(yld.operands, iter_inits):
-                        if yv.type != init.type:
-                            self.err(
-                                f"scf.yield type {yv.type.name} != iter-arg type "
-                                f"{init.type.name}",
-                                yld,
-                            )
+        self._enclosing_loop_names = enclosing
 
     # ---- scf.if ----
 

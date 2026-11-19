@@ -31,6 +31,11 @@ Tests:
   function: coosort_bad_arg
   precision: *single_precision
 
+- name: coosort_extra
+  category: quick
+  function: coosort_extra
+  precision: *single_precision
+
 - name: coosort
   category: quick
   function: coosort

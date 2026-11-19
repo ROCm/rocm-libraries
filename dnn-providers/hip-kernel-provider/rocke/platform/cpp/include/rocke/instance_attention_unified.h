@@ -36,7 +36,7 @@
  *   build_unified_attention_reduce(spec)         rocke_build_unified_attention_reduce_scalar
  *   *.kernel_name()                              rocke_unified_attention_*_kernel_name
  *   (block_id grid extents)                      rocke_unified_attention_*_grid
- *   _attn_signature(include_bt_stride=False)     rocke_unified_attention_2d_scalar_signature
+ *   _attn_signature(include_bt_stride=True)      rocke_unified_attention_2d_scalar_signature
  *   supports_native_unified_attention(problem)   rocke_unified_attention_supports_scalar
  *   (build -> lower .ll convenience, NEW)        rocke_unified_attention_*_lower_to_llvm
  *
@@ -139,7 +139,11 @@ typedef struct rocke_unified_attention_reduce_spec
  * _lower_to_llvm: build into an internally-owned builder, then lower to LLVM
  *       .ll text. On ROCKE_OK *out_ll is a malloc'd NUL-terminated string the
  *       caller frees with free(); on failure *out_ll is left NULL and (if
- *       err != NULL, capacity err_cap) a diagnostic is written. */
+ *       err != NULL, capacity err_cap) a diagnostic is written.
+ *       These signatures take no target, so they always lower for the codegen
+ *       default, gfx950 -- the IR is for that arch whatever you compile it
+ *       for. To lower for another target, use the _new entry above and call
+ *       rocke_lower_kernel_to_llvm_ex() with the arch you want. */
 
 rocke_kernel_def_t* rocke_build_unified_attention_2d_scalar_new(
     rocke_ir_builder_t* b, const rocke_unified_attention_problem_t* p, const char* name);

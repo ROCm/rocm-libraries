@@ -8,6 +8,9 @@
 
 using namespace gpu_pointwise_ref_test;
 
+using HalfType = hipdnn_data_sdk::types::half;
+using BFloat16Type = hipdnn_data_sdk::types::bfloat16;
+
 // --- Test mixed layouts ---
 
 TEST(TestGpuPointwiseMixedLayouts, Unary)
@@ -21,10 +24,14 @@ TEST(TestGpuPointwiseMixedLayouts, Unary)
 
     const unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    inputTensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    fillWithRandomValues(inputTensor, -fillRange, fillRange, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
 
     auto operation = PointwiseMode::ABS;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
+        operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
@@ -44,11 +51,15 @@ TEST(TestGpuPointwiseMixedLayouts, Binary)
 
     const unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    input0Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
-    input1Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    fillWithRandomValues(input0Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
 
     auto operation = PointwiseMode::ADD;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -65,21 +76,26 @@ TEST(TestGpuPointwiseMixedTypes, UnaryUpcast)
     SKIP_IF_NO_DEVICES();
 
     // Input and output tensor have different types
-    Tensor<half> inputTensor({1, 3, 2, 2});
+    Tensor<HalfType> inputTensor({1, 3, 2, 2});
     Tensor<float> outputCpuTensor({1, 3, 2, 2});
     Tensor<float> outputGpuTensor({1, 3, 2, 2});
 
     const unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    inputTensor.fillWithRandomValues(half{-fillRange}, half{fillRange}, seed);
+    fillWithRandomValues(inputTensor, HalfType{-fillRange}, HalfType{fillRange}, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
 
     auto operation = PointwiseMode::ABS;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
+        operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
-    assertAllClose(
-        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float, half>(operation, fillRange));
+    assertAllClose(outputCpuTensor,
+                   outputGpuTensor,
+                   getDynamicTolerance<float, HalfType>(operation, fillRange));
 }
 
 TEST(TestGpuPointwiseMixedTypes, UnaryDowncast)
@@ -87,22 +103,26 @@ TEST(TestGpuPointwiseMixedTypes, UnaryDowncast)
     SKIP_IF_NO_DEVICES();
 
     // Input and output tensor have different types
-    Tensor<half> inputTensor({1, 3, 2, 2});
-    Tensor<bfloat16> outputCpuTensor({1, 3, 2, 2});
-    Tensor<bfloat16> outputGpuTensor({1, 3, 2, 2});
+    Tensor<HalfType> inputTensor({1, 3, 2, 2});
+    Tensor<BFloat16Type> outputCpuTensor({1, 3, 2, 2});
+    Tensor<BFloat16Type> outputGpuTensor({1, 3, 2, 2});
 
     const unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    inputTensor.fillWithRandomValues(half{-fillRange}, half{fillRange}, seed);
+    fillWithRandomValues(inputTensor, HalfType{-fillRange}, HalfType{fillRange}, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
 
     auto operation = PointwiseMode::ABS;
-    CpuReferencePointwiseImpl<bfloat16>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
+    CpuReferencePointwiseImpl<BFloat16Type, double>::pointwiseCompute(
+        operation, outputCpuTensor, inputTensor);
 
-    GpuReferencePointwise::pointwiseCompute<bfloat16>(operation, outputGpuTensor, inputTensor);
+    GpuReferencePointwise::pointwiseCompute<BFloat16Type>(operation, outputGpuTensor, inputTensor);
 
     assertAllClose(outputCpuTensor,
                    outputGpuTensor,
-                   getDynamicTolerance<bfloat16, half>(operation, fillRange));
+                   getDynamicTolerance<BFloat16Type, HalfType>(operation, fillRange));
 }
 
 TEST(TestGpuPointwiseMixedTypes, BinaryMixedInputs)
@@ -110,25 +130,30 @@ TEST(TestGpuPointwiseMixedTypes, BinaryMixedInputs)
     SKIP_IF_NO_DEVICES();
 
     // Input tensors have different types
-    Tensor<half> input0Tensor({1, 3, 2, 2});
-    Tensor<bfloat16> input1Tensor({1, 3, 2, 2});
+    Tensor<HalfType> input0Tensor({1, 3, 2, 2});
+    Tensor<BFloat16Type> input1Tensor({1, 3, 2, 2});
     Tensor<float> outputCpuTensor({1, 3, 2, 2});
     Tensor<float> outputGpuTensor({1, 3, 2, 2});
 
     const unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    input0Tensor.fillWithRandomValues(half{-fillRange}, half{fillRange}, seed);
-    input1Tensor.fillWithRandomValues(bfloat16{-fillRange}, bfloat16{fillRange}, seed);
+    fillWithRandomValues(input0Tensor, HalfType{-fillRange}, HalfType{fillRange}, seed);
+    fillWithRandomValues(input1Tensor, BFloat16Type{-fillRange}, BFloat16Type{fillRange}, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
 
     auto operation = PointwiseMode::ADD;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
         operation, outputGpuTensor, input0Tensor, input1Tensor);
 
-    assertAllClose(
-        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float, half>(operation, fillRange));
+    assertAllClose(outputCpuTensor,
+                   outputGpuTensor,
+                   getDynamicTolerance<float, HalfType>(operation, fillRange));
 }
 
 // --- Test 1D/2D/3D shapes ---
@@ -143,10 +168,14 @@ TEST(TestGpuPointwise1DShapes, Unary)
 
     const unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    inputTensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    fillWithRandomValues(inputTensor, -fillRange, fillRange, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
 
     auto operation = PointwiseMode::ABS;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
+        operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
@@ -165,11 +194,15 @@ TEST(TestGpuPointwise1DShapes, Binary)
 
     const unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    input0Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
-    input1Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    fillWithRandomValues(input0Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
 
     auto operation = PointwiseMode::ADD;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -189,10 +222,14 @@ TEST(TestGpuPointwise2DShapes, Unary)
 
     const unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    inputTensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    fillWithRandomValues(inputTensor, -fillRange, fillRange, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
 
     auto operation = PointwiseMode::ABS;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
+        operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
@@ -211,11 +248,15 @@ TEST(TestGpuPointwise2DShapes, Binary)
 
     const unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    input0Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
-    input1Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    fillWithRandomValues(input0Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
 
     auto operation = PointwiseMode::ADD;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -235,10 +276,14 @@ TEST(TestGpuPointwise3DShapes, Unary)
 
     const unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    inputTensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    fillWithRandomValues(inputTensor, -fillRange, fillRange, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
 
     auto operation = PointwiseMode::ABS;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
+        operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
@@ -257,11 +302,15 @@ TEST(TestGpuPointwise3DShapes, Binary)
 
     const unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    input0Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
-    input1Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    fillWithRandomValues(input0Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
 
     auto operation = PointwiseMode::ADD;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -284,10 +333,14 @@ TEST(TestGpuPointwise5DShapes, DISABLED_ExceedsInt32MaxElements)
 
     const unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    inputTensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    fillWithRandomValues(inputTensor, -fillRange, fillRange, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
 
     auto operation = PointwiseMode::ABS;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
+        operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
@@ -370,10 +423,14 @@ TEST(TestGpuPointwiseBroadcast, Broadcast2D)
 
     const unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    inputTensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    fillWithRandomValues(inputTensor, -fillRange, fillRange, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
 
     auto operation = PointwiseMode::ABS;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
+        operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
@@ -393,11 +450,15 @@ TEST(TestGpuPointwiseBroadcast, Broadcast2DImplicitLeading)
 
     const unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    input1Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
-    input2Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input2Tensor, -fillRange, fillRange, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input1Tensor.memory().hostData();
+    input2Tensor.memory().hostData();
 
     auto operation = PointwiseMode::MUL;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input1Tensor, input2Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -419,11 +480,15 @@ TEST(TestGpuPointwiseBroadcast, Broadcast3D)
 
     const unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    input1Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
-    input2Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input2Tensor, -fillRange, fillRange, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input1Tensor.memory().hostData();
+    input2Tensor.memory().hostData();
 
     auto operation = PointwiseMode::MUL;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input1Tensor, input2Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -445,11 +510,15 @@ TEST(TestGpuPointwiseBroadcast, Broadcast3DImplicitLeading)
 
     const unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    input1Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
-    input2Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input2Tensor, -fillRange, fillRange, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input1Tensor.memory().hostData();
+    input2Tensor.memory().hostData();
 
     auto operation = PointwiseMode::MUL;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input1Tensor, input2Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -471,11 +540,15 @@ TEST(TestGpuPointwiseBroadcast, Broadcast4D)
 
     const unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    input1Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
-    input2Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input2Tensor, -fillRange, fillRange, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input1Tensor.memory().hostData();
+    input2Tensor.memory().hostData();
 
     auto operation = PointwiseMode::MUL;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input1Tensor, input2Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -497,11 +570,15 @@ TEST(TestGpuPointwiseBroadcast, Broadcast5D)
 
     const unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    input1Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
-    input2Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input2Tensor, -fillRange, fillRange, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input1Tensor.memory().hostData();
+    input2Tensor.memory().hostData();
 
     auto operation = PointwiseMode::MUL;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input1Tensor, input2Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -523,11 +600,14 @@ TEST(TestGpuPointwiseRefSwishForward, WithBetaVal)
 
     const unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    inputTensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    fillWithRandomValues(inputTensor, -fillRange, fillRange, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
 
     auto operation = PointwiseMode::SWISH_FWD;
     const float beta = 2.0f;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, inputTensor, 0.f, 0.f, 0.f, beta);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -560,7 +640,7 @@ TEST(TestGpuPointwiseRefRELuForward, WithVals)
     const float lowerSlope = 0.1f;
 
     auto operation = PointwiseMode::RELU_FWD;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, inputTensor, lowerClip, upperClip, lowerSlope);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -602,7 +682,7 @@ TEST(TestGpuPointwiseRefRELuBackward, WithVals)
     const float lowerSlope = 0.1f;
 
     auto operation = PointwiseMode::RELU_BWD;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor, lowerClip, upperClip, lowerSlope);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -612,14 +692,14 @@ TEST(TestGpuPointwiseRefRELuBackward, WithVals)
 
 // --- Test suite instantiations ---
 
-using TestGpuPointwiseUnaryRef4DFp16 = PointwiseTestSuite<half>;
-using TestGpuPointwiseUnaryRef5DFp16 = PointwiseTestSuite<half>;
-using TestGpuPointwiseBinaryRef4DFp16 = PointwiseTestSuite<half>;
-using TestGpuPointwiseBinaryRef5DFp16 = PointwiseTestSuite<half>;
-using TestGpuPointwiseUnaryRef4DBfp16 = PointwiseTestSuite<bfloat16>;
-using TestGpuPointwiseUnaryRef5DBfp16 = PointwiseTestSuite<bfloat16>;
-using TestGpuPointwiseBinaryRef4DBfp16 = PointwiseTestSuite<bfloat16>;
-using TestGpuPointwiseBinaryRef5DBfp16 = PointwiseTestSuite<bfloat16>;
+using TestGpuPointwiseUnaryRef4DFp16 = PointwiseTestSuite<HalfType>;
+using TestGpuPointwiseUnaryRef5DFp16 = PointwiseTestSuite<HalfType>;
+using TestGpuPointwiseBinaryRef4DFp16 = PointwiseTestSuite<HalfType>;
+using TestGpuPointwiseBinaryRef5DFp16 = PointwiseTestSuite<HalfType>;
+using TestGpuPointwiseUnaryRef4DBfp16 = PointwiseTestSuite<BFloat16Type>;
+using TestGpuPointwiseUnaryRef5DBfp16 = PointwiseTestSuite<BFloat16Type>;
+using TestGpuPointwiseBinaryRef4DBfp16 = PointwiseTestSuite<BFloat16Type>;
+using TestGpuPointwiseBinaryRef5DBfp16 = PointwiseTestSuite<BFloat16Type>;
 using TestGpuPointwiseUnaryRef4DFp32 = PointwiseTestSuite<float>;
 using TestGpuPointwiseUnaryRef5DFp32 = PointwiseTestSuite<float>;
 using TestGpuPointwiseBinaryRef4DFp32 = PointwiseTestSuite<float>;
@@ -695,35 +775,25 @@ INSTANTIATE_TEST_SUITE_P(Quick,
 INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuPointwiseBinaryRef4DFp32,
                          ::testing::ValuesIn(getSmall4dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseUnaryRef4DFp16,
                          ::testing::ValuesIn(getSmall4dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef4DFp16,
                          ::testing::ValuesIn(getSmall4dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseUnaryRef4DBfp16,
                          ::testing::ValuesIn(getSmall4dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef4DBfp16,
                          ::testing::ValuesIn(getSmall4dBinaryPointwiseCases()));
+// Medium shapes are fp32-only: dtype enters only via per-element load/store conversion (P1);
+// Fp16/Bfp16 are covered by the standard tier's small-shape run.
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseUnaryRef4DFp32,
                          ::testing::ValuesIn(getMedium4dUnaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef4DFp32,
-                         ::testing::ValuesIn(getMedium4dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuPointwiseUnaryRef4DFp16,
-                         ::testing::ValuesIn(getMedium4dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuPointwiseBinaryRef4DFp16,
-                         ::testing::ValuesIn(getMedium4dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuPointwiseUnaryRef4DBfp16,
-                         ::testing::ValuesIn(getMedium4dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuPointwiseBinaryRef4DBfp16,
                          ::testing::ValuesIn(getMedium4dBinaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuPointwiseUnaryRef4DFp32,
@@ -731,66 +801,7 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuPointwiseBinaryRef4DFp32,
                          ::testing::ValuesIn(getLarge4dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuPointwiseUnaryRef4DFp16,
-                         ::testing::ValuesIn(getLarge4dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuPointwiseBinaryRef4DFp16,
-                         ::testing::ValuesIn(getLarge4dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuPointwiseUnaryRef4DBfp16,
-                         ::testing::ValuesIn(getLarge4dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuPointwiseBinaryRef4DBfp16,
-                         ::testing::ValuesIn(getLarge4dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseUnaryRef4DFp32, ::testing::ValuesIn([]() {
-                             auto v = getSmall4dUnaryPointwiseCases();
-                             auto m = getMedium4dUnaryPointwiseCases();
-                             auto l = getLarge4dUnaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseBinaryRef4DFp32, ::testing::ValuesIn([]() {
-                             auto v = getSmall4dBinaryPointwiseCases();
-                             auto m = getMedium4dBinaryPointwiseCases();
-                             auto l = getLarge4dBinaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseUnaryRef4DFp16, ::testing::ValuesIn([]() {
-                             auto v = getSmall4dUnaryPointwiseCases();
-                             auto m = getMedium4dUnaryPointwiseCases();
-                             auto l = getLarge4dUnaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseBinaryRef4DFp16, ::testing::ValuesIn([]() {
-                             auto v = getSmall4dBinaryPointwiseCases();
-                             auto m = getMedium4dBinaryPointwiseCases();
-                             auto l = getLarge4dBinaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseUnaryRef4DBfp16, ::testing::ValuesIn([]() {
-                             auto v = getSmall4dUnaryPointwiseCases();
-                             auto m = getMedium4dUnaryPointwiseCases();
-                             auto l = getLarge4dUnaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseBinaryRef4DBfp16, ::testing::ValuesIn([]() {
-                             auto v = getSmall4dBinaryPointwiseCases();
-                             auto m = getMedium4dBinaryPointwiseCases();
-                             auto l = getLarge4dBinaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
+
 // ============================================================================
 // 5D tests
 // ============================================================================
@@ -801,35 +812,25 @@ INSTANTIATE_TEST_SUITE_P(Quick,
 INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuPointwiseBinaryRef5DFp32,
                          ::testing::ValuesIn(getSmall5dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseUnaryRef5DFp16,
                          ::testing::ValuesIn(getSmall5dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef5DFp16,
                          ::testing::ValuesIn(getSmall5dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseUnaryRef5DBfp16,
                          ::testing::ValuesIn(getSmall5dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef5DBfp16,
                          ::testing::ValuesIn(getSmall5dBinaryPointwiseCases()));
+// Medium shapes are fp32-only: dtype enters only via per-element load/store conversion (P1);
+// Fp16/Bfp16 are covered by the standard tier's small-shape run.
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseUnaryRef5DFp32,
                          ::testing::ValuesIn(getMedium5dUnaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef5DFp32,
-                         ::testing::ValuesIn(getMedium5dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuPointwiseUnaryRef5DFp16,
-                         ::testing::ValuesIn(getMedium5dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuPointwiseBinaryRef5DFp16,
-                         ::testing::ValuesIn(getMedium5dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuPointwiseUnaryRef5DBfp16,
-                         ::testing::ValuesIn(getMedium5dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuPointwiseBinaryRef5DBfp16,
                          ::testing::ValuesIn(getMedium5dBinaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuPointwiseUnaryRef5DFp32,
@@ -837,63 +838,3 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuPointwiseBinaryRef5DFp32,
                          ::testing::ValuesIn(getLarge5dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuPointwiseUnaryRef5DFp16,
-                         ::testing::ValuesIn(getLarge5dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuPointwiseBinaryRef5DFp16,
-                         ::testing::ValuesIn(getLarge5dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuPointwiseUnaryRef5DBfp16,
-                         ::testing::ValuesIn(getLarge5dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuPointwiseBinaryRef5DBfp16,
-                         ::testing::ValuesIn(getLarge5dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseUnaryRef5DFp32, ::testing::ValuesIn([]() {
-                             auto v = getSmall5dUnaryPointwiseCases();
-                             auto m = getMedium5dUnaryPointwiseCases();
-                             auto l = getLarge5dUnaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseBinaryRef5DFp32, ::testing::ValuesIn([]() {
-                             auto v = getSmall5dBinaryPointwiseCases();
-                             auto m = getMedium5dBinaryPointwiseCases();
-                             auto l = getLarge5dBinaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseUnaryRef5DFp16, ::testing::ValuesIn([]() {
-                             auto v = getSmall5dUnaryPointwiseCases();
-                             auto m = getMedium5dUnaryPointwiseCases();
-                             auto l = getLarge5dUnaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseBinaryRef5DFp16, ::testing::ValuesIn([]() {
-                             auto v = getSmall5dBinaryPointwiseCases();
-                             auto m = getMedium5dBinaryPointwiseCases();
-                             auto l = getLarge5dBinaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseUnaryRef5DBfp16, ::testing::ValuesIn([]() {
-                             auto v = getSmall5dUnaryPointwiseCases();
-                             auto m = getMedium5dUnaryPointwiseCases();
-                             auto l = getLarge5dUnaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseBinaryRef5DBfp16, ::testing::ValuesIn([]() {
-                             auto v = getSmall5dBinaryPointwiseCases();
-                             auto m = getMedium5dBinaryPointwiseCases();
-                             auto l = getLarge5dBinaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));

@@ -220,12 +220,30 @@ TEST(TestSdpaAttributes, SetBooleanFlags)
 
     attrs.set_padding_mask(true);
     EXPECT_TRUE(attrs.padding_mask);
+}
 
-    attrs.set_causal_mask(true);
-    EXPECT_TRUE(attrs.causal_mask);
+TEST(TestSdpaAttributes, CausalMaskSettersSetDiagonalBand)
+{
+    SdpaAttributes topLeft;
+    topLeft.set_causal_mask(true);
+    EXPECT_EQ(topLeft.diagonal_alignment, DiagonalAlignment::TOP_LEFT);
+    ASSERT_TRUE(topLeft.right_bound.has_value());
+    EXPECT_EQ(*topLeft.right_bound, 0);
+    EXPECT_FALSE(topLeft.left_bound.has_value());
+    EXPECT_FALSE(topLeft.causal_mask);
 
-    attrs.set_causal_mask_bottom_right(true);
-    EXPECT_TRUE(attrs.causal_mask_bottom_right);
+    SdpaAttributes bottomRight;
+    bottomRight.set_causal_mask_bottom_right(true);
+    EXPECT_EQ(bottomRight.diagonal_alignment, DiagonalAlignment::BOTTOM_RIGHT);
+    ASSERT_TRUE(bottomRight.right_bound.has_value());
+    EXPECT_EQ(*bottomRight.right_bound, 0);
+    EXPECT_FALSE(bottomRight.causal_mask_bottom_right);
+
+    // false is a no-op, as in cuDNN.
+    bottomRight.set_causal_mask(false).set_causal_mask_bottom_right(false);
+    EXPECT_EQ(bottomRight.diagonal_alignment, DiagonalAlignment::BOTTOM_RIGHT);
+    ASSERT_TRUE(bottomRight.right_bound.has_value());
+    EXPECT_EQ(*bottomRight.right_bound, 0);
 }
 
 TEST(TestSdpaAttributes, SetScalarAttributes)
@@ -273,8 +291,8 @@ TEST(TestSdpaAttributes, LogicalAndStrictEquality)
     attr1.set_generate_stats(true);
     attr1.set_alibi_mask(false);
     attr1.set_padding_mask(false);
-    attr1.set_causal_mask(true);
-    attr1.set_causal_mask_bottom_right(false);
+    attr1.causal_mask = true;
+    attr1.causal_mask_bottom_right = false;
     attr1.set_dropout_probability(0.1f);
     attr1.set_attn_scale(0.125f);
     attr1.set_diagonal_band_left_bound(5);
@@ -305,8 +323,8 @@ TEST(TestSdpaAttributes, LogicalAndStrictEquality)
     attr2.set_generate_stats(true);
     attr2.set_alibi_mask(false);
     attr2.set_padding_mask(false);
-    attr2.set_causal_mask(true);
-    attr2.set_causal_mask_bottom_right(false);
+    attr2.causal_mask = true;
+    attr2.causal_mask_bottom_right = false;
     attr2.set_dropout_probability(0.1f);
     attr2.set_attn_scale(0.125f);
     attr2.set_diagonal_band_left_bound(5);
@@ -366,16 +384,16 @@ TEST(TestSdpaAttributes, LogicalAndStrictEquality)
     attr2.set_padding_mask(false); // Revert
 
     // causal_mask mismatch (deprecated field, still live state)
-    attr2.set_causal_mask(false);
+    attr2.causal_mask = false;
     EXPECT_FALSE(attr1 == attr2);
     EXPECT_FALSE(attr1.logicallyEquals(attr2));
-    attr2.set_causal_mask(true); // Revert
+    attr2.causal_mask = true; // Revert
 
     // causal_mask_bottom_right mismatch (deprecated field, still live state)
-    attr2.set_causal_mask_bottom_right(true);
+    attr2.causal_mask_bottom_right = true;
     EXPECT_FALSE(attr1 == attr2);
     EXPECT_FALSE(attr1.logicallyEquals(attr2));
-    attr2.set_causal_mask_bottom_right(false); // Revert
+    attr2.causal_mask_bottom_right = false; // Revert
 
     // dropout_probability mismatch
     attr2.set_dropout_probability(0.2f);
@@ -569,4 +587,22 @@ TEST(TestSdpaAttributes, NativeSetUnfuseFmaSetsHintNotUnsupported)
     attrs.set_unfuse_fma(false);
     EXPECT_FALSE(attrs.unfuse_fma_hint);
     EXPECT_FALSE(attrs.hasUnsupportedUsage());
+}
+
+// -- cu_seq_len_q / cu_seq_len_kv: the setters store the tensor as given; the node promotes a 1-D
+// (B+1) tensor during validation (see TestSdpaFwdNode) --
+
+TEST(TestSdpaAttributes, CuSeqLenSettersStoreTheTensorUntouched)
+{
+    SdpaAttributes attrs;
+    auto cuQ = std::make_shared<TensorAttributes>();
+    cuQ->set_dim({5});
+    auto cuKv = std::make_shared<TensorAttributes>();
+    attrs.set_cu_seq_len_q(cuQ);
+    attrs.set_cu_seq_len_kv(std::move(cuKv));
+
+    EXPECT_EQ(attrs.get_cu_seq_len_q(), cuQ);
+    EXPECT_EQ(cuQ->get_dim(), (std::vector<int64_t>{5}));
+    ASSERT_NE(attrs.get_cu_seq_len_kv(), nullptr);
+    EXPECT_TRUE(attrs.get_cu_seq_len_kv()->get_dim().empty());
 }

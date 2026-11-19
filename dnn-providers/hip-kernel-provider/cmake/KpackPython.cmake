@@ -102,6 +102,11 @@ function(_kpack_fetch out_dir)
         return()
     endif()
 
+    if(DEFINED ALLOW_FETCH_DEPS AND NOT ALLOW_FETCH_DEPS)
+        message(WARNING "kpack: HIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON overrides "
+            "ALLOW_FETCH_DEPS=OFF to fetch rocm_kpack.")
+    endif()
+
     message(STATUS "kpack: fetching "
         "${HIPKERNELPROVIDER_KPACK_GIT_REPO}@${HIPKERNELPROVIDER_KPACK_GIT_REF}")
     file(REMOVE_RECURSE "${_src}")
@@ -235,5 +240,6 @@ function(kpack_check_python_deps python_exe pythonpath out_missing)
             list(APPEND _missing "${_mod}")
         endif()
     endforeach()
+    file(REMOVE_RECURSE "${_probe_dir}")
     set(${out_missing} "${_missing}" PARENT_SCOPE)
 endfunction()

@@ -24,6 +24,7 @@
 #pragma once
 
 #include "dense2csx_device.h"
+#include "rocsparse_grid.hpp"
 
 namespace rocsparse
 {
@@ -59,7 +60,10 @@ namespace rocsparse
                     = 16 / (data_ratio > 0 ? data_ratio : 1);
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::dense2csr_kernel<NROWS_PER_BLOCK, WF_SIZE>),
-                    dim3((m - 1) / NROWS_PER_BLOCK + 1),
+                    dim3(rocsparse::get_grid_size_x(handle,
+                                                    (static_cast<int64_t>(m) - 1) / NROWS_PER_BLOCK
+                                                        + 1,
+                                                    WF_SIZE * NROWS_PER_BLOCK)),
                     dim3(WF_SIZE * NROWS_PER_BLOCK),
                     0,
                     stream,
@@ -80,7 +84,10 @@ namespace rocsparse
                     = 16 / (data_ratio > 0 ? data_ratio : 1);
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::dense2csr_kernel<NROWS_PER_BLOCK, WF_SIZE>),
-                    dim3((m - 1) / NROWS_PER_BLOCK + 1),
+                    dim3(rocsparse::get_grid_size_x(handle,
+                                                    (static_cast<int64_t>(m) - 1) / NROWS_PER_BLOCK
+                                                        + 1,
+                                                    WF_SIZE * NROWS_PER_BLOCK)),
                     dim3(WF_SIZE * NROWS_PER_BLOCK),
                     0,
                     stream,
@@ -107,7 +114,10 @@ namespace rocsparse
                     = 16 / (data_ratio > 0 ? data_ratio : 1);
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::dense2csc_kernel<NCOLUMNS_PER_BLOCK, WF_SIZE>),
-                    dim3((n - 1) / NCOLUMNS_PER_BLOCK + 1),
+                    dim3(rocsparse::get_grid_size_x(
+                        handle,
+                        (static_cast<int64_t>(n) - 1) / NCOLUMNS_PER_BLOCK + 1,
+                        WF_SIZE * NCOLUMNS_PER_BLOCK)),
                     dim3(WF_SIZE * NCOLUMNS_PER_BLOCK),
                     0,
                     stream,
@@ -128,7 +138,10 @@ namespace rocsparse
                     = 16 / (data_ratio > 0 ? data_ratio : 1);
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::dense2csc_kernel<NCOLUMNS_PER_BLOCK, WF_SIZE>),
-                    dim3((n - 1) / NCOLUMNS_PER_BLOCK + 1),
+                    dim3(rocsparse::get_grid_size_x(
+                        handle,
+                        (static_cast<int64_t>(n) - 1) / NCOLUMNS_PER_BLOCK + 1,
+                        WF_SIZE * NCOLUMNS_PER_BLOCK)),
                     dim3(WF_SIZE * NCOLUMNS_PER_BLOCK),
                     0,
                     stream,

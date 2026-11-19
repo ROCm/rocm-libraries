@@ -54,6 +54,19 @@ char hipsolver2char_fill(hipsolverFillMode_t value)
     }
 }
 
+char hipsolver2char_diag(hipsolverDiagType_t value)
+{
+    switch(value)
+    {
+    case HIPSOLVER_DIAG_NON_UNIT:
+        return 'N';
+    case HIPSOLVER_DIAG_UNIT:
+        return 'U';
+    default:
+        throw std::invalid_argument("Invalid enum");
+    }
+}
+
 char hipsolver2char_side(hipsolverSideMode_t value)
 {
     switch(value)
@@ -184,6 +197,21 @@ hipsolverFillMode_t char2hipsolver_fill(char value)
     case 'l':
     case 'L':
         return HIPSOLVER_FILL_MODE_LOWER;
+    default:
+        throw std::invalid_argument("Invalid character");
+    }
+}
+
+hipsolverDiagType_t char2hipsolver_diag(char value)
+{
+    switch(value)
+    {
+    case 'n':
+    case 'N':
+        return HIPSOLVER_DIAG_NON_UNIT;
+    case 'u':
+    case 'U':
+        return HIPSOLVER_DIAG_UNIT;
     default:
         throw std::invalid_argument("Invalid character");
     }

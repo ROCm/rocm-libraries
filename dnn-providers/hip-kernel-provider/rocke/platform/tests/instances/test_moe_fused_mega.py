@@ -62,5 +62,141 @@ class TestMoeFusedMega(unittest.TestCase):
             build_moe_fused_mega_gemm(self._spec("bf16"), arch="gfx1250")
 
 
+class TestMoeFusedMegaLdsBudget(unittest.TestCase):
+    """The fused total must be validated, not just the two GEMMs separately.
+
+    ``is_valid_spec`` runs over the gate/up and down ``UniversalGemmSpec`` s
+    independently and neither models ``Hidden_smem`` or the fact that all five
+    buffers coexist, so a tiling can pass both and still overrun the per-WG LDS
+    budget -- a kernel-load failure rather than a spec rejection.
+    """
+
+    # Shipped tile geometry, measured from the lowered IR's addrspace(3) pool.
+    SHIPPED_LDS_BYTES = 74752
+    GFX942_LDS_CAP = 65536
+
+    def _spec(self, **kw):
+        from rocke.instances.common.moe_fused_mega import FusedMegaKernelSpec
+
+        kw.setdefault("dtype", "bf16")
+        return FusedMegaKernelSpec(name="mega_lds", **kw)
+
+    def test_accounting_matches_emitted_pool(self):
+        # The accounting must equal the bytes the smem packer actually reserves,
+        # otherwise the gate rejects valid specs (or passes invalid ones).
+        from rocke.core import lower_llvm
+        from rocke.instances.common._moe_fused_mega_lds import mega_lds_pool_bytes
+        from rocke.instances.common.moe_fused_mega import (
+            _lds_allocs,
+            build_moe_fused_mega_gemm,
+        )
+
+        for kw in ({}, {"tile_m": 32}, {"tile_n_down": 128}, {"tile_k_down": 32}):
+            with self.subTest(**kw):
+                spec = self._spec(**kw)
+                kd = build_moe_fused_mega_gemm(spec, arch="gfx950")
+                low = lower_llvm._Lowerer(kd, arch="gfx950")
+                low._collect_smem(kd.body)
+                low._compute_smem_layout()
+                self.assertEqual(
+                    mega_lds_pool_bytes(_lds_allocs(spec)), low._smem_pool_size
+                )
+
+    def test_every_public_name_resolves(self):
+        # A stale __all__ entry breaks ``from ... import *``.
+        from rocke.instances.common import _moe_fused_mega_lds as budget
+
+        self.assertEqual(
+            [name for name in budget.__all__ if not hasattr(budget, name)], []
+        )
+
+    def test_accounting_covers_a_vector_segment_after_a_small_one(self):
+        # A 2-byte buffer followed by one read as <4 x float>: the packer
+        # aligns the vector segment to 16 bytes (its access claim), not the
+        # 4 bytes of its element rule. The accounting must not count less.
+        from rocke.core import lower_llvm
+        from rocke.core.ir import F16, F32, IRBuilder, PtrType, type_bytes
+        from rocke.instances.common._moe_fused_mega_lds import (
+            LdsAlloc,
+            mega_lds_pool_bytes,
+        )
+
+        builder = IRBuilder("mega_lds_vector_after_small")
+        out = builder.param("out", PtrType(F32, "global"))
+        zero = builder.const_i32(0)
+        head = builder.smem_alloc(F16, [1], name_hint="head")
+        vector = builder.smem_alloc(F32, [4], name_hint="vector")
+        tail = builder.smem_alloc(F16, [1], name_hint="tail")
+        half = builder.trunc_f32_to_f16(builder.const_f32(1.0))
+        # The small buffers are written before and after the vector traffic,
+        # so all three are live together and get disjoint segments.
+        builder.smem_store_f16(head, [zero], half)
+        builder.smem_store_f16(tail, [zero], half)
+        loaded = builder.global_load_vN(out, zero, F32, 4, align=16)
+        builder.smem_store_vN(vector, [zero], loaded, 4)
+        reloaded = builder.smem_load_vN(vector, zero, dtype=F32, n=4)
+        builder.global_store_vN(out, zero, reloaded, 4)
+        builder.smem_store_f16(head, [zero], half)
+        builder.smem_store_f16(tail, [zero], half)
+        builder.ret()
+
+        lowerer = lower_llvm._Lowerer(builder.kernel, arch="gfx950")
+        lowerer._collect_smem(builder.kernel.body)
+        lowerer._compute_smem_layout()
+        vector_global = lowerer._smem_storage_name[vector.name]
+        self.assertEqual(lowerer._smem_offsets[vector_global], 16)
+        allocs = [
+            LdsAlloc("head", type_bytes(F16), 1),
+            LdsAlloc("vector", type_bytes(F32), 4),
+            LdsAlloc("tail", type_bytes(F16), 1),
+        ]
+        self.assertGreaterEqual(mega_lds_pool_bytes(allocs), lowerer._smem_pool_size)
+
+    def test_shipped_geometry_costs_the_measured_bytes(self):
+        from rocke.instances.common._moe_fused_mega_lds import mega_lds_pool_bytes
+        from rocke.instances.common.moe_fused_mega import _lds_allocs
+
+        self.assertEqual(
+            mega_lds_pool_bytes(_lds_allocs(self._spec())), self.SHIPPED_LDS_BYTES
+        )
+
+    def test_gfx950_default_still_builds(self):
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.common.moe_fused_mega import build_moe_fused_mega_gemm
+
+        # The shipped geometry fits CDNA4's 160 KiB; only gfx942 is over.
+        ll = lower_kernel_to_llvm(
+            build_moe_fused_mega_gemm(self._spec(), arch="gfx950"), arch="gfx950"
+        )
+        self.assertIn("mfma.f32.16x16x32.bf16", ll)
+        self.assertIn("atomicrmw", ll)
+
+    def test_rejects_over_budget_gfx942_retile(self):
+        from rocke.instances.common.moe_fused_mega import build_moe_fused_mega_gemm
+
+        # warp_tile_k=16 is the gfx942-legal atom, so both GEMM sub-specs pass;
+        # only the fused total catches this one.
+        with self.assertRaises(ValueError) as cm:
+            build_moe_fused_mega_gemm(self._spec(warp_tile_k=16), arch="gfx942")
+        msg = str(cm.exception)
+        self.assertIn(str(self.SHIPPED_LDS_BYTES), msg)
+        self.assertIn(str(self.GFX942_LDS_CAP), msg)
+        self.assertIn("Hidden_smem", msg)
+
+    def test_accepts_gfx942_config_that_fits(self):
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.common.moe_fused_mega import build_moe_fused_mega_gemm
+
+        # One field off the shipped geometry brings the total under 64 KiB.
+        spec = self._spec(warp_tile_k=16, tile_n_down=128)
+        ll = lower_kernel_to_llvm(
+            build_moe_fused_mega_gemm(spec, arch="gfx942"), arch="gfx942"
+        )
+        self.assertIn("mfma.f32.16x16x16bf16", ll)  # the gfx942-legal bf16 atom
+        self.assertIn("atomicrmw", ll)
+        # 58368 B of LDS -- 7168 B of headroom under gfx942's 64 KiB.
+        self.assertIn("[58368 x i8]", ll)
+
+
 if __name__ == "__main__":
     unittest.main()

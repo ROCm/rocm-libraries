@@ -2,7 +2,9 @@
   "version": "1.0",
   "id": "7021d1df-7845-5773-ad35-9f92dbb68146",
   "name": "hkp_example:tiled_attention",
-  "arch": ["gfx942"],
+  "arch": [
+    "gfx942"
+  ],
   "matchers": [
     "0f3a9eaa-342f-523e-a827-54d0597827af",
     "a06e0cb1-b421-5364-beca-d2be0a7652ec"
@@ -34,7 +36,39 @@
         "dtype": "BF16",
         "operation": "ATTENTION"
       },
-      "priority": 0
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "dadc0932-9f93-503b-a856-1d49800ad7d4",
+              "kmd_id": "2e4b62b0-7394-5682-a2b0-d7313b2ba59c",
+              "metadata_fields": [
+                "block_size",
+                "dtype"
+              ],
+              "matcher_only_fields": [
+                "operation"
+              ],
+              "bindings": {
+                "block_size": {
+                  "field": "block_size"
+                },
+                "dtype": {
+                  "field": "dtype"
+                }
+              },
+              "vocabulary": {
+                "dtype": {
+                  "bf16": "BF16",
+                  "fp16": "FP16"
+                }
+              }
+            }
+          ]
+        }
+      }
     }
   ]
 }

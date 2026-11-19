@@ -47,12 +47,6 @@ typedef void* hipblasLtHandle_t;
 // forcing early cleanup
 extern "C" ROCBLAS_EXPORT void rocblas_shutdown();
 
-// Whether rocBLAS can reallocate device memory on demand, at the cost of only
-// allowing one allocation at a time, and at the cost of potential synchronization.
-// If this is 0, then stack-like allocation is allowed, but reallocation on demand
-// does not occur.
-#define ROCBLAS_REALLOC_ON_DEMAND 1
-
 // Round up size to the nearest MIN_CHUNK_SIZE
 constexpr size_t roundup_device_memory_size(size_t size)
 {
@@ -103,6 +97,8 @@ enum class Processor : int
     gfx1151 = 1151,
     gfx1152 = 1152,
     gfx1153 = 1153,
+    gfx1170 = 1170,
+    gfx1171 = 1171,
     gfx1200 = 1200,
     gfx1201 = 1201,
     gfx1250 = 1250
@@ -165,7 +161,7 @@ private:
         {
             if(device_id != old_device_id)
             {
-                (void)(hipSetDevice(old_device_id));
+                PRINT_IF_HIP_ERROR(hipSetDevice(old_device_id));
             }
         }
 
@@ -302,10 +298,12 @@ public:
             return batch_count;
     }
 
+    // Gates eager handle construction only; useHipBLASLt() enforces the gfx942 dtype/CU restriction.
     bool isDefaultHipBLASLtArch()
     {
         int gfx_arch = getArch();
-        if(gfx_arch == 1200 || gfx_arch == 1201 || gfx_arch == 1250 || gfx_arch == 950)
+        if(gfx_arch == 1200 || gfx_arch == 1201 || gfx_arch == 1250 || gfx_arch == 950
+           || gfx_arch == 942 || gfx_arch == 1170 || gfx_arch == 1171)
         {
             return true;
         }
@@ -319,14 +317,10 @@ public:
 
     /*******************************************************************************
      * This function determines whether or not to try using the hipBLASLt backend
-     * - If the enviornment variable is set, its value determines whether ot not to
+     * - If the environment variable is set, its value determines whether or not to
      *   try the hipBLASLt backend.
-     * - Otherwise try when the current architecture is defaulted to hipBLASLt support
-     * - Always disable for any `batched` API when the current handle is in stream
-     *   capture mode (as hipblaslt batched dispatch does synchronous memory copies)
-     * - batched mode requires env variable opt in as has additional pointer copies
      ******************************************************************************/
-    bool tryHipBLASLt(bool batched)
+    bool tryHipBLASLt()
     {
         bool status = false;
 
@@ -341,24 +335,6 @@ public:
         else
             status = hipblasltEnvVar == 1;
 #endif
-
-        if(status && batched)
-        {
-            static bool hipblasltEnvBatchedDisabled = [&] {
-                auto* env_var = getenv("ROCBLAS_USE_HIPBLASLT_BATCHED");
-                if(env_var)
-                {
-                    return strncmp(env_var, "0", 1) == 0;
-                }
-                return false;
-            }();
-
-            // only use for batched when explicitly enabled by env variable
-            if(!hipblasltEnvBatchedDisabled)
-                status = !is_stream_in_capture_mode();
-            else
-                status = false;
-        }
 
         return status;
     }
@@ -441,7 +417,18 @@ public:
     std::unique_ptr<rocblas_internal_ostream> log_bench_os;
     std::unique_ptr<rocblas_internal_ostream> log_profile_os;
     void                                      init_logging();
-    void                                      init_check_numerics();
+
+    // Name of the user-facing C API call currently executing on this handle. Set by an RAII helper
+    // at the top of each *_impl and cleared on scope exit. Used by rocblas_layer_mode_log_kernel_select
+    // (0x10) to annotate internal-GEMM trace lines with their parent API. Null when no API is active.
+    const char* current_api_name = nullptr;
+
+    // Backends that returned not_implemented for the most recent GEMM sub-problem, e.g.
+    // "hipblaslt,tensile". Written by runContractionProblem when 0x10 logging is on and consumed
+    // by the source-GEMM fallback through rocblas_internal_take_kernel_select_fallback().
+    const char* kernel_select_fallback_from = nullptr;
+
+    void init_check_numerics();
 
     // data pointer for rocSOLVER
     std::shared_ptr<void> data_ptr;
@@ -609,10 +596,8 @@ private:
 
     rocblas_status set_stream(hipStream_t new_stream);
 
-#if ROCBLAS_REALLOC_ON_DEMAND
     // Helper for device memory allocator
     bool ROCBLAS_EXPORT device_allocator(size_t size);
-#endif
 
 public:
     hipDeviceProp_t device_properties;
@@ -637,7 +622,6 @@ private:
     Processor getActiveArch();
 
     // Opaque smart allocator class to perform device memory allocations
-    // clang-format off
     class [[nodiscard]] _device_malloc : public rocblas_device_malloc_base
     {
     protected:
@@ -660,16 +644,14 @@ private:
             // arrays. The sizes are rounded up to the next multiple of MIN_CHUNK_SIZE.
             // size contains the total of all sizes at the end of the calculation of offsets.
             size = 0;
-            size_t old;
-            const size_t offsets[] = {(old = size, size += roundup_device_memory_size(sizes), old)...};
+            size_t       old;
+            const size_t offsets[]
+                = {(old = size, size += roundup_device_memory_size(sizes), old)...};
             char* addr = nullptr;
 
-            if(handle->stream_order_alloc &&
-                handle->device_memory_owner == rocblas_device_memory_ownership::rocblas_managed)
+            if(handle->stream_order_alloc
+               && handle->device_memory_owner == rocblas_device_memory_ownership::rocblas_managed)
             {
-// hipMallocAsync and hipFreeAsync are defined in hip version 5.2.0
-// Support for default stream added in hip version 5.3.0
-#if HIP_VERSION >= 50300000
                 if(!size)
                     return decltype(pointers)(sizeof...(sizes));
 
@@ -677,19 +659,16 @@ private:
                 if(hipStatus != hipSuccess)
                 {
                     success = false;
-                    rocblas_cerr << " rocBLAS internal error: hipMallocAsync() failed to allocate memory of size : " << size << std::endl;
+                    rocblas_cerr << " rocBLAS internal error: hipMallocAsync() failed to allocate "
+                                    "memory of size : "
+                                 << size << std::endl;
                     return decltype(pointers)(sizeof...(sizes));
                 }
                 addr = static_cast<char*>(dev_mem);
-#endif
             }
             else
             {
-#if ROCBLAS_REALLOC_ON_DEMAND
                 success = handle->device_allocator(size);
-#else
-                success = size <= handle->device_memory_size - handle->device_memory_in_use;
-#endif
                 // If allocation failed, return an array of nullptr's
                 // If total size is 0, return an array of nullptr's, but leave it marked as successful
                 if(!success || !size)
@@ -717,7 +696,6 @@ private:
             , success(true)
             , pointers(allocate_pointers(size_t(sizes)...))
         {
-
         }
 
         // Constructor for allocating count pointers of a certain total size
@@ -728,32 +706,26 @@ private:
             , stream_in_use(handle->stream)
             , success(true)
         {
-            if(handle->stream_order_alloc &&
-                handle->device_memory_owner == rocblas_device_memory_ownership::rocblas_managed)
+            if(handle->stream_order_alloc
+               && handle->device_memory_owner == rocblas_device_memory_ownership::rocblas_managed)
             {
-// hipMallocAsync and hipFreeAsync are defined in hip version 5.2.0
-// Support for default stream added in hip version 5.3.0
-#if HIP_VERSION >= 50300000
-                bool status = hipMallocAsync(&dev_mem, size, stream_in_use) == hipSuccess ;
+                bool status = hipMallocAsync(&dev_mem, size, stream_in_use) == hipSuccess;
 
-                for(auto i= 0 ; i < count ; i++)
+                for(auto i = 0; i < count; i++)
                     pointers.push_back(status ? dev_mem : nullptr);
-#endif
             }
             else
             {
-#if ROCBLAS_REALLOC_ON_DEMAND
-            success = handle->device_allocator(size);
-#else
-            success = size <= handle->device_memory_size - handle->device_memory_in_use;
-#endif
-            for(auto i= 0 ; i < count ; i++)
-            {    pointers.push_back(success ? static_cast<char*>(handle->device_memory)
-                                         + handle->device_memory_in_use : nullptr);
-            }
+                success = handle->device_allocator(size);
+                for(auto i = 0; i < count; i++)
+                {
+                    pointers.push_back(success ? static_cast<char*>(handle->device_memory)
+                                                     + handle->device_memory_in_use
+                                               : nullptr);
+                }
 
-            if(success)
-                handle->device_memory_in_use += size;
+                if(success)
+                    handle->device_memory_in_use += size;
             }
         }
 
@@ -794,25 +766,24 @@ private:
             // If success == false or size == 0, the destructor is a no-op
             if(success && size)
             {
-                if(handle->stream_order_alloc &&
-                    handle->device_memory_owner == rocblas_device_memory_ownership::rocblas_managed)
+                if(handle->stream_order_alloc
+                   && handle->device_memory_owner
+                          == rocblas_device_memory_ownership::rocblas_managed)
                 {
-// hipMallocAsync and hipFreeAsync are defined in hip version 5.2.0
-// Support for default stream added in hip version 5.3.0
-#if HIP_VERSION >= 50300000
-                        if(dev_mem)
-                        {
+                    if(dev_mem)
+                    {
 
-                            bool status = hipFreeAsync(dev_mem, stream_in_use) == hipSuccess ;
-                            if(!status)
-                            {
-                                rocblas_cerr << " rocBLAS internal error: hipFreeAsync() Failed, "
-                                "device memory could not be released to default memory pool" << std::endl;
-                                rocblas_abort();
-                            }
-                            dev_mem = nullptr;
+                        bool status = hipFreeAsync(dev_mem, stream_in_use) == hipSuccess;
+                        if(!status)
+                        {
+                            rocblas_cerr
+                                << " rocBLAS internal error: hipFreeAsync() Failed, "
+                                   "device memory could not be released to default memory pool"
+                                << std::endl;
+                            rocblas_abort();
                         }
-#endif
+                        dev_mem = nullptr;
+                    }
                 }
                 else
                 {
@@ -820,15 +791,15 @@ private:
                     // it matches the device_memory_in_use when this object was created.
                     if((handle->device_memory_in_use -= size) != prev_device_memory_in_use)
                     {
-                        rocblas_cerr
-                            << "rocBLAS internal error: device_malloc() RAII object not "
-                            "destroyed in LIFO order.\n"
-                            "Objects returned by device_malloc() must be 0-sized, "
-                            "unsuccessfully allocated,\n"
-                            "or destroyed in the reverse order that they are created.\n"
-                            "device_malloc() objects cannot be assigned to unless they are 0-sized\n"
-                            "or they were unsuccessfully allocated previously."
-                            << std::endl;
+                        rocblas_cerr << "rocBLAS internal error: device_malloc() RAII object not "
+                                        "destroyed in LIFO order.\n"
+                                        "Objects returned by device_malloc() must be 0-sized, "
+                                        "unsuccessfully allocated,\n"
+                                        "or destroyed in the reverse order that they are created.\n"
+                                        "device_malloc() objects cannot be assigned to unless they "
+                                        "are 0-sized\n"
+                                        "or they were unsuccessfully allocated previously."
+                                     << std::endl;
                         rocblas_abort();
                     }
                 }
@@ -864,24 +835,20 @@ private:
         }
     };
 
-    // clang-format on
-
     // Allocate workspace for GSU based on the needs.
-    // clang-format off
     class [[nodiscard]] _gsu_malloc_by_size final : public _device_malloc
     {
     public:
         explicit _gsu_malloc_by_size(rocblas_handle handle, size_t requested_Workspace_Size)
-        : _device_malloc(handle, requested_Workspace_Size)
+            : _device_malloc(handle, requested_Workspace_Size)
         {
             handle->gsu_workspace_size = success ? size : 0;
-            handle->gsu_workspace = static_cast<void*>(*this);
+            handle->gsu_workspace      = static_cast<void*>(*this);
         }
 
         _gsu_malloc_by_size(rocblas_handle handle)
-        : _device_malloc(handle, 0)
+            : _device_malloc(handle, 0)
         {
-
         }
 
         ~_gsu_malloc_by_size()
@@ -896,7 +863,6 @@ private:
         // Move constructor allows initialization by rvalues and returns from functions
         _gsu_malloc_by_size(_gsu_malloc_by_size&&) = default;
     };
-    // clang-format on
 
 public:
     // Allocate one or more sizes
@@ -945,6 +911,46 @@ public:
         return _gsu_malloc_by_size(this, requested_Workspace_Size);
     };
 };
+
+// RAII helper that stamps the user-facing C API name onto the handle for the duration of a call.
+// Used by rocblas_layer_mode_log_kernel_select (0x10) to attribute each internal-GEMM trace line
+// to its parent API. Construct one line at the top of each *_impl after the handle null-check.
+// When kernel-select logging is off (the common case) this is a no-op: the constructor only tests
+// the layer bit and touches the handle when the bit is set, so it costs nothing on the hot path.
+// Save/restore protects against re-entry: if an internal path calls another rocBLAS API, the
+// outer name is restored on scope exit. Single-threaded per handle, matching the rest of rocBLAS.
+struct rocblas_internal_api_scope
+{
+    rocblas_internal_api_scope(rocblas_handle h, const char* name)
+        : m_handle((h && (h->layer_mode & rocblas_layer_mode_log_kernel_select)) ? h : nullptr)
+        , m_prev(m_handle ? m_handle->current_api_name : nullptr)
+    {
+        if(m_handle)
+        {
+            m_handle->current_api_name            = name;
+            m_handle->kernel_select_fallback_from = nullptr;
+        }
+    }
+    ~rocblas_internal_api_scope()
+    {
+        if(m_handle)
+            m_handle->current_api_name = m_prev;
+    }
+    rocblas_internal_api_scope(const rocblas_internal_api_scope&) = delete;
+    rocblas_internal_api_scope& operator=(const rocblas_internal_api_scope&) = delete;
+
+private:
+    rocblas_handle m_handle;
+    const char*    m_prev;
+};
+
+// Returns and clears the backends that rejected the preceding GEMM sub-problem ("none" if none did).
+inline const char* rocblas_internal_take_kernel_select_fallback(rocblas_handle handle)
+{
+    const char* from                    = handle->kernel_select_fallback_from;
+    handle->kernel_select_fallback_from = nullptr;
+    return from ? from : "none";
+}
 
 // For functions which don't use temporary device memory, and won't be likely
 // to use them in the future, the RETURN_ZERO_DEVICE_MEMORY_SIZE_IF_QUERIED(handle)

@@ -1919,6 +1919,44 @@ namespace rocisa
         }
     };
 
+    struct BufferAtomicPkAddBF16 : public MUBUFStoreInstruction
+    {
+        // srcData is a single dword holding two packed BF16 lanes; the hardware
+        // performs both adds in BF16. The old value is returned only when the
+        // temporal hint asks for it, so leave mubuf unset for fire-and-forget.
+        BufferAtomicPkAddBF16(const std::shared_ptr<RegisterContainer>& src,
+                              const std::shared_ptr<RegisterContainer>& vaddr,
+                              const std::shared_ptr<RegisterContainer>& saddr,
+                              const InstructionInput&                   soffset,
+                              std::optional<MUBUFModifiers>             mubuf   = std::nullopt,
+                              const std::string&                        comment = "")
+            : MUBUFStoreInstruction(InstType::INST_BF16, src, vaddr, saddr, soffset, mubuf, comment)
+        {
+            setInst("buffer_atomic_pk_add_bf16");
+        }
+
+        BufferAtomicPkAddBF16(const BufferAtomicPkAddBF16& other)
+            : MUBUFStoreInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<BufferAtomicPkAddBF16>(*this);
+        }
+
+        // Deliberately no getDstParams() override: srcData is read-only. The
+        // hardware only returns the pre-add value when a temporal hint asks for
+        // it, and we never do, so modelling vdata as a destination would make
+        // the emitter append th:TH_ATOMIC_RETURN and clobber a register the
+        // store code has already reused.
+
+        std::string typeConvert() const override
+        {
+            return "";
+        }
+    };
+
     struct BufferAtomicCmpswapB32 : public MUBUFStoreInstruction
     {
         BufferAtomicCmpswapB32(const std::shared_ptr<RegisterContainer>& src,
@@ -2771,7 +2809,7 @@ namespace rocisa
         {
             if(ds)
                 ds->na = 1;
-            setInst("ds_load_tr4_b64");
+            setInst("ds_load_b64_tr_b4");
         }
 
         DSLoadB64TrB4(const DSLoadB64TrB4& other)
@@ -3895,12 +3933,14 @@ namespace rocisa
     {
         using ContainerPtr    = std::shared_ptr<Container>;
         using RegContainerPtr = std::shared_ptr<RegisterContainer>;
-        TensorLoadToLds(const RegContainerPtr& group0,
-                        const RegContainerPtr& group1,
-                        const RegContainerPtr& group2,
-                        const RegContainerPtr& group3,
-                        const std::string&     comment = std::string())
+        TensorLoadToLds(const RegContainerPtr&         group0,
+                        const RegContainerPtr&         group1,
+                        const RegContainerPtr&         group2,
+                        const RegContainerPtr&         group3,
+                        const std::string&             comment = std::string(),
+                        std::optional<TENSORModifiers> tensor  = std::nullopt)
             : Instruction(InstType::INST_TDM, comment)
+            , tensor(tensor)
             , group0(group0)
             , group1(group1)
             , group2(group2)
@@ -3924,6 +3964,7 @@ namespace rocisa
 
         TensorLoadToLds(const TensorLoadToLds& other)
             : Instruction(other)
+            , tensor(other.tensor)
             , group0(other.group0)
             , group1(other.group1)
             , group2(other.group2)
@@ -3980,8 +4021,14 @@ namespace rocisa
         std::string toString() const override
         {
             auto kStr = preStr() + " " + getArgStr();
+            if(tensor)
+            {
+                kStr += tensor->toString();
+            }
             return formatWithComment(kStr);
         }
+
+        std::optional<TENSORModifiers> tensor;
 
     private:
         RegContainerPtr group0;

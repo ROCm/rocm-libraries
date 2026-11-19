@@ -17,9 +17,18 @@ python/
 │   └── src/
 │       ├── module.cpp                     # Main nanobind module entry point
 │       ├── bindings.hpp                   # Shared binding declarations
+│       ├── device_buffer.hpp              # hipdnn.DeviceBuffer
+│       ├── dlpack_adapter.cpp             # DLPack (__dlpack__) import for variant packs and tensor_like
+│       ├── dlpack_adapter.hpp
 │       ├── autotune_bindings.cpp
 │       ├── graph_bindings.cpp
+│       ├── graph_kwargs_bindings.cpp      # cuDNN-style keyword overloads for Graph ops
+│       ├── pointwise_bindings.cpp         # cuDNN-style named pointwise methods
+│       ├── pygraph_bindings.cpp           # hipdnn.pygraph (cuDNN lifecycle semantics)
+│       ├── cudnn_compat.cpp               # Shared helpers for the cuDNN-style API
+│       ├── cudnn_compat.hpp
 │       ├── handle_bindings.cpp
+│       ├── handle_wrapper.hpp             # hipdnn.Handle implementation
 │       ├── memory_bindings.cpp
 │       ├── tensor_bindings.cpp
 │       ├── attributes_bindings.cpp
@@ -135,6 +144,186 @@ python -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 The wheel package uses a `src/` layout, so running pytest from
 `frontend_wheel_package/` does not accidentally import the source package.
 
+## DLPack Interoperability
+
+`Graph.execute()`, `Graph.execute_timed_ext()`,
+`Graph.execute_plan_at_index()`, `Graph.autotune()`, and
+`Graph.autotune_exhaustive_sweep()` take a `variant_pack` keyed by tensor UID
+or by `Tensor`. Each value, and `workspace`, may be one of these kinds, checked
+in this order:
+
+1. An `int` pointer.
+2. A `hipdnn.DeviceBuffer`.
+3. An object with a `data_ptr()` method (for example a PyTorch tensor).
+4. An object that implements `__dlpack__` in host (`cpu`), ROCm (`rocm`), or
+   pinned host (`rocm_host`) memory. The bindings use the DLPack data pointer
+   plus its byte offset.
+
+No data is copied. The caller must keep each object alive until the HIP work
+completes. The bindings call `__dlpack__(copy=False)`, so a producer that can
+export only a copy raises its own error instead of returning memory that nothing
+keeps alive. Errors raised by `__dlpack__` reach the caller unchanged.
+
+`Graph.tensor_like(obj, name="")` also accepts a `__dlpack__` producer. It
+copies the dims and the element strides (row-major when the producer reports
+none) and maps the data type. A host (`cpu`) producer becomes a
+runtime pass-by-value tensor: pass a host tensor for it in the variant pack of
+each execute call. Runtime pass-by-value tensors need an engine plugin that
+reports plugin API 1.2.0 or later. Sub-byte types follow the DLPack
+definition (`lanes=1`); packed exports such as `torch.float4_e2m1fn_x2`
+(`lanes=2`) raise `ValueError`.
+
+```python
+x = torch.randn(8, 16, device="cuda")
+scale = np.full((1, 1), 0.5, np.float32)
+x_t = graph.tensor_like(x, "x")
+scale_t = graph.tensor_like(scale, "scale")  # runtime pass-by-value
+# ... build the graph and plans with x_t and scale_t, producing y_t ...
+graph.execute(handle, {x_t: x, scale_t: scale, y_t: y}, workspace)
+```
+
+For a compile-time constant (plugin API 1.0.0), call `set_value` on the tensor
+instead. It bakes the value into the graph and clears the runtime flag.
+`set_value(value, data_type=None)` supports `FLOAT`, `DOUBLE`, `HALF`,
+`BFLOAT16`, `UINT8`, `INT32`, `INT64`, and `BOOLEAN`. Without `data_type`, it
+keeps the tensor's data type, or infers `BOOLEAN`, `INT64`, or `FLOAT` from a
+Python `bool`, `int`, or `float`. It resets dims and strides to `[1]`, so the
+tensor must have one element.
+
+```python
+scale_t = graph.tensor_like(scale, "scale").set_value(0.5)  # FLOAT constant
+eps_t = hipdnn.Tensor().set_value(1e-5, hipdnn.DataType.DOUBLE)
+```
+
+## cuDNN-style API
+
+`hipdnn.Graph` follows the hipDNN C++ API: op methods take a `*Attributes`
+object, and lifecycle methods (`validate`, `build_operation_graph`, `execute`,
+...) return an `Error`. That surface is unchanged. Code written for
+`cudnn.pygraph` can use the cuDNN-shaped additions below instead; all of them
+are extra overloads, methods, or names. Every call that worked before behaves
+the same. A call that raised `TypeError` can now reach a new overload, which
+may accept it or raise a more specific error: `ValueError` for a dtype with no
+hipDNN `DataType`, `NotImplementedError` for a cuDNN parameter value hipDNN
+cannot honour.
+
+On `hipdnn.Graph`:
+
+- Every op with a cuDNN counterpart (`conv_fprop`, `conv_dgrad`, `conv_wgrad`,
+  `matmul`, `batchnorm*`, `layernorm*`, `rmsnorm*`, `block_scale_*`,
+  `reduction`, `moe_grouped_matmul`, and `sdpa*` when hipDNN is built with
+  `-DHIPDNN_ENABLE_SDPA=ON`) also accepts cuDNN's keyword signature, for
+  example `graph.conv_fprop(image=x, weight=w, padding=[1, 1], stride=[1, 1],
+  dilation=[1, 1])`. As in cuDNN, `stride` and `dilation` have no usable
+  default: without them validation fails. Passing an attributes object together
+  with cuDNN keywords raises `TypeError`.
+- cuDNN's named pointwise methods (`add`, `bias`, `mul`, `relu`, `gelu`,
+  `sigmoid`, ...). `mod`, `pow` and `cos` are not available: hipDNN has no
+  pointwise mode for them.
+- `Graph.tensor(dim=, stride=, data_type=, is_virtual=, is_pass_by_value=,
+  ragged_offset=, name=, uid=)`. `ragged_offset` takes a `Tensor` or `None`.
+  `data_type` here and in `Tensor.set_data_type` also takes a torch or numpy
+  dtype; a dtype with no hipDNN `DataType` raises `ValueError`.
+  `Tensor.set_data_type()` with no argument resets the type to `NOT_SET`, as in
+  cuDNN.
+- cuDNN's keyword names next to hipDNN's: `index` for `plan_index`, and `input`
+  for `tensor_like`'s first argument.
+
+`hipdnn.pygraph` is a `Graph` subclass with cuDNN's lifecycle semantics:
+
+- The constructor takes `name`, `io_data_type`, `intermediate_data_type`,
+  `compute_data_type` and `handle`. Without a handle, the graph creates one the
+  first time a call needs it.
+- `build()` runs `validate` and `build_operation_graph`; `build(heur_modes)`
+  also creates, checks and builds the execution plans. The hipDNN form
+  `build(handle, modes=[FALLBACK], policy=HEURISTICS_CHOICE)` does the same
+  with the given handle, modes and build-plan policy.
+- `execute(tensor_to_device_buffer, workspace, handle=None)` and
+  `execute_plan_at_index(tensor_to_device_buffer, workspace, index,
+  handle=None)` take cuDNN's argument order. The hipDNN forms remain available.
+- `serialize()` and `deserialize([handle_,] pyobj)`.
+- Failures raise instead of returning an `Error`: `ValueError` for unset
+  attributes, shape deduction failures, bad tensor names or variant packs;
+  `hipdnn.GraphNotSupportedError` (a `RuntimeError`) when no engine supports
+  the graph or no execution plan can be created; `RuntimeError` otherwise,
+  including invalid attribute values.
+- `autotune`, `autotune_exhaustive_sweep`, `execute_timed_ext`,
+  `get_plan_name`, `get_plan_name_at_index` and `get_engine_configs` are
+  inherited unchanged from `hipdnn.Graph` and do not use the graph's handle.
+  The first three need an explicit handle, and `execute_timed_ext` still
+  returns `(Error, ExecutionTiming)`. Called without a handle, the other three
+  name engines from the built-in registry only, so a plugin-supplied engine
+  reports a hex ID.
+
+The package also exports cuDNN's module-level names for the hipDNN types:
+`tensor`, `data_type`, `heur_mode`, `norm_forward_phase`, `reduction_mode`,
+`convolution_mode`, `build_plan_policy`, `behavior_note`, `diagonal_alignment`,
+`attention_implementation`, `moe_grouped_matmul_mode`, `scalar_type` and
+`cudnnGraphNotSupportedError`.
+
+```python
+import hipdnn_frontend as cudnn
+
+FLOAT = cudnn.data_type.FLOAT
+graph = cudnn.pygraph(
+    io_data_type=FLOAT, intermediate_data_type=FLOAT, compute_data_type=FLOAT
+)
+X = graph.tensor(name="X", dim=[2, 8, 16, 16], stride=[2048, 256, 16, 1], data_type=FLOAT)
+W = graph.tensor(name="W", dim=[16, 8, 3, 3], stride=[72, 9, 3, 1], data_type=FLOAT)
+B = graph.tensor(name="B", dim=[1, 16, 1, 1], stride=[16, 1, 1, 1], data_type=FLOAT)
+conv = graph.conv_fprop(image=X, weight=W, padding=[1, 1], stride=[1, 1], dilation=[1, 1])
+Y = graph.relu(input=graph.bias(input=conv, bias=B))
+Y.set_output(True).set_data_type(FLOAT)
+graph.build([cudnn.heur_mode.FALLBACK])
+# x_dev, w_dev, b_dev, y_dev and workspace are device buffers.
+graph.execute({X: x_dev, W: w_dev, B: b_dev, Y: y_dev}, workspace)
+```
+
+`samples/cudnn_style_conv_bias_relu.py` is the complete version, with device
+buffers and a NumPy reference check.
+
+Remaining differences from `cudnn.pygraph`:
+
+- cuDNN parameters hipDNN cannot honour keep their position but accept only
+  one value; anything else raises `NotImplementedError`. Examples are
+  `matmul(padding=)`, the `pygraph` constructor's `sm_count`, `sm_version`,
+  `kernel_cache` and `device_property`, the SDPA `score_mod` callbacks, and
+  runtime shape overrides outside `execute` (and, without SDPA support, in
+  `execute` too). Each accepts cuDNN's default, except
+  `tensor(reordering_type=)`, which accepts only `None`, not cuDNN's default
+  `tensor_reordering.NONE`.
+- Operations hipDNN does not implement are absent, for example
+  `instancenorm`, `adalayernorm`, `rope`, `slice`, `concatenate`, `reshape`,
+  `transpose`, `genstats`, the FP8/MXFP8 SDPA variants, and the CUDA-graph
+  methods. `moe_grouped_matmul_bwd` is not yet bound in Python, although the
+  C++ `Graph` provides it.
+- Not provided: `backend_version*`, `get_last_error_string`, `knob` and
+  `knob_type`, `numerical_note`, `tensor_reordering`, `reshape_mode`,
+  `create_kernel_cache`, `create_device_properties`; the graph methods `key`,
+  `create_execution_plan`, `get_engine_count`, `get_behavior_notes`,
+  `get_behavior_notes_for_plan_at_index`, `query_tensor_attributes_of_uid`,
+  `select_behavior_notes`,
+  `deselect_behavior_notes`, `select_numeric_notes` and
+  `deselect_numeric_notes`; and the `cudnn.Graph` wrapper class (`Graph` here
+  is hipDNN's own graph).
+- The keyword forms of `layernorm`, `layernorm_backward`, `rmsnorm`,
+  `rmsnorm_backward`, `block_scale_quantize`, `sdpa` and `sdpa_backward`
+  return a tuple where cuDNN returns a list, as their attributes forms do.
+- The `pygraph` constructor's `name` defaults to `""`, not `"test_graph"`.
+- Without `handle=`, `pygraph` creates its handle the first time a call needs
+  one, not in the constructor.
+- `GraphNotSupportedError` (`cudnnGraphNotSupportedError`) derives from
+  `RuntimeError`, so `except RuntimeError` also catches it.
+- `create_execution_plans()` defaults `modes` to `[heur_mode.FALLBACK]`.
+- `deselect_engines()` and `deselect_workspace_greater_than()` return the
+  graph, so calls can be chained.
+- Enum values differ where the libraries differ: `data_type` has no
+  `FAST_FLOAT_FOR_FP8`, `INT8x4`, `UINT8x4` or `INT8x32`, `heur_mode` has no
+  `OPENSOURCE`, and `behavior_note` values are vendor-specific.
+- `create_handle()` returns a `hipdnn.Handle`, not an integer.
+- The `cudnn.graph` context manager and the `cudnn.jit` / `cudnn.graph_cache`
+  decorators are not provided.
+
 ## Running the Samples
 
 Sample scripts are source-tree utilities and are not included in the wheel.
@@ -145,4 +334,5 @@ python projects/hipdnn/python/frontend_wheel_package/samples/conv_dgrad.py
 python projects/hipdnn/python/frontend_wheel_package/samples/conv_wgrad.py
 python projects/hipdnn/python/frontend_wheel_package/samples/matmul.py
 python projects/hipdnn/python/frontend_wheel_package/samples/autotune.py
+python projects/hipdnn/python/frontend_wheel_package/samples/cudnn_style_conv_bias_relu.py
 ```

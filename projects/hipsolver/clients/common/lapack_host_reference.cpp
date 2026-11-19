@@ -23,6 +23,7 @@
 
 #include "../include/lapack_host_reference.hpp"
 #include "hipsolver.h"
+#include <vector>
 
 /*!\file
  * \brief provide template functions interfaces to BLAS and LAPACK interfaces, it is
@@ -272,6 +273,35 @@ void ztrsm_(char*                   side,
 
 void clacgv_(int* n, hipsolverComplex* x, int* incx);
 void zlacgv_(int* n, hipsolverDoubleComplex* x, int* incx);
+
+void slacpy_(const char*  uplo,
+             const int*   m,
+             const int*   n,
+             const float* A,
+             const int*   lda,
+             float*       B,
+             const int*   ldb);
+void dlacpy_(const char*   uplo,
+             const int*    m,
+             const int*    n,
+             const double* A,
+             const int*    lda,
+             double*       B,
+             const int*    ldb);
+void clacpy_(const char*             uplo,
+             const int*              m,
+             const int*              n,
+             const hipsolverComplex* A,
+             const int*              lda,
+             hipsolverComplex*       B,
+             const int*              ldb);
+void zlacpy_(const char*                   uplo,
+             const int*                    m,
+             const int*                    n,
+             const hipsolverDoubleComplex* A,
+             const int*                    lda,
+             hipsolverDoubleComplex*       B,
+             const int*                    ldb);
 
 void slarf_(
     char* side, int* m, int* n, float* x, int* incx, float* alpha, float* A, int* lda, float* work);
@@ -864,6 +894,23 @@ void dgetrf_(int* m, int* n, double* A, int* lda, int* ipiv, int* info);
 void cgetrf_(int* m, int* n, hipsolverComplex* A, int* lda, int* ipiv, int* info);
 void zgetrf_(int* m, int* n, hipsolverDoubleComplex* A, int* lda, int* ipiv, int* info);
 
+void sgetri_(int* n, float* A, int* lda, int* ipiv, float* work, int* lwork, int* info);
+void dgetri_(int* n, double* A, int* lda, int* ipiv, double* work, int* lwork, int* info);
+void cgetri_(int*              n,
+             hipsolverComplex* A,
+             int*              lda,
+             int*              ipiv,
+             hipsolverComplex* work,
+             int*              lwork,
+             int*              info);
+void zgetri_(int*                    n,
+             hipsolverDoubleComplex* A,
+             int*                    lda,
+             int*                    ipiv,
+             hipsolverDoubleComplex* work,
+             int*                    lwork,
+             int*                    info);
+
 void sgetrs_(
     char* trans, int* n, int* nrhs, float* A, int* lda, int* ipiv, float* B, int* ldb, int* info);
 void dgetrs_(
@@ -1327,6 +1374,11 @@ void zsytrs_(char*                   uplo,
              int*                    ldb,
              int*                    info);
 
+void strtri_(char* uplo, char* diag, int* n, float* A, int* lda, int* info);
+void dtrtri_(char* uplo, char* diag, int* n, double* A, int* lda, int* info);
+void ctrtri_(char* uplo, char* diag, int* n, hipsolverComplex* A, int* lda, int* info);
+void ztrtri_(char* uplo, char* diag, int* n, hipsolverDoubleComplex* A, int* lda, int* info);
+
 #ifdef __cplusplus
 }
 #endif
@@ -1726,6 +1778,49 @@ template <>
 void cpu_lacgv<hipsolverDoubleComplex>(int n, hipsolverDoubleComplex* x, int incx)
 {
     zlacgv_(&n, x, &incx);
+}
+
+// lacpy
+template <>
+void cpu_lacpy<float>(
+    hipsolverFillMode_t uplo, int m, int n, const float* A, int lda, float* B, int ldb)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    slacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
+}
+
+template <>
+void cpu_lacpy<double>(
+    hipsolverFillMode_t uplo, int m, int n, const double* A, int lda, double* B, int ldb)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    dlacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
+}
+
+template <>
+void cpu_lacpy<hipsolverComplex>(hipsolverFillMode_t     uplo,
+                                 int                     m,
+                                 int                     n,
+                                 const hipsolverComplex* A,
+                                 int                     lda,
+                                 hipsolverComplex*       B,
+                                 int                     ldb)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    clacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
+}
+
+template <>
+void cpu_lacpy<hipsolverDoubleComplex>(hipsolverFillMode_t           uplo,
+                                       int                           m,
+                                       int                           n,
+                                       const hipsolverDoubleComplex* A,
+                                       int                           lda,
+                                       hipsolverDoubleComplex*       B,
+                                       int                           ldb)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    zlacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
 }
 
 // larf
@@ -2852,6 +2947,38 @@ void cpu_getrf<hipsolverDoubleComplex>(
     zgetrf_(&m, &n, A, &lda, ipiv, info);
 }
 
+// getri
+template <>
+void cpu_getri<float>(int n, float* A, int lda, int* ipiv, float* work, int lwork, int* info)
+{
+    sgetri_(&n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_getri<double>(int n, double* A, int lda, int* ipiv, double* work, int lwork, int* info)
+{
+    dgetri_(&n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_getri<hipsolverComplex>(
+    int n, hipsolverComplex* A, int lda, int* ipiv, hipsolverComplex* work, int lwork, int* info)
+{
+    cgetri_(&n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_getri<hipsolverDoubleComplex>(int                     n,
+                                       hipsolverDoubleComplex* A,
+                                       int                     lda,
+                                       int*                    ipiv,
+                                       hipsolverDoubleComplex* work,
+                                       int                     lwork,
+                                       int*                    info)
+{
+    zgetri_(&n, A, &lda, ipiv, work, &lwork, info);
+}
+
 // getrs
 template <>
 void cpu_getrs<float>(hipsolverOperation_t trans,
@@ -3896,4 +4023,49 @@ void cpu_sytrs<hipsolverDoubleComplex>(hipsolverFillMode_t     uplo,
 {
     char uploC = hipsolver2char_fill(uplo);
     zsytrs_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, info);
+}
+
+// trtri
+template <>
+void cpu_trtri(
+    hipsolverFillMode_t uplo, hipsolverDiagType_t diag, int n, float* A, int lda, int* info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    char diagC = hipsolver2char_diag(diag);
+    strtri_(&uploC, &diagC, &n, A, &lda, info);
+}
+
+template <>
+void cpu_trtri(
+    hipsolverFillMode_t uplo, hipsolverDiagType_t diag, int n, double* A, int lda, int* info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    char diagC = hipsolver2char_diag(diag);
+    dtrtri_(&uploC, &diagC, &n, A, &lda, info);
+}
+
+template <>
+void cpu_trtri(hipsolverFillMode_t uplo,
+               hipsolverDiagType_t diag,
+               int                 n,
+               hipsolverComplex*   A,
+               int                 lda,
+               int*                info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    char diagC = hipsolver2char_diag(diag);
+    ctrtri_(&uploC, &diagC, &n, A, &lda, info);
+}
+
+template <>
+void cpu_trtri(hipsolverFillMode_t     uplo,
+               hipsolverDiagType_t     diag,
+               int                     n,
+               hipsolverDoubleComplex* A,
+               int                     lda,
+               int*                    info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    char diagC = hipsolver2char_diag(diag);
+    ztrtri_(&uploC, &diagC, &n, A, &lda, info);
 }

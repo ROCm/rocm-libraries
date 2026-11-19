@@ -77,6 +77,7 @@ add_executable(
     IntegrationRMSNormBackwardDescriptorLowering.cpp
     IntegrationRMSNormBackwardDescriptorLifting.cpp
     IntegrationAutotuneCompiledPlanPath.cpp
+    IntegrationBuildPlansFallback.cpp
     IntegrationAutotuneConfigRoundTrip.cpp
     IntegrationAutotuneConfigRoundTripUnsupportedOp.cpp
     IntegrationAutotuneEndToEnd.cpp
@@ -87,6 +88,12 @@ add_executable(
     # only built when the shim is enabled.
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnShimUmbrella.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnShimHandle.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnCompatibilityV8Builders.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnCompatibilityV8FindPlan.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnCompatibilityV8BuilderEngines.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnCompatibilityV8BuilderExecute.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnCompatibilityV8BuilderKnobs.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnCompatibilityV8BuilderLowering.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationOverrideExecute.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationOverrideValidation.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationTestPluginInfrastructure.cpp>
@@ -118,6 +125,8 @@ function(configure_hipdnn_public_frontend_test_target TARGET_NAME)
         ${TARGET_NAME}
         PRIVATE TEST_GOOD_PLUGIN_NAME="${TEST_GOOD_PLUGIN_NAME}"
                 TEST_EXECUTE_FAILS_PLUGIN_NAME="${TEST_EXECUTE_FAILS_PLUGIN_NAME}"
+                TEST_NO_SOLVER_PLUGIN_NAME="${TEST_NO_SOLVER_PLUGIN_NAME}"
+                TEST_RESOURCE_FAIL_PLUGIN_NAME="${TEST_RESOURCE_FAIL_PLUGIN_NAME}"
                 TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME="${TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME}"
                 TEST_NO_APPLICABLE_ENGINES_B_PLUGIN_NAME="${TEST_NO_APPLICABLE_ENGINES_B_PLUGIN_NAME}"
                 TEST_DUPLICATE_ID_A_PLUGIN_NAME="${TEST_DUPLICATE_ID_A_PLUGIN_NAME}"
@@ -138,6 +147,7 @@ function(configure_hipdnn_public_frontend_test_target TARGET_NAME)
                 TEST_PASS_BY_VALUE_RECORDER_PLUGIN_NAME="${HIPDNN_TEST_PASS_BY_VALUE_RECORDER_PLUGIN_TARGET}"
                 TEST_GOOD_HEURISTIC_PLUGIN_NAME="${TEST_GOOD_HEURISTIC_PLUGIN_NAME}"
                 TEST_AUTOTUNE_PLUGIN_NAME="${TEST_AUTOTUNE_PLUGIN_NAME}"
+                TEST_CUDNN_COMPATIBILITY_V8_PLUGIN_NAME="${TEST_CUDNN_COMPATIBILITY_V8_PLUGIN_NAME}"
     )
 
     # Ensure test plugins are built before tests
@@ -146,6 +156,8 @@ function(configure_hipdnn_public_frontend_test_target TARGET_NAME)
         ${TEST_GOOD_PLUGIN_NAME}
         ${TEST_GOOD_DEFAULT_PLUGIN_NAME}
         ${TEST_EXECUTE_FAILS_PLUGIN_NAME}
+        ${TEST_NO_SOLVER_PLUGIN_NAME}
+        ${TEST_RESOURCE_FAIL_PLUGIN_NAME}
         ${TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME}
         ${TEST_NO_APPLICABLE_ENGINES_B_PLUGIN_NAME}
         ${TEST_DUPLICATE_ID_A_PLUGIN_NAME}
@@ -164,6 +176,7 @@ function(configure_hipdnn_public_frontend_test_target TARGET_NAME)
         ${HIPDNN_TEST_PASS_BY_VALUE_PLUGIN_TARGET}
         ${HIPDNN_TEST_PASS_BY_VALUE_RECORDER_PLUGIN_TARGET}
         ${TEST_GOOD_HEURISTIC_PLUGIN_NAME}
+        ${TEST_CUDNN_COMPATIBILITY_V8_PLUGIN_NAME}
         test_autotune_plugin
     )
 endfunction()
@@ -193,7 +206,11 @@ target_link_libraries(
 )
 
 configure_hipdnn_public_frontend_test_target(hipdnn_public_frontend_dynamic_load_tests)
+# A built backend must load successfully; do not skip runtime-resolution failures.
 add_dependencies(hipdnn_public_frontend_dynamic_load_tests hipdnn_backend)
+target_compile_definitions(
+    hipdnn_public_frontend_dynamic_load_tests PRIVATE HIPDNN_TEST_EXPECT_BACKEND_LIBRARY
+)
 
 clang_tidy_check(hipdnn_public_frontend_dynamic_load_tests)
 add_hipdnn_test(hipdnn_public_frontend_dynamic_load_tests ${CMAKE_CURRENT_BINARY_DIR})

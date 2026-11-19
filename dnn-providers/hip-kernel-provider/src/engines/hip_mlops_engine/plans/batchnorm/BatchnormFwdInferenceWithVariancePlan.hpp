@@ -18,7 +18,6 @@
 namespace hip_kernel_provider
 {
 
-using namespace core::utils;
 using namespace compilation;
 
 namespace batchnorm
@@ -61,7 +60,7 @@ public:
     double epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                         uint32_t numDeviceBuffers) const;
 
-    const std::optional<ActivationParams>& optActivation() const;
+    const std::optional<core::utils::ActivationParams>& optActivation() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* activationOut() const;
 
 private:
@@ -73,7 +72,7 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _estVariance;
     hipdnn_plugin_sdk::ScalarOperand _epsilon;
 
-    std::optional<ActivationParams> _optActivation;
+    std::optional<core::utils::ActivationParams> _optActivation;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _activationOut;
 };
 
@@ -108,11 +107,8 @@ private:
     std::unique_ptr<IRunnableKernel> _runnableKernel;
 
     // Kernel launch parameters computed during compile()
-    unsigned int _channels = 0;
-    unsigned int _inCstride = 0;
-    unsigned int _batchCount = 0;
-    unsigned int _cStride = 0;
-    unsigned int _hwStride = 0;
+    unsigned int _channelStride = 0;
+    unsigned int _spatialStride = 0;
     unsigned int _batchStride = 0;
 };
 

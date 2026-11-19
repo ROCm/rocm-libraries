@@ -27,6 +27,7 @@ Adding a new operation follows this sequence:
 9. **Review and build** — Compile, run tests, review generated code
 10. **Extract test constants** — Replace inline test literals with named constants (see Step 10 below)
 11. **Review integration test** — The generated integration test includes a lowering round-trip test and per-scalar preservation tests; add hand-written tests for auto-UIDs, multi-input variants, and multi-operation graphs as needed (see Step 11 below)
+12. **Add the work model** — Apply the schema annotations from `fragments/fbs_tensor_fields.txt`, regenerate the operand visitor, and give the op a FLOP formula or a "no counting convention" entry (see Step 12 below)
 
 ---
 
@@ -52,7 +53,7 @@ Insert the content from `fragments/descriptor_type_enum.txt`.
 Insert the content from `fragments/string_utils_block.txt`.
 
 - Add switch cases to `hipdnnGetBackendDescriptorTypeName()`
-- Add switch cases to `hipdnnGetBackendAttributeNameString()`
+- Add switch cases to `hipdnnGetAttributeNameString()`
 - The fragment contains both sets of cases
 
 ### 4d. Descriptor Factory — `backend/src/descriptors/DescriptorFactory.cpp`
@@ -174,8 +175,8 @@ Insert the content from each fragment into the corresponding shared file:
 
 | Fragment | Target File | What to Add |
 |----------|-------------|-------------|
-| `node_factory_case.txt` | `backend/src/descriptors/NodeFactory.cpp` | Case in `createFromNode()` switch |
-| `operation_unpacker_case.txt` | `frontend/src/OperationUnpacker.cpp` | Case in the unpacker dispatch |
+| `node_factory_case.txt` | `backend/src/descriptors/NodeFactory.cpp` | Case in `NodeFactory::createOperationFromNode()` switch |
+| `operation_unpacker_case.txt` | `frontend/include/hipdnn_frontend/detail/OperationUnpacker.hpp` | Case in the unpacker dispatch |
 | `operation_unpacker_test.txt` | `frontend/tests/TestOperationUnpacker.cpp` | Uncomment existing test or insert generated test in the `createNodeForType` tests section. Also uncomment the corresponding `#include` for the node header. |
 | `operation_type_enum.txt` | `backend/include/HipdnnOperationType.h` | Enum entry for this operation |
 | `node_unpack_override.txt` | Frontend node header (e.g., `ConvolutionFpropNode.hpp`) | `unpack_from_descriptor` override |
@@ -196,7 +197,7 @@ Error unpack_from_descriptor(
 
 ### 7e. Update CMake
 
-Add the new test file to `backend/tests/CMakeLists.txt`. The cmake_entries.txt fragment (from full generation) includes the fromNode test entry.
+Add the new test file to `backend/tests/CMakeLists.txt`. The `cmake_entries.txt` fragment (from `--mode backend` or `--mode full`) includes the fromNode test entry.
 
 ### 7f. Update Packer for Name Support
 
@@ -239,7 +240,7 @@ Insert the content from `fragments/cmake_entries.txt`.
 - Add the new `.cpp` source file to `backend/src/CMakeLists.txt`
 - Add the new test `.cpp` files to the appropriate test CMakeLists files:
   - `backend/tests/CMakeLists.txt` for descriptor unit tests
-  - `tests/CMakeLists.txt` for integration tests
+  - `tests/frontend/CMakeLists.txt` for integration tests
 
 ---
 
@@ -304,7 +305,7 @@ The generated integration test (`Integration<Op>DescriptorLowering.cpp`) include
 
 ### Additional Hand-Written Tests
 
-The generated tests cover the basic single-input scenario and include an `AutoAssignedUidsPreservedInLiftingRoundTrip` test. Consider adding these as needed:
+The generated tests cover the basic single-input scenario and include an `AutoAssignedUidsPreservedInRoundTrip` test (the lifting file has `AutoAssignedUidsPreservedInLiftingRoundTrip`). Consider adding these as needed:
 
 **Multi-input/ternary variants** — For operations like pointwise that have optional additional inputs (in_1, in_2), add tests exercising binary and ternary graph method overloads.
 
@@ -314,13 +315,33 @@ The generated tests cover the basic single-input scenario and include an `AutoAs
 
 The integration test requires the frontend node type to exist. Specifically:
 - The frontend attributes class (e.g., `ConvFpropAttributes`) in `frontend/include/hipdnn_frontend/attributes/`
-- The frontend node class (e.g., `ConvolutionFpropNode`) in `frontend/include/hipdnn_frontend/nodes/`
+- The frontend node class (e.g., `ConvolutionFpropNode`) in `frontend/include/hipdnn_frontend/node/`
 - The graph method (e.g., `graph->conv_fprop()`) in `frontend/include/hipdnn_frontend/Graph.hpp`
 
 If these don't exist yet, the integration test cannot be compiled. In that case:
 - Still place the generated file in `tests/frontend/`
 - Do NOT add it to `tests/frontend/CMakeLists.txt` until the frontend types exist
 - Note in your summary that the integration test is pending frontend implementation
+
+---
+
+## Step 12: Work Model (FLOPs and Operand Annotations)
+
+UHD heuristics publish each node's logical FLOPs (`graph.flops`, `graph.nodes[i].flops`) and its operands (`graph.nodes[i].*`). Both need per-op input; see `docs/AddingNewOperations.md`, "Work Model (FLOPs)" and "Operand Features".
+
+### 12a. Schema Annotations — `flatbuffers_sdk/schemas/<op>_attributes.fbs`
+
+`fragments/fbs_tensor_fields.txt` lists the op table's tensor-uid declarations with their annotations: `(cache_uid)` on every tensor reference, plus `work_data_dependent` on each field whose YAML entry sets `work_data_dependent: true`. Make the schema match, declare each attribute it uses at file scope, then run the `cache-key-hipdnn` and `node-operands-hipdnn` pre-commit hooks (or `scripts/gen_cache_key.py` and `scripts/gen_node_operands.py`) and commit the regenerated `cachekey_generated.h` and `node_operands_generated.h`. A stale `node_operands_generated.h` fails to compile: its `static_assert` pins `NodeAttributes::MAX`.
+
+### 12b. FLOPs — `plugin_sdk/include/hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp`
+
+Every `NodeAttributes` member is either counted or listed in `NO_COUNTING_CONVENTION`; `TestEngineFeatures.EveryNodeTypeHasDeclaredWorkOrNoCountingConvention` fails for a member that is neither.
+
+| Fragment | Target | What to Add |
+|----------|--------|-------------|
+| `node_flops_overload.txt` | `EngineFeatures.hpp` | `nodeFlops` overload after the last one. The stub returns `std::nullopt` (uncounted); replace its TODO with the logical FLOP formula. |
+| `logical_flops_case.txt` | `EngineFeatures.hpp` | Case in the `logicalFlops()` switch, before `default:`. Its second snippet is the `NO_COUNTING_CONVENTION` entry to use instead of all three fragments when the op has no counting convention; give the reason on the line above it. |
+| `work_model_test_case.txt` | `plugin_sdk/tests/heuristics/TestEngineFeatures.cpp` | Entry in the `cases` vector of `EveryNodeTypeHasDeclaredWorkOrNoCountingConvention`. Set the attributes the formula reads and the expected FLOPs (the generated `0.0` fails). |
 
 ---
 
@@ -357,6 +378,17 @@ Apply these rules:
 | `field: bool` | `data_fields` | `bool` |
 | `field: [long]` (array of UIDs) | `tensor_array_fields` | (for peer_stats etc.) |
 
+A tensor-uid field annotated `work_data_dependent` in the schema (`long (cache_uid, work_data_dependent)`) sets `work_data_dependent: true` on its `tensor_fields` or `tensor_array_fields` entry (default `false`). Set it when the tensor's contents, not its shape, decide how much work the node does: valid lengths, page tables, block masks, routing offsets. An operand read densely whatever its values (an additive bias, a dropout seed) stays `false`. The generator emits the annotation in `fragments/fbs_tensor_fields.txt` (Step 12a):
+
+```yaml
+tensor_fields:
+  - name: "first_token_offset"
+    fbs_field: "first_token_offset_tensor_uid"
+    attr_suffix: "FIRST_TOKEN_OFFSET_DESC"
+    required: true
+    work_data_dependent: true   # Group boundaries decide how many rows are multiplied
+```
+
 ### Required YAML Fields
 
 ```yaml
@@ -387,7 +419,7 @@ operation:
                                                     # → emits ConvolutionFpropAttributes.hpp and
                                                     # TestConvolutionFpropAttributes.cpp.
     # Lifting support (used by the lifting outputs generated alongside backend mode)
-    unpacker_function: "unpackConvFprop"             # Function name in the generated unpacker
+    unpacker_function: "unpackConvWgradOperation"    # Function name in the generated unpacker
     unpacker_include: ""                              # Override derived include file name (optional)
 
   # Shared attributes — if this operation reuses attributes from another operation
@@ -395,7 +427,7 @@ operation:
   # attr_name values. Do NOT create new per-operation copies.
   has_compute_data_type: true
   compute_data_type_attr: "HIPDNN_ATTR_CONVOLUTION_COMP_TYPE"  # Shared across conv ops
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT"  # For HIPDNN_ATTR_OPERATION_TYPE_EXT
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_WEIGHTS_EXT"  # For HIPDNN_ATTR_OPERATION_TYPE_EXT
 
   # Test data — UIDs should be distinct across operations to avoid confusion
   test_data:
@@ -421,7 +453,7 @@ operation:
 | `test_constant_name` | string | `""` | Named constant reference for test values (e.g., `"K_CONV_PADDING"`). |
 | `build_node_check` | bool | `true` | Whether this field is verified in the buildNode round-trip test. |
 | `default_value` | string | `""` | Default value expression for the field (e.g., `"ConvolutionMode::CROSS_CORRELATION"`). |
-| `frontend_inverse_converter` | string | `""` | Conversion function from backend C-API value back to frontend enum (used in unpacker). Only needed for `mode` fields. Example: `toFrontendConvMode` |
+| `frontend_inverse_converter` | string | `""` | Conversion function from backend C-API value back to frontend enum (used in unpacker). Only needed for `mode` fields. Example: `fromHipdnnConvMode` |
 | `fbs_optional` | bool | `false` | Set `true` for FBS optional scalar fields (i.e., the FBS schema marks the field as optional/nullable rather than providing a default). When `true`, the generated frontend getter returns `std::optional<T>` and the packer/unpacker emit `has_value()` / `value()` plumbing. Replaces the legacy `frontend_getter_returns_optional` field — derive optional-return shape solely from `fbs_optional`. |
 | `mode_sentinel` | string | unset | (Mode fields only.) Controls whether `finalize()` emits the sentinel-not-set check for this mode field. One of `"required"` (always emit; sentinel must exist in `enum_def`), `"optional"` (emit only when a sentinel exists; silently skip otherwise — the soft mode for in-flight migrations), or `"none"` (never emit; the enum has no sentinel by design). When unset, the loader auto-detects: emits the check when the linked `enum_def` contains a `NOT_SET` / `UNSET` entry (or any entry with `sentinel: true`), otherwise warns and falls back to `"none"`. Use `"none"` for SDPA-style enums (`DiagonalAlignment`, `AttentionImplementation`) where every value is meaningful. |
 | `mode_converter_optional` | bool | unset | (Mode fields only.) Overrides whether the frontend→backend converter returns `std::optional<T>`. Unset derives it from `mode_sentinel` (sentinel present → optional). Set `true` for a sentinel-less enum that must still reject a value it does not map, instead of falling back to the first enumerator; the packer then emits the `has_value()` check and returns `INVALID_VALUE`. |
@@ -473,6 +505,7 @@ tensor_array_fields:
     required: false         # Whether the field must be set before finalize
     test_uids: [100, 101]   # UIDs for test tensor descriptors
     test_label: "PeerStats"  # Label used in test case names
+    work_data_dependent: false  # See "Mapping FBS Fields to YAML"
 ```
 
 ### Tips
@@ -500,7 +533,10 @@ All enums on develop already follow this pattern:
 - PointwiseMode — `HIPDNN_TYPE_POINTWISE_MODE` (= 25)
 - DiagonalAlignment — `HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT` (= 26)
 - AttentionImplementation — `HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT` (= 27)
-- NormFwdPhase — `HIPDNN_TYPE_NORM_FWD_PHASE`
+- NormFwdPhase — `HIPDNN_TYPE_NORM_FWD_PHASE` (= 22)
+- ResampleMode — `HIPDNN_TYPE_RESAMPLE_MODE` (= 29)
+- PaddingMode — `HIPDNN_TYPE_PADDING_MODE` (= 30)
+- MoeGroupedMatmulMode — `HIPDNN_TYPE_MOE_GROUPED_MATMUL_MODE` (= 31)
 
 ### `enum` Type — LEGACY, Do NOT Use for New Operations
 
@@ -612,7 +648,7 @@ Generated code and post-generation edits MUST use existing utilities rather than
 
 | Helper | Purpose |
 |--------|---------|
-| `setInt64Vector()` / `getInt64Vector()` | Vector fields |
+| `setScalarVector<T>()` / `getScalarVector<T>()` | Vector fields |
 | `setDataType()` / `getDataType()` | Compute data type |
 | `setScalar<T>()` / `getScalar<T>()` | Scalar fields |
 | Mode-specific (e.g., `setConvMode()` / `getConvMode()`) | Mode enum fields |
@@ -622,10 +658,10 @@ Generated code and post-generation edits MUST use existing utilities rather than
 
 | Pattern | Location | Purpose |
 |---------|----------|---------|
-| `findTensorByUid()` + `verifyTensor()` | `TestGraphDescriptorOps.cpp:64-90` | Locate and validate tensors in deserialized graphs |
-| `verify<Op>Node()` helpers | `TestGraphDescriptorOps.cpp:93-116` | Validate operation node attributes |
-| Bundle pattern (`ConvOpBundle`) | `TestGraphDescriptorOps.cpp:118-137` | Composite test setup for multi-descriptor operations |
-| `UnPackGraph()` | Graph test utils | FlatBuffer deserialization (use instead of `->UnPack()`) |
+| `findTensorByUid()` + `verifyTensor()` | `GraphTestUtils.hpp`, `TestGraphDescriptorOps.cpp` | Locate and validate tensors in deserialized graphs |
+| `verify<Op>Node()` helpers (e.g., `verifyConvFwdNode()`) | `TestGraphDescriptorOps.cpp` | Validate operation node attributes |
+| Bundle pattern (`ConvOpBundle`, `createDefaultConvOp()`) | `GraphTestUtils.hpp` | Composite test setup for multi-descriptor operations |
+| `UnPackGraph()` | `hipdnn_flatbuffers_sdk/data_objects/graph_generated.h` | FlatBuffer deserialization (use instead of `->UnPack()`) |
 | `std::unique_ptr<HipdnnBackendDescriptor>` | getAttribute results | Safe ownership wrapping |
 
 ### Anti-Patterns to Avoid
@@ -655,7 +691,7 @@ Generated code and post-generation edits MUST use existing utilities rather than
 
 ## Frontend Fragment Apply Paths
 
-`--mode frontend` (and `--mode full`) emits four fragment files plus a per-mode-field test fragment. None of them are insertable verbatim — each must land at a specific spot in an in-tree file. The table below is the canonical reference; verify each insertion point against the current file before pasting (line numbers drift).
+`--mode frontend` (and `--mode full`) emits four frontend fragment files. The per-mode-field test fragment `mode_frontend_tests_<field>.txt` is emitted by `--mode backend` (and `--mode full`) for each mode field with an `enum_def`. None of them are insertable verbatim — each must land at a specific spot in an in-tree file. The table below is the canonical reference; verify each insertion point against the current file before pasting (line numbers drift).
 
 The generated frontend fragments and their targets:
 
@@ -705,7 +741,7 @@ These keys / flags / behaviors are no longer honored. The loader now hard-reject
 
 ### `data_fields[].frontend_getter` is still honored
 
-Note that `frontend_getter` on **`data_fields[]`** and **`tensor_array_fields[]`** is unchanged — only the `tensor_fields[]` variant was removed. Data-field and tensor-array getters are still derived from the YAML directly because there is no `frontend.inputs[]` analogue for non-tensor / variable-length fields.
+Note that `frontend_getter` on **`data_fields[]`** and **`tensor_array_fields[]`** is unchanged. The `tensor_fields[]` variant was removed and then restored (see "Restored / Honored Again" above). Data-field and tensor-array getters are still derived from the YAML directly because there is no `frontend.inputs[]` analogue for non-tensor / variable-length fields.
 
 ---
 

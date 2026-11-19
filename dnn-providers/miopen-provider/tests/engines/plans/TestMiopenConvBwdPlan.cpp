@@ -3,14 +3,15 @@
 
 #include <memory>
 
+#include "MiopenApi.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <miopen/miopen.h>
 
 #include "HipdnnMiopenHandle.hpp"
 #include "HipdnnMiopenSettings.hpp"
+#include "common/ConvPlanFindModeCheck.hpp"
 #include "engines/plans/MiopenConvBwdPlan.hpp"
 
 using namespace miopen_plugin;
@@ -291,6 +292,18 @@ TEST_F(TestGpuConvBwdPlan, CreatesPlanWithValidGraph)
     // Create plan
     const HipdnnMiopenSettings executionSettings;
     ConvBwdPlan(*_handle, std::move(params), executionSettings);
+}
+
+TEST_F(TestGpuConvBwdPlan, BenchmarkingSelectsNormalFindMode)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    auto* attrs = graph.getNode(0).attributes_as_ConvolutionBwdAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    test_conv_common::expectBenchmarkingSelectsNormalFindMode<ConvBwdParams, ConvBwdPlan>(
+        *_handle, graph, *attrs);
 }
 
 TEST_F(TestGpuConvBwdPlan, PlanUsesDefaultWorkspaceSizeWhenNoLimitSet)

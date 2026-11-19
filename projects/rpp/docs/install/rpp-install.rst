@@ -10,11 +10,13 @@ Install RPP
 
 ROCm Performance Primitives (RPP) supports HIP and CPU-only backends. The CPU backend is also referred to as the HOST backend.
 
-Starting with ROCm 10.1, RPP is built and delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_, the unified ROCm build system. Earlier standalone RPP releases were delivered with ROCm 7.2.x and prior.
-
 .. note::
 
-    RPP packages built by TheRock are currently built with audio augmentations disabled (``RPP_AUDIO_SUPPORT=OFF``). Build :doc:`from source <./rpp-build-and-install>` to enable audio augmentation support.
+    Audio augmentations are always enabled. The HIP spectrogram needs the rocFFT
+    runtime. rocFFT is a ``Recommends`` dependency on Debian and a ``Suggests``
+    dependency on RPM, so the package manager might not install it. If rocFFT is
+    missing, the HIP spectrogram returns ``RPP_ERROR_NOT_IMPLEMENTED``. Every
+    other RPP function works without it. For more information, see :doc:`./rpp-build`.
 
 Before you begin, verify that your system is supported. For more information,
 see :ref:`ROCm Core SDK components <rocm:release-components>`.

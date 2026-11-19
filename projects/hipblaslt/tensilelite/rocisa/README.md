@@ -14,6 +14,9 @@ invoke rocisa
 This compiles the C++ extension and installs it into your active venv so that
 `import rocisa` works from anywhere — no `PYTHONPATH` required.
 
+Importing rocisa never starts a native build. After changing rocisa's C++
+sources, rerun `invoke rocisa`.
+
 > **Linux only.** The `invoke` dev workflow (`invoke rocisa`, `invoke build-client`)
 > is supported on Linux (a ROCm dev container) only: it uses `amdclang`, defaults to
 > `/opt/rocm`, and resolves dependencies via RPATH — none of which apply on Windows.
@@ -22,7 +25,7 @@ This compiles the C++ extension and installs it into your active venv so that
 
 ## Rebuilding after C++ changes
 
-See [tensilelite/README.md — "Rebuilding rocisa after C++ changes"](../README.md#rebuilding-rocisa-after-c-changes)
+See [tensilelite/README.md — "Rebuilding after C++ changes"](../README.md#rebuilding-after-c-changes)
 for the full rebuild instructions, including which cmake build directory to use
 depending on how rocisa was installed.
 
@@ -40,4 +43,7 @@ scikit-build-core handles the cmake configuration and compilation automatically.
 Requires the ROCm SDK (`amdclang++`) and `/opt/rocm` on the default search path,
 or set `ROCM_PATH`.
 
-For more information, see `docs/`.
+For more information, see the internal contributor notes in
+[`docs/`](docs/) (how to add a class or function, and how rocisa is used
+from TensileLite). These are developer-facing implementation notes, not
+part of the published [hipBLASLt documentation](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html).

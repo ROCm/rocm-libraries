@@ -38,9 +38,11 @@ void RMSnormValidator::checkTensorLayoutsAndDimsSupported(const std::vector<int6
     validateConsistentLayouts(tensors);
 }
 
-void RMSnormValidator::checkTensorDataTypesSupported(const std::vector<int64_t>& ioTensorIds,
-                                                     const std::vector<int64_t>& affineTensorIds,
-                                                     const std::vector<int64_t>& statTensorIds)
+void RMSnormValidator::checkTensorDataTypesSupported(
+    const std::vector<int64_t>& ioTensorIds,
+    const std::vector<int64_t>& affineTensorIds,
+    const std::vector<int64_t>& statTensorIds,
+    const std::vector<int64_t>& intermediateTensorIds)
 {
     const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedIOTypes{
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -68,19 +70,27 @@ void RMSnormValidator::checkTensorDataTypesSupported(const std::vector<int64_t>&
 
     // Only fp32 compute type is supported for now
     const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedComputeTypes{
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
-
-    };
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT};
 
     validateConsistentDataTypes(statTensorIds,
                                 allowedComputeTypes,
                                 "RMSnorm stat tensors use unsupported data type.",
                                 "All stat tensors for RMSnorm must have the same data type.");
+
+    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
+        allowedIntermediateTypes{hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT};
+
+    validateConsistentDataTypes(
+        intermediateTensorIds,
+        allowedIntermediateTypes,
+        "RMSnorm intermediate tensors use unsupported data type.",
+        "All intermediate tensors for RMSnorm must have the same data type.");
 }
 
 void RMSnormValidator::checkTensorShapesSupported(const std::vector<int64_t>& ioTensorIds,
                                                   const std::vector<int64_t>& affineTensorIds,
-                                                  const std::vector<int64_t>& statTensorIds)
+                                                  const std::vector<int64_t>& statTensorIds,
+                                                  const std::vector<int64_t>& intermediateTensorIds)
 {
     if(ioTensorIds.empty())
     {
@@ -94,6 +104,10 @@ void RMSnormValidator::checkTensorShapesSupported(const std::vector<int64_t>& io
 
     validateConsistentShapes(
         ioTensorIds, ioDims, "All IO tensors for RMSnorm must have the same shape.");
+    validateElementCountFitsUint32(
+        ioDims,
+        "RMSnorm kernels index tensors with 32-bit unsigned arithmetic; the IO tensor has "
+        "too many elements.");
 
     const auto& affineTensorAttr = findTensorAttributes(_tensorMap, affineTensorIds[0]);
     const std::vector<int64_t> affineDims(affineTensorAttr.dims()->begin(),
@@ -101,6 +115,17 @@ void RMSnormValidator::checkTensorShapesSupported(const std::vector<int64_t>& io
     validateConsistentShapes(affineTensorIds,
                              affineDims,
                              "Scale and bias tensors for RMSnorm must have the same shape.");
+
+    if(!intermediateTensorIds.empty())
+    {
+        const auto& intermediateTensorAttr
+            = findTensorAttributes(_tensorMap, intermediateTensorIds[0]);
+        const std::vector<int64_t> intermediateDims(intermediateTensorAttr.dims()->begin(),
+                                                    intermediateTensorAttr.dims()->end());
+        validateConsistentShapes(intermediateTensorIds,
+                                 intermediateDims,
+                                 "Intermediate tensors for RMSnorm must have the same shape.");
+    }
 
     checkAffineNormalizedShape(affineDims, ioDims);
 
@@ -140,30 +165,65 @@ void RMSnormValidator::checkAffineNormalizedShape(const std::vector<int64_t>& af
     }
 }
 
-void RMSnormValidator::checkTensorConfigSupported(
-    const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& rmsNormAttr)
+void RMSnormValidator::checkFwdTensorConfigSupported(
+    const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& rmsNormFwdAttr)
 {
     const std::vector<int64_t> ioTensorIds
-        = {rmsNormAttr.x_tensor_uid(), rmsNormAttr.y_tensor_uid()};
-    std::vector<int64_t> affineTensorIds = {rmsNormAttr.scale_tensor_uid()};
-    if(rmsNormAttr.bias_tensor_uid().has_value())
+        = {rmsNormFwdAttr.x_tensor_uid(), rmsNormFwdAttr.y_tensor_uid()};
+    std::vector<int64_t> affineTensorIds = {rmsNormFwdAttr.scale_tensor_uid()};
+    if(rmsNormFwdAttr.bias_tensor_uid().has_value())
     {
-        affineTensorIds.push_back(rmsNormAttr.bias_tensor_uid().value());
+        affineTensorIds.push_back(rmsNormFwdAttr.bias_tensor_uid().value());
     }
-
     std::vector<int64_t> statTensorIds;
-    if(rmsNormAttr.inv_rms_tensor_uid().has_value())
+    if(rmsNormFwdAttr.inv_rms_tensor_uid().has_value())
     {
-        statTensorIds.push_back(rmsNormAttr.inv_rms_tensor_uid().value());
+        statTensorIds.push_back(rmsNormFwdAttr.inv_rms_tensor_uid().value());
     }
 
     std::vector<int64_t> allTensors = std::vector<int64_t>(ioTensorIds.begin(), ioTensorIds.end());
     allTensors.insert(allTensors.end(), affineTensorIds.begin(), affineTensorIds.end());
     allTensors.insert(allTensors.end(), statTensorIds.begin(), statTensorIds.end());
 
+    checkEpsilonSupported(rmsNormFwdAttr.epsilon_tensor_uid());
+    validateNoVirtualTensors(allTensors,
+                             "RMSnorm kernel inputs and outputs must not be virtual tensors.");
     checkTensorLayoutsAndDimsSupported(allTensors);
-    checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds);
-    checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);
+    checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, {});
+    checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds, {});
+}
+
+void RMSnormValidator::checkFwdActivationTensorConfigSupported(
+    const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& rmsNormFwdAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttr)
+{
+    checkActivationModeSupported(pointwiseAttr, false);
+
+    const std::vector<int64_t> ioTensorIds
+        = {rmsNormFwdAttr.x_tensor_uid(), pointwiseAttr.out_0_tensor_uid()};
+    std::vector<int64_t> affineTensorIds = {rmsNormFwdAttr.scale_tensor_uid()};
+    if(rmsNormFwdAttr.bias_tensor_uid().has_value())
+    {
+        affineTensorIds.push_back(rmsNormFwdAttr.bias_tensor_uid().value());
+    }
+    std::vector<int64_t> statTensorIds;
+    if(rmsNormFwdAttr.inv_rms_tensor_uid().has_value())
+    {
+        statTensorIds.push_back(rmsNormFwdAttr.inv_rms_tensor_uid().value());
+    }
+    const std::vector<int64_t> intermediateTensorIds
+        = {rmsNormFwdAttr.y_tensor_uid(), pointwiseAttr.in_0_tensor_uid()};
+
+    std::vector<int64_t> allTensors = std::vector<int64_t>(ioTensorIds.begin(), ioTensorIds.end());
+    allTensors.insert(allTensors.end(), affineTensorIds.begin(), affineTensorIds.end());
+    allTensors.insert(allTensors.end(), statTensorIds.begin(), statTensorIds.end());
+    allTensors.insert(allTensors.end(), intermediateTensorIds.begin(), intermediateTensorIds.end());
+
+    checkEpsilonSupported(rmsNormFwdAttr.epsilon_tensor_uid());
+    checkTensorLayoutsAndDimsSupported(allTensors);
+    checkTensorDataTypesSupported(
+        ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds);
+    checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds);
 }
 
 void RMSnormValidator::checkBwdTensorConfigSupported(
@@ -187,9 +247,63 @@ void RMSnormValidator::checkBwdTensorConfigSupported(
     allTensors.insert(allTensors.end(), affineTensorIds.begin(), affineTensorIds.end());
     allTensors.insert(allTensors.end(), statTensorIds.begin(), statTensorIds.end());
 
+    validateNoVirtualTensors(allTensors,
+                             "RMSnorm kernel inputs and outputs must not be virtual tensors.");
     checkTensorLayoutsAndDimsSupported(allTensors);
-    checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds);
-    checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);
+    checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, {});
+    checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds, {});
+}
+
+void RMSnormValidator::checkBwdActivationTensorConfigSupported(
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes& rmsNormBwdAttr)
+{
+    checkActivationModeSupported(pointwiseAttr, true);
+
+    const auto activationIn1Uid = pointwiseAttr.in_1_tensor_uid();
+    if(!activationIn1Uid.has_value()
+       && pointwiseAttr.operation()
+              != hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Activation backward node must have a second input tensor (in_1)");
+    }
+
+    std::vector<int64_t> ioTensorIds = {
+        pointwiseAttr.in_0_tensor_uid(),
+        rmsNormBwdAttr.x_tensor_uid(),
+        rmsNormBwdAttr.dx_tensor_uid(),
+    };
+    if(activationIn1Uid.has_value())
+    {
+        ioTensorIds.push_back(activationIn1Uid.value());
+    }
+    const std::vector<int64_t> statTensorIds = {rmsNormBwdAttr.inv_rms_tensor_uid()};
+    std::vector<int64_t> affineTensorIds
+        = {rmsNormBwdAttr.scale_tensor_uid(), rmsNormBwdAttr.dscale_tensor_uid()};
+    if(rmsNormBwdAttr.dbias_tensor_uid().has_value())
+    {
+        affineTensorIds.push_back(rmsNormBwdAttr.dbias_tensor_uid().value());
+    }
+    const std::vector<int64_t> intermediateTensorIds
+        = {pointwiseAttr.out_0_tensor_uid(), rmsNormBwdAttr.dy_tensor_uid()};
+
+    std::vector<int64_t> allTensors = std::vector<int64_t>(ioTensorIds.begin(), ioTensorIds.end());
+    allTensors.insert(allTensors.end(), affineTensorIds.begin(), affineTensorIds.end());
+    allTensors.insert(allTensors.end(), statTensorIds.begin(), statTensorIds.end());
+    allTensors.insert(allTensors.end(), intermediateTensorIds.begin(), intermediateTensorIds.end());
+
+    checkTensorLayoutsAndDimsSupported(allTensors);
+    checkTensorDataTypesSupported(
+        ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds);
+    checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds);
+}
+
+void RMSnormValidator::checkActivationModeSupported(
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttr, bool isBwd)
+{
+    checkNormalizationActivationModeSupported(pointwiseAttr, isBwd, "Rmsnorm");
 }
 
 } // namespace hip_kernel_provider::rmsnorm

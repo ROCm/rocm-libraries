@@ -359,7 +359,6 @@ inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spilu0_stage& 
     return rocsparse_status_invalid_value;
 }
 
-#ifdef ROCSPARSE_WITH_ILDLT0
 template <>
 inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spildlt0_alg& p)
 {
@@ -383,7 +382,6 @@ inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spildlt0_outpu
 {
     return rocsparse_status_invalid_value;
 }
-#endif
 
 template <>
 inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spitsv_stage& p)
@@ -420,3 +418,17 @@ inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spgeam_stage& 
 {
     return rocsparse_status_invalid_value;
 }
+
+#if defined(ROCSPARSE_WITH_SPSORT)
+template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spsort_stage& p)
+{
+    return rocsparse_status_invalid_value;
+}
+
+template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spsort_input& p)
+{
+    return rocsparse_status_invalid_value;
+}
+#endif

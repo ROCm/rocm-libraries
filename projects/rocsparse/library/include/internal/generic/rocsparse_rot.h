@@ -57,7 +57,6 @@ extern "C" {
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="rot_uniform">Uniform Precisions</caption>
 *  <tr><th>X / Y / compute_type
 *  <tr><td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f64_r

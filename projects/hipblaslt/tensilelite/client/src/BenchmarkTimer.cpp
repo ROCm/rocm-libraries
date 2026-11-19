@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "BenchmarkTimer.hpp"
+#include "ClientProblemFactory.hpp"
 #include "PerformanceReporter.hpp"
 #include "ResultReporter.hpp"
 #include "TimingInstrumentation.hpp"
@@ -33,6 +34,7 @@
 
 #include <Tensile/hip/HipUtils.hpp>
 
+#include <algorithm>
 #include <csignal>
 #include <cstddef>
 #include <thread>
@@ -195,6 +197,11 @@ namespace TensileLite
             }
         }
 
+        ContractionProblem* BenchmarkTimer::deviceProblem() const
+        {
+            return m_split ? m_split->sliceProblem(m_problem, 0) : m_problem;
+        }
+
         void BenchmarkTimer::preSolution(ContractionSolution* const solution)
         {
             m_numEnqueuesInSolution = 0;
@@ -213,7 +220,7 @@ namespace TensileLite
             {
                 pp = solution->projectedPerformance(problem->gemms[0], m_hardware);
             }
-            else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
+            else if(auto problem = dynamic_cast<ContractionProblemGemm*>(deviceProblem()))
             {
                 pp = solution->projectedPerformance(*problem, m_hardware);
             }
@@ -257,11 +264,16 @@ namespace TensileLite
                 if(auto problem = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
                 {
                     pp        = m_solution->projectedPerformance(problem->gemms[0], m_hardware);
-                    flopCount = problem->gemms[0].flopCount();
+                    flopCount = 0.0;
+                    for(auto& gemm : problem->gemms)
+                        flopCount += gemm.flopCount();
                 }
                 else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
                 {
-                    pp        = m_solution->projectedPerformance(*problem, m_hardware);
+                    // m_problem is the full problem under --split-devices; the slice
+                    // gives the per-device projection.
+                    pp = m_solution->projectedPerformance(
+                        *dynamic_cast<ContractionProblemGemm*>(deviceProblem()), m_hardware);
                     flopCount = problem->flopCount();
                 }
                 else
@@ -270,10 +282,12 @@ namespace TensileLite
                         "[BenchmarkTimer] Failed to cast problem to any ContractionProblem.");
                 }
 
+                // split-devices: the slices ran concurrently, so the time is the slowest
+                // device and the work is the full problem.
                 gflops      = !sol_is_skipped ? flopCount / (timePerEnqueue_us) / 1000.0 : 0;
                 int    tiles       = pp.granularities.tilesPerCu * perf.CUs;
                 int    usedCus     = std::min(tiles, perf.CUs);
-                gflopsPerCu = gflops / usedCus;
+                gflopsPerCu = gflops / (m_split ? m_split->numSlices() : 1) / usedCus;
 
                 if(!sol_is_skipped)
                 {
@@ -336,8 +350,7 @@ namespace TensileLite
         }
 
         void BenchmarkTimer::postWarmup(TimingEvents const& startEvents,
-                                        TimingEvents const& stopEvents,
-                                        hipStream_t const&  stream)
+                                        TimingEvents const& stopEvents)
         {
             // no need to do the warmup test when:
             // 1. skip_from_map (When restore-from-log) or
@@ -348,15 +361,20 @@ namespace TensileLite
             double_millis totalTime(0.0);
 
             // Skip the first warmup event (cold start) when multiple warmups are available
-            size_t warmupStartIdx = startEvents->size() == 1 ? 0 : 1;
-            float enqTime = 0.0f;
-            HIP_CHECK_EXC(hipEventSynchronize(stopEvents->back().back()));
-            for(size_t i = warmupStartIdx; i < startEvents->size(); i++)
+            size_t warmupStartIdx = startEvents.numInvocations() == 1 ? 0 : 1;
+            for(size_t d = 0; d < stopEvents.numCards(); d++)
+                HIP_CHECK_EXC(hipEventSynchronize(stopEvents.card(d).back().back()));
+            for(size_t i = warmupStartIdx; i < startEvents.numInvocations(); i++)
             {
-                HIP_CHECK_EXC(hipEventElapsedTime(
-                    &enqTime, startEvents->at(i).front(), stopEvents->at(i).back()));
-
-                totalTime += double_millis(enqTime);
+                float launchMs = 0.0f;
+                for(size_t d = 0; d < startEvents.numCards(); d++)
+                {
+                    float enqTime = 0.0f;
+                    HIP_CHECK_EXC(hipEventElapsedTime(
+                        &enqTime, startEvents.card(d)[i].front(), stopEvents.card(d)[i].back()));
+                    launchMs = std::max(launchMs, enqTime);
+                }
+                totalTime += double_millis(launchMs);
             }
             if(totalTime < m_currentBestWarmUpTime)
                 m_currentBestWarmUpTime = totalTime;
@@ -369,14 +387,16 @@ namespace TensileLite
             }
         }
 
-        void BenchmarkTimer::validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                             TimingEvents const&            startEvents,
-                                             TimingEvents const&            stopEvents)
+        void BenchmarkTimer::validateWarmups(std::vector<size_t> const& slots,
+                                             TimingEvents const&        startEvents,
+                                             TimingEvents const&        stopEvents)
         {
-            if(m_syncAfterWarmups && (stopEvents->size() > 0) && (stopEvents->back().size() > 0))
+            if(m_syncAfterWarmups && stopEvents.numInvocations() > 0)
             {
                 ScopedTimer timer("validate_gpu_sync");
-                HIP_CHECK_EXC(hipEventSynchronize(stopEvents->back().back()));
+                for(size_t d = 0; d < stopEvents.numCards(); d++)
+                    if(!stopEvents.card(d).back().empty())
+                        HIP_CHECK_EXC(hipEventSynchronize(stopEvents.card(d).back().back()));
             }
         }
 
@@ -410,8 +430,9 @@ namespace TensileLite
                     for(int i = 0; i < problem->gemms.size(); i++)
                         flopCount += problem->gemms[i].flopCount();
                 }
-                else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
+                else if(auto problem = dynamic_cast<ContractionProblemGemm*>(deviceProblem()))
                 {
+                    // One launch is one device's slice.
                     flopCount = problem->flopCount();
                 }
                 else
@@ -433,79 +454,113 @@ namespace TensileLite
             m_curNumEnqueuesPerSync = count;
         }
 
-        void BenchmarkTimer::preEnqueues(hipStream_t const& stream)
+        void BenchmarkTimer::preEnqueues()
         {
             if(!m_useGPUTimer)
             {
-                HIP_CHECK_EXC(hipDeviceSynchronize());
+                forEachDevice(*m_devices,
+                              [](DeviceContext&) { HIP_CHECK_EXC(hipDeviceSynchronize()); });
                 m_startTime = clock::now();
             }
             else
             {
-                static_cast<void>(hipEventCreate(&start));
-                static_cast<void>(hipEventCreate(&stop));
-                static_cast<void>(hipEventRecord(start, stream));
+                // The span of a split run is host wall clock, so the devices must be idle when it
+                // starts, as on the other path; otherwise earlier queued work would be counted.
+                if(m_split != nullptr && m_split->numSlices() > 1)
+                    forEachDevice(*m_devices,
+                                  [](DeviceContext&) { HIP_CHECK_EXC(hipDeviceSynchronize()); });
+                m_start.assign(m_devices->size(), nullptr);
+                m_stop.assign(m_devices->size(), nullptr);
+                for(size_t d = 0; d < m_devices->size(); d++)
+                {
+                    ScopedDevice device((*m_devices)[d]->deviceId);
+                    HIP_CHECK_EXC(hipEventCreate(&m_start[d]));
+                    HIP_CHECK_EXC(hipEventCreate(&m_stop[d]));
+                    HIP_CHECK_EXC(hipEventRecord(m_start[d], (*m_devices)[d]->stream));
+                }
+                m_startTime = clock::now();
             }
         }
 
         void BenchmarkTimer::postEnqueues(TimingEvents const& startEvents,
-                                          TimingEvents const& stopEvents,
-                                          hipStream_t const&  stream)
+                                          TimingEvents const& stopEvents)
         {
             if(!m_useGPUTimer)
             {
-                HIP_CHECK_EXC(hipDeviceSynchronize());
+                forEachDevice(*m_devices,
+                              [](DeviceContext&) { HIP_CHECK_EXC(hipDeviceSynchronize()); });
                 m_endTime = clock::now();
             }
             else
             {
-                static_cast<void>(hipEventRecord(stop, stream));
-                static_cast<void>(hipEventSynchronize(stop));
+                // Surfaces kernel faults, which would otherwise yield bogus timings.
+                for(size_t d = 0; d < m_devices->size(); d++)
+                {
+                    ScopedDevice device((*m_devices)[d]->deviceId);
+                    HIP_CHECK_EXC(hipEventRecord(m_stop[d], (*m_devices)[d]->stream));
+                }
+                ScopedTimer timer("benchmark_event_sync");
+                for(auto stop : m_stop)
+                    HIP_CHECK_EXC(hipEventSynchronize(stop));
+                m_endTime = clock::now();
             }
         }
 
-        void BenchmarkTimer::validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                              TimingEvents const&            startEvents,
-                                              TimingEvents const&            stopEvents)
+        double BenchmarkTimer::takeBatchTimeMs()
         {
-            double_millis totalTime(0.0);
-
-            if(m_useGPUTimer)
+            // --split-devices: events of different devices cannot be compared, and the slowest
+            // device's own time leaves out the skew between the devices' launches. Use the full
+            // host-observed span, first launch to last device done, like the wall-clock timer.
+            const bool splitRun = m_split != nullptr && m_split->numSlices() > 1;
+            if(!m_useGPUTimer || splitRun)
             {
-                if((start == nullptr) && (stop == nullptr))
-                {
-                    float enqTime = 0.0f;
-                    HIP_CHECK_EXC(hipEventSynchronize(stopEvents->back().back()));
-                    for(size_t i = 0; i < startEvents->size(); i++)
+                if(m_useGPUTimer)
+                    for(size_t d = 0; d < m_devices->size(); d++)
                     {
-                        HIP_CHECK_EXC(hipEventElapsedTime(
-                            &enqTime, startEvents->at(i).front(), stopEvents->at(i).back()));
-
-                        totalTime += double_millis(enqTime);
+                        HIP_CHECK_EXC(hipEventDestroy(m_start[d]));
+                        HIP_CHECK_EXC(hipEventDestroy(m_stop[d]));
                     }
-                }
-                else
-                {
-                    float eventMs = 0.0f;
-                    static_cast<void>(hipEventElapsedTime(&eventMs, start, stop));
-                    totalTime = double_millis(eventMs);
-                    static_cast<void>(hipEventDestroy(start));
-                    static_cast<void>(hipEventDestroy(stop));
-                }
+                m_start.clear();
+                m_stop.clear();
+                return double_millis(m_endTime - m_startTime).count();
             }
-            else
+
+            float maxMs = 0.0f;
+            for(size_t d = 0; d < m_devices->size(); d++)
             {
-                totalTime = double_millis(m_endTime - m_startTime);
+                float eventMs = 0.0f;
+                {
+                    ScopedTimer timer("benchmark_event_elapsed_time");
+                    HIP_CHECK_EXC(hipEventElapsedTime(&eventMs, m_start[d], m_stop[d]));
+                }
+                maxMs = std::max(maxMs, eventMs);
+                {
+                    ScopedTimer timer("benchmark_event_destroy");
+                    HIP_CHECK_EXC(hipEventDestroy(m_start[d]));
+                    HIP_CHECK_EXC(hipEventDestroy(m_stop[d]));
+                }
             }
+            m_start.clear();
+            m_stop.clear();
+            return maxMs;
+        }
+
+        void BenchmarkTimer::validateEnqueues(std::vector<size_t> const& slots,
+                                              TimingEvents const&        startEvents,
+                                              TimingEvents const&        stopEvents)
+        {
+            double_millis totalTime(takeBatchTimeMs());
 
             m_timeInSolution += totalTime;
             m_totalGPUTime += totalTime;
-            m_numEnqueuesInSolution += startEvents->size();
+            m_numEnqueuesInSolution += startEvents.numInvocations();
 
             if(m_sleepPercent > 0)
             {
                 auto sleepTime = totalTime * (m_sleepPercent / 100.0);
 
+                // Deliberate idle time (--sleep-percent / SleepPercent), not work.
+                ScopedTimer timer("benchmark_sleep");
                 std::this_thread::sleep_for(sleepTime);
             }
         }

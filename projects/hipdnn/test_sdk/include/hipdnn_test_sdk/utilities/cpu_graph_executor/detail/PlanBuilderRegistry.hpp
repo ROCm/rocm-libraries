@@ -10,6 +10,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferenceWithVariancePlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormTrainPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BlockScaleDequantizePlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BlockScaleQuantizePlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionBwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionFwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/LayernormBpropPlan.hpp>
@@ -22,6 +23,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormBwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ReductionPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ResampleBwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ResampleFwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaBwdPlan.hpp>
 
@@ -61,7 +63,7 @@ public:
 
         std::ostringstream oss;
         oss << "No plan builder registered for signature key: " << key;
-        throw std::runtime_error(oss.str());
+        throw utilities::CpuReferenceNotApplicableError(oss.str());
     }
 
 private:

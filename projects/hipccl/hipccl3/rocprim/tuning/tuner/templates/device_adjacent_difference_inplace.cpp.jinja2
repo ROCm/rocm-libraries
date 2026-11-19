@@ -1,0 +1,7 @@
+{% extends "device_adjacent_difference.cpp.jinja2" %}
+
+{% block benchmarking_include %}
+#include "benchmark_device_adjacent_difference.hpp"
+{% endblock %}
+
+{% block aliasing %}common::api_variant::in_place{% endblock %}

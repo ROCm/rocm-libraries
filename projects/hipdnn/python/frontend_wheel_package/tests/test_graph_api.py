@@ -3,7 +3,16 @@
 
 """API tests for Graph configuration (mostly no GPU required)."""
 
+import math
+import sys
+
+import numpy as np
+import pytest
+
 import hipdnn_frontend as hipdnn
+
+from .graph_builders import build_pointwise_add_graph
+from .helpers import NullHandle, build_all_plans
 
 
 class TestGraphConfiguration:
@@ -122,3 +131,116 @@ class TestGraphValidation:
 
         result = graph.validate()
         assert not result.is_good()
+
+
+def _device_buffer(data):
+    buf = hipdnn.DeviceBuffer(data.nbytes)
+    buf.copy_from_host(data.tobytes())
+    return buf
+
+
+def _workspace_ptr(graph):
+    size = graph.get_workspace_size()
+    if size <= 0:
+        return None, 0
+    buf = hipdnn.DeviceBuffer(size)
+    return buf, buf.ptr()
+
+
+def test_execute_timed_ext_without_compiled_plan_is_a_bad_error():
+    """No compiled plan -> the same failure execute() would report; timing stays empty."""
+    graph = hipdnn.Graph()
+
+    err, timing = graph.execute_timed_ext(NullHandle(), {}, 0)
+    assert err.is_bad()
+    assert not timing.timed_out
+    assert timing.elapsed_ms is None
+    assert timing.quality == hipdnn.TimingQuality.INVALID
+
+
+def test_numerical_note_enum_exposes_the_ten_notes_without_not_set():
+    """NumericalNote mirrors the frontend enum; NOT_SET is not a reportable note."""
+    expected = {
+        "TENSOR_CORE",
+        "DOWN_CONVERT_INPUTS",
+        "REDUCED_PRECISION_REDUCTION",
+        "FFT",
+        "NONDETERMINISTIC",
+        "WINOGRAD",
+        "WINOGRAD_TILE_4x4",
+        "WINOGRAD_TILE_6x6",
+        "WINOGRAD_TILE_13x13",
+        "STRICT_NAN_PROP",
+    }
+    assert {member.name for member in hipdnn.NumericalNote} == expected
+
+
+def test_numerical_note_is_cudnns_spelling_of_the_enum():
+    """cuDNN's Python frontend spells the enum numerical_note."""
+    assert hipdnn.numerical_note is hipdnn.NumericalNote
+
+
+def test_numerical_notes_for_engine_on_unbuilt_graph_raises():
+    """The graph must be built before engine notes can be queried."""
+    graph = hipdnn.Graph()
+
+    with pytest.raises(RuntimeError):
+        graph.get_numerical_notes_for_engine(0)
+
+
+@pytest.mark.gpu
+def test_numerical_notes_for_engine_reports_the_engines_notes():
+    """The stub engine declares no numerical notes, so the backend reports NONDETERMINISTIC."""
+    graph, _, _, _ = build_pointwise_add_graph(n=1, c=1, h=2, w=2)
+    handle = hipdnn.create_handle()
+    assert graph.validate().is_good()
+    assert graph.build_operation_graph(handle).is_good()
+
+    engine_ids = graph.get_ranked_engine_ids()
+    assert engine_ids
+    for engine_id in engine_ids:
+        notes = graph.get_numerical_notes_for_engine(engine_id)
+        assert notes == [hipdnn.NumericalNote.NONDETERMINISTIC]
+
+
+@pytest.mark.gpu
+class TestGraphExecuteTimedExt:
+    """Tests for Graph.execute_timed_ext(): exactly-once, device-only-timed execution."""
+
+    def test_uid_keyed_reports_valid_timing(self):
+        """A real HIP event measurement through the test plugin reports its method."""
+        graph, a, b, out = build_pointwise_add_graph(n=1, c=1, h=2, w=2)
+        handle = build_all_plans(graph)
+
+        a_data = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32).reshape(a.get_dim())
+        b_data = np.array([10.0, 20.0, 30.0, 40.0], dtype=np.float32).reshape(
+            b.get_dim()
+        )
+        sentinel = np.full(out.get_dim(), -1.0, dtype=np.float32)
+
+        a_buf, b_buf = _device_buffer(a_data), _device_buffer(b_data)
+        out_buf = _device_buffer(sentinel)
+        ws_buf, ws_ptr = _workspace_ptr(graph)
+        variant_pack = {
+            a.get_uid(): a_buf.ptr(),
+            b.get_uid(): b_buf.ptr(),
+            out.get_uid(): out_buf.ptr(),
+        }
+
+        err, timing = graph.execute_timed_ext(handle, variant_pack, ws_ptr)
+        assert err.is_good(), err.get_message()
+        assert not timing.timed_out
+        if sys.platform == "win32" and timing.quality == hipdnn.TimingQuality.INVALID:
+            # On Windows, hipEventElapsedTime can return a negative value for a short
+            # span (https://github.com/ROCm/rocm-systems/issues/12925). The binding
+            # reports that as INVALID with no elapsed time, which is its documented
+            # contract. Remove this when the runtime fix ships.
+            assert timing.elapsed_ms is None
+            return
+        assert timing.elapsed_ms is not None
+        assert math.isfinite(timing.elapsed_ms)
+        assert timing.elapsed_ms >= 0.0
+        assert timing.quality in (
+            hipdnn.TimingQuality.DEVICE_ONLY,
+            hipdnn.TimingQuality.UNSTALLED,
+        )

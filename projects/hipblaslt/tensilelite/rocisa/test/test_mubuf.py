@@ -31,6 +31,7 @@ from rocisa.container import GLOBALModifiers, MUBUFModifiers, sgpr, vgpr
 from rocisa.enum import CacheScope, TemporalHint, NonVolatile
 from rocisa.instruction import (
     BufferAtomicAddF32,
+    BufferAtomicPkAddBF16,
     BufferLoadB32,
     BufferLoadB64,
     BufferLoadB128,
@@ -299,6 +300,19 @@ def test_rocisa_atomic_null_soffset_adds_offen():
     )
 
     assert str(inst).strip() == "buffer_atomic_add_f32 v12, v32, s[60:63], null offen offset:0"
+
+
+def test_rocisa_atomic_pk_add_bf16_null_soffset_adds_offen():
+    # Single dword of vdata holding two packed BF16 lanes; no glc/TH, so the
+    # hardware does not return the pre-add value.
+    inst = BufferAtomicPkAddBF16(
+        src=vgpr(12),
+        vaddr=vgpr(32),
+        saddr=sgpr(60, 4),
+        soffset=0,
+    )
+
+    assert str(inst).strip() == "buffer_atomic_pk_add_bf16 v12, v32, s[60:63], null offen offset:0"
 
 
 def test_rocisa_global_atomic_inc_u32_saddr():

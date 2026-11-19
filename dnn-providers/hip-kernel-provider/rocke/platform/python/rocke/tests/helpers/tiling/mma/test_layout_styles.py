@@ -1,0 +1,117 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""The LayoutStyle LDS-bridge extension point (follow-up #28): the memory-bridge descriptor pair a
+LDS-staging style produces is on the base protocol (``lds_bridge``), not exposed ad-hoc off a concrete
+subclass. A non-staging style returns None; the staging style returns (lds_read_landing, mma_ready).
+Offline, no GPU."""
+
+from __future__ import annotations
+
+import pytest
+
+from rocke.core.ir import F16, F32, FP4E2M1
+from rocke.helpers.tiling.mma.styles import CanonicalStyle, InterleavedStyle
+from rocke.helpers.tiling.traits import load_mma_traits
+
+_T = load_mma_traits().get("mfma_f32_16x16x16f16")
+
+
+def test_canonical_style_has_no_lds_bridge() -> None:
+    # Canonical loads MMA-ready directly (no LDS landing), so the optional bridge is None.
+    assert CanonicalStyle().lds_bridge(_T, role="A", free_sub=1, k_sub=1) is None
+
+
+def test_interleaved_lds_bridge_is_on_the_protocol() -> None:
+    style = InterleavedStyle()
+    bridge = style.lds_bridge(_T, role="A", free_sub=2, k_sub=1)
+    assert bridge is not None
+    read_landing, mma_ready = bridge
+    # the second half of the bridge IS the mma-ready operand_desc -- no divergence between them
+    assert mma_ready == style.operand_desc(_T, role="A", free_sub=2, k_sub=1)
+    # the read landing differs from mma-ready -- the in-register reorder is the price of the wide LDS read
+    assert read_landing != mma_ready
+
+
+def test_lds_bridge_role_selects_operand_free_axis() -> None:
+    style = InterleavedStyle()
+    for role in ("A", "B"):
+        bridge = style.lds_bridge(_T, role=role, free_sub=1, k_sub=1)
+        assert bridge[1] == style.operand_desc(_T, role=role, free_sub=1, k_sub=1)
+
+
+def test_lds_bridge_rejects_bad_role() -> None:
+    with pytest.raises(ValueError, match="role must be 'A' or 'B'"):
+        InterleavedStyle().lds_bridge(_T, role="C", free_sub=1, k_sub=1)
+
+
+# ---- #33: per-operand soundness runs at TileMmaPlan CONSTRUCTION (same timing as the C-oracle) ----
+
+
+def test_shipped_styles_build_a_plan_without_raising() -> None:
+    # Both profiles pass the construction-time operand-soundness check by construction -- for a
+    # single-atom wave AND a subtiled one. The (32,32,32) wave over a (16,16,16) atom makes
+    # m_sub/n_sub/k_sub == 2, so the check's subtiling path is covered by THIS test, not only
+    # transitively via the driver-path tests.
+    from rocke.helpers.tiling.mma.plan import TileMmaPlan, Tiling
+
+    configs = (
+        ((16, 16, 16), None),  # single atom (m_sub=n_sub=k_sub=1)
+        ((32, 32, 32), Tiling(atom_shape=(16, 16, 16))),  # 2x2x2 subtiled wave tile
+    )
+    for style in (CanonicalStyle(), InterleavedStyle()):
+        for shape, tiling in configs:
+            TileMmaPlan(
+                shape,
+                a=F16,
+                b=F16,
+                c=F32,
+                target="gfx90a",
+                style=style,
+                tiling=tiling,
+            )
+
+
+def test_a_operand_with_several_m_blocks_builds_canonical_and_refuses_interleaved() -> (
+    None
+):
+    # wmma_f32_32x16x128_f4: each lane holds 2 M blocks of A in its registers. The canonical
+    # encoding models that level, so a canonical plan builds; the interleaved construction does not,
+    # so it refuses the atom by name instead of building a wrong layout.
+    from rocke.helpers.tiling.mma.plan import TileMmaPlan
+
+    def plan(style):
+        return TileMmaPlan(
+            (32, 16, 128),
+            a=FP4E2M1,
+            b=FP4E2M1,
+            c=F32,
+            target="gfx1250",
+            style=style,
+            atom_override="wmma_f32_32x16x128_f4",
+        )
+
+    assert plan(CanonicalStyle()).op_id == "wmma_f32_32x16x128_f4"
+    with pytest.raises(NotImplementedError) as excinfo:
+        plan(InterleavedStyle())
+    assert str(excinfo.value) == (
+        "InterleavedStyle cannot lay out 'wmma_f32_32x16x128_f4': each lane holds 2 M blocks of "
+        "A in registers, which the interleaved construction does not model -- TODO: not "
+        "implemented yet; use the canonical style"
+    )
+
+
+def test_unsound_operand_rejected_at_plan_construction(monkeypatch) -> None:
+    # Force mma_operand_layout_sound to report an error and confirm the PLAN rejects it at build --
+    # proving the gate fires at construction (matching the C-oracle), not only at TileMmaDriver.__call__.
+    import rocke.helpers.tiling.transforms as transforms
+    from rocke.helpers.tiling.mma.plan import TileMmaPlan
+    from rocke.helpers.tiling.transforms._core import Diagnostic
+
+    monkeypatch.setattr(
+        transforms,
+        "mma_operand_layout_sound",
+        lambda *a, **k: Diagnostic("error", "forced-unsound (test)"),
+    )
+    with pytest.raises(ValueError, match="not sound"):
+        TileMmaPlan((16, 16, 16), a=F16, b=F16, c=F32, target="gfx90a")

@@ -1,4 +1,4 @@
-// Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -67,6 +67,25 @@ inline rocrand_status is_stream_blocking(hipStream_t stream, bool& is_blocking)
     else
     {
         is_blocking = true;
+    }
+    return ROCRAND_STATUS_SUCCESS;
+}
+
+inline rocrand_status is_stream_capturing(hipStream_t stream, bool& is_capturing)
+{
+    if(!stream)
+    {
+        is_capturing = false;
+    }
+    else
+    {
+        hipStreamCaptureStatus capture_status;
+        const hipError_t       error = hipStreamIsCapturing(stream, &capture_status);
+        if(error != hipSuccess)
+        {
+            return ROCRAND_STATUS_INTERNAL_ERROR;
+        }
+        is_capturing = capture_status != hipStreamCaptureStatusNone;
     }
     return ROCRAND_STATUS_SUCCESS;
 }
@@ -258,6 +277,20 @@ struct host_system
         }
         return ROCRAND_STATUS_SUCCESS;
     }
+
+    static rocrand_status is_stream_capturing([[maybe_unused]] hipStream_t stream,
+                                              bool&                        is_capturing)
+    {
+        if constexpr(UseHostFunc)
+        {
+            return detail::is_stream_capturing(stream, is_capturing);
+        }
+        else
+        {
+            is_capturing = false;
+        }
+        return ROCRAND_STATUS_SUCCESS;
+    }
 };
 
 namespace detail
@@ -269,7 +302,8 @@ template<typename Kernel,
          bool              IsDynamic,
          host::target_arch Arch,
          typename... Args>
-__global__ __launch_bounds__((host::get_block_size<ConfigProvider, T, Arch>(IsDynamic)))
+ROCRAND_INTERNAL_KERNEL __launch_bounds__((
+    host::get_block_size<ConfigProvider, T, Arch>(IsDynamic)))
 void trampoline_kernel(Args... args)
 {
 #if !defined(__SPIRV__)
@@ -369,6 +403,11 @@ struct device_system
     static rocrand_status is_host_func_blocking(hipStream_t stream, bool& is_blocking)
     {
         return detail::is_stream_blocking(stream, is_blocking);
+    }
+
+    static rocrand_status is_stream_capturing(hipStream_t stream, bool& is_capturing)
+    {
+        return detail::is_stream_capturing(stream, is_capturing);
     }
 };
 

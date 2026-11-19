@@ -11,18 +11,25 @@
 // and the off-diagonal work is discarded for free (depthwise is memory-bound). Only the
 // weight prologue differs (a one-hot diagonal tap); the rest is inherited.
 //
-// Scope: kw in {3,5,7,9,11}; kh is the vertical loop bound. Fprop stride 1/2; Dgrad =
-// rot180 correlation of dY (stride 2 runs it over dY upsampled 2x via cfg.dilation). 5x5
-// is also served by depthwise_2d_toeplitz; this path wins large-spatial.
+// Scope: fp16/bf16 and tf32 (stored fp32, split into a bf16 pair for the MFMA); kh x kw in
+// filter_buckets.h (odd squares 3..11, 1 x kw up to 127, kh x 1 up to 31); kh is the vertical loop
+// bound. Fprop stride 1/2; Dgrad = rot180 correlation of dY (stride 2 runs it over dY upsampled 2x
+// via cfg.dilation). 5x5 is also served by depthwise_2d_toeplitz; this path wins large-spatial.
+//
+// conv3d (odd square plane filters, kd <= 7): output depth folds into the batch, and each input row
+// is streamed once per depth tap into the same accumulator ring before the row flushes.
 
 #include "conv_kernel.h"
+#include "config_desc.h"
 #include "config_table.h"
 #include "depthwise_conv_kernel.h"
 #include "../../bunnies_cdna4.hpp"
 #include "../../grouped/grouped_8c_transforms.h"
+#include "../../grouped/depth_taps.h"
 #include "matrix_layout.h"
 #include "swizzle.h"
 #include "detail.h"
+#include "hip_util.h"
 #include "types.h"
 #include "mathutil.h"
 #include "launch_params.h"
@@ -75,38 +82,165 @@ __device__ void load_scatter(RegTile& rt, MemT* base, SlotMap&& slot, OffsetMap&
     }
 }
 
+// The kernel's LDS layout, as one interface over two element widths:
+//
+//   offset_uint4(x, cblk)   uint4 (16 B) offset of a column's c-block -- the DTL slot unit
+//   offset_c4blk(x, c4)     offset of a 4-channel block, in units of 4 elements
+//   x(off) / cblk(off)      inverses of offset_uint4, used to aim the DTL v-offsets
+//
+// The two widths disagree on what a uint4 holds -- 8 channels at 2 B per element, 4 at 4 B --
+// so offset_uint4's second argument is an 8-channel block for 16-bit and a 4-channel block
+// for tf32, and only offset_c4blk means the same thing to both. Naming them alike is what
+// lets the kernel body stay width-agnostic.
+
+// 16-bit: the shared SwizzleT, renamed into the interface above.
+template <int C_>
+struct DwSwizzle16
+{
+    using S = SwizzleT<C_>;
+    static constexpr int offset_uint4(int x_, int c8_) { return S::offset_uint4(x_, c8_); }
+    static constexpr int offset_c4blk(int x_, int c4_) { return S::offset_uint2(x_, c4_); }
+    static constexpr int x(int off) { return S::x(off); }
+    static constexpr int cblk(int off) { return S::c8(off); }
+};
+
+// tf32: xor the packed (column, 4-channel-block) address with the column bits just above it.
+// An involution, so one expression is both the layout and its inverse, and a uint4 already
+// *is* the 4-channel block, so offset_c4blk is offset_uint4.
+//
+// Not in swizzle.h because it is not a general scheme -- it is fitted to this kernel's two
+// lane maps, and both were checked against the gfx950 phase tables (ds_read_b128 is 4
+// phases of 16 scrambled lanes, ds_write_b128 is 8 of 8 consecutive ones).
+//
+// SwizzleT_fp32 does not fit them. Its 4*x skew was searched for the grouped-4c read, where
+// x spans 4 columns while c4 spans the group. Both accesses here are the transpose: c4 is
+// constant across an instruction and x sweeps 16 columns, so a term in 4*x repeats every 4
+// columns in the bank index and a phase's 16 lanes collapse onto 4 banks. Measured 27.6
+// conflict cycles per B-fragment read and 55.1 per staging store at block_c 32, against 0.00
+// and 0.01 for this.
+//
+// What the lane maps want instead is a rotation by x >> (4 - log2 C4) -- the same adaptive
+// rotation SwizzleT runs for 16-bit, and conflict-free here because (x >> t) mod 16 is a
+// complete residue system in every read phase. Folding it into the packed address collapses
+// it to one xor and, because the xor no longer has to stay inside a single axis, extends it
+// to C4 = 24 (block_c 96), whose odd factor 3 has no cheap per-axis form. This is CuTe's
+// Swizzle<B = log2 C4, M = 0, S = 4>; M + B <= S is what makes it an involution.
+template <int C_>
+struct DwSwizzleTf32
+{
+    static constexpr int C  = C_;
+    static constexpr int C4 = C / 4; // uint4 per column, and the 4-channel block count
+
+    static_assert(C > 0, "DwSwizzleTf32 requires positive C");
+    static_assert(C % 4 == 0, "DwSwizzleTf32 requires C divisible by 4 (uint4 = 4 channels)");
+    // A power-of-two C4 masks with C4 - 1, which from 32 up reaches bit 4 and overlaps the
+    // `a >> 4` it is xored against, so B > S and fold is no longer an involution.
+    static_assert((C4 & (C4 - 1)) != 0 || C4 <= 16,
+                  "DwSwizzleTf32 needs a power-of-two C4 <= 16 (block_c 64) or a new swizzle");
+
+    // Unsigned internals for the same reason SwizzleT uses them: / C4 and % C4 lower to a
+    // shift and a mask on the power-of-two widths. Callers pass non-negative coordinates.
+    static constexpr int offset_uint4(int x_, int c4_)
+    {
+        return fold(static_cast<unsigned>(x_) * C4 + static_cast<unsigned>(c4_));
+    }
+    static constexpr int offset_c4blk(int x_, int c4_) { return offset_uint4(x_, c4_); }
+
+    static constexpr int x(int off) { return static_cast<unsigned>(fold(off)) / C4; }
+    static constexpr int cblk(int off) { return static_cast<unsigned>(fold(off)) % C4; }
+
+private:
+    // Bits below log2 C4 carry c4, bits from 4 up carry the column, and the mask keeps the
+    // two apart -- which is both why this is a bijection and why it is its own inverse.
+    static constexpr int fold(int packed)
+    {
+        constexpr unsigned MASK = ((C4 & (C4 - 1)) == 0) ? unsigned(C4 - 1) : 7u;
+        const unsigned a        = packed;
+        return static_cast<int>(a ^ ((a >> 4) & MASK));
+    }
+
+    // Same guard SwizzleT_fp32 carries: a future edit cannot desync the LDS write side from
+    // the v-offsets the DTL loads are aimed with. The fold is periodic in x with period 16,
+    // so 16 rows cover every case.
+    static constexpr bool inverses_round_trip()
+    {
+        for(int x_ = 0; x_ < 16; ++x_)
+            for(int c4_ = 0; c4_ < C4; ++c4_)
+            {
+                const int off = offset_uint4(x_, c4_);
+                if(x(off) != x_ || cblk(off) != c4_)
+                    return false;
+            }
+        return true;
+    }
+    static_assert(inverses_round_trip(),
+                  "DwSwizzleTf32::offset_uint4 and x()/cblk() are not mutual inverses");
+};
+
+// Input plane that output plane b of the folded batch reads through depth tap t; -1 in the
+// depth padding.
+__device__ __forceinline__ int depth_tap_plane(int b, int t, const DepthParams& dp)
+{
+    int u;
+    return depth_tap_input(b % dp.d_out, t, dp, u) ? b / dp.d_out * dp.d_in + u : -1;
+}
+
 template <Config cfg, DataType DT>
-__device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restrict__ in,
-                                                       const ToType<DT>* __restrict__ wei,
-                                                       ToType<DT>* __restrict__ out,
-                                                       int N,
-                                                       int C,
-                                                       int hi,
-                                                       int wi,
-                                                       int ho,
-                                                       int wo,
-                                                       int py,
-                                                       int px)
+__device__ __forceinline__ void
+conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restrict__ in,
+                                       const ToType<DT>* __restrict__ wei,
+                                       ToType<DT>* __restrict__ out,
+                                       int N,
+                                       int C,
+                                       int hi,
+                                       int wi,
+                                       int ho,
+                                       int wo,
+                                       int fy,
+                                       int fx,
+                                       int py,
+                                       int px,
+                                       DepthParams dp)
 {
     using namespace grouped_8c_transforms;
-    using element_t = ToType<DT>;
-    using Sw        = SwizzleT<cfg.block_c()>;
+    // 1-D families are compiled per size bucket: cfg.kh/kw bound the layer's filter, whose
+    // taps past (fh, fw) load as zero. Square families and a bucket's unit axis are exact.
+    constexpr bool BUCKETED = (cfg.kh == 1 || cfg.kw == 1);
+    const int fh            = (BUCKETED && cfg.kh != 1) ? fy : cfg.kh;
+    const int fw            = (BUCKETED && cfg.kw != 1) ? fx : cfg.kw;
+    using element_t         = ToType<DT>;
 
-    // One 16x16x32 MFMA per horizontal tap.
+    constexpr bool is_tf32 = (DT == DataType::tf32);
+
+    // A conv3d streams each input row once per depth tap: N counts output planes, and plane
+    // b reads its image's input planes through KD taps, dead ones (depth padding) as zeros.
+    constexpr int KD = cfg.kd;
+
+    using Sw =
+        std::conditional_t<is_tf32, DwSwizzleTf32<cfg.block_c()>, DwSwizzle16<cfg.block_c()>>;
+
+    // One 16x16x32 MFMA per horizontal tap (three, for a tf32 pair).
     //
     // A = one-hot diagonal weights (16x32), B = streamed input (32x16), Acc = fp32 ring
     // (16x16); layouts match the raw fp16x8/fp32x4 vectors, so these wrappers are zero-cost.
-    constexpr auto half_fmt = (DT == DataType::bf16) ? bunnies::fpfmt::e8m7 : bunnies::fpfmt::e5m10;
-    using mat_a             = arch::matrix<half_fmt, 16, 32, bunnies::use::A>;
-    using mat_b             = arch::matrix<half_fmt, 32, 16, bunnies::use::B>;
-    using mat_acc           = arch::matrix<bunnies::fpfmt::e8m23, 16, 16, bunnies::use::Acc>;
-    // acc narrowed to element_t for the LDS staging store
-    using mat_out = arch::matrix<half_fmt, 16, 16, bunnies::use::Acc>;
+    constexpr auto data_fmt    = bunnies::fpfmt_of<DT>;
+    constexpr auto compute_fmt = is_tf32 ? bunnies::fpfmt::e8m10_e8m7x2split : data_fmt;
+    using mat_a_data           = arch::matrix<data_fmt, 16, 32, bunnies::use::A>;
+    using mat_a                = arch::matrix<compute_fmt, 16, 32, bunnies::use::A>;
+    using mat_b_data           = arch::matrix<data_fmt, 32, 16, bunnies::use::B>;
+    using mat_b                = arch::matrix<compute_fmt, 32, 16, bunnies::use::B>;
+    using mat_acc              = arch::matrix<bunnies::fpfmt::e8m23, 16, 16, bunnies::use::Acc>;
+    // acc narrowed to element_t for the LDS staging store (a no-op for tf32, whose storage is
+    // already fp32 -- it just widens the store from a b64 to a b128).
+    using mat_out        = arch::matrix<data_fmt, 16, 16, bunnies::use::Acc>;
+    using out_store_inst = std::conditional_t<is_tf32, arch::ds_store_b128, arch::ds_store_b64>;
 
     using ResultLayout = MatrixLayout<16, 16, 1, float>;
 
-    constexpr int CH_PER_UINT4 = 8;
-    constexpr int GROUP_UINT4  = cfg.group_size / CH_PER_UINT4; // == 1
+    // Channels per uint4, and how many of them a wave's channel group spans (1 at 2 B per
+    // element, 2 at 4 B).
+    constexpr int CH_PER_UINT4 = 16 / (int)sizeof(element_t);
+    constexpr int GROUP_UINT4  = cfg.group_size / CH_PER_UINT4;
 
     constexpr int BLOCK_W = BLOCK_Q + (cfg.kw - 1);
     // Dense horizontal passes: one MFMA contracts 4 input positions (K==32); a tile
@@ -116,18 +250,21 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
     // Structured-sparse (smfmac) path: the one-hot diagonal fits 2:4 sparsity trivially.
     //
     // One tap per 4-wide K group. An smfmac contracts 8 positions (K==64), halving the
-    // pass count (KSP == ceil(KWP/2)). Enabled only where it wins (KWP>=2, fp16/bf16);
-    // kw=3 stays dense (a K==64 pass would waste half its contraction).
-    constexpr bool USE_SPARSE = (KWP >= 2) && (DT == DataType::fp16 || DT == DataType::bf16);
+    // pass count (KSP == ceil(KWP/2)). Enabled only where it wins (KWP>=2); kw=3 stays dense
+    // (a K==64 pass would waste half its contraction). tf32 keeps the sparse path: the split
+    // just feeds the bf16 smfmac three times, same structure.
+    constexpr bool USE_SPARSE = (KWP >= 2);
     // Sparse passes: each smfmac spans 8 input positions (== 2 dense passes).
     constexpr int KSP = (KWP + 1) / 2;
     // Weights are staged 1:4 (one tap per group of 4) and cast to the 2:4 form smfmac
-    // consumes; see bunnies_cdna4.hpp.
+    // consumes -- for tf32 that cast also splits, so the fp32 2:4 operand never takes
+    // registers; see bunnies_cdna4.hpp.
     using smat_a_1of4 =
-        arch::sparse_matrix<half_fmt, 16, 64, bunnies::use::A, bunnies::sparsity::n1of4>;
+        arch::sparse_matrix<data_fmt, 16, 64, bunnies::use::A, bunnies::sparsity::n1of4>;
     using smat_a_2of4 =
-        arch::sparse_matrix<half_fmt, 16, 64, bunnies::use::A, bunnies::sparsity::n2of4>;
-    using smat_b = arch::matrix<half_fmt, 64, 16, bunnies::use::B>;
+        arch::sparse_matrix<compute_fmt, 16, 64, bunnies::use::A, bunnies::sparsity::n2of4>;
+    using smat_b_data = arch::matrix<data_fmt, 64, 16, bunnies::use::B>;
+    using smat_b      = arch::matrix<compute_fmt, 64, 16, bunnies::use::B>;
 
     constexpr int BLOCK_C_UINT4  = cfg.block_c() / CH_PER_UINT4;
     constexpr int BLOCK_GROUPS   = cfg.waves_per_wg;
@@ -162,6 +299,13 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
         (NARROW_LOAD_ELEMS + cfg.block_size() - 1) / cfg.block_size();
     constexpr int IO_LDS_SIZE =
         NUM_INPUT_LDS_BUFFERS * INPUT_LDS_BUFFER_UINT4 + OUTPUT_LDS_BUFFER_UINT4;
+    // Config::shared_bytes() is the host-side model of this, which the table uses to drop a
+    // rung whose ring will not fit; these two assert that the model and the geometry agree
+    // and that what it let through is actually within the bound.
+    static_assert(IO_LDS_SIZE * sizeof(uint4) == (size_t)cfg.shared_bytes(),
+                  "Config::shared_bytes() must model the kernel's static allocation exactly");
+    static_assert(cfg.shared_bytes() <= kMaxSharedBytes,
+                  "input ring + output staging must fit the static shared limit");
 
     __shared__ uint4 lds_buf[IO_LDS_SIZE];
     uint4* input_lds  = lds_buf;
@@ -226,7 +370,6 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
     // Highest input row this chunk will touch (for prefetch bounds).
     const int end_y = is_last_chunk ? hi_eff : main_y_hi;
 
-    const size_t wi_stride = (size_t)wi * C_UINT4;
     const size_t wo_stride = (size_t)wo * C_UINT4;
 
     const int wave_group = wave;
@@ -237,99 +380,150 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
     // at c==k_val, so the g-block is diagonal. For KWP>1, pass ph covers input positions
     // [4*ph, 4*ph+4) at tap column s_val = 4*ph + gg - q (out-of-range taps stay zero).
     // Issued up front so the weight loads overlap the input-load setup + first DMA below.
-    bunnies::reg_tile<mat_a, KWP, cfg.kh> weights_reg{};        // dense: off-diagonal stays 0
-    bunnies::reg_tile<smat_a_2of4, KSP, cfg.kh> sweights_reg{}; // sparse: compressed diagonal + idx
-    if constexpr(!USE_SPARSE)
-    {
-        // Each lane owns channel k_val = GT::k(row) at input position gg; for pass ph its
-        // live tap column is s_val = 4*ph + gg - q_val (out-of-range or past-C lanes stay
-        // zero). One coalesced load per (ph, r) routed into the lane's diagonal slot k_val
-        // -- load_scatter avoids load_sparse's per-slot scan over the one-hot operand.
-        const int row   = lane % 16;
-        const int gg    = lane / 16; // input position within the pass (0..3)
-        const int k_val = GT::k(row);
-        const int q_val = GT::q(row);
-        const int gch   = block_k + wave_group * cfg.group_size + k_val;
-        load_scatter<arch::global_load<sizeof(element_t)>>(
-            weights_reg,
-            const_cast<element_t*>(wei),
-            [&](int, int, int) { return k_val; }, // one-hot slot: the lane's own channel
-            [&](int ph, int r, int) -> size_t {
-            const int s_val = (4 * ph + gg) - q_val;
-            // Dgrad correlates dY with the rot180 filter: flip the taps
-            // (SizeView already swaps spatial dims and remaps pad to (k-1)-pad).
-            const int r_w = (cfg.direction == Direction::Dgrad) ? (cfg.kh - 1 - r) : r;
-            const int s_w = (cfg.direction == Direction::Dgrad) ? (cfg.kw - 1 - s_val) : s_val;
-            return ((size_t)gch * cfg.kh + r_w) * cfg.kw + s_w;
-        },
-            [&](int ph, int, int) {
-            const int s_val = (4 * ph + gg) - q_val;
-            if(s_val < 0 || s_val >= cfg.kw)
-                return false;
-            // Narrow path: this lane's diagonal channel may run past C in the last
-            // (partial) 8-channel group; leave it zero so its output is 0.
-            if constexpr(cfg.narrow_c)
-                return gch < C;
-            return true;
-        });
-    }
-    else
-    {
-        // Sparse diagonal tap placement.
-        //
-        // Row m carries channel k = m%8 at output column q = m/8, so its live position
-        // within a group of 4 is m%4 and only the groups whose logical K names channel k
-        // hold a tap. Logical K is 8*t + k for input position t of the pass, so pass sp
-        // spans positions [8*sp,8*sp+8) and the filter column is s = 8*sp + t - q.
-        using elem_t = typename smat_a_1of4::base_storage_t;
-        static_for<KSP>([&]<int sp>() {
-            static_for<cfg.kh>([&]<int r>() {
-                smat_a_1of4 w1of4;
-                w1of4.fill([](int row, int) { return row % 4; }, [&](int row, int kk) -> elem_t {
-                    const int k = row % 8;
-                    if(kk % 8 != k)
-                        return elem_t(0);
-                    const int s_val = (8 * sp + kk / 8) - row / 8;
-                    if(s_val < 0 || s_val >= cfg.kw)
-                        return elem_t(0);
-                    const int global_ch = block_k + wave_group * cfg.group_size + k;
-                    if constexpr(cfg.narrow_c)
-                    {
-                        if(global_ch >= C)
-                            return elem_t(0);
-                    }
-                    const size_t wbase = (size_t)global_ch * cfg.kh * cfg.kw;
-                    const int r_w      = (cfg.direction == Direction::Dgrad) ? (cfg.kh - 1 - r) : r;
-                    const int s_w =
-                        (cfg.direction == Direction::Dgrad) ? (cfg.kw - 1 - s_val) : s_val;
-                    return elem_t(wei[wbase + (size_t)r_w * cfg.kw + s_w]);
-                });
-                arch::matrix_cast(sweights_reg.block(sp, r), w1of4);
-            });
-        });
-    }
-
-    // Rebase each buffer at its image so the per-lane 32-bit offset spans only one
-    // image (hi*wi*C); the batch offset (possibly >2GB) lives in the 64-bit base.
+    // Held in compute form: the weights outlive every input row, so a tf32 split here is paid
+    // once for the whole stream.
     //
-    // image_bytes is the OOB sentinel offset that makes pad / upsample-zero loads read 0.
-    // Folded tiles carry one buffer per sub-image (block_g_idx + s*n_groups).
-    const size_t image_elems = static_cast<size_t>(hi) * wi * C;
-    const size_t image_bytes = image_elems * sizeof(element_t);
-    using rsrc_t             = decltype(arch::make_buffer(in, static_cast<int64_t>(0)));
-    rsrc_t input_rsrc[F];
+    // Row block rd holds filter row rd % kh of depth tap rd / kh, which reads weight plane
+    // depth_w(rd / kh): Dgrad flips the filter in depth as well.
+    using dense_w_t  = bunnies::reg_tile<mat_a, KWP, cfg.kh * KD>;
+    using sparse_w_t = bunnies::reg_tile<smat_a_2of4, KSP, cfg.kh * KD>;
+    dense_w_t weights_reg{};   // dense: off-diagonal stays 0
+    sparse_w_t sweights_reg{}; // sparse: compressed diagonal + idx
+    const int kd_w     = KD == 1 ? 1 : dp.kd;
+    const auto depth_w = [&](int t) {
+        return cfg.direction == Direction::Dgrad ? kd_w - 1 - t : t;
+    };
+    // An exact-size layer keeps the tap bounds compile-time, so the masks fold away.
+    const auto load_weights = [&]<bool EXACT>() {
+        const int tfh = EXACT ? cfg.kh : fh;
+        const int tfw = EXACT ? cfg.kw : fw;
+        if constexpr(!USE_SPARSE)
+        {
+            // Each lane owns channel k_val = GT::k(row) at input position gg; for pass ph its
+            // live tap column is s_val = 4*ph + gg - q_val (out-of-range or past-C lanes stay
+            // zero). One coalesced load per (ph, r) routed into the lane's diagonal slot k_val
+            // -- load_scatter avoids load_sparse's per-slot scan over the one-hot operand.
+            const int row   = lane % 16;
+            const int gg    = lane / 16; // input position within the pass (0..3)
+            const int k_val = GT::k(row);
+            const int q_val = GT::q(row);
+            const int gch   = block_k + wave_group * cfg.group_size + k_val;
+            // Scattered into the data form (one element per lane), then cast: the split has no
+            // element-wise slot to load into.
+            bunnies::reg_tile<mat_a_data, KWP, cfg.kh * KD> weights_data{};
+            load_scatter<arch::global_load<sizeof(element_t)>>(
+                weights_data,
+                const_cast<element_t*>(wei),
+                [&](int, int, int) { return k_val; }, // one-hot slot: the lane's own channel
+                [&](int ph, int rd, int) -> size_t {
+                const int r     = rd % cfg.kh;
+                const int s_val = (4 * ph + gg) - q_val;
+                // Dgrad correlates dY with the rot180 filter: flip the taps
+                // (SizeView already swaps spatial dims and remaps pad to (k-1)-pad).
+                const int r_w = (cfg.direction == Direction::Dgrad) ? (tfh - 1 - r) : r;
+                const int s_w = (cfg.direction == Direction::Dgrad) ? (tfw - 1 - s_val) : s_val;
+                return (((size_t)gch * kd_w + depth_w(rd / cfg.kh)) * tfh + r_w) * tfw + s_w;
+            },
+                [&](int ph, int rd, int) {
+                const int r     = rd % cfg.kh;
+                const int s_val = (4 * ph + gg) - q_val;
+                if(r >= tfh || rd / cfg.kh >= kd_w || s_val < 0 || s_val >= tfw)
+                    return false;
+                // Narrow path: this lane's diagonal channel may run past C in the last
+                // (partial) 8-channel group; leave it zero so its output is 0.
+                if constexpr(cfg.narrow_c)
+                    return gch < C;
+                return true;
+            });
+            bunnies::tile_cast(weights_reg, weights_data);
+        }
+        else
+        {
+            // Sparse diagonal tap placement.
+            //
+            // Row m carries channel k = m%8 at output column q = m/8, so its live position
+            // within a group of 4 is m%4 and only the groups whose logical K names channel k
+            // hold a tap. Logical K is 8*t + k for input position t of the pass, so pass sp
+            // spans positions [8*sp,8*sp+8) and the filter column is s = 8*sp + t - q.
+            using elem_t = typename smat_a_1of4::base_storage_t;
+            static_for<KSP>([&]<int sp>() {
+                static_for<cfg.kh * KD>([&]<int rd>() {
+                    constexpr int r = rd % cfg.kh;
+                    smat_a_1of4 w1of4;
+                    w1of4.fill([](int row, int) { return row % 4; },
+                               [&](int row, int kk) -> elem_t {
+                        const int k = row % 8;
+                        if(kk % 8 != k)
+                            return elem_t(0);
+                        const int s_val = (8 * sp + kk / 8) - row / 8;
+                        if(r >= tfh || rd / cfg.kh >= kd_w || s_val < 0 || s_val >= tfw)
+                            return elem_t(0);
+                        const int global_ch = block_k + wave_group * cfg.group_size + k;
+                        if constexpr(cfg.narrow_c)
+                        {
+                            if(global_ch >= C)
+                                return elem_t(0);
+                        }
+                        const size_t wbase =
+                            ((size_t)global_ch * kd_w + depth_w(rd / cfg.kh)) * tfh * tfw;
+                        const int r_w = (cfg.direction == Direction::Dgrad) ? (tfh - 1 - r) : r;
+                        const int s_w =
+                            (cfg.direction == Direction::Dgrad) ? (tfw - 1 - s_val) : s_val;
+                        return elem_t(wei[wbase + (size_t)r_w * tfw + s_w]);
+                    });
+                    arch::matrix_cast(sweights_reg.block(sp, rd), w1of4);
+                });
+            });
+        }
+    };
+    if(fh == cfg.kh && fw == cfg.kw)
+        load_weights.template operator()<true>();
+    else
+        load_weights.template operator()<false>();
+
+    // Each row's descriptor is rebased at that row, so the 32-bit offset spans only one row
+    // (wi*C) and the image offset lives in the 64-bit base; a pad / upsample-zero row gets
+    // NUM_RECORDS 0. Folded tiles, whose short rows cannot hide F descriptors per row, keep
+    // a per-image descriptor when the image fits 32 bits and add the row to the v-offset.
+    //
+    // COL_OOB stays out of range in both: past any image that fits, even plus its size.
+    // Folded tiles carry one image base per sub-image (block_g_idx + s*n_groups).
+    constexpr uint32_t COL_OOB = 0x80000000u;
+    const size_t row_elems     = static_cast<size_t>(wi) * C;
+    const uint32_t row_bytes   = static_cast<uint32_t>(row_elems * sizeof(element_t));
+    const size_t image_elems   = static_cast<size_t>(hi) * row_elems;
+    const bool image_fits      = image_elems * sizeof(element_t) <= INT32_MAX;
+    const uint32_t image_bytes = static_cast<uint32_t>(image_elems * sizeof(element_t));
+    const ToType<DT>* image_base[F];
+    using rsrc_t = decltype(arch::make_buffer(in, static_cast<int64_t>(0)));
+    rsrc_t image_rsrc[F];
     static_for<F>([&]<int s>() {
         const int n_s = block_g_idx + s * n_groups;
-        input_rsrc[s] =
-            arch::make_buffer(in + (size_t)n_s * image_elems, static_cast<int64_t>(image_elems));
+        image_base[s] = in + (size_t)n_s * image_elems;
+        image_rsrc[s] = arch::make_buffer(image_base[s], static_cast<int64_t>(image_elems));
     });
+    // A conv3d sub-image is an output plane, reading input plane tap_plane[s][T] through depth
+    // tap T. One descriptor spans the whole input when it fits, a row offset picks the plane.
+    int tap_plane[F][KD];
+    static_for<F>([&]<int s>() {
+        static_for<KD>(
+            [&]<int T>() { tap_plane[s][T] = depth_tap_plane(block_g_idx + s * n_groups, T, dp); });
+    });
+    const size_t tensor_elems   = (size_t)(N / dp.d_out) * dp.d_in * image_elems;
+    const bool tensor_fits      = tensor_elems * sizeof(element_t) <= INT32_MAX;
+    const uint32_t tensor_bytes = static_cast<uint32_t>(tensor_elems * sizeof(element_t));
+    const auto tensor_rsrc      = arch::make_buffer(in, static_cast<int64_t>(tensor_elems));
+    auto row_rsrc               = [&](const ToType<DT>* image, int dY_row, bool live) {
+        return arch::make_buffer(image + (live ? (size_t)dY_row * row_elems : 0),
+                                 live ? static_cast<int64_t>(row_elems) : 0);
+    };
 
     // Per-pass input-load plan: active lanes, LDS destination, and buffer v-offset of
     // their dY column.
     //
     // Pad / upsample-zero columns get the OOB sentinel so the load writes 0. The v-offset
-    // is image-local, identical across the F segments; only the LDS destination (segment
-    // base) and buffer resource differ.
+    // is row-local, identical across rows and the F segments; only the LDS destination
+    // (segment base) and buffer resource differ.
     struct InputLoadPlan
     {
         bool active[LOAD_PASSES];
@@ -344,7 +538,7 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
             static_for<F>([&]<int s>() { pl.lds[s][p] = &input_lds[s * SEG_UINT4 + loc]; });
 
             const int col        = Sw::x(loc);
-            const int c_uint4_p  = Sw::c8(loc);
+            const int c_uint4_p  = Sw::cblk(loc);
             const int global_col = (block_q - px) + col; // virtual-grid column
             const bool zero_col  = (UPS > 1) && ((global_col % UPS) != 0);
             const int dY_col     = (UPS > 1) ? (global_col / UPS) : global_col;
@@ -352,18 +546,19 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
                 pl.voffset[p] =
                     sizeof(uint4) * ((size_t)dY_col * C_UINT4 + block_c_uint4 + c_uint4_p);
             else
-                pl.voffset[p] = image_bytes;
+                pl.voffset[p] = COL_OOB;
         });
         return pl;
     }();
 
-    // Issue an async input load for virtual-grid row y_local into ring buffer TIC_PHASE.
+    // Issue an async input load for virtual-grid row y_local, as seen through depth tap TAP,
+    // into ring buffer TIC_PHASE. The ring holds (row, depth tap) steps; a conv2d has one tap.
     //
     // Dgrad stride-2 interstitial rows (y_local % UPS != 0) are forced OOB so they read 0.
     // TIC_PHASE is a template arg so the ring base is a compile-time constant the backend
     // can disambiguate from the current-row ds_read (a runtime phase would drain vmcnt to
     // 0 before the LDS read).
-    auto issue_input_load = [&]<int TIC_PHASE>(int y_local) {
+    auto issue_input_load = [&]<int TIC_PHASE, int TAP>(int y_local) {
         const bool row_oob  = (y_local < 0 || y_local >= hi_eff);
         const bool zero_row = !row_oob && (UPS > 1) && ((y_local % UPS) != 0);
         const int dY_row    = (UPS > 1) ? (y_local / UPS) : y_local;
@@ -379,8 +574,16 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
             // Lane owns LDS element e (slot e/8, channel e%8): load into a register (OOB
             // reads 0) then write to LDS. Register-staged because a b16 DMA's fixed fan-out
             // doesn't match this one-channel-per-lane swizzled layout.
-            const size_t row_elem = (size_t)dY_row * wi * C;
-            auto* lds_e           = reinterpret_cast<element_t*>(input_lds) +
+            const ToType<DT>* image = image_base[0];
+            bool live               = !zero_row;
+            if constexpr(KD > 1)
+            {
+                const int plane = tap_plane[0][TAP];
+                image           = in + (size_t)(plane < 0 ? 0 : plane) * image_elems;
+                live            = live && plane >= 0;
+            }
+            const auto rsrc = row_rsrc(image, dY_row, live);
+            auto* lds_e     = reinterpret_cast<element_t*>(input_lds) +
                           TIC_PHASE * INPUT_LDS_BUFFER_UINT4 * CH_PER_UINT4;
             element_t regs[NARROW_LOAD_PASSES];
             static_for<NARROW_LOAD_PASSES>([&]<int p>() {
@@ -390,7 +593,7 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
                 const int slot       = e / CH_PER_UINT4;
                 const int ch         = e % CH_PER_UINT4;
                 const int col        = Sw::x(slot);
-                const int c_uint4_p  = Sw::c8(slot);
+                const int c_uint4_p  = Sw::cblk(slot);
                 const int global_col = (block_q - px) + col;
                 const bool zero_col  = (UPS > 1) && ((global_col % UPS) != 0);
                 const int dY_col     = (UPS > 1) ? (global_col / UPS) : global_col;
@@ -398,9 +601,8 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
                 const int gch        = (block_c_uint4 + c_uint4_p) * CH_PER_UINT4 + ch;
                 const bool ok        = col_ok && !zero_row && gch < C;
                 const int v_offset =
-                    ok ? (int)(sizeof(element_t) * (row_elem + (size_t)dY_col * C + gch))
-                       : (int)image_bytes;
-                arch::buffer_load<sizeof(element_t)>::load(input_rsrc[0], &regs[p], v_offset, 0);
+                    ok ? (int)(sizeof(element_t) * ((size_t)dY_col * C + gch)) : (int)row_bytes;
+                arch::buffer_load<sizeof(element_t)>::load(rsrc, &regs[p], v_offset, 0);
             });
             arch::s_wait_vmcnt<0>();
             static_for<NARROW_LOAD_PASSES>([&]<int p>() {
@@ -415,28 +617,83 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
         // Wide path: one buffer_load_lds per active lane every call, even for OOB rows
         // (they read 0).
         //
-        // A constant per-row issue count lets s_wait_vmcnt<PREFETCH_AHEAD-1> mean exactly
-        // "current row landed, next PREFETCH_AHEAD-1 in flight" everywhere.
-        const auto row_offset = (row_oob || zero_row) ? (size_t)image_bytes
-                                                      : (size_t)dY_row * wi_stride * sizeof(uint4);
-        static_for<F>([&]<int s>() {
+        // A constant per-step issue count lets s_wait_vmcnt<PREFETCH_AHEAD-1> mean exactly
+        // "current step landed, next PREFETCH_AHEAD-1 in flight" everywhere.
+        const bool row_live = !row_oob && !zero_row;
+        if constexpr(KD > 1)
+        {
+            if(tensor_fits)
+            {
+                uint32_t row_off[F];
+                static_for<F>([&]<int s>() {
+                    const int plane = tap_plane[s][TAP];
+                    row_off[s]      = (row_live && plane >= 0)
+                                          ? ((uint32_t)plane * hi + dY_row) * row_bytes
+                                          : tensor_bytes;
+                });
+                static_for<LOAD_PASSES>([&]<int p>() {
+                    if(in_load.active[p])
+                    {
+                        static_for<F>([&]<int s>() {
+                            arch::buffer_load_lds<16>::load(tensor_rsrc,
+                                                            in_load.lds[s][p] +
+                                                                TIC_PHASE * INPUT_LDS_BUFFER_UINT4,
+                                                            in_load.voffset[p] + row_off[s],
+                                                            0);
+                        });
+                    }
+                });
+                return;
+            }
+        }
+        if(KD == 1 && F > 1 && image_fits)
+        {
+            const uint32_t row_off = row_live ? (uint32_t)dY_row * row_bytes : image_bytes;
             static_for<LOAD_PASSES>([&]<int p>() {
                 if(in_load.active[p])
                 {
-                    arch::buffer_load_lds<16>::load(input_rsrc[s],
-                                                    in_load.lds[s][p] +
-                                                        TIC_PHASE * INPUT_LDS_BUFFER_UINT4,
-                                                    in_load.voffset[p] + row_offset,
-                                                    0);
+                    static_for<F>([&]<int s>() {
+                        arch::buffer_load_lds<16>::load(image_rsrc[s],
+                                                        in_load.lds[s][p] +
+                                                            TIC_PHASE * INPUT_LDS_BUFFER_UINT4,
+                                                        in_load.voffset[p] + row_off,
+                                                        0);
+                    });
                 }
             });
+            return;
+        }
+        // Descriptors first, then pass-major loads, so one exec region spans every sub-image.
+        rsrc_t rsrc[F];
+        static_for<F>([&]<int s>() {
+            if constexpr(KD == 1)
+                rsrc[s] = row_rsrc(image_base[s], dY_row, row_live);
+            else
+            {
+                const int plane = tap_plane[s][TAP];
+                rsrc[s]         = row_rsrc(in + (size_t)(plane < 0 ? 0 : plane) * image_elems,
+                                   dY_row,
+                                   row_live && plane >= 0);
+            }
+        });
+        static_for<LOAD_PASSES>([&]<int p>() {
+            if(in_load.active[p])
+            {
+                static_for<F>([&]<int s>() {
+                    arch::buffer_load_lds<16>::load(rsrc[s],
+                                                    in_load.lds[s][p] +
+                                                        TIC_PHASE * INPUT_LDS_BUFFER_UINT4,
+                                                    in_load.voffset[p],
+                                                    0);
+                });
+            }
         });
     };
 
-    // Prime the ring: issue the first PREFETCH_AHEAD rows so the steady-state loop
-    // always has PREFETCH_AHEAD-1 later rows in flight while computing the current one.
+    // Prime the ring: issue the first PREFETCH_AHEAD (row, depth tap) steps so the steady-state
+    // loop always has PREFETCH_AHEAD-1 later steps in flight while computing the current one.
     static_for<PREFETCH_AHEAD>(
-        [&]<int j>() { issue_input_load.template operator()<j>(stream_y_lo + j); });
+        [&]<int j>() { issue_input_load.template operator()<j, j % KD>(stream_y_lo + j / KD); });
 
     // Folded tiles: the 16 tile-columns (lane % 16) split into F sub-images of SUBTILES.
     //
@@ -445,46 +702,86 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
     const int seg_lane = (lane % 16) / SUBTILES; // sub-image index of this lane
     const int n_local  = (lane % 16) % SUBTILES; // tile-column within the sub-image
     const int seg_off  = seg_lane * SEG_UINT4;   // this lane's segment base in LDS
-    // Clamp reads to a segment's last column: columns >= SEG_W are always zero-weight
-    // taps, so this keeps B finite (else the spill hits uninitialized LDS -> 0*NaN).
-    const auto seg_col = [](int c) { return c < SEG_W ? c : (SEG_W - 1); };
+    // Fold reads back into the segment: a sparse pass spans 8 input positions where the tile
+    // needs kw+1, so the trailing columns run past SEG_W. They are always zero-weight taps,
+    // and folding keeps B finite (else the spill hits uninitialized LDS -> 0*NaN).
+    //
+    // Any in-range column is equally correct, and which one is chosen decides whether the
+    // read stays bank-free. Subtracting a whole 16 keeps the lane's bank under
+    // DwSwizzleTf32 -- 16 columns move the row term by a multiple of 16 and the rotation
+    // term by a multiple of C4 -- so the phase keeps the complete residue system the swizzle
+    // relies on. Pinning to SEG_W - 1 loses it and costs conflicts at kw 5/9/11, the widths
+    // whose last pass overhangs. One subtraction always suffices, and never goes negative:
+    // the overhang peaks at 5 columns (kw 9), and c >= SEG_W >= 16 on entry.
+    //
+    // 16-bit keeps the old clamp. The same argument holds for SwizzleT and it would gain
+    // there too, but one shipped rung (block_c 32, w_fold 2, kw 11) comes out slightly worse,
+    // so that is a separate change to measure rather than a rider on this one.
+    constexpr bool FOLD_CLAMP = is_tf32 && SEG_W >= 16;
+    const auto seg_col        = [](int c) {
+        if constexpr(FOLD_CLAMP)
+            return c < SEG_W ? c : c - 16;
+        else
+            return c < SEG_W ? c : (SEG_W - 1);
+    };
     // B fragment LDS uint4 offsets, precomputed once (recomputing in the load hot
     // loop regresses sparse badly). Dense reads one uint4/pass; sparse two, because
     // the B map splits a lane's K into a low and a high 32-deep half, 4 input
     // columns apart.
-    int input_lds_offset_pass[KWP];
-    int sinput_lds_offset[KSP][2];
+    //
+    // A b128 is the widest LDS read, so it covers a lane's whole channel group only at 2 B
+    // per element; tf32's group is two uint4s and takes a round each. The two sit at the same
+    // column but adjacent c-blocks, which the swizzle's per-row rotation does not keep
+    // adjacent in LDS, so each needs its own offset. CH_ROUNDS is that second axis.
+    constexpr int CH_ROUNDS = GROUP_UINT4;
+    int input_lds_offset_pass[KWP][CH_ROUNDS];
+    int sinput_lds_offset[KSP][2][CH_ROUNDS];
     if constexpr(USE_SPARSE)
     {
         const int sinput_x = 2 * n_local + (lane / 16);
         static_for<KSP>([&]<int sp>() {
-            sinput_lds_offset[sp][0] =
-                seg_off + Sw::offset_uint4(seg_col(sinput_x + 8 * sp), wave_group * GROUP_UINT4);
-            sinput_lds_offset[sp][1] = seg_off + Sw::offset_uint4(seg_col(sinput_x + 8 * sp + 4),
-                                                                  wave_group * GROUP_UINT4);
+            static_for<CH_ROUNDS>([&]<int cr>() {
+                const int c_blk = wave_group * GROUP_UINT4 + cr;
+                sinput_lds_offset[sp][0][cr] =
+                    seg_off + Sw::offset_uint4(seg_col(sinput_x + 8 * sp), c_blk);
+                sinput_lds_offset[sp][1][cr] =
+                    seg_off + Sw::offset_uint4(seg_col(sinput_x + 8 * sp + 4), c_blk);
+            });
         });
     }
     else
     {
         const int input_x = 2 * n_local + lane / 16;
         for(int ph = 0; ph < KWP; ph++)
-            input_lds_offset_pass[ph] =
-                seg_off + Sw::offset_uint4(seg_col(input_x + 4 * ph), wave_group * GROUP_UINT4);
+            static_for<CH_ROUNDS>([&]<int cr>() {
+                input_lds_offset_pass[ph][cr] =
+                    seg_off +
+                    Sw::offset_uint4(seg_col(input_x + 4 * ph), wave_group * GROUP_UINT4 + cr);
+            });
     }
-    // Map-driven loads over the precomputed offsets: map_fun drives the round layout,
-    // and the round's K half selects the uint4 (dense: 1; sparse: 2).
+    // Map-driven loads over the precomputed offsets: map_fun drives the round layout, and the
+    // round's representative K selects the offset. K is 8*t + c for input position t and
+    // channel c, so K/32 is the sparse column half and (K%8)/4 the channel round.
+    const auto ch_round = [](int k) { return CH_ROUNDS == 1 ? 0 : (k % 8) / 4; };
+    // Loaded in the data form and cast: LDS carries fp32 for tf32, and holding B split means
+    // the conversion is once per row rather than once per MFMA.
     auto load_dinput = [&](int base, int ph) {
-        bunnies::reg_tile<mat_b, 1, 1> tile;
-        bunnies::load_tile<arch::ds_load_b128>(
-            tile, input_lds + base, [&](int, int, int, int) { return input_lds_offset_pass[ph]; });
-        return tile.block(0, 0);
+        bunnies::reg_tile<mat_b_data, 1, 1> tile;
+        bunnies::load_tile<arch::ds_load_b128>(tile, input_lds + base, [&](int, int, int k, int) {
+            return input_lds_offset_pass[ph][ch_round(k)];
+        });
+        bunnies::reg_tile<mat_b, 1, 1> compute;
+        bunnies::tile_cast(compute, tile);
+        return compute.block(0, 0);
     };
     auto load_sinput = [&](int base, int sp) {
-        bunnies::reg_tile<smat_b, 1, 1> tile;
+        bunnies::reg_tile<smat_b_data, 1, 1> tile;
         bunnies::load_tile<arch::ds_load_b128>(tile, input_lds + base, [&](int, int, int k, int) {
-            return sinput_lds_offset[sp][k / 32];
+            return sinput_lds_offset[sp][k / 32][ch_round(k)];
         });
-        return tile.block(0, 0);
+        bunnies::reg_tile<smat_b, 1, 1> compute;
+        bunnies::tile_cast(compute, tile);
+        return compute.block(0, 0);
     };
 
     // Output store plan (LDS staging -> global, one uint2 per lane): global destination
@@ -516,10 +813,12 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
             const int q_local       = col % OUT_W_SUB;
             const int q_out = (cfg.stride == 2) ? (block_q / 2) + q_local : block_q + q_local;
             const int n_out = block_g_idx + s_out * n_groups;
-            o.load_lds      = &output_lds[Sw::offset_uint4(col, c_uint4)];
-            o.q_out         = q_out;
-            o.ch_base       = (block_c_uint4 + c_uint4) * CH_PER_UINT4;
-            o.store_active  = (q_out < wo);
+            // One uint4 either way -- 8 channels at 2 B per element, 4 at 4 B -- and
+            // STORE_VECS grows to match, so the drain still covers the tile.
+            o.load_lds     = &output_lds[Sw::offset_uint4(col, c_uint4)];
+            o.q_out        = q_out;
+            o.ch_base      = (block_c_uint4 + c_uint4) * CH_PER_UINT4;
+            o.store_active = (q_out < wo);
             if constexpr(!cfg.narrow_c)
             {
                 if(q_out < wo)
@@ -546,9 +845,12 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
             o.lane_active = true;
             output_col    = 2 * result_n + GT::q(result_row);
         }
-        o.store_lds = reinterpret_cast<element_t*>(output_lds) +
-                      Sw::offset_uint2(output_col, wave_group * GROUP_UINT4 * 2 + c4_within_group) *
-                          (sizeof(uint2) / sizeof(element_t));
+        // A lane holds 4 of the group's channels, so the staging unit is a 4-channel block --
+        // a uint2 at 2 B per element, a uint4 at 4 B, four elements wide either way. The
+        // group spans cfg.group_size/4 such blocks whichever width it is.
+        o.store_lds =
+            reinterpret_cast<element_t*>(output_lds) +
+            Sw::offset_c4blk(output_col, wave_group * (cfg.group_size / 4) + c4_within_group) * 4;
         return o;
     }();
 
@@ -558,9 +860,9 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
     // comp_phase + PREFETCH_AHEAD. Carried across stream + remainder for consistency.
     int comp_phase = 0;
 
-    // When kh is a multiple of the ring size, comp_phase is 0 at every y_base entry, so
-    // row Y_LOCAL's slot is the constant Y_LOCAL % NBUF.
-    constexpr bool CT_PHASE = (cfg.kh % NUM_INPUT_LDS_BUFFERS == 0);
+    // When kh * KD is a multiple of the ring size, comp_phase is 0 at every y_base entry, so
+    // step (Y_LOCAL, T)'s slot is the constant (Y_LOCAL * KD + T) % NBUF.
+    constexpr bool CT_PHASE = (cfg.kh * KD % NUM_INPUT_LDS_BUFFERS == 0);
 
     // Input-strip sync without collapsing the prefetch pipeline.
     auto sync_input = [] {
@@ -591,7 +893,7 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
 
         // The swizzle already resolved the destination, so the map ignores the coords.
         auto stage_out = [&] {
-            bunnies::store_tile<arch::ds_store_b64>(
+            bunnies::store_tile<out_store_inst>(
                 out_tile, ostore.store_lds, [](int, int, int, int) { return 0; });
         };
         if constexpr(cfg.stride == 2)
@@ -609,7 +911,7 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
         if constexpr(cfg.narrow_c)
         {
             // Per-channel drain: write only this group's channels < C (last group is
-            // partial), one b16 element at a time.
+            // partial), one element at a time.
             if(ostore.store_active)
             {
                 const int wo_row = (cfg.stride == 2) ? (p_out / 2) : p_out;
@@ -631,78 +933,84 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
 
     // Per-row compute, shared by the chunk loop and the last-chunk remainder.
     //
-    // Prefetch ahead, run this row's horizontal MFMA passes into the kh-deep acc ring,
-    // advance the phase, then flush the completed row. Callers differ only in the row
-    // index, prefetch clamp, and flush gate (do_flush drops warm-up rows). CT_PHASE uses
-    // a compile-time ring base when kh % NBUF == 0, else the runtime comp_phase.
-    auto compute_row = [&]<int Y_LOCAL>(int y, int prefetch_y, bool do_flush) {
-        sync_input();
-        if constexpr(CT_PHASE)
-        {
-            constexpr int LP = (Y_LOCAL + PREFETCH_AHEAD) % NUM_INPUT_LDS_BUFFERS;
-            constexpr int CP = Y_LOCAL % NUM_INPUT_LDS_BUFFERS;
-            issue_input_load.template operator()<LP>(prefetch_y);
-            if constexpr(USE_SPARSE)
+    // For each depth tap: prefetch ahead, run the row's horizontal MFMA passes into the
+    // kh-deep acc ring and advance the phase; then flush the completed row. Callers differ only
+    // in the row index, prefetch clamp, and flush gate (do_flush drops warm-up rows). CT_PHASE
+    // uses a compile-time ring base when kh * KD % NBUF == 0, else the runtime comp_phase.
+    auto compute_row = [&]<int Y_LOCAL>(int y, int prefetch_end, bool do_flush) {
+        static_for<KD>([&]<int T>() {
+            // The stream position PREFETCH_AHEAD past (y, T); rows past prefetch_end load OOB.
+            constexpr int AY     = (T + PREFETCH_AHEAD) / KD;
+            constexpr int AT     = (T + PREFETCH_AHEAD) % KD;
+            const int prefetch_y = (y + AY < prefetch_end) ? (y + AY) : hi_eff;
+            sync_input();
+            if constexpr(CT_PHASE)
             {
-                static_for<KSP>([&]<int SP>() {
-                    smat_b sinput = load_sinput(CP * INPUT_LDS_BUFFER_UINT4, SP);
-                    static_for<cfg.kh>([&]<int R>() {
-                        constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
-                        arch::smma::wmma(acc.block(p_idx, 0),
-                                         sweights_reg.block(SP, R),
-                                         sinput,
-                                         acc.block(p_idx, 0));
+                constexpr int CP = (Y_LOCAL * KD + T) % NUM_INPUT_LDS_BUFFERS;
+                constexpr int LP = (CP + PREFETCH_AHEAD) % NUM_INPUT_LDS_BUFFERS;
+                issue_input_load.template operator()<LP, AT>(prefetch_y);
+                if constexpr(USE_SPARSE)
+                {
+                    static_for<KSP>([&]<int SP>() {
+                        smat_b sinput = load_sinput(CP * INPUT_LDS_BUFFER_UINT4, SP);
+                        static_for<cfg.kh>([&]<int R>() {
+                            constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
+                            arch::smma::wmma(acc.block(p_idx, 0),
+                                             sweights_reg.block(SP, T * cfg.kh + R),
+                                             sinput,
+                                             acc.block(p_idx, 0));
+                        });
                     });
-                });
+                }
+                else
+                {
+                    static_for<KWP>([&]<int PH>() {
+                        mat_b input_reg = load_dinput(CP * INPUT_LDS_BUFFER_UINT4, PH);
+                        static_for<cfg.kh>([&]<int R>() {
+                            constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
+                            arch::mma<>::wmma(acc.block(p_idx, 0),
+                                              weights_reg.block(PH, T * cfg.kh + R),
+                                              input_reg,
+                                              acc.block(p_idx, 0));
+                        });
+                    });
+                }
             }
             else
             {
-                static_for<KWP>([&]<int PH>() {
-                    mat_b input_reg = load_dinput(CP * INPUT_LDS_BUFFER_UINT4, PH);
-                    static_for<cfg.kh>([&]<int R>() {
-                        constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
-                        arch::mma<>::wmma(acc.block(p_idx, 0),
-                                          weights_reg.block(PH, R),
-                                          input_reg,
-                                          acc.block(p_idx, 0));
+                dispatch<NUM_INPUT_LDS_BUFFERS>(
+                    (comp_phase + PREFETCH_AHEAD) % NUM_INPUT_LDS_BUFFERS,
+                    [&]<int LP>() { issue_input_load.template operator()<LP, AT>(prefetch_y); });
+                if constexpr(USE_SPARSE)
+                {
+                    static_for<KSP>([&]<int SP>() {
+                        smat_b sinput = load_sinput(comp_phase * INPUT_LDS_BUFFER_UINT4, SP);
+                        static_for<cfg.kh>([&]<int R>() {
+                            constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
+                            arch::smma::wmma(acc.block(p_idx, 0),
+                                             sweights_reg.block(SP, T * cfg.kh + R),
+                                             sinput,
+                                             acc.block(p_idx, 0));
+                        });
                     });
-                });
-            }
-        }
-        else
-        {
-            dispatch<NUM_INPUT_LDS_BUFFERS>(
-                (comp_phase + PREFETCH_AHEAD) % NUM_INPUT_LDS_BUFFERS,
-                [&]<int LP>() { issue_input_load.template operator()<LP>(prefetch_y); });
-            if constexpr(USE_SPARSE)
-            {
-                static_for<KSP>([&]<int SP>() {
-                    smat_b sinput = load_sinput(comp_phase * INPUT_LDS_BUFFER_UINT4, SP);
-                    static_for<cfg.kh>([&]<int R>() {
-                        constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
-                        arch::smma::wmma(acc.block(p_idx, 0),
-                                         sweights_reg.block(SP, R),
-                                         sinput,
-                                         acc.block(p_idx, 0));
+                }
+                else
+                {
+                    static_for<KWP>([&]<int PH>() {
+                        mat_b input_reg = load_dinput(comp_phase * INPUT_LDS_BUFFER_UINT4, PH);
+                        static_for<cfg.kh>([&]<int R>() {
+                            constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
+                            arch::mma<>::wmma(acc.block(p_idx, 0),
+                                              weights_reg.block(PH, T * cfg.kh + R),
+                                              input_reg,
+                                              acc.block(p_idx, 0));
+                        });
                     });
-                });
+                }
             }
-            else
-            {
-                static_for<KWP>([&]<int PH>() {
-                    mat_b input_reg = load_dinput(comp_phase * INPUT_LDS_BUFFER_UINT4, PH);
-                    static_for<cfg.kh>([&]<int R>() {
-                        constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
-                        arch::mma<>::wmma(acc.block(p_idx, 0),
-                                          weights_reg.block(PH, R),
-                                          input_reg,
-                                          acc.block(p_idx, 0));
-                    });
-                });
-            }
-        }
 
-        comp_phase = (comp_phase + 1) % NUM_INPUT_LDS_BUFFERS;
+            comp_phase = (comp_phase + 1) % NUM_INPUT_LDS_BUFFERS;
+        });
 
         constexpr int P_FLUSH = (Y_LOCAL + 1) % cfg.kh;
         const int p_out       = y + py - (cfg.kh - 1);
@@ -719,8 +1027,7 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
             // hold the in-flight count constant.
             //
             // Warm-up rows (y < own_y_lo) seed the ring, so their flush is suppressed.
-            const int prefetch_y = (y + PREFETCH_AHEAD < end_y) ? (y + PREFETCH_AHEAD) : hi_eff;
-            compute_row.template operator()<Y_LOCAL>(y, prefetch_y, y >= own_y_lo);
+            compute_row.template operator()<Y_LOCAL>(y, end_y, y >= own_y_lo);
         });
     }
 
@@ -730,31 +1037,52 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
         static_for<cfg.kh>([&]<int Y_LOCAL>() {
             if(Y_LOCAL >= hi_eff % cfg.kh)
                 return;
-            const int y          = y_rem_base + Y_LOCAL;
-            const int prefetch_y = (y + PREFETCH_AHEAD < hi_eff) ? (y + PREFETCH_AHEAD) : hi_eff;
-            compute_row.template operator()<Y_LOCAL>(y, prefetch_y, true);
+            const int y = y_rem_base + Y_LOCAL;
+            compute_row.template operator()<Y_LOCAL>(y, hi_eff, true);
         });
     }
 
     if(is_last_chunk)
     {
-        const int ho_stride1 = hi_eff + 2 * py - (cfg.kh - 1);
-        const int tail_end   = (cfg.stride == 2) ? ho_stride1 : ho;
-        for(int p_out = hi_eff - cfg.kh + 1 + py; p_out < tail_end; p_out++)
-        {
+        // Stride-1 output rows (fh, not the bucket's cfg.kh, sets how many).
+        const int ho_stride1  = hi_eff + 2 * py - (fh - 1);
+        const int tail_end    = (cfg.stride == 2) ? ho_stride1 : ho;
+        const int tail_lo     = hi_eff - cfg.kh + 1 + py;
+        const auto flush_tail = [&](bunnies::reg_tile_concept auto const& slot, int p_out) {
+            if(p_out >= tail_end)
+                return;
             if constexpr(cfg.stride == 2)
             {
                 if(p_out % 2 != 0 || p_out / 2 >= ho)
-                    continue;
+                    return;
             }
             __syncthreads();
-            int p_idx = (p_out - py + cfg.kh) % cfg.kh;
-            bunnies::reg_tile<mat_acc, 1, 1> slot;
-            dispatch<cfg.kh>(p_idx, [&]<int P>() {
+            flush_p(slot, p_out);
+        };
+        if constexpr(cfg.kh > 23)
+        {
+            // Past kh 23 the compiler lowers a runtime-indexed ring to scratch, so walk the
+            // slots statically: slot P holds row tail_lo + j.
+            const int slot_lo = (hi_eff + 1) % cfg.kh;
+            static_for<cfg.kh>([&]<int P>() {
+                bunnies::reg_tile<mat_acc, 1, 1> slot;
                 slot.block(0, 0) = acc.block(P, 0);
                 acc.block(P, 0)  = mat_acc{};
+                flush_tail(slot, tail_lo + (P - slot_lo + cfg.kh) % cfg.kh);
             });
-            flush_p(slot, p_out);
+        }
+        else
+        {
+            for(int p_out = tail_lo; p_out < tail_end; p_out++)
+            {
+                const int p_idx = (p_out - py + cfg.kh) % cfg.kh;
+                bunnies::reg_tile<mat_acc, 1, 1> slot;
+                dispatch<cfg.kh>(p_idx, [&]<int P>() {
+                    slot.block(0, 0) = acc.block(P, 0);
+                    acc.block(P, 0)  = mat_acc{};
+                });
+                flush_tail(slot, p_out);
+            }
         }
     }
 }
@@ -774,27 +1102,30 @@ __global__ __launch_bounds__(cfg.block_size()) void conv2d_depthwise_1d_toeplitz
     int wi,
     int ho,
     int wo,
-    int /*fy*/,
-    int /*fx*/,
+    int fy,
+    int fx,
     int /*sy*/,
     int /*sx*/,
     int /*dy*/,
     int /*dx*/,
     int py,
-    int px)
+    int px,
+    DepthParams dp)
 {
     if(__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x32_f16) &&
        __builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x32_bf16) &&
        __builtin_amdgcn_is_invocable(__builtin_amdgcn_smfmac_f32_16x16x64_f16) &&
        __builtin_amdgcn_is_invocable(__builtin_amdgcn_smfmac_f32_16x16x64_bf16))
     {
-        conv2d_depthwise_1d_toeplitz_nhwc_impl<cfg, DT>(in, wei, out, N, C, hi, wi, ho, wo, py, px);
+        conv2d_depthwise_1d_toeplitz_nhwc_impl<cfg, DT>(
+            in, wei, out, N, C, hi, wi, ho, wo, fy, fx, py, px, dp);
     }
 }
 
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
-                 const Conv2dParams& par,
+                 const Device&,
+                 const ConvParams& par,
                  const void* in,
                  const void* wei,
                  void* out,
@@ -802,16 +1133,17 @@ void launch_impl(const LaunchParams& lp,
                  hipStream_t stream)
 {
     auto typed_launch = [&]<DataType DT>() {
-        using dtype = ToType<DT>;
-        auto view   = SizeView<cfg.direction>(par);
-        auto kernel = conv2d_depthwise_1d_toeplitz_nhwc_cdna4<cfg, DT>;
+        using dtype   = ToType<DT>;
+        auto view     = SizeView<cfg.direction>(par);
+        auto kernel   = conv2d_depthwise_1d_toeplitz_nhwc_cdna4<cfg, DT>;
+        const auto dp = DepthParams::of(par);
         kernel<<<lp.grid, lp.block_size, lp.dynamic_shared_bytes, stream>>>(
             static_cast<const dtype*>(in),
             static_cast<const dtype*>(wei),
             1.0,
             0.0,
             static_cast<dtype*>(out),
-            par.n,
+            par.n * dp.d_out,
             par.c,
             par.channels_per_group(),
             par.filters_per_group(),
@@ -826,27 +1158,17 @@ void launch_impl(const LaunchParams& lp,
             par.dilation_h,
             par.dilation_w,
             view.pad_h(),
-            view.pad_w());
+            view.pad_w(),
+            dp);
     };
-    if(par.input_type == DataType::bf16)
+    if constexpr(cfg.elem_bytes == 4)
+    {
+        typed_launch.template operator()<DataType::tf32>();
+    }
+    else if(par.input_type == DataType::bf16)
         typed_launch.template operator()<DataType::bf16>();
     else
         typed_launch.template operator()<DataType::fp16>();
-}
-
-// Compute-unit count of the active device (cached), used to size H-tiling.
-inline int cu_count()
-{
-    static const int cu = [] {
-        int dev = 0;
-        if(hipGetDevice(&dev) != hipSuccess)
-            return 256;
-        hipDeviceProp_t props{};
-        if(hipGetDeviceProperties(&props, dev) != hipSuccess || props.multiProcessorCount <= 0)
-            return 256;
-        return props.multiProcessorCount;
-    }();
-    return cu;
 }
 
 class Depthwise_1D_Toeplitz_ConvKernel : public DepthwiseConvKernel
@@ -860,49 +1182,13 @@ public:
 
     std::string_view name() const override { return "depthwise_1d_toeplitz"; }
 
-    std::string describe_config() const override
-    {
-        // Compact self-contained run label (abbrev name + every knob):
-        //
-        //   dw1d=depthwise_1d_toeplitz  k=filter(khxkw)  s=stride  F/D/W=direction
-        //   u=dgrad upsample  w=waves/wg  c=block_c  nc=narrow-C  f=batch-fold
-        const char* dir = (cfg_.direction == Direction::Fprop)   ? "F"
-                          : (cfg_.direction == Direction::Dgrad) ? "D"
-                                                                 : "W";
-        std::string s   = "dw1d k" + std::to_string(cfg_.kh);
-        if(cfg_.kw != cfg_.kh)
-            s += "x" + std::to_string(cfg_.kw);
-        s += " s" + std::to_string(cfg_.stride);
-        s += ' ';
-        s += dir;
-        if(cfg_.dilation > 1)
-            s += " u" + std::to_string(cfg_.dilation);
-        s += " w" + std::to_string(cfg_.waves_per_wg);
-        s += " c" + std::to_string(cfg_.block_c());
-        if(cfg_.narrow_c)
-            s += " nc";
-        if(cfg_.w_fold > 1)
-            s += " f" + std::to_string(cfg_.w_fold);
-        if(cfg_.lds_buffers != 3)
-            s += " b" + std::to_string(cfg_.lds_buffers);
-        return s;
-    }
+    KVDescriptor config_descriptor() const override { return config_fields(cfg_); }
 
-    void get_tolerance(const Conv2dParams& par, float& atol, float& rtol) const override
-    {
-        get_mixed_precision_tolerance(par, atol, rtol);
-        // A small atol floor keeps zero-upsampled Dgrad edges from tripping the check.
-        //
-        // The model budgets error as rtol * conv(|A|,|B|) with atol == 0. Dgrad edge
-        // outputs over a zero-upsampled dY collapse to a single ~1e-6 product, so that
-        // budget hits ~0 and fp16 rounding trips it; the floor stays far below any genuine
-        // error (~1e-3).
-        atol = std::max(atol, 1e-6f);
-    }
+    bool supports_dims(int dims) const override { return dims == 2 || dims == 3; }
 
-    bool is_applicable(const Conv2dParams& par) const override
+    bool is_applicable(const Device& dev, const ConvParams& par) const override
     {
-        if(!DepthwiseConvKernel::is_applicable(par))
+        if(!DepthwiseConvKernel::is_applicable(dev, par))
             return false;
         // Dgrad (backward-data) is the rot180 correlation of dY; stride 1 runs it
         // directly, stride 2 runs it over a 2x-upsampled dY (zeros between samples).
@@ -910,10 +1196,9 @@ public:
             return false;
         // Both C % 8 == 0 (wide uint4) and C % 8 != 0 (narrow b16) are handled, so no
         // channel-count reject here -- is_valid_config routes each C to its path.
-        // Shipped filters {3,5,7,9,11}; any odd kw generalizes (taps masked by kw). 5x5
+        // Shipped filters (compiled_filter); 1-D ones run on a bucket, taps masked. 5x5
         // is also served by depthwise_2d_toeplitz; this 1D path wins large-spatial.
-        if(par.kh != par.kw ||
-           (par.kw != 3 && par.kw != 5 && par.kw != 7 && par.kw != 9 && par.kw != 11))
+        if(compiled_filter(par.kh, par.kw).kh == 0)
             return false;
         if(par.stride_h != par.stride_w)
             return false;
@@ -923,22 +1208,27 @@ public:
             return false;
         if(par.pad_h > par.kh - 1 || par.pad_w > par.kw - 1)
             return false;
-        // The buffer is rebased per sample, so only a single image must fit a 32-bit
-        // offset; the batch may push the full tensors past 2GB.
-        if(par.n > 0)
-        {
-            Conv2dSize sz(par);
-            if(sz.input_bytes() / par.n > INT32_MAX || sz.output_bytes() / par.n > INT32_MAX)
-                return false;
-        }
+        // The buffer is rebased per input row, so only one row must fit a 32-bit offset;
+        // the image and the batch may push the tensors past 2GB. Dgrad's input row is dY's (q).
+        const int64_t in_w = (par.direction == Direction::Dgrad) ? par.q : par.w;
+        if(in_w * par.c * (int64_t)sizeof_data_type(par.input_type) > INT32_MAX)
+            return false;
+        // Output planes fold into the batch, and both plane counts are int on host and device.
+        const DepthParams dp = DepthParams::of(par);
+        if((int64_t)par.n * std::max(dp.d_in, dp.d_out) > INT32_MAX)
+            return false;
         return true;
     }
 
-    bool is_valid_config(const Conv2dParams& par) const override
+    bool is_valid_config(const Device& dev, const ConvParams& par) const override
     {
         if(par.direction != cfg_.direction)
             return false;
-        if(par.kh != cfg_.kh || par.kw != cfg_.kw)
+        if((int)sizeof_data_type(par.input_type) != cfg_.elem_bytes)
+            return false;
+        if(depth_tap_capacity(par) != cfg_.kd)
+            return false;
+        if(compiled_filter(par.kh, par.kw) != FilterShape{cfg_.kh, cfg_.kw})
             return false;
         if(cfg_.direction == Direction::Dgrad)
         {
@@ -977,8 +1267,13 @@ public:
         // masked on store, so unfoldable widths (e.g. 7) fold for free.
         if(cfg_.w_fold != preferred_wfold(par))
             return false;
+        if(get_launch_params(dev, par).grid.z > max_grid_z)
+            return false;
         return true;
     }
+
+    // A conv3d folds output depth into the batch, so its tiles see this many images.
+    static int planes(const ConvParams& par) { return par.n * DepthParams::of(par).d_out; }
 
     // Auto-pick heuristic: the batch-fold factor for `par` (1 = none).
     //
@@ -990,13 +1285,15 @@ public:
     // F=1 (halo re-read outweighs the tail reclaim). Prefer the smallest F (widest
     // sub-tile) that fills the tile with a majority-real tail, since wider sub-tiles
     // re-read less halo (F=2 beat F=4 at W=16).
-    static int preferred_wfold(const Conv2dParams& par)
+    static int preferred_wfold(const ConvParams& par)
     {
         // Applicable directions (Fprop/Dgrad) and stride_h==stride_w in {1,2} are
         // guaranteed by is_applicable.
         const bool is_dgrad = par.direction == Direction::Dgrad;
         if(par.dilation_h != 1 || par.dilation_w != 1)
             return 1; // forward dilation only
+        if(is_one_d(compiled_filter(par.kh, par.kw)))
+            return 1;
         if((par.c % 8) != 0)
             return 1; // wide path only
         // Tile stride: fprop subsamples the output; dgrad runs a stride-1 tile (the
@@ -1011,7 +1308,7 @@ public:
         const auto fills = [&](int F) {
             const int out_sub = (BLOCK_Q / F) / kstride; // outputs per sub-image
             const int rem     = out_w % out_sub;         // padded tail must be majority-real
-            return (par.n % F) == 0 && (rem == 0 || rem * 2 > out_sub);
+            return (planes(par) % F) == 0 && (rem == 0 || rem * 2 > out_sub);
         };
         if(fills(2))
             return 2;
@@ -1020,7 +1317,7 @@ public:
         return 1;
     }
 
-    LaunchParams get_launch_params(const Conv2dParams& par) const override
+    LaunchParams get_launch_params(const Device& dev, const ConvParams& par) const override
     {
         // Folded W tiling: the w-tile is w_sub()-wide and the batch is enumerated in
         // n_groups slots of w_fold images.
@@ -1029,7 +1326,7 @@ public:
         const int out_w    = (cfg_.direction == Direction::Dgrad) ? par.w : par.q;
         const int blocks_w = divup(out_w, output_block_q);
         const int blocks_c = divup(par.c, cfg_.block_c());
-        const int n_groups = divup(par.n, cfg_.w_fold);
+        const int n_groups = divup(planes(par), cfg_.w_fold);
         // Cap n_fold at n_groups so a small folded batch spawns no empty x-slots.
         // Must match the device decode.
         const int eff_n_fold    = min(cfg_.n_fold, n_groups);
@@ -1050,7 +1347,7 @@ public:
         {
             const int base_wgs = blocks_w_n * blocks_c * blocks_n_fold;
             // Target ~4 workgroups per CU; only tile when the base grid falls short.
-            const int target_wgs = 4 * cu_count();
+            const int target_wgs = 4 * dev.cu_count;
             // Each chunk re-reads one warm-up kh-block, so cap chunks at n_full_blocks/2
             // (halo <= 50%).
             //

@@ -37,7 +37,7 @@
 // Parse YAML data
 static std::string hipblaslt_parse_yaml(const std::string& yaml)
 {
-#ifdef WIN32
+#ifdef _WIN32
     // Explicitly run via `python.exe`, without relying on the .py file being
     // treated as an executable that should be run via the python interpreter.
     std::string python_command_launcher = "python ";
@@ -57,7 +57,7 @@ static std::string hipblaslt_parse_yaml(const std::string& yaml)
 
 #ifdef _WIN32
     int status = std::system(cmd.c_str());
-    if(status == -1)
+    if(status != 0)
         exit(EXIT_FAILURE);
 #else
     int status = system(cmd.c_str());

@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/knob/KnobSetting.hpp>
 
 #include <cstddef>
@@ -228,6 +229,13 @@ struct AutotuneResult
 
     int iterationsRun = 0; ///< Actual number of timed iterations executed
 
+    /// How the times above were measured. DEVICE_ONLY excludes host submission overhead;
+    /// UNSTALLED does not necessarily, since the stall gate was not used. Successful
+    /// results in one autotune() comparison carry the same value, because times measured
+    /// the two ways are not comparable. INVALID when no successful measurement was
+    /// recorded, including a failed or never-benchmarked candidate.
+    TimingQuality timingQuality = TimingQuality::INVALID;
+
     /// For RUN_UNTIL_STABLE, true when the trailing-window variation fell below
     /// stabilityThreshold before maxIterations was reached. For FIXED_AVERAGE, true when
     /// every iteration completed. False on benchmark failure under either strategy.
@@ -260,7 +268,9 @@ struct AutotuneResult
     std::string errorMessage; ///< Empty if no error; describes the benchmarking failure otherwise
 
     int64_t workspaceSize = 0; ///< Workspace bytes used by this engine
-    int64_t estimatedWorkspaceSize = 0; ///< Pre-compile workspace estimate from engine config
+    int64_t estimatedWorkspaceSize
+        = 0; ///< Pre-compile workspace estimate from engine config; covers the priming configuration
+    ///< for engines that expose the benchmarking knob
     int compiledPlanIndex = -1; ///< Index into compiled plans vector; used for winner selection
 
     TuneMode modeUsed = TuneMode::STANDARD; ///< Which mode was used for this engine

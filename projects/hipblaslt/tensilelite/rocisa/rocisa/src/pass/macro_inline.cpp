@@ -117,6 +117,15 @@ namespace rocisa
                 val = std::get<1>(*find_it);
             }
 
+            // tokenIdx is a position in the repeating lhs, operator, rhs, && pattern:
+            //   token:     \useGR  ==  0  &&  \usePLR  ==  1
+            //   tokenIdx:     0     1  2   3      0     1  2
+            // Case 2 evaluates each comparison and appends 0 or 1 to results.
+            // Case 3 inserts 2 as an && marker between comparison results.
+            // With both macro arguments zero, results is [1, 2, 0] (true && false).
+            // The loop below combines a later result only after an && marker.
+            // Without those markers, [1, 0] would return true: both comparisons
+            // are evaluated, but the second result is never combined with the first.
             switch(tokenIdx)
             {
             case 0: lhs = val; break;
@@ -131,7 +140,7 @@ namespace rocisa
                     assert(false && "unknown macro condition operator");
                 results.push_back(result ? 1 : 0);
                 break;
-            case 4:
+            case 3:
                 assert(val == "&&" && "unknown macro logical operator");
                 results.push_back(2); // sentinel for &&
                 break;

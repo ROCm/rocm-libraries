@@ -64,14 +64,17 @@ if(NOT pybind11_DIR)
 endif()
 find_package(pybind11 CONFIG REQUIRED)
 
-pybind11_add_module(rocke_engine rocke_engine.cpp rocke_engine_img2col.cpp
+pybind11_add_module(rocke_engine rocke_engine.cpp
                     rocke_engine_attention.cpp rocke_engine_moe_gemm_fused.cpp
                     rocke_engine_fmha_extra.cpp rocke_engine_fused_moe_e2e.cpp)
 target_include_directories(rocke_engine PRIVATE "${ROCKE_INCLUDE_DIR}")
 
 # Link the engine archive whole, plus libm. The engine is C++; its symbols are
 # exposed via extern "C" headers, so the archive links cleanly here.
-target_link_libraries(rocke_engine PRIVATE "${_ROCKE_BINDING_LINK_TARGET}")
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+target_link_libraries(rocke_engine PRIVATE "${_ROCKE_BINDING_LINK_TARGET}"
+                      ${CMAKE_DL_LIBS} Threads::Threads)
 if(UNIX)
   target_link_libraries(rocke_engine PRIVATE m)
 endif()

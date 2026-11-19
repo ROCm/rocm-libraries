@@ -10,6 +10,7 @@
 #include <unordered_map>
 
 #include <hip/hip_runtime_api.h>
+#include <hipdnn_plugin_sdk/DeviceQuery.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 
@@ -26,18 +27,22 @@ class HandleDeviceResolver : public hipdnn_plugin_sdk::ingestor::IDeviceResolver
 public:
     hipdnn_plugin_sdk::ingestor::DeviceId deviceId(const Handle& handle) const override
     {
-        int deviceId = 0;
+        // Seeded to -1, not 0: some HIP runtimes return hipSuccess from hipStreamGetDevice
+        // without writing the out-parameter. At 0 that goes unseen -- every stream resolves
+        // to device 0 and looks right on a single-device machine.
+        int deviceId = -1;
 
-        // Null stream: default stream belongs to the current device.
-        if(handle.getStream() != nullptr)
+        // Default stream tokens are relative to the live current device.
+        const auto stream = handle.getStream();
+        if(!hipdnn_plugin_sdk::isDefaultStream(stream))
         {
-            if(hipStreamGetDevice(handle.getStream(), &deviceId) == hipSuccess)
+            if(queryStreamDevice(stream, &deviceId) == hipSuccess && deviceId >= 0)
             {
                 return deviceId;
             }
         }
 
-        if(hipGetDevice(&deviceId) != hipSuccess)
+        if(queryCurrentDevice(&deviceId) != hipSuccess)
         {
             return hipdnn_plugin_sdk::ingestor::NO_DEVICE;
         }
@@ -72,16 +77,33 @@ public:
                     + hipGetErrorString(status));
         }
 
-        // HIP's fields narrow to the ingestor's `$device.*` namespace.
+        // Memory facts tell apart boards that share an arch and CU count (e.g. MI300X,
+        // MI325X, MI308X), which a UHD trained on a merged corpus needs.
         hipdnn_plugin_sdk::ingestor::DeviceProperties resolved;
         resolved.gcnArchName = properties.gcnArchName;
         resolved.warpSize = properties.warpSize;
         resolved.multiProcessorCount = properties.multiProcessorCount;
+        resolved.totalGlobalMem = properties.totalGlobalMem;
+        resolved.memoryBusWidth = properties.memoryBusWidth;
+        resolved.memoryClockRate = properties.memoryClockRate;
+        resolved.sharedMemPerBlock = properties.sharedMemPerBlock;
 
         return _properties.emplace(deviceId, std::move(resolved)).first->second;
     }
 
 protected:
+    /// Test seam: lets a test model a runtime that reports success without an ordinal.
+    virtual hipError_t queryStreamDevice(hipStream_t stream, int* deviceId) const
+    {
+        return hipdnn_plugin_sdk::getDeviceFromStream(stream, deviceId);
+    }
+
+    /// Test seam: lets a test pin the fallthrough ordinal without owning a device.
+    virtual hipError_t queryCurrentDevice(int* deviceId) const
+    {
+        return hipGetDevice(deviceId);
+    }
+
     /// Test seam: lets a test supply properties for devices this machine lacks.
     virtual hipError_t queryDeviceProperties(hipDeviceProp_t* properties,
                                              hipdnn_plugin_sdk::ingestor::DeviceId deviceId) const

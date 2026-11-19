@@ -32,14 +32,15 @@ namespace cluster_barrier {
 
 /// Single toggle for Rule 3 cross-loop hoisting (0 = off, 1 = on).
 ///
-/// To enable cross-loop in the pass **and** compile the cross-loop unit tests, set this macro
-/// to 1 and rebuild (rocisa / stinkytofu and `unit_tests`). The tests gate on the same
-/// `STINKY_KRULE3_CROSS_LOOP` via `IF_RULE3_CROSS_LOOP` in tests/unit/TestHelpers.hpp — there
-/// is no separate UT define; pass and tests must stay in sync.
+/// To enable cross-loop in the pass **and** compile the cross-loop unit tests,
+/// set this macro to 1 and rebuild (rocisa / stinkytofu and `unit_tests`). The
+/// tests gate on the same `STINKY_KRULE3_CROSS_LOOP` via `IF_RULE3_CROSS_LOOP`
+/// in tests/unit/TestHelpers.hpp — there is no separate UT define; pass and
+/// tests must stay in sync.
 ///
-/// `kRule3CrossLoop` mirrors this macro for runtime `if` checks. `#if STINKY_KRULE3_CROSS_LOOP`
-/// in tests reads the same value. The preprocessor cannot use `constexpr`, so change this macro
-/// (not `kRule3CrossLoop`).
+/// `kRule3CrossLoop` mirrors this macro for runtime `if` checks. `#if
+/// STINKY_KRULE3_CROSS_LOOP` in tests reads the same value. The preprocessor
+/// cannot use `constexpr`, so change this macro (not `kRule3CrossLoop`).
 #ifndef STINKY_KRULE3_CROSS_LOOP
 #define STINKY_KRULE3_CROSS_LOOP 0
 #endif
@@ -56,9 +57,23 @@ inline constexpr bool kRule3CrossLoop = false;
 class Pass;
 
 /// \p streamKMulticast and \p pgrValue only enable the Rule 3 producer-side
-/// tensor drain for StreamK cluster multicast at PrefetchGlobalRead >= 2; the
-/// barrier placement rules themselves derive everything they need from the IR.
+/// tensor drain for StreamK cluster multicast at PrefetchGlobalRead >= 2.
+/// \p rule3SignalLeadCycles controls how far ahead of its wait the Rule 3
+/// signal is targeted; 0 co-locates them.
+/// \p splitWaveLoop duplicates each Rule 3 loop. Wave 0 falls into the original
+/// body and posts a bare cluster signal; every other wave takes the copy, which
+/// keeps the wait and omits the signal. Off by default.
+/// \p reduceClusterBarrierPerLoop emits Rule 3 on the first trigger of each
+/// enclosing loop, then permits another handshake after each 2000 estimated
+/// cycles in a long fall-through loop body. Nearby HalfPLR /
+/// ExpandPointerSwap copies still share one handshake. Off handshakes every
+/// loop trigger. The backend passes the resolved knob; this default is the
+/// static fallback.
+/// A Rule 3 or pre-loop cluster signal that lands right behind an `s_wait_dscnt`
+/// run goes in front of that run, so the drain stays next to the instruction it
+/// was inserted for.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
-    bool streamKMulticast = false, int pgrValue = 1);
+    bool streamKMulticast = false, int pgrValue = 1, int rule3SignalLeadCycles = 100,
+    bool splitWaveLoop = false, bool reduceClusterBarrierPerLoop = false);
 
 }  // namespace stinkytofu

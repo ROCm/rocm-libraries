@@ -32,7 +32,9 @@ __global__ void flip_pkd_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr, ui
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x)) {
+    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x) ||
+        (id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y) ||
+        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x)) {
         return;
     }
 
@@ -80,7 +82,9 @@ __global__ void flip_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr, u
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x)) {
+    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x) ||
+        (id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y) ||
+        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x)) {
         return;
     }
 
@@ -158,7 +162,9 @@ __global__ void flip_pkd3_pln3_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstP
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x)) {
+    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x) ||
+        (id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y) ||
+        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x)) {
         return;
     }
 
@@ -206,7 +212,9 @@ __global__ void flip_pln3_pkd3_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dst
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x)) {
+    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x) ||
+        (id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y) ||
+        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x)) {
         return;
     }
 
@@ -253,7 +261,8 @@ RppStatus hip_exec_flip_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr, Rpp
                                Rpp32u* horizontalTensor, Rpp32u* verticalTensor,
                                RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                rpp::Handle& handle) {
-    if (roiType == RpptRoiType::XYWH) hip_exec_roi_conversion_xywh_to_ltrb(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::XYWH)
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_xywh_to_ltrb(roiTensorPtrSrc, handle));
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;
@@ -329,7 +338,8 @@ RppStatus hip_exec_flip_single_image(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPt
                                      RpptDescPtr dstDescPtr, Rpp32u* horizontalTensor,
                                      Rpp32u* verticalTensor, RpptROIPtr roiTensorPtrSrc,
                                      RpptRoiType roiType, rpp::Handle& handle) {
-    if (roiType == RpptRoiType::XYWH) hip_exec_roi_conversion_xywh_to_ltrb(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::XYWH)
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_xywh_to_ltrb(roiTensorPtrSrc, handle));
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;

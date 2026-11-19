@@ -24,11 +24,10 @@
  * X-DTLA pair) are declared there and resolved at link time by their own part
  * files.
  *
- * The atom @property/method calls that have no standalone C entry point are
- * reproduced inline byte-for-byte from atoms.py, identically to the rest of the
- * port:
+ * atom.zero_acc(b) has no standalone C entry point and is reproduced inline
+ * byte-for-byte from atoms.py, identically to the rest of the port:
  *   atom.zero_acc(b)         -> rocke_b_zero_vec_f32(b, atom->c_per_lane)
- *   atom.lane_to_output(...) -> the 16x16 / 32x32 / 4x4 arith from atoms.py
+ * atom.lane_to_output(...) is rocke_mfma_atom_lane_to_output (atoms.h).
  */
 
 #include <stdbool.h>
@@ -46,60 +45,6 @@
 static rocke_value_t* moe_fp8_atom_zero_acc(rocke_ir_builder_t* b, const rocke_mfma_atom_t* atom)
 {
     return rocke_b_zero_vec_f32(b, atom->c_per_lane);
-}
-
-/* atom.lane_to_output(b, lane, i) -> (row_in_atom, col_in_atom). Writes both via
- * out params. Faithful reproduction of atoms.py:536-591 (16x16 / 32x32 / 4x4).
- * The unsupported-shape branch leaves the outputs NULL (the Python
- * NotImplementedError path; the gate/up atom is always 16x16 here). */
-static void moe_fp8_atom_lane_to_output(rocke_ir_builder_t* b,
-                                        const rocke_mfma_atom_t* atom,
-                                        rocke_value_t* lane,
-                                        int i,
-                                        rocke_value_t** out_row,
-                                        rocke_value_t** out_col)
-{
-    if(atom->m == 16 && atom->n == 16)
-    {
-        rocke_value_t* c_atom_n = rocke_b_const_i32(b, atom->n);
-        rocke_value_t* n_in_atom = rocke_b_mod(b, lane, c_atom_n);
-        rocke_value_t* m_blk = rocke_b_div(b, lane, c_atom_n);
-        /* Python: row = b.add(b.mul(m_blk, c_per_lane), b.const_i32(i)) -- mul
-         * emitted FIRST. Force C arg-eval order with an ordered temporary. */
-        rocke_value_t* mul_v = rocke_b_mul(b, m_blk, rocke_b_const_i32(b, atom->c_per_lane));
-        rocke_value_t* row = rocke_b_add(b, mul_v, rocke_b_const_i32(b, i));
-        *out_row = row;
-        *out_col = n_in_atom;
-        return;
-    }
-    if(atom->m == 32 && atom->n == 32)
-    {
-        rocke_value_t* c_atom_n = rocke_b_const_i32(b, atom->n);
-        rocke_value_t* n_in_atom = rocke_b_mod(b, lane, c_atom_n);
-        rocke_value_t* m_blk = rocke_b_div(b, lane, c_atom_n);
-        int rb = i / 4;
-        int ri = i % 4;
-        /* Python: row = b.add(b.add(b.const_i32(rb*8), b.mul(m_blk, b.const_i32(4))),
-         *                     b.const_i32(ri)) -- const(rb*8), mul, inner add,
-         * const(ri), outer add. Force the order. */
-        rocke_value_t* c_rb = rocke_b_const_i32(b, rb * 8);
-        rocke_value_t* mul_v = rocke_b_mul(b, m_blk, rocke_b_const_i32(b, 4));
-        rocke_value_t* inner = rocke_b_add(b, c_rb, mul_v);
-        rocke_value_t* row = rocke_b_add(b, inner, rocke_b_const_i32(b, ri));
-        *out_row = row;
-        *out_col = n_in_atom;
-        return;
-    }
-    if(atom->m == 4 && atom->n == 4)
-    {
-        rocke_value_t* c4 = rocke_b_const_i32(b, 4);
-        rocke_value_t* lane_in_batch = rocke_b_mod(b, lane, c4);
-        *out_row = rocke_b_const_i32(b, i);
-        *out_col = lane_in_batch;
-        return;
-    }
-    *out_row = NULL;
-    *out_col = NULL;
 }
 
 /* ===================================================================== *
@@ -183,7 +128,7 @@ rocke_value_t* rocke_moe_fp8_store_hidden_f32_pass(rocke_moe_fp8_build_ctx_t* ct
                 rocke_value_t* g;
                 rocke_value_t* u;
                 rocke_value_t* h;
-                moe_fp8_atom_lane_to_output(b, atom, lane, i, &row_in, &col_in);
+                rocke_mfma_atom_lane_to_output(b, atom, lane, i, &row_in, &col_in);
                 row = rocke_b_add(
                     b, warp_m_off, rocke_b_add(b, rocke_b_const_i32(b, mi * atom->m), row_in));
                 col = rocke_b_add(

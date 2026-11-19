@@ -3,7 +3,7 @@
 // The parameters one direct_wgrad kernel is compiled for.
 //
 // docs/algorithms/direct/direct-wgrad.md is the algorithm these configure, and
-// docs/algorithms/direct/direct-wgrad-config-table.md the set of them the table holds.
+// docs/algorithms/details/direct/direct-wgrad-config-table.md the set of them the table holds.
 
 #include "mathutil.h"
 
@@ -16,14 +16,16 @@ static constexpr int WAVES_PER_WORKGROUP = 8;
 
 // VGPRs a config may spend on the gradient and the operands together.
 //
-// Past this the symptom is a spill rather than a diagnostic, so config_table.h asserts it
-// entry by entry.
+// This sizes a tile. Addresses, buffer descriptors, loop state and the rows the split path stages
+// are left to the headroom below the 256-register file, so a config can clear it and still spill;
+// scripts/cdna4/direct/direct_wgrad/hot_loop_check.py measures what each one spills.
+// direct-wgrad-config-table.md has the measured headroom.
 static constexpr int TILE_VGPR_BUDGET = 192;
 
 // Channels a swizzled LDS row needs, on either operand: TransposeSwizzle needs C4 >= 8.
 static constexpr int MIN_SWIZZLED_CHANS = 32;
 
-// The MFMA the compute phase tiles onto: 16x16x32.
+// The MFMA the compute phase tiles onto: 16×16×32.
 //
 // M is the input-channel axis of the gradient tile, N the output-channel axis, and K the Q
 // reduction, so one instruction consumes 32 output columns. It sits here rather than with the
@@ -48,6 +50,8 @@ struct Config
     int kh = 3; // filter height, and the depth of the delta register ring
     int kw = 3; // filter width, and the S tiles a compute phase holds at once
 
+    int elem_bytes = 2; // 2 for fp16/bf16, 4 for tf32.
+
     int wave_c16; // input channels per wave / 16
     int wave_k16; // output channels per wave / 16
 
@@ -58,6 +62,40 @@ struct Config
 
     int unfold_n      = 1; // images packed into one column block
     int prefetch_rows = 2; // rows the memory phase runs ahead of its compute phase
+
+    // Rows a loader addresses from one base, or 0 to address the whole image from one.
+    //
+    // Nonzero folds the tile's first row into the 64-bit base so the 32-bit offset spans a tile,
+    // which is the only way to reach an image past 2 GiB. Must be a multiple of unroll(). See
+    // the row-tile section of row_schedule.h.
+    int rows_per_tile = 0;
+
+    // Whether the entry serves layers whose spatial axis the grid leaves unsplit.
+    //
+    // Each dW element then has one writer, so the epilogue stores dW directly where a split
+    // entry stores partials. writes_fit_the_split gives each entry only the layers
+    // its write suits. After every field the older entries set, so that an entry without it mangles
+    // as it did before the field.
+    bool no_splits = false;
+
+    // Whether the entry also divides the image into row segments, for layers whose column blocks
+    // alone leave some of a workgroup's waves_q partitions without an item.
+    //
+    // rows_fit_the_split admits a layer to an unsegmented config or to its row-segmented copy,
+    // never both. Last, so that unsegmented entries mangle as they did before the field. See the
+    // row segments section of docs/algorithms/direct/direct-wgrad.md.
+    bool row_segments = false;
+
+    // Whether the entry runs a 1×N layer as N×1 over its H/W-exchanged view.
+    //
+    // A 1×N filter is the same bytes as the N×1 one, so only the loaders' strides change. See
+    // docs/algorithms/details/direct/direct-wgrad-exchange-hw.md.
+    //
+    // Declared last because the mangling drops a trailing false member, so entries without the
+    // exchange keep their symbol names.
+    bool exchange_hw = false;
+
+    constexpr bool is_tf32() const { return elem_bytes == 4; }
 
     constexpr int waves() const { return waves_c * waves_k * waves_q * waves_g; }
     constexpr int threads() const { return WAVE_SIZE * waves(); }
@@ -81,8 +119,14 @@ struct Config
     constexpr int s_cols_per_image() const { return w_unfold() + kw - 1; }
 
     // VGPRs one wave spends on the gradient, and on the two operands.
+    //
+    // The gradient is fp32 whatever the operands are. A tf32 operand block is the (big, small)
+    // bf16 pair, so it costs twice a 16-bit one, which is what 2 * elem_bytes says: 4 registers
+    // per 16-bit block and 8 per split one. tf32's staging registers (RowStage) are a third term,
+    // unbudgeted as TILE_VGPR_BUDGET explains; direct-wgrad-config-table.md's tf32 section sizes
+    // them.
     constexpr int acc_vgprs() const { return kh * kw * wave_c16 * wave_k16 * 4; }
-    constexpr int operand_vgprs() const { return 4 * (kw * wave_c16 + kh * wave_k16); }
+    constexpr int operand_vgprs() const { return 2 * elem_bytes * (kw * wave_c16 + kh * wave_k16); }
 
     // LDS row buffers per ring: one front buffer plus the rows in flight.
     //

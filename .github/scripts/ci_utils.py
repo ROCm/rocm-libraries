@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 import time
+import uuid
 from typing import Callable, Iterable, Mapping, Tuple, Type, TypeVar
 
 F = TypeVar("F", bound=Callable[..., object])
@@ -42,10 +43,17 @@ def retry(
 
 
 @retry(max_attempts=3, delay_seconds=2, exceptions=(TimeoutError,))
-def get_modified_paths(base_ref: str) -> set[str]:
-    """Returns paths of files changed relative to the base reference."""
+def get_modified_paths(base_ref: str, detect_renames: bool = True) -> set[str]:
+    """Returns paths of files changed relative to the base reference.
+
+    With rename detection a rename reports only its destination; pass
+    detect_renames=False to get the source path as well.
+    """
+    command = ["git", "diff", "--name-only", base_ref]
+    if not detect_renames:
+        command.insert(2, "--no-renames")
     result = subprocess.run(
-        ["git", "diff", "--name-only", base_ref],
+        command,
         capture_output=True,
         text=True,
         check=True,
@@ -73,7 +81,13 @@ def set_github_output(outputs: Mapping[str, str]):
         return
     with open(output_file, "a") as f:
         for k, v in outputs.items():
-            f.write(f"{k}={v}\n")
+            if "\n" in v:
+                # Multiline values require the heredoc delimiter syntax; a random
+                # delimiter avoids collisions with the value's own content.
+                delimiter = f"ghadelimiter_{uuid.uuid4()}"
+                f.write(f"{k}<<{delimiter}\n{v}\n{delimiter}\n")
+            else:
+                f.write(f"{k}={v}\n")
 
 
 def append_step_summary(summary: str):

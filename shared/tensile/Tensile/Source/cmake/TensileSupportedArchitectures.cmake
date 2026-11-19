@@ -56,9 +56,12 @@ if(NOT BUILD_ADDRESS_SANITIZER)
         "gfx1151"
         "gfx1152"
         "gfx1153"
+        "gfx1170"
+        "gfx1171"
         "gfx1200"
         "gfx1201"
-        "gfx1250")
+        "gfx1250"
+        "gfx1250-strict")
 
     set(SUPPORTED_ARCHITECTURES ${BASE_ARCHITECTURES})
     list(APPEND SUPPORTED_ARCHITECTURES
@@ -93,6 +96,21 @@ function(tensile_validate_gpu_targets targets)
     string(REGEX REPLACE " +" ";" target_list "${target_flat}")
 
     foreach(target IN LISTS target_list)
+        # Targets in ROCBLAS_TENSILE_ARCH_SKIPLIST are never built by Tensile, so they
+        # need not be supported (matched on the part before ':', like rocBLAS does).
+        string(REGEX REPLACE ":.*$" "" target_base "${target}")
+        set(skipped FALSE)
+        foreach(pat IN LISTS ROCBLAS_TENSILE_ARCH_SKIPLIST)
+            string(STRIP "${pat}" pat)
+            string(REGEX REPLACE ":.*$" "" pat_base "${pat}")
+            if(NOT pat_base STREQUAL "" AND target_base STREQUAL pat_base)
+                set(skipped TRUE)
+                break()
+            endif()
+        endforeach()
+        if(skipped)
+            continue()
+        endif()
         list(FIND supported_list "${target}" idx)
         if(idx EQUAL -1)
             message(FATAL_ERROR "Unsupported GPU target: ${target}\nSupported targets are: ${supported_list}")

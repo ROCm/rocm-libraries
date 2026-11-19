@@ -31,9 +31,13 @@
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 
-#include <atomic>
 #include <algorithm>
+#include <iterator>
 #include <map>
+#include <mutex>
+#include <set>
+#include <stdexcept>
+#include <string>
 
 #include <tensilelitehost/export.h>
 
@@ -69,9 +73,12 @@ namespace TensileLite
         gfx1151,
         gfx1152,
         gfx1153,
+        gfx1170,
+        gfx1171,
         gfx1200,
         gfx1201,
         gfx1250,
+        gfx1250_strict,
         All
     };
 
@@ -132,16 +139,39 @@ namespace TensileLite
             return "TensileLibrary_*_gfx1152";
         case LazyLoadingInit::gfx1153:
             return "TensileLibrary_*_gfx1153";
+        case LazyLoadingInit::gfx1170:
+            return "TensileLibrary_*_gfx1170";
+        case LazyLoadingInit::gfx1171:
+            return "TensileLibrary_*_gfx1171";
         case LazyLoadingInit::gfx1200:
             return "TensileLibrary_*_gfx1200";
         case LazyLoadingInit::gfx1201:
             return "TensileLibrary_*_gfx1201";
         case LazyLoadingInit::gfx1250:
             return "TensileLibrary_*_gfx1250";
+        // These two share an ISA but not an ELF machine code, so neither may
+        // preload the other's libraries. Callers match this whole-string, so the
+        // pattern above stops at the bare name and this one requires the suffix.
+        case LazyLoadingInit::gfx1250_strict:
+            return "TensileLibrary_*_gfx1250-strict";
         case LazyLoadingInit::None:
             return "";
         }
         return "";
+    }
+
+    inline std::string loadFailureMessage(std::string const& path)
+    {
+        std::string message = "Failed to load TensileLite library shard " + path;
+#ifdef _WIN32
+        // Without long-path support, Windows cannot open a path of MAX_PATH
+        // (260) characters or more, and the open fails the same way as for a
+        // missing file.
+        if(path.size() >= 260)
+            message += " (the path is " + std::to_string(path.size())
+                       + " characters, at or over the Windows MAX_PATH limit of 260)";
+#endif
+        return message;
     }
 
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
@@ -151,64 +181,128 @@ namespace TensileLite
         mutable std::set<std::string>*                                  loadedFiles;
         mutable SolutionMap<MySolution>*                                masterSolutions;
         mutable std::mutex*                                             solutionsGuard;
-        mutable std::mutex                                              lazyLoadingGuard;
+        mutable std::once_flag                                          lazyLoadOnce;
         std::string                                                     filePrefix;
+
+        // Where to publish an indexed shard's blob cache, keyed by file prefix,
+        // so the owning master can resolve indices this shard has not parsed
+        // yet. Without it the shard loads but its solutions stay unreachable by
+        // index.
+        mutable std::map<std::string, std::shared_ptr<SolutionBlobCache<MySolution>>>*
+            solutionSources = nullptr;
         std::string                                                     suffix;
         std::string                                                     libraryDirectory;
-        mutable std::atomic<bool>                                       lastFindTopRetAll = false;
 
         mutable std::map<std::string, std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>>*
             indexLoadedLibraries;
 
         PlaceholderLibrary() = default;
 
-        bool loadPlaceholderLibrary() const
+        // Loads the shard the first time it is needed and returns the published
+        // library. A caller that arrives while the load is running waits for it.
+        // After that, this is a pointer copy. The search runs on the returned
+        // pointer, not under the load.
+        std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> loadPlaceholderLibrary() const
         {
-            std::lock_guard<std::mutex> lock(lazyLoadingGuard);
-            // If condition in case two threads got into this function
-            if(!library)
-            {
+            std::call_once(lazyLoadOnce, [this] {
                 std::string path       = (libraryDirectory + "/" + filePrefix + suffix).c_str();
                 auto        newLibrary = LoadLibraryFile<MyProblem, MySolution>(path);
                 auto        mLibrary
-                    = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
-                library = mLibrary->library;
+                    = dynamic_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
 
-                std::lock_guard<std::mutex> lock(*solutionsGuard);
-                if(loadedFiles->find(filePrefix) != loadedFiles->end())
+                // Throwing leaves lazyLoadOnce unset, so the next lookup retries
+                // the load instead of using a library that is not there.
+                if(mLibrary == nullptr || mLibrary->library == nullptr)
                 {
-                    if(indexLoadedLibraries->find(filePrefix) == indexLoadedLibraries->end())
-                        return true;
-                    library = (*indexLoadedLibraries)[filePrefix];
-                    indexLoadedLibraries->erase(filePrefix);
-
-                    // If the library is already loaded, just return it
-                    if(Debug::Instance().printCodeObjectInfo())
-                        std::cout << "load placeholder library " << filePrefix
-                                  << " from MasterLibrary cache" << std::endl;
-                    return true;
+                    // The public API reports this as an internal error and drops
+                    // the message, so it is printed here too.
+                    auto message = loadFailureMessage(path);
+                    if(Debug::Instance().printDataInit())
+                        std::cout << message << std::endl;
+                    throw std::runtime_error(message);
                 }
 
-                using std::begin;
-                using std::end;
+                // Indexed shards publish solutions later; stamp the name on
+                // the cache so it is applied as each one is parsed.
+                if(mLibrary->blobCache)
+                    mLibrary->blobCache->setCodeObjectFilename(getCodeObjectFileName());
 
-                std::transform(begin(mLibrary->solutions),
-                               end(mLibrary->solutions),
-                               std::inserter(*masterSolutions, end(*masterSolutions)),
-                               [this](auto& i) {
-                                   i.second->codeObjectFilename = getCodeObjectFileName();
-                                   return i;
-                               });
-                loadedFiles->insert(filePrefix);
+                // Everything this load registers is built here first and merged
+                // into the master at the end. A throw before the merge leaves the
+                // master unchanged, so the retry that call_once makes registers
+                // the tree it loads and not one left over from this attempt.
+                SolutionMap<MySolution> newSolutions;
+                std::set<std::string>   newFiles;
+                std::map<std::string, std::shared_ptr<SolutionBlobCache<MySolution>>>
+                    newSources;
 
-                if(Debug::Instance().printCodeObjectInfo())
-                    std::cout << "load placeholder library " << path << std::endl
-                              << mLibrary->solutions.size() << " solutions loaded" << std::endl;
+                std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> published;
+                {
+                    std::lock_guard<std::mutex> lock(*solutionsGuard);
 
-                return mLibrary;
-            }
+                    const bool fileLoaded = loadedFiles->count(filePrefix) != 0;
+                    auto       adopted    = fileLoaded ? indexLoadedLibraries->find(filePrefix)
+                                                       : indexLoadedLibraries->end();
 
-            return false;
+                    if(adopted != indexLoadedLibraries->end())
+                    {
+                        // Adopting the tree the master loaded means adopting the
+                        // cache the master already published; ours is dropped.
+                        published = adopted->second;
+
+                        if(Debug::Instance().printCodeObjectInfo())
+                            std::cout << "load placeholder library " << filePrefix
+                                      << " from MasterLibrary cache" << std::endl;
+                    }
+                    else
+                    {
+                        // Publishes this shard's cache so the owning master can
+                        // resolve indices the shard has not parsed yet. Keyed by
+                        // prefix, so a shard the master already published is not
+                        // registered twice -- two caches for one shard would
+                        // retain two copies of its blob and hand out two objects
+                        // for the same solution index.
+                        if(mLibrary->blobCache && solutionSources != nullptr)
+                            newSources.emplace(filePrefix, mLibrary->blobCache);
+
+                        // When the file is already recorded, this shard keeps its
+                        // own tree, so its cache is the one the leaves reference.
+                        if(!fileLoaded)
+                        {
+                            for(auto const& entry : mLibrary->solutions)
+                            {
+                                entry.second->codeObjectFilename = getCodeObjectFileName();
+                                newSolutions.insert(entry);
+                            }
+                            newFiles.insert(filePrefix);
+
+                            if(Debug::Instance().printCodeObjectInfo())
+                                std::cout << "load placeholder library " << path << std::endl
+                                          << mLibrary->solutions.size()
+                                          << " solutions loaded" << std::endl;
+                        }
+                        published = mLibrary->library;
+                    }
+
+                    beforeLibraryRegistered();
+
+                    // Nothing below allocates or throws: merge moves nodes and
+                    // keeps entries the master already has.
+                    if(adopted != indexLoadedLibraries->end())
+                        indexLoadedLibraries->erase(adopted);
+                    if(solutionSources != nullptr)
+                        solutionSources->merge(newSources);
+                    masterSolutions->merge(newSolutions);
+                    loadedFiles->merge(newFiles);
+                }
+
+                // Stored after this load has registered the shard. The hook runs
+                // immediately after that store.
+                library = std::move(published);
+                afterLibraryPublished();
+            });
+
+            return library;
         }
 
         std::string getCodeObjectFileName() const
@@ -220,10 +314,9 @@ namespace TensileLite
                                                                Hardware const&  hardware,
                                                                const int index) const override
         {
-            if(!library)
-                loadPlaceholderLibrary();
+            auto lib = loadPlaceholderLibrary();
 
-            auto solution = library->getSolutionByIndex(problem, hardware, index);
+            auto solution = lib->getSolutionByIndex(problem, hardware, index);
 
             if(solution)
                 solution->codeObjectFilename = getCodeObjectFileName();
@@ -236,10 +329,9 @@ namespace TensileLite
                                                              double*          fitness
                                                              = nullptr) const override
         {
-            if(!library)
-                loadPlaceholderLibrary();
+            auto lib = loadPlaceholderLibrary();
 
-            auto solution = library->findBestSolution(problem, hardware, fitness);
+            auto solution = lib->findBestSolution(problem, hardware, fitness);
 
             if(solution)
                 solution->codeObjectFilename = getCodeObjectFileName();
@@ -259,12 +351,9 @@ namespace TensileLite
                              SolutionLibrarySearchType searchType
                              = SolutionLibrarySearchType::DEFAULT) const override
         {
-            if(!library)
-            {
-                loadPlaceholderLibrary();
-            }
+            auto lib = loadPlaceholderLibrary();
 
-            auto solutions = library->findAllSolutions(problem, hardware, searchType);
+            auto solutions = lib->findAllSolutions(problem, hardware, searchType);
 
             for(auto& solution : solutions)
             {
@@ -280,12 +369,9 @@ namespace TensileLite
                                         SolutionLibrarySearchType     searchType
                                         = SolutionLibrarySearchType::DEFAULT) const override
         {
-            if(!library)
-            {
-                loadPlaceholderLibrary();
-            }
+            auto lib = loadPlaceholderLibrary();
 
-            auto solutions = library->findAllSolutionsGroupedGemm(problems, hardware, searchType);
+            auto solutions = lib->findAllSolutionsGroupedGemm(problems, hardware, searchType);
 
             for(auto& solution : solutions)
             {
@@ -299,26 +385,16 @@ namespace TensileLite
                                                             Hardware const&  hardware,
                                                             int numSolutions) const override
         {
-            if(!library)
-            {
-                loadPlaceholderLibrary();
-            }
+            auto lib = loadPlaceholderLibrary();
 
-            auto solutions = library->findTopSolutions(problem, hardware, numSolutions);
+            auto solutions = lib->findTopSolutions(problem, hardware, numSolutions);
 
             for(auto& solution : solutions)
             {
                 solution->codeObjectFilename = getCodeObjectFileName();
             }
 
-            // can't reach the requested number, means findTop already done its best
-            lastFindTopRetAll = (solutions.size() < numSolutions);
             return solutions;
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const override
-        {
-            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>
@@ -326,12 +402,9 @@ namespace TensileLite
                                         Hardware const&               hardware,
                                         int                           numSolutions) const override
         {
-            if(!library)
-            {
-                loadPlaceholderLibrary();
-            }
+            auto lib = loadPlaceholderLibrary();
 
-            auto solutions = library->findTopSolutionsGroupedGemm(problems, hardware, numSolutions);
+            auto solutions = lib->findTopSolutionsGroupedGemm(problems, hardware, numSolutions);
 
             for(auto& solution : solutions)
             {
@@ -360,6 +433,18 @@ namespace TensileLite
         {
             return filePrefix + suffix;
         }
+
+    protected:
+        // Runs under solutionsGuard once this load has decided what to register
+        // and before the master is changed. If it throws, nothing is registered
+        // and the next lookup loads the shard again.
+        virtual void beforeLibraryRegistered() const {}
+
+        // Runs after `library` is stored. This load has already published the
+        // shard cache and recorded the file. Indexed solutions stay in that
+        // cache until a lookup parses them. It cannot throw: once `library` is
+        // stored, a retry would load the shard a second time.
+        virtual void afterLibraryPublished() const noexcept {}
     };
 
 } // namespace TensileLite

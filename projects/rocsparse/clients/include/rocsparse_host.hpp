@@ -138,8 +138,8 @@ struct rocsparse_host
 // BSR indexing macros
 #define BSR_IND(j, bi, bj, dir) \
     ((dir == rocsparse_direction_row) ? BSR_IND_R(j, bi, bj) : BSR_IND_C(j, bi, bj))
-#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi)*bsr_dim + (bj))
-#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
+#define BSR_IND_R(j, bi, bj) (static_cast<int64_t>(bsr_dim) * bsr_dim * (j) + (bi)*bsr_dim + (bj))
+#define BSR_IND_C(j, bi, bj) (static_cast<int64_t>(bsr_dim) * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
 
 /*
  * ===========================================================================
@@ -326,6 +326,22 @@ void host_csrsv(rocsparse_operation  trans,
                 J*                   struct_pivot,
                 J*                   numeric_pivot);
 
+template <typename I, typename T>
+void host_ellsv(I                    M,
+                I                    N,
+                T                    alpha,
+                const I*             ell_col_ind,
+                const T*             ell_val,
+                I                    ell_width,
+                const T*             x,
+                int64_t              x_inc,
+                T*                   y,
+                rocsparse_diag_type  diag_type,
+                rocsparse_fill_mode  fill_mode,
+                rocsparse_index_base base,
+                I*                   struct_pivot,
+                I*                   numeric_pivot);
+
 template <typename I, typename J, typename T>
 void host_cscsv(rocsparse_operation  trans,
                 J                    M,
@@ -393,7 +409,7 @@ void host_hybmv(rocsparse_operation  trans,
                 rocsparse_int        M,
                 rocsparse_int        N,
                 T                    alpha,
-                rocsparse_int        ell_nnz,
+                int64_t              ell_nnz,
                 const rocsparse_int* ell_col_ind,
                 const T*             ell_val,
                 rocsparse_int        ell_width,
@@ -680,6 +696,40 @@ void host_cscsm(J                    M,
                 rocsparse_index_base base,
                 J*                   struct_pivot,
                 J*                   numeric_pivot);
+
+template <typename I, typename J, typename T>
+void host_diagonal_solve_csr(rocsparse_operation  trans,
+                             J                    M,
+                             J                    nrhs,
+                             T                    alpha,
+                             const I*             csr_row_ptr,
+                             const J*             csr_col_ind,
+                             const T*             csr_val,
+                             const T*             B,
+                             T*                   C,
+                             int64_t              ld,
+                             rocsparse_order      order,
+                             rocsparse_index_base base,
+                             int32_t              modifier,
+                             J*                   struct_pivot,
+                             J*                   numeric_pivot);
+
+template <typename I, typename J, typename T>
+void host_diagonal_solve_csc(rocsparse_operation  trans,
+                             J                    M,
+                             J                    nrhs,
+                             T                    alpha,
+                             const I*             csc_col_ptr,
+                             const J*             csc_row_ind,
+                             const T*             csc_val,
+                             const T*             B,
+                             T*                   C,
+                             int64_t              ld,
+                             rocsparse_order      order,
+                             rocsparse_index_base base,
+                             int32_t              modifier,
+                             J*                   struct_pivot,
+                             J*                   numeric_pivot);
 
 template <typename I, typename T>
 void host_coosm(I                    M,
@@ -1274,7 +1324,7 @@ void host_csr_to_hyb(rocsparse_int                     M,
                      std::vector<rocsparse_int>&       ell_col_ind,
                      std::vector<T>&                   ell_val,
                      rocsparse_int&                    ell_width,
-                     rocsparse_int&                    ell_nnz,
+                     int64_t&                          ell_nnz,
                      std::vector<rocsparse_int>&       coo_row_ind,
                      std::vector<rocsparse_int>&       coo_col_ind,
                      std::vector<T>&                   coo_val,

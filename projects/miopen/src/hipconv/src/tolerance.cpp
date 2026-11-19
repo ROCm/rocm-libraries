@@ -23,14 +23,14 @@ float get_unit_roundoff(DataType dtype)
     }
 }
 
-size_t get_accumulation_depth(const Conv2dParams& par)
+size_t get_accumulation_depth(const ConvParams& par)
 {
     if(par.direction == Direction::Wgrad)
-        return static_cast<size_t>(par.n) * par.p * par.q;
+        return static_cast<size_t>(par.n) * par.e * par.p * par.q;
     if(par.direction == Direction::Fprop)
-        return static_cast<size_t>(par.channels_per_group()) * par.kh * par.kw;
+        return static_cast<size_t>(par.channels_per_group()) * par.kd * par.kh * par.kw;
     if(par.direction == Direction::Dgrad)
-        return static_cast<size_t>(par.filters_per_group()) * par.kh * par.kw;
+        return static_cast<size_t>(par.filters_per_group()) * par.kd * par.kh * par.kw;
     throw std::invalid_argument("unsupported convolution direction");
 }
 
@@ -115,7 +115,7 @@ size_t get_accumulation_depth(const Conv2dParams& par)
 // giving the final error bound
 // |C-Ctilde| = (3*u_low^2 + (1 + 2*u_low) gamma(3*n, u_high)) (1 + 2*u_low) conv(|A|, |B|)
 //
-void get_mixed_precision_tolerance(const Conv2dParams& par, size_t depth, float& atol, float& rtol)
+void get_mixed_precision_tolerance(const ConvParams& par, size_t depth, float& atol, float& rtol)
 {
     // u_high is the per-multiply error of the MFMA/WMMA pipeline. This is the fp32 accumulation
     // roundoff (2^{-24}).
@@ -129,7 +129,8 @@ void get_mixed_precision_tolerance(const Conv2dParams& par, size_t depth, float&
         const double nu = static_cast<double>(n) * u;
         return nu < 1.0 ? nu / (1.0 - nu) : std::numeric_limits<double>::infinity();
     };
-    atol = 0.0f;
+    // fp16 rounding below 2^-14 errs by up to 2^-25, half the subnormal spacing; no rtol bounds it.
+    atol = par.result_type() == DataType::fp16 ? 0x1p-25f : 0.0f;
 
     if(par.input_type == DataType::tf32)
     {
@@ -151,14 +152,14 @@ void get_mixed_precision_tolerance(const Conv2dParams& par, size_t depth, float&
     // Past the hypothesis there is no bound to report.
     //
     // A bound that survives it can still be too loose to check anything against, which is the
-    // caller's judgement to make; see docs/algorithms/direct/direct-wgrad-tolerance.md.
+    // caller's judgement to make; see docs/algorithms/details/direct/direct-wgrad-tolerance.md.
     if(!std::isfinite(rtol))
     {
         rtol = TOLERANCE_UNAVAILABLE;
     }
 }
 
-void get_mixed_precision_tolerance(const Conv2dParams& par, float& atol, float& rtol)
+void get_mixed_precision_tolerance(const ConvParams& par, float& atol, float& rtol)
 {
     // Recursive summation over the whole contraction, which is the depth a kernel has unless it
     // says otherwise.

@@ -4,21 +4,24 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
+#include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/bundle/BundleDiscovery.hpp"
 #include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 
 // NOLINTBEGIN(readability-identifier-naming)
 
 using namespace hipdnn_integration_tests::bundle;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 
 namespace
 {
@@ -41,7 +44,7 @@ std::filesystem::path batchNormSweepRoot()
 
 void verifyGoldenComparison(
     hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors,
-    std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>&
+    std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>&
         goldenOutputs,
     float tolerance)
 {
@@ -89,10 +92,10 @@ void writeMinimalBatchNormBundle(const std::filesystem::path& dir, const std::st
 // ---------------------------------------------------------------------------
 // Path 1 — CPU Reference against golden data (the "LayerNorm default" path)
 //
-// For ops without bundles AND without a GPU reference executor, the
-// existing TestCpuFpReference* tests use CpuReferenceGraphExecutor as the
-// ground truth.  This test proves the golden comparison pipeline works
-// end-to-end by running the same CPU executor against a real batch-norm
+// For ops without bundles AND without a GPU reference executor, the CPU reference
+// is the ground truth. This test proves the golden comparison pipeline works
+// end-to-end by running the CPU reference through CpuReferenceGraphExecutorAdapter
+// (the same CPU path the verification harness uses) against a real batch-norm
 // bundle and comparing the result to the golden tensor data on disk.
 // ---------------------------------------------------------------------------
 TEST(TestGoldenVerificationCpuRefFp32, BatchNormSmallMatchesGoldenData)
@@ -115,7 +118,7 @@ TEST(TestGoldenVerificationCpuRefFp32, BatchNormSmallMatchesGoldenData)
     auto goldenOutputs = graphAndTensors.extractAndClearOutputTensorData();
 
     auto hostBuffers = graphAndTensors.hostBufferMap();
-    hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
+    hipdnn_integration_tests::CpuReferenceGraphExecutorAdapter().execute(
         graphAndTensors.graphBuffer.data(), graphAndTensors.graphBuffer.size(), hostBuffers);
 
     verifyGoldenComparison(graphAndTensors, goldenOutputs, 1e-5f);
@@ -189,9 +192,7 @@ TEST(TestGpuGoldenVerificationRef, SkipsWhenNoPlanAvailable)
 // ---------------------------------------------------------------------------
 TEST(TestVerificationRouting, BundleDiscoveryFindsOnlyAuthoredBundleData)
 {
-    auto path = std::filesystem::temp_directory_path() / "golden_routing_test";
-    std::filesystem::remove_all(path);
-    const hipdnn_test_sdk::utilities::ScopedDirectory tempDir(path);
+    const auto tempDir = claimScratchDirectory("golden_routing");
 
     writeMinimalBatchNormBundle(tempDir.path() / "BatchnormInference" / "nchw" / "fp32" / "Small",
                                 "Small");

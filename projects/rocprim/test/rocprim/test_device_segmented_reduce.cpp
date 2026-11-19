@@ -34,6 +34,7 @@
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_types.hpp"
 
 // required rocprim headers
 #include <rocprim/block/block_reduce.hpp>
@@ -160,7 +161,41 @@ using Params = ::testing::Types<
 #undef maximum
 #undef minimum
 
-TYPED_TEST_SUITE(RocprimDeviceSegmentedReduce, Params);
+struct RocprimDeviceSegmentedReduceNameGenerator
+{
+    static std::string algo_tag(bra a)
+    {
+        switch(a)
+        {
+            case bra::using_warp_reduce: return "WarpReduce";
+            case bra::raking_reduce: return "Raking";
+            case bra::raking_reduce_commutative_only: return "RakingComm";
+            default: return "Default";
+        }
+    }
+
+    static std::string num(int v)
+    {
+        return v < 0 ? "n" + std::to_string(-v) : std::to_string(v);
+    }
+
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string algo = Params::use_default_config ? std::string("Default")
+                                                       : algo_tag(Params::algo);
+        std::string n = type_tag<typename Params::input_type>() + "_"
+                        + type_tag<typename Params::output_type>() + "_" + algo + "_"
+                        + num(Params::init) + "_"
+                        + std::to_string(Params::min_segment_length) + "_"
+                        + std::to_string(Params::max_segment_length);
+        if constexpr(Params::use_identity_iterator) n += "_Ident";
+        if constexpr(Params::use_graphs) n += "_Graphs";
+        return n;
+    }
+};
+
+TYPED_TEST_SUITE(RocprimDeviceSegmentedReduce, Params, RocprimDeviceSegmentedReduceNameGenerator);
 
 TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
 {

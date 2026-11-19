@@ -32,7 +32,7 @@ Every manifest carries:
 | `engine_build_id`    | string  | content hash of the engine that produced the artifact (`"unknown"` if the `rocke_engine` binding isn't importable) |
 | `engine_version`     | string  | version of the engine that produced the artifact (`"unknown"` fallback) |
 
-The `engine_build_id` / `engine_version` fields stamp the engine provenance (from the C++ engine's `rocke_build_id()` / `rocke_engine_version()`, exposed via the `rocke_engine` binding) so a consumer such as the rocke-provider can fail loud on a stale or mixed bundle instead of silently mixing artifacts. They are artifact stamps only and never enter the emitted IR. Helpers: `helpers/manifest.py::engine_build_id()` / `engine_version()`.
+The `engine_build_id` / `engine_version` fields stamp the engine provenance (from the C++ engine's `rocke_build_id()` / `rocke_engine_version()`, exposed via the `rocke_engine` binding) so a consumer such as the rocke-provider can fail loud on a stale or mixed bundle instead of silently mixing artifacts. They are artifact stamps only and never enter the emitted IR. Helpers: `helpers/manifest.py::engine_build_id()` / `engine_version()`. The build id hashes the engine's C++ sources and, when the sibling `library/cpp` tree is present, the library-owned C++ mirrors (e.g. conv) too, so an edit to either changes it (`cmake/rocke_build_id.cmake`, mirrored by `portable_ir/src/online.py::source_build_id`).
 
 ## Per-Kind Fields
 
@@ -76,11 +76,12 @@ Emitted by `make_conv_manifest(...)`:
 | Field           | Notes                                                                |
 |-----------------|----------------------------------------------------------------------|
 | `conv_layout`   | `"implicit_gemm"`, `"direct_grouped_16c"`, `"direct_grouped_4c"`     |
-| `conv`          | exactly 13 ints (raises `ValueError` otherwise)                      |
+| `direction`     | `"fwd"` (default), `"wgrad"` or `"dgrad"`: which conv the kernel computes; selects the `args_signature` problem block (`conv_args_signature(direction=...)`) and how the runner binds A/B/D |
+| `conv`          | 13 ints, or 18 for `implicit_gemm_3d` (`ValueError` otherwise)       |
 | `groups/cpg/kpg`| grouping; dense conv uses `groups=1, cpg=C, kpg=K`                   |
 | `grid_explicit` | bypass automatic grid derivation; required for direct conv kernels   |
 | `grid_order`    | `"MN"` or `"NM"` when `grid_explicit` not given                      |
-| `args_signature`| from `conv_args_signature()` (A, B, D, A_bytes, B_bytes, D_bytes)    |
+| `args_signature`| required; from `kernels.common.conv_abi` (AOT problem block included)|
 
 `sig_has_bytes=1` for all conv manifests (buffer-resource path requires the `*_bytes` args).
 
@@ -159,8 +160,8 @@ gemm_args_signature(with_bytes=False) ->
 gemm_args_signature(with_bytes=True) ->
   [A, B, C, A_bytes: i32, B_bytes: i32, C_bytes: i32]   # buffer-rsrc shape
 
-conv_args_signature() ->
-  [A, B, D, A_bytes, B_bytes, D_bytes]                  # always with bytes
+kernels.common.conv_abi.conv_args_signature(direction=...) ->
+  [A, B, D, A_bytes, B_bytes, D_bytes, <AOT problem block>, <extras>]
 
 attention_args_signature(path="2d") -> 16 entries (see above)
 attention_args_signature(path="reduce") -> 6 entries

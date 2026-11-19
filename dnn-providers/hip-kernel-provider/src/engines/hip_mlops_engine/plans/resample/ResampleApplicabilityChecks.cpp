@@ -8,6 +8,7 @@
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
+#include <cstdint>
 #include <unordered_set>
 
 namespace hip_kernel_provider::resample
@@ -15,6 +16,26 @@ namespace hip_kernel_provider::resample
 using namespace hip_kernel_provider::core::utils;
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+
+namespace
+{
+
+// True when the product of dims[first..] is at most `limit`, multiplied in 64 bits without
+// overflow.
+bool extentProductAtMost(const std::vector<int64_t>& dims, size_t first, int64_t limit)
+{
+    int64_t product = 1;
+    for(size_t i = first; i < dims.size(); ++i)
+    {
+        if(__builtin_mul_overflow(product, dims[i], &product) || product > limit)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
 
 void ResampleValidator::checkTensorLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds)
 {
@@ -35,37 +56,48 @@ void ResampleValidator::checkTensorLayoutsAndDimsSupported(const std::vector<int
     validateConsistentLayouts(tensors);
 }
 
-void ResampleValidator::checkTensorDataTypesSupported(
-    const data_objects::ResampleFwdAttributes& resampleAttr)
+void ResampleValidator::checkTensorDataTypesSupported(const std::vector<int64_t>& ioTensorIds,
+                                                      const std::optional<int64_t>& indexTensorId)
 {
+    if(ioTensorIds.empty())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "At least one IO tensor must be provided for Resample.");
+    }
+
     const std::unordered_set<data_objects::DataType> allowedIoTypes{
         data_objects::DataType::FLOAT,
         data_objects::DataType::HALF,
         data_objects::DataType::BFLOAT16};
 
-    const auto& xTensor = findTensorAttributes(_tensorMap, resampleAttr.x_tensor_uid());
-    const auto& yTensor = findTensorAttributes(_tensorMap, resampleAttr.y_tensor_uid());
-
-    validateDataTypeIsSupported(xTensor.data_type(),
+    const auto& refTensor = findTensorAttributes(_tensorMap, ioTensorIds[0]);
+    validateDataTypeIsSupported(refTensor.data_type(),
                                 allowedIoTypes,
-                                "ResampleFwd supports FLOAT, HALF, and BFLOAT16 x tensors.");
-    if(yTensor.data_type() != xTensor.data_type())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "ResampleFwd requires x and y tensors to have the same data type.");
-    }
+                                "Resample supports FLOAT, HALF, and BFLOAT16 IO tensors.");
 
-    const bool hasIndex = resampleAttr.index_tensor_uid().has_value();
-    if(hasIndex)
+    for(size_t i = 1; i < ioTensorIds.size(); ++i)
     {
-        const auto& indexTensor
-            = findTensorAttributes(_tensorMap, resampleAttr.index_tensor_uid().value());
-        if(indexTensor.data_type() != data_objects::DataType::INT32)
+        const auto& tensorAttr = findTensorAttributes(_tensorMap, ioTensorIds[i]);
+        validateDataTypeIsSupported(tensorAttr.data_type(),
+                                    allowedIoTypes,
+                                    "Resample supports FLOAT, HALF, and BFLOAT16 IO tensors.");
+
+        if(tensorAttr.data_type() != refTensor.data_type())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "ResampleFwd index tensor must have INT32 data type.");
+                "Resample requires all IO tensors to have the same data type.");
+        }
+    }
+
+    if(indexTensorId.has_value())
+    {
+        const auto& indexTensor = findTensorAttributes(_tensorMap, indexTensorId.value());
+        if(indexTensor.data_type() != data_objects::DataType::INT32)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Resample index tensor must have INT32 data type.");
         }
     }
 }
@@ -83,14 +115,54 @@ void ResampleValidator::checkTensorShapesSupported(
                                 toStdVector(resampleAttr.pre_padding()),
                                 toStdVector(resampleAttr.post_padding()),
                                 toStdVector(resampleAttr.stride()),
-                                toStdVector(resampleAttr.window()),
-                                "ResampleFwd");
+                                toStdVector(resampleAttr.window()));
+
+    // The forward plan launches one thread per output element in 256-thread blocks, and HIP
+    // rejects a launch of 2^32 or more threads, so the rounded-up thread count must stay below
+    // 2^32: at most 2^32 - 256 outputs. The kernel also narrows the flattened input spatial index
+    // to the INT32 index tensor.
+    constexpr int64_t MAX_OUTPUT_ELEMENTS = (int64_t{1} << 32) - 256;
+    if(!extentProductAtMost(yDims, 0, MAX_OUTPUT_ELEMENTS))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "ResampleFwd output exceeds the 2^32 - 256 elements one launch can cover.");
+    }
 
     if(resampleAttr.index_tensor_uid().has_value())
     {
         const auto& indexTensor
             = findTensorAttributes(_tensorMap, resampleAttr.index_tensor_uid().value());
         validateResampleIndexShape(indexTensor, yDims, "ResampleFwd");
+        if(!extentProductAtMost(xDims, 2, INT32_MAX))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "ResampleFwd flattened input spatial extent does not fit the INT32 index tensor.");
+        }
+    }
+}
+
+void ResampleValidator::checkBwdTensorShapesSupported(
+    const data_objects::ResampleBwdAttributes& resampleBwdAttr)
+{
+    const auto& dyTensor = findTensorAttributes(_tensorMap, resampleBwdAttr.dy_tensor_uid());
+    const auto& dxTensor = findTensorAttributes(_tensorMap, resampleBwdAttr.dx_tensor_uid());
+
+    const auto dyDims = tensorDims(dyTensor);
+    const auto dxDims = tensorDims(dxTensor);
+    validateResampleBwdOutputShape(dyDims,
+                                   dxDims,
+                                   toStdVector(resampleBwdAttr.pre_padding()),
+                                   toStdVector(resampleBwdAttr.post_padding()),
+                                   toStdVector(resampleBwdAttr.stride()),
+                                   toStdVector(resampleBwdAttr.window()));
+
+    if(resampleBwdAttr.index_tensor_uid().has_value())
+    {
+        const auto& indexTensor
+            = findTensorAttributes(_tensorMap, resampleBwdAttr.index_tensor_uid().value());
+        validateResampleIndexShape(indexTensor, dyDims, "ResampleBwd");
     }
 }
 
@@ -121,6 +193,14 @@ void ResampleValidator::checkTensorConfigSupported(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "ResampleFwd index tensor is supported only for maxpool mode.");
     }
+    // The kernel writes the index tensor whenever one is present, so an index tensor
+    // without generate_index would be written against the graph's stated intent.
+    if(resampleAttr.index_tensor_uid().has_value() && !generateIndex)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "ResampleFwd index tensor requires generate_index to be true.");
+    }
 
     std::vector<int64_t> tensorIds{resampleAttr.x_tensor_uid(), resampleAttr.y_tensor_uid()};
     if(resampleAttr.index_tensor_uid().has_value())
@@ -128,9 +208,59 @@ void ResampleValidator::checkTensorConfigSupported(
         tensorIds.push_back(resampleAttr.index_tensor_uid().value());
     }
 
+    validateNoVirtualTensors(
+        tensorIds, "Resample operands are read or written by the kernel and must not be virtual.");
     checkTensorLayoutsAndDimsSupported(tensorIds);
-    checkTensorDataTypesSupported(resampleAttr);
+    checkTensorDataTypesSupported({tensorIds[0], tensorIds[1]}, resampleAttr.index_tensor_uid());
     checkTensorShapesSupported(resampleAttr);
+}
+
+void ResampleValidator::checkBwdTensorConfigSupported(
+    const data_objects::ResampleBwdAttributes& resampleBwdAttr)
+{
+    const auto resampleMode = resampleBwdAttr.resample_mode();
+    if(resampleMode != data_objects::ResampleMode::MAXPOOL
+       && resampleMode != data_objects::ResampleMode::AVGPOOL_EXCLUDE_PADDING
+       && resampleMode != data_objects::ResampleMode::AVGPOOL_INCLUDE_PADDING)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "ResampleBwd resample mode is unsupported.");
+    }
+
+    if(resampleBwdAttr.padding_mode() == data_objects::PaddingMode::PADDING_NOT_SET)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "ResampleBwd padding mode must be set.");
+    }
+
+    if(resampleBwdAttr.index_tensor_uid().has_value()
+       && resampleBwdAttr.resample_mode() != data_objects::ResampleMode::MAXPOOL)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "ResampleBwd index tensor is supported only for maxpool mode.");
+    }
+
+    if(resampleBwdAttr.resample_mode() == data_objects::ResampleMode::MAXPOOL
+       && !resampleBwdAttr.index_tensor_uid().has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "ResampleBwd with maxpool mode requires an index tensor.");
+    }
+
+    std::vector<int64_t> tensorIds{resampleBwdAttr.dy_tensor_uid(),
+                                   resampleBwdAttr.dx_tensor_uid()};
+    if(resampleBwdAttr.index_tensor_uid().has_value())
+    {
+        tensorIds.push_back(resampleBwdAttr.index_tensor_uid().value());
+    }
+
+    validateNoVirtualTensors(
+        tensorIds, "Resample operands are read or written by the kernel and must not be virtual.");
+    checkTensorLayoutsAndDimsSupported(tensorIds);
+    checkTensorDataTypesSupported({tensorIds[0], tensorIds[1]}, resampleBwdAttr.index_tensor_uid());
+    checkBwdTensorShapesSupported(resampleBwdAttr);
 }
 
 } // namespace hip_kernel_provider::resample

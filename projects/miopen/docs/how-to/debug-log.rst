@@ -1,59 +1,105 @@
 .. meta::
-  :description: How to log and debug MIOpen
-  :keywords: MIOpen, ROCm, API, documentation, logging, debugging
+  :description: Environment variables that control MIOpen logging, and the messages hipDNN forwarding prints
+  :keywords: MIOpen, ROCm, API, documentation, logging, debugging, hipDNN
 
 ********************************************************************
-Logging and debugging
+Log and debug MIOpen
 ********************************************************************
 
-All logging messages are output to the standard error stream (``stderr``). You can use the following
-environmental variables to control logging. Both variables are disabled by default.
+All logging messages go to the standard error stream (``stderr``). Use the following environment
+variables to control logging. ``MIOPEN_ENABLE_LOGGING`` and ``MIOPEN_ENABLE_LOGGING_CMD`` are off
+by default.
 
-* ``MIOPEN_ENABLE_LOGGING``: Prints the basic layer-by-layer MIOpen API call
-  information with the actual parameters and configurations. This information is important for debugging.
+.. list-table::
+    :header-rows: 1
+    :widths: 30,45,25
 
-  * To enable the feature: ``1``, ``on``, ``yes``, ``true``, ``enable``, or ``enabled``
-  * To disable the feature: ``0``, ``off``, ``no``, ``false``, ``disable``, or ``disabled``
+    * - **Variable**
+      - **Description**
+      - **Values**
 
-* ``MIOPEN_ENABLE_LOGGING_CMD``: Outputs the associated ``MIOpenDriver`` command lines to the
-  console.
+    * - ``MIOPEN_ENABLE_LOGGING``
+      - Prints the basic layer-by-layer MIOpen API call information with the actual parameters and
+        configurations. This information is important for debugging.
+      - | Enable: ``1``, ``on``, ``yes``, ``true``, ``enable``, or ``enabled``
+        | Disable: ``0``, ``off``, ``no``, ``false``, ``disable``, or ``disabled``
 
-  * To enable the feature: ``1``, ``on``, ``yes``, ``true``, ``enable``, or ``enabled``
-  * To disable the feature: ``0``, ``off``, ``no``, ``false``, ``disable``, or ``disabled``
+    * - ``MIOPEN_ENABLE_LOGGING_CMD``
+      - Outputs the associated ``MIOpenDriver`` command lines to the console.
+      - | Enable: ``1``, ``on``, ``yes``, ``true``, ``enable``, or ``enabled``
+        | Disable: ``0``, ``off``, ``no``, ``false``, ``disable``, or ``disabled``
 
-* ``MIOPEN_LOG_LEVEL``: In addition to API call information and driver commands, MIOpen logs
-  information related to the progress of its internal operations. This information can be useful for
-  debugging and understanding how the library works. ``MIOPEN_LOG_LEVEL`` controls the
-  verbosity of these messages. The allowed values are:
+    * - ``MIOPEN_LOG_LEVEL``
+      - In addition to API call information and driver commands, MIOpen logs information related to
+        the progress of its internal operations. This information can be useful for debugging and
+        understanding how the library works. ``MIOPEN_LOG_LEVEL`` controls the verbosity of these
+        messages.
+      - ``0`` to ``7``. See :ref:`logging-levels`.
 
-  * ``0``: Default. Works as level ``4`` for release builds and level ``5`` for debug builds.
-  * ``1``: Quiet. No logging messages.
-  * ``2``: Fatal errors only (unused).
-  * ``3``: Errors, including fatal errors.
-  * ``4``: All errors and warnings.
-  * ``5``: Info. All the preceding information, plus information for debugging purposes.
-  * ``6``: Detailed information. All the preceding information, plus more detailed information for
-    debugging.
-  * ``7``: Trace. All the preceding information, plus additional details.
+    * - ``MIOPEN_ENABLE_LOGGING_MPMT``
+      - Prefixes each log line with information to identify records printed from different
+        processes or threads. This is useful for debugging multi-process and multi-threaded
+        applications.
+      - Same as ``MIOPEN_ENABLE_LOGGING``
 
-* ``MIOPEN_ENABLE_LOGGING_MPMT``: Each log line is prefixed with information
-  to identify records printed from different processes or threads. This is useful for debugging
-  multi-process and multi-threaded applications.
+    * - ``MIOPEN_ENABLE_LOGGING_ELAPSED_TIME``
+      - Adds a timestamp to each log line that indicates the time elapsed (in milliseconds) since
+        the previous log message.
+      - Same as ``MIOPEN_ENABLE_LOGGING``
 
-* ``MIOPEN_ENABLE_LOGGING_ELAPSED_TIME``: Adds a timestamp to each log line that indicates the
-  time elapsed (in milliseconds) since the previous log message.
+    * - ``MIOPEN_ENABLE_LOGGING_DATE_TIME``
+      - Adds a timestamp to each log line that indicates the system time (with milliseconds).
+      - Same as ``MIOPEN_ENABLE_LOGGING``
 
-* ``MIOPEN_ENABLE_LOGGING_DATE_TIME``: Adds a timestamp to each log line that indicates the
-  system time (with milliseconds).
+    * - ``MIOPEN_WARN_SEARCH``
+      - Elevates log messages for Search to warnings.
+      - Same as ``MIOPEN_ENABLE_LOGGING``
 
-* ``MIOPEN_WARN_SEARCH``: Elevate log messages for Search to warnings.
+    * - ``MIOPEN_LOG_BUFFER_SIZE``
+      - Message length of the Info2 buffer in lines. If ``MIOPEN_LOG_LEVEL`` is less than ``6``,
+        log messages are buffered. The buffered logs are dumped to a log file when MIOpen logs an
+        error message, or an error is thrown by MIOpen. This log can be found in
+        ``/tmp/miopen_error_<pid>``. This feature is disabled by default.
+      - A number greater than ``0`` enables the feature, for example ``128``.
 
-* ``MIOPEN_LOG_BUFFER_SIZE``: Message length of the Info2 buffer in lines.
-  If ``MIOPEN_LOG_LEVEL`` is less than 6, then log messages will be buffered.
-  The buffered logs will be dumped to a log file when MIOpen logs an error message,
-  or an error is thrown by MIOpen.
-  This log can be found in ``/tmp/miopen_error_<pid>``.
-  This feature is disabled by default and can be enabled by setting the value to greater than 0 (e.g., 128).
+.. _logging-levels:
+
+Log levels
+===================================================
+
+The allowed values of ``MIOPEN_LOG_LEVEL`` are:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 15,85
+
+    * - **Value**
+      - **Meaning**
+
+    * - ``0``
+      - Default. Works as level ``4`` for release builds and level ``5`` for debug builds.
+
+    * - ``1``
+      - Quiet. No logging messages.
+
+    * - ``2``
+      - Fatal errors only (unused).
+
+    * - ``3``
+      - Errors, including fatal errors.
+
+    * - ``4``
+      - All errors and warnings.
+
+    * - ``5``
+      - Info. All the preceding information, plus information for debugging purposes.
+
+    * - ``6``
+      - Detailed information. All the preceding information, plus more detailed information for
+        debugging.
+
+    * - ``7``
+      - Trace. All the preceding information, plus additional details.
 
 .. note::
 
@@ -64,6 +110,78 @@ environmental variables to control logging. Both variables are disabled by defau
     export MIOPEN_ENABLE_LOGGING=1
     export MIOPEN_ENABLE_LOGGING_CMD=1
     export MIOPEN_LOG_LEVEL=6
+
+  If you use hipDNN forwarding, also include the values of ``MIOPEN_HIPDNN_FORWARDING`` and
+  ``MIOPEN_DISABLE_HIPDNN_FOR``.
+
+.. _logging-hipdnn-forwarding:
+
+Logging hipDNN forwarding
+===================================================
+
+When :doc:`hipDNN forwarding <./use-hipdnn-forwarding>` is available, MIOpen can print these
+messages to ``stderr``:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 45,55
+
+    * - **Message**
+      - **Details**
+
+    * - ``[MIOpen] MIOPEN_HIPDNN_FORWARDING=<value>: entry points in the forwarding set are redirected to hipDNN, all others dispatch to the MIOpen implementation.``
+      - Printed once, when forwarding is turned on.
+
+    * - ``[MIOpen] hipDNN routing: <function> mode=<mode> route=<route> reason=<reason>``
+      - Printed when ``MIOPEN_LOG_LEVEL`` is ``6`` or higher, the first time each function is
+        called. MIOpen keeps that route for the rest of the run. ``mode`` is ``enabled`` or
+        ``disabled``, ``route`` is ``hipdnn`` or ``miopen``, and ``reason`` is one of the values in
+        :ref:`logging-hipdnn-routing-reasons`.
+
+    * - ``[MIOpen] hipDNN forwarded: <function>``
+      - Printed for every forwarded call when ``MIOPEN_ENABLE_LOGGING`` is enabled. It replaces the
+        usual API log entry and ``MIOpenDriver`` command, and doesn't list the arguments. Log
+        entries for descriptor functions, such as ``miopenGetTensorDescriptor_impl``, can follow it
+        because MIOpen calls them to read your descriptors. To see the full log entry, rerun with
+        ``MIOPEN_DISABLE_HIPDNN_FOR=<function>``.
+
+    * - ``[MIOpen] hipDNN forwarding is unavailable (if hipDNN gives no reason, set HIPDNN_LOG_LEVEL=error): <message>``
+      - Printed once if hipDNN could not be loaded. A common cause is a hipDNN with a different
+        major version than the one MIOpen was built with.
+
+    * - ``[MIOpen] [hipDNN-forwarded] <status>: <reason>``
+      - Printed once for each forwarded call that fails.
+
+The last two messages are hidden when ``MIOPEN_LOG_LEVEL`` is ``1``, ``2``, or a negative number.
+
+.. _logging-hipdnn-routing-reasons:
+
+Routing reasons
+---------------------------------------------------
+
+The ``reason`` field of the ``hipDNN routing`` message is one of the following:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 30,70
+
+    * - **Reason**
+      - **Meaning**
+
+    * - ``forwarding-off``
+      - ``MIOPEN_HIPDNN_FORWARDING`` is not enabled.
+
+    * - ``not-in-forwarding-set``
+      - This function is never forwarded.
+
+    * - ``disabled-by-env``
+      - ``MIOPEN_DISABLE_HIPDNN_FOR`` names this function, or is ``*``.
+
+    * - ``hipdnn-unavailable``
+      - hipDNN could not be loaded. The call fails instead of running in MIOpen.
+
+    * - ``in-forwarding-set``
+      - The function is forwarded to hipDNN.
 
 Layer filtering
 ===================================================
@@ -217,7 +335,6 @@ Some of the solutions have individual controls, which affect both find and immed
   * ``MIOPEN_DEBUG_AMD_MP_BD_WINOGRAD_EXPEREMENTAL_FP16_TRANSFORM`` --
     ``ConvMPBidirectWinograd*``, FWD/BWD FP16 experimental mode (use at your own risk). Disabled
     by default.
-  * ``MIOPEN_DEBUG_AMD_FUSED_WINOGRAD`` -- Fused ``FP32`` F(3,3) Winograd, variable filter size.
 
 Implicit GEMM solutions:
 

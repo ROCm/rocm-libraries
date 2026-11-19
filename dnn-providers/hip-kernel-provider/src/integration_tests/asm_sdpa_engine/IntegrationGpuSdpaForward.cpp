@@ -1,8 +1,14 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <stdexcept>
+
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
+#include <hip_kernel_provider_common/SdpaConfigConstants.hpp>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
@@ -11,6 +17,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "../../engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "../IntegrationGraphVerificationHarness.hpp"
 #include "AsmSdpaConfigHelpers.hpp"
 #include "asm_fmha_v3_fwd_configs.hpp"
@@ -25,6 +32,49 @@ using namespace asm_sdpa_engine;
 namespace
 {
 
+// Names the config helper assigns to the fp8 q/k/v descale tensors; the fill below
+// selects them by these names (see initializeBundle).
+constexpr const char* K_DESCALE_Q_NAME = "descale_q";
+constexpr const char* K_DESCALE_K_NAME = "descale_k";
+constexpr const char* K_DESCALE_V_NAME = "descale_v";
+
+// Fixed, positive, DISTINCT dequantization factors for the q/k/v descales. Distinct so a
+// q/k/v pointer swap changes the result and fails the test; fixed (not randomized) so the
+// same host value feeds both the GPU kernel and the CPU reference and the fp8 3e-2 bound
+// stays deterministic.
+constexpr float K_DESCALE_Q_FILL = 0.25f;
+constexpr float K_DESCALE_K_FILL = 0.5f;
+constexpr float K_DESCALE_V_FILL = 0.75f;
+
+// Per-batch token counts written into the group-mode offset tables (configToTestCase
+// gives group cases batch 2 and S_q = S_kv = 512). The lengths differ between batches,
+// are not multiples of any ts_qo or ts_kv, and both exceed the largest group ts_qo (256),
+// so every batch spans at least two Q-tiles of every group row and the causal tile
+// merging (tgDiv) changes the launch grid. Every K/V length is at least its Q length,
+// so bottom-right causal masks no row out fully.
+constexpr std::array<int32_t, 2> K_GROUP_SEQ_LENS_Q = {401, 260};
+constexpr std::array<int32_t, 2> K_GROUP_SEQ_LENS_KV = {483, 299};
+
+// Writes the exclusive prefix sum of @p lengths, the [B+1] token seqstarts AITER's group
+// mode reads, into @p tensor.
+template <size_t N>
+void fillSeqStarts(hipdnn_data_sdk::utilities::ITensor& tensor,
+                   const std::array<int32_t, N>& lengths)
+{
+    if(tensor.elementCount() != N + 1)
+    {
+        throw std::runtime_error("Ragged offset table has " + std::to_string(tensor.elementCount())
+                                 + " entries; the group-mode lengths need "
+                                 + std::to_string(N + 1));
+    }
+    std::array<int32_t, N + 1> starts{};
+    for(size_t b = 0; b < N; ++b)
+    {
+        starts[b + 1] = starts[b] + lengths[b];
+    }
+    tensor.fillWithData(starts.data(), sizeof(starts));
+}
+
 /**
  * @brief Test fixture that takes a GraphTestCase as parameter.
  */
@@ -32,13 +82,59 @@ template <typename DataType>
 class IntegrationSdpaFwd : public IntegrationGraphVerificationHarness<DataType, GraphTestCase>
 {
 protected:
-    void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
+    // Fill inputs, identifying the fp8 q/k/v descales and the group-mode offset tables
+    // BY NAME rather than by element count. Element-count selection is fragile: it
+    // silently breaks once per-(batch, KV-head) descales land (they stop being
+    // element-count 1) and it cannot separate the descales from the equally-scalar
+    // attention scale. Descales are dequantization factors, so they get the fixed,
+    // positive, DISTINCT fill constants defined above (see K_DESCALE_*_FILL for the
+    // distinct-and-fixed rationale). Offset tables get the token seqstarts of
+    // K_GROUP_SEQ_LENS_*. Every other tensor gets the plain random fill.
+    void initializeBundle(const hipdnn_frontend::graph::Graph& graph,
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
+        std::unordered_map<int64_t, std::string> uidToName;
+        graph.visit([&](const hipdnn_frontend::graph::INode& node) {
+            for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
+            {
+                uidToName.emplace(tensorAttr->get_uid(), tensorAttr->get_name());
+                if(tensorAttr->has_ragged_offset())
+                {
+                    const auto offset = tensorAttr->get_ragged_offset();
+                    uidToName.emplace(offset->get_uid(), offset->get_name());
+                }
+            }
+        });
+
         for(auto& tensorPair : bundle.tensors)
         {
-            bundle.randomizeTensor(tensorPair.first, _minVal, _maxVal, seed);
+            const auto nameIt = uidToName.find(tensorPair.first);
+            const bool hasName = (nameIt != uidToName.end());
+            if(hasName && nameIt->second == K_DESCALE_Q_NAME)
+            {
+                bundle.randomizeTensor(tensorPair.first, K_DESCALE_Q_FILL, K_DESCALE_Q_FILL, seed);
+            }
+            else if(hasName && nameIt->second == K_DESCALE_K_NAME)
+            {
+                bundle.randomizeTensor(tensorPair.first, K_DESCALE_K_FILL, K_DESCALE_K_FILL, seed);
+            }
+            else if(hasName && nameIt->second == K_DESCALE_V_NAME)
+            {
+                bundle.randomizeTensor(tensorPair.first, K_DESCALE_V_FILL, K_DESCALE_V_FILL, seed);
+            }
+            else if(hasName && nameIt->second == K_QO_RAGGED_OFFSET_NAME)
+            {
+                fillSeqStarts(*tensorPair.second, K_GROUP_SEQ_LENS_Q);
+            }
+            else if(hasName && nameIt->second == K_KV_RAGGED_OFFSET_NAME)
+            {
+                fillSeqStarts(*tensorPair.second, K_GROUP_SEQ_LENS_KV);
+            }
+            else
+            {
+                bundle.randomizeTensor(tensorPair.first, _minVal, _maxVal, seed);
+            }
         }
     }
 
@@ -54,25 +150,77 @@ protected:
                          << " but current device architecture is " << deviceString;
         }
 
-        auto graph = buildSdpaFwdGraph(testCase);
+        const SdpaFwdGraph built = buildSdpaFwdGraph(testCase);
+        const auto& graph = built.graph;
+        const auto& stats = built.stats;
 
         auto validationResult = graph->validate();
+
         ASSERT_TRUE(validationResult.is_good())
             << "Graph validation failed for config: " << testCase.name << " - "
             << validationResult.get_message();
+
+        {
+            auto supportStatus = graph->is_supported_ext(this->_handle);
+            ASSERT_EQ(supportStatus.code, ErrorCode::OK)
+                << "No engines applicable for config: " << testCase.name << " - "
+                << supportStatus.get_message();
+        }
+
+        // Group-mode cases fill their offset tables from K_GROUP_SEQ_LENS_Q/KV and are checked
+        // against the CPU ragged reference. IntegrationGpuSdpaForwardRagged.cpp adds
+        // frontend-built packed cases, fully masked rows included.
+        if(testCase.config.mode == hip_kernel_provider_common::BatchMode::GROUP)
+        {
+            // The offset tables must fit the dense allocation the graph describes.
+            ASSERT_EQ(testCase.batch, static_cast<int64_t>(K_GROUP_SEQ_LENS_Q.size()));
+            ASSERT_LE(*std::max_element(K_GROUP_SEQ_LENS_Q.begin(), K_GROUP_SEQ_LENS_Q.end()),
+                      testCase.seqQ);
+            ASSERT_LE(*std::max_element(K_GROUP_SEQ_LENS_KV.begin(), K_GROUP_SEQ_LENS_KV.end()),
+                      testCase.seqKv);
+            // Each batch must span at least two Q-tiles of this row.
+            ASSERT_GT(*std::min_element(K_GROUP_SEQ_LENS_Q.begin(), K_GROUP_SEQ_LENS_Q.end()),
+                      testCase.config.ts_qo);
+        }
+
+        GraphVerificationContext context(*graph);
 
         // Register output tensor validator
         graph->visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {
-                if(!tensorAttr->get_is_virtual())
+                if(tensorAttr->get_is_virtual())
                 {
-                    this->registerValidator(tensorAttr, tolerance);
+                    continue;
+                }
+                if(tensorAttr == stats)
+                {
+                    // A fully masked causal row has a log-sum-exp of -inf in both the CPU
+                    // reference and the device result.
+                    this->registerValidator(context,
+                                            tensorAttr,
+                                            createAllCloseMatchingInfinitiesValidator(
+                                                frontendToSdkDataType(tensorAttr->get_data_type()),
+                                                tolerance,
+                                                tolerance));
+                }
+                else
+                {
+                    this->registerValidator(context, tensorAttr, tolerance);
                 }
             }
         });
 
-        this->verifyGraph(*graph, 0);
+        // Build the graph; skip if no engine supports this configuration
+        // (e.g. causal mask + stats is not yet supported by the ASM kernels).
+        auto buildResult = graph->build(this->_handle);
+        if(buildResult.code == ErrorCode::GRAPH_NOT_SUPPORTED)
+        {
+            GTEST_SKIP() << "No engine supports this graph: " << buildResult.err_msg;
+        }
+        ASSERT_EQ(buildResult.code, ErrorCode::OK) << buildResult.err_msg;
+
+        this->verifyBuiltGraph(context, 0);
     }
 
     float _minVal = -1.0;
@@ -148,16 +296,9 @@ protected:
         {
             attributes.set_diagonal_band_left_bound(testCase.leftBound);
             attributes.set_diagonal_band_right_bound(testCase.rightBound);
-            if(testCase.topLeftAlignment)
-            {
-                attributes.set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
-                attributes.set_causal_mask(true);
-            }
-            else
-            {
-                attributes.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
-                attributes.set_causal_mask_bottom_right(true);
-            }
+            attributes.set_diagonal_alignment(testCase.topLeftAlignment
+                                                  ? DiagonalAlignment::TOP_LEFT
+                                                  : DiagonalAlignment::BOTTOM_RIGHT);
         }
 
         auto [o, stats] = graph.sdpa(q, k, v, attributes);
@@ -167,17 +308,18 @@ protected:
         auto validationResult = graph.validate();
         ASSERT_TRUE(validationResult.is_good()) << validationResult.get_message();
 
+        GraphVerificationContext context(graph);
         graph.visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {
                 if(!tensorAttr->get_is_virtual())
                 {
-                    this->registerValidator(tensorAttr, tolerance);
+                    this->registerValidator(context, tensorAttr, tolerance);
                 }
             }
         });
 
-        this->verifyGraph(graph, 0);
+        this->verifyGraph(context, 0);
     }
 
     float _minVal = -1.0;
@@ -350,17 +492,69 @@ std::vector<SdpaFwdTestCase> getSdpaFwdAsymSeqTestCases()
 
 using IntegrationGpuSdpaFwdShapeSweepBf16 = IntegrationSdpaFwdShapeSweep<bfloat16>;
 
+// Partition the kernel configs by precision so the bf16 and fp8 suites each run
+// against their own kernels.
+std::vector<GraphTestCase> getGraphTestCasesByPrecision(bool fp8)
+{
+    std::vector<GraphTestCase> cases;
+    for(const auto& [key, config] : cfg_fmha_fwd)
+    {
+        const bool isFp8 = (config.dtype == hip_kernel_provider_common::config::FP8BF16);
+        if(isFp8 == fp8)
+        {
+            cases.push_back(configToTestCase(config));
+        }
+    }
+    return cases;
+}
+
+// Stats (LSE) output is not supported for ragged tensors, nor with causal masks on the
+// current ASM kernels (SdpaFwdPlanBuilder::isApplicable declines both), so only
+// batch-mode NO_MASK kernels are paired with stats.
+std::vector<GraphTestCase> getBatchModeStatsTestCases()
+{
+    std::vector<GraphTestCase> cases;
+    for(const auto& [key, config] : cfg_fmha_fwd)
+    {
+        if(config.mode == hip_kernel_provider_common::BatchMode::BATCH
+           && static_cast<plan_utils::MaskType>(config.mask) == plan_utils::MaskType::NO_MASK)
+        {
+            cases.push_back(configToTestCase(config, /*withStats=*/true));
+        }
+    }
+    return cases;
+}
+
 } // namespace
 
 TEST_P(IntegrationGpuSdpaFwdBf16, Correctness)
 {
-    auto tolerance = 1e-2f;
+    // One fixture covers both precisions (fp8 output is BF16, so the harness DataType
+    // stays bfloat16 either way). FP8 (E4M3 FNUZ) inputs decode to identical values on
+    // GPU and CPU, so the only divergence is fp8 quantization propagating through the
+    // score/softmax/PV chain. That exceeds the bf16 1e-2 bound near a causal-mask
+    // diagonal (fewer averaging terms => coarser fp8 rounding shows through); 3e-2
+    // covers it. The dynamic SDPA tolerance model does not yet account for fp8 (see
+    // DynamicTolerancesSdpa.hpp), so this fixed fp8 bound is the interim; tighten once
+    // that lands.
+    const bool isFp8 = (GetParam().config.dtype == hip_kernel_provider_common::config::FP8BF16);
+    const float tolerance = isFp8 ? 3e-2f : 1e-2f;
     runGraphTest(tolerance);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuSdpaFwdBf16,
-                         testing::ValuesIn(getCompatibleGraphTestCases(cfg_fmha_fwd)),
+                         testing::ValuesIn(getGraphTestCasesByPrecision(/*fp8=*/false)),
+                         GraphTestCase::getName);
+
+INSTANTIATE_TEST_SUITE_P(SmokeFp8,
+                         IntegrationGpuSdpaFwdBf16,
+                         testing::ValuesIn(getGraphTestCasesByPrecision(/*fp8=*/true)),
+                         GraphTestCase::getName);
+
+INSTANTIATE_TEST_SUITE_P(SmokeStats,
+                         IntegrationGpuSdpaFwdBf16,
+                         testing::ValuesIn(getBatchModeStatsTestCases()),
                          GraphTestCase::getName);
 
 TEST_P(IntegrationGpuSdpaFwdShapeSweepBf16, Correctness)

@@ -2,34 +2,34 @@
 
 #include <array>
 
-using hipconv::Conv2dParams;
 using hipconv::ConvAlgorithm;
-using hipconv::ConvKernelSpan;
+using hipconv::ConvKernelGroup;
+using hipconv::ConvParams;
 
-extern const ConvKernelSpan grouped_4c_cdna4_kernels;
-extern const ConvKernelSpan grouped_4c_wgrad_cdna4_kernels;
-extern const ConvKernelSpan grouped_4c_wgrad_tf32_cdna4_kernels;
-extern const ConvKernelSpan grouped_8c_cdna4_kernels;
-extern const ConvKernelSpan grouped_8c_wgrad_cdna4_kernels;
-extern const ConvKernelSpan grouped_8c_wgrad_tf32_cdna4_kernels;
-extern const ConvKernelSpan grouped_16c_cdna4_kernels;
-extern const ConvKernelSpan grouped_16c_wgrad_cdna4_kernels;
-extern const ConvKernelSpan grouped_16c_wgrad_tf32_cdna4_kernels;
-extern const ConvKernelSpan grouped_32c_cdna4_kernels;
-extern const ConvKernelSpan grouped_32c_wgrad_cdna4_kernels;
-extern const ConvKernelSpan grouped_32c_wgrad_tf32_cdna4_kernels;
+extern const ConvKernelGroup grouped_4c_cdna4_kernels;
+extern const ConvKernelGroup grouped_4c_wgrad_cdna4_kernels;
+extern const ConvKernelGroup grouped_4c_wgrad_tf32_cdna4_kernels;
+extern const ConvKernelGroup grouped_8c_cdna4_kernels;
+extern const ConvKernelGroup grouped_8c_wgrad_cdna4_kernels;
+extern const ConvKernelGroup grouped_8c_wgrad_tf32_cdna4_kernels;
+extern const ConvKernelGroup grouped_16c_cdna4_kernels;
+extern const ConvKernelGroup grouped_16c_wgrad_cdna4_kernels;
+extern const ConvKernelGroup grouped_16c_wgrad_tf32_cdna4_kernels;
+extern const ConvKernelGroup grouped_32c_cdna4_kernels;
+extern const ConvKernelGroup grouped_32c_wgrad_cdna4_kernels;
+extern const ConvKernelGroup grouped_32c_wgrad_tf32_cdna4_kernels;
 
 namespace
 {
 
-bool is_applicable(const Conv2dParams& par)
+bool is_applicable(const ConvParams& par)
 {
     if(par.groups == 1)
         return false;
     return par.dilation_h == 1 && par.dilation_w == 1;
 }
 
-constexpr std::array<const ConvKernelSpan*, 12> kernel_groups = {
+constexpr std::array<const ConvKernelGroup*, 12> kernel_groups = {
     &grouped_32c_cdna4_kernels,
     &grouped_32c_wgrad_cdna4_kernels,
     &grouped_32c_wgrad_tf32_cdna4_kernels,

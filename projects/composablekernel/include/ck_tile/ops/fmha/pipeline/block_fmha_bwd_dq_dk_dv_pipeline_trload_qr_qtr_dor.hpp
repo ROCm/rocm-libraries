@@ -7,6 +7,7 @@
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_dropout.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_pipeline_trload_default_policy.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_pipeline_trload_tdm_policy.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
 
 namespace ck_tile {
@@ -15,6 +16,10 @@ template <typename Problem, typename Policy = BlockFmhaBwdPipelineTrLoadDefaultP
 struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
 {
     static constexpr auto is_qr_qtr_dor_pipeline = true;
+    // True when the policy stages its operands with TDM, which also decides
+    // whether this pipeline is buildable on a target without TDM; see
+    // kIsAvailable in fmha_bwd_kernel.hpp.
+    static constexpr auto is_tdm_decode_pipeline = Policy::kUsesTdm;
 
     using QDataType             = remove_cvref_t<typename Problem::QDataType>;
     using KDataType             = remove_cvref_t<typename Problem::KDataType>;
@@ -34,6 +39,21 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
     using FmhaMask              = remove_cvref_t<typename Problem::FmhaMask>;
     using FmhaDropout           = remove_cvref_t<typename Problem::FmhaDropout>;
     // using HotLoopScheduler      = typename Policy::template HotLoopScheduler<Problem>;
+
+    // The packed f32->16bit cast is opt-in: it needs a target whose builtin
+    // conversion matches CK's rounding, which is what kUsesTdm implies here.
+    template <typename DstType, typename SrcTensor>
+    CK_TILE_DEVICE static auto CastTile(const SrcTensor& src)
+    {
+        if constexpr(Policy::kUsesTdm)
+        {
+            return cast_tile_pk<DstType>(src);
+        }
+        else
+        {
+            return cast_tile<DstType>(src);
+        }
+    }
 
     using BlockFmhaShape = remove_cvref_t<typename Problem::BlockFmhaShape>;
 
@@ -69,7 +89,14 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
         kPadHeadDimV ? kPadHeadDimV : Policy::template GetAlignmentV<Problem>();
     static constexpr index_t kAlignmentOGrad =
         kPadHeadDimV ? kPadHeadDimV : Policy::template GetAlignmentOGrad<Problem>();
-    static constexpr index_t kAlignmentQGrad = 1;
+    // The TDM policy lays gemm_4's C out along hdim, so unpadded dQ can be
+    // stored 16 bytes at a time.
+    static constexpr index_t kAlignmentQGrad = [] {
+        if constexpr(Policy::kUsesTdm)
+            return Policy::template GetAlignmentQGradStore<Problem>();
+        else
+            return 1;
+    }();
     static constexpr index_t kAlignmentKGrad =
         kPadHeadDimQ ? kPadHeadDimQ : Policy::template GetAlignmentKGrad<Problem>();
     static constexpr index_t kAlignmentVGrad =
@@ -78,9 +105,32 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
 
     static constexpr const char* name = "trload_kr_ktr_vr";
 
+    // dK/dV leave through a double-buffered LDS stage and TDM stores, so the
+    // write of kv tile i overlaps the compute of tile i+1 and goes out as whole
+    // rows instead of one 16-byte store per lane and row.
+    static constexpr bool kTdmStoreDKDV =
+        Policy::kUsesTdm && std::is_same_v<KGradDataType, VGradDataType>;
+
+    CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSizeDKDVStage()
+    {
+        if constexpr(kTdmStoreDKDV)
+            return 2 * kN0 *
+                   (kQKHeaddim * sizeof(KGradDataType) + kVHeaddim * sizeof(VGradDataType));
+        else
+            return 0;
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSizeDKDVStageOffset()
+    {
+        return integer_least_multiple(Policy::template GetSmemSize<Problem>(), 128);
+    }
+
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
-        return Policy::template GetSmemSize<Problem>();
+        if constexpr(kTdmStoreDKDV)
+            return GetSmemSizeDKDVStageOffset() + GetSmemSizeDKDVStage();
+        else
+            return Policy::template GetSmemSize<Problem>();
     }
 
     CK_TILE_HOST_DEVICE static LSEDataType get_validated_lse(const LSEDataType raw_lse)
@@ -218,7 +268,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
 
         // K, HBM ->LDS ->Reg
         auto k_dram_window =
-            make_tile_window(Policy::template TransformXDramTensorView<KDataType>(
+            make_tile_window(Policy::template MakeXDramStagingView<KDataType>(
                                  k_dram_block_window_tmp.get_bottom_tensor_view()),
                              k_dram_block_window_tmp.get_window_lengths(),
                              {seqlen_kv_start, 0},
@@ -232,7 +282,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
         //------------------------------------------------------------------
         // V, HBM ->LDS ->Reg
         auto v_dram_window =
-            make_tile_window(Policy::template TransformXDramTensorView<VDataType>(
+            make_tile_window(Policy::template MakeXDramStagingView<VDataType>(
                                  v_dram_block_window_tmp.get_bottom_tensor_view()),
                              v_dram_block_window_tmp.get_window_lengths(),
                              {seqlen_kv_start, 0},
@@ -272,7 +322,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
         //---------------------------- Loop Load in ----------------------------//
         // Q: HBM -->LDS
         auto q_dram_window =
-            make_tile_window(Policy::template TransformXDramTensorView<QDataType>(
+            make_tile_window(Policy::template MakeXDramStagingView<QDataType>(
                                  q_dram_block_window_tmp.get_bottom_tensor_view()),
                              q_dram_block_window_tmp.get_window_lengths(),
                              {0, 0},
@@ -299,7 +349,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
         // dO: HBM ->LDS ---load--> Reg
         // dOT:          \-loadtr-> Reg
         auto do_dram_window =
-            make_tile_window(Policy::template TransformXDramTensorView<OGradDataType>(
+            make_tile_window(Policy::template MakeXDramStagingView<OGradDataType>(
                                  do_dram_block_window_tmp.get_bottom_tensor_view()),
                              do_dram_block_window_tmp.get_window_lengths(),
                              {0, 0},
@@ -426,6 +476,56 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
                                                dv_dram_block_window_tmp.get_window_lengths(),
                                                {0, 0});
 
+        // dK/dV LDS stage: two [kN0, hdim] buffers per gradient, stacked along
+        // rows; the windows start on buffer 0 and flip after every store.
+        auto dkdv_stage = [&]() {
+            if constexpr(kTdmStoreDKDV)
+            {
+                auto* stage_base =
+                    reinterpret_cast<char*>(k_lds_ptr) + GetSmemSizeDKDVStageOffset();
+                // Unpadded rows: the TDM store reads LDS densely.
+                auto dk_stage = make_tensor_view<address_space_enum::lds>(
+                    reinterpret_cast<KGradDataType*>(stage_base),
+                    make_naive_tensor_descriptor(
+                        make_tuple(number<2 * kN0>{}, number<kQKHeaddim>{}),
+                        make_tuple(number<kQKHeaddim>{}, number<1>{}),
+                        number<16 / sizeof(KGradDataType)>{},
+                        number<1>{}));
+                auto dv_stage = make_tensor_view<address_space_enum::lds>(
+                    reinterpret_cast<VGradDataType*>(stage_base +
+                                                     2 * kN0 * kQKHeaddim * sizeof(KGradDataType)),
+                    make_naive_tensor_descriptor(make_tuple(number<2 * kN0>{}, number<kVHeaddim>{}),
+                                                 make_tuple(number<kVHeaddim>{}, number<1>{}),
+                                                 number<16 / sizeof(VGradDataType)>{},
+                                                 number<1>{}));
+                return make_tuple(
+                    make_tile_window(dk_stage,
+                                     make_tuple(number<kN0>{}, number<kQKHeaddim>{}),
+                                     {0, 0},
+                                     gemm_3.MakeCBlockTile().get_tile_distribution()),
+                    make_tile_window(
+                        dk_stage,
+                        make_tuple(number<kN0>{}, number<kQKHeaddim>{}),
+                        {0, 0},
+                        Policy::template MakeTdmDramTileDistribution<Problem, kN0, kQKHeaddim>()),
+                    make_tile_window(dv_stage,
+                                     make_tuple(number<kN0>{}, number<kVHeaddim>{}),
+                                     {0, 0},
+                                     gemm_1.MakeCBlockTile().get_tile_distribution()),
+                    make_tile_window(
+                        dv_stage,
+                        make_tuple(number<kN0>{}, number<kVHeaddim>{}),
+                        {0, 0},
+                        Policy::template MakeTdmDramTileDistribution<Problem, kN0, kVHeaddim>()));
+            }
+            else
+            {
+                return 0;
+            }
+        }();
+        index_t dkdv_stage_flip  = kN0; // row offset to the other stage buffer
+        bool dkdv_store_inflight = false;
+
         index_t i_total_loops  = 0;
         index_t seqlen_kv_step = seqlen_kv_start;
         static_assert(kQKHeaddim >= kK0, "kQKHeaddim should be equal or greater than kK0");
@@ -452,9 +552,10 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
         decltype(load_tile(lse_dram_window)) lse_block_tile;
         decltype(load_tile(d_dram_window)) d_block_tile;
 
-        async_load_tile(q_lds_write_window, q_dram_window);
-        async_load_tile(do_lds_write_window, do_dram_window);
-        __builtin_amdgcn_s_waitcnt(0);
+        Policy::template LoadBlockToLds<QDataType, kQKHeaddim>(q_lds_write_window, q_dram_window);
+        Policy::template LoadBlockToLds<OGradDataType, kVHeaddim>(do_lds_write_window,
+                                                                  do_dram_window);
+        Policy::WaitAllMem();
         load_tile_transpose(qt_reg_tensor, qt_lds_read_window);
         q_reg_tensor = load_tile(q_lds_read_window);
         load_tile_transpose(dot_reg_tensor, dot_lds_read_window);
@@ -462,12 +563,29 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
 
         lse_block_tile = load_tile(lse_dram_window);
         d_block_tile   = load_tile(d_dram_window);
-        __builtin_amdgcn_s_waitcnt(0);
+        Policy::WaitAllMem();
         store_tile(lse_lds_write_window, lse_block_tile);
         store_tile(d_lds_write_window, d_block_tile);
-        __builtin_amdgcn_s_waitcnt(0);
+        Policy::WaitAllMem();
         lse = load_tile(lse_lds_read_window);
         d   = load_tile(d_lds_read_window);
+
+        constexpr bool kPrefetchKV = Policy::kUsesTdm;
+        index_t kv_tiles_issued    = 0;
+        auto issue_kv_tile         = [&]() {
+            Policy::template LoadBlockToLds<KDataType, kQKHeaddim>(k_lds_write_window,
+                                                                   k_dram_window);
+            move_tile_window(k_dram_window, {kN0, 0});
+            Policy::template LoadBlockToLds<VDataType, kVHeaddim>(v_lds_write_window,
+                                                                  v_dram_window);
+            move_tile_window(v_dram_window, {kN0, 0});
+            kv_tiles_issued += 1;
+        };
+        if constexpr(kPrefetchKV)
+        {
+            block_sync_lds();
+            issue_kv_tile();
+        }
 
         auto main_body = [&](auto is_prologue_, auto is_epilogue_) mutable {
             constexpr bool is_prologue = is_prologue_.value;
@@ -485,14 +603,35 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
 
             if constexpr(is_epilogue)
             {
-                async_load_tile(k_lds_write_window, k_dram_window);
-                move_tile_window(k_dram_window, {kN0, 0});
-                async_load_tile(v_lds_write_window, v_dram_window);
-                move_tile_window(v_dram_window, {kN0, 0});
-                s_waitcnt</*vmcnt=*/0>();
+                if constexpr(!kPrefetchKV)
+                {
+                    Policy::template LoadBlockToLds<KDataType, kQKHeaddim>(k_lds_write_window,
+                                                                           k_dram_window);
+                    move_tile_window(k_dram_window, {kN0, 0});
+                    Policy::template LoadBlockToLds<VDataType, kVHeaddim>(v_lds_write_window,
+                                                                          v_dram_window);
+                    move_tile_window(v_dram_window, {kN0, 0});
+                }
+                if constexpr(kTdmStoreDKDV)
+                {
+                    if(dkdv_store_inflight)
+                        Policy::template WaitBlockToLds<2>();
+                    else
+                        Policy::WaitBlockToLds();
+                }
+                else
+                {
+                    Policy::WaitBlockToLds();
+                }
                 k_reg_tensor = load_tile(k_lds_read_window);
                 v_reg_tensor = load_tile(v_lds_read_window);
                 load_tile_transpose(kt_reg_tensor, kt_lds_read_window);
+                if constexpr(kPrefetchKV)
+                {
+                    block_sync_lds();
+                    if(kv_tiles_issued < num_total_loop)
+                        issue_kv_tile();
+                }
             }
             if constexpr(is_epilogue)
             {
@@ -520,7 +659,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
                         },
                         s_acc,
                         bias_s_tile);
-                    move_tile_window(bias_dram_window, {kM0, 0});
+                    move_tile_window(bias_dram_window, {0, kN0});
                     __builtin_amdgcn_sched_barrier(0);
                 }
                 else if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
@@ -574,6 +713,14 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
                 {
                     dropout.template Run<decltype(gemm_0), RandValOutputDataType>(
                         0, seqlen_kv_step, p, randval_dram_window);
+                    if constexpr(FmhaDropout::IsStoreRandval)
+                    {
+                        // Run leaves the window one M block on, the step the regular
+                        // pipeline wants. Here kv is the loop axis instead, so undo
+                        // that and step N. The window origin already accounts for the
+                        // swap -- MakeRandvalDramWindow above is called with IsFwd.
+                        move_tile_window(randval_dram_window, {-kM0, kN0});
+                    }
                 }
                 const auto p_gemm = [&]() { // dropout / type conversion
                     if constexpr(FmhaDropout::IsDropout)
@@ -586,7 +733,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
                     }
                     else
                     {
-                        return cast_tile<GemmDataType>(p);
+                        return CastTile<GemmDataType>(p);
                     }
                 }();
 
@@ -632,7 +779,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
                         }
                         else
                         {
-                            return cast_tile<BiasGradDataType>(ds);
+                            return CastTile<BiasGradDataType>(ds);
                         }
                     }();
                     store_tile(bias_lds_write_window, dbias);
@@ -643,14 +790,14 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
                         Policy::template MakeBiasTileDistribution<Problem>());
                     shuffle_tile(dbias_tile, shuffled_dbias_tile);
                     store_tile(dbias_dram_window, dbias_tile);
-                    move_tile_window(dbias_dram_window, {kM0, 0});
+                    move_tile_window(dbias_dram_window, {0, kN0});
                     __builtin_amdgcn_sched_barrier(0);
                 }
             }
             if constexpr(is_epilogue)
             {
                 // STAGE 6, SGrad^T@Q^T Gemm3
-                const auto ds_gemm  = cast_tile<GemmDataType>(ds);
+                const auto ds_gemm  = CastTile<GemmDataType>(ds);
                 auto dst_reg_tensor = make_static_distributed_tensor<GemmDataType>(
                     Policy::template MakeSGradTRegSliceBlockDescriptor<Problem>());
                 dst_reg_tensor.get_thread_buffer() = ds_gemm.get_thread_buffer();
@@ -713,20 +860,66 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
                     tile_elementwise_inout([&raw_scale](auto& x) { x = x * raw_scale; }, dk_acc);
                 }
 
-                dk_epilogue(dk_dram_window, dk_acc, nullptr);
+                if constexpr(kTdmStoreDKDV)
+                {
+                    auto& [dk_in, dk_out, dv_in, dv_out] = dkdv_stage;
+                    store_tile(dk_in, CastTile<KGradDataType>(dk_acc));
+                    store_tile(dv_in, CastTile<VGradDataType>(dv_acc));
+                    block_sync_lds();
+                    TDMConfig tdm_cfg;
+                    store_tile_tdm(tdm_cfg, dk_dram_window, dk_out);
+                    store_tile_tdm(tdm_cfg, dv_dram_window, dv_out);
+                    dkdv_store_inflight = true;
+                    move_tile_window(dk_in, {dkdv_stage_flip, 0});
+                    move_tile_window(dk_out, {dkdv_stage_flip, 0});
+                    move_tile_window(dv_in, {dkdv_stage_flip, 0});
+                    move_tile_window(dv_out, {dkdv_stage_flip, 0});
+                    dkdv_stage_flip = -dkdv_stage_flip;
+                }
+                else
+                {
+                    dk_epilogue(dk_dram_window, dk_acc, nullptr);
+                    dv_epilogue(dv_dram_window, dv_acc, nullptr);
+                }
                 move_tile_window(dk_dram_window, {kN0, 0});
-                dv_epilogue(dv_dram_window, dv_acc, nullptr);
                 move_tile_window(dv_dram_window, {kN0, 0});
             }
         };
 
-        for(index_t i = 0; i < seqlen_kv_start; i += kN0)
-        {
-            dk_epilogue(dk_dram_window, decltype(gemm_3.MakeCBlockTile()){0}, nullptr);
-            move_tile_window(dk_dram_window, {kN0, 0});
-            dv_epilogue(dv_dram_window, decltype(gemm_1.MakeCBlockTile()){0}, nullptr);
-            move_tile_window(dv_dram_window, {kN0, 0});
-        }
+        auto zero_dkdv = [&](index_t from, index_t to) {
+            if constexpr(kTdmStoreDKDV)
+            {
+                if(from >= to)
+                    return;
+                auto& [dk_in, dk_out, dv_in, dv_out] = dkdv_stage;
+                s_wait_tensorcnt<0>();
+                store_tile(dk_in, CastTile<KGradDataType>(decltype(gemm_3.MakeCBlockTile()){0}));
+                store_tile(dv_in, CastTile<VGradDataType>(decltype(gemm_1.MakeCBlockTile()){0}));
+                block_sync_lds();
+                TDMConfig tdm_cfg;
+                for(index_t i = from; i < to; i += kN0)
+                {
+                    store_tile_tdm(tdm_cfg, dk_dram_window, dk_out);
+                    move_tile_window(dk_dram_window, {kN0, 0});
+                    store_tile_tdm(tdm_cfg, dv_dram_window, dv_out);
+                    move_tile_window(dv_dram_window, {kN0, 0});
+                }
+                s_wait_tensorcnt<0>();
+                block_sync_lds();
+            }
+            else
+            {
+                for(index_t i = from; i < to; i += kN0)
+                {
+                    dk_epilogue(dk_dram_window, decltype(gemm_3.MakeCBlockTile()){0}, nullptr);
+                    move_tile_window(dk_dram_window, {kN0, 0});
+                    dv_epilogue(dv_dram_window, decltype(gemm_1.MakeCBlockTile()){0}, nullptr);
+                    move_tile_window(dv_dram_window, {kN0, 0});
+                }
+            }
+        };
+
+        zero_dkdv(0, seqlen_kv_start);
 
         main_body(std::true_type{}, std::false_type{});
         // Hot loop
@@ -742,14 +935,16 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
         main_body(std::false_type{}, std::true_type{});
         seqlen_kv_step += kN0;
 
-        const auto k_length         = k_dram_block_window_tmp.get_window_lengths();
-        const auto seqlen_kv_length = k_length.at(number<0>{});
-        for(; seqlen_kv_step < seqlen_kv_length; seqlen_kv_step += kN0)
+        // Only a mask can leave kv blocks past the loop bound; zero their dK/dV so
+        // they do not keep whatever was already in memory. The bound is seqlen_k
+        // on the bottom tensor view, not get_window_lengths(), which is the tile
+        // extent kN0.
+        if constexpr(FmhaMask::IsMasking)
         {
-            dk_epilogue(dk_dram_window, decltype(gemm_3.MakeCBlockTile()){0}, nullptr);
-            move_tile_window(dk_dram_window, {kN0, 0});
-            dv_epilogue(dv_dram_window, decltype(gemm_1.MakeCBlockTile()){0}, nullptr);
-            move_tile_window(dv_dram_window, {kN0, 0});
+            const auto seqlen_kv_length =
+                k_dram_block_window_tmp.get_bottom_tensor_view().get_tensor_descriptor().get_length(
+                    number<0>{});
+            zero_dkdv(seqlen_kv_step, seqlen_kv_length);
         }
 
         // QGrad Scale
@@ -759,6 +954,11 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
         else
             tile_elementwise_inout([&raw_scale](auto& x) { x = x * raw_scale; }, dq_acc);
         dq_epilogue(dq_dram_window, dq_acc, nullptr);
+        if constexpr(kTdmStoreDKDV)
+        {
+            // The last dK/dV stores still read the LDS stage.
+            s_wait_tensorcnt<0>();
+        }
         return;
     }
 };
@@ -780,6 +980,19 @@ struct fmha_bwd_qr_qtr_dor_pipeline : std::false_type
 template <typename T>
 struct fmha_bwd_qr_qtr_dor_pipeline<T, std::void_t<decltype(T::is_qr_qtr_dor_pipeline)>>
     : std::bool_constant<T::is_qr_qtr_dor_pipeline>
+{
+};
+
+// Same test for is_tdm_decode_pipeline, which separates the TDM-staged form of
+// this pipeline from the plain one.
+template <typename, typename = void>
+struct fmha_bwd_tdm_decode_pipeline : std::false_type
+{
+};
+
+template <typename T>
+struct fmha_bwd_tdm_decode_pipeline<T, std::void_t<decltype(T::is_tdm_decode_pipeline)>>
+    : std::bool_constant<T::is_tdm_decode_pipeline>
 {
 };
 

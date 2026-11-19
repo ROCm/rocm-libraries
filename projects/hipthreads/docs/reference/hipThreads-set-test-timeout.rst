@@ -8,7 +8,7 @@
 hipThreads testing timeout
 **********************************************
 
-The hipThreads test suite is adapted from the libc++ thread tests.  Each test compiles to its own executable and runs the primitives inside a GPU kernel before checking its results.
+The hipThreads test suite is adapted from the libc++ thread tests. Each test compiles to its own executable and runs the primitives inside a GPU kernel before checking its results.
 
 The hipThreads test suite runs under `lit, the LLVM Integrated Tester <https://llvm.org/docs/CommandGuide/lit.html>`_. lit compiles each test with ``hipcc`` and runs the executables using the ``run.py`` wrapper.
 
@@ -20,7 +20,7 @@ The timeout value is configurable through the ``HIPTHREADS_TEST_TIMEOUT`` :doc:`
 
 For this variable to take effect, it must be set before lit:
 
-.. code-block:: bash
+.. code:: shell
 
   export HIPTHREADS_TEST_TIMEOUT=120
   lit -a -v -j 1 test/

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -96,9 +96,8 @@ namespace rocalution
         {
             for(int64_t i = 0; i < this->size_; ++i)
             {
-                if((std::abs(this->vec_[i]) == std::numeric_limits<ValueType>::infinity()) || // inf
-                   (this->vec_[i] != this->vec_[i]))
-                { // NaN
+                if(!rocalution_is_finite(this->vec_[i]))
+                {
                     // LCOV_EXCL_START
                     LOG_VERBOSE_INFO(2, "*** error: Vector:Check - problems with vector data");
                     return false;
@@ -391,10 +390,46 @@ namespace rocalution
 
         // Fill this with random data from interval [a,b]
         srand(seed);
-        for(int64_t i = 0; i < this->size_; ++i)
+        if constexpr(std::is_integral_v<ValueType>)
         {
-            this->vec_[i]
-                = a + static_cast<ValueType>(rand()) / static_cast<ValueType>(RAND_MAX) * (b - a);
+            // Uniform over the integers a to b. The width and the offset are unsigned
+            // integers: b - a can overflow ValueType, double cannot hold every int64_t
+            // bound, and a cast of a fraction to bool gives true. One rand() call has only
+            // RAND_MAX + 1 values, at least 2^15, so the offset is drawn 15 bits at a time
+            // up to the bit length of the width, and drawn again while it exceeds the width
+            const uint64_t width = static_cast<uint64_t>(b) - static_cast<uint64_t>(a);
+
+            int bits = 0;
+            while(bits < 64 && (width >> bits) != 0)
+            {
+                ++bits;
+            }
+            const uint64_t mask = (bits == 64) ? ~uint64_t(0) : (uint64_t(1) << bits) - 1;
+
+            for(int64_t i = 0; i < this->size_; ++i)
+            {
+                uint64_t offset;
+                do
+                {
+                    offset = 0;
+                    for(int drawn = 0; drawn < bits; drawn += 15)
+                    {
+                        offset = (offset << 15) | (static_cast<uint64_t>(rand()) & 0x7FFF);
+                    }
+                    offset &= mask;
+                } while(offset > width);
+
+                this->vec_[i] = static_cast<ValueType>(static_cast<uint64_t>(a) + offset);
+            }
+        }
+        else
+        {
+            for(int64_t i = 0; i < this->size_; ++i)
+            {
+                this->vec_[i]
+                    = a
+                      + static_cast<ValueType>(rand()) / static_cast<ValueType>(RAND_MAX) * (b - a);
+            }
         }
     }
 
@@ -969,41 +1004,37 @@ namespace rocalution
     template <>
     std::complex<float> HostVector<std::complex<float>>::Asum(void) const
     {
-        float asum_real = 0.0f;
-        float asum_imag = 0.0f;
+        float asum = 0.0f;
 
         _set_omp_backend_threads(this->local_backend_, this->size_);
 
 #ifdef _OPENMP
-#pragma omp parallel for reduction(+ : asum_real, asum_imag)
+#pragma omp parallel for reduction(+ : asum)
 #endif
         for(int64_t i = 0; i < this->size_; ++i)
         {
-            asum_real += std::abs(this->vec_[i].real());
-            asum_imag += std::abs(this->vec_[i].imag());
+            asum += std::abs(this->vec_[i]);
         }
 
-        return std::complex<float>(asum_real, asum_imag);
+        return std::complex<float>(asum);
     }
 
     template <>
     std::complex<double> HostVector<std::complex<double>>::Asum(void) const
     {
-        double asum_real = 0.0;
-        double asum_imag = 0.0;
+        double asum = 0.0;
 
         _set_omp_backend_threads(this->local_backend_, this->size_);
 
 #ifdef _OPENMP
-#pragma omp parallel for reduction(+ : asum_real, asum_imag)
+#pragma omp parallel for reduction(+ : asum)
 #endif
         for(int64_t i = 0; i < this->size_; ++i)
         {
-            asum_real += std::abs(this->vec_[i].real());
-            asum_imag += std::abs(this->vec_[i].imag());
+            asum += std::abs(this->vec_[i]);
         }
 
-        return std::complex<double>(asum_real, asum_imag);
+        return std::complex<double>(asum);
     }
 
     // LCOV_EXCL_START
@@ -1018,30 +1049,45 @@ namespace rocalution
     template <typename ValueType>
     int64_t HostVector<ValueType>::Amax(ValueType& value) const
     {
-        int64_t index = 0;
-
-        value = static_cast<ValueType>(0);
+        int64_t   index = 0;
+        ValueType amax  = static_cast<ValueType>(0);
 
         _set_omp_backend_threads(this->local_backend_, this->size_);
 
 #ifdef _OPENMP
-#pragma omp parallel for
+#pragma omp parallel
 #endif
-        for(int64_t i = 0; i < this->size_; ++i)
         {
-            ValueType val = std::abs(this->vec_[i]);
-            if(val > value)
+            int64_t   t_index = 0;
+            ValueType t_amax  = static_cast<ValueType>(0);
+
+#ifdef _OPENMP
+#pragma omp for nowait
+#endif
+            for(int64_t i = 0; i < this->size_; ++i)
+            {
+                ValueType val = std::abs(this->vec_[i]);
+                if(val > t_amax)
+                {
+                    t_amax  = val;
+                    t_index = i;
+                }
+            }
+
+            // Ties resolve to the smallest index, as in the sequential loop
 #ifdef _OPENMP
 #pragma omp critical
 #endif
             {
-                if(val > value)
+                if(t_amax > amax || (t_amax == amax && t_index < index))
                 {
-                    value = val;
-                    index = i;
+                    amax  = t_amax;
+                    index = t_index;
                 }
             }
         }
+
+        value = amax;
 
         return index;
     }
@@ -1597,6 +1643,7 @@ namespace rocalution
         copy_h2h(end - start, values, this->vec_ + start);
     }
 
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     void HostVector<ValueType>::RSPMISUpdateCFmap(const BaseVector<int>& index,
                                                   BaseVector<ValueType>* values)
@@ -1627,6 +1674,7 @@ namespace rocalution
             }
         }
     }
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     // LCOV_EXCL_START
     template <typename ValueType>
@@ -1662,6 +1710,12 @@ namespace rocalution
         for(int64_t i = start; i < end; ++i)
         {
             int coarse_index = this->vec_[index[i]];
+
+            if(coarse_index == -1)
+            {
+                map[ind++] = -1;
+                continue;
+            }
 
             if(check[coarse_index] == -1)
             {

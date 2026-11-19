@@ -23,8 +23,12 @@
  * THE SOFTWARE.
  *
  *******************************************************************************/
+#include <algorithm>
 #include <cstring>
+#include <memory>
+#include <new>
 #include <set>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -37,32 +41,81 @@
 #include "logger.hpp"
 #include "util.hpp"
 
-// The elementwise kernels walk a single index space defined by the output, so
-// every input has to carry exactly the same modes as the output and may only
-// differ in their order. An input holding a subset of the output modes would
-// have to be broadcast along the modes it lacks, which is not implemented and
-// used to surface as HIPTENSOR_STATUS_INTERNAL_ERROR at execution time rather
-// than as a rejection at descriptor creation.
-static hiptensorStatus_t checkElementwiseModes(char const*                 apiFuncName,
-                                               std::vector<int32_t> const& inModes,
-                                               char const*                 inName,
-                                               std::vector<int32_t> const& outModes,
-                                               char const*                 outName)
+// The elementwise kernels walk a single index space defined by the output, so an input may only
+// carry modes that the output also carries. Carrying fewer is allowed: the input is broadcast
+// along every output mode it lacks. Three things are rejected here:
+//  - a mode that appears in an input but not in the output, which would have to be reduced away
+//    rather than broadcast;
+//  - a mode repeated within one tensor, which leaves no unambiguous way to align that tensor to
+//    the output's mode order;
+//  - a mode shared with the output but with a different extent, which would send the walk over
+//    the output's index space past the end of the input.
+static hiptensorStatus_t checkElementwiseModes(char const*                     apiFuncName,
+                                               std::vector<int32_t> const&     inModes,
+                                               std::vector<std::size_t> const& inLengths,
+                                               char const*                     inName,
+                                               std::vector<int32_t> const&     outModes,
+                                               std::vector<std::size_t> const& outLengths,
+                                               char const*                     outName)
 {
-    if(std::set<int32_t>(inModes.cbegin(), inModes.cend())
-       == std::set<int32_t>(outModes.cbegin(), outModes.cend()))
+    auto& logger = *hiptensor::Logger::instance();
+    char  msg[256];
+
+    for(auto const& [modes, name] : {std::pair{&inModes, inName}, std::pair{&outModes, outName}})
     {
-        return HIPTENSOR_STATUS_SUCCESS;
+        auto seen = std::set<int32_t>();
+        for(auto mode : *modes)
+        {
+            if(!seen.insert(mode).second)
+            {
+                snprintf(msg,
+                         sizeof(msg),
+                         "Elementwise operation where mode '%c' (%d) is repeated within %s is not "
+                         "supported",
+                         mode,
+                         mode,
+                         name);
+                logger.logError(apiFuncName, msg);
+                return HIPTENSOR_STATUS_NOT_SUPPORTED;
+            }
+        }
     }
 
-    char msg[256];
-    snprintf(msg,
-             sizeof(msg),
-             "Elementwise operation where %s and %s carry different modes is not supported",
-             inName,
-             outName);
-    hiptensor::Logger::instance()->logError(apiFuncName, msg);
-    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    for(std::size_t i = 0; i < inModes.size(); i++)
+    {
+        auto outMode = std::find(outModes.cbegin(), outModes.cend(), inModes[i]);
+        if(outMode == outModes.cend())
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "Elementwise operation where %s carries mode '%c' (%d) that %s does not carry "
+                     "is not supported",
+                     inName,
+                     inModes[i],
+                     inModes[i],
+                     outName);
+            logger.logError(apiFuncName, msg);
+            return HIPTENSOR_STATUS_NOT_SUPPORTED;
+        }
+
+        auto outExtent = outLengths[std::distance(outModes.cbegin(), outMode)];
+        if(inLengths[i] != outExtent)
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "Mode '%c' (%d) has extent %zu in %s but extent %zu in %s",
+                     inModes[i],
+                     inModes[i],
+                     inLengths[i],
+                     inName,
+                     outExtent,
+                     outName);
+            logger.logError(apiFuncName, msg);
+            return HIPTENSOR_STATUS_INVALID_VALUE;
+        }
+    }
+
+    return HIPTENSOR_STATUS_SUCCESS;
 }
 
 hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
@@ -71,25 +124,41 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
     auto& logger = Logger::instance();
 
     // Log API access
-    char msg[128];
+    char msg[384];
     snprintf(
         msg, sizeof(msg), "handle=0x%0*llX", 2 * (int)sizeof(void*), (unsigned long long)handle);
     logger->logAPITrace("hiptensorCreate", msg);
 
-    (*handle) = new hiptensorHandle;
-
-    if(*handle == nullptr)
+    if(handle == nullptr)
     {
-        auto errorCode = HIPTENSOR_STATUS_ALLOC_FAILED;
+        auto errorCode = HIPTENSOR_STATUS_INVALID_VALUE;
         snprintf(msg,
                  sizeof(msg),
                  "Initialization Error : handle = nullptr (%s)",
                  hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorCreate", msg);
-        return HIPTENSOR_STATUS_ALLOC_FAILED;
+        return errorCode;
+    }
+
+    *handle = nullptr;
+
+    auto newHandle = std::unique_ptr<hiptensorHandle>(new(std::nothrow) hiptensorHandle);
+    if(newHandle == nullptr)
+    {
+        auto errorCode = HIPTENSOR_STATUS_ALLOC_FAILED;
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization Error : cannot allocate handle (%s)",
+                 hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorCreate", msg);
+        return errorCode;
     }
 
     auto hip_status = hipInit(0);
+    if(hip_status != hipSuccess)
+    {
+        hiptensor::clearHipError();
+    }
 
     if(hip_status == hipErrorInvalidDevice)
     {
@@ -99,7 +168,7 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
                  "Initialization error: invalid device (%s)",
                  hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorCreate", msg);
-        return HIPTENSOR_STATUS_HIP_ERROR;
+        return errorCode;
     }
     else if(hip_status == hipErrorInvalidValue)
     {
@@ -107,22 +176,80 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
         snprintf(
             msg, sizeof(msg), "Initialization error: (%s)", hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorCreate", msg);
-        return HIPTENSOR_STATUS_INVALID_VALUE;
+        return errorCode;
+    }
+    else if(hip_status != hipSuccess)
+    {
+        auto errorCode = HIPTENSOR_STATUS_HIP_ERROR;
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization error: hipInit failed: %s (%s)",
+                 hipGetErrorString(hip_status),
+                 hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorCreate", msg);
+        return errorCode;
     }
 
-    if (hiptensor::checkEnvironmentVariableEnabled("HIPTENSOR_DISABLE_PLAN_CACHE"))
+    // The handle is bound to the device that is current on the calling thread.
+    hipDevice_t deviceId = -1;
+    hip_status           = hipGetDevice(&deviceId);
+    if(hip_status == hipSuccess)
+    {
+        hip_status = newHandle->initDevice(deviceId);
+    }
+
+    if(hip_status != hipSuccess)
+    {
+        hiptensor::clearHipError();
+        auto errorCode = HIPTENSOR_STATUS_HIP_ERROR;
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization error: cannot query current device: %s (%s)",
+                 hipGetErrorString(hip_status),
+                 hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorCreate", msg);
+        return errorCode;
+    }
+
+    auto device = newHandle->getDevice();
+    if(device.getGcnArch() == hiptensor::HipDevice::hipGcnArch_t::UNSUPPORTED_ARCH)
+    {
+        auto errorCode = HIPTENSOR_STATUS_ARCH_MISMATCH;
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization error: device %d has unsupported architecture %s (%s)",
+                 (int)deviceId,
+                 device.getProperties().gcnArchName,
+                 hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorCreate", msg);
+        return errorCode;
+    }
+    else if(device.warpSize() == hiptensor::HipDevice::hipWarpSize_t::UNSUPPORTED_WARP_SIZE)
+    {
+        auto errorCode = HIPTENSOR_STATUS_ARCH_MISMATCH;
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization error: device %d has unsupported warp size %d (%s)",
+                 (int)deviceId,
+                 device.getProperties().warpSize,
+                 hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorCreate", msg);
+        return errorCode;
+    }
+
+    if(hiptensor::checkEnvironmentVariableEnabled("HIPTENSOR_DISABLE_PLAN_CACHE"))
     {
         snprintf(msg, sizeof(msg), "Plan Cache is disabled.");
         logger->logAPITrace("hiptensorCreate", msg);
     }
     else
     {
-        hiptensor::PlanCache* planCache = new hiptensor::PlanCache;
-        (*handle)->setPlanCache(planCache);
+        newHandle->setPlanCache(std::make_unique<hiptensor::PlanCache>());
         snprintf(msg, sizeof(msg), "Plan Cache is enabled.");
         logger->logAPITrace("hiptensorCreate", msg);
     }
 
+    *handle = newHandle.release();
     return HIPTENSOR_STATUS_SUCCESS;
 }
 
@@ -138,7 +265,6 @@ hiptensorStatus_t hiptensorDestroy(hiptensorHandle_t handle)
     logger->logAPITrace("hiptensorDestroy", msg);
 
     delete handle;
-    handle = nullptr;
 
     return HIPTENSOR_STATUS_SUCCESS;
 }
@@ -425,7 +551,13 @@ hiptensorStatus_t hiptensorCreatePermutation(const hiptensorHandle_t            
     auto modeAV = std::vector<int32_t>(modeA, modeA + descA->mLengths.size());
     auto modeBV = std::vector<int32_t>(modeB, modeB + descB->mLengths.size());
 
-    if(auto status = checkElementwiseModes("hiptensorCreatePermutation", modeAV, "A", modeBV, "B");
+    if(auto status = checkElementwiseModes("hiptensorCreatePermutation",
+                                           modeAV,
+                                           descA->mLengths,
+                                           "A",
+                                           modeBV,
+                                           descB->mLengths,
+                                           "B");
        status != HIPTENSOR_STATUS_SUCCESS)
     {
         return status;
@@ -504,10 +636,16 @@ hiptensorStatus_t hiptensorCreateElementwiseBinary(const hiptensorHandle_t      
     auto modeCV = std::vector<int32_t>(modeC, modeC + descC->mLengths.size());
     auto modeDV = std::vector<int32_t>(modeD, modeD + descD->mLengths.size());
 
-    for(auto const& [inModes, inName] : {std::pair{&modeAV, "A"}, std::pair{&modeCV, "C"}})
+    for(auto const& [inModes, inDesc, inName] :
+        {std::tuple{&modeAV, descA, "A"}, std::tuple{&modeCV, descC, "C"}})
     {
-        if(auto status = checkElementwiseModes(
-               "hiptensorCreateElementwiseBinary", *inModes, inName, modeDV, "D");
+        if(auto status = checkElementwiseModes("hiptensorCreateElementwiseBinary",
+                                               *inModes,
+                                               inDesc->mLengths,
+                                               inName,
+                                               modeDV,
+                                               descD->mLengths,
+                                               "D");
            status != HIPTENSOR_STATUS_SUCCESS)
         {
             return status;
@@ -593,11 +731,17 @@ hiptensorStatus_t hiptensorCreateElementwiseTrinary(const hiptensorHandle_t     
     auto modeCV = std::vector<int32_t>(modeC, modeC + descC->mLengths.size());
     auto modeDV = std::vector<int32_t>(modeD, modeD + descD->mLengths.size());
 
-    for(auto const& [inModes, inName] :
-        {std::pair{&modeAV, "A"}, std::pair{&modeBV, "B"}, std::pair{&modeCV, "C"}})
+    for(auto const& [inModes, inDesc, inName] : {std::tuple{&modeAV, descA, "A"},
+                                                 std::tuple{&modeBV, descB, "B"},
+                                                 std::tuple{&modeCV, descC, "C"}})
     {
-        if(auto status = checkElementwiseModes(
-               "hiptensorCreateElementwiseTrinary", *inModes, inName, modeDV, "D");
+        if(auto status = checkElementwiseModes("hiptensorCreateElementwiseTrinary",
+                                               *inModes,
+                                               inDesc->mLengths,
+                                               inName,
+                                               modeDV,
+                                               descD->mLengths,
+                                               "D");
            status != HIPTENSOR_STATUS_SUCCESS)
         {
             return status;
@@ -795,11 +939,12 @@ hiptensorStatus_t contractionGetWorkspaceSize(const hiptensorHandle_t           
                                               const hiptensorPlanPreference_t      planPref,
                                               const hiptensorWorksizePreference_t  workspacePref,
                                               uint64_t* workspaceSizeEstimate);
-hiptensorStatus_t contractionTrinaryGetWorkspaceSize(const hiptensorHandle_t              handle,
+hiptensorStatus_t
+                  contractionTrinaryGetWorkspaceSize(const hiptensorHandle_t              handle,
                                                      const hiptensorOperationDescriptor_t desc,
                                                      const hiptensorPlanPreference_t      planPref,
                                                      const hiptensorWorksizePreference_t  workspacePref,
-                                                     uint64_t* workspaceSizeEstimate);
+                                                     uint64_t*                            workspaceSizeEstimate);
 hiptensorStatus_t hiptensorEstimateWorkspaceSize(const hiptensorHandle_t              handle,
                                                  const hiptensorOperationDescriptor_t desc,
                                                  const hiptensorPlanPreference_t      planPref,
@@ -829,7 +974,7 @@ hiptensorStatus_t contractionTrinaryInitPlan(const hiptensorHandle_t            
                                              hiptensorPlan_t                      plan,
                                              const hiptensorOperationDescriptor_t desc,
                                              const hiptensorPlanPreference_t      pref,
-                                             uint64_t                             workspaceSizeLimit);
+                                             uint64_t workspaceSizeLimit);
 hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handle,
                                       hiptensorPlan_t*                     plan,
                                       const hiptensorOperationDescriptor_t desc,
@@ -837,7 +982,7 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
                                       uint64_t                             workspaceSizeLimit)
 {
     (*plan)                     = new hiptensorPlan();
-    hiptensorPlan_t             newPlan = *plan;
+    hiptensorPlan_t newPlan     = *plan;
     newPlan->mRequiredWorkspace = workspaceSizeLimit;
 
     // Deep-copy the tensor descriptors referenced by the operation descriptor
@@ -862,7 +1007,7 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
         newPlan->mOwnedDescE = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescE);
     }
 
-    newPlan->mOwnedOpDesc  = std::make_unique<hiptensorOperationDescriptor>(*desc);
+    newPlan->mOwnedOpDesc         = std::make_unique<hiptensorOperationDescriptor>(*desc);
     newPlan->mOwnedOpDesc->mDescA = newPlan->mOwnedDescA.get();
     newPlan->mOwnedOpDesc->mDescB = newPlan->mOwnedDescB.get();
     newPlan->mOwnedOpDesc->mDescC = newPlan->mOwnedDescC.get();
@@ -876,11 +1021,13 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
 
     if(desc->mOperationType == HIPTENSOR_CONTRACTION)
     {
-        return contractionInitPlan(handle, newPlan, newPlan->mOpDesc, newPlan->mPref, workspaceSizeLimit);
+        return contractionInitPlan(
+            handle, newPlan, newPlan->mOpDesc, newPlan->mPref, workspaceSizeLimit);
     }
     if(desc->mOperationType == HIPTENSOR_CONTRACTION_TRINARY)
     {
-        return contractionTrinaryInitPlan(handle, newPlan, newPlan->mOpDesc, newPlan->mPref, workspaceSizeLimit);
+        return contractionTrinaryInitPlan(
+            handle, newPlan, newPlan->mOpDesc, newPlan->mPref, workspaceSizeLimit);
     }
     return HIPTENSOR_STATUS_SUCCESS;
 }

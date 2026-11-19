@@ -32,8 +32,6 @@
 
 #include <tensilelitehost/export.h>
 
-#define TENSILE_USE_BF16
-
 #ifndef __BYTE_ORDER__
 #define __BYTE_ORDER__ __ORDER_LITTLE_ENDIAN__
 #endif
@@ -92,6 +90,11 @@ namespace TensileLite
         explicit operator int8_t() const
         {
             return static_cast<int8_t>(float(*this));
+        }
+
+        explicit operator uint8_t() const
+        {
+            return static_cast<uint8_t>(float(*this));
         }
 
         uint16_t data;

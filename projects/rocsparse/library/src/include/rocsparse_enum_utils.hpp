@@ -24,6 +24,8 @@
 
 #pragma once
 
+#include "rocsparse-types.h"
+
 namespace rocsparse
 {
     //

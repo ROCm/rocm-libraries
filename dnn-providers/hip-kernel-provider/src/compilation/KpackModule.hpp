@@ -5,6 +5,8 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include "device/ScopedDevice.hpp"
+
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
@@ -19,13 +21,18 @@ namespace hip_kernel_provider::compilation
 ///
 /// Immovable, not move-only: it is constructed in place by make_shared and every holder is
 /// a shared_ptr<const KpackModule>, which cannot be moved from.
+///
+/// The ordinal is carried so the unload can name the load's device (see ScopedDevice): a
+/// cache entry outlives the dispatch that filled it, so by destruction time the current
+/// device is whatever the application last set.
 class KpackModule
 {
 public:
     KpackModule() = default;
 
-    explicit KpackModule(hipModule_t module)
+    KpackModule(hipModule_t module, int deviceOrdinal)
         : _module(module)
+        , _deviceOrdinal(deviceOrdinal)
     {
     }
 
@@ -33,6 +40,10 @@ public:
     {
         if(_module != nullptr)
         {
+            // bound() is not consulted: an unload on the wrong device beats leaking the
+            // module, and a destructor has nowhere to report a refusal. ScopedDevice logs it.
+            const device::ScopedDevice binding(_deviceOrdinal);
+
             // Destructors do not throw, so a failed unload is reported and swallowed --
             // the same choice HipModuleGuard makes.
             const hipError_t status = hipModuleUnload(_module);
@@ -54,8 +65,14 @@ public:
         return _module;
     }
 
+    int deviceOrdinal() const
+    {
+        return _deviceOrdinal;
+    }
+
 private:
     hipModule_t _module = nullptr;
+    int _deviceOrdinal = 0;
 };
 
 } // namespace hip_kernel_provider::compilation
