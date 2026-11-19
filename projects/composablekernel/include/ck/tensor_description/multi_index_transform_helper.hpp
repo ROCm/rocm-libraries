@@ -166,10 +166,20 @@ make_conv_fwd_data_in_transform(index_t N,
                                 const MultiIndex<NDimSpatial>& out_lengths,
                                 const MultiIndex<NDimSpatial>& conv_strides,
                                 const MultiIndex<NDimSpatial>& conv_dilations,
-                                const MultiIndex<NDimSpatial>& left_pads)
+                                const MultiIndex<NDimSpatial>& left_pads,
+                                index_t M_padded,
+                                index_t K_padded)
 {
-    return ConvFwdDataImplicitGemmInTransform<NDimSpatial>{
-        N, C, in_lengths, filter_lengths, out_lengths, conv_strides, conv_dilations, left_pads};
+    return ConvFwdDataImplicitGemmInTransform<NDimSpatial>{N,
+                                                           C,
+                                                           in_lengths,
+                                                           filter_lengths,
+                                                           out_lengths,
+                                                           conv_strides,
+                                                           conv_dilations,
+                                                           left_pads,
+                                                           M_padded,
+                                                           K_padded};
 }
 
 template <typename LowerIndex>

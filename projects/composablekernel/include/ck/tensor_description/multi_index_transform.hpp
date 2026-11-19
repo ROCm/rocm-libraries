@@ -1769,9 +1769,19 @@ struct ConvBwdDataImplicitGemmOutTransform
 /**
  * @brief Map forward-convolution implicit-GEMM input indices to tensor indices.
  *
- * The upper dimensions are M=(N, O_0..O_{D-1}) and K=(F_0..F_{D-1}, C), flattened. The lower
- * dimensions are the input tensor coordinates (N, I_0..I_{D-1}, C). D is NDimSpatial.
- * Indices must be non-negative and below 2^31 (magic division limitation).
+ * The upper dimensions are the padded GEMM dimensions M_padded >= M and K_padded >= K, with
+ * M=(N, O_0..O_{D-1}) and K=(F_0..F_{D-1}, C) flattened. The lower dimensions are the input tensor
+ * coordinates (N, I_0..I_{D-1}, C). D is NDimSpatial. Indices must be non-negative and below 2^31
+ * (magic division limitation).
+ *
+ * The rows and columns beyond the real M and K (GEMM padding) are reported as invalid by this
+ * transform itself, so a separate right-pad transform (and its compares) is not needed. This is
+ * done by pushing the first spatial lower coordinate out of range: the M part of the poison is
+ * added to the term that only depends on m and the K part to the term that only depends on k, so
+ * each of them can be hoisted or shared independently of the other. The lower index of a padding
+ * row / column is therefore meaningless. A poisoned coordinate must never wrap back into
+ * [0, length), which holds when the first spatial input length is at most 2^29 and the first
+ * spatial lower coordinate of every row stays above -2^29.
  */
 template <index_t NDimSpatial>
 struct ConvFwdDataImplicitGemmInTransform
@@ -1798,6 +1808,11 @@ struct ConvFwdDataImplicitGemmInTransform
     SpatialDims m_magic_shift_;
     SpatialDims k_magic_multiplier_;
     SpatialDims k_magic_shift_;
+    // real (unpadded) GEMM lengths
+    index_t m_valid_;
+    index_t k_valid_;
+
+    static constexpr uint32_t kPoison = 1u << 30;
 
     __host__ __device__ constexpr ConvFwdDataImplicitGemmInTransform() = default;
 
@@ -1809,7 +1824,9 @@ struct ConvFwdDataImplicitGemmInTransform
                                                                 const SpatialDims& out_lengths,
                                                                 const SpatialDims& conv_strides,
                                                                 const SpatialDims& conv_dilations,
-                                                                const SpatialDims& left_pads)
+                                                                const SpatialDims& left_pads,
+                                                                index_t M_padded,
+                                                                index_t K_padded)
         : in_lengths_{in_lengths},
           conv_strides_{conv_strides},
           conv_dilations_{conv_dilations},
@@ -1821,7 +1838,9 @@ struct ConvFwdDataImplicitGemmInTransform
           m_magic_multiplier_{},
           m_magic_shift_{},
           k_magic_multiplier_{},
-          k_magic_shift_{}
+          k_magic_shift_{},
+          m_valid_{0},
+          k_valid_{0}
     {
         index_t m_length = N;
         index_t k_length = C;
@@ -1844,7 +1863,9 @@ struct ConvFwdDataImplicitGemmInTransform
             k_magic_shift_(j) =
                 MagicDivision::CalculateMagicShift(filter_lengths[Number<NDimSpatial - j>{}]);
         });
-        up_lengths_ = make_tuple(m_length, k_length);
+        m_valid_    = m_length;
+        k_valid_    = k_length;
+        up_lengths_ = make_tuple(M_padded, K_padded);
     }
 
     __host__ __device__ static constexpr index_t GetNumOfLowerDimension()
@@ -1894,9 +1915,24 @@ struct ConvFwdDataImplicitGemmInTransform
         });
         filter_idx(Number<0>{}) = quotient;
 
+        // Padding rows / columns (m >= M, k >= K) are made invalid by adding a large value to
+        // the first spatial coordinate, so that the unsigned range check fails. The M and K
+        // contributions are kept in separate terms (unsigned arithmetic, no signed overflow).
+        const uint32_t m_poison =
+            static_cast<uint32_t>(idx_up[Number<0>{}]) >= static_cast<uint32_t>(m_valid_) ? kPoison
+                                                                                          : 0u;
+        const uint32_t k_poison =
+            static_cast<uint32_t>(idx_up[Number<1>{}]) >= static_cast<uint32_t>(k_valid_) ? kPoison
+                                                                                          : 0u;
         static_for<0, NDimSpatial, 1>{}([&](auto d) {
-            idx_low(Number<d + 1>{}) =
-                out_idx[d] * conv_strides_[d] + filter_idx[d] * conv_dilations_[d] - left_pads_[d];
+            uint32_t m_part = static_cast<uint32_t>(out_idx[d] * conv_strides_[d] - left_pads_[d]);
+            uint32_t k_part = static_cast<uint32_t>(filter_idx[d] * conv_dilations_[d]);
+            if constexpr(d == 0)
+            {
+                m_part += m_poison;
+                k_part += k_poison;
+            }
+            idx_low(Number<d + 1>{}) = static_cast<index_t>(m_part + k_part);
         });
     }
 
