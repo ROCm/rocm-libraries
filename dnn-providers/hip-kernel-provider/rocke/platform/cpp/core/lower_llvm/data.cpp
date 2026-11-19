@@ -42,6 +42,7 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"workgroup.x", "declare i32 @llvm.amdgcn.workgroup.id.x()"},
     {"workgroup.y", "declare i32 @llvm.amdgcn.workgroup.id.y()"},
     {"workgroup.z", "declare i32 @llvm.amdgcn.workgroup.id.z()"},
+    {"dispatch.ptr", "declare ptr addrspace(4) @llvm.amdgcn.dispatch.ptr()"},
     {"s.barrier", "declare void @llvm.amdgcn.s.barrier()"},
     {"s.wait.dscnt", "declare void @llvm.amdgcn.s.wait.dscnt(i16)"},
     {"s.wait.loadcnt", "declare void @llvm.amdgcn.s.wait.loadcnt(i16)"},

@@ -510,6 +510,11 @@ typedef enum rocke_opcode
      * existing index shifts. */
     ROCKE_OP_MATH_LDEXP,
 
+    /* gpu.grid_dim: workgroups launched along an axis, read from the dispatch
+     * packet (Python IRBuilder.grid_dim). Appended so no existing index
+     * shifts. */
+    ROCKE_OP_GPU_GRID_DIM,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -1130,6 +1135,11 @@ rocke_value_t* rocke_b_thread_id_x(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_x(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_y(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_z(rocke_ir_builder_t* b);
+/* Workgroups launched along `axis` ("x", "y" or "z"; gridDim): the dispatch
+ * packet's grid size in work-items divided by block_size, the kernel's
+ * workgroup size along that axis (a build-time constant, >= 1). Python
+ * IRBuilder.grid_dim. */
+rocke_value_t* rocke_b_grid_dim(rocke_ir_builder_t* b, const char* axis, int block_size);
 
 /* gfx1250 workgroup clusters. `axis` is "x", "y" or "z". Without a cluster
  * launch every id and max id inside the cluster reads 0 and the cluster id

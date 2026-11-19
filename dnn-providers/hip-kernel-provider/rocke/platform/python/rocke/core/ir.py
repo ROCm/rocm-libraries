@@ -4017,6 +4017,10 @@ class IRBuilder:
         """Workgroups launched along ``axis`` (gridDim): the dispatch
         packet's grid size (work-items) over ``block_size``, the kernel's
         workgroup size along that axis (a build-time constant here)."""
+        if axis not in ("x", "y", "z"):
+            raise ValueError(f"grid_dim axis must be x, y, or z, got {axis!r}")
+        if int(block_size) < 1:
+            raise ValueError(f"grid_dim block_size must be >= 1, got {block_size}")
         return self._op(
             "gpu.grid_dim",
             attrs={"axis": axis, "block_size": int(block_size)},

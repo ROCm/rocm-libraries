@@ -57,6 +57,27 @@ rocke_value_t* rocke_b_block_id_z(rocke_ir_builder_t* b)
     return rocke_i_block_id_axis(b, "z");
 }
 
+/* Python IRBuilder.grid_dim; the refusal texts are the Python engine's. */
+rocke_value_t* rocke_b_grid_dim(rocke_ir_builder_t* b, const char* axis, int block_size)
+{
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!axis)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "grid_dim axis must be x, y, or z, got None");
+    if(strcmp(axis, "x") != 0 && strcmp(axis, "y") != 0 && strcmp(axis, "z") != 0)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "grid_dim axis must be x, y, or z, got '%s'", axis);
+    if(block_size < 1)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "grid_dim block_size must be >= 1, got %d", block_size);
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "axis", axis);
+    rocke_attr_set_int(b, &a, "block_size", block_size);
+    return rocke_i_op1(b, ROCKE_OP_GPU_GRID_DIM, NULL, 0, rocke_i32(), &a, "gdim");
+}
+
 /* gfx1250 workgroup clusters. A launch without a cluster shape is a 1x1x1
  * cluster: every id and max id inside the cluster reads 0 and the cluster id
  * equals the workgroup id. */

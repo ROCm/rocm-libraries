@@ -3534,7 +3534,9 @@ class _Lowerer:
         # hsa_kernel_dispatch_packet_t: grid_size_{x,y,z} (work-items, u32)
         # at bytes 12/16/20; gridDim = grid_size / the workgroup size.
         axis = op.attrs.get("axis", "x")
-        off = {"x": 12, "y": 16, "z": 20}[axis]
+        off = {"x": 12, "y": 16, "z": 20}.get(axis)
+        if off is None:
+            raise ValueError(f"grid_dim axis must be x, y, or z, got {axis!r}")
         bs = int(op.attrs.get("block_size", 1))
         r = op.result.name
         self._need("dispatch.ptr")

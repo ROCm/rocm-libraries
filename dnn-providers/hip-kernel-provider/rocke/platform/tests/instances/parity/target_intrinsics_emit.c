@@ -10,6 +10,8 @@
  * Python side, which says why a config needs a target that has its intrinsics.
  *
  * Configs 10..12 cover arith.fdot2 (f16, bf16) and the bf16 4x4x4 MFMA atom.
+ * Config 13 covers gpu.grid_dim on every axis, with and without the workgroup
+ * size divide.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -222,6 +224,19 @@ static void build_mfma_4x4x4_bf16(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
+static void build_grid_dim(rocke_ir_builder_t* b)
+{
+    rocke_value_t* out = global_ptr_param(b, "out", rocke_i32(), 4);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    rocke_value_t* gx = rocke_b_grid_dim(b, "x", 256);
+    rocke_value_t* gy = rocke_b_grid_dim(b, "y", 1);
+    rocke_value_t* gz = rocke_b_grid_dim(b, "z", 64);
+    rocke_value_t* gxy = rocke_b_add(b, gx, gy);
+    rocke_value_t* total = rocke_b_add(b, gxy, gz);
+    rocke_b_global_store(b, out, tid, total, 4);
+    rocke_b_ret(b);
+}
+
 typedef void (*build_fn_t)(rocke_ir_builder_t*);
 
 static const build_fn_t BUILDERS[] = {
@@ -238,6 +253,7 @@ static const build_fn_t BUILDERS[] = {
     build_fdot2_f16,
     build_fdot2_bf16,
     build_mfma_4x4x4_bf16,
+    build_grid_dim,
 };
 
 static const int NUM_BUILDERS = (int)(sizeof(BUILDERS) / sizeof(BUILDERS[0]));
@@ -257,6 +273,7 @@ static const char* const ARCHES[] = {
     "gfx950", /* arith.fdot2 f16 */
     "gfx950", /* arith.fdot2 bf16 */
     "gfx950", /* bf16 4x4x4 MFMA */
+    "gfx942", /* gpu.grid_dim (the dispatch packet; every target) */
 };
 static const int NUM_ARCHES = (int)(sizeof(ARCHES) / sizeof(ARCHES[0]));
 
