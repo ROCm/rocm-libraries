@@ -87,6 +87,7 @@ public:
         resolved.memoryBusWidth = properties.memoryBusWidth;
         resolved.memoryClockRate = properties.memoryClockRate;
         resolved.sharedMemPerBlock = properties.sharedMemPerBlock;
+        resolved.xccCount = queryXccCount(deviceId);
 
         return _properties.emplace(deviceId, std::move(resolved)).first->second;
     }
@@ -109,6 +110,15 @@ protected:
                                              hipdnn_plugin_sdk::ingestor::DeviceId deviceId) const
     {
         return hipGetDeviceProperties(properties, deviceId);
+    }
+
+    /// Test seam: the device's XCD count (0 when the runtime does not report one).
+    virtual int queryXccCount(hipdnn_plugin_sdk::ingestor::DeviceId deviceId) const
+    {
+        int xccs = 0;
+        return hipDeviceGetAttribute(&xccs, hipDeviceAttributeNumberOfXccs, deviceId) == hipSuccess
+                   ? xccs
+                   : 0;
     }
 
 private:

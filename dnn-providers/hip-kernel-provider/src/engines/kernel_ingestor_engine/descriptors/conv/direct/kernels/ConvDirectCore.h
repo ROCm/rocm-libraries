@@ -335,10 +335,25 @@ __device__ inline void k2FormatWeightsSplit(const K2FormatArgs& f)
 // Block decode shared by both kernels.
 struct K2Block
 {
-    int img, oh0, ow0, od0, dsEff, hw, hp;
+    int img, oh0, ow0, od0, dsEff, hw, hp, col;
     __device__ void init(const K2Args& a, int R, int S)
     {
         int bx = blockIdx.x;
+        col = blockIdx.y;
+        if(a.xcds > 1 && gridDim.z == 1)
+        {
+            // XCD x holds the blocks of launch index x mod X; give it the logical range
+            // [start(x), start(x + 1)), its blocks in launch order, column blocks fastest.
+            const unsigned gx = gridDim.x, gy = gridDim.y, x = static_cast<unsigned>(a.xcds);
+            const unsigned total = gx * gy;
+            const unsigned id = blockIdx.x + gx * blockIdx.y;
+            const unsigned per = total / x, rem = total % x;
+            const unsigned xcd = id % x, local = id / x;
+            const unsigned logical
+                = xcd < rem ? xcd * (per + 1) + local : rem * (per + 1) + (xcd - rem) * per + local;
+            col = static_cast<int>(logical % gy);
+            bx = static_cast<int>(logical / gy);
+        }
         const int tWi = bx % a.tilesW;
         bx /= a.tilesW;
         const int tHi = bx % a.tilesH;
@@ -891,7 +906,7 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
 
     K2Block b;
     b.init(a, R, S);
-    const int n0 = blockIdx.y * BN;
+    const int n0 = b.col * BN;
     const int tid = threadIdx.x;
     const int lane = tid % WAVE, wave = tid / WAVE;
     const int wm = wave % WM, wn = wave / WM;
@@ -1528,7 +1543,7 @@ __device__ void k2ConvFma(const K2Args& a CONV_EPI_FN_PARAM)
 
     K2Block b;
     b.init(a, R, S);
-    const int n0 = blockIdx.y * BN;
+    const int n0 = b.col * BN;
     const int tid = threadIdx.x;
     const int tn = tid % NT, tq = tid / NT;
 #if defined(CONV_EPI) && CONV_EPI

@@ -203,7 +203,7 @@ struct Plan
  * at most 16 splits.
  */
 std::optional<Plan>
-    planFor(const DirectProblem& problem, const Config& config, int64_t computeUnits);
+    planFor(const DirectProblem& problem, const Config& config, int64_t computeUnits, int xcds = 0);
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::conv_direct
 
