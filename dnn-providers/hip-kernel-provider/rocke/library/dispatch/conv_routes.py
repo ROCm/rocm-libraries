@@ -1,12 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Production routes of padded convolutions (opt-in route tables).
+"""Routes of padded convolutions (opt-in route tables).
 
 A *route table* says, per convolution problem, HOW a call is served -- not
-only which kernel runs it. A padded problem (the production form of a 3-D
-UNet: padding (1,1,1), or (0,1,1) on a depth-split run whose input carries its
-depth halo) can be served three ways:
+only which kernel runs it. A padded problem (padding (1,1,1), or (0,1,1) when
+the input already carries its depth halo) can be served three ways:
 
 ``direct``
     One pinned implicit-GEMM launch on the padded problem itself (what
@@ -50,6 +49,12 @@ Table format (one file, several selection modes, like a pin table)::
 * ``winograd.spec`` holds the :class:`~kernels.common.conv_winograd3d.WinogradYxSpec`
   fields except the extents (derived from the problem), ``winograd.wtv`` the
   weight-transform variant.
+* A route serves NDHWC requests of the table's arch and (when the table names
+  one) LLVM flavor, with ``algorithm`` ``"auto"`` or ``"pinned"``. The pad copy
+  and the Winograd drop-in are bf16 (their rows need a bf16 command), and a
+  named kernel must be one of its command's direction and dtype.
+* ``modes.<mode>.deterministic`` is kept as :attr:`ConvRoutes.deterministic`;
+  pins passed with the routes must be of the same mode.
 
 Nothing reads a route table unless a caller passes one: default dispatch is
 unchanged. :func:`dispatch_conv_route` raises ``ValueError`` for a request the
@@ -66,10 +71,13 @@ from pathlib import Path
 
 from .conv_pins import (
     _KEY_FIELDS,
+    PINNED_ALGORITHM,
     ConvPin,
     ConvPins,
     _SPLIT_RE,
+    _norm_dtype,
     dispatch_conv_pinned,
+    label_mismatch,
     parse_miopen_cmd,
     request_key,
     table_modes,
@@ -115,13 +123,19 @@ class ConvRoutes:
     arch: str = ""
     mode: str = ""
     llvm_flavor: str = ""
+    deterministic: bool = False
     _pinsets: dict = field(default_factory=dict, repr=False, compare=False)
 
     def __len__(self) -> int:
         return len(self.routes)
 
     def lookup(self, req) -> ConvRoute | None:
+        """The route of ``req``; ``None`` for another arch, or another LLVM
+        flavor than the one the table was selected under."""
         if self.arch and getattr(req, "arch", self.arch) != self.arch:
+            return None
+        flavor = getattr(req, "llvm_flavor", None)
+        if self.llvm_flavor and flavor is not None and flavor != self.llvm_flavor:
             return None
         return self.routes.get(request_key(req))
 
@@ -141,9 +155,13 @@ def route_from_row(case: str, row: Mapping, source: str = "") -> ConvRoute:
             f"{source}: case {case}: route {route!r} (one of {', '.join(ROUTES)})"
         )
     cmd = str(row["cmd"])
-    direction, _dtype, key = parse_miopen_cmd(cmd)
+    direction, dtype, key = parse_miopen_cmd(cmd)
     kernel = row.get("kernel")
     kernel = str(kernel).strip() if kernel else None
+    if route in (ROUTE_PADCOPY_HALO, ROUTE_WINOGRAD) and dtype != "bf16":
+        raise ValueError(
+            f"{source}: case {case}: a {route} route serves bf16, not {dtype}"
+        )
     spec, wtv = (), 0
     if route == ROUTE_WINOGRAD:
         w = row.get("winograd")
@@ -184,6 +202,10 @@ def route_from_row(case: str, row: Mapping, source: str = "") -> ConvRoute:
             raise ValueError(
                 f"{source}: case {case}: padcopy_halo copies one 3-D image (N=1)"
             )
+    if kernel:
+        why = label_mismatch(kernel, direction, dtype)
+        if why:
+            raise ValueError(f"{source}: case {case}: the route names a {why}")
     return ConvRoute(
         case=case,
         route=route,
@@ -229,6 +251,7 @@ def load_conv_routes(path, mode: str | None = None) -> ConvRoutes:
     out.arch = str(data.get("arch", "") or "")
     out.mode = mode
     out.llvm_flavor = str(data.get("llvm_flavor", "") or "")
+    out.deterministic = bool(data["modes"][mode].get("deterministic", False))
     return out
 
 
@@ -433,12 +456,12 @@ def _pins_label(pins: ConvPins | None, req) -> str | None:
     return pin.label if pin is not None else None
 
 
-def winograd_route_plan(route: ConvRoute, problem, direction: str):
+def winograd_route_plan(route: ConvRoute, problem, direction: str, dtype: str = "bf16"):
     """The :class:`Winograd3dPlan` of a ``winograd`` route (validated)."""
     from kernels.common import conv_winograd3d as cw
     from kernels.common import conv_winograd3d_select as sel
 
-    why = sel.winograd3d_ineligible_reason(problem, direction)
+    why = sel.winograd3d_ineligible_reason(problem, direction, _norm_dtype(dtype))
     if why:
         raise ValueError(
             f"{route.case}: winograd route on an ineligible problem: {why}"
@@ -587,20 +610,49 @@ def winograd_steps(plan, problem, direction: str) -> tuple:
     return tuple(steps)
 
 
+#: Request algorithms a route answers: a route is the table's own choice.
+_ROUTE_ALGORITHMS = ("auto", PINNED_ALGORITHM)
+
+
+def _check_modes(routes: ConvRoutes | None, pins: ConvPins | None) -> None:
+    if (
+        routes is not None
+        and pins is not None
+        and routes.mode
+        and pins.mode
+        and routes.mode != pins.mode
+    ):
+        raise ValueError(
+            f"{routes.source or 'routes'}: route mode {routes.mode!r} with pins "
+            f"of mode {pins.mode!r}"
+        )
+
+
 def dispatch_conv_route(
     req, routes: ConvRoutes, pins: ConvPins | None = None
 ) -> ConvRoutePlan:
-    """The production route of ``req`` (a ``ConvGroupedRequest``, any direction).
+    """The route of ``req`` (a ``ConvGroupedRequest``, any direction).
 
     Raises ``ValueError`` when the table does not route the problem or the
-    route cannot serve it (the caller falls back to its default selection).
-    ``pins`` serves routes whose row names no kernel (and nothing else).
+    route cannot serve it (the caller falls back to its default selection):
+    a layout other than NHWC (NDHWC), an explicit algorithm other than
+    ``"pinned"``, or pins of another mode than the routes'. ``pins`` serves
+    routes whose row names no kernel (and nothing else).
     """
     from .grouped_convolution import _conv_problem
 
+    _check_modes(routes, pins)
     route = routes.lookup(req)
     if route is None:
         raise ValueError(f"{routes.source or 'routes'}: no route for this problem")
+    layout = str(getattr(req, "layout", "NHWC")).upper()
+    if layout != "NHWC":
+        raise ValueError(f"{route.case}: routes serve NHWC (NDHWC), not {layout}")
+    algorithm = str(getattr(req, "algorithm", "auto")).strip().lower()
+    if algorithm not in _ROUTE_ALGORITHMS:
+        raise ValueError(
+            f"{route.case}: a route answers algorithm auto / pinned, not {algorithm!r}"
+        )
     problem = _conv_problem(req)
     if problem is None:
         raise ValueError("not a valid convolution shape")
@@ -658,7 +710,7 @@ def dispatch_conv_route(
             workspaces=(RouteWorkspace("Xp", pc.out_bytes, zero_once=True),),
             steps=steps,
         )
-    plan, spec = winograd_route_plan(route, problem, direction)
+    plan, spec = winograd_route_plan(route, problem, direction, req.dtype)
     return ConvRoutePlan(
         **base,
         winograd=plan,
@@ -667,13 +719,15 @@ def dispatch_conv_route(
     )
 
 
-def dispatch_conv_production(
+def dispatch_conv_routed(
     req, routes: ConvRoutes | None = None, pins: ConvPins | None = None
 ) -> ConvRoutePlan:
     """One call's plan from the opt-in tables, routes first: the route of
     ``req`` when ``routes`` routes it, else a ``direct`` plan of its pin in
-    ``pins``. Raises ``ValueError`` when neither table covers the problem (the
-    caller then uses its default selection, ``dispatch_conv_grouped``)."""
+    ``pins``. Raises ``ValueError`` when neither table covers the problem, or
+    when the two tables are of different modes (the caller then uses its
+    default selection, ``dispatch_conv_grouped``)."""
+    _check_modes(routes, pins)
     if routes is not None and routes.lookup(req) is not None:
         return dispatch_conv_route(req, routes, pins)
     if pins is not None and pins.lookup(req) is not None:

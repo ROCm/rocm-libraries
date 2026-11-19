@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""dispatch.conv_routes: route tables -> per-request production route (host only)."""
+"""dispatch.conv_routes: route tables -> per-request route (host only)."""
 
 import dataclasses
 import json
@@ -184,7 +184,15 @@ def test_bad_rows_refused(row, msg):
 
 def test_one_problem_one_route():
     with pytest.raises(ValueError, match="route one problem"):
-        _routes({"dup": {"cmd": _cmd(), "route": "direct", "kernel": "k"}})
+        _routes(
+            {
+                "dup": {
+                    "cmd": _cmd(),
+                    "route": "direct",
+                    "kernel": _pin_rows()["fwd_s1_pad1"]["kernel"],
+                }
+            }
+        )
 
 
 def test_lookup_exact_padded_problem():
@@ -334,23 +342,23 @@ def test_kernel_from_pins():
         cr.dispatch_conv_route(_req("dgrad_s1_pad1", r), r)
 
 
-def test_production_routes_then_pins():
+def test_routes_then_pins():
     pins = cp.load_conv_pins(PIN_TABLE, "deterministic")
     r = _routes()
-    plan = cr.dispatch_conv_production(_req("fwd_s3_pad1", r), r, pins)
+    plan = cr.dispatch_conv_routed(_req("fwd_s3_pad1", r), r, pins)
     assert plan.route == "winograd"
     # not routed, pinned: a direct plan of the pin (here the halo-form problem)
     hreq = cr.halo_request(_req("fwd_s1_pad1", r))
-    plan = cr.dispatch_conv_production(hreq, r, pins)
+    plan = cr.dispatch_conv_routed(hreq, r, pins)
     assert (
         plan.route == "direct"
         and plan.kernel_label.split()[0] == pins.lookup(hreq).instance
     )
     assert plan.steps[0].kind == "pinned" and plan.calls == pins.lookup(hreq).calls
     with pytest.raises(ValueError, match="neither"):
-        cr.dispatch_conv_production(dataclasses.replace(hreq, C=8), r, pins)
+        cr.dispatch_conv_routed(dataclasses.replace(hreq, C=8), r, pins)
     with pytest.raises(ValueError, match="neither"):
-        cr.dispatch_conv_production(hreq)
+        cr.dispatch_conv_routed(hreq)
 
 
 def test_default_dispatch_unchanged():
@@ -414,3 +422,119 @@ def test_shipped_route_kernels_are_the_pin_picks():
             p1 = cr.dispatch_conv_route(_req(case, r), r)
             p2 = cr.dispatch_conv_route(_req(case, rb), rb, pins)
             assert (p1.route, p1.kernel_label) == (p2.route, p2.kernel_label), case
+
+
+def _shipped_routes(mode="deterministic"):
+    return cr.load_conv_routes(SHIPPED["gfx942_unet3d_bf16"], mode)
+
+
+@pytest.mark.parametrize("case", ["dgrad_s3_pad1", "fwd_s4_pad011", "fwd_s1_pad1"])
+@pytest.mark.parametrize(
+    "change, msg",
+    [
+        ({"layout": "NCHW"}, "NHWC"),
+        ({"algorithm": "implicit_gemm"}, "algorithm"),
+        ({"llvm_flavor": "llvm20"}, "no route"),
+    ],
+)
+def test_a_route_refuses_what_it_was_not_selected_for(case, change, msg):
+    """Winograd routes too: the layout, an explicit algorithm and the LLVM
+    flavor the table was selected under are part of the route's contract."""
+    r = _shipped_routes()
+    req = _req(case, r)
+    cr.dispatch_conv_route(req, r)
+    cr.dispatch_conv_route(dataclasses.replace(req, algorithm="pinned"), r)
+    with pytest.raises(ValueError, match=msg):
+        cr.dispatch_conv_route(dataclasses.replace(req, **change), r)
+
+
+def _row_with(case, **change):
+    row = dict(_shipped_doc()["modes"]["deterministic"]["cases"][case])
+    row.update(change)
+    return row
+
+
+def _shipped_doc():
+    return json.loads(SHIPPED["gfx942_unet3d_bf16"].read_text())
+
+
+def _winograd_case(direction="fwd"):
+    cases = _shipped_doc()["modes"]["deterministic"]["cases"]
+    return next(
+        k
+        for k, v in cases.items()
+        if v["route"] == "winograd" and k.startswith(direction + "_")
+    )
+
+
+def _route_case(route, direction):
+    cases = _shipped_doc()["modes"]["deterministic"]["cases"]
+    return next(
+        k
+        for k, v in cases.items()
+        if v["route"] == route and k.startswith(direction + "_")
+    )
+
+
+def test_rows_whose_kernel_or_dtype_do_not_fit_are_refused():
+    pad = _route_case("padcopy_halo", "fwd")
+    direct = _route_case("direct", "fwd")
+    dgrad = _route_case("direct", "dgrad")
+    to = {"convbfp16": "conv", "fp16": "convfp16"}
+    bad = {
+        # the pad copy and the drop-in are bf16
+        "fp32 pad copy": _row_with(
+            pad, cmd=_row_with(pad)["cmd"].replace("convbfp16", to["convbfp16"])
+        ),
+        "fp16 winograd": _row_with(
+            _winograd_case(),
+            cmd=_row_with(_winograd_case())["cmd"].replace("convbfp16", to["fp16"]),
+        ),
+        # a bf16 kernel on an fp32 command; a dgrad kernel on a forward command
+        "fp32 direct": _row_with(
+            direct, cmd=_row_with(direct)["cmd"].replace("convbfp16", to["convbfp16"])
+        ),
+        "dgrad label": _row_with(direct, kernel=_row_with(dgrad)["kernel"]),
+    }
+    for name, row in bad.items():
+        with pytest.raises(ValueError, match="serves bf16|kernel on a"):
+            cr.routes_from_mapping({"cases": {name: row}}, source=name)
+
+
+def test_routes_and_pins_of_different_modes_are_refused():
+    r = _shipped_routes()
+    fastest = cp.load_conv_pins(PIN_TABLE, "fastest")
+    req = _req(_route_case("direct", "dgrad"), r)
+    with pytest.raises(ValueError, match="mode"):
+        cr.dispatch_conv_route(req, r, fastest)
+    with pytest.raises(ValueError, match="mode"):
+        cr.dispatch_conv_routed(req, r, fastest)
+    cr.dispatch_conv_routed(req, r, cp.load_conv_pins(PIN_TABLE, "deterministic"))
+
+
+@pytest.mark.parametrize("name", sorted(SHIPPED))
+def test_deterministic_route_modes_launch_deterministically(name):
+    """Every kernel a deterministic mode routes to is a deterministic launch
+    (the f32 det_classify verdict, as for a pin table's deterministic mode);
+    a Winograd route's split-K reduction is the ordered one."""
+    from benchmarks.common.det_classify import is_deterministic
+
+    doc = json.loads(SHIPPED[name].read_text())
+    for mode, body in doc["modes"].items():
+        r = cr.load_conv_routes(SHIPPED[name], mode)
+        assert r.deterministic == bool(body.get("deterministic"))
+        if not r.deterministic:
+            continue
+        for case in r.by_case():
+            plan = cr.dispatch_conv_route(_req(case, r), r)
+            if plan.route == cr.ROUTE_WINOGRAD:
+                reduce = [s for s in plan.steps if s.name.startswith("split-K")]
+                assert all(
+                    s.build("gfx942").name.startswith("wino_ks_reduce") for s in reduce
+                ), case
+                continue
+            spec = plan.kernel.spec
+            split_k = spec.launch_params().get("split_k")
+            assert is_deterministic(
+                plan.kernel_request.direction, spec.identity, split_k, "f32"
+            ), case

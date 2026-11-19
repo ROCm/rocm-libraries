@@ -1,7 +1,7 @@
 {
  "arch": "gfx942",
  "llvm_flavor": "llvm22",
- "comment": "3-D UNet convolutions (bf16, NDHWC, 3x3x3 filter, stride 1; 10 shapes x fwd/dgrad/wgrad) in the padded (production) forms: padding (1,1,1) (cases <dir>_s<N>_pad1) and (0,1,1) with the depth halo in the input (cases <dir>_s<N>_pad011). Per case the route selected by interleaved same-session judging: direct (pinned kernel on the padded problem), padcopy_halo (pad copy + pinned halo-form kernel) or winograd (3-D yx Winograd drop-in). Every route is deterministic (f32 reductions).",
+ "comment": "3-D UNet convolutions (bf16, NDHWC, 3x3x3 filter, stride 1; 10 shapes x fwd/dgrad/wgrad) in the padded forms: padding (1,1,1) (cases <dir>_s<N>_pad1) and (0,1,1) with the depth halo in the input (cases <dir>_s<N>_pad011). Per case the route selected by interleaved same-session judging: direct (pinned kernel on the padded problem), padcopy_halo (pad copy + pinned halo-form kernel) or winograd (3-D yx Winograd drop-in). Every route is deterministic (f32 reductions).",
  "modes": {
   "deterministic": {
    "deterministic": true,

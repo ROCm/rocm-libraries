@@ -264,17 +264,39 @@ class ConvPins:
         return rank
 
 
+def label_mismatch(label: str, direction: str, dtype: str) -> str | None:
+    """Why the kernel ``label`` names cannot serve a ``direction`` / ``dtype``
+    problem (its identity is another direction or operand dtype), or ``None``.
+    Raises ``ValueError`` on a malformed label."""
+    from kernels.conv.kernel_identity import KernelIdentity
+
+    ident = KernelIdentity.from_label(label.split()[0])
+    if ident.direction != direction:
+        return f"{ident.direction} kernel on a {direction} problem"
+    if ident.dtype_a != _norm_dtype(dtype):
+        return f"{ident.dtype_a} kernel on a {_norm_dtype(dtype)} problem"
+    return None
+
+
 def pins_from_mapping(data: Mapping, source: str = "") -> ConvPins:
-    """:class:`ConvPins` from a decoded pins document."""
+    """:class:`ConvPins` from a decoded pins document.
+
+    Every label must name a kernel of its command's direction and dtype, and
+    one problem may be pinned twice only to the same launch (the same label,
+    launch suffix included)."""
     out = ConvPins(source=source)
     for case, row in (data.get("cases") or {}).items():
         label = str(row["kernel"]).strip()
         instance = label.split()[0] if label else ""
         m = _SPLIT_RE.search(label)
         key = parse_miopen_cmd(row["cmd"])
-        if key in out.pins and out.pins[key].instance != instance:
+        why = label_mismatch(label, key[0], key[1]) if label else "no kernel"
+        if why:
+            raise ValueError(f"{source}: case {case} pins a {why}")
+        if key in out.pins and out.pins[key].label != label:
             raise ValueError(
-                f"{source}: cases {out.pins[key].case} and {case} pin one problem to two kernels"
+                f"{source}: cases {out.pins[key].case} and {case} pin one problem to "
+                f"two launches ({out.pins[key].label} vs {label})"
             )
         out.pins[key] = ConvPin(
             case=case,
@@ -496,6 +518,12 @@ def pinned_conv_candidate(pins: ConvPins, direction: str):
         p = _conv_problem(req)
         if p is None:
             return None, "not a valid convolution shape"
+        want = (direction, _norm_dtype(req.dtype))
+        if (spec.identity.direction, spec.identity.dtype_a) != want:
+            return None, (
+                f"{name}: pinned {pin.instance} is a {spec.identity.direction} "
+                f"{spec.identity.dtype_a} kernel, not {want[0]} {want[1]}"
+            )
         ok, why = identity_supports_problem(
             spec.identity, p, getattr(req, "llvm_flavor", None)
         )

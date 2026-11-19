@@ -1,7 +1,7 @@
 # Conv route tables
 
-A route table names, for each convolution problem it covers and for each selection mode, the *production route* that
-serves a call: one pinned kernel, a pad copy plus a pinned halo-form kernel, or the 3-D Winograd drop-in. It is read by
+A route table names, for each convolution problem it covers and for each selection mode, the *route* that serves a
+call: one pinned kernel, a pad copy plus a pinned halo-form kernel, or the 3-D Winograd drop-in. It is read by
 `dispatch/conv_routes.py`. Route tables are opt-in: nothing reads one unless a caller passes it, and default dispatch
 (`algorithm="auto"`, the pin tables) is unchanged.
 
@@ -61,8 +61,14 @@ plan.kernel           # DispatchResult of the pinned kernel (direct / padcopy_ha
 plan.winograd         # Winograd3dPlan (winograd): Winograd3dDropin(plan.problem, plan.direction, plan.winograd)
 ```
 
-`dispatch_conv_production(req, routes, pins)` answers from both opt-in tables, routes first: the route when the
-route table covers the problem, else a `direct` plan of the pin table's kernel (`ValueError` when neither does).
+`dispatch_conv_routed(req, routes, pins)` answers from both opt-in tables, routes first: the route when the route
+table covers the problem, else a `direct` plan of the pin table's kernel (`ValueError` when neither does, or when the
+two tables are of different modes).
+
+A route serves NDHWC requests of the table's arch and, when the table names one, its LLVM flavor, with `algorithm`
+`"auto"` or `"pinned"`; anything else raises `ValueError`. When loading, a `padcopy_halo` or `winograd` row needs a
+bf16 command (the pad copy and the drop-in are bf16), and a named `kernel` must be of its command's direction and dtype.
+The mode's `deterministic` flag is kept on the loaded routes (`ConvRoutes.deterministic`).
 
 `benchmarks/common/conv_route_exec.RouteBinding` binds a plan to device buffers (torch-free; the pinned step is bound
 as `--run-from-cache` binds a cached binary). `benchmarks/common/conv_route_check.py` verifies, determinism-checks and
