@@ -50,13 +50,21 @@ def anySingleArch(jobNameList)
     jobNameList.each { jobName, nodeDetails ->
         def platforms = [:]
         nodeDetails.each { os, archs ->
-            if (archs instanceof Collection && archs.size() > 1)
-                platforms[os] = ["(${archs.join('||')})"]
+            // The machine-config value is not always a Collection (it can be an
+            // array), so instanceof Collection let the three-arch list through.
+            def items = []
+            if (archs instanceof CharSequence)
+                items << archs.toString()
             else
-                platforms[os] = archs
+                archs.each { items << it.toString() }
+            if (items.size() > 1)
+                platforms[os] = ["(${items.join('||')})"]
+            else
+                platforms[os] = items
         }
         collapsed[jobName] = platforms
     }
+    echo "CPU-only agents: ${collapsed}"
     return collapsed
 }
 
@@ -66,10 +74,9 @@ def setupCI(urlJobName, jobNameList, buildCommand, runCI, label)
 
     // Host and MPI builds are CPU-only. Queue one agent, whichever configured
     // architecture is free, instead of one run per architecture.
-    if (label == 'Host' || label == 'MPI')
-        jobNameList = anySingleArch(jobNameList)
+    def nodesForRun = (label == 'Host' || label == 'MPI') ? anySingleArch(jobNameList) : jobNameList
 
-    jobNameList.each
+    nodesForRun.each
     {
         jobName, nodeDetails->
         if (urlJobName == jobName)
