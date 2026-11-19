@@ -187,3 +187,22 @@ def test_step_replay_resolves_a_table_through_dispatch():
                 assert all(" --pad_d 1 " in v["cmd"] for v in cases.values())
             if form == "pad011":
                 assert all(" --pad_d 0 " in v["cmd"] for v in cases.values())
+
+
+def test_the_tables_are_package_data():
+    """A non-editable install ships the tables beside dispatch/conv_pins.py:
+    every JSON file under dispatch/ matches a package-data pattern."""
+    import fnmatch
+    import tomllib
+    from pathlib import Path
+
+    lib = Path(cp.__file__).resolve().parents[1]
+    data = tomllib.loads((lib / "pyproject.toml").read_text())
+    patterns = data["tool"]["setuptools"]["package-data"]["dispatch"]
+    files = [
+        f.relative_to(lib / "dispatch").as_posix()
+        for f in (lib / "dispatch").rglob("*.json")
+    ]
+    assert any(f.startswith("conv_pin_tables/") for f in files)
+    for f in files:
+        assert any(fnmatch.fnmatch(f, p) for p in patterns), f
