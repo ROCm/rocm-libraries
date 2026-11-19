@@ -11,30 +11,7 @@ from rocke.core.arch import ArchTarget
 from rocke.core.arch.mfma_scale import MATRIX_FORMATS
 from rocke.helpers.tiling import make_mma_accumulator_desc
 from rocke.helpers.tiling.register_mapper import RegisterMapper
-
-
-class _IntegerCoordinates:
-    """Execute the registered layout callback's integer arithmetic, without IR."""
-
-    @staticmethod
-    def const_i32(value):
-        return value
-
-    @staticmethod
-    def add(a, b):
-        return a + b
-
-    @staticmethod
-    def mul(a, b):
-        return a * b
-
-    @staticmethod
-    def div(a, b):
-        return a // b
-
-    @staticmethod
-    def mod(a, b):
-        return a % b
+from rocke.tests.lane_maps import lane_placements
 
 
 _CASES = []
@@ -73,11 +50,11 @@ def test_accumulator_descriptor_matches_every_registered_coordinate(
     metadata = atom.dst if result else atom.srcs[2]
     layout = atom.dst_layout() if result else atom.src_layout(2)
     assert desc.register_count == metadata.frag_len
-    for lane in range(atom.wave_size):
-        for slot in range(metadata.frag_len):
-            assert tuple(mapper.matrix_coordinates(lane, slot)) == tuple(
-                layout.coord(_IntegerCoordinates(), lane, slot)
-            )
+    assert [
+        mapper.matrix_coordinates(lane, slot)
+        for lane in range(atom.wave_size)
+        for slot in range(metadata.frag_len)
+    ] == lane_placements(layout, atom.wave_size)
 
 
 def test_gfx1250_profile_is_not_borrowed_for_other_wmma_targets():

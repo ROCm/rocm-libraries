@@ -17,6 +17,7 @@ from rocke.instances.gfx1250.block_scaled_gemm import (
     BlockScaledGemmSpec,
     build_block_scaled_gemm,
 )
+from rocke.tests.lane_maps import lane_placements
 
 _FORMATS = ("fp8e4m3", "bf8e5m2", "fp6e2m3", "fp6e3m2", "fp4e2m1")
 
@@ -72,14 +73,6 @@ def test_legacy_consumer_keeps_contiguous_half_wave_payload(a, b, scale, block):
     )
 
 
-class _Math:
-    const_i32 = staticmethod(lambda value: value)
-    add = staticmethod(lambda a, b: a + b)
-    mul = staticmethod(lambda a, b: a * b)
-    div = staticmethod(lambda a, b: a // b)
-    mod = staticmethod(lambda a, b: a % b)
-
-
 @pytest.mark.parametrize("block", (16, 32))
 def test_native_scale_distribution_matches_actual_atom_layouts(block):
     atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
@@ -101,15 +94,16 @@ def test_native_scale_distribution_matches_actual_atom_layouts(block):
         wave_size=32,
     )
     mapper = RegisterMapper(desc.layout)
-    for lane in range(32):
-        for index in range(count):
-            row, group = atom.a_scale_layout().coord(_Math(), lane, index)
-            b_group, column = atom.b_scale_layout().coord(_Math(), lane, index)
-            assert (
-                tuple(mapper.matrix_coordinates(lane, index))
-                == (row, group)
-                == (column, b_group)
-            )
+    actual = [
+        mapper.matrix_coordinates(lane, index)
+        for lane in range(atom.wave_size)
+        for index in range(count)
+    ]
+    assert actual == lane_placements(atom.a_scale_layout(), atom.wave_size)
+    assert actual == [
+        (column, group)
+        for group, column in lane_placements(atom.b_scale_layout(), atom.wave_size)
+    ]
 
 
 def test_consumer_does_not_bypass_fragment_loads_or_stores():

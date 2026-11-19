@@ -24,13 +24,7 @@ from rocke.helpers.tiling.global_address import (
     storage_displacement,
 )
 from rocke.helpers.tiling.register_mapper import RegisterMapper
-
-
-class _IntegerArithmetic:
-    const_i32 = staticmethod(lambda value: value)
-    mul = staticmethod(lambda a, b: a * b)
-    add = staticmethod(lambda a, b: a + b)
-    div = staticmethod(lambda a, b: a // b)
+from rocke.tests.lane_maps import LaneMapEvaluator
 
 
 @pytest.mark.parametrize("dtype,words", list(product(MATRIX_FORMATS, (8, 16))))
@@ -47,7 +41,7 @@ def test_byte_base_plus_constant_run_offset_matches_logical_coordinates(dtype, w
     unit_bytes = 4 if bits < 8 else 1
     for lane in range(mapper.num_lanes):
         base = tuple(mapper.matrix_coordinates(lane, 0))
-        base_byte = byte_address(_IntegerArithmetic(), runtime, list(base))
+        base_byte = byte_address(LaneMapEvaluator, runtime, list(base))
         for reg in range(0, layout.fragment.count, group):
             coordinate = tuple(mapper.matrix_coordinates(lane, reg))
             delta = tuple(value - start for value, start in zip(coordinate, base))
