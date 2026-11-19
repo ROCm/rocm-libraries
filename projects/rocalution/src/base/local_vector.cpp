@@ -59,12 +59,6 @@ namespace rocalution
     {
         log_debug(this, "LocalVector::~LocalVector()");
 
-        // An unsynced Move*Async() still holds the other backend object
-        if(this->asyncf_ == true)
-        {
-            this->Sync();
-        }
-
         this->Clear();
         delete this->vector_;
     }
@@ -191,6 +185,12 @@ namespace rocalution
     void LocalVector<ValueType>::Clear(void)
     {
         log_debug(this, "LocalVector::Clear()");
+
+        // A pending *Async() transfer still reads or writes the data
+        if(this->asyncf_ == true)
+        {
+            this->Sync();
+        }
 
         this->vector_->Clear();
     }

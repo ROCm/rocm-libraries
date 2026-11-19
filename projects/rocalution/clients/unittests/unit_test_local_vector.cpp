@@ -1380,6 +1380,35 @@ TEST(local_vector_moves, a_vector_destroyed_after_an_async_move_without_sync_fre
     });
 }
 
+TEST(local_vector_moves, clear_during_an_async_move_leaves_the_vector_empty)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const std::vector<T> a = x<T>();
+        for(Backend from : {Backend::Host, Backend::Accelerator})
+        {
+            SCOPED_TRACE(backend_name(from));
+            const Backend to = from == Backend::Host ? Backend::Accelerator : Backend::Host;
+
+            auto v = make_local_vector(from, a);
+            if(to == Backend::Host)
+            {
+                v->MoveToHostAsync();
+            }
+            else
+            {
+                v->MoveToAcceleratorAsync();
+            }
+            v->Clear();
+            v->Sync();
+            EXPECT_EQ(v->GetSize(), 0);
+            EXPECT_EQ(location_of(*v), backend_name(to));
+        }
+    });
+}
+
 // After the device synchronization and before Sync(), reads through operator[] give the
 // entries, and Sync() then leaves the vector on the target backend. Some of these calls
 // copy synchronously, so a missing device synchronization need not fail here.

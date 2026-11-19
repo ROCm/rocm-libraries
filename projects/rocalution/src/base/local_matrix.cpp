@@ -107,6 +107,12 @@ namespace rocalution
     {
         log_debug(this, "LocalMatrix::Clear()", "");
 
+        // A pending *Async() transfer still reads or writes the data
+        if(this->asyncf_ == true)
+        {
+            this->Sync();
+        }
+
         this->matrix_->Clear();
     }
 
