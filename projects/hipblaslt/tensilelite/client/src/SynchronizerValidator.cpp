@@ -3,6 +3,7 @@
 
 #include "SynchronizerValidator.hpp"
 #include "TimingInstrumentation.hpp"
+#include "ClientProblemFactory.hpp"
 
 #include "ResultReporter.hpp"
 
@@ -216,6 +217,15 @@ namespace TensileLite
             }
         }
 
+        ContractionProblem* SynchronizerValidator::deviceProblem(int deviceId) const
+        {
+            if(m_split != nullptr)
+                for(size_t d = 0; d < m_devices->size(); d++)
+                    if((*m_devices)[d]->deviceId == deviceId)
+                        return m_split->sliceProblem(m_problem, d);
+            return m_problem;
+        }
+
         void SynchronizerValidator::checkInputs(char const* stage, CheckTimers const& timers)
         {
             if(!active() || m_problem == nullptr)
@@ -257,7 +267,7 @@ namespace TensileLite
                                       result.grouped[j].Synchronizer,
                                       j);
                     }
-                    else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
+                    else if(auto problem = dynamic_cast<ContractionProblemGemm*>(deviceProblem(device.deviceId)))
                     {
                         auto const& result = dynamic_cast<ContractionInputs const&>(*inputs);
                         checkOnce(device.deviceId, *problem, result.Synchronizer, 0);

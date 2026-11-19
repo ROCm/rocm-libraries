@@ -863,13 +863,30 @@ TEST_P(TestAttentionDenseSavedValues, RefusesAMaskOutsideTheMaskRules)
     expectReadRefusal(read, windowWithoutCausal, "launch value 'sliding_window'");
 
     // A 512-key window over seqlen_q 1536 and seqlen_kv 1024: row 1535 sees (1023, 1535], no
-    // key.
+    // key. gfx950 serves no window, so its reader refuses the plan. gfx942 restores it when
+    // the plan binds no stats output and refuses it with one.
     SavedLaunchInputs keylessRows = valid;
     keylessRows.values["seqlen_q"] = int64_t{1536};
     keylessRows.values["seqlen_kv"] = int64_t{1024};
     keylessRows.values["sliding_window"] = int64_t{512};
-    expectReadRefusal(read, keylessRows, "launch value 'sliding_window'");
-    expectReadRefusal(read, keylessRows, "no key");
+    if(GetParam()->label == "Gfx942")
+    {
+        EXPECT_EQ(read(keylessRows).binding.slidingWindow, 512);
+
+        SavedLaunchInputs keylessRowsWithStats = keylessRows;
+        keylessRowsWithStats.values["stats.uid"] = int64_t{7};
+        expectReadRefusal(read, keylessRowsWithStats, "launch value 'sliding_window'");
+        expectReadRefusal(read, keylessRowsWithStats, "not yet supported with a stats output");
+
+        // One key wider, the plan with stats restores.
+        keylessRowsWithStats.values["sliding_window"] = int64_t{513};
+        EXPECT_EQ(read(keylessRowsWithStats).binding.slidingWindow, 513);
+    }
+    else
+    {
+        expectReadRefusal(read, keylessRows, "launch value 'sliding_window'");
+        expectReadRefusal(read, keylessRows, "this arch serves no sliding window");
+    }
 
     // One key wider and the last row sees the last key.
     SavedLaunchInputs lastRowReaches = keylessRows;

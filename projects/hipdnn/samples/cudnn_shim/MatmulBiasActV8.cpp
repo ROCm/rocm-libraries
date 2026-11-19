@@ -125,12 +125,12 @@ bool runVariant(cudnnHandle_t handle,
         hipdnn_test_sdk::utilities::CpuFpReferenceMatmul::matmul(aTensor, bTensor, cRef);
 
         Tensor<float> biasedRef(cDims);
-        hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<float>::pointwiseCompute(
+        hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
             ReferenceMode::ADD, biasedRef, cRef, biasTensor);
 
         // Writing the activation into an io-typed tensor is the final cast to T.
         Tensor<T> yRef(cDims);
-        hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<T>::pointwiseCompute(
+        hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<T, double>::pointwiseCompute(
             activation.referenceMode, yRef, biasedRef);
 
         const float tolerance

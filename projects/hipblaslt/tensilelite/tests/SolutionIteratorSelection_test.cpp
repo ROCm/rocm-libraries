@@ -7,11 +7,14 @@
 
 #include <gtest/gtest.h>
 
+#include "ClientArgsTestUtils.hpp"
+#include "ClientProblemFactory.hpp"
 #include "ResultReporter.hpp"
 #include "SolutionIterator.hpp"
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionLibrary.hpp>
+#include <Tensile/ContractionProblemPredicates.hpp>
 
 #include <memory>
 #include <string>
@@ -191,4 +194,43 @@ TEST_F(SolutionIteratorSelectionTest, NothingSelectedIsAnErrorWithTheOption)
     ASSERT_TRUE(iterator->moreSolutionsInProblem());
     EXPECT_EQ(iterator->getSolution(), solution1);
     EXPECT_EQ(iterator->error(), 2);
+}
+
+// --split-devices: a solution has to be valid for the slice of every device, not only for the full
+// problem the library was asked about.
+namespace
+{
+    class ExposedIterator : public TopSolutionIterator
+    {
+    public:
+        using TopSolutionIterator::TopSolutionIterator;
+        bool valid(ContractionSolution& solution)
+        {
+            return checkSolution(solution);
+        }
+    };
+}
+
+TEST_F(SolutionIteratorSelectionTest, ASolutionMustBeValidForEverySlice)
+{
+    selector->selection = {solution1};
+    // M = 128 split over two devices is 64 rows each; this solution only takes multiples of 128.
+    solution1->problemPredicate = std::make_shared<Predicates::Contraction::SizeMultiple>(0, 128);
+
+    ClientProblemFactory factory(TestUtils::makeSplitClientArgs({128, 128, 1, 64}, 2, "M"));
+    auto*                full = factory.problems()[0].get();
+
+    ExposedIterator split(library, hardware, 2.0, 1, false, false);
+    split.setReporter(reporter);
+    split.setSplit(&factory);
+    split.preProblem(full);
+    EXPECT_FALSE(split.valid(*solution1));
+
+    // The same solution is fine for the full problem when it is not split, and a solution without
+    // restrictions is fine for every slice.
+    ExposedIterator whole(library, hardware, 2.0, 1, false, false);
+    whole.setReporter(reporter);
+    whole.preProblem(full);
+    EXPECT_TRUE(whole.valid(*solution1));
+    EXPECT_TRUE(split.valid(*solution0));
 }

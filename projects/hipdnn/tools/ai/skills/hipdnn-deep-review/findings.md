@@ -7,7 +7,7 @@ Formats for lane reports and verifier files. Tiers and the M-rules are in
 
 ```markdown
 ID:        <LANE>-p<n>         provisional; the orchestrator assigns the final ID
-Kind:      defect | test-gap | source-claim | process
+Kind:      defect | test-gap | source-claim | process | design
 Tier:      BLOCKING | IMPORTANT | SUGGESTION | FUTURE WORK
 Where:     path:line read from $HEAD, every location involved; $BASE:path:line for removed content
 Expected:  the contract and its source (header, doc, schema, test, PR description, policy rule)
@@ -31,8 +31,10 @@ earlier head. Mark anything not observed directly `[INFERENCE]`. Never write abs
 paths: cite `$EVIDENCE/...`, `$SCRATCH/...` or repository-relative paths.
 
 File a finding only when you can name the input or situation that makes the code or text
-produce a wrong result or decision, and the consequence. Style and preference are not
-findings. At `IMPORTANT` or above, **Proof** holds the reproduction or the quoted
+produce a wrong result or decision, and the consequence. A naming or organization finding
+(a name, a file or layer placement, a helper's grouping) states the mistake a caller or
+maintainer could reasonably make and what in the change leads to it; an interchangeable
+preference is not a finding. At `IMPORTANT` or above, **Proof** holds the reproduction or the quoted
 contradiction and the policy rule it relies on.
 
 ## Proof per kind
@@ -43,6 +45,7 @@ contradiction and the policy rule it relies on.
 | test-gap | A plausible, non-equivalent mutation in the claimed behavior survives the named tests, which pass unmutated; or, when no configuration that builds the claimed code links it into the named tests' binary, that link-graph evidence plus the absence of any registered test that exercises the path (no mutant runs) | The mutation is killed | The tests cannot run, or only skip |
 | source-claim | Every cited `path:line` supports it and no other location contradicts it | A cited or uncited location contradicts it | - |
 | process | The PR text, CI run or label the rule needs is absent or contradicts the claim; for skill or brief text, the cited text lacks or contradicts the requirement | The artifact exists and supports the claim, or the cited text states the requirement | The artifact is not readable |
+| design | The cited contract, commit or discussion supports the claim and the stated cost follows | An RFC, decision or discussion shows the design is intentional | A cited source is not readable |
 
 A `SUGGESTION` or `FUTURE WORK` finding of any kind is verified as a `source-claim` re-read.
 No fix is applied to confirm a defect. A compile failure, a skip or a failure for another
@@ -54,7 +57,8 @@ verify file's directory.
 A verifier returns `CONFIRMED`, `PARTIAL` (a narrower claim holds; restate it), `DOWNGRADED`
 or `UPGRADED` (tier changed, with the reason), `REFUTED` or `UNVERIFIED` (what blocked it).
 `CONFIRMED` and `REFUTED` are equal outcomes: never look for a reason to confirm, and
-correct tier inflation as readily as errors.
+correct tier inflation as readily as errors. The verdict follows the proof alone: a PR thread's
+state or an author's reply never sets it ([report.md](report.md) *Threads*).
 
 A second verifier, who is neither the reporter nor the first verifier, rechecks a `REFUTED`
 verdict on a `BLOCKING` or `IMPORTANT` finding and any verdict whose final tier is on the
@@ -112,6 +116,7 @@ Reason:    <one line>
 Proof:     <command, exit code, log as $EVIDENCE/<relative path>>
 Class:     rerun | text-read | not-exercised   (at a new head)
 Not established: <what the proof does not cover>
+Needs human decision: <question, options, recommendation>   (optional; see lanes/verify.md *Threads*)
 ```
 
 Keep mutation diffs and logs in

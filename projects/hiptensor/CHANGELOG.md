@@ -15,12 +15,18 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 * Changed `hiptensorPermute` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when the output tensor's data type differs from the input tensor's. Previously the mismatch passed validation and the call failed with `HIPTENSOR_STATUS_INTERNAL_ERROR` because no kernel matched.
 * Changed `hiptensorElementwiseTrinaryExecute` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when the data type of D differs from that of C, matching `hiptensorElementwiseBinaryExecute`. Previously the mismatch failed later with `HIPTENSOR_STATUS_INTERNAL_ERROR`.
 * Changed the `hiptensor::hiptensor` CMake target to propagate `hip::host` instead of `hip::device`. Code that links hipTensor is no longer compiled as HIP for every GPU target by default. Projects that compile their own HIP kernels must link `hip::device` themselves.
+* Changed the build to require only the Composable Kernel headers. hipTensor uses the `headers` component of the Composable Kernel package when available, so Composable Kernel can be built with `-DCK_HEADERS_ONLY=ON` without compiling any instance library, and otherwise falls back to the include directories of `device_other_operations`.
 
 ### Optimized
 * Reduced build time by compiling library, test, and sample sources that define no GPU kernels for the host only, and by removing the unused CPU reference implementations from `libhiptensor.so`. They are now built only into the test suite's host reference library.
 
 ### Resolved issues
+* Fixed `hiptensorDestroy` aborting with a double free, or corrupting the heap, after `hiptensorHandleWritePlanCacheToFile` was called on a handle whose plan cache held entries.
+* Fixed a full plan cache growing past its size limit when a new problem was added, and evicting its least recently used entry when an existing problem was updated instead. A new entry now evicts the least recently used one, and updating an existing entry evicts nothing.
 * Fixed `hiptensorElementwiseBinaryExecute` and `hiptensorReduce` treating the alpha, beta, and gamma scalars as 0 when the compute descriptor is `HIPTENSOR_COMPUTE_DESC_16BF`.
+* Fixed hipTensor terminating the application while the library was loading, before `main()`, when the current GPU was unsupported or a HIP device query failed. The device is now checked when `hiptensorCreate` is called on the calling thread's current device: it returns `HIPTENSOR_STATUS_ARCH_MISMATCH` for an unsupported GPU and `HIPTENSOR_STATUS_HIP_ERROR` when HIP initialization or the device query fails, and leaves the handle set to `nullptr`. The error log says whether the architecture or the warp size was rejected. `hiptensorCreate` returns `HIPTENSOR_STATUS_INVALID_VALUE` when `handle` is `nullptr`. hipTensor no longer calls `exit()` when a HIP call fails.
+* Fixed complex contractions reporting a device out-of-memory condition as an unsupported problem. `hiptensorCreatePlan` and `hiptensorContract` now return `HIPTENSOR_STATUS_ALLOC_FAILED` when the scratch buffers for the real and imaginary parts can't be allocated.
+* Fixed `hiptensorReduce`, `hiptensorPermute`, `hiptensorElementwiseBinaryExecute`, and `hiptensorElementwiseTrinaryExecute` launching kernels on the wrong GPU when the current device differs from the one the handle was created on. Like the contraction APIs, they now return `HIPTENSOR_STATUS_ARCH_MISMATCH` in that case.
 
 ## hipTensor 2.5.0 for ROCm 10.2
 

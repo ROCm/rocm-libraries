@@ -549,7 +549,7 @@ How many `miopen*` symbols each library exports, and what form (`nm -D --defined
 | `libMIOpen.so.1` (wrapper) | 263 | 0 | 263 |
 | `libMIOpen_private.so.1` | 4 † | 263 | 267 |
 
-† The 4 non-renamed survivors in `libMIOpen_private.so.1` are: `miopenConvolutionABBackwardWeightsGetWorkSpaceSize`, `miopenHiddenGetConvolutionFindMode`, `miopenHiddenSetConvolutionFindMode`, `miopen_sqlite3_memvfs_init`. They are not in the rename header and are unrelated to the wrapper hop.
+† The 4 non-renamed survivors in `libMIOpen_private.so.1` are: `miopenConvolutionABBackwardWeightsGetWorkSpaceSize`, `miopenHiddenGetConvolutionFindMode`, `miopenHiddenSetConvolutionFindMode`, `miopen_sqlite3_memvfs_init`. They are not in the rename header and are unrelated to the wrapper hop. This is the prototype's state: the production build now also renames and re-exports the first three, and the three `miopenConvolution*GetWorkSpaceSizeRange` functions, so a bare `-lMIOpen` link resolves them (RFC 0001 §4.2). `miopen_sqlite3_memvfs_init` is not a `miopen[A-Z]` C API entry point and is not in the symbol baseline.
 
 Undefined `miopen*` symbols in each synthetic plugin (`nm -D --undefined-only`):
 
@@ -830,8 +830,8 @@ Native MIOpen drops to 0.213 s on the second process because it reuses its **per
 
 ## Concerns found
 
-1. **No persistent cache for the redirect (highest impact).** The hipDNN plan is cached per process only. Native MIOpen persists compiled kernels to disk and so collapses repeat runs to 0.2 s; the redirect re-pays cold setup every process and stays ~4 s. Cross-process persistence (or enabling/sharing hipDNN's own kernel cache) is needed before the redirect is competitive on repeated invocations. **This is the headline regression and the gating item for RFC §7 Phase 1 exit criterion 4 (cold-start vs warm-start) and Phase 4 perf.**
-2. **Plan-build time is unstable** (1.3 ms on one cold run, 3.9 s on another). The multi-second case implies kernel compilation / autotuning happening inside plan finalize on some runs; the attribution/trigger needs to be understood.
+1. **No persistent cache for the redirect (highest impact).** The hipDNN plan is cached per process only. Native MIOpen persists compiled kernels to disk and so collapses repeat runs to 0.2 s; the redirect re-pays cold setup every process and stays ~4 s. Cross-process persistence (or enabling/sharing hipDNN's own kernel cache) is needed before the redirect is competitive on repeated invocations. **This is the headline regression and the gating item for RFC §7 Phase 1 exit criterion 4 (cold-start vs warm-start) and Phase 4 perf.** *(Fixed since: the regression no longer occurs; see the update below.)*
+2. **Plan-build time is unstable** (1.3 ms on one cold run, 3.9 s on another). The multi-second case implies kernel compilation / autotuning happening inside plan finalize on some runs; the attribution/trigger needs to be understood. *(On the current build the first-call time follows MIOpen kernel-cache state; see the update below.)*
 3. **Driver benchmarking blind spot.** GPU kernel time / GFLOPs report 0.000 / inf under the redirect, so standard driver perf reporting is unusable; only the shim timers work today.
 4. **Limited coverage.** Conv forward only, identity scaling, group=1. Because the path falls back silently on any unsupported case, "redirect enabled" does not guarantee the redirect was actually taken — future work should surface when fallback occurs. (Note: this prototype's silent fallback on *any* hipDNN failure is broader than the RFC §6.1 design, which propagates per-call hipDNN errors rather than absorbing them; Phase 2 must reconcile the two.)
 5. **Correctness not yet verified.** These runs used `-V 0` (no numerical verification), so the hipDNN path was only proven to execute, not to produce correct results. Follow-up: re-run with verification enabled (`-V 1`) before relying on the path.
@@ -840,4 +840,21 @@ Native MIOpen drops to 0.213 s on the second process because it reuses its **per
 
 - **Per handle:** +~2.1 ms cold create, +~1 µs destroy; negligible thereafter.
 - **Per conv (warm):** ~27 µs host-side overhead per call (native GPU kernel is ~17 µs; not directly comparable, but the redirect adds modest steady-state cost).
-- **Cold start / repeated processes:** dominated by the non-persisted plan build (up to ~3.9 s), keeping warm-process wall time at ~4 s vs. native 0.2 s. This is the headline regression for the redirect as currently implemented and the main item to resolve in the RFC.
+- **Cold start / repeated processes:** dominated by the non-persisted plan build (up to ~3.9 s), keeping warm-process wall time at ~4 s vs. native 0.2 s. This is the headline regression for the redirect as currently implemented and the main item to resolve in the RFC. *(Fixed since: see the update below.)*
+
+## Update: cold start re-measured on the wrapper build
+
+This regression was real in the prototype and has since been fixed; the change that fixed it was not identified. The numbers below show the current state. Flag-ON build of `develop` (commit `1a33436bd64`), gfx90a (MI210), same convolution as above (`-i 100 -t 1`), forwarding `enabled` vs `disabled`. Each pair runs both modes back to back in random order, in a fresh process; wall time is for the whole process. Two batches, shared and busy node, OS file cache warm.
+
+| Fresh process, `MIOpenDriver` | Pairs | `disabled` median | `enabled` median | Ratio | 95% CI |
+| --- | --- | --- | --- | --- | --- |
+| Warm kernel caches | 80 | 1031 ms | 1044 ms | 1.013 | 1.006–1.018 |
+| Empty kernel caches | 40 | 6265 ms | 6333 ms | 1.011 | 0.997–1.021 |
+
+A timing program that calls the public API gave 1.014 (warm) and 1.008 (empty), with upper bounds ≤ 1.029. Numerical verification (`-V 1`) passed in both modes; the log shows `miopenConvolutionForward` routed to hipDNN.
+
+- **Cost of forwarding:** ~13–15 ms on the first forwarded call (hipDNN backend and MIOpen provider plugin load, plan build) and ~7 µs per later call.
+- **No double compilation:** with empty caches the forwarded plan build takes ~4.97 s, the same as native Find (~4.95 s), and whole-process times match. The same kernels are compiled once and shared through MIOpen's cache.
+- **Plan-build instability (concern 2):** the first forwarded call takes ~5 s with an empty kernel cache (4.91–5.41 s over 30 runs) and 15–17 ms with a warm one. The prototype's spread follows cache state. The 1.3 ms figure was not reproduced; the first-call number includes backend load and the run itself.
+- **No cross-process plan cache is needed** (concern 1 closed for this workload).
+- **Not shown:** the earlier "one-time device-library load" explanation was neither confirmed nor ruled out (HIP init is ~47 ms in both modes). A forwarded call with empty caches does the work of a Find, so it costs ~5.7× native immediate mode there (immediate-mode calls are not forwarded). Not covered: other data types, directions, fused paths, other architectures, a disk-cold start, and a flag-OFF baseline.

@@ -148,6 +148,11 @@ For more information, run the command with the ``--help`` option. The output of 
    --help |-h                         Produces this help message
    --version <value>                  Prints the version number
 
+.. note::
+
+   On Windows, leave ``--use_gpu_timer`` off. The HIP runtime's Windows backend does not time event
+   pairs correctly, so ``hipEventElapsedTime`` does not measure the launches.
+
 
 Building clients with prebuilt libraries
 ========================================

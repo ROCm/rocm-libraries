@@ -15,6 +15,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnMiopenHandle.hpp"
+#include "engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.hpp"
 #include "engines/plans/MiopenBatchnormPlanBuilder.hpp"
 
 #include "mocks/MockHipdnnMiopenContext.hpp"
@@ -75,6 +76,28 @@ protected:
     std::unique_ptr<HipdnnMiopenHandle> _dummyHandle;
     MockEngineConfig _mockEngineConfig;
 };
+
+TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableMatchesIsGraphApplicable)
+{
+    auto servedBuilder
+        = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
+    const GraphWrapper served(servedBuilder.GetBufferPointer(), servedBuilder.GetSize());
+    EXPECT_EQ(_planBuilder.isApplicable(*_dummyHandle, served),
+              MiopenBatchnormPlanBuilder::isGraphApplicable(served));
+    EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, served));
+
+    auto declinedBuilder
+        = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(
+            {150528, 50176, 224, 1},
+            {1, 3, 224, 224},
+            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+            /*overrideShapeEnabled=*/true);
+    const GraphWrapper declined(declinedBuilder.GetBufferPointer(), declinedBuilder.GetSize());
+    EXPECT_EQ(_planBuilder.isApplicable(*_dummyHandle, declined),
+              MiopenBatchnormPlanBuilder::isGraphApplicable(declined));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, declined));
+}
 
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForGraphWithUnsupportedNodeCount)
 {
@@ -2254,4 +2277,438 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanFor3dNclFusedThreeNodeGr
 
     EXPECT_NO_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
+}
+
+namespace
+{
+
+namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+
+// Running-statistics roles of a batchnorm training node, one bit each.
+constexpr unsigned PREV_MEAN = 1U << 0;
+constexpr unsigned PREV_VAR = 1U << 1;
+constexpr unsigned MOMENTUM = 1U << 2;
+constexpr unsigned NEXT_MEAN = 1U << 3;
+constexpr unsigned NEXT_VAR = 1U << 4;
+constexpr unsigned ALL_RUNNING_STATS = PREV_MEAN | PREV_VAR | MOMENTUM | NEXT_MEAN | NEXT_VAR;
+
+// Single-node batchnorm training graph whose running-statistics roles and saved
+// mean / inv_variance outputs are selected independently.
+flatbuffers::FlatBufferBuilder createBatchnormTrainingGraphWithStats(unsigned runningStatsMask,
+                                                                     bool saveMean,
+                                                                     bool saveInvVariance)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors;
+
+    const std::vector<int64_t> dims = {1, 3, 14, 14};
+    const std::vector<int64_t> strides = {588, 196, 14, 1};
+    const std::vector<int64_t> derivedDims = {1, 3, 1, 1};
+    const std::vector<int64_t> derivedStrides = {3, 1, 1, 1};
+    const std::vector<int64_t> scalarDims = {1};
+
+    const auto addTensor = [&](int64_t uid,
+                               const char* name,
+                               const std::vector<int64_t>& tensorStrides,
+                               const std::vector<int64_t>& tensorDims) {
+        tensors.push_back(fb::CreateTensorAttributesDirect(
+            builder, uid, name, fb::DataType::FLOAT, &tensorStrides, &tensorDims));
+    };
+    const auto addScalar = [&](int64_t uid, const char* name, float value) {
+        const fb::Float32Value scalar(value);
+        tensors.push_back(fb::CreateTensorAttributesDirect(builder,
+                                                           uid,
+                                                           name,
+                                                           fb::DataType::FLOAT,
+                                                           &scalarDims,
+                                                           &scalarDims,
+                                                           false,
+                                                           fb::TensorValue::Float32Value,
+                                                           builder.CreateStruct(scalar).Union()));
+    };
+    const auto optionalUid = [](bool present, int64_t uid) {
+        return present ? flatbuffers::Optional<int64_t>(uid) : flatbuffers::nullopt;
+    };
+
+    addTensor(1, "x", strides, dims);
+    addTensor(2, "y", strides, dims);
+    addTensor(3, "scale", derivedStrides, derivedDims);
+    addTensor(4, "bias", derivedStrides, derivedDims);
+    addScalar(5, "epsilon", 1e-5f);
+
+    if(saveMean)
+    {
+        addTensor(6, "mean", derivedStrides, derivedDims);
+    }
+    if(saveInvVariance)
+    {
+        addTensor(7, "inv_variance", derivedStrides, derivedDims);
+    }
+    if((runningStatsMask & PREV_MEAN) != 0U)
+    {
+        addTensor(8, "prev_running_mean", derivedStrides, derivedDims);
+    }
+    if((runningStatsMask & PREV_VAR) != 0U)
+    {
+        addTensor(9, "prev_running_variance", derivedStrides, derivedDims);
+    }
+    if((runningStatsMask & MOMENTUM) != 0U)
+    {
+        addScalar(10, "momentum", 0.1f);
+    }
+    if((runningStatsMask & NEXT_MEAN) != 0U)
+    {
+        addTensor(11, "next_running_mean", derivedStrides, derivedDims);
+    }
+    if((runningStatsMask & NEXT_VAR) != 0U)
+    {
+        addTensor(12, "next_running_variance", derivedStrides, derivedDims);
+    }
+
+    const auto attributes
+        = fb::CreateBatchnormAttributes(builder,
+                                        1,
+                                        3,
+                                        4,
+                                        5,
+                                        0,
+                                        optionalUid((runningStatsMask & PREV_MEAN) != 0U, 8),
+                                        optionalUid((runningStatsMask & PREV_VAR) != 0U, 9),
+                                        optionalUid((runningStatsMask & MOMENTUM) != 0U, 10),
+                                        2,
+                                        optionalUid(saveMean, 6),
+                                        optionalUid(saveInvVariance, 7),
+                                        optionalUid((runningStatsMask & NEXT_MEAN) != 0U, 11),
+                                        optionalUid((runningStatsMask & NEXT_VAR) != 0U, 12));
+
+    std::vector<flatbuffers::Offset<fb::Node>> nodes;
+    nodes.push_back(fb::CreateNodeDirect(builder,
+                                         "batchnorm_training",
+                                         fb::DataType::FLOAT,
+                                         fb::NodeAttributes::BatchnormAttributes,
+                                         attributes.Union()));
+
+    builder.Finish(fb::CreateGraphDirect(builder,
+                                         "test",
+                                         fb::DataType::FLOAT,
+                                         fb::DataType::HALF,
+                                         fb::DataType::BFLOAT16,
+                                         &tensors,
+                                         &nodes));
+    return builder;
+}
+
+struct BnTrainingStatsParam
+{
+    unsigned runningStatsMask;
+    bool saveMean;
+    bool saveInvVariance;
+};
+
+std::string bnTrainingStatsParamName(const ::testing::TestParamInfo<BnTrainingStatsParam>& info)
+{
+    const auto& p = info.param;
+    const auto role = [&](unsigned bit, const char* name) {
+        return std::string((p.runningStatsMask & bit) != 0U ? "_" : "_No") + name;
+    };
+    return role(PREV_MEAN, "PrevMean") + role(PREV_VAR, "PrevVar") + role(MOMENTUM, "Momentum")
+           + role(NEXT_MEAN, "NextMean") + role(NEXT_VAR, "NextVar")
+           + (p.saveMean ? "_SaveMean" : "_NoSaveMean")
+           + (p.saveInvVariance ? "_SaveInvVar" : "_NoSaveInvVar");
+}
+
+std::vector<BnTrainingStatsParam> allBnTrainingStatsParams()
+{
+    std::vector<BnTrainingStatsParam> params;
+    for(unsigned mask = 0; mask <= ALL_RUNNING_STATS; ++mask)
+    {
+        for(const bool saveMean : {false, true})
+        {
+            for(const bool saveInvVariance : {false, true})
+            {
+                params.push_back({mask, saveMean, saveInvVariance});
+            }
+        }
+    }
+    return params;
+}
+
+enum class BnSingleNodeMode
+{
+    INFERENCE,
+    INFERENCE_WITH_VARIANCE,
+    BACKWARD,
+    TRAINING,
+};
+
+struct BnVirtualRoleParam
+{
+    BnSingleNodeMode mode;
+    int64_t uid;
+    const char* role;
+};
+
+const char* modeName(BnSingleNodeMode mode)
+{
+    switch(mode)
+    {
+    case BnSingleNodeMode::INFERENCE:
+        return "Inference";
+    case BnSingleNodeMode::INFERENCE_WITH_VARIANCE:
+        return "InferenceWithVariance";
+    case BnSingleNodeMode::BACKWARD:
+        return "Backward";
+    case BnSingleNodeMode::TRAINING:
+        return "Training";
+    default:
+        return "Unknown";
+    }
+}
+
+flatbuffers::FlatBufferBuilder createSingleNodeGraph(BnSingleNodeMode mode)
+{
+    namespace utils = hipdnn_test_sdk::utilities;
+    switch(mode)
+    {
+    case BnSingleNodeMode::INFERENCE:
+        return utils::createValidBatchnormInferenceGraph();
+    case BnSingleNodeMode::INFERENCE_WITH_VARIANCE:
+        return utils::createValidBatchnormWithVarianceInferenceGraph();
+    case BnSingleNodeMode::BACKWARD:
+        return utils::createValidBatchnormBwdGraph();
+    case BnSingleNodeMode::TRAINING:
+        return utils::createValidBatchnormFwdTrainingGraph();
+    default:
+        throw std::logic_error("unknown batchnorm mode");
+    }
+}
+
+// Returns the graph with one tensor flagged virtual; a negative uid leaves the graph unchanged.
+flatbuffers::FlatBufferBuilder createSingleNodeGraphWithVirtualTensor(BnSingleNodeMode mode,
+                                                                      int64_t virtualUid)
+{
+    return hipdnn_test_sdk::utilities::mutateGraph(createSingleNodeGraph(mode),
+                                                   [virtualUid](fb::GraphT& graph) {
+                                                       for(auto& tensor : graph.tensors)
+                                                       {
+                                                           if(tensor->uid == virtualUid)
+                                                           {
+                                                               tensor->virtual_ = true;
+                                                           }
+                                                       }
+                                                   });
+}
+
+// Every tensor role the single-node plan reads or writes. Uids follow the test-sdk graph helpers.
+const std::vector<BnVirtualRoleParam>& singleNodeVirtualRoles()
+{
+    static const std::vector<BnVirtualRoleParam> s_roles = {
+        {BnSingleNodeMode::INFERENCE, 1, "X"},
+        {BnSingleNodeMode::INFERENCE, 2, "Y"},
+        {BnSingleNodeMode::INFERENCE, 3, "Scale"},
+        {BnSingleNodeMode::INFERENCE, 4, "Bias"},
+        {BnSingleNodeMode::INFERENCE, 5, "Mean"},
+        {BnSingleNodeMode::INFERENCE, 6, "InvVariance"},
+        {BnSingleNodeMode::INFERENCE_WITH_VARIANCE, 1, "X"},
+        {BnSingleNodeMode::INFERENCE_WITH_VARIANCE, 2, "Y"},
+        {BnSingleNodeMode::INFERENCE_WITH_VARIANCE, 3, "Scale"},
+        {BnSingleNodeMode::INFERENCE_WITH_VARIANCE, 4, "Bias"},
+        {BnSingleNodeMode::INFERENCE_WITH_VARIANCE, 5, "Mean"},
+        {BnSingleNodeMode::INFERENCE_WITH_VARIANCE, 6, "Variance"},
+        {BnSingleNodeMode::BACKWARD, 1, "X"},
+        {BnSingleNodeMode::BACKWARD, 2, "Dy"},
+        {BnSingleNodeMode::BACKWARD, 3, "Dx"},
+        {BnSingleNodeMode::BACKWARD, 4, "Scale"},
+        {BnSingleNodeMode::BACKWARD, 5, "Dscale"},
+        {BnSingleNodeMode::BACKWARD, 6, "Dbias"},
+        {BnSingleNodeMode::BACKWARD, 7, "Mean"},
+        {BnSingleNodeMode::BACKWARD, 8, "InvVariance"},
+        {BnSingleNodeMode::TRAINING, 1, "X"},
+        {BnSingleNodeMode::TRAINING, 2, "Y"},
+        {BnSingleNodeMode::TRAINING, 3, "Scale"},
+        {BnSingleNodeMode::TRAINING, 4, "Bias"},
+        {BnSingleNodeMode::TRAINING, 6, "SavedMean"},
+        {BnSingleNodeMode::TRAINING, 7, "SavedInvVariance"},
+    };
+    return s_roles;
+}
+
+} // namespace
+
+// The single-node batchnorm plan serves no running statistics, and saved mean / inv_variance
+// only as a pair; anything else would be dropped silently at execute time, so the builder must
+// decline it.
+class TestMiopenBatchnormPlanBuilderTrainingStats
+    : public ::testing::TestWithParam<BnTrainingStatsParam>
+{
+};
+
+TEST_P(TestMiopenBatchnormPlanBuilderTrainingStats, ServesOnlyGraphsWhoseStatsThePlanHonours)
+{
+    const auto& p = GetParam();
+    auto builder
+        = createBatchnormTrainingGraphWithStats(p.runningStatsMask, p.saveMean, p.saveInvVariance);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    const bool planHonoursStats = p.runningStatsMask == 0U && p.saveMean == p.saveInvVariance;
+
+    EXPECT_EQ(MiopenBatchnormPlanBuilder::isGraphApplicable(graph), planHonoursStats);
+}
+
+// The training builder serves no running statistics, or the complete set together with the
+// saved mean and inverse variance: with running statistics the plan calls the MIOpen API that
+// requires the saved-statistics descriptors.
+TEST_P(TestMiopenBatchnormPlanBuilderTrainingStats,
+       TrainingBuilderServesOnlyCompleteOrNoRunningStats)
+{
+    const auto& p = GetParam();
+    auto builder
+        = createBatchnormTrainingGraphWithStats(p.runningStatsMask, p.saveMean, p.saveInvVariance);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    const bool planHonoursStats
+        = (p.runningStatsMask == 0U && p.saveMean == p.saveInvVariance)
+          || (p.runningStatsMask == ALL_RUNNING_STATS && p.saveMean && p.saveInvVariance);
+
+    EXPECT_EQ(MiopenBatchnormFwdTrainingPlanBuilder::isGraphApplicable(graph), planHonoursStats);
+}
+
+INSTANTIATE_TEST_SUITE_P(AllRunningStatsAndSavedStatsSubsets,
+                         TestMiopenBatchnormPlanBuilderTrainingStats,
+                         ::testing::ValuesIn(allBnTrainingStatsParams()),
+                         bnTrainingStatsParamName);
+
+class TestMiopenBatchnormPlanBuilderVirtualRole
+    : public ::testing::TestWithParam<BnVirtualRoleParam>
+{
+};
+
+// The single-node plans execute against caller-supplied device buffers, which a virtual
+// tensor never has.
+TEST_P(TestMiopenBatchnormPlanBuilderVirtualRole, DeclinesVirtualTensor)
+{
+    const auto& p = GetParam();
+
+    auto servedBuilder = createSingleNodeGraphWithVirtualTensor(p.mode, -1);
+    const GraphWrapper served(servedBuilder.GetBufferPointer(), servedBuilder.GetSize());
+    ASSERT_TRUE(MiopenBatchnormPlanBuilder::isGraphApplicable(served));
+
+    auto virtualBuilder = createSingleNodeGraphWithVirtualTensor(p.mode, p.uid);
+    const GraphWrapper graph(virtualBuilder.GetBufferPointer(), virtualBuilder.GetSize());
+    EXPECT_FALSE(MiopenBatchnormPlanBuilder::isGraphApplicable(graph));
+}
+
+INSTANTIATE_TEST_SUITE_P(EveryRolePerMode,
+                         TestMiopenBatchnormPlanBuilderVirtualRole,
+                         ::testing::ValuesIn(singleNodeVirtualRoles()),
+                         [](const ::testing::TestParamInfo<BnVirtualRoleParam>& info) {
+                             return std::string(modeName(info.param.mode)) + "_" + info.param.role;
+                         });
+
+namespace
+{
+
+constexpr int64_t SAVED_MEAN_UID = 6;
+constexpr int64_t SAVED_INV_VARIANCE_UID = 7;
+
+// A single-node training graph (saved mean uid 6, saved inv_variance uid 7) whose saved tensors
+// are flagged virtual independently.
+flatbuffers::FlatBufferBuilder
+    createSavedPairGraph(unsigned runningStatsMask, bool virtualMean, bool virtualInvVariance)
+{
+    return hipdnn_test_sdk::utilities::mutateGraph(
+        createBatchnormTrainingGraphWithStats(runningStatsMask, true, true),
+        [virtualMean, virtualInvVariance](fb::GraphT& graph) {
+            for(auto& tensor : graph.tensors)
+            {
+                if((tensor->uid == SAVED_MEAN_UID && virtualMean)
+                   || (tensor->uid == SAVED_INV_VARIANCE_UID && virtualInvVariance))
+                {
+                    tensor->virtual_ = true;
+                }
+            }
+        });
+}
+
+} // namespace
+
+// A saved mean / inv_variance pair that is virtual and unconsumed is "saved statistics not
+// requested" and is served; exactly one virtual tensor, running statistics, or a fused
+// activation stay declined.
+class TestMiopenBatchnormSavedPairVirtual : public ::testing::Test
+{
+};
+
+TEST_F(TestMiopenBatchnormSavedPairVirtual, SingleNodeBuilderServesBothVirtual)
+{
+    auto builder = createSavedPairGraph(0U, true, true);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(MiopenBatchnormPlanBuilder::isGraphApplicable(graph));
+}
+
+TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderServesBothVirtual)
+{
+    auto builder = createSavedPairGraph(0U, true, true);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(MiopenBatchnormFwdTrainingPlanBuilder::isGraphApplicable(graph));
+}
+
+TEST_F(TestMiopenBatchnormSavedPairVirtual, SingleNodeBuilderDeclinesOnlyMeanVirtual)
+{
+    auto builder = createSavedPairGraph(0U, true, false);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(MiopenBatchnormPlanBuilder::isGraphApplicable(graph));
+}
+
+TEST_F(TestMiopenBatchnormSavedPairVirtual, SingleNodeBuilderDeclinesOnlyInvVarianceVirtual)
+{
+    auto builder = createSavedPairGraph(0U, false, true);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(MiopenBatchnormPlanBuilder::isGraphApplicable(graph));
+}
+
+TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderDeclinesOnlyMeanVirtual)
+{
+    auto builder = createSavedPairGraph(0U, true, false);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(MiopenBatchnormFwdTrainingPlanBuilder::isGraphApplicable(graph));
+}
+
+TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderDeclinesOnlyInvVarianceVirtual)
+{
+    auto builder = createSavedPairGraph(0U, false, true);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(MiopenBatchnormFwdTrainingPlanBuilder::isGraphApplicable(graph));
+}
+
+TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderDeclinesBothVirtualWithRunningStats)
+{
+    auto builder = createSavedPairGraph(ALL_RUNNING_STATS, true, true);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(MiopenBatchnormFwdTrainingPlanBuilder::isGraphApplicable(graph));
+}
+
+TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderDeclinesBothVirtualWithFusedActivation)
+{
+    auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+        hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(),
+        [](fb::GraphT& graph) {
+            for(auto& tensor : graph.tensors)
+            {
+                if(tensor->name == "mean" || tensor->name == "inv_variance")
+                {
+                    tensor->virtual_ = true;
+                }
+            }
+        });
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(MiopenBatchnormFwdTrainingPlanBuilder::isGraphApplicable(graph));
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
 
 #include "test_common.hpp"
 #include "test_rocrand_common.hpp"
+#include "test_rocrand_sobol_equidistribution.hpp"
 #include <rocrand/rocrand.h>
 
 #include <rng/sobol.hpp>
@@ -657,6 +658,101 @@ TYPED_TEST_P(sobol_qrng_tests, continuity_test)
     }
 }
 
+// Algebraic check of the generator matrix over GF(2):
+// Each dimension's generator matrix is recovered from generated values, then checked for
+// the condition that makes the dimension a (0, 1)-sequence: every leading m x m submatrix
+// is nonsingular over GF(2).
+TYPED_TEST_P(sobol_qrng_tests, generator_matrix_test)
+{
+    using generator_t = typename TestFixture::generator_t;
+    using constant_t  = typename TestFixture::constant_t;
+
+    constexpr unsigned int dimensions = generator_t::is_scrambled ? SCRAMBLED_SOBOL_DIM : SOBOL_DIM;
+    constexpr unsigned int bits       = sizeof(constant_t) * 8;
+
+    std::vector<constant_t> direction_vectors;
+    std::vector<constant_t> scramble_constants;
+    ASSERT_NO_FATAL_FAILURE(
+        (rocrand_test::sobol::recover_direction_vectors<generator_t, constant_t>(
+            dimensions,
+            direction_vectors,
+            scramble_constants)));
+
+    for(unsigned int d = 0; d < dimensions; d++)
+    {
+        const auto         matrix = rocrand_test::sobol::generator_matrix(direction_vectors.data()
+                                                                  + static_cast<size_t>(d) * bits);
+        const unsigned int m      = rocrand_test::sobol::first_singular_leading_minor(matrix);
+        ASSERT_EQ(m, 0u) << "dimension " << d << " is not equidistributed: the leading " << m
+                         << " x " << m << " submatrix of its generator matrix is singular, so its"
+                         << " first 2^" << m << " values do not cover every " << m
+                         << "-bit prefix exactly once";
+    }
+}
+
+// The scrambled generators must apply a Matousek scramble to the Joe-Kuo direction vectors: a
+// linear matrix scramble C -> L * C with L unit lower triangular, plus a per-dimension digital
+// shift XORed onto the output. L being unit lower triangular is what keeps the leading minors
+// nonsingular.
+TYPED_TEST_P(sobol_qrng_tests, linear_matrix_scramble_test)
+{
+    using generator_t = typename TestFixture::generator_t;
+    using constant_t  = typename TestFixture::constant_t;
+
+    constexpr unsigned int dimensions = 1024;
+    constexpr unsigned int bits       = sizeof(constant_t) * 8;
+
+    std::vector<constant_t> direction_vectors;
+    std::vector<constant_t> scramble_constants;
+    ASSERT_NO_FATAL_FAILURE(
+        (rocrand_test::sobol::recover_direction_vectors<generator_t, constant_t>(
+            dimensions,
+            direction_vectors,
+            scramble_constants)));
+
+    const constant_t* unscrambled;
+    ASSERT_NO_FATAL_FAILURE(rocrand_test::sobol::get_unscrambled_direction_vectors(&unscrambled));
+
+    for(unsigned int d = 0; d < dimensions; d++)
+    {
+        SCOPED_TRACE(testing::Message() << "with dimension = " << d);
+
+        const auto scrambled = rocrand_test::sobol::generator_matrix(
+            direction_vectors.data() + static_cast<size_t>(d) * bits);
+        const auto plain
+            = rocrand_test::sobol::generator_matrix(unscrambled + static_cast<size_t>(d) * bits);
+
+        rocrand_test::sobol::gf2_matrix<constant_t> plain_inverse;
+        ASSERT_TRUE(rocrand_test::sobol::invert(plain, plain_inverse))
+            << "the unscrambled generator matrix is singular";
+
+        const auto scramble = rocrand_test::sobol::multiply(scrambled, plain_inverse);
+        ASSERT_TRUE(rocrand_test::sobol::is_unit_lower_triangular(scramble))
+            << "the scrambled direction vectors are not a linear matrix scramble of the"
+            << " unscrambled ones";
+
+        if constexpr(generator_t::is_scrambled)
+        {
+            // The digital shift is what the scrambling constant contributes, and it is the only
+            // reason an unscrambled sequence starts at zero while a scrambled one does not.
+            EXPECT_NE(scramble_constants[d], constant_t{})
+                << "no digital shift was applied to this dimension";
+        }
+        else
+        {
+            // An unscrambled generator starts at zero and must reproduce the Joe-Kuo vectors
+            // exactly, which also confirms that the recovery above is truthful.
+            EXPECT_EQ(scramble_constants[d], constant_t{});
+            for(unsigned int j = 0; j < bits; j++)
+            {
+                ASSERT_EQ(direction_vectors[static_cast<size_t>(d) * bits + j],
+                          unscrambled[static_cast<size_t>(d) * bits + j])
+                    << "recovered direction vector " << j << " does not match the table";
+            }
+        }
+    }
+}
+
 REGISTER_TYPED_TEST_SUITE_P(sobol_qrng_tests,
                             init_test,
                             uniform_uint_test,
@@ -673,6 +769,8 @@ REGISTER_TYPED_TEST_SUITE_P(sobol_qrng_tests,
                             discard_test,
                             discard_stride_test,
                             offsets_test,
-                            continuity_test);
+                            continuity_test,
+                            generator_matrix_test,
+                            linear_matrix_scramble_test);
 
 #endif // ROCRAND_TEST_INTERNAL_TEST_ROCRAND_SOBOL_QRNG_HPP_

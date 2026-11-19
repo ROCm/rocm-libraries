@@ -494,12 +494,13 @@ TEST(aux_handle_test, set_uniform_summation_order_default_matches_device)
     ASSERT_EQ(hipGetDevice(&device), hipSuccess);
     ASSERT_EQ(hipGetDeviceProperties(&props, device), hipSuccess);
     const std::string arch = props.gcnArchName;
-    const bool        rdna
-        = arch.find("gfx11") != std::string::npos || arch.find("gfx120") != std::string::npos;
+    const bool        default_off = arch.find("gfx11") != std::string::npos
+                             || arch.find("gfx120") != std::string::npos
+                             || arch.find("gfx942") != std::string::npos;
 
     int32_t value = -42;
     ASSERT_EQ(hipblasLtGetUniformSummationOrder(handle, &value), HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(value, rdna ? 0 : 1) << arch;
+    ASSERT_EQ(value, default_off ? 0 : 1) << arch;
 
     ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
 }

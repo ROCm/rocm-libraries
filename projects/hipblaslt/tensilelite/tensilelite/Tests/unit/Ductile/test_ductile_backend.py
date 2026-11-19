@@ -585,8 +585,99 @@ def test_ductile_backend_evaluate_preserves_solution_index_alignment(monkeypatch
     fitness = captured["nGFlops"]
     assert fitness.shape == (2, 3)
     assert np.allclose(fitness[:, 0], [10.0, 11.0])
-    assert np.allclose(fitness[:, 1], [0.0, 0.0])
+    # Candidate 1 was never built (_generate_ga_solutions returned None for it), so it
+    # must be marked -1 ("not buildable"), not 0 ("built but measured zero/invalid perf") -
+    # these two failure modes must stay distinguishable.
+    assert np.allclose(fitness[:, 1], [-1.0, -1.0])
     assert np.allclose(fitness[:, 2], [20.0, 21.0])
+
+
+def test_ductile_backend_evaluate_unbuilt_candidates_marked_minus_one_not_zero(monkeypatch, tmp_path):
+    """Candidates rejected before build (duplicates/failed validation) must be filled
+    with -1.0 in the fitness array, not 0.0, so the GA can distinguish "never built"
+    from "built but legitimately scored zero/invalid performance"."""
+    csv_path = tmp_path / "results.csv"
+    _write_csv(csv_path, {"sol0": [5.0]})
+
+    captured = {}
+
+    class FakeGA:
+        def __init__(self, *args, **kwargs):
+            self._evaluate = kwargs["evaluate"]
+
+        def optimize(self):
+            # 3 candidates requested, but only 1 solution survives generation/dedup -
+            # candidates at index 1 and 2 are never built.
+            captured["nGFlops"] = self._evaluate([{"a": 0}, {"a": 1}, {"a": 2}])
+            return [{"a": 0}], np.array([1.0], dtype=np.float32)
+
+        def evaluate(self, _best):
+            return np.array([1.0], dtype=np.float32)
+
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr(
+        "tensilelite.backends.ductile_backend._generate_ga_solutions",
+        lambda *_args, **_kwargs: [_fake_solution("sol0"), None, None],
+    )
+    monkeypatch.setattr(
+        "tensilelite.backends.ductile_backend.getSolutionNameMin",
+        lambda solution, _splitgsu: solution.name,
+    )
+    _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
+
+    backend = DuctileBackend()
+    backend.run({}, _make_benchmark_config(tmp_path), lambda *_args, **_kwargs: (str(csv_path), 0))
+
+    fitness = captured["nGFlops"]
+    assert fitness.shape == (1, 3)
+    assert np.allclose(fitness[:, 0], [5.0])
+    assert np.allclose(fitness[:, 1], [-1.0])
+    assert np.allclose(fitness[:, 2], [-1.0])
+
+
+def test_ductile_backend_evaluate_coalesces_nonfinite_and_negative_scores(monkeypatch, tmp_path):
+    """Built candidates that score NaN/inf must be coalesced to 0.0 (so a single bad
+    benchmark sample can't poison GA selection), while a genuinely negative score is
+    clamped to the same -1.0 sentinel used for "never built" - distinct from a clean
+    positive measurement, which must pass through unchanged."""
+    csv_path = tmp_path / "results.csv"
+    _write_csv(csv_path, {"sol0": ["nan"], "sol1": ["inf"], "sol2": ["-5.0"], "sol3": ["10.0"]})
+
+    captured = {}
+
+    class FakeGA:
+        def __init__(self, *args, **kwargs):
+            self._evaluate = kwargs["evaluate"]
+
+        def optimize(self):
+            captured["nGFlops"] = self._evaluate([{"a": 0}, {"a": 1}, {"a": 2}, {"a": 3}])
+            return [{"a": 0}], np.array([1.0], dtype=np.float32)
+
+        def evaluate(self, _best):
+            return np.array([1.0], dtype=np.float32)
+
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr(
+        "tensilelite.backends.ductile_backend._generate_ga_solutions",
+        lambda *_args, **_kwargs: [
+            _fake_solution("sol0"), _fake_solution("sol1"), _fake_solution("sol2"), _fake_solution("sol3"),
+        ],
+    )
+    monkeypatch.setattr(
+        "tensilelite.backends.ductile_backend.getSolutionNameMin",
+        lambda solution, _splitgsu: solution.name,
+    )
+    _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
+
+    backend = DuctileBackend()
+    backend.run({}, _make_benchmark_config(tmp_path), lambda *_args, **_kwargs: (str(csv_path), 0))
+
+    fitness = captured["nGFlops"]
+    assert fitness.shape == (1, 4)
+    assert np.allclose(fitness[:, 0], [0.0])   # nan -> 0
+    assert np.allclose(fitness[:, 1], [0.0])   # inf -> 0
+    assert np.allclose(fitness[:, 2], [-1.0])  # negative -> -1 sentinel
+    assert np.allclose(fitness[:, 3], [10.0])  # clean positive score preserved
 
 
 def test_generate_single_solution_with_groups_expands_group_keys(monkeypatch):
@@ -1339,6 +1430,49 @@ def test_verification_partial_fail_warns_and_reevaluates(monkeypatch, tmp_path):
     backend.run({}, _make_benchmark_config(tmp_path), lambda *a, **kw: (str(csv_path), 0))
 
     assert any("passed verification" in w for w in warned)
+
+
+def test_verification_zero_score_passes_with_gte_zero_check(monkeypatch, tmp_path):
+    """A champion whose re-evaluated score is exactly 0.0 (e.g. a NaN/inf measurement
+    coalesced to 0 by _evaluate) must still pass verification now that the keep
+    threshold is `>= 0` rather than `> 0` - only the -1.0 "never built" sentinel should
+    be filtered out, not a legitimately-built-but-zero-scoring candidate."""
+    csv_path = tmp_path / "results.csv"
+    _write_csv(csv_path, {"Cijk_0": [5.0], "Cijk_1": [3.0], "Cijk_2": [1.0]})
+
+    warned = []
+    eval_calls = []
+
+    class FakeGA:
+        def __init__(self, *a, **kw):
+            self._evaluate = kw["evaluate"]
+
+        def optimize(self):
+            self._evaluate([{"a": 0}, {"a": 1}, {"a": 2}])
+            return [{"a": 0}, {"a": 1}, {"a": 2}], np.array([1.0, 1.0, 1.0], dtype=np.float32)
+
+        def evaluate(self, best):
+            eval_calls.append(len(best))
+            if len(eval_calls) == 1:
+                # candidate 0: built but coalesced to 0 (e.g. nan/inf measurement);
+                # candidate 1: never built (-1 sentinel); candidate 2: scored normally.
+                return np.array([0.0, -1.0, 5.0], dtype=np.float32)
+            # Re-evaluation of the filtered (kept) set.
+            return np.array([0.0, 5.0], dtype=np.float32)
+
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr(
+        "tensilelite.backends.ductile_backend._generate_ga_solutions",
+        lambda *a, **kw: [types.SimpleNamespace(), types.SimpleNamespace(), types.SimpleNamespace()],
+    )
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.printWarning", lambda m: warned.append(m))
+    _patch_primitives(monkeypatch, _base_merged_config())
+
+    backend = DuctileBackend()
+    backend.run({}, _make_benchmark_config(tmp_path), lambda *a, **kw: (str(csv_path), 0))
+
+    # 2 of 3 passed - the 0.0-scoring candidate counts as a pass; only -1.0 is dropped.
+    assert any("2/3 passed verification" in w for w in warned)
 
 
 # ---------------------------------------------------------------------------

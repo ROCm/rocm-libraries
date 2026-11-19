@@ -295,6 +295,24 @@ TEST(PersistentArgumentLayout, CustomDescriptorPacksDataParallelPayloadAndReject
     EXPECT_THROW(solution.validatePersistentLoopArgs(), std::runtime_error);
 }
 
+TEST(PersistentArgumentLayout, OutputPeerDPassesTheDistanceToThePeersD)
+{
+    ContractionSolution solution;
+    configurePersistentSolution(solution, 3, 1);
+    solution.problemType.outputPeerD = true;
+    auto problem                     = persistentProblem();
+    auto device                      = persistentDevice();
+
+    char buffers[64];
+    auto inputs  = persistentInputs();
+    inputs.d     = buffers;
+    inputs.peerD = buffers + 48;
+    auto invocation = solution.generateSingleCall<true>(
+        problem, inputs, device, solution.resolvePersistentSettings(problem, device), GSUSettings{});
+
+    EXPECT_EQ(value<int64_t>(invocation.args, "DeltaPeerD"), 48);
+}
+
 TEST(PersistentArgumentLayout, DataParallelCustomDescriptorMatchesCompleteNormalBuffer)
 {
     for(bool initialStrides : {false, true})

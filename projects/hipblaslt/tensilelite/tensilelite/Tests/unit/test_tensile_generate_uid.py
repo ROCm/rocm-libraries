@@ -124,6 +124,57 @@ def test_regenerate_uid_for_solution_replaces_uid(tmp_path: Path) -> None:
     assert updated["Solutions"][1]["SolutionUID"] == encode_solution_uid(new_uid)
 
 
+def test_regenerate_uid_for_solution_inplace_keeps_key_order(tmp_path: Path) -> None:
+    """``--inplace`` writes the canonical solution order and does not sort the file.
+
+    The input solution is deliberately out of order. After rewrite,
+    ``SolutionIndex``, ``SolutionUID``, ``KernelNameMin``, and
+    ``SolutionNameMin`` lead the solution, and top-level keys stay in the
+    order they were written.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the solution is not reordered or other keys are sorted.
+    """
+    yaml_path = tmp_path / "logic.yaml"
+    data = {
+        "MinimumRequiredVersion": "0.0.0",
+        "ScheduleName": "test",
+        "ProblemType": {"OperationType": "GEMM"},
+        "Solutions": [
+            {
+                "NumThreads": 256,
+                "SolutionNameMin": "sol0",
+                "MacroTile0": 32,
+                "KernelNameMin": "kern0",
+                "SolutionUID": "0u1c",
+                "SolutionIndex": 0,
+            }
+        ],
+    }
+    LibraryIO.writeYAML(str(yaml_path), data, sort_keys=False)
+
+    new_uid = regenerate_uid_for_solution(yaml_path, 0, inplace=True)
+
+    updated = LibraryIO.readYAML(str(yaml_path))
+    assert list(updated) == ["MinimumRequiredVersion", "ScheduleName", "ProblemType", "Solutions"]
+    solution = updated["Solutions"][0]
+    assert list(solution) == [
+        "SolutionIndex",
+        "SolutionUID",
+        "KernelNameMin",
+        "SolutionNameMin",
+        "NumThreads",
+        "MacroTile0",
+    ]
+    assert solution["SolutionUID"] == encode_solution_uid(new_uid)
+
+
 def test_regenerate_uid_for_solution_without_inplace_does_not_write(
     tmp_path: Path,
 ) -> None:

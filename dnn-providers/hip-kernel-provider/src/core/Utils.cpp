@@ -186,4 +186,16 @@ bool hasOnly16ByteAlignedTensors(
     });
 }
 
+bool hasNoStrayRaggedOffsetMultiplier(
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    return std::all_of(tensorMap.begin(), tensorMap.end(), [](const auto& entry) {
+        const auto* tensor = entry.second;
+        return tensor->ragged_offset_tensor_uid().has_value()
+               || tensor->ragged_offset_multiplier() == 1;
+    });
+}
+
 } // namespace hip_kernel_provider::core::utils

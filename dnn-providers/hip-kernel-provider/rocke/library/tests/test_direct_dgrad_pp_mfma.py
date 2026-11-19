@@ -211,15 +211,18 @@ def test_reasons():
     assert "pad_w must be -1" in why(pad_w=-3)
     assert why(pad_w=1) is None
     # Each buffer descriptor (one input image, one output image, the filter)
-    # stays within the i32 range the masked offset relies on, and so does the
-    # flat block id.
+    # stays within the i32 range the masked offset relies on.
     big = dict(H=1024, W=2048, cpg=768, kpg=768)
     limit = "exceeds 2147483647 B, the i32 buffer range"
     assert why(**big) == f"input image {limit}"
     assert why(H=16, W=16, cpg=8, kpg=1 << 27) == f"output image {limit}"
     assert why(H=1, W=1, cpg=1 << 14, kpg=1 << 14) == f"filter {limit}"
     assert why(H=1 << 30, W=1 << 30, cpg=1 << 30, kpg=8) == f"input image {limit}"
-    assert "workgroups exceed the i32 block id" in why(N=1 << 25, H=256, W=256)
+    # The whole dY and dX sizes are i32 kernargs: 32 images that each fit,
+    # but 4 GiB in all, are refused.
+    kernarg = "exceeds 2147483647 B, the i32 byte-count kernarg"
+    assert why(N=32, H=256, W=256, cpg=1024, kpg=1024) == f"input {kernarg}"
+    assert why(N=32, H=256, W=256, cpg=8, kpg=1024) == f"output {kernarg}"
     assert "fp16/bf16" in why(dtype="fp32")
     for arch in ("gfx942", "gfx90a"):
         assert dgrad_pp_mfma_reason(ok, arch=arch) == (

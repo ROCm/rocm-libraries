@@ -16,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-#include "engines/kernel_ingestor_engine/packs/Gfx950ConvGeometryCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvAotGeometryCommon.hpp"
 
 /// @file ConvDgradAotGeometry.hpp
 /// The launch contract of the shape-generic backward-data (dgrad) AOT-instance engines,
@@ -32,16 +32,16 @@
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_dgrad_aot
 {
 
-// The helpers both gfx950 conv engines share (Gfx950ConvGeometryCommon.hpp).
-using gfx950_conv::bufferRangesDoNotOverlap;
-using gfx950_conv::ceilDiv;
-using gfx950_conv::DIRECT_KERNARG_NAMES;
-using gfx950_conv::DW_DGRAD_MFMA_CH;
-using gfx950_conv::DW_DGRAD_WIN_MAX_TENSOR_BYTES;
-using gfx950_conv::LaunchGeometry;
-using gfx950_conv::MagicDivision;
-using gfx950_conv::magicDivision;
-using gfx950_conv::wideProduct;
+// The helpers the conv AOT engines share (ConvAotGeometryCommon.hpp).
+using conv_aot::bufferRangesDoNotOverlap;
+using conv_aot::ceilDiv;
+using conv_aot::DIRECT_KERNARG_NAMES;
+using conv_aot::DW_DGRAD_MFMA_CH;
+using conv_aot::DW_DGRAD_WIN_MAX_TENSOR_BYTES;
+using conv_aot::LaunchGeometry;
+using conv_aot::MagicDivision;
+using conv_aot::magicDivision;
+using conv_aot::wideProduct;
 
 constexpr int64_t I32_MAX = std::numeric_limits<int32_t>::max();
 constexpr int64_t I32_MIN = std::numeric_limits<int32_t>::min();

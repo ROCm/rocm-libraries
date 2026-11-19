@@ -108,6 +108,11 @@ std::string getConfigDescription(const fmha_v3_fwdConfig& config);
  */
 GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats = false);
 
+/// Names of the INT32 [B+1, 1, 1, 1] token offset tables buildSdpaFwdGraph gives a
+/// group-mode graph: Q and O share the first, K and V the second.
+inline constexpr const char* K_QO_RAGGED_OFFSET_NAME = "qo_ragged_offset";
+inline constexpr const char* K_KV_RAGGED_OFFSET_NAME = "kv_ragged_offset";
+
 /// An SDPA forward graph together with its STATS output attribute.
 struct SdpaFwdGraph
 {

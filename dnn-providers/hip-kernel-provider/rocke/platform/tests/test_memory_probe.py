@@ -53,6 +53,21 @@ class TestTdmSource(unittest.TestCase):
             with self.subTest(shape=(m, n, k)), self.assertRaises(ValueError):
                 mp.tdm_source(m, n, k, lds_reads=False, repeats=1, gap_ms=0)
 
+    def test_the_tdm_operands_are_unsigned_vectors(self):
+        # The builtin takes unsigned int vectors; compilers with ext_vector_type builtin
+        # signatures do not convert int vectors implicitly.
+        src = mp.tdm_source(4096, 4096, 65536, lds_reads=False, repeats=1, gap_ms=0)
+        unsigned = set(
+            re.findall(r"typedef unsigned(?: int)? (\w+) __attribute__", src)
+        )
+        declared = {name: t for t, name in re.findall(r"\b(\w+) (\w+) = \{", src)}
+        call = re.search(r"__builtin_amdgcn_tensor_load_to_lds\((.*)\);", src)
+        self.assertIsNotNone(call)
+        *groups, _cache_policy = (arg.strip() for arg in call.group(1).split(","))
+        for name in dict.fromkeys(groups):
+            with self.subTest(operand=name):
+                self.assertIn(declared.get(name), unsigned)
+
 
 class TestBandwidthSource(unittest.TestCase):
     def test_sizes_and_protocol_are_substituted(self):

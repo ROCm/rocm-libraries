@@ -63,7 +63,7 @@ else()
     endif()
 endif()
 
-get_target_property(composable_kernel_INCLUDES composable_kernel::device_other_operations INTERFACE_INCLUDE_DIRECTORIES)
+get_target_property(composable_kernel_INCLUDES ${HIPTENSOR_CK_INCLUDE_TARGET} INTERFACE_INCLUDE_DIRECTORIES)
 
 # ABI export-surface guard. Host-only (no GPU): runs scripts/check_exported_symbols.py over the
 # built libhiptensor.so and fails if any symbol outside the public allowlist is exported. The
@@ -518,6 +518,7 @@ set(_HIPTENSOR_DEVICE_TESTS
   "complex_scale_contraction_test_m5n5k5|01_contraction/complex_scale_test_params_rank5.yaml"
   "complex_scale_contraction_test_m6n6k6|01_contraction/complex_scale_test_params_rank6.yaml"
   "plan_cache_test|01_contraction/plan_cache_test_params.yaml"
+  "plan_cache_lru_test|NONE"
   "plan_lifetime_test|NONE"
   "trinary_bilinear_contraction_test|NONE"
   "trinary_scale_contraction_test|NONE"

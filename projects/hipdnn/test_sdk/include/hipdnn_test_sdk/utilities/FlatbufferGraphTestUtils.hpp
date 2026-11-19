@@ -38,6 +38,18 @@ inline flatbuffers::FlatBufferBuilder createEmptyValidGraph()
     return builder;
 }
 
+/// Unpacks a serialized graph, applies `mutate(GraphT&)`, and re-serializes the result.
+template <typename Mutate>
+flatbuffers::FlatBufferBuilder mutateGraph(const flatbuffers::FlatBufferBuilder& source,
+                                           Mutate&& mutate)
+{
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(source.GetBufferPointer());
+    mutate(*graph);
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(builder, graph.get()));
+    return builder;
+}
+
 /// Re-serializes a graph with its first non-virtual tensor marked ragged. The
 /// applicability check keys on ragged_offset_tensor_uid being set, so we point it
 /// at another existing tensor uid to keep the value plausible. Throws if the graph
@@ -2730,7 +2742,8 @@ inline flatbuffers::FlatBufferBuilder
                                     std::optional<float> swishBeta = std::nullopt,
                                     hipdnn_flatbuffers_sdk::data_objects::DataType dataType
                                     = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                                    std::optional<float> reluLowerClipSlope = std::nullopt)
+                                    std::optional<float> reluLowerClipSlope = std::nullopt,
+                                    bool biasInFirstOperand = false)
 {
     flatbuffers::FlatBufferBuilder builder;
 
@@ -2794,8 +2807,8 @@ inline flatbuffers::FlatBufferBuilder
             flatbuffers::nullopt,
             flatbuffers::nullopt,
             flatbuffers::nullopt,
-            cMatmulTensorUid,
-            biasTensorUid,
+            biasInFirstOperand ? biasTensorUid : cMatmulTensorUid,
+            biasInFirstOperand ? cMatmulTensorUid : biasTensorUid,
             flatbuffers::nullopt,
             cBiasTensorUid);
         nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(

@@ -28,6 +28,9 @@
 
 #include <Tensile/ContractionProblemPredicates.hpp>
 
+#include <sstream>
+#include <string>
+
 TEST(Predicates, ArithmeticIntensity)
 {
     using namespace TensileLite;
@@ -495,4 +498,34 @@ TEST(Predicates, GL2PrefetchSAddrOffsetLimitCheck_TluMetadataStepsByFreeSize)
     packet.tluMetadata = true;
     EXPECT_TRUE(
         gl2Check(packet, gl2Problem(true, false, rocisa::DataType::BFloat16, m, 256, k, k, k)));
+}
+
+// ----------------------------------------------------------------------------
+// PeerDCheck: a problem with a second D buffer runs only kernels that store to it, and a problem
+// without one runs only kernels that do not.
+// ----------------------------------------------------------------------------
+TEST(Predicates, PeerDCheck_OnlyMatchesTheKindOfKernelTheProblemAsksFor)
+{
+    using namespace TensileLite;
+    using Predicates::Contraction::PeerDCheck;
+
+    auto plain
+        = ContractionProblemGemm::GEMM(false, true, 256, 256, 256, 256, 256, 256, 1.0, false, 1);
+    auto peer = plain;
+    peer.setOutputPeerD(true);
+    EXPECT_FALSE(plain.outputPeerD());
+    EXPECT_TRUE(peer.outputPeerD());
+
+    PeerDCheck wantsPeer(true), wantsNone(false);
+    EXPECT_FALSE(wantsPeer(plain));
+    EXPECT_TRUE(wantsNone(plain));
+    EXPECT_TRUE(wantsPeer(peer));
+    EXPECT_FALSE(wantsNone(peer));
+    EXPECT_EQ(PeerDCheck::Type(), "PeerDCheck");
+
+    // The debug output says what was compared, so a mismatch can be read from a rejection log.
+    std::ostringstream stream;
+    EXPECT_FALSE(wantsPeer.debugEval(plain, stream));
+    EXPECT_NE(stream.str().find("prob_peerD=0"), std::string::npos);
+    EXPECT_NE(stream.str().find("sol_peerD=1"), std::string::npos);
 }

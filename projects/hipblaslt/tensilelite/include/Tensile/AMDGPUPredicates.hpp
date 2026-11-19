@@ -59,6 +59,13 @@ namespace TensileLite
         inline const std::map<int, AMDGPU::Processor>& knownChipIds()
         {
             static const std::map<int, AMDGPU::Processor> ids = {
+                // gfx942 variants
+                {0x74a0, AMDGPU::Processor::gfx942},
+                {0x74a1, AMDGPU::Processor::gfx942},
+                {0x74a2, AMDGPU::Processor::gfx942},
+                {0x74a3, AMDGPU::Processor::gfx942},
+                {0x74a5, AMDGPU::Processor::gfx942},
+                {0x74a9, AMDGPU::Processor::gfx942},
                 // gfx950 variants
                 {0x75a0, AMDGPU::Processor::gfx950}, // mi350
                 {0x75b0, AMDGPU::Processor::gfx950}, // mi350

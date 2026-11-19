@@ -10,6 +10,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace hip_kernel_provider
@@ -41,6 +42,9 @@ bool HipMlopsEngine::isApplicable(
     const auto& tensorMap = opGraph.getTensorMap();
     HIP_KERNEL_RETURN_FALSE_IF(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(tensorMap),
                                "Ragged tensors are not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !hip_kernel_provider::core::utils::hasNoStrayRaggedOffsetMultiplier(tensorMap),
+        "ragged_offset_multiplier is set on a tensor without a ragged offset");
     HIP_KERNEL_RETURN_FALSE_IF(
         !hip_kernel_provider::core::utils::hasOnly16ByteAlignedTensors(tensorMap),
         "All tensors must be aligned to a multiple of 16 bytes");
@@ -110,10 +114,12 @@ size_t HipMlopsEngine::getMaxWorkspaceSize(
     Settings baseExecutionSettings;
     initializeHipKernelSettings(engineConfig, baseExecutionSettings);
     size_t workspaceSize = 0;
+    bool anyApplied = false;
     for(const auto& planBuilder : _planBuilders)
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
+            anyApplied = true;
             Settings executionSettings = baseExecutionSettings;
             planBuilder->initializeExecutionSettings(
                 handle, opGraph, engineConfig, executionSettings);
@@ -121,6 +127,13 @@ size_t HipMlopsEngine::getMaxWorkspaceSize(
                 = std::max(workspaceSize,
                            planBuilder->getMaxWorkspaceSize(handle, opGraph, executionSettings));
         }
+    }
+
+    if(!anyApplied)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "HipMlopsEngine::getMaxWorkspaceSize: no plan builder applies to the graph");
     }
     return workspaceSize;
 }
@@ -151,9 +164,13 @@ void HipMlopsEngine::initializeExecutionContext(
         if(planBuilder->isApplicable(handle, opGraph))
         {
             planBuilder->buildPlan(handle, opGraph, engineConfig, executionContext);
-            break;
+            return;
         }
     }
+
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+        "HipMlopsEngine::initializeExecutionContext: no plan builder applies to the graph");
 }
 
 void HipMlopsEngine::addPlanBuilder(

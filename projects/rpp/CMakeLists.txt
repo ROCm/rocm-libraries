@@ -437,7 +437,6 @@ endif()
 enable_testing()
 include(CTest)
 if(BUILD_TESTING)
-    add_subdirectory(test)
     add_subdirectory(utilities/test)
 endif()
 

@@ -75,4 +75,11 @@ bool hasOnly16ByteAlignedTensors(
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
+// A `ragged_offset_multiplier` other than 1 only means something on a tensor with a ragged
+// offset; on any other tensor no provider kernel reads it.
+bool hasNoStrayRaggedOffsetMultiplier(
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
 } // namespace hip_kernel_provider::core::utils

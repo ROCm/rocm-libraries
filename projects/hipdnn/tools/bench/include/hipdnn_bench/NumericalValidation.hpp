@@ -268,6 +268,53 @@ inline uint64_t powerOfTwoCode(FillValue value, int bias, int mantissaBits, int 
     return value.negative ? (code | (1ULL << static_cast<unsigned>(width - 1))) : code;
 }
 
+/// @brief Writes @p value as one element of the integer or boolean @p dataType at @p bytes;
+///        false for another type or a value the type cannot hold (BOOLEAN takes 0 or 1).
+inline bool encodeInteger(hipdnn_frontend::DataType dataType, int64_t value, uint8_t* bytes)
+{
+    using hipdnn_frontend::DataType;
+    switch(dataType)
+    {
+    case DataType::INT64:
+        std::memcpy(bytes, &value, sizeof(value));
+        return true;
+    case DataType::INT32:
+    {
+        if(value < std::numeric_limits<int32_t>::min()
+           || value > std::numeric_limits<int32_t>::max())
+        {
+            return false;
+        }
+        const auto narrow = static_cast<int32_t>(value);
+        std::memcpy(bytes, &narrow, sizeof(narrow));
+        return true;
+    }
+    case DataType::INT8:
+        if(value < std::numeric_limits<int8_t>::min() || value > std::numeric_limits<int8_t>::max())
+        {
+            return false;
+        }
+        *bytes = static_cast<uint8_t>(value);
+        return true;
+    case DataType::UINT8:
+        if(value < 0 || value > std::numeric_limits<uint8_t>::max())
+        {
+            return false;
+        }
+        *bytes = static_cast<uint8_t>(value);
+        return true;
+    case DataType::BOOLEAN:
+        if(value < 0 || value > 1)
+        {
+            return false;
+        }
+        *bytes = static_cast<uint8_t>(value);
+        return true;
+    default:
+        return false;
+    }
+}
+
 /// @brief Writes one element of @p dataType at @p bytes; false for a type not encoded here.
 ///
 /// Sub-byte and packed types are declined and keep the zero fill; a wrong encode would put
@@ -322,20 +369,10 @@ inline bool encodeFillElement(hipdnn_frontend::DataType dataType, FillValue valu
         *bytes = static_cast<uint8_t>(127 + value.exponent);
         return true;
     case DataType::INT64:
-    {
-        std::memcpy(bytes, &magnitude, sizeof(magnitude));
-        return true;
-    }
     case DataType::INT32:
-    {
-        const auto code = static_cast<int32_t>(magnitude);
-        std::memcpy(bytes, &code, sizeof(code));
-        return true;
-    }
     case DataType::INT8:
     case DataType::UINT8:
-        *bytes = static_cast<uint8_t>(magnitude);
-        return true;
+        return encodeInteger(dataType, magnitude, bytes);
     // All-true mask; false would switch off whatever it gates.
     case DataType::BOOLEAN:
         *bytes = 1;
@@ -366,6 +403,29 @@ inline std::vector<uint8_t> inputFillImage(hipdnn_frontend::DataType dataType,
         value.negative = value.negative && !positive;
         // Refusal depends only on the type, so a half-filled buffer is never returned.
         if(!encodeFillElement(dataType, value, image.data() + (index * width)))
+        {
+            return {};
+        }
+    }
+    return image;
+}
+
+/// @brief A @p bytes long host image of @p values (hipdnn_bench::declaredContents) for an
+///        integer or boolean input; empty when the type is neither, the buffer does not hold
+///        exactly that many elements, or a value does not fit the type.
+inline std::vector<uint8_t> declaredImage(hipdnn_frontend::DataType dataType,
+                                          size_t bytes,
+                                          const std::vector<int64_t>& values)
+{
+    const auto width = static_cast<size_t>(elementBits(dataType) / 8);
+    if(width == 0 || bytes != values.size() * width)
+    {
+        return {};
+    }
+    std::vector<uint8_t> image(bytes, 0);
+    for(size_t index = 0; index < values.size(); ++index)
+    {
+        if(!encodeInteger(dataType, values[index], image.data() + (index * width)))
         {
             return {};
         }

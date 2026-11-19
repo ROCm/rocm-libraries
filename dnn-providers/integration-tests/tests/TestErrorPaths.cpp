@@ -233,7 +233,7 @@ TEST_F(TestErrorPaths, RefCrashFails)
 }
 
 // Pins the exception type relationships the harness routing relies on: the CPU
-// executor's CpuReferenceNotApplicableError is a plain std::runtime_error, NOT a
+// executor's CpuReferenceNotApplicableError derives from std::runtime_error but is NOT a
 // ReferenceCapabilityError, so only the adapter's translation turns it into a skip.
 // This test does not call the adapter; see CpuAdapterTranslatesNotApplicableToCapabilityError.
 TEST_F(TestErrorPaths, NotApplicableAndCapabilityErrorTypeRelationships)

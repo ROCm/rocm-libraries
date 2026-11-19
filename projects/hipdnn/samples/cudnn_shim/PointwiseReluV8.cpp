@@ -73,7 +73,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     if(config.cpuValidation)
     {
         hipdnn_data_sdk::utilities::Tensor<InputType> yRefTensor({n, c, h, w}, layout);
-        hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
+        hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType, double>::pointwiseCompute(
             hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD, yRefTensor, xTensor);
 
         const float tolerance = hipdnn_test_sdk::utilities::pointwise::getTolerance<InputType>();

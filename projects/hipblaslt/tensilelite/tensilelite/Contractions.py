@@ -106,7 +106,7 @@ class ProblemType:
                  'useBeta', 'useBias', 'biasSrcWhiteList', 'useE', 'useGateResidual', 'gateResidualDataTypeWhiteList', 'useScaleAB', 'useScaleCD', 'useScaleAlphaVec', 'biasDataTypeWhiteList',
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
-                 'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
+                 'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'outputPeerD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
                  'mxBlockA', 'mxBlockB', 'mxBlockFreeA', 'mxBlockFreeB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedA2A', 'stochasticRounding']
     @classmethod
     def FromOriginalState(cls, d):
@@ -296,6 +296,10 @@ class ProblemType:
         if 'OutputAmaxD' in d:
             rv.outputAmaxD = d['OutputAmaxD']
 
+        rv.outputPeerD = False
+        if 'OutputPeerD' in d:
+            rv.outputPeerD = d['OutputPeerD']
+
         rv.useScaleAB = ""
         if 'UseScaleAB' in d:
             rv.useScaleAB = d['UseScaleAB']
@@ -455,6 +459,7 @@ class ProblemType:
             predicates.append(ProblemPredicate("GateResidualDataTypeWhiteList", value=self.gateResidualDataTypeWhiteList))
             predicates.append(ProblemPredicate("BiasSrcWhiteList", value=self.biasSrcWhiteList))
             predicates.append(ProblemPredicate("AmaxDCheck", value=self.outputAmaxD))
+            predicates.append(ProblemPredicate("PeerDCheck", value=self.outputPeerD))
             if self.activationType in ['all', 'hipblaslt_all']:
                 exportType = ActivationType.Export.GRADONLY if self.useGradient else ActivationType.Export.NORMAL
                 supportedBy = ActivationType.SupportedBy.ALL if self.activationType == 'all' else ActivationType.SupportedBy.HIPBLASLT
@@ -1120,6 +1125,28 @@ class Solution:
             *,
             raiseProblemTypeOnTypeMismatch: bool = True,
         ):
+        rv = cls.RecordFromOriginalState(d, srcName, deviceInfo)
+        rv.originalSolution = OriginalSolution(
+                                  d,
+                                  splitGSU,
+                                  printSolutionRejectionReason,
+                                  printIndexAssignmentInfo,
+                                  assembler,
+                                  isaInfoMap,
+                                  srcName,
+                                  raiseProblemTypeOnTypeMismatch=raiseProblemTypeOnTypeMismatch,
+                              )
+        rv.srcName = srcName
+
+        return rv
+
+    @classmethod
+    def RecordFromOriginalState(cls, d, srcName="", deviceInfo=None):
+        """The library record FromOriginalState writes, without the OriginalSolution.
+
+        Fills in d['ISA'] and d['CUCount'] as FromOriginalState does, so the
+        OriginalSolution built from d afterwards sees the same state.
+        """
         rv = cls()
 
         if 'SolutionNameMin' in d:
@@ -1177,18 +1204,6 @@ class Solution:
         rv.hardwarePredicate = Hardware.HardwarePredicate.FromHardware(
             d['ISA'], d['CUCount'], d.get('DeviceNames', None), logicFile=srcName
         )
-        rv.originalSolution = OriginalSolution(
-                                  d,
-                                  splitGSU,
-                                  printSolutionRejectionReason,
-                                  printIndexAssignmentInfo,
-                                  assembler,
-                                  isaInfoMap,
-                                  srcName,
-                                  raiseProblemTypeOnTypeMismatch=raiseProblemTypeOnTypeMismatch,
-                              )
-        rv.srcName = srcName
-
         return rv
 
     @classmethod

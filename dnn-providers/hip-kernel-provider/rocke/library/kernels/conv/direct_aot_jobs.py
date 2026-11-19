@@ -34,6 +34,8 @@ from kernels.conv.direct_variants import (
     DIRECT_FWD_SMALLC_WMMA as _FWD_SMALLC,
     DIRECT_FWD_SMALLC_MFMA as _FWD_SMALLC_MFMA,
     DIRECT_FWD_SMALLK_MFMA as _FWD_SMALLK_MFMA,
+    DIRECT_FWD_FLEX_MFMA as _FWD_FLEX_MFMA,
+    DIRECT_FWD_PP_MFMA as _FWD_PP_MFMA,
     DIRECT_FWD_SMALLK_WMMA as _FWD_SMALLK,
     DIRECT_FWD_WMMA as _FWD_WMMA,
     DIRECT_GROUPED_HALO as _GROUPED_HALO,
@@ -1138,6 +1140,29 @@ FWD_SMALLK_LAYERS = (
     (3, 3, 1, 1, 1, 3),
     (1, 7, 0, 3, 1, 1),
 )
+# Flattened-pixel implicit-GEMM forward (direct_fwd_flex_mfma, gfx950): the
+# dense layers it serves, (KH, KW, PAD, pad_w, stride, dil_h, dil_w), and its
+# (tile K, split_c) knobs.
+FWD_FLEX_LAYERS = (
+    (3, 3, 1, 1, 2, 1, 1),
+    (1, 1, 0, 0, 2, 1, 1),
+    (2, 2, 0, 0, 2, 1, 1),
+    (3, 3, 24, 24, 1, 24, 24),
+    (3, 3, 36, 36, 1, 36, 36),
+    (3, 3, 12, 12, 1, 12, 12),
+    (3, 3, 2, 2, 1, 2, 2),
+    (1, 3, 0, 1, 1, 1, 1),
+    (1, 3, 0, 3, 1, 1, 3),
+    (1, 3, 0, 5, 1, 1, 5),
+    (1, 7, 0, 3, 1, 1, 1),
+    (1, 7, 0, 9, 1, 1, 3),
+    (1, 7, 0, 15, 1, 1, 5),
+    (1, 11, 0, 5, 1, 1, 1),
+    (1, 11, 0, 15, 1, 1, 3),
+    (1, 11, 0, 25, 1, 1, 5),
+    (7, 1, 3, 0, 1, 1, 1),
+)
+FWD_FLEX_KNOBS = tuple((bk, sc) for bk in (256, 128) for sc in (1, 2, 4))
 # Tap-outer WMMA forward (direct_fwd_tapouter_wmma): the "same"-padded dilated
 # 3x3 rows of atrous / ASPP layers it serves, (PAD, dil); stride 1.
 FWD_TAPOUTER_DILATIONS = (
@@ -1232,6 +1257,9 @@ FWD_SMALLC_MFMA_KNOBS = (
     (2, 2, 2, 2, 8, 8, 1, False),
     (2, 4, 2, 2, 2, 64, 1, False),
 )
+# LDS-DMA ping-pong MFMA forward (direct_fwd_pp_mfma, gfx950): "same"-padded
+# square filters (the output-channel blocks are the kernel module's BLOCK_K).
+FWD_PP_MFMA_FILTERS = (3,)
 # fwd_smallk_mfma (gfx950): (waves, out_h, out_w); a first grid of 4 / 8 waves
 # over 8..32-pixel square-ish output tiles and full-width 1-row strips.
 FWD_SMALLK_MFMA_KNOBS = tuple(
@@ -1894,6 +1922,34 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for kh, kw, pad, pw, st, kk in FWD_SMALLK_LAYERS
         ),
     ),
+    # LDS-DMA ping-pong forward on wave64 MFMA (gfx950): dense, stride 1, odd
+    # square filters with "same" padding; C and K runtime.
+    _FWD_PP_MFMA: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=0, kpg=0)
+            for k in FWD_PP_MFMA_FILTERS
+        ),
+    ),
+    # Flattened-pixel implicit-GEMM forward on wave64 MFMA (gfx950): C, K
+    # runtime; split_c > 1 pulls in the split-C fold (_split_reduce_job).
+    _FWD_FLEX_MFMA: (
+        "fwd",
+        tuple(
+            DirectCaps(
+                KH=kh,
+                kw=0 if kw == kh else kw,
+                PAD=pad,
+                pad_w=-1 if pw == pad else pw,
+                stride=st,
+                cpg=0,
+                kpg=0,
+                dil_h=dh,
+                dil_w=dw,
+            )
+            for kh, kw, pad, pw, st, dh, dw in FWD_FLEX_LAYERS
+        ),
+    ),
     _FWD_SMALLK: (
         "fwd",
         tuple(
@@ -2548,6 +2604,11 @@ def _knob_grid(
             DW_FWD_WMMA_PREFETCH,
         ):
             yield dict(block_waves=waves, block_h=bh, w_fold=fold, prefetch_rows=pf)
+    elif variant == _FWD_FLEX_MFMA:
+        if arch != "gfx950":
+            return  # 16-byte LDS DMA and the 160 KiB LDS: gfx950 only
+        for bk, sc in FWD_FLEX_KNOBS:
+            yield dict(bk=bk, split_c=sc)
     elif variant == _FWD_SMALLK_MFMA:
         from rocke.core.arch import ArchTarget
 
@@ -2555,6 +2616,13 @@ def _knob_grid(
             return
         for waves, oh, ow in FWD_SMALLK_MFMA_KNOBS:
             yield dict(waves=waves, out_h=oh, out_w=ow)
+    elif variant == _FWD_PP_MFMA:
+        if arch != "gfx950":
+            return  # 16-byte LDS DMA: gfx950 only
+        from kernels.common.conv_direct_fwd_pp_mfma import BLOCK_K
+
+        for bk in BLOCK_K:
+            yield dict(block_k=bk)
     elif variant == _FWD_SMALLC_MFMA:
         from rocke.core.arch import ArchTarget
 
@@ -3420,7 +3488,10 @@ def _caps_jobs(
                     fold_knobs,
                 )
             )
-        if variant == "direct_nongrouped" and knobs.get("split_c", 1) > 1:
+        if (
+            variant in ("direct_nongrouped", _FWD_FLEX_MFMA)
+            and knobs.get("split_c", 1) > 1
+        ):
             cell.append(_split_reduce_job(arch, wave_size, knobs["split_c"], dtype))
         if variant in _MFMA_DGRAD:
             for helper, helper_knobs, _, _ in direct_dgrad_weight_transforms(

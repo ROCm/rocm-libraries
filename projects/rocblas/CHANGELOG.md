@@ -3,7 +3,7 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
-## rocBLAS 5.9.0
+## (Unreleased) rocBLAS 5.9.0
 
 ### Added
 
@@ -30,7 +30,7 @@ rocBLAS documentation is available at
 * Fix a crash on Windows when rocBLAS cannot find its Tensile library file and the deployment directory name contains a regex escape, such as `x-deploy`. The diagnostic that lists the library files built a `std::regex` from that path and threw `std::regex_error` instead of returning a status. Library filenames are now matched directly, and a missing directory no longer throws from the diagnostic itself.
 * Fix the rocBLAS library build on Python 3.12 when setuptools is not installed. `library/src/merge_archives.py` imported `distutils.spawn`, which that Python release removed from the standard library, so the archive merge step failed before parsing its arguments. The script now locates `ar` with `shutil.which`.
 
-## rocBLAS 5.8.0 
+## rocBLAS 5.8.0 for ROCm 10.2.0
 
 ### Added
 

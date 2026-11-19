@@ -10,14 +10,11 @@ and Torch binding; admission, pin resolution and sweeping are shared.
 
 from __future__ import annotations
 
-import dataclasses
-
 from typing import Callable, Mapping, Optional
 
 from kernels.common.attention_unified import (
-    supports_native_unified_attention,
-    supports_native_unified_attention_3d_tiled,
-    supports_native_unified_attention_tiled,
+    supports_native_unified_attention_coverage,
+    unified_lse_path_gate,
 )
 from rocke.dispatch.core import Capability, KernelCandidate, ShapeRange
 from rocke.dispatch.tuning import make_tuned_candidate
@@ -59,20 +56,12 @@ def _tuning_precheck(variant: AttentionGeometryVariant):
     (the scalar kernel writes none), so it is asked about the LSE-off problem
     and an LSE request must also pass the gate of the variant's own path: the
     split-KV or tiled 2D gate owns which arches and features can write LSE."""
-    path_gate = (
-        supports_native_unified_attention_3d_tiled
-        if variant.path == "3d"
-        else supports_native_unified_attention_tiled
-    )
+    path_gate = unified_lse_path_gate(variant.path)
 
     def precheck(req):
         problem = _tuning_problem(req)
-        if not problem.emit_lse:
-            return supports_native_unified_attention(problem, arch=variant.arch)
-        ok, why = supports_native_unified_attention(
-            dataclasses.replace(problem, emit_lse=False), arch=variant.arch
-        )
-        if ok:
+        ok, why = supports_native_unified_attention_coverage(problem, arch=variant.arch)
+        if ok and problem.emit_lse:
             return path_gate(problem, arch=variant.arch)
         return ok, why
 

@@ -590,3 +590,27 @@ TEST(CustomKernelTest, A2AGemmRejectsAMisalignedA2ABuf)
     EXPECT_THROW(fusedCustomCall(FusedA2A::A2AGemm, defaultWGM, buf + 64), std::runtime_error);
     EXPECT_NO_THROW(fusedCustomCall(FusedA2A::GemmA2A, defaultWGM, buf + 64));
 }
+
+// The random seed takes exactly one 32-bit slot. Follow it with another argument
+// to verify proper width is used.
+TEST(CustomKernelTest, RndSeedDescriptorPacksThroughCustomCall)
+{
+    ContractionSolution solution;
+    configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::RNDSeed});
+    solution.customKernel.args.push_back({CustomArgType::uint32, CustomArgSemantic::Padding});
+
+    auto              problem = dummyProblem();
+    auto              device  = probeDevice();
+    ContractionInputs inputs;
+    StreamKSettings   sk;
+
+    auto invocation = solution.generateCustomCall<false>(problem, inputs, device, sk);
+
+    ASSERT_EQ(invocation.args.size(), 2 * sizeof(uint32_t));
+
+    uint32_t padding = 1;
+    std::memcpy(&padding,
+                static_cast<uint8_t const*>(invocation.args.data()) + sizeof(uint32_t),
+                sizeof(padding));
+    EXPECT_EQ(padding, 0u);
+}

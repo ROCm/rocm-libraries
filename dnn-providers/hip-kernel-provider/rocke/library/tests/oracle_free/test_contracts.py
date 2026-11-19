@@ -1,7 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""CPU-only contracts for the uniform-probability checker and subject adapter."""
+"""CPU-only contracts for the uniform-probability checker, the subject adapter and
+the suite's source policy."""
 
 from __future__ import annotations
 
@@ -974,7 +975,7 @@ def test_subject_requires_a_known_arch_and_the_proven_scope() -> None:
     for arch in DENSE_SUBJECTS:
         for case in UNIFORM_QUICK_CASES:
             _validate_supported_case(arch, case)
-    with pytest.raises(ValueError, match="no dense uniform-probability subject"):
+    with pytest.raises(ValueError, match="no dense oracle-free subject"):
         _validate_supported_case("gfx90a", UNIFORM_WINDOW_FP16)
     with pytest.raises(ValueError, match="outside the proven zero-ULP range"):
         _validate_supported_case(
@@ -1241,14 +1242,25 @@ def test_torch_checker_accepts_torch_free_source() -> None:
 _SKIP_CALLS = frozenset({"skip", "skipif", "importorskip", "xfail"})
 
 
-def _gpu_lane_tree() -> ast.Module:
-    path = Path(__file__).with_name("test_analytical_dense.py")
+# Each GPU lane module and the subject matrix its launches must run.
+_GPU_LANES = (
+    ("test_analytical_dense.py", "QUICK_SUBJECT_CASES"),
+    ("test_permutation_dense.py", "PERMUTATION_SUBJECT_CASES"),
+)
+_GPU_LANE_MODULES = tuple(module for module, _ in _GPU_LANES)
+
+
+def _gpu_lane_tree(module: str) -> ast.Module:
+    path = Path(__file__).with_name(module)
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
-def test_gpu_lane_parametrizes_over_the_quick_subject_matrix() -> None:
+@pytest.mark.parametrize("module,matrix", _GPU_LANES)
+def test_gpu_lane_parametrizes_over_its_subject_matrix(
+    module: str, matrix: str
+) -> None:
     argvalues: list[ast.AST] = []
-    for node in ast.walk(_gpu_lane_tree()):
+    for node in ast.walk(_gpu_lane_tree(module)):
         if not isinstance(node, ast.Call):
             continue
         if not _dotted_name(node.func).endswith("mark.parametrize"):
@@ -1258,28 +1270,30 @@ def test_gpu_lane_parametrizes_over_the_quick_subject_matrix() -> None:
     assert argvalues, "the GPU lane has no parametrized test"
     for value in argvalues:
         assert isinstance(value, ast.Name), ast.dump(value)
-        assert value.id == "QUICK_SUBJECT_CASES"
+        assert value.id == matrix
 
 
-def test_gpu_lane_never_skips_after_the_architecture_gate() -> None:
+@pytest.mark.parametrize("module", _GPU_LANE_MODULES)
+def test_gpu_lane_never_skips_after_the_architecture_gate(module: str) -> None:
     """The shared architecture gate is the only permitted skip; on the case's
     architecture an out-of-scope dispatch outcome must fail, never skip."""
     escapes = [
         f"line {node.lineno}: {_dotted_name(node.func)}"
-        for node in ast.walk(_gpu_lane_tree())
+        for node in ast.walk(_gpu_lane_tree(module))
         if isinstance(node, ast.Call)
         and _dotted_name(node.func).split(".")[-1] in _SKIP_CALLS
     ]
     assert not escapes
 
 
-def test_gpu_lane_gates_through_the_require_aware_arch_helper() -> None:
+@pytest.mark.parametrize("module", _GPU_LANE_MODULES)
+def test_gpu_lane_gates_through_the_require_aware_arch_helper(module: str) -> None:
     """The architecture gate is ``current_device_arch_in((arch,), ...)`` on the
     case's own architecture, so ``ROCKE_REQUIRE_<ARCH>=1`` fails a lane that lost
     its GPU instead of letting it pass with the GPU cases skipped."""
     gates = [
         node
-        for node in ast.walk(_gpu_lane_tree())
+        for node in ast.walk(_gpu_lane_tree(module))
         if isinstance(node, ast.Call)
         and _dotted_name(node.func) == "current_device_arch_in"
     ]
@@ -1339,9 +1353,12 @@ config = json.loads(sys.argv[1])
 sys.path[:0] = config["path"]
 package = config["package"]
 importlib.import_module(package + "._analytical")
+importlib.import_module(package + "._permutation")
+importlib.import_module(package + "._permutation_path")
 subject = importlib.import_module(package + "._dense_subject")
 importlib.import_module(package + ".test_analytical_dense")
-for arch, case in subject.QUICK_SUBJECT_CASES:
+importlib.import_module(package + ".test_permutation_dense")
+for arch, case in (*subject.QUICK_SUBJECT_CASES, *subject.PERMUTATION_SUBJECT_CASES):
     subject.resolve_dense_subject(arch, case)
     importlib.import_module(subject.DENSE_SUBJECTS[arch].runner_module)
 loaded = sorted(name for name in sys.modules if name.split(".")[0] == "torch")

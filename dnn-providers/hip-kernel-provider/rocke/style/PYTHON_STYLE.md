@@ -310,7 +310,8 @@ mechanics:
 
 ## 12. A minimal conforming module
 
-A new `instances/` builder that assembles the rules above (body elided):
+A new `instances/` builder that assembles the rules above (body elided). Its signature
+follows the builder rule in [`platform/AGENTS.md`](../platform/AGENTS.md).
 
 ```python
 """Foo GEMM builder — Spec -> build_* -> KernelDef (host authoring)."""
@@ -341,7 +342,7 @@ def is_valid_spec(spec: FooSpec, arch: str = "gfx950") -> tuple[bool, str]:
     return True, "ok"
 
 
-def build_foo(spec: FooSpec, arch: str = "gfx950") -> KernelDef:
+def build_foo(spec: FooSpec, *, arch: str) -> KernelDef:
     ok, why = is_valid_spec(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid foo spec for {arch}: {why}")

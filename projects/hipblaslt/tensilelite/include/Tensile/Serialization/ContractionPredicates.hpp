@@ -82,6 +82,7 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::AIGreaterThanEqual>(),
                      Base::template Pair<Predicates::Contraction::AILessThanEqual>(),
                      Base::template Pair<Predicates::Contraction::AmaxDCheck>(),
+                     Base::template Pair<Predicates::Contraction::PeerDCheck>(),
                      Base::template Pair<Predicates::Contraction::AlphaValue>(),
                      Base::template Pair<Predicates::Contraction::BetaValue>(),
                      Base::template Pair<Predicates::Contraction::BetaZero>(),
@@ -292,6 +293,12 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::AmaxDCheck, IO>
             : public AutoMappingTraits<Predicates::Contraction::AmaxDCheck, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::PeerDCheck, IO>
+            : public AutoMappingTraits<Predicates::Contraction::PeerDCheck, IO>
         {
         };
 

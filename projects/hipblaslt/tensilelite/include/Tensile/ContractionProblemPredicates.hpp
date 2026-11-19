@@ -937,6 +937,43 @@ namespace TensileLite
                 }
             };
 
+            // A problem with a peer D buffer runs only kernels that store to it, and the reverse.
+            struct PeerDCheck : public Predicate_CRTP<PeerDCheck, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                bool value;
+
+                PeerDCheck() = default;
+                PeerDCheck(bool value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "PeerDCheck";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.outputPeerD() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "prob_peerD=" << problem.outputPeerD() << " == sol_peerD=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
             struct BetaZero : public Predicate_CRTP<BetaZero, ContractionProblemGemm>
             {
                 enum
