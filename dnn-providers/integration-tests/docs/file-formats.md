@@ -89,8 +89,9 @@ A run does not parse the `sweep.json` of a folder that its `--gtest_filter` cann
 select. Thus a malformed `sweep.json` in that folder can stay undetected in that
 run. A name collision among tests that the filter cannot select can also stay
 undetected, when at least one side is in such a folder. A run that can select the
-folder aborts, and so does an unfiltered run. A run with `--write-support-claims` and `hipdnn_golden_data_tests`
-parse every folder, so they also abort.
+folder aborts, and so does an unfiltered run. A run with
+`--write-support-claims` and `hipdnn_golden_data_tests` parse every folder, so
+they also abort.
 Keep every bundle under a tier directory. A graph directly in the data root
 registers under the name of the data root folder, and a sweep at the data root
 registers under suite `_`. A graph under any other top-level folder registers
