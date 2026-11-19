@@ -134,7 +134,7 @@ void runGpuVsCpuPointwiseTernary(hipdnn_flatbuffers_sdk::data_objects::Pointwise
     input0Tensor.memory().hostData();
     input1Tensor.memory().hostData();
 
-    CpuReferencePointwiseImpl<DataType, DataType, DataType, bool>::pointwiseCompute(
+    CpuReferencePointwiseImpl<DataType, double, DataType, DataType, bool>::pointwiseCompute(
         operation, outputCpu, input0Tensor, input1Tensor, maskTensor);
 
     GpuReferencePointwise::pointwiseCompute<DataType, DataType, DataType, bool>(
@@ -165,7 +165,7 @@ void runGpuVsCpuPointwiseUnarySpecialValues(
             static_cast<DataType>(values[i]), 0, 0, 0, static_cast<int64_t>(i));
     }
 
-    CpuReferencePointwiseImpl<DataType, DataType>::pointwiseCompute(
+    CpuReferencePointwiseImpl<DataType, double, DataType>::pointwiseCompute(
         operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<DataType, DataType>(
@@ -197,7 +197,7 @@ void runGpuVsCpuPointwiseBinarySpecialValues(
         input1Tensor.setHostValue(values1[i], 0, 0, 0, static_cast<int64_t>(i));
     }
 
-    CpuReferencePointwiseImpl<OutputType, float, float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<OutputType, double, float, float>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor);
 
     GpuReferencePointwise::pointwiseCompute<OutputType, float, float>(
