@@ -1722,9 +1722,21 @@ def make_a_descriptor_addr64(
     Excludes ``"n"``/``p_A_stride_n`` from the descriptor entirely: that
     product (an operand large enough to need i64 for a huge ``N``) is
     already folded into the i64 tile origin by
-    :func:`rocke.helpers.tensor_view.make_tile_buffer_resource`, not
-    recomputed per lane in i32 -- see
+    :func:`rocke.helpers.tensor_view.make_tile_buffer_resource` /
+    :func:`addr64_a_origin_bytes`, not recomputed per lane in i32 -- see
     ``library/kernels/conv/docs/large_tensor_addr64_plan.md`` section 3.
+
+    **Precondition the caller must uphold:** every lane's delta ``d`` in
+    one call (i.e. the whole tile, ``[0, block_m)``) must decode to the
+    *same* ``n`` as ``origin_coords``' ``n0``. ``hi``/``wi`` are computed
+    *absolutely* here (safe in i32, since ``Ho``/``Wi`` never depend on
+    ``N``) and added to an origin that only contains ``n0``'s contribution
+    -- so a tile whose M-range crosses an image boundary would read through
+    the wrong image's base for every lane past the crossing. Plan section
+    2.2's ``p_image_aligned`` (not implemented in this slice) is precisely
+    the host-side guarantee that prevents this; until it lands, a caller
+    must only reach this descriptor when it already knows the tile cannot
+    cross an image boundary (e.g. ``Ho*Wo`` is a multiple of ``block_m``).
     """
     neg_pH = b.sub(b.const_i32(0), params["p_pH"])
     neg_pW = b.sub(b.const_i32(0), params["p_pW"])
@@ -1767,13 +1779,64 @@ def make_d_descriptor_addr64(
 ):
     """addr64 counterpart of :func:`make_d_descriptor_dynamic`: ``(d, k_out)
     -> N[D]HWK``, 2D only. Excludes ``"n"``/``p_D_stride_n`` for the same
-    reason as :func:`make_a_descriptor_addr64`."""
+    reason as :func:`make_a_descriptor_addr64` -- same image-boundary
+    precondition applies."""
     transforms = [spatial_unmerge_addr64(params, upper="m", origin_coords=origin_coords)]
     coord_names = ["ho", "wo", "k_out"]
     strides = [params["p_D_stride_ho"], params["p_D_stride_wo"], b.const_i32(1)]
     return DynamicTensorDescriptor.create(
         name or "D_nhwk_addr64", coord_names=coord_names, strides=strides
     ).transform(*transforms)
+
+
+def addr64_a_origin_bytes(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    n0_i64: Value,
+    elem_bytes: int,
+) -> Value:
+    """The A operand's i64 tile-origin byte offset: ``n0 * stride_n``,
+    elements, times ``elem_bytes``.
+
+    Only the ``n`` term: :func:`make_a_descriptor_addr64`'s per-lane
+    offset still computes ``hi``/``wi`` *absolutely* (bounded by
+    ``Hi``/``Wi``, never by ``N``, so i32 is safe there regardless of
+    addr64), so folding ``hi_first * stride_hi`` into the origin *as well*
+    would double-count that contribution -- it would be added once here
+    and again through the per-lane ``hi * stride_hi``. (Plan section 2.1's
+    tighter ``hi_first``-based origin is a footprint-shrinking refinement
+    for the host-side admission check in section 6.2, not implemented in
+    this slice; it would need the per-lane offset to compute the *delta*
+    ``hi - hi_first`` instead of the absolute ``hi``.)
+
+    Feed the result to
+    :func:`rocke.helpers.tensor_view.make_tile_buffer_resource`'s
+    ``origin_i64``. ``n0_i64`` is only used here, multiplied by the (i64,
+    under addr64) ``p_A_stride_n`` -- never decoded into a per-lane
+    absolute coordinate, so it is fine even when the true ``N`` exceeds
+    i32 (see :func:`spatial_unmerge_addr64`'s docstring).
+    """
+    origin_elems = b.mul(n0_i64, params["p_A_stride_n"])
+    return b.mul(origin_elems, b.const_i64(elem_bytes))
+
+
+def addr64_d_origin_bytes(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    n0_i64: Value,
+    elem_bytes: int,
+) -> Value:
+    """The D operand's i64 tile-origin byte offset: ``n0 * stride_n``,
+    elements, times ``elem_bytes``. Only the ``n`` term, for the same
+    reason as :func:`addr64_a_origin_bytes`: :func:`make_d_descriptor_addr64`
+    still computes ``ho``/``wo`` *absolutely* (bounded by ``Ho``/``Wo``,
+    never by ``N``), so folding them into the origin too would double-count
+    that contribution.
+    """
+    origin_elems = b.mul(n0_i64, params["p_D_stride_n"])
+    return b.mul(origin_elems, b.const_i64(elem_bytes))
 
 
 def emit_direct_epilogue_wmma(
