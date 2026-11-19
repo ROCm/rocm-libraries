@@ -678,13 +678,14 @@ def kernels_for(catalog, direction, tag, priority=1000):
             cfgs += [
                 C("wmma125_f16", 64, 64, 32, 2, 2, vec=8, cf=2),
             ]
-        # flex 1: the flex tile (ConvIgemmFlex.h, gfx950): 256 flattened output positions x 256
-        # or 128 channels, both operands by LDS DMA in 64-channel k-steps, eight waves in two
-        # ping-pong groups, one-round split-K. Appended after every twin (it has none).
+        # flex 1: the flex tile (ConvIgemmFlex.h, gfx950): 256 flattened output positions x 256,
+        # 192 (whole tiles of Wan VAE's 192 and 384 channels) or 128 channels, both operands by
+        # LDS DMA in 64-channel k-steps, eight waves in two ping-pong groups, one-round split-K.
+        # Appended after every twin (it has none).
         if catalog is CATALOG and dtype in FLEX_ATOMS:
             cfgs += [
                 C(FLEX_ATOMS[dtype], 256, bn, 64, 4, 2, vec=8, xcd=1, flex=1)
-                for bn in (256, 128)
+                for bn in (256, 128, 192)
             ]
         for i, c in enumerate(cfgs):
             name = f"conv_igemm.{tag}.{dt}.{c['atom']}.{c['math']}.{c['bm']}x{c['bn']}x{c['bk']}" f".w{c['wm']}x{c['wn']}.t{c['threads']}.v{c['vec']}.s{c['stages']}" + (

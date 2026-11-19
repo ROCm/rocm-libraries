@@ -22,7 +22,7 @@
 //                       channels-first memory and write the output channels-first (K1_BUFFER 1;
 //                       the matrix-core kernel with CF 1, or the FMA kernel)
 //   CONV_IGEMM_FLEX     1: the flex tile (k1ConvFlex, ConvIgemmFlex.h): gfx950 16-bit, BM 256 x BN
-//                       256 or 128 over flattened output positions, both operands by LDS DMA,
+//                       256, 192 or 128 over flattened output positions, both operands by LDS DMA,
 //                       eight waves in two groups (ping-pong); defined only when set
 //   K1_BUFFER           0 when a block's rows could span 2^31 bytes (64-bit global loads)
 //   K1_LARGE            1: 64-bit positions within an image (large-image configs, images past

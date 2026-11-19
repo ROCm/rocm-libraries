@@ -1247,15 +1247,15 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.splitPolicy = kernel.getIntMetadata("split_policy");
     tile.cfx = kernel.getIntMetadata("cfx");
     tile.flex = kernel.metadata.count("flex") != 0 ? kernel.getIntMetadata("flex") : 0;
-    // The flex tile: 256 positions x 256 or 128 channels of 16-bit 16x16x32 atoms on 4 x 2 waves,
+    // The flex tile: 256 positions x 256, 192 or 128 channels of 16-bit 16x16x32 atoms on 4 x 2 waves,
     // 64-channel k-steps, 8-wide vectors, XCD order; every other variant knob off.
     if(tile.flex != 0
        && (tile.flex != 1 || (tile.atom != "mfma16x32_f16" && tile.atom != "mfma16x32_bf16")
-           || tile.split || tile.bm != 256 || (tile.bn != 256 && tile.bn != 128) || tile.bk != 64
-           || tile.wm != 4 || tile.wn != 2 || tile.vec != 8 || tile.stages != 1 || tile.xcd != 1
-           || tile.halo != 0 || tile.wdirect != 0 || tile.pack != 0 || tile.cf != 0 || tile.swz != 0
-           || tile.dma != 0 || tile.fuse != 0 || tile.large != 0 || tile.patch != 0 || tile.cfx != 0
-           || tile.splitPolicy != 0))
+           || tile.split || tile.bm != 256 || (tile.bn != 256 && tile.bn != 192 && tile.bn != 128)
+           || tile.bk != 64 || tile.wm != 4 || tile.wn != 2 || tile.vec != 8 || tile.stages != 1
+           || tile.xcd != 1 || tile.halo != 0 || tile.wdirect != 0 || tile.pack != 0 || tile.cf != 0
+           || tile.swz != 0 || tile.dma != 0 || tile.fuse != 0 || tile.large != 0 || tile.patch != 0
+           || tile.cfx != 0 || tile.splitPolicy != 0))
     {
         return std::nullopt;
     }

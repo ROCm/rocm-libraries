@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 // K1 flex tile (CONV_IGEMM_FLEX 1): the implicit GEMM over flattened output positions as one
-// 256-position x BN-channel block (BN 256 or 128) of eight waves on gfx950's 16x16x32 matrix cores, for 16-bit
+// 256-position x BN-channel block (BN 256, 192 or 128) of eight waves on gfx950's 16x16x32 matrix cores, for 16-bit
 // channels-last forward and unit-stride backward-data graphs. Included by ConvIgemm.cpp after
 // ConvIgemmCore.h (atoms, K1Args, k1Setup, k1Rsrc, k1XcdOrder). HIPRTC-compatible.
 //
@@ -74,7 +74,7 @@ __device__ __attribute__((always_inline)) void k1ConvFlex(const K1Args& a CONV_E
     constexpr int FM = 128 / DIM, FN = WN / DIM; // a wave's position x channel fragments
     static_assert(sizeof(T) == 2 && Atom::KA == 32 && Atom::KPL == 8 && Atom::WAVE == WAVE,
                   "16-bit, 16x16x32 atoms");
-    static_assert((BN == 256 || BN == 128) && IPW == 4, "tile");
+    static_assert((BN == 256 || BN == 192 || BN == 128) && IPW == 4, "tile");
     typedef typename K1Raw<16>::type Raw16;
     typedef typename Atom::frag Frag;
 
@@ -462,9 +462,11 @@ __device__ __attribute__((always_inline)) void k1ConvFlex(const K1Args& a CONV_E
     // Whole 16-byte runs of output channels: each wave stages its 128 positions x WN channels in
     // LDS (the stages are free: every read and DMA is done), granule g of position p at slot
     // g ^ key(p), then stores each position's channels with GO lanes of 16 bytes.
-    if((ncols & 7) == 0 && (outChans & 7) == 0 && (chanBase & 7) == 0)
+    // (A wave's 48 channels of BN 192 are 6 granules a row: such tiles store directly.)
+    constexpr bool STAGED = BN != 192;
+    if(STAGED && (ncols & 7) == 0 && (outChans & 7) == 0 && (chanBase & 7) == 0)
     {
-        constexpr int GO = WN * 2 / 16; // granules a staged row (8 or 4)
+        constexpr int GO = STAGED ? WN * 2 / 16 : 8; // granules a staged row (8 or 4)
         constexpr int PO = WAVE / GO; // positions a store instruction
         auto key = [](int p) __attribute__((always_inline))
         {
