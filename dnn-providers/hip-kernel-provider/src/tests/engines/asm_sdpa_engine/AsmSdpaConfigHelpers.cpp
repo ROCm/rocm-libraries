@@ -117,7 +117,7 @@ GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats)
     tc.attnScale = 1.0f / std::sqrt(static_cast<float>(config.hdim_q));
     // Group mode gives Q and K/V a token capacity of 512, twice the largest ts_qo of any
     // group row, so the per-batch lengths a test writes into the offset tables can span
-    // two Q-tiles of every row while keeping every K/V length at least its Q length.
+    // two Q-tiles of every row on either side.
     if(config.mode == BatchMode::GROUP)
     {
         constexpr int64_t K_GROUP_SEQ_CAPACITY = 512;

@@ -17,6 +17,17 @@
 namespace asm_sdpa_engine
 {
 
+/// Which set of per-batch lengths the integration fixture writes into a group-mode case's
+/// offset and cumulative length tables (the sets live in IntegrationGpuSdpaForward.cpp).
+enum class GroupLengths
+{
+    /// Every batch spans several Q-tiles and has at least as many keys as queries.
+    STANDARD,
+    /// A batch with more queries than keys (fully masked rows under bottom-right causal), a
+    /// batch with no queries and a batch with no keys.
+    EDGE,
+};
+
 /**
  * @brief Lightweight, GPU-free parameters for building an SDPA forward graph.
  *
@@ -47,6 +58,9 @@ struct GraphTestCase
     /// cuSeqLens only: cu_seq_len_q and cu_seq_len_kv name one table (K_CU_SEQ_LEN_Q_NAME),
     /// so every batch's Q and K/V lengths are equal while K/V keep their own ragged offsets.
     bool sharedCuSeqLen = false;
+    /// Group mode only: the per-batch lengths of the offset and cumulative length tables. The
+    /// batch count must match the set's.
+    GroupLengths groupLengths = GroupLengths::STANDARD;
 
     std::string name;
     std::string arch;
