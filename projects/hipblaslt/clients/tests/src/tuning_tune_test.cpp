@@ -1373,6 +1373,7 @@ namespace
                                                 "HIPBLASLT_TUNING_FLUSH_ICACHE",
                                                 "HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE",
                                                 "HIPBLASLT_TUNING_SCRATCH_MAX_BYTES",
+                                                "HIPBLASLT_CHECK_NUMERICS",
                                                 // Set by one logging case, and
                                                 // left set would make every
                                                 // later case skip itself.
@@ -2196,6 +2197,38 @@ namespace
         EXPECT_EQ(c.misses, 1u);
         EXPECT_EQ(c.shapes, 1u);
         EXPECT_EQ(c.fellback, 1u);
+    }
+
+    // A device that refuses tuning its scratch leaves the call on default
+    // selection, which succeeds, so the refusal must not stay in HIP's last
+    // error: the caller's next hipGetLastError would report an out-of-memory it
+    // never had, and HIPBLASLT_CHECK_NUMERICS would fail the matmul. Every call
+    // is checked, because resolving a kernel for its first launch clears the
+    // last error on its own.
+    TEST_F(TuningTune_pre_checkin, RefusedScratchLeavesNoHipError)
+    {
+        for(const char* checkNumerics : {"0", "1"})
+        {
+            SCOPED_TRACE(std::string("HIPBLASLT_CHECK_NUMERICS=") + checkNumerics);
+            setenv("HIPBLASLT_CHECK_NUMERICS", checkNumerics, 1);
+            enterMode("tune", m_path);
+            hipblaslt_tuning_inject_failure_for_test(6);
+            static_cast<void>(hipGetLastError());
+
+            for(int call = 0; call < 3; call++)
+            {
+                ASSERT_TRUE(runGemm(256, 256, 256)) << "call " << call << " failed the matmul";
+                const hipError_t last = hipGetLastError();
+                EXPECT_EQ(last, hipSuccess) << "call " << call << " left " << hipGetErrorName(last);
+            }
+
+            // Refused before tuning-start, and a failure rather than a skip.
+            const auto c = counters();
+            EXPECT_EQ(c.attempts, 0u);
+            EXPECT_EQ(c.skipped, 0u);
+            EXPECT_EQ(c.tuned, 0u);
+            EXPECT_EQ(valueRowCount(m_path), 0u);
+        }
     }
 
     // Two threads that meet two untuned shapes at the same time both get them
