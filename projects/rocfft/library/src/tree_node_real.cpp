@@ -174,8 +174,9 @@ void RealTransCmplxNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 
     // complex fft
     NodeMetaData fftPlanData(this);
-    fftPlanData.dimension = dimension;
-    fftPlanData.length    = *realLength;
+    fftPlanData.dimension    = dimension;
+    fftPlanData.length       = *realLength;
+    fftPlanData.outputLength = fftPlanData.length;
 
     auto fftPlan = NodeFactory::CreateExplicitNode(fftPlanData, this, determined_scheme);
     fftPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[1].get());
@@ -278,10 +279,11 @@ void RealTransEvenNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     // complex
 
     NodeMetaData cfftPlanData(this);
-    cfftPlanData.dimension = dimension;
-    cfftPlanData.length    = *realLength;
-    cfftPlanData.length[0] = cfftPlanData.length[0] / 2;
-    auto cfftPlan          = NodeFactory::CreateExplicitNode(cfftPlanData, this, determined_scheme);
+    cfftPlanData.dimension    = dimension;
+    cfftPlanData.length       = *realLength;
+    cfftPlanData.length[0]    = cfftPlanData.length[0] / 2;
+    cfftPlanData.outputLength = cfftPlanData.length;
+    auto cfftPlan = NodeFactory::CreateExplicitNode(cfftPlanData, this, determined_scheme);
     // NB: the buffer is real, but we treat it as complex
     cfftPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[fft_node_id].get());
 
@@ -547,8 +549,9 @@ void Real2DEvenNode::BuildTree_internal_2D_SINGLE()
     else
     {
         NodeMetaData cfftPlanData(this);
-        cfftPlanData.dimension = dimension;
-        cfftPlanData.length    = {outputLength[0] / 2, outputLength[1]};
+        cfftPlanData.dimension    = dimension;
+        cfftPlanData.length       = {outputLength[0] / 2, outputLength[1]};
+        cfftPlanData.outputLength = cfftPlanData.length;
 
         auto cfftPlan = NodeFactory::CreateExplicitNode(cfftPlanData, this);
         cfftPlan->RecursiveBuildTree();
@@ -666,8 +669,9 @@ void Real2DEvenNode::BuildTree_internal_TR_pair(SchemeTreeVec& child_scheme_tree
 
         // second row fft
         NodeMetaData row2PlanData(this);
-        row2PlanData.length    = trans1Plan->outputLength;
-        row2PlanData.dimension = 1;
+        row2PlanData.length       = trans1Plan->outputLength;
+        row2PlanData.dimension    = 1;
+        row2PlanData.outputLength = row2PlanData.length;
         auto row2Plan = NodeFactory::CreateExplicitNode(row2PlanData, this, determined_scheme_2);
         row2Plan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[2].get());
 
@@ -738,8 +742,9 @@ void Real2DEvenNode::BuildTree_internal_TR_pair(SchemeTreeVec& child_scheme_tree
 
         // c2c row transform
         NodeMetaData c2cPlanData(this);
-        c2cPlanData.dimension = 1;
-        c2cPlanData.length    = trans1Plan->outputLength;
+        c2cPlanData.dimension    = 1;
+        c2cPlanData.length       = trans1Plan->outputLength;
+        c2cPlanData.outputLength = c2cPlanData.length;
         auto c2cPlan = NodeFactory::CreateExplicitNode(c2cPlanData, this, determined_scheme_1);
         c2cPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[1].get());
 
@@ -1381,8 +1386,9 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
 
         // first column
         NodeMetaData c1planData(this);
-        c1planData.length    = trans1->outputLength;
-        c1planData.dimension = 1;
+        c1planData.length       = trans1->outputLength;
+        c1planData.dimension    = 1;
+        c1planData.outputLength = c1planData.length;
         auto c1plan = NodeFactory::CreateExplicitNode(c1planData, this, determined_scheme_2);
         c1plan->allowOutofplace = false; // let it be inplace
         c1plan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[2].get());
@@ -1395,8 +1401,9 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
 
         // second column
         NodeMetaData c2planData(this);
-        c2planData.length    = trans2->outputLength;
-        c2planData.dimension = 1;
+        c2planData.length       = trans2->outputLength;
+        c2planData.dimension    = 1;
+        c2planData.outputLength = c2planData.length;
         auto c2plan = NodeFactory::CreateExplicitNode(c2planData, this, determined_scheme_4);
         c2plan->allowOutofplace = false; // let it be inplace
         c2plan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[4].get());
@@ -1496,8 +1503,9 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
 
         // column
         NodeMetaData c2planData(this);
-        c2planData.length    = trans3->outputLength;
-        c2planData.dimension = 1;
+        c2planData.length       = trans3->outputLength;
+        c2planData.dimension    = 1;
+        c2planData.outputLength = c2planData.length;
         auto c2plan = NodeFactory::CreateExplicitNode(c2planData, this, determined_scheme_1);
         c2plan->allowOutofplace = false; // let it be inplace
         c2plan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[1].get());
@@ -1511,8 +1519,9 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
 
         // column
         NodeMetaData c1planData(this);
-        c1planData.length    = trans2->outputLength;
-        c1planData.dimension = 1;
+        c1planData.length       = trans2->outputLength;
+        c1planData.dimension    = 1;
+        c1planData.outputLength = c1planData.length;
         auto c1plan = NodeFactory::CreateExplicitNode(c1planData, this, determined_scheme_3);
         c1plan->allowOutofplace = false; // let it be inplace
         c1plan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[3].get());

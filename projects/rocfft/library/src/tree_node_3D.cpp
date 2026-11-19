@@ -50,8 +50,9 @@ void RTRT3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 
     // 2d fft
     NodeMetaData xyPlanData(this);
-    xyPlanData.length    = length;
-    xyPlanData.dimension = 2;
+    xyPlanData.length       = length;
+    xyPlanData.dimension    = 2;
+    xyPlanData.outputLength = xyPlanData.length;
     auto xyPlan = NodeFactory::CreateExplicitNode(xyPlanData, this, determined_scheme_node0);
     xyPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
 
@@ -68,6 +69,7 @@ void RTRT3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     zPlanData.length.push_back(length[2]);
     zPlanData.length.push_back(length[0]);
     zPlanData.length.push_back(length[1]);
+    zPlanData.outputLength = zPlanData.length;
     auto zPlan = NodeFactory::CreateExplicitNode(zPlanData, this, determined_scheme_node2);
     zPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[2].get());
 
@@ -192,8 +194,9 @@ void TRTRTR3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 
         // row ffts
         NodeMetaData row_plan_data(this);
-        row_plan_data.length    = cur_length;
-        row_plan_data.dimension = 1;
+        row_plan_data.length       = cur_length;
+        row_plan_data.dimension    = 1;
+        row_plan_data.outputLength = row_plan_data.length;
         // skip the decide scheme part in node factory
         ComputeScheme determined_scheme
             = (noSolution) ? CS_NONE : child_scheme_trees[i + 1]->curScheme;
@@ -395,8 +398,9 @@ void BLOCKRC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         {
             // row ffts
             NodeMetaData row_plan_data(this);
-            row_plan_data.length    = cur_length;
-            row_plan_data.dimension = 1;
+            row_plan_data.length       = cur_length;
+            row_plan_data.dimension    = 1;
+            row_plan_data.outputLength = row_plan_data.length;
             ComputeScheme determined_scheme
                 = (noSolution) ? CS_NONE : child_scheme_trees[childNodes.size()]->curScheme;
             auto row_plan = NodeFactory::CreateExplicitNode(row_plan_data, this, determined_scheme);
@@ -606,6 +610,7 @@ void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         xyPlanData.length.push_back(length[index]);
     }
+    xyPlanData.outputLength = xyPlanData.length;
     auto xyPlan = NodeFactory::CreateExplicitNode(xyPlanData, this, determined_scheme_node0);
     xyPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
 

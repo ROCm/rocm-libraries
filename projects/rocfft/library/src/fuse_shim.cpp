@@ -172,6 +172,8 @@ std::unique_ptr<TreeNode> TRFuseShim::FuseKernels()
 
         std::swap(fused->outStride[1], fused->outStride[2]);
         std::swap(fused->length[1], fused->length[2]);
+        if(!fused->outputLength.empty())
+            std::swap(fused->outputLength[1], fused->outputLength[2]);
     }
     else
     {

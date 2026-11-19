@@ -56,6 +56,7 @@ void RTRT2DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         row1PlanData.length.push_back(length[index]);
     }
+    row1PlanData.outputLength = row1PlanData.length;
     auto row1Plan = NodeFactory::CreateExplicitNode(row1PlanData, this, determined_scheme_node0);
     row1Plan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
 
@@ -79,6 +80,7 @@ void RTRT2DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         row2PlanData.length.push_back(length[index]);
     }
+    row2PlanData.outputLength = row2PlanData.length;
     auto row2Plan = NodeFactory::CreateExplicitNode(row2PlanData, this, determined_scheme_node2);
     row2Plan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[2].get());
 
@@ -187,6 +189,7 @@ void RC2DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         rowPlanData.length.push_back(length[index]);
     }
+    rowPlanData.outputLength = rowPlanData.length;
     auto rowPlan = NodeFactory::CreateExplicitNode(rowPlanData, this, determined_scheme_node0);
     rowPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
 

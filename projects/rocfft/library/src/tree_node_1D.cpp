@@ -76,6 +76,7 @@ void TRTRT1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         row1PlanData.length.push_back(length[index]);
     }
+    row1PlanData.outputLength = row1PlanData.length;
 
     auto row1Plan = NodeFactory::CreateExplicitNode(row1PlanData, this, determined_scheme_node1);
     row1Plan->large1D = 0;
