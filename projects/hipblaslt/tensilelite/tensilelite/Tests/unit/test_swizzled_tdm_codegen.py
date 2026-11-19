@@ -63,6 +63,11 @@ REGRESSIONS = [
     # F4 is packed bytes: innerK / pad derive from a 0.5-byte element.
     _case("f4_B", "B", "f4"),
     _case("f4_A_vwa2_pad", "A", "f4", VectorWidthA=2),
+    # nO tile <= 1024 B: the VW>1 pad comes from the descriptor's pad_interval (no iterate-mode)
+    _case("bf16_B_vwb2_small_tile", "B", "bf16", VectorWidthB=2, DepthU=32),
+    _case("bf16_A_vwa2_small_tile", "A", "bf16", VectorWidthA=2, DepthU=32),
+    _case("f4_B_vwb2_small_tile", "B", "f4", VectorWidthB=2, DepthU=128),
+    _case("f4_A_vwa2_small_tile", "A", "f4", VectorWidthA=2, DepthU=128),
     _case("f4_B_vwb4_pad", "B", "f4", wt=(4, 4), VectorWidthB=4),
     _case("mxf4_AB", "AB", "mxf4"),
 ]
