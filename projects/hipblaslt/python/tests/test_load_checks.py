@@ -237,6 +237,73 @@ def test_only_the_selected_hipblaslt_may_be_loaded_after_import():
 # --- the build-time HIP runtime -----------------------------------------------------------------
 
 
+# --- dependencies loaded from hipBLASLt's own directory -----------------------------------------
+
+_NEEDED = {
+    "/r/lib/libhipblaslt.so.1": [
+        "libtensilelite-host.so.1",
+        "librocroller.so.1",
+        "libc.so.6",
+    ],
+    "/r/lib/libtensilelite-host.so.1": ["liborigami.so.1", "libamdhip64.so.7"],
+    "/r/lib/librocroller.so.1": ["libamdhip64.so.7", "libhipblaslt.so.1"],
+    "/r/lib/liborigami.so.1": [],
+    "/r/lib/libamdhip64.so.7": [],
+}
+
+
+def _plan(loaded=()):
+    return L.dependencies_to_preload(
+        "/r/lib/libhipblaslt.so.1",
+        lambda p: _NEEDED.get(p, []),
+        _NEEDED.__contains__,
+        loaded,
+        "linux",
+    )
+
+
+def test_dependencies_come_from_hipblaslts_directory_before_their_dependents():
+    order = _plan()
+    assert sorted(order) == sorted(set(_NEEDED) - {"/r/lib/libhipblaslt.so.1"})
+    for lib, needs in _NEEDED.items():
+        for name in needs:
+            dep = "/r/lib/" + name
+            if lib in order and dep in order:
+                assert order.index(dep) < order.index(lib), (dep, lib)
+
+
+def test_an_already_loaded_dependency_isnt_loaded_again():
+    order = _plan(loaded=["/opt/rocm/lib/libamdhip64.so.7.2.0"])
+    assert "/r/lib/libamdhip64.so.7" not in order
+    assert "/r/lib/librocroller.so.1" in order
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads an ELF file")
+def test_the_extensions_dynamic_section_names_hipblaslt():
+    from hipblaslt import _core
+
+    needed, governed_by_rpath = L.elf_dynamic(_core.__file__)
+    assert any(n.startswith("libhipblaslt.so") for n in needed)
+    assert isinstance(governed_by_rpath, bool)
+
+
+def test_a_file_that_isnt_elf_has_no_dynamic_section(tmp_path):
+    f = tmp_path / "not-elf.so"
+    f.write_bytes(b"#!/bin/sh\n" + b"\0" * 64)
+    assert L.elf_dynamic(str(f)) is None
+    assert L.elf_dynamic(str(tmp_path / "missing.so")) is None
+
+
+def test_a_failed_preload_names_ld_library_path(tmp_path):
+    with pytest.raises(L.HipblasLtLoadError, match="LD_LIBRARY_PATH is set"):
+        L._preload(
+            str(tmp_path / "libmissing.so.1"), {"LD_LIBRARY_PATH": "/other/rocm/lib"}
+        )
+    with pytest.raises(L.HipblasLtLoadError) as excinfo:
+        L._preload(str(tmp_path / "libmissing.so.1"), {})
+    assert "LD_LIBRARY_PATH" not in str(excinfo.value)
+
+
 def test_a_build_time_library_gets_its_hip_runtime_first():
     build = L.Candidate("/install/lib/libhipblaslt.so.1", "build")
     runtime = "/custom/rocm/lib/libamdhip64.so.7"

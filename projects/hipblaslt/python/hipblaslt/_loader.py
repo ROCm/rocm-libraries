@@ -30,6 +30,8 @@ __all__ = [
     "check_single_hipblaslt",
     "choose_library",
     "compatible_already_loaded",
+    "dependencies_to_preload",
+    "elf_dynamic",
     "hip_runtime_to_preload",
     "HipblasLtLoadError",
     "HipblasLtLoadWarning",
@@ -212,6 +214,41 @@ def hip_runtime_to_preload(
     if any(_base(p, platform).startswith("libamdhip64.so") for p in loaded):
         return None
     return build_hip_runtime
+
+
+def dependencies_to_preload(
+    path: str,
+    needed_of: Callable[[str], Sequence[str]],
+    isfile: Callable[[str], bool],
+    loaded: Iterable[str],
+    platform: str,
+) -> list[str]:
+    """The libraries in `path`'s own directory that it needs, dependencies before dependents.
+
+    `needed_of` gives a library's NEEDED names. A dependency the process already has under its
+    name is left alone: loading a second copy by full path would put two in the process.
+    """
+    pm = _pathmod(platform)
+    home = pm.dirname(path)
+    loaded = list(loaded)
+    order: list[str] = []
+    seen = {pm.basename(path)}
+
+    def visit(lib: str) -> None:
+        for name in needed_of(lib):
+            if name in seen:
+                continue
+            seen.add(name)
+            dep = pm.join(home, name)
+            if not isfile(dep) or any(
+                matches_lib_name(p, name, platform) for p in loaded
+            ):
+                continue
+            visit(dep)
+            order.append(dep)
+
+    visit(path)
+    return order
 
 
 def check_single_hipblaslt(path: str, loaded: Iterable[str], platform: str) -> None:
@@ -415,6 +452,72 @@ def _windows_modules() -> list[str]:
     return out
 
 
+_DT_NULL, _DT_NEEDED, _DT_STRTAB, _DT_STRSZ, _DT_RPATH, _DT_RUNPATH = (
+    0,
+    1,
+    5,
+    10,
+    15,
+    29,
+)
+
+
+def elf_dynamic(path: str) -> tuple[list[str], bool] | None:
+    """A 64-bit little-endian ELF's NEEDED names, and whether DT_RPATH (not DT_RUNPATH) governs
+    its search path. None for anything else, or a file that can't be read."""
+    import struct
+
+    try:
+        with open(path, "rb") as f:
+            head = f.read(64)
+            if len(head) < 64 or head[:4] != b"\x7fELF" or head[4] != 2 or head[5] != 1:
+                return None
+            (phoff,) = struct.unpack_from("<Q", head, 0x20)
+            phentsize, phnum = struct.unpack_from("<HH", head, 0x36)
+            f.seek(phoff)
+            table = f.read(phentsize * phnum)
+            segments, dynamic = [], None
+            for i in range(phnum):
+                p_type, _, offset, vaddr, _, filesz = struct.unpack_from(
+                    "<IIQQQQ", table, i * phentsize
+                )
+                if p_type == 1:  # PT_LOAD
+                    segments.append((vaddr, offset, filesz))
+                elif p_type == 2:  # PT_DYNAMIC
+                    dynamic = (offset, filesz)
+            if dynamic is None:
+                return None
+            f.seek(dynamic[0])
+            data = f.read(dynamic[1])
+            entries = []
+            for o in range(0, len(data) - 15, 16):
+                tag, value = struct.unpack_from("<qQ", data, o)
+                if tag == _DT_NULL:
+                    break
+                entries.append((tag, value))
+            tags = dict(entries)
+            strtab = next(
+                (
+                    off + tags[_DT_STRTAB] - va
+                    for va, off, size in segments
+                    if va <= tags.get(_DT_STRTAB, -1) < va + size
+                ),
+                None,
+            )
+            if strtab is None:
+                return None
+            f.seek(strtab)
+            strings = f.read(tags.get(_DT_STRSZ, 0))
+    except (OSError, struct.error):
+        return None
+
+    def string(at: int) -> str:
+        return strings[at : strings.index(b"\0", at)].decode("utf-8", "replace")
+
+    needed = [string(v) for t, v in entries if t == _DT_NEEDED]
+    return needed, _DT_RPATH in tags and _DT_RUNPATH not in tags
+
+
 def _rocm_sdk_find(name: str) -> list[str]:
     try:
         import rocm_sdk  # type: ignore[import-not-found]
@@ -426,6 +529,22 @@ def _rocm_sdk_find(name: str) -> list[str]:
         Exception
     ):  # noqa: BLE001 - a broken rocm_sdk install just means "not found here"
         return []
+
+
+def _preload(path: str, environ: Mapping[str, str]) -> None:
+    try:
+        if sys.platform == "win32":
+            ctypes.WinDLL(path)
+        else:
+            ctypes.CDLL(path, mode=ctypes.RTLD_GLOBAL)
+    except OSError as e:
+        hint = ""
+        if environ.get("LD_LIBRARY_PATH"):
+            hint = (
+                f" LD_LIBRARY_PATH is set ({environ['LD_LIBRARY_PATH']}), and a library there "
+                "may come from a different ROCm; try again without it."
+            )
+        raise HipblasLtLoadError(f"Couldn't load {path}: {e}.{hint}") from e
 
 
 def load(
@@ -467,12 +586,23 @@ def load(
         ]
         for d in windows_dirs_to_register(candidates, _has_hip_runtime):
             os.add_dll_directory(d)
-        ctypes.WinDLL(chosen.path)
+        _preload(chosen.path, environ)
     else:
         runtime = hip_runtime_to_preload(chosen, build_hip_runtime, before, platform)
-        if runtime and os.path.isfile(runtime):
-            ctypes.CDLL(runtime, mode=ctypes.RTLD_GLOBAL)
-        ctypes.CDLL(chosen.path, mode=ctypes.RTLD_GLOBAL)
+        first = [runtime] if runtime and os.path.isfile(runtime) else []
+        dynamic = elf_dynamic(chosen.path)
+        if environ.get("LD_LIBRARY_PATH") and dynamic and not dynamic[1]:
+            # LD_LIBRARY_PATH is searched before DT_RUNPATH, so another ROCm there would supply
+            # hipBLASLt's companions. Load them from hipBLASLt's own directory first.
+            first += dependencies_to_preload(
+                chosen.path,
+                lambda p: (elf_dynamic(p) or ([], False))[0],
+                os.path.isfile,
+                before + first,
+                platform,
+            )
+        for lib in first + [chosen.path]:
+            _preload(lib, environ)
 
     if override:
         _log.info("hipBLASLt loaded from %s (%s)", chosen.path, LIBRARY_ENV)
