@@ -673,6 +673,49 @@ TEST_F(TestBundleDiscoveryFixture, DirectoryNamedSweepJsonThrowsWithItsPathWhenT
     }
 }
 
+// In a sweep that discovery reads, a directory named sweep.json, or a link to a
+// directory, fails discovery with a message that names it.
+TEST_F(TestBundleDiscoveryFixture, DirectoryNamedSweepJsonThrowsWithItsPathWhenTheCasesAreRead)
+{
+    namespace fs = std::filesystem;
+    const auto expectThrowNaming = [](const fs::path& root, const fs::path& sweepJson) {
+        try
+        {
+            (void)discoverBundles(root);
+            ADD_FAILURE() << "discovery did not throw for " << sweepJson;
+        }
+        catch(const std::runtime_error& e)
+        {
+            EXPECT_NE(
+                std::string(e.what()).find("Could not open sweep manifest: " + sweepJson.string()),
+                std::string::npos)
+                << e.what();
+        }
+    };
+
+    const auto directoryRoot = _tempDir / "directory";
+    const auto directorySweep = directoryRoot / "quick" / "Op" / "Odd";
+    fs::create_directories(directorySweep / "sweep.json");
+    std::ofstream(directorySweep / "graph.template.json") << "{}";
+    expectThrowNaming(directoryRoot, directorySweep / "sweep.json");
+
+    const auto linkRoot = _tempDir / "link";
+    const auto linkSweep = linkRoot / "quick" / "Op" / "Linked";
+    const auto target = _tempDir / "target";
+    fs::create_directories(linkSweep);
+    fs::create_directories(target);
+    std::ofstream(linkSweep / "graph.template.json") << "{}";
+    try
+    {
+        fs::create_directory_symlink(target, linkSweep / "sweep.json");
+    }
+    catch(const fs::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create directory symlinks here: " << e.what();
+    }
+    expectThrowNaming(linkRoot, linkSweep / "sweep.json");
+}
+
 // The walk skips a sweep.json that is a directory link back to its own folder, and a
 // link to nothing. Such a folder is not a sweep root, so it is an empty leaf.
 TEST_F(TestBundleDiscoveryFixture, SweepJsonLinkThatTheWalkSkipsMarksNoSweepRoot)

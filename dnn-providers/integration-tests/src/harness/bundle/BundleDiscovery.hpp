@@ -526,8 +526,13 @@ inline void warnOnEmptyLeafFolders(const BundleTreeListing& listing,
 // meaningful.
 inline std::vector<std::string> readSweepCaseIds(const std::filesystem::path& sweepPath)
 {
-    std::ifstream stream(sweepPath);
-    if(!stream)
+    std::error_code error;
+    std::ifstream stream;
+    if(std::filesystem::is_regular_file(sweepPath, error))
+    {
+        stream.open(sweepPath);
+    }
+    if(!stream.is_open())
     {
         throw std::runtime_error("Could not open sweep manifest: " + sweepPath.string());
     }
