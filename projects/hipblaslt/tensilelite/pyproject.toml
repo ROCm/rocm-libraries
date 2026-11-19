@@ -100,7 +100,8 @@ dev = [
 
 [build-system]
 requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+build-backend = "_tensilelite_build_backend"
+backend-path = ["packaging_backend"]
 
 [tool.setuptools]
 # package-data below is the only list of non-Python files in the wheel.
