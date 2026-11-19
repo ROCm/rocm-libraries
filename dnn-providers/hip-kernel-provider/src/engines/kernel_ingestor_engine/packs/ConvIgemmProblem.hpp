@@ -258,9 +258,11 @@ inline constexpr int64_t MAX_SPLIT_POLICY = 64;
  *   keeping at least two k-iterations per split; one block per WGP on legacy gfx10+
  *   (device_units), keeping at least 64; one block per CU on gfx1250, keeping eight.
  * - 1: no split.
- * - N from 2 to MAX_SPLIT_POLICY: exactly N splits where each keeps a k-iteration and the
- *   partials and the grid fit; otherwise no split (the kernel match declines such a config, and
- *   any whose plan equals the default's, so autotune times only distinct plans).
+ * - N from 2 to MAX_SPLIT_POLICY: exactly N splits where the unsplit grid under-fills the
+ *   device, each split keeps a k-iteration and the partials and the grid fit; otherwise no split
+ *   (the kernel match declines such a config, and any whose plan equals the default's, so
+ *   autotune times only distinct plans, and a filled grid's engine workspace carries no
+ *   partials it never runs).
  *
  * A device that reports no units gets no split (the kernel match declines it). @p pack: 1 the
  * config's k-steps span whole taps (tap packing), so a k-step covers bk / (reduction channels)

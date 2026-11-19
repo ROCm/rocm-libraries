@@ -1119,11 +1119,14 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
     {
         iterations = divUp(phaseTaps * reduction, bk);
     }
+    const long long wanted = device_units::dispatchUnits(device) * blocksPerUnit;
+    const bool underFilled = tiles < wanted;
     if(splitPolicy >= 2)
     {
-        // Exactly splitPolicy splits, each of at least one k-iteration, within the partials'
-        // and the grid's limits; otherwise none (the kernel match declines the config).
-        if(splitPolicy > iterations
+        // Exactly splitPolicy splits of an under-filled grid, each of at least one k-iteration,
+        // within the partials' and the grid's limits; otherwise none (the kernel match declines
+        // the config).
+        if(!underFilled || splitPolicy > iterations
            || splitPolicy * plan.outElems * static_cast<long long>(sizeof(float))
                   > MAX_PARTIAL_BYTES
            || grid->z * splitPolicy > MAX_GRID_YZ)
@@ -1136,11 +1139,9 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
             = plan.partialOffset + static_cast<size_t>(splitPolicy * plan.outElems) * sizeof(float);
         return plan;
     }
-    const long long wanted = device_units::dispatchUnits(device) * blocksPerUnit;
     long long splits
-        = tiles >= wanted
-              ? 1
-              : std::min({divUp(wanted, tiles), iterations / minIterations, MAX_SPLITS});
+        = !underFilled ? 1
+                       : std::min({divUp(wanted, tiles), iterations / minIterations, MAX_SPLITS});
     while(splits > 1
           && (splits * plan.outElems * static_cast<long long>(sizeof(float)) > MAX_PARTIAL_BYTES
               || grid->z * splits > MAX_GRID_YZ))

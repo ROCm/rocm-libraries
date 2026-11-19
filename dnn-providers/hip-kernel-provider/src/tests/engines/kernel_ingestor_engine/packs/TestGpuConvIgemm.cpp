@@ -2420,6 +2420,15 @@ TEST(TestConvIgemmSplitPlan, ExplicitSplitCountsAreExactWhereFeasible)
     EXPECT_EQ(infeasible.splits, 1);
     EXPECT_EQ(infeasible.workspaceBytes, shallow.workspaceBytes);
     EXPECT_EQ(conv_igemm::splitPlanFor(shallow, 128, 128, 32, device, 0, false, 9).splits, 9);
+    // A filled grid (640 tiles against 608 wanted, 144 k-steps, partials in bounds): none.
+    const auto filled
+        = parsedProblem(dense(512, 256, {128, 160}, {3, 3}, {1, 1}, true), ConvDirection::FORWARD);
+    for(const int policy : {2, 8})
+    {
+        const auto plan = conv_igemm::splitPlanFor(filled, 128, 128, 32, device, 0, false, policy);
+        EXPECT_EQ(plan.splits, 1);
+        EXPECT_EQ(plan.workspaceBytes, filled.workspaceBytes);
+    }
     // Patch configs never split, whatever the policy.
     EXPECT_EQ(conv_igemm::splitPlanFor(deep, 128, 128, 32, device, 0, true, 32).splits, 1);
     EXPECT_THROW(conv_igemm::splitPlanFor(
@@ -2543,6 +2552,12 @@ TEST(TestConvIgemmCatalog, SplitPolicyTwinsServeOnlyPlansTheDefaultDoesNotRun)
     const auto filled = dense(256, 256, {256, 256}, {3, 3}, {1, 1}, true);
     EXPECT_TRUE(served(filled, plain));
     EXPECT_FALSE(served(filled, none));
+    // Filled and narrow (640 tiles of 256 x 128 on 8 output channels, 144 k-steps, 32 splits'
+    // partials 168 MB): 32 splits fit but the grid needs none, so the twin is not served and its
+    // partials do not size the engine's workspace.
+    const auto narrow = dense(512, 8, {256, 320}, {3, 3}, {1, 1}, true);
+    EXPECT_TRUE(served(narrow, plain));
+    EXPECT_FALSE(served(narrow, split32));
     // 9 k-steps cannot take 32 splits.
     const auto shallow = dense(32, 128, {8, 8}, {3, 3}, {1, 1}, true);
     EXPECT_FALSE(served(shallow, split32));
