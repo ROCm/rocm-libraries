@@ -675,7 +675,7 @@ TYPED_TEST(matrix_dense, extract_and_replace_rows_and_columns)
     auto           A  = this->make(a);
     ASSERT_NE(A, nullptr);
 
-    auto column = make_vector(TypeParam::backend, std::vector<T>(5));
+    auto column = make_vector(TypeParam::backend, std::vector<T>(5, -7.0));
     ASSERT_TRUE(A->ExtractColumnVector(3, column.get()));
     EXPECT_EQ(values_of(*column), (std::vector<T>{da[3], da[10], da[17], da[24], da[31]}));
 
@@ -692,12 +692,7 @@ TYPED_TEST(matrix_dense, extract_and_replace_rows_and_columns)
 
     EXPECT_EQ(dense_of(*A), da);
 
-    if(TypeParam::backend == Backend::Host)
-    {
-        KNOWN_BUG("ExtractRowVector stops after as many columns as there are rows");
-    }
-
-    auto row = make_vector(TypeParam::backend, std::vector<T>(7));
+    auto row = make_vector(TypeParam::backend, std::vector<T>(7, -7.0));
     ASSERT_TRUE(A->ExtractRowVector(2, row.get()));
     EXPECT_EQ(values_of(*row), std::vector<T>(da.begin() + 14, da.begin() + 21));
 }
