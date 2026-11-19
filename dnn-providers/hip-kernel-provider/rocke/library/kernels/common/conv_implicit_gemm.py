@@ -1695,7 +1695,8 @@ def resolve_fwd_split_k_spec(
         target = ArchTarget.from_gfx(arch)
         family = "wmma" if target.wave_size == 32 else "mma"
         probe = dc_replace(spec, split_k=degree, split_k_cluster=0)
-        if fwd_split_k_reason(probe, family, target) is not None:
+        _why = fwd_split_k_reason(probe, family, target)
+        if _why is not None or _fwd_workspace_split_conflict(probe):
             degree = 1
     return dc_replace(spec, split_k=degree)
 
@@ -1772,9 +1773,8 @@ def fwd_split_tail_zero_rows(
     return min(gemm_m, (max(0, full_tiles) // max(1, num_pid_n)) * tile_m)
 
 
-# The knobs of the wave64 MFMA atomic split-K forward (``split_k > 1`` on a
-# wave64 target). The WMMA split-K forward (the fp32 workspace split) takes
-# none of them.
+# The knobs of the atomic split-K forward (:func:`fwd_split_k_atomic`). The
+# two-stage workspace split-K forward takes none of them.
 _FWD_ATOMIC_SPLIT_KNOBS = (
     "split_tail",
     "split_tail_compact",
@@ -1793,6 +1793,71 @@ _FWD_ATOMIC_SPLIT_KNOBS = (
 def _fwd_atomic_split_knobs(spec: "ImplicitGemmConvSpec") -> List[str]:
     """The atomic split-K knobs ``spec`` sets."""
     return [k for k in _FWD_ATOMIC_SPLIT_KNOBS if getattr(spec, k, 0)]
+
+
+# The K-loop, tile-order and epilogue knobs the two-stage workspace split-K
+# forward does not take: it runs the plain K loop over its slice
+# (``split_k_lo`` / ``split_k_hi``) and stores fp32 slabs, while these knobs
+# drive their own loops and stores over the atomic split's slice bounds
+# (:func:`fwd_split_k_atomic`). Mirrored by conv_fwd_workspace_split_ok in
+# conv_implicit_gemm_conv_spec_descriptors.cpp.
+_FWD_ATOMIC_ONLY_KNOBS = (
+    "xcd_remap",
+    "m_band",
+    "reg_prefetch",
+    "prefetch_regs",
+    "lds_xor",
+    "lds_kpack_read",
+    "lds_xor_rowkey",
+    "uniform_k_decode",
+    "uk_tap_fast",
+    "uk_nopad",
+    "uk_chunk_group",
+    "fb_skip_empty",
+    "vmem_interleave",
+    "epi_store_fast",
+    "lds_ahead",
+    "defer_mfma",
+    "defer_mfma_per_write",
+    "rpf_setprio",
+    "rpf_pingpong",
+    "pp_pre_mfma",
+    "pp_b_double",
+    "pp_split_fetch",
+    "pp_end_guard",
+    "split_addr_k_decode",
+    "epi_lds_barriers",
+    "uk_xhalo",
+    "xh_wait_smem",
+    "epi_quad_xpose",
+    "xh_stride_m",
+    "fxh_dma",
+    "xh_yring",
+    "xh_pad",
+    "rpf_lds_barrier",
+    "rpf_fetch_late",
+    "xh_dpp",
+    "a_direct",
+    "xh_subtile",
+    "pp_fetch_deep",
+)
+
+
+def _fwd_workspace_split_conflict(spec: "ImplicitGemmConvSpec") -> str:
+    """Why the two-stage workspace split-K forward (``split_k > 1`` that is not
+    :func:`fwd_split_k_atomic`, or the cluster form) cannot take ``spec``'s
+    knobs, or ``""``."""
+    if spec.split_k <= 1 or (fwd_split_k_atomic(spec) and not spec.split_k_cluster):
+        return ""
+    knobs = [k for k in _FWD_ATOMIC_ONLY_KNOBS if getattr(spec, k, 0)]
+    if spec.cshuffle_m_chunks != 1:
+        knobs.append("cshuffle_m_chunks")
+    if knobs:
+        return (
+            f"{', '.join(knobs)}: knobs of the atomic split-K forward; the "
+            "two-stage workspace split runs the plain K loop"
+        )
+    return ""
 
 
 def fwd_split_det_slabs(tiles: int, split_k: int, *, split_hybrid: int = 0) -> int:
@@ -1872,7 +1937,7 @@ def fwd_split_k_conflict(spec: "ImplicitGemmConvSpec") -> str:
             return (
                 f"{', '.join(_knobs)}: knobs of the wave64 MFMA atomic split-K forward"
             )
-        return ""
+        return _fwd_workspace_split_conflict(spec)
     if spec.split_det and (
         spec.split_streamk
         or spec.split_flag_store
@@ -2225,7 +2290,9 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             # workspace); fwd_split_k_conflict judges it.
             _why = fwd_split_k_conflict(spec) or None
         else:
-            _why = fwd_split_k_reason(spec, family, target)
+            _why = fwd_split_k_reason(spec, family, target) or (
+                _fwd_workspace_split_conflict(spec) or None
+            )
         if _why is not None:
             return False, _why
 

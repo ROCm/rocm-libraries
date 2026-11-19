@@ -1132,6 +1132,36 @@ int rocke_conv_xhalo_b_rows(const rocke_implicit_gemm_conv_spec_t* s)
     return rows + (((rows * (s->tile_k / vb)) % bs) ? 1 : 0);
 }
 
+/* Python _fwd_workspace_split_conflict: the K-loop, tile-order and epilogue
+ * knobs the two-stage workspace split-K forward (split_k > 1 that is not
+ * rocke_conv_fwd_split_k_atomic, or the cluster form) does not take -- it runs
+ * the plain K loop over its slice and stores fp32 slabs, while these knobs
+ * drive their own loops and stores over the atomic split's slice bounds. The
+ * Python-only knobs (prefetch_regs, xh_dpp, a_direct, xh_subtile,
+ * pp_fetch_deep) are refused by the binding before they reach this engine. */
+static bool conv_fwd_workspace_split_ok(const rocke_implicit_gemm_conv_spec_t* s,
+                                        char* reason,
+                                        size_t reason_cap)
+{
+    if(s->split_k <= 1 || (rocke_conv_fwd_split_k_atomic(s) && !s->split_k_cluster))
+        return true;
+    const bool knobs
+        = s->xcd_remap || s->m_band || s->reg_prefetch || s->lds_xor || s->lds_kpack_read
+          || s->lds_xor_rowkey || s->uniform_k_decode || s->uk_tap_fast || s->uk_nopad
+          || s->uk_chunk_group || s->fb_skip_empty || s->vmem_interleave || s->epi_store_fast
+          || s->lds_ahead || s->defer_mfma || s->defer_mfma_per_write || s->rpf_setprio
+          || s->rpf_pingpong || s->pp_pre_mfma || s->pp_b_double || s->pp_split_fetch
+          || s->pp_end_guard || s->split_addr_k_decode || s->epi_lds_barriers || s->uk_xhalo
+          || s->xh_wait_smem || s->epi_quad_xpose || s->xh_stride_m || s->fxh_dma || s->xh_yring
+          || s->xh_pad || s->rpf_lds_barrier || s->rpf_fetch_late || s->cshuffle_m_chunks != 1;
+    if(knobs)
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "knobs of the atomic split-K forward; the two-stage workspace split runs "
+                        "the plain K loop");
+    return true;
+}
+
 /* The split_atomic rule at the head of Python fwd_split_k_conflict: it selects
  * the atomic form for a 2-D wave64 split only. */
 bool rocke_conv_fwd_split_atomic_ok(const rocke_implicit_gemm_conv_spec_t* s,
@@ -1190,7 +1220,8 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
     {
         if(knobs)
             ROCKE_SPEC_FAIL(reason, reason_cap, "knobs of the wave64 MFMA atomic split-K forward");
-        return true; /* not the atomic split: fwd_split_k_reason's */
+        /* not the atomic split: fwd_split_k_reason's, without the atomic knobs */
+        return conv_fwd_workspace_split_ok(s, reason, reason_cap);
     }
     {
         const char* d = s->dtype_d ? s->dtype_d : "fp16";
@@ -2019,7 +2050,8 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
             if(!rocke_conv_fwd_asplit_conflict_ok(s, reason, reason_cap))
                 return false;
         }
-        else if(!rocke_conv_fwd_split_k_available(s, family, arch, reason, reason_cap))
+        else if(!rocke_conv_fwd_split_k_available(s, family, arch, reason, reason_cap)
+                || !conv_fwd_workspace_split_ok(s, reason, reason_cap))
         {
             return false;
         }

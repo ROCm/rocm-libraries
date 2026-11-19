@@ -161,6 +161,39 @@ class TestSplitKGate(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("split_atomic", why)
 
+    def test_workspace_split_refuses_the_atomic_split_knobs(self):
+        # The two-stage workspace split runs the plain K loop over its slice;
+        # the atomic split's K-loop, tile-order and epilogue knobs drive their
+        # own loops over the atomic slice bounds, so they are refused there
+        # (and an auto degree falls back to the unsplit kernel), while the
+        # atomic form (split_atomic) still takes them.
+        from kernels.common.conv_implicit_gemm import resolve_fwd_split_k_spec
+
+        base = dict(
+            wave_size=64,
+            pipeline="mem",
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            tile_m=64,
+            tile_n=64,
+        )
+        plain = _spec(split_k=-1, **base)
+        self.assertGreater(resolve_fwd_split_k_spec(plain, "gfx950").split_k, 1)
+        for knob in (dict(uniform_k_decode=True), dict(reg_prefetch=1)):
+            spec = _spec(split_k=2, **base, **knob)
+            ok, why = is_valid_spec(spec, "gfx950")
+            self.assertFalse(ok)
+            self.assertIn("two-stage workspace split", why)
+            ok, why = is_valid_spec(
+                dataclasses.replace(spec, split_atomic=True), "gfx950"
+            )
+            self.assertTrue(ok, why)
+            ok, why = is_valid_spec(dataclasses.replace(spec, split_k=1), "gfx950")
+            self.assertTrue(ok, why)
+            auto = dataclasses.replace(spec, split_k=-1)
+            self.assertEqual(resolve_fwd_split_k_spec(auto, "gfx950").split_k, 1)
+
     def test_fp32_output_two_stage_is_rejected(self):
         # Stage 2 casts to fp16 / bf16 only, on every family, so fp32 storage
         # (TF32 compute on MFMA, plain fp32 on gfx1250 WMMA) stays unsplit;

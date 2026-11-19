@@ -1356,6 +1356,14 @@ static int make_cfg_3d_base(int idx, rocke_implicit_gemm_conv_spec_t* spec, cons
         spec->split_k = 2;
         spec->split_atomic = true;
         return 0;
+    case 153:
+        /* 151 without split_atomic (the two-stage workspace split) +
+         * uniform_k_decode: rejected (an atomic-split K loop) */
+        if(make_cfg_3d_base(151, spec, arch) != 0)
+            return -1;
+        spec->split_atomic = false;
+        spec->uniform_k_decode = true;
+        return 0;
     default:
         return -1;
     }
