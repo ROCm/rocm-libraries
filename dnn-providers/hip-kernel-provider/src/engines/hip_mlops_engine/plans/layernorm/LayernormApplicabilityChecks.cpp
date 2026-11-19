@@ -241,6 +241,10 @@ void LayernormValidator::checkTensorShapesSupported(const std::vector<int64_t>& 
 
     validateConsistentShapes(
         ioTensorIds, ioDims, "All IO tensors for layernorm must have the same shape.");
+    validateElementCountFitsUint32(
+        ioDims,
+        "Layernorm kernels index tensors with 32-bit unsigned arithmetic; the IO tensor "
+        "has too many elements.");
 
     const auto& affineTensorAttr = findTensorAttributes(_tensorMap, affineTensorIds[0]);
     const std::vector<int64_t> affineDims(affineTensorAttr.dims()->begin(),
@@ -425,12 +429,20 @@ void LayernormValidator::checkTensorConfigSupported(
         = std::vector<int64_t>(ioTensorIds.begin(), ioTensorIds.end());
     ioAndStatTensorIds.insert(ioAndStatTensorIds.end(), statTensorIds.begin(), statTensorIds.end());
 
+    {
+        std::vector<int64_t> bufferTensorIds = ioAndStatTensorIds;
+        bufferTensorIds.insert(
+            bufferTensorIds.end(), affineTensorIds.begin(), affineTensorIds.end());
+        validateNoVirtualTensors(
+            bufferTensorIds, "Layernorm kernel inputs and outputs must not be virtual tensors.");
+    }
     checkTensorLayoutsAndDimsSupported(ioAndStatTensorIds);
     checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, epsilonTensorIds);
     checkTensorMemoryOrderSupported(
         lnAttr.x_tensor_uid(),
         {{"scale", lnAttr.scale_tensor_uid()}, {"bias", lnAttr.bias_tensor_uid()}},
         fwdStatTensors);
+    checkEpsilonSupported(lnAttr.epsilon_tensor_uid());
     validateNormalizedDim(ioTensorIds, affineTensorIds, statTensorIds);
     checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);
     checkOperandDimsMatchNormalizedDims(
@@ -471,6 +483,14 @@ void LayernormValidator::checkTensorConfigSupported(
         epsilonTensorIds.push_back(lnAttr.epsilon_tensor_uid().value());
     }
 
+    {
+        std::vector<int64_t> bufferTensorIds = ioTensorIds;
+        bufferTensorIds.insert(
+            bufferTensorIds.end(), affineTensorIds.begin(), affineTensorIds.end());
+        bufferTensorIds.insert(bufferTensorIds.end(), statTensorIds.begin(), statTensorIds.end());
+        validateNoVirtualTensors(
+            bufferTensorIds, "Layernorm kernel inputs and outputs must not be virtual tensors.");
+    }
     checkTensorLayoutsAndDimsSupported(ioTensorIds);
     checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, epsilonTensorIds);
     checkTensorMemoryOrderSupported(lnAttr.x_tensor_uid(),
@@ -478,6 +498,10 @@ void LayernormValidator::checkTensorConfigSupported(
                                      {"dscale", lnAttr.dscale_tensor_uid()},
                                      {"dbias", lnAttr.dbias_tensor_uid()}},
                                     bwdStatTensors);
+    if(lnAttr.epsilon_tensor_uid().has_value())
+    {
+        checkEpsilonSupported(lnAttr.epsilon_tensor_uid().value());
+    }
     validateNormalizedDim(ioTensorIds, affineTensorIds, statTensorIds);
     checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);
     checkOperandDimsMatchNormalizedDims(lnAttr.x_tensor_uid(),
