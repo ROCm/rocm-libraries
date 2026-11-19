@@ -34,6 +34,9 @@ from kernels.common.attention_bwd_plan import (
 from kernels.common.attention_dense_bwd_plan import attn_dense_bwd_plan
 
 MODS = {"gfx942": gfx942_tuning, "gfx950": gfx950_tuning}
+# Every registered per-arch module (RDNA included): the shipped general entries
+# and their routing are checked on all of them.
+TABLES = dict(routing.ARCH_TUNING)
 _GATE = AttnBwdPolicy(declared_groups=frozenset(FEATURE_GROUPS), waive_unverified=True)
 
 
@@ -161,17 +164,19 @@ def test_dense_check_plans_without_a_request(arch):
 # ---------------------------------------------------------- shipped entries
 
 
-def _entries(table_name):
+def _entries(table_name, mods=MODS):
     out = []
-    for arch, mod in sorted(MODS.items()):
+    for arch, mod in sorted(mods.items()):
         for key, knobs in getattr(mod, table_name).items():
             out.append(pytest.param(arch, key, knobs, id=f"{arch}-{key!r}"))
     return out
 
 
-@pytest.mark.parametrize("arch,key,knobs", _entries("GENERAL_TUNED_TABLE"))
+@pytest.mark.parametrize("arch,key,knobs", _entries("GENERAL_TUNED_TABLE", TABLES))
 def test_shipped_general_entry_plans_on_its_key(arch, key, knobs):
-    MODS[arch].check_general_entry(key, knobs)
+    """Every shipped general entry of every arch plans on every representative
+    request of its key (the full check; the import-time pass plans one)."""
+    TABLES[arch].check_general_entry(key, knobs)
     assert knobs.get("sched") != "iglp1"
 
 
@@ -205,14 +210,14 @@ def _first_plannable(arch, reqs, policy):
     raise AssertionError("no plannable representative")
 
 
-@pytest.mark.parametrize("arch", sorted(MODS))
+@pytest.mark.parametrize("arch", sorted(TABLES))
 def test_routing_takes_the_tuned_general_config(arch):
     """For a representative request of every tuned general key, the routed
     plan is the plan of the entry's knobs (and differs from the defaults on
     at least one key)."""
     pol = _routed()
     differs = 0
-    for key, knobs in MODS[arch].GENERAL_TUNED_TABLE.items():
+    for key, knobs in TABLES[arch].GENERAL_TUNED_TABLE.items():
         req = _first_plannable(arch, tt.general_key_requests(arch, key), _GATE)
         assert attn_bwd_tuning_key(req, arch) == key
         plan = routing.plan_attention_bwd(req, arch, policy=pol)

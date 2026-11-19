@@ -88,6 +88,15 @@ def test_census_has_no_measurements(census):
     assert all(set(c) <= allowed for c in census["configs"])
 
 
+def test_class_arches_are_the_declared_arches():
+    """The bench's class arches are the backward's declared targets (kept by
+    hand in the bench; this pins them so a newly declared arch is not left
+    out of the class matrix and the census counts)."""
+    from kernels.common.attention_bwd_plan import DECLARED_ARCHS
+
+    assert tuple(bb.CLASS_ARCHS) == tuple(DECLARED_ARCHS)
+
+
 def test_census_class_counts_match_the_generator(census, cells):
     block = census["class_representatives"]
     counts = bb.class_counts(cells)

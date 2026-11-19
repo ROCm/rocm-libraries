@@ -189,16 +189,28 @@ _MASK_CASE = {
 }
 
 
+def _mask_case(mask, req):
+    """The case mask fields of a ``mask`` request (a window takes the
+    request's own band), or None for a mask kind with no case form."""
+    if mask in _MASK_CASE:
+        return _MASK_CASE[mask]
+    if mask == "window" and req.left_bound is not None and req.left_bound >= 0:
+        return {
+            "diagonal": "bottom_right" if req.bottom_right else "top_left",
+            "left_bound": req.left_bound,
+            "right_bound": req.right_bound,
+        }
+    return None
+
+
 def _general_key_case(arch, key):
     """A fixed-length bhsd / bshd case of tuned key ``key`` and the request
     fields that put it in the key (``num_cus``, ``num_xcds``), or None."""
     for req in tuned_tables.general_key_requests(arch, key):
         if req.layout != "dense" or req.padding or req.num_cus is None:
             continue
-        mask = key[4]
-        if mask not in _MASK_CASE or req.b * req.h_q * req.s_q * req.s_kv > (
-            _ORACLE_CELLS
-        ):
+        mask_kw = _mask_case(key[4], req)
+        if mask_kw is None or req.b * req.h_q * req.s_q * req.s_kv > _ORACLE_CELLS:
             continue
         layout = "bhsd" if req.strides is None else "bshd"
         tag = "_".join(str(x) for x in key[2:]).replace("*", "any")
@@ -215,7 +227,7 @@ def _general_key_case(arch, key):
             s_q=req.s_q,
             s_kv=req.s_kv,
             layout=layout,
-            **_MASK_CASE[mask],
+            **mask_kw,
         )
         extra = {"num_cus": req.num_cus, "num_xcds": req.num_xcds}
         got = dataclasses.replace(request_from_case(case), **extra)
@@ -235,6 +247,18 @@ def _tuned_general_params():
         if found is not None:
             out.append(pytest.param(key, *found, id=found[0].id))
     return out
+
+
+@pytest.mark.skipif(ARCH not in routing.ARCH_TUNING, reason="no tuned tables")
+def test_every_fixed_tuned_key_has_a_numeric_case():
+    """Every fixed-length tuned general key of the device's table (window
+    keys included) gets a dispatch numeric case: none is silently left out."""
+    missing = [
+        key
+        for key in routing.ARCH_TUNING[ARCH].GENERAL_TUNED_TABLE
+        if key[7] == "fixed" and _general_key_case(ARCH, key) is None
+    ]
+    assert not missing, missing
 
 
 @pytest.mark.parametrize("key,case,extra", _tuned_general_params())

@@ -3,7 +3,8 @@
 """Checks of the per-arch tuned tables of the attention backward.
 
 The per-arch modules (:mod:`.gfx942_tuning`, :mod:`.gfx950_tuning`,
-:mod:`.gfx1151_tuning`, :mod:`.gfx1201_tuning`) hold the tuned tables; this module is the gate an entry passes before it is shipped.
+:mod:`.gfx1151_tuning`, :mod:`.gfx1201_tuning`) hold the tuned tables; this
+module is the gate an entry passes before it is shipped.
 An entry is checked by planning it, the way the routing consumes it, on
 representative requests of its key:
 
@@ -38,6 +39,45 @@ first plannable representative request (the check above with ``limit=1``),
 and the performance-status tables name measured classes of the arch. The
 check over every representative runs in the tests (it plans hundreds of
 requests).
+
+RDNA entries (gfx1151, gfx1201)
+-------------------------------
+On the RDNA targets the rocKE backward is slower than PyTorch's own backward
+on every measured cell, so the CDNA rule (an entry wins the bench's confirm
+stage against the competitor on every cell of its key) admits no entry.
+rocKE is the only hipDNN backward there, so an RDNA entry is the best rocKE
+configuration instead. A finalist of the sweep's ``runtime`` stage is the
+entry of tuning key K when, on every dense census cell of K,
+
+1. it is correct (its arm completes and passes the pruning-set gate),
+2. it has a clean A/A control (its ``#aa`` twin is not judged different from
+   it either way), and
+3. it is not slower than the shipped plan (the paired verdict against it is
+   ``pass``, or ``ambiguous`` with a time ratio within ``TIE_EPS``);
+
+of the finalists that pass every cell of K, the one with the lowest
+geometric-mean time ratio against the shipped plan is the entry, and only
+when that ratio is below 1. Keys with no qualifying finalist keep the
+defaults. Head size 32 is not swept (the census has no d = 32 cell).
+
+Regeneration (on a device of the arch; results outside the source tree):
+
+1. sweep the primary general slices of d = 64 and d = 128 through
+   ``runtime``: ``attention_bwd_sweep.py --arch <gfx> --family general --d <d>
+   --stage <stage> --gate tests._attention_bwd_perf_gate:gate --out-dir DIR``
+   for each stage from ``geometry`` to ``runtime``;
+2. the finalists are the top two of the ``runtime`` stage
+   (``attention_bwd_sweep.ranked(DIR, slice, "runtime", 2)``);
+3. time the shipped plan and the finalists on the slice's dense cohort cells:
+   ``attention_bwd_bench.py --ids <cells> --arch <gfx> --rocke-configs FILE``
+   (``FILE`` holding ``shipped`` and the finalists' configurations)
+   ``--competitor-arms default --aa-control all --gate
+   tests._attention_bwd_perf_gate:gate --gate-constants CONSTS``, where
+   ``CONSTS`` are the bench's gate constants for the device;
+4. apply the rule above per tuning key (keys from the cells' requests with
+   the device's ``num_cus``) and write ``{"entries": [{"key", "knobs"}]}``;
+5. ``<gfx>_tuning.general_entries(doc)`` checks every entry; the checked
+   mapping replaces the module's ``GENERAL_TUNED_TABLE``.
 """
 
 from __future__ import annotations
