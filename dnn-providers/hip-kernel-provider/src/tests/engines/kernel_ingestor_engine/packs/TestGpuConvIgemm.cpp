@@ -880,8 +880,9 @@ protected:
     void run()
     {
         SKIP_IF_NO_DEVICES();
-        const auto arch
-            = hipdnn_plugin_sdk::stripArchFeatures(currentDeviceProperties().gcnArchName);
+        // The properties outlive the arch view into their name.
+        const auto device = currentDeviceProperties();
+        const auto arch = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName);
         if(arch != "gfx950" && arch != "gfx942")
         {
             GTEST_SKIP() << "flex tiles run on gfx950 and gfx942 only";
@@ -2547,7 +2548,7 @@ TEST(TestConvIgemmSplitPlan, FlexTailSplitSplitsTheRowTilesPastTheWholeRounds)
     EXPECT_EQ(plan.partialElems, plan.outElems);
 }
 
-TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950TilesThatDeclineEveryOtherKnob)
+TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950OrGfx942TilesThatDeclineEveryOtherKnob)
 {
     auto shape = dense(32, 48, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, true);
     shape.dataType = DataType::HALF;
@@ -2568,17 +2569,24 @@ TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950TilesThatDeclineEveryOtherKnob)
                 continue;
             }
             SCOPED_TRACE(kernel.name);
+            // The LDS-DMA form (16x16x32 atoms) is gfx950's, the register-staged form gfx942's:
+            // 128-byte k-steps either way.
+            const bool dma = kernel.getStringMetadata("atom").rfind("mfma16x32_", 0) == 0;
+            const bool fp32 = kernel.getStringMetadata("dtype") == "FLOAT";
             EXPECT_EQ(kernel.getIntMetadata("flex"), 1);
             EXPECT_EQ(kernel.getIntMetadata("bm"), 256);
-            EXPECT_EQ(kernel.getIntMetadata("bk"), 64);
+            EXPECT_EQ(kernel.getIntMetadata("bk"), fp32 ? 32 : 64);
             EXPECT_EQ(kernel.getIntMetadata("xcd"), 1);
             if(kernel.getStringMetadata("dtype") != "HALF")
             {
                 continue;
             }
             ++flex;
-            EXPECT_TRUE(matchesKernel(pack, gfx950.context(), kernel, *bound950));
-            EXPECT_FALSE(matchesKernel(pack, gfx942.context(), kernel, *bound942));
+            const auto& home = dma ? gfx950 : gfx942;
+            const auto& homeBound = dma ? *bound950 : *bound942;
+            EXPECT_TRUE(matchesKernel(pack, home.context(), kernel, homeBound));
+            EXPECT_FALSE(matchesKernel(
+                pack, (dma ? gfx942 : gfx950).context(), kernel, dma ? *bound942 : *bound950));
             for(const auto& [field, value] : std::initializer_list<std::pair<const char*, int64_t>>{
                     {"flex", 2},    {"bm", 128},  {"bn", 64},    {"bk", 32}, {"wm", 2},
                     {"wn", 4},      {"vec", 4},   {"stages", 2}, {"xcd", 0}, {"halo", 1},
@@ -2588,11 +2596,11 @@ TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950TilesThatDeclineEveryOtherKnob)
                 SCOPED_TRACE(field);
                 auto mutated = kernel;
                 mutated.metadata[field] = value;
-                EXPECT_FALSE(matchesKernel(pack, gfx950.context(), mutated, *bound950));
+                EXPECT_FALSE(matchesKernel(pack, home.context(), mutated, homeBound));
             }
             auto atom = kernel;
             atom.metadata["atom"] = std::string("mfma32x16_f16");
-            EXPECT_FALSE(matchesKernel(pack, gfx950.context(), atom, *bound950));
+            EXPECT_FALSE(matchesKernel(pack, home.context(), atom, homeBound));
         }
         // Backward data in stride phases and filters past ten taps on an axis decline.
         auto strided = shape;
@@ -2606,16 +2614,19 @@ TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950TilesThatDeclineEveryOtherKnob)
             {
                 continue;
             }
-            const GraphFixture fixture(buildGraph(specFor(declined, direction)),
-                                       deviceOf("gfx950", 256));
-            const auto bound = matchesGraph(pack, fixture.context());
-            ASSERT_TRUE(bound.has_value());
-            for(const auto& kernel : catalog(direction))
+            for(const auto& device :
+                {deviceOf("gfx950", 256), deviceOf("gfx942:sramecc+:xnack-", 304)})
             {
-                if(kernel.getIntMetadata("flex") != 0)
+                const GraphFixture fixture(buildGraph(specFor(declined, direction)), device);
+                const auto bound = matchesGraph(pack, fixture.context());
+                ASSERT_TRUE(bound.has_value());
+                for(const auto& kernel : catalog(direction))
                 {
-                    EXPECT_FALSE(matchesKernel(pack, fixture.context(), kernel, *bound))
-                        << kernel.name;
+                    if(kernel.getIntMetadata("flex") != 0)
+                    {
+                        EXPECT_FALSE(matchesKernel(pack, fixture.context(), kernel, *bound))
+                            << kernel.name;
+                    }
                 }
             }
         }
@@ -2623,14 +2634,18 @@ TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950TilesThatDeclineEveryOtherKnob)
         auto huge = dense(64, 64, {4096, 4096}, {3, 3}, {1, 1}, true);
         huge.n = 1;
         huge.dataType = DataType::HALF;
-        const GraphFixture big(buildGraph(specFor(huge, direction)), deviceOf("gfx950", 256));
-        const auto bigBound = matchesGraph(pack, big.context());
-        ASSERT_TRUE(bigBound.has_value());
-        for(const auto& kernel : catalog(direction))
+        for(const auto& device : {deviceOf("gfx950", 256), deviceOf("gfx942:sramecc+:xnack-", 304)})
         {
-            if(kernel.getIntMetadata("flex") != 0)
+            const GraphFixture big(buildGraph(specFor(huge, direction)), device);
+            const auto bigBound = matchesGraph(pack, big.context());
+            ASSERT_TRUE(bigBound.has_value());
+            for(const auto& kernel : catalog(direction))
             {
-                EXPECT_FALSE(matchesKernel(pack, big.context(), kernel, *bigBound)) << kernel.name;
+                if(kernel.getIntMetadata("flex") != 0)
+                {
+                    EXPECT_FALSE(matchesKernel(pack, big.context(), kernel, *bigBound))
+                        << kernel.name;
+                }
             }
         }
     }
