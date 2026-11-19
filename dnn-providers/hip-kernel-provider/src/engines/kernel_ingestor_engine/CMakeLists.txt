@@ -306,6 +306,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvIgemmCore.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvIgemmPatch.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvIgemmFlex.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvIgemmFlexReg.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvEpilogue.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvEpilogueArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvArchFamily.h"
@@ -372,6 +373,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ConvIgemmCore.h
         ConvIgemmPatch.h
         ConvIgemmFlex.h
+        ConvIgemmFlexReg.h
         ConvEpilogue.h
         ConvEpilogueArgs.h
         ConvArchFamily.h
