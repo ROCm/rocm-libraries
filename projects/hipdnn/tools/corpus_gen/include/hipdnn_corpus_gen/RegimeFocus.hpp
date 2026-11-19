@@ -588,11 +588,25 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
     // each way that keeps the realised share of every value at its weight. A lane that declines
     // hands its share back, and the next round splits what is still missing.
     const bool weighted = detail::anyWeighted(metadata.parameters);
-    const auto sizes = detail::combinationSizes(metadata.parameters, served);
+    const auto sizes = detail::combinationSizes(metadata, served);
+    // The regime is part of the key seed: otherwise every regime draws its lanes in the same
+    // order, and a sparse regime is built from the same few lanes each time (or fails the same
+    // way for all of them).
+    uint64_t labelHash = 0xcbf29ce484222325ULL; // FNV-1a
+    for(const auto character : focus.label)
+    {
+        labelHash = (labelHash ^ static_cast<unsigned char>(character)) * 0x100000001b3ULL;
+    }
     std::vector<uint64_t> tieKeys(lanes.size());
     for(size_t i = 0; i < lanes.size(); ++i)
     {
-        tieKeys[i] = detail::tieKey(request.seed, i);
+        tieKeys[i] = detail::tieKey(request.seed ^ labelHash, i);
+        // A lane its categorical values leave empty is never tried, and is not an untried lane
+        // a saturated regime could be hiding.
+        if(weighted && sizes[i] <= 0.0)
+        {
+            lanes[i].saturated = true;
+        }
     }
     if(!weighted)
     {

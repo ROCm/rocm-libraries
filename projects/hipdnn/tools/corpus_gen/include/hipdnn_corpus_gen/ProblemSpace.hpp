@@ -287,23 +287,134 @@ inline bool anyWeighted(const std::vector<Parameter>& parameters)
     });
 }
 
-/// How large each of @p combinations is relative to the average: the product, over weighted
-/// parameters, of its value's weight over the mean weight (Parameter::relativeWeight). 1 for
-/// every combination when nothing is weighted. The one definition the main search and the
-/// regime focus share, so both realise the declared shares.
-inline std::vector<double> combinationSizes(const std::vector<Parameter>& parameters,
+/// Whether the categorical values of @p combination alone make some declared constraint false.
+/// The language is three-valued: a constraint that reads a numeric parameter (not bound here)
+/// stays unresolved unless its other arms decide it, so only a definite false counts. This is
+/// how (alignment bottom_right, non-causal, no window) is found empty without a shape.
+inline bool excludedByCategoricals(const OperationMetadata& metadata,
+                                   const ProblemPoint& combination)
+{
+    if(metadata.constraints.size() == 0)
+    {
+        return false;
+    }
+    const auto context = detail::contextFor(combination);
+    for(size_t i = 0; i < metadata.constraints.size(); ++i)
+    {
+        const auto value = metadata.constraints.evaluate(i, context);
+        if(!value.containsUnresolved() && value.isBool() && !value.asBool())
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// How large each of @p combinations is relative to the average over those that can hold a
+/// problem: 1 for every combination when nothing is weighted, else sized so that each weighted
+/// parameter's values hold their declared weights' shares of the whole.
+///
+/// A combination its categorical values make empty (excludedByCategoricals) has size 0. Dropping
+/// one value's combinations from the sum would otherwise leave that value short of its weight
+/// (a quarter of the window-none combinations are empty, none of the windowed ones are), so the
+/// sizes start as the product of the values' relative weights and are raked: each weighted
+/// parameter's values are rescaled in turn to their weights' shares, over the values that have
+/// any combination left, until all agree. The one definition the main search and the regime
+/// focus share, so both realise the declared shares.
+inline std::vector<double> combinationSizes(const OperationMetadata& metadata,
                                             const std::vector<ProblemPoint>& combinations)
 {
     std::vector<double> sizes(combinations.size(), 1.0);
+    if(!anyWeighted(metadata.parameters))
+    {
+        return sizes;
+    }
+    size_t live = 0;
     for(size_t index = 0; index < combinations.size(); ++index)
     {
-        for(const auto& parameter : parameters)
+        if(excludedByCategoricals(metadata, combinations[index]))
+        {
+            sizes[index] = 0.0;
+            continue;
+        }
+        ++live;
+        for(const auto& parameter : metadata.parameters)
         {
             const auto found = combinations[index].find(parameter.name);
             if(!parameter.weights.empty() && found != combinations[index].end())
             {
                 sizes[index] *= parameter.relativeWeight(std::get<std::string>(found->second));
             }
+        }
+    }
+
+    const auto normalise = [&sizes, live]() {
+        double sum = 0.0;
+        for(const auto size : sizes)
+        {
+            sum += size;
+        }
+        if(sum > 0.0)
+        {
+            for(auto& size : sizes)
+            {
+                size *= static_cast<double>(live) / sum;
+            }
+        }
+    };
+    normalise();
+    for(int round = 0; round < 200; ++round)
+    {
+        double change = 0.0;
+        for(const auto& parameter : metadata.parameters)
+        {
+            if(parameter.weights.empty())
+            {
+                continue;
+            }
+            std::map<std::string, double> mass;
+            for(size_t index = 0; index < combinations.size(); ++index)
+            {
+                const auto found = combinations[index].find(parameter.name);
+                if(found != combinations[index].end())
+                {
+                    mass[std::get<std::string>(found->second)] += sizes[index];
+                }
+            }
+            double total = 0.0;
+            double weight = 0.0;
+            for(const auto& [value, held] : mass)
+            {
+                if(held > 0.0)
+                {
+                    total += held;
+                    weight += parameter.weightOf(value);
+                }
+            }
+            if(!(total > 0.0))
+            {
+                continue;
+            }
+            for(size_t index = 0; index < combinations.size(); ++index)
+            {
+                const auto found = combinations[index].find(parameter.name);
+                if(found == combinations[index].end())
+                {
+                    continue;
+                }
+                const auto& value = std::get<std::string>(found->second);
+                if(mass[value] > 0.0)
+                {
+                    const auto factor = total * parameter.weightOf(value) / weight / mass[value];
+                    change = std::max(change, std::abs(factor - 1.0));
+                    sizes[index] *= factor;
+                }
+            }
+        }
+        normalise();
+        if(change < 1e-9)
+        {
+            break;
         }
     }
     return sizes;
@@ -605,7 +716,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
     // How large each combination is relative to the average (Parameter::weights); 1 for every
     // combination when nothing is weighted, and then the counts below are the unweighted ones.
     const bool weighted = detail::anyWeighted(metadata.parameters);
-    const auto sizes = detail::combinationSizes(metadata.parameters, combinations);
+    const auto sizes = detail::combinationSizes(metadata, combinations);
     // The first pass's per-combination problem count: pointsPerCombination for each, or the
     // whole first pass (pointsPerCombination x combinations) split by size, largest remainder,
     // with at least one each so no combination (and so no declared value) is dropped.
@@ -617,11 +728,14 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         {
             keys[i] = detail::tieKey(request.seed, i);
         }
+        // The first pass is pointsPerCombination for every combination that can hold a problem.
+        const auto live
+            = std::count_if(sizes.begin(), sizes.end(), [](double size) { return size > 0.0; });
         firstPass = detail::apportion(
-            request.pointsPerCombination * static_cast<int64_t>(combinations.size()), sizes, keys);
-        for(auto& count : firstPass)
+            request.pointsPerCombination * static_cast<int64_t>(live), sizes, keys);
+        for(size_t i = 0; i < firstPass.size(); ++i)
         {
-            count = std::max<int64_t>(1, count);
+            firstPass[i] = sizes[i] > 0.0 ? std::max<int64_t>(1, firstPass[i]) : 0;
         }
     }
     const auto pointsFor = [&firstPass](size_t index) { return firstPass[index]; };
@@ -796,7 +910,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             }
         }
 
-        if(!metadata.archetypes.empty() && anchored.empty())
+        if(!metadata.archetypes.empty() && anchored.empty() && pointsFor(index) > 0)
         {
             // Reported so it is not mistaken for an operation with no declared workloads.
             corpus.skippedCombinations.push_back("no declared archetype was admitted for "

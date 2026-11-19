@@ -927,4 +927,57 @@ TEST(TestProblemSpace, AWeightedValueKeepsItsShareAtASmallPointsPerCombination)
     EXPECT_NEAR(shareOf(grown, "layout", "b") + shareOf(grown, "layout", "c"), 0.5, 0.03);
 }
 
+TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
+{
+    // (alignment bottom_right, non-causal, window none) is empty by the declaration's own
+    // constraints, while its windowed twins are not, so sizes taken as a product of weights over
+    // all 864 combinations leave window none at 43%, not its declared 50%.
+    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json");
+    ASSERT_TRUE(file.good());
+    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+    ASSERT_TRUE(parsed.ok());
+    const auto& metadata = *parsed.metadata;
+
+    size_t total = 0;
+    const auto combinations = detail::categoricalCombinations(metadata.parameters, 1024, total);
+    ASSERT_EQ(combinations.size(), 864U);
+    const auto sizes = detail::combinationSizes(metadata, combinations);
+
+    double all = 0.0;
+    std::map<std::string, double> window;
+    std::map<std::string, double> layout;
+    std::map<std::string, double> scale;
+    size_t empty = 0;
+    for(size_t i = 0; i < combinations.size(); ++i)
+    {
+        const auto& c = combinations[i];
+        const auto text = [&c](const char* name) { return std::get<std::string>(c.at(name)); };
+        const bool emptyByDeclaration = text("alignment") == "bottom_right"
+                                        && !std::get<bool>(c.at("is_causal"))
+                                        && text("window") == "none";
+        if(emptyByDeclaration)
+        {
+            EXPECT_EQ(sizes[i], 0.0) << detail::describe(c);
+            ++empty;
+        }
+        else
+        {
+            EXPECT_GT(sizes[i], 0.0) << detail::describe(c);
+        }
+        all += sizes[i];
+        window[text("window")] += sizes[i];
+        layout[text("layout")] += sizes[i];
+        scale[text("scale")] += sizes[i];
+    }
+    // A quarter of the non-causal, bottom_right half of the product: 864 / 2 / 2 / 4.
+    EXPECT_EQ(empty, 54U);
+    EXPECT_NEAR(window["none"] / all, 0.5, 1e-6);
+    EXPECT_NEAR(window["local_128"] / all, 1.0 / 6.0, 1e-6);
+    EXPECT_NEAR(layout["bshd"] / all, 0.5, 1e-6);
+    EXPECT_NEAR(layout["kv_bhsd"] / all, 0.25, 1e-6);
+    EXPECT_NEAR(scale["inv_sqrt_d"] / all, 0.5, 1e-6);
+    // The mean over combinations that can hold a problem is 1, as it is for unweighted ones.
+    EXPECT_NEAR(all, static_cast<double>(combinations.size() - empty), 1e-6);
+}
+
 } // namespace hipdnn_corpus_gen
