@@ -88,6 +88,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
   RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
   filters up to 7x7 and is selected through Find mode.
+* [DB] Added validated gfx1101 (Navi 32) find-db and perf-db files, so gfx1101 uses tuned
+  solver selection and performance configs instead of untuned defaults.
 * [Conv] Updated the bundled hipconv from v0.4.0 to v0.5.0. This adds `ConvHipConv` kernels for
   gfx950 (including `direct_flex`, dilated layers, conv3d, more filter shapes and layers past
   2 GiB) and wider filter coverage on gfx1250, and fixes wrong backward-weights results from the
@@ -95,6 +97,14 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   [`src/hipconv/CHANGELOG.md`](src/hipconv/CHANGELOG.md) for the full list.
 
 ### Changed
+* [Conv] The gfx942/gfx950 two-tower config-selection heuristic now ranks a shipped precomputed
+  config-embedding table instead of running the per-candidate fdeep config tower at run time, then
+  checks CK applicability lazily top-down; on a miss (no table, or nothing applicable) selection
+  falls through to the solver's non-AI heuristic. The two-tower models for the grouped CK
+  implicit-GEMM solvers (2D and 3D; forward, backward-data, backward-weights) are refreshed on
+  current tuning data. Set `MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB=1` to disable the table
+  and revert to the non-AI heuristic; set `MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE=0`
+  to skip the pre-existing 3D forward large-tensor hard-coded override and use the AI heuristic.
 * [Conv] Refreshed the 2D and 3D TunaNet solver-selection heuristics for gfx942 and gfx950 to
   support the current solver set (including `ConvHipConv`, depthwise, and Winograd variants) and
   improve top-1 accuracy and time-regret across all four architecture/dimension combinations.
@@ -119,6 +129,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   are rejected.
 
 ### Removed
+* [Conv] Stopped shipping the per-solver `{arch}_{solver}_kernel_config_encoder.tn.model` files; the
+  precomputed config-embedding table replaces the live config tower, so the config encoder is no
+  longer loaded at run time.
 * Removed the unused `miopenOperatorDescriptor` type from `miopen.h` (source-level only, ABI-neutral).
 * Removed `miopenAlphaBetaCase_t` and its unprefixed enumerators `DEFAULT`, `SCALE`, `BILINEAR` and `ERROR_STATE` from `miopen.h` (source-level only, ABI-neutral).
 * Removed the `MIOPEN_FP8_IEEE_EXPONENT_BIAS` CMake option and its `config.h` define. The FP8
