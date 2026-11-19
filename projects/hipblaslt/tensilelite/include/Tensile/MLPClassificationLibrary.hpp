@@ -164,27 +164,9 @@ namespace TensileLite
                 {
                     auto const& solution = *it->second;
                     Task        task(hardware, problem, *solution);
-                    // The uniform-summation-order arm adds hardwarePredicate plus
-                    // softwarePredicate(DEFAULT), which subsumes problemPredicate and adds
-                    // taskPredicate and the StreamK dynamic-queue check -- both reject
-                    // kernels accepted before the per-tile split mapping was added. With
-                    // that mode off, keep the narrower filter and independently
-                    // require device-scalar capability.
-                    bool accept;
-                    if(problem.getParams().uniformSummationOrder() != 0)
-                    {
-                        accept = (*solution->hardwarePredicate)(hardware)
-                                 && softwarePredicate(SolutionLibrarySearchType::DEFAULT,
-                                                      task,
-                                                      hardware,
-                                                      *solution,
-                                                      problem);
-                    }
-                    else
-                    {
-                        accept = (*solution->problemPredicate)(problem)
-                                 && solution->deviceScalarAlphaSupported(problem);
-                    }
+                    // taskPredicate (WorkspaceCheck) must hold with uniform summation
+                    // order off too, or the caller gets solutions it has no workspace for.
+                    const bool accept = selectionPredicate(task, hardware, *solution, problem);
                     if(accept)
                     {
                         rv.emplace_back(solution);
