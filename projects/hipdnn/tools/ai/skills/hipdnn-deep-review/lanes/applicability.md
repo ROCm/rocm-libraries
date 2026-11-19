@@ -52,16 +52,22 @@ no guard: it does not run on the raw backend API, deserialized or JSON graphs, o
    checklist, and compare with the bound applicability enforces. Each launch needs its own check: a second kernel with a different
    block size reaches the limit at a different size. When a launch's thread count is a descriptor field the tree does not show (a
    generated descriptor, a helper pack), treat `threads` as a free parameter: give the bound as a function of it and name the smallest
-   graph at the smallest and the largest block size the engine can pick.
+   graph at the smallest block size and at the largest the engine can pick (the engine's own cap, else the device's `maxThreadsPerBlock`).
    - Limits come from the runtime and the device (`maxGridSize`, `maxThreadsDim`, `maxThreadsPerBlock`), not from a constant the engine
      hardcodes. A hardcoded limit names its source in a comment: the HIP launch rule it mirrors, or the device property it stands for.
    - A bound that exists in plan build but not in applicability is `accept-then-fail`; one that is missing is the hazard.
+   - A refusal inside the kernel launcher (a launch-time guard that turns the runtime error into a named exception) is a backstop, not a
+     bound in applicability: the graph is still accepted and the plan built, so a missing per-engine bound stays `accept-then-fail` at the
+     same tier. A guard that checks only part of the launch rule (work-items but not the grid y and z limits) leaves the unchecked part a
+     finding. In a plan with several launches, say when a late failure comes after earlier launches have already written outputs; the tier
+     does not change.
    - A floor of `none` satisfies *Reachability first*: the finding's Proof states that a baseline graph passes every layer.
    - A bound the change adds that an earlier bound already implies is a note under **Checked, no finding**, not a gate and not a finding.
    - Kernel-argument extents narrowed to `int32` are the *Dims and extents* row's; this step covers values the launch itself uses (grid,
      block, work-item counts).
-   - An engine family in the same directory that the change does not touch and that has the same launch shape is `sibling-drift` at
-     `FUTURE WORK`, or a `CORR` handoff when it is not an applicability question.
+   - An engine family that the change does not touch and that shares the changed engine's op class or generator, with the same launch
+     shape, is `sibling-drift` at `FUTURE WORK`, or a `CORR` handoff when it is not an applicability question. Name the families you did
+     not audit under **Coverage**. "Code the change does not touch" is per function or hunk the change edits, not per file.
 
 ## Hazard classes
 
