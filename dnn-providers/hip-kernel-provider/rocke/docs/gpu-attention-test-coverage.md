@@ -59,7 +59,7 @@ listed separately in the inventory, not added to the workload rows.
 | gfx942 paged D128 ring regression | 12 | No: different path | Skipped |
 | gfx942 paged GQA head-fold | 4 | No: different path | Skipped |
 | gfx942 paged decode with i64 K/V addressing | 4 | No: different path | Skipped |
-| gfx942/gfx950 paged reads past the sequence (Q, stale K/V slots, block table) | 36 | No: different path | Skipped |
+| gfx942/gfx950 paged reads past the sequence (Q, stale K/V slots, block table) | 39 | No: different path | Skipped |
 | gfx950 dense attention | Historical inventory: 51 shapes in 50 configurations | Base causal configurations on gfx950 | Device-gated on gfx942; see gfx950 validation below |
 | gfx950 dense paged K/V | 40 | No: paged cache and block table | Device-gated on gfx942 |
 | Dense paged K/V through dispatch | 3 (1 gfx942, 2 gfx950) | No: paged cache and block table | Skipped |
