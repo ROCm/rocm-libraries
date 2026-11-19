@@ -251,6 +251,10 @@ public:
 
     ~poisson_distribution_manager()
     {
+        if(m_initialized)
+        {
+            ROCRAND_HIP_FATAL_ASSERT(hipStreamSynchronize(m_stream));
+        }
         factory_t::deallocate(m_distribution);
         if constexpr((Method & DISCRETE_METHOD_ALIAS) != 0)
         {
