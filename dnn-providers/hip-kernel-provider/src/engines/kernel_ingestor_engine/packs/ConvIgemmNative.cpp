@@ -1673,6 +1673,7 @@ public:
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 "conv_igemm dispatch was given a config its kernel match declines");
         }
+        problem->args.xcds = device_units::xcdCount(context.deviceProperties);
 
         compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
         options.add("CONV_IGEMM_T", elementTypeFor(problem->base.dataType));

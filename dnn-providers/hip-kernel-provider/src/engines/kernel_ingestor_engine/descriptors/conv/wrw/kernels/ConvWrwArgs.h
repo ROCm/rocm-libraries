@@ -60,6 +60,9 @@ struct K3Args
     /// dw element strides: k (over all groups) and tap (t r s flattened); c is 1.
     long long dwk;
     long long dwtap;
+    /// XCD-contiguous block order (CONV_K3_XCD): the device's XCDs; 1 or 0 keeps the launch order.
+    int xcds;
+    int padding1;
 };
 
 /// Adds the splits' fp32 partials in split order and writes dw in its element type and layout.
