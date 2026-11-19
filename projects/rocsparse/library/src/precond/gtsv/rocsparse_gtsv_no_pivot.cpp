@@ -530,14 +530,12 @@ namespace rocsparse
                                                          T*               B)
     {
         const int64_t nblocks_rhs = (static_cast<int64_t>(n) - 1) / NUM_RHS + 1;
-        for(int64_t bidy_offset = 0; bidy_offset < nblocks_rhs;
-            bidy_offset += handle->properties.maxGridSize[1])
+        for(int64_t bidy_offset = 0; bidy_offset < nblocks_rhs;)
         {
+            const uint32_t grid_y = rocsparse::get_grid_size_y(handle, nblocks_rhs - bidy_offset);
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::gtsv_no_pivot_pcr_tiled_backward_kernel<BLOCKSIZE, NUM_RHS>),
-                dim3((m - 1) / BLOCKSIZE + 1,
-                     rocsparse::get_grid_size_y(handle, nblocks_rhs - bidy_offset),
-                     1),
+                dim3((m - 1) / BLOCKSIZE + 1, grid_y, 1),
                 dim3(BLOCKSIZE),
                 0,
                 handle->stream,
@@ -552,6 +550,7 @@ namespace rocsparse
                 B_modified,
                 B_spike,
                 B);
+            bidy_offset += grid_y;
         }
         return rocsparse_status_success;
     }
@@ -576,14 +575,12 @@ namespace rocsparse
                                                        T*               B_spike)
     {
         const int64_t nblocks_rhs = (static_cast<int64_t>(n) - 1) / NUM_RHS + 1;
-        for(int64_t bidy_offset = 0; bidy_offset < nblocks_rhs;
-            bidy_offset += handle->properties.maxGridSize[1])
+        for(int64_t bidy_offset = 0; bidy_offset < nblocks_rhs;)
         {
+            const uint32_t grid_y = rocsparse::get_grid_size_y(handle, nblocks_rhs - bidy_offset);
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::gtsv_no_pivot_pcr_tiled_forward_kernel<BLOCKSIZE, NUM_RHS>),
-                dim3((m - 1) / BLOCKSIZE + 1,
-                     rocsparse::get_grid_size_y(handle, nblocks_rhs - bidy_offset),
-                     1),
+                dim3((m - 1) / BLOCKSIZE + 1, grid_y, 1),
                 dim3(BLOCKSIZE),
                 0,
                 handle->stream,
@@ -604,6 +601,7 @@ namespace rocsparse
                 d_spike,
                 du_spike,
                 B_spike);
+            bidy_offset += grid_y;
         }
         return rocsparse_status_success;
     }
