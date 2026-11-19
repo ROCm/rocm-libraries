@@ -1442,16 +1442,20 @@ TEST_F(ConcurrencyAutotuneTest, PlansWithDifferentOperatorsDoNotShareRound)
     ASSERT_EQ(refStatus, HIPTENSOR_STATUS_SUCCESS) << "status " << statusCode(refStatus);
 
     // The identity plan starts its round, then every call of the negating plan must negate.
+    // A candidate kernel may not support the problem: that call fails and is skipped.
     (void)runCall(identity, handle, identityPlan, b, identityWs);
+    int successes = 0;
     for(int call = 0; call < 3; call++)
     {
         SCOPED_TRACE("call " + std::to_string(call));
         auto [s, result] = runCall(negate, handle, negatePlan, b, negateWs);
         if(s == HIPTENSOR_STATUS_SUCCESS)
         {
+            successes++;
             EXPECT_EQ(result, reference);
         }
     }
+    EXPECT_GT(successes, 0) << "no call of the negating plan succeeded";
 }
 
 // The pass-through permutation kernel, selected when alpha is 1, ignores alpha. A plan keeps
