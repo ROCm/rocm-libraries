@@ -39,13 +39,15 @@ ROCSOLVER_BEGIN_NAMESPACE
 
 static constexpr int MinWarpSize = 32;
 
+// number of warps to match ThreadCount
+// similar to ceildiv( ThreadCount, MinWarpSize )
 template <int ThreadCount>
 static constexpr int MaxWarpCount = (ThreadCount + MinWarpSize - 1) / MinWarpSize;
 
 template <typename I>
 __device__ __host__ constexpr I num_warps(const I thread_count, const int warp_size)
 {
-    return (thread_count + warp_size - 1) / warp_size;
+    return ceildiv(thread_count, warp_size);
 }
 
 /*
