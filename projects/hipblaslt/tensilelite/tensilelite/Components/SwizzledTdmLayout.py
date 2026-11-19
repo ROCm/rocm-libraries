@@ -22,6 +22,7 @@ in elements unless named *Bytes; descriptor extents are in descriptor units
 from dataclasses import dataclass
 from typing import Mapping, Optional, Sequence, Tuple
 
+TDM_PAD_INTERVAL_LIMIT = 1024  # largest block (bytes) the TDM descriptor's pad_interval field can describe
 MAX_LDS_CONST_OFFSET = 65536   # ds_load immediate range; a larger offset selects LocalReadAddr+i
 
 # The host pads K to this many bytes, on every architecture. Flattening (kO, kM) gives the index of
@@ -133,6 +134,13 @@ class SwizzledTdmGeometry:
     @property
     def padBytes(self) -> int:
         return int(round(self.padElems * self.bpe))
+
+    @property
+    def padViaIterate(self) -> bool:
+        """The VW>1 pad is deposited by TDM iterate-mode (one nO tile per step) rather than by the
+        descriptor's pad_interval: the descriptor's pad block is at most TDM_PAD_INTERVAL_LIMIT bytes,
+        so only nO tiles larger than that need iterate-mode."""
+        return self.padElems != 0 and self.nOTileBytes > TDM_PAD_INTERVAL_LIMIT
 
     def paddedK(self, sizeL: int) -> int:
         """K extent of one nO row in the host buffer (its row stride is MI * paddedK)."""

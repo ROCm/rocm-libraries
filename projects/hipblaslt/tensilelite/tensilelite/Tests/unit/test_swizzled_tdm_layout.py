@@ -88,8 +88,8 @@ def simulate(sol, tc, sizeFree, sizeK, wg):
     kb = int(sizeK * bpe)
     numComp = tdmWaveComponents(sol, tc)[0] if sol["NumWaves"] > 1 else 1
     rowsPerComp, replicate = g.compRows(numComp)
-    tile1 = 1 if g.padElems else rowsPerComp      # iterate mode issues one nO tile per step
-    issues = rowsPerComp if g.padElems else 1
+    tile1 = 1 if g.padViaIterate else rowsPerComp   # iterate mode issues one nO tile per step
+    issues = rowsPerComp if g.padViaIterate else 1
     seg = sol["LDSSegInterleaveOffsets"] if sol["LDSSegmentInterleave"] == 1 else {}
     ldsBase = seg.get("ldsBase" + tc, sol["LdsOffset" + tc])
     writeStride = seg.get("writeStrideBytes")
@@ -116,6 +116,7 @@ def simulate(sol, tc, sizeFree, sizeK, wg):
             dim0 = (g.descTailDim0(sizeK) if tail else g.descTile0()) * unitBytes
             dim1 = g.remainingRows(sizeFree, wg, comp, 0 if replicate else rowsPerComp)
             compLds = ldsBase + (comp * writeStride if seg else g.compLdsOffsetBytes(comp, numComp))
+            # iterate mode steps by nO tile + pad; pad_interval puts the pad after each row of the 2-D copy
             rowStep = g.iterLdsIncBytes() if g.padElems else int(g.descTile0() * unitBytes)
             for it in range(issues):
                 tdm_copy(lds, host, base + it * int(g.descStride0(sizeK) * unitBytes),
@@ -179,6 +180,13 @@ CASES = [
     _c("B_f8_wt44_vwb2", "B", "f8", wt=(4, 4), VectorWidthB=2),
     _c("B_f4_vwb2_pad", "B", "f4", VectorWidthB=2), _c("B_bf16_vwb2", "B", "bf16", VectorWidthB=2),
     _c("B_f8_du128", "B", "f8", DepthU=128), _c("B_f8_du512", "B", "f8", DepthU=512),
+    # nO tile <= 1024 B with VW>1: the pad comes from the descriptor's pad_interval, not iterate-mode.
+    # (F8 never gets here: its WMMA K is 128, so an nO tile is at least 16 * 128 bytes.)
+    _c("B_bf16_vwb2_du32_small", "B", "bf16", VectorWidthB=2, DepthU=32),
+    _c("A_bf16_vwa2_du32_small", "A", "bf16", VectorWidthA=2, DepthU=32),
+    _c("B_f16_vwb2_du32_small", "B", "f16", VectorWidthB=2, DepthU=32),
+    _c("B_f4_vwb2_du128_small", "B", "f4", VectorWidthB=2, DepthU=128),
+    _c("A_f4_vwa2_du128_small", "A", "f4", VectorWidthA=2, DepthU=128),
     _c("B_f8_wg41_n16", "B", "f8", wt=(1, 1), wg=(4, 1)),
     _c("A_f8_wg14_m16", "A", "f8", wt=(1, 1), wg=(1, 4)),
     _c("B_f8_wg41_mt128x16", "B", "f8", wt=(2, 1), wg=(4, 1)),
@@ -243,3 +251,25 @@ def test_host_layout_is_independent_of_the_kernel_swizzle_granule(bpe, kBytes):
         gfx942 = host_bytes(sizeFree, sizeK, 16, 64, bpe)     # wave 64, MI 16 -> kM = 4
         gfx1250 = host_bytes(sizeFree, sizeK, 16, 32, bpe)    # wave 32, MI 16 -> kM = 2
         assert gfx942 == gfx1250
+
+
+def test_pad_interval_limit_matches_the_solver():
+    from tensilelite.Components.SwizzledTdmLayout import TDM_PAD_INTERVAL_LIMIT as geomLimit
+    from tensilelite.SolutionStructs.Utilities import TDM_PAD_INTERVAL_LIMIT as solverLimit
+    assert geomLimit == solverLimit
+
+
+@pytest.mark.parametrize("side,dtype,du,viaIterate", [
+    ("B", "bf16", 32, False), ("A", "bf16", 32, False), ("B", "f4", 128, False), ("A", "f4", 128, False),
+    ("B", "bf16", 64, True), ("A", "bf16", 64, True), ("B", "f8", 128, True), ("A", "f8", 128, True),
+])
+def test_vw_pad_route_follows_the_pad_interval_limit(_gp_gfx1250, gfx1250_iim, assembler, side, dtype, du, viaIterate):
+    """A VW>1 nO tile of at most 1024 B is padded by the descriptor's pad_interval, a larger one by iterate-mode."""
+    vw = {"VectorWidth" + side: 2}
+    params = H.swizzled_params(gfx1250_iim, side, dtype, wt=(2, 2), wg=(2, 2), DepthU=du, **vw)
+    sol = H.derive(params, assembler, gfx1250_iim)
+    assert sol["Valid"], "configuration rejected"
+    g = SwizzledTdmGeometry.fromKernel(sol, side)
+    assert g.padElems > 0
+    assert g.padViaIterate == viaIterate
+    assert bool(sol.get("_TDMIterateMode" + side)) == viaIterate

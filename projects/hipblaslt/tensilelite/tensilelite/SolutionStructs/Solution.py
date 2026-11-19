@@ -5707,17 +5707,15 @@ class Solution(collections.abc.Mapping):
           # VW>1 swizzle-A hits the same VWA-way LDS bank conflict as swizzle-B with VWB>1 (mOStride =
           # MI_M*DepthU is a multiple of the 256B bank cycle). Break it the same way: a 16B pad per
           # mO-tile, deposited through TDM iterate-mode. VW==1 stays unpadded and byte-identical.
-          # A tile of <= 1024B would need the descriptor pad_interval field instead, whose 16B pad is an
-          # odd-dword pad_amount (silently wrong on hardware), so small tiles stay unpadded (correct,
-          # just bank-conflicted).
           bpeA = state["ProblemType"]["DataTypeA"].numBytes()                # 0.5 for F4 (packed bytes)
           mOStrideBytes = int(state["MatrixInstM"] * state["_DepthUA"] * bpeA)  # per-mO LDS tile size
-          if swizzleAIsTDM and state["VectorWidthA"] > 1 and mOStrideBytes > 1024:
+          if swizzleAIsTDM and state["VectorWidthA"] > 1:
             state["LdsBlockSizePerPadA"] = mOStrideBytes
             state["LdsPadA"] = int(16 / bpeA)                                  # 16B = 4-bank shift (ds_load b128 width), in elements
             assert state["LdsPadA"] * bpeA == 16, "swizzled-TDM A pad must be 16 bytes"
-            state["_TDMIterateModeA"] = True
-            state["TDMIterateMode"] = state["TDMIterateMode"] | 1              # kernel naming (bit0 = A)
+            if mOStrideBytes > TDM_PAD_INTERVAL_LIMIT:                         # pad_interval covers a smaller block
+              state["_TDMIterateModeA"] = True
+              state["TDMIterateMode"] = state["TDMIterateMode"] | 1            # kernel naming (bit0 = A)
           elif swizzleAIsTDM:
             # Swizzle reads from a contiguous, unpadded LDS layout at fixed offsets; any LDS pad shifts
             # the data out from under those offsets. And the swizzle builds its own TDM descriptor.
@@ -5751,15 +5749,15 @@ class Solution(collections.abc.Mapping):
           # supplies it through the per-iteration LDS write stride (lds_inc = LdsBlockSizePerPad +
           # LdsPad*bpe) and works for any block size. VW==1 stays unpadded (already conflict-free) and
           # byte-identical to before. See initTDMDescriptor / _localReadSwizzledTDM for the read match.
-          # Tiles of <= 1024B stay unpadded (see swizzle-A above: the pad_interval route is an odd-dword pad).
           bpeB = state["ProblemType"]["DataTypeB"].numBytes()                # 0.5 for F4 (packed bytes)
           nOStrideBytes = int(state["MatrixInstN"] * state["_DepthUB"] * bpeB)  # per-nO LDS tile size
-          if swizzleBIsTDM and state["VectorWidthB"] > 1 and nOStrideBytes > 1024:
+          if swizzleBIsTDM and state["VectorWidthB"] > 1:
             state["LdsBlockSizePerPadB"] = nOStrideBytes
             state["LdsPadB"] = int(16 / bpeB)                                  # 16B = 4-bank shift (ds_load b128 width), in elements
             assert state["LdsPadB"] * bpeB == 16, "swizzled-TDM B pad must be 16 bytes"
-            state["_TDMIterateModeB"] = True
-            state["TDMIterateMode"] = state["TDMIterateMode"] | 2              # kernel naming (bit1 = B)
+            if nOStrideBytes > TDM_PAD_INTERVAL_LIMIT:                         # pad_interval covers a smaller block
+              state["_TDMIterateModeB"] = True
+              state["TDMIterateMode"] = state["TDMIterateMode"] | 2            # kernel naming (bit1 = B)
           elif swizzleBIsTDM:
             # Swizzle reads from a contiguous, unpadded LDS layout at fixed offsets; any LDS pad shifts
             # the data out from under those offsets. And the swizzle builds its own TDM descriptor.
