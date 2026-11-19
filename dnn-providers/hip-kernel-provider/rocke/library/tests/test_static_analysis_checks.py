@@ -530,20 +530,15 @@ def test_local_hook_config_has_only_local_hooks_and_names_no_stage():
         assert not hook.get("additional_dependencies"), hook["id"]
 
 
-def test_root_hook_config_needs_no_newer_pre_commit_for_these_hooks():
-    # pre-commit older than 3.2.0 rejects the whole file when any hook uses the
-    # `pre-push` stage, and every contributor reads the root config on each commit.
-    # The advisory hooks therefore live in their own file (see above).
+def test_root_hook_config_does_not_define_the_advisory_hooks():
+    # The advisory hooks live only in the rocKE-local config (see above). Defined in
+    # the repository's own config they would apply to every contributor, which the
+    # opt-in design avoids. This test says nothing about other projects' hooks: it
+    # must not fail a rocKE change because of what they add to that file.
     if not _ROOT_HOOK_CONFIG.is_file():
         pytest.skip("the repository hook config is not part of this layout")
     config = _load_yaml(_ROOT_HOOK_CONFIG)
-    stages = {*config.get("default_stages", [])}
-    ids = set()
-    for repo in config["repos"]:
-        for hook in repo["hooks"]:
-            ids.add(hook["id"])
-            stages.update(hook.get("stages", []))
-    assert "pre-push" not in stages
+    ids = {hook["id"] for repo in config["repos"] for hook in repo["hooks"]}
     assert not {"rocke-pyright", "rocke-radon", "rocke-vulture"} & ids
 
 
