@@ -2,13 +2,15 @@
 # SPDX-License-Identifier: MIT
 """A conv kernel label rebuilds its kernel from the repo alone.
 
-``job_for_identity`` runs the generators first; an identity their grid does
-not walk -- the opt-in knob sets of the shipped pin and route tables, or a
-grid narrowed by the ``ROCKE_AOT_*`` scoping variables -- is read off its own
-fields by ``job_from_identity``. These tests hold that inverse to the
-generators (same spec, same capability axes for every job they build), and
+``rebuild_job_for_identity`` runs the generators first; an identity their
+grid does not walk -- the opt-in knob sets of the shipped pin and route
+tables, or a grid narrowed by the ``ROCKE_AOT_*`` scoping variables -- is read
+off its own fields by ``job_from_identity``. These tests hold that inverse to
+the generators (same spec, same capability axes for every job they build),
 check that every label of the shipped tables resolves and builds its kernel
-IR in a process with no ``ROCKE_AOT_*`` variable set.
+IR in a process with no ``ROCKE_AOT_*`` variable set, and that
+``job_for_identity`` stays the strict inverse of the grid (it refuses what the
+sweep does not build).
 
 CPU only: kernel IR is built, nothing is compiled.
 """
@@ -64,7 +66,7 @@ def test_the_shipped_tables_name_kernels():
 @pytest.mark.parametrize("label", sorted(_LABELS))
 def test_every_shipped_label_rebuilds_its_kernel(label):
     ident = KernelIdentity.from_label(label)
-    job = aj.job_for_identity(ident)
+    job = aj.rebuild_job_for_identity(ident)
     assert job.identity == ident
     assert aj.job_from_identity(ident) == job
     kernel, meta = aj.kernel_for_job(job, ident.arch, ident.dtype_a)
@@ -77,12 +79,12 @@ def test_shipped_labels_resolve_without_the_aot_scope_environment():
     one narrowed to 3-D, 8-wide caches), every shipped label still resolves."""
     script = (
         "import json, sys\n"
-        "from kernels.conv.aot_jobs import job_for_identity\n"
+        "from kernels.conv.aot_jobs import rebuild_job_for_identity\n"
         "from kernels.conv.kernel_identity import KernelIdentity\n"
         "bad = []\n"
         "for lab in json.loads(sys.argv[1]):\n"
         "    try:\n"
-        "        job_for_identity(KernelIdentity.from_label(lab))\n"
+        "        rebuild_job_for_identity(KernelIdentity.from_label(lab))\n"
         "    except LookupError as e:\n"
         "        bad.append(str(e))\n"
         "print(len(bad)); print('\\n'.join(bad[:3]))\n"
@@ -99,6 +101,26 @@ def test_shipped_labels_resolve_without_the_aot_scope_environment():
             check=True,
         ).stdout
         assert out.splitlines()[0] == "0", (extra, out)
+
+
+def test_job_for_identity_stays_the_strict_inverse_of_the_grid():
+    """Packaging asks ``job_for_identity`` whether the sweep builds an
+    identity: an identity off the grid is refused there even though its
+    fields spell a valid job, which only ``rebuild_job_for_identity`` reads."""
+    off_grid = []
+    for label in sorted(_LABELS):
+        ident = KernelIdentity.from_label(label)
+        try:
+            aj.job_for_identity(ident)
+        except LookupError:
+            off_grid.append(ident)
+    assert off_grid, "every shipped label is on the default grid"
+    for ident in off_grid[:3]:
+        assert aj.rebuild_job_for_identity(ident).identity == ident
+    on_grid = next(iter(_grid_jobs("gfx950", "fwd", "bf16", 1)))
+    basic = dataclasses.replace(on_grid.identity, pipeline="basic")
+    with pytest.raises(LookupError):
+        aj.job_for_identity(basic)
 
 
 def test_the_dispatcher_imports_under_narrowed_aot_scoping():

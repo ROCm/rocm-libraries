@@ -6,7 +6,8 @@ how one of them is built.
 A :class:`BuildJob` is one kernel: a :class:`KernelIdentity` plus the spec
 kwargs and capability axes that produce it. The generators below walk the
 grid (``CACHE_*``) and yield jobs; :func:`job_for_identity` inverts them for one
-identity and :func:`kernel_for_job` turns a job into kernel IR. Nothing here
+identity (:func:`rebuild_job_for_identity` also builds one the grid does not
+walk) and :func:`kernel_for_job` turns a job into kernel IR. Nothing here
 compiles, caches or launches -- that is :mod:`benchmarks.common.kernel_sweep`
 -- so the dispatcher (:mod:`dispatch.grouped_convolution`) can build any
 registered instance without reaching above its layer.
@@ -4198,21 +4199,37 @@ def _dgrad_jobs(
 
 
 def job_for_identity(identity: KernelIdentity) -> BuildJob:
-    """The job that builds ``identity``.
+    """The job ``--compile-all`` builds ``identity`` from.
 
-    First the inverse of the generators above, obtained by running them: the
+    The inverse of the generators above, obtained by running them: the
     identity's geometry is fed to its direction's generator (with the
     identity's own split-K degree, sub-GEMM cap and LLVM flavor) and the job
-    whose identity is equal is returned, exactly the one ``--compile-all``
-    builds. An identity this process's grid does not walk -- an opt-in knob
-    set, a rank or width the ``ROCKE_AOT_*`` scoping variables leave out, as
-    in the shipped pin and route tables -- is read off its own fields by
-    :func:`job_from_identity`, which builds the same job for every identity
-    the grid does walk. So a label alone rebuilds its kernel, whatever the
-    environment.
+    whose identity is equal is returned. So a rebuilt job is exactly the one
+    the cache build made, never a reconstruction that could drift from it.
+
+    Raises ``LookupError`` for an identity the generators of this process do
+    not produce (a different grid, a rank or width the ``ROCKE_AOT_*``
+    scoping variables leave out, or a field they never set). Callers use that
+    as the test of whether the sweep builds an identity; to rebuild a kernel
+    from its label whatever the grid, use :func:`rebuild_job_for_identity`.
+    """
+    return _grid_job_for_identity(identity)
+
+
+def rebuild_job_for_identity(identity: KernelIdentity) -> BuildJob:
+    """The job that builds ``identity``, on the sweep's grid or off it.
+
+    :func:`job_for_identity` first, so an identity the grid walks gets
+    exactly the job ``--compile-all`` builds. An identity this process's grid
+    does not walk -- an opt-in knob set, a rank or width the ``ROCKE_AOT_*``
+    scoping variables leave out, as in the shipped pin and route tables -- is
+    read off its own fields by :func:`job_from_identity`, which builds the
+    same job for every identity the grid does walk. So a label alone rebuilds
+    its kernel, whatever the environment. This is not a test of whether the
+    sweep builds ``identity``.
 
     Raises ``LookupError`` for an identity no job produces (a field no spec
-    has, or one the generators never set).
+    has, or a configuration its spec validator refuses).
     """
     try:
         return _grid_job_for_identity(identity)
@@ -4224,7 +4241,7 @@ def job_for_identity(identity: KernelIdentity) -> BuildJob:
 
 
 def _grid_job_for_identity(identity: KernelIdentity) -> BuildJob:
-    """:func:`job_for_identity` by running this process's generators."""
+    """:func:`job_for_identity`: run this process's generators."""
     from rocke.core.arch import ArchTarget
 
     if identity.algorithm != "implicit_gemm" or identity.direction not in (

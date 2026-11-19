@@ -49,11 +49,12 @@ unpadded problems, except the dgrad x-halo kernels that mask the W padding thems
 `dx_interior` serves `pW == (X-1)/2` through its W-extended view). That is why each padded form has cases of its own.
 A request the table does not pin misses it and falls back to the default selection.
 
-The label alone rebuilds the kernel: the candidate's `build()` (and `benchmarks/common/reproduce_kernel.py`) goes
-through `kernels.conv.aot_jobs.job_for_identity`, which reads an identity the process's AOT grid does not walk off its
-own fields. The `ROCKE_AOT_*` variables only scope which kernels a `--compile-all` cache build enumerates (see the
+The label alone rebuilds the kernel: the candidate's `build()` goes through
+`kernels.conv.aot_jobs.rebuild_job_for_identity`, which reads an identity the process's AOT grid does not walk off its
+own fields (`job_for_identity` stays the strict inverse of the grid: it refuses what this process's sweep does not
+build). The `ROCKE_AOT_*` variables only scope which kernels a `--compile-all` cache build enumerates (see the
 kernel READMEs under `kernels/common/`); no table kernel needs them to be built. To put a table's kernels into an AOT
-cache, compile the jobs of its labels (`job_for_identity(KernelIdentity.from_label(label))`) with
+cache, compile the jobs of its labels (`rebuild_job_for_identity(KernelIdentity.from_label(label))`) with
 `benchmarks.common.kernel_sweep.compile_jobs`.
 
 ## Regenerating a table

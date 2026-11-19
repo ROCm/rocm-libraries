@@ -54,7 +54,7 @@ picked under ``algorithm="auto"``, reached by pinning its ``algorithm``):
   its spec (:class:`ConvPinnedSpec`) is the instance's AOT identity plus the
   launch parameters it was benchmarked with; ``build`` is the IR of the cached
   binary, rebuilt from the label alone
-  (:func:`kernels.conv.aot_jobs.job_for_identity`: the ``--compile-all`` job
+  (:func:`kernels.conv.aot_jobs.rebuild_job_for_identity`: the ``--compile-all`` job
   where this process's grid walks the identity, else the job read off its
   fields -- no ``ROCKE_AOT_*`` scoping variable is needed).
 * :func:`dispatch_conv_pinned` answers a ``ConvGroupedRequest`` of any
@@ -493,7 +493,7 @@ def pinned_conv_candidate(pins: ConvPins, direction: str):
     """
     from rocke.dispatch.core import Capability, KernelCandidate, selector_matches
 
-    from kernels.conv.aot_jobs import job_for_identity, kernel_for_job
+    from kernels.conv.aot_jobs import kernel_for_job, rebuild_job_for_identity
     from kernels.conv.kernel_identity import identity_supports_problem
 
     from .grouped_convolution import _conv_problem
@@ -550,7 +550,7 @@ def pinned_conv_candidate(pins: ConvPins, direction: str):
                 f"{spec.name} is a {spec.identity.arch} instance, not {arch}"
             )
         return kernel_for_job(
-            job_for_identity(spec.identity), arch, spec.identity.dtype_a
+            rebuild_job_for_identity(spec.identity), arch, spec.identity.dtype_a
         )[0]
 
     dtypes = tuple(sorted({key[1] for key in pins.pins})) or ("bf16", "fp16")

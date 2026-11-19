@@ -73,17 +73,20 @@ Compiling the instances is not done here: their binaries come from the AOT
 build (``benchmarks/common/grouped_conv/benchmark_grouped_conv.py
 --compile-all``), keyed by the same identity. Every candidate can still build
 its kernel IR (``DispatchResult.build()``): from the job ``--compile-all``
-builds its identity from (:func:`kernels.conv.aot_jobs.job_for_identity`,
-:func:`kernels.conv.direct_aot_jobs.direct_job_for_identity`), so it is
-the IR of the cached binary. What dispatch hands a launcher is
-a :class:`ConvLaunchPlan` (:func:`launch_plan_for`): the kernels to launch in
-order -- each one's identity, launch geometry, kernarg signature and buffers
--- plus the scratch and host tables they need. Most instances are one kernel;
-the MFMA direct dgrad first runs the weight transforms named in its spec's
-``helpers``, a split-C direct forward instance runs the reduction named there
-after it (into ``y`` from an fp32 workspace), and implicit-GEMM dgrad reads a
-tilde sub-GEMM table the caller uploads. Implicit-GEMM instances run a
-convolution whose width folds into its channels (a patch embedding) folded.
+builds its identity from
+(:func:`kernels.conv.aot_jobs.rebuild_job_for_identity`,
+:func:`kernels.conv.direct_aot_jobs.direct_job_for_identity`), so it is the
+IR of the cached binary; an implicit-GEMM identity the ``ROCKE_AOT_*``
+scoping variables leave out of this process's grid is read off its fields.
+What dispatch hands a launcher is a :class:`ConvLaunchPlan`
+(:func:`launch_plan_for`): the kernels to launch in order -- each one's
+identity, launch geometry, kernarg signature and buffers -- plus the scratch
+and host tables they need. Most instances are one kernel; the MFMA direct
+dgrad first runs the weight transforms named in its spec's ``helpers``, a
+split-C direct forward instance runs the reduction named there after it (into
+``y`` from an fp32 workspace), and implicit-GEMM dgrad reads a tilde sub-GEMM
+table the caller uploads. Implicit-GEMM instances run a convolution whose
+width folds into its channels (a patch embedding) folded.
 """
 
 from __future__ import annotations
@@ -97,8 +100,8 @@ from pathlib import Path
 
 from rocke.core.arch import ArchTarget
 from kernels.conv.aot_jobs import (
-    job_for_identity,
     kernel_for_job,
+    rebuild_job_for_identity,
     spec_for_job,
     spec_launch_block_size,
 )
@@ -549,7 +552,7 @@ def _instance_block(identity: KernelIdentity) -> tuple[int, int, int]:
         if identity.pipeline != "wavelet":
             return (identity.warp_m * identity.warp_n * identity.wave_size, 1, 1)
         # Wavelet appends load waves to the workgroup; the spec knows how many.
-        spec = spec_for_job(job_for_identity(identity), identity.dtype_a)
+        spec = spec_for_job(rebuild_job_for_identity(identity), identity.dtype_a)
         return (spec_launch_block_size(spec), 1, 1)
     # threads_per_block reads only the knobs, so any shape the spec accepts
     # at construction answers it.
@@ -913,7 +916,7 @@ def _build_instance(spec: ConvInstanceSpec, arch: str):
     if identity.is_direct:
         job = direct_job_for_identity(identity)
         return direct_kernel_for_job(job, arch, identity.dtype_a)[0]
-    return kernel_for_job(job_for_identity(identity), arch, identity.dtype_a)[0]
+    return kernel_for_job(rebuild_job_for_identity(identity), arch, identity.dtype_a)[0]
 
 
 def _make_instance_candidate(spec: ConvInstanceSpec, priority: int) -> KernelCandidate:

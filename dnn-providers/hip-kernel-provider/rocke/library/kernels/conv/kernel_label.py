@@ -10,10 +10,10 @@ to the kernel that produced it. :func:`encode` therefore turns a
 carries *every* identity field, and :func:`decode` turns the string back into
 an equal identity -- ``decode(encode(i)) == i`` for every identity. That
 round trip is what ``reproduce_kernel.py`` builds on: a name copied out of a
-log is enough to rebuild the kernel. For an implicit-GEMM kernel that holds in
-any environment: :func:`kernels.conv.aot_jobs.job_for_identity` reads an
-identity the process's AOT grid does not walk off its own fields (a direct
-conv kernel is rebuilt from the direct grid,
+log is enough to rebuild the kernel. For an implicit-GEMM kernel
+:func:`kernels.conv.aot_jobs.rebuild_job_for_identity` does that in any
+environment: it reads an identity the process's AOT grid does not walk off
+its own fields (a direct conv kernel is rebuilt from the direct grid,
 :func:`kernels.conv.direct_aot_jobs.direct_job_for_identity`). The
 grouped-convolution dispatcher names its instances by it too (their list,
 ``dispatch/grouped_convolution_instances/``, spells the same fields against

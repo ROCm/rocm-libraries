@@ -3,7 +3,7 @@
 """The shipped conv pin and route tables' kernels on a gfx942 device.
 
 Every distinct kernel label the shipped tables name is rebuilt from the label
-alone (:func:`kernels.conv.aot_jobs.job_for_identity`), compiled into a
+alone (:func:`kernels.conv.aot_jobs.rebuild_job_for_identity`), compiled into a
 scratch AOT cache and launched the way a pinned route launches it
 (:class:`benchmarks.common.conv_route_exec.RouteBinding`) on its table
 problem with the depth cut down (the same form: padding, channels, height and
@@ -81,12 +81,12 @@ def cache(tmp_path_factory):
 
 def _compiled(cache, label: str):
     from benchmarks.common.kernel_sweep import compile_jobs
-    from kernels.conv.aot_jobs import job_for_identity, kernel_for_job
+    from kernels.conv.aot_jobs import kernel_for_job, rebuild_job_for_identity
     from kernels.conv.kernel_identity import KernelIdentity
 
     ident = KernelIdentity.from_label(label.split()[0])
     if cache.get(ident) is None:
-        job = job_for_identity(ident)
+        job = rebuild_job_for_identity(ident)
         compile_jobs(
             cache=cache,
             all_jobs=[job],
