@@ -1252,6 +1252,10 @@ namespace
                       layout, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &mode, sizeof(mode), &written),
                   HIPBLAS_STATUS_SUCCESS);
         EXPECT_EQ(mode, HIPBLASLT_BATCH_MODE_GROUPED);
+        int32_t grouped = HIPBLASLT_BATCH_MODE_GROUPED;
+        EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                      layout, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &grouped, sizeof(grouped)),
+                  HIPBLAS_STATUS_SUCCESS);
         int32_t strided = HIPBLASLT_BATCH_MODE_STRIDED;
         EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
                       layout, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &strided, sizeof(strided)),
@@ -1304,7 +1308,6 @@ namespace
         // A regular layout cannot be switched to grouped mode or given grouped arrays.
         hipblasLtMatrixLayout_t regular = nullptr;
         ASSERT_EQ(hipblasLtMatrixLayoutCreate(&regular, HIP_R_16F, 8, 8, 8), HIPBLAS_STATUS_SUCCESS);
-        int32_t grouped = HIPBLASLT_BATCH_MODE_GROUPED;
         EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
                       regular, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &grouped, sizeof(grouped)),
                   HIPBLAS_STATUS_INVALID_VALUE);
@@ -1320,10 +1323,13 @@ namespace
                       regular, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &mode, sizeof(mode), &written),
                   HIPBLAS_STATUS_SUCCESS);
         EXPECT_EQ(mode, HIPBLASLT_BATCH_MODE_STRIDED);
-        // Pointer-array mode is still accepted on a regular layout.
+        // Pointer-array and strided modes are still accepted on a regular layout.
         int32_t ptrArray = HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
         EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
                       regular, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &ptrArray, sizeof(ptrArray)),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                      regular, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &strided, sizeof(strided)),
                   HIPBLAS_STATUS_SUCCESS);
         hipblasLtMatrixLayoutDestroy(regular);
 
