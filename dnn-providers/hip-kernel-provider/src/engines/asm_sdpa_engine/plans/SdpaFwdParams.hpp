@@ -14,10 +14,23 @@
 namespace asm_sdpa_engine
 {
 
+// Group mode locates each batch's tokens through two INT32 [B+1] token tables per side.
+// The ragged offset tables hold the physical starts (AITER's seqstart, the kernel's
+// ptr_*seq_padding). The cumulative length tables hold the logical lengths as prefix sums
+// (AITER's cu_seqlen, the kernel's ptr_*seq); without them the kernel reads the lengths
+// from the ragged offset tables, so the batches must then be packed with no gaps.
 struct SdpaFwdGroupModeParams
 {
     int64_t qoRaggedOffsetUid;
     int64_t kvRaggedOffsetUid;
+
+    /// The graph's cu_seq_len_q and cu_seq_len_kv tensor UIDs, which are always set together.
+    struct CumulativeLengthUids
+    {
+        int64_t q;
+        int64_t kv;
+    };
+    std::optional<CumulativeLengthUids> cuSeqLenUids = std::nullopt;
 };
 
 /**

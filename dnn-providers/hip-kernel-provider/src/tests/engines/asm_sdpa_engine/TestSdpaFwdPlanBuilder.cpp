@@ -47,6 +47,7 @@ namespace sdpa = hipdnn_test_sdk::utilities::sdpa;
 
 using hipdnn_flatbuffers_sdk::data_objects::GraphT;
 using hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT;
+using hipdnn_test_sdk::utilities::CuSeqLenSides;
 
 flatbuffers::FlatBufferBuilder mutateGraph(flatbuffers::FlatBufferBuilder&& builder,
                                            const std::function<void(GraphT&)>& mutate)
@@ -90,6 +91,15 @@ int64_t maxTensorUid(const GraphT& graph)
         maxUid = std::max(maxUid, tensor->uid);
     }
     return maxUid;
+}
+
+void removeTensor(GraphT& graph, const std::string& name)
+{
+    auto& tensors = graph.tensors;
+    tensors.erase(std::remove_if(tensors.begin(),
+                                 tensors.end(),
+                                 [&](const auto& tensor) { return tensor->name == name; }),
+                  tensors.end());
 }
 
 class TestSdpaFwdPlanBuilder : public ::testing::Test
@@ -144,9 +154,7 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
                         bool causalMask = false,
                         bool overrideShapeEnabled = false,
                         hipdnn_flatbuffers_sdk::data_objects::DataType mmaCoreMode
-                        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
-                        hipdnn_test_sdk::utilities::CuSeqLenSides cuSeqLenSides
-                        = hipdnn_test_sdk::utilities::CuSeqLenSides::NONE)
+                        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
 {
     if(qDims.size() != 4 || vDims.size() != 4)
     {
@@ -173,53 +181,7 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
         paddingMask,
         causalMask,
         overrideShapeEnabled,
-        mmaCoreMode,
-        cuSeqLenSides);
-}
-
-// No ASM forward kernel implements cu_seq_len_*. padding_mask stays false so only the
-// cu_seq_len reject can decline the graph.
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsCuSeqLen)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    SKIP_IF_NO_DEVICES();
-
-    const std::string deviceString
-        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
-    if(deviceString != "gfx942" && deviceString != "gfx950")
-    {
-        GTEST_SKIP();
-    }
-
-    const std::vector<int64_t> dims = {4, 8, 256, 128};
-    auto baseline = createSdpaFwdGraph(dims, dims);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper baselineWrapper(
-        baseline.GetBufferPointer(), baseline.GetSize());
-    ASSERT_TRUE(_planBuilder.isApplicable(_handle, baselineWrapper));
-
-    // Each side alone must decline the graph, not only both together.
-    using hipdnn_test_sdk::utilities::CuSeqLenSides;
-    for(const auto sides : {CuSeqLenSides::Q, CuSeqLenSides::KV, CuSeqLenSides::BOTH})
-    {
-        SCOPED_TRACE(static_cast<int>(sides));
-        auto withCuSeqLen = createSdpaFwdGraph(dims,
-                                               dims,
-                                               DataType::BFLOAT16,
-                                               DataType::FLOAT,
-                                               /*withAttnMask=*/false,
-                                               /*withScale=*/false,
-                                               /*withStats=*/false,
-                                               /*alibiMask=*/false,
-                                               /*paddingMask=*/false,
-                                               /*causalMask=*/false,
-                                               /*overrideShapeEnabled=*/false,
-                                               DataType::UNSET,
-                                               sides);
-        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper cuWrapper(
-            withCuSeqLen.GetBufferPointer(), withCuSeqLen.GetSize());
-        EXPECT_FALSE(_planBuilder.isApplicable(_handle, cuWrapper));
-    }
+        mmaCoreMode);
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
@@ -492,7 +454,9 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForNon16ByteAlignment)
 
 auto createBshdSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
                             const std::vector<int64_t>& vDims = {4, 8, 256, 128},
-                            bool withStats = false)
+                            bool withStats = false,
+                            bool paddingMask = false,
+                            CuSeqLenSides cuSeqLenSides = CuSeqLenSides::NONE)
 {
     const std::vector<int64_t> kDims = {qDims[0], vDims[1], vDims[2], qDims[3]};
     const std::vector<int64_t> oDims = {qDims[0], qDims[1], qDims[2], vDims[3]};
@@ -509,15 +473,37 @@ auto createBshdSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128}
         hipdnn_data_sdk::utilities::generateStrides(oDims, bshd),
         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        false,
-        false,
-        withStats);
+        /*withAttnMask=*/false,
+        /*withScale=*/false,
+        withStats,
+        /*alibiMask=*/false,
+        paddingMask,
+        /*causalMask=*/false,
+        /*overrideShapeEnabled=*/false,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
+        cuSeqLenSides);
 }
 
 auto createRaggedBshdSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
-                                  const std::vector<int64_t>& vDims = {4, 8, 256, 128})
+                                  const std::vector<int64_t>& vDims = {4, 8, 256, 128},
+                                  bool withStats = false,
+                                  bool paddingMask = false,
+                                  CuSeqLenSides cuSeqLenSides = CuSeqLenSides::NONE)
 {
-    return sdpa::withRaggedTensors(createBshdSdpaFwdGraph(qDims, vDims), {"q", "k", "v", "o"});
+    return sdpa::withRaggedTensors(
+        createBshdSdpaFwdGraph(qDims, vDims, withStats, paddingMask, cuSeqLenSides),
+        {"q", "k", "v", "o"});
+}
+
+// A group-mode graph that gives the per-batch logical lengths as cu_seq_len_q/kv, with the
+// padding_mask the frontend pairs them with.
+auto createRaggedCuSeqLenSdpaFwdGraph()
+{
+    return createRaggedBshdSdpaFwdGraph({4, 8, 256, 128},
+                                        {4, 8, 256, 128},
+                                        /*withStats=*/false,
+                                        /*paddingMask=*/true,
+                                        CuSeqLenSides::BOTH);
 }
 
 // Requests the bottom-right causal band (left bound unbounded, right bound 0) that the
@@ -543,6 +529,44 @@ flatbuffers::FlatBufferBuilder withTopLeftCausalMask(flatbuffers::FlatBufferBuil
     });
 }
 
+// Points K and V at the Q/O ragged offset tensor, so both sides read their per-batch lengths
+// from one table.
+flatbuffers::FlatBufferBuilder withSharedRaggedOffset(flatbuffers::FlatBufferBuilder&& builder)
+{
+    return mutateGraph(std::move(builder), [](GraphT& graph) {
+        const auto qoOffsetUid = findTensor(graph, "q").ragged_offset_tensor_uid;
+        findTensor(graph, "k").ragged_offset_tensor_uid = qoOffsetUid;
+        findTensor(graph, "v").ragged_offset_tensor_uid = qoOffsetUid;
+        removeTensor(graph, "kv_ragged_offset");
+    });
+}
+
+// Points cu_seq_len_kv at the cu_seq_len_q tensor, so both sides read their per-batch
+// logical lengths from one table.
+flatbuffers::FlatBufferBuilder withSharedCuSeqLen(flatbuffers::FlatBufferBuilder&& builder)
+{
+    return mutateGraph(std::move(builder), [](GraphT& graph) {
+        auto* attrs = graph.nodes.front()->attributes.AsSdpaAttributes();
+        attrs->cu_seq_len_kv_tensor_uid = attrs->cu_seq_len_q_tensor_uid;
+        removeTensor(graph, "cu_seq_len_kv");
+    });
+}
+
+// Lays out the stats tensor of a group-mode graph as AITER's head-major [H, total_q] LSE:
+// ragged on the Q/O offset tensor in token units, so element (b, h, s) sits at
+// offset[b] + h * total_q + s.
+flatbuffers::FlatBufferBuilder withHeadMajorRaggedStats(flatbuffers::FlatBufferBuilder&& builder)
+{
+    return mutateGraph(std::move(builder), [](GraphT& graph) {
+        const auto& q = findTensor(graph, "q");
+        auto& stats = findTensor(graph, "stats");
+        const int64_t seqLenQ = q.dims[2];
+        stats.strides = {seqLenQ, q.dims[0] * seqLenQ, 1, 1};
+        stats.ragged_offset_tensor_uid = q.ragged_offset_tensor_uid;
+        stats.ragged_offset_multiplier = 1;
+    });
+}
+
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedVariations)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -561,12 +585,6 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedVariations)
         {GraphTest{createRaggedBshdSdpaFwdGraph({4, 8, 256, 192}, {4, 8, 256, 128}),
                    "Group mode with q head dim 192 and v head dim 128"},
          true},
-        {GraphTest{sdpa::withRaggedTensors(createBshdSdpaFwdGraph({4, 8, 256, 128},
-                                                                  {4, 8, 256, 128},
-                                                                  /*withStats=*/true),
-                                           {"q", "k", "v", "o"}),
-                   "Group mode with generate_stats"},
-         false},
         {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph(), {"q", "k", "v"}),
                    "Q, K, V ragged but not O"},
          false},
@@ -574,40 +592,26 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedVariations)
         {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph(), {"k", "v", "o"}),
                    "K, V, O ragged but not Q"},
          false},
-        {GraphTest{sdpa::withRaggedTensors(createBshdSdpaFwdGraph({4, 8, 256, 128},
-                                                                  {4, 8, 256, 128},
-                                                                  /*withStats=*/true),
-                                           {"q", "k", "v", "o", "stats"}),
-                   "Q, K, V, O and STATS ragged -> STATS is an unsupported ragged tensor"},
-         false},
-        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
-                                      {4, 8, 256, 128},
-                                      DataType::BFLOAT16,
-                                      DataType::FLOAT,
-                                      false,
-                                      false,
-                                      /*withStats=*/true),
-                   "Dense Q, K, V, O with stats (baseline for the stats-only ragged case)"},
-         true},
-        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph({4, 8, 256, 128},
-                                                              {4, 8, 256, 128},
-                                                              DataType::BFLOAT16,
-                                                              DataType::FLOAT,
-                                                              false,
-                                                              false,
-                                                              /*withStats=*/true),
-                                           {"stats"}),
-                   "Dense Q, K, V, O with only STATS ragged -> STATS is an unsupported ragged "
-                   "tensor"},
-         false},
-        // Both archs have a group-mode bottom-right causal bf16 hd128 row. A top-left
-        // causal mask must not run on it even when the maximum lengths are equal: the
-        // per-batch lengths in the offset tables can differ, and then the masks differ.
+        // Both archs have a group-mode bottom-right causal bf16 hd128 row. A top-left causal
+        // mask runs on it only when the Q and K/V per-batch lengths come from one table,
+        // where the two masks agree; equal maximum lengths are not enough. The cu_seq_len
+        // tensors, when the graph has them, are the length tables instead of the offsets.
         {GraphTest{withBottomRightCausalMask(createRaggedBshdSdpaFwdGraph()),
-                   "Group mode bottom-right causal (baseline for the top-left case)"},
+                   "Group mode bottom-right causal (baseline for the top-left cases)"},
          true},
         {GraphTest{withTopLeftCausalMask(createRaggedBshdSdpaFwdGraph()),
-                   "Group mode top-left causal with equal maximum S_q and S_kv"},
+                   "Group mode top-left causal with separate Q/O and K/V offset tensors"},
+         false},
+        {GraphTest{withTopLeftCausalMask(withSharedRaggedOffset(createRaggedBshdSdpaFwdGraph())),
+                   "Group mode top-left causal with one offset tensor for Q, K, V and O"},
+         true},
+        {GraphTest{withTopLeftCausalMask(withSharedCuSeqLen(createRaggedCuSeqLenSdpaFwdGraph())),
+                   "Group mode top-left causal with one cu_seq_len tensor for both sides"},
+         true},
+        {GraphTest{
+             withTopLeftCausalMask(withSharedRaggedOffset(createRaggedCuSeqLenSdpaFwdGraph())),
+             "Group mode top-left causal with one offset tensor but separate "
+             "cu_seq_len_q/kv"},
          false}};
 
     for(const auto& [test, applicability] : applicabilityTests)
@@ -758,16 +762,145 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedOffsetContract)
     }
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsSeqLenQ)
+// Group mode can take the per-batch logical lengths as cu_seq_len_q/kv, paired with
+// padding_mask; the ragged offset tensors then hold the physical starts. Batch mode has no
+// length input, and per-batch seq_len_q/kv would need a prefix sum the engine does not run.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableCuSeqLenContract)
 {
-    const GraphTest test{sdpa::withSeqLenQ(createSdpaFwdGraph()), "seq_len_q_tensor_uid set"};
-    EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    std::vector<std::pair<GraphTest, bool>> applicabilityTests = {
+        {GraphTest{createRaggedCuSeqLenSdpaFwdGraph(),
+                   "Group mode with cu_seq_len_q/kv and padding_mask"},
+         true},
+        {GraphTest{createBshdSdpaFwdGraph(
+                       dims, dims, /*withStats=*/false, /*paddingMask=*/true, CuSeqLenSides::BOTH),
+                   "Batch mode with cu_seq_len_q/kv and padding_mask"},
+         false},
+        {GraphTest{createRaggedBshdSdpaFwdGraph(
+                       dims, dims, /*withStats=*/false, /*paddingMask=*/false, CuSeqLenSides::BOTH),
+                   "cu_seq_len_q/kv without padding_mask"},
+         false},
+        {GraphTest{createRaggedBshdSdpaFwdGraph(
+                       dims, dims, /*withStats=*/false, /*paddingMask=*/true, CuSeqLenSides::NONE),
+                   "padding_mask without cu_seq_len_q/kv"},
+         false},
+        {GraphTest{createRaggedBshdSdpaFwdGraph(
+                       dims, dims, /*withStats=*/false, /*paddingMask=*/true, CuSeqLenSides::Q),
+                   "cu_seq_len_q without cu_seq_len_kv"},
+         false},
+        {GraphTest{createRaggedBshdSdpaFwdGraph(
+                       dims, dims, /*withStats=*/false, /*paddingMask=*/true, CuSeqLenSides::KV),
+                   "cu_seq_len_kv without cu_seq_len_q"},
+         false},
+        {GraphTest{sdpa::withSeqLenQ(createRaggedCuSeqLenSdpaFwdGraph()), "seq_len_q set"}, false},
+        {GraphTest{sdpa::withSeqLenKv(createRaggedCuSeqLenSdpaFwdGraph()), "seq_len_kv set"},
+         false}};
+
+    // The cu_seq_len tensors are validated separately, so every defect is exercised on both.
+    // The graph has B = 4, so a valid cu_seq_len tensor is INT32 [5, 1, 1, 1].
+    for(const char* name : {"cu_seq_len_q", "cu_seq_len_kv"})
+    {
+        const auto addRejected = [&](const std::string& defect,
+                                     const std::function<void(TensorAttributesT&)>& mutate) {
+            applicabilityTests.emplace_back(
+                GraphTest{mutateGraph(createRaggedCuSeqLenSdpaFwdGraph(),
+                                      [&](GraphT& graph) { mutate(findTensor(graph, name)); }),
+                          std::string(name) + ": " + defect},
+                false);
+        };
+        addRejected("INT64", [](TensorAttributesT& t) { t.data_type = DataType::INT64; });
+        addRejected("virtual", [](TensorAttributesT& t) { t.virtual_ = true; });
+        addRejected("B rather than B+1 entries",
+                    [](TensorAttributesT& t) { t.dims = {4, 1, 1, 1}; });
+        addRejected("stride[0] == 2", [](TensorAttributesT& t) { t.strides = {2, 1, 1, 1}; });
+    }
+
+    for(const auto& [test, applicability] : applicabilityTests)
+    {
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
+            << test.message;
+    }
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsSeqLenKv)
+// Batch mode writes dense FP32 [B, H, Sq] stats. Group mode writes AITER's head-major
+// [H, total_q] LSE, so its stats tensor must be ragged on the Q/O offset tensor in token
+// units with a sequence stride of 1.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableStatsLayoutFollowsBatchMode)
 {
-    const GraphTest test{sdpa::withSeqLenKv(createSdpaFwdGraph()), "seq_len_kv_tensor_uid set"};
-    EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    // Mutates the head-major stats graph that group mode accepts.
+    const auto withGroupStats = [&](const std::function<void(GraphT&)>& mutate) {
+        return mutateGraph(
+            withHeadMajorRaggedStats(createRaggedBshdSdpaFwdGraph(dims, dims, /*withStats=*/true)),
+            mutate);
+    };
+
+    const std::vector<std::pair<GraphTest, bool>> applicabilityTests = {
+        {GraphTest{createBshdSdpaFwdGraph(dims, dims, /*withStats=*/true),
+                   "Batch mode with dense stats"},
+         true},
+        {GraphTest{sdpa::withRaggedTensors(createBshdSdpaFwdGraph(dims, dims, /*withStats=*/true),
+                                           {"stats"}),
+                   "Batch mode with ragged stats"},
+         false},
+        {GraphTest{
+             withHeadMajorRaggedStats(createRaggedBshdSdpaFwdGraph(dims, dims, /*withStats=*/true)),
+             "Group mode with head-major stats ragged on the Q/O offset tensor"},
+         true},
+        {GraphTest{withGroupStats([](GraphT& graph) {
+                       auto& stats = findTensor(graph, "stats");
+                       stats.dims.pop_back();
+                       stats.strides.pop_back();
+                   }),
+                   "Group mode with rank-3 head-major stats"},
+         true},
+        {GraphTest{createRaggedBshdSdpaFwdGraph(dims, dims, /*withStats=*/true),
+                   "Group mode with dense stats"},
+         false},
+        {GraphTest{sdpa::withRaggedTensors(createBshdSdpaFwdGraph(dims, dims, /*withStats=*/true),
+                                           {"q", "k", "v", "o", "stats"}),
+                   "Group mode with stats ragged on its own offset tensor"},
+         false},
+        {GraphTest{withGroupStats([](GraphT& graph) {
+                       findTensor(graph, "stats").ragged_offset_tensor_uid
+                           = findTensor(graph, "k").ragged_offset_tensor_uid;
+                   }),
+                   "Group mode with stats ragged on the K/V offset tensor"},
+         false},
+        {GraphTest{withGroupStats([](GraphT& graph) { findTensor(graph, "stats").strides[2] = 2; }),
+                   "Group mode stats with sequence stride 2"},
+         false},
+        {GraphTest{withGroupStats([](GraphT& graph) {
+                       findTensor(graph, "stats").ragged_offset_multiplier = 8;
+                   }),
+                   "Group mode stats with ragged_offset_multiplier 8"},
+         false}};
+
+    for(const auto& [test, applicability] : applicabilityTests)
+    {
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
+            << test.message;
+    }
 }
 
 // =============================================================================
