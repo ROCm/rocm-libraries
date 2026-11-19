@@ -5267,6 +5267,182 @@ TEST(TestEnginePluginResourceManager, CodegenFixturePredictionsThroughResourceMa
     EXPECT_THAT(failed.reason, HasSubstr("valid graph"));
 }
 
+// ---------------------------------------------------------------------------
+// The SDK-generated entry points called directly through the codegen fixture's exports,
+// so a test sees the plugin's own status rather than the backend's PLUGIN_ERROR.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+using CreateHandleFn = hipdnnPluginStatus_t (*)(hipdnnEnginePluginHandle_t*);
+using DestroyHandleFn = hipdnnPluginStatus_t (*)(hipdnnEnginePluginHandle_t);
+using GetApplicableEngineIdsFn = hipdnnPluginStatus_t (*)(
+    hipdnnEnginePluginHandle_t, const hipdnnPluginConstData_t*, int64_t*, uint32_t, uint32_t*);
+using GetEngineDetailsFn = hipdnnPluginStatus_t (*)(hipdnnEnginePluginHandle_t,
+                                                    int64_t,
+                                                    const hipdnnPluginConstData_t*,
+                                                    hipdnnPluginConstData_t*);
+using GetWorkspaceSizeFn = hipdnnPluginStatus_t (*)(hipdnnEnginePluginHandle_t,
+                                                    const hipdnnPluginConstData_t*,
+                                                    const hipdnnPluginConstData_t*,
+                                                    size_t*);
+using CreateExecutionContextFn = hipdnnPluginStatus_t (*)(hipdnnEnginePluginHandle_t,
+                                                          const hipdnnPluginConstData_t*,
+                                                          const hipdnnPluginConstData_t*,
+                                                          hipdnnEnginePluginExecutionContext_t*);
+using DestroyExecutionContextFn
+    = hipdnnPluginStatus_t (*)(hipdnnEnginePluginHandle_t, hipdnnEnginePluginExecutionContext_t);
+
+class TestCodegenFixtureEntryPoints : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        ASSERT_TRUE(std::filesystem::exists(CODEGEN_FIXTURE_PATH))
+            << "Test precondition: plugin missing at " << CODEGEN_FIXTURE_PATH;
+        _library = SharedLibrary(CODEGEN_FIXTURE_PATH);
+        _destroyHandle = _library.getSymbol<DestroyHandleFn>("hipdnnEnginePluginDestroy");
+        _getApplicableEngineIds = _library.getSymbol<GetApplicableEngineIdsFn>(
+            "hipdnnEnginePluginGetApplicableEngineIds");
+        _getEngineDetails
+            = _library.getSymbol<GetEngineDetailsFn>("hipdnnEnginePluginGetEngineDetails");
+        _getWorkspaceSize
+            = _library.getSymbol<GetWorkspaceSizeFn>("hipdnnEnginePluginGetWorkspaceSize");
+        _createExecutionContext = _library.getSymbol<CreateExecutionContextFn>(
+            "hipdnnEnginePluginCreateExecutionContext");
+        _destroyExecutionContext = _library.getSymbol<DestroyExecutionContextFn>(
+            "hipdnnEnginePluginDestroyExecutionContext");
+
+        auto* createHandle = _library.getSymbol<CreateHandleFn>("hipdnnEnginePluginCreate");
+        ASSERT_EQ(createHandle(&_handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+        ASSERT_NE(_handle, nullptr);
+
+        hipdnn_flatbuffers_sdk::data_objects::EngineConfigT config;
+        config.engine_id = codegen_fixture::K_FIXTURE_ENGINE_ID;
+        _configBytes.Finish(
+            hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(_configBytes, &config));
+    }
+
+    void TearDown() override
+    {
+        if(_handle != nullptr)
+        {
+            _destroyHandle(_handle);
+        }
+    }
+
+    hipdnnPluginConstData_t validGraph() const
+    {
+        return {_graphBytes.GetBufferPointer(), _graphBytes.GetSize()};
+    }
+
+    hipdnnPluginConstData_t validConfig() const
+    {
+        return {_configBytes.GetBufferPointer(), _configBytes.GetSize()};
+    }
+
+    // A root offset of zero fails FlatBuffers verification for every root type.
+    hipdnnPluginConstData_t unverifiableBuffer() const
+    {
+        return {_unverifiableBytes.data(), _unverifiableBytes.size()};
+    }
+
+    // Runs CreateExecutionContext and releases any context it created, so a call that
+    // wrongly succeeds does not leak.
+    hipdnnPluginStatus_t createExecutionContext(const hipdnnPluginConstData_t& engineConfig,
+                                                const hipdnnPluginConstData_t& opGraph)
+    {
+        hipdnnEnginePluginExecutionContext_t context = nullptr;
+        const auto status = _createExecutionContext(_handle, &engineConfig, &opGraph, &context);
+        if(context != nullptr)
+        {
+            _destroyExecutionContext(_handle, context);
+        }
+        return status;
+    }
+
+    SharedLibrary _library;
+    hipdnnEnginePluginHandle_t _handle = nullptr;
+    DestroyHandleFn _destroyHandle = nullptr;
+    GetApplicableEngineIdsFn _getApplicableEngineIds = nullptr;
+    GetEngineDetailsFn _getEngineDetails = nullptr;
+    GetWorkspaceSizeFn _getWorkspaceSize = nullptr;
+    CreateExecutionContextFn _createExecutionContext = nullptr;
+    DestroyExecutionContextFn _destroyExecutionContext = nullptr;
+    flatbuffers::FlatBufferBuilder _graphBytes = createValidGraph();
+    flatbuffers::FlatBufferBuilder _configBytes;
+    std::array<uint8_t, 8> _unverifiableBytes{};
+};
+
+} // namespace
+
+// The caller may only release details from a successful call, so a failure must not
+// leave the caller's earlier contents behind.
+TEST_F(TestCodegenFixtureEntryPoints, FailedGetEngineDetailsLeavesNoDetails)
+{
+    constexpr int64_t UNKNOWN_ENGINE_ID = 0x7777;
+    const auto opGraph = validGraph();
+    int sentinel = 0;
+    hipdnnPluginConstData_t details{&sentinel, 1};
+
+    EXPECT_NE(_getEngineDetails(_handle, UNKNOWN_ENGINE_ID, &opGraph, &details),
+              HIPDNN_PLUGIN_STATUS_SUCCESS);
+    EXPECT_EQ(details.ptr, nullptr);
+    EXPECT_EQ(details.size, 0U);
+}
+
+// The fixture engine never reads the graph, so only the entry point's own check can
+// refuse a buffer that failed verification.
+TEST_F(TestCodegenFixtureEntryPoints, GetApplicableEngineIdsRejectsUnverifiableGraph)
+{
+    const auto opGraph = unverifiableBuffer();
+    std::array<int64_t, 4> engineIds{};
+    uint32_t numEngines = 0;
+
+    EXPECT_EQ(_getApplicableEngineIds(_handle,
+                                      &opGraph,
+                                      engineIds.data(),
+                                      static_cast<uint32_t>(engineIds.size()),
+                                      &numEngines),
+              HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestCodegenFixtureEntryPoints, GetEngineDetailsRejectsUnverifiableGraph)
+{
+    const auto opGraph = unverifiableBuffer();
+    int sentinel = 0;
+    hipdnnPluginConstData_t details{&sentinel, 1};
+
+    EXPECT_EQ(_getEngineDetails(_handle, codegen_fixture::K_FIXTURE_ENGINE_ID, &opGraph, &details),
+              HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+    EXPECT_EQ(details.ptr, nullptr);
+    EXPECT_EQ(details.size, 0U);
+}
+
+TEST_F(TestCodegenFixtureEntryPoints, GetWorkspaceSizeRejectsUnverifiableGraphOrConfig)
+{
+    const auto engineConfig = validConfig();
+    const auto opGraph = validGraph();
+    const auto unverifiable = unverifiableBuffer();
+    size_t workspaceSize = 0;
+
+    EXPECT_EQ(_getWorkspaceSize(_handle, &engineConfig, &unverifiable, &workspaceSize),
+              HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+    EXPECT_EQ(_getWorkspaceSize(_handle, &unverifiable, &opGraph, &workspaceSize),
+              HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestCodegenFixtureEntryPoints, CreateExecutionContextRejectsUnverifiableGraphOrConfig)
+{
+    const auto engineConfig = validConfig();
+    const auto opGraph = validGraph();
+    const auto unverifiable = unverifiableBuffer();
+
+    EXPECT_EQ(createExecutionContext(engineConfig, unverifiable), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+    EXPECT_EQ(createExecutionContext(unverifiable, opGraph), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+}
+
 // A page missing a schema-required string is refused at the plugin boundary, and the
 // plugin's allocation is still released.
 TEST_F(TestEnginePredictionTransport, CandidatePageMissingARequiredFieldIsAPluginError)

@@ -26,6 +26,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -64,7 +65,12 @@ inline double toDouble(const ScalarValue& value)
             if constexpr(std::is_same_v<T, int32_t> || std::is_same_v<T, int64_t>)
             {
                 const auto widened = static_cast<double>(v);
-                if(static_cast<T>(widened) != v)
+                // Converting a double back to T is defined only inside [min, max + 1);
+                // both bounds are powers of two, so exactly representable. INT64_MAX
+                // widens to 2^63, which this rejects before the cast back is evaluated.
+                constexpr auto LOWER_BOUND = static_cast<double>(std::numeric_limits<T>::min());
+                constexpr auto UPPER_BOUND = -LOWER_BOUND;
+                if(widened < LOWER_BOUND || widened >= UPPER_BOUND || static_cast<T>(widened) != v)
                 {
                     throw HipdnnPluginException(
                         HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,

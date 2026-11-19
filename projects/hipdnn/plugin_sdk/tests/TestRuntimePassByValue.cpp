@@ -446,6 +446,23 @@ TEST(TestRuntimePassByValue, ToDoubleThrowsOnUnrepresentableInt64)
                                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
 }
 
+// INT64_MAX widens to 2^63, one past the int64_t range, so converting it back is
+// undefined; the range check must reject it before that conversion runs.
+TEST(TestRuntimePassByValue, ToDoubleThrowsOnInt64MaxWhichWidensOutOfRange)
+{
+    expectPluginThrowWithStatus([] { toDouble(ScalarValue{std::numeric_limits<int64_t>::max()}); },
+                                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+}
+
+// -2^63 and 2^60 are exactly representable, so the range check must not reject them.
+TEST(TestRuntimePassByValue, ToDoubleAcceptsExactlyRepresentableInt64AtTheRangeEdges)
+{
+    EXPECT_EQ(toDouble(ScalarValue{std::numeric_limits<int64_t>::min()}), -9.223372036854775808e18);
+
+    constexpr int64_t TWO_POW_60 = int64_t{1} << 60;
+    EXPECT_EQ(toDouble(ScalarValue{TWO_POW_60}), 1152921504606846976.0);
+}
+
 TEST(TestRuntimePassByValue, ToDoubleThrowsOnUnrepresentableInt32IsUnreachableButInt64Guarded)
 {
     // int32_t is always exactly representable in double (24 vs 53 mantissa bits
