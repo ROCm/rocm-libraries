@@ -10,8 +10,10 @@ import pytest
 from uhd_gen.provenance import (
     ProvenanceError,
     compare_provenance,
+    hard_provenance,
     record_feature_semantics,
     require_feature_semantics,
+    shared_provenance,
     snapshot_provenance,
     validate_provenance,
 )
@@ -210,6 +212,55 @@ def test_a_stale_selector_revision_is_refused_rather_than_scored():
     compare_provenance(trained, {"selector_revision": "aiter-fwd-1"})
     with pytest.raises(ProvenanceError, match="selector_revision"):
         compare_provenance(trained, {"selector_revision": "aiter-fwd-2"})
+
+
+def test_another_compilers_code_objects_are_warned_about_not_refused(caplog):
+    """The runtime binds a model whose codegen_revision differs, and warns."""
+    trained = {"selector_revision": "aiter-fwd-1", "codegen_revision": "cg-A"}
+    compare_provenance(trained, {**trained})
+    assert "codegen_revision" not in caplog.text
+    compare_provenance(trained, {**trained, "codegen_revision": "cg-B"})
+    assert "'cg-A'" in caplog.text and "'cg-B'" in caplog.text
+    with pytest.raises(ProvenanceError, match="selector_revision"):
+        compare_provenance(
+            trained, {"selector_revision": "aiter-fwd-2", "codegen_revision": "cg-A"}
+        )
+
+
+@pytest.mark.parametrize(
+    "revisions, shared",
+    [
+        (("cg-A", "cg-A"), "cg-A"),
+        (("cg-A", "cg-B"), None),
+        (("cg-A", None), None),
+        ((None, None), None),
+    ],
+    ids=["one_compiler", "two_compilers", "one_unrecorded", "none_recorded"],
+)
+def test_a_codegen_revision_is_shared_only_when_every_snapshot_records_it(
+    revisions, shared
+):
+    snapshots = [
+        {"selector_revision": "r", **({"codegen_revision": c} if c else {})}
+        for c in revisions
+    ]
+    provenance, warning = shared_provenance(snapshots)
+    assert provenance == {
+        "selector_revision": "r",
+        **({"codegen_revision": shared} if shared else {}),
+    }
+    assert (warning is not None) == (len(set(revisions)) > 1)
+    assert hard_provenance(snapshots[0]) == {"selector_revision": "r"}
+
+
+def test_snapshots_that_differ_beyond_their_codegen_revision_share_nothing():
+    with pytest.raises(ProvenanceError, match="beyond its codegen_revision"):
+        shared_provenance(
+            [
+                {"selector_revision": "r1", "codegen_revision": "cg-A"},
+                {"selector_revision": "r2", "codegen_revision": "cg-A"},
+            ]
+        )
 
 
 def test_feature_semantics_absent_means_revision_1_and_a_mismatch_names_both():

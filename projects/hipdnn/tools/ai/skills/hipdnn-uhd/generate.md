@@ -207,7 +207,9 @@ candidate is every slot's pick, named `prep=<id>|dkdv=<id>|dq=<id>`, and a knob 
 - **Accumulate.** A second set for the same engine and device excludes the first; it does not
   replace it. Archive a key's sets ([data.md](data.md)) to start afresh.
 - **Revision.** Collections of different selector revisions go to different datasets; a model
-  trains from one.
+  trains from one. Collections of one selector revision built by different compilers
+  (different `codegen_revision`) share a dataset; training warns and the model records no
+  `codegen_revision`.
 - **Tier.** A smoke round proves the pipeline, not the model: it passes when every graph is
   collected, the model trains and is scored held out, and Stage V's identity, available,
   metric and selector-revision gates pass. Its accuracy gate is reported, and a smoke model is

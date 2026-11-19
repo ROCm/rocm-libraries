@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .errors import HkpPackError
 from .variant import _hash_payload
-from .agreement import OriginObserver, observe
+from .agreement import OriginObserver, digest, observe
 
 try:
     from types import UnionType as _UnionType
@@ -302,6 +302,39 @@ def _load_module_compiler():
     return KernelModule, compile_module
 
 
+def _load_comgr_options():
+    """Lazy handle for rocke's `accepted_comgr_options`, which names the COMGR
+    options a kernel compiles with.
+
+    `compile_kernel` passes COMGR exactly what it returns, and `compile_module`
+    passes what it returns for the primary (it refuses a module whose kernels
+    imply different options). Behind a function so tests can substitute a stub.
+    """
+    from rocke.helpers.compile import accepted_comgr_options
+
+    return accepted_comgr_options
+
+
+def code_object_identity(llvm_texts, isa, options):
+    """A compiler-independent digest of what a code object is compiled from.
+
+    rocKE's `ComgrInput` contract is that the HSACO is a pure function of the LLVM
+    IR, the COMGR ISA name, the COMGR options and the COMGR library. This digests
+    the first three, so it stays fixed when only the COMGR library changes while
+    the code object's sha256 moves. `llvm_texts` holds one IR text per kernel the
+    object is built from, in the order they are linked.
+    """
+    return digest(
+        {
+            "llvm": [
+                hashlib.sha256(text.encode("utf-8")).hexdigest() for text in llvm_texts
+            ],
+            "isa": isa,
+            "options": list(options),
+        }
+    )
+
+
 def _resolved_comgr_path():
     """Best-effort path of the comgr the rocke loader resolved, for diagnostics.
 
@@ -521,6 +554,10 @@ def compile_rocke_variant(
     object. The captured symbol is then the primary's, and the observations gain
     `companions`: `{role: symbol}`; a KernelDef build records no such key.
 
+    The observations record the object's `code_object_sha256` and its
+    `code_object_identity` (see `code_object_identity`), which the packer stamps
+    on the shipped kernel_source as `identity`.
+
     `arch` is the shard the object is packed for; `target` (the UKD's
     `kernel_source.target`) decides the processor it is compiled for, which the
     support predicate, the builder and comgr all receive. See `rocke_compile_arch`.
@@ -618,6 +655,13 @@ def compile_rocke_variant(
     observations["compile_target"] = compile_arch
     observations["symbol"] = artifact.kernel_name
     observations["code_object_sha256"] = hashlib.sha256(artifact.hsaco).hexdigest()
+    # With ROCKE_DEBUG_LOC set the IR embeds absolute source paths, so the identity
+    # of a debug-info build also depends on where the tree is checked out.
+    observations["code_object_identity"] = code_object_identity(
+        artifact.llvm_texts if is_module else (artifact.llvm_text,),
+        artifact.isa,
+        _load_comgr_options()(kernel.primary if is_module else kernel),
+    )
     if is_module:
         # Only a module records companions, so a single-kernel compile's
         # evidence -- and the descriptor digest binding it -- is unchanged.

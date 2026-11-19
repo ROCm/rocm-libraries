@@ -1354,7 +1354,10 @@ Authored `hip`, `hsaco`, and `rocke` sources are packed into kpack at build time
 loader (`DescriptorLoader.hpp`) accepts the kinds `embedded_source`, `kpack`, `hsaco_file`, and
 `rocke_builder`. Only `embedded_source` and `kpack` have adapters; the loader rejects the other
 two as not yet implemented. A runtime `kpack` source carries `toc_key`, `sha256`, and the
-packager-read `signature`, in addition to `library` and `symbol`.
+packager-read `signature`, in addition to `library` and `symbol`. A source the packager compiled
+from rocKE IR also carries `identity` (UKD 1.2): a sha256 of what it handed the compiler, which the
+generic engine's selector revision reads in place of `sha256` so that a compiler change alone does
+not move it ([RFC 0019 §8.1](0019_UniversalHeuristicDescriptor.md#81-descriptor-versions-and-uhd-coupling)).
 
 A kernel source points at code through a small tagged union, the one piece unique to a UKD,
 and fills a Launch slot in the pack's shared UDD to run. A single-kernel UKD supplies one

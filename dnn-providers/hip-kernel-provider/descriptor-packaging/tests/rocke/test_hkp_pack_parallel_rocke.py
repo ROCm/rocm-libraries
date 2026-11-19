@@ -142,9 +142,11 @@ _EDITABLE_MODULE = """
 
 
 class _FakeRockeArtifact:
-    def __init__(self, name, data):
+    def __init__(self, name, data, llvm_text, isa):
         self.kernel_name = name
         self.hsaco = data
+        self.llvm_text = llvm_text
+        self.isa = isa
 
 
 class _FakeComgrError(Exception):
@@ -188,10 +190,20 @@ def editable_producer(tmp_path, monkeypatch):
     importlib.invalidate_caches()
 
     def _fake_compile(kernel, *, arch, capture_ir_text=False, backend=None):
-        return _FakeRockeArtifact("editable_symbol", b"\x7fELF-stub")
+        # The IR names the spec, so the two variants have different identities.
+        _kernel, spec, _arch = kernel
+        return _FakeRockeArtifact(
+            "editable_symbol",
+            b"\x7fELF-stub",
+            f"; tile {spec.tile}",
+            f"amdgcn-amd-amdhsa--{arch}",
+        )
 
     monkeypatch.setattr(
         rocke_compile, "_load_compiler", lambda: (_fake_compile, _FakeComgrError)
+    )
+    monkeypatch.setattr(
+        rocke_compile, "_load_comgr_options", lambda: lambda _kernel: ["-O3"]
     )
 
     try:
@@ -328,3 +340,35 @@ def test_pool_accepts_variants_built_by_one_producer_revision(
     assert len(inter.variant_co) == 2
     assert all(co.is_file() for co in inter.variant_co.values())
     assert producer.read_text(encoding="utf-8") == textwrap.dedent(_EDITABLE_MODULE)
+
+
+@pytest.mark.quick
+def test_pool_and_serial_paths_record_the_same_identities(
+    editable_producer, tmp_path, monkeypatch
+):
+    """A pooled variant's `code_object_identity` crosses the worker boundary with its
+    observations, and is the identity the serial walk records for that variant: the
+    packer stamps it from there."""
+    corpus, _producer = editable_producer
+
+    def _identities(jobs, inter_dir):
+        monkeypatch.setenv("HKP_PACK_JOBS", jobs)
+        inter = pipeline.compile_intermediate(
+            load_flat_input(corpus, GENERIC_TARGETS, log=_silent),
+            corpus,
+            TARGET_ARCH,
+            "hipcc",
+            tmp_path / inter_dir,
+            log=_silent,
+        )
+        return {
+            ukd.id: ukd.observations["code_object_identity"]
+            for kdp in inter.kdps
+            for ukd in kdp.ukds
+        }
+
+    _serial_pool(monkeypatch)
+    pooled = _identities("2", "pooled")
+    serial = _identities("1", "serial")
+    assert pooled == serial
+    assert len(set(serial.values())) == 2, "the two variants compile different IR"

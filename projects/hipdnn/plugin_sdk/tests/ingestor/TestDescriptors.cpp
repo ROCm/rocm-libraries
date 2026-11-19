@@ -246,7 +246,8 @@ TEST(TestIngestorDescriptors, HeuristicDescriptorDefaultsToStaticOrder)
                                       f17,
                                       f18,
                                       f19,
-                                      f20]
+                                      f20,
+                                      f21]
             = HeuristicDescriptor{};
     }
     {
@@ -280,7 +281,7 @@ TEST(TestIngestorDescriptors, HeuristicDescriptorDefaultsToStaticOrder)
         [[maybe_unused]] const auto& [f0, f1, f2, f3] = KernelArgument{};
     }
     {
-        [[maybe_unused]] const auto& [f0, f1, f2, f3, f4, f5, f6, f7] = KernelSource{};
+        [[maybe_unused]] const auto& [f0, f1, f2, f3, f4, f5, f6, f7, f8] = KernelSource{};
     }
     {
         [[maybe_unused]] const auto& [f0, f1, f2, f3, f4, f5, f6, f7, f8] = KernelDescriptor{};
@@ -371,6 +372,7 @@ KernelSource populatedSource()
     source.symbol = "symbol";
     source.sha256 = "0123abcd";
     source.signature = {populatedArgument()};
+    source.identity = "4567cdef";
     return source;
 }
 
@@ -409,6 +411,7 @@ HeuristicDescriptor populatedHeuristic()
     heuristic.treeRoot = "tree";
     heuristic.trainedAgainst = populatedProvenance();
     heuristic.trainedAgainstSelectorRevision = "selector-revision";
+    heuristic.trainedAgainstCodegenRevision = "codegen-revision";
     heuristic.engineName = "engine";
     heuristic.role = "sort_kernel_catalog";
     heuristic.arch = "gfx942";
@@ -582,6 +585,11 @@ std::vector<EqualityCase> allEqualityCases()
                      true,
                      baseline,
                      [](auto& v) { v.trainedAgainstSelectorRevision += "!"; }),
+            fieldRow(type,
+                     "TrainedAgainstCodegenRevision",
+                     true,
+                     baseline,
+                     [](auto& v) { v.trainedAgainstCodegenRevision += "!"; }),
             fieldRow(type, "EngineName", false, baseline, [](auto& v) { v.engineName += "!"; }),
             fieldRow(type, "Role", false, baseline, [](auto& v) { v.role = "predict_engine"; }),
             fieldRow(type, "Arch", false, baseline, [](auto& v) { v.arch = "gfx950"; }),
@@ -710,6 +718,7 @@ std::vector<EqualityCase> allEqualityCases()
                      true,
                      baseline,
                      [](auto& v) { v.signature.push_back(KernelArgument{}); }),
+            fieldRow(type, "Identity", true, baseline, [](auto& v) { v.identity += "!"; }),
         });
     }
     {
