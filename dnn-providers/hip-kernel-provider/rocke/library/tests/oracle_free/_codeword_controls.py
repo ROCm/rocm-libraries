@@ -42,13 +42,12 @@ from ._codeword_analytical import (
 from ._codeword_policy import CODEWORD_KILL_MATRIX, CodewordMutation, in_scope
 from ._codeword_subject import (
     CODEWORD_ARCHES,
-    _hip_backend,
-    _launch_guarded,
     codeword_schedule,
+    launch_guarded,
     resolve_codeword_subject,
     run_codeword_case,
 )
-from ._dense_subject import DENSE_SUBJECTS, ResolvedDenseSubject
+from ._dense_subject import DENSE_SUBJECTS, ResolvedDenseSubject, dense_runner_launch
 
 # One control per seam of the kill matrix. Every control but the last is emitted.
 CODEWORD_SUBJECT_CONTROLS = (
@@ -324,17 +323,17 @@ def run_row_bound_bypass(
         "out": layout.new_buffer(),
     }
     shipped_predicate = runner.supports_attention_dense
+    shipped_launch = dense_runner_launch(
+        arch, spec, scale=1.0 / math.sqrt(case.head_dim)
+    )
 
-    def launch(*, q, k, v, out) -> None:
+    def launch(**buffers) -> None:
         runner.supports_attention_dense = lambda _spec, *, arch: shipped_predicate(
             shipped_spec, arch=arch
         )
         try:
-            runner.run_attention_dense_torch(
-                spec=spec, q=q, k=k, v=v, out=out, scale=1.0 / math.sqrt(case.head_dim)
-            )
+            shipped_launch(**buffers)
         finally:
             runner.supports_attention_dense = shipped_predicate
 
-    raw = _launch_guarded(launch, _hip_backend(), host, layout)
-    return ragged, GuardedOutput(layout, raw)
+    return ragged, launch_guarded(launch, host, layout)

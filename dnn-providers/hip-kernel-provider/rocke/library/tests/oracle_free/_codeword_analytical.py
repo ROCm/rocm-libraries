@@ -51,7 +51,8 @@ CODEWORD_MAX_KV_HEADS = 4
 CODEWORD_MAX_SEQLEN_K = 256
 CODEWORD_MAX_HEAD_DIM = 64
 
-_SIGN_BIT = 0x8000
+# Both subject formats are 16 bits wide with the sign in the top bit.
+SIGN_BIT = 0x8000
 
 # The uniform-probability lane's two specifications, at batch 1 and at batch 2.
 # Batch placement is observable only at batch 2. These are grouped-query cases:
@@ -168,7 +169,15 @@ def exact_target_bits(value: Fraction, dtype: str) -> int:
     An exact rational has no negative zero, so zero is ``+0`` and the sign bit is
     set only for a negative value."""
     magnitude = target_bits(abs(value.numerator), value.denominator, dtype)
-    return magnitude | _SIGN_BIT if value < 0 else magnitude
+    return magnitude | SIGN_BIT if value < 0 else magnitude
+
+
+def nonfinite_field(dtype: str) -> int:
+    """The exponent field of a subject format, all ones.
+
+    Stored bits are an infinity or a NaN exactly when the whole field is set."""
+    fraction_bits, exponent_bits, _ = _FORMAT[dtype]
+    return ((1 << exponent_bits) - 1) << fraction_bits
 
 
 def codeword_target_bits(case: UniformCase) -> np.ndarray:
@@ -538,11 +547,10 @@ class GuardedOutput:
 
     def safety(self, dtype: str) -> StoreSafety:
         """Count changed guard elements and unwritten or non-finite outputs."""
-        fraction_bits, exponent_bits, _ = _FORMAT[dtype]
         start, stop = self.layout.guard, self.layout.guard + self.layout.logical
         logical = self.raw[start:stop]
         unwritten = logical == SENTINEL_BITS
-        exponent_field = ((1 << exponent_bits) - 1) << fraction_bits
+        exponent_field = nonfinite_field(dtype)
         nonfinite = ((logical & exponent_field) == exponent_field) & ~unwritten
         return StoreSafety(
             prefix=int(np.count_nonzero(self.raw[:start] != CANARY_BITS)),

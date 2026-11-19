@@ -39,6 +39,7 @@ from ._codeword_analytical import (
     LANE_KV_HEAD,
     LANE_PARITY,
     SENTINEL_BITS,
+    SIGN_BIT,
     GuardedOutput,
     StoreSafety,
     TileSchedule,
@@ -46,10 +47,8 @@ from ._codeword_analytical import (
     codeword_target_bits,
     codeword_value,
     exact_target_bits,
+    nonfinite_field,
 )
-
-_SIGN_BIT = 0x8000
-_MAGNITUDE = 0x7FFF
 
 
 class Channel(str, Enum):
@@ -117,7 +116,7 @@ def path_exact_admissible(case: UniformCase) -> AdmissibleBits:
     The zero output is a sum of signed zeros whose sign nothing fixes."""
     first = codeword_target_bits(case)
     second = first.copy()
-    second[first == 0] = _SIGN_BIT
+    second[first == 0] = SIGN_BIT
     return AdmissibleBits(first, second)
 
 
@@ -176,7 +175,7 @@ def codeword_decoder(case: UniformCase) -> Mapping[int, DecodedSource]:
             codeword_target(case, 0, 0, 0, dim),
             DecodedSource(Channel.DIMENSION, dim),
         )
-    table[_SIGN_BIT] = table[0]
+    table[SIGN_BIT] = table[0]
     return MappingProxyType(table)
 
 
@@ -253,8 +252,7 @@ def analyze_codeword(
             f"expected {bits.shape} of case {case.case_id}"
         )
     targets = codeword_target_bits(case)
-    fraction_bits, exponent_bits, _ = _FORMAT[case.dtype]
-    exponent_field = ((1 << exponent_bits) - 1) << fraction_bits
+    exponent_field = nonfinite_field(case.dtype)
     # Unwritten and non-finite outputs belong to the store-safety counts.
     judged = (bits != SENTINEL_BITS) & ((bits & exponent_field) != exponent_field)
     outside = judged & ~admissible.contains(bits)
@@ -289,7 +287,7 @@ def analyze_codeword(
         misplaced=int(np.count_nonzero(far & known)),
         foreign=int(np.count_nonzero(far & ~known)),
         worst_ulp=int(distance[outside].max()) if outside.any() else 0,
-        negative_zero=int(np.count_nonzero((targets == 0) & (bits == _SIGN_BIT))),
+        negative_zero=int(np.count_nonzero((targets == 0) & (bits == SIGN_BIT))),
         safety=output.safety(case.dtype),
         failures=failures,
     )
@@ -463,11 +461,11 @@ def applicable_mutations(case: UniformCase) -> tuple[CodewordMutation, ...]:
 
 def _nonfinite_bits(numerator: Fraction, dtype: str) -> int:
     """What ``numerator * (1 / 0)`` stores: an infinity, or a NaN for zero."""
-    fraction_bits, exponent_bits, _ = _FORMAT[dtype]
-    infinity = ((1 << exponent_bits) - 1) << fraction_bits
+    infinity = nonfinite_field(dtype)
     if numerator == 0:
-        return infinity | (1 << (fraction_bits - 1))
-    return infinity | _SIGN_BIT if numerator < 0 else infinity
+        quiet_bit = 1 << (_FORMAT[dtype][0] - 1)
+        return infinity | quiet_bit
+    return infinity | SIGN_BIT if numerator < 0 else infinity
 
 
 def _mutant_bits(value: Fraction, scale: Fraction | None, dtype: str) -> int:

@@ -70,6 +70,10 @@ launches it the same way. The suite therefore exercises the shipped compile,
 cache and launch path and keeps no copy of the kernel signature, geometry or
 runtime arguments.
 
+Steps 1 and 3 to 5 are `launch_dense_buffers`, the one device path of the suite.
+The coordinate-codeword check launches through it too, with an output offset:
+the kernel is then given an address inside the output buffer.
+
 ## Policy
 
 Expected values are correctly rounded (round-to-nearest-even) raw FP16/BF16 bit

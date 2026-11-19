@@ -68,6 +68,7 @@ from ._codeword_controls import (
     CODEWORD_ROW_BOUND_CASES,
     CODEWORD_SUBJECT_CONTROLS,
     _mutant_builder,
+    _single_bit,
     lowered_ir,
     private_build,
     row_bound_bypass_spec,
@@ -93,13 +94,14 @@ from ._codeword_policy import (
 from ._codeword_subject import (
     CODEWORD_ARCHES,
     CODEWORD_SUBJECT_CASES,
-    _launch_guarded,
     _verify_codeword_resolved_spec,
     codeword_kernel_key,
     codeword_schedule,
+    launch_guarded,
     resolve_codeword_subject,
+    run_codeword_case,
 )
-from ._dense_subject import DENSE_SUBJECTS
+from ._dense_subject import DENSE_SUBJECTS, launch_dense_buffers, run_dense_case
 from .test_codeword_dense import _judge_output, _not_rejected
 from .test_contracts import _SKIP_CALLS, _dotted_name
 
@@ -1119,8 +1121,8 @@ def _fake_launch(case: UniformCase, kernel) -> tuple[GuardedOutput, _FakeDevice,
         seen.update(q=q, k=k, v=v, out=out)
         kernel(device, out)
 
-    raw = _launch_guarded(launch, device.backend(), host, layout)
-    return GuardedOutput(layout, raw), device, seen
+    output = launch_guarded(launch, host, layout, backend=device.backend())
+    return output, device, seen
 
 
 def test_guarded_launch_hands_the_kernel_the_interior_of_the_allocation() -> None:
@@ -1227,6 +1229,66 @@ def test_a_write_past_the_guard_is_not_contained() -> None:
         _fake_launch(case, kernel)
 
 
+def test_launch_without_an_offset_hands_the_kernel_the_output_buffer() -> None:
+    """The uniform-probability lane launches through the same device path with
+    no offset: the kernel gets the output buffer itself, and all of it is read
+    back."""
+    case = CODEWORD_UNGROUPED_CASES[0]
+    targets = codeword_target_bits(case)
+    device = _FakeDevice()
+    q, k, v = (encode_bits(values, case.dtype) for values in codeword_inputs(case))
+    out = np.zeros(case.output_shape, dtype=np.uint16)
+    seen: dict = {}
+
+    def launch(*, q, k, v, out) -> None:
+        seen.update(out=out)
+        device.store(out.ptr(), targets)
+
+    raw = launch_dense_buffers(
+        launch, {"q": q, "k": k, "v": v, "out": out}, backend=device.backend()
+    )
+    assert seen["out"].nbytes() == targets.nbytes
+    assert np.array_equal(raw, targets)
+
+
+@pytest.mark.parametrize("out_offset", [-16, 8, 64])
+def test_launch_refuses_an_offset_outside_the_output_or_unaligned(
+    out_offset: int,
+) -> None:
+    """The address the kernel is given must lie inside the output allocation and
+    keep the 16-byte alignment the adapter checks on every device pointer."""
+    layout = GuardLayout(guard=8, logical=16)
+    device = _FakeDevice()
+
+    def launch(**buffers) -> None:
+        raise AssertionError("launched")
+
+    with pytest.raises(
+        ValueError, match=rf"out_offset={out_offset}, expected a multiple of 16 bytes"
+    ):
+        launch_dense_buffers(
+            launch,
+            {"out": layout.new_buffer()},
+            out_offset=out_offset,
+            backend=device.backend(),
+        )
+    assert device.allocations == {}
+
+
+def test_a_launch_refuses_the_subject_of_another_case() -> None:
+    """Both lanes validate a launch through the adapter before any device call,
+    so a subject resolved for another case is refused on the CPU."""
+    (arch, case), (_, other_case) = CODEWORD_SUBJECT_CASES[:2]
+    other = resolve_codeword_subject(arch, other_case)
+    q, k, v = (encode_bits(values, case.dtype) for values in codeword_inputs(case))
+    for run in (run_codeword_case, run_dense_case):
+        with pytest.raises(
+            ValueError,
+            match=rf"resolved subject {arch}/{other.case_id} != {arch}/{case.case_id}",
+        ):
+            run(arch, case, q, k, v, subject=other)
+
+
 @cache
 def _correct_output(case: UniformCase) -> GuardedOutput:
     """A guarded output holding the path-exact emulation, with untouched guards."""
@@ -1273,6 +1335,8 @@ def test_admissible_bits_reject_arrays_that_are_not_two_bit_tables() -> None:
     AdmissibleBits(bits, bits)
     with pytest.raises(ValueError, match=r"dtypes float32 and uint16"):
         AdmissibleBits(bits.astype(np.float32), bits)
+    with pytest.raises(ValueError, match=r"dtypes uint16 and float32"):
+        AdmissibleBits(bits, bits.astype(np.float32))
     with pytest.raises(ValueError, match=r"shapes \(2, 3\) and \(3, 2\)"):
         AdmissibleBits(bits, bits.T.copy())
 
@@ -1416,6 +1480,21 @@ def test_decoder_names_each_lane_and_marks_shared_values() -> None:
     assert decoder[0x0000] == decoder[0x8000] == DecodedSource(Channel.ROW, 0)
 
 
+def test_decoder_refuses_a_value_that_two_lanes_store() -> None:
+    """A stored value names its lane only while the lanes take disjoint ranges.
+    Far outside the codeword bounds they meet: dimension 323 stores ``324/16``,
+    which is the batch lane's ``20 + 1/4``."""
+    case = replace(CODEWORD_UNGROUPED_CASES[0], head_dim=324)
+    assert codeword_value(0, 0, 0, 323) == codeword_value(0, 0, 0, LANE_BATCH)
+    with pytest.raises(ValueError, match=r"are in the batch and dimension lanes"):
+        codeword_decoder(case)
+    # One dimension less and no two lanes share a value.
+    decoder = codeword_decoder(replace(case, head_dim=323))
+    assert decoder[_rounded(case, Fraction(323, 16))] == DecodedSource(
+        Channel.DIMENSION, 322
+    )
+
+
 def test_kill_matrix_has_a_row_for_every_mutation_and_a_case_for_every_scope() -> None:
     assert set(CODEWORD_KILL_MATRIX) == set(CodewordMutation)
     for scope in Scope:
@@ -1474,6 +1553,23 @@ def test_a_mutation_outside_its_scope_stores_the_correct_output(
     assert np.array_equal(_placement_mutant_bits(case, mutation, bits), bits)
     with pytest.raises(ValueError, match=rf"mutation='{mutation.value}' on case"):
         apply_mutation(case, _DERIVED_SCHEDULE, mutation, _correct_output(case))
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [CodewordMutation.DIM_ROTATE_IN_VECTOR, CodewordMutation.D_HALF_SWAP],
+    ids=lambda mutation: mutation.value,
+)
+def test_dimension_mutations_require_whole_store_vectors(
+    mutation: CodewordMutation,
+) -> None:
+    """The dimension mutations move outputs inside the epilogue's pairs of
+    four-element store vectors, so a head dimension that is not made of whole
+    pairs is refused."""
+    case = replace(CODEWORD_UNGROUPED_CASES[0], head_dim=12)
+    bits = np.zeros(case.output_shape, dtype=np.uint16)
+    with pytest.raises(ValueError, match=r"head_dim=12, expected a multiple of 8"):
+        _placement_mutant_bits(case, mutation, bits)
 
 
 @pytest.mark.parametrize("case", CODEWORD_QUICK_CASES, ids=lambda case: case.case_id)
@@ -1768,6 +1864,10 @@ def test_emitted_control_refuses_what_it_cannot_keep_inside_the_tensor() -> None
         _mutant_builder(
             object, CodewordMutation.BATCH_SWAP, replace(case, seqlen_q=384)
         )
+    # Zero has no bit to flip, although ``0 & -1`` is zero as for a power of two.
+    assert _single_bit("head_dim", 64) == 64
+    with pytest.raises(ValueError, match=r"head_dim=0, expected a power of two"):
+        _single_bit("head_dim", 0)
 
 
 def _fake_kernel_spec(**overrides) -> SimpleNamespace:

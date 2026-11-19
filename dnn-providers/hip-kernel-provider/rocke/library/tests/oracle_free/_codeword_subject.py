@@ -16,7 +16,6 @@ collection needs neither a GPU nor ROCm.
 
 from __future__ import annotations
 
-import importlib
 import math
 from collections.abc import Callable, Mapping
 from types import SimpleNamespace
@@ -33,12 +32,11 @@ from ._codeword_analytical import (
     require_codeword_scope,
 )
 from ._dense_subject import (
-    DENSE_SUBJECTS,
     ResolvedDenseSubject,
-    _validate_device_buffers,
-    _validate_host_bits,
-    _verify_resolved_spec,
+    dense_runner_launch,
+    launch_dense_buffers,
     resolve_dense_subject,
+    validated_dense_subject,
 )
 
 _ELEMENT_BYTES = 2
@@ -100,42 +98,22 @@ def codeword_schedule(subject: ResolvedDenseSubject) -> TileSchedule:
     return TileSchedule(block_m=int(spec.block_m), block_n=int(spec.block_n))
 
 
-def _hip_backend() -> SimpleNamespace:
-    """The HIP runtime pieces a launch needs, imported on use."""
-    from rocke.runtime import DeviceMem, Runtime
-    from rocke.runtime.host_buffers import as_u8_buffer
-
-    return SimpleNamespace(
-        DeviceMem=DeviceMem, Runtime=Runtime, as_u8_buffer=as_u8_buffer
-    )
-
-
-def _launch_guarded(
+def launch_guarded(
     launch: Callable[..., None],
-    backend: SimpleNamespace,
     host: Mapping[str, np.ndarray],
     layout: GuardLayout,
-) -> np.ndarray:
-    """Upload ``q``/``k``/``v`` and the guarded ``out``, launch, read ``out`` back.
+    *,
+    backend: SimpleNamespace | None = None,
+) -> GuardedOutput:
+    """Launch into the guarded ``out`` allocation of ``host`` and read it back.
 
     The kernel gets the address of the logical tensor inside the allocation, so
-    the guards on both sides are device memory it does not own. ``launch`` is
-    called with the three input buffers and that interior address."""
-    runtime = backend.Runtime()
-    device = {name: backend.DeviceMem(array.nbytes) for name, array in host.items()}
-    _validate_device_buffers(
-        device, {name: int(array.nbytes) for name, array in host.items()}
+    the guards on both sides are device memory it does not own. The device path
+    is the subject adapter's, with the guard as the output offset."""
+    raw = launch_dense_buffers(
+        launch, host, out_offset=layout.guard * _ELEMENT_BYTES, backend=backend
     )
-    for name, array in host.items():
-        runtime.memcpy_h2d(
-            device[name].ptr(), backend.as_u8_buffer(array), array.nbytes
-        )
-    interior = int(device["out"].ptr()) + layout.guard * _ELEMENT_BYTES
-    launch(q=device["q"], k=device["k"], v=device["v"], out=interior)
-    runtime.sync()
-    raw = host["out"]
-    runtime.memcpy_d2h(backend.as_u8_buffer(raw), device["out"].ptr(), raw.nbytes)
-    return raw
+    return GuardedOutput(layout, raw)
 
 
 def run_codeword_case(
@@ -155,26 +133,14 @@ def run_codeword_case(
     float conversion. The launch goes through the architecture's public dense
     runner, as in the uniform-probability lane; judging the bits is left to the
     analyzer."""
-    resolved = resolve_codeword_subject(arch, case) if subject is None else subject
-    if (resolved.arch, resolved.case_id) != (arch, case.case_id):
-        raise ValueError(
-            f"run_codeword_case failed - subject is "
-            f"{resolved.arch}/{resolved.case_id}, expected {arch}/{case.case_id}"
-        )
     require_codeword_scope(case)
-    _validate_host_bits(case, q, k, v)
-    _verify_resolved_spec(arch, case, resolved.tuning_spec)
+    if subject is None:
+        subject = resolve_codeword_subject(arch, case)
+    resolved = validated_dense_subject(arch, case, q, k, v, subject=subject)
     _verify_codeword_resolved_spec(resolved.tuning_spec)
     layout = guard_layout(case, codeword_schedule(resolved))
-    runner = importlib.import_module(DENSE_SUBJECTS[arch].runner_module)
-    spec = resolved.tuning_spec.kernel_spec
-
-    def launch(*, q, k, v, out) -> None:
-        # Without sinks, LSE or a KV split the runner only packs device pointers,
-        # so it takes the interior address of the output as a plain integer.
-        runner.run_attention_dense_torch(
-            spec=spec, q=q, k=k, v=v, out=out, scale=1.0 / math.sqrt(case.head_dim)
-        )
-
+    launch = dense_runner_launch(
+        arch, resolved.tuning_spec.kernel_spec, scale=1.0 / math.sqrt(case.head_dim)
+    )
     host = {"q": q.copy(), "k": k.copy(), "v": v.copy(), "out": layout.new_buffer()}
-    return GuardedOutput(layout, _launch_guarded(launch, _hip_backend(), host, layout))
+    return launch_guarded(launch, host, layout)

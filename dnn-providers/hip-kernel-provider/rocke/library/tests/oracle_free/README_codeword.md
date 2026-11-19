@@ -121,6 +121,8 @@ and four tile geometries.
 `run_codeword_case` allocates `guard | logical | guard` and hands the kernel the
 address of the logical tensor. Guard elements hold the canary `0xA5A5`, a finite
 value no output can equal; logical elements hold the sentinel `0xFFFF`, a NaN.
+The upload, the launch and the readback are the uniform-probability adapter's
+`launch_dense_buffers`, called with the guard as the output offset.
 
 | Count | Elements | Required |
 |---|---|---|
