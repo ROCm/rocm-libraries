@@ -23,6 +23,10 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * `tensilelite-client` now moves each remote peer's SDMA queue off KFD's recommended engine by default (`--fused-a2a-sdma-rotate`, default `-1`), in both fused modes. Remote peer queues need an even xGMI SDMA engine from KFD, and a nonzero rotation also needs 14 xGMI SDMA engines; on other nodes pass `--fused-a2a-sdma-rotate=0`.
 * `hipblaslt.h` no longer includes `<regex>`, which none of the hipBLASLt headers use. Code that uses `std::regex` must include `<regex>` itself.
 
+### Optimized
+
+* Improved gfx950 performance of skinny BF16 and FP16 TN GEMMs with one to five tokens and a bias vector of D's type (`F.linear` with a bias) by adding a bias epilogue to the vLLM wave-split-K custom kernels and routing them there.
+
 ### Resolved issues
 
 * Fixed `hipblaslt-bench` and `hipblaslt-test` rejecting a compute-input type override for A alone and accepting an unsupported override for B alone.
@@ -30,6 +34,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Fixed `hipblaslt_ext::GroupedGemm::initialize` with `useUserArgs = false` accepting an algo for a hand-written kernel (gfx942 only) whose problem predicates a GEMM of the group fails. It now returns `HIPBLAS_STATUS_INVALID_VALUE`, as `hipblaslt_ext::Gemm::initialize` does. With `useUserArgs = true` the sizes come from device memory and are not checked.
 * Fixed the extension API examples that passed `stream` as the `useUserArgs` argument of `initialize`, and the device user arguments examples that ran with an undefined buffer.
 * Fixed `hipblaslt.h`, `hipblaslt-ext-op.h`, and `hipblaslt-local-kernel.h` failing to compile in a C translation unit. The C++ standard library includes, the default member initializers in `hipblasLtMatmulHeuristicResult_t`, the `static_cast` in the `*_INVALID` macros, and the C++-only `hipblaslt_e8.h` and `hipblaslt_e5m3.h` types now apply only to C++. In C, the `HIP_R_*_EXT` type ids are enumeration constants, so two C files that include the headers no longer fail to link with duplicate symbols. C++ consumers see no change.
+* Fixed a user split-K override (for example `GemmTuning` split-K above 1) on the gfx950 skinny TN custom kernels writing D to the workspace instead of D. Their solutions now refuse split-K and WGM overrides, which the kernels do not take.
 
 ## hipBLASLt 1.5.0 for ROCm 10.2.0
 

@@ -141,6 +141,88 @@ Tests:
   batch_mode: [0, 1]
   batch_count: 1
 
+# The same shapes with the bias epilogue. A bias of D's type reaches the vLLM
+# wvSplitK kernels' bias epilogue on gfx950; an f32 bias, an activation or a
+# scale-alpha vector must fall through to other kernels. The bias tests add
+# shapes that reach every kernel with a bias epilogue, for each type, and the
+# chunked staging past the LDS stage with a bias (3 x 28672, and 5 x 16400 with
+# the last YTILE = 3 row tile partial for FP16).
+- name: matmul_skinny_bf16_tn_bias
+  category: pre_checkin
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  matrix_size: &skinny_tn_bias_sizes
+    - { M: 1024, N: 1, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, ldd: 1024 }
+    - { M: 1024, N: 2, K: 1024, lda: 1032, ldb: 1040, ldc: 1048, ldd: 1056 }
+    - { M: 1024, N: 3, K: 1024, lda: 1024, ldb: 1032, ldc: 1024, ldd: 1024 }
+    - { M: 1024, N: 4, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, ldd: 1024 }
+    - { M: 1024, N: 5, K: 1024, lda: 1024, ldb: 1028, ldc: 1024, ldd: 1032 }
+    - { M: 8192, N: 1, K: 1024, lda: 1024, ldb: 1024, ldc: 8192, ldd: 8192 }
+    - { M: 12290, N: 4, K: 10248, lda: 10248, ldb: 10248, ldc: 12290, ldd: 12290 }
+    - { M: 1024, N: 3, K: 28672, lda: 28672, ldb: 28680, ldc: 1024, ldd: 1024 }
+    - { M: 1031, N: 2, K: 4104, lda: 4104, ldb: 4104, ldc: 1031, ldd: 1031 }
+    - { M: 2048, N: 3, K: 1032, lda: 1032, ldb: 1032, ldc: 2048, ldd: 2048 }
+    - { M: 1031, N: 4, K: 2056, lda: 2056, ldb: 2056, ldc: 1031, ldd: 1031 }
+    - { M: 1031, N: 5, K: 8200, lda: 8200, ldb: 8200, ldc: 1031, ldd: 1031 }
+    - { M: 2048, N: 3, K: 28672, lda: 28672, ldb: 28680, ldc: 2048, ldd: 2048 }
+    - { M: 4097, N: 5, K: 16400, lda: 16400, ldb: 16400, ldc: 4097, ldd: 4097 }
+  alpha: 1
+  beta: [0, 2]
+  batch_mode: [0, 1]
+  batch_count: 1
+  bias_vector: 1
+  bias_type: [bf16_r, f32_r]
+
+- name: matmul_skinny_bf16_tn_bias_epilogue
+  category: pre_checkin
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  matrix_size: *skinny_tn_sizes
+  alpha: 1
+  beta: 0
+  batch_count: 1
+  bias_vector: 1
+  bias_type: bf16_r
+  activation_type: [none, gelu]
+  scaleAlpha_vector: [0, 1]
+  unit_check: 0
+  norm_check: 1
+
+- name: matmul_skinny_f16_tn_bias
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  transA: T
+  transB: N
+  matrix_size: *skinny_tn_bias_sizes
+  alpha: 1
+  beta: [0, 2]
+  batch_mode: [0, 1]
+  batch_count: 1
+  bias_vector: 1
+  bias_type: [f16_r, f32_r]
+
+- name: matmul_skinny_f16_tn_bias_epilogue
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  transA: T
+  transB: N
+  matrix_size: *skinny_tn_sizes
+  alpha: 1
+  beta: 0
+  batch_count: 1
+  bias_vector: 1
+  bias_type: f16_r
+  activation_type: [none, gelu]
+  scaleAlpha_vector: [0, 1]
+  unit_check: 0
+  norm_check: 1
+
 # Tests confirm no NaN propagation when alpha = 0, 2 and beta = 0. Value .NaN is converted into zero
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *real_precisions,
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }

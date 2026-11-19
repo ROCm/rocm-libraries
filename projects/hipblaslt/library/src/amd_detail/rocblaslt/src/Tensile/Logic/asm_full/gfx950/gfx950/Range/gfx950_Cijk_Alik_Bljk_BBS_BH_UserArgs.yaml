@@ -298,8 +298,8 @@ Solutions:
   GlobalReadVectorWidthA: 1
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: false, SupportStreamKPerTileExtraIters: false,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
   MFMA_BF16_1K: true
@@ -379,8 +379,8 @@ Solutions:
   GlobalReadVectorWidthA: 1
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: false, SupportStreamKPerTileExtraIters: false,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
   MFMA_BF16_1K: true
@@ -461,8 +461,8 @@ Solutions:
   GlobalReadVectorWidthA: 1
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: false, SupportStreamKPerTileExtraIters: false,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
   MFMA_BF16_1K: true
@@ -530,6 +530,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_bf16_tn_n1_y1u2
@@ -543,7 +544,7 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    SupportCustomWGM: false, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
     UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
@@ -613,6 +614,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_bf16_tn_n1_y1u4
@@ -626,7 +628,7 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    SupportCustomWGM: false, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
     UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
@@ -709,7 +711,7 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    SupportCustomWGM: false, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
     UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
@@ -779,6 +781,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_bf16_tn_n2_y1u2
@@ -792,7 +795,7 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    SupportCustomWGM: false, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
     UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
@@ -862,6 +865,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_bf16_tn_n2_y1u4
@@ -875,7 +879,7 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    SupportCustomWGM: false, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
     UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
@@ -945,6 +949,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_bf16_tn_n3_y1u2
@@ -958,7 +963,7 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    SupportCustomWGM: false, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
     UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
@@ -1028,6 +1033,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_bf16_tn_n3_y1u4
@@ -1041,7 +1047,7 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    SupportCustomWGM: false, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
     UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
@@ -1124,7 +1130,7 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    SupportCustomWGM: false, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
     UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
@@ -1194,6 +1200,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_bf16_tn_n4_y1u2
@@ -1207,7 +1214,7 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    SupportCustomWGM: false, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
     UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
@@ -1277,6 +1284,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_bf16_tn_n4_y1u4
@@ -1290,7 +1298,7 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    SupportCustomWGM: false, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
     UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
@@ -1360,6 +1368,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_bf16_tn_n4_y3u2
@@ -1373,7 +1382,7 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    SupportCustomWGM: false, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
     UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
@@ -1443,6 +1452,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_bf16_tn_n5_y1u2
@@ -1456,7 +1466,7 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    SupportCustomWGM: false, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
     UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
