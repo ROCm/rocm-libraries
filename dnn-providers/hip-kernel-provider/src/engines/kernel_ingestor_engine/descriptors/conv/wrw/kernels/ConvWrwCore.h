@@ -387,7 +387,8 @@ template <class T,
           int VEC,
           int THREADS,
           int PF = 1,
-          int ALIGN = 0>
+          int ALIGN = 0,
+          int FB = 0>
 struct K3Tiles
 {
     typedef typename K1Raw<VEC * sizeof(T)>::type Raw;
@@ -412,8 +413,13 @@ struct K3Tiles
     static constexpr int SKEW = 16 / static_cast<int>(sizeof(T));
     // TR: rows are positions of BK (dy) or BC (x) channels, pitch padded by 16 bytes; the x
     // tile holds PH rows per phase. Else rows are channels of positions.
-    static constexpr int LDA = TR ? k3TrPitch(BK) : BQ + SKEW;
-    static constexpr int LDB = TR ? k3TrPitch(BC) : k3CfPitch(PH, SKEW, SW, LAYOUT == K3_NCHW);
+    // FB (the ring's matrix-core fragment bytes on CDNA): channels-last rows of k3ClPitch, so
+    // the fragment reads and transposing stores do not meet on LDS banks.
+    static constexpr bool CL = FB > 0 && LAYOUT == K3_NHWC;
+    static constexpr int LDA = TR ? k3TrPitch(BK) : CL ? k3ClPitch(BQ, sizeof(T), FB) : BQ + SKEW;
+    static constexpr int LDB = TR   ? k3TrPitch(BC)
+                               : CL ? k3ClPitch(PH + 2, sizeof(T), FB)
+                                    : k3CfPitch(PH, SKEW, SW, LAYOUT == K3_NCHW);
     // ALIGN: a guard of VEC elements ahead of the x tile takes the first row's shifted spill.
     static constexpr int A_ELEMS = (TR ? BQ : BK) * LDA + (ALIGN == 1 ? VEC : 0);
     static constexpr int B_ELEMS = FR * SW * (TR ? PH : BC) * LDB;
@@ -583,11 +589,32 @@ struct K3Tiles
                          const bool (&xOk)[FR],
                          const int (&xRow)[FR])
     {
+        k3i4 yr, xr;
+        rsrcOf(a, n, yr, xr);
+        loadRs<P>(a, yr, xr, q0, yOk, yRow, xOk, xRow);
+    }
+
+    /// The buffer resources of image n's dy and x.
+    __device__ void rsrcOf(const K3Args& a, int n, k3i4& yr, k3i4& xr) const
+    {
+        yr = k3Rsrc4(static_cast<const T*>(a.dy) + n * a.yImage + (PB ? yBase : 0),
+                     (PB ? yWin : a.yImage) * sizeof(T));
+        xr = k3Rsrc4(static_cast<const T*>(a.x) + n * a.xImage + (PB ? xBase : 0),
+                     (PB ? xWin : a.xImage) * sizeof(T));
+    }
+
+    /// load() with image n's buffer resources (rsrcOf) given.
+    template <int P = 0>
+    __device__ void loadRs(const K3Args& a,
+                           const k3i4& yr,
+                           const k3i4& xr,
+                           int q0,
+                           bool yOk,
+                           int yRow,
+                           const bool (&xOk)[FR],
+                           const int (&xRow)[FR])
+    {
         Step& s = st[P];
-        const k3i4 yr = k3Rsrc4(static_cast<const T*>(a.dy) + n * a.yImage + (PB ? yBase : 0),
-                                (PB ? yWin : a.yImage) * sizeof(T));
-        const k3i4 xr = k3Rsrc4(static_cast<const T*>(a.x) + n * a.xImage + (PB ? xBase : 0),
-                                (PB ? xWin : a.xImage) * sizeof(T));
         const int iw0 = q0 * SW - a.pw;
         const int yElems = PB ? yWin : static_cast<int>(a.yImage);
         const int xElems = PB ? xWin : static_cast<int>(a.xImage);
@@ -2964,8 +2991,13 @@ __device__ K3_LOOP_INLINE void k3WrwRowsSmallC(const K3Args& a)
 // output row oh - r dh, whose fragments sit in a register ring of the last R dy rows. A track
 // has at most ceil(ho / dh) + R - 1 steps, ending at its last x row in the image (K3Track); a
 // split that starts inside a track first replays the R - 1 rows before it with its multiplies
-// masked. Grid: (k tiles x c tiles, groups x ft,
-// splits). Two LDS buffers, one barrier per step.
+// masked. Grid: (k tiles x c tiles, groups x ft, splits), walked in XCD-contiguous order on
+// every arch (k1XcdOrder: blocks that share x and dy rows share an L2; a no-op on one XCD).
+// Two LDS buffers, one barrier per stage of WQ steps (one when WQ is 0): a stage loads WQ
+// consecutive steps (each in its own register set and LDS slot) and multiplies them in order.
+// Narrow output rows take a small BQ (no zero positions in the atoms) at WQ steps a stage, so a
+// stage still holds WQ BQ positions. Within a track the cursor's rows and offsets advance by
+// additions; the division and the buffer resources are recomputed only where a track starts.
 template <class T,
           class Atom,
           int LAYOUT,
@@ -2979,8 +3011,8 @@ template <class T,
           int WK,
           int WC,
           int VEC,
-          int XCD = 0,
-          int ALIGN = 0>
+          int ALIGN = 0,
+          int WQ = 0>
 __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -2990,13 +3022,22 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
     constexpr int FK = WTK / DIM, FC = WTC / DIM;
     constexpr int KK = BQ / KA;
     static_assert(FK * DIM * WK == BK && FC * DIM * WC == BC && BQ % KA == 0, "K3 tile");
-    typedef K3Tiles<T, LAYOUT, BK, BC, BQ, 1, S, SW, DW, VEC, THREADS, 1, ALIGN> Tiles;
+#if defined(__GFX9__)
+    // CDNA: the fragment read's bytes set the channels-last pitch (k3ClPitch).
+    constexpr int FB = KPL * static_cast<int>(sizeof(T));
+#else
+    constexpr int FB = 0;
+#endif
+    constexpr int P = WQ > 1 ? WQ : 1; // steps a stage
+    typedef K3Tiles<T, LAYOUT, BK, BC, BQ, 1, S, SW, DW, VEC, THREADS, 1, ALIGN, FB> Tiles;
     static_assert(
-        k3LdsBytes(1, LAYOUT, sizeof(T), BK, BC, BQ, R, S, SW, DW, WK, WC, 0, 0, VEC, ALIGN, 0)
-            == 2 * (Tiles::A_ELEMS + Tiles::B_ELEMS) * sizeof(T),
+        k3LdsBytes(
+            1, LAYOUT, sizeof(T), BK, BC, BQ, R, S, SW, DW, WK, WC, 0, 0, VEC, ALIGN, 0, WQ, FB)
+            == 2 * P * (Tiles::A_ELEMS + Tiles::B_ELEMS) * sizeof(T),
         "K3 LDS arithmetic (ConvWrwGeom.h)");
     constexpr int LDA = Tiles::LDA, LDB = Tiles::LDB;
-    constexpr int BUF = Tiles::A_ELEMS + Tiles::B_ELEMS;
+    constexpr int SLOT = Tiles::A_ELEMS + Tiles::B_ELEMS; // one step's tiles
+    constexpr int BUF = P * SLOT;
 
     __shared__ __attribute__((aligned(16))) T lds[2 * BUF];
 
@@ -3005,7 +3046,7 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
     const int wk = wave % WK, wc = wave / WK;
     const int kg = a.k / a.groups, cg = a.c / a.groups;
     unsigned bx, by, bz;
-    k3BlockIds<XCD>(bx, by, bz, a.xcds);
+    k3BlockIds<1>(bx, by, bz, a.xcds);
     const int kTiles = (kg + BK - 1) / BK;
     const int k0 = (bx % kTiles) * BK;
     const int c0 = (bx / kTiles) * BC;
@@ -3049,109 +3090,188 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
     const int xs2 = static_cast<int>(a.xs[2]), xs3 = static_cast<int>(a.xs[3]);
     // Cursor: (n, od, rho, chunk, m), m fastest. Replay up to R - 1 rows of the track before
     // `begin` (multiplies masked).
-    long long it = begin;
     K3Track cur;
+    long long first = begin;
     if(begin < end)
-        it = cur.seek(a, begin, R - 1);
-    int &n = cur.n, &od = cur.od, &rho = cur.rho, &chunk = cur.chunk, &m = cur.m;
-    Tiles tiles;
-    tiles.init(a, tid, g, k0, c0, kg, cg);
-    // Loads the cursor's step into register set P.
-    // Loads the cursor's step into register set P; a step past the split loads nothing
-    // (out-of-range offsets), so every step issues the same loads.
-    auto issue = [&](auto pc, bool live, bool math) {
-        constexpr int P = decltype(pc)::value;
-        const int oh = rho + m * a.dh;
-        const int id = od * a.sd + t * a.dd - a.pd;
-        const int ih = sh > 1 ? sh * (m - q0) + p : rho - a.ph + m * a.dh;
-        const bool xOk[1]
-            = {live && math && id >= 0 && id < a.di && ih >= 0 && ih < a.hi && n < a.n};
-        const int xRow[1] = {id * xs2 + ih * xs3};
-        tiles.template load<P>(a,
-                               n < a.n ? n : 0,
-                               chunk * BQ,
-                               live && oh < a.ho && n < a.n,
-                               od * ys2 + oh * ys3,
-                               xOk,
-                               xRow);
+        first = cur.seek(a, begin, R - 1);
+    // Steps left (replayed ones included) and replayed steps left.
+    unsigned long long left = begin < end ? static_cast<unsigned long long>(end - first) : 0ull;
+    int replay = static_cast<int>(begin - first);
+    // A step's tiles a stage slot, each slot's units on threads rotated by THREADS / P, so the
+    // waves share a stage's loads and stores.
+    Tiles tiles[P];
+    auto tidOf = [&](int i) { return P == 1 ? tid : (tid + i * (THREADS / P)) % THREADS; };
+    k3ForEach<P>([&](auto ic) {
+        constexpr int I = decltype(ic)::value;
+        tiles[I].init(a, tidOf(I), g, k0, c0, kg, cg);
+    });
+    // The cursor's step: output row oh and input row ih (oh >= ho past the last image, ih far
+    // below zero for a depth tap outside the image, so one compare each tests a row), their
+    // element offsets, its tap rows with a dy row in the image (k3RowsOf), and the track's
+    // constants.
+    const int ihStep = sh > 1 ? sh : a.dh;
+    const int yRowStep = a.dh * ys3, xRowStep = ihStep * xs3;
+    int oh = 0, ih = 0, yRow = 0, xRow = 0, u = 0, q0c = 0;
+    unsigned rowsC = 0;
+    k3i4 yr, xr;
+    auto startTrack = [&]() {
+        const int m = cur.m;
+        const bool nOk = cur.n < a.n;
+        const int id = cur.od * a.sd + t * a.dd - a.pd;
+        u = cur.rho < a.ho ? (a.ho - cur.rho + a.dh - 1) / a.dh : 0;
+        oh = nOk ? cur.rho + m * a.dh : a.ho;
+        ih = sh > 1 ? sh * (m - q0) + p : cur.rho - a.ph + m * a.dh;
+        yRow = cur.od * ys2 + oh * ys3;
+        xRow = id * xs2 + ih * xs3;
+        ih = nOk && id >= 0 && id < a.di ? ih : -(1 << 30);
+        rowsC = k3RowsOf(m, u, R);
+        q0c = cur.chunk * BQ;
+        tiles[0].rsrcOf(a, nOk ? cur.n : 0, yr, xr);
     };
-    auto advance = [&]() { cur.advance(a); };
+    auto advance = [&]() {
+        cur.advance(a);
+        if(cur.m != 0)
+        {
+            oh += a.dh;
+            ih += ihStep;
+            yRow += yRowStep;
+            xRow += xRowStep;
+            rowsC = ((rowsC << 1) | (cur.m < u ? 1u : 0u)) & ((1u << R) - 1u);
+        }
+        else
+        {
+            startTrack();
+        }
+    };
+    // The newest issued step's steps left (replayed ones included) and replayed steps left.
+    unsigned long long leftI = left;
+    int replayI = replay;
+    // What a step's multiply needs, taken when it is issued.
+    struct Meta
+    {
+        bool trackStart, math;
+        unsigned rows;
+    };
+    auto metaOf = [&]() {
+        Meta mt;
+        mt.trackStart = cur.m == 0;
+        mt.rows = rowsC & phaseRows;
+        // A step whose x row lies in the padding only moves the ring: its window is zeros (a
+        // third of the steps of a 3-row filter at dilation 36 on 128 rows). A replayed step
+        // (before the split's first) only fills the ring, and a step past the split (the end
+        // of a partial stage) does nothing.
+        mt.math = static_cast<bool>((replayI == 0) & (leftI != 0ull)
+                                    & (static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi)));
+        return mt;
+    };
+    // Loads the cursor's step into register set I; a step past the split loads nothing
+    // (out-of-range offsets), so every step issues the same loads. A replayed step loads dy
+    // only.
+    auto issue = [&](auto ic) {
+        constexpr int I = decltype(ic)::value;
+        const bool live = leftI != 0ull;
+        const bool xOk[1] = {static_cast<bool>(
+            live & (replayI == 0) & (static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi)))};
+        const int xRows[1] = {xRow};
+        tiles[I].template loadRs<0>(
+            a, yr, xr, q0c, static_cast<bool>(live & (oh < a.ho)), yRow, xOk, xRows);
+    };
+    auto next = [&]() {
+        advance();
+        leftI = leftI != 0ull ? leftI - 1ull : 0ull;
+        replayI = replayI > 0 ? replayI - 1 : 0;
+    };
+    auto waitAll = [&]() {
+        k3ForEach<P>([&](auto ic) { tiles[decltype(ic)::value].template wait<0, 0>(); });
+    };
+    auto storeAll = [&](T* buf) {
+        k3ForEach<P>([&](auto ic) {
+            constexpr int I = decltype(ic)::value;
+            tiles[I].template store<0>(
+                a, buf + I * SLOT, buf + I * SLOT + Tiles::A_ELEMS, tidOf(I));
+        });
+    };
 
-    // Pipeline: LDS buffer j % 2 holds step j; the registers carry step j + 1, loaded while step j
-    // multiplies.
+    // Pipeline: LDS buffer j % 2 holds stage j; the registers carry stage j + 1, loaded while
+    // stage j multiplies.
+    Meta mCur[P];
     if(begin < end)
     {
-        issue(K3Int<0>{}, true, it >= begin);
-        tiles.template wait<0, 0>();
-        tiles.template store<0>(a, lds, lds + Tiles::A_ELEMS, tid);
+        startTrack();
+        k3ForEach<P>([&](auto ic) {
+            constexpr int I = decltype(ic)::value;
+            if constexpr(I > 0)
+                next();
+            mCur[I] = metaOf();
+            issue(ic);
+        });
+        waitAll();
+        storeAll(lds);
         k1LdsBarrier();
     }
     const int kb = Atom::template kBase<KPL>(lane);
     constexpr int TRB = Tiles::TR ? 1 : 0;
     auto body = [&](auto pc) {
-        constexpr int J = decltype(pc)::value; // step parity
-        // A new track starts with an empty ring; else the ring moves down one row. The cursor
-        // is still on the computed step: its tap rows with a dy row in the image.
-        const bool trackStart = m == 0;
-        const unsigned rows
-            = k3RowsOf(m, rho < a.ho ? (a.ho - rho + a.dh - 1) / a.dh : 0, R) & phaseRows;
-        // A step whose x row lies in the padding only moves the ring: its window is zeros
-        // (a third of the steps of a 3-row filter at dilation 36 on 128 rows).
-        const int ihC = sh > 1 ? sh * (m - q0) + p : rho - a.ph + m * a.dh;
-        const int idC = od * a.sd + t * a.dd - a.pd;
-        const bool xIn = idC >= 0 && idC < a.di && ihC >= 0 && ihC < a.hi;
-        advance();
-        issue(K3Int<0>{}, it + 1 < end, it + 1 >= begin);
+        constexpr int J = decltype(pc)::value; // stage parity
+        Meta mt[P];
+        k3ForEach<P>([&](auto ic) {
+            constexpr int I = decltype(ic)::value;
+            mt[I] = mCur[I];
+            next();
+            mCur[I] = metaOf();
+            issue(ic);
+        });
         // The loads above stay ahead of the multiplies.
         __builtin_amdgcn_sched_barrier(0);
-        const T* As = lds + J * BUF;
-        const T* Bs = As + Tiles::A_ELEMS;
+        k3ForEach<P>([&](auto ic) {
+            constexpr int I = decltype(ic)::value;
+            const T* As = lds + J * BUF + I * SLOT;
+            const T* Bs = As + Tiles::A_ELEMS;
+            // A new track starts with an empty ring; else the ring moves down one row.
 #pragma unroll
-        for(int r = R - 1; r > 0; --r)
+            for(int r = R - 1; r > 0; --r)
 #pragma unroll
-            for(int kk = 0; kk < KK; ++kk)
+                for(int kk = 0; kk < KK; ++kk)
 #pragma unroll
-                for(int x = 0; x < FK; ++x)
-                    ring[r][kk][x] = trackStart ? typename Atom::frag{} : ring[r - 1][kk][x];
-        if constexpr(Tiles::TR)
-        {
-            const T* aBase = As + wk * WTK + k3TrLane<Atom, LDA>(lane);
+                    for(int x = 0; x < FK; ++x)
+                        ring[r][kk][x]
+                            = mt[I].trackStart ? typename Atom::frag{} : ring[r - 1][kk][x];
+            if constexpr(Tiles::TR)
+            {
+                const T* aBase = As + wk * WTK + k3TrLane<Atom, LDA>(lane);
 #pragma unroll
-            for(int kk = 0; kk < KK; ++kk)
+                for(int kk = 0; kk < KK; ++kk)
 #pragma unroll
-                for(int x = 0; x < FK; ++x)
-                    ring[0][kk][x] = k3FragTr<Atom, T, LDA>(aBase + kk * KA * LDA + x * DIM);
-        }
-        else
-        {
-            const T* aBase = As + (wk * WTK + lane % DIM) * LDA + kb;
+                    for(int x = 0; x < FK; ++x)
+                        ring[0][kk][x] = k3FragTr<Atom, T, LDA>(aBase + kk * KA * LDA + x * DIM);
+            }
+            else
+            {
+                const T* aBase = As + (wk * WTK + lane % DIM) * LDA + kb;
 #pragma unroll
-            for(int kk = 0; kk < KK; ++kk)
+                for(int kk = 0; kk < KK; ++kk)
 #pragma unroll
-                for(int x = 0; x < FK; ++x)
-                    ring[0][kk][x] = k3FragAt<Atom, T, 0>(aBase + x * DIM * LDA + kk * KA);
-        }
-        // Tap row r: the window against dy row ring[r]; acc index r S + s. A replayed step
-        // (before the split's first) only fills the ring. The branch also keeps the
-        // multiplies' register live ranges apart from the loads' and stores'.
-        const T* bBase = Tiles::TR ? Bs + wc * WTC + k3TrLane<Atom, LDB>(lane)
-                                   : Bs + (wc * WTC + lane % DIM) * LDB + kb;
-        if(it >= begin && xIn)
-            k3MultiplyRows<Atom, T, R, S, SW, DW, FK, FC, BC, LDB, KK, TRB, Tiles::PH>(
-                acc, ring, bBase, rows);
+                    for(int x = 0; x < FK; ++x)
+                        ring[0][kk][x] = k3FragAt<Atom, T, 0>(aBase + x * DIM * LDA + kk * KA);
+            }
+            // Tap row r: the window against dy row ring[r]; acc index r S + s. The branch also
+            // keeps the multiplies' register live ranges apart from the loads' and stores'.
+            const T* bBase = Tiles::TR ? Bs + wc * WTC + k3TrLane<Atom, LDB>(lane)
+                                       : Bs + (wc * WTC + lane % DIM) * LDB + kb;
+            if(mt[I].math)
+                k3MultiplyRows<Atom, T, R, S, SW, DW, FK, FC, BC, LDB, KK, TRB, Tiles::PH>(
+                    acc, ring, bBase, mt[I].rows);
+        });
         __builtin_amdgcn_sched_barrier(0);
-        tiles.template wait<0, 0>();
-        {
-            T* nA = lds + (J ^ 1) * BUF;
-            tiles.template store<0>(a, nA, nA + Tiles::A_ELEMS, tid);
-        }
+        waitAll();
+        storeAll(lds + (J ^ 1) * BUF);
         k1LdsBarrier();
-        ++it;
+        left = left > static_cast<unsigned long long>(P) ? left - P : 0ull;
     };
-    while(it < end)
+    while(left != 0ull)
     {
         body(K3Int<0>{});
-        if(it >= end)
+        if(left == 0ull)
             break;
         body(K3Int<1>{});
     }

@@ -38,6 +38,20 @@ constexpr int k3CfPitch(int ph, int skew, int sw, bool channelsFirst)
     return (sw == 1 && channelsFirst ? units | 1 : units) * skew;
 }
 
+/// The matrix-core ring's channels-last tile row pitch (elements of eb bytes) for n positions,
+/// with fragment reads of fb bytes a lane: a whole number of fb-wide dword groups, an odd count
+/// of them. The rows one read's lanes take then start in distinct bank groups: an 8-byte read
+/// of 16 lanes or a 4-byte read of 32 covers the 32 banks once. The transposing stores (a dword
+/// a channel row, positions across lanes) stay within two passes.
+constexpr int k3ClPitch(int n, int eb, int fb)
+{
+    const int g = fb >= 16 ? 4 : fb >= 8 ? 2 : 1;
+    int d = k3DivUp(k3DivUp(n * eb, 4), g) * g;
+    if((d / g) % 2 == 0)
+        d += g;
+    return d * 4 / eb;
+}
+
 /// The generic loop's window row pitch (elements of eb bytes) for wpos positions (a whole number
 /// of 16-byte units): at least wpos + 16 bytes, an odd number of 16-byte units (a row stride of
 /// 4 mod 8 dwords keeps the fragment reads of consecutive rows off each other's banks).
@@ -146,7 +160,8 @@ constexpr long long k3LdsBytes(int loop,
                                int vec,
                                int align,
                                int ns,
-                               int wq = 0)
+                               int wq = 0,
+                               int fb = 0)
 {
     if(loop == 9)
         return 0;
@@ -235,11 +250,17 @@ constexpr long long k3LdsBytes(int loop,
     const int phRaw = layout == 0 ? nbv * vec / sw : k3DivUp(win, sw);
     const int ph = k3DivUp(phRaw, kv) * kv;
     const int skew = 16 / eb;
-    const int lda = tr ? k3TrPitch(bk) : bq + skew;
-    const int ldb = tr ? k3TrPitch(bc) : k3CfPitch(ph, skew, sw, layout == 0);
+    // fb: the ring's matrix-core fragment bytes on CDNA (k3ClPitch); 0 elsewhere.
+    const bool cl = loop == 1 && layout == 1 && fb > 0;
+    const int lda = tr ? k3TrPitch(bk) : cl ? k3ClPitch(bq, eb, fb) : bq + skew;
+    const int ldb = tr   ? k3TrPitch(bc)
+                    : cl ? k3ClPitch(ph + 2, eb, fb)
+                         : k3CfPitch(ph, skew, sw, layout == 0);
     const long long aElems = static_cast<long long>(tr ? bq : bk) * lda + (align == 1 ? vec : 0);
     const long long bElems = static_cast<long long>(rows) * sw * (tr ? ph : bc) * ldb;
-    return 2 * (aElems + bElems) * eb;
+    // The ring's stages of wq steps: a slot per step.
+    const long long slots = loop == 1 && wq > 1 ? wq : 1;
+    return 2 * slots * (aElems + bElems) * eb;
 }
 
 // NOLINTEND(modernize-use-auto,readability-avoid-nested-conditional-operator,readability-braces-around-statements,readability-implicit-bool-conversion,readability-isolate-declaration)

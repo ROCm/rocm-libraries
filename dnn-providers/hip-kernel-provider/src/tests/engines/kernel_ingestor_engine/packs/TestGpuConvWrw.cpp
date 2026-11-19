@@ -383,6 +383,14 @@ std::vector<DeviceCase> deviceCases()
         {"GroupedNhwc3x3", conv(24, 48, {7, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true, 3)},
         {"ThreeD3x3x3",
          conv(8, 16, {4, 6, 7}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1})},
+        // Small 3-D maps whose rows fit a ring stage's narrow steps (16 and 8 positions), with
+        // stages that cross tracks and images, in both layouts.
+        {"ThreeDNhwc3x3x3Rows16",
+         conv(64, 64, {3, 7, 16}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, true)},
+        {"ThreeDNhwc3x3x3Rows8",
+         conv(32, 64, {4, 5, 8}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, true)},
+        {"ThreeD3x3x3Rows8",
+         conv(64, 32, {4, 5, 8}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1})},
         {"OneD1x7", conv(16, 24, {50}, {7}, {3}, {3}, {1}, {1})},
         {"OneD1x7Nhwc", conv(16, 24, {50}, {7}, {3}, {3}, {1}, {1}, true)},
         {"OneD1x3Dilation5", conv(32, 64, {150}, {3}, {5}, {5}, {1}, {5})},
@@ -1440,6 +1448,71 @@ std::vector<DeviceCase> genericInfinityCases()
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvWrwGenericInfinities,
                          ::testing::ValuesIn(genericInfinityCases()),
+                         [](const auto& info) { return info.param.name; });
+
+/// +inf and -inf in x on the row ring's cases, every element type, on the matrix-core ring's
+/// configs (loop 1): the one-step ring and its stages of narrow steps (both layouts) carry an
+/// infinity to every dw element it reaches, as the reference gives.
+class TestGpuConvWrwRingInfinities : public ::testing::TestWithParam<DeviceCase>
+{
+};
+
+/// The catalog's matrix-core ring configs.
+const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& ringCatalog()
+{
+    static const auto ring = [] {
+        std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> out;
+        for(const auto& kernel : catalog())
+        {
+            if(configOf(kernel).loop == conv_wrw::LOOP_RING)
+            {
+                out.push_back(kernel);
+            }
+        }
+        return out;
+    }();
+    return ring;
+}
+
+TEST_P(TestGpuConvWrwRingInfinities, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(GetParam(), Math::NATIVE, true, &ringCatalog());
+}
+
+TEST_P(TestGpuConvWrwRingInfinities, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<Half>(GetParam(), Math::NATIVE, true, &ringCatalog());
+}
+
+TEST_P(TestGpuConvWrwRingInfinities, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(GetParam(), Math::NATIVE, true, &ringCatalog());
+}
+
+std::vector<DeviceCase> ringInfinityCases()
+{
+    std::vector<DeviceCase> cases;
+    for(const auto& deviceCase : deviceCases())
+    {
+        if(deviceCase.name == "Nhwc3x3" || deviceCase.name == "Nchw3x3"
+           || deviceCase.name.rfind("ThreeDNhwc3x3x3Rows", 0) == 0
+           || deviceCase.name == "ThreeD3x3x3Rows8")
+        {
+            // Skipped where no ring config serves the type (fp32 on RDNA and gfx906: FMA loops).
+            auto ringCase = deviceCase;
+            ringCase.someArchs = true;
+            cases.push_back(ringCase);
+        }
+    }
+    return cases;
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvWrwRingInfinities,
+                         ::testing::ValuesIn(ringInfinityCases()),
                          [](const auto& info) { return info.param.name; });
 
 /// gfx950's channels-last ring kept channels-last (loop 1, layout 2) at 128 x 128 tiles, a
