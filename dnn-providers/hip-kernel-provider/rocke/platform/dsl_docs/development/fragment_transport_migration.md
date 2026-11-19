@@ -14,7 +14,16 @@ HIP lowering of a rebased pointer adds the memory operation's element index
 using the access type's byte width. The rebase itself is still a byte offset.
 This applies beyond packed MMA fragments: grouped MoE rebases FP16/BF16 weights
 by expert before issuing typed loads. Address emission is covered in both HIP
-lowerers; the full grouped FP16 kernel is tested through the Python HIP route.
+lowerers; the full grouped FP16 kernel is tested through the Python HIP route
+with canonical and preshuffled weights on both vector and scalar load paths.
+
+Even without rebasing, HIP scalar loads and stores whose IR alignment is weaker
+than the access width use a byte copy. Naturally aligned multi-byte accesses
+through matching typed pointers still use direct dereferences. As a codegen check,
+Clang 24 at `-O3` emitted identical kernel instructions before and after the
+scalar alignment change for FP16 MoE gather with hidden width and workgroup size
+both 256, on `gfx942`, `gfx950`, and `gfx1250`. This does not measure runtime
+performance or establish that other kernels have unchanged codegen.
 
 The inventory below records the migration from `f29f15d3f7ec` and the validation
 requirements. Its old paths and line numbers refer to that starting revision.

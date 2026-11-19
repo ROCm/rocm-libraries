@@ -3,6 +3,7 @@
 """Explicit gfx950 HIP compiler and numerical gate for grouped FP16 MoE."""
 
 from contextlib import ExitStack
+import json
 import os
 import shutil
 import struct
@@ -95,11 +96,13 @@ def main() -> int:
     atom = dict(warp_tile_m=16, warp_tile_n=16, warp_tile_k=16)
     vector_tile = TileSpec(32, 32, 32, 2, 2, **atom)
     scalar_tile = TileSpec(16, 64, 16, 1, 4, **atom)
-    for label, tile, preshuffled, width in (
+    cases = (
         ("canonical_vector", vector_tile, False, 4),
         ("preshuffled_vector", vector_tile, True, 4),
         ("canonical_scalar", scalar_tile, False, 1),
-    ):
+        ("preshuffled_scalar", scalar_tile, True, 1),
+    )
+    for label, tile, preshuffled, width in cases:
         spec = FusedInterleavedGateUpSiluGemmSpec(
             name=f"grouped_gate_up_hip_{label}",
             tile=tile,
@@ -118,7 +121,9 @@ def main() -> int:
             f"PASS {label}: load_vec={width}, HIP compiled and agrees with NumPy",
             flush=True,
         )
-    print('MOE_RESULT={"arch":"gfx950","compiled":3,"numeric_passed":3}', flush=True)
+    # Reaching this point means every case compiled and matched the reference.
+    result = {"arch": arch, "compiled": len(cases), "numeric_passed": len(cases)}
+    print(f"MOE_RESULT={json.dumps(result, separators=(',', ':'))}", flush=True)
     return 0
 
 

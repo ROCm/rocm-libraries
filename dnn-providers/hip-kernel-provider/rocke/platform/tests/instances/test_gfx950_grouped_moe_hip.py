@@ -4,6 +4,8 @@
 
 import re
 
+import pytest
+
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.helpers.spec import choose_load_vec
 from rocke.instances.common.gemm_universal import TileSpec, TraitSpec
@@ -13,12 +15,17 @@ from rocke.instances.common.moe_gemm_fused import (
 )
 
 
-def test_grouped_canonical_fp16_weights_use_halfword_indices():
+@pytest.mark.parametrize(
+    ("preshuffle_b", "alignment"),
+    [(False, 2), (True, 1)],
+    ids=["canonical", "preshuffled"],
+)
+def test_grouped_scalar_fp16_weights_use_halfword_indices(preshuffle_b, alignment):
     tile = TileSpec(16, 64, 16, 1, 4, warp_tile_m=16, warp_tile_n=16, warp_tile_k=16)
     spec = FusedInterleavedGateUpSiluGemmSpec(
         name="grouped_gate_up_hip_scalar",
         tile=tile,
-        trait=TraitSpec(preshuffle_b=False),
+        trait=TraitSpec(preshuffle_b=preshuffle_b),
         dtype="f16",
         grouped=True,
     )
@@ -30,7 +37,7 @@ def test_grouped_canonical_fp16_weights_use_halfword_indices():
     base = rebase[1]
     assert re.search(
         rf"__builtin_memcpy\(&\w+, __builtin_assume_aligned\(reinterpret_cast<const "
-        rf"unsigned char\*>\({base}\) \+ \(int64_t\)\w+ \* \(int64_t\)sizeof\(fp16\), 2\), 2\);",
+        rf"unsigned char\*>\({base}\) \+ \(int64_t\)\w+ \* \(int64_t\)sizeof\(fp16\), {alignment}\), 2\);",
         hip,
     )
     assert f" = {base}[" not in hip
