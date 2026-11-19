@@ -843,11 +843,13 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
             sums(m).get_thread_buffer().template set_as<fp32x8_t>(number<0>{}, fp32x8_t{});
             WarpGemm{}(sums(m), p_rows[m], ones);
         });
-        // The guard as the PV emitter's: the WMMAs complete in order, so the RAW fence on the last
-        // result covers every operand, and the operands stay allocated until the fence.
+        // The guard: the RAW fence on the last result, then a full drain, since under the hazard
+        // note's model (WMMAs do not retire in issue order) the fence does not cover the earlier
+        // row-sum WMMAs; the operands stay allocated until the drain.
         if constexpr(kWmmaOperandGuard)
         {
             WaitWmmaOperandsRead(sums(number<kPMI - 1>{}));
+            asm volatile("s_wait_alu depctr_va_vdst(0)" ::: "memory");
             KeepOperandLive(ones);
             static_for<0, kPMI, 1>{}([&](auto m) { KeepOperandLive(p_rows[m]); });
         }
@@ -1049,17 +1051,20 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
             asm volatile("" ::"v"(chunks[i]) : "memory");
     }
 
-    // The Drain or KeepPending point of QK row Row of a grouped-drain schedule: the full drain
-    // (Drain only), then the keep-alive of the last-M K slices of the pairs it covers.
+    // The Drain or KeepPending point of QK row Row of a grouped-drain schedule: the full drain,
+    // then the keep-alive of the last-M K slices of the pairs it covers. KeepPending, after the
+    // RAW fence of a QK stage's last row, drains too: the fence waits for the last WMMA's result
+    // only, and under the hazard note's model (WMMAs do not retire in issue order) the earlier
+    // pairs of the group may still read their K slices. The BF16 page tile places a Drain point
+    // there instead (FmhaBatchPrefillPageTileGroupedDrainPlacement).
     template <typename Placement, typename BlockGemm, index_t Row, bool Drain, typename KeepPair>
     CK_TILE_DEVICE static void EmitQkGroupedDrain(KeepPair& keep_k_of_pair)
     {
         static_assert(Placement::kQkMIter == BlockGemm::MIterPerWarp);
         constexpr auto kPairs = Placement::QkKeptPairs(Row, Drain);
         __builtin_amdgcn_sched_barrier(0);
-        if constexpr(Drain)
-            // Full drain only: a counted va_vdst(k >= 1) does not cover the WAR.
-            asm volatile("s_wait_alu depctr_va_vdst(0)" ::: "memory");
+        // Full drain: a counted va_vdst(k >= 1) does not cover the WAR.
+        asm volatile("s_wait_alu depctr_va_vdst(0)" ::: "memory");
         static_for<kPairs.begin, kPairs.end, 1>{}([&](auto q) { keep_k_of_pair(q); });
         __builtin_amdgcn_sched_barrier(0);
     }
