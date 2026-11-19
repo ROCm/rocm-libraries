@@ -215,6 +215,54 @@ def test_ctest_readiness_and_failure_propagation(
         assert "ctest: SKIPPED" in capsys.readouterr().out
 
 
+def test_gemm_gpu_runner_keeps_selected_package_from_other_checkout(runner, tmp_path):
+    selected = tmp_path / "selected"
+    tests = selected / "tests"
+    tools = selected / "tools"
+    tests.mkdir(parents=True)
+    tools.mkdir()
+    script = tests / "run_all.py"
+    shutil.copy2(runner.TESTS / "run_all.py", script)
+    shutil.copy2(runner.TOOLS / "_hostcaps.py", tools / "_hostcaps.py")
+
+    for root, marker in (
+        (selected, "SELECTED_GATE"),
+        (tmp_path / "other", "SHADOW_GATE"),
+    ):
+        package = root / "python" / "rocke"
+        (package / "tests").mkdir(parents=True)
+        (package / "__init__.py").touch()
+        (package / "tests" / "__init__.py").touch()
+        (package / "tests" / "universal_gemm_gpu_gate.py").write_text(
+            f"print({marker!r})\n", encoding="utf-8"
+        )
+    shutil.copy2(
+        runner.ROCKE / "python/rocke/tests/subprocess_launcher.py",
+        selected / "python/rocke/tests/subprocess_launcher.py",
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--no-guard",
+            "--no-gate",
+            "--no-pytest",
+            "--no-ir-validity",
+            "--no-arch-domain",
+            "--build-root",
+            str(tmp_path / "build"),
+            "--gemm-gpu",
+            "gfx950",
+        ],
+        cwd=tmp_path / "other" / "python",
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "SELECTED_GATE" in result.stdout
+    assert "SHADOW_GATE" not in result.stdout
+
+
 @pytest.mark.parametrize(
     ("gate_rc", "only_ir", "expect_complete"),
     [(0, "", True), (0, "gemm/gfx950/base", False), (1, "", False)],

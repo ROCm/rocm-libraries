@@ -599,20 +599,20 @@ def main() -> int:
 
     if args.gemm_gpu and status == 0:
         print(f"\n== UniversalGemm GPU numerical gate ({args.gemm_gpu}) ==", flush=True)
-        gpu_env = os.environ.copy()
-        gpu_env["PYTHONPATH"] = os.pathsep.join(
-            filter(None, (str(ROCKE / "python"), gpu_env.get("PYTHONPATH")))
+        from rocke.tests.subprocess_launcher import (
+            rocke_python_command,
+            rocke_subprocess_env,
         )
+
         rc = subprocess.run(
-            [
-                sys.executable,
-                "-u",
+            rocke_python_command(
                 "-m",
                 "rocke.tests.universal_gemm_gpu_gate",
                 "--arch",
                 args.gemm_gpu,
-            ],
-            env=gpu_env,
+                interpreter_flags=("-u",),
+            ),
+            env=rocke_subprocess_env(),
         ).returncode
         if rc != 77:  # The optional lane reported incompatible or unavailable hardware.
             status |= rc
