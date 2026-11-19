@@ -27,10 +27,10 @@ def runCompileCommand(platform, project, boolean sameOrg=false)
     platform.runCommand(this, command)
 }
 
-def runTestCommand (platform, project, gfilter)
+def runTestCommand (platform, project, gfilter, boolean hmmTests = true)
 {
     def hmmTestCommand= ''
-    if (platform.jenkinsLabel.contains('gfx90a'))
+    if (hmmTests && platform.jenkinsLabel.contains('gfx90a'))
     {
         hmmTestCommand = """
                             HSA_XNACK=0 GTEST_LISTENER=NO_PASS_LINE_IN_LOG  ./rocalution-test --gtest_output=xml:test_detail_hmm_xnack_off.xml --gtest_color=yes --gtest_filter=**

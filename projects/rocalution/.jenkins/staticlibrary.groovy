@@ -42,7 +42,8 @@ def runCI =
         platform, project->
 
         def gfilter = "*checkin*"
-        commonGroovy.runTestCommand(platform, project, gfilter)
+        // Host and MPI builds are CPU-only, so the gfx90a XNACK runs add nothing there.
+        commonGroovy.runTestCommand(platform, project, gfilter, label == '')
     }
 
     def packageCommand =
@@ -55,9 +56,34 @@ def runCI =
     buildProject(prj, formatCheck, nodes.dockerArray, compileCommand, testCommand, packageCommand)
 }
 
+// math-ci replaces the arch list with every architecture. A CPU-only build needs
+// one agent, so fold the list into a single label expression. The library joins
+// os and arch with &&, which yields ubuntu24-therock&&(gfx90a||gfx942||gfx950)
+// and lets the scheduler take whichever of those agents is free.
+def anySingleArch(jobNameList)
+{
+    def collapsed = [:]
+    jobNameList.each { jobName, nodeDetails ->
+        def platforms = [:]
+        nodeDetails.each { os, archs ->
+            if (archs instanceof Collection && archs.size() > 1)
+                platforms[os] = ["(${archs.join('||')})"]
+            else
+                platforms[os] = archs
+        }
+        collapsed[jobName] = platforms
+    }
+    return collapsed
+}
+
 def setupCI(urlJobName, jobNameList, buildCommand, runCI, label)
 {
     jobNameList = auxiliary.appendJobNameList(jobNameList)
+
+    // Host and MPI builds are CPU-only. Queue one agent, whichever configured
+    // architecture is free, instead of one run per architecture.
+    if (label == 'Host' || label == 'MPI')
+        jobNameList = anySingleArch(jobNameList)
 
     jobNameList.each
     {
