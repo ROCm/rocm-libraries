@@ -96,6 +96,10 @@ def wgrad_reduce_spec_conflict(spec: "WgradReduceSpec") -> str:
             f"WgradReduceSpec.fold_loop must be 0..{_MAX_FOLD_LOOP} "
             f"(got {spec.fold_loop})"
         )
+    if spec.fold_loop and v <= 1:
+        return "WgradReduceSpec.fold_loop needs vec > 1"
+    if spec.fold_loop and (spec.rezero or spec.groups > 1):
+        return "WgradReduceSpec.fold_loop: no rezero, ungrouped only"
     if spec.slab_par < 1:
         return f"WgradReduceSpec.slab_par must be >= 1 (got {spec.slab_par})"
     if spec.slab_par > 1 and not spec.fold_loop:

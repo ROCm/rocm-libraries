@@ -501,6 +501,11 @@ _REDUCE_GATED = (
     (dict(vec=3), "vec must be 1, 2, 4 or 8"),
     (dict(vec=4, ws_replicas=256, fold_loop=128, tile_m=1), "fold_loop must be 0..64"),
     (dict(vec=4, slab_par=0), "slab_par must be >= 1"),
+    (dict(ws_replicas=4, fold_loop=2, tile_m=1), "fold_loop needs vec > 1"),
+    (
+        dict(vec=4, ws_replicas=4, fold_loop=2, tile_m=1, groups=2),
+        "fold_loop: no rezero, ungrouped only",
+    ),
     (
         dict(vec=8, problem=None),
         "must divide the dW row length",

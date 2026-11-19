@@ -184,6 +184,18 @@ bool rocke_wgrad_reduce_is_valid_spec(const rocke_wgrad_reduce_spec_t* spec,
                      spec->fold_loop);
         return false;
     }
+    if(spec->fold_loop && v <= 1)
+    {
+        if(reason)
+            snprintf(reason, reason_cap, "WgradReduceSpec.fold_loop needs vec > 1");
+        return false;
+    }
+    if(spec->fold_loop && (spec->rezero || spec->groups > 1))
+    {
+        if(reason)
+            snprintf(reason, reason_cap, "WgradReduceSpec.fold_loop: no rezero, ungrouped only");
+        return false;
+    }
     if(spec->slab_par < 1)
     {
         if(reason)
