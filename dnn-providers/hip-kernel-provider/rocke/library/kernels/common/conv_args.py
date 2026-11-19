@@ -765,6 +765,15 @@ class ConvArgs:
                 f"stream-K partitions K itself; launch it with split_k=1 "
                 f"(got {split_k})"
             )
+        if full_tiles is not None and not (
+            0 <= full_tiles <= self.num_pid_m * self.num_pid_n
+        ):
+            # split_tail remaps the first full_tiles workgroups over that many
+            # tiles: past the tile count, real tiles would be left unwritten.
+            raise ValueError(
+                f"split_tail: full_tiles={full_tiles} outside [0, "
+                f"{self.num_pid_m * self.num_pid_n}] (the launch's tiles)"
+            )
         abi = self.arg_names(
             two_stage=ws_ptr is not None and streamk is None,
             streamk=streamk.reduction if streamk is not None else None,
