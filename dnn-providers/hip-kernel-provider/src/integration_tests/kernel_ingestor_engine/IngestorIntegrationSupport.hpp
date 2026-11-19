@@ -233,10 +233,10 @@ inline std::string setProviderDgradBatchChunkByteLimit(int64_t limit)
     return {};
 }
 
-// The loaded provider's count of hipkernel:Gfx950ConvDgradAot implicit-GEMM launches, one
-// per batch slice (exported as
-// hipdnnEnginePluginConvDgradAotImplicitLaunchCountForTesting). Writes a
-// description of the failure to error and returns -1 if the hook is not there.
+// The loaded provider's count of hipkernel:Gfx950ConvDgradAot and hipkernel:Gfx1250ConvDgradAot
+// implicit-GEMM launches, one per batch slice (exported as
+// hipdnnEnginePluginConvDgradAotImplicitLaunchCountForTesting). Writes a description of
+// the failure to error and returns -1 if the hook is not there.
 inline int64_t providerDgradImplicitLaunchCount(std::string& error)
 {
     const auto pluginPath = loadedProviderPluginPath();

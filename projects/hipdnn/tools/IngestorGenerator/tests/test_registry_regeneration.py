@@ -361,13 +361,35 @@ def bundle(manifest) -> Path:
     return directory
 
 
+#: `uhd_gen` imports its own dependency set (``tools/uhd_gen/requirements.txt``:
+#: flatbuffers, lightgbm, numpy, pandas, pyarrow, scikit-learn), which this generator's
+#: own ``requirements.txt`` deliberately does not carry. The gates below reach it only
+#: for a bundle that ships a model binary, so a venv built for this suite alone can lack
+#: it entirely.
+_NO_UHD_GEN = (
+    "uhd_gen is not importable ({error}). The gates that read a shipped model binary "
+    "need uhd_gen's dependencies (tools/uhd_gen/requirements.txt); install them to run "
+    "them. This suite's own requirements.txt does not carry them, the same way it does "
+    "not carry rocm_kpack."
+)
+
+
 def _uhd_gen():
     """`uhd_gen`'s promotion checks, run on the shipped files rather than reimplemented:
-    promote refuses a model the runtime would refuse, and so must a model that ships."""
+    promote refuses a model the runtime would refuse, and so must a model that ships.
+
+    Skips rather than fails when `uhd_gen` cannot be imported: its dependencies are not
+    this suite's, so an absent one is an unrun gate, not a broken bundle. A bundle that
+    ships no model never gets here, so the skip is only reachable where there is
+    something to check and no means to check it.
+    """
     tools = str(_ROOT.parent)
     if tools not in sys.path:
         sys.path.append(tools)
-    from uhd_gen import promote, provenance
+    try:
+        from uhd_gen import promote, provenance
+    except ImportError as error:  # pragma: no cover - depends on the venv
+        pytest.skip(_NO_UHD_GEN.format(error=error))
 
     return promote, provenance
 
@@ -508,6 +530,12 @@ def test_g8_every_shipped_model_binary_is_one_the_engine_loads(bundle):
             promote._verify_artifact(uhd.document, artifact, uhd.role)
         except promote.PromoteError as error:
             failures.append(f"{uhd.path.relative_to(bundle)}: {error}")
+        except ImportError as error:
+            # Reading the model parses its FlatBuffer, so this is the first point that
+            # needs uhd_gen's own dependencies rather than just its modules. Absent one,
+            # the gate is unrun rather than failed -- the same call the suite makes for
+            # rocm_kpack, and for a model dvc has not pulled below.
+            pytest.skip(_NO_UHD_GEN.format(error=error))
     assert not failures, "\n".join(failures)
     if unpulled:
         # The way g2 and g3 skip an un-pulled KDP: CI pulls, and a strict run fails the skip.

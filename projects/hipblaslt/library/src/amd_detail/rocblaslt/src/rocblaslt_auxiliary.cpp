@@ -56,13 +56,17 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <hip/hip_runtime_api.h>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 #include <sstream>
+#include <stdexcept>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #define TO_STR2(x) #x
 #define TO_STR(x) TO_STR2(x)
@@ -3627,11 +3631,90 @@ struct ArchName
 // exported. Get architecture name
 std::string rocblaslt_internal_get_arch_name()
 {
-    int deviceId;
-    static_cast<void>(hipGetDevice(&deviceId));
-    hipDeviceProp_t deviceProperties;
-    static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-    return ArchName{}(deviceProperties);
+    int        deviceId = -1;
+    hipError_t err      = hipGetDevice(&deviceId);
+    if(err != hipSuccess)
+        throw std::runtime_error(std::string("hipGetDevice failed: ") + hipGetErrorString(err));
+    return rocblaslt_internal_get_arch_name(deviceId);
+}
+
+namespace
+{
+    // The HIP calls ArchNameCache makes; tests substitute fakes.
+    struct ArchNameApi
+    {
+        decltype(&hipGetDeviceCount)      getDeviceCount      = hipGetDeviceCount;
+        decltype(&hipGetDeviceProperties) getDeviceProperties = hipGetDeviceProperties;
+    };
+
+    // Per-device arch names. A device's properties do not change while the
+    // process runs. Only successful queries are kept: a failure throws, and
+    // the next lookup retries. Once filled, a lookup takes no lock.
+    class ArchNameCache
+    {
+    public:
+        explicit ArchNameCache(ArchNameApi api = {})
+            : m_api(api)
+        {
+        }
+
+        // Throws if deviceId is not a visible device or a HIP query fails.
+        const std::string& get(int deviceId)
+        {
+            if(!m_counted.load(std::memory_order_acquire))
+            {
+                std::lock_guard<std::mutex> lock(m_fill);
+                if(!m_counted.load(std::memory_order_relaxed))
+                {
+                    int        count = 0;
+                    hipError_t err   = m_api.getDeviceCount(&count);
+                    if(err != hipSuccess)
+                        throw std::runtime_error(std::string("hipGetDeviceCount failed: ")
+                                                 + hipGetErrorString(err));
+                    m_devices = std::vector<Device>(count);
+                    m_counted.store(true, std::memory_order_release);
+                }
+            }
+
+            if(deviceId < 0 || deviceId >= static_cast<int>(m_devices.size()))
+                throw std::runtime_error("Invalid HIP device ID " + std::to_string(deviceId));
+
+            Device& device = m_devices[deviceId];
+            if(!device.known.load(std::memory_order_acquire))
+            {
+                std::lock_guard<std::mutex> lock(m_fill);
+                if(!device.known.load(std::memory_order_relaxed))
+                {
+                    hipDeviceProp_t deviceProperties;
+                    hipError_t      err = m_api.getDeviceProperties(&deviceProperties, deviceId);
+                    if(err != hipSuccess)
+                        throw std::runtime_error(std::string("hipGetDeviceProperties failed: ")
+                                                 + hipGetErrorString(err));
+                    device.name = ArchName{}(deviceProperties);
+                    device.known.store(true, std::memory_order_release);
+                }
+            }
+            return device.name;
+        }
+
+    private:
+        struct Device
+        {
+            std::atomic<bool> known{false};
+            std::string       name;
+        };
+
+        ArchNameApi         m_api;
+        std::atomic<bool>   m_counted{false};
+        std::vector<Device> m_devices;
+        std::mutex          m_fill;
+    };
+}
+
+const std::string& rocblaslt_internal_get_arch_name(int deviceId)
+{
+    static ArchNameCache cache;
+    return cache.get(deviceId);
 }
 
 bool rocblaslt_internal_test_path(const std::string& path)
@@ -3807,6 +3890,38 @@ extern "C" int rocblaslt_matmul_is_tuned(rocblaslt_handle        handle,
 extern "C" HIPBLASLT_EXPORT void hipblaslt_debug_reload()
 {
     TensileLite::Debug::Instance().reloadDebugBitsForTest();
+}
+
+// Test support: looks up deviceIds[0..count) in order through one fresh
+// ArchNameCache over the given HIP calls, leaving the process cache alone.
+// ok[i] is whether lookup i succeeded; on success, the nameSize bytes at
+// names + i * nameSize hold its name, truncated and NUL-terminated.
+extern "C" HIPBLASLT_EXPORT void
+    hipblaslt_arch_name_lookups_for_test(hipError_t (*getDeviceCount)(int*),
+                                         hipError_t (*getDeviceProperties)(hipDeviceProp_t*, int),
+                                         const int* deviceIds,
+                                         size_t     count,
+                                         char*      names,
+                                         size_t     nameSize,
+                                         bool*      ok)
+{
+    ArchNameCache cache({getDeviceCount, getDeviceProperties});
+    for(size_t i = 0; i < count; ++i)
+    {
+        try
+        {
+            const std::string& name = cache.get(deviceIds[i]);
+            char*              out  = names + i * nameSize;
+            size_t             len  = std::min(name.size(), nameSize - 1);
+            std::memcpy(out, name.data(), len);
+            out[len] = '\0';
+            ok[i]    = true;
+        }
+        catch(const std::exception&)
+        {
+            ok[i] = false;
+        }
+    }
 }
 
 // Test support, like hipblaslt_debug_reload: the tuning variables are read on
