@@ -373,9 +373,13 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeScaleRankMustMatchX)
         = {{4, 2, 1}, {4, 1, 2}, {4, 2, 1, 1}, {4}};
     for(const auto& scaleDims : mismatchedScaleDims)
     {
-        EXPECT_EQ(makeNodeWithScaleDims(scaleDims).pre_validate_node().code,
-                  ErrorCode::INVALID_VALUE)
+        const auto error = makeNodeWithScaleDims(scaleDims).pre_validate_node();
+        EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE)
             << "scale rank " << scaleDims.size() << " vs x rank 2";
+        EXPECT_NE(error.get_message().find("scale tensor rank (" + std::to_string(scaleDims.size())
+                                           + ") must equal input tensor rank (2)"),
+                  std::string::npos)
+            << error.get_message();
     }
 }
 

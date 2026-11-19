@@ -1875,6 +1875,100 @@ TEST_F(TestGraph, ValidateRejectsInvalidRaggedAuxDims)
     EXPECT_NE(result.get_message().find("RaggedOffset"), std::string::npos) << result.get_message();
 }
 
+TEST_F(TestGraph, ValidateAcceptsInt64RaggedAux)
+{
+    auto raggedOffset = std::make_shared<TensorAttributes>();
+    raggedOffset->set_uid(7)
+        .set_name("RaggedOffset")
+        .set_data_type(DataType::INT64)
+        .set_dim({5})
+        .set_stride({1});
+
+    Graph graph;
+    createRaggedPointwiseGraph(graph, raggedOffset);
+
+    const auto result = graph.validate();
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+}
+
+// Every gathered tensor's ragged-offset tensor is validated, not only those of graph inputs.
+TEST_F(TestGraph, ValidateRejectsInvalidRaggedAuxOnNodeOutput)
+{
+    auto raggedOffset = std::make_shared<TensorAttributes>();
+    raggedOffset->set_uid(7).set_name("RaggedOffset").set_dim({5}).set_stride({1});
+
+    Graph graph;
+    createRaggedPointwiseGraph(graph, nullptr);
+    const auto tensorsByName = graph.getTensorsByName();
+    ASSERT_EQ(tensorsByName.count("Y"), 1u);
+    tensorsByName.at("Y")->set_ragged_offset(raggedOffset);
+
+    const auto result = graph.validate();
+    EXPECT_EQ(result.code, ErrorCode::ATTRIBUTE_NOT_SET) << result.get_message();
+    EXPECT_NE(result.get_message().find("RaggedOffset"), std::string::npos) << result.get_message();
+
+    raggedOffset->set_data_type(DataType::INT32);
+    const auto withDataType = graph.validate();
+    EXPECT_TRUE(withDataType.is_good()) << withDataType.get_message();
+}
+
+// A batchnorm peer statistic's ragged-offset tensor is gathered like any other node
+// tensor's, so it takes part in the duplicate-UID check. A peer statistic is not a graph
+// input, and its ragged-offset tensor is validated all the same.
+TEST_F(TestGraph, ValidateCoversPeerStatRaggedAux)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("InputX")
+        .set_dim({1, 64, 32, 32})
+        .set_stride({65536, 1024, 32, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(2).set_name("ScaleTensor").set_dim({64}).set_stride({1});
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(3).set_name("BiasTensor").set_dim({64}).set_stride({1});
+
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_uid(4).set_name("Epsilon");
+
+    auto peerStatOffset = std::make_shared<TensorAttributes>();
+    peerStatOffset->set_name("PeerStatOffset").set_dim({5}).set_stride({1});
+
+    auto peerStat = std::make_shared<TensorAttributes>();
+    peerStat->set_uid(20)
+        .set_name("PeerStat")
+        .set_dim({1, 64, 1, 1})
+        .set_stride({64, 1, 1, 1})
+        .set_data_type(DataType::FLOAT);
+    peerStat->set_ragged_offset(peerStatOffset);
+
+    BatchnormAttributes bnAttrs;
+    bnAttrs.set_name("BN");
+    bnAttrs.set_epsilon(epsilon);
+    bnAttrs.set_peer_stats({peerStat});
+    graph.batchnorm(x, scale, bias, bnAttrs);
+
+    peerStatOffset->set_uid(3);
+    const auto duplicate = graph.validate();
+    EXPECT_EQ(duplicate.code, ErrorCode::INVALID_VALUE) << duplicate.get_message();
+    EXPECT_NE(duplicate.get_message().find("Duplicate tensor UIDs found in the graph: 3"),
+              std::string::npos)
+        << duplicate.get_message();
+
+    peerStatOffset->set_uid(22);
+    const auto withoutDataType = graph.validate();
+    EXPECT_EQ(withoutDataType.code, ErrorCode::ATTRIBUTE_NOT_SET) << withoutDataType.get_message();
+    EXPECT_NE(withoutDataType.get_message().find("PeerStatOffset"), std::string::npos)
+        << withoutDataType.get_message();
+}
+
 TEST_F(TestGraph, SetAndGetAttributes)
 {
     Graph graph;
@@ -4619,7 +4713,11 @@ TEST_F(TestGraph, AssignedTensorUidsFollowNodeOrder)
     EXPECT_EQ(tensorUidsByName(graph), expected);
 }
 
-TEST_F(TestGraph, IdenticalGraphsGetIdenticalUids)
+// Builds BUILD_COUNT graphs with @p createGraph, moving each one's tensors to other heap
+// addresses, and returns the name -> UID map of each build.
+static std::vector<std::map<std::string, int64_t>>
+    buildUidsAcrossHeapLayouts(hipdnnHandle_t handle,
+                               const std::function<void(Graph&)>& createGraph)
 {
     constexpr int BUILD_COUNT = 20;
 
@@ -4643,11 +4741,92 @@ TEST_F(TestGraph, IdenticalGraphsGetIdenticalUids)
         }
 
         graphs.push_back(std::make_unique<Graph>());
-        createUnsetUidPointwiseChain(*graphs.back(), 8);
+        createGraph(*graphs.back());
 
-        auto buildResult = graphs.back()->build_operation_graph(_handle);
-        ASSERT_TRUE(buildResult.is_good()) << buildResult.get_message();
+        auto buildResult = graphs.back()->build_operation_graph(handle);
+        EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
         uidsPerBuild.push_back(tensorUidsByName(*graphs.back()));
+    }
+
+    return uidsPerBuild;
+}
+
+TEST_F(TestGraph, IdenticalGraphsGetIdenticalUids)
+{
+    const auto uidsPerBuild = buildUidsAcrossHeapLayouts(
+        _handle, [](Graph& graph) { createUnsetUidPointwiseChain(graph, 8); });
+
+    for(size_t build = 1; build < uidsPerBuild.size(); ++build)
+    {
+        EXPECT_EQ(uidsPerBuild[build], uidsPerBuild[0]) << "build " << build;
+    }
+}
+
+// Builds T = X + B followed by a batchnorm of T with outputs Y, Mean and InvVariance.
+// Every tensor is named and none has a UID.
+static void createUnsetUidMultiOperandGraph(Graph& graph)
+{
+    graph.set_name("MultiOperandGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    const std::vector<int64_t> dims = {1, 2, 3, 4};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_name("X").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
+
+    auto b = std::make_shared<TensorAttributes>();
+    b->set_name("B").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes addAttributes;
+    addAttributes.set_name("Add");
+    addAttributes.set_mode(PointwiseMode::ADD);
+    auto t = graph.pointwise(x, b, addAttributes);
+    t->set_name("T");
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_name("Scale").set_dim(derivedDims).set_stride(derivedStrides);
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_name("Bias").set_dim(derivedDims).set_stride(derivedStrides);
+
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_name("Epsilon");
+
+    BatchnormAttributes bnAttributes;
+    bnAttributes.set_name("BN");
+    bnAttributes.set_epsilon(epsilon);
+    auto [y, mean, invVariance, nextRunningMean, nextRunningVariance]
+        = graph.batchnorm(t, scale, bias, bnAttributes);
+    y->set_name("Y").set_output(true);
+    mean->set_name("Mean");
+    invVariance->set_name("InvVariance");
+}
+
+// Nodes with several inputs and outputs insert them in the iteration order of their
+// attributes' maps, which must not depend on where the tensors live.
+TEST_F(TestGraph, IdenticalMultiOperandGraphsGetIdenticalUids)
+{
+    const auto uidsPerBuild = buildUidsAcrossHeapLayouts(_handle, createUnsetUidMultiOperandGraph);
+    ASSERT_FALSE(uidsPerBuild.empty());
+
+    // Per node, its inputs get UIDs before its outputs.
+    const auto& uids = uidsPerBuild[0];
+    ASSERT_EQ(uids.size(), 9u);
+    for(const char* input : {"X", "B"})
+    {
+        EXPECT_LT(uids.at(input), uids.at("T")) << input;
+    }
+    for(const char* input : {"T", "Scale", "Bias", "Epsilon"})
+    {
+        for(const char* output : {"Y", "Mean", "InvVariance"})
+        {
+            EXPECT_LT(uids.at(input), uids.at(output)) << input << " < " << output;
+        }
     }
 
     for(size_t build = 1; build < uidsPerBuild.size(); ++build)

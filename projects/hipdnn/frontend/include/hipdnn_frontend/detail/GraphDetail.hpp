@@ -41,10 +41,10 @@ inline Error hasEngineConfigs(hipdnnBackendDescriptor_t engineHeuristicDesc)
     return {ErrorCode::OK, ""};
 }
 
-// Appends the retrieved engine-config descriptors to @p engineConfigs and their engine ids to
-// @p engineIds, in heuristic rank order. On success, the descriptors appended to
-// @p engineConfigs match @p engineIds one to one: for the empty vectors every caller passes,
-// engineConfigs.size() == engineIds.size().
+// Appends the retrieved engine-config descriptors to @p engineConfigs, in heuristic rank order,
+// and replaces the contents of @p engineIds with their engine ids. On success, engineIds[i] is
+// the id of the i-th appended descriptor: when @p engineConfigs starts empty, as for every
+// caller, engineConfigs.size() == engineIds.size().
 inline Error
     getEngineConfigs(std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>>& engineConfigs,
                      std::vector<int64_t>& engineIds,

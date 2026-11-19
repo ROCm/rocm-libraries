@@ -253,9 +253,14 @@ TEST(TestMoeGroupedMatmulNode, ScatterRoutedRowsMustMatchTokenRows)
             .set_token_index(makeRoutingTensor(routedTokens))
             .set_token_ks(makeRoutingTensor(routedTokens))
             .set_top_k(2);
-        EXPECT_EQ(MoeGroupedMatmulNode(std::move(attrs), graphAttrs).pre_validate_node().code,
-                  ErrorCode::INVALID_VALUE)
+        const auto error = MoeGroupedMatmulNode(std::move(attrs), graphAttrs).pre_validate_node();
+        EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE)
             << "routed tokens " << routedTokens << " vs token rows 8";
+        EXPECT_NE(error.get_message().find("MoE SCATTER routed-token count ("
+                                           + std::to_string(routedTokens)
+                                           + ") must equal the token tensor row count (8)"),
+                  std::string::npos)
+            << error.get_message();
     }
 }
 

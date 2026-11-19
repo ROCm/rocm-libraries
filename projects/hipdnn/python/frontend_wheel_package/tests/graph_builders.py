@@ -452,6 +452,8 @@ def build_block_scale_dequantize_graph():
     graph = create_float_graph()
     x = hipdnn.Tensor.create([2, 64, 32, 32], hipdnn.DataType.FLOAT)
     x.set_name("x")
+    # block_size [32] applies to the last dimension (block sizes align to the
+    # trailing dimensions), so the scale is [2, 64, 32, 1].
     scale = hipdnn.Tensor.create([2, 64, 32, 1], hipdnn.DataType.FLOAT)
     scale.set_name("scale")
 

@@ -77,6 +77,14 @@ public:
         return setInput(input_names::X, std::move(x));
     }
 
+    /**
+     * @brief Set the output tensor
+     *
+     * Unset Y dimensions are inferred per spatial dimension as
+     * (x + pre_padding + post_padding - window) / stride + 1, with truncating division, as
+     * cuDNN does; an inferred extent below 1 is rejected with INVALID_VALUE. Y dimensions set
+     * by the caller are not checked against that formula, as in cuDNN.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     ResampleFwdAttributes& set_y(const std::shared_ptr<TensorAttributes>& y)
     {

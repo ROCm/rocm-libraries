@@ -527,6 +527,9 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, GenerateIndexNotMaxPoolRejected
 
         auto result = graph->validate();
         EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.err_msg;
+        EXPECT_NE(result.err_msg.find("generate_index is only supported for MAXPOOL"),
+                  std::string::npos)
+            << result.err_msg;
     }
 }
 

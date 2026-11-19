@@ -18,7 +18,10 @@ namespace hipdnn_frontend::detail
 
 // Collects graph tensors without duplicates and iterates them in insertion order.
 // Everything derived from that order, such as the UIDs populateHipdnnTensorIds()
-// assigns, is therefore the same for identical graphs.
+// assigns, follows the order in which the nodes insert their tensors. Within a node,
+// inputs and outputs follow the iteration order of the attributes' std::unordered_map,
+// which is fixed for one standard library but may differ between libraries, so
+// identical graphs get the same UIDs when built with the same standard library.
 class OrderedTensorSet
 {
 public:

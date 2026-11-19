@@ -486,6 +486,18 @@ TEST(TestSdpaFwdNode, PreValidateFailsDropoutWithoutOffset)
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
 }
 
+// Fails if the `!attributes.get_seed()` term of the dropout rule is removed.
+TEST(TestSdpaFwdNode, PreValidateFailsDropoutWithoutSeed)
+{
+    auto attrs = makeDropoutAttrs();
+    attrs.set_dropout_probability(0.1f);
+    attrs.set_offset(makeTensor4D(1, 1, 1, 1));
+
+    auto err = preValidateDropout(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
+    EXPECT_NE(err.err_msg.find("seed and offset"), std::string::npos) << err.err_msg;
+}
+
 TEST(TestSdpaFwdNode, PreValidateSucceedsDropoutWithSeedAndOffset)
 {
     auto attrs = makeDropoutAttrs();
@@ -1326,6 +1338,18 @@ TEST(TestSdpaFwdNode, PreValidateFailsPaddingMaskWithOnlySeqLenQ)
 {
     auto attrs = makePaddingMaskAttrs();
     attrs.set_seq_len_q(makeSeqLen(2));
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
+    EXPECT_NE(err.err_msg.find("padding_mask requires"), std::string::npos) << err.err_msg;
+}
+
+// A KV-side length without a Q-side one, with a non-ragged Q: fails if `!hasQLengths ||` is
+// removed from the padding_mask rule. (cu_seq_len_kv alone is rejected earlier, by the
+// cu_seq_len rule that a Q-side and a KV-side length are provided together.)
+TEST(TestSdpaFwdNode, PreValidateFailsPaddingMaskWithOnlySeqLenKv)
+{
+    auto attrs = makePaddingMaskAttrs();
+    attrs.set_seq_len_kv(makeSeqLen(2));
     auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
     EXPECT_NE(err.err_msg.find("padding_mask requires"), std::string::npos) << err.err_msg;

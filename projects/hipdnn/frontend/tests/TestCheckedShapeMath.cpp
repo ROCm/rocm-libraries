@@ -24,6 +24,9 @@ constexpr int64_t K_MIN = std::numeric_limits<int64_t>::min();
 constexpr int64_t K_UNTOUCHED = 12345;
 constexpr int64_t K_TWO_POW_31 = int64_t{1} << 31;
 constexpr int64_t K_TWO_POW_32 = int64_t{1} << 32;
+// INT64_MAX = 7 * 73 * 127 * 337 * 92737 * 649657, so 7 * K_MAX_OVER_7 is exactly the maximum
+constexpr int64_t K_MAX_OVER_7 = K_MAX / 7;
+static_assert(K_MAX_OVER_7 * 7 == K_MAX);
 } // namespace
 
 TEST(TestCheckedShapeMath, AddRejectsResultsOutsideInt64)
@@ -106,6 +109,29 @@ TEST(TestCheckedShapeMath, MulAcceptsEachSignCombinationWithinTheLimit)
     EXPECT_EQ(out, 0);
 }
 
+// A product exactly at the maximum fits and the next multiple of the larger operand does not.
+// The accepts fail if the positive-positive bound `a <= maxValue / b` (or the negative-negative
+// bound `b >= maxValue / a`) in checkedMul becomes strict; the rejects fail if it is loosened
+// by one.
+TEST(TestCheckedShapeMath, MulAcceptsTheMaximumAndRejectsOnePastItForLikeSigns)
+{
+    int64_t out = 0;
+    EXPECT_TRUE(checkedMul(7, K_MAX_OVER_7, out));
+    EXPECT_EQ(out, K_MAX);
+    EXPECT_TRUE(checkedMul(K_MAX, 1, out));
+    EXPECT_EQ(out, K_MAX);
+    EXPECT_TRUE(checkedMul(-7, -K_MAX_OVER_7, out));
+    EXPECT_EQ(out, K_MAX);
+    EXPECT_TRUE(checkedMul(-1, -K_MAX, out));
+    EXPECT_EQ(out, K_MAX);
+
+    out = K_UNTOUCHED;
+    // 7 * (K_MAX_OVER_7 + 1) = K_MAX + 7
+    EXPECT_FALSE(checkedMul(7, K_MAX_OVER_7 + 1, out));
+    EXPECT_FALSE(checkedMul(-7, -(K_MAX_OVER_7 + 1), out));
+    EXPECT_EQ(out, K_UNTOUCHED);
+}
+
 TEST(TestCheckedShapeMath, DilatedKernelSizeComputesTheTerm)
 {
     int64_t out = 0;
@@ -129,6 +155,20 @@ TEST(TestCheckedShapeMath, DilatedKernelSizeRejectsOverflow)
     error = checkedDilatedKernelSize("Node", 0, 1, K_MIN, out);
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
+    EXPECT_EQ(out, K_UNTOUCHED);
+}
+
+// Removing the checked `+ 1` (checkedAdd(scaled, 1, result)) in checkedDilatedKernelSize fails
+// this test: it is the only step that overflows.
+TEST(TestCheckedShapeMath, DilatedKernelSizeRejectsOverflowOfTheFinalIncrement)
+{
+    int64_t out = K_UNTOUCHED;
+    // kernel - 1 = 1 and max * 1 = max fit; max + 1 does not
+    auto error = checkedDilatedKernelSize("Node", 1, K_MAX, 2, out);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("Node: dilated kernel size overflows int64 at spatial index 1"),
+              std::string::npos)
+        << error.err_msg;
     EXPECT_EQ(out, K_UNTOUCHED);
 }
 
@@ -157,6 +197,21 @@ TEST(TestCheckedShapeMath, PaddedNumeratorRejectsIntermediateOverflow)
 
     error = checkedPaddedNumerator("Node", 0, 0, 0, 0, K_MIN, out);
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(out, K_UNTOUCHED);
+}
+
+// Removing the checked `+ postPad` (checkedAdd(prePadded, postPad, padded)) in
+// checkedPaddedNumerator fails this test: it is the only step that overflows, and its wrapped
+// value minus the span would fit.
+TEST(TestCheckedShapeMath, PaddedNumeratorRejectsOverflowOfThePostPadding)
+{
+    int64_t out = K_UNTOUCHED;
+    // 1 + (max - 1) = max fits; max + max does not (it wraps to -2, and -2 - 3 would fit)
+    auto error = checkedPaddedNumerator("Node", 1, 1, K_MAX - 1, K_MAX, 3, out);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("padded extent minus span overflows int64 at spatial index 1"),
+              std::string::npos)
+        << error.err_msg;
     EXPECT_EQ(out, K_UNTOUCHED);
 }
 
@@ -210,5 +265,38 @@ TEST(TestCheckedShapeMath, TransposedExtentRejectsOverflow)
     // 0 - max - max underflows
     error = checkedTransposedExtent("Node", 0, 1, 1, K_MAX, K_MAX, 1, out);
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(out, K_UNTOUCHED);
+}
+
+// Each case overflows at exactly one step of checkedTransposedExtent, and the value that step
+// would wrap to carries through the later steps without another overflow. Removing the checked
+// step a case names fails that case.
+TEST(TestCheckedShapeMath, TransposedExtentRejectsOverflowAtEachRemainingStep)
+{
+    int64_t out = K_UNTOUCHED;
+    // checkedSub(dy, 1, dyMinusOne): min - 1 underflows; its wrap, max, times 1 minus 0 plus 0
+    // fits
+    auto error = checkedTransposedExtent("Node", 0, K_MIN, 1, 0, 0, 0, out);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("Node: input extent overflows int64 at spatial index 0"),
+              std::string::npos)
+        << error.err_msg;
+    EXPECT_EQ(out, K_UNTOUCHED);
+
+    // checkedSub(strided, prePad, lessPrePad): (2 - 1) * max = max fits; max - (-1) overflows;
+    // its wrap, min, minus 0 plus 1 fits
+    error = checkedTransposedExtent("Node", 1, 2, K_MAX, -1, 0, 1, out);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("Node: input extent overflows int64 at spatial index 1"),
+              std::string::npos)
+        << error.err_msg;
+    EXPECT_EQ(out, K_UNTOUCHED);
+
+    // checkedAdd(unpadded, window, result): (2 - 1) * max - 0 - 0 = max fits; max + 1 overflows
+    error = checkedTransposedExtent("Node", 2, 2, K_MAX, 0, 0, 1, out);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("Node: input extent overflows int64 at spatial index 2"),
+              std::string::npos)
+        << error.err_msg;
     EXPECT_EQ(out, K_UNTOUCHED);
 }

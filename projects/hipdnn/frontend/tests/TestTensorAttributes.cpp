@@ -294,14 +294,17 @@ TEST(TestTensorAttributes, ValidateDataType)
 }
 
 // validate() and the lowering share one table (toHipdnnDataType): a data type
-// validate() accepts is one the lowering can express, and vice versa.
+// validate() accepts is one the lowering can express, and vice versa. The probed values run
+// past the last enumerator, so an enumerator added later is covered too.
 TEST(TestTensorAttributes, ValidateDataTypeAgreesWithLoweringForEveryValue)
 {
+    constexpr int K_DATA_TYPE_PROBE_END = 64;
+
     TensorAttributes tensor;
     tensor.set_dim({4, 5, 6});
     tensor.set_stride({30, 6, 1});
 
-    for(int i = 0; i <= static_cast<int>(DataType::FP8_E5M2_FNUZ); ++i)
+    for(int i = 0; i < K_DATA_TYPE_PROBE_END; ++i)
     {
         const auto dataType = static_cast<DataType>(i);
         tensor.set_data_type(dataType);
@@ -318,6 +321,17 @@ TEST(TestTensorAttributes, ValidateDataTypeAgreesWithLoweringForEveryValue)
         }
         EXPECT_EQ(result.code, expected) << "For DataType value " << i;
     }
+
+    // The last probed value is past every enumerator: it has no name and validate() rejects it.
+    // Raise K_DATA_TYPE_PROBE_END when this fails.
+    const auto pastTheEnd = static_cast<DataType>(K_DATA_TYPE_PROBE_END - 1);
+    EXPECT_STREQ(to_string(pastTheEnd), "unknown");
+    tensor.set_data_type(pastTheEnd);
+    const auto result = tensor.validate();
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(result.err_msg.find("data type unknown is not supported by hipDNN lowering"),
+              std::string::npos)
+        << result.err_msg;
 }
 
 TEST(TestTensorAttributes, ValidateRejectsUnmappedDataTypeWithMessage)

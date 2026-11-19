@@ -477,7 +477,9 @@ TEST(TestCudnnShimGraphNodes, BlockScaleQuantizeValidGraphValidates)
 
 // Mirrors native TestBlockScaleDequantizeNode shapes. The dequantize output must
 // stay virtual (the node rejects a non-virtual y), so it is left unmarked rather
-// than wired with set_output(true) like the other Tier-1 outputs.
+// than wired with set_output(true) like the other Tier-1 outputs. block_size {32}
+// applies to the last dimension (block sizes align to the trailing dimensions), so
+// the scale is [2, 64, 32, 1].
 TEST(TestCudnnShimGraphNodes, BlockScaleDequantizeValidGraphValidates)
 {
     fe::graph::Graph graph;

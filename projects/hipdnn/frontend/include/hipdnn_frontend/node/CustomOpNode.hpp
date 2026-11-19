@@ -145,7 +145,9 @@ public:
         if(attributes.compute_data_type == DataType::NOT_SET)
         {
             return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "Node " + attributes.name + " does not have a compute_data_type set"};
+                    "Node " + attributes.name
+                        + " does not have a compute_data_type set. Set the graph data types "
+                          "before adding nodes: a node copies them when it is added."};
         }
 
         for(const auto& tensorAttr : getNodeOutputTensorAttributes())

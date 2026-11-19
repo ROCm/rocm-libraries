@@ -232,12 +232,9 @@ public:
         BaseNode<BatchnormBackwardNode, NodeType::BATCHNORM_BACKWARD>::gather_hipdnn_tensors(
             allTensors);
 
-        for(auto& tensor : attributes.peer_stats)
+        for(const auto& tensor : attributes.peer_stats)
         {
-            if(tensor)
-            {
-                allTensors.insert(tensor);
-            }
+            detail::insertTensorWithAux(allTensors, tensor);
         }
     }
 

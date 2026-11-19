@@ -721,6 +721,22 @@ TEST(TestLayerNormNode, PreValidateFailsBiasNotMatchingInferredScale)
     EXPECT_NE(err.err_msg.find("inferred"), std::string::npos) << err.err_msg;
 }
 
+// Fails if the `setTensor->get_dim() != inferredAffineDims` check is removed.
+TEST(TestLayerNormNode, PreValidateFailsScaleNotMatchingInferredBias)
+{
+    // The unset bias is inferred as [1, 512], which a rank-reduced scale [512] does not match
+    auto x = makeTensor({32, 512});
+    auto attrs = makeMinimalAttrs(x);
+    attrs.set_bias(std::make_shared<TensorAttributes>()); // No dimensions
+
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+    EXPECT_NE(err.err_msg.find("dims inferred from x for the unset bias tensor"), std::string::npos)
+        << err.err_msg;
+}
+
 TEST(TestLayerNormNode, ValidateInfersUnsetScaleAndBias)
 {
     // pre_validate_node() then infer_properties_node(), the order validate() runs them in

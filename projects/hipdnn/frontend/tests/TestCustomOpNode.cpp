@@ -269,6 +269,10 @@ TEST(TestCustomOpNode, PostValidateFailsWithoutComputeDataType)
 
     auto err = node.post_validate_node();
     EXPECT_EQ(err.code, ErrorCode::ATTRIBUTE_NOT_SET);
+    EXPECT_NE(err.get_message().find("compute_data_type"), std::string::npos) << err.get_message();
+    EXPECT_NE(err.get_message().find("Set the graph data types before adding nodes"),
+              std::string::npos)
+        << err.get_message();
 }
 
 TEST(TestCustomOpNode, InferPropertiesPropagatesContext)
