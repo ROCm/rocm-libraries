@@ -283,6 +283,7 @@ def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
     kernel["ProblemType"]["UseScaleAlphaVec"] = False
     kernel["ProblemType"]["UseScaleCD"] = False
     kernel["ProblemType"]["OutputAmaxD"] = False
+    kernel["ProblemType"]["OutputPeerD"] = False
     kernel["ProblemType"]["UseBias"] = False
     kernel["ProblemType"]["UseBeta"] = False
     kernel["ProblemType"]["BiasSrc"] = "D"
