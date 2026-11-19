@@ -1288,13 +1288,16 @@ inline void sort_keys_over_4g()
     {
         GTEST_SKIP() << "insufficient host memory";
     }
+    // keys_input initially holds values in [0, number_of_possible_keys), not keys. They are
+    // converted to keys with value_to_key below.
     std::vector<key_type> keys_input
         = test_utils::get_random_data<key_type>(size,
                                                 key_type{0},
                                                 key_type{number_of_possible_keys - 1},
                                                 seed_value);
 
-    //generate histogram of the randomly generated values
+    // Generate a histogram of the randomly generated values, then replace each value with
+    // its key. The histogram is indexed by value and is used to check the sorted keys.
     for(key_type& key : keys_input)
     {
         histogram[key]++;
