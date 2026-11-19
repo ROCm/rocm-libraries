@@ -564,12 +564,14 @@ executed path:
   normalizer, a branch condition or an address.
 
 The last two are checked on the lowered kernel, on the CPU and again before
-every launch. `_value_shift_path.py` classifies every floating-point
-instruction of the LLVM IR against the path, traces the MFMA operands to the
-stored tensors, and follows everything computed from V: `v_ptr` may be read
-only by the fills of its LDS region, that region only as the value operand of
-the PV calls, and their results only by the accumulator, its rescale, the
-reciprocal product and the store. An instruction, an operand or a V-derived
+every launch. The path is the one the key-permutation bound is derived for, so
+the checks of `_permutation_path.py` are reused: they classify every
+floating-point instruction of the LLVM IR against the path and trace the MFMA
+operands to the stored tensors. `_value_shift_path.py` adds a trace of
+everything computed from V: `v_ptr` may be read only by the fills of its LDS
+region, that region only as the value operand of the PV calls, and their
+results only by the accumulator, its rescale, the reciprocal product and the
+store. An instruction, an operand or a V-derived
 value outside that fails with "re-derive the tolerance"; the tolerance is never
 widened to absorb it. The trace follows LDS regions as a whole. Which row of
 its region a fill writes is index arithmetic and is not traced.
@@ -650,7 +652,22 @@ Two more launches apply a wrong shift while the analyzer keeps expecting `c`:
 | `omit_second_half` | `c` in the first `D / 2` columns, zero in the rest |
 | `rescale_second_half` | `c` in the first `D / 2` columns, `c / 2` in the rest |
 
-Each must exceed its tolerance somewhere.
+The mutated tensor is a legitimate input, so the pair obeys the relation with
+the applied shift, and its residual against `c` is the missing shift plus an
+error inside the tolerance. A wrong shift counts as rejected
+(`shift_mutation_failures`) only when all of these hold:
+
+- every value of the launch is finite and inside its guard: a faulty launch
+  does not stand in for a rejection;
+- no residual is beyond its tolerance in the first `D / 2` columns, which
+  carry `c`;
+- every residual is beyond its tolerance in each column whose missing shift is
+  more than twice the tolerance that reads no output. At the quick shape that
+  is every column of the second half.
+
+The shift has period four, so the correct launch cannot tell an output column
+from the one `D / 2` further on. The wrong shifts can: a kernel that exchanged
+the halves would put the residuals in the first one.
 
 A normalization mutation is applied on the host to the real outputs: both
 stored outputs are scaled by `1 + eta` and converted again, for

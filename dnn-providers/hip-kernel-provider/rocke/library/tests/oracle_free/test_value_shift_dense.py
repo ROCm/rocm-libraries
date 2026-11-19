@@ -40,6 +40,7 @@ from ._dense_subject import (
     resolve_dense_subject,
     run_dense_case,
 )
+from ._permutation_path import fp_mode_violations
 from ._value_shift import (
     OUTPUT_SCALE_SWEEP,
     ShiftMutation,
@@ -52,12 +53,13 @@ from ._value_shift import (
     output_scale_threshold,
     require_finite_scores,
     scale_output_bits,
+    shift_mutation_failures,
     shift_vector,
     shifted_value_bits,
     value_shift_contract,
     value_shift_inputs,
 )
-from ._value_shift_path import REDERIVE, fp_mode_violations, verified_key_tiles
+from ._value_shift_path import REDERIVE, verified_key_tiles
 
 pytestmark = pytest.mark.gpu
 
@@ -75,16 +77,27 @@ def _case_label(arch: str, case: ValueShiftCase) -> str:
 
 
 def _not_rejected(
-    label: str, what: str, mutated: ValueShiftResult, positive: ValueShiftResult
+    label: str,
+    what: str,
+    mutated: ValueShiftResult,
+    positive: ValueShiftResult,
+    failures: tuple[str, ...] = (),
 ) -> str:
     """Explain a mutation the relation did not reject, blaming the right side.
 
     The mutations are certain to be rejected only for a kernel whose correct
-    shift passes. When that one fails, its violations are the diagnosis."""
+    shift passes. When that one fails, its violations are the diagnosis.
+    ``failures`` are the reasons a wrong-shift launch does not count as
+    rejected."""
     if positive.violations:
         return (
             f"{label}: {what} was not rejected and the correct shift itself "
             f"fails; {format_value_shift_result(positive)}"
+        )
+    if failures:
+        return (
+            f"{label}: {what} was not rejected as a wrong shift: "
+            f"{'; '.join(failures)}; {format_value_shift_result(mutated)}"
         )
     return (
         f"{label}: {what} stayed within the tolerance; "
@@ -177,19 +190,19 @@ def test_constant_value_shift(subject_case: tuple[str, ValueShiftCase]) -> None:
     for mutation in ShiftMutation:
         applied = applied_shift(case.head_dim, mutation)
         v_mutated = shifted_value_bits(v, applied, case.dtype)
-        mutated = analyze_value_shift(
-            value_shift_contract(
-                case, v, v_mutated, key_tiles=key_tiles, applied=applied
-            ),
-            base,
-            launch(v_mutated),
+        mutated_contract = value_shift_contract(
+            case, v, v_mutated, key_tiles=key_tiles, applied=applied
         )
+        mutated = analyze_value_shift(mutated_contract, base, launch(v_mutated))
         print(
             f"{label} {mutation.value}: rho_max={mutated.max_ratio:.3g}; "
             f"{mutated.exceed_count} beyond the tolerance"
         )
-        assert mutated.rejected_by_residual, _not_rejected(
-            label, mutation.value, mutated, positive
+        # The mutated tensor is a legitimate input: the launch must be sound and
+        # its residuals must lie where the wrong shift puts them.
+        failures = shift_mutation_failures(mutated_contract, applied, mutated)
+        assert not failures, _not_rejected(
+            label, mutation.value, mutated, positive, failures
         )
 
     # Normalization mutation on the real outputs: both scaled by 1 + eta after

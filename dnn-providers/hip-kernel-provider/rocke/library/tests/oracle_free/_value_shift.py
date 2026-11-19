@@ -672,7 +672,9 @@ class ValueShiftResult:
     """Verdict and diagnostics of one pair of raw-bit outputs.
 
     ``violations`` is the verdict. Everything else is a diagnostic and never
-    enters it. ``max_ratio`` is the largest residual over its tolerance, at
+    enters it. ``column_exceed_count`` splits ``exceed_count`` per output
+    column; :func:`shift_mutation_failures` reads it to judge a wrong-shift
+    launch. ``max_ratio`` is the largest residual over its tolerance, at
     ``worst_coordinate``; ``head_max_ratio`` and ``class_max_ratio`` split it
     per ``(batch, query head)`` and per ``d mod 4``, the period of the shift
     and of the FP16 store forms. ``eta_at_worst`` is the residual over the
@@ -691,6 +693,7 @@ class ValueShiftResult:
     invalid_count: int
     magnitude_count: int
     exceed_count: int
+    column_exceed_count: tuple[int, ...]
     compared_count: int
     max_ratio: float
     worst_coordinate: tuple[int, int, int, int] | None
@@ -803,6 +806,9 @@ def analyze_value_shift(
         invalid_count=invalid_count,
         magnitude_count=magnitude_count,
         exceed_count=exceed_count,
+        column_exceed_count=tuple(
+            int(item) for item in np.count_nonzero(exceed, axis=(0, 1, 2))
+        ),
         compared_count=compared_count,
         max_ratio=float(np.max(ratio)),
         worst_coordinate=worst_coordinate,
@@ -842,6 +848,66 @@ def analyze_value_shift(
             np.count_nonzero(compared & (magnitude > reduced))
         ),
     )
+
+
+def shift_mutation_failures(
+    contract: ValueShiftContract, applied: np.ndarray, result: ValueShiftResult
+) -> tuple[str, ...]:
+    """Why a launch on ``V + applied`` does not count as a rejected wrong shift.
+    Empty when it does.
+
+    ``contract`` and ``result`` are those of the base launch and the launch on
+    ``V + applied``, judged against the expected shift ``c``. The mutated
+    tensor is a legitimate input, so the pair obeys the relation with the
+    applied shift, and its residual against ``c`` is ``applied_d - c_d`` plus
+    an error inside the tolerance. That fixes where the residuals must lie:
+
+    - every stored value is finite and inside its guard, as for any launch; a
+      faulty launch must not stand in for a rejection;
+    - a column the mutation leaves at ``c_d`` has no residual beyond its
+      tolerance;
+    - a column whose applied shift differs from ``c_d`` by more than twice the
+      a-priori tolerance, which no stored pair inside the guards exceeds, has
+      every residual beyond its tolerance;
+    - some residual is beyond its tolerance.
+
+    The tolerance is evaluated for ``|c_d|``, so it covers an applied shift
+    that is not larger; a larger one is refused."""
+    case = contract.case
+    applied_values = _require_shift(applied, case.head_dim)
+    if np.any(np.abs(applied_values) > np.abs(contract.shift)):
+        raise ValueError(
+            "the applied shift exceeds the expected one; the tolerance does "
+            "not cover the pair"
+        )
+    difference = np.abs(applied_values - contract.shift)
+    failures = []
+    if result.invalid_count:
+        failures.append(f"invalid={result.invalid_count}")
+    if result.magnitude_count:
+        failures.append(f"magnitude>guard at {result.magnitude_count}")
+    exceed = np.asarray(result.column_exceed_count)
+    unchanged = difference == 0.0
+    stray = int(exceed[unchanged].sum())
+    if stray:
+        first = int(np.flatnonzero(unchanged & (exceed > 0))[0])
+        failures.append(
+            f"{stray} residuals beyond the tolerance in columns that carry the "
+            f"expected shift, first in column {first}"
+        )
+    rows = case.batch * case.seqlen_q * case.nhead_q
+    certain = difference > 2.0 * contract.apriori_tolerance
+    short = certain & (exceed < rows)
+    if np.any(short):
+        first = int(np.flatnonzero(short)[0])
+        failures.append(
+            f"{int(np.count_nonzero(short))} columns whose wrong shift is certain "
+            f"to exceed the tolerance keep residuals inside it, first column "
+            f"{first} with {int(exceed[first])} of {rows} beyond"
+        )
+    if not result.exceed_count:
+        failures.append("no residual beyond its tolerance")
+    return tuple(failures)
 
 
 def scale_output_bits(bits: np.ndarray, eta: float, dtype: str) -> np.ndarray:

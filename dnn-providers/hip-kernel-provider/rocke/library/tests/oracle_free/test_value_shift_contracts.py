@@ -41,6 +41,16 @@ from ._dense_subject import (
     resolve_dense_subject,
     softmax_scale,
 )
+from ._permutation_path import (
+    _F32_INITIAL_MAX,
+    _F32_ONE,
+    classify_unmasked_path,
+    expected_chain_counts,
+    expected_path_counts,
+    fp_mode_violations,
+    kernel_descriptor_words,
+    trace_mfma_operands,
+)
 from ._value_shift import (
     _ATOM_UNDERFLOW,
     _DOMINANT_KEY,
@@ -64,6 +74,7 @@ from ._value_shift import (
     require_finite_scores,
     rounding_radius,
     scale_output_bits,
+    shift_mutation_failures,
     shift_vector,
     shifted_value_bits,
     store_allowance,
@@ -73,16 +84,8 @@ from ._value_shift import (
     value_shift_tolerance,
 )
 from ._value_shift_path import (
-    _F32_INITIAL_MAX,
-    _F32_ONE,
     REDERIVE,
-    classify_unmasked_path,
-    expected_chain_counts,
     expected_cone_counts,
-    expected_path_counts,
-    fp_mode_violations,
-    kernel_descriptor_words,
-    trace_mfma_operands,
     trace_value_cone,
     unmasked_path_violations,
     verified_key_tiles,
@@ -842,6 +845,18 @@ def test_analyzer_tells_a_row_sum_error_from_a_column_error(
     assert moved.worst_coordinate == (0, 9, 2, 5)
 
 
+def _exact_mutated_pair(
+    case: ValueShiftCase, mutation: ShiftMutation
+) -> tuple[ValueShiftContract, np.ndarray, np.ndarray, np.ndarray]:
+    """The contract of one wrong-shift pair, its applied shift, and two outputs
+    that carry that shift exactly."""
+    contract, _, _ = _quick_contract(case, mutation=mutation)
+    applied = applied_shift(case.head_dim, mutation)
+    base = _constant_output(case, 0.25)
+    values = decode_bits(base, case.dtype) + applied
+    return contract, applied, base, encode_bits(values.astype(np.float32), case.dtype)
+
+
 def test_analyzer_validates_its_inputs() -> None:
     case = _FP16_MODERATE
     contract, _, _ = _quick_contract(case)
@@ -859,17 +874,115 @@ def test_wrong_shifts_are_rejected_on_exact_outputs(
 ) -> None:
     """Outputs that carry the applied shift exactly fail wherever it differs
     from the expected one: the second half of the columns, and only there."""
-    contract, _, _ = _quick_contract(case, mutation=mutation)
-    base = _constant_output(case, 0.25)
-    values = decode_bits(base, case.dtype) + applied_shift(case.head_dim, mutation)
-    result = analyze_value_shift(
-        contract, base, encode_bits(values.astype(np.float32), case.dtype)
-    )
+    contract, applied, base, follow_up = _exact_mutated_pair(case, mutation)
+    result = analyze_value_shift(contract, base, follow_up)
     assert result.rejected_by_residual
     assert result.exceed_count == base.size // 2
     assert result.worst_coordinate[3] >= case.head_dim // 2
     expected = 1.0 if mutation is ShiftMutation.OMIT_SECOND_HALF else 0.5
     assert abs(result.eta_at_worst) == expected
+    assert shift_mutation_failures(contract, applied, result) == ()
+
+
+@pytest.mark.parametrize("case", [_FP16_MODERATE, _BF16_MODERATE], ids=_case_id)
+@pytest.mark.parametrize("mutation", list(ShiftMutation))
+def test_wrong_shift_verdict_requires_a_sound_launch(
+    case: ValueShiftCase, mutation: ShiftMutation
+) -> None:
+    """A wrong-shift launch counts as rejected only when the launch itself is
+    sound and its residuals lie where the wrong shift puts them. One residual
+    beyond the tolerance is not enough."""
+    contract, applied, base, follow_up = _exact_mutated_pair(case, mutation)
+    rows = case.batch * case.seqlen_q * case.nhead_q
+    half = case.head_dim // 2
+    mutated_column = case.head_dim - 1
+
+    def failures(output: np.ndarray) -> tuple[str, ...]:
+        result = analyze_value_shift(contract, base, output)
+        return shift_mutation_failures(contract, applied, result)
+
+    clean = analyze_value_shift(contract, base, follow_up)
+    assert clean.column_exceed_count == (0,) * half + (rows,) * half
+    assert sum(clean.column_exceed_count) == clean.exceed_count
+
+    # Quiet NaN everywhere but one wrong value: one residual is beyond the
+    # tolerance and nothing else was stored.
+    index = (0, 0, 0, mutated_column)
+    mostly_unwritten = np.full(case.output_shape, _NAN_BITS[case.dtype], np.uint16)
+    mostly_unwritten[index] = follow_up[index]
+    result = analyze_value_shift(contract, base, mostly_unwritten)
+    assert result.rejected_by_residual and result.exceed_count == 1
+    found = shift_mutation_failures(contract, applied, result)
+    assert found[0] == f"invalid={base.size - 1}"
+    assert f"{half} columns whose wrong shift is certain" in found[1]
+    assert found[1].endswith(f"first column {half} with 0 of {rows} beyond")
+    assert len(found) == 2
+
+    unwritten = np.full(case.output_shape, _NAN_BITS[case.dtype], np.uint16)
+    found = failures(unwritten)
+    assert found[0] == f"invalid={base.size}"
+    assert found[-1] == "no residual beyond its tolerance"
+
+    # A stored value beyond its guard, in a column whose residual exceeds the
+    # tolerance either way.
+    oversized = _with_value(follow_up, (0, 3, 1, mutated_column), 4.0, case.dtype)
+    assert failures(oversized) == ("magnitude>guard at 1",)
+
+    # The relation holds in the columns the mutation leaves alone. A residual
+    # there is a fault of the launch, not a rejection.
+    stray = _with_value(follow_up, (0, 5, 2, 0), 0.25, case.dtype)
+    assert failures(stray) == (
+        "1 residuals beyond the tolerance in columns that carry the expected "
+        "shift, first in column 0",
+    )
+
+    # One element of a mutated column that carries the expected shift after all.
+    kept = (0, 7, 4, mutated_column)
+    carried = 0.25 + float(shift_vector(case.head_dim)[mutated_column])
+    assert failures(_with_value(follow_up, kept, carried, case.dtype)) == (
+        "1 columns whose wrong shift is certain to exceed the tolerance keep "
+        f"residuals inside it, first column {mutated_column} with {rows - 1} of "
+        f"{rows} beyond",
+    )
+
+    # The halves exchanged: residuals beyond the tolerance exist, in the wrong
+    # columns. The shift has period four, so the expected-shift relation cannot
+    # tell the halves apart; the wrong shifts can.
+    values = decode_bits(base, case.dtype) + np.roll(applied, half)
+    exchanged = encode_bits(values.astype(np.float32), case.dtype)
+    result = analyze_value_shift(contract, base, exchanged)
+    assert result.rejected_by_residual and result.exceed_count == base.size // 2
+    found = shift_mutation_failures(contract, applied, result)
+    assert len(found) == 2
+    assert found[0].startswith(f"{base.size // 2} residuals beyond the tolerance")
+    assert found[1].startswith(f"{half} columns whose wrong shift is certain")
+
+
+@pytest.mark.parametrize("case", VALUE_SHIFT_QUICK_CASES, ids=_case_id)
+@pytest.mark.parametrize("mutation", list(ShiftMutation))
+def test_every_mutated_column_is_certain_to_be_rejected_at_the_quick_shape(
+    case: ValueShiftCase, mutation: ShiftMutation
+) -> None:
+    """The verdict requires every residual of a column beyond its tolerance only
+    where the missing shift is more than twice the a-priori tolerance. At the
+    quick shape that is every mutated column, so the requirement is not empty."""
+    contract, _, _ = _quick_contract(case, mutation=mutation)
+    difference = np.abs(applied_shift(case.head_dim, mutation) - contract.shift)
+    half = case.head_dim // 2
+    assert np.all(difference[:half] == 0.0)
+    assert np.all(difference[half:] > 2.0 * contract.apriori_tolerance[half:])
+
+
+def test_wrong_shift_verdict_refuses_a_shift_the_tolerance_does_not_cover() -> None:
+    case = _FP16_MODERATE
+    contract, applied, base, follow_up = _exact_mutated_pair(
+        case, ShiftMutation.OMIT_SECOND_HALF
+    )
+    result = analyze_value_shift(contract, base, follow_up)
+    with pytest.raises(ValueError, match="exceeds the expected one"):
+        shift_mutation_failures(contract, 2.0 * shift_vector(case.head_dim), result)
+    with pytest.raises(ValueError, match="finite values"):
+        shift_mutation_failures(contract, applied[:-1], result)
 
 
 # ---------------------------------------------------------------------------
@@ -987,6 +1100,7 @@ def _scalar_analyze(
     tolerance = value_shift_tolerance(contract, base, follow_up)
     reduced = value_shift_tolerance(contract, base, follow_up, cast_normalizer=True)
     invalid = magnitude_count = exceed = compared = 0
+    column_exceed = [0] * case.head_dim
     reduced_exceed = 0
     reduced_ratio = 0.0
     max_ratio = max_abs = 0.0
@@ -1021,6 +1135,7 @@ def _scalar_analyze(
                     limit = float(tolerance[index])
                     ratio = abs(residual) / limit
                     exceed += abs(residual) > limit
+                    column_exceed[dim] += abs(residual) > limit
                     reduced_exceed += abs(residual) > float(reduced[index])
                     reduced_ratio = max(
                         reduced_ratio, abs(residual) / float(reduced[index])
@@ -1059,6 +1174,7 @@ def _scalar_analyze(
         invalid_count=invalid,
         magnitude_count=magnitude_count,
         exceed_count=exceed,
+        column_exceed_count=tuple(column_exceed),
         compared_count=compared,
         max_ratio=max_ratio,
         worst_coordinate=worst[0] if worst else None,
@@ -1388,6 +1504,8 @@ def test_modeled_wrong_shifts_are_rejected(
     assert result.max_ratio > 10.0
     assert result.worst_coordinate[3] >= case.head_dim // 2
     assert result.exceed_count == base.size // 2
+    applied = applied_shift(case.head_dim, mutation)
+    assert shift_mutation_failures(contract, applied, result) == ()
 
 
 @pytest.mark.parametrize("case", VALUE_SHIFT_QUICK_CASES, ids=_case_id)
@@ -1511,6 +1629,7 @@ def _result(*, exceed: bool) -> ValueShiftResult:
         invalid_count=0,
         magnitude_count=0,
         exceed_count=9 if exceed else 0,
+        column_exceed_count=(9 if exceed else 0,),
         compared_count=64,
         max_ratio=500.0 if exceed else 0.1,
         worst_coordinate=(0, 0, 0, 0),
@@ -1545,6 +1664,17 @@ def test_unrejected_mutation_blames_a_failing_shift() -> None:
     )
     assert "the correct shift itself fails" in message
     assert "violations=residual=0.5>0.001 at 9" in message
+    message = _not_rejected(
+        "label",
+        "omit_second_half",
+        _result(exceed=True),
+        _result(exceed=False),
+        ("invalid=3", "magnitude>guard at 1"),
+    )
+    assert (
+        "omit_second_half was not rejected as a wrong shift: invalid=3; "
+        "magnitude>guard at 1; violations=" in message
+    )
 
 
 # ---------------------------------------------------------------------------

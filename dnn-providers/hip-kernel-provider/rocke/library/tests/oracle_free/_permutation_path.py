@@ -416,6 +416,11 @@ def trace_mfma_operands(ir: str, dtype: str) -> tuple[list, Counter]:
     # Chains: an MFMA call continues the chain of its accumulator operand.
     atom = _MFMA_ATOM[dtype]
     calls = [item for item in instructions.values() if item.opcode == atom]
+    # The parser keeps SSA values only, so a constant operand would shift the
+    # later ones. A constant is not a traced tensor either way.
+    constant = [call.text for call in calls if len(call.operands) != 3]
+    if constant:
+        return [f"MFMA operand is a constant: {text}" for text in constant], counts
     successor: dict[str, list[str]] = {}
     starts: list[_Instruction] = []
     for call in calls:
