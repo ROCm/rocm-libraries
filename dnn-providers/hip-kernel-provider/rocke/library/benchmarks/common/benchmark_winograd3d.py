@@ -4,8 +4,10 @@
 """Opt-in benchmark for the 3-D Winograd F(2x2x2,3x3x3) forward prototype.
 
 Runs ``kernels.common.conv_winograd3d`` on halo-form NDHWC bf16 problems (N=1, valid
-conv, stride 1), verifies against a float32 torch conv3d with the benchmark's metric
-(``max|out-ref| / max(|ref|max, 1)``, bf16 tolerance 5e-2), and times it with the
+conv, stride 1), verifies against a float32 torch conv3d with scale-free metrics
+(``max|out-ref| / max|ref|`` below 5e-2 and ``mean|out-ref| / mean|ref|`` below
+``VERIFY_MEAN_REL``, so scaled data modes are judged like unscaled ones; the exit status
+is 1 when a verified run fails), and times it with the
 staged protocol (one stalled call per sample, median) -- the same protocol
 ``benchmark_conv_compare --timing staged`` reports. Two times are printed: the main
 kernel alone, and the whole call (weight transform + main kernel).
@@ -20,6 +22,12 @@ from __future__ import annotations
 import argparse
 import json
 import time
+
+# verify verdict: scale-free max and mean relative error of the output against the f32
+# reference (both independent of the data scale, so tr@-20 / tv<b>@e data cannot pass a
+# zero or garbage output)
+VERIFY_MAX_REL = 5e-2
+VERIFY_MEAN_REL = 1e-2
 
 UNET3D_SHAPES = {
     1: (258, 130, 130, 64, 64),
@@ -120,9 +128,21 @@ def _make_data(kind, xs, ws, dev):
     return X.to(torch.bfloat16), W.to(torch.bfloat16)
 
 
+def verify_verdict(Yv, ref) -> dict:
+    """The verify verdict of an output Yv against the f32 reference: ``rel_err`` =
+    max|err| / max|ref|, ``mean_rel`` = mean|err| / mean|ref| (both scale-free) and
+    ``verify`` PASS when they are below VERIFY_MAX_REL / VERIFY_MEAN_REL."""
+    err = (Yv - ref).abs()
+    ra = ref.abs()
+    rel = err.max().item() / max(ra.max().item(), 1e-30)
+    mrel = err.mean().item() / max(ra.mean().item(), 1e-30)
+    ok = rel < VERIFY_MAX_REL and mrel < VERIFY_MEAN_REL
+    return {"rel_err": rel, "mean_rel": mrel, "verify": "PASS" if ok else "FAIL"}
+
+
 def _acc_stats(Yv, ref):
-    """Error of Yv (f32 view of the bf16 output) vs the f32 reference: the rocKE verify metric
-    (max|err| / max(max|ref|, 1)), the scale-free max|err| / max|ref|, mean|err| / mean|ref|,
+    """Error of Yv (f32 view of the bf16 output) vs the f32 reference: the scale-free
+    max|err| / max|ref| and mean|err| / mean|ref| (the verify verdict's two metrics),
     the worst output channel (max_c max|err_c| / max|ref_c|) and the relative error of the
     output's bf16 rounding alone (the floor any bf16-output kernel has)."""
     import torch
@@ -769,16 +789,11 @@ def run_one(
             # the outer ring is not stored (chained BWD-data layout): compare the rest
             Yv = Yv[1:-1, 1:-1, 1:-1].contiguous()
             ref = ref[1:-1, 1:-1, 1:-1].contiguous()
-        err = (Yv - ref).abs()
-        scale = max(ref.abs().max().item(), 1.0)
-        rel = err.max().item() / scale
-        res["rel_err"] = rel
-        res["mean_rel"] = err.mean().item() / ref.abs().mean().item()
-        res["verify"] = "PASS" if rel < 5e-2 else "FAIL"
+        res.update(verify_verdict(Yv, ref))
         res.update(_acc_stats(Yv, ref))
         if acc_out:
             torch.save({"Y": Yv.to(torch.bfloat16).cpu()}, acc_out)
-        del ref, err, xr, wr
+        del ref, xr, wr
     from statistics import median
 
     res["dir"] = "dgrad" if dgrad else "fwd"
@@ -997,7 +1012,16 @@ def main(argv=None):
         with open(a.results, "a") as f:
             for r in out:
                 f.write(json.dumps(r) + "\n")
-    return 0
+    return 1 if any(run_failed(r) for r in out) else 0
+
+
+def run_failed(res: dict) -> bool:
+    """A result whose verify verdict, output amax map or determinism check failed."""
+    return (
+        res.get("verify") == "FAIL"
+        or res.get("map_out_ok") is False
+        or res.get("det_identical") is False
+    )
 
 
 if __name__ == "__main__":

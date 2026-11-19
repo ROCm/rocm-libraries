@@ -973,3 +973,21 @@ def test_dropin_wrapper_refuses_unrunnable_specs(extra):
     )
     with pytest.raises(ValueError, match="drop-in"):
         Winograd3dDropin(p, "fwd", bad)
+
+
+def test_benchmark_verdict_is_scale_free():
+    """The benchmark's verify verdict judges scaled data like unscaled data: a zero or a
+    doubled output of a 2^-20-scaled problem fails, a bf16 rounding of it passes."""
+    torch = pytest.importorskip("torch")
+    from benchmarks.common.benchmark_winograd3d import run_failed, verify_verdict
+
+    g = torch.Generator().manual_seed(0)
+    ref = torch.randn(8, 8, 8, 16, generator=g) * 2.0**-20
+    assert verify_verdict(torch.zeros_like(ref), ref)["verify"] == "FAIL"
+    assert verify_verdict(2 * ref, ref)["verify"] == "FAIL"
+    good = ref.to(torch.bfloat16).float()
+    v = verify_verdict(good, ref)
+    assert v["verify"] == "PASS" and v["rel_err"] < 1e-2
+    assert run_failed({"verify": "FAIL"}) and run_failed({"map_out_ok": False})
+    assert run_failed({"det_identical": False})
+    assert not run_failed({"verify": "PASS", "map_out_ok": True, "det_identical": True})
