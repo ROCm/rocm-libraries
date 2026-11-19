@@ -166,10 +166,11 @@ python3 script/check_public_abi.py check-headers --require-provider
 python3 script/check_public_abi.py check build/lib/libMIOpen.so \
   --baseline test/public_abi/public_symbols.baseline
 python3 -m pytest script/test_check_public_abi.py
-# test_forwarding_parity_gpu_labels lives in test/gtest/, hence PYTHONPATH; the rest are in script/.
+# test_forwarding_parity_gpu_labels and test_check_wrapper_registration live in test/gtest/, hence
+# PYTHONPATH; the rest are in script/.
 (cd script && PYTHONPATH=../test/gtest python3 -m unittest \
   test_check_wrapper_abi test_miopen_wrapper_libs test_run_forwarding_parity \
-  test_compare_forwarding_runs test_forwarding_parity_gpu_labels)
+  test_compare_forwarding_runs test_forwarding_parity_gpu_labels test_check_wrapper_registration)
 # Wrapper-ON builds, after building miopen-tests (the libraries, forwarding_failure_probe,
 # and the fake hipDNN backend); no GPU needed:
 ctest --test-dir build --output-on-failure --no-tests=error \

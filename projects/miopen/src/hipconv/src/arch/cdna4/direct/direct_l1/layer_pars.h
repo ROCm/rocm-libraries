@@ -19,6 +19,9 @@ struct InputPars
     // Number of channels
     const int C;
 
+    // Output chunks of w_unfold columns per image row; read by unfold_chunks tiles only.
+    const int chunks_per_row = 1;
+
     __host__ __device__ size_t size() const { return static_cast<size_t>(N) * H * W * C; }
 };
 

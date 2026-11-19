@@ -130,7 +130,7 @@ namespace TensileLite
                                 .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
                                 .cache_hints_a             = solution->sizeMapping.cacheHintA(),
                                 .cache_hints_b             = solution->sizeMapping.cacheHintB(),
-                                .cache_hints_d             = solution->sizeMapping.NonTemporalD,
+                                .cache_hints_d             = solution->sizeMapping.cacheHintD(),
                                 .workspace_size            = std::numeric_limits<size_t>::max(),
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
                                 .stream_k                  = (solution->sizeMapping.isStreamK() ? (solution->sizeMapping.hasDynamicAssignment() ? 4 : solution->sizeMapping.hasHybridAssignment() ? 5 : 3) : 0),
@@ -158,12 +158,23 @@ namespace TensileLite
                                     .prefetch_global_read = solution->sizeMapping.PrefetchGlobalRead,
                                     .buffer_load          = solution->sizeMapping.BufferLoad,
                                     .buffer_store         = solution->sizeMapping.BufferStore,
+                                    .workgroup_mapping_xcc
+                                    = solution->sizeMapping.workGroupMappingXCC,
+                                    .workgroup_mapping_xcc_group
+                                    = solution->sizeMapping.workGroupMappingXCCGroup,
                                     .one_lds_buffer       = solution->sizeMapping.OneLDSBuffer,
                                     .source_swap          = solution->sizeMapping.SourceSwap,
                                     .unroll_major_lds_a   = solution->sizeMapping.UnrollMajorLDSA,
                                     .unroll_major_lds_b   = solution->sizeMapping.UnrollMajorLDSB,
                                     .lds_transpose_read_a = solution->sizeMapping.enableLDSTrA,
                                     .lds_transpose_read_b = solution->sizeMapping.enableLDSTrB,
+                                    .tdm_inst             = solution->sizeMapping.TDMInst,
+                                    .prefetch_gl2         = solution->sizeMapping.PrefetchGL2,
+                                    .prefetch_local_read
+                                    = solution->sizeMapping.PrefetchLocalRead,
+                                    .half_plr             = solution->sizeMapping.HalfPLR,
+                                    .multicast = solution->sizeMapping.Multicast != 0,
+                                    .adaptive_gemm = solution->sizeMapping.adaptiveGemm,
                                 },
                             };
 

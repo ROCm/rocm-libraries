@@ -24,6 +24,8 @@
  *
  *******************************************************************************/
 
+#include <new>
+
 #include "contraction_solution.hpp"
 #include "hash.hpp"
 #include "hiptensor_options.hpp"
@@ -238,26 +240,38 @@ namespace hiptensor
                                         unsigned long              workspaceSize,
                                         StreamConfig const& streamConfig /*= StreamConfig{}*/)
     {
-        if(!initArgs(alpha,
-                     A,
-                     B,
-                     beta,
-                     D,
-                     E,
-                     a_ms_ns_lengths,
-                     a_ms_ks_strides,
-                     a_ms_ks_modes,
-                     b_ns_ks_lengths,
-                     b_ns_ks_strides,
-                     b_ns_ks_modes,
-                     ds_ms_ns_lengths,
-                     ds_ms_ns_strides,
-                     ds_ms_ns_modes,
-                     e_ms_ns_lengths,
-                     e_ms_ns_strides,
-                     e_ms_ns_modes,
-                     unaryOps,
-                     workspacePtr))
+        bool argsReady = false;
+        try
+        {
+            argsReady = initArgs(alpha,
+                                 A,
+                                 B,
+                                 beta,
+                                 D,
+                                 E,
+                                 a_ms_ns_lengths,
+                                 a_ms_ks_strides,
+                                 a_ms_ks_modes,
+                                 b_ns_ks_lengths,
+                                 b_ns_ks_strides,
+                                 b_ns_ks_modes,
+                                 ds_ms_ns_lengths,
+                                 ds_ms_ns_strides,
+                                 ds_ms_ns_modes,
+                                 e_ms_ns_lengths,
+                                 e_ms_ns_strides,
+                                 e_ms_ns_modes,
+                                 unaryOps,
+                                 workspacePtr);
+        }
+        catch(std::bad_alloc const&)
+        {
+            // Some device ops allocate device scratch buffers while building their arguments.
+            resetArgs();
+            return {HIPTENSOR_STATUS_ALLOC_FAILED, -1.0f};
+        }
+
+        if(!argsReady)
         {
             return {HIPTENSOR_STATUS_INTERNAL_ERROR, -1.0f};
         }

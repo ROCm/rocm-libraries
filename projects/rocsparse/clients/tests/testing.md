@@ -3,7 +3,7 @@
 **Status:** Draft
 **Owner:** @doctorcolinsmith
 **Technical Lead:** @ntrost57
-**Last Updated:** 2026-10-27
+**Last Updated:** 2026-11-17
 
 This document describes how rocSPARSE is tested today, which signals actually gate a merge, and
 where the gaps are. It follows the ROCm-wide TESTING.md template and is written as a description of
@@ -171,9 +171,10 @@ selection, and device-side conversions — these require a GPU and are exercised
 paths; this is not mandated initially and will be pursued in phases. The Codecov `rocSPARSE-unit`
 flag is held to 80% (see [Coverage](#coverage)). A useful property of the unit
 layer is that library sources compiled into the two binaries are instrumented under
-`BUILD_CODE_COVERAGE` (`-fprofile-instr-generate -fcoverage-mapping`), so device kernels and internal
-primitives exercised by `rocsparse-unit-test-device` begin to emit LLVM profile data that the
-integration suite's host-side instrumentation cannot capture. See [Coverage](#coverage).
+`BUILD_CODE_COVERAGE` (`-Xarch_host -fprofile-instr-generate -fcoverage-mapping`). That instruments
+host code only, including internal primitives and the host side of the translation units compiled
+into `rocsparse-unit-test-device`. The device kernels themselves are not instrumented. See
+[Coverage](#coverage).
 
 ---
 
@@ -213,6 +214,13 @@ at one tier — e.g., `./rocsparse-test --gtest_filter=*quick/csrmv*` should fin
 > exist to keep any one routine from dominating a tier's total runtime; when a routine consistently
 > and substantially exceeds its budget, that is a signal to trim redundant cases (see the test-size guidance
 > below).
+
+**Known gap — no independent third-party reference:** numerical results are checked against an
+in-tree host implementation of the same routine, and the unit-test layer exercises components in
+isolation. rocSPARSE is not checked against an independent third-party sparse library (for example
+cuSPARSE or SciPy) at any tier. A host implementation can be wrong in the same way as the device
+kernel, so host/device agreement does not by itself establish numerical correctness. Closing this
+gap needs an external reference wired into the YAML pipeline or a dedicated comparison suite.
 
 **Test data / matrices:** functional suites read `.csr` matrices converted from **24 SuiteSparse**
 matrices (e.g. `nos1`–`nos7`, `amazon0312`, `webbase-1M`), MD5-verified and converted by
@@ -376,7 +384,7 @@ owner or ticket per case — a tracked quarantine list with expiry remains a gap
 
 ## Coverage
 
-**Tool:** LLVM source-based coverage (`-fprofile-instr-generate -fcoverage-mapping`), enabled with
+**Tool:** LLVM source-based coverage on host code (`-Xarch_host -fprofile-instr-generate -fcoverage-mapping`), enabled with
 `-DBUILD_CODE_COVERAGE=ON` (via `install.sh --codecoverage`, which requires a Debug `-g` or
 RelWithDebInfo `-k` build). `lcov`/`gcovr` are explicitly not used because they do not work with LLVM
 coverage.
@@ -414,8 +422,9 @@ failure when either flag is under 80%. TheRock does not run these statuses. Bran
 * *Code coverage* = fraction of lines executed (e.g. 700 of 1,000 → 70%).
 * *Test coverage* = fraction of intended functionality exercised (types, index types, formats, sizes,
   platforms). Host-side instrumentation of `rocsparse-test` still misses most device kernels.
-  `rocsparse-unit-test-device` is instrumented under `BUILD_CODE_COVERAGE` and compiles library
-  device sources directly in, so those paths can emit LLVM profile data. Inventory is incomplete
+  `rocsparse-unit-test-device` is instrumented under `BUILD_CODE_COVERAGE` with `-Xarch_host` and
+  compiles library device sources directly in. Host code in those translation units emits LLVM
+  profile data; the device kernels do not. Inventory is incomplete
   (not every kernel is unit-tested) and a coverage run still sees only one wavefront size (see
   below).
 
@@ -516,6 +525,7 @@ device configurations are not ASAN-covered.
 | Coverage `coverage_analysis` ignores unit-test failures | Low | Medium | Failures do not block the Codecov upload |
 | No tracked quarantine list (owner + ticket + expiry) for `known_bug` cases | Low | Low | `*known_bug*` excluded from gating; linkage is ad-hoc |
 | No TSAN/UBSAN/MSAN | High | High | ASAN only |
+| No independent third-party numerical reference (only in-tree host reference and unit tests) | Medium | High | Device results are compared with an in-tree host implementation; a bug shared with that host reference is not caught by any suite |
 
 ---
 

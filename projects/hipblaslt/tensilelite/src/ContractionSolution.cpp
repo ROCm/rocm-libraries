@@ -49,6 +49,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <iomanip>
@@ -72,6 +73,15 @@ namespace TensileLite
 {
     namespace
     {
+        // OutputPeerD: the kernel adds this distance to every D store address to reach the peer
+        // D. It is taken between the two buffers' batch 0, so it is the same whether the kernel
+        // gets D as one pointer or as a batch pointer array (both D have the same layout).
+        int64_t peerDDistance(ContractionInputs const& inputs)
+        {
+            return static_cast<int64_t>(reinterpret_cast<intptr_t>(inputs.peerD)
+                                        - reinterpret_cast<intptr_t>(inputs.d));
+        }
+
         size_t checkedMultiply(size_t a, size_t b)
         {
             if(b != 0 && a > std::numeric_limits<size_t>::max() / b)
@@ -837,6 +847,10 @@ namespace TensileLite
                            ContractionSolution::GroupedInputs const&        inputs,
                            DeviceUserArguments<TAct>*                       args)
     {
+        for(auto const& problem : problems)
+            if(problem.fusedA2A() == FusedA2A::A2AGemm)
+                throw std::runtime_error("A2AGemm does not support device user arguments");
+
         for(int i = 0; i < problems.size(); i++)
         {
             const TensorDescriptor& e = problems[i].tensor(ContractionProblemGemm::TENSOR::E);
@@ -1074,17 +1088,6 @@ namespace TensileLite
         return magu.M;
     }
 
-    uint32_t
-        ContractionSolution::magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const
-    {
-        if(magicDivAlg == 1)
-            return magicNumberAlg1(x, magicShift);
-        else if(magicDivAlg == 2)
-            return magicNumberAlg2(x, magicShift);
-        else
-            throw std::runtime_error("bad magicDivAlg");
-    }
-
     uint32_t ContractionSolution::smallMagicNumber(uint32_t x) const
     {
         uint64_t  magicNum;
@@ -1207,8 +1210,7 @@ namespace TensileLite
             // The flat space is in padded tiles here too, so that a solution with
             // a K unit keeps one convention across every path it can take.
             uint32_t magicShift = 0;
-            const uint32_t magic = solution.magicNumber(
-                2,
+            const uint32_t magic = solution.magicNumberAlg2(
                 static_cast<uint32_t>(
                     skPaddedItersPerTile(itersPerTile, solution.skKGranularity())),
                 &magicShift);
@@ -1442,10 +1444,13 @@ namespace TensileLite
             for(size_t i = startStrideAB; i < mxsa.dimensions(); i++)
                 args.template append<uint32_t>(concatenate_if<T_Debug>("strideMXSA", i), mxsa.strides()[i]);
 
+        const size_t bStrideDivisor
+            = problemType.fusedA2A == FusedA2A::A2AGemm ? problem.world() : 1;
         for(size_t i = startStrideAB; i < b.dimensions(); i++)
         {
             auto stride_b = problemType.sparse == 2 ? compressed.strides()[i] : b.strides()[i];
-            args.template append<uint32_t>(concatenate_if<T_Debug>("strideB", i), stride_b);
+            args.template append<uint32_t>(concatenate_if<T_Debug>("strideB", i),
+                                           stride_b / bStrideDivisor);
         }
 
         if(problemType.mxBlockB)
@@ -1614,8 +1619,8 @@ namespace TensileLite
                         = skPaddedItersPerTile(sk3_itersPerTile, skKGranularity());
                     uint32_t magicNumberItersPerTile;
                     uint32_t magicShiftItersPerTile;
-                    magicNumberItersPerTile = magicNumber(
-                        2, sk3_paddedIters, &magicShiftItersPerTile);
+                    magicNumberItersPerTile
+                        = magicNumberAlg2(sk3_paddedIters, &magicShiftItersPerTile);
                     // Bit 30 = SK5 mode bit, bit 29 = uniform summation order.
                     // Both are stolen from the always-zero 5..30 window of
                     // magicNumberAlg2's shift field; bit 31 stays the "add"
@@ -1688,7 +1693,7 @@ namespace TensileLite
                 uint32_t magicNumberItersPerTile;
                 uint32_t magicShiftItersPerTile;
                 magicNumberItersPerTile
-                    = magicNumber(2, paddedItersPerTile, &magicShiftItersPerTile);
+                    = magicNumberAlg2(paddedItersPerTile, &magicShiftItersPerTile);
 
                 // MagicShiftItersPerTile wire format:
                 //   31    = magicNumberAlg2's "add" indicator (abit)
@@ -2042,6 +2047,10 @@ namespace TensileLite
             }
         }
 
+        // After the activation arguments and before the amax ones, as in the kernel signature.
+        if(problemType.outputPeerD)
+            args.template append<int64_t>("DeltaPeerD", peerDDistance(inputs));
+
         if(problemType.outputAmaxD)
         {
             args.template append<const void*>("AddrAmaxOut", inputs.amaxD);
@@ -2118,14 +2127,27 @@ namespace TensileLite
             {
                 if(sizes.size() >= 4)
                 {
+                    // Built as PredictionLibrary builds the ranking's problem, so both see
+                    // the same operand layouts and pick the same WGM.
+                    auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
+                    if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
+                        miDataType = origami::data_type_t::XFloat32;
                     origami::problem_t origami_problem = {
-                        .size    = {sizes[0], sizes[1], sizes[3]},
-                        .batch   = sizes[2],
+                        .size        = {sizes[0], sizes[1], sizes[3]},
+                        .batch       = sizes[2],
                         // CU budget hint; 0 = use all CUs.
-                        .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
-                        .a_dtype = datatypeToAnalyticalDatatype(problem.a().dataType()),
-                        .b_dtype = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                        .num_cus     = static_cast<size_t>(problem.getParams().smCountTarget()),
+                        .a_transpose = problem.transA() ? origami::transpose_t::T
+                                                        : origami::transpose_t::N,
+                        .b_transpose = problem.transB() ? origami::transpose_t::T
+                                                        : origami::transpose_t::N,
+                        .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                        .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                        .c_dtype     = datatypeToAnalyticalDatatype(problem.c().dataType()),
+                        .d_dtype     = datatypeToAnalyticalDatatype(problem.d().dataType()),
+                        .mi_dtype    = miDataType,
                     };
+                    // Origami ranks an auto mapping with this same call.
                     origami::config_t origami_config = {
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
                                           static_cast<size_t>(sizeMapping.macroTile.y),
@@ -2546,6 +2568,12 @@ namespace TensileLite
         const uint32_t mask16              = 0xFFFF;
         const uint32_t mask14              = 0x3FFF;
         const uint32_t mask8               = 0xFF;
+
+        if(problemType.fusedA2A == FusedA2A::A2AGemm && (wgm < 0 || wgmxcc > 1))
+            throw std::runtime_error("[fused-a2a] A2AGemm requires WorkGroupMapping >= 0 and "
+                                     "WorkGroupMappingXCC = 1; got "
+                                     + std::to_string(wgm) + " and " + std::to_string(wgmxcc)
+                                     + ".");
 
         internalArg0 = 0;
         internalArg1 = 0;
@@ -3051,14 +3079,20 @@ namespace TensileLite
         }
 
         // The fused GEMM+A2A segment follows batchOffsets in the kernel signature.
-        if(problem.fusedGemmA2A())
+        if(problemType.fusedA2A != FusedA2A::Disabled)
+        {
+            if(problemType.fusedA2A == FusedA2A::A2AGemm)
+                checkA2AGemmBufAligned(inputs.fusedA2APeers, inputs.fusedA2AMyRank);
+            AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
             appendFusedSegment(rv.args,
                                inputs.fusedA2APeers,
                                inputs.fusedA2ACounter,
                                inputs.fusedA2AMyRank,
                                problem.world(),
                                inputs.fusedA2ADrain,
-                               static_cast<uint32_t>(problem.fusedA2AExtent()));
+                               static_cast<uint32_t>(problem.fusedA2AExtent()),
+                               static_cast<uint32_t>(pAMDGPU ? pAMDGPU->computeUnitCount : 0));
+        }
 
         // CU-occupancy probe tail args (layout: Signature.py addOccupancyProbeArgs).
         // A grid smaller than minGrid is padded with probe-only WGs so the probe
@@ -3163,7 +3197,7 @@ namespace TensileLite
                 = static_cast<uint32_t>(skPaddedItersPerTile(itersPerTile, skKGranularity()));
             skTotalIters    = static_cast<uint32_t>(numTiles * paddedItersPerTile);
             skMagicNumberItersPerTile
-                = magicNumber(2, paddedItersPerTile, &skMagicShiftItersPerTile);
+                = magicNumberAlg2(paddedItersPerTile, &skMagicShiftItersPerTile);
 
             bool twoTileStreamK = sizeMapping.isStreamK()
                                   || customKernel.workspaceType == CustomWorkspaceType::StreamK
@@ -3830,6 +3864,9 @@ namespace TensileLite
                                                        problem.useGateResidual() ? gate.strides().at(index) : 0);
                     break;
                 }
+                case CustomArgSemantic::DeltaPeerD:
+                    rv.args.template append<int64_t>("DeltaPeerD", peerDDistance(inputs));
+                    break;
                 case CustomArgSemantic::AddressAmaxOut:
                     rv.args.template append<void const*>("AddressAmaxOut", inputs.amaxD);
                     break;
@@ -3929,27 +3966,34 @@ namespace TensileLite
                 // ---- Packed batch dimension divisors ----
                 // arg.index comes from the kernel's custom.config, so it is untrusted;
                 // fall back to a dimension of 1 rather than indexing out of bounds.
-                case CustomArgSemantic::MagicNumberSize:
+                case CustomArgSemantic::MagicNumberSizeAlg1:
+                case CustomArgSemantic::MagicShiftSizeAlg1:
                 {
                     uint32_t dimSize = arg.index < problem.problemSizes().size()
                                            ? problem.problemSizes()[arg.index]
                                            : 1;
                     uint32_t magicShift;
-                    uint32_t magicNum = magicNumber(sizeMapping.magicDivAlg, dimSize, &magicShift);
-                    rv.args.template append<uint32_t>("MagicNumberSize", magicNum);
+                    uint32_t magicNum = magicNumberAlg1(dimSize, &magicShift);
+                    rv.args.template append<uint32_t>(
+                        toString(arg.semantic),
+                        arg.semantic == CustomArgSemantic::MagicNumberSizeAlg1 ? magicNum
+                                                                               : magicShift);
                     break;
                 }
-                case CustomArgSemantic::MagicShiftSize:
+                case CustomArgSemantic::MagicNumberSizeAlg2:
+                case CustomArgSemantic::MagicShiftSizeAlg2:
                 {
                     uint32_t dimSize = arg.index < problem.problemSizes().size()
                                            ? problem.problemSizes()[arg.index]
                                            : 1;
                     uint32_t magicShift;
-                    magicNumber(sizeMapping.magicDivAlg, dimSize, &magicShift);
-                    rv.args.template append<uint32_t>("MagicShiftSize", magicShift);
+                    uint32_t magicNum = magicNumberAlg2(dimSize, &magicShift);
+                    rv.args.template append<uint32_t>(
+                        toString(arg.semantic),
+                        arg.semantic == CustomArgSemantic::MagicNumberSizeAlg2 ? magicNum
+                                                                               : magicShift);
                     break;
                 }
-
                 // ---- Epilogue control args ----
                 case CustomArgSemantic::BiasType:
                     rv.args.template append<uint32_t>("BiasType", static_cast<uint32_t>(problem.bias().dataType()));
@@ -4012,13 +4056,18 @@ namespace TensileLite
                     break;
                 case CustomArgSemantic::FusedA2ASegment:
                 {
-                    appendFusedSegment(rv.args,
-                                       inputs.fusedA2APeers,
-                                       inputs.fusedA2ACounter,
-                                       inputs.fusedA2AMyRank,
-                                       problem.world(),
-                                       inputs.fusedA2ADrain,
-                                       static_cast<uint32_t>(problem.fusedA2AExtent()));
+                    if(problemType.fusedA2A == FusedA2A::A2AGemm)
+                        checkA2AGemmBufAligned(inputs.fusedA2APeers, inputs.fusedA2AMyRank);
+                    AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+                    appendFusedSegment(
+                        rv.args,
+                        inputs.fusedA2APeers,
+                        inputs.fusedA2ACounter,
+                        inputs.fusedA2AMyRank,
+                        problem.world(),
+                        inputs.fusedA2ADrain,
+                        static_cast<uint32_t>(problem.fusedA2AExtent()),
+                        static_cast<uint32_t>(pAMDGPU ? pAMDGPU->computeUnitCount : 0));
                     break;
                 }
                 // ---- Random seed args ----
@@ -4033,7 +4082,7 @@ namespace TensileLite
 
                 // rocRoller workgroup mapping. libdivide branchfree magics of
                 // the WGM integer, numTilesN, the tail, and the main block,
-                // plus the two signed quotients. Not Tensile magicNumber().
+                // plus the two signed quotients. Not Tensile's magicNumberAlg1/2().
                 case CustomArgSemantic::RR_WorkgroupMapping:
                     rv.args.appendCustomType("RR_WorkgroupMapping", wgmKernarg().workgroupMapping, arg.type);
                     break;
@@ -7718,7 +7767,12 @@ namespace TensileLite
                                static_cast<size_t>(self.sizeMapping.matrixInstruction[2])},
                         .occupancy = std::max(self.sizeMapping.CUOccupancy, static_cast<int>(1)),
                         .workgroup_mapping         = self.sizeMapping.workGroupMapping,
-                        .workspace_size            = problem.workspaceSize(),
+                        // The spatial-cluster schedule re-cuts this grid and checks its own
+                        // (unpadded) workspace requirement, so the per-WG tile check must not
+                        // turn the exact size it reports into a whole-tile grid.
+                        .workspace_size            = self.usesStreamKSpatialCluster()
+                                                         ? std::numeric_limits<size_t>::max()
+                                                         : problem.workspaceSize(),
                         .workspace_size_per_elem_c = self.sizeMapping.isPersistentDataParallel()
                                                          ? static_cast<size_t>(DataTypeInfo::Get(self.problemType.computeType).elementSize)
                                                          : self.sizeMapping.workspaceSizePerElemC,
