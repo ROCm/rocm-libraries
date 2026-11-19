@@ -100,6 +100,20 @@ def test_direct_explicit_directions_override_a_zero_forw():
     assert _case_direction(1, None) == "fwd"
 
 
+def test_direct_run_directions_helper():
+    """One rule for the run directions: the requested ones, else the -F one,
+    else none (the dilation check and both main() branches read it)."""
+    from benchmarks.common.benchmark_direct_conv import _run_directions
+
+    assert _run_directions(0, None) == ()
+    assert _run_directions(0, ()) == ()
+    assert _run_directions(0, ("wgrad",)) == ("wgrad",)
+    assert _run_directions(1, ("wgrad", "fwd")) == ("wgrad", "fwd")
+    assert _run_directions(1, None) == ("fwd",)
+    assert _run_directions(2, None) == ("dgrad",)
+    assert _run_directions(4, []) == ("wgrad",)
+
+
 @pytest.mark.parametrize("kw", ["conv", "convfp32"])
 def test_direct_parse_reads_fp32_from_its_own_keyword(kw):
     from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct

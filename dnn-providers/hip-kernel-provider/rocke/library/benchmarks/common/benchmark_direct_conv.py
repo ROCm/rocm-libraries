@@ -298,9 +298,7 @@ def parse_miopen_cmd_direct(cmd: str, directions: "tuple[str, ...] | None" = Non
     # Dilated: direct_nongrouped, direct_fwd_wmma, direct_fwd_tapouter_wmma
     # (forward) and direct_dgrad_wmma compute one; this benchmark takes
     # ungrouped forward and dgrad problems.
-    run_dirs = tuple(directions or ()) or tuple(
-        d for d in (_miopen_forw_to_direction(miopen_args.forw),) if d is not None
-    )
+    run_dirs = _run_directions(miopen_args.forw, directions)
     if dilated and (
         any(d not in ("fwd", "dgrad") for d in run_dirs)
         or (not directions and miopen_args.forw not in (1, 2))
@@ -2984,13 +2982,21 @@ def _miopen_forw_to_direction(forw: int) -> "str | None":
     return _FORW_TO_DIR.get(forw & 7)
 
 
-def _case_direction(forw: int, req_dirs) -> "str | None":
-    """The direction a parsed MIOpen case is listed under: the first
-    explicitly requested ``--directions`` entry (``_run_from_cache`` launches
-    every requested direction whatever ``-F`` says), else the ``-F`` mapping."""
+def _run_directions(forw: int, req_dirs) -> "tuple[str, ...]":
+    """The directions a parsed MIOpen case runs: every explicitly requested
+    ``--directions`` entry (``_run_from_cache`` launches each whatever ``-F``
+    says), else the ``-F`` mapping, else none."""
     if req_dirs:
-        return req_dirs[0]
-    return _miopen_forw_to_direction(forw)
+        return tuple(req_dirs)
+    d = _miopen_forw_to_direction(forw)
+    return () if d is None else (d,)
+
+
+def _case_direction(forw: int, req_dirs) -> "str | None":
+    """The direction a parsed MIOpen case is listed under: the first of
+    ``_run_directions``, or None when ``-F`` maps to none."""
+    dirs = _run_directions(forw, req_dirs)
+    return dirs[0] if dirs else None
 
 
 # ---------------------------------------------------------------------------
