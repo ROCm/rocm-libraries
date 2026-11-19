@@ -82,6 +82,7 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::AIGreaterThanEqual>(),
                      Base::template Pair<Predicates::Contraction::AILessThanEqual>(),
                      Base::template Pair<Predicates::Contraction::AmaxDCheck>(),
+                     Base::template Pair<Predicates::Contraction::PeerDCheck>(),
                      Base::template Pair<Predicates::Contraction::AlphaValue>(),
                      Base::template Pair<Predicates::Contraction::BetaValue>(),
                      Base::template Pair<Predicates::Contraction::BetaZero>(),
@@ -95,6 +96,8 @@ namespace TensileLite
                      Base::template Pair<
                          Predicates::Contraction::BufferLoadOffsetLimitCheck_Beta>(),
                      Base::template Pair<Predicates::Contraction::BufferStoreOffsetLimitCheck>(),
+                     Base::template Pair<
+                         Predicates::Contraction::GL2PrefetchSAddrOffsetLimitCheck>(),
                      Base::template Pair<Predicates::Contraction::WorkgroupNumberCheck>(),
                      Base::template Pair<Predicates::Contraction::PersistentKernelCheck>(),
                      Base::template Pair<Predicates::Contraction::GlobalSplitUCheckMinK>(),
@@ -131,8 +134,9 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::WorkgroupMappingXCCCheck>(),
                      Base::template Pair<Predicates::Contraction::SwizzleTensorA>(),
                      Base::template Pair<Predicates::Contraction::SwizzleTensorB>(),
-                     Base::template Pair<Predicates::Contraction::FusedGemmA2A>(),
+                     Base::template Pair<Predicates::Contraction::FusedA2AEqual>(),
                      Base::template Pair<Predicates::Contraction::GemmA2AShape>(),
+                     Base::template Pair<Predicates::Contraction::A2AGemmShape>(),
                      Base::template Pair<Predicates::Contraction::MXBlockA>(),
                      Base::template Pair<Predicates::Contraction::MXBlockB>(),
                      Base::template Pair<Predicates::Contraction::MXBlockFreeA>(),
@@ -141,7 +145,8 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::DataTypeMXSB>(),
                      Base::template Pair<Predicates::Contraction::ScaleBlockSizeA>(),
                      Base::template Pair<Predicates::Contraction::ScaleZeroPointA>(),
-                     Base::template Pair<Predicates::Contraction::Int4EncodingA>()});
+                     Base::template Pair<Predicates::Contraction::Int4EncodingA>(),
+                     Base::template Pair<Predicates::Contraction::MXScaleFormatEquals>()});
 
                 auto gmap = Generic::GetSubclasses();
                 rv.insert(gmap.begin(), gmap.end());
@@ -292,6 +297,12 @@ namespace TensileLite
         };
 
         template <typename IO>
+        struct MappingTraits<Predicates::Contraction::PeerDCheck, IO>
+            : public AutoMappingTraits<Predicates::Contraction::PeerDCheck, IO>
+        {
+        };
+
+        template <typename IO>
         struct MappingTraits<Predicates::Contraction::AlphaValue, IO>
             : public AutoMappingTraits<Predicates::Contraction::AlphaValue, IO>
         {
@@ -366,6 +377,13 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::BufferStoreOffsetLimitCheck, IO>
             : public AutoMappingTraits<Predicates::Contraction::BufferStoreOffsetLimitCheck, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::GL2PrefetchSAddrOffsetLimitCheck, IO>
+            : public AutoMappingTraits<Predicates::Contraction::GL2PrefetchSAddrOffsetLimitCheck,
+                                       IO>
         {
         };
 
@@ -587,14 +605,26 @@ namespace TensileLite
         };
 
         template <typename IO>
-        struct MappingTraits<Predicates::Contraction::FusedGemmA2A, IO>
-            : public AutoMappingTraits<Predicates::Contraction::FusedGemmA2A, IO>
+        struct MappingTraits<Predicates::Contraction::MXScaleFormatEquals, IO>
+            : public AutoMappingTraits<Predicates::Contraction::MXScaleFormatEquals, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::FusedA2AEqual, IO>
+            : public AutoMappingTraits<Predicates::Contraction::FusedA2AEqual, IO>
         {
         };
 
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::GemmA2AShape, IO>
             : public AutoMappingTraits<Predicates::Contraction::GemmA2AShape, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::A2AGemmShape, IO>
+            : public AutoMappingTraits<Predicates::Contraction::A2AGemmShape, IO>
         {
         };
 

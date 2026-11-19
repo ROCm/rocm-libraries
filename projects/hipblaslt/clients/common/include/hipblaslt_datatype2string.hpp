@@ -81,6 +81,7 @@ inline hipDataType scaleDataType(hipblaslt_scaling_format s)
     case hipblaslt_scaling_format::Block_32_UE8M0:
     case hipblaslt_scaling_format::Block_16_UE8M0:
     case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+    case hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT:
         return HIP_R_8F_UE8M0;
     case hipblaslt_scaling_format::Block_32_UE4M3:
     case hipblaslt_scaling_format::Block_16_UE4M3:
@@ -90,6 +91,27 @@ inline hipDataType scaleDataType(hipblaslt_scaling_format s)
         return static_cast<hipDataType>(HIP_R_8F_E5M3_EXT);
     default:
         return HIP_R_8F_UE8M0;
+    }
+}
+
+// Short MX scale element-format token for test names ("UE8M0"/"UE4M3"/"UE5M3").
+// Pairs with blockSize() to build a self-describing "_SAMX_<block>_<fmt>" test-name suffix.
+inline const char* mxScaleFormatName(hipblaslt_scaling_format s)
+{
+    switch(s)
+    {
+    case hipblaslt_scaling_format::Block_32_UE8M0:
+    case hipblaslt_scaling_format::Block_16_UE8M0:
+    case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+        return "UE8M0";
+    case hipblaslt_scaling_format::Block_32_UE4M3:
+    case hipblaslt_scaling_format::Block_16_UE4M3:
+        return "UE4M3";
+    case hipblaslt_scaling_format::Block_32_UE5M3:
+    case hipblaslt_scaling_format::Block_16_UE5M3:
+        return "UE5M3";
+    default:
+        return "UNKNOWN";
     }
 }
 
@@ -154,6 +176,7 @@ inline bool isBlockScaling(hipblaslt_scaling_format s)
     case hipblaslt_scaling_format::Block_32_UE5M3:
     case hipblaslt_scaling_format::Block_16_UE5M3:
     case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+    case hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT:
         return true;
     default:
         return false;
@@ -168,6 +191,7 @@ inline int blockSize(hipblaslt_scaling_format s)
     case hipblaslt_scaling_format::Block_32_UE4M3:
     case hipblaslt_scaling_format::Block_32_UE5M3:
     case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+    case hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT:
         return 32;
     case hipblaslt_scaling_format::Block_16_UE8M0:
     case hipblaslt_scaling_format::Block_16_UE4M3:
@@ -210,6 +234,14 @@ inline size_t blockScaleBufferSize(int64_t                  dataRow,
     if(s == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
         return kAlongRows ? scaleBufferSize(dataRow, dataCol, s)
                           : scaleBufferSize(dataCol, dataRow, s);
+
+    // Whole 128-row by 4-K-block tiles.
+    if(s == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT)
+    {
+        size_t const kBlocks = ((kAlongRows ? dataRow : dataCol) + 127) / 128 * 4;
+        size_t const mnDim   = ((kAlongRows ? dataCol : dataRow) + 127) / 128 * 128;
+        return kBlocks * mnDim;
+    }
 
     if(mxUseRocroller)
     {

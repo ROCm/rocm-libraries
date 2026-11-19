@@ -1,17 +1,20 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Host-only unit tests for the client string<->enum helpers declared in
-// hipblaslt_datatype2string.hpp. See README.md in this directory for the
+// Host-only unit tests for client string<->enum helpers and argument type
+// validation. See README.md in this directory for the
 // dual-target build, the HostUnit/smoke_ naming, and the X-macro tripwire
 // pattern used below.
 
+#include "hipblaslt_arguments.hpp"
 #include "hipblaslt_datatype2string.hpp"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <initializer_list>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -306,4 +309,94 @@ TEST(HostUnitBiasSourceParser, smoke_EveryEnumeratorIsRegistered)
 TEST(HostUnitBiasSourceParser, smoke_UnknownStringMapsToZeroSentinel)
 {
     EXPECT_EQ(static_cast<int>(string_to_hipblaslt_bias_source("not_a_bias_source")), 0);
+}
+
+TEST(HostUnitComputeInputType, smoke_AllowsEitherSingleOverride)
+{
+    for(bool overrideA : {true, false})
+    {
+        SCOPED_TRACE(overrideA ? "A-only override" : "B-only override");
+        Arguments arg{};
+        arg.init();
+        arg.compute_type        = HIPBLAS_COMPUTE_32F;
+        arg.compute_input_typeA = overrideA ? HIP_R_16F : HIPBLASLT_DATATYPE_INVALID;
+        arg.compute_input_typeB = overrideA ? HIPBLASLT_DATATYPE_INVALID : HIP_R_16F;
+
+        const auto [typeA, typeB] = derive_unset_compute_input_type(arg);
+        EXPECT_EQ(typeA, overrideA ? HIP_R_16F : HIP_R_32F);
+        EXPECT_EQ(typeB, overrideA ? HIP_R_32F : HIP_R_16F);
+    }
+}
+
+TEST(HostUnitComputeInputType, smoke_RejectsInvalidSingleOverride)
+{
+    for(bool overrideA : {true, false})
+    {
+        SCOPED_TRACE(overrideA ? "A-only override" : "B-only override");
+        Arguments arg{};
+        arg.init();
+        arg.compute_type        = HIPBLAS_COMPUTE_32F;
+        arg.compute_input_typeA = overrideA ? HIP_R_8I : HIPBLASLT_DATATYPE_INVALID;
+        arg.compute_input_typeB = overrideA ? HIPBLASLT_DATATYPE_INVALID : HIP_R_8I;
+
+        try
+        {
+            derive_unset_compute_input_type(arg);
+            FAIL() << "Expected std::invalid_argument";
+        }
+        catch(const std::invalid_argument& error)
+        {
+            EXPECT_STREQ(error.what(),
+                         overrideA ? "Invalid compute_input_typeA i8_r"
+                                   : "Invalid compute_input_typeB i8_r");
+        }
+    }
+}
+
+TEST(HostUnitBiasType, smoke_UnsupportedTypeWithoutBias)
+{
+    Arguments arg{};
+    arg.init();
+    arg.a_type       = HIP_R_8F_E4M3;
+    arg.b_type       = HIP_R_16F;
+    arg.c_type       = HIP_R_8F_E4M3;
+    arg.d_type       = HIP_R_8F_E4M3;
+    arg.compute_type = HIPBLAS_COMPUTE_32F;
+    arg.bias_vector  = false;
+    arg.bias_type    = HIPBLASLT_DATATYPE_INVALID;
+
+    EXPECT_EQ(derive_unset_bias_type(arg), HIP_R_8F_E4M3);
+
+    arg.bias_type = HIP_R_8F_E5M2;
+    EXPECT_EQ(derive_unset_bias_type(arg), HIP_R_8F_E5M2);
+}
+
+TEST(HostUnitBiasType, smoke_ValidatesTypeWithBias)
+{
+    Arguments arg{};
+    arg.init();
+    arg.a_type       = HIP_R_8F_E4M3;
+    arg.b_type       = HIP_R_16F;
+    arg.c_type       = HIP_R_8F_E4M3;
+    arg.d_type       = HIP_R_8F_E4M3;
+    arg.compute_type = HIPBLAS_COMPUTE_32F;
+    arg.bias_vector  = true;
+
+    for(auto bias_type : {HIPBLASLT_DATATYPE_INVALID, HIP_R_8F_E4M3})
+    {
+        SCOPED_TRACE(bias_type);
+        arg.bias_type = bias_type;
+        try
+        {
+            derive_unset_bias_type(arg);
+            FAIL() << "Expected an unsupported bias type to be rejected";
+        }
+        catch(const std::invalid_argument& error)
+        {
+            EXPECT_STREQ(error.what(), "Invalid bias type f8_r");
+        }
+    }
+
+    arg.bias_type = HIP_R_16F;
+    EXPECT_EQ(derive_unset_bias_type(arg), HIP_R_16F);
 }

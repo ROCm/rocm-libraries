@@ -257,7 +257,17 @@ namespace TensileLite
 
             auto newLibrary = LoadLibraryFile<MyProblem, MySolution>(path.string());
             auto mLibrary
-                = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
+                = dynamic_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
+
+            // Nothing is recorded for a shard that did not load, so a later
+            // lookup tries it again.
+            if(mLibrary == nullptr || mLibrary->library == nullptr)
+            {
+                if(Debug::Instance().printDataInit())
+                    std::cout << "Failed to load library for index " << index
+                              << " from file: " << path.string() << std::endl;
+                return;
+            }
 
             using std::begin;
             using std::end;

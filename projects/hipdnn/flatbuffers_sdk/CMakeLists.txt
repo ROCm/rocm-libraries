@@ -168,6 +168,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         schemas/gbdt_model.fbs
         schemas/table_model.fbs
         schemas/linear_model.fbs
+        schemas/mlp_model.fbs
         schemas/moe_grouped_matmul_attributes.fbs
         schemas/moe_grouped_matmul_bwd_attributes.fbs
         schemas/linear_attention_common.fbs
@@ -186,13 +187,13 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
     # `_generated/` so they ship in its wheel (see uhd_gen/__init__.py). Other schemas are
     # consumed only from C++. uhd_gen is built only with the kernel ingestor, so a build
     # without it leaves the committed bindings alone; the flatc pre-commit hook
-    # (scripts/run_flatc.py) regenerates them whenever gbdt_model.fbs or linear_model.fbs
-    # changes.
+    # (scripts/run_flatc.py) regenerates them whenever gbdt_model.fbs, linear_model.fbs or
+    # mlp_model.fbs changes.
     if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         hipdnn_generate_flatbuffer_python(
             NAME uhd_gen
             TARGET hipdnn_flatbuffers_sdk
-            SCHEMAS schemas/gbdt_model.fbs schemas/linear_model.fbs
+            SCHEMAS schemas/gbdt_model.fbs schemas/linear_model.fbs schemas/mlp_model.fbs
             SCHEMAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/schemas"
             OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tools/uhd_gen/_generated"
         )

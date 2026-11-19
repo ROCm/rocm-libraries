@@ -3,6 +3,7 @@
 #include <cstring>
 #include <hipdnn-gpu-ref/GpuReferencePointwise.hpp>
 
+#include <hipdnn-gpu-ref/detail/GpuRefHelpers.hpp>
 #include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
 #include <hipdnn-gpu-ref/detail/GpuRefLaunch.hpp>
 
@@ -100,8 +101,7 @@ void GpuReferencePointwise::launchUnary(
         = compiler.getOrCompile("GpuRefPointwiseUnary.cpp", defines, "PointwiseUnaryRef");
 
     // Use output dims to calculate launch grid dimensions due to broadcasting rules
-    const int64_t numElements
-        = std::accumulate(outputDims.begin(), outputDims.end(), int64_t{1}, std::multiplies<>());
+    const int64_t numElements = detail::elementCount(outputDims);
     int64_t numBlocks = numElements / GpuReferencePointwise::BLOCK_SIZE;
     numBlocks += (numElements % GpuReferencePointwise::BLOCK_SIZE == 0) ? 0 : 1;
 
@@ -172,8 +172,7 @@ void GpuReferencePointwise::launchBinary(
         = compiler.getOrCompile("GpuRefPointwiseBinary.cpp", defines, "PointwiseBinaryRef");
 
     // Use output dims to calculate launch grid dimensions due to broadcasting rules
-    const int64_t numElements
-        = std::accumulate(outputDims.begin(), outputDims.end(), int64_t{1}, std::multiplies<>());
+    const int64_t numElements = detail::elementCount(outputDims);
     int64_t numBlocks = numElements / GpuReferencePointwise::BLOCK_SIZE;
     numBlocks += (numElements % GpuReferencePointwise::BLOCK_SIZE == 0) ? 0 : 1;
 

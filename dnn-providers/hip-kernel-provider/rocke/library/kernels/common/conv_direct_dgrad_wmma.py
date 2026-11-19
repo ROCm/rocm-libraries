@@ -301,6 +301,9 @@ class DirectDgradWmmaSpec:
             1,
         )
 
+    def launch_geometry(self) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+        return self.grid(), (self.threads_per_block, 1, 1)
+
 
 def dgrad_wmma_tile_efficiency(spec: DirectDgradWmmaSpec) -> float:
     """Share of ``spec``'s padded tile grid that is real work on its problem."""

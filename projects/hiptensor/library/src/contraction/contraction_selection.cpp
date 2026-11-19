@@ -32,6 +32,7 @@
 #define CHECK_HIP_ALLOC(status)               \
     if(status != hipSuccess)                  \
     {                                         \
+        hiptensor::clearHipError();           \
         return HIPTENSOR_STATUS_ALLOC_FAILED; \
     }
 #endif
@@ -135,7 +136,8 @@ namespace hiptensor
         std::vector<float> sol_times(candidates.size(), std::numeric_limits<float>::max());
         std::vector<int>   indices(candidates.size());
         std::iota(indices.begin(), indices.end(), 0);
-        int idx = 0;
+        int  idx         = 0;
+        bool allocFailed = false;
         for(auto* solution : candidates)
         {
             using hiptensor::HiptensorOptions;
@@ -211,6 +213,10 @@ namespace hiptensor
 
                 sol_times[idx] = time;
             }
+            else if(errorCode == HIPTENSOR_STATUS_ALLOC_FAILED)
+            {
+                allocFailed = true;
+            }
 
             idx++;
         }
@@ -234,7 +240,7 @@ namespace hiptensor
 
         if(bestSolution == nullptr)
         {
-            return HIPTENSOR_STATUS_EXECUTION_FAILED;
+            return allocFailed ? HIPTENSOR_STATUS_ALLOC_FAILED : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
         else
         {

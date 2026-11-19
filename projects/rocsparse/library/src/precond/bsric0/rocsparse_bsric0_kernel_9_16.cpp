@@ -56,7 +56,7 @@ namespace rocsparse
 
         __shared__ J columns[MAX_NNZB];
         __shared__ I index[MAX_NNZB];
-        __shared__ J local_index[MAX_NNZB];
+        __shared__ I local_index[MAX_NNZB];
         __shared__ T row_sum[BSRDIM][BSRDIM + 1];
         __shared__ T temp[BSRDIM][BSRDIM + 1];
         __shared__ T values[BSRDIM][BSRDIM + 1];
@@ -131,16 +131,12 @@ namespace rocsparse
                 if(direction == rocsparse_direction_row)
                 {
                     values[tidy][q]
-                        = (tidy < block_dim)
-                              ? bsr_val[block_dim * block_dim * j + block_dim * tidy + q]
-                              : static_cast<T>(0);
+                        = (tidy < block_dim) ? bsr_val[BSR_IND_R(j, tidy, q)] : static_cast<T>(0);
                 }
                 else
                 {
                     values[tidy][q]
-                        = (tidy < block_dim)
-                              ? bsr_val[block_dim * block_dim * j + block_dim * q + tidy]
-                              : static_cast<T>(0);
+                        = (tidy < block_dim) ? bsr_val[BSR_IND_C(j, tidy, q)] : static_cast<T>(0);
                 }
 
                 temp[tidy][q] = static_cast<T>(0);
@@ -166,8 +162,8 @@ namespace rocsparse
                 }
                 else
                 {
-                    index[count]       = block_dim * block_dim * (k + block_row_begin);
-                    local_index[count] = block_dim * block_dim * l;
+                    index[count]       = k + block_row_begin;
+                    local_index[count] = l;
 
                     k++;
                     l++;
@@ -190,15 +186,13 @@ namespace rocsparse
                 if(direction == rocsparse_direction_row)
                 {
                     local_values[tidy][q] = (tidy < block_dim) ? rocsparse::load_done_row_data(
-                                                &bsr_val[block_dim * block_dim * local_block_diag
-                                                         + block_dim * tidy + q])
+                                                &bsr_val[BSR_IND_R(local_block_diag, tidy, q)])
                                                                : static_cast<T>(0);
                 }
                 else
                 {
                     local_values[tidy][q] = (tidy < block_dim) ? rocsparse::load_done_row_data(
-                                                &bsr_val[block_dim * block_dim * local_block_diag
-                                                         + block_dim * q + tidy])
+                                                &bsr_val[BSR_IND_C(local_block_diag, tidy, q)])
                                                                : static_cast<T>(0);
                 }
             }
@@ -209,8 +203,8 @@ namespace rocsparse
             // need device scope loads.
             for(I l = 0; l < count - 1; l++)
             {
-                J idx2 = local_index[l];
-                I idx  = index[l];
+                const I jl = local_index[l];
+                const I jk = index[l];
 
                 for(J q = tidx; q < block_dim; q += DIMX)
                 {
@@ -221,20 +215,18 @@ namespace rocsparse
                     {
                         if(direction == rocsparse_direction_row)
                         {
-                            T v1
-                                = rocsparse::load_done_row_data(&bsr_val[idx2 + block_dim * q + p]);
-                            T v2      = (tidy < block_dim) ? rocsparse::load_done_row_data(
-                                       &bsr_val[idx + block_dim * tidy + p])
-                                                           : static_cast<T>(0);
+                            T v1 = rocsparse::load_done_row_data(&bsr_val[BSR_IND_R(jl, q, p)]);
+                            T v2 = (tidy < block_dim) ? rocsparse::load_done_row_data(
+                                       &bsr_val[BSR_IND_R(jk, tidy, p)])
+                                                      : static_cast<T>(0);
                             local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                         }
                         else
                         {
-                            T v1
-                                = rocsparse::load_done_row_data(&bsr_val[idx2 + block_dim * p + q]);
-                            T v2      = (tidy < block_dim) ? rocsparse::load_done_row_data(
-                                       &bsr_val[idx + block_dim * p + tidy])
-                                                           : static_cast<T>(0);
+                            T v1 = rocsparse::load_done_row_data(&bsr_val[BSR_IND_C(jl, q, p)]);
+                            T v2 = (tidy < block_dim) ? rocsparse::load_done_row_data(
+                                       &bsr_val[BSR_IND_C(jk, tidy, p)])
+                                                      : static_cast<T>(0);
                             local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                         }
                     }
@@ -297,15 +289,13 @@ namespace rocsparse
                 {
                     if(direction == rocsparse_direction_row)
                     {
-                        rocsparse::store_done_row_data(
-                            &bsr_val[block_dim * block_dim * j + block_dim * tidy + q],
-                            values[tidy][q]);
+                        rocsparse::store_done_row_data(&bsr_val[BSR_IND_R(j, tidy, q)],
+                                                       values[tidy][q]);
                     }
                     else
                     {
-                        rocsparse::store_done_row_data(
-                            &bsr_val[block_dim * block_dim * j + block_dim * q + tidy],
-                            values[tidy][q]);
+                        rocsparse::store_done_row_data(&bsr_val[BSR_IND_C(j, tidy, q)],
+                                                       values[tidy][q]);
                     }
                 }
             }
@@ -320,17 +310,13 @@ namespace rocsparse
         {
             if(direction == rocsparse_direction_row)
             {
-                values[tidy][q]
-                    = (tidy < block_dim)
-                          ? bsr_val[block_dim * block_dim * block_row_diag + block_dim * tidy + q]
-                          : static_cast<T>(0);
+                values[tidy][q] = (tidy < block_dim) ? bsr_val[BSR_IND_R(block_row_diag, tidy, q)]
+                                                     : static_cast<T>(0);
             }
             else
             {
-                values[tidy][q]
-                    = (tidy < block_dim)
-                          ? bsr_val[block_dim * block_dim * block_row_diag + block_dim * q + tidy]
-                          : static_cast<T>(0);
+                values[tidy][q] = (tidy < block_dim) ? bsr_val[BSR_IND_C(block_row_diag, tidy, q)]
+                                                     : static_cast<T>(0);
             }
         }
 
@@ -393,15 +379,13 @@ namespace rocsparse
             {
                 if(direction == rocsparse_direction_row)
                 {
-                    rocsparse::store_done_row_data(
-                        &bsr_val[block_dim * block_dim * block_row_diag + block_dim * tidy + q],
-                        values[tidy][q]);
+                    rocsparse::store_done_row_data(&bsr_val[BSR_IND_R(block_row_diag, tidy, q)],
+                                                   values[tidy][q]);
                 }
                 else
                 {
-                    rocsparse::store_done_row_data(
-                        &bsr_val[block_dim * block_dim * block_row_diag + block_dim * q + tidy],
-                        values[tidy][q]);
+                    rocsparse::store_done_row_data(&bsr_val[BSR_IND_C(block_row_diag, tidy, q)],
+                                                   values[tidy][q]);
                 }
             }
         }

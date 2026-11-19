@@ -32,7 +32,7 @@ import yaml
 
 import tensilelite
 import tensilelite.CustomKernels as ck_mod
-import tensilelite.TensileLogic.HandleCustomKernel as hck_mod
+import tensilelite.logic.handle_custom_kernel as hck_mod
 from tensilelite.resources import custom_kernel_text
 from tensilelite.AddCustomConfig import (
     _fmt_yaml_args,
@@ -281,6 +281,30 @@ def test_get_custom_kernel_config_preserves_size_multiple_predicate(tmp_path):
 
     assert config["AssertFree0ElementMultiple"] == 256
     assert config["AssertFree1ElementMultiple"] == 256
+
+
+@pytest.mark.parametrize("layout", [None, "Auto"])
+def test_get_custom_kernel_config_requires_mx_scale_layout(tmp_path, layout):
+    lines = ["InternalSupportParams:", "  KernArgsVersion: 0"]
+    if layout:
+        lines.append(f"MXScaleFormat: {layout}")
+    lines += ["ProblemType: {MXBlockA: 32, MXBlockB: 32}", "MatrixInstruction: [16, 16, 16, 1]"]
+    write_kernel(tmp_path / "mx_kernel.s", "\n".join(lines))
+
+    with pytest.raises(RuntimeError, match="MXScaleFormat"):
+        getCustomKernelConfig("mx_kernel", {}, str(tmp_path))
+
+
+def test_get_custom_kernel_config_keeps_declared_mx_scale_layout(tmp_path):
+    write_kernel(tmp_path / "mx_kernel.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          MXScaleFormat: HostPreSwizzle
+          ProblemType: {MXBlockA: 32, MXBlockB: 32}
+          MatrixInstruction: [16, 16, 16, 1]
+        """)
+
+    assert getCustomKernelConfig("mx_kernel", {}, str(tmp_path))["MXScaleFormat"] == "HostPreSwizzle"
 
 
 def test_get_custom_kernel_config_rejects_bad_predicate_value(tmp_path):
@@ -783,11 +807,20 @@ def test_metadata_arg_regex_semantics():
     assert _metadataArgToCustomArg(_meta_arg("StrideE0"))["semantic"] == "StrideE0"
 
 
-def test_metadata_arg_magic_size_index():
-    a = _metadataArgToCustomArg(_meta_arg("MagicNumberSizeI"))
-    assert a["semantic"] == "MagicNumberSize" and a["index"] == 0
-    b = _metadataArgToCustomArg(_meta_arg("MagicShiftSizeJ"))
-    assert b["semantic"] == "MagicShiftSize" and b["index"] == 1
+@pytest.mark.parametrize("alg", [1, 2])
+def test_metadata_arg_magic_size_name_carries_algorithm(alg):
+    number = _metadataArgToCustomArg(_meta_arg("MagicNumberSizeAlg%dI" % alg))
+    shift = _metadataArgToCustomArg(_meta_arg("MagicShiftSizeAlg%dJ" % alg))
+    assert number["semantic"] == "MagicNumberSizeAlg%d" % alg and number["index"] == 0
+    assert shift["semantic"] == "MagicShiftSizeAlg%d" % alg and shift["index"] == 1
+
+
+@pytest.mark.parametrize("name", ["MagicNumberSizeI", "MagicShiftSizeJ",
+                                  "MagicNumberSizeAlg0I", "MagicNumberSizeAlg3I"])
+def test_metadata_arg_magic_size_without_a_supported_algorithm_raises(name):
+    # A name that does not say which algorithm packed the value is not guessed.
+    with pytest.raises(RuntimeError, match="Unknown amdgpu_metadata arg name"):
+        _metadataArgToCustomArg(_meta_arg(name))
 
 
 def test_metadata_arg_missing_field_raises():
@@ -1578,7 +1611,7 @@ def test_skinny_tn_range_logic(rel, dataType, kernels):
     The BF16 file must also share the placeholder of the shipped plain-GEMM
     Equality file beside it. That is a fact about two corpus files, so
     ``TensileLogic --check-all`` checks it
-    (``ValidCorpusConsistency.find_range_sibling_violations``), not this test."""
+    (``valid_corpus_consistency.find_range_sibling_violations``), not this test."""
     with open(require_logic_file(rel)) as f:
         doc = yaml.safe_load(f)
     assert doc["LibraryType"] == "Range"

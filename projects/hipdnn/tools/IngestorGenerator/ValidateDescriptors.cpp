@@ -238,18 +238,8 @@ const char* severityName(hipdnnSeverity_t severity)
     return "UNKNOWN";
 }
 
-/// Calls @p visit(arch, id) for every model a single-valued role map names.
-template <typename Visit>
-void forEachRoleModel(const std::map<std::string, DescriptorId>& references, Visit&& visit)
-{
-    for(const auto& [arch, id] : references)
-    {
-        visit(arch, id);
-    }
-}
-
-/// Calls @p visit(arch, id) for every model a scoring role names: one per metric per
-/// architecture (RFC 0019 §3.1), so every entry of every list.
+/// Calls @p visit(arch, id) for every model a role map names: every entry of every list (a
+/// scoring role holds one per metric per architecture, RFC 0019 §3.1).
 template <typename Visit>
 void forEachRoleModel(const std::map<std::string, std::vector<DescriptorId>>& references,
                       Visit&& visit)

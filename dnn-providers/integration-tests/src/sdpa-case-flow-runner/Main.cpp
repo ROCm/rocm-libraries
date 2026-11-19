@@ -36,6 +36,7 @@
 #include <random>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -67,6 +68,7 @@
 #include "RunnerSourceHash.hpp"
 #include "ShiftedStarts.hpp"
 #include "harness/CpuReferenceGraphExecutorAdapter.hpp"
+#include "harness/IReferenceExecutors.hpp"
 #include "harness/PlanWorkspace.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/bundle/LiveRows.hpp"
@@ -1229,6 +1231,31 @@ struct Context
     it::CpuReferenceGraphExecutorAdapter cpuRef;
 };
 
+class ContextReferences : public it::IReferenceExecutors
+{
+public:
+    explicit ContextReferences(Context& ctx)
+        : _ctx(ctx)
+    {
+    }
+
+    it::IReferenceGraphExecutor& get(it::ReferenceExecutorType type) override
+    {
+        if(type == it::ReferenceExecutorType::GPU)
+        {
+            return _ctx.gpuRef;
+        }
+        if(type == it::ReferenceExecutorType::CPU)
+        {
+            return _ctx.cpuRef;
+        }
+        throw std::runtime_error("unknown reference executor type");
+    }
+
+private:
+    Context& _ctx;
+};
+
 struct Comparison
 {
     std::string against;
@@ -2061,8 +2088,9 @@ std::string runCase(size_t index,
             {
                 contentNotes.push_back(placed.name + ":" + recipeNote(recipes.fill(placed.uid)));
             }
+            ContextReferences references(ctx);
             const auto fill = it::fillInputs(
-                *fbGraph, engineBundle.tensors, leafInputs, recipes, nullptr, aliases);
+                *fbGraph, engineBundle.tensors, leafInputs, recipes, references, nullptr, aliases);
             if(!fill.filled)
             {
                 line.num("t_fill_us", microsSince(stageStart))

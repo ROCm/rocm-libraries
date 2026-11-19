@@ -183,20 +183,22 @@ TEST_CASE("Origami: a kernel's WavefrontSize overrides the architecture default"
   REQUIRE(epilogue(arch_t::gfx950, 32) != epilogue(arch_t::gfx950, 64));
 }
 
-// Keep all measured ratios identical and only flip the architecture enum so
-// the comparison isolates wavefront_size() (64 -> 32) in ACC/store modeling.
+// Same hardware, only the kernel's wavefront size changes, so the comparison isolates the
+// wavefront size (64 -> 32) in ACC/store modeling.
 TEST_CASE("Origami: wave32 increases modeled epilogue cost", "[origami][hardware]") {
-  auto hw64 = make_hardware(950);
-  auto hw32 = hw64;
-  hw32.arch = origami::hardware_t::architecture_t::gfx1250;
+  auto hw = make_hardware(950);
+  hw.arch = origami::hardware_t::architecture_t::gfx1250;
 
-  auto problem = make_problem(2048, 2048, 2048, origami::transpose_t::T, origami::transpose_t::N);
-  auto config  = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 0);
+  auto problem  = make_problem(2048, 2048, 2048, origami::transpose_t::T, origami::transpose_t::N);
+  auto config64 = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 0);
+  auto config32 = config64;
+  config64.tensile().wavefront_size = 64;
+  config32.tensile().wavefront_size = 32;
 
-  origami::gemm::context_t ctx64(problem, hw64, config);
-  origami::gemm::context_t ctx32(problem, hw32, config);
-  const double epi64 = origami::gemm::compute_epilogue_latency(problem, hw64, config, ctx64);
-  const double epi32 = origami::gemm::compute_epilogue_latency(problem, hw32, config, ctx32);
+  origami::gemm::context_t ctx64(problem, hw, config64);
+  origami::gemm::context_t ctx32(problem, hw, config32);
+  const double epi64 = origami::gemm::compute_epilogue_latency(problem, hw, config64, ctx64);
+  const double epi32 = origami::gemm::compute_epilogue_latency(problem, hw, config32, ctx32);
 
   REQUIRE(epi64 > 0);
   REQUIRE(epi32 > epi64);
@@ -357,6 +359,69 @@ TEST_CASE("Origami: select_workgroup_mapping", "[origami]") {
       REQUIRE(mapping_large.wgmxccchunk >= mapping_nonsquare.wgmxccchunk);
       REQUIRE(mapping_large.wgmxcc == mapping_nonsquare.wgmxcc);
       REQUIRE(mapping_large.wgm >= mapping_nonsquare.wgm);
+    }
+  }
+}
+
+TEST_CASE("Origami: gfx1250 select_workgroup_mapping maps WGM only", "[origami]") {
+  auto hardware = make_hardware(1250);
+  auto config   = make_config(256, 256, 64);
+  auto select   = [&](const origami::problem_t& problem, const origami::config_t& cfg) {
+    const auto mapping = origami::select_workgroup_mapping(problem, hardware, cfg, 0);
+    REQUIRE(mapping.wgmxcc == 1);
+    REQUIRE(mapping.wgmxccchunk == 0);
+    REQUIRE(mapping.wgmxccsplitk == 0);
+    REQUIRE(mapping.wgm >= 1);
+    REQUIRE(mapping.wgm <= 64);
+    REQUIRE((mapping.wgm & (mapping.wgm - 1)) == 0);
+    return mapping.wgm;
+  };
+
+  SECTION("every remap but a positive WGM stays off") {
+    for (auto [m, n, k] : {std::tuple{4096, 4096, 8192}, std::tuple{2048, 2048, 2048},
+                           std::tuple{5120, 512, 5120}, std::tuple{1024, 1024, 65536},
+                           std::tuple{16, 64, 231696}, std::tuple{3024, 452352, 3504}}) {
+      select(make_problem(m, n, k), config);
+      select(make_problem(m, n, k, origami::transpose_t::T, origami::transpose_t::N, 4), config);
+    }
+  }
+
+  SECTION("a single tile row or column ties every WGM: WGM 1") {
+    REQUIRE(select(make_problem(256, 65536, 4096), config) == 1);
+    REQUIRE(select(make_problem(65536, 256, 4096), config) == 1);
+  }
+
+  SECTION("a large 2-D grid picks a wider slab") {
+    REQUIRE(select(make_problem(36912, 62832, 4448), config) > 1);
+  }
+
+  SECTION("cache hints are not read: every operand is priced as temporal") {
+    const auto problem = make_problem(36912, 62832, 4448);
+    auto nt            = make_config(256, 256, 64, 16, 16, 16, false, 1, 1, 4, 4);
+    REQUIRE(select(problem, nt) == select(problem, config));
+    auto temporal               = config;
+    temporal.tensile().tdm_inst = 3;
+    nt.tensile().tdm_inst       = 3;
+    REQUIRE(select(problem, nt) == select(problem, temporal));
+    REQUIRE(select(problem, nt) > 1);
+  }
+
+  SECTION("StaggerU stays off") {
+    const auto stagger = origami::select_staggerU(
+        make_problem(2048, 2048, 2048), hardware, make_config(128, 128, 64, 16, 16, 32), 256, 4);
+    REQUIRE(stagger.staggerU == 0);
+    REQUIRE(stagger.staggerUMapping == 0);
+    REQUIRE(stagger.staggerUStrideShift == 0);
+  }
+}
+
+TEST_CASE("Origami: select_workgroup_mapping keeps the XCC remap off gfx1250", "[origami]") {
+  for (int gpu_arch : {942, 950}) {
+    DYNAMIC_SECTION("gfx" << gpu_arch) {
+      auto hardware = make_hardware(gpu_arch);
+      const auto mapping = origami::select_workgroup_mapping(
+          make_problem(4096, 4096, 8192), hardware, make_config(256, 256, 32, 32, 32, 8, false, 1), 256);
+      REQUIRE(mapping.wgmxcc == hardware.NUM_XCD);
     }
   }
 }
@@ -596,11 +661,23 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
       identical_ai_configs.push_back(make_config(128, 64, 128, 32, 32, 8, false, 1, 6, 0, 0));
       identical_ai_configs.push_back(make_config(64, 128, 128, 32, 32, 8, false, 1, 6, 0, 0));
 
+      // The tie-break is only defined for exact ties; a shared-L2 model can separate the two
+      // tiles by rounding alone, which must stay a tie in all but the last bits.
+      auto require_tie_prefers = [&](const std::vector<origami::prediction_result_t>& results,
+                                     size_t expected_mt_m) {
+        REQUIRE(results.size() == 2);
+        if (results[0].latency == results[1].latency)
+          REQUIRE(results[0].config.mt.m == expected_mt_m);
+        else
+          REQUIRE(std::abs(results[0].latency - results[1].latency) <=
+                  1e-6 * std::max(results[0].latency, results[1].latency));
+      };
+
       auto problem_m_greater_than_n = make_problem(2048, 1024, 1024);
       auto results_m_greater_than_n =
           origami::rank_configs(problem_m_greater_than_n, hardware, identical_ai_configs);
-      REQUIRE(identical_ai_configs[0].mt.m ==
-              results_m_greater_than_n[0].config.mt.m);  // If M > N, prefer tiles with larger MT_M
+      // If M > N, prefer tiles with larger MT_M
+      require_tie_prefers(results_m_greater_than_n, identical_ai_configs[0].mt.m);
 
       auto problem_n_greater_than_m = make_problem(1024, 4096, 1024);
       auto results_n_greater_than_m =
@@ -611,8 +688,8 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
       auto problem_m_equals_n = make_problem(1024, 1024, 1024);
       auto results_m_equals_n =
           origami::rank_configs(problem_m_equals_n, hardware, identical_ai_configs);
-      REQUIRE(identical_ai_configs[0].mt.m ==
-              results_m_equals_n[0].config.mt.m);  // If M == N, prefer tiles with larger MT_M
+      // If M == N, prefer tiles with larger MT_M
+      require_tie_prefers(results_m_equals_n, identical_ai_configs[0].mt.m);
 
       // Test 5: Test with different heuristics_variance values
       portable_setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "0.0", 1);
@@ -663,6 +740,7 @@ TEST_CASE("Origami: rank_configs non-temporal availability", "[origami][cache-hi
       }
     }
 
+    const bool cdna_hints = !make_hardware(gpu_arch).is_cdna5();
     DYNAMIC_SECTION("gfx" << gpu_arch << " - prefers an available non-temporal B variant") {
       auto hardware = make_hardware(gpu_arch);
       auto problem =
@@ -673,9 +751,15 @@ TEST_CASE("Origami: rank_configs non-temporal availability", "[origami][cache-hi
       origami::memoize_non_temporal_availability(configs);
 
       auto results = origami::rank_configs(problem, hardware, configs);
-      REQUIRE(results.size() == 1);
-      REQUIRE(results.front().latency < rejected);
-      REQUIRE(results.front().config.cache_hints_b == 4);
+      if (cdna_hints) {
+        REQUIRE(results.size() == 1);
+        REQUIRE(results.front().latency < rejected);
+        REQUIRE(results.front().config.cache_hints_b == 4);
+      } else {
+        // TemporalHint archs have no admission rule: both variants are scored.
+        REQUIRE(results.size() == configs.size());
+        for (const auto& result : results) REQUIRE(result.latency < rejected);
+      }
     }
 
     DYNAMIC_SECTION("gfx" << gpu_arch << " - keeps temporal A when no variant exists") {
@@ -702,9 +786,14 @@ TEST_CASE("Origami: rank_configs non-temporal availability", "[origami][cache-hi
       origami::memoize_non_temporal_availability(configs);
 
       auto results = origami::rank_configs(problem, hardware, configs);
-      REQUIRE(results.size() == 1);
-      REQUIRE(results.front().latency < rejected);
-      REQUIRE(results.front().config.cache_hints_a == 4);
+      if (cdna_hints) {
+        REQUIRE(results.size() == 1);
+        REQUIRE(results.front().latency < rejected);
+        REQUIRE(results.front().config.cache_hints_a == 4);
+      } else {
+        REQUIRE(results.size() == configs.size());
+        for (const auto& result : results) REQUIRE(result.latency < rejected);
+      }
     }
 
     // The skinny branch depends on this config's macro tile, so an NT variant
@@ -867,6 +956,17 @@ TEST_CASE("Origami: buffer load/store tie-break", "[origami]") {
       plain.push_back(first);
       plain.push_back(with_buffer_flags(false, false, 1));
       plain.push_back(with_buffer_flags(true, true, 2));
+      // A plain config runs the predicted WGM (gfx1250: the selector's for its tile); give the
+      // Tensile ones the same so all three tie.
+      const origami::gemm::context_t first_context(problem, hardware, first);
+      int predicted_wgm = first_context.wgm.wgm;
+      if (hardware.is_cdna5()) {
+        origami::config_t host;
+        host.mt = first.mt;
+        predicted_wgm =
+            origami::select_workgroup_mapping(problem, hardware, host, first_context.num_wgs).wgm;
+      }
+      for (size_t i = 1; i < plain.size(); ++i) plain[i].workgroup_mapping = predicted_wgm;
       auto skipped = origami::rank_configs(problem, hardware, plain);
       REQUIRE(skipped.size() == plain.size());
       for (const auto& result : skipped) { REQUIRE(result.latency == skipped.front().latency); }
@@ -1235,6 +1335,7 @@ TEST_CASE("Origami: select_staggerU unit test", "[origami]") {
 
 TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
   for (int gpu_arch : test_architectures) {
+    if (gpu_arch == 1250) continue;  // maps WGM only, see "gfx1250 select_workgroup_mapping maps WGM only"
     DYNAMIC_SECTION("gfx" << gpu_arch << " - select_workgroup_mapping unit test") {
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(4096, 4096, 8192);

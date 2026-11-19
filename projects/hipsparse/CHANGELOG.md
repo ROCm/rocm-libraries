@@ -7,8 +7,9 @@ Documentation for hipSPARSE is available at
 ## (Unreleased) hipSPARSE
 
 ### Changed
-* ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
-* GoogleTest must be installed before building the clients. Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
+* Build dependency and test-data handling has changed:
+  * ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
+  * GoogleTest must be installed before building the clients. Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both options build GoogleTest statically and don't install it.
 * `install.sh -d` no longer configures and installs the `deps` directory.
 * The 19 SuiteSparse test matrices are now stored with DVC in `clients/matrices`. Run `dvc pull -R projects/hipsparse/clients/matrices` before building the tests. In a sparse checkout, add the repository-root `.dvc` directory first with `git sparse-checkout add .dvc`. By default, CMake configuration fails when matrices are missing instead of downloading them from SuiteSparse. Configure with `-DALLOW_FETCH_DEPS=ON` to download them instead, which also applies to `HIPSPARSE_TEST_MIRROR`. The `--matrices-dir` options of `install.sh` and `rmake.py` still download missing matrices.
 
@@ -18,6 +19,7 @@ Documentation for hipSPARSE is available at
 ### Resolved issues
 * Fixed missing documentation in IDEs, clangd and libclang-based binding generators. Every S/D/C/Z variant of a routine family now carries the family's documentation instead of only the first variant. Documentation for generic API functions and the `hipsparseStatus_t` and `hipsparseCsr2CscAlg_t` types is now attached to their declarations. Corrected the documentation of `hipsparseXgtsv2_bufferSizeExt`, `hipsparseXgebsr2gebsc_bufferSize`, `hipsparseXgebsr2gebsc`, `hipsparseXpruneDense2csr_bufferSizeExt`, `hipsparseXcsric02`, `hipsparseXbsric02`, `hipsparseXcsrsv2_solve`, and `hipsparseXgpsvInterleavedBatch`.
 * Fixed an integer overflow in `hipsparseXcsr2hyb` when processing matrices whose padded ELL part exceeds `INT32_MAX` (~2.1 billion) elements. The overflow caused the ELL element count to wrap to an incorrect value, resulting in undersized ELL device allocations and out-of-bounds device writes during CSR-to-HYB conversion.
+* Fixed `hipsparseSpGEMM_workEstimation`, `hipsparseSpGEMM_compute`, and the `hipsparseSpGEMMreuse` routines, which returned the untransposed product when `opA` or `opB` was not `HIPSPARSE_OPERATION_NON_TRANSPOSE`. They now return `HIPSPARSE_STATUS_NOT_SUPPORTED`, which matches the documentation.
 
 ## hipSPARSE 4.8.0 for ROCm 10.1
 

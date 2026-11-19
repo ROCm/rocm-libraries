@@ -143,6 +143,7 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
     fetch_gtest_dependency()
 endif()
 include(Tests)
+include(LongPathManifest)
 
 if(MIOPENPROVIDER_ENABLE_COVERAGE)
     message(STATUS "Enabling compile flags for coverage-mapping")
@@ -193,14 +194,6 @@ else()
 endif()
 message(STATUS "miopen-provider: linking MIOpen library target '${MIOPEN_PROVIDER_MIOPEN_LIB}'")
 
-# Treat MIOpen headers as system headers so neither the compiler nor
-# clang-tidy emits diagnostics for code we do not own. MIOpen's exported
-# CMake package (both in-tree and the installed miopen-targets.cmake)
-# does not mark its include dirs SYSTEM, so we promote them here.
-# Requires CMake 3.25+ (SYSTEM target property); enforced by
-# cmake_minimum_required above.
-set_target_properties(${MIOPEN_PROVIDER_MIOPEN_LIB} PROPERTIES SYSTEM TRUE)
-
 add_library(
     miopen_plugin_impl OBJECT
     engines/MiopenEngine.cpp
@@ -214,6 +207,7 @@ add_library(
     engines/plans/MiopenBinaryPointwiseChecks.cpp
     engines/plans/MiopenBinaryPointwisePlan.cpp
     engines/plans/MiopenBinaryPointwisePlanBuilder.cpp
+    engines/plans/MiopenConvApplicabilityChecks.cpp
     engines/plans/MiopenConvBwdPlan.cpp
     engines/plans/MiopenConvFwdBiasActivPlan.cpp
     engines/plans/MiopenConvFwdBiasActivPlanBuilder.cpp
@@ -236,16 +230,31 @@ add_library(
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(miopen_plugin_impl PUBLIC ${MIOPEN_PROVIDER_MIOPEN_LIB} hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
 
+# Mark every header included as <miopen/...> as a system header, so the provider's -Werror and
+# clang-tidy ignore them (on Windows, miopen.h trips -Wmicrosoft-enum-value). Marking MIOpen's
+# include directories SYSTEM instead would not work: the in-tree target is shared with MIOpen's
+# tests, CK plugins and driver, and SYSTEM would put ROCM_PATH/include ahead of this checkout's
+# headers for all of them. An installed MIOpen is already system via its imported target.
+# PUBLIC so the unit tests inherit it.
+if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    set(miopen_provider_system_header_prefix "/clang:--system-header-prefix=miopen/")
+else()
+    set(miopen_provider_system_header_prefix "--system-header-prefix=miopen/")
+endif()
+target_compile_options(miopen_plugin_impl PUBLIC "${miopen_provider_system_header_prefix}")
+unset(miopen_provider_system_header_prefix)
+
 target_compile_definitions(miopen_plugin_impl PUBLIC MIOPEN_BETA_API)
 # When linking the private implementation library, force-include the symbol-rename
 # header so the provider's public C API calls bind the _impl entry points exported
 # by libMIOpen_private.so. The header is generated from MIOpen's
-# include/miopen/miopen.h by projects/miopen/script/generate_wrapper_sources.py, in
-# the same run that writes the src/private/miopen_private_rename.h MIOpen_private is
-# built with, so the two renames cannot differ. It keeps the provider sources free
-# of _impl spellings. PUBLIC so the force-include also reaches the unit-test
-# targets, which compile the provider headers. With the split OFF nothing is
-# force-included and the provider calls the public C API unchanged.
+# include/miopen/miopen.h and src/include/miopen/miopen_internal.h by
+# projects/miopen/script/generate_wrapper_sources.py, in the same run that writes
+# the src/private/miopen_private_rename.h MIOpen_private is built with, so the two
+# renames cannot differ. It keeps the provider sources free of _impl spellings.
+# PUBLIC so the force-include also reaches the unit-test targets, which compile
+# the provider headers. With the split OFF nothing is force-included and the
+# provider calls the public C API unchanged.
 #
 # The header is named without a directory: it resolves through the PUBLIC include
 # directory set above, which keeps the build-machine path -- and any space in it --
@@ -422,6 +431,8 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             ENGINE_NAME    MIOPEN_ENGINE
             INSTALL_SUBDIR miopen_plugin
             TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/config/MIOPEN_ENGINE.toml
+            # Five small batchnorm inference bundles: a few seconds on one GPU.
+            BENCHMARK_REFERENCE_SMOKE_FILTER "quick_BatchnormFwdInference_Inference.*"
             ${_external_category_args}
         )
         message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
@@ -450,6 +461,7 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             apply_ctest_category_labels(
                 "${MIOPENPROVIDER_CTEST_CATEGORIES_YAML}"
                 EXPLICIT_TESTS ${PROJECT_NAME}-external-integration-check
+                               ${PROJECT_NAME}-external-integration-check-benchmark-reference-smoke
             )
         endif()
     else()
@@ -553,3 +565,4 @@ if(MIOPENPROVIDER_ENABLE_COVERAGE)
     add_custom_coverage_target(current-coverage "")
 
 endif()
+hipdnn_apply_long_path_manifest()

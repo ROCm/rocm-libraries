@@ -538,6 +538,8 @@ struct RocblasltContractionProblem
         Block_32_F16_ZP,
         Block_64_F16_ZP,
         Block_128_F16_ZP,
+        // E8M0 per 32 K elements, shuffled in 128-row by 4-K-block tiles.
+        Block_32_UE8M0_128_4_EXT,
     };
 
     hipblasOperation_t trans_a;
@@ -751,7 +753,13 @@ struct RocblasltContractionProblem
 // Fields of hipblasLtFusedEpilogueDescriptor, flattened for this layer.
 struct RocblasltFusedEpilogueInfo
 {
-    bool                         hasA2APrefix      = false;
+    enum class Mode
+    {
+        Disabled,
+        GemmA2A,
+    };
+
+    Mode                         mode              = Mode::Disabled;
     const hipblasLtSdmaQueue_t*  a2aSdmaQueues     = nullptr;
     void* const*                 a2aRecvPtrs       = nullptr;
     int64_t                      a2aExtent         = 0;
@@ -762,6 +770,19 @@ struct RocblasltFusedEpilogueInfo
 // Returns false when desc is nullptr.
 bool rocblaslt_resolve_fused_epilogue(const struct hipblasLtFusedEpilogueDescriptor* desc,
                                       RocblasltFusedEpilogueInfo&                    out);
+
+// Returns false unless prob requests a fused all-to-all.
+inline bool rocblaslt_resolve_fused_a2a(const RocblasltContractionProblem& prob,
+                                        RocblasltFusedEpilogueInfo&        out)
+{
+    return rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, out)
+           && out.mode != RocblasltFusedEpilogueInfo::Mode::Disabled;
+}
+
+// Every rejection is reported as rocblaslt_status_invalid_value.
+rocblaslt_status rocblaslt_validate_fused_epilogue_dispatch(rocblaslt_handle        handle,
+                                                            rocblaslt_matmul_desc   matmulDesc,
+                                                            rocblaslt_matrix_layout matD);
 #endif
 
 namespace rocblaslt

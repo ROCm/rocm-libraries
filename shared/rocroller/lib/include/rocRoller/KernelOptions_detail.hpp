@@ -19,6 +19,13 @@ namespace rocRoller
         bool alwaysWaitZeroBeforeBarrier = false;
 
         /**
+         * If enabled, drain the LDS (DS) wait queue before entering each KLoop and before its
+         * back-edge, so every path into the KLoop labels has the same waitcnt state. Off by
+         * default because it adds waits to kernels whose states already agree.
+         */
+        bool syncLDSQueueAtKLoopBoundaries = false;
+
+        /**
          * Maximum limit on the number of kernel arguments we will allow to be preloaded into
          * SGPRs by the GPU at the beginning of the kernel. If it is set to -1, this is
          * unlimited and we will use the maximum defined by the architecture.

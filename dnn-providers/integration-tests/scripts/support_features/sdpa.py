@@ -60,9 +60,9 @@ DTYPES = {
     "fp8_e5m2_fnuz": "fp8e5m2_fnuz",
 }
 # (q / k head dim, v head dim) -> head_dim value. A v head dim that is not
-# q's gives its own value: the ASM kernels run 192 x 128 (fmha_v3_*/*.csv).
-# 256 is the widest head the gfx942 split-KV decode kernels
-# (hipkernel:Gfx942AttentionUnified3d) are built for.
+# q's gives its own value: the ASM kernels run 192 x 128 (fmha_v3_*/*.csv), and
+# the FlyDSL backward serves 128 x 64 and 256 x 64. 256 is the widest head the
+# gfx942 split-KV decode kernels (hipkernel:Gfx942AttentionUnified3d) are built for.
 _SQUARE_HEAD_DIMS = (1, 64, 128, 192, 256)
 _PAIRED_HEAD_DIMS = (
     (1, 64),
@@ -80,6 +80,7 @@ _PAIRED_HEAD_DIMS = (
     (192, 64),
     (192, 128),
     (192, 256),
+    (256, 64),
     (256, 128),
 )
 HEAD_DIMS = {
@@ -115,6 +116,11 @@ FEATURES = (
         "varlen:seq_lens",
         ("seq_len_q_tensor_uid", "seq_len_kv_tensor_uid", "padding_mask"),
         "per-batch sequence lengths, or padding",
+    ),
+    Feature(
+        "varlen:cu_seq_lens",
+        ("cu_seq_len_q_tensor_uid", "cu_seq_len_kv_tensor_uid"),
+        "cumulative sequence lengths (prefix sums, B+1 values)",
     ),
     Feature("scale:fixed", ("attn_scale_value",)),
     Feature("scale:runtime", ("scale_tensor_uid",)),
@@ -298,6 +304,8 @@ def extract(node: dict, tensors_by_uid: dict) -> set[str]:
         or attrs.get("padding_mask")
     ):
         features.add("varlen:seq_lens")
+    if has("cu_seq_len_q_tensor_uid") or has("cu_seq_len_kv_tensor_uid"):
+        features.add("varlen:cu_seq_lens")
     if attrs.get("generate_stats") or has("stats_tensor_uid"):
         features.add("out:stats")
     if has("max_tensor_uid") or has("sum_exp_tensor_uid"):

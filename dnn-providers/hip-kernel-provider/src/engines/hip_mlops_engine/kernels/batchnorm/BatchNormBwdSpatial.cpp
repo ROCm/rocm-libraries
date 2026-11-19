@@ -332,8 +332,17 @@ struct BatchNormBwdSpatialImpl<0>
 template <>
 struct BatchNormBwdSpatialImpl<1>
 {
-    static constexpr unsigned int read_size = hip_plugin_config::layout_channel_last ? 1 : 4;
-    static constexpr unsigned int write_size = hip_plugin_config::layout_channel_last ? 1 : 2;
+    // Ported from MIOpen #6765. For NCHW the read/write loops walk flattened NHW positions with
+    // vectorized accesses. When HW is not a multiple of the vector width, the last access in a
+    // channel crosses into the next channel's memory, so fall back to scalar accesses.
+    static constexpr unsigned int read_size
+        = (!hip_plugin_config::layout_channel_last && hip_plugin_bn_config::spatial_size % 4 == 0)
+              ? 4
+              : 1;
+    static constexpr unsigned int write_size
+        = (!hip_plugin_config::layout_channel_last && hip_plugin_bn_config::spatial_size % 2 == 0)
+              ? 2
+              : 1;
 
     using InputReadVecType = typename mapped_vector_type<InputType, read_size>::type;
     using OutputReadVecType = typename mapped_vector_type<OutputType, read_size>::type;
@@ -412,7 +421,8 @@ struct BatchNormBwdSpatialImpl<1>
                      && hip_plugin_bn_config::spatial_size >= 4096)
         {
             ComputeReadVecType read4;
-            for(unsigned int k = lid << 2; k < less4; k += grprd)
+            // Intentional divergence from MIOpen, see ALMIOPEN-3141
+            for(unsigned int k = lid * read_size; k < less4; k += grprd)
             {
                 read4 = hip_kernel_provider::cast<ComputeReadVecType>(
                     *reinterpret_cast<const InputReadVecType*>(x_in + getTensorIndex(k)));
@@ -424,7 +434,7 @@ struct BatchNormBwdSpatialImpl<1>
             {
                 if(lid < rem4)
                 {
-                    unsigned int index = getTensorIndex((lid << 2) + less4);
+                    unsigned int index = getTensorIndex((lid * read_size) + less4);
                     if(index + read_size - 1 < hip_plugin_bn_config::tensor_size)
                     {
                         read4 = hip_kernel_provider::cast<ComputeReadVecType>(
@@ -483,7 +493,7 @@ struct BatchNormBwdSpatialImpl<1>
         constexpr unsigned int readUnrollHint
             = hip_plugin_bn_config::batches > hip_plugin_bn_config::loop_unroll_max_batch ? 4 : 2;
         static_unroll_count<unsigned int, 0, less4, grprd, readUnrollHint>{[&](unsigned int k) {
-            unsigned int l = k + (lid << 2 * (1 - hip_plugin_config::layout_channel_last));
+            unsigned int l = k + (lid * read_size);
             if(l < less4)
             {
                 unsigned int index = getTensorIndex(l);
@@ -503,8 +513,7 @@ struct BatchNormBwdSpatialImpl<1>
 
         if constexpr(rem4 > 0)
         {
-            unsigned int index
-                = getTensorIndex((lid << 2 * (1 - hip_plugin_config::layout_channel_last)) + less4);
+            unsigned int index = getTensorIndex((lid * read_size) + less4);
             if(index + read_size - 1 < hip_plugin_bn_config::tensor_size)
             {
                 auto xread = *reinterpret_cast<const InputReadVecType*>(x_in + index);

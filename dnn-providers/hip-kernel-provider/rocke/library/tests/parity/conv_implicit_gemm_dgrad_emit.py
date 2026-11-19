@@ -12,7 +12,7 @@ from kernels.common.conv_implicit_gemm_dgrad import (
     DgradConvSpec,
     build_implicit_gemm_conv_dgrad,
 )
-from kernels.common._conv_implicit_gemm_common import ConvProblem
+from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
 from _emit_common import run_emit
 
 
@@ -1240,7 +1240,97 @@ def _spec(idx: int):
         base.update(kw)
         return DgradConvSpec(**base), "gfx950"
 
+    if 57 <= idx <= 66:
+        return _tf32_spec(idx)
+
     raise SystemExit(f"unknown config index {idx}")
+
+
+# TF32 compute (ConvDataSpec(mma_dtype="tf32")): fp32 dY / W / dX, each LDS
+# fragment bitcast to vec<tf32xN> for the arch's TF32 atom -- native XF32 on
+# gfx942 (16x16x8, 32x32x4), BF16x3 emulation on gfx950 (16x16x32, 32x32x16).
+# N=2 16x16 C=K=64 3x3 pad 1, 64x64 tile, 2x2 warps. Keep in lockstep with
+# make_cfg_tf32() in conv_implicit_gemm_dgrad_emit.c.
+#   57: gfx950 16x16x32, stride 1, mem/default
+#   58: gfx950 32x32x16, stride 2 (tilde sub-GEMMs), compv4/cshuffle
+#   59: gfx942 16x16x8, stride 1, compv3/cshuffle
+#   60: gfx942 32x32x4, stride 2, mem/default
+#   61: gfx950 16x16x32, stride 2, split_k=2 (atomic fp32 dX), cshuffle
+#   62: gfx942 16x16x8, stride 1, groups=2, split_k=2
+#   63: gfx950 16x16x32, stride 1, tap_outer_k + dy_halo=2
+#   64: gfx942 32x32x4, stride 2, uniform_k_decode, compv4
+#   65: gfx950 lds_k_outer: rejected by both engines
+#   66: gfx950 with gfx942's 16x16x8 atom: rejected by both engines
+_TF32 = ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32")
+
+
+def _tf32_spec(idx: int):
+    arch, wt, tile_k, stride, kw = {
+        57: ("gfx950", (16, 16, 32), 64, 1, {}),
+        58: (
+            "gfx950",
+            (32, 32, 16),
+            32,
+            2,
+            dict(pipeline="compv4", epilogue="cshuffle"),
+        ),
+        59: (
+            "gfx942",
+            (16, 16, 8),
+            32,
+            1,
+            dict(pipeline="compv3", epilogue="cshuffle"),
+        ),
+        60: ("gfx942", (32, 32, 4), 32, 2, {}),
+        61: ("gfx950", (16, 16, 32), 64, 2, dict(split_k=2, epilogue="cshuffle")),
+        62: ("gfx942", (16, 16, 8), 32, 1, dict(split_k=2)),
+        63: (
+            "gfx950",
+            (16, 16, 32),
+            64,
+            1,
+            dict(tap_outer_k=True, dy_halo=2, halo_max_wo=16),
+        ),
+        64: (
+            "gfx942",
+            (32, 32, 4),
+            32,
+            2,
+            dict(uniform_k_decode=True, pipeline="compv4"),
+        ),
+        65: ("gfx950", (16, 16, 32), 64, 1, dict(lds_k_outer=True)),
+        66: ("gfx950", (16, 16, 8), 32, 1, {}),
+    }[idx]
+    groups = 2 if idx == 62 else 1
+    base = {
+        "problem": _cp(
+            N=2,
+            Hi=16,
+            Wi=16,
+            C=64 * groups,
+            K=64 * groups,
+            Y=3,
+            X=3,
+            sH=stride,
+            sW=stride,
+            pH=1,
+            pW=1,
+            groups=groups,
+        ),
+        "data": _TF32,
+        "tile_m": 64,
+        "tile_n": 64,
+        "tile_k": tile_k,
+        "warp_m": 2,
+        "warp_n": 2,
+        "warp_tile_m": wt[0],
+        "warp_tile_n": wt[1],
+        "warp_tile_k": wt[2],
+        "pipeline": "mem",
+        "epilogue": "default",
+    }
+    base.update(kw)
+    return DgradConvSpec(**base), arch
 
 
 def main() -> int:

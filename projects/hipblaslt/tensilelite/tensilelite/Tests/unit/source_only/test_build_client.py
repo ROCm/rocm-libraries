@@ -34,7 +34,7 @@ def test_build_client_configures_for_the_target_and_not_the_features(monkeypatch
     context = _RecordingContext()
 
     tasks.build_client.body(
-        context, build=False, build_dir=str(tmp_path / "build"), rebuild_rocisa=False
+        context, build=False, build_dir=str(tmp_path / "build")
     )
 
     configure = next(c for c in context.commands if c.startswith("cmake"))
@@ -55,7 +55,6 @@ def test_build_client_strips_features_from_an_explicit_gpu_target(monkeypatch, t
         context,
         build=False,
         build_dir=str(tmp_path / "build"),
-        rebuild_rocisa=False,
         gpu_targets="gfx942:sramecc+:xnack-",
     )
 

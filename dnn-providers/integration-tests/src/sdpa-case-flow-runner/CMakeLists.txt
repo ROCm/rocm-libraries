@@ -50,6 +50,9 @@ target_include_directories(${SDPA_CASE_FLOW_RUNNER_EXE}
         ${_it_src}/sdpa-case-flow-poc
         ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
+target_include_directories(${SDPA_CASE_FLOW_RUNNER_EXE} SYSTEM PRIVATE
+    ${_it_src}/third-party/tomlplusplus
+)
 
 target_link_libraries(${SDPA_CASE_FLOW_RUNNER_EXE}
     PRIVATE

@@ -12,7 +12,9 @@ a plain pass.
 Divergences listed in --known-divergences are tolerated and printed rather than
 failed, but only on the devices each line names. A listed divergence that no
 longer matches what this device produced fails the comparison, so the list
-cannot go stale.
+cannot go stale. The exception is a line marked optional, for a divergence that
+also depends on how MIOpen was built: it is tolerated when it occurs and only
+reported when the two modes agree.
 
 Both runs execute the same binary from the same build, so any divergence is a
 behavioural difference introduced by forwarding.
@@ -36,10 +38,11 @@ PROPERTY_PREFIX = "parity_"
 DEVICE_PROPERTY = "forwarding_parity_device"
 
 ALL_ARCHS = "all"
+OPTIONAL = "optional"
 ARCH_NAME = re.compile(r"gfx[0-9a-z]+")
 
 KnownDivergence = collections.namedtuple(
-    "KnownDivergence", "name archs disabled enabled reason"
+    "KnownDivergence", "name archs disabled enabled reason optional", defaults=(False,)
 )
 
 
@@ -115,6 +118,11 @@ def load_known_divergences(path):
 
     Devices are listed explicitly because where MIOpen itself cannot serve a
     case the two modes agree, which would otherwise look like a closed gap.
+
+    A divergence that also depends on how MIOpen was built (for example whether
+    the Composable Kernel plugin is loaded) cannot be pinned to a device. Add the
+    token optional to its archs field (all,optional or gfx942,optional) and the
+    line is not stale when the two modes agree.
     """
     try:
         with open(path) as handle:
@@ -139,15 +147,22 @@ def load_known_divergences(path):
                 )
             )
         name, archs, disabled, enabled, reason = fields
-        arch_list = tuple(arch.strip() for arch in archs.split(","))
-        if arch_list != (ALL_ARCHS,) and not all(
-            ARCH_NAME.fullmatch(arch) for arch in arch_list
+        tokens = tuple(token.strip() for token in archs.split(","))
+        optional = OPTIONAL in tokens
+        arch_list = tuple(token for token in tokens if token != OPTIONAL)
+        if not arch_list or (
+            arch_list != (ALL_ARCHS,)
+            and not all(ARCH_NAME.fullmatch(arch) for arch in arch_list)
         ):
             raise UnreadableRun(
                 "{} line {}: the archs field must be {} or a comma-separated list of "
-                "gfx names, not '{}'".format(path, number, ALL_ARCHS, archs)
+                "gfx names, optionally with {}, not '{}'".format(
+                    path, number, ALL_ARCHS, OPTIONAL, archs
+                )
             )
-        known.append(KnownDivergence(name, arch_list, disabled, enabled, reason))
+        known.append(
+            KnownDivergence(name, arch_list, disabled, enabled, reason, optional)
+        )
     return known
 
 
@@ -277,10 +292,15 @@ def main(disabled_xml, enabled_xml, newer_than=None, known_divergences=None):
             )
         problems.append(problem)
 
-    # Fail lines whose test now agrees, so the list cannot only grow. A listed test
-    # missing from the run is skipped: several binaries share the list.
+    # Fail lines whose test now agrees, so the list cannot only grow, unless the
+    # line is optional. A listed test missing from the run is skipped: several
+    # binaries share the list.
+    agreed_optional = []
     for entry in known_here:
         if entry.name in shared and entry.name not in diverged:
+            if entry.optional:
+                agreed_optional.append(entry)
+                continue
             problems.append(
                 "{} no longer diverges on {} (both runs report {}) -- update or delete "
                 "its line in {}".format(
@@ -316,27 +336,65 @@ def main(disabled_xml, enabled_xml, newer_than=None, known_divergences=None):
             )
         )
         for entry in tolerated:
-            print("  ! {}".format(entry.name))
+            print(
+                "  ! {}{}".format(entry.name, " [optional]" if entry.optional else "")
+            )
             print("      disabled={} enabled={}".format(entry.disabled, entry.enabled))
             print("      {}".format(entry.reason))
         print(
             "  The modes do not agree here. Nothing above is being checked for parity."
         )
+
+    # Not a failure, but said out loud: a bare "OK" would not show that a listed
+    # gap is simply not open on this build.
+    if agreed_optional:
+        print(
+            "forwarding parity: {} optional known divergence{} did not occur on {}, "
+            "listed in {}".format(
+                len(agreed_optional),
+                "" if len(agreed_optional) == 1 else "s",
+                run_device,
+                known_divergences,
+            )
+        )
+        for entry in agreed_optional:
+            print("  ~ {}".format(entry.name))
+            print("      both modes report {}".format(describe(a[entry.name])))
+            print(
+                "      optional line: it diverges only on some builds, so agreement is "
+                "not an error. When it does diverge: {}".format(entry.reason)
+            )
+        print(
+            "  These tests agree under both modes here, so they are checked for parity "
+            "on this build."
+        )
+    optional_note = (
+        "; {} optional known divergence{} did not occur".format(
+            len(agreed_optional), "" if len(agreed_optional) == 1 else "s"
+        )
+        if agreed_optional
+        else ""
+    )
+
+    if tolerated:
         print(
             "forwarding parity OK apart from {} known divergence{}: {} tests compared "
-            "under both modes ({} executed, {} skipped)".format(
+            "under both modes ({} executed, {} skipped){}".format(
                 len(tolerated),
                 "" if len(tolerated) == 1 else "s",
                 total_a,
                 ran_a,
                 total_a - ran_a,
+                optional_note,
             )
         )
         return 0
 
     print(
         "forwarding parity OK: {} tests identical under both modes "
-        "({} executed, {} skipped)".format(total_a, ran_a, total_a - ran_a)
+        "({} executed, {} skipped){}".format(
+            total_a, ran_a, total_a - ran_a, optional_note
+        )
     )
     return 0
 

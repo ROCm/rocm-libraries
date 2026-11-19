@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "BatchnormFwdTrainingPlan.hpp"
+#include "BatchnormApplicabilityChecks.hpp"
 #include "BatchnormCommon.hpp"
 #include "BatchnormKernelCompileOptions.hpp"
 
@@ -33,16 +34,20 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     _epsilon = hipdnn_plugin_sdk::makeScalarOperand(
         tensorMap, attributes.epsilon_tensor_uid(), "Epsilon");
 
-    // Save mean and inv_variance are optional
-    if(attributes.mean_tensor_uid().has_value())
+    // Save mean and inv_variance are optional; a pair that is virtual in both tensors is not
+    // requested and stays unset.
+    if(!hasUnrequestedSavedPair(attributes, tensorMap))
     {
-        _mean = &(findTensorAttributes(tensorMap, attributes.mean_tensor_uid().value()));
-    }
+        if(attributes.mean_tensor_uid().has_value())
+        {
+            _mean = &(findTensorAttributes(tensorMap, attributes.mean_tensor_uid().value()));
+        }
 
-    if(attributes.inv_variance_tensor_uid().has_value())
-    {
-        _invVariance
-            = &(findTensorAttributes(tensorMap, attributes.inv_variance_tensor_uid().value()));
+        if(attributes.inv_variance_tensor_uid().has_value())
+        {
+            _invVariance
+                = &(findTensorAttributes(tensorMap, attributes.inv_variance_tensor_uid().value()));
+        }
     }
 
     if(attributes.prev_running_mean_tensor_uid().has_value()
@@ -365,7 +370,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
 
         // Get the stash method based on problem size and WG size
         stashMethod = hip_kernel_provider::batchnorm::getStashMethod(
-            problem, stashValuesFwd, ylocalsize, zlocalsize, batchElements);
+            problem, stashValuesFwd, ylocalsize, zlocalsize, batchElements, vectorsize);
 
         // WG size for Final kernels (NLC/NHWC/NDHWC)
         if(isLayoutChannelLast && channels % 2 == 0 && xlocalsize % 2 == 0)

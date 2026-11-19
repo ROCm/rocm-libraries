@@ -287,8 +287,12 @@ struct BatchNormFwdTrainSpatialImpl<1>
 
         __syncthreads();
 
+        // Intentional divergence from MIOpen, which has no HW % 4 check here: the vec4 reads walk
+        // flattened NHW positions, so when HW is not a multiple of 4 the last read of a channel
+        // crosses into the next channel's memory and corrupts mean/variance. Use the scalar path.
         if constexpr(!hip_plugin_config::layout_channel_last
-                     && hip_plugin_bn_config::spatial_size >= 4096)
+                     && hip_plugin_bn_config::spatial_size >= 4096
+                     && hip_plugin_bn_config::spatial_size % 4 == 0)
         {
             using InputVecType4 = typename mapped_vector_type<InputType, 4>::type;
             InputVecType4 read4;

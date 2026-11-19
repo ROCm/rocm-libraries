@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import warnings
 
@@ -18,6 +19,8 @@ from rocke.core.arch import (
     compiler_target_from_target_id,
     generic_arch_from_target_id,
     known_arches,
+    parse_target_id,
+    processor_from_target_id,
     target_id_from_isa,
 )
 from rocke.core.arch.target import _load_generic_targets
@@ -154,6 +157,77 @@ def test_target_id_extraction_accepts_all_triple_field_forms(
 
 
 @pytest.mark.parametrize(
+    ("value", "target_id"),
+    [
+        # Compilers write the triple's environment field empty or as "unknown".
+        ("amdgcn-amd-amdhsa--gfx950", "gfx950"),
+        ("amdgcn-amd-amdhsa-unknown-gfx1201", "gfx1201"),
+        ("gfx942", "gfx942"),
+        ("amdgcn-amd-amdhsa--gfx950:xnack+", "gfx950:xnack+"),
+        ("amdgcn-amd-amdhsa-unknown-gfx950:xnack-", "gfx950:xnack-"),
+        ("amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-", "gfx942:sramecc+:xnack-"),
+        ("amdgcn-amd-amdhsa--gfx11-generic", "gfx11-generic"),
+        ("amdgcn-amd-amdhsa-unknown-gfx9-4-generic:xnack+", "gfx9-4-generic:xnack+"),
+        ("gfx1250-strict", "gfx1250-strict"),
+    ],
+)
+def test_parse_target_id_accepts_isa_names_and_bare_target_ids(
+    value: str, target_id: str
+) -> None:
+    assert parse_target_id(value) == target_id
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "''",
+        '""',
+        # A processor name in the wrong place, which target_id_from_isa would
+        # still pick out of the value.
+        "notgfx950",
+        "amdgcn-amd-amdhsa--notgfx950",
+        "amdgcn-amd-amdhsa-unknown-:gfx950",
+        "gfx-named-prefix-gfx942",
+        # The triple with no processor, or another environment field.
+        "amdgcn-amd-amdhsa-unknown-",
+        "amdgcn-amd-amdhsa--",
+        "amdgcn-amd-amdhsa-linux-gfx950",
+        "amdgcn-amd-amdhsa-opencl-gfx950",
+        # A feature without its sign, an empty feature, a trailing separator.
+        "gfx950:xnack",
+        "gfx950:",
+        "gfx950::xnack+",
+        "gfx950-",
+        "gfx",
+        "GFX950",
+        " gfx950",
+        "gfx950 ",
+    ],
+)
+def test_parse_target_id_refuses_any_other_form(value: str) -> None:
+    with pytest.raises(ValueError, match=f"^'{re.escape(value)}' is not a target ID"):
+        parse_target_id(value)
+
+
+@pytest.mark.parametrize(
+    ("target_id", "processor"),
+    [
+        ("gfx942:sramecc+:xnack-", "gfx942"),
+        ("gfx1250-strict", "gfx1250"),
+        ("gfx11-generic:xnack-", "gfx11-generic"),
+        # A generic-target member stays itself, not its generic.
+        ("gfx1100", "gfx1100"),
+        # Any other name: its leading gfx token, or up to its first ':'.
+        ("gfx942_bad:xnack-", "gfx942"),
+        ("unexpected-target:xnack-", "unexpected-target"),
+    ],
+)
+def test_processor_from_target_id(target_id: str, processor: str) -> None:
+    assert processor_from_target_id(target_id) == processor
+
+
+@pytest.mark.parametrize(
     ("target_id", "generic"),
     [
         (member, generic)
@@ -247,19 +321,16 @@ def test_generic_targets_are_catalogued_and_disjoint() -> None:
                 assert member_target.wave_size == target.wave_size
 
 
-def test_cpp_target_identity_matches_python() -> None:
-    """Compare the native CTest executable with Python when a build is supplied.
+def _native_comparison_inputs() -> list[str]:
+    """Every value the native target identity test is compared on.
 
     The C++ engine keeps its own copy of the generic target table, so every
     generic processor and every member read from arch_specs.json is an input:
     a member missing from, or misspelled in, the C++ copy resolves to a
-    different catalog row there and fails the comparison.
+    different catalog row there and fails the comparison. The prefixes, profiles
+    and features include forms the strict parser refuses, so its refusal text is
+    compared too.
     """
-    from rocke.core.arch.target import _load_generic_targets
-
-    executable = os.environ.get("ROCKE_ARCH_TARGET_TEST_EXE")
-    if not executable:
-        pytest.skip("set ROCKE_ARCH_TARGET_TEST_EXE to the native target identity test")
     generic_targets = _load_generic_targets()
     targets = [
         *known_arches(),
@@ -279,14 +350,40 @@ def test_cpp_target_identity_matches_python() -> None:
         "gfx",
         "gfx-",
         "gfx942_bad",
+        "notgfx950",
+        "GFX950",
     ]
     inputs = [
         f"{prefix}{target}{profile}{features}"
         for target in targets
-        for prefix in ("", "amdgcn-amd-amdhsa--", "gfx-named-prefix-")
-        for profile in ("", "-strict")
-        for features in ("", ":", ":sramecc+:xnack-", ":unknown+")
+        for prefix in (
+            "",
+            "amdgcn-amd-amdhsa--",
+            "amdgcn-amd-amdhsa-unknown-",
+            "amdgcn-amd-amdhsa-linux-",
+            "gfx-named-prefix-",
+        )
+        for profile in ("", "-strict", "-")
+        for features in ("", ":", ":sramecc+:xnack-", ":unknown+", ":xnack", "::xnack+")
     ]
+    return inputs + [
+        "amdgcn-amd-amdhsa-unknown-",
+        "amdgcn-amd-amdhsa-unknown-:gfx950",
+        "''",
+    ]
+
+
+def test_cpp_target_identity_matches_python() -> None:
+    """Compare the native CTest executable with Python when a build is supplied.
+
+    Every target identity helper is compared, including the strict parser's
+    accepted target IDs and its refusal text and the compile target at every
+    LLVM flavor, on every value ``_native_comparison_inputs`` lists.
+    """
+    executable = os.environ.get("ROCKE_ARCH_TARGET_TEST_EXE")
+    if not executable:
+        pytest.skip("set ROCKE_ARCH_TARGET_TEST_EXE to the native target identity test")
+    inputs = _native_comparison_inputs()
     # The inputs go through standard input, one per line: as arguments they
     # would outgrow the command-line length Windows allows.
     result = subprocess.run(
@@ -301,12 +398,18 @@ def test_cpp_target_identity_matches_python() -> None:
     expected = []
     for isa in inputs:
         target = target_id_from_isa(isa)
+        try:
+            parsed = parse_target_id(isa)
+        except ValueError as refusal:
+            parsed = f"!{refusal}"
         row = [
             target,
             base_arch_from_target_id(target),
             compiler_target_from_target_id(target),
             arch_from_isa(isa),
             generic_arch_from_target_id(target) or "-",
+            processor_from_target_id(target),
+            parsed,
         ]
         for flavor in LLVM_FLAVORS:
             with warnings.catch_warnings(record=True) as record:

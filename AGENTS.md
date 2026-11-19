@@ -80,9 +80,17 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 | `hipdnn-ingestor-impact` | Checking whether a kernel ingestor change breaks kernel ABI or dispatch at run time while the build stays green, without a full review. |
 | `hipdnn-uhd` | Taking a hipDNN engine through the UHD heuristic lifecycle on the local GPU: generating, training, judging, validating, installing, and triaging heuristics and their training data. |
 | `hipdnn-deep-review` | Reviewing a hipDNN or provider change in depth with parallel agents until its findings close. Its `IMPACT` lane runs the `hipdnn-ingestor-impact` scripts. |
+| `hipdnn-aiter-asm-sdpa-fwd-sync` | Updating the ASM SDPA engine's forward kernels from an AITER release for the GPU archs you choose: tiered plan, apply with generated provenance, engine follow-up and validation. ASM kernels only, never CK. |
 | `hipdnn-codegen` (at [`projects/hipdnn/tools/DescriptorGenerator/.claude/skills/`](projects/hipdnn/tools/DescriptorGenerator/.claude/skills/hipdnn-codegen/SKILL.md)) | Generating operation boilerplate from a YAML config. |
 | `rfc-review` | Reviewing a technical RFC across the structured perspectives. Follow-ups: `rfc-review-compatibility`, `rfc-review-ops`, `rfc-review-security`. |
 | `rfc-backlog` | Turning an RFC into a backlog of Jira stories and tasks. |
+
+### MIOpen
+
+| Skill | Path | Use it when |
+| --- | --- | --- |
+| `miopen-review` | [`projects/miopen/skills/miopen-review/`](projects/miopen/skills/miopen-review/SKILL.md) | A lightweight single-pass review of a MIOpen PR or local commits: parallel reviewer lanes primed with MIOpen's contracts, a devil's-advocate pass, optional reproduction on a GPU host you supply, and draft comments posted only after approval. |
+| `miopen-deep-review` | [`projects/miopen/skills/miopen-deep-review/`](projects/miopen/skills/miopen-deep-review/SKILL.md) | Running a multi-agent deep review of a MIOpen PR, branch or commit range, with every finding verified and a ledger carried across rounds. |
 
 ### StinkyTofu
 

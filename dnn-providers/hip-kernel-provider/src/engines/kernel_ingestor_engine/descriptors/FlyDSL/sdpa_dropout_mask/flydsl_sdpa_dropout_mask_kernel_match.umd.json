@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "cca26e8d-52fa-539a-b2b0-03d4a52e0484",
+  "name": "flydsl sdpa_dropout_mask: kernel variant fits the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.flydsl_sdpa_dropout_mask.kernel_match"
+}

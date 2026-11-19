@@ -49,3 +49,11 @@ Known bugs:
   # with a NaN sentinel before each verified launch. REMOVE this entry in the PR that
   # fixes ROCM-33823. Review by 2026-11-16.
   - { name: matmul_batch_complex_general_batch_edge, function: matmul, alpha: 0, alphai: 0, beta: 1, betai: 0, known_bug_platforms: gfx950 }
+  # ROCM-34287: on gfx1170, the heuristic returns a solution that needs a 262144-byte
+  # (256 KiB) workspace when the user workspace is 0, so the f16 and bf16 TN 128x128x2048
+  # cases of matmul_heuristic_all_solutions_no_workspace fail with "Returned workspace
+  # size (262144) is larger than user allocated (0)". Only algo_method 0 (heuristic) fails;
+  # the f32 case, the NT cases and the algo_method 1 (get all algos) cases pass. REMOVE
+  # these entries in the PR that fixes ROCM-34287.
+  - { name: matmul_heuristic_all_solutions_no_workspace, function: matmul, a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, transA: T, transB: N, algo_method: 0, known_bug_platforms: gfx1170 }
+  - { name: matmul_heuristic_all_solutions_no_workspace, function: matmul, a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, transA: T, transB: N, algo_method: 0, known_bug_platforms: gfx1170 }

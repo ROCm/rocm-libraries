@@ -138,10 +138,10 @@ skip.
 
 * **Typed tests** (`TYPED_TEST`) over value type and backend. The parameter is `Typed<T, Backend>`,
   and the lists are built with `WithBackends<...>`, `HostOnly<...>` and `AcceleratorOnly<...>` from
-  the value-type lists `AllValueTypes`, `NumericTypes`, `FloatingTypes`, `RealTypes` and
-  `IntegerTypes` (`unit_test_types.hpp`). The complex types are part of the lists only with
-  `BUILD_SUPPORT_COMPLEX`, because the library instantiates them only then. Test names look like
-  `cfloat_Accelerator`.
+  the value-type lists `AllValueTypes`, `NumericTypes`, `FloatingTypes`, `RealTypes`,
+  `ComplexTypes` and `IntegerTypes` (`unit_test_types.hpp`). The complex types are part of the
+  lists only with `BUILD_SUPPORT_COMPLEX`, because the library instantiates them only then, so
+  `ComplexTypes` is empty without it. Test names look like `cfloat_Accelerator`.
 * **Value-parameterized tests** (`TEST_P`) over backend and matrix format (`BackendFormat`, names
   like `Accelerator_BCSR2`). GoogleTest has no typed value-parameterized tests, so these run their
   body once per value type with `for_each_type`.

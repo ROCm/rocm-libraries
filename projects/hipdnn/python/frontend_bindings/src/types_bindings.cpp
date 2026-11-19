@@ -155,6 +155,21 @@ void typesBindings(nb::module_& m)
         .value("SUPPORTS_EXECUTION_PLAN_SERIALIZATION",
                BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
 
+    // Bind NumericalNote enum
+    auto numericalNote
+        = nb::enum_<NumericalNote>(m, "NumericalNote")
+              .value("TENSOR_CORE", NumericalNote::TENSOR_CORE)
+              .value("DOWN_CONVERT_INPUTS", NumericalNote::DOWN_CONVERT_INPUTS)
+              .value("REDUCED_PRECISION_REDUCTION", NumericalNote::REDUCED_PRECISION_REDUCTION)
+              .value("FFT", NumericalNote::FFT)
+              .value("NONDETERMINISTIC", NumericalNote::NONDETERMINISTIC)
+              .value("WINOGRAD", NumericalNote::WINOGRAD)
+              .value("WINOGRAD_TILE_4x4", NumericalNote::WINOGRAD_TILE_4x4)
+              .value("WINOGRAD_TILE_6x6", NumericalNote::WINOGRAD_TILE_6x6)
+              .value("WINOGRAD_TILE_13x13", NumericalNote::WINOGRAD_TILE_13x13)
+              .value("STRICT_NAN_PROP", NumericalNote::STRICT_NAN_PROP);
+    m.attr("numerical_note") = numericalNote;
+
     // Bind BuildPlanPolicy enum
     nb::enum_<BuildPlanPolicy>(m, "BuildPlanPolicy")
         .value("HEURISTICS_CHOICE", BuildPlanPolicy::HEURISTICS_CHOICE)

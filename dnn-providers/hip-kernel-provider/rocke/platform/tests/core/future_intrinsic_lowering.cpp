@@ -2928,6 +2928,88 @@ void case_trap()
     rocke_ir_builder_free(&b);
 }
 
+/* ldexp: the C++ builder's op lowers to one call of llvm.ldexp.f32.i32,
+ * declared once, and to __builtin_ldexpf in HIP source; it is pure; the builder
+ * refuses an operand that is not an f32 value or an i32 exponent, and the
+ * verifier refuses a raw op of the wrong types, with the Python engine's texts
+ * (tests/core/test_ldexp.py). */
+void build_ldexp(rocke_ir_builder_t* b)
+{
+    rocke_value_t* x = rocke_b_param(b, "X", rocke_ptr_type(b, rocke_f32(), "global"), nullptr);
+    rocke_value_t* e = rocke_b_param(b, "E", rocke_ptr_type(b, rocke_i32(), "global"), nullptr);
+    rocke_value_t* y = rocke_b_param(b, "Y", rocke_ptr_type(b, rocke_f32(), "global"), nullptr);
+    rocke_value_t* t = rocke_b_thread_id_x(b);
+    rocke_value_t* v = rocke_b_ldexp(
+        b, rocke_b_global_load_f32(b, x, t, 4), rocke_b_global_load_i32(b, e, t, 4));
+    rocke_b_global_store(b, y, t, v, 4);
+}
+
+void case_ldexp()
+{
+    const std::string ir = lower_one("ldexp", build_ldexp, "gfx90a");
+    EXPECT_IR_COUNT(ir, " = call float @llvm.ldexp.f32.i32(float ", 1);
+    EXPECT_IR_COUNT(ir, "declare float @llvm.ldexp.f32.i32(float, i32)\n", 1);
+
+    const std::string hip = lower_one_hip("ldexp_hip", build_ldexp, "gfx90a");
+    EXPECT_IR_COUNT(hip, " = __builtin_ldexpf(", 1);
+
+    if(!rocke_opcode_is_pure(ROCKE_OP_MATH_LDEXP))
+        fail("math.ldexp must be pure", __LINE__);
+    if(std::string(rocke_opcode_name(ROCKE_OP_MATH_LDEXP)) != "math.ldexp")
+        fail("ROCKE_OP_MATH_LDEXP must be named math.ldexp", __LINE__);
+
+    /* The builder refuses an f32 exponent. */
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "ldexp_bad_exponent");
+        std::string err;
+        rocke_value_t* r = nullptr;
+        try
+        {
+            r = rocke_b_ldexp(&b, rocke_b_const_f32(&b, 1.0), rocke_b_const_f32(&b, 2.0));
+            if(rocke_ir_builder_status(&b) != ROCKE_OK)
+            {
+                const char* msg = rocke_ir_builder_error(&b);
+                err = msg ? msg : "(no message)";
+            }
+        }
+        catch(const std::exception& e)
+        {
+            err = e.what();
+        }
+        if(r != nullptr
+           || err.find("ldexp takes an f32 value and an i32 exponent and gives an f32, got f32, "
+                       "f32 -> f32")
+                  == std::string::npos)
+            fail("rocke_b_ldexp must refuse an f32 exponent", __LINE__);
+        rocke_ir_builder_free(&b);
+    }
+
+    /* A raw ldexp with an i32 value, past the builder: the verifier refuses it. */
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "ldexp_raw");
+    rocke_value_t* ops[] = {rocke_b_const_i32(&b, 1), rocke_b_const_i32(&b, 2)};
+    const rocke_type_t* result_types[] = {rocke_f32()};
+    rocke_b_op(
+        &b, ROCKE_OP_MATH_LDEXP, ops, 2, result_types, 1, nullptr, nullptr, 0, "ldexp", nullptr);
+    rocke_b_ret(&b);
+    rocke_diag_t* diags = nullptr;
+    size_t n = 0;
+    rocke_verify(rocke_ir_builder_kernel(&b), &diags, &n);
+    bool saw = false;
+    for(size_t i = 0; i < n; ++i)
+    {
+        const std::string m = diags[i].message ? diags[i].message : "";
+        saw |= m.find("ldexp takes an f32 value and an i32 exponent and gives an f32, got i32, "
+                      "i32 -> f32")
+               != std::string::npos;
+    }
+    rocke_diags_free(diags, n);
+    if(!saw)
+        fail("verifier must reject an ldexp of an i32 value", __LINE__);
+    rocke_ir_builder_free(&b);
+}
+
 void case_gfx1250_tdm_gated()
 {
     const struct
@@ -4431,6 +4513,7 @@ const TestCase k_cases[] = {
     {"global_ptr_to_i64", case_global_ptr_to_i64},
     {"global_ptr_offset", case_global_ptr_offset},
     {"trap", case_trap},
+    {"ldexp", case_ldexp},
     {"gfx1250_tdm_gated", case_gfx1250_tdm_gated},
     {"gfx1250_tdm_builder_rejects", case_gfx1250_tdm_builder_rejects},
     {"gfx1250_tdm_purity", case_gfx1250_tdm_purity},
