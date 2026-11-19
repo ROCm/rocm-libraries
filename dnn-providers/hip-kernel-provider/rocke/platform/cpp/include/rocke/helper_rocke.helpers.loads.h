@@ -95,7 +95,8 @@ typedef struct rocke_tdm_tile_load
     rocke_value_t* groups[5];
 } rocke_tdm_tile_load_t;
 
-/* Prepare a descriptor for a bound LDS byte address. The caller owns wave
+/* Prepare a descriptor for a bound LDS byte address. The source must be a
+ * global pointer with a pointee width matching elem_bytes. The caller owns wave
  * selection and waits; it may insert a hook before issuing the descriptor. */
 bool rocke_tdm_tile_loader_2d_prepare(rocke_ir_builder_t* b,
                                       const rocke_tdm_tile_loader_2d_t* loader,

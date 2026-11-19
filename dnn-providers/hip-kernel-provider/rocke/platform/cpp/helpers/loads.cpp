@@ -26,6 +26,22 @@ bool rocke_tdm_tile_loader_2d_prepare(rocke_ir_builder_t* b,
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "tdm tile load needs loader, source and output");
         return false;
     }
+    if(!rocke_i_live(b))
+        return false;
+    const rocke_type_t* ptr = source->ptr ? source->ptr->type : NULL;
+    if(ptr == NULL || ptr->kind != ROCKE_TYPE_PTR || strcmp(ptr->space, "global") != 0)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "TDM source must be a global pointer");
+        return false;
+    }
+    const int bytes = loader->elem_bytes;
+    if((bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8)
+       || rocke_i_type_bits(ptr->pointee) != 8 * bytes)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "TDM source pointee width must match elem_bytes (1, 2, 4, or 8)");
+        return false;
+    }
     /* Keep the builder-call order explicit to mirror Python. */
     rocke_value_t* row_off64 = rocke_b_zext(b, source->row_origin, rocke_i64());
     rocke_value_t* stride64 = rocke_b_zext(b, source->row_stride, rocke_i64());

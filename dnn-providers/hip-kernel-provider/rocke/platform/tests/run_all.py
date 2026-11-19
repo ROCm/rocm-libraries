@@ -496,6 +496,11 @@ def main() -> int:
         "Other gates and CTest remain complete",
     )
     ap.add_argument(
+        "--gemm-gpu",
+        choices=("gfx942", "gfx950", "gfx1250"),
+        help="also run the explicit UniversalGemm GPU numerical gate on this architecture",
+    )
+    ap.add_argument(
         "--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_verify")
     )
     ap.add_argument(
@@ -591,6 +596,26 @@ def main() -> int:
             ["ctest", "-C", args.config, "--output-on-failure", "--no-tests=ignore"],
             cwd=str(build_root),
         ).returncode
+
+    if args.gemm_gpu and status == 0:
+        print(f"\n== UniversalGemm GPU numerical gate ({args.gemm_gpu}) ==", flush=True)
+        gpu_env = os.environ.copy()
+        gpu_env["PYTHONPATH"] = os.pathsep.join(
+            filter(None, (str(ROCKE / "python"), gpu_env.get("PYTHONPATH")))
+        )
+        rc = subprocess.run(
+            [
+                sys.executable,
+                "-u",
+                "-m",
+                "rocke.tests.universal_gemm_gpu_gate",
+                "--arch",
+                args.gemm_gpu,
+            ],
+            env=gpu_env,
+        ).returncode
+        if rc != 77:  # The optional lane reported incompatible or unavailable hardware.
+            status |= rc
 
     result_scope = "FOCUSED " if run_focused else ""
     print("\nRESULT:", result_scope + ("GREEN" if status == 0 else "RED"))

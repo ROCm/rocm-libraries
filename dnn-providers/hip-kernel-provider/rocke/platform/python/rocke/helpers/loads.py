@@ -51,7 +51,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence, Tuple
 
-from ..core.ir import F16, I64, IRBuilder, Type, Value
+from ..core.ir import F16, I64, IRBuilder, PtrType, Type, Value, type_bits
 
 
 # A descriptor callback maps (row, col) in the tile-local coordinate
@@ -213,6 +213,7 @@ def swizzle_lds_col(b: IRBuilder, row: Value, col: Value, col_xor) -> Value:
 class TdmSourceWindow2D:
     """Runtime window into a global tensor with contiguous columns.
 
+    The global pointer's pointee width must match the loader's element size.
     Coordinates, extents, and strides are i32 elements. ``base_offset`` is
     an i64 element offset for selecting a batch or suballocation. The caller
     can hoist ``cols_remaining`` when several windows share a column interval;
@@ -258,6 +259,16 @@ class TdmTileLoader2D:
     def prepare(
         self, b: IRBuilder, source: TdmSourceWindow2D, lds_addr: Value, *, zero: Value
     ) -> TdmTileLoad:
+        ptr_ty = source.ptr.type
+        if not isinstance(ptr_ty, PtrType) or ptr_ty.space != "global":
+            raise ValueError("TDM source must be a global pointer")
+        if (
+            self.elem_bytes not in (1, 2, 4, 8)
+            or type_bits(ptr_ty.pointee) != 8 * self.elem_bytes
+        ):
+            raise ValueError(
+                "TDM source pointee width must match elem_bytes (1, 2, 4, or 8)"
+            )
         # Widen before multiplying so large tensor offsets do not wrap at i32.
         row64 = b.mul(b.zext(source.row_origin, I64), b.zext(source.row_stride, I64))
         origin = b.add(source.base_offset, b.add(row64, b.zext(source.col_origin, I64)))

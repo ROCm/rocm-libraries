@@ -143,6 +143,13 @@ endif()
 
 # The MX GEMM's C grid for an unset workgroup tile, which no Python caller
 # reaches.
+if(BUILD_TESTING AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/test_tdm_tile_loader.cpp")
+  add_executable(rocke_test_tdm_tile_loader instances/test_tdm_tile_loader.cpp)
+  target_link_libraries(rocke_test_tdm_tile_loader PRIVATE rocke_core)
+  add_test(NAME rocke_test_tdm_tile_loader COMMAND rocke_test_tdm_tile_loader)
+endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/mx_gemm_host.cpp")
   add_executable(rocke_mx_gemm_host instances/mx_gemm_host.cpp)
   target_link_libraries(rocke_mx_gemm_host PRIVATE rocke_core)

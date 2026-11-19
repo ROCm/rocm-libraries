@@ -23,10 +23,8 @@ from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import pytest
 
 from rocke.core.ir import KernelDef
-from rocke.tests.ir_validity import arbiter_verdict
 
 if TYPE_CHECKING:
     from rocke.helpers.compile import KernelArtifact
@@ -70,6 +68,8 @@ def probe_device_arch() -> tuple[str | None, str]:
 def current_device_arch() -> str:
     """The arch of the GPU this process launches on: HIP's current device, the one
     rocke's runtime keeps and launches kernels on. Skips when there is no GPU."""
+    import pytest
+
     arch, absence = probe_device_arch()
     if arch is None:
         pytest.skip(absence)
@@ -80,6 +80,8 @@ def current_device_arch_in(arches: Collection[str], subject: str = "this test") 
     """The current GPU's arch when it is one of `arches`; otherwise skip, naming `subject`
     and the GPU found. Fails instead when ``ROCKE_REQUIRE_<ARCH>=1`` is set for an arch
     in `arches` and the current GPU is not that arch (see the module docstring)."""
+    import pytest
+
     arch, absence = probe_device_arch()
     found = arch or absence
     for required in arches:
@@ -96,8 +98,12 @@ def supported_device_arch(kernel: KernelDef, arches: Collection[str]) -> str:
     supports `kernel`'s data types) and the IR the active engine lowers `kernel` to
     compiles and links for it; otherwise skip, naming why, or fail on a compiler
     rejection or on a missing required GPU (see `current_device_arch_in`)."""
-    arch = current_device_arch_in(arches, subject=kernel.name)
+    import pytest
+
     from rocke.core.lower_llvm import lower_kernel_to_llvm
+    from rocke.tests.ir_validity import arbiter_verdict
+
+    arch = current_device_arch_in(arches, subject=kernel.name)
 
     text = lower_kernel_to_llvm(kernel, arch=arch)
     verdict, reason = arbiter_verdict(text, arch)

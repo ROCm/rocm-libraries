@@ -343,6 +343,20 @@ test_categories:
       - "ckc"
       - "hip-kernel-provider"
 
+  universal-gemm-numerics-comprehensive:
+    description: "rocKE UniversalGemm compile-and-launch regressions, comprehensive and full"
+    test_patterns:
+      - "rocke_universal_gemm_numerics_gfx942"
+      - "rocke_universal_gemm_numerics_gfx950"
+      - "rocke_universal_gemm_numerics_gfx1250"
+    labels:
+      - "comprehensive"
+      - "full"
+      - "gpu"
+      - "python"
+      - "ckc"
+      - "hip-kernel-provider"
+
   comprehensive:
     description: "rocKE checks run by scheduled CI only"
     test_patterns:
