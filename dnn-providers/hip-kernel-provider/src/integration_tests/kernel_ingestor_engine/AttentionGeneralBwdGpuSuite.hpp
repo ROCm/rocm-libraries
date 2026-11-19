@@ -31,6 +31,9 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/knob/Knob.hpp>
+#include <hipdnn_frontend/knob/KnobConstraint.hpp>
+#include <hipdnn_frontend/knob/KnobSetting.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -645,17 +648,45 @@ protected:
         return graph;
     }
 
-    /// Plans @p c on the engine only and allocates its buffers and workspace.
-    void build(const GpuCase& c, Built& built)
+    /// Plans @p c on the engine only, with @p knobs pinned: the first step's error, or OK.
+    hipdnn_frontend::Error
+        plan(const GpuCase& c, Built& built, const std::vector<hipdnn_frontend::KnobSetting>& knobs)
     {
         built.graph = makeGraph(c);
         auto& graph = *built.graph;
-        ASSERT_TRUE(ok(graph.validate()));
-        ASSERT_TRUE(ok(graph.build_operation_graph(_handle)));
-        ASSERT_TRUE(ok(graph.create_execution_plan_ext(
-            hipdnn_data_sdk::utilities::engineNameToId(ENGINE), {})));
-        ASSERT_TRUE(ok(graph.check_support()));
-        ASSERT_TRUE(ok(graph.build_plans()));
+        for(auto error : {graph.validate(), graph.build_operation_graph(_handle)})
+        {
+            if(error.code != hipdnn_frontend::ErrorCode::OK)
+            {
+                return error;
+            }
+        }
+        auto error = graph.create_execution_plan_ext(
+            hipdnn_data_sdk::utilities::engineNameToId(ENGINE), knobs);
+        if(error.code == hipdnn_frontend::ErrorCode::OK)
+        {
+            error = graph.check_support();
+        }
+        if(error.code == hipdnn_frontend::ErrorCode::OK)
+        {
+            error = graph.build_plans();
+        }
+        return error;
+    }
+
+    /// Plans @p c on the engine only and allocates its buffers and workspace.
+    void build(const GpuCase& c,
+               Built& built,
+               const std::vector<hipdnn_frontend::KnobSetting>& knobs = {})
+    {
+        ASSERT_TRUE(ok(plan(c, built, knobs)));
+        allocate(c, built);
+    }
+
+    /// Allocates the buffers and the workspace of the planned @p built.
+    void allocate(const GpuCase& c, Built& built)
+    {
+        auto& graph = *built.graph;
         ASSERT_TRUE(ok(graph.get_workspace_size(built.workspaceBytes)));
         if(fullDevice())
         {
@@ -854,6 +885,105 @@ protected:
         {
             runDeclined(c);
         }
+    }
+
+    /// The values the engine advertises for knob @p id of the planned graph (the main slot's
+    /// candidates, RFC 0021 section 5) and its default, the engine's own pick.
+    static std::pair<std::vector<int64_t>, int64_t>
+        advertised(const std::vector<hipdnn_frontend::Knob>& knobs, std::string_view id)
+    {
+        for(const auto& knob : knobs)
+        {
+            if(knob.knobId() != id)
+            {
+                continue;
+            }
+            const auto* ints
+                = dynamic_cast<const hipdnn_frontend::IntConstraint*>(knob.constraint());
+            const auto* pick = std::get_if<int64_t>(&knob.defaultValue());
+            if(ints == nullptr || pick == nullptr)
+            {
+                break;
+            }
+            std::vector<int64_t> values(ints->getValidValues().begin(),
+                                        ints->getValidValues().end());
+            std::sort(values.begin(), values.end());
+            return {values, *pick};
+        }
+        ADD_FAILURE() << ENGINE << " advertises no integer knob " << id;
+        return {};
+    }
+
+    /// Every main kernel the engine admits for @p c, forced through the main slot's knobs, runs
+    /// twice on fresh data and matches the reference. A candidate stands in for the engine's
+    /// pick (same prep launch and shared workspace), so each queries the pick's workspace size.
+    /// A (tuning key, head pack) pair no admitted kernel has is refused before any plan exists.
+    void runEveryMainCandidate(const GpuCase& c)
+    {
+        if(c.code != "OK")
+        {
+            GTEST_SKIP() << c.name << " is declined; it has no candidates";
+        }
+        const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(ENGINE);
+        std::vector<int64_t> keys;
+        std::vector<int64_t> packs;
+        std::pair<int64_t, int64_t> pick;
+        int64_t pickWorkspace = 0;
+        {
+            Built probe;
+            build(c, probe);
+            ASSERT_FALSE(::testing::Test::HasFatalFailure());
+            pickWorkspace = probe.workspaceBytes;
+            std::vector<hipdnn_frontend::Knob> knobs;
+            ASSERT_TRUE(ok(probe.graph->get_knobs_for_engine(engineId, knobs)));
+            std::tie(keys, pick.first) = advertised(knobs, "main.tuning_key_id");
+            std::tie(packs, pick.second) = advertised(knobs, "main.head_pack_on");
+        }
+        ASSERT_FALSE(keys.empty() || packs.empty());
+
+        size_t ran = 0;
+        bool pickRan = false;
+        for(const auto key : keys)
+        {
+            for(const auto pack : packs)
+            {
+                const std::string what = std::string(c.name)
+                                         + " main.tuning_key_id=" + std::to_string(key)
+                                         + " main.head_pack_on=" + std::to_string(pack);
+                SCOPED_TRACE(what);
+                Built built;
+                const auto error = plan(c,
+                                        built,
+                                        {hipdnn_frontend::KnobSetting("main.tuning_key_id", key),
+                                         hipdnn_frontend::KnobSetting("main.head_pack_on", pack)});
+                if(error.code != hipdnn_frontend::ErrorCode::OK)
+                {
+                    EXPECT_NE(error.err_msg.find("satisfying the requested knob"),
+                              std::string::npos)
+                        << "a pinned candidate failed to plan: " << error.err_msg;
+                    continue;
+                }
+                allocate(c, built);
+                ASSERT_FALSE(::testing::Test::HasFatalFailure());
+                EXPECT_EQ(built.workspaceBytes, pickWorkspace)
+                    << "a candidate must leave the pick's shared workspace layout";
+                for(const uint32_t seed : {21U, 22U})
+                {
+                    auto state = makeState(c, makeLengths(c, seed), seed);
+                    reference(c, state);
+                    upload(c, state, built);
+                    ASSERT_TRUE(ok(execute(built)));
+                    check(c, state, built);
+                    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+                }
+                ++ran;
+                pickRan = pickRan || (key == pick.first && pack == pick.second);
+            }
+        }
+        std::cout << "GBWD_CANDIDATES " << c.name << " " << ran << '\n';
+        EXPECT_GE(ran, 1u);
+        EXPECT_TRUE(pickRan) << "the engine's own pick (tuning key " << pick.first << ", head pack "
+                             << pick.second << ") was not among the candidates";
     }
 
     /// One plan captured once into a HIP graph and replayed three times, each with new data and,
