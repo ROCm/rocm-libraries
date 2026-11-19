@@ -236,6 +236,20 @@ TEST_F(TestEngineNames, EngineNameOrIdTreatsBarePlusAsName)
     EXPECT_EQ(engineNameOrIdToId("+"), engineNameToId("+"));
 }
 
+TEST_F(TestEngineNames, EngineNameOrIdTreatsASecondSignAsName)
+{
+    EXPECT_EQ(engineNameOrIdToId("+-5"), engineNameToId("+-5"));
+    EXPECT_NE(engineNameOrIdToId("+-5"), -5);
+    EXPECT_EQ(engineNameOrIdToId("++5"), engineNameToId("++5"));
+}
+
+// Every string yields an ID: a hex token too wide for 64 bits names an engine rather
+// than being rejected or truncated.
+TEST_F(TestEngineNames, EngineNameOrIdHashesAnOverflowingHexIdAsName)
+{
+    EXPECT_EQ(engineNameOrIdToId("0x1FFFFFFFFFFFFFFFF"), engineNameToId("0x1FFFFFFFFFFFFFFFF"));
+}
+
 TEST_F(TestEngineNames, EngineNameOrIdParsesHexId)
 {
     EXPECT_EQ(engineNameOrIdToId("0x0000000000003039"), 12345);

@@ -115,7 +115,8 @@ inline std::optional<int64_t> parseEngineNumericId(std::string_view value)
     const bool hasLeadingPlus = value.front() == '+';
     const auto* first = value.data() + (hasLeadingPlus ? 1 : 0);
     const auto* last = value.data() + value.size();
-    if(first == last)
+    // One sign at most: from_chars would accept the '-' of "+-5" after the stripped '+'.
+    if(first == last || (hasLeadingPlus && (*first == '+' || *first == '-')))
     {
         return std::nullopt;
     }

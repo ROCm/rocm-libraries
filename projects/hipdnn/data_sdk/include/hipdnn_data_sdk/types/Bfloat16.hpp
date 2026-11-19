@@ -108,12 +108,24 @@ constexpr uint16_t BFLOAT16_ROUND_ERROR = 0x3F00;
 
 // Convert float to bfloat16 bits using simple truncation
 // This is faster than RNE and matches some HIP implementations
+// NaN inputs stay NaN: a NaN whose payload lies only in the truncated low
+// mantissa bits gets the quiet NaN bit set instead of becoming infinity.
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline uint16_t float_to_bfloat16_bits_truncate(float f) noexcept
 {
     uint32_t bits;
     std::memcpy(&bits, &f, sizeof(float));
-    return static_cast<uint16_t>(bits >> 16);
+
+    auto upper = static_cast<uint16_t>(bits >> 16);
+
+    const uint32_t exp = (bits >> 23) & 0xFF;
+    const uint32_t mant = bits & 0x007FFFFF;
+    if(exp == 0xFF && mant != 0)
+    {
+        return upper | 0x0040;
+    }
+
+    return upper;
 }
 
 // Convert float to bfloat16 bits using round-to-nearest-even (RNE)

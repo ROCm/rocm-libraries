@@ -472,6 +472,27 @@ TEST_F(TestForwardingFunctions, Int32Abs)
     EXPECT_EQ(hipdnn_data_sdk::types::abs(int32_t{1000}), 1000);
 }
 
+TEST_F(TestForwardingFunctions, Int32AbsOfMinimumIsUnchanged)
+{
+    constexpr int32_t MINIMUM = std::numeric_limits<int32_t>::min();
+    EXPECT_EQ(hipdnn_data_sdk::types::abs(MINIMUM), MINIMUM);
+    EXPECT_EQ(hipdnn_data_sdk::types::abs(MINIMUM + 1), std::numeric_limits<int32_t>::max());
+}
+
+TEST_F(TestForwardingFunctions, Int32Sqrt)
+{
+    EXPECT_EQ(hipdnn_data_sdk::types::sqrt(int32_t{16}), 4);
+    EXPECT_EQ(hipdnn_data_sdk::types::sqrt(int32_t{17}), 4);
+    EXPECT_EQ(hipdnn_data_sdk::types::sqrt(int32_t{0}), 0);
+}
+
+TEST_F(TestForwardingFunctions, Int32SqrtOfNegativeIsZero)
+{
+    EXPECT_EQ(hipdnn_data_sdk::types::sqrt(int32_t{-1}), 0);
+    EXPECT_EQ(hipdnn_data_sdk::types::sqrt(int32_t{-16}), 0);
+    EXPECT_EQ(hipdnn_data_sdk::types::sqrt(std::numeric_limits<int32_t>::min()), 0);
+}
+
 TEST_F(TestForwardingFunctions, Uint8Max)
 {
     EXPECT_EQ(hipdnn_data_sdk::types::max(uint8_t{5}, uint8_t{10}), 10);
