@@ -976,7 +976,8 @@ _GFX942_3D_OFFSET = 32
 #   85: 83 + rpf_pingpong=5, vmem_interleave=6, pp_b_double, pp_split_fetch=4
 #   86: 83 + rpf_pingpong=4, rpf_setprio=1, pp_pre_mfma=2
 #   87: 83 + rpf_pingpong=1
-#   88: 83 + rpf_pingpong=3, pp_b_double
+#   88: 83 + rpf_pingpong=3, pp_b_double: rejected by both engines (modes 2 / 3
+#       do not wait for the [mem A] LDS reads)
 #   89: 83 + rpf_pingpong=5, vmem_interleave=5, pp_split_fetch=10
 #   90: 54 + compv3, reg_prefetch=1, vmem_interleave=2, rpf_setprio=1
 #   91: 83 + rpf_pingpong=5 without vmem_interleave: rejected by both engines

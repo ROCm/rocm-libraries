@@ -37,7 +37,7 @@ class TestFwdPingPong(unittest.TestCase):
         ):
             for knobs in (
                 dict(rpf_pingpong=1, rpf_setprio=1),
-                dict(rpf_pingpong=3),
+                dict(rpf_pingpong=1),
                 dict(rpf_pingpong=4),
                 dict(rpf_pingpong=4, pp_pre_mfma=2),
                 dict(rpf_pingpong=5, vmem_interleave=4),
@@ -109,13 +109,16 @@ class TestFwdPingPongSpec(unittest.TestCase):
             dict(rpf_pingpong=4),
             dict(rpf_pingpong=4, pp_pre_mfma=2, rpf_setprio=1),
             dict(rpf_pingpong=5, vmem_interleave=4),
-            dict(rpf_pingpong=3, lds_kpack_read=False),
+            dict(rpf_pingpong=1, lds_kpack_read=False),
             dict(cshuffle_m_chunks=2),
         ):
             with self.subTest(**kw):
                 self.assertEqual(_fwd_kloop_conflict(self._spec(**kw)), "")
         for kw in (
             dict(rpf_pingpong=6),
+            # 2 / 3: the [mem A] barrier without the wait for the LDS reads.
+            dict(rpf_pingpong=2),
+            dict(rpf_pingpong=3),
             dict(rpf_pingpong=4, warp_m=2),  # 4 waves
             dict(rpf_pingpong=4, lds_ahead=True),
             dict(rpf_pingpong=4, defer_mfma=1),

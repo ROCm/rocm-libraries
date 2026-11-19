@@ -568,17 +568,14 @@ class ImplicitGemmConvSpec:
     # reads, [compute A] the first half of the MFMAs, [mem B] the next tile's
     # LDS store, [compute B] the second half -- one wave's memory phase hides
     # under its SIMD partner's MFMAs. The compute phases run at s_setprio
-    # ``rpf_setprio``. 1: the barrier closing [mem A] waits for the wave's
-    # fragment reads (lgkmcnt(0)); 2: it does not (the reads complete under
-    # the partner's MFMAs; Triton's form); 3: as 2 without the compiler
-    # fence on that barrier, so each MFMA waits for its own fragments;
-    # 4: as 3 with the global reads of tile t+2 issued in [mem B] after the
-    # LDS store of t+1 (loop-carried registers; [mem A] ends with
-    # lgkmcnt(0) as in 1, modes 2/3 rely on in-order LDS across waves and
-    # are experiments only), so [mem A] holds the
-    # fragment reads only; 5: as 4 with those reads (and their address math)
-    # inside [compute B], one buffer_load per ``vmem_interleave`` MFMAs.
-    # Tags ``pp<n>``.
+    # ``rpf_setprio``. The barrier closing [mem A] waits for the wave's
+    # fragment reads (lgkmcnt(0)): a read still queued at the LDS is not
+    # ordered before the partner SIMD's later write. 1: that schedule;
+    # 4: 1 with the global reads of tile t+2 issued in [mem B] after the LDS
+    # store of t+1 (loop-carried registers), so [mem A] holds the fragment
+    # reads only; 5: as 4 with those reads (and their address math) inside
+    # [compute B], one buffer_load per ``vmem_interleave`` MFMAs. 2 and 3
+    # (the [mem A] barrier without that wait) are refused. Tags ``pp<n>``.
     rpf_pingpong: int = 0
     # rpf_pingpong: MFMAs of each compute phase issued ahead of the barrier
     # that opens it (operands in registers; hides the barrier). Tags ``ppm<n>``.
@@ -1230,8 +1227,11 @@ def _fwd_kloop_conflict(spec: "ImplicitGemmConvSpec") -> str:
         )
     if spec.rpf_pingpong:
         _nw = spec.warp_m * spec.warp_n
-        if spec.rpf_pingpong not in (1, 2, 3, 4, 5):
-            return "rpf_pingpong must be 0..5"
+        if spec.rpf_pingpong not in (1, 4, 5):
+            # 2 / 3 issued the [mem A] barrier without waiting for the
+            # outstanding LDS reads (an ordering the hardware does not
+            # guarantee across waves): not built.
+            return "rpf_pingpong must be 0, 1, 4 or 5"
         if (spec.rpf_pingpong == 5) != bool(spec.vmem_interleave):
             return "rpf_pingpong=5 places its loads one per vmem_interleave MFMAs (and only it)"
         _half_mf = (
@@ -5135,19 +5135,12 @@ def _build_implicit_gemm_conv_impl(
                 return accs_
 
             def bar_mem_a():
-                if spec.rpf_pingpong in (1, 4, 5):
-                    # The wave's fragment reads complete before the partner
-                    # half may start overwriting the buffer: a read still
-                    # queued at the LDS when the barrier releases is not
-                    # ordered before another SIMD's later write (pp3 measured
-                    # nondeterministic results on t128x128 w2x4).
-                    b.sync_lds_only(fence="compiler")
-                elif spec.rpf_pingpong == 2:
-                    b.s_barrier_bare(fence="compiler")
-                else:
-                    # No compiler fence: the compute phase waits for each
-                    # fragment with its own (descending) lgkmcnt.
-                    b.s_barrier_bare(fence="none")
+                # The wave's fragment reads complete before the partner half
+                # may start overwriting the buffer: a read still queued at the
+                # LDS when the barrier releases is not ordered before another
+                # SIMD's later write (why modes 2 / 3, which skipped this
+                # wait, are refused).
+                b.sync_lds_only(fence="compiler")
 
             def bar_mem_b():
                 b.sync_lds_only(fence="compiler")

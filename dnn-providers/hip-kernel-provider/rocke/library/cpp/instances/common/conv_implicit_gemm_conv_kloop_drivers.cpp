@@ -1037,16 +1037,11 @@ static void conv_pp_sched_loads(conv_pp_t* p, int n_ld, int n_m)
         rocke_b_sched_group_barrier(b, ROCKE_SCHED_MFMA, n_m, 0);
 }
 
+/* The [mem A] barrier waits for the wave's fragment reads (rpf_pingpong is
+ * 1, 4 or 5; the validator refuses 2 / 3, which skipped that wait). */
 static void conv_pp_bar_mem_a(conv_pp_t* p)
 {
-    rocke_ir_builder_t* b = p->ctx->b;
-    const int pp = p->ctx->spec->rpf_pingpong;
-    if(pp == 1 || pp == 4 || pp == 5)
-        rocke_b_sync_lds_only_fence(b, "compiler");
-    else if(pp == 2)
-        rocke_b_s_barrier_bare_fence(b, "compiler");
-    else
-        rocke_b_s_barrier_bare_fence(b, "none");
+    rocke_b_sync_lds_only_fence(p->ctx->b, "compiler");
 }
 
 /* open_compute: the first `pre` MFMAs of the phase, then its barrier. */

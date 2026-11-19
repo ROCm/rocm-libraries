@@ -350,8 +350,9 @@ Every K tile is four barrier-separated phases: [mem A] all LDS fragment reads of
 MFMAs, [mem B] the LDS store of the next tile, [compute B] the other half -- one wave's memory phase runs under its
 SIMD partner's MFMAs. Modes: `pp1` (fragment reads retired before the barrier, loads of the next tile in [mem A]),
 `pp4` (global reads of tile t+2 issued in [mem B] after the store of t+1, loop-carried registers), `pp5` (those reads
-spread over the [compute B] MFMAs, one per `vmem_interleave` MFMAs); `pp2`/`pp3` are experiments that rely on in-order
-LDS across waves. `pp_pre_mfma` (`ppm<n>`) hoists MFMAs above the opening barriers, `pp_b_double` (`ppbd`) keeps B in
+spread over the [compute B] MFMAs, one per `vmem_interleave` MFMAs). Every mode waits for the wave's fragment reads
+before the [mem A] barrier; `rpf_pingpong` 2 / 3, which did not, are refused (a read still queued at the LDS is not
+ordered before the partner SIMD's later write). `pp_pre_mfma` (`ppm<n>`) hoists MFMAs above the opening barriers, `pp_b_double` (`ppbd`) keeps B in
 two buffers. It targets the 16x16x16 atom on t256x128x64 w4x2 for gfx942 FWD 3-D convs with 128-1024 channels,
 where [mem A] is LDS-read bound.
 AOT axis: `ROCKE_AOT_FWD_PP=p<mode>[m<pre>][s<prio>][v<vmi>][w<wpe>],...` on `ROCKE_AOT_FWD_PP_SCOPE` geometries.

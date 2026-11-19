@@ -1400,8 +1400,10 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
     if(s->rpf_pingpong)
     {
         const int nw = s->warp_m * s->warp_n;
-        if(s->rpf_pingpong < 1 || s->rpf_pingpong > 5)
-            ROCKE_SPEC_FAIL(reason, reason_cap, "rpf_pingpong must be 0..5");
+        /* 2 / 3 issued the [mem A] barrier without waiting for the
+         * outstanding LDS reads: not built. */
+        if(s->rpf_pingpong != 1 && s->rpf_pingpong != 4 && s->rpf_pingpong != 5)
+            ROCKE_SPEC_FAIL(reason, reason_cap, "rpf_pingpong must be 0, 1, 4 or 5");
         if((s->rpf_pingpong == 5) != (s->vmem_interleave != 0))
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
