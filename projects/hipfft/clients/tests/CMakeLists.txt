@@ -347,10 +347,6 @@ if( NOT "${HIPFFT_LINKED_VERSION}" STREQUAL ""
     target_include_directories( ${c_src}_c BEFORE PRIVATE
       $<TARGET_PROPERTY:hip::hipfft,INTERFACE_INCLUDE_DIRECTORIES>
       )
-    target_link_libraries( ${c_src}_c
-      PRIVATE
-      hip::hipfft
-      )
     if( BUILD_WITH_LIB STREQUAL "CUDA" )
       target_compile_definitions( ${c_src}_c PRIVATE __HIP_PLATFORM_NVIDIA__)
     else()
