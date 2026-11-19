@@ -16,13 +16,16 @@ touched.
 
 from __future__ import annotations
 
+import ast
 import dataclasses
+import inspect
 
 import pytest
 
 from benchmarks.common.kernel_cache import KernelCache
 from kernels.common._conv_implicit_gemm_common import ConvProblem
 from kernels.common.conv_direct_grouped import DirectConvProblem
+from kernels.conv import kernel_identity as _ki
 from kernels.conv.kernel_identity import (
     DIRECT_PROBLEM_CAPABILITY_ATTRS,
     IDENTITY_CAPABILITY_FIELDS,
@@ -90,6 +93,9 @@ def _identities() -> list:
         _identity(direction="dgrad", patch=True),
         _identity(direction="dgrad", max_sub_gemms=4),
         _identity(direction="dgrad", tap_outer_k=True),
+        _identity(direction="dgrad", tap_outer_k=True, tapk_pingpong=4),
+        _identity(direction="wgrad", epi_quad_xpose=1),
+        _identity(direction="fwd", split_k=2, two_stage=True, split_k_cluster=4),
         _identity(direction="dgrad", dy_halo=1, halo_max_wo=64, filter_h=3, filter_w=3),
         _identity(
             direction="direct_fwd",
@@ -165,6 +171,26 @@ def _conv_problems() -> list:
             pD=1,
             dD=1,
         ),
+        # A filter wider than 3 per axis (the tapk_pingpong >= 4 tap mask).
+        ConvProblem(
+            N=1,
+            Hi=16,
+            Wi=16,
+            C=64,
+            K=64,
+            Y=5,
+            X=5,
+            pH=2,
+            pW=2,
+            Di=16,
+            Z=5,
+            sD=1,
+            pD=2,
+            dD=1,
+        ),
+        # cpg = kpg = 6: not a multiple of 4 (the wgrad epi_quad_xpose store and
+        # the cluster split-K fold).
+        ConvProblem(N=2, Hi=16, Wi=16, C=12, K=12, Y=3, X=3, pH=1, pW=1, groups=2),
     ]
 
 
@@ -198,15 +224,22 @@ def _answers(identity, problems=None) -> list:
 
 def _perturbed(value):
     """A different value of the same kind, or ``None`` when there is none."""
+    others = _perturbations(value)
+    return others[0] if others else None
+
+
+def _perturbations(value) -> list:
+    """Different values of the same kind: for an int several, since a rule
+    may only fire past a threshold (``>= 4``) or on a residue (``% 4``)."""
     if isinstance(value, bool):
-        return not value
+        return [not value]
     if isinstance(value, int):
-        return value + 1
+        return [v for v in dict.fromkeys((value + 1, 1, 2, 4, 5, 1003)) if v != value]
     if isinstance(value, str):
-        return value + "_x"
+        return [value + "_x"]
     if value is None:
-        return 3
-    return None
+        return [3]
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -234,14 +267,58 @@ def test_identity_key_covers_every_field_the_predicate_reads():
     for identity in _identities():
         expected = _answers(identity)
         for name in free:
-            other = _perturbed(getattr(identity, name))
-            if other is None:
-                continue
-            moved = dataclasses.replace(identity, **{name: other})
-            assert _answers(moved) == expected, (
-                f"{identity.direction}/{identity.algorithm}: the predicate "
-                f"reads {name!r}, which the identity capability key leaves out"
-            )
+            for other in _perturbations(getattr(identity, name)):
+                moved = dataclasses.replace(identity, **{name: other})
+                assert _answers(moved) == expected, (
+                    f"{identity.direction}/{identity.algorithm}: the predicate "
+                    f"reads {name!r}={other!r}, which the identity capability "
+                    "key leaves out"
+                )
+
+
+# The predicate and the helpers it hands the identity to.
+_PREDICATE_FUNCTIONS = (
+    _ki.identity_supports_problem,
+    _ki.dgrad_sub_gemms,
+    _ki._grid_fits,
+    _ki._group_merge_fits,
+)
+
+
+def _identity_reads(fn) -> set:
+    """Every ``identity.<field>`` / ``getattr(identity, "<field>")`` in ``fn``."""
+    reads = set()
+    for node in ast.walk(ast.parse(inspect.getsource(fn))):
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "identity"
+        ):
+            reads.add(node.attr)
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and len(node.args) >= 2
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id == "identity"
+            and isinstance(node.args[1], ast.Constant)
+        ):
+            reads.add(node.args[1].value)
+    return reads
+
+
+def test_identity_key_names_every_field_the_predicate_source_reads():
+    """The perturbation test only sees the rules its problems exercise; this
+    reads the predicate's source, so a new rule on a field the key leaves out
+    fails here even before a problem that fires it is added."""
+    reads = set().union(*(_identity_reads(fn) for fn in _PREDICATE_FUNCTIONS))
+    assert {"tile_m", "tapk_pingpong", "epi_quad_xpose"} <= reads
+    missing = reads - _IDENTITY_KEY_FIELDS - {"label"}
+    assert not missing, (
+        f"identity_supports_problem reads {sorted(missing)}, which "
+        "IDENTITY_CAPABILITY_FIELDS leaves out"
+    )
 
 
 def test_identity_key_separates_what_the_predicate_separates():
@@ -377,6 +454,33 @@ def test_compatible_matches_a_plain_scan(cache, direction):
         assert cache.compatible(problem, direction=direction) == expected
     # An agreement on "nothing matches" everywhere would prove nothing.
     assert offered
+
+
+@pytest.mark.parametrize("twin_first", [False, True])
+def test_compatible_splits_a_knob_the_predicate_reads(tmp_path, twin_first):
+    """A tap-outer dgrad binary and its tapk_pingpong = 4 twin differ only in
+    a field the predicate reads (the twin serves filters of up to 3 per
+    axis). Whichever the cache lists first, a 5x5x5 problem is offered the
+    plain binary alone."""
+    plain = _identity(
+        direction="dgrad",
+        grouped=True,
+        tap_outer_k=True,
+        stride_h=1,
+        stride_w=1,
+        dilation_h=1,
+        dilation_w=1,
+        is_3d=True,
+    )
+    twin = dataclasses.replace(plain, tapk_pingpong=4)
+    c = KernelCache(tmp_path, _ARCH)
+    for ident in (twin, plain) if twin_first else (plain, twin):
+        c.put(ident, b"placeholder", {"kernel_name": ident.label()})
+    problem = _conv_problems()[-2]
+    assert identity_supports_problem(plain, problem)[0]
+    assert not identity_supports_problem(twin, problem)[0]
+    offered = [e[0] for e in c.compatible(problem, direction="dgrad")]
+    assert offered == [plain]
 
 
 def test_compatible_returns_the_callers_own_list(cache):

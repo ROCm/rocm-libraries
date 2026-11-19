@@ -372,7 +372,9 @@ class KernelIdentity:
     split_tail_compact: bool = False
     # fwd only (ImplicitGemmConvSpec.split_det). Left out of the hash at 0.
     split_det: int = 0
-    # fwd only (ImplicitGemmConvSpec.epi_quad_xpose). Left out of the hash at 0.
+    # fwd and wgrad (ImplicitGemmConvSpec.epi_quad_xpose,
+    # WgradConvSpec.epi_quad_xpose); on wgrad a capability (cpg % 4 == 0, see
+    # identity_supports_problem). Left out of the hash at 0.
     epi_quad_xpose: int = 0
     # fwd and dgrad (ImplicitGemmConvSpec.no_agpr, DgradConvSpec.no_agpr). Left out of the hash while False.
     no_agpr: bool = False
@@ -1487,6 +1489,9 @@ IDENTITY_CAPABILITY_FIELDS = (
     "xh_tap_rsrc",
     "xh_dx_wmask",
     "xh_yring",
+    "tapk_pingpong",
+    "epi_quad_xpose",
+    "split_k_cluster",
 )
 
 #: Problem attributes the predicate reads when the identity is a *direct* one.
