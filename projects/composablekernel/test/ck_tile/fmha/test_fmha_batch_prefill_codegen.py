@@ -19,9 +19,9 @@ from codegen.ops.fmha_batch_prefill import get_fwd_blobs, is_page_tile_tag  # no
 # split: the same set unmasked; M128 split: P128 D64, P64 D64, P64 D128, dense/masked) and 2
 # query-tail instances (P64 D128, dense/masked).
 _PAGE_TILE_KERNELS = 1940
-# FP8 (fp8bf16) page-tile instances: D64 M64 (every unsplit grid), P64, vectorized + vLLM,
+# FP8 (fp8bf16) page-tile instances: D64 M128 and M64 (small grids), P64, vectorized + vLLM,
 # dense/masked.
-_FP8_PAGE_TILE_KERNELS = 2
+_FP8_PAGE_TILE_KERNELS = 4
 _M64_SET = set(itertools.product(["bf16"], [64, 128], [64, 128], ["s_no", "s_mask"]))
 _SPLIT_SET = {(d, p, 64, "s_no") for d in (64, 128) for p in (64, 128)}
 _SPLIT_SET |= {
@@ -449,7 +449,7 @@ class BatchPrefillCodegenTest(unittest.TestCase):
                     (k.F_hdim, k.F_page_size, k.F_pipeline.F_mask, k.F_tile.F_bm0)
                     for k in fp8
                 },
-                set(itertools.product([64], [64], ["s_no", "s_mask"], [64])),
+                set(itertools.product([64], [64], ["s_no", "s_mask"], [64, 128])),
             )
             for k in fp8:
                 p = k.F_pipeline
@@ -461,13 +461,14 @@ class BatchPrefillCodegenTest(unittest.TestCase):
                 self.assertEqual(
                     (p.F_lse, p.F_sink, p.F_bias, p.F_logits), ("f", "f", "no", "f")
                 )
-                # One PV stage over the 128-key tile.
+                # One PV stage over the 128-key tile at M128 and M64.
                 self.assertEqual((k.F_tile.F_bk1, k.F_tile.F_kv_splits), (128, 1))
-                # M64 takes every unsplit grid; a split request matches no FP8 arm.
+                # M64 takes grids of at most 2 num_cus M128 workgroups (512 on 256 CUs), unsplit.
                 constraint = str(k.F_tile.F_constraint)
-                for wg in (1, 511, 512, 513, 1024, 4096):
-                    self.assertTrue(
+                for wg in (1, 511, 512, 513, 1024):
+                    self.assertEqual(
                         _holds(constraint, wg, 128 * wg, 1, page=64),
+                        k.F_tile.F_bm0 == 128 or wg <= 512,
                         (k.F_tile.F_bm0, wg),
                     )
                 self.assertFalse(_holds(constraint, 1, 128, 2, page=64))
@@ -487,7 +488,7 @@ class BatchPrefillCodegenTest(unittest.TestCase):
             end = api.find("t.data_type.compare(", start + 1)
             arms = _arms(api[start : end if end >= 0 else len(api)])
             self.assertEqual(len(arms), _FP8_PAGE_TILE_KERNELS)
-            # A dense arm and a masked arm (any window) of the M64 tile, each with its mask type.
+            # A dense arm and a masked arm (any window) per tile, each with its mask type.
             prefix = "fmha_fwd_batch_prefill_traits_<64, FmhaFwdFp8Bf16, true, "
             self.assertEqual(
                 sorted(
@@ -498,11 +499,21 @@ class BatchPrefillCodegenTest(unittest.TestCase):
                     )
                     for cond, trait in arms
                 ),
-                sorted((True, masked, masked) for masked in (False, True)),
+                sorted(
+                    (m64, masked, masked)
+                    for m64 in (False, True)
+                    for masked in (False, True)
+                ),
             )
-            for cond, trait in arms:
-                # No grid clause: the M64 arms take every grid.
-                self.assertNotIn("get_num_blocks", cond)
+            # The M64 arms come first with their grid clause; the M128 arms take every grid.
+            m64 = [i for i, (_, t) in enumerate(arms) if t.startswith(prefix + "64, ")]
+            self.assertEqual(m64, [0, 1])
+            for i, (cond, trait) in enumerate(arms):
+                if i in m64:
+                    self.assertIn("get_num_blocks(128) <= 2 * num_cus", cond)
+                else:
+                    self.assertTrue(trait.startswith(prefix + "128, "), trait)
+                    self.assertNotIn("get_num_blocks", cond)
                 for clause in (
                     "t.qscale_type == quant_scale_enum::pertensor",
                     "t.page_size == 64",

@@ -784,6 +784,12 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
         return p_tile;
     }
 
+    // Where SumQuantizedPRows builds its FP8 ones operand (16 VGPRs). As a constant, the compiler
+    // builds it once before the KV loop and keeps it live through the loop: the M128 tile then
+    // holds 348 VGPRs (occupancy 2) instead of 334 (occupancy 3). Built per call, it lives only
+    // around the row-sum WMMAs. The M64 tile is at occupancy 4 either way and keeps the constant.
+    static constexpr bool kRowSumOnesPerCall = Geometry::kM == 128;
+
     // The row sum of the FP8 P that gemm_1 consumes (the pipeline's quantized mass), on the WMMA
     // unit: per M iteration of gemm_1, the sum of the lane's row of the P tile (gemm_1's A layout,
     // as RepackPForGemm1 returns it). Each is the PV WMMA of that iteration's P chunk with V's
@@ -810,8 +816,23 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
         constexpr auto a_warp_y_index_zeros = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
 
         BWarpTensor ones;
-        static_for<0, BBuffer::size(), 1>{}(
-            [&](auto e) { ones.get_thread_buffer()(e) = type_convert<fp8_t>(1.0f); });
+        if constexpr(kRowSumOnesPerCall)
+        {
+            // Four FP8 ones in a word that an empty volatile asm takes and returns: the compiler
+            // cannot treat the word as loop invariant, so it builds the operand from it here.
+            using Word = uint32_t;
+            static_assert(sizeof(fp8_t) == 1 && sizeof(BBuffer) % sizeof(Word) == 0);
+            Word word = 0x01010101u * bit_cast<uint8_t>(type_convert<fp8_t>(1.0f));
+            asm volatile("" : "+v"(word));
+            array<Word, sizeof(BBuffer) / sizeof(Word)> words;
+            static_for<0, sizeof(BBuffer) / sizeof(Word), 1>{}([&](auto w) { words(w) = word; });
+            ones.get_thread_buffer() = bit_cast<BBuffer>(words);
+        }
+        else
+        {
+            static_for<0, BBuffer::size(), 1>{}(
+                [&](auto e) { ones.get_thread_buffer()(e) = type_convert<fp8_t>(1.0f); });
+        }
         array<AWarpTensor, kPMI> p_rows;
         array<CWarpTensor, kPMI> sums;
         static_for<0, kPMI, 1>{}([&](auto m) {
