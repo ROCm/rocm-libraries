@@ -222,11 +222,14 @@ class GL2PrefetchLoad(GL2Prefetch):
         return mod
 
     def calculateStartAddr(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, \
-                           gsuIterSgpr: Optional[int] = None) -> Module:
+                           gsuIterSgpr: Optional[int] = None, \
+                           kStartSgprName: Optional[str] = None) -> Module:
         """Compute this workgroup's prefetch start addresses.
 
         gsuIterSgpr holds the shared GSU chunk start iteration from
         calculateGSUIterOffset, or None when the kernel has no GSU paths.
+        kStartSgprName names the SGPR holding a StreamK work item's start
+        iteration within its tile, or None when the work item starts at K=0.
         """
         mod = Module()
         globalPrefetchSize: int = writer.states.regCaps["GlobalPrefetchSize"]
@@ -455,6 +458,18 @@ class GL2PrefetchLoad(GL2Prefetch):
             if gsuIterSgpr is not None:
                 mod.add(self.applyGSUChunk(writer, kernel, tp, gsuIterSgpr, \
                     tmpSgprIdx0, tmpSgprIdx2, tmpVgprIdx))
+            if kStartSgprName is not None:
+                incName: str = f"GL2PrefetchInc{tc}"
+                mod.addModuleAsFlatItems(writer.s_mul_u64_u32(
+                    sgpr(tmpSgprIdx2), sgpr(tmpSgprIdx3),
+                    sgpr(kStartSgprName), sgpr(incName),
+                    tmpVgprIdx, comment="kOffset = kStart * inc"))
+                mod.add(SAddU64(sgpr(tmpSgprIdx0, 2), sgpr(tmpSgprIdx0, 2), sgpr(tmpSgprIdx2, 2), \
+                    comment="skip to this work item's K start"))
+                if self.numIncSgpr(kernel) == 2:
+                    mod.add(SMulI32(sgpr(tmpSgprIdx2), sgpr(kStartSgprName), sgpr(f"{incName}+1"), \
+                        comment="kOffset.hi = kStart * inc.hi"))
+                    mod.add(SAddU32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx2)))
 
             # add all together
             if useSAddr:
