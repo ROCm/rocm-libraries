@@ -1015,25 +1015,12 @@ std::optional<Grid> gridFor(const IgemmProblem& problem, int64_t bm, int64_t bn)
         static_cast<unsigned int>(x), static_cast<unsigned int>(y), static_cast<unsigned int>(z)};
 }
 
-long long flexSplits(long long tiles, long long kSteps, long long units)
-{
-    constexpr long long MAX_SPLITS = 16;
-    long long best = 1;
-    long long bestSteps = kSteps;
-    for(long long splits = 2; splits <= MAX_SPLITS && tiles * splits <= units; ++splits)
-    {
-        const long long steps = divUp(kSteps, splits) + FLEX_SPLIT_COST;
-        if(steps < bestSteps)
-        {
-            best = splits;
-            bestSteps = steps;
-        }
-    }
-    return best;
-}
-
-FlexTailSplit flexTailSplit(
-    long long rowTiles, long long rowWidth, long long kSteps, long long units, bool tailAlone)
+FlexTailSplit flexTailSplit(long long rowTiles,
+                            long long rowWidth,
+                            long long kSteps,
+                            long long units,
+                            bool tailAlone,
+                            long long splitCost)
 {
     constexpr long long MAX_SPLITS = 16;
     FlexTailSplit best;
@@ -1049,7 +1036,7 @@ FlexTailSplit flexTailSplit(
         {
             const long long cost
                 = divUp(first * rowWidth, units) * kSteps
-                  + divUp(tail * splits, units) * (divUp(kSteps, splits) + FLEX_SPLIT_COST);
+                  + divUp(tail * splits, units) * (divUp(kSteps, splits) + splitCost);
             if(cost < bestCost)
             {
                 bestCost = cost;
@@ -1196,7 +1183,7 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
     }
     long long splits = 1;
     long long splitRowTile = 0;
-    if(flex == 2)
+    if(flex != 0)
     {
         // One launch of the whole grid (rows within one dispatch) for the tail split.
         const long long rowWidth = static_cast<long long>(grid->y) * grid->z;
@@ -1205,13 +1192,10 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
                                          iterations,
                                          wanted,
                                          problem.base.epilogue.empty()
-                                             && launchTilesFor(grid->x, 512) == grid->x);
+                                             && launchTilesFor(grid->x, 512) == grid->x,
+                                         flexSplitCost(flex));
         splits = split.splits;
         splitRowTile = split.splitRowTile;
-    }
-    else if(flex != 0)
-    {
-        splits = flexSplits(tiles, iterations, device_units::dispatchUnits(device));
     }
     else if(underFilled)
     {

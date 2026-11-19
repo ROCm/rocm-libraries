@@ -41,7 +41,8 @@
 // channels (direct 8-byte stores where the channels are not whole runs).
 //
 // Split-K (a.splits > 1): split z runs a contiguous range of the steps and writes fp32 partials
-// indexed like the output, which ConvIgemmReduce adds in split order.
+// indexed like the output, which ConvIgemmReduce adds in split order. A launch of the trailing row
+// tiles only (the tail split) indexes its partials from row tile a.partialTile.
 #pragma once
 
 /// s_barrier without the fences of __syncthreads: the in-flight LDS DMA of the next stage must stay
@@ -423,7 +424,8 @@ __device__ __attribute__((always_inline)) void k1ConvFlex(const K1Args& a CONV_E
             for(int j = 0; j < FN; ++j)
             {
                 const int n = nl + j * DIM;
-                float* o = partial + m * outChans + chanBase + n;
+                float* o = partial + (m - static_cast<long long>(a.partialTile) * BM) * outChans
+                           + chanBase + n;
                 if(vec && n + 3 < ncols)
                     *reinterpret_cast<typename Atom::acc*>(o) = acc[i][j];
                 else

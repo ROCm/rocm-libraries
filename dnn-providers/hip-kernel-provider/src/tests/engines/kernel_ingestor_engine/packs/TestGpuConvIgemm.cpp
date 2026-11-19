@@ -872,6 +872,11 @@ std::vector<FlexCase> flexCases()
         tail.n = 1;
         cases.push_back({"Nhwc3x3TailSplit" + std::to_string(rows) + "RowTiles", tail, false});
     }
+    // 300 row tiles past one round of 256 units (MI355X) with a reduction deep enough to pay a
+    // split: the LDS-DMA form splits only the last 44.
+    auto deepTail = dense(2048, 16, {300, 256}, {1, 1}, {0, 0}, true);
+    deepTail.n = 1;
+    cases.push_back({"Nhwc1x1TailSplit300RowTiles", deepTail, false});
     return cases;
 }
 
@@ -2716,61 +2721,79 @@ TEST(TestConvIgemmSplitPlan, ADeviceWithoutUnitsGetsNoSplitAndNoConfig)
     }
 }
 
-TEST(TestConvIgemmSplitPlan, FlexSplitsWithinOneRoundIntoTheFewestStepsPerSplit)
+TEST(TestConvIgemmSplitPlan, FlexLdsDmaFormTakesTheTailSplitAtItsSplitCost)
 {
-    // 88 tiles of 216 k-steps on 256 units: 2 splits fit one round (3 would not).
-    EXPECT_EQ(conv_igemm::flexSplits(88, 216, 256), 2);
-    // 64 tiles of 432 k-steps: 4 splits, 108 + 14 steps.
-    EXPECT_EQ(conv_igemm::flexSplits(64, 432, 256), 4);
-    // A grid that fills the units, or a reduction too short to gain from a split, runs unsplit.
-    EXPECT_EQ(conv_igemm::flexSplits(256, 432, 256), 1);
-    EXPECT_EQ(conv_igemm::flexSplits(64, 16, 256), 1);
-    // One tile of a deep reduction: at most 16 splits.
-    EXPECT_EQ(conv_igemm::flexSplits(1, 4096, 256), 16);
-    // Split policy 0 applies it to the flex tile's grid (one 256 x 256 tile, 27 x 8 k-steps of
-    // 64, one resident block a CU); policies 1 and N plan as for any config.
+    EXPECT_EQ(conv_igemm::flexSplitCost(1), 20);
+    EXPECT_EQ(conv_igemm::flexSplitCost(2), 14);
+    // 300 row tiles of 216 k-steps on 256 units: 256 row tiles fill one round and the other 44
+    // split 5 ways into one more round (216 + 44 + 20 k-steps, not 2 x 216).
+    const auto tail
+        = conv_igemm::flexTailSplit(300, 1, 216, 256, true, conv_igemm::flexSplitCost(1));
+    EXPECT_EQ(tail.splitRowTile, 256);
+    EXPECT_EQ(tail.splits, 5);
+    // A fused epilogue: every row tile splits, 4 rounds of 72 + 20.
+    const auto whole
+        = conv_igemm::flexTailSplit(300, 1, 216, 256, false, conv_igemm::flexSplitCost(1));
+    EXPECT_EQ(whole.splitRowTile, 0);
+    EXPECT_EQ(whole.splits, 3);
+    // Split policy 0 applies it to the flex tile's grid: one 256 x 256 tile of 27 x 8 k-steps of
+    // 64 splits 16 ways (14 + 20 k-steps); policies 1 and N plan as for any config.
     auto deep = dense(512, 256, {3, 4, 5}, {3, 3, 3}, {1, 1, 1}, true);
     deep.n = 1;
     const auto problem = parsedProblem(deep, ConvDirection::FORWARD);
     const auto device = deviceOf("gfx950", 256);
     const auto flexPlan = [&](int64_t policy) {
-        return conv_igemm::splitPlanFor(problem, 256, 256, 64, device, 0, false, policy, 1, true)
-            .splits;
+        return conv_igemm::splitPlanFor(problem, 256, 256, 64, device, 0, false, policy, 1, 1);
     };
-    EXPECT_EQ(flexPlan(0), conv_igemm::flexSplits(1, 216, 256));
-    EXPECT_EQ(flexPlan(1), 1);
-    EXPECT_EQ(flexPlan(4), 4);
-    // 88 tiles (11 x 32 x 64 positions) on 256 units: the auto plan stays within one round where the default rule would
-    // take 3 splits (264 blocks).
+    EXPECT_EQ(flexPlan(0).splits, 16);
+    EXPECT_EQ(flexPlan(0).splitRowTile, 0);
+    EXPECT_EQ(flexPlan(0).partialElems, flexPlan(0).outElems);
+    EXPECT_EQ(flexPlan(1).splits, 1);
+    EXPECT_EQ(flexPlan(4).splits, 4);
+    // 88 tiles (11 x 32 x 64 positions) on 256 units: 2 splits in one round (108 + 20 k-steps
+    // beat two rounds of any larger split) where the default rule would take 3 splits.
     auto wide = dense(512, 256, {11, 32, 64}, {3, 3, 3}, {1, 1, 1}, true);
     wide.n = 1;
     const auto wideProblem = parsedProblem(wide, ConvDirection::FORWARD);
-    EXPECT_EQ(
-        conv_igemm::splitPlanFor(wideProblem, 256, 256, 64, device, 0, false, 0, 1, true).splits,
-        2);
+    EXPECT_EQ(conv_igemm::splitPlanFor(wideProblem, 256, 256, 64, device, 0, false, 0, 1, 1).splits,
+              2);
     EXPECT_EQ(conv_igemm::splitPlanFor(wideProblem, 256, 256, 64, device, 0, false, 0, 1).splits,
               3);
+    // 300 x 256 positions (300 row tiles of one 256-channel column tile): the tail split, its
+    // partials covering only the 44 split row tiles.
+    auto rows = dense(512, 256, {300, 256}, {3, 3}, {1, 1}, true);
+    rows.n = 1;
+    const auto rowsPlan = conv_igemm::splitPlanFor(
+        parsedProblem(rows, ConvDirection::FORWARD), 256, 256, 64, device, 0, false, 0, 1, 1);
+    EXPECT_EQ(rowsPlan.splitRowTile, 256);
+    EXPECT_GT(rowsPlan.splits, 1);
+    EXPECT_EQ(rowsPlan.partialElems, rowsPlan.outElems - 256LL * 256 * 256);
 }
 
 TEST(TestConvIgemmSplitPlan, FlexTailSplitSplitsTheRowTilesPastTheWholeRounds)
 {
     // 256 row tiles of 2 tiles, 216 k-steps, 228 units: 228 row tiles fill two rounds and the
     // other 56 tiles split 4 ways into one more round (2 x 216 + 54 + 14 k-steps).
-    const auto tail = conv_igemm::flexTailSplit(256, 2, 216, 228, true);
+    const auto tail
+        = conv_igemm::flexTailSplit(256, 2, 216, 228, true, conv_igemm::flexSplitCost(2));
     EXPECT_EQ(tail.splitRowTile, 228);
     EXPECT_EQ(tail.splits, 4);
     // With the tail kept in the launch (a fused epilogue), every row tile splits or none does:
     // 7 rounds of 72 + 14 beat 3 rounds of 216.
-    const auto whole = conv_igemm::flexTailSplit(256, 2, 216, 228, false);
+    const auto whole
+        = conv_igemm::flexTailSplit(256, 2, 216, 228, false, conv_igemm::flexSplitCost(2));
     EXPECT_EQ(whole.splitRowTile, 0);
     EXPECT_EQ(whole.splits, 3);
     // 128 tiles under one round of 228 units, 432 k-steps: 5 splits run 3 rounds of 87 + 14.
-    const auto under = conv_igemm::flexTailSplit(32, 4, 432, 228, true);
+    const auto under
+        = conv_igemm::flexTailSplit(32, 4, 432, 228, true, conv_igemm::flexSplitCost(2));
     EXPECT_EQ(under.splitRowTile, 0);
     EXPECT_EQ(under.splits, 5);
     // Whole rounds exactly, or a reduction too short to pay a split: unsplit.
-    EXPECT_EQ(conv_igemm::flexTailSplit(228, 2, 216, 228, true).splits, 1);
-    EXPECT_EQ(conv_igemm::flexTailSplit(32, 4, 16, 228, true).splits, 1);
+    EXPECT_EQ(
+        conv_igemm::flexTailSplit(228, 2, 216, 228, true, conv_igemm::flexSplitCost(2)).splits, 1);
+    EXPECT_EQ(conv_igemm::flexTailSplit(32, 4, 16, 228, true, conv_igemm::flexSplitCost(2)).splits,
+              1);
     // The register-staged plan of a single row tile splits all of it, partials of the whole
     // output.
     auto deep = dense(512, 256, {3, 4, 5}, {3, 3, 3}, {1, 1, 1}, true);
