@@ -651,7 +651,8 @@ UniversalGemm's compile-and-launch regressions live in
 FP64 direct-to-LDS or TDM cases. The comprehensive/full installed CTests share
 one GPU resource lock and each has a separate timeout. A nonmatching current
 HIP device skips unless `ROCKE_REQUIRE_<ARCH>=1`; a matching device must compile
-and pass its full case list against NumPy.
+and pass its full case list against NumPy. When `tests/run_all.py` is explicitly
+asked for `--gemm-gpu`, a skip reports `RESULT: INCOMPLETE` and exits 77.
 
 The counted backward synchronization split is the reference implementation:
 fast validator/model/mutation contracts remain in source discovery; the

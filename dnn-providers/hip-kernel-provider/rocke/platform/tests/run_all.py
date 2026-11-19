@@ -597,6 +597,7 @@ def main() -> int:
             cwd=str(build_root),
         ).returncode
 
+    gpu_skipped = False
     if args.gemm_gpu and status == 0:
         print(f"\n== UniversalGemm GPU numerical gate ({args.gemm_gpu}) ==", flush=True)
         from rocke.tests.subprocess_launcher import (
@@ -614,11 +615,12 @@ def main() -> int:
             ),
             env=rocke_subprocess_env(),
         ).returncode
-        if rc != 77:  # The optional lane reported incompatible or unavailable hardware.
-            status |= rc
+        gpu_skipped = rc == 77  # Explicit request, but no GPU comparisons ran.
+        status |= rc
 
     result_scope = "FOCUSED " if run_focused else ""
-    print("\nRESULT:", result_scope + ("GREEN" if status == 0 else "RED"))
+    verdict = "INCOMPLETE" if gpu_skipped else ("GREEN" if status == 0 else "RED")
+    print("\nRESULT:", result_scope + verdict)
     return status
 
 

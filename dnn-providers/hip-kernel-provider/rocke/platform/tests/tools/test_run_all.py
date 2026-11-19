@@ -264,6 +264,40 @@ def test_gemm_gpu_runner_keeps_selected_package_from_other_checkout(runner, tmp_
 
 
 @pytest.mark.parametrize(
+    "gpu_rc,expected_status,verdict",
+    [(None, 0, "GREEN"), (0, 0, "GREEN"), (77, 77, "INCOMPLETE"), (1, 1, "RED")],
+)
+def test_requested_gemm_gpu_gate_controls_verdict(
+    runner, monkeypatch, tmp_path, capsys, gpu_rc, expected_status, verdict
+):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        assert "rocke.tests.universal_gemm_gpu_gate" in command
+        assert command[-2:] == ["--arch", "gfx950"]
+        return subprocess.CompletedProcess(command, gpu_rc)
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    argv = [
+        "run_all.py",
+        "--no-guard",
+        "--no-gate",
+        "--no-pytest",
+        "--no-ir-validity",
+        "--no-arch-domain",
+        "--build-root",
+        str(tmp_path),
+    ]
+    if gpu_rc is not None:
+        argv.extend(["--gemm-gpu", "gfx950"])
+    monkeypatch.setattr(runner.sys, "argv", argv)
+    assert runner.main() == expected_status
+    assert len(calls) == (0 if gpu_rc is None else 1)
+    assert capsys.readouterr().out.splitlines()[-1] == f"RESULT: {verdict}"
+
+
+@pytest.mark.parametrize(
     ("gate_rc", "only_ir", "expect_complete"),
     [(0, "", True), (0, "gemm/gfx950/base", False), (1, "", False)],
 )
