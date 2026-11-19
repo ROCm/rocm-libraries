@@ -56,7 +56,8 @@ void check_sampled(index_t M, index_t N, index_t K)
         K, [&](auto variant) { check_sampled_kernel<typename decltype(variant)::type>(M, N, K); });
 }
 
-// A past 2^31 bytes: the MAB shape (tile_n 16) at M 65536, K 81920 (2.5 GiB of FP4 A).
+// A past 2^31 bytes: the 128x16x512 4x1-wave tile (tile_n 16) at M 65536, K 81920 (2.5 GiB of FP4
+// A).
 TEST(MxGemmTdmScheduledLargeCases, WideA)
 {
     using K = Kernel<pk_fp4_t,

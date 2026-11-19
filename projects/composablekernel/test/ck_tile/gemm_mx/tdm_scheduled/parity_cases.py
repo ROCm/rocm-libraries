@@ -47,9 +47,9 @@ def _tile(tile_m, tile_n, tile_k, warp_m, warp_n, atom_m):
     }
 
 
-MAF = _tile(256, 256, 512, 2, 2, 32)
-MAB = _tile(128, 16, 512, 4, 1, 16)
-FP8_256 = _tile(128, 128, 256, 2, 2, 16)
+T256X256X512 = _tile(256, 256, 512, 2, 2, 32)
+T128X16X512 = _tile(128, 16, 512, 4, 1, 16)
+T128X128X256 = _tile(128, 128, 256, 2, 2, 16)
 NO_CLUSTER = {"cluster_dim": (1, 1)}
 
 
@@ -71,10 +71,10 @@ def _row(
 #: M, N, K of 0: an instance row (Policy::Validate / validate_instance). Otherwise a problem row
 #: on a valid instance (GetUnsupportedReason / MxTdmScheduledSpec.validate).
 PARITY_CASES = [
-    _row("maf", MAF, "ok"),
+    _row("t256x256x512", T256X256X512, "ok"),
     _row(
-        "mab",
-        MAB,
+        "t128x16x512",
+        T128X16X512,
         "ok",
         out="fp16",
         tuning={
@@ -84,20 +84,23 @@ PARITY_CASES = [
             "split_b_lds_read": False,
         },
     ),
-    _row("out_f32", MAF, "out_dtype", out="fp32"),
+    _row("out_f32", T256X256X512, "out_dtype", out="fp32"),
     _row("tile_m_48", _tile(48, 256, 512, 2, 2, 32), "tile_mn"),
-    _row("in_f16", MAF, "dtype", a="fp16"),
-    _row("fp4_x_fp8", MAF, "dtype_width", b="fp8"),
-    _row("fp8_tile_k_512", MAF, "tile_k", a="fp8"),
+    _row("in_f16", T256X256X512, "dtype", a="fp16"),
+    _row("fp4_x_fp8", T256X256X512, "dtype_width", b="fp8"),
+    _row("fp8_tile_k_512", T256X256X512, "tile_k", a="fp8"),
     _row("waves_2x1", _tile(256, 256, 512, 2, 1, 32), "wave_group"),
     _row("fp8_atom_32", _tile(128, 128, 256, 2, 2, 32), "mma", a="fp8"),
     _row("tile_16x16", _tile(16, 16, 128, 2, 2, 32), "tile_atoms"),
     _row(
-        "split_b_no_prefetch", MAF, "split_b_read", tuning={"prefetch_lds_read": False}
+        "split_b_no_prefetch",
+        T256X256X512,
+        "split_b_read",
+        tuning={"prefetch_lds_read": False},
     ),
-    _row("gl2_1", MAF, "gl2_distance", tuning={"gl2_prefetch_distance": 1}),
-    _row("cluster_1x0", MAF, "cluster_dim", tuning={"cluster_dim": (1, 0)}),
-    _row("cluster_8x4", MAF, "cluster_size", tuning={"cluster_dim": (8, 4)}),
+    _row("gl2_1", T256X256X512, "gl2_distance", tuning={"gl2_prefetch_distance": 1}),
+    _row("cluster_1x0", T256X256X512, "cluster_dim", tuning={"cluster_dim": (1, 0)}),
+    _row("cluster_8x4", T256X256X512, "cluster_size", tuning={"cluster_dim": (8, 4)}),
     _row(
         "interleave_4x1_m32",
         _tile(128, 16, 128, 4, 1, 32),
@@ -110,13 +113,19 @@ PARITY_CASES = [
         "interleave_baseline_split",
     ),
     _row("lds_64x256x1024", _tile(64, 256, 1024, 2, 2, 32), "lds_capacity"),
-    _row("maf_1024", MAF, "ok", mnk=(1024, 1024, 1024)),
-    _row("m_0", MAF, "shape_positive", tuning=NO_CLUSTER, mnk=(0, 256, 512)),
-    _row("k_1040", MAF, "k_scale_block", tuning=NO_CLUSTER, mnk=(256, 256, 1040)),
+    _row("t256x256x512_1024", T256X256X512, "ok", mnk=(1024, 1024, 1024)),
+    _row("m_0", T256X256X512, "shape_positive", tuning=NO_CLUSTER, mnk=(0, 256, 512)),
     _row(
-        "m_4m_k_64k", MAF, "scale_span", tuning=NO_CLUSTER, mnk=(1 << 22, 256, 1 << 16)
+        "k_1040", T256X256X512, "k_scale_block", tuning=NO_CLUSTER, mnk=(256, 256, 1040)
     ),
-    _row("k_256", MAF, "k_short", tuning=NO_CLUSTER, mnk=(256, 256, 256)),
+    _row(
+        "m_4m_k_64k",
+        T256X256X512,
+        "scale_span",
+        tuning=NO_CLUSTER,
+        mnk=(1 << 22, 256, 1 << 16),
+    ),
+    _row("k_256", T256X256X512, "k_short", tuning=NO_CLUSTER, mnk=(256, 256, 256)),
     _row(
         "k_near_i32_max",
         _tile(32, 32, 256, 2, 2, 16),
@@ -127,13 +136,13 @@ PARITY_CASES = [
     ),
     _row(
         "k_tail_160",
-        FP8_256,
+        T128X128X256,
         "k_tail_full",
         a="fp8",
         tuning={"split_b_lds_read": False},
         mnk=(1024, 1024, 2048 + 160),
     ),
-    _row("grid_3x3_cluster_4x4", MAF, "cluster_grid", mnk=(768, 768, 1024)),
+    _row("grid_3x3_cluster_4x4", T256X256X512, "cluster_grid", mnk=(768, 768, 1024)),
 ]
 
 #: Reasons no row reaches, with why.

@@ -21,35 +21,35 @@ template <typename O, typename Tuning, typename Traits>
 using Fp4Big = Kernel<pk_fp4_t, pk_fp4_t, O, 256, 256, 512, 2, 2, 32, Tuning, Traits>;
 
 // The tuned 4096 x 4096 FP4 instance: 256x256x512 tile, 4x4 cluster.
-using Maf         = Fp4Big<fp8_t, Tu<4, 4>, Shape<false, false, 0>>;
-using MafTail     = Fp4Big<fp8_t, Tu<4, 4>, Shape<false, false, 1>>;
-using MafOddTail3 = Fp4Big<fp8_t, Tu<4, 4>, Shape<false, false, 3>>;
+using Fp4C4x4      = Fp4Big<fp8_t, Tu<4, 4>, Shape<false, false, 0>>;
+using Fp4C4x4Tail1 = Fp4Big<fp8_t, Tu<4, 4>, Shape<false, false, 1>>;
+using Fp4C4x4Tail3 = Fp4Big<fp8_t, Tu<4, 4>, Shape<false, false, 3>>;
 
-TEST(MxGemmTdmScheduled, Fp4MafEvenTiles) { check<Maf>(1024, 1024, 2048); }
-TEST(MxGemmTdmScheduled, Fp4MafLongK) { check<Maf>(1024, 1024, 65536); }
-TEST(MxGemmTdmScheduled, Fp4MafOddTiles)
+TEST(MxGemmTdmScheduled, Fp4EvenTiles) { check<Fp4C4x4>(1024, 1024, 2048); }
+TEST(MxGemmTdmScheduled, Fp4LongK) { check<Fp4C4x4>(1024, 1024, 65536); }
+TEST(MxGemmTdmScheduled, Fp4OddTiles)
 {
-    check<Maf>(1024, 1024, 512);
-    check<Maf>(1024, 1024, 1536);
-    check<Maf>(1024, 1024, 2560);
+    check<Fp4C4x4>(1024, 1024, 512);
+    check<Fp4C4x4>(1024, 1024, 1536);
+    check<Fp4C4x4>(1024, 1024, 2560);
 }
 // One instance serves every whole-tile count: odd counts (1, 3) run its TailNumber::One kernel,
 // even counts (2, 4) its Two kernel.
-TEST(MxGemmTdmScheduled, Fp4MafTileCounts)
+TEST(MxGemmTdmScheduled, Fp4TileCounts)
 {
     for(index_t tiles = 1; tiles <= 4; ++tiles)
     {
-        check<Maf>(1024, 1024, tiles * 512);
-        check<MafTail>(1024, 1024, tiles * 512 + 128);
+        check<Fp4C4x4>(1024, 1024, tiles * 512);
+        check<Fp4C4x4Tail1>(1024, 1024, tiles * 512 + 128);
     }
 }
 TEST(MxGemmTdmScheduled, Fp4KTail)
 {
-    check<MafTail>(1024, 1024, 2048 + 128);
+    check<Fp4C4x4Tail1>(1024, 1024, 2048 + 128);
     // A partial last K step: K a multiple of 32 only, its scales zero-padded.
-    check<MafTail>(1024, 1024, 2048 + 32);
-    check<MafTail>(1024, 1024, 2048 + 96);
-    check<MafOddTail3>(1024, 1024, 1536 + 384);
+    check<Fp4C4x4Tail1>(1024, 1024, 2048 + 32);
+    check<Fp4C4x4Tail1>(1024, 1024, 2048 + 96);
+    check<Fp4C4x4Tail3>(1024, 1024, 1536 + 384);
 }
 
 TEST(MxGemmTdmScheduled, Fp4OutputTypes)
@@ -122,7 +122,7 @@ TEST(MxGemmTdmScheduled, Fp4TilesAndWaveGroups)
                  32,
                  Tu<1, 1, 4, true, true, false>,
                  Shape<false, false, 0>>>(512, 512, 2048);
-    // The 16x16 atom with FP4, and the MAB shape: tile_n 16, one N repeat.
+    // The 16x16 atom with FP4, and the 128x16x512 4x1-wave tile: tile_n 16, one N repeat.
     check<Kernel<pk_fp4_t,
                  pk_fp4_t,
                  fp8_t,
