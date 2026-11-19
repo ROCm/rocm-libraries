@@ -6123,4 +6123,276 @@ Tests:
   beta: 1.0
   unit_check: 1
 
+# Skinny TN GEMMs that library logic routes to the gfx1201 vLLM wvSplitK custom
+# kernels (n = 1 to 5) on devices that report 32 CUs: a shape inside a row of
+# each kernel, padded leading dimensions they must honor (ldb K + 4 also keeps
+# the tokens off 16-byte boundaries, lda K + 9 the weights off any), m not a
+# multiple of the wave tile (1537, 3073 and 12289 with YTILE = 2, 12290 with
+# YTILE = 4), n * K past the 32K-element LDS stage (4 x 10248, 5 x 10248), and
+# problems that must fall back to other kernels: K % 8 != 0, n = 6, K below the
+# rows' 512, and general-batched (pointer-array) problems.
+- name: matmul_skinny_gfx1201_bf16_tn
+  category: pre_checkin
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  matrix_size: &skinny_gfx1201_tn_sizes
+    - { M: 9, N: 1, K: 512, lda: 512, ldb: 512, ldc: 9, ldd: 9 }
+    - { M: 9, N: 2, K: 512, lda: 521, ldb: 516, ldc: 12, ldd: 16 }
+    - { M: 9, N: 3, K: 512, lda: 512, ldb: 512, ldc: 9, ldd: 9 }
+    - { M: 9, N: 4, K: 512, lda: 521, ldb: 516, ldc: 12, ldd: 16 }
+    - { M: 9, N: 5, K: 512, lda: 512, ldb: 512, ldc: 9, ldd: 9 }
+    - { M: 129, N: 1, K: 512, lda: 521, ldb: 516, ldc: 132, ldd: 136 }
+    - { M: 4097, N: 1, K: 4096, lda: 4105, ldb: 4100, ldc: 4097, ldd: 4104 }
+    - { M: 3073, N: 2, K: 512, lda: 512, ldb: 512, ldc: 3073, ldd: 3073 }
+    - { M: 3073, N: 5, K: 1288, lda: 1297, ldb: 1292, ldc: 3076, ldd: 3080 }
+    - { M: 1537, N: 1, K: 10248, lda: 10257, ldb: 10252, ldc: 1540, ldd: 1544 }
+    - { M: 1537, N: 4, K: 10248, lda: 10248, ldb: 10248, ldc: 1537, ldd: 1537 }
+    - { M: 513, N: 5, K: 10248, lda: 10257, ldb: 10252, ldc: 516, ldd: 520 }
+    - { M: 12289, N: 4, K: 512, lda: 521, ldb: 516, ldc: 12292, ldd: 12296 }
+    - { M: 12290, N: 3, K: 512, lda: 512, ldb: 512, ldc: 12290, ldd: 12290 }
+    - { M: 1024, N: 2, K: 1004, lda: 1004, ldb: 1004, ldc: 1024, ldd: 1024 }
+    - { M: 1024, N: 6, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, ldd: 1024 }
+    - { M: 1024, N: 1, K: 256, lda: 256, ldb: 256, ldc: 1024, ldd: 1024 }
+  alpha: 1
+  beta: [0, 2]
+  batch_mode: [0, 1]
+  batch_count: 1
+  gpu_arch: '1201'
+
+- name: matmul_skinny_gfx1201_f16_tn
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  transA: T
+  transB: N
+  matrix_size: *skinny_gfx1201_tn_sizes
+  alpha: 1
+  beta: [0, 2]
+  batch_mode: [0, 1]
+  batch_count: 1
+  gpu_arch: '1201'
+
+# The same shapes with the bias epilogue. A bias of D's type reaches the gfx1201
+# kernels' bias epilogue; an f32 bias, an activation or a scale-alpha vector must
+# fall through to other kernels.
+- name: matmul_skinny_gfx1201_bf16_tn_bias
+  category: pre_checkin
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  matrix_size: *skinny_gfx1201_tn_sizes
+  alpha: 1
+  beta: [0, 2]
+  batch_mode: [0, 1]
+  batch_count: 1
+  bias_vector: 1
+  bias_type: [bf16_r, f32_r]
+  gpu_arch: '1201'
+
+- name: matmul_skinny_gfx1201_bf16_tn_bias_epilogue
+  category: pre_checkin
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  matrix_size: *skinny_gfx1201_tn_sizes
+  alpha: 1
+  beta: 0
+  batch_count: 1
+  bias_vector: 1
+  bias_type: bf16_r
+  activation_type: [none, gelu]
+  scaleAlpha_vector: [0, 1]
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1201'
+
+- name: matmul_skinny_gfx1201_f16_tn_bias
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  transA: T
+  transB: N
+  matrix_size: *skinny_gfx1201_tn_sizes
+  alpha: 1
+  beta: [0, 2]
+  batch_mode: [0, 1]
+  batch_count: 1
+  bias_vector: 1
+  bias_type: [f16_r, f32_r]
+  gpu_arch: '1201'
+
+- name: matmul_skinny_gfx1201_f16_tn_bias_epilogue
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  transA: T
+  transB: N
+  matrix_size: *skinny_gfx1201_tn_sizes
+  alpha: 1
+  beta: 0
+  batch_count: 1
+  bias_vector: 1
+  bias_type: f16_r
+  activation_type: [none, gelu]
+  scaleAlpha_vector: [0, 1]
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1201'
+
+# Skinny FP8 TN GEMMs with scalar A and B scales that library logic routes to the
+# gfx1201 vLLM wvSplitKQ custom kernels on devices that report 32 CUs: a shape
+# inside a row of each kernel, padded leading dimensions they must honor (ldb
+# K + 4 also keeps the tokens off 16-byte boundaries), m not a multiple of the
+# wave tile (9, 129 and 513 with YTILE = 2, 130, 1538 and 3074 with YTILE = 4),
+# n * K past the 64 KB LDS stage (4 x 20496; 4 x 16400 also ends the staged
+# tokens part way through a wave), K not a multiple of the 512 bytes a wave
+# loads per step with weight rows off any boundary (lda 529, 1043 and 16403), a
+# scale on only A or only B, n = 5 and K below the rows' 512, and general-batched
+# (pointer-array) problems, which must fall back to other kernels.
+- name: matmul_skinny_gfx1201_f8_tn_dst_bf16
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_bf16
+  transA: T
+  transB: N
+  matrix_size: &skinny_gfx1201_f8_tn_sizes
+    - { M: 9, N: 1, K: 512, lda: 512, ldb: 512, ldc: 9, ldd: 9 }
+    - { M: 9, N: 2, K: 512, lda: 529, ldb: 516, ldc: 12, ldd: 16 }
+    - { M: 9, N: 3, K: 512, lda: 512, ldb: 512, ldc: 9, ldd: 9 }
+    - { M: 9, N: 4, K: 512, lda: 529, ldb: 516, ldc: 12, ldd: 16 }
+    - { M: 9, N: 3, K: 1296, lda: 1296, ldb: 1296, ldc: 9, ldd: 9 }
+    - { M: 129, N: 3, K: 512, lda: 529, ldb: 516, ldc: 132, ldd: 136 }
+    - { M: 129, N: 4, K: 512, lda: 512, ldb: 512, ldc: 129, ldd: 129 }
+    - { M: 130, N: 1, K: 1296, lda: 1313, ldb: 1300, ldc: 133, ldd: 137 }
+    - { M: 1538, N: 2, K: 512, lda: 512, ldb: 512, ldc: 1538, ldd: 1538 }
+    - { M: 3074, N: 2, K: 512, lda: 529, ldb: 516, ldc: 3077, ldd: 3081 }
+    - { M: 3074, N: 3, K: 512, lda: 512, ldb: 512, ldc: 3074, ldd: 3074 }
+    - { M: 3074, N: 1, K: 512, lda: 529, ldb: 516, ldc: 3077, ldd: 3081 }
+    - { M: 1027, N: 2, K: 1040, lda: 1043, ldb: 1040, ldc: 1027, ldd: 1027 }
+    - { M: 513, N: 4, K: 20496, lda: 20496, ldb: 20496, ldc: 513, ldd: 513 }
+    - { M: 1031, N: 4, K: 16400, lda: 16403, ldb: 16400, ldc: 1031, ldd: 1031 }
+    - { M: 1024, N: 5, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, ldd: 1024 }
+    - { M: 1024, N: 1, K: 256, lda: 256, ldb: 256, ldc: 1024, ldd: 1024 }
+  alpha: 1
+  beta: [0, 2]
+  scaleA: [0, 1]
+  scaleB: [0, 1]
+  batch_mode: [0, 1]
+  batch_count: 1
+  gpu_arch: '1201'
+
+- name: matmul_skinny_gfx1201_f8_tn_dst_f16
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_fp16
+  transA: T
+  transB: N
+  matrix_size: *skinny_gfx1201_f8_tn_sizes
+  alpha: 1
+  beta: [0, 2]
+  scaleA: [0, 1]
+  scaleB: [0, 1]
+  batch_mode: [0, 1]
+  batch_count: 1
+  gpu_arch: '1201'
+
+# The same FP8 shapes with the bias epilogue. A bias of D's type reaches the
+# gfx1201 wvSplitKQ kernels' bias epilogue; an f32 bias, an activation or a
+# scale-alpha vector must fall through to other kernels.
+- name: matmul_skinny_gfx1201_f8_tn_dst_bf16_bias
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_bf16
+  transA: T
+  transB: N
+  matrix_size: *skinny_gfx1201_f8_tn_sizes
+  alpha: 1
+  beta: [0, 2]
+  scaleA: 1
+  scaleB: 1
+  batch_mode: [0, 1]
+  batch_count: 1
+  bias_vector: 1
+  bias_type: [bf16_r, f32_r]
+  gpu_arch: '1201'
+
+- name: matmul_skinny_gfx1201_f8_tn_dst_bf16_bias_epilogue
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_bf16
+  transA: T
+  transB: N
+  matrix_size: *skinny_gfx1201_f8_tn_sizes
+  alpha: 1
+  beta: 0
+  scaleA: 1
+  scaleB: 1
+  batch_count: 1
+  bias_vector: 1
+  bias_type: bf16_r
+  activation_type: [none, gelu]
+  scaleAlpha_vector: [0, 1]
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1201'
+
+- name: matmul_skinny_gfx1201_f8_tn_dst_f16_bias
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_fp16
+  transA: T
+  transB: N
+  matrix_size: *skinny_gfx1201_f8_tn_sizes
+  alpha: 1
+  beta: [0, 2]
+  scaleA: 1
+  scaleB: 1
+  batch_mode: [0, 1]
+  batch_count: 1
+  bias_vector: 1
+  bias_type: [f16_r, f32_r]
+  gpu_arch: '1201'
+
+# Without the shapes of K 16400 and 20496, where the kernels these problems fall
+# back to (they are not the wvSplitKQ kernels') sit at the norm check's tolerance
+# for FP16 D with a scale-alpha vector.
+- name: matmul_skinny_gfx1201_f8_tn_dst_f16_bias_epilogue
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_fp16
+  transA: T
+  transB: N
+  matrix_size:
+    - { M: 9, N: 1, K: 512, lda: 512, ldb: 512, ldc: 9, ldd: 9 }
+    - { M: 9, N: 2, K: 512, lda: 529, ldb: 516, ldc: 12, ldd: 16 }
+    - { M: 9, N: 3, K: 512, lda: 512, ldb: 512, ldc: 9, ldd: 9 }
+    - { M: 9, N: 4, K: 512, lda: 529, ldb: 516, ldc: 12, ldd: 16 }
+    - { M: 9, N: 3, K: 1296, lda: 1296, ldb: 1296, ldc: 9, ldd: 9 }
+    - { M: 129, N: 3, K: 512, lda: 529, ldb: 516, ldc: 132, ldd: 136 }
+    - { M: 129, N: 4, K: 512, lda: 512, ldb: 512, ldc: 129, ldd: 129 }
+    - { M: 130, N: 1, K: 1296, lda: 1313, ldb: 1300, ldc: 133, ldd: 137 }
+    - { M: 1538, N: 2, K: 512, lda: 512, ldb: 512, ldc: 1538, ldd: 1538 }
+    - { M: 3074, N: 2, K: 512, lda: 529, ldb: 516, ldc: 3077, ldd: 3081 }
+    - { M: 3074, N: 3, K: 512, lda: 512, ldb: 512, ldc: 3074, ldd: 3074 }
+    - { M: 3074, N: 1, K: 512, lda: 529, ldb: 516, ldc: 3077, ldd: 3081 }
+    - { M: 1027, N: 2, K: 1040, lda: 1043, ldb: 1040, ldc: 1027, ldd: 1027 }
+    - { M: 1024, N: 5, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, ldd: 1024 }
+    - { M: 1024, N: 1, K: 256, lda: 256, ldb: 256, ldc: 1024, ldd: 1024 }
+  alpha: 1
+  beta: 0
+  scaleA: 1
+  scaleB: 1
+  batch_count: 1
+  bias_vector: 1
+  bias_type: f16_r
+  activation_type: [none, gelu]
+  scaleAlpha_vector: [0, 1]
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1201'
+
 ...
