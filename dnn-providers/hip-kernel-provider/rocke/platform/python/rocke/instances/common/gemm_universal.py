@@ -1997,13 +1997,26 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     lds_c = b.add(sel(a_lds, b_lds), b.zext(b.mul(comp, b.const_i32(half_rows * pitch)), _I64))
                     mask = sel(_tdm_a_mask if isinstance(_tdm_a_mask, Value) else b.const_i32(_tdm_a_mask),
                                _tdm_b_mask if isinstance(_tdm_b_mask, Value) else b.const_i32(_tdm_b_mask))
-                    groups = b.tdm_descriptor_2d(
-                        gaddr, lds_c, elem_bytes=_tdm_elem_bytes, tensor_dim0=k_rem,
-                        tensor_dim1=b.smax(b.sub(extent, row_c), zero), row_stride=K,
-                        tile_dim0=block_k, tile_dim1=half_rows,
-                        pad_interval=_tdm_pad_interval if _tdm_pad_enable else None,
-                        pad_amount=_tdm_pad_amount, workgroup_mask=mask,
-                    )
+                    if _os_mx.environ.get("ROCKE_EXP_MX_ROWMAP") == "1":
+                        # Blocks of 8 rows (2048 B) plus a 16 B pad, by TDM
+                        # iterate mode (see the read side in the MX read-ahead
+                        # loop): component c starts at block 16 c.
+                        lds_c = b.add(sel(a_lds, b_lds), b.zext(b.mul(comp, b.const_i32((half_rows // 8) * 2064)), _I64))
+                        groups = b.tdm_descriptor_2d(
+                            gaddr, lds_c, elem_bytes=_tdm_elem_bytes, tensor_dim0=k_rem,
+                            tensor_dim1=b.smax(b.sub(extent, row_c), zero), row_stride=K,
+                            tile_dim0=block_k, tile_dim1=8, workgroup_mask=mask,
+                            iterate_count=half_rows // 8, lds_increment=2064,
+                            global_increment=b.mul(K, b.const_i32(8)),
+                        )
+                    else:
+                        groups = b.tdm_descriptor_2d(
+                            gaddr, lds_c, elem_bytes=_tdm_elem_bytes, tensor_dim0=k_rem,
+                            tensor_dim1=b.smax(b.sub(extent, row_c), zero), row_stride=K,
+                            tile_dim0=block_k, tile_dim1=half_rows,
+                            pad_interval=_tdm_pad_interval if _tdm_pad_enable else None,
+                            pad_amount=_tdm_pad_amount, workgroup_mask=mask,
+                        )
                     b.tensor_load_to_lds(*groups, cachepolicy=0)
                     # Scales: wave component c loads K-step row c of its operand's
                     # [ksteps][rows * 4] tile (constant extents, as SCALE_NOCLIP).
@@ -3340,12 +3353,63 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
         ks = block_k // 128
 
+        rowmap = _os_ra.environ.get("ROCKE_EXP_MX_ROWMAP") == "1"
+        if rowmap:
+            # Lane l of repeat r reads wave row r + l * R (R = repeats = 8, 256 B
+            # rows), stored by the split loads' TDM iterate mode as blocks of 8
+            # rows plus a 16 B pad: byte (row * 256 + (row // 8) * 16) of the
+            # buffer, i.e. a per-lane base plus constant offsets.
+            if _os_ra.environ.get("ROCKE_EXP_TDM_SPLIT") != "2":
+                raise ValueError("ROCKE_EXP_MX_ROWMAP needs ROCKE_EXP_TDM_SPLIT=2 (the loads that write its layout)")
+            if not (mfmas_m == mfmas_n == 8 and block_k * _tdm_elem_bytes == 256 and t.warp_tile_m == t.warp_tile_n == 16):
+                raise ValueError("ROCKE_EXP_MX_ROWMAP needs 8x8 repeats of 16x16 atoms and 256 B rows")
+            if _lds_k * _tdm_elem_bytes * block_m < (block_m // 8) * 2064:
+                raise ValueError("ROCKE_EXP_MX_ROWMAP needs lds_k_pad >= 8")
+
+            def _rm_base(warp_off):
+                # (warp_off + 8 l) * 256 + (warp_off / 8 + l) * 16 + k_in_atom
+                r0 = b.add(warp_off, b.mul(lane16, b.const_i32(8)))
+                return b.add(b.add(b.mul(r0, b.const_i32(256)), b.mul(b.div(r0, b.const_i32(8)), b.const_i32(16))), k_in_atom)
+
+            # One per-lane base per operand and buffer (the buffer shift folded
+            # in), so every read is base + a small immediate offset.
+            buf_bytes = block_m * _lds_k * _tdm_elem_bytes
+            # The bases ride through the K loop as loop-carried values: as
+            # loop invariants LLVM would hoist every base + offset out of the
+            # loop (one live VGPR per read address) before ISel could fold the
+            # offsets into the ds_load immediates.
+            # Each base is copied through an opaque v_mov so LLVM cannot merge
+            # base + offset back into an expression it cannot prove wrap-free
+            # (which blocks the ds_load offset fold, e.g. in the prologue).
+            def _opaque(v):
+                return b.inline_asm("v_mov_b32 $0, $1", "=v,v", [v], I32, sideeffect=False)
+
+            rmb = {
+                "a": [_opaque(b.add(_rm_base(warp_m_off), b.const_i32(p * buf_bytes if _prefetch else 0))) for p in (0, 1)],
+                "b": [_opaque(b.add(_rm_base(warp_n_off), b.const_i32(p * buf_bytes if _prefetch else 0))) for p in (0, 1)],
+            }
+
+            def _rm_frag(src, bases, p, kk, r):
+                frag = None
+                row0 = b.const_i32(0)
+                for ci in range(a_per_lane * 4 // 16):
+                    # nuw lets the backend fold the constant into the ds_load offset.
+                    col = b.add_nuw(bases[p], b.const_i32(r * 256 + kk * t.warp_tile_k + ci * 32))
+                    chunk = _emit_smem_load(b, src, row0, col, 16, storage_dtype)
+                    dw = b.vec_bitcast(chunk, VectorType(I32, 4))
+                    frag = dw if frag is None else b.vec_concat(frag, dw)
+                return frag
+
         def rd_a(p, kk, mi):
+            if rowmap:
+                return _rm_frag(A_smem, rmb["a"], p, kk, mi)
             row = b.add(warp_m_off, b.const_i32(mi * t.warp_tile_m + (p * block_m if _prefetch else 0)))
             kb = b.const_i32(kk * t.warp_tile_k)
             return _emit_frag_smem_load(A_smem, a_row_in_atom, k_in_atom, row, kb, a_per_lane, 32)
 
         def rd_b(p, kk, ni):
+            if rowmap:
+                return _rm_frag(B_smem, rmb["b"], p, kk, ni)
             row = b.add(warp_n_off, b.const_i32(ni * t.warp_tile_n + (p * block_n if _prefetch else 0)))
             kb = b.const_i32(kk * t.warp_tile_k)
             return _emit_frag_smem_load(B_smem, b_col_in_atom, k_in_atom, row, kb, b_per_lane, 32)
@@ -3354,7 +3418,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             row = b.const_i32((p * ks if _prefetch else 0) + kk)
 
             def words(smem, mn_off, reps, step):
-                if swz:
+                if swz or rowmap:
                     base = b.add(mn_off, b.mul(lane16, b.const_i32(reps)))
                     out = []
                     for q in range(reps // 4):
@@ -3521,13 +3585,19 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         head0 = (a0, sa0, sb0, [rd_b(0, 0, j) for j in range(half)],
                  [rd_b(0, 0, half + j) for j in range(half)])
         n_acc = len(accs)
+        n_head = len(flat(head0))
+        bases = (rmb["a"] + rmb["b"]) if rowmap else []
         args = list(accs) + [(f"ra{i}", v) for i, v in enumerate(flat(head0))]
+        args += [(f"rmb{i}", v) for i, v in enumerate(bases)]
         loop = b.scf_for_iter(k_lo, k_end, bk2, args, iv_name="k0", elide_trailing_barrier=False)
         with loop as (k0, it):
             it = list(it)
-            acc, head = _tile(0, k0, it[:n_acc], unflat(it[n_acc:]))
+            if rowmap:
+                lb = it[n_acc + n_head:]
+                rmb["a"], rmb["b"] = lb[:2], lb[2:]
+            acc, head = _tile(0, k0, it[:n_acc], unflat(it[n_acc:n_acc + n_head]))
             acc, head = _tile(1, b.add(k0, c_block_k), acc, head)
-            b.scf_yield(*acc, *flat(head))
+            b.scf_yield(*acc, *flat(head), *(rmb["a"] + rmb["b"] if rowmap else []))
         # The last tile read ahead into a buffer nobody uses; settle LDS before
         # the epilogue. With cluster barriers no workgroup leaves while a
         # peer's multicast may still write its LDS.
@@ -3838,6 +3908,12 @@ def _emit_wmma_acc_scatter(
     """
     t = spec.tile
     c_map = op.c_layout()
+    import os as _os_rmap
+
+    # EXPERIMENT: ROCKE_EXP_MX_ROWMAP=1 interleaves the repeats (atom row a of
+    # M-repeat mi is wave row a * mfmas_m + mi; likewise N), as the MX
+    # read-ahead loop reads A and B.
+    rowmap = _os_rmap.environ.get("ROCKE_EXP_MX_ROWMAP") == "1"
     flat = 0
     for mi in range(t.mfmas_per_warp_m):
         atom_m = b.add(m_base_off, b.const_i32(mi * t.warp_tile_m))
@@ -3848,6 +3924,14 @@ def _emit_wmma_acc_scatter(
             acc_h = b.vec_cast_f32_to(acc, storage_dtype)
             for i in range(c_per_lane):
                 row_in_atom, col_in_atom = c_map.coord(b, lane, i)
+                if rowmap:
+                    per_cell(
+                        b.add(m_base_off, b.add(b.mul(row_in_atom, b.const_i32(t.mfmas_per_warp_m)), b.const_i32(mi))),
+                        b.add(n_base_off, b.add(b.mul(col_in_atom, b.const_i32(t.mfmas_per_warp_n)), b.const_i32(ni))),
+                        acc_h,
+                        i,
+                    )
+                    continue
                 per_cell(
                     b.add(atom_m, row_in_atom),
                     b.add(atom_n, col_in_atom),

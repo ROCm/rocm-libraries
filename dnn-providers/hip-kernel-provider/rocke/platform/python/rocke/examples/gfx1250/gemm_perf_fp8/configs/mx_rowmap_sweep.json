@@ -1,0 +1,135 @@
+{
+  "_comment": "mx_env_sweep.py config: the mx_gemm prototype's LDS layout (ROCKE_EXP_MX_ROWMAP=1: lane l of repeat r reads row r + 8 l; rows stored by TDM iterate mode as 2048 B blocks + 16 B pad, so tile fills write long aligned runs; scales then need no host swizzle, MX_SWZ=0) on the best loop (cs0nbpf4) and on the prototype's K-atom order (r1*). Cluster 4x4. MAF shape; time with --data mxgemm.",
+  "base_env": {
+    "ROCKE_EXP_MX": "1",
+    "ROCKE_EXP_MX_SWZ": "1",
+    "ROCKE_EXP_MX_SCALE_MC": "0",
+    "ROCKE_EXP_MX_KFENCE": "1",
+    "ROCKE_EXP_MX_SCALE_NOCLIP": "1",
+    "ROCKE_EXP_MC_SOLO0": "1"
+  },
+  "variants": [
+    {
+      "name": "mxswz",
+      "env": {}
+    },
+    {
+      "name": "cs0nbpf4",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1"
+      }
+    },
+    {
+      "name": "cs0nbpf4rm",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_ROWMAP": "1",
+        "ROCKE_EXP_MX_SWZ": "0"
+      }
+    },
+    {
+      "name": "cs0nbrm",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_ROWMAP": "1",
+        "ROCKE_EXP_MX_SWZ": "0"
+      }
+    },
+    {
+      "name": "r1rm",
+      "env": {
+        "ROCKE_EXP_MX_RA": "1",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CS": "6",
+        "ROCKE_EXP_MX_RA_PEND": "36",
+        "ROCKE_EXP_MX_ROWMAP": "1",
+        "ROCKE_EXP_MX_SWZ": "0"
+      }
+    },
+    {
+      "name": "r1pf4rm",
+      "env": {
+        "ROCKE_EXP_MX_RA": "1",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CS": "6",
+        "ROCKE_EXP_MX_RA_PEND": "36",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_ROWMAP": "1",
+        "ROCKE_EXP_MX_SWZ": "0"
+      }
+    },
+    {
+      "name": "r1pf2rm",
+      "env": {
+        "ROCKE_EXP_MX_RA": "1",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CS": "6",
+        "ROCKE_EXP_MX_RA_PEND": "36",
+        "ROCKE_EXP_MX_ROWMAP": "1",
+        "ROCKE_EXP_MX_SWZ": "0",
+        "ROCKE_EXP_GL2_PREFETCH": "2",
+        "ROCKE_EXP_GL2_CLUSTER": "1"
+      }
+    },
+    {
+      "name": "r1cs0pf4rm",
+      "env": {
+        "ROCKE_EXP_MX_RA": "1",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_PEND": "36",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_ROWMAP": "1",
+        "ROCKE_EXP_MX_SWZ": "0"
+      }
+    }
+  ],
+  "arms": [
+    {
+      "name": "c4x4",
+      "cluster": "4,4"
+    }
+  ],
+  "shapes": [
+    [
+      3072,
+      4096,
+      65536
+    ]
+  ],
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}

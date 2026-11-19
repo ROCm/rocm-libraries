@@ -6285,6 +6285,9 @@ class IRBuilder:
         workgroup_mask: int = 0,
         pad_interval: int | None = None,
         pad_amount: int = 0,
+        iterate_count: int = 0,
+        lds_increment: int = 0,
+        global_increment: Value | None = None,
     ) -> tuple[Value, Value, Value, Value, Value]:
         """Build the five D# groups for a rank-2 TDM tile transfer.
 
@@ -6375,6 +6378,7 @@ class IRBuilder:
             | int(pad_enable) << 20
             | (pad_interval or 0) << 22
             | pad_amount << 25
+            | int(iterate_count > 0) << 19
         )
         group1 = (
             word(flags) if runtime_mask is None else self.lor(word(flags), runtime_mask),
@@ -6389,6 +6393,24 @@ class IRBuilder:
         d0 = self.vec_pack([self.readfirstlane(v) for v in group0], I32)
         d1 = self.vec_pack([self.readfirstlane(v) for v in group1], I32)
         zero4 = self.zero_vec(I32, 4)
+        # EXPERIMENT (uncommitted, ported from the gfx1250 mx_gemm prototype):
+        # ``iterate_count`` > 0 is TDM iterate mode: the tile is moved that
+        # many times, the LDS address advancing ``lds_increment`` elements and
+        # the global address ``global_increment`` elements (i32) after each, so
+        # a pad period longer than the pad field's 1024 B is one iteration plus
+        # the pad. Group 2 (mode 0): 0 | LDS increment | global increment |
+        # iterate_count - 1 in bits 31:16.
+        if iterate_count:
+            if not 1 <= iterate_count <= 0x10000 or global_increment is None:
+                raise ValueError(f"{name} iterate_count needs 1..65536 and global_increment")
+            group2 = (
+                self.const_i32(0),
+                word(lds_increment),
+                global_increment,
+                word((iterate_count - 1) << 16),
+            )
+            d2 = self.vec_pack([self.readfirstlane(v) for v in group2], I32)
+            return d0, d1, d2, zero4, self.zero_vec(I32, 8)
         return d0, d1, zero4, zero4, self.zero_vec(I32, 8)
 
     def iglp_opt(self, level: int = 0) -> None:
