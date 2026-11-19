@@ -812,42 +812,51 @@ TYPED_TEST(matrix_csr, lu_solve_of_factors_with_long_rows)
     expect_near(values_of(*out), upper_solve(D, n, lower_solve(D, n, b, true), false), tol<T>());
 }
 
-// The matrix is the lower triangle L of L L^T, with the diagonal last in each row
+// The matrix is the lower triangle L of L L^T, with the diagonal last in each row. The
+// triangle of a 10 x 10 five-point Laplacian has 100 rows that reach ten entries back
+// from the diagonal.
 TYPED_TEST(matrix_csr, ll_solve)
 {
-    using T                = typename TypeParam::value_type;
-    const Csr<T>         L = filtered(spd<T>(8), [](int i, int j, T) { return j <= i; });
-    const std::vector<T> b = rhs<T>(L.n);
-    const std::vector<T> D = dense(L);
-
-    std::vector<T> Lt(D.size());
-    std::vector<T> inv_diag(L.n);
-    for(int i = 0; i < L.n; ++i)
+    using T             = typename TypeParam::value_type;
+    const auto   lower  = [](int i, int j, T) { return j <= i; };
+    const Csr<T> spd8   = filtered(spd<T>(8), lower);
+    const Csr<T> grid10 = filtered(grid<T>(10, 10, 1.0, 1.0, true), lower);
+    for(const Csr<T>* L : {&spd8, &grid10})
     {
-        inv_diag[i] = T(1) / D[i * L.n + i];
-        for(int j = 0; j < L.n; ++j)
+        SCOPED_TRACE(L->n);
+        const std::vector<T> b = rhs<T>(L->n);
+        const std::vector<T> D = dense(*L);
+
+        std::vector<T> Lt(D.size());
+        std::vector<T> inv_diag(L->n);
+        for(int i = 0; i < L->n; ++i)
         {
-            Lt[j * L.n + i] = D[i * L.n + j];
+            inv_diag[i] = T(1) / D[i * L->n + i];
+            for(int j = 0; j < L->n; ++j)
+            {
+                Lt[j * L->n + i] = D[i * L->n + j];
+            }
         }
+        const std::vector<T> expected
+            = upper_solve(Lt, L->n, lower_solve(D, L->n, b, false), false);
+
+        auto A = this->make(*L);
+        ASSERT_NE(A, nullptr);
+        auto in  = make_vector(TypeParam::backend, b);
+        auto inv = make_vector(TypeParam::backend, inv_diag);
+
+        A->LLAnalyse();
+
+        auto out = make_vector(TypeParam::backend, std::vector<T>(L->n, T(0)));
+        ASSERT_TRUE(A->LLSolve(*in, out.get()));
+        expect_near(values_of(*out), expected, tol<T>());
+
+        auto out_inv = make_vector(TypeParam::backend, std::vector<T>(L->n, T(0)));
+        ASSERT_TRUE(A->LLSolve(*in, *inv, out_inv.get()));
+        expect_near(values_of(*out_inv), expected, tol<T>());
+
+        A->LLAnalyseClear();
     }
-    const std::vector<T> expected = upper_solve(Lt, L.n, lower_solve(D, L.n, b, false), false);
-
-    auto A = this->make(L);
-    ASSERT_NE(A, nullptr);
-    auto in  = make_vector(TypeParam::backend, b);
-    auto inv = make_vector(TypeParam::backend, inv_diag);
-
-    A->LLAnalyse();
-
-    auto out = make_vector(TypeParam::backend, std::vector<T>(L.n, T(0)));
-    ASSERT_TRUE(A->LLSolve(*in, out.get()));
-    expect_near(values_of(*out), expected, tol<T>());
-
-    auto out_inv = make_vector(TypeParam::backend, std::vector<T>(L.n, T(0)));
-    ASSERT_TRUE(A->LLSolve(*in, *inv, out_inv.get()));
-    expect_near(values_of(*out_inv), expected, tol<T>());
-
-    A->LLAnalyseClear();
 }
 
 // Only the triangle of the solve is read from the full matrix
