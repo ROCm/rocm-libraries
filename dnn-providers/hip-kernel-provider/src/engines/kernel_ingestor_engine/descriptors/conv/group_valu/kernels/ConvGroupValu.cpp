@@ -172,7 +172,9 @@ constexpr int tapAt(int j, int s)
 }
 static_assert(VBX >= ES && VBY >= ES, "load granule");
 
-#if HKP_ARCH_GFX11 || HKP_ARCH_GFX12
+#if HKP_ARCH_GFX1250
+#define GV_RSRC_FLAGS 0
+#elif HKP_ARCH_GFX11 || HKP_ARCH_GFX12
 #define GV_RSRC_FLAGS 0x31004000
 #elif defined(__gfx1010__) || defined(__gfx1030__) || defined(__gfx1031__) || defined(__gfx1032__)
 #define GV_RSRC_FLAGS 0x31014000

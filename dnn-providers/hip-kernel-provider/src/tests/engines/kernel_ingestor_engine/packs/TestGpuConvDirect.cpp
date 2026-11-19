@@ -294,6 +294,21 @@ std::vector<DeviceCase> deviceCases()
     cases.push_back({"NhwcSmallChannels", dense(3, 16, {17, 15}, {3, 3}, {1, 1}, true)});
     cases.push_back({"NhwcWide", dense(32, 48, {5, 70}, {3, 3}, {1, 1}, true)});
     cases.push_back({"NhwcMultiBlock", dense(136, 152, {17, 23}, {3, 3}, {1, 1}, true)});
+    // Wider column tiles must handle a full block followed by a partial one, including an
+    // unaligned final output vector. In backward data the graph's C/K exchange roles, so the
+    // mirrored case reaches that scalar epilogue while keeping the reduction divisible by 8.
+    auto outputTail = dense(40, 133, {9, 15}, {3, 3}, {1, 1}, true);
+    outputTail.n = 3;
+    cases.push_back({"Nhwc3x3OutputVectorTail", outputTail});
+    auto inputTail = dense(133, 40, {11, 9}, {3, 3}, {0, 0}, false);
+    inputTail.n = 3;
+    cases.push_back({"Nchw3x3InputVectorTail", inputTail});
+    // One image, several spatial and channel blocks, a partial reduction chunk in either
+    // direction, and asymmetric halos after reflection/staging.
+    auto wideConvolution = padded(dense(72, 168, {9, 15}, {3, 3}, {1, 1}, false), {2, 0}, {0, 1});
+    wideConvolution.n = 1;
+    wideConvolution.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"Nchw3x3WideAsymmetricConvolutionMode", wideConvolution});
     cases.push_back({"Nhwc5x5", dense(32, 48, {19, 23}, {5, 5}, {2, 2}, true)});
     cases.push_back({"Nchw5x5Asymmetric",
                      padded(dense(24, 40, {11, 13}, {5, 5}, {1, 1}, false), {2, 1}, {1, 2})});
@@ -807,8 +822,15 @@ TEST(TestConvDirectCatalog, DilatedConfigsServeEveryDtypeOnTheRowsArchitectures)
 
 TEST(TestConvDirectCatalog, EveryConfigParsesAndRunsSomewhere)
 {
-    static constexpr std::array<const char*, 8> ARCHS{
-        "gfx906", "gfx908", "gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1151", "gfx1201"};
+    static constexpr std::array<const char*, 9> ARCHS{"gfx906",
+                                                      "gfx908",
+                                                      "gfx90a",
+                                                      "gfx942",
+                                                      "gfx950",
+                                                      "gfx1100",
+                                                      "gfx1151",
+                                                      "gfx1201",
+                                                      "gfx1250"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         ASSERT_FALSE(catalog(direction).empty());
@@ -827,8 +849,15 @@ TEST(TestConvDirectCatalog, EveryConfigParsesAndRunsSomewhere)
 
 TEST(TestConvDirectCatalog, EveryFilterAndDtypeHasAConfigOnEveryArchitecture)
 {
-    static constexpr std::array<const char*, 8> ARCHS{
-        "gfx906", "gfx908", "gfx90a", "gfx942", "gfx950", "gfx1030", "gfx1151", "gfx1201"};
+    static constexpr std::array<const char*, 9> ARCHS{"gfx906",
+                                                      "gfx908",
+                                                      "gfx90a",
+                                                      "gfx942",
+                                                      "gfx950",
+                                                      "gfx1030",
+                                                      "gfx1151",
+                                                      "gfx1201",
+                                                      "gfx1250"};
     for(const auto& filter : conv_direct::FILTERS)
     {
         for(const char* dtype : {"FLOAT", "HALF", "BFLOAT16"})

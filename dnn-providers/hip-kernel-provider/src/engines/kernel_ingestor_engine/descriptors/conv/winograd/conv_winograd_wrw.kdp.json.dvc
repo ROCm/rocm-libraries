@@ -1,6 +1,6 @@
 outs:
-- md5: 207c1b5b821e8d5c1706bc8cd6dc8fa7
-  size: 66709
+- md5: 4d77d85c9c978616b04e9ba4f22462fd
+  size: 72421
   hash: md5
   path: conv_winograd_wrw.kdp.json
   remote: ingestor

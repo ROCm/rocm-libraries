@@ -6,6 +6,7 @@
 #include <array>
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -625,7 +626,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
 bool admits(const ConfigFields& fields,
             const std::string& arch,
             ConvShape shape = baseShape(),
-            const std::string& dtype = "HALF")
+            const std::string& dtype = "HALF",
+            ConvDirection direction = ConvDirection::FORWARD)
 {
     if(dtype == "FLOAT")
     {
@@ -642,10 +644,16 @@ bool admits(const ConfigFields& fields,
     auto properties = testDeviceProperties();
     properties.gcnArchName = arch;
     properties.multiProcessorCount = 64;
-    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::FORWARD)), properties);
-    const auto bound = matchesGraph(PACK_FWD, fixture.context());
-    return bound.has_value()
-           && matchesKernel(PACK_FWD, fixture.context(), kernelOf(fields, dtype), *bound);
+    const GraphFixture fixture(buildGraph(specFor(shape, direction)), properties);
+    auto pack = PACK_FWD;
+    auto kernel = kernelOf(fields, dtype);
+    if(direction == ConvDirection::BACKWARD_DATA)
+    {
+        pack.graphMatcher = "hipkernel.conv_direct_bwd.graph_match";
+        kernel.metadata["direction"] = std::string("BWD");
+    }
+    const auto bound = matchesGraph(pack, fixture.context());
+    return bound.has_value() && matchesKernel(pack, fixture.context(), kernel, *bound);
 }
 
 TEST(TestConvDirectKernelMatch, MatrixCoreConfigsRunOnlyWhereTheirAtomAndShipListAllow)
@@ -709,6 +717,28 @@ TEST(TestConvDirectKernelMatch, TheChannelVectorMustDivideTheReduction)
     scalar.tn = 8;
     scalar.nt = 8;
     EXPECT_TRUE(admits(scalar, "gfx942", odd));
+}
+
+TEST(TestConvDirectKernelMatch, WideColumnsAllowOutputTailsButNotReductionVectorTails)
+{
+    for(const auto& dtype : {std::string("HALF"), std::string("BFLOAT16")})
+    {
+        SCOPED_TRACE(dtype);
+        ConfigFields f;
+        f.atom = dtype == "HALF" ? "wmma125_f16" : "wmma125_bf16";
+        f.archs = "gfx1250";
+        f.bm = 64;
+        f.bn = 128;
+        f.wn = 4;
+        auto shape = baseShape();
+        shape.c = 40;
+        shape.k = 133;
+        EXPECT_TRUE(admits(f, "gfx1250", shape, dtype, ConvDirection::FORWARD));
+        EXPECT_FALSE(admits(f, "gfx1250", shape, dtype, ConvDirection::BACKWARD_DATA));
+        std::swap(shape.c, shape.k);
+        EXPECT_FALSE(admits(f, "gfx1250", shape, dtype, ConvDirection::FORWARD));
+        EXPECT_TRUE(admits(f, "gfx1250", shape, dtype, ConvDirection::BACKWARD_DATA));
+    }
 }
 
 TEST(TestConvDirectKernelMatch, FmaRunsEverywhere)

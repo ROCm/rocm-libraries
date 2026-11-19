@@ -209,23 +209,14 @@ int atomReductionStep(std::string_view atom)
         std::string_view name;
         int ka;
     };
-    static constexpr std::array<Entry, 16> STEPS{{
-        {"mfma16_f16", 16},
-        {"mfma32_f16", 8},
-        {"mfma16_bf16", 16},
-        {"mfma32_bf16", 8},
-        {"mfma16_bf16_908", 8},
-        {"mfma32_bf16_908", 4},
-        {"mfma16_f32", 4},
-        {"mfma32_f32", 2},
-        {"mfma16x32_f16", 32},
-        {"mfma16x32_bf16", 32},
-        {"mfma32x16_f16", 16},
-        {"mfma32x16_bf16", 16},
-        {"wmma11_f16", 16},
-        {"wmma11_bf16", 16},
-        {"wmma12_f16", 16},
-        {"wmma12_bf16", 16},
+    static constexpr std::array<Entry, 19> STEPS{{
+        {"mfma16_f16", 16},     {"mfma32_f16", 8},      {"mfma16_bf16", 16},
+        {"mfma32_bf16", 8},     {"mfma16_bf16_908", 8}, {"mfma32_bf16_908", 4},
+        {"mfma16_f32", 4},      {"mfma32_f32", 2},      {"mfma16x32_f16", 32},
+        {"mfma16x32_bf16", 32}, {"mfma32x16_f16", 16},  {"mfma32x16_bf16", 16},
+        {"wmma11_f16", 16},     {"wmma11_bf16", 16},    {"wmma12_f16", 16},
+        {"wmma12_bf16", 16},    {"wmma125_f16", 32},    {"wmma125_bf16", 32},
+        {"wmma125_f32", 4},
     }};
     for(const auto& entry : STEPS)
     {

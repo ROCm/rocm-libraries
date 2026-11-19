@@ -42,3 +42,11 @@
 #else
 #define HKP_ARCH_GFX12 0
 #endif
+
+// Qualified native K32/K4 WMMA and resource contract. gfx1251 and gfx12-5-generic
+// remain excluded until their complete kernel/resource behavior is validated.
+#if defined(__gfx1250__)
+#define HKP_ARCH_GFX1250 1
+#else
+#define HKP_ARCH_GFX1250 0
+#endif

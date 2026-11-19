@@ -78,7 +78,10 @@ def regenerate_uid_for_solution(
     LibraryIO.reorderSolutionsParams(data)
 
     if inplace:
-        LibraryIO.writeYAML(str(yaml_path), data)
+        # sort_keys=False keeps the order reorderSolutionsParams just applied.
+        # The YAML dumper sorts keys by default, which would undo that order
+        # and rewrite every other key in the file for a one-line UID change.
+        LibraryIO.writeYAML(str(yaml_path), data, sort_keys=False)
 
     return new_uid
 
