@@ -24,6 +24,8 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/CachingLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ContractionSelectionLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ClientProblemFactorySplit_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SplitPlacement_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SliceAlignment_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CuCount_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CustomKernel_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_test.cpp"
@@ -56,6 +58,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceFastPath_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceValidatorLifecycle_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ReadMostlyMap_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultComparison_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceMXFastPath_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RocRollerWgmKernargs_test.cpp"
@@ -66,6 +69,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/SynchronizerValidatorReporting_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptor_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestData.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ThreadSafeValue_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HashmapEnumLookup_test.cpp"
 )
 
