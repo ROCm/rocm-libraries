@@ -117,7 +117,7 @@ void run_spectrogram(const AudioConfig& cfg, const SpectrogramParams& p) {
     dst.read(actual.data(), dstBytes);
 
     // A float FFT's rounding error scales with the frame's energy rather than with each bin, so
-    // the bound is relative to the largest output: 2.9e-7 of it measured on both backends.
+    // the bound is relative to the largest output.
     double peak = 0.0;
     for_each_audio_plane_element(dstDesc, planes, [&](Rpp32u, Rpp32u, Rpp32u, std::size_t i) {
         peak = std::max(peak, static_cast<double>(golden[i]));
@@ -138,8 +138,8 @@ TEST_P(SpectrogramTest, Correctness) {
 }
 
 // Mono only: HIP rejects other numDims. Covers both layouts, both padding modes with and without
-// centered windows, both powers, nfft larger than the window and equal to it (0), a non-power-of-2
-// nfft (400: Bluestein on HOST) and a caller-supplied window.
+// centered windows, both powers, nfft larger than the window and equal to it, a non-power-of-2
+// nfft (Bluestein on HOST) and a caller-supplied window.
 INSTANTIATE_TEST_SUITE_P(Audio_Spectrogram, SpectrogramTest,
                          ::testing::ValuesIn(audio_with_params<SpectrogramParams>(
                              make_audio_configs({1}), {{NFT, true, true, 2, 320, 160, 512, false},

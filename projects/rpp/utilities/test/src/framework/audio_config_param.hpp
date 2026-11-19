@@ -50,7 +50,7 @@ inline std::string audio_shape_name(AudioShape s) {
     return s == AudioShape::Uniform ? "Uniform" : "Ragged";
 }
 
-// 4099 frames spans more than two 2048-float HIP blocks plus a tail.
+// The longest Ragged length spans more than two HIP blocks plus a tail.
 inline std::vector<Rpp32s> audio_lengths(AudioShape s) {
     if (s == AudioShape::Uniform) return {4096, 4096, 4096};
     return {4099, 2051, 1037};

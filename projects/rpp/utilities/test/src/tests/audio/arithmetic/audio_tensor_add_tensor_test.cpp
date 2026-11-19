@@ -74,7 +74,7 @@ void run_audio_tensor_add_tensor(const AudioConfig& cfg) {
     dst.read(actual.data(), bytes);
 
     // One correctly rounded float add, which the double golden reproduces exactly. Padding is not
-    // checked: the HIP kernel stores whole 8-float vectors over each sample's tail.
+    // checked: the HIP kernel stores whole vectors over each sample's tail.
     EXPECT_TRUE(compare_audio(actual.data(), golden.data(), desc, lengths, Bound{}));
 }
 

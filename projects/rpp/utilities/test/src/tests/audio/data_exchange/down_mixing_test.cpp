@@ -75,7 +75,7 @@ void run_down_mixing(const AudioConfig& cfg, const DownMixingParams& p) {
     handle.sync();
     dst.read(actual.data(), dstBytes);
 
-    // A float sum of up to 9 weighted values in [-1, 1], in a different order on each backend.
+    // A float sum of weighted values in [-1, 1], in a different order on each backend.
     EXPECT_TRUE(compare_audio(actual.data(), golden.data(), dstDesc, lengths, Bound{1e-6}));
     // Both kernels write one value per frame, so the padding stays untouched.
     EXPECT_TRUE(compare_audio_padding(actual.data(), dstDesc, lengths));
@@ -92,8 +92,8 @@ TEST_P(DownMixingTest, Correctness) {
     run_down_mixing(p.cfg, p.op);
 }
 
-// The channel counts cover each kernel path: mono is a copy; HOST sums 1-3 channels as scalars,
-// 4-7 with SSE and 8+ with AVX plus a scalar tail; HIP sums 8 channels at a time plus a tail.
+// The channel counts cover each kernel path: the mono copy, HOST's scalar, SSE and AVX sums with a
+// scalar tail, and HIP's vector sums with a tail.
 INSTANTIATE_TEST_SUITE_P(Audio_DataExchange, DownMixingTest,
                          ::testing::ValuesIn(audio_with_params<DownMixingParams>(
                              make_audio_configs({1, 2, 5, 9}), {{false}, {true}})),

@@ -76,7 +76,7 @@ void run_audio_tensor_mul_scalar(const AudioConfig& cfg, const MulScalarParams& 
     dst.read(actual.data(), bytes);
 
     // One correctly rounded float multiply, which the double golden reproduces exactly. Padding is
-    // not checked: the HIP kernel stores whole 8-float vectors over each sample's tail.
+    // not checked: the HIP kernel stores whole vectors over each sample's tail.
     EXPECT_TRUE(compare_audio(actual.data(), golden.data(), desc, lengths, Bound{}));
 }
 

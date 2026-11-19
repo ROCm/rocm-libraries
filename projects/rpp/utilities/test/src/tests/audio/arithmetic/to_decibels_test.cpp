@@ -87,8 +87,8 @@ void run_to_decibels(const AudioConfig& cfg, const ToDecibelsParams& p) {
     handle.sync();
     dst.read(actual.data(), bytes);
 
-    // HOST computes the ratio and log in float: a few ulp of the ratio becomes ~1e-6 dB, plus a
-    // few ulp of the result itself. Padding is not checked: the HIP kernel stores whole vectors.
+    // HOST computes the ratio and log in float, so both the ratio's and the result's rounding show
+    // up. Padding is not checked: the HIP kernel stores whole vectors.
     EXPECT_TRUE(compare_audio(actual.data(), golden.data(), desc, lengths, Bound{1e-5, 1e-6}));
 }
 

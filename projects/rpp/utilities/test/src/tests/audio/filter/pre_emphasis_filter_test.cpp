@@ -40,7 +40,7 @@ using namespace rpptest;
 
 namespace {
 
-// One coefficient per sample: the usual 0.97, a weaker one, and a negative one.
+// One coefficient per sample: a typical one, a weaker one, and a negative one.
 const std::vector<Rpp32f> kCoeffs{0.97f, 0.5f, -0.3f};
 
 struct PreEmphasisParams {
@@ -87,8 +87,8 @@ void run_pre_emphasis_filter(const AudioConfig& cfg, const PreEmphasisParams& p)
     handle.sync();
     dst.read(actual.data(), bytes);
 
-    // A float multiply and subtract (or one FMA) on values below 2 in magnitude: at most two
-    // roundings of 2^-23. Padding is not checked: the HIP kernel stores whole 8-float vectors.
+    // A float multiply and subtract (or one FMA), so at most two float roundings. Padding is not
+    // checked: the HIP kernel stores whole vectors.
     EXPECT_TRUE(compare_audio(actual.data(), golden.data(), desc, lengths, Bound{5e-7}));
 }
 

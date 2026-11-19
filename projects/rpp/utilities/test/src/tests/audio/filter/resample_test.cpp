@@ -59,7 +59,7 @@ struct ResampleParams {
 };
 
 // The windowed-sinc table the legacy suite and MIVisionX build: a Hann-windowed sinc with `lobes`
-// zero crossings each side, 64 table points per lobe. HOST reads lookup, HIP reads lookupPinned.
+// zero crossings each side. HOST reads lookup, HIP reads lookupPinned.
 class ResamplingWindow {
    public:
     ResamplingWindow(RppBackend backend, Rpp32s lobes)
@@ -156,13 +156,13 @@ TEST_P(ResampleTest, Correctness) {
     run_resample(p.cfg, p.op);
 }
 
-// Both kernels step the input position in float across each 256-frame block and resync it from
-// double at the next block. When inRate / outRate is not exact in float the position drifts by up
-// to ~5e-4 frames by the block's end, which moves the output by that times the signal's slope (up
-// to ~0.65 per frame for Tones): 3.1e-4 measured. An exact step (Up2x) leaves only float sums.
+// Both kernels step the input position in float across each block and resync it from double at
+// the next block. When inRate / outRate is not exact in float the position drifts within a block,
+// which moves the output by the drift times the signal's slope. An exact step (Up2x) leaves only
+// float sums.
 // Channels cover the mono and interleaved paths on each backend, up to RPPT_MAX_AUDIO_CHANNELS.
 // Mixed passes one sample per batch through unchanged (the copy path) beside two resampled ones,
-// with a 6-tap window: one SSE step plus a scalar tail on HOST, scalar only on HIP.
+// with a short window: one SSE step plus a scalar tail on HOST, scalar only on HIP.
 INSTANTIATE_TEST_SUITE_P(
     Audio_Filter, ResampleTest,
     ::testing::ValuesIn(audio_with_params<ResampleParams>(

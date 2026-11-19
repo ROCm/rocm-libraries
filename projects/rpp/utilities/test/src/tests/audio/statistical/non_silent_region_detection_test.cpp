@@ -41,7 +41,7 @@ using namespace rpptest;
 
 namespace {
 
-// Full-scale noise between loudBegin[n] and loudEnd[n], and noise at 1e-4 (-80 dB) elsewhere, so
+// Full-scale noise between loudBegin[n] and loudEnd[n], and low-level noise elsewhere, so
 // the silence is not exact zeros. The loud span is placed differently in each sample.
 struct Burst {
     std::vector<Rpp32s> loudBegin, loudEnd;
@@ -74,8 +74,8 @@ struct NonSilentParams {
 };
 
 // The result is a pair of indices, compared exactly, so the backends' float rounding of the
-// moving mean square must not move any value across the cut-off. True when every value is at least
-// 0.1% away from it.
+// moving mean square must not move any value across the cut-off. True when every value is clear of
+// it by a small relative margin.
 bool clear_of_cutoff(const std::vector<double>& mms, double cutOff) {
     for (double v : mms)
         if (std::fabs(v - cutOff) < 1e-3 * cutOff) return false;

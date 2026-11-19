@@ -43,8 +43,8 @@ using namespace rpptest;
 
 namespace {
 
-// The spectrogram of each audio sample: nfft 512, and the frame count a centered spectrogram
-// with step 160 gives for the config's lengths.
+// The spectrogram of each audio sample, with the frame count a centered spectrogram gives for the
+// config's lengths.
 constexpr Rpp32u kNumBins = 512 / 2 + 1;
 constexpr Rpp32s kWindowStep = 160;
 
@@ -107,10 +107,9 @@ void run_mel_filter_bank(const AudioConfig& cfg, const MelFilterBankParams& p) {
     handle.sync();
     dst.read(actual.data(), dstBytes);
 
-    // RPP converts the filter edges to and from mel in float, which moves each edge by ~1e-7 of
-    // its frequency; on a narrow filter that shifts the weights by a few 1e-6. The bound is
-    // relative to the largest output: 4.5e-6 of it measured on both backends. Padding is not
-    // checked: HOST zeroes up to 8 frames past each sample's end.
+    // RPP converts the filter edges to and from mel in float, which moves each edge slightly; on a
+    // narrow filter that visibly shifts the weights. The bound is relative to the largest output.
+    // Padding is not checked: HOST zeroes frames past each sample's end.
     double peak = 0.0;
     for_each_audio_plane_element(dstDesc, dstPlanes, [&](Rpp32u, Rpp32u, Rpp32u, std::size_t i) {
         peak = std::max(peak, static_cast<double>(golden[i]));
@@ -130,8 +129,8 @@ TEST_P(MelFilterBankTest, Correctness) {
     run_mel_filter_bank(p.cfg, p.op);
 }
 
-// Both mel formulas, with and without normalization, over the full band (maxFreq 0) and a
-// sub-band. 128 filters over 257 bins leaves the lowest filters narrower than one bin.
+// Both mel formulas, with and without normalization, over the full band and a sub-band. The
+// largest filter count leaves the lowest filters narrower than one bin.
 INSTANTIATE_TEST_SUITE_P(Audio_Spectrogram, MelFilterBankTest,
                          ::testing::ValuesIn(audio_with_params<MelFilterBankParams>(
                              make_audio_configs({1}),
