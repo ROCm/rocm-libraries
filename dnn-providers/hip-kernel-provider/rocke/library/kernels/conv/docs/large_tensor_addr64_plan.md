@@ -1,10 +1,33 @@
 # Plan: wariant `addr64` kerneli conv fwd dla tensorów > 2 GiB
 
 Status: faza 0 (helpery platformy, `KernelIdentity.addr64` / `ImplicitGemmConvSpec.addr64`,
-odblokowany kind `"i64"` w ABI) zaimplementowana i scalona. Żadna rodzina kerneli
-jeszcze nie buduje ścieżki `addr64` (`validate()` odmawia `addr64=True`). Zakres:
-wszystkie rodziny **forward** convolution w `library/kernels/common/` i ich
-mirrory C++ w `library/cpp/`. Następny krok: faza 1 (implicit GEMM fwd, sekcja 7).
+odblokowany kind `"i64"` w ABI) zaimplementowana i scalona. Z fazy 1 (sekcja 7)
+zaimplementowane są na razie tylko prymitywy M-decode z sekcji 3/5:
+`tile_origin_decode_i64`, `carry_decode_i32` (+ mirror C++) i transform
+`UnmergeAddr64`/`unmerge_addr64` — każdy z testem, **ale jeszcze nieużywane
+przez żaden builder**. Żadna rodzina kerneli jeszcze nie buduje ścieżki
+`addr64` (`validate()` odmawia `addr64=True`). Zakres: wszystkie rodziny
+**forward** convolution w `library/kernels/common/` i ich mirrory C++ w
+`library/cpp/`.
+
+**Odkryta komplikacja przy podłączaniu M-decode (do rozwiązania przed dalszą
+fazą 1):** `make_a_descriptor_dynamic`/`make_d_descriptor_dynamic`
+(`_conv_implicit_gemm_common.py`) liczą *bezwzględny* offset jako
+`sum(coord_i * stride_i)` po całym łańcuchu transformacji — łącznie z
+dekodowanym `n`, mnożonym przez `stride_n`. Podmiana samego
+`spatial_unmerge_dynamic` na `UnmergeAddr64` (który też produkuje bezwzględne
+`(n, ho, wo)`) nie usuwa więc przepełnienia i32: `n * stride_n` to dokładnie
+ten iloczyn, który `addr64` ma ominąć dla dużego `N`. Zgodnie z modelem z
+sekcji 2, ten iloczyn musi wejść w skład **originu** (liczony raz na WG, w
+i64, przez `make_tile_buffer_resource`), a per-lane arytmetyka i32 może
+liczyć wyłącznie ograniczoną deltę w obrębie kafla. Najbliższy gotowy budulec
+do tego podziału to `DynamicTensorDescriptor.offset_i64_split`/`offset_i64`
+(`platform/python/rocke/helpers/transforms.py`, już używane gdzie indziej dla
+wzorca „jeden duży wskaźnik bazowy + reszta i32”) — raczej niż bezpośrednie
+użycie `UnmergeAddr64`'s bezwzględnych współrzędnych w istniejącym łańcuchu
+`make_a/d_descriptor_dynamic`. To wymaga przeprojektowania, jak origin trafia
+do `a_offset_split`/`d_addr` (skąd dziś biorą `m_val`), zanim którykolwiek
+builder implicit-GEMM będzie mógł bezpiecznie ustawić `addr64=True`.
 
 ## 1. Cel i zasady
 
