@@ -84,9 +84,10 @@ def _runtime_name_patterns(stem: str) -> dict[str, str]:
 _MAPPED_LIBRARY_NAMES = {
     "hip": _runtime_name_patterns("amdhip64"),
     "comgr": _runtime_name_patterns("amd_comgr"),
+    # Require a numeric version prefix so LLVM-C is not treated as LLVM.
     "llvm": {
-        "linux": r"libLLVM(?:-[\w.]+)?\.so(?:\..+)?",
-        "win32": r"(?:lib)?LLVM(?:-[\w.]+)?\.dll",
+        "linux": r"libLLVM(?:-[0-9][\w.]*)?\.so(?:\..+)?",
+        "win32": r"(?:lib)?LLVM(?:-[0-9][\w.]*)?\.dll",
     },
     # Compare clang-cpp, not the separate libclang C API, on both platforms.
     "clang": {

@@ -346,10 +346,12 @@ def test_unverifiable_and_ambiguous_binaries_do_not_match():
         ("linux", "hip", "libamdhip64.so.7", "libamdhip64_debug.so.7"),
         ("linux", "comgr", "libamd_comgr.so.3", "amd_comgr.so.3"),
         ("linux", "llvm", "libLLVM.so.23.0git", "libLLVMCore.so.23"),
+        ("linux", "llvm", "libLLVM-23.so", "libLLVM-C.so"),
         ("linux", "clang", "libclang-cpp.so.23", "libclang.so.23"),
         ("win32", "hip", "AMDhip64_7.DLL", "amdhip64_stub.dll"),
         ("win32", "comgr", "amd_comgr0702.dll", "amd_comgr_helper.dll"),
         ("win32", "llvm", "LLVM-23.dll", "LLVMCore.dll"),
+        ("win32", "llvm", "LLVM.dll", "LLVM-C.dll"),
         ("win32", "clang", "clang-cpp.dll", "libclang.dll"),
         ("win32", "clang", "libclang-cpp-23.dll", "clang-23.dll"),
     ],
@@ -360,6 +362,25 @@ def test_inventory_library_names(platform, kind, valid, near_miss):
     assert classify(near_miss, platform=platform) is None
     other_platform = "win32" if platform == "linux" else "linux"
     assert classify(valid, platform=other_platform) is None
+
+
+@pytest.mark.parametrize(
+    ("platform", "c_api", "shared_llvm"),
+    [
+        ("linux", "libLLVM-C.so", "libLLVM.so.23.0git"),
+        ("win32", "LLVM-C.dll", "LLVM-23.dll"),
+    ],
+)
+def test_llvm_c_api_does_not_produce_binary_mismatch(platform, c_api, shared_llvm):
+    def inventory(name, digest):
+        kind = runtime_coexistence._mapped_library_kind(name, platform=platform)
+        return (probe.RocmLibrary(kind, name, digest),) if kind else ()
+
+    status, reason = probe._compare(
+        inventory(c_api, "c-api-digest"), inventory(shared_llvm, "shared-llvm-digest")
+    )
+    assert status is _INCOMPLETE
+    assert "llvm: missing" in reason
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux maps format")
