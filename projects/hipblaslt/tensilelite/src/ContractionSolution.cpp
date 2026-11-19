@@ -7917,7 +7917,11 @@ namespace TensileLite
                     const size_t I
                         = std::max(size_t{1}, problem.getItersPerTile(self.sizeMapping));
                     // Matches origami::streamk MinItersPerCU (streamk.cpp).
-                    constexpr size_t MinItersPerCU = 8;
+                    static const size_t MinItersPerCU = [] {
+                        const char* env = std::getenv("ORIGAMI_SK_MIN_ITERS_PER_CU");
+                        return env ? static_cast<size_t>(std::max(1, std::atoi(env)))
+                                   : size_t{4};
+                    }();
                     // "will RUN", not "is supported": the device branches on the
                     // packed uniform-summation-order bit, which the packer sets
                     // only when both terms hold. The mode term is redundant under

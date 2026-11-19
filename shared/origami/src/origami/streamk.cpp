@@ -8,6 +8,9 @@
 #include "origami/math.hpp"
 #include "origami/types.hpp"
 
+#include <algorithm>
+#include <cstdlib>
+
 namespace origami {
 namespace streamk {
 size_t compute_number_of_output_tiles(size_t mt_m, size_t mt_n, size_t m, size_t n, size_t batch) {
@@ -158,8 +161,15 @@ reduction_t select_reduction(const problem_t& problem,
     if (tiles < cu_count) {
       // For problems with large k and low number of tiles, use parallel reduction
       // TODO Benchmark to check if limits are correct
-      constexpr int MinItersForParallel = 64;
-      const int MaxTilesForParallel     = cu_count / 4;
+      static const int MinItersForParallel = [] {
+        const char* env = std::getenv("ORIGAMI_SK_MIN_ITERS_FOR_PARALLEL");
+        return env ? std::atoi(env) : 16;
+      }();
+      static const int MaxTilesDivisor = [] {
+        const char* env = std::getenv("ORIGAMI_SK_MAX_TILES_FOR_PARALLEL_DIV");
+        return env ? std::max(1, std::atoi(env)) : 2;
+      }();
+      const int MaxTilesForParallel = cu_count / MaxTilesDivisor;
       if (iters_per_tile >= MinItersForParallel && tiles <= MaxTilesForParallel)
         reduction_strategy = reduction_t::parallel;
     }
@@ -413,7 +423,10 @@ size_t grid_k_split_aware(const problem_t& problem,
     // TODO Benchmark to check if limits are correct
     // constexpr int MinItersForParallel = 64;
     // constexpr int MaxTilesForParallel = 16;
-    constexpr int MinItersPerCU = 8;
+    static const size_t MinItersPerCU = [] {
+      const char* env = std::getenv("ORIGAMI_SK_MIN_ITERS_PER_CU");
+      return env ? static_cast<size_t>(std::max(1, std::atoi(env))) : size_t{4};
+    }();
 
     if (config.reduction_strategy == reduction_t::parallel) {
       size_t virt_cu_count = cu_count;
