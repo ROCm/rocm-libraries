@@ -4,12 +4,10 @@
 
 TensileCreateLibrary parses every logic file in worker processes and ships the
 resulting solutions back to one parent, which keeps all of them until the
-library files are written. A fully built ``Solution`` is a ``_state`` dict of
-some 500 entries plus a private ``ProblemType``: about 140 KB of resident
-memory each once unpickled, so a full architecture build (350k solutions)
-costs the parent 50 GiB. The parent reads a dozen of those keys. Everything
-else is needed only inside a worker: kernel code generation hydrates the
-solution, and library writing hydrates it to compute names.
+library files are written. A fully built ``Solution`` contains hundreds of
+state entries and a private ``ProblemType``. The parent needs only a small
+subset while organizing kernel jobs. Kernel generation, helper construction
+and library naming expand the full state when they need it.
 
 ``CompactSolution`` holds the pickled ``Solution`` as a zlib-compressed blob
 (a few KB) and a tuple of the values for ``SUMMARY_KEYS``. It implements the
@@ -21,8 +19,9 @@ unexpected hot path shows up as a number rather than as a silent slowdown;
 an object read that way repeatedly is promoted to a cached hydrated copy so
 the cost stays bounded.
 
-Hashing and equality mirror ``Solution`` exactly (full name, codeObjectFile,
-DeviceNames) so deduplication through ``dict.fromkeys`` is unchanged.
+Hashing and equality between compact records follow ``Solution`` semantics
+so the parent's deduplication through ``dict.fromkeys`` is unchanged. Full
+and compact representations compare unequal in both directions.
 """
 
 import pickle
