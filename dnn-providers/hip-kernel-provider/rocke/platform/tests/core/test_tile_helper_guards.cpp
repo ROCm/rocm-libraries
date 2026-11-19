@@ -10,6 +10,21 @@
 #include <cstdlib>
 #include <cstring>
 
+template <typename Fn>
+static bool refuses(rocke_ir_builder_t& b, const char* diagnostic, Fn&& call)
+{
+    try
+    {
+        call();
+        return rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE
+               && std::strstr(rocke_ir_builder_error(&b), diagnostic);
+    }
+    catch(const ckc::ValueError& error)
+    {
+        return std::strstr(error.what(), diagnostic);
+    }
+}
+
 static void
     count_chunk(rocke_ir_builder_t*, rocke_value_t*, rocke_value_t*, rocke_value_t*, void* user)
 {
@@ -25,20 +40,26 @@ static bool check_geometry(int load_vec, int block_size, bool valid)
     loader.block_size = block_size;
     int per_thread = -1;
     const auto status = rocke_coalesced_tile_loader_vecs_per_thread(&loader, &per_thread);
-    rocke_ir_builder_t b;
+    rocke_ir_builder_t b{};
     if(rocke_ir_builder_init(&b, "loader_geometry") != ROCKE_OK)
         return false;
     auto* tid = rocke_b_const_i32(&b, 0);
     const int before = rocke_b_current_region(&b)->num_ops;
     int visited = 0;
-    rocke_coalesced_tile_loader_visit_chunks(&b, &loader, tid, nullptr, count_chunk, &visited);
-    const bool passed
-        = valid ? status == ROCKE_OK && per_thread == 2 && visited == per_thread
-                      && rocke_ir_builder_ok(&b)
-                : status == ROCKE_ERR_VALUE && per_thread == -1 && visited == 0
-                      && rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE
-                      && std::strstr(rocke_ir_builder_error(&b), "invalid chunk geometry")
-                      && rocke_b_current_region(&b)->num_ops == before;
+    const auto visit = [&] {
+        rocke_coalesced_tile_loader_visit_chunks(&b, &loader, tid, nullptr, count_chunk, &visited);
+    };
+    bool passed;
+    if(valid)
+    {
+        visit();
+        passed = status == ROCKE_OK && per_thread == 2 && visited == per_thread
+                 && rocke_ir_builder_ok(&b);
+    }
+    else
+        passed = status == ROCKE_ERR_VALUE && per_thread == -1
+                 && refuses(b, "invalid chunk geometry", visit) && visited == 0
+                 && rocke_b_current_region(&b)->num_ops == before;
     if(!passed)
         std::fprintf(stderr,
                      "unexpected chunk geometry result for load_vec=%d block_size=%d\n",
@@ -75,11 +96,15 @@ static bool check_empty_fragment()
         return false;
     auto* zero = rocke_b_const_i32(&b, 0);
     const int before = rocke_b_current_region(&b)->num_ops;
-    const auto* result = rocke_b_load_clipped_global_fragment(
-        &b, zero, zero, zero, rocke_f16(), 0, unexpected_read, nullptr);
-    const bool passed = result == nullptr && rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE
-                        && std::strstr(rocke_ir_builder_error(&b), "fragment needs positive width")
-                        && rocke_b_current_region(&b)->num_ops == before;
+    rocke_value_t* result = nullptr;
+    const bool passed
+        = refuses(b,
+                  "fragment needs positive width",
+                  [&] {
+                      result = rocke_b_load_clipped_global_fragment(
+                          &b, zero, zero, zero, rocke_f16(), 0, unexpected_read, nullptr);
+                  })
+          && result == nullptr && rocke_b_current_region(&b)->num_ops == before;
     rocke_ir_builder_free(&b);
     return passed;
 }
@@ -103,12 +128,17 @@ static bool check_staged_grid(rocke_tile_mma_grid_t grid, size_t count, const ch
           };
     const rocke_tile_mma_readers_t readers{read, read, issue, nullptr, nullptr, nullptr, &reads};
     const int before = rocke_b_current_region(&b)->num_ops;
-    rocke_tile_mma_accumulate_staged(&b, grid, acc, count, &readers, out);
-    const bool passed = error == nullptr ? rocke_ir_builder_ok(&b) && reads == 2 && out[0] == zero
-                                         : rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE
-                                               && reads == 0 && out[0] == nullptr
-                                               && std::strstr(rocke_ir_builder_error(&b), error)
-                                               && rocke_b_current_region(&b)->num_ops == before;
+    const auto accumulate
+        = [&] { rocke_tile_mma_accumulate_staged(&b, grid, acc, count, &readers, out); };
+    bool passed;
+    if(error == nullptr)
+    {
+        accumulate();
+        passed = rocke_ir_builder_ok(&b) && reads == 2 && out[0] == zero;
+    }
+    else
+        passed = refuses(b, error, accumulate) && reads == 0 && out[0] == nullptr
+                 && rocke_b_current_region(&b)->num_ops == before;
     rocke_ir_builder_free(&b);
     return passed;
 }
