@@ -3181,6 +3181,17 @@ def _dgrad_lds_charge(spec: DgradConvSpec) -> tuple[int, int, int]:
     if spec.tapk_xhalo and spec.xh_a_k4:
         # K0 slabs of xh_a_k4_rows rows x 4 elements: tile_k * Mp elements.
         _a_shape = (spec.xh_a_k4_rows, spec.tile_k)
+    if spec.tapk_pp_xhalo:
+        # The x-halo ping-pong loop's dY tile (A_smem_xh, _pp_xhalo_loop) is
+        # the only A buffer it allocates: 4 the register-shift rows, 2/3 the
+        # gapped rows of tile_k + 8, 1 the tile, its X - 1 back rows, a junk
+        # and a zero row.
+        if spec.tapk_pp_xhalo == 4:
+            _a_shape = _lds_layout.storage_shape(spec.tile_m + 16)
+        elif spec.tapk_pp_xhalo in (2, 3):
+            _a_shape = (pp_xhalo_gap_rows(spec), spec.tile_k + 8)
+        else:
+            _a_shape = _lds_layout.storage_shape(spec.tile_m + spec.problem.X + 1)
     _b_shape = (
         (spec.tile_k, spec.tile_n + spec.kouter_b_pad)
         if spec.lds_k_outer
@@ -3465,11 +3476,16 @@ def _xhalo_knob_conflict(spec: DgradConvSpec) -> str:
         and not spec.lds_k_outer
         and spec.data.dtype_a in ("bf16", "fp16")
         and spec.xhalo_lds_rows - spec.tile_m <= 8
+        # (its row records build the (z, y) tap mask for filters of up to
+        # _PP_MAX_FILTER per axis)
+        and max(spec.problem.Y, spec.problem.Z if spec.problem.is_3d else 1)
+        <= _PP_MAX_FILTER
     ):
         return (
             "xh_dlds 1/2 needs the x-halo prefetch loop (tpf 1/3) with xh_a_k4, xhalo_exact, "
             "xh_b_wide, xh_b_kpad, b_kpack 2, two 16-deep k atoms per tile, no xh_defer / "
-            "xh_order 4 / setprio 2 / xh_persist / split-K, 16-bit data"
+            "xh_order 4 / setprio 2 / xh_persist / split-K, 16-bit data, filters <= 3 "
+            "along y and z"
         )
     if spec.epi_lds_barriers and not (
         (
@@ -3499,7 +3515,8 @@ def _xhalo_knob_conflict(spec: DgradConvSpec) -> str:
     if spec.xh_yring:
         _yr = xh_yring_geometry(spec)
         if not (
-            _yr
+            spec.xh_yring > 0
+            and _yr
             and spec.tapk_xhalo
             and spec.tapk_prefetch == 3
             and spec.xhalo_exact
@@ -3512,11 +3529,15 @@ def _xhalo_knob_conflict(spec: DgradConvSpec) -> str:
             and not spec.lds_k_outer
             and spec.tapk_setprio != 2
             and spec.xh_fast_a in (0, 1)
+            and spec.problem.Y == spec.problem.X
         ):
+            # Y == X: the ring unrolls the build problem's filter rows, and an
+            # x-halo identity records only the filter width, so a binary never
+            # holds a ring of a height its label does not name.
             return (
                 "xh_yring (dgrad) needs the x-halo prefetch loop (tpf 3) with xhalo_exact, "
-                "xh_a_k4, xh_b_wide, tapk_ztrim 1 (zt0 failed verify on s2), no split-K / "
-                "xh_persist, and a ring "
+                "xh_a_k4, xh_b_wide, tapk_ztrim 1 (the trim the ring is verified with), no "
+                "split-K / xh_persist, a filter with Y == X, and a ring "
                 "of P = k * Wi >= tile_m + X - 1 rows within the A slab"
             )
     if spec.xh_dx_wmask and not (
@@ -3557,18 +3578,28 @@ def _xhalo_knob_conflict(spec: DgradConvSpec) -> str:
     return ""
 
 
+# The most filter rows the y-ring unrolls (the C++ engine's per-row tables).
+_XH_YRING_MAX_Y = 16
+
+
 def xh_yring_geometry(spec: DgradConvSpec):
     """``(Wi, P, new_main_rows)`` of the dgrad x-halo y-ring (xh_yring), or
     None where it does not fit: the ring holds P = k * Wi >= tile_m + X - 1
     rows plus a junk and a zero row inside the A slab (xh_a_k4_rows); a y step
     loads the Wi new rows (X - 1 back rows + Wi - (X - 1) main rows in whole
-    loader passes)."""
+    loader passes).
+
+    The ring width is baked: the binary serves problems with ``Wi == xh_yring
+    % 1000`` only, and the y steps are unrolled for the build problem's
+    filter height. Those are launch rules of the problem, enforced by
+    ``kernels.conv.kernel_identity.identity_supports_problem``; the spec's
+    own problem is only the build template (AOT builds it on a probe)."""
     wi = spec.xh_yring % 1000
     if spec.xh_yring // 1000 == 1:
         return None
     back = spec.problem.X - 1
     need = spec.tile_m + back
-    if wi <= back or spec.problem.Y < 2:
+    if wi <= back or not 2 <= spec.problem.Y <= _XH_YRING_MAX_Y:
         return None
     P = -(-need // wi) * wi
     if P + 2 > spec.xh_a_k4_rows:

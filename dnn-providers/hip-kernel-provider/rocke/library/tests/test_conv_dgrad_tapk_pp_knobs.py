@@ -223,6 +223,35 @@ class TestTapkPpKnobs(unittest.TestCase):
             with self.subTest(name=s.kernel_name()):
                 self.assertFalse(is_valid_dgrad_spec(s, _ARCH)[0])
 
+    def test_pp_xhalo_lds_charge_is_the_pool(self):
+        # The x-halo ping-pong's dY tile (A_smem_xh) is charged as allocated,
+        # so the validator refuses a tile whose pool passes the LDS.
+        import re
+
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        from kernels.common.conv_implicit_gemm_dgrad import dgrad_lds_bytes
+
+        wide = dict(tile_n=256, warp_m=2, warp_n=4, cshuffle_m_chunks=4)
+        cases = [_pp(tapk_pp_xhalo=x) for x in (0, 1, 2)]
+        cases += [_pp(tapk_pp_xhalo=x, tapk_pp_epi=2) for x in (3, 4)]
+        cases += [_pp(tapk_pp_xhalo=2, tile_n=64), _pp(tapk_pp_xhalo=4, tile_n=64)]
+        for s in cases:
+            with self.subTest(name=s.kernel_name()):
+                ok, why = is_valid_dgrad_spec(s, _ARCH)
+                self.assertTrue(ok, why)
+                ll = _lower_kernel_to_llvm_python(
+                    build_implicit_gemm_conv_dgrad(s, arch=_ARCH), arch=_ARCH
+                )
+                pool = re.findall(r"addrspace\(3\) global \[(\d+) x i8\]", ll)
+                self.assertEqual([int(x) for x in pool], [dgrad_lds_bytes(s)])
+        for x in (1, 2):
+            s = _pp(tapk_pp_xhalo=x, **wide)
+            ok, why = is_valid_dgrad_spec(s, _ARCH)
+            self.assertFalse(ok)
+            self.assertIn("LDS budget", why)
+        self.assertTrue(is_valid_dgrad_spec(_pp(**wide), _ARCH)[0])
+
     def test_persistent_grid(self):
         self.assertEqual(dgrad_persistent_grid(8517, 0, 228), 8517)
         self.assertEqual(dgrad_persistent_grid(8517, 1, 228), 228)

@@ -232,17 +232,44 @@ static int _dgrad_kouter_b_pad(const rocke_dgrad_conv_spec_t* s)
     return ROCKE_DGRAD_KOUTER_PAD;
 }
 
+/* Defined further down (shared with the builder). */
+static int _dgrad_xhalo_lds_rows(const rocke_dgrad_conv_spec_t* s);
+static int _dgrad_xh_a_k4_rows(const rocke_dgrad_conv_spec_t* s);
+static int _dgrad_b_load_vec(const rocke_dgrad_conv_spec_t* s);
+static bool _dgrad_pp_a_partial(const rocke_dgrad_conv_spec_t* s);
+
 static void _dgrad_lds_charge(const rocke_dgrad_conv_spec_t* s, long* ab, long* c, long* total)
 {
+    /* Python _dgrad_lds_charge term by term. The xh_dlds and tapk_pp_xhalo
+     * buffers are not charged: the validator refuses both knobs (Python-only)
+     * before it charges the LDS. */
     int ab_dtype_bytes = (s->dtype_a && strcmp(s->dtype_a, "fp32") == 0) ? 4 : 2;
     rocke_conv_lds_layout_t layout = _dgrad_effective_lds_layout(s);
-    long a_rows = s->dy_halo > 0 ? _dgrad_dy_halo_lds_rows(s) : s->tile_m;
-    long a_elems = a_rows * layout.row_stride;
-    long b_elems = s->lds_k_outer ? (long)s->tile_k * (s->tile_n + _dgrad_kouter_b_pad(s))
-                                  : (long)s->tile_n * layout.row_stride;
-    /* dy_halo=2 double-buffers the B tile. */
-    long b_copies = s->dy_halo == 2 ? 2 : 1;
-    long ab_bytes = (a_elems + b_copies * b_elems) * ab_dtype_bytes;
+    long a_rows = s->dy_halo > 0           ? _dgrad_dy_halo_lds_rows(s)
+                  : s->tapk_xhalo          ? _dgrad_xhalo_lds_rows(s)
+                  : _dgrad_pp_a_partial(s) ? s->tile_m + 8
+                                           : s->tile_m;
+    long a_cols = layout.row_stride;
+    if(s->tapk_xhalo && s->xh_a_k4)
+    {
+        /* K0 slabs of xh_a_k4_rows rows x 4 elements: tile_k * Mp elements. */
+        a_rows = _dgrad_xh_a_k4_rows(s);
+        a_cols = s->tile_k;
+    }
+    long b_rows = s->lds_k_outer ? s->tile_k : s->tile_n;
+    long b_cols = s->lds_k_outer ? s->tile_n + _dgrad_kouter_b_pad(s) : layout.row_stride;
+    /* dy_halo=2 double-buffers the B tile; tapk_prefetch=2 both tiles. */
+    long b_copies = (s->dy_halo == 2 || s->tapk_prefetch == 2) ? 2 : 1;
+    const long a_copies = s->tapk_prefetch == 2 ? 2 : 1;
+    if(s->tapk_xhalo)
+        b_copies = s->problem.X;
+    if(s->tapk_xhalo && s->xh_b_kpad && !s->lds_k_outer)
+        b_cols = s->tile_k + s->xh_b_kpad;
+    long b_total_rows = b_copies * b_rows;
+    /* xh_b_wide: one stacked tile of the X taps plus load_vec junk rows. */
+    if(s->tapk_xhalo && s->xh_b_wide)
+        b_total_rows = (long)s->problem.X * s->tile_n + _dgrad_b_load_vec(s);
+    long ab_bytes = (a_copies * a_rows * a_cols + b_total_rows * b_cols) * ab_dtype_bytes;
     int c_dtype_bytes = (s->dtype_d && strcmp(s->dtype_d, "fp32") == 0) ? 4 : 2;
     bool cshuffle = s->epilogue && strcmp(s->epilogue, "cshuffle") == 0;
     const int mch = s->cshuffle_m_chunks > 1 ? s->cshuffle_m_chunks : 1;
@@ -608,7 +635,247 @@ static bool _dgrad_pp_a_partial(const rocke_dgrad_conv_spec_t* s)
     return chunks % bs != 0 && chunks % s->wave_size == 0;
 }
 
-static int _dgrad_xhalo_lds_rows(const rocke_dgrad_conv_spec_t* s);
+/* Defined further down (the B loaders). */
+static int _kpr_choose_vec(int tile_rows, int tile_cols, int block_size, int max_vec, int kpack);
+
+/* Python XTapKPackLoader.fits: the X stacked k-packed B tiles split into whole
+ * waves of load units. */
+static bool
+    _dgrad_xtap_kpack_fits(int n_taps, int tile_rows, int tile_cols, int load_vec, int kpack)
+{
+    if(load_vec < 2 || kpack < 2 || tile_rows % load_vec || tile_cols % kpack)
+        return false;
+    const long units = (long)n_taps * (tile_rows / load_vec) * (tile_cols / kpack);
+    return units % 64 == 0;
+}
+
+/* Python xh_yring_geometry(spec) is not None: the y-ring's P = k * Wi >=
+ * tile_m + X - 1 rows plus a junk and a zero row fit the A slab, and a y step
+ * loads its Wi - (X - 1) main rows in whole loader passes. */
+#define ROCKE_DGRAD_XH_YRING_MAX_Y 16 /* Python _XH_YRING_MAX_Y */
+static bool _dgrad_xh_yring_fits(const rocke_dgrad_conv_spec_t* s)
+{
+    const int wi = s->xh_yring % 1000;
+    if(s->xh_yring / 1000 == 1)
+        return false;
+    const int back = s->problem.X - 1;
+    const int need = s->tile_m + back;
+    if(wi <= back || s->problem.Y < 2 || s->problem.Y > ROCKE_DGRAD_XH_YRING_MAX_Y)
+        return false;
+    const int P = (need + wi - 1) / wi * wi;
+    if(P + 2 > _dgrad_xh_a_k4_rows(s))
+        return false;
+    const int n_main = wi - back;
+    const int rows_per_pass
+        = s->tile_k > 0 ? rocke_dgrad_conv_spec_block_size(s) * 8 / s->tile_k : 0;
+    return n_main > 0 && n_main <= s->tile_m && rows_per_pass > 0 && n_main % rows_per_pass == 0;
+}
+
+/* The knob rules of Python _tapk_prefetch_conflict (with the parts of
+ * _tapk_pingpong_conflict / _pp_streamk_conflict the checks above do not
+ * cover): false + the reason, verbatim. */
+static bool
+    _dgrad_tapk_prefetch_ok(const rocke_dgrad_conv_spec_t* s, char* reason, size_t reason_cap)
+{
+    const bool cshuffle = s->epilogue && strcmp(s->epilogue, "cshuffle") == 0;
+    const bool wavelet = s->pipeline && strcmp(s->pipeline, "wavelet") == 0;
+    if(s->split_atomic_pairs
+       && !(s->split_k > 1 && (s->tapk_xhalo || s->tapk_pingpong) && cshuffle && s->dtype_d
+            && strcmp(s->dtype_d, "bf16") == 0 && s->wave_size == 64))
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "split_atomic_pairs: the split-K x-halo / ping-pong cshuffle bf16 atomic store "
+                 "only");
+        return false;
+    }
+    if(s->tapk_pingpong && (s->tapk_pingpong < 1 || s->tapk_pingpong > 5))
+    {
+        snprintf(reason, reason_cap, "tapk_pingpong must be 0..5; got %d", s->tapk_pingpong);
+        return false;
+    }
+    if(s->pp_box_det
+       && !(s->pp_box_det >= 1 && s->pp_box_det <= 4 && s->pp_boxes && s->split_k > 1
+            && s->wave_size == 64 && s->warp_tile_m == 16 && s->warp_tile_n == 16))
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "pp_box_det is 0..4 and needs pp_boxes, split_k > 1, wave64 16x16 MFMA atoms");
+        return false;
+    }
+    if(s->b_kpack)
+    {
+        if(s->b_kpack != 2 && s->b_kpack != 4 && s->b_kpack != 8)
+        {
+            snprintf(reason, reason_cap, "b_kpack must be 0, 2, 4 or 8; got %d", s->b_kpack);
+            return false;
+        }
+        if(s->lds_k_outer)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "b_kpack applies to the M-outer B tile only (lds_k_outer is set)");
+            return false;
+        }
+        if(wavelet)
+        {
+            snprintf(reason, reason_cap, "b_kpack is not supported with pipeline='wavelet'");
+            return false;
+        }
+        const int vb = _dgrad_b_load_vec(s);
+        if(!_kpr_choose_vec(
+               s->tile_n, s->tile_k, rocke_dgrad_conv_spec_block_size(s), vb, s->b_kpack))
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "b_kpack=%d does not split the %dx%d B tile into whole units per thread at "
+                     "any load width in [2, %d]",
+                     s->b_kpack,
+                     s->tile_n,
+                     s->tile_k,
+                     vb);
+            return false;
+        }
+    }
+    if(s->tapk_xhalo)
+    {
+        const char* why = NULL;
+        if(!s->tap_outer_k)
+            why = "tapk_xhalo is a mode of the tap-outer K loop; it needs tap_outer_k";
+        else if(s->dy_halo)
+            why = "tapk_xhalo and dy_halo are exclusive";
+        else if(s->tapk_prefetch == 2)
+            why = "tapk_xhalo does not implement tapk_prefetch=2 (no LDS ping-pong)";
+        if(why)
+        {
+            snprintf(reason, reason_cap, "%s", why);
+            return false;
+        }
+        if(s->problem.pW != 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "tapk_xhalo needs pW == 0 (a pixel with wi < x then has no dY pixel for tap "
+                     "x); got pW=%d",
+                     s->problem.pW);
+            return false;
+        }
+        if(s->problem.X < 2)
+        {
+            snprintf(reason, reason_cap, "tapk_xhalo needs a filter with X > 1");
+            return false;
+        }
+    }
+    if(s->tapk_prefetch < 0 || s->tapk_prefetch > 3)
+    {
+        snprintf(
+            reason, reason_cap, "tapk_prefetch must be 0, 1, 2 or 3; got %d", s->tapk_prefetch);
+        return false;
+    }
+    if(s->tapk_prefetch == 0)
+        return true;
+    if(!s->tap_outer_k)
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "tapk_prefetch pipelines the tap-outer K loop; it needs tap_outer_k");
+        return false;
+    }
+    if(s->dy_halo)
+    {
+        snprintf(reason, reason_cap, "tapk_prefetch does not apply to the dY halo K loop");
+        return false;
+    }
+    return true;
+}
+
+/* The rules of Python _xhalo_knob_conflict the checks above do not cover
+ * (knob ranges and prerequisites), in its order, reasons verbatim. */
+static bool _dgrad_xhalo_knobs_ok(const rocke_dgrad_conv_spec_t* s, char* reason, size_t reason_cap)
+{
+    const rocke_conv_problem_t* p = &s->problem;
+    const bool xh = s->tapk_xhalo;
+    const bool tpf13 = s->tapk_prefetch == 1 || s->tapk_prefetch == 3;
+    const bool cshuffle = s->epilogue && strcmp(s->epilogue, "cshuffle") == 0;
+    const bool wavelet = s->pipeline && strcmp(s->pipeline, "wavelet") == 0;
+    const int max_yz = (p->is_3d && p->Z > p->Y) ? p->Z : p->Y;
+#define ROCKE_DGRAD_KNOB_FAIL(...)                 \
+    do                                             \
+    {                                              \
+        snprintf(reason, reason_cap, __VA_ARGS__); \
+        return false;                              \
+    } while(0)
+    if(s->xh_fast_a < 0 || s->xh_fast_a > 2
+       || (s->xh_fast_a && !(xh && s->xhalo_exact && s->split_k == 1 && max_yz <= 3)))
+        ROCKE_DGRAD_KNOB_FAIL("xh_fast_a is 0..2 and needs tapk_xhalo with xhalo_exact, split_k 1 "
+                              "and filters <= 3 along y and z");
+    if(s->tapk_ilv < 0 || (s->tapk_ilv && !(xh && tpf13)))
+        ROCKE_DGRAD_KNOB_FAIL("tapk_ilv needs tapk_xhalo with tapk_prefetch 1 or 3");
+    if(s->tapk_lds_ahead < 0
+       || (s->tapk_lds_ahead && !(xh && tpf13 && !s->lds_k_outer && s->wave_size == 64)))
+        ROCKE_DGRAD_KNOB_FAIL(
+            "tapk_lds_ahead needs tapk_xhalo with tapk_prefetch 1 or 3 (MFMA, M-outer B)");
+    if(s->lds_xor
+       && !((xh || s->tapk_pingpong) && s->has_lds_k_pad && s->lds_k_pad == 0 && !s->lds_layout
+            && !s->lds_k_outer
+            && (s->tile_k == 16 || s->tile_k == 32 || s->tile_k == 64 || s->tile_k == 128)
+            && s->wave_size == 64 && !wavelet))
+        ROCKE_DGRAD_KNOB_FAIL("lds_xor needs tapk_xhalo, lds_k_pad 0, the M-outer B tile, tile_k "
+                              "in 16..128 and the wave64 MFMA path");
+    if(s->xh_b_kpad
+       && !(xh && s->lds_xor
+            && (s->xh_b_kpad == 2 || s->xh_b_kpad == 4 || s->xh_b_kpad == 6 || s->xh_b_kpad == 8)))
+        ROCKE_DGRAD_KNOB_FAIL("xh_b_kpad (2/4/6/8) needs tapk_xhalo with lds_xor");
+    if(s->xh_b_wide
+       && !(
+           xh && tpf13 && s->b_kpack && !s->lds_k_outer
+           && _dgrad_xtap_kpack_fits(p->X, s->tile_n, s->tile_k, _dgrad_b_load_vec(s), s->b_kpack)))
+        ROCKE_DGRAD_KNOB_FAIL("xh_b_wide needs tapk_xhalo, tapk_prefetch 1 or 3, b_kpack, the "
+                              "M-outer B tile and whole waves of stacked B units");
+    if(s->xh_defer)
+    {
+        const int n_steps = p->X * rocke_dgrad_conv_spec_k_atoms_per_tile_k(s);
+        if(!(xh && tpf13 && s->tapk_setprio != 2 && !s->lds_k_outer && s->wave_size == 64
+             && 0 < s->xh_defer && s->xh_defer < n_steps))
+            ROCKE_DGRAD_KNOB_FAIL("xh_defer needs tapk_xhalo with tapk_prefetch 1 or 3 (MFMA, "
+                                  "M-outer B, not tapk_setprio 2) and leaves >= 1 step before "
+                                  "the barrier");
+    }
+    if(s->tapk_setprio < 0 || s->tapk_setprio > 2 || (s->tapk_setprio && !(xh && tpf13)))
+        ROCKE_DGRAD_KNOB_FAIL(
+            "tapk_setprio is 0, 1 or 2 and needs tapk_xhalo with tapk_prefetch 1 or 3");
+    if(s->tapk_setprio == 2 && (s->tapk_ilv || s->tapk_lds_ahead))
+        ROCKE_DGRAD_KNOB_FAIL(
+            "tapk_setprio 2 clusters the phase itself: tapk_ilv / tapk_lds_ahead must be 0");
+    if(s->tapk_lds_barrier && !(xh && tpf13))
+        ROCKE_DGRAD_KNOB_FAIL("tapk_lds_barrier needs tapk_xhalo with tapk_prefetch 1 or 3");
+    if(s->xhalo_exact && !xh)
+        ROCKE_DGRAD_KNOB_FAIL("xhalo_exact needs tapk_xhalo");
+    if(s->xcd_remap < 0)
+        ROCKE_DGRAD_KNOB_FAIL("xcd_remap must be >= 0");
+    {
+        /* Python _pp_elb_ok: a ping-pong cshuffle epilogue without a persistent
+         * loop, stream-K or LDS DMA. */
+        const bool pp_elb = s->tapk_pingpong && cshuffle && !xh && !s->pp_streamk
+                            && !s->tapk_pp_persist && !s->async_dma;
+        if(s->epi_lds_barriers
+           && !((xh && cshuffle && s->split_k == 1 && !s->xh_persist) || pp_elb))
+            ROCKE_DGRAD_KNOB_FAIL("epi_lds_barriers (dgrad) needs the x-halo cshuffle epilogue "
+                                  "(split_k 1) or a ping-pong cshuffle one (no stream-K / "
+                                  "persistent loop / async DMA)");
+    }
+    const int mc = s->cshuffle_m_chunks;
+    if(mc != 1)
+    {
+        if(mc < 1 || !cshuffle || (s->split_k != 1 && !s->pp_boxes))
+            ROCKE_DGRAD_KNOB_FAIL(
+                "cshuffle_m_chunks > 1 needs the cshuffle epilogue and split_k 1");
+        if(!(s->dtype_d && strcmp(s->dtype_d, "bf16") == 0))
+            ROCKE_DGRAD_KNOB_FAIL("cshuffle_m_chunks > 1 is bf16 output only");
+    }
+#undef ROCKE_DGRAD_KNOB_FAIL
+    return true;
+}
 
 // Arch-aware spec validation (Python is_valid_dgrad_spec)
 // ---------------------------------------------------------------------------
@@ -818,7 +1085,8 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
         {
             snprintf(reason,
                      reason_cap,
-                     "xh_order is 0..7 and needs tapk_xhalo with tapk_prefetch 1 or 3");
+                     "xh_order is 0..7 and needs tapk_xhalo with tapk_prefetch 1 or 3 (bit 4: "
+                     "tapk_prefetch 3)");
             return false;
         }
         const int mpw = (s->warp_m && s->warp_tile_m) ? s->tile_m / s->warp_m / s->warp_tile_m : 0;
@@ -929,16 +1197,17 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
     /* Branch knobs the C++ engine does not implement yet. */
     const bool xh_ok = s->tapk_xhalo && s->tap_outer_k;
     if(s->xh_yring
-       && (!xh_ok || s->tapk_prefetch != 3 || !s->xhalo_exact || !s->xh_a_k4 || !s->xh_b_wide
-           || s->tapk_ztrim != 1 || s->split_k > 1 || s->xh_persist || s->xh_dlds || s->lds_k_outer
-           || s->tapk_setprio == 2 || s->xh_fast_a > 1))
+       && (s->xh_yring < 0 || !xh_ok || s->tapk_prefetch != 3 || !s->xhalo_exact || !s->xh_a_k4
+           || !s->xh_b_wide || s->tapk_ztrim != 1 || s->split_k > 1 || s->xh_persist || s->xh_dlds
+           || s->lds_k_outer || s->tapk_setprio == 2 || s->xh_fast_a < 0 || s->xh_fast_a > 1
+           || s->problem.Y != s->problem.X || !_dgrad_xh_yring_fits(s)))
     {
-        snprintf(
-            reason,
-            reason_cap,
-            "xh_yring (dgrad) needs the x-halo prefetch loop (tpf 3) with xhalo_exact, xh_a_k4, "
-            "xh_b_wide, tapk_ztrim 1 (zt0 failed verify on s2), no split-K / xh_persist, and a "
-            "ring of P = k * Wi >= tile_m + X - 1 rows within the A slab");
+        snprintf(reason,
+                 reason_cap,
+                 "xh_yring (dgrad) needs the x-halo prefetch loop (tpf 3) with xhalo_exact, "
+                 "xh_a_k4, xh_b_wide, tapk_ztrim 1 (the trim the ring is verified with), no "
+                 "split-K / xh_persist, a filter with Y == X, and a ring of P = k * Wi >= tile_m "
+                 "+ X - 1 rows within the A slab");
         return false;
     }
     /* _xhalo_knob_conflict: the W-column store mask (after the xh_yring rule). */
@@ -995,8 +1264,8 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
        || s->tapk_pp_persist || s->tapk_pp_xhalo || (s->tapk_ztrim && !xh_ok && !s->tapk_pingpong)
        || (s->tapk_pp_bslab && !s->tapk_pingpong) || (s->xh_a_k4 && !xh_ok)
        || (s->xh_order && !xh_ok) || (s->xh_defer && !xh_ok) || (s->xh_fast_a && !xh_ok)
-       || (s->xh_epi && !xh_ok) || s->xh_persist || s->pp_streamk || s->pp_sk_mode
-       || (s->pp_boxes && !s->tapk_pingpong)
+       || s->xh_fast_a == 2 || (s->xh_epi && !xh_ok) || s->xh_persist || s->pp_streamk
+       || s->pp_sk_mode || (s->pp_boxes && !s->tapk_pingpong)
        || (s->pp_box_det
            && !((s->pp_box_det == 1 || s->pp_box_det == 2) && s->pp_boxes && s->split_k > 1))
        || (s->epi_lds_barriers && !s->pp_boxes && !xh_ok
@@ -1317,6 +1586,12 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                      "tap_outer_k needs split_k == 1 (a K slice could start mid-tap)");
             return false;
         }
+        /* Its packed-atomic store treats dX as a dense (M, C) matrix. */
+        if(s->split_k > 1 && !(s->epilogue && strcmp(s->epilogue, "cshuffle") == 0))
+        {
+            snprintf(reason, reason_cap, "x-halo split-K needs the cshuffle epilogue");
+            return false;
+        }
         if(s->wave_size != 64 || (s->pipeline && strcmp(s->pipeline, "wavelet") == 0))
         {
             snprintf(reason,
@@ -1335,8 +1610,16 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
         }
     }
 
+    /* Python _tapk_prefetch_conflict: b_kpack, tapk_xhalo, tapk_prefetch. */
+    if(!_dgrad_tapk_prefetch_ok(s, reason, reason_cap))
+        return false;
+
     /* Python _dy_halo_conflict (reasons verbatim). */
     if(!_dgrad_dy_halo_ok(s, reason, reason_cap))
+        return false;
+
+    /* Python _xhalo_knob_conflict: the knob ranges and prerequisites. */
+    if(!_dgrad_xhalo_knobs_ok(s, reason, reason_cap))
         return false;
 
     /* wavelet-specific checks (Python: spec.pipeline == "wavelet" block). */
@@ -3997,7 +4280,7 @@ static rocke_value_t* dgrad_declare_ptr(rocke_ir_builder_t* b,
 
 static bool _kpr_fits(int tile_rows, int tile_cols, int block_size, int load_vec, int kpack)
 {
-    if(load_vec < 2 || tile_rows % load_vec || tile_cols % kpack)
+    if(load_vec < 2 || kpack < 1 || tile_rows % load_vec || tile_cols % kpack)
         return false;
     const int units = (tile_rows / load_vec) * (tile_cols / kpack);
     return units >= block_size && units % block_size == 0;

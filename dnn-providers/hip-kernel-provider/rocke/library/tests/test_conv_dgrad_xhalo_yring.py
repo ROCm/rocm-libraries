@@ -72,9 +72,23 @@ class TestYRing(unittest.TestCase):
             _ring(130, xh_fast_a=2),
             _ring(130, split_k=2),
             _ring(2),
+            _ring(-870),
         ):
             with self.subTest(name=s.kernel_name()):
                 self.assertFalse(is_valid_dgrad_spec(s, _ARCH)[0])
+
+    def test_filter_height_is_the_width(self):
+        # The ring unrolls the build filter's rows and the identity records
+        # only X: a ring of another height is never built.
+        for Y in (1, 2, 5):
+            s = _ring(130, problem=_problem(Y=Y), xh_fast_a=0, xh_tap_rsrc=False)
+            with self.subTest(Y=Y):
+                ok, why = is_valid_dgrad_spec(s, _ARCH)
+                self.assertFalse(ok)
+                self.assertIn("a filter with Y == X", why)
+        self.assertTrue(
+            is_valid_dgrad_spec(_ring(130, problem=_problem(Y=3)), _ARCH)[0]
+        )
 
     def test_identity_and_support(self):
         sets = aot_jobs._parse_dgrad_xh_knobs("xyr=130,xtr=1,ak4=1")
