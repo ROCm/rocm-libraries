@@ -46,6 +46,7 @@ from rocisa.functions import scalarUInt32DivideAndRemainder, vectorStaticMultipl
 from ..Common import DataDirection, SemanticVersion, isSubtileMultiDU, \
     isMxf4SubtilePath
 from ..Common.DataType import DataType
+from ..Common.Utilities import storeCachelineAlignEnabled  # also imported from here by other modules
 from ..Component import GlobalWriteComponents
 from ..Component import Component
 from ..SolutionStructs import Solution
@@ -66,10 +67,6 @@ from math import ceil, log2, gcd
 # v_permlane32_swap x2` with a two-`v_permlane16_swap` shuffle on eligible gfx950
 # paired dwordx4 stores. This changes the cross-lane assembly AND the per-lane store
 # row address. Orphan/scalar stores use a separate, already LDS-free path.
-def storeCachelineAlignEnabled(kernel) -> bool:
-    """The StoreCachelineAlign solution parameter: two paired 16-bit stores that are the two
-    halves of the same 128B lines are blended so each store writes full lines."""
-    return bool(kernel.get("StoreCachelineAlign", False))
 
 
 def plsinStorePermlane16Active(kernel, weaveGroups) -> bool:

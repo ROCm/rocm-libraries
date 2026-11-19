@@ -46,6 +46,7 @@ from rocisa.instruction import Instruction, SAddCU32, SSubBU32, SCSelectB32, SCS
 
 from ...Common.GlobalParameters import globalParameters
 from ...Common import isMxf4SubtilePath, persistentSpatialCluster, plsinBlockSchedTile
+from ...Common.Utilities import storeCachelineAlignEnabled
 
 
 # ds_load_b128 reads 4 contiguous VGPRs.
@@ -5894,7 +5895,7 @@ class LogicalScheduler:
     def _wovenCachelineAlignOn(self):
         """StoreCachelineAlign on the woven fused store: turns on the dead-register pack lease,
         the banded terminal-MFMA order and the deferred (staggered) store it needs."""
-        return bool(self._kernel and self._kernel.get("StoreCachelineAlign", False))
+        return bool(self._kernel and storeCachelineAlignEnabled(self._kernel))
 
     def _planCapturedTerminalMfmas(self, emitted_3d, captures, storeModule,
                                    requiredCycles, applyMoves=True):
