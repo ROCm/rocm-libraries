@@ -1,9 +1,12 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "rocke/error.hpp"
+#include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.loads.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 static void
@@ -58,11 +61,33 @@ static bool check_layout()
            && rocke_lds_column_xor_shift_for(layout, 2) == 3;
 }
 
+static rocke_value_t*
+    unexpected_read(rocke_ir_builder_t*, rocke_value_t*, rocke_value_t*, int, const void*)
+{
+    std::abort();
+}
+
+static bool check_empty_fragment()
+{
+    rocke_ir_builder_t b{};
+    if(rocke_ir_builder_init(&b, "empty_fragment") != ROCKE_OK)
+        return false;
+    auto* zero = rocke_b_const_i32(&b, 0);
+    const int before = rocke_b_current_region(&b)->num_ops;
+    const auto* result = rocke_b_load_clipped_global_fragment(
+        &b, zero, zero, zero, rocke_f16(), 0, unexpected_read, nullptr);
+    const bool passed = result == nullptr && rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE
+                        && std::strstr(rocke_ir_builder_error(&b), "fragment needs positive width")
+                        && rocke_b_current_region(&b)->num_ops == before;
+    rocke_ir_builder_free(&b);
+    return passed;
+}
+
 int main()
 {
-    return check_layout() && check_geometry(0, 64, false) && check_geometry(2, 0, false)
-                   && check_geometry(-1, 64, false) && check_geometry(2, -1, false)
-                   && check_geometry(2, 64, true)
+    return check_empty_fragment() && check_layout() && check_geometry(0, 64, false)
+                   && check_geometry(2, 0, false) && check_geometry(-1, 64, false)
+                   && check_geometry(2, -1, false) && check_geometry(2, 64, true)
                ? 0
                : 1;
 }
