@@ -23,8 +23,8 @@ pytest.importorskip("pandas")
 # pid it writes to escape.pid; one naming "latin" writes a log line that is not UTF-8 to
 # stdout before its answer in a --graph-list process; one naming "poison" is measured but
 # fails every graph a --graph-list process measures after it, as a broken device or handle
-# would; one naming "bad" fails on its own. Every process start is appended to calls.txt
-# beside the script.
+# would; one naming "bad" fails on its own; one naming "split" reports another graph key
+# on each GPU. Every process start is appended to calls.txt beside the script.
 _BENCH = r"""
 import json, os, subprocess, sys, time
 from pathlib import Path
@@ -86,7 +86,8 @@ def answer(path, listed):
     average = 1.0 + graph["size"] / 10 + (0.5 if metric == "time" else 0.0) + ordinal
     line = {
         "engine_id": 7, "engine_name": "provider:engine7", "graph_id": graph["id"],
-        "graph_key": graph["id"], "device_id": f"board{ordinal}",
+        "graph_key": graph["id"] + (f"@{ordinal}" if "split" in graph["id"] else ""),
+        "device_id": f"board{ordinal}",
         "device_uuid": f"uuid-of-gpu-{ordinal}",
         "arch": "gfx942", "metric": metric,
         "binding": {"engine": "provider:engine7", "role": "predict_engine", "arch": "gfx942",
@@ -263,6 +264,53 @@ def test_a_batch_that_crashes_is_finished_one_graph_per_process(tmp_path, monkey
         "02.json"
     ]
     assert "no plan for this graph" in manifest["failed_graphs"][0]["error"]
+
+
+@pytest.mark.parametrize("batch", [1, 4])
+def test_each_measured_graph_records_the_key_the_bench_reported_for_it(
+    tmp_path, monkeypatch, batch
+):
+    """The collection manifest names each graph's benchmark id beside its file, taken from
+    the answer that named the graph: in a batch that crashed part-way, from the batch or
+    from the graph's own process. A graph that failed records none, as does one whose
+    answers name two keys, which fails."""
+    monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
+    world = _world(tmp_path, ["g0", "crash1", "bad2", "g3", "split4"])
+
+    assert (
+        _collect(
+            world,
+            tmp_path / "out",
+            batch,
+            "--max-graph-failures",
+            "0.5",
+            "--device",
+            "0",
+            "--device",
+            "1",
+        )
+        == 0
+    )
+
+    manifest = json.loads(
+        (tmp_path / "out" / "collection_manifest.json").read_text(encoding="utf-8")
+    )
+    assert {
+        Path(graph["source"]).name: graph.get("benchmark")
+        for graph in manifest["graphs"]
+    } == {
+        "00.json": "g0",
+        "01.json": "crash1",
+        "02.json": None,
+        "03.json": "g3",
+        "04.json": None,
+    }
+    failures = {
+        Path(failure["source"]).name: failure for failure in manifest["failed_graphs"]
+    }
+    assert set(failures) == {"02.json", "04.json"}
+    assert "reported 2 graph keys" in failures["04.json"]["error"]
+    assert not any("benchmark" in failure for failure in failures.values())
 
 
 def test_graphs_a_poisoned_batch_fails_are_measured_alone(tmp_path, monkeypatch):

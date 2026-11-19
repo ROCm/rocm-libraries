@@ -57,6 +57,8 @@ there too, it is the kernel.
 | `: error: argument …`, `unrecognized arguments`, `the following arguments are required` | the command does not match this checkout's `uhd_gen`; check `--help` |
 | `--output-dir must not exist; generation never overwrites a previous run` | write each run to a new directory |
 | `generate requires a true problem holdout: 0 < --eval-fraction < 1` | pass a fraction in range, `--eval-benchmarks`, or `--recall` for a closed shape set |
+| `none of the N --eval-benchmarks graphs was measured in this corpus`, or a warning that some are not among the run's rows naming `eval_slice.py rekey` | the set was generated on another build, whose graph schema gave its graphs other ids: `eval_slice.py rekey` the slices against the collections ([data.md](data.md)) |
+| `none of the N --eval-benchmarks graphs is in this dataset`, or a warning that some are not among the run's rows naming the CSV `benchmark` column | the list names ids the published dataset's CSVs do not carry: list the hold-out from their `benchmark` column |
 | corpus_gen refuses a pack-coverage engine | pass `--kdp-root` |
 | every graph fails collection, the engine's load error naming a kernel file or archive under `<plugin dir>/arch_content/` | the build staged no kernels for this arch ([data.md](data.md), "Kernel files") |
 | a Python traceback from `uhd_gen` | a tool bug; report it with the command and the checkout's SHA |

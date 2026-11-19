@@ -21,7 +21,9 @@ python3 $UHD/scripts/eval_slice.py sample <each training set's eval_slice.json> 
   --count 200 --trained <the model's run>/generation_manifest.json --out sample.json
 ```
 draws up to 200 graphs spread evenly over the slices' regimes, and refuses if any is among
-the model's `training_problem_keys`. A slice is a tenth of its set, so a smoke set (200
+the model's `training_problem_keys`. Pass the slices training held out: the rekeyed ones when
+the model was trained with rekeyed slices ([data.md](data.md)), since the check and `rows`
+match graphs by benchmark id. A slice is a tenth of its set, so a smoke set (200
 graphs per operation) gives every slice graph, about 20 per operation. A closed shape set has
 no slice: its whole set is the graph list, and the verdict is recall.
 

@@ -177,6 +177,14 @@ def test_a_sample_takes_every_regime_before_any_twice(slicing):
     ), "all of them, when fewer"
 
 
+def _run_slicing(*args):
+    return subprocess.run(
+        [sys.executable, str(SLICE_SCRIPT), *map(str, args)],
+        capture_output=True,
+        text=True,
+    )
+
+
 def _write_set(root: Path, operations: dict) -> list:
     manifests = []
     for operation, counts in operations.items():
@@ -198,11 +206,7 @@ def test_the_cli_slices_every_operation_once_and_resolves_graph_files(
     manifests = _write_set(
         tmp_path / "set", {"conv_fwd": {"a": 20}, "matmul": {"b": 10}}
     )
-    run = lambda *args: subprocess.run(
-        [sys.executable, str(SLICE_SCRIPT), *map(str, args)],
-        capture_output=True,
-        text=True,
-    )
+    run = _run_slicing
     assert run("choose", *manifests).returncode == 0
     written = tmp_path / "set" / "eval_slice.json"
     document = json.loads(written.read_text())
@@ -263,6 +267,144 @@ def test_the_cli_slices_every_operation_once_and_resolves_graph_files(
     )
     kept = json.loads((tmp_path / "rows.json").read_text())
     assert {r["benchmark"] for r in kept} == set(document["benchmarks"])
+
+
+def _sliced_set(tmp_path: Path) -> tuple[Path, dict]:
+    """A two-operation set and its slice, as `choose` writes it."""
+    manifests = _write_set(
+        tmp_path / "set", {"conv_fwd": {"a": 20}, "matmul": {"b": 10}}
+    )
+    assert _run_slicing("choose", *manifests).returncode == 0
+    written = tmp_path / "set" / "eval_slice.json"
+    return written, json.loads(written.read_text())
+
+
+def _collection(directory: Path, sources: dict, failed: tuple = ()) -> Path:
+    """A collection manifest naming each of `sources` in `graphs` (file -> its key, or None
+    for a graph that failed, which records none) and each of `failed` in `failed_graphs`.
+    """
+    directory.mkdir(parents=True)
+    (directory / "collection_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema": "uhd_gen.collection/1",
+                "graphs": [
+                    {"source": str(path), **({"benchmark": key} if key else {})}
+                    for path, key in sources.items()
+                ],
+                "failed_graphs": [
+                    {"source": str(path), "error": "no plan"} for path in failed
+                ],
+            }
+        )
+    )
+    return directory
+
+
+@pytest.mark.parametrize("case", ["same_paths", "set_moved", "same_name_elsewhere"])
+def test_a_rekeyed_slice_holds_out_the_ids_a_newer_build_measured(tmp_path, case):
+    """Graph content keys move with the graph schema: the same files, collected by a newer
+    build, carry other ids. Rekeying keeps the slice's graphs and swaps their ids, found by
+    path, or by file name when the set now lives elsewhere; a graph's own path wins over a
+    same-named file measured elsewhere under another id."""
+    written, document = _sliced_set(tmp_path)
+    measured = {}
+    for operation in ("conv_fwd", "matmul"):
+        for graph in sorted((tmp_path / "set" / operation / "graphs").iterdir()):
+            source = (
+                tmp_path / "elsewhere" / graph.name if case == "set_moved" else graph
+            )
+            measured[source] = f"new-{graph.stem}"
+    if case == "same_name_elsewhere":
+        measured[tmp_path / "x" / next(iter(measured)).name] = "other"
+    collection = _collection(tmp_path / "collection", measured)
+
+    run = _run_slicing(
+        "rekey", written, "--collection", collection, "--out-dir", tmp_path / "rekeyed"
+    )
+    assert run.returncode == 0, run.stderr
+    rekeyed = json.loads((tmp_path / "rekeyed" / "set" / "eval_slice.json").read_text())
+    assert rekeyed["benchmarks"] == sorted(f"new-{b}" for b in document["benchmarks"])
+    assert {g["benchmark"]: g["file"] for g in rekeyed["graphs"]} == {
+        f"new-{g['benchmark']}": g["file"] for g in document["graphs"]
+    }
+    assert all(Path(g["path"]).is_file() for g in rekeyed["graphs"])
+    for kept in ("schema", "fraction", "seed", "by_regime", "manifests"):
+        assert rekeyed[kept] == document[kept], kept
+
+    held = tmp_path / "held.json"
+    assert (
+        _run_slicing(
+            "holdout", tmp_path / "rekeyed" / "set" / "eval_slice.json", "--out", held
+        ).returncode
+        == 0
+    )
+    assert json.loads(held.read_text()) == rekeyed["benchmarks"]
+
+
+@pytest.mark.parametrize("listed_in", ["graphs", "failed_graphs"])
+def test_a_slice_graph_that_failed_collection_keeps_its_id(tmp_path, listed_in):
+    """A graph a collection named but did not measure, within the run's failure budget,
+    stays in the rekeyed slice under its old id, which no rows carry, and is counted; the
+    rest are rekeyed."""
+    written, document = _sliced_set(tmp_path)
+    paths = {Path(g["path"]): f"new-{g['benchmark']}" for g in document["graphs"]}
+    first = next(iter(paths))
+    old = first.stem
+    if listed_in == "graphs":
+        paths[first] = None
+        failed = ()
+    else:
+        del paths[first]
+        failed = (first,)
+    collection = _collection(tmp_path / "collection", paths, failed)
+
+    run = _run_slicing(
+        "rekey", written, "--collection", collection, "--out-dir", tmp_path / "rekeyed"
+    )
+    assert run.returncode == 0, run.stderr
+    assert "1 graph(s) failed collection and keep their old ids" in run.stderr
+    rekeyed = json.loads((tmp_path / "rekeyed" / "set" / "eval_slice.json").read_text())
+    assert rekeyed["benchmarks"] == sorted(
+        b if b == old else f"new-{b}" for b in document["benchmarks"]
+    )
+
+
+@pytest.mark.parametrize(
+    "case, message",
+    [
+        ("missing", "no collection names it"),
+        ("ambiguous", "2 ids go with it"),
+        ("predates", "predates them"),
+        ("over_its_source", "exists or is named twice"),
+    ],
+    ids=["missing", "ambiguous", "predates", "over_its_source"],
+)
+def test_a_slice_that_cannot_be_rekeyed_is_refused(tmp_path, case, message):
+    """A slice graph no collection names, one whose file name goes with two ids, a
+    collection that records no ids, and an output that would replace the slice it is
+    read from are refused, writing nothing."""
+    written, document = _sliced_set(tmp_path)
+    source = written.read_bytes()
+    paths = {Path(g["path"]): f"new-{g['benchmark']}" for g in document["graphs"]}
+    first = next(iter(paths))
+    if case == "missing":
+        del paths[first]
+    elif case == "ambiguous":
+        del paths[first]
+        paths[tmp_path / "x" / first.name] = "one"
+        paths[tmp_path / "y" / first.name] = "two"
+    elif case == "predates":
+        paths = dict.fromkeys(paths)
+    collection = _collection(tmp_path / "collection", paths)
+
+    out_dir = tmp_path if case == "over_its_source" else tmp_path / "rekeyed"
+    run = _run_slicing(
+        "rekey", written, "--collection", collection, "--out-dir", out_dir
+    )
+    assert run.returncode != 0 and message in run.stderr
+    assert not (tmp_path / "rekeyed").exists()
+    assert written.read_bytes() == source
 
 
 # --- engine predictor (L1) verdict --------------------------------------------------
