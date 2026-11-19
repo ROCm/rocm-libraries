@@ -409,7 +409,7 @@ bool matches(float got, float want, float tolerance)
 }
 
 /// Bytes of NaN guard placed before and after the input in the guarded runs.
-constexpr size_t GUARD_BYTES = 64 * 1024;
+constexpr size_t GUARD_BYTES = size_t{64} * 1024;
 
 /// The input the reduction reads, copied between two NaN guards (all-ones bytes: NaN in fp32,
 /// fp16 and bf16): a kernel that read outside the tensor and used the value would put NaN into
