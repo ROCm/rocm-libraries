@@ -434,7 +434,10 @@ def _build_client(
 
     detected, gpu_targets = _resolve_gpu_targets(gpu_targets, build_env)
     if not gpu_targets:
-        raise Exit("Error: No GPU detected and no gpu_targets provided", code=1)
+        raise Exit(
+            f"Error: No GPU detected using ROCm at {build_env.root} and no gpu_targets provided",
+            code=1,
+        )
     if detected is not None and detected != gpu_targets:
         print(f"warning: No GPU targets specified. Detected {detected}, using: {gpu_targets}")
     elif detected is not None:
@@ -680,7 +683,7 @@ def build_coverage(
     _report_rocm_build_environment(build_env)
     _, gpu_targets = _resolve_gpu_targets(gpu_targets, build_env)
     if not gpu_targets:
-        print("Error: No GPU detected and no gpu_targets provided.")
+        print(f"Error: No GPU detected using ROCm at {build_env.root} and no gpu_targets provided.")
         return
 
     if clean and os.path.exists(build_dir):

@@ -603,16 +603,29 @@ def test_native_auto_detection_uses_selected_tools_and_recovers_stepping(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="executable shell tool fixtures")
-def test_selected_root_without_gpu_tools_does_not_borrow_ambient_tools(tmp_path, monkeypatch):
-    selected = _executable_rocm_root(tmp_path, "selected", "gfx1250")
+@pytest.mark.parametrize("workflow", ["client", "coverage"])
+def test_selected_root_without_gpu_tools_does_not_borrow_ambient_tools(
+    tmp_path, monkeypatch, capsys, workflow
+):
+    selected = _executable_rocm_root(tmp_path, "selected root", "gfx1250")
     (selected / "lib/llvm/bin/amdgpu-arch").unlink()
     (selected / "bin/rocminfo").unlink()
     ambient = _executable_rocm_root(tmp_path, "ambient", "gfx942")
     monkeypatch.setenv("ROCM_PATH", str(ambient))
     monkeypatch.setenv("PATH", str(ambient / "lib/llvm/bin") + os.pathsep + os.environ["PATH"])
     context = _RecordingContext()
-    with pytest.raises(tasks.Exit, match="No GPU detected"):
-        tasks.build_client.body(context, build_dir=str(tmp_path / "build"), rocm_path=str(selected))
+    kwargs = {"build_dir": str(tmp_path / "build"), "rocm_path": str(selected)}
+    if workflow == "client":
+        with pytest.raises(tasks.Exit, match="No GPU detected") as error:
+            tasks.build_client.body(context, **kwargs)
+        assert error.value.code == 1
+        diagnostic = str(error.value)
+    else:
+        tasks.build_coverage.body(context, **kwargs)
+        diagnostic = next(
+            line for line in capsys.readouterr().out.splitlines() if "No GPU detected" in line
+        )
+    assert f"No GPU detected using ROCm at {selected}" in diagnostic
     assert context.commands == []
 
 
