@@ -162,6 +162,31 @@ def test_generated_solution_name_keeps_runtime_tokens(make_state):
     assert N.getKernelNameMin(handwritten, splitGSU=False) == "hand_ck"
 
 
+def test_generated_kernel_name_tracks_compact_loop_store(make_state):
+    # The stamp is the assembly identity, but CompactLoopStore is applied
+    # after it is written. The symbol has to follow the live field, and the
+    # name key has to stay so CustomKernel.FromOriginalState can load it.
+    stamp = "Cijk_example_MT64x64x16_CLS0_ISA950"
+    off = make_state(CompactLoopStore=False, CustomKernel={"name": stamp, "generated": True})
+    on = make_state(CompactLoopStore=True, CustomKernel={"name": stamp, "generated": True})
+
+    assert N.getKernelNameMin(off, splitGSU=False) == stamp
+    assert N.getKernelNameMin(on, splitGSU=False) == stamp.replace("CLS0", "CLS1")
+    assert off["CustomKernel"]["name"] == stamp
+    assert on["CustomKernel"]["name"] == stamp
+
+    # A stamp from before the token existed still has to show CLS when it is on.
+    legacy = "Cijk_example_MT64x64x16_ISA950"
+    legacy_on = make_state(CompactLoopStore=True, CustomKernel={"name": legacy, "generated": True})
+    legacy_off = make_state(CompactLoopStore=False, CustomKernel={"name": legacy, "generated": True})
+    assert N.getKernelNameMin(legacy_on, splitGSU=False) == legacy + "_CLS1"
+    assert N.getKernelNameMin(legacy_off, splitGSU=False) == legacy
+
+    # Handwritten names are not parameter encodings; a CLS substring stays put.
+    hand = make_state(CompactLoopStore=True, CustomKernel={"name": stamp})
+    assert N.getKernelNameMin(hand, splitGSU=False) == stamp
+
+
 def test_name_with_thread_tile_no_matrix_inst(make_state, snapshot):
     # No MatrixInstM -> the ThreadTile branch instead of MatrixInstruction.
     s = make_state()

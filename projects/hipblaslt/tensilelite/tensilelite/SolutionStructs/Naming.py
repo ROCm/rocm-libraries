@@ -192,6 +192,30 @@ def _nameSafe(value) -> str:
   return re.sub(r"[^A-Za-z0-9]", "", str(value).replace("-", "n").replace(".", "p"))
 
 
+# CompactLoopStore's name token. The stamp is written once; the store path
+# keeps reading the live field, so a later default or derivation change has to
+# show up in this token or the symbol stays CLS0 while the asm emits CLS loops.
+_CLS_PREFIX = getParameterNameAbbreviation("CompactLoopStore")
+_CLS_TOKEN = re.compile(rf"(^|_){_CLS_PREFIX}[01](?=_|$)")
+
+
+def _withLiveCompactLoopStore(name: str, state) -> str:
+  """Overlay the live CompactLoopStore onto a generated kernel's stamped symbol.
+
+  The name key itself stays: CustomKernel.FromOriginalState requires it.
+  Off with no token stays unnamed, matching stamps from before CLS existed.
+  """
+  if "CompactLoopStore" not in state:
+    return name
+  live = getParameterValueAbbreviation("CompactLoopStore", state["CompactLoopStore"])
+  token = _CLS_PREFIX + live
+  if _CLS_TOKEN.search(name):
+    return _CLS_TOKEN.sub(lambda m: m.group(1) + token, name, count=1)
+  if live != "0":
+    return name + "_" + token
+  return name
+
+
 def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInternalArgs):
 
   ck = state.get("CustomKernel")
@@ -200,9 +224,14 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   # dispatch tokens below: WGM, WGMXCCG, SU, SUM, SUS, GSUC, GSUWGMRR.
   # Handwritten kernels have no parameter encoding, so the stamped name
   # is the whole name for both callers.
+  # Kernel names still read CompactLoopStore off the live field: that
+  # parameter changes the store loops after the stamp is written.
   generated = isinstance(ck, dict) and bool(ck.get("generated", False))
   if isinstance(ck, dict) and ck.get("name") and (not generated or ignoreInternalArgs):
-    return ck["name"]
+    name = ck["name"]
+    if generated:
+      name = _withLiveCompactLoopStore(name, state)
+    return name
   if state.get("CustomKernelName", ""):
     return state["CustomKernelName"]
 
