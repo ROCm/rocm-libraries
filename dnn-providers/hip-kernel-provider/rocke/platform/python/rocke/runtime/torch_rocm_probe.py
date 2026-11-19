@@ -100,6 +100,7 @@ class TorchRocmReport:
     torch_hip_version: str | None = None
     worker_status: TorchWorkerStatus | None = None
     stderr: str = ""
+    torch_file: str | None = None
 
 
 def _fingerprint(
@@ -262,6 +263,7 @@ def _worker(output: Path) -> None:
             "status": TorchWorkerStatus.IMPORTED,
             "version": torch.__version__,
             "hip_version": getattr(getattr(torch, "version", None), "hip", None),
+            "torch_file": getattr(torch, "__file__", None),
             "libraries": [asdict(library) for library in libraries],
             "error": error,
         }
@@ -278,8 +280,10 @@ def _stderr_tail(path: Path) -> str:
 def probe_torch_rocm(*, timeout: float = 30.0) -> TorchRocmReport:
     """Observe the parent and import torch in a fresh, time-bounded interpreter.
 
-    Does not load COMGR, HIP or torch in the parent. Libraries not mapped by
-    the child import are unknown; this does not exercise JIT or GPU launch.
+    Does not load COMGR, HIP or torch in the parent. The child reports its
+    torch module's file and uses its own startup path, not the caller's
+    in-memory sys.path. Libraries not mapped by the child import are unknown;
+    this does not exercise JIT or GPU launch.
     """
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("timeout must be positive and finite")
@@ -356,14 +360,15 @@ def probe_torch_rocm(*, timeout: float = 30.0) -> TorchRocmReport:
     else:
         status, reason = _compare(parent, observed)
     return TorchRocmReport(
-        status,
-        reason,
-        parent,
-        observed,
-        payload["version"],
-        payload["hip_version"],
-        worker_status,
-        stderr_text,
+        status=status,
+        reason=reason,
+        parent_libraries=parent,
+        torch_libraries=observed,
+        torch_version=payload["version"],
+        torch_hip_version=payload["hip_version"],
+        worker_status=worker_status,
+        stderr=stderr_text,
+        torch_file=payload["torch_file"],
     )
 
 

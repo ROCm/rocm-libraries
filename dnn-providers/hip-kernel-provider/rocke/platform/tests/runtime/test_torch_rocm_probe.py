@@ -126,6 +126,7 @@ def test_subprocess_compares_mapped_bytes_not_filenames_or_versions(
     assert data["worker_status"] == _Worker.IMPORTED
     assert data["torch_version"] == "fixture"
     assert data["torch_hip_version"] == "fixture HIP version"
+    assert Path(data["torch_file"]).samefile(tmp_path / "torch.py")
     outcome = _PAIR_OUTCOMES[pair]
     assert data["status"] == (_INCOMPLETE if outcome == _UNSEEN else outcome)
     for key, path in [("parent_libraries", parent_lib), ("torch_libraries", child_lib)]:
@@ -167,6 +168,7 @@ def test_combined_hip_and_comgr_evidence(monkeypatch, hip, comgr):
                     "status": _Worker.IMPORTED,
                     "version": "fixture",
                     "hip_version": "fixture HIP version",
+                    "torch_file": "fixture/torch.py",
                     "libraries": [asdict(item) for item in child],
                     "error": None,
                 }
@@ -225,6 +227,7 @@ def test_import_failures_are_not_binary_mismatches(
     result = probe.probe_torch_rocm()
     assert result.status is _INCOMPLETE
     assert result.worker_status is status
+    assert result.torch_file is None
     assert reason in result.reason
 
 
@@ -254,9 +257,13 @@ def test_invalid_timeout_is_rejected_before_observing_or_spawning(monkeypatch, t
 
 @pytest.mark.parametrize("timeout", ["30", "-1"])
 def test_module_cli(tmp_path, timeout):
-    (tmp_path / "torch.py").write_text("__version__ = 'cli fixture'\n", encoding="utf-8")
+    (tmp_path / "torch.py").write_text(
+        "__version__ = 'cli fixture'\n", encoding="utf-8"
+    )
     result = subprocess.run(
-        rocke_python_command("-m", "rocke.runtime.torch_rocm_probe", f"--timeout={timeout}"),
+        rocke_python_command(
+            "-m", "rocke.runtime.torch_rocm_probe", f"--timeout={timeout}"
+        ),
         cwd=tmp_path,
         env=rocke_subprocess_env(python_paths=[tmp_path]),
         capture_output=True,
@@ -274,6 +281,45 @@ def test_module_cli(tmp_path, timeout):
     assert report["status"] == "inconclusive"
     assert report["worker_status"] == "imported"
     assert report["torch_version"] == "cli fixture"
+    assert Path(report["torch_file"]).samefile(tmp_path / "torch.py")
+
+
+def test_reports_torch_from_child_startup_path(tmp_path):
+    parent_only = tmp_path / "parent_only"
+    child_visible = tmp_path / "child_visible"
+    parent_only.mkdir()
+    child_visible.mkdir()
+    (parent_only / "torch.py").write_text("__version__ = 'parent'\n", encoding="utf-8")
+    child_torch = child_visible / "torch.py"
+    child_torch.write_text("__version__ = 'child'\n", encoding="utf-8")
+    result = subprocess.run(
+        rocke_python_command(
+            "-c",
+            "import importlib.util, json, sys\n"
+            "from dataclasses import asdict\n"
+            "from pathlib import Path\n"
+            "from rocke.runtime.torch_rocm_probe import probe_torch_rocm\n"
+            "parent_only = Path(sys.argv[1])\n"
+            "sys.path.insert(0, str(parent_only))\n"
+            "parent_spec = importlib.util.find_spec('torch')\n"
+            "assert Path(parent_spec.origin).samefile(parent_only / 'torch.py')\n"
+            "assert 'torch' not in sys.modules\n"
+            "report = probe_torch_rocm()\n"
+            "assert 'torch' not in sys.modules\n"
+            "print(json.dumps(asdict(report)))\n",
+            parent_only,
+        ),
+        cwd=tmp_path,
+        env=rocke_subprocess_env(python_paths=[child_visible]),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
+    report = json.loads(result.stdout)
+    assert report["worker_status"] == _Worker.IMPORTED
+    assert report["torch_version"] == "child"
+    assert Path(report["torch_file"]).samefile(child_torch)
 
 
 def test_bounds_subprocess_runtime(tmp_path, monkeypatch):
