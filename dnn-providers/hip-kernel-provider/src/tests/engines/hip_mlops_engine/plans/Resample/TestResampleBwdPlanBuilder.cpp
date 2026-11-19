@@ -3,6 +3,7 @@
 
 #include <cstdio>
 #include <gtest/gtest.h>
+#include <limits>
 #include <ostream>
 #include <string>
 
@@ -28,19 +29,32 @@ using namespace hip_kernel_provider::resample;
 namespace
 {
 
-// A 1x1 pooling window with stride 1, so dx has the dims of dy: [1, 1, height, width].
-flatbuffers::FlatBufferBuilder createResampleBwdGraphWithGradientSize(int64_t height, int64_t width)
+// dx is [1, 1, height, width] and dy is [1, 1, outHeight, outWidth].
+flatbuffers::FlatBufferBuilder createResampleBwdGraph(int64_t height,
+                                                      int64_t width,
+                                                      int64_t outHeight,
+                                                      int64_t outWidth,
+                                                      const std::vector<int64_t>& prePadding,
+                                                      const std::vector<int64_t>& postPadding,
+                                                      const std::vector<int64_t>& stride,
+                                                      const std::vector<int64_t>& window)
 {
     flatbuffers::FlatBufferBuilder builder;
     const std::vector<int64_t> dims = {1, 1, height, width};
     const std::vector<int64_t> strides = {height * width, height * width, width, 1};
-    const std::vector<int64_t> padding = {0, 0};
-    const std::vector<int64_t> unit = {1, 1};
+    const std::vector<int64_t> outDims = {1, 1, outHeight, outWidth};
+    const std::vector<int64_t> outStrides
+        = {outHeight * outWidth, outHeight * outWidth, outWidth, 1};
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 1, "dy", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+        builder,
+        1,
+        "dy",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &outStrides,
+        &outDims));
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 2, "dx", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &strides, &dims));
 
@@ -49,10 +63,10 @@ flatbuffers::FlatBufferBuilder createResampleBwdGraphWithGradientSize(int64_t he
         1,
         2,
         ::flatbuffers::nullopt,
-        &padding,
-        &padding,
-        &unit,
-        &unit,
+        &prePadding,
+        &postPadding,
+        &stride,
+        &window,
         hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_EXCLUDE_PADDING,
         hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD);
 
@@ -73,6 +87,12 @@ flatbuffers::FlatBufferBuilder createResampleBwdGraphWithGradientSize(int64_t he
         &tensorAttributes,
         &nodes));
     return builder;
+}
+
+// A 1x1 pooling window with stride 1, so dx has the dims of dy: [1, 1, height, width].
+flatbuffers::FlatBufferBuilder createResampleBwdGraphWithGradientSize(int64_t height, int64_t width)
+{
+    return createResampleBwdGraph(height, width, height, width, {0, 0}, {0, 0}, {1, 1}, {1, 1});
 }
 
 } // namespace
@@ -150,6 +170,51 @@ TEST_F(TestResampleBwdPlanBuilder, IsApplicableReturnsFalseForGradientOverThread
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// dy and dx are [1, 1, 1, 1]. A stride of INT64_MAX keeps dy at one element whatever the padding
+// and window, so each row isolates one int64_t limit of the shape inference. An overflowing
+// padding row sets the output height to 2, the value the unchecked expression wraps to.
+TEST_F(TestResampleBwdPlanBuilder, SpatialParametersAtTheInt64Limit)
+{
+    constexpr int64_t MAX = std::numeric_limits<int64_t>::max();
+    constexpr int64_t TWO_31 = int64_t{1} << 31;
+    constexpr int64_t TWO_32 = int64_t{1} << 32;
+    struct Row
+    {
+        const char* name;
+        std::vector<int64_t> prePadding;
+        std::vector<int64_t> postPadding;
+        std::vector<int64_t> window;
+        int64_t outHeight;
+        bool expected;
+    };
+    for(const auto& row : {
+            Row{"pre_padding fills the padded extent", {MAX - 1, 0}, {0, 0}, {1, 1}, 1, true},
+            Row{"pre_padding overflows the padded extent", {MAX, 0}, {0, 0}, {1, 1}, 2, false},
+            Row{"post_padding fills the padded extent", {0, 0}, {MAX - 1, 0}, {1, 1}, 1, true},
+            Row{"post_padding overflows the padded extent", {0, 0}, {MAX, 0}, {1, 1}, 2, false},
+            Row{"window product fits",
+                {TWO_32 - 2, TWO_31 - 1},
+                {0, 0},
+                {TWO_32 - 1, TWO_31},
+                1,
+                true},
+            Row{"window product overflows",
+                {TWO_32 - 1, TWO_31 - 1},
+                {0, 0},
+                {TWO_32, TWO_31},
+                1,
+                false},
+        })
+    {
+        SCOPED_TRACE(row.name);
+        auto builder = createResampleBwdGraph(
+            1, 1, row.outHeight, 1, row.prePadding, row.postPadding, {MAX, MAX}, row.window);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_EQ(_planBuilder.isApplicable(_dummyHandle, graph), row.expected);
+    }
 }
 
 // ============================================================================
