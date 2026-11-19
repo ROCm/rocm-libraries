@@ -1670,7 +1670,10 @@ def main() -> int:
             "split-K resolver picks for each kernel, "
             "1 = disabled, "
             ">1 = fixed degree, "
-            "-1 = auto (the resolver dispatch uses, per kernel). "
+            "-1 = auto (the resolver dispatch uses, per kernel, resolved "
+            "for the device being timed; the cached atomic forward split, "
+            "split_tail and stream-K / hybrid binaries have no forward cost "
+            "model, so for them -1 sweeps as 0 does). "
             "Applies to --run-from-cache too, where the degree is a kernarg "
             "and the cached binary is launched at whichever degree this "
             "selects; there 1 selects nothing, since the non-split-K kernel "
@@ -2556,8 +2559,10 @@ def _build_wgrad_one(args_tuple):
     from kernels.common.conv_split_k import resolve_conv_split_k
 
     # The dispatcher's resolver: an auto (-1) degree comes out as dispatch
-    # would launch it, and an explicit one is held inside gridDim.z. A combo
-    # it cannot serve is skipped, like any other invalid combo.
+    # would launch it on the device being timed (its CU count, as the
+    # --run-from-cache path resolves it), and an explicit one is held inside
+    # gridDim.z. A combo it cannot serve is skipped, like any other invalid
+    # combo.
     try:
         resolved_split_k = resolve_conv_split_k(
             "wgrad",
@@ -2572,6 +2577,7 @@ def _build_wgrad_one(args_tuple):
             group_merge=group_merge,
             split_k=split_k,
             reduction="atomic",
+            num_cus=_device_num_cus(),
         ).split_k
     except ValueError:
         return None
@@ -2703,6 +2709,7 @@ def _build_wgrad_two_stage_one(args_tuple):
             split_k=split_k,
             reduction="workspace",
             allow_unsplit=False,
+            num_cus=_device_num_cus(),
         ).split_k
     except ValueError:
         return None  # nothing to split: the two-stage leg does not apply
@@ -6894,9 +6901,14 @@ def _runtime_split_ks(
     ``requested`` is ``--split-k``, with the same meaning it has on the JIT
     sweep: 0 sweeps ``degrees`` (``--split-k-degrees``) plus the resolver's
     pick, -1 launches at the resolver's pick only, and a positive value pins
-    that degree -- for the forward split as for wgrad. Where the forward
-    policy does not split the problem, -1 yields no degree, so the plain
-    forward binary alone is timed. The cache records ``split_k=2`` only as a
+    that degree. The resolver resolves for the device being timed
+    (:func:`_device_num_cus`). -1 means "resolver only" for wgrad and the
+    two-stage (WMMA) forward split; where the forward policy does not split
+    the problem it yields no degree, so the plain forward binary alone is
+    timed. The atomic (MFMA) forward split, ``split_tail`` and stream-K /
+    ``split_hybrid`` binaries have no forward cost model, so for them -1 acts
+    as 0: the binary is swept over ``degrees`` plus the wave-filling degrees
+    (or its tail launches / stream-K workgroup counts). The cache records ``split_k=2`` only as a
     marker that the binary is the split-K one -- the degree itself is a
     kernarg -- so nothing here is baked in and every mode is reachable at
     launch.
