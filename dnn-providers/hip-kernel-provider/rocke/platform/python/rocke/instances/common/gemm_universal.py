@@ -2826,6 +2826,16 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
 
     # Workgroup ids of the split barrier: signal / wait the whole workgroup.
     _WG_SIGNAL, _WG_WAIT = 0xFFFFFFFF, 0xFFFF
+    # Cluster barrier (-3) sequences of the mx_gemm prototype: a full cluster
+    # rendezvous, and a signal from wave 0 alone ($0 = the wave index).
+    _CL_SYNC = (
+        "s_barrier_signal_isfirst -1\n"
+        "s_barrier_wait -1\n"
+        "s_cbranch_scc0 1\n"
+        "s_barrier_signal -3\n"
+        "s_barrier_wait -3"
+    )
+    _CL_SIGNAL0 = "s_cmp_eq_u32 $0, 0\ns_cbranch_scc0 1\ns_barrier_signal -3"
 
     def _tdm_publish(allowed: int) -> None:
         """Publish TDM fills: wait until at most ``allowed`` are outstanding, then
@@ -3205,6 +3215,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # ROCKE_EXP_MX_RA_PEND=n: LDS reads the second barrier may leave in flight
     # (the next tile's reads issued after this buffer's last one; default 0).
     # ROCKE_EXP_MX_RA_NOFENCE=1: no scheduling fences between the groups.
+    # ROCKE_EXP_MX_RA_CB=1 (with RA=2 and a cluster launch): cluster barriers as
+    # in the mx_gemm prototype. After the tile's workgroup barrier wave 0
+    # signals the cluster barrier; ROCKE_EXP_MX_RA_CW (default 16) WMMAs later
+    # every wave waits on it, and only then refills (a multicast load writes
+    # every member's LDS, so every member must be done with the buffer). The
+    # cluster also meets before the first load and before the epilogue.
     # ROCKE_EXP_MX_RA=2: one barrier per tile instead. With read-ahead this
     # buffer's last reads go out at the end of the K-atom before the last, so
     # one barrier ROCKE_EXP_MX_RA_BAR (default 8) WMMAs into the last K-atom
@@ -3292,6 +3308,10 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         k_end = b.add(k_lo, b.mul(n_even, c_block_k))
 
         bar_at = int(_os_ra.environ.get("ROCKE_EXP_MX_RA_BAR", "8"))
+        cb = _mx_ra_one and _os_ra.environ.get("ROCKE_EXP_MX_RA_CB") == "1"
+        if cb and not _os_ra.environ.get("ROCKE_EXP_CLUSTER"):
+            cb = False  # no cluster launch: the workgroup barrier is enough
+        cw = int(_os_ra.environ.get("ROCKE_EXP_MX_RA_CW", "16"))
 
         def wmmas(acc, a, bh, sa, sb, which, lo=0, hi=None):
             order = [(j, mi) for j in range(half) for mi in range(mfmas_m)]
@@ -3322,12 +3342,29 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     b.inline_asm("s_wait_dscnt 0", "~{memory}")
                     b.s_wait_tensorcnt(0)
                     b.s_barrier_bare()
-                    _refill(p, k_cur)
-                    fence()
-                    na, nsa, nsb = rd_head(sp, sk)
-                    fence()
-                    wmmas(acc, a, b0, sa, sb, 0, bar_at)
-                    fence()
+                    if cb:
+                        # This workgroup is done with the buffer: tell the
+                        # cluster (wave 0 only), and refill only once every
+                        # member has said so, ``cw`` WMMAs later.
+                        b.inline_asm(_CL_SIGNAL0, "s,~{scc},~{memory}", [_tdm_wave_id])
+                        fence()
+                        na, nsa, nsb = rd_head(sp, sk)
+                        fence()
+                        wait_at = min(bar_at + cw, half * mfmas_m)
+                        wmmas(acc, a, b0, sa, sb, 0, bar_at, wait_at)
+                        fence()
+                        b.inline_asm("s_barrier_wait -3", "~{memory}")
+                        _refill(p, k_cur)
+                        fence()
+                        wmmas(acc, a, b0, sa, sb, 0, wait_at)
+                        fence()
+                    else:
+                        _refill(p, k_cur)
+                        fence()
+                        na, nsa, nsb = rd_head(sp, sk)
+                        fence()
+                        wmmas(acc, a, b0, sa, sb, 0, bar_at)
+                        fence()
                     nb0 = [rd_b(sp, sk, j) for j in range(half)]
                     fence()
                     wmmas(acc, a, b1, sa, sb, 1)
@@ -3362,7 +3399,9 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             return acc, (a, sa, sb, b0, b1)
 
         # Prologue: tiles 0 and 1 into buffers 0 and 1; tile 0 published; its
-        # first K-atom read.
+        # first K-atom read. With cluster barriers the cluster meets first.
+        if cb:
+            b.inline_asm(_CL_SYNC, "~{scc},~{memory}")
         emit_load_phase(A_smem, B_smem, k_lo, lds_parity=0)
         emit_load_phase(A_smem, B_smem, b.add(k_lo, c_block_k), lds_parity=1)
         b.s_wait_tensorcnt(0)
@@ -3379,9 +3418,13 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             acc, head = _tile(1, b.add(k0, c_block_k), acc, head)
             b.scf_yield(*acc, *flat(head))
         # The last tile read ahead into a buffer nobody uses; settle LDS before
-        # the epilogue.
+        # the epilogue. With cluster barriers no workgroup leaves while a
+        # peer's multicast may still write its LDS.
         b.s_waitcnt(lgkmcnt=0)
         b.s_barrier_bare()
+        if cb:
+            b.s_wait_tensorcnt(0)
+            b.inline_asm(_CL_SYNC, "~{scc},~{memory}")
         _for_results = list(loop.results)[:n_acc]
 
     def _emit_kloop_prefetch() -> None:
