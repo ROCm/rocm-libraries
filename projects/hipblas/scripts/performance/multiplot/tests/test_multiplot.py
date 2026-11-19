@@ -342,6 +342,47 @@ def test_plot_roofline_writes_csv_and_figures(data_root):
     assert any(row['cache_resident'] == 'True' for row in rows)
 
 
+def test_plot_draws_every_precision_any_function_has(tmp_path):
+    # hemm is complex only; listed first it used to hide the real precisions of the other functions
+    shutil.copytree(os.path.join(MULTIPLOT_DIR, 'blas3', 'gfx90a'), tmp_path / 'blas3' / 'gfx90a')
+    r = _plot(tmp_path, '-l', 'blas3', '--label1', 'M', '--label2', 'N', '-f', 'hemm', '-f', 'symm')
+    assert r.returncode == 0, r.stderr
+    drawn = {'_'.join(f.stem.split('_')[-2:])
+             for f in (tmp_path / 'blas3' / 'gfx90a' / 'plots_gflops').glob('*.png')}
+    assert {'f32_r', 'f64_r', 'f32_c', 'f64_c'} <= drawn
+
+
+def test_cache_resident_only_for_bandwidth_bound_results():
+    import plot
+    spec = {'GBps': 1000, 'peak_gflops_effective': {'f32': 10000}, 'l2_mb': 1000}
+    small_axpy = {'N': 1000}
+    small_gemm = {'M': 256, 'N': 256, 'K': 256}
+    # axpy: 1000 GB/s x 1/6 FLOP/byte is far below the peak, so it is memory-bound and fits in cache
+    assert plot.is_cache_resident('axpy', 'f32_r', small_axpy, spec)
+    # gemm: intensity 32 FLOP/byte makes it compute-bound, so cache reuse is expected, not flagged
+    assert not plot.is_cache_resident('gemm', 'f32_r', small_gemm, spec)
+    # without a bandwidth there is no memory-bound ceiling to compare with
+    assert not plot.is_cache_resident('axpy', 'f32_r', small_axpy, {'l2_mb': 1000})
+
+
+def test_roofline_legend_has_one_entry_per_function(data_root, monkeypatch):
+    import matplotlib.figure
+    import plot
+    labels = []
+    def capture(fig, *args, **kwargs):
+        legend = fig.axes[0].get_legend()
+        labels.append([t.get_text() for t in legend.get_texts()])
+    monkeypatch.setattr(matplotlib.figure.Figure, 'savefig', capture)
+    spec = {'GBps': 1600, 'peak_gflops_effective': {'f32': 23000, 'f64': 300}, 'l2_mb': 4096}
+    # l2_mb this large makes every gfx90a gemv result cache-resident, the case that used to add a
+    # second, empty legend entry
+    plot.plot_roofline(str(data_root / 'blas2' / 'gfx90a'), ['gemv', 'ger'], spec, str(data_root / 'out'), 'test')
+    assert labels
+    for figure_labels in labels:
+        functions = [l for l in figure_labels if not l.startswith(('ceiling', 'published'))]
+        assert len(functions) == len(set(functions)), figure_labels
+
+
 def test_plot_modes_are_exclusive_and_need_a_ceiling(data_root):
     r = _plot(data_root, '-l', 'blas1', '--theo_max', '--roofline', '-f', 'axpy')
     assert r.returncode != 0

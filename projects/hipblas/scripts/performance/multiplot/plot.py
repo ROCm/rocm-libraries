@@ -38,8 +38,20 @@ def point_ceiling(funcname, prec, function_label, row, machine_spec_dict):
 
 
 def is_cache_resident(funcname, prec, row, machine_spec_dict):
+    """
+    True for a memory-bound result whose bytes moved fit in cache, so it measured cache rather than
+    memory bandwidth. Compute-bound results are never flagged: their ceiling is the compute peak, and
+    reusing data in cache is how they reach it.
+    """
     l2_mb = machine_spec_dict.get('l2_mb')
     if not l2_mb or row is None:
+        return False
+    gbps, peaks = machine_ceilings(machine_spec_dict)
+    ai = perf_model.intensity(funcname, prec, row)
+    if not gbps or ai is None:
+        return False
+    peak = (peaks or {}).get(perf_model.PRECISIONS[prec][3])
+    if peak and ai * gbps >= peak:
         return False
     footprint = perf_model.footprint_bytes(funcname, prec, row)
     return footprint is not None and footprint < CACHE_RESIDENT_FACTOR * l2_mb * 1024 * 1024
@@ -97,14 +109,15 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
     if rows_dicts1 is None:
         rows_dicts1 = [{} for _ in gflops_dicts1]
 
-    gflops_dict0 = gflops_dicts1[0]
-    for prec in sorted(gflops_dict0.keys()):
+    # every precision that any of the functions has (Hermitian functions, for example, are complex only)
+    for prec in sorted(set().union(*(d.keys() for d in gflops_dicts1))):
         # style only the series this precision actually has
         drawn  = sum(1 for d1, d2 in zip(gflops_dicts1, gflops_dicts2) if prec in d1 and prec in d2)
         styles = iter(series_styles(drawn))
         figure, axes = plt.subplots(figsize=chart_size(drawn))
 
-        ratio_max = 1.0
+        ratio_max    = 1.0
+        any_resident = False
         for gflops_dict1, gflops_dict2, funcname, const_args_dict, rows_dict1 in zip(gflops_dicts1, gflops_dicts2, funcname_list, const_args_dicts, rows_dicts1):
             if prec not in gflops_dict1 or prec not in gflops_dict2:
                 continue
@@ -168,6 +181,7 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
             axes.plot(sorted_sizes1, sorted_gflops1, '-', color=cur_color, marker=marker,
                       label=function_label)
             if any(resident):
+                any_resident = True
                 # draw cache-resident points hollow on top of the line's filled markers
                 axes.scatter([x for x, r in zip(sorted_sizes1, resident) if r],
                              [y for y, r in zip(sorted_gflops1, resident) if r],
@@ -181,7 +195,7 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
             axes.set_ylim(0, 1.05 * ratio_max)
             axes.axhline(1.0, color='gray', linewidth=1, linestyle='-', zorder=0)
             axes.set_ylabel('gflops / theoretical_maximum_gflops')
-            if machine_spec_dict.get('l2_mb'):
+            if any_resident:
                 axes.annotate(f"hollow: bytes moved < {CACHE_RESIDENT_FACTOR} x L2 (cache-resident)",
                               xy=(0.01, 0.01), xycoords='axes fraction', fontsize=8)
         elif perf_vs_perf == True:
@@ -314,8 +328,9 @@ def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achie
             label = perf_model.PRECISIONS[prec][0] + funcname
             solid = [pt for pt in fpts if not pt['cache_resident']]
             hollow = [pt for pt in fpts if pt['cache_resident']]
-            axes.scatter([pt['ai'] for pt in solid], [pt['gflops'] for pt in solid], color=color,
-                         marker=marker, label=label)
+            if solid:
+                axes.scatter([pt['ai'] for pt in solid], [pt['gflops'] for pt in solid], color=color,
+                             marker=marker, label=label)
             if hollow:
                 axes.scatter([pt['ai'] for pt in hollow], [pt['gflops'] for pt in hollow],
                              facecolors='none', edgecolors=color, marker=marker,
@@ -325,7 +340,7 @@ def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achie
         axes.set_yscale('log')
         axes.set_xlabel('arithmetic intensity (FLOP / byte)')
         axes.set_ylabel('GFLOP/s')
-        if machine_spec_dict.get('l2_mb'):
+        if any(pt['cache_resident'] for pt in pts):
             axes.annotate(f"hollow: bytes moved < {CACHE_RESIDENT_FACTOR} x L2 (cache-resident)",
                           xy=(0.01, 0.01), xycoords='axes fraction', fontsize=8)
         finish_chart(axes)
