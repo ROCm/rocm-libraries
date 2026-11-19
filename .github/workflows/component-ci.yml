@@ -40,7 +40,7 @@ jobs:
             .github/scripts/component_ci.py
             .github/scripts/tests/test_component_ci_paths.py
           fetch-depth: 2
-      - name: Check literal component CI paths
+      - name: Test component CI path selection
         run: python .github/scripts/tests/test_component_ci_paths.py
       - uses: ./.github/actions/ci-env
         id: env
@@ -108,7 +108,10 @@ jobs:
   component-ci-summary:
     name: "Component CI Summary"
     if: always()
+    # changes is listed so that a Configure CI failure fails the summary instead
+    # of leaving only skipped components, and so needs.changes resolves below.
     needs:
+      - changes
       - stinkytofu
       - rocisa
       - geko
