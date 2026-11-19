@@ -1721,8 +1721,8 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardGPU()
             printf("stats: bnormb, 0, %zu, %zu, 0, %f, %f\n",
                    dataSz,
                    dataSz,
-                   (rdCnt * dataSz + wrCnt * dataSz) / lowtime / 1e6,
-                   lowtime);
+                   (rdCnt * dataSz + wrCnt * dataSz) / time / 1e6,
+                   time);
         }
     }
 
