@@ -1392,6 +1392,31 @@ def test_packaging_admits_every_ued_field_the_loader_reads(tmp_path, main_fixtur
             id="sdk_version_over_int",
         ),
         pytest.param(
+            _set("sdk_version", "-1.2.0"),
+            "MAJOR.MINOR.PATCH",
+            id="sdk_version_signed",
+        ),
+        pytest.param(
+            _set("sdk_version", "+1.2.0"),
+            "MAJOR.MINOR.PATCH",
+            id="sdk_version_plus_sign",
+        ),
+        pytest.param(
+            _set("sdk_version", " 1. 2 .0"),
+            "MAJOR.MINOR.PATCH",
+            id="sdk_version_whitespace",
+        ),
+        pytest.param(
+            _set("sdk_version", "1.2.0junk"),
+            "MAJOR.MINOR.PATCH",
+            id="sdk_version_trailing_text",
+        ),
+        pytest.param(
+            _set("sdk_version", "1.2.0-rc1"),
+            "MAJOR.MINOR.PATCH",
+            id="sdk_version_prerelease_suffix",
+        ),
+        pytest.param(
             _set("graph_match", {"nodes": []}),
             "unknown fields",
             id="graph_match_declarative_arm",

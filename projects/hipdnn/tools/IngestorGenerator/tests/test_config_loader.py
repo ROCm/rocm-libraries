@@ -2628,6 +2628,36 @@ class TestRuntimeContractRejections:
                 r"engine\.sdk_version '' is not a version the loader can parse",
                 id="sdk-version-empty",
             ),
+            pytest.param(
+                lambda r: r["engine"].__setitem__("sdk_version", "-1.0.0"),
+                r"engine\.sdk_version '-1\.0\.0' is not a version the loader can parse",
+                id="sdk-version-negative-major",
+            ),
+            pytest.param(
+                lambda r: r["engine"].__setitem__("sdk_version", "+1.0.0"),
+                r"engine\.sdk_version '\+1\.0\.0' is not a version the loader can parse",
+                id="sdk-version-plus-sign",
+            ),
+            pytest.param(
+                lambda r: r["engine"].__setitem__("sdk_version", "1. 0 .0"),
+                r"engine\.sdk_version '1\. 0 \.0' is not a version the loader can parse",
+                id="sdk-version-inner-whitespace",
+            ),
+            pytest.param(
+                lambda r: r["engine"].__setitem__("sdk_version", "1.0.0junk"),
+                r"engine\.sdk_version '1\.0\.0junk' is not a version the loader can parse",
+                id="sdk-version-trailing-text",
+            ),
+            pytest.param(
+                lambda r: r["engine"].__setitem__("sdk_version", "1.0.0-rc1"),
+                r"engine\.sdk_version '1\.0\.0-rc1' is not a version the loader can parse",
+                id="sdk-version-prerelease-suffix",
+            ),
+            pytest.param(
+                lambda r: r["engine"].__setitem__("sdk_version", "1.0.2147483648"),
+                r"engine\.sdk_version '1\.0\.2147483648' is not a version the loader can parse",
+                id="sdk-version-over-int",
+            ),
             # T1(d) -- is_number_integer + requireInt64, DescriptorLoader.hpp:977-984.
             pytest.param(
                 lambda r: r["packs"][0]["kernels"][0].__setitem__("priority", 1.5),
@@ -2850,6 +2880,10 @@ class TestRuntimeContractRejections:
             pytest.param(
                 lambda r: r["engine"].__setitem__("sdk_version", "10.20.30"),
                 id="sdk-version-multi-digit-components",
+            ),
+            pytest.param(
+                lambda r: r["engine"].__setitem__("sdk_version", "1.0.0.9"),
+                id="sdk-version-with-ignored-tweak",
             ),
             pytest.param(
                 lambda r: r["packs"][0]["kernels"][0].__setitem__("priority", 0),

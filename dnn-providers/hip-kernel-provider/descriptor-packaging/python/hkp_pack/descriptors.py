@@ -782,20 +782,18 @@ def _validate_slots(slots, where):
         _validate_unique_strings(slot.get("knobs", []), "knobs", slot_where)
 
 
-# hipdnn_data_sdk::utilities::Version reads `sdk_version` with three `operator>>`
-# integer extractions separated by '.': whitespace may precede each integer or
-# dot, an integer may carry a sign, and text after the patch is ignored.
+# hipdnn_data_sdk::utilities::Version reads `sdk_version` as MAJOR.MINOR.PATCH:
+# three unsigned decimal integers separated by '.', with no sign or whitespace,
+# optionally followed by '.' and an alphanumeric tweak that it ignores.
 _SDK_VERSION_RE = re.compile(
-    r"\s*([+-]?[0-9]+)\s*\.\s*([+-]?[0-9]+)\s*\.\s*([+-]?[0-9]+)", re.ASCII
+    r"([0-9]+)\.([0-9]+)\.([0-9]+)(?:\.[A-Za-z0-9]+)?", re.ASCII
 )
 
 
 def _sdk_version_fits(text):
     """Whether Version(text) parses: the shape above, each part within int."""
-    parsed = _SDK_VERSION_RE.match(text)
-    return parsed is not None and all(
-        -(2**31) <= int(part) < 2**31 for part in parsed.groups()
-    )
+    parsed = _SDK_VERSION_RE.fullmatch(text)
+    return parsed is not None and all(int(part) < 2**31 for part in parsed.groups())
 
 
 def _role_references(doc, role):

@@ -18,7 +18,10 @@ using namespace hipdnn_data_sdk::utilities;
 namespace
 {
 // NOLINTNEXTLINE(bugprone-throwing-static-initialization) test constant
-const std::string SUCCESS_VERSION = std::to_string(HIPDNN_FRONTEND_VERSION_MAJOR) + ".-1.0";
+const std::string SUCCESS_VERSION = std::to_string(HIPDNN_FRONTEND_VERSION_MAJOR) + ".0.0";
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization) test constant
+const std::string MAJOR_MISMATCH_VERSION
+    = std::to_string(HIPDNN_FRONTEND_VERSION_MAJOR + 1) + ".0.0.TWEAK";
 }
 
 TEST(TestBackendFactory, TryToUseBackendInterfaceSuccessCreatesDirectWrapper)
@@ -30,7 +33,7 @@ TEST(TestBackendFactory, TryToUseBackendInterfaceSuccessCreatesDirectWrapper)
 TEST(TestBackendFactory, TryToUseBackendInterfaceMajorVersionMismatchCreatesIncompatibleWrapper)
 {
     EXPECT_TRUE(std::dynamic_pointer_cast<IncompatibleBackendWrapper>(
-        tryToUseBackendInterface("-1.0.0.TWEAK")));
+        tryToUseBackendInterface(MAJOR_MISMATCH_VERSION.c_str())));
 }
 
 TEST(TestBackendFactory, TryToUseBackendInterfaceBadlyFormedVersionCreatesIncompatibleWrapper)
