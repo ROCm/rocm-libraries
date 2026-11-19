@@ -5,7 +5,6 @@
 #include "launch_params.h"
 #include "hash.hpp"
 
-#include <limits>
 #include <string>
 
 namespace hipconv
@@ -16,20 +15,18 @@ RepresentationHashPair::RepresentationHashPair(std::string_view repr) : repr_{st
     hash_ = murmur3_32(repr_);
 }
 
-namespace
-{
-
-constexpr size_t no_workgroup_limit = std::numeric_limits<size_t>::max();
-
-size_t max_workgroups_yz(const hipconv::Device& dev)
+std::size_t max_workgroups_yz(const hipconv::Device& dev)
 {
     const auto name = dev.arch->name;
     if(name.starts_with("gfx1200") || name.starts_with("gfx1201"))
-        return size_t{1} << 16;
+        return std::size_t{1} << 16;
     if(name.starts_with("gfx1250"))
-        return (size_t{1} << 16) - 1;
+        return (std::size_t{1} << 16) - 1;
     return no_workgroup_limit;
 }
+
+namespace
+{
 
 bool grid_yz_within(const dim3& grid, size_t limit)
 {
