@@ -216,6 +216,36 @@ int rocke_attention_tiled_2d_spec_n_blocks_per_tile(const rocke_attention_tiled_
     return rocke_attention_tiled_2d_spec_tile_size_eff(s) / bs;
 }
 
+int rocke_attention_tiled_2d_spec_kq_lds_pad_slab_rows(const rocke_attention_tiled_2d_spec_t* s)
+{
+    if(!s->use_kq_lds_pad || s->use_fp8_mfma_qk || s->kq_lds_pad_halves == 0
+       || !s->use_k_single_buffer || s->head_size <= 0
+       || ROCKE_ATTENTION_KQ_PAD_SLAB_HALVES % s->head_size != 0 || s->kq_lds_pad_halves % 8 != 0)
+        return 0;
+    const int slab_rows = ROCKE_ATTENTION_KQ_PAD_SLAB_HALVES / s->head_size;
+    return rocke_attention_tiled_2d_spec_tile_size_eff(s) % slab_rows == 0 ? slab_rows : 0;
+}
+
+bool rocke_attention_tiled_2d_spec_q_staged_in_k_lds(const rocke_attention_tiled_2d_spec_t* s)
+{
+    if(s->use_fp8_mfma_qk || s->use_q_reread || s->use_q_direct_reg)
+        return false;
+    const long q_bytes = (long)rocke_attention_tiled_2d_spec_block_m(s) * s->head_size * 2;
+    const long k_slots_bytes
+        = 2L * rocke_attention_tiled_2d_spec_tile_size_eff(s) * s->head_size * 2;
+    return q_bytes <= k_slots_bytes;
+}
+
+const char* rocke_attention_tiled_2d_spec_kq_pad_refusal(const rocke_attention_tiled_2d_spec_t* s)
+{
+    if(!rocke_attention_tiled_2d_spec_kq_lds_pad_slab_rows(s)
+       || !rocke_attention_tiled_2d_spec_q_staged_in_k_lds(s))
+        return NULL;
+    return "KQ LDS pad failed - use_q_reread=False, use_q_direct_reg=False, expected one of "
+           "them True (transposed 32x32 path) or use_kq_lds_pad=False (Q staged in the "
+           "padded single K slot is read unpadded)";
+}
+
 const rocke_type_t* rocke_attention_tiled_2d_spec_dtype_ir(const rocke_attention_tiled_2d_spec_t* s)
 {
     if(s != NULL && rocke_streq(s->dtype, "fp16"))

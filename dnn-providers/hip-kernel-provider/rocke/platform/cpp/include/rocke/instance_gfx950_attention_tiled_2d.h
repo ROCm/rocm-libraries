@@ -209,13 +209,6 @@ rocke_status_t
                                                   char* err,
                                                   size_t err_cap);
 
-/* Python's single-K refusal of a laid-out KQ LDS pad while Q is staged in the K
- * slot. Returns 1 and writes the refusal text to ``msg`` when ``spec`` hits it,
- * else 0. Shared by the entry's spec checks and the lever resolver. */
-int rocke_gfx950_attention_tiled_2d_kq_pad_refusal(const rocke_attention_tiled_2d_spec_t* spec,
-                                                   char* msg,
-                                                   size_t msg_cap);
-
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

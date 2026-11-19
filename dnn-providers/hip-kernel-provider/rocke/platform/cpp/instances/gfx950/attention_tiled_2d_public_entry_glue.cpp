@@ -93,33 +93,6 @@ static void rocke_g950_reason(char* reason, size_t reason_cap, const char* m)
  * status + message on the builder, so the extern "C" ABI is unchanged.
  * [[noreturn]] keeps the existing `...; return false/NULL;` call sites valid --
  * the trailing return is simply never reached. */
-/* Python: spec.kq_lds_pad_slab_rows and spec.q_staged_in_k_lds, the two reads of
- * the single-K __post_init__ refusal of a laid-out KQ pad under staged Q. */
-int rocke_gfx950_attention_tiled_2d_kq_pad_refusal(const rocke_attention_tiled_2d_spec_t* spec,
-                                                   char* msg,
-                                                   size_t msg_cap)
-{
-    const int hd = spec->head_size;
-    const int t = rocke_attention_tiled_2d_spec_tile_size_eff(spec);
-    /* One wave's async-DMA slab is 1024 B = 512 halves. */
-    const int slab_rows = (hd > 0 && 512 % hd == 0) ? 512 / hd : 0;
-    const bool pad_laid_out = spec->use_kq_lds_pad && !spec->use_fp8_mfma_qk
-                              && spec->kq_lds_pad_halves != 0 && slab_rows != 0
-                              && t % slab_rows == 0 && spec->kq_lds_pad_halves % 8 == 0
-                              && spec->use_k_single_buffer;
-    if(!pad_laid_out || spec->use_fp8_mfma_qk || spec->use_q_reread || spec->use_q_direct_reg)
-        return 0;
-    const int block_m = rocke_attention_tiled_2d_spec_block_m(spec);
-    if(block_m * hd * 2 > 2 * t * hd * 2)
-        return 0;
-    snprintf(msg,
-             msg_cap,
-             "KQ LDS pad failed - use_q_reread=False, use_q_direct_reg=False, expected one of "
-             "them True (transposed 32x32 path) or use_kq_lds_pad=False (Q staged in the "
-             "padded single K slot is read unpadded)");
-    return 1;
-}
-
 [[noreturn]] static void rocke_g950_fail(rocke_ir_builder_t* b, rocke_status_t st, const char* msg)
 {
     (void)b;
@@ -548,10 +521,12 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
         if(spec->use_staggered_iter_wait)
             rocke_g950_fail(
                 b, ROCKE_ERR_NOTIMPL, "use_k_single_buffer does not support staggered_iter_wait");
-        char kq_pad_msg[256];
-        if(rocke_gfx950_attention_tiled_2d_kq_pad_refusal(spec, kq_pad_msg, sizeof(kq_pad_msg)))
+        const char* kq_pad_msg = rocke_attention_tiled_2d_spec_kq_pad_refusal(spec);
+        if(kq_pad_msg)
             rocke_g950_fail(b, ROCKE_ERR_VALUE, kq_pad_msg);
     }
+    if(spec->use_fp8_mfma_qk && !rocke_g950_streq(spec->kv_storage_dtype, "fp8e4m3"))
+        rocke_g950_fail(b, ROCKE_ERR_VALUE, "use_fp8_mfma_qk requires kv_storage_dtype='fp8e4m3'");
 
     /* gfx950 does NOT pre-resolve a catalog atom or ArchTarget in the prologue
      * (the kv_body calls mfma_32x32x16_for_dtype / mfma_16x16x32_for_dtype
@@ -843,35 +818,15 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
     ctx->K_BUFS = ctx->K_SINGLE_BUFFER ? 1 : (ctx->RING3 ? 3 : 2);
     ctx->K_TOTAL_BYTES = K_TOTAL_BYTES;
 
-    /* K_lds slab pad: one wave's async-DMA slab (1024 B) fills KQ_SLAB_ROWS
-     * rows; padding between slabs keeps the DMA write contiguous. The read
-     * remap exists only for the bf16 K path with a single K slot, so the pad
-     * is dropped under fp8 QK, unsupported geometry, or K double-buffering. */
-    {
-        int pad = spec->use_kq_lds_pad ? spec->kq_lds_pad_halves : 0;
-        int slab_rows = pad ? 512 / HD : 0;
-        if(pad
-           && (FP8_MFMA_QK || 512 % HD != 0 || slab_rows == 0 || T % slab_rows != 0
-               || pad % 8 != 0))
-        {
-            pad = 0;
-            slab_rows = 0;
-        }
-        if(pad && ctx->K_BUFS != 1)
-        {
-            pad = 0;
-            slab_rows = 0;
-        }
-        ctx->KQ_LDS_PAD = pad;
-        ctx->KQ_SLAB_ROWS = slab_rows;
-    }
+    /* K_lds slab pad (Python: spec.kq_lds_pad_slab_rows): one wave's async-DMA slab
+     * fills KQ_SLAB_ROWS rows, and the pad between slabs keeps the DMA write contiguous. */
+    ctx->KQ_SLAB_ROWS = rocke_attention_tiled_2d_spec_kq_lds_pad_slab_rows(spec);
+    ctx->KQ_LDS_PAD = ctx->KQ_SLAB_ROWS ? spec->kq_lds_pad_halves : 0;
 
-    bool Q_ALIAS_K = rocke_type_eq(K_LDS_DTYPE, dtype) && (Q_BYTES <= K_TOTAL_BYTES);
-    if(ctx->Q_REREAD)
-        Q_ALIAS_K = false; /* the K prefetch would overwrite an aliased Q */
+    /* Python: Q_ALIAS_K = spec.q_staged_in_k_lds (not under a Q re-read, whose K
+     * prefetch would overwrite an aliased Q, nor with Q gathered straight to VGPRs). */
+    const bool Q_ALIAS_K = rocke_attention_tiled_2d_spec_q_staged_in_k_lds(spec);
     ctx->Q_DIRECT_REG = spec->use_q_direct_reg;
-    if(ctx->Q_DIRECT_REG)
-        Q_ALIAS_K = false; /* Q never touches LDS */
     const bool Q_USES_DUAL_SLOT = Q_ALIAS_K && (BLOCK_M > T);
     ctx->Q_DIRECT_GLOBAL = false; /* gfx950 has no Q_DIRECT_GLOBAL path */
     ctx->Q_ALIAS_K = Q_ALIAS_K;

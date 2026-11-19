@@ -215,6 +215,18 @@ int rocke_attention_tiled_2d_spec_block_q(const rocke_attention_tiled_2d_spec_t*
 int rocke_attention_tiled_2d_spec_tile_size_eff(const rocke_attention_tiled_2d_spec_t* s);
 /* n_blocks_per_tile = tile_size_eff // block_size */
 int rocke_attention_tiled_2d_spec_n_blocks_per_tile(const rocke_attention_tiled_2d_spec_t* s);
+/* One wave's async-DMA slab, in halves: the unit the gfx950 KQ LDS pad lays out. */
+#define ROCKE_ATTENTION_KQ_PAD_SLAB_HALVES 512
+/* kq_lds_pad_slab_rows: K rows per padded K_lds slab when use_kq_lds_pad is laid out
+ * (bf16 K, single K slot, whole slabs tiling the KV tile, a 16-byte-aligned pad
+ * width), else 0. Python: spec.kq_lds_pad_slab_rows. */
+int rocke_attention_tiled_2d_spec_kq_lds_pad_slab_rows(const rocke_attention_tiled_2d_spec_t* s);
+/* q_staged_in_k_lds: Q shares K_lds (not raw-fp8 K, no Q re-read, no direct-register
+ * Q, and Q fits the two K slots). Python: spec.q_staged_in_k_lds. */
+bool rocke_attention_tiled_2d_spec_q_staged_in_k_lds(const rocke_attention_tiled_2d_spec_t* s);
+/* The refusal text when a laid-out KQ pad meets Q staged in the K slot, else NULL.
+ * Python: the single-K __post_init__ check. */
+const char* rocke_attention_tiled_2d_spec_kq_pad_refusal(const rocke_attention_tiled_2d_spec_t* s);
 /* dtype_ir: F16 for "fp16", BF16 otherwise (returns a rocke_type_t*). */
 const rocke_type_t*
     rocke_attention_tiled_2d_spec_dtype_ir(const rocke_attention_tiled_2d_spec_t* s);
