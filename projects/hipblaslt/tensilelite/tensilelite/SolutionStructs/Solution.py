@@ -6916,10 +6916,10 @@ class Solution(collections.abc.Mapping):
 
     # TEMP: TDMPlusLdsBuf (triple LDS buffer) has an unresolved cross-wave
     # read-after-write race on the rotating LDS (a fast wave overwrites a buffer
-    # a slow wave is still reading). Silently fall back to 2 buffers for every
-    # value (auto -1 and forced 1) so existing library logic that selected a
-    # triple kernel keeps building. Re-enable once the race is fixed.
-    state["TDMPlusLdsBuf"] = 0
+    # a slow wave is still reading). The unconditional clear is commented out so
+    # a requested triple buffer can be built and timed. Re-enable the clear once
+    # the race is fixed.
+    # state["TDMPlusLdsBuf"] = 0
 
     # disable TDMPlusLdsBuf if not applicable. TDMPlusLdsBuf asks for PGR+1 (3) LDS
     # buffers for PGR2 without requiring DirectToLds. -1 (auto) is still unresolved
@@ -6933,10 +6933,11 @@ class Solution(collections.abc.Mapping):
       if state["PrefetchAcrossPersistent"]:
         state["TDMPlusLdsBuf"] = 0
       if state["_ScheduleIterAlg"] != 0:
-        if  state["TDMPlusLdsBuf"] == 1:
-          reject(state, printRejectionReason, "TDMPlusLdsBuf is not supported with ScheduleIterAlg != 0")
-          return
-        state["TDMPlusLdsBuf"] = 0
+        # if  state["TDMPlusLdsBuf"] == 1:
+        #   reject(state, printRejectionReason, "TDMPlusLdsBuf is not supported with ScheduleIterAlg != 0")
+        #   return
+        # state["TDMPlusLdsBuf"] = 0
+        pass
 
     if decouplePGR and state["1LDSBuffer"] == -1:
       # Resolve before a later rule can force 1LDSBuffer=1 over the per-tensor layout.

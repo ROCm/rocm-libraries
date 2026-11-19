@@ -17,12 +17,25 @@ ONLY="${2:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="${ROOT:-$SCRIPT_DIR}"
-TENSILE="${TENSILE:-$(cd "$SCRIPT_DIR/../../tensilelite/bin" && pwd)/Tensile}"
+TENSILE_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+TENSILE="${TENSILE:-$TENSILE_ROOT/tensilelite/bin/Tensile}"
+CLIENT="${CLIENT:-$TENSILE_ROOT/build_tmp/tensilelite/client/tensilelite-client}"
 
 if [[ ! -x "$TENSILE" && ! -f "$TENSILE" ]]; then
   echo "Tensile not found at $TENSILE" >&2
   exit 1
 fi
+if [[ ! -x "$CLIENT" ]]; then
+  echo "tensilelite-client not found at $CLIENT" >&2
+  exit 1
+fi
+
+# Built rocisa + tensilelite package (system python; .venv may be incomplete).
+export PYTHONPATH="${TENSILE_ROOT}/build_tmp/tensilelite/rocisa:${TENSILE_ROOT}/build_tmp/tensilelite:${TENSILE_ROOT}${PYTHONPATH:+:$PYTHONPATH}"
+# Match client to the local host lib (system /opt/rocm tensilelite-host segfaults).
+export LD_LIBRARY_PATH="${TENSILE_ROOT}/build_tmp/tensilelite:${TENSILE_ROOT}/build_tmp/tensilelite/client${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# Default to this user's reserved GPU when unset (g04-2 gpu-guard).
+export HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-1}"
 
 case "$MODE" in
   smoke) CFG=config_smoke.yaml; OUT=results_smoke ;;
@@ -30,7 +43,8 @@ case "$MODE" in
   *) echo "mode must be smoke|full" >&2; exit 1 ;;
 esac
 
-GROUPS=(
+# NOTE: cannot use the name GROUPS — bash reserves it for the user's GIDs.
+PARAM_GROUPS=(
   01_tdm_loads
   02_workgroup_cluster
   03_lds_segment
@@ -42,12 +56,12 @@ GROUPS=(
 )
 
 if [[ -n "$ONLY" ]]; then
-  GROUPS=("$ONLY")
+  PARAM_GROUPS=("$ONLY")
 fi
 
 export HIP_FORCE_DEV_KERNARG="${HIP_FORCE_DEV_KERNARG:-1}"
 
-for g in "${GROUPS[@]}"; do
+for g in "${PARAM_GROUPS[@]}"; do
   dir="$ROOT/$g"
   cfg="$dir/$CFG"
   out="$dir/$OUT"
@@ -55,7 +69,8 @@ for g in "${GROUPS[@]}"; do
   echo "======== $g ($MODE) ========"
   echo "config: $cfg"
   echo "output: $out"
-  python3 "$TENSILE" "$cfg" "$out" 2>&1 | tee "$out/tensile_run.log"
+  echo "client: $CLIENT"
+  python3 "$TENSILE" "$cfg" "$out" --prebuilt-client "$CLIENT" 2>&1 | tee "$out/tensile_run.log"
   python3 "$SCRIPT_DIR/collect_results.py" "$out" --group "$g" --mode "$MODE"
 done
 
