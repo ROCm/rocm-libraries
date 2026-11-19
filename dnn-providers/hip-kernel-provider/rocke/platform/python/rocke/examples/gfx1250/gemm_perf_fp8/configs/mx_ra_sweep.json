@@ -1,0 +1,26 @@
+{
+  "_comment": "mx_env_sweep.py config: the MX champion's flags against the read-ahead K-loop (ROCKE_EXP_MX_RA=1: next K-atom's LDS reads during this one, B in halves, two workgroup barriers per tile). ra36 lets the refill barrier leave the next tile's A and scale reads (32 + 4) in flight; ranf drops the scheduling fences. MAF shape for 96-CU partitions.",
+  "base_env": {
+    "ROCKE_EXP_MX": "1",
+    "ROCKE_EXP_MX_SWZ": "1",
+    "ROCKE_EXP_MX_SCALE_MC": "0",
+    "ROCKE_EXP_MX_KFENCE": "1",
+    "ROCKE_EXP_MX_SCALE_NOCLIP": "1",
+    "ROCKE_EXP_MC_SOLO0": "1"
+  },
+  "variants": [
+    {"name": "mxswz", "env": {}},
+    {"name": "ra", "env": {"ROCKE_EXP_MX_RA": "1"}},
+    {"name": "ra36", "env": {"ROCKE_EXP_MX_RA": "1", "ROCKE_EXP_MX_RA_PEND": "36"}},
+    {"name": "ranf", "env": {"ROCKE_EXP_MX_RA": "1", "ROCKE_EXP_MX_RA_NOFENCE": "1"}}
+  ],
+  "arms": [
+    {"name": "c1x1"},
+    {"name": "c1x4", "cluster": "1,4"},
+    {"name": "c4x4", "cluster": "4,4"}
+  ],
+  "shapes": [[3072, 4096, 65536]],
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}

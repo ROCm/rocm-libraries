@@ -3167,6 +3167,162 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         _top_wait(1)
         _for_results = _emit_wmma_phase(A_smem, B_smem, acc, lds_parity=1)
 
+    # EXPERIMENT (uncommitted idea from the gfx1250 mx_gemm prototype):
+    # ROCKE_EXP_MX_RA=1 replaces the early-refill loop of an MX kernel with a
+    # read-ahead loop: K-atom s+1's LDS reads (the next tile's K-atom 0 from the
+    # other buffer at a tile's last K-atom) go out during K-atom s, with B in
+    # halves ("half-B late"): next A and scales, WMMAs of B half 0, next B half 0,
+    # WMMAs of B half 1, next B half 1. Two plain workgroup barriers per tile,
+    # both in its last K-atom: before reading the next tile (it has landed), and
+    # after the first half's WMMAs (every wave is done with this buffer), after
+    # which this buffer is refilled with the tile two ahead.
+    # ROCKE_EXP_MX_RA_PEND=n: LDS reads the second barrier may leave in flight
+    # (the next tile's reads issued after this buffer's last one; default 0).
+    # ROCKE_EXP_MX_RA_NOFENCE=1: no scheduling fences between the groups.
+    import os as _os_ra
+
+    _mx_ra = _os_ra.environ.get("ROCKE_EXP_MX_RA") == "1"
+
+    def _emit_kloop_mx_readahead() -> None:
+        nonlocal _for_results
+        if mfmas_n % 2:
+            raise ValueError("ROCKE_EXP_MX_RA needs an even N repeat")
+        half = mfmas_n // 2
+        pend = int(_os_ra.environ.get("ROCKE_EXP_MX_RA_PEND", "0"))
+        fenced = _os_ra.environ.get("ROCKE_EXP_MX_RA_NOFENCE") != "1"
+        swz = _os_ra.environ.get("ROCKE_EXP_MX_SWZ") == "1"
+        if swz and (mfmas_m % 4 or mfmas_n % 4):
+            raise ValueError("ROCKE_EXP_MX_SWZ needs 4 | repeats")
+
+        def fence() -> None:
+            if fenced:
+                b.sched_barrier(0)
+
+        a_row_in_atom, _ = op.a_layout().coord(b, lane, 0)
+        _, b_col_in_atom = op.b_layout().coord(b, lane, 0)
+        k_in_atom = b.mul(b.div(lane, b.const_i32(16)), b.const_i32(16))
+        lane16 = b.mod(lane, b.const_i32(16))
+        warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
+        warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
+        ks = block_k // 128
+
+        def rd_a(p, kk, mi):
+            row = b.add(warp_m_off, b.const_i32(mi * t.warp_tile_m + (p * block_m if _prefetch else 0)))
+            kb = b.const_i32(kk * t.warp_tile_k)
+            return _emit_frag_smem_load(A_smem, a_row_in_atom, k_in_atom, row, kb, a_per_lane, 32)
+
+        def rd_b(p, kk, ni):
+            row = b.add(warp_n_off, b.const_i32(ni * t.warp_tile_n + (p * block_n if _prefetch else 0)))
+            kb = b.const_i32(kk * t.warp_tile_k)
+            return _emit_frag_smem_load(B_smem, b_col_in_atom, k_in_atom, row, kb, b_per_lane, 32)
+
+        def rd_scales(p, kk):
+            row = b.const_i32((p * ks if _prefetch else 0) + kk)
+
+            def words(smem, mn_off, reps, step):
+                if swz:
+                    base = b.add(mn_off, b.mul(lane16, b.const_i32(reps)))
+                    out = []
+                    for q in range(reps // 4):
+                        v = _emit_smem_load(b, smem, row, b.add(base, b.const_i32(4 * q)), 4, I32)
+                        out += [b.vec_extract(v, i) for i in range(4)]
+                    return out
+                return [
+                    _emit_smem_load(b, smem, row, b.add(b.add(mn_off, b.const_i32(r * step)), lane16), 1, I32)
+                    for r in range(reps)
+                ]
+
+            return (
+                words(AS_smem, warp_m_off, mfmas_m, t.warp_tile_m),
+                words(BS_smem, warp_n_off, mfmas_n, t.warp_tile_n),
+            )
+
+        def rd_head(p, kk):
+            a = [rd_a(p, kk, mi) for mi in range(mfmas_m)]
+            sa, sb = rd_scales(p, kk)
+            return a, sa, sb
+
+        def flat(head):
+            a, sa, sb, b0, b1 = head
+            return [*a, *sa, *sb, *b0, *b1]
+
+        def unflat(vals):
+            vals = list(vals)
+            out = []
+            for n in (mfmas_m, mfmas_m, mfmas_n, half, half):
+                out.append(vals[:n])
+                vals = vals[n:]
+            return tuple(out)
+
+        bk2 = b.const_i32(2 * block_k)
+        n_tiles = _k_tile_count()
+        n_even = b.add(n_tiles, b.mod(n_tiles, b.const_i32(2)))
+        k_end = b.add(k_lo, b.mul(n_even, c_block_k))
+
+        def wmmas(acc, a, bh, sa, sb, which):
+            for j in range(half):
+                ni = which * half + j
+                for mi in range(mfmas_m):
+                    f = mi * mfmas_n + ni
+                    acc[f] = b.mma(_mx_op.op_id, a[mi], bh[j], acc[f], sa[mi], sb[ni])
+
+        def _tile(p, k_cur, acc, head):
+            acc = list(acc)
+            a, sa, sb, b0, b1 = head
+            for s in range(k_atoms):
+                last = s + 1 == k_atoms
+                sp, sk = (1 - p, 0) if last else (p, s + 1)
+                if last:
+                    # The next tile has landed (this wave's fills) and is
+                    # published to every wave.
+                    fence()
+                    b.s_wait_tensorcnt(0)
+                    b.s_barrier_bare()
+                    fence()
+                na, nsa, nsb = rd_head(sp, sk)
+                fence()
+                wmmas(acc, a, b0, sa, sb, 0)
+                fence()
+                if last:
+                    # Every wave has read this buffer: refill it with the
+                    # tile two ahead (the issuing pair only; none past the end).
+                    b.inline_asm(f"s_wait_dscnt {pend}", "~{memory}")
+                    b.s_barrier_bare()
+                    k_next = b.add(k_cur, bk2)
+                    with b.scf_if(b.cmp_lt(k_next, k_end)):
+                        emit_load_phase(A_smem, B_smem, k_next, lds_parity=p)
+                    fence()
+                nb0 = [rd_b(sp, sk, j) for j in range(half)]
+                fence()
+                wmmas(acc, a, b1, sa, sb, 1)
+                fence()
+                nb1 = [rd_b(sp, sk, half + j) for j in range(half)]
+                a, sa, sb, b0, b1 = na, nsa, nsb, nb0, nb1
+            return acc, (a, sa, sb, b0, b1)
+
+        # Prologue: tiles 0 and 1 into buffers 0 and 1; tile 0 published; its
+        # first K-atom read.
+        emit_load_phase(A_smem, B_smem, k_lo, lds_parity=0)
+        emit_load_phase(A_smem, B_smem, b.add(k_lo, c_block_k), lds_parity=1)
+        b.s_wait_tensorcnt(0)
+        b.s_barrier_bare()
+        a0, sa0, sb0 = rd_head(0, 0)
+        head0 = (a0, sa0, sb0, [rd_b(0, 0, j) for j in range(half)],
+                 [rd_b(0, 0, half + j) for j in range(half)])
+        n_acc = len(accs)
+        args = list(accs) + [(f"ra{i}", v) for i, v in enumerate(flat(head0))]
+        loop = b.scf_for_iter(k_lo, k_end, bk2, args, iv_name="k0", elide_trailing_barrier=False)
+        with loop as (k0, it):
+            it = list(it)
+            acc, head = _tile(0, k0, it[:n_acc], unflat(it[n_acc:]))
+            acc, head = _tile(1, b.add(k0, c_block_k), acc, head)
+            b.scf_yield(*acc, *flat(head))
+        # The last tile read ahead into a buffer nobody uses; settle LDS before
+        # the epilogue.
+        b.s_waitcnt(lgkmcnt=0)
+        b.s_barrier_bare()
+        _for_results = list(loop.results)[:n_acc]
+
     def _emit_kloop_prefetch() -> None:
         """Software-pipelined K-loop with DTLA ping-pong.
 
@@ -3238,6 +3394,9 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             _for_results = acc
             return
 
+        if spec.trait.tdm_early_refill and _mx and _mx_ra:
+            _emit_kloop_mx_readahead()
+            return
         if spec.trait.tdm_early_refill:
             _emit_kloop_tdm_early_refill()
             return
