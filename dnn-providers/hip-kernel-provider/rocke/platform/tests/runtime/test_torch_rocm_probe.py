@@ -15,6 +15,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 import pytest
+from rocke.runtime import runtime_coexistence
 from rocke.runtime import torch_rocm_probe as probe
 from rocke.tests.subprocess_launcher import rocke_python_command, rocke_subprocess_env
 
@@ -290,6 +291,28 @@ def test_unverifiable_and_ambiguous_binaries_do_not_match():
     for right in [(), (other, known), (unknown,)]:
         assert probe._compare((known,), right)[0] == "inconclusive"
     assert probe._compare((), ())[0] == "inconclusive"
+
+
+@pytest.mark.parametrize(
+    ("platform", "kind", "valid", "near_miss"),
+    [
+        ("linux", "hip", "libamdhip64.so.7", "libamdhip64_debug.so.7"),
+        ("linux", "comgr", "libamd_comgr.so.3", "amd_comgr.so.3"),
+        ("linux", "llvm", "libLLVM.so.23.0git", "libLLVMCore.so.23"),
+        ("linux", "clang", "libclang-cpp.so.23", "libclang.so.23"),
+        ("win32", "hip", "AMDhip64_7.DLL", "amdhip64_stub.dll"),
+        ("win32", "comgr", "amd_comgr0702.dll", "amd_comgr_helper.dll"),
+        ("win32", "llvm", "LLVM-23.dll", "LLVMCore.dll"),
+        ("win32", "clang", "clang-cpp.dll", "libclang.dll"),
+        ("win32", "clang", "libclang-cpp-23.dll", "clang-23.dll"),
+    ],
+)
+def test_inventory_library_names(platform, kind, valid, near_miss):
+    classify = runtime_coexistence._mapped_library_kind
+    assert classify(valid, platform=platform) == kind
+    assert classify(near_miss, platform=platform) is None
+    other_platform = "win32" if platform == "linux" else "linux"
+    assert classify(valid, platform=other_platform) is None
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux maps format")

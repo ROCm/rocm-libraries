@@ -96,12 +96,12 @@ still reports the ordinary `set_isa` error; #12919 tracks that diagnostic.
 ### Diagnose a possible torch/ROCm mismatch
 
 Call `rocke.runtime.torch_rocm_probe.probe_torch_rocm()` **in the process you
-want to inspect**. It snapshots mapped HIP, COMGR, and shared LLVM/Clang
-libraries on Linux or Windows, imports torch in a fresh Python subprocess,
-and compares the observed file fingerprints. Torch's version and HIP build
-version are context, not proof that the binaries match. The report separates
-different binaries, matching observations, and inconclusive results, and
-includes child import failures, crashes, and timeouts.
+want to inspect**. It snapshots mapped HIP, COMGR, LLVM, and `clang-cpp`
+libraries (not the separate `libclang` C API) on Linux or Windows, imports
+torch in a fresh Python subprocess, and compares the observed fingerprints.
+Torch's version and HIP build version are context, not proof that the binaries
+match. The report separates different binaries, matching observations, and
+inconclusive results, and includes child import failures, crashes, and timeouts.
 
 For a standalone report, run `python -m rocke.runtime.torch_rocm_probe`. This
 starts in a fresh parent, so its report may list torch's libraries but have

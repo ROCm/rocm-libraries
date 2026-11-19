@@ -98,7 +98,7 @@ def _linux_libraries(lines: Iterable[str]) -> tuple[RocmLibrary, ...]:
         if "x" not in permissions:
             continue  # Exclude ordinary data mappings of files named like libraries.
         path = pathname.removesuffix(" (deleted)")
-        kind = helpers._mapped_library_kind(Path(path).name)
+        kind = helpers._mapped_library_kind(Path(path).name, platform="linux")
         key = pathname, dev, inode
         if not kind or key in mapped:
             continue
@@ -163,7 +163,7 @@ def _snapshot() -> tuple[tuple[RocmLibrary, ...], str | None]:
                 tuple(
                     _fingerprint(path, kind)
                     for path in sorted(set(_windows_module_paths()))
-                    if (kind := classify(Path(path).name))
+                    if (kind := classify(Path(path).name, platform="win32"))
                 ),
                 None,
             )

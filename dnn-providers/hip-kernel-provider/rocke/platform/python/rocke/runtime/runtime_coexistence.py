@@ -70,32 +70,38 @@ def _dll_basename(stem: str) -> str:
     return f"{stem}.dll"
 
 
-def _runtime_name_pattern(stem: str) -> str:
+def _runtime_name_patterns(stem: str) -> dict[str, str]:
     so = re.escape(_so_basename(stem))
     dll_stem = re.escape(_dll_basename(stem).removesuffix(".dll"))
-    return rf"(?:{so}(?:\..+)?|{dll_stem}(?:_?\d+)*\.dll)"
+    return {
+        "linux": rf"{so}(?:\..+)?",
+        "win32": rf"{dll_stem}(?:_?\d+)*\.dll",
+    }
 
 
 # Inventory classification does not select a library. A loader candidate can
 # intentionally use narrower SONAME rules or broader on-disk filename globs.
 _MAPPED_LIBRARY_NAMES = {
-    "hip": _runtime_name_pattern("amdhip64"),
-    "comgr": _runtime_name_pattern("amd_comgr"),
-    "llvm": r"(?:libLLVM(?:-[\w.]+)?\.so(?:\..+)?|(?:lib)?LLVM(?:-[\w.]+)?\.dll)",
-    "clang": r"(?:libclang-cpp(?:-[\w.]+)?\.so(?:\..+)?|"
-    r"(?:lib)?clang(?:-cpp)?(?:-[\w.]+)?\.dll)",
+    "hip": _runtime_name_patterns("amdhip64"),
+    "comgr": _runtime_name_patterns("amd_comgr"),
+    "llvm": {
+        "linux": r"libLLVM(?:-[\w.]+)?\.so(?:\..+)?",
+        "win32": r"(?:lib)?LLVM(?:-[\w.]+)?\.dll",
+    },
+    # Compare clang-cpp, not the separate libclang C API, on both platforms.
+    "clang": {
+        "linux": r"libclang-cpp(?:-[\w.]+)?\.so(?:\..+)?",
+        "win32": r"(?:lib)?clang-cpp(?:-[\w.]+)?\.dll",
+    },
 }
 
 
-def _mapped_library_kind(basename: str) -> str | None:
-    return next(
-        (
-            kind
-            for kind, pattern in _MAPPED_LIBRARY_NAMES.items()
-            if re.fullmatch(pattern, basename, re.IGNORECASE)
-        ),
-        None,
-    )
+def _mapped_library_kind(basename: str, *, platform: str) -> str | None:
+    for kind, names in _MAPPED_LIBRARY_NAMES.items():
+        pattern = names.get(platform)
+        if pattern and re.fullmatch(pattern, basename, re.IGNORECASE):
+            return kind
+    return None
 
 
 def _mapped_lib(stem: str, *, require_unique: bool = False) -> Optional[str]:
