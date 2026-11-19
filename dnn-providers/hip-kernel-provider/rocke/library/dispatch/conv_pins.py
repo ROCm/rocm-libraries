@@ -53,7 +53,10 @@ picked under ``algorithm="auto"``, reached by pinning its ``algorithm``):
   (:func:`kernels.conv.kernel_identity.identity_supports_problem`) accepts it;
   its spec (:class:`ConvPinnedSpec`) is the instance's AOT identity plus the
   launch parameters it was benchmarked with; ``build`` is the IR of the cached
-  binary (the job ``--compile-all`` builds the identity from).
+  binary, rebuilt from the label alone
+  (:func:`kernels.conv.aot_jobs.job_for_identity`: the ``--compile-all`` job
+  where this process's grid walks the identity, else the job read off its
+  fields -- no ``ROCKE_AOT_*`` scoping variable is needed).
 * :func:`dispatch_conv_pinned` answers a ``ConvGroupedRequest`` of any
   direction (fwd, dgrad, wgrad) from a table: a ``DispatchResult`` whose
   ``spec.launch_params()`` carries ``split_k`` / ``tail_full``.

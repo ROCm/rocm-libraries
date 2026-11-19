@@ -135,24 +135,27 @@ def test_signature_is_the_run_from_cache_one():
             assert res.signature == want
 
 
-@pytest.mark.parametrize("case", ["fwd_s10", "dgrad_s10", "wgrad_s10"])
-def test_a_pinned_instance_builds_its_kernel_ir(case):
-    path = TABLES["gfx942_unet3d_bf16"]
+def _pinned_cases():
+    for stem, path in TABLES.items():
+        doc = json.loads(path.read_text())
+        for mode, body in doc["modes"].items():
+            for case in body["cases"]:
+                yield pytest.param(path, mode, case, id=f"{stem}#{mode}:{case}")
+
+
+@pytest.mark.parametrize("path,mode,case", list(_pinned_cases()))
+def test_every_pinned_instance_builds_its_kernel_ir(path, mode, case):
+    """The pinned candidate's build() rebuilds the binary's kernel from the
+    label alone, in a process with no AOT scoping variable set."""
     doc = json.loads(path.read_text())
-    pins = cp.load_conv_pins(path, "deterministic")
+    pins = cp.load_conv_pins(path, mode)
     res = cp.dispatch_conv_pinned(
         cp.request_from_miopen_cmd(
-            doc["modes"]["deterministic"]["cases"][case]["cmd"], "gfx942"
+            doc["modes"][mode]["cases"][case]["cmd"], doc["arch"]
         ),
         pins,
     )
-    try:
-        kernel = res.build()
-    except LookupError as e:
-        # The opt-in identity axes of the cache recipe (ROCKE_AOT_* in ADD
-        # mode) are not set in this process: build() is the --compile-all job
-        # of the identity, which only those axes produce.
-        pytest.skip(f"pinned identity outside this process's AOT grid: {e}")
+    kernel = res.build()
     assert kernel is not None
     with pytest.raises(ValueError, match="not gfx950"):
         res.candidate.built(res.spec, "gfx950")

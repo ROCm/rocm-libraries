@@ -48,6 +48,13 @@ A pinned binary admits only problems its identity serves: halo-form kernels (`uk
 padded problems, which is why each padded form has cases of its own. A request the table does not pin misses it and
 falls back to the default selection.
 
+The label alone rebuilds the kernel: the candidate's `build()` (and `benchmarks/common/reproduce_kernel.py`) goes
+through `kernels.conv.aot_jobs.job_for_identity`, which reads an identity the process's AOT grid does not walk off its
+own fields. The `ROCKE_AOT_*` variables only scope which kernels a `--compile-all` cache build enumerates (see the
+kernel READMEs under `kernels/common/`); no table kernel needs them to be built. To put a table's kernels into an AOT
+cache, compile the jobs of its labels (`job_for_identity(KernelIdentity.from_label(label))`) with
+`benchmarks.common.kernel_sweep.compile_jobs`.
+
 ## Regenerating a table
 
 1. Collect candidates for each case from the finalists of `benchmark_conv_compare.py --fast-rank` runs over the AOT

@@ -4198,17 +4198,33 @@ def _dgrad_jobs(
 
 
 def job_for_identity(identity: KernelIdentity) -> BuildJob:
-    """The job ``--compile-all`` builds ``identity`` from.
+    """The job that builds ``identity``.
 
-    The inverse of the generators above, obtained by running them: the
+    First the inverse of the generators above, obtained by running them: the
     identity's geometry is fed to its direction's generator (with the
     identity's own split-K degree, sub-GEMM cap and LLVM flavor) and the job
-    whose identity is equal is returned. So a rebuilt job is exactly the one
-    the cache build made, never a reconstruction that could drift from it.
+    whose identity is equal is returned, exactly the one ``--compile-all``
+    builds. An identity this process's grid does not walk -- an opt-in knob
+    set, a rank or width the ``ROCKE_AOT_*`` scoping variables leave out, as
+    in the shipped pin and route tables -- is read off its own fields by
+    :func:`job_from_identity`, which builds the same job for every identity
+    the grid does walk. So a label alone rebuilds its kernel, whatever the
+    environment.
 
-    Raises ``LookupError`` for an identity the generators of this checkout do
-    not produce (a different grid, or a field they never set).
+    Raises ``LookupError`` for an identity no job produces (a field no spec
+    has, or one the generators never set).
     """
+    try:
+        return _grid_job_for_identity(identity)
+    except LookupError as grid_miss:
+        try:
+            return job_from_identity(identity)
+        except LookupError as e:
+            raise LookupError(f"{grid_miss}; read off its fields: {e}") from None
+
+
+def _grid_job_for_identity(identity: KernelIdentity) -> BuildJob:
+    """:func:`job_for_identity` by running this process's generators."""
     from rocke.core.arch import ArchTarget
 
     if identity.algorithm != "implicit_gemm" or identity.direction not in (
@@ -4233,6 +4249,11 @@ def job_for_identity(identity: KernelIdentity) -> BuildJob:
         raise LookupError(
             f"{identity.arch} runs wave{target.wave_size}, the identity records "
             f"wave{identity.wave_size}"
+        )
+    if identity.is_3d not in CACHE_SPATIAL_3D:
+        raise LookupError(
+            f"{identity.label()}: ROCKE_AOT_SPATIAL leaves "
+            f"{'3-D' if identity.is_3d else '2-D'} kernels out of this grid"
         )
     dtype = identity.dtype_a
     wt = identity.warp_tile_m
@@ -4281,6 +4302,338 @@ def job_for_identity(identity: KernelIdentity) -> BuildJob:
         f"{identity.label()} is not produced by this checkout's "
         f"{identity.direction} generator (another grid, or a field it never sets)"
     )
+
+
+# Identity fields that are not spec kwargs, per direction, and what
+# job_from_identity does with them: they become the job's capability axes or
+# its data spec, are recomputed and compared (the async chunk widths), or are
+# launch-time fields of the same binary (dgrad dx_interior). Any other
+# identity-only field must sit at its default.
+_IDENTITY_BASE_FIELDS = frozenset(
+    (
+        "arch",
+        "direction",
+        "algorithm",
+        "dtype_a",
+        "dtype_b",
+        "dtype_d",
+        "llvm_flavor",
+        "grouped",
+        "is_3d",
+    )
+)
+_IDENTITY_ONLY_FIELDS = {
+    "fwd": frozenset(("two_stage", "async_chunk_a", "async_chunk_b")),
+    "wgrad": frozenset(("async_chunk_a", "async_chunk_b")),
+    "dgrad": frozenset(
+        (
+            "stride_h",
+            "stride_w",
+            "dilation_h",
+            "dilation_w",
+            "filter_h",
+            "filter_w",
+            "dx_interior",
+            "dx_interior_axes",
+        )
+    ),
+}
+
+
+def _spec_class(direction: str):
+    if direction == "fwd":
+        from kernels.common.conv_implicit_gemm import ImplicitGemmConvSpec as Spec
+    elif direction == "wgrad":
+        from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec as Spec
+    elif direction == "dgrad":
+        from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec as Spec
+    else:
+        raise ValueError(f"unknown direction {direction!r}")
+    return Spec
+
+
+def _identity_spec_kwargs(identity: KernelIdentity) -> dict:
+    """The spec kwargs an identity records, as the generators pass them.
+
+    Every spec field the identity carries maps 1:1, except the few whose
+    identity default ("not set") differs from the spec default: those are
+    passed only when set, so the spec keeps its own default exactly where
+    the generators leave the key out.
+    """
+    import dataclasses
+
+    spec_fields = {f.name for f in dataclasses.fields(_spec_class(identity.direction))}
+    id_fields = {f.name: f for f in dataclasses.fields(KernelIdentity)}
+    d = identity.direction
+    kw = {}
+    for name, fld in id_fields.items():
+        if name not in spec_fields or name in _IDENTITY_BASE_FIELDS:
+            continue
+        value = getattr(identity, name)
+        default = fld.default
+        if name == "acc_epilogue":
+            if value != default:
+                raise LookupError(
+                    f"accumulator epilogue {value!r} is not built from an identity"
+                )
+            continue
+        if name in ("lds_layout", "num_load_waves", "streamk_reduction"):
+            # Unset in the identity = the spec's own default.
+            if value != default:
+                kw[name] = value
+            continue
+        if name == "ws_replicas":
+            if value:
+                kw[name] = value
+            continue
+        if name == "lds_k_pad":
+            # 0 is also the explicit pad of the XOR-swizzled (unpadded) dgrad
+            # tile; elsewhere it means "unset" (the spec derives a pad).
+            if value or (d == "dgrad" and identity.lds_xor):
+                kw[name] = value
+            elif d == "wgrad":
+                derived = _wgrad_default_lds_k_pad(identity)
+                if derived is not None:
+                    kw[name] = derived
+            continue
+        if name in ("vector_size_a", "vector_size_b", "vector_size_c"):
+            # 0 = derived by the builder (the group-merged kernels).
+            if value != 0:
+                kw[name] = value
+            continue
+        if d == "fwd" and name == "prefetch_regs":
+            # The identity's int is shared with wgrad; fwd's spec takes a bool.
+            if value:
+                kw[name] = True
+            continue
+        if d == "dgrad" and name == "max_sub_gemms":
+            kw[name] = value
+            continue
+        if value != default or name in _ALWAYS_SET_SPEC_FIELDS:
+            kw[name] = value
+    return kw
+
+
+# Spec fields every generator passes, even at the identity's default.
+_ALWAYS_SET_SPEC_FIELDS = frozenset(
+    (
+        "tile_m",
+        "tile_n",
+        "tile_k",
+        "warp_m",
+        "warp_n",
+        "warp_tile_m",
+        "warp_tile_n",
+        "warp_tile_k",
+        "pipeline",
+        "epilogue",
+        "wave_size",
+    )
+)
+
+
+def _wgrad_default_lds_k_pad(identity: KernelIdentity):
+    """The row pad the wgrad generator derives for ``identity``'s geometry."""
+    from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+    return WgradConvSpec.default_lds_k_pad(
+        arch=identity.arch,
+        tile_k=identity.tile_k,
+        dtype_a=storage_dtype(identity.dtype_a),
+        dtype_b=storage_dtype(identity.dtype_b),
+        lds_k_outer=identity.lds_k_outer,
+        wave_size=identity.wave_size,
+    )
+
+
+def _identity_caps(identity: KernelIdentity) -> dict:
+    """The capability axes (probe problem) a job of ``identity`` is built for,
+    spelled as the generators spell them."""
+    d = identity.direction
+    if d in ("fwd", "wgrad"):
+        if identity.group_merge > 1:
+            return dict(grouped=True, group_merge=identity.group_merge)
+        if d == "fwd" and identity.two_stage:
+            return dict(grouped=True)
+        return dict(grouped=identity.grouped, is_3d=identity.is_3d)
+    if identity.dy_halo:
+        return {
+            "grouped": True,
+            "stride": 1,
+            "dilation": 1,
+            "halo_filter": identity.filter_h,
+            "halo_max_wo": identity.halo_max_wo,
+        }
+    if identity.patch:
+        return dict(grouped=False, tilde=True, patch=True)
+    if identity.stride_h == 0:
+        return {"grouped": identity.grouped, "tilde": True, "is_3d": identity.is_3d}
+    caps = {
+        "grouped": identity.grouped,
+        "stride": identity.stride_h,
+        "dilation": identity.dilation_h,
+        "is_3d": identity.is_3d,
+    }
+    if identity.tapk_xhalo or identity.tapk_pp_xhalo:
+        caps["xhalo"] = True
+    return caps
+
+
+def _generator_identity(identity: KernelIdentity, kw: dict, caps: dict):
+    """The identity a generator records for ``(kw, caps)``: the inverse's
+    check that every field of ``identity`` came from the job."""
+    d = identity.direction
+    dtypes = (identity.dtype_a, identity.dtype_b, identity.dtype_d)
+    fields = dict(
+        arch=identity.arch,
+        direction=d,
+        algorithm="implicit_gemm",
+        llvm_flavor=identity.llvm_flavor,
+        dtype_a=dtypes[0],
+        dtype_b=dtypes[1],
+        dtype_d=dtypes[2],
+        grouped=caps.get("grouped", False),
+        is_3d=caps.get("is_3d", False),
+    )
+    id_cfg = dict(kw)
+    if d == "fwd" and id_cfg.get("prefetch_regs"):
+        id_cfg["prefetch_regs"] = 1
+    if caps.get("group_merge", 1) > 1:
+        fields.update(vector_size_a=0, vector_size_b=0, vector_size_c=0)
+    if d == "fwd":
+        fields["two_stage"] = identity.two_stage
+        fields.update(_async_chunks(kw, dtypes, caps, identity.arch))
+    elif d == "wgrad":
+        chunks = _wgrad_async_chunks(kw, dtypes, caps, identity.arch)
+        if chunks is None:
+            raise LookupError(
+                f"{identity.label()}: the async wgrad loop cannot serve this "
+                "configuration"
+            )
+        fields.update(chunks)
+    else:
+        for name in _IDENTITY_ONLY_FIELDS["dgrad"]:
+            fields[name] = getattr(identity, name)
+    fields.update(id_cfg)
+    try:
+        return KernelIdentity(**fields)
+    except TypeError as e:  # a spec kwarg the identity does not record
+        raise LookupError(f"{identity.label()}: {e}") from None
+
+
+def job_from_identity(identity: KernelIdentity, *, validate: bool = True) -> BuildJob:
+    """The job of ``identity`` read off its own fields, without the grid.
+
+    The identity records every spec field that changes the emitted ISA, so
+    the spec kwargs map 1:1 from it and the capability axes follow from its
+    capability fields. This builds kernels the default grid does not walk
+    -- a pinned table's opt-in knob sets, or a grid narrowed by the
+    ``ROCKE_AOT_*`` scoping variables -- from the identity alone. The job's
+    identity is rebuilt the way the generators record it and must equal
+    ``identity``; for every identity the generators produce the job is the
+    one they build (tests/test_aot_jobs_from_identity.py).
+
+    Raises ``LookupError`` for an identity no job can produce: a field the
+    spec does not have, one that is not a spec field and not a capability
+    the job can take, or (``validate``) a configuration its direction's spec
+    validator refuses on the identity's arch.
+    """
+    import dataclasses
+
+    from rocke.core.arch import ArchTarget
+
+    if identity.algorithm != "implicit_gemm" or identity.direction not in (
+        "fwd",
+        "wgrad",
+        "dgrad",
+    ):
+        raise LookupError(
+            f"not an implicit-GEMM conv identity: {identity.direction}/"
+            f"{identity.algorithm}"
+        )
+    if (identity.dtype_a, identity.dtype_b, identity.dtype_d) != dtype_triple(
+        identity.dtype_a
+    ):
+        raise LookupError(
+            "the AOT jobs build A, B and D in one dtype (tf32: tf32/tf32/fp32)"
+        )
+    if identity.warp_tile_m != identity.warp_tile_n:
+        raise LookupError("the AOT jobs build square warp tiles only")
+    target = ArchTarget.from_gfx(identity.arch)
+    if target.wave_size != identity.wave_size:
+        raise LookupError(
+            f"{identity.arch} runs wave{target.wave_size}, the identity records "
+            f"wave{identity.wave_size}"
+        )
+    wt = identity.warp_tile_m
+    atom = target.mma.select_largest_k(
+        family="wmma" if target.wave_size == 32 else "mma",
+        a_dtype=identity.dtype_a,
+        b_dtype=identity.dtype_a,
+        c_dtype="fp32",
+        m=wt,
+        n=wt,
+    )
+    if atom is None or atom.k != identity.warp_tile_k:
+        raise LookupError(
+            f"no {wt}x{wt}x{identity.warp_tile_k} {identity.dtype_a} MMA atom on "
+            f"{identity.arch}"
+        )
+    d = identity.direction
+    spec_fields = {f.name for f in dataclasses.fields(_spec_class(d))}
+    allowed = _IDENTITY_BASE_FIELDS | _IDENTITY_ONLY_FIELDS[d]
+    for fld in dataclasses.fields(KernelIdentity):
+        name = fld.name
+        if name in spec_fields or name in allowed:
+            continue
+        if name == "group_merge" or (d == "dgrad" and name in ("halo_max_wo",)):
+            continue
+        if getattr(identity, name) != fld.default:
+            raise LookupError(
+                f"{identity.label()}: {name}={getattr(identity, name)!r} is not "
+                f"a {d} spec field or capability"
+            )
+    kw = _identity_spec_kwargs(identity)
+    caps = _identity_caps(identity)
+    rebuilt = _generator_identity(identity, kw, caps)
+    if rebuilt != identity:
+        diff = {
+            f.name: (getattr(identity, f.name), getattr(rebuilt, f.name))
+            for f in dataclasses.fields(KernelIdentity)
+            if getattr(identity, f.name) != getattr(rebuilt, f.name)
+        }
+        raise LookupError(
+            f"{identity.label()}: no job records this identity "
+            f"(identity vs job: {diff})"
+        )
+    job = BuildJob(identity=identity, direction=d, spec_kwargs=kw, caps=caps)
+    if validate:
+        why = _spec_invalid_reason(job, identity.arch, identity.dtype_a)
+        if why:
+            raise LookupError(f"{identity.label()}: not a valid {d} spec: {why}")
+    return job
+
+
+def _spec_invalid_reason(job: BuildJob, arch: str, dtype: str) -> Optional[str]:
+    """Why ``job``'s spec does not build on ``arch`` (its direction's
+    validator), or ``None``. The grid's own limits are not applied."""
+    try:
+        spec = spec_for_job(job, dtype)
+        spec.validate()
+        if job.direction == "fwd":
+            from kernels.common.conv_implicit_gemm import is_valid_spec as valid
+        elif job.direction == "wgrad":
+            from kernels.common.conv_implicit_gemm_wgrad import (
+                is_valid_wgrad_spec as valid,
+            )
+        else:
+            from kernels.common.conv_implicit_gemm_dgrad import (
+                is_valid_dgrad_spec as valid,
+            )
+        ok, why = valid(spec, arch=arch)
+    except (ValueError, TypeError) as e:
+        return str(e) or type(e).__name__
+    return None if ok else (why or "rejected")
 
 
 # Forward LDS budget per arch for the AOT grid, below the arch's capacity.
