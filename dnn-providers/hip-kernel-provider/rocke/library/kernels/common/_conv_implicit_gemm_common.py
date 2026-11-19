@@ -54,6 +54,7 @@ from rocke.helpers.transforms import (
     embed_dynamic,
     pad,
     pad_dynamic,
+    unmerge_addr64,
     unmerge_magic,
     unmerge_magic_dynamic,
 )
@@ -1432,6 +1433,31 @@ def spatial_unmerge_dynamic(
     return unmerge_magic_dynamic(upper, into=into, magic_triples=triples)
 
 
+def spatial_unmerge_addr64(
+    params, *, upper: str, origin_coords: Sequence[Value], leading: str = "n"
+):
+    """addr64 counterpart of :func:`spatial_unmerge_dynamic`: ``d`` (the
+    per-lane delta from the tile's i64 origin) -> ``(n, ho, wo)`` via
+    :class:`rocke.helpers.transforms.UnmergeAddr64`'s carry propagation, no
+    magic numbers. 2D only (no ``is_3d`` branch -- Phase 1 slice A's scope;
+    see ``library/kernels/conv/docs/large_tensor_addr64_plan.md`` section 3).
+
+    ``origin_coords`` is ``[leading, ho0, wo0]`` -- the tile origin decoded
+    by :func:`rocke.helpers.tensor_view.tile_origin_decode_i64`, each
+    narrowed to i32 by the caller (see that function's docstring for why
+    the leading coord may be meaningless when the tensor's leading extent
+    itself exceeds i32: harmless here, since the leading coord this
+    transform produces is never read downstream -- it is folded into the
+    i64 tile origin by the caller instead of being recomputed per lane).
+    """
+    return unmerge_addr64(
+        upper,
+        into=[leading, "ho", "wo"],
+        origin_coords=origin_coords,
+        dims_i32=[params["p_Ho"], params["p_Wo"]],
+    )
+
+
 def channel_unmerge_dynamic(
     params, *, upper: str, prefix: str, is_3d: bool, cdim: Value, last: str = "c"
 ):
@@ -1678,6 +1704,75 @@ def make_d_descriptor_dynamic(
         name = "D_nhwk"
     return DynamicTensorDescriptor.create(
         name, coord_names=coord_names, strides=strides
+    ).transform(*transforms)
+
+
+def make_a_descriptor_addr64(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    origin_coords: Sequence[Value],
+    name: Optional[str] = None,
+):
+    """addr64 counterpart of :func:`make_a_descriptor_dynamic`: ``(d, k) ->
+    N[D]HWC``, 2D / non-grouped only (Phase 1 slice A's scope). ``d`` is the
+    per-lane delta from the tile's i64 origin; ``origin_coords`` is that
+    origin's ``(n0, ho0, wo0)`` (see :func:`spatial_unmerge_addr64`).
+
+    Excludes ``"n"``/``p_A_stride_n`` from the descriptor entirely: that
+    product (an operand large enough to need i64 for a huge ``N``) is
+    already folded into the i64 tile origin by
+    :func:`rocke.helpers.tensor_view.make_tile_buffer_resource`, not
+    recomputed per lane in i32 -- see
+    ``library/kernels/conv/docs/large_tensor_addr64_plan.md`` section 3.
+    """
+    neg_pH = b.sub(b.const_i32(0), params["p_pH"])
+    neg_pW = b.sub(b.const_i32(0), params["p_pW"])
+    transforms = [
+        spatial_unmerge_addr64(params, upper="m", origin_coords=origin_coords),
+        embed_dynamic(
+            upper=["ho", "y"],
+            lower="hi",
+            strides=[params["p_sH"], params["p_dH"]],
+            offset=neg_pH,
+            lo=0,
+            hi=params["p_Hi"],
+        ),
+        embed_dynamic(
+            upper=["wo", "x"],
+            lower="wi",
+            strides=[params["p_sW"], params["p_dW"]],
+            offset=neg_pW,
+            lo=0,
+            hi=params["p_Wi"],
+        ),
+        *_a_channel_decode_dynamic(
+            b, params, is_3d=False, grouped=False, upper="k", prefix="k_"
+        ),
+        *filter_pads_dynamic(params, is_3d=False),
+    ]
+    coord_names = ["hi", "wi", "c"]
+    strides = [params["p_A_stride_hi"], params["p_A_stride_wi"], b.const_i32(1)]
+    return DynamicTensorDescriptor.create(
+        name or "A_nhwc_addr64", coord_names=coord_names, strides=strides
+    ).transform(*transforms)
+
+
+def make_d_descriptor_addr64(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    origin_coords: Sequence[Value],
+    name: Optional[str] = None,
+):
+    """addr64 counterpart of :func:`make_d_descriptor_dynamic`: ``(d, k_out)
+    -> N[D]HWK``, 2D only. Excludes ``"n"``/``p_D_stride_n`` for the same
+    reason as :func:`make_a_descriptor_addr64`."""
+    transforms = [spatial_unmerge_addr64(params, upper="m", origin_coords=origin_coords)]
+    coord_names = ["ho", "wo", "k_out"]
+    strides = [params["p_D_stride_ho"], params["p_D_stride_wo"], b.const_i32(1)]
+    return DynamicTensorDescriptor.create(
+        name or "D_nhwk_addr64", coord_names=coord_names, strides=strides
     ).transform(*transforms)
 
 
