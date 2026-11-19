@@ -30,6 +30,7 @@
 #include <cmath>
 #include <complex>
 #include <exception>
+#include <limits>
 #include <new>
 #include <type_traits>
 
@@ -470,10 +471,18 @@ __device__ __host__ inline T rocblas_abs(T x)
     return x < 0 ? -x : x;
 }
 
-// For complex, we have defined a __device__ __host__ compatible std::abs
+// For complex, we have defined a __device__ __host__ compatible std::abs.
+// It returns 0 for NaN + 0i and NaN for Inf + Inf i, so a NaN in either part gives NaN and,
+// otherwise, an infinite part gives infinity.
 template <typename T, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
 __device__ __host__ inline auto rocblas_abs(T x)
 {
+    using S = decltype(std::real(x));
+    const S re = std::real(x), im = std::imag(x);
+    if(std::isnan(re) || std::isnan(im))
+        return std::numeric_limits<S>::quiet_NaN();
+    if(std::isinf(re) || std::isinf(im))
+        return std::numeric_limits<S>::infinity();
     return std::abs(x);
 }
 

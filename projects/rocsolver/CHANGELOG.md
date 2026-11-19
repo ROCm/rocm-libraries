@@ -3,6 +3,16 @@
 Full documentation for rocSOLVER is available at the [rocSOLVER documentation](https://rocm.docs.amd.com/projects/rocSOLVER/en/latest/index.html).
 
 
+## (Unreleased) rocSOLVER
+
+### Resolved issues
+
+* Fixed LANGE for complex entries with a NaN or infinite part. The one-, infinity- and max-norms
+  were finite for a NaN + 0i entry and NaN for an Inf + Inf i entry; they are now NaN and
+  infinity, as in LAPACK.
+
+
+
 ## rocSOLVER 3.39.0 for ROCm 10.3.0
 
 ### Resolved issues
