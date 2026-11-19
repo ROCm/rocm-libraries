@@ -839,7 +839,8 @@ __device__ inline void k2Drive(const K2Block& b,
 // tile (one per depth set) in LDS, double-buffered across taps with one barrier per tap, like the
 // halo; weights formatted with ka = BC, so each (tap, chunk) tile is contiguous in global.
 // BL 2 (tap mode): the block stages a chunk's R x S weight tiles in one LDS stage with 16-byte
-// loads shared by all waves (two barriers a chunk); weights formatted with ka = BC.
+// loads shared by all waves (double-buffered where the LDS holds two stages, else a second
+// barrier a chunk); weights formatted with ka = BC.
 // TO: output type (T, or fp32 for the three-bf16 form whose operands are bf16).
 // SPLIT 1: split-C config; the block reduces chunks [z cps, (z+1) cps) and the epilogue writes fp32
 // partials to ws[z] (k2SplitReduce finishes). SPLIT 0 writes TO to y and needs splits = 1.
@@ -916,8 +917,11 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
     constexpr int BLW = BC;
     constexpr int WTILE = BN * BLW;
     constexpr int WSTAGE = BL == 2 ? R * S * WTILE : 0;
+    // Two weight stages where they fit the LDS (one barrier a chunk, like the halo), else one
+    // (a second barrier before the next chunk's weights overwrite it).
+    constexpr int WSTAGES = (2 * SLOT + 2 * WSTAGE) * static_cast<int>(sizeof(T)) <= 65536 ? 2 : 1;
     static_assert(BL != 2 || (RING == 0 && XPF == 0 && CF == 0), "chunk weights: tap mode");
-    __shared__ __attribute__((aligned(16))) T lds[2 * SLOT + 2 * BSTAGE + WSTAGE];
+    __shared__ __attribute__((aligned(16))) T lds[2 * SLOT + 2 * BSTAGE + WSTAGES * WSTAGE];
     T* const bls = lds + 2 * SLOT;
     T* const wls = lds + 2 * SLOT + 2 * BSTAGE;
 
@@ -1323,7 +1327,8 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
             }
         }
     };
-    auto commitW = [&]() {
+    int wst = 0; // the weight stage the current chunk reads
+    auto commitW = [&](int st) {
         typedef typename K1Raw<PIECE>::type Piece;
         constexpr int PIECES = 16 / PIECE;
         constexpr int WORDS = PIECE / 4;
@@ -1335,7 +1340,7 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
             {
                 const int rs = v / WV, e = (v - rs * WV) * VB;
                 const int n = e / BC, key = (n / WP) % WG;
-                T* row = wls + rs * WTILE + n * BLW;
+                T* row = wls + st * WSTAGE + rs * WTILE + n * BLW;
 #pragma unroll
                 for(int p = 0; p < PIECES; ++p)
                 {
@@ -1369,7 +1374,8 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
         }
     }
     // One chunk: the next chunk's weights to registers, the halo prefetch, the MMAs (weights from
-    // LDS), then a barrier and the weights to the stage (the driver's next barrier orders them).
+    // LDS), then the weights to the other stage (one stage: after a barrier); the driver's next
+    // barrier orders them.
     auto chunkW = [&](int stage, int cc, auto&& pf, auto&& nx) {
         const T* halo = lds + stage * SLOT;
         int tn = 0, cn = 0;
@@ -1393,7 +1399,7 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
                 Frag bf[FN];
 #pragma unroll
                 for(int j = 0; j < FN; ++j)
-                    bf[j] = k1Frag<Atom>(wls + rs * WTILE + wOff[j][q]);
+                    bf[j] = k1Frag<Atom>(wls + wst * WSTAGE + rs * WTILE + wOff[j][q]);
 #pragma unroll
                 for(int i = 0; i < FM; ++i)
 #pragma unroll
@@ -1403,8 +1409,11 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
         }
         if(next)
         {
-            __syncthreads();
-            commitW();
+            if constexpr(WSTAGES == 1)
+                __syncthreads();
+            commitW(WSTAGES == 1 ? 0 : wst ^ 1);
+            if constexpr(WSTAGES == 2)
+                wst ^= 1;
         }
     };
     if constexpr(BL == 2)
@@ -1413,7 +1422,7 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
         K2CursorTaps c0;
         c0.init(b.dsEff, KD, nChL, b.od0 - a.pd, a.di);
         loadW(c0.more() ? c0.t : 0, 0);
-        commitW();
+        commitW(0);
     }
     if constexpr(BL == 1)
     {
