@@ -2288,6 +2288,9 @@ public:
         if(m_start != nullptr)
             static_cast<void>(hipEventDestroy(m_start));
         m_start = nullptr;
+        for(hipEvent_t event : m_done)
+            static_cast<void>(hipEventDestroy(event));
+        m_done.clear();
         m_streams.resize(std::min<size_t>(m_streams.size(), 1));
         m_workspaces.clear();
         for(auto& replica : m_replica)
@@ -2467,13 +2470,36 @@ public:
     }
 
     // One launch of every partition. Partitions wait for work already queued on stream0, and
-    // PartitionedGemm::run joins them at the end, so stream0 sees the whole span.
+    // stream0 waits for every other partition at the end (PartitionedGemm::run does not join
+    // them), so stream0 sees the whole span.
     hipblasStatus_t run()
     {
         check(hipEventRecord(m_start, m_streams[0]), "hipEventRecord");
         for(size_t i = 1; i < m_streams.size(); i++)
             check(hipStreamWaitEvent(m_streams[i], m_start, 0), "hipStreamWaitEvent");
-        return m_gemm->run(m_streams);
+        auto status = m_gemm->run(m_streams);
+        if(status != HIPBLAS_STATUS_SUCCESS)
+            return status;
+        // An event belongs to the device that is current when it is created, and is recorded on
+        // a stream of that device.
+        int previous = 0;
+        check(hipGetDevice(&previous), "hipGetDevice");
+        for(size_t i = 1; i < m_streams.size(); i++)
+        {
+            check(hipSetDevice(m_devices[i]), "hipSetDevice");
+            if(m_done.size() < i)
+            {
+                hipEvent_t event = nullptr;
+                check(hipEventCreateWithFlags(&event, hipEventDisableTiming),
+                      "hipEventCreateWithFlags");
+                m_done.push_back(event);
+            }
+            check(hipEventRecord(m_done[i - 1], m_streams[i]), "hipEventRecord");
+        }
+        check(hipSetDevice(previous), "hipSetDevice");
+        for(size_t i = 1; i < m_streams.size(); i++)
+            check(hipStreamWaitEvent(m_streams[0], m_done[i - 1], 0), "hipStreamWaitEvent");
+        return status;
     }
 
 private:
@@ -2495,6 +2521,7 @@ private:
     std::vector<hipStream_t>                               m_streams; // [0] is the caller's
     std::vector<void*>                                     m_workspaces; // partitions 1..N-1
     hipEvent_t                                             m_start = nullptr;
+    std::vector<hipEvent_t>                                m_done; // partitions 1.. finished
     std::unique_ptr<hipblaslt_ext::experimental::PartitionedGemm>        m_gemm;
 };
 

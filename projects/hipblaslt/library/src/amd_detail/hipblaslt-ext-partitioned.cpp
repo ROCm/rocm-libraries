@@ -214,10 +214,6 @@ namespace hipblaslt_ext::experimental
         SplitDim             dim          = SplitDim::M;
         std::vector<int64_t> sliceOffset, sliceSize;
 
-        // One event per partition (device, event) that joins the partitions at the end of
-        // run(): created on the device of the partition's stream, recreated when that changes.
-        std::vector<std::pair<int, hipEvent_t>> joinEvents;
-
         // Partitions whose D slice (or the peer D they also store) is memory of another device:
         // run() publishes their writes. One host word per partition (device, word) is the
         // target of that stream write.
@@ -226,7 +222,6 @@ namespace hipblaslt_ext::experimental
 
         ~PartitionedGemmImpl()
         {
-            releaseJoinEvents();
             releasePublishWords();
         }
 
@@ -268,38 +263,6 @@ namespace hipblaslt_ext::experimental
             word  = static_cast<uint64_t*>(p);
             *word = 0;
             return word;
-        }
-
-        void releaseJoinEvents()
-        {
-            for(auto& [device, event] : joinEvents)
-            {
-                ScopedDevice guard(device);
-                static_cast<void>(hipEventDestroy(event));
-            }
-            joinEvents.clear();
-        }
-
-        bool ensureJoinEvents(std::vector<int> const& devices)
-        {
-            bool same = joinEvents.size() == devices.size();
-            for(size_t i = 0; same && i < devices.size(); i++)
-                same = joinEvents[i].first == devices[i];
-            if(same)
-                return true;
-            releaseJoinEvents();
-            for(int device : devices)
-            {
-                ScopedDevice guard(device);
-                hipEvent_t   event = nullptr;
-                if(!guard.ok() || hipEventCreateWithFlags(&event, hipEventDisableTiming) != hipSuccess)
-                {
-                    releaseJoinEvents();
-                    return false;
-                }
-                joinEvents.emplace_back(device, event);
-            }
-            return true;
         }
 
         size_t count() const
@@ -1024,7 +987,7 @@ namespace hipblaslt_ext::experimental
             if(st != HIPBLAS_STATUS_SUCCESS)
                 return st;
             // This partition wrote memory of another device: a stream write after the slice makes
-            // those writes visible to the other devices before the join below lets them go on.
+            // those writes visible to the other devices.
             if(s.publishD[i])
             {
                 uint64_t* word = s.publishWord(i, devices[i]);
@@ -1033,28 +996,9 @@ namespace hipblaslt_ext::experimental
             }
         }
 
-        // Join the partitions on the GPU, so that work enqueued on any partition's stream after
-        // this call runs once every partition has finished its slice. The caller needs no
-        // event or host wait of its own.
-        if(s.count() > 1)
-        {
-            if(!s.ensureJoinEvents(devices))
-                return HIPBLAS_STATUS_INTERNAL_ERROR;
-            for(size_t i = 0; i < s.count(); i++)
-            {
-                ScopedDevice guard(devices[i]);
-                if(hipEventRecord(s.joinEvents[i].second, streams[i]) != hipSuccess)
-                    return HIPBLAS_STATUS_INTERNAL_ERROR;
-            }
-            for(size_t j = 0; j < s.count(); j++)
-            {
-                ScopedDevice guard(devices[j]);
-                for(size_t i = 0; i < s.count(); i++)
-                    if(i != j
-                       && hipStreamWaitEvent(streams[j], s.joinEvents[i].second, 0) != hipSuccess)
-                        return HIPBLAS_STATUS_INTERNAL_ERROR;
-            }
-        }
+        // The partitions are not joined here: ordering work after all of them is the caller's
+        // (an event on each partition's stream that the other streams wait for, or a host
+        // synchronize), as with any stream-based launch.
         return HIPBLAS_STATUS_SUCCESS;
     }
 

@@ -1252,16 +1252,13 @@ namespace hipblaslt_ext
             * another partition mode, found from the PCI function of the devices), or different GPUs.
             *
             *  With ``storePeerD`` every partition also stores its slice into the D of the other
-            * partition, so that both Ds are complete once the run has finished (the partitions are
-            * joined, see run()). It needs exactly 2 partitions and a replicated D (two different
+            * partition, so that both Ds are complete once every partition has finished its slice
+            * (see run()). It needs exactly 2 partitions and a replicated D (two different
             * pointers, in any order: the peer of each partition is found by device), and the backend
             * needs kernels that store a second D; without them setProblem succeeds and
             * algoGetHeuristic returns nothing (also with a device library built before this
-            * feature). The peer D is written with system-scope stores. After run() returns, later work on
-            * any partition's stream sees the complete D (with ``storePeerD`` both complete Ds). Up
-            * to the caller: ordering with a stream that is not one of the partition streams (record
-            * an event on a partition stream and wait for it, or synchronize), and graph capture that
-            * does not include every partition stream.
+            * feature). The peer D is written with system-scope stores. run() does not order
+            * later work after the partitions: see run().
             *
             *  \retval HIPBLAS_STATUS_SUCCESS           If the problem was set on every partition.
             *  \retval HIPBLAS_STATUS_INVALID_VALUE     If `inputs` does not hold one GemmInputs
@@ -1353,10 +1350,13 @@ namespace hipblaslt_ext
             /*! \ingroup library_module
             *  \brief Launches every partition's slice on its stream and returns without waiting.
             *
-            *  \details After the launches the partitions are joined on the GPU: each stream waits
-            * for every other partition to finish its slice. Work that the caller enqueues on any
-            * of the streams after this call therefore sees the slices of all partitions (for
-            * example, a shared D is complete), with no event or host wait of the caller's own.
+            *  \details Each partition's slice is launched on its own stream, as Gemm::run does for
+            * one stream. The partitions are not joined: work that needs the whole result (for
+            * example a kernel that reads all of D) must be ordered after every partition by the
+            * caller. Record an event on each partition's stream after this call and make the
+            * streams that need the result wait for it (hipStreamWaitEvent), or synchronize the
+            * streams from the host. The sample does the first. The same holds under stream
+            * capture, where only the kernels of each partition are recorded.
             *
             *  A partition whose D slice is memory of another device (a shared D), or that also
             * stores the peer D (``storePeerD``), publishes its writes on its stream after the

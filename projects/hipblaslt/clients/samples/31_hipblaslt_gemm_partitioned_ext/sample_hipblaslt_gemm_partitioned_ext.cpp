@@ -149,6 +149,28 @@ int main(int argc, char** argv)
 
     // Launches slice i on streams[i] and returns. The streams run at the same time.
     CHECK_HIPBLASLT_ERROR(gemm.run(streams));
+
+    // ---- join the partitions ----
+    // run() does not order anything after the partitions. To queue work on a partition's stream
+    // that needs the whole result, record an event on every stream after its slice and make the
+    // other streams wait for it. After this, work queued on any of the streams starts only when
+    // every partition has finished.
+    std::vector<hipEvent_t> done(partitions);
+    for(int i = 0; i < partitions; i++)
+    {
+        CHECK_HIP_ERROR(hipSetDevice(i));
+        CHECK_HIP_ERROR(hipEventCreateWithFlags(&done[i], hipEventDisableTiming));
+        CHECK_HIP_ERROR(hipEventRecord(done[i], streams[i]));
+    }
+    for(int j = 0; j < partitions; j++)
+    {
+        CHECK_HIP_ERROR(hipSetDevice(j));
+        for(int i = 0; i < partitions; i++)
+            if(i != j)
+                CHECK_HIP_ERROR(hipStreamWaitEvent(streams[j], done[i], 0));
+    }
+
+    // The host reads D next, so it waits for the streams.
     for(int i = 0; i < partitions; i++)
     {
         CHECK_HIP_ERROR(hipSetDevice(i));
@@ -188,6 +210,7 @@ int main(int argc, char** argv)
         hipFree(const_cast<void*>(c[i]));
         hipFree(d[i]);
         hipFree(workspaces[i]);
+        hipEventDestroy(done[i]);
         hipStreamDestroy(streams[i]);
         hipblasLtDestroy(handles[i]);
     }
