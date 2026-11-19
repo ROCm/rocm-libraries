@@ -166,6 +166,55 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT 180)\n")
 
+# Library 3-D NDHWC conv CPU tests (no GPU): the 3-D forward / dgrad / wgrad
+# knobs and their validators, the C++ binding's knob forwarding, the dgrad
+# interior / box plans, the 3-D Winograd family, and the shipped gfx942 pin and
+# route tables with their dispatch. Several files also hold GPU classes
+# (marked gpu); -m "not gpu" leaves those to rocke_library_conv3d_gpu_pytest.
+# Their own entry, so they do not share rocke_library_conv_pytest's budget.
+set(_ROCKE_LIBRARY_CONV3D_TEST_RELPATHS
+    "tests/library/tests/test_conv_cpp_binding_knobs.py"
+    "tests/library/tests/test_conv_dgrad_box_det.py"
+    "tests/library/tests/test_conv_dgrad_box_plan.py"
+    "tests/library/tests/test_conv_dgrad_interior.py"
+    "tests/library/tests/test_conv_dgrad_interior_cpp.py"
+    "tests/library/tests/test_conv_dgrad_pingpong.py"
+    "tests/library/tests/test_conv_dgrad_pp_boxes.py"
+    "tests/library/tests/test_conv_dgrad_tapk_pp_knobs.py"
+    "tests/library/tests/test_conv_dgrad_xhalo_knobs.py"
+    "tests/library/tests/test_conv_dgrad_xhalo_lds_knobs.py"
+    "tests/library/tests/test_conv_dgrad_xhalo_yring.py"
+    "tests/library/tests/test_conv_fwd_3d_fxd.py"
+    "tests/library/tests/test_conv_fwd_3d_kloop_knobs.py"
+    "tests/library/tests/test_conv_fwd_3d_lds_knobs.py"
+    "tests/library/tests/test_conv_fwd_3d_xpd.py"
+    "tests/library/tests/test_conv_fwd_3d_xyr.py"
+    "tests/library/tests/test_conv_fwd_pingpong.py"
+    "tests/library/tests/test_conv_fwd_split_det.py"
+    "tests/library/tests/test_conv_fwd_split_store.py"
+    "tests/library/tests/test_conv_m_band.py"
+    "tests/library/tests/test_conv_pin_table.py"
+    "tests/library/tests/test_conv_pins_dispatch.py"
+    "tests/library/tests/test_conv_small_grid_knobs.py"
+    "tests/library/tests/test_conv_routes.py"
+    "tests/library/tests/test_conv_shipped_tables_gpu.py"
+    "tests/library/tests/test_conv_wgrad_lds_bswz.py"
+    "tests/library/tests/test_conv_wgrad_xwin.py"
+    "tests/library/tests/test_conv_winograd3d.py"
+    "tests/library/tests/test_derive_conv_pins.py")
+set(_ROCKE_LIBRARY_CONV3D_TESTS "")
+foreach(_rocke_conv3d_test ${_ROCKE_LIBRARY_CONV3D_TEST_RELPATHS})
+  string(APPEND _ROCKE_LIBRARY_CONV3D_TESTS
+         " \"${ROCKE_TEST_CTEST_REL}${_rocke_conv3d_test}\"")
+endforeach()
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_conv3d_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV3D_TESTS} -m \"not gpu\" -v -rs --timeout=60)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_conv3d_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 300)\n")
+
 # Library conv TF32 tests (no GPU required), as two entries:
 #
 #   rocke_library_conv_tf32_pytest: validation and rejections, kernel names,
@@ -670,5 +719,40 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_gpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;gpu\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 1800)\n")
+
+# Library 3-D NDHWC conv GPU numeric tests: the kernels the shipped gfx942 pin
+# and route tables select, run through dispatch and the route binding against
+# an f32 reference (bitwise reruns for the deterministic selections), and the
+# GPU classes of the 3-D forward knob suites. They skip without a gfx942 device.
+# Their own entry, so they do not eat into rocke_library_gpu_pytest's timeout.
+set(_ROCKE_LIBRARY_CONV3D_GPU_TEST_RELPATHS
+    "tests/library/tests/test_conv_shipped_tables_gpu.py"
+    "tests/library/tests/test_conv_routes_gpu.py"
+    "tests/library/tests/test_conv_fwd_3d_fxd.py::TestFwd3dXHaloDma"
+    "tests/library/tests/test_conv_fwd_3d_fxd.py::TestFwd3dMBandSplitTail"
+    "tests/library/tests/test_conv_fwd_3d_kloop_knobs.py::TestFwd3dKLoopKnobs"
+    "tests/library/tests/test_conv_fwd_3d_lds_knobs.py::TestFwd3dLdsKnobs"
+    "tests/library/tests/test_conv_fwd_3d_lds_knobs.py::TestFwd3dXHalo"
+    "tests/library/tests/test_conv_fwd_3d_lds_knobs.py::TestFwd3dQuadXposeEpilogue"
+    "tests/library/tests/test_conv_fwd_3d_lds_knobs.py::TestFwd3dXStrideM"
+    "tests/library/tests/test_conv_fwd_3d_lds_knobs.py::TestFwd3dMBand"
+    "tests/library/tests/test_conv_fwd_3d_xpd.py::TestFwd3dXHaloPad"
+    "tests/library/tests/test_conv_fwd_3d_xyr.py::TestFwd3dXHaloYRing"
+    "tests/library/tests/test_conv_fwd_pingpong.py::TestFwdPingPong"
+    "tests/library/tests/test_conv_fwd_split_det.py::TestFwdSplitDet"
+    "tests/library/tests/test_conv_fwd_split_store.py::TestFwdSplitStore"
+    "tests/library/tests/test_conv_fwd_split_store.py::TestFwdSplitFlags")
+set(_ROCKE_LIBRARY_CONV3D_GPU_TESTS "")
+foreach(_rocke_conv3d_gpu_test ${_ROCKE_LIBRARY_CONV3D_GPU_TEST_RELPATHS})
+  string(APPEND _ROCKE_LIBRARY_CONV3D_GPU_TESTS
+         " \"${ROCKE_TEST_CTEST_REL}${_rocke_conv3d_gpu_test}\"")
+endforeach()
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_conv3d_gpu_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV3D_GPU_TESTS} -m gpu -v -rs)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_conv3d_gpu_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;conv\\;gpu\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT 1800)\n")
