@@ -8792,5 +8792,77 @@ class TestCShuffleEpilogueSmoke(unittest.TestCase):
         self.assertIn("@llvm.amdgcn.s.barrier", ll)
 
 
+@arch_specific(("gfx950",), reason=_LABEL_ONLY)
+class TestEpilogueAddr64Origin(unittest.TestCase):
+    """``m_origin_i64`` on ``DirectEpilogue.store`` / ``CShuffleEpilogue.store``:
+    the large-tensor (``addr64``) tile-origin path (plan section 3). Confirms
+    the default (``None``) path is untouched and the opt-in path emits the
+    expected i64 zext/add/icmp bounds check with no reference to
+    ``grid.block_m_off`` in the local delta.
+    """
+
+    arch = "gfx950"
+
+    _TILE = dict(
+        tile_m=128,
+        tile_n=128,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_k=1,
+        warp_tile_m=32,
+        warp_tile_n=32,
+        warp_tile_k=16,
+    )
+
+    def _build(self, *, m_origin_i64: bool, direct: bool):
+        from rocke.helpers import CShuffleEpilogue
+        from rocke.helpers.epilogues import DirectEpilogue
+
+        b = IRBuilder(f"epi_addr64_{'origin' if m_origin_i64 else 'default'}")
+        D = b.param("D", PtrType(F16, "global"))
+        M = b.param("M", I64 if m_origin_i64 else I32)
+        N = b.param("N", I32)
+
+        atom = mfma_atom("f16", 32, 32, 16)
+        grid = WarpGrid(**self._TILE).bind(b, m_origin_i64=m_origin_i64)
+        n_accs = grid.mfmas_per_warp_m * grid.mfmas_per_warp_n
+        accs = [b.zero_vec_f32(atom.c_per_lane) for _ in range(n_accs)]
+        d_rsrc = b.buffer_rsrc(D, b.mul(M, b.mul(N, b.const_i32(4))))
+
+        def addr_fn(b_, m_val, n_val):
+            return b_.add(b_.mul(m_val, N), n_val), None
+
+        origin_kw = {"m_origin_i64": grid.block_m_off_i64} if m_origin_i64 else {}
+        if direct:
+            DirectEpilogue(atom=atom, grid=grid).store(
+                b, accs=accs, addr_fn=addr_fn, d_rsrc=d_rsrc, bounds=(M, N), **origin_kw
+            )
+        else:
+            epi = CShuffleEpilogue.from_grid(atom=atom, grid=grid, out_dtype="fp16")
+            epi.store(
+                b, accs=accs, addr_fn=addr_fn, d_rsrc=d_rsrc, bounds=(M, N), **origin_kw
+            )
+        return lower_kernel_to_llvm(b.kernel, arch=self.arch)
+
+    def test_direct_default_has_no_i64_bounds_arithmetic(self):
+        ll = self._build(m_origin_i64=False, direct=True)
+        self.assertNotIn("icmp slt i64", ll)
+
+    def test_direct_addr64_emits_i64_origin_add_and_compare(self):
+        ll = self._build(m_origin_i64=True, direct=True)
+        self.assertIn("zext i32", ll)
+        self.assertIn("icmp slt i64", ll)
+
+    def test_cshuffle_default_has_no_i64_bounds_arithmetic(self):
+        ll = self._build(m_origin_i64=False, direct=False)
+        self.assertNotIn("icmp slt i64", ll)
+
+    def test_cshuffle_addr64_emits_i64_origin_add_and_compare(self):
+        ll = self._build(m_origin_i64=True, direct=False)
+        self.assertIn("zext i32", ll)
+        self.assertIn("icmp slt i64", ll)
+
+
 if __name__ == "__main__":
     unittest.main()

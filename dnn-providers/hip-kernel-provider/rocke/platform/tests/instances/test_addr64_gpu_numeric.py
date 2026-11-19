@@ -170,6 +170,68 @@ def _launch_mdecode(m0: int, ho_dim: int, wo_dim: int, d: int):
     return tuple(out)
 
 
+# ---------------------------------------------------------------------
+# Epilogue addr64 bounds check: the exact formula added to
+# DirectEpilogue._bounds_check / CShuffleEpilogue.store (helpers/epilogues.py)
+# ---------------------------------------------------------------------
+
+
+def _build_epilogue_bounds_probe():
+    """Replicates ``_bounds_check``'s addr64 branch in isolation:
+    ``ok = (origin + zext(m_local)) < M``. Writes 1/0 to ``out``."""
+    b = IRBuilder("addr64_epilogue_bounds_probe")
+    out = b.param("out", PtrType(I32, "global"))
+    origin = b.param("origin", I64)
+    m_local = b.param("m_local", I32)
+    m_bound = b.param("M", I64)
+    ok = b.cmp_lt(b.add(origin, b.zext(m_local, I64)), m_bound)
+    result = b.select(ok, b.const_i32(1), b.const_i32(0))
+    b.global_store(out, b.const_i32(0), result)
+    b.ret()
+    return b.kernel
+
+
+def _launch_epilogue_bounds_probe(origin: int, m_local: int, m_bound: int) -> int:
+    kernel = _build_epilogue_bounds_probe()
+    artifact = compile_kernel(kernel, arch=_ARCH)
+    rt = Runtime()
+    module = rt.load_module(artifact.hsaco)
+    fn = module.get_function(artifact.kernel_name)
+
+    out_ptr = rt.alloc(4)
+    rt.memset(out_ptr, 0, 4)
+    # Kernel param order: out (ptr, @0), origin (i64, @8), m_local (i32, @16),
+    # M (i64, needs 8-byte alignment -> 4 pad bytes, @24).
+    args = struct.pack("<Qqi4xq", out_ptr, origin, m_local, m_bound)
+    rt.launch_blocking(fn, (1, 1, 1), (1, 1, 1), args)
+
+    result = (ctypes.c_int32 * 1)(0)
+    rt.memcpy_d2h(result, out_ptr, 4)
+    rt.free(out_ptr)
+    return result[0]
+
+
+@pytest.mark.parametrize(
+    "origin,m_local,m_bound,want",
+    [
+        # Huge origin (> 4 GiB), small in-tile delta: a real row, in bounds.
+        (6_000_000_000, 5, 6_000_000_100, 1),
+        # Same huge origin, delta pushes past the bound: the tile's tail.
+        (6_000_000_000, 150, 6_000_000_100, 0),
+        # Origin exactly at the bound: every delta is out of bounds.
+        (6_000_000_000, 0, 6_000_000_000, 0),
+        # Small origin (the non-addr64-shaped case, still through the i64
+        # branch): ordinary in-bounds / out-of-bounds rows.
+        (0, 10, 128, 1),
+        (0, 200, 128, 0),
+    ],
+)
+def test_epilogue_addr64_bounds_check_matches_reference(origin, m_local, m_bound, want):
+    got = _launch_epilogue_bounds_probe(origin, m_local, m_bound)
+    assert got == want
+    assert want == int(origin + m_local < m_bound)
+
+
 @pytest.mark.parametrize(
     "n0_ref,ho0_ref,wo0_ref,ho_dim,wo_dim,d",
     [
