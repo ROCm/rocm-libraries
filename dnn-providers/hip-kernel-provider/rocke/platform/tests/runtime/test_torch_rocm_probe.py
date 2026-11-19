@@ -85,8 +85,10 @@ def test_subprocess_compares_mapped_bytes_not_filenames_or_versions(
         encoding="utf-8",
     )
     (tmp_path / "torch.py").write_text(
+        "import sys\n"
         "from types import SimpleNamespace\n"
         "from fixture_mapping import map_fixture\n"
+        "assert 'rocke' not in sys.modules\n"
         "__version__ = 'fixture'\n"
         "version = SimpleNamespace(hip='fixture HIP version')\n"
         "print('noisy import output')\n"
@@ -258,6 +260,7 @@ def test_linux_inventory_deduplicates_segments_and_checks_file_identity(tmp_path
     stat = path.stat()
     dev = f"{os.major(stat.st_dev):x}:{os.minor(stat.st_dev):x}"
     lines = [
+        f"0000-0500 r-xp 0 {dev} 0\n",  # Anonymous executable mapping.
         f"0500-1000 r--p 0 {dev} {stat.st_ino + 9} {path}\n",
         f"1000-2000 r-xp 0 {dev} {stat.st_ino} {path}\n",
         f"2000-3000 r-xp 1 {dev} {stat.st_ino} {path}\n",

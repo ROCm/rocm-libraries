@@ -13,27 +13,39 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib
+import importlib.util
 import json
 import math
 import os
-import re
 import subprocess
 import sys
 import tempfile
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
+from functools import cache
 from pathlib import Path
+from types import ModuleType
 
 __all__ = ["RocmLibrary", "TorchRocmReport", "probe_torch_rocm"]
 
-# Match loader basenames, not SDK directory names or Python extension names.
-_LIBRARY_NAMES = {
-    "hip": r"(?:libamdhip64\.so(?:\..+)?|amdhip64(?:_?\d+)*\.dll)",
-    "comgr": r"(?:libamd_comgr\.so(?:\..+)?|amd_comgr(?:_?\d+)*\.dll)",
-    "llvm": r"(?:libLLVM(?:-[\w.]+)?\.so(?:\..+)?|(?:lib)?LLVM(?:-[\w.]+)?\.dll)",
-    "clang": r"(?:libclang-cpp(?:-[\w.]+)?\.so(?:\..+)?|"
-    r"(?:lib)?clang(?:-cpp)?(?:-[\w.]+)?\.dll)",
-}
+
+@cache
+def _inventory_helpers() -> ModuleType:
+    if __package__:
+        from . import runtime_coexistence
+
+        return runtime_coexistence
+
+    # The standalone worker reaches this after importing torch. Load only the
+    # sibling module from this installation, without importing rocke or using
+    # ambient sys.path to locate the helper.
+    path = Path(__file__).with_name("runtime_coexistence.py")
+    spec = importlib.util.spec_from_file_location("_rocke_probe_coexistence", path)
+    if spec is None or spec.loader is None:
+        raise OSError(f"could not locate inventory helpers: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 @dataclass(frozen=True)
@@ -60,18 +72,6 @@ class TorchRocmReport:
     stderr: str = ""
 
 
-def _kind(path: str) -> str | None:
-    name = Path(path).name
-    return next(
-        (
-            k
-            for k, pattern in _LIBRARY_NAMES.items()
-            if re.fullmatch(pattern, name, re.IGNORECASE)
-        ),
-        None,
-    )
-
-
 def _fingerprint(
     path: str, kind: str, mapped_identity: tuple[int, int] | None = None
 ) -> RocmLibrary:
@@ -92,16 +92,13 @@ def _fingerprint(
 
 
 def _linux_libraries(lines: Iterable[str]) -> tuple[RocmLibrary, ...]:
+    helpers = _inventory_helpers()
     mapped: dict[tuple[str, str, str], RocmLibrary] = {}
-    for line in lines:
-        fields = line.rstrip("\n").split(maxsplit=5)
-        if len(fields) != 6:
-            continue
-        _, permissions, _, dev, inode, pathname = fields
+    for permissions, dev, inode, pathname in helpers._iter_proc_maps_rows(lines):
         if "x" not in permissions:
             continue  # Exclude ordinary data mappings of files named like libraries.
         path = pathname.removesuffix(" (deleted)")
-        kind = _kind(path)
+        kind = helpers._mapped_library_kind(Path(path).name)
         key = pathname, dev, inode
         if not kind or key in mapped:
             continue
@@ -155,15 +152,18 @@ def _snapshot() -> tuple[tuple[RocmLibrary, ...], str | None]:
     try:
         if sys.platform == "linux":
             with open(
-                "/proc/self/maps", encoding="utf-8", errors="surrogateescape"
+                _inventory_helpers()._PROC_MAPS,
+                encoding="utf-8",
+                errors="surrogateescape",
             ) as maps:
                 return _linux_libraries(maps), None
         if sys.platform == "win32":
+            classify = _inventory_helpers()._mapped_library_kind
             return (
                 tuple(
                     _fingerprint(path, kind)
                     for path in sorted(set(_windows_module_paths()))
-                    if (kind := _kind(path))
+                    if (kind := classify(Path(path).name))
                 ),
                 None,
             )
@@ -177,7 +177,7 @@ def _compare(
 ) -> tuple[str, str]:
     different, incomplete = [], []
     comparable = 0
-    for kind in _LIBRARY_NAMES:
+    for kind in _inventory_helpers()._MAPPED_LIBRARY_NAMES:
         left, right = (
             [item for item in rows if item.kind == kind] for rows in (parent, child)
         )
