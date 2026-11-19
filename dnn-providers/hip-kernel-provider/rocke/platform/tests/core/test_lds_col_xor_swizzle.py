@@ -131,21 +131,22 @@ def test_named_layouts_share_the_same_mapping_in_byte_and_element_units(layout, 
     "terms", [(-1, 3, 4), (0, 32, 4), (0, 3, 32), (0, 3, 4, -1), (True, 3, 4)]
 )
 def test_layout_rejects_invalid_bit_terms(terms):
-    with pytest.raises(ValueError, match=r"LDS column XOR terms must be integers"):
+    with pytest.raises(ValueError) as error:
         LdsColumnXor(*terms)
+    assert str(error.value) == "LDS column XOR terms must be integers in [0, 31]"
 
 
 @pytest.mark.parametrize("unit_bytes", [0, -2, 3])
 def test_layout_rejects_invalid_unit_width(unit_bytes):
-    with pytest.raises(ValueError, match="LDS column units must be a positive power"):
+    with pytest.raises(ValueError) as error:
         ROW_XOR_8x16B.shift_for(unit_bytes)
+    assert str(error.value) == "LDS column units must be a positive power of two bytes"
 
 
 def test_layout_rejects_unit_wider_than_chunk():
-    with pytest.raises(
-        ValueError, match="LDS column unit is larger than a swizzle chunk"
-    ):
+    with pytest.raises(ValueError) as error:
         ROW_XOR_8x16B.shift_for(32)
+    assert str(error.value) == "LDS column unit is larger than a swizzle chunk"
 
 
 @pytest.mark.parametrize("r,w,shift", [(0, 0, 3), (0, 3, 3), (3, 1, 4)])

@@ -17,11 +17,11 @@ static bool refuses(rocke_ir_builder_t& b, const char* diagnostic, Fn&& call)
     {
         call();
         return rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE
-               && std::strstr(rocke_ir_builder_error(&b), diagnostic);
+               && std::strcmp(rocke_ir_builder_error(&b), diagnostic) == 0;
     }
     catch(const ckc::ValueError& error)
     {
-        return std::strstr(error.what(), diagnostic);
+        return std::strcmp(error.what(), diagnostic) == 0;
     }
 }
 
@@ -37,6 +37,7 @@ static bool check_geometry(int rows,
                            int block_size,
                            bool row_axis,
                            int expected,
+                           const char* diagnostic = nullptr,
                            bool prebound = false)
 {
     rocke_coalesced_tile_loader_t loader{};
@@ -69,9 +70,8 @@ static bool check_geometry(int rows,
                  && rocke_ir_builder_ok(&b);
     }
     else
-        passed = status == ROCKE_ERR_VALUE && per_thread == -1
-                 && refuses(b, "invalid chunk geometry", visit) && visited == 0
-                 && rocke_b_current_region(&b)->num_ops == before;
+        passed = status == ROCKE_ERR_VALUE && per_thread == -1 && refuses(b, diagnostic, visit)
+                 && visited == 0 && rocke_b_current_region(&b)->num_ops == before;
     if(!passed)
         std::fprintf(stderr,
                      "unexpected %dx%d chunk geometry for load_vec=%d block_size=%d row_axis=%d\n",
@@ -84,18 +84,112 @@ static bool check_geometry(int rows,
     return passed;
 }
 
+static const char* const divisor_error
+    = "CoalescedTileLoader: load_vec and block_size must be positive";
+static const char* const extent_error = "CoalescedTileLoader: tile dimensions must be positive";
+static const char* const vector_error = "CoalescedTileLoader: load_vec must divide the vector axis";
+static const char* const overflow_error = "CoalescedTileLoader: chunk geometry exceeds i32";
+
+static bool check_loader_geometry()
+{
+    return check_geometry(16, 16, 0, 64, false, -1, divisor_error)
+           && check_geometry(16, 16, 2, 0, false, -1, divisor_error)
+           && check_geometry(16, 16, -1, 64, false, -1, divisor_error)
+           && check_geometry(16, 16, 2, -1, false, -1, divisor_error)
+           && check_geometry(0, 0, 0, 0, false, -1, divisor_error)
+           && check_geometry(4, 6, 4, 3, false, -1, vector_error)
+           && check_geometry(4, 6, 4, 3, false, -1, vector_error, true)
+           && check_geometry(6, 4, 4, 3, true, -1, vector_error)
+           && check_geometry(4, 2, 4, 2, false, -1, vector_error)
+           && check_geometry(0, 2, 4, 2, false, -1, extent_error)
+           && check_geometry(8, -8, 2, 4, true, -1, extent_error)
+           && check_geometry(
+               8, 8, 2, 3, false, -1, "tile 8x8 / 2 = 32 not divisible by block_size 3")
+           && check_geometry(65536, 65536, 1, 3, false, -1, overflow_error)
+           && check_geometry(5, 8, 4, 5, false, 2) && check_geometry(8, 5, 4, 5, true, 2);
+}
+
+static bool check_other_loader_builders()
+{
+    rocke_coalesced_tile_loader_t loader{};
+    loader.tile_rows = 4;
+    loader.tile_cols = 6;
+    loader.load_vec = 4;
+    loader.block_size = 3;
+    const auto descriptor = [](rocke_ir_builder_t*,
+                               rocke_value_t*,
+                               rocke_value_t*,
+                               rocke_value_t**,
+                               void*) -> rocke_value_t* { std::abort(); };
+    const auto check = [&](auto emit) {
+        rocke_ir_builder_t b{};
+        if(rocke_ir_builder_init(&b, "loader_geometry") != ROCKE_OK)
+            return false;
+        auto* zero = rocke_b_const_i32(&b, 0);
+        const int before = rocke_b_current_region(&b)->num_ops;
+        const bool passed = refuses(b, vector_error, [&] { emit(&b, zero); })
+                            && rocke_b_current_region(&b)->num_ops == before;
+        rocke_ir_builder_free(&b);
+        return passed;
+    };
+    return check([&](auto* b, auto* zero) {
+               rocke_coalesced_tile_loader_load(
+                   b, &loader, zero, nullptr, descriptor, nullptr, nullptr, zero);
+           })
+           && check([&](auto* b, auto* zero) {
+                  rocke_ctl_staged_t staged{};
+                  rocke_coalesced_tile_loader_load_global(
+                      b, &loader, zero, descriptor, nullptr, nullptr, zero, &staged);
+              })
+           && check([&](auto* b, auto* zero) {
+                  rocke_ctl_staged_t slots{};
+                  rocke_coalesced_tile_loader_plan_slots(b, &loader, zero, &slots);
+              });
+}
+
+static bool check_layout_refusal(const rocke_lds_column_xor_t* layout,
+                                 int unit_bytes,
+                                 const char* diagnostic)
+{
+    if(rocke_lds_column_xor_shift_for(layout, unit_bytes) != -1)
+        return false;
+    rocke_ir_builder_t b{};
+    if(rocke_ir_builder_init(&b, "xor_layout") != ROCKE_OK)
+        return false;
+    auto* zero = rocke_b_const_i32(&b, 0);
+    const int before = rocke_b_current_region(&b)->num_ops;
+    const bool passed
+        = refuses(
+              b, diagnostic, [&] { rocke_lds_column_xor_emit(&b, zero, zero, layout, unit_bytes); })
+          && rocke_b_current_region(&b)->num_ops == before;
+    rocke_ir_builder_free(&b);
+    return passed;
+}
+
 static bool check_layout()
 {
     const rocke_lds_column_xor_t bad_terms[]
         = {{-1, 3, 4, -1}, {0, 32, 4, -1}, {0, 3, 32, -1}, {0, 3, 4, -2}};
     for(const auto& layout : bad_terms)
-        if(rocke_lds_column_xor_shift_for(&layout, 2) != -1)
+        if(!check_layout_refusal(&layout, 0, "LDS column XOR terms must be integers in [0, 31]"))
             return false;
     const auto* layout = &rocke_lds_row_xor_8x16b;
-    return rocke_lds_column_xor_shift_for(layout, 0) == -1
-           && rocke_lds_column_xor_shift_for(layout, 3) == -1
-           && rocke_lds_column_xor_shift_for(layout, 32) == -1
-           && rocke_lds_column_xor_shift_for(layout, 2) == 3;
+    const char* unit_error = "LDS column units must be a positive power of two bytes";
+    if(!check_layout_refusal(layout, 0, unit_error) || !check_layout_refusal(layout, 3, unit_error)
+       || !check_layout_refusal(layout, 32, "LDS column unit is larger than a swizzle chunk")
+       || !check_layout_refusal(nullptr, 2, "LDS column XOR layout must not be null")
+       || rocke_lds_column_xor_shift_for(layout, 2) != 3
+       || rocke_lds_column_xor_shift_for(&rocke_lds_no_swizzle, 0) != 0)
+        return false;
+    rocke_ir_builder_t b{};
+    if(rocke_ir_builder_init(&b, "xor_identity") != ROCKE_OK)
+        return false;
+    auto* col = rocke_b_const_i32(&b, 42);
+    const int before = rocke_b_current_region(&b)->num_ops;
+    const bool passed = rocke_lds_column_xor_emit(&b, nullptr, col, &rocke_lds_no_swizzle, 0) == col
+                        && rocke_b_current_region(&b)->num_ops == before;
+    rocke_ir_builder_free(&b);
+    return passed;
 }
 
 static rocke_value_t*
@@ -160,21 +254,11 @@ static bool check_staged_grid(rocke_tile_mma_grid_t grid, size_t count, const ch
 
 int main()
 {
-    return check_staged_grid({1, 1, 0}, 1, "positive grid and one accumulator per output atom")
-                   && check_staged_grid(
-                       {2, 1, 1}, 1, "positive grid and one accumulator per output atom")
+    const char* grid_error = "staged MMA needs a positive grid and one accumulator per output atom";
+    return check_staged_grid({1, 1, 0}, 1, grid_error)
+                   && check_staged_grid({2, 1, 1}, 1, grid_error)
                    && check_staged_grid({1, 1, 1}, 1, nullptr) && check_empty_fragment()
-                   && check_layout() && check_geometry(16, 16, 0, 64, false, -1)
-                   && check_geometry(16, 16, 2, 0, false, -1)
-                   && check_geometry(16, 16, -1, 64, false, -1)
-                   && check_geometry(16, 16, 2, -1, false, -1)
-                   && check_geometry(4, 6, 4, 3, false, -1)
-                   && check_geometry(4, 6, 4, 3, false, -1, true)
-                   && check_geometry(6, 4, 4, 3, true, -1) && check_geometry(4, 2, 4, 2, false, -1)
-                   && check_geometry(0, 8, 2, 4, false, -1) && check_geometry(8, -8, 2, 4, true, -1)
-                   && check_geometry(8, 8, 2, 3, false, -1)
-                   && check_geometry(65536, 65536, 1, 4, false, -1)
-                   && check_geometry(5, 8, 4, 5, false, 2) && check_geometry(8, 5, 4, 5, true, 2)
+                   && check_layout() && check_loader_geometry() && check_other_loader_builders()
                ? 0
                : 1;
 }

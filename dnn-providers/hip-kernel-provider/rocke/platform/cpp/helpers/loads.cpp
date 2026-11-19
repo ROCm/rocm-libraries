@@ -254,20 +254,34 @@ int rocke_lds_column_xor_chunk_mask(const rocke_lds_column_xor_t* layout)
     return static_cast<int>((1u << layout->row_bits) - 1u);
 }
 
-int rocke_lds_column_xor_shift_for(const rocke_lds_column_xor_t* layout, int unit_bytes)
+/* The plain shift query preserves its -1 sentinel; only the builder API
+ * reports the diagnostic that corresponds to the Python check. */
+static const char*
+    lds_column_xor_check_shift(const rocke_lds_column_xor_t* layout, int unit_bytes, int& shift)
 {
-    if(layout == NULL || layout->row_shift < 0 || layout->row_shift > 31 || layout->row_bits < 0
+    if(layout == NULL)
+        return "LDS column XOR layout must not be null";
+    if(layout->row_shift < 0 || layout->row_shift > 31 || layout->row_bits < 0
        || layout->row_bits > 31 || layout->chunk_log2_bytes < 0 || layout->chunk_log2_bytes > 31
        || layout->flip_row_bit < -1 || layout->flip_row_bit > 31)
-        return -1;
+        return "LDS column XOR terms must be integers in [0, 31]";
     if(rocke_lds_column_xor_is_identity(layout))
-        return 0;
+    {
+        shift = 0;
+        return NULL;
+    }
     if(unit_bytes <= 0 || (unit_bytes & (unit_bytes - 1)) != 0)
-        return -1;
-    int shift = layout->chunk_log2_bytes;
+        return "LDS column units must be a positive power of two bytes";
+    shift = layout->chunk_log2_bytes;
     for(; unit_bytes > 1; unit_bytes >>= 1)
         --shift;
-    return shift < 0 ? -1 : shift;
+    return shift < 0 ? "LDS column unit is larger than a swizzle chunk" : NULL;
+}
+
+int rocke_lds_column_xor_shift_for(const rocke_lds_column_xor_t* layout, int unit_bytes)
+{
+    int shift;
+    return lds_column_xor_check_shift(layout, unit_bytes, shift) == NULL ? shift : -1;
 }
 
 rocke_value_t* rocke_lds_column_xor_emit(rocke_ir_builder_t* b,
@@ -278,10 +292,9 @@ rocke_value_t* rocke_lds_column_xor_emit(rocke_ir_builder_t* b,
 {
     if(!rocke_i_live(b))
         return NULL;
-    const int shift = rocke_lds_column_xor_shift_for(layout, unit_bytes);
-    if(shift < 0)
-        return (rocke_value_t*)rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "invalid LDS column XOR layout or unit size");
+    int shift;
+    if(const char* diagnostic = lds_column_xor_check_shift(layout, unit_bytes, shift))
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", diagnostic);
     if(rocke_lds_column_xor_is_identity(layout))
         return col;
     const int terms[4]
@@ -373,24 +386,91 @@ rocke_status_t rocke_coalesced_tile_loader_set_col_xor(rocke_coalesced_tile_load
     return ROCKE_OK;
 }
 
-rocke_status_t
-    rocke_coalesced_tile_loader_vecs_per_thread(const rocke_coalesced_tile_loader_t* self, int* out)
+enum class ctl_geometry_error
 {
-    if(self == NULL || self->load_vec <= 0 || self->block_size <= 0 || self->tile_rows <= 0
-       || self->tile_cols <= 0)
-        return ROCKE_ERR_VALUE;
+    none,
+    missing_loader,
+    nonpositive_divisor,
+    nonpositive_extent,
+    partial_vector,
+    index_overflow,
+    uneven_distribution,
+};
+
+static ctl_geometry_error ctl_chunk_count(const rocke_coalesced_tile_loader_t* self, int& total)
+{
+    /* Keep refusal precedence in sync with CoalescedTileLoader.vecs_per_thread. */
+    if(self == NULL)
+        return ctl_geometry_error::missing_loader;
+    if(self->load_vec <= 0 || self->block_size <= 0)
+        return ctl_geometry_error::nonpositive_divisor;
+    if(self->tile_rows <= 0 || self->tile_cols <= 0)
+        return ctl_geometry_error::nonpositive_extent;
     const int axis = self->vector_axis_row ? self->tile_rows : self->tile_cols;
     const int outer = self->vector_axis_row ? self->tile_cols : self->tile_rows;
     if(axis % self->load_vec != 0)
-        return ROCKE_ERR_VALUE;
+        return ctl_geometry_error::partial_vector;
     /* Traversal materializes the linear chunk ID in i32. Widen the product
      * so malformed geometry cannot overflow before the check. */
     const int64_t total_vecs = static_cast<int64_t>(axis / self->load_vec) * outer;
-    if(total_vecs > INT32_MAX || total_vecs % self->block_size != 0)
+    if(total_vecs > INT32_MAX)
+        return ctl_geometry_error::index_overflow;
+    total = static_cast<int>(total_vecs);
+    return total % self->block_size == 0 ? ctl_geometry_error::none
+                                         : ctl_geometry_error::uneven_distribution;
+}
+
+rocke_status_t
+    rocke_coalesced_tile_loader_vecs_per_thread(const rocke_coalesced_tile_loader_t* self, int* out)
+{
+    int total = 0;
+    if(ctl_chunk_count(self, total) != ctl_geometry_error::none)
         return ROCKE_ERR_VALUE;
     if(out != NULL)
-        *out = static_cast<int>(total_vecs / self->block_size);
+        *out = total / self->block_size;
     return ROCKE_OK;
+}
+
+static bool
+    ctl_require_geometry(rocke_ir_builder_t* b, const rocke_coalesced_tile_loader_t* self, int* out)
+{
+    int total = 0;
+    switch(ctl_chunk_count(self, total))
+    {
+    case ctl_geometry_error::none:
+        if(out != NULL)
+            *out = total / self->block_size;
+        return true;
+    case ctl_geometry_error::missing_loader:
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "CoalescedTileLoader: missing loader");
+        break;
+    case ctl_geometry_error::nonpositive_divisor:
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "CoalescedTileLoader: load_vec and block_size must be positive");
+        break;
+    case ctl_geometry_error::nonpositive_extent:
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "CoalescedTileLoader: tile dimensions must be positive");
+        break;
+    case ctl_geometry_error::partial_vector:
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "CoalescedTileLoader: load_vec must divide the vector axis");
+        break;
+    case ctl_geometry_error::index_overflow:
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "CoalescedTileLoader: chunk geometry exceeds i32");
+        break;
+    case ctl_geometry_error::uneven_distribution:
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "tile %dx%d / %d = %d not divisible by block_size %d",
+                        self->tile_rows,
+                        self->tile_cols,
+                        self->load_vec,
+                        total,
+                        self->block_size);
+        break;
+    }
+    return false;
 }
 
 int rocke_coalesced_tile_loader_cols_per_vec(const rocke_coalesced_tile_loader_t* self)
@@ -589,17 +669,8 @@ void rocke_coalesced_tile_loader_visit_chunks(rocke_ir_builder_t* b,
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "CoalescedTileLoader: invalid chunk traversal");
         return;
     }
-    if(rocke_coalesced_tile_loader_vecs_per_thread(self, &count) != ROCKE_OK)
-    {
-        rocke_i_set_err(b,
-                        ROCKE_ERR_VALUE,
-                        "CoalescedTileLoader: invalid chunk geometry (%dx%d / %d, block_size %d)",
-                        self->tile_rows,
-                        self->tile_cols,
-                        self->load_vec,
-                        self->block_size);
+    if(!ctl_require_geometry(b, self, &count))
         return;
-    }
     rocke_coalesced_chunk_grid_t local{};
     if(grid == NULL)
     {
@@ -702,11 +773,8 @@ void rocke_coalesced_tile_loader_load(rocke_ir_builder_t* b,
     const int elem_bytes = ctl_elem_bytes_or_err(b, self);
     if(elem_bytes == 0)
         return;
-    if(rocke_coalesced_tile_loader_vecs_per_thread(self, NULL) != ROCKE_OK)
-    {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "CoalescedTileLoader: invalid chunk geometry");
+    if(!ctl_require_geometry(b, self, NULL))
         return;
-    }
     const rocke_coalesced_chunk_grid_t grid{rocke_b_const_i32(b, self->block_size),
                                             rocke_b_const_i32(b, self->load_vec),
                                             rocke_b_const_i32(b, ctl_span(self)),
@@ -775,11 +843,8 @@ void rocke_coalesced_tile_loader_load_global(rocke_ir_builder_t* b,
     const int elem_bytes = ctl_elem_bytes_or_err(b, self);
     if(elem_bytes == 0)
         return;
-    if(rocke_coalesced_tile_loader_vecs_per_thread(self, &vecs_per_thread) != ROCKE_OK)
-    {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "CoalescedTileLoader: bad vecs_per_thread");
+    if(!ctl_require_geometry(b, self, &vecs_per_thread))
         return;
-    }
     c_threads = rocke_b_const_i32(b, self->block_size);
     c_load_vec = rocke_b_const_i32(b, self->load_vec);
     c_span = rocke_b_const_i32(b, ctl_span(self));
@@ -873,11 +938,8 @@ void rocke_coalesced_tile_loader_plan_slots(rocke_ir_builder_t* b,
     }
 
     int vecs_per_thread = 0;
-    if(rocke_coalesced_tile_loader_vecs_per_thread(self, &vecs_per_thread) != ROCKE_OK)
-    {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "CoalescedTileLoader: bad vecs_per_thread");
+    if(!ctl_require_geometry(b, self, &vecs_per_thread))
         return;
-    }
     /* Python: c_span is rows_per_vec in row mode, cols_per_vec otherwise. */
     rocke_value_t* c_threads = rocke_b_const_i32(b, self->block_size);
     rocke_value_t* c_load_vec = rocke_b_const_i32(b, self->load_vec);

@@ -18,19 +18,26 @@ class IntegerBuilder:
     mod = staticmethod(operator.mod)
 
 
+DIVISOR_ERROR = "CoalescedTileLoader: load_vec and block_size must be positive"
+EXTENT_ERROR = "CoalescedTileLoader: tile dimensions must be positive"
+VECTOR_ERROR = "CoalescedTileLoader: load_vec must divide the vector axis"
+OVERFLOW_ERROR = "CoalescedTileLoader: chunk geometry exceeds i32"
+
+
 @pytest.mark.parametrize("grid", [None, (3, 4, 1)], ids=["default", "prebound"])
 @pytest.mark.parametrize(
     "rows,cols,width,threads,axis,diagnostic",
     [
-        (4, 6, 4, 3, "col", "must divide the vector axis"),
-        (6, 4, 4, 3, "row", "must divide the vector axis"),
-        (4, 2, 4, 2, "col", "must divide the vector axis"),
-        (8, 8, 0, 4, "col", "load_vec and block_size must be positive"),
-        (8, 8, 2, 0, "col", "load_vec and block_size must be positive"),
-        (8, 0, 2, 4, "col", "tile dimensions must be positive"),
-        (-8, 8, 2, 4, "row", "tile dimensions must be positive"),
-        (8, 8, 2, 3, "col", "not divisible by block_size"),
-        (65536, 65536, 1, 4, "col", "chunk geometry exceeds i32"),
+        (4, 6, 4, 3, "col", VECTOR_ERROR),
+        (6, 4, 4, 3, "row", VECTOR_ERROR),
+        (4, 2, 4, 2, "col", VECTOR_ERROR),
+        (8, 8, 0, 4, "col", DIVISOR_ERROR),
+        (8, 8, 2, 0, "col", DIVISOR_ERROR),
+        (0, 0, 0, 0, "col", DIVISOR_ERROR),
+        (0, 2, 4, 2, "col", EXTENT_ERROR),
+        (-8, 8, 2, 4, "row", EXTENT_ERROR),
+        (8, 8, 2, 3, "col", "tile 8x8 / 2 = 32 not divisible by block_size 3"),
+        (65536, 65536, 1, 3, "col", OVERFLOW_ERROR),
     ],
 )
 def test_invalid_geometry_rejects_before_builder_or_callbacks(
@@ -42,10 +49,11 @@ def test_invalid_geometry_rejects_before_builder_or_callbacks(
         pytest.fail("invalid geometry invoked a traversal callback")
 
     # None cannot emit even a constant; a premature builder call fails the test.
-    with pytest.raises(ValueError, match=diagnostic):
+    with pytest.raises(ValueError) as error:
         loader.visit_chunks(
             None, tid=0, emit=unexpected, grid=grid, before_decode=unexpected
         )
+    assert str(error.value) == diagnostic
 
 
 @pytest.mark.parametrize("method", ["load", "load_global", "plan_slots", "fetch"])
@@ -56,8 +64,9 @@ def test_other_loader_entry_points_validate_before_building_grid(method):
         kwargs.update(rsrc=object(), descriptor=None)
     if method == "load":
         kwargs["smem_dst"] = None
-    with pytest.raises(ValueError, match="load_vec and block_size must be positive"):
+    with pytest.raises(ValueError) as error:
         getattr(loader, method)(None, **kwargs)
+    assert str(error.value) == DIVISOR_ERROR
 
 
 @pytest.mark.parametrize("rows,cols,axis", [(5, 8, "col"), (8, 5, "row")])
