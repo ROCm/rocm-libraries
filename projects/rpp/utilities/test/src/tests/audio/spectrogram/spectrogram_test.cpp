@@ -90,7 +90,9 @@ void run_spectrogram(const AudioConfig& cfg, const SpectrogramParams& p) {
     const std::size_t srcBytes = audio_byte_size(srcDesc);
     const std::size_t dstBytes = audio_byte_size(dstDesc);
 
-    const std::vector<Rpp32f> input = make_audio_input(srcDesc, lengths, Tones{});
+    // White noise puts energy in every bin. Tones leave most bins in window leakage far below the
+    // peak-relative bound, where any value would pass.
+    const std::vector<Rpp32f> input = make_audio_input(srcDesc, lengths, Noise{});
     std::vector<Rpp32f> golden = make_audio_output(dstDesc);
     std::vector<Rpp32f> actual = golden;
     spectrogram_reference(input.data(), srcDesc, golden.data(), dstDesc, lengths, args);
@@ -115,7 +117,7 @@ void run_spectrogram(const AudioConfig& cfg, const SpectrogramParams& p) {
     dst.read(actual.data(), dstBytes);
 
     // A float FFT's rounding error scales with the frame's energy rather than with each bin, so
-    // the bound is relative to the largest output: 3.1e-7 of it measured on both backends.
+    // the bound is relative to the largest output: 2.9e-7 of it measured on both backends.
     double peak = 0.0;
     for_each_audio_plane_element(dstDesc, planes, [&](Rpp32u, Rpp32u, Rpp32u, std::size_t i) {
         peak = std::max(peak, static_cast<double>(golden[i]));
