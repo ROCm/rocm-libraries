@@ -8,9 +8,12 @@ set(HIPBLASLT_HOST_UNIT_TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/alpha_mode_logging_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/adaptive_sm_count_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/allclose_gtest.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/arguments_init_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/bench_options_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/bench_verify_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cblas_reference_gtest.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/grouped_predicate_problem_gtest.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mx_integer_exact_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mx_scale_format_predicate_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mx_scale_setup_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mx_tile128x4_gtest.cpp

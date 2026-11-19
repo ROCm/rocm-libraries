@@ -117,6 +117,10 @@ The same recipe covers a branch that adds a family or splits a catalog: the new 
 new pointers, and `--prune` removes the ones the merged generators do not write. It is
 safe to rerun: an unchanged catalog keeps its pointer byte for byte.
 
+The cutover removes generated catalogs from the git index even when the incoming
+branch staged different bytes. It keeps the regenerated worktree files intact
+and records those bytes in DVC; only pointers and small descriptors remain staged.
+
 ## 5. When the bytes differ
 
 `--check` reporting a difference on a tree nobody regenerated means a generator is not

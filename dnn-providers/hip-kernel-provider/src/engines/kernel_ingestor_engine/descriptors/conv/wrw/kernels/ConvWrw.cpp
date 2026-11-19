@@ -14,16 +14,18 @@
 //                    layout 0 or 1 staged into the same tiles, WC 1); 7 packed rows (several
 //                    narrow output rows a step); 8 generic taps (runtime filter, strides and
 //                    dilation; x and dy through their strides; FR taps a block, S SW 0; DW 0 per-tap
-//                    gathers, or the extra positions of a shared width window)
-//   CONV_K3_ATOM     K1's matrix-core atom (ConvIgemmCore.h); loops 0 to 2
+//                    gathers, or the extra positions of a shared width window); 9
+//                    channels-last small-K FMA (gfx1250); 11 scalar masked 64-bit gathers with
+//                    flattened positions; 12 flattened (tap, channel) GEMM
+//   CONV_K3_ATOM     K1's matrix-core atom (ConvIgemmCore.h); loops 0 to 2, 6 to 8, 11 and 12
 //   CONV_K3_LAYOUT   0 channels-first (N C D H W); 1 channels-last (N D H W C) transposed into
 //                    LDS; 2 channels-last kept channels-last, LDS transpose reads (gfx950, 16-bit)
 //   CONV_K3_BK, _BC, _BQ   tile: output channels, input channels, positions per step
 //   CONV_K3_FR       filter rows per block (loop 0); the filter height (loops 1 to 3)
 //   CONV_K3_S, _SW, _DW    filter width, its stride and dilation
 //   CONV_K3_WK, _WC  waves over output and input channels (loops 0 to 2)
-//   CONV_K3_TK, _TC  output and input channels per thread (loops 3, 4)
-//   CONV_K3_VEC      elements per 16-byte global load
+//   CONV_K3_TK, _TC  output and input channels per thread (loops 3, 4 and 9)
+//   CONV_K3_VEC      elements per 16-byte global load (1 for runtime scalar loops 9, 11 and 12)
 //   CONV_K3_XCD      1: XCD-contiguous block order (gfx942, gfx950)
 //   CONV_K3_ALIGN    1: row-aligned units, unaligned LDS store (loop 1, channels-first)
 //   CONV_K3_NS       LDS stages (loop 2); ring slots (loop 5)
@@ -44,6 +46,7 @@
 
 #include "ConvWrwCore.h"
 #include "ConvWrwDirect.h"
+#include "ConvWrwSmallK.h"
 
 #ifndef CONV_K3_TO
 #define CONV_K3_TO CONV_K3_T
@@ -115,6 +118,8 @@ extern "C" __global__ void __launch_bounds__(256) ConvWrwSplit(K3SplitArgs a)
 
 #if CONV_K3_LOOP == 5
 #define CONV_K3_THREADS 512
+#elif CONV_K3_LOOP == 9
+#define CONV_K3_THREADS CONV_K3_BC
 #elif CONV_K3_LOOP == 3 || CONV_K3_LOOP == 4 || (CONV_K3_LOOP == 8 && CONV_K3_TK > 0)
 #define CONV_K3_THREADS ((CONV_K3_BK / CONV_K3_TK) * (CONV_K3_BC / CONV_K3_TC))
 #else
@@ -123,6 +128,27 @@ extern "C" __global__ void __launch_bounds__(256) ConvWrwSplit(K3SplitArgs a)
 
 extern "C" __global__ void __launch_bounds__(CONV_K3_THREADS) ConvWrw(K3Args a)
 {
+#if CONV_K3_LOOP == 9
+    k3WrwSmallK<CONV_K3_T, CONV_K3_BC, CONV_K3_BQ>(a);
+#elif CONV_K3_LOOP == 12
+    k3WrwTapTiled<CONV_K3_T,
+                  CONV_K3_ATOM,
+                  CONV_K3_LAYOUT,
+                  CONV_K3_BK,
+                  CONV_K3_BC,
+                  CONV_K3_BQ,
+                  CONV_K3_WK,
+                  CONV_K3_WC>(a);
+#elif CONV_K3_LOOP == 11
+    k3WrwNativeGeneric<CONV_K3_T,
+                       CONV_K3_ATOM,
+                       CONV_K3_LAYOUT,
+                       CONV_K3_BK,
+                       CONV_K3_BC,
+                       CONV_K3_BQ,
+                       CONV_K3_WK,
+                       CONV_K3_WC>(a);
+#else
 #if CONV_K3_LOOP == 5
     k3WrwDirect<CONV_K3_T,
                 CONV_K3_ATOM,
@@ -278,6 +304,7 @@ extern "C" __global__ void __launch_bounds__(CONV_K3_THREADS) ConvWrw(K3Args a)
               CONV_K3_WC,
               CONV_K3_VEC,
               CONV_K3_XCD>(a);
+#endif
 #endif
 }
 

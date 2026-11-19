@@ -54,6 +54,10 @@
     {
       "name": "ring",
       "type": "int"
+    },
+    {
+      "name": "layout_id",
+      "type": "int"
     }
   ]
 }

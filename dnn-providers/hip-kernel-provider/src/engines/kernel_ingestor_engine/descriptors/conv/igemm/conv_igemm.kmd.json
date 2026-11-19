@@ -92,6 +92,10 @@
       "type": "int"
     },
     {
+      "name": "split_policy",
+      "type": "int"
+    },
+    {
       "name": "cfx",
       "type": "int"
     }
