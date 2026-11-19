@@ -12101,6 +12101,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       and kernel["PrefetchGL2"] == 0 \
       and self.states.numItersPLR == 0
 
+  def _needsLoopSkipPGRSync(self, kernel):
+    # PGR2 with a loop counter of 2 skips the unroll loop and enters the first
+    # NGLL from the prologue, with the second prefetched tile still in flight.
+    # With fewer than two prefetched local-read iterations the NGLL starts with
+    # a planner barrier whose tensorcnt drain covers that edge; draining it
+    # separately lets the wait pass drop that drain, which the loop exit and the
+    # NLL behind the OptNLL dispatch still need. So sync only for PLR >= 2.
+    return kernel["PrefetchGlobalRead"] == 2 \
+      and not kernel["SuppressNoLoadLoop"] \
+      and self._usesMainLoopTokenBarrierPlanner(kernel) \
+      and self.states.numItersPLR >= 2
+
   def postMainLoopBarrierCheckAndReset(self, kernel, rootModule):
     """
     Rebuild SBarrier placement from dynamic memory-token usage:
@@ -12145,7 +12157,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           keptItems.append(item)
         elif isinstance(item, SBarrier) \
              and "-3" not in str(item).split("//", 1)[0] \
-             and "single-loop PGR bypass sync" not in str(item):
+             and "PGR bypass sync" not in str(item):
           # Pass-2 rebuilds only workgroup-scope barriers from token-state
           # transitions, so only those are cleared here. Cluster-scope split
           # barriers (s_barrier_signal/wait -3), e.g. the StreamKMulticast
