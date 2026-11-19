@@ -595,6 +595,15 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         // Channels-first halo tiles: 16-bit matrix-core, register-path weights, no split.
         return std::nullopt;
     }
+    // The cross-chunk prefetch (absent: 0): halo tiles with register-path weights,
+    // channels-last.
+    config.xpf = intField(kernel, "xpf").value_or(0);
+    if(config.xpf != 0
+       && (config.xpf != 1 || config.rows || config.atom == "fma" || config.bl != 0
+           || config.cf != 0))
+    {
+        return std::nullopt;
+    }
     config.math = math == 1;
     const bool known
         = std::any_of(FILTERS.begin(),
@@ -1285,6 +1294,11 @@ public:
             if(config.cf != 0)
             {
                 options.add("CONV_DIRECT_CF", std::to_string(config.cf));
+            }
+            // Defined only when set, so every other config compiles as before.
+            if(config.xpf != 0)
+            {
+                options.add("CONV_DIRECT_XPF", std::to_string(config.xpf));
             }
         }
 

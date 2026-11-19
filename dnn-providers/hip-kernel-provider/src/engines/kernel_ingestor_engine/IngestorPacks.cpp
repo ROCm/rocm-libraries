@@ -83,6 +83,12 @@ const std::vector<IngestorPack>& ingestorPacks()
          &registerConvGroupValuSymbols,
          &resetConvGroupValuModuleCache},
 #endif
+#ifdef HIPDNN_ENGINE_CONV_NARROW
+        {"hipkernel:CONV_NARROW", &registerConvNarrowSymbols, &resetConvNarrowModuleCache},
+        {"hipkernel:CONV_NARROW_WRW",
+         &registerConvNarrowWrwSymbols,
+         &resetConvNarrowWrwModuleCache},
+#endif
 #ifdef HIPDNN_ENGINE_CONV_GROUP_VALU_WRW
         {"hipkernel:CONV_GROUP_VALU_WRW",
          &registerConvGroupValuWrwSymbols,
