@@ -252,8 +252,9 @@ explicit seven-knob pin on `gfx942_dense` (`qk_lookahead`, `block_m=256`,
 
 `xcd_local` is a gfx942-only persistent decode: XCD-local load balance at 304
 CTAs over 8 XCDs, Hq 32 and Hkv 8 or 16. It is not in the shared
-`PERSIST_DECODES`, so the shared spec, gfx950 and the C++ mirror never accept
-it. The restriction is one-way: `qk_lookahead` requires `xcd_local`, and
+`PERSIST_DECODES`, so the shared spec and gfx950 never accept it. Its IR (with
+and without `qk_lookahead`) is in the gfx942 golden and the C++/Python
+byte-identity check (`tests/test_attention_ir_cpp_parity.py`). The restriction is one-way: `qk_lookahead` requires `xcd_local`, and
 `xcd_local` is legal without `qk_lookahead`.
 
 **Tuning-id migration for `gfx942_dense`.** Adding a defaulted field

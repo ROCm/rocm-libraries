@@ -1,66 +1,138 @@
 # gfx942 bf16 D128 causal prefill: QK lookahead and the `xcd_local` decode
 
-This change adds an opt-in QK-lookahead tile body (`qk_lookahead`) to the gfx942
-dense prefill kernel, plus `xcd_local`, a gfx942-only persistent decode. Both are
-off by default. No shipped default, candidate or existing golden changes. The
-body builds on the K LDS double buffering and V register prefetch levers from the
-[CFVST / KDB / VPF case study](gfx942_dense_cfvst_kdb_vprefetch_case_study.md),
-and needs both of them on.
+This change adds two opt-in levers to the gfx942 dense prefill kernel for bf16
+D128 causal attention on the persistent grid:
+
+- `qk_lookahead=True` turns on several changes to the tile body together. It
+  double-buffers V^T as well as K, pipelines the tile loop one tile deep,
+  interleaves MFMA with VALU work, swizzles K in LDS instead of padding it, and
+  stages Q and O through LDS. Sections 1a–1h describe each part.
+- `persist_decode="xcd_local"`, a gfx942-only persistent decode that is causal workload and L2/XCD layout aware.
+
+Both are off by default. No shipped default, candidate or existing golden
+changes. `qk_lookahead` builds on K LDS double buffering and V register prefetch
+from the [CFVST / KDB / VPF case study](gfx942_dense_cfvst_kdb_vprefetch_case_study.md),
+and needs both on. It runs only on `xcd_local`; `xcd_local` is legal on its own.
 
 Measured scope: gfx942 (304 CUs), BF16, D128, causal prefill, Hq 32, Hkv 8 and
 16, B 1 and 16, S 1024 to 16384. The `qk_lookahead` pin is compared with the
 `gfx942_dense` candidate's default spec and with AITER's asm FMHA v3 forward
-(two rounding modes), with ratios only.
-
-## Problem
-
-With K double buffering and V prefetch on, the tile loop still runs its two big
-phases one after the other: QK MFMAs, then the softmax VALU work, then PV MFMAs.
-While softmax runs, the MFMA pipe has nothing to issue. While QK and PV run, the
-VALU has little to do. The goal is to keep both units busy within one wave's own
-instruction stream, by giving each MFMA independent VALU work to overlap with.
+at two bf16 output rounding modes: AITER RTNA (its default `how_v3_bf16_cvt`,
+round to nearest, ties away from zero) and AITER RTNE (`how_v3_bf16_cvt=0`, round
+to nearest, ties to even, the rounding both rocKE arms use). The parts of
+`qk_lookahead` were measured only together, so every result applies to the whole
+flag, not to any one part.
 
 ## Optimization 1: QK lookahead (`qk_lookahead=True`)
 
-Software-pipeline the tile loop one tile deep. Write `S(j)` for tile `j`'s scaled
-scores (the `block_m x block_n` QK result after the softmax scale).
+| Part | What it does |
+|---|---|
+| 1a. Two K slots and two V^T slots, one barrier per tile | one LDS barrier per tile instead of two |
+| 1b. Software pipelining one tile deep | QK of the next tile runs under the current tile's softmax |
+| 1c. Fenced MFMA/VALU interleave | one chunk of independent VALU/LDS work after every MFMA |
+| 1d. K XOR swizzle instead of a row pad | frees LDS for the second V^T slot; 16 B K reads |
+| 1e. V^T swizzle for two slots | V(j+1) `ds_write_b32` from 4-way to 2-way bank conflicts |
+| 1f. Split row sum | the cross-half row-sum add moves out of the loop |
+| 1g. Q staged through LDS | row-contiguous Q loads, transposed in LDS |
+| 1h. O staged through LDS | O stored as whole 128 B lines |
+
+### 1a. Two K slots and two V^T slots, one barrier per tile
+
+`QK(j+1)` reads K slot `(j+1) % 2`, while `K(j+2)` is written into slot `j % 2`.
+`PV(j)` reads V^T slot `j % 2`, while `V(j+1)` is stored into slot `(j+1) % 2`.
+Every slot's last readers are past the previous barrier, so the loop needs one
+LDS barrier per tile, which publishes both new tiles. The two K slots come from
+`lds_num_buffers=2`. The second V^T slot is new with this flag. Together they
+fill the 64 KiB LDS.
+
+### 1b. Software pipelining one tile deep
 
 - Pipeline step `j` enters with `S(j)` already computed. It issues `QK(j+1)`
   while it runs tile `j`'s softmax head: row max, the rescale factor `alpha`, the
   O rescale, and the first P packs.
 - `PV(j)` then carries the remaining P packs, the scale of `S(j+1)` and the
   `K(j+2)` DMA.
-- Each MFMA is followed by one fenced chunk of VALU/LDS work. Chunk sizes come
-  from an issue-cycle estimate, so MFMAs are not issued back to back.
-- Two K slots and two V^T slots leave one LDS barrier per tile.
-- K rows are XOR-swizzled in LDS with no row pad and read 16 B at a time. Q is
-  transposed into the MFMA layout through LDS. O is stored through LDS as whole
-  128 B lines, so `o_store_width` has no effect and is rejected.
+- The prologue computes `S(0)`. The epilogue runs the last tile's softmax and PV
+  from the carried `S`.
 
-Scope, enforced by `supports_attention_dense` (`NOT_YET_IMPLEMENTED:` reasons):
-bf16, D128, top-left causal, persistent grid, `persist_decode="xcd_local"`,
-`block_m=256`, `block_n=64`, `lds_num_buffers=2`, `v_reg_prefetch=True`,
-`causal_diag_split=True`, `lds_row_pad=0`, and the CFVST V path with its swizzle.
-It refuses windows, sinks, LSE, paging, KV segments, iglp and the PV
-priority/fence knobs. `use_exp2_fast` and `pv_loop_order` stay free and are
-covered by the numeric tests.
+### 1c. Fenced MFMA/VALU interleave
+
+QK and PV are emitted as generators that yield after each MFMA. After every
+MFMA, the body emits one fenced chunk of independent VALU/LDS work: max, mask,
+`alpha`, O rescale, exp, P pack, the V(j+1) load and store, or a K DMA row. Chunk
+sizes come from a fixed per-operation issue-cycle estimate. No two MFMAs are
+emitted back to back. The estimate decides only where work goes, not what work
+is done.
+
+In QK, the two key subtiles alternate, so consecutive MFMAs never depend on each
+other. Each still accumulates in order, so the scores match the non-pipelined
+body exactly. K `ds_read`s are issued up to three ahead of the MFMA that uses
+them (`QK_READ_AHEAD`).
+
+### 1d. K XOR swizzle instead of a row pad
+
+K rows are stored with no row pad (`lds_row_pad=0`). Instead, each row's 16 B
+chunks are XORed with `row & 7`. The K DMA applies the swizzle to the global
+offset it fetches, so each lane keeps one base address. QK then reads K 16 B at a
+time (`ds_read_b128`), one read feeding two MFMA steps. Without the pad, two K
+slots and two V^T slots fit in the 64 KiB LDS.
+
+### 1e. V^T swizzle for two slots
+
+The CFVST V^T swizzle key also XORs in `(dim >> 4) & 1`. With two V^T slots at
+`block_n=64`, this takes the V(j+1) `ds_write_b32` from 4-way to 2-way bank
+conflicts. PV builds one V^T base address per tile and folds the rest into XORs
+and immediates.
+
+### 1f. Split row sum
+
+Each lane half keeps its own partial softmax row sum `l` through the loop. The
+two halves are added once after the loop with one cross-half shuffle.
+
+### 1g. Q staged through LDS
+
+Q is loaded row-contiguous (16 rows x 64 B per load) instead of in the MFMA
+layout. In the prologue it is transposed into the MFMA layout through V^T slot 1,
+which is free until `V(1)` is stored in tile 0. The 16 B chunks are XORed with
+`(row >> 1) & 3` so the `ds_read_b128` that reads them back hits 8 distinct
+slots.
+
+### 1h. O staged through LDS
+
+After the loop, once all waves are past their last K/V reads, each wave writes O
+into the K buffer in 8 B chunks XORed with `row & 15`. It reads O back
+row-contiguous, 16 B per lane, and stores whole 128 B lines to global memory.
+Because of this, `o_store_width` has no effect and is rejected.
+
 
 ## Optimization 2: the `xcd_local` persistent decode
 
-`xcd_local` maps work items to the 304 persistent CTAs per XCD. It needs
-`chiplet_num_xcds=8`, `num_persistent=304`, Hq 32 and Hkv 8 or 16.
+A persistent decode decides which work item (one query block of one Q head in
+one batch) each persistent CTA runs in each round. `xcd_local` needs 8 XCDs, 304
+persistent CTAs (38 per XCD), Hq 32 and Hkv 8 or 16.
 
-- XCD `x = wi % 8` (where `wi` is the work-item index) owns Q heads `4x .. 4x+3`,
-  which is one kv head at Hkv 8 or two at Hkv 16.
-- Each XCD walks its own stream. Per batch, the stream ranks the XCD's
-  `NQB * 4` items (`NQB` = query blocks per head) longest query block first,
-  rotating over the 4 heads. The ranks are dealt to the XCD's 38 CTAs as a snake,
-  so per-CTA causal cost stays balanced.
+**KV heads to XCDs.** The decode relies on the hardware placing CTAs on XCDs
+round-robin. It gives every CTA only work items of its own XCD. Each XCD owns 4
+Q heads in every batch: at Hkv 8 those 4 heads share one kv head, and at Hkv 16
+they read two. Every Q head that reads a given kv head runs on the same XCD, and
+no other XCD reads that kv head.
 
-`xcd_local` is legal without `qk_lookahead`. `qk_lookahead` runs only on it. It
-is not in the shared `PERSIST_DECODES`, so the shared spec, gfx950 and the C++
-mirror never accept it; the gfx942 spec adds it through
-`Gfx942AttentionDenseSpec.persist_decode_registry()`.
+**Batching.** Each XCD works through the batches in order. It hands out every
+work item of one batch before any item of the next batch. A new batch can start
+part-way through a round, on whichever CTAs are next.
+
+**Causal order.** Under the causal mask, later query blocks attend to more keys.
+Inside a batch, each XCD hands out its query blocks from the last (most keys) to
+the first. The 4 Q heads of one query block go out together.
+
+**Dealing to CTAs.** Each XCD deals this ordered list to its 38 CTAs one round at
+a time. Odd rounds go in reverse order (a snake): a CTA that got one of the
+longest items in one round gets one of the shortest in the next. When the
+batch's items do not divide evenly by 38, some CTAs get one item more than the
+others. Those CTAs come last in each round's order before the snake reverses
+it, and the leftover items go out in a final, partial round. Each work item is
+handed out exactly once.
+
 
 ## How to reach it
 
@@ -88,10 +160,11 @@ The full tuning space reaches the same point. Adding the defaulted
 ## Static resources
 
 Static counts are from the HSACOs timed in the benchmark (`static_resources.csv`,
-LLVM23, 512 threads/WG, persistent 304). Instruction columns are static counts in
+LLVM23, persistent 304). Instruction columns are static counts in
 the code object, not executed counts. The `qk_lookahead` binary is the same on
 every shape. The baseline row is B=1, S=4096, Hkv=8; the baseline at S≤2048 uses
-`block_m=128` (228 VGPR, 16 `ds_write` / `buffer_load`).
+`block_m=128` (256 threads/WG, 228 VGPR, 16 `ds_write` / `buffer_load`); every
+other binary in the table is 512 threads/WG.
 
 | Arm | VGPR | AGPR | SGPR | VGPR / SGPR spills | Scratch | LDS bytes | waves/SIMD | `v_mfma` | `ds_read` | `ds_write` | `buffer_load` | `s_barrier` | `s_waitcnt` | VALU | SALU |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -99,10 +172,8 @@ every shape. The baseline row is B=1, S=4096, Hkv=8; the baseline at S≤2048 us
 | `qk_lookahead` | 250 | 0 | 96 | 0 / 0 | 0 B | 65536 | 2 | 192 | 120 | 48 | 24 | 6 | 105 | 1947 | 726 |
 
 Both arms are spill-free with 0 B scratch on all twelve shapes. `qk_lookahead`
-uses the whole 64 KiB LDS. The higher static MFMA and barrier counts come from the
-prologue, the pipelined loop, the epilogue and the diagonal-split peel, each
-emitted separately. The main loop keeps one LDS barrier per tile, which a test
-asserts.
+uses the whole 64 KiB LDS: two K slots and two V^T slots (1a, 1d). Each tile loop
+keeps one LDS barrier per tile, which a test asserts.
 
 ## Results
 
@@ -117,12 +188,6 @@ All workloads are BF16, Hq=32, D=128, causal, Sq = Skv = S, on gfx942 (304 CUs).
 | AITER RTNA | `flash_attn_func(q, k, v, causal=True)`: AITER's default kernel selection with its default bf16 output rounding, RTNA (`how_v3_bf16_cvt` left at its default) | — | — | — |
 | AITER RTNE | the same with `how_v3_bf16_cvt=0`: RTNE output rounding, the rounding the rocKE kernels use | — | — | — |
 
-The gfx942_dense default is not what `algorithm="auto"` picks for these shapes
-(auto dispatch picks `unified_2d`); it is the opt-in dense candidate at its own
-defaults. It uses `block_m=128` at S≤2048 and `block_m=256` above, with
-`waves_per_eu=2`, `lds_row_pad=8`, one K buffer and no V prefetch. Its resolved
-specs, kernel names and replay records are in `resolved_specs.json`.
-
 AITER is pinned at commit `97452bc933e571facd206ea01348852ef0c96e97`.
 
 ### Speedup of `qk_lookahead`
@@ -130,8 +195,9 @@ AITER is pinned at commit `97452bc933e571facd206ea01348852ef0c96e97`.
 Each cell is the median over three runs of the per-run ratio
 `median(baseline time) / median(candidate time)`, with the min–max of the three
 runs. The percentage is `(ratio − 1) × 100`, the throughput gain of the
-candidate; the percentage columns come first, then the same ratios as × with
-the min–max range. Above 1.000× (a positive percentage) means the candidate is faster.
+candidate. The percentage columns come first, then the same ratios as × with
+the min–max range. Above 1.000× (a positive percentage) means the candidate is
+faster.
 
 | dtype | B | S | Hkv | qk_lookahead vs gfx942_dense default (%) | qk_lookahead vs AITER RTNA (%) | qk_lookahead vs AITER RTNE (%) | gfx942_dense default vs AITER RTNA (%) | qk_lookahead vs gfx942_dense default (×, range) | qk_lookahead vs AITER RTNA (×, range) | qk_lookahead vs AITER RTNE (×, range) | gfx942_dense default vs AITER RTNA (×, range) |
 |---|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|
@@ -154,8 +220,7 @@ At these measured configurations only:
 - `qk_lookahead` is faster than the gfx942_dense default on all 12 shapes.
 - It is faster than AITER RTNE, the equal-rounding comparison, on all 12 shapes.
 - It is faster than AITER RTNA on 11 of 12 shapes. It is slower at B=16, S=8192,
-  Hkv=8 (0.977×, −2.3%). AITER RTNA rounds its bf16 output with RTNA; both rocKE
-  arms and AITER RTNE use RTNE.
+  Hkv=8 (0.977×, −2.3%).
 
 ### Correctness
 
@@ -169,17 +234,49 @@ The GPU tests in `tests/test_attention_dense_gfx942_numeric.py` also check
 grid-stride rounds, non-default softmax scales (`4e-2`), the free knobs
 (`use_exp2_fast=False`, `pv_loop_order="k_major"`) and runtime-shape binary reuse.
 
-### Caveats
+## Architecture and configuration gating
 
-- One gfx942 part, 304 CUs. `xcd_local` needs 304 persistent CTAs over 8 XCDs,
-  so `qk_lookahead` does not apply to other CU counts.
-- Hq 32 only: `xcd_local` needs Hq 32 and Hkv 8 or 16.
-- AITER RTNA and the rocKE arms round the bf16 output differently (RTNA vs
-  RTNE); AITER RTNE is the equal-work comparison.
-- The gfx942_dense default is an opt-in candidate, not the `algorithm="auto"`
-  choice for these shapes.
-- Timing has no host synchronization between the 50 launches in a block, so it
-  measures back-to-back kernel throughput, not single-launch latency.
+Both optimizations are implemented in `library/kernels/gfx942/attention_dense.py`
+on `Gfx942AttentionDenseSpec`; `xcd_local` lives in
+`library/kernels/common/attention_dense_decode.py` as `PersistXcdLocal`.
+
+Architecture eligibility is enforced by the existing `arch != "gfx942"` checks in
+`supports_attention_dense(spec, arch=...)` and `build_attention_dense(spec, arch=...)`.
+The support predicate returns `(False, reason)` for other architectures, and the
+builder raises `NotImplementedError`. `xcd_local` is registered only in
+`Gfx942AttentionDenseSpec.persist_decode_registry()`, so the shared spec and other
+architectures do not accept it.
+
+The optimization-specific eligibility conditions:
+
+- **`xcd_local` (`persist_decode="xcd_local"`):** checked when the spec is built
+  (`PersistXcdLocal.check`). Requires `chiplet_num_xcds=8`, `num_persistent=304`,
+  Hq 32 and Hkv 8 or 16. It is legal without `qk_lookahead`. `persist_decode="auto"`
+  never resolves to it.
+- **QK lookahead (`qk_lookahead=True`):** checked by `supports_attention_dense()`.
+  Requires BF16 D128 top-left causal attention on the persistent grid with
+  `block_m=256`, `block_n=64`, `lds_num_buffers=2`, `v_reg_prefetch=True`,
+  `causal_diag_split=True`, `lds_row_pad=0`, and the CFVST V path with its V
+  swizzle. It rejects sliding window, `window_wave_skip`, attention sinks, LSE
+  output, paged KV, `kv_segments > 1`, `iglp`, `pv_priority` and
+  `pv_sched_fence_mask`.
+- **QK lookahead needs `xcd_local`:** a `qk_lookahead` spec whose resolved
+  `persist_decode` is not `xcd_local` is rejected.
+- **`o_store_width`:** any value other than the default 4 is rejected with
+  `qk_lookahead`, because it stores O through LDS and does not read
+  `o_store_width`.
+
+The LDS allocation, including the second V^T slot under `qk_lookahead`, is
+checked against the gfx942 capacity using `attention_lds_capacity_bytes(arch)` and
+`_lds_bytes(spec)`. Unsupported configurations are rejected before kernel
+emission.
+
+In dispatch, `qk_lookahead` is the last axis of the `gfx942_dense` tuning space
+(`library/dispatch/attention/axes.py`), and `xcd_local` is one of its
+`persist_decode` values. There is no candidate for either. The default
+configuration keeps `qk_lookahead=False` and `persist_decode="auto"`, so both
+remain opt-in and do not change the default kernel.
+
 
 ## Method
 
@@ -205,10 +302,74 @@ Harness:
 
 Provenance. Every run is at the same clean commit (the harness refuses a dirty
 tree): the change's code commit, before this document was added. Only Markdown
-changed after it. Each records the SHA-256 of the kernel, spec, decode, dispatch and harness
-sources, and all three runs record the same hashes. LLVM flavor `llvm23`.
+changed after it. Each run records the SHA-256 of the kernel, spec, decode,
+dispatch and harness sources, and all three runs record the same hashes. LLVM
+flavor `llvm23`.
+
+### Benchmark environment and provenance
+
+| Component | Configuration |
+| :--- | :--- |
+| Hardware target | gfx942, 304 CUs |
+| Benchmarked source HEAD | `4f2df197f507d4e37171262947fdc0a482dd067c` (clean working tree, all three runs) |
+| Kernel source SHA-256 | `c1bbcf8ed71c5ec91623a7482b78892458b0f3028a2028db8f94890f8ab027c5` |
+| Benchmark harness SHA-256 | `0b1bdde3a98a91e8e022c2d940b2f3cf8698a22c4d5a98018ae65046d6dece05` |
+| ROCm stack | 10.0.0 |
+| HIP | `7.15.26333` |
+| Python | `3.12.3` |
+| NumPy | `2.5.5` |
+| Triton | `3.8.0+amd.rocm7.2.0.git7cb7b059` |
+| PyTorch (AITER arms) | `2.13.0+rocm10.0.0` |
+| AITER | `97452bc933e571facd206ea01348852ef0c96e97` (clean) |
+| ROCKE compiler backend | Python |
+| LLVM flavor | `llvm23` |
+
+### Shape-by-shape kernel identity
+
+`gfx942_dense` default, built by `attention_tuning_spec(req, "gfx942_dense", knobs={}).kernel_spec`:
+
+| dtype | B | S | Hq | Hkv | D | Exact baseline kernel name | persistent | exp2_fast (resolved) | decode (resolved) | grid | block |
+|---|---:|---:|---:|---:|---:|---|---|---|---|---|---|
+| bf16 | 1 | 1024 | 32 | 8 | 128 | `rocke_attention_dense_d128_bn64_bf16_bm128_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2` | `true` | `true` | `bt_hkv_minor` | `[304, 1, 1]` | `[256, 1, 1]` |
+| bf16 | 1 | 1024 | 32 | 16 | 128 | `rocke_attention_dense_d128_bn64_bf16_bm128_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2` | `true` | `true` | `bt_hkv_minor` | `[304, 1, 1]` | `[256, 1, 1]` |
+| bf16 | 1 | 2048 | 32 | 8 | 128 | `rocke_attention_dense_d128_bn64_bf16_bm128_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2` | `true` | `true` | `bt_hkv_minor` | `[304, 1, 1]` | `[256, 1, 1]` |
+| bf16 | 1 | 2048 | 32 | 16 | 128 | `rocke_attention_dense_d128_bn64_bf16_bm128_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2` | `true` | `true` | `bt_hkv_minor` | `[304, 1, 1]` | `[256, 1, 1]` |
+| bf16 | 1 | 4096 | 32 | 8 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2` | `true` | `true` | `bt_hkv_minor` | `[304, 1, 1]` | `[512, 1, 1]` |
+| bf16 | 1 | 4096 | 32 | 16 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2` | `true` | `true` | `bt_hkv_minor` | `[304, 1, 1]` | `[512, 1, 1]` |
+| bf16 | 1 | 8192 | 32 | 8 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2` | `true` | `true` | `bt_hkv_minor` | `[304, 1, 1]` | `[512, 1, 1]` |
+| bf16 | 1 | 8192 | 32 | 16 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2` | `true` | `true` | `bt_hkv_minor` | `[304, 1, 1]` | `[512, 1, 1]` |
+| bf16 | 1 | 16384 | 32 | 8 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2` | `true` | `true` | `bt_hkv_minor` | `[304, 1, 1]` | `[512, 1, 1]` |
+| bf16 | 16 | 4096 | 32 | 8 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_hkvmaj_gfx942_wpe2` | `true` | `true` | `hkv_major` | `[304, 1, 1]` | `[512, 1, 1]` |
+| bf16 | 16 | 4096 | 32 | 16 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe2` | `true` | `true` | `qb_major` | `[304, 1, 1]` | `[512, 1, 1]` |
+| bf16 | 16 | 8192 | 32 | 8 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_hkvmaj_gfx942_wpe2` | `true` | `true` | `hkv_major` | `[304, 1, 1]` | `[512, 1, 1]` |
+
+`qk_lookahead`, built by `attention_tuning_spec(req, "gfx942_dense", knobs=QKLA_KNOBS).kernel_spec`,
+is the same kernel at all 12 shapes:
+
+| Exact kernel name | persistent | exp2_fast (resolved) | decode (resolved) | grid | block |
+|---|---|---|---|---|---|
+| `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_xcdlb_gfx942_wpe2_kdb1_vpf1_krowpad0_dsplit_qkla` | `true` | `true` | `xcd_local` | `[304, 1, 1]` | `[512, 1, 1]` |
+
+AITER arms, from AITER's `LoadKernel` log lines in each run's log. Each kernel
+was loaded once per process, and no other AITER kernel was loaded, so every
+shape ran these two kernels in all three runs:
+
+| Arm | Call | Exact kernel name | Code object |
+|---|---|---|---|
+| AITER RTNA | `flash_attn_func(q, k, v, causal=True)` | `_ZN5aiter31fmha_fwd_hd128_bf16_causal_rtnaE` | `fwd_hd128_bf16_causal_rtna.co` (AITER `fmha_v3_fwd`, gfx942) |
+| AITER RTNE | `flash_attn_func(q, k, v, causal=True, how_v3_bf16_cvt=0)` | `_ZN5aiter31fmha_fwd_hd128_bf16_causal_rtneE` | `fwd_hd128_bf16_causal_rtne.co` (AITER `fmha_v3_fwd`, gfx942) |
+
+**Benchmark harness:** `library/benchmarks/gfx942/attention/prefill/bench_dense_qkla_vs_aiter.py`
+
+**Kernel source:** `library/kernels/gfx942/attention_dense.py`
 
 Reproduce:
+
+Set up the environment with `setup.sh` from the
+[Reproducibility section of the CFVST / KDB / VPF case study](gfx942_dense_cfvst_kdb_vprefetch_case_study.md#reproducibility),
+then `source` the `rocke_env.sh` it writes. `setup.sh` does not install AITER;
+install AITER separately at the commit listed under Results. From the rocke
+root, run the three seeds and combine them:
 
 ```
 python library/benchmarks/gfx942/attention/prefill/bench_dense_qkla_vs_aiter.py --seed 942 --out-dir <dir>/run1
@@ -216,5 +377,3 @@ python library/benchmarks/gfx942/attention/prefill/bench_dense_qkla_vs_aiter.py 
 python library/benchmarks/gfx942/attention/prefill/bench_dense_qkla_vs_aiter.py --seed 944 --out-dir <dir>/run3
 python library/benchmarks/gfx942/attention/prefill/bench_dense_qkla_vs_aiter.py --combine <dir>/run1 <dir>/run2 <dir>/run3
 ```
-
-Absolute times stay in each run's local `runs.csv`; only ratios are published.

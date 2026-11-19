@@ -2636,8 +2636,9 @@ An optimization is done when:
   with one chunk of independent VALU/LDS work so no two MFMAs issue back
   to back (`qk_lookahead` on gfx942 bf16 D128). A deeper pipeline needs
   more LDS slots; with two K and two V^T slots it keeps one barrier per
-  tile. Pair it with a persistent decode that balances causal work per
-  XCD (`xcd_local`); see the
+  tile. It runs on a persistent decode that keeps each kv head's work on
+  one XCD and hands out the longest causal query blocks first
+  (`xcd_local`); see the
   [gfx942 QK lookahead case study](../../../library/builders/gfx942/attention/prefill/gfx942_dense_qk_lookahead_case_study.md).
 - If the HIP-debug backend disagrees with LLVM-direct on a kernel,
   one of the two is missing an op lowering — file the issue,
