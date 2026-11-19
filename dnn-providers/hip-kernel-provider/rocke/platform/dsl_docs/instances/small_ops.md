@@ -481,6 +481,82 @@ picks it (lowest priority of the axis; reachable by pinning `spec_id`, e.g.
 that did not pan out for its target shapes — left registered as a lever in
 case a different shape regime benefits.
 
+**`n_groups` (default-off, inference-only thread-decomposition lever).**
+`BatchNorm2DSpec.n_groups` (default `1`, byte-identical emission when `1`)
+splits one CTA's `block_size` threads into `n_groups` sub-groups of
+`block_size // n_groups` threads each, where each sub-group sweeps a
+*different* `N` sample's `H*W` row concurrently instead of every thread
+sweeping the same row one sample at a time:
+
+```text
+hw_threads = block_size // n_groups
+lidihw = tid / hw_threads            (which sub-group / which sample slot)
+tid_within_row = tid % hw_threads     (lane's position within its sub-group's row)
+
+for og in range(N // n_groups):
+    n = og * n_groups + lidihw       (runtime value -- depends on lidihw)
+    y[n, c, :, :] = (x[n, c, :, :] - mean) * inv_std * gamma + beta
+    # swept by `hw_threads` lanes (tid_within_row), not the full `block_size`
+```
+
+This mirrors MIOpen's spatial-batchnorm thread mapping (`chwid`/`lidihw`/`nid`
+in `forward_spatial.cpp`), where threads are split across both the spatial
+and batch dimensions simultaneously, instead of this family's original
+Python-unrolled `for n in range(N)` N-loop that runs the full `block_size`
+against one row at a time — the fix for shapes whose `H*W` is small enough
+that it structurally caps `block_size` well below what the hardware can
+usefully run.
+
+Rejected for `training=True` by `is_valid_spec`: threading cached Welford
+partials across the sub-group boundary needs a different, not-yet-built
+reduction strategy, so this lever only reaches the elementwise inference
+path (same no-LDS, no-sync pass-2-only code shape as `training=False` with
+`n_groups=1`, just a different thread decomposition). Composes with
+`channels_per_block`: each of the CPB channels a CTA owns runs the full
+`n_groups` decomposition in turn. Dispatch-wired the same way as
+`channels_per_block` (new candidate axis, `n_groups=1` kept as the
+default/auto-selected priority, `>1` reachable by pinning `spec_id`, e.g.
+`batchnorm_b256_v4_ng4`). Byte-identity- and GPU-numeric-verified. Staged
+GPU measurement on gfx950 found no win on the shape it was built to target
+(`n16c256h16w16`, inference) — every candidate lands at the measurement
+floor — but a real ~1.27x win once `N` is large enough to give each thread
+sub-group multiple outer-loop iterations to amortize over (`n64c256h16w16`).
+See `platform/python/rocke/instances/SUPPORT_MATRIX.md` for the full table.
+
+**`fast_reduce` (default-off, training-only reduction-shape lever).**
+`BatchNorm2DSpec.fast_reduce` (default `False`, byte-identical emission when
+`False`) replaces the training-path block reduction
+(`welford_block_reduce_stable`: a flat `block_size`-wide LDS halving tree
+over the `(mean, M2, count)` triple -- 9 barriers / 3 LDS buffers for
+`block_size=256`) with a wave-shuffle-first reduction
+(`welford_block_reduce_stable_wave_prologue`, `helpers/reduction.py`):
+
+```text
+# stage 1: butterfly-shuffle merge inside each wavefront -- no LDS, no sync
+for k in range(log2(wave_size)):
+    (mean, m2, count) = welford_merge((mean, m2, count), warp_shuffle_xor(..., 1<<k))
+
+# stage 2 (only when block_size > wave_size): small cross-warp LDS merge
+lane0_of_each_warp writes (mean, m2, count) -> lds[warp]   (one sync)
+every lane redundantly folds the num_warps lds slots in registers
+```
+
+This mirrors MIOpen's `shfl_interleaved_reduction_welford` +
+`lds_reduce2_welford` spatial-batchnorm reduction shape, and reuses the same
+butterfly-shuffle trick `block_lds_reduce_with_wave_prologue` already applies
+to a single combine value, generalised to the Welford triple's non-additive
+pairwise merge (`_welford_merge_pair`, shared by both the shuffle stage and
+the small cross-warp LDS tree). Rejected for `training=False` by
+`is_valid_spec`: inference does no reduction at all, so there is nothing for
+this lever to speed up. Dispatch-wired the same way as `channels_per_block`/
+`n_groups` (new candidate axis, `fast_reduce=False` kept as the
+default/auto-selected priority, `True` reachable by pinning `spec_id`, e.g.
+`batchnorm_b128_v2_fr`). Byte-identity- and GPU-numeric-verified. Staged GPU
+measurement on gfx950 found a reproducible win on every training shape
+tested -- unlike `channels_per_block`/`n_groups`, this is not a
+shape-specific lever: it never regressed on any shape tried. See
+`platform/python/rocke/instances/SUPPORT_MATRIX.md` for the full table.
+
 ## Transpose2D
 
 File:

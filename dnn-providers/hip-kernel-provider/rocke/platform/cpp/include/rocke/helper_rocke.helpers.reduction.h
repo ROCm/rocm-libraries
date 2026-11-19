@@ -167,6 +167,26 @@ int rocke_welford_block_reduce_stable(rocke_ir_builder_t* b,
                                       rocke_value_t** out_mean,
                                       rocke_value_t** out_var);
 
+/* welford_block_reduce_stable_wave_prologue(...) analogue: wave-shuffle-first
+ * Welford block reduction. A butterfly-shuffle merge of the (mean, M2, count)
+ * triple inside each wavefront (no LDS, no sync), followed -- only when
+ * block_size > wave_size -- by every lane redundantly folding the num_warps
+ * per-warp partials out of a small LDS slice (one sync). Same contract as
+ * rocke_welford_block_reduce_stable. Returns 1 on success, 0 (sticky error) on
+ * non-f32 input or a non-power-of-two wave_size. */
+int rocke_welford_block_reduce_stable_wave_prologue(rocke_ir_builder_t* b,
+                                                    rocke_value_t* mean_val,
+                                                    rocke_value_t* m2_val,
+                                                    rocke_value_t* count_val,
+                                                    rocke_value_t* lds_mean,
+                                                    rocke_value_t* lds_m2,
+                                                    rocke_value_t* lds_count,
+                                                    rocke_value_t* tid,
+                                                    int block_size,
+                                                    int wave_size,
+                                                    rocke_value_t** out_mean,
+                                                    rocke_value_t** out_var);
+
 /* block_lds_reduce_with_index(...) analogue: LDS tree reduction carrying both
  * value (f32) and index (i32) for argmax / argmin. Uses the CK doubling tree so
  * ties resolve to the LOWEST index. Writes value to *out_val, index to

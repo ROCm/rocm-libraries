@@ -117,6 +117,100 @@ class TestBatchNormDispatch(unittest.TestCase):
                 specs = batchnorm_sweep_space(req)
                 self.assertTrue(any(s.channels_per_block > 1 for s in specs))
 
+    def test_n_groups_default_is_one_and_not_auto_selected(self):
+        # n_groups is a default-off, inference-only lever: auto dispatch
+        # must keep picking the n_groups=1 candidate even though ng>1
+        # candidates are registered and legal for this shape (n=4 divides
+        # every value in _N_GROUPS, training=False makes them eligible).
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                r = dispatch_batchnorm(_req(4, 32, 64, 64, arch, training=False))
+                self.assertEqual(r.spec.n_groups, 1)
+
+    def test_n_groups_reachable_via_spec_id(self):
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                req = _req(
+                    4,
+                    32,
+                    64,
+                    64,
+                    arch,
+                    training=False,
+                    spec_id="batchnorm_b256_v4_ng4",
+                )
+                r = dispatch_batchnorm(req)
+                self.assertEqual(r.spec.n_groups, 4)
+
+    def test_n_groups_appears_in_sweep_space(self):
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                req = _req(4, 32, 64, 64, arch, training=False)
+                specs = batchnorm_sweep_space(req)
+                self.assertTrue(any(s.n_groups > 1 for s in specs))
+
+    def test_n_groups_rejected_when_training(self):
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                req = _req(
+                    4,
+                    32,
+                    64,
+                    64,
+                    arch,
+                    training=True,
+                    spec_id="batchnorm_b256_v4_ng4",
+                )
+                with self.assertRaises(ValueError):
+                    dispatch_batchnorm(req)
+
+    def test_fast_reduce_default_is_false_and_not_auto_selected(self):
+        # fast_reduce is a default-off, training-only lever: auto dispatch
+        # must keep picking the fast_reduce=False candidate even though the
+        # fast_reduce=True candidates are registered and legal for this
+        # shape (training=True makes them eligible).
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                r = dispatch_batchnorm(_req(4, 32, 64, 64, arch, training=True))
+                self.assertFalse(r.spec.fast_reduce)
+
+    def test_fast_reduce_reachable_via_spec_id(self):
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                req = _req(
+                    4,
+                    32,
+                    64,
+                    64,
+                    arch,
+                    training=True,
+                    spec_id="batchnorm_b256_v4_fr",
+                )
+                r = dispatch_batchnorm(req)
+                self.assertTrue(r.spec.fast_reduce)
+
+    def test_fast_reduce_appears_in_sweep_space(self):
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                req = _req(4, 32, 64, 64, arch, training=True)
+                specs = batchnorm_sweep_space(req)
+                self.assertTrue(any(s.fast_reduce for s in specs))
+
+    def test_fast_reduce_rejected_when_inference(self):
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                req = _req(
+                    4,
+                    32,
+                    64,
+                    64,
+                    arch,
+                    training=False,
+                    spec_id="batchnorm_b256_v4_fr",
+                )
+                with self.assertRaises(ValueError):
+                    dispatch_batchnorm(req)
+
     def test_sweep_space_enumerates_valid_block_vec_combos(self):
         for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):

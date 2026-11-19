@@ -53,6 +53,30 @@ BATCHNORM_ABI_VERSION = "hipkg-batchnorm2d/v1"
 # dominates -- see ``instances/common/batchnorm2d.py``'s module docstring.
 _CHANNELS_PER_BLOCK = (1, 2, 4, 8)
 
+# ``n_groups`` candidate axis: 1 (default, byte-identical to the original
+# per-sample N-loop emission) plus a few power-of-two splits. ``1`` is always
+# the highest-priority value (see ``_build_registry``) -- this is a
+# default-OFF, inference-only lever (``is_valid_spec`` rejects ``n_groups>1``
+# combined with ``training=True``), exposed the same way as
+# ``_CHANNELS_PER_BLOCK`` for measurement, never auto-selected in production
+# unless a caller pins its ``spec_id`` explicitly. See
+# ``instances/common/batchnorm2d.py``'s module docstring for the shapes it
+# targets (``H*W`` small enough to structurally cap ``block_size``).
+_N_GROUPS = (1, 2, 4, 8)
+
+# ``fast_reduce`` candidate axis: False (default, byte-identical to the
+# original flat block_size-wide LDS Welford tree) and True (wave-shuffle-
+# first Welford merge). ``False`` is always the highest-priority value (see
+# ``_build_registry``) -- this is a default-OFF, training-only lever
+# (``is_valid_spec`` rejects ``fast_reduce=True`` combined with
+# ``training=False``), exposed the same way as ``_CHANNELS_PER_BLOCK`` /
+# ``_N_GROUPS`` for measurement, never auto-selected in production unless a
+# caller pins its ``spec_id`` explicitly. See
+# ``instances/common/batchnorm2d.py``'s module docstring for what it trades
+# (fewer LDS barriers in the per-channel reduction) and
+# ``SUPPORT_MATRIX.md`` for the measured win.
+_FAST_REDUCE = (False, True)
+
 
 @dataclass(frozen=True)
 class BatchNormRequest(OperatorRequest):
@@ -118,7 +142,13 @@ def _request_errors(req: OperatorRequest) -> list[str]:
 
 
 def _make_spec(
-    req: BatchNormRequest, *, block_size: int, vec: int, channels_per_block: int = 1
+    req: BatchNormRequest,
+    *,
+    block_size: int,
+    vec: int,
+    channels_per_block: int = 1,
+    n_groups: int = 1,
+    fast_reduce: bool = False,
 ) -> _bn.BatchNorm2DSpec:
     dtype = _bn_dtype(req.dtype)
     wave = ArchTarget.from_gfx(req.arch).wave_size
@@ -132,18 +162,28 @@ def _make_spec(
         dtype=dtype,
         training=bool(req.training),
         channels_per_block=channels_per_block,
+        n_groups=n_groups,
+        fast_reduce=fast_reduce,
         wave_size=wave,
     )
 
 
 def _make_candidate(
-    *, block_size: int, vec: int, channels_per_block: int, priority: int
+    *,
+    block_size: int,
+    vec: int,
+    channels_per_block: int,
+    n_groups: int,
+    fast_reduce: bool,
+    priority: int,
 ) -> KernelCandidate:
     # Matches BatchNorm2DSpec.kernel_name()'s convention: no suffix for the
-    # default channels_per_block=1, so this spec_id is stable for every
-    # pre-existing caller/test that pins it.
+    # default channels_per_block=1 / n_groups=1 / fast_reduce=False, so this
+    # spec_id is stable for every pre-existing caller/test that pins it.
     cpb_suffix = f"_cpb{channels_per_block}" if channels_per_block != 1 else ""
-    spec_id = f"batchnorm_b{block_size}_v{vec}{cpb_suffix}"
+    ng_suffix = f"_ng{n_groups}" if n_groups != 1 else ""
+    fr_suffix = "_fr" if fast_reduce else ""
+    spec_id = f"batchnorm_b{block_size}_v{vec}{cpb_suffix}{ng_suffix}{fr_suffix}"
     name = f"batchnorm2d_{spec_id}"
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
@@ -155,7 +195,12 @@ def _make_candidate(
         if not ok:
             return False, why
         spec = _make_spec(
-            req, block_size=block_size, vec=vec, channels_per_block=channels_per_block
+            req,
+            block_size=block_size,
+            vec=vec,
+            channels_per_block=channels_per_block,
+            n_groups=n_groups,
+            fast_reduce=fast_reduce,
         )
         return _bn.is_valid_spec(spec, arch=req.arch)
 
@@ -165,7 +210,12 @@ def _make_candidate(
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, BatchNormRequest)
         return _make_spec(
-            req, block_size=block_size, vec=vec, channels_per_block=channels_per_block
+            req,
+            block_size=block_size,
+            vec=vec,
+            channels_per_block=channels_per_block,
+            n_groups=n_groups,
+            fast_reduce=fast_reduce,
         )
 
     candidate = KernelCandidate(
@@ -202,23 +252,33 @@ def _build_registry() -> CandidateRegistry:
     reg = CandidateRegistry(
         _FAMILY, dim_vocabulary=BATCHNORM_DIM_VOCABULARY, require_build=True
     )
-    # Priority order = channels_per_block=1 first (unchanged production
-    # behavior; every cpb>1 candidate is a strictly lower-priority, default-
-    # off lever -- see _CHANNELS_PER_BLOCK's docstring), then largest
-    # block_size, then widest vec within a block_size tier, so the
-    # highest-throughput cpb=1 candidate that the arch accepts still wins
-    # under ``auto`` exactly as before this lever was added.
+    # Priority order = channels_per_block=1, n_groups=1 first (unchanged
+    # production behavior; every cpb>1 / ng>1 candidate is a strictly
+    # lower-priority, default-off lever -- see _CHANNELS_PER_BLOCK's and
+    # _N_GROUPS's docstrings), then largest block_size, then widest vec
+    # within a block_size tier, so the highest-throughput cpb=1/ng=1
+    # candidate that the arch accepts still wins under ``auto`` exactly as
+    # before either lever was added. ``n_groups>1`` candidates that pair
+    # with ``training=True`` requests are simply rejected by
+    # ``is_valid_spec`` at dispatch time (no explicit skip needed here).
     cands = []
     for cpb_rank, cpb in enumerate(_CHANNELS_PER_BLOCK):
-        prio = 10 + cpb_rank * 1000
-        for bs in _BLOCK_SIZES:
-            for v in _VECS:
-                cands.append(
-                    _make_candidate(
-                        block_size=bs, vec=v, channels_per_block=cpb, priority=prio
-                    )
-                )
-                prio += 1
+        for ng_rank, ng in enumerate(_N_GROUPS):
+            for fr_rank, fr in enumerate(_FAST_REDUCE):
+                prio = 10 + cpb_rank * 100000 + ng_rank * 1000 + fr_rank * 100
+                for bs in _BLOCK_SIZES:
+                    for v in _VECS:
+                        cands.append(
+                            _make_candidate(
+                                block_size=bs,
+                                vec=v,
+                                channels_per_block=cpb,
+                                n_groups=ng,
+                                fast_reduce=fr,
+                                priority=prio,
+                            )
+                        )
+                        prio += 1
     reg.extend(cands)
     return reg
 

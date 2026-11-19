@@ -84,6 +84,7 @@ from ...helpers.reduction import (
     row_norm_needs_two_pass,
     tree_reduce,
     welford_block_reduce_stable,
+    welford_block_reduce_stable_wave_prologue,
 )
 from ...helpers.spec import IOSpecRule, kernel_name_join, validate_io
 from ...helpers.sweep import pass2_row_chunks, sweep_row_chunks
@@ -128,6 +129,17 @@ class BatchNorm2DSpec:
     for ``training=True`` (see ``is_valid_spec``): threading cached Welford
     partials across the sub-group boundary needs a different, not-yet-built
     strategy."""
+    fast_reduce: bool = False
+    """Default-off lever, training-only: replace the flat ``block_size``-wide
+    LDS Welford tree (:func:`welford_block_reduce_stable`, 9 barriers / 3 LDS
+    buffers for ``block_size=256``) with a wave-shuffle-first reduction
+    (:func:`welford_block_reduce_stable_wave_prologue`): a butterfly-shuffle
+    merge inside each wavefront (no LDS, no barrier) followed by a small
+    cross-warp LDS merge (``num_warps`` slots, 1 barrier). Mirrors MIOpen's
+    ``shfl_interleaved_reduction_welford`` + ``lds_reduce2_welford`` spatial-
+    batchnorm reduction shape. ``=False`` (the default) reproduces the
+    original flat-tree emission byte-for-byte. Rejected when ``block_size``
+    is not a multiple of ``wave_size`` (see ``is_valid_spec``)."""
     wave_size: int = 64
     name: str = "rocke_batchnorm2d_fwd"
 
@@ -153,7 +165,11 @@ class BatchNorm2DSpec:
             f"v{self.vec}",
             f"cpb{self.channels_per_block}" if self.channels_per_block != 1 else "",
             f"ng{self.n_groups}" if self.n_groups != 1 else "",
-            flags={"train": self.training, "smv": self.save_mean_invstd},
+            flags={
+                "train": self.training,
+                "smv": self.save_mean_invstd,
+                "fr": self.fast_reduce,
+            },
         )
 
 
@@ -207,6 +223,14 @@ def is_valid_spec(spec: BatchNorm2DSpec, arch: str = "gfx950") -> Tuple[bool, st
         )
     if spec.n % spec.n_groups != 0:
         return False, f"n {spec.n} not divisible by n_groups {spec.n_groups}"
+
+    if spec.fast_reduce and not spec.training:
+        return False, "fast_reduce requires training=True (inference has no reduction to speed up)"
+    if spec.fast_reduce and spec.block_size % spec.wave_size != 0:
+        return False, (
+            f"fast_reduce requires block_size {spec.block_size} divisible by "
+            f"wave_size {spec.wave_size}"
+        )
 
     hw_threads = spec.block_size // spec.n_groups
     ok, why = validate_io(
@@ -394,17 +418,31 @@ def build_batchnorm2d(spec: BatchNorm2DSpec) -> KernelDef:
                 mean_p = b.fmul(sum_p, inv_count_p)
                 m2_p = b.fsub(sumsq_p, b.fmul(mean_p, sum_p))
 
-                mean, var = welford_block_reduce_stable(
-                    b,
-                    mean_p,
-                    m2_p,
-                    b.const_f32(count_p),
-                    lds_mean,
-                    lds_m2,
-                    lds_count,
-                    tid,
-                    block_size=BS,
-                )
+                if spec.fast_reduce:
+                    mean, var = welford_block_reduce_stable_wave_prologue(
+                        b,
+                        mean_p,
+                        m2_p,
+                        b.const_f32(count_p),
+                        lds_mean,
+                        lds_m2,
+                        lds_count,
+                        tid,
+                        block_size=BS,
+                        wave_size=spec.wave_size,
+                    )
+                else:
+                    mean, var = welford_block_reduce_stable(
+                        b,
+                        mean_p,
+                        m2_p,
+                        b.const_f32(count_p),
+                        lds_mean,
+                        lds_m2,
+                        lds_count,
+                        tid,
+                        block_size=BS,
+                    )
 
                 with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
                     old_mean = b.global_load_f32(RunningMean, channel)

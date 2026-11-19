@@ -43,6 +43,8 @@ rocke_batchnorm2d_spec_t rocke_batchnorm2d_spec_default(void)
     s.training = true;
     s.save_mean_invstd = false;
     s.channels_per_block = 1;
+    s.n_groups = 1;
+    s.fast_reduce = false;
     s.wave_size = 64;
     s.name = "rocke_batchnorm2d_fwd";
     return s;
@@ -79,9 +81,11 @@ int rocke_batchnorm2d_elems_per_thread(const rocke_batchnorm2d_spec_t* spec)
  *   kernel_name_join(self.name, self.dtype, f"N{n}C{c}H{h}W{w}", f"b{block_size}",
  *                    f"v{vec}",
  *                    f"cpb{channels_per_block}" if channels_per_block != 1 else "",
+ *                    f"ng{n_groups}" if n_groups != 1 else "",
  *                    flags={"train": training, "smv": save_mean_invstd})
- * kernel_name_join drops empty-string parts, so an empty part_cpb (the
- * channels_per_block==1 default) reproduces the pre-lever name exactly. */
+ * kernel_name_join drops empty-string parts, so empty part_cpb/part_ng (the
+ * channels_per_block==1 / n_groups==1 defaults) reproduce the pre-lever name
+ * exactly. */
 rocke_status_t rocke_batchnorm2d_kernel_name(const rocke_batchnorm2d_spec_t* spec,
                                              char* out,
                                              size_t out_cap)
@@ -90,9 +94,10 @@ rocke_status_t rocke_batchnorm2d_kernel_name(const rocke_batchnorm2d_spec_t* spe
     char part_b[32];
     char part_v[32];
     char part_cpb[32];
-    const char* parts[5];
-    const char* flag_names[2];
-    int flag_on[2];
+    char part_ng[32];
+    const char* parts[6];
+    const char* flag_names[3];
+    int flag_on[3];
 
     if(spec == NULL || out == NULL)
     {
@@ -110,19 +115,30 @@ rocke_status_t rocke_batchnorm2d_kernel_name(const rocke_batchnorm2d_spec_t* spe
     {
         part_cpb[0] = '\0';
     }
+    if(spec->n_groups != 1)
+    {
+        snprintf(part_ng, sizeof part_ng, "ng%d", spec->n_groups);
+    }
+    else
+    {
+        part_ng[0] = '\0';
+    }
 
     parts[0] = spec->dtype;
     parts[1] = part_dims;
     parts[2] = part_b;
     parts[3] = part_v;
     parts[4] = part_cpb;
+    parts[5] = part_ng;
 
     flag_names[0] = "train";
     flag_on[0] = spec->training ? 1 : 0;
     flag_names[1] = "smv";
     flag_on[1] = spec->save_mean_invstd ? 1 : 0;
+    flag_names[2] = "fr";
+    flag_on[2] = spec->fast_reduce ? 1 : 0;
 
-    return rocke_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 2, out, out_cap, NULL);
+    return rocke_kernel_name_join(spec->name, parts, 6, flag_names, flag_on, 3, out, out_cap, NULL);
 }
 
 /* ------------------------------------------------------------------ *
@@ -194,10 +210,44 @@ bool rocke_batchnorm2d_is_valid_spec(const rocke_batchnorm2d_spec_t* spec,
         return false;
     }
 
+    if(spec->n_groups <= 0)
+    {
+        bn_set_reason(reason, reason_cap, "n_groups must be positive");
+        return false;
+    }
+    if(spec->n_groups != 1 && spec->training)
+    {
+        bn_set_reason(reason, reason_cap, "n_groups > 1 requires training=False");
+        return false;
+    }
+    if(spec->block_size % spec->n_groups != 0)
+    {
+        bn_set_reason(reason, reason_cap, "block_size not divisible by n_groups");
+        return false;
+    }
+    if(spec->n % spec->n_groups != 0)
+    {
+        bn_set_reason(reason, reason_cap, "n not divisible by n_groups");
+        return false;
+    }
+
+    if(spec->fast_reduce && !spec->training)
+    {
+        bn_set_reason(reason, reason_cap, "fast_reduce requires training=True");
+        return false;
+    }
+    if(spec->fast_reduce && spec->block_size % spec->wave_size != 0)
+    {
+        bn_set_reason(reason, reason_cap, "fast_reduce requires block_size divisible by wave_size");
+        return false;
+    }
+
     hw = rocke_batchnorm2d_hw(spec);
 
-    /* validate_io(IOSpecRule(dtype, block_size, vec, n_per_block=hw)). */
-    rocke_io_spec_rule_init(&rule, spec->dtype, spec->block_size, spec->vec);
+    /* validate_io(IOSpecRule(dtype, block_size=hw_threads, vec, n_per_block=hw)),
+     * where hw_threads = block_size // n_groups (the per-sub-group thread
+     * count the n_groups>1 path actually sweeps HW with). */
+    rocke_io_spec_rule_init(&rule, spec->dtype, spec->block_size / spec->n_groups, spec->vec);
     rule.n_per_block_set = 1;
     rule.n_per_block = hw;
     rule.max_elems_per_thread_set = 0; /* checked separately below */
@@ -520,6 +570,7 @@ rocke_kernel_def_t* rocke_build_batchnorm2d(rocke_ir_builder_t* b,
          * comment for the LDS-reuse-barrier rationale. */
         rocke_value_t* base_channel = channel; /* captured right after tid, above */
         int CPB = spec->channels_per_block;
+        int NG = spec->n_groups;
         int cb;
 
         for(cb = 0; cb < CPB; ++cb)
@@ -546,11 +597,13 @@ rocke_kernel_def_t* rocke_build_batchnorm2d(rocke_ir_builder_t* b,
                 }
             }
 
-            p1.sum_p = rocke_b_const_f32(b, 0.0);
-            p1.sumsq_p = rocke_b_const_f32(b, 0.0);
-
             lengths2[0] = 1;
             lengths2[1] = HW;
+
+            if(NG == 1)
+            {
+            p1.sum_p = rocke_b_const_f32(b, 0.0);
+            p1.sumsq_p = rocke_b_const_f32(b, 0.0);
 
             for(n = 0; n < N; ++n)
             {
@@ -586,17 +639,35 @@ rocke_kernel_def_t* rocke_build_batchnorm2d(rocke_ir_builder_t* b,
                 rocke_value_t* m2_p =
                     rocke_b_fsub(b, p1.sumsq_p, rocke_b_fmul(b, mean_p, p1.sum_p));
 
-                rocke_welford_block_reduce_stable(b,
-                                                  mean_p,
-                                                  m2_p,
-                                                  rocke_b_const_f32(b, count_p),
-                                                  lds_mean,
-                                                  lds_m2,
-                                                  lds_count,
-                                                  tid,
-                                                  BS,
-                                                  &mean,
-                                                  &var);
+                if(spec->fast_reduce)
+                {
+                    rocke_welford_block_reduce_stable_wave_prologue(b,
+                                                                    mean_p,
+                                                                    m2_p,
+                                                                    rocke_b_const_f32(b, count_p),
+                                                                    lds_mean,
+                                                                    lds_m2,
+                                                                    lds_count,
+                                                                    tid,
+                                                                    BS,
+                                                                    spec->wave_size,
+                                                                    &mean,
+                                                                    &var);
+                }
+                else
+                {
+                    rocke_welford_block_reduce_stable(b,
+                                                      mean_p,
+                                                      m2_p,
+                                                      rocke_b_const_f32(b, count_p),
+                                                      lds_mean,
+                                                      lds_m2,
+                                                      lds_count,
+                                                      tid,
+                                                      BS,
+                                                      &mean,
+                                                      &var);
+                }
 
                 {
                     rocke_if_t iff = rocke_b_scf_if(b, rocke_b_cmp_eq(b, tid, rocke_b_const_i32(b, 0)));
@@ -679,6 +750,75 @@ rocke_kernel_def_t* rocke_build_batchnorm2d(rocke_ir_builder_t* b,
                                        &p2,
                                        cached_by_n[n],
                                        num_cached_by_n[n]);
+            }
+            }
+            else
+            {
+                /* n_groups > 1: inference-only, N and H*W split across the
+                 * CTA's threads simultaneously (mirrors MIOpen's spatial
+                 * batchnorm thread mapping). is_valid_spec guarantees
+                 * training=false here, so there is no Welford/LDS state to
+                 * thread across the sub-group boundary -- just the scalar
+                 * running-stat read and the elementwise affine, applied
+                 * with a different thread decomposition than the NG==1
+                 * inference branch above. */
+                int hw_threads;
+                int ept_row_ng;
+                rocke_value_t* c_hw_threads;
+                rocke_value_t* lidihw;
+                rocke_value_t* tid_within_row;
+                int og;
+
+                mean = rocke_b_global_load_f32(b, RunningMean, channel, 4);
+                var = rocke_b_global_load_f32(b, RunningVar, channel, 4);
+                inv_std = rocke_b_rsqrt(b, rocke_b_fadd(b, var, eps));
+                gamma_v = rocke_b_load_scalar_as_f32(b, Gamma, channel, spec->dtype);
+                beta_v = rocke_b_load_scalar_as_f32(b, Beta, channel, spec->dtype);
+                scale = rocke_b_fmul(b, inv_std, gamma_v);
+
+                hw_threads = BS / NG;
+                ept_row_ng = HW / hw_threads;
+                c_hw_threads = rocke_b_const_i32(b, hw_threads);
+                lidihw = rocke_b_div(b, tid, c_hw_threads);
+                tid_within_row = rocke_b_mod(b, tid, c_hw_threads);
+
+                for(og = 0; og < N / NG; ++og)
+                {
+                    rocke_value_t* n_runtime =
+                        rocke_b_add(b, rocke_b_const_i32(b, og * NG), lidihw);
+                    rocke_value_t* row_n =
+                        rocke_b_add(b, rocke_b_mul(b, n_runtime, rocke_b_const_i32(b, C)), channel);
+                    rocke_tile_window_t y_tile_n_ng;
+                    rocke_tile_window_t x_tile_n_ng;
+                    bn_pass2_ctx_t p2;
+
+                    origin[0] = row_n;
+                    origin[1] = rocke_b_const_i32(b, 0);
+                    rocke_make_tile_window(&y_tile_n_ng, &y_view, lengths2, origin, 2);
+                    origin[0] = row_n;
+                    origin[1] = rocke_b_const_i32(b, 0);
+                    rocke_make_tile_window(&x_tile_n_ng, &x_view, lengths2, origin, 2);
+
+                    p2.two_pass = false;
+                    p2.training = false;
+                    p2.vec = VEC;
+                    p2.x_tile_n = &x_tile_n_ng;
+                    p2.mean = mean;
+                    p2.scale = scale;
+                    p2.beta_v = beta_v;
+
+                    rocke_pass2_row_chunks(b,
+                                           &y_tile_n_ng,
+                                           tid_within_row,
+                                           hw_threads,
+                                           VEC,
+                                           ept_row_ng,
+                                           NULL, /* row -- origin already placed */
+                                           bn_pass2_body,
+                                           &p2,
+                                           NULL,
+                                           0);
+                }
             }
         }
     }

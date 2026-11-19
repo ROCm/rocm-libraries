@@ -37,32 +37,42 @@ typedef struct
     bool training;
     bool save_mean_invstd;
     int channels_per_block;
+    int n_groups;
+    bool fast_reduce;
 } bn_cfg_t;
 
 /* MUST match CONFIGS in batchnorm2d_emit.py (index for index). */
 static const bn_cfg_t CONFIGS[] = {
     /* 0..2 small single-pass, training */
-    {2, 8, 16, 16, 64, 2, "f16", true, false, 1},
-    {2, 8, 16, 16, 64, 2, "bf16", true, false, 1},
-    {2, 8, 16, 16, 64, 2, "f16", true, true, 1},
+    {2, 8, 16, 16, 64, 2, "f16", true, false, 1, 1, false},
+    {2, 8, 16, 16, 64, 2, "bf16", true, false, 1, 1, false},
+    {2, 8, 16, 16, 64, 2, "f16", true, true, 1, 1, false},
     /* 3..4 inference */
-    {2, 8, 16, 16, 64, 2, "f16", false, false, 1},
-    {2, 8, 16, 16, 64, 2, "bf16", false, false, 1},
+    {2, 8, 16, 16, 64, 2, "f16", false, false, 1, 1, false},
+    {2, 8, 16, 16, 64, 2, "bf16", false, false, 1, 1, false},
     /* 5..7 vec / block sweep */
-    {2, 8, 32, 32, 128, 4, "f16", true, false, 1},
-    {4, 4, 16, 16, 64, 4, "bf16", true, true, 1},
-    {1, 16, 8, 8, 32, 2, "f16", true, false, 1},
+    {2, 8, 32, 32, 128, 4, "f16", true, false, 1, 1, false},
+    {4, 4, 16, 16, 64, 4, "bf16", true, true, 1, 1, false},
+    {1, 16, 8, 8, 32, 2, "f16", true, false, 1, 1, false},
     /* 8 fp16 alias */
-    {2, 8, 16, 16, 64, 2, "fp16", true, false, 1},
+    {2, 8, 16, 16, 64, 2, "fp16", true, false, 1, 1, false},
     /* 9..11 two-pass */
-    {8, 4, 32, 32, 64, 2, "f16", true, false, 1},
-    {8, 4, 32, 32, 64, 2, "bf16", false, false, 1},
-    {8, 4, 32, 32, 64, 4, "f16", true, true, 1},
+    {8, 4, 32, 32, 64, 2, "f16", true, false, 1, 1, false},
+    {8, 4, 32, 32, 64, 2, "bf16", false, false, 1, 1, false},
+    {8, 4, 32, 32, 64, 4, "f16", true, true, 1, 1, false},
     /* 12..15 channels_per_block > 1 lever */
-    {2, 8, 16, 16, 64, 2, "f16", true, false, 2},
-    {2, 8, 16, 16, 64, 2, "bf16", false, false, 4},
-    {4, 4, 16, 16, 64, 4, "bf16", true, true, 2},
-    {8, 4, 32, 32, 64, 2, "f16", true, false, 4},
+    {2, 8, 16, 16, 64, 2, "f16", true, false, 2, 1, false},
+    {2, 8, 16, 16, 64, 2, "bf16", false, false, 4, 1, false},
+    {4, 4, 16, 16, 64, 4, "bf16", true, true, 2, 1, false},
+    {8, 4, 32, 32, 64, 2, "f16", true, false, 4, 1, false},
+    /* 16..18 n_groups > 1 lever (inference-only) */
+    {4, 4, 16, 16, 256, 2, "f16", false, false, 1, 2, false},
+    {4, 4, 16, 16, 256, 2, "bf16", false, false, 1, 4, false},
+    {4, 8, 16, 16, 256, 2, "f16", false, false, 2, 2, false},
+    /* 19..21 fast_reduce lever (training-only) */
+    {2, 8, 16, 16, 64, 2, "f16", true, false, 1, 1, true},
+    {4, 4, 16, 16, 128, 2, "bf16", true, true, 1, 1, true},
+    {2, 8, 16, 16, 64, 2, "f16", true, false, 2, 1, true},
 };
 
 #define NCFG ((int)(sizeof(CONFIGS) / sizeof(CONFIGS[0])))
@@ -82,6 +92,8 @@ static int make_spec(int idx, rocke_batchnorm2d_spec_t* spec)
     spec->training = CONFIGS[idx].training;
     spec->save_mean_invstd = CONFIGS[idx].save_mean_invstd;
     spec->channels_per_block = CONFIGS[idx].channels_per_block;
+    spec->n_groups = CONFIGS[idx].n_groups;
+    spec->fast_reduce = CONFIGS[idx].fast_reduce;
     return 0;
 }
 

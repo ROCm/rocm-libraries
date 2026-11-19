@@ -44,6 +44,7 @@ __all__ = [
     "tree_reduce",
     "welford_block_reduce",
     "welford_block_reduce_stable",
+    "welford_block_reduce_stable_wave_prologue",
 ]
 
 
@@ -542,6 +543,138 @@ def welford_block_reduce_stable(
     m2_out = b.vec_extract(b.smem_load_vN_f32(lds_m2, b.const_i32(0), n=1), 0)
     count_out = b.vec_extract(b.smem_load_vN_f32(lds_count, b.const_i32(0), n=1), 0)
     var_out = b.fmul(m2_out, b.rcp(count_out))
+    return mean_out, var_out
+
+
+def _welford_merge_pair(
+    b: IRBuilder,
+    mean_a: Value,
+    m2_a: Value,
+    cnt_a: Value,
+    mean_b: Value,
+    m2_b: Value,
+    cnt_b: Value,
+) -> Tuple[Value, Value, Value]:
+    """One Welford pairwise merge of two ``(mean, M2, count)`` triples.
+
+    The scalar form of the merge step inside :func:`welford_block_reduce_stable`'s
+    halving loop, factored out so the wave-butterfly prologue below can call it
+    once per shuffle stage without duplicating the formula.
+    """
+    zero = b.const_f32(0.0)
+    count = b.fadd(cnt_a, cnt_b)
+    is_empty = b.fcmp("oeq", count, zero)
+    ratio = b.fmul(cnt_b, b.rcp(count))
+    count_b_over_count = b.select(is_empty, zero, ratio)
+    delta = b.fsub(mean_b, mean_a)
+    new_mean = b.fadd(mean_a, b.fmul(delta, count_b_over_count))
+    dd = b.fmul(delta, delta)
+    cross = b.fmul(b.fmul(dd, cnt_a), count_b_over_count)
+    new_m2 = b.fadd(m2_a, b.fadd(m2_b, cross))
+    return new_mean, new_m2, count
+
+
+def welford_block_reduce_stable_wave_prologue(
+    b: IRBuilder,
+    mean_val: Value,
+    m2_val: Value,
+    count_val: Value,
+    lds_mean: Value,
+    lds_m2: Value,
+    lds_count: Value,
+    tid: Value,
+    *,
+    block_size: int,
+    wave_size: int = 64,
+) -> Tuple[Value, Value]:
+    """Wave-shuffle-first Welford block reduction = warp butterfly + small cross-warp LDS tree.
+
+    Same contract as :func:`welford_block_reduce_stable` (each lane supplies
+    its own partial ``(mean, M2, count)`` triple; returns ``(mean_block,
+    var_block)`` broadcast to every lane), but mirrors
+    :func:`block_lds_reduce_with_wave_prologue`'s two-stage shape instead of
+    :func:`welford_block_reduce_stable`'s flat ``block_size``-wide LDS tree:
+
+    1. **Wave stage** -- ``log2(wave_size)`` butterfly-shuffle merges
+       (``warp_shuffle_xor_dpp`` for masks <= 8, ``warp_shuffle_xor`` above
+       that, matching :func:`_warp_xor_reduce`'s DPP-row trick), each stage
+       applying :func:`_welford_merge_pair` to the local triple and its
+       shuffled partner -- no LDS, no ``sync`` at all. After this every lane
+       in the wave holds the full wave-local Welford triple.
+    2. **Cross-warp stage** -- only when ``block_size > wave_size``: lane 0 of
+       each wave writes its triple into a ``num_warps``-wide slice of the
+       three LDS buffers (the caller's ``block_size``-wide allocations are
+       reused; only the first ``num_warps`` slots are touched), then a
+       halving loop merges down to lane 0 exactly like
+       :func:`welford_block_reduce_stable`'s tree but bounded to
+       ``num_warps`` participants instead of ``block_size``.
+
+    For ``block_size=256``, ``wave_size=64`` this is 6 shuffle stages (no
+    barrier) + 1 barrier + a 2-round LDS halving (4 -> 2 -> 1), i.e. 3 total
+    barriers versus the flat tree's 9 -- mirroring MIOpen's
+    ``shfl_interleaved_reduction_welford`` + ``lds_reduce2_welford`` spatial-
+    batchnorm reduction shape. Numerically identical merge formula to
+    :func:`welford_block_reduce_stable` (same associative/commutative
+    count-weighted combiner), applied in a different (but still
+    deterministic) pairing order.
+    """
+    if mean_val.type.name != "f32":
+        raise ValueError("welford_block_reduce_stable_wave_prologue expects f32 mean_val")
+    if m2_val.type.name != "f32":
+        raise ValueError("welford_block_reduce_stable_wave_prologue expects f32 m2_val")
+    if count_val.type.name != "f32":
+        raise ValueError("welford_block_reduce_stable_wave_prologue expects f32 count_val")
+    if wave_size & (wave_size - 1):
+        raise ValueError(f"wave_size {wave_size} is not a power of two")
+
+    mean_w, m2_w, cnt_w = mean_val, m2_val, count_val
+    stages = wave_size.bit_length() - 1
+    for k in range(stages):
+        mask = 1 << k
+        dpp_mask = mask if mask <= 2 else 2 * mask - 1
+        if mask <= 8:
+            mean_r = b.warp_shuffle_xor_dpp(mean_w, dpp_mask)
+            m2_r = b.warp_shuffle_xor_dpp(m2_w, dpp_mask)
+            cnt_r = b.warp_shuffle_xor_dpp(cnt_w, dpp_mask)
+        else:
+            mean_r = b.warp_shuffle_xor(mean_w, mask)
+            m2_r = b.warp_shuffle_xor(m2_w, mask)
+            cnt_r = b.warp_shuffle_xor(cnt_w, mask)
+        mean_w, m2_w, cnt_w = _welford_merge_pair(b, mean_w, m2_w, cnt_w, mean_r, m2_r, cnt_r)
+
+    num_warps = block_size // wave_size
+    if num_warps == 1:
+        var_w = b.fmul(m2_w, b.rcp(cnt_w))
+        return mean_w, var_w
+
+    c_wave = b.const_i32(wave_size)
+    lane = b.mod(tid, c_wave)
+    warp = b.div(tid, c_wave)
+    with b.scf_if(b.cmp_eq(lane, b.const_i32(0))):
+        b.smem_store_vN_f32(lds_mean, [warp], mean_w, 1)
+        b.smem_store_vN_f32(lds_m2, [warp], m2_w, 1)
+        b.smem_store_vN_f32(lds_count, [warp], cnt_w, 1)
+    b.sync()
+
+    # Every lane (not just a subset gated by `tid`) redundantly reads all
+    # `num_warps` slots and folds them in registers -- avoids indexing the
+    # small per-warp LDS slice by raw `tid` (which is NOT the warp id: many
+    # lanes share one warp slot), matching
+    # :func:`block_lds_reduce_with_wave_prologue`'s same redundant-read shape.
+    mean_out = m2_out = cnt_out = None
+    for w in range(num_warps):
+        c_w = b.const_i32(w)
+        mean_p = b.vec_extract(b.smem_load_vN_f32(lds_mean, c_w, n=1), 0)
+        m2_p = b.vec_extract(b.smem_load_vN_f32(lds_m2, c_w, n=1), 0)
+        cnt_p = b.vec_extract(b.smem_load_vN_f32(lds_count, c_w, n=1), 0)
+        if w == 0:
+            mean_out, m2_out, cnt_out = mean_p, m2_p, cnt_p
+        else:
+            mean_out, m2_out, cnt_out = _welford_merge_pair(
+                b, mean_out, m2_out, cnt_out, mean_p, m2_p, cnt_p
+            )
+
+    var_out = b.fmul(m2_out, b.rcp(cnt_out))
     return mean_out, var_out
 
 

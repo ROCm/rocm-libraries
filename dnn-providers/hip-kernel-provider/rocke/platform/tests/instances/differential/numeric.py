@@ -1182,6 +1182,8 @@ class BatchNormCfg:
     vec: int = 4
     momentum: float = 0.1
     channels_per_block: int = 1
+    n_groups: int = 1
+    fast_reduce: bool = False
 
 
 # H*W must be divisible by block_size*vec (one sweep_row_chunks call per
@@ -1205,6 +1207,35 @@ BATCHNORM_CONFIGS: List[BatchNormCfg] = [
     BatchNormCfg(
         "bn_train_bf16_4x128x8x32_cpb8", 4, 128, 8, 32, "bf16",
         training=True, channels_per_block=8,
+    ),
+    # --- n_groups > 1 lever: inference-only, N and H*W split across the
+    # CTA's threads simultaneously (mirrors MIOpen's spatial thread
+    # mapping) ---
+    BatchNormCfg(
+        "bn_infer_f16_4x32x16x16_ng2", 4, 32, 16, 16, "f16",
+        training=False, block_size=256, vec=2, n_groups=2,
+    ),
+    BatchNormCfg(
+        "bn_infer_bf16_4x32x16x16_ng4", 4, 32, 16, 16, "bf16",
+        training=False, block_size=256, vec=2, n_groups=4,
+    ),
+    BatchNormCfg(
+        "bn_infer_f16_4x64x16x16_cpb2_ng2", 4, 64, 16, 16, "f16",
+        training=False, block_size=256, vec=2, channels_per_block=2, n_groups=2,
+    ),
+    # --- fast_reduce lever: training-only, wave-shuffle-first Welford merge
+    # instead of the flat block_size-wide LDS tree ---
+    BatchNormCfg(
+        "bn_train_f16_16x256x16x16_fr", 16, 256, 16, 16, "f16",
+        training=True, block_size=128, vec=2, fast_reduce=True,
+    ),
+    BatchNormCfg(
+        "bn_train_bf16_16x256x16x16_fr", 16, 256, 16, 16, "bf16",
+        training=True, block_size=128, vec=2, fast_reduce=True,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_2x64x16x16_fr_sw", 2, 64, 16, 16, "f16",
+        training=True, block_size=64, vec=4, fast_reduce=True,
     ),
 ]
 
@@ -1256,6 +1287,8 @@ def run_batchnorm_config(cfg: BatchNormCfg, arch: str = "gfx950") -> NumericResu
         dtype=cfg.dtype,
         training=cfg.training,
         channels_per_block=cfg.channels_per_block,
+        n_groups=cfg.n_groups,
+        fast_reduce=cfg.fast_reduce,
         wave_size=_wave,
     )
     ok, reason = is_valid_spec(spec, arch=arch)

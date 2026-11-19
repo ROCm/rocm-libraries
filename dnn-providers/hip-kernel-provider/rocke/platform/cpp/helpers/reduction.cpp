@@ -640,6 +640,169 @@ int rocke_welford_block_reduce_stable(rocke_ir_builder_t* b,
     return 1;
 }
 
+/* ----------------------------- welford_block_reduce_stable_wave_prologue */
+
+/* _welford_merge_pair(b, mean_a, m2_a, cnt_a, mean_b, m2_b, cnt_b): one Welford
+ * pairwise merge of two (mean, M2, count) triples. Mirrors
+ * reduction.py::_welford_merge_pair -- the scalar form of the merge step
+ * inside rocke_welford_block_reduce_stable's halving loop, factored out so the
+ * wave-butterfly prologue can call it once per shuffle stage. */
+static void rocke_red_welford_merge_pair(rocke_ir_builder_t* b,
+                                         rocke_value_t* mean_a,
+                                         rocke_value_t* m2_a,
+                                         rocke_value_t* cnt_a,
+                                         rocke_value_t* mean_b,
+                                         rocke_value_t* m2_b,
+                                         rocke_value_t* cnt_b,
+                                         rocke_value_t** out_mean,
+                                         rocke_value_t** out_m2,
+                                         rocke_value_t** out_count)
+{
+    rocke_value_t* zero = rocke_b_const_f32(b, 0.0);
+    rocke_value_t* count = rocke_b_fadd(b, cnt_a, cnt_b);
+    rocke_value_t* is_empty = rocke_b_fcmp(b, "oeq", count, zero);
+    rocke_value_t* ratio = rocke_b_fmul(b, cnt_b, rocke_b_rcp(b, count));
+    rocke_value_t* count_b_over_count = rocke_b_select(b, is_empty, zero, ratio);
+    rocke_value_t* delta = rocke_b_fsub(b, mean_b, mean_a);
+    rocke_value_t* new_mean = rocke_b_fadd(b, mean_a, rocke_b_fmul(b, delta, count_b_over_count));
+    rocke_value_t* dd = rocke_b_fmul(b, delta, delta);
+    rocke_value_t* cross = rocke_b_fmul(b, rocke_b_fmul(b, dd, cnt_a), count_b_over_count);
+    rocke_value_t* new_m2 = rocke_b_fadd(b, m2_a, rocke_b_fadd(b, m2_b, cross));
+    *out_mean = new_mean;
+    *out_m2 = new_m2;
+    *out_count = count;
+}
+
+int rocke_welford_block_reduce_stable_wave_prologue(rocke_ir_builder_t* b,
+                                                    rocke_value_t* mean_val,
+                                                    rocke_value_t* m2_val,
+                                                    rocke_value_t* count_val,
+                                                    rocke_value_t* lds_mean,
+                                                    rocke_value_t* lds_m2,
+                                                    rocke_value_t* lds_count,
+                                                    rocke_value_t* tid,
+                                                    int block_size,
+                                                    int wave_size,
+                                                    rocke_value_t** out_mean,
+                                                    rocke_value_t** out_var)
+{
+    rocke_value_t* mean_w;
+    rocke_value_t* m2_w;
+    rocke_value_t* cnt_w;
+    int stages;
+    int k;
+    int num_warps;
+    rocke_value_t* mean_out;
+    rocke_value_t* m2_out;
+    rocke_value_t* cnt_out;
+    int w;
+
+    if(!rocke_red_is_f32(mean_val))
+    {
+        rocke_red_set_err(
+            b, ROCKE_ERR_VALUE, "welford_block_reduce_stable_wave_prologue expects f32 mean_val");
+        return 0;
+    }
+    if(!rocke_red_is_f32(m2_val))
+    {
+        rocke_red_set_err(
+            b, ROCKE_ERR_VALUE, "welford_block_reduce_stable_wave_prologue expects f32 m2_val");
+        return 0;
+    }
+    if(!rocke_red_is_f32(count_val))
+    {
+        rocke_red_set_err(
+            b, ROCKE_ERR_VALUE, "welford_block_reduce_stable_wave_prologue expects f32 count_val");
+        return 0;
+    }
+    if(wave_size & (wave_size - 1))
+    {
+        rocke_red_set_err(b, ROCKE_ERR_VALUE, "wave_size %d is not a power of two", wave_size);
+        return 0;
+    }
+
+    mean_w = mean_val;
+    m2_w = m2_val;
+    cnt_w = count_val;
+    stages = rocke_red_bit_length(wave_size) - 1;
+    for(k = 0; k < stages; ++k)
+    {
+        int mask = 1 << k;
+        int dpp_mask = mask <= 2 ? mask : 2 * mask - 1;
+        rocke_value_t* mean_r;
+        rocke_value_t* m2_r;
+        rocke_value_t* cnt_r;
+        if(mask <= 8)
+        {
+            mean_r = rocke_b_warp_shuffle_xor_dpp(b, mean_w, dpp_mask);
+            m2_r = rocke_b_warp_shuffle_xor_dpp(b, m2_w, dpp_mask);
+            cnt_r = rocke_b_warp_shuffle_xor_dpp(b, cnt_w, dpp_mask);
+        }
+        else
+        {
+            mean_r = rocke_b_warp_shuffle_xor(b, mean_w, mask);
+            m2_r = rocke_b_warp_shuffle_xor(b, m2_w, mask);
+            cnt_r = rocke_b_warp_shuffle_xor(b, cnt_w, mask);
+        }
+        rocke_red_welford_merge_pair(b, mean_w, m2_w, cnt_w, mean_r, m2_r, cnt_r, &mean_w, &m2_w, &cnt_w);
+    }
+
+    num_warps = block_size / wave_size;
+    if(num_warps == 1)
+    {
+        *out_mean = mean_w;
+        *out_var = rocke_b_fmul(b, m2_w, rocke_b_rcp(b, cnt_w));
+        return 1;
+    }
+
+    {
+        rocke_value_t* c_wave = rocke_b_const_i32(b, wave_size);
+        rocke_value_t* lane = rocke_b_mod(b, tid, c_wave);
+        rocke_value_t* warp = rocke_b_div(b, tid, c_wave);
+        rocke_if_t iff = rocke_b_scf_if(b, rocke_b_cmp_eq(b, lane, rocke_b_const_i32(b, 0)));
+        rocke_b_region_enter(b, iff.then_region);
+        {
+            rocke_value_t* idx[1];
+            idx[0] = warp;
+            rocke_b_smem_store_vN_f32(b, lds_mean, idx, 1, mean_w, 1);
+            rocke_b_smem_store_vN_f32(b, lds_m2, idx, 1, m2_w, 1);
+            rocke_b_smem_store_vN_f32(b, lds_count, idx, 1, cnt_w, 1);
+        }
+        rocke_b_region_leave(b);
+    }
+    rocke_b_sync(b);
+
+    mean_out = NULL;
+    m2_out = NULL;
+    cnt_out = NULL;
+    for(w = 0; w < num_warps; ++w)
+    {
+        rocke_value_t* idx[1];
+        rocke_value_t* mean_p;
+        rocke_value_t* m2_p;
+        rocke_value_t* cnt_p;
+        idx[0] = rocke_b_const_i32(b, w);
+        mean_p = rocke_b_vec_extract(b, rocke_b_smem_load_vN_f32(b, lds_mean, idx, 1, 1), 0);
+        m2_p = rocke_b_vec_extract(b, rocke_b_smem_load_vN_f32(b, lds_m2, idx, 1, 1), 0);
+        cnt_p = rocke_b_vec_extract(b, rocke_b_smem_load_vN_f32(b, lds_count, idx, 1, 1), 0);
+        if(w == 0)
+        {
+            mean_out = mean_p;
+            m2_out = m2_p;
+            cnt_out = cnt_p;
+        }
+        else
+        {
+            rocke_red_welford_merge_pair(
+                b, mean_out, m2_out, cnt_out, mean_p, m2_p, cnt_p, &mean_out, &m2_out, &cnt_out);
+        }
+    }
+
+    *out_mean = mean_out;
+    *out_var = rocke_b_fmul(b, m2_out, rocke_b_rcp(b, cnt_out));
+    return 1;
+}
+
 /* ---------------------------------------------- block_lds_reduce_with_index */
 
 int rocke_block_lds_reduce_with_index(rocke_ir_builder_t* b,
