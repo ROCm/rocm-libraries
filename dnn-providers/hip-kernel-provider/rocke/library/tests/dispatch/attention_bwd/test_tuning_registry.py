@@ -215,6 +215,21 @@ _SMALL_TILE = {
     "pt_route": "lds", "waves": 4, "block_m": 32, "block_n": 16, "block_k4": 16,
     "atom_g4": "16x16x16",
 }  # fmt: skip
+# Tiles on which the transposed / replicated grids are legal (gfx942): found on
+# the geometry pools, kept here so the search needs no pool for them.
+_GRID_W4 = {
+    "waves": 4, "block_m": 64, "block_n": 32, "pt_route": "lds", "kt_source": "lds",
+    "warp_grid_g02": (2, 2), "warp_grid_g13": (2, 2), "warp_grid_g4": (1, 4),
+}  # fmt: skip
+_GRID_W2_M16 = {
+    "waves": 2, "block_m": 16, "block_n": 32,
+    "warp_grid_g02": (1, 2), "warp_grid_g4": (1, 2),
+}  # fmt: skip
+_GRID_W2_M64 = {
+    "waves": 2, "block_m": 64, "block_n": 16, "block_k4": 16, "pt_route": "lds",
+    "kt_source": "lds", "kv_residency": "lds", "warp_grid_g02": (2, 1),
+    "warp_grid_g4": (1, 2),
+}  # fmt: skip
 # Couplings a value needs (tried before the geometry pools).
 _CONTEXTS = {
     "agpr_route": ({}, _ROUTE, {"agpr_alloc": (192, 192)}),
@@ -222,8 +237,10 @@ _CONTEXTS = {
     "asm_cluster": (_ASM, {**_ASM, "agpr_alloc": (192, 192)}),
     "asm_load_hoist": (_ASM, {**_ASM, "agpr_alloc": (192, 192)}),
     "s_in_agpr": ({}, _ROUTE, {"agpr_alloc": "backend"}),
-    "warp_grid_g02": ({}, {"pt_route": "lds"}, _SMALL_TILE),
-    "warp_grid_g13": ({}, {"pt_route": "lds"}, _SMALL_TILE),
+    "warp_grid_g02": ({}, {"pt_route": "lds"}, _SMALL_TILE, _GRID_W4),
+    "warp_grid_g13": (
+        {}, {"pt_route": "lds"}, _SMALL_TILE, _GRID_W4, _GRID_W2_M16, _GRID_W2_M64,
+    ),  # fmt: skip
     "acc_in_lds": ({}, {"agpr_alloc": (0, 0)}),
     "dkv_atomic_guard": ({}, {"dkv_mode": "atomic"}),
     "setprio": ({"sched": "stage_table"}, {"sched": "stage_table_atomics"}),
@@ -717,7 +734,11 @@ def test_barrier_merge_axes_follow_the_validator_couplings():
     for p, st in zip(merged, statuses):
         if st == "illegal":
             assert status({**p, "barrier_merge": "off"}) == "illegal", p
-    full = sw.schedule_values(c.with_knobs(barrier_merge="on"), ALL_FULL)
+    # ring_issue = "late" applies wherever barrier_merge = "on" is set, so the
+    # full level of the start point alone shows both values
+    cm = c.with_knobs(barrier_merge="on")
+    start = sw.schedule_values(cm, ALL_FULL, extras=False)[:1]
+    full = sw.with_extras(cm, ALL_FULL, start, sw.SCHEDULE_EXTRA)
     assert _values(full, "ring_issue", "early") == {"early", "late"}
 
 
