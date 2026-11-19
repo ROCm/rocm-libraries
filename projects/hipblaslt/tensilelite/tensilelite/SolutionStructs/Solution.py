@@ -7682,7 +7682,8 @@ class Solution(collections.abc.Mapping):
     if state.get("WaveTileContiguousA"):
       pt = state["ProblemType"]
       supported = (tuple(state["ISA"]) == (12, 5, 0)
-                   and state["MatrixInstM"] == state["MatrixInstN"] == 16
+                   and (state["MatrixInstM"], state["MatrixInstN"]) in
+                       ((16, 16), (16, 32) if state["SourceSwap"] else (32, 16))
                    and state["MatrixInstBM"] == state["MatrixInstBN"] == 1
                    and state["WavefrontSize"] == 32 and state["MIWaveGroup"] == [2, 2]
                    and state["MIArchVgpr"] and state["LocalSplitU"] == 1
@@ -7691,25 +7692,22 @@ class Solution(collections.abc.Mapping):
                    and not state["LDSTrInst"] and not pt["Sparse"]
                    and not state["StoreRemapVectorWidth"]
                    and not state.get("UseSubtileImpl"))
-      for axis, tc in enumerate(("A", "B")):
-        width = state["VectorWidth" + tc]
-        if tc == "B":
-          supported &= width > 0 and width & (width - 1) == 0
-        if pt.get("MXBlock" + tc):
-          width = mxReadVectorWidth(state, "MXS" + tc)
-          # LRA and DS immediates apply padding separately; their phases must agree.
-          scaleBlock = state["LdsBlockSizePerPadMXS" + tc]
-          if scaleBlock and state["LdsPadMXS" + tc]:
-            scaleTile = 16 * (state["MatrixInstK"] // pt["MXBlock" + tc])
-            vectors = state["MIWaveTile"][axis] // width
-            groupTiles = width * (2 if vectors >= 2 and vectors % 2 == 0 else 1)
-            supported &= (scaleTile > 0 and (scaleTile % scaleBlock == 0 or scaleBlock % scaleTile == 0)
-                          and scaleTile * groupTiles % scaleBlock == 0
-                          and scaleTile * state["MIWaveTile"][axis] % scaleBlock == 0)
-          supported &= (state["MXScaleFormat"] == "InMemorySwizzle"
-                        and pt.get("MXBlockFree" + tc, 1) == 1
-                        and state["MatrixInstK"] // pt["MXBlock" + tc] == 4
-                        and not state.get("DirectToVgprMXS" + tc))
+      if pt.get("MXBlockA"):
+        width = mxReadVectorWidth(state, "MXSA")
+        # LRA and DS immediates apply padding separately; their phases must agree.
+        scaleBlock = state["LdsBlockSizePerPadMXSA"]
+        if scaleBlock and state["LdsPadMXSA"]:
+          matrixDim = state["MatrixInstM"]
+          scaleTile = matrixDim * (state["MatrixInstK"] // pt["MXBlockA"])
+          vectors = state["MIWaveTile"][0] // width
+          tileSpan = matrixDim == state["WavefrontSize"] // 2 and vectors >= 2 and vectors % 2 == 0
+          groupTiles = width * (2 if tileSpan else 1)
+          supported &= (scaleTile > 0 and (scaleTile % scaleBlock == 0 or scaleBlock % scaleTile == 0)
+                        and scaleTile * groupTiles % scaleBlock == 0
+                        and scaleTile * state["MIWaveTile"][0] % scaleBlock == 0)
+        supported &= (state["MXScaleFormat"] == "InMemorySwizzle"
+                      and pt.get("MXBlockFreeA", 1) == 1
+                      and not state.get("DirectToVgprMXSA"))
       if not supported:
         reject(state, printRejectionReason, "WaveTileContiguousA: unsupported read/store layout or padding phase")
         return

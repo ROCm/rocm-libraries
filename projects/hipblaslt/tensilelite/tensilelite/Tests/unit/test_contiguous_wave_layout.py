@@ -56,13 +56,13 @@ def _execute(module, registers):
     return registers
 
 
-def _component(wave_tile_a, width_a, source_swap, contiguous, store_width=None, width_b=8):
+def _component(wave_tile_a, width_a, source_swap, contiguous, store_width=None, width_b=8, matrix=(16, 16)):
     rocIsa.getInstance().setKernel((12, 5, 0), 32)
     kernel = dict(
         WavefrontSize=32, MIWaveGroup=[2, 2], MIWaveTile=[wave_tile_a, 8],
-        MatrixInstM=16, MatrixInstN=16, MatrixInstBM=1, MatrixInstBN=1,
+        MatrixInstM=matrix[0], MatrixInstN=matrix[1], MatrixInstBM=1, MatrixInstBN=1,
         MIOutputVectorWidth=8, VectorWidthA=width_a, VectorWidthB=width_b,
-        MacroTile0=32 * wave_tile_a, MacroTile1=256,
+        MacroTile0=2 * matrix[0] * wave_tile_a, MacroTile1=16 * matrix[1],
         BufferStore=False, StoreRemapVectorWidth=0, LocalSplitU=1,
         EnableMatrixInstruction=True, SourceSwap=source_swap, _VectorStore=True,
         StoreVectorWidth=width_a if source_swap else 8 * width_a, GlobalSplitU=1, GlobalSplitUAlgorithm="MultipleBuffer",
@@ -124,29 +124,32 @@ def test_wave_output_coverage(wave_tile, width, width_b, contiguous, source_swap
         assert all_outputs == {(m, n) for m in range(32 * wave_tile) for n in range(256)}
 
 
+@pytest.mark.parametrize("rectangular", [False, True])
 @pytest.mark.parametrize("source_swap,store_width", [
     (False, None), (False, 1), (False, 2), (False, 4), (False, 8),
     (True, None), (True, 1),
 ])
 @pytest.mark.parametrize("wave_tile,width", [(7, 1), (6, 1), (6, 2), (6, 3), (8, 4), (12, 6), (16, 8), (10, 1), (10, 2)])
 @pytest.mark.parametrize("width_b", [2, 4, 8])
-def test_native_wmma_results_store_without_lane_exchange(wave_tile, width, source_swap, store_width, width_b):
+def test_native_wmma_results_store_without_lane_exchange(wave_tile, width, source_swap, store_width, width_b, rectangular):
     from tensilelite.KernelWriterModules import accToArchMapper
 
-    writer, kernel, coordinates = _component(wave_tile, width, source_swap, True, store_width, width_b)
+    matrix = ((16, 32) if source_swap else (32, 16)) if rectangular else (16, 16)
+    outputs = matrix[0] * matrix[1] // 32
+    writer, kernel, coordinates = _component(wave_tile, width, source_swap, True, store_width, width_b, matrix)
     states = []
     for serial in range(128):
         wave, lane = divmod(serial, 32)
         state = {"v[vgprSerial]": serial}
         for j in range(8):
             for i in range(wave_tile):
-                for t in range(8):
+                for t in range(outputs):
                     # WMMA result coordinates before the store address mapping.
-                    m, n = ((lane % 16, 8 * (lane // 16) + t) if source_swap
-                            else (8 * (lane // 16) + t, lane % 16))
-                    point = (wave % 2 * 16 * wave_tile + 16 * i + m,
-                             16 * width_b * (wave // 2 + 2 * (j // width_b)) + width_b * n + j % width_b)
-                    state[f"C{8 * (i + wave_tile * j) + t}"] = point
+                    output = 16 * (t // 8) + 8 * (lane // 16) + t % 8
+                    m, n = (lane % 16, output) if source_swap else (output, lane % 16)
+                    point = (wave % 2 * matrix[0] * wave_tile + matrix[0] * i + m,
+                             matrix[1] * width_b * (wave // 2 + 2 * (j // width_b)) + width_b * n + j % width_b)
+                    state[f"C{outputs * (i + wave_tile * j) + t}"] = point
         states.append(state)
     _, arch2acc = accToArchMapper(kernel)
     widths, element_lists = NotLocalFullTileElementsMFMA().getElements(writer, kernel)

@@ -990,8 +990,9 @@ def _execute_scale_addresses(source, serial):
 ])
 @pytest.mark.parametrize("source_swap", [False, True])
 @pytest.mark.parametrize("dtype,depth_u", [("F8", 128), ("F4", 256)])
+@pytest.mark.parametrize("rectangular", [False, True])
 def test_contiguous_a_scale_loads_match_wmma_rows(
-        derive, assembler, monkeypatch, tile, width, source_swap, dtype, depth_u):
+        derive, assembler, monkeypatch, tile, width, source_swap, dtype, depth_u, rectangular):
     import re
     from codegen_harness import emit_one_kernel
     from tensilelite.Common.Types import DebugConfig
@@ -1030,10 +1031,10 @@ def test_contiguous_a_scale_loads_match_wmma_rows(
         return result
 
     monkeypatch.setattr(LocalReadMFMA, "localReadMX", local_read)
-    sol, out = derive(1, mi=[16, 16, 128, 1, 1, tile, 2, 2, 2],
+    sol, out = derive(1, mi=[32 if rectangular else 16, 16, 128, 1, 1, tile, 1 if rectangular else 2, 2, 2],
                       VectorWidthA=width, VectorWidthB=1, DepthU=depth_u, HalfPLR=0,
                       SourceSwap=source_swap, WaveTileContiguousA=True,
-                      LDSSegmentBRotate=1, NumElementsPerBatchStore=16,
+                      LDSSegmentBRotate=0 if rectangular else 1, NumElementsPerBatchStore=16,
                       LdsPadMXSA=-1, LdsBlockSizePerPadMXSA=-1,
                       ProblemType={"DataType": dtype, "DestDataType": "S",
                                    "MXBlockA": 32, "MXBlockB": 32})
@@ -1045,7 +1046,8 @@ def test_contiguous_a_scale_loads_match_wmma_rows(
     name, _, error = emit_one_kernel(writer, kernel, canonical=False)
     assert error == 0, name
     assert len(init) == 4 and loads
-    count = tile // 2 if tile % 2 == 0 else tile
+    matrix_m = sol["MatrixInstM"]
+    count = tile // 2 if matrix_m == 16 and tile % 2 == 0 else tile
     assert writer.states.mxsa.numVgprValuPerBlock == count
     assert writer.states.numReadsPerIterMXSA == count
     assert writer.tPA["MX"]["localReadInstruction"].blockWidth == 1
@@ -1055,7 +1057,7 @@ def test_contiguous_a_scale_loads_match_wmma_rows(
     _, normalized = _execute_scale_addresses(source, 0)
     offsets = sol["LDSSegInterleaveOffsets"]
     split = bool(offsets.get("mxsSplitA"))
-    assert split is (tile % 2 == 0)
+    assert split is (matrix_m * tile * 4 % 128 == 0)
     buffer_stride = offsets.get("bufferStrideMXSA", sol["LdsOffsetA_Blk"])
     pad = sol["LdsPadMXSA"]
     pad_block = sol["LdsBlockSizePerPadMXSA"]
@@ -1064,7 +1066,7 @@ def test_contiguous_a_scale_loads_match_wmma_rows(
         return address + (address // pad_block) * pad if pad_block else address
 
     for k_offset, module in set(loads):
-        assert k_offset % (tile * 16 * 4) == 0
+        assert k_offset % (tile * matrix_m * 4) == 0
         instructions = [line for line in module.splitlines() if line.startswith("ds_load_")]
         assert len(instructions) == count
         by_register = {}
@@ -1079,19 +1081,19 @@ def test_contiguous_a_scale_loads_match_wmma_rows(
             register, selector = writer.mxsTileSpanScaleSel(kernel, writer.tPA["MX"], logical_tile)
             addr, immediate = by_register[register]
             for wave in range(4):
-                for row_in_tile in range(16):
+                for row_in_tile in range(matrix_m):
                     regs = lane_regs[wave * 32 + row_in_tile + selector * 16]
                     for phase in (0, 1):
                         actual = regs[addr]
                         if phase:
                             actual ^= regs["v[vgprLocalReadSwapAddrMXSA]"]
                         actual += immediate
-                        row = logical_tile * 16 + row_in_tile
+                        row = logical_tile * matrix_m + row_in_tile
                         expected = offsets["ldsBaseMXSA"] + phase * buffer_stride
                         if split:
                             expected += (wave % 2) * offsets["mxsaStrideBytes"]
                         else:
-                            row += (wave % 2) * tile * 16
+                            row += (wave % 2) * tile * matrix_m
                         expected += padded(k_offset + row * 4)
                         # One dword contains the four K-block scales for this row.
                         assert list(range(actual, actual + 4)) == list(range(expected, expected + 4))
@@ -1347,3 +1349,33 @@ def test_contiguous_a_mxsa_split_budget_keeps_auto_fallback_intact(derive, sourc
             assert "requires paired LDS placement: layout exceeds MaxLDS" in out
         else:
             assert "LDSSegmentBRotate: needs LDSSegmentInterleave=1" in out
+
+
+@pytest.mark.parametrize("source_swap,tile,width,depth_u,half_plr,mt", [
+    (False, [10, 4], -1, 256, 1, (640, 128)),
+    (True, [10, 4], -1, 512, 1, (320, 256)),
+    (True, [10, 4], -1, 256, 1, (320, 256)),
+    (False, [4, 10], 2, 512, 1, (256, 320)),
+    (False, [4, 10], 2, 256, 1, (256, 320)),
+    (True, [4, 10], 2, 256, 2, (128, 640)),
+])
+@pytest.mark.parametrize("mode", [0, 1])
+@pytest.mark.parametrize("mx_block,scale_type", [(16, "F8"), (32, "E8"), (128, "E8")])
+def test_contiguous_a_rectangular_mxf4_derivation(derive, source_swap, tile, width, depth_u, half_plr, mt, mode, mx_block, scale_type):
+    sol, out = derive(mode, mi=[32, 16, 128, 1, 1, *tile, 2, 2],
+                      VectorWidthA=width, VectorWidthB=2, DepthU=depth_u, HalfPLR=half_plr,
+                      SourceSwap=source_swap, WaveTileContiguousA=True,
+                      LDSSegmentBRotate=0, ClusterDim=[4, 4], ClusterAIDMapping=-2,
+                      ProblemType={"DataType": "F4", "DestDataType": "F8",
+                                   "MXBlockA": mx_block, "MXBlockB": mx_block,
+                                   "DataTypeMXSA": scale_type, "DataTypeMXSB": scale_type})
+    if mx_block == 16 and depth_u == 512:
+        assert not sol["Valid"]
+        assert "exceeds MaxLDS" in out or "bytes of LDS" in out
+        return
+    assert sol["Valid"], out
+    assert sol["WaveTileContiguousA"]
+    assert sol["LDSSegmentInterleave"] == mode
+    assert sol["StoreVectorWidth"] == (1 if source_swap else 8)
+    assert (sol["MacroTile0"], sol["MacroTile1"]) == mt
+    assert sol["LdsNumBytes"] <= sol["MaxLDS"]

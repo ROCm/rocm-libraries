@@ -7,7 +7,6 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
-  NumElementsToValidateWinner: -1
   KernelTime: false
   BoundsCheck: 0
   PrintSolutionRejectionReason: true
@@ -27,10 +26,8 @@ GlobalParameters:
   SkipSlowSolutionRatio: 0.0
   NumBenchmarks: 1
   NumWarmups: 0
-  EnqueuesPerSync: 0
   DataInitTypeMXSA: 3
   DataInitTypeMXSB: 3
-  MXDataGenerator: false
 BenchmarkProblems:
 # FP8
 - - OperationType: GEMM

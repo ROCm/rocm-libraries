@@ -188,11 +188,12 @@ def accToArchMapper(kernel):
 
   if kernel.get("WaveTileContiguousA"):
     wt, nt = kernel["MIWaveTile"]
+    outputs = kernel["MatrixInstM"] * kernel["MatrixInstN"] // kernel["WavefrontSize"]
     for j in range(nt):
       for i in range(wt):
-        for t in range(8):
-          src = t + 8 * (i + wt * j)
-          dst = i + wt * (t + 8 * j) if kernel["SourceSwap"] else src
+        for t in range(outputs):
+          src = t + outputs * (i + wt * j)
+          dst = i + wt * (t + outputs * j) if kernel["SourceSwap"] else src
           acc2arch[src], arch2acc[dst] = dst, src
     return acc2arch, arch2acc
 

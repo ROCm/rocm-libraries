@@ -752,8 +752,8 @@ class LocalReadMFMA(LocalRead):
                 blockStep = (2 * vIdx) if mxsTileSpan else vIdx
                 mStep = MIWaveGroupShape[tile01]
                 if contiguousA:
-                    offset_val *= 16
-                    mStep = 16 * vectorWidth
+                    offset_val *= kernel["MatrixInstM"]
+                    mStep = kernel["MatrixInstM"] * vectorWidth
                 if mxPhase:
                     pass
                 elif mx2d:
@@ -1788,7 +1788,8 @@ class LocalReadMFMA(LocalRead):
                                     incOffset = rIdx * numElementPerRead * UnrollStride
                                 elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
                                     incOffset = rIdx * numElementPerRead * UnrollStride * 2
-                                    incOffset += tiIdx * matrixInstTO * vectorWidth * tileStride
+                                    tileWidth = 1 if kernel.get("WaveTileContiguousA") and tc == "A" else vectorWidth
+                                    incOffset += tiIdx * matrixInstTO * tileWidth * tileStride
                                 else:
                                     vw = kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]
                                     incOffset = (rIdx // vw) * UnrollStride * vw
@@ -1813,7 +1814,7 @@ class LocalReadMFMA(LocalRead):
                                              and _segOff.get("activeTC") == tc
                                              and numVectorsPerTile > 1)
                                 if kernel.get("WaveTileContiguousA") and tc == "A":
-                                    vCols = (vIdx * numOffsets + oIdx) * 16 * vectorWidth
+                                    vCols = (vIdx * numOffsets + oIdx) * matrixInstT * vectorWidth
                                 elif _portSplit:
                                     # Drop the wave-group factor from the per-vIdx column stride so the
                                     # two vIdx stay within this port's segment; the A0->A1 segment jump
@@ -1845,7 +1846,7 @@ class LocalReadMFMA(LocalRead):
                                     perpStrideInv = permBlock // perpStride
                                     offset_val = (eIdx * (perpStrideInv) + vCols) * tileStride
                                 else:
-                                    freeStep = 16 if kernel.get("WaveTileContiguousA") and tc == "A" else 1
+                                    freeStep = matrixInstT if kernel.get("WaveTileContiguousA") and tc == "A" else 1
                                     offset_val = (eIdx * freeStep + vCols) * tileStride
 
                                 if kernel["ProblemType"]["Sparse"] != 0:
