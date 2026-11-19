@@ -480,21 +480,30 @@ class ConvArgs:
     # ---- the ABI ----
 
     def arg_names(
-        self, *, two_stage: bool = False, streamk: Optional[str] = None
+        self,
+        *,
+        two_stage: bool = False,
+        streamk: Optional[str] = None,
+        addr64: bool = False,
     ) -> List[ArgSpec]:
         """The ordered kernarg ABI of the kernel these args launch.
 
         ``streamk`` is the stream-K reduction of a stream-K wgrad kernel.
+        ``addr64`` selects the large-tensor forward-addressing ABI (fwd,
+        2D only) -- see :func:`kernels.common.conv_abi.conv_arg_names`.
         """
         if self.algorithm == "direct":
-            if two_stage or streamk is not None:
-                raise ValueError("direct conv has no two-stage or stream-K variant")
+            if two_stage or streamk is not None or addr64:
+                raise ValueError(
+                    "direct conv has no two-stage, stream-K, or addr64 variant"
+                )
             return conv_direct_arg_names(direction=self.direction)
         return conv_arg_names(
             direction=self.direction,
             is_3d=self.geom.is_3d,
             two_stage=two_stage,
             streamk=streamk,
+            addr64=addr64,
         )
 
     # ---- GEMM view (implicit GEMM only) ----
@@ -713,6 +722,7 @@ class ConvArgs:
         streamk: Optional[StreamKLaunch] = None,
         sk_flags: Optional[int] = None,
         sk_partials: Optional[int] = None,
+        addr64: bool = False,
     ) -> Dict[str, int]:
         """Return the ``values`` dict for ``KernelLauncher.__call__()``.
 
@@ -752,9 +762,12 @@ class ConvArgs:
                 f"stream-K partitions K itself; launch it with split_k=1 "
                 f"(got {split_k})"
             )
+        if addr64 and (split_k != 1 or ws_ptr is not None or streamk is not None):
+            raise ValueError("addr64 does not yet support split-K or stream-K")
         abi = self.arg_names(
             two_stage=ws_ptr is not None and streamk is None,
             streamk=streamk.reduction if streamk is not None else None,
+            addr64=addr64,
         )
         names = [n for n, _ in abi]
         values: Dict[str, int] = dict(

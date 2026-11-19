@@ -172,14 +172,16 @@ def _fwd_arg_names(
     return out
 
 
-def conv_fwd_problem_block(*, is_3d: bool = False) -> List[ArgSpec]:
+def conv_fwd_problem_block(*, is_3d: bool = False, addr64: bool = False) -> List[ArgSpec]:
     """The forward AOT problem block on its own, without the leading pointers.
 
     A fused kernel that embeds the forward conv body (``deep_fused_conv_pool``)
     keeps its own pointer convention and appends this block, so it picks up the
-    same runtime problem args in the same order.
+    same runtime problem args in the same order. ``addr64`` selects the
+    large-tensor forward-addressing ABI (fwd, 2D only) -- see
+    :func:`_fwd_arg_names`.
     """
-    return _fwd_arg_names(is_3d=is_3d)[_LEADING_ARGS:]
+    return _fwd_arg_names(is_3d=is_3d, addr64=addr64)[_LEADING_ARGS:]
 
 
 # Stream-K reductions of the wgrad kernel, as ABI selectors.
