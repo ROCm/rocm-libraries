@@ -538,6 +538,17 @@ TEST_F(IntegrationGpuMatmulApplicability, NarrowFusedIntermediateEqualToOutputDe
     expectDeclinedBeforeBuildPlans(c);
 }
 
+// Activation only: a narrow matmul output feeding a lone RELU_FWD, with no bias node.
+// Fails if the intermediate check runs only when the graph has a bias.
+TEST_F(IntegrationGpuMatmulApplicability, NarrowFusedIntermediateBeforeActivationOnlyDeclines)
+{
+    auto c = narrowIntermediateCaseMatmulOut();
+    c.withBias = false;
+    c.withRelu = true;
+    c.finalType = DataType::HALF;
+    expectDeclinedBeforeBuildPlans(c);
+}
+
 // Positive control for the decline rule: a FLOAT intermediate under HALF io builds and matches.
 TEST_F(IntegrationGpuMatmulApplicability, FloatFusedIntermediateWithHalfOutputMatchesReference)
 {
@@ -646,4 +657,24 @@ TEST_F(IntegrationGpuMatmulApplicability, FusedFinalWithPaddedBatchStrideMatches
     c.finalStrides = {27, 5, 1};
     c.withRelu = true;
     expectMatchesReference(c, FP32_TOLERANCE);
+}
+
+// The same padded final output under HALF io with a FLOAT intermediate: the FP32-only
+// intermediate rule and the final output's own batch stride apply together.
+// Fails if either rule declines the graph or D is written at the matmul output's batch stride.
+TEST_F(IntegrationGpuMatmulApplicability, HalfFusedFinalWithPaddedBatchStrideMatchesReference)
+{
+    MatmulCase c;
+    c.m = 4;
+    c.k = 8;
+    c.n = 5;
+    c.batchDims = {2};
+    c.ioType = DataType::HALF;
+    c.intermediateType = DataType::FLOAT;
+    c.matmulOutType = DataType::FLOAT;
+    c.cStrides = {20, 5, 1};
+    c.finalStrides = {27, 5, 1};
+    c.withRelu = true;
+    c.finalType = DataType::HALF;
+    expectMatchesReference(c, FP16_TOLERANCE);
 }

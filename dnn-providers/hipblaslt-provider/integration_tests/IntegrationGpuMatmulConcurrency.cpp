@@ -404,8 +404,10 @@ TEST_F(IntegrationGpuMatmulConcurrency, ConcurrentHandleCreateDestroy)
 // Concurrent get_knobs_for_engine() calls on one finalized graph. The call takes no handle, so
 // threads that each own a handle still go through the graph's own plugin handle, whose
 // engine-details buffers every call stores and removes. Fails (crash in the plugin handle's
-// map) if that bookkeeping is not synchronized; each call must also return every reference knob
-// with the same id, description, deprecation flag, type, default value and constraint.
+// map) if that bookkeeping is not synchronized, or if a call returns a different knob list than
+// the single-threaded reference. The hipBLASLt engine publishes no knobs, so the reference list
+// is asserted empty: an engine that gains knobs must revisit this test, whose per-knob field
+// comparison then starts comparing content.
 TEST_F(IntegrationGpuMatmulConcurrency, ConcurrentKnobQueriesOnSharedGraph)
 {
     constexpr int64_t KNOB_DIM = 32;
@@ -443,6 +445,8 @@ TEST_F(IntegrationGpuMatmulConcurrency, ConcurrentKnobQueriesOnSharedGraph)
     std::vector<Knob> referenceKnobs;
     result = graph.get_knobs_for_engine(engineId, referenceKnobs);
     ASSERT_TRUE(result.is_good()) << result.err_msg;
+    ASSERT_TRUE(referenceKnobs.empty())
+        << "HIPBLASLT_ENGINE now publishes knobs; check the per-knob comparison covers them";
 
     const Graph& sharedGraph = graph;
     FailureRecorder failures;

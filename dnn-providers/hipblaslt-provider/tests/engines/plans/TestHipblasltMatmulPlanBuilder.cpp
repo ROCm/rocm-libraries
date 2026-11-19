@@ -1339,6 +1339,19 @@ TEST_F(TestHipblasltMatmulPlanBuilder, DeclinesNarrowIntermediatesEqualToNarrowO
                                           true,
                                           PointwiseMode::UNSET,
                                           {{0, narrow}, {1, narrow}, {3, narrow}, {4, narrow}}));
+        // Activation only (A, B, C_matmul, C): a narrow matmul output equal to the narrow final
+        // output is declined with no bias node in the graph.
+        EXPECT_FALSE(isApplicableWithTypes(_planBuilder,
+                                           _handle,
+                                           false,
+                                           PointwiseMode::RELU_FWD,
+                                           {{0, narrow}, {1, narrow}, {2, narrow}, {3, narrow}}));
+        // Positive control: the same activation-only graph with a FLOAT matmul output.
+        EXPECT_TRUE(isApplicableWithTypes(_planBuilder,
+                                          _handle,
+                                          false,
+                                          PointwiseMode::RELU_FWD,
+                                          {{0, narrow}, {1, narrow}, {3, narrow}}));
     }
 }
 
