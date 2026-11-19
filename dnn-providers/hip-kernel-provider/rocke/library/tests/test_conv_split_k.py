@@ -494,12 +494,15 @@ def test_dgrad_fallback_does_not_clamp_fp32():
     assert result.split_k > ATOMIC_16BIT_MAX_SPLIT_K
 
 
-# 1x1, small channels, long N*H*W reduction: the CK formula asks for 608 on
-# gfx942 and 512 on gfx90a, far past the 16-bit atomic limit.
+# 1x1, small channels, long N*H*W reduction: the CK formula asks for 512 on
+# gfx90a, far past the 16-bit atomic limit. gfx942 wgrad does not take the CK
+# formula: it resolves through its provisional cost model
+# (conv_split_k._WGRAD_COST_MODELS), so every fallback test below runs on
+# gfx90a and the gfx942 cost-model tests pin what gfx942 does instead.
 FALLBACK_WGRAD = ConvProblem(N=256, Hi=28, Wi=28, C=32, K=32, Y=1, X=1)
 
 
-@pytest.mark.parametrize("arch", ["gfx942", "gfx90a"])
+@pytest.mark.parametrize("arch", ["gfx90a"])
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
 def test_wgrad_fallback_moves_a_16bit_atomic_past_its_limit_to_the_workspace(
     arch, dtype
@@ -509,9 +512,6 @@ def test_wgrad_fallback_moves_a_16bit_atomic_past_its_limit_to_the_workspace(
     assert (r.split_k, r.two_stage) == (r.requested, True)
 
 
-# gfx942 wgrad resolves through its provisional cost model
-# (conv_split_k._WGRAD_COST_MODELS), not the CK formula, so the fixed-atomic
-# fallback is checked on gfx90a; the gfx942 model is held to the same limit.
 @pytest.mark.parametrize("arch", ["gfx90a"])
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
 def test_wgrad_fallback_holds_a_fixed_16bit_atomic_to_its_limit(arch, dtype):
@@ -538,7 +538,23 @@ def test_wgrad_fallback_holds_the_atomic_when_the_workspace_does_not_fit(dtype):
 
 
 def test_wgrad_fallback_does_not_clamp_fp32():
+    r = _wgrad(FALLBACK_WGRAD, "gfx90a", "fp32", reduction="atomic")
+    assert r.reason.startswith("CK formula")
+    assert r.split_k == r.requested > ATOMIC_16BIT_MAX_SPLIT_K
+
+
+@pytest.mark.parametrize("dtype", ["bf16", "fp16", "fp32"])
+def test_wgrad_gfx942_auto_resolves_through_its_cost_model(dtype):
+    # gfx942 wgrad takes the provisional cost model, not the CK formula; a
+    # 16-bit atomic it picks stays within the atomic's limit.
+    r = _wgrad(FALLBACK_WGRAD, "gfx942", dtype, reduction="auto")
+    assert r.reason.startswith("cost model")
+    assert r.two_stage or dtype == "fp32" or r.split_k <= ATOMIC_16BIT_MAX_SPLIT_K
+
+
+def test_wgrad_gfx942_cost_model_does_not_clamp_fp32():
     r = _wgrad(FALLBACK_WGRAD, "gfx942", "fp32", reduction="atomic")
+    assert r.reason.startswith("cost model")
     assert r.split_k == r.requested > ATOMIC_16BIT_MAX_SPLIT_K
 
 

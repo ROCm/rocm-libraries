@@ -229,6 +229,13 @@ the packed atomic: `reduction="auto"` moves it to the f32 workspace when one
 fits (else holds it to 128 on the atomic when the atomic is available), and
 `reduction="atomic"` holds it to 128.
 
+gfx942 has no fitted planner model, but its wgrad does not take the CK formula
+either: `conv_split_k` resolves it through a provisional wgrad-only cost model
+(`_WGRAD_COST_MODELS["gfx942"]`, the gfx950 fit rescaled to gfx942's per-CU
+MFMA rate and CU / XCD counts) until a gfx942 wgrad corpus is fitted. Its
+16-bit atomic degree is held to `ATOMIC_16BIT_MAX_SPLIT_K` by the atomic
+reduction's `max_split_k`, as on a fitted arch.
+
 ### Split-K cshuffle atomic epilogue
 
 Added `CShuffleEpilogue.atomic_store` and `_emit_wgrad_split_k_cshuffle_epilogue`
@@ -652,8 +659,14 @@ X times fewer X reads and LDS stores than the `tile_n x tile_k` tile.
 * **Serves** two-stage split-K, stride-1 / dilation-1 W, filter width X,
   groups 1, `cpg % Cb == 0`, `Wo % tile_k == 0`
   (`kernel_identity.identity_supports_problem`). AOT axis:
-  `ROCKE_AOT_WGRAD_XWIN` and its scope variables (`aot_jobs.py`). Python AOT path
-  only; the C++ engine twin is a follow-up.
+  `ROCKE_AOT_WGRAD_XWIN` and its scope variables (`aot_jobs.py`). The C++
+  engine twins the one-filter-row subset (`xwin` with `xwin_groups`, `xwin_gn`,
+  `xwin_pp`, `xwin_pps`, `xwin_rot`, `xwin_bq`, `xwin_aq`, `xwin_kord`);
+  `xwin_rows`, `xwin_mrow` and `xwin_kband` are Python-only.
+* **Python-only knobs.** The C++ wgrad validator refuses `lds_bswz`, `ws_fuse`,
+  `ws_tree`, `epi_quad_xpose`, `ws_lc`, `ws_gred`, `xwin_rows`, `xwin_mrow` and
+  `xwin_kband` (no C++ twin), so those kernels build through the Python engine
+  only.
 
 ### xwin block ping-pong (`xwin_groups`, `xwin_pp`, `xwin_gn`)
 
