@@ -67,6 +67,9 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
     T* const W = load_ptr_batch<T>(WW, bid, shiftW, strideW);
     T const* const tau = load_ptr_batch<T>(tauA, bid, 0, strideP);
 
+    assert((MAX_THDS % warpSize) == 0);
+    assert((ldsmemsize % sizeof(T)) == 0);
+
     // shared variables
     I const len_smem = ldsmemsize / sizeof(T);
     I const len_sval = (MAX_THDS / warpSize);
@@ -152,6 +155,8 @@ void latrd_dot_scale_axpy(rocblas_handle handle,
     I const warpSize = props->warpSize;
     I const sharedMemMaxSize = props->sharedMemPerBlock;
 
+    assert((LATRD_DOT_THREADS % warpSize) == 0);
+
     I const len_sdata = (LATRD_DOT_THREADS / warpSize);
     I const size_sdata = sizeof(T) * len_sdata;
 
@@ -161,14 +166,10 @@ void latrd_dot_scale_axpy(rocblas_handle handle,
 
     ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy_kernel<LATRD_DOT_THREADS, T>),
                             dim3(1, 1, batch_count), dim3(LATRD_DOT_THREADS, 1, 1), ldsSize, stream,
-
-                            n,
-
-                            AA, shiftA, strideA,
-
-                            WW, shiftW, strideW,
-
-                            tauA, strideP, ldsSize);
+                            n, // opts
+                            AA, shiftA, strideA, // A
+                            WW, shiftW, strideW, // W
+                            tauA, strideP, ldsSize); // tau
 }
 
 /********************************************************************************/
