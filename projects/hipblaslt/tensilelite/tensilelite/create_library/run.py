@@ -52,6 +52,8 @@ from ..Common import (
     IsaVersion,
     ParallelMap2,
     poolSizeBudget,
+    releaseFreedMemory,
+    shutdownWorkerPool,
     print1,
     print2,
     printWarning,
@@ -913,7 +915,13 @@ def writeSolutionsAndKernelsTCL(
             assembled_kernel = assemble(written_kernel)
             # The source is on disk (and assembled) by now; don't ship it back
             # to the parent, which only needs the post-codegen kernel info.
-            return processed_kernel._replace(src=None, header=None)
+            slim = processed_kernel._replace(src=None, header=None)
+            # Release free allocator pages after dropping the source and write results.
+            # With CpuThreads 1 this runs in the parent beside the source
+            # compile thread; glibc's malloc_trim takes the arena locks.
+            del processed_kernel, written_kernel, assembled_kernel
+            releaseFreedMemory()
+            return slim
         return composed_function
 
     # The basename has to stay "Kernels": the emitted code object is named from
@@ -940,6 +948,9 @@ def writeSolutionsAndKernelsTCL(
             compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
             uniqueAsmKernels,
         )
+        # The link and bundle steps below need no workers; the pool would
+        # otherwise sit idle holding the heap it grew during codegen.
+        shutdownWorkerPool()
 
         buildAssemblyCodeObjectFiles(
             asmToolchain.linker,
@@ -1568,6 +1579,9 @@ def main(argv=None):
     )
     stop_glds = timer()
     print(f"Time to load yaml files (s): {(stop_glds-start_glds):3.2f}")
+    # Codegen gets fresh workers rather than ones still holding the heap they
+    # grew parsing YAML.
+    shutdownWorkerPool()
 
 
     kernels = generateKernelObjectsFromSolutions(solutions)
