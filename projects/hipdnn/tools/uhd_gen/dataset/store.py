@@ -38,6 +38,7 @@ from typing import Any, Iterable, Iterator
 import pandas as pd
 
 from .. import addressing
+from ..provenance import hard_provenance, shared_provenance
 from .publish import ValidationError, publish_frame
 from .training_table import SLOT_REFERENCE, WORKSPACE_PREFIX, slot_training_rows
 
@@ -52,6 +53,9 @@ COLLECTION_MANIFEST = "collection_manifest.json"
 BOOKKEEPING = ("contribution_id", "collected_at", "source", "purpose", "corpus_id")
 
 #: What every contribution of one dataset must share: a model is trained against one binding.
+#: `trained_against` is compared without its `codegen_revision` (`hard_provenance`): each
+#: contribution keeps its own, and contributions measured with different compilers join one
+#: dataset with a warning (`codegen_warning`).
 SHARED = (
     "role",
     "engine_name",
@@ -254,12 +258,30 @@ def _write_atomically(path: pathlib.Path, write) -> None:
     os.replace(temporary, path)
 
 
+def _shared(entry: dict[str, Any]) -> dict[str, Any]:
+    """`entry`'s SHARED members as a dataset compares and records them."""
+    return {
+        key: (
+            hard_provenance(entry.get(key))
+            if key == "trained_against"
+            else entry.get(key)
+        )
+        for key in SHARED
+    }
+
+
+def codegen_warning(contributions: Iterable[dict[str, Any]]) -> str | None:
+    """Why `contributions` measured with different code objects, or None when they did not."""
+    return shared_provenance(c.get("trained_against") for c in contributions)[1]
+
+
 def _agree(manifest: dict[str, Any], entry: dict[str, Any]) -> None:
+    shared, joining = _shared(manifest), _shared(entry)
     for key in SHARED:
-        if manifest.get(key) != entry.get(key):
+        if shared[key] != joining[key]:
             raise DatasetError(
                 f"contribution {entry['contribution_id']} disagrees with this dataset on "
-                f"{key}: {manifest.get(key)!r} vs {entry.get(key)!r}; a dataset holds one "
+                f"{key}: {shared[key]!r} vs {joining[key]!r}; a dataset holds one "
                 "binding, as a model is trained against one"
             )
 
@@ -423,7 +445,7 @@ def _write(
             first = prepared[0][0]
             manifest = {
                 "schema": DATASET_SCHEMA,
-                **{key: first.get(key) for key in SHARED},
+                **_shared(first),
                 "contributions": [],
             }
         removed, unknown = select(manifest["contributions"], replace)
@@ -965,7 +987,18 @@ def main(argv: list[str] | None = None) -> int:
     except (DatasetError, ValidationError, ValueError, OSError) as error:
         print(f"uhd_gen.dataset add: {error}", file=sys.stderr)
         return 1
-    print(json.dumps({"dataset": str(args.into), "contributions": results}))
+    warning = codegen_warning(read_manifest(args.into)["contributions"])
+    if warning:
+        print(f"uhd_gen.dataset add: warning: {warning}", file=sys.stderr)
+    print(
+        json.dumps(
+            {
+                "dataset": str(args.into),
+                "contributions": results,
+                "warnings": [warning] if warning else [],
+            }
+        )
+    )
     return 0
 
 

@@ -2958,6 +2958,30 @@ TEST(TestDescriptorLoader, DisablesAPredictionModelWhoseArtifactEscapesTheTree)
         << recorder.getRecordedLogsAsString();
 }
 
+/// `trained_against.codegen_revision` is read beside the selector revision. It only qualifies
+/// the model, so the declared path, whose engine revision is opaque provider text, still binds
+/// on the selector revision alone.
+TEST(TestDescriptorLoader, ReadsARecordedCodegenRevision)
+{
+    const ScopedL1Scorer scorer;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_codegen"));
+    const auto modelId = testUuid('e', '1');
+    auto document = declaredL1Document(modelId);
+    document["trained_against"]["codegen_revision"] = "codegen-old";
+    writeDocument(dir.path(), {".uhd.json", document});
+
+    const auto resolved = resolveDeclaredEnginePredictions(loadDescriptorCatalog(dir.path()),
+                                                           "test:opaque",
+                                                           L1_SELECTOR_REVISION,
+                                                           declaration({{"default", modelId}}));
+
+    EXPECT_TRUE(resolved.refused.empty());
+    ASSERT_EQ(resolved.byMetric.count("tflops"), 1u);
+    const auto& model = resolved.byMetric.at("tflops").at("default");
+    EXPECT_EQ(model.trainedAgainstSelectorRevision, L1_SELECTOR_REVISION);
+    EXPECT_EQ(model.trainedAgainstCodegenRevision, "codegen-old");
+}
+
 /// RFC 0019 Open Question 7: an engine with no UED declares its L1 model's UUID in code.
 /// Checked end to end, through a calibrated score in the requested metric.
 TEST(TestDescriptorLoader, DeclaredEnginePredictionResolvesAndScores)
@@ -4746,7 +4770,7 @@ TEST(TestDescriptorLoader, SkipsAnInlineKernelDeclaringANewerUkdVersion)
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_newer_version"));
     auto documents = makeSetDocuments('1', "test:valid");
-    documentOfType(documents, ".kdp.json").at("kernelDescriptors").front()["version"] = "1.2";
+    documentOfType(documents, ".kdp.json").at("kernelDescriptors").front()["version"] = "1.3";
     writeDocuments(dir.path(), documents);
 
     const auto sets = loadFrom(dir.path());
@@ -4755,7 +4779,7 @@ TEST(TestDescriptorLoader, SkipsAnInlineKernelDeclaringANewerUkdVersion)
     ASSERT_EQ(sets.front().packs.size(), 1u);
     const auto& kernels = sets.front().packs.front().kernels;
     ASSERT_EQ(kernels.size(), 2u);
-    // Which two, not merely how many: the gate has to drop the entry that declared 1.2.
+    // Which two, not merely how many: the gate has to drop the entry that declared 1.3.
     EXPECT_EQ(toString(kernels[0].id), testUuid('1', '9'));
     EXPECT_EQ(toString(kernels[1].id), testUuid('1', 'a'));
     // The locator names the pack file; "a 'kernelDescriptors' entry" alone names nothing,
@@ -4777,7 +4801,7 @@ TEST(TestDescriptorLoader, SkewOnAnInlineKernelSupersedesItsOtherViolations)
     auto& pack = documentOfType(documents, ".kdp.json");
     pack["arch"] = nlohmann::json::array({"gfx942"});
     auto& skewed = pack.at("kernelDescriptors").front();
-    skewed["version"] = "1.2";
+    skewed["version"] = "1.3";
     skewed["arch"] = nlohmann::json::array({"gfx90a"});
     writeDocuments(dir.path(), documents);
 
@@ -4788,7 +4812,7 @@ TEST(TestDescriptorLoader, SkewOnAnInlineKernelSupersedesItsOtherViolations)
     ASSERT_EQ(sets.size(), 1u);
     ASSERT_EQ(sets.front().packs.size(), 1u);
     EXPECT_EQ(sets.front().packs.front().kernels.size(), 2u);
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "declares version 1.2"))
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "declares version 1.3"))
         << recorder.getRecordedLogsAsString();
 }
 
@@ -4829,7 +4853,7 @@ TEST(TestDescriptorLoader, DropsAPackReferencingAStandaloneKernelOfANewerUkdVers
 
     auto broken = makeSetDocuments('2', "test:broken");
     referenceLastKernel(broken);
-    documentOfType(broken, ".ukd.json")["version"] = "1.2";
+    documentOfType(broken, ".ukd.json")["version"] = "1.3";
     writeDocuments(dir.path(), broken);
 
     const auto sets = loadFrom(dir.path());
@@ -4882,7 +4906,7 @@ TEST_P(TestDescriptorLoaderPackReadings, WarnsOncePerReadingOfThePack)
     auto& pack = documentOfType(documents, ".kdp.json");
     pack["x-pack-note"] = "header";
     auto& kernels = pack.at("kernelDescriptors");
-    kernels[0]["version"] = "1.2";
+    kernels[0]["version"] = "1.3";
     kernels[1]["x-kernel-note"] = "kernel";
     writeDocuments(dir.path(), documents);
     overwritePack(dir.path(), documents, GetParam().spell(pack));
@@ -4894,7 +4918,7 @@ TEST_P(TestDescriptorLoaderPackReadings, WarnsOncePerReadingOfThePack)
     EXPECT_EQ(sets.front().packs.front().kernels.size(), 2u);
     const auto& param = GetParam();
     for(const std::string warning :
-        {"extension key 'x-pack-note'", "declares version 1.2", "extension key 'x-kernel-note'"})
+        {"extension key 'x-pack-note'", "declares version 1.3", "extension key 'x-kernel-note'"})
     {
         const auto count = countLogsContaining(recorder, warning);
         if(param.exactly)
@@ -5324,7 +5348,7 @@ std::vector<OracleCase> oracleCases()
          loads,
          [] {
              auto skewed = oracleKernel(2);
-             skewed["version"] = "1.2";
+             skewed["version"] = "1.3";
              return oraclePackText(oracleHeader(),
                                    nlohmann::json::array({oracleKernel(1), skewed}));
          }},
@@ -5890,9 +5914,10 @@ TEST(TestDescriptorLoader, AcceptsTwoLaunchNamesNamingOneKernelInline)
     EXPECT_EQ(kernel.sources.at("merge").tocKey, kernel.sources.at("decode").tocKey);
 }
 
-/// The selector revision digests every launch's code object, so a pack whose launch is
-/// rebuilt does not keep a revision a ranker was trained against. Each launch carries its
-/// own symbol, toc_key and sha256, and each of them counts on its own.
+/// The selector revision digests every launch's code identity, which is its sha256 for a launch
+/// that carries no `identity` (as these do not), so a pack whose launch is rebuilt does not keep
+/// a revision a ranker was trained against. Each launch carries its own symbol, toc_key and
+/// sha256, and each of them counts on its own.
 TEST(TestDescriptorLoader, ChangingALaunchCodeObjectChangesTheEngineSelectorRevision)
 {
     const auto revisionWith
@@ -6065,6 +6090,115 @@ TEST(TestDescriptorLoader, AcceptsAConformingSha256)
     ASSERT_EQ(sets.front().packs.size(), 1u);
     ASSERT_FALSE(sets.front().packs.front().kernels.empty());
     EXPECT_EQ(sets.front().packs.front().kernels.front().source.sha256, digest);
+}
+
+/// The packager stamps `identity` beside `sha256` on a code object it compiled itself, on the
+/// kernel's single source and on each launch of a multi-launch kernel; it is read verbatim.
+TEST(TestDescriptorLoader, CarriesAPackagedCodeObjectIdentity)
+{
+    const std::string identity(64, 'c');
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("identity_ok"));
+        auto packaged = makeSetDocuments('1', "test:identity");
+        auto& kernel = documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front();
+        kernel["version"] = "1.2";
+        kernel["kernel_source"] = {{"kind", "kpack"},
+                                   {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+                                   {"toc_key", "PointwiseAdd/block64"},
+                                   {"symbol", "PointwiseAdd"},
+                                   {"sha256", std::string(64, 'a')},
+                                   {"signature", packagedSignature()},
+                                   {"identity", identity}};
+        writeDocuments(dir.path(), packaged);
+
+        const auto sets = loadFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u);
+        const auto& kernels = sets.front().packs.front().kernels;
+        EXPECT_EQ(kernels.front().source.identity, identity);
+    }
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+            uniqueDirectory("identity_launch_ok"));
+        auto documents = makeSetDocuments('1', "test:identity_launch");
+        auto& document = spellAsMultiLaunch(documents);
+        document["version"] = "1.2";
+        document.at("sources").at("decode")["identity"] = identity;
+        writeDocuments(dir.path(), documents);
+
+        const auto sets = loadFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u);
+        const auto& kernel = sets.front().packs.front().kernels.front();
+        EXPECT_EQ(kernel.sources.at("decode").identity, identity);
+        EXPECT_TRUE(kernel.sources.at("merge").identity.empty());
+    }
+}
+
+/// `identity` arrived with UKD 1.2: a kernel that carries one under an older version is refused,
+/// on its single source and on a launch alike, as `sources` under 1.0 is.
+TEST(TestDescriptorLoader, RefusesAnIdentityUnderAVersionBeforeItsMinor)
+{
+    for(const bool multiLaunch : {false, true})
+    {
+        SCOPED_TRACE(multiLaunch ? "launch" : "single source");
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("identity_1_1"));
+        auto documents = makeSetDocuments('1', "test:identity_1_1");
+        auto& kernel = documentOfType(documents, ".kdp.json").at("kernelDescriptors").front();
+        if(multiLaunch)
+        {
+            spellAsMultiLaunch(documents).at("sources").at("decode")["identity"]
+                = std::string(64, 'c');
+        }
+        else
+        {
+            kernel["version"] = "1.1";
+            kernel["kernel_source"] = {{"kind", "kpack"},
+                                       {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+                                       {"toc_key", "PointwiseAdd/block64"},
+                                       {"symbol", "PointwiseAdd"},
+                                       {"sha256", std::string(64, 'a')},
+                                       {"signature", packagedSignature()},
+                                       {"identity", std::string(64, 'c')}};
+        }
+        writeDocuments(dir.path(), documents);
+
+        EXPECT_TRUE(loadFrom(dir.path()).empty());
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "needs UKD 1.2"))
+            << recorder.getRecordedLogsAsString();
+    }
+}
+
+/// `identity` is held to the sha256 shape, so a truncated or mis-cased digest fails at load
+/// with the key, the locator and the value, not as a silent selector change.
+TEST(TestDescriptorLoader, RejectsAnIdentityThatIsNotASha256Digest)
+{
+    for(const auto& identity : {std::string(), std::string(63, 'c'), std::string(64, 'C')})
+    {
+        SCOPED_TRACE("identity '" + identity + "'");
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("identity_bad"));
+        auto packaged = makeSetDocuments('1', "test:identity_bad");
+        auto& kernel = documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front();
+        kernel["version"] = "1.2";
+        kernel["kernel_source"] = {{"kind", "kpack"},
+                                   {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+                                   {"toc_key", "PointwiseAdd/block64"},
+                                   {"symbol", "PointwiseAdd"},
+                                   {"sha256", std::string(64, 'a')},
+                                   {"signature", packagedSignature()},
+                                   {"identity", identity}};
+        writeDocuments(dir.path(), packaged);
+
+        EXPECT_TRUE(loadFrom(dir.path()).empty());
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "identity"))
+            << recorder.getRecordedLogsAsString();
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel_source"))
+            << recorder.getRecordedLogsAsString();
+    }
 }
 
 namespace
