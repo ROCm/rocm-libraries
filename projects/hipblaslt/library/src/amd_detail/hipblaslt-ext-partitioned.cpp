@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <set>
 #include <sstream>
@@ -200,6 +201,7 @@ namespace hipblaslt_ext::experimental
     public:
         std::vector<std::unique_ptr<Gemm>> gemms;
         std::vector<int>                   devices; // device of each partition's handle
+        bool                               gfx1250 = true; // every partition is a gfx1250 device
 
         hipblasOperation_t   opA, opB;
         hipDataType          typeA, typeB, typeC, typeD;
@@ -368,6 +370,14 @@ namespace hipblaslt_ext::experimental
             pimpl->devices.push_back(handle ? reinterpret_cast<rocblaslt_handle>(handle)->device
                                             : -1);
         }
+        // PartitionedGemm is supported on gfx1250 only: setProblem refuses any other device.
+        for(int device : pimpl->devices)
+        {
+            hipDeviceProp_t props;
+            if(hipGetDeviceProperties(&props, device) != hipSuccess
+               || std::strncmp(props.gcnArchName, "gfx1250", 7) != 0)
+                pimpl->gfx1250 = false;
+        }
     }
 
     PartitionedGemm::~PartitionedGemm()                                     = default;
@@ -402,6 +412,11 @@ namespace hipblaslt_ext::experimental
         // All or nothing: a failure below must not leave the previous problem usable with some
         // partitions already switched to the new one.
         s.hasProblem = false;
+        if(!s.gfx1250)
+        {
+            log_error(__func__, "PartitionedGemm is supported on gfx1250 devices only");
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+        }
         if(parts == 0 || m <= 0 || n <= 0 || k <= 0 || batch_count <= 0)
             return HIPBLAS_STATUS_INVALID_VALUE;
         // A batch split writes different batches of D from different partitions, so D must have

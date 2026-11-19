@@ -1267,7 +1267,8 @@ namespace hipblaslt_ext
             *  \retval HIPBLAS_STATUS_INVALID_VALUE     If `inputs` does not hold one GemmInputs
             * per partition, a required pointer is null, a size is not positive, or the split dimension is smaller than the
             * number of partitions.
-            *  \retval HIPBLAS_STATUS_NOT_SUPPORTED     If the types or operations are not
+            *  \retval HIPBLAS_STATUS_NOT_SUPPORTED     If a partition's device is not a gfx1250
+            * (the only architecture PartitionedGemm supports), the types or operations are not
             * supported (conjugate transpose, sub-byte types), or a partition rejects its slice.
             */
             HIPBLASLT_EXPORT hipblasStatus_t setProblem(int64_t                        m,
@@ -1360,8 +1361,13 @@ namespace hipblaslt_ext
             *  A partition whose D slice is memory of another device (a shared D), or that also
             * stores the peer D (``storePeerD``), publishes its writes on its stream after the
             * slice, so that the other devices see them. A partition that writes only its own
-            * device's memory does not. Shared A, B and C are the caller's: whoever wrote them
-            * last must have made them visible to every partition's device before this call.
+            * device's memory does not. ``setProblem`` decides this from the device that owns the
+            * first and the last element of the partition's D slice (and of its peer D). A D slice
+            * whose first and last element are on the partition's own device but which crosses
+            * another device in between (possible with a VMM mapping) is not published: making
+            * those writes visible is then the caller's. Shared A, B and C are the caller's too:
+            * whoever wrote them last must have made them visible to every partition's device
+            * before this call.
             *
             *  @param[in]
             *  streams       One stream per partition.

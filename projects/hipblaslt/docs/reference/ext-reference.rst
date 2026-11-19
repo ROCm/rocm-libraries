@@ -111,6 +111,9 @@ PartitionedGemm
 
    ``PartitionedGemm`` is a beta API. It may change in a future release.
 
+``PartitionedGemm`` is supported on gfx1250 devices only. On any other architecture
+``setProblem`` returns ``HIPBLAS_STATUS_NOT_SUPPORTED``.
+
 ``PartitionedGemm`` runs one GEMM as slices on the devices of a partitioned GPU, for example the
 two partitions of a DPX card, where each partition is a separate HIP device. The caller passes
 one hipBLASLt handle per partition (created with that partition's device current), and one
