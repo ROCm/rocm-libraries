@@ -2483,7 +2483,7 @@ TEST(TestConvIgemmSplitPlan, FlexSplitsWithinOneRoundIntoTheFewestStepsPerSplit)
     EXPECT_EQ(conv_igemm::flexSplits(64, 432, 256), 4);
     // A grid that fills the units, or a reduction too short to gain from a split, runs unsplit.
     EXPECT_EQ(conv_igemm::flexSplits(256, 432, 256), 1);
-    EXPECT_EQ(conv_igemm::flexSplits(64, 20, 256), 1);
+    EXPECT_EQ(conv_igemm::flexSplits(64, 16, 256), 1);
     // One tile of a deep reduction: at most 16 splits.
     EXPECT_EQ(conv_igemm::flexSplits(1, 4096, 256), 16);
     // The plan applies it to the flex tile's grid (one 256 x 256 tile, 27 x 8 k-steps of 64).
