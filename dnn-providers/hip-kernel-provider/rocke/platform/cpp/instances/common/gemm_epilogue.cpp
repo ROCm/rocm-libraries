@@ -867,7 +867,7 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
     walker.tile_cols = t->tile_n;
     walker.block_size = threads;
     walker.load_vec = store_vec;
-    const rocke_coalesced_chunk_grid_t grid{c_threads, NULL, c_tile_n_div_vec};
+    const rocke_coalesced_chunk_grid_t grid{c_threads, NULL, c_tile_n_div_vec, NULL};
     rocke_coalesced_tile_loader_visit_chunks(
         b,
         &walker,

@@ -1988,6 +1988,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         )
 
         def copy_operand(loader, source, dest):
+            packed_offset = None
+
+            def prepare_packed(chunk_id):
+                nonlocal packed_offset
+                packed_offset = b.add(source.origin[0], b.mul(chunk_id, chunk_grid[1]))
+
             def emit(row, col, chunk_id):
                 if spec.trait.pad_k:
 
@@ -2006,12 +2012,18 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     value = load_clipped_global_fragment(
                         b, k_off, col, K, dtype=storage_dtype, n=load_vec, read=read
                     )
-                else:
-                    zero = b.const_i32(0)
-                    if source.rank == 2:
-                        indices = (zero, b.mul(chunk_id, chunk_grid[1]))
+                elif source.rank == 2:
+                    assert packed_offset is not None
+                    if load_vec == 1:
+                        value = b.global_load(
+                            source.view.base, packed_offset, storage_dtype
+                        )
                     else:
-                        indices = (zero, row, col)
+                        value = b.global_load_vN(
+                            source.view.base, packed_offset, storage_dtype, load_vec
+                        )
+                else:
+                    indices = (b.const_i32(0), row, col)
                     if load_vec == 1:
                         value = source.load_scalar(b, *indices)
                     else:
@@ -2031,7 +2043,17 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 else:
                     dest.store_vec(b, dst_row, dst_col, value=value, n=load_vec)
 
-            loader.visit_chunks(b, tid=tid, emit=emit, grid=chunk_grid)
+            loader.visit_chunks(
+                b,
+                tid=tid,
+                emit=emit,
+                grid=chunk_grid,
+                before_decode=(
+                    prepare_packed
+                    if source.rank == 2 and not spec.trait.pad_k
+                    else None
+                ),
+            )
 
         copy_operand(a_loader, a_global_tile, a_lds_tile)
         if spec.trait.preshuffle_b:
@@ -2042,7 +2064,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 b, n_tile=n_tile, k_tile=k_tile, n_tile_count=n_tile_count
             )
             base = b.add(batch_off_b, b.mul(tile_id, b.const_i32(block_n * block_k)))
-            b_origin = (base, b.const_i32(0))
+            b_origin = (base, b_lds_tile.origin[0])
             b_lengths = (1, block_n * block_k)
         else:
             b_origin = (batch_off_b, block_n_off, k_off)

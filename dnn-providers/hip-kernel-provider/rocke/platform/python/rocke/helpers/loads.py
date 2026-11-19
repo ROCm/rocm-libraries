@@ -535,6 +535,7 @@ class CoalescedTileLoader:
         tid: Value,
         emit: Callable[[Value, Value, Value], None],
         grid: tuple[Value, Value | None, Value] | None = None,
+        before_decode: Callable[[Value], None] | None = None,
     ) -> None:
         """Visit each lane's coalesced chunks without imposing an address layout.
 
@@ -542,6 +543,8 @@ class CoalescedTileLoader:
         linear chunk ID in packed storage. The optional prebound ``grid`` is
         (threads, vector width, chunks per row or column), in that order.
         A ``None`` width lets the decoder materialize it per vector chunk.
+        ``before_decode(chunk_id)`` can emit linear address arithmetic in the
+        same order as an existing packed copy.
         """
         if grid is None:
             grid = (
@@ -556,6 +559,8 @@ class CoalescedTileLoader:
         c_threads, c_load_vec, c_span = grid
         for e in range(self.vecs_per_thread):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+            if before_decode is not None:
+                before_decode(vec_idx)
             row, col = self._decode_row_col(
                 b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
             )

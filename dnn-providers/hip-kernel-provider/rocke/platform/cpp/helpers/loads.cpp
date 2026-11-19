@@ -605,7 +605,7 @@ void rocke_coalesced_tile_loader_visit_chunks(rocke_ir_builder_t* b,
                         self->block_size);
         return;
     }
-    rocke_coalesced_chunk_grid_t local;
+    rocke_coalesced_chunk_grid_t local{};
     if(grid == NULL)
     {
         local.threads = rocke_b_const_i32(b, self->block_size);
@@ -619,6 +619,8 @@ void rocke_coalesced_tile_loader_visit_chunks(rocke_ir_builder_t* b,
         rocke_value_t* col;
         rocke_value_t* vec_idx
             = rocke_b_add(b, rocke_b_mul(b, rocke_b_const_i32(b, e), grid->threads), tid);
+        if(grid->before_decode != nullptr)
+            grid->before_decode(b, vec_idx, user);
         ctl_decode_row_col(b, self, vec_idx, grid->span, grid->width, &row, &col);
         emit(b, row, col, vec_idx, user);
     }
@@ -707,7 +709,8 @@ void rocke_coalesced_tile_loader_load(rocke_ir_builder_t* b,
         return;
     const rocke_coalesced_chunk_grid_t grid{rocke_b_const_i32(b, self->block_size),
                                             rocke_b_const_i32(b, self->load_vec),
-                                            rocke_b_const_i32(b, ctl_span(self))};
+                                            rocke_b_const_i32(b, ctl_span(self)),
+                                            NULL};
     ctl_load_call call{self,
                        smem_dst,
                        descriptor,

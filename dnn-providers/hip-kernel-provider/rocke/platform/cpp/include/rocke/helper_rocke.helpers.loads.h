@@ -173,11 +173,17 @@ typedef struct rocke_coalesced_tile_loader
     int col_xor[4];
 } rocke_coalesced_tile_loader_t;
 
+typedef void (*rocke_coalesced_chunk_prepare_fn)(rocke_ir_builder_t* b,
+                                                 rocke_value_t* chunk_id,
+                                                 void* user);
+
 typedef struct rocke_coalesced_chunk_grid
 {
     rocke_value_t* threads;
     rocke_value_t* width; /* NULL materializes the width per vector chunk. */
     rocke_value_t* span;
+    /* Optional linear addressing hook before decoding the logical row/col. */
+    rocke_coalesced_chunk_prepare_fn before_decode;
 } rocke_coalesced_chunk_grid_t;
 
 typedef void (*rocke_coalesced_chunk_fn)(rocke_ir_builder_t* b,

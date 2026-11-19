@@ -199,7 +199,16 @@ struct rocke_gemm_sync_operand
     int rows;
     int parity_imm;
     rocke_value_t* parity_v;
+    rocke_value_t* packed_offset = nullptr;
 };
+
+static void
+    rocke_gemm_prepare_packed_offset(rocke_ir_builder_t* b, rocke_value_t* chunk_id, void* user)
+{
+    auto& copy = *static_cast<rocke_gemm_sync_operand*>(user);
+    auto* chunk_start = rocke_b_mul(b, chunk_id, copy.ctx->c_load_vec);
+    copy.packed_offset = rocke_b_add(b, copy.source->origin[0], chunk_start);
+}
 
 struct rocke_gemm_clipped_operand
 {
@@ -250,14 +259,18 @@ static void rocke_gemm_copy_sync_chunk(rocke_ir_builder_t* b,
                                                      rocke_gemm_read_clipped_scalar,
                                                      &clipped);
     }
+    else if(copy.source->rank == 2)
+    {
+        auto* ptr = copy.source->view->base;
+        value = width == 1 ? rocke_b_global_load(b, ptr, copy.packed_offset, ctx->storage_dtype, 0)
+                           : rocke_b_global_load_vN(
+                                 b, ptr, copy.packed_offset, ctx->storage_dtype, width, 0);
+    }
     else
     {
         rocke_value_t* src_idx[3] = {rocke_b_const_i32(b, 0), row, col};
-        const int rank = copy.source->rank;
-        if(rank == 2)
-            src_idx[1] = rocke_b_mul(b, chunk_id, ctx->c_load_vec);
-        value = width == 1 ? rocke_tile_window_load_scalar(b, copy.source, src_idx, rank)
-                           : rocke_tile_window_load_vec(b, copy.source, src_idx, rank, width);
+        value = width == 1 ? rocke_tile_window_load_scalar(b, copy.source, src_idx, 3)
+                           : rocke_tile_window_load_vec(b, copy.source, src_idx, 3, width);
     }
 
     rocke_value_t* dst_row = row;
@@ -281,8 +294,12 @@ static void rocke_gemm_copy_sync_operand(rocke_gemm_sync_operand* copy)
     loader.tile_cols = ctx->block_k;
     loader.block_size = ctx->threads;
     loader.load_vec = ctx->load_vec;
-    const rocke_coalesced_chunk_grid_t grid{
-        ctx->c_threads, ctx->c_load_vec, ctx->c_block_k_div_vec};
+    const bool prepare_packed = copy->source->rank == 2 && !ctx->spec->trait.pad_k;
+    const rocke_coalesced_chunk_grid_t grid{ctx->c_threads,
+                                            ctx->c_load_vec,
+                                            ctx->c_block_k_div_vec,
+                                            prepare_packed ? rocke_gemm_prepare_packed_offset
+                                                           : NULL};
     rocke_coalesced_tile_loader_visit_chunks(
         ctx->b, &loader, ctx->tid, &grid, rocke_gemm_copy_sync_chunk, copy);
 }
@@ -525,7 +542,7 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
         rocke_value_t* tile_id = rocke_emit_preshuffleb_tile_id(b, n_tile, k_tile, n_tile_count);
         rocke_value_t* tile_elems = rocke_b_const_i32(b, ctx->block_n * ctx->block_k);
         b_gorigin[0] = rocke_b_add(b, ctx->batch_off_b, rocke_b_mul(b, tile_id, tile_elems));
-        b_gorigin[1] = rocke_b_const_i32(b, 0);
+        b_gorigin[1] = b_lorigin[0];
         b_glen[1] = ctx->block_n * ctx->block_k;
     }
     rocke_make_tile_window(&b_global_tile, &ctx->b_view, b_glen, b_gorigin, ctx->b_view.desc.rank);
