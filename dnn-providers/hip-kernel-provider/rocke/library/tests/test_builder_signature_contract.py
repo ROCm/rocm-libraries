@@ -400,6 +400,18 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_winograd3d.Winograd3dSpec": ("C", "Di", "Hi", "K", "Wi"),
     "kernels.common.conv_winograd3d.WinogradXSpec": ("C", "Di", "Hi", "K", "Wi"),
     "kernels.common.conv_winograd3d.WinogradYxSpec": ("C", "Di", "Hi", "K", "Wi"),
+    # Its auxiliary launches (relayouts, weight transforms, split-K reduction,
+    # pad copy): the extents and channels they are specialised for.
+    "kernels.common.conv_winograd3d.KsReduceSpec": ("ks", "nel"),
+    "kernels.common.conv_winograd3d.PadCopyKernelSpec": ("C", "D", "H", "W"),
+    "kernels.common.conv_winograd3d.XToC8LdsSpec": ("C", "D", "H", "W"),
+    "kernels.common.conv_winograd3d.XToC8RangeSpec": ("C", "D", "H", "W"),
+    "kernels.common.conv_winograd3d.XToC8Spec": ("C", "D", "H", "W"),
+    "kernels.common.conv_winograd3d.XWeightTransformSpec": ("C", "K"),
+    "kernels.common.conv_winograd3d.YxAuxSpec": ("C", "D", "H", "K", "W"),
+    "kernels.common.conv_winograd3d.YxWeightTransformSpec": ("C", "K"),
+    "kernels.common.conv_winograd3d.YxWeightTransformV2Spec": ("C", "K"),
+    "kernels.common.conv_winograd3d.YxWeightTransformV3Spec": ("C", "K"),
 }
 
 

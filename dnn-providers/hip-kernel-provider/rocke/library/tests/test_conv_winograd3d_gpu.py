@@ -166,7 +166,7 @@ def test_pad_copy(halo, C):
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     D, H, W = 6, 8, 10
-    k = cw.build_pad_copy(D, H, W, C, halo=halo)
+    k = cw.build_pad_copy(cw.PadCopyKernelSpec(D, H, W, C, halo=halo))
     run = KernelLauncher(
         hsaco=compile_kernel(k, arch="gfx942").hsaco,
         kernel_name=k.name,

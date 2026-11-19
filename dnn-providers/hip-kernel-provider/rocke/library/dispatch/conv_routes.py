@@ -289,7 +289,15 @@ class PadCopySpec:
         from kernels.common import conv_winograd3d as cw
 
         return cw.build_pad_copy(
-            self.D, self.H, self.W, self.C, halo=tuple(self.halo), unroll=self.unroll
+            cw.PadCopyKernelSpec(
+                self.D,
+                self.H,
+                self.W,
+                self.C,
+                halo=tuple(self.halo),
+                unroll=self.unroll,
+            ),
+            arch=arch,
         )
 
     def grid(self) -> tuple:
@@ -546,16 +554,19 @@ def winograd_steps(plan, problem, direction: str) -> tuple:
 
     def aux(arch: str = "gfx942"):
         return cw.build_yx_aux(
-            *src,
-            K,
-            out_dtype=odt,
-            fold=spec.stage in ("reg", "wlds"),
-            rev=spec.xrev,
-            halo=halo,
-            flip=direction == "dgrad",
-            wtv=wv,
-            amax=bps1,
-            my=spec.my,
+            cw.YxAuxSpec(
+                *src,
+                K,
+                out_dtype=odt,
+                fold=spec.stage in ("reg", "wlds"),
+                rev=spec.xrev,
+                halo=halo,
+                flip=direction == "dgrad",
+                wtv=wv,
+                amax=bps1,
+                my=spec.my,
+            ),
+            arch=arch,
         )
 
     sga = (
@@ -587,7 +598,7 @@ def winograd_steps(plan, problem, direction: str) -> tuple:
             f"winograd main {spec.name}",
             "kernel",
             (("X", "X8"), ("U", "U"), ("Y", "P" if ks > 1 else "y")) + ea,
-            build=lambda arch="gfx942": cw.build_winograd_yx(spec),
+            build=lambda arch="gfx942": cw.build_winograd_yx(spec, arch=arch),
             signature=tuple(sgm.build()),
             grid=cw.winograd_yx_grid(spec),
             block=(spec.block_size, 1, 1),
@@ -600,7 +611,9 @@ def winograd_steps(plan, problem, direction: str) -> tuple:
                 f"split-K reduce ({ks})",
                 "kernel",
                 (("P", "P"), ("Y", "y")),
-                build=lambda arch="gfx942": cw.build_ks_reduce(nel, ks),
+                build=lambda arch="gfx942": cw.build_ks_reduce(
+                    cw.KsReduceSpec(nel, ks), arch=arch
+                ),
                 signature=tuple(
                     SignatureBuilder().ptr("P", "f32").ptr("Y", "bf16").build()
                 ),

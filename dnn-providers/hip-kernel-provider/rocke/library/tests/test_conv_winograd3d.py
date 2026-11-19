@@ -271,7 +271,7 @@ def test_yx_wt3_swizzle_is_a_bijection(K, C):
         seen.add((rest // (ncb // 8), k, cb))
     assert len(seen) == 3 * K * ncb
     assert all(0 <= d < 3 and 0 <= k < K and 0 <= c < ncb for d, k, c in seen)
-    kd = cw.build_yx_weight_transform_v3(K, C, swz=True)
+    kd = cw.build_yx_weight_transform_v3(cw.YxWeightTransformV3Spec(K, C, swz=True))
     assert kd.name.endswith("_swz")
     assert not cw.yx_wt3_swz_ok(K, C, flip=True)
 
@@ -610,7 +610,7 @@ def test_dropin_wrapper_rejects_direct_plans():
 
 @pytest.mark.parametrize("halo", [1, (0, 1, 1)])
 def test_pad_copy_kernel_builds(halo):
-    k = cw.build_pad_copy(16, 8, 8, 1024, halo=halo)
+    k = cw.build_pad_copy(cw.PadCopyKernelSpec(16, 8, 8, 1024, halo=halo))
     assert k.name.startswith("pad_copy_D16H8W8C1024_h")
     # 16-byte units: 16*8*8*1024/8 = 131072 -> 128 blocks of 256 threads x 4 units
     assert cw.pad_copy_grid(16, 8, 8, 1024) == (128, 1, 1)
@@ -759,12 +759,12 @@ def test_buffer_limit_refuses_large_problems():
     assert cw.yx_buffer_bytes(s)["Y"] == 4 * 128 * 256 * 256 * 256 * 4
     # the auxiliary kernels refuse on their own (direct API / benchmark callers)
     for build in (
-        lambda: cw.build_pad_copy(256, 256, 256, 128),
-        lambda: cw.build_yx_aux(256, 256, 256, 128, 128, halo=1),
-        lambda: cw.build_x_to_c8_lds(256, 256, 256, 128),
-        lambda: cw.build_x_to_c8(256, 256, 256, 128),
-        lambda: cw.build_x_to_c8_range(256, 256, 256, 128),
-        lambda: cw.build_ks_reduce(256 * 256 * 256 * 128, 4),
+        lambda: cw.build_pad_copy(cw.PadCopyKernelSpec(256, 256, 256, 128)),
+        lambda: cw.build_yx_aux(cw.YxAuxSpec(256, 256, 256, 128, 128, halo=1)),
+        lambda: cw.build_x_to_c8_lds(cw.XToC8LdsSpec(256, 256, 256, 128)),
+        lambda: cw.build_x_to_c8(cw.XToC8Spec(256, 256, 256, 128)),
+        lambda: cw.build_x_to_c8_range(cw.XToC8RangeSpec(256, 256, 256, 128)),
+        lambda: cw.build_ks_reduce(cw.KsReduceSpec(256 * 256 * 256 * 128, 4)),
     ):
         with pytest.raises(ValueError, match="buffer"):
             build()
@@ -785,7 +785,9 @@ def test_buffer_limit_keeps_the_route_and_table_problems():
             assert sel.winograd3d_ineligible_reason(_cp_adapter(sid), d) is None
     p = _cp_pad1(128, 128, 128, 128, 128)  # X8 130^3 * 256 bytes, well inside
     assert sel.winograd3d_ineligible_reason(p, "fwd") is None
-    assert cw.build_pad_copy(128, 64, 64, 64).name.startswith("pad_copy_D128H64W64C64")
+    assert cw.build_pad_copy(cw.PadCopyKernelSpec(128, 64, 64, 64)).name.startswith(
+        "pad_copy_D128H64W64C64"
+    )
 
 
 @pytest.mark.parametrize("C", [4, 12, 0])
@@ -793,7 +795,7 @@ def test_pad_copy_refuses_partial_units(C):
     """The pad copy moves 16-byte units: C must be a multiple of 8 bf16 channels (C=4
     would write every voxel one position early, C=12 half a voxel early)."""
     with pytest.raises(ValueError, match="multiple of 8"):
-        cw.build_pad_copy(4, 4, 4, C)
+        cw.build_pad_copy(cw.PadCopyKernelSpec(4, 4, 4, C))
     with pytest.raises(ValueError, match="multiple of 8"):
         cw.pad_copy_grid(4, 4, 4, C)
 
@@ -802,12 +804,18 @@ def test_pad_copy_refuses_partial_units(C):
 @pytest.mark.parametrize(
     "build",
     [
-        lambda D, H, W: cw.build_x_to_c8_lds(D, H, W, 128, halo=1),
-        lambda D, H, W: cw.build_x_to_c8_lds(D, H, W, 128, halo=(0, 1, 1), amax=True),
-        lambda D, H, W: cw.build_yx_aux(D, H, W, 128, 128, halo=1),
-        lambda D, H, W: cw.build_yx_aux(D, H, W, 128, 128, halo=1, wtv=4, amax=True),
-        lambda D, H, W: cw.build_yx_aux(D, H, W, 128, 128, halo=(2, 1, 1), flip=True),
-        lambda D, H, W: cw.build_x_to_c8(D, H, W, 128, rows=True),
+        lambda D, H, W: cw.build_x_to_c8_lds(cw.XToC8LdsSpec(D, H, W, 128, halo=1)),
+        lambda D, H, W: cw.build_x_to_c8_lds(
+            cw.XToC8LdsSpec(D, H, W, 128, halo=(0, 1, 1), amax=True)
+        ),
+        lambda D, H, W: cw.build_yx_aux(cw.YxAuxSpec(D, H, W, 128, 128, halo=1)),
+        lambda D, H, W: cw.build_yx_aux(
+            cw.YxAuxSpec(D, H, W, 128, 128, halo=1, wtv=4, amax=True)
+        ),
+        lambda D, H, W: cw.build_yx_aux(
+            cw.YxAuxSpec(D, H, W, 128, 128, halo=(2, 1, 1), flip=True)
+        ),
+        lambda D, H, W: cw.build_x_to_c8(cw.XToC8Spec(D, H, W, 128, rows=True)),
     ],
 )
 def test_halo_relayout_names_carry_the_shape(build):
@@ -825,14 +833,22 @@ def test_halo_relayout_names_carry_the_shape(build):
 
 def test_relayout_names_without_halo_are_unchanged():
     """Without a halo the relayout body depends on the volume only: the names keep it."""
-    assert cw.build_x_to_c8_lds(64, 64, 64, 128).name == "wino_x_to_c8l_V262144C128"
-    assert cw.build_x_to_c8(64, 64, 64, 128).name == "wino_x_to_c8_V262144C128"
     assert (
-        cw.build_yx_aux(64, 64, 64, 128, 128, wtv=4).name
+        cw.build_x_to_c8_lds(cw.XToC8LdsSpec(64, 64, 64, 128)).name
+        == "wino_x_to_c8l_V262144C128"
+    )
+    assert (
+        cw.build_x_to_c8(cw.XToC8Spec(64, 64, 64, 128)).name
+        == "wino_x_to_c8_V262144C128"
+    )
+    assert (
+        cw.build_yx_aux(cw.YxAuxSpec(64, 64, 64, 128, 128, wtv=4)).name
         == "wino_yx_aux_V262144C128K128_f16_wt4"
     )
     assert (
-        cw.build_yx_aux(32, 16, 16, 128, 128, halo=1, wtv=4, amax=True).name
+        cw.build_yx_aux(
+            cw.YxAuxSpec(32, 16, 16, 128, 128, halo=1, wtv=4, amax=True)
+        ).name
         == "wino_yx_aux_V8192C128K128_f16_h1_wt4_am_32x16x16"
     )
 

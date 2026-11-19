@@ -313,7 +313,9 @@ class DgradHaloZeroSpec:
         return kernel_name_join(self.name, f"b{self.block}", "v2")
 
 
-def build_dgrad_halo_zero(spec: DgradHaloZeroSpec) -> KernelDef:
+def build_dgrad_halo_zero(
+    spec: DgradHaloZeroSpec, *, arch: str = "gfx942"
+) -> KernelDef:
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block
     dx_ptr = b.param(

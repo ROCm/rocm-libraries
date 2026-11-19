@@ -92,34 +92,40 @@ class Winograd3dDropin:
         if self.ndhwc:
             if wt3:
                 ka = cw.build_yx_weight_transform_v3(
-                    K, C, flip=dgrad, swz=wtv == 4, my=spec.my
+                    cw.YxWeightTransformV3Spec(
+                        K, C, flip=dgrad, swz=wtv == 4, my=spec.my
+                    )
                 )
                 ga = cw.yx_weight_transform_v3_grid(K, C)
             else:
                 ka = cw.build_yx_weight_transform(
-                    K,
-                    C,
-                    out_dtype=odt,
-                    fold=spec.stage in ("reg", "wlds"),
-                    u16=spec.b16,
-                    uc=spec.bc,
-                    flip=dgrad,
+                    cw.YxWeightTransformSpec(
+                        K,
+                        C,
+                        out_dtype=odt,
+                        fold=spec.stage in ("reg", "wlds"),
+                        u16=spec.b16,
+                        uc=spec.bc,
+                        flip=dgrad,
+                    )
                 )
                 ga = cw.yx_weight_transform_grid(K, C)
             sga = SignatureBuilder().ptr("W", "bf16").ptr("U", odt)
             self._caux = LaunchConfig(grid=ga, block=(256, 1, 1))
         else:
             ka = cw.build_yx_aux(
-                *self.src,
-                K,
-                out_dtype=odt,
-                fold=spec.stage in ("reg", "wlds"),
-                rev=spec.xrev,
-                halo=halo,
-                flip=dgrad,
-                wtv=(wtv if wt3 else 1),
-                amax=self.bps == 1,
-                my=spec.my,
+                cw.YxAuxSpec(
+                    *self.src,
+                    K,
+                    out_dtype=odt,
+                    fold=spec.stage in ("reg", "wlds"),
+                    rev=spec.xrev,
+                    halo=halo,
+                    flip=dgrad,
+                    wtv=(wtv if wt3 else 1),
+                    amax=self.bps == 1,
+                    my=spec.my,
+                )
             )
             sga = (
                 SignatureBuilder()
@@ -164,7 +170,7 @@ class Winograd3dDropin:
         self.kernel_names = [ka.name, km.name]
         nel = spec.Do * spec.Ho * spec.Wo * K
         if self.ks > 1:
-            kr = cw.build_ks_reduce(nel, self.ks)
+            kr = cw.build_ks_reduce(cw.KsReduceSpec(nel, self.ks))
             self._red = KernelLauncher(
                 hsaco=compile_kernel(kr, arch=arch).hsaco,
                 kernel_name=kr.name,

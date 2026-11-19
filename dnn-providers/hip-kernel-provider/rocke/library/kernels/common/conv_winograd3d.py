@@ -493,7 +493,7 @@ def _main_loop_pf(
     return loop.results[:16]
 
 
-def build_winograd3d_fwd(spec: Winograd3dSpec) -> KernelDef:
+def build_winograd3d_fwd(spec: Winograd3dSpec, *, arch: str = "gfx942") -> KernelDef:
     ok, why = is_valid_spec(spec)
     if not ok:
         raise ValueError(f"invalid winograd3d spec: {why}")
@@ -1942,7 +1942,7 @@ def _yx_epi_store16(b, spec, zo, ld, wbase, ih, oy, coef, tb, z0, ry, mask=None)
         )
 
 
-def build_winograd_yx(spec: WinogradYxSpec) -> KernelDef:
+def build_winograd_yx(spec: WinogradYxSpec, *, arch: str = "gfx942") -> KernelDef:
     """Dispatch on ``spec.stage``."""
     if spec.stage == "lds":
         return build_winograd_yx_lds_fwd(spec)
@@ -1955,7 +1955,7 @@ def build_winograd_yx(spec: WinogradYxSpec) -> KernelDef:
     return build_winograd_yx_fwd(spec)
 
 
-def build_winograd_yx_fwd(spec: WinogradYxSpec) -> KernelDef:
+def build_winograd_yx_fwd(spec: WinogradYxSpec, *, arch: str = "gfx942") -> KernelDef:
     ok, why = is_valid_yx_spec(spec)
     if not ok:
         raise ValueError(f"invalid winograd yx spec: {why}")
@@ -2154,7 +2154,9 @@ def _yx_lds_floats(spec) -> int:
     return (spec.z_tile + 2) * TR * 4 * 2 * (TCx + 1) * 8
 
 
-def build_winograd_yx_lds_fwd(spec: WinogradYxSpec) -> KernelDef:
+def build_winograd_yx_lds_fwd(
+    spec: WinogradYxSpec, *, arch: str = "gfx942"
+) -> KernelDef:
     """F(2x2,3x3) on (y,x) + direct z, input planes staged in LDS (see ``stage``)."""
     ok, why = is_valid_yx_spec(spec)
     if not ok or spec.stage != "lds":
@@ -2521,7 +2523,9 @@ def _lds16_loop_b16(
     )
 
 
-def build_winograd_yx_lds16p_fwd(spec: WinogradYxSpec) -> KernelDef:
+def build_winograd_yx_lds16p_fwd(
+    spec: WinogradYxSpec, *, arch: str = "gfx942"
+) -> KernelDef:
     """Persistent variant of the lds16 stage: ``spec.persist`` workgroups loop over the
     blocks (n blocks fastest, as nfast); the loads of the next block's first two chunks and
     weights are issued before the current block's epilogue, so their latency is hidden.
@@ -3020,7 +3024,9 @@ def _bps_scales(b, spec, E, z0, tb, lane, n_entries):
     return s_in, s_out, e
 
 
-def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
+def build_winograd_yx_lds16_fwd(
+    spec: WinogradYxSpec, *, arch: str = "gfx942"
+) -> KernelDef:
     """F(2x2,3x3) on (y,x) + direct z with f16 staging (``stage="lds16"``).
 
     The workgroup converts each chunk's input planes once: B^T along y in f32, stored as
@@ -4384,7 +4390,9 @@ def _yx_wlds_floats(spec) -> int:
     return spec.waves * _yx_wlds_wave_words(spec)
 
 
-def build_winograd_yx_wlds_fwd(spec: WinogradYxSpec) -> KernelDef:
+def build_winograd_yx_wlds_fwd(
+    spec: WinogradYxSpec, *, arch: str = "gfx942"
+) -> KernelDef:
     """F(2x2,3x3) on (y,x) + direct z with WAVE-PRIVATE staging (``stage="wlds"``).
 
     Each wave stages only the two input rows its y-point ``b`` needs (coalesced 8-byte
@@ -4675,9 +4683,21 @@ def winograd_yx_weight_transform(
 # ---------------------------------------------------------------------------------
 
 
-def build_x_to_c8(D: int, H: int, W: int, C: int, rows: bool = False) -> KernelDef:
+@dataclass(frozen=True)
+class XToC8Spec:
+    """The relayout X -> c8 (:func:`build_x_to_c8`)."""
+
+    D: int
+    H: int
+    W: int
+    C: int
+    rows: bool = False
+
+
+def build_x_to_c8(spec: XToC8Spec, *, arch: str = "gfx942") -> KernelDef:
     """X [D][H][W][C] bf16 -> X8 [C/8][D][H][W][8]. Grid (ceil(V/64), 1, 1), block 256:
     thread (v = lane, q = wave) copies 16 B chunks cb = q, q+4, ... of voxel v."""
+    D, H, W, C, rows = spec.D, spec.H, spec.W, spec.C, spec.rows
     V = D * H * W
     _check_buffers("x_to_c8", X=V * C * 2)
     # the rows layout divides by W: its name carries the shape, not only the volume
@@ -4721,11 +4741,22 @@ def build_x_to_c8(D: int, H: int, W: int, C: int, rows: bool = False) -> KernelD
     return b.kernel
 
 
-def build_x_to_c8_range(D: int, H: int, W: int, C: int) -> KernelDef:
+@dataclass(frozen=True)
+class XToC8RangeSpec:
+    """The voxel-range relayout X -> c8 (:func:`build_x_to_c8_range`)."""
+
+    D: int
+    H: int
+    W: int
+    C: int
+
+
+def build_x_to_c8_range(spec: XToC8RangeSpec, *, arch: str = "gfx942") -> KernelDef:
     """X [D][H][W][C] -> X8 [C/8][D][H][W][8] for voxels [V0, V1) (kernel arguments), no LDS
     (so it can share CUs with an LDS-full kernel on another stream). Grid
     (ceil((V1 - V0) / 64)), block 256: thread (lane, wave q) copies chunks q, q+4, ...
     """
+    D, H, W, C = spec.D, spec.H, spec.W, spec.C
     V = D * H * W
     _check_buffers("x_to_c8_range", X=V * C * 2)
     b = IRBuilder(f"wino_x_to_c8rng_V{V}C{C}")
@@ -4764,21 +4795,36 @@ def x_to_c8_grid(D, H, W, C):
     return (-(-(D * H * W) // 64), 1, 1)
 
 
-def build_x_to_c8_lds(
-    D: int,
-    H: int,
-    W: int,
-    C: int,
-    block_bytes=None,
-    halo: int = 0,
-    scale: bool = False,
-    amax: bool = False,
-) -> KernelDef:
+@dataclass(frozen=True)
+class XToC8LdsSpec:
+    """The LDS-transposed relayout X -> c8 (:func:`build_x_to_c8_lds`)."""
+
+    D: int
+    H: int
+    W: int
+    C: int
+    block_bytes: int | None = None
+    halo: int = 0
+    scale: bool = False
+    amax: bool = False
+
+
+def build_x_to_c8_lds(spec: XToC8LdsSpec, *, arch: str = "gfx942") -> KernelDef:
     """LDS-transposed X [D][H][W][C] -> X8 [C/8][D][H][W][8]: a block of VB voxels is read
     fully coalesced (16 B per lane, consecutive), transposed through LDS and written as
     C/8 runs of VB * 16 contiguous bytes. Block 256, grid ceil(V / VB). ``amax``: also
     E[block] = max of the |x| bf16 bit patterns of the block's voxels (the bps=1 map).
     """
+    D, H, W, C, block_bytes, halo, scale, amax = (
+        spec.D,
+        spec.H,
+        spec.W,
+        spec.C,
+        spec.block_bytes,
+        spec.halo,
+        spec.scale,
+        spec.amax,
+    )
     V = D * H * W
     _check_buffers("x_to_c8_lds", X=V * C * 2, X8=_relayout_bytes(D, H, W, C, halo))
     b = IRBuilder(
@@ -4990,15 +5036,26 @@ def x_to_c8_lds_grid(D, H, W, C, block_bytes=None):
 PAD_COPY_UNROLL = 4  # 16-byte units per thread (all loads issued before the stores)
 
 
-def build_pad_copy(
-    D: int, H: int, W: int, C: int, halo=1, unroll: int = PAD_COPY_UNROLL
-) -> KernelDef:
+@dataclass(frozen=True)
+class PadCopyKernelSpec:
+    """The zero-pad copy (:func:`build_pad_copy`); ``halo``: an int or a per-axis (hz, hy, hx) tuple."""
+
+    D: int
+    H: int
+    W: int
+    C: int
+    halo: int | tuple[int, int, int] = 1
+    unroll: int = PAD_COPY_UNROLL
+
+
+def build_pad_copy(spec: PadCopyKernelSpec, *, arch: str = "gfx942") -> KernelDef:
     """Zero-pad copy for the DIRECT path (not used by any Winograd kernel): X [D][H][W][C]
     bf16 -> the interior of Xp [D+2hz][H+2hy][W+2hx][C] (the caller zeroes Xp's halo once), so a
     halo-form (pad 0) kernel can serve a padded problem. Flat over 16-byte units, ``unroll``
     per thread, all loads before the stores; out-of-range units are dropped by the buffer
     bounds. ``halo``: an int or a per-axis (hz, hy, hx) tuple. Grid :func:`pad_copy_grid`.
     """
+    D, H, W, C, halo, unroll = spec.D, spec.H, spec.W, spec.C, spec.halo, spec.unroll
     hz_, hy_, hx_ = halo if isinstance(halo, tuple) else (halo,) * 3
     _check_pad_copy(D, H, W, C, halo)
     V = D * H * W
@@ -5059,18 +5116,33 @@ def pad_copy_grid(D, H, W, C, unroll: int = PAD_COPY_UNROLL):
     return (-(-(D * H * W * C // 8) // (256 * unroll)), 1, 1)
 
 
+@dataclass(frozen=True)
+class YxWeightTransformSpec:
+    """The yx weight transform (:func:`build_yx_weight_transform`)."""
+
+    K: int
+    C: int
+    out_dtype: str = "f16"
+    fold: bool = False
+    u16: bool = False
+    uc: bool = False
+    flip: bool = False
+
+
 def build_yx_weight_transform(
-    K: int,
-    C: int,
-    *,
-    out_dtype: str = "f16",
-    fold: bool = False,
-    u16: bool = False,
-    uc: bool = False,
-    flip: bool = False,
+    spec: YxWeightTransformSpec, *, arch: str = "gfx942"
 ) -> KernelDef:
     """W [K][3][3][3][C] bf16 -> U [3 dz][4 b][4 c][C/8][K][8] (``out_dtype``).
     One thread per (k, c): 27 loads, G (x) G on (y, x), 48 stores. Grid (C*K/256)."""
+    K, C, out_dtype, fold, u16, uc, flip = (
+        spec.K,
+        spec.C,
+        spec.out_dtype,
+        spec.fold,
+        spec.u16,
+        spec.uc,
+        spec.flip,
+    )
     from rocke.core.ir import F16
 
     odt = F16 if out_dtype == "f16" else BF16
@@ -5167,14 +5239,26 @@ def _emit_yx_wt(b, W, Uo, K, C, out_dtype, fold, u16, uc, blk, flip=False):
                 b.global_store(Uo, off, cvt, align=2)
 
 
+@dataclass(frozen=True)
+class YxWeightTransformV3Spec:
+    """The lds16-layout weight transform (:func:`build_yx_weight_transform_v3`)."""
+
+    K: int
+    C: int
+    flip: bool = False
+    swz: bool = False
+    my: int = 2
+
+
 def build_yx_weight_transform_v3(
-    K: int, C: int, *, flip: bool = False, swz: bool = False, my: int = 2
+    spec: YxWeightTransformV3Spec, *, arch: str = "gfx942"
 ) -> KernelDef:
     """W -> U [3][4][4][C/8][K][8] f16 (lds16 layout, no fold), one thread per (k, 8-channel
     group), consecutive threads = consecutive k, so every U store is a 16-byte lane store and
     a wave writes 1 KiB contiguous. Loads: 16 bytes per tap (forward filter, ``flip=False``)
     or, for dgrad (``flip``: W is the forward filter [C][3][3][3][K]), 8 coalesced 2-byte
     loads per tap. Same arithmetic order as _emit_yx_wt. Grid (ceil(K*C/8/256))."""
+    K, C, flip, swz, my = spec.K, spec.C, spec.flip, spec.swz, spec.my
     from rocke.core.ir import F16
 
     b = IRBuilder(
@@ -5303,13 +5387,24 @@ def _emit_yx_wt3(b, W, Uo, K, C, flip, blk, swz=False, my=2):
                     b.buffer_store_vN_f16(ru, so, ci(pt * C * K * 2 + 8 * hh), h, 2)
 
 
+@dataclass(frozen=True)
+class YxWeightTransformV2Spec:
+    """The vectorised weight transform (:func:`build_yx_weight_transform_v2`)."""
+
+    K: int
+    C: int
+    out_dtype: str = "f16"
+    fold: bool = False
+
+
 def build_yx_weight_transform_v2(
-    K: int, C: int, *, out_dtype: str = "f16", fold: bool = False
+    spec: YxWeightTransformV2Spec, *, arch: str = "gfx942"
 ) -> KernelDef:
     """Vectorised weight transform into the default U layout [3][4][4][C/8][K][8]:
     one thread per (4-channel quad, k) -- consecutive threads take consecutive k --
     8-byte loads of W and 8-byte stores of U, one dz plane at a time. Grid (C*K/4/256).
     """
+    K, C, out_dtype, fold = spec.K, spec.C, spec.out_dtype, spec.fold
     from rocke.core.ir import F16
 
     odt = F16 if out_dtype == "f16" else BF16
@@ -5387,26 +5482,46 @@ def yx_weight_transform_v2_grid(K, C):
     return (-(-(K * C // 4) // 256), 1, 1)
 
 
-def build_yx_aux(
-    D: int,
-    H: int,
-    W: int,
-    C: int,
-    K: int,
-    *,
-    out_dtype: str = "f16",
-    fold: bool = False,
-    rev: bool = False,
-    halo: int = 0,
-    flip: bool = False,
-    wtv: int = 1,
-    scale: bool = False,
-    amax: bool = False,
-    my: int = 2,
-) -> KernelDef:
+@dataclass(frozen=True)
+class YxAuxSpec:
+    """The merged auxiliary launch of the yx kernel (:func:`build_yx_aux`)."""
+
+    D: int
+    H: int
+    W: int
+    C: int
+    K: int
+    out_dtype: str = "f16"
+    fold: bool = False
+    rev: bool = False
+    halo: int | tuple[int, int, int] = 0
+    flip: bool = False
+    wtv: int = 1
+    scale: bool = False
+    amax: bool = False
+    my: int = 2
+
+
+def build_yx_aux(spec: YxAuxSpec, *, arch: str = "gfx942") -> KernelDef:
     """One launch for both auxiliary passes of the yx kernel: blocks [0, NX) relayout X to c8
     (LDS-transposed), blocks [NX, NX + NW) transform the weights -- the two run side by side
     instead of back to back. Signature (X, X8, W, U); grid yx_aux_grid()."""
+    D, H, W, C, K, out_dtype, fold, rev, halo, flip, wtv, scale, amax, my = (
+        spec.D,
+        spec.H,
+        spec.W,
+        spec.C,
+        spec.K,
+        spec.out_dtype,
+        spec.fold,
+        spec.rev,
+        spec.halo,
+        spec.flip,
+        spec.wtv,
+        spec.scale,
+        spec.amax,
+        spec.my,
+    )
     from rocke.core.ir import F16
 
     odt = F16 if out_dtype == "f16" else BF16
@@ -5473,7 +5588,7 @@ def build_yx_aux(
     return b.kernel
 
 
-def build_yx_frel_aux(spec: WinogradYxSpec) -> KernelDef:
+def build_yx_frel_aux(spec: WinogradYxSpec, *, arch: str = "gfx942") -> KernelDef:
     """Pre-launch of the fused-relayout (``frel``) main kernel: blocks [0, NXA) relayout the
     first ``base`` voxels of X to c8 (LDS-transposed), blocks [NXA, NXA + NW) transform the
     weights, the last block zeroes the producer flags. Signature (X, X8, W, U, F)."""
@@ -5513,8 +5628,17 @@ def build_yx_frel_aux(spec: WinogradYxSpec) -> KernelDef:
     return b.kernel
 
 
-def build_ks_reduce(nel: int, ks: int) -> KernelDef:
+@dataclass(frozen=True)
+class KsReduceSpec:
+    """The split-K reduction (:func:`build_ks_reduce`): ``nel`` outputs, ``ks`` slices."""
+
+    nel: int
+    ks: int
+
+
+def build_ks_reduce(spec: KsReduceSpec, *, arch: str = "gfx942") -> KernelDef:
     """Split-K reduction: P [ks][nel] f32 -> Y [nel] bf16 (8 elements per thread)."""
+    nel, ks = spec.nel, spec.ks
     _check_buffers("ks_reduce", P=ks * nel * 4, Y=nel * 2)
     b = IRBuilder(f"wino_ks_reduce_n{nel}_k{ks}")
     b.kernel.attrs["max_workgroup_size"] = 256
@@ -5692,7 +5816,7 @@ def winograd_x_grid(spec: WinogradXSpec) -> Tuple[int, int, int]:
     return (nblk, 1, 1)
 
 
-def build_winograd_x_fwd(spec: WinogradXSpec) -> KernelDef:
+def build_winograd_x_fwd(spec: WinogradXSpec, *, arch: str = "gfx942") -> KernelDef:
     from rocke.core.ir import F16
 
     ok, why = is_valid_x_spec(spec)
@@ -6011,10 +6135,21 @@ def winograd_x_weight_transform(w, *, dtype=None):
     return u.to(dtype or torch.float16).contiguous()
 
 
-def build_x_weight_transform(K: int, C: int) -> KernelDef:
+@dataclass(frozen=True)
+class XWeightTransformSpec:
+    """The x-only weight transform (:func:`build_x_weight_transform`)."""
+
+    K: int
+    C: int
+
+
+def build_x_weight_transform(
+    spec: XWeightTransformSpec, *, arch: str = "gfx942"
+) -> KernelDef:
     """W [K][3][3][3][C] bf16 -> U [3 dz][3 dy][4 c][C/8][K][8] f16 (G along x only).
     One thread per (k, c), c fastest: 27 coalesced 2-byte loads, 36 stores. Grid (C*K/256).
     """
+    K, C = spec.K, spec.C
     from rocke.core.ir import F16
 
     b = IRBuilder(f"wino_x_wt_K{K}C{C}")
@@ -6066,6 +6201,16 @@ def x_weight_transform_grid(K, C):
 
 
 __all__ = [
+    "XToC8Spec",
+    "XToC8RangeSpec",
+    "XToC8LdsSpec",
+    "PadCopyKernelSpec",
+    "YxWeightTransformSpec",
+    "YxWeightTransformV2Spec",
+    "YxWeightTransformV3Spec",
+    "YxAuxSpec",
+    "KsReduceSpec",
+    "XWeightTransformSpec",
     "build_x_weight_transform",
     "x_weight_transform_grid",
     "WinogradXSpec",

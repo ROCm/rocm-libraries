@@ -415,7 +415,7 @@ def run_one(
         nel = spec.Do * spec.Ho * spec.Wo * K
         Yp = torch.zeros(KS * nel, device=dev, dtype=torch.float32)
         args["Y"] = Yp
-        kr_ = cw.build_ks_reduce(nel, KS)
+        kr_ = cw.build_ks_reduce(cw.KsReduceSpec(nel, KS))
         lred = KernelLauncher(
             hsaco=compile_kernel(kr_, arch=arch).hsaco,
             kernel_name=kr_.name,
@@ -433,14 +433,14 @@ def run_one(
 
     aux = None
     if variant == "x":
-        kx = cw.build_x_to_c8_lds(Di, Hi, Wi, C)
+        kx = cw.build_x_to_c8_lds(cw.XToC8LdsSpec(Di, Hi, Wi, C))
         lx = KernelLauncher(
             hsaco=compile_kernel(kx, arch=arch).hsaco,
             kernel_name=kx.name,
             signature=SignatureBuilder().ptr("X", "bf16").ptr("X8", "bf16").build(),
         )
         cx = LaunchConfig(grid=cw.x_to_c8_lds_grid(Di, Hi, Wi, C), block=(256, 1, 1))
-        kwx = cw.build_x_weight_transform(K, C)
+        kwx = cw.build_x_weight_transform(cw.XWeightTransformSpec(K, C))
         lwx = KernelLauncher(
             hsaco=compile_kernel(kwx, arch=arch).hsaco,
             kernel_name=kwx.name,
@@ -454,14 +454,18 @@ def run_one(
         if hx:
             h2 = 2 * hx
             kx = cw.build_x_to_c8_lds(
-                Di - 2 * hz, Hi - h2, Wi - h2, C, halo=hxs, scale=osc, amax=am1
+                cw.XToC8LdsSpec(
+                    Di - 2 * hz, Hi - h2, Wi - h2, C, halo=hxs, scale=osc, amax=am1
+                )
             )
             xgrid = cw.x_to_c8_lds_grid(Di - 2 * hz, Hi - h2, Wi - h2, C)
         elif lay == "r8":
-            kx = cw.build_x_to_c8(Di, Hi, Wi, C, rows=True)
+            kx = cw.build_x_to_c8(cw.XToC8Spec(Di, Hi, Wi, C, rows=True))
             xgrid = cw.x_to_c8_grid(Di, Hi, Wi, C)
         else:  # LDS-transposed relayout (coalesced reads and writes)
-            kx = cw.build_x_to_c8_lds(Di, Hi, Wi, C, scale=osc, amax=am1)
+            kx = cw.build_x_to_c8_lds(
+                cw.XToC8LdsSpec(Di, Hi, Wi, C, scale=osc, amax=am1)
+            )
             xgrid = cw.x_to_c8_lds_grid(Di, Hi, Wi, C)
         sgx = SignatureBuilder().ptr("X", "bf16").ptr("X8", "bf16")
         if osc:
@@ -486,17 +490,19 @@ def run_one(
             raise ValueError("my=4: --wtv 3 or 4")
         if wt3:
             kw_ = cw.build_yx_weight_transform_v3(
-                K, C, flip=dgrad, swz=wtv == 4, my=my_
+                cw.YxWeightTransformV3Spec(K, C, flip=dgrad, swz=wtv == 4, my=my_)
             )
         else:
             kw_ = cw.build_yx_weight_transform(
-                K,
-                C,
-                out_dtype=odt,
-                fold=spec.stage in ("reg", "wlds"),
-                u16=spec.b16,
-                uc=spec.bc,
-                flip=dgrad,
+                cw.YxWeightTransformSpec(
+                    K,
+                    C,
+                    out_dtype=odt,
+                    fold=spec.stage in ("reg", "wlds"),
+                    u16=spec.b16,
+                    uc=spec.bc,
+                    flip=dgrad,
+                )
             )
         lw = KernelLauncher(
             hsaco=compile_kernel(kw_, arch=arch).hsaco,
@@ -530,20 +536,22 @@ def run_one(
             # one launch for both passes (relayout and weight transform side by side)
             hd = 2 * hx
             ka = cw.build_yx_aux(
-                Di - 2 * hz,
-                Hi - hd,
-                Wi - hd,
-                C,
-                K,
-                out_dtype=odt,
-                fold=spec.stage in ("reg", "wlds"),
-                rev=getattr(spec, "xrev", False),
-                halo=hxs,
-                flip=dgrad,
-                wtv=(wtv if wt3 else 1),
-                scale=osc,
-                amax=am1,
-                my=my_,
+                cw.YxAuxSpec(
+                    Di - 2 * hz,
+                    Hi - hd,
+                    Wi - hd,
+                    C,
+                    K,
+                    out_dtype=odt,
+                    fold=spec.stage in ("reg", "wlds"),
+                    rev=getattr(spec, "xrev", False),
+                    halo=hxs,
+                    flip=dgrad,
+                    wtv=(wtv if wt3 else 1),
+                    scale=osc,
+                    amax=am1,
+                    my=my_,
+                )
             )
             sga = (
                 SignatureBuilder()
@@ -613,7 +621,7 @@ def run_one(
             [0] + sorted({max(1, min(nzb - 1, round(f * nzb))) for f in pipe}) + [nzb]
         )
         PV = Hi * Wi
-        kr = cw.build_x_to_c8_range(Di, Hi, Wi, C)
+        kr = cw.build_x_to_c8_range(cw.XToC8RangeSpec(Di, Hi, Wi, C))
         lr = KernelLauncher(
             hsaco=compile_kernel(kr, arch=arch).hsaco,
             kernel_name=kr.name,
@@ -624,7 +632,9 @@ def run_one(
             .scalar("V1", "i32")
             .build(),
         )
-        kwp = cw.build_yx_weight_transform(K, C, out_dtype="f16")
+        kwp = cw.build_yx_weight_transform(
+            cw.YxWeightTransformSpec(K, C, out_dtype="f16")
+        )
         lwp = KernelLauncher(
             hsaco=compile_kernel(kwp, arch=arch).hsaco,
             kernel_name=kwp.name,
@@ -872,7 +882,9 @@ def run_one(
         )
         # the same pad copy as one rocKE kernel at copy bandwidth (cw.build_pad_copy)
         kpc = cw.build_pad_copy(
-            Di - 2 * hz, Hi - 2 * hx, Wi - 2 * hx, C, halo=(hz, hx, hx)
+            cw.PadCopyKernelSpec(
+                Di - 2 * hz, Hi - 2 * hx, Wi - 2 * hx, C, halo=(hz, hx, hx)
+            )
         )
         lpc = KernelLauncher(
             hsaco=compile_kernel(kpc, arch=arch).hsaco,
