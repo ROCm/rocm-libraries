@@ -329,16 +329,24 @@ def _gfx942(rt, rng):
 
 
 def _gfx1250(rt, rng):
+    import numpy as np
+
+    # Include both a K-only tail and a tail on each operand's row axis.
+    aligned = (256, 384)
     cases = (
-        ("single", 1, 0, False, False, (32, 80)),
-        ("ping_pong", 2, 8, False, False, (32, 64, 96, 80)),
-        ("ring", 3, 8, False, False, (32, 80, 128)),
-        ("split_ring", 3, 8, True, False, (80, 128)),
-        ("early_refill", 2, 8, True, True, (64, 80, 96)),
+        ("single", 1, 0, False, False, aligned, (32, 80)),
+        ("ping_pong", 2, 8, False, False, aligned, (32, 64, 96, 80)),
+        ("ring", 3, 8, False, False, aligned, (32, 80, 128)),
+        ("split_ring", 3, 8, True, False, aligned, (80, 128)),
+        ("early_refill", 2, 8, True, True, aligned, (64, 80, 96)),
+        ("ragged_mn", 1, 0, False, False, (259, 387), (80,)),
     )
     count = 0
     tile = TileSpec(128, 128, 32, 2, 2, 1, 16, 16, 32)
-    for name, depth, pad, split_barrier, early, sizes in cases:
+    for name, depth, pad, split_barrier, early, (m, n), sizes in cases:
+        pad_m, pad_n = m % tile.tile_m != 0, n % tile.tile_n != 0
+        gm = (m + tile.tile_m - 1) // tile.tile_m
+        gn = (n + tile.tile_n - 1) // tile.tile_n
         spec = UniversalGemmSpec(
             name=f"tdm_tile_loader_{name}",
             tile=tile,
@@ -346,6 +354,8 @@ def _gfx1250(rt, rng):
             trait=TraitSpec(
                 pipeline="mem",
                 epilogue="default",
+                pad_m=pad_m,
+                pad_n=pad_n,
                 tdm=True,
                 tdm_depth=depth,
                 lds_k_pad=pad,
@@ -357,19 +367,24 @@ def _gfx1250(rt, rng):
         artifact = _compile(build_universal_gemm(spec, arch="gfx1250"), "gfx1250")
         if "call void @llvm.amdgcn.tensor.load.to.lds" not in artifact.llvm_text:
             raise RuntimeError(f"{name} did not emit TDM")
-        m, n = 256, 384
         for k in sizes:
             a, b, c = _fp16_arrays(rng, m, n, k)
+            output = c
+            if pad_m or pad_n:
+                # Keep A and B exact-size. Guard all output addresses a full
+                # tile could touch, without changing the logical C row stride.
+                output = np.full(
+                    gm * tile.tile_m * gn * tile.tile_n, 137, dtype=c.dtype
+                )
+                c = output[: m * n].reshape(m, n)
+                c.fill(np.nan)
             _run_buffers(
-                rt,
-                artifact,
-                a,
-                b,
-                c,
-                (n // tile.tile_n, m // tile.tile_m, 1),
-                spec.block_size,
-                (m, n, k),
+                rt, artifact, a, b, output, (gn, gm, 1), spec.block_size, (m, n, k)
             )
+            if pad_m or pad_n:
+                np.testing.assert_array_equal(
+                    output[m * n :], 137, err_msg="TDM output canary was overwritten"
+                )
             _check_fp16(name, a, b, c)
             count += 1
     return count

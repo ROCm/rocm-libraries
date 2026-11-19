@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Host-only checks of the explicit UniversalGemm gate's verdicts."""
 
+from types import SimpleNamespace
+
+import numpy as np
 import pytest
 
 from rocke.runtime import comgr, hip_module
@@ -37,3 +40,45 @@ def test_gate_rejects_missing_compiler_and_zero_comparisons(monkeypatch):
     assert gate.main(["--arch", "gfx950"]) == 1
     monkeypatch.setitem(gate._GPU_CASES, "gfx950", lambda rt, rng: 1)
     assert gate.main(["--arch", "gfx950"]) == 0
+
+
+@pytest.mark.parametrize("damage_canary", [False, True])
+def test_gfx1250_ragged_case_uses_exact_inputs_and_checks_output_guard(
+    monkeypatch, damage_canary
+):
+    monkeypatch.setattr(gate, "build_universal_gemm", lambda spec, *, arch: spec)
+    monkeypatch.setattr(
+        gate,
+        "_compile",
+        lambda spec, arch: SimpleNamespace(
+            spec=spec, llvm_text="call void @llvm.amdgcn.tensor.load.to.lds"
+        ),
+    )
+    compared = []
+    monkeypatch.setattr(
+        gate, "_check_fp16", lambda label, a, b, c: compared.append(label)
+    )
+
+    def launch(rt, artifact, a, b, output, grid, block_size, scalars):
+        if not artifact.spec.trait.pad_m and not artifact.spec.trait.pad_n:
+            return
+        assert artifact.spec.trait.pad_m and artifact.spec.trait.pad_n
+        m, n, k = scalars
+        assert (m, n, k) == (259, 387, 80)
+        assert a.shape == (m, k) and b.shape == (n, k)
+        assert a.nbytes == 2 * m * k and b.nbytes == 2 * n * k
+        assert grid == (4, 3, 1)
+        assert np.isnan(output[: m * n]).all()
+        assert output.size > m * n
+        np.testing.assert_array_equal(output[m * n :], 137)
+        if damage_canary:
+            output[m * n] = 0
+
+    monkeypatch.setattr(gate, "_run_buffers", launch)
+    if damage_canary:
+        with pytest.raises(AssertionError, match="TDM output canary was overwritten"):
+            gate._gfx1250(None, np.random.default_rng(6))
+        assert "ragged_mn" not in compared
+    else:
+        assert gate._gfx1250(None, np.random.default_rng(6)) == 15
+        assert compared[-1] == "ragged_mn"
