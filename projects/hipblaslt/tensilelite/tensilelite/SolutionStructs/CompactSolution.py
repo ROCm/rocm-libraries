@@ -32,7 +32,7 @@ from .Naming import getKernelFileBase, getKernelNameMin, getKeyNoInternalArgs
 from .Solution import Solution
 
 # Keys TensileCreateLibrary's parent process reads from a kernel/solution
-# without hydrating it. Keep in sync with Run.py / Toolchain/Assembly.py.
+# without hydrating it. Keep in sync with create_library/run.py / Toolchain/Assembly.py.
 SUMMARY_KEYS = (
     "KernelLanguage",
     "ISA",
@@ -51,15 +51,7 @@ SUMMARY_KEYS = (
     "UnrollLoopSwapGlobalReadOrder",
     "DirectToVgprA",
     "DirectToVgprB",
-    "SolutionIndex",
-    "SolutionNameMin",
     "StinkyTofuRegisterAllocation",
-    "CUOccupancy",
-    "MathClocksUnrolledLoop",
-    "LdsNumBytes",
-    "LoopIters",
-    "LdsOffsetBias",
-    "_subtileUnitScaleVgpr",
 )
 _SUMMARY_INDEX = {k: i for i, k in enumerate(SUMMARY_KEYS)}
 # Presence is a bitmask over SUMMARY_KEYS rather than a sentinel value: a
