@@ -4645,7 +4645,10 @@ def build_x_to_c8(D: int, H: int, W: int, C: int, rows: bool = False) -> KernelD
     thread (v = lane, q = wave) copies 16 B chunks cb = q, q+4, ... of voxel v."""
     V = D * H * W
     _check_buffers("x_to_c8", X=V * C * 2)
-    b = IRBuilder(f"wino_x_to_c8{'r' if rows else ''}_V{V}C{C}")
+    # the rows layout divides by W: its name carries the shape, not only the volume
+    b = IRBuilder(
+        f"wino_x_to_c8r_D{D}H{H}W{W}C{C}" if rows else f"wino_x_to_c8_V{V}C{C}"
+    )
     b.kernel.attrs["max_workgroup_size"] = 256
     X = b.param("X", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
     X8 = b.param("X8", PtrType(BF16, "global"), noalias=True, writeonly=True, align=16)
@@ -4749,6 +4752,7 @@ def build_x_to_c8_lds(
         + (f"_h{_halo_tag(halo)}" if halo else "")
         + ("_s" if scale else "")
         + ("_am" if amax else "")
+        + _halo_shape(halo, D, H, W)
     )
     b.kernel.attrs["max_workgroup_size"] = 256
     X = b.param("X", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
@@ -4785,6 +4789,13 @@ def _halo_tag(halo) -> str:
     """Kernel-name tag of a relayout halo: an int as is, a per-axis (hz, hy, hx) tuple as
     its three digits."""
     return "".join(str(v) for v in halo) if isinstance(halo, tuple) else str(halo)
+
+
+def _halo_shape(halo, D: int, H: int, W: int) -> str:
+    """Kernel-name suffix of a relayout with a halo: the source shape (the halo body
+    indexes D, H and W separately, so two shapes of one volume must not share a name);
+    '' without a halo (the body depends on the volume only)."""
+    return f"_{D}x{H}x{W}" if halo else ""
 
 
 def _relayout_bytes(D: int, H: int, W: int, C: int, halo=0) -> int:
@@ -5370,7 +5381,7 @@ def build_yx_aux(
         f"wino_yx_aux_V{D * H * W}C{C}K{K}_{out_dtype}{'_fold' if fold else ''}"
         f"{'_rev' if rev else ''}{f'_h{_halo_tag(halo)}' if halo else ''}{'_flip' if flip else ''}"
         f"{'_wt3' if wtv == 3 else ''}{'_wt4' if wtv == 4 else ''}{'_s' if scale else ''}"
-        f"{'_am' if amax else ''}{'_my4' if my == 4 else ''}"
+        f"{'_am' if amax else ''}{'_my4' if my == 4 else ''}{_halo_shape(halo, D, H, W)}"
     )
     b.kernel.attrs["max_workgroup_size"] = 256
     X = b.param("X", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)

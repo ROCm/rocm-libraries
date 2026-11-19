@@ -797,6 +797,45 @@ def test_pad_copy_refuses_partial_units(C):
         cw.pad_copy_grid(4, 4, 4, C)
 
 
+# --- kernel names: same-volume shapes never share a name with a different body ------------
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda D, H, W: cw.build_x_to_c8_lds(D, H, W, 128, halo=1),
+        lambda D, H, W: cw.build_x_to_c8_lds(D, H, W, 128, halo=(0, 1, 1), amax=True),
+        lambda D, H, W: cw.build_yx_aux(D, H, W, 128, 128, halo=1),
+        lambda D, H, W: cw.build_yx_aux(D, H, W, 128, 128, halo=1, wtv=4, amax=True),
+        lambda D, H, W: cw.build_yx_aux(D, H, W, 128, 128, halo=(2, 1, 1), flip=True),
+        lambda D, H, W: cw.build_x_to_c8(D, H, W, 128, rows=True),
+    ],
+)
+def test_halo_relayout_names_carry_the_shape(build):
+    """The halo (and rows) relayouts index D, H and W separately: (64,64,64) and
+    (256,32,32) have one volume and different bodies, so they must differ by name
+    (name-keyed kernel caches would otherwise run one shape's kernel on the other)."""
+    from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+    a, b = build(64, 64, 64), build(256, 32, 32)
+    assert a.name != b.name
+    la = lower_kernel_to_llvm(a, arch="gfx942").replace(a.name, "K")
+    lb = lower_kernel_to_llvm(b, arch="gfx942").replace(b.name, "K")
+    assert la != lb
+
+
+def test_relayout_names_without_halo_are_unchanged():
+    """Without a halo the relayout body depends on the volume only: the names keep it."""
+    assert cw.build_x_to_c8_lds(64, 64, 64, 128).name == "wino_x_to_c8l_V262144C128"
+    assert cw.build_x_to_c8(64, 64, 64, 128).name == "wino_x_to_c8_V262144C128"
+    assert (
+        cw.build_yx_aux(64, 64, 64, 128, 128, wtv=4).name
+        == "wino_yx_aux_V262144C128K128_f16_wt4"
+    )
+    assert (
+        cw.build_yx_aux(32, 16, 16, 128, 128, halo=1, wtv=4, amax=True).name
+        == "wino_yx_aux_V8192C128K128_f16_h1_wt4_am_32x16x16"
+    )
+
+
 # --- selector: decision tables only, chained output contract, producer geometry ------------
 def test_selector_has_no_analytic_fallback():
     """Problems without a decision table entry get the direct plan (no estimate)."""
