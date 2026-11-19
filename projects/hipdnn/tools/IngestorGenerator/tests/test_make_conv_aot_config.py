@@ -299,17 +299,18 @@ def test_the_ued_ranks_with_the_native_scorer_then_the_trained_ranker(name):
         assert digest == model["tree_data"]["hash"], artifact
 
 
-@pytest.mark.parametrize("name", sorted(_BUNDLES))
+@pytest.mark.parametrize(
+    "name",
+    sorted(name for name, sha in _TRAINED_CATALOG_SHA256.items() if sha is not None),
+)
 def test_the_shipped_ranker_was_trained_on_the_shipped_catalog(name):
     """The descriptor loader ties a ranker to its engine's UED/KMD/UMD ids only, so a
     catalog edit that keeps them leaves it ranking a catalog it never saw. The catalog
-    is every shard's kernels: one ranker serves them all."""
+    is every shard's kernels: one ranker serves them all. Only bundles with a recorded
+    fingerprint are checked (test_every_bundle_states_its_expectations keeps a
+    fingerprint limited to bundles that ship a ranker)."""
     engine, folder, _, _ = _BUNDLES[name]
-    if not _SHIPS_A_RANKER[name]:
-        pytest.skip(f"{engine} ships no trained ranker")
     trained = _TRAINED_CATALOG_SHA256[name]
-    if trained is None:
-        pytest.skip(f"no trained-catalog fingerprint is recorded for {engine}'s ranker")
     kdps = _kdps(folder)
     kernels = [
         kernel

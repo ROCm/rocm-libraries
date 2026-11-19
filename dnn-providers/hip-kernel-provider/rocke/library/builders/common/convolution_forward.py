@@ -2255,10 +2255,20 @@ def gfx950_conv_fwd_aot_capabilities(
     return conv_fwd_aot_capabilities(spec)
 
 
+def _gfx942_arch_mismatch(spec) -> str:
+    """Why ``spec`` is not a hipkernel:Gfx942ConvFwdAot instance, or ``""``."""
+    if getattr(spec, "ARCH", None) == "gfx942":
+        return ""
+    return f"a {type(spec).__name__} is not a gfx942 instance"
+
+
 def gfx942_conv_fwd_aot_capabilities(
     spec: Gfx942ConvFwdAotSpec,
 ) -> Gfx950ConvFwdCapabilities:
-    """:func:`conv_fwd_aot_capabilities` of a hipkernel:Gfx942ConvFwdAot instance."""
+    """:func:`conv_fwd_aot_capabilities` of a hipkernel:Gfx942ConvFwdAot instance;
+    another arch's instance raises ``TypeError``."""
+    if _gfx942_arch_mismatch(spec):
+        raise TypeError(_gfx942_arch_mismatch(spec))
     return conv_fwd_aot_capabilities(spec)
 
 
@@ -2282,7 +2292,11 @@ def gfx950_conv_fwd_aot_serves(
 def gfx942_conv_fwd_aot_serves(
     spec: Gfx942ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
 ) -> tuple[bool, str]:
-    """:func:`conv_fwd_aot_serves` for a hipkernel:Gfx942ConvFwdAot instance."""
+    """:func:`conv_fwd_aot_serves` for a hipkernel:Gfx942ConvFwdAot instance; another
+    arch's instance serves nothing."""
+    mismatch = _gfx942_arch_mismatch(spec)
+    if mismatch:
+        return False, mismatch
     return conv_fwd_aot_serves(spec, problem)
 
 
@@ -2298,8 +2312,10 @@ def gfx942_conv_fwd_aot_runtime_candidates(
     problem: Gfx950ConvFwdSpec, specs: Sequence[Gfx942ConvFwdAotSpec]
 ) -> list[Gfx942ConvFwdAotSpec]:
     """:func:`conv_fwd_aot_runtime_candidates`: what hipkernel:Gfx942ConvFwdAot
-    selects for ``problem``."""
-    return conv_fwd_aot_runtime_candidates(problem, specs)
+    selects for ``problem``; another arch's instances are never candidates."""
+    return conv_fwd_aot_runtime_candidates(
+        problem, [spec for spec in specs if not _gfx942_arch_mismatch(spec)]
+    )
 
 
 def gfx950_conv_fwd_aot_problem_for_request(

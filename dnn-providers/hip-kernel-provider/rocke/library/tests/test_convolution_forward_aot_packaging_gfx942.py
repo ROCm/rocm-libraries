@@ -40,6 +40,7 @@ from builders.common.convolution_forward import (
     build_gfx942_conv_fwd_aot_split_reduce,
     build_gfx950_conv_fwd_aot,
     conv_fwd_aot_serves,
+    gfx942_conv_fwd_aot_capabilities,
     gfx942_conv_fwd_aot_problem_for_request,
     gfx942_conv_fwd_aot_runtime_candidates,
     gfx942_conv_fwd_aot_serves,
@@ -212,6 +213,26 @@ def test_instances_are_refused_for_the_other_arch(catalog):
             assert not ok and "only a split-C instance" in why, why
             with pytest.raises(ValueError, match="only a split-C instance"):
                 build_gfx942_conv_fwd_aot_split_reduce(spec)
+
+
+def test_the_gfx942_wrappers_refuse_another_archs_instance(catalog):
+    """A gfx950 instance passed to the gfx942 serve/capability/selection wrappers is
+    not served, has no capabilities and is never a candidate, although the shared
+    rule alone would accept it."""
+    spec = next(s for _, s in catalog["fp16"] if s.is_direct)
+    twin = _as_gfx950(spec)
+    problem = next(
+        p for p in _direct_problems(spec, 64, _SEED) if conv_fwd_aot_serves(spec, p)[0]
+    )
+    assert conv_fwd_aot_serves(twin, problem)[0]
+    assert gfx942_conv_fwd_aot_serves(spec, problem) == (True, "ok")
+    ok, why = gfx942_conv_fwd_aot_serves(twin, problem)
+    assert not ok and "not a gfx942 instance" in why, why
+    gfx942_conv_fwd_aot_capabilities(spec)
+    with pytest.raises(TypeError, match="not a gfx942 instance"):
+        gfx942_conv_fwd_aot_capabilities(twin)
+    assert gfx942_conv_fwd_aot_runtime_candidates(problem, [spec])
+    assert gfx942_conv_fwd_aot_runtime_candidates(problem, [twin]) == []
 
 
 def test_the_identity_converters_refuse_the_other_arch(catalog):

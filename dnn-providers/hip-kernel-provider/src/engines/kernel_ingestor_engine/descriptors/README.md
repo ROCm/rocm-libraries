@@ -137,8 +137,10 @@ rocKE/<bundle>/
 
 One pointer per bundle keeps the pointer count and the pull small, and the whole bundle
 updates atomically. Files are stored uncompressed, one blob each. `gfx950_attention_dense`,
-`gfx942_attention_unified_3d`, `gfx950_conv_fwd_aot` and `gfx950_conv_dgrad_aot` (the last
-two with `heuristics.dvc`) use this layout. A single large file with its own
+`gfx942_attention_unified_3d` and the conv AOT bundles `gfx950_conv_fwd_aot`,
+`gfx942_conv_fwd_aot`, `gfx950_conv_dgrad_aot`, `gfx942_conv_dgrad_aot` and
+`gfx1250_conv_dgrad_aot` (each with `heuristics.dvc`, its trained `sort_kernel_catalog`
+ranker) use this layout. A single large file with its own
 `<name>.kdp.json.dvc` pointer is also
 accepted.
 

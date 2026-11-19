@@ -60,6 +60,9 @@ struct Engine
 {
     std::string_view arch;
     int64_t waveSize;
+    /// Whether the engine launches direct_depthwise_win: its Toeplitz MFMA form is
+    /// gfx950-only, so the gfx942 engine refuses a win kernel its packs might carry.
+    bool windowedDepthwise;
     std::string_view messagePrefix;
     std::string_view graphMatcherSymbol;
     std::string_view kernelMatcherSymbol;
@@ -78,6 +81,7 @@ struct Engine
 
 constexpr Engine GFX950_ENGINE{"gfx950",
                                64,
+                               true,
                                "gfx950_conv_fwd",
                                "hipkernel.gfx950_conv_fwd_aot.graph_match",
                                "hipkernel.gfx950_conv_fwd_aot.kernel_match",
@@ -91,6 +95,7 @@ constexpr Engine GFX950_ENGINE{"gfx950",
                                &gfx950ConvFwdAotKpackModuleCache};
 constexpr Engine GFX942_ENGINE{"gfx942",
                                64,
+                               false,
                                "gfx942_conv_fwd",
                                "hipkernel.gfx942_conv_fwd_aot.graph_match",
                                "hipkernel.gfx942_conv_fwd_aot.kernel_match",
@@ -855,13 +860,19 @@ std::optional<ConvLaunch> batchSplitLaunch(const MatchedProblem& matched,
     return launch;
 }
 
-std::optional<ConvLaunch> aotKernelFits(const MatchedProblem& matched,
+std::optional<ConvLaunch> aotKernelFits(const Engine& engine,
+                                        const MatchedProblem& matched,
                                         const KernelDefinition& kernel)
 {
     const char* dtype = matched.dtype == data_objects::DataType::HALF ? "fp16" : "bf16";
     AotPrepared scratch;
     const auto& prepared = preparedOf(kernel, scratch);
     if(prepared.dtype != dtype || !prepared.instance)
+    {
+        return std::nullopt;
+    }
+    if(const auto* direct = std::get_if<conv::DirectInstance>(&*prepared.instance);
+       direct && direct->variant == conv::DirectVariant::WIN && !engine.windowedDepthwise)
     {
         return std::nullopt;
     }
@@ -874,7 +885,7 @@ bool aotKernelMatches(const MatchContext& context,
                       const KernelDefinition& kernel)
 {
     const auto matched = matchedFromBound(E, context, bound);
-    return matched && aotKernelFits(*matched, kernel).has_value();
+    return matched && aotKernelFits(E, *matched, kernel).has_value();
 }
 
 template <const Engine& E>
@@ -904,6 +915,10 @@ double
     }
     if(const auto* direct = std::get_if<conv::DirectInstance>(&*instance))
     {
+        if(direct->variant == conv::DirectVariant::WIN && !E.windowedDepthwise)
+        {
+            return -1.0;
+        }
         // win packages both a pure-depthwise arm (cpg == 1, which competes with
         // std/spatial/tiled/col) and a grouped one (cpg a multiple of 8): only the
         // former is pure depthwise.
@@ -1190,7 +1205,7 @@ public:
             return 0;
         }
         const auto matched = matchProblem(E, context);
-        const auto launch = matched ? aotKernelFits(*matched, kernel) : std::nullopt;
+        const auto launch = matched ? aotKernelFits(E, *matched, kernel) : std::nullopt;
         return launch ? static_cast<size_t>(launch->workspaceBytes) : 0;
     }
 
@@ -1199,7 +1214,7 @@ public:
                                               const KernelDefinition& kernel) const override
     {
         const auto matched = matchProblem(E, context);
-        const auto launch = matched ? aotKernelFits(*matched, kernel) : std::nullopt;
+        const auto launch = matched ? aotKernelFits(E, *matched, kernel) : std::nullopt;
         // A split-C kernel launches through this pack's two-launch handler only, and
         // every kernel of that pack is split-C.
         if(!launch || launch->reduce.has_value() != !_launchNames.empty())

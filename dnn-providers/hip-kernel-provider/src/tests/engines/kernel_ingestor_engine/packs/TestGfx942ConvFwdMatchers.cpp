@@ -298,6 +298,43 @@ TEST(TestGfx942ConvFwdKernelMatcher, EachEngineServesItsOwnDeviceOnly)
     }
 }
 
+TEST(TestGfx942ConvFwdKernelMatcher, RefusesAWindowedDepthwiseKernelTheGfx950EngineServes)
+{
+    // direct_depthwise_win needs gfx950's Toeplitz MFMA form: the gfx942 catalog ships
+    // none, and a win kernel in a gfx942 pack is refused by the matcher, the score and
+    // the dispatch alike, while the gfx950 engine serves the same kernel.
+    auto win = sampleKernel({"direct", {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, "direct", {0, 0, 0, 0}});
+    win.metadata["grouped"] = int64_t{0};
+    win.metadata["kernel_family"] = int64_t{1};
+    win.metadata["direct_variant"] = std::string("win");
+    win.metadata["filter_h"] = win.metadata["filter_w"] = int64_t{3};
+    win.metadata["stride_h"] = win.metadata["stride_w"] = int64_t{1};
+    win.metadata["pad_h"] = win.metadata["pad_w"] = int64_t{1};
+    win.metadata["dilation_h"] = win.metadata["dilation_w"] = int64_t{1};
+    win.metadata["block_h"] = int64_t{12};
+    win.metadata["block_waves"] = int64_t{8};
+    win.metadata["cpg"] = int64_t{1};
+    win.metadata["kpg"] = int64_t{1};
+    win.metadata["prefetch_rows"] = int64_t{2};
+    win.metadata["w_fold"] = int64_t{2};
+    const ConvShape depthwise = depthwiseShape(32, 14, 14, 3, 1, 1);
+
+    const auto onGfx950
+        = fixtureOf(depthwise, data_objects::DataType::HALF, deviceProperties("gfx950"));
+    const auto gfx950Bound = matchesGraph(GFX950_FWD.pack, onGfx950.context());
+    ASSERT_TRUE(gfx950Bound);
+    EXPECT_TRUE(matchesKernel(GFX950_FWD.pack, onGfx950.context(), win, *gfx950Bound));
+
+    const auto onGfx942
+        = fixtureOf(depthwise, data_objects::DataType::HALF, deviceProperties("gfx942"));
+    const auto gfx942Bound = matchesGraph(GFX942_FWD.pack, onGfx942.context());
+    ASSERT_TRUE(gfx942Bound);
+    EXPECT_FALSE(matchesKernel(GFX942_FWD.pack, onGfx942.context(), win, *gfx942Bound));
+    EXPECT_FALSE(matchesKernel(GFX942_FWD.pack, onGfx942.context(), win));
+    EXPECT_EQ(scoreKernel(GFX942_FWD.pack, onGfx942.context(), win, *gfx942Bound), -1.0);
+    expectRefusedTogether(dispatchHandler(GFX942_FWD.pack), onGfx942.context(), *gfx942Bound, win);
+}
+
 TEST(TestGfx942ConvFwdKernelMatcher, EveryShippedInstanceServesGraphsOfItsOwnDtypeOnly)
 {
     // Over every golden problem, the matcher already admits exactly the adapter's
