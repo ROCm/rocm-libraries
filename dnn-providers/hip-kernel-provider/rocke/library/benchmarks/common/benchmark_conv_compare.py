@@ -295,8 +295,6 @@ def _build_implicit_only_args(args) -> list[str]:
         a += ["--split-k", str(args.split_k)]
     if args.split_k_degrees is not None:
         a += ["--split-k-degrees", args.split_k_degrees]
-    if args.two_stage is not None:
-        a += ["--two-stage", args.two_stage]
     if args.deterministic:
         a += ["--deterministic", args.deterministic]
     if args.split_k_prune is not None:
@@ -792,17 +790,6 @@ def main() -> int:
         help=(
             "comma-separated wgrad split-K degrees swept by --split-k 0 "
             "(default: the implicit-GEMM sweep's own list). Forwarded to "
-            "implicit-GEMM only."
-        ),
-    )
-    implicit_grp.add_argument(
-        "--two-stage",
-        default=None,
-        choices=["auto", "always", "never"],
-        dest="two_stage",
-        help=(
-            "wgrad two-stage (f32 workspace) kernels: auto / always / never "
-            "(default: the implicit-GEMM sweep's own, auto). Forwarded to "
             "implicit-GEMM only."
         ),
     )
