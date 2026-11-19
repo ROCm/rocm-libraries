@@ -27,6 +27,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <vector>
+
 /* ----- shared small helper: copy a working acc array into ctx->final_accs ----
  * Python sets `final_accs = current_accs` (or `for_op.results`); in C the
  * drivers write the ctx slot the epilogue reads. */
@@ -2425,7 +2427,9 @@ static rocke_value_t* conv_xh_emit(conv_xh_t* x,
         c_oob = xp.a_nb;
     }
 
-    conv_dma_t a_dma[64];
+    /* The DMA lists are sized from the spec (a wave's range is WR / 4
+     * segments; B one segment per wave and round), as Python's lists are. */
+    std::vector<conv_dma_t> a_dma(WR / 4 > 0 ? WR / 4 : 1);
     int n_adma = 0;
     rocke_value_t* pc_w[3] = {NULL, NULL, NULL};
     {
@@ -2481,10 +2485,12 @@ static rocke_value_t* conv_xh_emit(conv_xh_t* x,
     }
     /* B: rows (x, n) of the lds_xor layout; chunk = pchunk ^ (key(row) & 3). */
     const int _sh = spec->lds_xor_rowkey ? 0 : 1;
-    conv_dma_t b_dma[256];
+    const bool bcheap = n_waves == 4 && block_n == 64;
+    const int n_bseg = XT * block_n / 4;
+    const int n_brnd = (n_bseg + n_waves - 1) / n_waves;
+    std::vector<conv_dma_t> b_dma(bcheap ? XT * block_n / 16 : (n_brnd > 0 ? n_brnd : 1));
     int n_bdma = 0;
     rocke_value_t* c_tn = rocke_b_const_i32(b, block_n);
-    const bool bcheap = n_waves == 4 && block_n == 64;
     if(bcheap)
     {
         rocke_value_t* key;
@@ -2524,12 +2530,19 @@ static rocke_value_t* conv_xh_emit(conv_xh_t* x,
     }
     else
     {
-        const int n_seg = XT * block_n / 4;
-        for(int jj = 0; jj < (n_seg + n_waves - 1) / n_waves; ++jj)
+        /* Python segs(): every segment index first, then the per-segment
+         * offsets (the same SSA order). The last round's surplus waves repeat
+         * the last segment. */
+        std::vector<rocke_value_t*> sgs(n_brnd > 0 ? n_brnd : 1);
+        for(int jj = 0; jj < n_brnd; ++jj)
         {
-            rocke_value_t* sg = rocke_b_add(b, rocke_b_const_i32(b, jj * n_waves), wave_);
-            if((jj + 1) * n_waves > n_seg)
-                sg = rocke_b_smin(b, sg, rocke_b_const_i32(b, n_seg - 1));
+            sgs[jj] = rocke_b_add(b, rocke_b_const_i32(b, jj * n_waves), wave_);
+            if((jj + 1) * n_waves > n_bseg)
+                sgs[jj] = rocke_b_smin(b, sgs[jj], rocke_b_const_i32(b, n_bseg - 1));
+        }
+        for(int jj = 0; jj < n_brnd; ++jj)
+        {
+            rocke_value_t* sg = sgs[jj];
             rocke_value_t* prow = rocke_b_add(b, rocke_b_mul(b, sg, rocke_b_const_i32(b, 4)), l16);
             rocke_value_t* key = _sh ? rocke_b_lshr(b, prow, rocke_b_const_i32(b, _sh)) : prow;
             rocke_value_t* chunk
@@ -2566,7 +2579,7 @@ static rocke_value_t* conv_xh_emit(conv_xh_t* x,
         y.c2 = c2;
         y.A_addr = A_addr;
         y.B_addr = B_addr;
-        y.b_dma = b_dma;
+        y.b_dma = b_dma.data();
         y.n_bdma = n_bdma;
         y.bcheap = bcheap;
         y.base_rows = base_rows;
@@ -2824,7 +2837,7 @@ static rocke_value_t*
                              rocke_b_add(b, m0, rocke_b_const_i32(b, ((RR - 1) * QQ + cw) * WEXT)),
                              pc_ring[cw]);
     }
-    conv_xdst_t own[64];
+    std::vector<conv_xdst_t> own(NSEG > 0 ? NSEG : 1);
     int n_own = 0;
     for(int j = 0; j < NSEG; ++j)
     {
@@ -2855,9 +2868,10 @@ static rocke_value_t*
     }
     const int n_slot = (NSEG + 3) / 4;
     rocke_value_t* scratch = rocke_b_const_i32(b, spec->warp_m * NSEG);
-    rocke_value_t* ring_v[64];
-    int ring_cw[64], ring_i[64];
-    rocke_value_t* ring_js[64];
+    const int n_ring_max = QQ * n_slot > 0 ? QQ * n_slot : 1;
+    std::vector<rocke_value_t*> ring_v(n_ring_max);
+    std::vector<int> ring_cw(n_ring_max), ring_i(n_ring_max);
+    std::vector<rocke_value_t*> ring_js(n_ring_max);
     int n_ring = 0;
     for(int cw = 0; cw < QQ; ++cw)
     {
@@ -2890,7 +2904,7 @@ static rocke_value_t*
             ring_js[n_ring++] = j_s;
         }
     }
-    conv_xdst_t b_lazy[256];
+    std::vector<conv_xdst_t> b_lazy(y->n_bdma > 0 ? y->n_bdma : 1);
     int n_blazy = 0;
     for(int j = 0; j < y->n_bdma; ++j)
     {
@@ -2899,10 +2913,11 @@ static rocke_value_t*
         else
             b_lazy[n_blazy++] = {0, 0, NULL, y->b_dma[j].lds, y->b_dma[j].voff};
     }
-    conv_xdst_t ring[CONV_XH_TAPS - 1][64];
+    std::vector<conv_xdst_t> ring[CONV_XH_TAPS - 1];
     int n_rl[CONV_XH_TAPS - 1];
     for(int yy = 0; yy < XT - 1; ++yy)
     {
+        ring[yy].resize(n_ring > 0 ? n_ring : 1);
         n_rl[yy] = 0;
         for(int r = 0; r < n_ring; ++r)
         {
@@ -2916,7 +2931,7 @@ static rocke_value_t*
             ring[yy][n_rl[yy]++] = {'w', d * NSEG + 4 * ring_i[r], inval, NULL, ring_v[r]};
         }
     }
-    conv_xdst_t own2[64];
+    std::vector<conv_xdst_t> own2(NSEG > 0 ? NSEG : 1);
     int n_own2 = 0;
     rocke_value_t* uu = NULL;
     rocke_value_t* pc_u[3] = {NULL, NULL, NULL};
@@ -3024,13 +3039,13 @@ static rocke_value_t*
         conv_xh_uniforms(x, st0, &ao, &bo, &to);
         rocke_value_t* sa0 = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, ao, c_eb));
         rocke_value_t* sb0 = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, bo, c_eb));
-        issue(own,
+        issue(own.data(),
               n_own,
               conv_xpd_rsrc(ctx, xp, xp->on ? pc_ring[0][0] : NULL, pc_own[1], st0),
               NULL,
               sa0,
               c0);
-        issue(b_lazy, n_blazy, ctx->b_rsrc, y->B_addr, sb0, c0);
+        issue(b_lazy.data(), n_blazy, ctx->b_rsrc, y->B_addr, sb0, c0);
         rocke_b_region_leave(b);
     }
     rocke_b_sync(b);
@@ -3130,7 +3145,7 @@ static rocke_value_t*
                 rocke_value_t* hn = rocke_b_cmp_lt(b, nk, y->xh_hi);
                 for(int i = 0; i < 3; ++i)
                     sel[i] = rocke_b_select(b, hn, st1[i], st[i]);
-                a_list = own;
+                a_list = own.data();
                 n_alist = n_own;
                 a_rs = conv_xpd_rsrc(ctx, xp, xp->on ? pc_ring[0][0] : NULL, pc_own[1], sel);
             }
@@ -3138,7 +3153,7 @@ static rocke_value_t*
             {
                 for(int i = 0; i < 3; ++i)
                     sel[i] = st1[i];
-                a_list = ring[yy];
+                a_list = ring[yy].data();
                 n_alist = n_rl[yy];
                 a_rs = conv_xpd_rsrc(
                     ctx, xp, xp->on ? pc_ring[0][0] : NULL, xp->on ? pc_ring[0][1] : NULL, sel);
@@ -3155,7 +3170,7 @@ static rocke_value_t*
                 rocke_b_s_waitcnt(b, -1, XT * mfmas_n, -1);
                 n_pre = n_own2;
                 n_alist = 0;
-                issue(own2,
+                issue(own2.data(),
                       n_own2,
                       conv_xpd_rsrc(ctx, xp, xp->on ? pc_ring[0][0] : NULL, pc_u[1], sel),
                       NULL,
@@ -3191,7 +3206,7 @@ static rocke_value_t*
             }
             rocke_b_sync_lds_only_fence(b, "compiler");
             issue(a_list, n_alist, a_rs, NULL, sa, z0);
-            issue(b_lazy, n_blazy, ctx->b_rsrc, y->B_addr, sb, z0);
+            issue(b_lazy.data(), n_blazy, ctx->b_rsrc, y->B_addr, sb, z0);
             run_mf(n_pre_mf, XT * n_mf);
             {
                 const int n_post = n_alist + n_blazy;

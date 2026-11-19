@@ -1033,6 +1033,16 @@ _GFX942_3D_OFFSET = 32
 #  152: 55 + split_k=2, split_atomic: rejected by both engines (3-D)
 #  153: 151 without split_atomic (the two-stage workspace split) +
 #       uniform_k_decode: rejected by both engines (an atomic-split K loop)
+#  154: 57 + epi_quad_xpose=1 (the quad-transpose store through the pointwise
+#       D address)
+#  155: 114 with warp_m=1 (one wave: the x-halo B DMA list of the
+#       wave-private loop without the 4-wave form; a 65-segment wave range)
+#  156: 114 with tile_n=128 (the same B DMA list with four waves)
+#  157: 57 + split_k=2: rejected by both engines (pointwise atomic split)
+#  158: 111 with split_det=0 + split_zero_first: rejected by both engines
+#       (split_hybrid runs the stream-K loop)
+#  159: 94 without xcd_remap + split_xcd_remap=6: rejected by both engines
+#       (split_det 1 owner dispatched before its slices)
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1473,6 +1483,15 @@ def _gfx942_3d_spec(idx: int):
     )
     if idx in _pp:
         knobs[idx] = (55, dict(_s3, **_pp[idx]))
+    knobs[154] = (57, dict(epi_quad_xpose=1))
+    knobs[155] = (55, dict(_s4, warp_m=1))
+    knobs[156] = (55, dict(_s4, tile_n=128))
+    knobs[157] = (57, dict(split_k=2))
+    knobs[158] = (55, dict(_s3, xcd_remap=0, split_hybrid=4, split_zero_first=True))
+    knobs[159] = (
+        55,
+        dict(_s3, **_p85, split_det=1, xcd_remap=0, split_xcd_remap=6),
+    )
     extra = {}
     if idx in knobs:
         idx, extra = knobs[idx]

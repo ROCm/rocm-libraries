@@ -1222,10 +1222,16 @@ static void conv_emit_fwd_epilogue_qx(rocke_conv_build_ctx_t* ctx, rocke_value_t
         rocke_value_t* m_wave = rocke_b_add(b, ctx->block_m_off_v, wm2);
         m_str = rocke_b_add(b, m_wave, rocke_b_mul(b, row_in, rocke_b_const_i32(b, mfmas_m)));
     }
+    /* d_addr: the pointwise closure (flat [M, K], always valid) or the D
+     * descriptor's, as the other fwd epilogues pick it. */
     rocke_conv_d_addr_ctx_t dctx;
     dctx.D_desc = ctx->D_desc;
     dctx.k_out_group_base = ctx->d_k_out_group_base;
     dctx.slab_base = NULL;
+    rocke_conv_d_addr_pw_ctx_t pw;
+    pw.pitch = ctx->ir_d_pitch_pw;
+    pw.k_out_group_base = ctx->d_k_out_group_base;
+    pw.valid = ctx->ir_always_valid_d;
     rocke_value_t* n_bound = ctx->merged ? ctx->c_gm : ctx->p_kpg;
     for(int mi = 0; mi < mfmas_m; ++mi)
     {
@@ -1236,7 +1242,9 @@ static void conv_emit_fwd_epilogue_qx(rocke_conv_build_ctx_t* ctx, rocke_value_t
             m_val = rocke_b_select(b, ctx->xsm_ok, ms, m_val);
         }
         rocke_value_t* valid = NULL;
-        rocke_value_t* off0 = rocke_conv_d_addr(b, m_val, n_base, &valid, &dctx);
+        rocke_value_t* off0 = ctx->is_pointwise
+                                  ? rocke_conv_d_addr_pointwise(b, m_val, n_base, &valid, &pw)
+                                  : rocke_conv_d_addr(b, m_val, n_base, &valid, &dctx);
         rocke_value_t* m_ok = rocke_b_cmp_lt(b, m_val, ctx->p_M);
         if(valid != NULL)
             m_ok = rocke_b_land(b, m_ok, valid);

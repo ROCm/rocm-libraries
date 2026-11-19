@@ -1125,6 +1125,44 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const cha
         spec->defer_mfma = idx == 125 ? 2 : 0;
         spec->defer_mfma_per_write = idx == 125 ? 3 : 0;
         return 0;
+    case 154:
+    case 157:
+        /* 57 + epi_quad_xpose=1 (the pointwise D address) / + split_k=2:
+         * rejected (pointwise atomic split) */
+        if(make_cfg_3d_base(57, spec, arch) != 0)
+            return -1;
+        if(idx == 154)
+            spec->epi_quad_xpose = 1;
+        else
+            spec->split_k = 2;
+        return 0;
+    case 155:
+    case 156:
+        /* 114 with warp_m=1 / tile_n=128: the x-halo B DMA list without the
+         * 4-wave form (155: a 65-segment wave range) */
+        if(make_cfg_3d(114, spec, arch) != 0)
+            return -1;
+        if(idx == 155)
+            spec->warp_m = 1;
+        else
+            spec->tile_n = 128;
+        return 0;
+    case 158:
+        /* 111 with split_det=0 + split_zero_first: rejected (split_hybrid
+         * runs the stream-K loop) */
+        if(make_cfg_3d(111, spec, arch) != 0)
+            return -1;
+        spec->split_det = 0;
+        spec->split_zero_first = true;
+        return 0;
+    case 159:
+        /* 94 without xcd_remap + split_xcd_remap=6: rejected (the split_det 1
+         * owner dispatched before its slices) */
+        if(make_cfg_3d(94, spec, arch) != 0)
+            return -1;
+        spec->xcd_remap = 0;
+        spec->split_xcd_remap = 6;
+        return 0;
     case 152:
         /* 55 + split_k=2, split_atomic: rejected (a 3-D split is atomic already) */
         if(make_cfg_3d_base(55, spec, arch) != 0)
