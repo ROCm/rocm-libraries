@@ -5726,11 +5726,12 @@ class Solution(collections.abc.Mapping):
           GRVW_TC = state[f"GlobalReadVectorWidth{tc}"]
           if GRVW_TC != laneSize:
             reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support GRVW{tc} ({GRVW_TC}) != swizzle lane size ({laneSize})")
-            return
 
       # The rejects below guard the gfx1250 swizzled-TDM path only. The gfx942 DirectToVgpr swizzle
       # path (no TDM) keeps the rules it had before the TDM path existed: a LibraryLogic carries
-      # swizzle-A kernels with VectorWidthA > 1 there, which must stay valid.
+      # swizzle-A kernels with VectorWidthA > 1 there, which must stay valid, and its rejects do not
+      # return early, so one derivation still reports every violated rule (characterization tests
+      # pin that multiset). The TDM-only rejects return at once.
       if state["ProblemType"]["SwizzleTensorA"]:
         # The subtile path has its own layout rules; these guard the DTV and swizzled-TDM paths.
         if not state["UseSubtileImpl"]:
@@ -5760,10 +5761,8 @@ class Solution(collections.abc.Mapping):
           # gfx1250 swizzled-TDM stages A through LDS via tensor_load_to_lds instead.
           if not state["DirectToVgprA"] and not swizzleAIsTDM:
             reject(state, printRejectionReason, f"Tensor A swizzling requires DirectToVgprA")
-            return
         if not state["ProblemType"]["TransposeA"]:
           reject(state, printRejectionReason, f"Tensor A swizzling supports TN or TT only")
-          return
 
       if state["ProblemType"]["SwizzleTensorB"]:
         # The subtile path has its own layout rules; these guard the DTV and swizzled-TDM paths.
@@ -5802,15 +5801,12 @@ class Solution(collections.abc.Mapping):
           # gfx1250 swizzled-TDM stages B through LDS via tensor_load_to_lds instead.
           if not state["DirectToVgprB"] and not swizzleBIsTDM:
             reject(state, printRejectionReason, f"Tensor B swizzling requires DirectToVgprB")
-            return
         if state["ProblemType"]["TransposeB"]:
           reject(state, printRejectionReason, f"Tensor B swizzling supports TN or NN only")
-          return
 
         # TODO- NN fails validation due to DTVB + Tail-Loop is not working correctly
         if not (state["ProblemType"]["TransposeA"] and not state["ProblemType"]["TransposeB"]):
           reject(state, printRejectionReason, f"Tensor B swizzling supports TN only")
-          return
 
       # Force GRVW the same when UnrollLoopSwapGlobalReadOrder = 1.
       if genGRVWA and state["UnrollLoopSwapGlobalReadOrder"] == 1:
