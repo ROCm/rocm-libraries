@@ -140,11 +140,18 @@ def _uniform_ramp_inputs(kv_len):
     one-of-{2,4,8}-segments drop or zero-out case clears this test's tolerance
     several times over). A single dominant key, as ``_decode_inputs``'s ``hot``
     is, leaves most segments carrying negligible weight, so dropping one of
-    them would barely move the output and this check would not catch it."""
+    them would barely move the output and this check would not catch it.
+
+    Channel 0 of V is the constant 1 instead, so its correct output is 1. A
+    zero-mean ramp alone cannot tell a correct reduce from one that writes
+    zeros or skips the final 1/sum normalization (equal weights on a zero-mean
+    signal sum to 0 either way); the constant channel can. The other channels
+    keep the ramp and its expected 0, where ``ATOL`` alone bounds the error."""
     q = np.ones((1, NUM_QUERY_HEADS, HEAD_SIZE), np.float32)
     k = np.zeros((NUM_KV_HEADS, kv_len, HEAD_SIZE), np.float32)
     ramp = np.linspace(-4.0, 4.0, kv_len, dtype=np.float32)
     v = np.broadcast_to(ramp[None, :, None], (NUM_KV_HEADS, kv_len, HEAD_SIZE)).copy()
+    v[..., 0] = 1.0
     return q, _bf16(k), _bf16(v)
 
 
