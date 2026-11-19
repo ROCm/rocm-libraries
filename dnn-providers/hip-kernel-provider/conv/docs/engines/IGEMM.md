@@ -49,7 +49,7 @@ block: stage A (gathered) and B (filter) tiles in LDS -> MMA/FMA over the k-step
 - Matrix-core block of `WM x WN` waves, tile `BM x BN`, k-step `BK`. One LDS buffer per operand: the next k-step's global loads are issued into registers before the current step's multiplies and stored after a barrier. gfx950 `dma` configs instead load straight into a ring of 2-4 swizzled LDS stages.
 - Atoms: MFMA 16x16 and 32x32 (wave64), gfx950 16x16x32 / 32x32x16, gfx908 bf16 forms, WMMA gfx11 (both half-waves hold all k) and gfx12 (half-waves split k), fp32 MFMA, and xf32 on gfx942.
 - FMA kernel: k-major LDS tiles, each thread a `TM x TN` register tile in runs of 4x4; fp16 multiplies pairs of k with `v_dot2_f32_f16`.
-- Flex tile (`flex`, `k1ConvFlex`, gfx950 16-bit): 256 flattened output positions x 256, 192 or 128 channels on eight waves (192: whole tiles of 192 and 384 channels).
+- Flex tile (`flex`, `k1ConvFlex`, gfx950 16-bit): 256 flattened output positions x 256, 192 or 128 channels on eight waves, each owning 64 positions x half the channels (192: whole tiles of 192 and 384 channels).
   - The block's rows run on across planes and images, so no spatial tile is padded.
   - Both operands reach LDS by 16-byte DMA in 64-channel (128-byte) rows: X double-buffered, W triple-buffered. A lane's X rows are fixed for the block and keep their offset at tap 0 plus one in-image bit per tap of each axis, so a step's DMA is a uniform tap delta and one mask test per row.
   - The reduction walks 64-channel slices outer and taps inner, so consecutive steps read shifted copies of the same rows (L1 hits).
