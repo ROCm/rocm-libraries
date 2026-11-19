@@ -158,6 +158,8 @@ class WgradSplitPolicy:
       per-group tiles are small.
     * ``min_slice_k`` -- the shallowest K-slice worth a CTA; shallower slices pay
       the fixed per-CTA cost and one more atomic pass for little work.
+      ``grouped_min_slice_k`` overrides it for a grouped launch (``groups > 1``);
+      ``None`` keeps ``min_slice_k``.
     * ``max_degree`` / ``max_degree_by_dtype`` -- the cap, overridable per dW
       dtype. A packed 16-bit atomic rounds the running sum in dW on every add,
       so with same-sign partials the relative error grows with the degree, up
@@ -174,6 +176,7 @@ class WgradSplitPolicy:
     min_slice_k: int
     max_degree: int
     max_degree_by_dtype: tuple[tuple[str, int], ...] = ()
+    grouped_min_slice_k: int | None = None
 
     def degree_cap(self, dtype_d: str) -> int:
         return dict(self.max_degree_by_dtype).get(dtype_d, self.max_degree)
@@ -212,12 +215,17 @@ def atomic_rounding_degree_cap(fraction_bits: int, tol: float = WGRAD_TOLERANCE)
 # inputs then exceed that tolerance (at 16, one 1.0 partial followed by fifteen
 # 2**-8 ones rounds back to 1.0, a 5.5% error).
 #
+# Ungrouped launches slice K down to 256 elements; grouped ones keep a
+# 2048-element floor, because shallower slices regressed grouped shapes such as
+# ResNeXt g32.
+#
 # fp16 has its own policy (_WGRAD_SPLIT_POLICY_BY_DTYPE below).
 _WGRAD_SPLIT_POLICY: dict[str, WgradSplitPolicy] = {
     "gfx1250": WgradSplitPolicy(
         target_ctas=2048,
         grouped_target_ctas=4096,
-        min_slice_k=2048,
+        min_slice_k=256,
+        grouped_min_slice_k=2048,
         max_degree=128,
         max_degree_by_dtype=(("bf16", atomic_rounding_degree_cap(7)),),
     ),
@@ -226,7 +234,7 @@ _WGRAD_SPLIT_POLICY: dict[str, WgradSplitPolicy] = {
 # Per-dtype overrides of _WGRAD_SPLIT_POLICY, keyed by (arch, dW dtype).
 #
 # gfx1250 fp16: fill to 1024 CTAs (2048 grouped) with K slices as shallow as
-# 512. Fitted on a sample of wgrad shapes with every cached split-K binary
+# 64 (512 grouped). Fitted on a sample of wgrad shapes with every cached split-K binary
 # timed at every degree 2..128 and verified, once the packed fp16 atomic was
 # no longer fenced (it is an atomicrmw now). fp16 was not split automatically
 # before (cap 1): that cap was a symptom of the fenced atomic.
@@ -241,7 +249,8 @@ _WGRAD_SPLIT_POLICY_BY_DTYPE: dict[tuple[str, str], WgradSplitPolicy] = {
     ("gfx1250", "fp16"): WgradSplitPolicy(
         target_ctas=1024,
         grouped_target_ctas=2048,
-        min_slice_k=512,
+        min_slice_k=64,
+        grouped_min_slice_k=512,
         max_degree=128,
         max_degree_by_dtype=(("fp16", atomic_rounding_degree_cap(10)),),
     ),
@@ -426,10 +435,15 @@ def select_split_k_wgrad(
         n_groups = groups
         target = policy.grouped_target_ctas if n_groups > 1 else policy.target_ctas
         grid_no_split = base_grid * n_groups
+        min_slice = (
+            policy.grouped_min_slice_k
+            if n_groups > 1 and policy.grouped_min_slice_k is not None
+            else policy.min_slice_k
+        )
         # Every bound is folded into one cap, so nothing applied after it can
         # raise the degree past any of them.
         cap = min(
-            wg_K // policy.min_slice_k,
+            wg_K // min_slice,
             policy.degree_cap(dtype_d),
             MAX_GRID_DIM_Z // n_groups,
         )
@@ -439,7 +453,7 @@ def select_split_k_wgrad(
             base_grid,
             target,
             f"{arch} wgrad policy ({dtype_d}): min(floor({target} / "
-            f"{grid_no_split}), floor({wg_K} / {policy.min_slice_k}), "
+            f"{grid_no_split}), floor({wg_K} / {min_slice}), "
             f"{policy.degree_cap(dtype_d)}) = {split_k}",
         )
 
