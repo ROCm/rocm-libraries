@@ -20,6 +20,9 @@ LIBRARY_CLIENT_DIR: str = "4_LibraryClient"
 # If a file name is longer than this value, and `--short-filenames` is set, shorten it with a hash.
 MAX_FILENAME_LENGTH: int = 64
 
+# XCC count ClusterAIDMapping != -1 is written for (2 AIDs x 4 XCCs).
+CLUSTER_AID_MAPPING_XCC_COUNT: int = 8
+
 # Characters to use for GEMM naming, e.g., C[ij]=Sum[k] A[ik]*B[jk]
 INDEX_CHARS: str = "IJKLMNOPQRSTUVWXYZ"
 

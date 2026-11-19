@@ -167,6 +167,7 @@ namespace TensileLite
             {
                 SubclassMap rv({Base::template Pair<Predicates::GPU::ProcessorEqual>(),
                                 Base::template Pair<Predicates::GPU::CUCountEqual>(),
+                                Base::template Pair<Predicates::GPU::XCCCountEqual>(),
                                 Base::template Pair<Predicates::GPU::PciChipIdEqual>(),
                                 Base::template Pair<Predicates::GPU::RunsKernelTargeting>()});
 
@@ -193,6 +194,12 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::GPU::CUCountEqual, IO>
             : public AutoMappingTraits<Predicates::GPU::CUCountEqual, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::GPU::XCCCountEqual, IO>
+            : public AutoMappingTraits<Predicates::GPU::XCCCountEqual, IO>
         {
         };
 

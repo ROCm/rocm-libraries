@@ -212,6 +212,37 @@ namespace TensileLite
                 }
             };
 
+            struct XCCCountEqual : public Predicate_CRTP<XCCCountEqual, AMDGPU>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                XCCCountEqual() = default;
+                XCCCountEqual(int val)
+                    : value(val)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "XCCCount";
+                }
+
+                virtual bool operator()(AMDGPU const& gpu) const override
+                {
+                    return gpu.xccCount == value;
+                }
+
+                virtual bool debugEval(AMDGPU const& gpu, std::ostream& stream) const override
+                {
+                    return debugEvalCmp(gpu, stream, "gpu", gpu.xccCount, "==", "sol", value);
+                }
+            };
+
             struct PciChipIdEqual : public Predicate_CRTP<PciChipIdEqual, AMDGPU>
             {
                 enum

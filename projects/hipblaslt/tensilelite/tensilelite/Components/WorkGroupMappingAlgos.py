@@ -21,6 +21,7 @@
 ################################################################################
 
 
+from ..Common.Constants import CLUSTER_AID_MAPPING_XCC_COUNT
 from ..ExecutionPolicy import isPersistent
 from rocisa.code import Module, Label, ValueSet
 from rocisa.instruction import SSendMsgRtnB32
@@ -434,7 +435,8 @@ def ClusterAIDRemap(writer, kernel, sgprWGM):
     cs, ck = kernel["ClusterDim"]
     if start == -1 or isPersistent(kernel) or cs & (cs - 1) or ck & (ck - 1):
         return module
-    numXCC, xccPerAID = 8, 4
+    numXCC = CLUSTER_AID_MAPPING_XCC_COUNT
+    xccPerAID = numXCC // 2
     log2cs, log2ck = int(log2(cs)), int(log2(ck))
 
     module.addComment1("remap clusters onto AIDs: one contiguous half of the cluster grid per GL2")
