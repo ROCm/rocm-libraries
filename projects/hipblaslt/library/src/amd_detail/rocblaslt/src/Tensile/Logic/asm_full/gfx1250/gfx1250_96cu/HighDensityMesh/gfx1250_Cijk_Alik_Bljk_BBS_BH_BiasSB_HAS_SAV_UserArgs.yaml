@@ -1082,7 +1082,7 @@ ExactLogic:
 - - [25256, 512, 1, 8192]
   - [40, 840558.0]
 IndexOrder: [2, 3, 0, 1]
-LibraryType: GridBased
+LibraryType: MeshBased
 MinimumRequiredVersion: 5.0.0
 PerfMetric: DeviceEfficiency
 ProblemType:
