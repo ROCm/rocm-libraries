@@ -670,8 +670,9 @@ def _dgrad_pbx8_twins(sets):
     no pzs) also with pbx=8 -- the makespan-planned records (conv_dgrad_box_plan);
     same binary code, host-side plan."""
     out = list(sets)
-    # ROCKE_AOT_DGRAD_PBX8_PBC=456,684,912: each pbx=8 twin also at those CU
-    # budgets (pbc; the planner may pick multi-round plans there).
+    # ROCKE_AOT_DGRAD_PBX8_PBC=<c>[,<c>...]: each pbx=8 twin also at those CU
+    # budgets (pbc, e.g. multiples of the device's CU count; the planner may
+    # pick multi-round plans there).
     pbcs = [
         int(t)
         for t in _os.environ.get("ROCKE_AOT_DGRAD_PBX8_PBC", "").split(",")
@@ -2296,7 +2297,7 @@ def _fwd_small_spatial_variants(
     The plain and ``prefetch_regs`` loops take both. The ``uniform_k_decode``
     + ``reg_prefetch=1`` loop also takes split-K when
     ``ROCKE_AOT_FWD_UKD_SPLIT=1`` (opt-in: the small-spatial grids that need
-    it, s7/s8/s10-like, are a corner of the problem space); the other
+    it, a few output tiles per image, are a corner of the problem space); the other
     ``uniform_k_decode`` / ``reg_prefetch`` loops take neither.
     """
     if kloop.get("uniform_k_decode") or kloop.get("reg_prefetch"):
@@ -2422,7 +2423,7 @@ def _fwd_split_atomic_variants(kloop: dict, variant: tuple) -> Tuple[dict, ...]:
             out = out + [dict(v, split_xcd_remap=n) for n in skx for v in base]
         # ROCKE_AOT_FWD_SHY_SKX=1: the split_hybrid binaries also with that
         # slice-major XCD remap (an XCD runs whole aligned slices of every
-        # tile, so it reads only its slices' weights: less fabric traffic on fwd s7).
+        # tile, so it reads only its slices' weights: less cross-XCD traffic).
         if (
             shy
             and skx
@@ -2462,7 +2463,7 @@ def _fwd_split_tails(kloop: dict, split_k: int) -> Tuple[bool, ...]:
     """``split_tail`` values built for one forward split variant: the
     tail-only split (ImplicitGemmConvSpec.split_tail) is opt-in
     (``ROCKE_AOT_FWD_SPLIT_TAIL=1``), on the uniform_k_decode + reg_prefetch=1
-    split binaries -- the loop the few-wave grids (s5/s6-like) run on."""
+    split binaries -- the loop the few-wave grids run on."""
     if (
         split_k > 1
         and kloop.get("uniform_k_decode")

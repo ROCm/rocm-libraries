@@ -303,10 +303,10 @@ FWD_SPLIT_K_MIN_GEMM_K = TARGET_SLICE_K
 # Provisional gfx942 constants for the implicit-GEMM wgrad split-K choice
 # only (the GEMM planner keeps gfx942 unfitted): the gfx950 fit with the
 # per-CU MFMA rate halved -- gfx942 issues half the 16-bit MFMA FLOPs per CU
-# per clock -- on gfx942's own CU and XCD counts. Checked against split-K
-# degree sweeps of 3-D wgrad shapes on a gfx942 part, with the caller passing
-# the device's CU count; replace with a split_k_cost_fit.py fit when a gfx942
-# wgrad corpus is swept.
+# per clock. num_cus / num_xcds are the arch-default fallback counts; a
+# caller that knows the device passes its CU count. Checked against
+# split-K degree sweeps of 3-D wgrad shapes on gfx942; replace with a
+# split_k_cost_fit.py fit when a gfx942 wgrad corpus is swept.
 _WGRAD_COST_MODELS = {
     "gfx942": replace(
         split_k_cost_model("gfx950"),
@@ -999,9 +999,9 @@ def fwd_wave_filling_split_ks(
 
     For ``n = 1..max_waves``, the largest degree ``floor(n * num_cus / tiles)``
     (> 1) whose ``tiles * degree`` workgroups fit ``n`` waves of one workgroup
-    per CU. A power of two rarely fills a part whose CU count is not one
-    (gfx942: 228 CUs): 32 output tiles x 7 = 224 workgroups is one wave where
-    x 8 = 256 makes two. Ascending, no duplicates. The caller still applies
+    per CU. A power of two rarely fills a device whose CU count is not one:
+    with 224 to 255 CUs, 32 output tiles x 7 = 224 workgroups is one wave
+    where x 8 = 256 makes two. Ascending, no duplicates. The caller still applies
     its own limits (slice length, grid size, gridDim.z).
     """
     if tiles <= 0 or not num_cus:

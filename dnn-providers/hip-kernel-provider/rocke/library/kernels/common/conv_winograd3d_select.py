@@ -51,7 +51,7 @@ that ``build_ks_reduce`` sums in a fixed order).
 
 Selection: per-cell decision tables only (``TUNED*``: same-session comparisons on gfx942
 against the deterministic direct kernels, reduced to the selected candidate and the direct
-baselines it beats by ``TUNED_MARGIN``; near-ties go to the direct kernel: better accuracy,
+baselines it leads by at least ``TUNED_MARGIN``; near-ties go to the direct kernel: better accuracy,
 no range caveat). A problem, mode or prescale without a table entry gets the direct plan
 (``source="untuned"``): Winograd is never chosen without a comparison on the target.
 
@@ -106,7 +106,7 @@ SPEC_Z = dict(SPEC_B, nsplit=False, z_tile=4, n_tile=32, xcd=6)
 # (direction, Di, Hi, Wi, C, K) -> {"baselines": the direct alternatives compared for the cell,
 # "<mode>[_nops]": (selected candidate name, the baselines it leads by TUNED_MARGIN)} with mode
 # dropin / chained, "_nops" = without prescale (range-safe data). Baselines: "direct" = the
-# best direct kernel on the problem as given; "pad_copy" / "pad_copy_torch" (padded FWD only)
+# selected direct kernel on the problem as given; "pad_copy" / "pad_copy_torch" (padded FWD only)
 # = zero-pad copy of X (conv_winograd3d.build_pad_copy / a torch strided copy) + the
 # halo-form direct kernel. Keys: the forward problem's (Di, Hi, Wi, C, K) for both
 # directions (dgrad = the dgrad of that forward conv).

@@ -1807,8 +1807,8 @@ class DgradConvSpec:
     # row n of slab kg at element (kg * tile_n + n) * 4). The n-fast loader's
     # lanes (consecutive n, one k group per wave) then store contiguous bytes:
     # one 16-byte store per 2 rows instead of two 8-byte stores into one
-    # 64-byte column of a row-major tile (4- to 16-way bank conflicts: the
-    # B stores were most of the kernel's LDS bank-conflict cycles on s2/s3).
+    # 64-byte column of a row-major tile (4- to 16-way bank conflicts in
+    # the B stores).
     # Each B fragment read becomes two 8-byte reads of consecutive rows of two
     # slabs (conflict-free). 1 = that; 2 = 1 with the B loads 2 wide, so a
     # thread's unit is 2 rows (one 16-byte store; tile_n 256 otherwise loads
@@ -1924,7 +1924,7 @@ class DgradConvSpec:
     # with dy_halo, 0 otherwise. Tags ``hwo<n>``.
     halo_max_wo: int = 0
     # Stream-K over a persistent grid of ``pp_streamk`` workgroups (the CU
-    # count of the target, e.g. 228 on a gfx942 part), for the ping-pong loop
+    # count of the device), for the ping-pong loop
     # (tapk_pingpong) on grids of a few waves. The (output tile, K tile)
     # iteration space, tile-major, is cut into pp_streamk equal contiguous
     # ranges; a workgroup walks its range tile by tile (each segment its own

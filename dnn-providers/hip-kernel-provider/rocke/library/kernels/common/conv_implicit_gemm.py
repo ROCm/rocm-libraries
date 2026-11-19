@@ -373,7 +373,7 @@ class ImplicitGemmConvSpec:
     # reduction in slice 0 (their other slices exit at once; plain store);
     # only the tiles past it are split ``ks_count`` ways and atomic-added
     # into D. Fills the last, partial wave of workgroups of a grid that is a
-    # few waves deep (s5/s6: 1024 tiles over 456 slots). ``xcd_remap``
+    # few waves deep (a tile count just above a whole number of waves). ``xcd_remap``
     # permutes the full tiles only, so the tail stays the last output tiles
     # in row-major tile order and the host zeroes only the D rows from tile
     # row ``full_tiles // num_pid_n`` on (:func:`fwd_split_tail_zero_rows`).
@@ -701,7 +701,7 @@ class ImplicitGemmConvSpec:
     # tile's address decode, global reads, LDS store and barrier) runs only
     # when its range is not empty, as the x-halo kernel already does. Every
     # workgroup the uniform loop serves otherwise pays it after its K loop
-    # (~5k cycles at the end of a split-K slice, ATT). Tags ``fbse``.
+    # (at the end of every split-K slice). Tags ``fbse``.
     fb_skip_empty: bool = False
     # rpf_pingpong loop: the global reads of a tile past the loop's end (the
     # last iterations' prefetch) are masked out (buffer OOB: no memory
@@ -719,8 +719,8 @@ class ImplicitGemmConvSpec:
     # offsets in L2); the H = G - S*T others each take the remainders
     # [S*P, Kt) of q = ceil(T / H) whole tiles. P balances a slice against q
     # remainders plus q-1 extra epilogues of ``split_hybrid`` K tiles each.
-    # For grids that leave CUs idle at a whole slice count (s7: 64 tiles x 3 =
-    # 192 of 228 CUs). Tags ``shy<n>``.
+    # For grids that leave CUs idle at a whole slice count (tiles x slices
+    # just short of the CU count). Tags ``shy<n>``.
     split_hybrid: int = 0
     # split_k > 1: deterministic split-K. No atomics into D: every split
     # tile has one owner contribution -- the last slice (plain / split_tail
@@ -7615,7 +7615,7 @@ def _build_implicit_gemm_conv_impl(
                 if spec.vmem_interleave:
                     # The first tap's MFMA phase spreads the loads, one per
                     # vmem_interleave MFMAs (they back up in the TA queue
-                    # when issued back to back; ATT: 46-54 stall cycles each).
+                    # when issued back to back).
                     _vmi_pending[0] = len(staged[0]) + len(staged[1])
                 else:
                     b.sched_barrier(0)

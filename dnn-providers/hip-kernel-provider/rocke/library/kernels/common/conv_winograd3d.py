@@ -871,7 +871,7 @@ class WinogradYxSpec:
     # lds16 (default double-buffered path): split the C chunks over ``ksplit`` workgroups
     # (grid x ksplit, split index slowest); each writes its f32 partial sums to slice
     # ``ks`` of an f32 workspace [ksplit][Do][Ho][Wo][K] (the "Y" argument, f32), and
-    # build_ks_reduce sums the slices into the bf16 NDHWC output. For small grids (s7/s8).
+    # build_ks_reduce sums the slices into the bf16 NDHWC output. For small grids.
     ksplit: int = 1
     # f32 kernel argument OS multiplied into the output (A^T coefficients of the epilogue,
     # free): with a relayout that scales X by 1/OS (a power of two, exact) the f16 operands
