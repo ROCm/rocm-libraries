@@ -13,6 +13,39 @@
 
 namespace ck {
 
+namespace direct_load_mask_detail {
+
+// PROTOTYPE (gfx125 / wave32 only): validity as an SGPR lane mask for the full-assembly async load.
+#if defined(__gfx125__)
+// A two-sided Pad checks two compares combined with &&; ballot of that is lowered through a VGPR
+// flag, so descriptors containing it keep the original bool path.
+template <typename Tran>
+struct is_pad_transform : false_type
+{
+};
+template <typename L, typename LP, typename RP, bool Skip>
+struct is_pad_transform<Pad<L, LP, RP, Skip>> : true_type
+{
+};
+
+template <typename Transforms>
+struct any_pad_transform;
+template <typename... Ts>
+struct any_pad_transform<Tuple<Ts...>>
+    : integral_constant<bool, (is_pad_transform<remove_cvref_t<Ts>>::value || ...)>
+{
+};
+
+template <typename Desc>
+inline constexpr bool desc_has_pad_transform_v =
+    any_pad_transform<remove_cvref_t<decltype(declval<const Desc&>().GetTransforms())>>::value;
+#else
+template <typename Desc>
+inline constexpr bool desc_has_pad_transform_v = false;
+#endif
+
+} // namespace direct_load_mask_detail
+
 /**
  * Transfer that uses direct load instructions to copy data from global to LDS memory.
  *
@@ -221,8 +254,20 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
         static_assert(num_access > 0);
         static_for<0, num_access, 1>{}([&](auto idx_1d) {
             src_coord_idx_(idx_1d) = src_coord_.GetOffset();
-            src_coord_valid_(idx_1d) =
-                coordinate_has_valid_offset_assuming_visible_index_is_valid(src_desc, src_coord_);
+            if constexpr(UseLaneMask)
+            {
+#if defined(__gfx125__)
+                src_coord_valid_mask_(idx_1d) =
+                    coordinate_has_valid_lane_mask_assuming_visible_index_is_valid(src_desc,
+                                                                                   src_coord_);
+#endif
+            }
+            else
+            {
+                src_coord_valid_(idx_1d) =
+                    coordinate_has_valid_offset_assuming_visible_index_is_valid(src_desc,
+                                                                                src_coord_);
+            }
 
             // move coordinate
             if constexpr(idx_1d.value != num_access - 1)
@@ -306,19 +351,34 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
         // loop over space-filling curve
         static_assert(num_access > 0);
         static_for<0, num_access, 1>{}([&](auto idx_1d) {
-            const auto src_offset   = src_coord_idx_(idx_1d);
-            const bool is_src_valid = src_coord_valid_(idx_1d);
+            const auto src_offset = src_coord_idx_(idx_1d);
 
             constexpr auto lds_access_offset = [&]() {
                 constexpr auto coord_offset = SpaceFillingCurve::GetIndex(idx_1d) * thread_steps;
                 return make_tensor_coordinate(DstDesc{}, coord_offset).GetOffset();
             }();
 
-            src_buf.template AsyncCopyToLds<remove_cvref_t<decltype(dst_buf)>,
-                                            ScalarPerVector,
-                                            lds_access_offset,
-                                            UseFullAssembly>(
-                dst_buf, src_offset, dst_coord_.GetOffset(), is_src_valid);
+            if constexpr(UseLaneMask)
+            {
+#if defined(__gfx125__)
+                amd_async_load_global_to_lds_assembly_mask<remove_cvref_t<typename DstBuffer::type>,
+                                                           ScalarPerVector,
+                                                           lds_access_offset>(
+                    amd_wave_read_first_lane(src_buf.p_data_),
+                    src_offset,
+                    dst_buf.p_data_,
+                    dst_coord_.GetOffset(),
+                    src_coord_valid_mask_(idx_1d));
+#endif
+            }
+            else
+            {
+                src_buf.template AsyncCopyToLds<remove_cvref_t<decltype(dst_buf)>,
+                                                ScalarPerVector,
+                                                lds_access_offset,
+                                                UseFullAssembly>(
+                    dst_buf, src_offset, dst_coord_.GetOffset(), src_coord_valid_(idx_1d));
+            }
         });
 #else
         constexpr auto dst_access_lengths = thread_slice_lengths;
@@ -512,6 +572,10 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
     static constexpr index_t num_access = SpaceFillingCurve::GetNumOfAccess();
     StaticallyIndexedArray<index_t, num_access> src_coord_idx_;
     StaticallyIndexedArray<bool, num_access> src_coord_valid_;
+    StaticallyIndexedArray<uint32_t, num_access> src_coord_valid_mask_;
+
+    static constexpr bool UseLaneMask =
+        UseFullAssembly && !direct_load_mask_detail::desc_has_pad_transform_v<SrcDesc>;
 
     SrcCoord src_coord_;
     DstCoord dst_coord_;

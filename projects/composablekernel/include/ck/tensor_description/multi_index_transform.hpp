@@ -1941,6 +1941,28 @@ struct ConvFwdDataImplicitGemmInTransform
         return valid;
     }
 
+    // PROTOTYPE: one ballot per spatial dimension keeps each term a single compare so it is
+    // lowered to a v_cmp writing an SGPR lane mask (wave32 / gfx125 only).
+    static constexpr bool HasValidLaneMask = true;
+
+    template <typename UpIdx>
+    __device__ uint32_t IsValidLaneMask(const UpIdx& idx_up) const
+    {
+#if defined(__gfx125__)
+        LowerIndex idx_low;
+        CalculateLowerIndex(idx_low, idx_up);
+        uint32_t mask = 0xffffffffu;
+        static_for<0, NDimSpatial, 1>{}([&](auto d) {
+            mask &= __builtin_amdgcn_ballot_w32(static_cast<uint32_t>(idx_low[Number<d + 1>{}]) <
+                                                static_cast<uint32_t>(in_lengths_[d]));
+        });
+        return mask;
+#else
+        ignore = idx_up;
+        return 0;
+#endif
+    }
+
     __host__ __device__ static constexpr bool IsKnownAtCompileTime() { return false; }
 
     __host__ __device__ void Print() const
