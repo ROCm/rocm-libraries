@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -302,7 +303,11 @@ std::optional<Tile>
         const double tiles
             = static_cast<double>(divUp(a.ho, th)) * static_cast<double>(divUp(a.wo, tw));
         const double cost = tiles * (pixels + 0.5 * (th + config.r - 1) * (tw + config.s - 1));
-        if(bestCost < 0 || cost < bestCost)
+        // On a tie, a width of whole 16-pixel runs: a 16-lane A fragment then reads 16
+        // consecutive halo pixels of one row (one pass over the LDS banks) instead of two rows.
+        const bool whole
+            = tw % 16 == 0 && best.tw % 16 != 0 && std::getenv("HKP_K2_TIE_OLD") == nullptr;
+        if(bestCost < 0 || cost < bestCost || (cost == bestCost && whole))
         {
             bestCost = cost;
             best.th = th;
@@ -650,7 +655,7 @@ bool configRunsOn(const Config& config, std::string_view gcnArchName)
 }
 
 std::optional<Plan>
-    planFor(const DirectProblem& problem, const Config& config, int64_t computeUnits)
+    planFor(const DirectProblem& problem, const Config& config, int64_t computeUnits, int xcds)
 {
     const auto& a = problem.args;
     if(computeUnits < 1)
@@ -817,6 +822,12 @@ std::optional<Plan>
     plan.grid[0] = static_cast<unsigned int>(gridX);
     plan.grid[1] = static_cast<unsigned int>(columnBlocks);
     plan.grid[2] = static_cast<unsigned int>(k2.splits);
+    // XCD-contiguous block order (halo tiles, one split): the XCD count of the device.
+    k2.xcds = !config.rows && k2.splits == 1 && xcds > 1 ? xcds : 0;
+    if(const char* env = std::getenv("HKP_K2_XCDS"); env != nullptr && !config.rows)
+    {
+        k2.xcds = std::atoi(env); // A/B only
+    }
     if(config.rows)
     {
         // One 1-D grid of at most one block per unit; the kernel walks the tiles.
@@ -985,8 +996,10 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
     {
         return std::nullopt;
     }
-    const auto plan = conv_direct::planFor(
-        *problem, *config, device_units::dispatchUnits(context.deviceProperties));
+    const auto plan = conv_direct::planFor(*problem,
+                                           *config,
+                                           device_units::dispatchUnits(context.deviceProperties),
+                                           context.deviceProperties.xccCount);
     if(!plan.has_value())
     {
         return std::nullopt;
