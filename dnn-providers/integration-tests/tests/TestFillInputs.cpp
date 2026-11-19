@@ -1155,6 +1155,9 @@ TEST(TestFillInputs, ConvPlusBiasPlusReluFused)
     EXPECT_TRUE(result.filled) << result.reason;
 }
 
+namespace
+{
+
 // conv -> MUL by a constant scalar (a tensor carrying a value) -> y.
 GraphResult buildConvConstantScaleGraph(DataType scaleType)
 {
@@ -1211,6 +1214,8 @@ GraphResult buildConvConstantScaleGraph(DataType scaleType)
     r.graph = GetGraph(b.GetBufferPointer());
     return r;
 }
+
+} // namespace
 
 // The references read a constant's buffer, while engines bake its value: the buffer must
 // hold the value, never a random draw.
