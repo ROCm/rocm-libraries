@@ -179,7 +179,7 @@ def default_block_n(arch: str, d: int, dtype: str, stage_vec: int, seq_mode: str
     return attn_bwd_default_geometry(arch, d, dtype, stage_vec, seq_mode)["block_n"]
 
 
-def default_requests(arch: str) -> list[AttnBwdRequest]:
+def default_requests() -> list[AttnBwdRequest]:
     """The class-default requests (no device fill hint, so no tuned key)."""
     out = []
     for d in BWD_HEAD_SIZES:
@@ -285,7 +285,7 @@ def _catalog(arch: str) -> tuple[tuple[CatalogRow, ...], tuple[PrepRow, ...]]:
         raise ValueError(f"{arch} is not an engine arch {ENGINE_ARCHS}")
     rows: dict[tuple, CatalogRow] = {}
     preps: dict[str, PrepRow] = {}
-    requests = [(None, r) for r in default_requests(arch)] + tuned_requests(arch)
+    requests = [(None, r) for r in default_requests()] + tuned_requests(arch)
     for _key, req in requests:
         code, detail, plan = engine_verdict(req, arch)
         if plan is None:

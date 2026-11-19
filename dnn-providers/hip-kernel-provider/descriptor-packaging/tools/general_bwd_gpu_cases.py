@@ -333,7 +333,7 @@ def _entry(name: str, c: Case, arch: str, ids: dict, quick=False, tags=()) -> En
 def row_cases(arch: str) -> dict[int, Case]:
     """The cheapest case selecting each catalog row on ``arch``'s full device."""
     rows = C.catalog_rows(arch)
-    bases = [r.representative for r in rows] + C.default_requests(arch)
+    bases = [r.representative for r in rows] + C.default_requests()
     bases += [q for _k, q in C.tuned_requests(arch)]
     seen, best = set(), {}
     for req in bases:
@@ -386,7 +386,7 @@ def _quick_rows(arch: str, cases: dict[int, Case]) -> set[int]:
     return chosen
 
 
-def _named(arch: str) -> list[tuple[str, Case, tuple]]:
+def _named() -> list[tuple[str, Case, tuple]]:
     """Feature cases beyond the rows (both arches)."""
     s = _f32(0.125)
     thd = dict(layout="thd", stats="ragged", alignment=16, scale=s)
@@ -524,7 +524,7 @@ def arch_entries(arch: str) -> list[Entry]:
         if e.row != i:
             raise AssertionError(f"{arch}: row {i} case selects row {e.row}")
         out.append(e)
-    for name, c, tags in _named(arch):
+    for name, c, tags in _named():
         e = _entry(name, c, arch, ids, quick=True, tags=tags)
         if ("decline" in tags) == (e.code == "OK"):
             raise AssertionError(f"{arch}: {name} verdict {e.code}")
