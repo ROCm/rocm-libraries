@@ -17,9 +17,24 @@
  * requires that every opcode has a name that maps back to it.
  */
 
+#include "rocke/abi.h"
 #include "rocke/ir.h"
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
+
+/* Layout canary for the other ABI surface of rocke/ir.h: a caller allocates
+ * rocke_ir_builder_t itself (often on its stack) and rocke_ir_builder_init
+ * writes every field, so growing the struct is memory-unsafe for a caller
+ * compiled against the old header. A size change requires bumping
+ * ROCKE_ABI_VERSION in rocke/abi.h (and BINARY_ABI in portable_ir/src/abi.py),
+ * then updating this pin. 64-bit only, where the pointer width that is part of
+ * the layout is known. */
+#if INTPTR_MAX == INT64_MAX
+static_assert(sizeof(rocke_ir_builder_t) == 880 && ROCKE_ABI_VERSION >= 21,
+              "rocke_ir_builder_t changed size: bump ROCKE_ABI_VERSION in rocke/abi.h, then "
+              "update this pin");
+#endif
 
 namespace
 {
