@@ -871,7 +871,8 @@ protected:
     void run()
     {
         SKIP_IF_NO_DEVICES();
-        if(hipdnn_plugin_sdk::stripArchFeatures(currentDeviceProperties().gcnArchName) != "gfx950")
+        const auto properties = currentDeviceProperties();
+        if(hipdnn_plugin_sdk::stripArchFeatures(properties.gcnArchName) != "gfx950")
         {
             GTEST_SKIP() << "flex tiles run on gfx950 only";
         }
