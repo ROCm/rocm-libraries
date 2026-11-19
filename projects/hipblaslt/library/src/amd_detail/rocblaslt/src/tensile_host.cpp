@@ -41,6 +41,7 @@
 #include "rocblaslt_fused_a2a_peers.hpp"
 #include "candidate_preparation.hpp"
 #include "get_all_search_type_for_test.hpp"
+#include "gemm_scheduling_for_test.hpp"
 #include "grouped_predicate_problem.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocblaslt_secure_env.hpp"
@@ -4085,7 +4086,6 @@ TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void> ge
     return &data->problem;
 }
 
-// Test support, outside the supported API: read the effective contraction settings.
 extern "C" HIPBLASLT_EXPORT bool hipblaslt_gemm_scheduling_for_test(
     std::shared_ptr<void> gemmData, bool grouped, size_t index, int32_t* smCount, int32_t* mode)
 {

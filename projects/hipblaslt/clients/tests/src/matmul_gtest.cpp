@@ -23,6 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include "../../../library/src/amd_detail/rocblaslt/src/include/gemm_scheduling_for_test.hpp"
 #include "hipblaslt/hipblaslt-ext.hpp"
 #include "hipblaslt_arguments.hpp"
 #include "hipblaslt_data.hpp"
@@ -1349,9 +1350,6 @@ namespace
 #endif
 
 } // namespace
-
-extern "C" bool hipblaslt_gemm_scheduling_for_test(
-    std::shared_ptr<void> gemmData, bool grouped, size_t index, int32_t* smCount, int32_t* mode);
 
 namespace
 {
