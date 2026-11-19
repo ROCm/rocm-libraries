@@ -3,7 +3,7 @@
 
 # This private module deliberately lives at the wheel top level so
 # tensilelite_configure_client can manage an installed binding without importing
-# tensilelite, whose package initialization validates the ROCm runtime.
+# tensilelite. Later stack layers validate the ROCm runtime at package import.
 
 """Client-selection policy shared by configuration and package startup."""
 
@@ -329,7 +329,8 @@ def _source_revision_module(package_dir: Path) -> dict:
     """Load tensilelite/_source_revision.py by path.
 
     Importing tensilelite._source_revision would run tensilelite/__init__,
-    which validates the ROCm runtime; client configuration must not need that.
+    where later stack layers validate the ROCm runtime. Client configuration
+    must work independently of that validation.
     """
     path = package_dir / "_source_revision.py"
     try:
