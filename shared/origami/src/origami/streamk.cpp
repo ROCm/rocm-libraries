@@ -159,11 +159,9 @@ reduction_t select_reduction(const problem_t& problem,
       // For problems with large k and low number of tiles, use parallel reduction
       // TODO Benchmark to check if limits are correct
       constexpr int MinItersForParallel = 64;
-      // tree_split_needs_divisor drops the tile bound below cu_count. The tree
-      // grid keeps tiles * F <= cu_count, so above cu_count / 2 tiles no kernel
-      // gets F >= 2 from it, and from cu_count / 4 to cu_count / 2 a kernel
-      // that needs a divisor splits only when 2 or 3 divides iters_per_tile.
-      const size_t MaxTilesForParallel = config.tree_split_needs_divisor ? cu_count : cu_count / 4;
+      // Parallel can beat tree, so prefer_parallel_split raises the tile
+      // bound from cu_count / 4 to cu_count.
+      const size_t MaxTilesForParallel = config.prefer_parallel_split ? cu_count : cu_count / 4;
       if (iters_per_tile >= MinItersForParallel && tiles <= MaxTilesForParallel)
         reduction_strategy = reduction_t::parallel;
     }
@@ -433,11 +431,10 @@ size_t grid_k_split_aware(const problem_t& problem,
 
       size_t maxSplits = std::min(maxSplitsForTiles, maxSplitsForIters);
 
-      // With tree_split_needs_divisor, above cu_count / 4 tiles: one wave of
-      // tiles * F <= cu_count leaves up to half the CUs idle, and a parallel
-      // split has no spin-wait, so its grid may exceed the CUs. Take the
-      // smallest F that best fills the last of at most two waves.
-      if (config.tree_split_needs_divisor && cu_budget == 0 && tiles > cu_count / 4) {
+      // With prefer_parallel_split, above cu_count / 4 tiles: a parallel split
+      // has no spin-wait, so its grid may exceed the CUs. Take the smallest F
+      // that best fills the last of at most two waves.
+      if (config.prefer_parallel_split && cu_budget == 0 && tiles > cu_count / 4) {
         // grid / (waves * cu_count) is proportional to the inverse of the time,
         // so larger is better; ties keep the smallest F.
         auto wave_fill = [&](size_t f) {

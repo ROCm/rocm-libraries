@@ -172,11 +172,11 @@ The host picks one mode per launch and passes it in `SKSplitFactor`:
   writes one partial slot. The post kernel then reduces the `F` slots of each
   tile and applies the epilogue.
 
-For a kernel that declares `parallel`, the host prefers it above a quarter of
-the CU count in tiles (up to the CU count, with at least 64 iterations per tile
-and no CU cap), with a grid of up to two waves of
-`tiles * F` workgroups, because a handwritten tree split needs `F | itersPerTile`
-under uniform summation order.
+Parallel reduction can be faster than tree, so for a kernel that declares
+`parallel` the host prefers it above a quarter of the CU count in tiles (up to
+the CU count, with at least 64 iterations per tile and no CU cap), with a grid
+of up to two waves of `tiles * F` workgroups. Under uniform summation order a
+tree split also needs `F | itersPerTile`, which often rules tree out there.
 
 `NumTiles` counts the tiles of all batches, and `F = grid / NumTiles` is the
 same for every batch. A post kernel `grid` of `TilesBands` launches

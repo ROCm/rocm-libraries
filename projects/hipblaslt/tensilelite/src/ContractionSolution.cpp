@@ -6352,10 +6352,10 @@ namespace TensileLite
                 .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
             };
             origami::config_t origami_config = {
-                .mt                       = {static_cast<size_t>(sizeMapping.macroTile.x),
-                                             static_cast<size_t>(sizeMapping.macroTile.y),
-                                             static_cast<size_t>(sizeMapping.depthU)},
-                .tree_split_needs_divisor = customTreeSplitNeedsDivisor(),
+                .mt                    = {static_cast<size_t>(sizeMapping.macroTile.x),
+                                          static_cast<size_t>(sizeMapping.macroTile.y),
+                                          static_cast<size_t>(sizeMapping.depthU)},
+                .prefer_parallel_split = customPrefersParallelSplit(),
             };
 
             reductionStrat = origami::streamk::select_reduction(
@@ -6551,12 +6551,9 @@ namespace TensileLite
                != customKernel.streamKReductions.end();
     }
 
-    // Only matters for kernels that also complete parallel reduction. The
-    // divisor is the uniform-summation-order tree split F | itersPerTile.
-    bool ContractionSolution::customTreeSplitNeedsDivisor() const
+    bool ContractionSolution::customPrefersParallelSplit() const
     {
-        return handwrittenCustomKernel() && customKernelReduces(CustomReductionMode::Parallel)
-               && !internalArgsSupport.perTileExtraIters;
+        return handwrittenCustomKernel() && customKernelReduces(CustomReductionMode::Parallel);
     }
 
     bool ContractionSolution::customDataParallelClamp(origami::reduction_t reduction) const
@@ -7620,7 +7617,7 @@ namespace TensileLite
                         // the DataParallel launch itself has no reduction strategy.
                         .reduction_strategy = self.sizeMapping.isPersistentDataParallel()
                                                   ? origami::reduction_t::tree : reductionStrat,
-                        .tree_split_needs_divisor = self.customTreeSplitNeedsDivisor(),
+                        .prefer_parallel_split = self.customPrefersParallelSplit(),
                     };
 
                     TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);

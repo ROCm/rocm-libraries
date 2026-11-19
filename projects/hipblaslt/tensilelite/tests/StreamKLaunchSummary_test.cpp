@@ -1458,40 +1458,35 @@ TEST(StreamKLaunchSummaryTest, GeneratedKernelNameKeepsOrigamiReduction)
     EXPECT_EQ(solution.getSKReduction(problem, env.device), origami::reduction_t::none);
 }
 
-// origami's tree_split_needs_divisor is set only for a handwritten kernel
-// that completes parallel reduction and lacks per-tile extra iterations.
-TEST(StreamKLaunchSummaryTest, CustomTreeSplitNeedsDivisorScope)
+// origami's prefer_parallel_split is set only for a handwritten kernel
+// that completes parallel reduction.
+TEST(StreamKLaunchSummaryTest, CustomPrefersParallelSplitScope)
 {
     ContractionSolution solution;
     initStreamKSolution(solution, 3);
-    EXPECT_FALSE(solution.customTreeSplitNeedsDivisor()) << "not a custom kernel";
+    EXPECT_FALSE(solution.customPrefersParallelSplit()) << "not a custom kernel";
 
     solution.customKernel.name = "probe";
     solution.customKernel.streamKReductions
         = {CustomReductionMode::Tree, CustomReductionMode::Parallel};
     solution.customKernel.generated = true;
-    EXPECT_FALSE(solution.customTreeSplitNeedsDivisor()) << "generated kernel";
+    EXPECT_FALSE(solution.customPrefersParallelSplit()) << "generated kernel";
 
     solution.customKernel.generated = false;
-    EXPECT_TRUE(solution.customTreeSplitNeedsDivisor());
+    EXPECT_TRUE(solution.customPrefersParallelSplit());
 
-    solution.internalArgsSupport.perTileExtraIters = true;
-    EXPECT_FALSE(solution.customTreeSplitNeedsDivisor())
-        << "per-tile extra iterations split a tile unevenly, no divisor needed";
-
-    solution.internalArgsSupport.perTileExtraIters = false;
-    solution.customKernel.streamKReductions        = {CustomReductionMode::Tree};
-    EXPECT_FALSE(solution.customTreeSplitNeedsDivisor()) << "tree-only kernel";
+    solution.customKernel.streamKReductions = {CustomReductionMode::Tree};
+    EXPECT_FALSE(solution.customPrefersParallelSplit()) << "tree-only kernel";
 
     solution.customKernel.streamKReductions = {CustomReductionMode::Parallel};
-    EXPECT_TRUE(solution.customTreeSplitNeedsDivisor());
+    EXPECT_TRUE(solution.customPrefersParallelSplit());
 }
 
 // 128 tiles (above cuCount / 4) with an odd itersPerTile: a handwritten
-// parallel kernel without per-tile extras is admitted to parallel F = 2, and
+// parallel kernel is admitted to parallel F = 2, and
 // the workspace query agrees with the launch snapshot on grid, reduction and
 // bytes. The same kernel marked generated keeps origami's tree reduction.
-TEST(StreamKLaunchSummaryTest, CustomDivisorBoundKernelSplitsParallelAboveQuarterCus)
+TEST(StreamKLaunchSummaryTest, CustomKernelPrefersParallelAboveQuarterCus)
 {
     AnalyticalEnv       env;
     ContractionSolution solution;

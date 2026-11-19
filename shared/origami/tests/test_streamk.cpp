@@ -459,12 +459,12 @@ TEST_CASE("Origami streamk: ipt <= 1 switches to DP above two waves of workgroup
   }
 }
 
-TEST_CASE("Origami streamk: tree_split_needs_divisor widens the parallel K-split", "[streamk]") {
+TEST_CASE("Origami streamk: prefer_parallel_split widens the parallel K-split", "[streamk]") {
   // `tiles` output tiles (one tile row per batch entry) on 256 CUs. Returns
   // origami's reduction and the k_split_aware grid sized for that reduction.
   constexpr size_t MT_M = 128, MT_N = 128, MT_K = 64;
   constexpr size_t kTileBytes = MT_M * MT_N * 4;
-  auto make = [](size_t tiles, size_t ipt, bool needs_divisor, size_t num_cus, size_t batch,
+  auto make = [](size_t tiles, size_t ipt, bool prefer, size_t num_cus, size_t batch,
                  size_t workspace) {
     auto p = make_problem(MT_M, MT_N * tiles / batch, MT_K * ipt, origami::transpose_t::T,
                           origami::transpose_t::N, batch);
@@ -472,14 +472,14 @@ TEST_CASE("Origami streamk: tree_split_needs_divisor widens the parallel K-split
     auto c                      = make_config(MT_M, MT_N, MT_K);
     c.workspace_size            = workspace;
     c.workspace_size_per_elem_c = 4;
-    c.tree_split_needs_divisor  = needs_divisor;
+    c.prefer_parallel_split  = prefer;
     return std::make_pair(p, c);
   };
   const auto hw   = make_hardware(950);
   const auto algo = origami::grid_selection_t::k_split_aware;
-  auto pick       = [&](size_t tiles, size_t ipt, bool needs_divisor, size_t num_cus = 0,
+  auto pick       = [&](size_t tiles, size_t ipt, bool prefer, size_t num_cus = 0,
                   size_t batch = 1, size_t workspace = std::numeric_limits<size_t>::max()) {
-    auto [p, c]          = make(tiles, ipt, needs_divisor, num_cus, batch, workspace);
+    auto [p, c]          = make(tiles, ipt, prefer, num_cus, batch, workspace);
     c.reduction_strategy = origami::streamk::select_reduction(p, hw, c, algo);
     return std::make_pair(c.reduction_strategy, origami::streamk::select_grid_size(p, hw, c, algo));
   };
