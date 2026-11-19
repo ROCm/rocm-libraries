@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import collections
 import os
 import re
 import matplotlib
@@ -265,6 +266,7 @@ def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achie
             gflops = float(row['hipblas-Gflops'])
             points.setdefault(prec, []).append({
                 'function': funcname,
+                'transA': row.get('transA', ''), 'transB': row.get('transB', ''),
                 'compute_type': prec,
                 'M': row.get('M', ''), 'N': row.get('N', ''), 'K': row.get('K', ''),
                 'ai': ai,
@@ -278,10 +280,20 @@ def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achie
         print("plot.py --roofline: no modeled results to plot")
         return
 
+    # One series per function, or per transpose combination when a function's results have several
+    # (gemm): the transposes do not change the arithmetic intensity, so they would share a column.
+    for pts in points.values():
+        combos = collections.defaultdict(set)
+        for pt in pts:
+            combos[pt['function']].add(pt['transA'] + pt['transB'])
+        for pt in pts:
+            several = len(combos[pt['function']]) > 1
+            pt['series'] = pt['function'] + (' ' + pt['transA'] + pt['transB'] if several else '')
+
     Path(savedir).mkdir(parents=True, exist_ok=True)
     stem = "_".join(function_names)
     with open(os.path.join(savedir, f"roofline_{stem}.csv"), 'w') as csv_out:
-        columns = ['function', 'compute_type', 'M', 'N', 'K', 'ai', 'gflops', 'ceiling',
+        columns = ['function', 'compute_type', 'transA', 'transB', 'M', 'N', 'K', 'ai', 'gflops', 'ceiling',
                    'pct_of_ceiling', 'footprint_bytes', 'cache_resident']
         csv_out.write(",".join(columns) + "\n")
         for prec in sorted(points):
@@ -303,7 +315,7 @@ def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achie
             x_lo, x_hi = min(x_lo, ridge / 4), max(x_hi, ridge * 4)
         x = np.logspace(np.log10(x_lo), np.log10(x_hi), 200)
 
-        funcs = sorted({pt['function'] for pt in pts})
+        funcs = sorted({pt['series'] for pt in pts})
         figure, axes = plt.subplots(figsize=chart_size(len(funcs) + 3))
 
         def roof(bw, pk):
@@ -324,7 +336,7 @@ def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achie
                       label=f"{achievable_bw_frac:.0%} of bandwidth")
 
         for funcname, (color, marker) in zip(funcs, series_styles(len(funcs))):
-            fpts = [pt for pt in pts if pt['function'] == funcname]
+            fpts = [pt for pt in pts if pt['series'] == funcname]
             label = perf_model.PRECISIONS[prec][0] + funcname
             solid = [pt for pt in fpts if not pt['cache_resident']]
             hollow = [pt for pt in fpts if pt['cache_resident']]

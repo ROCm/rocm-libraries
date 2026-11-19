@@ -383,6 +383,42 @@ def test_roofline_legend_has_one_entry_per_function(data_root, monkeypatch):
         assert len(functions) == len(set(functions)), figure_labels
 
 
+def test_roofline_splits_gemm_by_transpose(tmp_path, monkeypatch):
+    import csv
+    import matplotlib.figure
+    import plot
+    shutil.copytree(os.path.join(MULTIPLOT_DIR, 'blas3', 'gfx90a'), tmp_path / 'blas3')
+    # the checked-in gemm results have one transpose combination (N, T); add the same rows as N, N
+    gemm_csv = tmp_path / 'blas3' / 'gemm.csv'
+    lines = gemm_csv.read_text().splitlines()
+    extra = []
+    for i, line in enumerate(lines[:-1]):
+        if 'hipblas-Gflops' in line:
+            header = line.split(',')
+            data = lines[i + 1].split(',')
+            data[header.index('transB')] = 'N'
+            extra += [line, ','.join(data)]
+    gemm_csv.write_text('\n'.join(lines + extra) + '\n')
+    labels = {}
+    def capture(fig, path, *args, **kwargs):
+        labels[os.path.basename(str(path))] = [t.get_text() for t in fig.axes[0].get_legend().get_texts()]
+    monkeypatch.setattr(matplotlib.figure.Figure, 'savefig', capture)
+    spec = {'GBps': 1600, 'peak_gflops_effective': {'f32': 23000, 'f64': 11500}}
+    out = tmp_path / 'out'
+    plot.plot_roofline(str(tmp_path / 'blas3'), ['gemm', 'symm'], spec, str(out), 'test')
+
+    f32 = labels['roofline_gemm_symm_f32_r']
+    gemm_series = sorted(l for l in f32 if l.startswith('sgemm'))
+    # transposes share a column, so each combination gets its own series
+    assert len(gemm_series) > 1 and all(len(l.split()) == 2 for l in gemm_series), f32
+    # a function swept with one transpose setting keeps a single, unsuffixed series
+    assert 'ssymm' in f32
+
+    rows = list(csv.DictReader(open(out / 'roofline_gemm_symm.csv')))
+    gemm_rows = [r for r in rows if r['function'] == 'gemm']
+    assert {r['transA'] + r['transB'] for r in gemm_rows} == {l.split()[1] for l in gemm_series}
+
+
 def test_plot_modes_are_exclusive_and_need_a_ceiling(data_root):
     r = _plot(data_root, '-l', 'blas1', '--theo_max', '--roofline', '-f', 'axpy')
     assert r.returncode != 0
