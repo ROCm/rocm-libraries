@@ -395,7 +395,12 @@ def _hybrid_cases():
 
 @pytest.mark.gpu
 @pytest.mark.parametrize(
-    "label,cmd", _hybrid_cases(), ids=lambda v: v.split("-shy")[0][-24:] + "-shy"
+    "label,cmd",
+    _hybrid_cases(),
+    ids=[
+        re.sub(r"^fwd-implicit_gemm-bf16-3d-|-wave64.*$", "", lab)
+        for lab, _ in _hybrid_cases()
+    ],
 )
 def test_split_hybrid_degrees(label, cmd, cache_root):
     """A ``split_hybrid`` binary at degrees G with no remainder segments

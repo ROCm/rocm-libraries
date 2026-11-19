@@ -35,8 +35,10 @@ def _skip_reason() -> str:
         arch = get_device_arch()
     except Exception as e:  # pragma: no cover - no device
         return f"no GPU: {e}"
-    if not arch or not arch.startswith(("gfx94", "gfx95")):
-        return f"MFMA-only knobs; device is {arch}"
+    if not arch or not arch.startswith("gfx942"):
+        # The 3-D NDHWC conv knobs target gfx942; on other MFMA arches the
+        # atom the tests pick does not admit them.
+        return f"the 3-D NDHWC conv knobs target gfx942; device is {arch}"
     return ""
 
 
