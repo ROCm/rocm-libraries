@@ -22,11 +22,19 @@ derived on the CPU without evaluating attention (see "Prediction: Tier B").
 | `test_structured_contracts.py` | CPU contracts: primitives, fixtures, soundness of the prediction, mutation separation, IR and code-object path contracts, policy |
 | `test_structured_analytical_gfx942.py` | the launches on gfx942 |
 | `_structured_capture_audit.py` | replayable audit of saved raw outputs |
-| `_structured_shapes.py` | shapes and masks, exact FP16/BF16 encoding, the V exposures, the raw-bit observation |
+| `_structured_shapes.py` | shapes and masks, the legal key interval, the V exposures |
 | `_structured_subject.py` | the raw-bit subject adapter: dispatch resolution and the launch |
 
-The check is self-contained: it imports nothing from the uniform-probability
-check in this directory ([README.md](README.md)), which covers the zero-Q case.
+The fixtures, the prediction and the analyzer are this check's own. What does
+not depend on the logits is shared with the uniform-probability check in this
+directory ([README.md](README.md)), which covers the zero-Q case, and has one
+home there:
+
+| Shared | Home |
+|---|---|
+| the FP16/BF16 formats, exact encoding and decoding of raw bits, exact rounding of a rational target | `_analytical.py` |
+| the raw-bit observation: exposure names, one exposure per name, coverage of every key | `_analytical.py` |
+| the checks of the raw-bit host arrays and of the device buffers, the NaN prefill of the output | `_dense_subject.py` |
 
 ## Cases
 
@@ -151,18 +159,21 @@ any reciprocal below `2^11`.
 
 A-F covers an AMDGPU backend behaviour: affected compilers select some
 unflagged `fptrunc(fmul float)` FP16 stores as `v_fma_mix{lo,hi}_f16`, which
-rounds the exact product once. LLVM PR
-[#236759](https://github.com/llvm/llvm-project/pull/236759), still open, proposes
-to make that fold require `contract`. The fused instruction adds a zero to the
-product: `+0.0` (disassembled as `0`) in the older affected compilers, and
-`-0.0` (`neg(0)`) since LLVM PR
-[#214544](https://github.com/llvm/llvm-project/pull/214544), which corrected
-the sign of a zero product. With `-0.0` the store is `q(o R)` for every
-operand. With `+0.0` it differs only where the exact product is `-0`, which
-the modeled path, with `o` and `R` nonnegative, does not reach. The ISA
-contract accepts a compiler that folds, with either addend, and one that does
-not; it requires both factors of the fused product to be read as plain
-registers, and checks that the denominator combine is never fused.
+rounds the exact product once. A compiler that makes that fold require the
+`contract` flag selects none, and every store rounds twice. The fused
+instruction adds a zero to the product, and the compiler chooses its sign:
+
+| Compiler | Folds | Zero addend | Disassembled as |
+|---|---|---|---|
+| LLVM 20 (ROCm 7.1.0) and LLVM 23 (ROCm 7.13.0) | yes | `+0.0` | `0` |
+| AMD clang 24 (the CI compiler when this was written) | yes | `-0.0` | `neg(0)` |
+| a compiler that requires `contract` | no | none | no `v_fma_mix*` in the epilogue |
+
+With `-0.0` the store is `q(o R)` for every operand. With `+0.0` it differs
+only where the exact product is `-0`, which the modeled path, with `o` and `R`
+nonnegative, does not reach. The ISA contract accepts all three rows; it
+requires both factors of the fused product to be read as plain registers, and
+checks that the denominator combine is never fused.
 
 **Tier A**, the certified correctly rounded target `q(y*)` with a small ULP
 radius, is diagnostic: it names the failure class, never the verdict. A
@@ -215,9 +226,9 @@ can show, not evidence for those assumptions.
 
 By default, and in CI, the contract judges seven rows of each case (0, 63, 64,
 127, 128, 207 and 255: block, tile and window edges). With
-`ROCKE_STRUCTURED_FULL_VIOLATION_SWEEP=1` it judges all 256 rows, which takes
-about twenty minutes; the figures and the "no coordinate" statement above are
-those of that sweep.
+`ROCKE_STRUCTURED_FULL_VIOLATION_SWEEP=1` it judges all 256 rows, which is far
+too slow for a CI entry; the figures and the "no coordinate" statement above
+are those of that sweep.
 
 ## Mutation self-checks
 

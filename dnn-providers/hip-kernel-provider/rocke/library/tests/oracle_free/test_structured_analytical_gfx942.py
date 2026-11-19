@@ -27,6 +27,7 @@ import numpy as np
 import pytest
 from rocke.tests.gpu import current_device_arch_in
 
+from ._analytical import encode_bits
 from ._structured_analytical import (
     STRUCTURED_EXPOSURES,
     STRUCTURED_QUICK_CASES,
@@ -46,7 +47,7 @@ from ._structured_analytical import (
     structured_records,
     require_structured_calibration,
 )
-from ._structured_shapes import Observation, encode_bits
+from ._structured_shapes import Observation
 from ._structured_subject import (
     ResolvedDenseSubject,
     launched_code_object,

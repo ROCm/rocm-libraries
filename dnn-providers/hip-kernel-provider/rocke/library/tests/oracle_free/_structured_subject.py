@@ -14,24 +14,21 @@ functions that use them, so CPU collection and the analytical contracts need
 neither a GPU nor ROCm.
 
 It accepts only the two four-head quick shapes the check's predictions are
-derived for.
+derived for. The checks of the raw-bit host arrays and of the device buffers,
+and the output prefill, are those of ``_dense_subject.py``, the directory's
+adapter for the dense kernels.
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
 import numpy as np
 
+from ._dense_subject import _NAN_BITS, _validate_device_buffers, _validate_host_bits
 from ._structured_shapes import SpecFingerprint
-
-_POINTER_ALIGNMENT = 16
-# Quiet-NaN output prefill: a coordinate the kernel never writes reads back as
-# invalid instead of passing as a stale zero.
-_NAN_BITS = {"fp16": 0x7E00, "bf16": 0x7FC0}
 
 
 class DenseCase(Protocol):
@@ -74,54 +71,6 @@ class ResolvedDenseSubject:
     tuning_spec: object
     candidate_name: str
     fingerprint: SpecFingerprint
-
-
-def _validate_host_bits(case: DenseCase, q, k, v) -> None:
-    """Validate the dense ABI on the raw-bit host inputs."""
-    expected_shapes = {
-        "q": case.output_shape,
-        "k": case.key_shape,
-        "v": case.key_shape,
-    }
-    for name, array in (("q", q), ("k", k), ("v", v)):
-        if not isinstance(array, np.ndarray):
-            raise TypeError(f"{name} must be a numpy array of raw bits")
-        if array.shape != expected_shapes[name]:
-            raise ValueError(f"{name} shape {array.shape} != {expected_shapes[name]}")
-        if array.dtype != np.uint16:
-            raise ValueError(f"{name} dtype {array.dtype} != uint16 raw bits")
-        if not array.flags.c_contiguous:
-            raise ValueError(f"{name} must be C-contiguous")
-
-
-def _validate_device_buffers(
-    buffers: Mapping[str, object], nbytes: Mapping[str, int]
-) -> None:
-    """Check each device buffer's size, alignment and separation.
-
-    Duck-typed on ``ptr()`` / ``nbytes()`` so the contract is CPU-testable with
-    small fakes; ``run_dense_case`` passes real ``DeviceMem`` objects."""
-    spans: dict[str, tuple[int, int]] = {}
-    for name, buffer in buffers.items():
-        size = int(buffer.nbytes())
-        if size != nbytes[name]:
-            raise ValueError(f"{name} device size {size} != host size {nbytes[name]}")
-        pointer = int(buffer.ptr())
-        if pointer == 0:
-            raise ValueError(f"{name} device pointer is null")
-        if pointer % _POINTER_ALIGNMENT:
-            raise ValueError(
-                f"{name} pointer must be {_POINTER_ALIGNMENT}-byte aligned"
-            )
-        spans[name] = (pointer, pointer + size)
-
-    names = tuple(spans)
-    for index, left_name in enumerate(names):
-        left_start, left_end = spans[left_name]
-        for right_name in names[index + 1 :]:
-            right_start, right_end = spans[right_name]
-            if left_start < right_end and right_start < left_end:
-                raise ValueError(f"{left_name} overlaps {right_name}")
 
 
 def _validate_supported_case(case: DenseCase) -> None:
@@ -201,6 +150,13 @@ def _verify_resolved_spec(case: DenseCase, tuning_spec) -> SpecFingerprint:
     if spec.causal_bottom_right:
         raise AssertionError(
             "the structured-logit check requires the top-left causal band"
+        )
+    # A paged or varlen spec reads K and V through a layout the adapter does
+    # not supply: it hands the kernel one dense Q, K, V and O.
+    if spec.paged or spec.varlen:
+        raise AssertionError(
+            "the structured-logit check requires a dense, non-paged, "
+            "non-varlen layout"
         )
     return SpecFingerprint(
         path=tuning_spec.path,

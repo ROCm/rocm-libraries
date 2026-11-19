@@ -35,8 +35,8 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # Both start at the standard tier (the python-standard category of
 # ROCKE_ENGINE_test_categories_external.yaml) and bake in the standard label
 # so `ctest -L standard` finds them without that file's labelling; the quick
-# tier keeps its budget. Every test of both modules is self-contained, so the
-# shard plugin may split them, and a shard that receives no test passes.
+# tier keeps its budget. No test of either module depends on another test, so
+# the shard plugin may split them, and a shard that receives no test passes.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_oracle_free_structured_logit_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_structured_analytical_gfx942.py\" -v -rs --timeout=120)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES

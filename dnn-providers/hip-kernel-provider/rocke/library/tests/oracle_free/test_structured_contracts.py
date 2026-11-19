@@ -38,11 +38,13 @@ from decimal import Decimal, localcontext
 from fractions import Fraction
 from functools import cache
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from rocke.numeric.bf16 import f32_to_bf16
 
+from ._analytical import encode_bits, target_bits
 from ._structured_analytical import (
     A_DIV_DOMAIN,
     A_QK_EXPONENTS,
@@ -148,19 +150,20 @@ from ._structured_capture_audit import audit_case, audit_captures, format_audit
 from ._structured_shapes import (
     QUICK_SHAPES,
     DenseShape,
+    MaskMutation,
     Observation,
-    encode_bits,
     exposure_values,
     legal_interval,
-    target_bits,
 )
 from ._structured_subject import (
     _resolve_tuning_spec,
     _shape,
     _validate_supported_case,
+    _verify_resolved_spec,
     resolve_dense_subject,
     run_dense_case,
 )
+from .test_contracts import _fake_tuning_spec
 
 _REDERIVE = "re-derive the path model"
 
@@ -2979,6 +2982,153 @@ def test_structured_case_rejects_inexact_or_unsupported_configurations(
         StructuredCase(**arguments)
 
 
+_SHAPE_FIELDS = ("batch", "seqlen_q", "seqlen_k", "nhead_q", "nhead_k", "head_dim")
+
+
+@pytest.mark.parametrize(
+    "kwargs,match",
+    [
+        *(({name: 0}, f"{name} must be positive") for name in _SHAPE_FIELDS),
+        ({"head_dim": -64}, "head_dim must be positive"),
+        ({"nhead_q": 8}, "nhead_q must equal nhead_k"),
+        ({"nhead_k": 2}, "nhead_q must equal nhead_k"),
+        ({"nhead_q": 9, "nhead_k": 9}, "nhead_k must be at most 8"),
+        ({"dtype": "fp32"}, "dtype must be one of"),
+        ({"mask": "none"}, "mask must be one of"),
+        ({"mask": "window"}, "window mask requires window > 0"),
+        ({"mask": "window", "window": -64}, "window mask requires window > 0"),
+        ({"window": 64}, "window must be zero unless mask='window'"),
+    ],
+)
+def test_dense_shape_rejects_what_the_check_is_not_derived_for(kwargs, match) -> None:
+    arguments = dataclasses.asdict(QUICK_SHAPES[0])
+    assert DenseShape(**arguments) == QUICK_SHAPES[0]
+    arguments.update(kwargs)
+    with pytest.raises(ValueError, match=match):
+        DenseShape(**arguments)
+
+
+def test_dense_shape_accepts_the_edges_of_its_guards() -> None:
+    assert DenseShape(1, 256, 256, 8, 8, 64, "fp16", "causal").nhead_k == 8
+    assert DenseShape(1, 256, 256, 4, 4, 64, "bf16", "window", 1).window == 1
+
+
+def test_legal_interval_is_the_mask_rule_and_its_one_key_mutations() -> None:
+    causal, window = QUICK_SHAPES
+    assert [legal_interval(causal, q) for q in (0, 1, 255)] == [
+        (0, 0),
+        (0, 1),
+        (0, 255),
+    ]
+    assert [legal_interval(window, q) for q in (0, 63, 64, 255)] == [
+        (0, 0),
+        (0, 63),
+        (1, 64),
+        (192, 255),
+    ]
+    assert legal_interval(causal, 3, MaskMutation.INCLUDE_FUTURE_KEY) == (0, 4)
+    assert legal_interval(causal, 3, "exclude_last_key") == (0, 2)
+    assert legal_interval(window, 100, MaskMutation.INCLUDE_OLD_WINDOW_KEY) == (36, 100)
+    assert legal_interval(window, 100, "exclude_oldest_window_key") == (38, 100)
+    # The upper bound is clipped at the last key, and the lower one at key 0.
+    assert legal_interval(causal, 255, "include_future_key") == (0, 255)
+    assert legal_interval(window, 10, "include_old_window_key") == (0, 10)
+
+
+def test_legal_interval_reports_a_row_without_a_key_as_empty() -> None:
+    """An interval whose bounds cross is returned as ``(0, -1)``, never as the
+    crossed pair, so ``last - first + 1`` is the key count for every row."""
+    causal, _ = QUICK_SHAPES
+    assert legal_interval(causal, 0, MaskMutation.EXCLUDE_LAST_KEY) == (0, -1)
+    one_key = DenseShape(1, 8, 8, 4, 4, 64, "bf16", "window", 1)
+    assert legal_interval(one_key, 5) == (5, 5)
+    assert legal_interval(one_key, 5, "exclude_oldest_window_key") == (0, -1)
+    # More queries than keys: the window of row 7 starts past the last key.
+    short = DenseShape(1, 8, 4, 4, 4, 64, "bf16", "window", 2)
+    assert legal_interval(short, 4) == (3, 3)
+    assert legal_interval(short, 7) == (0, -1)
+
+
+@pytest.mark.parametrize(
+    "shape,query,mutation,error,match",
+    [
+        (0, -1, None, IndexError, "-1"),
+        (0, 256, None, IndexError, "256"),
+        (0, 0, "include_old_window_key", ValueError, "does not apply to causal"),
+        (0, 0, "exclude_oldest_window_key", ValueError, "does not apply to causal"),
+        (1, 0, "include_future_key", ValueError, "does not apply to window"),
+        (1, 0, "exclude_last_key", ValueError, "does not apply to window"),
+        (0, 0, "denominator_plus_one", ValueError, "not a valid MaskMutation"),
+    ],
+)
+def test_legal_interval_refuses_a_row_or_mutation_outside_the_shape(
+    shape: int, query: int, mutation, error, match: str
+) -> None:
+    with pytest.raises(error, match=match):
+        legal_interval(QUICK_SHAPES[shape], query, mutation)
+
+
+_ONE_ELEMENT = np.zeros((1, 1, 1, 1), dtype=np.uint16)
+
+
+@pytest.mark.parametrize(
+    "exposures,match",
+    [
+        ((), "at least one exposure"),
+        (
+            (("basis@0", _ONE_ELEMENT), ("basis@0", _ONE_ELEMENT)),
+            "duplicate exposure 'basis@0'",
+        ),
+        ((("folded", _ONE_ELEMENT.astype(np.float16)),), "raw uint16 bits"),
+        ((("folded", _ONE_ELEMENT.astype(np.int16)),), "raw uint16 bits"),
+        ((("basis", _ONE_ELEMENT),), "unknown exposure 'basis'"),
+        ((("fold", _ONE_ELEMENT),), "unknown exposure 'fold'"),
+        ((("basis@-64", _ONE_ELEMENT),), "invalid basis exposure"),
+        ((("basis@064", _ONE_ELEMENT),), "invalid basis exposure"),
+        ((("basis@x", _ONE_ELEMENT),), "invalid basis exposure"),
+    ],
+)
+def test_observation_refuses_what_is_not_named_raw_bits(exposures, match: str) -> None:
+    """The container is the directory's shared one. These are the properties
+    of it the structured analyzer relies on: every exposure is named as the
+    predictor names it, once, and holds the stored bits unconverted."""
+    Observation((("basis@0", _ONE_ELEMENT), ("folded", _ONE_ELEMENT)))
+    with pytest.raises(ValueError, match=match):
+        Observation(exposures)
+
+
+def _zero_observation(case: StructuredCase, drop: str | None = None) -> Observation:
+    bits = np.zeros(case.output_shape, dtype=np.uint16)
+    return Observation(
+        tuple((name, bits) for name in STRUCTURED_EXPOSURES if name != drop)
+    )
+
+
+@pytest.mark.parametrize(
+    "drop,match",
+    [
+        ("folded", "requires a folded exposure"),
+        ("basis@0", "expose every key exactly once"),
+        ("basis@192", "expose every key exactly once"),
+    ],
+)
+def test_analyzer_refuses_an_observation_that_does_not_cover_the_case(
+    drop: str, match: str
+) -> None:
+    case = STRUCTURED_QUICK_CASES[0]
+    with pytest.raises(ValueError, match=match):
+        analyze_structured_policy(case, _zero_observation(case, drop))
+
+
+def test_analyzer_refuses_an_observation_of_another_shape() -> None:
+    case = STRUCTURED_QUICK_CASES[0]
+    exposures = list(_zero_observation(case).exposures)
+    name, bits = exposures[0]
+    exposures[0] = (name, bits[:, :-1])
+    with pytest.raises(ValueError, match=f"exposure '{name}' shape"):
+        analyze_structured_policy(case, Observation(tuple(exposures)))
+
+
 @pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
 def test_generators_are_exact_and_match_the_score_model(case: StructuredCase) -> None:
     q, k = structured_query_key(case)
@@ -4860,16 +5010,6 @@ def _structured_gpu_lane_tree() -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
-def _dotted(node: ast.AST) -> str:
-    parts: list[str] = []
-    while isinstance(node, ast.Attribute):
-        parts.append(node.attr)
-        node = node.value
-    if isinstance(node, ast.Name):
-        parts.append(node.id)
-    return ".".join(reversed(parts))
-
-
 def test_structured_gpu_lane_scope_and_gate() -> None:
     """The structured-logit GPU lane runs exactly ``STRUCTURED_QUICK_CASES``, gates once
     through the
@@ -4877,7 +5017,7 @@ def test_structured_gpu_lane_scope_and_gate() -> None:
     otherwise, and ends in ``require_structured_calibration``."""
     tree = _structured_gpu_lane_tree()
     calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
-    names = [_dotted(call.func) for call in calls]
+    names = [ast.unparse(call.func) for call in calls]
     parametrized = [
         call for call, name in zip(calls, names) if name.endswith("mark.parametrize")
     ]
@@ -4934,11 +5074,150 @@ def test_adapter_resolves_the_default_spec_with_no_knob_pinned() -> None:
     request and the spec id alone, and a retune reaches the calibration gate."""
     tree = ast.parse(inspect.getsource(_resolve_tuning_spec))
     calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
-    names = [_dotted(call.func) for call in calls]
+    names = [ast.unparse(call.func) for call in calls]
     assert "tuning_spec_with_knobs" not in names
     assert names.count("attention_tuning_spec") == 1
     resolve = calls[names.index("attention_tuning_spec")]
     assert len(resolve.args) == 2 and not resolve.keywords
+
+
+@pytest.mark.parametrize(
+    "shape,match",
+    [
+        ((2, 256, 256, 4, 4, 64, "fp16", "causal"), "require batch 1"),
+        ((1, 256, 256, 8, 8, 64, "fp16", "causal"), "require Hq=Hkv=4"),
+        ((1, 256, 256, 2, 2, 64, "fp16", "causal"), "require Hq=Hkv=4"),
+        ((1, 256, 256, 4, 4, 32, "fp16", "causal"), "require D64"),
+        ((1, 128, 256, 4, 4, 64, "fp16", "causal"), "require query length 256"),
+        ((1, 256, 128, 4, 4, 64, "fp16", "causal"), "require key length 256"),
+        ((1, 256, 256, 4, 4, 64, "bf16", "window", 32), "require window 64"),
+    ],
+)
+def test_adapter_refuses_shapes_outside_the_two_quick_shapes(shape, match) -> None:
+    for quick in QUICK_SHAPES:
+        _validate_supported_case(quick)
+    with pytest.raises(ValueError, match=match):
+        _validate_supported_case(DenseShape(*shape))
+    with pytest.raises(ValueError, match=match):
+        resolve_dense_subject(DenseShape(*shape))
+
+
+@pytest.mark.parametrize(
+    "key_shape", [(2, 256, 4, 64), (1, 256, 4, 32)], ids=["batch", "head_dim"]
+)
+def test_adapter_refuses_q_and_k_shapes_that_disagree(key_shape) -> None:
+    case = SimpleNamespace(output_shape=(1, 256, 4, 64), key_shape=key_shape)
+    with pytest.raises(ValueError, match="inconsistent Q/K shapes"):
+        _shape(case)
+
+
+def _quick_tuning_spec(**overrides) -> SimpleNamespace:
+    """The uniform contracts' stand-in for a dispatch result, reshaped to the
+    FP16 causal quick case of this check."""
+    fields = {
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "sliding_window": 0,
+        "resolved_use_exp2_fast": lambda: True,
+    }
+    return _fake_tuning_spec(**{**fields, **overrides})
+
+
+@pytest.mark.parametrize(
+    "name,value,match",
+    [
+        ("kv_segments", 2, "single-pass KV, kv_segments=2"),
+        ("ragged", True, "non-ragged"),
+        ("causal_bottom_right", True, "top-left causal band"),
+        ("use_sinks", True, "sinks to be disabled"),
+        ("emit_lse", True, "non-LSE epilogue"),
+        ("paged", True, "non-paged"),
+        ("varlen", True, "non-varlen"),
+        ("batch", 2, "batch=2"),
+        ("seqlen_q", 128, "seqlen_q=128"),
+        ("seqlen_kv", 128, "seqlen_kv=128"),
+        ("num_query_heads", 8, "num_query_heads=8"),
+        ("num_kv_heads", 2, "num_kv_heads=2"),
+        ("head_size", 32, "head_size=32"),
+        ("dtype", "bf16", "dtype='bf16'"),
+        ("causal", False, "causal=False"),
+        ("sliding_window", 64, "sliding_window=64"),
+    ],
+)
+def test_adapter_refuses_resolved_specs_it_cannot_launch(
+    name: str, value, match: str
+) -> None:
+    """Each refusal of ``_verify_resolved_spec`` on its own: a spec that needs
+    a buffer the adapter does not supply, reads K and V through another
+    layout, or does not echo the shape the host arrays are sized from."""
+    case = QUICK_SHAPES[0]
+    fingerprint = _verify_resolved_spec(case, _quick_tuning_spec())
+    assert fingerprint == STRUCTURED_QUICK_SPECS[case.dtype]
+    with pytest.raises(AssertionError, match=match):
+        _verify_resolved_spec(case, _quick_tuning_spec(**{name: value}))
+
+
+@pytest.mark.parametrize(
+    "field,value,match",
+    [
+        ("path", "2d", "path='2d'"),
+        ("arch", "gfx950", "arch='gfx950'"),
+        ("candidate_name", "attention_gfx942_dense_qbminor", "candidate="),
+    ],
+)
+def test_adapter_refuses_another_path_arch_or_candidate(field, value, match) -> None:
+    other = _quick_tuning_spec()
+    setattr(other, field, value)
+    with pytest.raises(AssertionError, match=match):
+        _verify_resolved_spec(QUICK_SHAPES[0], other)
+
+
+def _launch_inputs(case: StructuredCase) -> dict[str, np.ndarray]:
+    """Raw bits of one launch of ``case``, as the GPU lane encodes them."""
+    q, k, v = structured_inputs(case, "folded")
+    return {
+        name: encode_bits(values, case.dtype)
+        for name, values in (("q", q), ("k", k), ("v", v))
+    }
+
+
+@pytest.mark.parametrize(
+    "name,replace,error,match",
+    [
+        ("q", lambda array: array[:, :-1], ValueError, "q shape"),
+        ("k", lambda array: array.astype(np.float16), ValueError, "k dtype"),
+        ("v", np.asfortranarray, ValueError, "v must be C-contiguous"),
+        ("q", lambda array: array.tolist(), TypeError, "q must be a numpy array"),
+    ],
+)
+def test_a_launch_checks_the_host_arrays_before_the_device(
+    name, replace, error, match
+) -> None:
+    """The host-array checks are the shared adapter's; this pins that the
+    structured launch applies them, before it resolves or allocates anything."""
+    case = STRUCTURED_QUICK_CASES[0]
+    arrays = _launch_inputs(case)
+    arrays[name] = replace(arrays[name])
+    with pytest.raises(error, match=match):
+        run_dense_case(case, **arrays)
+
+
+def test_a_launch_refuses_a_subject_it_was_not_resolved_for() -> None:
+    """Both refusals are raised before a device buffer exists, so they run on
+    a host without a GPU."""
+    causal, window = (
+        next(case for case in STRUCTURED_QUICK_CASES if case.base == base)
+        for base in QUICK_SHAPES
+    )
+    arrays = _launch_inputs(causal)
+    with pytest.raises(ValueError, match="resolved subject case"):
+        run_dense_case(causal, **arrays, subject=resolve_dense_subject(window))
+    subject = resolve_dense_subject(causal)
+    drifted = dataclasses.replace(
+        subject, fingerprint=dataclasses.replace(subject.fingerprint, block_m=64)
+    )
+    with pytest.raises(AssertionError, match="fingerprint changed before launch"):
+        run_dense_case(causal, **arrays, subject=drifted)
 
 
 def test_subject_side_wrong_scale_is_the_omitted_sqrt_d_mutation() -> None:

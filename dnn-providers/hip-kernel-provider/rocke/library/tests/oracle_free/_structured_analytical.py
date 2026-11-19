@@ -37,6 +37,7 @@ from types import MappingProxyType
 import numpy as np
 from rocke.numeric.bf16 import f32_to_bf16
 
+from ._analytical import _FORMAT, decode_bits, target_bits
 from ._structured_shapes import (
     BASIS_OFFSETS,
     QUICK_SHAPES,
@@ -46,9 +47,7 @@ from ._structured_shapes import (
     SpecFingerprint,
     basis_offset,
     validate_observation,
-    decode_bits,
     legal_interval,
-    target_bits,
     exposure_values,
 )
 
@@ -641,9 +640,9 @@ def rcp_a_div(denominator: F32Interval) -> F32Interval:
 
 def target_value(bits: int, dtype: str) -> Fraction:
     """Exact value of nonnegative raw FP16/BF16 bits."""
-    if dtype not in _TARGET_FORMAT:
+    if dtype not in _FORMAT:
         raise ValueError(dtype)
-    fraction_bits, exponent_bits, bias = _TARGET_FORMAT[dtype]
+    fraction_bits, exponent_bits, bias = _FORMAT[dtype]
     exponent = (int(bits) >> fraction_bits) & ((1 << exponent_bits) - 1)
     fraction = int(bits) & ((1 << fraction_bits) - 1)
     if int(bits) >> (fraction_bits + exponent_bits):
@@ -654,7 +653,6 @@ def target_value(bits: int, dtype: str) -> Fraction:
     return Fraction(significand) * Fraction(2) ** (exponent - bias - fraction_bits)
 
 
-_TARGET_FORMAT = {"fp16": (10, 5, 15), "bf16": (7, 8, 127)}
 _FINITE_MASK = {"fp16": 0x7C00, "bf16": 0x7F80}
 _SIGN_BIT = 0x8000
 

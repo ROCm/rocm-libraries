@@ -227,8 +227,9 @@ the strategy's biggest holes live (see
   (`rocke_oracle_free_structured_logit_pytest`, standard tier) launches the
   shipped gfx942 dense kernel with structured Q and K, so the QK contraction,
   the scale, the softmax, the mask, the online rescale and the per-head Q and K
-  reads reach the output. It is self-contained and shares no code with the
-  uniform-probability check above.
+  reads reach the output. Its prediction and analyzer are its own; the exact
+  FP16/BF16 helpers, the raw-bit observation and the buffer checks are those
+  of the uniform-probability check above.
   Each stored value must lie in the set the kernel's pinned floating-point
   path can store, derived on the CPU from named assumptions and without an
   attention reference; no tolerance is calibrated from runs. Its CPU contracts
