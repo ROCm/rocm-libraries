@@ -23,7 +23,6 @@ build-backend = "scikit_build_core.build"
 cmake.version = ">=3.25"
 cmake.build-type = "Release"
 wheel.packages = ["hipblaslt"]
-build-dir = "build/{wheel_tag}"
 
 # The package version is hipBLASLt's own version, read from the hipblaslt-version.h of the
 # hipBLASLt the bindings are built against. CMakeLists.txt checks that
