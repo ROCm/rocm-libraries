@@ -19,7 +19,7 @@ using namespace hip_kernel_provider::core;
 // asserted below), so the backend routes the provider every graph the SDK can express. Which of
 // them an engine sees is the provider's schema guard's to say (GraphSchema.hpp): an engine that
 // has not opted in still declines any graph needing more than providerBaselineGraphSchema().
-#define HIPDNN_PLUGIN_API_VERSION "1.4.0"
+#define HIPDNN_PLUGIN_API_VERSION "1.6.0"
 #include <hipdnn_plugin_sdk/EnginePluginImpl.inl>
 
 #include <string_view>
@@ -78,7 +78,8 @@ extern "C" HIPDNN_PLUGIN_EXPORT void
         limit);
 }
 
-/// The implicit-GEMM kernel launches hipkernel:Gfx950ConvDgradAot has made inside this
+/// The implicit-GEMM kernel launches hipkernel:Gfx950ConvDgradAot and
+/// hipkernel:Gfx1250ConvDgradAot have made inside this
 /// loaded plugin, one per batch slice, so a test can tell a sliced launch from a whole
 /// one. FOR TESTS ONLY, exported for the same reason as the hooks above.
 extern "C" HIPDNN_PLUGIN_EXPORT int64_t

@@ -66,8 +66,10 @@ _rocblaslt_handle::_rocblaslt_handle()
 
     // TODO(ROCM-33832): uniform summation order disables StaggerU, which slows RDNA
     // GEMMs, so RDNA defaults it off. Remove once RDNA is as fast with it on.
+    // gfx942 also defaults it off.
     const std::string arch = properties.gcnArchName;
-    if(arch.find("gfx11") != std::string::npos || arch.find("gfx120") != std::string::npos)
+    if(arch.find("gfx11") != std::string::npos || arch.find("gfx120") != std::string::npos
+       || arch.find("gfx942") != std::string::npos)
         uniform_summation_order = 0;
 
 #ifdef HIPBLASLT_USE_ROCROLLER

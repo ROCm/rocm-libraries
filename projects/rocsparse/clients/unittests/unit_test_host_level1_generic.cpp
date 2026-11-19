@@ -41,8 +41,11 @@
 #include "rocsparse.h"
 #include "unit_test_utils.hpp"
 
+#include <complex>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <string>
+#include <type_traits>
 #include <vector>
 
 namespace
@@ -236,6 +239,147 @@ namespace
                       rocsparse_status_success);
         EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
     }
+
+    template <typename T>
+    constexpr bool is_complex
+        = std::is_same_v<T, rocsparse_float_complex> || std::is_same_v<T, rocsparse_double_complex>;
+
+    // Value re + i * im; the imaginary part is dropped for a real type.
+    template <typename T>
+    T cvalue(double re, double im)
+    {
+        if constexpr(is_complex<T>)
+            return T(re, im);
+        else
+            return static_cast<T>(re);
+    }
+
+    template <typename T>
+    std::complex<double> to_cd(T v)
+    {
+        if constexpr(is_complex<T>)
+            return std::complex<double>(std::real(v), std::imag(v));
+        else
+            return std::complex<double>(v, 0.0);
+    }
+
+    // rocsparse_spvv with x and y built by the mutable or the const constructor (issue
+    // #15875): the result must be x . y (none) and conj(x) . y (conjugate transpose).
+    template <typename T, typename I>
+    void spvv_const_run(rocsparse_handle     handle,
+                        rocsparse_indextype  it,
+                        rocsparse_index_base base,
+                        bool                 const_x,
+                        bool                 const_y)
+    {
+        SCOPED_TRACE(std::string("const_x=") + (const_x ? "1" : "0")
+                     + " const_y=" + (const_y ? "1" : "0"));
+        const I              off = (base == rocsparse_index_base_one) ? 1 : 0;
+        const std::vector<I> ind{
+            static_cast<I>(0 + off), static_cast<I>(2 + off), static_cast<I>(4 + off)};
+        const std::vector<T> xval{cvalue<T>(1, 1), cvalue<T>(2, -1), cvalue<T>(3, 2)};
+        std::vector<T>       yv;
+        for(int k = 0; k < 5; ++k)
+            yv.push_back(cvalue<T>(k + 1, 0.5 * k));
+
+        rocsparse_ut::device_vector<I> d_ind(ind);
+        rocsparse_ut::device_vector<T> d_xval(xval);
+        rocsparse_ut::device_vector<T> d_y(yv);
+
+        struct descriptors
+        {
+            rocsparse_const_spvec_descr x{};
+            rocsparse_const_dnvec_descr y{};
+
+            ~descriptors()
+            {
+                if(x != nullptr)
+                {
+                    rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spvec_descr",
+                                                          rocsparse_destroy_spvec_descr(x));
+                }
+                if(y != nullptr)
+                {
+                    rocsparse_clients_log_rocsparse_error("rocsparse_destroy_dnvec_descr",
+                                                          rocsparse_destroy_dnvec_descr(y));
+                }
+            }
+        } descr;
+        auto& x = descr.x;
+        auto& y = descr.y;
+        if(const_x)
+        {
+            unit_test_throw_rocsparse_error(
+                "rocsparse_create_const_spvec_descr",
+                rocsparse_create_const_spvec_descr(
+                    &x, 5, 3, d_ind.ptr, d_xval.ptr, it, base, dt_of<T>()));
+        }
+        else
+        {
+            rocsparse_spvec_descr mx = nullptr;
+            unit_test_throw_rocsparse_error(
+                "rocsparse_create_spvec_descr",
+                rocsparse_create_spvec_descr(
+                    &mx, 5, 3, d_ind.ptr, d_xval.ptr, it, base, dt_of<T>()));
+            x = mx;
+        }
+        if(const_y)
+        {
+            unit_test_throw_rocsparse_error(
+                "rocsparse_create_const_dnvec_descr",
+                rocsparse_create_const_dnvec_descr(&y, 5, d_y.ptr, dt_of<T>()));
+        }
+        else
+        {
+            rocsparse_dnvec_descr my = nullptr;
+            unit_test_throw_rocsparse_error(
+                "rocsparse_create_dnvec_descr",
+                rocsparse_create_dnvec_descr(&my, 5, d_y.ptr, dt_of<T>()));
+            y = my;
+        }
+
+        size_t buffer_size = 0;
+        T      result      = cvalue<T>(-99, 0);
+        UT_EXPECT_ROC(
+            rocsparse_spvv(
+                handle, rocsparse_operation_none, x, y, &result, dt_of<T>(), &buffer_size, nullptr),
+            rocsparse_status_success);
+        rocsparse_ut::device_vector<char> temp(buffer_size ? buffer_size : 4);
+
+        for(const auto trans : {rocsparse_operation_none, rocsparse_operation_conjugate_transpose})
+        {
+            std::complex<double> want = 0.0;
+            for(size_t k = 0; k < ind.size(); ++k)
+            {
+                const auto xk = to_cd(xval[k]);
+                want += ((trans == rocsparse_operation_none) ? xk : std::conj(xk))
+                        * to_cd(yv[ind[k] - off]);
+            }
+            result = cvalue<T>(-99, 0);
+            UT_EXPECT_ROC(
+                rocsparse_spvv(handle, trans, x, y, &result, dt_of<T>(), &buffer_size, temp.ptr),
+                rocsparse_status_success);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            EXPECT_LE(std::abs(to_cd(result) - want), 1.0e-5 * std::abs(want))
+                << "trans=" << static_cast<int>(trans) << " got " << to_cd(result) << " want "
+                << want;
+        }
+    }
+
+    template <typename T>
+    void spvv_const_all(rocsparse_handle handle)
+    {
+        for(const bool const_x : {false, true})
+        {
+            for(const bool const_y : {false, true})
+            {
+                ASSERT_NO_FATAL_FAILURE((spvv_const_run<T, int32_t>(
+                    handle, rocsparse_indextype_i32, rocsparse_index_base_zero, const_x, const_y)));
+                ASSERT_NO_FATAL_FAILURE((spvv_const_run<T, int64_t>(
+                    handle, rocsparse_indextype_i64, rocsparse_index_base_one, const_x, const_y)));
+            }
+        }
+    }
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -381,6 +525,15 @@ TEST_F(HostLevel1, spvv_dispatch_i64_base_one)
         handle, rocsparse_indextype_i64, rocsparse_index_base_one)));
     ASSERT_NO_FATAL_FAILURE((spvv_run<rocsparse_double_complex, int64_t>(
         handle, rocsparse_indextype_i64, rocsparse_index_base_one)));
+}
+
+// rocsparse_spvv reads the arrays of descriptors built by the const constructors.
+TEST_F(HostLevel1, spvv_const_descriptors)
+{
+    ASSERT_NO_FATAL_FAILURE(spvv_const_all<float>(handle));
+    ASSERT_NO_FATAL_FAILURE(spvv_const_all<double>(handle));
+    ASSERT_NO_FATAL_FAILURE(spvv_const_all<rocsparse_float_complex>(handle));
+    ASSERT_NO_FATAL_FAILURE(spvv_const_all<rocsparse_double_complex>(handle));
 }
 
 // ---------------------------------------------------------------------------

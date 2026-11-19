@@ -261,7 +261,7 @@ in [`clients/tests/src/`](clients/tests/src/). The last three rows are in
 | `fast_check_gtest.cpp` | `FastCheck_pre_checkin`, `FastCheckDevice_pre_checkin` | The `fast_check` verifier: fault injection into host-computed results and the per-solution failure summary (`FastCheck_pre_checkin`, no GPU), and the device padding, poison and probe-sum kernels plus 4 GiB-boundary buffer placement on small buffers (`FastCheckDevice_pre_checkin`, no hipBLASLt kernels) |
 | `host_memory_gtest.cpp` | `HostMemory_pre_checkin` | How the client holds pinned host memory: an idle buffer of 1 GiB or more stays cached only while consecutive tests reuse it (released after a test that does not, or when a test of another shape needs new memory), a smaller one until 100 consecutive tests have not reused it, large buffers get no 20% reuse slack, and a failed host allocation is reported instead of used. The `query_*` tests point the host-memory query (`host_memory.hpp`) at temporary copies of `/proc/meminfo` and the cgroup files, and check that it takes the smaller of `MemAvailable` and the tightest container memory limit (cgroup v1 or v2, up to the root). The `limit_*` tests check that `HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT` caps that budget and never raises it, and that it makes the memory preflight skip. Pins at most about 3.3 GiB; no hipBLASLt kernels |
 | `cotenant_gtest.cpp` | `CotenantOptions`, `CotenantLds`, `CotenantScoped` | In-process cotenant helper (Linux only): option validation and LDS-reservation sizing (host-only), plus `Scoped` start/stop and argument-error cases that need a GPU and skip without one |
-| `unit/parser_gtest.cpp` | `HostUnitInitParser`, `HostUnitActivationParser`, `HostUnitBiasSourceParser`, `HostUnitComputeInputType` | The client's string parsers for initialization, activation and bias source, with round-trips through their `*_to_string` helpers; independent validation and defaulting of A and B compute-input types |
+| `unit/parser_gtest.cpp` | `HostUnitInitParser`, `HostUnitActivationParser`, `HostUnitBiasSourceParser`, `HostUnitComputeInputType`, `HostUnitBiasType` | The client's string parsers for initialization, activation and bias source, with round-trips through their `*_to_string` helpers; independent validation and defaulting of A and B compute-input types; bias-type validation only when bias is enabled |
 | `unit/scaling_format_gtest.cpp` | `HostUnitScalingFormat` | Scaling-format helpers, including the two independent paddings in scale-buffer sizing |
 | `unit/yaml_conversion_gtest.cpp` | `HostUnitYamlConversionDeathTest` | `--yaml` conversion through `hipblaslt_gentest.py`: the client exits with failure on malformed input and accepts a valid empty test list. Needs Python with PyYAML |
 
@@ -372,10 +372,22 @@ default), and they run on a two-GPU gfx950 node in Math CI's `precheckin` on pul
 **How the tiers are applied in CI.** TheRock's test lane runs hipBLASLt through the CTest presets
 built from this file ([TheRock#5230](https://github.com/ROCm/TheRock/pull/5230)), so the tiers above
 are what CI actually runs. A pull request to this repository gets the `standard` tier in Multi-Arch
-CI, because TheRock treats any rocm-libraries change as a submodule change; scheduled nightly runs
-get `comprehensive`. The hipBLASLt ASAN lane drives `hipblaslt-test` directly through
-`test/therock/test_hipblaslt.py`: `quick` selects `*smoke*` on pull requests, and `standard` selects
-`*smoke*:*quick*:*pre_checkin*-*known_bug*` nightly.
+CI, because TheRock treats any rocm-libraries change as a submodule change, except on gfx950, where
+a pull request that touches hipBLASLt gets the `quick` tier; scheduled nightly runs get
+`comprehensive`. The hipBLASLt ASAN lane drives `hipblaslt-test` directly through
+[`test/therock/test_hipblaslt.py`](../../test/therock/test_hipblaslt.py) with these filters:
+
+| ASAN tier | GTest filter |
+| --- | --- |
+| `quick` (pull requests) | `*smoke*-*HipBufferTransferMemoryMode.*/Managed` |
+| `standard` (nightly) | `*smoke*:*quick*:*pre_checkin*-*known_bug*:*HipBufferTransferMemoryMode.*/Managed` |
+
+Both tiers temporarily exclude the two managed-memory buffer cases for the ASAN allocator
+failure tracked in ROCM-34263 and [rocm-systems #15163](https://github.com/ROCm/rocm-systems/issues/15163).
+The `Device` cases remain enabled, and non-ASAN runs retain both memory modes. The runner comment
+records the removal condition and review date. CTest and direct binary invocations bypass this
+exclusion; manual `comprehensive` and `full` ASAN dispatches receive no filter and remain exposed
+to the managed-memory failure.
 
 **Test size and shape expectations.** The suite leans heavily on many small problem sizes rather
 than few large ones, which is the right default: most correctness bugs are in tiling, edge handling,
@@ -681,8 +693,8 @@ tracked as a gap.
 **Trusted gate.** A failure here is a real problem with the change.
 
 - Build on both platforms, which includes the `TensileLogic --check-all` library logic validation
-- Client GTest `standard` tier on gfx94X-dcgpu and gfx950-dcgpu (Linux) and gfx110X (Windows),
-  through Multi-Arch CI
+- Client GTest `standard` tier on gfx94X-dcgpu (Linux) and gfx110X (Windows), and `quick` tier on
+  gfx950-dcgpu (Linux), through Multi-Arch CI
 - The Math CI client suite on gfx90a, gfx942, gfx950 and gfx12, plus the multi-GPU cases on two
   gfx950 GPUs
 - The Math CI sensitive-word scan, the job named `static-analysis`

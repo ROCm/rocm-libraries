@@ -51,7 +51,10 @@ def prep_threads_per_row(tile):
     return math.gcd(tile // VEC, 16)
 
 
-def build_fmha_bwd_prep_f32_gfx950_module_primary(dtype_str, tile, padded):
+def build_fmha_bwd_prep_f32_gfx950_module_primary(
+    dtype_str, tile, padded, vec_tail=False
+):
+    """`vec_tail`: see `fmha_bwd_prep_gfx11`; the vector is 4 fp32 wide."""
     if dtype_str != "fp32":
         raise ValueError(dtype_str)
     if tile % 32 or tile <= 0:
@@ -62,7 +65,8 @@ def build_fmha_bwd_prep_f32_gfx950_module_primary(dtype_str, tile, padded):
     NVEC = tile // VEC // TPR  # vectors per lane per row
     PADDED = bool(padded)
     LOG2_TPR = TPR.bit_length() - 1
-    _cache_tag = (KERNEL_NAME, dtype_str, tile, PADDED)
+    VEC_TAIL = bool(vec_tail) and PADDED
+    _cache_tag = (KERNEL_NAME, dtype_str, tile, PADDED, VEC_TAIL)
 
     def _ptr_ty(ty, align):
         return fx.PointerType.get(
@@ -136,7 +140,20 @@ def build_fmha_bwd_prep_f32_gfx950_module_primary(dtype_str, tile, padded):
         acc = fx.Float32(0.0)
         for i in range_constexpr(NVEC):
             col = (lane + fx.Int32(i * TPR)) * fx.Int32(VEC)
-            if const_expr(PADDED):
+            if const_expr(VEC_TAIL):
+                hd = fx.Int32(hdim_vo)
+                last = hd - fx.Int32(VEC)
+                m = (col < last).select(col, last)
+                s0 = (m > fx.Int32(0)).select(m, fx.Int32(0))
+                vt = Vec.make_type(VEC, elem)
+                ov = fx.ptr_load(o_p + fx.Int64(o_row + fx.Index(s0)), vt)
+                dv = fx.ptr_load(do_p + fx.Int64(do_row + fx.Index(s0)), vt)
+                prod = ov * dv
+                for j in range_constexpr(VEC):
+                    g = s0 + fx.Int32(j)
+                    live = (g >= col) & (g < hd)
+                    acc = acc + live.select(prod[j], fx.Float32(0.0))
+            elif const_expr(PADDED):
                 # element-wise, tail masked: the column is clamped to 0 (legal) and the value zeroed
                 for j in range_constexpr(VEC):
                     c = col + fx.Int32(j)

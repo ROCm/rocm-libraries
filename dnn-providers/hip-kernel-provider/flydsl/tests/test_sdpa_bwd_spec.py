@@ -144,7 +144,7 @@ def test_policy_default_split_rows_outrank_the_rest(kind: str) -> None:
     listed = nondet.read(arch="gfx950").keys()
     groups: dict[tuple, dict[bool, list[int]]] = {}
     for row in instances_for(f"sdpa_bwd_{kind}", "gfx950"):
-        spec = to_spec(row)
+        spec = to_spec(row, "gfx950")
         policy_default = not spec.knobs and spec.hash() not in listed
         geometry = (
             row.dtype,
@@ -178,7 +178,7 @@ def test_a_dq_row_names_the_reduce_symbol_its_object_holds() -> None:
     combined = [r for r in rows if r.knobs["reduce_symbol"]]
     assert combined
     for row in rows:
-        spec = to_spec(row)
+        spec = to_spec(row, "gfx950")
         stores_db = spec.cls == "bias" and spec.store_db != 0
         assert row.knobs["reduce_symbol"] == (
             SDPA_BWD_REDUCE_SYMBOL[spec.bias_dtype] if stores_db else ""
@@ -265,6 +265,7 @@ def test_the_feature_knobs_come_last_in_every_knob_order() -> None:
     from generators._sdpa_bwd_spec import (  # noqa: PLC0415
         FEATURE_KNOBS,
         GENERIC_TABLE_KNOBS,
+        KNOBS_CDNA9,
         KNOBS_GENERIC,
     )
 
@@ -274,6 +275,216 @@ def test_the_feature_knobs_come_last_in_every_knob_order() -> None:
         assert GENERIC_TABLE_KNOBS[kernel][-2:] == FEATURE_KNOBS
     for kernel in ("prep", "dbias_reduce", "merged"):
         assert not set(FEATURE_KNOBS) & set(KNOBS[kernel])
+    # gfx942 and gfx90a: dK/dV spells grid_order before the feature knobs
+    for kernel in ("dkdv", "dq"):
+        assert KNOBS_CDNA9[kernel][-2:] == FEATURE_KNOBS
+    assert KNOBS_CDNA9["dkdv"][-3] == "grid_order"
+    for kernel in ("prep", "dbias_reduce"):
+        assert not set(FEATURE_KNOBS) & set(KNOBS_CDNA9[kernel])
+
+
+# --- gfx942 and gfx90a: one arch whose 16-bit rows are RDNA-family and whose fp32 rows are CDNA-family ---
+
+CDNA9 = ("gfx942", "gfx90a")
+
+
+def test_the_builder_family_follows_the_arch_and_the_dtype() -> None:
+    from generators._sdpa_bwd_spec import family  # noqa: PLC0415
+
+    assert [family("gfx950", d) for d in ("f16", "bf16", "fp32")] == ["cdna"] * 3
+    assert [family("gfx11-generic", d) for d in ("f16", "bf16", "fp32")] == ["rdna"] * 3
+    for arch in CDNA9:
+        assert [family(arch, d) for d in ("f16", "bf16", "fp32")] == [
+            "rdna",
+            "rdna",
+            "cdna",
+        ]
+
+
+def test_the_fp32_dbias_reduce_of_a_cdna9_arch_is_rdna_family() -> None:
+    """The f32 dB reduce of a 16-bit row is the gfx11 kernel; every other fp32 row of gfx942 and gfx90a is CDNA-family."""
+    from generators._sdpa_bwd_spec import family  # noqa: PLC0415
+
+    for arch in CDNA9:
+        assert family(arch, "fp32", "dbias_reduce") == "rdna"
+        assert family(arch, "fp32", "dq") == family(arch, "fp32") == "cdna"
+        spec = Spec.parse(f"dbias_reduce,fp32,32,plain,bk,0,0,tail,0,1;arch={arch}")
+        assert spec.knobs == {}
+    assert family("gfx950", "fp32", "dbias_reduce") == "cdna"
+
+
+@pytest.mark.parametrize("arch", CDNA9)
+def test_a_cdna9_row_takes_the_feature_knobs_of_the_16_bit_family_only(
+    arch: str,
+) -> None:
+    from generators._sdpa_bwd_spec import U2_SYMBOLS  # noqa: PLC0415
+
+    for key in (
+        "dkdv,f16,64,bias,bk,0,1,g1,0,1;arch={};bias_f32=1",
+        "dkdv,bf16,64,plain,bk,0,1,g1,0,1;arch={};rne=1;u2=dv",
+        "dq,f16,128,causal,bk,1,1,g1,0,1;arch={};u2=dq",
+        "dq,f16,128,bias,bk,0,1,g1,0,1;arch={};store_db=0;bias_f32=1",
+    ):
+        assert Spec.parse(key.format(arch)).key() == key.format(arch)
+    for key in (
+        "dkdv,fp32,64,plain,bk,0,1,g1,0,1;arch={};u2=dk",
+        "dq,fp32,64,plain,bk,0,1,g1,0,1;arch={};u2=dq",
+        "dkdv,fp32,64,bias,bk,0,1,g1,0,1;arch={};bias_f32=1",
+        "dkdv,f16,64,bias,bk,0,1,g1,0,1;arch={};u2=dk",
+    ):
+        with pytest.raises(ValueError):
+            Spec.parse(key.format(arch))
+    for kernel in ("dkdv", "dq"):
+        assert U2_SYMBOLS[arch, kernel] == U2_SYMBOLS["gfx11-generic", kernel]
+
+
+def test_the_instance_module_spells_the_same_family_rule() -> None:
+    """``_instances`` cannot import the Spec module (that would make it an input of every op), so it restates the rule."""
+    from generators import _instances  # noqa: PLC0415
+    from generators._sdpa_bwd_spec import ARCHES, family  # noqa: PLC0415
+
+    for arch in ARCHES:
+        for dtype in ("f16", "bf16", "fp32"):
+            for kind in (None, "dq", "dbias_reduce"):
+                assert _instances._sdpa_bwd_row_is_cdna(arch, dtype, kind) == (
+                    family(arch, dtype, kind) == "cdna"
+                ), (arch, dtype, kind)
+
+
+@pytest.mark.parametrize("arch", CDNA9)
+def test_the_cdna9_ladders(arch: str) -> None:
+    from generators._sdpa_bwd_spec import FP32_LADDER, ladder  # noqa: PLC0415
+
+    sixteen = ladder(arch, "f16")
+    assert ladder(arch, "bf16") == sixteen == ladder(arch)
+    assert sixteen == (16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256, 512)
+    assert (
+        ladder(arch, "fp32")
+        == FP32_LADDER
+        == (32, 64, 96, 128, 160, 192, 224, 256, 512)
+    )
+    # the head dims 257..512 ride the 512 rung, padded: there is no 320/384/448 rung
+    assert rung_below(512, "f16", arch) == rung_below(512, "fp32", arch) == 256
+    assert rung_below(16, "f16", arch) == 0
+    for key, ok in (
+        ("dkdv,bf16,512,plain,bk,0,1,g1,0,1;arch={}", True),
+        ("dkdv,bf16,16,plain,bk,0,1,g1,0,1;arch={}", True),
+        ("dkdv,bf16,384,plain,bk,0,1,g1,0,1;arch={}", False),
+        ("dkdv,fp32,512,plain,bk,0,1,g1,0,1;arch={}", True),
+        ("dkdv,fp32,16,plain,bk,0,1,g1,0,1;arch={}", False),
+    ):
+        if ok:
+            assert Spec.parse(key.format(arch)).arch == arch
+        else:
+            with pytest.raises(ValueError, match="ladder"):
+                Spec.parse(key.format(arch))
+
+
+def test_the_cdna9_fp32_rows_take_the_gfx950_family_knobs_and_the_16_bit_rows_the_generic_ones() -> (
+    None
+):
+    fp32 = Spec.parse("dkdv,fp32,512,causal,bk,1,1,g1,0,1;arch=gfx90a;block_q=16")
+    assert fp32.knobs == {"block_q": 16}
+    assert (
+        Spec.parse(
+            "dq,fp32,128,bias,bk,0,1,g1,0,1;arch=gfx942;block_m=32;block_n=16"
+        ).block_n
+        == 16
+    )
+    with pytest.raises(ValueError, match="does not apply"):
+        Spec.parse("dkdv,fp32,128,plain,bk,0,1,g1,0,1;arch=gfx90a;split_head_dim=1")
+    with pytest.raises(ValueError, match="does not apply"):
+        Spec.parse("dkdv,f16,128,plain,bk,0,1,g1,0,1;arch=gfx90a;mfma_rows=16")
+    with pytest.raises(ValueError, match="not built"):
+        Spec.parse("merged,bf16,64,plain,bk,0,0,tail,0,1;arch=gfx90a")
+
+
+@pytest.mark.parametrize(
+    ("key", "other"),
+    [
+        ("dkdv,f16,64,plain,bk,0,1,g1,0,1;arch=gfx942", "grid_order=kv_fastest"),
+        ("dkdv,f16,64,plain,bk,0,1,g1,0,1;arch=gfx90a", "grid_order=head_fastest"),
+    ],
+)
+def test_grid_order_is_spelled_only_when_it_is_not_the_default_of_the_arch(
+    key: str, other: str
+) -> None:
+    default = Spec.parse(key)
+    assert default.grid_order is None and "grid_order" not in default.key()
+    spelled = Spec.parse(f"{key};{other}")
+    assert spelled.key() == f"{key};{other}"
+    assert spelled.hash() != default.hash()
+    default_order = {"gfx942": "head_fastest", "gfx90a": "kv_fastest"}[default.arch]
+    with pytest.raises(ValueError, match="only when it is not the default"):
+        Spec.parse(f"{key};grid_order={default_order}")
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "dq,f16,64,plain,bk,0,1,g1,0,1;arch=gfx90a;grid_order=head_fastest",  # dQ has one grid order
+        "dkdv,fp32,64,plain,bk,0,1,g1,0,1;arch=gfx90a;grid_order=head_fastest",  # the native fp32 family launches head-fastest
+        "dkdv,f16,64,plain,bk,0,1,g1,0,1;arch=gfx11-generic;grid_order=head_fastest",
+    ],
+)
+def test_grid_order_belongs_to_the_cdna9_16_bit_dkdv_rows(key: str) -> None:
+    with pytest.raises(ValueError, match="does not apply"):
+        Spec.parse(key)
+
+
+def test_a_cdna9_row_keeps_its_arch_through_to_spec() -> None:
+    """A CDNA-family row of gfx942 or gfx90a is a Spec of that arch: its key spells the arch and hashes apart from gfx950's."""
+    from generators import _instances  # noqa: PLC0415
+
+    row = _instances._sdpa_bwd_cdna_row(
+        "dkdv",
+        ("fp32", 128, "plain", "bk", 0, 1, "g1", 0, 1, -1, -1, -1, 16, -1, -1, -1, -1),
+        frozenset(),
+    )
+    for arch in CDNA9:
+        spec = to_spec(row, arch)
+        assert (spec.arch, spec.key()) == (
+            arch,
+            f"dkdv,fp32,128,plain,bk,0,1,g1,0,1;arch={arch};block_q=16",
+        )
+        assert Spec.parse(spec.key()) == spec
+    assert (
+        to_spec(row, "gfx950").key() == "dkdv,fp32,128,plain,bk,0,1,g1,0,1;block_q=16"
+    )
+
+
+@pytest.mark.parametrize("arch", CDNA9)
+@pytest.mark.parametrize("dtype", ["f16", "bf16", "fp32"])
+def test_vec_tail_is_a_spelled_knob_of_the_padded_cdna9_prep(
+    arch: str, dtype: str
+) -> None:
+    plain = f"prep,{dtype},128,plain,bk,0,1,tail,0,1;arch={arch}"
+    spelled = Spec.parse(f"{plain};vec_tail=1")
+    assert spelled.key() == f"{plain};vec_tail=1"
+    assert Spec.parse(spelled.key()) == spelled
+    assert Spec.parse(plain).key() == plain and Spec.parse(plain).vec_tail is None
+    assert spelled.hash() != Spec.parse(plain).hash()
+    with pytest.raises(ValueError, match="vec_tail"):
+        Spec.parse(f"{plain};vec_tail=0")
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "prep,f16,128,plain,bk,0,1,tail,0,1;vec_tail=1",  # gfx950
+        "prep,fp32,128,plain,bk,0,1,tail,0,1;vec_tail=1",  # gfx950
+        "prep,f16,128,plain,bk,0,1,tail,0,1;arch=gfx11-generic;vec_tail=1",
+        "prep,fp32,128,plain,bk,0,1,tail,0,1;arch=gfx11-generic;vec_tail=1",
+        "prep,f16,128,plain,bk,0,1,tail,0,1;arch=gfx12-generic;vec_tail=1",
+        "prep,f16,128,plain,bk,0,0,tail,0,1;arch=gfx90a;vec_tail=1",  # exact tile: the knob has no effect, one spelling per object
+        "prep,fp32,128,plain,bk,0,0,tail,0,1;arch=gfx942;vec_tail=1",
+        "dkdv,f16,128,plain,bk,0,1,g1,0,1;arch=gfx90a;vec_tail=1",
+        "dq,fp32,128,plain,bk,0,1,g1,0,1;arch=gfx942;vec_tail=1",
+    ],
+)
+def test_vec_tail_is_refused_outside_the_padded_cdna9_prep(key: str) -> None:
+    with pytest.raises(ValueError):
+        Spec.parse(key)
 
 
 @pytest.mark.parametrize(
@@ -345,16 +556,19 @@ def test_a_feature_knob_in_a_table_row_is_the_knob_of_its_spec() -> None:
     from generators._instances import (  # noqa: PLC0415
         SDPA_BWD_FEATURE_KNOBS,
         SDPA_BWD_KNOBS,
+        SDPA_BWD_OPTIONAL_KNOBS,
         sdpa_bwd_perf_knobs,
     )
     from generators._sdpa_bwd_spec import (
         FEATURE_KNOBS,
+        OPTIONAL_TABLE_KNOBS,
         UNSET_INT,
         UNSET_WORD,
     )  # noqa: PLC0415
 
     assert tuple(SDPA_BWD_FEATURE_KNOBS) == FEATURE_KNOBS
     assert SDPA_BWD_FEATURE_KNOBS == {"bias_f32": UNSET_INT, "u2": UNSET_WORD}
+    assert tuple(SDPA_BWD_OPTIONAL_KNOBS) == OPTIONAL_TABLE_KNOBS
     names = SDPA_BWD_KNOBS["dkdv"]
     short = sdpa_bwd_perf_knobs(names, (-1,) * (len(names) - 2))
     assert (short["bias_f32"], short["u2"]) == (UNSET_INT, UNSET_WORD)

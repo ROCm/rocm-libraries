@@ -141,9 +141,10 @@ namespace TensileLite
         X_MACRO(SKItersPerWG) \
         X_MACRO(SKGrid) \
         X_MACRO(SKTilesAndSplit) \
-        /* Packed batch dimension divisors */ \
-        X_MACRO(MagicNumberSize) \
-        X_MACRO(MagicShiftSize) \
+        X_MACRO(MagicNumberSizeAlg1) \
+        X_MACRO(MagicShiftSizeAlg1) \
+        X_MACRO(MagicNumberSizeAlg2) \
+        X_MACRO(MagicShiftSizeAlg2) \
         /* Epilogue control args */ \
         X_MACRO(BiasType) \
         X_MACRO(StrideBias) \
@@ -185,7 +186,8 @@ namespace TensileLite
         X_MACRO(RR_MagicShiftAndSignWgmMainBlock) \
         X_MACRO(AddressScaleZeroA) \
         X_MACRO(ScaleBlockSizeA) \
-        X_MACRO(ESMRuntimeSupported)
+        X_MACRO(ESMRuntimeSupported) \
+        X_MACRO(DeltaPeerD)
 
     enum class CustomArgSemantic
     {
@@ -433,6 +435,7 @@ namespace TensileLite
 
     struct SizeMapping
     {
+        int                    a2aSubRounds     = 1;
         bool                   activationFused  = true;
         int                    adaptiveGemm     = 0;
         int                    adaptiveGemmGSUA = 0;
@@ -465,7 +468,7 @@ namespace TensileLite
         dim3                   macroTile;
         int                    magicDivAlg            = 1;
         int                    MathClocksUnrolledLoop = 0;
-        std::array<int, 4>     matrixInstruction;
+        std::array<int, 4>     matrixInstruction{};
         int                    Multicast                  = 0;
         int                    nonTemporalA               = 0;
         int                    nonTemporalB               = 0;
@@ -492,7 +495,7 @@ namespace TensileLite
         int                    temporalHintA              = 0;
         int                    temporalHintB              = 0;
         int                    temporalHintD              = 0;
-        dim3                   threadTile;
+        dim3                   threadTile{0, 0, 0};
         TileProcessingStrategy tileProcessingStrategy        = TileProcessingStrategy::None;
         int                    UnrollLoopSwapGlobalReadOrder = 0;
         int                    UnrollMajorLDSA               = -1;
@@ -501,7 +504,7 @@ namespace TensileLite
         int                    VectorWidthA                  = 1;
         int                    VectorWidthB                  = 1;
         int                    WavefrontSize                 = 0;
-        std::array<int, 2>     waveGroup;
+        std::array<int, 2>     waveGroup{};
         size_t                 waveNum                  = 0;
         int                    WaveSeparateGlobalReadA  = 0;
         int                    WaveSeparateGlobalReadB  = 0;
@@ -1519,6 +1522,7 @@ namespace TensileLite
             bool             useInitialStridesCD       = false;
             bool             stridedBatched            = true;
             bool             outputAmaxD               = false;
+            bool             outputPeerD               = false;
             bool             groupedGemm               = false;
             ActivationType   activationType            = ActivationType::None;
             int              activationArgLength       = 0;
@@ -1533,7 +1537,7 @@ namespace TensileLite
             bool supportDeviceUserArguments = false;
             bool swizzleTensorA             = false;
             bool swizzleTensorB             = false;
-            bool fusedGemmA2A               = false;
+            FusedA2A fusedA2A                   = FusedA2A::Disabled;
             int  metadataLayout             = 0;
             // w4a16 group size, zero-point and encoding come from predicates and the problem;
             // a runtime-group kernel matches several group sizes.
@@ -1624,7 +1628,6 @@ namespace TensileLite
 
         uint32_t magicNumberAlg1(uint32_t x, uint32_t* magicShift) const;
         uint32_t magicNumberAlg2(uint32_t x, uint32_t* magicShift) const;
-        uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
         uint32_t smallMagicNumber(uint32_t x) const;
 
         std::tuple<int32_t, size_t, size_t, size_t> calculateAutoWGM(Problem const&  problem,

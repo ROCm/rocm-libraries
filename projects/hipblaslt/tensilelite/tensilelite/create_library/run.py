@@ -51,6 +51,7 @@ from ..Common import (
     HR,
     IsaVersion,
     ParallelMap2,
+    poolSizeBudget,
     print1,
     print2,
     printWarning,
@@ -1288,24 +1289,22 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
 
 
 def _includeGemmA2AFusionProblemType(problemType, enabled: bool) -> bool:
-    """Return whether this build admits one library logic's GEMM+A2A solutions.
+    """Return whether this build admits one library logic's fused A2A solutions.
 
-    Only an explicit True excludes one: a missing key, or no problem type at all,
+    Only a fused mode excludes one: a missing key, or no problem type at all,
     names a logic file that is not fused. Erring this way keeps a problem type that
     cannot answer the question from emptying the library, which fails far more
     quietly than building the solutions the gate meant to skip.
     """
-    return enabled or (problemType or {}).get("FusedGemmA2A", False) is not True
+    return enabled or (problemType or {}).get("FusedA2A", "Disabled") not in ("GemmA2A", "A2AGemm")
 
 
 ################################################################################
 # Tensile Create Library
 ################################################################################
 def _cpuCount() -> int:
-    if os.name == "nt":
-        # Matches CPUThreadCount: the Windows scheduler caps waitable handles.
-        return min(os.cpu_count() or 1, 61)
-    return len(os.sched_getaffinity(0))
+    """The pool budget CPUThreadCount gives one process: the groups build in place of it."""
+    return poolSizeBudget()
 
 
 def _jobsPerGroup(requested: int, groups: List[List[str]]) -> List[int]:
@@ -1324,7 +1323,7 @@ def _jobsPerGroup(requested: int, groups: List[List[str]]) -> List[int]:
     unambiguous abbreviation of ``--jobs``) to avoid silently dropping them.
     """
     # 0 disables threading and has to survive the split intact; -1 is the
-    # documented "use every CPU" default.
+    # documented "use the whole budget" default.
     if requested == 0:
         return [0] * len(groups)
     total = _cpuCount() if requested < 0 else min(_cpuCount(), requested)
@@ -1390,6 +1389,10 @@ def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int, argv=Non
 
     The output directory is shared: each run keeps its scratch to itself
     (buildTmpDir) and their per-architecture outputs are named apart.
+
+    ``argv`` is this run's own arguments, the ones main parsed. Not sys.argv:
+    behind the ``tensilelite`` dispatcher that still starts with the command
+    name, which a child would take for its LogicPath.
     """
     print1(
         f"# Architectures requested need {len(groups)} builds to cover: "

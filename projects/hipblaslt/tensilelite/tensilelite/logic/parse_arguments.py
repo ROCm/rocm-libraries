@@ -38,6 +38,7 @@ def parseArguments(argv: Optional[Sequence[str]] = None):
     """
 
     argParser = ArgumentParser(
+        prog="tensilelite logic",
         description="TensileLogic runs critical checks to ensure the "
         "integrity of the supplied logic files.",
     )
@@ -112,6 +113,12 @@ def parseArguments(argv: Optional[Sequence[str]] = None):
         action="store_true",
         help="exit non-zero when a known-bugs entry no longer fails validation "
         "(a landed fix); use in CI to force removal of stale entries",
+    )
+    argParser.add_argument(
+        "--logic-filter",
+        dest="LogicFilter",
+        default="**/*.yaml",
+        help="glob relative to LogicPath (default: **/*.yaml)",
     )
     args = argParser.parse_args(argv)
 
