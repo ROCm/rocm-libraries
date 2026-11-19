@@ -34,6 +34,8 @@ Geometry (a wave owns 16 query rows of one head-dim shard; no role split, unlike
 
 Schedule policy: the sweep's initial policy (register-pressure skeletons of this kernel's loop), one
 row per rung: (shards Qs, num_waves, block_n). Every row is re-measured on the real objects and may change; `num_waves` and `block_n` are gfx1201's measured prior re-expressed for v16 operands, not confirmed for performance.
+A row may carry a fourth element, `sched_strategy`, the LLVM `amdgpu-sched-strategy` its rung builds with; an absent element leaves the option unset,
+and no row carries it unless its rung measured a gain. It is not a pin.
 `waves_per_eu` 2, `kt_lds_layout` scalar and `lpt_tile_order` on are gfx1201's defaults.
 """
 
@@ -57,7 +59,7 @@ ELEM_BYTES = 2
 LDS_PAD = 4  # K, V and K^T row padding (elements): K_STRIDE = tile + 4, KT_STRIDE = block_n + 4
 MAX_WAVES = 16  # a 512-thread workgroup; the register-pressure skeletons stop here
 
-# tile -> (contraction_shards, num_waves, block_n)
+# tile -> (contraction_shards, num_waves, block_n[, sched_strategy])
 POLICY = {
     16: (1, 16, 32),
     32: (1, 8, 32),
@@ -95,6 +97,17 @@ POLICY_MFMA16 = {
     512: (2, 8, 16),
 }
 DEFAULT_WAVES_PER_EU = 2
+# The values of a policy row's `sched_strategy`: `max-memory-clause` (AOTriton's value at hd 512) and the dK/dV knob's
+# `SCHED_STRATEGIES` (held equal by `tests/test_bwd_layout_model.py`). LLVM ignores an unknown value silently, so a row is checked here.
+# `default` leaves the option unset, as it does for dK/dV.
+SCHED_STRATEGIES = (
+    "max-memory-clause",
+    "max-ilp",
+    "iterative-ilp",
+    "iterative-minreg",
+    "iterative-maxocc",
+    "default",
+)
 DEFAULT_KT_LDS_LAYOUT = "scalar"
 KT_LDS_LAYOUTS = ("scalar", "staged")
 BIAS_STAGES = (
@@ -144,6 +157,8 @@ class BwdDqKnobsGfx11:
     why: str  # the broken rule when `legal` is False, else ""
     bias_f32: bool = False  # the bias (and the dB store) are FLOAT; bias builds only
     u2: str = ""  # "dq": V heads (`num_head_v` kernarg); "" otherwise
+    # The LLVM `amdgpu-sched-strategy` of the build; "" leaves the option unset.
+    sched_strategy: str = ""
 
     @property
     def block_size(self):
@@ -209,6 +224,13 @@ def bwd_dq_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **pi
         else POLICY_GFX12 if arch == GFX12_ARCH else POLICY
     )
     base = policy.get(tile, (1, 8, 32))
+    sched_strategy = base[3] if len(base) > 3 else ""
+    if sched_strategy not in ("", *SCHED_STRATEGIES):
+        raise ValueError(
+            f"sched_strategy {sched_strategy!r} of the {arch} dQ policy row {tile} is not one of {SCHED_STRATEGIES}"
+        )
+    if sched_strategy == "default":
+        sched_strategy = ""
     shards = int(pins.get("contraction_shards", base[0]))
     if shards < 1 or shards & (shards - 1):
         why.append(f"contraction_shards {shards} is not a power of two")
@@ -284,4 +306,5 @@ def bwd_dq_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **pi
         why="; ".join(why),
         bias_f32=bias_f32,
         u2=u2,
+        sched_strategy=sched_strategy,
     )

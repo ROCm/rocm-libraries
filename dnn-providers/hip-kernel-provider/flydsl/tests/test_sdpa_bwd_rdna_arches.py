@@ -113,3 +113,46 @@ def test_only_the_split_ops_have_rows_on_gfx11_generic() -> None:
         assert instances_for(module.OP, "gfx11-generic")
     for module in CDNA_ONLY_GENERATORS:
         assert instances_for(module.OP, "gfx11-generic") == []
+
+
+def test_a_dq_policy_scheduler_reaches_the_build_hints_and_the_launcher_hints(
+    monkeypatch,
+) -> None:
+    """G16: ``build`` writes ``llvm_options["amdgpu-sched-strategy"]`` into the per-build hints copy when the dQ policy row spells it, and
+    leaves the shared ``_COMPILE_HINTS`` and every other Spec's hints alone; the launcher's own hints (the JIT path) carry it too.
+    """
+    pytest.importorskip("flydsl")
+    sys.path.insert(0, str(FLYDSL / "kernels_src"))
+    from generators import _sdpa_bwd_rdna_build as rdna  # noqa: PLC0415
+    from generators._sdpa_bwd_spec import Spec  # noqa: PLC0415
+    from kernels.attention_bwd_rdna import fmha_bwd_dq_gfx11 as dq  # noqa: PLC0415
+    from kernels.attention_bwd_rdna import (
+        fmha_tuning_bwd_dq_gfx11 as tuning,
+    )  # noqa: PLC0415
+
+    key = "amdgpu-sched-strategy"
+    spec = Spec("dq", "f16", 128, "plain", "bk", 0, 1, "g1", arch="gfx12-generic")
+    base = rdna.build(spec)
+    assert key not in base.hints["llvm_options"] and base.knobs.sched_strategy == ""
+    shared = {
+        k: dict(v) if isinstance(v, dict) else v for k, v in dq._COMPILE_HINTS.items()
+    }
+    monkeypatch.setitem(tuning.POLICY_GFX12, 128, (2, 8, 16, "max-memory-clause"))
+    built = rdna.build(spec)
+    assert built.knobs.sched_strategy == "max-memory-clause"
+    assert built.hints["llvm_options"][key] == "max-memory-clause"
+    assert {
+        k: v for k, v in built.hints["llvm_options"].items() if k != key
+    } == dq._COMPILE_HINTS["llvm_options"]
+    assert dq._COMPILE_HINTS == shared
+    other = rdna.build(
+        Spec("dq", "bf16", 96, "plain", "bk", 0, 1, "g1", arch="gfx12-generic")
+    )
+    assert key not in other.hints["llvm_options"]
+    # dK/dV keeps its inert function attribute: its record's default ``sched_strategy`` never becomes an LLVM option
+    for arch in ("gfx11-generic", "gfx12-generic"):
+        dkdv = rdna.build(
+            Spec("dkdv", "f16", 128, "plain", "bk", 0, 1, "g1", arch=arch)
+        )
+        assert dkdv.knobs.sched_strategy == "max-memory-clause"
+        assert key not in dkdv.hints["llvm_options"]

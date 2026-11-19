@@ -7743,10 +7743,14 @@ def _sdpa_bwd_rdna_row(kind: str, arch: str, row: tuple) -> Instance:
     bias is never staged) and names the standalone reduce kernel its companion object holds. A gfx942 or gfx90a row has no
     feature-knob column: ``bias_f32`` and ``u2`` read as unset.
 
-    A gfx11-generic or gfx12-generic row's priority is ``PRIORITY_SPECIALIZED + 1 + 2 * ((256 - tile) // 16) + stores_no_db``: the smaller
+    A gfx11-generic row's priority is ``PRIORITY_SPECIALIZED + 1 + 2 * ((256 - tile) // 16) + stores_no_db``: the smaller
     rung of the arch's ladder outranks the larger, so the default plan takes the smallest rung that covers the problem, and
-    within a rung a bias dQ row that stores no dB (``store_db`` 0) outranks its dB-storing twin (131 down to 101 on the gfx11 rungs, 93, 85,
-    77 and 69 on the gfx12 rungs 320, 384, 448 and 512; no ties within an (op, dtype, class, dropout, store_db)); ``_sdpa_bwd_instances`` re-ranks a gfx942 or gfx90a row. The dBias reduce rows
+    within a rung a bias dQ row that stores no dB (``store_db`` 0) outranks its dB-storing twin (131 down to 101 on the gfx11 rungs).
+    A gfx12-generic row's is ``PRIORITY_SPECIALIZED + 1 + 4 * ((256 - tile) // 16) + 2 * (padded == 0) + stores_no_db``: the
+    exact twin (``padded`` 0) of a rung outranks its padded row and a padded row outranks the next rung's exact one (101 to 162 on
+    the rungs 16 to 256, 85, 69, 53 and 37 on the wide rungs 320, 384, 448 and 512), so a bias graph without dB takes the exact
+    dB-storing row over the padded ``store_db`` 0 row. No ties within an (op, dtype, class, dropout, store_db); ``_sdpa_bwd_instances``
+    re-ranks a gfx942 or gfx90a row. The dBias reduce rows
     are the dQ op's companions and are no instance.
     """
     op = f"sdpa_bwd_{kind}"
@@ -7820,7 +7824,11 @@ def _sdpa_bwd_rdna_row(kind: str, arch: str, row: tuple) -> Instance:
         dtype=dtype,
         priority=PRIORITY_SPECIALIZED
         + 1
-        + 2 * ((256 - tile) // 16)
+        + (
+            4 * ((256 - tile) // 16) + 2 * (padded == 0)
+            if arch == SDPA_BWD_GFX12_TARGET
+            else 2 * ((256 - tile) // 16)
+        )
         + (bias and knobs.get("store_db") == 0),
         knobs=knobs,
     )

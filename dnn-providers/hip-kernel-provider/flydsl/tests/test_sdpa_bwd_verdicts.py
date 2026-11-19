@@ -513,6 +513,144 @@ def gfx12_dq448(tmp_path_factory):
     return _gfx12_fixture(tmp_path_factory.mktemp("gfx12_dq448"), True)
 
 
+G15_RUNGS = (64, 96, 128, 256)
+
+
+def _gfx12_exact_fixture(root):
+    """The shipped-shape row set plus the G15 exact twins (``padded`` 0, ``floor`` tail) of the 16-bit no-dropout dK/dV and dQ rows at
+    64/96/128/256, plain/causal/bias, and a padded ``store_db=0`` dQ bias row at each of those rungs.
+    """
+    import csv  # noqa: PLC0415
+
+    from generators._sdpa_bwd_spec import Spec  # noqa: PLC0415
+
+    model = sv.MODELS["gfx12-generic"]
+    specs = gfx12_row_set()
+    for dtype in ("f16", "bf16"):
+        for tile in G15_RUNGS:
+            for kernel in ("dkdv", "dq"):
+                for cls in ("plain", "causal", "bias"):
+                    specs.append(
+                        Spec(
+                            kernel,
+                            dtype,
+                            tile,
+                            cls,
+                            "bk",
+                            0,
+                            0,
+                            "tail",
+                            arch="gfx12-generic",
+                        )
+                    )
+            specs.append(
+                Spec(
+                    "dq",
+                    dtype,
+                    tile,
+                    "bias",
+                    "bk",
+                    0,
+                    1,
+                    "g1",
+                    store_db=0,
+                    arch="gfx12-generic",
+                )
+            )
+    reference = root / "reference.csv"
+    with reference.open("w", newline="") as fh:
+        w = csv.writer(fh, lineterminator="\n")
+        w.writerow(("hash", "spec"))
+        w.writerows((s.hash(), s.key()) for s in specs)
+    sv.write_selection(model, reference, root / "selection.csv")
+    sel = sv.load_selection(root / "selection.csv")
+    rows = sv.generate(model, root / "selection.csv", content=None)
+    return model, specs, sel, rows
+
+
+@pytest.fixture(scope="module")
+def gfx12_exact(tmp_path_factory):
+    return _gfx12_exact_fixture(tmp_path_factory.mktemp("gfx12_exact"))
+
+
+def _forms(by_hash, hashes):
+    return tuple(
+        (by_hash[h].tile, by_hash[h].padded, by_hash[h].store_db) for h in hashes
+    )
+
+
+@pytest.mark.parametrize("tile", G15_RUNGS)
+def test_gfx12_exact_row_fills_default_hash_and_padded_row_exact_false_hash(
+    gfx12_exact, tile
+):
+    """G15 (4): the exact row of a rung is ``default_hash`` of its entry, the padded row ``exact_false_hash``; a key with one row has it
+    in both columns (dropout, a rung without an exact twin)."""
+    _, specs, sel, _ = gfx12_exact
+    by_hash = {s.hash(): s for s in specs}
+    for kernel in ("dkdv", "dq"):
+        for cls in ("plain", "causal"):
+            ef, default = sel[(kernel, "f16", tile, cls, 0, "")]
+            assert (by_hash[ef].padded, by_hash[default].padded) == (1, 0), (
+                kernel,
+                cls,
+            )
+            assert by_hash[ef].tile == by_hash[default].tile == tile
+            ef, default = sel[(kernel, "f16", tile, cls, 1, "")]
+            assert ef == default and by_hash[ef].padded == 1
+    ef, default = sel[("dkdv", "fp32", tile if tile != 96 else 128, "plain", 0, "")]
+    assert ef == default
+
+
+@pytest.mark.parametrize("tile", G15_RUNGS)
+def test_gfx12_bias_null_entry_is_exact_db_storing_over_padded_store_db_0(
+    gfx12_exact, tile
+):
+    _, specs, sel, _ = gfx12_exact
+    by_hash = {s.hash(): s for s in specs}
+    ef, default = sel[("dq", "f16", tile, "bias", 0, "null")]
+    assert (by_hash[default].padded, by_hash[default].store_db) == (0, None)
+    assert (by_hash[ef].padded, by_hash[ef].store_db) == (1, 0)
+    ef, default = sel[("dq", "f16", tile, "bias", 0, "requested")]
+    assert (by_hash[ef].padded, by_hash[ef].store_db) == (1, None)
+    assert (by_hash[default].padded, by_hash[default].store_db) == (0, None)
+
+
+@pytest.mark.parametrize("tile", G15_RUNGS)
+def test_gfx12_expect_routes_exact_graphs_to_exact_rows_and_the_rest_to_padded(
+    gfx12_exact, tile
+):
+    """``expect`` takes ``default_hash`` when (dqk, dv) = (rung, rung) and ``exact_false_hash`` otherwise."""
+    model, specs, sel, _ = gfx12_exact
+    by_hash = {s.hash(): s for s in specs}
+
+    def route(**kw):
+        verdict, prep, dkdv, dq, _, rule, _ = sv.expect(
+            sv.make("probe", "test", **kw), sel, model
+        )
+        assert (verdict, rule) == ("served", "")
+        return _forms(by_hash, (dkdv, dq))
+
+    assert route(dqk=tile) == ((tile, 0, None), (tile, 0, None))
+    assert route(dqk=tile - 8) == ((tile, 1, None), (tile, 1, None))
+    assert route(dqk=tile, dv=tile - 8) == ((tile, 1, None), (tile, 1, None))
+    assert route(dqk=tile - 8, dv=tile) == ((tile, 1, None), (tile, 1, None))
+    assert route(dqk=tile, dropout=1) == ((tile, 1, None), (tile, 1, None))
+    bias = dict(dqk=tile, bias="full")
+    assert route(**bias, dbias=1) == ((tile, 0, None), (tile, 0, None))
+    assert route(**bias) == ((tile, 0, None), (tile, 0, None))
+    assert route(dqk=tile - 8, bias="full") == ((tile, 1, None), (tile, 1, 0))
+
+
+def test_gfx12_graphs_off_the_exact_rungs_keep_their_padded_routing(gfx12_exact):
+    model, specs, sel, _ = gfx12_exact
+    by_hash = {s.hash(): s for s in specs}
+    for hd, want in ((160, 160), (192, 192), (320, 320)):
+        _, _, dkdv, dq, _, _, _ = sv.expect(
+            sv.make("probe", "test", dqk=hd), sel, model
+        )
+        assert by_hash[dkdv].padded == 1 and by_hash[dkdv].tile == want
+
+
 def test_gfx12_model_is_registered_with_its_own_csv_stem():
     model = sv.MODELS["gfx12-generic"]
     assert (model.stem, model.from_bundle, model.combined_reduce) == (

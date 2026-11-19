@@ -326,9 +326,13 @@ def build(spec: Spec) -> cdna.Built:
     launch = builder(
         meta, knobs, runtime_axes=("dropout",) if spec.dform == "rt" else ()
     )
-    return cdna.Built(
-        spec, cdna._single_jit(launch), mod, meta, knobs, cdna._hints_of(mod, spec)
-    )
+    hints = cdna._hints_of(mod, spec)
+    # Only a dQ record: the dK/dV record's own ``sched_strategy`` (default ``max-memory-clause``) is a function attribute FlyDSL 0.3.4 drops, and stays so.
+    sched = getattr(knobs, "sched_strategy", "") if spec.kernel == "dq" else ""
+    if sched:
+        # A dQ policy row's scheduler (``fmha_tuning_bwd_dq_gfx11``): the LLVM option reaches the backend where the function attribute does not.
+        hints.setdefault("llvm_options", {})["amdgpu-sched-strategy"] = sched
+    return cdna.Built(spec, cdna._single_jit(launch), mod, meta, knobs, hints)
 
 
 def geometry_of(built: cdna.Built) -> dict:

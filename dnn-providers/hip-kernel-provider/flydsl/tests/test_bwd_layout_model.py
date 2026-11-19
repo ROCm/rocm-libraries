@@ -13,6 +13,7 @@ run a kernel and does not validate gfx12 on hardware.
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import sys
 from pathlib import Path
@@ -497,6 +498,80 @@ def test_the_wide_rungs_are_legal_on_gfx12_only_and_the_other_ladders_do_not_mov
         "gfx12-generic", "f16", 512, "plain", 0, 1, 512, 512, contraction_shards=8
     )
     assert q512.legal and q512.slice == 64 and q512.num_waves % 8 == 0
+
+
+@pytest.mark.parametrize("tile", (64, 96, 128, 256))
+def test_the_gfx12_exact_rungs_resolve_the_schedule_of_their_padded_twin(tile):
+    """G15: an exact key (``padded`` 0) spells nothing beyond its padded twin, so both resolve the same dK/dV and dQ schedule at the four rungs."""
+    for cls in ("plain", "causal", "bias"):
+        exact_k = TDKDV.bwd_dkdv_knobs(
+            "gfx12-generic", "f16", tile, cls, 0, 0, tile, tile
+        )
+        padded_k = TDKDV.bwd_dkdv_knobs(
+            "gfx12-generic", "f16", tile, cls, 0, 1, tile, tile
+        )
+        exact_q = TDQ.bwd_dq_knobs("gfx12-generic", "f16", tile, cls, 0, 0, tile, tile)
+        padded_q = TDQ.bwd_dq_knobs("gfx12-generic", "f16", tile, cls, 0, 1, tile, tile)
+        assert exact_k.legal and exact_q.legal, (tile, cls, exact_q.why)
+        assert not exact_k.padded_head and padded_k.padded_head
+        assert exact_k == dataclasses.replace(padded_k, padded_head=False)
+        assert exact_q == padded_q
+
+
+@pytest.mark.parametrize("tile", (64, 96, 128, 256))
+def test_v8_dataflow_equals_dense_at_the_exact_rungs(tile):
+    """The V8 (gfx12 WMMA) dK/dV and dQ dataflow with a head dim equal to its rung (no padded tail), at the four G15 rungs, against dense numpy."""
+    test_dkdv_q_rows_dataflow_equals_dense(L.ABI_V8, tile, 16)
+    test_dq_kv_rows_dataflow_equals_dense(L.ABI_V8, tile, 16)
+
+
+def test_the_dq_scheduler_field_is_optional_validated_and_reaches_the_knob_record(
+    monkeypatch,
+):
+    """G16: the fourth field of a gfx12 dQ policy row is the LLVM scheduler of the build. Absent it is empty; an unknown value raises; the
+    dK/dV values (and ``max-memory-clause``) are accepted, ``default`` reads as unset.
+    """
+    assert TDQ.SCHED_STRATEGIES == ("max-memory-clause", *TDKDV.SCHED_STRATEGIES)
+    assert all(len(row) == 3 for row in TDQ.POLICY_GFX12.values())
+    for arch in ("gfx11-generic", "gfx12-generic", "gfx942"):
+        assert (
+            TDQ.bwd_dq_knobs(arch, "f16", 128, "plain", 0, 1, 128, 128).sched_strategy
+            == ""
+        )
+    for value in TDQ.SCHED_STRATEGIES:
+        monkeypatch.setitem(TDQ.POLICY_GFX12, 512, (4, 8, 16, value))
+        k = TDQ.bwd_dq_knobs("gfx12-generic", "f16", 512, "plain", 0, 1, 512, 512)
+        assert k.legal and k.sched_strategy == ("" if value == "default" else value)
+        # the other rungs and arches do not carry it
+        assert (
+            TDQ.bwd_dq_knobs(
+                "gfx12-generic", "f16", 384, "plain", 0, 1, 384, 384
+            ).sched_strategy
+            == ""
+        )
+        assert (
+            TDQ.bwd_dq_knobs(
+                "gfx11-generic", "f16", 128, "plain", 0, 1, 128, 128
+            ).sched_strategy
+            == ""
+        )
+    monkeypatch.setitem(TDQ.POLICY_GFX12, 512, (4, 8, 16, "max-memory-clauze"))
+    with pytest.raises(ValueError, match="sched_strategy"):
+        TDQ.bwd_dq_knobs("gfx12-generic", "f16", 512, "plain", 0, 1, 512, 512)
+    with pytest.raises(
+        TypeError
+    ):  # a pin spelling is not offered: the field lives in the policy row
+        TDQ.bwd_dq_knobs(
+            "gfx12-generic",
+            "f16",
+            512,
+            "plain",
+            0,
+            1,
+            512,
+            512,
+            sched_strategy="max-ilp",
+        )
 
 
 def test_mfma16_hd512_dkdv_default_fits_64k_and_the_transposed_tile_copy_does_not():

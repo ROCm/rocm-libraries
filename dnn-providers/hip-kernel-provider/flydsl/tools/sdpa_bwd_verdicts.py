@@ -428,19 +428,21 @@ def load_selection(path=SELECTION_CSV):
 
 
 def selection_from_reference(rows, model):
-    """The routing table (``load_selection``'s keys; both hashes the pinned object's) of the pins in @p rows, the rows of the arch's
-    reference CSV: a prep object serves every class and dropout of its rung; a dQ bias object serves both dBias requests unless a
-    ``store_db=0`` object of its rung serves the "null" one; the standalone reduce objects serve both dropouts. The routing is keyed
-    by the graph's class and dtype: a feature row (``bias_f32`` or ``u2``) is a different object family chosen by the graph's bias
-    dtype or head counts, so it holds no routing entry and is not read as the plain object of its slot.
-    """
-    table = {}
+    """The routing table (``load_selection``'s keys) of the pins in @p rows, the rows of the arch's reference CSV: a prep object serves
+    every class and dropout of its rung; a dQ bias object serves both dBias requests unless a ``store_db=0`` object of its rung
+    serves the "null" one; the standalone reduce objects serve both dropouts. The routing is keyed by the graph's class and dtype: a
+    feature row (``bias_f32`` or ``u2``) is a different object family chosen by the graph's bias dtype or head counts, so it holds
+    no routing entry and is not read as the plain object of its slot.
 
-    def put(key, hash_):
-        assert table.setdefault(key, (hash_, hash_)) == (hash_, hash_), (
-            key,
-            "two objects",
-        )
+    A key served by an exact row (``padded`` 0) and a padded row of the same rung has ``default_hash`` of the exact row (the graph
+    whose head dims equal the rung) and ``exact_false_hash`` of the padded row (every other graph); a key with one row has it in both.
+    A bias dQ "null" key reads the ``store_db=0`` row of the form when it has one, else its dB-storing row.
+    """
+    forms = {}  # key -> {padded: hash}
+
+    def put(key, padded, hash_):
+        by_form = forms.setdefault(key, {})
+        assert by_form.setdefault(padded, hash_) == hash_, (key, "two objects")
 
     nulls = set()
     for row in rows:
@@ -449,31 +451,35 @@ def selection_from_reference(rows, model):
         if spec.bias_f32 or spec.u2:
             continue
         if spec.kernel == "dq" and spec.store_db == 0:
-            nulls.add((spec.dtype, spec.tile, spec.dropout))
+            nulls.add((spec.dtype, spec.tile, spec.dropout, spec.padded))
     for row in rows:
         spec, h = Spec.parse(row["spec"]), row["hash"]
         if spec.bias_f32 or spec.u2:
             continue
+        pad = spec.padded
         if spec.kernel == "prep":
             for cls in ("plain", "causal", "bias"):
                 for drop in (0, 1):
-                    put(("prep", spec.dtype, spec.tile, cls, drop, ""), h)
+                    put(("prep", spec.dtype, spec.tile, cls, drop, ""), pad, h)
         elif spec.kernel == "dkdv":
-            put(("dkdv", spec.dtype, spec.tile, spec.cls, spec.dropout, ""), h)
+            put(("dkdv", spec.dtype, spec.tile, spec.cls, spec.dropout, ""), pad, h)
         elif spec.kernel == "dq" and spec.cls != "bias":
-            put(("dq", spec.dtype, spec.tile, spec.cls, spec.dropout, ""), h)
+            put(("dq", spec.dtype, spec.tile, spec.cls, spec.dropout, ""), pad, h)
         elif spec.kernel == "dq":
             args = (spec.dtype, spec.tile, "bias", spec.dropout)
             if spec.store_db == 0:
-                put(("dq", *args, "null"), h)
+                put(("dq", *args, "null"), pad, h)
             else:
-                put(("dq", *args, "requested"), h)
-                if (spec.dtype, spec.tile, spec.dropout) not in nulls:
-                    put(("dq", *args, "null"), h)
+                put(("dq", *args, "requested"), pad, h)
+                if (spec.dtype, spec.tile, spec.dropout, pad) not in nulls:
+                    put(("dq", *args, "null"), pad, h)
         elif spec.kernel == "dbias_reduce":
             for drop in (0, 1):
-                put(("dbias_reduce", spec.dtype, 0, "bias", drop, ""), h)
-    return table
+                put(("dbias_reduce", spec.dtype, 0, "bias", drop, ""), pad, h)
+    return {
+        key: (by_form.get(1, by_form.get(0)), by_form.get(0, by_form.get(1)))
+        for key, by_form in forms.items()
+    }
 
 
 def write_selection(model, reference=None, out=None):
@@ -556,8 +562,11 @@ def expect(r, sel, model=GFX11):
     # Each routing entry is keyed (kernel, dtype, tile, class, dropout, store_db).
     prep_tile, _ = to_rung(r["dv"], None, r["dtype"], model.kernel_ladders(sel, "prep"))
     tiles = {"prep": prep_tile, "dkdv": tile, "dq": dq_tile}
+    # An exact row serves the graph whose head dims equal the rung (``default_hash``), a padded row every other (``exact_false_hash``).
     hashes = [
-        sel[(k, r["dtype"], tiles[k], cls, drop, store_db if k == "dq" else "")][1]
+        sel[(k, r["dtype"], tiles[k], cls, drop, store_db if k == "dq" else "")][
+            int((r["dqk"], r["dv"]) == (tiles[k], tiles[k]))
+        ]
         for k in ("prep", "dkdv", "dq")
     ]
     # A dtype whose reduce kernel is inside the dQ object has no standalone reduce slot.
