@@ -762,6 +762,23 @@ def test_every_direct_sweep_identity_is_packageable_on_the_sweeps_probe(direct_j
     }
 
 
+def test_gfx950_direct_problems_keep_the_square_filter_and_padding_sentinels(
+    direct_jobs,
+):
+    """gfx950 never states ``kw`` / ``pad_w``: its caps and the spec's probe leave
+    the sentinels (kw 0, pad_w -1), which read as KH and PAD, so the per-axis
+    fields gfx1250 added change nothing for it. The C++ side reads pad_w -1 as PAD
+    (``test_pad_w_sentinel_reads_as_pad``) and sets KW from the filter itself."""
+    assert direct_jobs
+    for dtype, job in direct_jobs:
+        assert "kw" not in job.caps and "pad_w" not in job.caps, job.identity.label()
+        caps = direct_kernel_sweep.DirectCaps(**job.caps)
+        assert (caps.kw, caps.pad_w) == (0, -1)
+        assert (caps.KW, caps.PAD_W) == (caps.KH, caps.PAD)
+        probe = _direct_spec(job.identity).probe_problem()
+        assert (probe.KW, probe.PAD_W) == (probe.KH, probe.PAD), job.identity.label()
+
+
 def test_packaged_direct_ir_is_the_sweep_kernel_up_to_its_symbol(direct_jobs):
     sample = _sampled(direct_jobs)
     assert {job.identity.algorithm for _, job in sample} == set(_DIRECT_COUNTS)

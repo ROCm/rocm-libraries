@@ -197,6 +197,22 @@ static void test_pad_w_below_minus_one_refused(void)
           reason);
 }
 
+/* pad_w = -1 is the "same as PAD" sentinel the Python DirectConvProblem sends
+ * for every square-padded problem (all of gfx950's): the C++ consumers read the
+ * column padding through rocke_direct_conv_problem_pad_w and must see PAD. */
+static void test_pad_w_sentinel_reads_as_pad(void)
+{
+    rocke_direct_conv_problem_t p = dw_problem(3, 3, 2, -1);
+
+    CHECK(rocke_direct_conv_problem_pad_w(&p) == 2, "pad_w=-1 did not read as PAD");
+    p.pad_w = 2;
+    CHECK(rocke_direct_conv_problem_pad_w(&p) == 2, "pad_w equal to PAD changed");
+    p.pad_w = 0;
+    CHECK(rocke_direct_conv_problem_pad_w(&p) == 0, "an explicit pad_w=0 read as PAD");
+    p.pad_w = 1;
+    CHECK(rocke_direct_conv_problem_pad_w(&p) == 1, "an explicit pad_w was not honoured");
+}
+
 /* The row-streaming kernel offsets columns by PAD: it takes one padding. */
 static void test_stream_refuses_per_axis_padding(void)
 {
@@ -1215,6 +1231,7 @@ int main(void)
     test_py_str_repr();
     test_stream_lower_name_overflow();
     test_pad_w_below_minus_one_refused();
+    test_pad_w_sentinel_reads_as_pad();
     test_stream_refuses_per_axis_padding();
     test_tiled_dgrad_name_carries_per_axis_padding();
     test_tiled_dgrad_refuses_cpl();
