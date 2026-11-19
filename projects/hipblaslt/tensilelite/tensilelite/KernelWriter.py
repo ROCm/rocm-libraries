@@ -11565,6 +11565,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       tP["swizzlePackK"] = 1
       tP["swzGeom"] = SwizzledTdmGeometry.fromKernel(kernel, cM)
       tP["swizzleK"] = tP["swzGeom"].swzK
+      tP["swizzlePadK"] = tP["swzGeom"].padK
 
   ##############################################################################
   # Global Read Addresses: Tile Assignment A/B

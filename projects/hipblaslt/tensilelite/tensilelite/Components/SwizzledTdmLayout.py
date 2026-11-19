@@ -6,7 +6,7 @@ The host pre-swizzles the operand into WMMA order, per batch:
 
     [nO = free // MI, kO = K // swzK, kM = wave // MI, nI = free % MI, kI = innerK]
 
-with the free dimension padded to MI rows and K padded to swzK (paddedK). One
+with the free dimension padded to MI rows and K padded to PAD_K_BYTES (paddedK). One
 innerK block is one 16-byte ds_load_b128; F4 (0.5 byte) is handled as packed
 bytes, so its byte layout equals F8's. TDM copies one DepthU K-slice of every nO
 row of the macro-tile into LDS (nO-major, optionally padded per nO tile), and the
@@ -23,6 +23,12 @@ from dataclasses import dataclass
 from typing import Mapping, Optional, Sequence, Tuple
 
 MAX_LDS_CONST_OFFSET = 65536   # ds_load immediate range; a larger offset selects LocalReadAddr+i
+
+# The host pads K to this many bytes, on every architecture. Flattening (kO, kM) gives the index of
+# the 16-byte K block, so for a given padded K the swizzled bytes are identical whatever the kernel's
+# swzK is; padding to the gfx942 granule (64 B, hipblasLtOrder_t COL16_4R*) keeps one host layout and
+# one hipBLASLt user contract across architectures.
+PAD_K_BYTES = 64
 
 
 @dataclass(frozen=True)
@@ -71,6 +77,13 @@ class SwizzledTdmGeometry:
     def swzK(self) -> int:
         """Host swizzle K granule (elements): K is padded to a multiple of it."""
         return self.innerK * self.kM
+
+    @property
+    def padK(self) -> int:
+        """K elements the host pads to (PAD_K_BYTES); a multiple of swzK."""
+        padK = int(PAD_K_BYTES / self.bpe)
+        assert padK % self.swzK == 0, "host K padding must be a whole number of swizzle K granules"
+        return padK
 
     @property
     def unitShift(self) -> int:
@@ -122,6 +135,12 @@ class SwizzledTdmGeometry:
         return int(round(self.padElems * self.bpe))
 
     def paddedK(self, sizeL: int) -> int:
+        """K extent of one nO row in the host buffer (its row stride is MI * paddedK)."""
+        return -(-sizeL // self.padK) * self.padK
+
+    def validK(self, sizeL: int) -> int:
+        """K extent the kernel reads for the tail: whole swzK granules covering sizeL (the rest of
+        paddedK is zero padding that is never loaded)."""
         return -(-sizeL // self.swzK) * self.swzK
 
     # ---- TDM descriptor -----------------------------------------------------------------
@@ -145,7 +164,7 @@ class SwizzledTdmGeometry:
 
     def descTailDim0(self, sizeL: int) -> int:
         """Tail-loop dim0: the valid K prefix of an nO row, MI * alignUp(K % DepthU, swzK)."""
-        return (self.mi * self.paddedK(sizeL % self.depthU)) >> self.unitShift
+        return (self.mi * self.validK(sizeL % self.depthU)) >> self.unitShift
 
     def remainingRows(self, sizeFree: int, wg: int, comp: int = 0, rowsPerComp: int = 0) -> int:
         """dim1: nO rows left in the (MI-padded) buffer from this load's first row."""

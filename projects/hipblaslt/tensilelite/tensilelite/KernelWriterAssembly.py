@@ -25227,12 +25227,12 @@ class KernelWriterAssembly(KernelWriter):
       # Describe a 2-D tile so tensor_load_to_lds gathers one DepthU K-slice across all N-tiles:
       #   tile0 = MI_N*DepthU   (one nO's DepthU slice, contiguous)
       #   tile1 = #nO per wave  (= MacroTile/MI_N / numWaves)
-      #   stride0 = MI_N*paddedK (nO row stride in the host buffer; paddedK = roundup(SizeL, swzK))
+      #   stride0 = MI_N*paddedK (nO row stride in the host buffer; paddedK = roundup(SizeL, padK))
       # For #nO==1 or DepthU==K this reduces to a contiguous copy. GlobalReadIncsB (= MI_N*DepthU)
       # advances the base to the next DepthU slice. Element counts; data_size handles fp8 width.
       geom      = tP["swzGeom"]                           # SwizzledTdmGeometry: tile/stride/unit constants
       swzMiN    = geom.mi                                 # tile free-dim MI (M for A, N for B)
-      swzK      = geom.swzK                               # host swizzle K granule (32 for fp8)
+      padK      = geom.padK                               # host K padding (64 bytes)
       swzTile0  = geom.nOTile                             # per-nO DepthU slice (elements)
       # F4 packs two elements per byte: like the generic path (sizeShifter), the descriptor counts
       # bytes (data_size=1B), so element extents along K are halved. MI_N is even, so exact.
@@ -25253,8 +25253,8 @@ class KernelWriterAssembly(KernelWriter):
         sIdx    = swzTmp.idx        # reused for dim/tile values
         strideS = swzTmp.idx + 1    # stride0 = MI_N*paddedK, kept for the iterate global_inc
         rowTmp  = swzTmp.idx + 2
-        mod.add(SAddU32(sgpr(strideS), sgpr("SizeL"), swzK - 1, "paddedK = SizeL + swzK-1"))
-        mod.add(SAndB32(sgpr(strideS), sgpr(strideS), hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK &= ~(swzK-1)"))
+        mod.add(SAddU32(sgpr(strideS), sgpr("SizeL"), padK - 1, "paddedK = SizeL + padK-1"))
+        mod.add(SAndB32(sgpr(strideS), sgpr(strideS), hex(0xFFFFFFFF & ~(padK - 1)), "paddedK &= ~(padK-1)"))
         mod.add(SMulI32(sgpr(strideS), sgpr(strideS), swzMiN >> swzUnitShift, "stride0 = MI_N * paddedK (desc units)"))
         mod.add(comp.setTensorStride0(descSgprName(1), strideS, 0))
         mod.add(SMovB32(sgpr(sIdx), swzTile0 >> swzUnitShift, "swizzled B: dim0 = tile0 = MI_N*DepthU (desc units)"))
@@ -25530,7 +25530,7 @@ class KernelWriterAssembly(KernelWriter):
     if bool(tP.get("isSwizzledTDM")):
       geom      = tP["swzGeom"]                           # SwizzledTdmGeometry: tile/stride/unit constants
       swzMiN    = geom.mi                                 # tile free-dim MI (M for A, N for B)
-      swzK      = geom.swzK                               # host swizzle K granule (32 for fp8)
+      padK      = geom.padK                               # host K padding (64 bytes)
       swzTile0  = geom.nOTile                             # per-nO DepthU slice (elements)
       # F4 packs two elements per byte: like the generic path (sizeShifter), the descriptor counts
       # bytes (data_size=1B), so element extents along K are halved. MI_N is even, so exact.
@@ -25556,8 +25556,8 @@ class KernelWriterAssembly(KernelWriter):
         sIdx    = swzTmp.idx        # reused for dim/tile values
         strideS = swzTmp.idx + 1    # stride0 = MI_N*paddedK, kept for the iterate global_inc
         rowTmp  = swzTmp.idx + 2
-        mod.add(SAddU32(sgpr(strideS), sgpr("SizeL"), swzK - 1, "paddedK = SizeL + swzK-1"))
-        mod.add(SAndB32(sgpr(strideS), sgpr(strideS), hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK &= ~(swzK-1)"))
+        mod.add(SAddU32(sgpr(strideS), sgpr("SizeL"), padK - 1, "paddedK = SizeL + padK-1"))
+        mod.add(SAndB32(sgpr(strideS), sgpr(strideS), hex(0xFFFFFFFF & ~(padK - 1)), "paddedK &= ~(padK-1)"))
         mod.add(SMulI32(sgpr(strideS), sgpr(strideS), swzMiN >> swzUnitShift, "stride0 = MI_N * paddedK (desc units)"))
         mod.add(comp.setTensorStride0(descSgprName(1), strideS, 0))
         mod.add(SMovB32(sgpr(sIdx), swzTile0 >> swzUnitShift, "swizzled B: dim0 = tile0 = MI_N*DepthU (desc units)"))

@@ -76,13 +76,13 @@ class TensorDataMoverLoad(TensorDataMover):
         """Bytes between consecutive macro-tiles of a swizzled-TDM operand.
 
         The host lays the operand out densely as [tile/MI, paddedK/swzK, ..., MI, ...] with
-        paddedK = alignUp(SizeL, swzK) and ignores the leading-dimension stride, so one
+        paddedK = alignUp(SizeL, padK) and ignores the leading-dimension stride, so one
         macro-tile spans MT * paddedK elements rather than MT * Stride{tc}{free}.
         """
         mod = Module("swizzled-TDM tile stride")
-        swzK = tp["swzGeom"].swzK
-        mod.add(SAddU32(sgpr(dstSgprIdx), sgpr("SizeL"), swzK - 1, f"paddedK = SizeL + swzK({swzK})-1"))
-        mod.add(SAndB32(sgpr(dstSgprIdx), sgpr(dstSgprIdx), hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK = alignUp(SizeL, swzK)"))
+        padK = tp["swzGeom"].padK
+        mod.add(SAddU32(sgpr(dstSgprIdx), sgpr("SizeL"), padK - 1, f"paddedK = SizeL + padK({padK})-1"))
+        mod.add(SAndB32(sgpr(dstSgprIdx), sgpr(dstSgprIdx), hex(0xFFFFFFFF & ~(padK - 1)), "paddedK = alignUp(SizeL, padK)"))
         mod.add(SMulI32(sgpr(dstSgprIdx), sgpr(dstSgprIdx), round(mt * bpe), f"swizzled tile stride = paddedK * MT({mt}) * bpe({bpe})"))
         return mod
 
@@ -294,18 +294,18 @@ class TensorDataMoverLoad(TensorDataMover):
                     mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mSplit * mxUnit * bpe), f"woffset = wCompId * mSplit({mSplit}) * mxUnit({mxUnit}) * bpe({bpe})"))
             elif tp.get("isSwizzledTDM"):
                 # Swizzled-B: host buffer is nO-major with row stride0 = MI_N*paddedK (elements),
-                # paddedK = roundup(SizeL, swzK). Component wCompId loads rowsPerComp nO rows ->
+                # paddedK = roundup(SizeL, padK). Component wCompId loads rowsPerComp nO rows ->
                 # woffset = wCompId * rowsPerComp * MI_N * paddedK * bpe.
                 geom        = tp["swzGeom"]                 # SwizzledTdmGeometry.compGlobalOffsetBytes
                 swzMiN      = geom.mi
-                swzK        = geom.swzK
+                padK        = geom.padK
                 rowsPerComp, swzReplicate = geom.compRows(numComp)
                 if swzReplicate:
                     rowsPerComp = 0  # every component loads the whole tile from the WG base
                 with writer.allocTmpSgpr(1, tag="swzWSglobal") as swzTmp:
                     pk = swzTmp.idx
-                    mod.add(SAddU32(sgpr(pk), sgpr("SizeL"), swzK - 1, "paddedK = SizeL + swzK-1"))
-                    mod.add(SAndB32(sgpr(pk), sgpr(pk), hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK &= ~(swzK-1)"))
+                    mod.add(SAddU32(sgpr(pk), sgpr("SizeL"), padK - 1, "paddedK = SizeL + padK-1"))
+                    mod.add(SAndB32(sgpr(pk), sgpr(pk), hex(0xFFFFFFFF & ~(padK - 1)), "paddedK &= ~(padK-1)"))
                     mod.add(SMulI32(sgpr(pk), sgpr(pk), round(swzMiN * rowsPerComp * bpe), f"stride0*rowsPerComp*bpe = MI_N*paddedK*{rowsPerComp}*{bpe}"))
                     mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(pk), "woffset = wCompId * rowsPerComp * MI_N*paddedK*bpe"))
             else:

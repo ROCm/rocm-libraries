@@ -7,7 +7,7 @@ SwizzledTdmGeometry. This test checks that geometry end to end against an
 independent reference, written here without it:
 
 * host layout -- the client's pre-swizzle of an operand (per batch,
-  [nO, kO, kM, nI, kI] with the free dim padded to MI rows and K to swzK);
+  [nO, kO, kM, nI, kI] with the free dim padded to MI rows and K to 64 bytes);
 * TDM -- a 2-D copy of tile0 x tile1 from (base, stride0) that zero-fills past
   (dim0, dim1), written to LDS row by row (row step = tile0, or the iterate-mode
   LDS increment); descriptor units are elements of max(1, bpe) bytes, and a read
@@ -37,17 +37,25 @@ GARBAGE = "past-the-buffer"   # a TDM read beyond the operand buffer (another ba
 
 
 # ---------------------------------------------------------------- independent reference
-def host_bytes(sizeFree, sizeK, mi, wave, bpe):
-    """Pre-swizzled host buffer (one batch) as a list of byte tags (free, kByte) or ZERO."""
+HOST_PAD_K_BYTES = 64   # the host pads K to this many bytes (hipblasLtOrder_t COL16_4R*), on every arch
+
+
+def host_bytes(sizeFree, sizeK, mi, wave, bpe, padKBytes=HOST_PAD_K_BYTES):
+    """Pre-swizzled host buffer (one batch) as a list of byte tags (free, kByte) or ZERO.
+
+    The K block of one kO group is wave // mi 16-byte kI blocks, so kO is (16 * wave // mi) bytes
+    wide; K is padded to padKBytes first."""
     kb = int(sizeK * bpe)                      # K in bytes
-    kBlocks = -(-kb // 32)                     # 32-byte swizzle blocks (two 16-byte kI blocks)
-    rows = -(-sizeFree // mi) * mi
     kmid = wave // mi
-    buf = [ZERO] * (rows * kBlocks * 32)
+    kOBytes = 16 * kmid                        # K bytes of one kO group
+    paddedKb = -(-kb // padKBytes) * padKBytes
+    kBlocks = paddedKb // kOBytes              # kO groups per nO row
+    rows = -(-sizeFree // mi) * mi
+    buf = [ZERO] * (rows * paddedKb)
     for f in range(sizeFree):
         nO, nI = divmod(f, mi)
         for k in range(kb):
-            kO, rem = divmod(k, 32)
+            kO, rem = divmod(k, kOBytes)
             kM, kI = divmod(rem, 16)
             off = ((nO * kBlocks + kO) * kmid + kM) * mi * 16 + nI * 16 + kI
             buf[off] = (f, k)
@@ -204,3 +212,34 @@ def test_swizzled_tdm_layout(_gp_gfx1250, gfx1250_iim, assembler, cfg):
         sizeFree = mt + mt // 2 + 3                     # second macro-tile is partial
         for wg in (0, 1):
             assert simulate(sol, tc, sizeFree, sizeK, wg) > 0
+
+
+@pytest.mark.parametrize("kBytes", [16, 48, 64, 80, 96, 112, 128, 144, 160, 192])
+@pytest.mark.parametrize("side,dtype", [("B", "f8"), ("A", "bf16"), ("B", "f4"), ("AB", "f8")])
+def test_swizzled_tdm_layout_k_not_64_byte_multiple(_gp_gfx1250, gfx1250_iim, assembler, side, dtype, kBytes):
+    """K that is a 32-byte multiple but not a 64-byte one (the host pads it to 64 B)."""
+    params = H.swizzled_params(gfx1250_iim, side, dtype, wt=(2, 2), wg=(2, 2))
+    sol = H.derive(params, assembler, gfx1250_iim)
+    assert sol["Valid"], "configuration rejected"
+    for tc in ("A", "B"):
+        if not sol["ProblemType"]["SwizzleTensor" + tc]:
+            continue
+        bpe = sol["ProblemType"]["DataType" + tc].numBytes()
+        mt = sol["MacroTile%u" % (0 if tc == "A" else 1)]
+        for wg in (0, 1):
+            assert simulate(sol, tc, mt + mt // 2 + 3, int(kBytes / bpe), wg) > 0
+
+
+@pytest.mark.parametrize("bpe", [0.5, 1, 2])
+@pytest.mark.parametrize("kBytes", [16, 32, 64, 96, 192, 208])
+def test_host_layout_is_independent_of_the_kernel_swizzle_granule(bpe, kBytes):
+    """With K padded to 64 bytes the swizzled bytes do not depend on kM.
+
+    gfx942 swizzles with 64-byte kO groups (kM = 4), gfx1250 with 32-byte ones (kM = 2). Flattening
+    (kO, kM) gives the 16-byte K block index in both, so the two layouts are the same byte for byte
+    and one hipBLASLt user layout serves both."""
+    sizeK = int(kBytes / bpe)
+    for sizeFree in (16, 37):
+        gfx942 = host_bytes(sizeFree, sizeK, 16, 64, bpe)     # wave 64, MI 16 -> kM = 4
+        gfx1250 = host_bytes(sizeFree, sizeK, 16, 32, bpe)    # wave 32, MI 16 -> kM = 2
+        assert gfx942 == gfx1250

@@ -388,15 +388,15 @@ class GL2PrefetchLoad(GL2Prefetch):
             # physical stride directly in bytes so fractional element sizes do not
             # lose precision by scaling the row coordinate before multiplication.
             if isSwizzledTDM:
-                swizzleK: int = tp["swizzleK"]
+                padK: int = tp["swizzlePadK"]
                 swizzleMi: int = tp["gl2SwizzleMi"]
-                assert swizzleK > 0 and (swizzleK & (swizzleK - 1)) == 0, \
-                    "swizzled-TDM K granule must be a power of two"
+                assert padK > 0 and (padK & (padK - 1)) == 0, \
+                    "swizzled-TDM K padding must be a power of two"
                 perpStride = sgpr(tmpSgprIdx2)
-                mod.add(SAddU32(perpStride, sgpr("SizeL"), swizzleK - 1, \
-                    comment=f"paddedK = SizeL + swizzleK({swizzleK}) - 1"))
-                mod.add(SAndB32(perpStride, perpStride, hex(0xFFFFFFFF & ~(swizzleK - 1)), \
-                    comment="paddedK = alignUp(SizeL, swizzleK)"))
+                mod.add(SAddU32(perpStride, sgpr("SizeL"), padK - 1, \
+                    comment=f"paddedK = SizeL + padK({padK}) - 1"))
+                mod.add(SAndB32(perpStride, perpStride, hex(0xFFFFFFFF & ~(padK - 1)), \
+                    comment="paddedK = alignUp(SizeL, padK)"))
                 mod.add(SMulI32(perpStride, perpStride, round(swizzleMi * bpe), \
                     comment=f"swizzled row stride bytes = MI({swizzleMi}) * paddedK * bpe({bpe})"))
             # will we have MX stride later?
