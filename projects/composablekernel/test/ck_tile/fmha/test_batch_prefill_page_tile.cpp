@@ -1461,9 +1461,10 @@ TYPED_TEST(PageTileForward, MatchesReferenceSink)
     return h;
 }
 
-// Sink instance: no attended key falls in the pages between the sink tile and the first window
-// tile, so their table entries may hold anything. Out-of-range ids there must leave the output
-// bitwise equal to the plain table's, and correct.
+// Sink instance: the pages between the sink tile and the first window tile lie in key tiles that
+// no query tile visits (the read set of the batch-prefill contract in fmha_fwd.hpp), so their table
+// entries may hold anything. Out-of-range ids there must leave the output bitwise equal to the
+// plain table's, and correct.
 TYPED_TEST(PageTileForward, SkippedSinkPages)
 {
     if constexpr(!kSink)

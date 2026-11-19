@@ -1055,8 +1055,10 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
     // then the keep-alive of the last-M K slices of the pairs it covers. KeepPending, after the
     // RAW fence of a QK stage's last row, drains too: the fence waits for the last WMMA's result
     // only, and under the hazard note's model (WMMAs do not retire in issue order) the earlier
-    // pairs of the group may still read their K slices. The BF16 page tile places a Drain point
-    // there instead (FmhaBatchPrefillPageTileGroupedDrainPlacement).
+    // pairs of the group may still read their K slices. The BF16 / FP16 page tile places a Drain
+    // point there instead (FmhaBatchPrefillPageTileGroupedDrainPlacement), except in the D128 M128
+    // tiles without prepared tile bases, which keep the shared KeepPending release
+    // (fmha_page_tile_d128_m128_spills_v).
     template <typename Placement, typename BlockGemm, index_t Row, bool Drain, typename KeepPair>
     CK_TILE_DEVICE static void EmitQkGroupedDrain(KeepPair& keep_k_of_pair)
     {
