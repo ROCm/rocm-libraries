@@ -96,6 +96,27 @@ def check_replayable(key, problem, dtype) -> None:
         )
 
 
+GRAPH_CHECK_TOL = 1e-2
+
+
+def graph_max_rel_err(eager: dict, graph: dict) -> float:
+    """max over outputs of max|eager - graph| / max|eager| (``--graph-variant``
+    check). Any non-finite value in either output, or a missing output, gives
+    ``inf``, so a capture that writes NaN cannot compare as equal (Python's
+    ``max`` drops a NaN operand)."""
+    import numpy as _np
+
+    worst = 0.0
+    for key, a in eager.items():
+        b = graph.get(key)
+        if b is None or not (_np.all(_np.isfinite(a)) and _np.all(_np.isfinite(b))):
+            return float("inf")
+        den = float(_np.max(_np.abs(a))) if a.size else 0.0
+        diff = float(_np.max(_np.abs(a - b))) if a.size else 0.0
+        worst = max(worst, diff / (den or 1.0))
+    return worst
+
+
 def find_amd_smi():
     """``amd-smi`` on PATH, else under ``$ROCM_PATH`` / ``$ROCM_HOME``; None if absent."""
     exe = shutil.which("amd-smi")
@@ -1404,15 +1425,12 @@ def main(argv=None) -> int:
             _hipg.hipGraphLaunch(gexec, ctypes.c_void_p(gstream))
             rt.sync()
             gout = _outs()
-            worst = 0.0
-            for key_, a in eager.items():
-                b = gout[key_]
-                den = float(_np.max(_np.abs(a))) or 1.0
-                worst = max(worst, float(_np.max(_np.abs(a - b))) / den)
-            graph_ok = worst < 1e-2
+            worst = graph_max_rel_err(eager, gout)
+            graph_ok = bool(worst < GRAPH_CHECK_TOL)  # NaN/inf: False
             out["graph_check"] = {
                 "outputs": len(eager),
-                "max_rel_err": worst,
+                # JSON has no inf: a non-finite comparison is recorded as null.
+                "max_rel_err": worst if worst < float("inf") else None,
                 "pass": graph_ok,
             }
             print(

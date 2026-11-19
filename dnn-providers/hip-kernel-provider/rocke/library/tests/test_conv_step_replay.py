@@ -75,3 +75,24 @@ def test_find_amd_smi_on_path_and_rocm_path(tmp_path, monkeypatch):
     s.start()  # no amd-smi: sampling stays off, no thread
     s.stop()
     assert s.summary() is None
+
+
+def test_graph_check_rejects_nan_and_missing_outputs():
+    import numpy as np
+
+    from benchmarks.common.conv_step_replay import GRAPH_CHECK_TOL, graph_max_rel_err
+
+    a = np.array([1.0, -2.0, 4.0], dtype=np.float32)
+    assert graph_max_rel_err({"o": a}, {"o": a.copy()}) == 0.0
+    off = a.copy()
+    off[1] = -2.5
+    assert graph_max_rel_err({"o": a}, {"o": off}) == pytest.approx(0.125)
+    nan = a.copy()
+    nan[2] = np.nan
+    for eager, graph in (({"o": a}, {"o": nan}), ({"o": nan}, {"o": a})):
+        worst = graph_max_rel_err(eager, graph)
+        assert not worst < GRAPH_CHECK_TOL
+    assert not graph_max_rel_err({"o": a}, {}) < GRAPH_CHECK_TOL
+    inf = a.copy()
+    inf[0] = np.inf
+    assert not graph_max_rel_err({"o": a}, {"o": inf}) < GRAPH_CHECK_TOL
