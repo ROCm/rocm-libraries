@@ -1051,22 +1051,29 @@ std::string valueHeadsName(const ::testing::TestParamInfo<ValueHeadsParam>& info
            + (p.causal ? "Causal" : "Plain") + (p.dropout > 0.0F ? "Dropout" : "");
 }
 
+// Standard keeps one shape per axis: both head orders, key/value group ratios 4, 8, 4 and 3
+// (Hq / Hk), causal and not, dropout, head dim 128 and both dtypes.
 INSTANTIATE_TEST_SUITE_P(
-    ,
+    Standard,
     TestGpuFlydslSdpaBwdSplitValueHeads,
     ::testing::Values(ValueHeadsParam{DataType::BFLOAT16, 32, 8, 4, false, 0.0F},
-                      ValueHeadsParam{DataType::BFLOAT16, 32, 8, 4, true, 0.0F},
+                      ValueHeadsParam{DataType::BFLOAT16, 32, 4, 8, true, 0.2F},
+                      ValueHeadsParam{DataType::HALF, 32, 8, 4, true, 0.2F, 128},
+                      ValueHeadsParam{DataType::HALF, 24, 8, 6, true, 0.0F}),
+    valueHeadsName);
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    TestGpuFlydslSdpaBwdSplitValueHeads,
+    ::testing::Values(ValueHeadsParam{DataType::BFLOAT16, 32, 8, 4, true, 0.0F},
                       ValueHeadsParam{DataType::BFLOAT16, 32, 4, 8, false, 0.0F},
                       ValueHeadsParam{DataType::BFLOAT16, 32, 4, 8, true, 0.0F},
                       ValueHeadsParam{DataType::BFLOAT16, 32, 8, 4, false, 0.2F},
                       ValueHeadsParam{DataType::BFLOAT16, 32, 8, 4, true, 0.2F},
                       ValueHeadsParam{DataType::BFLOAT16, 32, 4, 8, false, 0.2F},
-                      ValueHeadsParam{DataType::BFLOAT16, 32, 4, 8, true, 0.2F},
                       ValueHeadsParam{DataType::HALF, 32, 8, 4, true, 0.2F},
                       ValueHeadsParam{DataType::HALF, 32, 4, 8, false, 0.2F},
-                      ValueHeadsParam{DataType::HALF, 32, 8, 4, true, 0.2F, 128},
-                      ValueHeadsParam{DataType::BFLOAT16, 24, 8, 6, false, 0.2F},
-                      ValueHeadsParam{DataType::HALF, 24, 8, 6, true, 0.0F}),
+                      ValueHeadsParam{DataType::BFLOAT16, 24, 8, 6, false, 0.2F}),
     valueHeadsName);
 
 TEST_F(TestGpuFlydslSdpaBwdSplitDispatch, PaddedBatchWithDistinctKeyAndValueHeadsZeroesItsTails)
