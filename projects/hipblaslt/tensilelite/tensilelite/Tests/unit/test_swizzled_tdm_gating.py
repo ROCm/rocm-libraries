@@ -16,8 +16,8 @@ probe sweeps; real-HW runs of the suites where noted in the suite comments.
 
 import pytest
 
-from tensilelite.Tests.unit import swizzled_tdm_helpers as H
-from tensilelite.Tests.unit.test_halfplr_streamk_rejects import _gp_gfx1250  # noqa: F401
+import swizzled_tdm_helpers as H
+from test_halfplr_streamk_rejects import _gp_gfx1250  # noqa: F401
 
 pytestmark = pytest.mark.unit
 

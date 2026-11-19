@@ -11,7 +11,7 @@ import copy
 
 import pytest
 
-from tensilelite.Tests.unit.test_halfplr_streamk_rejects import _PRISTINE_DEFAULT_SOLUTION
+from test_halfplr_streamk_rejects import _PRISTINE_DEFAULT_SOLUTION
 
 pytestmark = pytest.mark.unit
 
