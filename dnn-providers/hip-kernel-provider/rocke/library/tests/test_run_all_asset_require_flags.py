@@ -64,3 +64,68 @@ def test_does_not_repeat_a_flag_the_caller_already_forwarded(monkeypatch):
     assert run_all._forwarded_asset_require_flags(
         ["--rocke-require-hipdnn-assets"]
     ) == ["--rocke-require-hkp-pack-headers"]
+
+
+def _installed(monkeypatch, *, hipdnn: bool, headers: bool) -> None:
+    monkeypatch.setattr(run_all.hipdnn_assets, "installed_copy_present", lambda: hipdnn)
+    monkeypatch.setattr(
+        run_all.hkp_pack_headers, "installed_copy_present", lambda: headers
+    )
+
+
+def test_main_forwards_both_flags_to_file_workers(monkeypatch):
+    _installed(monkeypatch, hipdnn=True, headers=True)
+    calls = []
+    monkeypatch.setattr(
+        run_all,
+        "_run_affordable_file_stage",
+        lambda **kwargs: calls.append(kwargs) or run_all._StageResult(0),
+    )
+    monkeypatch.setattr(
+        run_all.sys,
+        "argv",
+        ["run_all.py", "--pytest-only", "--no-ir-gates", "--jobs", "2", "--", "-q"],
+    )
+    assert run_all.main() == 0
+    assert [call["extra"] for call in calls] == [
+        ["-q", "--rocke-require-hipdnn-assets", "--rocke-require-hkp-pack-headers"]
+    ]
+
+
+def test_main_forwards_the_present_flag_to_a_single_pytest_process(monkeypatch):
+    _installed(monkeypatch, hipdnn=False, headers=True)
+    commands = []
+    monkeypatch.setattr(
+        run_all,
+        "_run",
+        lambda name, command, **kwargs: commands.append(command)
+        or run_all._StageResult(0),
+    )
+    monkeypatch.setattr(
+        run_all.sys,
+        "argv",
+        ["run_all.py", "--pytest-only", "--no-ir-gates", "--jobs", "0"],
+    )
+    assert run_all.main() == 0
+    assert len(commands) == 1
+    assert commands[0].count("--rocke-require-hkp-pack-headers") == 1
+    assert "--rocke-require-hipdnn-assets" not in commands[0]
+
+
+def test_main_does_not_forward_flags_to_explicit_gates(monkeypatch):
+    _installed(monkeypatch, hipdnn=True, headers=True)
+    commands = []
+    monkeypatch.setattr(
+        run_all,
+        "_run",
+        lambda name, command, **kwargs: commands.append(command)
+        or run_all._StageResult(0, skipped=True),
+    )
+    monkeypatch.setattr(
+        run_all.sys, "argv", ["run_all.py", "--gate", "counted-structural"]
+    )
+    run_all.main()
+    assert commands
+    assert not any(
+        flag.startswith("--rocke-require-") for command in commands for flag in command
+    )
