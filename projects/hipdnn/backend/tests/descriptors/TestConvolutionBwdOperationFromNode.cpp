@@ -234,6 +234,15 @@ TEST_F(TestConvolutionBwdOperationFromNode, FailsWithMissingDxTensor)
                                HIPDNN_STATUS_INTERNAL_ERROR);
 }
 
+TEST_F(TestConvolutionBwdOperationFromNode, FailsWithStrideInconsistentWithDims)
+{
+    auto node = createStandardNode();
+    node.attributes.AsConvolutionBwdAttributes()->stride[1] = 100000;
+
+    ASSERT_THROW_HIPDNN_STATUS(ConvolutionBwdOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
 TEST_F(TestConvolutionBwdOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
     auto node = createStandardNode();

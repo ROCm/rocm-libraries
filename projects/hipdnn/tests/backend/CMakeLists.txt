@@ -11,6 +11,7 @@ add_executable(
     main.cpp
     IntegrationBackendDescriptor.cpp
     IntegrationBackendExecuteApi.cpp
+    IntegrationConvDgradHugeStride.cpp
     IntegrationConvOperationDescriptorApi.cpp
     IntegrationGraphDescriptorApi.cpp
     IntegrationEngineApi.cpp

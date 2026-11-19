@@ -224,6 +224,10 @@ void VariantDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
                        HIPDNN_STATUS_BAD_PARAM,
                        "VariantDescriptor::setAttribute(): attributeType is not "
                        "HIPDNN_TYPE_VOID_PTR for DATA_POINTERS");
+        THROW_IF_FALSE(elementCount > 0,
+                       HIPDNN_STATUS_BAD_PARAM,
+                       "VariantDescriptor::setAttribute(): elementCount must be positive for "
+                       "DATA_POINTERS");
         _dataPointers.assign(static_cast<const void* const*>(arrayOfElements),
                              static_cast<const void* const*>(arrayOfElements) + elementCount);
         break;

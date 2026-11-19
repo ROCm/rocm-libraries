@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/CacheRoot.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <optional>
 #include <string>
@@ -91,6 +92,31 @@ TEST_F(TestCacheRoot, UnsetHomeDoesNotResolveToALiteralTildeDirectory)
 
     EXPECT_TRUE(root.empty());
     EXPECT_FALSE(std::filesystem::exists("~"));
+}
+
+/// The degradation above is reported, naming HIPDNN_CACHE_DIR and its value, once per shared
+/// object rather than on every cache access.
+TEST_F(TestCacheRoot, UnexpandableCacheDirWarnsOnceWithItsValue)
+{
+#if defined(__linux__)
+    const ScopedEnvironmentVariableSetter home("HOME", "");
+#else
+    const ScopedEnvironmentVariableSetter home("USERPROFILE", "");
+#endif
+    const ScopedEnvironmentVariableSetter cacheDir("HIPDNN_CACHE_DIR", "~/hipdnn_unexpanded_root");
+    detail::unexpandedCacheRootWarned().store(false);
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+
+    EXPECT_TRUE(cacheRoot().empty());
+    EXPECT_TRUE(cacheRoot().empty());
+
+    ASSERT_EQ(recorder.getRecordedLogCount(), 1) << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_WARN, "HIPDNN_CACHE_DIR='~/hipdnn_unexpanded_root'"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "on-disk caching is disabled"))
+        << recorder.getRecordedLogsAsString();
 }
 
 TEST_F(TestCacheRoot, CustomWritableDirIsUsedAndCreated)

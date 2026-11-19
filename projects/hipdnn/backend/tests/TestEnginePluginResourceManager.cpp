@@ -1959,6 +1959,23 @@ TEST(TestEnginePluginResourceManager, ConstructorContributesNothingWhenNoEngineW
     }
 }
 
+// Once process exit has begun getOrCreatePluginManager() returns null, and a handle created
+// then still constructs its resource manager.
+TEST(TestEnginePluginResourceManager, ConstructorWithNullPluginManagerHoldsNoPlugins)
+{
+    const std::shared_ptr<EnginePluginManager> noPluginManager;
+    const EnginePluginResourceManager resourceManager(noPluginManager);
+
+    EXPECT_TRUE(resourceManager.getEngineInfos().empty());
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    EXPECT_TRUE(resourceManager.getApplicableEngineIds(&mockGraphDesc).empty());
+}
+
 TEST(TestEnginePluginResourceManager, ConstructorContinuesAfterBadPluginWithGoodPlugin)
 {
     const std::shared_ptr<MockEnginePlugin> badPlugin = std::make_shared<MockEnginePlugin>();
@@ -2100,6 +2117,64 @@ TEST(TestEnginePluginResourceManager, GetApplicableEngineIdsSkipsPluginThatThrow
         std::vector<int64_t> engineIds;
         EXPECT_NO_THROW(engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc));
         EXPECT_EQ(engineIds, std::vector<int64_t>{200});
+    }
+}
+
+// An engine a plugin offers but another plugin owns must be skipped, not fail the query: the
+// owner's engine is still reported, once, along with the offering plugin's own engines, and a
+// pinned query for one of the offering plugin's own engines still answers.
+TEST(TestEnginePluginResourceManager, GetApplicableEngineIdsSurvivesPluginOfferingForeignEngine)
+{
+    const std::shared_ptr<MockEnginePlugin> pluginA = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> pluginB = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{pluginA, pluginB};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+
+    // Admission kept engine 100 for A and left B with engine 200 only, yet B still
+    // offers 100 for the graph, as a plugin that lost a duplicate engine does.
+    pluginManager->setAcceptedEngineIds(*pluginB, {200});
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+
+    auto handleA = reinterpret_cast<hipdnnEnginePluginHandle_t>(0xaaa);
+    EXPECT_CALL(*pluginA, name()).WillRepeatedly(::testing::Return("PluginA"));
+    EXPECT_CALL(*pluginA, createHandle()).WillOnce(::testing::Return(handleA));
+    EXPECT_CALL(*pluginA, getAllEngineIds())
+        .WillRepeatedly(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*pluginA, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
+    EXPECT_CALL(*pluginA, destroyHandle(handleA));
+    EXPECT_CALL(*pluginA, getApplicableEngineIds(handleA, testing::_))
+        .WillRepeatedly(::testing::Return(std::vector<int64_t>{100}));
+
+    auto handleB = reinterpret_cast<hipdnnEnginePluginHandle_t>(0xbbb);
+    EXPECT_CALL(*pluginB, name()).WillRepeatedly(::testing::Return("PluginB"));
+    EXPECT_CALL(*pluginB, createHandle()).WillOnce(::testing::Return(handleB));
+    EXPECT_CALL(*pluginB, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
+    EXPECT_CALL(*pluginB, destroyHandle(handleB));
+    EXPECT_CALL(*pluginB, getApplicableEngineIds(handleB, testing::_))
+        .WillRepeatedly(::testing::Return(std::vector<int64_t>{200, 100}));
+
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillRepeatedly(::testing::Return(fakeSerializedData));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        std::vector<int64_t> engineIds;
+        EXPECT_NO_THROW(engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc));
+        EXPECT_EQ(std::count(engineIds.begin(), engineIds.end(), 100), 1);
+        EXPECT_EQ(std::count(engineIds.begin(), engineIds.end(), 200), 1);
+
+        bool isApplicable = false;
+        EXPECT_NO_THROW(isApplicable = resourceManager.isEngineApplicable(200, &mockGraphDesc));
+        EXPECT_TRUE(isApplicable);
     }
 }
 
@@ -4006,6 +4081,90 @@ TEST(TestEnginePluginResourceManager, FindEngineIdByNameIsUnambiguousAcrossPlugi
         EXPECT_EQ(resourceManager.findEngineIdByName("ALPHA_ENGINE"), alphaId);
         EXPECT_EQ(resourceManager.findEngineIdByName("BETA_ENGINE"), betaId);
     }
+}
+
+TEST(TestEnginePluginResourceManager, FindEngineIdByNameIsUnambiguousWithAHexadecimalDeclaredName)
+{
+    // The declared name hashes to its own engine's ID, so admission keeps it, yet it
+    // is also the hexadecimal name unnamed engine 100 is listed under.
+    const int64_t unnamedId = 100;
+    const std::string hexName = hipdnn_data_sdk::utilities::formatEngineIdHex(unnamedId);
+    const int64_t declaredId = hipdnn_data_sdk::utilities::engineNameToId(hexName);
+
+    const SingleEnginePluginHarness harness(std::vector<int64_t>{unnamedId, declaredId});
+    harness.stubIdentity("test-plugin", "1.0");
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.plugin, getEngineName(unnamedId))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>()));
+    EXPECT_CALL(*harness.plugin, getEngineName(declaredId))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>(hexName)));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        const auto infos = resourceManager.getEngineInfos();
+        ASSERT_EQ(infos.size(), 2U);
+        EXPECT_NE(infos[0].engineName, infos[1].engineName);
+
+        // The enumeration, the reverse index, the resolver and the string-to-ID
+        // conversion the frontend uses agree on each engine.
+        for(const auto& info : infos)
+        {
+            EXPECT_EQ(resourceManager.findEngineIdByName(info.engineName), info.engineId)
+                << "engine name: " << info.engineName;
+            EXPECT_EQ(resourceManager.resolveEngineName(info.engineId, std::nullopt),
+                      info.engineName);
+            EXPECT_EQ(hipdnn_data_sdk::utilities::engineNameOrIdToId(info.engineName),
+                      info.engineId)
+                << "engine name: " << info.engineName;
+        }
+
+        // engineNameOrIdToId() reads that string as engine 100, so that engine keeps it.
+        EXPECT_EQ(resourceManager.findEngineIdByName(hexName), unnamedId);
+        EXPECT_EQ(resourceManager.findEngineNameById(declaredId),
+                  hipdnn_data_sdk::utilities::formatEngineIdHex(declaredId));
+    }
+}
+
+TEST(TestEnginePluginResourceManager, ResolveEngineNameReplacesADecimalDeclaredName)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const ScopedBackendWarningCapture capture;
+
+    // A decimal spelling reads back as engine 100 rather than as the engine
+    // declaring it, even though it hashes to that engine's ID.
+    const int64_t unnamedId = 100;
+    const std::string decimalName = "100";
+    const int64_t declaredId = hipdnn_data_sdk::utilities::engineNameToId(decimalName);
+    const std::string declaredHex = hipdnn_data_sdk::utilities::formatEngineIdHex(declaredId);
+
+    const SingleEnginePluginHarness harness(std::vector<int64_t>{unnamedId, declaredId});
+    harness.stubIdentity("test-plugin", "1.0");
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.plugin, getEngineName(unnamedId))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>()));
+    EXPECT_CALL(*harness.plugin, getEngineName(declaredId))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>(decimalName)));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        EXPECT_EQ(resourceManager.resolveEngineName(declaredId, std::nullopt), declaredHex);
+        EXPECT_EQ(resourceManager.findEngineNameById(declaredId), declaredHex);
+        EXPECT_EQ(resourceManager.findEngineIdByName(declaredHex), declaredId);
+        EXPECT_FALSE(resourceManager.findEngineIdByName(decimalName).has_value());
+    }
+
+    // The plugin, the engine and the refused name are all named.
+    const std::string recordedLogs = recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "hipdnnEnginePluginGetEngineName"))
+        << recordedLogs;
+    EXPECT_TRUE(recorder.hasLogContaining("mock_plugin")) << recordedLogs;
+    EXPECT_TRUE(recorder.hasLogContaining(declaredHex)) << recordedLogs;
+    EXPECT_TRUE(recorder.hasLogContaining("'100'")) << recordedLogs;
 }
 
 TEST(TestEnginePluginResourceManager, FindEngineIdByNameReturnsNulloptWhenNoEnginesAreLoaded)

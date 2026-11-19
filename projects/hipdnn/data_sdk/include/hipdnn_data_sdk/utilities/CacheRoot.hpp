@@ -10,7 +10,10 @@
 #include <algorithm>
 #include <cwctype>
 #endif
+#include <atomic>
 #include <filesystem>
+#include <hipdnn_data_sdk/Visibility.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/CacheRootDefaults.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
@@ -31,6 +34,46 @@ inline bool cacheDisabledByEnv()
     return normalized == "1" || normalized == "true" || normalized == "on" || normalized == "yes"
            || normalized == "enable" || normalized == "enabled";
 }
+
+namespace detail
+{
+
+/// Set once this shared object has warned that the cache root cannot be resolved because the
+/// home directory is unknown, so the warning is not repeated on every cache access. Tests reset
+/// it to observe the warning again.
+HIPDNN_HIDDEN inline std::atomic<bool>& unexpandedCacheRootWarned()
+{
+    static std::atomic<bool> s_warned{false};
+    return s_warned;
+}
+
+/// Warns, once per shared object while WARN logging is enabled, that @p rawPath still starts
+/// with an unexpanded home token because @p homeVariable is unset, so on-disk caching is off.
+/// @p fromEnv tells whether @p rawPath is the value of HIPDNN_CACHE_DIR or the built-in default.
+inline void
+    warnUnexpandedCacheRoot(const std::string& rawPath, bool fromEnv, const char* homeVariable)
+{
+    if(!::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_WARN)
+       || unexpandedCacheRootWarned().exchange(true))
+    {
+        return;
+    }
+
+    if(fromEnv)
+    {
+        HIPDNN_SDK_LOG_WARN("HIPDNN_CACHE_DIR='" << rawPath << "' cannot be expanded because "
+                                                 << homeVariable
+                                                 << " is unset; on-disk caching is disabled");
+    }
+    else
+    {
+        HIPDNN_SDK_LOG_WARN("HIPDNN_CACHE_DIR is unset and its default '"
+                            << rawPath << "' cannot be expanded because " << homeVariable
+                            << " is unset; on-disk caching is disabled");
+    }
+}
+
+} // namespace detail
 
 #if defined(_WIN32)
 namespace detail
@@ -92,7 +135,8 @@ inline std::filesystem::path cacheRoot()
     // characters (see data_sdk/CMakeLists.txt), so widening it byte-for-byte is exact --
     // no transcoding step is involved, unlike the environment reads below.
     std::wstring rawPath = getEnvW(L"HIPDNN_CACHE_DIR");
-    if(rawPath.empty())
+    const bool fromEnv = !rawPath.empty();
+    if(!fromEnv)
     {
         const std::string_view defaultNarrow = HIPDNN_DATA_SDK_CACHE_ROOT_DEFAULT;
         rawPath.assign(defaultNarrow.begin(), defaultNarrow.end());
@@ -106,13 +150,16 @@ inline std::filesystem::path cacheRoot()
     // disk cache".
     if(expanded.empty() || expanded.front() == L'~' || detail::startsWithUserProfileToken(expanded))
     {
+        detail::warnUnexpandedCacheRoot(
+            detail::pathForDiagnostic(std::filesystem::path(rawPath)), fromEnv, "USERPROFILE");
         return {};
     }
 
     std::filesystem::path resolved(expanded);
 #else
     std::string rawPath = getEnv("HIPDNN_CACHE_DIR");
-    if(rawPath.empty())
+    const bool fromEnv = !rawPath.empty();
+    if(!fromEnv)
     {
         rawPath = HIPDNN_DATA_SDK_CACHE_ROOT_DEFAULT;
     }
@@ -124,6 +171,7 @@ inline std::filesystem::path cacheRoot()
     // treats as "no disk cache".
     if(expanded.empty() || expanded.front() == '~')
     {
+        detail::warnUnexpandedCacheRoot(rawPath, fromEnv, "HOME");
         return {};
     }
 

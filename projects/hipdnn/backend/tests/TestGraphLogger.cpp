@@ -184,6 +184,50 @@ TEST_F(TestGraphLogger, MalformedGraphIsNotLogged)
     EXPECT_TRUE(getJsonFilesInDir(_tempDir).empty());
 }
 
+// Port of the exploratory test Issue_C4_04_graph_log_dump_failure_fails_finalize. A graph name
+// that is not valid UTF-8 neither fails finalize nor leaves an unreadable dump: the dump is
+// valid JSON with the invalid bytes replaced by U+FFFD.
+TEST_F(TestGraphLogger, NonUtf8GraphNameStillBuilds)
+{
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());
+    hipdnn_backend::logging::loggerShutdown();
+
+    auto bundle = test_utilities::createDefaultConvOp(HIPDNN_DATA_FLOAT);
+
+    GraphDescriptor descriptor;
+    const std::array<HipdnnBackendDescriptor*, 1> ops = {bundle.convOp.get()};
+    descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                            1,
+                            static_cast<const void*>(ops.data()));
+
+    auto handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
+    descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                            HIPDNN_TYPE_HANDLE,
+                            1,
+                            static_cast<const void*>(&handle));
+
+    const std::string name = "bad\xff\xfe"
+                             "name";
+    descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT,
+                            HIPDNN_TYPE_CHAR,
+                            static_cast<int64_t>(name.size()),
+                            name.c_str());
+
+    ASSERT_NO_THROW(descriptor.finalize());
+
+    auto jsonFiles = getJsonFilesInDir(_tempDir);
+    ASSERT_EQ(jsonFiles.size(), 1u);
+
+    std::ifstream file(jsonFiles[0]);
+    ASSERT_TRUE(file.is_open());
+    nlohmann::json j;
+    ASSERT_NO_THROW(j = nlohmann::json::parse(file));
+    ASSERT_TRUE(j.contains("name"));
+    EXPECT_NE(j["name"].get<std::string>().find("\xEF\xBF\xBD"), std::string::npos)
+        << "Expected U+FFFD in the dumped name";
+}
+
 TEST_F(TestGraphLogger, DifferentGraphsLoggedSeparately)
 {
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());

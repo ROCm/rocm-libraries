@@ -12,6 +12,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <memory>
 #include <vector>
 
 namespace hipdnn_backend
@@ -1613,6 +1614,32 @@ TEST(TestDescriptorAttributeUtils, GetTensorDescriptorArraySuccess)
     // cleanup packed descriptors
     delete output[0];
     delete output[1];
+}
+
+TEST(TestDescriptorAttributeUtils, GetTensorDescriptorArrayPartialReadReportsNumberWritten)
+{
+    auto wrapper1 = test_utilities::createFinalizedTensor(10);
+    auto wrapper2 = test_utilities::createFinalizedTensor(20);
+    std::vector<std::shared_ptr<TensorDescriptor>> source;
+    source.push_back(HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+        wrapper1.get(), HIPDNN_STATUS_BAD_PARAM, "unpack"));
+    source.push_back(HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+        wrapper2.get(), HIPDNN_STATUS_BAD_PARAM, "unpack"));
+
+    std::array<HipdnnBackendDescriptor*, 2> output = {nullptr, nullptr};
+    int64_t count = 0;
+
+    ASSERT_NO_THROW(getTensorDescriptorArray(source,
+                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                             1,
+                                             &count,
+                                             static_cast<void*>(output.data()),
+                                             "test"));
+    const std::unique_ptr<HipdnnBackendDescriptor> written(output[0]);
+
+    EXPECT_EQ(count, 1);
+    EXPECT_NE(written, nullptr);
+    EXPECT_EQ(output[1], nullptr);
 }
 
 TEST(TestDescriptorAttributeUtils, GetTensorDescriptorArrayThrowsOnWrongType)

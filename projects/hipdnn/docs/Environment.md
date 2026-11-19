@@ -521,6 +521,8 @@ messages at that level and all higher severities.
 
 Specifies the file path where logs will be **appended**. If not set, logs are written to `stderr`.
 
+hipDNN reads this variable and opens the file the first time logging is enabled, by `HIPDNN_LOG_LEVEL` or by `setGlobalLogLevel()`; while the level is `off`, no file is created. The destination then stays fixed for the process. If the file cannot be opened (for example, the path is a directory or its parent cannot be created), hipDNN prints one warning naming `HIPDNN_LOG_FILE` on `stderr` and writes the logs to `stderr` instead.
+
 **Example:**
 ```bash
 export HIPDNN_LOG_FILE=/path/to/hipdnn.log
@@ -536,6 +538,8 @@ Controls graph structure logging. When set to a non-empty directory path, graphs
 | `<path>`   | Write graph structures as JSON files to the given directory |
 
 Graph JSON files are written to the directory specified by `HIPDNN_LOG_GRAPH_DIR`. If the directory does not exist, it is created automatically. Relative paths are resolved against the current working directory. Files are named `graph_<id>.json` after the graph's own ID, so finalizing a graph again, or replaying a serialized one, reuses a single file. A graph rebuilt from scratch is a new graph with a new ID and is written separately; point the variable at a per-process directory if many processes share one output location.
+
+Names that are not valid UTF-8 are written with the invalid bytes replaced by U+FFFD. A graph that cannot be written is reported as a warning in the log; finalization succeeds regardless.
 
 This variable is independent of `HIPDNN_LOG_LEVEL` and `HIPDNN_LOG_FILE`.
 

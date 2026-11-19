@@ -18,6 +18,8 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
+#include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -117,6 +119,76 @@ protected:
         _unfinalizedTensor.reset();
     }
 };
+
+namespace
+{
+
+std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims)
+{
+    std::vector<int64_t> strides(dims.size(), 1);
+    for(size_t i = dims.size() - 1; i > 0; --i)
+    {
+        strides[i - 1] = strides[i] * dims[i];
+    }
+    return strides;
+}
+
+// Finalizes a dgrad descriptor built from packed tensors with the given dims, zero padding,
+// the given stride, and the given dilation (unit dilation when empty).
+void finalizeDgradWithShape(const std::vector<int64_t>& dyDims,
+                            const std::vector<int64_t>& wDims,
+                            const std::vector<int64_t>& dxDims,
+                            const std::vector<int64_t>& stride,
+                            std::vector<int64_t> dilation = {})
+{
+    auto dyTensor = createFinalizedTensor(K_DGRAD_TENSOR_DY_UID, dyDims, packedStrides(dyDims));
+    auto wTensor = createFinalizedTensor(K_DGRAD_TENSOR_W_UID, wDims, packedStrides(wDims));
+    auto dxTensor = createFinalizedTensor(K_DGRAD_TENSOR_DX_UID, dxDims, packedStrides(dxDims));
+    HipdnnBackendDescriptor* dyPtr = dyTensor.get();
+    HipdnnBackendDescriptor* wPtr = wTensor.get();
+    HipdnnBackendDescriptor* dxPtr = dxTensor.get();
+
+    auto wrapper = createDescriptor<ConvolutionBwdOperationDescriptor>();
+    auto desc = wrapper->asDescriptor<ConvolutionBwdOperationDescriptor>();
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&dyPtr));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_W,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&wPtr));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DX,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&dxPtr));
+
+    const auto count = static_cast<int64_t>(stride.size());
+    std::vector<int64_t> padding(stride.size(), 0);
+    if(dilation.empty())
+    {
+        dilation.assign(stride.size(), 1);
+    }
+    desc->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS, HIPDNN_TYPE_INT64, count, padding.data());
+    desc->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS, HIPDNN_TYPE_INT64, count, padding.data());
+    desc->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES, HIPDNN_TYPE_INT64, count, stride.data());
+    desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_DILATIONS,
+                       HIPDNN_TYPE_INT64,
+                       static_cast<int64_t>(dilation.size()),
+                       dilation.data());
+    auto computeType = HIPDNN_DATA_FLOAT;
+    desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    auto convMode = HIPDNN_CROSS_CORRELATION;
+    desc->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
+
+    desc->finalize();
+}
+
+} // namespace
 
 // =============================================================================
 // Lifecycle Tests
@@ -257,6 +329,49 @@ TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWithoutConvMode)
     getDescriptor()->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+
+// =============================================================================
+// Finalize Tests - Spatial Shape Consistency
+// =============================================================================
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWithHugeStrideInconsistentWithDims)
+{
+    // dy width must be (4 - 1) / stride + 1 = 1 for any stride > 3, not 4.
+    ASSERT_THROW_HIPDNN_STATUS(
+        finalizeDgradWithShape({4, 4, 4, 4}, {4, 4, 1, 1}, {4, 4, 4, 4}, {1, 100000}),
+        HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(
+        finalizeDgradWithShape({4, 4, 4, 4}, {4, 4, 1, 1}, {4, 4, 4, 4}, {1, 1048577}),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeAcceptsUnitStrideOnSameShape)
+{
+    ASSERT_NO_THROW(finalizeDgradWithShape({4, 4, 4, 4}, {4, 4, 1, 1}, {4, 4, 4, 4}, {1, 1}));
+}
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeAcceptsStrideThatFloorsTheOutput)
+{
+    // H: (6 - 1) / 2 + 1 = 3 (floored), W: (5 - 1) / 2 + 1 = 3 (exact).
+    ASSERT_NO_THROW(finalizeDgradWithShape({1, 1, 3, 3}, {1, 1, 1, 1}, {1, 1, 6, 5}, {2, 2}));
+}
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWhenStrideCountDiffersFromSpatialRank)
+{
+    ASSERT_THROW_HIPDNN_STATUS(
+        finalizeDgradWithShape({4, 4, 4, 4}, {4, 4, 1, 1}, {4, 4, 4, 4}, {1}),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWhenDilatedKernelOverflows)
+{
+    ASSERT_THROW_HIPDNN_STATUS(finalizeDgradWithShape({1, 1, 4, 4},
+                                                      {1, 1, 3, 1},
+                                                      {1, 1, 4, 4},
+                                                      {1, 1},
+                                                      {std::numeric_limits<int64_t>::max(), 1}),
+                               HIPDNN_STATUS_BAD_PARAM);
 }
 
 // =============================================================================

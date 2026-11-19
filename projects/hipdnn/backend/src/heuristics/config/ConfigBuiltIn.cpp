@@ -41,6 +41,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -78,8 +79,9 @@ constexpr const char* POLICY_NAME = "SelectionHeuristic::Config";
 // hands in a callback that forwards to the backend logger, which is itself a
 // process-wide sink, so the identity of the "current" callback does not matter
 // as long as one is installed. Do not assume per-instance scoping here.
-hipdnnCallback_t g_loggingCallback = nullptr; // NOLINT(readability-identifier-naming)
-hipdnnSeverity_t g_logLevel = HIPDNN_SEV_INFO; // NOLINT(readability-identifier-naming)
+// Atomic because every handle creation writes them while other threads may be logging.
+std::atomic<hipdnnCallback_t> g_loggingCallback{nullptr}; // NOLINT(readability-identifier-naming)
+std::atomic<hipdnnSeverity_t> g_logLevel{HIPDNN_SEV_INFO}; // NOLINT(readability-identifier-naming)
 
 #define CONFIG_BUILTIN_LOG(severity, ...) \
     HIPDNN_BUILTIN_HEURISTIC_LOG(         \
@@ -699,13 +701,13 @@ hipdnnPluginStatus_t getType(hipdnnPluginType_t* type)
 
 hipdnnPluginStatus_t setLoggingCallback(hipdnnCallback_t callback)
 {
-    g_loggingCallback = callback;
+    g_loggingCallback.store(callback, std::memory_order_relaxed);
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
 hipdnnPluginStatus_t setLogLevel(hipdnnSeverity_t level)
 {
-    g_logLevel = level;
+    g_logLevel.store(level, std::memory_order_relaxed);
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 

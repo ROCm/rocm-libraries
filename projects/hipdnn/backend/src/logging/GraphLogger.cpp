@@ -130,12 +130,17 @@ void GraphLogger::logGraph(const uint8_t* serializedGraph, size_t size)
         return;
     }
 
+    // Names are free-form bytes, so invalid UTF-8 is replaced with U+FFFD instead of failing
+    // the dump. The text is built before the file is opened, so a failure cannot leave an
+    // empty file behind that later calls would skip as already logged.
     const nlohmann::json graphJson = *graph;
+    const std::string graphText
+        = graphJson.dump(2, ' ', false, nlohmann::json::error_handler_t::replace);
 
     std::ofstream file(fullPath);
     if(file.is_open())
     {
-        file << graphJson.dump(2);
+        file << graphText;
         file.close();
         HIPDNN_BACKEND_LOG_INFO(
             "Writing graph \"{}\" with id {} to {}", graphName, graphId, fullPath.string());

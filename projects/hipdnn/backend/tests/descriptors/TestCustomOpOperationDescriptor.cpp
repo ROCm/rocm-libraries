@@ -352,6 +352,25 @@ TEST_F(TestCustomOpOperationDescriptor, GetAttributeInputTensorArray)
     ASSERT_NE(retrieved1, nullptr);
 }
 
+TEST_F(TestCustomOpOperationDescriptor, GetAttributePartialInputReadReportsNumberWritten)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    std::array<HipdnnBackendDescriptor*, 2> rawRetrieved = {nullptr, nullptr};
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       &elementCount,
+                                       static_cast<void*>(rawRetrieved.data())));
+    auto retrieved0 = std::unique_ptr<HipdnnBackendDescriptor>(rawRetrieved[0]);
+
+    EXPECT_EQ(elementCount, 1);
+    EXPECT_NE(retrieved0, nullptr);
+    EXPECT_EQ(rawRetrieved[1], nullptr);
+}
+
 TEST_F(TestCustomOpOperationDescriptor, GetAttributeOutputTensorArray)
 {
     makeFinalized();

@@ -3,14 +3,26 @@
 
 #pragma once
 
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_frontend/detail/HipdnnBackendInterface.hpp>
+
+#include <string>
+#include <utility>
 
 namespace hipdnn_frontend::detail
 {
 
+/// Stands in for a backend that could not be used. Every call fails with
+/// HIPDNN_STATUS_NOT_INITIALIZED, and getLastErrorString() reports why the backend is unusable.
 class IncompatibleBackendWrapper : public IHipdnnBackend
 {
 public:
+    explicit IncompatibleBackendWrapper(
+        std::string reason = "the hipDNN backend is unavailable or incompatible with this frontend")
+        : _reason(std::move(reason))
+    {
+    }
+
     hipdnnStatus_t create(hipdnnHandle_t* /*handle*/) override
     {
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
@@ -78,7 +90,11 @@ public:
         return "";
     }
 
-    void getLastErrorString(char* /*message*/, size_t /*maxSize*/) override {}
+    void getLastErrorString(char* message, size_t maxSize) override
+    {
+        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
+            message, _reason.c_str(), maxSize);
+    }
 
     hipdnnStatus_t backendCreateAndDeserializeGraphExt(hipdnnBackendDescriptor_t* /*descriptor*/,
                                                        const uint8_t* /*serializedGraph*/,
@@ -226,6 +242,9 @@ public:
     {
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }
+
+private:
+    std::string _reason;
 };
 
 } // namespace hipdnn_frontend::detail

@@ -959,6 +959,35 @@ TEST_F(TestBatchnormOperationDescriptor, GetPeerStatsTensorArray)
     EXPECT_EQ(peerDesc1->getData().uid, K_BATCHNORM_TENSOR_PEER_STAT_1_UID);
 }
 
+TEST_F(TestBatchnormOperationDescriptor, GetPeerStatsPartialReadReportsNumberWritten)
+{
+    auto desc = getDescriptor();
+    std::array<HipdnnBackendDescriptor*, 2> descs = {_peerStatsDesc0.get(), _peerStatsDesc1.get()};
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       2,
+                       static_cast<const void*>(descs.data()));
+    setAllAttributesExcept();
+    desc->finalize();
+
+    std::array<HipdnnBackendDescriptor*, 2> retrieved = {nullptr, nullptr};
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       &elementCount,
+                                       static_cast<void*>(retrieved.data())));
+    const std::unique_ptr<HipdnnBackendDescriptor> written(retrieved[0]);
+
+    EXPECT_EQ(elementCount, 1);
+    EXPECT_EQ(retrieved[1], nullptr);
+    ASSERT_NE(written, nullptr);
+    auto peerDesc0 = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+        written.get(), HIPDNN_STATUS_INTERNAL_ERROR, "Failed to unpack peer stats 0");
+    ASSERT_NE(peerDesc0, nullptr);
+    EXPECT_EQ(peerDesc0->getData().uid, K_BATCHNORM_TENSOR_PEER_STAT_0_UID);
+}
+
 // =============================================================================
 // ToString Test
 // =============================================================================

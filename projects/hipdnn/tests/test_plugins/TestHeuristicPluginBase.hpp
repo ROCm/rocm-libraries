@@ -9,6 +9,7 @@
 #include <hipdnn_plugin_sdk/heuristic_api_version.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -35,8 +36,8 @@ struct PolicyDescriptorImpl
 
 // Callback state
 // NOLINTBEGIN(readability-identifier-naming)
-hipdnnCallback_t g_loggingCallback = nullptr;
-hipdnnSeverity_t g_logLevel = HIPDNN_SEV_INFO;
+std::atomic<hipdnnCallback_t> g_loggingCallback{nullptr};
+std::atomic<hipdnnSeverity_t> g_logLevel{HIPDNN_SEV_INFO};
 // NOLINTEND(readability-identifier-naming)
 
 } // anonymous namespace
@@ -255,13 +256,13 @@ public:
 
     static hipdnnPluginStatus_t setLoggingCallback(hipdnnCallback_t callback)
     {
-        g_loggingCallback = callback;
+        g_loggingCallback.store(callback, std::memory_order_relaxed);
         return HIPDNN_PLUGIN_STATUS_SUCCESS;
     }
 
     static hipdnnPluginStatus_t setLogLevel(hipdnnSeverity_t level)
     {
-        g_logLevel = level;
+        g_logLevel.store(level, std::memory_order_relaxed);
         return HIPDNN_PLUGIN_STATUS_SUCCESS;
     }
 

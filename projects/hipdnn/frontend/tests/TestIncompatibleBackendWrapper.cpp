@@ -265,14 +265,20 @@ TEST(TestIncompatibleBackendWrapper, GetErrorString)
     EXPECT_STREQ(errorString, "");
 }
 
-TEST(TestIncompatibleBackendWrapper, GetLastErrorString)
+TEST(TestIncompatibleBackendWrapper, GetLastErrorStringReportsTheReason)
+{
+    IncompatibleBackendWrapper backendWrapper("backend library not found");
+    std::array<char, 64> message{};
+    backendWrapper.getLastErrorString(message.data(), message.size());
+    EXPECT_STREQ(message.data(), "backend library not found");
+}
+
+TEST(TestIncompatibleBackendWrapper, GetLastErrorStringIsNeverEmpty)
 {
     IncompatibleBackendWrapper backendWrapper;
-    std::string message = "initial";
-    // getLastErrorString is a void function that does nothing
+    std::array<char, 256> message{};
     backendWrapper.getLastErrorString(message.data(), message.size());
-    // Message should remain unchanged since the function does nothing
-    EXPECT_EQ(message, std::string{"initial"});
+    EXPECT_STRNE(message.data(), "");
 }
 
 TEST(TestIncompatibleBackendWrapper, LoggingCallbackExt)

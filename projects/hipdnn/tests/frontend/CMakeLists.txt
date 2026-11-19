@@ -38,6 +38,7 @@ add_executable(
     IntegrationCustomOpDescriptorLowering.cpp
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
+    IntegrationGlobalObjectsDestroyedAtExit.cpp
     IntegrationGraphKnobsApi.cpp
     IntegrationGraphKnobSettingsDescriptorLowering.cpp
     IntegrationGraphKnobsDescriptorLifting.cpp

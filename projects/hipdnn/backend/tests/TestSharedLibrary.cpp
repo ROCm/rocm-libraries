@@ -67,6 +67,24 @@ TEST(TestSharedLibrary, LoadLibraryCtorWrongPath)
                                HIPDNN_STATUS_PLUGIN_ERROR);
 }
 
+TEST(TestSharedLibrary, MissingFileMessageNamesRequestedAndTriedPaths)
+{
+    const auto requested = std::filesystem::path("./missing_plugin_for_message");
+    const auto triedName = hipdnn_data_sdk::utilities::getLibraryName("missing_plugin_for_message");
+    try
+    {
+        const plugin::SharedLibrary library(requested);
+        FAIL() << "Loading a missing plugin file did not throw";
+    }
+    catch(const HipdnnException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_STATUS_PLUGIN_ERROR);
+        const std::string message = e.what();
+        EXPECT_NE(message.find(requested.string()), std::string::npos) << message;
+        EXPECT_NE(message.find(triedName), std::string::npos) << message;
+    }
+}
+
 TEST(TestSharedLibrary, GetSymbol)
 {
     const plugin::SharedLibrary library(LIBRARY_PATH);

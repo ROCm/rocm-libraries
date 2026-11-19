@@ -461,3 +461,35 @@ TEST_F(IntegrationEngineHeuristicApi, GetEngineConfigsRequestMoreThanAvailable)
         EXPECT_EQ(hipdnnBackendDestroyDescriptor(config), HIPDNN_STATUS_SUCCESS);
     }
 }
+
+TEST_F(IntegrationEngineHeuristicApi, GetEngineConfigsRejectsNegativeRequestedCount)
+{
+    populateEngineHeuristic(true);
+
+    std::vector<hipdnnBackendDescriptor_t> configs(2);
+    for(auto& config : configs)
+    {
+        ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, &config),
+                  HIPDNN_STATUS_SUCCESS);
+    }
+    const std::vector<hipdnnBackendDescriptor_t> sentinel = configs;
+
+    int64_t count = 42;
+    EXPECT_EQ(hipdnnBackendGetAttribute(_engineHeuristic,
+                                        HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        -1,
+                                        &count,
+                                        static_cast<void*>(configs.data())),
+              HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(count, 42);
+    EXPECT_EQ(configs, sentinel);
+
+    // No engine config was written into the caller's descriptors, so none of
+    // them can be finalized.
+    for(auto config : configs)
+    {
+        EXPECT_NE(hipdnnBackendFinalize(config), HIPDNN_STATUS_SUCCESS);
+        EXPECT_EQ(hipdnnBackendDestroyDescriptor(config), HIPDNN_STATUS_SUCCESS);
+    }
+}

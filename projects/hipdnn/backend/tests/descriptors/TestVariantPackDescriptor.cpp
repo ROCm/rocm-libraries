@@ -224,6 +224,47 @@ TEST_F(TestVariantPackDescriptorWhenInitialized, InvalidSetAttributes)
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
+TEST_F(TestVariantPackDescriptorWhenInitialized, DataPointersRejectNonPositiveCountAndKeepState)
+{
+    std::array<void*, 3> devPtrs = {reinterpret_cast<void*>(0x1234),
+                                    reinterpret_cast<void*>(0x5678),
+                                    reinterpret_cast<void*>(0x9abc)};
+    std::array<int64_t, 3> uids = {1, 2, 3};
+    void* workspace = reinterpret_cast<void*>(0xdeadbeef);
+
+    _descriptor.setAttribute(HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS,
+                             HIPDNN_TYPE_VOID_PTR,
+                             devPtrs.size(),
+                             static_cast<const void*>(devPtrs.data()));
+
+    ASSERT_THROW_HIPDNN_STATUS(_descriptor.setAttribute(HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS,
+                                                        HIPDNN_TYPE_VOID_PTR,
+                                                        -1,
+                                                        static_cast<const void*>(devPtrs.data())),
+                               HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(_descriptor.setAttribute(HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS,
+                                                        HIPDNN_TYPE_VOID_PTR,
+                                                        0,
+                                                        static_cast<const void*>(devPtrs.data())),
+                               HIPDNN_STATUS_BAD_PARAM);
+
+    // The rejected calls leave the pointers set first in place.
+    _descriptor.setAttribute(
+        HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS, HIPDNN_TYPE_INT64, uids.size(), uids.data());
+    _descriptor.setAttribute(HIPDNN_ATTR_VARIANT_PACK_WORKSPACE,
+                             HIPDNN_TYPE_VOID_PTR,
+                             1,
+                             static_cast<const void*>(&workspace));
+    ASSERT_NO_THROW(_descriptor.finalize());
+
+    const auto& stored = _descriptor.getDataPointers();
+    ASSERT_EQ(stored.size(), devPtrs.size());
+    for(size_t i = 0; i < devPtrs.size(); ++i)
+    {
+        EXPECT_EQ(stored[i], devPtrs[i]);
+    }
+}
+
 TEST_F(TestVariantPackDescriptorWhenInitialized, InvalidFinalizeCounts)
 {
     std::array<void*, 3> devPtrs = {reinterpret_cast<void*>(0x1234),

@@ -89,6 +89,13 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnDestroy(hipdnnHandle_t handle)
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         throwIfNull(handle);
 
+        // A handle released during process exit, after the plugins may have been torn down,
+        // is left to the operating system.
+        if(hipdnn_backend::plugin::EnginePluginResourceManager::isShuttingDown())
+        {
+            return;
+        }
+
         delete handle;
 
         LOG_API_SUCCESS(apiName, "handle destroyed", "");
@@ -143,6 +150,13 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         throwIfInvalidDescriptor(descriptor);
+
+        // A descriptor released during process exit may hold plugin objects; it is left to
+        // the operating system.
+        if(hipdnn_backend::plugin::EnginePluginResourceManager::isShuttingDown())
+        {
+            return;
+        }
 
         hipdnn_backend::DescriptorFactory::destroy(descriptor);
 
@@ -207,6 +221,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         throwIfInvalidDescriptor(descriptor);
+        THROW_IF_LT(requestedElementCount,
+                    0,
+                    HIPDNN_STATUS_BAD_PARAM,
+                    "hipdnnBackendGetAttribute: requestedElementCount must not be negative");
 
         descriptor->getAttribute(
             attributeName, attributeType, requestedElementCount, elementCount, arrayOfElements);
@@ -242,6 +260,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         throwIfInvalidDescriptor(descriptor);
+        THROW_IF_LT(elementCount,
+                    0,
+                    HIPDNN_STATUS_BAD_PARAM,
+                    "hipdnnBackendSetAttribute: elementCount must not be negative");
 
         descriptor->setAttribute(attributeName, attributeType, elementCount, arrayOfElements);
 
@@ -720,7 +742,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendSetGlobalLogLevel_ext(hipdnnSe
     if(level != HIPDNN_SEV_INFO && level != HIPDNN_SEV_WARN && level != HIPDNN_SEV_ERROR
        && level != HIPDNN_SEV_FATAL && level != HIPDNN_SEV_OFF)
     {
-        return HIPDNN_STATUS_BAD_PARAM;
+        return hipdnn_backend::LastErrorManager::setLastError(
+            HIPDNN_STATUS_BAD_PARAM,
+            "hipdnnBackendSetGlobalLogLevel_ext: invalid log level "
+                + std::to_string(static_cast<int>(level)));
     }
 
     return hipdnn_backend::logging::setGlobalLogLevel(level);
@@ -730,7 +755,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetGlobalLogLevel_ext(hipdnnSe
 {
     if(level == nullptr)
     {
-        return HIPDNN_STATUS_BAD_PARAM;
+        return hipdnn_backend::LastErrorManager::setLastError(
+            HIPDNN_STATUS_BAD_PARAM, "hipdnnBackendGetGlobalLogLevel_ext: level must not be null");
     }
 
     return hipdnn_backend::logging::getGlobalLogLevel(*level);

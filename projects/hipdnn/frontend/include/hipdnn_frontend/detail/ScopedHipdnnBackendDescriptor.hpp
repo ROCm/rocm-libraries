@@ -82,7 +82,9 @@ public:
 
     ~ScopedHipdnnBackendDescriptor()
     {
-        if(_valid && _descriptor != nullptr)
+        // A descriptor released during static destruction is left to the operating system;
+        // see IHipdnnBackend::isShutdown().
+        if(_valid && _descriptor != nullptr && !IHipdnnBackend::isShutdown())
         {
             auto status = hipdnnBackend()->backendDestroyDescriptor(_descriptor);
 
@@ -108,7 +110,7 @@ public:
     {
         if(this != &other)
         {
-            if(_valid && _descriptor != nullptr)
+            if(_valid && _descriptor != nullptr && !IHipdnnBackend::isShutdown())
             {
                 auto status = hipdnnBackend()->backendDestroyDescriptor(_descriptor);
                 if(status != HIPDNN_STATUS_SUCCESS)
