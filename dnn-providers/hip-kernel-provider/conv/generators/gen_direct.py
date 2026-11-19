@@ -280,6 +280,13 @@ for dt in ("HALF", "BFLOAT16"):
             M(f"mfma16_{e}", F333, 128, 64, 32, 2, 2, 8, ring=0, xpf=1),
             M(f"mfma16_{e}", F333, 128, 64, 32, 2, 2, 8, ring=1, xpf=1),
             M(f"mfma16_{e}", F333, 128, 32, 32, 4, 1, 8, ring=0, xpf=1),
+            # One wave row (wm 1): each wave reuses its weight fragments over all 128 rows, so
+            # the register-path weights are read once per block and half as often per MMA.
+            M(f"mfma16_{e}", F333, 128, 128, 16, 1, 4, 8, ring=0, xpf=1),
+            M(f"mfma16_{e}", F333, 128, 128, 32, 1, 4, 8, ring=0, xpf=1),
+            M(f"mfma16_{e}", F333, 128, 64, 32, 1, 4, 8, ring=1, xpf=1),
+            M(f"mfma16_{e}", F333, 128, 192, 16, 1, 4, 8, ring=0, xpf=1),
+            M(f"mfma16_{e}", F333, 128, 256, 16, 1, 8, 8, ring=0, xpf=1),
             # 2-D 3x3: the xpf twins of the gfx942 halo tiles.
             M(f"mfma16_{e}", F33, 128, 64, 32, 2, 2, 8, xpf=1),
             M(f"mfma16_{e}", F33, 128, 64, 16, 2, 2, 8, xpf=1),
