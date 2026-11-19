@@ -827,6 +827,7 @@ std::optional<Plan>
     k2.xcds = !config.rows && k2.splits == 1 && xcds > 1 ? xcds : 0;
     k2.xcdRun
         = k2.xcds > 1 ? static_cast<int>(std::max<int64_t>(1, 2 * computeUnits / k2.xcds)) : 0;
+    k2.prio = std::getenv("HKP_K2_PRIO") != nullptr ? 1 : 0; // A/B only
     if(const char* env = std::getenv("HKP_K2_XCDS"); env != nullptr && !config.rows)
     {
         k2.xcds = std::atoi(env); // A/B only

@@ -735,6 +735,7 @@ __device__ inline void k2StaticFor(F&& f)
 // planes (L2 hits), so the 2-D tiles and register budget apply unchanged.
 template <int KD, int RING, class Load, class Commit, class Ring, class Tap, class Store>
 __device__ inline void k2Drive(const K2Block& b,
+                               int prio,
                                int pd,
                                int di,
                                int nCh,
@@ -779,7 +780,11 @@ __device__ inline void k2Drive(const K2Block& b,
                             c = cur.cc;
                             return more;
                         };
+                        if(prio)
+                            __builtin_amdgcn_s_setprio(1);
                         ring(stage, cc, jj, U, pf, nx);
+                        if(prio)
+                            __builtin_amdgcn_s_setprio(0);
                         if(more)
                         {
                             commit(stage ^ 1);
@@ -822,7 +827,11 @@ __device__ inline void k2Drive(const K2Block& b,
                         c = cur.cc;
                         return more;
                     };
+                    if(prio)
+                        __builtin_amdgcn_s_setprio(1);
                     tap(stage, cc, t, pf, nx);
+                    if(prio)
+                        __builtin_amdgcn_s_setprio(0);
                     if(more)
                     {
                         commit(stage ^ 1);
@@ -1501,6 +1510,7 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
 
     k2Drive<KD, RING>(
         b,
+        a.prio,
         a.pd,
         a.di,
         nChL,
@@ -1781,6 +1791,7 @@ __device__ void k2ConvFma(const K2Args& a CONV_EPI_FN_PARAM)
 
     k2Drive<KD, RING>(
         b,
+        a.prio,
         a.pd,
         a.di,
         (a.c + BC - 1) / BC,
