@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from rocke.tests.arch_marks import arch_specific
 
 
 @pytest.fixture
@@ -19,6 +20,10 @@ def helper():
     return module
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the helper under test drives the gfx950 scaled numerics harness; scaled MFMA exists on gfx950 only",
+)
 @pytest.mark.parametrize(
     "route,missing",
     [("comgr", "llvm-objdump"), ("hip", "llvm-objdump"), ("hip", "hipcc")],
@@ -32,12 +37,20 @@ def test_missing_tools_skip(helper, monkeypatch, route, missing):
         helper.run_numeric(monkeypatch, "fp8", "bf8", "bf16", route, 32, 64, 128)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the helper under test drives the gfx950 scaled numerics harness; scaled MFMA exists on gfx950 only",
+)
 def test_check_isa_missing_objdump(helper, monkeypatch):
     monkeypatch.setattr(helper.shutil, "which", lambda name: None)
     with pytest.raises(pytest.skip.Exception, match="llvm-objdump is required"):
         helper.check_isa(None, None)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the helper under test drives the gfx950 scaled numerics harness; scaled MFMA exists on gfx950 only",
+)
 @pytest.mark.parametrize("route", ["comgr", "hip"])
 def test_available_tools_reach_harness_and_preserve_failures(
     helper, monkeypatch, route
@@ -59,6 +72,10 @@ def test_available_tools_reach_harness_and_preserve_failures(
         helper.run_numeric(monkeypatch, "fp8", "bf8", "bf16", route, 32, 64, 128)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the helper under test drives the gfx950 scaled numerics harness; scaled MFMA exists on gfx950 only",
+)
 def test_objdump_failure_is_not_skipped(helper, monkeypatch):
     monkeypatch.setattr(helper.shutil, "which", lambda name: name)
     monkeypatch.setattr(

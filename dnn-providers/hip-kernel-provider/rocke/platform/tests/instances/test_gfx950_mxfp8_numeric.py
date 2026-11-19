@@ -3,8 +3,13 @@
 """gfx950 MXFP8 non-unity scaled MFMA numerical cases."""
 
 import pytest
+from rocke.tests.arch_marks import arch_specific
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="scaled MFMA exists on gfx950 only; gfx942 refuses it (test_wrong_target_rejection in tests/core/test_gfx950_scaled_mfma.py checks the refusal)",
+)
 @pytest.mark.parametrize("dtype", ["fp8", "bf8"])
 @pytest.mark.parametrize("output", ["bf16", "fp16"])
 @pytest.mark.parametrize("route", ["comgr", "hip"])

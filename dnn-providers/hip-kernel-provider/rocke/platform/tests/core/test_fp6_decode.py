@@ -27,10 +27,15 @@ from rocke.core.ir import F32, I8, IRBuilder, PtrType
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.core.passes import optimize_kernel
 from rocke.helpers import compile_kernel
+from rocke.tests.arch_marks import COVERED_ARCHES
 from rocke.helpers.i4_dequant import (
     _FP4_CODEBOOK,
     _FP6_CODEBOOK,
     unpack_fp6_bytes_to_quad_f32,
+)
+
+pytestmark = pytest.mark.filterwarnings(
+    "error::rocke.core.lower_llvm.ArchDomainWarning"
 )
 
 _FP6_CODES = 64
@@ -172,12 +177,13 @@ def _decode_on_gpu(arch, optimize_ir):
         module.unload()
 
 
-def test_optimized_decode_keeps_negative_zero():
+@pytest.mark.parametrize("arch", COVERED_ARCHES)
+def test_optimized_decode_keeps_negative_zero(arch):
     # Code 32 decodes to -0.0, a different constant from code 0's +0.0, so the
     # optimizer must not merge them (Python's 0.0 == -0.0).
     kernel = _decode_kernel()
     optimize_kernel(kernel)
-    assert "0x8000000000000000" in lower_kernel_to_llvm(kernel, arch="gfx942")
+    assert "0x8000000000000000" in lower_kernel_to_llvm(kernel, arch=arch)
 
 
 # The optimizer runs only when asked; run the codes through both paths.

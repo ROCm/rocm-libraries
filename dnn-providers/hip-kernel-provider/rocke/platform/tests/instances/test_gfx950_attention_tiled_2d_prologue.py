@@ -18,6 +18,7 @@ import re
 from pathlib import Path
 
 import pytest
+from rocke.tests.arch_marks import arch_specific
 
 CPP = Path(__file__).resolve().parents[2] / "cpp"
 GLUE = CPP / "instances" / "gfx950" / "attention_tiled_2d_public_entry_glue.cpp"
@@ -54,6 +55,10 @@ def _prologues() -> list[tuple[str, str, str]]:
     ]
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the test reads the gfx950 tiled 2D attention C++ glue file; cpp/instances/gfx942 has no tiled 2D attention file",
+)
 def test_there_is_one_prologue_and_it_is_file_local():
     glue = GLUE.relative_to(CPP).as_posix()
     assert _prologues() == [(glue, "rocke_gfx950_attn2d_build_ctx_init", "{")]
@@ -64,6 +69,10 @@ def test_there_is_one_prologue_and_it_is_file_local():
     )
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the test reads the gfx950 tiled 2D attention C++ glue file; cpp/instances/gfx942 has no tiled 2D attention file",
+)
 def test_the_driver_calls_it():
     assert re.search(
         r"!\s*rocke_gfx950_attn2d_build_ctx_init\(\s*&ctx\s*,\s*b\s*,\s*spec\s*,\s*arch\s*\)",

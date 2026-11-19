@@ -12,8 +12,13 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import run_diff
 from rocke.core.lower_llvm import LLVM_FLAVORS
+from rocke.tests.arch_marks import arch_specific
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the emitter family gfx950_block_scaled_gemm uses scaled MFMA, which exists on gfx950 only",
+)
 @pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 def test_scaled_mfma_batch_reenters_and_terminates(monkeypatch, flavor):
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
