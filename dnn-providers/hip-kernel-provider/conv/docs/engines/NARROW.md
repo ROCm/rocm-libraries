@@ -29,7 +29,7 @@ SPDX-License-Identifier:  MIT
   - Backward weights of output layers on gfx950 and gfx942, against `CONV_WRW`. Autotune keeps `CONV_WRW` there.
   - Wan 3x3x3 heads on gfx942 gain only 1.1-1.3x.
 - **Precision:** fp32 accumulation. Forward and backward data sum every output element in one thread, in a fixed order, and round once. Backward weights add fp32 partials in split order. Deterministic, no atomics. No numerical notes.
-- **Instances:** 8554 configs. Forward has 2476 and backward data 2740, in 14 catalog files per direction. Backward weights has 3338.
+- **Instances:** 8758 configs. Forward has 2572 and backward data 2848, in 14 catalog files per direction. Backward weights has 3338.
 
 ## Why it exists
 
@@ -118,7 +118,7 @@ The steps (images x planes x bands x strips) split across blocks into fp32 parti
   - Tiles per atom family are taken from a sweep over output-layer, stem and 3-D shapes on gfx950, gfx908 and gfx1101.
   - MFMA: `64x1` with prefetch 3, plus the streaming `32x2`; on 3-D, also `64x2` over 8 waves.
   - WMMA: the streaming `32x2` and `64x2` over 8 waves; on 3-D, also `64x1`.
-  - The vector ALU: `32x4` and `64x2`; on 3-D, also the streaming `32x2`.
+  - The vector ALU: `32x4`, `64x2` and `32x2` (whose 64 product rows carry 8-channel heads within 64 KiB); on 3-D, also the streaming `32x2`.
   - Configs whose A buffers would exceed 128 VGPRs, or whose LDS exceeds the ship group's, are not generated.
   - Each config is admitted on correctness alone, and autotune picks.
 

@@ -104,8 +104,14 @@ TILES = {
     "mfma": ([A_TILE, B_TILE], [A_TILE, C_TILE, B_TILE]),
     "wmma": ([B_TILE, C_TILE], [C_TILE, A_TILE, B_TILE]),
     "valu": (
-        [(32, 4, 4, 2, 0, 0), (64, 2, 4, 2, 0, 0)],
-        [(32, 4, 4, 2, 0, 0), (64, 2, 4, 2, 0, 0), (32, 2, 4, 2, 0, 1)],
+        # 32x2 (64 rows of products) also carries the 8-channel heads within 64 KiB.
+        [(32, 4, 4, 2, 0, 0), (64, 2, 4, 2, 0, 0), (32, 2, 4, 2, 0, 0)],
+        [
+            (32, 4, 4, 2, 0, 0),
+            (64, 2, 4, 2, 0, 0),
+            (32, 2, 4, 2, 0, 1),
+            (32, 2, 4, 2, 0, 0),
+        ],
     ),
 }
 # A step's A fragments live in registers (CN_PD + 1 buffers): at most this many VGPRs.
