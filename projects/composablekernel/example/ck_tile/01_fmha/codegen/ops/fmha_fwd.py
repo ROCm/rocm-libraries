@@ -1684,6 +1684,12 @@ class KernelComponentFactoryGfx1151(KernelComponentFactoryGfx115):
         return pipeline.F_dropout == "f" and pipeline.F_dpad == "f"
 
     @classmethod
+    def check_d64_tile(cls, tile, pipeline) -> bool:
+        if cls._stages_whole_kv(tile):
+            return cls._is_plain(pipeline)
+        return KernelComponentFactoryGfx115.check_d64_tile(tile, pipeline)
+
+    @classmethod
     def check_d128_tile(cls, tile, pipeline) -> bool:
         if cls._is_plain(pipeline):
             return cls._stages_whole_kv(tile)
@@ -1695,6 +1701,16 @@ class KernelComponentFactoryGfx1151(KernelComponentFactoryGfx115):
     def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
         result = super().get_hdim_tile_size_dict(dtype)
         if dtype in cls._DT_FP16_BF16:
+            # num_cus is HIP's multiProcessorCount, which counts WGPs (2 CUs) here.
+            few_blocks = "get_num_blocks(64) <= 2 * num_cus"
+            # Whole-K/V staging loses to QK32/PV32 with few blocks and on key loops of
+            # up to four 64-key steps.
+            k64_d64_constraint = (
+                "(a.max_seqlen_q <= 8192 || "
+                "t.bias_type == bias_enum::elementwise_bias) && "
+                f"!({few_blocks}) && a.seqlen_k > 256"
+            )
+            result[(64, 64)] = [FmhaFwdTileSize( 64,  64,  64,  64,  64,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint(k64_d64_constraint))] + result[(64, 64)]  # fmt: skip
             result[(128, 128)] = [FmhaFwdTileSize( 64,  32, 128, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)] + result[(128, 128)]  # fmt: skip
         return result
 

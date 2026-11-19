@@ -80,6 +80,14 @@ class TestGfx1151Codegen(unittest.TestCase):
 
         self.assertEqual(tiles("gfx1151"), tiles("gfx1150"))
 
+    def test_d64_plain_keeps_the_family_tile_as_fallback(self):
+        d64 = {
+            (k.F_tile.F_bm0, k.F_tile.F_bn0, k.F_tile.F_bk0)
+            for k in _kernels(["gfx1151"])
+            if k.F_hdim == 64 and _plain(k) and k.F_pipeline.F_bias == "bias"
+        }
+        self.assertEqual(d64, {(64, 64, 64), (64, 64, 32)})
+
 
 if __name__ == "__main__":
     unittest.main()
