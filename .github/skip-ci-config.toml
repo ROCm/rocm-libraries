@@ -92,6 +92,9 @@ common = [
     ".github/workflows/pre-commit.yml",
     ".github/workflows/shared-ctest-ci.yml",
     ".github/workflows/update-docs.yml",
+    # Scripts only those workflows run.
+    ".github/scripts/gfx1250_blas_tests.py",
+    ".github/scripts/scrub_test_log.py",
 ]
 
 # Patterns that skip CI only on Linux (e.g., Windows-only projects)
