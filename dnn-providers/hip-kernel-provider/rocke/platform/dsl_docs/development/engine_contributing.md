@@ -106,7 +106,7 @@ PYTHONPATH="$PY" python3 -m tests/instances/differential/run_diff.py --mode ir -
 `--mode ir --canonical` is the diagnostic lens: it separates a genuine
 divergence (`STRUCT_DRIFT`) from harmless SSA-id renumbering (`CANON_EQUAL`).
 Most "I changed the builder and the `.ll` is identical but the IR differs"
-surprises are the latter — see [`invariants.md`](./invariants.md#the-ir-builder-must-emit-operands-left-to-right).
+surprises are the latter — see [`invariants.md`](./invariants.md#2-the-ir-builder-must-emit-operands-left-to-right).
 
 ### Transitional state: when "red" vs this tree is expected
 
