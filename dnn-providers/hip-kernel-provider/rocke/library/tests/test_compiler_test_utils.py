@@ -1,7 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The skip policy every compile test shares (``_compiler_test_utils``).
+"""How the library's compile tests apply the platform's compiler-tool policy
+(``rocke.tests.compiler_tools``, through ``_compiler_test_utils``).
 
 CPU only. Each error is a real one from the committed option table: a
 compiler whose LLVM major the table records as refusing the option
@@ -22,13 +23,11 @@ from rocke.core.ir import KernelDef, Region
 from rocke.runtime import comgr
 from rocke.runtime.comgr import CompilerInfo
 from rocke.runtime.compiler_options import measured_answers, require_accepted
+from rocke.tests.compiler_tools import REQUIRE_COMPILER_TOOLS_ENV
 
 from . import _attention_bwd_resources
 from ._attention_bwd_resources import compile_or_skip
-from ._compiler_test_utils import (
-    REQUIRE_COMPILER_TOOLS_ENV,
-    skip_where_compiler_refuses_option,
-)
+from ._compiler_test_utils import skip_where_compiler_refuses_option
 
 OPTION = "-amdgpu-mfma-vgpr-form"
 # How the refusal starts, and how the policy introduces it.

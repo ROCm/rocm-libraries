@@ -56,6 +56,7 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     UniformPart,
 )
 from rocke.helpers.tiling.tensor_transforms.walk import split_coordinate
+from rocke.tests.comgr import require_comgr_target
 from rocke.tests.engines import lower_with_both_engines
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
@@ -932,23 +933,11 @@ def test_every_golden_case_lowers_to_the_same_ir_in_both_engines(case, arch, fla
     assert lower_with_both_engines(_golden_kernel(case), arch, flavor)
 
 
-def _require_comgr_target(arch: str) -> None:
-    """Skip when the loaded comgr cannot target ``arch`` (an older ROCm lacks the newest
-    targets); after this, any compile error is the kernel's and fails the test."""
-    comgr = pytest.importorskip("rocke.runtime.comgr")
-    try:
-        isas = comgr.supported_isas()
-    except comgr.ComgrError as exc:
-        pytest.skip(f"comgr unavailable: {exc}")
-    if arch not in {name.split("--")[-1].split(":")[0] for name in isas}:
-        pytest.skip(f"the loaded comgr cannot target {arch}")
-
-
 @pytest.mark.parametrize("arch", GOLDEN_ARCHES)
 @pytest.mark.parametrize("case", sorted(GOLDEN_CASES))
 def test_every_golden_case_compiles(case, arch):
     compile_kernel = pytest.importorskip("rocke.helpers.compile").compile_kernel
-    _require_comgr_target(arch)
+    require_comgr_target(arch)
     assert compile_kernel(_golden_kernel(case), arch=arch).hsaco
 
 

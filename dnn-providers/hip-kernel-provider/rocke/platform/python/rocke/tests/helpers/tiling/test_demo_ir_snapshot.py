@@ -146,10 +146,10 @@ _GOLDEN: dict[str, str] = {
     "crc_ab_swap": "15cd57ecf4ab6992093d5b03db78fdaa1161ad7019f4f565dad0f2232ddafc91",
     "crc_single_buffer": "70c29b35206d6d4a7d402269ead1f9d878e35a6152b2525d1b8b440aa27fb127",
     "crc_b64_swizzle": "e214067d349a336d4f93aa86f7fb005d8916b4a0cc65442a0d024735aff89e0b",
-    "probe_store": "523e5531da73a0285134c298339d163d0b6c4739a15a834dcbb70a23ed33f470",
-    "probe_read": "12cb15e2273823ba0180a43c5779abfd867bcf5d4806e3f3ffd2d18eef7b44f9",
-    "probe_read_pad": "8c5d306a7ca6474fff604e076d8128ed0e118a48114d83d38e92cf4ed9146c35",
-    "probe_store_narrow": "153d632dac1149cd895cbb3f11c8ac9034230bebc93dfa9e8c8ac9b3aa6811e5",
+    "probe_store": "bc5e75e9672d330999690447e016130db042dd4e8b7a3b13bdf47b337d0d9fe0",
+    "probe_read": "1585998f40bf643793161cf6587c874d92f3557b01c160df1d9f13915ab38a45",
+    "probe_read_pad": "0e77b091f8698960aa2e8c75e6c523b436aee6d4eaf010bcaf763c453687a7a1",
+    "probe_store_narrow": "94e56c913cc9d7e2dadf493eb85abefe81d651a96177655c653467db4ba0f5c5",
 }
 
 

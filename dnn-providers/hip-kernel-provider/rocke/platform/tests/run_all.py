@@ -5,14 +5,15 @@
 # Cross-platform (Windows + Linux) CI/parent entrypoint for the rocKE engine.
 # One command runs: (1) the relative-path contract guard, (2) the byte-identity
 # gate, (3) the pytest suite, (4) the same suite again under ROCKE_BACKEND=both
-# when the engine extension is importable, (5) ctest if a build dir exists. All
-# paths are derived relative to this file so the rocke/platform/ tree is
+# when the engine extension is importable, (5) the backend access-width gate, a
+# compile check kept out of pytest discovery, (6) ctest if a build dir exists.
+# All paths are derived relative to this file so the rocke/platform/ tree is
 # copy-able verbatim.
 #
 # Usage:
 #   python rocke/platform/tests/run_all.py [--no-guard] [--no-gate] [--no-pytest]
-#       [--no-both] [--only SUBSTR] [--only-ir SUBSTR] [--build-root DIR]
-#       [--config CONFIG] [--pytest-target PATH_OR_NODE_ID]
+#       [--no-both] [--no-backend-width] [--only SUBSTR] [--only-ir SUBSTR]
+#       [--build-root DIR] [--config CONFIG] [--pytest-target PATH_OR_NODE_ID]
 #
 # The two filters are separate by *vocabulary*, not by gate. `--only` selects
 # *families* for the byte-identity gate; `--only-ir` selects *case ids*
@@ -24,7 +25,8 @@
 # valid where the user aimed it. Any new corpus gate belongs on `--only-ir`.
 #
 # Filtering is separate from skipping: an unfiltered gate still runs in full;
-# use `--no-gate` / `--no-ir-validity` / `--no-arch-domain` to opt out of one.
+# use `--no-gate` / `--no-ir-validity` / `--no-arch-domain` /
+# `--no-backend-width` to opt out of one.
 
 from __future__ import annotations
 
@@ -453,6 +455,47 @@ def differential_pytest_pass(env: dict[str, str], targets: list[str]) -> int:
     ).returncode
 
 
+# A check that compiles kernels is kept out of ordinary pytest discovery
+# (TESTING.md, section 5.0.1), so this runner names it as a stage of its own. Its
+# installed twin is the CTest entry rocke_tiling_backend_width_pytest, whose
+# per-test bound this stage keeps (tests/test_engine_linkage.py checks the two
+# agree).
+_BACKEND_WIDTH_CHECK = Path("helpers", "tiling", "check_backend_access_width.py")
+BACKEND_WIDTH_TEST_TIMEOUT_S = 60
+
+
+def backend_width_gate() -> int:
+    """Run the tiling layer's backend access-width check (rocke.tests.helpers.tiling).
+
+    It compiles a few copy kernels through COMGR and requires every global access
+    in their code objects to move the width the tiling layer plans. Without COMGR,
+    llvm-objdump or llvm-readelf it skips and the skip is reported; the stage
+    inherits the caller's environment, so ROCKE_REQUIRE_COMPILER_TOOLS=1 makes
+    those skips failures. The module is
+    resolved from the imported ``rocke`` package, so the stage runs the same file
+    in a source checkout and in an installed tree.
+    """
+    from rocke.tests import subprocess_launcher
+
+    check = Path(subprocess_launcher.__file__).resolve().parent / _BACKEND_WIDTH_CHECK
+    print("\n== backend access-width gate ==")
+    command = subprocess_launcher.rocke_python_command(
+        "-m",
+        "pytest",
+        "-c",
+        str(TESTS / "pytest.ini"),
+        str(check),
+        "-rs",
+        f"--timeout={BACKEND_WIDTH_TEST_TIMEOUT_S}",
+    )
+    return subprocess.run(
+        command,
+        check=False,
+        cwd=str(TESTS),
+        env=subprocess_launcher.rocke_subprocess_env(),
+    ).returncode
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="rocKE test/validation runner")
     ap.add_argument("--no-guard", action="store_true")
@@ -473,6 +516,12 @@ def main() -> int:
         "--no-both",
         action="store_true",
         help="skip the ROCKE_BACKEND=both differential pytest pass",
+    )
+    ap.add_argument(
+        "--no-backend-width",
+        action="store_true",
+        help="skip the backend access-width gate (compile copy kernels through "
+        "COMGR and check the width of every global access)",
     )
     ap.add_argument(
         "--only",
@@ -576,6 +625,9 @@ def main() -> int:
 
     if not args.no_pytest and not args.no_both:
         status |= differential_pytest_pass(pytest_env, selected_pytests)
+
+    if not args.no_backend_width:
+        status |= backend_width_gate()
 
     build_root = Path(args.build_root)
     # Run the entire registered suite once any executable is built; partial

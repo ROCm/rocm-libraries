@@ -452,7 +452,24 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             assert command[configuration] == f"{test_ctest_rel}tests/pytest.ini"
             assert command[configuration + 1 : command.index("-v")] == paths, name
             assert command[-2:] == ["-m", marker_expression], name
+        # The backend width check is outside ordinary discovery, so its entry
+        # names its one file and the tiling entries above never collect it.
+        width_check = next(
+            test
+            for test in tests
+            if test["name"] == "rocke_tiling_backend_width_pytest"
+        )["command"]
+        configuration = width_check.index("-c") + 1
+        assert width_check[configuration] == f"{test_ctest_rel}tests/pytest.ini"
+        assert width_check[configuration + 1 : width_check.index("-v")] == [
+            f"{tiling_tree}/check_backend_access_width.py"
+        ]
+        # tests/run_all.py runs the same file as a stage of its own, under the
+        # same per-test bound.
+        run_all = load_driver("rocke_run_all", PLATFORM / "tests" / "run_all.py")
+        assert width_check[-1] == f"--timeout={run_all.BACKEND_WIDTH_TEST_TIMEOUT_S}"
         expected_tiling_environment = {"PYTHONPATH": package_root}
+        expected_backend_width_environment: dict[str, str] = {}
         library_pythonpath = os.pathsep.join(
             (f"{test_ctest_rel}tests/library", package_root)
         )
@@ -497,6 +514,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             expected_platform_environment.update(compiler_environment)
             expected_tiling_environment.update(compiler_environment)
             expected_mla_environment.update(compiler_environment)
+            expected_backend_width_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
             expected_mla_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
             expected_counted_isa_environment.update(compiler_environment)
 
@@ -508,6 +526,13 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             assert environment_for(tests, part) == expected_platform_environment
         for name in tiling_entries:
             assert environment_for(tests, name) == expected_tiling_environment
+        # The width check takes the tiling environment plus the compiler
+        # requirement policy, so it fails rather than skips where the tools
+        # should be.
+        assert environment_for(tests, "rocke_tiling_backend_width_pytest") == {
+            **expected_tiling_environment,
+            **expected_backend_width_environment,
+        }
         if has_library:
             assert (
                 environment_for(tests, "rocke_library_mla_pytest")
@@ -697,10 +722,10 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     the parts, rocke_tiling_gpu_pytest like the library's GPU entry, and
     rocke_tiling_visualization_pytest in the comprehensive tier only, which
     pull-request and push CI (quick and standard) do not select.
-    rocke_ctest_shard_pytest, rocke_library_gdn_pytest and
-    rocke_library_conv_fwd_aot_packaging_pytest run in the standard,
-    comprehensive and full tiers and not in the quick tier. Another category
-    keeps rocke_library_gdn_pytest and
+    rocke_ctest_shard_pytest, rocke_tiling_backend_width_pytest,
+    rocke_library_gdn_pytest and rocke_library_conv_fwd_aot_packaging_pytest run
+    in the standard, comprehensive and full tiers and not in the quick tier.
+    Another category keeps rocke_library_gdn_pytest and
     rocke_library_conv_fwd_aot_packaging_pytest in the ffm-quick tier."""
     _, ctest_dir = configure_installed_ctest(tmp_path)
     names = [test["name"] for test in list_installed_ctests(ctest_dir)]
@@ -713,6 +738,7 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     ]
     assert set(tiling_entries) <= set(names)
     assert "rocke_ctest_shard_pytest" in names
+    assert "rocke_tiling_backend_width_pytest" in names
     future_part = "rocke_pytest_fp8_group2"
     labels = provider_category_labels(
         [
@@ -721,6 +747,7 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
             *tiling_entries,
             "rocke_library_gpu_pytest",
             "rocke_ctest_shard_pytest",
+            "rocke_tiling_backend_width_pytest",
             "rocke_library_gdn_pytest",
             "rocke_library_conv_fwd_aot_packaging_pytest",
         ],
@@ -736,6 +763,7 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     assert labels.get("rocke_tiling_visualization_pytest") == {"comprehensive", "full"}
     standard_entries = [
         "rocke_ctest_shard_pytest",
+        "rocke_tiling_backend_width_pytest",
         "rocke_library_gdn_pytest",
         "rocke_library_conv_fwd_aot_packaging_pytest",
     ]
