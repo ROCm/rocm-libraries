@@ -20,7 +20,13 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Tuple
 
-from rocke.core import GemmLowerResult, import_engine, lower_family, name_of
+from rocke.core import (
+    GemmLowerResult,
+    import_engine,
+    lower_family,
+    lower_kernel_python,
+    name_of,
+)
 from rocke.core.codegen_policy import scheduler_strategy_reason
 
 #: The extension that binds the conv families' C++ mirrors.
@@ -31,13 +37,10 @@ def _lower_python(kernel: Any, arch: str) -> str:
     """Lower a built kernel with the Python lowerer, unconditionally.
 
     Every ``py_fn`` handed to :func:`rocke.core.lower_family` is the Python
-    side of the ``python`` / ``both`` selection, so it must not re-resolve the
-    backend: the public ``lower_kernel_to_llvm`` dispatches on
-    ``ROCKE_BACKEND`` and would run the C++ lowerer, which makes ``"both"``
-    compare C++ against C++."""
-    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-
-    return _lower_kernel_to_llvm_python(kernel, arch=arch)
+    side of the ``python`` / ``both`` selection, so it lowers through
+    :func:`rocke.core.lower_kernel_python`, which never re-resolves the
+    backend (see there)."""
+    return lower_kernel_python(kernel, arch=arch)
 
 
 def _reject_unknown_sched(spec: Any, arch: str) -> None:

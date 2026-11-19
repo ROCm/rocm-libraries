@@ -6,8 +6,8 @@
 Python half of ``backend="both"``. If ``py_fn`` called the public
 ``lower_kernel_to_llvm`` it would re-resolve the backend from the environment,
 so ``"python"`` could silently run the C++ lowerer and ``"both"`` would compare
-C++ against C++. The bridge therefore calls ``_lower_kernel_to_llvm_python``
-directly.
+C++ against C++. The bridge therefore lowers through
+``rocke.core.lower_kernel_python``, which calls ``_lower_kernel_to_llvm_python``.
 
 * :class:`TestPyFnIsPythonOnly` replaces the dispatching lowerer and the C++
   engine with stubs that fail the test, then lowers one spec per family with
@@ -333,7 +333,7 @@ def _engine_must_not_run(*_a, **_k):
 def _dispatch_must_not_run(*_a, **_k):
     raise AssertionError(
         "py_fn went through the backend-resolving lowerer; it must call "
-        "_lower_kernel_to_llvm_python"
+        "rocke.core.lower_kernel_python"
     )
 
 
