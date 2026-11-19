@@ -58,16 +58,3 @@ def test_partial_storage_word_is_refused(dtype, count):
         storage_vector_type(dtype_to_ir_type(dtype), count)
     with pytest.raises(ValueError, match="not a whole number of 32-bit registers"):
         mma_operand_ir_type(dtype, count)
-
-
-def test_compatibility_exports_delegate_to_the_core_contracts():
-    from rocke.helpers import mma_io
-    from rocke.helpers.packing import pack_fragment_bits
-    from rocke.helpers.tiling.compat import load_matrix_fragment
-
-    assert mma_io.storage_ir_type is storage_ir_type
-    assert mma_io.storage_element_type is storage_element_type
-    assert mma_io.storage_vector_type is storage_vector_type
-    assert mma_io.mma_operand_ir_type is mma_operand_ir_type
-    assert mma_io.pack_fragment_bits is pack_fragment_bits
-    assert mma_io.load_matrix_fragment is load_matrix_fragment

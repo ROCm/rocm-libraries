@@ -22,10 +22,12 @@
 #include <string.h>
 
 #include "rocke/error.hpp"
-#include "rocke/helper_rocke.helpers.mma_io.h"
+#include "rocke/helper_rocke.helpers.packing.h"
 #include "rocke/helper_rocke.helpers.quant.h"
 #include "rocke/ir_serialize.h"
+#include "rocke/ir_storage.h"
 #include "rocke/lower_hip.h"
+#include "rocke/tiling_compat.h"
 #include "rocke/wmma_scale_internal.h"
 
 #define CHECK(x)                                                       \

@@ -34,9 +34,7 @@ from rocke.core.storage import (
     FragmentPacking,
     MatrixFragmentLayout,
 )
-from rocke.core import ir_storage, mma_operand
 from rocke.core.ir_storage import storage_ir_type
-from rocke.helpers import mma_io
 from rocke.helpers.packing import pack_fragment_bits
 from rocke.helpers.tiling.compat import load_matrix_fragment
 from rocke.tests.engines import ENGINES, assert_engine_rejects_hip
@@ -62,15 +60,6 @@ CASES = [
     "pack_scale_bytes_i32",
     "pack_scale_bytes_i64",
 ]
-
-
-def test_legacy_module_reexports_split_helpers():
-    assert mma_io.load_matrix_fragment is load_matrix_fragment
-    assert mma_io.pack_fragment_bits is pack_fragment_bits
-    assert mma_io.mma_operand_ir_type is mma_operand.mma_operand_ir_type
-    assert mma_io.storage_ir_type is ir_storage.storage_ir_type
-    assert mma_io.storage_element_type is ir_storage.storage_element_type
-    assert mma_io.storage_vector_type is ir_storage.storage_vector_type
 
 
 def build_transport(dtype):

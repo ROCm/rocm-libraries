@@ -112,10 +112,12 @@ not an assumption that vector construction or padding is free.
 
 ### Raw-layout compatibility
 
-The former `helpers.mma_io` module is now a compatibility re-export only.
-Its retained `load_matrix_fragment` adapter lives in `helpers/tiling/compat.py`
-and delegates actual loads to the same internal storage policy used by the
-fragment verb. It takes a dtype, raw fragment layout, caller-selected row base,
+The former `helpers.mma_io` import and matching native header are removed.
+Use `core.ir_storage` for storage types, `core.mma_operand` for logical operand
+vectors, and `helpers.packing` for encoded-pattern packing. The raw-layout
+`load_matrix_fragment` adapter lives in `helpers/tiling/compat.py` (native:
+`rocke/tiling_compat.h`) and delegates actual loads to the same internal storage
+policy used by the fragment verb. It takes a dtype, raw fragment layout, caller-selected row base,
 lane group, and K origin. `row_base` counts pointer storage units. The optional
 `alignment_bytes` (default 1) guarantees alignment at that row address, before
 the loader adds K and lane/chunk offsets. For a buffer aligned to 16 bytes with

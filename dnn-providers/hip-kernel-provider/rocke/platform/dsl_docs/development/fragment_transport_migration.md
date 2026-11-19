@@ -5,8 +5,8 @@ SPDX-License-Identifier: MIT -->
 
 The gfx950 and gfx1250 block-scaled GEMM builders and the gfx942 TF32 probe
 now use the public tiling `load_fragment` and `store_fragment` verbs, including
-the existing native mirrors. The old `mma_io` entry points remain as
-compatibility forwards; raw byte-padded rows and wider slots use the tiling
+the existing native mirrors. The old `mma_io` import and native include are
+removed. Raw byte-padded rows and wider slots still use the raw-layout tiling
 adapter rather than a second transport implementation. New kernels should use
 the descriptor-driven verbs directly.
 
