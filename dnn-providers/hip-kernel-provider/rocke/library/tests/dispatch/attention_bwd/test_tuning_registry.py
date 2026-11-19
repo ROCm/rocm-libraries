@@ -247,9 +247,11 @@ def _value_knobs(name, value) -> dict:
 
 
 def _legal_somewhere(name, value) -> str | None:
-    """An arch where ``name = value`` is legal and built, or None."""
-    for ctx in _CONTEXTS.get(name, ({},)):
-        for use_pool in (False, True):
+    """An arch where ``name = value`` is legal and built, or None. Every
+    context is tried on its own before any is tried on the geometry pools,
+    which take minutes to build on gfx950."""
+    for use_pool in (False, True):
+        for ctx in _CONTEXTS.get(name, ({},)):
             for arch in BWD_ARCHS:
                 for d in (64, 128, 32):
                     bases = _pool(arch, d) if use_pool else ({},)
