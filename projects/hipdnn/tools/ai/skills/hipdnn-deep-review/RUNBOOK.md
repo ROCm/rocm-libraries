@@ -19,9 +19,17 @@ results; `init` derives it itself). `$TARGET` is the PR's base branch (a stacked
 `develop`), `develop` for `branch:<name>` unless told otherwise (`--target`), or the left side
 of a range.
 
+Before `init` of a PR review, link the comments already posted to their findings, once per
+`posted.tsv` found: the `posted:<file>` input, else every `$EVIDENCE/r*/comments/*/posted.tsv`
+([report.md](report.md) *posted.tsv*). Linking is idempotent and needs no thread data:
+
+```bash
+ledger.py link "$EVIDENCE" <N> --from <posted.tsv>   # or: ledger.py link "$EVIDENCE" <N> <comment URL> <ID>
+```
+
 ```bash
 python3 <skill dir>/scripts/pin.py init --evidence <evidence dir> --scratch <scratch dir> \
-  --round <N> --owner-repo <owner>/<repo> [--clone <dir>] \
+  --round <N> --owner-repo <owner>/<repo> [--clone <dir>] [--reviewer <gh login>] [--since <time>] \
   --pr <pr>   # or: --branch <name> [--target <base>]   or: --range <base>..<head>
 ```
 
@@ -45,7 +53,17 @@ python3 <skill dir>/scripts/pin.py init --evidence <evidence dir> --scratch <scr
 - adds the sparse worktrees `$REPO` (at `$HEAD`) and `$REPO_BASE` (at `$BASE`) and checks
   both are at their SHAs;
 - for a PR saves `pr/pr.json` (with GitHub's `mergeStateStatus` and `mergeable`; nothing gates on them), `body.md`, `inline.json`, `files.json`, `checks.tsv` and the plain-text `branch.txt`, `pr-text.txt`, `pr-comment.txt` and `pr-inline.txt`, and
-  checks `$HEAD` against `headRefOid` and the file counts (below).
+  checks `$HEAD` against `headRefOid` and the file counts (below);
+- writes `Pinned:` (UTC) and, for a PR, `Reviewer:` (`--reviewer`, else `gh api user`) to `PIN.md`;
+- for a PR, thread intake: saves every review thread (GraphQL `reviewThreads`; a failed read
+  fails `init`, with no REST fallback) as `pr/threads.json`, fills `State`, `Last reply` and
+  `Round seen` of the ledger's Threads rows, writes `threads.md` (all threads, with logins) and
+  `reply-affected.txt` (the findings whose linked thread has a reply by someone other than the
+  reviewer since the previous round's `Pinned:`, else `--since`; `--since` is required when that
+  round has no `Pinned:`), and prints `unlinked: <URL>` for each thread no row links and
+  `mismatch:` for a resolved thread whose finding is `OPEN` or `UNVERIFIED` and an unresolved
+  thread whose finding is closed. Nothing is linked by inference: link an `unlinked:` thread by
+  hand with `ledger.py link`. Thread state never changes a finding.
 
 `. <evidence dir>/r<N>/env.sh` exports every `PIN.md` variable among `SKILL EVIDENCE SCRATCH
 CLONE KEY TARGET TARGET_TIP HEAD HEAD_SHORT BASE REPO REPO_BASE KNOWLEDGE`, fails when `EVIDENCE`,
@@ -121,7 +139,9 @@ two `numstat.txt` rows; a binary file `-<TAB>-<TAB>path` is one owned file of ze
 It cannot judge context: edit `owners.tsv` by hand for what only judgment decides.
 
 - A total at or under the target is one lane. Split only for distinct contexts (areas that
-  share no contracts) and record why in the ledger Lanes table.
+  share no contracts) and record why in the ledger Lanes table. When one `CORR<k>` would own
+  two or more separate implementations of the same contract (say a Python and a native
+  runtime path), split it by subsystem even under the target and record why there.
 - Keep a header with its implementation and a producer with its consumer. `plan` keeps a changed test with its changed source:
   `test_<x>.py` or `Test<X>.cpp` pairs with every changed non-test file whose stem is `<x>` (case-insensitive) when they share a directory (`X.cpp` and `X.hpp`),
   in their area group; a test with no such file, or same-stem files in several directories, stays where its own area puts it. A pair over the target gets its own lane.
@@ -147,11 +167,13 @@ its trigger holds, else mark it `N/A`; when unsure, run it.
 | `API` | [public-api](lanes/public-api.md) | Public surfaces, behavior changes in source, docs of new public declarations | A file in the brief's surfaces table, or non-test source under `projects/hipdnn/` or `dnn-providers/`, changes |
 | `ROCK` | [therock](lanes/therock.md) | Whether TheRock CI builds and tests the change: skip-ci, job, family and tier selection, flags, RPATH, CTest files, artifact split, target-neutral outputs, Windows lookup and path length, tier timeout baselines. Its timeout projection against what `RUN` measured is the follow-up `ROCK-f1` | Non-documentation file changes |
 | `LEAK` | [leaks](lanes/leaks.md) | Private information in the change and in review output | Always |
+| `DESIGN` | [design](lanes/design.md) | The contract the change adds or alters, its layer and owner, the history behind the code it changes, extensions it forecloses | Non-documentation file changes |
 | `DUP` | [dedup](lanes/dedup.md) | Reuse of existing code; repetition within the change | Code is added |
 | `DOCS` | [docs](lanes/docs.md) | Accuracy and concision of docs and comments, including edited public headers | A documentation or source file changes |
 | `DRIFT` | [drift](lanes/drift.md) | The change merged onto the target's current tip: conflicts, broken target-side contracts, tests on the merge | `drift.txt` says `Trigger: yes` |
 | `RUN` | [build-validate](lanes/build-validate.md) | Building the head and running the relevant tests | Always |
 | `IMPACT` | [runtime-impact](lanes/runtime-impact.md) | Kernel ABI and dispatch contracts of the kernel ingestor (kernarg lists, launch surfaces, matchers, descriptors, generic targets) at base, head and the merged tree; which shipped variants change and which device runs would settle it | A file under `dnn-providers/hip-kernel-provider/`, `projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/` (any plugin SDK header: the report works out which ones the descriptor loader includes), `projects/hipdnn/tools/IngestorGenerator/`, `projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json` or `projects/hipdnn/plugin_sdk/cmake/GpuGenericTargets*` changes |
+| `APPL` | [applicability](lanes/applicability.md) | Graphs an engine accepts but cannot serve: reachable properties by version and schema, unread or loose gates, sibling drift, bypass paths, version raises and schema or floor changes, decline tests | A file under `dnn-providers/`, `projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/` or `projects/hipdnn/flatbuffers_sdk/schemas/` changes |
 
 `ORCH` (process findings you file), `SCOUT<k>`, `SYNTH` ([orient](lanes/orient.md)) and `VER`
 ([verify](lanes/verify.md)) are not partition choices. Merge two lanes into one agent when the
@@ -168,7 +190,7 @@ ledger.py seed "$EVIDENCE" <N> --lane 'DEPS=N/A (no manifest or source changes)'
 
 `packets` writes `packets/<LANE>.md` ([lanes/common.md](lanes/common.md) *Context packet*) for
 each lane of `owners.tsv` and each concern lane in `--lanes` (changed files in scope with their
-`numstat` rows, areas and Orient paths; BUILD, DEPS and IMPACT scope to their trigger files and print
+`numstat` rows, areas and Orient paths; BUILD, DEPS, IMPACT and APPL scope to their trigger files, and DESIGN to the non-documentation files; each prints
 `<LANE>: no changed file in scope, N/A` when none; `DRIFT` adds `drift.txt` and prints
 `DRIFT: N/A (<reason>)` when its trigger is `no` (give that reason to `seed` with `--lane`); every other concern lane takes all changed
 files, so name only lanes whose trigger holds; `--parent` is the stack parent). In round 2 on,
@@ -204,22 +226,23 @@ Agents:    <maximum concurrent agents>
 Cores:     <CPU cores for builds and tests>
 Mutation:  <host-provided recipe or wrapper command for mutating a built tree> | none
 Scope:     <user's scope notes, e.g. areas being deprecated; "do not file findings in <area>"> | none
+Hazard knowledge: <directory of engine-applicability hazard notes, distinct from $KNOWLEDGE> | none
 ```
 
-`Agents:`, `Cores:`, `Mutation:` and `Scope:` are inputs from the user or the host; the skill assumes no values. Dispatch each lane, scout, verifier and the
+`Agents:`, `Cores:`, `Mutation:`, `Scope:` and `Hazard knowledge:` are inputs from the user or the host; the skill assumes no values. Dispatch each lane, scout, verifier and the
 writer as its own fresh agent with shell and write access; fill this template as its first
 message. Agents see only their dispatch: each begins by reading `dispatch-context.md`.
 
 **Queue.** Run at most `Agents:` agents at once, in this priority order: `RUN` first, then `DRIFT`, then
 `IMPACT` (its emitter builds every shipped variant twice), then the
-longest lanes (largest `CORR<k>`, then `TESTQ`), `DUP` and `DOCS` last. `RUN`, `DRIFT`, an approved
+longest lanes (largest `CORR<k>`, then `TESTQ`, then `DESIGN`), `DUP` and `DOCS` last. `RUN`, `DRIFT`, an approved
 `ROCK` build, `ROCK`'s configure diff (`Build host: yes`), or any other lane that builds or mutates, run concurrently in their own `$SCRATCH` trees and
 split `Cores:` between them while they overlap, `RUN` taking the larger share. `IMPACT`'s emitter does not
 read `Cores:`: it builds the two sides on two concurrent workers, so count two cores against `Cores:` while it runs.
 
 ```markdown
 Role:      <LANE> | SCOUT<k> | SYNTH | VER-<batch> | WRITER; round <N>; follow-up f<k> if any
-Context:   read $EVIDENCE/r<N>/dispatch-context.md first (Env, Approved, Builds, Agents, Cores, Mutation, Scope)
+Context:   read $EVIDENCE/r<N>/dispatch-context.md first (Env, Approved, Builds, Agents, Cores, Mutation, Scope, Hazard knowledge)
 Read:      lanes, verifiers: $SKILL/lanes/common.md, findings.md, policy.md, then <brief path>.
            Scouts, SYNTH: lanes/common.md, lanes/orient.md. WRITER: report.md *REPORT.md*, policy.md
 Inputs:    under $EVIDENCE/r<N>/: PIN.md; pr/body.md or intent.md; CONTEXT.md and the area
@@ -248,7 +271,7 @@ waits; the answer resumes the round (*Iterate*, same head).
 A follow-up dispatch (approved request, decision, Handoff) carries the lane's report path and
 the item only, and writes `lanes/<LANE>-f<k>.md`, numbering IDs after the lane's last `p<n>`.
 
-`AUTH`, `TESTQ`, `DRIFT` and `IMPACT` run in the first fan-out without waiting for `RUN`. When `RUN` returns, dispatch
+`AUTH`, `TESTQ`, `DRIFT`, `IMPACT` and `APPL` run in the first fan-out without waiting for `RUN`. When `RUN` returns, dispatch
 `AUTH-f1` with the `AUTH` and `RUN` report paths: it reconciles the claims and the
 **Consumers** list against `RUN`'s executed counts ([lanes/author-testing.md](lanes/author-testing.md)).
 When `TESTQ` wrote `M1: UNVERIFIED`, also dispatch `TESTQ-f1` with the `TESTQ` and `RUN` report paths: it settles M1 from
@@ -282,7 +305,7 @@ or a grouped row) and why. Re-dispatch a non-conforming report once, naming the 
 2. `ledger.py ids "$EVIDENCE" <N>` assigns final `<LANE>-<n>` IDs (all `CORR<k>` share
    `CORR-<n>`), writes `ID-MAP.md` ([report.md](report.md) *Final IDs*) and adds a candidate
    row per finding; re-running keeps assigned IDs; it exits 1 when a report sits below a nested `r<k>/`
-   directory, holds a finding block it cannot parse, cites a provisional ID no report of the round
+   directory, holds a finding block it cannot parse or `ID:` lines but no Findings section, cites a provisional ID no report of the round
    writes as a block, or reports a provisional ID not of the form `<LANE>-p<n>`.
    Cluster findings with the same location and claim, and those a verifier reported as
    `ORCH: cluster <ID> with <ID>` under **Handoffs**: `ledger.py cluster "$EVIDENCE" <N> <kept ID>
@@ -295,6 +318,8 @@ or a grouped row) and why. Re-dispatch a non-conforming report once, naming the 
    and its published copy; for more, re-dispatch that scout, then `SYNTH`.
 4. Send conflicting findings and each lane's own **Needs human decision** entries to the
    ledger's Open questions table (edit it by hand), citing [policy.md](policy.md) *Precedence*.
+   A verifier's `Needs human decision:` line (`ledger.py verdicts` prints it as
+   `needs-decision: <ID>: ...`) goes there too.
 
 Verify every candidate with an agent that did not report it ([lanes/verify.md](lanes/verify.md)):
 `BLOCKING` and `IMPORTANT` in batches of at most 10 per verifier, grouped by lane;
@@ -329,7 +354,7 @@ from Open questions into Decisions. Run `comments.py draft "$EVIDENCE" <N>` for 
 `## General` item; an `UNVERIFIED` one is marked `(UNVERIFIED: <verifier's Reason>)`. An `OPEN`
 `SUGGESTION` or `FUTURE WORK` finding is its own `## General` item, below a `**<tier>: <kind>**`
 line. Review and edit the
-drafts. Re-dispatch `LEAK` for
+drafts. To turn the findings into curated, posted PR comments after the user has discussed the round, hand off to [hipdnn-review-comments](../hipdnn-review-comments/SKILL.md) with `findings:ledger:$EVIDENCE:<N>`. Re-dispatch `LEAK` for
 its output sweep ([lanes/leaks.md](lanes/leaks.md); output `$EVIDENCE/r<N>/lanes/LEAK-sweep.md`) before the user sees either file; redact each hit it reports in the output and in the published `$KNOWLEDGE` copy (the sweep reads both and fails when the copy is missing), then sweep again. Evidence subdirectories are local-only and not swept.
 `comments.py check-sweep "$EVIDENCE" <N>` exits 0 only when the sweep says `Sweep: clean` and is newer than every file it read; a later edit makes it stale.
 
@@ -337,6 +362,18 @@ its output sweep ([lanes/leaks.md](lanes/leaks.md); output `$EVIDENCE/r<N>/lanes
 `Closure:` line equals the `ledger.py counts` line, and `comments.py check-sweep` exits 0.
 
 ## Iterate
+
+Run `pin.py freshness --evidence "$EVIDENCE" --owner-repo <owner>/<repo> [--pr <pr>] [--reviewer <login>]`
+to choose where to start. It prints one verdict: `stale: base branch changed` (the PR was
+retargeted), `stale: head moved`, `new thread activity` (a comment by someone other than the
+reviewer after the newest round's `Pinned:`) or `fresh`, in that priority, then `next: start
+r<N+1>` or `next: reopen r<N>`; `N/A` when the review has no PR. For a round without `Pinned:`
+(every round before this field, and a published-only round) pass `--prev-head <sha>`,
+`--prev-pinned <time>` (a date alone is 00:00 UTC) and `--prev-target <branch>`; without a
+target it skips the base check and says so. With no `PIN.md` the PR is unknown, so also pass
+`--pr <pr>`, and `--reviewer <login>` when the newest round's `PIN.md` has no `Reviewer:`. Freshness
+ignores movement of the target's tip; re-running `DRIFT` and `IMPACT` follows their own rules
+below.
 
 On a new head, start round N+1 at *Pin and intake*. In *Orient*, copy the previous round's
 `orient/` and `CONTEXT.md`; scout an area the change adds and every area whose file's
@@ -358,7 +395,9 @@ Re-run `DRIFT` whenever the round's `drift.txt` says `Trigger: yes`: the target 
 Re-run `IMPACT` whenever the round's pinned `TARGET_TIP` differs from the tip of its last run: its
 merged view is computed against that tip and goes stale with it. Only *Pin and intake* records a
 tip: a round reopened on the same head keeps its pinned tip, so its `IMPACT` re-run does too.
-Re-verify every affected `OPEN` or `UNVERIFIED` finding. A lane not re-run carries forward
+Re-run `APPL` whenever the round's delta changes a file under its trigger prefixes (an `APPL` lane that was `N/A` runs when a later head adds one).
+Re-verify every affected `OPEN` or `UNVERIFIED` finding, and every finding in `reply-affected.txt`
+(a reply by someone other than the reviewer on its linked thread), whatever its status. A lane not re-run carries forward
 (Coverage and Lanes rows copied, marked `carried from r<M>`).
 
 **Continuing a published review.** Earlier rounds may exist only as a published record that
@@ -366,13 +405,19 @@ someone else ran (`prior:<dir>`): a review folder holding `LEDGER.md` and `r<k>/
 without `PIN.md` or `files.txt`. Before *Pin and intake*, copy its `LEDGER*.md` and every
 `r<k>/` into an empty `$EVIDENCE`, and leave the copies unchanged. `round:` then defaults to
 the next round. Take the previous head and base from the record's round table or the newest
-`REPORT.md` header. Run `ledger.py counts "$EVIDENCE" <k>` on the newest round. For each
+`REPORT.md` header; the record has no `Pinned:`, so pass its date to `pin.py freshness` (*Iterate*) and
+to `pin.py init` as `--since`. Run `ledger.py counts "$EVIDENCE" <k>` on the newest round. For each
 Open questions row the PR has since answered, ask the user and move the answer into Decisions,
 or the new round cannot reach `Closure: CLOSED`. `(not published)` cells in the copies are
 redactions; the scripts accept them.
 
-On the same head, after a decision, approval, new evidence or to re-run a `FAILED` lane, reopen the round at *Merge and
-verify*: record the decision, run the follow-ups, re-verify what it affects and repeat
+On the same head, after a decision, approval, new evidence, new thread activity or to re-run a `FAILED` lane, reopen the round at *Merge and
+verify*. Link any new `posted.tsv` first (*Pin and intake*), then
+`pin.py threads --evidence "$EVIDENCE" --round <N> --owner-repo <owner>/<repo> --pr <pr> [--reviewer <login>] [--since <time>]`
+re-fetches the threads and refreshes `threads.md` and `reply-affected.txt`. A reply is new when it
+came after `--since`, else after round `<N>`'s own `Pinned:`, so the reopened round's list holds the
+replies since it was pinned; `--since` is required when round `<N>` has no `Pinned:`, and `--reviewer`
+when its `PIN.md` has no `Reviewer:`, as in a published-only round. Then: record the decision, run the follow-ups, re-verify what it affects and repeat
 *Synthesize*, updating the round's files in place.
 
 Close a finding only when its proof ([findings.md](findings.md) *Proof per kind*) no longer
