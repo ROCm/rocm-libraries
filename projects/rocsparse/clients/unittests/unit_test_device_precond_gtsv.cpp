@@ -31,6 +31,7 @@
 
 #include "unit_test_device_precond_common.hpp"
 
+#include <sstream>
 #include <string>
 
 using namespace precond_ut;
@@ -700,5 +701,153 @@ TEST_F(PrecondTridiagonal, interleaved_batch_argument_validation)
         EXPECT_EQ(interleaved_solve<double>(
                       handle, alg, m, nullptr, nullptr, nullptr, nullptr, 0, 1, nullptr),
                   rocsparse_status_success);
+    }
+}
+
+// Uniform scaling of a nonsingular tridiagonal system does not change the solution,
+// but the QR kernel used to form |z|^2 and 1/|z|^2 directly. Orders 4 and 17, with
+// scales outside the square root of each format's range. A sentinel of 77 sits on
+// either side of every array the solver writes.
+namespace
+{
+    template <typename T>
+    void run_qr_uniform_scale(rocsparse_handle               handle,
+                              rocsparse_gtsv_interleaved_alg alg,
+                              int32_t                        m,
+                              double                         scale,
+                              bool                           zero_dl = false,
+                              bool                           zero_du = false)
+    {
+        std::ostringstream trace;
+        trace << "qr alg=" << static_cast<int>(alg) << " m=" << m << " scale=" << std::scientific
+              << scale;
+        if(zero_dl)
+            trace << " dl=0";
+        if(zero_du)
+            trace << " du=0";
+        SCOPED_TRACE(trace.str());
+
+        std::vector<T> dl(m), d(m), du(m), rhs(m), want(m);
+        for(int32_t j = 0; j < m; ++j)
+        {
+            dl[j]   = (!zero_dl && j >= 1) ? make_value<T>(-0.5 * scale, 0.2 * scale)
+                                           : make_value<T>(0.0);
+            d[j]    = make_value<T>(4.0 * scale, 0.3 * scale);
+            du[j]   = (!zero_du && j < m - 1) ? make_value<T>(0.75 * scale, -0.1 * scale)
+                                              : make_value<T>(0.0);
+            want[j] = make_value<T>(static_cast<double>(j + 1) / 7.0,
+                                    0.2 * static_cast<double>(j + 1) / 7.0);
+        }
+        for(int32_t j = 0; j < m; ++j)
+        {
+            std::complex<double> b = to_cd(d[j]) * to_cd(want[j]);
+            if(j >= 1)
+                b += to_cd(dl[j]) * to_cd(want[j - 1]);
+            if(j + 1 < m)
+                b += to_cd(du[j]) * to_cd(want[j + 1]);
+            rhs[j] = from_cd<T>(b);
+        }
+
+        const T sentinel = make_value<T>(77.0, 0.0);
+        auto    pad      = [&](const std::vector<T>& v) {
+            std::vector<T> out(static_cast<size_t>(m) + 2, sentinel);
+            for(int32_t j = 0; j < m; ++j)
+                out[static_cast<size_t>(j) + 1] = v[j];
+            return out;
+        };
+
+        device_vector<T> ddl{pad(dl)}, dd{pad(d)}, ddu{pad(du)}, dx{pad(rhs)};
+        ASSERT_TRUE(ddl.ptr && dd.ptr && ddu.ptr && dx.ptr);
+
+        const rocsparse_int batch_count  = 1;
+        const rocsparse_int batch_stride = 1;
+        size_t              buffer_size  = 0;
+        ASSERT_EQ(PRECOND_CALL(T,
+                               gtsv_interleaved_batch_buffer_size,
+                               handle,
+                               alg,
+                               static_cast<rocsparse_int>(m),
+                               ddl.ptr + 1,
+                               dd.ptr + 1,
+                               ddu.ptr + 1,
+                               dx.ptr + 1,
+                               batch_count,
+                               batch_stride,
+                               &buffer_size),
+                  rocsparse_status_success);
+        ASSERT_GT(buffer_size, 0u);
+
+        device_vector<char> buffer{buffer_size};
+        ASSERT_TRUE(buffer.ptr);
+        ASSERT_EQ(PRECOND_CALL(T,
+                               gtsv_interleaved_batch,
+                               handle,
+                               alg,
+                               static_cast<rocsparse_int>(m),
+                               ddl.ptr + 1,
+                               dd.ptr + 1,
+                               ddu.ptr + 1,
+                               dx.ptr + 1,
+                               batch_count,
+                               batch_stride,
+                               buffer.ptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        const auto got = to_host(dx);
+        ASSERT_EQ(got.size(), static_cast<size_t>(m) + 2);
+        EXPECT_DOUBLE_EQ(re(got.front()), 77.0);
+        EXPECT_DOUBLE_EQ(im(got.front()), 0.0);
+        EXPECT_DOUBLE_EQ(re(got.back()), 77.0);
+        EXPECT_DOUBLE_EQ(im(got.back()), 0.0);
+
+        const double tol = is_single_precision<T> ? 1.0e-4 : 1.0e-8;
+        for(int32_t j = 0; j < m; ++j)
+        {
+            const T& got_j = got[static_cast<size_t>(j) + 1];
+            ASSERT_TRUE(std::isfinite(re(got_j)) && std::isfinite(im(got_j))) << "x[" << j << "]";
+            EXPECT_NEAR(re(got_j), re(want[j]), tol) << "x[" << j << "]";
+            EXPECT_NEAR(im(got_j), im(want[j]), tol) << "x[" << j << "]";
+        }
+    }
+}
+
+TEST_F(PrecondTridiagonal, interleaved_qr_uniform_scale_keeps_solution)
+{
+    const rocsparse_gtsv_interleaved_alg algs[]
+        = {rocsparse_gtsv_interleaved_alg_default, rocsparse_gtsv_interleaved_alg_qr};
+    for(const auto alg : algs)
+    {
+        for(const int32_t m : {4, 17})
+        {
+            run_qr_uniform_scale<float>(handle, alg, m, 1.0);
+            run_qr_uniform_scale<float>(handle, alg, m, 1.0e20);
+            run_qr_uniform_scale<float>(handle, alg, m, 1.0e-20);
+            run_qr_uniform_scale<rocsparse_float_complex>(handle, alg, m, 1.0);
+            run_qr_uniform_scale<rocsparse_float_complex>(handle, alg, m, 1.0e20);
+            run_qr_uniform_scale<rocsparse_float_complex>(handle, alg, m, 1.0e-20);
+
+            run_qr_uniform_scale<double>(handle, alg, m, 1.0);
+            run_qr_uniform_scale<double>(handle, alg, m, 1.0e200);
+            run_qr_uniform_scale<double>(handle, alg, m, 1.0e-200);
+            run_qr_uniform_scale<rocsparse_double_complex>(handle, alg, m, 1.0);
+            run_qr_uniform_scale<rocsparse_double_complex>(handle, alg, m, 1.0e200);
+            run_qr_uniform_scale<rocsparse_double_complex>(handle, alg, m, 1.0e-200);
+        }
+    }
+
+    // Every subset of {dl, du} is dropped. The diagonal stays nonzero, so the system
+    // stays nonsingular and the solution is known. Bits, from low to high, are dl, du.
+    for(const auto alg : algs)
+    {
+        for(int mask = 0; mask < 4; ++mask)
+        {
+            const bool zero_dl = mask & 1;
+            const bool zero_du = mask & 2;
+            run_qr_uniform_scale<float>(handle, alg, 4, 1.0, zero_dl, zero_du);
+            run_qr_uniform_scale<double>(handle, alg, 4, 1.0, zero_dl, zero_du);
+            run_qr_uniform_scale<rocsparse_float_complex>(handle, alg, 4, 1.0, zero_dl, zero_du);
+            run_qr_uniform_scale<rocsparse_double_complex>(handle, alg, 4, 1.0, zero_dl, zero_du);
+        }
     }
 }

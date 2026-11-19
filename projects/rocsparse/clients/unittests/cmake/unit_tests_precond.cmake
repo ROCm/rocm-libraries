@@ -21,13 +21,15 @@
 #
 # ########################################################################
 
-# Unit tests for the preconditioners: ILU0, IC0, ILDLT0, itilu0, tridiagonal solvers and the
-# triangular info. Included from clients/unittests/CMakeLists.txt; all of them go to the
-# device target, which also links the internal itilu0 sources they use.
+# Unit tests for the preconditioners: ILU0, IC0, ILDLT0, itilu0, tridiagonal and
+# pentadiagonal solvers, and the triangular info. Included from
+# clients/unittests/CMakeLists.txt; all of them go to the device target, which also
+# links the internal itilu0 sources they use.
 
 list(APPEND ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_device_precond_kernels.cpp
   unit_test_device_precond_generic.cpp
+  unit_test_device_precond_gpsv.cpp
   unit_test_device_precond_gtsv.cpp
   unit_test_device_precond_itilu0.cpp
   unit_test_device_precond_legacy.cpp
