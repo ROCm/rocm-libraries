@@ -6458,8 +6458,7 @@ def _pbd_stage2_run(
     lay = extras["pbd"]
     if ident.pp_box_det >= 3:
         return run1  # (the last slice of a tile folds in-kernel)
-    if not lay["n_tiles"] or os.environ.get("ROCKE_PBD_DEBUG_SKIP_S2"):
-        # (ROCKE_PBD_DEBUG_SKIP_S2: timing of stage 1 alone -- wrong dX)
+    if not lay["n_tiles"]:
         return run1
     dt = ident.dtype_d
     vec = ident.vector_size_c or 8
@@ -7026,7 +7025,8 @@ def _fwd_split_k_degrees(problem, ident, degrees, wave_fill: bool = True) -> tup
     groups = max(1, problem.groups)
     tiles = args_.num_pid_m * args_.num_pid_n * groups
     # Plus the degrees whose grid fills whole waves of the device's CUs (a
-    # power of two rarely does on a 228-CU gfx942 part: s10 fwd 32 tiles x 7).
+    # power of two rarely does on a part whose CU count is not one, e.g. a
+    # gfx942 part with fewer CUs than the arch default).
     num_cus = _device_num_cus() if wave_fill else None
     if num_cus:
         from kernels.common.conv_split_k import fwd_wave_filling_split_ks
@@ -7045,7 +7045,7 @@ def _fwd_split_k_degrees(problem, ident, degrees, wave_fill: bool = True) -> tup
 class TailSplit(int):
     """A ``split_tail`` launch: the split-K degree (the int itself) of the
     tail tiles, and ``full_tiles``, the tiles (in launch order) that run the
-    whole reduction unsplit. Prints as ``<degree>/tail<full_tiles>``."""
+    whole reduction unsplit. Prints as ``<degree>/full<full_tiles>``."""
 
     def __new__(cls, degree: int, full_tiles: int):
         obj = super().__new__(cls, degree)
