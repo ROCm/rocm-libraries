@@ -111,6 +111,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
 
     DeepLabV3's c512 d4 layer (16 x 128², channels-last) takes 34 ms on gfx1101; channels-first takes 37-41.
   - The gfx950 direct loop is at parity with `ConvHipConv` on Flux / SDXL VAE (0.96-1.06x).
+  - gfx11's generic tier, on the corpus wrw layers the BLAS path served there (interleaved autotuned A/B, two rounds): 26 of them gain K3 configs, 1.51x in total time on gfx1100 and 1.40x on gfx1101 (14 and 12 faster by more than 5%, none slower). R(2+1)D's channels-last 3x1x1 layers run 1.7-4.0x, Inception's channels-last 5x5 1.2-1.75x and HiFi-GAN's 1x7 rows to one output channel 1.3-1.5x the BLAS path's speed.
 - **Weak:**
   - gfx90a VAE NHWC bf16 3x3 at 96²-384²: 1.11-1.28x behind.
   - nnU-Net fp32 NCHW 3-D on gfx90a: 1.73x.

@@ -63,6 +63,7 @@ Measured against the BLAS path, 16-bit channels-last:
 - gfx950: 1.5-1.9x faster on 2-D 5x5/7x7 and 3-D 1x5x5.
 - gfx1201: 2.6-3.2x faster on the same shapes, and 1.7x on 1-D k3.
 - 1-D k9: 0.69x on gfx950 and 0.96x on gfx1201, so BLAS still wins there. Heuristics should rank BLAS above the generic tier for it.
+- gfx11 (gfx1100, gfx1101): R(2+1)D's 3x1x1 layers 1.7-4.0x, Inception's 5x5 1.2-1.75x, HiFi-GAN's 1x7 rows to one output channel 1.3-1.5x. On R(2+1)D's 14² and 7² maps and its wide 1x3x3 layers BLAS stays ahead (0.2-0.5x), and autotune keeps it there; heuristics should rank BLAS first for them.
 - ASPP-class filters (at most 9 taps, dilation 6 or more): BLAS won where first measured (d18 16-bit 0.6-0.7x, d6 fp32 0.6x), and the generic tier declines them except on gfx11. On gfx11 BLAS is slow at these shapes: on gfx1101 the generic tier runs deeplab 3x3 d12-d36 at 0.9-12x the BLAS path's speed and SSD's fp32 3x3 d6 at 1.3-2.2x, so it serves them.
 - Narrow groups (fewer than 16 input and fewer than 16 output channels a group): the generic tier ran 14-20x behind `CONV_GROUP_WRW` at 4 channels a group and 30-5000x behind the vector-ALU engines on depthwise layers (gfx1101). It declines them.
 - Stems (fewer than 8 input channels a group) and output rows of fewer than 4 positions: BLAS measured 2.5-30x faster on gfx1101 (ViT / ConvNeXt / R(2+1)D stems, Inception's 5x5 over a 5x5 map). The generic tier declines them.
