@@ -1305,7 +1305,8 @@ static void test_wmma_wgrad_empty_problems(void)
  * test_direct_dw_wgrad_wmma.py): a negative PAD, the wave counts, the fp32
  * dW / partial-slot / replicated-scratch buffers past 32 bits. */
 template <typename Spec, typename Valid>
-static void expect_wgrad_reason(const char* what, const Spec& spec, Valid is_valid, const char* want)
+static void
+    expect_wgrad_reason(const char* what, const Spec& spec, Valid is_valid, const char* want)
 {
     char reason[ERR_CAP];
     reason[0] = '\0';
@@ -1319,13 +1320,16 @@ static void test_wmma_wgrad_remaining_refusals(void)
     d.problem = dense_problem(12, 40, 64, 96);
     d.problem.PAD = -1;
     d.tdm = 1;
-    expect_wgrad_reason("dense PAD -1", d, rocke_direct_wgrad_wmma_is_valid_spec, "PAD >= 0 (got -1)");
+    expect_wgrad_reason(
+        "dense PAD -1", d, rocke_direct_wgrad_wmma_is_valid_spec, "PAD >= 0 (got -1)");
     d.problem = dense_problem(13, 40, 64, 96);
     d.tdm = rocke_direct_wgrad_wmma_spec_default().tdm;
     d.waves_k = -1;
     d.waves_c = -2;
-    expect_wgrad_reason(
-        "dense waves -1 x -2", d, rocke_direct_wgrad_wmma_is_valid_spec, "waves_k and waves_c >= 1");
+    expect_wgrad_reason("dense waves -1 x -2",
+                        d,
+                        rocke_direct_wgrad_wmma_is_valid_spec,
+                        "waves_k and waves_c >= 1");
     d.waves_k = 0;
     d.waves_c = 4;
     expect_wgrad_reason(
@@ -1354,11 +1358,10 @@ static void test_wmma_wgrad_remaining_refusals(void)
     g.problem.groups = 2048;
     g.rows_per_chunk = 1;
     g.target_blocks = 1048576;
-    expect_wgrad_reason(
-        "grouped partial slots",
-        g,
-        rocke_grouped_wgrad_wmma_is_valid_spec,
-        "fp32 partial slots of 9663676416 B exceeds the 32-bit buffer size");
+    expect_wgrad_reason("grouped partial slots",
+                        g,
+                        rocke_grouped_wgrad_wmma_is_valid_spec,
+                        "fp32 partial slots of 9663676416 B exceeds the 32-bit buffer size");
 
     rocke_direct_dw_wgrad_wmma_spec_t dw = rocke_direct_dw_wgrad_wmma_spec_default();
     dw.problem = dw_problem(7, 7, 0, -1);
@@ -1367,11 +1370,10 @@ static void test_wmma_wgrad_remaining_refusals(void)
     dw.problem.H = 7;
     dw.problem.W = 7;
     dw.problem.groups = 342400;
-    expect_wgrad_reason(
-        "depthwise replicated scratch",
-        dw,
-        rocke_direct_dw_wgrad_wmma_is_valid_spec,
-        "fp32 replicated scratch of 4295065600 B exceeds the 32-bit buffer size");
+    expect_wgrad_reason("depthwise replicated scratch",
+                        dw,
+                        rocke_direct_dw_wgrad_wmma_is_valid_spec,
+                        "fp32 replicated scratch of 4295065600 B exceeds the 32-bit buffer size");
 }
 
 int main(void)
