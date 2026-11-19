@@ -905,6 +905,20 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableStatsLayoutFollowsBatchMode)
                    }),
                    "Batch mode single-head stats with a head stride below Sq"},
          false},
+        // B = 4, H = 1: the last LSE offset is 3 * s_h + Sq - 1 elements of 4 bytes, which must
+        // fit in 32 bits.
+        {GraphTest{withSingleHeadBatchStats([&](GraphT& graph) {
+                       findTensor(graph, "stats").strides
+                           = {int64_t{1} << 28, int64_t{1} << 28, 1, 1};
+                   }),
+                   "Batch mode stats with a padded head stride whose LSE offsets fit in 32 bits"},
+         true},
+        {GraphTest{withSingleHeadBatchStats([&](GraphT& graph) {
+                       findTensor(graph, "stats").strides
+                           = {int64_t{1} << 29, int64_t{1} << 29, 1, 1};
+                   }),
+                   "Batch mode stats with a padded head stride whose LSE offsets wrap 32 bits"},
+         false},
         {GraphTest{withBatchStats([&](GraphT& graph) {
                        findTensor(graph, "stats").strides = {2 * heads * seqLenQ, seqLenQ, 1, 1};
                    }),

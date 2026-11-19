@@ -448,10 +448,14 @@ static bool wouldFwdByteStridesFitUint32(
     {
         // LSE/stats: rank 3 [B, H_q, S_q] or rank 4 [B, H_q, S_q, 1] in FP32;
         // only the head stride reaches the kernel, which steps batches by H_q * head stride.
+        // Batch mode's whole LSE offset is bounded in isSupportedStatsTensor.
         const auto* statsStrides = stats->strides();
-        ok &= plan_utils::byteStrideFitsU32("nhead_stride_lse", statsStrides->Get(1), K_FP32_BYTES);
-        ok &= plan_utils::byteStrideFitsU32(
-            "batch_stride_lse", stats->dims()->Get(1) * statsStrides->Get(1), K_FP32_BYTES);
+        const bool headStrideFits
+            = plan_utils::byteStrideFitsU32("nhead_stride_lse", statsStrides->Get(1), K_FP32_BYTES);
+        ok &= headStrideFits;
+        ok &= headStrideFits
+              && plan_utils::byteStrideFitsU32(
+                  "batch_stride_lse", stats->dims()->Get(1) * statsStrides->Get(1), K_FP32_BYTES);
     }
 
     return ok;
@@ -487,14 +491,31 @@ bool fwdKvRowExtentsFitU32(const hipdnn_flatbuffers_sdk::data_objects::TensorAtt
     return ok;
 }
 
+// Batch-mode kernels form the LSE element offset (b * H + h) * s_lse_Hs + s in 32-bit
+// arithmetic, so the offset of the last element, (B * H - 1) * headStride + Sq - 1, must fit
+// in 32 bits. Evaluated by division so no product of graph values can overflow.
+static bool batchLseOffsetsFitU32(int64_t batch, int64_t heads, int64_t headStride, int64_t seqLenQ)
+{
+    constexpr int64_t K_MAX_LSE_ELEMENTS = static_cast<int64_t>(UINT32_MAX) / K_FP32_BYTES;
+    if(batch < 1 || heads < 1 || seqLenQ < 1 || seqLenQ > K_MAX_LSE_ELEMENTS
+       || heads > K_MAX_LSE_ELEMENTS / batch)
+    {
+        return false;
+    }
+    const int64_t headSteps = (batch * heads) - 1;
+    return headSteps == 0
+           || (headStride >= 0 && headStride <= (K_MAX_LSE_ELEMENTS - (seqLenQ - 1)) / headSteps);
+}
+
 // Validates the optional stats (LSE) output tensor. Batch mode writes FP32 [B, H, Sq]
 // element (b, h, s) at (b * H + h) * s_lse_Hs + s: the kernel takes only a head stride
 // (s_lse_Hs), with no batch or sequence stride, and steps batches by H * s_lse_Hs. The
 // strides must therefore be [H * s_h, s_h, 1] with s_h >= Sq so rows of different heads do
-// not overlap; any other layout is declined. Group mode writes AITER's varlen layout
-// [H, total_q]: one FP32 per Q token at h * s_lse_Hs + seqstart_q[b] + s, with no per-token
-// stride, so the stats tensor must be ragged on the Q/O offset table in token units with a
-// sequence stride of 1. Q must already be known to be rank 4.
+// not overlap, and the last element's offset must fit in 32 bits; any other layout is
+// declined. Group mode writes AITER's varlen layout [H, total_q]: one FP32 per Q token at
+// h * s_lse_Hs + seqstart_q[b] + s, with no per-token stride, so the stats tensor must be
+// ragged on the Q/O offset table in token units with a sequence stride of 1. Q must already
+// be known to be rank 4.
 static bool
     isSupportedStatsTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& stats,
                            const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
@@ -557,9 +578,14 @@ static bool
         const int64_t heads = stats.dims()->Get(1);
         const int64_t seqLenQ = stats.dims()->Get(2);
         const auto* strides = stats.strides();
+        HIP_KERNEL_RETURN_FALSE_IF(strides == nullptr || strides->size() != statsRank,
+                                   "batch-mode stats tensor must have one stride per dim");
+        // Checked first: it bounds the head stride, so the product below cannot overflow.
+        HIP_KERNEL_RETURN_FALSE_IF(!batchLseOffsetsFitU32(batch, heads, strides->Get(1), seqLenQ),
+                                   "batch-mode stats tensor LSE offsets (B * H - 1) * head stride "
+                                   "+ Sq must fit in 32 bits");
         HIP_KERNEL_RETURN_FALSE_IF(
-            strides == nullptr || strides->size() != statsRank
-                || (batch != 1 && strides->Get(0) != heads * strides->Get(1))
+            (batch != 1 && strides->Get(0) != heads * strides->Get(1))
                 || ((batch != 1 || heads != 1) && strides->Get(1) < seqLenQ)
                 || (seqLenQ != 1 && strides->Get(SDPA_SEQ_AXIS) != 1),
             "batch-mode stats tensor strides must be [H * s_h, s_h, 1] with head stride s_h >= Sq "
