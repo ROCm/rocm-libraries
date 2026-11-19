@@ -269,16 +269,19 @@ constexpr w4a16_params_t w4a16_gfx1150() {
   p.token_tile_wgs_per_cu             = 2;
   // The generic grid scales with occupancy: it split few tiles' K over 64 workgroups, 3x slower.
   p.generic_grid_otherwise            = false;
-  p.decode_dram_bytes_per_us          = 83.4e3 ;
-  p.decode_dram_latency_us            = 1.15;
+  // Decode: fit on the retargeted gfx1151 decode set's kernel times on gfx1150 (ideal shapes and a
+  // sample of the vLLM decode list): the weight stream reaches less of the DRAM bandwidth and
+  // the per-token v_dot2 work weighs more with 16 CUs.
+  p.decode_dram_bytes_per_us          = 75.85e3;
+  p.decode_dram_latency_us            = 0.575;
   p.decode_l2_bytes_per_us            = 9320.0e3;
-  p.decode_waves_per_cu_per_occupancy = 3.24;
-  p.decode_wave_cycles                = 933.0;
-  p.decode_iter_cycles                = 1090.0;
-  p.decode_byte_cycles                = 0.39;
-  p.decode_dequant_cycles             = 5.6;
-  p.decode_mac_cycles                 = 0.354;
-  p.decode_fixed_us                   = 2.44;
+  p.decode_waves_per_cu_per_occupancy = 2.045;
+  p.decode_wave_cycles                = 826.0;
+  p.decode_iter_cycles                = 742.0;
+  p.decode_byte_cycles                = 0.478;
+  p.decode_dequant_cycles             = 2.13;
+  p.decode_mac_cycles                 = 2.88;
+  p.decode_fixed_us                   = 2.61;
   return p;
 }
 
