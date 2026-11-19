@@ -7,13 +7,18 @@
 //   - one hipBLASLt handle, stream, workspace and set of matrices per partition (device)
 //   - the problem is the full m x n x k GEMM; it is split along N, so partition i computes
 //     m x n_i x k and writes its columns of D at their final place in its own full-size D
-//   - every matrix has one pointer per partition. Here each partition owns a whole copy; passing
-//     the same pointer for every partition would share one matrix. The library adds the slice
-//     offset to each pointer.
+//   - every matrix has one pointer per partition. By default each partition owns a whole copy.
+//     With "shared", A and B are one buffer each on device 0 and every partition gets the same
+//     pointer; the other partitions read them over peer access, which the caller enables. The
+//     library adds the slice offset to each pointer.
 //
 // A and B hold ones, so every element of D must equal k. The sample checks that.
 //
-// Usage: sample_hipblaslt_gemm_partitioned_ext [partitions]    (default 2)
+// Usage: sample_hipblaslt_gemm_partitioned_ext [partitions] [shared]    (default 2, replicated)
+//
+// TODO: add a variant with a shared A or B and storePeerD = true (every partition also stores
+// its slice into the other partition's D). It needs OutputPeerD kernels in the device library;
+// with the current library algoGetHeuristic returns no algorithm for it.
 
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -21,6 +26,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <vector>
 
@@ -30,7 +36,8 @@ int main(int argc, char** argv)
 {
     int deviceCount = 0;
     CHECK_HIP_ERROR(hipGetDeviceCount(&deviceCount));
-    const int partitions = argc > 1 ? std::atoi(argv[1]) : 2;
+    const int  partitions = argc > 1 ? std::atoi(argv[1]) : 2;
+    const bool shared     = argc > 2 && std::strcmp(argv[2], "shared") == 0;
     if(partitions < 1 || partitions > deviceCount)
     {
         std::cerr << "This sample needs " << partitions << " devices, found " << deviceCount
@@ -58,17 +65,33 @@ int main(int argc, char** argv)
         CHECK_HIPBLASLT_ERROR(hipblasLtCreate(&handles[i]));
         CHECK_HIP_ERROR(hipStreamCreate(&streams[i]));
         CHECK_HIP_ERROR(hipMalloc(&workspaces[i], workspaceBytes));
-        void *da, *db, *dc, *dd;
-        CHECK_HIP_ERROR(hipMalloc(&da, hostA.size() * 2));
-        CHECK_HIP_ERROR(hipMalloc(&db, hostB.size() * 2));
+        void *dc, *dd;
         CHECK_HIP_ERROR(hipMalloc(&dc, ldc * n * 2));
         CHECK_HIP_ERROR(hipMalloc(&dd, ldd * n * 2));
-        CHECK_HIP_ERROR(hipMemcpy(da, hostA.data(), hostA.size() * 2, hipMemcpyHostToDevice));
-        CHECK_HIP_ERROR(hipMemcpy(db, hostB.data(), hostB.size() * 2, hipMemcpyHostToDevice));
         CHECK_HIP_ERROR(hipMemset(dc, 0, ldc * n * 2));
         CHECK_HIP_ERROR(hipMemset(dd, 0, ldd * n * 2));
-        a[i] = da, b[i] = db, c[i] = dc, d[i] = dd;
+        c[i] = dc, d[i] = dd;
+        if(shared && i > 0)
+        {
+            // Shared A and B: the same pointer as partition 0. The library does not enable peer
+            // access; this partition's device must be able to read device 0's memory.
+            hipError_t peer = hipDeviceEnablePeerAccess(0, 0);
+            if(peer != hipSuccess && peer != hipErrorPeerAccessAlreadyEnabled)
+                CHECK_HIP_ERROR(peer);
+            static_cast<void>(hipGetLastError());
+            a[i] = a[0], b[i] = b[0];
+            continue;
+        }
+        void *da, *db;
+        CHECK_HIP_ERROR(hipMalloc(&da, hostA.size() * 2));
+        CHECK_HIP_ERROR(hipMalloc(&db, hostB.size() * 2));
+        CHECK_HIP_ERROR(hipMemcpy(da, hostA.data(), hostA.size() * 2, hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(db, hostB.data(), hostB.size() * 2, hipMemcpyHostToDevice));
+        a[i] = da, b[i] = db;
     }
+    // Shared inputs were written on device 0: they must be complete before another device reads.
+    CHECK_HIP_ERROR(hipSetDevice(0));
+    CHECK_HIP_ERROR(hipDeviceSynchronize());
 
     // ---- the partitioned GEMM ----
     hipblaslt_ext::experimental::PartitionedGemm gemm(handles,
@@ -151,13 +174,17 @@ int main(int argc, char** argv)
         std::cout << "partition " << i << " computed columns [" << offset << ", " << offset + size
                   << ")" << std::endl;
     }
+    std::cout << (shared ? "A and B: shared" : "A and B: replicated") << std::endl;
     std::cout << (errors ? "FAILED" : "PASSED") << std::endl;
 
     for(int i = 0; i < partitions; i++)
     {
         CHECK_HIP_ERROR(hipSetDevice(i));
-        hipFree(const_cast<void*>(a[i]));
-        hipFree(const_cast<void*>(b[i]));
+        if(!shared || i == 0)
+        {
+            hipFree(const_cast<void*>(a[i]));
+            hipFree(const_cast<void*>(b[i]));
+        }
         hipFree(const_cast<void*>(c[i]));
         hipFree(d[i]);
         hipFree(workspaces[i]);
