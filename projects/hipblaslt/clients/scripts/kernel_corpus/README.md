@@ -75,6 +75,15 @@ checks relies on those predicates to stay in bounds. hipblaslt-test cannot build
 leading dimensions equal to the rows stored), so those report `unsupported`. Give each profile
 its own `--out`.
 
+`--refusals` asks the library the same questions without building any data: `refusal_probe.cpp`
+sets up each problem through the ext API with dummy pointers, pins the solution by index, and asks
+`isAlgoSupported`. Each exact-size MX FP6 solution gets its registered problem, which it must
+accept, and every edges problem, which it must refuse, including the batch and stride edges
+hipblaslt-test cannot build. Its results are `<index>:probe-<tag>` cases, and a probe that finds
+another solution name at the index fails the case. The probe is built with the install tree's
+`amdclang++` and needs the hipBLASLt and hipBLAS-common headers from TheRock's `blas_dev`
+artifact in `<rocm>/include`, or give a built one with `--refusal-probe`.
+
 `--relaunch N` then reruns the first passing case of each solution with `hipblaslt-bench
 --post_bench_verify_iters N --verify_strict`, which checks the first launch against the CPU
 and then that each of N back-to-back relaunches gives the same D, bit for bit. Its results are
@@ -84,7 +93,7 @@ and then that each of N back-to-back relaunches gives the same D, bit for bit. I
 # The rocKE MXFP6 kernels on an MI355X: registered sizes with 20 relaunches each, then edges.
 ./run.py --rocm-dir rocm-gfx950 --out rocke-mi355x --problem-filter '^B?Float6/' --relaunch 20
 ./run.py --rocm-dir rocm-gfx950 --out rocke-mi355x-edges --problem-filter '^B?Float6/' \
-    --profile edges
+    --profile edges --refusals
 ```
 
 The architecture comes from the device. `--index-range lo:hi`, `--problem-filter` (a regex on

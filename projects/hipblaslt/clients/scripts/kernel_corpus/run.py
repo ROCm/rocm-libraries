@@ -17,7 +17,9 @@ stopped.
 Cases checked against the CPU reference (MX kernels) run one per process, with their own case
 timeout and every available CPU for the reference. --relaunch N then relaunches each solution's
 first passing case N more times with hipblaslt-bench, which checks on the GPU that every
-relaunch gives the same D, bit for bit, as the first launch.
+relaunch gives the same D, bit for bit, as the first launch. --refusals asks the library, without
+building data, whether each exact-size MX FP6 solution accepts its registered problem and refuses
+every edges problem (refusals.py), including those hipblaslt-test cannot build.
 
 Sharding follows TheRock's test jobs: SHARD_INDEX (1-based) and TOTAL_SHARDS select a
 contiguous slice of the corpus. Failures that match the known-bugs list (known_bugs.py) are
@@ -48,6 +50,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import corpus_index  # noqa: E402
 import plan  # noqa: E402
+import refusals  # noqa: E402
 import report  # noqa: E402
 
 EXIT_FAILURES = 1
@@ -655,6 +658,60 @@ class Shard:
             if status in FAILING:
                 print(f"  {status.upper():8s} {index}:relaunch {row['problem_type']}", flush=True)
 
+    def refusal_checks(self, cu_count: Optional[int], chip_id: Optional[int]) -> int:
+        """The data-free refusal checks for the exact-size MX FP6 solutions in this shard that
+        this device can run, see refusals.py. A solution checked in an earlier run is not
+        checked again. Returns an exit code."""
+        done = set()
+        if self.results_path.exists():
+            done = {
+                row["index"]
+                for row in corpus_index.read_jsonl(self.results_path)
+                if str(row.get("shape") or "").startswith("probe-")
+            }
+        cases: list[plan.Case] = []
+        for index, record in sorted(self.records.items()):
+            if index not in done and not unreachable_reason(record, cu_count, chip_id):
+                cases += refusals.probe_cases(record)
+        if not cases:
+            return 0
+        try:
+            exe = refusals.default_probe(self.args.refusal_probe, self.tool.rocm_dir, self.dir)
+        except RuntimeError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return EXIT_USAGE
+        print(f"asking the library about {len(cases)} problems without data", flush=True)
+        answers, output, code = refusals.run_probe(
+            exe, cases, self.tool.env(), self.args.reference_timeout, self.dir
+        )
+        with self.log_path.open("a") as log:
+            log.write(f"\n### {utc_now()} {exe} (refusal probe, exit {code})\n{output}")
+        rows = []
+        for case in cases:
+            record = self.records[case.index]
+            status, message = refusals.classify(
+                case, record, answers.get(refusals.probe_label(case))
+            )
+            if status == "crash" and code is None:
+                status = "timeout"
+            row = {k: v for k, v in self.describe(case).items() if k != "types"}
+            rows.append(
+                {
+                    **row,
+                    **answers.get(refusals.probe_label(case), {}),
+                    "case_id": refusals.probe_label(case),
+                    "shape": f"probe-{case.shape.tag}",
+                    "status": status,
+                    "message": message,
+                    "returncode": code,
+                    "time": utc_now(),
+                }
+            )
+            if status in FAILING:
+                print(f"  {status.upper():8s} {rows[-1]['case_id']}", flush=True)
+        self.append(rows)
+        return 0
+
 
 def select_records(records: list[dict], args: argparse.Namespace) -> list[dict]:
     selected = records
@@ -746,6 +803,18 @@ def parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
         metavar="N",
         help="After the cases, relaunch each solution's first passing case N more times with "
         "hipblaslt-bench and check every relaunch gives the first launch's D (default: 0, off)",
+    )
+    parser.add_argument(
+        "--refusals",
+        action="store_true",
+        help="Ask the library, without data, whether each exact-size MX FP6 solution accepts "
+        "its registered problem and refuses every edges problem",
+    )
+    parser.add_argument(
+        "--refusal-probe",
+        type=Path,
+        help="A built refusal_probe to use (default: build refusal_probe.cpp with the install "
+        "tree's amdclang++)",
     )
     parser.add_argument("--index-range", help="Solution index range lo:hi (hi exclusive)")
     parser.add_argument("--problem-filter", help="Regex on the problem-type key, e.g. 'Half/Half'")
@@ -884,6 +953,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         code = shard.run_cases(cases)
     if not args.dry_run and code == 0 and args.relaunch > 0:
         shard.relaunch_cases(args.relaunch)
+    if not args.dry_run and code == 0 and args.refusals:
+        code = shard.refusal_checks(cu_count, chip_id)
     summary = report.write_reports(out, known=known)
     if code == 0 and (report.run_failed(summary) or summary["case_status"].get("harness_error")):
         code = EXIT_FAILURES

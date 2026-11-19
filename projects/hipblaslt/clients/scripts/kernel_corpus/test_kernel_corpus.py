@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import corpus_index  # noqa: E402
 import known_bugs  # noqa: E402
 import plan  # noqa: E402
+import refusals  # noqa: E402
 import report  # noqa: E402
 import run  # noqa: E402
 
@@ -757,6 +758,105 @@ class MXEndToEndTests(unittest.TestCase):
             with mock.patch("sys.stdout", io.StringIO()):
                 run.main(corpus_argv(rocm, out, "--relaunch", "3"))
             self.assertEqual(len((Path(d) / "bench.log").read_text().splitlines()), 2)
+
+
+# Stands in for refusal_probe: accepts every registered problem and refuses the rest, except
+# labels ACCEPT matches, which it accepts. It names each solution by the planner's convention.
+FAKE_PROBE_BODY = textwrap.dedent(
+    r"""
+    import re, sys
+    for line in sys.stdin:
+        label, index, a_type = line.split()[:3]
+        accept = label.endswith("registered") or (ACCEPT and re.search(ACCEPT, label))
+        name = "rocke_gemm_mx_%s_4096x4096x65536_%s" % (
+            "Float6" if a_type == "f6_r" else "BFloat6", index)
+        print("RESULT %s %s isAlgoSupported %s %s" % (
+            label, "accepted" if accept else "refused",
+            "SUCCESS" if accept else "INVALID_VALUE", name), flush=True)
+    """
+)
+
+
+def fake_probe(root: Path, accept: str = "") -> Path:
+    probe = root / "fake_refusal_probe"
+    probe.write_text(f"#!{sys.executable}\nACCEPT = {accept!r}\n{FAKE_PROBE_BODY}")
+    probe.chmod(0o755)
+    return probe
+
+
+class RefusalProbeTests(unittest.TestCase):
+    def test_probe_lines_carry_the_problems_hipblaslt_test_cannot_build(self):
+        cases = {c.shape.tag: c for c in refusals.probe_cases(record(mx_solution(4)))}
+        self.assertEqual(set(cases), {plan.REGISTERED_TAG, *plan.EDGE_TAGS})
+        line = dict((tag, refusals.probe_line(c).split()) for tag, c in cases.items())
+        # label index a_type tiled_b m n k batch lda ldb ldd alpha beta
+        self.assertEqual(
+            line["registered"],
+            "4:probe-registered 4 f6_r 1 4096 4096 65536 1 65536 65536 4096 1.0 0.0".split(),
+        )
+        self.assertEqual(line["batch2"][7], "2")
+        self.assertEqual((line["ldapad"][8], line["ldbpad"][9]), ("65664", "65664"))
+        self.assertEqual(line["border"][3], "0")
+        self.assertEqual(refusals.probe_cases(record(solution(0))), [])
+
+    def test_answers_are_judged_against_the_plan(self):
+        rec = record(mx_solution(4))
+        cases = {c.shape.tag: c for c in refusals.probe_cases(rec)}
+        answer = {"verdict": "refused", "probe_name": rec["name"], "line": "RESULT x"}
+        accepted = {**answer, "verdict": "accepted"}
+        judge = lambda tag, a: refusals.classify(cases[tag], rec, a)[0]  # noqa: E731
+        self.assertEqual(judge("registered", accepted), "pass")
+        self.assertEqual(judge("registered", answer), "fail")
+        self.assertEqual(judge("batch2", answer), "expected_refusal")
+        self.assertEqual(judge("batch2", accepted), "fail")
+        self.assertEqual(judge("batch2", None), "crash")
+        renamed = {**accepted, "probe_name": "Cijk_something_else"}
+        status, message = refusals.classify(cases["registered"], rec, renamed)
+        self.assertEqual(status, "fail")
+        self.assertIn("Cijk_something_else", message)
+
+    def test_parse_results_reads_only_result_lines(self):
+        got = refusals.parse_results(
+            "rocblaslt warning\nRESULT 4:probe-kup refused isAlgoSupported INVALID_VALUE n\n"
+            "RESULT 4:probe-kdown refused setProblem INVALID_VALUE -\n"
+        )
+        self.assertEqual(set(got), {"4:probe-kup", "4:probe-kdown"})
+        self.assertIsNone(got["4:probe-kdown"]["probe_name"])
+
+    def test_a_missing_header_stops_the_build_with_the_reason(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaisesRegex(RuntimeError, "blas dev artifact"):
+                refusals.build_probe(Path(d), Path(d) / "out")
+
+
+class RefusalEndToEndTests(unittest.TestCase):
+    def test_refusals_run_once_and_report_an_accepted_edge(self):
+        with tempfile.TemporaryDirectory() as d:
+            rocm = fake_rocm(Path(d), bad="none", solutions=MXEndToEndTests.SOLUTIONS)
+            probe = fake_probe(Path(d), accept=r"^1:probe-ldapad$")
+            out = Path(d) / "out"
+            argv = corpus_argv(
+                rocm, out, "--profile", "edges", "--refusals", "--refusal-probe", str(probe)
+            )
+            with mock.patch("sys.stdout", io.StringIO()), mock.patch("time.sleep"):
+                code = run.main(argv)
+            self.assertEqual(code, run.EXIT_FAILURES)
+            summary = json.loads((out / "summary.json").read_text())
+            n = len(plan.EDGE_TAGS)
+            # The fake hipblaslt-test runs every edge (2n fails); the probe refuses 2n - 1.
+            self.assertEqual(
+                summary["case_status"],
+                {"pass": 2, "fail": 2 * n + 1, "expected_refusal": 2 * n - 1},
+            )
+            probe_failures = [f for f in summary["failures"] if "probe" in f["case_id"]]
+            self.assertEqual([f["case_id"] for f in probe_failures], ["1:probe-ldapad"])
+            self.assertEqual(probe_failures[0]["reason"], refusals.ACCEPTED_WITHOUT_DATA)
+
+            log = out / "shard-1-of-1" / "hipblaslt-test.log"
+            before = log.read_text().count("refusal probe")
+            with mock.patch("sys.stdout", io.StringIO()):
+                run.main(argv)
+            self.assertEqual(log.read_text().count("refusal probe"), before)
 
 
 class ReportTests(unittest.TestCase):
