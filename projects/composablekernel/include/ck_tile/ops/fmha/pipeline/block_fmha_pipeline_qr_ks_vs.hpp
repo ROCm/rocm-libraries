@@ -766,8 +766,7 @@ struct BlockFmhaPipelineQRKSVS
                     {
                         block_sync_lds();
 
-                        store_tile(k_lds_window,
-                                   tile_elementwise_in(k_element_func, k_block_tile));
+                        store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
 
                         k_scale_block_tile = load_k_scale_block_tile();
 
