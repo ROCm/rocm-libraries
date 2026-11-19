@@ -16,10 +16,9 @@ For advanced workflows, source builds, or custom configurations, see
 
 .. note::
 
-   If you build `HYPRE <https://github.com/hypre-space/hypre>`__ for HIP
-   against rocThrust, you need HYPRE for HIP version 3.2.0 or later with ROCm
-   7.1.0 and later. Earlier HYPRE versions fail to compile because the
-   ``HYPRE_THRUST_IDENTITY`` macro has no HIP branch.
+   To build `HYPRE <https://github.com/hypre-space/hypre>`__ with HIP support
+   against rocThrust, use HYPRE 3.2.0 or later. Earlier HYPRE versions fail to
+   compile with ROCm 7.1.0 and later.
 
 .. _install-rocm:
 
