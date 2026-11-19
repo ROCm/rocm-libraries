@@ -443,7 +443,7 @@ binary): the x-halo cshuffle epilogue (`xh_epi >= 1`, 3-D) stores only
 takes row and plane gaps (`m*sw + row*(sh - Wi*sw) + plane*(sd - Hi*sh)`).
 With `dx_interior` it makes the x-halo skip exact; without it the binary
 serves `pW == (X-1)/2` problems (the padded production form) through their
-W-extended `pW = 0` view, whose dX origin sits one column before dX's.
+W-extended `pW = 0` view, whose dX origin sits `(X-1)/2` columns before dX's.
 
 `identity_supports_problem` enforces: `dx_interior` needs a tap-outer kernel,
 split-K only as `pp_box_det`, no stream-K, a halo-form problem on the masked
