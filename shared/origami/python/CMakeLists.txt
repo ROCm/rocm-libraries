@@ -19,7 +19,13 @@ if(NOT nanobind_FOUND AND ORIGAMI_ENABLE_FETCH)
     find_package(nanobind CONFIG REQUIRED)
 endif()
 
-set(PYTHON_INSTALL_DIR "origami")
+if(SKBUILD)
+    set(PYTHON_INSTALL_DIR "origami")
+else()
+    set(PYTHON_INSTALL_DIR
+        "${CMAKE_INSTALL_LIBDIR}/python${Python_VERSION_MAJOR}.${Python_VERSION_MINOR}/site-packages/origami"
+    )
+endif()
 
 nanobind_add_module(_pyorigami "${CMAKE_CURRENT_SOURCE_DIR}/csrc/bindings.cpp")
 
@@ -29,6 +35,11 @@ set_target_properties(_pyorigami PROPERTIES
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/__init__.py"
     "${CMAKE_CURRENT_BINARY_DIR}/origami/__init__.py"
+    COPYONLY
+)
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/_rocm_init.py"
+    "${CMAKE_CURRENT_BINARY_DIR}/origami/_rocm_init.py"
     COPYONLY
 )
 configure_file(
@@ -80,6 +91,7 @@ install(TARGETS _pyorigami
 if(NOT SKBUILD)
     install(FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/__init__.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/_rocm_init.py"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/selector.py"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/origami.py"
         DESTINATION "${PYTHON_INSTALL_DIR}"

@@ -39,6 +39,82 @@ include/origami/...
 
 To build the native library from this source tree instead, pass `-DORIGAMI_BUILD_FROM_SOURCE=ON` (via `CMAKE_ARGS`). That is a development path, not a self-contained one: the wheel never bundles `liborigami`, so the extension still resolves `liborigami.so.1` through the loader at import time and you must install the library you built and put it on the loader path yourself.
 
+#### Static and shared linkage
+
+The release-wheel workflow expects the installed shared Origami package supplied
+by ROCm. The `python` preset selects `ORIGAMI_BUILD_FROM_SOURCE=OFF`, and CMake
+links `_pyorigami` to the `roc::origami` target exported by that package. The
+release-wheel test verifies that the extension records `NEEDED liborigami.so.1`
+and that the wheel contains no native Origami library.
+
+For source builds, `ORIGAMI_BUILD_SHARED_LIBS` chooses the native target type.
+It defaults to `ON`, including in the Libraries superbuild. Explicit static
+consumers, such as hipBLASLt's bundled C++ build, select `OFF`. Enabling Python
+does not override that selection.
+
+| Configuration | Native library selection |
+| --- | --- |
+| C++ source build with `ORIGAMI_BUILD_SHARED_LIBS=ON` | Build shared Origami |
+| C++ source build with `ORIGAMI_BUILD_SHARED_LIBS=OFF` | Build static Origami |
+| Combined source development build with Python and shared Origami enabled | Link the extension to the source-built shared library |
+| Installed-library build with `ORIGAMI_BUILD_FROM_SOURCE=OFF` | Link the target type exported by the installed package |
+
+`ORIGAMI_BUILD_SHARED_LIBS` does not change an imported target's type. If the
+installed package exports a static target, CMake links it statically into the
+extension; this does not satisfy the shared release-wheel contract. Configuration
+does not reject that target or force a source build to use shared linkage. The
+shared release workflow is validated through its selected package and the
+resulting wheel's native dependency.
+
+#### Finding the native runtime
+
+The wheel contains the bindings, while the native Origami and HIP libraries are
+installed separately. Origami follows [TheRock's Python initialization pattern](https://github.com/ROCm/TheRock/blob/0705bfa248b5fb4994de624f9554059fecc686ec/docs/packaging/python_packaging.md#performing-initialization):
+when `rocm_sdk` is installed, it initializes the SDK and preloads `amdhip64` and
+`origami` before importing the compiled extension. The SDK resolves these names
+to libraries inside the ROCm Python packages. Origami does not change
+`LD_LIBRARY_PATH` or request preloads from `ROCM_SDK_PRELOAD_LIBRARIES`.
+
+Install the `rocm` extra to request the ROCm Python runtime packages:
+
+```bash
+python -m pip install 'rocm-origami[rocm]'
+```
+
+Use a package index and ROCm package version appropriate for your platform and
+the native package used to build the wheel. The extra requests `rocm[libraries]`;
+it does not enforce an exact wheel/native build pairing or replace the native
+SONAME compatibility policy.
+
+| Installation | Runtime discovery |
+| --- | --- |
+| Venv with ROCm Python packages | SDK preloads HIP and Origami from those packages |
+| Extension under a ROCm prefix | Relative runtime paths reach the prefix's native library directory |
+| Venv using system ROCm, without `rocm_sdk` | System loader configuration must make native Origami and HIP discoverable |
+
+Plain CMake installs place the extension and all Python package files under
+`<prefix>/<libdir>/pythonX.Y/site-packages/origami`, using `CMAKE_INSTALL_LIBDIR`
+and the selected Python version. This follows TheRock's native-prefix discovery
+and preserves installation relocation through `cmake --install --prefix`.
+Wheel builds install `origami/` relative to the wheel root instead, letting pip
+place it in the environment's site-packages. For a separate native prefix, select
+its site-packages through Python's search path, as TheRock's test runner does;
+that prefix is not automatically on an unrelated interpreter's `sys.path`.
+
+If `rocm_sdk` is absent, Origami uses the existing system-loader behavior. If it
+is installed, its runtime takes precedence; SDK import or loading failures are
+reported rather than falling back to a different system library. Keep source
+development environments free of ROCm Python packages when testing a separately
+built system runtime. Windows uses the SDK's DLL loading support; Origami-specific
+Windows validation is still required before claiming that delivery is supported.
+
+The release-wheel script tests import without `LD_LIBRARY_PATH` or `LD_PRELOAD`.
+Set `ORIGAMI_ROCM_SDK_REQUIREMENT` to the desired pip requirement, for example
+`rocm[libraries]==<release-version>`, to install the SDK into its test venv. Without
+that setting, the test requires an already configured system runtime. Pip index
+and local-wheel settings use the usual pip environment variables. The old
+`ORIGAMI_RUNTIME_LIB_DIR` loader override is no longer used by this test.
+
 #### Toolchain, package prefix, and sysroot
 
 The supplied presets select `cmake/toolchains/rocm-clang.cmake`. On Linux, that
@@ -103,7 +179,10 @@ Install the built artifact:
 python -m pip install dist/*.whl
 ```
 
-The wheel links the installed shared `liborigami`; that runtime must be visible to the dynamic loader at import time (via RPATH, `LD_LIBRARY_PATH`, or `ldconfig`).
+The wheel links the installed shared `liborigami`. At import, an installed ROCm
+Python SDK preloads the native libraries; otherwise the system loader must find
+them. See [Finding the native runtime](#finding-the-native-runtime) for the
+installation layouts and test setup.
 
 #### Create an editable development install
 
@@ -121,18 +200,17 @@ The native library and extension are built once during installation, so rerun
 [Iterative development](#iterative-development) for the CMake-only edit-build-test
 loop.
 
-Alternatively, install directly from the repository in one step (builds a wheel under the hood):
+Alternatively, build and install the bindings directly from the repository
+against an already installed native Origami package:
 
 ```bash
-pip install git+https://github.com/ROCm/rocm-libraries.git#subdirectory=shared/origami
+python -m pip install 'git+https://github.com/ROCm/rocm-libraries.git#subdirectory=shared/origami'
 ```
 
-To build the native library from source in the same step instead:
-
-```bash
-CMAKE_ARGS="-DORIGAMI_BUILD_FROM_SOURCE=ON" \
-  pip install git+https://github.com/ROCm/rocm-libraries.git#subdirectory=shared/origami
-```
+For native source development, use the editable workflow above. A regular pip
+wheel build with `ORIGAMI_BUILD_FROM_SOURCE=ON` does not install the shared native
+runtime, because that library is excluded from the wheel. It therefore does not
+provide a self-contained native installation.
 
 ## API Example
 
