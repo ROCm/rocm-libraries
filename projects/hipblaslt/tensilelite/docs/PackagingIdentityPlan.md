@@ -185,8 +185,8 @@ Restack only.
   - If no SHA is found, CMake records none and warns at configure time: "no source
     revision found; client pairing disabled. Build from a git checkout or pass
     `-DTENSILELITE_SOURCE_REVISION=<sha>`." The client prints `none` for
-    `--source-revision`; client use warns and allows when either revision is
-    unavailable (decision 3).
+    `--source-revision`; client use warns and allows when both revisions are
+    unavailable, and rejects pairing when only one is unavailable (decision 3).
   - The `tensilelite-metadata` build prerequisite refreshes `metadata.json` and
     `TensileLiteClientVersion.hpp`. Unchanged contents preserve timestamps, so an
     unchanged identity does not recompile the client. Dirty edits, reverts, and
@@ -229,10 +229,18 @@ Restack only.
     it on that installation object. Compare commits only: a commit mismatch fails;
     differing full source states at the same commit warn. Equal clean or dirty
     source states remain quiet;
-  - **a source revision is unavailable:** warn that source compatibility could not
-    be verified and allow pairing, for editable and regular installs alike. A
-    known revision is still checked without Git; malformed revisions and raised
-    resolver/stamp errors remain errors.
+  - **both source revisions are unavailable:** warn that source compatibility
+    could not be verified and allow pairing, for editable and regular installs
+    alike;
+  - **exactly one source revision is unavailable:** reject pairing and explain
+    how to obtain matching identities. Known revisions still compare without
+    Git; malformed revisions and raised resolver/stamp errors remain errors.
+- Reject a non-empty `TENSILELITE_SOURCE_REVISION` in every editable build hook,
+  before setuptools prepares metadata. Editable installs obtain their runtime
+  identity from Git; a build-time override would label distribution metadata
+  without providing an identity for client validation. Keep the backend in its
+  own `packaging_backend` directory to avoid exposing project metadata through
+  `backend-path`.
 - Identify ownership before source resolution. Support default and strict editable
   layouts by checking source-file identity for symlinks and hardlinks; retain the
   imported package directory as the binding key and the actual source root for
@@ -1034,7 +1042,8 @@ When available, the Python package and client each carry the full `git rev-parse
 HEAD` of rocm-libraries. At first client use, regular installations require exact
 source-state equality. Editable installations require the same commit and warn
 when their recorded full source states differ. Equal clean or dirty states are
-quiet. If either revision is unavailable, warn and allow use (decision 3).
+quiet. If both revisions are unavailable, warn and allow use. If exactly one is
+unavailable, reject pairing (decision 3).
 
 Justification:
 
@@ -1065,13 +1074,20 @@ CMake):
    - then the same command prefix with `rev-parse HEAD`.
 3. **`TENSILELITE_SOURCE_REVISION`:** 40-hex, optionally with a dirty suffix. If git
    also produced a SHA and the base commits differ, fail instead of overriding.
+   Regular Python builds and native client builds accept this input; editable
+   Python build hooks reject any non-empty value. Editable runtime resolution
+   does not read environment overrides.
 4. **Nothing found:** no SHA, for pip and CMake alike. CMake warns at configure
-   time and the client prints `none`. At client use, an unavailable revision on
-   either side warns and allows pairing for editable and regular installations.
-   This supports source ZIP installs without Git; an unstamped third-party wheel
-   is indistinguishable and receives the same fallback. Raised resolver failures
-   and malformed stamps or reported revisions remain errors. Executable, query
-   and later ROCm checks still apply. Known stamps still compare without Git.
+   time and the client prints `none`. At client use, warn and allow pairing when
+   both revisions are missing; reject pairing when exactly one is missing. This
+   applies to editable and regular installations and supports builds from the same
+   source ZIP without Git or overrides. An unstamped package cannot pair with a
+   stamped client. When the ZIP's SHA is known, a regular Python build and native
+   client build can both receive it explicitly. An editable ZIP install cannot
+   use that override and must pair with an unstamped client or move to a Git
+   checkout. Raised resolver failures and malformed stamps or reported revisions
+   remain errors. Executable, query and later ROCm checks still apply. Known
+   stamps still compare without Git.
    No substitute ID is generated: an invented ID records nothing about which source
    was built, can't go through `parse_revision` without leaking into the version
    label, and makes wheels non-reproducible. Every known build path has git or
@@ -1112,7 +1128,7 @@ changes.
 
 - `tensilelite/_build_info.py` is generated only into `build_lib` (wheels) and the
   sdist release tree, never into the source tree;
-- editable installs carry no stamp;
+- editable installs carry no stamp and reject manual source-revision overrides;
 - client and canonical wheel get the same complete value from build-time metadata;
 - dev builds use `5.0.0+g<40-hex>[.dirty]`; releases keep `+rocm…`/`+devrocm…` with
   the SHA only in `_build_info`.
@@ -1124,8 +1140,10 @@ changes.
   installation object. Fresh operations get fresh objects. A commit mismatch
   fails; differing full source states at one commit warn. Equal clean or dirty
   states are quiet. There is no runtime override variable;
-- either source revision unavailable: warn and allow, in both installation modes.
-  Preserve known comparisons and reject malformed values or raised resolver errors.
+- both source revisions unavailable: warn and allow, in both installation modes;
+- exactly one source revision unavailable: reject pairing, in both installation
+  modes. Preserve known comparisons and reject malformed values or raised
+  resolver errors.
 
 Justification. Each point below was verified in scratch experiments by a packaging
 review on 2026-11-10 (pip 26.2.1, setuptools 82, tox 4.56.1, git 2.43):
