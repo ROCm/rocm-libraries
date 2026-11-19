@@ -1423,52 +1423,93 @@ void setAffine(LayoutCase& layout,
     layout.dbiasStrides = strides;
 }
 
+using NamedLayoutCase = std::pair<const char*, LayoutCase>;
+
+// Operand dims that match x's normalized dims, for several normalizedDim values and ranks.
+std::vector<NamedLayoutCase> operandDimsMatchingXCases()
+{
+    std::vector<NamedLayoutCase> cases;
+    cases.emplace_back("rank 4, normalized over C, H and W", makeNormalizedOverChwCase());
+
+    auto overHw = makeNormalizedOverChwCase();
+    setAffine(overHw, {1, 1, 8, 8}, {64, 64, 8, 1});
+    overHw.statDims = {4, 6, 1, 1};
+    overHw.meanStrides = {6, 1, 1, 1};
+    overHw.invVarianceStrides = {6, 1, 1, 1};
+    cases.emplace_back("rank 4, normalized over H and W", overHw);
+
+    const std::vector<int64_t> strides5 = {192, 64, 16, 4, 1};
+    LayoutCase rank5;
+    rank5.xDims = {2, 3, 4, 4, 4};
+    rank5.xStrides = strides5;
+    setAffine(rank5, {1, 3, 4, 4, 4}, strides5);
+    rank5.statDims = {2, 1, 1, 1, 1};
+    rank5.meanStrides = {1, 1, 1, 1, 1};
+    rank5.invVarianceStrides = {1, 1, 1, 1, 1};
+    cases.emplace_back("rank 5, normalized over C, D, H and W", rank5);
+    return cases;
+}
+
+// Operand dims that differ from x's, smaller and larger, each passing validateNormalizedDim.
+std::vector<NamedLayoutCase> operandDimsDifferentFromXCases()
+{
+    std::vector<NamedLayoutCase> cases;
+    for(const auto& [name, rows] : {std::pair<const char*, int64_t>{"statistics rows 2 of 4", 2},
+                                    std::pair<const char*, int64_t>{"statistics rows 3 of 4", 3},
+                                    std::pair<const char*, int64_t>{"statistics rows 5 of 4", 5}})
+    {
+        auto layout = makeNormalizedOverChwCase();
+        layout.statDims = {rows, 1, 1, 1};
+        cases.emplace_back(name, layout);
+    }
+    for(const auto& [name, width] : {std::pair<const char*, int64_t>{"affine W 4 of 8", 4},
+                                     std::pair<const char*, int64_t>{"affine W 7 of 8", 7},
+                                     std::pair<const char*, int64_t>{"affine W 9 of 8", 9}})
+    {
+        auto layout = makeNormalizedOverChwCase();
+        setAffine(layout, {1, 6, 8, width}, {48 * width, 8 * width, width, 1});
+        cases.emplace_back(name, layout);
+    }
+    auto middleOne = makeNormalizedOverChwCase();
+    setAffine(middleOne, {1, 6, 1, 8}, {48, 8, 8, 1});
+    cases.emplace_back("affine H 1 of 8", middleOne);
+    return cases;
+}
+
 } // anonymous namespace
 
 TEST(TestLayernormValidator, OperandDimsMatchingXAcceptedFprop)
 {
-    expectFprop(makeNormalizedOverChwCase(), false);
+    for(const auto& [name, layout] : operandDimsMatchingXCases())
+    {
+        SCOPED_TRACE(name);
+        expectFprop(layout, false);
+    }
 }
 
 TEST(TestLayernormValidator, OperandDimsDifferentFromXDeclinedFprop)
 {
+    for(const auto& [name, layout] : operandDimsDifferentFromXCases())
     {
-        SCOPED_TRACE("statistics cover 2 of x's 4 rows");
-        auto layout = makeNormalizedOverChwCase();
-        layout.statDims = {2, 1, 1, 1};
-        expectFprop(layout, true);
-    }
-    {
-        SCOPED_TRACE("affine W extent 4 against x's 8");
-        auto layout = makeNormalizedOverChwCase();
-        setAffine(layout, {1, 6, 8, 4}, {192, 32, 4, 1});
-        expectFprop(layout, true);
-    }
-    {
-        SCOPED_TRACE("affine H extent 1 against x's 8");
-        auto layout = makeNormalizedOverChwCase();
-        setAffine(layout, {1, 6, 1, 8}, {48, 8, 8, 1});
+        SCOPED_TRACE(name);
         expectFprop(layout, true);
     }
 }
 
 TEST(TestLayernormValidator, OperandDimsMatchingXAcceptedBprop)
 {
-    expectBprop(makeNormalizedOverChwCase(), false);
+    for(const auto& [name, layout] : operandDimsMatchingXCases())
+    {
+        SCOPED_TRACE(name);
+        expectBprop(layout, false);
+    }
 }
 
 TEST(TestLayernormValidator, OperandDimsDifferentFromXDeclinedBprop)
 {
+    for(const auto& [name, layout] : operandDimsDifferentFromXCases())
     {
-        SCOPED_TRACE("saved statistics cover 3 of x's 4 rows");
-        auto layout = makeNormalizedOverChwCase();
-        layout.statDims = {3, 1, 1, 1};
-        expectBprop(layout, true);
-    }
-    {
-        SCOPED_TRACE("affine W extent 4 against x's 8");
-        auto layout = makeNormalizedOverChwCase();
-        setAffine(layout, {1, 6, 8, 4}, {192, 32, 4, 1});
+        SCOPED_TRACE(name);
         expectBprop(layout, true);
     }
 }
