@@ -161,6 +161,10 @@ class GPU_HipdnnShimConvSolutionApi_FP32 : public HipdnnShimConvFwd
 {
 };
 
+class GPU_HipdnnShimConvProfiling_FP32 : public HipdnnShimConvFwd
+{
+};
+
 class GPU_HipdnnShimConvDeclined_FP32 : public HipdnnShimConvFwd
 {
 protected:
@@ -330,6 +334,68 @@ TEST_F(GPU_HipdnnShimConvSolutionApi_FP32, RunSolutionMatchesCpuReference)
             handle, solutions[0], arguments.size(), arguments.data(), wspace.ptr(), wspace.size()),
         miopenStatusSuccess);
 
+    ReadBackAndCheck();
+}
+
+// The conv counterpart of GPU_HipdnnShimBNProfiling_FP32.KernelTimeOnCallerHandle: every
+// forwarded conv entry point runs through the same timed execute, so forward stands for all
+// four (ALMIOPEN-3382). Find is not forwarded and leaves its own time on the handle, so the
+// time is reset between Find and the call. A handle of its own keeps profiling off the shared
+// one.
+TEST_F(GPU_HipdnnShimConvProfiling_FP32, KernelTimeOnCallerHandle)
+{
+    const OwnedHandleOnStream owned_handle(handle_deref.GetStream());
+    auto&& profiled = miopen::deref(owned_handle.handle);
+    profiled.EnableProfiling(true);
+
+    std::size_t workspace_size = 0;
+    ASSERT_EQ(miopenConvolutionForwardGetWorkSpaceSize(
+                  owned_handle.handle, &w.desc, &x.desc, conv.handle, &y.desc, &workspace_size),
+              miopenStatusSuccess);
+    Workspace wspace{workspace_size};
+    miopenConvAlgoPerf_t perf{};
+    int algo_count = 0;
+    ASSERT_EQ(miopenFindConvolutionForwardAlgorithm(owned_handle.handle,
+                                                    &x.desc,
+                                                    x_dev.get(),
+                                                    &w.desc,
+                                                    w_dev.get(),
+                                                    conv.handle,
+                                                    &y.desc,
+                                                    y_dev.get(),
+                                                    1,
+                                                    &algo_count,
+                                                    &perf,
+                                                    wspace.ptr(),
+                                                    wspace.size(),
+                                                    false),
+              miopenStatusSuccess);
+    ASSERT_GT(algo_count, 0);
+    wspace.resize(std::max(workspace_size, perf.memory));
+    ResetAfterFind(y_dev, y);
+
+    profiled.ResetKernelTime();
+    const auto result = CaptureCall([&] {
+        return miopenConvolutionForward(owned_handle.handle,
+                                        &kOne,
+                                        &x.desc,
+                                        x_dev.get(),
+                                        &w.desc,
+                                        w_dev.get(),
+                                        conv.handle,
+                                        perf.fwd_algo,
+                                        &kZero,
+                                        &y.desc,
+                                        y_dev.get(),
+                                        wspace.ptr(),
+                                        wspace.size());
+    });
+    ASSERT_EQ(result.status, miopenStatusSuccess) << result.message << '\n' << result.logged;
+
+    const float ms      = profiled.GetKernelTime();
+    const bool recorded = ms > 0.0f;
+    RecordParityFlag("kernel_time_recorded_conv_fwd", recorded);
+    EXPECT_TRUE(recorded) << ms << " ms";
     ReadBackAndCheck();
 }
 

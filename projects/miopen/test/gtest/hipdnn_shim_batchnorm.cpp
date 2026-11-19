@@ -1856,25 +1856,22 @@ const BN2DTestCase& ProfilingCase()
     return profiling_case;
 }
 
-// Records whether the call left a kernel time on the handle, which MIOpen does for
-// every call it serves while profiling is on. The caller resets the time first, so
+// Checks that the call left a kernel time on the handle, which both paths do for
+// every call they serve while profiling is on. The caller resets the time first, so
 // one left by an earlier call does not count.
 void RecordKernelTime(const miopen::Handle& handle, const std::string& case_name)
 {
     const float ms      = handle.GetKernelTime();
     const bool recorded = ms > 0.0f;
     hs::RecordParityFlag("kernel_time_recorded_" + case_name, recorded);
-    if(!hs::ForwardingEnabled())
-        EXPECT_TRUE(recorded) << case_name << ": " << ms << " ms";
+    EXPECT_TRUE(recorded) << case_name << ": " << ms << " ms";
 }
 
 // With profiling on, MIOpen times the kernels it launches on the handle, and
 // miopenGetKernelTime returns their time. The provider launches a forwarded call's
-// kernels on its own MIOpen handle, so nothing is timed on the caller's handle and
-// the time stays 0 (ALMIOPEN-3382). The test records the outcome in both modes and
-// expects a time only in the disabled one. Once ALMIOPEN-3382 is fixed, the enabled
-// run records a time too, and its line in known_forwarding_divergences.txt no
-// longer matches.
+// kernels on its own MIOpen handle, so the shim times the hipDNN execute on the
+// caller's stream and writes the time to the caller's handle (ALMIOPEN-3382). The
+// test expects a time in both modes.
 TEST(GPU_HipdnnShimBNProfiling_FP32, KernelTimeOnCallerHandle)
 {
     const hs::OwnedHandleOnStream owned_handle(get_handle().GetStream());
@@ -1913,6 +1910,76 @@ TEST(GPU_HipdnnShimBNProfiling_FP32, KernelTimeOnCallerHandle)
             RecordKernelTime(handle, "profiling_infer");
             CheckInfer(handle, d);
         }
+    }
+}
+
+// A served call replaces the handle's kernel time: MIOpen resets it before it stores the
+// time of the kernels it launched. The sentinel is far above any real kernel time, so a
+// call that added to the old value would leave a time at or above it.
+TEST(GPU_HipdnnShimBNProfiling_FP32, KernelTimeReplacesThePreviousValue)
+{
+    constexpr float kSentinelMs = 1.0e6f;
+
+    const hs::OwnedHandleOnStream owned_handle(get_handle().GetStream());
+    auto&& handle = miopen::deref(owned_handle.handle);
+    handle.EnableProfiling(true);
+
+    TrainData d;
+    handle.ResetKernelTime();
+    handle.AccumKernelTime(kSentinelMs);
+    const auto result = TrainUnderPolicy(handle, d, miopenBNSpatial, ProfilingCase());
+    if(ExpectServed("profiling_replaces_previous", result))
+    {
+        const float ms = handle.GetKernelTime();
+        EXPECT_GT(ms, 0.0f);
+        EXPECT_LT(ms, kSentinelMs) << "the call added to the previous time instead of replacing it";
+        CheckTrain(handle, d, true, false);
+    }
+}
+
+// With profiling off, a served call leaves the handle's kernel time as it was. The mark is
+// a time no kernel would report, so a call that stored its own time over it shows.
+TEST(GPU_HipdnnShimBNProfiling_FP32, KernelTimeIsLeftAloneWhenProfilingIsOff)
+{
+    constexpr float kMarkMs = 123.0f;
+
+    const hs::OwnedHandleOnStream owned_handle(get_handle().GetStream());
+    auto&& handle = miopen::deref(owned_handle.handle);
+    handle.EnableProfiling(false);
+
+    TrainData d;
+    handle.ResetKernelTime();
+    handle.AccumKernelTime(kMarkMs);
+    const auto result = TrainUnderPolicy(handle, d, miopenBNSpatial, ProfilingCase());
+    if(ExpectServed("profiling_off_leaves_time", result))
+    {
+        EXPECT_FLOAT_EQ(handle.GetKernelTime(), kMarkMs);
+        CheckTrain(handle, d, true, false);
+    }
+}
+
+// Backward without saved stats at an epsilon other than the provider's runs two graphs: a
+// training that computes the stats, then the backward. The call must report a time for the
+// whole sequence. The test cannot tell the sum from one graph's time, because a kernel's
+// time is not repeatable to the precision that needs; it checks that the multi-graph path
+// is timed and that its output is still right.
+TEST(GPU_HipdnnShimBNProfiling_FP32, KernelTimeOfBackwardWithoutSavedStats)
+{
+    const hs::OwnedHandleOnStream owned_handle(get_handle().GetStream());
+    auto&& handle = miopen::deref(owned_handle.handle);
+    handle.EnableProfiling(true);
+
+    BwdData d;
+    SetUpBwd(d);
+    DecoupleDy(handle, d);
+    d.epsilon = kLargeEpsilon;
+    handle.ResetKernelTime();
+    const auto result = hs::CaptureCall([&] { return BwdV1(handle, d, false); });
+    if(ExpectServed("profiling_bwd_no_saved_stats", result))
+    {
+        RecordKernelTime(handle, "profiling_bwd_no_saved_stats");
+        FillTrueStats(d, d.epsilon);
+        CheckBwd(handle, d);
     }
 }
 
