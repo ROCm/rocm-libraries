@@ -1849,11 +1849,13 @@ def test_the_dense_registry_names_a_tuning_id_for_every_kernel(manifest, registr
 
 def test_a_mined_dense_shape_row_without_use_attn_bias_is_covered(registry):
     """`mine_shapes.py` rows predate the ``use_attn_bias`` cell axis: such a row is a
-    bias-off request, and a row that sets the axis lands in the bias-on cell."""
+    bias-off request, and a row that sets the axis lands in the bias-on cell. The row uses
+    the canonical 8 / 8 heads, the only head configuration the dense cells list: the
+    kernel reads its head counts at runtime."""
     row = {
         "batch": 1,
         "nhead_q": 8,
-        "nhead_k": 1,
+        "nhead_k": 8,
         "seqlen_q": 512,
         "seqlen_k": 512,
         "hdim_q": 64,
@@ -1863,10 +1865,12 @@ def test_a_mined_dense_shape_row_without_use_attn_bias_is_covered(registry):
         "sliding_window": 0,
         "use_sinks": False,
     }
-    _, gaps, covered = re_.shapes_report(
+    lines, gaps, covered = re_.shapes_report(
         registry, [row, {**row, "use_attn_bias": True}]
     )
     assert (gaps, covered) == (0, 2)
+    # Two cells, not one: the omitted axis is bias-off and the set one is bias-on.
+    assert "  covered: 2 shapes, 2 cells" in lines
 
 
 # ---------------------------------------------------------------------------

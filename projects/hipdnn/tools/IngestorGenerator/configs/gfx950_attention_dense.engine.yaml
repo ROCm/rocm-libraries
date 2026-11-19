@@ -278,8 +278,8 @@ launch_surface:
       by buildIngestorKernelCode(..., expectedSignature).
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseSignature.cpp
 
-  # The gfx950 arch descriptor's hook for the one KMD field only this manifest declares of the
-  # optional features: the shared pack reads it through the descriptor, never by name.
+  # The gfx950 arch descriptor's additive-bias hook: the shared pack reads use_additive_bias
+  # through it, never by name.
   - name: bias
     python_source: kernels/gfx950/attention_dense.py:build_attention_dense
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp

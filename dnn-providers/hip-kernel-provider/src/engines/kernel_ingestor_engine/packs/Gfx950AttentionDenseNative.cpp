@@ -8,7 +8,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <variant>
 
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
@@ -35,11 +34,11 @@
  * `build_attention_dense`, packaged (kind: rocke -> kpack) for gfx950 only. Matching and
  * dispatch, the [2^-64, 2^4] scale range included, are shared with the gfx942 twin
  * (AttentionDenseNative.cpp); what is gfx950's own is bound here: the block_m {128, 256}
- * tiles with their LDS budget, no sliding window, a head-count comparison because the
- * catalog lists each head configuration as its own entry, and the v1 (8-argument) and v2
+ * tiles with their LDS budget, no sliding window, and the v1 (8-argument) and v2
  * (10-argument) launch contracts. A kernel built with an additive bias (the
  * use_additive_bias KMD field) takes the v3 contract, which adds the bias pointer and its
- * strides: 14 arguments.
+ * strides: 14 arguments. No head count is compared: the kernel reads both as kernargs
+ * taken from the graph.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {

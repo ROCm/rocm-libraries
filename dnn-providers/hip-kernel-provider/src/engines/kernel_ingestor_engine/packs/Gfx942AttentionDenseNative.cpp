@@ -46,9 +46,8 @@
  * the shared code, as on gfx950.
  *
  * The body reads both head counts at runtime as well as batch and the sequence lengths
- * (`Gfx942AttentionDenseSpec.runtime_param_fields`). Unlike the gfx950 twin, whose
- * catalog lists each head configuration and whose kernelMatches compares them, a
- * candidate here is never compared against the graph's head counts.
+ * (`Gfx942AttentionDenseSpec.runtime_param_fields`). Like the gfx950 twin, a candidate
+ * here is never compared against the graph's head counts.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
