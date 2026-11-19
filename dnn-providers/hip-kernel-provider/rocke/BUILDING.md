@@ -144,4 +144,8 @@ binding beside `rocke_engine`; `-DROCKE_BUILD_LIBRARY_CPP=OFF` skips them.
 `cmake --install` puts the library archive and headers into the same `ckc`
 package: a C/C++ consumer of a library family (e.g. the conv API in
 `rocke/instance_conv_*.h`) links `ckc::rocke_library`, which brings
-`ckc::rocke_core` with it.
+`ckc::rocke_core` with it. `-DROCKE_INSTALL_DEVELOPMENT=OFF` skips that
+developer install (both archives, all public headers and the `ckc` package,
+which share one export set). The hip-kernel-provider sets it OFF, because no
+TheRock artifact component ships those files, and ties every rocKE test install
+switch and `BUILD_TESTING` to `HIPKERNELPROVIDER_ENABLE_TESTS`.

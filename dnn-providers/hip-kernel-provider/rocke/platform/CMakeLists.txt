@@ -96,6 +96,9 @@ option(ROCKE_INSTALL_TESTS "Install rocKE smoke test artifacts and CTest metadat
 option(ROCKE_INSTALL_PYTHON_TESTS "Install rocKE Python smoke/golden CI tests" ON)
 option(ROCKE_INSTALL_PLATFORM_PYTEST "Install the full rocKE platform pytest CTest entry" ON)
 option(ROCKE_INSTALL_STANDALONE_CTEST "Install standalone rocKE CTest metadata" ON)
+option(ROCKE_INSTALL_DEVELOPMENT
+       "Install the rocke_core and rocke_library archives, the public headers and the ckc CMake package"
+       ON)
 if(NOT DEFINED ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
   set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "" CACHE STRING
       "Provider installed CTest subdir to append rocKE tests to, e.g. hip_kernel_provider")
@@ -343,24 +346,30 @@ if(ROCKE_BUILD_LIBRARY_CPP AND EXISTS "${_ROCKE_LIBRARY_CPP_DIR}/CMakeLists.txt"
 endif()
 
 # --- Installable engine + test artifacts -------------------------------------
-install(TARGETS rocke_core
-        EXPORT ckcTargets
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/cpp/include/"
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(EXPORT ckcTargets
-        FILE ckcTargets.cmake
-        NAMESPACE ckc::
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ckc)
-include(CMakePackageConfigHelpers)
-configure_package_config_file(
-  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ckcConfig.cmake.in"
-  "${CMAKE_CURRENT_BINARY_DIR}/ckcConfig.cmake"
-  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ckc)
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/ckcConfig.cmake"
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ckc)
+# The rocke_core and rocke_library targets share the ckcTargets export set, so
+# every install rule that names that set sits under ROCKE_INSTALL_DEVELOPMENT:
+# library/cpp/CMakeLists.txt gates its half on the same option, and exporting a
+# target that is not installed is a generate-time error.
+if(ROCKE_INSTALL_DEVELOPMENT)
+  install(TARGETS rocke_core
+          EXPORT ckcTargets
+          ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+          LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+          RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/cpp/include/"
+          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+  install(EXPORT ckcTargets
+          FILE ckcTargets.cmake
+          NAMESPACE ckc::
+          DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ckc)
+  include(CMakePackageConfigHelpers)
+  configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ckcConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/ckcConfig.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ckc)
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/ckcConfig.cmake"
+          DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ckc)
+endif()
 
 if(ROCKE_INSTALL_PYTHON_PACKAGE)
   # In provider mode, co-locate the rocke package under the test subdir
