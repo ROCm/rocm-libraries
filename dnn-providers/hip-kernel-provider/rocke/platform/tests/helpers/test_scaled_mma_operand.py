@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Instruction ABI padding is separate from logical fragment transport."""
 
+from dataclasses import replace
 from itertools import product
 import os
 from pathlib import Path
@@ -115,6 +116,27 @@ def test_invalid_operand_role_is_refused_before_emission(role):
     before = serialize(builder.kernel)
     with pytest.raises(ValueError, match="expected 'a' or 'b'"):
         prepare_scaled_mma_operand(builder, atom, role, fragment)
+    assert serialize(builder.kernel) == before
+
+
+@pytest.mark.parametrize("target", ("gfx950", "gfx1250"))
+@pytest.mark.parametrize("conflict", ("a", "b"))
+@pytest.mark.parametrize("role", ("a", "b"))
+def test_conflicting_atom_format_is_refused_before_emission(target, conflict, role):
+    fp8, bf8 = "fp8e4m3", "bf8e5m2"
+    a, b = (bf8, fp8) if conflict == "a" else (fp8, bf8)
+    mixed, desc, dtype = _contract(target, a, b, role)
+    fp8_atom, _, _ = _contract(target, fp8, fp8, role)
+    stale = replace(mixed, op_id=fp8_atom.op_id)
+    builder = IRBuilder("conflicting_atom_format")
+    fragment = make_fragment(desc, dtype)
+    fill_fragment(builder, fragment, 0)
+    before = serialize(builder.kernel)
+    with pytest.raises(
+        ValueError,
+        match=f"atom operand {conflict} dtype='bf8e5m2' conflicts with catalog dtype='fp8e4m3'",
+    ):
+        prepare_scaled_mma_operand(builder, stale, role, fragment)
     assert serialize(builder.kernel) == before
 
 

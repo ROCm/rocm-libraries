@@ -24,8 +24,9 @@ def prepare_scaled_mma_operand(
     """Return the selected scaled atom's A/B carrier vector.
 
     The fragment retains only live storage words. This bridge validates its
-    logical format and count, reinterprets byte-sized formats, and appends the
-    atom's required zero tail. It emits no memory operations or conversions.
+    logical format and count against the catalog atom selected by ``op_id``,
+    reinterprets byte-sized formats, and appends the required zero tail. It
+    emits no memory operations or conversions.
     LLVM may still materialize zero registers; inspect ISA before claiming the
     padding is instruction-free.
     """
@@ -39,19 +40,32 @@ def prepare_scaled_mma_operand(
     if (
         not isinstance(atom.family, str)
         or not isinstance(atom.op_id, str)
-        or not isinstance(atom.srcs[index].dtype, str)
+        or not all(isinstance(src.dtype, str) for src in atom.srcs[:2])
     ):
         raise TypeError("scaled MMA operand requires complete atom metadata")
-    if atom.family == "mfma_scaled" and gfx950_scaled_mfma(atom.op_id) is not None:
-        layout = matrix_layout(atom.srcs[index].dtype)
+    wmma = None
+    if atom.family == "mfma_scaled":
+        resolved = gfx950_scaled_mfma(atom.op_id)
     elif atom.family == "wmma_scaled":
-        operation = gfx1250_scaled_wmma(atom.op_id)
-        if operation is None:
-            raise ValueError(f"unsupported scaled MMA operand ABI: {atom.op_id}")
-        layout = operation.matrix_layout(role)
+        wmma = gfx1250_scaled_wmma(atom.op_id)
+        resolved = wmma.atom if wmma is not None else None
     else:
+        resolved = None
+    if resolved is None:
         raise ValueError(f"unsupported scaled MMA operand ABI: {atom.op_id}")
-    expected_dtype = atom.srcs[index].dtype
+    # Lowering gets both format selectors from the ID, not the supplied copy.
+    for i, operand in enumerate(("a", "b")):
+        supplied_dtype = atom.srcs[i].dtype
+        catalog_dtype = resolved.srcs[i].dtype
+        if supplied_dtype != catalog_dtype:
+            raise ValueError(
+                f"scaled MMA atom operand {operand} dtype={supplied_dtype!r} "
+                f"conflicts with catalog dtype={catalog_dtype!r} for {atom.op_id!r}"
+            )
+    expected_dtype = resolved.srcs[index].dtype
+    layout = (
+        wmma.matrix_layout(role) if wmma is not None else matrix_layout(expected_dtype)
+    )
     if fragment.dtype.name != expected_dtype:
         raise ValueError(
             f"scaled MMA operand {role} dtype={fragment.dtype.name!r}, "

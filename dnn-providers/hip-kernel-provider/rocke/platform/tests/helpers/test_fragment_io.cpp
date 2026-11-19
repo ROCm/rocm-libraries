@@ -70,24 +70,39 @@ static int gemm(const char* a, const char* bb, const char* c, const int* shape)
     return status;
 }
 
-static int prepare(const char* gfx, const char* a, const char* bb, const char* role)
+static int prepare(const char* gfx,
+                   const char* a,
+                   const char* bb,
+                   const char* role,
+                   const char* conflicting_role = NULL)
 {
     const auto* target = rocke_arch_target_from_gfx(gfx);
     if(!target || (strcmp(role, "a") != 0 && strcmp(role, "b") != 0))
         return 2;
     const bool mfma = strcmp(gfx, "gfx950") == 0;
     rocke_mma_scale_filter_t scales = {"e8m0", "e8m0", ROCKE_MMA_SCALE_K32};
-    const auto* atom = rocke_mma_catalog_op_for_shape(&target->mma,
-                                                      mfma ? "mfma_scaled" : "wmma_scaled",
-                                                      a,
-                                                      bb,
-                                                      "fp32",
-                                                      mfma ? 32 : 16,
-                                                      mfma ? 32 : 16,
-                                                      mfma ? 64 : 128,
-                                                      &scales);
+    auto lookup = [&](const char* lhs, const char* rhs) {
+        return rocke_mma_catalog_op_for_shape(&target->mma,
+                                              mfma ? "mfma_scaled" : "wmma_scaled",
+                                              lhs,
+                                              rhs,
+                                              "fp32",
+                                              mfma ? 32 : 16,
+                                              mfma ? 32 : 16,
+                                              mfma ? 64 : 128,
+                                              &scales);
+    };
+    const auto* atom = lookup(a, bb);
     if(!atom)
         return 2;
+    auto supplied = *atom;
+    if(conflicting_role)
+    {
+        const auto* fp8 = lookup("fp8e4m3", "fp8e4m3");
+        if(!fp8)
+            return 2;
+        supplied.op_id = fp8->op_id;
+    }
     const bool for_b = strcmp(role, "b") == 0;
     auto layout = mfma ? rocke_mfma_matrix_layout(for_b ? bb : a)
                        : rocke_scaled_wmma_matrix_layout(atom, for_b);
@@ -102,10 +117,25 @@ static int prepare(const char* gfx, const char* a, const char* bb, const char* r
                      == ROCKE_OK
               && rocke_h_fill_fragment(&b, &fragment, 0) == ROCKE_OK;
     if(ok)
-        ok = rocke_h_prepare_scaled_mma_operand(&b, atom, role, &fragment) != NULL;
-    const int status = ok && rocke_ir_builder_ok(&b) ? print_kernel(&b) : 1;
+    {
+        const auto before = b.kernel->body->num_ops;
+        const auto* result = rocke_h_prepare_scaled_mma_operand(&b, &supplied, role, &fragment);
+        if(conflicting_role)
+        {
+            char expected[112];
+            snprintf(expected,
+                     sizeof(expected),
+                     "atom operand %s dtype='bf8e5m2' conflicts with catalog dtype='fp8e4m3'",
+                     conflicting_role);
+            ok = !result && rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE
+                 && strstr(b.err, expected) && b.kernel->body->num_ops == before;
+        }
+        else
+            ok = result && rocke_ir_builder_ok(&b);
+    }
+    const int status = ok ? (conflicting_role ? 0 : print_kernel(&b)) : 1;
     if(status)
-        fprintf(stderr, "%s\n", b.err);
+        fprintf(stderr, "unexpected %s %s preparation result: %s\n", gfx, role, b.err);
     rocke_ir_builder_free(&b);
     return status;
 }
@@ -228,6 +258,13 @@ int main(int argc, char** argv)
 {
     if(argc == 1)
     {
+        const char* targets[] = {"gfx950", "gfx1250"};
+        const char* roles[] = {"a", "b"};
+        for(const char* gfx : targets)
+            for(const char* role : roles)
+                if(prepare(gfx, "bf8e5m2", "fp8e4m3", role, "a")
+                   || prepare(gfx, "fp8e4m3", "bf8e5m2", role, "b"))
+                    return 1;
         const int config[] = {8, 32, 2, 32, 32, 16, 0, 0, 0};
         return !invalid_tile(false) || !invalid_tile(true) || emit("fp6e2m3", config, false);
     }
