@@ -194,6 +194,10 @@ inline std::vector<BN2DTestCase> Network2DSmall()
         // FinalMeanVariance stage indexes the 3-channel (12-byte) per-channel
         // running/saved buffers at the channel boundary.
         {2, 3, 8, 8, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
+        {1, 64, 63, 63, miopen::batchnorm::Direction::Backward, 0, 0},
+        {1, 64, 64, 64, miopen::batchnorm::Direction::Backward, 0, 0},
+        {1, 64, 65, 65, miopen::batchnorm::Direction::Backward, 0, 0},
+        {1, 64, 63, 66, miopen::batchnorm::Direction::Backward, 0, 0},
     };
     // clang-format on
 }
