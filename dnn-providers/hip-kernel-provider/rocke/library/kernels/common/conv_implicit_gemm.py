@@ -810,7 +810,7 @@ class ImplicitGemmConvSpec:
     #   rows once its A reads are done, no barrier for A; needs Wo % 64 == 0 per
     #   workgroup and xh_wait_smem), barrier after n MFMAs, then B's DMA;
     #   2000 + n  as 1000 + n with part of A's DMA after the barrier.
-    #   Values in use: 1036, 1040, 2016, 2020.
+    #   The shipped gfx942 tables use 1036, 1040, 2016 and 2020.
     fxh_dma: int = 0
     # fxh_dma >= 1000 with the input-row ring across the y taps (fwd x-halo,
     # tapf order: y fastest within (chunk, z)): a tile of R = xh_yring whole
