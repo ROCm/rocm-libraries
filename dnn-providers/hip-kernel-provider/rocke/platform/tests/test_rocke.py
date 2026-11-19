@@ -762,6 +762,58 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(bound.tid.type.name, "i32")
         self.assertEqual(bound.lane.type.name, "i32")
         self.assertEqual(bound.warp_m_idx.type.name, "i32")
+        self.assertIsNone(bound.block_m_off_i64)
+
+    def test_warp_grid_default_bind_is_byte_identical_with_m_origin_i64_false(self):
+        """m_origin_i64 defaults to False and must not perturb existing IR."""
+        grid = WarpGrid(
+            tile_m=128,
+            tile_n=128,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+        )
+        b1 = IRBuilder("a")
+        grid.bind(b1)
+        b2 = IRBuilder("a")
+        grid.bind(b2, m_origin_i64=False)
+        ops1 = [(op.name, op.attrs) for op in b1.kernel.body.ops]
+        ops2 = [(op.name, op.attrs) for op in b2.kernel.body.ops]
+        self.assertEqual(ops1, ops2)
+
+    def test_warp_grid_m_origin_i64_widens_the_same_block_id(self):
+        """block_m_off_i64 is block_m_off's product, in i64, from the same
+        block-id read (plan section 3 item 1: addr64's tile origin must not
+        re-derive the M-axis block id via a second, possibly divergent
+        read)."""
+        b = IRBuilder("check_grid_addr64")
+        grid = WarpGrid(
+            tile_m=128,
+            tile_n=128,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+        )
+        bound = grid.bind(b, m_origin_i64=True)
+        self.assertIsNotNone(bound.block_m_off_i64)
+        self.assertEqual(bound.block_m_off_i64.type.name, "i64")
+        # Both block_m_off (i32) and block_m_off_i64 multiply the same
+        # gpu.block_id op's result -- not two independent block-id reads.
+        mul_ops = [op for op in b.kernel.body.ops if op.name == "arith.mul"]
+        i32_mul = next(op for op in mul_ops if op.result is bound.block_m_off)
+        i64_mul = next(op for op in mul_ops if op.result is bound.block_m_off_i64)
+        zext_op = next(
+            op for op in b.kernel.body.ops if op.result is i64_mul.operands[0]
+        )
+        self.assertEqual(zext_op.name, "arith.zext")
+        self.assertIs(zext_op.operands[0], i32_mul.operands[0])
+        self.assertEqual(i64_mul.operands[1].op.attrs["value"], 128)
 
     def test_coalesced_loader_choose_vec(self):
         # 128x32 tile = 4096 halves, 256 threads: vec=8 -> 512 vecs ≥ 256 ✓
