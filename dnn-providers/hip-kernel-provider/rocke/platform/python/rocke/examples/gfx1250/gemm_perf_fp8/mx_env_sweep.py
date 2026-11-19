@@ -156,6 +156,8 @@ def _busy(gmap, own_pid=None, detail=None):
     head = [h.strip() for h in lines[0].split(",")]
     col = {h: i for i, h in enumerate(head)}
     busy = set()
+    if "pid" not in col or "gpu" not in col:
+        return busy  # no process running: amd-smi then prints just "gpu,process_info"
     for line in lines[1:]:
         f = [x.strip() for x in line.split(",")]
         if len(f) < len(head) or not f[col["pid"]].isdigit() or f[col["gpu"]] not in gmap:
