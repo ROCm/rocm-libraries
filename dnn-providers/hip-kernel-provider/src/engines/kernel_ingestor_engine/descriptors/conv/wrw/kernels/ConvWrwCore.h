@@ -1014,16 +1014,16 @@ struct K3PackTiles
 };
 
 /// The block's (tile, row set, split) indices. XCD 1: logical blocks run contiguously per XCD
-/// (gfx942 / gfx950 dispatch round-robin over 8), so the channel tiles of one split, which
-/// read the same rows, share an L2.
+/// (gfx942 / gfx950 dispatch round-robin over their `xcds` XCDs), so the channel tiles of one
+/// split, which read the same rows, share an L2.
 template <int XCD>
-__device__ inline void k3BlockIds(unsigned& bx, unsigned& by, unsigned& bz)
+__device__ inline void k3BlockIds(unsigned& bx, unsigned& by, unsigned& bz, int xcds)
 {
     bx = blockIdx.x;
     by = blockIdx.y;
     bz = blockIdx.z;
     if constexpr(XCD != 0)
-        k1XcdOrder(bx, by, bz);
+        k1XcdOrder(bx, by, bz, xcds);
 }
 
 /// One step's accumulation from LDS: per k-atom, filter row f's window (fStride elements per
@@ -1384,7 +1384,7 @@ __device__ K3_LOOP_INLINE void k3WrwRows(const K3Args& a)
     const int wk = wave % WK, wc = wave / WK;
     const int kg = a.k / a.groups, cg = a.c / a.groups;
     unsigned bx, by, bz;
-    k3BlockIds<XCD>(bx, by, bz);
+    k3BlockIds<XCD>(bx, by, bz, a.xcds);
     const int kTiles = (kg + BK - 1) / BK;
     const int k0 = (bx % kTiles) * BK;
     const int c0 = (bx / kTiles) * BC;
@@ -1637,7 +1637,7 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
     const int wk = wave % WK, wc = wave / WK;
     const int kg = a.k / a.groups, cg = a.c / a.groups;
     unsigned bx, by, bz;
-    k3BlockIds<XCD>(bx, by, bz);
+    k3BlockIds<XCD>(bx, by, bz, a.xcds);
     const int kTiles = (kg + BK - 1) / BK;
     const int k0 = (bx % kTiles) * BK;
     const int c0 = (bx / kTiles) * BC;
@@ -2433,7 +2433,7 @@ __device__ K3_LOOP_INLINE void k3WrwRowsSmallC(const K3Args& a)
     const int lane = tid % WAVE, wk = tid / WAVE;
     const int kg = a.k / a.groups, cg = a.c / a.groups;
     unsigned bx, by, bz;
-    k3BlockIds<XCD>(bx, by, bz);
+    k3BlockIds<XCD>(bx, by, bz, a.xcds);
     const int kTiles = (kg + BK - 1) / BK;
     const int k0 = (bx % kTiles) * BK;
     const int c0 = (bx / kTiles) * BC;
@@ -2674,7 +2674,7 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
     const int wk = wave % WK, wc = wave / WK;
     const int kg = a.k / a.groups, cg = a.c / a.groups;
     unsigned bx, by, bz;
-    k3BlockIds<XCD>(bx, by, bz);
+    k3BlockIds<XCD>(bx, by, bz, a.xcds);
     const int kTiles = (kg + BK - 1) / BK;
     const int k0 = (bx % kTiles) * BK;
     const int c0 = (bx / kTiles) * BC;
@@ -3778,7 +3778,7 @@ __device__ K3_LOOP_INLINE void k3WrwRingDma(const K3Args& a)
     const int wk = wave % WK, wc = wave / WK;
     const int kg = a.k / a.groups, cg = a.c / a.groups;
     unsigned bx, by, bz;
-    k3BlockIds<XCD>(bx, by, bz);
+    k3BlockIds<XCD>(bx, by, bz, a.xcds);
     const int kTiles = (kg + BK - 1) / BK;
     const int k0 = (bx % kTiles) * BK;
     const int c0 = (bx / kTiles) * BC;
@@ -4109,7 +4109,7 @@ __device__ K3_LOOP_INLINE void k3WrwRingDmaTr(const K3Args& a)
     const int wk = wave % WK, wc = wave / WK;
     const int kg = a.k / a.groups, cg = a.c / a.groups;
     unsigned bx, by, bz;
-    k3BlockIds<XCD>(bx, by, bz);
+    k3BlockIds<XCD>(bx, by, bz, a.xcds);
     const int kTiles = (kg + BK - 1) / BK;
     const int k0 = (bx % kTiles) * BK;
     const int c0 = (bx / kTiles) * BC;

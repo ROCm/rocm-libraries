@@ -45,6 +45,10 @@ struct K1Args
     /// the filter's depth and height extents (T, R). Unused otherwise.
     int patchT;
     int patchR;
+    /// XCD-contiguous block order (CONV_IGEMM_XCD): the device's XCDs, dealt workgroups
+    /// round-robin in launch order; 1 or 0 keeps the launch order.
+    int xcds;
+    int padding1;
 };
 
 /// Adds the splits' fp32 partials in split order into the output's element type.
