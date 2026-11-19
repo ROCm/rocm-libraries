@@ -10,6 +10,7 @@ Subcommands for collection, training, evaluation and descriptor installation:
     evaluate            corpus + trained UHD -> §11.2 regret report
     promote             install that pair into a descriptor tree and point a UED at it
     generate            graph corpus -> public collection -> train/evaluate/promote
+    feature-search      training rows -> a searched feature recipe (recipe.json)
 
 Collect, train and install:
 
@@ -218,6 +219,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     add_size_arguments(size)
 
+    from .feature_search import add_feature_search_arguments, run_feature_search
+
+    feature_search = subparsers.add_parser(
+        "feature-search",
+        help="search a feature recipe over the published columns and derived expressions",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    add_feature_search_arguments(feature_search)
+
     # Split off before the main parser sees flags it does not declare.
     if argv is None:
         argv = sys.argv[1:]
@@ -259,6 +269,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_generate(args)
     if args.command == "size":
         return run_size(args)
+    if args.command == "feature-search":
+        return run_feature_search(args)
     if args.command == "promote":
         return run_promote(args)
     if args.command == "evaluate":

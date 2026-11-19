@@ -685,6 +685,60 @@ but "work unknown" stays absent and is never silently 0. Whether a signature is 
 a corpus is therefore the evaluator's answer over the published feature maps
 (`check_signature_evaluates`), not a check that every referenced name is published.
 
+### Feature exclusions, `feature-search`, and overriding
+
+**Exclusions.** A proposal (and a search) never reads these published columns, because a model
+that does learns the corpus rather than the cost; each is listed in `omitted_proposals` with its
+`reason`:
+
+| Reason | Columns |
+|---|---|
+| `positional_tensor` | `graph.tensors[<i>].*`: positional copies of a node's tensor roles, which are role-ambiguous (the node-role columns stay) |
+| `derived_numel` | names ending `.numel`: the product of the published dims |
+| `caller_value` | `graph.nodes[<i>].attn_scale_value` and a matcher's `<namespace>.scale`: caller-chosen multipliers, often `1/sqrt(head_dim)`, so a second head_dim to a model |
+| `board_identity` | `device.total_global_mem`: varies only between the pooled boards |
+
+Strides, `dropout_p`/`dropout_probability` and `virtual` are kept. An authored recipe
+(`--features`, `--feature-signature`) is never filtered.
+
+**Search.** `generate --feature-search` replaces the proposal with a search on the training
+rows (never the evaluation slice). The same search runs on any rows, to read what it chooses:
+
+```bash
+python -m uhd_gen feature-search --input train.csv --target tflops \
+    --descriptor-tree ./descriptors --engine hipkernel:my_engine --output-dir ./search
+```
+
+The candidates are the published columns every row binds (exact duplicates and constants
+collapse, the lexicographically first name of a duplicate group is kept) and `jsonexpr`
+expressions over them: padding (`ceil_div(d, m) * m`, `d / (ceil_div(d, m) * m)`, `d % m`, for
+m in 8..128), ratios of dims of different tensor roles, stride order
+(`{">": ["$q.strides[1]", "$q.strides[2]"]}`: head-major or token-major, for each adjacent pair
+before a tensor's innermost stride; raw strides stay candidates), grid counts
+(`prod(S) * ceil_div(d, t)` over the other dims of a role, also divided by `$device.cu_count` when
+that field varies) and, given catalog values, `d` rounded up to each catalog field's tiers
+(`--catalog-values file.json` with `{"field": [values...]}`, or the metadata of the engine's KDP
+kernels in `--descriptor-tree`, which `generate` always reads). More than `--max-candidates`
+(2000) candidates are refused, not sampled. The search is backward elimination scored by
+LightGBM on the log target with 5-fold validation by problem, repeated over three seeds: each round
+drops the least important 15% (permutation importance; near-duplicate clusters, |corr| > 0.999,
+leave together), it stops after two rounds worse than the best by more than
+`max(spread, 0.002)` or at 8 features, keeps the smallest round within that tolerance of the
+best, then removes features one at a time while the score stays within it of that round's. Every recipe
+entry is checked against `hipdnn_uhd_features` on every row before it is written. The same
+rows and seeds give the same recipe.
+
+The output directory (`feature_search/` beside the model for `generate`, whose
+`generation_manifest.json` records the report path and a summary under `feature_search`)
+holds `recipe.json`, a features-signature array; `feature_search_report.json`, with the
+candidate counts per template, the exclusions, every round (features kept, score and spread),
+the final features with each one's removal cost, and what was dropped and why; and a Markdown
+summary.
+
+**Overriding.** `--features` or `--feature-signature` is taken as written and skips the
+search. To choose a subset of what the search found, edit `recipe.json` and pass it back as
+`--feature-signature recipe.json`. `--feature-search` together with either is an error.
+
 ### Reproducible generation
 
 `python -m uhd_gen generate --help` describes the combined workflow. It accepts

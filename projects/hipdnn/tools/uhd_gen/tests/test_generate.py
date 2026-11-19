@@ -1037,6 +1037,207 @@ def test_a_proposed_tensor_uid_reads_only_whether_the_tensor_is_bound(evaluator)
     assert [row[0] for row in values] == [1.0, 1.0, 1.0, 0.0]
 
 
+def _rule_frame():
+    """One column per exclusion rule, and the columns the audit decided to keep."""
+    return pd.DataFrame(
+        {
+            "graph.nodes[0].q.dims[0]": [2, 4, 8, 16],
+            "graph.tensors[1].dims[0]": [2, 4, 8, 16],
+            "graph.tensors[0].strides[2]": [8, 8, 8, 8],
+            "graph.nodes[0].q.numel": [16, 32, 64, 128],
+            "graph.nodes[0].attn_scale_value": [0.5, 0.25, 0.125, 0.0625],
+            "flydsl_sdpa_rdna.scale": [1056964608, 1048576000, 1040187392, 1031798784],
+            "device.total_global_mem": [2**36] * 4,
+            "graph.nodes[0].q.strides[1]": [8, 8, 8, 8],
+            "flydsl_sdpa_rdna.dropout_p": [0, 0, 1036831949, 1036831949],
+            "graph.nodes[0].dropout_probability": [0.0, 0.0, 0.1, 0.1],
+            "graph.nodes[0].q.virtual": [False, False, True, False],
+            "graph.nodes[0].scale.dims[0]": [1, 1, 2, 2],
+            "flydsl_sdpa_rdna.scale.uid": [-1, 11, -1, 11],
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("column", "reason"),
+    [
+        ("graph.tensors[1].dims[0]", "positional_tensor"),
+        ("graph.tensors[0].strides[2]", "positional_tensor"),
+        ("graph.nodes[0].q.numel", "derived_numel"),
+        ("graph.nodes[0].attn_scale_value", "caller_value"),
+        ("flydsl_sdpa_rdna.scale", "caller_value"),
+        ("device.total_global_mem", "board_identity"),
+    ],
+)
+def test_a_proposal_leaves_out_each_excluded_column_and_records_why(column, reason):
+    frame = _rule_frame()
+    signature, omitted = feature_recipe(frame, set(frame.columns), None, None, [], [])
+    assert "$" + column not in signature
+    assert {"expression": "$" + column, "reason": reason} in omitted
+
+
+def test_a_proposal_keeps_strides_dropout_virtual_and_the_columns_the_rules_resemble():
+    """The corpus never varies strides, dropout or `virtual`, which is why they look
+    neutral; the audit kept them. A scale tensor's uid is an identifier, read as presence,
+    not a caller value, and a node's `scale` tensor dims are dims."""
+    frame = _rule_frame()
+    signature, omitted = feature_recipe(frame, set(frame.columns), None, None, [], [])
+    for kept in (
+        "graph.nodes[0].q.dims[0]",
+        "graph.nodes[0].q.strides[1]",
+        "flydsl_sdpa_rdna.dropout_p",
+        "graph.nodes[0].dropout_probability",
+        "graph.nodes[0].q.virtual",
+        "graph.nodes[0].scale.dims[0]",
+    ):
+        assert "$" + kept in signature
+        assert kept not in [e["expression"][1:] for e in omitted]
+    assert {"!=": ["$flydsl_sdpa_rdna.scale.uid", -1]} in signature
+    assert [
+        entry["reason"]
+        for entry in omitted
+        if entry["expression"] == "$flydsl_sdpa_rdna.scale.uid"
+    ] == ["tensor_identifier"]
+
+
+def test_an_authored_recipe_is_never_filtered_by_the_exclusion_rules():
+    frame = _rule_frame()
+    authored = [
+        "$graph.tensors[1].dims[0]",
+        "$graph.nodes[0].attn_scale_value",
+        "$device.total_global_mem",
+    ]
+    signature, omitted = feature_recipe(
+        frame, set(frame.columns), authored, None, [], []
+    )
+    assert (signature, omitted) == (authored, [])
+
+
+def _search_args(*args, **keywords):
+    """`_l1_args` without its authored `--features`."""
+    common = _l1_args(*args, **keywords)
+    position = common.index("--features")
+    return common[:position] + common[position + 2 :]
+
+
+def _bench_publishing_excluded_columns(monkeypatch, provenance):
+    """The L1 stand-in, publishing a positional copy, a scale value and a board field too."""
+    import uhd_gen.generate
+
+    requested = _immediate_bench(monkeypatch, provenance)
+    bench = uhd_gen.generate._run_json
+
+    def publishing(*arguments, **keywords):
+        response = bench(*arguments, **keywords)
+        size = response["features"]["graph.nodes[0].dy.dims[0]"]
+        response["features"].update(
+            {
+                "graph.tensors[0].dims[0]": size,
+                "graph.nodes[0].attn_scale_value": 1 / size,
+                "device.total_global_mem": 2**36,
+            }
+        )
+        return response
+
+    monkeypatch.setattr("uhd_gen.generate._run_json", publishing)
+    return requested
+
+
+@pytest.mark.parametrize("authored", ["--features", "--feature-signature"])
+def test_feature_search_with_an_authored_recipe_is_refused_naming_both(
+    monkeypatch, tmp_path, evaluator, caplog, authored
+):
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    requested = _bench_publishing_excluded_columns(
+        monkeypatch, snapshot_provenance(tree)
+    )
+    recipe = tmp_path / "recipe.json"
+    recipe.write_text(json.dumps(["$graph.flops"]), encoding="utf-8")
+    command = _search_args(
+        _graphs(tmp_path / "graphs"), tree, tmp_path / "out", evaluator
+    )
+    value = ["graph.flops"] if authored == "--features" else [str(recipe)]
+    assert main([*command, authored, *value, "--feature-search"]) == 1
+    assert "--feature-search" in caplog.text and authored in caplog.text
+    # Refused before anything was measured.
+    assert not requested
+
+
+@pytest.mark.parametrize("authored", ["--features", "--feature-signature"])
+def test_an_authored_recipe_skips_the_search_and_trains_as_written(
+    monkeypatch, tmp_path, evaluator, authored
+):
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    _bench_publishing_excluded_columns(monkeypatch, snapshot_provenance(tree))
+
+    def searched(*arguments, **keywords):
+        raise AssertionError("an authored recipe must not be searched")
+
+    monkeypatch.setattr("uhd_gen.feature_search.search_features", searched)
+    recipe = tmp_path / "recipe.json"
+    recipe.write_text(
+        json.dumps(["$graph.flops", "$graph.nodes[0].attn_scale_value"]),
+        encoding="utf-8",
+    )
+    output = tmp_path / "out"
+    command = _search_args(_graphs(tmp_path / "graphs"), tree, output, evaluator)
+    value = (
+        ["graph.flops", "graph.nodes[0].attn_scale_value"]
+        if authored == "--features"
+        else [str(recipe)]
+    )
+    assert main([*command, authored, *value]) == 0
+    manifest = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    # Taken as written, the excluded column included.
+    assert manifest["features_signature"] == [
+        "$graph.flops",
+        "$graph.nodes[0].attn_scale_value",
+    ]
+    assert manifest["feature_search"] is None
+    assert not (output / "feature_search").exists()
+
+
+def test_feature_search_trains_on_its_recipe_and_records_the_report(
+    monkeypatch, tmp_path, evaluator
+):
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    _bench_publishing_excluded_columns(monkeypatch, snapshot_provenance(tree))
+    output = tmp_path / "out"
+    command = _search_args(_graphs(tmp_path / "graphs"), tree, output, evaluator)
+    assert main([*command, "--feature-search"]) == 0
+
+    manifest = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    searched = manifest["feature_search"]
+    assert Path(searched["report"]) == (
+        output.resolve() / "feature_search" / "feature_search_report.json"
+    )
+    recipe = json.loads(
+        (output / "feature_search" / "recipe.json").read_text(encoding="utf-8")
+    )
+    assert manifest["features_signature"] == recipe
+    assert searched["features"] == len(recipe)
+    # The model trained on the searched recipe, and nothing a rule excludes entered it.
+    assert json.loads((output / "features.json").read_text(encoding="utf-8")) == recipe
+    assert not {
+        "$graph.tensors[0].dims[0]",
+        "$graph.nodes[0].attn_scale_value",
+        "$device.total_global_mem",
+    } & set(json.dumps(recipe).replace('"', " ").split())
+    reasons = {
+        entry["expression"]: entry["reason"] for entry in manifest["omitted_proposals"]
+    }
+    assert reasons["$graph.tensors[0].dims[0]"] == "positional_tensor"
+    assert reasons["$graph.nodes[0].attn_scale_value"] == "caller_value"
+    assert reasons["$device.total_global_mem"] == "board_identity"
+
+
 @pytest.mark.parametrize(
     "authored",
     [

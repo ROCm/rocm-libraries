@@ -11,6 +11,7 @@ import logging
 import math
 import os
 import queue
+import re
 import shutil
 import signal
 import subprocess
@@ -188,6 +189,15 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
     )
     source.add_argument(
         "--feature-signature", help="Explicit canonical inline JSON feature array"
+    )
+    parser.add_argument(
+        "--feature-search",
+        action="store_true",
+        help="Search the feature recipe (padding, ratio, grid and tier expressions over "
+        "the published columns) on the training rows instead of proposing one; the report "
+        "is written beside the model and summarised in generation_manifest.json. Edit "
+        "feature_search/recipe.json and pass it as --feature-signature to choose a subset. "
+        "Not with --features or --feature-signature",
     )
     parser.add_argument(
         "--dim-tile",
@@ -1647,12 +1657,101 @@ def is_tensor_identifier(name: str) -> bool:
     return name.rsplit(".", 1)[-1] == "uid"
 
 
+def is_positional_tensor(name: str) -> bool:
+    """`graph.tensors[<i>].*`: the graph's tensors by position, each a copy of a node's role
+    (`graph.nodes[0].q`, ...). The position is not a stable role (2.1% of the audited SDPA
+    rows disagree with the node's k and o), so a model reading it learns the ordering of the
+    graph's tensor table; the node-role columns stay."""
+    return re.match(r"graph\.tensors\[\d+\]\.", name) is not None
+
+
+def is_derived_numel(name: str) -> bool:
+    """A `<tensor>.numel`: the product of the tensor's published dims."""
+    return name.endswith(".numel")
+
+
+def is_caller_value(name: str) -> bool:
+    """A multiplier the caller chose, with no path to kernel time: a node's
+    `attn_scale_value`, or a matcher's `<namespace>.scale` token. A corpus that sets it to
+    1/sqrt(head_dim) makes it a second head_dim to a model."""
+    if re.fullmatch(r"graph\.nodes\[\d+\]\.attn_scale_value", name):
+        return True
+    namespace, _, token = name.partition(".")
+    return token == "scale" and namespace not in ("graph", "device", "kernel")
+
+
+def is_board_identity(name: str) -> bool:
+    """`device.total_global_mem`: it varies only between the boards a training set pools,
+    and capacity has no path to kernel time, so a model reading it learns the board."""
+    return name == "device.total_global_mem"
+
+
+#: The columns a proposal and a feature search never read, by reason: the first predicate a
+#: column satisfies names it. An authored recipe is never filtered.
+EXCLUSIONS = (
+    ("positional_tensor", is_positional_tensor),
+    ("derived_numel", is_derived_numel),
+    ("caller_value", is_caller_value),
+    ("board_identity", is_board_identity),
+)
+
+
+def exclusion_reason(name: str) -> str | None:
+    """Why `name` is never proposed, or None."""
+    return next((reason for reason, rule in EXCLUSIONS if rule(name)), None)
+
+
 def presence_flag(name: str) -> dict:
     """What a tensor identifier carries about the problem: whether the tensor is bound. Every
     hip-kernel-provider matcher binds an absent optional tensor's uid as -1 (NO_STATS,
     NO_BIAS, NO_UID, ...), so this is the matcher's own test; any other value, 0 included,
     is a bound tensor."""
     return {"!=": ["$" + name, -1]}
+
+
+def identifier_omissions(identifiers: list[str]) -> list:
+    """The `omitted_proposals` entries of the tensor identifiers read as presence flags."""
+    return [
+        {
+            "expression": "$" + name,
+            "reason": "tensor_identifier",
+            "read_instead": presence_flag(name),
+        }
+        for name in identifiers
+    ]
+
+
+def proposal_columns(
+    train_frame: pd.DataFrame,
+    published: set[str],
+    kmd_fields: list[str] | None,
+    knobs: list[str],
+) -> tuple[list[str], list[str], set[str], list]:
+    """What a proposal starts from: (scalar columns, tensor identifiers, offered kernel
+    fields, omitted). A column every training row binds as a scalar is a candidate unless an
+    exclusion rule names it or it is a tensor identifier (read only as a presence flag);
+    each exclusion is recorded in `omitted` with its reason."""
+    offered = {"kernel." + field for field in kmd_fields or () if field in knobs}
+    scalar_columns = [
+        name
+        for name in sorted(published)
+        if train_frame[name].notna().all()
+        and train_frame[name]
+        .map(lambda value: isinstance(value, (str, int, float, bool)))
+        .all()
+    ]
+    omitted = [
+        {"expression": "$" + name, "reason": reason}
+        for name in scalar_columns
+        if (reason := exclusion_reason(name))
+    ]
+    scalar_columns = [name for name in scalar_columns if not exclusion_reason(name)]
+    identifiers = [name for name in scalar_columns if is_tensor_identifier(name)]
+    scalar_columns = [name for name in scalar_columns if not is_tensor_identifier(name)]
+    legal_kernel_fields = {
+        name for name in scalar_columns if name.split("[", 1)[0] in offered
+    }
+    return scalar_columns, identifiers, legal_kernel_fields, omitted
 
 
 def feature_recipe(
@@ -1674,34 +1773,14 @@ def feature_recipe(
     if authored is not None:
         signature = authored
     else:
-        offered = {"kernel." + field for field in kmd_fields or () if field in knobs}
-        scalar_columns = [
-            name
-            for name in sorted(published)
-            if train_frame[name].notna().all()
-            and train_frame[name]
-            .map(lambda value: isinstance(value, (str, int, float, bool)))
-            .all()
-        ]
-        identifiers = [name for name in scalar_columns if is_tensor_identifier(name)]
-        scalar_columns = [
-            name for name in scalar_columns if not is_tensor_identifier(name)
-        ]
-        legal_kernel_fields = {
-            name for name in scalar_columns if name.split("[", 1)[0] in offered
-        }
+        scalar_columns, identifiers, legal_kernel_fields, excluded = proposal_columns(
+            train_frame, published, kmd_fields, knobs
+        )
         signature, omitted = propose_features(
             train_frame[scalar_columns], legal_kernel_fields, pairs
         )
         signature = signature + [presence_flag(name) for name in identifiers]
-        omitted = omitted + [
-            {
-                "expression": "$" + name,
-                "reason": "tensor_identifier",
-                "read_instead": presence_flag(name),
-            }
-            for name in identifiers
-        ]
+        omitted = excluded + omitted + identifier_omissions(identifiers)
     if not isinstance(signature, list) or not signature:
         raise ValueError("the feature recipe must be a nonempty canonical array")
     if kmd_fields is not None:
@@ -1804,6 +1883,11 @@ def _generate_published(
     if not args.no_promote:
         raise ValueError(
             "a published dataset's engine has no UED to install into; pass --no-promote"
+        )
+    if args.feature_search:
+        raise ValueError(
+            "--feature-search is not supported for a published dataset; pass --features "
+            "or --feature-signature"
         )
     if not (args.features or args.feature_signature):
         raise ValueError(
@@ -1997,6 +2081,12 @@ def _check_generate_arguments(
     from .__main__ import check_adapter_options
 
     check_adapter_options(args)
+    if args.feature_search and (args.features or args.feature_signature):
+        raise ValueError(
+            "--feature-search searches for a recipe and "
+            f"{'--features' if args.features else '--feature-signature'} supplies one; "
+            "pass one or the other"
+        )
     if not 0 <= args.max_graph_failures < 1:
         raise ValueError("--max-graph-failures must be a fraction in [0, 1)")
     if output.exists():
@@ -2156,6 +2246,58 @@ def _split_for_training(
     return held, eval_corpora, train_frames
 
 
+def _search_recipe(
+    args: argparse.Namespace,
+    train_frame: pd.DataFrame,
+    published: set,
+    kmd_fields: list | None,
+    knobs: list,
+    label: tuple,
+    grouping,
+    tree: Path,
+    stage: Path,
+) -> dict:
+    """The recipe `--feature-search` finds on the training rows (never the evaluation slice),
+    for the first metric's label: the recipe, the proposals omitted, and the summary the
+    manifest records. The report and `recipe.json` are written under `stage`."""
+    from .feature_search import (
+        DEFAULT_SEEDS,
+        catalog_values_from_tree,
+        search_features,
+        search_summary,
+        write_search,
+    )
+
+    declared, target = label[0], label[1]
+    scalar_columns, identifiers, legal_kernel_fields, excluded = proposal_columns(
+        train_frame, published, kmd_fields, knobs
+    )
+    omitted = excluded + identifier_omissions(identifiers)
+    report = search_features(
+        train_frame,
+        columns=[
+            name
+            for name in scalar_columns
+            if not name.startswith("kernel.") or name in legal_kernel_fields
+        ],
+        presence_columns=identifiers,
+        target=target,
+        objective=_label_objective(declared),
+        groups=problem_keys(train_frame, grouping),
+        catalog_values=catalog_values_from_tree(tree, args.engine),
+        catalog_source=str(tree),
+        seeds=[args.seed + offset for offset in range(len(DEFAULT_SEEDS))],
+        omitted=omitted,
+        feature_evaluator=args.feature_evaluator,
+    )
+    paths = write_search(report, stage / "feature_search")
+    return {
+        "recipe": report["recipe"],
+        "omitted": omitted,
+        "summary": search_summary(report, paths),
+    }
+
+
 def _feature_signature(
     args: argparse.Namespace,
     train_frame: pd.DataFrame,
@@ -2163,6 +2305,7 @@ def _feature_signature(
     kmd_fields: list | None,
     knobs: list,
     immediate: bool,
+    searched: dict | None = None,
 ) -> tuple[list, list, list]:
     """The one feature recipe every metric shares: authored (`--feature-signature`,
     `--features`) or proposed from the training rows, checked against what the engine
@@ -2177,11 +2320,15 @@ def _feature_signature(
         authored = json.loads(Path(args.feature_signature).read_text(encoding="utf-8"))
     elif args.features:
         authored = build_features_signature(args.features)
+    elif searched is not None:
+        authored = searched["recipe"]
     else:
         authored = None
     signature, omitted = feature_recipe(
         train_frame, published, authored, kmd_fields, knobs, pairs
     )
+    if searched is not None:
+        omitted = searched["omitted"]
     withheld = withheld_kernel_fields(kmd_fields or [], knobs, published)
     if immediate:
         # Leakage only; whether each entry evaluates on the published features is
@@ -2461,10 +2608,26 @@ def run_generate(args: argparse.Namespace) -> int:
         held, eval_corpora, train_frames = _split_for_training(
             args, rows, frames, usable, sources, grouping, stage, staged
         )
-        # The first source proposes and checks the one feature recipe every metric shares.
+        # The first source proposes (or searches) and checks the one feature recipe every
+        # metric shares.
         train_frame = train_frames[sources[0]]
+        search = (
+            _search_recipe(
+                args,
+                train_frame,
+                published,
+                kmd_fields,
+                knobs,
+                labels[0],
+                grouping,
+                tree,
+                stage,
+            )
+            if args.feature_search
+            else None
+        )
         signature, omitted, withheld = _feature_signature(
-            args, train_frame, published, kmd_fields, knobs, immediate
+            args, train_frame, published, kmd_fields, knobs, immediate, search
         )
         coverage = device_field_coverage(train_frame)
         enforce_device_coverage(signature, coverage)
@@ -2630,6 +2793,9 @@ def run_generate(args: argparse.Namespace) -> int:
                 "commands": commands,
                 "features_signature": signature,
                 "omitted_proposals": omitted,
+                # The search's report path and summary, or null when the recipe was
+                # authored or proposed.
+                "feature_search": None if search is None else search["summary"],
                 # KMD fields never offered as `$kernel.*` features, and why.
                 "withheld_kernel_fields": withheld,
                 # One entry per UHD: its metric (null if metric-less), model dir, and the
