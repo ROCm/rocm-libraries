@@ -1640,6 +1640,21 @@ def withheld_kernel_fields(
     return withheld
 
 
+def is_tensor_identifier(name: str) -> bool:
+    """A published `<namespace>.<token>.uid`: the uid of the tensor a matcher bound, kept so
+    dispatch finds its buffer. It labels the tensor and says nothing about the problem, and a
+    corpus fixes it per form, so a model reading its value learns the corpus's label."""
+    return name.rsplit(".", 1)[-1] == "uid"
+
+
+def presence_flag(name: str) -> dict:
+    """What a tensor identifier carries about the problem: whether the tensor is bound. Every
+    hip-kernel-provider matcher binds an absent optional tensor's uid as -1 (NO_STATS,
+    NO_BIAS, NO_UID, ...), so this is the matcher's own test; any other value, 0 included,
+    is a bound tensor."""
+    return {"!=": ["$" + name, -1]}
+
+
 def feature_recipe(
     train_frame: pd.DataFrame,
     published: set[str],
@@ -1651,7 +1666,9 @@ def feature_recipe(
     """(signature, omitted proposals): the authored recipe, or one proposed from the corpus.
 
     `kmd_fields` is None for an engine-level run. For a catalog run, `$kernel.*` axes must
-    be shipping UED knobs, checked here before training rather than at promotion.
+    be shipping UED knobs, checked here before training rather than at promotion. A proposal
+    reads a tensor identifier only through its `presence_flag`; an authored recipe is taken
+    as written.
     """
     omitted = []
     if authored is not None:
@@ -1666,12 +1683,25 @@ def feature_recipe(
             .map(lambda value: isinstance(value, (str, int, float, bool)))
             .all()
         ]
+        identifiers = [name for name in scalar_columns if is_tensor_identifier(name)]
+        scalar_columns = [
+            name for name in scalar_columns if not is_tensor_identifier(name)
+        ]
         legal_kernel_fields = {
             name for name in scalar_columns if name.split("[", 1)[0] in offered
         }
         signature, omitted = propose_features(
             train_frame[scalar_columns], legal_kernel_fields, pairs
         )
+        signature = signature + [presence_flag(name) for name in identifiers]
+        omitted = omitted + [
+            {
+                "expression": "$" + name,
+                "reason": "tensor_identifier",
+                "read_instead": presence_flag(name),
+            }
+            for name in identifiers
+        ]
     if not isinstance(signature, list) or not signature:
         raise ValueError("the feature recipe must be a nonempty canonical array")
     if kmd_fields is not None:

@@ -1010,6 +1010,33 @@ def test_generation_offers_kernel_features_only_for_the_shipping_knobs():
     ]
 
 
+def test_a_proposed_tensor_uid_reads_only_whether_the_tensor_is_bound(evaluator):
+    """A matcher binds an optional tensor's uid (-1 when absent) so dispatch can find its
+    buffer; a corpus fixes that uid, so a model reading the number learns the corpus's label
+    for the tensor. The proposal reads it as a presence flag: two graphs that differ only in
+    the uid they gave the bias get the same feature, and a graph without one does not.
+    """
+    from uhd_gen.features import evaluate_feature_maps
+
+    frame = _attention_frame()
+    frame["gfx950_attention_dense.bias.uid"] = [-1, 7, -1, 0]
+    signature, omitted = feature_recipe(
+        frame, set(frame.columns), None, _KMD_FIELDS, _SHIPPING_KNOBS, []
+    )
+
+    assert "$gfx950_attention_dense.bias.uid" not in signature
+    flag = {"!=": ["$gfx950_attention_dense.bias.uid", -1]}
+    assert flag in signature
+    assert {
+        "expression": "$gfx950_attention_dense.bias.uid",
+        "reason": "tensor_identifier",
+        "read_instead": flag,
+    } in omitted
+    rows = [{"gfx950_attention_dense.bias.uid": uid} for uid in (7, 3, 0, -1)]
+    _, values = evaluate_feature_maps(rows, [flag], executable=evaluator)
+    assert [row[0] for row in values] == [1.0, 1.0, 1.0, 0.0]
+
+
 @pytest.mark.parametrize(
     "authored",
     [

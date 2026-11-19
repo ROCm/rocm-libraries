@@ -666,6 +666,14 @@ and retain the raw device field — which training then drops on the same eviden
 by the variance rule above, naming it with its value. `device_coverage` in
 `train_manifest.json` records the observed values of every device field either way.
 
+Automatic feature proposals never read a tensor identifier's value. A published name ending
+in `.uid`, such as the `<engine>.bias.uid` a matcher binds so dispatch finds the tensor's
+buffer, labels the tensor and says nothing about the problem, and a corpus fixes it, so a
+model reading the number would score the corpus's label. The proposal reads it as a presence
+flag instead, `{"!=": ["$<engine>.bias.uid", -1]}`: every matcher binds an absent optional
+tensor's uid as -1. `generation_manifest.json` lists each one under `omitted_proposals` with
+`reason: tensor_identifier` and the flag read instead; an authored recipe is taken as written.
+
 A value a row does not publish is **absent**, never zero and never NaN: a conv-fwd row
 has no `dy`, and pandas fills that hole with NaN, which `evaluate_feature_rows` turns back
 into JSON `null` before the evaluator sees it (a column no row publishes goes over as
