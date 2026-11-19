@@ -2545,6 +2545,7 @@ def setup_multiple_gemm_dispatchers(
     import sys
 
     n = len(configs)
+    input_configs = list(configs)
     results: List[Optional[Path]] = [None] * n
 
     # Only failures are written below, so a caller that reuses one dict across
@@ -2555,8 +2556,9 @@ def setup_multiple_gemm_dispatchers(
     # permute_n exits too: a call that produced no verdict must not leave an
     # older one standing in for it.
     if errors is not None:
-        for c in configs:
+        for c in input_configs:
             errors.pop(c.name, None)
+            errors.pop(getattr(c, "kernel_config", c).name, None)
 
     if n == 0:
         return results
@@ -2568,7 +2570,7 @@ def setup_multiple_gemm_dispatchers(
     # so this only catches a hand-constructed / misused config before it becomes a
     # .so that could silently produce incorrect output.
     if not BRIDGE_PERMUTE_N:
-        for c in configs:
+        for c in input_configs:
             if getattr(c, "variant", "") == "preshuffle" and getattr(
                 c, "permute_n", False
             ):
@@ -2584,15 +2586,18 @@ def setup_multiple_gemm_dispatchers(
     # expand_sweep already resolves this, but a config built directly (gfx_arch
     # left as None) would otherwise emit a literal "None" arch. Resolve/validate
     # here too, defaulting a None to the rocminfo-detected arch (never gfx942).
+    # Launch variants (e.g. StreamKBudgetConfig) unwrap to kernel_config so a
+    # direct caller compiles each underlying kernel once under its header name.
     _shared_arch: Optional[str] = None
     resolved_configs: List[GemmKernelConfig] = []
-    for c in configs:
-        if c.gfx_arch:
-            resolved_configs.append(replace(c, gfx_arch=_resolve_arch(c.gfx_arch)))
+    for c in input_configs:
+        base = getattr(c, "kernel_config", c)
+        if base.gfx_arch:
+            resolved_configs.append(replace(base, gfx_arch=_resolve_arch(base.gfx_arch)))
         else:
             if _shared_arch is None:
                 _shared_arch = _get_arch()
-            resolved_configs.append(replace(c, gfx_arch=_shared_arch))
+            resolved_configs.append(replace(base, gfx_arch=_shared_arch))
     configs = resolved_configs
 
     max_workers = max_workers or min(multiprocessing.cpu_count(), 8)
@@ -2735,11 +2740,13 @@ def setup_multiple_gemm_dispatchers(
     if errors is not None:
         for i, c in enumerate(configs):
             if results[i] is None:
-                errors[c.name] = (
+                reason = (
                     failures.get(i)
                     or failures.get(first_index[c.name])
                     or "build failed with no reason reported"
                 )
+                errors[c.name] = reason
+                errors[input_configs[i].name] = reason
 
     if verbose:
         ok_count = sum(1 for r in results if r is not None)

@@ -350,7 +350,7 @@ def test_launch_variants_share_their_kernels_build(tmp_path):
     # round 2 needs none. Each build is charged once, and each variant is
     # measured under its own name.
     ad = VariantAdapter({"P1": VARIANTS, "P2": VARIANTS})
-    factory, made = variant_factory({"P1": [["A", "A@50"], ["B@50"]],
+    factory, made = variant_factory({"P1": [["A@50", "A"], ["B@50"]],
                                      "P2": [["A@50", "B"], ["A"]]})
     s, _, co = run(tmp_path, ad, {}, factory=factory)
     assert ad.builds == [["A", "B"]] and co.ledger.builds == 2
@@ -359,8 +359,8 @@ def test_launch_variants_share_their_kernels_build(tmp_path):
          ("P1", "B@50"), ("P2", "A")])
     assert {r.candidate_key for r in ad.measured} == {"A", "A@50", "B", "B@50"}
     build = events(tmp_path / "out", "build")
-    assert [(b["candidate_key"], b["waiting"]) for b in build] == [
-        ("A", ["P1", "P2"]), ("B", ["P2"])]
+    assert [(b["kernel"], b["candidate_key"], b["waiting"]) for b in build] == [
+        ("A", "A", ["P1", "P2"]), ("B", "B", ["P2"])]
     assert s.counts["built"] == 2 and s.status == "complete"
     assert "candidates that share a build (build_key) are built and charged once" in \
         " ".join(strict(tmp_path / "out" / "run.json")["domain"])

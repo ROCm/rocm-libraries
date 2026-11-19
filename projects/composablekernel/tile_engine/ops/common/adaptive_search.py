@@ -1296,8 +1296,9 @@ class SearchCoordinator:
             r = results[c.artifact_key]
             self.counts["built" if r.path is not None else "build_failed"] += 1
             self._event(
-                "build", kernel=c.kernel_name, candidate_key=c.artifact_key,
-                ok=r.path is not None, path=r.path, reason=r.reason, digest=r.digest,
+                "build", kernel=c.build_key or c.kernel_name,
+                candidate_key=c.artifact_key, ok=r.path is not None, path=r.path,
+                reason=r.reason, digest=r.digest,
                 waiting=sorted({p.key for p, _, _, a in admitted
                                 if a.artifact_key == c.artifact_key}),
             )

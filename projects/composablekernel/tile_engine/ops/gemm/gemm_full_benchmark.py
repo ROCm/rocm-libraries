@@ -1238,6 +1238,7 @@ def main():
             "layout": sweep_layout,
             "variant": codegen_variant,
             "configs": config_paths,
+            **({"budget_pct": budgets} if budgets else {}),
             **pipeline_metadata,
             "problems": [
                 {"M": int(p["M"]), "N": int(p["N"]), "K": int(p["K"])} for p in problems
