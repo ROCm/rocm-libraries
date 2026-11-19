@@ -214,8 +214,10 @@ as `load_fragment`. The tile window computes a physical offset with runtime
 strides; the logical K coordinate determines which elements to zero-fill.
 Preshuffled B uses the same clipping with its packed source offset. The LDS
 placement, including padding, swizzles, and slots, is independent of clipping.
-The `compv4` name is not an async switch: `direct_to_lds` selects the gfx9 async
-copy path, and `dtl_prefetch` selects its ping-pong schedule.
+The `compv4` name is not an async switch: `direct_to_lds` selects gfx9 async
+copies through `AsyncTileLoaderSlot.issue_bytes`. GEMM supplies the source
+byte offsets (including source swizzles and FP64 sub-element chunks) and
+binds the LDS wave/slot bases. `dtl_prefetch` selects the ping-pong schedule.
 
 The gfx1250 `tdm` path uses [`TdmTileLoader2D`](../../python/rocke/helpers/loads.py)
 for A/B fills. It prepares a descriptor from a `TdmSourceWindow2D` and a bound
@@ -260,6 +262,10 @@ its own fragment-loading contract.
 `scheduler in ("intrawave", "interwave")` selects the `SchedulePolicy` flavor (intra-wave or inter-wave overlap groups).
 
 ## Epilogue
+
+Split-K and direct MFMA output use the same accumulator scatter. Split-K
+atomically adds each guarded cell to the caller’s FP32 workspace without an
+intermediate conversion.
 
 `epilogue = "default"` (`DirectEpilogue`):
 

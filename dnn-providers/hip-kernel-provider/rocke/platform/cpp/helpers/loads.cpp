@@ -1239,6 +1239,67 @@ rocke_status_t rocke_async_tile_loader_bind(rocke_ir_builder_t* b,
     return (b != NULL) ? b->status : ROCKE_OK;
 }
 
+struct atl_pass_coordinates
+{
+    rocke_value_t* base;
+    rocke_value_t* chunk;
+    rocke_value_t* row;
+    rocke_value_t* col;
+};
+
+static atl_pass_coordinates atl_get_pass_coordinates(rocke_ir_builder_t* b,
+                                                     const rocke_async_tile_loader_slot_t* slot,
+                                                     rocke_value_t* tid,
+                                                     rocke_value_t* chunks_per_row,
+                                                     rocke_value_t* cols_per_chunk,
+                                                     int slot_bytes,
+                                                     int p)
+{
+    const auto& loader = slot->loader;
+    const int byte_off = slot_bytes + p * rocke_async_tile_loader_pass_bytes(&loader);
+    rocke_value_t* base = slot->per_wave_lds_base;
+    if(byte_off)
+        base = rocke_b_smem_ptr_add(
+            b, base, rocke_b_zext(b, rocke_b_const_i32(b, byte_off), rocke_i64()));
+    rocke_value_t* chunk = rocke_b_add(b, tid, rocke_b_const_i32(b, p * loader.block_size));
+    rocke_value_t* row = rocke_b_div(b, chunk, chunks_per_row);
+    rocke_value_t* col_in_chunks = rocke_b_mod(b, chunk, chunks_per_row);
+    rocke_value_t* step = cols_per_chunk;
+    if(step == NULL)
+        step = rocke_b_const_i32(b, rocke_async_tile_loader_halves_per_chunk(&loader));
+    rocke_value_t* col = rocke_b_mul(b, col_in_chunks, step);
+    return {base, chunk, row, col};
+}
+
+void rocke_async_tile_loader_slot_issue_bytes(rocke_ir_builder_t* b,
+                                              const rocke_async_tile_loader_slot_t* self,
+                                              rocke_value_t* tid,
+                                              rocke_value_t* rsrc,
+                                              rocke_loads_byte_descriptor_fn descriptor,
+                                              void* descriptor_user,
+                                              rocke_value_t* chunks_per_row,
+                                              rocke_value_t* cols_per_chunk,
+                                              rocke_value_t* zero_soff,
+                                              int slot_bytes,
+                                              int coherency)
+{
+    if(!rocke_i_live(b))
+        return;
+    if(self == NULL || descriptor == NULL || chunks_per_row == NULL || cols_per_chunk == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "AsyncTileLoaderSlot.issue_bytes: unbound issue");
+        return;
+    }
+    for(int p = 0; p < self->loader.passes; ++p)
+    {
+        const auto pass
+            = atl_get_pass_coordinates(b, self, tid, chunks_per_row, cols_per_chunk, slot_bytes, p);
+        rocke_value_t* offset = descriptor(b, pass.row, pass.col, descriptor_user);
+        rocke_b_async_buffer_load_lds_addr(
+            b, rsrc, pass.base, offset, zero_soff, self->loader.dwords, coherency);
+    }
+}
+
 void rocke_async_tile_loader_slot_issue(rocke_ir_builder_t* b,
                                         const rocke_async_tile_loader_slot_t* self,
                                         rocke_value_t* tid,
@@ -1289,49 +1350,13 @@ void rocke_async_tile_loader_slot_issue(rocke_ir_builder_t* b,
 
     for(p = 0; p < L->passes; ++p)
     {
-        int pass_byte_off;
-        rocke_value_t* pass_base;
-        rocke_value_t* chunk_idx;
-        rocke_value_t* row;
-        rocke_value_t* col_v;
-        rocke_value_t* col;
+        const auto pass = atl_get_pass_coordinates(b, self, tid, c_chunks_per_row, NULL, 0, p);
         rocke_value_t* off_elems;
         rocke_value_t* valid;
         rocke_value_t* off_bytes;
         rocke_value_t* in_pass;
         rocke_value_t* valid_final;
         rocke_value_t* safe;
-
-        /* Python:
-         *   pass_byte_off = p * L.pass_bytes
-         *   pass_base = (b.smem_ptr_add(self.per_wave_lds_base,
-         *                               b.zext(b.const_i32(pass_byte_off), I64))
-         *                if p > 0 else self.per_wave_lds_base)
-         */
-        pass_byte_off = p * rocke_async_tile_loader_pass_bytes(L);
-        if(p > 0)
-        {
-            pass_base = rocke_b_smem_ptr_add(
-                b,
-                self->per_wave_lds_base,
-                rocke_b_zext(b, rocke_b_const_i32(b, pass_byte_off), rocke_i64()));
-        }
-        else
-        {
-            pass_base = self->per_wave_lds_base;
-        }
-
-        /* Python:
-         *   chunk_idx = b.add(tid, b.const_i32(p * L.block_size))
-         *   row   = b.div(chunk_idx, c_chunks_per_row)
-         *   col_v = b.mod(chunk_idx, c_chunks_per_row)
-         *   col   = b.mul(col_v, b.const_i32(L.halves_per_chunk))
-         */
-        chunk_idx = rocke_b_add(b, tid, rocke_b_const_i32(b, p * L->block_size));
-        row = rocke_b_div(b, chunk_idx, c_chunks_per_row);
-        col_v = rocke_b_mod(b, chunk_idx, c_chunks_per_row);
-        col = rocke_b_mul(
-            b, col_v, rocke_b_const_i32(b, rocke_async_tile_loader_halves_per_chunk(L)));
 
         /* Python:
          *   off_elems, valid = descriptor(b, row, col)
@@ -1343,9 +1368,9 @@ void rocke_async_tile_loader_slot_issue(rocke_ir_builder_t* b,
          *                                coherency=coherency)
          */
         valid = NULL;
-        off_elems = descriptor(b, row, col, &valid, descriptor_user);
+        off_elems = descriptor(b, pass.row, pass.col, &valid, descriptor_user);
         off_bytes = rocke_b_mul(b, off_elems, c_half_bytes);
-        in_pass = rocke_b_cmp_lt(b, chunk_idx, rocke_b_const_i32(b, L->chunks_total));
+        in_pass = rocke_b_cmp_lt(b, pass.chunk, rocke_b_const_i32(b, L->chunks_total));
         if(valid != NULL)
         {
             valid_final = rocke_b_land(b, valid, in_pass);
@@ -1355,7 +1380,7 @@ void rocke_async_tile_loader_slot_issue(rocke_ir_builder_t* b,
             valid_final = in_pass;
         }
         safe = rocke_b_select(b, valid_final, off_bytes, c_oob);
-        rocke_b_async_buffer_load_lds_addr(b, rsrc, pass_base, safe, c0, L->dwords, coherency);
+        rocke_b_async_buffer_load_lds_addr(b, rsrc, pass.base, safe, c0, L->dwords, coherency);
     }
 }
 

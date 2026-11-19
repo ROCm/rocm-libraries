@@ -61,6 +61,7 @@ from ...core.ir import (
     BF16,
     BF8E5M2,
     F16,
+    F32,
     FP8E4M3,
     F64,
     I32,
@@ -74,7 +75,13 @@ from ...core.ir import (
     encode_tdm_padding,
 )
 from ...helpers.io import io_ir_type, load_clipped_global_fragment
-from ...helpers.loads import CoalescedTileLoader, TdmSourceWindow2D, TdmTileLoader2D
+from ...helpers.loads import (
+    AsyncTileLoader,
+    AsyncTileLoaderSlot,
+    CoalescedTileLoader,
+    TdmSourceWindow2D,
+    TdmTileLoader2D,
+)
 from ...helpers.preshuffle import emit_preshuffleb_tile_id
 from ...helpers.spec import WarpTileBlockSizeMixin, choose_load_vec
 from ...helpers.tensor_view import make_global_view, make_tile_window
@@ -1311,9 +1318,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # afterwards). It is read+write (atomicrmw), so drop the writeonly
     # attribute. Outside split-K the C param is byte-identical to before.
     if _is_split_k:
-        from ...core.ir import F32 as _F32
-
-        C = b.param("Cf32", PtrType(_F32, "global"), noalias=True, align=4)
+        C = b.param("Cf32", PtrType(F32, "global"), noalias=True, align=4)
     else:
         C = b.param(
             "C",
@@ -1665,18 +1670,9 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         _a_lds_desc = TensorDescriptor.packed((block_m, block_k), storage_dtype)
         _b_lds_desc = TensorDescriptor.packed((block_n, block_k), storage_dtype)
 
-    # DirectToLDS (DTLA/DTLB) plumbing. We issue
-    # ``async_buffer_load_lds_addr`` directly because
-    # :class:`AsyncTileLoader` assumes a tile shape where the row dimension
-    # wraps at ``halves_per_chunk`` — that's an attention-specific layout
-    # and does not match a [block_m, block_k] GEMM tile with block_k >>
-    # halves_per_chunk.
-    #
-    # The intrinsic writes ``dwords * 4`` bytes per lane lane-contiguous
-    # starting at the wave-uniform ``lds_dst``. For our tile we lay
-    # ``block_size`` lanes across the tile such that each lane covers one
-    # chunk of ``dwords * 2`` halves (bf16 elements). Passes cover the
-    # remaining chunks_total / block_size iterations.
+    # Bind the direct-to-LDS chunk geometry independently of each K tile.
+    # The loader owns pass traversal; GEMM supplies the byte offset so even
+    # a chunk smaller than an element (FP64) uses the same issue path.
     if spec.trait.direct_to_lds:
         from ...core.arch import ArchTarget
         from ...core.ir import I64 as _I64
@@ -1699,9 +1695,23 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         _dtl_b_chunks = (block_n * block_k * _dtl_elem_bytes) // _DTL_BYTES_PER_LANE
         _dtl_a_passes = (_dtl_a_chunks + spec.block_size - 1) // spec.block_size
         _dtl_b_passes = (_dtl_b_chunks + spec.block_size - 1) // spec.block_size
-        # block_size lanes write block_size * BYTES_PER_LANE bytes per pass
-        # to LDS. Single workgroup writes share the LDS base.
-        _dtl_pass_bytes = spec.block_size * _DTL_BYTES_PER_LANE
+        _dtl_a_loader, _dtl_b_loader = (
+            AsyncTileLoader(
+                tile_rows=rows,
+                tile_cols=block_k,
+                block_size=spec.block_size,
+                wave_size=spec.wave_size,
+                elem_dtype=storage_dtype,
+                dwords=_DTL_DWORDS,
+                chunks_total=chunks,
+                chunks_per_pass=spec.block_size,
+                passes=passes,
+            )
+            for rows, chunks, passes in (
+                (block_m, _dtl_a_chunks, _dtl_a_passes),
+                (block_n, _dtl_b_chunks, _dtl_b_passes),
+            )
+        )
 
         _dtl_big_bytes = b.const_i32(0x7FFF0000)
         _dtl_a_rsrc = b.buffer_rsrc(A, _dtl_big_bytes)
@@ -1919,57 +1929,34 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 )
                 return b.mul(off_elems, c_eb)
 
-            for p in range(_dtl_a_passes):
-                pass_off_bytes = p * _dtl_pass_bytes + a_parity_bytes_static
-                pass_lds_a = (
-                    b.smem_ptr_add(
-                        a_lds_wave_base, b.zext(b.const_i32(pass_off_bytes), _I64)
-                    )
-                    if pass_off_bytes > 0
-                    else a_lds_wave_base
-                )
-                chunk_idx = b.add(tid, b.const_i32(p * spec.block_size))
-                row = b.div(chunk_idx, _dtl_c_chunks_per_row)
-                col_v = b.mod(chunk_idx, _dtl_c_chunks_per_row)
-                col = b.mul(col_v, _dtl_c_cols_per_chunk)
-                # element offset for A row in halves. With lds_swizzle, load the
-                # global element at col^f(row) into the lane-linear LDS slot so
-                # the swizzled ds_read (col_base^f(row)) fetches it back (XOR is
-                # its own inverse) -- the LDS dest stays wave-contiguous.
-                off_bytes = _dtl_off_bytes(batch_off_a, block_m_off, row, col)
-                b.async_buffer_load_lds_addr(
-                    _dtl_a_rsrc,
-                    pass_lds_a,
-                    off_bytes,
-                    _dtl_zero_soff,
-                    _DTL_DWORDS,
-                    coherency=spec.trait.dtl_cache_a,
-                )
-            for p in range(_dtl_b_passes):
-                pass_off_bytes = p * _dtl_pass_bytes + b_parity_bytes_static
-                pass_lds_b = (
-                    b.smem_ptr_add(
-                        b_lds_wave_base, b.zext(b.const_i32(pass_off_bytes), _I64)
-                    )
-                    if pass_off_bytes > 0
-                    else b_lds_wave_base
-                )
-                chunk_idx = b.add(tid, b.const_i32(p * spec.block_size))
-                row = b.div(chunk_idx, _dtl_c_chunks_per_row)
-                col_v = b.mod(chunk_idx, _dtl_c_chunks_per_row)
-                col = b.mul(col_v, _dtl_c_cols_per_chunk)
-                off_bytes = _dtl_off_bytes(batch_off_b, block_n_off, row, col)
-                b.async_buffer_load_lds_addr(
-                    _dtl_b_rsrc,
-                    pass_lds_b,
-                    off_bytes,
-                    _dtl_zero_soff,
-                    _DTL_DWORDS,
-                    coherency=spec.trait.dtl_cache_b,
-                )
-            # The following ``b.sync()`` (in the caller) lowers to
-            # ``s_waitcnt vmcnt(0) lgkmcnt(0) ; s_barrier``, which drains
-            # the in-flight DTLA writes before any wave reads LDS.
+            # Source-side XOR leaves the destination wave-contiguous. The
+            # K-loop still owns the waits before any consumer reads LDS.
+            issue_grid = dict(
+                tid=tid,
+                chunks_per_row=_dtl_c_chunks_per_row,
+                cols_per_chunk=_dtl_c_cols_per_chunk,
+                zero_soff=_dtl_zero_soff,
+            )
+            AsyncTileLoaderSlot(_dtl_a_loader, A_dst, a_lds_wave_base).issue_bytes(
+                b,
+                rsrc=_dtl_a_rsrc,
+                descriptor=lambda row, col: _dtl_off_bytes(
+                    batch_off_a, block_m_off, row, col
+                ),
+                slot_bytes=a_parity_bytes_static,
+                coherency=spec.trait.dtl_cache_a,
+                **issue_grid,
+            )
+            AsyncTileLoaderSlot(_dtl_b_loader, B_dst, b_lds_wave_base).issue_bytes(
+                b,
+                rsrc=_dtl_b_rsrc,
+                descriptor=lambda row, col: _dtl_off_bytes(
+                    batch_off_b, block_n_off, row, col
+                ),
+                slot_bytes=b_parity_bytes_static,
+                coherency=spec.trait.dtl_cache_b,
+                **issue_grid,
+            )
             return
 
         a_global_tile = make_tile_window(
@@ -2845,71 +2832,41 @@ def _emit_epilogue_split_k(
     n_tile)`` converges to the full f32 GEMM; the caller casts the workspace
     to the target dtype.
 
-    The MFMA C-fragment ``(row_in_atom, col_in_atom)`` decode reuses the
-    atom's ``CWarpDstrEncoding`` distribution exactly as
-    :func:`_emit_mfma_acc_scatter` does, so the scattered output coords match
-    the direct epilogue cell-for-cell -- only the per-cell write differs
-    (f32 atomicrmw fadd vs bf16 global store).
+    The direct and split-K epilogues share the same accumulator scatter.
+    Only the per-cell write differs: split-K atomically adds to FP32.
     """
-    from ...helpers.atoms import c_warp_params, make_c_warp_dstr_encoding, mfma_atom
-    from ...helpers.distribution import make_static_tile_distribution
-
     t = spec.tile
-    mfmas_m = t.mfmas_per_warp_m
-    mfmas_n = t.mfmas_per_warp_n
-
-    warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
-    warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
+    warp_m_off = b.mul(warp_m_idx, b.const_i32(t.mfmas_per_warp_m * t.warp_tile_m))
+    warp_n_off = b.mul(warp_n_idx, b.const_i32(t.mfmas_per_warp_n * t.warp_tile_n))
     block_warp_m_off = b.add(block_m_off, warp_m_off)
     block_warp_n_off = b.add(block_n_off, warp_n_off)
 
-    atom = mfma_atom(spec.data.dtype_a, t.warp_tile_m, t.warp_tile_n, t.warp_tile_k)
-    _, _kc_mlane, kc_m1, kc_nlane = c_warp_params(atom)
-    c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
+    def add_cell(c_m, c_n, acc, i):
+        c_off = b.add(b.mul(c_m, N), c_n)
+        val = b.vec_extract(acc, i)
+        checks = []
+        if spec.trait.pad_m:
+            checks.append(b.cmp_lt(c_m, M))
+        if spec.trait.pad_n:
+            checks.append(b.cmp_lt(c_n, N))
+        if checks:
+            in_bounds = checks[0] if len(checks) == 1 else b.land(checks[0], checks[1])
+            with b.scf_if(in_bounds):
+                b.global_atomic_add_f32(Cf32, c_off, val)
+        else:
+            b.global_atomic_add_f32(Cf32, c_off, val)
 
-    c_nlane = b.const_i32(kc_nlane)
-    n_in_atom = b.mod(lane, c_nlane)
-    m_blk = b.div(lane, c_nlane)
-    p_lane = [m_blk, n_in_atom]
-
-    row_in_atom: List[Value] = []
-    col_in_atom: Optional[Value] = None
-    for i in range(c_per_lane):
-        ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
-        x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
-        row_in_atom.append(x_row)
-        col_in_atom = x_col
-
-    pad_m = bool(spec.trait.pad_m)
-    pad_n = bool(spec.trait.pad_n)
-
-    flat = 0
-    for mi in range(mfmas_m):
-        base_m = b.add(block_warp_m_off, b.const_i32(mi * t.warp_tile_m))
-        for ni in range(mfmas_n):
-            acc = accs[flat]
-            flat += 1
-            c_n = b.add(
-                block_warp_n_off,
-                b.add(b.const_i32(ni * t.warp_tile_n), col_in_atom),
-            )
-            for i in range(c_per_lane):
-                c_m = b.add(base_m, row_in_atom[i])
-                c_off = b.add(b.mul(c_m, N), c_n)
-                val = b.vec_extract(acc, i)
-                checks: List[Value] = []
-                if pad_m:
-                    checks.append(b.cmp_lt(c_m, M))
-                if pad_n:
-                    checks.append(b.cmp_lt(c_n, N))
-                if checks:
-                    in_bounds = (
-                        checks[0] if len(checks) == 1 else b.land(checks[0], checks[1])
-                    )
-                    with b.scf_if(in_bounds):
-                        b.global_atomic_add_f32(Cf32, c_off, val)
-                else:
-                    b.global_atomic_add_f32(Cf32, c_off, val)
+    _emit_mfma_acc_scatter(
+        b,
+        spec,
+        lane,
+        accs,
+        block_warp_m_off,
+        block_warp_n_off,
+        c_per_lane,
+        F32,
+        add_cell,
+    )
 
 
 def _emit_epilogue_cshuffle(

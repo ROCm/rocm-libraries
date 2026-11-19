@@ -222,7 +222,6 @@ typedef struct rocke_gemm_build_ctx
     int dtl_b_chunks; /* (block_n*block_k*elem_bytes)/bytes_per_lane */
     int dtl_a_passes; /* ceil(dtl_a_chunks / block_size)          */
     int dtl_b_passes; /* ceil(dtl_b_chunks / block_size)          */
-    int dtl_pass_bytes; /* block_size * dtl_bytes_per_lane           */
     int dtl_chunks_per_row; /* block_k*elem_bytes / bytes_per_lane       */
     rocke_value_t* dtl_big_bytes; /* const_i32(0x7FFF0000)        */
     rocke_value_t* dtl_a_rsrc; /* buffer_rsrc(A, big_bytes)    */

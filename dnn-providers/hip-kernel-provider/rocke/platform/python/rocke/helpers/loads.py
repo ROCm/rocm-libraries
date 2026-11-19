@@ -1101,6 +1101,64 @@ class AsyncTileLoaderSlot:
     smem_dst: Value
     per_wave_lds_base: Value  # i64; lane 0 of the wave writes here
 
+    def _pass_coordinates(
+        self,
+        b: IRBuilder,
+        tid: Value,
+        chunks_per_row: Value,
+        cols_per_chunk: Value | None = None,
+        slot_bytes: int = 0,
+    ):
+        loader = self.loader
+        for p in range(loader.passes):
+            byte_off = slot_bytes + p * loader.pass_bytes
+            base = self.per_wave_lds_base
+            if byte_off:
+                base = b.smem_ptr_add(base, b.zext(b.const_i32(byte_off), I64))
+            chunk = b.add(tid, b.const_i32(p * loader.block_size))
+            row = b.div(chunk, chunks_per_row)
+            col_in_chunks = b.mod(chunk, chunks_per_row)
+            step = (
+                cols_per_chunk
+                if cols_per_chunk is not None
+                else b.const_i32(loader.elems_per_chunk)
+            )
+            yield base, chunk, row, b.mul(col_in_chunks, step)
+
+    def issue_bytes(
+        self,
+        b: IRBuilder,
+        *,
+        tid: Value,
+        rsrc: Value,
+        descriptor: Callable[[Value, Value], Value],
+        chunks_per_row: Value,
+        cols_per_chunk: Value,
+        zero_soff: Value,
+        slot_bytes: int = 0,
+        coherency: int = 0,
+    ) -> None:
+        """Issue a prebound slot with a descriptor returning byte offsets.
+
+        The caller binds the per-wave LDS base, precomputes the chunk grid,
+        and guarantees each issued chunk has a valid destination and source
+        (or an out-of-bounds buffer offset for zero-fill). Columns can be
+        expressed in bytes when a hardware chunk is smaller than one element.
+        ``slot_bytes`` handles a static slot offset; a dynamic one belongs in
+        the bound LDS base. The caller still owns VMEM waits and barriers.
+        """
+        for base, _, row, col in self._pass_coordinates(
+            b, tid, chunks_per_row, cols_per_chunk, slot_bytes
+        ):
+            b.async_buffer_load_lds_addr(
+                rsrc,
+                base,
+                descriptor(row, col),
+                zero_soff,
+                self.loader.dwords,
+                coherency=coherency,
+            )
+
     def issue(
         self,
         b: IRBuilder,
@@ -1132,26 +1190,9 @@ class AsyncTileLoaderSlot:
         c0 = b.const_i32(0)
         c_chunks_per_row = b.const_i32(L.chunks_per_row)
 
-        for p in range(L.passes):
-            # Per-pass LDS base = per_wave_lds_base + p * pass_bytes.
-            # Each lane in the wave writes at its own lane*bytes_per_chunk
-            # offset *from that base*, which the intrinsic supplies.
-            pass_byte_off = p * L.pass_bytes
-            pass_base = (
-                b.smem_ptr_add(
-                    self.per_wave_lds_base,
-                    b.zext(b.const_i32(pass_byte_off), I64),
-                )
-                if p > 0
-                else self.per_wave_lds_base
-            )
-
-            # chunk_idx = tid + p * block_size
-            chunk_idx = b.add(tid, b.const_i32(p * L.block_size))
-            row = b.div(chunk_idx, c_chunks_per_row)
-            col_v = b.mod(chunk_idx, c_chunks_per_row)
-            col = b.mul(col_v, b.const_i32(L.elems_per_chunk))
-
+        for pass_base, chunk_idx, row, col in self._pass_coordinates(
+            b, tid, c_chunks_per_row
+        ):
             off_elems, valid = descriptor(b, row, col)
             off_bytes = b.mul(off_elems, c_elem_bytes)
             # Threads whose chunk_idx >= chunks_total still issue an

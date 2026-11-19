@@ -1470,7 +1470,6 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
             = (ctx.block_n * ctx.block_k * ctx.dtl_elem_bytes) / ctx.dtl_bytes_per_lane;
         ctx.dtl_a_passes = (ctx.dtl_a_chunks + spec->block_size - 1) / spec->block_size;
         ctx.dtl_b_passes = (ctx.dtl_b_chunks + spec->block_size - 1) / spec->block_size;
-        ctx.dtl_pass_bytes = spec->block_size * ctx.dtl_bytes_per_lane;
         ctx.dtl_chunks_per_row = ctx.block_k * ctx.dtl_elem_bytes / ctx.dtl_bytes_per_lane;
 
         ctx.dtl_big_bytes = rocke_b_const_i32(b, 0x7FFF0000);

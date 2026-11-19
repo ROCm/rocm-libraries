@@ -491,6 +491,26 @@ void rocke_async_tile_loader_slot_issue(rocke_ir_builder_t* b,
                                         int oob_sentinel,
                                         int coherency);
 
+typedef rocke_value_t* (*rocke_loads_byte_descriptor_fn)(rocke_ir_builder_t* b,
+                                                         rocke_value_t* row,
+                                                         rocke_value_t* col,
+                                                         void* user);
+
+/* AsyncTileLoaderSlot.issue_bytes: caller binds the wave base and coordinate
+ * grid and owns validity of each chunk (may return an OOB buffer offset).
+ * Static slot displacement is in bytes. Waits remain with the caller. */
+void rocke_async_tile_loader_slot_issue_bytes(rocke_ir_builder_t* b,
+                                              const rocke_async_tile_loader_slot_t* self,
+                                              rocke_value_t* tid,
+                                              rocke_value_t* rsrc,
+                                              rocke_loads_byte_descriptor_fn descriptor,
+                                              void* descriptor_user,
+                                              rocke_value_t* chunks_per_row,
+                                              rocke_value_t* cols_per_chunk,
+                                              rocke_value_t* zero_soff,
+                                              int slot_bytes,
+                                              int coherency);
+
 /* AsyncTileLoaderSlot.required_lds_bytes method: passes * pass_bytes. */
 int rocke_async_tile_loader_slot_required_lds_bytes(const rocke_async_tile_loader_slot_t* self);
 

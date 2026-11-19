@@ -101,6 +101,53 @@ static rocke_value_t* rocke_gemm_dtl_off_bytes(rocke_gemm_build_ctx_t* ctx,
     return rocke_b_mul(b, off_elems, c_eb);
 }
 
+struct rocke_gemm_dtl_source
+{
+    rocke_gemm_build_ctx_t* ctx;
+    rocke_value_t* elem_bytes;
+    rocke_value_t* batch_off;
+    rocke_value_t* block_off;
+    rocke_value_t* k_off;
+};
+
+static rocke_value_t* rocke_gemm_dtl_descriptor(rocke_ir_builder_t*,
+                                                rocke_value_t* row,
+                                                rocke_value_t* col,
+                                                void* user)
+{
+    const auto& src = *static_cast<rocke_gemm_dtl_source*>(user);
+    return rocke_gemm_dtl_off_bytes(
+        src.ctx, src.elem_bytes, src.batch_off, src.block_off, row, col, src.k_off);
+}
+
+static void rocke_gemm_issue_dtl_operand(rocke_gemm_dtl_source* src,
+                                         rocke_value_t* dest,
+                                         rocke_value_t* wave_base,
+                                         rocke_value_t* rsrc,
+                                         int passes,
+                                         int slot_bytes,
+                                         int coherency)
+{
+    const auto* ctx = src->ctx;
+    rocke_async_tile_loader_slot_t slot = {};
+    slot.loader.block_size = ctx->spec->block_size;
+    slot.loader.dwords = ctx->dtl_dwords;
+    slot.loader.passes = passes;
+    slot.smem_dst = dest;
+    slot.per_wave_lds_base = wave_base;
+    rocke_async_tile_loader_slot_issue_bytes(ctx->b,
+                                             &slot,
+                                             ctx->tid,
+                                             rsrc,
+                                             rocke_gemm_dtl_descriptor,
+                                             src,
+                                             ctx->dtl_c_chunks_per_row,
+                                             ctx->dtl_c_cols_per_chunk,
+                                             ctx->dtl_zero_soff,
+                                             slot_bytes,
+                                             coherency);
+}
+
 /* ===================================================================== *
  *  emit_load_phase -- one K-tile's coalesced global->LDS copy.
  *
@@ -399,56 +446,22 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
             b_lds_wave_base = b_lds_par_base;
         }
 
-        for(int p = 0; p < ctx->dtl_a_passes; ++p)
-        {
-            int pass_off_bytes = p * ctx->dtl_pass_bytes + a_parity_bytes_static;
-            rocke_value_t* pass_lds_a
-                = (pass_off_bytes > 0)
-                      ? rocke_b_smem_ptr_add(
-                            b,
-                            a_lds_wave_base,
-                            rocke_b_zext(b, rocke_b_const_i32(b, pass_off_bytes), I64))
-                      : a_lds_wave_base;
-            rocke_value_t* chunk_idx
-                = rocke_b_add(b, ctx->tid, rocke_b_const_i32(b, p * spec->block_size));
-            rocke_value_t* row = rocke_b_div(b, chunk_idx, ctx->dtl_c_chunks_per_row);
-            rocke_value_t* col_v = rocke_b_mod(b, chunk_idx, ctx->dtl_c_chunks_per_row);
-            rocke_value_t* col = rocke_b_mul(b, col_v, ctx->dtl_c_cols_per_chunk);
-            rocke_value_t* off_bytes = rocke_gemm_dtl_off_bytes(
-                ctx, c_eb, ctx->batch_off_a, ctx->block_m_off, row, col, k_off);
-            rocke_b_async_buffer_load_lds_addr(b,
-                                               ctx->dtl_a_rsrc,
-                                               pass_lds_a,
-                                               off_bytes,
-                                               ctx->dtl_zero_soff,
-                                               ctx->dtl_dwords,
-                                               spec->trait.dtl_cache_a);
-        }
-        for(int p = 0; p < ctx->dtl_b_passes; ++p)
-        {
-            int pass_off_bytes = p * ctx->dtl_pass_bytes + b_parity_bytes_static;
-            rocke_value_t* pass_lds_b
-                = (pass_off_bytes > 0)
-                      ? rocke_b_smem_ptr_add(
-                            b,
-                            b_lds_wave_base,
-                            rocke_b_zext(b, rocke_b_const_i32(b, pass_off_bytes), I64))
-                      : b_lds_wave_base;
-            rocke_value_t* chunk_idx
-                = rocke_b_add(b, ctx->tid, rocke_b_const_i32(b, p * spec->block_size));
-            rocke_value_t* row = rocke_b_div(b, chunk_idx, ctx->dtl_c_chunks_per_row);
-            rocke_value_t* col_v = rocke_b_mod(b, chunk_idx, ctx->dtl_c_chunks_per_row);
-            rocke_value_t* col = rocke_b_mul(b, col_v, ctx->dtl_c_cols_per_chunk);
-            rocke_value_t* off_bytes = rocke_gemm_dtl_off_bytes(
-                ctx, c_eb, ctx->batch_off_b, ctx->block_n_off, row, col, k_off);
-            rocke_b_async_buffer_load_lds_addr(b,
-                                               ctx->dtl_b_rsrc,
-                                               pass_lds_b,
-                                               off_bytes,
-                                               ctx->dtl_zero_soff,
-                                               ctx->dtl_dwords,
-                                               spec->trait.dtl_cache_b);
-        }
+        rocke_gemm_dtl_source src_a{ctx, c_eb, ctx->batch_off_a, ctx->block_m_off, k_off};
+        rocke_gemm_dtl_source src_b{ctx, c_eb, ctx->batch_off_b, ctx->block_n_off, k_off};
+        rocke_gemm_issue_dtl_operand(&src_a,
+                                     A_dst,
+                                     a_lds_wave_base,
+                                     ctx->dtl_a_rsrc,
+                                     ctx->dtl_a_passes,
+                                     a_parity_bytes_static,
+                                     spec->trait.dtl_cache_a);
+        rocke_gemm_issue_dtl_operand(&src_b,
+                                     B_dst,
+                                     b_lds_wave_base,
+                                     ctx->dtl_b_rsrc,
+                                     ctx->dtl_b_passes,
+                                     b_parity_bytes_static,
+                                     spec->trait.dtl_cache_b);
         return;
     }
 
