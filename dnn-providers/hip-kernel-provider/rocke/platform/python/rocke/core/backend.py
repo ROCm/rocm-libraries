@@ -674,8 +674,10 @@ def lower_kernel_python(
     return _lower_kernel_to_llvm_python(kernel, arch=arch, llvm_flavor=llvm_flavor)
 
 
-def _python_ll_ir(kernel: Any, arch: str, want_ir: bool) -> Tuple[str, str]:
-    """``(ll, ir)`` of a built kernel from the Python engine alone."""
+def lower_kernel_python_ll_ir(kernel: Any, arch: str, want_ir: bool) -> Tuple[str, str]:
+    """``(ll, ir)`` of a built kernel from the Python engine alone: the whole
+    body of a ``py_fn`` once the kernel is built (``ir`` is ``""`` unless
+    ``want_ir``).  Shared by the universal GEMM path and the library bridges."""
     ll = lower_kernel_python(kernel, arch=arch)
     ir = ""
     if want_ir:
@@ -689,7 +691,9 @@ def _lower_python(spec: Any, arch: str, want_ir: bool) -> Tuple[str, str]:
     """Native Python lowering of a universal-GEMM spec."""
     from ..instances.common.gemm_universal import build_universal_gemm
 
-    return _python_ll_ir(build_universal_gemm(spec, arch=arch), arch, want_ir)
+    return lower_kernel_python_ll_ir(
+        build_universal_gemm(spec, arch=arch), arch, want_ir
+    )
 
 
 def _lower_cpp(spec: Any, arch: str, want_ir: bool) -> Tuple[str, str]:
@@ -967,7 +971,7 @@ def lower_batched_gemm(
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.batched_gemm import build_batched_gemm
 
-        return _python_ll_ir(build_batched_gemm(spec, arch=arch), arch, wi)
+        return lower_kernel_python_ll_ir(build_batched_gemm(spec, arch=arch), arch, wi)
 
     eng = import_engine()
     sd = batched_gemm_spec_to_dict(spec)
@@ -995,7 +999,7 @@ def lower_grouped_gemm(
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.grouped_gemm import build_grouped_gemm
 
-        return _python_ll_ir(build_grouped_gemm(spec, arch=arch), arch, wi)
+        return lower_kernel_python_ll_ir(build_grouped_gemm(spec, arch=arch), arch, wi)
 
     eng = import_engine()
     sd = grouped_gemm_spec_to_dict(spec)
@@ -1023,7 +1027,7 @@ def lower_flatmm(
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.flatmm import build_flatmm
 
-        return _python_ll_ir(build_flatmm(spec, arch=arch), arch, wi)
+        return lower_kernel_python_ll_ir(build_flatmm(spec, arch=arch), arch, wi)
 
     eng = import_engine()
     sd = flatmm_spec_to_dict(spec)
@@ -1051,7 +1055,7 @@ def lower_streamk_gemm(
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.streamk_gemm import build_streamk_gemm
 
-        return _python_ll_ir(build_streamk_gemm(spec, arch=arch), arch, wi)
+        return lower_kernel_python_ll_ir(build_streamk_gemm(spec, arch=arch), arch, wi)
 
     eng = import_engine()
     sd = streamk_gemm_spec_to_dict(spec)
@@ -1079,7 +1083,9 @@ def lower_block_scale_gemm(
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.block_scale_gemm import build_block_scale_gemm
 
-        return _python_ll_ir(build_block_scale_gemm(spec, arch=arch), arch, wi)
+        return lower_kernel_python_ll_ir(
+            build_block_scale_gemm(spec, arch=arch), arch, wi
+        )
 
     eng = import_engine()
     sd = block_scale_gemm_spec_to_dict(spec)
@@ -1107,7 +1113,7 @@ def lower_mx_gemm(
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.mx_gemm import build_mx_gemm
 
-        return _python_ll_ir(build_mx_gemm(spec, arch=arch), arch, wi)
+        return lower_kernel_python_ll_ir(build_mx_gemm(spec, arch=arch), arch, wi)
 
     eng = import_engine()
     sd = mx_gemm_spec_to_dict(spec)
@@ -1135,7 +1141,7 @@ def lower_mfma_gemm(
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.mfma_gemm import build_mfma_gemm
 
-        return _python_ll_ir(build_mfma_gemm(spec, arch=arch), arch, wi)
+        return lower_kernel_python_ll_ir(build_mfma_gemm(spec, arch=arch), arch, wi)
 
     eng = import_engine()
     sd = mfma_gemm_spec_to_dict(spec)
@@ -1164,7 +1170,7 @@ def lower_matmul_nbits(
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.matmul_nbits import build_matmul_nbits
 
-        return _python_ll_ir(build_matmul_nbits(spec, arch=arch), arch, wi)
+        return lower_kernel_python_ll_ir(build_matmul_nbits(spec, arch=arch), arch, wi)
 
     eng = import_engine()
     sd = matmul_nbits_spec_to_dict(spec)
@@ -1192,7 +1198,7 @@ def lower_gemm_multi_d(
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.gemm_multi_d import build_gemm_multi_d
 
-        return _python_ll_ir(build_gemm_multi_d(spec, arch=arch), arch, wi)
+        return lower_kernel_python_ll_ir(build_gemm_multi_d(spec, arch=arch), arch, wi)
 
     eng = import_engine()
     sd = gemm_multi_d_spec_to_dict(spec)
@@ -1220,7 +1226,9 @@ def lower_gemm_multi_abd(
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.gemm_multi_abd import build_gemm_multi_abd
 
-        return _python_ll_ir(build_gemm_multi_abd(spec, arch=arch), arch, wi)
+        return lower_kernel_python_ll_ir(
+            build_gemm_multi_abd(spec, arch=arch), arch, wi
+        )
 
     eng = import_engine()
     sd = gemm_multi_abd_spec_to_dict(spec)

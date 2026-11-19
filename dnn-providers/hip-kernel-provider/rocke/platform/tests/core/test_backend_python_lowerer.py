@@ -88,9 +88,13 @@ def test_lower_kernel_python_is_public():
     assert core.lower_kernel_python is bk.lower_kernel_python
 
 
+def test_lower_kernel_python_ll_ir_is_public():
+    assert core.lower_kernel_python_ll_ir is bk.lower_kernel_python_ll_ir
+
+
 def test_no_python_path_uses_the_dispatching_lowerer():
     """Every ``lower_*`` family wrapper's ``py_fn`` and the universal GEMM's
-    ``_lower_python`` go through ``_python_ll_ir`` (which calls
+    ``_lower_python`` go through ``lower_kernel_python_ll_ir`` (which calls
     ``lower_kernel_python``); nothing in the module calls
     ``lower_kernel_to_llvm``."""
     tree = ast.parse(inspect.getsource(bk))
@@ -105,8 +109,8 @@ def test_no_python_path_uses_the_dispatching_lowerer():
 
     assert "lower_kernel_to_llvm" not in called(tree)
     top = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
-    assert "_python_ll_ir" in called(top["_lower_python"])
-    assert "lower_kernel_python" in called(top["_python_ll_ir"])
+    assert "lower_kernel_python_ll_ir" in called(top["_lower_python"])
+    assert "lower_kernel_python" in called(top["lower_kernel_python_ll_ir"])
     wrappers = [
         n
         for n in top.values()
@@ -121,4 +125,4 @@ def test_no_python_path_uses_the_dispatching_lowerer():
             for f in ast.walk(w)
             if isinstance(f, ast.FunctionDef) and f.name == "py_fn"
         )
-        assert "_python_ll_ir" in called(py_fn), w.name
+        assert "lower_kernel_python_ll_ir" in called(py_fn), w.name

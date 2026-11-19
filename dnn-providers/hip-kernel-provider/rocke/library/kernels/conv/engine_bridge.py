@@ -24,23 +24,13 @@ from rocke.core import (
     GemmLowerResult,
     import_engine,
     lower_family,
-    lower_kernel_python,
+    lower_kernel_python_ll_ir,
     name_of,
 )
 from rocke.core.codegen_policy import scheduler_strategy_reason
 
 #: The extension that binds the conv families' C++ mirrors.
 ENGINE_MODULE = "rocke_library_engine"
-
-
-def _lower_python(kernel: Any, arch: str) -> str:
-    """Lower a built kernel with the Python lowerer, unconditionally.
-
-    Every ``py_fn`` handed to :func:`rocke.core.lower_family` is the Python
-    side of the ``python`` / ``both`` selection, so it lowers through
-    :func:`rocke.core.lower_kernel_python`, which never re-resolves the
-    backend (see there)."""
-    return lower_kernel_python(kernel, arch=arch)
 
 
 def _reject_unknown_sched(spec: Any, arch: str) -> None:
@@ -678,13 +668,7 @@ def lower_conv_implicit_gemm(
         from kernels.common.conv_implicit_gemm import build_implicit_gemm_conv
 
         k = build_implicit_gemm_conv(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     if spec.split_k == -1:
         # Auto split-K is resolved on the Python side for both engines, so the
@@ -730,13 +714,7 @@ def lower_conv_direct_grouped(
             "generic": build_direct_conv,
         }.get(kind, build_direct_conv_16c)
         k = build(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     eng = import_engine(ENGINE_MODULE)
     sd = conv_direct_grouped_spec_to_dict(spec, kind)
@@ -765,13 +743,7 @@ def lower_conv_direct_nongrouped(
         from kernels.common.conv_direct_nongrouped import build_direct_conv_nongrouped
 
         k = build_direct_conv_nongrouped(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     eng = import_engine(ENGINE_MODULE)
     sd = conv_direct_nongrouped_spec_to_dict(spec)
@@ -800,13 +772,7 @@ def lower_conv_direct_fwd_smallc_wmma(
         from kernels.common.conv_fwd_small_wmma import build_fwd_smallc_wmma
 
         k = build_fwd_smallc_wmma(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     _reject_unknown_sched(spec, arch)
     eng = import_engine(ENGINE_MODULE)
@@ -836,13 +802,7 @@ def lower_conv_direct_fwd_smallk_wmma(
         from kernels.common.conv_fwd_small_wmma import build_fwd_smallk_wmma
 
         k = build_fwd_smallk_wmma(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     _reject_unknown_sched(spec, arch)
     eng = import_engine(ENGINE_MODULE)
@@ -872,13 +832,7 @@ def lower_conv_direct_fwd_smallc_mfma(
         from kernels.common.conv_fwd_small_mfma import build_fwd_smallc_mfma
 
         k = build_fwd_smallc_mfma(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     eng = import_engine(ENGINE_MODULE)
     sd = conv_direct_fwd_smallc_mfma_spec_to_dict(spec)
@@ -907,13 +861,7 @@ def lower_conv_direct_fwd_smallk_mfma(
         from kernels.common.conv_fwd_small_mfma import build_fwd_smallk_mfma
 
         k = build_fwd_smallk_mfma(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     eng = import_engine(ENGINE_MODULE)
     sd = conv_direct_fwd_smallk_mfma_spec_to_dict(spec)
@@ -943,13 +891,7 @@ def lower_conv_direct_fwd_pp_mfma(
         from kernels.common.conv_direct_fwd_pp_mfma import build_fwd_pp_mfma
 
         k = build_fwd_pp_mfma(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     # The engine is imported on the C++ path only: backend="python" needs no
     # rocke_library_engine.
@@ -983,13 +925,7 @@ def lower_conv_direct_fwd_flex_mfma(
         from kernels.common.conv_direct_fwd_flex_mfma import build_fwd_flex_mfma
 
         k = build_fwd_flex_mfma(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     # The engine is imported on the C++ path only: backend="python" needs no
     # rocke_library_engine.
@@ -1022,13 +958,7 @@ def lower_conv_direct_dw_fwd_wmma(
         from kernels.common.conv_direct_dw_fwd_wmma import build_dw_fwd_wmma
 
         k = build_dw_fwd_wmma(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     eng = import_engine(ENGINE_MODULE)
     sd = conv_direct_dw_fwd_wmma_spec_to_dict(spec)
@@ -1057,13 +987,7 @@ def lower_conv_direct_fwd_gstream_wmma(
         from kernels.common.conv_direct_fwd_gstream_wmma import build_fwd_gstream_wmma
 
         k = build_fwd_gstream_wmma(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     _reject_unknown_sched(spec, arch)
     eng = import_engine(ENGINE_MODULE)
@@ -1095,13 +1019,7 @@ def lower_conv_direct_fwd_tapouter_wmma(
         )
 
         k = build_direct_fwd_tapouter_wmma(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     _reject_unknown_sched(spec, arch)
     eng = import_engine(ENGINE_MODULE)
@@ -1131,13 +1049,7 @@ def lower_conv_dgrad_patch_wmma(
         from kernels.common.conv_dgrad_patch_wmma import build_dgrad_patch_wmma
 
         k = build_dgrad_patch_wmma(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     _reject_unknown_sched(spec, arch)
     eng = import_engine(ENGINE_MODULE)
@@ -1167,13 +1079,7 @@ def lower_conv_dgrad_smallc_wmma(
         from kernels.common.conv_dgrad_smallc_wmma import build_dgrad_smallc_wmma
 
         k = build_dgrad_smallc_wmma(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     _reject_unknown_sched(spec, arch)
     eng = import_engine(ENGINE_MODULE)
@@ -1203,13 +1109,7 @@ def lower_conv_direct_dgrad_wmma(
         from kernels.common.conv_direct_dgrad_wmma import build_direct_dgrad_wmma
 
         k = build_direct_dgrad_wmma(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     _reject_unknown_sched(spec, arch)
     eng = import_engine(ENGINE_MODULE)
@@ -1240,13 +1140,7 @@ def lower_conv_direct_dgrad_pp_mfma(
         from kernels.common.conv_direct_dgrad_pp_mfma import build_dgrad_pp_mfma
 
         k = build_dgrad_pp_mfma(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     # The engine is imported on the C++ path only: backend="python" needs no
     # rocke_library_engine.
@@ -1279,13 +1173,7 @@ def lower_conv_direct_fwd_wmma(
         from kernels.common.conv_direct_fwd_wmma import build_direct_fwd_wmma
 
         k = build_direct_fwd_wmma(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     _reject_unknown_sched(spec, arch)
     eng = import_engine(ENGINE_MODULE)
@@ -1376,13 +1264,7 @@ def lower_conv_winograd_fwd(
             k = wf.build_winograd_merged(
                 wf.WinogradMergedSpec(spec, tuple(stages)), arch=arch
             )
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     eng = import_engine(ENGINE_MODULE)
     sd = conv_winograd_fwd_spec_to_dict(spec, stages)
@@ -1435,13 +1317,7 @@ def lower_conv_winograd_gemm_wmma(
         from kernels.common.conv_winograd_gemm_wmma import build_winograd_gemm_wmma
 
         k = build_winograd_gemm_wmma(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     _reject_unknown_sched(spec, arch)
     eng = import_engine(ENGINE_MODULE)
@@ -1472,13 +1348,7 @@ def lower_conv_winograd_gemm_reduce(
         from kernels.common.conv_winograd_gemm_wmma import build_winograd_gemm_reduce
 
         k = build_winograd_gemm_reduce(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     eng = import_engine(ENGINE_MODULE)
     sd = dict(dtype=spec.dtype)
@@ -1563,13 +1433,7 @@ def lower_conv_winograd_gen(
             "K4": G.build_output_transform,
         }[stage]
         k = build(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     eng = import_engine(ENGINE_MODULE)
     return lower_family(
@@ -1643,13 +1507,7 @@ def lower_conv_winograd_fused_1d_wmma(
         from kernels.common.conv_winograd_fused_1d_wmma import build_fused_wino_1d
 
         k = build_fused_wino_1d(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     eng = import_engine(ENGINE_MODULE)
     sd = conv_winograd_fused_1d_spec_to_dict(spec)
@@ -1678,13 +1536,7 @@ def lower_img2col(
         from kernels.common.img2col import build_img2col
 
         k = build_img2col(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     eng = import_engine(ENGINE_MODULE)
     sd = img2col_spec_to_dict(spec)
@@ -1715,13 +1567,7 @@ def lower_deep_fused_conv_pool(
         )
 
         k = build_deep_fused_conv_pool(spec, arch=arch)
-        ll = _lower_python(k, arch)
-        ir = ""
-        if wi:
-            from rocke.core.ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(k, arch, wi)
 
     eng = import_engine(ENGINE_MODULE)
     sd = deep_fused_conv_pool_spec_to_dict(spec)

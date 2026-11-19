@@ -429,7 +429,17 @@ def test_no_py_fn_uses_the_dispatching_lowerer():
             for c in ast.walk(fns[0])
             if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
         }
-        assert "_lower_python" in called, top.name
+        assert "lower_kernel_python_ll_ir" in called, top.name
+        # The shared helper is the whole body: no per-family (ll, ir) block.
+        rets = [n for n in ast.walk(fns[0]) if isinstance(n, ast.Return)]
+        assert len(rets) == 1 and isinstance(rets[0].value, ast.Call), top.name
+        assert rets[0].value.func.id == "lower_kernel_python_ll_ir", top.name
+        assert "serialize" not in {
+            a.name
+            for n in ast.walk(fns[0])
+            if isinstance(n, ast.ImportFrom)
+            for a in n.names
+        }, top.name
 
 
 if __name__ == "__main__":
