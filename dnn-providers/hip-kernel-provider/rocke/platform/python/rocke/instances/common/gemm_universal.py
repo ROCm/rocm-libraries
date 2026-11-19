@@ -75,6 +75,7 @@ from ...core.ir import (
 )
 from ...helpers.io import io_ir_type, load_clipped_global_fragment
 from ...helpers.loads import CoalescedTileLoader, TdmSourceWindow2D, TdmTileLoader2D
+from ...helpers.preshuffle import emit_preshuffleb_tile_id
 from ...helpers.spec import WarpTileBlockSizeMixin, choose_load_vec
 from ...helpers.tensor_view import make_global_view, make_tile_window
 from ...helpers.tiling import TileMmaDriver
@@ -1619,17 +1620,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         (f"acc_m{mi}_n{ni}", acc_init) for mi in range(mfmas_m) for ni in range(mfmas_n)
     ]
 
-    # Global -> LDS coalesced copy plan.
-    threads = spec.block_size
-    a_total = block_m * block_k
-    b_total = block_n * block_k
-    a_vec_total = a_total // load_vec
-    b_vec_total = b_total // load_vec
-    a_vecs_per_thread = a_vec_total // threads
-    b_vecs_per_thread = b_vec_total // threads
-    c_threads = b.const_i32(threads)
-    c_load_vec = b.const_i32(load_vec)
-    c_block_k_div_vec = b.const_i32(block_k // load_vec)
+    # Bind the synchronous chunk grid once for both operands.
+    chunk_grid = (
+        b.const_i32(spec.block_size),
+        b.const_i32(load_vec),
+        b.const_i32(block_k // load_vec),
+    )
+    a_loader = CoalescedTileLoader(block_m, block_k, spec.block_size, load_vec)
+    b_loader = CoalescedTileLoader(block_n, block_k, spec.block_size, load_vec)
 
     # CK Tile-style data views. The A and B global tensors are
     # modelled as 3D views ``(batch, M_or_N, K)`` with element strides
@@ -1646,9 +1644,10 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     a_view = make_global_view(
         A, shape=(1, 1, 1), dtype=storage_dtype, strides=(1, K, 1)
     )
-    b_view = make_global_view(
-        Bp, shape=(1, 1, 1), dtype=storage_dtype, strides=(1, K, 1)
-    )
+    # A packed B tile is one contiguous window; K is still the logical clip.
+    b_shape = (1, block_n * block_k) if spec.trait.preshuffle_b else (1, 1, 1)
+    b_strides = (1, 1) if spec.trait.preshuffle_b else (1, K, 1)
+    b_view = make_global_view(Bp, shape=b_shape, dtype=storage_dtype, strides=b_strides)
     # LDS views are 2D packed (block_m, block_k) / (block_n, block_k).
     from ...helpers.tensor_view import TensorDescriptor, TensorView
 
@@ -1665,8 +1664,6 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     else:
         _a_lds_desc = TensorDescriptor.packed((block_m, block_k), storage_dtype)
         _b_lds_desc = TensorDescriptor.packed((block_n, block_k), storage_dtype)
-    a_lds_view = TensorView(base=A_smem, desc=_a_lds_desc, addr_space="lds")
-    b_lds_view = TensorView(base=B_smem, desc=_b_lds_desc, addr_space="lds")
 
     # DirectToLDS (DTLA/DTLB) plumbing. We issue
     # ``async_buffer_load_lds_addr`` directly because
@@ -1980,167 +1977,73 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             lengths=(1, block_m, block_k),
             origin=(batch_off_a, block_m_off, k_off),
         )
-        b_global_tile = make_tile_window(
-            b_view,
-            lengths=(1, block_n, block_k),
-            origin=(batch_off_b, block_n_off, k_off),
-        )
-        # The raw-pointer loader has no tail masking. Start with the existing
-        # full-tile contract and an identity LDS placement; keep the specialized
-        # paths below for tails, packed B, and nontrivial LDS addressing.
-        if (
-            arch == "gfx950"
-            and storage_dtype == F16
-            and spec.trait.pipeline == "mem"
-            and not spec.batched
-            and spec.trait.split_k == 1
-            and not (spec.trait.pad_m or spec.trait.pad_n or spec.trait.pad_k)
-            and not spec.trait.preshuffle_b
-            and not (_two_buf or _lds_pad or _SWZ)
-        ):
-
-            def copy_full_tile(src, dst, rows):
-                batch_base, row_base, col_base = src.origin
-                desc = src.view.desc
-
-                def source(builder, row, col):
-                    indices = (
-                        batch_base,
-                        builder.add(row_base, row),
-                        builder.add(col_base, col),
-                    )
-                    return desc.offset(builder, indices), None
-
-                CoalescedTileLoader(
-                    tile_rows=rows,
-                    tile_cols=block_k,
-                    block_size=spec.block_size,
-                    load_vec=load_vec,
-                    use_buffer_rsrc=False,
-                ).load(b, tid=tid, smem_dst=dst, descriptor=source, ptr=src.view.base)
-
-            copy_full_tile(a_global_tile, A_dst, block_m)
-            copy_full_tile(b_global_tile, B_dst, block_n)
-            return
-
         a_lds_tile = make_tile_window(
-            a_lds_view,
+            TensorView(base=A_dst, desc=_a_lds_desc, addr_space="lds"),
             lengths=(block_m, block_k),
             origin=(b.const_i32(0), b.const_i32(0)),
         )
         b_lds_tile = make_tile_window(
-            b_lds_view,
+            TensorView(base=B_dst, desc=_b_lds_desc, addr_space="lds"),
             lengths=(block_n, block_k),
             origin=(b.const_i32(0), b.const_i32(0)),
         )
 
-        # Double-buffer parity row offset (compv4 non-DTL): the LDS
-        # ``store_vec``/``store_scalar`` paths index the smem base
-        # directly (origin is not applied for the lds addr space), so we
-        # fold the parity offset into the destination ``row`` here. Half 1
-        # lands at row block_m / block_n in the [2*block_m, block_k] /
-        # [2*block_n, block_k] alloc. ``lds_parity`` is a Python int
-        # (compile-time prologue) or an i32 Value (runtime loop iter-arg).
-        def _ld_a_row(r: Value) -> Value:
-            if not _db:
-                return r
-            if isinstance(lds_parity, Value):
-                return b.add(r, b.mul(lds_parity, b.const_i32(block_m)))
-            return b.add(r, b.const_i32(lds_parity * block_m)) if lds_parity else r
-
-        def _ld_b_row(r: Value) -> Value:
-            if not _db:
-                return r
-            if isinstance(lds_parity, Value):
-                return b.add(r, b.mul(lds_parity, b.const_i32(block_n)))
-            return b.add(r, b.const_i32(lds_parity * block_n)) if lds_parity else r
-
-        # Coalesced (row, col_v, col) decode of a per-thread vec index,
-        # shared by the A / B-canonical / B-preshuffle copy loops. Takes
-        # the already-built ``vec_idx`` so the emitted SSA matches the
-        # inline order verbatim (callers that also need ``vec_idx`` for a
-        # global offset compute it before calling).
-        def _vec_rc(vec_idx: Value) -> Tuple[Value, Value, Value]:
-            row = b.div(vec_idx, c_block_k_div_vec)
-            col_v = b.mod(vec_idx, c_block_k_div_vec)
-            col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
-            return row, col_v, col
-
-        def _load_k_clipped(ptr: Value, offset: Value, col: Value) -> Value:
-            return load_clipped_global_fragment(
-                b, ptr, offset, b.add(k_off, col), K, dtype=storage_dtype, n=load_vec
-            )
-
-        def _load_sync_window(tile, row: Value, col: Value) -> Value:
-            indices = (b.const_i32(0), row, col)
-            if spec.trait.pad_k:
-                return _load_k_clipped(
-                    tile.view.base, tile.element_offset(b, *indices), col
-                )
-            if load_vec == 1:
-                return tile.load_scalar(b, *indices)
-            return tile.load_vec(b, *indices, n=load_vec)
-
-        def _store_sync_window(tile, row: Value, col: Value, value: Value) -> None:
-            if load_vec == 1:
-                tile.store_scalar(b, row, col, value=value)
-            else:
-                tile.store_vec(b, row, col, value=value, n=load_vec)
-
-        for e in range(a_vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row, _, col = _vec_rc(vec_idx)
-            a_val = _load_sync_window(a_global_tile, row, col)
-            _store_sync_window(a_lds_tile, _ld_a_row(row), _swz_col(col, row), a_val)
-        # B-load branch.
-        #
-        # Canonical (row-major B): each lane reads ``load_vec`` halves at
-        # `(n_global_row, k_global_col)`; address arithmetic is strided
-        # (one row of B is K halves apart). The wave's lanes hit
-        # different rows -> multiple discontiguous VMEM transactions per
-        # K-tile.
-        #
-        # ``preshuffle_b`` (B is pre-shuffled to ``(k_tiles, n_tiles,
-        # block_n, block_k)`` per batch by the host): the (block_n x
-        # block_k) tile for the current `(n_tile, k_tile)` lives as
-        # ``block_n * block_k`` consecutive elements in B. Loading it
-        # contiguously into ``B_smem`` (which is row-major
-        # ``(block_n, block_k)``) yields **the same** in-LDS layout as
-        # the canonical path, so the MFMA inner loop is unchanged. The
-        # win is that the per-K global loads collapse to one wide
-        # ``buffer_load_dwordxN`` burst per warp.
-        if spec.trait.preshuffle_b:
-            n_tile_idx = b.div(block_n_off, c_block_n)
-            k_tile_idx = b.div(k_off, c_block_k)
-            # ceil(N / block_n); pre-condition: caller pads N to a
-            # multiple of block_n so the ceiling is N / block_n exactly.
-            n_tile_count = b.div(N, c_block_n)
-            tile_offset_elements = b.mul(
-                b.add(b.mul(k_tile_idx, n_tile_count), n_tile_idx),
-                b.const_i32(block_n * block_k),
-            )
-            base_off = b.add(batch_off_b, tile_offset_elements)
-            for e in range(b_vecs_per_thread):
-                vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-                glob_off = b.add(base_off, b.mul(vec_idx, c_load_vec))
-                row, _, col = _vec_rc(vec_idx)
-                if spec.trait.pad_k:
-                    b_val = _load_k_clipped(Bp, glob_off, col)
-                elif load_vec == 1:
-                    b_val = b.global_load(Bp, glob_off, storage_dtype)
+        def copy_operand(loader, source, dest):
+            def emit(row, col, chunk_id):
+                zero = b.const_i32(0)
+                # Keep packed reads linear instead of reconstructing the
+                # same address from the logical row and column.
+                if source.rank == 2:
+                    indices = (zero, b.mul(chunk_id, chunk_grid[1]))
                 else:
-                    b_val = b.global_load_vN(Bp, glob_off, storage_dtype, load_vec)
-                _store_sync_window(
-                    b_lds_tile, _ld_b_row(row), _swz_col(col, row), b_val
-                )
+                    indices = (zero, row, col)
+                if spec.trait.pad_k:
+                    value = load_clipped_global_fragment(
+                        b,
+                        source.view.base,
+                        source.element_offset(b, *indices),
+                        b.add(k_off, col),
+                        K,
+                        dtype=storage_dtype,
+                        n=load_vec,
+                    )
+                elif load_vec == 1:
+                    value = source.load_scalar(b, *indices)
+                else:
+                    value = source.load_vec(b, *indices, n=load_vec)
+
+                # Only the LDS row is slot-relative; swizzle the logical row.
+                dst_row = row
+                if _db and isinstance(lds_parity, Value):
+                    dst_row = b.add(
+                        row, b.mul(lds_parity, b.const_i32(loader.tile_rows))
+                    )
+                elif _db and lds_parity:
+                    dst_row = b.add(row, b.const_i32(lds_parity * loader.tile_rows))
+                dst_col = _swz_col(col, row)
+                if load_vec == 1:
+                    dest.store_scalar(b, dst_row, dst_col, value=value)
+                else:
+                    dest.store_vec(b, dst_row, dst_col, value=value, n=load_vec)
+
+            loader.visit_chunks(b, tid=tid, emit=emit, grid=chunk_grid)
+
+        copy_operand(a_loader, a_global_tile, a_lds_tile)
+        if spec.trait.preshuffle_b:
+            n_tile = b.div(block_n_off, c_block_n)
+            k_tile = b.div(k_off, c_block_k)
+            n_tile_count = b.div(N, c_block_n)  # Packed N is tile-aligned.
+            tile_id = emit_preshuffleb_tile_id(
+                b, n_tile=n_tile, k_tile=k_tile, n_tile_count=n_tile_count
+            )
+            base = b.add(batch_off_b, b.mul(tile_id, b.const_i32(block_n * block_k)))
+            b_origin = (base, b.const_i32(0))
+            b_lengths = (1, block_n * block_k)
         else:
-            for e in range(b_vecs_per_thread):
-                vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-                row, _, col = _vec_rc(vec_idx)
-                b_val = _load_sync_window(b_global_tile, row, col)
-                _store_sync_window(
-                    b_lds_tile, _ld_b_row(row), _swz_col(col, row), b_val
-                )
+            b_origin = (batch_off_b, block_n_off, k_off)
+            b_lengths = (1, block_n, block_k)
+        b_global_tile = make_tile_window(b_view, lengths=b_lengths, origin=b_origin)
+        copy_operand(b_loader, b_global_tile, b_lds_tile)
 
     def _emit_frag_smem_load(
         src: Value,

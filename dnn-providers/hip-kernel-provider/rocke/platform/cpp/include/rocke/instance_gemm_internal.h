@@ -198,19 +198,13 @@ typedef struct rocke_gemm_build_ctx
     /* ---- global -> LDS coalesced copy plan -- */
     int threads; /* spec.block_size                           */
     int load_vec; /* _choose_load_vec(spec)                    */
-    int a_total; /* block_m * block_k                         */
-    int b_total; /* block_n * block_k                         */
-    int a_vec_total; /* a_total / load_vec                        */
-    int b_vec_total; /* b_total / load_vec                        */
-    int a_vecs_per_thread; /* a_vec_total / threads                     */
-    int b_vecs_per_thread; /* b_vec_total / threads                     */
     rocke_value_t* c_threads; /* const_i32(threads)                */
     rocke_value_t* c_load_vec; /* const_i32(load_vec)               */
     rocke_value_t* c_block_k_div_vec; /* const_i32(block_k / load_vec)     */
 
     /* ---- CK-Tile data views (host-side; hold SSA bases) -- */
     rocke_tensor_view_t a_view; /* make_global_view(A, (1,K,1))      */
-    rocke_tensor_view_t b_view; /* make_global_view(Bp,(1,K,1))      */
+    rocke_tensor_view_t b_view; /* B row stride K or packed block_k */
     rocke_tensor_descriptor_t a_lds_desc; /* packed or with_strides         */
     rocke_tensor_descriptor_t b_lds_desc;
     rocke_tensor_view_t a_lds_view; /* LDS view over A_smem              */

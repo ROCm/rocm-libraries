@@ -202,12 +202,12 @@ LDS allocations are part of the algorithm. They control:
 
 ## Data Movement
 
-The non-batched, unpadded gfx950 FP16 `mem` path with ordinary B storage and
-packed single-buffer LDS is the plain GEMM example for `CoalescedTileLoader`.
-In [`emit_load_phase`](../../python/rocke/instances/common/gemm_universal.py), the
-A/B `TileWindow`s select the source rectangles, their descriptors turn local
-coordinates into global element offsets, and the loader emits the global load
-and LDS store for each lane. The K loop still owns the workgroup barriers.
+Synchronous GEMM uses `CoalescedTileLoader.visit_chunks` for both operands.
+In [`emit_load_phase`](../../python/rocke/instances/common/gemm_universal.py),
+the A/B `TileWindow`s select the sources. A preshuffled B window is one
+contiguous packed tile and uses the visitor's linear chunk ID; ordinary B uses
+logical row/column coordinates and the runtime K stride. Both feed the same
+chunk visitor and LDS mapping. The K loop still owns workgroup barriers.
 
 For synchronous copies with `pad_k`, A and B use the same masked scalar loads
 as `load_fragment`. The tile window computes a physical offset with runtime

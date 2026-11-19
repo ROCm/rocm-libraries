@@ -420,6 +420,38 @@ class CoalescedTileLoader:
             return chunk, idx0  # row = idx1*load_vec, col = idx0
         return idx0, chunk  # row = idx0, col = idx1*load_vec
 
+    def visit_chunks(
+        self,
+        b: IRBuilder,
+        *,
+        tid: Value,
+        emit: Callable[[Value, Value, Value], None],
+        grid: tuple[Value, Value, Value] | None = None,
+    ) -> None:
+        """Visit each lane's coalesced chunks without imposing an address layout.
+
+        ``emit(row, col, chunk_id)`` can bind a logical window or use the
+        linear chunk ID in packed storage. The optional prebound ``grid`` is
+        (threads, vector width, chunks per row or column), in that order.
+        """
+        if grid is None:
+            grid = (
+                b.const_i32(self.block_size),
+                b.const_i32(self.load_vec),
+                b.const_i32(
+                    self.rows_per_vec
+                    if self.vector_axis == "row"
+                    else self.cols_per_vec
+                ),
+            )
+        c_threads, c_load_vec, c_span = grid
+        for e in range(self.vecs_per_thread):
+            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+            row, col = self._decode_row_col(
+                b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
+            )
+            emit(row, col, vec_idx)
+
     def _store_tile(
         self, b: IRBuilder, smem_dst: Value, row: Value, col: Value, v: Value
     ) -> None:
@@ -660,37 +692,26 @@ class CoalescedTileLoader:
         c0 = b.const_i32(0)
         c_oob = b.const_i32(self.oob_sentinel)
 
-        for e in range(self.vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row, col = self._decode_row_col(
-                b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
-            )
-
+        def emit(row, col, _chunk_id):
             off_elems, valid = descriptor(b, row, col)
-
             if self.use_buffer_rsrc:
                 off_bytes = b.mul(off_elems, c_elem_bytes)
-                if valid is not None:
-                    safe = b.select(valid, off_bytes, c_oob)
-                else:
-                    safe = off_bytes
+                safe = (
+                    b.select(valid, off_bytes, c_oob)
+                    if valid is not None
+                    else off_bytes
+                )
                 if self.load_vec == 1:
                     v = b.buffer_load(rsrc, safe, c0, dtype)
-                    if self.col_xor is not None:
-                        col = self._swizzle(b, row, col)
-                    b.smem_store_vN(smem_dst, [row, col], v, 1)
                 else:
                     v = b.buffer_load_vN(rsrc, safe, c0, dtype, self.load_vec)
-                    self._store_tile(b, smem_dst, row, col, v)
+            elif self.load_vec == 1:
+                v = b.global_load(ptr, off_elems, dtype)
             else:
-                if self.load_vec == 1:
-                    v = b.global_load(ptr, off_elems, dtype)
-                    if self.col_xor is not None:
-                        col = self._swizzle(b, row, col)
-                    b.smem_store_vN(smem_dst, [row, col], v, 1)
-                else:
-                    v = b.global_load_vN(ptr, off_elems, dtype, self.load_vec)
-                    self._store_tile(b, smem_dst, row, col, v)
+                v = b.global_load_vN(ptr, off_elems, dtype, self.load_vec)
+            self._store_tile(b, smem_dst, row, col, v)
+
+        self.visit_chunks(b, tid=tid, emit=emit, grid=(c_threads, c_load_vec, c_span))
 
     def load_async_to_lds(
         self,

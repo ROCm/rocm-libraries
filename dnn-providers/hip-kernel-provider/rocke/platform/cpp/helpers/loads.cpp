@@ -500,6 +500,84 @@ static void ctl_store_tile(rocke_ir_builder_t* b,
     }
 }
 
+void rocke_coalesced_tile_loader_visit_chunks(rocke_ir_builder_t* b,
+                                              const rocke_coalesced_tile_loader_t* self,
+                                              rocke_value_t* tid,
+                                              const rocke_coalesced_chunk_grid_t* grid,
+                                              rocke_coalesced_chunk_fn emit,
+                                              void* user)
+{
+    if(!rocke_i_live(b))
+        return;
+    int count;
+    if(self == NULL || tid == NULL || emit == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "CoalescedTileLoader: invalid chunk traversal");
+        return;
+    }
+    if(rocke_coalesced_tile_loader_vecs_per_thread(self, &count) != ROCKE_OK)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "CoalescedTileLoader: tile %dx%d / %d not divisible by block_size %d",
+                        self->tile_rows,
+                        self->tile_cols,
+                        self->load_vec,
+                        self->block_size);
+        return;
+    }
+    rocke_coalesced_chunk_grid_t local;
+    if(grid == NULL)
+    {
+        local.threads = rocke_b_const_i32(b, self->block_size);
+        local.width = rocke_b_const_i32(b, self->load_vec);
+        local.span = rocke_b_const_i32(b, ctl_span(self));
+        grid = &local;
+    }
+    for(int e = 0; e < count; ++e)
+    {
+        rocke_value_t* row;
+        rocke_value_t* col;
+        rocke_value_t* vec_idx
+            = rocke_b_add(b, rocke_b_mul(b, rocke_b_const_i32(b, e), grid->threads), tid);
+        ctl_decode_row_col(b, self, vec_idx, grid->span, grid->width, &row, &col);
+        emit(b, row, col, vec_idx, user);
+    }
+}
+
+struct ctl_load_call
+{
+    const rocke_coalesced_tile_loader_t* self;
+    rocke_value_t* smem_dst;
+    rocke_loads_descriptor_fn descriptor;
+    void* descriptor_user;
+    rocke_value_t* rsrc;
+    rocke_value_t* ptr;
+    rocke_value_t* c_elem_bytes;
+    rocke_value_t* c0;
+    rocke_value_t* c_oob;
+};
+
+static void ctl_emit_load_chunk(
+    rocke_ir_builder_t* b, rocke_value_t* row, rocke_value_t* col, rocke_value_t*, void* user)
+{
+    const auto& call = *static_cast<ctl_load_call*>(user);
+    rocke_value_t* valid = NULL;
+    rocke_value_t* off = call.descriptor(b, row, col, &valid, call.descriptor_user);
+    rocke_value_t* value;
+    if(call.self->use_buffer_rsrc)
+    {
+        rocke_value_t* bytes = rocke_b_mul(b, off, call.c_elem_bytes);
+        rocke_value_t* safe = valid ? rocke_b_select(b, valid, bytes, call.c_oob) : bytes;
+        value = ctl_buffer_read(b, call.self, call.rsrc, safe, call.c0);
+    }
+    else
+    {
+        value = ctl_global_read(b, call.self, call.ptr, off);
+    }
+    ctl_store_tile(b, call.self, call.smem_dst, row, col, value);
+}
+
 void rocke_coalesced_tile_loader_load(rocke_ir_builder_t* b,
                                       const rocke_coalesced_tile_loader_t* self,
                                       rocke_value_t* tid,
@@ -509,22 +587,11 @@ void rocke_coalesced_tile_loader_load(rocke_ir_builder_t* b,
                                       rocke_value_t* rsrc,
                                       rocke_value_t* ptr)
 {
-    rocke_value_t* c_threads;
-    rocke_value_t* c_load_vec;
-    rocke_value_t* c_span;
-    rocke_value_t* c_half_bytes;
-    rocke_value_t* c0;
-    rocke_value_t* c_oob;
-    int vecs_per_thread;
-    int e;
-
-    if(b != NULL && b->status != ROCKE_OK)
+    if(!rocke_i_live(b))
+        return;
+    if(self == NULL || descriptor == NULL)
     {
-        return; /* already in error: no-op */
-    }
-    if(self == NULL)
-    {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "CoalescedTileLoader.load: NULL loader");
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "CoalescedTileLoader.load: NULL loader or descriptor");
         return;
     }
 
@@ -559,83 +626,19 @@ void rocke_coalesced_tile_loader_load(rocke_ir_builder_t* b,
     const int elem_bytes = ctl_elem_bytes_or_err(b, self);
     if(elem_bytes == 0)
         return;
-    c_threads = rocke_b_const_i32(b, self->block_size);
-    c_load_vec = rocke_b_const_i32(b, self->load_vec);
-    c_span = rocke_b_const_i32(b, ctl_span(self));
-    c_half_bytes = rocke_b_const_i32(b, elem_bytes);
-    c0 = rocke_b_const_i32(b, 0);
-    c_oob = rocke_b_const_i32(b, self->oob_sentinel);
-
-    /* self.vecs_per_thread (Python property; raises ValueError on bad divide). */
-    if(rocke_coalesced_tile_loader_vecs_per_thread(self, &vecs_per_thread) != ROCKE_OK)
-    {
-        rocke_i_set_err(b,
-                        ROCKE_ERR_VALUE,
-                        "CoalescedTileLoader: tile %dx%d / %d not divisible by "
-                        "block_size %d",
-                        self->tile_rows,
-                        self->tile_cols,
-                        self->load_vec,
-                        self->block_size);
-        return;
-    }
-
-    for(e = 0; e < vecs_per_thread; ++e)
-    {
-        rocke_value_t* vec_idx;
-        rocke_value_t* row;
-        rocke_value_t* col;
-        rocke_value_t* off_elems;
-        rocke_value_t* valid;
-
-        /* Python: vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-         *         row, col = self._decode_row_col(b, vec_idx, ...) */
-        vec_idx = rocke_b_add(b, rocke_b_mul(b, rocke_b_const_i32(b, e), c_threads), tid);
-        ctl_decode_row_col(b, self, vec_idx, c_span, c_load_vec, &row, &col);
-
-        /* Python: off_elems, valid = descriptor(b, row, col) */
-        valid = NULL; /* default => "None" if callback leaves it NULL */
-        off_elems = descriptor(b, row, col, &valid, descriptor_user);
-
-        if(self->use_buffer_rsrc)
-        {
-            rocke_value_t* off_bytes;
-            rocke_value_t* safe;
-
-            /* Python:
-             *   off_bytes = b.mul(off_elems, c_half_bytes)
-             *   safe = b.select(valid, off_bytes, c_oob) if valid is not None
-             *          else off_bytes
-             */
-            off_bytes = rocke_b_mul(b, off_elems, c_half_bytes);
-            if(valid != NULL)
-            {
-                safe = rocke_b_select(b, valid, off_bytes, c_oob);
-            }
-            else
-            {
-                safe = off_bytes;
-            }
-
-            /* Python:
-             *   v = b.buffer_load(rsrc, safe, c0, dtype)        (load_vec == 1)
-             *   v = b.buffer_load_vN(rsrc, safe, c0, dtype, n)  (otherwise)
-             *   self._store_tile(b, smem_dst, row, col, v)      # vN or row-scatter
-             */
-            rocke_value_t* v = ctl_buffer_read(b, self, rsrc, safe, c0);
-            ctl_store_tile(b, self, smem_dst, row, col, v);
-        }
-        else
-        {
-            /* Python:
-             *   v = b.global_load(ptr, off_elems, dtype)        (load_vec == 1)
-             *   v = b.global_load_vN(ptr, off_elems, dtype, n)  (otherwise)
-             *   self._store_tile(b, smem_dst, row, col, v)      # vN or row-scatter
-             */
-            rocke_value_t* v = ctl_global_read(b, self, ptr, off_elems);
-            ctl_store_tile(b, self, smem_dst, row, col, v);
-        }
-    }
+    const rocke_coalesced_chunk_grid_t grid{rocke_b_const_i32(b, self->block_size),
+                                            rocke_b_const_i32(b, self->load_vec),
+                                            rocke_b_const_i32(b, ctl_span(self))};
+    ctl_load_call call{self,
+                       smem_dst,
+                       descriptor,
+                       descriptor_user,
+                       rsrc,
+                       ptr,
+                       rocke_b_const_i32(b, elem_bytes),
+                       rocke_b_const_i32(b, 0),
+                       rocke_b_const_i32(b, self->oob_sentinel)};
+    rocke_coalesced_tile_loader_visit_chunks(b, self, tid, &grid, ctl_emit_load_chunk, &call);
 }
 
 /* ============================================================================

@@ -1389,12 +1389,6 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
                         spec->block_size);
         return NULL;
     }
-    ctx.a_total = ctx.block_m * ctx.block_k;
-    ctx.b_total = ctx.block_n * ctx.block_k;
-    ctx.a_vec_total = ctx.a_total / ctx.load_vec;
-    ctx.b_vec_total = ctx.b_total / ctx.load_vec;
-    ctx.a_vecs_per_thread = ctx.a_vec_total / ctx.threads;
-    ctx.b_vecs_per_thread = ctx.b_vec_total / ctx.threads;
     ctx.c_threads = rocke_b_const_i32(b, ctx.threads);
     ctx.c_load_vec = rocke_b_const_i32(b, ctx.load_vec);
     ctx.c_block_k_div_vec = rocke_b_const_i32(b, ctx.block_k / ctx.load_vec);
@@ -1407,7 +1401,15 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         gstride[1] = rocke_stride_value(ctx.K);
         gstride[2] = rocke_stride_imm(1);
         rocke_make_global_view(&ctx.a_view, ctx.A, gshape, 3, ctx.storage_dtype, gstride);
-        rocke_make_global_view(&ctx.b_view, ctx.Bp, gshape, 3, ctx.storage_dtype, gstride);
+        if(spec->trait.preshuffle_b)
+        {
+            const int packed_shape[2] = {1, ctx.block_n * ctx.block_k};
+            const rocke_stride_t packed_stride[2] = {rocke_stride_imm(1), rocke_stride_imm(1)};
+            rocke_make_global_view(
+                &ctx.b_view, ctx.Bp, packed_shape, 2, ctx.storage_dtype, packed_stride);
+        }
+        else
+            rocke_make_global_view(&ctx.b_view, ctx.Bp, gshape, 3, ctx.storage_dtype, gstride);
     }
     {
         int a2[2] = {ctx.block_m, ctx.block_k};

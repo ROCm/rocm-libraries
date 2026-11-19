@@ -30,6 +30,7 @@
 #include "rocke/helper_rocke.helpers.grid.h" /* rocke_chiplet_aware_super_tile_dynamic */
 #include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.loads.h"
+#include "rocke/helper_rocke.helpers.preshuffle.h"
 #include "rocke/instance_gemm_internal.h"
 
 /* storage_dtype in (FP8E4M3, BF8E5M2) -- the 8-bit A/B operands of the gfx1250
@@ -146,64 +147,68 @@ static void rocke_gemm_tdm_issue(rocke_gemm_build_ctx_t* ctx,
     rocke_tdm_tile_load_issue(ctx->b, &transfer, /*cachepolicy=*/0);
 }
 
-/* Full-tile source offsets for the synchronous coalesced-copy helper. */
-static rocke_value_t* rocke_gemm_tile_source(rocke_ir_builder_t* b,
-                                             rocke_value_t* row,
-                                             rocke_value_t* col,
-                                             rocke_value_t** valid,
-                                             void* user)
+struct rocke_gemm_sync_operand
 {
-    const rocke_tile_window_t* tile = (const rocke_tile_window_t*)user;
-    rocke_value_t* indices[3];
-    indices[0] = tile->origin[0];
-    indices[1] = rocke_b_add(b, tile->origin[1], row);
-    indices[2] = rocke_b_add(b, tile->origin[2], col);
-    *valid = NULL;
-    return rocke_tensor_descriptor_offset(b, &tile->view->desc, indices, 3);
-}
+    rocke_gemm_build_ctx_t* ctx;
+    const rocke_tile_window_t* source;
+    const rocke_tile_window_t* dest;
+    rocke_value_t* k_off;
+    int rows;
+    int parity_imm;
+    rocke_value_t* parity_v;
+};
 
-static rocke_value_t* rocke_gemm_load_k_clipped(rocke_gemm_build_ctx_t* ctx,
-                                                rocke_value_t* ptr,
-                                                rocke_value_t* offset,
-                                                rocke_value_t* k_off,
-                                                rocke_value_t* col,
-                                                int load_vec)
+static void rocke_gemm_copy_sync_chunk(rocke_ir_builder_t* b,
+                                       rocke_value_t* row,
+                                       rocke_value_t* col,
+                                       rocke_value_t* chunk_id,
+                                       void* user)
 {
-    rocke_ir_builder_t* b = ctx->b;
-    rocke_value_t* position = rocke_b_add(b, k_off, col);
-    return rocke_b_load_clipped_global_fragment(
-        b, ptr, offset, position, ctx->K, ctx->storage_dtype, load_vec);
-}
-
-static rocke_value_t* rocke_gemm_load_sync_window(rocke_gemm_build_ctx_t* ctx,
-                                                  const rocke_tile_window_t* tile,
-                                                  rocke_value_t* row,
-                                                  rocke_value_t* col,
-                                                  rocke_value_t* k_off,
-                                                  int load_vec)
-{
-    rocke_ir_builder_t* b = ctx->b;
-    rocke_value_t* indices[3] = {rocke_b_const_i32(b, 0), row, col};
+    const auto& copy = *static_cast<rocke_gemm_sync_operand*>(user);
+    auto* ctx = copy.ctx;
+    int width = ctx->load_vec;
+    rocke_value_t* src_idx[3] = {rocke_b_const_i32(b, 0), row, col};
+    const int rank = copy.source->rank;
+    if(rank == 2)
+        src_idx[1] = rocke_b_mul(b, chunk_id, ctx->c_load_vec);
+    rocke_value_t* value;
     if(ctx->spec->trait.pad_k)
     {
-        rocke_value_t* offset = rocke_tile_window_element_offset(b, tile, indices, 3);
-        return rocke_gemm_load_k_clipped(ctx, tile->view->base, offset, k_off, col, load_vec);
+        rocke_value_t* offset = rocke_tile_window_element_offset(b, copy.source, src_idx, rank);
+        rocke_value_t* position = rocke_b_add(b, copy.k_off, col);
+        value = rocke_b_load_clipped_global_fragment(
+            b, copy.source->view->base, offset, position, ctx->K, ctx->storage_dtype, width);
     }
-    if(load_vec == 1)
-        return rocke_tile_window_load_scalar(b, tile, indices, 3);
-    return rocke_tile_window_load_vec(b, tile, indices, 3, load_vec);
+    else if(width == 1)
+        value = rocke_tile_window_load_scalar(b, copy.source, src_idx, rank);
+    else
+        value = rocke_tile_window_load_vec(b, copy.source, src_idx, rank, width);
+
+    rocke_value_t* dst_row = row;
+    if(ctx->db && copy.parity_v != NULL)
+        dst_row
+            = rocke_b_add(b, row, rocke_b_mul(b, copy.parity_v, rocke_b_const_i32(b, copy.rows)));
+    else if(ctx->db && copy.parity_imm)
+        dst_row = rocke_b_add(b, row, rocke_b_const_i32(b, copy.parity_imm * copy.rows));
+    rocke_value_t* dst_idx[2] = {dst_row, rocke_gemm_swz_col(ctx, col, row)};
+    if(width == 1)
+        rocke_tile_window_store_scalar(b, copy.dest, dst_idx, 2, value, 0);
+    else
+        rocke_tile_window_store_vec(b, copy.dest, dst_idx, 2, value, width);
 }
 
-static void rocke_gemm_store_sync_window(rocke_ir_builder_t* b,
-                                         const rocke_tile_window_t* tile,
-                                         rocke_value_t* const* indices,
-                                         rocke_value_t* value,
-                                         int load_vec)
+static void rocke_gemm_copy_sync_operand(rocke_gemm_sync_operand* copy)
 {
-    if(load_vec == 1)
-        rocke_tile_window_store_scalar(b, tile, indices, 2, value, 0);
-    else
-        rocke_tile_window_store_vec(b, tile, indices, 2, value, load_vec);
+    const auto* ctx = copy->ctx;
+    rocke_coalesced_tile_loader_t loader = {};
+    loader.tile_rows = copy->rows;
+    loader.tile_cols = ctx->block_k;
+    loader.block_size = ctx->threads;
+    loader.load_vec = ctx->load_vec;
+    const rocke_coalesced_chunk_grid_t grid{
+        ctx->c_threads, ctx->c_load_vec, ctx->c_block_k_div_vec};
+    rocke_coalesced_tile_loader_visit_chunks(
+        ctx->b, &loader, ctx->tid, &grid, rocke_gemm_copy_sync_chunk, copy);
 }
 
 void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
@@ -447,138 +452,44 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
         return;
     }
 
-    /* ----------------------- canonical / preshuffle path ----------------------- */
-    int load_vec = ctx->load_vec;
-    bool db = ctx->db;
-
-    /* a_global_tile / b_global_tile / a_lds_tile / b_lds_tile. */
+    /* Synchronous copy: ordinary and packed operands differ only in the
+     * source view and origin. Both use the coalesced visitor. */
     rocke_tile_window_t a_global_tile, b_global_tile, a_lds_tile, b_lds_tile;
-    {
-        int a_glen[3] = {1, ctx->block_m, ctx->block_k};
-        int b_glen[3] = {1, ctx->block_n, ctx->block_k};
-        rocke_value_t* a_gorigin[3] = {ctx->batch_off_a, ctx->block_m_off, k_off};
-        rocke_value_t* b_gorigin[3] = {ctx->batch_off_b, ctx->block_n_off, k_off};
-        rocke_make_tile_window(&a_global_tile, &ctx->a_view, a_glen, a_gorigin, 3);
-        rocke_make_tile_window(&b_global_tile, &ctx->b_view, b_glen, b_gorigin, 3);
+    const int a_glen[3] = {1, ctx->block_m, ctx->block_k};
+    int b_glen[3] = {1, ctx->block_n, ctx->block_k};
+    rocke_value_t* a_gorigin[3] = {ctx->batch_off_a, ctx->block_m_off, k_off};
+    rocke_value_t* b_gorigin[3] = {ctx->batch_off_b, ctx->block_n_off, k_off};
+    rocke_make_tile_window(&a_global_tile, &ctx->a_view, a_glen, a_gorigin, 3);
 
-        if(strcmp(ctx->arch, "gfx950") == 0 && rocke_type_eq(ctx->storage_dtype, rocke_f16())
-           && strcmp(spec->trait.pipeline, "mem") == 0 && !spec->batched && spec->trait.split_k == 1
-           && !spec->trait.pad_m && !spec->trait.pad_n && !spec->trait.pad_k
-           && !spec->trait.preshuffle_b && !ctx->two_buf && !ctx->lds_pad && !ctx->swz)
-        {
-            rocke_coalesced_tile_loader_t loader = {};
-            loader.tile_cols = ctx->block_k;
-            loader.block_size = ctx->threads;
-            loader.load_vec = load_vec;
-            loader.oob_sentinel = INT32_MAX;
-            loader.tile_rows = ctx->block_m;
-            rocke_coalesced_tile_loader_load(b,
-                                             &loader,
-                                             ctx->tid,
-                                             A_dst,
-                                             rocke_gemm_tile_source,
-                                             &a_global_tile,
-                                             NULL,
-                                             a_global_tile.view->base);
-            loader.tile_rows = ctx->block_n;
-            rocke_coalesced_tile_loader_load(b,
-                                             &loader,
-                                             ctx->tid,
-                                             B_dst,
-                                             rocke_gemm_tile_source,
-                                             &b_global_tile,
-                                             NULL,
-                                             b_global_tile.view->base);
-            return;
-        }
+    const int a_llen[2] = {ctx->block_m, ctx->block_k};
+    const int b_llen[2] = {ctx->block_n, ctx->block_k};
+    rocke_value_t* a_lorigin[2] = {rocke_b_const_i32(b, 0), rocke_b_const_i32(b, 0)};
+    rocke_value_t* b_lorigin[2] = {rocke_b_const_i32(b, 0), rocke_b_const_i32(b, 0)};
+    rocke_tensor_view_t a_lds_view = ctx->a_lds_view;
+    rocke_tensor_view_t b_lds_view = ctx->b_lds_view;
+    a_lds_view.base = A_dst;
+    b_lds_view.base = B_dst;
+    rocke_make_tile_window(&a_lds_tile, &a_lds_view, a_llen, a_lorigin, 2);
+    rocke_make_tile_window(&b_lds_tile, &b_lds_view, b_llen, b_lorigin, 2);
 
-        int a_llen[2] = {ctx->block_m, ctx->block_k};
-        int b_llen[2] = {ctx->block_n, ctx->block_k};
-        rocke_value_t* zero_a = rocke_b_const_i32(b, 0);
-        rocke_value_t* zero_b = rocke_b_const_i32(b, 0);
-        rocke_value_t* a_lorigin[2] = {zero_a, zero_b};
-        rocke_value_t* zero_c = rocke_b_const_i32(b, 0);
-        rocke_value_t* zero_d = rocke_b_const_i32(b, 0);
-        rocke_value_t* b_lorigin[2] = {zero_c, zero_d};
-        rocke_make_tile_window(&a_lds_tile, &ctx->a_lds_view, a_llen, a_lorigin, 2);
-        rocke_make_tile_window(&b_lds_tile, &ctx->b_lds_view, b_llen, b_lorigin, 2);
-    }
-
-    /* _ld_a_row / _ld_b_row : double-buffer parity row fold (compv4 non-DTL).
-     * Implemented as inline lambdas via a helper macro-free local routine. */
-#define LD_ROW(rvar, blk)                                                                        \
-    (!db ? (rvar)                                                                                \
-         : (parity_v != NULL                                                                     \
-                ? rocke_b_add(b, (rvar), rocke_b_mul(b, parity_v, rocke_b_const_i32(b, (blk))))  \
-                : (parity_imm ? rocke_b_add(b, (rvar), rocke_b_const_i32(b, parity_imm * (blk))) \
-                              : (rvar))))
-
-    /* A-load loop. */
-    for(int e = 0; e < ctx->a_vecs_per_thread; ++e)
-    {
-        rocke_value_t* vec_idx
-            = rocke_b_add(b, rocke_b_mul(b, rocke_b_const_i32(b, e), ctx->c_threads), ctx->tid);
-        /* _vec_rc(vec_idx). */
-        rocke_value_t* row = rocke_b_div(b, vec_idx, ctx->c_block_k_div_vec);
-        rocke_value_t* col_v = rocke_b_mod(b, vec_idx, ctx->c_block_k_div_vec);
-        rocke_value_t* col = (load_vec > 1) ? rocke_b_mul(b, col_v, ctx->c_load_vec) : col_v;
-        rocke_value_t* a_val
-            = rocke_gemm_load_sync_window(ctx, &a_global_tile, row, col, k_off, load_vec);
-        rocke_value_t* lidx[2] = {LD_ROW(row, ctx->block_m), rocke_gemm_swz_col(ctx, col, row)};
-        rocke_gemm_store_sync_window(b, &a_lds_tile, lidx, a_val, load_vec);
-    }
-
-    /* B-load branch. */
+    rocke_gemm_sync_operand a{
+        ctx, &a_global_tile, &a_lds_tile, k_off, ctx->block_m, parity_imm, parity_v};
+    rocke_gemm_copy_sync_operand(&a);
     if(spec->trait.preshuffle_b)
     {
-        rocke_value_t* n_tile_idx = rocke_b_div(b, ctx->block_n_off, ctx->c_block_n);
-        rocke_value_t* k_tile_idx = rocke_b_div(b, k_off, ctx->c_block_k);
+        rocke_value_t* n_tile = rocke_b_div(b, ctx->block_n_off, ctx->c_block_n);
+        rocke_value_t* k_tile = rocke_b_div(b, k_off, ctx->c_block_k);
         rocke_value_t* n_tile_count = rocke_b_div(b, ctx->N, ctx->c_block_n);
-        /* Python evaluates rocke_b_mul args left-to-right: the inner add/mul are
-         * built BEFORE the const. C evaluates call args right-to-left, so bind
-         * each sub-expression to a temp in Python order to match SSA ids. */
-        rocke_value_t* tile_off_inner
-            = rocke_b_add(b, rocke_b_mul(b, k_tile_idx, n_tile_count), n_tile_idx);
-        rocke_value_t* tile_off_const = rocke_b_const_i32(b, ctx->block_n * ctx->block_k);
-        rocke_value_t* tile_offset_elements = rocke_b_mul(b, tile_off_inner, tile_off_const);
-        rocke_value_t* base_off = rocke_b_add(b, ctx->batch_off_b, tile_offset_elements);
-        for(int e = 0; e < ctx->b_vecs_per_thread; ++e)
-        {
-            rocke_value_t* vec_idx
-                = rocke_b_add(b, rocke_b_mul(b, rocke_b_const_i32(b, e), ctx->c_threads), ctx->tid);
-            rocke_value_t* glob_off
-                = rocke_b_add(b, base_off, rocke_b_mul(b, vec_idx, ctx->c_load_vec));
-            rocke_value_t* row = rocke_b_div(b, vec_idx, ctx->c_block_k_div_vec);
-            rocke_value_t* col_v = rocke_b_mod(b, vec_idx, ctx->c_block_k_div_vec);
-            rocke_value_t* col = (load_vec > 1) ? rocke_b_mul(b, col_v, ctx->c_load_vec) : col_v;
-            rocke_value_t* b_val;
-            if(spec->trait.pad_k)
-                b_val = rocke_gemm_load_k_clipped(ctx, ctx->Bp, glob_off, k_off, col, load_vec);
-            else if(load_vec == 1)
-                b_val = rocke_b_global_load(b, ctx->Bp, glob_off, ctx->storage_dtype, 0);
-            else
-                b_val
-                    = rocke_b_global_load_vN(b, ctx->Bp, glob_off, ctx->storage_dtype, load_vec, 0);
-            rocke_value_t* lidx[2] = {LD_ROW(row, ctx->block_n), rocke_gemm_swz_col(ctx, col, row)};
-            rocke_gemm_store_sync_window(b, &b_lds_tile, lidx, b_val, load_vec);
-        }
+        rocke_value_t* tile_id = rocke_emit_preshuffleb_tile_id(b, n_tile, k_tile, n_tile_count);
+        rocke_value_t* tile_elems = rocke_b_const_i32(b, ctx->block_n * ctx->block_k);
+        b_gorigin[0] = rocke_b_add(b, ctx->batch_off_b, rocke_b_mul(b, tile_id, tile_elems));
+        b_gorigin[1] = rocke_b_const_i32(b, 0);
+        b_glen[1] = ctx->block_n * ctx->block_k;
     }
-    else
-    {
-        for(int e = 0; e < ctx->b_vecs_per_thread; ++e)
-        {
-            rocke_value_t* vec_idx
-                = rocke_b_add(b, rocke_b_mul(b, rocke_b_const_i32(b, e), ctx->c_threads), ctx->tid);
-            rocke_value_t* row = rocke_b_div(b, vec_idx, ctx->c_block_k_div_vec);
-            rocke_value_t* col_v = rocke_b_mod(b, vec_idx, ctx->c_block_k_div_vec);
-            rocke_value_t* col = (load_vec > 1) ? rocke_b_mul(b, col_v, ctx->c_load_vec) : col_v;
-            rocke_value_t* b_val
-                = rocke_gemm_load_sync_window(ctx, &b_global_tile, row, col, k_off, load_vec);
-            rocke_value_t* lidx[2] = {LD_ROW(row, ctx->block_n), rocke_gemm_swz_col(ctx, col, row)};
-            rocke_gemm_store_sync_window(b, &b_lds_tile, lidx, b_val, load_vec);
-        }
-    }
-#undef LD_ROW
+    rocke_make_tile_window(&b_global_tile, &ctx->b_view, b_glen, b_gorigin, ctx->b_view.desc.rank);
+    rocke_gemm_sync_operand bv{
+        ctx, &b_global_tile, &b_lds_tile, k_off, ctx->block_n, parity_imm, parity_v};
+    rocke_gemm_copy_sync_operand(&bv);
 }
 
 /* ===================================================================== *

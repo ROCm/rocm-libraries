@@ -39,13 +39,13 @@ def _build(trait: TraitSpec):
     )
     copies = []
     schedules = []
-    load = CoalescedTileLoader.load
+    visit_chunks = CoalescedTileLoader.visit_chunks
     single = GemmKLoop.single_buffered
     ping_pong = GemmKLoop.ping_pong
 
-    def record_load(loader, builder, **kwargs):
+    def record_copy(loader, builder, **kwargs):
         copies.append((loader.tile_rows, loader.tile_cols, loader.load_vec))
-        return load(loader, builder, **kwargs)
+        return visit_chunks(loader, builder, **kwargs)
 
     def record_single(loop):
         schedules.append("single")
@@ -56,7 +56,7 @@ def _build(trait: TraitSpec):
         return ping_pong(loop, direct_to_lds=direct_to_lds)
 
     with (
-        patch.object(CoalescedTileLoader, "load", record_load),
+        patch.object(CoalescedTileLoader, "visit_chunks", record_copy),
         patch.object(GemmKLoop, "single_buffered", record_single),
         patch.object(GemmKLoop, "ping_pong", record_ping_pong),
         patch.object(
@@ -77,6 +77,12 @@ def _cases():
             TraitSpec(pipeline="mem", epilogue="default", pad_k=True),
             "single",
             (65, 91),
+        ),
+        (
+            "preshuffled_ping_pong",
+            TraitSpec(pipeline="compv4", epilogue="default", preshuffle_b=True),
+            "sync",
+            (96,),
         ),
         (
             "preshuffled_tail",
@@ -109,7 +115,8 @@ def _cases():
 class TestUniversalGemmTileCopy(unittest.TestCase):
     def _build_case(self, label, trait, schedule):
         spec, kernel, copies, schedules, clipped_reads = _build(trait)
-        self.assertEqual(copies, [(64, 32, 8)] * 2 if label == "coalesced" else [])
+        expected = {"single": 2, "sync": 4, "async": 0}[schedule]
+        self.assertEqual(copies, [(64, 32, 8)] * expected)
         self.assertEqual(schedules, [schedule])
         self.assertEqual(bool(clipped_reads), trait.pad_k)
         return spec, kernel

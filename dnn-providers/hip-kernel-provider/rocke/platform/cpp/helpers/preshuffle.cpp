@@ -29,6 +29,14 @@ int rocke_preshuffleb_spec_tile_bytes(const rocke_preshuffleb_spec_t* spec)
     return spec->block_n * spec->block_k * spec->elem_bytes;
 }
 
+rocke_value_t* rocke_emit_preshuffleb_tile_id(rocke_ir_builder_t* b,
+                                              rocke_value_t* n_tile,
+                                              rocke_value_t* k_tile,
+                                              rocke_value_t* n_tile_count)
+{
+    return rocke_b_add(b, rocke_b_mul(b, k_tile, n_tile_count), n_tile);
+}
+
 /* ------------------------------------------------------------------ *
  * emit_preshuffleb_offset
  * ------------------------------------------------------------------ */
@@ -73,7 +81,7 @@ rocke_value_t* rocke_emit_preshuffleb_offset(rocke_ir_builder_t* b,
     c_block_k = rocke_b_const_i32(b, spec->block_k);
     c_elem_bytes = rocke_b_const_i32(b, spec->elem_bytes);
 
-    tile_id = rocke_b_add(b, rocke_b_mul(b, k_tile, n_tile_count), n_tile);
+    tile_id = rocke_emit_preshuffleb_tile_id(b, n_tile, k_tile, n_tile_count);
     tile_base = rocke_b_mul(b, tile_id, c_tile_bytes);
     inner = rocke_b_add(b, rocke_b_mul(b, n_in_tile, c_block_k), k_in_tile);
     inner_bytes = rocke_b_mul(b, inner, c_elem_bytes);

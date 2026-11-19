@@ -53,6 +53,7 @@ from ..core.ir import IRBuilder, Value
 __all__ = [
     "PreshuffleBSpec",
     "emit_preshuffleb_offset",
+    "emit_preshuffleb_tile_id",
     "host_preshuffle_layout",
 ]
 
@@ -77,6 +78,13 @@ class PreshuffleBSpec:
     def tile_bytes(self) -> int:
         """``block_n * block_k * elem_bytes`` -- bytes per preshuffled tile."""
         return self.block_n * self.block_k * self.elem_bytes
+
+
+def emit_preshuffleb_tile_id(
+    b: IRBuilder, *, n_tile: Value, k_tile: Value, n_tile_count: Value
+) -> Value:
+    """Linear tile ID in the packed B buffer's (K tile, N tile) axes."""
+    return b.add(b.mul(k_tile, n_tile_count), n_tile)
 
 
 def emit_preshuffleb_offset(
@@ -110,7 +118,9 @@ def emit_preshuffleb_offset(
     c_block_k = b.const_i32(spec.block_k)
     c_elem_bytes = b.const_i32(spec.elem_bytes)
 
-    tile_id = b.add(b.mul(k_tile, n_tile_count), n_tile)
+    tile_id = emit_preshuffleb_tile_id(
+        b, n_tile=n_tile, k_tile=k_tile, n_tile_count=n_tile_count
+    )
     tile_base = b.mul(tile_id, c_tile_bytes)
     inner = b.add(b.mul(n_in_tile, c_block_k), k_in_tile)
     inner_bytes = b.mul(inner, c_elem_bytes)

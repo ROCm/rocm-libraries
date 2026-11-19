@@ -172,6 +172,28 @@ typedef struct rocke_coalesced_tile_loader
     int col_xor[4];
 } rocke_coalesced_tile_loader_t;
 
+typedef struct rocke_coalesced_chunk_grid
+{
+    rocke_value_t* threads;
+    rocke_value_t* width;
+    rocke_value_t* span;
+} rocke_coalesced_chunk_grid_t;
+
+typedef void (*rocke_coalesced_chunk_fn)(rocke_ir_builder_t* b,
+                                         rocke_value_t* row,
+                                         rocke_value_t* col,
+                                         rocke_value_t* chunk_id,
+                                         void* user);
+
+/* Visit coalesced chunks; the emitter owns source and destination addressing.
+ * `grid` may be NULL to materialize the tile's iteration constants here. */
+void rocke_coalesced_tile_loader_visit_chunks(rocke_ir_builder_t* b,
+                                              const rocke_coalesced_tile_loader_t* self,
+                                              rocke_value_t* tid,
+                                              const rocke_coalesced_chunk_grid_t* grid,
+                                              rocke_coalesced_chunk_fn emit,
+                                              void* user);
+
 /* lds_col_xor_params(tile_cols, chunk=8): the conflict-free XOR swizzle of an
  * unpadded [rows][tile_cols] LDS tile of 16-bit elements read in chunk-element
  * (16-byte) runs. Writes {row_shift, chunk_mask, chunk_log2, flip_shift} to
