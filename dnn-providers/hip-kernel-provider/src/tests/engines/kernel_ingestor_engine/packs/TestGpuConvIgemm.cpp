@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -817,7 +818,7 @@ INSTANTIATE_TEST_SUITE_P(,
                                                                                          : "Bwd");
                          });
 
-/// The flex tile (gfx950): flattened-position tiles whose 256 rows straddle planes and images,
+/// The flex tile (gfx950 LDS-DMA form, gfx942 register-staged form): flattened-position tiles whose 256 rows straddle planes and images,
 /// reduction channels and output channels that are not whole k-steps or tiles, odd depths, depth
 /// strides, groups, dilation, filters past 3 taps, and a deep reduction over a tiny grid (split-K).
 struct FlexCase
@@ -871,9 +872,15 @@ protected:
     void run()
     {
         SKIP_IF_NO_DEVICES();
-        if(hipdnn_plugin_sdk::stripArchFeatures(currentDeviceProperties().gcnArchName) != "gfx950")
+        const auto arch
+            = hipdnn_plugin_sdk::stripArchFeatures(currentDeviceProperties().gcnArchName);
+        if(arch != "gfx950" && arch != "gfx942")
         {
-            GTEST_SKIP() << "flex tiles run on gfx950 only";
+            GTEST_SKIP() << "flex tiles run on gfx950 and gfx942 only";
+        }
+        if(std::is_same_v<T, float> && arch != "gfx942")
+        {
+            GTEST_SKIP() << "fp32 flex tiles are the gfx942 form's";
         }
         const auto& [flexCase, direction, infinities] = GetParam();
         if(direction == ConvDirection::BACKWARD_DATA && !flexCase.backward)
@@ -892,6 +899,11 @@ TEST_P(TestGpuConvIgemmFlex, Half)
 TEST_P(TestGpuConvIgemmFlex, BFloat16)
 {
     run<BFloat16>();
+}
+
+TEST_P(TestGpuConvIgemmFlex, Float)
+{
+    run<float>();
 }
 
 INSTANTIATE_TEST_SUITE_P(,

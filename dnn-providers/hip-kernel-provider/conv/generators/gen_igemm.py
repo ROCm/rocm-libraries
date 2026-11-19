@@ -611,6 +611,13 @@ CATALOG125TF32 = {
 }
 
 FLEX_ATOMS = {"HALF": "mfma16x32_f16", "BFLOAT16": "mfma16x32_bf16"}
+# The flex tile's register-staged form (gfx942: 64 KiB LDS, dword LDS DMA): 256 x 128, 128-byte
+# reduction steps (64 16-bit or 32 fp32 channels).
+FLEX_REG_ATOMS = {
+    "HALF": ("mfma16_f16", 2),
+    "BFLOAT16": ("mfma16_bf16", 2),
+    "FLOAT": ("mfma16_f32", 4),
+}
 
 kmd, umd, udd = U("kmd"), U("umd"), U("udd")
 w(
@@ -686,6 +693,10 @@ def kernels_for(catalog, direction, tag, priority=1000):
                 C(FLEX_ATOMS[dtype], 256, bn, 64, 4, 2, vec=8, xcd=1, flex=1)
                 for bn in (256, 128)
             ]
+        # flex 1 on 16x16x16 / 16x16x4 atoms: the register-staged form (ConvIgemmFlexReg.h, gfx942).
+        if catalog is CATALOG and dtype in FLEX_REG_ATOMS:
+            atom, eb = FLEX_REG_ATOMS[dtype]
+            cfgs += [C(atom, 256, 128, 128 // eb, 4, 2, vec=16 // eb, xcd=1, flex=1)]
         for i, c in enumerate(cfgs):
             name = f"conv_igemm.{tag}.{dt}.{c['atom']}.{c['math']}.{c['bm']}x{c['bn']}x{c['bk']}" f".w{c['wm']}x{c['wn']}.t{c['threads']}.v{c['vec']}.s{c['stages']}" + (
                 ".xcd" if c["xcd"] else ""

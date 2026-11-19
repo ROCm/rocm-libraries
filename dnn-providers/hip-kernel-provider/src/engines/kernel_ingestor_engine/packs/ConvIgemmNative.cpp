@@ -1249,10 +1249,17 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.flex = kernel.metadata.count("flex") != 0 ? kernel.getIntMetadata("flex") : 0;
     // The flex tile: 256 positions x 256 or 128 channels of 16-bit 16x16x32 atoms on 4 x 2 waves,
     // 64-channel k-steps, 8-wide vectors, XCD order; every other variant knob off.
+    // The register-staged form (16x16x16 / 16x16x4 atoms, gfx942): one 64 KiB-class LDS stage,
+    // BN 128, 128-byte reduction steps (64 16-bit or 32 fp32 channels, 16-byte vectors).
+    const bool flexReg
+        = tile.atom == "mfma16_f16" || tile.atom == "mfma16_bf16" || tile.atom == "mfma16_f32";
+    const int64_t flexElem = tile.atom == "mfma16_f32" ? 4 : 2;
     if(tile.flex != 0
-       && (tile.flex != 1 || (tile.atom != "mfma16x32_f16" && tile.atom != "mfma16x32_bf16")
-           || tile.split || tile.bm != 256 || (tile.bn != 256 && tile.bn != 128) || tile.bk != 64
-           || tile.wm != 4 || tile.wn != 2 || tile.vec != 8 || tile.stages != 1 || tile.xcd != 1
+       && (tile.flex != 1
+           || (tile.atom != "mfma16x32_f16" && tile.atom != "mfma16x32_bf16" && !flexReg)
+           || tile.split || tile.bm != 256 || (tile.bn != 256 && tile.bn != 128)
+           || (flexReg && tile.bn != 128) || tile.bk != 128 / flexElem || tile.wm != 4
+           || tile.wn != 2 || tile.vec != 16 / flexElem || tile.stages != 1 || tile.xcd != 1
            || tile.halo != 0 || tile.wdirect != 0 || tile.pack != 0 || tile.cf != 0 || tile.swz != 0
            || tile.dma != 0 || tile.fuse != 0 || tile.large != 0 || tile.patch != 0 || tile.cfx != 0
            || tile.splitPolicy != 0))
@@ -1505,10 +1512,12 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    // The flex tile: gfx950, 32-bit buffer offsets, backward data at unit stride (one phase),
-    // and at most FLEX_MAX_TAPS taps along each filter axis (its per-row in-image tap bits).
+    // The flex tile: gfx950 (LDS-DMA form, 16x16x32 atoms) or gfx942 (register-staged form),
+    // 32-bit buffer offsets, backward data at unit stride (one phase), and at most FLEX_MAX_TAPS
+    // taps along each filter axis (its per-row in-image tap bits).
     if(tile->flex != 0
-       && (hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName) != "gfx950"
+       && (hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName)
+               != (tile->atom.rfind("mfma16x32_", 0) == 0 ? "gfx950" : "gfx942")
            || !bufferLoads(*problem) || problem->phases != 1 || a.ft > FLEX_MAX_TAPS
            || a.fr > FLEX_MAX_TAPS || a.fs > FLEX_MAX_TAPS))
     {
@@ -1835,7 +1844,9 @@ public:
         }
         if(tile->flex != 0)
         {
-            options.add("CONV_IGEMM_FLEX", std::to_string(tile->flex));
+            // The form by the atom: 1 LDS DMA (16x16x32, gfx950), 2 register-staged (gfx942).
+            options.add("CONV_IGEMM_FLEX",
+                        std::string(tile->atom.rfind("mfma16x32_", 0) == 0 ? "1" : "2"));
         }
         const int waves = conv_igemm::occupancyTarget(tile->atom,
                                                       tile->bm,
