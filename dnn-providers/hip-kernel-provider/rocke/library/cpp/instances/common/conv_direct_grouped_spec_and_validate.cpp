@@ -4418,7 +4418,7 @@ bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
             reason, reason_cap, "dgrad_weights_lds needs ds_read_b64_tr_b16 (absent on %s)", arch);
     if(dconv_gen_row_stream_reason(spec, why, sizeof why))
         ROCKE_SPEC_FAIL(reason, reason_cap, "%s", why);
-    if(spec->xcd_tiles && dconv_gen_xcd_tiles_count(arch) == 0)
+    if(spec->xcd_tiles && rocke_direct_conv_xcd_tiles_count(arch) == 0)
         ROCKE_SPEC_FAIL(
             reason, reason_cap, "xcd_tiles is built for ['gfx950'] only (got %s)", arch);
     if(spec->block_groups <= 0 || p->groups % spec->block_groups != 0)

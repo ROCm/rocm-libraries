@@ -615,7 +615,7 @@ typedef struct rocke_direct_depthwise_tiled_spec
     (ROCKE_DIRECT_PERSISTENT_NUM_XCD * ROCKE_DIRECT_PERSISTENT_BLOCKS_PER_XCD)
 /* The XCD count the xcd_tiles remap is built for (Python: _XCD_TILES_ARCHES);
  * 0 when the target has none. */
-static inline int dconv_gen_xcd_tiles_count(const char* arch)
+static inline int rocke_direct_conv_xcd_tiles_count(const char* arch)
 {
     return (arch != NULL && strcmp(arch, "gfx950") == 0) ? ROCKE_NUM_XCDS_MI350X : 0;
 }
