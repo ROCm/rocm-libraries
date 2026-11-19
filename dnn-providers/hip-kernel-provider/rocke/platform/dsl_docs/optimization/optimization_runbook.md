@@ -3326,6 +3326,24 @@ Distilled rules (also folded into §8.6):
 
 ---
 
+### 17.8 RDNA General SDPA Backward Tuned-Table Selection
+
+Full study:
+[`library/dispatch/attention_bwd/rdna_general_tuning_case_study.md`](../../../library/dispatch/attention_bwd/rdna_general_tuning_case_study.md).
+On gfx1151 / gfx1201 the backward's own CDNA tuning rule (an entry must beat
+the competitor's backward) admits no entry: PyTorch's own backward beats
+rocKE's shipped plan by a wide margin on every measured cell there. The
+lesson: when a target cannot win the competitor comparison a tuned table
+still has value as the *best available configuration of the shipped
+backend*, measured against its own shipped plan (not the competitor) with
+the same rigor (correctness gate, A/A control, geometric-mean ranking) as
+the comparison it replaces. The selection rule itself is a checked, unit-
+tested pure function (`dispatch/attention_bwd/rdna_entry_rule.py`), not a
+manual step, and every shipped entry's qualifying verdict is a checked
+artifact (`rdna_entries_manifest.json`) rather than free-text documentation.
+
+---
+
 ## 18. DSL Probe Workflow
 
 This section is the runbook's how-to for the static-inspection probes

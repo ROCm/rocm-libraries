@@ -1,0 +1,982 @@
+{
+  "gfx1151": {
+    "entries": [
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          128,
+          "bf16",
+          "causal_br",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "61062eb51c5f0878d1c9",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          128,
+          "bf16",
+          "causal_br",
+          "gqa",
+          "unequal",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "61062eb51c5f0878d1c9",
+        "cells_checked": 6,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          128,
+          "bf16",
+          "causal_tl",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t64",
+          "over"
+        ],
+        "finalist": "61062eb51c5f0878d1c9",
+        "cells_checked": 8,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          128,
+          "bf16",
+          "causal_tl",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "61062eb51c5f0878d1c9",
+        "cells_checked": 13,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          128,
+          "bf16",
+          "causal_tl",
+          "gqa",
+          "unequal",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "61062eb51c5f0878d1c9",
+        "cells_checked": 6,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          128,
+          "bf16",
+          "causal_tl",
+          "mha",
+          "square",
+          "fixed",
+          8,
+          "t64",
+          "over"
+        ],
+        "finalist": "61062eb51c5f0878d1c9",
+        "cells_checked": 2,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          128,
+          "bf16",
+          "causal_tl",
+          "mha",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "61062eb51c5f0878d1c9",
+        "cells_checked": 3,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          128,
+          "bf16",
+          "none",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "61062eb51c5f0878d1c9",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          128,
+          "bf16",
+          "none",
+          "gqa",
+          "unequal",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "61062eb51c5f0878d1c9",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          128,
+          "bf16",
+          "none",
+          "mha",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "61062eb51c5f0878d1c9",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          128,
+          "bf16",
+          "window",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "61062eb51c5f0878d1c9",
+        "cells_checked": 3,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          128,
+          "bf16",
+          "window",
+          "gqa",
+          "unequal",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "61062eb51c5f0878d1c9",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          128,
+          "fp16",
+          "causal_br",
+          "gqa",
+          "unequal",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "01d6b467b4abb044620a",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          128,
+          "fp16",
+          "causal_tl",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t64",
+          "over"
+        ],
+        "finalist": "01d6b467b4abb044620a",
+        "cells_checked": 2,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          128,
+          "fp16",
+          "causal_tl",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "61062eb51c5f0878d1c9",
+        "cells_checked": 4,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          128,
+          "fp16",
+          "causal_tl",
+          "mha",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "61062eb51c5f0878d1c9",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          128,
+          "fp16",
+          "window",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "61062eb51c5f0878d1c9",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          64,
+          "bf16",
+          "causal_br",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "198b4415c3e61585b231",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          64,
+          "bf16",
+          "causal_br",
+          "gqa",
+          "unequal",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "198b4415c3e61585b231",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          64,
+          "bf16",
+          "causal_tl",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t64",
+          "over"
+        ],
+        "finalist": "198b4415c3e61585b231",
+        "cells_checked": 2,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          64,
+          "bf16",
+          "causal_tl",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "198b4415c3e61585b231",
+        "cells_checked": 3,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          64,
+          "bf16",
+          "causal_tl",
+          "mha",
+          "square",
+          "fixed",
+          8,
+          "t64",
+          "over"
+        ],
+        "finalist": "198b4415c3e61585b231",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          64,
+          "bf16",
+          "none",
+          "mha",
+          "square",
+          "fixed",
+          8,
+          "t64",
+          "over"
+        ],
+        "finalist": "115ad83fb144e43c34c1",
+        "cells_checked": 5,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          64,
+          "bf16",
+          "none",
+          "mha",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "115ad83fb144e43c34c1",
+        "cells_checked": 7,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          64,
+          "bf16",
+          "window",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "198b4415c3e61585b231",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          64,
+          "fp16",
+          "none",
+          "mha",
+          "square",
+          "fixed",
+          8,
+          "t64",
+          "over"
+        ],
+        "finalist": "115ad83fb144e43c34c1",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1151",
+          "general",
+          64,
+          "fp16",
+          "none",
+          "mha",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "115ad83fb144e43c34c1",
+        "cells_checked": 1,
+        "correct": true
+      }
+    ]
+  },
+  "gfx1201": {
+    "entries": [
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          128,
+          "bf16",
+          "causal_br",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "6bc46b2920120a6e3720",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          128,
+          "bf16",
+          "causal_br",
+          "gqa",
+          "unequal",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "6bc46b2920120a6e3720",
+        "cells_checked": 6,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          128,
+          "bf16",
+          "causal_tl",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t64",
+          "over"
+        ],
+        "finalist": "6bc46b2920120a6e3720",
+        "cells_checked": 8,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          128,
+          "bf16",
+          "causal_tl",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "6bc46b2920120a6e3720",
+        "cells_checked": 13,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          128,
+          "bf16",
+          "causal_tl",
+          "gqa",
+          "unequal",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "6bc46b2920120a6e3720",
+        "cells_checked": 6,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          128,
+          "bf16",
+          "causal_tl",
+          "mha",
+          "square",
+          "fixed",
+          8,
+          "t64",
+          "over"
+        ],
+        "finalist": "6bc46b2920120a6e3720",
+        "cells_checked": 2,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          128,
+          "bf16",
+          "causal_tl",
+          "mha",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "6bc46b2920120a6e3720",
+        "cells_checked": 3,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          128,
+          "bf16",
+          "none",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "d9533b9bd0afe4318773",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          128,
+          "bf16",
+          "none",
+          "gqa",
+          "unequal",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "d9533b9bd0afe4318773",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          128,
+          "bf16",
+          "none",
+          "mha",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "d9533b9bd0afe4318773",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          128,
+          "bf16",
+          "window",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "6bc46b2920120a6e3720",
+        "cells_checked": 3,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          128,
+          "bf16",
+          "window",
+          "gqa",
+          "unequal",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "6bc46b2920120a6e3720",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          128,
+          "fp16",
+          "causal_br",
+          "gqa",
+          "unequal",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "6bc46b2920120a6e3720",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          128,
+          "fp16",
+          "causal_tl",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t64",
+          "over"
+        ],
+        "finalist": "6bc46b2920120a6e3720",
+        "cells_checked": 2,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          128,
+          "fp16",
+          "causal_tl",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "6bc46b2920120a6e3720",
+        "cells_checked": 4,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          128,
+          "fp16",
+          "causal_tl",
+          "mha",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "6bc46b2920120a6e3720",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          128,
+          "fp16",
+          "window",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "d9533b9bd0afe4318773",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          64,
+          "bf16",
+          "causal_br",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "69947925e2b7f8968503",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          64,
+          "bf16",
+          "causal_br",
+          "gqa",
+          "unequal",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "69947925e2b7f8968503",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          64,
+          "bf16",
+          "causal_tl",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t64",
+          "over"
+        ],
+        "finalist": "69947925e2b7f8968503",
+        "cells_checked": 2,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          64,
+          "bf16",
+          "causal_tl",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "69947925e2b7f8968503",
+        "cells_checked": 3,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          64,
+          "bf16",
+          "causal_tl",
+          "mha",
+          "square",
+          "fixed",
+          8,
+          "t64",
+          "over"
+        ],
+        "finalist": "69947925e2b7f8968503",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          64,
+          "bf16",
+          "none",
+          "mha",
+          "square",
+          "fixed",
+          8,
+          "t64",
+          "over"
+        ],
+        "finalist": "69947925e2b7f8968503",
+        "cells_checked": 5,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          64,
+          "bf16",
+          "none",
+          "mha",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "69947925e2b7f8968503",
+        "cells_checked": 7,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          64,
+          "bf16",
+          "window",
+          "gqa",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "69947925e2b7f8968503",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          64,
+          "fp16",
+          "none",
+          "mha",
+          "square",
+          "fixed",
+          8,
+          "t64",
+          "over"
+        ],
+        "finalist": "69947925e2b7f8968503",
+        "cells_checked": 1,
+        "correct": true
+      },
+      {
+        "key": [
+          "gfx1201",
+          "general",
+          64,
+          "fp16",
+          "none",
+          "mha",
+          "square",
+          "fixed",
+          8,
+          "t>64",
+          "over"
+        ],
+        "finalist": "69947925e2b7f8968503",
+        "cells_checked": 1,
+        "correct": true
+      }
+    ]
+  }
+}

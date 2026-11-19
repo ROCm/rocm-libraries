@@ -42,12 +42,13 @@ requests).
 
 RDNA entries (gfx1151, gfx1201)
 -------------------------------
-On the RDNA targets the rocKE backward is slower than PyTorch's own backward
-on every measured cell, so the CDNA rule (an entry wins the bench's confirm
-stage against the competitor on every cell of its key) admits no entry.
-rocKE is the only hipDNN backward there, so an RDNA entry is the best rocKE
-configuration instead. A finalist of the sweep's ``runtime`` stage is the
-entry of tuning key K when, on every dense census cell of K,
+On the RDNA targets the CDNA rule's required win against the competitor (an
+entry wins the bench's confirm stage on every cell of its key) does not hold,
+so rocKE being the only hipDNN backward there, an RDNA entry is instead the
+best rocKE configuration of its key (the qualifying measured comparison is in
+``rdna_general_tuning_case_study.md``, a relative-only result document, not
+here). A finalist of the sweep's ``runtime`` stage is the entry of tuning key
+K when, on every dense census cell of K,
 
 1. it is correct (its arm completes and passes the pruning-set gate),
 2. it has a clean A/A control (its ``#aa`` twin is not judged different from
@@ -74,10 +75,18 @@ Regeneration (on a device of the arch; results outside the source tree):
    ``--competitor-arms default --aa-control all --gate
    tests._attention_bwd_perf_gate:gate --gate-constants CONSTS``, where
    ``CONSTS`` are the bench's gate constants for the device;
-4. apply the rule above per tuning key (keys from the cells' requests with
-   the device's ``num_cus``) and write ``{"entries": [{"key", "knobs"}]}``;
+4. build a judge document (``{"slices": {"<d>": {"keys": {key: {"cells",
+   "finalists": {finalist: {"ok", "geomean_vs_shipped", "why"}}}}}}}``, keys
+   from the cells' requests with the device's ``num_cus``) and apply the rule
+   with :func:`.rdna_entry_rule.select_rdna_general_entries` (the checked,
+   unit-tested implementation of the rule above -- see that module for the
+   tolerance / false-positive policy of its ``tie_eps``), then write the
+   winning finalists' knobs as ``{"entries": [{"key", "knobs"}]}``;
 5. ``<gfx>_tuning.general_entries(doc)`` checks every entry; the checked
-   mapping replaces the module's ``GENERAL_TUNED_TABLE``.
+   mapping replaces the module's ``GENERAL_TUNED_TABLE``;
+6. record each entry's qualifying verdict (finalist id, cells checked,
+   correct -- no ratio) in ``rdna_entries_manifest.json``, checked against
+   the shipped table in ``tests.dispatch.attention_bwd.test_tuned_tables``.
 """
 
 from __future__ import annotations

@@ -17,6 +17,8 @@ CPU only (plans, no device):
 from __future__ import annotations
 
 import dataclasses
+import json
+import pathlib
 
 import pytest
 
@@ -37,6 +39,10 @@ MODS = {"gfx942": gfx942_tuning, "gfx950": gfx950_tuning}
 # Every registered per-arch module (RDNA included): the shipped general entries
 # and their routing are checked on all of them.
 TABLES = dict(routing.ARCH_TUNING)
+# General-family checks (the check, its refusals, general_entries) run on every
+# arch, RDNA included; MODS stays CDNA-only for the dense-family checks (no
+# RDNA module has a dense table -- the dense family is not built there).
+GENERAL_MODS = dict(TABLES)
 _GATE = AttnBwdPolicy(declared_groups=frozenset(FEATURE_GROUPS), waive_unverified=True)
 
 
@@ -65,26 +71,44 @@ def _hook(knobs):
 # ------------------------------------------------------------------ the check
 
 
-@pytest.mark.parametrize("arch", sorted(MODS))
+@pytest.mark.parametrize("arch", sorted(GENERAL_MODS))
 def test_general_check_refuses_an_unknown_knob(arch):
     key = attn_bwd_tuning_key(_req(), arch)
     # refused by the registry check before anything is planned
     with pytest.raises(ValueError, match="'bogus' is not a registered knob"):
-        MODS[arch].check_general_entry(key, {"bogus": 1})
+        GENERAL_MODS[arch].check_general_entry(key, {"bogus": 1})
     with pytest.raises(ValueError, match="not a registered knob"):
-        MODS[arch].general_entries([{"key": list(key), "knobs": {"bogus": 1}}])
+        GENERAL_MODS[arch].general_entries([{"key": list(key), "knobs": {"bogus": 1}}])
 
 
-@pytest.mark.parametrize("arch", sorted(MODS))
+@pytest.mark.parametrize("arch", sorted(GENERAL_MODS))
 def test_general_check_refuses_an_illegal_value(arch):
     key = attn_bwd_tuning_key(_req(), arch)
     with pytest.raises(ValueError, match="lb_order='sideways'"):
-        MODS[arch].check_general_entry(key, {"lb_order": "sideways"})
+        GENERAL_MODS[arch].check_general_entry(key, {"lb_order": "sideways"})
     with pytest.raises(ValueError, match="global_path"):
-        MODS[arch].check_general_entry(key, {"global_path": "nope"})
+        GENERAL_MODS[arch].check_general_entry(key, {"global_path": "nope"})
 
 
-@pytest.mark.parametrize("arch", sorted(MODS))
+def _num_cus_for_full_bucket(arch, req):
+    """``num_cus`` landing ``req`` in the ``full`` fill bucket on ``arch``
+    (the grid the bucket compares against is arch-dependent through the
+    class's default geometry, so no single literal works on every arch;
+    the bucket is monotonic in ``num_cus`` for the fixed grid of ``req``)."""
+    lo, hi = 1, 1 << 20
+    while lo < hi:
+        mid = (lo + hi) // 2
+        bucket = attn_bwd_tuning_key(dataclasses.replace(req, num_cus=mid), arch)[-1]
+        if bucket == "full":
+            return mid
+        if bucket == "under":
+            hi = mid
+        else:  # "over": grid >= 2 * num_cus, so num_cus must grow
+            lo = mid + 1
+    raise AssertionError(f"no full-bucket num_cus found for {arch}")
+
+
+@pytest.mark.parametrize("arch", sorted(GENERAL_MODS))
 def test_general_check_refuses_a_value_the_key_does_not_fix(arch):
     """A g_split that does not divide every head group of a GQA class, and
     mirror pairing on a fill bucket whose lower edge does not overfill the
@@ -93,19 +117,20 @@ def test_general_check_refuses_a_value_the_key_does_not_fix(arch):
     assert gqa[5] == "gqa"
     assert attn_bwd_plan(_req(h_k=2, h_v=2), arch, policy=_hook({"g_split": 2}))
     with pytest.raises(ValueError, match="must divide the head group"):
-        MODS[arch].check_general_entry(gqa, {"g_split": 2})
-    full = attn_bwd_tuning_key(_req(num_cus=2 * 8 * 32), arch)
+        GENERAL_MODS[arch].check_general_entry(gqa, {"g_split": 2})
+    nc = _num_cus_for_full_bucket(arch, _req())
+    full = attn_bwd_tuning_key(_req(num_cus=nc), arch)
     assert full[-1] == "full"
     with pytest.raises(ValueError, match="mirror pairing"):
-        MODS[arch].check_general_entry(full, {"lb_order": "mirror"})
+        GENERAL_MODS[arch].check_general_entry(full, {"lb_order": "mirror"})
 
 
-@pytest.mark.parametrize("arch", sorted(MODS))
+@pytest.mark.parametrize("arch", sorted(GENERAL_MODS))
 def test_general_check_passes_a_valid_entry(arch):
     key = attn_bwd_tuning_key(_req(), arch)
-    MODS[arch].check_general_entry(key, {"edge_tiles": True})
+    GENERAL_MODS[arch].check_general_entry(key, {"edge_tiles": True})
     doc = {"entries": [{"key": list(key), "knobs": {"edge_tiles": True}}]}
-    assert MODS[arch].general_entries(doc) == {key: {"edge_tiles": True}}
+    assert GENERAL_MODS[arch].general_entries(doc) == {key: {"edge_tiles": True}}
     reqs = tt.general_key_requests(arch, key)
     assert reqs and all(attn_bwd_tuning_key(r, arch) == key for r in reqs)
 
@@ -296,3 +321,29 @@ def test_rdna_tables_are_general_only():
         mine = {k for k in pol.tuned_table if k[0] == arch}
         assert mine == set(mod.GENERAL_TUNED_TABLE)
         assert not any(k[0] == arch for k in pol.dense_pack)
+
+
+_MANIFEST_PATH = (
+    pathlib.Path(__file__).resolve().parents[3]
+    / "dispatch"
+    / "attention_bwd"
+    / "rdna_entries_manifest.json"
+)
+
+
+@pytest.mark.parametrize("arch", ["gfx1151", "gfx1201"])
+def test_every_rdna_entry_has_a_manifest_verdict(arch):
+    """Every promoted RDNA entry names its qualifying verdict
+    (``rdna_entries_manifest.json``: the finalist that won its key, the
+    cells it was checked on, and that it was correct on all of them --
+    :mod:`dispatch.attention_bwd.rdna_entry_rule`), and every manifest
+    record is a shipped entry: the table and the manifest cannot drift
+    apart without failing this test."""
+    manifest = json.loads(_MANIFEST_PATH.read_text())
+    records = {tuple(e["key"]): e for e in manifest[arch]["entries"]}
+    table = routing.ARCH_TUNING[arch].GENERAL_TUNED_TABLE
+    assert set(records) == set(table)
+    for key, rec in records.items():
+        assert rec["correct"] is True
+        assert rec["cells_checked"] >= 1
+        assert rec["finalist"]
