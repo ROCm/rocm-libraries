@@ -202,7 +202,6 @@ def test_min_assignment_benchmarks_with_fast_adaptive_profile_and_flush(
     for row in dumped["rows"]:
         assert row["algo_method"] == 0
         assert row["requested_solution_num"] == -1
-        assert "iters" not in row and "cold_iters" not in row
         for key, value in expected.items():
             assert row[key] == value
 

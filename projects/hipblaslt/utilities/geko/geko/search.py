@@ -46,8 +46,9 @@ logger = logging.getLogger("GEKO")
 #              "thorough" (flat adaptive-knob dicts), "balanced" nests two
 #              such dicts under "stage_a"/"stage_b" plus a "k" int.
 #              configure() detects this nesting and builds off "stage_a"
-#              only -- search.run() doesn't implement the stage_b re-verify
-#              pass yet, so stage_b/k aren't consumed until that lands.
+#              only -- run(profile="balanced") then calls _stage_b_configs 
+#              and re-benchmarks the top 50 "stage_a" solutions with the 
+#              "thorough" knobs.
 #   thorough - Tightest convergence/ceiling knobs from the regret sweep.
 #              Most expensive; full/accurate search. Default profile.
 #
@@ -398,9 +399,8 @@ def run(
             return self.log_file.read_text().count("Winner")
 
         def _stage_b_configs(self, stage_a_log: Path) -> List[dict]:
-            # Rank each GEMM's own stage_a candidates by measured latency
-            # (ascending; ties keep stage_a's first-seen order) and shortlist
-            # the first top_k distinct solution indices per GEMM.
+            # Rank each GEMM's own stage_a candidates by measured latency (ascending) 
+            # and shortlist the first top_k distinct solution indices per GEMM.
             res = bench.utils.parse_benchmark_output(stage_a_log).sort_values("us")
             shortlist: Dict[tuple, List[int]] = defaultdict(list)
             for _, row in res.iterrows():
