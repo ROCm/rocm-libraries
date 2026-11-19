@@ -2457,16 +2457,10 @@ TEST(TestConvIgemmCatalog, SplittableMatrixCoreConfigsHaveSplitPolicyTwins)
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         const auto& kernels = catalog(direction);
+        // Every field but the split policy.
         const auto knobsOf = [](const auto& kernel) {
-            std::vector<std::string> fields;
-            for(const auto& [key, value] : kernel.metadata.items())
-            {
-                if(key != "split_policy")
-                {
-                    fields.push_back(key + "=" + value.dump());
-                }
-            }
-            std::sort(fields.begin(), fields.end());
+            auto fields = kernel.metadata;
+            fields.erase("split_policy");
             return fields;
         };
         int nosplit = 0;
