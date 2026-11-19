@@ -1228,76 +1228,88 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesMixedLayoutAtEveryRank)
     }
 }
 
-// The convolution-forward layout-mix bundle shapes that fail on MIOpen today, with their exact
-// dims and strides including the extent-1 dimensions.
+// The layout-mix bundle shapes that fail on MIOpen today, with their exact dims and strides
+// including the extent-1 dimensions. The convolution-forward bundles (1D, 2D and 3D) are written
+// in forward roles and run through forward; the backward-data bundles (1D, 2D and 3D) are written
+// in backward-data roles and run through both backward operations. The first of those is the
+// degenerate global convolution: dy [2,32,1] has only the channels-first canonical strides.
 TEST(TestMiopenConvApplicabilityChecks, DeclinesMixedLayoutBundleShapes)
 {
-    const std::vector<ConvCase> cases = {
-        forwardCase("1d bf16 x cf w cl y cf",
-                    withStrides({8, 16, 16}, {256, 16, 1}, DataType::BFLOAT16),
-                    withStrides({32, 16, 1}, {16, 1, 16}, DataType::BFLOAT16),
-                    withStrides({8, 32, 16}, {512, 16, 1}, DataType::BFLOAT16)),
-        forwardCase("2d bf16 grouped x cf w cl y cf",
-                    withStrides({2, 16, 16, 16}, {4096, 256, 16, 1}, DataType::BFLOAT16),
-                    withStrides({16, 1, 3, 3}, {9, 1, 3, 1}, DataType::BFLOAT16),
-                    withStrides({2, 16, 16, 16}, {4096, 256, 16, 1}, DataType::BFLOAT16)),
-        forwardCase("1d fp32 single input channel x cf w cf y cl",
-                    withStrides({2, 1, 16}, {16, 16, 1}),
-                    withStrides({16, 1, 3}, {3, 3, 1}),
-                    withStrides({2, 16, 16}, {256, 1, 16})),
-        forwardCase("2d bf16 single input channel x cl w cf y cf",
-                    withStrides({2, 1, 16, 16}, {256, 1, 16, 1}, DataType::BFLOAT16),
-                    withStrides({16, 1, 3, 3}, {9, 9, 3, 1}, DataType::BFLOAT16),
-                    withStrides({2, 16, 16, 16}, {4096, 256, 16, 1}, DataType::BFLOAT16)),
-        forwardCase("3d fp16 single input channel x cf w cl y cl",
-                    withStrides({2, 1, 16, 16, 16}, {4096, 4096, 256, 16, 1}, DataType::HALF),
-                    withStrides({16, 1, 3, 3, 3}, {27, 1, 9, 3, 1}, DataType::HALF),
-                    withStrides({2, 16, 16, 16, 16}, {65536, 1, 4096, 256, 16}, DataType::HALF)),
+    struct BundleShapes
+    {
+        std::vector<ConvCase> cases;
+        std::vector<ConvOp> ops;
     };
 
-    for(const auto& bundleCase : cases)
-    {
-        expectDeclined(bundleCase, LAYOUT_REASON, FORWARD_OPS);
-    }
-}
-
-// The backward-data layout-mix bundle shapes that fail on MIOpen today (1D, 2D and 3D), with their
-// exact dims and strides including the extent-1 dimensions. The first one is the degenerate global
-// convolution: dy [2,32,1] has only the channels-first canonical strides.
-TEST(TestMiopenConvApplicabilityChecks, BackwardDeclinesMixedLayoutBundleShapes)
-{
-    const std::vector<ConvCase> cases = {
-        {"1d half global convolution, dy cf, w cl, dx cl",
-         withStrides({2, 32, 1}, {32, 1, 1}, DataType::HALF),
-         withStrides({32, 16, 16}, {256, 1, 16}, DataType::HALF),
-         withStrides({2, 16, 16}, {256, 1, 16}, DataType::HALF)},
-        {"2d bf16, dy cf, w cl, dx cf",
-         withStrides(
-             MIXED_LAYOUT_2D_DY_DIMS, MIXED_LAYOUT_2D_DY_STRIDES, MIXED_LAYOUT_2D_DATA_TYPE),
-         withStrides(MIXED_LAYOUT_2D_W_DIMS, MIXED_LAYOUT_2D_W_STRIDES, MIXED_LAYOUT_2D_DATA_TYPE),
-         withStrides(
-             MIXED_LAYOUT_2D_DX_DIMS, MIXED_LAYOUT_2D_DX_STRIDES, MIXED_LAYOUT_2D_DATA_TYPE)},
-        {"2d half, dy cf, w cl, dx cl",
-         withStrides({2, 32, 8, 8}, {2048, 64, 8, 1}, DataType::HALF),
-         withStrides({32, 16, 2, 2}, {64, 1, 32, 16}, DataType::HALF),
-         withStrides({2, 16, 16, 16}, {4096, 1, 256, 16}, DataType::HALF)},
-        {"2d float, dy cf, w cf, dx cl",
-         withStrides({2, 32, 2, 2}, {128, 4, 2, 1}),
-         withStrides({32, 3, 16, 16}, {768, 256, 16, 1}),
-         withStrides({2, 3, 32, 32}, {3072, 1, 96, 3})},
-        {"3d bf16, dy cf, w cl, dx cf",
-         withStrides({2, 32, 14, 14, 14}, {87808, 2744, 196, 14, 1}, DataType::BFLOAT16),
-         withStrides({32, 16, 3, 3, 3}, {432, 1, 144, 48, 16}, DataType::BFLOAT16),
-         withStrides({2, 16, 16, 16, 16}, {65536, 4096, 256, 16, 1}, DataType::BFLOAT16)},
-        {"3d float, dy cf, w cf, dx cl",
-         withStrides({2, 32, 16, 16, 16}, {131072, 4096, 256, 16, 1}),
-         withStrides({32, 16, 3, 3, 3}, {432, 27, 9, 3, 1}),
-         withStrides({2, 16, 16, 16, 16}, {65536, 1, 4096, 256, 16})},
+    const std::vector<BundleShapes> bundles = {
+        {{
+             forwardCase("1d bf16 x cf w cl y cf",
+                         withStrides(test_conv_common::MIXED_LAYOUT_1D_DX_DIMS,
+                                     test_conv_common::MIXED_LAYOUT_1D_DX_STRIDES,
+                                     DataType::BFLOAT16),
+                         withStrides(test_conv_common::MIXED_LAYOUT_1D_W_DIMS,
+                                     test_conv_common::MIXED_LAYOUT_1D_W_STRIDES,
+                                     DataType::BFLOAT16),
+                         withStrides(test_conv_common::MIXED_LAYOUT_1D_DY_DIMS,
+                                     test_conv_common::MIXED_LAYOUT_1D_DY_STRIDES,
+                                     DataType::BFLOAT16)),
+             forwardCase("2d bf16 grouped x cf w cl y cf",
+                         withStrides({2, 16, 16, 16}, {4096, 256, 16, 1}, DataType::BFLOAT16),
+                         withStrides({16, 1, 3, 3}, {9, 1, 3, 1}, DataType::BFLOAT16),
+                         withStrides({2, 16, 16, 16}, {4096, 256, 16, 1}, DataType::BFLOAT16)),
+             forwardCase("1d fp32 single input channel x cf w cf y cl",
+                         withStrides({2, 1, 16}, {16, 16, 1}),
+                         withStrides({16, 1, 3}, {3, 3, 1}),
+                         withStrides({2, 16, 16}, {256, 1, 16})),
+             forwardCase("2d bf16 single input channel x cl w cf y cf",
+                         withStrides({2, 1, 16, 16}, {256, 1, 16, 1}, DataType::BFLOAT16),
+                         withStrides({16, 1, 3, 3}, {9, 9, 3, 1}, DataType::BFLOAT16),
+                         withStrides({2, 16, 16, 16}, {4096, 256, 16, 1}, DataType::BFLOAT16)),
+             forwardCase(
+                 "3d fp16 single input channel x cf w cl y cl",
+                 withStrides({2, 1, 16, 16, 16}, {4096, 4096, 256, 16, 1}, DataType::HALF),
+                 withStrides({16, 1, 3, 3, 3}, {27, 1, 9, 3, 1}, DataType::HALF),
+                 withStrides({2, 16, 16, 16, 16}, {65536, 1, 4096, 256, 16}, DataType::HALF)),
+         },
+         FORWARD_OPS},
+        {{
+             {"1d half global convolution, dy cf, w cl, dx cl",
+              withStrides({2, 32, 1}, {32, 1, 1}, DataType::HALF),
+              withStrides({32, 16, 16}, {256, 1, 16}, DataType::HALF),
+              withStrides({2, 16, 16}, {256, 1, 16}, DataType::HALF)},
+             {"2d bf16, dy cf, w cl, dx cf",
+              withStrides(
+                  MIXED_LAYOUT_2D_DY_DIMS, MIXED_LAYOUT_2D_DY_STRIDES, MIXED_LAYOUT_2D_DATA_TYPE),
+              withStrides(
+                  MIXED_LAYOUT_2D_W_DIMS, MIXED_LAYOUT_2D_W_STRIDES, MIXED_LAYOUT_2D_DATA_TYPE),
+              withStrides(
+                  MIXED_LAYOUT_2D_DX_DIMS, MIXED_LAYOUT_2D_DX_STRIDES, MIXED_LAYOUT_2D_DATA_TYPE)},
+             {"2d half, dy cf, w cl, dx cl",
+              withStrides({2, 32, 8, 8}, {2048, 64, 8, 1}, DataType::HALF),
+              withStrides({32, 16, 2, 2}, {64, 1, 32, 16}, DataType::HALF),
+              withStrides({2, 16, 16, 16}, {4096, 1, 256, 16}, DataType::HALF)},
+             {"2d float, dy cf, w cf, dx cl",
+              withStrides({2, 32, 2, 2}, {128, 4, 2, 1}),
+              withStrides({32, 3, 16, 16}, {768, 256, 16, 1}),
+              withStrides({2, 3, 32, 32}, {3072, 1, 96, 3})},
+             {"3d bf16, dy cf, w cl, dx cf",
+              withStrides({2, 32, 14, 14, 14}, {87808, 2744, 196, 14, 1}, DataType::BFLOAT16),
+              withStrides({32, 16, 3, 3, 3}, {432, 1, 144, 48, 16}, DataType::BFLOAT16),
+              withStrides({2, 16, 16, 16, 16}, {65536, 4096, 256, 16, 1}, DataType::BFLOAT16)},
+             {"3d float, dy cf, w cf, dx cl",
+              withStrides({2, 32, 16, 16, 16}, {131072, 4096, 256, 16, 1}),
+              withStrides({32, 16, 3, 3, 3}, {432, 27, 9, 3, 1}),
+              withStrides({2, 16, 16, 16, 16}, {65536, 1, 4096, 256, 16})},
+         },
+         BACKWARD_OPS},
     };
 
-    for(const auto& bundleCase : cases)
+    for(const auto& bundle : bundles)
     {
-        expectDeclined(bundleCase, LAYOUT_REASON, BACKWARD_OPS);
+        for(const auto& bundleCase : bundle.cases)
+        {
+            expectDeclined(bundleCase, LAYOUT_REASON, bundle.ops);
+        }
     }
 }
 
