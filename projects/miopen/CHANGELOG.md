@@ -98,8 +98,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Added `ConvHipDirectConv1dFwd`, a direct fp32 forward 1D convolution solver (NCHW with
   H == 1, strided, dilated and grouped) for RDNA (`gfx101X`, `gfx103X`, `gfx110X`, `gfx115X`,
   `gfx117X`, `gfx120X`). On these targets the CK grouped kernels do not take fp32 inputs, so
-  dilated fp32 1D convolutions previously ran on `ConvDirectNaiveConvFwd`; on gfx1151 the new
-  solver is 14x to 29x faster on those shapes and is selected through Find mode.
+  dilated fp32 1D convolutions previously ran on `GemmFwdRest`; on gfx1151 the new solver is 2x
+  to 4x faster on those shapes, needs no workspace, and is selected through Find mode.
 
 ### Changed
 * [Conv] The gfx942/gfx950 two-tower config-selection heuristic now ranks a shipped precomputed
