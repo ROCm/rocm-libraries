@@ -2069,7 +2069,7 @@ static double compute_epilogue_latency_cdna5(const problem_t& problem,
     // In-kernel linear fixup (Components/StreamK.py storeBranchesCommon): peers store their f32 partials in the
     // flat workspace layout and set a device-scope flag; the tile's owner then, once per peer, busy-polls that
     // flag, resets it and reads the partial with per-lane loads, and finally stores D.  The handshake repeats
-    // for each of the F - 1 partials (sk_fixup: fixed time per partial, linear in F - 1, the same for 1x1 and
+    // for each of the F - 1 partials (measured: fixed time per partial, linear in F - 1, the same for 1x1 and
     // cluster kernels); only the tiles' owners read, so they share the per-lane L2 peak.
     const double n_partials = static_cast<double>(context.splitting_factor - 1);
     const double partials   = n_partials * elems * ws;
@@ -2730,7 +2730,7 @@ double compute_tile_latency(const problem_t& problem,
                        L_mem_floor * static_cast<double>(num_main_iters)});
     // gfx1250 tensor-DMA load-latency stall, from the kernel's issue/wait recurrence.
     // Code fact (KernelWriter.py: "wait for previous set of global reads", tdmWait(PGR - 1), then the
-    // workgroup barrier; in every disassembled pool kernel the loop is  tensor_load_to_lds ...
+    // workgroup barrier; in the disassembled gfx1250 library kernels the loop is  tensor_load_to_lds ...
     // s_wait_tensorcnt 1 ... s_barrier ... ds_load): an iteration issues the load of the tile PGR
     // iterations ahead and then waits only for the load issued PGR-1 iterations earlier; the prologue
     // issues PGR loads back to back.  With e[j] the issue time in iteration j, c_it the wave's own time
@@ -2738,12 +2738,12 @@ double compute_tile_latency(const problem_t& problem,
     //     e[j+1] = max(e[j], e[j-PGR+1] + lat + S) + c_it,
     // so PGR iterations span one load:  T = max(T_nostall, (c_it + lat + S) / PGR).  The former charge
     // (lat + S - (PGR-1) * L_iter) priced every iteration as if its own load had to land within it.
-    // Microbenchmark (tdm_bandwidth, bwfit_fit.py model_load): without math (c_it = 0) this is the fitted
+    // Microbenchmark (tensor-DMA bandwidth): without math (c_it = 0) this is the fitted
     // latency-bound law T = (lat0 + c X + S) / depth, where the loaded latency grows with the device
     // throughput X = bytes per iteration / T; T therefore solves a quadratic, as in the fit.
     // PrefetchGL2 issues the L2 prefetch of a tile that many iterations (of T) before its load, which then
     // waits the L2 latency at least.  No constant is introduced: lat0, c, S and the fixed cost are the
-    // existing tdm_bandwidth / kloop numbers.  Per-lane loads and PGR <= 1 keep the charge above.
+    // existing tensor-DMA bandwidth / K-loop numbers.  Per-lane loads and PGR <= 1 keep the charge above.
     if (tp.tdm_inst != 0) {
       const double depth = static_cast<double>(pgr);
       const double c1    = L_compute * compute_tile_penalty;
@@ -2986,7 +2986,7 @@ double compute_tile_latency(const problem_t& problem,
   const double L_lsu_reduce = compute_lsu_reduction_latency(problem, hardware, config, context);
   double L_tile_total = (L_prologue + L_mainloop + L_epilogue + L_lsu_reduce) * weight_tile_total;
   // gfx1250: work outside the tile model that every tile round repeats, growing with the output tile and one
-  // K-iteration of A and B (kernel_rounds: time vs tile rounds of real kernels).
+  // K-iteration of A and B (time vs tile rounds of real kernels).
   if (hardware.is_cdna5()) {
     const double d_kib  = static_cast<double>(config.mt.m) * static_cast<double>(config.mt.n) * context.d_bytes / 1024.0;
     const double op_kib = (static_cast<double>(config.mt.m) * context.a_bytes +
@@ -3008,7 +3008,7 @@ double compute_tile_latency(const problem_t& problem,
   }
   // gfx1250: r workgroups resident on a WGP overlap everything but the WGP's shared LDS port (operand reads and
   // tensor-DMA writes at its bandwidth), matrix pipes and store path, so r of them take one tile's time plus r - 1
-  // such busy times (kloop -r sweep, measured up to 4 workgroups per WGP).
+  // such busy times (measured up to 4 workgroups per WGP).
   if (wmma_bf16 && wgs_per_cu > 1.0 && k_iters > 0) {
     const double r     = std::min(wgs_per_cu, heuristic_defaults_t::GFX1250_MAX_MEASURED_RESIDENT_WGS);
     const double mt_k  = static_cast<double>(MT_K);

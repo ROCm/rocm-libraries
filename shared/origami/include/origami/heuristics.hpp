@@ -99,7 +99,7 @@ struct heuristic_defaults_t {
   /// row narrower than the 256 B block L2 serves still costs a whole block.
   static constexpr double GFX1250_TDM_L2_ROW_B_PER_CLK = 557.0 / 2.4;  // 232.08 B/clk (557 B/ns)
   /// Tensor-DMA row service rate of one WGP from DRAM, B/clk; a row costs at least one 256 B DRAM
-  /// block (tdm_bandwidth sweep, bwfit_fit.py "final", q fixed at the block).
+  /// block (fitted to a tensor-DMA bandwidth microbenchmark, q fixed at the block).
   static constexpr double GFX1250_TDM_DRAM_ROW_B_PER_CLK = 420.0 / 2.4;  // 175.0 B/clk (420 B/ns)
   /// Soft-minimum sharpness of the WGPs' tensor-DMA rate against the L2 peak (same fits; the DRAM peak is met
   /// in a hard minimum, which fits the sweep as well).
@@ -115,13 +115,13 @@ struct heuristic_defaults_t {
   static constexpr double GFX1250_STORE_SHARPNESS      = 2.17;
   /// Bytes landing in LDS with multicast and the cluster barrier over those without, two
   /// tensor loads in flight per wave: L2-resident 37.1 / 32.7 TB/s, DRAM-streaming 17.2 /
-  /// 22.2 TB/s (mc_probe, 4x4 clusters of MT 128, DU 64).
+  /// 22.2 TB/s (multicast microbenchmark, 4x4 clusters of MT 128, DU 64).
   static constexpr double GFX1250_MULTICAST_L2_GAIN   = 37.1 / 32.7;
   static constexpr double GFX1250_MULTICAST_DRAM_GAIN = 17.2 / 22.2;
   /// WGPs of the part hardware_t::mem_bw_per_wg_coefficients was fit on; compute_mem_bw_from_
   /// occupancy rescales the active CU count by this over the part's N_CU.
   static constexpr double GFX1250_BW_FIT_WGPS = 256.0;
-  /// Non-SourceSwap D store (store_layout microbenchmark, fit_store_layout.py): a wave32 16x16 WMMA accumulator
+  /// Non-SourceSwap D store (fitted to a store-layout microbenchmark): a wave32 16x16 WMMA accumulator
   /// stored with 16 B lanes writes 32 B (COLUMN_BYTES) into each of 16 columns per instruction.  Extra time of such
   /// an instruction over the SourceSwap one, cycles, and the device ceiling it reaches, B/clk, for TemporalHintD
   /// RT / NT.
@@ -141,31 +141,31 @@ struct heuristic_defaults_t {
   /// Dependent LDS read latency in cycles the matrix pipe must cover.
   static constexpr double GFX1250_LDS_READ_LATENCY_CLK = 70.0;
   /// Per-lane vector loads (one 16 B load per lane in flight): one WGP's ceiling and the device's
-  /// L2-resident peak, B/clk (probes bw_sweep).
+  /// L2-resident peak, B/clk (bandwidth microbenchmark).
   static constexpr double GFX1250_LANE_LOAD_WGP_B_PER_CLK = 91.0 / 2.4;     // 37.917 B/clk (91 B/ns)
   static constexpr double GFX1250_LANE_LOAD_L2_B_PER_CLK  = 21100.0 / 2.4;  // 8791.7 B/clk (21100 B/ns)
   /// StreamK in-kernel linear fixup: time per partial that does not depend on its size (the owner's flag
   /// poll, flag reset, barrier and read set-up), cycles, with the partial's bytes read at
-  /// GFX1250_LANE_LOAD_WGP_B_PER_CLK (sk_fixup: 1.52 +- 0.07 us over 31 pool kernels, F = 2..4; no separate
-  /// peer-release time was found).
+  /// GFX1250_LANE_LOAD_WGP_B_PER_CLK (StreamK fixup microbenchmark: 1.52 +- 0.07 us over 31 kernels,
+  /// F = 2..4; no separate peer-release time was found).
   static constexpr double GFX1250_SK_FIXUP_HANDSHAKE_CLK = 1520.0 * 2.4;  // 3648 clk (1520 ns)
   /// Loaded tensor-DMA load latency, lat0 + c x device throughput: cycles and cycles per (B/clk) of device
-  /// throughput, from L2 and from DRAM (tdm_bandwidth sweep, bwfit_fit.py "final" with the 256 B row minimum;
+  /// throughput, from L2 and from DRAM (fitted to a tensor-DMA bandwidth microbenchmark with the 256 B row minimum;
   /// measured as ns and ns per TB/s; 1 TB/s = 1000 B/ns, so ns per TB/s x 2.4^2 / 1000 = clk per B/clk).
   static constexpr double GFX1250_TDM_L2_LAT0_CLK        = 216.9 * 2.4;                // 520.56 clk (216.9 ns)
   static constexpr double GFX1250_TDM_L2_LAT_CLK_PER_BPC = 1.076 * 2.4 * 2.4 / 1000.0;  // 0.00619776 (1.076 ns per TB/s)
   static constexpr double GFX1250_TDM_DRAM_LAT0_CLK        = 630.6 * 2.4;                // 1513.44 clk (630.6 ns)
   static constexpr double GFX1250_TDM_DRAM_LAT_CLK_PER_BPC = 18.35 * 2.4 * 2.4 / 1000.0;  // 0.105696 (18.35 ns per TB/s)
   /// Interval between back-to-back kernel launches on one stream, cycles, for 1 to 1024 workgroups
-  /// (launch_probe, ~/obuild/tilerank/launch_probe).  Host / driver time, not clocked by the engine.
+  /// (kernel-launch microbenchmark).  Host / driver time, not clocked by the engine.
   static constexpr double GFX1250_KERNEL_LAUNCH_CLK = 2080.0 * 2.4;  // 4992 clk (2080 ns)
   /// TH_LOAD_NT tensor loads of rows narrower than the 256 B DRAM block: the block's other part is refetched with
   /// probability 1 / (1 + (D0 / D)^n) when D bytes of tensor-DMA traffic reach the device between the two uses
-  /// (D0 in MiB; tdm_tall run_nt_stride.sh + fit_nt.py).
+  /// (D0 in MiB; fitted to a tensor-DMA stride microbenchmark).
   static constexpr double GFX1250_TDM_NT_REFETCH_D0_MIB = 34.2;
   static constexpr double GFX1250_TDM_NT_REFETCH_N      = 1.6;
   /// Extra time of one wave's edge-path store instruction over the full-width store, measured inside real BF16 TN
-  /// kernels (AdaptiveGemm twins on M-remainder grids, edge_store_m fit_edge.py), cycles: M-edge path by lane bytes
+  /// kernels (AdaptiveGemm twins on M-remainder grids), cycles: M-edge path by lane bytes
   /// (2, 4, 8, 16 B), and the full-width N-only edge path.
   static constexpr double GFX1250_EDGE_STORE_EXTRA_CLK_2B  = 94.8 * 2.4;  // 227.52 clk (94.8 ns)
   static constexpr double GFX1250_EDGE_STORE_EXTRA_CLK_4B  = 71.2 * 2.4;  // 170.88 clk (71.2 ns)
@@ -173,21 +173,21 @@ struct heuristic_defaults_t {
   static constexpr double GFX1250_EDGE_STORE_EXTRA_CLK_16B = 33.7 * 2.4;  // 80.88 clk (33.7 ns)
   static constexpr double GFX1250_EDGE_STORE_EXTRA_CLK_N   = 38.6 * 2.4;  // 92.64 clk (38.6 ns)
   /// Soft-maximum sharpness of a TDM + LDS-read + WMMA K-loop's memory and math times, L2-resident and
-  /// DRAM-streaming (kloop run_kloop.sh + fit_kloop.py).
+  /// DRAM-streaming (fitted to a K-loop microbenchmark).
   static constexpr double GFX1250_KLOOP_L2_OVERLAP   = 1.93;
   static constexpr double GFX1250_KLOOP_DRAM_OVERLAP = 1.73;
-  /// Fixed cost of one K-iteration (two barriers, tensor waits, TDM issue), cycles: intercept of the kloop DepthU
-  /// sweep for 4 waves, which 690 of the 694 pool kernels have (8 waves measured 314 clk).
+  /// Fixed cost of one K-iteration (two barriers, tensor waits, TDM issue), cycles: intercept of a K-loop DepthU
+  /// sweep for 4 waves, which nearly all gfx1250 library kernels use (8 waves measured 314 clk).
   /// 207 -> 263.439: refit on the 145-size N-sweep (see GFX1250_FIT_* below).
   static constexpr double GFX1250_KITER_FIXED_CLK = 263.43924868273393;
   /// v_wmma_f32_16x16x32_bf16 issue interval per SIMD with 1, 2 and 4 waves on the SIMD, cycles at the engine
-  /// clock (kloop run_wmma_rate.sh, independent accumulators).
+  /// clock (WMMA-rate microbenchmark, independent accumulators).
   static constexpr double GFX1250_WMMA_BF16_CLK = 10.1;  // 1 wave per SIMD; 2 / 4 waves measured 7.5 / 6.05
-  /// Most workgroups per WGP the co-residency law was measured for (kloop -r 1..4).
+  /// Most workgroups per WGP the co-residency law was measured for (1..4 workgroups per WGP).
   static constexpr double GFX1250_MAX_MEASURED_RESIDENT_WGS = 4.0;
   /// K-loop slowdown of a multicast cluster over its exact 1x1 twin beyond the microbenchmarked multicast model:
   /// 1 + lambda x k / (k + K0) for k K-iterations, lambda by workgroups along the cluster's larger axis (2, 4, 8)
-  /// (real BBS TN kernels on synthetic shapes, cluster_lockstep run_lockstep.sh + residual.py + fit_lockstep.py).
+  /// (fitted to real BBS TN kernels on synthetic shapes).
   /// Model-relative: measured / predicted cluster-to-twin ratio of this model without the term, so it is refitted
   /// from the stored ratios after any change of the K-loop model (here: against the issue/wait-recurrence stall;
   /// rms log 0.140 over 768 cases; K0 = 64 is the last value of the fit's grid, 48 fits equally).
@@ -195,15 +195,15 @@ struct heuristic_defaults_t {
   static constexpr double GFX1250_CLUSTER_LOCKSTEP_8  = 0.624;
   static constexpr double GFX1250_CLUSTER_LOCKSTEP_K0 = 64.0;
   /// Rate at which a WGP's tail loop (K % DepthU != 0, including K < DepthU) moves the whole DepthU window of A and
-  /// B, B/clk, with every WGP busy (kernel_fixed: K = n DU + 8 / + 32 vs n DU, fit_tail.py).
+  /// B, B/clk, with every WGP busy (measured as K = n DU + 8 / + 32 vs n DU).
   static constexpr double GFX1250_TAIL_WINDOW_B_PER_CLK = 66.8 / 2.4;  // 27.833 B/clk (66.8 B/ns)
   /// Odd K (A and B rows not 4 B aligned): extra time per tile, a constant plus a part per K-iteration, cycles per
-  /// KiB of the DepthU window (kernel_fixed: K = n DU + 1 vs n DU and K = 1, fit_tail.py).
+  /// KiB of the DepthU window (measured as K = n DU + 1 vs n DU and K = 1).
   static constexpr double GFX1250_ODD_K_CLK_PER_KIB      = 92.0 * 2.4;  // 220.8 clk/KiB (92.0 ns/KiB)
   static constexpr double GFX1250_ODD_K_CLK_PER_KIB_ITER = 26.9 * 2.4;  // 64.56 clk/KiB (26.9 ns/KiB)
   /// Cost outside the K-loop that the tile model leaves out, in cycles, as a constant plus growth per KiB of the
-  /// output tile and per KiB of one K-iteration of A and B.  Per tile round (kernel_rounds: slope of time vs tile
-  /// rounds of real kernels, fit_rounds.py; the constant fits ~0) and once per kernel (kernel_fixed one-wave
+  /// output tile and per KiB of one K-iteration of A and B.  Per tile round (slope of time vs tile
+  /// rounds of real kernels; the constant fits ~0) and once per kernel (one-wave
   /// intercepts less one round).  The per-kernel cost also grows per doubling of CUOccupancy (measured with one WG
   /// per WGP; the mechanism is not isolated).  Model-relative (measured minus this model with every fixed term at
   /// zero): refitted against the issue/wait-recurrence stall, which moves the model's one-wave intercepts (per
@@ -216,7 +216,7 @@ struct heuristic_defaults_t {
   static constexpr double GFX1250_TILE_FIXED_CLK_PER_KIB_OP   = 16.8 * 2.4;  // 40.32 clk/KiB (16.8 ns/KiB)
 
   /// gfx1250 refit of the model's relative-cost constants on the measured top-30 candidates of the 145-size
-  /// (5 shapes x N = 64..512) bf16 TN N-sweep (origami_refit/refit2.py, centered objective, all data).  The fit
+  /// (5 shapes x N = 64..512) bf16 TN N-sweep (centered objective, all data).  The fit
   /// was made on the develop model, so the values that are multipliers on a model term are applied as such
   /// (1.0 = unchanged): the K-iteration fixed cost (GFX1250_KITER_FIXED_CLK above) and the 6-XCD peaks
   /// (hardware.hpp) are changed in place.
