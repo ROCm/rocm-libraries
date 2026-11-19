@@ -26,10 +26,10 @@
 
 #pragma once
 
-// --partitions runs through the experimental PartitionedGemm, so every file that includes this
-// header defines ROCM_ENABLE_EXPERIMENTAL_APIS to 1 before its first include.
+// --partitions runs through the experimental PartitionedGemm, so a target that includes this
+// header links roc::hipblaslt_experimental (hipblaslt-clients-common does).
 #if !defined(ROCM_ENABLE_EXPERIMENTAL_APIS) || !ROCM_ENABLE_EXPERIMENTAL_APIS
-#error "testing_matmul.hpp needs ROCM_ENABLE_EXPERIMENTAL_APIS defined to 1"
+#error "testing_matmul.hpp needs roc::hipblaslt_experimental (ROCM_ENABLE_EXPERIMENTAL_APIS=1)"
 #endif
 #include <hipblaslt/hipblaslt-experimental.h>
 

@@ -1,13 +1,17 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Helpers shared by the PartitionedGemm tests: partitioned_gemm_gtest.cpp and the contract tests
-// in experimental/contract_partitioned_gemm_gtest.cpp.
+// Helpers shared by the PartitionedGemm tests: the contract tests in
+// contract_partitioned_gemm_gtest.cpp and the other tests in ../partitioned_gemm_gtest.cpp.
+//
+// Part of the contract of experimental feature PARTITIONED_GEMM: the contract tests' results
+// depend on these helpers, so changing this file needs a revision bump, as changing a contract
+// test does (tools/scripts/check_experimental_api.py checks both).
 
 #pragma once
 
 #if !defined(ROCM_ENABLE_EXPERIMENTAL_APIS) || !ROCM_ENABLE_EXPERIMENTAL_APIS
-#error "partitioned_gemm_test_helpers.hpp needs ROCM_ENABLE_EXPERIMENTAL_APIS defined to 1"
+#error "contract_partitioned_gemm_helpers.hpp needs ROCM_ENABLE_EXPERIMENTAL_APIS defined to 1"
 #endif
 #include <hipblaslt/hipblaslt-experimental.h>
 

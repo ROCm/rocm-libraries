@@ -23,9 +23,6 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-// testing_matmul.hpp runs --partitions through the experimental PartitionedGemm.
-#define ROCM_ENABLE_EXPERIMENTAL_APIS 1
-
 #include "hipblaslt/hipblaslt-ext.hpp"
 #include "hipblaslt_arguments.hpp"
 #include "hipblaslt_data.hpp"

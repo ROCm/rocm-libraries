@@ -6,13 +6,15 @@
 // These tests define the promised behavior of the feature, as documented in
 // hipblaslt-experimental-partitioned-gemm.h. Adding a test is free. Changing or deleting one is a
 // breaking change: tools/scripts/check_experimental_api.py fails the PR unless it also bumps
-// HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM, the feature's revision.
+// HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM, the feature's revision. The same goes for the helpers
+// in contract_partitioned_gemm_helpers.hpp.
 //
-// Like the rest of the PartitionedGemm tests, all but the revision check run on gfx1250 and skip
-// elsewhere. The helpers are in partitioned_gemm_test_helpers.hpp.
+// The feature is supported on gfx1250 only, so every CI lane checks part of the contract: on
+// gfx1250 the tests of its behavior run, and on any other architecture NotSupportedOffGfx1250
+// checks that setProblem refuses. The revision check runs everywhere.
 
 #define ROCM_ENABLE_EXPERIMENTAL_APIS 1
-#include "../partitioned_gemm_test_helpers.hpp"
+#include "contract_partitioned_gemm_helpers.hpp"
 
 using namespace partitioned_gemm_test;
 

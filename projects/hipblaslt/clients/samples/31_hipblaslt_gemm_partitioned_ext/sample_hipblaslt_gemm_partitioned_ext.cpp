@@ -22,7 +22,11 @@
 // its slice into the other partition's D). It needs OutputPeerD kernels in the device library;
 // with the current library algoGetHeuristic returns no algorithm for it.
 
+// A CMake target gets the switch by linking roc::hipblaslt_experimental, as this sample does;
+// other builds define it before the include.
+#ifndef ROCM_ENABLE_EXPERIMENTAL_APIS
 #define ROCM_ENABLE_EXPERIMENTAL_APIS 1
+#endif
 #include <hipblaslt/hipblaslt-experimental.h>
 
 #if !defined(HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM) \

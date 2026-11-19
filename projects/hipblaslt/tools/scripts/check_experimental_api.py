@@ -8,21 +8,31 @@ Compares the experimental API of a base revision (normally the PR's target branc
 the working tree. Each experimental feature lives in its own header,
 hipblaslt-experimental-<feature>.h, which defines HIPBLASLT_EXPERIMENTAL_<FEATURE> to the
 feature's revision, and has contract tests in
-clients/tests/src/experimental/contract_<feature>_gtest.cpp. A change to a feature is
-breaking if it
+clients/tests/src/experimental/contract_<feature>_gtest.cpp. Headers next to them named
+contract_<feature>*.hpp (or .h), such as shared test helpers, are part of the contract too. A
+change to a feature is breaking if it
 
-* removes a declaration from the feature's header (functions, types, enumerators, macros),
+* removes a declaration from the feature's header (functions, C++ methods, types,
+  enumerators, macros),
 * changes a macro, or
-* changes or deletes one of the feature's contract tests. Contract tests define the
-  feature's promised behavior, so editing one means the behavior changed.
+* changes or deletes one of the feature's contract tests or contract headers. Contract tests
+  define the feature's promised behavior, so editing one means the behavior changed.
 
-Additions are never breaking. A breaking change must bump that feature's revision in the
-same change. Some changes are never allowed, with or without a bump:
+Additions are never breaking; that includes a new C++ method or overload. A breaking change
+must bump that feature's revision in the same change. Some changes are never allowed, with or
+without a bump:
 
 * changing a function's signature, or a struct, union or typedef, under its existing name
   (give it a new name, such as ..._v2, and remove the old one),
+* changing a C++ function or method in place: its return type, default arguments or
+  qualifiers (a different parameter list is a different overload, so it is a removal plus an
+  addition),
+* changing a C++ class's bases, data members or virtual functions, which are its layout (give
+  the class a new name),
 * changing an enumerator's value, or giving a new enumerator a value at or below
-  HIPBLASLT_EXPERIMENTAL_ENUM_HIGH_WATER (experimental enum values are never reused),
+  HIPBLASLT_EXPERIMENTAL_ENUM_HIGH_WATER (experimental enum values are never reused; this
+  includes C++ scoped enums),
+* declaring a template, which the checker cannot compare,
 * changing or removing anything declared in hipblaslt-experimental.h itself, such as
   hipblasLtExperimentalGetFeatureRevision.
 
@@ -54,7 +64,7 @@ HEADER_DIR = "library/include/hipblaslt"
 MAIN_HEADER = f"{HEADER_DIR}/hipblaslt-experimental.h"
 FEATURE_HEADER_GLOB = "hipblaslt-experimental-*.h"
 CONTRACT_DIR = "clients/tests/src/experimental"
-CONTRACT_GLOB = "contract_*.cpp"
+CONTRACT_GLOBS = ("contract_*.cpp", "contract_*.hpp", "contract_*.h")
 REVISION_PREFIX = "HIPBLASLT_EXPERIMENTAL_"
 ENUM_BIT = "HIPBLASLT_EXPERIMENTAL_ENUM_BIT"
 HIGH_WATER_MACRO = "HIPBLASLT_EXPERIMENTAL_ENUM_HIGH_WATER"
@@ -68,14 +78,20 @@ def feature_of_header(path: str) -> str:
 
 
 def feature_of_contract(path: str, features) -> str:
-    """contract_gemm_a2a_gtest.cpp or contract_gemm_a2a_errors_gtest.cpp -> GEMM_A2A
+    """contract_gemm_a2a_gtest.cpp, contract_gemm_a2a_errors_gtest.cpp or
+    contract_gemm_a2a_helpers.hpp -> GEMM_A2A
 
     The longest known feature name that the file name starts with; otherwise the whole stem.
     """
-    stem = path.rsplit("/", 1)[-1][len("contract_") : -len(".cpp")]
+    stem = path.rsplit("/", 1)[-1][len("contract_") :].rsplit(".", 1)[0]
     stem = re.sub(r"_gtest$", "", stem).upper()
     matches = [f for f in features if stem == f or stem.startswith(f + "_")]
     return max(matches, key=len) if matches else stem
+
+
+def contract_files(tree) -> List[str]:
+    """The contract tests and contract headers in a tree."""
+    return sorted({p for pattern in CONTRACT_GLOBS for p in tree.glob(CONTRACT_DIR, pattern)})
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +228,230 @@ def _add_statement(stmt: str, feature: str, where: str, surface: Surface) -> Non
         surface.decls[f"decl {stmt}"] = (feature, stmt)
 
 
+# C++ declarations: namespaces, classes, scoped enums and overloaded functions. Functions and
+# methods are keyed by their scope, name and parameter types (the parts that decide which
+# symbol a caller binds to), so an overload is its own declaration and renaming a parameter is
+# no change. The rest of a declaration (return type, default arguments, qualifiers such as
+# noexcept or = delete) is compared under that key. A class's layout (bases, data members and
+# virtual functions) is one declaration; its other methods are separate.
+
+_ACCESS = re.compile(r"(public|protected|private):(?!:)")
+_TYPE_WORDS = {
+    "auto", "bool", "char", "char8_t", "char16_t", "char32_t", "const", "double", "float",
+    "int", "long", "short", "signed", "unsigned", "void", "volatile", "wchar_t",
+}
+_QUALIFIER_WORDS = {"class", "const", "enum", "struct", "typename", "volatile"}
+
+
+def _match_brace(code: str, i: int) -> int:
+    """Index of the '}' that closes the '{' at code[i] (len(code) if it is not closed)."""
+    depth = 0
+    for j in range(i, len(code)):
+        if code[j] == "{":
+            depth += 1
+        elif code[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return j
+    return len(code)
+
+
+def _split_top(text: str, sep: str) -> List[str]:
+    """Split at `sep` outside (), <>, [] and {}."""
+    parts, depth, start = [], 0, 0
+    for i, ch in enumerate(text):
+        if ch in "(<[{":
+            depth += 1
+        elif ch in ")>]}":
+            depth -= 1
+        elif ch == sep and depth == 0:
+            parts.append(text[start:i])
+            start = i + 1
+    parts.append(text[start:])
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _parameter(param: str) -> Tuple[str, str]:
+    """The type and the default argument of a parameter: 'const T& x = {}' -> ('const T&', '{}')."""
+    pieces = _split_top(param, "=")
+    decl, default = pieces[0], "=".join(pieces[1:])
+    m = re.match(r"(.*[\w>&*\]])\s*\b([A-Za-z_]\w*)$", decl)
+    # 'unsigned int' and 'const T' have no parameter name.
+    if m and m.group(2) not in _TYPE_WORDS and not set(m.group(1).split()) <= _QUALIFIER_WORDS:
+        decl = m.group(1).strip()
+    return decl, default
+
+
+def _function(stmt: str) -> Optional[Tuple[str, str]]:
+    """(key, text) of a function declaration, or None if `stmt` is not one.
+
+    key is 'name(parameter types)' plus cv and ref qualifiers; text is the whole declaration
+    without parameter names.
+    """
+    m = re.search(r"\boperator\s*(?:\(\)|\[\]|[^\w\s(]+)\s*\(|(~?\w+)\s*\(", stmt)
+    if not m or "(*" in stmt[: m.end() + 1]:
+        return None
+    name_end = m.end() - 1
+    name = normalize(stmt[m.start() : name_end])
+    depth, close = 0, -1
+    for j in range(name_end, len(stmt)):
+        if stmt[j] == "(":
+            depth += 1
+        elif stmt[j] == ")":
+            depth -= 1
+            if depth == 0:
+                close = j
+                break
+    if close < 0:
+        return None
+    prefix = normalize(stmt[: m.start()])
+    suffix = normalize(stmt[close + 1 :])
+    params = [_parameter(p) for p in _split_top(stmt[name_end + 1 : close], ",")]
+    if [p[0] for p in params] == ["void"]:
+        params = []
+    types = ",".join(t for t, _ in params)
+    qualifiers = re.findall(r"\bconst\b|\bvolatile\b|&&|&", suffix.split("=")[0].split("noexcept")[0])
+    key = f"{name}({types}){''.join(qualifiers)}"
+    text = normalize(
+        f"{prefix} {name}({','.join(t + ('=' + d if d else '') for t, d in params)}) {suffix}"
+    )
+    return key, text
+
+
+def _strip_access(stmt: str, access: str) -> Tuple[str, str]:
+    while True:
+        m = _ACCESS.match(stmt)
+        if not m:
+            return stmt, access
+        access, stmt = m.group(1), stmt[m.end() :]
+
+
+def _scoped(scope: str, name: str) -> str:
+    return f"{scope}::{name}" if scope else name
+
+
+class _Class:
+    def __init__(self, kind: str, qualified: str):
+        self.kind = kind
+        self.qualified = qualified
+        self.layout: List[str] = []
+
+
+def _cpp_statement(stmt: str, scope: str, cls: Optional[_Class], access: str,
+                   feature: str, where: str, surface: Surface) -> None:
+    if stmt.startswith("template"):
+        surface.errors.append(f"{where}: {scope or 'global scope'}: templates are not supported"
+                              " in experimental headers (the checker cannot compare them)")
+        return
+    if stmt.startswith(("friend ", "static_assert")):
+        return
+    alias = re.match(r"using (\w+)=", stmt)
+    if alias or stmt.startswith("typedef "):
+        name = alias.group(1) if alias else re.findall(r"\w+", stmt)[-1]
+        if cls is None or access != "private":
+            surface.decls[f"type {_scoped(scope, name)}"] = (feature, stmt)
+        return
+    function = _function(stmt) if not re.match(r"(?:class|struct|union|enum)\b", stmt) else None
+    if function:
+        key, text = function
+        if cls is None:
+            surface.decls[f"function {_scoped(scope, key)}"] = (feature, text)
+            return
+        if re.search(r"\bvirtual\b", text):
+            cls.layout.append(text)
+        if access != "private":
+            surface.decls[f"method {_scoped(scope, key)}"] = (feature, text)
+        return
+    if cls is not None:
+        cls.layout.append(stmt)  # a data member or a nested type
+    else:
+        surface.decls[f"decl {_scoped(scope, stmt)}"] = (feature, stmt)
+
+
+def _cpp_enum(head: str, body: str, scope: str, feature: str, where: str, surface: Surface) -> None:
+    m = re.match(r"enum(?: (?:class|struct))?(?: (\w+))?(?::(.+))?$", head)
+    if not m or not m.group(1):
+        surface.errors.append(f"{where}: anonymous enum in {scope or 'global scope'}; give it a name")
+        return
+    name = _scoped(scope, m.group(1))
+    surface.decls[f"enum {name}"] = (feature, head[: m.start(1)].strip() + (":" + m.group(2) if m.group(2) else ""))
+    for item in _split_top(normalize(body), ","):
+        if "=" not in item:
+            surface.errors.append(
+                f"{where}: enumerator {name}::{item} needs an explicit value"
+                " (implicit values shift silently when enumerators are inserted)"
+            )
+            continue
+        ident, value = item.split("=", 1)
+        _add_enumerator(f"enumerator {name}::{ident}", value, feature, where, surface)
+
+
+def _cpp_class(head: str, body: str, scope: str, outer: Optional[_Class],
+               feature: str, where: str, surface: Surface) -> None:
+    m = re.match(r"(class|struct|union) (?:\w+ )*?(\w+)( final)?(?::(.+))?$", head)
+    if not m:
+        surface.errors.append(f"{where}: unnamed {head.split()[0]} in {scope or 'global scope'}")
+        return
+    kind, name = m.group(1), m.group(2)
+    cls = _Class(kind, _scoped(scope, name))
+    if m.group(4):
+        cls.layout.append(":" + m.group(4))
+    parse_cpp(body, cls.qualified, feature, where, surface, cls)
+    surface.decls[f"class {cls.qualified}"] = (feature, f"{kind}{m.group(3) or ''}{{{';'.join(cls.layout)}}}")
+    if outer is not None:
+        outer.layout.append(f"{kind} {name}")
+
+
+def parse_cpp(code: str, scope: str, feature: str, where: str, surface: Surface,
+              cls: Optional[_Class] = None) -> None:
+    """Declarations in C++ code: a namespace body, a class body or top-level C++ declarations."""
+    access = "private" if cls is not None and cls.kind == "class" else "public"
+    i = start = 0
+    while i < len(code):
+        ch = code[i]
+        if ch == "{":
+            head, access = _strip_access(normalize(code[start:i]), access)
+            end = _match_brace(code, i)
+            namespace = re.fullmatch(r"namespace(?: ([\w:]+))?", head)
+            if namespace:
+                if cls is not None or not namespace.group(1):
+                    surface.errors.append(f"{where}: {'anonymous namespace' if cls is None else 'namespace in a class'}"
+                                          " in an experimental header")
+                else:
+                    parse_cpp(code[i + 1 : end], _scoped(scope, namespace.group(1)), feature, where, surface)
+                start = i = end + 1
+                continue
+            if re.match(r"(?:class|struct|union|enum)\b", head):
+                semi = code.find(";", end)
+                semi = len(code) if semi < 0 else semi
+                if head.startswith("enum"):
+                    _cpp_enum(head, code[i + 1 : end], scope, feature, where, surface)
+                else:
+                    _cpp_class(head, code[i + 1 : end], scope, cls, feature, where, surface)
+                trailing = normalize(code[end + 1 : semi])
+                if trailing:
+                    _cpp_statement(trailing, scope, cls, access, feature, where, surface)
+                start = i = semi + 1
+                continue
+            if "(" in head and head.count("(") == head.count(")"):
+                # An inline function body: the declaration is the head, the body is not API.
+                _cpp_statement(head, scope, cls, access, feature, where, surface)
+                after = re.match(r"\s*;", code[end + 1 :])
+                start = i = end + 1 + (after.end() if after else 0)
+                continue
+            i = end + 1  # a braced initializer or default argument inside a declaration
+            continue
+        if ch == ";":
+            stmt, access = _strip_access(normalize(code[start:i]), access)
+            if stmt:
+                _cpp_statement(stmt, scope, cls, access, feature, where, surface)
+            start = i + 1
+        i += 1
+    stmt, access = _strip_access(normalize(code[start:]), access)
+    if stmt:
+        _cpp_statement(stmt, scope, cls, access, feature, where, surface)
+
+
 def parse_header(text: str, feature: str, where: str, surface: Surface) -> None:
     revision_macro = f"{REVISION_PREFIX}{feature}"
     code_lines = []
@@ -237,18 +477,32 @@ def parse_header(text: str, feature: str, where: str, surface: Surface) -> None:
         code_lines.append(line)
     code = re.sub(r'extern\s*"C"\s*\{', " ", "\n".join(code_lines))
 
-    depth, start = 0, 0
-    for i, ch in enumerate(code):
+    depth, start, i = 0, 0, 0
+    while i < len(code):
+        ch = code[i]
+        if ch == "{" and depth == 0:
+            head = normalize(code[start:i])
+            if re.fullmatch(r"namespace(?: [\w:]+)?", head) or re.match(r"(?:class|template)\b", head):
+                end = _match_brace(code, i)
+                if head.startswith("namespace"):
+                    stop = end + 1
+                else:
+                    semi = code.find(";", end)
+                    stop = len(code) if semi < 0 else semi + 1
+                parse_cpp(code[start:stop], "", feature, where, surface)
+                start = i = stop
+                continue
         if ch == "{":
             depth += 1
         elif ch == "}":
             if depth == 0:  # closing brace of extern "C"
                 code = code[:i] + " " + code[i + 1 :]
-                continue
-            depth -= 1
+            else:
+                depth -= 1
         elif ch == ";" and depth == 0:
             _add_statement(code[start:i], feature, where, surface)
             start = i + 1
+        i += 1
     _add_statement(code[start:], feature, where, surface)
 
     if feature != CORE and feature not in surface.revisions:
@@ -267,7 +521,7 @@ def load_surface(tree) -> Optional[Surface]:
     parse_header(main, CORE, MAIN_HEADER, surface)
     for path in tree.glob(HEADER_DIR, FEATURE_HEADER_GLOB):
         parse_header(tree.read(path), feature_of_header(path), path, surface)
-    for path in tree.glob(CONTRACT_DIR, CONTRACT_GLOB):
+    for path in contract_files(tree):
         feature = feature_of_contract(path, surface.revisions)
         if feature not in surface.revisions:
             surface.errors.append(f"{path}: no experimental feature {feature} for this contract test")
@@ -326,12 +580,27 @@ def compare(base: Optional[Surface], head: Surface) -> Report:
             continue
         if feature == CORE:
             report.errors.append(f"changed {key} in {MAIN_HEADER}, which never changes")
+        elif key.startswith(("function ", "method ")) and "(" in key:
+            report.errors.append(
+                f"changed {key} in place: '{text}' -> '{new}'.\n"
+                "  The return type, default arguments and qualifiers of a C++ function or method"
+                " never change under the same parameter list: add an overload or a new name"
+                " and remove the old one (a removal needs a revision bump)."
+            )
         elif key.startswith("function "):
             report.errors.append(
                 f"changed {key} in place: '{text}' -> '{new}'.\n"
                 "  A breaking change to a function gives it a new name (for example ..._v2) and"
                 " removes the old one, so a stale binary fails to load instead of calling it"
                 " with the wrong arguments."
+            )
+        elif key.startswith(("class ", "enum ")):
+            report.errors.append(
+                f"changed {key} in place: '{text}' -> '{new}'.\n"
+                "  A change to a class's bases, data members or virtual functions, or to an"
+                " enum's underlying type, gives it a new name (for example ..._v2) and removes"
+                " the old one, so a stale binary never uses the old layout as the new one."
+                " Adding a non-virtual method is an addition."
             )
         elif key.startswith("type "):
             report.errors.append(
