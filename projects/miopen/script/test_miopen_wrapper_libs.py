@@ -26,6 +26,7 @@ from miopen_wrapper_libs import (
     PRIVATE,
     WRAPPER,
     default_lib_dirs,
+    find_ck_plugins,
     find_library,
     loader_path_variable,
     resolve_pair,
@@ -126,6 +127,29 @@ class LinuxLayoutTest(unittest.TestCase):
         self.assertEqual((wrapper, private), (None, None))
         [problem] = problems
         self.assertIn("different directories", problem)
+
+    def test_ck_plugins_are_found_and_other_files_are_not(self):
+        for name in (
+            "libMIOpenCKGroupedConv_gfx942.so",
+            "libMIOpenCKGroupedConv_gfx90a.so",
+            "libMIOpenCKGroupedConv_gfx90a.so.bak",
+            "libMIOpen.so.1.0",
+            "libMIOpen.so",
+            "libMIOpen_private.so",
+        ):
+            (self.lib / name).touch()
+        (self.lib / "libMIOpenCKGroupedConv_gfx1100.so").mkdir()
+        self.assertEqual(
+            [p.name for p in find_ck_plugins(self.lib, windows=False)],
+            ["libMIOpenCKGroupedConv_gfx90a.so", "libMIOpenCKGroupedConv_gfx942.so"],
+        )
+
+    def test_no_ck_plugins_is_an_empty_list(self):
+        self.assertEqual(find_ck_plugins(self.lib, windows=False), [])
+
+    def test_windows_plugins_are_not_listed(self):
+        (self.lib / "MIOpenCKGroupedConv_gfx90a.dll").touch()
+        self.assertEqual(find_ck_plugins(self.lib, windows=True), [])
 
     def test_the_loader_searches_ld_library_path(self):
         self.assertEqual(loader_path_variable(windows=False), "LD_LIBRARY_PATH")
