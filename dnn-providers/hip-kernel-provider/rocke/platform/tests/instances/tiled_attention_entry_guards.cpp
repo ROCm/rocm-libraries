@@ -12,7 +12,9 @@
  *   - the gfx950 2D spec pairing use_staggered_iter_wait with
  *     use_early_v_schedule (the two schedules overlap);
  *   - the gfx950 2D spec laying out the KQ LDS pad while Q is staged in the
- *     single K slot (Q is written and read unpadded there).
+ *     single K slot (Q is written and read unpadded there);
+ *   - the gfx942 3D spec with use_i64_kv_addr (its loaders have no i64 path, so a
+ *     spec built that way would address a cache past 2 GiB with 32 bits).
  *
  * The expected texts are the Python ones: kernels.common._fmha_common
  * check_head_counts and the fastKV module's _NOT_GFX950. The pytest twin,
@@ -37,6 +39,8 @@ static const char* const NOT_GFX950
     = "fastKV register-P is a gfx950 kernel; gfx942 is not supported";
 static const char* const STAGGERED_EARLY_V
     = "use_staggered_iter_wait does not support use_early_v_schedule";
+static const char* const GFX942_3D_I64
+    = "gfx942 tiled 3D kernel does not support use_i64_kv_addr (paged KV cache > 2 GiB) yet";
 static const char* const KQ_PAD_STAGED_Q
     = "KQ LDS pad failed - use_q_reread=False, use_q_direct_reg=False, expected one of them "
       "True (transposed 32x32 path) or use_kq_lds_pad=False (Q staged in the padded single K "
@@ -248,10 +252,24 @@ static int check_gfx950_kq_pad_staged_q(void)
     return expect_refused("gfx950 2D KQ pad + staged Q", st, ll, err, KQ_PAD_STAGED_Q);
 }
 
+static int check_gfx942_3d_i64_kv_addr(void)
+{
+    char err[512];
+    char* ll = NULL;
+    rocke_unified_attention_3d_tiled_spec_t s = spec_3d(32, 8);
+    s.use_i64_kv_addr = true;
+
+    err[0] = '\0';
+    const rocke_status_t st = rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm(
+        &s, "gfx942", ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof(err));
+    return expect_refused("gfx942 3D use_i64_kv_addr", st, ll, err, GFX942_3D_I64);
+}
+
 int main(void)
 {
     const int failures = check_head_counts() + check_fastkv_arch()
-                         + check_gfx950_staggered_early_v() + check_gfx950_kq_pad_staged_q();
+                         + check_gfx950_staggered_early_v() + check_gfx950_kq_pad_staged_q()
+                         + check_gfx942_3d_i64_kv_addr();
     if(failures != 0)
     {
         fprintf(stderr, "%d TILED ATTENTION ENTRY GUARD CHECK(S) FAILED\n", failures);
