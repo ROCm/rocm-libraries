@@ -333,7 +333,7 @@ FlexTailSplit flexTailSplit(long long rowTiles,
 /// The flex tile's fixed cost of one more split, in its k-steps (the partials' round trip and
 /// the reduce launch), by form: 1, the LDS-DMA form, runs a k-step in about half the time of 2,
 /// the register-staged form, so the same round trip costs it more k-steps.
-inline constexpr long long flexSplitCost(int64_t form)
+constexpr long long flexSplitCost(int64_t form)
 {
     return form == 1 ? 20 : 14;
 }
