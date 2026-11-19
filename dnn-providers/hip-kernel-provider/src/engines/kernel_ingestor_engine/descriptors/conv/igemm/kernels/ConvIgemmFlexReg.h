@@ -23,8 +23,9 @@
 //   [mem A]     every fragment read of the step (two 64-byte halves of the slice);
 //   [compute A] the first half's MMAs at raised priority;
 //   [mem B]     the group's share of the next step's tile from registers into the stage (the
-//               other group has finished its reads of this step one phase earlier);
-//   [compute B] the loads of the step after next, then the second half's MMAs.
+//               other group has finished its reads of this step one phase earlier), then the
+//               loads of the step after next;
+//   [compute B] the second half's MMAs.
 // So on every SIMD one wave multiplies while the other reads or writes LDS.
 //
 // A 16-byte granule holds GE = 16 / sizeof(T) consecutive channels; lane group f (lane / 16)
@@ -355,13 +356,14 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
         // [compute A]
         mmas(0);
         k1FlexBarrier();
-        // [mem B]: the next step's tile (loaded one step ago) into the stage.
+        // [mem B]: the next step's tile (loaded one step ago) into the stage, then the loads of
+        // the step after next, so the compute phases issue only MMAs.
         __builtin_amdgcn_s_waitcnt(0x0F70); // vmcnt(0)
         store();
+        load();
         __builtin_amdgcn_s_waitcnt(0xC07F); // lgkmcnt(0)
         k1FlexBarrier();
-        // [compute B]: the loads of the step after next, then the second half.
-        load();
+        // [compute B]: the second half.
         mmas(1);
         k1FlexBarrier();
     }
