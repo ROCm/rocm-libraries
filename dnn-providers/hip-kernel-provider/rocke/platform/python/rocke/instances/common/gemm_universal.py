@@ -1785,6 +1785,26 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # many bytes per parity step.
         _tdm_a_buf_bytes = block_m * _lds_k * _tdm_elem_bytes
         _tdm_b_buf_bytes = block_n * _lds_k * _tdm_elem_bytes
+        # EXPERIMENT: ROCKE_EXP_LDS_ILV=1 (with ROCKE_EXP_MX_ROWMAP) places the
+        # data per buffer, as the mx_gemm prototype does: buffer p's A at
+        # p * S and its B at p * S + BOFF, both from A_smem's start, inside the
+        # A_smem + B_smem region. S = ROCKE_EXP_LDS_ILV_S (default half the
+        # region), BOFF = ROCKE_EXP_LDS_ILV_B (default one padded operand
+        # buffer). The TDM fills one buffer while the waves read the other.
+        _lds_ilv = _os_mx.environ.get("ROCKE_EXP_LDS_ILV") == "1"
+        _lds_data_bytes = (_A_LDS_M + _B_LDS_N) * _lds_k * _tdm_elem_bytes
+        _lds_ilv_s = int(_os_mx.environ.get("ROCKE_EXP_LDS_ILV_S", "0")) or _lds_data_bytes // 2
+        _lds_ilv_b = int(_os_mx.environ.get("ROCKE_EXP_LDS_ILV_B", "0")) or _tdm_a_buf_bytes
+        if _lds_ilv and _lds_ilv_s + _lds_ilv_b + (block_n // 8) * 2064 > _lds_data_bytes:
+            raise ValueError("ROCKE_EXP_LDS_ILV: buffer 1's B runs past the data region")
+
+        def _lds_data_off(operand: str, p: int) -> int:
+            """Byte offset of ``operand``'s buffer ``p`` from A_smem's start."""
+            if _lds_ilv:
+                return p * _lds_ilv_s + (_lds_ilv_b if operand == "b" else 0)
+            if operand == "a":
+                return p * _tdm_a_buf_bytes
+            return _A_LDS_M * _lds_k * _tdm_elem_bytes + p * _tdm_b_buf_bytes
         # The waves the kernel launches. Not warp_m * warp_n * warp_k: with
         # warp_k > 1 that counts waves a block_size of warp_m * warp_n waves
         # never launches, and a fill gated on one of them never happens.
@@ -2001,6 +2021,11 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         # Blocks of 8 rows (2048 B) plus a 16 B pad, by TDM
                         # iterate mode (see the read side in the MX read-ahead
                         # loop): component c starts at block 16 c.
+                        if _lds_ilv:
+                            if isinstance(lds_parity, Value):
+                                raise ValueError("ROCKE_EXP_LDS_ILV needs a static buffer parity")
+                            a_lds = b.smem_ptr_add(_tdm_a_lds_base, b.zext(b.const_i32(_lds_data_off("a", lds_parity)), _I64))
+                            b_lds = b.smem_ptr_add(_tdm_a_lds_base, b.zext(b.const_i32(_lds_data_off("b", lds_parity)), _I64))
                         lds_c = b.add(sel(a_lds, b_lds), b.zext(b.mul(comp, b.const_i32((half_rows // 8) * 2064)), _I64))
                         groups = b.tdm_descriptor_2d(
                             gaddr, lds_c, elem_bytes=_tdm_elem_bytes, tensor_dim0=k_rem,
@@ -3384,10 +3409,17 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             def _opaque(v):
                 return b.inline_asm("v_mov_b32 $0, $1", "=v,v", [v], I32, sideeffect=False)
 
-            rmb = {
-                "a": [_opaque(b.add(_rm_base(warp_m_off), b.const_i32(p * buf_bytes if _prefetch else 0))) for p in (0, 1)],
-                "b": [_opaque(b.add(_rm_base(warp_n_off), b.const_i32(p * buf_bytes if _prefetch else 0))) for p in (0, 1)],
-            }
+            if _lds_ilv:
+                # Both operands are addressed from A_smem's start.
+                rmb = {
+                    "a": [_opaque(b.add(_rm_base(warp_m_off), b.const_i32(_lds_data_off("a", p)))) for p in (0, 1)],
+                    "b": [_opaque(b.add(_rm_base(warp_n_off), b.const_i32(_lds_data_off("b", p)))) for p in (0, 1)],
+                }
+            else:
+                rmb = {
+                    "a": [_opaque(b.add(_rm_base(warp_m_off), b.const_i32(p * buf_bytes if _prefetch else 0))) for p in (0, 1)],
+                    "b": [_opaque(b.add(_rm_base(warp_n_off), b.const_i32(p * buf_bytes if _prefetch else 0))) for p in (0, 1)],
+                }
 
             def _rm_frag(src, bases, p, kk, r):
                 frag = None
@@ -3409,7 +3441,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
 
         def rd_b(p, kk, ni):
             if rowmap:
-                return _rm_frag(B_smem, rmb["b"], p, kk, ni)
+                return _rm_frag(A_smem if _lds_ilv else B_smem, rmb["b"], p, kk, ni)
             row = b.add(warp_n_off, b.const_i32(ni * t.warp_tile_n + (p * block_n if _prefetch else 0)))
             kb = b.const_i32(kk * t.warp_tile_k)
             return _emit_frag_smem_load(B_smem, b_col_in_atom, k_in_atom, row, kb, b_per_lane, 32)

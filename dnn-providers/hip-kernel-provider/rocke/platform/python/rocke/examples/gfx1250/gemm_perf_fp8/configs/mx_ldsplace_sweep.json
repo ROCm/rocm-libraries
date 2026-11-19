@@ -1,0 +1,165 @@
+{
+  "_comment": "mx_env_sweep.py config: LDS placement. The row-map kernel with each buffer's A and B together (ROCKE_EXP_LDS_ILV=1, as the mx_gemm prototype lays out LDS), buffer 1 at S bytes (default half the data region; ilvref = the prototype's 136832 with B right after A; 144 KiB; 160 KiB), so the TDM fill of one buffer and the reads of the other touch different LDS ranges; r1* on the prototype's K-atom order. Cluster 4x4. MAF shape; time with --data mxgemm.",
+  "base_env": {
+    "ROCKE_EXP_MX": "1",
+    "ROCKE_EXP_MX_SWZ": "1",
+    "ROCKE_EXP_MX_SCALE_MC": "0",
+    "ROCKE_EXP_MX_KFENCE": "1",
+    "ROCKE_EXP_MX_SCALE_NOCLIP": "1",
+    "ROCKE_EXP_MC_SOLO0": "1"
+  },
+  "variants": [
+    {
+      "name": "cs0nbpf4",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1"
+      }
+    },
+    {
+      "name": "cs0nbpf4rm",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_ROWMAP": "1",
+        "ROCKE_EXP_MX_SWZ": "0"
+      }
+    },
+    {
+      "name": "ilv",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_ROWMAP": "1",
+        "ROCKE_EXP_MX_SWZ": "0",
+        "ROCKE_EXP_LDS_ILV": "1"
+      }
+    },
+    {
+      "name": "ilvref",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_ROWMAP": "1",
+        "ROCKE_EXP_MX_SWZ": "0",
+        "ROCKE_EXP_LDS_ILV": "1",
+        "ROCKE_EXP_LDS_ILV_S": "136832",
+        "ROCKE_EXP_LDS_ILV_B": "66048"
+      }
+    },
+    {
+      "name": "ilv144k",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_ROWMAP": "1",
+        "ROCKE_EXP_MX_SWZ": "0",
+        "ROCKE_EXP_LDS_ILV": "1",
+        "ROCKE_EXP_LDS_ILV_S": "147456",
+        "ROCKE_EXP_LDS_ILV_B": "66048"
+      }
+    },
+    {
+      "name": "ilv160k",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_ROWMAP": "1",
+        "ROCKE_EXP_MX_SWZ": "0",
+        "ROCKE_EXP_LDS_ILV": "1",
+        "ROCKE_EXP_LDS_ILV_S": "163840",
+        "ROCKE_EXP_LDS_ILV_B": "66048"
+      }
+    },
+    {
+      "name": "r1ilvref",
+      "env": {
+        "ROCKE_EXP_MX_RA": "1",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CS": "6",
+        "ROCKE_EXP_MX_RA_PEND": "36",
+        "ROCKE_EXP_MX_ROWMAP": "1",
+        "ROCKE_EXP_MX_SWZ": "0",
+        "ROCKE_EXP_LDS_ILV": "1",
+        "ROCKE_EXP_LDS_ILV_S": "136832",
+        "ROCKE_EXP_LDS_ILV_B": "66048"
+      }
+    },
+    {
+      "name": "r1ilv160k",
+      "env": {
+        "ROCKE_EXP_MX_RA": "1",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CS": "6",
+        "ROCKE_EXP_MX_RA_PEND": "36",
+        "ROCKE_EXP_MX_ROWMAP": "1",
+        "ROCKE_EXP_MX_SWZ": "0",
+        "ROCKE_EXP_LDS_ILV": "1",
+        "ROCKE_EXP_LDS_ILV_S": "163840",
+        "ROCKE_EXP_LDS_ILV_B": "66048"
+      }
+    }
+  ],
+  "arms": [
+    {
+      "name": "c4x4",
+      "cluster": "4,4"
+    }
+  ],
+  "shapes": [
+    [
+      3072,
+      4096,
+      65536
+    ]
+  ],
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}
