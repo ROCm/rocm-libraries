@@ -309,7 +309,7 @@ class FusedMegaKernelSpecFp8:
 
 
 # ---------------------------------------------------------------------------
-# Grid + signature (the grid is ALGORITHM.md §4)
+# Grid + signature (the grid is ALGORITHM.md §4; the persistent grid, §8.3)
 # ---------------------------------------------------------------------------
 
 
