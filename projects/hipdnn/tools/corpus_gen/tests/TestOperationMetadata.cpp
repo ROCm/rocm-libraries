@@ -425,4 +425,50 @@ TEST(TestOperationMetadata, AConditionalDimsElementIsOmittedWhenItsConditionIsFa
               (std::vector<int64_t>{4, 512, 1024}));
 }
 
+TEST(TestOperationMetadata, AWeightMustNameADeclaredValueAndBePositive)
+{
+    // A weight that names nothing, or that cannot be a frequency, would otherwise be ignored and
+    // leave the corpus at equal shares while the declaration says otherwise.
+    const auto errorFor = [](const std::string& parameter) {
+        auto declaration = layernormMetadata();
+        declaration["parameters"]["dtype"] = nlohmann::json::parse(parameter);
+        const auto load = parseOperationMetadata(declaration);
+        return load.errors.empty() ? std::string() : load.errors.front();
+    };
+
+    EXPECT_TRUE(errorFor(R"({"type": "enum", "values": ["fp32", "fp16"],
+                             "weights": {"fp32": 2, "fp16": 1}})")
+                    .empty());
+    EXPECT_NE(errorFor(R"({"type": "enum", "values": ["fp32", "fp16"],
+                           "weights": {"bf16": 2}})")
+                  .find("undeclared value 'bf16'"),
+              std::string::npos);
+    EXPECT_NE(errorFor(R"({"type": "enum", "values": ["fp32", "fp16"],
+                           "weights": {"fp32": 0}})")
+                  .find("above 0"),
+              std::string::npos);
+    EXPECT_NE(errorFor(R"({"type": "enum", "values": ["fp32", "fp16"],
+                           "weights": {"fp32": -1}})")
+                  .find("above 0"),
+              std::string::npos);
+    EXPECT_NE(errorFor(R"({"type": "int64", "weights": {"1": 2}})").find("not an enum"),
+              std::string::npos);
+}
+
+TEST(TestOperationMetadata, AValueWithoutAWeightWeighsOneAndWeightsAreRelativeToTheirMean)
+{
+    auto declaration = layernormMetadata();
+    declaration["parameters"]["dtype"] = nlohmann::json::parse(
+        R"({"type": "enum", "values": ["fp32", "fp16", "bf16"], "weights": {"fp32": 4}})");
+    const auto load = parseOperationMetadata(declaration);
+    ASSERT_TRUE(load.ok()) << (load.errors.empty() ? "" : load.errors.front());
+
+    const auto* dtype = load.metadata->find("dtype");
+    ASSERT_NE(dtype, nullptr);
+    // 4, 1, 1: the mean is 2, so fp32 is twice as common as average and the others half.
+    EXPECT_DOUBLE_EQ(dtype->relativeWeight("fp32"), 2.0);
+    EXPECT_DOUBLE_EQ(dtype->relativeWeight("fp16"), 0.5);
+    EXPECT_DOUBLE_EQ(load.metadata->find("forward_phase")->relativeWeight("TRAINING"), 1.0);
+}
+
 } // namespace hipdnn_corpus_gen

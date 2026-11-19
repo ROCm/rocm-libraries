@@ -23,6 +23,7 @@
 #include <numeric>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <variant>
 #include <vector>
 
@@ -947,6 +948,9 @@ TEST(TestGraphBuilderRegistry, TheShippedSdpaMetadataBuildsGraphsTheEnginesAccep
                              {"is_causal", false},
                              {"alignment", std::string("top_left")},
                              {"generate_stats", false},
+                             {"layout", std::string("bshd")},
+                             {"scale", std::string("inv_sqrt_d")},
+                             {"window", std::string("none")},
                              {"dtype", std::string("fp16")}};
     const auto built = buildGraphFor(*parsed.metadata, point);
     ASSERT_TRUE(built.ok()) << built.error;
@@ -1011,6 +1015,9 @@ TEST(TestGraphBuilderRegistry, ACausalSdpaGraphSaysCausalWithBoundsNotTheDepreca
                                  {"is_causal", true},
                                  {"alignment", anchor},
                                  {"generate_stats", false},
+                                 {"layout", std::string("bshd")},
+                                 {"scale", std::string("inv_sqrt_d")},
+                                 {"window", std::string("none")},
                                  {"dtype", std::string("bf16")}};
         const auto built = buildGraphFor(*parsed.metadata, point);
         ASSERT_TRUE(built.ok()) << anchor << ": " << built.error;
@@ -1071,6 +1078,9 @@ TEST(TestGraphBuilderRegistry, TheTrainingForwardWritesTheStatisticsItPromises)
                              {"is_causal", false},
                              {"alignment", std::string("top_left")},
                              {"generate_stats", true},
+                             {"layout", std::string("bshd")},
+                             {"scale", std::string("inv_sqrt_d")},
+                             {"window", std::string("none")},
                              {"dtype", std::string("bf16")}};
     const auto built = buildGraphFor(*parsed.metadata, point);
     ASSERT_TRUE(built.ok()) << built.error;
@@ -1215,6 +1225,204 @@ TEST(TestGraphBuilderRegistry, TheNormBackwardsReadTheStatisticsTheTrainingForwa
     expectStatistics(batch.bytes, batchNode->mean_tensor_uid(), {1, 8, 1, 1}, "batchnorm mean");
     expectStatistics(
         batch.bytes, batchNode->inv_variance_tensor_uid(), {1, 8, 1, 1}, "batchnorm inv_variance");
+}
+
+namespace
+{
+
+/// GQA with seqlen_q != seqlen_k, so a wrong head count or sequence length in any stride shows.
+ProblemPoint attentionPoint(const std::string& operation, const std::string& layout)
+{
+    ProblemPoint point{{"batch", int64_t{2}},
+                       {"heads", int64_t{8}},
+                       {"heads_kv", int64_t{2}},
+                       {"seqlen_q", int64_t{16}},
+                       {"seqlen_k", int64_t{32}},
+                       {"head_dim", int64_t{64}},
+                       {"is_causal", false},
+                       {"alignment", std::string("top_left")},
+                       {"dtype", std::string("fp16")},
+                       {"layout", layout},
+                       {"scale", std::string("inv_sqrt_d")}};
+    if(operation == "sdpa_fwd")
+    {
+        point["generate_stats"] = false;
+        point["window"] = std::string("none");
+    }
+    return point;
+}
+
+std::map<std::string, std::vector<int64_t>> stridesByName(const GraphBytes& bytes)
+{
+    std::map<std::string, std::vector<int64_t>> byName;
+    for(const auto* tensor : *asGraph(bytes)->tensors())
+    {
+        byName[tensor->name()->str()]
+            = std::vector<int64_t>(tensor->strides()->begin(), tensor->strides()->end());
+    }
+    return byName;
+}
+
+/// The scale and band the node carries, whichever direction it runs in.
+struct SdpaScaleAndBand
+{
+    std::optional<float> scale;
+    std::optional<int64_t> left;
+    std::optional<int64_t> right;
+};
+
+SdpaScaleAndBand scaleAndBand(const GraphBytes& bytes)
+{
+    const auto* node = asGraph(bytes)->nodes()->Get(0);
+    SdpaScaleAndBand out;
+    const auto take = [&out](const auto* attributes) {
+        ASSERT_NE(attributes, nullptr);
+        if(attributes->attn_scale_value().has_value())
+        {
+            out.scale = attributes->attn_scale_value().value();
+        }
+        if(attributes->left_bound().has_value())
+        {
+            out.left = attributes->left_bound().value();
+        }
+        if(attributes->right_bound().has_value())
+        {
+            out.right = attributes->right_bound().value();
+        }
+    };
+    if(node->attributes_as_SdpaAttributes() != nullptr)
+    {
+        take(node->attributes_as_SdpaAttributes());
+    }
+    else
+    {
+        take(node->attributes_as_SdpaBackwardAttributes());
+    }
+    return out;
+}
+
+} // namespace
+
+TEST(TestGraphBuilderRegistry, EverySdpaLayoutStridesEachOperandAsItIsNamed)
+{
+    // BSHD = [S*H*D, D, H*D, 1]; BHSD = [H*S*D, S*D, D, 1]. kv_bhsd is the decode KV cache: the
+    // query side token-major and the key/value side head-major, in both directions.
+    const std::vector<int64_t> tokenQ{16 * 8 * 64, 64, 8 * 64, 1};
+    const std::vector<int64_t> headQ{8 * 16 * 64, 16 * 64, 64, 1};
+    const std::vector<int64_t> tokenKv{32 * 2 * 64, 64, 2 * 64, 1};
+    const std::vector<int64_t> headKv{2 * 32 * 64, 32 * 64, 64, 1};
+
+    struct Layout
+    {
+        std::string name;
+        const std::vector<int64_t>& query;
+        const std::vector<int64_t>& keyValue;
+    };
+    const std::vector<Layout> layouts{
+        {"bshd", tokenQ, tokenKv}, {"bhsd", headQ, headKv}, {"kv_bhsd", tokenQ, headKv}};
+
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        const auto metadata = shipped(operation);
+        const std::vector<std::string> queryTensors
+            = operation == "sdpa_fwd" ? std::vector<std::string>{"q", "o"}
+                                      : std::vector<std::string>{"q", "o", "dO", "dq"};
+        const std::vector<std::string> keyValueTensors
+            = operation == "sdpa_fwd" ? std::vector<std::string>{"k", "v"}
+                                      : std::vector<std::string>{"k", "v", "dk", "dv"};
+
+        for(const auto& layout : layouts)
+        {
+            const auto built = buildGraphFor(metadata, attentionPoint(operation, layout.name));
+            ASSERT_TRUE(built.ok()) << operation << " " << layout.name << ": " << built.error;
+            const auto strides = stridesByName(built.bytes);
+            for(const auto& name : queryTensors)
+            {
+                EXPECT_EQ(strides.at(name), layout.query)
+                    << operation << " " << layout.name << " " << name;
+            }
+            for(const auto& name : keyValueTensors)
+            {
+                EXPECT_EQ(strides.at(name), layout.keyValue)
+                    << operation << " " << layout.name << " " << name;
+            }
+        }
+    }
+}
+
+TEST(TestGraphBuilderRegistry, EverySdpaScaleWritesTheAttributeItNames)
+{
+    // head_dim 64: 1/sqrt(D) = 0.125. jitter scales it by 0.5 + (seqlen_k % 16) / 8, so it moves
+    // with seqlen_k: 32 % 16 = 0 gives 0.5, 37 % 16 = 5 gives 1.125.
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        const auto metadata = shipped(operation);
+        const std::vector<std::tuple<std::string, int64_t, float>> cases{{"inv_sqrt_d", 32, 0.125F},
+                                                                         {"inv_sqrt_d", 37, 0.125F},
+                                                                         {"unit", 32, 1.0F},
+                                                                         {"jitter", 32, 0.0625F},
+                                                                         {"jitter", 37, 0.140625F}};
+        for(const auto& [scale, seqlenK, expected] : cases)
+        {
+            auto point = attentionPoint(operation, "bshd");
+            point["scale"] = scale;
+            point["seqlen_k"] = seqlenK;
+            const auto built = buildGraphFor(metadata, point);
+            ASSERT_TRUE(built.ok()) << operation << " " << scale << ": " << built.error;
+            const auto node = scaleAndBand(built.bytes);
+            ASSERT_TRUE(node.scale.has_value())
+                << operation << " " << scale << " left the scale unset";
+            EXPECT_FLOAT_EQ(*node.scale, expected)
+                << operation << " " << scale << " seqlen_k " << seqlenK;
+        }
+    }
+}
+
+TEST(TestGraphBuilderRegistry, ASlidingWindowWritesItsLeftBoundAndNoWindowWritesNone)
+{
+    const auto metadata = shipped("sdpa_fwd");
+    const std::vector<std::pair<std::string, std::optional<int64_t>>> cases{
+        {"none", std::nullopt}, {"local_128", 128}, {"local_1024", 1024}, {"local_4096", 4096}};
+    for(const auto& [window, expected] : cases)
+    {
+        auto point = attentionPoint("sdpa_fwd", "bshd");
+        point["is_causal"] = true;
+        point["seqlen_k"] = int64_t{16};
+        point["window"] = window;
+        const auto built = buildGraphFor(metadata, point);
+        ASSERT_TRUE(built.ok()) << window << ": " << built.error;
+        const auto node = scaleAndBand(built.bytes);
+        EXPECT_EQ(node.left, expected) << window;
+        // The causal right bound is the mask's, not the window's.
+        ASSERT_TRUE(node.right.has_value()) << window;
+        EXPECT_EQ(*node.right, 0) << window;
+    }
+}
+
+TEST(TestGraphBuilderRegistry, Fp32IsADeclaredSdpaDtypeAndBuildsFloatOperands)
+{
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        const auto metadata = shipped(operation);
+        const auto* dtype = metadata.find("dtype");
+        ASSERT_NE(dtype, nullptr) << operation;
+        EXPECT_NE(std::find(dtype->values.begin(), dtype->values.end(), "fp32"),
+                  dtype->values.end())
+            << operation << " does not declare fp32";
+
+        auto point = attentionPoint(operation, "bshd");
+        point["dtype"] = std::string("fp32");
+        const auto built = buildGraphFor(metadata, point);
+        ASSERT_TRUE(built.ok()) << operation << ": " << built.error;
+        const auto* graph = asGraph(built.bytes);
+        EXPECT_EQ(graph->io_data_type(), hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+            << operation;
+        for(const auto* tensor : *graph->tensors())
+        {
+            EXPECT_EQ(tensor->data_type(), hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+                << operation << " " << tensor->name()->str();
+        }
+    }
 }
 
 } // namespace hipdnn_corpus_gen

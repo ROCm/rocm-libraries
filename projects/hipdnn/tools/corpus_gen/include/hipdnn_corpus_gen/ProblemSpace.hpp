@@ -89,6 +89,14 @@ struct ExplorationRequest
     /// Maximum oracle budget, as a multiple of @ref budgetPerCombination, a combination may grow
     /// to. Hitting it is a search limit, reported as such.
     int64_t budgetGrowthLimit = 64;
+
+    /// Scales the archetype and neighbourhood quotas with @ref corpusTarget instead of fixing
+    /// them at the mixture's share of @ref pointsPerCombination: each combination's anchored
+    /// quota is the mixture share of max(pointsPerCombination, corpusTarget / combinations), so
+    /// the declared mixture holds at a large --count rather than collapsing into the
+    /// exploration share. Off by default (the fixed quotas); without a corpusTarget it changes
+    /// nothing.
+    bool anchorScaling = false;
 };
 
 /// One categorical assignment and what the numeric search found under it.
@@ -150,6 +158,25 @@ struct ProblemCorpus
             all.insert(all.end(), combination.problems.begin(), combination.problems.end());
         }
         return all;
+    }
+
+    /// Problems drawn from archetypes or their neighbourhood, over every combination.
+    int64_t anchoredProblems() const
+    {
+        int64_t anchored = 0;
+        for(const auto& combination : combinations)
+        {
+            anchored += combination.fromArchetypes + combination.fromNeighbourhood;
+        }
+        return anchored;
+    }
+
+    /// Anchored problems over every problem found, 0 for an empty corpus: the mixture the
+    /// corpus actually realised, as against the one the declaration asks for.
+    double anchoredShare() const
+    {
+        const auto all = problems().size();
+        return all == 0 ? 0.0 : static_cast<double>(anchoredProblems()) / static_cast<double>(all);
     }
 };
 
@@ -441,6 +468,37 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
     // Per-combination state kept for the growth pass. The memo makes growing affordable: a
     // longer walk from the same seed retraces the shorter one, answered from here.
     std::vector<FeasibleSetRequest> searches(combinations.size());
+    // How large each combination is relative to the average (Parameter::weights): the product,
+    // over weighted parameters, of its value's weight over the mean weight. Every combination is
+    // 1 when nothing is weighted, and then the sizes below are exactly the unweighted ones.
+    std::vector<double> sizes(combinations.size(), 1.0);
+    const bool weighted
+        = std::any_of(metadata.parameters.begin(),
+                      metadata.parameters.end(),
+                      [](const Parameter& parameter) { return !parameter.weights.empty(); });
+    if(weighted)
+    {
+        for(size_t index = 0; index < combinations.size(); ++index)
+        {
+            for(const auto& parameter : metadata.parameters)
+            {
+                const auto found = combinations[index].find(parameter.name);
+                if(!parameter.weights.empty() && found != combinations[index].end())
+                {
+                    sizes[index] *= parameter.relativeWeight(std::get<std::string>(found->second));
+                }
+            }
+        }
+    }
+    // The per-combination problem count: pointsPerCombination, scaled by the combination's size.
+    const auto pointsFor = [&](size_t index) {
+        return weighted
+                   ? std::max<int64_t>(
+                         1,
+                         static_cast<int64_t>(std::llround(
+                             static_cast<double>(request.pointsPerCombination) * sizes[index])))
+                   : request.pointsPerCombination;
+    };
     std::vector<size_t> anchoredCounts(combinations.size(), 0);
     std::vector<std::map<Shape, bool>> answered(combinations.size());
     /// Held points the search reached, per combination.
@@ -523,7 +581,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         FeasibleSetRequest search;
         search.seeds = skeleton;
         search.dimensions = numericWindow;
-        search.targetCount = request.pointsPerCombination;
+        search.targetCount = pointsFor(index);
         search.oracleBudget = request.budgetPerCombination;
         search.restarts = request.restarts;
         search.stepsPerStart = request.stepsPerStart;
@@ -563,7 +621,14 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         size_t neighbourhoodQuota = 0;
         if(!metadata.mixture.isExplorationOnly())
         {
-            const auto total = static_cast<double>(request.pointsPerCombination);
+            // Problems per combination the mixture shares apply to.
+            auto total = static_cast<double>(pointsFor(index));
+            if(request.anchorScaling && request.corpusTarget > 0)
+            {
+                total = std::max(total,
+                                 static_cast<double>(request.corpusTarget) * sizes[index]
+                                     / static_cast<double>(combinations.size()));
+            }
             archetypeQuota
                 = static_cast<size_t>(std::max(0.0, metadata.mixture.archetypes * total));
             neighbourhoodQuota
@@ -614,8 +679,8 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         }
 
         // The search fills whatever the anchored draws did not.
-        search.targetCount = std::max<int64_t>(
-            0, request.pointsPerCombination - static_cast<int64_t>(result.problems.size()));
+        search.targetCount
+            = std::max<int64_t>(0, pointsFor(index) - static_cast<int64_t>(result.problems.size()));
 
         // Admitted points seed the walk inside the served region.
         for(const auto& point : result.problems)
@@ -705,10 +770,21 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             break;
         }
 
-        const auto share = (need + static_cast<int64_t>(growable.size()) - 1)
-                           / static_cast<int64_t>(growable.size());
+        double growableSize = 0.0;
         for(const auto index : growable)
         {
+            growableSize += sizes[index];
+        }
+        // Each combination's share of what is missing: equal when nothing is weighted.
+        const auto shareFor = [&](size_t index) {
+            return weighted ? static_cast<int64_t>(std::ceil(static_cast<double>(need)
+                                                             * sizes[index] / growableSize))
+                            : (need + static_cast<int64_t>(growable.size()) - 1)
+                                  / static_cast<int64_t>(growable.size());
+        };
+        for(const auto index : growable)
+        {
+            const auto share = shareFor(index);
             auto& result = corpus.combinations[index];
             auto& search = searches[index];
             const auto oracle = oracleFor(index);

@@ -201,6 +201,13 @@ void printHelp(const char* program)
               << "                         per-combination count is --per-combination.\n"
               << "  --per-combination <n>  First-pass problems per categorical combination\n"
               << "                         (default 50)\n"
+              << "  --anchor-scaling       Scale each combination's archetype and neighbourhood\n"
+              << "                         quotas with --count, to the mixture share of\n"
+              << "                         max(--per-combination, count / combinations), so the\n"
+              << "                         declared mixture holds at a large --count instead of\n"
+              << "                         diluting into exploration. Default off (fixed quotas).\n"
+              << "                         manifest.json's anchored_share reports the share\n"
+              << "                         realised, with or without it\n"
               << "  --kdp-root <path>      A *.kdp.json pack, or a directory of them (repeatable)\n"
               << "  --model-shapes <csv>   Recorded shapes as q.<parameter> columns (repeatable)\n"
               << "  --model-share <f>      Share of the corpus per source; a share of 0\n"
@@ -316,6 +323,10 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         else if(arg == "--per-combination")
         {
             reader.integer(options.exploration.pointsPerCombination, 1);
+        }
+        else if(arg == "--anchor-scaling")
+        {
+            options.exploration.anchorScaling = true;
         }
         else if(arg == "--kdp-root" || arg == "--kdp")
         {
@@ -1081,6 +1092,9 @@ int runGenerator(const std::vector<std::string>& args)
     std::vector<std::string> quotaShort;
     /// Per operation: each numeric parameter's served extent, and the extremes taken.
     nlohmann::json servedExtent = nlohmann::json::object();
+    nlohmann::json anchoredShare = nlohmann::json::object();
+    /// Per operation, the declared value weights of each weighted categorical parameter.
+    nlohmann::json categoricalWeights = nlohmann::json::object();
     bool searchFoundMore = false;
     std::ofstream commands;
     std::filesystem::path root;
@@ -1115,6 +1129,13 @@ int runGenerator(const std::vector<std::string>& args)
         hipdnn_corpus_gen::MetadataOperationCorpus result;
         result.metadataPath = operationEntry.first;
         result.operation = metadata.operation;
+        for(const auto& parameter : metadata.parameters)
+        {
+            if(!parameter.weights.empty())
+            {
+                categoricalWeights[result.operation][parameter.name] = parameter.weights;
+            }
+        }
 
         // Every source passes the same engine test; a problem is served only if every named
         // engine serves it. The byte ceiling applies only to the search: pack and model shapes
@@ -1252,6 +1273,11 @@ int runGenerator(const std::vector<std::string>& args)
         {
             result.corpus
                 = hipdnn_corpus_gen::exploreProblemSpace(metadata, request, admits, alreadyPooled);
+            anchoredShare[result.operation] = nlohmann::json{
+                {"anchored", result.corpus.anchoredProblems()},
+                {"explored", static_cast<int64_t>(result.corpus.problems().size())},
+                {"share", result.corpus.anchoredShare()},
+                {"anchor_scaling", request.anchorScaling}};
         }
         else
         {
@@ -1663,6 +1689,14 @@ int runGenerator(const std::vector<std::string>& args)
         if(!servedExtent.empty())
         {
             manifest.reports["served_extent"] = servedExtent;
+        }
+        if(!anchoredShare.empty())
+        {
+            manifest.reports["anchored_share"] = anchoredShare;
+        }
+        if(!categoricalWeights.empty())
+        {
+            manifest.reports["categorical_weights"] = categoricalWeights;
         }
         if(options.count > 0 && total < requested && !shortfall.empty())
         {

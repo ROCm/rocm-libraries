@@ -15,9 +15,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include "OperationsDir.hpp"
+#include <fstream>
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace hipdnn_corpus_gen
 {
@@ -601,6 +604,225 @@ TEST(TestProblemSpace, NothingServedHasNoEdges)
     {
         EXPECT_TRUE(combination.lowest.empty());
         EXPECT_TRUE(combination.highest.empty());
+    }
+}
+
+namespace
+{
+
+/// Two combinations, each with an archetype list and neighbourhoods wide enough that the
+/// anchored draws are not limited by the number of distinct points they can reach.
+OperationMetadata anchoredToy()
+{
+    return metadataFor(R"({
+      "schema_version": "1.0",
+      "operation": "toy",
+      "parameters": {
+        "M":     { "type": "int64" },
+        "N":     { "type": "int64" },
+        "dtype": { "type": "enum", "values": ["fp32", "fp16"] }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "createValidMatmulGraph", "source": "x.hpp",
+                         "arguments": [] },
+      "archetypes": [
+        { "name": "layers",
+          "values": { "M": [64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536],
+                      "N": [64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536] } }
+      ],
+      "neighbourhood": {
+        "M": { "kind": "scale", "factors": [0.5, 0.75, 1, 1.5, 2] },
+        "N": { "kind": "scale", "factors": [0.5, 1, 2] }
+      },
+      "mixture": { "archetypes": 0.2, "neighbourhood": 0.6, "exploration": 0.2 }
+    })");
+}
+
+std::vector<std::string> described(const ProblemCorpus& corpus)
+{
+    std::vector<std::string> out;
+    for(const auto& point : corpus.problems())
+    {
+        out.push_back(detail::describe(point));
+    }
+    return out;
+}
+
+} // namespace
+
+TEST(TestProblemSpace, TheAnchoredShareCollapsesAtALargeCountUnlessAnchorScalingHoldsIt)
+{
+    // The declared mixture is 80% anchored. The fixed quotas give each combination a few
+    // anchored draws however large the corpus, so at a large count the corpus is exploration;
+    // anchor scaling sizes the quotas to the target.
+    ExplorationRequest request;
+    request.pointsPerCombination = 10;
+    request.corpusTarget = 300;
+    request.seed = 6;
+
+    const auto fixed = exploreProblemSpace(anchoredToy(), request, ACCEPT_EVERYTHING);
+    request.anchorScaling = true;
+    const auto scaled = exploreProblemSpace(anchoredToy(), request, ACCEPT_EVERYTHING);
+
+    ASSERT_GE(fixed.problems().size(), 300U);
+    ASSERT_GE(scaled.problems().size(), 300U);
+    EXPECT_LT(fixed.anchoredShare(), 0.2);
+    // Growth past the target is made of exploration, so the realised share sits below the
+    // declared 0.8; the point is that it is not the few percent the fixed quotas leave.
+    EXPECT_GT(scaled.anchoredShare(), 0.4);
+}
+
+TEST(TestProblemSpace, AnchorScalingNeverShrinksTheFixedQuotasAndNeedsATarget)
+{
+    // max(pointsPerCombination, target / combinations): a target the first pass already covers,
+    // or none, leaves the corpus exactly as it was.
+    ExplorationRequest request;
+    request.pointsPerCombination = 10;
+    request.seed = 7;
+
+    for(const int64_t target : {int64_t{0}, int64_t{12}})
+    {
+        request.corpusTarget = target;
+        request.anchorScaling = false;
+        const auto fixed = exploreProblemSpace(anchoredToy(), request, ACCEPT_EVERYTHING);
+        request.anchorScaling = true;
+        const auto scaled = exploreProblemSpace(anchoredToy(), request, ACCEPT_EVERYTHING);
+        EXPECT_EQ(described(scaled), described(fixed)) << "target " << target;
+    }
+}
+
+TEST(TestProblemSpace, EveryShippedSdpaCombinationIsExploredAndNoDeclaredValueIsDropped)
+{
+    // Past maxCombinations the product is sampled; a facet added to SDPA must not push it over,
+    // or combinations (and so graphs) silently vanish from every corpus.
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/" + operation
+                           + ".opmeta.json");
+        ASSERT_TRUE(file.good()) << operation;
+        const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+        ASSERT_TRUE(parsed.ok()) << operation;
+
+        size_t total = 0;
+        const auto combinations = detail::categoricalCombinations(
+            parsed.metadata->parameters, ExplorationRequest{}.maxCombinations, total);
+        EXPECT_EQ(combinations.size(), total) << operation;
+        // is_causal 2 x alignment 2 x dtype 3 x layout 3 x scale 3, and for the forward
+        // generate_stats 2 x window 4.
+        EXPECT_EQ(total, operation == "sdpa_fwd" ? size_t{864} : size_t{108}) << operation;
+    }
+}
+
+TEST(TestProblemSpace, TheShippedSdpaConstraintsAdmitCrossAttentionOnlyWithoutACausalMask)
+{
+    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json");
+    ASSERT_TRUE(file.good());
+    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+    ASSERT_TRUE(parsed.ok());
+
+    const auto admits
+        = [&](int64_t seqlenQ, int64_t seqlenK, bool causal, const std::string& window) {
+              const ProblemPoint point{{"batch", int64_t{1}},
+                                       {"heads", int64_t{8}},
+                                       {"heads_kv", int64_t{8}},
+                                       {"seqlen_q", seqlenQ},
+                                       {"seqlen_k", seqlenK},
+                                       {"head_dim", int64_t{64}},
+                                       {"is_causal", causal},
+                                       {"alignment", std::string("top_left")},
+                                       {"dtype", std::string("fp16")},
+                                       {"generate_stats", false},
+                                       {"layout", std::string("bshd")},
+                                       {"scale", std::string("inv_sqrt_d")},
+                                       {"window", window}};
+              return detail::satisfiesConstraints(*parsed.metadata, point);
+          };
+
+    EXPECT_TRUE(admits(4096, 77, false, "none")) << "cross attention is bidirectional";
+    EXPECT_FALSE(admits(4096, 77, true, "none")) << "a causal mask needs seqlen_q <= seqlen_k";
+    EXPECT_TRUE(admits(2048, 2048, true, "none"));
+    EXPECT_TRUE(admits(2048, 2048, true, "local_1024"));
+    EXPECT_TRUE(admits(2048, 2048, false, "local_1024"))
+        << "the frontend accepts a left bound under any mask";
+}
+
+namespace
+{
+
+/// Two enums, one weighted 2:1:1, one not, over two numeric extents.
+OperationMetadata weightedToy(const std::string& weights)
+{
+    return metadataFor(R"({
+      "schema_version": "1.0",
+      "operation": "toy",
+      "parameters": {
+        "M":      { "type": "int64" },
+        "N":      { "type": "int64" },
+        "layout": { "type": "enum", "values": ["a", "b", "c"])"
+                       + weights + R"( },
+        "dtype":  { "type": "enum", "values": ["fp32", "fp16"] }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "createValidMatmulGraph", "source": "x.hpp",
+                         "arguments": [] }
+    })");
+}
+
+double shareOf(const ProblemCorpus& corpus, const std::string& parameter, const std::string& value)
+{
+    size_t held = 0;
+    const auto problems = corpus.problems();
+    for(const auto& point : problems)
+    {
+        held += std::get<std::string>(point.at(parameter)) == value ? 1 : 0;
+    }
+    return static_cast<double>(held) / static_cast<double>(problems.size());
+}
+
+} // namespace
+
+TEST(TestProblemSpace, AWeightedValueRealisesItsShareOfTheFirstPassAndOfTheGrownCorpus)
+{
+    const auto metadata = weightedToy(R"(, "weights": {"a": 2})");
+    for(const int64_t target : {int64_t{0}, int64_t{600}})
+    {
+        ExplorationRequest request;
+        request.pointsPerCombination = 40;
+        request.corpusTarget = target;
+        request.seed = 12;
+
+        const auto corpus = exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING);
+
+        // 2:1:1 is 0.5, 0.25, 0.25; the other enum stays even.
+        EXPECT_NEAR(shareOf(corpus, "layout", "a"), 0.5, 0.03) << "target " << target;
+        EXPECT_NEAR(shareOf(corpus, "layout", "b"), 0.25, 0.03) << "target " << target;
+        EXPECT_NEAR(shareOf(corpus, "layout", "c"), 0.25, 0.03) << "target " << target;
+        EXPECT_NEAR(shareOf(corpus, "dtype", "fp32"), 0.5, 0.03) << "target " << target;
+        if(target > 0)
+        {
+            EXPECT_GE(corpus.problems().size(), static_cast<size_t>(target));
+        }
+    }
+}
+
+TEST(TestProblemSpace, EqualWeightsAreExactlyNoWeights)
+{
+    // Weights are relative: declaring every value equal must not move a single problem, and a
+    // declaration without weights is the unweighted exploration.
+    for(const int64_t target : {int64_t{0}, int64_t{250}})
+    {
+        ExplorationRequest request;
+        request.pointsPerCombination = 25;
+        request.corpusTarget = target;
+        request.seed = 13;
+
+        const auto absent = exploreProblemSpace(weightedToy(""), request, ACCEPT_EVERYTHING);
+        const auto equal = exploreProblemSpace(
+            weightedToy(R"(, "weights": {"a": 3, "b": 3, "c": 3})"), request, ACCEPT_EVERYTHING);
+
+        EXPECT_EQ(described(equal), described(absent)) << "target " << target;
     }
 }
 

@@ -40,13 +40,21 @@ parameter repeated widens it. Examples:
 
 - `sdpa_fwd` for a bf16, head-dim-128, non-causal engine:
   `--keep q.dtype=bf16 --keep q.head_dim=128 --keep q.is_causal=false`
-  (`dtype` values are `fp16`, `bf16`; `is_causal` is a bool).
+  (`dtype` values are `fp16`, `bf16`, `fp32`; `is_causal` is a bool).
+- SDPA also varies `layout` (`bshd`, `bhsd`, `kv_bhsd`: the strides), `scale` (`inv_sqrt_d`,
+  `unit`, `jitter`) and, on `sdpa_fwd`, `window` (`none`, `local_128`, `local_1024`,
+  `local_4096`). An engine that serves only BSHD keeps `--keep q.layout=bshd`; otherwise leave
+  them free, since a set with one layout or one scale teaches a model nothing about them.
 - `pointwise` for an fp16 ADD kernel: `--keep q.dtype=fp16 --keep q.mode=ADD`
   (`mode` uses the FlatBuffers enumerator names ADD, MUL, SUB, DIV, MAX_OP, MIN_OP).
 
 Keep facets to what the engine **declares** it supports (its UMD/KMD constraints), not to what
 is convenient: every facet narrows the regimes the evaluation can see, and a regime missing
 from the set is a regime the report cannot warn about.
+
+An enum parameter may declare `weights` (value -> relative weight; unlisted values weigh 1): a
+combination's share of the set scales with its values' weights. The SDPA files keep the common
+configuration (BSHD, `1/sqrt(head_dim)`, no window) at about half of each facet.
 
 ## 3. Pack coverage (`--kdp-root`)
 
@@ -64,6 +72,9 @@ pack-coverage engine adds its entry there on its branch.
 - `--regime-quota` / `--regime-quotas` ask at least n problems in a named regime (a sizing's
   quotas use these); `--regime-floor n` asks n in every regime the operation declares and
   reports a regime the engine does not serve as short, without failing.
+- `--anchor-scaling` keeps the declared archetype/neighbourhood mixture at a large `--count`;
+  without it the anchored share falls as exploration fills the set. It changes the set, so it
+  is part of the set's identity like `--count` and `--seed`.
 - `--include-extremes` takes the served point at each end of every numeric parameter first;
   `--ceiling` is the largest extent searched. Every manifest records `served_extent` (how far
   the search reached; a maximum near the ceiling is marked `at_search_ceiling`).

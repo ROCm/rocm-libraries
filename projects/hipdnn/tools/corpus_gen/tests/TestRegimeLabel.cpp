@@ -343,7 +343,12 @@ TEST(TestRegimeFocus, AnUnservedRegimeCostsOnlyTheProbe)
 
     EXPECT_TRUE(found.problems.empty());
     EXPECT_TRUE(found.saturated);
-    EXPECT_LE(found.proposed, static_cast<int64_t>(request.maxCombinations) * request.probeBudget);
+    // The sample is capped at maxCombinations, plus one extra combination per declared value it
+    // missed, so the cap is what the enumeration actually yields.
+    size_t total = 0;
+    const auto combinations
+        = detail::categoricalCombinations(metadata.parameters, request.maxCombinations, total);
+    EXPECT_LE(found.proposed, static_cast<int64_t>(combinations.size()) * request.probeBudget);
 }
 
 TEST(TestRegimeFocus, EveryLabelTheFacetsCanSpellIsListedAndCompiles)

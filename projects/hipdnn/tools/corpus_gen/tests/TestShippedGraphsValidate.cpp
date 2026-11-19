@@ -126,3 +126,76 @@ TEST(TestShippedGraphsValidate, EveryDeclarationBuildsGraphsTheFrontendValidates
     }
     EXPECT_GT(operations, 0) << "no shipped declaration was found";
 }
+
+TEST(TestShippedGraphsValidate, EverySdpaLayoutScaleWindowAndSequenceRelationValidates)
+{
+    // The sweep above draws a couple of points per combination; these are the corners the SDPA
+    // facets add: cross attention (seqlen_q > seqlen_k, non-causal), the widest head, fp32, every
+    // layout, scale and window.
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/" + operation
+                           + ".opmeta.json");
+        ASSERT_TRUE(file.good()) << operation;
+        const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+        ASSERT_TRUE(parsed.ok()) << operation;
+
+        struct Shape
+        {
+            int64_t seqlenQ;
+            int64_t seqlenK;
+            int64_t headDim;
+            bool causal;
+        };
+        const std::vector<Shape> shapes{{4096, 77, 40, false},
+                                        {1024, 1024, 512, true},
+                                        {1, 4096, 128, true},
+                                        {197, 197, 8, false}};
+        const std::vector<std::string> windows
+            = operation == "sdpa_fwd" ? std::vector<std::string>{"none", "local_128", "local_4096"}
+                                      : std::vector<std::string>{"none"};
+        for(const auto& shape : shapes)
+        {
+            for(const std::string layout : {"bshd", "bhsd", "kv_bhsd"})
+            {
+                for(const std::string scale : {"inv_sqrt_d", "unit", "jitter"})
+                {
+                    for(const std::string dtype : {"fp16", "fp32"})
+                    {
+                        for(const auto& window : windows)
+                        {
+                            ProblemPoint point{{"batch", int64_t{2}},
+                                               {"heads", int64_t{8}},
+                                               {"heads_kv", int64_t{2}},
+                                               {"seqlen_q", shape.seqlenQ},
+                                               {"seqlen_k", shape.seqlenK},
+                                               {"head_dim", shape.headDim},
+                                               {"is_causal", shape.causal},
+                                               {"alignment", std::string("top_left")},
+                                               {"dtype", dtype},
+                                               {"layout", layout},
+                                               {"scale", scale}};
+                            if(operation == "sdpa_fwd")
+                            {
+                                point["generate_stats"] = false;
+                                point["window"] = window;
+                            }
+                            const std::string where = operation + " " + detail::describe(point);
+                            ASSERT_TRUE(detail::satisfiesConstraints(*parsed.metadata, point))
+                                << where;
+                            const auto built = buildGraphFor(*parsed.metadata, point);
+                            ASSERT_TRUE(built.ok()) << where << ": " << built.error;
+                            hipdnn_frontend::graph::Graph graph;
+                            const auto restored = graph.deserialize(built.bytes);
+                            ASSERT_TRUE(restored.is_good())
+                                << where << ": deserialize: " << restored.get_message();
+                            const auto valid = graph.validate();
+                            EXPECT_TRUE(valid.is_good())
+                                << where << ": validate: " << valid.get_message();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

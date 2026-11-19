@@ -51,6 +51,9 @@ std::vector<uint8_t> someGraph()
                              {"is_causal", true},
                              {"alignment", std::string("top_left")},
                              {"generate_stats", false},
+                             {"layout", std::string("bshd")},
+                             {"scale", std::string("inv_sqrt_d")},
+                             {"window", std::string("none")},
                              {"dtype", std::string("bf16")}};
 
     const auto built = buildGraphFor(*parsed.metadata, point);
@@ -164,6 +167,9 @@ TEST(TestGraphIdentity, DifferentGraphsGetDifferentContentKeys)
                              {"is_causal", true},
                              {"alignment", std::string("top_left")},
                              {"generate_stats", false},
+                             {"layout", std::string("bshd")},
+                             {"scale", std::string("inv_sqrt_d")},
+                             {"window", std::string("none")},
                              {"dtype", std::string("bf16")}};
     const auto built = buildGraphFor(*parsed.metadata, point);
     ASSERT_TRUE(built.ok()) << built.error;
