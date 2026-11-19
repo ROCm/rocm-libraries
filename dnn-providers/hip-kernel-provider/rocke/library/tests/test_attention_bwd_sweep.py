@@ -27,7 +27,7 @@ from kernels.common.attention_bwd import (
 )
 from kernels.common.attention_bwd_dq import validate_attn_bwd_dq_spec
 
-from ._attention_bwd_stage_sample import sampled_geometry_stage
+from ._attention_bwd_stage_sample import only_geometries, sampled_geometry_stage
 from ._attention_bwd_test_utils import fake_bench_ok
 
 REL1 = sw.Release(frozenset({1}))
@@ -69,7 +69,7 @@ def test_default_knobs_are_the_shipped_start_point():
 # --------------------------------------------------------------------------- adapter
 def test_candidate_spec_adapter_and_record_roundtrip():
     sl = _sl("gfx950", 64)
-    c = sw.geometry_stage(sl, REL1).candidates[0]
+    c = sampled_geometry_stage(sl, REL1, first=1).candidates[0]
     spec = c.spec()  # AttnBwdSpec names (scheduler_strategy, tuples)
     assert isinstance(spec, AttnBwdSpec)
     fields = c.spec_fields()
@@ -142,10 +142,10 @@ def test_rule_tokens(msg, tok):
 @pytest.mark.parametrize("d", [64, 128])
 def test_geometry_stage_builds_every_candidate(arch, d):
     """Every geometry-stage candidate is legal and built (portable paths).
-    On gfx950, whose fallback search checks about 1.4 million structures at
-    d128, a spread sample of the geometries (every geometry: the exhaustive
-    test below)."""
-    if arch == "gfx950":
+    On gfx942 and gfx950, whose fallback searches check up to 1.4 million
+    structures, a spread sample of the geometries (every geometry: the
+    exhaustive test below)."""
+    if arch in ("gfx942", "gfx950"):
         gs = sampled_geometry_stage(_sl(arch, d), REL1, n_default=4, n_fallback=3)
     else:
         gs = sw.geometry_stage(_sl(arch, d), REL1)
@@ -153,11 +153,12 @@ def test_geometry_stage_builds_every_candidate(arch, d):
 
 
 @pytest.mark.exhaustive
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 @pytest.mark.parametrize("d", [64, 128])
-def test_geometry_stage_builds_every_gfx950_candidate(d):
-    """:func:`test_geometry_stage_builds_every_candidate` on every gfx950
-    geometry."""
-    _check_stage_candidates(sw.geometry_stage(_sl("gfx950", d), REL1))
+def test_geometry_stage_builds_every_mfma_candidate(arch, d):
+    """:func:`test_geometry_stage_builds_every_candidate` on every gfx942 and
+    gfx950 geometry."""
+    _check_stage_candidates(sw.geometry_stage(_sl(arch, d), REL1))
 
 
 def _check_stage_candidates(gs):
@@ -173,11 +174,8 @@ def _check_stage_candidates(gs):
 
 def test_structures_enumerate_grids_and_untied_atoms():
     sl = _sl("gfx950", 64)
-    c = next(
-        x
-        for x in sw.geometry_stage(sl, REL1).candidates
-        if x.k["waves"] == 4 and x.k["block_m"] == 32 and x.k["block_n"] == 64
-    )
+    tile = {"waves": 4, "block_m": 32, "block_n": 64}
+    c = sampled_geometry_stage(sl, REL1, where=tile, first=1).candidates[0]
     ss = sw.structures(c, sw.Release(frozenset({1, 2, 3, 4})))
     assert any(s["warp_grid_g02"] == (2, 2) for s in ss)
     assert all(
@@ -193,7 +191,7 @@ def test_structures_enumerate_grids_and_untied_atoms():
     assert len(one) == 1 and all(one[0][k] == c.k[k] for k in one[0])
     # gfx1201: never relabel (the validator rejects it on WMMA)
     sl12 = _sl("gfx1201", 64)
-    for g in sw.geometry_stage(sl12, REL1).candidates[:3]:
+    for g in sampled_geometry_stage(sl12, REL1, first=3).candidates:
         for s in sw.structures(g, sw.Release(sw.ALL_RELEASED)):
             assert s["pt_route"] == "lds" and s["kv_residency"] == "lds"
 
@@ -296,7 +294,16 @@ def test_backend_alloc_dedupes_with_a_policy_none_resolution():
     """``"backend"`` emits what a policy result of ``None`` emits, so the two
     collapse where the policy resolves to ``None``."""
     sl = _sl("gfx950", 128)
-    for c in sw.geometry_stage(sl, sw.Release(sw.ALL_RELEASED)).candidates:
+    rel = sw.Release(sw.ALL_RELEASED)
+    # the stage's candidates in its order, built one geometry at a time up to
+    # the first match (the whole stage searches about a million structures)
+    geos = [{k: g[k] for k in sw.GEOMETRY_KNOBS} for g in sw.geometries(sl, rel)]
+    cands = (
+        c
+        for g in geos
+        for c in sampled_geometry_stage(sl, rel, where=g, first=1).candidates
+    )
+    for c in cands:
         lg = sw.legality(c)
         if lg.resolved.agpr_alloc is None:
             be = c.with_knobs(agpr_alloc="backend")
@@ -484,7 +491,7 @@ def test_stage_chaining_from_shard_records(tmp_path):
 
 def test_swizzle_ties_expand_with_the_predictor(monkeypatch):
     sl = _sl("gfx942", 64)
-    c = sw.geometry_stage(sl, REL1).candidates[0]
+    c = sampled_geometry_stage(sl, REL1, first=1).candidates[0]
     assert sw.swizzle_ties(c) == []
     monkeypatch.setattr(
         sw,
@@ -511,7 +518,7 @@ def test_secondary_slice_recompiles_the_primary_top():
     prim = _sl("gfx942", 128)
     sec = sw.secondary_slice(prim, "fp16")
     assert sec.dtype == "fp16" and sec.tag().endswith("-fp16")
-    top = sw.geometry_stage(prim, REL1).candidates[:3]
+    top = sampled_geometry_stage(prim, REL1, first=3).candidates
     out = sw.stage_candidates("schedule", sec, rel=REL1, prior={"primary": top})
     assert {c.slice for c in out} == {sec} and len(out) == 3
     with pytest.raises(ValueError):
@@ -534,7 +541,9 @@ def test_representative_cells_of_the_primary_slices():
 
 # --------------------------------------------------------------------------- counts / plan
 def test_count_slice_bounds():
-    sc = sw.count_slice(_sl("gfx942", 128), REL1)
+    sl = _sl("gfx942", 128)
+    with only_geometries(sl, n_default=2, n_fallback=2):
+        sc = sw.count_slice(sl, REL1)
     assert sc.geometries > 0 and sc.product >= sc.geometries - sc.fallback
     assert sc.stages["runtime"] == sc.stages["confirm"] == 0
     assert sc.stages["structure"] <= sw.STRUCTURE_FROM_GEOMETRIES * sc.structures_max
@@ -608,84 +617,88 @@ def test_driver_stage_records_tokens_and_resumes(tmp_path, monkeypatch):
     from benchmarks.common import attention_bwd_compile as bc
 
     sl = _sl("gfx942", 128)
-    cands = sw.geometry_stage(sl, REL1).candidates
-    prune_key, fail_key = cands[0].key(), cands[1].key()
+    with only_geometries(sl, first=16):
+        cands = sw.geometry_stage(sl, REL1).candidates
+        prune_key, fail_key = cands[0].key(), cands[1].key()
 
-    def fake_batch(items, **kw):
-        return [_Res(True) for _ in items]
+        def fake_batch(items, **kw):
+            return [_Res(True) for _ in items]
 
-    class Gate:
-        def static_prune(self, arch, spec, hsaco):
-            k = next(c.key() for c in cands if sw.legality(c).resolved == spec)
-            return ("agpr_copy_traffic" if k == prune_key else None), {"r": 1}
+        class Gate:
+            def static_prune(self, arch, spec, hsaco):
+                k = next(c.key() for c in cands if sw.legality(c).resolved == spec)
+                return ("agpr_copy_traffic" if k == prune_key else None), {"r": 1}
 
-    calls = []
+        calls = []
 
-    def fake_bench(argv):
-        out = Path(argv[argv.index("--out-dir") + 1])
-        cfgs = json.loads(Path(argv[argv.index("--rocke-configs") + 1]).read_text())
-        ids = argv[argv.index("--ids") + 1].split(",")
-        calls.append(len(cfgs["configs"]))
-        for cid in ids:
-            arms = {"default|native": {"status": "ok", "median_ms": 2.0, "spread": 0.0,
-                                       "attempt_medians_ms": [2.0] * 5}}  # fmt: skip
-            for i, c in enumerate(cfgs["configs"]):
-                st = "correctness_fail" if c["label"] == fail_key else "ok"
-                arms[f"rocke|{c['label']}"] = {
-                    "status": st, "median_ms": 1.0 + i, "spread": 0.0,
-                    "attempt_medians_ms": [1.0 + i] * 5,
-                }  # fmt: skip
-            bb.append_jsonl(out / "cells.jsonl", {"id": cid, "complete": True,
-                            "bar_arm": "default|native", "arms": arms})  # fmt: skip
-        bb.append_jsonl(out / "env.jsonl", {"host": "n", "cu_count": 1})
-        return 0
+        def fake_bench(argv):
+            out = Path(argv[argv.index("--out-dir") + 1])
+            cfgs = json.loads(Path(argv[argv.index("--rocke-configs") + 1]).read_text())
+            ids = argv[argv.index("--ids") + 1].split(",")
+            calls.append(len(cfgs["configs"]))
+            for cid in ids:
+                arms = {"default|native": {"status": "ok", "median_ms": 2.0, "spread": 0.0,
+                                           "attempt_medians_ms": [2.0] * 5}}  # fmt: skip
+                for i, c in enumerate(cfgs["configs"]):
+                    st = "correctness_fail" if c["label"] == fail_key else "ok"
+                    arms[f"rocke|{c['label']}"] = {
+                        "status": st, "median_ms": 1.0 + i, "spread": 0.0,
+                        "attempt_medians_ms": [1.0 + i] * 5,
+                    }  # fmt: skip
+                bb.append_jsonl(out / "cells.jsonl", {"id": cid, "complete": True,
+                                "bar_arm": "default|native", "arms": arms})  # fmt: skip
+            bb.append_jsonl(out / "env.jsonl", {"host": "n", "cu_count": 1})
+            return 0
 
-    monkeypatch.setattr(bc, "compile_batch", fake_batch)
-    monkeypatch.setattr(bb, "main", fake_bench)
+        monkeypatch.setattr(bc, "compile_batch", fake_batch)
+        monkeypatch.setattr(bb, "main", fake_bench)
 
-    class _TC:
-        comgr, flavor = "c", "llvm22"
+        class _TC:
+            comgr, flavor = "c", "llvm22"
 
-        def record(self):
-            return {"comgr": "c"}
+            def record(self):
+                return {"comgr": "c"}
 
-    drv = sw.Driver(sw.Options(out=tmp_path, arch="gfx942", release=REL1,
-                               arms_per_attempt=5, gate="x:y"))  # fmt: skip
-    drv._gate, drv._toolchain = Gate(), _TC()
-    drv._cache = type("C", (), {"root": tmp_path / "cache"})()
-    counts = drv.run_stage(sl, "geometry")
-    assert counts["pruned"] == 1 and counts["correctness_fail"] == 1
-    # geometries whose cheapest legal structure is split dQ (no G4) emit the
-    # same kernel for every G4 grid: those duplicates are recorded, not timed
-    _reps, dup = sw.dedupe(cands)
-    assert counts["duplicate"] == len(dup)
-    assert counts["timed"] == len(cands) - 2 - len(dup)
-    assert calls and max(calls) <= 5
-    recs = sw.read_records(tmp_path, sl, "geometry")
-    assert recs[prune_key]["status"] == "pruned:agpr_copy_traffic"
-    assert recs[fail_key]["status"] == "correctness_fail"
-    timed = [r for r in recs.values() if r["status"] == "timed"]
-    assert all(r["released"] == [1] and r["keep"] == 8 and r["env"] for r in timed)
-    assert all(set(r["cells"]) == {c.id for c in sw.representative_cells(sl)}
-               for r in timed)  # fmt: skip
-    n = len(calls)
-    again = drv.run_stage(sl, "geometry")
-    assert len(calls) == n and again["skipped_done"] == len(cands)
-    assert len(sw.ranked(tmp_path, sl, "geometry", 8)) == 8
+        drv = sw.Driver(sw.Options(out=tmp_path, arch="gfx942", release=REL1,
+                                   arms_per_attempt=5, gate="x:y"))  # fmt: skip
+        drv._gate, drv._toolchain = Gate(), _TC()
+        drv._cache = type("C", (), {"root": tmp_path / "cache"})()
+        counts = drv.run_stage(sl, "geometry")
+        assert counts["pruned"] == 1 and counts["correctness_fail"] == 1
+        # geometries whose cheapest legal structure is split dQ (no G4) emit the
+        # same kernel for every G4 grid: those duplicates are recorded, not timed
+        _reps, dup = sw.dedupe(cands)
+        assert counts["duplicate"] == len(dup)
+        assert counts["timed"] == len(cands) - 2 - len(dup)
+        assert calls and max(calls) <= 5
+        recs = sw.read_records(tmp_path, sl, "geometry")
+        assert recs[prune_key]["status"] == "pruned:agpr_copy_traffic"
+        assert recs[fail_key]["status"] == "correctness_fail"
+        timed = [r for r in recs.values() if r["status"] == "timed"]
+        assert all(r["released"] == [1] and r["keep"] == 8 and r["env"] for r in timed)
+        assert all(set(r["cells"]) == {c.id for c in sw.representative_cells(sl)}
+                   for r in timed)  # fmt: skip
+        n = len(calls)
+        again = drv.run_stage(sl, "geometry")
+        assert len(calls) == n and again["skipped_done"] == len(cands)
+        assert len(sw.ranked(tmp_path, sl, "geometry", 8)) == 8
 
 
 def test_dry_run_stage_and_shards_partition(tmp_path):
     sl = _sl("gfx950", 64)
-    seen = []
-    for i in range(3):
-        d = sw.Driver(sw.Options(out=tmp_path, arch="gfx950", release=REL1,
-                                 shard=(i, 3), dry_run=True))  # fmt: skip
-        d.run_stage(sl, "geometry")
-        seen += [r["key"] for r in sw.read_records(tmp_path, sl, "geometry").values()]
-    keys = {c.key() for c in sw.geometry_stage(sl, REL1).candidates}
-    assert set(seen) == keys
-    files = list(sw.stage_dir(tmp_path, sl, "geometry").glob("shard-*.jsonl"))
-    assert len(files) == 3
+    with only_geometries(sl, n_default=4, n_fallback=2):
+        seen = []
+        for i in range(3):
+            d = sw.Driver(sw.Options(out=tmp_path, arch="gfx950", release=REL1,
+                                     shard=(i, 3), dry_run=True))  # fmt: skip
+            d.run_stage(sl, "geometry")
+            seen += [
+                r["key"] for r in sw.read_records(tmp_path, sl, "geometry").values()
+            ]
+        keys = {c.key() for c in sw.geometry_stage(sl, REL1).candidates}
+        assert set(seen) == keys
+        files = list(sw.stage_dir(tmp_path, sl, "geometry").glob("shard-*.jsonl"))
+        assert len(files) == 3
 
 
 # --------------------------------------------------------------------------- cli
@@ -723,36 +736,39 @@ def test_sweep_level_is_parsed_recorded_and_counted(tmp_path, capsys):
     line = capsys.readouterr().out.strip()
     assert " released=1 level=full " in line and " product_scope=legacy " in line
     sl = _sl("gfx950", 64)
-    d = sw.Driver(sw.Options(out=tmp_path, arch="gfx950", dry_run=True,
-                             release=sw.Release(frozenset({1}), "full")))  # fmt: skip
-    d.run_stage(sl, "geometry")
-    recs = sw.read_records(tmp_path, sl, "geometry").values()
-    assert recs and all(r["level"] == "full" for r in recs)
+    with only_geometries(sl, n_default=2, n_fallback=1):
+        d = sw.Driver(sw.Options(out=tmp_path, arch="gfx950", dry_run=True,
+                                 release=sw.Release(frozenset({1}), "full")))  # fmt: skip
+        d.run_stage(sl, "geometry")
+        recs = sw.read_records(tmp_path, sl, "geometry").values()
+        assert recs and all(r["level"] == "full" for r in recs)
 
 
 def test_cli_count_plan_reads_constants_by_arch(tmp_path, capsys):
-    consts = tmp_path / "c.json"
-    consts.write_text(json.dumps({"per_arch": {"gfx942": {
-        "t_compile_serial": 2.0, "compile_speedup": 8.0, "t_run": 0.2,
-        "t_attempt": 3.0, "t_reference": 5.0, "t_gate": 0.5}}}))  # fmt: skip
-    argv = ["--count", "--plan", "--constants", str(consts), "--arch", "gfx942",
-            "--family", "general", "--d", "128"]  # fmt: skip
-    assert sw.main(argv) == 0
-    line = capsys.readouterr().out.strip()
-    assert re.search(r" jobs_geometry=\d+ .* jobs_upper_bound=\d+$", line)
-    assert not re.search(r"\d+\.\d+", line)
-    assert "jobs_expected" not in line
-    data = json.loads(consts.read_text())
-    data["per_arch"]["gfx942"]["survival"] = 0.5
-    consts.write_text(json.dumps(data))
-    assert sw.main(argv) == 0
-    line = capsys.readouterr().out.strip()
-    up = int(re.search(r"jobs_upper_bound=(\d+)", line).group(1))
-    exp = int(re.search(r"jobs_expected=(\d+)$", line).group(1))
-    assert exp <= up
-    consts.write_text(json.dumps({"per_arch": {}}))
-    assert sw.main(argv) == 0
-    assert capsys.readouterr().out.strip().endswith("jobs=unknown")
+    # the plan is computed from the counts of a few geometries of the slice
+    with only_geometries(_sl("gfx942", 128), n_default=2, n_fallback=2):
+        consts = tmp_path / "c.json"
+        consts.write_text(json.dumps({"per_arch": {"gfx942": {
+            "t_compile_serial": 2.0, "compile_speedup": 8.0, "t_run": 0.2,
+            "t_attempt": 3.0, "t_reference": 5.0, "t_gate": 0.5}}}))  # fmt: skip
+        argv = ["--count", "--plan", "--constants", str(consts), "--arch", "gfx942",
+                "--family", "general", "--d", "128"]  # fmt: skip
+        assert sw.main(argv) == 0
+        line = capsys.readouterr().out.strip()
+        assert re.search(r" jobs_geometry=\d+ .* jobs_upper_bound=\d+$", line)
+        assert not re.search(r"\d+\.\d+", line)
+        assert "jobs_expected" not in line
+        data = json.loads(consts.read_text())
+        data["per_arch"]["gfx942"]["survival"] = 0.5
+        consts.write_text(json.dumps(data))
+        assert sw.main(argv) == 0
+        line = capsys.readouterr().out.strip()
+        up = int(re.search(r"jobs_upper_bound=(\d+)", line).group(1))
+        exp = int(re.search(r"jobs_expected=(\d+)$", line).group(1))
+        assert exp <= up
+        consts.write_text(json.dumps({"per_arch": {}}))
+        assert sw.main(argv) == 0
+        assert capsys.readouterr().out.strip().endswith("jobs=unknown")
 
 
 def test_cli_guards(tmp_path):
@@ -863,7 +879,7 @@ def test_compiler_crash_prone_candidates_compile_in_child_processes(
 
 def test_confirm_shards_the_cohort_cells(tmp_path, monkeypatch):
     sl = _sl("gfx942", 64)
-    fin = sw.geometry_stage(sl, REL1).candidates[:2]
+    fin = sampled_geometry_stage(sl, REL1, first=2).candidates
     _write(tmp_path, sl, "runtime", [_timed(c, 1.0 + i, "runtime")
                                      for i, c in enumerate(fin)])  # fmt: skip
     _fake_env(monkeypatch, [])
