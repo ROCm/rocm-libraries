@@ -754,77 +754,110 @@ if(NOT WIN32)
 endif()
 
 #################################################
-#     Int8 input tests (slow path)              #
+#     Int8 input tests (fast & slow)            #
 #################################################
 # A/B are Int8 drawn from [-128, 127]. Each combination is one of the
 # reference's TypedGemm_I8_* ids: C/D type (--typeCD) x alpha/beta type
 # (--typeAlpha), which is also the reference's epilogue type. The golden GEMM
 # accumulates exactly in integers, applies the epilogue in that type and casts
-# to C/D with the reference's SaturateCast rules, so D must match exactly.
-# The fast path does not support Int8 inputs yet (isFastPathEligible rejects
-# them), so these run on the slow path only.
+# to C/D with the reference's SaturateCast rules, so D must match exactly, on
+# both paths: fast and slow therefore also match each other exactly.
 #
-# The slow reference reduces in integers before converting once to the
-# alpha/beta type (#15765). Float precision no longer limits K. The large-K
-# cases allow sums above 2^24; the golden still requires the completed sum and
-# integer epilogue intermediates to fit Int32. Output-range constraints below
-# also apply. Dedicated ReferenceInt8Accumulation gtests check exact boundary
-# values and modulo 2^32 reduction with a signed Int32 interpretation.
+# Both references reduce in integers before the alpha/beta epilogue. The
+# fast reduction and corrected slow float-alpha reduction (#15765) use modulo
+# 2^32 with a signed Int32 interpretation. Float precision no longer limits K. The large-K cases allow sums above 2^24; the golden still
+# requires completed sums and integer epilogue intermediates to fit Int32.
+# Dedicated reference gtests check exact boundary and wrapping values.
 #
 # Each entry: NAME;typeCD;typeAlpha;alpha;beta;alpha for ScaleAB. Alphas keep D
 # in range: Half output below 65504, no int32 overflow (the golden throws on
 # int32 overflow), and a mix of saturated and in-range Int8 values with
 # round-half-to-even ties (I8_I8_S); 2^-16 for ScaleAB, whose scales go up to
 # 100 x 100.
-foreach(COMBO
-        "I8_I8_I32;i8;i32;1;2;1"
-        "I8_I32_I32;i32;i32;1;2;1"
-        "I8_I32_S;i32;f32;0.5;0.5;0.0000152587890625"
-        "I8_I8_S;i8;f32;0.001953125;0.5;0.0000152587890625"
-        "I8_H_S;f16;f32;0.015625;0.5;0.0000152587890625"
-        "I8_B_S;bf16;f32;1;0.5;0.0000152587890625")
-    list(GET COMBO 0 NAME)
-    list(GET COMBO 1 TYPE_CD)
-    list(GET COMBO 2 TYPE_ALPHA)
-    list(GET COMBO 3 ALPHA)
-    list(GET COMBO 4 BETA)
-    list(GET COMBO 5 SCALEAB_ALPHA)
-    set(I8_ARGS ${F32_SIZES} --type i8 --typeCD ${TYPE_CD} --typeAlpha ${TYPE_ALPHA} --validate)
-
-    # Integer ScaleAB has no fractional alpha; retain the smaller
-    # output-range case while large-K reduction coverage runs separately.
-    set(I8_SCALE_ARGS ${I8_ARGS})
-    if("${TYPE_ALPHA}" STREQUAL "i32")
-        set(I8_SCALE_ARGS ${F16_SIZES} --type i8 --typeCD ${TYPE_CD}
-            --typeAlpha ${TYPE_ALPHA} --validate)
+#
+# With int alpha (>= 1) and the full data range, almost every I8_I8_I32 output
+# saturates, which would hide errors that only change in-range values. The
+# I8_I8_I32_Narrow tests draw A/B from [-3, 3] instead (|sum| has a standard
+# deviation of about 50, so about 1% of D saturates). No ScaleAB there: the
+# scales (up to 100 x 100) saturate D at any data range.
+foreach(PATH fast slow)
+    if("${PATH}" STREQUAL "fast")
+        set(PATH_FLAGS --tryFastPath)
+    else()
+        set(PATH_FLAGS "")
     endif()
 
+    foreach(COMBO
+            "I8_I8_I32;i8;i32;1;2;1"
+            "I8_I32_I32;i32;i32;1;2;1"
+            "I8_I32_S;i32;f32;0.5;0.5;0.0000152587890625"
+            "I8_I8_S;i8;f32;0.001953125;0.5;0.0000152587890625"
+            "I8_H_S;f16;f32;0.015625;0.5;0.0000152587890625"
+            "I8_B_S;bf16;f32;1;0.5;0.0000152587890625")
+        list(GET COMBO 0 NAME)
+        list(GET COMBO 1 TYPE_CD)
+        list(GET COMBO 2 TYPE_ALPHA)
+        list(GET COMBO 3 ALPHA)
+        list(GET COMBO 4 BETA)
+        list(GET COMBO 5 SCALEAB_ALPHA)
+        set(I8_ARGS ${F32_SIZES} --type i8 --typeCD ${TYPE_CD} --typeAlpha ${TYPE_ALPHA} --validate ${PATH_FLAGS})
+
+        # Integer ScaleAB has no fractional alpha; retain the smaller
+        # output-range case while large-K reduction coverage runs separately.
+        set(I8_SCALE_ARGS ${I8_ARGS})
+        if("${TYPE_ALPHA}" STREQUAL "i32")
+            set(I8_SCALE_ARGS ${F16_SIZES} --type i8 --typeCD ${TYPE_CD}
+                --typeAlpha ${TYPE_ALPHA} --validate ${PATH_FLAGS})
+        endif()
+
+        foreach(TRANS NN TN NT TT)
+            get_trans_flags(${TRANS} TFLAGS)
+            add_cpu_gemm_test(${PATH}_${NAME}_${TRANS}
+                ARGS ${I8_ARGS} ${TFLAGS} --alpha ${ALPHA}
+            )
+            add_cpu_gemm_test(${PATH}_${NAME}_LargeK_${TRANS}
+                ARGS -M 3 -N 5 -K 1044 --type i8 --typeCD ${TYPE_CD}
+                    --typeAlpha ${TYPE_ALPHA} ${TFLAGS} --alpha ${ALPHA}
+                    --validate ${PATH_FLAGS}
+            )
+        endforeach()
+        add_cpu_gemm_test(${PATH}_${NAME}_Beta
+            ARGS ${I8_ARGS} --alpha ${ALPHA} --beta ${BETA}
+        )
+        add_cpu_gemm_test(${PATH}_${NAME}_Bias
+            ARGS ${I8_ARGS} --alpha ${ALPHA} --bias
+        )
+        add_cpu_gemm_test(${PATH}_${NAME}_TN_AllFeatures
+            ARGS ${I8_ARGS} --transA --alpha ${ALPHA} --beta ${BETA} --bias --activation relu --scaleAlphaVec
+        )
+        foreach(MODE Scalar Vector)
+            add_cpu_gemm_test(${PATH}_${NAME}_ScaleAB_${MODE}
+                ARGS ${I8_SCALE_ARGS} --alpha ${SCALEAB_ALPHA} --useScaleAB ${MODE}
+            )
+        endforeach()
+        add_cpu_gemm_test(${PATH}_${NAME}_Batched
+            ARGS ${I8_ARGS} --alpha ${ALPHA} --batchCount 3
+        )
+    endforeach()
+
+    set(I8_NARROW_ARGS ${F16_SIZES} --type i8 --typeCD i8 --typeAlpha i32 --int8Min -3 --int8Max 3 --validate ${PATH_FLAGS})
     foreach(TRANS NN TN NT TT)
         get_trans_flags(${TRANS} TFLAGS)
-        add_cpu_gemm_test(slow_${NAME}_${TRANS}
-            ARGS ${I8_ARGS} ${TFLAGS} --alpha ${ALPHA}
-        )
-        add_cpu_gemm_test(slow_${NAME}_LargeK_${TRANS}
-            ARGS -M 3 -N 5 -K 1044 --type i8 --typeCD ${TYPE_CD}
-                --typeAlpha ${TYPE_ALPHA} ${TFLAGS} --alpha ${ALPHA} --validate
+        add_cpu_gemm_test(${PATH}_I8_I8_I32_Narrow_${TRANS}
+            ARGS ${I8_NARROW_ARGS} ${TFLAGS}
         )
     endforeach()
-    add_cpu_gemm_test(slow_${NAME}_Beta
-        ARGS ${I8_ARGS} --alpha ${ALPHA} --beta ${BETA}
+    add_cpu_gemm_test(${PATH}_I8_I8_I32_Narrow_Beta
+        ARGS ${I8_NARROW_ARGS} --beta 2
     )
-    add_cpu_gemm_test(slow_${NAME}_Bias
-        ARGS ${I8_ARGS} --alpha ${ALPHA} --bias
+    add_cpu_gemm_test(${PATH}_I8_I8_I32_Narrow_Bias
+        ARGS ${I8_NARROW_ARGS} --bias
     )
-    add_cpu_gemm_test(slow_${NAME}_TN_AllFeatures
-        ARGS ${I8_ARGS} --transA --alpha ${ALPHA} --beta ${BETA} --bias --activation relu --scaleAlphaVec
+    add_cpu_gemm_test(${PATH}_I8_I8_I32_Narrow_TN_AllFeatures
+        ARGS ${I8_NARROW_ARGS} --transA --beta 2 --bias --activation relu --scaleAlphaVec
     )
-    foreach(MODE Scalar Vector)
-        add_cpu_gemm_test(slow_${NAME}_ScaleAB_${MODE}
-            ARGS ${I8_SCALE_ARGS} --alpha ${SCALEAB_ALPHA} --useScaleAB ${MODE}
-        )
-    endforeach()
-    add_cpu_gemm_test(slow_${NAME}_Batched
-        ARGS ${I8_ARGS} --alpha ${ALPHA} --batchCount 3
+    add_cpu_gemm_test(${PATH}_I8_I8_I32_Narrow_Batched
+        ARGS ${I8_NARROW_ARGS} --batchCount 3
     )
 endforeach()
 
@@ -833,6 +866,9 @@ foreach(CASE
         "I8_MixedA;--typeA i8 --typeB f32;Error: mixed i8 / non-i8 input is not supported"
         "I8_UnsupportedCD;--type i8 --typeCD f32;Error: unsupported i8 type combination --typeCD f32 --typeAlpha f32"
         "I8_NonIntegerAlpha;--type i8 --typeCD i32 --typeAlpha i32 --alpha 0.5;Error: --typeAlpha i32 needs integer --alpha and --beta"
+        "I8_Int8RangeOutOfBounds;--type i8 --int8Min -129;Error: --int8Min/--int8Max need i8 inputs and -128 <= int8Min <= int8Max <= 127"
+        "I8_Int8RangeEmpty;--type i8 --int8Min 3 --int8Max 2;Error: --int8Min/--int8Max need i8 inputs and -128 <= int8Min <= int8Max <= 127"
+        "F32_Int8Range;--type f32 --int8Max 3;Error: --int8Min/--int8Max need i8 inputs and -128 <= int8Min <= int8Max <= 127"
         "F32_TypeCD;--type f32 --typeCD f16;Error: --typeCD f16 / --typeAlpha f32 is only supported for i8 inputs")
     list(GET CASE 0 NAME)
     list(GET CASE 1 FLAGS)
