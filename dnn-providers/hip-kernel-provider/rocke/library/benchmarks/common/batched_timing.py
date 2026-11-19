@@ -111,8 +111,8 @@ def apply_hip_device_flags() -> None:
     HIP's default host wait spins a CPU core; on a device whose CPU and GPU
     share one power budget, that spin takes power the GPU clock does not get.
     Staged timing waits on the host after every sample, so it pays it on every
-    call. A harness setting -- compare only with numbers timed under the same
-    flags (Triton / MIOpen re-timed with them).
+    call. A harness setting -- compare only with timings taken under the same
+    flags (other libraries re-timed with them).
     """
     import os
 
