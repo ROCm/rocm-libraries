@@ -281,13 +281,19 @@ class Case:
 
         self.stream = stream
         if route_plan is not None:
-            from benchmarks.common.conv_route_exec import RouteBinding
+            from benchmarks.common.conv_route_exec import (
+                RouteBinding,
+                SharedWorkspaces,
+            )
 
-            # One set of route workspaces per case (scratch, reused call after call).
+            # One set of route workspaces per case (scratch, reused call after
+            # call); a variant reuses the base's only where they fit its plan
+            # (another route's workspaces of the same names may be larger).
+            shared = getattr(share_from, "route_ws", None)
             self.route_ws = (
-                share_from.route_ws
-                if share_from is not None and hasattr(share_from, "route_ws")
-                else {}
+                shared
+                if shared is not None and shared.compatible(route_plan)
+                else SharedWorkspaces()
             )
             self.route_bindings = [
                 RouteBinding(

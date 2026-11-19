@@ -9,7 +9,10 @@ binary (:func:`benchmark_implicit_gemm_conv._cached_bind_batch`: kernargs, grid,
 scratch, zeroing, Stage 2); the route's own kernels (pad copy, Winograd relayout / main /
 split-K reduction) are compiled from their ``RouteStep.build`` (memoised per process) and
 bound with ``KernelLauncher.bind``. Workspaces are allocated once per binding (or shared
-through ``workspaces=``) and the ``zero_once`` ones zeroed at allocation.
+through ``workspaces=``, a :class:`SharedWorkspaces`) and the ``zero_once`` ones zeroed
+at allocation. A shared workspace is reused only by a plan that declares it the same
+way (same size and ``zero_once``; a ``zero_once`` one only by the same route): anything
+else is refused, never bound to a buffer it would overrun or find dirty.
 
 Usage::
 
@@ -60,14 +63,54 @@ def pinned_launch(plan, cache, B):
     return ident, meta, launcher, split_k
 
 
+def _route_key(plan) -> tuple:
+    """What a ``zero_once`` workspace's never-written part depends on: the
+    route's launches and kernels (its layout), not only its size."""
+    return (
+        plan.route,
+        plan.kernel_label,
+        plan.launches,
+        repr(plan.pad_copy),
+        repr(plan.winograd),
+        tuple(plan.workspaces),
+    )
+
+
+class SharedWorkspaces(dict):
+    """Route workspaces shared by several bindings: ``{name: device pointer}``
+    plus, per name, how it was allocated (``meta[name] = (nbytes, zero_once,
+    route key)``), so a later binding can check the buffer fits its plan."""
+
+    def __init__(self):
+        super().__init__()
+        self.meta = {}
+
+    def compatible(self, plan) -> bool:
+        """True when every workspace of ``plan`` already here can be reused by it."""
+        return all(
+            self._reason(w, plan) is None for w in plan.workspaces if w.name in self
+        )
+
+    def _reason(self, w, plan):
+        nbytes, zero_once, key = self.meta[w.name]
+        if nbytes < w.nbytes:
+            return f"shared buffer of {nbytes} B < {w.nbytes} B needed"
+        if zero_once != w.zero_once:
+            return "zero_once differs from the shared buffer's"
+        if w.zero_once and key != _route_key(plan):
+            return "zero_once buffer of another route (its halo may not be zero)"
+        return None
+
+
 class RouteBinding:
     """One call of a routed case bound to buffers ``ptrs`` = (A, B, D): fwd (X, W, Y),
     dgrad (dY, W, dX), wgrad (dY, X, dW); ``sizes`` their byte sizes.
 
     ``cfg_cls``: the ``LaunchConfig`` class to launch with (a stream-binding wrapper
-    for multi-stream replays). ``workspaces``: a dict to share route workspaces
-    between bindings of one case (a replay binds one call per buffer set; the
-    workspaces are scratch, reused call after call)."""
+    for multi-stream replays). ``workspaces``: a :class:`SharedWorkspaces` to share
+    route workspaces between bindings of one case (a replay binds one call per
+    buffer set; the workspaces are scratch, reused call after call); a workspace
+    already there that does not fit this plan raises ``ValueError``."""
 
     def __init__(
         self,
@@ -94,10 +137,19 @@ class RouteBinding:
         cfg_cls = cfg_cls or LaunchConfig
         self.live_extras = live_extras if live_extras is not None else []
         self._owned = []
-        ws = workspaces if workspaces is not None else {}
+        if workspaces is not None and not isinstance(workspaces, SharedWorkspaces):
+            raise TypeError("workspaces= takes a SharedWorkspaces")
+        ws = workspaces if workspaces is not None else SharedWorkspaces()
         self._keep = []
         for w in plan.workspaces:
-            if w.name not in ws:
+            if w.name in ws:
+                why = ws._reason(w, plan)
+                if why is not None:
+                    raise ValueError(
+                        f"{plan.case}: route workspace {w.name}: {why}; "
+                        "bind with its own SharedWorkspaces"
+                    )
+            else:
                 if (
                     alloc is not None
                 ):  # caller's allocator: alloc(nbytes) -> (ptr, keepalive)
@@ -110,12 +162,14 @@ class RouteBinding:
                 if w.zero_once:
                     rt.memset(p, 0, w.nbytes)
                 ws[w.name] = p
+                ws.meta[w.name] = (w.nbytes, w.zero_once, _route_key(plan))
         self.workspaces = ws
         bufs = {"x": self.ptrs[0], "w": self.ptrs[1], "y": self.ptrs[2], **ws}
         nbytes = {
             "x": self.sizes[0],
             "w": self.sizes[1],
             "y": self.sizes[2],
+            # the plan's sizes: a shared buffer is checked to be at least that
             **{w.name: w.nbytes for w in plan.workspaces},
         }
         runs = []
