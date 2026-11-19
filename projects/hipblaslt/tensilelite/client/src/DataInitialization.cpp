@@ -2473,7 +2473,8 @@ namespace TensileLite
                                                        mxBlockFree,
                                                        scaleElemSize,
                                                        kFast,
-                                                       unsignedExponentScale);
+                                                       takeMXScaleTileMax(dataInitMode,
+                                                                          unsignedExponentScale));
                           if(shouldVaryMXScaleFreeTiles(
                                  dataInitMode, scaleInitMode, mxBlockFree, unsignedExponentScale))
                               varyMXScaleFreeTiles(scalePtr, tiledFree, compactKBlocks, kFast);
