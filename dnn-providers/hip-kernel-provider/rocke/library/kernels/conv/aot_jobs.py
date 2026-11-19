@@ -321,6 +321,18 @@ CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES: Tuple[
     (256, 256, 64, 4, 4, 16),
 )
 CACHE_WGRAD_EXTRA_WARP_MN: Tuple[int, ...] = (3, 6)
+# Deep-K WMMA wgrad geometries (gfx1250): (tile_m, tile_n, tile_k, warp_m,
+# warp_n), "mem" pipeline, warp tile 16, cshuffle epilogue plus the cover's
+# split-K / async variants. wgrad GEMMs are often small in M x N and long in
+# K; a K tile of 128-512 with 16 waves cuts the barriers per WMMA that the
+# 64-deep ladder pays, as CK's 512-thread, K=128..512 instances do on the
+# same layers. These three are what is left of a wider set after dropping the
+# geometries whose wins the others match.
+CACHE_WGRAD_DEEPK_GEOMETRIES: Tuple[Tuple[int, int, int, int, int], ...] = (
+    (64, 64, 256, 4, 4),
+    (64, 64, 512, 4, 4),
+    (128, 128, 128, 4, 4),
+)
 # Cap on the f32 accumulator registers each lane holds:
 # (tile_m / warp_m) * (tile_n / warp_n) / wave_size. Above 256 the
 # accumulators no longer fit the 256 AGPRs MFMA accumulates into, so the
@@ -659,8 +671,11 @@ def _geometries(
 
     ``direction`` selects the grid: wgrad gets the filter-shaped tile and warp
     extensions (see :data:`CACHE_WGRAD_EXTRA_TILE_MN`), everything else the
-    base grid. It must be threaded through wherever a geometry list is built
-    for a direction, or the chunk bounds stop matching the list the worker
+    base grid; WMMA wgrad then adds the
+    :data:`CACHE_WGRAD_DEEPK_GEOMETRIES` after it; targets whose LDS cannot hold
+    them (a 64x64x512 16-bit tile pair is 128 KB) are filtered by
+    :func:`_spec_is_valid`, not by a per-arch list. It must be threaded through
+    wherever a geometry list is built for a direction, or the chunk bounds stop matching the list the worker
     walks.
     """
     tile_mn, warp_mn = _grid_axes(direction)
@@ -696,6 +711,13 @@ def _geometries(
         if atom is None or tile_k % atom.k:
             continue
         yield tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom
+    if direction == "wgrad" and mma_family == "wmma":
+        atom = target.mma.select_largest_k(
+            family=mma_family, a_dtype=da, b_dtype=db, c_dtype="fp32", m=16, n=16
+        )
+        if atom is not None:
+            for tile_m, tile_n, tile_k, warp_m, warp_n in CACHE_WGRAD_DEEPK_GEOMETRIES:
+                yield tile_m, tile_n, tile_k, warp_m, warp_n, 16, "mem", "cshuffle", atom
 
 
 def _aot_pipeline(direction: str, pipeline: str) -> bool:
@@ -745,7 +767,10 @@ def _wgrad_wmma_cover(mma_family: str, geometry: tuple) -> bool:
     :data:`CACHE_WGRAD_WMMA_GEOMETRIES` cover. Outside the cover a WMMA
     geometry builds only the synchronous default-epilogue kernels.
     """
-    return mma_family != "wmma" or tuple(geometry[:5]) in CACHE_WGRAD_WMMA_GEOMETRIES
+    return mma_family != "wmma" or (
+        tuple(geometry[:5]) in CACHE_WGRAD_WMMA_GEOMETRIES
+        or tuple(geometry[:5]) in CACHE_WGRAD_DEEPK_GEOMETRIES
+    )
 
 
 def _wgrad_async_chunks(cfg: dict, dtypes, caps: dict, arch: str) -> Optional[dict]:
@@ -2276,6 +2301,30 @@ def _probe_problem(direction: str, caps: Optional[dict] = None):
     )
 
 
+def spec_for_job(job: BuildJob, dtype: str):
+    """The kernel spec ``job`` builds (its direction's implicit-GEMM spec at
+    the canonical probe problem); nothing is built. Raises like the spec's
+    constructor on an invalid configuration."""
+    data = conv_data_spec(dtype)
+    problem = _probe_problem(job.direction, job.caps)
+    if job.direction == "fwd":
+        from kernels.common.conv_implicit_gemm import ImplicitGemmConvSpec as Spec
+    elif job.direction == "wgrad":
+        from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec as Spec
+    elif job.direction == "dgrad":
+        from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec as Spec
+    else:
+        raise ValueError(f"unknown direction {job.direction!r}")
+    return Spec(problem=problem, data=data, **job.spec_kwargs)
+
+
+def spec_launch_block_size(spec) -> int:
+    """Workgroup size of ``spec``'s kernel: ``launch_block_size`` where a
+    pipeline appends extra waves (wavelet); wgrad has no such pipeline and
+    exposes ``block_size`` alone."""
+    return getattr(spec, "launch_block_size", spec.block_size)
+
+
 def kernel_for_job(job: BuildJob, arch: str, dtype: str):
     """Build one job's kernel IR. Returns ``(kernel, meta)``; nothing compiled.
 
@@ -2283,40 +2332,20 @@ def kernel_for_job(job: BuildJob, arch: str, dtype: str):
     rather than failed -- the grid is deliberately over-generated and most
     rejections are ordinary spec-validity rules.
     """
-    data = conv_data_spec(dtype)
-    problem = _probe_problem(job.direction, job.caps)
-
+    spec = spec_for_job(job, dtype)
     if job.direction == "fwd":
-        from kernels.common.conv_implicit_gemm import (
-            ImplicitGemmConvSpec,
-            build_implicit_gemm_conv,
-        )
-
-        spec = ImplicitGemmConvSpec(problem=problem, data=data, **job.spec_kwargs)
-        kernel = build_implicit_gemm_conv(spec, arch=arch)
+        from kernels.common.conv_implicit_gemm import build_implicit_gemm_conv as build
     elif job.direction == "wgrad":
         from kernels.common.conv_implicit_gemm_wgrad import (
-            WgradConvSpec,
-            build_implicit_gemm_conv_wgrad,
+            build_implicit_gemm_conv_wgrad as build,
         )
-
-        spec = WgradConvSpec(problem=problem, data=data, **job.spec_kwargs)
-        kernel = build_implicit_gemm_conv_wgrad(spec, arch=arch)
-    elif job.direction == "dgrad":
-        from kernels.common.conv_implicit_gemm_dgrad import (
-            DgradConvSpec,
-            build_implicit_gemm_conv_dgrad,
-        )
-
-        spec = DgradConvSpec(problem=problem, data=data, **job.spec_kwargs)
-        kernel = build_implicit_gemm_conv_dgrad(spec, arch=arch)
     else:
-        raise ValueError(f"unknown direction {job.direction!r}")
-
+        from kernels.common.conv_implicit_gemm_dgrad import (
+            build_implicit_gemm_conv_dgrad as build,
+        )
+    kernel = build(spec, arch=arch)
     meta = {
         "spec_kernel_name": spec.kernel_name(),
-        # launch_block_size only exists where a pipeline appends extra waves
-        # (wavelet); wgrad has no such pipeline and exposes block_size alone.
-        "block_size": getattr(spec, "launch_block_size", spec.block_size),
+        "block_size": spec_launch_block_size(spec),
     }
     return kernel, meta

@@ -57,6 +57,23 @@ int n_waves(const rocke_direct_wgrad_tiled_spec_t* s)
     return s->waves_k * s->waves_c;
 }
 
+/* DirectWgradTiledSpec.pingpong_halves: single-group ping-pong, the two
+ * groups are the block's wave halves. */
+bool pingpong_halves(const rocke_direct_wgrad_tiled_spec_t* s)
+{
+    return s->pingpong && s->q_groups == 1;
+}
+
+/* The q_groups == 1 ping-pong keeps one more row buffer. */
+int n_buffers(const rocke_direct_wgrad_tiled_spec_t* s)
+{
+    if(pingpong_halves(s))
+    {
+        return s->prefetch + 2;
+    }
+    return s->prefetch + 1;
+}
+
 int strip_w(const rocke_direct_wgrad_tiled_spec_t* s)
 {
     return kWo / s->unfold_n;
@@ -256,7 +273,7 @@ extern "C" int rocke_direct_wgrad_tiled_unroll(const rocke_direct_wgrad_tiled_sp
     {
         return s->row_unroll;
     }
-    return std::lcm(s->prefetch + 1, s->problem.KH);
+    return std::lcm(n_buffers(s), s->problem.KH);
 }
 
 extern "C" int rocke_direct_wgrad_tiled_acc_vgprs(const rocke_direct_wgrad_tiled_spec_t* s)
@@ -274,7 +291,7 @@ extern "C" long rocke_direct_wgrad_tiled_lds_bytes(const rocke_direct_wgrad_tile
     {
         red = 2L * n_waves(s) * s->wave_k16 * s->wave_c16 * kWave * 4 * 4;
     }
-    return (s->prefetch + 1) * slot + red;
+    return n_buffers(s) * slot + red;
 }
 
 extern "C" int rocke_direct_wgrad_tiled_n_channel_tiles(const rocke_direct_wgrad_tiled_spec_t* s)
@@ -288,13 +305,19 @@ extern "C" int rocke_direct_wgrad_tiled_n_channel_tiles(const rocke_direct_wgrad
 extern "C" int rocke_direct_wgrad_tiled_n_segments(const rocke_direct_wgrad_tiled_spec_t* s)
 {
     const rocke_direct_conv_problem_t* p = &s->problem;
-    return cdiv(p->N, s->unfold_n) * cdiv(problem_wo(p), strip_w(s)) * cdiv(p->H, s->rows_per_seg);
+    int n_hb = s->rows_per_seg ? cdiv(p->H, s->rows_per_seg) : 1;
+    return cdiv(p->N, s->unfold_n) * cdiv(problem_wo(p), strip_w(s)) * n_hb;
 }
 
 extern "C" int rocke_direct_wgrad_tiled_n_splits(const rocke_direct_wgrad_tiled_spec_t* s)
 {
     int a = cdiv(rocke_direct_wgrad_tiled_n_segments(s), s->q_groups);
-    int c = cdiv(s->target_blocks, rocke_direct_wgrad_tiled_n_channel_tiles(s));
+    int tiles = rocke_direct_wgrad_tiled_n_channel_tiles(s);
+    int c = s->rows_per_seg ? cdiv(s->target_blocks, tiles) : s->target_blocks / tiles;
+    if(c < 1)
+    {
+        c = 1;
+    }
     return a < c ? a : c;
 }
 
@@ -323,7 +346,14 @@ extern "C" rocke_status_t rocke_direct_wgrad_tiled_kernel_name(
     snprintf(f_buf, sizeof f_buf, "f%dx%dp%d", p->KH, p->KW, p->PAD);
     snprintf(wt_buf, sizeof wt_buf, "wt%dx%d", wave_k(s), wave_c(s));
     snprintf(w_buf, sizeof w_buf, "w%dx%d", s->waves_k, s->waves_c);
-    snprintf(rps_buf, sizeof rps_buf, "rps%d", s->rows_per_seg);
+    if(s->rows_per_seg)
+    {
+        snprintf(rps_buf, sizeof rps_buf, "rps%d", s->rows_per_seg);
+    }
+    else
+    {
+        snprintf(rps_buf, sizeof rps_buf, "rpsH");
+    }
     snprintf(pf_buf, sizeof pf_buf, "pf%d", s->prefetch);
     snprintf(tb_buf, sizeof tb_buf, "tb%d", s->target_blocks);
     snprintf(u_buf, sizeof u_buf, "u%d", s->row_unroll);
@@ -415,9 +445,9 @@ extern "C" bool rocke_direct_wgrad_tiled_is_valid_spec(const rocke_direct_wgrad_
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "q_groups must be 1 or 2");
     }
-    if(s->pingpong && s->q_groups != 2)
+    if(pingpong_halves(s) && n_waves(s) % 2)
     {
-        ROCKE_SPEC_FAIL(reason, reason_cap, "pingpong needs q_groups == 2");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "pingpong with q_groups == 1 needs an even wave count");
     }
     if(rocke_direct_wgrad_tiled_threads_per_block(s)
        > rocke_archtarget_max_threads_per_block(target))
@@ -447,22 +477,22 @@ extern "C" bool rocke_direct_wgrad_tiled_is_valid_spec(const rocke_direct_wgrad_
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "target_blocks must be >= 1");
     }
-    /* (Python divides by prefetch + 1 here; a negative prefetch, which raises
-     * there, falls through to the prefetch check.) */
-    if(s->prefetch >= 0 && s->row_unroll % (s->prefetch + 1))
-    {
-        ROCKE_SPEC_FAIL(reason, reason_cap, "row_unroll must be a multiple of prefetch + 1");
-    }
+    /* Before the n_buffers check: prefetch -1 (-2 with the single-group
+     * ping-pong's extra buffer) makes n_buffers 0. */
     if(s->prefetch < 1)
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "prefetch must be >= 1");
     }
+    if(s->row_unroll % n_buffers(s))
+    {
+        ROCKE_SPEC_FAIL(reason, reason_cap, "row_unroll must be a multiple of n_buffers");
+    }
     {
         int u = rocke_direct_wgrad_tiled_unroll(s);
-        if(s->rows_per_seg <= 0 || u <= 0 || s->rows_per_seg % u)
+        if(s->rows_per_seg < 0 || u <= 0 || s->rows_per_seg % u)
         {
             ROCKE_SPEC_FAIL(
-                reason, reason_cap, "rows_per_seg must be a positive multiple of %d", u);
+                reason, reason_cap, "rows_per_seg must be 0 or a positive multiple of %d", u);
         }
     }
     if(p->KH > 8 || p->KW > 8)
@@ -503,6 +533,7 @@ struct Ctx
     bool bf16;
 
     int KH, KW, PAD, NW, WK16, WC16, BK, BC, CHK, CHC, UN, WU, SEG, STRIP, D, NB, HPB, U, T_PRO;
+    bool AUTO; /* rows_per_seg == 0: whole strips, one-round grid */
     int IK, IC, N_INSTR, QG, GDY_ELEMS, GX_ELEMS;
     std::vector<int> swz_k, swz_c;
 
@@ -510,6 +541,7 @@ struct Ctx
     V c0, c1, c_two, oob;
     V c_cpg, c_kpg;
     V lane, qg, wave;
+    V pp_grp = NULL;
     V k_blk0, c_glb0, c_blk0, group;
     V a_rsrc, b_rsrc;
     std::vector<V> dy_bufs, x_bufs, dy_addr, x_addr;
@@ -518,6 +550,7 @@ struct Ctx
     std::vector<std::vector<V>> dy_idx; /* [mi][rd] */
     std::vector<std::vector<std::vector<V>>> x_idx; /* [s][ni][rd] */
     V zero_frag;
+    V n_rb = NULL; /* AUTO: row-loop trip count, ceil(H / U) */
     int n_acc;
 };
 
@@ -592,6 +625,12 @@ struct Seg
     std::vector<LaneOff> dy, xs;
 };
 
+/* A segment's first image, strip and row range (seg_origin). */
+struct SegOrigin
+{
+    V n0, q, h0, h_end;
+};
+
 /* issue_row(buf, t, h0, h_end, lane_offs, t_end) */
 void issue_row(Ctx& c, const Seg& sg, int buf, V t)
 {
@@ -648,13 +687,53 @@ V read_frag(Ctx& c, V smem, const std::vector<V>& idx)
 
 typedef std::vector<std::vector<V>> Ring; /* [KH][WK16] */
 
+/* wait_rows(lead) */
+void wait_rows(Ctx& c, bool lead)
+{
+    const Em& e = c.e;
+    if(pingpong_halves(c.spec))
+    {
+        if(lead)
+        {
+            rocke_b_s_waitcnt(e.b, -1, 0, -1);
+        }
+        else
+        {
+            rocke_b_s_waitcnt(e.b, (c.D - 1) * c.N_INSTR, -1, -1);
+        }
+    }
+    else if(lead)
+    {
+        rocke_b_s_waitcnt(e.b, (c.D - 1) * c.N_INSTR, 0, -1);
+    }
+    else
+    {
+        rocke_b_s_waitcnt(e.b, -1, 0, -1);
+    }
+}
+
+/* mid_barrier() */
+void mid_barrier(Ctx& c)
+{
+    wait_rows(c, false);
+    rocke_b_s_barrier_bare(c.e.b);
+    if(c.QG == 1)
+    {
+        rocke_b_sched_barrier(c.e.b, 0);
+    }
+}
+
 /* step(buf, t, ring, accs, compute, issue) */
 void step(Ctx& c, const Seg& sg, int buf, V t, Ring& ring, std::vector<V>& accs, bool compute)
 {
     const Em& e = c.e;
-    rocke_b_s_waitcnt(e.b, (c.D - 1) * c.N_INSTR, 0, -1);
+    wait_rows(c, true);
     rocke_b_s_barrier_bare(e.b);
-    issue_row(c, sg, (buf + c.D) % c.NB, e.addi(t, c.D));
+    bool late = pingpong_halves(c.spec);
+    if(!late)
+    {
+        issue_row(c, sg, (buf + c.D) % c.NB, e.addi(t, c.D));
+    }
     std::vector<V> newest;
     for(int mi = 0; mi < c.WK16; ++mi)
     {
@@ -662,22 +741,33 @@ void step(Ctx& c, const Seg& sg, int buf, V t, Ring& ring, std::vector<V>& accs,
     }
     ring.erase(ring.begin());
     ring.push_back(newest);
+    std::vector<std::vector<V>> xf(c.KW);
+    if(compute)
+    {
+        for(int s = 0; s < c.KW; ++s)
+        {
+            for(int ni = 0; ni < c.WC16; ++ni)
+            {
+                xf[s].push_back(read_frag(c, c.x_bufs[buf], c.x_idx[s][ni]));
+            }
+        }
+    }
+    if(late)
+    {
+        rocke_b_sched_barrier(e.b, 0);
+        issue_row(c, sg, (buf + c.D) % c.NB, e.addi(t, c.D));
+    }
     if(!compute)
     {
-        return;
-    }
-    std::vector<std::vector<V>> xf(c.KW);
-    for(int s = 0; s < c.KW; ++s)
-    {
-        for(int ni = 0; ni < c.WC16; ++ni)
+        if(late)
         {
-            xf[s].push_back(read_frag(c, c.x_bufs[buf], c.x_idx[s][ni]));
+            mid_barrier(c);
         }
+        return;
     }
     if(c.spec->pingpong)
     {
-        rocke_b_s_waitcnt(e.b, -1, 0, -1);
-        rocke_b_s_barrier_bare(e.b);
+        mid_barrier(c);
         rocke_b_s_setprio(e.b, 1);
     }
     for(int r = 0; r < c.KH; ++r)
@@ -697,7 +787,16 @@ void step(Ctx& c, const Seg& sg, int buf, V t, Ring& ring, std::vector<V>& accs,
     }
     if(c.spec->pingpong)
     {
+        if(c.QG == 1)
+        {
+            rocke_b_sched_barrier(e.b, 0);
+        }
         rocke_b_s_setprio(e.b, 0);
+    }
+    else if(c.AUTO)
+    {
+        /* Keep each row's MFMAs in its row (runtime trip count). */
+        rocke_b_sched_barrier(e.b, 0);
     }
 }
 
@@ -709,7 +808,8 @@ std::vector<V> segment(Ctx& c, std::vector<V> accs, V n0, V q, V h0, V h_end, V 
     sg.h0 = h0;
     sg.h_end = h_end;
     seg_lane_offsets(c, n0, e.muli(q, c.WU), sg.dy, sg.xs);
-    sg.t_end = e.ci(c.T_PRO + c.HPB);
+    /* A whole strip needs no tail cut (see the Python builder). */
+    sg.t_end = e.ci(c.AUTO ? (1 << 30) : c.T_PRO + c.HPB);
     if(valid != NULL)
     {
         sg.t_end = e.select(valid, sg.t_end, c.c0);
@@ -717,6 +817,11 @@ std::vector<V> segment(Ctx& c, std::vector<V> accs, V n0, V q, V h0, V h_end, V 
     for(int t = 0; t < c.D; ++t)
     {
         issue_row(c, sg, t % c.NB, e.ci(t));
+    }
+    if(pingpong_halves(c.spec))
+    {
+        rocke_b_s_waitcnt(e.b, (c.D - 1) * c.N_INSTR, -1, -1);
+        e.if_(e.eq(c.pp_grp, c.c1), [&]() { rocke_b_s_barrier_bare(e.b); });
     }
     Ring ring(c.KH, std::vector<V>(c.WK16, c.zero_frag));
     for(int t = 0; t < c.T_PRO; ++t)
@@ -733,7 +838,7 @@ std::vector<V> segment(Ctx& c, std::vector<V> accs, V n0, V q, V h0, V h_end, V 
             inits.push_back(ring[j][mi]);
         }
     }
-    V hi_bound = e.ci(c.HPB / c.U);
+    V hi_bound = c.AUTO ? c.n_rb : e.ci(c.HPB / c.U);
     std::vector<V> res
         = e.for_iter(c.c0, hi_bound, c.c1, names, inits, "rb", [&](V rb, std::vector<V> rc) {
               std::vector<V> accs_i(rc.begin(), rc.begin() + c.n_acc);
@@ -759,6 +864,10 @@ std::vector<V> segment(Ctx& c, std::vector<V> accs, V n0, V q, V h0, V h_end, V 
     std::vector<V> accs_out(res.begin(), res.begin() + std::min((size_t)c.n_acc, res.size()));
     rocke_b_s_waitcnt(e.b, 0, 0, -1);
     rocke_b_s_barrier_bare(e.b);
+    if(pingpong_halves(c.spec))
+    {
+        e.if_(e.eq(c.pp_grp, c.c0), [&]() { rocke_b_s_barrier_bare(e.b); });
+    }
     return accs_out;
 }
 
@@ -830,8 +939,9 @@ rocke_kernel_def_t*
     c.SEG = c.WU + c.KW - 1;
     c.STRIP = c.UN * c.SEG;
     c.D = spec->prefetch;
-    c.NB = spec->prefetch + 1;
+    c.NB = n_buffers(spec);
     c.HPB = spec->rows_per_seg;
+    c.AUTO = c.HPB == 0;
     c.U = rocke_direct_wgrad_tiled_unroll(spec);
     c.T_PRO = c.KH - 1;
     c.IK = dma_instrs_dy(spec);
@@ -917,13 +1027,32 @@ rocke_kernel_def_t*
     V n_ch_tiles = e.mul(e.mul(p_groups, n_k_tiles), n_c_tiles);
     V n_q = e.cdivi(p_Wo, c.WU);
     V n_ng = e.cdivi(p_N, c.UN);
-    V n_hb = e.cdivi(p_H, c.HPB);
-    V total_segs = e.mul(e.mul(n_ng, n_q), n_hb);
+    V n_hb = NULL;
+    V total_segs;
+    if(c.AUTO)
+    {
+        /* One segment per strip: all H rows, the trip count rounded up. */
+        c.n_rb = e.cdivi(p_H, c.U);
+        total_segs = e.mul(n_ng, n_q);
+    }
+    else
+    {
+        n_hb = e.cdivi(p_H, c.HPB);
+        total_segs = e.mul(e.mul(n_ng, n_q), n_hb);
+    }
     /* Same formula as DirectWgradTiledSpec.n_splits, which sizes the grid. */
     V sa = e.cdivi(total_segs, spec->q_groups);
     V tb = e.ci(spec->target_blocks);
-    V sb = e.add(tb, e.sub(n_ch_tiles, c.c1));
-    sb = e.div(sb, n_ch_tiles);
+    V sb;
+    if(c.AUTO)
+    {
+        sb = e.smax(e.div(tb, n_ch_tiles), c.c1);
+    }
+    else
+    {
+        sb = e.add(tb, e.sub(n_ch_tiles, c.c1));
+        sb = e.div(sb, n_ch_tiles);
+    }
     V n_splits = e.smin(sa, sb);
 
     /* Renumber block ids so each XCD gets a contiguous run. */
@@ -1031,10 +1160,32 @@ rocke_kernel_def_t*
     c.zero_frag = rocke_b_zero_vec(b, c.io_type, kVec);
 
     /* ---- persistent segment loop ---- */
-    if(spec->pingpong)
+    /* Segment seg -> first image, strip and row range (seg_origin in the
+     * Python builder). Row block fastest, then strip, then image group; in
+     * auto mode a segment is a whole strip. */
+    auto seg_origin = [&](V seg) {
+        V rest = seg, h0 = c.c0;
+        if(!c.AUTO)
+        {
+            V hb = e.mod(seg, n_hb);
+            rest = e.div(seg, n_hb);
+            h0 = e.muli(hb, c.HPB);
+        }
+        V n0 = e.muli(e.div(rest, n_q), c.UN);
+        V q = e.mod(rest, n_q);
+        V h_end = c.AUTO ? p_H : e.smin(e.addi(h0, c.HPB), p_H);
+        return SegOrigin{n0, q, h0, h_end};
+    };
+    /* Ping-pong group: the q group, or the half of the block's waves. */
+    c.pp_grp = c.qg;
+    if(pingpong_halves(spec))
+    {
+        c.pp_grp = e.divi(c.wave, c.NW / 2);
+    }
+    if(spec->pingpong && c.QG > 1)
     {
         /* Group 1 starts one barrier late. */
-        e.if_(e.eq(c.qg, c.c1), [&]() { rocke_b_s_barrier_bare(b); });
+        e.if_(e.eq(c.pp_grp, c.c1), [&]() { rocke_b_s_barrier_bare(b); });
     }
     std::vector<std::string> acc_names = iter_names("acc", c.n_acc);
     std::vector<V> zero_accs(c.n_acc, zero_acc);
@@ -1048,13 +1199,8 @@ rocke_kernel_def_t*
                           zero_accs,
                           "seg",
                           [&](V seg, std::vector<V> carried) {
-                              V hb = e.mod(seg, n_hb);
-                              V rest = e.div(seg, n_hb);
-                              V h0 = e.muli(hb, c.HPB);
-                              V n0 = e.muli(e.div(rest, n_q), c.UN);
-                              V q = e.mod(rest, n_q);
-                              V h_end = e.smin(e.addi(h0, c.HPB), p_H);
-                              return segment(c, carried, n0, q, h0, h_end, NULL);
+                              SegOrigin o = seg_origin(seg);
+                              return segment(c, carried, o.n0, o.q, o.h0, o.h_end, NULL);
                           });
     }
     else
@@ -1069,23 +1215,18 @@ rocke_kernel_def_t*
             c.c0, n_iter, c.c1, acc_names, zero_accs, "segi", [&](V segi, std::vector<V> carried) {
                 V a = e.add(vsplit0, c.qg);
                 V seg = e.add(a, e.mul(segi, n_vsplits));
-                V hb = e.mod(seg, n_hb);
-                V rest = e.div(seg, n_hb);
-                V h0 = e.muli(hb, c.HPB);
-                V n0 = e.muli(e.div(rest, n_q), c.UN);
-                V q = e.mod(rest, n_q);
-                V h_end = e.smin(e.addi(h0, c.HPB), p_H);
+                SegOrigin o = seg_origin(seg);
                 V valid = e.lt(seg, total_segs);
-                return segment(c, carried, n0, q, h0, h_end, valid);
+                return segment(c, carried, o.n0, o.q, o.h0, o.h_end, valid);
             });
     }
     if((int)accs.size() != c.n_acc || !rocke_ir_builder_ok(b))
     {
         return NULL;
     }
-    if(spec->pingpong)
+    if(spec->pingpong && c.QG > 1)
     {
-        e.if_(e.eq(c.qg, c.c0), [&]() { rocke_b_s_barrier_bare(b); });
+        e.if_(e.eq(c.pp_grp, c.c0), [&]() { rocke_b_s_barrier_bare(b); });
     }
 
     /* ---- epilogue: atomic add into dW[total_k, KH, KW, cpg] ---- */

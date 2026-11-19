@@ -51,7 +51,9 @@ def test_ordinary_loop_count_respects_tail_and_gsu(
         sgprs={"LoopCounter": 6, "SizesSum": 8, "GSU": 9},
     )
     module = KernelWriterAssembly._calculateOrdinaryLoopNumIter(
-        writer, {"DepthU": 16, "GlobalSplitU": gsu}, "LoopCounter", 0,
+        writer,
+        {"DepthU": 16, "GlobalSplitU": gsu, "ProblemType": {"FusedA2A": "Disabled"}},
+        "LoopCounter", 0,
         ContinuousRegister(32, 3),
     )
     observed = run_scalar_kernel(

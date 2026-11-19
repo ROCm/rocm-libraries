@@ -38,6 +38,7 @@
 #include <hipdnn_compatibility/cudnn/detail/knob_wrapper.h>
 #include <hipdnn_compatibility/cudnn/detail/node_wrappers/unsupported_nodes.h>
 #include <hipdnn_compatibility/cudnn/detail/note_triage.h>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::graph
@@ -583,8 +584,8 @@ public:
 
     // Per-note dispositions live in detail/note_triage.h.
 
-    /// @brief Logged and ignored; hipDNN has no numerical-note metadata.
-    /// @note STRICT_NAN_PROP records GRAPH_NOT_SUPPORTED.
+    /// @brief NONDETERMINISTIC restricts plans to engines that report it.
+    /// @note STRICT_NAN_PROP records GRAPH_NOT_SUPPORTED; other notes are logged and ignored.
     Graph& select_numeric_notes(const std::vector<NumericalNote_t>& notes)
     {
         for(const auto note : notes)
@@ -592,12 +593,20 @@ public:
             applyNote("select_numeric_notes",
                       note,
                       cudnn_frontend::detail::triageSelect(note),
-                      [](NumericalNote_t) { return false; });
+                      [this](NumericalNote_t mapped) {
+                          if(mapped != NumericalNote_t::NONDETERMINISTIC)
+                          {
+                              return false;
+                          }
+                          _selectedNumericalNotes.push_back(mapped);
+                          return true;
+                      });
         }
         return *this;
     }
 
-    /// @brief NONDETERMINISTIC restricts plans to engines that claim deterministic results.
+    /// @brief NONDETERMINISTIC excludes engines that report it, so only engines that claim
+    /// deterministic results remain.
     /// @note DOWN_CONVERT_INPUTS and REDUCED_PRECISION_REDUCTION record GRAPH_NOT_SUPPORTED;
     /// other notes are logged and ignored.
     Graph& deselect_numeric_notes(const std::vector<NumericalNote_t>& notes)
@@ -612,7 +621,7 @@ public:
                           {
                               return false;
                           }
-                          _requireDeterministic = true;
+                          _deselectedNumericalNotes.push_back(mapped);
                           return true;
                       });
         }
@@ -1647,7 +1656,8 @@ private:
     std::vector<int64_t> _engineIndexToNativeEngineId;
     std::vector<BehaviorNote_t> _selectedBehaviorNotes;
     std::vector<BehaviorNote_t> _deselectedBehaviorNotes;
-    bool _requireDeterministic = false;
+    std::vector<NumericalNote_t> _selectedNumericalNotes;
+    std::vector<NumericalNote_t> _deselectedNumericalNotes;
     std::unordered_set<int64_t> _shimBarredEngineIds;
 
     Mode _mode = Mode::Empty;
@@ -1750,12 +1760,14 @@ private:
         return findTopSurvivingPlanIndex(survivingIndex);
     }
 
-    // Behavior-note and determinism filters bar engines by per-engine metadata.
+    // Behavior-note and numerical-note filters bar engines by per-engine metadata.
     error_t applyEngineMetadataFilters(const std::vector<HeurMode_t>& modes)
     {
         const bool filterBehavior
             = !_selectedBehaviorNotes.empty() || !_deselectedBehaviorNotes.empty();
-        if(!filterBehavior && !_requireDeterministic)
+        const bool filterNumerical
+            = !_selectedNumericalNotes.empty() || !_deselectedNumericalNotes.empty();
+        if(!filterBehavior && !filterNumerical)
         {
             return {};
         }
@@ -1772,21 +1784,26 @@ private:
             {
                 continue;
             }
-            if(_requireDeterministic && !cudnn_frontend::detail::isDeterminismClaimed(engineId))
+            bool bar = false;
+            if(filterNumerical)
             {
-                enginesToBar.push_back(engineId);
-                continue;
+                std::vector<NumericalNote_t> engineNotes;
+                CHECK_CUDNN_FRONTEND_ERROR(
+                    _graph->get_numerical_notes_for_engine(engineId, engineNotes));
+                bar = !cudnn_frontend::detail::numericalNotesMatch(
+                    _selectedNumericalNotes, _deselectedNumericalNotes, engineNotes);
             }
-            if(filterBehavior)
+            if(!bar && filterBehavior)
             {
                 std::vector<BehaviorNote_t> engineNotes;
                 CHECK_CUDNN_FRONTEND_ERROR(
                     _graph->get_behavior_notes_for_engine(engineId, engineNotes));
-                if(!cudnn_frontend::detail::behaviorNotesMatch(
-                       _selectedBehaviorNotes, _deselectedBehaviorNotes, engineNotes))
-                {
-                    enginesToBar.push_back(engineId);
-                }
+                bar = !cudnn_frontend::detail::behaviorNotesMatch(
+                    _selectedBehaviorNotes, _deselectedBehaviorNotes, engineNotes);
+            }
+            if(bar)
+            {
+                enginesToBar.push_back(engineId);
             }
         }
 
@@ -1849,7 +1866,11 @@ private:
         {
             append("behavior notes");
         }
-        if(_requireDeterministic)
+        if(!_selectedNumericalNotes.empty())
+        {
+            append("select_numeric_notes(NONDETERMINISTIC)");
+        }
+        if(!_deselectedNumericalNotes.empty())
         {
             append("deselect_numeric_notes(NONDETERMINISTIC)");
         }
@@ -1973,7 +1994,8 @@ private:
         _engineIndexToNativeEngineId.clear();
         _selectedBehaviorNotes.clear();
         _deselectedBehaviorNotes.clear();
-        _requireDeterministic = false;
+        _selectedNumericalNotes.clear();
+        _deselectedNumericalNotes.clear();
         _shimBarredEngineIds.clear();
         _recordedError.reset();
         _mode = Mode::Empty;

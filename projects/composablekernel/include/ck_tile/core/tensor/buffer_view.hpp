@@ -489,7 +489,7 @@ struct buffer_view<address_space_enum::global,
             bool_constant<oob_conditional_check>{});
 #endif
 #if CK_TILE_HAS_ASYNCMARK
-        __builtin_amdgcn_asyncmark();
+        asyncmark();
 #endif
     }
 
@@ -523,7 +523,7 @@ struct buffer_view<address_space_enum::global,
 
         cluster_multicast_load_async_to_lds<remove_cvref_t<X>, inst_offset>(g_src, lds_ptr, mask);
 #if CK_TILE_HAS_ASYNCMARK
-        __builtin_amdgcn_asyncmark();
+        asyncmark();
 #endif
 #else
         (void)smem;
@@ -566,7 +566,7 @@ struct buffer_view<address_space_enum::global,
                               /*oob_conditional_check*/ false>(
             smem + linear_offset, rsrc, (i + linear_offset) * static_cast<index_t>(sizeof(type)));
 #if CK_TILE_HAS_ASYNCMARK
-        __builtin_amdgcn_asyncmark();
+        asyncmark();
 #endif
     }
 
