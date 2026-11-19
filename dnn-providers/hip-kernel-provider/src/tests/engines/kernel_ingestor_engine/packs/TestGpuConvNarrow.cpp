@@ -48,8 +48,9 @@
  * true convolution, and several images. Backward weights: both sides (an output layer's K <= 8,
  * a stem's C <= 8), the same classes and edges, several channel blocks and splits. Infinities and
  * NaN in the streamed operand propagate as the reference's do (forward and backward data never
- * gather products of padding; backward weights plant them away from the borders, see
- * ConvNarrowWrw.cpp). A tensor past 2 GiB of images each under it runs on 64-bit image bases.
+ * gather products of padding; an output layer's backward weights make no product for a tap that
+ * reaches no dy pixel, planted in x's border pixels; a stem's are planted away from the borders,
+ * see ConvNarrowWrw.cpp). A tensor past 2 GiB of images each under it runs on 64-bit image bases.
  * Every config relaunches bitwise identical.
  */
 namespace
@@ -281,6 +282,9 @@ struct DeviceCase
     /// Served only with 160 KiB of LDS (gfx950): a 7x7 stem's 147 or a 3x7x7 stem's 441
     /// (narrow channel, tap) columns of products outgrow 64 KiB.
     bool largeLds = false;
+    /// Backward weights of an output layer: infinities and NaN planted in x's border pixels,
+    /// whose taps that reach no dy pixel make no product (an explicitly padded GEMM's result).
+    bool borderSpecials = false;
 };
 
 ConvShape conv(int64_t c,
@@ -405,6 +409,16 @@ std::vector<DeviceCase> deviceCases()
         cases.push_back({l + "7x7S2ConvolutionMode", wrwConvolution, wrw});
         cases.push_back(
             {l + "3x3K3Specials", conv(32, 3, {13, 37}, {3, 3}, {1, 1}, {1, 1}, cl, 1), wrw, true});
+        for(const auto& [name, shape] : std::vector<std::pair<std::string, ConvShape>>{
+                {"3x3K3BorderSpecials", conv(32, 3, {13, 37}, {3, 3}, {1, 1}, {1, 1}, cl, 1)},
+                {"3x3K3Stride2UnusedSpecials",
+                 conv(32, 3, {14, 38}, {3, 3}, {2, 2}, {0, 0}, cl, 1)},
+                {"3x3x3K3BorderSpecials",
+                 conv(24, 3, {5, 9, 21}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, cl, 1)}})
+        {
+            cases.push_back({l + name, shape, wrw});
+            cases.back().borderSpecials = true;
+        }
         cases.push_back({l + "7x7S2C3Specials",
                          conv(3, 24, {23, 30}, {7, 7}, {2, 2}, {3, 3}, cl, 1),
                          wrw,
@@ -438,6 +452,30 @@ void plantCentreInfinity(Tensor<T>& tensor)
 }
 
 /// Plants +inf, -inf and NaN at fixed positions of @p tensor.
+template <typename T>
+void plantBorderSpecials(Tensor<T>& tensor)
+{
+    auto* data = static_cast<T*>(tensor.rawHostData());
+    const auto& dims = tensor.dims();
+    std::vector<int64_t> first(dims.size(), 0);
+    std::vector<int64_t> last(dims.size(), 0);
+    for(size_t axis = 2; axis < dims.size(); ++axis)
+    {
+        last[axis] = dims[axis] - 1;
+    }
+    first[1] = 1;
+    data[offsetOf(first, tensor.strides())]
+        = static_cast<T>(std::numeric_limits<float>::infinity());
+    last[1] = 2;
+    data[offsetOf(last, tensor.strides())]
+        = static_cast<T>(-std::numeric_limits<float>::infinity());
+    last[1] = dims[1] - 1;
+    last.back() = 0;
+    data[offsetOf(last, tensor.strides())]
+        = static_cast<T>(std::numeric_limits<float>::quiet_NaN());
+    tensor.markHostModified();
+}
+
 template <typename T>
 void plantSpecials(Tensor<T>& tensor)
 {
@@ -482,6 +520,10 @@ void runCase(const DeviceCase& deviceCase)
     else
     {
         w.fillTensorWithRandomValues(-1.0f, 1.0f, SEED + 1);
+    }
+    if(deviceCase.borderSpecials)
+    {
+        plantBorderSpecials(x);
     }
     if(deviceCase.specials)
     {

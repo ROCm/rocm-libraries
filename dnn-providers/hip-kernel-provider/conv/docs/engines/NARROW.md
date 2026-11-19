@@ -144,7 +144,11 @@ Measured with autotune (fresh cache), our engines and the BLAS engines, 20 itera
 
 - **Forward and backward data:** fp32 accumulation. 16-bit products are exact on the 16-bit atoms. One thread sums every output element in a fixed order, and it is rounded once. The device suite relaunches each config and compares bits.
 - **Padding:** products of pixels outside the input are never gathered. An infinite or NaN weight therefore meets padding as an exact reference does, which is not at all. An infinite input value meets only the filter's own entries.
-- **Backward weights:** the wide operand's pixels run through the matrix core, and the narrow window carries zeros for padding. An infinite wide-operand value multiplied by a padding zero gives NaN in dw where the exact reference skips the term. The device suite plants inf and NaN away from the padding.
+- **Backward weights:** infinities and NaN give the result of an explicitly padded GEMM: im2col with x's padding as zeros, as PyTorch, the BLAS engines and `CONV_WRW` compute it.
+  - **Stems:** an infinite dy value meets x's padding as inf x 0, which gives NaN.
+  - **Output layers:** an infinite or NaN x pixel meets only the taps that reach a dy pixel. A tap that reaches none (beyond dy, or a stride phase between dy pixels) makes no product.
+  - **Implementation:** the matrix cores multiply every column, so a step whose A fragments hold a non-finite value runs them with those values zeroed. Each lane then adds the non-finite values' products on the taps that reach a dy pixel. A wave-wide vote on the loaded fragments decides this, so finite data pays only the vote.
+  - **Tests:** the device suite plants infinities and NaN in x's border pixels (padding, and a stride-2 column and row no output reads), and in a stem's interior dy.
 - **Folded filter columns (`sf` 1):** this kernel option, not in the catalog, multiplies the padding columns of the window by the filter, with the same consequence for infinite inputs.
 
 ## Prior art considered

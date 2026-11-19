@@ -26,9 +26,14 @@
 // [split][wide channel][column]; ConvNarrowWrwReduce adds the splits in order and writes dw in its
 // element type, in the graph's taps (convolution mode reflected): deterministic, no atomics.
 //
-// An infinite or NaN wide-operand pixel meets every column of its step: where a tap of it reaches
-// no narrow pixel (padding, or a stride phase between dy pixels) the product is inf x 0 (NaN), as
-// an explicitly padded GEMM computes it.
+// Infinities and NaN follow an explicitly padded GEMM (im2col with x's padding as zeros, as
+// PyTorch, the BLAS engines and CONV_WRW compute it): a stem's (CW_MAPB 0) wide dy pixel meets x's
+// padding as inf x 0 (NaN). An output layer's (CW_MAPB 1) wide x pixel meets only the taps that
+// reach a dy pixel -- the B operand's zeros where a tap reaches none (beyond dy, or a stride phase
+// between dy pixels) are no products, not padding. The matrix cores multiply every column, so a
+// step whose A fragments hold a non-finite value (a wave-wide vote on the loaded fragments) runs
+// them with those values zeroed and adds the non-finite values' products on the taps that reach
+// a dy pixel, lane by lane; the vector ALU skips those taps for a non-finite x value.
 //
 // One HIPRTC compile per config; every extent, stride, padding, dilation and channel count is a
 // runtime argument (ConvNarrowArgs.h). Defines:
@@ -119,6 +124,35 @@ constexpr int EPT = (NCP * KR + NT - 1) / NT; // B elements a thread
 
 constexpr unsigned OOB = K1_OUT_OF_RANGE;
 
+/// The exponent bits of an element type (all set: infinite or NaN).
+template <class X>
+struct ExpBits;
+template <>
+struct ExpBits<float>
+{
+    typedef unsigned raw;
+    static constexpr unsigned MASK = 0x7f800000u;
+};
+template <>
+struct ExpBits<k1_half>
+{
+    typedef unsigned short raw;
+    static constexpr unsigned MASK = 0x7c00u;
+};
+template <>
+struct ExpBits<k1_bf16>
+{
+    typedef unsigned short raw;
+    static constexpr unsigned MASK = 0x7f80u;
+};
+
+/// Whether @p v is infinite or NaN.
+__device__ inline bool nonFinite(T v)
+{
+    const unsigned bits = __builtin_bit_cast(typename ExpBits<T>::raw, v);
+    return (bits & ExpBits<T>::MASK) == ExpBits<T>::MASK;
+}
+
 __device__ inline int floorDiv(int a, int b)
 {
     return a >= 0 ? a / b : -((-a + b - 1) / b);
@@ -197,6 +231,52 @@ __device__ inline Frag loadRun(__amdgpu_buffer_rsrc_t r, int base, int ps, int a
             }
         }
         return f;
+    }
+}
+
+/// A fragment's KPL elements.
+template <int L = KPL>
+struct FragElems
+{
+    T e[L];
+};
+
+/// Whether any element of @p f is infinite or NaN.
+__device__ inline bool fragNonFinite(const Frag& f)
+{
+    const auto x = __builtin_bit_cast(FragElems<>, f);
+    bool any = false;
+#pragma unroll
+    for(int e = 0; e < KPL; ++e)
+    {
+        any = any || nonFinite(x.e[e]);
+    }
+    return any;
+}
+
+/// @p f with its infinite and NaN elements zeroed.
+__device__ inline Frag finitePart(const Frag& f)
+{
+    auto x = __builtin_bit_cast(FragElems<>, f);
+#pragma unroll
+    for(int e = 0; e < KPL; ++e)
+    {
+        x.e[e] = nonFinite(x.e[e]) ? K1Elem<T>::store(0.0f) : x.e[e];
+    }
+    return __builtin_bit_cast(Frag, x);
+}
+
+/// Whether any lane of the wave has @p v.
+template <int WV = WAVE>
+__device__ inline bool anyLane(bool v)
+{
+    if constexpr(WV == 64)
+    {
+        return __builtin_amdgcn_ballot_w64(v) != 0;
+    }
+    else
+    {
+        return __builtin_amdgcn_ballot_w32(v) != 0;
     }
 }
 
@@ -284,6 +364,23 @@ struct Wrw
         img = rest / a.di;
         q0 = band * RB;
         iw0 = strip * WR;
+    }
+
+    /// CW_MAPB 1: whether column @p n (t, j, r, s) at the step's pixel @p k reaches a dy pixel
+    /// (the B operand holds a dy value there, not a zero for a missing product).
+    __device__ bool reaches(int n, int k, int z, int q0, int iw0) const
+    {
+        const int s = n % FS;
+        const int r = (n / FS) % FR;
+        const int j = (n / (FS * FR)) % KO;
+        const int t = n / (FS * FR * KO);
+        const int jr = k / WR;
+        const int q = q0 + jr;
+        const int w = iw0 + k - jr * WR;
+        return n < NCOL && j < a.ko && q < a.hi && w < a.wi
+               && mapAxis(z, t, a.sd, a.pd, a.dd, a.dn) >= 0
+               && mapAxis(q, r, a.sh, a.ph, a.dh, a.hn) >= 0
+               && mapAxis(w, s, a.sw, a.pw, a.dw2, a.wn) >= 0;
     }
 
     /// The narrow window step @p st's taps reach into registers: element e = (((j FD + t) FR +
@@ -423,6 +520,57 @@ struct Wrw
     {
         return loadFrag(sB + (nt * DIM + col) * BPITCH + ks * KA + kb);
     }
+
+    /// CW_MAPB 1, a step with non-finite A values (run with them zeroed): their products on the
+    /// columns that reach a dy pixel, into each lane's accumulators.
+    __device__ void addNonFinite(int st)
+    {
+        int img, z, q0, iw0;
+        stepAt(st, img, z, q0, iw0);
+        const char* inImage = static_cast<const char*>(a.in) + img * a.is[0] * ES;
+        const __amdgpu_buffer_rsrc_t r = k1Rsrc(inImage, a.inImageBytes);
+        const int cs = static_cast<int>(a.is[1]);
+        const int ps = static_cast<int>(a.is[4]);
+        for(int mt = 0; mt < MPW; ++mt)
+        {
+            for(int i = 0; i < Atom::ACC; ++i)
+            {
+                const int m = c0 + (mt * NW + wave) * DIM + Atom::dRow(lane, i);
+                if(m >= a.ci)
+                {
+                    continue;
+                }
+                for(int k = 0; k < KR; ++k)
+                {
+                    const int jr = k / WR;
+                    const int q = q0 + jr;
+                    const int w = iw0 + k - jr * WR;
+                    if(q >= a.hi || w >= a.wi)
+                    {
+                        continue;
+                    }
+                    const T xr
+                        = loadElem(r,
+                                   static_cast<unsigned>((m * cs + z * static_cast<int>(a.is[2])
+                                                          + q * static_cast<int>(a.is[3]) + w * ps)
+                                                         * ES));
+                    if(!nonFinite(xr))
+                    {
+                        continue;
+                    }
+                    const float xv = K1Elem<T>::load(xr);
+                    for(int nt = 0; nt < NTL; ++nt)
+                    {
+                        const int n = nt * DIM + col;
+                        if(reaches(n, k, z, q0, iw0))
+                        {
+                            d[mt][nt][i] += xv * K1Elem<T>::load(sB[n * BPITCH + k]);
+                        }
+                    }
+                }
+            }
+        }
+    }
 #endif
 
     /// One step on buffer B: its window (in registers) into LDS, the next step's window and A
@@ -461,9 +609,24 @@ struct Wrw
             for(int u = 0; u < WR; ++u)
             {
                 const bool ok = rowOk && iw0 + u < a.wi;
-                const float xv = K1Elem<T>::load(
-                    loadElem(r, ok ? static_cast<unsigned>((rowOff + u * ps) * ES) : OOB));
+                const T xr = loadElem(r, ok ? static_cast<unsigned>((rowOff + u * ps) * ES) : OOB);
+                const float xv = K1Elem<T>::load(xr);
                 const int k = jr * WR + u;
+                if constexpr(MAPB)
+                {
+                    if(nonFinite(xr))
+                    {
+                        // Only the taps that reach a dy pixel (see the file comment).
+                        for(int n = 0; n < CPT; ++n)
+                        {
+                            if(reaches(group * CPT + n, k, z, q0, iw0))
+                            {
+                                acc[n] = __builtin_fmaf(xv, bg[n * BPITCH + k], acc[n]);
+                            }
+                        }
+                        continue;
+                    }
+                }
 #pragma unroll
                 for(int n = 0; n < CPT; ++n)
                 {
@@ -472,6 +635,33 @@ struct Wrw
             }
         }
 #else
+        bool special = false;
+        if constexpr(MAPB)
+        {
+            bool nf = false;
+#pragma unroll
+            for(int mt = 0; mt < MPW; ++mt)
+            {
+#pragma unroll
+                for(int ks = 0; ks < KSR; ++ks)
+                {
+                    nf = nf || fragNonFinite(abuf[B][mt][ks]);
+                }
+            }
+            special = anyLane(nf); // wave-uniform
+            if(special)
+            {
+#pragma unroll
+                for(int mt = 0; mt < MPW; ++mt)
+                {
+#pragma unroll
+                    for(int ks = 0; ks < KSR; ++ks)
+                    {
+                        abuf[B][mt][ks] = finitePart(abuf[B][mt][ks]);
+                    }
+                }
+            }
+        }
 #pragma unroll
         for(int ks = 0; ks < KSR; ++ks)
         {
@@ -484,6 +674,13 @@ struct Wrw
                 {
                     d[mt][nt] = Atom::mma(abuf[B][mt][ks], bf, d[mt][nt]);
                 }
+            }
+        }
+        if constexpr(MAPB)
+        {
+            if(special)
+            {
+                addNonFinite(st);
             }
         }
 #endif
