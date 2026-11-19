@@ -1183,6 +1183,38 @@ TEST(Maf1_0Init, RoundsOnceFromDouble)
     EXPECT_EQ(f32[1], static_cast<float>(std::cos(1.0)));
 }
 
+// Maf2_0 rounds each double draw once to BF16. The Double fill of the same tensor draws the same
+// values, so every BF16 element must equal its double rounded to nearest even, computed here
+// without going through float. About one draw in 2^17 lands where rounding to float first
+// changes the result; 4M draws hit a few dozen, and must hit one or the check proves nothing.
+TEST(Maf2_0Init, RoundsOnceToBF16)
+{
+    using TensileLite::Client::DataInitialization;
+    size_t const                       n = size_t(1) << 22;
+    std::vector<double>                d(n);
+    std::vector<TensileLite::BFloat16> bf(n);
+    DataInitialization::initArrayMaf2_0(d.data(), n, ContractionProblemGemm::TENSOR::A);
+    DataInitialization::initArrayMaf2_0(bf.data(), n, ContractionProblemGemm::TENSOR::A);
+    // Nearest even with 8 significant bits; dividing by a power of two is exact.
+    auto bf16 = [](double v) {
+        if(v == 0)
+            return v;
+        double const ulp = std::ldexp(1.0, std::ilogb(v) - 7);
+        return std::nearbyint(v / ulp) * ulp;
+    };
+    size_t wrong = 0, viaFloatDiffers = 0;
+    for(size_t k = 0; k < n; k++)
+    {
+        double const once = bf16(d[k]);
+        if(static_cast<double>(float(bf[k])) != once)
+            wrong++;
+        if(bf16(static_cast<float>(d[k])) != once)
+            viaFloatDiffers++;
+    }
+    EXPECT_EQ(wrong, 0u);
+    EXPECT_GT(viaFloatDiffers, 0u);
+}
+
 TEST(Maf1_0Init, UnsupportedTypesThrow)
 {
     using TensileLite::Client::DataInitialization;
