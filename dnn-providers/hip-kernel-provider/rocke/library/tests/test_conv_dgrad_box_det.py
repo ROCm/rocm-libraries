@@ -198,6 +198,26 @@ class TestBuild(unittest.TestCase):
             s = DgradBoxDetReduceSpec(tile_m=128, tile_n=256, warp_m=2, warp_n=4, **kw)
             self.assertIsNotNone(build_dgrad_box_det_reduce(s, arch=_ARCH))
 
+    def test_stage2_unroll_range(self):
+        # One loop trip loads `unroll` slices (at most PBD_MAX_UNROLL); both
+        # engines refuse the rest with the same reason (parity configs 6 / 7
+        # of conv_dgrad_box_det_reduce_emit pin the cap).
+        from rocke.core.ir_serialize import serialize
+
+        from kernels.common.conv_dgrad_box_det import PBD_MAX_UNROLL
+
+        def ir(**kw):
+            s = DgradBoxDetReduceSpec(tile_m=128, tile_n=256, warp_m=2, warp_n=4, **kw)
+            return serialize(build_dgrad_box_det_reduce(s, arch=_ARCH))
+
+        loads = {u: ir(unroll=u).count("buffer_load") for u in (1, PBD_MAX_UNROLL)}
+        self.assertEqual(loads[PBD_MAX_UNROLL], PBD_MAX_UNROLL * loads[1])
+        for bad in (0, -1, PBD_MAX_UNROLL + 1, 12):
+            with self.assertRaisesRegex(ValueError, r"unroll must be in \[1, 8\]"):
+                ir(unroll=bad)
+        with self.assertRaisesRegex(ValueError, "msplit must be >= 1"):
+            ir(msplit=0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -15,6 +15,8 @@
 #   3  t256x256 w4x2, m_chunks 2
 #   4  t128x256 w2x4, wave_wg, unroll 2, load_aux 2
 #   5  t128x256 w2x4, msplit 4, pix_pre, bf16 slots
+#   6  t128x256 w2x4, unroll 8 (the most slices per trip)
+#   7  t128x256 w2x4, unroll 9: rejected by both engines
 from kernels.common.conv_dgrad_box_det import (
     DgradBoxDetReduceSpec,
     build_dgrad_box_det_reduce,
@@ -30,6 +32,8 @@ _CFGS = {
     3: dict(_T256, m_chunks=2),
     4: dict(_T128, wave_wg=True, unroll=2, load_aux=2),
     5: dict(_T128, msplit=4, pix_pre=True, slot_bytes=2),
+    6: dict(_T128, unroll=8),
+    7: dict(_T128, unroll=9),
 }
 
 

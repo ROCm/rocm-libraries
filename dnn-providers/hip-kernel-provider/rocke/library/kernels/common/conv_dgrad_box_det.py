@@ -39,6 +39,8 @@ from rocke.helpers.spec import SignatureBuilder, kernel_name_join
 from rocke.helpers.tensor_view import make_buffer_resource
 
 PBD_ENTRY_WORDS = 8
+# The most slices one Stage-2 loop trip loads (DgradBoxDetReduceSpec.unroll).
+PBD_MAX_UNROLL = 8
 _WS_ALIGN_WORDS = 64
 
 
@@ -195,6 +197,10 @@ def build_dgrad_box_det_reduce(
     ``n_tiles``), the stage-1 warp grid; see the module docstring."""
     from rocke.helpers.io import io_ir_type
 
+    if not 1 <= spec.unroll <= PBD_MAX_UNROLL:
+        raise ValueError("box det reduce: unroll must be in [1, 8]")
+    if spec.msplit < 1:
+        raise ValueError("box det reduce: msplit must be >= 1")
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
     ws_ptr = b.param(

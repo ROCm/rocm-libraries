@@ -21,6 +21,9 @@
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
+/* Python PBD_MAX_UNROLL: the most slices one reduce-loop trip loads. */
+#define ROCKE_PBD_MAX_UNROLL 8
+
 rocke_dgrad_box_det_reduce_spec_t rocke_dgrad_box_det_reduce_spec_default(void)
 {
     rocke_dgrad_box_det_reduce_spec_t s;
@@ -205,6 +208,17 @@ rocke_kernel_def_t* rocke_build_dgrad_box_det_reduce(rocke_ir_builder_t* b,
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "box det reduce: tile not divisible by the warp grid");
         return NULL;
     }
+    /* Python build_dgrad_box_det_reduce: the knob ranges, before any use. */
+    if(spec->unroll < 1 || spec->unroll > ROCKE_PBD_MAX_UNROLL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "box det reduce: unroll must be in [1, 8]");
+        return NULL;
+    }
+    if(spec->msplit < 1)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "box det reduce: msplit must be >= 1");
+        return NULL;
+    }
     const int mfm = spec->tile_m / (spec->warp_m * 16);
     const int mfn = spec->tile_n / (spec->warp_n * 16);
     if(mfm % spec->msplit)
@@ -342,8 +356,8 @@ rocke_kernel_def_t* rocke_build_dgrad_box_det_reduce(rocke_ir_builder_t* b,
     rocke_b_region_enter(b, red.body);
     {
         rocke_value_t* s = red.iv;
-        rocke_value_t* parts[8][256];
-        for(int u = 0; u < U && u < 8; ++u)
+        rocke_value_t* parts[ROCKE_PBD_MAX_UNROLL][256];
+        for(int u = 0; u < U; ++u)
         {
             rocke_value_t* su = u ? rocke_b_add(b, s, rocke_b_const_i32(b, u)) : s;
             rocke_value_t* slot = rocke_b_add(b, slot0, rocke_b_mul(b, su, step));
@@ -381,7 +395,7 @@ rocke_kernel_def_t* rocke_build_dgrad_box_det_reduce(rocke_ir_builder_t* b,
         rocke_value_t* nw[256];
         for(int j = 0; j < n_acc; ++j)
             nw[j] = red.iter_vars[j];
-        for(int u = 0; u < U && u < 8; ++u)
+        for(int u = 0; u < U; ++u)
             for(int j = 0; j < n_acc; ++j)
                 nw[j] = rocke_b_fadd(b, nw[j], parts[u][j]);
         rocke_b_scf_yield(b, nw, n_acc);

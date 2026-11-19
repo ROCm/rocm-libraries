@@ -14,6 +14,8 @@
  *   3  t256x256 w4x2, m_chunks 2
  *   4  t128x256 w2x4, wave_wg, unroll 2, load_aux 2
  *   5  t128x256 w2x4, msplit 4, pix_pre, bf16 slots
+ *   6  t128x256 w2x4, unroll 8 (the most slices per trip)
+ *   7  t128x256 w2x4, unroll 9: rejected by both engines
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,7 +31,7 @@ static int make_cfg(int idx, rocke_dgrad_box_det_reduce_spec_t* spec, const char
 {
     *spec = rocke_dgrad_box_det_reduce_spec_default();
     *arch = "gfx942";
-    if(idx < 0 || idx > 5)
+    if(idx < 0 || idx > 7)
         return -1;
     const bool t256 = idx >= 1 && idx <= 3;
     spec->tile_m = t256 ? 256 : 128;
@@ -52,6 +54,10 @@ static int make_cfg(int idx, rocke_dgrad_box_det_reduce_spec_t* spec, const char
         spec->unroll = 2;
         spec->load_aux = 2;
     }
+    if(idx == 6)
+        spec->unroll = 8; /* the most slices per trip */
+    if(idx == 7)
+        spec->unroll = 9; /* rejected by both engines */
     return 0;
 }
 
