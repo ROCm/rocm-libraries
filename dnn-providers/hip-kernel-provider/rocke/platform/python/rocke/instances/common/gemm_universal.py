@@ -1998,6 +1998,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             and not spec.trait.preshuffle_b
             and not (_two_buf or _lds_pad or _SWZ)
         ):
+
             def copy_full_tile(src, dst, rows):
                 batch_base, row_base, col_base = src.origin
                 desc = src.view.desc
@@ -2568,7 +2569,9 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         else:
             loop = GemmKLoop(
                 b=b,
-                issue=lambda k, slot: emit_load_phase(A_smem, B_smem, k, lds_parity=slot),
+                issue=lambda k, slot: emit_load_phase(
+                    A_smem, B_smem, k, lds_parity=slot
+                ),
                 compute=lambda acc, slot: emit_mfma_phase(
                     A_smem, B_smem, acc, lds_parity=slot
                 ),

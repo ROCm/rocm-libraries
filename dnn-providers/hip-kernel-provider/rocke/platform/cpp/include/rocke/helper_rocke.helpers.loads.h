@@ -98,14 +98,14 @@ typedef struct rocke_tdm_tile_load
 /* Prepare a descriptor for a bound LDS byte address. The caller owns wave
  * selection and waits; it may insert a hook before issuing the descriptor. */
 bool rocke_tdm_tile_loader_2d_prepare(rocke_ir_builder_t* b,
-                                     const rocke_tdm_tile_loader_2d_t* loader,
-                                     const rocke_tdm_source_window_2d_t* source,
-                                     rocke_value_t* lds_addr,
-                                     rocke_value_t* zero,
-                                     rocke_tdm_tile_load_t* out);
+                                      const rocke_tdm_tile_loader_2d_t* loader,
+                                      const rocke_tdm_source_window_2d_t* source,
+                                      rocke_value_t* lds_addr,
+                                      rocke_value_t* zero,
+                                      rocke_tdm_tile_load_t* out);
 void rocke_tdm_tile_load_issue(rocke_ir_builder_t* b,
-                              const rocke_tdm_tile_load_t* load,
-                              int cachepolicy);
+                               const rocke_tdm_tile_load_t* load,
+                               int cachepolicy);
 
 /* ------------------------------------------------------------ DescriptorFn *
  *

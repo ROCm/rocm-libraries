@@ -15,11 +15,11 @@
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 bool rocke_tdm_tile_loader_2d_prepare(rocke_ir_builder_t* b,
-                                     const rocke_tdm_tile_loader_2d_t* loader,
-                                     const rocke_tdm_source_window_2d_t* source,
-                                     rocke_value_t* lds_addr,
-                                     rocke_value_t* zero,
-                                     rocke_tdm_tile_load_t* out)
+                                      const rocke_tdm_tile_loader_2d_t* loader,
+                                      const rocke_tdm_source_window_2d_t* source,
+                                      rocke_value_t* lds_addr,
+                                      rocke_value_t* zero,
+                                      rocke_tdm_tile_load_t* out)
 {
     if(loader == NULL || source == NULL || out == NULL)
     {
@@ -37,23 +37,23 @@ bool rocke_tdm_tile_loader_2d_prepare(rocke_ir_builder_t* b,
     rocke_value_t* rows_left = rocke_b_sub(b, source->row_extent, source->row_origin);
     rocke_value_t* rows_remaining = rocke_b_smax(b, rows_left, zero);
     return rocke_b_tdm_descriptor_2d(b,
-                                    addr,
-                                    lds_addr,
-                                    loader->elem_bytes,
-                                    source->cols_remaining,
-                                    rows_remaining,
-                                    source->row_stride,
-                                    loader->tile_cols,
-                                    loader->tile_rows,
-                                    0,
-                                    loader->pad_interval,
-                                    loader->pad_amount,
-                                    out->groups);
+                                     addr,
+                                     lds_addr,
+                                     loader->elem_bytes,
+                                     source->cols_remaining,
+                                     rows_remaining,
+                                     source->row_stride,
+                                     loader->tile_cols,
+                                     loader->tile_rows,
+                                     0,
+                                     loader->pad_interval,
+                                     loader->pad_amount,
+                                     out->groups);
 }
 
 void rocke_tdm_tile_load_issue(rocke_ir_builder_t* b,
-                              const rocke_tdm_tile_load_t* load,
-                              int cachepolicy)
+                               const rocke_tdm_tile_load_t* load,
+                               int cachepolicy)
 {
     if(load == NULL)
     {

@@ -28,9 +28,9 @@
 /* Reuse each A fragment across atom columns and each B fragment across atom
  * rows. Mirrors the cluster emission in _gemm_compute_tile.py. */
 static void rocke_gemm_accumulate_mfma_fragments(rocke_gemm_build_ctx_t* ctx,
-                                                  rocke_value_t* const* a_rows,
-                                                  rocke_value_t* const* b_cols,
-                                                  rocke_value_t** accs)
+                                                 rocke_value_t* const* a_rows,
+                                                 rocke_value_t* const* b_cols,
+                                                 rocke_value_t** accs)
 {
     rocke_ir_builder_t* b = ctx->b;
     const bool prioritize = ctx->swz && ctx->sched_hints;

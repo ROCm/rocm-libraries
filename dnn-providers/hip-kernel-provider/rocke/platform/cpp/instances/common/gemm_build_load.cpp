@@ -152,10 +152,10 @@ static void rocke_gemm_tdm_issue(rocke_gemm_build_ctx_t* ctx,
 
 /* Full-tile source offsets for the synchronous coalesced-copy helper. */
 static rocke_value_t* rocke_gemm_tile_source(rocke_ir_builder_t* b,
-                                            rocke_value_t* row,
-                                            rocke_value_t* col,
-                                            rocke_value_t** valid,
-                                            void* user)
+                                             rocke_value_t* row,
+                                             rocke_value_t* col,
+                                             rocke_value_t** valid,
+                                             void* user)
 {
     const rocke_tile_window_t* tile = (const rocke_tile_window_t*)user;
     rocke_value_t* indices[3];
@@ -432,10 +432,9 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
         rocke_make_tile_window(&b_global_tile, &ctx->b_view, b_glen, b_gorigin, 3);
 
         if(strcmp(ctx->arch, "gfx950") == 0 && rocke_type_eq(ctx->storage_dtype, rocke_f16())
-           && strcmp(spec->trait.pipeline, "mem") == 0 && !spec->batched
-           && spec->trait.split_k == 1 && !spec->trait.pad_m && !spec->trait.pad_n
-           && !spec->trait.pad_k && !spec->trait.preshuffle_b && !ctx->two_buf && !ctx->lds_pad
-           && !ctx->swz)
+           && strcmp(spec->trait.pipeline, "mem") == 0 && !spec->batched && spec->trait.split_k == 1
+           && !spec->trait.pad_m && !spec->trait.pad_n && !spec->trait.pad_k
+           && !spec->trait.preshuffle_b && !ctx->two_buf && !ctx->lds_pad && !ctx->swz)
         {
             rocke_coalesced_tile_loader_t loader = {};
             loader.tile_cols = ctx->block_k;
