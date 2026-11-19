@@ -609,8 +609,9 @@ validParameters = { # we need to make sure this matches develop
     # A paired store fills half of each 128B line; with this on, two paired stores that
     # hold the two halves of the same lines are blended in place so each store writes
     # full lines, which removes the partial-line write traffic. It applies to the plain
-    # post-loop store's guard-free interior body and to the staged fused store, and is
-    # a no-op on kernels and store paths where it cannot apply.
+    # post-loop store's guard-free interior body and to the staged and woven fused
+    # stores, and is a no-op on kernels and store paths where it cannot apply. On by
+    # default.
     "StoreCachelineAlign": [False, True],
     # FusedA2A=A2AGemm: K sub-rounds per peer shard, each with its own flag.
     "A2ASubRounds": [1, 2, 4],
