@@ -6,6 +6,10 @@ every legal score equal, so the softmax row for query `q` is uniform over its
 legal key set `A(q)`. Each expected output follows from legal-key arithmetic
 alone, rounded correctly into the subject dtype.
 
+A separate check on the same zero-Q launches, which tests where the kernel
+writes its output and that it writes nothing outside it, is described in
+[README_codeword.md](README_codeword.md).
+
 ## Exposures
 
 Each case runs `Sk / D + 1` launches on the same zero-Q, finite, nonconstant K:
@@ -65,6 +69,10 @@ attribute, so it accepts `DeviceMem` buffers directly; the pinned SDPA lane
 launches it the same way. The suite therefore exercises the shipped compile,
 cache and launch path and keeps no copy of the kernel signature, geometry or
 runtime arguments.
+
+Steps 1 and 3 to 5 are `launch_dense_buffers`, the one device path of the suite.
+The coordinate-codeword check launches through it too, with an output offset:
+the kernel is then given an address inside the output buffer.
 
 ## Policy
 

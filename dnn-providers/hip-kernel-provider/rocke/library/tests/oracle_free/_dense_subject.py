@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import importlib
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 
 import numpy as np
 
@@ -230,6 +230,101 @@ def resolve_dense_subject(arch: str, case: UniformCase) -> ResolvedDenseSubject:
     )
 
 
+def validated_dense_subject(
+    arch: str,
+    case: UniformCase,
+    q: np.ndarray,
+    k: np.ndarray,
+    v: np.ndarray,
+    *,
+    subject: ResolvedDenseSubject | None = None,
+) -> ResolvedDenseSubject:
+    """Validate one launch before any device call and return its subject.
+
+    Checks the case, the dense ABI of the raw-bit inputs, and that the subject,
+    given or resolved here, is the one of ``arch`` and ``case`` and is still
+    inside the adapter's scope."""
+    _validate_supported_case(arch, case)
+    _validate_host_bits(case, q, k, v)
+    resolved = resolve_dense_subject(arch, case) if subject is None else subject
+    if (resolved.arch, resolved.case_id) != (arch, case.case_id):
+        raise ValueError(
+            f"resolved subject {resolved.arch}/{resolved.case_id} != "
+            f"{arch}/{case.case_id}"
+        )
+    _verify_resolved_spec(arch, case, resolved.tuning_spec)
+    return resolved
+
+
+def dense_runner_launch(arch: str, kernel_spec, *, scale: float) -> Callable[..., None]:
+    """The launch of one kernel spec through the architecture's public dense runner.
+
+    The returned callable takes the ``q``/``k``/``v``/``out`` device buffers by
+    keyword. Without sinks, LSE or a KV split the runner only packs device
+    pointers, so ``out`` may also be a plain device address."""
+    runner = importlib.import_module(DENSE_SUBJECTS[arch].runner_module)
+
+    def launch(*, q, k, v, out) -> None:
+        runner.run_attention_dense_torch(
+            spec=kernel_spec, q=q, k=k, v=v, out=out, scale=scale
+        )
+
+    return launch
+
+
+def _hip_backend() -> SimpleNamespace:
+    """The HIP runtime pieces a launch needs, imported on use."""
+    from rocke.runtime import DeviceMem, Runtime
+    from rocke.runtime.host_buffers import as_u8_buffer
+
+    return SimpleNamespace(
+        DeviceMem=DeviceMem, Runtime=Runtime, as_u8_buffer=as_u8_buffer
+    )
+
+
+def launch_dense_buffers(
+    launch: Callable[..., None],
+    host: Mapping[str, np.ndarray],
+    *,
+    out_offset: int = 0,
+    backend: SimpleNamespace | None = None,
+) -> np.ndarray:
+    """Upload ``q``/``k``/``v``/``out``, launch, and read the whole ``out`` back.
+
+    This is the one device path of the oracle-free dense lanes. Each device
+    buffer's size, 16-byte alignment and separation are checked before upload.
+    ``launch`` is called with the three input buffers and the output. With
+    ``out_offset`` zero the output is its device buffer. Otherwise it is the
+    address ``out_offset`` bytes into that buffer, so the bytes on both sides of
+    what the kernel is given are device memory it does not own. The host arrays
+    must be writable: ``as_u8_buffer`` views their storage via ``from_buffer``.
+    ``backend`` replaces the HIP runtime, so a contract can run this path on a
+    stand-in device."""
+    out_bytes = int(host["out"].nbytes)
+    if not 0 <= out_offset < out_bytes or out_offset % _POINTER_ALIGNMENT:
+        raise ValueError(
+            f"launch_dense_buffers failed - out_offset={out_offset}, expected a "
+            f"multiple of {_POINTER_ALIGNMENT} bytes inside the {out_bytes}-byte "
+            "output"
+        )
+    backend = _hip_backend() if backend is None else backend
+    runtime = backend.Runtime()
+    device = {name: backend.DeviceMem(array.nbytes) for name, array in host.items()}
+    _validate_device_buffers(
+        device, {name: int(array.nbytes) for name, array in host.items()}
+    )
+    for name, array in host.items():
+        runtime.memcpy_h2d(
+            device[name].ptr(), backend.as_u8_buffer(array), array.nbytes
+        )
+    out = device["out"] if out_offset == 0 else int(device["out"].ptr()) + out_offset
+    launch(q=device["q"], k=device["k"], v=device["v"], out=out)
+    runtime.sync()
+    raw = host["out"]
+    runtime.memcpy_d2h(backend.as_u8_buffer(raw), device["out"].ptr(), raw.nbytes)
+    return raw
+
+
 def run_dense_case(
     arch: str,
     case: UniformCase,
@@ -245,20 +340,7 @@ def run_dense_case(
     (``[B, Sq, Hq, D]`` and ``[B, Sk, Hkv, D]``). The output is NaN-prefilled and
     read back without any float conversion, so the analyzer judges exactly the
     stored bits. Numerical judgment is left to the analyzer."""
-    from rocke.runtime import DeviceMem, Runtime
-    from rocke.runtime.host_buffers import as_u8_buffer
-
-    _validate_supported_case(arch, case)
-    _validate_host_bits(case, q, k, v)
-    resolved = resolve_dense_subject(arch, case) if subject is None else subject
-    if (resolved.arch, resolved.case_id) != (arch, case.case_id):
-        raise ValueError(
-            f"resolved subject {resolved.arch}/{resolved.case_id} != "
-            f"{arch}/{case.case_id}"
-        )
-    _verify_resolved_spec(arch, case, resolved.tuning_spec)
-    runner = importlib.import_module(DENSE_SUBJECTS[arch].runner_module)
-
+    resolved = validated_dense_subject(arch, case, q, k, v, subject=subject)
     # Private writable copies: ``as_u8_buffer`` views storage via ``from_buffer``,
     # which refuses read-only arrays.
     host = {
@@ -267,22 +349,7 @@ def run_dense_case(
         "v": v.copy(),
         "out": np.full(case.output_shape, _NAN_BITS[case.dtype], dtype=np.uint16),
     }
-    runtime = Runtime()
-    device = {name: DeviceMem(array.nbytes) for name, array in host.items()}
-    _validate_device_buffers(
-        device, {name: int(array.nbytes) for name, array in host.items()}
+    launch = dense_runner_launch(
+        arch, resolved.tuning_spec.kernel_spec, scale=1.0 / math.sqrt(case.head_dim)
     )
-    for name, array in host.items():
-        runtime.memcpy_h2d(device[name].ptr(), as_u8_buffer(array), array.nbytes)
-    runner.run_attention_dense_torch(
-        spec=resolved.tuning_spec.kernel_spec,
-        q=device["q"],
-        k=device["k"],
-        v=device["v"],
-        out=device["out"],
-        scale=1.0 / math.sqrt(case.head_dim),
-    )
-    runtime.sync()
-    out = host["out"]
-    runtime.memcpy_d2h(as_u8_buffer(out), device["out"].ptr(), out.nbytes)
-    return out
+    return launch_dense_buffers(launch, host)

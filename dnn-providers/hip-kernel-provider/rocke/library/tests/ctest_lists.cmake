@@ -16,10 +16,12 @@
 # platform/CMakeLists.txt defines. The explicit gates do not. The configure
 # fails for any other pytest entry that does not.
 
-# Oracle-free uniform-probability launches of the shipped dense kernels. Only
-# the GPU module runs here; its CPU contracts run in the attention CPU lane.
+# Oracle-free launches of the shipped dense kernels: the uniform-probability
+# gate, the coordinate-codeword placement gate, and the placement gate's
+# negative controls (private builds with one defect each). Only the GPU modules
+# run here; their CPU contracts run in the attention CPU lane.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_oracle_free_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_analytical_dense.py\" -v -rs)\n")
+       "add_test(rocke_oracle_free_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_analytical_dense.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_codeword_dense.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_codeword_dense_controls.py\" -v -rs)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_oracle_free_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;gpu\\;quick\"\n"
@@ -223,7 +225,8 @@ endif()
 # bound against the compiled code object, the tiled C++ entries' head-count
 # and arch refusals, the dense segment-combine launch ABI, the drift guard
 # that pins the shared dense spec's C++ mirror to the Python, the
-# oracle-free uniform-probability checker and subject contracts, the gfx942
+# oracle-free uniform-probability checker and subject contracts, the
+# oracle-free coordinate-codeword contracts, the gfx942
 # dense golden IR hashes (pure text lowering, a few seconds), the dense
 # varlen-keys host checks, the gfx950 dense varlen K/V buffer bound on the emitted
 # IR, and the backward-test memo bound in tests/conftest.py.
@@ -269,6 +272,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_sdpa_free_stride_layouts.py"
     "tests/library/tests/test_bwd_memo_bound.py"
     "tests/library/tests/oracle_free/test_contracts.py"
+    "tests/library/tests/oracle_free/test_codeword_contracts.py"
     "tests/library/tests/test_attention_dense_gfx942.py"
     "tests/library/tests/test_attention_combo_sweep_fp8.py"
     "tests/library/tests/test_dense_prefill_emit_shapes.py"
