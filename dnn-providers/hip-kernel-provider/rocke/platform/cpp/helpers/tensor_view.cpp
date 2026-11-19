@@ -1120,6 +1120,75 @@ rocke_status_t rocke_tv_make_tile_buffer_resource(rocke_ir_builder_t* b,
     return rocke_tv_make_buffer_resource(b, out, base_ptr, num_records, soffset);
 }
 
+rocke_status_t rocke_tv_tile_origin_decode_i64(rocke_ir_builder_t* b,
+                                               rocke_value_t* m0_i64,
+                                               rocke_value_t* const* dims_i64,
+                                               int num_dims,
+                                               rocke_value_t** out)
+{
+    /* Python tile_origin_decode_i64:
+     *   rank = len(dims_i64) + 1
+     *   tmp = m0_i64
+     *   for i in range(rank - 1, 0, -1):
+     *       dim = dims_i64[i - 1]
+     *       quot = b.div(tmp, dim)
+     *       rem = b.sub(tmp, b.mul(quot, dim))
+     *       coords[i] = rem
+     *       tmp = quot
+     *   coords[0] = tmp
+     */
+    rocke_value_t* tmp;
+    int i;
+    if(b == NULL || out == NULL || num_dims < 0)
+        return ROCKE_ERR_VALUE;
+    tmp = m0_i64;
+    for(i = num_dims; i >= 1; --i)
+    {
+        rocke_value_t* dim = dims_i64[i - 1];
+        rocke_value_t* quot = rocke_b_div(b, tmp, dim);
+        rocke_value_t* rem = rocke_b_sub(b, tmp, rocke_b_mul(b, quot, dim));
+        out[i] = rem;
+        tmp = quot;
+    }
+    out[0] = tmp;
+    return ROCKE_OK;
+}
+
+rocke_status_t rocke_tv_carry_decode_i32(rocke_ir_builder_t* b,
+                                         rocke_value_t* d_i32,
+                                         rocke_value_t* const* origin_coords,
+                                         rocke_value_t* const* dims_i32,
+                                         int num_dims,
+                                         rocke_value_t** out)
+{
+    /* Python carry_decode_i32:
+     *   trailing_origin = origin_coords[1:]
+     *   out_trailing = list(trailing_origin)
+     *   carry = d_i32
+     *   for i in range(len(trailing_origin) - 1, -1, -1):
+     *       dim = dims_i32[i]
+     *       v = b.add(trailing_origin[i], carry)
+     *       carry = b.div(v, dim)
+     *       out_trailing[i] = b.mod(v, dim)
+     *   leading = b.add(origin_coords[0], carry)
+     *   return [leading] + out_trailing
+     */
+    rocke_value_t* carry;
+    int i;
+    if(b == NULL || out == NULL || num_dims < 0)
+        return ROCKE_ERR_VALUE;
+    carry = d_i32;
+    for(i = num_dims - 1; i >= 0; --i)
+    {
+        rocke_value_t* dim = dims_i32[i];
+        rocke_value_t* v = rocke_b_add(b, origin_coords[i + 1], carry);
+        carry = rocke_b_div(b, v, dim);
+        out[i + 1] = rocke_b_mod(b, v, dim);
+    }
+    out[0] = rocke_b_add(b, origin_coords[0], carry);
+    return ROCKE_OK;
+}
+
 rocke_status_t rocke_tv_make_buffer_view(rocke_tensor_view_t* out,
                                          const rocke_tv_buffer_resource_t* rsrc,
                                          const int* shape,
