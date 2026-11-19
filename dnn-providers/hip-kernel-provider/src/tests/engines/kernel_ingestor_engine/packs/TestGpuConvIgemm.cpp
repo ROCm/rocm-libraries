@@ -2748,7 +2748,8 @@ TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950TilesThatDeclineEveryOtherKnob)
         ASSERT_TRUE(bound950.has_value() && bound942.has_value());
         for(const auto& kernel : catalog(direction))
         {
-            if(kernel.getIntMetadata("flex") == 0)
+            // Split-policy twins are served only where their plan differs from the default's.
+            if(kernel.getIntMetadata("flex") == 0 || kernel.getIntMetadata("split_policy") != 0)
             {
                 continue;
             }
@@ -2764,11 +2765,26 @@ TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950TilesThatDeclineEveryOtherKnob)
             ++flex;
             EXPECT_TRUE(matchesKernel(pack, gfx950.context(), kernel, *bound950));
             EXPECT_FALSE(matchesKernel(pack, gfx942.context(), kernel, *bound942));
-            for(const auto& [field, value] : std::initializer_list<std::pair<const char*, int64_t>>{
-                    {"flex", 2},    {"bm", 128},  {"bn", 64},    {"bk", 32}, {"wm", 2},
-                    {"wn", 4},      {"vec", 4},   {"stages", 2}, {"xcd", 0}, {"halo", 1},
-                    {"wdirect", 1}, {"pack", 2},  {"cf", 1},     {"swz", 1}, {"dma", 2},
-                    {"fuse", 2},    {"large", 1}, {"patch", 1},  {"cfx", 1}, {"split_policy", 1}})
+            for(const auto& [field, value] :
+                std::initializer_list<std::pair<const char*, int64_t>>{{"flex", 2},
+                                                                       {"bm", 128},
+                                                                       {"bn", 64},
+                                                                       {"bk", 32},
+                                                                       {"wm", 2},
+                                                                       {"wn", 4},
+                                                                       {"vec", 4},
+                                                                       {"stages", 2},
+                                                                       {"xcd", 0},
+                                                                       {"halo", 1},
+                                                                       {"wdirect", 1},
+                                                                       {"pack", 2},
+                                                                       {"cf", 1},
+                                                                       {"swz", 1},
+                                                                       {"dma", 2},
+                                                                       {"fuse", 2},
+                                                                       {"large", 1},
+                                                                       {"patch", 1},
+                                                                       {"cfx", 1}})
             {
                 SCOPED_TRACE(field);
                 auto mutated = kernel;
