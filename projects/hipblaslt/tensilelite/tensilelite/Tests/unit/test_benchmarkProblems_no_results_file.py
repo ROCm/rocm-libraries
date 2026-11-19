@@ -4,8 +4,8 @@
 """The benchmark client writes its results CSV only when something reads it.
 
 BenchmarkProblems asks the client for a results CSV only if the config has a
-LibraryLogic section or uses the Ductile backend; otherwise ClientParameters.ini
-sets no-results-file. Without the CSV, a rerun into the same output directory
+LibraryLogic section, uses the Ductile backend, or enables ForceResultsFile;
+otherwise ClientParameters.ini sets no-results-file. Without the CSV, a rerun into the same output directory
 benchmarks again (the CSV is the "already benchmarked" marker).
 """
 
@@ -111,14 +111,16 @@ def _run_main(tmp_path, monkeypatch, backend=None, forceRedo=False, **mainKwargs
         (False, {"Name": "tensile"}, False),
     ],
 )
+@pytest.mark.parametrize("forceResultsFile", [False, True])
 def test_main_asks_for_results_only_when_consumed(
-    tmp_path, monkeypatch, hasLibraryLogic, backend, expected
+    tmp_path, monkeypatch, hasLibraryLogic, backend, expected, forceResultsFile
 ):
+    monkeypatch.setitem(globalParameters, "ForceResultsFile", forceResultsFile)
     _, writeResultsFiles = _run_main(
         tmp_path, monkeypatch, backend=backend, hasLibraryLogic=hasLibraryLogic
     )
 
-    assert writeResultsFiles == [expected]
+    assert writeResultsFiles == [expected or forceResultsFile]
 
 
 def test_main_default_writes_results(tmp_path, monkeypatch):
@@ -604,6 +606,37 @@ def test_end_to_end_without_library_logic(tensile_args, tmp_path, monkeypatch, _
     assert not (outputDir / "3_LibraryLogic").exists()
 
     assert _run_tensile(tensile_args, monkeypatch, config, outputDir, *_NO_FORCE_REDO) == 1
+
+
+@pytest.mark.parametrize("useCache", [False, True], ids=["fresh", "cached"])
+def test_end_to_end_force_results_file(
+    tensile_args, tmp_path, monkeypatch, _gpu_less, useCache
+):
+    """The YAML opt-in restores externally consumed CSVs, including on cached reruns."""
+    outputDir = tmp_path / "out"
+    configPath = _config(tmp_path, False)
+    _run_tensile(tensile_args, monkeypatch, configPath, outputDir)
+    assert not list(outputDir.rglob("*.csv"))
+
+    config = yaml.safe_load(configPath.read_text())
+    config["GlobalParameters"]["ForceResultsFile"] = True
+    configPath.write_text(yaml.safe_dump(config))
+    cacheArgs = ("--use-cache",) if useCache else ()
+    assert _run_tensile(tensile_args, monkeypatch, configPath, outputDir, *cacheArgs) == 1
+
+    (ini,) = _client_inis(outputDir)
+    assert "no-results-file=True" not in ini.read_text().splitlines()
+    assert any(line.startswith("results-file=") for line in ini.read_text().splitlines())
+    assert list((outputDir / BENCHMARK_DATA_DIR).glob("*.csv"))
+    assert not (outputDir / "3_LibraryLogic").exists()
+    assert _run_tensile(tensile_args, monkeypatch, configPath, outputDir, *_NO_FORCE_REDO) == 0
+
+    # Turning the opt-in off must refresh the INI and remove the earlier run's CSVs.
+    config["GlobalParameters"]["ForceResultsFile"] = False
+    configPath.write_text(yaml.safe_dump(config))
+    assert _run_tensile(tensile_args, monkeypatch, configPath, outputDir, *cacheArgs) == 1
+    assert "no-results-file=True" in ini.read_text().splitlines()
+    assert not list(outputDir.rglob("*.csv"))
 
 
 @pytest.mark.parametrize("useCache", [False, True], ids=["fresh", "cached"])

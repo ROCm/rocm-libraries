@@ -1020,8 +1020,8 @@ def main(
         archNames: The gfx names this build was asked for, when the caller knows
             them. Needed to tune a stepping, whose ISA cannot name its target.
         hasLibraryLogic: Whether the config has a LibraryLogic section, which reads
-            the results CSVs. Without one (and without the Ductile backend) the client
-            writes no results CSV, so a rerun into the same output directory with
+            the results CSVs. Without one (and without the Ductile backend or
+            ForceResultsFile) the client writes no results CSV, so a rerun with
             ForceRedoBenchmarkProblems=False benchmarks again: the results CSV is the
             "already benchmarked" marker.
     """
@@ -1032,7 +1032,9 @@ def main(
     # Parse and validate backend config using shared contract
     backend = parse_backend_config(backend if backend else None)
     backend_name = str(backend.get("Name", "tensile")).lower()
-    writeResultsFile = _resultsFileConsumed(hasLibraryLogic, backend_name)
+    writeResultsFile = globalParameters["ForceResultsFile"] or _resultsFileConsumed(
+        hasLibraryLogic, backend_name
+    )
 
     # Load solution pool index if provided and supported by the backend
     solutionPoolIndex = None
