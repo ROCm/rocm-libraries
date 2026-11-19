@@ -35,6 +35,12 @@ using namespace hipdnn_test_sdk::utilities;
 using test_conv_common::CONV_2D_W_DIMS;
 using test_conv_common::CONV_2D_X_DIMS;
 using test_conv_common::CONV_2D_Y_DIMS;
+using test_conv_common::MIXED_LAYOUT_1D_DX_DIMS;
+using test_conv_common::MIXED_LAYOUT_1D_DX_STRIDES;
+using test_conv_common::MIXED_LAYOUT_1D_DY_DIMS;
+using test_conv_common::MIXED_LAYOUT_1D_DY_STRIDES;
+using test_conv_common::MIXED_LAYOUT_1D_W_DIMS;
+using test_conv_common::MIXED_LAYOUT_1D_W_STRIDES;
 using test_conv_common::MIXED_LAYOUT_2D_DATA_TYPE;
 using test_conv_common::MIXED_LAYOUT_2D_DX_DIMS;
 using test_conv_common::MIXED_LAYOUT_2D_DX_STRIDES;
@@ -523,12 +529,12 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForMixedLayoutForwa
                    *_handle,
                    ConvKind::FORWARD,
                    hipdnn_test_sdk::utilities::createValidConvFwdGraph(
-                       {8, 16, 16},
-                       {256, 16, 1},
-                       {32, 16, 1},
-                       {16, 1, 16},
-                       {8, 32, 16},
-                       {512, 16, 1},
+                       MIXED_LAYOUT_1D_DX_DIMS,
+                       MIXED_LAYOUT_1D_DX_STRIDES,
+                       MIXED_LAYOUT_1D_W_DIMS,
+                       MIXED_LAYOUT_1D_W_STRIDES,
+                       MIXED_LAYOUT_1D_DY_DIMS,
+                       MIXED_LAYOUT_1D_DY_STRIDES,
                        {0},
                        {0},
                        {1},
