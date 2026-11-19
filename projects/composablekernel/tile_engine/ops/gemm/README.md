@@ -47,7 +47,7 @@ for regular GEMM:
 
 ```
 gemm/
-├── gemm_full_benchmark.py          # bridge driver: gemm_universal, multi_d, multi_abd, preshuffle
+├── gemm_full_benchmark.py          # bridge driver: gemm_universal, multi_d, multi_abd, preshuffle, streamk
 ├── run_one_gemm_kernel.py          # disposable per-kernel worker for the above
 ├── <op>_full_benchmark.py          # per-op bridge drivers: batched_gemm, batched_contraction,
 ├── run_one_<op>_kernel.py          #   grouped_gemm, gemm_multi_d, mx_gemm, streamk_gemm
@@ -56,7 +56,7 @@ gemm/
 ├── gemm_validation_utils.py        # arch/warp-tile tables (also read by the dispatcher)
 ├── gemm_instance_builder.py        # shared generator for the native (legacy) builds
 ├── gemm_benchmark.{py,hpp}, gemm_common.hpp, gemm_profiler.hpp  # native harness
-├── gemm_universal/  gemm_multi_d/  gemm_multi_abd/  gemm_preshuffle/  grouped_gemm/ ...
+├── gemm_universal/  gemm_multi_d/  gemm_multi_abd/  gemm_preshuffle/  gemm_streamk/  grouped_gemm/ ...
 │                                   # per-variant configs/ + native CMake builds
 └── README.md
 ```
@@ -69,9 +69,10 @@ gemm/
 - `user_provided_config.json` — scratch space for custom sweeps.
 - `example_problems.json` — example M/N/K problem set (used when `--problems`
   is omitted).
-- `search_settings_gfx1250_tdm.json` - example search settings for the gfx1250
-  full default config with `--pipelines`, see
-  [gfx1250 / MI450](#gfx1250--mi450-tdm-pipelines).
+- `search_settings_gfx1250_tdm.json`, `search_settings_gfx1250_streamk.json` -
+  example search settings for gfx1250 TDM universal and Stream-K searches, see
+  [gfx1250 / MI450](#gfx1250--mi450-tdm-pipelines) and
+  [Stream-K](#stream-k---variant-gemm_streamk).
 
 > The JSON used by **nightly** tests is intended to drop into the same
 > `configs/` directory and be selected with a positional config — no driver
@@ -156,6 +157,13 @@ measures and reports exactly as described above.
   all eligible kernels within that space. Explicit selections are recorded
   under `"pipelines"` in `--list-pairs` and in a search's `run.json`; omitting
   the flag keeps every pipeline from the selected configs.
+- `--budget-pct PCTS` - `--variant gemm_streamk` only: comma-list of distinct
+  workgroup budgets in `1..100` (% of the kernel's default `CUs x occupancy`,
+  default `100`). Non-persistent kernels expand to one launch variant per
+  budget (`<kernel>@budget<pct>`, while `100` keeps `<kernel>`) sharing one
+  build; persistent kernels run at `100` only. Recorded under `"budget_pct"` in
+  `--list-pairs` and a search's `run.json`; see
+  [Stream-K](#stream-k---variant-gemm_streamk).
 - `--list-pairs PATH` — dry run: expand and pair as a real run would, write every
   `(problem, kernel)` pair it would measure together with each kernel's
   configuration, and exit without building. Use it to see the size of a sweep
@@ -846,7 +854,7 @@ auto-detected (`HIP_VISIBLE_DEVICES`, then `rocm-smi`/`amd-smi`); override with
 
 | Axis | Supported |
 |---|---|
-| dtype | `fp16`, `bf16`, `fp32`, `fp8`, `bf8` (per-arch; `gemm_preshuffle` excludes `fp32`, `gemm_multi_d`/`gemm_multi_abd` are `fp16` only) |
+| dtype | `fp16`, `bf16`, `fp32`, `fp8`, `bf8` (per-arch; `gemm_preshuffle` and `gemm_streamk` exclude `fp32`, `gemm_multi_d`/`gemm_multi_abd` are `fp16` only) |
 | layout | `rcr`, `rrr`, `crr`, `ccr` (row-major C only — ck_tile rejects column-major C at build); `gemm_multi_abd` takes the 4-char `rcrr`; `gemm_preshuffle` is `rcr` only |
 
 ### Variant scope
@@ -861,12 +869,14 @@ variant-aware driver**, not a per-variant copy. `--variant` selects both the
 | `gemm_multi_d` | `gemm_multi_d/configs/` | `multi_d` |
 | `gemm_multi_abd` | `gemm_multi_abd/configs/` | `multi_abd` |
 | `gemm_preshuffle` | `gemm_preshuffle/configs/` | `preshuffle` |
+| `gemm_streamk` | `gemm_streamk/configs/` | `stream_k` |
 
-Grouped GEMM, batched GEMM, batched contraction, mx_gemm, stream-K and
+Grouped GEMM, batched GEMM, batched contraction, mx_gemm and
 gemm_bquant have their own `<op>_full_benchmark.py` drivers (gemm_bquant's lives
-in `block_scale_gemm/gemm_bquant/`). `gemm_multi_d` also has a dedicated
-`gemm_multi_d_full_benchmark.py`. `--variant grouped_gemm` is rejected; use
-`grouped_gemm_full_benchmark.py`.
+in `block_scale_gemm/gemm_bquant/`). `gemm_multi_d` and `gemm_streamk` also
+retain dedicated `gemm_multi_d_full_benchmark.py` and
+`streamk_gemm_full_benchmark.py` drivers. `--variant grouped_gemm` is rejected;
+use `grouped_gemm_full_benchmark.py`.
 
 ### Native (legacy) Tile Engine builds
 

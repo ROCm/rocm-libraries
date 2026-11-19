@@ -807,7 +807,9 @@ def test_streamk_pipeline_filter_preserves_budgets_across_run_modes(
     assert pairs == {KEYS[0]: expected}
     assert {r["pipeline"] for r in selected.values()} == {"comp_tdm_v3"}
     assert {r["budget_pct"] for r in selected.values()} == {100, 50}
-    assert _read(tmp_path, "sk-pairs.json")["pipelines"] == ["comp_tdm_v3"]
+    listed_json = _read(tmp_path, "sk-pairs.json")
+    assert listed_json["pipelines"] == ["comp_tdm_v3"]
+    assert listed_json["budget_pct"] == [100, 50]
     rc, cap, built, calls = _main(
         monkeypatch,
         capsys,

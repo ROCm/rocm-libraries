@@ -1212,9 +1212,9 @@ def test_streamk_budgets_share_one_build_and_reach_the_launch(tmp_path, monkeypa
     assert tc.loaded == [art / f"{k}.so" for k in SK_KERNELS] * 2
 
 
-@pytest.mark.parametrize("mislabel", [False, True])
+@pytest.mark.parametrize("mislabel,exit_code", [(False, 0), (True, 0), (False, -11)])
 def test_legacy_streamk_launch_pins_arch_and_checks_identity(
-    tmp_path, monkeypatch, mislabel
+    tmp_path, monkeypatch, mislabel, exit_code
 ):
     cfg = SK[0].kernel_config
     tc = Toolchain(tmp_path, monkeypatch, mislabel={cfg.name: B} if mislabel else None)
@@ -1223,7 +1223,9 @@ def test_legacy_streamk_launch_pins_arch_and_checks_identity(
 
     def popen(argv, **kwargs):
         launches.append((argv, kwargs["env"]))
-        return _InProcess(tc)
+        proc = _InProcess(tc)
+        proc.returncode = exit_code
+        return proc
 
     monkeypatch.setattr(
         legacy_streamk,
@@ -1250,6 +1252,8 @@ def test_legacy_streamk_launch_pins_arch_and_checks_identity(
     if mislabel:
         assert failed == 1 and not rows
         assert "identity mismatch" in tc.outputs[0]["error"]
+    elif exit_code != 0:
+        assert failed == 1 and len(rows) == 1
     else:
         assert failed == 0
         assert rows[0]["kernel"] == cfg.name and rows[0]["budget_pct"] == 50
