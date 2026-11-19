@@ -1113,6 +1113,14 @@ inline int64_t bias_vector_length(hipblaslt_bias_source source, int64_t m, int64
     return source == hipblaslt_bias_source::b ? n : m;
 }
 
+// The CPU bias-gradient reference supports one batch. Check before computing or reading it.
+inline void validate_bias_gradient_batch_count(const Arguments& arg, int64_t batches)
+{
+    if(arg.gradient && arg.bias_vector && batches > 1
+       && (arg.unit_check || arg.norm_check || arg.allclose_check))
+        throw std::invalid_argument("bias-gradient verification supports only one batch");
+}
+
 // The MX element types integer_exact data supports (makeIntegerExactMX in mxDataGen.cpp).
 inline bool integer_exact_mx_element_type(hipDataType t)
 {
@@ -1449,6 +1457,7 @@ void check(const Arguments&              arg,
 
     for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
     {
+        validate_bias_gradient_batch_count(arg, num_batches[gemmIdx]);
         // Check Inf/NaN consistency first so "Inf turned into NaN" bugs fail with a clear message.
         // Mirror the unit/norm-check buffer branching: pointer-array mode uses per-batch buffers,
         // so a strided read over num_batches would compare the wrong buffers / go out of bounds.
@@ -1549,20 +1558,14 @@ void check(const Arguments&              arg,
                                            1,
                                            hAmaxD_gold[gemmIdx].buf(),
                                            hAmaxD[gemmIdx].buf(),
-                                           num_batches[gemmIdx],
+                                           1,
                                            tol[gemmIdx],
                                            Tc);
                     }
                     else
                     {
-                        unit_check_general(1,
-                                           1,
-                                           1,
-                                           1,
-                                           hAmaxD_gold[gemmIdx].buf(),
-                                           hAmaxD[gemmIdx].buf(),
-                                           num_batches[gemmIdx],
-                                           Tc);
+                        unit_check_general(
+                            1, 1, 1, 1, hAmaxD_gold[gemmIdx].buf(), hAmaxD[gemmIdx].buf(), 1, Tc);
                     }
                 }
                 if(!arg.gradient && arg.use_e)
@@ -1648,13 +1651,14 @@ void check(const Arguments&              arg,
             {
                 if(arg.amaxD)
                 {
+                    // amaxD is one scalar for the entire GEMM, including all its batches.
                     const OutputNormCheck amax = norm_check_batches(
                         Tc,
                         norm_tolerance(Tc),
                         1,
                         1,
                         1,
-                        num_batches[gemmIdx],
+                        1,
                         strided_batches(hAmaxD_gold[gemmIdx], hAmaxD[gemmIdx], 1, Tc));
                     hipblaslt_error += amax.total_error;
                     report_norm_check(amax,
@@ -1695,7 +1699,7 @@ void check(const Arguments&              arg,
                         bias_length,
                         1,
                         bias_length,
-                        num_batches[gemmIdx],
+                        1,
                         strided_batches(hBias_gold[gemmIdx], hBias[gemmIdx], bias_length, Tbias));
                     hipblaslt_error += bias.total_error;
                     report_norm_check(bias,
@@ -2145,6 +2149,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                               hipDataType      Tbias,
                               hipDataType      Taux)
 {
+    validate_bias_gradient_batch_count(arg, arg.batch_count);
     hipblasOperation_t transA(char_to_hipblas_operation(arg.transA));
     hipblasOperation_t transB(char_to_hipblas_operation(arg.transB));
 

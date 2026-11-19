@@ -147,7 +147,7 @@ namespace
             std::vector<double>        tol{0};
             double                     max_ulp = 0, avg_ulp = 0;
             const int64_t              before = hipblaslt_bench_options::verification_failures();
-            const int64_t extra_before        = hipblaslt_bench_options::extra_check_failures();
+            const int64_t extra_before          = hipblaslt_bench_options::extra_check_failures();
             check(arg,
                   gemm_count,
                   {m},
@@ -229,6 +229,9 @@ namespace
                 result[0].as<float>()[test.length - 1] = corrupt ? 2.0f : 1.0f;
                 std::vector<double> tol{0};
                 double              norm_error = 0, atol = 0, rtol = 0, max_ulp = 0, avg_ulp = 0;
+                CaptureErrorStream  capture;
+                const int64_t       d_before     = hipblaslt_bench_options::verification_failures();
+                const int64_t       extra_before = hipblaslt_bench_options::extra_check_failures();
                 ::testing::TestPartResultArray failures;
                 {
                     ::testing::ScopedFakeTestPartResultReporter reporter(
@@ -263,15 +266,134 @@ namespace
                           HIP_R_32F,
                           HIP_R_32F);
                 }
+                EXPECT_EQ(hipblaslt_bench_options::verification_failures(), d_before);
+                EXPECT_EQ(hipblaslt_bench_options::extra_check_failures() - extra_before,
+                          corrupt ? 1 : 0);
                 EXPECT_EQ(failures.size(), corrupt ? 1 : 0);
                 if(corrupt)
                 {
                     if(failures.size() == 1)
                         EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
                     EXPECT_GT(norm_error, 0.1);
+                    EXPECT_NE(hipblaslt_cerr.str().find("norm check failed for the bias gradient"),
+                              std::string::npos);
                 }
                 else
                     EXPECT_EQ(norm_error, 0);
+            }
+        }
+    }
+
+    TEST(BenchVerify, smoke_AmaxChecksOneValuePerGemm)
+    {
+        BenchVerifyD               d(2, 2, 3, HIPBLASLT_BATCH_MODE_STRIDED);
+        std::vector<HipHostBuffer> gold, result, unused;
+        gold.emplace_back(HIP_R_32F, 3);
+        result.emplace_back(HIP_R_32F, 3);
+        // Only element 0 is an output. Mismatched sentinels make a per-batch read fail.
+        for(int i = 0; i < 3; ++i)
+        {
+            gold[0].as<float>()[i]   = 1.0f;
+            result[0].as<float>()[i] = 1000.0f;
+        }
+        for(int check_kind : {0, 1, 2}) // norm, unit, near
+        {
+            for(bool corrupt : {false, true})
+            {
+                SCOPED_TRACE(::testing::Message()
+                             << "check=" << check_kind << " corrupt=" << corrupt);
+                Arguments arg{};
+                arg.init();
+                arg.unit_check        = check_kind != 0;
+                arg.norm_check        = check_kind == 0;
+                arg.allclose_check    = 0;
+                arg.norm_check_assert = true;
+                arg.amaxD             = true;
+                arg.a_type = arg.b_type  = HIP_R_32F;
+                arg.compute_type         = HIPBLAS_COMPUTE_32F;
+                result[0].as<float>()[0] = corrupt ? 2.0f : 1.0f;
+                std::vector<double> tol{check_kind == 2 ? 0.01 : 0.0};
+                double              norm_error = 0, atol = 0, rtol = 0, max_ulp = 0, avg_ulp = 0;
+                const int64_t       d_before     = hipblaslt_bench_options::verification_failures();
+                const int64_t       extra_before = hipblaslt_bench_options::extra_check_failures();
+                CaptureErrorStream  capture;
+                ::testing::TestPartResultArray assertions;
+                {
+                    ::testing::ScopedFakeTestPartResultReporter reporter(
+                        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
+                        &assertions);
+                    check(arg,
+                          1,
+                          {2},
+                          {2},
+                          {2},
+                          {2},
+                          {4},
+                          {4},
+                          {3},
+                          {0},
+                          d.gold,
+                          d.result,
+                          gold,
+                          result,
+                          unused,
+                          unused,
+                          unused,
+                          unused,
+                          tol,
+                          norm_error,
+                          atol,
+                          rtol,
+                          max_ulp,
+                          avg_ulp,
+                          HIP_R_32F,
+                          HIP_R_32F,
+                          HIP_R_32F,
+                          HIP_R_32F);
+                }
+                EXPECT_EQ(assertions.size(), corrupt ? 1 : 0);
+                EXPECT_EQ(hipblaslt_bench_options::verification_failures(), d_before);
+                EXPECT_EQ(hipblaslt_bench_options::extra_check_failures() - extra_before,
+                          corrupt && check_kind == 0 ? 1 : 0);
+                EXPECT_EQ(norm_error, corrupt && check_kind == 0 ? 1.0 : 0.0);
+                if(corrupt && check_kind == 0)
+                    EXPECT_NE(
+                        hipblaslt_cerr.str().find("norm check failed for amaxD of gemm 0: batch 0"),
+                        std::string::npos);
+            }
+        }
+    }
+
+    TEST(BenchVerify, smoke_BiasGradientRejectsMultipleBatches)
+    {
+        for(int check_kind : {0, 1, 2}) // norm, unit, allclose
+        {
+            SCOPED_TRACE(check_kind);
+            Arguments arg{};
+            arg.init();
+            arg.norm_check     = check_kind == 0;
+            arg.unit_check     = check_kind == 1;
+            arg.allclose_check = check_kind == 2;
+            arg.gradient       = true;
+            arg.bias_vector    = true;
+            arg.batch_count    = 3;
+            // The shared client must reject this before allocating or computing the reference.
+            try
+            {
+                testing_matmul_with_bias(arg,
+                                         HIP_R_32F,
+                                         HIP_R_32F,
+                                         HIP_R_32F,
+                                         HIP_R_32F,
+                                         HIP_R_32F,
+                                         HIP_R_32F,
+                                         HIP_R_32F,
+                                         HIP_R_32F);
+                FAIL() << "Expected the unsupported bias-gradient batch count to be rejected";
+            }
+            catch(const std::invalid_argument& error)
+            {
+                EXPECT_STREQ(error.what(), "bias-gradient verification supports only one batch");
             }
         }
     }

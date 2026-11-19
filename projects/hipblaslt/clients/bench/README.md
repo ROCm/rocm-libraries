@@ -141,7 +141,7 @@ the failed checks above are for solution 3 of 12 (library index 8805, kernel <ke
 
 If D's type has no norm limit, or isn't one the norm check can compare, the bench prints that D was not verified and counts it as a failed check.
 
-The norm checks of E, the bias gradient and amaxD also apply their limit to each batch. E uses the same kind of limit as D; the bias gradient and amaxD use the tolerance of their own type. A failing one prints a line like D's, and the line naming the solution follows. These outputs are reported the same way when their type can't be compared.
+E is checked per batch with the same kind of norm limit as D. amaxD is checked once per GEMM: its single value is the maximum across all batches. Bias-gradient verification supports one batch; host verification rejects a bias-gradient problem with more than one batch before computing its reference. The bias gradient and amaxD use the tolerance of their own type. A failing one prints a line like D's, and the line naming the solution follows. These outputs are reported the same way when their type can't be compared.
 ```
 norm check failed for the bias gradient of gemm 0: batch 0 has norm_error 2.44902, at or above the limit of 1e-05
 ```
