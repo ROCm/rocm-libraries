@@ -287,6 +287,13 @@ for dt in ("HALF", "BFLOAT16"):
             M(f"mfma16_{e}", F333, 128, 64, 32, 1, 4, 8, ring=1, xpf=1),
             M(f"mfma16_{e}", F333, 128, 192, 16, 1, 4, 8, ring=0, xpf=1),
             M(f"mfma16_{e}", F333, 128, 256, 16, 1, 8, 8, ring=0, xpf=1),
+            # Split-C twins for under-filled grids (the planner splits the channel chunks only
+            # below two blocks a CU): the 512 / 1024-channel layers on small 3-D and smaller
+            # outputs run 64-192 blocks on 228-304 CUs unsplit.
+            M(f"mfma16_{e}", F333, 128, 192, 16, 2, 4, 8, ring=0, split=1),
+            M(f"mfma16_{e}", F333, 128, 128, 16, 2, 2, 8, ring=0, split=1, xpf=1),
+            M(f"mfma16_{e}", F333, 128, 64, 32, 2, 2, 8, ring=0, split=1, xpf=1),
+            M(f"mfma16_{e}", F333, 128, 128, 16, 1, 4, 8, ring=0, split=1, xpf=1),
             # Chunk weights in LDS (bl 2): one 16-byte load stream a block instead of a fragment
             # stream a wave; 8-wave blocks at one block a CU.
             M(f"mfma16_{e}", F333, 128, 128, 16, 2, 4, 8, ring=0, bl=2),
