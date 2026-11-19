@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <set>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -13,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/NumericalNote.h>
@@ -90,6 +92,40 @@ TEST(TestHipblasltEnginePluginApi, GetAllEngineIdsValid)
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
     EXPECT_EQ(numEngines, expected.size());
 }
+
+#if defined(HIPBLASLTPROVIDER_ENABLE_CONV) && defined(HIPBLASLTPROVIDER_ENABLE_HIPBLASLT)
+TEST(TestHipblasltEnginePluginApi, LibraryActivationEngineIsOptIn)
+{
+    // Listed only with HIPBLASLT_PROVIDER_CONV_LIBRARY_ACTIVATIONS=1: its fused activations
+    // give other special values than every other engine, and no numerical note says so.
+    const auto listed = [] {
+        uint32_t count = 0;
+        EXPECT_EQ(hipdnnEnginePluginGetAllEngineIdsImpl(nullptr, 0, &count),
+                  HIPDNN_PLUGIN_STATUS_SUCCESS);
+        std::vector<int64_t> ids(count, 0);
+        EXPECT_EQ(hipdnnEnginePluginGetAllEngineIdsImpl(ids.data(), count, &count),
+                  HIPDNN_PLUGIN_STATUS_SUCCESS);
+        return std::find(ids.begin(), ids.end(), HIPBLASLT_CONV_LIBRARY_ACTIVATION_ENGINE_ID)
+               != ids.end();
+    };
+    const char* name = "HIPBLASLT_PROVIDER_CONV_LIBRARY_ACTIVATIONS";
+    const std::string previous = getEnv(name);
+    unsetEnv(name);
+    EXPECT_FALSE(listed());
+    setEnv(name, "0");
+    EXPECT_FALSE(listed());
+    setEnv(name, "1");
+    EXPECT_TRUE(listed());
+    if(previous.empty())
+    {
+        unsetEnv(name);
+    }
+    else
+    {
+        setEnv(name, previous.c_str());
+    }
+}
+#endif
 
 TEST(TestHipblasltEnginePluginApi, CreateNullHandle)
 {

@@ -51,6 +51,37 @@ bool currentDeviceIsGfx11()
     return found->second;
 }
 
+bool usesAddend(const ConvGemmPlanCalls& calls)
+{
+    for(const auto& stage : calls.stages)
+    {
+        for(const auto& call : stage.calls)
+        {
+            if(call.c.has_value())
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+const char* epilogueFormName(EpilogueForm form)
+{
+    switch(form)
+    {
+    case EpilogueForm::NATIVE:
+        return "native";
+    case EpilogueForm::FUSED_PASS:
+        return "fused pass";
+    case EpilogueForm::EXTRA_PASS:
+        return "extra pass";
+    default:
+        break;
+    }
+    return "none";
+}
+
 bool narrowPartials(ConvGemmPlanBuilder::NarrowPartials policy)
 {
     return policy == ConvGemmPlanBuilder::NarrowPartials::ALWAYS
@@ -67,7 +98,7 @@ ConvGemmPlanBuilder::ConvGemmPlanBuilder(PlanFactory factory,
                                          ColumnLayout layout,
                                          NarrowPartials narrowPartials,
                                          std::optional<size_t> maxBackwardWeightsRepackBytes,
-                                         bool nativeEpilogue)
+                                         GemmEpilogueSupport gemmEpilogue)
     : _factory(std::move(factory))
     , _maxRepackWorkspaceBytes(maxRepackWorkspaceBytes)
     , _tf32(tf32)
@@ -76,7 +107,7 @@ ConvGemmPlanBuilder::ConvGemmPlanBuilder(PlanFactory factory,
     , _layout(layout)
     , _narrowPartials(narrowPartials)
     , _maxBackwardWeightsRepackBytes(maxBackwardWeightsRepackBytes)
-    , _nativeEpilogue(nativeEpilogue)
+    , _gemmEpilogue(gemmEpilogue)
 {
 }
 
@@ -84,7 +115,8 @@ std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     ColumnLayout layout,
     bool splitReduction,
-    bool wideBackwardWeights) const
+    bool wideBackwardWeights,
+    bool gemmEpilogue) const
 {
     for(const auto direction :
         {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
@@ -103,6 +135,11 @@ std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
         if(_reducedPrecisionReduction)
         {
             return reducedPrecisionGemmCalls(*problem);
+        }
+        // The library-activation sibling: only the graphs, and the plans, it differs on.
+        if(_gemmEpilogue.libraryActivations && (!gemmEpilogue || !usesLibraryActivation(*problem)))
+        {
+            return std::nullopt;
         }
         auto calls = convGemmCalls(
             *problem,
@@ -134,7 +171,16 @@ std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
         // A fused graph: the epilogue in the GEMM, the plan's last pass or one more pass.
         if(calls.has_value() && !problem->epilogue.empty())
         {
-            return fuseEpilogue(*problem, std::move(*calls), _nativeEpilogue);
+            auto fused = fuseEpilogue(
+                *problem,
+                std::move(*calls),
+                gemmEpilogue ? std::optional<GemmEpilogueSupport>(_gemmEpilogue) : std::nullopt);
+            if(fused.has_value() && _gemmEpilogue.libraryActivations
+               && fused->epilogueForm != EpilogueForm::NATIVE)
+            {
+                return std::nullopt;
+            }
+            return fused;
         }
         return calls;
     }
@@ -167,6 +213,20 @@ std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::buildableCalls(
     if(runs(*calls))
     {
         return calls;
+    }
+    // A GEMM epilogue the backend has no algorithm for: the epilogue in a pass.
+    if(calls->epilogueForm == EpilogueForm::NATIVE)
+    {
+        auto pass = callsFor(opGraph, _layout, _splitReduction, false, false);
+        if(!pass.has_value())
+        {
+            return calls;
+        }
+        calls = std::move(pass);
+        if(runs(*calls))
+        {
+            return calls;
+        }
     }
     for(const auto layout : {ColumnLayout::STAGED_CHANNELS_LAST,
                              ColumnLayout::CHANNELS_LAST,
@@ -243,12 +303,13 @@ void ConvGemmPlanBuilder::buildPlan(
     }
     HIPDNN_PLUGIN_LOG_INFO("Building explicit-GEMM convolution plan, row "
                            << toString(calls->row) << ", " << calls->stages.size() << " stage(s), "
-                           << calls->workspaceBytes << " workspace bytes");
+                           << calls->workspaceBytes << " workspace bytes, epilogue "
+                           << epilogueFormName(calls->epilogueForm));
 
     // Benchmarking: when the plan has a choice of layout (an IM2COL column matrix; a 1x1
-    // channels-first backward weights' batched partials or channels-last staging) or of a
-    // backward weights' reduction split, time every distinct one on the first execute and keep
-    // the fastest: none wins every shape.
+    // channels-first backward weights' batched partials or channels-last staging), of a
+    // backward weights' reduction split, or of where a fused epilogue runs, time every distinct
+    // one on the first execute and keep the fastest: none wins every shape.
     if(executionContext.benchmarking())
     {
         std::vector<BenchmarkedPlan::Candidate> candidates;
@@ -259,6 +320,26 @@ void ConvGemmPlanBuilder::buildPlan(
         };
         seen.push_back(signature(*calls));
         candidates.push_back({"default", planFor(handle, *calls)});
+        // A GEMM epilogue against the same epilogue in a pass, where the GEMM's own may cost
+        // more than the pass's traffic: a broadcast-bias addend (one more y-sized read a
+        // GEMM, and its fill) on a bandwidth-bound layer. A bias along the rows costs the GEMM
+        // nothing, and the clamp tail moves fewer bytes than the pass: never a candidate.
+        if(calls->epilogueForm == EpilogueForm::NATIVE && usesAddend(*calls))
+        {
+            auto pass = callsFor(opGraph, _layout, _splitReduction, false, false);
+            if(pass.has_value())
+            {
+                try
+                {
+                    candidates.push_back({"epilogue_pass", planFor(handle, std::move(*pass))});
+                }
+                catch(const std::exception& e)
+                {
+                    HIPDNN_PLUGIN_LOG_INFO(
+                        "Explicit-GEMM candidate epilogue_pass skipped: " << e.what());
+                }
+            }
+        }
         // Staged channels-last: one GEMM over every image of a channels-first y, where the
         // other layouts batch a small per-image GEMM (1x1 stride 2: 25 x 25 outputs an image).
         // Image slices: a 16-bit backward weights over the cap summed through an fp32

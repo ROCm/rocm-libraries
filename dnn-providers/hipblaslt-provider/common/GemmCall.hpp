@@ -43,9 +43,10 @@ inline void* operandAddress(void* base, const GemmOperand& operand)
 }
 
 /**
- * @brief A fused convolution epilogue a backend applies in its own GEMM kernel: hipBLASLt's
- *        native epilogues, set only on calls whose rows are the output channels (the bias is
- *        a vector along m). Computed in fp32 before the GEMM's one rounding of d.
+ * @brief A fused convolution epilogue a backend applies in its own GEMM kernel: one of
+ *        hipBLASLt's native epilogues. A bias in it is a vector along m, so it is set only on
+ *        calls whose rows are the output channels. Computed in fp32 before the GEMM's one
+ *        rounding of d.
  */
 struct NativeEpilogue
 {
@@ -54,7 +55,7 @@ struct NativeEpilogue
     /// The activation's arguments (clamp bounds).
     float act0 = 0.0F;
     float act1 = 0.0F;
-    /// The per-channel bias vector; none without one.
+    /// The per-channel bias vector along m; none without one.
     std::optional<int64_t> biasUid;
     hipdnn_flatbuffers_sdk::data_objects::DataType biasType
         = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
@@ -65,9 +66,10 @@ struct NativeEpilogue
  *        that executes it.
  *
  * For each of `batchCount` matrices: d(m x n) = op(a)(m x k) * op(b)(k x n), accumulated in
- * fp32 and written once -- or, with `accumulate`, added to what d already holds (beta = 1).
- * `d` stands in for `c` too, so it carries the output. The GEMM plans split a call until every
- * size fits the 32-bit ones the BLAS libraries take (fitLibraryLimits).
+ * fp32 and written once -- or, with `accumulate`, added to what d already holds (beta = 1), or,
+ * with `c`, added to c (beta = 1). Without `c`, `d` stands in for c, so it carries the output.
+ * The GEMM plans split a call until every size fits the 32-bit ones the BLAS libraries take
+ * (fitLibraryLimits).
  */
 struct GemmCall
 {
@@ -89,6 +91,11 @@ struct GemmCall
     bool tf32 = false;
     /// A fused epilogue the backend applies to d (hipBLASLt only); unset for every unfused call.
     std::optional<NativeEpilogue> epilogue;
+    /// An addend of d's shape and type the product is added to, in fp32 before the epilogue
+    /// and the one rounding (beta = 1); d is then written, never read. A fused epilogue's
+    /// per-channel bias where the channels are d's columns: one matrix of the bias broadcast
+    /// along the rows, batch stride 0. Never with `accumulate`.
+    std::optional<GemmOperand> c;
 };
 
 } // namespace hipblaslt_plugin
