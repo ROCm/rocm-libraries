@@ -193,7 +193,7 @@ class TestFwd3dXStrideM(unittest.TestCase):
     strided eqx store map) against the fp32 reference: x-halo workgroups,
     workgroups that fall back (range exceeded, Wo % 4 != 0, padding) with
     the default store map, mixed in one launch, grouped, K not a multiple of
-    the tile, and the 4-fragment (64-row) waves of the production tile."""
+    the tile, and the 4-fragment (64-row) waves of the shipped tile."""
 
     def test_xh_stride_m(self):
         base = dict(

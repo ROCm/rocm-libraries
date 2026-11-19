@@ -933,7 +933,7 @@ def main(argv=None):
     p.add_argument(
         "--adapter",
         action="store_true",
-        help="production pad-(1,1,1) form: X / dY one voxel smaller per side, the "
+        help="pad-(1,1,1) form: X / dY one voxel smaller per side, the "
         "relayout adds the zero halo (drop-in only; FWD and --dgrad)",
     )
     p.add_argument(

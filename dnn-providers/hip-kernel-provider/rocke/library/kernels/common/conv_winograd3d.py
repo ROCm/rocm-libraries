@@ -894,7 +894,7 @@ class WinogradYxSpec:
     bps: int = 0
     bps_halo: int = 0
     # bps=1: the source's zero halo along z when it differs from y / x (-1: bps_halo) -- the
-    # production pad (0,1,1) form of a D-split run (relayout halo (0, 1, 1); dgrad (2, 1, 1))
+    # the pad (0,1,1) form of a D-split run (relayout halo (0, 1, 1); dgrad (2, 1, 1))
     bps_halo_z: int = -1
     bps_l: int = 14
     bps_pz: int = 0

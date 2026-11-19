@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Bind a production route (:func:`dispatch.conv_routes.dispatch_conv_route`) to device buffers.
+"""Bind a route (:func:`dispatch.conv_routes.dispatch_conv_route`) to device buffers.
 
 Torch-free: buffers are raw device pointers from :class:`rocke.runtime.hip_module.Runtime`
 (torch tensors work too, through their ``data_ptr``). The pinned implicit-GEMM step of a

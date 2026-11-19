@@ -393,7 +393,7 @@ class TestIdentity(unittest.TestCase):
                 ),
             )[0]
         )
-        # padded (production-form) problems decompose too
+        # padded problems decompose too
         self.assertTrue(
             identity_supports_problem(
                 ident,

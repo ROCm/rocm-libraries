@@ -14,7 +14,7 @@ Modes (what a call costs besides the main kernel):
 
 * ``"dropin"`` -- NDHWC in / NDHWC out, no model change: one aux launch (LDS-transposed
   X / dY relayout to c8 [+ halo 2 for dgrad] next to the weight transform) + main kernel.
-* ``"dropin"`` on the production adapter forms -- pad (1,1,1) (input = output size) and pad
+* ``"dropin"`` on the padded adapter forms -- pad (1,1,1) (input = output size) and pad
   (0,1,1) (a D-split run's D+2 input): the same aux launch adds the zero halo (FWD: the
   padding; BWD-data: 2 - padding around dY, whose dX is then the padded conv's full
   gradient) -- the main kernel is the halo form's. There the direct kernels lose their
@@ -924,7 +924,7 @@ UNET3D_SHAPES = {
 
 def unet3d_plans(mode: str = "dropin", form: str = "halo", **kw):
     """{(direction, cell): Winograd3dPlan} for the UNET3D_SHAPES convs (FWD and BWD-data);
-    ``form="adapter"``: the production pad-(1,1,1) problems (input 2 smaller per dim).
+    ``form="adapter"``: the pad-(1,1,1) problems (input 2 smaller per dim).
     """
     out = {}
     pd, ph = {"halo": (0, 0), "adapter": (1, 1), "adapter011": (0, 1)}[form]

@@ -260,7 +260,7 @@ class Case:
         check_replayable(key, problem, dtype)
         direction = {1: "fwd", 2: "dgrad", 4: "wgrad"}[int(forw)]
         self.direction, self.problem, self.dtype = direction, problem, dtype
-        # A production route (``--routes``): pad copy / Winograd launches around
+        # A route (``--routes``): pad copy / Winograd launches around
         # (or instead of) a pinned kernel, bound by conv_route_exec.RouteBinding.
         route_plan = pin.get("route_plan")
         if route_plan is None:
@@ -526,7 +526,7 @@ def main(argv=None) -> int:
         "--routes",
         default=None,
         metavar="ROUTE_TABLE#MODE[@FORM]",
-        help="replay the production routes of a route table (dispatch/conv_routes.py) instead of "
+        help="replay the routes of a route table (dispatch/conv_routes.py) instead of "
         "--pins; with --pins too, rows without a kernel take the pin table's",
     )
     ap.add_argument(
