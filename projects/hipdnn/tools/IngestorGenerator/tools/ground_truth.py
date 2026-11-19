@@ -310,6 +310,67 @@ def packed_strides(dims: list, order: list | None = None) -> list:
     return strides
 
 
+def _bshd(dims) -> list:
+    _, heads, seq, hdim = dims
+    return [seq * heads * hdim, hdim, heads * hdim, 1]
+
+
+def _bhsd(dims) -> list:
+    _, heads, seq, hdim = dims
+    return [heads * seq * hdim, seq * hdim, hdim, 1]
+
+
+def _view(dims, buffer_heads: int, batch_step: int = 1) -> list:
+    """Strides of a [B, S, H, D] slice of a [B', S, buffer_heads, D] buffer that
+    steps ``batch_step`` batches per batch index."""
+    _, _, seq, hdim = dims
+    return [batch_step * seq * buffer_heads * hdim, hdim, buffer_heads * hdim, 1]
+
+
+def _same(dims, roles, what: str) -> None:
+    """The views of one buffer share its sequence length and head size."""
+    if len({(dims[r][2], dims[r][3]) for r in roles}) != 1:
+        raise GroundTruthError(
+            f"layout {what} needs one seqlen and head size in {roles}"
+        )
+
+
+def _packed_qkv(dims) -> dict:
+    _same(dims, "qkv", "packed_qkv")
+    total = dims["q"][1] + 2 * dims["k"][1]
+    return {r: _view(dims[r], total) for r in "qkv"} | {"o": _bshd(dims["o"])}
+
+
+def _packed_kv(dims) -> dict:
+    _same(dims, "kv", "packed_kv")
+    out = {r: _bshd(dims[r]) for r in "qo"}
+    return out | {r: _view(dims[r], 2 * dims[r][1]) for r in "kv"}
+
+
+def _batch_slice(dims) -> dict:
+    out = {r: _view(dims[r], dims[r][1], 2) for r in "qkv"}
+    return out | {"o": _bshd(dims["o"])}
+
+
+#: Catalog-sweep layouts: name -> f({role: (B, H, S, D)}) -> {role: strides}, roles
+#: q k v o, every tensor in graph (B, H, S, D) dim order. `bshd` is what a template
+#: tensor with "strides": "packed" and stride_order [0, 2, 1, 3] already gets.
+LAYOUTS = {
+    "bshd": lambda dims: {r: _bshd(d) for r, d in dims.items()},
+    "bhsd": lambda dims: {r: _bhsd(d) for r, d in dims.items()},
+    "packed_qkv": _packed_qkv,  # Q K V views of one [B, S, Hq + 2 Hkv, D]; O separate
+    "packed_kv": _packed_kv,  # K V views of one [B, S, 2 Hkv, D]; Q and O separate
+    "batch_slice": _batch_slice,  # Q K V are the odd batches of [2 B, ...]; O separate
+}
+
+
+def _check_dims(dims, where: str, name) -> None:
+    if not isinstance(dims, list) or any(type(d) is not int or d <= 0 for d in dims):
+        raise GroundTruthError(
+            f"{where}: tensor {name!r} dims {dims!r} are not positive integers"
+        )
+
+
 def instantiate(template: dict, value_map: dict, row: dict) -> dict:
     request = row["request"]
     where = f"row {row['_provenance']['row']}"
@@ -341,17 +402,25 @@ def instantiate(template: dict, value_map: dict, row: dict) -> dict:
     for pointer, value in patches.items():
         container, key = _pointer_parent(graph, pointer)
         container[key] = value
+    roles = {t.pop("layout_role", None): t for t in graph.get("tensors", [])}
+    layout = row.get("layout")
+    if layout is not None:
+        if layout not in LAYOUTS:
+            raise GroundTruthError(
+                f"{where}: layout {layout!r} is not in {sorted(LAYOUTS)}"
+            )
+        if not set("qkvo") <= set(roles):
+            raise GroundTruthError(f"{where}: the template tags no q/k/v/o layout_role")
+        for role, tensor in roles.items():
+            _check_dims(tensor.get("dims"), where, tensor.get("name"))
+        strides = LAYOUTS[layout]({r: roles[r]["dims"] for r in "qkvo"})
+        for role in "qkvo":
+            roles[role]["strides"] = strides[role]
     for tensor in graph.get("tensors", []):
         order = tensor.pop("stride_order", None)
         if tensor.get("strides") == "packed":
             dims = tensor.get("dims")
-            if not isinstance(dims, list) or any(
-                type(d) is not int or d <= 0 for d in dims
-            ):
-                raise GroundTruthError(
-                    f"{where}: tensor {tensor.get('name')!r} dims {dims!r} are not "
-                    "positive integers"
-                )
+            _check_dims(dims, where, tensor.get("name"))
             if order is not None and sorted(order) != list(range(len(dims))):
                 raise GroundTruthError(
                     f"template tensor {tensor.get('name')!r} stride_order {order!r} "
@@ -391,6 +460,132 @@ def write_graphs(gt_path, manifest_path, out_dir) -> list:
     text = json.dumps(mapping, indent=1) + "\n"
     graphs_map_path(gt_path).write_text(text, encoding="utf-8")
     return names
+
+
+_SHAPES_KEYS = {"dtypes", "head_dims", "mask_types", "layouts", "shapes"}
+_SHAPE_KEYS = {"id", "batch", "nhead_q", "nhead_k", "seqlen_q", "seqlen_k"}
+
+
+def layout_rows(spec: dict) -> list:
+    """`layouts` rows for ``spec`` (see `read_layout_spec`): dtype, head size, mask,
+    shape, layout, the last varying fastest. Row numbers start at 1."""
+    rows = []
+    for dtype in spec["dtypes"]:
+        for hdim in spec["head_dims"]:
+            for mask in spec["mask_types"]:
+                for shape in spec["shapes"]:
+                    request = dict(
+                        batch=shape["batch"],
+                        nhead_q=shape["nhead_q"],
+                        nhead_k=shape["nhead_k"],
+                        seqlen_q=shape["seqlen_q"],
+                        seqlen_k=shape.get("seqlen_k", shape["seqlen_q"]),
+                        hdim_q=hdim,
+                        hdim_v=hdim,
+                        dtype=dtype,
+                        mask_type=mask,
+                    )
+                    for layout in spec["layouts"]:
+                        rows.append(
+                            dict(
+                                request=request,
+                                layout=layout,
+                                shape=shape["id"],
+                                _provenance=dict(source="layouts", row=len(rows) + 1),
+                            )
+                        )
+    return rows
+
+
+def read_layout_spec(path) -> dict:
+    """The YAML cell/shape/layout lists `layouts` crosses: ``dtypes``, ``head_dims``,
+    ``mask_types``, ``layouts`` (names of `LAYOUTS`) and ``shapes`` (``id``,
+    ``batch``, ``nhead_q``, ``nhead_k``, ``seqlen_q``, optional ``seqlen_k``)."""
+    import yaml
+
+    try:
+        spec = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise GroundTruthError(f"{path} is not a readable YAML file: {exc}") from exc
+    if not isinstance(spec, dict) or set(spec) != _SHAPES_KEYS:
+        raise GroundTruthError(
+            f"{path} must be a mapping with exactly {sorted(_SHAPES_KEYS)}"
+        )
+    unknown = sorted(set(spec["layouts"]) - set(LAYOUTS))
+    if unknown:
+        raise GroundTruthError(
+            f"{path}: unknown layout(s) {unknown}; know {sorted(LAYOUTS)}"
+        )
+    ids = [x.get("id") for x in spec["shapes"]]
+    if len(set(ids)) != len(ids):
+        raise GroundTruthError(f"{path}: shape ids {ids} are not unique")
+    for shape in spec["shapes"]:
+        bad = sorted(set(shape) - _SHAPE_KEYS) + [
+            k for k in _SHAPE_KEYS - {"seqlen_k"} if k not in shape
+        ]
+        if bad:
+            raise GroundTruthError(
+                f"{path}: shape {shape.get('id')!r}: bad or missing {bad}"
+            )
+    return spec
+
+
+def _canonical(dims, strides) -> list:
+    """``strides`` with every extent-1 axis ignored (it is never stepped)."""
+    return [0 if n == 1 else s for n, s in zip(dims, strides)]
+
+
+def layouts_map_path(out_dir) -> Path:
+    out_dir = Path(out_dir)
+    return out_dir.with_name(out_dir.name + ".layouts.yaml")
+
+
+def write_layout_graphs(shapes_path, manifest_path, out_dir) -> list:
+    """One graph per `layout_rows` row in ``out_dir`` and the join map beside it
+    (`layouts_map_path`): graph name, family, shape id, layout, request, strides,
+    semantic identity, and ``same_as_bshd`` when the layout is the BSHD twin once
+    extent-1 axes are ignored (such a graph repeats the twin's measurement)."""
+    import yaml
+
+    manifest = load_manifest(str(manifest_path))
+    template, value_map = ground_truth_block(manifest, manifest_path)
+    rows = layout_rows(read_layout_spec(shapes_path))
+    out_dir = Path(out_dir)
+    if out_dir.exists() and any(out_dir.iterdir()):
+        raise GroundTruthError(f"{out_dir} is not empty")
+    graphs = [instantiate(template, value_map, row) for row in rows]
+    out_dir.mkdir(parents=True, exist_ok=True)
+    mapping = []
+    for row, graph in zip(rows, graphs):
+        (out_dir / f"{graph['name']}.json").write_text(
+            json.dumps(graph, indent=4) + "\n", encoding="utf-8"
+        )
+        by_name = {t["name"]: t for t in graph["tensors"]}
+        twin = instantiate(template, value_map, {**row, "layout": "bshd"})
+        same = all(
+            _canonical(a["dims"], a["strides"]) == _canonical(b["dims"], b["strides"])
+            for a, b in zip(graph["tensors"], twin["tensors"])
+        )
+        mapping.append(
+            dict(
+                graph_name=graph["name"],
+                semantic_identity=semantic_identity(graph),
+                family=dict(
+                    dtype=row["request"]["dtype"],
+                    head_size=row["request"]["hdim_q"],
+                    mask_type=row["request"]["mask_type"],
+                ),
+                shape=row["shape"],
+                layout=row["layout"],
+                same_as_bshd=same,
+                request=dict(row["request"]),
+                strides={n: by_name[n]["strides"] for n in by_name},
+            )
+        )
+    layouts_map_path(out_dir).write_text(
+        yaml.safe_dump(mapping, sort_keys=False), encoding="utf-8"
+    )
+    return [m["graph_name"] for m in mapping]
 
 
 def _passed(correctness) -> bool:
@@ -588,6 +783,10 @@ def main(argv=None) -> int:
     p.add_argument("--gt", required=True)
     p.add_argument("--manifest", required=True)
     p.add_argument("--out", required=True)
+    p = sub.add_parser("layouts", help="cells x shapes x layouts -> graphs + map")
+    p.add_argument("--manifest", required=True)
+    p.add_argument("--shapes", required=True, help="YAML, see read_layout_spec")
+    p.add_argument("--out", required=True, help="empty or new graph directory")
     p = sub.add_parser("compare", help="GT.json vs a tools/sweep.py output")
     p.add_argument("--gt", required=True)
     p.add_argument("--sweep-output", required=True)
@@ -611,6 +810,11 @@ def main(argv=None) -> int:
         elif args.command == "graphs":
             names = write_graphs(args.gt, args.manifest, args.out)
             print(f"{len(names)} graphs -> {args.out}")
+        elif args.command == "layouts":
+            names = write_layout_graphs(args.shapes, args.manifest, args.out)
+            print(
+                f"{len(names)} graphs -> {args.out}, map {layouts_map_path(args.out)}"
+            )
         else:
             comparison = compare(args.gt, args.sweep_output, args.arm, args.margin)
             report = render_report(comparison, args.gt, args.sweep_output)

@@ -56,7 +56,7 @@ is also each child's cwd.
 | `engine_ued_name` | Required exact installed UED engine name |
 | `engine_name` | Required exact label of the `engine_ued_name` engine, never a prefix or regex: the UED name, or `engine_<hex ID>` with the ID unsigned or signed (see below); installed baseline discovery must connect it to `engine_ued_name` |
 | `corpora` | Nonempty ordered list of `{name, path, expected_graphs}`; explicit directory path and positive count covering every staged graph |
-| `arms` | Nonempty ordered list of `{name, install_tree, expected_descriptors}`; descriptor count is the positive total of all KDP `kernelDescriptors` entries in the installed tree |
+| `arms` | Nonempty ordered list of `{name, install_tree, expected_descriptors}` plus an optional `benchmarking` boolean (default true; false sets `HIPDNN_FORCE_BENCHMARKING=0` so the engine serves its ranker's top-ranked candidate, see `tools/ranker_check.py`); descriptor count is the positive total of all KDP `kernelDescriptors` entries in the installed tree |
 | `warmup_arm` | Required arm name or explicit `null`; comparative runs use the first/baseline arm |
 | `rounds` | Positive integer; drift-reporting comparisons require at least three |
 | `min_served` | Positive integer no greater than any corpus count, set near the approved served population, not a success-by-one-row default |
@@ -138,7 +138,7 @@ once per ordered corpus/arm after the timed grid, with
 Construct each child's environment afresh from the caller environment, setting the current
 arm's `ROCM_PATH` and `LD_LIBRARY_PATH` prefix without accumulating prior arms. Every
 phase attempt, correctness included, gets its own `HIPDNN_CACHE_DIR` and
-`HIPDNN_LOG_FILE`, `HIPDNN_FORCE_BENCHMARKING=1` and `HIPDNN_LOG_LEVEL=info`; another
+`HIPDNN_LOG_FILE`, `HIPDNN_FORCE_BENCHMARKING=1` (0 for an arm with `benchmarking: false`) and `HIPDNN_LOG_LEVEL=info`; another
 sweep's paths are not shared state. A `benchmark.argv` passing a phase option above,
 `--backend`, `--autotune` or `--hipdnn-cache-dir` (the driver owns the rankings' cache) is
 invalid configuration.
