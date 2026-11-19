@@ -486,6 +486,10 @@ class CoalescedTileLoader:
 
     @property
     def vecs_per_thread(self) -> int:
+        if self.load_vec <= 0 or self.block_size <= 0:
+            raise ValueError(
+                "CoalescedTileLoader: load_vec and block_size must be positive"
+            )
         total_vecs = (self.tile_rows * self.tile_cols) // self.load_vec
         if total_vecs % self.block_size:
             raise ValueError(

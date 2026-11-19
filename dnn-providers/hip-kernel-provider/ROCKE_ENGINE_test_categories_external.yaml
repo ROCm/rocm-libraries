@@ -69,6 +69,7 @@ test_categories:
     description: "rocKE pre-registered smoke/golden/unit checks (C++ + Python)"
     test_patterns:
       - "rocke_test_tdm_tile_loader"
+      - "rocke_tile_helper_guards"
       - "rocke_f64_mma"
       - "rocke_optimization_barrier"
       - "rocke_optimization_barrier_hip_pair"
@@ -166,6 +167,7 @@ test_categories:
     description: "Fast-feedback mechanism (FFM) rocKE smoke/golden/unit checks"
     test_patterns:
       - "rocke_test_tdm_tile_loader"
+      - "rocke_tile_helper_guards"
       - "rocke_f64_mma"
       - "rocke_optimization_barrier"
       - "rocke_optimization_barrier_hip_pair"

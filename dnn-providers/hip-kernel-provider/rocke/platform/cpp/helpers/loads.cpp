@@ -377,7 +377,7 @@ rocke_status_t
 {
     int total_vecs;
 
-    if(self == NULL)
+    if(self == NULL || self->load_vec <= 0 || self->block_size <= 0)
     {
         return ROCKE_ERR_VALUE;
     }
@@ -598,7 +598,7 @@ void rocke_coalesced_tile_loader_visit_chunks(rocke_ir_builder_t* b,
     {
         rocke_i_set_err(b,
                         ROCKE_ERR_VALUE,
-                        "CoalescedTileLoader: tile %dx%d / %d not divisible by block_size %d",
+                        "CoalescedTileLoader: invalid chunk geometry (%dx%d / %d, block_size %d)",
                         self->tile_rows,
                         self->tile_cols,
                         self->load_vec,
