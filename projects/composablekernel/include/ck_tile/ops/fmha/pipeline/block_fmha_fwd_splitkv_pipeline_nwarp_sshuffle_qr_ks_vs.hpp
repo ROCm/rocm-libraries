@@ -593,12 +593,15 @@ struct BlockFmhaFwdSplitKVPipelineNWarpSShuffleQRKSVS
             {
                 const auto k_origin = k_page_block_navigator.to_global_window_origin(
                     i_page_block_k, k_dram_block_window.get_window_origin());
+                // Every sink tile is exempt from the head check, not only the last one
+                // (is_sink_tile): the sink can span several kN0 tiles from column 0.
                 set_tile_if(
                     s_acc,
                     -numeric<SMPLComputeDataType>::infinity(),
                     [&,
-                     physical_seqlen_k_start_ = is_sink_tile ? 0 : physical_seqlen_k_start,
-                     physical_seqlen_k_end_   = physical_seqlen_k_end](auto tile_idx) {
+                     physical_seqlen_k_start_ =
+                         i_total_loops < num_sink_loop ? 0 : physical_seqlen_k_start,
+                     physical_seqlen_k_end_ = physical_seqlen_k_end](auto tile_idx) {
                         const auto col = k_origin.at(number<0>{}) + tile_idx.at(number<1>{});
                         if constexpr(kIsPagedKV)
                         {
