@@ -841,6 +841,11 @@ namespace hipblaslt_ext::experimental
                   || (inputs.storePeerD && foreign(advance(dPointers[1 - i], elems[3], bytes[3])));
         }
 
+        // The word a publishing partition writes is allocated here and not in run(): a host
+        // allocation is refused while a stream is being captured.
+        for(size_t i = 0; i < parts; i++)
+            if(publish[i] && s.publishWord(i, s.devices[i]) == nullptr)
+                return HIPBLAS_STATUS_INTERNAL_ERROR;
         s.publishD = std::move(publish);
         s.m = m, s.n = n, s.k = k, s.batch = batch_count;
         for(int t = 0; t < 4; t++)
@@ -990,7 +995,8 @@ namespace hipblaslt_ext::experimental
             // those writes visible to the other devices.
             if(s.publishD[i])
             {
-                uint64_t* word = s.publishWord(i, devices[i]);
+                // Allocated by setProblem; nothing is allocated here, so run() can be captured.
+                uint64_t* word = i < s.publishWords.size() ? s.publishWords[i].second : nullptr;
                 if(word == nullptr || hipStreamWriteValue64(streams[i], word, 1, 0) != hipSuccess)
                     return HIPBLAS_STATUS_INTERNAL_ERROR;
             }
