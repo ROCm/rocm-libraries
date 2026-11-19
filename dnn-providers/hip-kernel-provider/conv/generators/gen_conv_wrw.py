@@ -1047,7 +1047,12 @@ UNALIGNED_K = [
     ),
     ({"FLOAT": "mfma32_f32"}, [(32, 128, 1, 4, 16), (32, 64, 1, 2, 16)], 0),
 ]
-# 1x7: HiFi-GAN's output layer (one output channel).
+# 1x7: HiFi-GAN's output layer (one output channel), which has 32 input channels: also tiles 32
+# input channels wide (atom family prefix -> tiles), so a block's channel tile is not half empty.
+UNALIGNED_K_NARROW = {
+    "mfma": [(32, 32, 1, 1, 32), (32, 32, 1, 1, 64)],
+    "wmma": [(16, 32, 1, 2, 32), (16, 32, 1, 2, 64)],
+}
 UNALIGNED_K_FILTERS = [("3x3", 3, 3), ("1x1", 1, 1), ("1x7", 7, 1)]
 
 
@@ -1056,7 +1061,8 @@ def build_unaligned_k():
     for atoms, tiles, xcd in UNALIGNED_K:
         for dtype, atom in atoms.items():
             for tag, s, fr in UNALIGNED_K_FILTERS:
-                for t in tiles:
+                extra = UNALIGNED_K_NARROW.get(atom[:4], []) if tag == "1x7" else []
+                for t in tiles + [x for x in extra if x not in tiles]:
                     c = C(atom, 1, CL, t, s, 1, 1, fr, 16 // eb(dtype), xcd, 2, 0)
                     if valid(c, dtype):
                         CATALOG[dtype].extend(with_bpu(c))
