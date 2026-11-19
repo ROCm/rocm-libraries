@@ -15,12 +15,11 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import sys
 import types
 from pathlib import Path
 
 import pytest
-from rocke.tests.subprocess_launcher import rocke_subprocess_env
+from rocke.tests.subprocess_launcher import rocke_python_command, rocke_subprocess_env
 
 from dispatch.attention_bwd import dense_tuning, gfx950_tuning, routing, tuned_tables
 from dispatch.attention_bwd import tuning_common as tc
@@ -145,7 +144,7 @@ def test_a_bad_shipped_entry_fails_the_package_import(tmp_path):
     )
     code = "import dispatch; print(dispatch.__file__); import dispatch.attention_bwd"
     bad = subprocess.run(
-        [sys.executable, "-c", code],
+        rocke_python_command("-c", code),
         env=env,
         cwd=tmp_path,
         capture_output=True,
@@ -158,7 +157,7 @@ def test_a_bad_shipped_entry_fails_the_package_import(tmp_path):
     # the unmodified copy imports
     path.write_text(src, encoding="utf-8")
     good = subprocess.run(
-        [sys.executable, "-c", code],
+        rocke_python_command("-c", code),
         env=env,
         cwd=tmp_path,
         capture_output=True,
