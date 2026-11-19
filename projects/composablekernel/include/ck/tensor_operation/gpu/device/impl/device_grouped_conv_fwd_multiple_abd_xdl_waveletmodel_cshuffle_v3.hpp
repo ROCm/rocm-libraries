@@ -408,11 +408,21 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
                                 ctc::NDHWGC,
                                 ALay>>;
 
-        const auto in_gemmmraw_gemmkraw_desc =
-            conv_to_gemm_transformer.template MakeADescriptor_M_K<Layout>();
-
-        const auto in_gemmm_gemmk_desc =
-            matrix_padder.PadADescriptor_M_K(in_gemmmraw_gemmkraw_desc);
+        const auto in_gemmm_gemmk_desc = [&]() {
+            if constexpr(ConvToGemmFwdTransformer::UseCustomTransformA)
+            {
+                // The custom transform pads to MPerBlock x KPerBlock and reports the padding
+                // rows / columns as invalid itself, so the GEMM padder must not be applied.
+                static_assert(GemmSpec == GemmSpecialization::MNKPadding);
+                return conv_to_gemm_transformer.MakeADescriptorWithCustomTransform_M_K(MPerBlock,
+                                                                                       KPerBlock);
+            }
+            else
+            {
+                return matrix_padder.PadADescriptor_M_K(
+                    conv_to_gemm_transformer.template MakeADescriptor_M_K<Layout>());
+            }
+        }();
 
         const auto M = in_gemmm_gemmk_desc.GetLength(I0);
         const auto K = in_gemmm_gemmk_desc.GetLength(I1);

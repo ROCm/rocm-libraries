@@ -518,7 +518,10 @@ auto MakeGenericDescriptor(const ForwardConvCase<NDim>& cfg, const std::array<in
 }
 
 template <index_t NDim>
-auto MakeCustomTransform(const ForwardConvCase<NDim>& cfg, const std::array<index_t, NDim>& out)
+auto MakeCustomTransform(const ForwardConvCase<NDim>& cfg,
+                         const std::array<index_t, NDim>& out,
+                         index_t m_padded,
+                         index_t k_padded)
 {
     return make_conv_fwd_data_in_transform<NDim>(cfg.N,
                                                  cfg.C,
@@ -527,7 +530,9 @@ auto MakeCustomTransform(const ForwardConvCase<NDim>& cfg, const std::array<inde
                                                  ToMultiIndex<NDim>(out),
                                                  ToMultiIndex<NDim>(cfg.Stride),
                                                  ToMultiIndex<NDim>(cfg.Dilation),
-                                                 ToMultiIndex<NDim>(cfg.PadLeft));
+                                                 ToMultiIndex<NDim>(cfg.PadLeft),
+                                                 m_padded,
+                                                 k_padded);
 }
 
 template <index_t NDim>
@@ -557,45 +562,60 @@ void CheckForwardConvInputTransformMatchesGeneric(const ForwardConvCase<NDim>& c
             return make_naive_tensor_descriptor_packed(
                 make_tuple(cfg.N, cfg.In[0], cfg.In[1], cfg.In[2], cfg.C));
     }();
-    const auto custom_desc = transform_tensor_descriptor(
-        input_desc,
-        make_tuple(MakeCustomTransform<NDim>(cfg, out)),
-        make_tuple(typename arithmetic_sequence_gen<0, NDim + 2, 1>::type{}),
-        make_tuple(Sequence<0, 1>{}));
-
-    // Upper indices beyond M and K are also checked: GEMM padding produces them and the custom
-    // transform must behave exactly like the generic merge/embed/pad chain there.
+    // The transform is built with the padded GEMM lengths (as the GEMM padder would produce them)
+    // and must report the padding rows / columns (m >= M or k >= K) as invalid itself, with the
+    // same offsets and validity as the generic pad / embed / merge chain inside the real M x K.
     const index_t M     = cfg.N * out_spatial;
     const index_t K     = filter_size * cfg.C;
     const index_t M_ext = M + out_spatial + 1;
     const index_t K_ext = K + cfg.C + 1;
 
-    int64_t mismatches  = 0;
-    index_t first_bad_m = -1;
-    index_t first_bad_k = -1;
-    for(index_t m = 0; m < M_ext; ++m)
-    {
-        for(index_t k = 0; k < K_ext; ++k)
-        {
-            const auto index              = make_tuple(m, k);
-            const auto custom_coordinate  = make_tensor_coordinate(custom_desc, index);
-            const auto generic_coordinate = make_tensor_coordinate(generic_desc, index);
+    const auto make_custom_desc = [&](index_t m_padded, index_t k_padded) {
+        return transform_tensor_descriptor(
+            input_desc,
+            make_tuple(MakeCustomTransform<NDim>(cfg, out, m_padded, k_padded)),
+            make_tuple(typename arithmetic_sequence_gen<0, NDim + 2, 1>::type{}),
+            make_tuple(Sequence<0, 1>{}));
+    };
+    const auto custom_desc = make_custom_desc(M_ext, K_ext);
+    EXPECT_EQ(custom_desc.GetLength(Number<0>{}), M_ext);
+    EXPECT_EQ(custom_desc.GetLength(Number<1>{}), K_ext);
 
-            if(custom_coordinate.GetOffset() != generic_coordinate.GetOffset() ||
-               coordinate_has_valid_offset_assuming_visible_index_is_valid(custom_desc,
-                                                                           custom_coordinate) !=
-                   coordinate_has_valid_offset_assuming_visible_index_is_valid(generic_desc,
-                                                                               generic_coordinate))
+    const auto check_against_generic = [&](const auto& desc, const char* what) {
+        int64_t mismatches  = 0;
+        index_t first_bad_m = -1;
+        index_t first_bad_k = -1;
+        for(index_t m = 0; m < desc.GetLength(Number<0>{}); ++m)
+        {
+            for(index_t k = 0; k < desc.GetLength(Number<1>{}); ++k)
             {
-                if(mismatches++ == 0)
+                const auto index              = make_tuple(m, k);
+                const auto custom_coordinate  = make_tensor_coordinate(desc, index);
+                const auto generic_coordinate = make_tensor_coordinate(generic_desc, index);
+                const bool custom_valid =
+                    coordinate_has_valid_offset_assuming_visible_index_is_valid(desc,
+                                                                                custom_coordinate);
+                const bool generic_valid =
+                    coordinate_has_valid_offset_assuming_visible_index_is_valid(generic_desc,
+                                                                                generic_coordinate);
+                const bool expect = m < M && k < K && generic_valid;
+                const bool offset_ok =
+                    !expect || custom_coordinate.GetOffset() == generic_coordinate.GetOffset();
+                if(custom_valid != expect || !offset_ok)
                 {
-                    first_bad_m = m;
-                    first_bad_k = k;
+                    if(mismatches++ == 0)
+                    {
+                        first_bad_m = m;
+                        first_bad_k = k;
+                    }
                 }
             }
         }
-    }
-    EXPECT_EQ(mismatches, 0) << "first mismatch at m=" << first_bad_m << " k=" << first_bad_k;
+        EXPECT_EQ(mismatches, 0) << what << ": first mismatch at m=" << first_bad_m
+                                 << " k=" << first_bad_k;
+    };
+    check_against_generic(custom_desc, "padded GEMM");
+    check_against_generic(make_custom_desc(M, K), "no GEMM padding");
 
     // Moving a coordinate (UpdateLowerIndex path used by the kernels) must agree with building
     // the coordinate from scratch. Steps go forward and backward, change one or both dimensions.
@@ -653,7 +673,8 @@ void CheckForwardConvInputTransformLowerIndices(const ForwardConvCase<NDim>& cfg
     const int64_t K = filter_size * cfg.C;
     ASSERT_LT(M, int64_t(1) << 31);
 
-    const auto transform = MakeCustomTransform<NDim>(cfg, out);
+    const auto transform =
+        MakeCustomTransform<NDim>(cfg, out, static_cast<index_t>(M), static_cast<index_t>(K));
 
     // Upper-index boundaries around every divisor, plus values up to the largest dividend
     // (2^31 - 1) magic division supports; random samples cover the rest.
@@ -725,15 +746,22 @@ void CheckForwardConvInputTransformLowerIndices(const ForwardConvCase<NDim>& cfg
                 continue;
             }
 
-            MultiIndex<NDim + 2> low;
-            transform.CalculateLowerIndex(low, up);
+            // rows / columns beyond the real M x K are GEMM padding: always invalid, and their
+            // lower index is meaningless
+            const bool inside = m < M && k < K;
+            if(inside)
+            {
+                MultiIndex<NDim + 2> low;
+                transform.CalculateLowerIndex(low, up);
 
-            mismatches += low[Number<0>{}] != n;
-            mismatches += low[Number<NDim + 1>{}] != c;
-            static_for<0, NDim, 1>{}([&](auto d) {
-                mismatches += static_cast<int64_t>(low[Number<d + 1>{}]) != in_idx[d];
-            });
-            mismatches += transform.IsValidUpperIndexMappedToValidLowerIndex(up) != valid;
+                mismatches += low[Number<0>{}] != n;
+                mismatches += low[Number<NDim + 1>{}] != c;
+                static_for<0, NDim, 1>{}([&](auto d) {
+                    mismatches += static_cast<int64_t>(low[Number<d + 1>{}]) != in_idx[d];
+                });
+            }
+            mismatches +=
+                transform.IsValidUpperIndexMappedToValidLowerIndex(up) != (inside && valid);
         }
     }
     EXPECT_EQ(mismatches, 0);
@@ -803,18 +831,18 @@ TEST(TensorDescriptorFunctorsIntegration, ForwardConvInputTransformMatchesGeneri
 
     // Extreme configurations, checked against an int64 reference (offsets would overflow here).
     const ForwardConvCase<1> extreme1d[] = {
-        // Wo = INT32_MAX: largest magic-division divisor on the M side
-        {1, 1, {INT32_MAX}, {1}, {1}, {1}, {0}, {0}},
+        // Wo = 2^29: largest first-dimension extent supported by the padding poison
+        {1, 1, {1 << 29}, {1}, {1}, {1}, {0}, {0}},
         // Wo = 65537, C = 65537
         {1, 1, {65537}, {1}, {1}, {1}, {0}, {0}},
         {2, 65537, {3}, {1}, {1}, {1}, {0}, {0}},
         // K = Y * C just below 2^31
         {1, 715827882, {3}, {3}, {1}, {1}, {0}, {0}},
         // very negative and very large lower indices; only wi == 0 is valid
-        {1, 1, {4}, {1}, {1 << 28}, {1}, {1 << 30}, {0}},
+        {1, 1, {4}, {1}, {1 << 28}, {1}, {1 << 29}, {0}},
         {1, 1, {4}, {1}, {1 << 28}, {1}, {0}, {1 << 30}},
-        {1, 1, {4}, {1}, {1 << 28}, {1}, {INT32_MAX}, {0}},
-        {1, 1, {INT32_MAX}, {2}, {INT32_MAX - 1}, {1}, {0}, {0}},
+        {1, 1, {4}, {1}, {1 << 28}, {1}, {(1 << 29) - 5}, {0}},
+        {1, 1, {1 << 29}, {2}, {(1 << 29) - 1}, {1}, {0}, {0}},
     };
     const ForwardConvCase<2> extreme2d[] = {
         // M just below 2^31 and a large channel count
@@ -828,22 +856,22 @@ TEST(TensorDescriptorFunctorsIntegration, ForwardConvInputTransformMatchesGeneri
         {1, 1, {1, 65537}, {1, 1}, {1, 1}, {1, 1}, {0, 0}, {0, 0}},
         {2, 65537, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {0, 0}, {0, 0}},
         // very negative lower indices; only hi == 0 / wi == 0 is valid
-        {1, 1, {4, 4}, {1, 1}, {1 << 28, 1 << 28}, {1, 1}, {1 << 30, 1 << 30}, {0, 0}},
+        {1, 1, {4, 4}, {1, 1}, {1 << 28, 1 << 28}, {1, 1}, {1 << 29, 1 << 30}, {0, 0}},
         // very large positive lower indices; only hi == 0 / wi == 0 is valid
         {1, 1, {4, 4}, {1, 1}, {1 << 28, 1 << 28}, {1, 1}, {0, 0}, {1 << 30, 1 << 30}},
         {1, 1, {4, 4}, {1, 1}, {1 << 28, 1 << 28}, {1, 1}, {0, 0}, {7 << 28, 7 << 28}},
-        // lower indices down to -(2^31 - 1)
-        {1, 1, {4, 4}, {1, 1}, {1 << 28, 1 << 28}, {1, 1}, {INT32_MAX, INT32_MAX}, {0, 0}},
-        // extents at the 32-bit limit: Hi = Wi = INT32_MAX, filter taps reaching Hi - 1 and Hi
+        // second dimension down to -(2^31 - 1)
+        {1, 1, {4, 4}, {1, 1}, {1 << 28, 1 << 28}, {1, 1}, {1 << 29, INT32_MAX}, {0, 0}},
+        // large extents: Hi = 2^29, Wi = INT32_MAX, filter taps reaching Hi - 1 and Hi
         {1,
          1,
-         {INT32_MAX, INT32_MAX},
+         {1 << 29, INT32_MAX},
          {2, 2},
-         {INT32_MAX - 1, INT32_MAX - 1},
+         {(1 << 29) - 1, INT32_MAX - 1},
          {1, 1},
          {0, 0},
          {0, 0}},
-        {1, 1, {INT32_MAX, INT32_MAX}, {2, 2}, {INT32_MAX, INT32_MAX}, {1, 1}, {0, 0}, {1, 1}},
+        {1, 1, {1 << 29, INT32_MAX}, {2, 2}, {1 << 29, INT32_MAX}, {1, 1}, {0, 0}, {1, 1}},
         // Wo = INT32_MAX (largest magic-division divisor) with M = INT32_MAX
         {1, 1, {1, INT32_MAX}, {1, 1}, {1, 1}, {1, 1}, {0, 0}, {0, 0}},
         // K = Y * X * C just below 2^31, with X = 1 (divisor 1) and a huge C divisor
@@ -866,7 +894,7 @@ TEST(TensorDescriptorFunctorsIntegration, ForwardConvInputTransformMatchesGeneri
          {1, 1, 1},
          {1 << 28, 1 << 28, 1 << 28},
          {1, 1, 1},
-         {1 << 30, 1 << 30, 1 << 30},
+         {1 << 29, 1 << 30, 1 << 30},
          {0, 0, 0}},
         {1,
          1,
