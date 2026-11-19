@@ -210,15 +210,15 @@ void host_csrilu0(J                         M,
                                               ? (col_j + base)
                                               : std::min(*singular_pivot, int64_t(col_j + base));
                     }
+                }
 
-                    // Check for numeric zero pivot
-                    if(diag_val == static_cast<T>(0))
-                    {
-                        *numeric_pivot = (*numeric_pivot == -1)
-                                             ? (col_j + base)
-                                             : std::min(*numeric_pivot, int64_t(col_j + base));
-                        continue;
-                    }
+                // A pivot that is still zero after the optional boost is a numerical zero.
+                if(diag_val == static_cast<T>(0))
+                {
+                    *numeric_pivot = (*numeric_pivot == -1)
+                                         ? (col_j + base)
+                                         : std::min(*numeric_pivot, int64_t(col_j + base));
+                    continue;
                 }
 
                 {
@@ -277,7 +277,6 @@ void host_csrilu0(J                         M,
 
                 const bool is_singular_diag
                     = is_diag && (std::abs(csr_val[diag_pos]) <= singular_tol[0]);
-                const bool is_zero_diag = is_diag && (csr_val[diag_pos] == static_cast<T>(0));
 
                 // check for singular diagonal
                 if(is_singular_diag)
@@ -286,14 +285,14 @@ void host_csrilu0(J                         M,
                                           ? (ai + base)
                                           : std::min(*singular_pivot, int64_t(ai + base));
                 }
+            }
 
-                // check for zero diagonal
-                if(is_zero_diag)
-                {
-                    *numeric_pivot = (*numeric_pivot == -1)
-                                         ? (ai + base)
-                                         : std::min(*numeric_pivot, int64_t(ai + base));
-                }
+            // A pivot that is still zero after the optional boost is a numerical zero.
+            if(csr_val[diag_pos] == static_cast<T>(0))
+            {
+                *numeric_pivot = (*numeric_pivot == -1)
+                                     ? (ai + base)
+                                     : std::min(*numeric_pivot, int64_t(ai + base));
             }
 
             // clear nnz entries
@@ -472,14 +471,12 @@ void host_bsrilu0(rocsparse_direction       dir,
                                                            : diag;
                     bsr_val[BSR_IND(j, bi, bi, dir)] = diag;
                 }
-                else
+
+                // A pivot that is still zero after the optional boost is a numerical zero.
+                if(diag == static_cast<T>(0))
                 {
-                    // Check for numeric pivot
-                    if(diag == static_cast<T>(0))
-                    {
-                        *numeric_pivot = std::min(*numeric_pivot, int64_t(bsr_col_ind[j]));
-                        continue;
-                    }
+                    *numeric_pivot = std::min(*numeric_pivot, int64_t(bsr_col_ind[j]));
+                    continue;
                 }
 
                 // Process all rows within the BSR block after bi-th row
