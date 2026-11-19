@@ -1076,13 +1076,19 @@ TEST(TestMiopenConvApplicabilityChecks, AcceptsEmptyTensorsWithSaneDims)
     }
 }
 
-// A zero dim that is not the leading one is declined when an earlier dim has an extent above 1,
-// though not for being zero: the canonical strides of such a tensor are 0 for every dim before the
-// zero, so those of them with an extent above 1 are broadcast axes. The tensor is not packed and
-// its stride order matches neither layout, so every operation declines it by the layout rule,
-// whichever of the three tensors it is and in either layout. A zero in the leading dim is accepted
-// (above), and so is a zero behind dims that all have extent 1 (next test). This pins the current
-// behaviour; it does not say that an empty channel or spatial extent has to be declined.
+// A zero dim is not declined for being zero but for what it does to the canonical strides:
+// generateStrides gives stride 0 to every dim that is outer to the zero dim in the layout's memory
+// order. For channels-first those are the dims before the zero dim; for channels-last they are the
+// batch dim, plus the spatial dims when the channel dim is zero, or the earlier spatial dims when a
+// spatial dim is zero. A dim of extent above 1 at stride 0 is a broadcast axis: the tensor is not
+// packed and its stride order matches neither layout, so every operation declines it by the layout
+// rule, whichever of the three tensors it is and in either layout. Without such a dim the tensor is
+// accepted: a zero in the leading dim (above) and a zero whose outer dims allow it (next test).
+// The first rows have a batch of extent above 1, which is always a broadcast axis. The explicit
+// rows have a batch of 1: by hand, channels-last {1, 0, 8, 8} has strides {0, 1, 0, 0}, so its
+// spatial dims of extent 8 are broadcast axes, and channels-first {1, 4, 0, 8} has {0, 0, 8, 1},
+// so its channel dim of extent 4 is. This pins the current behaviour; it does not say that an
+// empty channel or spatial extent has to be declined.
 TEST(TestMiopenConvApplicabilityChecks, DeclinesEmptyTensorsWhoseZeroExtentIsNotLeading)
 {
     for(const bool channelsLastLayout : {false, true})
@@ -1105,14 +1111,41 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesEmptyTensorsWhoseZeroExtentIsNot
             }
         }
     }
+
+    struct ZeroStrideAxisCase
+    {
+        bool channelsLastLayout;
+        std::vector<int64_t> dims;
+        std::vector<int64_t> strides;
+    };
+    const std::vector<ZeroStrideAxisCase> unitBatchCases
+        = {{true, {1, 0, 8, 8}, {0, 1, 0, 0}}, {false, {1, 4, 0, 8}, {0, 0, 8, 1}}};
+
+    for(const auto& unitBatch : unitBatchCases)
+    {
+        const TensorSpec empty = withStrides(unitBatch.dims, unitBatch.strides);
+        ASSERT_EQ(empty.strides, packedStrides(empty.dims, unitBatch.channelsLastLayout));
+        ASSERT_FALSE(isTensorPacked(empty.dims, empty.strides));
+
+        const ConvCase base = uniformCase(convShapes(), unitBatch.channelsLastLayout);
+
+        for(const Role role : ROLES)
+        {
+            SCOPED_TRACE((unitBatch.channelsLastLayout ? "channels-last " : "channels-first ")
+                         + vecToString(unitBatch.dims) + ", tensor "
+                         + std::to_string(static_cast<int>(role)));
+            expectDeclined(withTensorAt(base, role, empty), LAYOUT_REASON);
+        }
+    }
 }
 
-// A zero dim behind dims that all have extent 1 is accepted: the zero strides it leaves sit on
-// extent-1 dims, so there is no broadcast axis, and the tensor is packed (element count 0 equals
-// the span -1 plus 1) with the canonical strides of its layout. By hand, {1, 0, 8, 8} channels-first
-// has strides {0, 64, 8, 1} and {1, 4, 0, 8} channels-last has {0, 1, 32, 4}. Every operation
-// accepts such a tensor in each of the three roles. This pins the current behaviour.
-TEST(TestMiopenConvApplicabilityChecks, AcceptsEmptyTensorsWhoseZeroExtentFollowsOnlyUnitDims)
+// A zero dim whose outer dims in the layout's memory order all have extent 1 is accepted: the zero
+// strides it leaves sit on extent-1 dims, so there is no broadcast axis, and the tensor is packed
+// (element count 0 equals the span -1 plus 1) with the canonical strides of its layout. By hand,
+// {1, 0, 8, 8} channels-first has strides {0, 64, 8, 1} and {1, 4, 0, 8} channels-last has
+// {0, 1, 32, 4}. Every operation accepts such a tensor in each of the three roles. This pins the
+// current behaviour.
+TEST(TestMiopenConvApplicabilityChecks, AcceptsEmptyTensorsWithoutAZeroStrideAxis)
 {
     struct UnitBatchCase
     {

@@ -447,13 +447,17 @@ TensorInfo readTensor(const char* operation, const char* name, const TensorAttri
     // in stride order; dims whose zero-as-one product does not fit would overflow there (signed
     // overflow is undefined behaviour), even when a zero dim makes the element count zero. No real
     // tensor has that many elements, so decline before computing anything. A zero dim does not
-    // decline here, but that is not acceptance of every empty tensor: the canonical strides of a
-    // zero dim are 0 for every dim before it, so a zero that is not the leading dim leaves a zero
-    // stride on every earlier dim. It declines only when one of those earlier dims has an extent
-    // above 1: that dim is then a broadcast axis, so the tensor is not packed (isTensorPacked) and
-    // its stride order matches neither layout (classifyLayout), and the layout check below
-    // declines it. When every earlier dim has extent 1 the tensor is packed with canonical
-    // strides, as is an empty leading dim, and is accepted.
+    // decline here, but that is not acceptance of every empty tensor: generateStrides gives stride
+    // 0 to every dim that is outer to a zero dim in the layout's memory order. For channels-first
+    // those are the dims before the zero dim. For channels-last they are the batch dim, plus the
+    // spatial dims when the channel dim is zero, or the earlier spatial dims when a spatial dim
+    // is zero (the channel dim keeps its stride). A dim of extent above 1 at stride 0 is a
+    // broadcast axis: the tensor is not packed (isTensorPacked) and its stride order matches
+    // neither layout (classifyLayout), so the layout check below declines it. Without such a dim
+    // the tensor is packed with canonical strides and is accepted, as is an empty leading dim.
+    // By hand: channels-first {1, 0, 8, 8} has strides {0, 64, 8, 1} and is accepted;
+    // channels-last {1, 0, 8, 8} has {0, 1, 0, 0} and is declined; channels-last {1, 4, 0, 8} has
+    // {0, 1, 32, 4} and is accepted; channels-first {1, 4, 0, 8} has {0, 0, 8, 1} and is declined.
     if(saturatingExtent(operation, name, attr) == std::numeric_limits<int64_t>::max())
     {
         decline(prefix + " has dims whose element count reaches the 64-bit limit");
