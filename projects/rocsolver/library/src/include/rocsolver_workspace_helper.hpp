@@ -127,9 +127,9 @@ private:
 public:
     /* Constructor */
     rocsolver_workspace_helper()
-        : has_scalars_r(0)
+        : optim_mem(0)
+        , has_scalars_r(0)
         , has_scalars_c(0)
-        , optim_mem(0)
         , num_excl(0)
         , size_excl(0)
         , size_shared(0)
