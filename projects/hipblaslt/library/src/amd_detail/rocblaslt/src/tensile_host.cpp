@@ -4507,8 +4507,8 @@ namespace
             void* fresh = nullptr;
             if(hipMalloc(&fresh, refuse ? SIZE_MAX : bytes) != hipSuccess)
             {
-                // The matmul goes on untuned and succeeds, so this error must
-                // not reach the caller's next hipGetLastError.
+                // The matmul goes on without this search and succeeds, so this
+                // error must not reach the caller's next hipGetLastError.
                 static_cast<void>(hipGetLastError());
                 return deny(Denial::Unavailable);
             }

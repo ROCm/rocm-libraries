@@ -2199,18 +2199,20 @@ namespace
         EXPECT_EQ(c.fellback, 1u);
     }
 
-    // A device that refuses tuning its scratch leaves the call on default
-    // selection, which succeeds, so the refusal must not stay in HIP's last
-    // error: the caller's next hipGetLastError would report an out-of-memory it
-    // never had, and HIPBLASLT_CHECK_NUMERICS would fail the matmul. Every call
-    // is checked, because resolving a kernel for its first launch clears the
-    // last error on its own.
+    // A device that refuses tuning's scratch allocation leaves the call on
+    // default selection, which succeeds, so the refusal must not stay in HIP's
+    // last error: the caller's next hipGetLastError would report an
+    // out-of-memory it never had, and HIPBLASLT_CHECK_NUMERICS would fail the
+    // matmul. Every call is checked, because resolving a kernel for its first
+    // launch clears the last error on its own.
     TEST_F(TuningTune_pre_checkin, RefusedScratchLeavesNoHipError)
     {
-        for(const char* checkNumerics : {"0", "1"})
+        // 2 runs the same scan as 1 but logs only a NaN, and zero inputs have none.
+        for(const char* checkNumerics : {"0", "2"})
         {
             SCOPED_TRACE(std::string("HIPBLASLT_CHECK_NUMERICS=") + checkNumerics);
             setenv("HIPBLASLT_CHECK_NUMERICS", checkNumerics, 1);
+            std::remove(m_path.c_str());
             enterMode("tune", m_path);
             hipblaslt_tuning_inject_failure_for_test(6);
             static_cast<void>(hipGetLastError());
@@ -2228,6 +2230,12 @@ namespace
             EXPECT_EQ(c.skipped, 0u);
             EXPECT_EQ(c.tuned, 0u);
             EXPECT_EQ(valueRowCount(m_path), 0u);
+
+            // The refusal is what kept the shape untuned, and it was not latched.
+            hipblaslt_tuning_inject_failure_for_test(0);
+            ASSERT_TRUE(runGemm(256, 256, 256));
+            EXPECT_EQ(counters().attempts, 1u);
+            EXPECT_EQ(valueRowCount(m_path), 1u);
         }
     }
 
