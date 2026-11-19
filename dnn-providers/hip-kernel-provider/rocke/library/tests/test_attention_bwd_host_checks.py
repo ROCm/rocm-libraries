@@ -239,6 +239,15 @@ def test_thd_offsets_end_within_every_tensor_of_the_side():
     batched = _meta((req.b, req.h_q, 227, 1), (0, 227, 1, 1), "fp32")
     with pytest.raises(ValueError, match="past lse's 227 tokens"):
         check_attn_bwd_lengths(req, offsets_q=offs_q, tensors=dict(good, lse=batched))
+    # a packed lse (lse_ragged=False under THD) is read per Q token as well
+    packed = _req(layout="thd", lse_ragged=False, lse_dims=(256, 8, 1))
+    full = _meta((228, req.h_q, 1), (req.h_q, 1, 1), "fp32")
+    check_attn_bwd_lengths(packed, offsets_q=offs_q, tensors=dict(good, lse=full))
+    short_packed = _meta((227, req.h_q, 1), (req.h_q, 1, 1), "fp32")
+    with pytest.raises(ValueError, match="past lse's 227 tokens"):
+        check_attn_bwd_lengths(
+            packed, offsets_q=offs_q, tensors=dict(good, lse=short_packed)
+        )
     # a side whose table is not given is not checked
     check_attn_bwd_lengths(req, offsets_q=offs_q, tensors=short("v", 1))
     with _code("MISSING_TENSOR"):
