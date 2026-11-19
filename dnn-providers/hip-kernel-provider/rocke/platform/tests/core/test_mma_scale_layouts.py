@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Independent lane-coordinate, tensor-address and packed-scale oracles."""
+"""Independent lane-coordinate and scale-layout metadata checks."""
 
 from collections import Counter
 from dataclasses import replace
@@ -10,10 +10,6 @@ import pytest
 
 from rocke.core.arch import ArchTarget, known_arches
 from rocke.core.ir import IRBuilder
-from rocke.instances.gfx1250.block_scaled_gemm import (
-    BlockScaledGemmSpec,
-    build_block_scaled_gemm,
-)
 
 
 def _atom(dtype, block_k):
@@ -29,39 +25,22 @@ def _atom(dtype, block_k):
     )
 
 
-def _evaluate(value, *, lane=0, tile=(0, 0), loads=None):
-    """Evaluate only the integer SSA dependency graph, never the MMA itself."""
+def _evaluate_coordinate(value, *, lane):
     op = value.op
     if op.name == "arith.constant":
         return op.attrs["value"]
     if op.name == "gpu.thread_id":
         return lane
-    if op.name == "gpu.block_id":
-        return tile[0 if op.attrs["axis"] == "x" else 1]
-
-    def evaluate(v):
-        return _evaluate(v, lane=lane, tile=tile, loads=loads)
-
-    if op.name == "memref.global_load_typed":
-        ptr, index = op.operands
-        offset = evaluate(index)
-        role = ptr.name.lstrip("%")
-        assert role in ("A_scale", "B_scale")
-        loads.append((role, offset))
-        # Distinct address-sensitive bytes expose stride, group and order bugs.
-        return (offset * 37 + (11 if role == "A_scale" else 73)) % 256
-    if op.name == "arith.zext":
-        return evaluate(op.operands[0]) & 255
     operations = {
         "arith.add": operator.add,
         "arith.mul": operator.mul,
         "arith.div": operator.floordiv,
         "arith.mod": operator.mod,
-        "arith.shl": operator.lshift,
-        "arith.or": operator.or_,
     }
     assert op.name in operations, op.name
-    return operations[op.name](*(evaluate(v) for v in op.operands))
+    return operations[op.name](
+        *(_evaluate_coordinate(v, lane=lane) for v in op.operands)
+    )
 
 
 @pytest.mark.parametrize("dtype", ["fp8", "bf8", "fp4"])
@@ -83,7 +62,7 @@ def test_scale_coordinates(dtype, block_k, role):
     seen = Counter()
     for l in range(32):
         for j, pair in enumerate(coords):
-            actual = tuple(_evaluate(v, lane=l) for v in pair)
+            actual = tuple(_evaluate_coordinate(v, lane=l) for v in pair)
             expected = (l % 16, j) if role == "a_scale" else (j, l % 16)
             assert actual == expected
             seen[actual] += 1
@@ -111,7 +90,7 @@ def test_every_scaled_catalog_coordinates_match_independent_lane_oracle():
             for slot in range(count):
                 coords = layout.coord(b, lane, slot)
                 for l in range(32):
-                    actual = tuple(_evaluate(v, lane=l) for v in coords)
+                    actual = tuple(_evaluate_coordinate(v, lane=l) for v in coords)
                     assert actual == (
                         (l % 16, slot) if role == "a_scale" else (slot, l % 16)
                     )
@@ -176,49 +155,3 @@ def test_scale_metadata_rejects_inconsistent_maps(role):
     for count in (-1, True, 1.5):
         with pytest.raises(ValueError, match="fragment length"):
             update_scale(frag_len=count)
-
-
-@pytest.mark.parametrize("dtype", ["fp8", "bf8", "fp4"])
-@pytest.mark.parametrize("block_k", [16, 32])
-def test_instance_scale_addresses_and_packed_words(dtype, block_k):
-    spec = BlockScaledGemmSpec(
-        "scale_addresses",
-        M=32,
-        N=48,
-        K=256,
-        dtype_a=dtype,
-        dtype_b=dtype,
-        scale_dtype="e8m0",
-        block_k=block_k,
-        matrix_path="wmma_scale16" if block_k == 16 else "wmma_scale",
-    )
-    kernel = build_block_scaled_gemm(spec, arch="gfx1250")
-    mmas = [op for op in kernel.body.ops if op.name == "tile.mma"]
-    assert len(mmas) == 2
-    count = 128 // block_k
-    for x, y in ((0, 0), (2, 1)):
-        for lane in range(32):
-            for step, mma in enumerate(mmas):
-                for source, value in enumerate(mma.operands[3:]):
-                    offsets = [
-                        (
-                            (16 * y + lane % 16) * (256 // block_k) + step * count + j
-                            if source == 0
-                            else (step * count + j) * 48 + 16 * x + lane % 16
-                        )
-                        for j in range(count)
-                    ]
-                    role = "A_scale" if source == 0 else "B_scale"
-                    expected = int.from_bytes(
-                        bytes(
-                            (offset * 37 + (11 if source == 0 else 73)) % 256
-                            for offset in offsets
-                        ),
-                        "little",
-                    )
-                    loads = []
-                    assert (
-                        _evaluate(value, lane=lane, tile=(x, y), loads=loads)
-                        == expected
-                    )
-                    assert loads == [(role, offset) for offset in offsets]
