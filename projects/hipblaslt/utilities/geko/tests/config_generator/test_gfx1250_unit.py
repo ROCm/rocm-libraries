@@ -514,6 +514,71 @@ def test_ga_profile_and_postprocessor_offer_the_published_mxfp4_cluster(
     assert [2, 8] in unswapped and [4, 4] not in unswapped
 
 
+def _nvfp4_cfg(streamk: bool, library_type: str = "OOB") -> dict:
+    gt = GemmType.from_tensile("T", "N", "F4", "F4", "S")
+    gp = GemmConfig(gt, [[16, 16, 1, 16]], mx=True, mx_block=16, mx_scale_type="F8")
+    return {"ARCH": "gfx1250_96cu", "StreamK": streamk, "LIBRARY_TYPE": library_type, "GemmProblem": gp}
+
+
+_MX_CFGS = {
+    "mxfp4": lambda sk, lib: _cfg(arch="gfx1250_96cu", dt="F4", streamk=sk, library_type=lib, mx=True),
+    "nvfp4": _nvfp4_cfg,
+    "mxfp8": lambda sk, lib: _cfg(arch="gfx1250_96cu", dt="F8", streamk=sk, library_type=lib, mx=True),
+}
+
+
+def _execution_policy(groups: list) -> list:
+    found = [g for g in groups if g and "TileProcessingStrategy" in g[0]]
+    assert len(found) == 1
+    return found[0]
+
+
+@pytest.mark.parametrize("library_type", ["OOB", "Equality"])
+@pytest.mark.parametrize("kind", sorted(_MX_CFGS))
+def test_ga_profile_searches_shadow_init_on_non_persistent_mx(kind: str, library_type: str) -> None:
+    """Without StreamK, MX problems search ForceDisableShadowInit [False, True] as a flat parameter."""
+    cfg = _MX_CFGS[kind](False, library_type)
+    params, groups = g1250_opt.GFX1250GAParams(cfg).generate_for_size(_SIZE_4096X3072)
+    fp = params["ForceDisableShadowInit"]
+    assert fp.values == [False, True] and fp.active
+    assert not any("TileProcessingStrategy" in g[0] for g in groups if g)
+    new_fork, _ = g1250_pp.GFX1250GAPostProcessor(cfg).apply(params, [_mi_entry(_MI_32X16)], _SIZE_4096X3072)
+    assert new_fork["ForceDisableShadowInit"].values == [False, True]
+
+
+@pytest.mark.parametrize("library_type", ["OOB", "Equality"])
+@pytest.mark.parametrize("kind", sorted(_MX_CFGS))
+def test_ga_profile_disables_shadow_init_on_persistent_mx(kind: str, library_type: str) -> None:
+    """With StreamK, persistent MX entries pin ForceDisableShadowInit True; a None entry searches both.
+
+    With shadow init on, some persistent MX kernels fail to compile in KernelWriter
+    and keep the unpaired LDSSegmentInterleave layout.
+    """
+    cfg = _MX_CFGS[kind](True, library_type)
+    params, groups = g1250_opt.GFX1250GAParams(cfg).generate_for_size(_SIZE_4096X3072)
+    assert "ForceDisableShadowInit" not in params
+    policy = _execution_policy(groups)
+    assert all(len(fp.values) == 1 for e in policy for fp in e.values())
+    persistent = [e for e in policy if e["TileProcessingStrategy"].values != ["None"]]
+    plain = [e for e in policy if e["TileProcessingStrategy"].values == ["None"]]
+    assert persistent and all(e["ForceDisableShadowInit"].values == [True] for e in persistent)
+    if library_type == "OOB":
+        assert not plain
+    else:
+        assert sorted(e["ForceDisableShadowInit"].values[0] for e in plain) == [False, True]
+        assert all(len(e) == 2 for e in plain)
+
+
+@pytest.mark.parametrize("streamk", [False, True])
+@pytest.mark.parametrize("dt", ["B", "F8", "H"])
+def test_ga_profile_leaves_shadow_init_default_for_non_mx(dt: str, streamk: bool) -> None:
+    """Non-MX problems emit no ForceDisableShadowInit, so Tensile's default applies."""
+    cfg = _cfg(arch="gfx1250_96cu", dt=dt, streamk=streamk, library_type="Equality")
+    params, groups = g1250_opt.GFX1250GAParams(cfg).generate_for_size(_SIZE_4096X3072)
+    assert "ForceDisableShadowInit" not in params
+    assert not any("ForceDisableShadowInit" in e for g in groups for e in g)
+
+
 # ---------------------------------------------------------------------------
 # _GFX1250SourceSwapSplit
 # ---------------------------------------------------------------------------

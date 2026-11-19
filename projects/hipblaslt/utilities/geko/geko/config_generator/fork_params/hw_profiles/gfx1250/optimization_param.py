@@ -23,7 +23,7 @@ Key differences vs gfx950 (MFMA) profiles:
     LDSSegmentBRotate (B-side LDS segment conflict elimination).
 """
 
-from typing import Optional
+from typing import List, Optional
 
 from geko.config_generator.constants import HARDWARE_MAP, dataSize, mx_format
 from geko.config_generator.fork_params.hw_profiles.gfx1250.cluster_dim import (
@@ -457,9 +457,10 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
     1. **Pinned by the gfx1250 recommended configuration.** TDM on both tensors
        with its companions (PLR 1, PGR 2, 1LDSBuffer 0), SIA 4 (StinkyTofu),
        LDS transpose on, kernel-arg preload on, cluster launch and GL2 prefetch
-       off on A0, and the LdsPad* / LdsBlockSizePerPad* family left at -1 so
-       codegen derives padding and block size. These are requirements of the
-       codegen path, not tuning knobs.
+       off on A0, the LdsPad* / LdsBlockSizePerPad* family left at -1 so
+       codegen derives padding and block size, and ForceDisableShadowInit on
+       persistent MX kernels. These are requirements of the codegen path, not
+       tuning knobs.
     2. **Searched axes**: everything gfx950 generic sweeps that gfx1250 supports,
        plus the gfx1250-exclusive knobs.
 
@@ -657,6 +658,36 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
     def lds_block_size_per_pad_mxsb(self, ctx: SizeContext) -> Optional[ForkParameter]:
         return self._make_param("LdsBlockSizePerPadMXSB", [-1]) if self._mx_block() else None
 
+    def _shadow_init_values(self, persistent: bool) -> List[bool]:
+        """ForceDisableShadowInit values for an MX kernel: [True] when persistent.
+
+        The parameter only turns off KernelWriter's optional shadow init, which
+        sets up the store and initializes C in the shadow of the global-read
+        prefetch and keeps the registers it uses live across the main loop.
+        Persistent MX kernels need it True: with shadow init on, some of them
+        fail to compile in KernelWriter (for example StreamK kernels of
+        [32, 16, 128, 1, 1, 8, 4, 2, 2] with SourceSwap and TDMIterateMode 1),
+        and TensileLite keeps persistent MX kernels on the unpaired
+        LDSSegmentInterleave layout unless it is True
+        (``persistent_keeps_unpaired``). Non-persistent MX kernels search both
+        values: some only compile with True, while shadow init stays available
+        for the ones where it pays off.
+        """
+        return [True] if persistent else [False, True]
+
+    @param
+    def force_disable_shadow_init(self, ctx: SizeContext) -> Optional[ForkParameter]:
+        """MX only; not emitted otherwise, so non-MX problems keep Tensile's default False.
+
+        Without ``StreamK: true`` every kernel is non-persistent and the flat
+        parameter offers [False, True]. With it, :meth:`execution_policy` carries
+        the value per persistent strategy instead (see
+        :meth:`_shadow_init_values`), so no flat parameter is emitted.
+        """
+        if not self._mx_block() or self._sk3():
+            return None
+        return self._make_param("ForceDisableShadowInit", self._shadow_init_values(persistent=False))
+
     # =================================================================
     # 2. Persistent strategy and GlobalSplitU
     # =================================================================
@@ -719,6 +750,11 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
         Each persistent strategy pairs with PrefetchAcrossPersistent [0, 1].
         OOB keeps only XCC remap 0 ("Cannot use auto WGMXCC with SKXCC");
         Equality searches all divisors of the ARCH's XCC count.
+
+        On MX problems every entry also carries ForceDisableShadowInit: True on
+        the persistent entries, and the non-persistent ``None`` entry is
+        repeated once per value of :meth:`_shadow_init_values`, so every group
+        value stays single-valued.
         """
         if not self._sk3():
             return None
@@ -735,7 +771,15 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
                         "PrefetchAcrossPersistent": self._make_param("PrefetchAcrossPersistent", [prefetch]),
                         "PersistentXCCMapping": self._make_param("PersistentXCCMapping", [remap]),
                     })
-        return entries
+        if not self._mx_block():
+            return entries
+        with_fdsi = []
+        for entry in entries:
+            persistent = entry["TileProcessingStrategy"].values != ["None"]
+            for value in self._shadow_init_values(persistent):
+                fdsi = self._make_param("ForceDisableShadowInit", [value])
+                with_fdsi.append({**entry, "ForceDisableShadowInit": fdsi})
+        return with_fdsi
 
     @param
     def global_split_u_algorithm(self, ctx: SizeContext) -> ForkParameter:
