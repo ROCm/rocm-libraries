@@ -965,12 +965,10 @@ namespace TensileLite
             // min(32, omp_get_max_threads()) threads that each fill a contiguous chunk. Each tensor
             // gets its own seed range (seed + 32 * tensorIndex), matching hipBLASLt's maf2_0.
             template <typename T>
-            void initArrayMaf2_0(T* array, size_t elements, size_t tensorIndex)
+            static void initArrayMaf2_0(T* array, size_t elements, size_t tensorIndex)
             {
-                // Draws in double; Float, Half and the FP8 types round each draw to nearest even
-                // (Half and FP8 directly from double, FP8 saturating finite values to the largest
-                // finite one). BFloat16's constructor casts to float, then rounds to BF16, like the
-                // other double-based modes.
+                // Draws in double and rounds each draw once to nearest even (roundMaf1_0; FP8
+                // saturates finite values to the largest finite one).
                 if constexpr(std::is_same_v<T, double> || std::is_same_v<T, float>
                              || std::is_same_v<T, Half> || std::is_same_v<T, BFloat16>
                              || std::is_same_v<T, Float8> || std::is_same_v<T, BFloat8>
@@ -987,7 +985,7 @@ namespace TensileLite
                         std::normal_distribution<double> dist(0.0, 1.0);
 #pragma omp for schedule(static)
                         for(size_t i = 0; i < elements; i++)
-                            array[i] = static_cast<T>(dist(gen));
+                            array[i] = roundMaf1_0<T>(dist(gen));
                     }
                 }
                 else
