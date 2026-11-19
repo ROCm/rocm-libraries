@@ -264,14 +264,15 @@ ConvCase uniformCase(const RankShapes& shapes,
 
 // Strides of `dims` with the padding of one dimension: in the physical order of the layout
 // (outermost first: N, C, spatial.. for channels-first; N, spatial.., C for channels-last) the
-// extent of the dimension `level` positions from the innermost one counts one element more when
-// the strides are laid out. Level 0 pads the innermost dimension (channels in channels-last, row
-// length in channels-first), the highest useful level pads the planes. The strides keep the
+// extent of the dimension `level` positions from the innermost one counts `padding` elements more
+// when the strides are laid out. Level 0 pads the innermost dimension (channels in channels-last,
+// row length in channels-first), the highest useful level pads the planes. The strides keep the
 // strict order of the layout, so the stride-order class is unchanged; every dim must have an
 // extent above 1 for the tensor to be non-packed.
 TensorSpec paddedTensor(const std::vector<int64_t>& dims,
                         bool channelsLastLayout,
                         size_t level,
+                        int64_t padding = 1,
                         DataType dataType = DataType::FLOAT)
 {
     const size_t rank = dims.size();
@@ -300,7 +301,7 @@ TensorSpec paddedTensor(const std::vector<int64_t>& dims,
     {
         const size_t dim = physical[rank - 1 - position];
         strides[dim] = stride;
-        stride *= dims[dim] + (position == level ? 1 : 0);
+        stride *= dims[dim] + (position == level ? padding : 0);
     }
     return withStrides(dims, strides, dataType);
 }
@@ -1395,71 +1396,6 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesUnsupportedDataTypeShared)
 // Declined: non-packed
 // ---------------------------------------------------------------------------------------------
 
-// Forward declines every non-packed tensor. The padded tensor keeps the stride order of its
-// layout, so the three tensors still share one layout class and only the packing rule declines the
-// graph.
-TEST(TestMiopenConvApplicabilityChecks, DeclinesNonPackedChannelsFirstInput)
-{
-    const std::vector<ConvCase> cases = {
-        forwardCase("padded rows",
-                    withStrides(convXDims, {512, 128, 16, 1}),
-                    channelsFirst(convWDims),
-                    channelsFirst(convYDims)),
-        forwardCase("padded channels",
-                    withStrides(convXDims, {512, 128, 8, 1}),
-                    channelsFirst(convWDims),
-                    channelsFirst(convYDims)),
-        forwardCase("padded planes",
-                    withStrides(convXDims, {384, 64, 8, 1}),
-                    channelsFirst(convWDims),
-                    channelsFirst(convYDims)),
-    };
-
-    for(const auto& paddedCase : cases)
-    {
-        expectDeclined(paddedCase, PACKED_REASON, FORWARD_OPS);
-    }
-}
-
-TEST(TestMiopenConvApplicabilityChecks, DeclinesNonPackedChannelsLastInput)
-{
-    const std::vector<ConvCase> cases = {
-        forwardCase("padded rows",
-                    withStrides(convXDims, {320, 1, 40, 4}),
-                    channelsLast(convWDims),
-                    channelsLast(convYDims)),
-        forwardCase("padded columns",
-                    withStrides(convXDims, {512, 1, 64, 8}),
-                    channelsLast(convWDims),
-                    channelsLast(convYDims)),
-        forwardCase("padded batch",
-                    withStrides(convXDims, {384, 1, 32, 4}),
-                    channelsLast(convWDims),
-                    channelsLast(convYDims)),
-    };
-
-    for(const auto& paddedCase : cases)
-    {
-        expectDeclined(paddedCase, PACKED_REASON, FORWARD_OPS);
-    }
-}
-
-TEST(TestMiopenConvApplicabilityChecks, DeclinesNonPackedWeights)
-{
-    expectForwardDeclined(channelsFirst(convXDims),
-                          withStrides(convWDims, {48, 12, 4, 1}),
-                          channelsFirst(convYDims),
-                          PACKED_REASON);
-}
-
-TEST(TestMiopenConvApplicabilityChecks, DeclinesNonPackedOutput)
-{
-    expectForwardDeclined(channelsFirst(convXDims),
-                          channelsFirst(convWDims),
-                          withStrides(convYDims, {192, 48, 8, 1}),
-                          PACKED_REASON);
-}
-
 // Backward declines only a non-packed channels-last tensor. The padded tensor keeps the
 // channels-last stride order, so the three tensors still share one layout class and only the
 // channels-last packing rule declines the graph. Row-, channel- and plane-padded, at every
@@ -1858,17 +1794,20 @@ TEST(TestMiopenConvApplicabilityChecks, StridesOnTheRepresentableLimitAreJudgedB
 
 // The overflow check before isTensorPacked (the replay of its arithmetic) must not decline strides
 // whose arithmetic fits, and the packed verdict is isTensorPacked's own, which the validators read
-// from it directly. This pins that for rows none of which is near a limit: forward declines x as
-// "not packed" exactly when isTensorPacked is false for it, and never for overflow, at ranks 3, 4
-// and 5. It does not pin the replay's arithmetic against the SDK function (the overflow rows do,
-// above). w and y are packed in x's layout class so that the layout rule does not pre-empt the
-// packing rule; the reordered rows are packed and are declined by the layout rule instead, so they
-// must not be declined as not packed.
+// from it directly. This pins that for rows none of which is near a limit: forward declines a
+// tensor as "not packed" exactly when isTensorPacked is false for it, and never for overflow,
+// whichever of x, w and y it is, at ranks 3, 4 and 5 and on the 2D shape of the other tests. It
+// does not pin the replay's arithmetic against the SDK function (the overflow rows do, above). The
+// other two tensors are packed in the layout class of the row so that the layout rule does not
+// pre-empt the packing rule; the reordered rows are packed and are declined by the layout rule
+// instead, so they must not be declined as not packed. The padded rows pad every position of both
+// layouts by 1, 2, 4 and 8 elements: a padded tensor keeps the stride order of its layout, so
+// forward declines it for packing alone.
 TEST(TestMiopenConvApplicabilityChecks, PackingVerdictAgreesWithIsTensorPacked)
 {
     struct PackingRow
     {
-        const char* name;
+        std::string name;
         std::vector<int64_t> strides;
         bool channelsLastClass;
         bool packed;
@@ -1880,10 +1819,7 @@ TEST(TestMiopenConvApplicabilityChecks, PackingVerdictAgreesWithIsTensorPacked)
         }
         return strides;
     };
-
-    for(const auto& shapes : rankShapes())
-    {
-        const auto& dims = shapes.x;
+    const auto rowsOf = [&gapped](const std::vector<int64_t>& dims) {
         const size_t rank = dims.size();
 
         std::vector<int64_t> reorderedOrder(rank);
@@ -1892,41 +1828,67 @@ TEST(TestMiopenConvApplicabilityChecks, PackingVerdictAgreesWithIsTensorPacked)
             reorderedOrder[i] = static_cast<int64_t>(i);
         }
 
-        const std::vector<PackingRow> rows = {
+        std::vector<PackingRow> rows = {
             {"canonical channels-first", packedStrides(dims, false), false, true},
             {"canonical channels-last", packedStrides(dims, true), true, true},
-            {"channels-first padded rows", paddedTensor(dims, false, 0).strides, false, false},
-            {"channels-first padded planes",
-             paddedTensor(dims, false, rank - 2).strides,
-             false,
-             false},
-            {"channels-last padded channels", paddedTensor(dims, true, 0).strides, true, false},
-            {"channels-last padded planes",
-             paddedTensor(dims, true, rank - 2).strides,
-             true,
-             false},
             {"channels-first with gaps", gapped(packedStrides(dims, false)), false, false},
             {"channels-last with gaps", gapped(packedStrides(dims, true)), true, false},
             {"reordered", generateStrides(dims, reorderedOrder), false, true},
         };
-
-        for(const auto& row : rows)
+        for(const bool channelsLastClass : {false, true})
         {
-            SCOPED_TRACE("rank " + std::to_string(rank) + ", " + row.name + ", strides "
-                         + vecToString(row.strides));
-            const TensorSpec x = withStrides(dims, row.strides);
-            const bool packed = isTensorPacked(x.dims, x.strides);
-            ASSERT_EQ(packed, row.packed);
+            for(size_t level = 0; level + 1 < rank; ++level)
+            {
+                for(const int64_t padding : {1, 2, 4, 8})
+                {
+                    rows.push_back(
+                        {std::string(channelsLastClass ? "channels-last" : "channels-first")
+                             + " padded at level " + std::to_string(level) + " by "
+                             + std::to_string(padding),
+                         paddedTensor(dims, channelsLastClass, level, padding).strides,
+                         channelsLastClass,
+                         false});
+                }
+            }
+        }
+        return rows;
+    };
 
-            const auto others = [&row](const std::vector<int64_t>& otherDims) {
-                return row.channelsLastClass ? channelsLast(otherDims) : channelsFirst(otherDims);
-            };
-            const std::string reason = declineReason(
-                ConvOp::FORWARD, forwardCase("forward", x, others(shapes.w), others(shapes.y)));
+    auto allShapes = rankShapes();
+    allShapes.push_back(convShapes());
 
-            EXPECT_EQ(reason.find(PACKED_REASON) != std::string::npos, !packed);
-            EXPECT_THAT(reason, ::testing::Not(::testing::HasSubstr(strideOverflowReason("x"))));
-            EXPECT_THAT(reason, ::testing::Not(::testing::HasSubstr(overflowReason("x"))));
+    for(const auto& shapes : allShapes)
+    {
+        const ConvCase uniform = uniformCase(shapes, false);
+
+        for(const Role role : ROLES)
+        {
+            const auto& dims = tensorAt(uniform, role).dims;
+            const char* name = roleName(ConvOp::FORWARD, role);
+
+            for(const auto& row : rowsOf(dims))
+            {
+                SCOPED_TRACE("rank " + std::to_string(dims.size()) + ", tensor "
+                             + std::to_string(static_cast<int>(role)) + ", " + row.name
+                             + ", strides " + vecToString(row.strides));
+                const TensorSpec tensor = withStrides(dims, row.strides);
+                ASSERT_EQ(isTensorPacked(tensor.dims, tensor.strides), row.packed);
+
+                const std::string reason = declineReason(
+                    ConvOp::FORWARD,
+                    withTensorAt(uniformCase(shapes, row.channelsLastClass), role, tensor));
+
+                EXPECT_EQ(reason.find(PACKED_REASON) != std::string::npos, !row.packed);
+                if(!row.packed)
+                {
+                    EXPECT_THAT(reason,
+                                ::testing::HasSubstr(std::string(operationName(ConvOp::FORWARD))
+                                                     + ": tensor " + name + " is not packed"));
+                }
+                EXPECT_THAT(reason,
+                            ::testing::Not(::testing::HasSubstr(strideOverflowReason(name))));
+                EXPECT_THAT(reason, ::testing::Not(::testing::HasSubstr(overflowReason(name))));
+            }
         }
     }
 }
