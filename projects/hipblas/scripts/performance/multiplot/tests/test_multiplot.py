@@ -232,6 +232,23 @@ def test_flush_yaml_injection_matches_sweep_files(tmp_path):
         assert tests > 0 and text.count('flush_memory_size: 4096') == tests
 
 
+@pytest.mark.parametrize('prefix', ['s', 'd', 'c', 'z'])
+def test_level1_theo_max_covers_the_level1_sweep(prefix):
+    factors = benchmark.L1_theo_max(1.0)
+    for func in ('axpy', 'dot', 'scal', 'nrm2', 'iamax'):
+        assert prefix + func in factors
+
+
+def test_large_sweeps_include_the_shared_definitions():
+    for level in ('blas1', 'blas2'):
+        large_dir = os.path.join(MULTIPLOT_DIR, level, 'large')
+        files = sorted(f for f in os.listdir(large_dir) if f.endswith('.yaml'))
+        assert files
+        for f in files:
+            text = open(os.path.join(large_dir, f)).read()
+            assert 'include: ../../../../../clients/include/hipblas_common.yaml' in text, f
+
+
 HIPBLAS_DIR = os.path.abspath(os.path.join(MULTIPLOT_DIR, '..', '..', '..'))
 SIZE_ARGS = ('M', 'N', 'K', 'KL', 'KU')
 
