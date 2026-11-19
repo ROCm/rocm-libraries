@@ -59,10 +59,6 @@ using compilation::launchAxisFits;
 using sdpa_graph::INT32_LIMIT;
 inline constexpr int64_t BYTES_PER_ELEMENT = 2; // bf16 and f16 only
 
-/// The largest y or z extent of a launch grid the FlyDSL SDPA packs accept. HIP's own limit is
-/// 65536 workgroups; this is one below it, to match the other FlyDSL SDPA packs.
-inline constexpr int64_t GRID_YZ_LIMIT = 65535;
-
 /// A bound the graph leaves open (hipDNN's sentinel for left_bound / right_bound).
 inline constexpr int64_t UNBOUNDED = -1;
 

@@ -18,11 +18,9 @@ public:
     virtual void setGridSize(unsigned int x, unsigned int y, unsigned int z) = 0;
     virtual void setSharedMemBytes(unsigned int bytes) = 0;
 
-    /// Launch with the grid and block sizes set. A launch past HIP's per-axis limits throws
-    /// HipdnnPluginException with status BAD_PARAM before any HIP call: more than
-    /// LAUNCH_AXIS_ITEM_LIMIT work-items (grid x block) or an empty block on an axis, more
-    /// than LAUNCH_GRID_X_LIMIT workgroups on x, or more than LAUNCH_GRID_YZ_LIMIT on y or z
-    /// (see LaunchLimits.hpp).
+    /// Launch with the grid and block sizes set. A launch with more than
+    /// LAUNCH_AXIS_ITEM_LIMIT work-items (grid x block) or an empty block on any axis throws
+    /// HipdnnPluginException with status BAD_PARAM before any HIP call (see LaunchLimits.hpp).
     template <typename... Args>
     void launch(hipStream_t stream, Args&&... args) const
     {

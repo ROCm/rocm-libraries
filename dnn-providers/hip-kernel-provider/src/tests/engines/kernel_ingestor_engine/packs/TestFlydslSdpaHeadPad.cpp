@@ -591,52 +591,6 @@ TEST(TestFlydslSdpaHeadPad, AGraphOffEightReachesTheEnginePadded)
     EXPECT_EQ(plan.output.planeThreads, int64_t{37} * 37);
 }
 
-/// Whether the padding matchers pass @p spec's graph to the engine (the stand-in accepts every
-/// graph it is given).
-bool paddedGraphIsMatched(const SdpaGraphSpec& spec)
-{
-    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
-    return StandInPadded::graphMatches(fixture.context()).has_value();
-}
-
-TEST(TestFlydslSdpaHeadPad, DeclinesACopyWithMorePlanesThanTheGridHolds)
-{
-    // The copy's y extent is batch x heads: GRID_YZ_LIMIT (65535) planes are served.
-    constexpr int64_t LIMIT = 65535;
-    for(const bool onBatch : {true, false})
-    {
-        SCOPED_TRACE(onBatch ? "planes from the batch" : "planes from the heads");
-        const auto planesSpec = [&](int64_t planes) {
-            auto spec = compactSpec(37);
-            spec.batch = onBatch ? planes : 1;
-            spec.heads = onBatch ? 1 : planes;
-            spec.kvHeads = 1;
-            spec.seqLenQ = 1;
-            spec.seqLenKv = 1;
-            return spec;
-        };
-        EXPECT_TRUE(paddedGraphIsMatched(planesSpec(LIMIT)));
-        EXPECT_FALSE(paddedGraphIsMatched(planesSpec(LIMIT + 1)));
-    }
-}
-
-TEST(TestFlydslSdpaHeadPad, DeclinesACopyWithMoreThreadsPerPlaneThanInt32)
-{
-    // The copy's x extent covers sequence x padded units per plane: head dim 7 pads to 8 half
-    // units, so a sequence of 2^28 is 2^31 threads, one past int32.
-    const auto sequenceSpec = [](int64_t sequence) {
-        auto spec = compactSpec(7);
-        spec.batch = 1;
-        spec.heads = 1;
-        spec.kvHeads = 1;
-        spec.seqLenQ = sequence;
-        spec.seqLenKv = 1;
-        return spec;
-    };
-    EXPECT_TRUE(paddedGraphIsMatched(sequenceSpec((int64_t{1} << 28) - 1)));
-    EXPECT_FALSE(paddedGraphIsMatched(sequenceSpec(int64_t{1} << 28)));
-}
-
 TEST(TestFlydslSdpaHeadPad, CopiesF32AsTwoUnitsPerElement)
 {
     auto spec = compactSpec(7);

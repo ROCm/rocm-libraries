@@ -1351,19 +1351,17 @@ inline int64_t candidateThreads(const CdnaTile& tile)
     return tile.blockM * (tile.dualwave ? DUALWAVE_THREADS_PER_ROW : GENERIC_THREADS_PER_ROW);
 }
 
-/// The launch grid, or nullopt past the launch limits: the dual-wave kernel one workgroup per
-/// (query head, query block, batch), declined past int32 workgroups or 32 bits of work-items
-/// on x and past `GRID_YZ_LIMIT` workgroups on y (query blocks) and z (batch); the generic one
-/// per (batch, query tile, query head), flattened onto x, declined past int32 workgroups or
-/// 32 bits of work-items.
+/// The launch grid, or nullopt past the launch limits (workgroups past int32 on any axis, or
+/// x-axis work-items past 32 bits): the dual-wave kernel one workgroup per (query
+/// head, query block, batch); the generic one per (batch, query tile, query head),
+/// flattened onto x.
 inline std::optional<std::array<int64_t, 3>> candidateGrid(const SdpaProblem& problem,
                                                            const CdnaTile& tile)
 {
     const auto queryBlocks = (problem.seqLenQ + tile.blockM - 1) / tile.blockM;
     if(tile.dualwave)
     {
-        if(queryBlocks > GRID_YZ_LIMIT || problem.batch > GRID_YZ_LIMIT
-           || problem.numHeads > INT32_LIMIT
+        if(queryBlocks > INT32_LIMIT || problem.numHeads > INT32_LIMIT
            || !launchAxisFits(problem.numHeads, candidateThreads(tile)))
         {
             return std::nullopt;

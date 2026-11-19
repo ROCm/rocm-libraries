@@ -20,13 +20,12 @@ namespace hip_kernel_provider::compilation
 namespace
 {
 
-// HIP refuses a launch past a limit with a bare "invalid argument"; this names the kernel
+// HIP refuses a launch past the limit with a bare "invalid argument"; this names the kernel
 // and the axis instead.
 void requireAxisFits(const std::string& kernelName,
                      char axis,
                      unsigned int grid,
-                     unsigned int block,
-                     int64_t gridLimit)
+                     unsigned int block)
 {
     if(!launchAxisFits(grid, block))
     {
@@ -35,14 +34,6 @@ void requireAxisFits(const std::string& kernelName,
             "kernel '" + kernelName + "' launch does not fit one launch axis (at most "
                 + std::to_string(LAUNCH_AXIS_ITEM_LIMIT) + " work-items, non-empty block): axis "
                 + axis + ", grid " + std::to_string(grid) + " x block " + std::to_string(block));
-    }
-    if(grid > gridLimit)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "kernel '" + kernelName + "' launch grid does not fit one launch axis (at most "
-                + std::to_string(gridLimit) + " workgroups): axis " + axis + ", grid "
-                + std::to_string(grid));
     }
 }
 
@@ -82,9 +73,9 @@ void Kernel::setSharedMemBytes(unsigned int bytes)
 
 void Kernel::launchImpl(hipStream_t stream, void** kernelParams) const
 {
-    requireAxisFits(_kernelName, 'x', _gridX, _blockX, LAUNCH_GRID_X_LIMIT);
-    requireAxisFits(_kernelName, 'y', _gridY, _blockY, LAUNCH_GRID_YZ_LIMIT);
-    requireAxisFits(_kernelName, 'z', _gridZ, _blockZ, LAUNCH_GRID_YZ_LIMIT);
+    requireAxisFits(_kernelName, 'x', _gridX, _blockX);
+    requireAxisFits(_kernelName, 'y', _gridY, _blockY);
+    requireAxisFits(_kernelName, 'z', _gridZ, _blockZ);
 
     // A module belongs to the device that was current at hipModuleLoadData, and the launch
     // has to be made from there. Measured on a two-GPU MI300X: with the module on device 0

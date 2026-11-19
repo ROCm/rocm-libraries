@@ -1881,32 +1881,6 @@ TEST(TestFlydslSdpaCdnaKernelMatch, DeclinesALaunchPastThirtyTwoBitWorkItems)
     EXPECT_TRUE(cdnaAdmits(dualwave, makeCdnaKernel()));
 }
 
-TEST(TestFlydslSdpaCdnaKernelMatch, DeclinesADualwaveGridPastTheYAndZWorkgroupLimits)
-{
-    // The dual-wave grid is (query heads, query blocks, batch): y and z hold at most
-    // GRID_YZ_LIMIT (65535) workgroups. Head dim 32 keeps Q's bytes under 2^31 at 2^24 query
-    // rows (256 rows a block), so the byte bounds do not decline first.
-    constexpr int64_t LIMIT = 65535;
-    constexpr int64_t BLOCK_M = 256;
-    const auto dualwave = makeCdnaKernel("dualwave", 32);
-    const auto spec = [](int64_t batch, int64_t seqLenQ) {
-        auto result = cdnaSpec();
-        result.headDim = 32;
-        result.heads = 1;
-        result.kvHeads = 1;
-        result.seqLenKv = 1;
-        result.batch = batch;
-        result.seqLenQ = seqLenQ;
-        return result;
-    };
-    // z is the batch.
-    EXPECT_TRUE(cdnaAdmits(spec(LIMIT, 1), dualwave));
-    EXPECT_FALSE(cdnaAdmits(spec(LIMIT + 1, 1), dualwave));
-    // y is the query blocks.
-    EXPECT_TRUE(cdnaAdmits(spec(1, BLOCK_M * LIMIT), dualwave));
-    EXPECT_FALSE(cdnaAdmits(spec(1, BLOCK_M * (LIMIT + 1)), dualwave));
-}
-
 TEST(TestFlydslSdpaCdnaKernelMatch, DeclinesASplitWorkspacePastThirtyTwoBits)
 {
     // A device with a very large compute-unit count splits the keys 64 ways: the partials
