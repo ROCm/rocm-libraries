@@ -279,23 +279,17 @@ void checkNodeAttrsTensors(
     }
 
     // hipBLASLt applies the epilogue to the fp32 accumulator and rounds once to the output
-    // type, so a fused intermediate narrower than fp32 and different from the final output
-    // type cannot be honored.
+    // type, so a fused intermediate narrower than fp32 cannot be honored.
     if(biasAttr != nullptr || activAttr != nullptr)
     {
-        const auto finalUid
-            = activAttr != nullptr ? activAttr->out_0_tensor_uid() : biasAttr->out_0_tensor_uid();
-        const auto finalType
-            = hipblaslt_utils::findTensorAttributes(tensorMap, finalUid).dataType();
-
         const auto checkIntermediate = [&](int64_t uid, const char* role) {
             const auto type = hipblaslt_utils::findTensorAttributes(tensorMap, uid).dataType();
-            if(type != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT && type != finalType)
+            if(type != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                    std::string("Fused intermediate data type must be float or the final output "
-                                "data type: ")
+                    std::string("Fused intermediate data type must be float because hipBLASLt "
+                                "computes the epilogue in FP32: ")
                         + role);
             }
         };

@@ -404,7 +404,8 @@ TEST_F(IntegrationGpuMatmulConcurrency, ConcurrentHandleCreateDestroy)
 // Concurrent get_knobs_for_engine() calls on one finalized graph. The call takes no handle, so
 // threads that each own a handle still go through the graph's own plugin handle, whose
 // engine-details buffers every call stores and removes. Fails (crash in the plugin handle's
-// map) if that bookkeeping is not synchronized; each call must also see the reference knobs.
+// map) if that bookkeeping is not synchronized; each call must also return every reference knob
+// with the same id, description, deprecation flag, type, default value and constraint.
 TEST_F(IntegrationGpuMatmulConcurrency, ConcurrentKnobQueriesOnSharedGraph)
 {
     constexpr int64_t KNOB_DIM = 32;
@@ -466,6 +467,25 @@ TEST_F(IntegrationGpuMatmulConcurrency, ConcurrentKnobQueriesOnSharedGraph)
                     failures.record(at + "got " + std::to_string(knobs.size()) + " knobs, expected "
                                     + std::to_string(referenceKnobs.size()));
                     return;
+                }
+                for(size_t i = 0; i < knobs.size(); ++i)
+                {
+                    const auto& got = knobs[i];
+                    const auto& expected = referenceKnobs[i];
+                    const bool sameConstraint
+                        = (got.constraint() == nullptr) == (expected.constraint() == nullptr)
+                          && (got.constraint() == nullptr
+                              || got.constraint()->toString() == expected.constraint()->toString());
+                    if(got.knobId() != expected.knobId()
+                       || got.description() != expected.description()
+                       || got.isDeprecated() != expected.isDeprecated()
+                       || got.valueType() != expected.valueType()
+                       || got.defaultValue() != expected.defaultValue() || !sameConstraint)
+                    {
+                        failures.record(at + "knob " + std::to_string(i) + " is " + got.toString()
+                                        + ", expected " + expected.toString());
+                        return;
+                    }
                 }
             }
         });

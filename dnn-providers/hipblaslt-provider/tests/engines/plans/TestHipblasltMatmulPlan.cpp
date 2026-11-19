@@ -237,6 +237,38 @@ TEST(TestMatmulParams, AcceptsSizeOneKOperandsWithNonCanonicalStrides)
 
 namespace
 {
+hipblasOperation_t getTransAttribute(const HipblasltMatmulDesc& desc,
+                                     hipblasLtMatmulDescAttributes_t attr)
+{
+    hipblasOperation_t value = HIPBLAS_OP_N;
+    size_t sizeWritten = 0;
+    EXPECT_EQ(hipblasLtMatmulDescGetAttribute(
+                  desc.matmulDesc(), attr, static_cast<void*>(&value), sizeof(value), &sizeWritten),
+              HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(sizeWritten, sizeof(value));
+    return value;
+}
+} // namespace
+
+// B [1, N] with strides {99, 100} has a size-1 row dimension and a last stride that is not 1, so
+// matrixOrder reads it as column-major and operandTranspose returns OP_T. The descriptor is in
+// the swapped BLAS frame (C^T = B^T * A^T): its TRANSA is B's transpose and its TRANSB is A's.
+// Fails if the transpose of a size-1 operand is derived from its raw strides.
+TEST(TestMatmulParams, SizeOneRowOperandWithNonCanonicalStridesIsTransposed)
+{
+    auto builder = createValidMatmulGraph({4, 1}, {1, 1}, {1, 5}, {99, 100}, {4, 5}, {5, 1});
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+    auto* attrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    MatmulParams const params(*attrs, graph.getTensorMap());
+
+    EXPECT_EQ(getTransAttribute(params.desc(), HIPBLASLT_MATMUL_DESC_TRANSA), HIPBLAS_OP_T);
+    EXPECT_EQ(getTransAttribute(params.desc(), HIPBLASLT_MATMUL_DESC_TRANSB), HIPBLAS_OP_N);
+}
+
+namespace
+{
 // Rewrites the strides of the tensor at `index` in the graph's tensor list to {1, rows}
 // (column-major for a [rows, cols] tensor).
 void makeTensorColumnMajor(flatbuffers::FlatBufferBuilder& builder,

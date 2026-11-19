@@ -5,7 +5,7 @@
       "id": "3_16_128_bfp16_ncl_operationswish_fwd_norlo_norhi_6de5d0",
       "values": {
         "io_data_type": "bfloat16",
-        "intermediate_data_type": "bfloat16",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -19,7 +19,7 @@
               128,
               1
             ],
-            "data_type": "bfloat16"
+            "data_type": "float"
           },
           {
             "uid": 1,
@@ -85,7 +85,7 @@
       "id": "3_16_128_bfp16_ncl_operationgelu_approx_tanh_fwd_norlo_norhi_d42dc7",
       "values": {
         "io_data_type": "bfloat16",
-        "intermediate_data_type": "bfloat16",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -99,7 +99,7 @@
               128,
               1
             ],
-            "data_type": "bfloat16"
+            "data_type": "float"
           },
           {
             "uid": 1,
@@ -165,7 +165,7 @@
       "id": "2_3_16_128_bfp16_nchw_operationrelu_fwd_rlo0_norhi_ef36ce",
       "values": {
         "io_data_type": "bfloat16",
-        "intermediate_data_type": "bfloat16",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -181,7 +181,7 @@
               128,
               1
             ],
-            "data_type": "bfloat16"
+            "data_type": "float"
           },
           {
             "uid": 1,
@@ -253,7 +253,7 @@
       "id": "3_16_128_fp16_ncl_operationrelu_fwd_rlo0_norhi_725f79",
       "values": {
         "io_data_type": "half",
-        "intermediate_data_type": "half",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -267,7 +267,7 @@
               128,
               1
             ],
-            "data_type": "half"
+            "data_type": "float"
           },
           {
             "uid": 1,
@@ -333,7 +333,7 @@
       "id": "3_16_128_fp16_ncl_operationgelu_approx_tanh_fwd_norlo_norhi_a060e6",
       "values": {
         "io_data_type": "half",
-        "intermediate_data_type": "half",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -347,7 +347,7 @@
               128,
               1
             ],
-            "data_type": "half"
+            "data_type": "float"
           },
           {
             "uid": 1,
@@ -413,7 +413,7 @@
       "id": "2_3_16_128_fp16_nchw_operationswish_fwd_norlo_norhi_ca75ea",
       "values": {
         "io_data_type": "half",
-        "intermediate_data_type": "half",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -429,7 +429,7 @@
               128,
               1
             ],
-            "data_type": "half"
+            "data_type": "float"
           },
           {
             "uid": 1,
@@ -501,7 +501,7 @@
       "id": "2_3_16_128_fp16_nchw_operationswish_fwd_norlo_norhi_7fd5df",
       "values": {
         "io_data_type": "half",
-        "intermediate_data_type": "half",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -517,7 +517,7 @@
               128,
               1
             ],
-            "data_type": "half"
+            "data_type": "float"
           },
           {
             "uid": 1,

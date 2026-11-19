@@ -5,7 +5,7 @@
       "id": "3_16_128_bfp16_ncl_b8425e",
       "values": {
         "io_data_type": "bfloat16",
-        "intermediate_data_type": "bfloat16",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -19,7 +19,7 @@
               128,
               1
             ],
-            "data_type": "bfloat16"
+            "data_type": "float"
           },
           {
             "uid": 1,
@@ -93,7 +93,7 @@
       "id": "2_3_16_128_fp16_nchw_c638fb",
       "values": {
         "io_data_type": "half",
-        "intermediate_data_type": "half",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -109,7 +109,7 @@
               128,
               1
             ],
-            "data_type": "half"
+            "data_type": "float"
           },
           {
             "uid": 1,

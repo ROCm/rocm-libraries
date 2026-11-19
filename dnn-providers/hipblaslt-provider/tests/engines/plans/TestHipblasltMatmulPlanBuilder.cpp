@@ -1292,30 +1292,54 @@ TEST_F(TestHipblasltMatmulPlanBuilder, DeclinesNarrowBiasOutputBeforeActivation)
         _planBuilder, _handle, true, PointwiseMode::RELU_FWD, {{4, DataType::HALF}}));
 }
 
-TEST_F(TestHipblasltMatmulPlanBuilder, AcceptsFloatIntermediatesUnderHalfOutput)
+TEST_F(TestHipblasltMatmulPlanBuilder, AcceptsFloatIntermediatesUnderNarrowOutput)
 {
-    // Mutant: an equal-to-final-output-only rule declines FLOAT intermediates under HALF output.
-    EXPECT_TRUE(
-        isApplicableWithTypes(_planBuilder,
-                              _handle,
-                              true,
-                              PointwiseMode::RELU_FWD,
-                              {{0, DataType::HALF}, {1, DataType::HALF}, {5, DataType::HALF}}));
+    // Mutant: a rule requiring intermediates to equal the final output declines FLOAT ones.
+    for(const auto narrow : {DataType::HALF, DataType::BFLOAT16})
+    {
+        EXPECT_TRUE(isApplicableWithTypes(_planBuilder,
+                                          _handle,
+                                          true,
+                                          PointwiseMode::RELU_FWD,
+                                          {{0, narrow}, {1, narrow}, {5, narrow}}));
+    }
 }
 
-TEST_F(TestHipblasltMatmulPlanBuilder, AcceptsHalfIntermediatesEqualToHalfOutput)
+// hipBLASLt computes the epilogue on the FP32 accumulator, so an intermediate that equals a
+// narrow final output type is still declined.
+TEST_F(TestHipblasltMatmulPlanBuilder, DeclinesNarrowIntermediatesEqualToNarrowOutput)
 {
-    // Mutant: a FLOAT-only rule declines intermediates equal to the HALF final output.
-    EXPECT_TRUE(isApplicableWithTypes(_planBuilder,
-                                      _handle,
-                                      true,
-                                      PointwiseMode::RELU_FWD,
-                                      {{0, DataType::HALF},
-                                       {1, DataType::HALF},
-                                       {2, DataType::HALF},
-                                       {3, DataType::HALF},
-                                       {4, DataType::HALF},
-                                       {5, DataType::HALF}}));
+    // Mutant: an "or equal to the final output type" exemption accepts these graphs.
+    for(const auto narrow : {DataType::HALF, DataType::BFLOAT16})
+    {
+        // Bias + activation, every tensor narrow: the matmul output (2) is the first decline.
+        EXPECT_FALSE(isApplicableWithTypes(
+            _planBuilder,
+            _handle,
+            true,
+            PointwiseMode::RELU_FWD,
+            {{0, narrow}, {1, narrow}, {2, narrow}, {3, narrow}, {4, narrow}, {5, narrow}}));
+        // Bias + activation, FLOAT matmul output: the narrow bias output (4) alone declines.
+        EXPECT_FALSE(isApplicableWithTypes(
+            _planBuilder,
+            _handle,
+            true,
+            PointwiseMode::RELU_FWD,
+            {{0, narrow}, {1, narrow}, {3, narrow}, {4, narrow}, {5, narrow}}));
+        // Bias only, narrow matmul output (2) equal to the narrow final output (4).
+        EXPECT_FALSE(isApplicableWithTypes(
+            _planBuilder,
+            _handle,
+            true,
+            PointwiseMode::UNSET,
+            {{0, narrow}, {1, narrow}, {2, narrow}, {3, narrow}, {4, narrow}}));
+        // Positive control: the same bias-only graph with a FLOAT matmul output is accepted.
+        EXPECT_TRUE(isApplicableWithTypes(_planBuilder,
+                                          _handle,
+                                          true,
+                                          PointwiseMode::UNSET,
+                                          {{0, narrow}, {1, narrow}, {3, narrow}, {4, narrow}}));
+    }
 }
 
 TEST_F(TestHipblasltMatmulPlanBuilder, GetWorkspaceSize)

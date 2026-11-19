@@ -516,8 +516,8 @@ INSTANTIATE_TEST_SUITE_P(IntegrationGpuMatmulApplicability,
                          IntegrationGpuMatmulApplicabilityUnitColumn,
                          ::testing::Values<int64_t>(8, 33));
 
-// The engine adds the bias to the FP32 accumulator and rounds once, so a virtual intermediate
-// narrower than FLOAT (and different from the final output) cannot be honored.
+// The engine runs the epilogue on the FP32 accumulator, so a virtual intermediate narrower than
+// FLOAT cannot be honored, whatever the final output type.
 // Fails if the provider accepts such a fused graph.
 TEST_F(IntegrationGpuMatmulApplicability, NarrowFusedMatmulIntermediateDeclines)
 {
@@ -527,6 +527,15 @@ TEST_F(IntegrationGpuMatmulApplicability, NarrowFusedMatmulIntermediateDeclines)
 TEST_F(IntegrationGpuMatmulApplicability, NarrowFusedBiasIntermediateDeclines)
 {
     expectDeclinedBeforeBuildPlans(narrowIntermediateCaseBiasOut());
+}
+
+// A narrow intermediate equal to the narrow final output is declined too.
+// Fails if the provider exempts an intermediate that matches the final output type.
+TEST_F(IntegrationGpuMatmulApplicability, NarrowFusedIntermediateEqualToOutputDeclines)
+{
+    auto c = narrowIntermediateCaseMatmulOut();
+    c.finalType = DataType::HALF;
+    expectDeclinedBeforeBuildPlans(c);
 }
 
 // Positive control for the decline rule: a FLOAT intermediate under HALF io builds and matches.
@@ -544,17 +553,32 @@ TEST_F(IntegrationGpuMatmulApplicability, FloatFusedIntermediateWithHalfOutputMa
     expectMatchesReference(c, FP16_TOLERANCE);
 }
 
-// A size-1 dimension's stride is arbitrary; A [8,1] with strides [1,8] is a contiguous column, so
-// the operand is row-major with K == 1.
-// Fails if the operand transpose is derived from the raw stride of the size-1 dimension.
+// With K == 1, A [8,1] with strides {7,7} has neither stride equal to 1, so a rule that reads only
+// the strides rejects it; the size-1 trailing dimension makes it row-major regardless.
+// Fails if the provider declines an operand whose layout only the size-1 rule can classify.
 TEST_F(IntegrationGpuMatmulApplicability, OperandWithUnitDimNonCanonicalStrideMatchesReference)
 {
     MatmulCase c;
     c.m = 8;
     c.k = 1;
     c.n = 12;
-    c.aStrides = {1, 8};
+    c.aStrides = {7, 7};
     c.bStrides = {12, 1};
+    c.cStrides = {12, 1};
+    expectMatchesReference(c, FP32_TOLERANCE);
+}
+
+// With K == 1, B [1,12] with strides {99,100} has a size-1 row dimension and a last stride that
+// is not 1, so it is classified column-major and transposed. Exercises the column-major branch of
+// the size-1 rule on the B operand end to end.
+// Fails if the provider declines the operand or misreads it after a wrong transpose.
+TEST_F(IntegrationGpuMatmulApplicability, SizeOneRowBOperandWithNonCanonicalStridesMatchesReference)
+{
+    MatmulCase c;
+    c.m = 8;
+    c.k = 1;
+    c.n = 12;
+    c.bStrides = {99, 100};
     c.cStrides = {12, 1};
     expectMatchesReference(c, FP32_TOLERANCE);
 }

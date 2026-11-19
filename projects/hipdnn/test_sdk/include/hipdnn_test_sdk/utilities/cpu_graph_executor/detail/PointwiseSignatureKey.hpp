@@ -225,6 +225,15 @@ struct PointwiseSignatureKey
                               hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
                               hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        // FLOAT matmul output plus a narrow bias, rounded to the narrow output type
+        addBinaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::HALF>(map);
+        addBinaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
 
         addComparisonPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                   hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
