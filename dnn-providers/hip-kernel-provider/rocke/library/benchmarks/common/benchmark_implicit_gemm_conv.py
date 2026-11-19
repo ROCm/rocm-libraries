@@ -7019,10 +7019,15 @@ def _runtime_split_ks(
                 _fwd_split_tail_launches(problem, ident) if requested in (0, -1) else ()
             )
         if getattr(ident, "split_streamk", False) or getattr(ident, "split_hybrid", 0):
-            # A stream-K (or split_hybrid) binary's degree is its workgroup count.
-            return (
+            # A stream-K (or split_hybrid) binary's degree is its workgroup
+            # count; its flat grid decodes one group, and its partition math is
+            # exact for fewer than 2^15 workgroups.
+            if max(1, problem.groups) != 1:
+                return ()
+            gs = (
                 _fwd_streamk_launches(problem, ident) if requested in (0, -1) else swept
             )
+            return tuple(g for g in gs if int(g) < _FWD_STREAMK_MAX_WGS)
         return fwd_degrees
     return _split_k_degrees(
         problem,
@@ -7108,6 +7113,9 @@ class TailSplit(int):
 
 # Stream-K (split_streamk) workgroup counts, in resident workgroups per CU.
 _FWD_STREAMK_WGS_PER_CU = (1, 2)
+# The stream-K partition w*(T/G) + (w*(T%G))/G stays inside i32 below this
+# workgroup count.
+_FWD_STREAMK_MAX_WGS = 1 << 15
 
 
 def _fwd_streamk_launches(problem, ident) -> tuple:
@@ -7989,7 +7997,16 @@ def _extras_and_grid(
         extras["split_k"] = int(split_k)
         if getattr(ident, "split_tail", False):
             # The tiles that run unsplit (TailSplit); 0 = split every tile.
-            extras["full_tiles"] = getattr(split_k, "full_tiles", 0)
+            # A /full<T> reused on a smaller shape clamps to its tile count.
+            from kernels.common.conv_args import ConvArgs as _TA
+
+            _ta = _TA.from_problem(
+                problem, tile_m=ident.tile_m, tile_n=ident.tile_n, tile_k=ident.tile_k
+            )
+            extras["full_tiles"] = min(
+                int(getattr(split_k, "full_tiles", 0) or 0),
+                _ta.num_pid_m * _ta.num_pid_n,
+            )
         if getattr(ident, "split_det", False):
             # split_det: one i32 counter per output tile (zeroed once, the
             # owner resets it) and the f32 partial-tile slots, in one buffer.
