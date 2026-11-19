@@ -14,6 +14,56 @@
 
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
+bool rocke_tdm_tile_loader_2d_prepare(rocke_ir_builder_t* b,
+                                     const rocke_tdm_tile_loader_2d_t* loader,
+                                     const rocke_tdm_source_window_2d_t* source,
+                                     rocke_value_t* lds_addr,
+                                     rocke_value_t* zero,
+                                     rocke_tdm_tile_load_t* out)
+{
+    if(loader == NULL || source == NULL || out == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "tdm tile load needs loader, source and output");
+        return false;
+    }
+    /* Keep the builder-call order explicit to mirror Python. */
+    rocke_value_t* row_off64 = rocke_b_zext(b, source->row_origin, rocke_i64());
+    rocke_value_t* stride64 = rocke_b_zext(b, source->row_stride, rocke_i64());
+    rocke_value_t* row64 = rocke_b_mul(b, row_off64, stride64);
+    rocke_value_t* col_off64 = rocke_b_zext(b, source->col_origin, rocke_i64());
+    rocke_value_t* in_window = rocke_b_add(b, row64, col_off64);
+    rocke_value_t* origin = rocke_b_add(b, source->base_offset, in_window);
+    rocke_value_t* addr = rocke_b_global_addr_of(b, source->ptr, origin);
+    rocke_value_t* rows_left = rocke_b_sub(b, source->row_extent, source->row_origin);
+    rocke_value_t* rows_remaining = rocke_b_smax(b, rows_left, zero);
+    return rocke_b_tdm_descriptor_2d(b,
+                                    addr,
+                                    lds_addr,
+                                    loader->elem_bytes,
+                                    source->cols_remaining,
+                                    rows_remaining,
+                                    source->row_stride,
+                                    loader->tile_cols,
+                                    loader->tile_rows,
+                                    0,
+                                    loader->pad_interval,
+                                    loader->pad_amount,
+                                    out->groups);
+}
+
+void rocke_tdm_tile_load_issue(rocke_ir_builder_t* b,
+                              const rocke_tdm_tile_load_t* load,
+                              int cachepolicy)
+{
+    if(load == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "tdm tile load needs a prepared descriptor");
+        return;
+    }
+    const auto* g = load->groups;
+    rocke_b_tensor_load_to_lds(b, g[0], g[1], g[2], g[3], g[4], cachepolicy);
+}
+
 /* ============================================================================
  * CoalescedTileLoader
  * ========================================================================== */

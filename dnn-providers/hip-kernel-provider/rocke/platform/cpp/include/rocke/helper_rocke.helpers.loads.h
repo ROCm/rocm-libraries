@@ -67,6 +67,46 @@
 extern "C" {
 #endif
 
+/* TdmSourceWindow2D: contiguous columns; all coordinates and strides are
+ * i32 elements except the i64 base_offset. cols_remaining may be shared by
+ * multiple operands; row_extent is the tensor's full extent, not tile_rows. */
+typedef struct rocke_tdm_source_window_2d
+{
+    rocke_value_t* ptr;
+    rocke_value_t* base_offset;
+    rocke_value_t* row_origin;
+    rocke_value_t* col_origin;
+    rocke_value_t* row_extent;
+    rocke_value_t* cols_remaining;
+    rocke_value_t* row_stride;
+} rocke_tdm_source_window_2d_t;
+
+typedef struct rocke_tdm_tile_loader_2d
+{
+    int tile_rows;
+    int tile_cols;
+    int elem_bytes;
+    int pad_interval; /* -1 disables hardware LDS padding */
+    int pad_amount;
+} rocke_tdm_tile_loader_2d_t;
+
+typedef struct rocke_tdm_tile_load
+{
+    rocke_value_t* groups[5];
+} rocke_tdm_tile_load_t;
+
+/* Prepare a descriptor for a bound LDS byte address. The caller owns wave
+ * selection and waits; it may insert a hook before issuing the descriptor. */
+bool rocke_tdm_tile_loader_2d_prepare(rocke_ir_builder_t* b,
+                                     const rocke_tdm_tile_loader_2d_t* loader,
+                                     const rocke_tdm_source_window_2d_t* source,
+                                     rocke_value_t* lds_addr,
+                                     rocke_value_t* zero,
+                                     rocke_tdm_tile_load_t* out);
+void rocke_tdm_tile_load_issue(rocke_ir_builder_t* b,
+                              const rocke_tdm_tile_load_t* load,
+                              int cachepolicy);
+
 /* ------------------------------------------------------------ DescriptorFn *
  *
  * Python:

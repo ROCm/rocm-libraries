@@ -119,6 +119,76 @@ def swizzle_lds_col(b: IRBuilder, row: Value, col: Value, col_xor) -> Value:
     return b.xor(col, b.shl(sel, b.const_i32(chunk_log2)))
 
 
+@dataclass(frozen=True)
+class TdmSourceWindow2D:
+    """Runtime window into a global tensor with contiguous columns.
+
+    Coordinates, extents, and strides are i32 elements. ``base_offset`` is
+    an i64 element offset for selecting a batch or suballocation. The caller
+    can hoist ``cols_remaining`` when several windows share a column interval;
+    it must be the number of source columns left after ``col_origin`` (or zero).
+    ``row_extent`` is the source tensor's full row count, not the tile height.
+    """
+
+    ptr: Value
+    base_offset: Value
+    row_origin: Value
+    col_origin: Value
+    row_extent: Value
+    cols_remaining: Value
+    row_stride: Value
+
+
+@dataclass(frozen=True)
+class TdmTileLoad:
+    """A prepared descriptor. Issuing it neither waits nor selects a wave."""
+
+    groups: tuple[Value, Value, Value, Value, Value]
+
+    def issue(self, b: IRBuilder, *, cachepolicy: int = 0) -> None:
+        b.tensor_load_to_lds(*self.groups, cachepolicy=cachepolicy)
+
+
+@dataclass(frozen=True)
+class TdmTileLoader2D:
+    """Prepare a wave-level global-to-LDS tile load for one source window.
+
+    The destination is a bound LDS byte address. TDM writes row-major with
+    optional hardware padding; ``pad_interval`` and ``pad_amount`` are the
+    encoded descriptor fields. The schedule owns issuer selection and all
+    waits, and may emit a synchronization hook between prepare and issue.
+    """
+
+    tile_rows: int
+    tile_cols: int
+    elem_bytes: int
+    pad_interval: int | None = None
+    pad_amount: int = 0
+
+    def prepare(
+        self, b: IRBuilder, source: TdmSourceWindow2D, lds_addr: Value, *, zero: Value
+    ) -> TdmTileLoad:
+        # Widen before multiplying so large tensor offsets do not wrap at i32.
+        row64 = b.mul(b.zext(source.row_origin, I64), b.zext(source.row_stride, I64))
+        origin = b.add(source.base_offset, b.add(row64, b.zext(source.col_origin, I64)))
+        addr = b.global_addr_of(source.ptr, origin)
+        rows_remaining = b.smax(b.sub(source.row_extent, source.row_origin), zero)
+        return TdmTileLoad(
+            b.tdm_descriptor_2d(
+                addr,
+                lds_addr,
+                elem_bytes=self.elem_bytes,
+                tensor_dim0=source.cols_remaining,
+                tensor_dim1=rows_remaining,
+                row_stride=source.row_stride,
+                tile_dim0=self.tile_cols,
+                tile_dim1=self.tile_rows,
+                pad_interval=self.pad_interval,
+                pad_amount=self.pad_amount,
+            )
+        )
+
+
 # The two admissible ``vector_axis`` values.  Kept as a module constant so the
 # validation in ``choose_vec`` (classmethod entry point) and ``__post_init__``
 # (direct-construction entry point) can never drift.

@@ -74,7 +74,7 @@ from ...core.ir import (
     encode_tdm_padding,
 )
 from ...helpers.io import io_ir_type
-from ...helpers.loads import CoalescedTileLoader
+from ...helpers.loads import CoalescedTileLoader, TdmSourceWindow2D, TdmTileLoader2D
 from ...helpers.spec import WarpTileBlockSizeMixin, choose_load_vec
 from ...helpers.tensor_view import make_global_view, make_tile_window
 from ._gemm_compute_tile import accumulate_mfma_tile
@@ -1798,35 +1798,26 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             k_remaining = b.smax(b.sub(K, k_off), zero)
 
             def _issue(ptr, row_off, rows, extent, lds_base, batch64):
-                # The element offset in i64: an operand past 2^31 elements
-                # (e.g. M = K = 131072) wraps an i32 one, and the GEP would
-                # sign-extend it to an address before the tensor. Every term is
-                # non-negative, so each widens with zext; ``batch64`` is already
-                # i64 (``tdm_batch_a`` / ``tdm_batch_b``).
-                row64 = b.mul(b.zext(row_off, _I64), b.zext(K, _I64))
-                origin = b.add(batch64, b.add(row64, b.zext(k_off, _I64)))
-                groups = b.tdm_descriptor_2d(
-                    b.global_addr_of(ptr, origin),
-                    lds_base,
-                    elem_bytes=_tdm_elem_bytes,
-                    tensor_dim0=k_remaining,
-                    # The TENSOR's remaining extent from this tile's origin, not
-                    # the tile height. The mover bounds its address generation on
-                    # this, so a constant tile height describes a tensor that ends
-                    # 64 rows past every origin -- wrong for every tile but the
-                    # first, and wrong everywhere rather than only at a ragged
-                    # edge. ``pad_m``/``pad_n`` are not consulted precisely
-                    # because OOB is handled here, by clipping the extent.
-                    tensor_dim1=b.smax(b.sub(extent, row_off), zero),
+                source = TdmSourceWindow2D(
+                    ptr=ptr,
+                    base_offset=batch64,
+                    row_origin=row_off,
+                    col_origin=k_off,
+                    row_extent=extent,
+                    cols_remaining=k_remaining,
                     row_stride=K,
-                    tile_dim0=block_k,
-                    tile_dim1=rows,
+                )
+                loader = TdmTileLoader2D(
+                    tile_rows=rows,
+                    tile_cols=block_k,
+                    elem_bytes=_tdm_elem_bytes,
                     pad_interval=_tdm_pad_interval if _tdm_pad_enable else None,
                     pad_amount=_tdm_pad_amount,
                 )
+                transfer = loader.prepare(b, source, lds_base, zero=zero)
                 if before_issue is not None:
                     before_issue()
-                b.tensor_load_to_lds(*groups, cachepolicy=0)
+                transfer.issue(b)
 
             # ``tensor_load_to_lds`` is a wave-level instruction that moves the
             # whole tile, so letting every wave issue it copies the tile once

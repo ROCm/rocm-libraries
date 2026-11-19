@@ -126,48 +126,28 @@ static void rocke_gemm_tdm_issue(rocke_gemm_build_ctx_t* ctx,
                                  rocke_value_t* zero,
                                  rocke_gemm_emit_hook_t before_issue)
 {
-    rocke_ir_builder_t* b = ctx->b;
-    /* The element offset in i64: an operand past 2^31 elements (e.g.
-     * M = K = 131072) wraps an i32 one, and the GEP would sign-extend it to an
-     * address before the tensor. Every term is non-negative, so each widens
-     * with zext; batch_off is already i64 (ctx->tdm_batch_a / _b). One value
-     * per statement, in the Python engine's order. */
-    rocke_value_t* batch64 = batch_off;
-    rocke_value_t* row_off64 = rocke_b_zext(b, row_off, rocke_i64());
-    rocke_value_t* k64 = rocke_b_zext(b, ctx->K, rocke_i64());
-    rocke_value_t* row64 = rocke_b_mul(b, row_off64, k64);
-    rocke_value_t* k_off64 = rocke_b_zext(b, k_off, rocke_i64());
-    rocke_value_t* in_batch = rocke_b_add(b, row64, k_off64);
-    rocke_value_t* origin = rocke_b_add(b, batch64, in_batch);
-    rocke_value_t* groups[5];
-    /* One value per statement, in the Python engine's order: the address,
-     * then the row extent. */
-    rocke_value_t* gaddr = rocke_b_global_addr_of(b, ptr, origin);
-    /* The TENSOR's remaining extent from this tile's origin, not the tile
-     * height. The mover bounds its address generation on this, so a constant
-     * tile height describes a tensor ending `rows` past every origin -- wrong
-     * for every tile but the first. pad_m/pad_n are not consulted precisely
-     * because OOB is handled here, by clipping the extent. */
-    rocke_value_t* rows_left = rocke_b_smax(b, rocke_b_sub(b, extent, row_off), zero);
-    if(!rocke_b_tdm_descriptor_2d(b,
-                                  gaddr,
-                                  lds_base,
-                                  ctx->tdm_elem_bytes,
-                                  k_remaining,
-                                  rows_left,
-                                  ctx->K,
-                                  ctx->block_k,
-                                  rows,
-                                  0,
-                                  ctx->tdm_pad_enable ? ctx->tdm_pad_interval : -1,
-                                  ctx->tdm_pad_amount,
-                                  groups))
-    {
+    const rocke_tdm_source_window_2d_t source = {
+        .ptr = ptr,
+        .base_offset = batch_off,
+        .row_origin = row_off,
+        .col_origin = k_off,
+        .row_extent = extent,
+        .cols_remaining = k_remaining,
+        .row_stride = ctx->K,
+    };
+    const rocke_tdm_tile_loader_2d_t loader = {
+        .tile_rows = rows,
+        .tile_cols = ctx->block_k,
+        .elem_bytes = ctx->tdm_elem_bytes,
+        .pad_interval = ctx->tdm_pad_enable ? ctx->tdm_pad_interval : -1,
+        .pad_amount = ctx->tdm_pad_amount,
+    };
+    rocke_tdm_tile_load_t transfer;
+    if(!rocke_tdm_tile_loader_2d_prepare(ctx->b, &loader, &source, lds_base, zero, &transfer))
         return;
-    }
     if(before_issue.fn != NULL)
         before_issue.fn(ctx, before_issue.user);
-    rocke_b_tensor_load_to_lds(b, groups[0], groups[1], groups[2], groups[3], groups[4], 0);
+    rocke_tdm_tile_load_issue(ctx->b, &transfer, /*cachepolicy=*/0);
 }
 
 /* Full-tile source offsets for the synchronous coalesced-copy helper. */

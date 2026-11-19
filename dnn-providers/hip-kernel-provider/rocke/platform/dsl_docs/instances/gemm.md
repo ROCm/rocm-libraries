@@ -212,8 +212,14 @@ and LDS store for each lane. The K loop still owns the workgroup barriers.
 Other synchronous configurations retain their specialized copies, including
 padded tails, pre-shuffled B, and nontrivial LDS destination mappings. The
 `compv4` name is not an async switch: `direct_to_lds` selects the gfx9 async
-copy path, and `dtl_prefetch` selects its ping-pong schedule. TDM has a separate
-copy and completion contract.
+copy path, and `dtl_prefetch` selects its ping-pong schedule.
+
+The gfx1250 `tdm` path uses [`TdmTileLoader2D`](../../python/rocke/helpers/loads.py)
+for A/B fills. It prepares a descriptor from a `TdmSourceWindow2D` and a bound
+LDS byte address, then issues one whole-tile load. Keeping `prepare` separate
+from `issue` lets the schedule insert its synchronization hook between them.
+The caller still selects the issuing wave, rotates slots, and waits for
+completion through `TdmKLoop`. The C epilogue does not use TDM stores.
 
 GEMM descriptor (`make_global_view + make_tile_window`):
 
