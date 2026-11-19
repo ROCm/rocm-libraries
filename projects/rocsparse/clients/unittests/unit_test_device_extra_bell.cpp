@@ -25,9 +25,10 @@
 //
 // Generic spmm with a blocked ELL matrix that has no stored blocks (the
 // product is zero, so C = beta * C) or a few stored blocks, including a row
-// count that the block dimension does not divide, with a transposed or batched
-// blocked ELL product that spmm rejects, with a blocked ELL matrix built by
-// dense_to_sparse, and with formats spmm does not support.
+// count that the block dimension does not divide, i64 indices in base one and
+// a C without padding, with a transposed or batched blocked ELL product that
+// spmm rejects, with a blocked ELL matrix built by dense_to_sparse, and with
+// formats spmm does not support.
 //
 #include "unit_test_extra_common.hpp"
 
@@ -41,28 +42,37 @@ namespace
 
     struct BellRun
     {
-        rocsparse_operation opA    = rocsparse_operation_none;
-        int64_t             rows   = 6;
-        int64_t             kb     = 2;
-        int64_t             bd     = 2;
-        int64_t             cols   = 0;
-        int64_t             n      = 5;
-        rocsparse_order     order  = rocsparse_order_column;
-        bool                device = false;
+        rocsparse_operation  opA     = rocsparse_operation_none;
+        int64_t              rows    = 6;
+        int64_t              kb      = 2;
+        int64_t              bd      = 2;
+        int64_t              cols    = 0;
+        int64_t              n       = 5;
+        rocsparse_order      order   = rocsparse_order_column;
+        bool                 device  = false;
+        rocsparse_indextype  itype   = rocsparse_indextype_i32;
+        rocsparse_index_base base    = rocsparse_index_base_zero;
+        int64_t              ldc_pad = 2;
     };
 
     // A blocked ELL A of `rows` scalar rows (ceil(rows / bd) block rows, so the
     // last block row is partial when bd does not divide rows) and kb block
-    // columns, with ell_cols = cols, so cols / bd stored blocks per block row.
-    // Ad is A on the host. B and C, in `order`, are those of op(A) * B and hold
-    // `slabs` copies of their storage so that a strided batch stays in bounds.
+    // columns, with ell_cols = cols, so cols / bd stored blocks per block row,
+    // and block column indices of type itype in base `base`. Ad is A on the
+    // host. B and C, in `order`, are those of op(A) * B and hold `slabs` copies
+    // of their storage so that a strided batch stays in bounds. The leading
+    // dimension of C is ldc_pad more than its rows (column order) or columns
+    // (row order). C's slabs are followed by a guard of bd * ldc sentinels, so
+    // a write to a row past the last row of C stays in the buffer and is seen
+    // even without padding. c_size is the storage of one slab of C.
     struct BellProblem
     {
-        int64_t            Mc = 0, Kc = 0, ldb = 0, ldc = 0;
+        int64_t            Mc = 0, Kc = 0, ldb = 0, ldc = 0, c_size = 0;
         Dense              Ad, Bl, C0;
         std::vector<float> hC;
         DevBuf<float>      dB, dC;
         DevBuf<int32_t>    ind;
+        DevBuf<int64_t>    ind64;
         DevBuf<float>      val;
         SpmatH             sp;
         DnmatH             mB, mC;
@@ -76,15 +86,16 @@ namespace
         p.Mc              = (r.opA == rocsparse_operation_none) ? m : k;
         p.Kc              = (r.opA == rocsparse_operation_none) ? k : m;
         p.ldb             = (col ? p.Kc : r.n) + 1;
-        p.ldc             = (col ? p.Mc : r.n) + 2;
+        p.ldc             = (col ? p.Mc : r.n) + r.ldc_pad;
 
         Rng rng(17);
         p.Bl                  = random_dense<float>(p.Kc, r.n, rng);
         p.C0                  = random_dense<float>(p.Mc, r.n, rng);
         std::vector<float> hB = store_dense<float>(p.Bl, r.order, p.ldb);
         p.hC                  = store_dense<float>(p.C0, r.order, p.ldc);
+        p.c_size              = static_cast<int64_t>(p.hC.size());
         hB.resize(slabs * hB.size(), -77.0f);
-        p.hC.resize(slabs * p.hC.size(), -77.0f);
+        p.hC.resize(static_cast<size_t>(slabs * p.c_size + r.bd * p.ldc), -77.0f);
         p.dB = up_raw<float>(hB);
         p.dC = up_raw<float>(p.hC);
 
@@ -109,9 +120,20 @@ namespace
                         p.Ad.at(row, first[e] * r.bd + c) = v;
                     }
         }
-        p.ind = up_idx<int32_t>(hind);
+        ASSERT_TRUE(r.itype == rocsparse_indextype_i32 || r.itype == rocsparse_indextype_i64);
+        void* ind = nullptr;
+        if(r.itype == rocsparse_indextype_i64)
+        {
+            p.ind64 = up_idx<int64_t>(hind, static_cast<int64_t>(r.base));
+            ind     = p.ind64.ptr;
+        }
+        else
+        {
+            p.ind = up_idx<int32_t>(hind, static_cast<int64_t>(r.base));
+            ind   = p.ind.ptr;
+        }
         p.val = up_val<float>(hval);
-        ASSERT_TRUE(p.dB.ptr && p.dC.ptr && p.ind.ptr && p.val.ptr);
+        ASSERT_TRUE(p.dB.ptr && p.dC.ptr && ind && p.val.ptr);
 
         ASSERT_EQ(rocsparse_create_bell_descr(&p.sp.p,
                                               m,
@@ -119,10 +141,10 @@ namespace
                                               rocsparse_direction_row,
                                               r.bd,
                                               r.cols,
-                                              p.ind.ptr,
+                                              ind,
                                               p.val.ptr,
-                                              rocsparse_indextype_i32,
-                                              rocsparse_index_base_zero,
+                                              r.itype,
+                                              r.base,
                                               rocsparse_datatype_f32_r),
                   rocsparse_status_success);
         ASSERT_EQ(rocsparse_create_dnmat_descr(
@@ -165,6 +187,9 @@ namespace
                      + " n=" + std::to_string(r.n) + " cols=" + std::to_string(r.cols)
                      + " order=" + std::to_string(static_cast<int>(r.order))
                      + " device=" + std::to_string(r.device));
+        SCOPED_TRACE("itype=" + std::to_string(static_cast<int>(r.itype))
+                     + " base=" + std::to_string(static_cast<int>(r.base))
+                     + " ldc_pad=" + std::to_string(r.ldc_pad));
         ASSERT_EQ(r.opA, rocsparse_operation_none);
         BellProblem p;
         ASSERT_NO_FATAL_FAILURE(make_bell_problem(r, p));
@@ -177,12 +202,24 @@ namespace
         auto   spmm = [&](rocsparse_spmm_stage stage, void* buffer) {
             return bell_spmm(handle, r.opA, alpha.get(), p, beta.get(), stage, &bsz, buffer);
         };
+        // The guard after C keeps its sentinel on every stage.
+        auto expect_guard = [&](rocsparse_spmm_stage stage) {
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            const std::vector<float> hC  = p.dC.host();
+            const auto               bad = std::count_if(
+                hC.begin() + p.c_size, hC.end(), [](float v) { return v != -77.0f; });
+            EXPECT_EQ(bad, 0) << "guard after C was written by stage " << static_cast<int>(stage);
+        };
         ASSERT_EQ(spmm(rocsparse_spmm_stage_buffer_size, nullptr), rocsparse_status_success);
+        ASSERT_NO_FATAL_FAILURE(expect_guard(rocsparse_spmm_stage_buffer_size));
         DevBuf<char> buffer(bsz > 0 ? bsz : 1);
         ASSERT_TRUE(buffer.ptr);
         for(rocsparse_spmm_stage stage :
             {rocsparse_spmm_stage_preprocess, rocsparse_spmm_stage_compute})
+        {
             ASSERT_EQ(spmm(stage, buffer.ptr), rocsparse_status_success);
+            ASSERT_NO_FATAL_FAILURE(expect_guard(stage));
+        }
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
         const Dense want = axpby(2.0, matmul(p.Ad, p.Bl), -0.5, p.C0);
@@ -228,6 +265,30 @@ TEST_F(ExtraBell, stored_blocks_match_host_product)
                 r.rows  = rows;
                 r.cols  = blocks * r.bd;
                 r.order = order;
+                run_bell_product(handle, r);
+                if(HasFatalFailure())
+                    return;
+            }
+}
+
+TEST_F(ExtraBell, stored_blocks_i64_base_one_tight_ldc)
+{
+    // As stored_blocks_match_host_product, with int64_t block column indices
+    // in base one and ldc equal to the rows (column order) or columns (row
+    // order) of C, so C has no padding. With 5 rows and 1 row the last block
+    // row is partial; in row order a write to its row past the last row of C
+    // lands in the guard after C.
+    for(int64_t rows : {6, 5, 1})
+        for(int64_t blocks : {1, 2})
+            for(rocsparse_order order : {rocsparse_order_row, rocsparse_order_column})
+            {
+                BellRun r;
+                r.rows    = rows;
+                r.cols    = blocks * r.bd;
+                r.order   = order;
+                r.itype   = rocsparse_indextype_i64;
+                r.base    = rocsparse_index_base_one;
+                r.ldc_pad = 0;
                 run_bell_product(handle, r);
                 if(HasFatalFailure())
                     return;
