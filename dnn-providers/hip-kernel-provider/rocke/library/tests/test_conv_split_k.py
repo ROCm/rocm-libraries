@@ -5,7 +5,7 @@
 CPU-only. Covers the conv-specific limits (reduction availability, the 16-bit
 atomic cap, merged groups, gridDim.z), the override and explicit paths, and
 that an arch without a fitted cost model resolves as the previous CK-formula
-rule did, except that a 16-bit dgrad degree is held to the atomic cap.
+rule did, except that a 16-bit dgrad or wgrad degree is held to the atomic cap.
 """
 
 from __future__ import annotations
@@ -468,6 +468,34 @@ def test_dgrad_fallback_does_not_clamp_fp32():
     )
     assert result.split_k == result.requested == ck.split_k
     assert result.split_k > ATOMIC_16BIT_MAX_SPLIT_K
+
+
+# 1x1, small channels, long N*H*W reduction: the CK formula asks for 608 on
+# gfx942 and 512 on gfx90a, far past the 16-bit atomic limit.
+FALLBACK_WGRAD = ConvProblem(N=256, Hi=28, Wi=28, C=32, K=32, Y=1, X=1)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx90a"])
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+def test_wgrad_fallback_moves_a_16bit_atomic_past_its_limit_to_the_workspace(
+    arch, dtype
+):
+    r = _wgrad(FALLBACK_WGRAD, arch, dtype, reduction="auto")
+    assert r.requested > ATOMIC_16BIT_MAX_SPLIT_K
+    assert (r.split_k, r.two_stage) == (r.requested, True)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx90a"])
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+def test_wgrad_fallback_holds_a_fixed_16bit_atomic_to_its_limit(arch, dtype):
+    r = _wgrad(FALLBACK_WGRAD, arch, dtype, reduction="atomic")
+    assert r.requested > ATOMIC_16BIT_MAX_SPLIT_K
+    assert (r.split_k, r.two_stage) == (ATOMIC_16BIT_MAX_SPLIT_K, False)
+
+
+def test_wgrad_fallback_does_not_clamp_fp32():
+    r = _wgrad(FALLBACK_WGRAD, "gfx942", "fp32", reduction="atomic")
+    assert r.split_k == r.requested > ATOMIC_16BIT_MAX_SPLIT_K
 
 
 def test_benchmark_workers_skip_combos_the_resolver_cannot_serve():

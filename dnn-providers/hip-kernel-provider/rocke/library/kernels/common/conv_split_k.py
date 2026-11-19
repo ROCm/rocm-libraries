@@ -43,9 +43,10 @@ long-standing dispatcher rule instead: the CK formula
 atomic whenever it can be built, else the workspace, else no split. The kernel
 builders and the benchmark, which used to feed the CK formula unmerged
 per-group dims, get it on the launched geometry (merged dims, launched group
-count). For dgrad the CK-formula auto degree of a 16-bit dtype is also held to
-:data:`ATOMIC_16BIT_MAX_SPLIT_K`; the wgrad CK-formula path (``atomic_cap=False``)
-is not.
+count). The CK-formula auto degree of a 16-bit dtype is also held to
+:data:`ATOMIC_16BIT_MAX_SPLIT_K` on the packed atomic: dgrad, which has no
+workspace, comes down to it; a wgrad request free to pick its reduction moves to
+the workspace above it (else it comes down to it, as for ``override``).
 
 ``override`` forces the degree of an auto request: ``1`` forces no split, an
 integer ``n >= 2`` forces that degree, held to what the kernel can build --
@@ -112,8 +113,8 @@ __all__ = [
 # slice rounds its partial into the 16-bit output, so the error grows with the
 # degree: on the gfx950 wgrad corpus the verify gate fails broadly from 256 on,
 # while the f32 workspace reduction passes at every degree. An override is held
-# to it too, and so is the dgrad CK-formula fallback; only an explicit degree is
-# the caller's own.
+# to it too, and so is the CK-formula fallback of both dgrad and wgrad; only an
+# explicit degree is the caller's own.
 ATOMIC_16BIT_MAX_SPLIT_K = 128
 
 # ws_bytes is an i32 kernarg, so a two-stage workspace above this overflows it.
@@ -727,7 +728,7 @@ def _resolve_wgrad(
                 legacy.split_k,
                 f"CK formula ({legacy.reason}); no split: {atomic_why}",
             )
-        return _rule(legacy.split_k, f"CK formula ({legacy.reason})", atomic_cap=False)
+        return _rule(legacy.split_k, f"CK formula ({legacy.reason})", atomic_cap=True)
 
     reductions = []
     if reduction in ("auto", "atomic") and atomic_ok:
@@ -906,7 +907,8 @@ def _resolve_dgrad(
         if _is_16bit(dtype) and degree > ATOMIC_16BIT_MAX_SPLIT_K:
             # dgrad has no workspace to move to: the packed 16-bit atomic stays
             # within its accuracy limit, as the dgrad override and the fitted
-            # planner hold it. (The wgrad CK-formula fallback is unchanged.)
+            # planner hold it. (The wgrad CK-formula fallback moves to its
+            # workspace instead, or is held to the same limit.)
             degree = ATOMIC_16BIT_MAX_SPLIT_K
             reason += f", held to the 16-bit atomic limit {ATOMIC_16BIT_MAX_SPLIT_K}"
         return ConvSplitK(degree, False, legacy.split_k, reason)
