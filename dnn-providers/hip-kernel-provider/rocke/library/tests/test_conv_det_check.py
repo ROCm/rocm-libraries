@@ -27,3 +27,24 @@ def test_count_unwritten(dtype):
     # A partly written element (one byte changed) is written.
     flat.view(torch.uint8).view(-1, t.element_size())[3, 0] = 0
     assert count_unwritten(t) == 0
+
+
+def test_poison_refused_with_fresh(capsys):
+    from benchmarks.common.conv_det_check import main
+
+    with pytest.raises(SystemExit) as e:
+        main(
+            [
+                "--cache",
+                "unused",
+                "--miopen-cmd",
+                "unused",
+                "--kernel",
+                "unused",
+                "--fresh",
+                "--output-init",
+                "poison",
+            ]
+        )
+    assert e.value.code == 2
+    assert "steady-state" in capsys.readouterr().err

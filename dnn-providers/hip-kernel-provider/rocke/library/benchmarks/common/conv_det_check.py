@@ -298,6 +298,9 @@ def main(argv=None) -> int:
         "--against", help="compare the first output with a --save file (another GPU)"
     )
     args = ap.parse_args(argv)
+    if args.fresh and args.output_init == "poison":
+        # A fresh binding zeroes its output: the poison check would not run.
+        ap.error("--output-init poison is a steady-state check; drop --fresh")
 
     import torch
 
