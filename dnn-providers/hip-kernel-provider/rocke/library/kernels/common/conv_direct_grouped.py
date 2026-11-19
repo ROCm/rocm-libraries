@@ -91,7 +91,7 @@ from kernels.common._conv_layouts import ConvKOuterFragmentReader
 from kernels.common.conv_abi import conv_direct_arg_names
 from rocke.helpers.fuse import dtype_to_ir
 from rocke.helpers.spec import ceil_div
-from rocke.helpers.grid import chiplet_transform_chunked_runtime
+from rocke.helpers.grid import NUM_XCDS_MI350X, chiplet_transform_chunked_runtime
 from rocke.helpers.io import concat_tree, smem_load_fragment
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
@@ -4106,7 +4106,7 @@ def direct_conv_lds_bytes(spec: DirectConvSpec) -> int:
 #: XCD count the ``xcd_tiles`` remap is built for, per target. The remap
 #: groups one image row band per XCD; it is only built where the count is
 #: known (gfx950).
-_XCD_TILES_ARCHES = {"gfx950": 8}
+_XCD_TILES_ARCHES = {"gfx950": NUM_XCDS_MI350X}
 #: Fewest image row bands (``N * ceil(H / block_h)``) an ``xcd_tiles`` launch
 #: needs: with fewer, no full block of row bands exists and the remap is the
 #: identity.
@@ -14572,10 +14572,10 @@ def build_direct_dgrad(
 # Launch geometry
 # ---------------------------------------------------------------------------
 
-# Blocks a persistent DirectConvSpec kernel is launched with: 8 XCDs x 32
-# workgroups, the same constants the kernel decodes its cells against. C twins:
+# Blocks a persistent DirectConvSpec kernel is launched with: the platform grid
+# helper's XCD count (NUM_XCDS_MI350X) x 32 workgroups, the same constants the kernel decodes its cells against. C twins:
 # ROCKE_DIRECT_PERSISTENT_{NUM_XCD,BLOCKS_PER_XCD,BLOCKS}.
-DIRECT_PERSISTENT_NUM_XCD = 8
+DIRECT_PERSISTENT_NUM_XCD = NUM_XCDS_MI350X
 DIRECT_PERSISTENT_BLOCKS_PER_XCD = 32
 DIRECT_PERSISTENT_BLOCKS = DIRECT_PERSISTENT_NUM_XCD * DIRECT_PERSISTENT_BLOCKS_PER_XCD
 

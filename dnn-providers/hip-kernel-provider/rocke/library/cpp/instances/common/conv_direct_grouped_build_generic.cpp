@@ -511,7 +511,7 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
             }
             /* _XCD_TILES_ARCHES[arch]: is_valid_spec admits gfx950 only. */
             xc_lin = rocke_chiplet_transform_chunked_runtime(
-                b, xc_lin, num_wgs, ROCKE_DIRECT_PERSISTENT_NUM_XCD, xc_gxy);
+                b, xc_lin, num_wgs, dconv_gen_xcd_tiles_count(arch), xc_gxy);
             if(xc_lin == NULL)
                 return NULL;
             bx = rocke_b_mod(b, xc_lin, xc_gx);

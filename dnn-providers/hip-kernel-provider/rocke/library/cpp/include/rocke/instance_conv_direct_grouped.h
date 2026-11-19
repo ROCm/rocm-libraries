@@ -65,8 +65,10 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <string.h>
 
 #include "rocke/arch_target.h"
+#include "rocke/helper_rocke.helpers.grid.h" /* ROCKE_NUM_XCDS_MI350X */
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
 
@@ -603,13 +605,20 @@ typedef struct rocke_direct_depthwise_tiled_spec
 #define ROCKE_DCONV_DW_TILED_REG_BUDGET 256
 #define ROCKE_DCONV_DW_TILED_UNROLL_MAX_FMAS 6144
 
-/* Blocks a persistent direct-conv kernel is launched with: 8 XCDs x 32
- * workgroups, the constants the generic kernel decodes its cells against.
- * Twins of Python's DIRECT_PERSISTENT_{NUM_XCD,BLOCKS_PER_XCD,BLOCKS}. */
-#define ROCKE_DIRECT_PERSISTENT_NUM_XCD 8
+/* Blocks a persistent direct-conv kernel is launched with: one XCD count of
+ * the platform grid helper (ROCKE_NUM_XCDS_MI350X) x 32 workgroups, the
+ * constants the generic kernel decodes its cells against. Twins of Python's
+ * DIRECT_PERSISTENT_{NUM_XCD,BLOCKS_PER_XCD,BLOCKS}. */
+#define ROCKE_DIRECT_PERSISTENT_NUM_XCD ROCKE_NUM_XCDS_MI350X
 #define ROCKE_DIRECT_PERSISTENT_BLOCKS_PER_XCD 32
 #define ROCKE_DIRECT_PERSISTENT_BLOCKS \
     (ROCKE_DIRECT_PERSISTENT_NUM_XCD * ROCKE_DIRECT_PERSISTENT_BLOCKS_PER_XCD)
+/* The XCD count the xcd_tiles remap is built for (Python: _XCD_TILES_ARCHES);
+ * 0 when the target has none. */
+static inline int dconv_gen_xcd_tiles_count(const char* arch)
+{
+    return (arch != NULL && strcmp(arch, "gfx950") == 0) ? ROCKE_NUM_XCDS_MI350X : 0;
+}
 /* Largest filter extent the dgrad mode takes (Python: _DW_TILED_DGRAD_MAX_K). */
 #define ROCKE_DCONV_DW_TILED_DGRAD_MAX_K 64
 

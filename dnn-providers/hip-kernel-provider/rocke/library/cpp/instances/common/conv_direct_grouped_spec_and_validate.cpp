@@ -4230,13 +4230,6 @@ static bool dconv_gen_row_stream_reason(const rocke_direct_conv_spec_t* spec, ch
     return false;
 }
 
-/* The XCD count the xcd_tiles remap is built for (_XCD_TILES_ARCHES); 0 when
- * the target has none. */
-static int dconv_gen_xcd_tiles_count(const char* arch)
-{
-    return (arch != NULL && strcmp(arch, "gfx950") == 0) ? 8 : 0;
-}
-
 rocke_status_t rocke_direct_conv_validate(const rocke_direct_conv_spec_t* spec,
                                           char* reason,
                                           size_t reason_cap)
