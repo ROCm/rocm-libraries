@@ -45,7 +45,7 @@ from rocisa.instruction import Instruction, SAddCU32, SSubBU32, SCSelectB32, SCS
     MFMAInstruction, MXMFMAInstruction, VCvtPkF32toBF16, VCvtPkF32toFP16
 
 from ...Common.GlobalParameters import globalParameters
-from ...Common import isMxf4SubtilePath, plsinBlockSchedTile
+from ...Common import isMxf4SubtilePath, persistentSpatialCluster, plsinBlockSchedTile
 
 
 # ds_load_b128 reads 4 contiguous VGPRs.
@@ -5961,6 +5961,13 @@ class LogicalScheduler:
         from rocisa.container import sgpr
 
         module = Module("Preloop")
+        if persistentSpatialCluster(kernel) and kernel.get("ClusterBarrier", True):
+            from .ClusterBarrier import subtileClusterBarrierWait
+            # Consume the prologue/re-entry arrival before either the first GR
+            # or a zero-iteration exit. PGR0's initC-only preloop also opens its
+            # own cluster phase, so this belongs outside the emitted schedule.
+            # Alpha-zero nonowners already wait and bypass this preloop entirely.
+            module.add(subtileClusterBarrierWait(writer, kernel))
         _mxf4 = isMxf4SubtilePath(kernel)
 
         skipGRLabel = Label("SkipPreloop" if _mxf4 else "SkipPreloopGR", "")
