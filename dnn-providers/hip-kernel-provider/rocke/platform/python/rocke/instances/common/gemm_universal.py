@@ -2139,56 +2139,50 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             b_par_row_v = None
             a_par_row_static = lds_parity * block_m if _prefetch else 0
             b_par_row_static = lds_parity * block_n if _prefetch else 0
-        new_accs: List[Value] = list(iter_vars)
-        for kk in range(k_atoms):
-            k_tile_base = b.const_i32(kk * t.warp_tile_k)
-            a_rows = []
-            for mi in range(mfmas_m):
-                atom_row = b.add(
-                    warp_m_off,
-                    b.const_i32(mi * t.warp_tile_m + a_par_row_static),
-                )
-                if a_par_row_v is not None:
-                    atom_row = b.add(atom_row, a_par_row_v)
-                a_rows.append(
-                    _emit_frag_smem_load(
-                        A_src,
-                        a_row_in_atom,
-                        a_k_in_atom,
-                        atom_row,
-                        k_tile_base,
-                        a_per_lane,
-                    )
-                )
-            b_cols = []
-            for ni in range(mfmas_n):
-                atom_row = b.add(
-                    warp_n_off,
-                    b.const_i32(ni * t.warp_tile_n + b_par_row_static),
-                )
-                if b_par_row_v is not None:
-                    atom_row = b.add(atom_row, b_par_row_v)
-                b_cols.append(
-                    _emit_frag_smem_load(
-                        B_src,
-                        b_col_in_atom,
-                        b_k_in_atom,
-                        atom_row,
-                        k_tile_base,
-                        b_per_lane,
-                    )
-                )
+        k_tile_base: Value | None = None
+
+        def read_a(kk, mi):
+            nonlocal k_tile_base
+            if mi == 0:
+                k_tile_base = b.const_i32(kk * t.warp_tile_k)
+            assert k_tile_base is not None
+            atom_row = b.add(
+                warp_m_off, b.const_i32(mi * t.warp_tile_m + a_par_row_static)
+            )
+            if a_par_row_v is not None:
+                atom_row = b.add(atom_row, a_par_row_v)
+            return _emit_frag_smem_load(
+                A_src, a_row_in_atom, a_k_in_atom, atom_row, k_tile_base, a_per_lane
+            )
+
+        def read_b(_kk, ni):
+            assert k_tile_base is not None
+            atom_row = b.add(
+                warp_n_off, b.const_i32(ni * t.warp_tile_n + b_par_row_static)
+            )
+            if b_par_row_v is not None:
+                atom_row = b.add(atom_row, b_par_row_v)
+            return _emit_frag_smem_load(
+                B_src, b_col_in_atom, b_k_in_atom, atom_row, k_tile_base, b_per_lane
+            )
+
+        def finish_reads(kk):
             if after_last_reads is not None and kk == k_atoms - 1:
                 after_last_reads()
-            flat = 0
-            for mi in range(mfmas_m):
-                for ni in range(mfmas_n):
-                    new_accs[flat] = _emit_mma(
-                        b, op, a_rows[mi], b_cols[ni], new_accs[flat]
-                    )
-                    flat += 1
-                if after_first_row is not None and kk == k_atoms - 1 and mi == 0:
-                    after_first_row()
+
+        def finish_row(kk, mi):
+            if after_first_row is not None and kk == k_atoms - 1 and mi == 0:
+                after_first_row()
+
+        new_accs = TileMmaDriver.accumulate_staged(
+            subtiles=(mfmas_m, mfmas_n, k_atoms),
+            accs=iter_vars,
+            read_a=read_a,
+            read_b=read_b,
+            mma=lambda a, bb, acc: _emit_mma(b, op, a, bb, acc),
+            after_reads=finish_reads if after_last_reads is not None else None,
+            after_row=finish_row if after_first_row is not None else None,
+        )
         # WMMA intrawave compute schedule (the simple/mem k-loop keeps the LDS
         # store + global load in a separate barrier region, so this region holds
         # only the operand ds_reads + WMMAs). Opt-in via the 'wmma_v1' pipeline.
@@ -2315,7 +2309,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 b, B_src, b_row, _swz_col(col_base, swz_row), b_per_lane, storage_dtype
             )
 
-        def _finish_mma_row():
+        def _finish_mma_row(_kk, _mi):
             b.s_setprio(0)
             b.sched_barrier(0)
 
@@ -2326,7 +2320,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             read_a=_read_a,
             read_b=_read_b,
             mma=lambda a, bb, acc: _emit_mma(b, op, a, bb, acc),
-            before_row=(lambda: b.s_setprio(1)) if prioritize else None,
+            before_row=(lambda _kk, _mi: b.s_setprio(1)) if prioritize else None,
             after_row=_finish_mma_row if prioritize else None,
         )
 
@@ -3029,30 +3023,13 @@ def _emit_epilogue_cshuffle(
     ):
         store_vec //= 2
 
-    if store_vec == 1:
-        # Pathological: fall back to scalar stores.
-        store_vec = 1
-
     tid = b.thread_id_x()
     c_threads = b.const_i32(threads)
     c_tile_n_div_vec = b.const_i32(t.tile_n // store_vec)
-    vecs_per_thread = (t.tile_m * t.tile_n // store_vec) // threads
     pad_m = bool(spec.trait.pad_m)
     pad_n = bool(spec.trait.pad_n)
 
-    # Coalesced (row, col_v, col) decode of a per-thread vec index for the
-    # wide C store. Takes the already-built ``vec_idx`` so the emitted SSA
-    # matches the inline order verbatim.
-    def _vec_rc(vec_idx: Value) -> Tuple[Value, Value, Value]:
-        row = b.div(vec_idx, c_tile_n_div_vec)
-        col_v = b.mod(vec_idx, c_tile_n_div_vec)
-        col = b.mul(col_v, b.const_i32(store_vec)) if store_vec > 1 else col_v
-        return row, col_v, col
-
-    for e in range(vecs_per_thread):
-        vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-        row, col_v, col = _vec_rc(vec_idx)
-
+    def store_chunk(row, col, _chunk_id):
         c_m = b.add(block_m_off, row)
         c_n = b.add(block_n_off, col)
         c_off = b.add(b.mul(c_m, N), c_n)
@@ -3119,6 +3096,10 @@ def _emit_epilogue_cshuffle(
                         b.global_store_vN(C, c_off, hv, store_vec)
                 else:
                     b.global_store_vN(C, c_off, hv, store_vec)
+
+    CoalescedTileLoader(t.tile_m, t.tile_n, threads, store_vec).visit_chunks(
+        b, tid=tid, emit=store_chunk, grid=(c_threads, None, c_tile_n_div_vec)
+    )
 
 
 def _load_smem_scalar(

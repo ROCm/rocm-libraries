@@ -403,7 +403,7 @@ class CoalescedTileLoader:
         return self.tile_rows // self.load_vec
 
     def _decode_row_col(
-        self, b: IRBuilder, vec_idx: Value, *, c_span: Value, c_load_vec: Value
+        self, b: IRBuilder, vec_idx: Value, *, c_span: Value, c_load_vec: Value | None
     ) -> Tuple[Value, Value]:
         """Map a per-thread ``vec_idx`` to tile-local ``(row, col)``.
 
@@ -415,7 +415,10 @@ class CoalescedTileLoader:
         """
         idx0 = b.div(vec_idx, c_span)
         idx1 = b.mod(vec_idx, c_span)
-        chunk = b.mul(idx1, c_load_vec) if self.load_vec > 1 else idx1
+        chunk = idx1
+        if self.load_vec > 1:
+            width = b.const_i32(self.load_vec) if c_load_vec is None else c_load_vec
+            chunk = b.mul(idx1, width)
         if self.vector_axis == "row":
             return chunk, idx0  # row = idx1*load_vec, col = idx0
         return idx0, chunk  # row = idx0, col = idx1*load_vec
@@ -426,13 +429,14 @@ class CoalescedTileLoader:
         *,
         tid: Value,
         emit: Callable[[Value, Value, Value], None],
-        grid: tuple[Value, Value, Value] | None = None,
+        grid: tuple[Value, Value | None, Value] | None = None,
     ) -> None:
         """Visit each lane's coalesced chunks without imposing an address layout.
 
         ``emit(row, col, chunk_id)`` can bind a logical window or use the
         linear chunk ID in packed storage. The optional prebound ``grid`` is
         (threads, vector width, chunks per row or column), in that order.
+        A ``None`` width lets the decoder materialize it per vector chunk.
         """
         if grid is None:
             grid = (

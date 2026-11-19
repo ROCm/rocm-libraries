@@ -89,12 +89,12 @@ static rocke_value_t* rocke_gemm_issue_mfma(
     return rocke_gemm_emit_mma(b, tile.ctx->op, a, bb, acc);
 }
 
-static void rocke_gemm_start_mfma_row(rocke_ir_builder_t* b, void*)
+static void rocke_gemm_start_mfma_row(rocke_ir_builder_t* b, int, int, void*)
 {
     rocke_b_s_setprio(b, 1);
 }
 
-static void rocke_gemm_finish_mfma_row(rocke_ir_builder_t* b, void*)
+static void rocke_gemm_finish_mfma_row(rocke_ir_builder_t* b, int, int, void*)
 {
     rocke_b_s_setprio(b, 0);
     rocke_b_sched_barrier(b, 0);
@@ -204,12 +204,14 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
                                t->warp_tile_n,
                                ctx->b_per_lane}};
     const bool prioritize = ctx->swz && ctx->sched_hints;
-    const rocke_tile_mma_readers_t readers{rocke_gemm_read_mfma_a,
-                                           rocke_gemm_read_mfma_b,
-                                           rocke_gemm_issue_mfma,
-                                           prioritize ? rocke_gemm_start_mfma_row : nullptr,
-                                           prioritize ? rocke_gemm_finish_mfma_row : nullptr,
-                                           &tile};
+    const rocke_tile_mma_readers_t readers{
+        .read_a = rocke_gemm_read_mfma_a,
+        .read_b = rocke_gemm_read_mfma_b,
+        .mma = rocke_gemm_issue_mfma,
+        .after_reads = nullptr,
+        .before_row = prioritize ? rocke_gemm_start_mfma_row : nullptr,
+        .after_row = prioritize ? rocke_gemm_finish_mfma_row : nullptr,
+        .user = &tile};
     rocke_tile_mma_accumulate_staged(b,
                                      {mfmas_m, mfmas_n, k_atoms},
                                      iter_vars,

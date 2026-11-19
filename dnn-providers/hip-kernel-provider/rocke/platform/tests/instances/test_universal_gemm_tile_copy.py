@@ -143,14 +143,28 @@ def _cases():
             "single",
             (128,),
         ),
+        (
+            "cshuffle_full",
+            TraitSpec(pipeline="mem", epilogue="cshuffle"),
+            "single",
+            (96,),
+        ),
+        (
+            "cshuffle_edges",
+            TraitSpec(pipeline="mem", epilogue="cshuffle", pad_m=True, pad_n=True),
+            "single",
+            (96,),
+        ),
     )
 
 
 class TestUniversalGemmTileCopy(unittest.TestCase):
     def _build_case(self, label, trait, schedule):
         spec, kernel, copies, schedules, clipped_reads, dtl_issues = _build(trait)
-        expected = {"single": 2, "sync": 4, "async": 0}[schedule]
-        self.assertEqual(copies, [(64, 32, 8)] * expected)
+        expected = [(64, 32, 8)] * {"single": 2, "sync": 4, "async": 0}[schedule]
+        if trait.epilogue == "cshuffle":
+            expected.append((64, 64, 8))
+        self.assertEqual(copies, expected)
         self.assertEqual(schedules, [schedule])
         self.assertEqual(bool(clipped_reads), trait.pad_k)
         self.assertEqual(dtl_issues, 4 if schedule == "async" else 0)
@@ -226,24 +240,28 @@ class TestUniversalGemmTileCopy(unittest.TestCase):
         from rocke.instances.common.manifest_runner.utils import as_u8_buffer
 
         split_k = spec.trait.split_k
-        m, n = (67, 131) if split_k > 1 else (128, 192)
+        m = 67 if spec.trait.pad_m else 128
+        n = 131 if spec.trait.pad_n else 192
+        edges = spec.trait.pad_m or spec.trait.pad_n
         tile_m, tile_n = spec.tile.tile_m, spec.tile.tile_n
         gm, gn = (m + tile_m - 1) // tile_m, (n + tile_n - 1) // tile_n
         storage_dtype = np.float64 if spec.data.dtype_a == "fp64" else np.float16
         a = rng.integers(-3, 4, (m, k), dtype=np.int16).astype(storage_dtype)
         b = rng.integers(-3, 4, (n, k), dtype=np.int16).astype(storage_dtype)
         a_storage, b_storage = a, b
-        if split_k > 1:
+        output_dtype = np.float32 if split_k > 1 else storage_dtype
+        initial = 0 if split_k > 1 else np.nan
+        if edges:
             # Pad physical input rows but keep the logical M/N bounds. Nonzero
-            # padding makes an unguarded atomic write corrupt C or the canary.
+            # padding makes a missing store/atomic guard corrupt C or the canary.
             a_storage = np.full((gm * tile_m, k), 3, dtype=a.dtype)
             b_storage = np.full((gn * tile_n, k), 5, dtype=b.dtype)
             a_storage[:m], b_storage[:n] = a, b
-            output = np.full(gm * tile_m * gn * tile_n, 137, dtype=np.float32)
+            output = np.full(gm * tile_m * gn * tile_n, 137, dtype=output_dtype)
             c = output[: m * n].reshape(m, n)
-            c.fill(0)
+            c.fill(initial)
         else:
-            c = output = np.full((m, n), np.nan, dtype=storage_dtype)
+            c = output = np.full((m, n), initial, dtype=output_dtype)
         if spec.trait.preshuffle_b:
             tile_n, tile_k = spec.tile.tile_n, spec.tile.tile_k
             k_tiles = (k + tile_k - 1) // tile_k
@@ -277,7 +295,7 @@ class TestUniversalGemmTileCopy(unittest.TestCase):
         ref_dtype = np.float64 if c.dtype == np.float64 else np.float32
         ref = (a.astype(ref_dtype) @ b.astype(ref_dtype).T).astype(c.dtype)
         np.testing.assert_array_equal(c, ref)
-        if split_k > 1:
+        if edges:
             np.testing.assert_array_equal(output[m * n :], 137)
         print(
             json.dumps(

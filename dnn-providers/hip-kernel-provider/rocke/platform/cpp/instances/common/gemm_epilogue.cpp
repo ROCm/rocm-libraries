@@ -23,6 +23,7 @@
 #include "rocke/helper_rocke.helpers.distribution.h" /* tile distribution        */
 #include "rocke/helper_rocke.helpers.fuse.h" /* FusedEpilogue apply/decl */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_io_ir_type           */
+#include "rocke/helper_rocke.helpers.loads.h" /* coalesced chunk traversal */
 #include "rocke/instance_gemm_internal.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
 
@@ -653,7 +654,6 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
     rocke_value_t* tid;
     rocke_value_t* c_threads;
     rocke_value_t* c_tile_n_div_vec;
-    int vecs_per_thread;
     bool pad_m;
     bool pad_n;
 
@@ -751,138 +751,134 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
         store_vec /= 2;
     }
 
-    if(store_vec == 1)
-    {
-        /* Pathological: fall back to scalar stores. */
-        store_vec = 1;
-    }
-
     tid = rocke_b_thread_id_x(b);
     c_threads = rocke_b_const_i32(b, threads);
     c_tile_n_div_vec = rocke_b_const_i32(b, t->tile_n / store_vec);
-    vecs_per_thread = (t->tile_m * t->tile_n / store_vec) / threads;
     pad_m = spec->trait.pad_m;
     pad_n = spec->trait.pad_n;
 
-    {
-        int e;
-        for(e = 0; e < vecs_per_thread; ++e)
+    auto store_chunk = [&](rocke_value_t* row, rocke_value_t* col) {
+        rocke_value_t* c_m = rocke_b_add(b, block_m_off, row);
+        rocke_value_t* c_n = rocke_b_add(b, block_n_off, col);
+        rocke_value_t* c_off = rocke_b_add(b, rocke_b_mul(b, c_m, N), c_n);
+        rocke_value_t* in_bounds = NULL;
+
+        if(batch_off_c != NULL)
+            c_off = rocke_b_add(b, batch_off_c, c_off);
+
+        if(pad_m || pad_n)
         {
-            rocke_value_t* vec_idx
-                = rocke_b_add(b, rocke_b_mul(b, rocke_b_const_i32(b, e), c_threads), tid);
-            /* _vec_rc(vec_idx): row, col_v, col */
-            rocke_value_t* row = rocke_b_div(b, vec_idx, c_tile_n_div_vec);
-            rocke_value_t* col_v = rocke_b_mod(b, vec_idx, c_tile_n_div_vec);
-            rocke_value_t* col
-                = (store_vec > 1) ? rocke_b_mul(b, col_v, rocke_b_const_i32(b, store_vec)) : col_v;
-
-            rocke_value_t* c_m = rocke_b_add(b, block_m_off, row);
-            rocke_value_t* c_n = rocke_b_add(b, block_n_off, col);
-            rocke_value_t* c_off = rocke_b_add(b, rocke_b_mul(b, c_m, N), c_n);
-            rocke_value_t* in_bounds = NULL;
-
-            if(batch_off_c != NULL)
-                c_off = rocke_b_add(b, batch_off_c, c_off);
-
-            if(pad_m || pad_n)
+            rocke_value_t* checks[2];
+            int nchecks = 0;
+            if(pad_m)
+                checks[nchecks++] = rocke_b_cmp_lt(b, c_m, M);
+            if(pad_n)
             {
-                rocke_value_t* checks[2];
-                int nchecks = 0;
-                if(pad_m)
-                    checks[nchecks++] = rocke_b_cmp_lt(b, c_m, M);
-                if(pad_n)
+                if(store_vec == 1)
                 {
-                    if(store_vec == 1)
+                    checks[nchecks++] = rocke_b_cmp_lt(b, c_n, N);
+                }
+                else
+                {
+                    rocke_value_t* c_n_last
+                        = rocke_b_add(b, c_n, rocke_b_const_i32(b, store_vec - 1));
+                    checks[nchecks++] = rocke_b_cmp_lt(b, c_n_last, N);
+                }
+            }
+            in_bounds = (nchecks == 1) ? checks[0] : rocke_b_land(b, checks[0], checks[1]);
+        }
+
+        if(store_vec == 1)
+        {
+            rocke_value_t* h = rocke_gemm_load_smem_scalar(b, Cs, row, col, storage_dtype);
+            if(fused_epilogue != NULL)
+            {
+                /* h = fused_epilogue.apply_scalar(b, h, c_m, c_n) */
+                h = rocke_gemm_fe_apply_scalar(b, fused_epilogue, h, c_m, c_n);
+            }
+            if(in_bounds != NULL)
+            {
+                rocke_if_t iff = rocke_b_scf_if(b, in_bounds);
+                rocke_b_region_enter(b, iff.then_region);
+                rocke_b_global_store(b, C, c_off, h, elem_bytes);
+                rocke_b_region_leave(b);
+            }
+            else
+            {
+                rocke_b_global_store(b, C, c_off, h, elem_bytes);
+            }
+        }
+        else
+        {
+            rocke_value_t* hv = rocke_gemm_load_smem_vec(b, Cs, row, col, store_vec, storage_dtype);
+            if(pad_n)
+            {
+                int i;
+                for(i = 0; i < store_vec; ++i)
+                {
+                    rocke_value_t* c_n_i = i ? rocke_b_add(b, c_n, rocke_b_const_i32(b, i)) : c_n;
+                    rocke_value_t* c_off_i
+                        = i ? rocke_b_add(b, c_off, rocke_b_const_i32(b, i)) : c_off;
+                    rocke_value_t* h = rocke_b_vec_extract(b, hv, i);
+                    rocke_value_t* checks[2];
+                    int nchecks = 0;
+                    rocke_value_t* elem_in_bounds;
+                    if(fused_epilogue != NULL)
                     {
-                        checks[nchecks++] = rocke_b_cmp_lt(b, c_n, N);
+                        h = rocke_gemm_fe_apply_scalar(b, fused_epilogue, h, c_m, c_n_i);
                     }
-                    else
+                    if(pad_m)
+                        checks[nchecks++] = rocke_b_cmp_lt(b, c_m, M);
+                    checks[nchecks++] = rocke_b_cmp_lt(b, c_n_i, N);
+                    elem_in_bounds
+                        = (nchecks == 1) ? checks[0] : rocke_b_land(b, checks[0], checks[1]);
                     {
-                        rocke_value_t* c_n_last
-                            = rocke_b_add(b, c_n, rocke_b_const_i32(b, store_vec - 1));
-                        checks[nchecks++] = rocke_b_cmp_lt(b, c_n_last, N);
+                        rocke_if_t iff = rocke_b_scf_if(b, elem_in_bounds);
+                        rocke_b_region_enter(b, iff.then_region);
+                        rocke_b_global_store(b, C, c_off_i, h, elem_bytes);
+                        rocke_b_region_leave(b);
                     }
                 }
-                in_bounds = (nchecks == 1) ? checks[0] : rocke_b_land(b, checks[0], checks[1]);
             }
-
-            if(store_vec == 1)
+            else
             {
-                rocke_value_t* h = rocke_gemm_load_smem_scalar(b, Cs, row, col, storage_dtype);
                 if(fused_epilogue != NULL)
                 {
-                    /* h = fused_epilogue.apply_scalar(b, h, c_m, c_n) */
-                    h = rocke_gemm_fe_apply_scalar(b, fused_epilogue, h, c_m, c_n);
+                    /* hv = fused_epilogue.apply_vec(b, hv, c_m, c_n, n_elems=store_vec) */
+                    hv = rocke_gemm_fe_apply_vec(
+                        b, fused_epilogue, fused_is_mde, hv, c_m, c_n, store_vec);
                 }
                 if(in_bounds != NULL)
                 {
                     rocke_if_t iff = rocke_b_scf_if(b, in_bounds);
                     rocke_b_region_enter(b, iff.then_region);
-                    rocke_b_global_store(b, C, c_off, h, elem_bytes);
+                    rocke_b_global_store_vN(b, C, c_off, hv, store_vec, 0);
                     rocke_b_region_leave(b);
                 }
                 else
                 {
-                    rocke_b_global_store(b, C, c_off, h, elem_bytes);
-                }
-            }
-            else
-            {
-                rocke_value_t* hv
-                    = rocke_gemm_load_smem_vec(b, Cs, row, col, store_vec, storage_dtype);
-                if(pad_n)
-                {
-                    int i;
-                    for(i = 0; i < store_vec; ++i)
-                    {
-                        rocke_value_t* c_n_i
-                            = i ? rocke_b_add(b, c_n, rocke_b_const_i32(b, i)) : c_n;
-                        rocke_value_t* c_off_i
-                            = i ? rocke_b_add(b, c_off, rocke_b_const_i32(b, i)) : c_off;
-                        rocke_value_t* h = rocke_b_vec_extract(b, hv, i);
-                        rocke_value_t* checks[2];
-                        int nchecks = 0;
-                        rocke_value_t* elem_in_bounds;
-                        if(fused_epilogue != NULL)
-                        {
-                            h = rocke_gemm_fe_apply_scalar(b, fused_epilogue, h, c_m, c_n_i);
-                        }
-                        if(pad_m)
-                            checks[nchecks++] = rocke_b_cmp_lt(b, c_m, M);
-                        checks[nchecks++] = rocke_b_cmp_lt(b, c_n_i, N);
-                        elem_in_bounds
-                            = (nchecks == 1) ? checks[0] : rocke_b_land(b, checks[0], checks[1]);
-                        {
-                            rocke_if_t iff = rocke_b_scf_if(b, elem_in_bounds);
-                            rocke_b_region_enter(b, iff.then_region);
-                            rocke_b_global_store(b, C, c_off_i, h, elem_bytes);
-                            rocke_b_region_leave(b);
-                        }
-                    }
-                }
-                else
-                {
-                    if(fused_epilogue != NULL)
-                    {
-                        /* hv = fused_epilogue.apply_vec(b, hv, c_m, c_n, n_elems=store_vec) */
-                        hv = rocke_gemm_fe_apply_vec(
-                            b, fused_epilogue, fused_is_mde, hv, c_m, c_n, store_vec);
-                    }
-                    if(in_bounds != NULL)
-                    {
-                        rocke_if_t iff = rocke_b_scf_if(b, in_bounds);
-                        rocke_b_region_enter(b, iff.then_region);
-                        rocke_b_global_store_vN(b, C, c_off, hv, store_vec, 0);
-                        rocke_b_region_leave(b);
-                    }
-                    else
-                    {
-                        rocke_b_global_store_vN(b, C, c_off, hv, store_vec, 0);
-                    }
+                    rocke_b_global_store_vN(b, C, c_off, hv, store_vec, 0);
                 }
             }
         }
-    }
+    };
+    rocke_coalesced_tile_loader_t walker = {};
+    walker.tile_rows = t->tile_m;
+    walker.tile_cols = t->tile_n;
+    walker.block_size = threads;
+    walker.load_vec = store_vec;
+    const rocke_coalesced_chunk_grid_t grid{c_threads, NULL, c_tile_n_div_vec};
+    rocke_coalesced_tile_loader_visit_chunks(
+        b,
+        &walker,
+        tid,
+        &grid,
+        [](rocke_ir_builder_t*,
+           rocke_value_t* row,
+           rocke_value_t* col,
+           rocke_value_t*,
+           void* user) { (*static_cast<decltype(store_chunk)*>(user))(row, col); },
+        &store_chunk);
 }
 
 /* =====================================================================

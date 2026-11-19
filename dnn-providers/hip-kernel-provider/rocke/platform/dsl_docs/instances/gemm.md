@@ -256,8 +256,9 @@ Inside one K tile, [`TileMmaDriver.accumulate_staged`](../../python/rocke/helper
 uses the same atom-grid walker as `TileMma`. It reads each A atom row and B
 atom column once per K atom, then reuses them across N and M respectively.
 UniversalGemm binds the lane and LDS addresses and supplies its row priority
-hints. Both engines unroll the atom traversal at build time. WMMA still uses
-its own fragment-loading contract.
+hints. Both engines unroll the atom traversal at build time. WMMA uses the same
+walker with its own fragment readers. Split-barrier TDM signals after the
+last K atom’s reads are issued; early refill starts after its first MMA row.
 
 `scheduler in ("intrawave", "interwave")` selects the `SchedulePolicy` flavor (intra-wave or inter-wave overlap groups).
 
@@ -280,7 +281,9 @@ for each acc vector:
  C[g_m, g_n] = v
 ```
 
-`epilogue = "cshuffle"` (`CShuffleEpilogue`):
+`epilogue = "cshuffle"` (`CShuffleEpilogue`): the LDS-to-global writeback
+uses the coalesced chunk visitor. GEMM still owns its raw-pointer stores,
+output bounds and fused transforms.
 
 ```text
 1. truncate each accumulator slot to f16 (vec_trunc_f32_to_f16 packs 4 floats -> 4 halves)

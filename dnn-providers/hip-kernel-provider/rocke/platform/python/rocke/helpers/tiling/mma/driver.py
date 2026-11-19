@@ -251,16 +251,18 @@ class TileMmaDriver:
         read_a: Callable[[int, int], Value],
         read_b: Callable[[int, int], Value],
         mma: Callable[[Value, Value, Value], Value],
-        before_row: Callable[[], None] | None = None,
-        after_row: Callable[[], None] | None = None,
+        after_reads: Callable[[int], None] | None = None,
+        before_row: Callable[[int, int], None] | None = None,
+        after_row: Callable[[int, int], None] | None = None,
     ) -> list[Value]:
         """Drive a staged atom grid without materializing A/B/C wave fragments.
 
         The caller supplies compatible atom readers and accumulator vectors.
         For each K atom, ``read_a(ki, mi)`` and ``read_b(ki, ni)`` load every A
         row and B column once, before issuing the row-major output grid.
-        Row hooks can emit priority hints; LDS waits and slot ownership remain
-        with the caller. Unlike the Fragment path, the readers own layout checks.
+        ``after_reads(ki)`` runs after issuing that K atom's reads; row hooks
+        receive ``(ki, mi)``. Callers own priority, waits, and slot reuse.
+        Unlike the Fragment path, the readers own layout checks.
         """
         m_sub, n_sub, k_sub = subtiles
         if min(subtiles) <= 0 or len(accs) != m_sub * n_sub:
@@ -275,11 +277,13 @@ class TileMmaDriver:
             if mi == 0 and ni == 0:
                 a_rows = [read_a(ki, row) for row in range(m_sub)]
                 b_cols = [read_b(ki, col) for col in range(n_sub)]
+                if after_reads is not None:
+                    after_reads(ki)
             if ni == 0 and before_row is not None:
-                before_row()
+                before_row(ki, mi)
             acc = mma(a_rows[mi], b_cols[ni], acc)
             if ni == n_sub - 1 and after_row is not None:
-                after_row()
+                after_row(ki, mi)
             return acc
 
         return cls._accumulate_atoms((m_sub, n_sub, k_sub), ("K", "M", "N"), accs, emit)

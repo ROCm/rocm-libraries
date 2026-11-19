@@ -431,7 +431,12 @@ static void ctl_decode_row_col(rocke_ir_builder_t* b,
 {
     rocke_value_t* idx0 = rocke_b_div(b, vec_idx, c_span);
     rocke_value_t* idx1 = rocke_b_mod(b, vec_idx, c_span);
-    rocke_value_t* chunk = (self->load_vec > 1) ? rocke_b_mul(b, idx1, c_load_vec) : idx1;
+    rocke_value_t* chunk = idx1;
+    if(self->load_vec > 1)
+    {
+        rocke_value_t* width = c_load_vec ? c_load_vec : rocke_b_const_i32(b, self->load_vec);
+        chunk = rocke_b_mul(b, idx1, width);
+    }
     if(self->vector_axis_row)
     {
         *out_row = chunk;

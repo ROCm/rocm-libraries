@@ -78,15 +78,16 @@ class TestTdmTileLoader(unittest.TestCase):
             self.skipTest("requires a gfx1250 HIP GPU")
 
         cases = (
-            ("single", 1, 0, False, (32, 80)),
-            ("ping_pong", 2, 8, False, (32, 64, 96, 80)),
-            ("ring", 3, 8, False, (32, 80, 128)),
-            ("early_refill", 2, 8, True, (64, 80, 96)),
+            ("single", 1, 0, False, False, (32, 80)),
+            ("ping_pong", 2, 8, False, False, (32, 64, 96, 80)),
+            ("ring", 3, 8, False, False, (32, 80, 128)),
+            ("split_ring", 3, 8, True, False, (80, 128)),
+            ("early_refill", 2, 8, True, True, (64, 80, 96)),
         )
         tile = TileSpec(128, 128, 32, 2, 2, 1, 16, 16, 32)
         rt = Runtime()
         rng = np.random.default_rng(2302)
-        for name, depth, pad, early, sizes in cases:
+        for name, depth, pad, split_barrier, early, sizes in cases:
             with self.subTest(case=name):
                 spec = UniversalGemmSpec(
                     name=f"tdm_tile_loader_{name}",
@@ -97,7 +98,7 @@ class TestTdmTileLoader(unittest.TestCase):
                         tdm=True,
                         tdm_depth=depth,
                         lds_k_pad=pad,
-                        split_barrier=early,
+                        split_barrier=split_barrier,
                         tdm_alternate_issuers=early,
                         tdm_early_refill=early,
                     ),

@@ -175,7 +175,7 @@ typedef struct rocke_coalesced_tile_loader
 typedef struct rocke_coalesced_chunk_grid
 {
     rocke_value_t* threads;
-    rocke_value_t* width;
+    rocke_value_t* width; /* NULL materializes the width per vector chunk. */
     rocke_value_t* span;
 } rocke_coalesced_chunk_grid_t;
 

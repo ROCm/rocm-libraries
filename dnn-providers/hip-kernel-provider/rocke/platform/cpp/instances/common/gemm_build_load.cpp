@@ -31,6 +31,7 @@
 #include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.loads.h"
 #include "rocke/helper_rocke.helpers.preshuffle.h"
+#include "rocke/helper_rocke.helpers.tiling.mma.h"
 #include "rocke/instance_gemm_internal.h"
 
 /* storage_dtype in (FP8E4M3, BF8E5M2) -- the 8-bit A/B operands of the gfx1250
@@ -589,9 +590,78 @@ void rocke_gemm_emit_wmma_phase(rocke_gemm_build_ctx_t* ctx,
         ctx, A_src, B_src, iter_vars, num_iter_vars, parity_imm, parity_v, out_accs, none, none);
 }
 
-/* after_last_reads is emitted once the last k-atom's fragment loads are issued
- * and before its WMMAs -- the earliest point at which this wave has no further
- * reads of the tile (the split-barrier signal). */
+struct rocke_gemm_wmma_operand
+{
+    rocke_value_t* lds;
+    rocke_value_t* free_in_atom;
+    rocke_value_t* k_in_atom;
+    rocke_value_t* warp_off;
+    rocke_value_t* slot_off;
+    int static_slot_off;
+    int atom_rows;
+    int frag_len;
+};
+
+struct rocke_gemm_wmma_tile
+{
+    rocke_gemm_build_ctx_t* ctx;
+    rocke_gemm_wmma_operand a;
+    rocke_gemm_wmma_operand bb;
+    rocke_value_t* k_tile_base;
+    rocke_gemm_emit_hook_t after_last_reads;
+    rocke_gemm_emit_hook_t after_first_row;
+};
+
+static rocke_value_t* rocke_gemm_read_wmma_operand(rocke_ir_builder_t* b,
+                                                   const rocke_gemm_wmma_tile& tile,
+                                                   const rocke_gemm_wmma_operand& op,
+                                                   int atom)
+{
+    rocke_value_t* row = rocke_b_add(
+        b, op.warp_off, rocke_b_const_i32(b, atom * op.atom_rows + op.static_slot_off));
+    if(op.slot_off != NULL)
+        row = rocke_b_add(b, row, op.slot_off);
+    return rocke_gemm_emit_frag_smem_load(
+        tile.ctx, op.lds, op.free_in_atom, op.k_in_atom, row, tile.k_tile_base, op.frag_len);
+}
+
+static rocke_value_t* rocke_gemm_read_wmma_a(rocke_ir_builder_t* b, int ki, int mi, void* user)
+{
+    auto& tile = *static_cast<rocke_gemm_wmma_tile*>(user);
+    if(mi == 0)
+        tile.k_tile_base = rocke_b_const_i32(b, ki * tile.ctx->spec->tile.warp_tile_k);
+    return rocke_gemm_read_wmma_operand(b, tile, tile.a, mi);
+}
+
+static rocke_value_t* rocke_gemm_read_wmma_b(rocke_ir_builder_t* b, int, int ni, void* user)
+{
+    const auto& tile = *static_cast<rocke_gemm_wmma_tile*>(user);
+    return rocke_gemm_read_wmma_operand(b, tile, tile.bb, ni);
+}
+
+static rocke_value_t* rocke_gemm_issue_wmma(
+    rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* bb, rocke_value_t* acc, void* user)
+{
+    const auto& tile = *static_cast<rocke_gemm_wmma_tile*>(user);
+    return rocke_gemm_emit_mma(b, tile.ctx->op, a, bb, acc);
+}
+
+static void rocke_gemm_finish_wmma_reads(rocke_ir_builder_t*, int ki, void* user)
+{
+    const auto& tile = *static_cast<rocke_gemm_wmma_tile*>(user);
+    if(ki == tile.ctx->k_atoms - 1)
+        tile.after_last_reads.fn(tile.ctx, tile.after_last_reads.user);
+}
+
+static void rocke_gemm_finish_wmma_row(rocke_ir_builder_t*, int ki, int mi, void* user)
+{
+    const auto& tile = *static_cast<rocke_gemm_wmma_tile*>(user);
+    if(ki == tile.ctx->k_atoms - 1 && mi == 0)
+        tile.after_first_row.fn(tile.ctx, tile.after_first_row.user);
+}
+
+/* The after_last_reads hook runs before the last K atom's first MMA;
+ * after_first_row follows its first complete MMA row. */
 void rocke_gemm_emit_wmma_phase_ex(rocke_gemm_build_ctx_t* ctx,
                                    rocke_value_t* A_src,
                                    rocke_value_t* B_src,
@@ -648,49 +718,41 @@ void rocke_gemm_emit_wmma_phase_ex(rocke_gemm_build_ctx_t* ctx,
         b_par_row_static = ctx->prefetch ? parity_imm * ctx->block_n : 0;
     }
 
-    /* new_accs = list(iter_vars) */
-    for(int i = 0; i < ctx->num_accs; ++i)
-        out_accs[i] = iter_vars[i];
-
-    /* Bounded scratch for per-K-step fragment vectors. */
-    rocke_value_t* a_rows[ROCKE_GEMM_MAX_ACCS];
-    rocke_value_t* b_cols[ROCKE_GEMM_MAX_ACCS];
-
-    for(int kk = 0; kk < ctx->k_atoms; ++kk)
-    {
-        rocke_value_t* k_tile_base = rocke_b_const_i32(b, kk * t->warp_tile_k);
-        for(int mi = 0; mi < ctx->mfmas_m; ++mi)
-        {
-            rocke_value_t* atom_row = rocke_b_add(
-                b, warp_m_off, rocke_b_const_i32(b, mi * t->warp_tile_m + a_par_row_static));
-            if(a_par_row_v != NULL)
-                atom_row = rocke_b_add(b, atom_row, a_par_row_v);
-            a_rows[mi] = rocke_gemm_emit_frag_smem_load(
-                ctx, A_src, a_row_in_atom, a_k_in_atom, atom_row, k_tile_base, ctx->a_per_lane);
-        }
-        for(int ni = 0; ni < ctx->mfmas_n; ++ni)
-        {
-            rocke_value_t* atom_row = rocke_b_add(
-                b, warp_n_off, rocke_b_const_i32(b, ni * t->warp_tile_n + b_par_row_static));
-            if(b_par_row_v != NULL)
-                atom_row = rocke_b_add(b, atom_row, b_par_row_v);
-            b_cols[ni] = rocke_gemm_emit_frag_smem_load(
-                ctx, B_src, b_col_in_atom, b_k_in_atom, atom_row, k_tile_base, ctx->b_per_lane);
-        }
-        bool last_k_atom = kk == ctx->k_atoms - 1;
-        if(after_last_reads.fn != NULL && last_k_atom)
-            after_last_reads.fn(ctx, after_last_reads.user);
-        int flat = 0;
-        for(int mi = 0; mi < ctx->mfmas_m; ++mi)
-        {
-            for(int ni = 0; ni < ctx->mfmas_n; ++ni)
-            {
-                out_accs[flat]
-                    = rocke_gemm_emit_mma(b, ctx->op, a_rows[mi], b_cols[ni], out_accs[flat]);
-                ++flat;
-            }
-            if(after_first_row.fn != NULL && last_k_atom && mi == 0)
-                after_first_row.fn(ctx, after_first_row.user);
-        }
-    }
+    rocke_gemm_wmma_tile tile{
+        ctx,
+        {A_src,
+         a_row_in_atom,
+         a_k_in_atom,
+         warp_m_off,
+         a_par_row_v,
+         a_par_row_static,
+         t->warp_tile_m,
+         ctx->a_per_lane},
+        {B_src,
+         b_col_in_atom,
+         b_k_in_atom,
+         warp_n_off,
+         b_par_row_v,
+         b_par_row_static,
+         t->warp_tile_n,
+         ctx->b_per_lane},
+        nullptr,
+        after_last_reads,
+        after_first_row,
+    };
+    const rocke_tile_mma_readers_t readers{
+        .read_a = rocke_gemm_read_wmma_a,
+        .read_b = rocke_gemm_read_wmma_b,
+        .mma = rocke_gemm_issue_wmma,
+        .after_reads = after_last_reads.fn ? rocke_gemm_finish_wmma_reads : nullptr,
+        .before_row = nullptr,
+        .after_row = after_first_row.fn ? rocke_gemm_finish_wmma_row : nullptr,
+        .user = &tile,
+    };
+    rocke_tile_mma_accumulate_staged(b,
+                                     {ctx->mfmas_m, ctx->mfmas_n, ctx->k_atoms},
+                                     iter_vars,
+                                     static_cast<size_t>(ctx->num_accs),
+                                     &readers,
+                                     out_accs);
 }

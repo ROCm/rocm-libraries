@@ -83,12 +83,14 @@ static rocke_value_t* rocke_tile_mma_issue_staged(
             stage.a_rows[row] = op.read_a(b, ki, static_cast<int>(row), op.user);
         for(size_t col = 0; col < stage.b_cols.size(); ++col)
             stage.b_cols[col] = op.read_b(b, ki, static_cast<int>(col), op.user);
+        if(op.after_reads != nullptr)
+            op.after_reads(b, ki, op.user);
     }
     if(ni == 0 && op.before_row != nullptr)
-        op.before_row(b, op.user);
+        op.before_row(b, ki, mi, op.user);
     rocke_value_t* result = op.mma(b, stage.a_rows[mi], stage.b_cols[ni], acc, op.user);
     if(static_cast<size_t>(ni + 1) == stage.b_cols.size() && op.after_row != nullptr)
-        op.after_row(b, op.user);
+        op.after_row(b, ki, mi, op.user);
     return result;
 }
 

@@ -40,20 +40,22 @@ typedef rocke_value_t* (*rocke_tile_mma_read_fn)(rocke_ir_builder_t* b,
                                                  void* user);
 typedef rocke_value_t* (*rocke_tile_mma_issue_fn)(
     rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* bb, rocke_value_t* acc, void* user);
-typedef void (*rocke_tile_mma_row_fn)(rocke_ir_builder_t* b, void* user);
+typedef void (*rocke_tile_mma_reads_fn)(rocke_ir_builder_t* b, int ki, void* user);
+typedef void (*rocke_tile_mma_row_fn)(rocke_ir_builder_t* b, int ki, int mi, void* user);
 
 typedef struct rocke_tile_mma_readers
 {
     rocke_tile_mma_read_fn read_a;
     rocke_tile_mma_read_fn read_b;
     rocke_tile_mma_issue_fn mma;
+    rocke_tile_mma_reads_fn after_reads;
     rocke_tile_mma_row_fn before_row;
     rocke_tile_mma_row_fn after_row;
     void* user;
 } rocke_tile_mma_readers_t;
 
-/* Staged, K/M/N order. Read each A row and B column once per K atom. The
- * optional row hooks bracket its MMAs, not the A/B reads. */
+/* Staged, K/M/N order. Read each A row and B column once per K atom, then
+ * call after_reads before any MMA. Indexed row hooks bracket each MMA row. */
 void rocke_tile_mma_accumulate_staged(rocke_ir_builder_t* b,
                                       rocke_tile_mma_grid_t grid,
                                       rocke_value_t* const* accs,
