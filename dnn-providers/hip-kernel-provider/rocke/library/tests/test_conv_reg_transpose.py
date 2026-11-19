@@ -522,9 +522,13 @@ class TestWgradRdna4Grid(unittest.TestCase):
             target = ArchTarget.from_gfx(arch)
             for direction in ("fwd", "dgrad"):
                 with self.subTest(arch=arch, direction=direction):
-                    # Off the axis unless the direction is in the tuple (the
-                    # tuple is ("fwd", "wgrad") once the forward PR is in).
-                    if direction in CACHE_RDNA4_EXTRA_TILE_K_DIRECTIONS:
+                    # Forward follows the tuple (it is ("fwd", "wgrad") once
+                    # the forward PR is in); dgrad is never on the axis, so a
+                    # tuple that gains "dgrad" fails here.
+                    if (
+                        direction == "fwd"
+                        and direction in CACHE_RDNA4_EXTRA_TILE_K_DIRECTIONS
+                    ):
                         self.assertTrue(at_128(target, direction))
                     else:
                         self.assertFalse(at_128(target, direction))
