@@ -900,8 +900,8 @@ TEST(TestGpuReferenceGraphExecutor, UnsupportedNodeTypeThrows)
 {
     SKIP_IF_NO_DEVICES();
 
-    // BlockScaleDequantize has no GPU plan yet - should throw
-    auto builder = hipdnn_test_sdk::utilities::createValidBlockScaleDequantizeGraph();
+    // MoE grouped matmul has no GPU plan yet.
+    auto builder = hipdnn_test_sdk::utilities::createValidMoeGroupedMatmulGraph();
 
     const std::unordered_map<int64_t, void*> variantPack;
 
