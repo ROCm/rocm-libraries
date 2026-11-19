@@ -19,7 +19,7 @@ Modes (``--mode``, repeatable; default ``staged step``):
 
 * ``staged``  each case's call timed as the sweep's staged protocol times it
               (stalled single-call samples, median) -- must reproduce the
-              per-cell record numbers.
+              per-case numbers the sweep recorded.
 * ``parts``   the same per case, split: the whole call, the call with its
               zeroing memsets skipped, and the memsets alone (``rt.memset_async``
               is intercepted). The difference is what the launcher adds around
@@ -38,11 +38,13 @@ another problem form, e.g. the halo form beside a padded base, on its own
 buffers). ``ab`` also prints each variant's calls-weighted staged sum per
 direction.
 
-Every (case, direction) gets its own operand buffers (``--share`` reuses one
-set per case and direction across its calls, which is the default: the calls of
-one case in a step differ only in their data, and a fresh buffer per call costs
-memory, not fidelity, since no buffer of one case fits the last-level cache beside
-the others).
+By default every call of a (case, direction) gets its own operand buffers;
+``--share`` reuses one set per case and direction across its calls (less
+device memory; the calls of one case in a step differ only in their data).
+
+Commands: bf16 3-D (NDHWC) convolutions only (the host data is bf16 and the
+outputs are read back as bf16); any other command is refused before anything
+is allocated.
 """
 
 from __future__ import annotations
@@ -51,6 +53,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import statistics
 import subprocess
 import sys
@@ -82,6 +85,31 @@ def step_sequence(order=FWD_ORDER):
     return seq
 
 
+def check_replayable(key, problem, dtype) -> None:
+    """Refuse a command this tool cannot replay: it sizes and fills operands as
+    bf16 and builds 3-D (NDHWC) shapes."""
+    if dtype != "bf16" or not getattr(problem, "is_3d", False):
+        form = "3-D" if getattr(problem, "is_3d", False) else "2-D"
+        raise SystemExit(
+            f"{key}: conv_step_replay replays bf16 3-D (NDHWC) commands only; "
+            f"got {dtype} {form}"
+        )
+
+
+def find_amd_smi():
+    """``amd-smi`` on PATH, else under ``$ROCM_PATH`` / ``$ROCM_HOME``; None if absent."""
+    exe = shutil.which("amd-smi")
+    if exe:
+        return exe
+    for var in ("ROCM_PATH", "ROCM_HOME"):
+        root = os.environ.get(var)
+        if root:
+            cand = os.path.join(root, "bin", "amd-smi")
+            if os.path.isfile(cand) and os.access(cand, os.X_OK):
+                return cand
+    return None
+
+
 def _bf16_random(n, seed):
     import numpy as np
 
@@ -95,6 +123,7 @@ class ClockSampler:
 
     def __init__(self, gpu, period=0.5):
         self.gpu, self.period = gpu, period
+        self.exe = find_amd_smi()
         self.samples = []
         self._stop = threading.Event()
         self._t = None
@@ -103,7 +132,7 @@ class ClockSampler:
         try:
             out = subprocess.run(
                 [
-                    "/opt/rocm/bin/amd-smi",
+                    self.exe,
                     "metric",
                     "-g",
                     str(self.gpu),
@@ -146,6 +175,13 @@ class ClockSampler:
             self._stop.wait(self.period)
 
     def start(self):
+        if self.exe is None:
+            print(
+                "[replay] amd-smi not found (PATH, ROCM_PATH); clock sampling off",
+                file=sys.stderr,
+                flush=True,
+            )
+            return
         self._t = threading.Thread(target=self._run, daemon=True)
         self._t.start()
 
@@ -200,6 +236,7 @@ class Case:
         self.calls = int(pin.get("calls", 1))
         self.ref_ms = pin.get("ms")
         problem, dtype, forw = B.parse_miopen_cmd(pin["cmd"])
+        check_replayable(key, problem, dtype)
         direction = {1: "fwd", 2: "dgrad", 4: "wgrad"}[int(forw)]
         self.direction, self.problem, self.dtype = direction, problem, dtype
         # A production route (``--routes``): pad copy / Winograd launches around
@@ -254,17 +291,7 @@ class Case:
             self.bufs += list(ptrs)
             for ptr, nb in zip(ptrs[:2], sizes[:2]):
                 n = nb // 2
-                rt.memcpy_h2d(
-                    ptr,
-                    (
-                        host_bits.ctypes.data_as(
-                            __import__("ctypes").POINTER(__import__("ctypes").c_uint8)
-                        ).contents
-                        if False
-                        else _u8(host_bits, n * 2)
-                    ),
-                    n * 2,
-                )
+                rt.memcpy_h2d(ptr, _u8(host_bits, n * 2), n * 2)
             rt.memset(ptrs[2], 0, sizes[2])
             self.ptr_sets.append(ptrs)
         self.live_extras = []
@@ -630,6 +657,7 @@ def main(argv=None) -> int:
     ap.add_argument("--tag", default="")
     args = ap.parse_args(argv)
     modes = args.mode or ["staged", "step"]
+    exit_rc = 0
 
     sys.meta_path.insert(0, _NoTorch())
     from pathlib import Path
@@ -675,10 +703,11 @@ def main(argv=None) -> int:
     for k, row in [(k, pins[k]) for k in need] + [
         (k, fp[k]) for fp in form_pins.values() for k in need if k in fp
     ]:
-        problem, _, _ = B.parse_miopen_cmd(row["cmd"])
+        problem, dtype, _ = B.parse_miopen_cmd(row["cmd"])
+        check_replayable(k, problem, dtype)
         p = problem
         # every operand the host data is copied into: activations and the filter
-        # (the filter dominates the deep layers, e.g. s10: 57 MB vs 3.7 MB of dX)
+        # (the filter dominates the deepest layers)
         max_bytes = max(
             max_bytes,
             2 * p.N * max(p.Di * p.Hi * p.Wi * p.C, p.Do * p.Ho * p.Wo * p.K),
@@ -946,8 +975,8 @@ def main(argv=None) -> int:
         tot_dir = {n: {} for n in names}
         for k in keys:
             labels = [variants[n][k].label for n in names]
-            # one timing per distinct (label, env) callable; identical pins of a
-            # pins-variant reuse the base timing
+            # every variant is timed, identical pins included; the [=/*] marker
+            # shows which variants run the base's kernels
             t = time_interleaved_staged(
                 [variants[n][k].run for n in names],
                 rounds=args.rounds,
@@ -1370,11 +1399,26 @@ def main(argv=None) -> int:
                 b = gout[key_]
                 den = float(_np.max(_np.abs(a))) or 1.0
                 worst = max(worst, float(_np.max(_np.abs(a - b))) / den)
+            graph_ok = worst < 1e-2
+            out["graph_check"] = {
+                "outputs": len(eager),
+                "max_rel_err": worst,
+                "pass": graph_ok,
+            }
             print(
                 f"[replay] graph check: {len(eager)} outputs, max |eager - graph| / max|eager| = {worst:.3e} "
-                f"({'PASS' if worst < 1e-2 else 'FAIL'})",
+                f"({'PASS' if graph_ok else 'FAIL'})",
                 flush=True,
             )
+            if not graph_ok:
+                # A capture that does not reproduce the eager step is not timed:
+                # its rows would read as valid. The run exits 1.
+                print(
+                    "[replay] graph variant dropped: its outputs differ from the eager step",
+                    flush=True,
+                )
+                variants.pop("graph")
+                exit_rc = 1
         reps = []
         for rep in range(args.step_reps):
             _vl = list(variants.items())
@@ -1535,7 +1579,7 @@ def main(argv=None) -> int:
         B._free_extras(rt, c.live_extras)
         for b in c.bufs:
             rt.free(b)
-    return 0
+    return exit_rc
 
 
 if __name__ == "__main__":

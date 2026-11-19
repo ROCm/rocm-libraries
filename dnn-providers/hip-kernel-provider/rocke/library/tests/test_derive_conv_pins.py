@@ -7,16 +7,12 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
-SCRIPT = (
-    Path(__file__).resolve().parents[1]
-    / "benchmarks"
-    / "common"
-    / "derive_conv_pins.py"
-)
+LIBRARY = Path(__file__).resolve().parents[1]
 CMD = "MIOpenDriver convbfp16 -n 1 -c 64 -H 8 -W 8 -k 64 -y 3 -x 3 -F 1"
 
 
@@ -40,9 +36,23 @@ def _run_dir(tmp: Path, name: str, winner: str, finalists: dict) -> Path:
 
 def _derive(tmp: Path, *dirs, extra=()):
     out = tmp / "pins.json"
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(LIBRARY)] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
+    )
     subprocess.run(
-        [sys.executable, str(SCRIPT), "--out", str(out), *extra, *map(str, dirs)],
+        [
+            sys.executable,
+            "-m",
+            "benchmarks.common.derive_conv_pins",
+            "--out",
+            str(out),
+            *extra,
+            *map(str, dirs),
+        ],
         check=True,
+        cwd=LIBRARY,
+        env=env,
     )
     return json.loads(out.read_text())["cases"]
 
@@ -63,3 +73,12 @@ def test_several_runs_pin_the_lowest_median(tmp_path):
     assert pins["fwd_s1"]["kernel"] == "k2"
     assert pins["fwd_s1"]["alts"][0] == "k2" and "k1" in pins["fwd_s1"]["alts"]
     assert "probe-only-label" not in pins["fwd_s1"]["alts"]
+
+
+def test_shape_calls_follow_the_step_order():
+    from benchmarks.common.conv_step_replay import step_sequence
+    from benchmarks.common.derive_conv_pins import SHAPE_CALLS
+
+    fwd = [s for d, s in step_sequence() if d == "fwd"]
+    assert SHAPE_CALLS == {s: fwd.count(s) for s in set(fwd)}
+    assert SHAPE_CALLS == {1: 2, 2: 1, 3: 1, 4: 2, 5: 1, 6: 2, 7: 2, 8: 1, 9: 1, 10: 2}

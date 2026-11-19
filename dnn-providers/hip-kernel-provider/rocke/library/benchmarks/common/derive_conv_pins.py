@@ -2,23 +2,31 @@
 # SPDX-License-Identifier: MIT
 """Derive a pins file (case -> kernel + launch) from benchmark_conv_compare results.
 
-usage: python derive_conv_pins.py --out pins.json RUN_DIR [RUN_DIR ...]
+usage: python -m benchmarks.common.derive_conv_pins --out pins.json RUN_DIR [RUN_DIR ...]
 
-Each RUN_DIR holds ``<dir>_s<N>.jsonl`` result rows and their ``.log``. With
-one run the pin is that run's pick.
+Each RUN_DIR holds one ``<direction>_s<N>.jsonl`` per case (direction fwd,
+dgrad or wgrad; N the shape id of :data:`conv_step_replay.FWD_ORDER`): the
+``--results`` file of a ``benchmark_conv_compare.py --fast-rank`` run of that
+case, with the run's stdout saved beside it as ``<direction>_s<N>.jsonl.log``.
+A pin's ``calls`` is how often its shape occurs in one step
+(:func:`conv_step_replay.step_sequence`). With one run the pin is that run's pick.
 With several, every finalist time a log printed (``[i/n]  TFLOPS  ms  label``) is
 collected per case and label; the pin is the label with the lowest median over
 the runs that measured it, among labels measured in at least ``--min-runs`` runs
 (default: half of the runs that measured the case, rounded up). The ``ms`` of a pin is that median.
 """
 import argparse
+import collections
 import json
 import os
 import re
 import statistics
 import sys
 
-SHAPE_CALLS = {1: 2, 2: 1, 3: 1, 4: 2, 5: 1, 6: 2, 7: 2, 8: 1, 9: 1, 10: 2}
+from benchmarks.common.conv_step_replay import FWD_ORDER
+
+# calls per step of each shape id: one per occurrence in the forward order
+SHAPE_CALLS = dict(collections.Counter(FWD_ORDER))
 FIN_RE = re.compile(
     r"^\s+\[\s*\d+/\d+\]\s+([\d.]+) TFLOPS\s+([\d.]+) ms\s+(\S.*\S)\s*$"
 )
