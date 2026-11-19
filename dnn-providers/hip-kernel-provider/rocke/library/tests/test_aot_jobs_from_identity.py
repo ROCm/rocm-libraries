@@ -115,8 +115,12 @@ def test_job_for_identity_stays_the_strict_inverse_of_the_grid():
         except LookupError:
             off_grid.append(ident)
     assert off_grid, "every shipped label is on the default grid"
+    from benchmarks.common.reproduce_kernel import job_and_builder
+
     for ident in off_grid[:3]:
         assert aj.rebuild_job_for_identity(ident).identity == ident
+        # reproduce_kernel.py rebuilds a label off the grid too.
+        assert job_and_builder(ident)[0] == aj.rebuild_job_for_identity(ident)
     on_grid = next(iter(_grid_jobs("gfx950", "fwd", "bf16", 1)))
     basic = dataclasses.replace(on_grid.identity, pipeline="basic")
     with pytest.raises(LookupError):
