@@ -198,6 +198,16 @@ std::vector<SdpaBwdTestCase> getSdpaBwdSmokeTestCases()
         SdpaBwdTestCase({1, 1, 128, 192}, {1, 1, 256, 128}, std::nullopt, -1, 0, true)
             .withA16()
             .onlyOn(K_GFX950_ONLY),
+        // One case per gfx950 hd64 and hd192 row family the cases above leave out
+        // (A32 masks 0-2, A16 masks 0-1), so this tier reaches every gfx950 row
+        // family these head dims select.
+        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 256, 64}).onlyOn(K_GFX950_ONLY),
+        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 256, 64}, std::nullopt, -1, 0, false)
+            .onlyOn(K_GFX950_ONLY),
+        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 128, 64}).withA16().onlyOn(K_GFX950_ONLY),
+        SdpaBwdTestCase({1, 1, 128, 192}, {1, 1, 256, 192}).onlyOn(K_GFX950_ONLY),
+        SdpaBwdTestCase({1, 1, 128, 192}, {1, 1, 256, 192}, std::nullopt, -1, 0, true)
+            .onlyOn(K_GFX950_ONLY),
     };
 }
 
@@ -249,11 +259,13 @@ std::vector<SdpaBwdTestCase> getSdpaBwdComprehensiveTestCases()
         SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 192}),
         SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 192}, std::nullopt, -1, 0, true),
         // S_q = 1 on the hd64 and hd192 rows, which gfx950 runs as the gfx942
-        // kernels rebuilt. hd64 takes the atol of the other S_q = 1 cases (worst
-        // ratio 0.14 over seeds 0-3 on MI300X and MI355X). At hd192 the bf16 dQ
-        // reaches 6.25 and its error 0.03125 (one bf16 ulp there), which used 88%
-        // of a 1e-2 atol on gfx942; atol 6.25e-2 keeps the ratio at or below 0.5,
-        // and the smallest largest |dV| measured, 0.247, still fails a halved dV.
+        // kernels rebuilt. hd64 takes the atol of the other S_q = 1 cases. At hd192
+        // the bf16 dQ reaches 6.25, where one bf16 ulp (0.03125) used 88% of a 1e-2
+        // atol on gfx942, so the case uses 6.25e-2. Over seeds 0-7 on an MI325X
+        // (gfx942) and an MI355X (gfx950) the worst ratio is 0.18 at hd64 and 0.06
+        // at hd192, and at hd192 the smallest largest |dV|, |dK| and |dQ| are 0.25,
+        // 0.38 and 0.80. A halved or all-zero output fails once its largest |ref|
+        // exceeds 0.16, so each of them fails.
         SdpaBwdTestCase({1, 2, 1, 64}, {1, 2, 256, 64}).withAbsoluteTolerance(1e-2f),
         SdpaBwdTestCase({1, 2, 1, 192}, {1, 2, 256, 192}).withAbsoluteTolerance(6.25e-2f),
         // D_qk = 192 with D_v = 128: the hd128 odo, the 192 x 128 dqdkdv and the
@@ -586,16 +598,13 @@ protected:
         ASSERT_NO_FATAL_FAILURE(registerOutput(dq, "dQ"));
         ASSERT_NO_FATAL_FAILURE(registerOutput(dk, "dK"));
         ASSERT_NO_FATAL_FAILURE(registerOutput(dv, "dV"));
-        if(!testCase.a16)
+        // A32 is the engine's default accumulator, so it needs no knob.
+        std::vector<KnobSetting> knobs;
+        if(testCase.a16)
         {
-            this->verifyGraph(context, 0);
-            return;
+            knobs.emplace_back("hipkernel.sdpa.bwd.accumulator_type", std::string("a16"));
         }
-
-        ASSERT_NO_FATAL_FAILURE(this->buildPlansForEngine(
-            graph,
-            ASM_SDPA_ENGINE_ID,
-            {KnobSetting("hipkernel.sdpa.bwd.accumulator_type", std::string("a16"))}));
+        ASSERT_NO_FATAL_FAILURE(this->buildPlansForEngine(graph, ASM_SDPA_ENGINE_ID, knobs));
         this->verifyBuiltGraph(context, 0);
     }
 
@@ -625,15 +634,17 @@ TEST_P(IntegrationGpuSdpaBwdBf16, Correctness)
     // dQ, dK and dV reach BF16 through these paths:
     // - A32 (gfx942 and gfx950): DQDKDV accumulates dQ in FP32 and dq_convert rounds it
     //   to BF16 once.
-    // - A16 on gfx942: DQDKDV writes dQ directly.
-    // - A16 on gfx950: DQDKDV accumulates into a 16-bit dq_acc and dq_shuffle writes dQ.
+    // - A16 on gfx942, and on gfx950 at D_qk = 64: DQDKDV writes dQ directly.
+    // - A16 on gfx950 at D_qk != 64: DQDKDV accumulates into a 16-bit dq_acc and
+    //   dq_shuffle writes dQ.
     // The CPU reference accumulates in FP32 and rounds to BF16 once. The kernels also
     // recompute the softmax with their own rounding, so near-zero probabilities differ
     // from the reference's, and the dS = P * (dP - D) subtraction amplifies the
     // difference.
     //
-    // atol = rtol = 0.1 on both paths, and atol = 1e-2 for the S_q = 1 cases. Measured on
-    // an MI300X (gfx942) and an MI355X (gfx950) over seeds 0-7 from the SDPA_BWD_ERROR
+    // atol = rtol = 0.1 on both paths. The S_q = 1 cases use atol = 1e-2, except the
+    // hd192 one, which uses 6.25e-2 (see its case comment). Measured on an MI300X or an
+    // MI325X (gfx942) and an MI355X (gfx950) over seeds 0-7 from the SDPA_BWD_ERROR
     // lines: the largest error uses 22% of the bound on the paths and 28% on the S_q = 1
     // cases, and every halved or all-zero dQ, dK or dV fails each case. Keep worst_ratio
     // at or below 0.5 when changing them.
@@ -656,7 +667,7 @@ TEST_P(IntegrationGpuSdpaBwdFp16, Correctness)
     // FP16 takes the paths the BF16 test lists; its 10-bit mantissa (BF16 has 7) leaves
     // less rounding error on each.
     //
-    // The same tolerances as BF16, from the same measurement: the largest error uses 3%
+    // The same tolerances as BF16, from the same measurement: the largest error uses 4%
     // of the bound on the paths and the S_q = 1 cases.
     const SdpaBwdTolerance a32{0.1f, 0.1f};
     const SdpaBwdTolerance a16{0.1f, 0.1f};
