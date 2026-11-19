@@ -309,13 +309,13 @@ Opt-in identity fields (all default off; AOT env axes in `aot_jobs._fwd_sched_k_
 | `rpf_fetch_late` (`flate`) | `ROCKE_AOT_FWD_FLATE=1` | Next tile's loads behind the first LDS reads. |
 | `xh_dpp` (`xdpp`) | `ROCKE_AOT_FWD_XDPP=1` | x-halo: taps 1, 2 shift the previous tap's A fragments through the lanes (DPP) instead of re-reading LDS. Python engine only (see below). |
 | `xh_pad` (`xpd`) | `ROCKE_AOT_FWD_XPD=1` | The wave-private x-halo DMA loop (`fxh_dma >= 1000`) on padded inputs: the DMA masks the padding itself (dilation 1 along D / H). |
+| `rpf_setprio=n` (`prio<n>`) | `ROCKE_AOT_FWD_PRIO=1` | `s_setprio n` over the load issue and the MFMA phase. |
+| `defer_mfma` on the x-halo loop | `ROCKE_AOT_FWD_SCHED=..d1..,..d2..` | The last tap's last kk MFMAs (or all of them) run after an LDS-only barrier, interleaved with the next tile's LDS writes. |
+| `waves_per_eu` | `ROCKE_AOT_FWD_WPE=n` | Occupancy target clones of the rpf1 lxor loops (name tag `wpe<n>`). |
 
 `xh_dpp`, `a_direct` (`adir`), `xh_subtile` (`xsub`), `pp_fetch_deep` (`ppfd`) and `prefetch_regs` (`pfr`) are
 Python-engine only: the C++ engine has no twin, so the conv binding refuses a spec that sets one (a `ValueError`
 naming the field) rather than build another kernel under its name, and the byte-identity gate does not cover them.
-| `rpf_setprio=n` (`prio<n>`) | `ROCKE_AOT_FWD_PRIO=1` | `s_setprio n` over the load issue and the MFMA phase. |
-| `defer_mfma` on the x-halo loop | `ROCKE_AOT_FWD_SCHED=..d1..,..d2..` | The last tap's last kk MFMAs (or all of them) run after an LDS-only barrier, interleaved with the next tile's LDS writes. |
-| `waves_per_eu` | `ROCKE_AOT_FWD_WPE=n` | Occupancy target clones of the rpf1 lxor loops (name tag `wpe<n>`). |
 
 The x-halo knobs target large-spatial 3-D shapes on gfx942, on tiles such as `t256x64x32 w4x1 mem cshuffle xcd6 lxor kprd uxh(4|8)`
 (+ tapf/cg2 for C >= 128, lah, dfr1/2, prio1).
