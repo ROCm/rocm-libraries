@@ -81,9 +81,9 @@ def _dst(inst):
 
 # ---------------------------------------------------------------- parameter
 
-def test_parameter_is_registered_and_off_by_default():
+def test_parameter_is_registered_and_on_by_default():
     assert validParameters["StoreCachelineAlign"] == [False, True]
-    assert {"StoreCachelineAlign": [False]} in defaultBenchmarkCommonParameters
+    assert {"StoreCachelineAlign": [True]} in defaultBenchmarkCommonParameters
     assert "StoreCachelineAlign" in getRequiredParametersMin()
     assert storeCachelineAlignEnabled({}) is False
     assert storeCachelineAlignEnabled({"StoreCachelineAlign": True}) is True

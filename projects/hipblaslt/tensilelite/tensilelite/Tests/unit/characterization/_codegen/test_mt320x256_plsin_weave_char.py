@@ -1,6 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""MT320x256 last-K PLSIN Weave: fused arm uses permlane16, plain keeps ds_bpermute.
+"""MT320x256 last-K PLSIN Weave: fused arm uses permlane16, plain keeps ds_bpermute
+unless the store cacheline align moves it to permlane16 as well.
 
 MIWT [10,8] has a tile product of 80, past the 64 ``spillFree`` admits, so this
 is the one emit in the unit suite that resolves PLSIN True through
@@ -67,13 +68,25 @@ def test_mt320x256_plsin_weave_solutions_are_in_scope():
         assert st["MIWaveTile"][0] * st["MIWaveTile"][1] > 64
 
 
-def test_mt320x256_plsin_weave_emits_dual_shuffle():
-    results = emit_kernels_from_config(_CONFIG, limit=2, arch=_ARCH, canonical=True)
-    assert results, f"no kernels from {_CONFIG}"
+def _emit_group0(config):
+    results = emit_kernels_from_config(config, limit=2, arch=_ARCH, canonical=True)
+    assert results, f"no kernels from {config}"
     assert all(err == 0 for (_b, _s, err) in results), (
         f"emit failed: {[(b, e) for b, _s, e in results if e != 0]}"
     )
-    for base, src, _err in results:
+    return results
+
+
+def test_mt320x256_plsin_weave_emits_dual_shuffle(tmp_path):
+    """Without the store cacheline align each arm keeps its own shuffle."""
+    with open(_CONFIG) as f:
+        text = f.read()
+    gate = "        - PostLoopStoreInNll: [true]\n"
+    assert gate in text, f"{_CONFIG}: no PostLoopStoreInNll fork to hang the override on"
+    config = tmp_path / "mt320x256_plsin_weave_noalign.yaml"
+    config.write_text(text.replace(gate, gate + "        - StoreCachelineAlign: [false]\n"))
+
+    for base, src, _err in _emit_group0(str(config)):
         fused, rest = _split_fused_vs_rest(base, src)
         assert "v_permlane16_swap_b32" in fused, (
             f"{base}: fused Weave store should use v_permlane16_swap"
@@ -81,6 +94,24 @@ def test_mt320x256_plsin_weave_emits_dual_shuffle():
         assert rest, f"{base}: missing plain-NLL / post-loop tail"
         assert "ds_bpermute_b32" in rest, (
             f"{base}: plain NLL/post-loop should keep ds_bpermute"
+        )
+
+
+def test_mt320x256_store_cacheline_align_puts_the_plain_store_on_permlane16():
+    """With the store cacheline align (the default) the plain store takes the permlane16
+    layout too: the align blends in that layout, so the plain arm cannot stay on
+    ds_bpermute. The fused arm is unchanged."""
+    for base, src, _err in _emit_group0(_CONFIG):
+        fused, rest = _split_fused_vs_rest(base, src)
+        assert "v_permlane16_swap_b32" in fused, (
+            f"{base}: fused Weave store should use v_permlane16_swap"
+        )
+        assert rest, f"{base}: missing plain-NLL / post-loop tail"
+        assert "v_permlane16_swap_b32" in rest, (
+            f"{base}: the aligned plain store should use v_permlane16_swap"
+        )
+        assert "ds_bpermute_b32" not in rest, (
+            f"{base}: the aligned plain store should not keep ds_bpermute"
         )
 
 
