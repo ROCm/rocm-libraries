@@ -42,10 +42,26 @@ CTA count is a formula of the shape) — keep per-shape identity. Baked grid ker
 still take batch and both seqlens as parameters; that ABI does not make a baked
 diagonal safe to reuse for a different sequence-length difference.
 
+Q, K, V and O are logical `[B, S, H, D]` views of any storage layout the host admits: every
+kernel takes twelve trailing `i32` arguments, a batch, head and token element stride per
+tensor (the head-dim stride is 1), after all other parameters, so BSHD, BHSD, batch slices
+and packed QKV views launch without a copy. The grid body, its KV-segment form, the
+persistent body in every order that reads the runtime shape, and the wide-DMA form read
+them; the `gqa_pair` orders, the fp8 K/V-cache bodies and ragged, varlen and paged specs take the arguments and ignore
+them, and `run_attention_dense_torch` admits packed tensors only for those
+(`body_serves_strides`). A strided O is refused with `kv_segments > 1`. The strides are not a
+spec field: the kernel name and the cache key do not change. The admission rules (stride
+multiples, alignment, overlap, size limits) are in
+`kernels/common/_attention_dense_strides.py`.
+
 Tile/resource knobs are `block_n`, `waves_per_eu`, and `lds_k_group_pad`;
 persistent scheduling knobs are `num_persistent`, `interleave`, and `wide_lds_dma`;
 block-order knobs are `persist_decode`, `nonpersist_decode`, and
 `chiplet_num_xcds` (see `../ALGORITHM.md` §8.2).
+
+The measured cost of the launch-time strides against `develop` and the strided-layout catalog
+sweep, for gfx942 and gfx950, are in
+[`dense_attention_launch_time_strides_case_study.md`](dense_attention_launch_time_strides_case_study.md).
 
 ## Persistent (grid-stride) mode
 

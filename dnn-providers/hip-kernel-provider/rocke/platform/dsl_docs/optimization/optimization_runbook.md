@@ -356,6 +356,11 @@ top-level constraint applies verbatim here.
   event-timed loop.
 - Pin GPU clocks if you suspect throttling:
   `sudo rocm-smi --setperflevel high && sudo rocm-smi --setsclk 7`.
+- To compare two code versions, time every arm in ONE process on the same
+  buffers, in a balanced mirrored order, and load the baseline's code object a
+  second time as an A/A' noise control; one process per arm showed offsets as
+  large as the effect being measured (worked example:
+  `library/builders/gfx950/attention/prefill/dense_attention_launch_time_strides_case_study.md`).
 
 ### 2.4 Metadata To Record
 
@@ -1274,6 +1279,12 @@ layout match, independent of the atom's compute throughput.
   arbitrary addresses (lane-contiguous for gfx9 `buffer_load … lds`; gfx1250's
   `global_load_async_to_lds` takes a per-lane LDS address; see Sections 6.3 and 6.4a).
 - If arbitrary swizzle is needed, verify the intrinsic supports it.
+- The LDS destination of a gfx9 `buffer_load ... lds` copy is wave-uniform. Keep
+  the wave's first group offset in one SGPR computed once and add a
+  compile-time group constant per copy: deriving it per row in a VGPR costs a
+  VGPR and a `v_readfirstlane` per issue in the loop. In the dense attention
+  grid bodies this paid for the extra address arithmetic of launch-time
+  strides.
 
 ### 8.3 Waits And Barriers
 
@@ -1358,7 +1369,11 @@ top of the main-loop body**, and when you use it **suppress the manual
   exists.
 - Group enough MFMA between waits.
 - Watch scalar ALU address arithmetic (`probe_isa_inspect.py`'s
-  `salu` sub-bucket grows if the address math is not hoisted).
+  `salu` sub-bucket grows if the address math is not hoisted). Hoist what does
+  not depend on the work item, keep the per-lane part in the VGPR offset, and
+  re-check the schedule after any address change: on a D128 attention KV loop
+  the compiler's overlap of the softmax exps with the PV MFMAs was lost by
+  address-code changes until each PV MFMA was emitted right after its P pack.
 
 ### 8.6 Diagnosing the bound: barrier-bound vs schedule-bound
 

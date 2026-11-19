@@ -36,6 +36,10 @@ from dispatch.attention import (
     tuning_spec_with_knobs,
 )
 from dispatch.attention.gfx942_dense import tuned_base_spec
+from kernels.common._attention_dense_strides import (
+    DENSE_STRIDE_NAMES,
+    packed_launch_strides,
+)
 from kernels.common.attention_dense_spec import (
     AttentionDenseSpec,
     attention_dense_cache_key,
@@ -681,6 +685,7 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
             "num_kv_heads",
         ]
         ptrs_and_scale = ["q_ptr", "k_ptr", "v_ptr", "o_ptr", "scale"]
+        strides = list(DENSE_STRIDE_NAMES)
         shapes = [
             {"batch": b, "nhead_q": hq, "nhead_k": hk}
             for b in (1, 2, 4)
@@ -726,9 +731,13 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
                         )
                         self.assertIn("persist304", name)
                     names = [p["name"] for p in attention_dense_signature(specs[0])]
-                    self.assertEqual(names, ptrs_and_scale + shape_args + tail)
                     self.assertEqual(
-                        names[len(ptrs_and_scale) :],
+                        names, ptrs_and_scale + shape_args + tail + strides
+                    )
+                    # The shape kernargs, then the 12 strides, which are not shape
+                    # kernargs of the spec.
+                    self.assertEqual(
+                        names[len(ptrs_and_scale) : -len(strides)],
                         list(specs[0].runtime_kernarg_fields),
                     )
 
@@ -778,8 +787,9 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
         for i, a in enumerate(name_sets):
             for other in name_sets[i + 1 :]:
                 self.assertFalse(a & other)
+        # No shape params, but every dense body ends with the 12 strides.
         self.assertEqual(
-            [p["name"] for p in gfx950_signature(baked[0])], ptrs_and_scale
+            [p["name"] for p in gfx950_signature(baked[0])], ptrs_and_scale + strides
         )
 
     def test_support_implies_the_dispatched_spec_builds(self):
@@ -841,13 +851,22 @@ class TestGfx942DensePersistentRuntimeShape(unittest.TestCase):
                         list(spec.runtime_param_fields) + fastdiv_fields,
                     )
 
+                    # The 12 strides close the ABI; they are not shape kernargs.
+                    strides = list(DENSE_STRIDE_NAMES)
                     sig = [p["name"] for p in attention_dense_signature(spec)]
-                    self.assertEqual(sig[5:], list(spec.runtime_kernarg_fields))
+                    self.assertEqual(
+                        sig[5:], list(spec.runtime_kernarg_fields) + strides
+                    )
                     kd = build_attention_dense(spec, arch="gfx942")
                     self.assertEqual([p.name for p in kd.params], sig)
 
                     args = attention_dense_runtime_args(spec)
-                    self.assertEqual(list(args), list(spec.runtime_kernarg_fields))
+                    self.assertEqual(
+                        list(args), list(spec.runtime_kernarg_fields) + strides
+                    )
+                    self.assertEqual(
+                        {f: args[f] for f in strides}, packed_launch_strides(spec)
+                    )
                     for f in spec.runtime_param_fields:
                         self.assertEqual(args[f], getattr(spec, f))
                     nqb = spec.seqlen_q // spec.block_m
@@ -881,7 +900,7 @@ class TestGfx942DensePersistentRuntimeShape(unittest.TestCase):
             self.assertEqual(spec.runtime_kernarg_fields, spec.runtime_param_fields)
             self.assertEqual(
                 list(attention_dense_runtime_args(spec)),
-                list(spec.runtime_param_fields),
+                list(spec.runtime_param_fields) + list(DENSE_STRIDE_NAMES),
             )
 
     def test_auto_decode_is_keyed_by_its_resolved_order(self):

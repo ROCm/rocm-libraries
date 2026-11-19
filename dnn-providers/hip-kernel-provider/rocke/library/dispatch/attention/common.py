@@ -80,6 +80,11 @@ FAMILY = "attention_unified"
 # v2: the gfx942 and gfx950 tiled kernels take the head counts and the sliding
 # window as kernargs.
 ATTENTION_ABI_VERSION = "hipkg-attention-unified/v2"
+# The dense candidates' own ABI version, hashed into their tuning ids (the unified
+# ones keep ATTENTION_ABI_VERSION). v3: every dense kernel takes 12 trailing i32
+# Q/K/V/O strides (kernel names unchanged, so the version is what tells an old id
+# from a new argument list).
+DENSE_ATTENTION_ABI_VERSION = "hipkg-attention-unified/v3"
 # The query-side options of a packed request: each is an ``AttentionRequest``
 # field, the feature it reports, and the RDNA WMMA prefill spec field it sets.
 QUERY_SIDE_OPTIONS = ("dense_q", "seqused_q")
