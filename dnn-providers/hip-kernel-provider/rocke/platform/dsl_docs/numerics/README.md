@@ -228,10 +228,18 @@ on its own. It is also wave-wide: with it set, gfx942 measured f16 overflow,
 `v_rcp_f16(0)` and out-of-range f32 -> f16 conversions giving 65504 instead of
 +-inf, and the i8 MFMA's i32 accumulator saturating instead of wrapping; LLVM
 does not model the bit, so constant-folded code would disagree with the
-hardware. rocKE keeps the software clamp. gfx950 has not been measured.
+hardware. rocKE keeps the software clamp.
 
-To re-check these values: lower a kernel with
-`lower_kernel_to_llvm(kernel, arch=...)`, compile the `.ll` with `llc
+**Measured on gfx950 with the bit clear** (the state every rocKE kernel runs
+in): the raw f32 -> fp8 / bf8 conversions (`v_cvt_pk_fp8_f32`,
+`v_cvt_pk_bf8_f32`) and develop's `quantize_scalar_f32` clamp, on `develop`
+at [63e29d36559](https://github.com/ROCm/rocm-libraries/commit/63e29d365593a4f0a52a1f44b4136242195d89ad).
+The results are in the [fp8e4m3](./datatype_fp8_e4m3.md#conversions) and
+[bf8e5m2](./datatype_bf8_e5m2.md#conversions) files. gfx950 with the bit set
+has not been measured.
+
+To re-check the kernel descriptor values in the table above: lower a kernel
+with `lower_kernel_to_llvm(kernel, arch=...)`, compile the `.ll` with `llc
 -mtriple=amdgcn-amd-amdhsa -mcpu=<gfx>` and read the `.amdhsa_*` lines.
 
 ### NaN and infinity in arithmetic
@@ -292,7 +300,7 @@ The single list of numerics behaviour that is decided but not yet on
 
 | change | where | affects |
 |---|---|---|
-| `quantize_scalar_f32` saturates fp8 / bf8 to the target's bound (240 / 57344 on gfx942, 448 / 57344 on gfx950) and keeps NaN; `quant_max_abs` takes the target; the per-target encoding table moves to one home, `rocke.helpers.fp8_encoding`. The packed routes that apply no clamp keep relying on the scale (see the fp8 file). | branch `users/cgmillette/rocke/fp8-fnuz-bounds` | [datatype_fp8_e4m3.md](./datatype_fp8_e4m3.md), [datatype_bf8_e5m2.md](./datatype_bf8_e5m2.md), [datatype_int8_uint8.md](./datatype_int8_uint8.md) (`quant_max_abs` gains an `arch` argument) |
+| `quantize_scalar_f32` saturates fp8 / bf8 to the target's bound (240 / 57344 on gfx942, 448 / 57344 on gfx950) and keeps NaN; `quant_max_abs` takes the target; the per-target encoding table moves to one home, `rocke.helpers.fp8_encoding`. The packed routes that apply no clamp keep relying on the scale (see the fp8 file). On gfx950 the branch passes its Python tests (the C++ engine-binding tests were skipped) and the fused-MoE fp8 GPU test, and `quantize_scalar_f32` measured NaN kept, +-inf at +-bound and finite overflow at +-bound (for bf8 only positive overflow was measured). | branch `users/cgmillette/rocke/fp8-fnuz-bounds` | [datatype_fp8_e4m3.md](./datatype_fp8_e4m3.md), [datatype_bf8_e5m2.md](./datatype_bf8_e5m2.md), [datatype_int8_uint8.md](./datatype_int8_uint8.md) (`quant_max_abs` gains an `arch` argument) |
 
 ## Standards cited
 

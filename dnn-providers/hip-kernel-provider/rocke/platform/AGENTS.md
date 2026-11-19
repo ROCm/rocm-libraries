@@ -62,8 +62,6 @@ govern what you commit and how you describe it.
   comments and commit messages remain qualitative because measured claims there become
   stale and are difficult to review in context.
 - **No legal claims or unsupported marketing claims.** Never make legal claims about AMD or
-  other products/software. Do not make unsupported marketing, general superiority,
-- **No legal claims or unsupported marketing claims.** Never make legal claims about AMD or
   other products/software. Do not make unsupported marketing, general superiority, performance,
   rule above are permitted; marketing language is not. **Protect AMD.**
 - **No internal links** (Jira/Confluence/Perforce) in committed/public artifacts;
