@@ -38,16 +38,17 @@ Per direction, on top of that:
   c in {1, 2, 4, 8} (Y along kpg). K loop: plain, ``unroll_k`` (double-
   buffered 2x loop), and ``async_dma`` (direct-to-LDS; built once per
   geometry, under pipeline "mem", since it ignores the pipeline); on the
-  wave64 MFMA pipelines also ``reg_prefetch`` 1 / 2 (register-prefetch loop,
-  one / two LDS buffers), ``uniform_k_decode`` (per-tile filter-tap decode
-  with the plain loop as its fallback) and the two together; the
-  ``uniform_k_decode`` + ``reg_prefetch`` = 1 loop also in the XCD-contiguous
-  tile orders of :data:`CACHE_FWD_XCD_REMAP` (``xcd_remap``) and on
-  XOR-swizzled unpadded LDS tiles (``lds_xor``, tile_k >= 32). The plain
-  and ``unroll_k`` loops are also built with ``prefetch_regs`` (register-
-  staged prefetch); the single-tile ones (plain, ``prefetch_regs``) on the
-  cshuffle epilogue also as the split-K binary (``split_k`` recorded as 2,
-  degree swept at launch), and the 3-D sync-load ones also with
+  :data:`CACHE_FWD_KLOOP_ARCHS` targets' wave64 MFMA pipelines also
+  ``reg_prefetch`` 1 / 2 (register-prefetch loop, one / two LDS buffers),
+  ``uniform_k_decode`` (per-tile filter-tap decode with the plain loop as
+  its fallback) and the two together; the ``uniform_k_decode`` +
+  ``reg_prefetch`` = 1 loop also in the XCD-contiguous tile orders of
+  :data:`CACHE_FWD_XCD_REMAP` (``xcd_remap``) and on XOR-swizzled unpadded
+  LDS tiles (``lds_xor``, tile_k >= 32). There the plain and ``unroll_k``
+  loops are also built with ``prefetch_regs`` (register-staged prefetch);
+  the single-tile ones (plain, ``prefetch_regs``) on the cshuffle epilogue
+  also as the split-K binary (``split_k`` recorded as 2, degree swept at
+  launch), and the 3-D sync-load ones also with
   ``split_addr_k_decode`` (per-tile decode, cpg % tile_k == 0 only). Plus
   group-merged depthwise kernels (``group_merge`` in 4..64, cshuffle, plain
   and ``unroll_k`` loops, load widths derived by the builder, on the tile
@@ -1392,7 +1393,14 @@ def _aot_pipeline(direction: str, pipeline: str) -> bool:
 # the uniform_k_decode + reg_prefetch=1 loop -- the loop the large-spatial 3-D
 # shapes use -- so the grid grows by two kernels per geometry rather than
 # doubling.
-CACHE_FWD_XCD_REMAP: Dict[str, Tuple[int, ...]] = {"gfx942": (6, 8), "gfx950": (8,)}
+CACHE_FWD_XCD_REMAP: Dict[str, Tuple[int, ...]] = {"gfx942": (6, 8)}
+
+# Archs whose forward grid takes the K-loop variants below (prefetch_regs,
+# reg_prefetch, uniform_k_decode, lds_xor, xcd_remap, uk_tap_fast and the opt-in
+# scheduling and ping-pong loops). Every other arch builds the plain, unroll_k and
+# (on "mem") async_dma loops only, the grid its packaged AOT forward instances
+# model (builders/common/convolution_forward.py).
+CACHE_FWD_KLOOP_ARCHS: Tuple[str, ...] = ("gfx942",)
 
 
 def _fwd_k_loops(pipeline: str, arch: Optional[str] = None) -> List[dict]:
@@ -1412,7 +1420,15 @@ def _fwd_k_loops(pipeline: str, arch: Optional[str] = None) -> List[dict]:
     MFMAs; one or two LDS buffers) and ``uniform_k_decode`` (per-tile filter-tap
     decode, with the plain loop kept as the fallback for cpg % tile_k != 0)
     are built on the wave64 MFMA pipelines, alone and together.
+
+    Only on :data:`CACHE_FWD_KLOOP_ARCHS`; other archs get the plain and
+    ``unroll_k`` loops and, on "mem", ``async_dma``.
     """
+    if arch not in CACHE_FWD_KLOOP_ARCHS:
+        base = [dict(unroll_k=unroll, async_dma=False) for unroll in (False, True)]
+        if pipeline == "mem":
+            base.append(dict(unroll_k=False, async_dma=True))
+        return base
     k_loops = [
         dict(
             unroll_k=unroll,
