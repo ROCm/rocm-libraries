@@ -255,7 +255,14 @@ def tuned_base_spec(req: AttentionRequest):
         req,
         _default_block_m(req),
         _DENSE_BLOCK_N,
-        persistent=head_size == 128 and not paged,
+        # fp8 KV takes the default grid at both head sizes: the sync-dequant
+        # loader has no persistent path, so supports_attention_dense refuses
+        # persistent under fp8. Deciding that here rather than leaving it to the
+        # knob walk is what makes a D128 fp8 request legal for every caller. A
+        # request that pins any knob does not walk the axes, so without this it
+        # would keep the persistent default and be refused, which is exactly
+        # what pinning block_m or waves_per_eu used to do.
+        persistent=head_size == 128 and not paged and not req.use_fp8,
     )
     # Not with a bias: the segment store returns before the bias epilogue.
     if spec.causal_bottom_right and not spec.use_additive_bias:
@@ -386,6 +393,16 @@ def _make_spec(
     # Chunked prefill: the unmasked body loop skips the mask on every tile below
     # the shifted diagonal.
     diag_split = bottom_right and not ragged
+    if req.use_fp8:
+        # gfx942 decodes FNUZ fp8; reject an OCP-encoded request here. Both map
+        # to the same spec otherwise, and the byte would be decoded with the
+        # wrong exponent bias with nothing downstream to notice. gfx950 refuses
+        # the mirror case for the same reason.
+        from .tuning_specs import validate_explicit_fp8_encoding
+
+        validate_explicit_fp8_encoding(
+            arch="gfx942", use_fp8=True, fp8_fnuz=req.fp8_fnuz
+        )
     return Gfx942AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
@@ -415,6 +432,20 @@ def _make_spec(
         window_wave_skip=window_wave_skip,
         use_additive_bias=req.use_attn_bias,
         **dense_paged_fields(req),
+        kv_storage_dtype="fp8e4m3" if req.use_fp8 else None,
+        # fp8 opts out of the conflict-free transposed V path explicitly rather
+        # than leaving it to policy. default_use_cfvst resolves ON at D128 and
+        # the sync-dequant loader cannot fill a V^T V_lds, so a D128 fp8 request
+        # would otherwise be refused. use_cfvst is a tuning axis, so a free knob
+        # walk finds the legal point by itself, but a request pinning any knob
+        # does not walk it and gets the refusal instead.
+        #
+        # This is one half of making a D128 fp8 spec legal. The other is the
+        # persistent default in tuned_base_spec, which is off for fp8 for the
+        # same reason. Both have to be decided here: pinning only this one still
+        # left every pinned-knob D128 request refused on persistent.
+        # Emission-neutral at D64, where policy already resolves it off.
+        use_cfvst=False if req.use_fp8 else None,
     )
 
 
@@ -455,6 +486,20 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         # ``tuned_base_spec``) and paged K/V. The spec refuses a bias with paged K/V,
         # so a request for both is reported as a refused pin. Head size stays out:
         # D64/D128 coverage is ``supports_attention_dense``'s call.
+        #
+        # fp8 is advertised here only, matching gfx950, where it is grid-only
+        # because the spec rejects persistent and paged. The ingestor-grid
+        # candidates below stay without it.
+        #
+        # Advertising it for BOTH head sizes is deliberate. What fp8 cannot
+        # serve is the persistent grid and the conflict-free transposed V path,
+        # and those are knob points rather than head sizes. tuned_base_spec
+        # prefers both at D128, so it turns both OFF for an fp8 request instead
+        # of leaving either to the knob walk. Relying on the walk would serve
+        # only a free request: a caller pinning any knob does not walk the axes
+        # and would be refused. Gating on head size instead would drop a shape
+        # that works. Every per-shape fp8 refusal stays
+        # supports_attention_dense's call, as with head size.
         features=frozenset(
             {
                 "causal",
@@ -464,6 +509,7 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
                 "lse",
                 "attn_bias",
                 "layout_paged",
+                "fp8",
             }
         ),
         # tuned_base_spec picks these from the dtype, head size, work count and window.

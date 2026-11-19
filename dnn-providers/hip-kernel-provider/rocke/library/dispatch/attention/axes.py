@@ -164,8 +164,11 @@ DENSE_PROBLEM_FIELDS = frozenset(
         "chiplet_num_xcds",
     }
 )
-# Problem fields only some arches' dense specs declare (the band's right bound,
-# the additive bias, and the KV storage format, whose loader only gfx950 has).
+# Problem fields only some arches' dense specs declare: the band's right bound
+# (gfx950 only), the additive bias, and the KV storage format, which both dense
+# kernels now carry on the shared fp8 sync-dequant loader. The storage format is
+# set from the request and never swept -- a tuning point must not change the KV
+# cache's storage format.
 # gfx942's ``use_bias_x4`` (the bias load width) is not a
 # request fact but is classed here on purpose: no axis sweeps it, no pin can name
 # it, the kernel's policy resolves it, and it must stay None with the bias off, so
@@ -175,7 +178,9 @@ DENSE_PROBLEM_FIELDS = frozenset(
 # gfx942 dense id: document that like the ``v_reg_prefetch`` migration in AGENTS.md.
 DENSE_ARCH_PROBLEM_FIELDS: Mapping[str, frozenset] = {
     "gfx950": frozenset({"right_bound", "use_additive_bias", "kv_storage_dtype"}),
-    "gfx942": frozenset({"use_additive_bias", "use_bias_x4"}),
+    "gfx942": frozenset(
+        {"use_additive_bias", "use_bias_x4", "kv_storage_dtype"}
+    ),
 }
 DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {
     "gfx950": frozenset({"persistent", "wide_lds_dma"}),

@@ -332,6 +332,19 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
        "  TIMEOUT 180)\n")
 
+# Shared fp8 KV sync-dequant loader (no GPU): the host-side chunk deal and the
+# emitted op mix of the loop both dense kernels call. Host unit and IR structure
+# (TESTING.md 5.0.3 levels 1 and 2), so it takes the standard default rather
+# than joining a quick entry: it is neither a golden, nor a core refusal or
+# parity contract, nor a pinned GPU reference lane.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_attention_fp8_kv_load_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_fp8_kv_load_helper.py\" -v -rs --timeout=30)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_attention_fp8_kv_load_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;attention\\;host\\;standard\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 180)\n")
+
 # Tiled attention cache-key contract (no GPU). The targeted share/split
 # checks take seconds and run in the quick tier. The invariant sweep compares
 # key equality with build equality across every selector threshold for each

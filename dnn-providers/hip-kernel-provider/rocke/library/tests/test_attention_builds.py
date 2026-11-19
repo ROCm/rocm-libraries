@@ -4901,12 +4901,20 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
             v: self._spec(**self._BASE_KWARGS, **kw, use_sinks=True)
             for v, (kw, _) in self._PERSIST_VARIANTS.items()
         }
+        # fp8 KV appends k_scale/v_scale after scale and retypes the K/V
+        # pointers. Dropping either from the signature mis-binds every kernarg
+        # after it, and the runner packs by that signature, so the damage shows
+        # on GPU only. D64 on the default grid: the fp8 gate refuses the
+        # transposed V path and the persistent grid.
+        fp8_kwargs = dict(self._BASE_KWARGS, head_size=64)
+        fp8 = self._spec(**fp8_kwargs, block_m=128, kv_storage_dtype="fp8e4m3")
 
         for arm, spec in (
             ("runtime-shape", rt),
             *persist.items(),
             ("runtime-shape+sinks", rt_sinks),
             *((f"{v}+sinks", s) for v, s in persist_sinks.items()),
+            ("fp8-kv", fp8),
         ):
             with self.subTest(arm=arm):
                 params = build_attention_dense(spec, arch="gfx942").params

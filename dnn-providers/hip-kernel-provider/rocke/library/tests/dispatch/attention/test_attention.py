@@ -75,10 +75,13 @@ EXPECTED_FEATURES = {
         "causal_bottom_right",
         "sliding_window",
     },
+    # fp8 KV is on this candidate only, as on gfx950, where it is grid-only.
+    # The ingestor-grid gfx942 dense candidates below must keep declining it.
     "attention_gfx942_dense": {
         "attn_bias",
         "causal",
         "causal_bottom_right",
+        "fp8",
         "layout_dense",
         "layout_paged",
         "lse",
