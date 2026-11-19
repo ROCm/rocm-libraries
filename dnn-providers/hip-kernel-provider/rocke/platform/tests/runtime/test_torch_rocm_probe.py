@@ -19,10 +19,11 @@ from rocke.runtime import runtime_coexistence
 from rocke.runtime import torch_rocm_probe as probe
 from rocke.tests.subprocess_launcher import rocke_python_command, rocke_subprocess_env
 
-_UNSEEN = "unseen"
-_INCOMPLETE = "inconclusive"
-_MATCH = "same_binaries_observed"
-_MISMATCH = "different_binaries_observed"
+_UNSEEN = object()
+_INCOMPLETE = probe.TorchRocmStatus.INCONCLUSIVE
+_MATCH = probe.TorchRocmStatus.SAME_BINARIES_OBSERVED
+_MISMATCH = probe.TorchRocmStatus.DIFFERENT_BINARIES_OBSERVED
+_Worker = probe.TorchWorkerStatus
 
 # The two binaries have identical loader names and different contents.
 # No mapping on either side is neutral when the other library kind is present.
@@ -122,7 +123,7 @@ def test_subprocess_compares_mapped_bytes_not_filenames_or_versions(
         timeout=60,
     )
     data = json.loads(report.stdout)
-    assert data["worker_status"] == "imported"
+    assert data["worker_status"] == _Worker.IMPORTED
     assert data["torch_version"] == "fixture"
     assert data["torch_hip_version"] == "fixture HIP version"
     outcome = _PAIR_OUTCOMES[pair]
@@ -163,7 +164,7 @@ def test_combined_hip_and_comgr_evidence(monkeypatch, hip, comgr):
         Path(command[-1]).write_text(
             json.dumps(
                 {
-                    "status": "imported",
+                    "status": _Worker.IMPORTED,
                     "version": "fixture",
                     "hip_version": "fixture HIP version",
                     "libraries": [asdict(item) for item in child],
@@ -177,16 +178,16 @@ def test_combined_hip_and_comgr_evidence(monkeypatch, hip, comgr):
     monkeypatch.setattr(probe, "_snapshot", lambda: (parent, None))
     monkeypatch.setattr(probe.subprocess, "run", report_import)
     report = probe.probe_torch_rocm()
-    assert report.worker_status == "imported"
+    assert report.worker_status is _Worker.IMPORTED
     assert report.parent_libraries == parent
     assert report.torch_libraries == child
     outcomes = {_PAIR_OUTCOMES[hip], _PAIR_OUTCOMES[comgr]}
     if _MISMATCH in outcomes:
-        assert report.status == _MISMATCH
+        assert report.status is _MISMATCH
     elif _INCOMPLETE in outcomes or outcomes == {_UNSEEN}:
-        assert report.status == _INCOMPLETE
+        assert report.status is _INCOMPLETE
     else:
-        assert report.status == _MATCH
+        assert report.status is _MATCH
     for kind, pair in [("hip", hip), ("comgr", comgr)]:
         outcome = _PAIR_OUTCOMES[pair]
         assert (f"{kind}: different binaries" in report.reason) == (
@@ -200,20 +201,20 @@ def test_combined_hip_and_comgr_evidence(monkeypatch, hip, comgr):
     [
         (
             "raise ModuleNotFoundError(name='torch')",
-            "torch_not_installed",
+            _Worker.TORCH_NOT_INSTALLED,
             "ModuleNotFoundError",
         ),
         (
             "raise ImportError('dependency missing')",
-            "torch_import_error",
+            _Worker.TORCH_IMPORT_ERROR,
             "dependency missing",
         ),
         (
             "import rocke_probe_missing_torch_dependency",
-            "torch_import_error",
+            _Worker.TORCH_IMPORT_ERROR,
             "rocke_probe_missing_torch_dependency",
         ),
-        ("import os; os._exit(19)", "worker_error", "status 19"),
+        ("import os; os._exit(19)", _Worker.WORKER_ERROR, "status 19"),
     ],
 )
 def test_import_failures_are_not_binary_mismatches(
@@ -222,8 +223,8 @@ def test_import_failures_are_not_binary_mismatches(
     (tmp_path / "torch.py").write_text(source, encoding="utf-8")
     monkeypatch.setenv("PYTHONPATH", str(tmp_path))
     result = probe.probe_torch_rocm()
-    assert result.status == "inconclusive"
-    assert result.worker_status == status
+    assert result.status is _INCOMPLETE
+    assert result.worker_status is status
     assert reason in result.reason
 
 
@@ -234,8 +235,8 @@ def test_reports_native_crash(monkeypatch):
 
     monkeypatch.setattr(probe.subprocess, "run", fail)
     result = probe.probe_torch_rocm()
-    assert result.status == "inconclusive"
-    assert result.worker_status == "crashed"
+    assert result.status is _INCOMPLETE
+    assert result.worker_status is _Worker.CRASHED
     assert "-11" in result.reason
     assert result.stderr == "native loader failure"
 
@@ -279,18 +280,18 @@ def test_bounds_subprocess_runtime(tmp_path, monkeypatch):
     (tmp_path / "torch.py").write_text("import time; time.sleep(60)", encoding="utf-8")
     monkeypatch.setenv("PYTHONPATH", str(tmp_path))
     result = probe.probe_torch_rocm(timeout=0.5)
-    assert result.status == "inconclusive"
-    assert result.worker_status == "timeout"
+    assert result.status is _INCOMPLETE
+    assert result.worker_status is _Worker.TIMEOUT
 
 
 def test_unverifiable_and_ambiguous_binaries_do_not_match():
     known = probe.RocmLibrary("hip", "libamdhip64.so.7", "digest")
     other = probe.RocmLibrary("hip", "other/libamdhip64.so.7", "digest")
     unknown = probe.RocmLibrary("hip", "unreadable/libamdhip64.so.7")
-    assert probe._compare((known,), (other,))[0] == "same_binaries_observed"
+    assert probe._compare((known,), (other,))[0] is _MATCH
     for right in [(), (other, known), (unknown,)]:
-        assert probe._compare((known,), right)[0] == "inconclusive"
-    assert probe._compare((), ())[0] == "inconclusive"
+        assert probe._compare((known,), right)[0] is _INCOMPLETE
+    assert probe._compare((), ())[0] is _INCOMPLETE
 
 
 @pytest.mark.parametrize(

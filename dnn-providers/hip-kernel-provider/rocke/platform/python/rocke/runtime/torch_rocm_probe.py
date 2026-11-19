@@ -22,11 +22,41 @@ import sys
 import tempfile
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
+from enum import Enum
 from functools import cache
 from pathlib import Path
 from types import ModuleType
 
-__all__ = ["RocmLibrary", "TorchRocmReport", "probe_torch_rocm"]
+__all__ = [
+    "RocmLibrary",
+    "TorchRocmReport",
+    "TorchRocmStatus",
+    "TorchWorkerStatus",
+    "probe_torch_rocm",
+]
+
+
+class TorchRocmStatus(str, Enum):
+    """Comparison outcome for the observed binaries."""
+
+    DIFFERENT_BINARIES_OBSERVED = "different_binaries_observed"
+    SAME_BINARIES_OBSERVED = "same_binaries_observed"
+    INCONCLUSIVE = "inconclusive"
+
+    __str__ = str.__str__
+
+
+class TorchWorkerStatus(str, Enum):
+    """Outcome of the subprocess that imports torch."""
+
+    IMPORTED = "imported"
+    TORCH_NOT_INSTALLED = "torch_not_installed"
+    TORCH_IMPORT_ERROR = "torch_import_error"
+    WORKER_ERROR = "worker_error"
+    CRASHED = "crashed"
+    TIMEOUT = "timeout"
+
+    __str__ = str.__str__
 
 
 @cache
@@ -62,13 +92,13 @@ class RocmLibrary:
 class TorchRocmReport:
     """Observed library evidence, never a verdict on HIP instance ownership."""
 
-    status: str
+    status: TorchRocmStatus
     reason: str
     parent_libraries: tuple[RocmLibrary, ...]
     torch_libraries: tuple[RocmLibrary, ...] = ()
     torch_version: str | None = None
     torch_hip_version: str | None = None
-    worker_status: str | None = None
+    worker_status: TorchWorkerStatus | None = None
     stderr: str = ""
 
 
@@ -174,7 +204,7 @@ def _snapshot() -> tuple[tuple[RocmLibrary, ...], str | None]:
 
 def _compare(
     parent: tuple[RocmLibrary, ...], child: tuple[RocmLibrary, ...]
-) -> tuple[str, str]:
+) -> tuple[TorchRocmStatus, str]:
     different, incomplete = [], []
     comparable = 0
     for kind in _inventory_helpers()._MAPPED_LIBRARY_NAMES:
@@ -199,13 +229,18 @@ def _compare(
                 f"{kind}: different binaries ({left[0].path} vs {right[0].path})"
             )
     if different:
-        return "different_binaries_observed", "; ".join(different + incomplete)
+        return TorchRocmStatus.DIFFERENT_BINARIES_OBSERVED, "; ".join(
+            different + incomplete
+        )
     if incomplete or not comparable:
         return (
-            "inconclusive",
+            TorchRocmStatus.INCONCLUSIVE,
             "; ".join(incomplete) or "no ROCm binaries observed in either process",
         )
-    return "same_binaries_observed", "fingerprints match for the observed library roles"
+    return (
+        TorchRocmStatus.SAME_BINARIES_OBSERVED,
+        "fingerprints match for the observed library roles",
+    )
 
 
 def _worker(output: Path) -> None:
@@ -216,15 +251,15 @@ def _worker(output: Path) -> None:
         torch = importlib.import_module("torch")
     except Exception as exc:  # noqa: BLE001
         status = (
-            "torch_not_installed"
+            TorchWorkerStatus.TORCH_NOT_INSTALLED
             if isinstance(exc, ModuleNotFoundError) and exc.name == "torch"
-            else "torch_import_error"
+            else TorchWorkerStatus.TORCH_IMPORT_ERROR
         )
         report = {"status": status, "error": f"{type(exc).__name__}: {exc}"}
     else:
         libraries, error = _snapshot()
         report = {
-            "status": "imported",
+            "status": TorchWorkerStatus.IMPORTED,
             "version": torch.__version__,
             "hip_version": getattr(getattr(torch, "version", None), "hip", None),
             "libraries": [asdict(library) for library in libraries],
@@ -252,7 +287,7 @@ def probe_torch_rocm(*, timeout: float = 30.0) -> TorchRocmReport:
     with tempfile.TemporaryDirectory(prefix="rocke-torch-probe-") as directory:
         output = Path(directory) / "report.json"
         log = Path(directory) / "stderr.txt"
-        status, reason, payload = "worker_error", "", None
+        worker_status, reason, payload = TorchWorkerStatus.WORKER_ERROR, "", None
         with log.open("wb") as stderr:
             try:
                 child = subprocess.run(
@@ -270,7 +305,10 @@ def probe_torch_rocm(*, timeout: float = 30.0) -> TorchRocmReport:
                     check=False,
                 )
             except subprocess.TimeoutExpired:
-                status, reason = "timeout", "torch import probe timed out"
+                worker_status, reason = (
+                    TorchWorkerStatus.TIMEOUT,
+                    "torch import probe timed out",
+                )
             except OSError as exc:
                 reason = f"could not start torch import probe: {exc}"
             else:
@@ -278,7 +316,8 @@ def probe_torch_rocm(*, timeout: float = 30.0) -> TorchRocmReport:
                     crashed = child.returncode < 0 or (
                         sys.platform == "win32" and child.returncode >= 0x80000000
                     )
-                    status = "crashed" if crashed else "worker_error"
+                    if crashed:
+                        worker_status = TorchWorkerStatus.CRASHED
                     reason = f"torch import probe exited with status {child.returncode}"
                 else:
                     try:
@@ -288,19 +327,24 @@ def probe_torch_rocm(*, timeout: float = 30.0) -> TorchRocmReport:
         stderr_text = _stderr_tail(log)
     if payload is None:
         return TorchRocmReport(
-            "inconclusive", reason, parent, worker_status=status, stderr=stderr_text
+            TorchRocmStatus.INCONCLUSIVE,
+            reason,
+            parent,
+            worker_status=worker_status,
+            stderr=stderr_text,
         )
-    if payload["status"] != "imported":
+    worker_status = TorchWorkerStatus(payload["status"])
+    if worker_status is not TorchWorkerStatus.IMPORTED:
         return TorchRocmReport(
-            "inconclusive",
+            TorchRocmStatus.INCONCLUSIVE,
             payload["error"],
             parent,
-            worker_status=payload["status"],
+            worker_status=worker_status,
             stderr=stderr_text,
         )
     observed = tuple(RocmLibrary(**item) for item in payload["libraries"])
     if parent_error or payload["error"]:
-        status = "inconclusive"
+        status = TorchRocmStatus.INCONCLUSIVE
         reason = "; ".join(
             label + error
             for label, error in (
@@ -318,7 +362,7 @@ def probe_torch_rocm(*, timeout: float = 30.0) -> TorchRocmReport:
         observed,
         payload["version"],
         payload["hip_version"],
-        payload["status"],
+        worker_status,
         stderr_text,
     )
 
