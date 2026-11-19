@@ -124,9 +124,11 @@ constexpr int k3dLoads(int bc, int bk, int wq, int s, int dw)
     return k3DivUp(k3dXCols(bc, s, dw) * bc / 512, nw) + k3DivUp(32 * bk / 512, nw);
 }
 
-/// Static LDS bytes of a config. loop 0/1 matrix core (K3Tiles, two buffers), 2 LDS DMA (NS
-/// slots), 4 FMA output rows (two buffers of a dy chunk and FR windows), 3 FMA (an R + 1 row dy ring and two x windows). eb: element bytes; wave: lanes per
-/// wave; fr: the filter rows a loop-0 block stages, the filter height otherwise.
+/// Static LDS bytes: loops 0/1 matrix-core double buffers; 2 DMA slots; 3 FMA dy ring and
+/// double x windows; 4 FMA row double buffers; 5 direct ring; 6 small-C row double buffers;
+/// 7 packed-row double buffers; 8 generic multi-tap double buffers; 9 zero LDS; 11 one skewed
+/// matrix tile; 12 that tile plus 32 bytes per cached position. Loop 10's FP32 staging formula
+/// is in ldsBytesOf. eb: element bytes; fr: filter rows, or the generic loop's taps a block.
 constexpr long long k3LdsBytes(int loop,
                                int layout,
                                int eb,
@@ -146,6 +148,13 @@ constexpr long long k3LdsBytes(int loop,
                                int ns,
                                int wq = 0)
 {
+    if(loop == 9)
+        return 0;
+    if(loop == 12)
+        return static_cast<long long>(bk + bc) * (bq + 16 / eb) * eb
+               + static_cast<long long>(bq) * 32;
+    if(loop == 11)
+        return static_cast<long long>(bk + bc) * (bq + 16 / eb) * eb;
     if(loop == 8)
     {
         // Generic taps: two buffers of a bk-row dy chunk and fr (taps a block) bc-row x tiles,

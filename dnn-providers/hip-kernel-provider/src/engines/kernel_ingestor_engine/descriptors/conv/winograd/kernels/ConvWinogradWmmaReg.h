@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Fused Winograd F(2,3) on RDNA WMMA (gfx11 / gfx12, wave32), fp16 and bf16, fp32 accumulate,
+// Fused Winograd F(2,3) WMMA (gfx11 / gfx1200-1201 / native gfx1250, wave32), fp16/bf16, fp32 accumulate,
 // NCHW, forward form. The register-operand variant: the input transform lands straight in the
 // WMMA B fragments (no LDS for the transformed input, no barrier in the main loop) and the
 // transformed filter fragments come straight from the pre-pass buffer (global / L0).
@@ -9,7 +9,7 @@
 // Work item = (group, BK out channels, 16*TG tiles); 4*TG waves. Wave w owns transform row
 // i = w % 4 (bins 4i .. 4i+3) for 16 tiles (tile group w / 4); per bin a BK x 16 block of fp32
 // accumulators (BK/16 WMMA tiles). Lane: tile column lane % 16, channel half h = lane / 16 of each
-// 16-channel chunk. The row-i transform needs input rows (ra, rb) only:
+// CC-channel chunk (16 legacy, 32 native gfx1250). The row-i transform needs input rows (ra, rb) only:
 //   t[col] = d[ra][col] +- d[rb][col]          (column pass, B^T row i)
 //   V[i][0..3] = t0 - t2, t1 + t2, t2 - t1, t1 - t3   (row pass)
 // so the 4 waves of a tile group split the transform without redundancy. F16MATH: fp16 packed
@@ -19,7 +19,7 @@
 // Fragment k order: a WMMA half-wave (lanes 16h .. 16h+15) reads A and B from its own lanes only
 // (gfx11 computes D rows 2e + h in half h), so each half may order k its own way as long as A and
 // B agree. gfx11: half h holds [own 8 channels, the other half's 8] (v_permlanex16 exchange);
-// gfx12: half h holds its own 8 channels (the native split).
+// gfx1200/1201: half h holds its own 8 channels. gfx1250: its own 16 channels, no half-wave exchange.
 //
 // Epilogue: the wave applies the right A (row i's 4 bins -> 2 values) in registers, the two
 // values go to LDS (8 x BK x 16*TG fp32), then A^T over the 4 rows -> y with the parity mask.
@@ -94,7 +94,7 @@ struct K5WregCfg
     static constexpr int MT = BK / 16, WPG = 4 * NJ, WAVES = WPG * TG, THREADS = 32 * WAVES,
                          BT = 16 * TG;
     static constexpr int LDS = 8 * NJ * BK * BT; // floats: Z[row i][s][part j][k][t]
-    static constexpr int FD = GFX12 ? 4 : 8; // dwords per fragment
+    static constexpr int FD = sizeof(typename K5Wmma<T, GFX12>::frag) / 4;
 };
 
 // Bin row I of B^T: t = d[RA] + SIGN * d[RB].
@@ -125,11 +125,13 @@ __device__ __attribute__((always_inline)) void k5WregBody(const K5Args& a,
     typedef K5Row<I> R;
     constexpr int MT = C::MT, BT = C::BT, THREADS = C::THREADS, FD = C::FD;
     typedef typename W::frag frag;
+    constexpr int CC = W::CC, HC = W::NATIVE ? W::KPL : 8, HP = HC / 2;
+    static_assert(sizeof(T) == 2, "register operands use channel-pair fragments");
 
-    const int cgi = a.ci / a.groups, cgo = a.co / a.groups, cgiPad = (cgi + 15) / 16 * 16;
+    const int cgi = a.ci / a.groups, cgo = a.co / a.groups, cgiPad = (cgi + CC - 1) / CC * CC;
     const int nKB = (cgo + BK - 1) / BK, nTB = (a.tiles + BT - 1) / BT;
     const long long items = static_cast<long long>(a.groups) * nKB * nTB;
-    const int nCh = cgiPad / 16;
+    const int nCh = cgiPad / CC;
     const int chanStride = a.hi * a.wi;
     // The input is read as aligned dwords (rows start at any half): a 12-byte load covers a row's
     // 4 columns. A load partly past the buffer's end returns all zeros, and one before its start
@@ -173,7 +175,7 @@ __device__ __attribute__((always_inline)) void k5WregBody(const K5Args& a,
             const int tw = t % a.tw, rr = t / a.tw;
             const int th = rr % a.th, img = rr / a.th;
             const int ih0 = th * 2 - a.ph, iw0 = tw * 2 - a.pw;
-            const int base = ((img * a.ci + g * cgi + 8 * h) * a.hi) * a.wi + iw0;
+            const int base = ((img * a.ci + g * cgi + HC * h) * a.hi) * a.wi + iw0;
             const auto rowOffsets
                 = [&](int row, int& e, bool& ok, unsigned(&vo)[2], unsigned(&sh)[2]) {
                       if(row < 0 || row >= a.hi)
@@ -226,23 +228,23 @@ __device__ __attribute__((always_inline)) void k5WregBody(const K5Args& a,
         // Raw input for one chunk: rows a and b, 8 channels: 3 aligned dwords each (fast path,
         // shifted into place in the transform) or the 2 dwords already in place (edge path).
         typedef unsigned k5u3 __attribute__((ext_vector_type(3)));
-        k5u3 rA[8], rB[8];
+        k5u3 rA[HC], rB[HC];
         bool edge = false;
         auto load = [&](int ch, bool mayEdge) __attribute__((always_inline))
         {
-            const int cBase = ch * 16 + 8 * h; // first channel of this half
+            const int cBase = ch * CC + HC * h;
             // Edge path: the chunk's first element is within reach of the buffer's start (left
             // padding of row 0), or its last row reaches the end.
             const long long first
-                = (static_cast<long long>(imgFirst) * a.ci + g * cgi + ch * 16) * chanStride;
-            const int cEnd = ch * 16 + 16 < cgi ? ch * 16 + 16 : cgi;
+                = (static_cast<long long>(imgFirst) * a.ci + g * cgi + ch * CC) * chanStride;
+            const int cEnd = ch * CC + CC < cgi ? ch * CC + CC : cgi;
             const long long last
                 = (static_cast<long long>(imgLast) * a.ci + g * cgi + cEnd) * chanStride;
             edge = mayEdge && (first < 16 + a.pw || last + 8 > inElems);
             if(edge)
             {
 #pragma unroll
-                for(int c = 0; c < 8; ++c)
+                for(int c = 0; c < HC; ++c)
                 {
                     const bool ok = cBase + c < cgi;
 #pragma unroll
@@ -258,7 +260,7 @@ __device__ __attribute__((always_inline)) void k5WregBody(const K5Args& a,
                             hv[j] = __builtin_amdgcn_raw_buffer_load_b16(
                                 rIn,
                                 rok && e >= 0 ? static_cast<unsigned>(e) * sizeof(T)
-                                                    + static_cast<unsigned>(ch * 16) * chanBytes
+                                                    + static_cast<unsigned>(ch * CC) * chanBytes
                                               : static_cast<unsigned>(K5_OOB),
                                 0,
                                 0);
@@ -271,10 +273,10 @@ __device__ __attribute__((always_inline)) void k5WregBody(const K5Args& a,
                 return;
             }
 #pragma unroll
-            for(int c = 0; c < 8; ++c)
+            for(int c = 0; c < HC; ++c)
             {
                 const bool ok = cBase + c < cgi;
-                const unsigned so = static_cast<unsigned>(ch * 16 + c) * chanBytes;
+                const unsigned so = static_cast<unsigned>(ch * CC + c) * chanBytes;
                 const int r = csOdd && (c & 1) ? 1 : 0; // the channel offset's half phase (uniform)
                 // Chunks past the first carry >= 32 bytes of channel offset to take the bias from;
                 // in the first chunk (fast path) every offset is >= 0 unbiased.
@@ -290,8 +292,8 @@ __device__ __attribute__((always_inline)) void k5WregBody(const K5Args& a,
                         rIn, ok ? voB[r] - (16 - bias) : static_cast<unsigned>(K5_OOB), soA, 0));
             }
         };
-        // Transformed chunk: 4 bins x 4 channel-pair dwords (this half's channels).
-        unsigned v[BINS][4];
+        // Each half-wave owns HC channels: K8 on gfx11/gfx12, native K16 on gfx1250.
+        unsigned v[BINS][HP];
         // The row pass for this wave's bins (the others are dead code).
         auto rowPass = [&](int q, k5h2 p0, k5h2 p1, k5h2 p2, k5h2 p3) __attribute__((always_inline))
         {
@@ -306,7 +308,7 @@ __device__ __attribute__((always_inline)) void k5WregBody(const K5Args& a,
             constexpr int S = decltype(phaseTag)::value;
             constexpr int ND = S ? 3 : 2; // dwords holding the 4 columns
 #pragma unroll
-            for(int q = 0; q < 4; ++q)
+            for(int q = 0; q < HP; ++q)
             {
                 unsigned t[2][3];
 #pragma unroll
@@ -341,9 +343,9 @@ __device__ __attribute__((always_inline)) void k5WregBody(const K5Args& a,
                     return;
                 }
             }
-            k5u2 dA[8], dB[8];
+            k5u2 dA[HC], dB[HC];
 #pragma unroll
-            for(int c = 0; c < 8; ++c)
+            for(int c = 0; c < HC; ++c)
             {
                 const int r = csOdd && (c & 1) ? 1 : 0;
                 const unsigned sa = edge ? 0u : shA[r], sb = edge ? 0u : shB[r];
@@ -353,7 +355,7 @@ __device__ __attribute__((always_inline)) void k5WregBody(const K5Args& a,
                              __builtin_amdgcn_alignbit(rB[c].z, rB[c].y, sb)};
             }
 #pragma unroll
-            for(int q = 0; q < 4; ++q)
+            for(int q = 0; q < HP; ++q)
             {
                 if constexpr(F16MATH)
                 {
@@ -420,17 +422,18 @@ __device__ __attribute__((always_inline)) void k5WregBody(const K5Args& a,
         // the epilogue drops. All but the lane part of the offset is uniform.
         const int uRow = k0 + col;
         const unsigned uLane
-            = static_cast<unsigned>(((g * 16 + 4 * I + B0) * cgo + uRow) * cgiPad + 8 * h)
+            = static_cast<unsigned>(((g * 16 + 4 * I + B0) * cgo + uRow) * cgiPad + HC * h)
               * sizeof(T);
         const unsigned uLane2
-            = uLane + static_cast<unsigned>((8 - 16 * h) * static_cast<int>(sizeof(T)));
+            = W::NATIVE ? uLane + 16
+                        : uLane + static_cast<unsigned>((8 - 16 * h) * static_cast<int>(sizeof(T)));
         const unsigned binBytes = static_cast<unsigned>(cgo) * cgiPad * sizeof(T);
         frag ufr[BINS][MT];
         auto loadU = [&](int ch, int b) {
 #pragma unroll
             for(int m = 0; m < MT; ++m)
             {
-                const unsigned so = static_cast<unsigned>(ch * 16) * sizeof(T) + b * binBytes
+                const unsigned so = static_cast<unsigned>(ch * CC) * sizeof(T) + b * binBytes
                                     + static_cast<unsigned>(m * 16 * cgiPad) * sizeof(T);
                 if constexpr(GFX12)
                 {
@@ -471,7 +474,15 @@ __device__ __attribute__((always_inline)) void k5WregBody(const K5Args& a,
                 {
                     // This bin's B fragment, built just before its WMMAs.
                     frag bfr;
-                    if constexpr(!GFX12)
+                    if constexpr(W::NATIVE)
+                    {
+                        k5u8 f8{};
+#pragma unroll
+                        for(int q = 0; q < HP; ++q)
+                            f8[q] = v[b][q];
+                        bfr = __builtin_bit_cast(frag, f8);
+                    }
+                    else if constexpr(!GFX12)
                     {
                         k5u8 f8{};
 #pragma unroll

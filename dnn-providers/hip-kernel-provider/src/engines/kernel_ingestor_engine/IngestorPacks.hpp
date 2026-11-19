@@ -90,6 +90,8 @@ void registerConvStemBwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>
 void resetConvStemBwdModuleCache();
 void registerConvWinogradSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvWinogradModuleCache();
+void registerConvWinogradNdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvWinogradNdModuleCache();
 void registerConvDirectSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvDirectModuleCache();
 void registerConvGroupSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);

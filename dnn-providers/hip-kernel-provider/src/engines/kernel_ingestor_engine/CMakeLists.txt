@@ -262,6 +262,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvStemBwdNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvStemBwdProblem.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvWinogradNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvWinogradNdNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvWinogradNdProblem.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDirectNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvSmallcNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvGroupNative.cpp
@@ -309,6 +311,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvEpilogue.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvEpilogueArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvArchFamily.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvPackedMath.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm_nchw/kernels/ConvIgemmNchw.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm_nchw/kernels/ConvIgemmNchwArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm_nchw/kernels/ConvIgemmNchwCore.h"
@@ -317,6 +320,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/wrw/kernels/ConvWrwCore.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/wrw/kernels/ConvWrwDirect.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/wrw/kernels/ConvWrwGeom.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/wrw/kernels/ConvWrwSmallK.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/wrw/kernels/ConvWrwAccurate.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/stem_bwd/kernels/ConvStemBwd.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/stem_bwd/kernels/ConvStemBwdArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/stem_bwd/kernels/ConvStemBwdCore.h"
@@ -329,6 +334,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd/kernels/ConvWinogradSreg.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd/kernels/ConvWinogradWmmaCoop.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd/kernels/ConvWinogradWrw.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd_nd/kernels/ConvWinogradNd.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd_nd/kernels/ConvWinogradNdArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/direct/kernels/ConvDirect.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/direct/kernels/ConvDirectArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/direct/kernels/ConvDirectCore.h"
@@ -372,6 +379,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ConvEpilogue.h
         ConvEpilogueArgs.h
         ConvArchFamily.h
+        ConvPackedMath.h
         kernels/ConvIgemmNchw.cpp
         ConvIgemmNchwArgs.h
         ConvIgemmNchwCore.h
@@ -380,6 +388,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ConvWrwCore.h
         ConvWrwDirect.h
         ConvWrwGeom.h
+        ConvWrwSmallK.h
+        kernels/ConvWrwAccurate.cpp
         kernels/ConvStemBwd.cpp
         ConvStemBwdArgs.h
         ConvStemBwdCore.h
@@ -392,6 +402,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ConvWinogradSreg.h
         ConvWinogradWmmaCoop.h
         ConvWinogradWrw.h
+        kernels/ConvWinogradNd.cpp
+        ConvWinogradNdArgs.h
         kernels/ConvDirect.cpp
         ConvDirectArgs.h
         ConvDirectCore.h

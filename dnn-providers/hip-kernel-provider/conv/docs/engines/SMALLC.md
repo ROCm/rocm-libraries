@@ -15,7 +15,7 @@ SPDX-License-Identifier:  MIT
 - **Wins when:** RGB / grey stems on gfx950, gfx942 and RDNA (1.5-2.2x MIOpen call-weighted), single-channel 3-D medical inputs (3-5x), and VAE / diffusion output layers in backward data (c96-c320 dx from 3-4 dy channels, 1.4-2.2x).
 - **Loses when:** stems on gfx90a and gfx908 (1.6-2.2x behind MIOpen's stride-2 Winograd, CK, asm implicit GEMM and direct kernels), large-K NHWC 16-bit stems (sdxl c4 to k320, 1.1-1.4x behind CK), gfx950 patchify (behind hipconv's patch-embed kernel).
 - **Precision:** fp32 accumulation, the reduction done inside one block, one rounding at the store. Deterministic. No numerical notes.
-- **Instances:** 864 fwd + 216 bwd configs, each shipped to the architecture groups whose sweeps it won (`archs`).
+- **Instances:** 1057 fwd + 268 bwd configs, each shipped to the architecture groups whose sweeps it won (`archs`).
 - **vs MIOpen:** competes with CK grouped/3-D implicit GEMM, the Winograd `ConvBinWinogradRxSf3x2` / `f2x3g1` and `GemmFwdRest` on stems: 1.0-1.3x vs Winograd and 1.8-3.0x vs CK 3-D on gfx950/942/RDNA, 0.5-0.6x on gfx90a/gfx908.
 
 ## Why it exists

@@ -86,6 +86,17 @@ if(ENABLE_HIP_MLOPS_ENGINE)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_MLOPS=1)
 endif()
 
+# Explicit independent accuracy authority; separate from provider kernel selection.
+if(HIPKERNELPROVIDER_ENABLE_CONV AND HIPKERNELPROVIDER_ENABLE_TESTS AND TARGET hipdnn_bench_lib)
+    add_executable(hipkernel_validate_wrw ../conv/tools/ValidateWrw.cpp)
+    target_compile_features(hipkernel_validate_wrw PRIVATE cxx_std_17)
+    target_compile_options(hipkernel_validate_wrw PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+    target_link_libraries(hipkernel_validate_wrw PRIVATE
+        hipdnn_bench_lib hipdnn_frontend hipdnn_backend hipdnn_flatbuffers_sdk
+        hipdnn_data_sdk hip::host hiprtc::hiprtc)
+    clang_tidy_check(hipkernel_validate_wrw)
+endif()
+
 if(ENABLE_HIP_FLASH2_ENGINE)
     # Precompiled-kernel engine: compile the host-side engine/plan sources into the
     # provider object library. HipFlash2FwdPlan.hip is intentionally excluded (it is

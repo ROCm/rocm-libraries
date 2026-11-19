@@ -61,6 +61,11 @@ const std::vector<IngestorPack>& ingestorPacks()
 #ifdef HIPDNN_ENGINE_CONV_WINOGRAD
         {"hipkernel:CONV_WINOGRAD", &registerConvWinogradSymbols, &resetConvWinogradModuleCache},
 #endif
+#ifdef HIPDNN_ENGINE_CONV_WINOGRAD_ND
+        {"hipkernel:CONV_WINOGRAD_ND",
+         &registerConvWinogradNdSymbols,
+         &resetConvWinogradNdModuleCache},
+#endif
 #ifdef HIPDNN_ENGINE_CONV_DIRECT
         {"hipkernel:CONV_DIRECT", &registerConvDirectSymbols, &resetConvDirectModuleCache},
 #endif

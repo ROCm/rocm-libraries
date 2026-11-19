@@ -103,9 +103,9 @@ std::optional<IgemmProblem> withPatchView(const IgemmProblem& problem);
 /// channels-first-output config writes it in place of the staging transpose.
 bool outputChannelsFirst(const IgemmProblem& problem);
 
-/// @p problem without the output staging, for a channels-first-output config: the remaining
-/// staged operands keep their order in the workspace.
-IgemmProblem withoutOutputStaging(const IgemmProblem& problem);
+/// Removes the output staging for a channels-first epilogue, and also input staging when
+/// @p removeInput selects the bounded pointwise loader. Recomputes the remaining workspace.
+IgemmProblem withoutActivationStaging(const IgemmProblem& problem, bool removeInput);
 
 /**
  * @brief The convolution @p context's graph describes in @p direction, or nullopt when the
@@ -236,20 +236,24 @@ struct SplitPlan
 
 /// The analytic default: split only when the tiles leave the device under-filled, at most 16
 /// splits, and the partials under 1 GiB. Under-filled is fewer than two blocks per CU on gfx9,
-/// keeping at least two k-iterations per split; fewer than one block per WGP on gfx10+
-/// (device_units), keeping at least 64. A device that reports no units gets no split (the
-/// kernel match declines it). @p pack: 1 the config's k-steps span whole taps (tap packing), so
+/// keeping at least two k-iterations per split; fewer than one block per WGP on legacy gfx10+
+/// (device_units), keeping at least 64; gfx1250 keeps one block per CU and eight iterations.
+/// A device that reports no units gets no split (the kernel match declines it).
+/// @p pack: 1 the config's k-steps span whole taps (tap packing), so
 /// a k-step covers bk / (reduction channels) taps; 2 the reduction runs flat (taps x channels in
 /// k-steps of bk). @p noSplit (patch configs): one launch whatever the fill; their GEMMs are
 /// microsecond-scale, so the reduce launch and the partials' round trip cost more than an
 /// under-filled grid.
+/// @p splitPolicy: 0 uses the analytic default; 1 explicitly disables split-K for the qualified
+/// gfx1250 HALF backward-data configs, independently of patch configs' @p noSplit.
 SplitPlan splitPlanFor(const IgemmProblem& problem,
                        int64_t bm,
                        int64_t bn,
                        int64_t bk,
                        const hipdnn_plugin_sdk::ingestor::DeviceProperties& device,
                        int64_t pack = 0,
-                       bool noSplit = false);
+                       bool noSplit = false,
+                       int64_t splitPolicy = 0);
 
 /// Whether tap packing serves @p problem with a @p bk k-step: the reduction channels per tap
 /// are fewer than bk and divide it.

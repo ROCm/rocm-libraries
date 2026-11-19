@@ -31,7 +31,10 @@ ATOMS = {  # name: (id, wave, ka, lds bytes per block available, element)
     "wmma11_bf16": (7, 32, 16, 65536, "BFLOAT16"),
     "wmma12_f16": (8, 32, 16, 65536, "HALF"),
     "wmma12_bf16": (9, 32, 16, 65536, "BFLOAT16"),
-    "mfma16_bf16_908": (10, 64, 8, 65536, "BFLOAT16"),  # gfx908: no bf16_1k atom
+    "wmma125_f16": (10, 32, 32, 65536, "HALF"),
+    "wmma125_bf16": (11, 32, 32, 65536, "BFLOAT16"),
+    "wmma125_f32": (12, 32, 4, 65536, "FLOAT"),
+    "mfma16_bf16_908": (13, 64, 8, 65536, "BFLOAT16"),  # gfx908: no bf16_1k atom
 }
 INTS = [
     "atom_id",
@@ -92,6 +95,8 @@ EP1_TILES_OF = {
     "gfx908": CDNA_EP1,
     "gfx11": [(2, 4, 2, 2, 2), (2, 4, 4, 1, 1), (2, 8, 2, 2, 1), (2, 2, 4, 1, 1)],
     "gfx12": [(2, 4, 2, 2, 2), (2, 4, 4, 1, 1), (4, 2, 4, 2, 1)],
+    # Native WMMA keeps the gfx12 contiguous accumulator-row layout.
+    "gfx1250": [(2, 4, 2, 2, 2), (2, 4, 4, 1, 1), (4, 2, 4, 2, 1)],
 }
 # Backward data runs only at unit stride: the corpus's output layers (3x3 and 3x3x3, dy of up to
 # 4 channels). 2-D packs 3 and 4 channels into the same MMA steps, so one bound; 3-D keeps both.
@@ -137,6 +142,7 @@ ARCH_ATOMS = {
     "gfx908": ["mfma16_f16", "mfma16_f32", "mfma16_bf16_908"],
     "gfx11": ["wmma11_f16", "wmma11_bf16"],
     "gfx12": ["wmma12_f16", "wmma12_bf16"],
+    "gfx1250": ["wmma125_f16", "wmma125_bf16", "wmma125_f32"],
 }
 ORDER = [
     "gfx906",
@@ -147,6 +153,7 @@ ORDER = [
     "gfx1030",
     "gfx11",
     "gfx12",
+    "gfx1250",
     "any",
 ]
 
@@ -332,7 +339,14 @@ for direction, cat in (("fwd", catalog), ("bwd", bwd_catalog)):
         },
     )
     kernels = []
-    for i, (archs, c) in enumerate(cat.values()):
+    legacy_index = native_index = 0
+    for archs, c in cat.values():
+        if c["atom"].startswith("wmma125"):
+            priority = 1100 - native_index
+            native_index += 1
+        else:
+            priority = 1000 - legacy_index
+            legacy_index += 1
         groups = ",".join(a for a in ORDER if a in archs)
         name = (
             f"conv_smallc.{direction}.{dt[c['dtype']]}.{c['atom']}.c{c['cmax']}.{c['kd']}x{c['r']}x{c['s']}"
@@ -357,7 +371,7 @@ for direction, cat in (("fwd", catalog), ("bwd", bwd_catalog)):
                     "archs": groups,
                     **{k: c[k] for k in INTS},
                 },
-                "priority": 1000 - i,
+                "priority": priority,
             }
         )
     write(
