@@ -28,6 +28,8 @@
 #include <hip/atomic>
 // For cuda::std::__cccl_thread_sleep_for / cuda::std::__libcpp_thread_sleep_for(__ns)
 #include <hip/std/atomic>
+// For hip::std::unique_ptr in device code
+#include <hip/std/memory>
 
 // Workaround: On Windows, the HIP runtime does not dispatch kernels to the GPU
 // until hipStreamSynchronize is called on the stream. We spawn a detached
@@ -79,13 +81,14 @@ struct WorkQueue {
 
   private:
     __device__ void waitForSpace(uint32_t myPushCount);
-    // Tries to fetch and simultaneously lock the worknode at curPopCount. If none exists, or it's currently locked, or
-    // someone else got to it first, returns nullptr.
-    [[nodiscard]] __device__ WorkNode_Header *tryPop(bool shouldIncrementActiveCount, uint32_t curPopCount);
-    // Tries to fetch and simultaneously lock the worknode at curPopCount. If none exists, or it's currently locked, or
-    // someone else got to it first, returns nullptr. Safe to use with a queue which is written to by the CPU using
-    // hipMemcpy.
-    [[nodiscard]] __device__ WorkNode_Header *tryPop_cpuSafe(bool shouldIncrementActiveCount, uint32_t curPopCount);
+    // Tries to fetch and simultaneously lock the next waiting worknode. If none exists, or it's currently locked, or
+    // someone else got to it first, returns nullptr. cachedPopCount must be a value the caller has read from popCount,
+    // which may be out of date by now; this can't pop from anywhere but the head of the queue. It's only a parameter so
+    // tryPop_cpuSafe can reuse its own read of popCount instead of doing another one.
+    [[nodiscard]] __device__ WorkNode_Header *tryPop(bool shouldIncrementActiveCount, uint32_t cachedPopCount);
+    // Same as tryPop(shouldIncrementActiveCount, cachedPopCount), but safe to use with a queue which is written to by
+    // the CPU using hipMemcpy.
+    [[nodiscard]] __device__ WorkNode_Header *tryPop_cpuSafe(bool shouldIncrementActiveCount, uint32_t cachedPopCount);
 };
 
 // TODO: should these be static members of WorkNode_Header?
@@ -244,39 +247,51 @@ __device__ void WorkQueue<queueSize>::waitForSpace(uint32_t myPushCount) {
     }
 }
 
-// Tries to fetch and simultaneously lock the worknode at curPopCount. If none exists, or it's currently locked, or
-// someone else got to it first, returns nullptr.
+// Tries to fetch and simultaneously lock the next waiting worknode. If none exists, or it's currently locked, or
+// someone else got to it first, returns nullptr. cachedPopCount must be a value the caller has read from popCount (see
+// the declaration).
 template <size_t queueSize>
-[[nodiscard]] __device__ WorkNode_Header *WorkQueue<queueSize>::tryPop(bool shouldIncrementActiveCount, uint32_t curPopCount) {
-    const uint32_t index = curPopCount % queueSize;
+[[nodiscard]] __device__ WorkNode_Header *WorkQueue<queueSize>::tryPop(bool shouldIncrementActiveCount, uint32_t cachedPopCount) {
+    const uint32_t index = cachedPopCount % queueSize;
     WorkNode_Header *work = WorkNode_Header::tryLockAndFetch(&queue[index]);
     if (work == nullptr) {
         return nullptr;
     }
+    // work is now locked and queue[index] is empty. Unless we hand work over to the caller, guard puts it back into
+    // queue[index] when we return. Nobody else can write to queue[index] in the meantime:
+    //  - A pusher only writes to an entry once popCount has moved past the worknode that entry held on the previous
+    //    lap (see waitForSpace and waitForSpaceInCPUQueue), so the next push into queue[index] waits until popCount is
+    //    past work's position.
+    //  - popCount only moves past a position through the atomicCAS below, by the caller holding the worknode at that
+    //    position. While we hold work, nobody else can do that for work's position.
+    // To everyone else this looks the same as detachWorkNode locking a worknode that is still in the queue and later
+    // unlocking it back into the same entry: popCount doesn't move, and other callers find the entry empty (locked) and
+    // try again later.
+    auto putBack = [location = &queue[index]](WorkNode_Header *node) { node->restoreAndUnlock(location); };
+    hip::std::unique_ptr<WorkNode_Header, decltype(putBack)> guard(work, putBack);
     if (shouldIncrementActiveCount) {
         atomicAdd(&activeVcoreCount, 1);
     }
     __threadfence();
-    // If popCount has moved on since curPopCount was read, another vcore popped this entry and a pusher refilled it
-    // with a worknode from the next lap. Taking it would skip a position, and the queue would hang on the entry left
-    // empty. Put it back instead: no pusher can reuse the entry meanwhile, since popCount can't pass the worknode we
-    // hold. activeVcoreCount is incremented before popCount, as shouldKeepPollingForWork expects, so undo that too.
-    if (atomicCAS(&popCount, curPopCount, curPopCount + 1) != curPopCount) {
+    // Only the caller holding the worknode at cachedPopCount may advance popCount. If popCount has moved on since
+    // cachedPopCount was read, another vcore popped that worknode and a pusher refilled the entry with one from a later
+    // lap. Taking it would skip a position, and the queue would hang on the entry left empty, so let guard put it back
+    // (see above for why that's safe). activeVcoreCount is incremented before popCount, as shouldKeepPollingForWork
+    // expects, so undo that too.
+    if (atomicCAS(&popCount, cachedPopCount, cachedPopCount + 1) != cachedPopCount) {
         if (shouldIncrementActiveCount) {
             atomicSub(&activeVcoreCount, 1);
         }
-        atomicExch(reinterpret_cast<uintptr_t*>(&queue[index]), reinterpret_cast<uintptr_t>(work));
         return nullptr;
     }
-    return work;
+    return guard.release();
 }
 
-// Tries to fetch and simultaneously lock the worknode at curPopCount. If none exists, or it's currently locked, or
-// someone else got to it first, returns nullptr. Safe to use with a queue which is written to by the CPU using
-// hipMemcpy.
+// Same as tryPop(shouldIncrementActiveCount, cachedPopCount), but safe to use with a queue which is written to by the
+// CPU using hipMemcpy.
 template <size_t queueSize>
-__device__ WorkNode_Header *WorkQueue<queueSize>::tryPop_cpuSafe(bool shouldIncrementActiveCount, uint32_t curPopCount) {
-    const uint32_t index = curPopCount % queueSize;
+__device__ WorkNode_Header *WorkQueue<queueSize>::tryPop_cpuSafe(bool shouldIncrementActiveCount, uint32_t cachedPopCount) {
+    const uint32_t index = cachedPopCount % queueSize;
     // Atomic ops on device memory are only atomic with respect to the actions of other GPU cores, not the
     // asyncEngine/copy engine. In other words, the copy engine can execute a write in the middle of an atomic op. Thus,
     // if we don't have this 'if' guarding the tryPop call, it's possible for the atomicExch in tryPop to load nullptr
@@ -285,7 +300,7 @@ __device__ WorkNode_Header *WorkQueue<queueSize>::tryPop_cpuSafe(bool shouldIncr
     if (atomicAdd(reinterpret_cast<uintptr_t *>(&queue[index]), 0) == 0) {
         return nullptr;
     }
-    return tryPop(shouldIncrementActiveCount, curPopCount);
+    return tryPop(shouldIncrementActiveCount, cachedPopCount);
 
     // TODO: Are we certain that we won't see individual bytes as they get written?
     // If we do see them, then we can use the least significant bit of the pointer as a flag to indicate the write is
