@@ -8,10 +8,6 @@
 
 #include "miopen_cstdint.hpp"
 
-#ifndef MIOPEN_HIP_RUNTIME_COMPILE
-#include <hip/hip_bfloat16.h>
-#endif
-
 #include "miopen_limits.hpp"
 
 #define MIOPEN_ENABLE_F8_DEVICE_CODE 1

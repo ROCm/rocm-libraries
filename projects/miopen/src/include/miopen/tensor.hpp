@@ -280,7 +280,12 @@ struct TensorDescriptor : miopenTensorDescriptor
                                                             const TensorDescriptor& t);
 
     friend void to_json(nlohmann::json& j, const TensorDescriptor& descriptor);
+#ifdef MIOPEN_BUILD_TESTING
+    MIOPEN_INTERNALS_EXPORT friend void from_json(const nlohmann::json& j,
+                                                  TensorDescriptor& descriptor);
+#else
     friend void from_json(const nlohmann::json& j, TensorDescriptor& descriptor);
+#endif
 
 private:
     TensorDescriptor(miopenDataType_t t,

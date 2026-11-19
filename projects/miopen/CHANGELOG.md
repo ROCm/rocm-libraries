@@ -6,6 +6,12 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
+* [Numerics] Fixed statistics-mode argument handling, global launch dimensions, and
+  minimum/maximum reductions for positive-only, negative-only, zero, infinity, and BF16
+  subnormal inputs. Bound the grid-stride reduction to eight blocks per hardware compute unit
+  to limit contention on the statistics atomics.
+  Empty tensors return without allocating or launching GPU work, and element counts are
+  no longer narrowed to `int`.
 * [Reduce] Fixed `miopenReduceTensor` returning inf, NaN or imprecise results above 1024 reduced
   elements per output when the compute type is wider than the input type (for example FP16 `AVG`
   with FP32 compute). The workspace size now follows the compute type: allocate the workspace with the
@@ -97,6 +103,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   [`src/hipconv/CHANGELOG.md`](src/hipconv/CHANGELOG.md) for the full list.
 
 ### Changed
+* [Conv][Numerics] Migrated the legacy HIP BF16 types in `ConvDepthwiseFwd3D` and CheckNumerics to `__hip_bfloat16` with header-independent HIPRTC compilation and support for older HIP BF16 disk headers.
 * [Conv] The gfx942/gfx950 two-tower config-selection heuristic now ranks a shipped precomputed
   config-embedding table instead of running the per-candidate fdeep config tower at run time, then
   checks CK applicability lazily top-down; on a miss (no table, or nothing applicable) selection

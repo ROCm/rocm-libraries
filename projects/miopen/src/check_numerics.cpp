@@ -32,6 +32,8 @@
 #include <miopen/datatype.hpp>
 #include <miopen/target_properties.hpp>
 
+#include <limits>
+
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_CHECK_NUMERICS)
 
 namespace miopen {
@@ -46,8 +48,8 @@ struct CheckNumericsResult
 {
     float sum    = 0.0f;
     float absSum = 0.0f;
-    float min    = 0.0f;
-    float max    = 0.0f;
+    float min    = std::numeric_limits<float>::infinity();
+    float max    = -std::numeric_limits<float>::infinity();
 
     int hasZero = 0;
     int hasNan  = 0;
@@ -76,37 +78,29 @@ std::string GetKernelName(miopenDataType_t data_type)
 bool checkNumericsImpl(
     const Handle& handle, int mode, const TensorDescriptor& dDesc, ConstData_t data, bool isInput)
 {
-    int numElements = dDesc.GetElementSize();
+    const size_t numElements = dDesc.GetElementSize();
+    if(numElements == 0)
+        return false;
+
     CheckNumericsResult abnormal_h;
     auto abnormal_d =
         handle.Create(sizeof(CheckNumericsResult)); // TODO - someday avoid slow malloc/free here
     handle.WriteTo(&abnormal_h, abnormal_d, sizeof(CheckNumericsResult));
 
-    // Let each thread work on a single element
     const size_t threadsPerBlock = 256;
+    const size_t blocksForTensor = (numElements + threadsPerBlock - 1) / threadsPerBlock;
 
-    // Calculate based on tensor size
-    const size_t totalThreads = numElements;
-    const size_t minBlocks    = (totalThreads + threadsPerBlock - 1) / threadsPerBlock;
+    // The grid-stride loop covers the tensor with a bounded number of blocks.
+    // Limit contenders for the shared statistics atomics, not hardware occupancy.
+    const size_t blocksPerCU = 8;
+    const size_t numBlocks =
+        std::min(blocksForTensor, handle.GetMaxHardwareComputeUnits() * blocksPerCU);
 
-    // Calculate based on hardware occupancy
-    const size_t numCUs                = handle.GetMaxHardwareComputeUnits();
-    const size_t minWavesPerCU         = 4;    // Minimum occupancy target
-    const size_t maxWavesPerCU         = 2048; // Maximum to avoid over-subscription
-    const size_t wavesPerBlock         = threadsPerBlock / handle.GetWavefrontWidth();
-    const size_t minBlocksForOccupancy = (numCUs * minWavesPerCU) / wavesPerBlock;
-    const size_t maxBlocksForOccupancy = (numCUs * maxWavesPerCU) / wavesPerBlock;
-
-    // Clamp minBlocks to the occupancy range [min, max]
-    size_t numBlocks = std::max(minBlocks, minBlocksForOccupancy);
-    numBlocks        = std::min(numBlocks, maxBlocksForOccupancy);
-
-    const int computeStats = (mode & CheckNumerics::ComputeStats);
-    // TODO - some constants we should get from the device:
+    const bool computeStats       = (mode & CheckNumerics::ComputeStats) != 0;
     std::string program_name      = "MIOpenCheckNumerics.cpp";
     std::string kernel_name       = GetKernelName(dDesc.GetType());
     const std::vector<size_t> vld = {size_t{threadsPerBlock}, size_t{1}, size_t{1}};
-    const std::vector<size_t> vgd = {numBlocks, size_t{1}, size_t{1}};
+    const std::vector<size_t> vgd = {numBlocks * threadsPerBlock, size_t{1}, size_t{1}};
     const std::string build_options =
         " -DMIOPEN_FP8_CLIPPING=" + std::to_string(MIOPEN_FP8_CLIPPING) +
         " -DMIOPEN_FP8_IEEE_EXPONENT_BIAS=" +
@@ -130,7 +124,7 @@ bool checkNumericsImpl(
                        << " ptr=" << data << " zeros=" << abnormal_h.hasZero
                        << " nans=" << abnormal_h.hasNan << " infs=" << abnormal_h.hasInf << "  {"
                        << dDesc << "}");
-        if(computeStats != 0)
+        if(computeStats)
         {
             assert(numElements != 0);
             MIOPEN_LOG((isAbnormal ? miopen::LoggingLevel::Warning : miopen::LoggingLevel::Info),
