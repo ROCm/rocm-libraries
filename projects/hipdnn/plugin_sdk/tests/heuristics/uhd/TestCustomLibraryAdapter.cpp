@@ -8,6 +8,8 @@
 
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/CustomLibraryAdapter.hpp>
 
+#include <hipdnn_test_sdk/utilities/UhdFeatureRows.hpp>
+
 #include "../../TestResourcePaths.hpp"
 
 #include <gtest/gtest.h>
@@ -136,7 +138,7 @@ TEST_F(TestCustomLibraryAdapter, ScoreBatch)
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<std::vector<double>> batch = {{1.0, 2.0}, {3.0, 4.0}, {0.0, 0.0}};
-    auto scores = adapter->scoreBatch(batch);
+    auto scores = hipdnn_test_sdk::utilities::scoreRows(*adapter, batch).raw;
     ASSERT_EQ(scores.size(), 3U);
     EXPECT_DOUBLE_EQ(scores[0], 3.0);
     EXPECT_DOUBLE_EQ(scores[1], 7.0);

@@ -4,8 +4,8 @@
 > Last updated: 2026-10-15
 
 - **Status**: In progress
-- **Status notes**: The generic bundle runner, template sweeps, `--verification-mode`, the `hipdnn_golden_data_tests` binary, and `verify_golden_bundles.py` shipped (#8228, #8926, #8641, #10416, #11494). Bundle `.meta.json` tolerance, tolerance calibration, the `forward_source` check, the 800 MB budget check, and a pre-commit hook are not built. Code is in `dnn-providers/integration-tests/src/harness/bundle/`.
-- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+- **Status notes**: The generic bundle runner, template sweeps, `--verification-mode`, the `hipdnn_golden_data_tests` binary, and `verify_golden_bundles.py` shipped (#8228, #8926, #8641, #10416, #11494). Bundle `.meta.json` tolerance, tolerance calibration, the `forward_source` check, the 800 MB budget check, and a pre-commit hook are not built. A ragged tensor's `.bin` holds exactly its element space (#15080). Code is in `dnn-providers/integration-tests/src/harness/bundle/`.
+- **Last verified**: 2026-11-04 against #15080 on `develop` (49a01e717d5)
 
 ## Table of Contents
 1. [Summary](#summary)
@@ -263,7 +263,7 @@ Each `.tensor{uid}.bin` file is a **raw dump of the tensor's underlying storage*
 | Strides | `strides` field in JSON | **Element strides**, not byte strides (e.g., `[150528, 50176, 224, 1]`). Multiply by `sizeof(element_type)` for byte offsets. |
 | Byte order | Native platform | Little-endian on x86-64. No endianness marker in the file. |
 
-The file size in bytes equals `element_space x sizeof(element_type)`, where `element_space` is computed from `dims` and `strides` (the total storage footprint including any gaps for non-contiguous layouts). For a contiguous (packed) tensor, `element_space` equals the product of `dims`. A ragged tensor ([RFC 0014](0014_RaggedTensors.md)) stores only its valid rows, so its element count comes from the last value of its offset tensor.
+The file size in bytes equals `element_space x sizeof(element_type)`, where `element_space` is computed from `dims` and `strides` (the total storage footprint including any gaps for non-contiguous layouts). For a contiguous (packed) tensor, `element_space` equals the product of `dims`. A ragged tensor ([RFC 0014](0014_RaggedTensors.md)) uses its `elementSpace`: the extent from the start of the buffer to the last live element, computed from `dims`, `strides`, the offset tensor and, when the SDPA node names one, its `seq_len` tensor. A ragged `.bin` file holds exactly that many elements: each batch sits at its origin, and a gap after the last live row is not written.
 
 **To read a `.bin` file**: allocate `element_space x sizeof(T)` bytes, read the file into that buffer, then index using the strides from JSON. For contiguous tensors this is a straightforward row-major (C-order) array.
 
@@ -731,7 +731,7 @@ For **non-deterministic engines** (e.g., atomic FP32 accumulation with schedulin
 
 The per-operation default is the safety net. It starts simple and gets smarter:
 
-- **Fixed tolerances**: The harness reads the operation type of each node and the output data type from the graph and uses them as a lookup key into [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/TestTolerances.hpp), which defines compile-time constants per operation and data type (e.g., batchnorm inference fp32 = `2e-4`, conv fwd fp32 = `1e-5`). For a graph with several nodes, it takes the loosest per-node value. An unknown operation gets `1e-3`. The same value is used for atol and rtol. The graph does not compute tolerances — it provides the key, the lookup table provides the value.
+- **Fixed tolerances**: The harness reads the operation type of each node and the output data type from the graph and uses them as a lookup key into [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/TestTolerances.hpp), which defines compile-time constants per operation and data type (e.g., batchnorm inference fp32 = `2e-4`, conv fwd fp32 = `1e-5`). For a graph with several nodes, it takes the loosest per-node value. An unknown operation gets `1e-3`. The same value is used for atol and rtol. An fp8 output (E4M3 or E5M2) is the exception: it is graded at one step of its format, with rtol set to the format's epsilon and atol to its smallest subnormal. The graph does not compute tolerances — it provides the key, the lookup table provides the value.
 
 - **Future -- dynamic tolerances**: [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) will replace fixed lookup values with tolerances computed from graph properties (operation, data type, tensor dimensions). This is the intended long-term solution but requires validation before it can replace fixed values (see [Future Work](#future-work)).
 
@@ -749,7 +749,7 @@ Internal consistency is guaranteed by construction for generated bundles: `Graph
 
 Three checks catch the real tensor-data failure modes:
 
-1. **Tensor size validation (load time)** -- the harness reads each `.bin` file with `tensorFromFileAndAttributes()`, which throws when the byte count does not match `element_space x sizeof(element_type)` declared in the expanded graph JSON (see [binary tensor format](#binary-tensor-format)). The test fails. This is the primary load-time integrity check -- fast and sufficient to catch truncated downloads and wrong-file swaps.
+1. **Tensor size validation (load time)** -- the harness reads each `.bin` file with `tensorFromFileAndAttributes()`, which throws when the byte count does not match `element_space x sizeof(element_type)` declared in the expanded graph JSON (see [binary tensor format](#binary-tensor-format)). For a ragged tensor `element_space` is its `elementSpace`, so a file sized to the last offset value fails when that value differs from `elementSpace`. The test fails. This is the primary load-time integrity check -- fast and sufficient to catch truncated downloads and wrong-file swaps.
 
 2. **NaN/Inf rejection (generation time)** -- reject output tensors containing NaN or Inf before writing any files. `generate_sdpa_fwd_golden.py` does this; `generate_batchnorm_reference.py` does not. All-same-value tensors are valid (e.g., a bias-only layer can produce uniform output).
 

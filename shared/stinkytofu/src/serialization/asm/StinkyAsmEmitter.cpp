@@ -245,9 +245,38 @@ inline std::ostream& operator<<(std::ostream& os, const CacheScopeModifiers& mod
     return os;
 }
 
+// Match rocisa TENSORModifiers::toString() and the LLVM printer: th, scope, nv.
+inline std::ostream& operator<<(std::ostream& os, const TENSORModifiers& mod) {
+    if (hasTemporalHint(mod.th)) {
+        os << " th:" << toString(mod.th, mod.isStore);
+    }
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << " scope:" << toString(mod.scope);
+    }
+    if (mod.nv != NonVolatile::NV_NONE) {
+        os << " " << toString(mod.nv);
+    }
+    return os;
+}
+
 inline std::ostream& operator<<(std::ostream& os, const GLOBALModifiers& mod) {
     if (mod.offset != 0) {
         os << " offset:" << mod.offset;
+    }
+    if (mod.glc) {
+        if (mod.hasGLCModifier)
+            os << " glc";
+        else if (mod.hasSC0Modifier)
+            os << " sc0";
+    }
+    if (mod.slc) {
+        if (mod.hasGLCModifier)
+            os << " slc";
+        else if (mod.hasSC0Modifier)
+            os << " sc1";
+    }
+    if (mod.hasDLCModifier && mod.dlc) {
+        os << " dlc";
     }
     // Temporal hint / cache scope for global_prefetch_b8 (gl2-prefetch). Match
     // rocisa GLOBALModifiers::toString(): emit only non-default fields, temporal
@@ -257,6 +286,9 @@ inline std::ostream& operator<<(std::ostream& os, const GLOBALModifiers& mod) {
     }
     if (mod.scope != MUBUFScope::SCOPE_NONE) {
         os << " scope:" << toString(mod.scope);
+    }
+    if (mod.lds) {
+        os << " lds";
     }
     return os;
 }
@@ -547,8 +579,15 @@ static FieldType fieldTypeForEmittedSrcOperand(const StinkyInstruction& inst, si
     return FieldType::None;
 }
 
-static bool isNullSmemOffsetNokOperand(const StinkyRegister& reg) {
-    if (reg.dataType == StinkyRegister::Type::LiteralString) return reg.literalValue == "null";
+/// Scalar fields that encode an SGPR, M0 or null but no inline constant, such as
+/// the buffer soffset and the s_prefetch_inst slength. Zero in one is written `null`.
+static bool writesZeroAsNull(FieldType type) {
+    return type == FieldType::sreg_m0 || type == FieldType::smem_offset_nok;
+}
+
+static bool isZeroOrNull(const StinkyRegister& reg) {
+    if (reg.dataType == StinkyRegister::Type::LiteralString)
+        return reg.literalValue == "null" || reg.literalValue == "0";
     if (reg.dataType == StinkyRegister::Type::LiteralInt) return reg.literalInt == 0;
     return false;
 }
@@ -591,13 +630,6 @@ static void emitOperands(std::ostream& os, const StinkyInstruction& inst,
     // Check if instruction has VOP3 modifiers
     const VOP3Modifiers* vop3Mod = inst.getModifier<VOP3Modifiers>();
 
-    // Check if this is a MUBUF instruction (buffer operations) with offen.
-    // Note: SOPP fences (global_wb / global_inv) carry a CacheScopeModifiers
-    // instead of MUBUFModifiers, so this query correctly returns nullptr for
-    // them — the null/0-soffset substitution below is only meaningful for
-    // true buffer ops with src registers.
-    const MUBUFModifiers* mubufMod = inst.getModifier<MUBUFModifiers>();
-
     // Compute the number of source operands to emit from the HW field metadata.
     // Read-write operands already emitted via destRegs have duplicates appended
     // at the end of srcRegs for use-def tracking; those must not be re-emitted.
@@ -623,22 +655,8 @@ static void emitOperands(std::ostream& os, const StinkyInstruction& inst,
             os << ", ";
         }
 
-        // Check if this is the last visible source operand of a MUBUF instruction
-        // and it's a literal zero. When HasMUBUFConst is false (e.g. gfx1250),
-        // emit "null" instead of "0" for the soffset parameter.
-        // When HasMUBUFConst is true (e.g. gfx942), emit the raw value as-is.
-        if (mubufMod && !mubufMod->hasMUBUFConst && i == srcRegs.size() - 1) {
-            if (srcRegs[i].dataType == StinkyRegister::Type::LiteralInt &&
-                srcRegs[i].literalInt == 0) {
-                os << "null";
-                firstOperand = false;
-                nonSkippedIndex++;
-                continue;
-            }
-        }
-
-        if (fieldTypeForEmittedSrcOperand(inst, nonSkippedIndex) == FieldType::smem_offset_nok &&
-            isNullSmemOffsetNokOperand(srcRegs[i])) {
+        if (writesZeroAsNull(fieldTypeForEmittedSrcOperand(inst, nonSkippedIndex)) &&
+            isZeroOrNull(srcRegs[i])) {
             os << "null";
             firstOperand = false;
             nonSkippedIndex++;
@@ -793,6 +811,7 @@ static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& ins
             EMIT_TRAILING_MODIFIER(MUBUF, MUBUF);
             EMIT_TRAILING_MODIFIER(CACHE_SCOPE, CacheScope);
             EMIT_TRAILING_MODIFIER(GLOBAL, GLOBAL);
+            EMIT_TRAILING_MODIFIER(TENSOR, TENSOR);
             EMIT_TRAILING_MODIFIER(SMEM, SMEM);
             EMIT_TRAILING_MODIFIER(SDWA, SDWA);
             EMIT_TRAILING_MODIFIER(DPP, DPP);
@@ -874,9 +893,23 @@ static void emitDirective(std::ostream& os, const AsmDirective& directive,
         // Output raw text as-is (no newline added since text may already have it)
         os << directive.value;
         return;
-    } else if (directive.kind == AsmDirectiveKind::IF ||
-               directive.kind == AsmDirectiveKind::ENDIF) {
-        os << directive.value;
+    } else if (directive.kind == AsmDirectiveKind::IF) {
+        if (!directive.value.empty()) {
+            os << directive.value;
+        } else {
+            os << ".if " << directive.condition << "\n";
+        }
+        return;
+    } else if (directive.kind == AsmDirectiveKind::ENDIF) {
+        if (!directive.value.empty()) {
+            os << directive.value;
+        } else {
+            os << ".endif";
+            if (options.emitComments && !directive.comment.empty()) {
+                os << std::string(44, ' ') << " // " << directive.comment;
+            }
+            os << "\n";
+        }
         return;
     }
 

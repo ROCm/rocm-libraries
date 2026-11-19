@@ -19,7 +19,10 @@ bool parse_data_type_tag(std::string_view s, DataType& out)
                                       DataType::bf8,
                                       DataType::tf32})
         if(s == to_string(dtype))
-            return out = dtype, true;
+        {
+            out = dtype;
+            return true;
+        }
     return false;
 }
 

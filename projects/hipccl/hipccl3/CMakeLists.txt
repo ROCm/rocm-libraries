@@ -138,6 +138,22 @@ if(HIPCCL_BUILD_ALL)
     set(HIPCCL_BUILD_ROCTHRUST ON CACHE BOOL "" FORCE)
 endif()
 
+option(HIPCCL_ENABLE_COVERAGE "Build rocPRIM, rocThrust, hipCUB with code coverage enabled" OFF)
+
+if(DEFINED BUILD_CODE_COVERAGE)
+    message(DEPRECATION "BUILD_CODE_COVERAGE is deprecated and will be removed soon; use HIPCCL_ENABLE_COVERAGE instead.")
+    set(HIPCCL_ENABLE_COVERAGE ${BUILD_CODE_COVERAGE} CACHE BOOL "" FORCE)
+    unset(BUILD_CODE_COVERAGE CACHE)
+    unset(BUILD_CODE_COVERAGE)
+endif()
+
+if(HIPCCL_ENABLE_COVERAGE)
+    set(ROCPRIM_ENABLE_COVERAGE ON CACHE BOOL "" FORCE)
+    set(ROCTHRUST_ENABLE_COVERAGE ON CACHE BOOL "" FORCE)
+    set(HIPCUB_ENABLE_COVERAGE ON CACHE BOOL "" FORCE)
+endif()
+
+
 if(HIPCCL_BUILD_ROCPRIM)
     add_subdirectory_with_message(
         COMPONENT rocprim

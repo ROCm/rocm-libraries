@@ -682,6 +682,37 @@ TEST_F(TestGraphAndPlanSerializationApi, DeserializeGraphIdentifiedButCorruptCon
     EXPECT_EQ(rawDesc, nullptr);
 }
 
+// Neither a bare plan nor a bare graph carries a file identifier, so the graph loader
+// cannot tell them apart and parses a bare plan as a graph. No check looks for a plan;
+// the Graph verifier rejects it as a side effect. At version 2 the first check to fail is
+// the Graph name: the verifier reads the plan's version field as the offset of the name
+// string, and an offset of 2 is not 4-byte aligned. With this fixture's plugin payload,
+// the graph loader also rejects the plan when PLAN_SERIALIZATION_VERSION is 0 or 4, so a
+// version change alone does not fail this test. The plan comes from the production
+// writer, so a change to the plan envelope or the graph loader that lets a plan through
+// fails this test.
+TEST_F(TestGraphAndPlanSerializationApi, DeserializeGraphRejectsBarePlanBlob)
+{
+    makeExecutionPlanFinalized();
+    expectPlanSerialization();
+
+    size_t size = 0;
+    ASSERT_EQ(hipdnnBackendGetSerializedExecutionPlan_ext(_planWrapper.get(), 0, &size, nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    std::vector<uint8_t> planBlob(size);
+    ASSERT_EQ(hipdnnBackendGetSerializedExecutionPlan_ext(
+                  _planWrapper.get(), size, &size, planBlob.data()),
+              HIPDNN_STATUS_SUCCESS);
+    flatbuffers::Verifier verifier(planBlob.data(), planBlob.size());
+    ASSERT_TRUE(fbs::VerifySerializedExecutionPlanBuffer(verifier));
+
+    hipdnnBackendDescriptor_t rawDesc = nullptr;
+    EXPECT_EQ(
+        hipdnnBackendCreateAndDeserializeGraph_ext(&rawDesc, planBlob.data(), planBlob.size()),
+        HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(rawDesc, nullptr);
+}
+
 // ============================================================================
 // Plan deserialize (hipdnnBackendCreateAndDeserializeExecutionPlan_ext)
 //

@@ -146,10 +146,8 @@ RppStatus rppt_erode(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                                roiType, rppHandle);
     }
 #ifdef GPU_SUPPORT
-    if (srcDescPtr->offsetInBytes < 12 * (kernelSize / 2))
-        return RPP_ERROR_LOW_OFFSET;
-    else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
-             (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
+    if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
+        (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
             return hip_exec_erode_tensor(
@@ -203,10 +201,8 @@ RppStatus rppt_dilate(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                                 roiType, rppHandle);
     }
 #ifdef GPU_SUPPORT
-    if (srcDescPtr->offsetInBytes < 12 * (kernelSize / 2))
-        return RPP_ERROR_LOW_OFFSET;
-    else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
-             (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
+    if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
+        (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
             return hip_exec_dilate_tensor(

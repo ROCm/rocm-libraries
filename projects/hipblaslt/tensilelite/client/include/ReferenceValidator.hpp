@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include "DeviceContext.hpp"
 #include "RunListener.hpp"
 
 #include "ProgramOptions.hpp"
@@ -36,17 +37,20 @@
 #include "DataInitialization.hpp"
 
 #include <cstddef>
+#include <cstdint>
+#include <vector>
 
 namespace TensileLite
 {
     namespace Client
     {
 
+        class ClientProblemFactory;
+
         class ReferenceValidator : public RunListener
         {
         public:
-            ReferenceValidator(po::variables_map const&            args,
-                               std::shared_ptr<DataInitialization> dataInit);
+            ReferenceValidator(po::variables_map const& args);
 
             virtual bool needMoreBenchmarkRuns() const override;
             virtual void preBenchmarkRun() override;
@@ -64,11 +68,10 @@ namespace TensileLite
             virtual void   setNumWarmupRuns(size_t count) override;
             virtual void   preWarmup() override;
             virtual void   postWarmup(TimingEvents const& startEvents,
-                                      TimingEvents const& stopEvents,
-                                      hipStream_t const&  stream) override;
-            virtual void   validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                           TimingEvents const&            startEvents,
-                                           TimingEvents const&            stopEvents) override;
+                                      TimingEvents const& stopEvents) override;
+            virtual void   validateWarmups(std::vector<size_t> const& slots,
+                                           TimingEvents const&        startEvents,
+                                           TimingEvents const&        stopEvents) override;
 
             virtual size_t numSyncs() override
             {
@@ -83,17 +86,14 @@ namespace TensileLite
                 return 0;
             }
             virtual void setNumEnqueuesPerSync(size_t count) override {}
-            virtual void preEnqueues(hipStream_t const& stream) override {}
+            virtual void preEnqueues() override {}
             virtual void postEnqueues(TimingEvents const& startEvents,
-                                      TimingEvents const& stopEvents,
-                                      hipStream_t const&  stream) override
+                                      TimingEvents const& stopEvents) override
             {
             }
-            virtual void validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                          TimingEvents const&            startEvents,
-                                          TimingEvents const&            stopEvents) override
-            {
-            }
+            virtual void validateEnqueues(std::vector<size_t> const& slots,
+                                          TimingEvents const&        startEvents,
+                                          TimingEvents const&        stopEvents) override;
 
             bool validate(ContractionProblemGemm const& problem,
                           ContractionInputs const&      reference,
@@ -124,22 +124,52 @@ namespace TensileLite
 
             virtual int error() const override;
 
+            std::shared_ptr<ProblemInputs> referenceInputs(size_t card) const
+            {
+                return m_referenceInputs[card];
+            }
+
+            void setSplit(ClientProblemFactory const* split)
+            {
+                m_split = split;
+            }
+
+        protected:
+            // Allow lifecycle tests to observe validation without device transfers.
+            virtual void validateSlots(std::vector<size_t> const& slots);
+
         private:
             void allocateResultBuffer(size_t bytes);
+
+            // The problem device `card` runs: its slice under --split-devices, else m_problem.
+            ContractionProblem* deviceProblem(size_t card) const;
+
+            // --split-devices: point every non-owner device's reference A or B (the shared
+            // operand) at the owner's host data, the data the kernels read.
+            void redirectSharedInputs();
 
             bool shouldSkipNullTensor(const std::string& tensorName,
                                       bool hasNullPointer,
                                       bool hasZeroElements) const;
 
-            std::shared_ptr<DataInitialization> m_dataInit;
-            std::shared_ptr<ProblemInputs>      m_referenceInputs;
+            std::vector<std::shared_ptr<ProblemInputs>> m_referenceInputs;
+            std::vector<std::vector<uint8_t>>           m_referenceRecvs;
+            std::vector<std::vector<uint8_t>>           m_a2aGemmB;
 
             size_t                   m_cpuResultBufferSize = 0;
             std::shared_ptr<uint8_t> m_cpuResultBuffer;
 
-            ContractionProblem* m_problem;
+            ContractionProblem* m_problem = nullptr;
+
+            ClientProblemFactory const* m_split = nullptr;
+
+            // The unsplit operand is shared: every device validates against the owner's data.
+            bool m_sharedA = false;
+            bool m_sharedB = false;
 
             bool m_enabled;
+            FusedA2A m_fusedA2A              = FusedA2A::Disabled;
+            bool     m_validateAfterEnqueues = false;
 
             int  m_elementsToValidate;
             bool m_printValids;
@@ -164,7 +194,9 @@ namespace TensileLite
             bool   m_executedSolution  = false;
             size_t m_errorsReported    = 0;
 
-            bool validateSolution(std::shared_ptr<ProblemInputs> inputs);
+            bool validateSolution(size_t card, std::shared_ptr<ProblemInputs> inputs);
+            void referenceRecvs(ContractionProblemGemm const& problem);
+            void interleaveA2AGemmReferences(ContractionProblemGemm const& problem);
         };
     } // namespace Client
 } // namespace TensileLite

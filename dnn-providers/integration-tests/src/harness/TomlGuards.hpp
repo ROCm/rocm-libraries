@@ -11,21 +11,12 @@
 
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
+#include "harness/CurrentTestName.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/OutputComparison.hpp"
 
 namespace hipdnn_integration_tests
 {
-
-inline std::string currentTestName()
-{
-    auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
-    if(info == nullptr)
-    {
-        return {};
-    }
-    return std::string(info->test_suite_name()) + "." + info->name();
-}
 
 inline std::optional<ToleranceOverride> findTomlToleranceOverride(const std::string& testName)
 {

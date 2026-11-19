@@ -3,7 +3,7 @@
 
 """Subtile geometry validation for ``UseSubtileImpl`` solutions.
 
-Lives under ``Tensile/SolutionStructs/Validators/`` alongside the other
+Lives under ``tensilelite/SolutionStructs/Validators/`` alongside the other
 Solution-level validators, so the subtile layout rules are not interleaved with
 the rest of Solution.py.
 

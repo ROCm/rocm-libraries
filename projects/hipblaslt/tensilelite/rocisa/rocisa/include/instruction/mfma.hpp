@@ -159,7 +159,7 @@ namespace rocisa
         // _scale instruction with scale=0 to avoid a Base layer issue where
         // VOP3PX2/VOP3PX3 instructions may not execute atomically. This is NOT needed
         // on the base gfx1250 build, so it is gated on a per-build toggle set only for
-        // gfx1250-strict / gfx1250v0 (see rocIsa::setForceScaledWMMA, driven from
+        // gfx1250-strict (see rocIsa::setForceScaledWMMA, driven from
         // StinkyTofuArchName in KernelWriter) rather than on the shared ISA (12,5,0),
         // which cannot tell the steppings apart.
         bool forceScaledWMMA() const
@@ -172,8 +172,8 @@ namespace rocisa
         }
 
         // gfx1250 K=128 FP8/BF8 uses the dedicated v_wmma_*_16x16x128_{fp8,bf8}_{fp8,bf8}
-        // opcodes instead of f8f6f4. They are absent on gfx1250 (gfx1250v0), so the
-        // strict/v0 builds (forceScaledWMMA toggle) keep the scaled f8f6f4 form.
+        // opcodes instead of f8f6f4. They are absent on V0 (gfx1250-strict), so the
+        // strict build (forceScaledWMMA toggle) keeps the scaled f8f6f4 form.
         bool useNativeFp8WMMA() const
         {
             return capOrDefault(getAsmCaps(), "HasWMMA_V3") && variant[2] == 128
@@ -299,7 +299,8 @@ namespace rocisa
                 = !neg ? "" : (capOrDefault(getAsmCaps(), "HasWMMA_V1") ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
             std::string inputPermuteStr = "";
             std::string scaleStr        = "";
-            if(capOrDefault(getAsmCaps(), "HasMFMA_f8f6f4"))
+            // Only f8f6f4 opcodes use CBSZ/BLGP to select operand formats.
+            if(capOrDefault(getAsmCaps(), "HasMFMA_f8f6f4") && typeConvert(instType) == "f8f6f4")
             {
                 switch(instType)
                 {
