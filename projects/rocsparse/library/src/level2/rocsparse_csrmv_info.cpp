@@ -268,10 +268,13 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     {
         if(dest->lrb.n_rows_bins == nullptr)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->lrb.n_rows_bins, J_size * 32));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->lrb.n_rows_bins,
+                                                    J_size * rocsparse::lrb_num_bin_counters));
         }
-        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(
-            dest->lrb.n_rows_bins, src->lrb.n_rows_bins, J_size * 32, hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->lrb.n_rows_bins,
+                                                src->lrb.n_rows_bins,
+                                                J_size * rocsparse::lrb_num_bin_counters,
+                                                hipMemcpyDeviceToDevice));
     }
 
     RETURN_IF_ROCSPARSE_ERROR(dest->nnzsplit.copy_from(src->nnzsplit));

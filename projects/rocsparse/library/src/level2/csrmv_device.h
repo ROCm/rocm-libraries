@@ -662,7 +662,7 @@ namespace rocsparse
     // given an auxiliary structure storing the start index of each bin in that array.
     // Output:  rows_binoffsets_scratch = <uint32_t* of length csr.rows>. Temp storage for each row's
     //          atomically-calculated offset into its respective row-bin, EXCLUDING the row-bin start idx.
-    // Output:  n_rows_bins = <array of 32 uint32_t's>, where the value at index i is the number of rows
+    // Output:  n_rows_bins = <array of 64 J's>, where the value at index i is the number of rows
     //          in bin i. May want to be particular about spreading across cache banks (w/ padding),
     //          for atomics-load-balancing reasons.
     template <uint32_t BLOCKSIZE, typename I, typename J>

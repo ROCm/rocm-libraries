@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,16 +24,25 @@
 
 #pragma once
 
+namespace rocsparse
+{
+    // LRB processes bins 0 to lrb_num_bins - 1, i.e. rows of up to 2^31 non-zeros.
+    static constexpr int lrb_num_bins = 32;
+
+    // ceil(log2(row length)) <= 63 for 64-bit offsets.
+    static constexpr int lrb_num_bin_counters = 64;
+}
+
 typedef struct _rocsparse_lrb_info
 {
     void* rows_offsets_scratch{}; // size of m
     void* rows_bins{}; // size of m
-    void* n_rows_bins{}; // size of 32
+    void* n_rows_bins{}; // size of rocsparse::lrb_num_bin_counters
 
     size_t    size{};
     uint32_t* wg_flags{};
 
-    int64_t nRowsBins[32]{}; // host array
+    int64_t nRowsBins[rocsparse::lrb_num_bins]{}; // host array
 
     ~_rocsparse_lrb_info();
     void clear();
