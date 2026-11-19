@@ -1,0 +1,138 @@
+{
+  "_comment": "mx_env_sweep.py config: the row-map variants with the LDS allocation cut to the reference's size (ROCKE_EXP_SWEEP_LDS_PAD=8: 264 B row pitch, which still holds the 2048 B + 16 B blocks), against the same at pad 48. Cluster 4x4. MAF shape; time with --data mxgemm.",
+  "base_env": {
+    "ROCKE_EXP_MX": "1",
+    "ROCKE_EXP_MX_SWZ": "1",
+    "ROCKE_EXP_MX_SCALE_MC": "0",
+    "ROCKE_EXP_MX_KFENCE": "1",
+    "ROCKE_EXP_MX_SCALE_NOCLIP": "1",
+    "ROCKE_EXP_MC_SOLO0": "1"
+  },
+  "variants": [
+    {
+      "name": "mxswz",
+      "env": {}
+    },
+    {
+      "name": "cs0nbpf4",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1"
+      }
+    },
+    {
+      "name": "cs0nbpf4rm",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_ROWMAP": "1",
+        "ROCKE_EXP_MX_SWZ": "0"
+      }
+    },
+    {
+      "name": "cs0nbpf4rm8",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_ROWMAP": "1",
+        "ROCKE_EXP_MX_SWZ": "0",
+        "ROCKE_EXP_SWEEP_LDS_PAD": "8"
+      }
+    },
+    {
+      "name": "cs0nbrm8",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_ROWMAP": "1",
+        "ROCKE_EXP_MX_SWZ": "0",
+        "ROCKE_EXP_SWEEP_LDS_PAD": "8"
+      }
+    },
+    {
+      "name": "r1rm",
+      "env": {
+        "ROCKE_EXP_MX_RA": "1",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CS": "6",
+        "ROCKE_EXP_MX_RA_PEND": "36",
+        "ROCKE_EXP_MX_ROWMAP": "1",
+        "ROCKE_EXP_MX_SWZ": "0"
+      }
+    },
+    {
+      "name": "r1rm8",
+      "env": {
+        "ROCKE_EXP_MX_RA": "1",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CS": "6",
+        "ROCKE_EXP_MX_RA_PEND": "36",
+        "ROCKE_EXP_MX_ROWMAP": "1",
+        "ROCKE_EXP_MX_SWZ": "0",
+        "ROCKE_EXP_SWEEP_LDS_PAD": "8"
+      }
+    },
+    {
+      "name": "r1pf4rm8",
+      "env": {
+        "ROCKE_EXP_MX_RA": "1",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CS": "6",
+        "ROCKE_EXP_MX_RA_PEND": "36",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_ROWMAP": "1",
+        "ROCKE_EXP_MX_SWZ": "0",
+        "ROCKE_EXP_SWEEP_LDS_PAD": "8"
+      }
+    }
+  ],
+  "arms": [
+    {
+      "name": "c4x4",
+      "cluster": "4,4"
+    }
+  ],
+  "shapes": [
+    [
+      3072,
+      4096,
+      65536
+    ]
+  ],
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}
