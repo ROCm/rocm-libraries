@@ -3,11 +3,15 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <limits>
 #include <numeric>
 #include <random>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -556,8 +560,201 @@ TEST(TestGpuRepackKernels, WideCastSumsManyPartialsInAFixedTree)
     EXPECT_TRUE(castLaunch(args, "StridedCastFloatToFloat").entry.empty());
 }
 
+/// Element bits for a host float exact in the type: fp32 as is, fp16 through _Float16, bf16 by
+/// truncation.
+template <typename Bits>
+Bits encode(float value, data_objects::DataType type)
+{
+    if constexpr(sizeof(Bits) == 4)
+    {
+        uint32_t word = 0;
+        std::memcpy(&word, &value, sizeof(word));
+        return word;
+    }
+    else if(type == data_objects::DataType::HALF)
+    {
+        const auto h = static_cast<_Float16>(value);
+        Bits bits{};
+        std::memcpy(&bits, &h, sizeof(bits));
+        return bits;
+    }
+    else
+    {
+        uint32_t word = 0;
+        std::memcpy(&word, &value, sizeof(word));
+        return static_cast<Bits>(word >> 16);
+    }
+}
+
+template <typename Bits>
+float decode(Bits bits, data_objects::DataType type)
+{
+    uint32_t word = 0;
+    if constexpr(sizeof(Bits) == 4)
+    {
+        word = bits;
+    }
+    else if(type == data_objects::DataType::HALF)
+    {
+        _Float16 h{};
+        std::memcpy(&h, &bits, sizeof(bits));
+        return static_cast<float>(h);
+    }
+    else
+    {
+        word = static_cast<uint32_t>(bits) << 16;
+    }
+    float value = 0.0F;
+    std::memcpy(&value, &word, sizeof(value));
+    return value;
+}
+
+template <typename Bits>
+void runClamp(data_objects::DataType type, float lower, float upper, int64_t first)
+{
+    const RepackProgram program;
+    const std::array<float, 10> pattern{std::numeric_limits<float>::quiet_NaN(),
+                                        -std::numeric_limits<float>::infinity(),
+                                        -2.0F,
+                                        -0.5F,
+                                        -0.0F,
+                                        0.0F,
+                                        0.25F,
+                                        0.5F,
+                                        3.0F,
+                                        std::numeric_limits<float>::infinity()};
+    // An odd count past the vector runs, starting at element `first` of the buffer.
+    constexpr int64_t COUNT = 8 * 37 + 5;
+    std::vector<Bits> host(static_cast<size_t>(first + COUNT));
+    for(size_t i = 0; i < host.size(); ++i)
+    {
+        host[i] = encode<Bits>(pattern[i % pattern.size()], type);
+    }
+    void* device = nullptr;
+    ASSERT_EQ(hipMalloc(&device, host.size() * sizeof(Bits)), hipSuccess);
+    ASSERT_EQ(hipMemcpy(device, host.data(), host.size() * sizeof(Bits), hipMemcpyHostToDevice),
+              hipSuccess);
+    ClampArgs args{};
+    args.total = COUNT;
+    args.lower = lower;
+    args.upper = upper;
+    void* start = static_cast<Bits*>(device) + first;
+    program.launch(RepackStep{args, type, 0, 0}, start, start, nullptr);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    std::vector<Bits> got(host.size());
+    ASSERT_EQ(hipMemcpy(got.data(), device, got.size() * sizeof(Bits), hipMemcpyDeviceToHost),
+              hipSuccess);
+    ASSERT_EQ(hipFree(device), hipSuccess);
+    for(size_t i = 0; i < host.size(); ++i)
+    {
+        const float v = decode(host[i], type);
+        const float r = decode(got[i], type);
+        if(static_cast<int64_t>(i) < first)
+        {
+            EXPECT_EQ(got[i], host[i]) << "before the tensor, at " << i;
+            continue;
+        }
+        if(std::isnan(v))
+        {
+            EXPECT_TRUE(std::isnan(r)) << "NaN kept, at " << i;
+            continue;
+        }
+        float want = v;
+        if(v <= lower)
+        {
+            want = lower;
+        }
+        else if(v >= upper)
+        {
+            want = upper;
+        }
+        EXPECT_EQ(r, want) << "at " << i << ", from " << v;
+    }
+}
+
+TEST(TestGpuRepackKernels, ClampInPlaceKeepsNanAndClampsAtTheBounds)
+{
+    // The relu / clamp tail on y in its own type: the chain's comparisons, NaN kept, both the
+    // vector runs and the scalar tail, aligned and not.
+    SKIP_IF_NO_DEVICES();
+    const float inf = std::numeric_limits<float>::infinity();
+    for(const int64_t first : {int64_t{0}, int64_t{1}})
+    {
+        for(const auto& [lower, upper] : {std::pair{0.0F, inf}, std::pair{-0.5F, 0.5F}})
+        {
+            runClamp<uint32_t>(data_objects::DataType::FLOAT, lower, upper, first);
+            runClamp<uint16_t>(data_objects::DataType::HALF, lower, upper, first);
+            runClamp<uint16_t>(data_objects::DataType::BFLOAT16, lower, upper, first);
+        }
+    }
+}
+
+template <typename Bits>
+void runBroadcast(int64_t rows, int64_t channels, int64_t srcStride, int64_t first)
+{
+    const RepackProgram program;
+    std::vector<Bits> src(static_cast<size_t>(channels * srcStride));
+    std::iota(src.begin(), src.end(), Bits(1));
+    std::vector<Bits> fill(static_cast<size_t>(first + rows * channels + 3), Bits(0));
+    void* deviceSrc = nullptr;
+    void* deviceDst = nullptr;
+    ASSERT_EQ(hipMalloc(&deviceSrc, src.size() * sizeof(Bits)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&deviceDst, fill.size() * sizeof(Bits)), hipSuccess);
+    ASSERT_EQ(hipMemcpy(deviceSrc, src.data(), src.size() * sizeof(Bits), hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_EQ(hipMemcpy(deviceDst, fill.data(), fill.size() * sizeof(Bits), hipMemcpyHostToDevice),
+              hipSuccess);
+    BroadcastArgs args{};
+    args.rows = rows;
+    args.channels = channels;
+    args.srcStride = srcStride;
+    const auto type
+        = sizeof(Bits) == 2 ? data_objects::DataType::HALF : data_objects::DataType::FLOAT;
+    program.launch(
+        RepackStep{args, type, 0, 0}, deviceSrc, static_cast<Bits*>(deviceDst) + first, nullptr);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    std::vector<Bits> got(fill.size());
+    ASSERT_EQ(hipMemcpy(got.data(), deviceDst, got.size() * sizeof(Bits), hipMemcpyDeviceToHost),
+              hipSuccess);
+    ASSERT_EQ(hipFree(deviceSrc), hipSuccess);
+    ASSERT_EQ(hipFree(deviceDst), hipSuccess);
+    for(size_t i = 0; i < got.size(); ++i)
+    {
+        const auto index = static_cast<int64_t>(i) - first;
+        const Bits want = index < 0 || index >= rows * channels
+                              ? Bits(0)
+                              : src[static_cast<size_t>((index / rows) * srcStride)];
+        ASSERT_EQ(got[i], want) << "at " << i;
+    }
+}
+
+TEST(TestGpuRepackKernels, BroadcastFillsEveryRowWithTheVector)
+{
+    // The fused epilogue's broadcast bias: the vector runs and the per-element path (rows not a
+    // multiple of the vector, or a destination off 16 bytes), a strided source, both sizes.
+    SKIP_IF_NO_DEVICES();
+    for(const auto& [rows, first] : {std::pair{int64_t{64}, int64_t{0}},
+                                     std::pair{int64_t{35}, int64_t{0}},
+                                     std::pair{int64_t{64}, int64_t{1}}})
+    {
+        runBroadcast<uint16_t>(rows, 13, 1, first);
+        runBroadcast<uint32_t>(rows, 13, 1, first);
+        runBroadcast<uint16_t>(rows, 13, 3, first);
+    }
+}
+
 TEST(TestRepackProgram, EntryNamesFollowTheStepKind)
 {
+    EXPECT_EQ(RepackProgram::entryName({BroadcastArgs{}, data_objects::DataType::BFLOAT16, 0, 0}),
+              "Broadcast2");
+    EXPECT_EQ(RepackProgram::entryName({BroadcastArgs{}, data_objects::DataType::FLOAT, 0, 0}),
+              "Broadcast4");
+    EXPECT_EQ(RepackProgram::entryName({ClampArgs{}, data_objects::DataType::HALF, 0, 0}),
+              "ClampHalf");
+    EXPECT_EQ(RepackProgram::entryName({ClampArgs{}, data_objects::DataType::BFLOAT16, 0, 0}),
+              "ClampBfloat16");
+    EXPECT_EQ(RepackProgram::entryName({ClampArgs{}, data_objects::DataType::FLOAT, 0, 0}),
+              "ClampFloat");
     EXPECT_EQ(RepackProgram::entryName({StridedCopyArgs{}, data_objects::DataType::HALF, 0, 0}),
               "StridedCopy2");
     EXPECT_EQ(RepackProgram::entryName({StridedCopyArgs{}, data_objects::DataType::FLOAT, 0, 0}),
