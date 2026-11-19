@@ -2431,21 +2431,22 @@ TEST(TestConvIgemmSplitPlan, ExplicitSplitCountsAreExactWhereFeasible)
 
 TEST(TestConvIgemmSplitPlan, ResidentBlocksFollowThreadsLdsAndAccumulators)
 {
-    // 128 x 128 x 32, 4 waves, fp16: LDS 256 x 40 x 2 = 20 KiB (3 a 64 KiB CU), 128 registers
-    // (4 waves a SIMD, so 4 blocks): 3.
-    EXPECT_EQ(conv_igemm::residentBlocksOf(128, 128, 32, 256, 64, 1, 0, 2, "gfx942"), 3);
-    // gfx950's 160 KiB: the registers bound it, 4.
-    EXPECT_EQ(conv_igemm::residentBlocksOf(128, 128, 32, 256, 64, 1, 0, 2, "gfx950"), 4);
-    // 256 x 256: 256 accumulators + 64 registers, one wave a SIMD: one block of 4 waves.
-    EXPECT_EQ(conv_igemm::residentBlocksOf(256, 256, 32, 256, 64, 1, 0, 2, "gfx950"), 1);
-    // 512 threads (8 waves), 256 x 128: 128 registers, 16 waves a CU: 2 blocks.
+    // 512 threads (8 waves), 256 x 128, fp16 on gfx950: 128 registers (4 waves a SIMD, 16 a CU)
+    // and 30 KiB of LDS: 2 blocks.
     EXPECT_EQ(conv_igemm::residentBlocksOf(256, 128, 32, 512, 64, 1, 0, 2, "gfx950"), 2);
-    // Three DMA stages of 64-wide k-steps: LDS 3 x 256 x 72 x 2 = 108 KiB: one block on gfx950.
-    EXPECT_EQ(conv_igemm::residentBlocksOf(128, 128, 64, 256, 64, 1, 3, 2, "gfx950"), 1);
+    // 512 threads, 256 x 256: 192 registers, 2 waves a SIMD, 8 a CU: one block.
+    EXPECT_EQ(conv_igemm::residentBlocksOf(256, 256, 32, 512, 64, 1, 0, 2, "gfx942"), 1);
+    // The same on gfx942's 64 KiB with three 64-deep DMA-like stages (3 x 512 x 72 x 2 = 216
+    // KiB): over the LDS, still one block.
+    EXPECT_EQ(conv_igemm::residentBlocksOf(256, 256, 64, 512, 64, 3, 0, 2, "gfx942"), 1);
+    // Fewer than 8 waves: the default's 2 (0 here), however large the tile or its LDS.
+    EXPECT_EQ(conv_igemm::residentBlocksOf(128, 128, 32, 256, 64, 1, 0, 2, "gfx942"), 0);
+    EXPECT_EQ(conv_igemm::residentBlocksOf(256, 256, 32, 256, 64, 1, 0, 2, "gfx950"), 0);
+    EXPECT_EQ(conv_igemm::residentBlocksOf(128, 128, 64, 256, 64, 1, 3, 2, "gfx950"), 0);
     // Not a gfx9 CU, or the FMA kernel: the split plan's arch default.
-    EXPECT_EQ(conv_igemm::residentBlocksOf(128, 128, 32, 256, 32, 1, 0, 2, "gfx1201"), 0);
-    EXPECT_EQ(conv_igemm::residentBlocksOf(128, 128, 32, 256, 32, 1, 0, 2, "gfx1250"), 0);
-    EXPECT_EQ(conv_igemm::residentBlocksOf(64, 64, 16, 256, 0, 1, 0, 4, "gfx942"), 0);
+    EXPECT_EQ(conv_igemm::residentBlocksOf(256, 256, 32, 512, 32, 1, 0, 2, "gfx1201"), 0);
+    EXPECT_EQ(conv_igemm::residentBlocksOf(256, 256, 32, 512, 32, 1, 0, 2, "gfx1250"), 0);
+    EXPECT_EQ(conv_igemm::residentBlocksOf(64, 64, 16, 512, 0, 1, 0, 4, "gfx942"), 0);
     // A config one block a CU holds fills the device with half the default's blocks: 40 tiles
     // on 304 CUs split 16 ways at two blocks a CU (the cap), 8 at one.
     const auto wide

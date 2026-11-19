@@ -254,7 +254,7 @@ inline constexpr int64_t MAX_SPLIT_POLICY = 64;
  * @p splitPolicy (the config's `split_policy` knob):
  * - 0, the analytic default: split only when the tiles leave the device under-filled, at most
  *   16 splits, the partials under 1 GiB. Under-filled is fewer blocks than the units hold: on
- *   gfx9 @p residentBlocks a CU (the config's occupancy, residentBlocksOf) up to 2, 2 when 0,
+ *   gfx9 @p residentBlocks a CU (8-wave blocks' occupancy, residentBlocksOf) up to 2, 2 when 0,
  *   keeping at least two k-iterations per split; one block per WGP on legacy gfx10+
  *   (device_units), keeping at least 64; one block per CU on gfx1250, keeping eight.
  * - 1: no split.
@@ -279,9 +279,10 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
                        int64_t residentBlocks = 0);
 
 /**
- * @brief Blocks of a matrix-core config a CU holds at once, from its threads, its LDS and its
- *        accumulators; 0 for the FMA kernel (wave 0) or a device whose dispatch units are not
- *        gfx9 CUs (the split plan's arch default applies).
+ * @brief Blocks of a matrix-core config of at least 8 waves (512 threads on gfx9) a CU holds at
+ *        once, from its threads, its LDS and its accumulators; 0 for smaller blocks, the FMA
+ *        kernel (wave 0) or a device whose dispatch units are not gfx9 CUs (the split plan's arch
+ *        default, 2 a CU on gfx9, applies).
  *
  * Waves: 32 a gfx9 CU (8 a SIMD). LDS: (bm + bn) rows of bk padded by a 16-byte vector, by the
  * DMA stages or the k-stages, within the CU's 64 KiB (160 KiB on gfx950). Registers: bm x bn / threads

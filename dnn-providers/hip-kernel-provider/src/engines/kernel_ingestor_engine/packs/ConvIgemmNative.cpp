@@ -1033,6 +1033,12 @@ int64_t residentBlocksOf(int64_t bm,
     }
     const bool gfx950 = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName) == "gfx950";
     const long long wavesPerBlock = divUp(threads, wave);
+    // Blocks of fewer than 8 waves keep the default's 2: their split plans measured faster at 2
+    // than at an occupancy-derived 1 (wide and DMA tiles on gfx950 and MI325X, 6-8%).
+    if(wavesPerBlock < 8)
+    {
+        return 0;
+    }
     const long long lds = std::max<long long>(1, dma != 0 ? dma : stages) * (bm + bn)
                           * (bk + 16 / elementBytes) * elementBytes;
     const long long ldsPerCu = gfx950 ? 160 * 1024 : 64 * 1024;
