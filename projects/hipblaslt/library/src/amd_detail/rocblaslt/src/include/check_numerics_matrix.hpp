@@ -126,6 +126,8 @@ inline rocblaslt_status hipblaslt_launch_nan_kernel(int64_t     m,
     dim3           threads(DIM_X, DIM_X);
     const unsigned grid_x = (unsigned)((m + DIM_X - 1) / DIM_X);
     const unsigned grid_y = (unsigned)((n + DIM_X - 1) / DIM_X);
+    int            row_major_int = row_major ? 1 : 0;
+    int            ptr_array_int = ptr_array ? 1 : 0;
 
     // Chunk batch over grid-z to avoid the 65535 hardware cap.
     for(int32_t base = 0; base < batch; base += MAX_GRID_Z)
@@ -133,19 +135,29 @@ inline rocblaslt_status hipblaslt_launch_nan_kernel(int64_t     m,
         const int32_t this_batch = std::min<int32_t>(MAX_GRID_Z, batch - base);
         dim3          blocks(grid_x, grid_y, (unsigned)this_batch);
 
-        hipLaunchKernelGGL((hipblaslt_check_nan_kernel<DIM_X, DIM_X, T>),
-                           blocks, threads, 0, stream,
-                           m, n,
-                           D,
-                           ldd, stride_d,
-                           row_major ? 1 : 0,
-                           ptr_array ? 1 : 0,
-                           offset_d,
-                           base,
-                           d_flag,
-                           call_id);
-
-        if(hipGetLastError() != hipSuccess)
+        // hipLaunchKernel returns this launch's own status. hipGetLastError
+        // after hipLaunchKernelGGL would also return an error the caller left
+        // pending, and fail a matmul that ran.
+        int32_t batch_base = base;
+        void*   args[]     = {&m,
+                              &n,
+                              &D,
+                              &ldd,
+                              &stride_d,
+                              &row_major_int,
+                              &ptr_array_int,
+                              &offset_d,
+                              &batch_base,
+                              &d_flag,
+                              &call_id};
+        if(hipLaunchKernel(
+               reinterpret_cast<const void*>(&hipblaslt_check_nan_kernel<DIM_X, DIM_X, T>),
+               blocks,
+               threads,
+               args,
+               0,
+               stream)
+           != hipSuccess)
             return rocblaslt_status_internal_error;
     }
     return rocblaslt_status_success;
