@@ -35,10 +35,6 @@ struct K2Args
     /// while the grid as a whole still advances in launch order.
     int xcds;
     int xcdRun;
-    /// 1: waves raise their priority (s_setprio 1) from a step's loads through its MMAs and drop it
-    /// for the LDS store and the barrier, so a wave that reached its MMAs keeps the matrix core.
-    int prio;
-    int padding1;
     float* ws;
 };
 

@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -305,8 +304,7 @@ std::optional<Tile>
         const double cost = tiles * (pixels + 0.5 * (th + config.r - 1) * (tw + config.s - 1));
         // On a tie, a width of whole 16-pixel runs: a 16-lane A fragment then reads 16
         // consecutive halo pixels of one row (one pass over the LDS banks) instead of two rows.
-        const bool whole
-            = tw % 16 == 0 && best.tw % 16 != 0 && std::getenv("HKP_K2_TIE_OLD") == nullptr;
+        const bool whole = tw % 16 == 0 && best.tw % 16 != 0;
         if(bestCost < 0 || cost < bestCost || (cost == bestCost && whole))
         {
             bestCost = cost;
@@ -827,17 +825,6 @@ std::optional<Plan>
     k2.xcds = !config.rows && k2.splits == 1 && xcds > 1 ? xcds : 0;
     k2.xcdRun
         = k2.xcds > 1 ? static_cast<int>(std::max<int64_t>(1, 2 * computeUnits / k2.xcds)) : 0;
-    k2.prio = std::getenv("HKP_K2_PRIO") != nullptr ? 1 : 0; // A/B only
-    if(const char* env = std::getenv("HKP_K2_XCDS"); env != nullptr && !config.rows)
-    {
-        k2.xcds = std::atoi(env); // A/B only
-    }
-    if(const char* env = std::getenv("HKP_K2_XCDRUN"); env != nullptr && k2.xcds > 1)
-    {
-        // A/B only; 0: one contiguous range per XCD.
-        k2.xcdRun = std::atoi(env) > 0 ? std::atoi(env)
-                                       : static_cast<int>(divUp(gridX * columnBlocks, k2.xcds));
-    }
     if(config.rows)
     {
         // One 1-D grid of at most one block per unit; the kernel walks the tiles.
