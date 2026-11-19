@@ -413,14 +413,14 @@ struct K2HaloLoad
                           : -1;
         }
     }
-    // Input plane id, channel chunk c0. `valid` false (the driver's past-the-end step) reads
-    // zeros without an access. The offsets are selected by masks, not branches: a branch on a
-    // lane-varying test splits the loads into paths, and the wait for them merges to vmcnt(0).
-    __device__ void load(int id, int c0, bool valid)
+    // Input plane id (in range), channel chunk c0. The offsets are selected by masks, not
+    // branches: a branch on a lane-varying test splits the loads into paths, and the compiler's
+    // wait for them merges to vmcnt(0).
+    __device__ void load(int id, int c0)
     {
         const int c = c0 + kv;
-        const unsigned live = 0u - static_cast<unsigned>(valid && c < cIn);
-        const int base = (valid ? id : 0) * planeElems + c;
+        const unsigned live = 0u - static_cast<unsigned>(c < cIn);
+        const int base = id * planeElems + c;
 #pragma unroll
         for(int p = 0; p < PASSES; ++p)
         {
@@ -429,8 +429,8 @@ struct K2HaloLoad
                 = static_cast<unsigned>((base + hOff[p]) * static_cast<int>(sizeof(T)));
             r[p] = k1BufferLoad<Raw>(rsrc, (in & m) | (K1_OUT_OF_RANGE & ~m));
         }
-        // Keeps the loads here: unconditional loads are otherwise sunk into the commit's
-        // per-pass branch, right before their LDS store, and wait there with nothing to hide.
+        // Keeps the loads where they are issued: branch-free loads are otherwise sunk into the
+        // commit's per-pass branch, right before their LDS store, with nothing to hide them.
         asm volatile("" ::: "memory");
     }
     // Pixel-major: buf[pix * LDC + c].
@@ -537,19 +537,18 @@ struct K2HaloLoadCf
                           : -1;
         }
     }
-    // `valid` false (the driver's past-the-end step) reads zeros without an access.
-    __device__ void load(int id, int c0, bool valid)
+    __device__ void load(int id, int c0)
     {
 #pragma unroll
         for(int p = 0; p < PASSES; ++p)
         {
             const int c = c0 + cg8[p];
-            const int base = (c * chanElems + (valid ? id : 0) * planeElems + sOff[p])
-                             * static_cast<int>(sizeof(T));
+            const int base
+                = (c * chanElems + id * planeElems + sOff[p]) * static_cast<int>(sizeof(T));
 #pragma unroll
             for(int i = 0; i < 8; ++i)
             {
-                const bool ok = valid && cg8[p] >= 0 && sOff[p] >= 0 && c + i < cIn;
+                const bool ok = cg8[p] >= 0 && sOff[p] >= 0 && c + i < cIn;
                 r[p][i] = k1BufferLoad<Raw>(
                     rsrc,
                     ok ? static_cast<unsigned>(base + i * chanElems * static_cast<int>(sizeof(T)))
@@ -727,10 +726,7 @@ __device__ inline void k2StaticFor(F&& f)
 // The block's main loop, shared by both kernels. Double-buffered halo: each step waits on one
 // barrier, loads the next step's halo to registers (pf, called by the multiply where it suits
 // the vmcnt order), multiplies the current stage, then stores the registers to the other stage.
-// The last step loads (zeros, no access) and stores too, into the stage no step reads again: with
-// the same memory operations on every path, the compiler's waits for the halo count only the
-// loads issued after it, where a conditional prefetch made them vmcnt(0) at every step.
-//   load(plane, cc, valid)              next halo chunk to registers (zeros unless valid)
+//   load(plane, cc)                     next halo chunk to registers
 //   commit(stage)                       registers to LDS stage
 //   ring(stage, cc, jj, K2Int<u>, pf, nx)  RING: multiply the stage into the sets of plane jj (u = jj % KD)
 //   tap(stage, cc, t, pf, nx)              !RING: multiply the stage with depth tap t into set 0
@@ -761,7 +757,7 @@ __device__ inline void k2Drive(const K2Block& b,
         cur.init(planes, nCh, first, di);
         if(cur.more())
         {
-            load(cur.plane(), 0, true);
+            load(cur.plane(), 0);
             commit(0);
             cur.advance();
         }
@@ -778,16 +774,21 @@ __device__ inline void k2Drive(const K2Block& b,
                     {
                         __syncthreads();
                         const bool more = cur.more();
-                        auto pf = [&]() { load(cur.plane(), cur.cc, more); };
+                        auto pf = [&]() {
+                            if(more)
+                                load(cur.plane(), cur.cc);
+                        };
                         auto nx = [&](int& t, int& c) {
                             t = 0;
                             c = cur.cc;
                             return more;
                         };
                         ring(stage, cc, jj, U, pf, nx);
-                        commit(stage ^ 1);
                         if(more)
+                        {
+                            commit(stage ^ 1);
                             cur.advance();
+                        }
                         stage ^= 1;
                     }
                 }
@@ -802,7 +803,7 @@ __device__ inline void k2Drive(const K2Block& b,
         cur.init(b.dsEff, KD, nCh, first, di);
         if(cur.more())
         {
-            load(cur.plane(), 0, true);
+            load(cur.plane(), 0);
             commit(0);
             cur.advance();
         }
@@ -816,16 +817,21 @@ __device__ inline void k2Drive(const K2Block& b,
                 {
                     __syncthreads();
                     const bool more = cur.more();
-                    auto pf = [&]() { load(cur.plane(), cur.cc, more); };
+                    auto pf = [&]() {
+                        if(more)
+                            load(cur.plane(), cur.cc);
+                    };
                     auto nx = [&](int& tn, int& c) {
                         tn = cur.t;
                         c = cur.cc;
                         return more;
                     };
                     tap(stage, cc, t, pf, nx);
-                    commit(stage ^ 1);
                     if(more)
+                    {
+                        commit(stage ^ 1);
                         cur.advance();
+                    }
                     stage ^= 1;
                 }
             }
@@ -1512,7 +1518,7 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
         a.pd,
         a.di,
         nChL,
-        [&](int plane, int cc, bool valid) { ld.load(plane, (cb + cc) * BC, valid); },
+        [&](int plane, int cc) { ld.load(plane, (cb + cc) * BC); },
         [&](int stage) { ld.template storePixels<LDC>(lds + stage * SLOT); },
         ring,
         tap,
@@ -1792,7 +1798,7 @@ __device__ void k2ConvFma(const K2Args& a CONV_EPI_FN_PARAM)
         a.pd,
         a.di,
         (a.c + BC - 1) / BC,
-        [&](int plane, int cc, bool valid) { ld.load(plane, cc * BC, valid); },
+        [&](int plane, int cc) { ld.load(plane, cc * BC); },
         [&](int stage) { ld.template storeChannels<LDH>(lds + stage * STAGE); },
         ring,
         tap,
