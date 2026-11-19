@@ -25,6 +25,8 @@ namespace TensileLite
 
     struct StreamK
     {
+        enum class WorkAssignment { StaticGrid, DynamicWorkQueue, Hybrid };
+
         struct Static
         {
             struct KernelArguments

@@ -2633,7 +2633,7 @@ namespace
         auto solution                            = std::make_shared<TensileLite::ContractionSolution>();
         solution->kernelName                     = "row_uniformity_probe_kernel";
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
-        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
+        solution->sizeMapping.workAssignment = TensileLite::StreamK::WorkAssignment::StaticGrid;
         solution->sizeMapping.streamKAtomic      = 0;
 
         solution->sizeMapping.macroTile          = TensileLite::dim3(128, 128, 1);
@@ -2998,7 +2998,7 @@ namespace
         const auto hardware           = probeHardware();
         auto       solution           = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
-        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
+        solution->sizeMapping.workAssignment = TensileLite::StreamK::WorkAssignment::DynamicWorkQueue;
         auto problem                  = probeProblem();
 
         ASSERT_EQ(hardware.persistentDynamicGrid, 0);
@@ -3028,7 +3028,7 @@ namespace
         hardware.persistentFixedGrid          = 4096;
         auto solution                 = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
-        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
+        solution->sizeMapping.workAssignment = TensileLite::StreamK::WorkAssignment::DynamicWorkQueue;
 
         auto problem = TensileLite::ContractionProblemGemm::GEMM(
             false, false, 1280, 1280, 1024, 1280, 1280, 1280, 0.0, false, 1);
@@ -3064,7 +3064,7 @@ namespace
         const auto hardware           = probeHardware();
         auto       solution           = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
-        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
+        solution->sizeMapping.workAssignment = TensileLite::StreamK::WorkAssignment::DynamicWorkQueue;
         auto problemOn                = probeProblem();
         auto problemOff               = probeProblem();
         problemOff.setParams().setUniformSummationOrder(0);
@@ -3314,11 +3314,11 @@ namespace
             return out;
         }
 
-        const bool effectiveDynamic = solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::Hybrid
+        const bool effectiveDynamic = solution.sizeMapping.workAssignment == TensileLite::StreamK::WorkAssignment::Hybrid
                                           ? solution.streamK5EffectiveDynamic(tensile, hardware)
                                           : false;
-        out.staticPacking           = solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::StaticGrid
-                                      || (solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::Hybrid && !effectiveDynamic);
+        out.staticPacking           = solution.sizeMapping.workAssignment == TensileLite::StreamK::WorkAssignment::StaticGrid
+                                      || (solution.sizeMapping.workAssignment == TensileLite::StreamK::WorkAssignment::Hybrid && !effectiveDynamic);
 
         const origami::reduction_t reduction
             = effectiveDynamic ? origami::reduction_t::tree
@@ -3879,7 +3879,7 @@ namespace
         // SK5 hybrid: the only mode whose sub-mode streamK5EffectiveDynamic()
         // resolves, and therefore the only one tile scheduling can steer.
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
-        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::Hybrid;
+        solution->sizeMapping.workAssignment = TensileLite::StreamK::WorkAssignment::Hybrid;
 
         auto device = uniformitySteeringDevice();
         // No override knobs: the grid must come from the CU-bounded analytical

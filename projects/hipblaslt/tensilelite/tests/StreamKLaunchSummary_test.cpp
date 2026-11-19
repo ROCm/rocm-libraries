@@ -80,7 +80,7 @@ namespace
     {
         solution.sizeMapping.tileProcessingStrategy = streamK == 0
             ? TensileLite::TileProcessingStrategy::None : TensileLite::TileProcessingStrategy::StreamK;
-        solution.sizeMapping.workAssignment = (streamK == 4 ? TensileLite::WorkAssignment::DynamicWorkQueue : streamK == 5 ? TensileLite::WorkAssignment::Hybrid : TensileLite::WorkAssignment::StaticGrid);
+        solution.sizeMapping.workAssignment = (streamK == 4 ? TensileLite::StreamK::WorkAssignment::DynamicWorkQueue : streamK == 5 ? TensileLite::StreamK::WorkAssignment::Hybrid : TensileLite::StreamK::WorkAssignment::StaticGrid);
         solution.sizeMapping.streamKAtomic         = 0;
 
         solution.sizeMapping.macroTile             = TensileLite::dim3(128, 128, 1);
@@ -532,8 +532,8 @@ TEST_P(StreamKArgumentLayoutTest, PacksPartialWorkIntoKernelInvocation)
     ASSERT_EQ(launch.tileProcessingStrategy, TileProcessingStrategy::StreamK);
     ASSERT_EQ(launch.reduction, test.parallel ? origami::reduction_t::parallel
                                               : origami::reduction_t::tree);
-    ASSERT_EQ(launch.effectiveWorkAssignment, test.dynamic ? WorkAssignment::DynamicWorkQueue
-                                                          : WorkAssignment::StaticGrid);
+    ASSERT_EQ(launch.effectiveWorkAssignment, test.dynamic ? StreamK::WorkAssignment::DynamicWorkQueue
+                                                          : StreamK::WorkAssignment::StaticGrid);
     ASSERT_EQ(launch.grid, test.parallel ? 256u : 64u);
     ASSERT_GT(launch.workspaceBytes, 0u);
 
@@ -657,7 +657,7 @@ TEST_P(StreamKDynamicGridCoversQueuesTest, FixedGridIsRaisedToCoverEveryQueue)
     env.device.skSplit               = test.skSplit;
 
     auto launch = solution.resolvePersistentSettings(problem, env.device);
-    ASSERT_EQ(launch.effectiveWorkAssignment, WorkAssignment::DynamicWorkQueue);
+    ASSERT_EQ(launch.effectiveWorkAssignment, StreamK::WorkAssignment::DynamicWorkQueue);
     EXPECT_EQ(launch.grid, test.expectedGrid);
 
     std::array<uint32_t, 4> workspace{}, flags{};
@@ -709,8 +709,8 @@ TEST(PersistentLaunchSummaryTest, DataParallelHasNoReductionOrWorkspace)
     EXPECT_EQ(launch.workspaceBytes, 0u);
     EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), 0u);
     EXPECT_EQ(launch.tileProcessingStrategy, TileProcessingStrategy::DataParallel);
-    EXPECT_EQ(launch.workAssignment, WorkAssignment::StaticGrid);
-    EXPECT_EQ(launch.effectiveWorkAssignment, WorkAssignment::StaticGrid);
+    EXPECT_EQ(launch.workAssignment, StreamK::WorkAssignment::StaticGrid);
+    EXPECT_EQ(launch.effectiveWorkAssignment, StreamK::WorkAssignment::StaticGrid);
 }
 
 // ---------------------------------------------------------------------------
@@ -986,22 +986,22 @@ TEST(StreamKLaunchSummaryTest, SummaryReportsNamedPolicyAndEffectiveAssignment)
     struct Case
     {
         TileProcessingStrategy strategy;
-        WorkAssignment assignment;
+        StreamK::WorkAssignment assignment;
         bool dynamic;
         const char* expectedPolicy;
     };
     const Case cases[] = {
-        {TileProcessingStrategy::None, WorkAssignment::StaticGrid, false,
+        {TileProcessingStrategy::None, StreamK::WorkAssignment::StaticGrid, false,
          "TileProcessingStrategy=None WorkAssignment=StaticGrid EffectiveWorkAssignment=StaticGrid"},
-        {TileProcessingStrategy::DataParallel, WorkAssignment::StaticGrid, false,
+        {TileProcessingStrategy::DataParallel, StreamK::WorkAssignment::StaticGrid, false,
          "TileProcessingStrategy=DataParallel WorkAssignment=StaticGrid EffectiveWorkAssignment=StaticGrid"},
-        {TileProcessingStrategy::StreamK, WorkAssignment::StaticGrid, false,
+        {TileProcessingStrategy::StreamK, StreamK::WorkAssignment::StaticGrid, false,
          "TileProcessingStrategy=StreamK WorkAssignment=StaticGrid EffectiveWorkAssignment=StaticGrid"},
-        {TileProcessingStrategy::StreamK, WorkAssignment::DynamicWorkQueue, true,
+        {TileProcessingStrategy::StreamK, StreamK::WorkAssignment::DynamicWorkQueue, true,
          "TileProcessingStrategy=StreamK WorkAssignment=DynamicWorkQueue EffectiveWorkAssignment=DynamicWorkQueue"},
-        {TileProcessingStrategy::StreamK, WorkAssignment::Hybrid, false,
+        {TileProcessingStrategy::StreamK, StreamK::WorkAssignment::Hybrid, false,
          "TileProcessingStrategy=StreamK WorkAssignment=Hybrid EffectiveWorkAssignment=StaticGrid"},
-        {TileProcessingStrategy::StreamK, WorkAssignment::Hybrid, true,
+        {TileProcessingStrategy::StreamK, StreamK::WorkAssignment::Hybrid, true,
          "TileProcessingStrategy=StreamK WorkAssignment=Hybrid EffectiveWorkAssignment=DynamicWorkQueue"},
     };
     auto problem = makeGemmProblem(4096, 4224, 64);
