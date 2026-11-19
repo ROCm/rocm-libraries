@@ -44,9 +44,10 @@ res.spec.launch_params() # {"split_k": ..., "tail_full": ...}
 (`benchmarks/common/conv_step_replay.py --pins <table>#<mode>`, or `<table>#<mode>@<form>` for the `_<form>` cases, e.g.
 `@pad1`, `@pad011`) resolves every case through `dispatch_conv_pinned`.
 
-A pinned binary admits only problems its identity serves: halo-form kernels (`uk_nopad`, `tapk_xhalo`) do not admit
-padded problems, which is why each padded form has cases of its own. A request the table does not pin misses it and
-falls back to the default selection.
+A pinned binary admits only problems its identity serves: the halo-form kernels (`uk_nopad`, `tapk_xhalo`) serve
+unpadded problems, except the dgrad x-halo kernels that mask the W padding themselves (`xh_dx_wmask` without
+`dx_interior` serves `pW == (X-1)/2` through its W-extended view). That is why each padded form has cases of its own.
+A request the table does not pin misses it and falls back to the default selection.
 
 The label alone rebuilds the kernel: the candidate's `build()` (and `benchmarks/common/reproduce_kernel.py`) goes
 through `kernels.conv.aot_jobs.job_for_identity`, which reads an identity the process's AOT grid does not walk off its

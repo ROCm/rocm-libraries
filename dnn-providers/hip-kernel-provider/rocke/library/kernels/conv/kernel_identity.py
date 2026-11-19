@@ -384,7 +384,9 @@ class KernelIdentity:
     xh_stride_m: bool = False
     # fwd only (ImplicitGemmConvSpec.fxh_dma). Left out of the hash at 0.
     fxh_dma: int = 0
-    # fwd only (ImplicitGemmConvSpec.xh_yring). Left out of the hash at 0.
+    # fwd and dgrad (ImplicitGemmConvSpec.xh_yring, DgradConvSpec.xh_yring).
+    # On dgrad it is Wi + 1000 * d and a capability: identity_supports_problem
+    # admits only Wi == xh_yring % 1000. Left out of the hash at 0.
     xh_yring: int = 0
     # fwd only (ImplicitGemmConvSpec.xh_pad). Left out of the hash while False.
     xh_pad: bool = False
