@@ -6,6 +6,7 @@
 #include <array>
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -190,6 +191,70 @@ TEST(TestConvDirectForm, BackwardDataSwapsChannelsAndPadsByFilterMinusOneMinusPr
     EXPECT_EQ(problem->stagingBytes, size_t{0});
 }
 
+TEST(TestConvDirectForm, OneRowImagesTakeLineFiltersAndTheirDilation)
+{
+    // 2-D of one row, 1 x 11 at dilation 5 (the height dilation spans no taps).
+    auto row = baseShape();
+    row.input = {1, 64};
+    row.filter = {1, 11};
+    row.dilation = {1, 5};
+    row.prePadding = row.postPadding = {0, 25};
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        const auto problem = parse(specFor(row, direction));
+        ASSERT_TRUE(problem.has_value());
+        EXPECT_TRUE(problem->oneRow);
+        EXPECT_EQ(problem->dilation, 5);
+        EXPECT_EQ(problem->spatialRank, 2);
+        EXPECT_EQ(problem->args.hi, 1);
+        EXPECT_EQ(problem->args.ph, 0);
+        EXPECT_EQ(problem->args.pw, 25);
+    }
+    // 1-D: a one-row image of rank 1.
+    auto line = baseShape();
+    line.input = {40};
+    line.filter = {7};
+    line.stride = {1};
+    line.dilation = {3};
+    line.prePadding = line.postPadding = {9};
+    const auto oneD = parse(specFor(line, ConvDirection::FORWARD));
+    ASSERT_TRUE(oneD.has_value());
+    EXPECT_TRUE(oneD->oneRow);
+    EXPECT_EQ(oneD->spatialRank, 1);
+    EXPECT_EQ(oneD->dilation, 3);
+    EXPECT_EQ(oneD->args.wo, 40);
+    // A 3 x 3 image is not one row.
+    const auto square = parse(specFor(baseShape(), ConvDirection::FORWARD));
+    ASSERT_TRUE(square.has_value());
+    EXPECT_FALSE(square->oneRow);
+}
+
+TEST(TestConvDirectForm, DilationIsKeptAndBackwardDataPadsByTheDilatedReach)
+{
+    auto shape = baseShape();
+    shape.input = {9, 10};
+    shape.dilation = {3, 3};
+    shape.prePadding = {2, 3};
+    shape.postPadding = {4, 3};
+    shape.channelsLast = true;
+    const auto forward = parse(specFor(shape, ConvDirection::FORWARD));
+    ASSERT_TRUE(forward.has_value());
+    EXPECT_EQ(forward->dilation, 3);
+    EXPECT_EQ(forward->args.ph, 2);
+    EXPECT_EQ(forward->args.pw, 3);
+    EXPECT_EQ(forward->args.ho, 9);
+    EXPECT_EQ(forward->args.wo, 10);
+    const auto backward = parse(specFor(shape, ConvDirection::BACKWARD_DATA));
+    ASSERT_TRUE(backward.has_value());
+    EXPECT_EQ(backward->dilation, 3);
+    // (3 - 1) x 3 - pre.
+    EXPECT_EQ(backward->args.ph, 4);
+    EXPECT_EQ(backward->args.pw, 3);
+    const auto undilated = parse(specFor(baseShape(), ConvDirection::FORWARD));
+    ASSERT_TRUE(undilated.has_value());
+    EXPECT_EQ(undilated->dilation, 1);
+}
+
 // ---------------------------------------------------------------------------
 // One refusal per gated field
 // ---------------------------------------------------------------------------
@@ -259,14 +324,23 @@ std::vector<RefusalCase> refusalCases()
              s.y.dims[0] = 3;
              s.y.strides = packedStrides(s.y.dims, false);
          }},
-        // The direct envelope: 2-D or 3-D, groups 1, stride 1, dilation 1, an instantiated filter.
-        {"OneD",
+        // The direct envelope: 2-D or 3-D, groups 1, stride 1, dilation 1 (or one 2-D dilation of
+        // both filter axes), an instantiated filter.
+        {"OneDFilterNotALineWidth",
          [](ConvGraphSpec& s) {
              auto shape = baseShape();
-             shape.input = {7};
-             shape.filter = {3};
-             shape.prePadding = shape.postPadding = {1};
+             shape.input = {11};
+             shape.filter = {9};
+             shape.prePadding = shape.postPadding = {4};
              shape.stride = shape.dilation = {1};
+             reshape(s, shape);
+         }},
+        {"LineWidthOnTwoRows",
+         [](ConvGraphSpec& s) {
+             auto shape = baseShape();
+             shape.input = {2, 9};
+             shape.filter = {1, 11};
+             shape.prePadding = shape.postPadding = {0, 5};
              reshape(s, shape);
          }},
         {"Grouped",
@@ -281,11 +355,18 @@ std::vector<RefusalCase> refusalCases()
              shape.stride = {1, 2};
              reshape(s, shape);
          }},
-        {"DilationNot1",
+        {"DilationUnequalAxes",
          [](ConvGraphSpec& s) {
              auto shape = baseShape();
              shape.dilation = {2, 1};
              shape.prePadding = shape.postPadding = {2, 1};
+             reshape(s, shape);
+         }},
+        {"Dilation3d",
+         [](ConvGraphSpec& s) {
+             auto shape = filterShape({3, 3, 3}, {2, 2, 2});
+             shape.input = {6, 7, 6};
+             shape.dilation = {2, 2, 2};
              reshape(s, shape);
          }},
         {"Filter3x5", [](ConvGraphSpec& s) { reshape(s, filterShape({3, 5}, {1, 2})); }},
@@ -453,6 +534,9 @@ struct ConfigFields
     int64_t tm = 0, tn = 0, nt = 0, threads = 0, pipe = 0;
     int64_t rows = 0, pw = 0, fn = 0, wp = 0, wq = 0, wk = 0, pp = 0, epi = 0, un = 0, cf = 0;
     int64_t xpf = 0; ///< written only when set (an absent field reads as 0)
+    int64_t dil = 1;
+    int64_t line = 0;
+    int64_t bpu = 1;
 };
 
 /// A gfx950 rows config: 2 x 2 x 2 waves of 8 rows x 16 columns x 64 channels, 64-channel chunks.
@@ -533,7 +617,10 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"pp", f.pp},
                        {"epi", f.epi},
                        {"un", f.un},
-                       {"cf", f.cf}};
+                       {"cf", f.cf},
+                       {"dil", f.dil},
+                       {"line", f.line},
+                       {"bpu", f.bpu}};
     if(f.xpf != 0)
     {
         kernel.metadata["xpf"] = f.xpf;
@@ -544,7 +631,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
 bool admits(const ConfigFields& fields,
             const std::string& arch,
             ConvShape shape = baseShape(),
-            const std::string& dtype = "HALF")
+            const std::string& dtype = "HALF",
+            ConvDirection direction = ConvDirection::FORWARD)
 {
     if(dtype == "FLOAT")
     {
@@ -561,10 +649,16 @@ bool admits(const ConfigFields& fields,
     auto properties = testDeviceProperties();
     properties.gcnArchName = arch;
     properties.multiProcessorCount = 64;
-    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::FORWARD)), properties);
-    const auto bound = matchesGraph(PACK_FWD, fixture.context());
-    return bound.has_value()
-           && matchesKernel(PACK_FWD, fixture.context(), kernelOf(fields, dtype), *bound);
+    const GraphFixture fixture(buildGraph(specFor(shape, direction)), properties);
+    auto pack = PACK_FWD;
+    auto kernel = kernelOf(fields, dtype);
+    if(direction == ConvDirection::BACKWARD_DATA)
+    {
+        pack.graphMatcher = "hipkernel.conv_direct_bwd.graph_match";
+        kernel.metadata["direction"] = std::string("BWD");
+    }
+    const auto bound = matchesGraph(pack, fixture.context());
+    return bound.has_value() && matchesKernel(pack, fixture.context(), kernel, *bound);
 }
 
 TEST(TestConvDirectKernelMatch, MatrixCoreConfigsRunOnlyWhereTheirAtomAndShipListAllow)
@@ -628,6 +722,28 @@ TEST(TestConvDirectKernelMatch, TheChannelVectorMustDivideTheReduction)
     scalar.tn = 8;
     scalar.nt = 8;
     EXPECT_TRUE(admits(scalar, "gfx942", odd));
+}
+
+TEST(TestConvDirectKernelMatch, WideColumnsAllowOutputTailsButNotReductionVectorTails)
+{
+    for(const auto& dtype : {std::string("HALF"), std::string("BFLOAT16")})
+    {
+        SCOPED_TRACE(dtype);
+        ConfigFields f;
+        f.atom = dtype == "HALF" ? "wmma125_f16" : "wmma125_bf16";
+        f.archs = "gfx1250";
+        f.bm = 64;
+        f.bn = 128;
+        f.wn = 4;
+        auto shape = baseShape();
+        shape.c = 40;
+        shape.k = 133;
+        EXPECT_TRUE(admits(f, "gfx1250", shape, dtype, ConvDirection::FORWARD));
+        EXPECT_FALSE(admits(f, "gfx1250", shape, dtype, ConvDirection::BACKWARD_DATA));
+        std::swap(shape.c, shape.k);
+        EXPECT_FALSE(admits(f, "gfx1250", shape, dtype, ConvDirection::FORWARD));
+        EXPECT_TRUE(admits(f, "gfx1250", shape, dtype, ConvDirection::BACKWARD_DATA));
+    }
 }
 
 TEST(TestConvDirectKernelMatch, FmaRunsEverywhere)
@@ -955,6 +1071,128 @@ TEST(TestConvDirectKernelMatch, RowsConfigsDeclineHaloStagesPastTheDeviceLds)
     EXPECT_FALSE(admits(big, "gfx950"));
 }
 
+TEST(TestConvDirectKernelMatch, LineConfigsServeOneRowImages)
+{
+    auto row = baseShape();
+    row.input = {1, 64};
+    row.filter = {1, 11};
+    row.dilation = {1, 5};
+    row.prePadding = row.postPadding = {0, 25};
+    // 2 x 2 x 2 waves of 8 segments x 16 columns: a 512-column tile of the row.
+    auto line = rowsFields();
+    line.r = 1;
+    line.s = 11;
+    line.bc = 32;
+    line.dil = 5;
+    line.line = 1;
+    EXPECT_TRUE(admits(line, "gfx950", row));
+    // One staged line of 512 + (11 - 1) x 5 pixels, two stages.
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(line, "HALF"))),
+              2 * 562 * 32 * 2);
+    auto cf = line;
+    cf.cf = 1;
+    cf.epi = 0;
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(cf, "HALF"))),
+              32 * ((7 + 562 + 7) / 8) * 16 + 562 * 32 * 2);
+    // 1 x 11 undilated: (7 + 522 + 7) / 8 = 67 runs, rounded up to whole 16-column blocks.
+    auto cf1 = cf;
+    cf1.dil = 1;
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(cf1, "HALF"))),
+              32 * 68 * 16 + 522 * 32 * 2);
+    // Not on a two-row image, nor at another dilation or width.
+    auto twoRows = row;
+    twoRows.input = {2, 64};
+    auto f17 = line;
+    f17.s = 7;
+    f17.dil = 1;
+    auto rows17 = twoRows;
+    rows17.filter = {1, 7};
+    rows17.dilation = {1, 1};
+    rows17.prePadding = rows17.postPadding = {0, 3};
+    EXPECT_FALSE(admits(f17, "gfx950", rows17));
+    auto d3 = line;
+    d3.dil = 3;
+    EXPECT_FALSE(admits(d3, "gfx950", row));
+    // 1-D graphs: line configs only.
+    auto oneD = baseShape();
+    oneD.input = {64};
+    oneD.filter = {7};
+    oneD.prePadding = oneD.postPadding = {3};
+    oneD.stride = oneD.dilation = {1};
+    EXPECT_TRUE(admits(f17, "gfx950", oneD));
+    auto plain17 = rowsFields();
+    plain17.r = 1;
+    plain17.s = 7;
+    plain17.bc = 32;
+    EXPECT_FALSE(admits(plain17, "gfx950", oneD)) << "a 2-D rows config on a 1-D graph";
+    // Line tiles are 2-D rows of 1 x S filters, one image per column group, no ping-pong or split.
+    const std::vector<std::pair<std::string, std::function<void(ConfigFields&)>>> malformed{
+        {"line 2", [](ConfigFields& f) { f.line = 2; }},
+        {"r 3", [](ConfigFields& f) { f.r = 3; }},
+        {"un 2", [](ConfigFields& f) { f.un = 2; }},
+        {"pp 1",
+         [](ConfigFields& f) {
+             f.pp = 1;
+             f.epi = 0;
+         }},
+        {"split", [](ConfigFields& f) { f.split = 1; }},
+    };
+    for(const auto& [name, mutate] : malformed)
+    {
+        auto f = line;
+        mutate(f);
+        EXPECT_FALSE(admits(f, "gfx950", row)) << name;
+    }
+    ConfigFields mma;
+    mma.atom = "mfma16x32_f16";
+    mma.archs = "gfx950";
+    mma.r = 1;
+    mma.s = 7;
+    mma.line = 1;
+    EXPECT_FALSE(admits(mma, "gfx950", rows17)) << "line on a halo-tile config";
+}
+
+TEST(TestConvDirectKernelMatch, DilatedRowsConfigsServeTheirOwnDilation)
+{
+    auto dilated = baseShape();
+    dilated.dilation = {2, 2};
+    dilated.prePadding = dilated.postPadding = {2, 2};
+    auto d2 = rowsFields();
+    d2.bc = 32;
+    d2.dil = 2;
+    EXPECT_TRUE(admits(d2, "gfx950", dilated));
+    EXPECT_FALSE(admits(d2, "gfx950")) << "a dilated config on an undilated graph";
+    EXPECT_FALSE(admits(rowsFields(), "gfx950", dilated)) << "an undilated config";
+    auto d4 = d2;
+    d4.dil = 4;
+    EXPECT_FALSE(admits(d4, "gfx950", dilated));
+    // The halo tile and FMA kernels serve dilation 1 only.
+    ConfigFields mma;
+    mma.atom = "mfma16x32_f16";
+    mma.archs = "gfx950";
+    EXPECT_FALSE(admits(mma, "gfx950", dilated));
+    EXPECT_FALSE(admits(fmaFields(8), "gfx950", dilated));
+    // Dilation is a 2-D rows knob of one image per column group.
+    mma.dil = 2;
+    EXPECT_FALSE(admits(mma, "gfx950", dilated));
+    auto unfold = d2;
+    unfold.un = 2;
+    EXPECT_FALSE(admits(unfold, "gfx950", dilated));
+    // The halo grows by (3 - 1) x 2 rows and columns: 20 x 36 pixels a stage.
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(d2, "HALF"))),
+              2 * 20 * 36 * 32 * 2);
+    auto cf = d2;
+    cf.cf = 1;
+    cf.epi = 0;
+    // One channels-last stage plus the raw stage of 8-column runs: (7 + 36 + 7) / 8 = 6 a row.
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(cf, "HALF"))),
+              20 * 32 * 6 * 16 + 20 * 36 * 32 * 2);
+    // At 64-channel chunks the dilated halo passes gfx950's 160 KiB.
+    auto wide = d2;
+    wide.bc = 64;
+    EXPECT_FALSE(admits(wide, "gfx950", dilated));
+}
+
 TEST(TestConvDirectKernelMatch, RowsConfigsTakeTheirOwnDimensionCount)
 {
     auto rows3d = rowsFields();
@@ -1010,6 +1248,7 @@ TEST(TestConvDirectKernelMatch, RowsConfigsDeclineEachMalformedField)
         {"wn", [](ConfigFields& f) { f.wn = 2; }},
         {"bm", [](ConfigFields& f) { f.bm = 128; }},
         {"bn", [](ConfigFields& f) { f.bn = 64; }},
+        {"dil 0", [](ConfigFields& f) { f.dil = 0; }},
     };
     for(const auto& [name, mutate] : mutations)
     {
@@ -1400,6 +1639,104 @@ TEST(TestConvDirectPlan, SmallGfx950RowsTilesDeclineManyRoundGrids)
     auto gfx9 = rowsGfx9Fields();
     gfx9.wq = 1;
     EXPECT_TRUE(planOf(shape, gfx9, "HALF", 32).has_value());
+}
+
+TEST(TestConvDirectPlan, RowsBlocksPerUnitScaleTheGridAndTheirStages)
+{
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.dataType = DataType::HALF;
+    shape.c = 64;
+    shape.k = 64;
+    shape.input = {64, 64};
+    // 8 x 32 x 64, 4 waves: 8 x 2 tiles x 2 images = 32 tiles.
+    auto pair = rowsFields();
+    pair.wp = 1;
+    pair.bm = 8;
+    pair.fn = 2;
+    pair.bn = 64;
+    pair.bc = 32;
+    pair.bpu = 2;
+    const auto plan = planOf(shape, pair, "HALF", 8);
+    ASSERT_TRUE(plan.has_value());
+    EXPECT_EQ(plan->grid[0], 16u) << "two resident blocks per unit";
+    pair.bpu = 1;
+    EXPECT_EQ(planOf(shape, pair, "HALF", 8)->grid[0], 8u);
+    pair.bpu = 3;
+    EXPECT_EQ(planOf(shape, pair, "HALF", 64)->grid[0], 32u) << "never more blocks than tiles";
+    // Every resident block holds its halo stages: 3 x 43,520 bytes fit gfx950's 160 KiB; on a
+    // 64 KiB part two 16-row dword tiles do not, two 8-row ones do.
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(pair, "HALF"))),
+              2 * 10 * 34 * 32 * 2);
+    EXPECT_TRUE(admits(pair, "gfx950", shape));
+    pair.bpu = 4;
+    EXPECT_FALSE(admits(pair, "gfx950", shape)) << "bpu 1 to 3";
+    auto dword = rowsGfx9Fields();
+    ASSERT_TRUE(admits(dword, "gfx90a"));
+    dword.bpu = 2;
+    EXPECT_FALSE(admits(dword, "gfx90a")) << "2 x 39 KiB past 64 KiB";
+    dword.wp = 1;
+    dword.bm = 8;
+    EXPECT_TRUE(admits(dword, "gfx90a")) << "2 x 21 KiB";
+    // A rows knob only.
+    ConfigFields mma;
+    mma.atom = "mfma16x32_f16";
+    mma.archs = "gfx950";
+    mma.bpu = 2;
+    EXPECT_FALSE(admits(mma, "gfx950"));
+}
+
+TEST(TestConvDirectPlan, LineTilesAreSegmentsOfTheRowEndToEnd)
+{
+    auto wide = baseShape();
+    wide.input = {1, 1100};
+    wide.filter = {1, 11};
+    wide.dilation = {1, 5};
+    wide.prePadding = wide.postPadding = {0, 25};
+    wide.dataType = DataType::HALF;
+    auto line = rowsFields();
+    line.r = 1;
+    line.s = 11;
+    line.bc = 32;
+    line.dil = 5;
+    line.line = 1;
+    // 2 x 8 segments of 32 columns: 512 columns of the row a tile, three tiles for 1100.
+    const auto plan = planOf(wide, line, "HALF", 64);
+    ASSERT_TRUE(plan.has_value());
+    EXPECT_EQ(plan->args.th, 1);
+    EXPECT_EQ(plan->args.tw, 512);
+    EXPECT_EQ(plan->args.tilesW, 3);
+    EXPECT_EQ(plan->args.tilesH, 1);
+    // A line tile is the reference tile's 512 pixels: 128 tiles on one unit (past 8 rounds) do
+    // not decline it.
+    auto longRow = wide;
+    longRow.input = {1, 65536};
+    EXPECT_TRUE(planOf(longRow, line, "HALF", 1).has_value());
+}
+
+TEST(TestConvDirectPlan, SmallGfx950RowsTilesCompareTheChannelsTheyCompute)
+{
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.dataType = DataType::HALF;
+    shape.n = 2;
+    shape.c = 64;
+    shape.k = 64;
+    shape.input = {256, 256};
+    // 16 x 32 x 64: the reference tile's work on 64 output channels.
+    auto narrow = rowsFields();
+    narrow.fn = 2;
+    narrow.bn = 64;
+    // 8 x 16 tiles x 2 images = 256 tiles: more than 8 rounds of 16 units.
+    EXPECT_TRUE(planOf(shape, narrow, "HALF", 16).has_value());
+    // Half its columns: still a smaller tile than the reference on these channels.
+    auto half = narrow;
+    half.wq = 1;
+    EXPECT_FALSE(planOf(shape, half, "HALF", 16).has_value());
+    // 128 output channels: the 64-wide tile computes half the reference tile's and declines.
+    shape.k = 128;
+    EXPECT_FALSE(planOf(shape, narrow, "HALF", 16).has_value());
+    EXPECT_TRUE(planOf(shape, rowsFields(), "HALF", 16).has_value());
 }
 
 TEST(TestConvDirectPlan, BatchUnfoldTilesPackImagesAlongTheColumns)

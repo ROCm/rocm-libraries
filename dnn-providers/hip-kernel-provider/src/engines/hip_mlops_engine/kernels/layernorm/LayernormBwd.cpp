@@ -2,6 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 #include "LayernormCommon.hpp"
+#if defined(__gfx1250__)
+#include "ReductionFunctions.hpp"
+#endif
 
 constexpr unsigned int PARALLEL_SIZE = HIP_PLUGIN_LAYERNORM_PARALLEL_SIZE;
 
@@ -56,6 +59,10 @@ extern "C" __global__ void LayernormBwd(const OutputType* __restrict__ dy,
         sum_dy_scale_x += pdy_pscale * hip_kernel_provider::cast<float>(x[idx]);
     }
 
+#if defined(__gfx1250__)
+    hip_kernel_provider::batchnorm::reduction::reduce2<float, float, LOCAL_SIZE>(
+        sum_dy_scale, sum_dy_scale_x, 1.0f, lid);
+#else
     ltmp1[lid] = sum_dy_scale;
     ltmp2[lid] = sum_dy_scale_x;
     __syncthreads();
@@ -68,9 +75,9 @@ extern "C" __global__ void LayernormBwd(const OutputType* __restrict__ dy,
         }
         __syncthreads();
     }
-
     sum_dy_scale = ltmp1[0];
     sum_dy_scale_x = ltmp2[0];
+#endif
     constexpr float inverseInnerSize = 1.0f / INNER_SIZE;
     float a = prstd * prstd * prstd * inverseInnerSize * (sum_dy_scale_x - sum_dy_scale * pmean);
     float b = prstd * sum_dy_scale * inverseInnerSize - a * pmean;

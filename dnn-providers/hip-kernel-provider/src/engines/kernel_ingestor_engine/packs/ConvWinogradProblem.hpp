@@ -92,9 +92,9 @@ enum class Variant
     MULTIPASS,
     FUSED,
     WMMA,
-    WREG, ///< fused WMMA with register-built operands (gfx11 / gfx12)
+    WREG, ///< fused WMMA with register-built operands (gfx11 / gfx1200-1201 / gfx1250)
     SREG, ///< fused VALU with register operands (wave64 gfx9)
-    COOP, ///< fused WMMA, the block transforms each input chunk once into LDS (gfx11 / gfx12)
+    COOP, ///< fused WMMA/MFMA, cooperative input transform (gfx11 / gfx1200-1201 / gfx1250 / CDNA)
     WRW, ///< backward weights F(3,r): x / dy transforms, a split GEMM per position, dW transform
 };
 
@@ -104,11 +104,14 @@ struct Config
     Variant variant = Variant::MULTIPASS;
     int m = 2; ///< output tile: F(m,3), or F(3,2) (m = 3) on stride 2's phase sub-filters
     Layout layout = Layout::NCHW; ///< what the kernels read; the fused variants read NCHW
-    /// "any", or the matrix-core family: "gfx11", "gfx12" (WMMA), "gfx9" (MFMA, gfx908 and later
-    /// CDNA), "gfx942" (MFMA, gfx940-942), "gfx950" (MFMA, gfx950)
+    /// "any", or the matrix-core family: "gfx11", "gfx12" (WMMA, 1200/1201), "gfx9" (MFMA,
+    /// gfx908 and later CDNA), "gfx942" (MFMA, gfx940-942), "gfx950" (MFMA, gfx950), "gfx1250"
     std::string arch;
+    /// 0 VALU, 1 gfx11, 2 gfx12 WMMA128, 3 CDNA K16, 4 gfx1250 K32, 5 gfx1250 exact f32 K4,
+    /// 6 gfx950 backward-weights K32.
+    int atom = 0;
     bool llcPlan = false; ///< multipass: slice the batch to fit the last-level cache
-    int gemmBm = 0, gemmBn = 0, gemmBk = 0; ///< multipass GEMM tile
+    int gemmBm = 0, gemmBn = 0, gemmBk = 0; ///< multipass GEMM tile (atom 5: exact FP32 K4 WMMA)
     int bk = 0, bt = 0, ccv = 0, tm = 0, tn = 0; ///< fused VALU block
     int waves = 0; ///< fused WMMA waves per workgroup (register / cooperative: derived, checked)
     int bins = 0; ///< register WMMA: bins of a transform row per wave (4 or 2)

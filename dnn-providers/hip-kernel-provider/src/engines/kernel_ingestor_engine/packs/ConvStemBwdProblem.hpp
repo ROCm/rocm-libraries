@@ -40,23 +40,12 @@ namespace hip_kernel_provider::kernel_ingestor_engine::conv_stem_bwd
 
 /// The atoms a config may name, in atom_id order: K1's matrix-core atoms (no TF32 form), then
 /// "fma" (exact fp32 on the vector ALUs, for devices without an fp32 matrix core).
-inline constexpr std::array<std::string_view, 17> ATOMS{"mfma16_f16",
-                                                        "mfma16_bf16",
-                                                        "mfma16_bf16_908",
-                                                        "mfma16_f32",
-                                                        "mfma32_f16",
-                                                        "mfma32_bf16",
-                                                        "mfma32_bf16_908",
-                                                        "mfma32_f32",
-                                                        "mfma16x32_f16",
-                                                        "mfma16x32_bf16",
-                                                        "mfma32x16_f16",
-                                                        "mfma32x16_bf16",
-                                                        "wmma11_f16",
-                                                        "wmma11_bf16",
-                                                        "wmma12_f16",
-                                                        "wmma12_bf16",
-                                                        "fma"};
+inline constexpr std::array<std::string_view, 20> ATOMS{
+    "mfma16_f16",    "mfma16_bf16",    "mfma16_bf16_908", "mfma16_f32",
+    "mfma32_f16",    "mfma32_bf16",    "mfma32_bf16_908", "mfma32_f32",
+    "mfma16x32_f16", "mfma16x32_bf16", "mfma32x16_f16",   "mfma32x16_bf16",
+    "wmma11_f16",    "wmma11_bf16",    "wmma12_f16",      "wmma12_bf16",
+    "fma",           "wmma125_f16",    "wmma125_bf16",    "wmma125_f32"};
 
 /// The atom_id of @p atom, or -1 for an unknown one.
 int64_t atomIdOf(std::string_view atom);
@@ -99,7 +88,7 @@ struct StemBwdConfig
     int64_t atomId = -1;
     int64_t layout = -1;
     /// Channels-first dy loads: 1 element, or 16 bytes of aligned columns. Channels-last: 16
-    /// bytes of output channels.
+    /// bytes of output channels, or 1 element where the output channels are not whole vectors.
     int64_t vec = 0;
     /// Window offsets: filter rows / columns per stride phase (the problem's, exactly).
     int64_t u = 0;
@@ -224,8 +213,8 @@ inline constexpr int64_t MAX_TRANSFORM_BLOCKS = 1024;
  * Reads and gates every field of @p config: the atom (known, its atom_id, running on the
  * device, taking the graph's element type; "fma" on fp32 graphs, or 16-bit ones where
  * runsMatrixAtomFor finds no atom for the type); the layout, one dy is
- * packed in; vec (channels-last: 16 bytes, the output channels whole vectors; channels-first:
- * 1, or 16 bytes when dy rows are whole vectors); u and v the problem's window extents; sh and
+ * packed in; vec (channels-last: 16 bytes when the output channels are whole vectors, 1 when
+ * they are not; channels-first: 1, or 16 bytes when dy rows are whole vectors); u and v the problem's window extents; sh and
  * sw the problem's strides; ft the problem's depth taps (0 on a trivial depth axis); sd 0, or
  * SPACE_TO_DEPTH on a stride-1 problem of trivial depth (u and v then its space-to-depth
  * window's, channels-first vec 1, the phases sd x sd); nb at least the input channels times the phases, at most

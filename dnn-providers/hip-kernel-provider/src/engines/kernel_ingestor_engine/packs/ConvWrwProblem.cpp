@@ -45,8 +45,14 @@ constexpr int64_t CHUNK_MARGIN = 512;
 /// The generic loop declines filters of at most this many taps dilated at least this far.
 constexpr int64_t GENERIC_SPARSE_MAX_TAPS = 9;
 constexpr int64_t GENERIC_SPARSE_MIN_DILATION = 6;
-/// The generic FMA form declines fewer input channels a group, or this width stride and past.
-constexpr int64_t GENERIC_FMA_MIN_CHANNELS = 8;
+/// The generic loop declines grouped layers whose groups have fewer input and fewer output
+/// channels than this (depthwise, ResNeXt-class narrow groups).
+constexpr int64_t GENERIC_MIN_GROUP_CHANNELS = 16;
+/// The generic loop declines fewer input channels a group (stems), and output rows narrower
+/// than this many positions.
+constexpr int64_t GENERIC_MIN_CHANNELS = 8;
+constexpr int64_t GENERIC_MIN_OUTPUT_WIDTH = 4;
+/// The generic FMA form declines this width stride and past.
 constexpr int64_t GENERIC_FMA_MAX_STRIDE = 4;
 /// The reduce: 256 threads, 64 four-channel quads of dw per block.
 constexpr int64_t REDUCE_QUADS_PER_BLOCK = 64;
@@ -146,6 +152,9 @@ constexpr std::array<AtomShape, ATOMS.size()> SHAPES{{
     {16, 16, 8}, // wmma12_f16
     {16, 16, 8}, // wmma12_bf16
     {0, 0, 0}, // fma: no matrix core
+    {16, 32, 16}, // wmma125_f16: native gfx1250 16x16x32
+    {16, 32, 16}, // wmma125_bf16: native gfx1250 16x16x32
+    {16, 4, 2}, // wmma125_f32: native gfx1250 16x16x4
 }};
 
 } // namespace
@@ -173,7 +182,7 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
     const auto& a = base->args;
     const long long cg = a.c / a.groups;
     // x and dy: both packed channels-first or both packed channels-last (every loop), or any
-    // strides (the generic loop).
+    // strides (the buffer generic loop 8 and native scalar gather loop 11).
     const std::array<long long, CONV_NAIVE_TENSOR_DIMS> xExtents{
         a.n, a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]};
     const std::array<long long, CONV_NAIVE_TENSOR_DIMS> yExtents{
@@ -198,8 +207,9 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
     {
         return std::nullopt;
     }
-    // The kernel's argument block holds the batch in 32 bits.
-    if(a.n > INT_LIMIT)
+    // The argument block holds these extents in 32 bits.
+    if(a.n > INT_LIMIT || a.c > INT_LIMIT || a.k > INT_LIMIT || a.groups > INT_LIMIT
+       || a.inSpatial[0] > INT_LIMIT || a.inSpatial[1] > INT_LIMIT || a.inSpatial[2] > INT_LIMIT)
     {
         return std::nullopt;
     }
@@ -228,7 +238,11 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
         = pack_features::checkedProduct({a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]});
     const auto yImage
         = pack_features::checkedProduct({a.k, a.outSpatial[0], a.outSpatial[1], a.outSpatial[2]});
-    if(!xImage.has_value() || !yImage.has_value())
+    const auto xBytes = pack_features::checkedProduct({a.n, xImage.value_or(0), elementBytes});
+    const auto yBytes = pack_features::checkedProduct({a.n, yImage.value_or(0), elementBytes});
+    const auto wBytes = pack_features::checkedProduct({a.k, cg, *taps, elementBytes});
+    if(!xImage.has_value() || !yImage.has_value() || !xBytes.has_value() || !yBytes.has_value()
+       || !wBytes.has_value())
     {
         return std::nullopt;
     }
@@ -312,6 +326,15 @@ int64_t ldsBytesOf(const WrwConfig& config, int elementBytes)
             return std::numeric_limits<int64_t>::max();
         }
     }
+    if(config.loop == LOOP_ACCURATE)
+    {
+        if((config.bk != 8 && config.bk != 16) || (config.bc != 8 && config.bc != 16)
+           || (config.bq != 32 && config.bq != 64) || elementBytes != 4)
+        {
+            return std::numeric_limits<int64_t>::max();
+        }
+        return (config.bk + config.bc) * (config.bq + 1) * static_cast<int64_t>(sizeof(float));
+    }
     const auto i = [](int64_t value) { return static_cast<int>(value); };
     return k3LdsBytes(i(config.loop),
                       i(config.layout),
@@ -335,6 +358,12 @@ int64_t ldsBytesOf(const WrwConfig& config, int elementBytes)
 
 int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave)
 {
+    // Scalar gathers have no register load-pass bitmask or outstanding inline-asm loads.
+    if(config.loop == LOOP_NATIVE_GENERIC || config.loop == LOOP_TAP_TILED
+       || config.loop == LOOP_SMALL_K || config.loop == LOOP_ACCURATE)
+    {
+        return 0;
+    }
     const int64_t vec = config.vec;
     if(config.loop == LOOP_GENERIC)
     {
@@ -490,8 +519,11 @@ std::optional<bool>
     int64_t sw = 0;
     int64_t dw = 0;
     int64_t fr = -1;
-    if(!readInt(atomId) || atomId < 0 || atomId >= static_cast<int64_t>(ATOMS.size())
-       || at >= key.size())
+    // The legacy generic tier's spec namespace ends at FMA; appended native atoms use their
+    // own qualified runtime paths, not specialized-class keys.
+    constexpr int64_t SPEC_FMA_ATOM_ID = 16;
+    static_assert(ATOMS[SPEC_FMA_ATOM_ID] == "fma");
+    if(!readInt(atomId) || atomId < 0 || atomId > SPEC_FMA_ATOM_ID || at >= key.size())
     {
         return std::nullopt;
     }
@@ -502,7 +534,7 @@ std::optional<bool>
     const char kind = blockBuffers ? static_cast<char>(letter - 'a' + 'A') : letter;
     const bool fmaKind = kind == 'F' || kind == 'S' || kind == 'Q';
     const bool ring = kind == 'P' || kind == 'U' || kind == 'G' || kind == 'D' || kind == 'Q';
-    const bool fmaAtom = atomId == static_cast<int64_t>(ATOMS.size()) - 1;
+    const bool fmaAtom = atomId == SPEC_FMA_ATOM_ID;
     if((kind != 'R' && kind != 'C' && kind != 'F' && kind != 'S' && !ring) || fmaKind != fmaAtom
        || !readInt(layout) || layout < 0 || layout > 2 || !readDotInt(s) || !readDotInt(sw)
        || !readDotInt(dw) || !readDotInt(fr) || at != key.size() || s < 1 || sw < 1 || dw < 1
@@ -569,21 +601,28 @@ std::optional<bool>
 
 int64_t ldsLimitOf(std::string_view gcnArchName)
 {
-    return hipdnn_plugin_sdk::stripArchFeatures(gcnArchName) == "gfx950" ? 160 * 1024 : 64 * 1024;
+    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
+    if(arch == "gfx1250")
+    {
+        return int64_t{320} * 1024;
+    }
+    return arch == "gfx950" ? int64_t{160} * 1024 : int64_t{64} * 1024;
 }
 
 int64_t splitsWanted(int64_t blocksXY,
                      int64_t blocksPerUnit,
                      int64_t steps,
                      int64_t partialElems,
-                     int64_t dispatchUnits)
+                     int64_t dispatchUnits,
+                     int64_t partialElementBytes)
 {
     int64_t wanted
         = divUp(std::max<int64_t>(dispatchUnits, 1) * std::max<int64_t>(blocksPerUnit, 1),
                 std::max<int64_t>(blocksXY, 1));
     wanted = std::min({wanted, std::max<int64_t>(1, steps / 4), MAX_GRID_YZ});
-    const int64_t splitBytes = std::max<int64_t>(partialElems, 1) * int64_t{sizeof(float)};
-    wanted = std::max<int64_t>(1, std::min(wanted, MAX_WORKSPACE_BYTES / splitBytes));
+    const int64_t maxSplits = MAX_WORKSPACE_BYTES / std::max<int64_t>(partialElementBytes, 1)
+                              / std::max<int64_t>(partialElems, 1);
+    wanted = std::max<int64_t>(1, std::min(wanted, maxSplits));
     // Whole rounds of blocks over the units: of wanted / 2 .. wanted splits, the one whose
     // grid leaves the least of its last round idle (the most splits on a tie). 10 splits of 64
     // blocks on 304 units run 3 rounds for 2.1 rounds of work; 9 run 2 for 1.9.
@@ -739,6 +778,72 @@ DirectPlan directPlanFor(int64_t tiles,
     return best;
 }
 
+std::optional<WrwProblem> widthFoldOf(const WrwProblem& problem)
+{
+    const auto& a = problem.base.args;
+    const int64_t s = a.stride[2];
+    const int64_t width = a.inSpatial[2];
+    const int64_t filterW = a.filter[2];
+    const int64_t pad = a.prePadding[2];
+    const bool staged = problem.channelsFirst;
+    if(problem.noFold || problem.folded || s < 2 || filterW % s != 0 || a.dilation[2] != 1
+       || a.groups != 1 || pad < 0 || problem.largeImage
+       || !(problem.channelsFirst || problem.channelsLast) || (!staged && width % s != 0))
+    {
+        return std::nullopt;
+    }
+    // Staged: shifted by the padding's phase, exactly S / s taps. In place: ceil-padded.
+    const int64_t shift = staged ? pad % s : 0;
+    const int64_t reach = staged ? divUp(width + shift, s) : width / s;
+    const int64_t pre = staged ? (pad - shift) / s : divUp(pad, s);
+    const int64_t fw = staged ? filterW / s : divUp(filterW - pad, s) + pre;
+    const auto channels = pack_features::checkedMultiply(a.c, s);
+    // The folded output width is dy's: reach + pre + post - fw + 1 with a padding past the end
+    // of at least 0 (every dy position's window starts inside the folded row's reach).
+    const int64_t post = a.outSpatial[2] - reach - pre + fw - 1;
+    // The staged rows are padded to whole 16-byte vectors (ConvWrwFoldX's stores); the extra
+    // positions are zero and no dy position reads them.
+    const int64_t vector = 16 / problem.elementBytes;
+    const int64_t u = staged ? divUp(reach, vector) * vector : reach;
+    if(!channels.has_value() || *channels > INT_LIMIT || reach < 1 || fw < 1 || post < 0
+       || u > INT_LIMIT)
+    {
+        return std::nullopt;
+    }
+    WrwProblem view = problem;
+    auto& v = view.base.args;
+    v.c = *channels;
+    v.inSpatial[2] = u;
+    v.filter[2] = fw;
+    v.stride[2] = 1;
+    v.prePadding[2] = pre;
+    v.dilation[2] = 1;
+    const int64_t planes = a.inSpatial[0] * a.inSpatial[1];
+    if(problem.channelsFirst)
+    {
+        // The staged x': packed N (C s) D H U.
+        v.xStrides[4] = 1;
+        v.xStrides[3] = u;
+        v.xStrides[2] = a.inSpatial[1] * u;
+        v.xStrides[1] = planes * u;
+        v.xStrides[0] = *channels * planes * u;
+    }
+    else
+    {
+        // Channels-last x in place: position u s + j of channel c is channel j C + c of
+        // position u, so only the width stride changes (s C elements a folded position).
+        v.xStrides[1] = 1;
+        v.xStrides[4] = *channels;
+    }
+    // The folded filter (K T R fw by C s); its partials are reduced into dw by the fold reduce.
+    view.taps = a.filter[0] * a.filter[1] * fw;
+    view.channelsFirst = problem.channelsFirst;
+    view.channelsLast = problem.channelsLast;
+    view.folded = true;
+    view.foldShift = shift;
+    return view;
+}
+
 std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
                                       const WrwConfig& config,
                                       const hipdnn_plugin_sdk::ingestor::DeviceProperties& device)
@@ -752,13 +857,14 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         // channels-last); not the generic tier (loop 8) or the block-based buffer forms (pb).
         if(config.math != 1 || problem.base.dataType != data_objects::DataType::FLOAT
            || conv_igemm::atomElement(config.atom) != "bf16" || config.dws != 0
-           || config.loop == LOOP_GENERIC || config.pb != 0
+           || config.loop >= LOOP_GENERIC || config.pb != 0
            || !(problem.channelsFirst || problem.channelsLast)
            || problem.base.args.n * 3 > INT_LIMIT || !threeBf16Pays(problem, device.gcnArchName))
         {
             return std::nullopt;
         }
         WrwProblem split = problem;
+        split.noFold = true;
         split.base.dataType = data_objects::DataType::BFLOAT16;
         split.elementBytes = 2;
         split.base.args.n = problem.base.args.n * 3;
@@ -793,11 +899,94 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         return launch;
     }
 
+    // The width fold: a specialized config (compile-time geometry) of unit width stride serves a
+    // strided width whose stride divides the filter width as the folded stride-1 problem
+    // (widthFoldOf).
+    if(config.loop < LOOP_GENERIC && config.sw == 1 && problem.base.args.stride[2] > 1)
+    {
+        const auto folded = widthFoldOf(problem);
+        if(!folded.has_value())
+        {
+            return std::nullopt;
+        }
+        auto launch = wrwLaunchFor(*folded, config, device);
+        const int64_t units = device_units::dispatchUnits(device);
+        if(!launch.has_value() || launch->dwStore || units < 1)
+        {
+            return std::nullopt;
+        }
+        const auto& a = problem.base.args;
+        const auto& f = folded->base.args;
+        const int64_t s = a.stride[2];
+        auto& r = launch->reduce;
+        const int64_t quads = r.elems / r.cg * divUp(int64_t{r.cg}, int64_t{4});
+        const int64_t perBlock = deepReduceQuads(quads, units);
+        if(divUp(quads, perBlock) > INT_LIMIT)
+        {
+            return std::nullopt;
+        }
+        r.tile = 4;
+        r.quads = static_cast<int>(perBlock);
+        launch->reduceGrid = static_cast<unsigned int>(divUp(quads, perBlock));
+        launch->reduceBlock = static_cast<unsigned int>(4 * perBlock);
+        auto& rf = launch->reduceFold;
+        rf.r = r;
+        // dw packed K C T R S or K T R S C, the graph's taps.
+        const int64_t taps = problem.taps;
+        rf.wk = a.c * taps;
+        rf.wc = problem.filterChannelsLast ? 1 : taps;
+        rf.wtap = problem.filterChannelsLast ? a.c : 1;
+        rf.c = static_cast<int>(a.c);
+        rf.s = static_cast<int>(s);
+        rf.fw = static_cast<int>(f.filter[2]);
+        rf.pre = static_cast<int>(f.prePadding[2]);
+        rf.pad = static_cast<int>(a.prePadding[2] - folded->foldShift);
+        rf.filterW = static_cast<int>(a.filter[2]);
+        rf.outer = static_cast<int>(a.filter[0] * a.filter[1]);
+        rf.flip = a.flipFilter != 0 ? 1 : 0;
+        launch->fold = true;
+        if(problem.channelsFirst)
+        {
+            const auto rows
+                = pack_features::checkedProduct({a.n, a.c, a.inSpatial[0], a.inSpatial[1]});
+            if(!rows.has_value())
+            {
+                return std::nullopt;
+            }
+            // The staged x' (ceil((L + shift) / s) positions a row by s phases), by tiles of
+            // K3_FOLD_TILE x elements of one row.
+            const int64_t tilePositions
+                = K3_FOLD_TILE / s / (16 / problem.elementBytes) * (16 / problem.elementBytes);
+            const auto blocks
+                = pack_features::checkedMultiply(*rows, divUp(f.inSpatial[2], tilePositions));
+            const auto stagedBytes = pack_features::checkedProduct(
+                {*rows, f.inSpatial[2], s, int64_t{problem.elementBytes}});
+            if(tilePositions < 1 || !blocks.has_value() || *blocks > INT_LIMIT
+               || !stagedBytes.has_value())
+            {
+                return std::nullopt;
+            }
+            launch->foldStage = true;
+            launch->foldOffset = (launch->workspaceBytes + 255) / 256 * 256;
+            launch->workspaceBytes = launch->foldOffset + static_cast<size_t>(*stagedBytes);
+            auto& fa = launch->foldArgs;
+            fa.rows = *rows;
+            fa.planes = a.inSpatial[0] * a.inSpatial[1];
+            fa.width = a.inSpatial[2];
+            fa.c = static_cast<int>(a.c);
+            fa.s = static_cast<int>(s);
+            fa.u = static_cast<int>(f.inSpatial[2]);
+            fa.shift = static_cast<int>(folded->foldShift);
+            launch->foldGrid = static_cast<unsigned int>(*blocks);
+        }
+        return launch;
+    }
+
     // A 1x1 filter at unit stride and no padding over packed channels-first images reads every
     // image plane (depth x height x width) as one contiguous run in x and dy alike: the
     // specialized loops take it as one row of that many positions, so their position chunks
     // run across row ends (resnext's 16-wide rows filled half of each 32-position chunk).
-    if(config.loop != LOOP_GENERIC && problem.channelsFirst)
+    if(config.loop < LOOP_GENERIC && problem.channelsFirst)
     {
         const auto& p = problem.base.args;
         bool pointwise = p.inSpatial[0] * p.inSpatial[1] > 1;
@@ -832,10 +1021,16 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
+    const bool accurate = config.loop == LOOP_ACCURATE;
+    const bool smallk = config.loop == LOOP_SMALL_K;
+    const bool nativeGeneric = config.loop == LOOP_NATIVE_GENERIC;
+    const bool tapTiled = config.loop == LOOP_TAP_TILED;
+    const bool runtime = nativeGeneric || tapTiled || smallk || accurate;
     const bool generic = config.loop == LOOP_GENERIC;
     // The generic loop's FMA form: the "fma" atom (thread tiles tk x tc).
     const bool genericFma = generic && info->wave == 0;
-    const bool fma = config.loop == LOOP_RING_FMA || config.loop == LOOP_ROWS_FMA || genericFma;
+    const bool fma = config.loop == LOOP_RING_FMA || config.loop == LOOP_ROWS_FMA || genericFma
+                     || smallk || accurate;
     const bool direct = config.loop == LOOP_DIRECT;
     const bool smallc = config.loop == LOOP_ROWS_SMALLC;
     const bool packed = config.loop == LOOP_ROWS_PACKED;
@@ -852,7 +1047,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     // The generic FMA form only where no matrix atom takes the element (fp32 on RDNA): the
     // matrix generic configs serve the rest.
     if(!conv_igemm::atomRunsOn(config.atom, arch)
-       || (fma ? (element != "f32" || genericFma) && runsMatrixAtomFor(element, arch)
+       || (fma ? !smallk && (element != "f32" || genericFma) && runsMatrixAtomFor(element, arch)
                : conv_igemm::atomElement(config.atom) != element))
     {
         return std::nullopt;
@@ -864,22 +1059,23 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     const int64_t cg = a.c / a.groups;
     const bool gfx950 = hipdnn_plugin_sdk::stripArchFeatures(arch) == "gfx950";
     // Flattened positions (flat 1): every output position, and the whole x and dy spans.
-    const int64_t positions = a.n * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
+    const int64_t flatPositions = a.n * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
     const int64_t xTensor = (a.n - 1) * a.xStrides[0] + problem.xSpan;
     const int64_t yTensor = (a.n - 1) * a.yStrides[0] + problem.ySpan;
+    const bool gfx1250 = hipdnn_plugin_sdk::stripArchFeatures(arch) == "gfx1250";
 
     // Loop and layout.
-    if(config.loop < LOOP_ROWS || config.loop > LOOP_GENERIC)
+    if(config.loop < LOOP_ROWS || config.loop > LOOP_TAP_TILED)
     {
         return std::nullopt;
     }
     const bool cf = config.layout == LAYOUT_CHANNELS_FIRST;
     const bool tr = config.layout == LAYOUT_CHANNELS_LAST_TR;
     const bool cl = config.layout == LAYOUT_CHANNELS_LAST || tr;
-    if(generic)
+    if(generic || (nativeGeneric && !problem.channelsFirst && !problem.channelsLast))
     {
-        // The generic loop reads through the strides: channel vectors (layout 1) exactly where
-        // they load whole, elements (layout 0) everywhere else.
+        // The buffer generic uses channel vectors where they load whole, scalar elements
+        // elsewhere. Native scalar gathers use that same layout choice for strided operands.
         if(tr || cl != problem.vectorChannels)
         {
             return std::nullopt;
@@ -894,14 +1090,59 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
+    // Runtime matrix configs use native gfx1250 atoms and scalar gathers. Keep their tile
+    // arithmetic and register footprint bounded.
+    if(nativeGeneric || tapTiled)
+    {
+        if(!gfx1250 || config.atom.compare(0, 8, "wmma125_") != 0 || tr || config.vec != 1
+           || config.fr != 0 || config.s != 0 || config.sw != 0 || config.dw != 0 || config.bk > 128
+           || config.bc > 128 || config.bq > 256 || config.wk > 8 || config.wc > 8
+           || config.xcd != 0 || config.align != 0 || config.ns != 0
+           || (config.dws != 1 && config.dws != 2))
+        {
+            return std::nullopt;
+        }
+    }
+    if(smallk
+       && (!gfx1250 || config.layout != LAYOUT_CHANNELS_LAST || kg > 4 || config.bk != 4
+           || config.tk != 4 || config.tc != 1
+           || (config.bc != 64 && config.bc != 128 && config.bc != 256)
+           || (config.bq != 64 && config.bq != 128 && config.bq != 256) || config.vec != 1
+           || config.wk != 0 || config.wc != 0 || config.fr != 0 || config.s != 0 || config.sw != 0
+           || config.dw != 0 || config.xcd != 0 || config.align != 0 || config.ns != 0
+           || config.wq != 0 || config.dws != 1))
+    {
+        return std::nullopt;
+    }
+    // A separate complete FP32-output kernel: no matrix atom, vector assumptions, direct
+    // epilogue, or specialized-filter knobs. Every thread owns one (k,c) FP64 accumulator.
+    // The FP64 path is qualified only on gfx1250; FMA's broad atom gate is not its contract.
+    if(accurate
+       && (!gfx1250 || element != "f32" || eb != 4 || tr || (config.bk != 8 && config.bk != 16)
+           || (config.bc != 8 && config.bc != 16) || (config.bq != 32 && config.bq != 64)
+           || config.tk != 1 || config.tc != 1 || config.vec != 1 || config.wk != 0
+           || config.wc != 0 || config.fr != 0 || config.s != 0 || config.sw != 0 || config.dw != 0
+           || config.xcd != 0 || config.align != 0 || config.ns != 0 || config.wq != 0
+           || config.dws != 0))
+    {
+        return std::nullopt;
+    }
     // The vector and the tile: 16 bytes, or (FMA output rows) one element.
-    if((config.vec * eb != 16 && (config.loop != LOOP_ROWS_FMA || config.vec != 1)) || config.bk < 1
-       || config.bc < 1 || config.bq < 1)
+    if((config.vec * eb != 16 && ((config.loop != LOOP_ROWS_FMA && !runtime) || config.vec != 1))
+       || config.bk < 1 || config.bc < 1 || config.bq < 1)
     {
         return std::nullopt;
     }
     int64_t threads = 0;
-    if(fma)
+    if(accurate)
+    {
+        threads = config.bk * config.bc;
+    }
+    else if(smallk)
+    {
+        threads = config.bc;
+    }
+    else if(fma)
     {
         // Thread tiles of whole channel quads dividing the tile (so bk and bc are quads too).
         if(config.wk != 0 || config.wc != 0 || config.tk < 4 || config.tc < 4 || config.tk % 4 != 0
@@ -926,6 +1167,15 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         }
         threads = config.wk * config.wc * info->wave;
     }
+    if(tapTiled)
+    {
+        const int64_t qlanes = std::min(config.bq, threads);
+        if(threads % config.bk != 0 || threads % config.bc != 0 || threads % qlanes != 0
+           || config.bq % qlanes != 0)
+        {
+            return std::nullopt;
+        }
+    }
     // waves_q: loop 5's items side by side, the 8 waves split wk x wc x wq; 0 elsewhere.
     if(direct ? ((config.wq != 1 && config.wq != 2 && config.wq != 4)
                  || config.wk * config.wc * config.wq != 8)
@@ -934,18 +1184,22 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         return std::nullopt;
     }
     // The direct dw store: compiled in or not; loop 5 writes partials only.
-    if((config.dws != 0 && config.dws != 1) || (direct && config.dws != 0))
+    if(config.dws < 0 || config.dws > 2 || (direct && config.dws != 0)
+       || (config.dws == 2
+           && (!tapTiled || !cf || problem.filterChannelsLast || config.atom != "wmma125_f16"
+               || config.bk != 64 || config.bc != 64 || config.bq != 32 || config.wk != 2
+               || config.wc != 2)))
     {
         return std::nullopt;
     }
     // Block-based buffers: exactly the graphs whose image is past the 32-bit buffer range (the
     // parse admits those channels-first only), on the K3Tiles loops, with a block's bk dy and
     // bc x channel planes within it.
-    if(config.pb != 0 && config.pb != 1)
+    if((config.pb != 0 && config.pb != 1) || (runtime && config.pb != 0))
     {
         return std::nullopt;
     }
-    if(problem.largeImage != (config.pb == 1))
+    if(!runtime && problem.largeImage != (config.pb == 1))
     {
         return std::nullopt;
     }
@@ -1006,8 +1260,11 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
             return std::nullopt;
         }
         // Widely dilated small filters (ASPP-class: at most 9 taps, dilation 6 or more on a
-        // filter axis): each tap gathers a far-apart window and the BLAS path won on every arch
-        // measured, so the generic loop only adds candidates there.
+        // filter axis): each tap gathers a far-apart window. Measured against the BLAS path on
+        // deeplab 3x3 d12-d36 and SSD's fp32 3x3 d6 (best generic config against best BLAS):
+        // gfx1101 0.9-12x (fp32 FMA form 1.3-2.2x) and gfx1201 16-bit 0.8-3.3x (geomean 1.5x)
+        // serve them; gfx1201's FMA form (0.4-0.7x), gfx942 (geomean 0.64x) and gfx90a (0.73x)
+        // leave them to BLAS, as does every architecture not measured.
         int64_t dilation = 1;
         for(int axis = 0; axis < CONV_NAIVE_SPATIAL_DIMS; ++axis)
         {
@@ -1016,33 +1273,56 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
                 dilation = std::max<int64_t>(dilation, a.dilation[axis]);
             }
         }
-        if(problem.taps <= GENERIC_SPARSE_MAX_TAPS && dilation >= GENERIC_SPARSE_MIN_DILATION)
+        const auto baseArch = hipdnn_plugin_sdk::stripArchFeatures(arch);
+        const bool servesSparse
+            = baseArch.rfind("gfx11", 0) == 0 || (baseArch.rfind("gfx120", 0) == 0 && !genericFma);
+        if(problem.taps <= GENERIC_SPARSE_MAX_TAPS && dilation >= GENERIC_SPARSE_MIN_DILATION
+           && !servesSparse)
         {
             return std::nullopt;
         }
-        // The FMA form leaves stems (few input channels a group: the channel tile mostly
-        // empty) and patchify-class width strides (no reuse between a chunk's taps) to BLAS,
-        // which won both on gfx1201 (AlexNet 11x11 s4 c3, ViT 4x4 s4 c3, wav2vec k10 s5).
-        if(genericFma && (cg < GENERIC_FMA_MIN_CHANNELS || a.stride[2] >= GENERIC_FMA_MAX_STRIDE))
+        // Narrow groups (depthwise, ResNeXt-class): a group's GEMM fills a sliver of the block's
+        // channel tile and every group rereads each tap's gather. On gfx1101 it ran 14-20x
+        // behind CONV_GROUP_WRW at 4 channels a group and 30-5000x behind the vector-ALU engines
+        // on depthwise layers (CONV_DEPTHWISE_VALU_WRW, CONV_GROUP_VALU_WRW serve both).
+        if(a.groups > 1 && cg < GENERIC_MIN_GROUP_CHANNELS && kg < GENERIC_MIN_GROUP_CHANNELS)
+        {
+            return std::nullopt;
+        }
+        // Stems (few input channels a group: the channel tile mostly empty) and output rows of a
+        // few positions (a step's chunk mostly empty) go to BLAS. Measured against it: ViT,
+        // ConvNeXt and R(2+1)D stems (3 channels) 2.5-30x behind on gfx1101, 4.2-7.9x on
+        // gfx1201 (FMA form); Inception's 5x5 over a 5x5 map (one position a row) 5-25x behind
+        // on gfx1101. The flattened-position form (flat 1) fills its steps across rows, so it
+        // keeps narrow rows.
+        if(cg < GENERIC_MIN_CHANNELS
+           || (config.flat == 0 && a.outSpatial[2] < GENERIC_MIN_OUTPUT_WIDTH))
+        {
+            return std::nullopt;
+        }
+        // The FMA form also leaves patchify-class width strides (no reuse between a chunk's
+        // taps) to BLAS, which won on gfx1201 (AlexNet 11x11 s4, wav2vec k10 s5).
+        if(genericFma && a.stride[2] >= GENERIC_FMA_MAX_STRIDE)
         {
             return std::nullopt;
         }
     }
     // Every other loop: the filter width, its stride and dilation are compile-time.
-    else if(config.s != a.filter[2] || config.sw != a.stride[2] || config.dw != a.dilation[2]
-            || config.fr < 1)
+    else if(!runtime
+            && (config.s != a.filter[2] || config.sw != a.stride[2] || config.dw != a.dilation[2]
+                || config.fr < 1))
     {
         return std::nullopt;
     }
     // (The generic loop's channel vectors are the problem's vectorChannels, gated above.)
-    if(!generic && cf)
+    if(!generic && !runtime && cf)
     {
         if(config.bq % config.vec != 0 || (!fma && config.vec % config.sw != 0))
         {
             return std::nullopt;
         }
     }
-    else if(!generic
+    else if(!generic && !runtime
             && ((kg % config.vec != 0 && config.align != 2) || (cg % config.vec != 0 && !smallc)))
     {
         return std::nullopt;
@@ -1074,7 +1354,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     // loop 1) height stride sh > 1 at unit height dilation, phases of ceil(fr / sh) rows.
     const bool phased = config.loop == LOOP_RING && a.stride[1] > 1 && a.dilation[1] == 1
                         && config.fr == divUp(a.filter[1], a.stride[1]);
-    if(!rows && !phased && (a.stride[1] != 1 || config.fr != a.filter[1]))
+    if(!runtime && !rows && !phased && (a.stride[1] != 1 || config.fr != a.filter[1]))
     {
         return std::nullopt;
     }
@@ -1122,7 +1402,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
-    if(fma && !generic && cf
+    if(fma && !generic && !runtime && cf
        && (a.inSpatial[2] % config.vec != 0 || a.outSpatial[2] % config.vec != 0))
     {
         return std::nullopt;
@@ -1156,7 +1436,10 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     // The block, its load passes and its LDS.
     if(threads > MAX_BLOCK
        || loadPassesOf(config, eb, info->wave) > (packed || generic ? MAX_PACK_PASSES : MAX_PASSES)
-       || ldsBytesOf(config, eb) > ldsLimitOf(arch))
+       || ldsBytesOf(config, eb) > static_cast<int64_t>(
+              gfx1250 && device.sharedMemPerBlock > 0
+                  ? std::min(static_cast<size_t>(ldsLimitOf(arch)), device.sharedMemPerBlock)
+                  : static_cast<size_t>(ldsLimitOf(arch))))
     {
         return std::nullopt;
     }
@@ -1180,7 +1463,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         xImage = problem.xSpan;
         yImage = problem.ySpan;
     }
-    if(!generic && cf && (xImage < config.vec || yImage < config.vec))
+    if(!generic && !runtime && cf && (xImage < config.vec || yImage < config.vec))
     {
         return std::nullopt;
     }
@@ -1189,7 +1472,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     // x and dy each one buffer, and the positions within 32 bits.
     if(config.flat != 0
        && (config.flat != 1 || !generic || config.dw != 0 || config.pb != 0
-           || a.outSpatial[2] >= config.bq || positions > INT_LIMIT - config.bq
+           || a.outSpatial[2] >= config.bq || flatPositions > INT_LIMIT - config.bq
            || xTensor > INT_LIMIT / eb || yTensor > INT_LIMIT / eb))
     {
         return std::nullopt;
@@ -1229,7 +1512,31 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     int64_t stepsPerSplit = 0;
     std::optional<int64_t> steps;
     DirectPlan plan;
-    if(direct)
+    if(runtime)
+    {
+        const auto columns = pack_features::checkedProduct({problem.taps, cg});
+        if(!columns.has_value())
+        {
+            return std::nullopt;
+        }
+        const auto tiles
+            = tapTiled
+                  ? pack_features::checkedProduct(
+                        {a.groups, divUp(*columns, config.bc), divUp(kg, config.bk)})
+                  : pack_features::checkedProduct({a.groups,
+                                                   problem.taps,
+                                                   divUp(cg, config.bc),
+                                                   smallk ? int64_t{1} : divUp(kg, config.bk)});
+        const auto positions = pack_features::checkedProduct(
+            {a.n, a.outSpatial[0], a.outSpatial[1], a.outSpatial[2]});
+        if(!tiles.has_value() || !positions.has_value())
+        {
+            return std::nullopt;
+        }
+        gridX = *tiles;
+        steps = divUp(*positions, config.bq);
+    }
+    else if(direct)
     {
         // Loop 5: a persistent grid over (tile, item) units; steps are a tile's items and
         // stepsPerSplit the items (walk 0) or units (walk 1) of a piece.
@@ -1301,7 +1608,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         else if(generic && config.flat != 0)
         {
             chunks = 1;
-            steps = divUp(positions, config.bq);
+            steps = divUp(flatPositions, config.bq);
         }
         else if(rows)
         {
@@ -1323,35 +1630,54 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     }
     if(!direct)
     {
-        const int64_t wanted
-            = splitsWanted(gridX * gridY, config.bpu, *steps, *partialElems, units);
+        const int64_t wanted = splitsWanted(gridX * gridY,
+                                            config.bpu,
+                                            *steps,
+                                            *partialElems,
+                                            units,
+                                            accurate ? sizeof(double) : sizeof(float));
         stepsPerSplit = divUp(*steps, wanted);
         splits = divUp(*steps, stepsPerSplit);
         gridZ = splits;
     }
-    const auto workspace
-        = pack_features::checkedProduct({splits, *partialElems, int64_t{sizeof(float)}});
+    // Channels-first filters also have contiguous taps when the channel axis has extent one.
+    // Direct stores do not allocate partials or launch the reducer.
+    const bool dwStore
+        = splits == 1 && !problem.folded
+          && (config.dws == 2
+              || (config.dws == 1 && (problem.filterChannelsLast || problem.taps == 1 || cg == 1)));
+    const auto workspace = pack_features::checkedProduct(
+        {splits, *partialElems, accurate ? int64_t{sizeof(double)} : int64_t{sizeof(float)}});
     const int64_t quads = a.groups * problem.taps * kg * divUp(cg, 4);
     // K C T R S filters of several taps at few splits: tile blocks, which write each output
     // channel's run of channels by every tap contiguously (reduceTileFor). With more splits, K T
     // R S C or one tap (channels already contiguous), the quad blocks.
-    const ReduceTile reduceTile
-        = problem.filterChannelsLast || problem.taps < 2 || splits > K3_REDUCE_TILE_MAX_SPLITS
-              ? ReduceTile{}
-              : reduceTileFor(a.groups, kg, cg, problem.taps, units);
+    const ReduceTile reduceTile = accurate || dwStore || problem.filterChannelsLast
+                                          || problem.taps < 2 || splits > K3_REDUCE_TILE_MAX_SPLITS
+                                      ? ReduceTile{}
+                                      : reduceTileFor(a.groups, kg, cg, problem.taps, units);
     // gfx950 at one split: the row reduce (one output channel's run of 64 channels a block)
     // measured 3-4 us ahead of the tile reduce in the call (StyleGAN2 c512 8^2 n2, R(2+1)D c512).
     const bool reduceRows = reduceTile.blocks > 0 && splits == 1
                             && problem.taps <= K3_REDUCE_ROW_MAX_TAPS
                             && hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) == "gfx950";
-    int64_t reduceGrid
-        = reduceTile.blocks > 0 ? reduceTile.blocks : divUp(quads, REDUCE_QUADS_PER_BLOCK);
+    int64_t reduceGrid = divUp(quads, REDUCE_QUADS_PER_BLOCK);
+    if(accurate)
+    {
+        reduceGrid = divUp(*partialElems, 256);
+    }
+    else if(reduceTile.blocks > 0)
+    {
+        reduceGrid = reduceTile.blocks;
+    }
     if(reduceRows)
     {
         reduceGrid = a.groups * kg * divUp(cg, int64_t{K3_REDUCE_ROW_CHANNELS});
     }
-    if(splits > MAX_GRID_YZ || !workspace.has_value()
-       || (direct && *workspace > MAX_WORKSPACE_BYTES) || reduceGrid > INT_LIMIT
+    if(splits > MAX_GRID_YZ
+       || (!dwStore
+           && (!workspace.has_value() || ((direct || gfx1250) && *workspace > MAX_WORKSPACE_BYTES)
+               || reduceGrid > INT_LIMIT))
        || (config.xcd != 0 && gridX * gridY * gridZ > UINT_LIMIT))
     {
         return std::nullopt;
@@ -1364,11 +1690,8 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     launch.block = static_cast<unsigned int>(threads);
     launch.reduceGrid = static_cast<unsigned int>(reduceGrid);
     launch.kernelType = info->kernelType;
-    // One split into dw of contiguous channels (K T R S C, or one tap), on a config compiled
-    // with the direct store: the kernel writes dw in its element type and no reduce runs.
-    const bool dwStore
-        = config.dws == 1 && splits == 1 && (problem.filterChannelsLast || problem.taps == 1);
     launch.dwStore = dwStore;
+    launch.accurate = accurate;
     launch.workspaceBytes = dwStore ? 0 : static_cast<size_t>(*workspace);
     auto& k3 = launch.args;
     k3.n = static_cast<int>(a.n);
@@ -1397,12 +1720,12 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     k3.splits = static_cast<int>(splits);
     k3.steps = *steps;
     k3.stepsPerSplit = stepsPerSplit;
-    k3.trackLen = rows || direct ? 0 : static_cast<int>(trackLen);
-    k3.trackLong = rows || direct ? 0 : static_cast<int>(trackLong);
+    k3.trackLen = rows || direct || runtime ? 0 : static_cast<int>(trackLen);
+    k3.trackLong = rows || direct || runtime ? 0 : static_cast<int>(trackLong);
     k3.segs = direct ? static_cast<int>(plan.segs) : static_cast<int>(packWidth);
     k3.segRows = direct ? static_cast<int>(plan.segRows) : static_cast<int>(packRows);
     k3.walk = direct ? static_cast<int>(plan.walk) : 0;
-    if(generic)
+    if(generic || nativeGeneric)
     {
         // The graph's own strides (packed or not).
         std::copy(std::begin(a.xStrides), std::end(a.xStrides), std::begin(k3.xs));
@@ -1450,7 +1773,32 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     r.tileC = static_cast<int>(reduceTile.tileC);
     r.tilesK = static_cast<int>(reduceTile.tilesK);
     r.tilesC = static_cast<int>(reduceTile.tilesC);
+    // Many splits into few quads: the deep reduce (the same sum, more loads in flight, smaller
+    // blocks), where the quad reduce's grid leaves most units idle and waits on load latency.
+    if(!dwStore && !accurate && r.tile == 0 && splits >= K3_REDUCE_DEEP_MIN_SPLITS
+       && K3_REDUCE_DEEP_UNIT_SHARE * divUp(quads, REDUCE_QUADS_PER_BLOCK) <= units)
+    {
+        const int64_t perBlock = deepReduceQuads(quads, units);
+        if(divUp(quads, perBlock) <= INT_LIMIT)
+        {
+            r.tile = 3;
+            r.quads = static_cast<int>(perBlock);
+            launch.reduceGrid = static_cast<unsigned int>(divUp(quads, perBlock));
+            launch.reduceBlock = static_cast<unsigned int>(4 * perBlock);
+        }
+    }
     return launch;
+}
+
+int64_t deepReduceQuads(int64_t quads, int64_t dispatchUnits)
+{
+    // The largest block (64 quads) that still gives every unit two blocks, down to 16.
+    int64_t perBlock = K3_REDUCE_DEEP_MAX_QUADS;
+    while(perBlock > 16 && divUp(quads, perBlock) < 2 * std::max<int64_t>(dispatchUnits, 1))
+    {
+        perBlock /= 2;
+    }
+    return perBlock;
 }
 
 bool threeBf16Pays(const WrwProblem& problem, std::string_view gcnArchName)

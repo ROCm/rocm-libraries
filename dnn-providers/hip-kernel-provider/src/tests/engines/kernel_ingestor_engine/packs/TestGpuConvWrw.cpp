@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -308,13 +309,22 @@ struct DeviceCase
     bool noGfx906 = false;
     /// Served only where a few configs ship (block-based buffers): skipped where none does.
     bool someArchs = false;
-    /// Served by the generic loop alone, which ships on the matrix atoms of gfx908 to gfx950
-    /// and gfx12: skipped on gfx906 and gfx11.
+    /// Served by the generic loop alone, which ships on every matrix atom (gfx908 to gfx950,
+    /// gfx11 and gfx12): skipped on gfx906.
     bool genericOnly = false;
     /// x's element strides (the generic loop's strided operands); empty: packed. The default
     /// initializer lets the cases' aggregate initializations omit it without
     /// -Wmissing-field-initializers.
     std::vector<int64_t> xStrides{}; // NOLINT(readability-redundant-member-init)
+    /// Served on gfx908 in 16-bit too (bf16 on its half-rate atoms): output channels that are
+    /// not whole vectors, the small-C rows and the generic loop.
+    bool gfx908 = false;
+    /// Nonzero: exercise this native gfx1250 loop alone against the independent reference.
+    int64_t onlyLoop = 0;
+    bool dilationRows = false;
+    /// Targeted matrix family whose native catalog exists only for 16-bit operands.
+    bool sixteenBitOnly = false;
+    bool directChannelsFirstStore = false;
 };
 
 ConvShape conv(int64_t c,
@@ -359,6 +369,14 @@ std::vector<DeviceCase> deviceCases()
          conv(32, 3, {21, 45}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true)},
         {"Nhwc1x1FiveOutputChannels",
          conv(16, 5, {13, 37}, {1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, true, 1, 3)},
+        // HiFi-GAN's output layer: one output channel, 1x7, in both layouts.
+        {"OneD1x7OneOutputChannel", conv(32, 1, {300}, {7}, {3}, {3}, {1}, {1})},
+        {"OneD1x7OneOutputChannelNhwc", conv(32, 1, {300}, {7}, {3}, {3}, {1}, {1}, true)},
+        // 32-channel groups (ResNeXt) channels-last.
+        {"Grouped32Nhwc3x3", conv(64, 64, {7, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true, 2)},
+        // A 3-D VAE output layer (3 channels from many), channels-last.
+        {"ThreeDNhwc3x3x3ThreeOutputChannels",
+         conv(40, 3, {4, 7, 37}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, true)},
         {"ThreeDNhwc3x3x3",
          conv(16, 32, {4, 6, 40}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, true)},
         {"GroupedNchw3x3", conv(48, 32, {7, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, false, 2)},
@@ -379,6 +397,13 @@ std::vector<DeviceCase> deviceCases()
         {"OneD1x16Stride8", conv(32, 64, {203}, {16}, {4}, {4}, {8}, {1})},
         {"ThreeD2x2x2Stride2",
          conv(8, 16, {6, 8, 10}, {2, 2, 2}, {0, 0, 0}, {0, 0, 0}, {2, 2, 2}, {1, 1, 1})},
+        // Width strides dividing the filter width over widths they divide: also served as the
+        // width fold's stride-1 problem (HiFi-GAN's 1x16 stride 8, padding 4; patch-like 2x2
+        // stride 2 channels-last).
+        {"OneD1x16Stride8Fold", conv(32, 64, {256}, {16}, {4}, {4}, {8}, {1})},
+        {"OneD1x16Stride8FoldNhwc", conv(32, 64, {256}, {16}, {4}, {4}, {8}, {1}, true)},
+        {"Fold2x2Stride2Nhwc",
+         conv(16, 32, {12, 16}, {2, 2}, {0, 0}, {0, 0}, {2, 2}, {1, 1}, true)},
         {"Deeplab3x3Dilation36",
          conv(16, 16, {76, 76}, {3, 3}, {36, 36}, {36, 36}, {1, 1}, {36, 36}, false, 1, 1)},
         {"Wide1x11Dilation3", conv(16, 16, {3, 40}, {1, 11}, {0, 15}, {0, 15}, {1, 1}, {1, 3})},
@@ -442,6 +467,75 @@ std::vector<DeviceCase> deviceCases()
         {"PaddingPastTheFilter", conv(8, 16, {6, 9}, {3, 3}, {3, 4}, {3, 4}, {1, 1}, {1, 1})},
         {"ManySteps", conv(64, 96, {20, 70}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, false, 1, 4)},
     };
+    // Small-C window tiles: a partial BC8 tile, two tiles with a channel tail, and the
+    // Cg16 admission boundary, independently of batch and group count. Restrict the loop
+    // so a generic config cannot stand in for the native small-C numerical path.
+    for(const int64_t stride : {1, 2})
+    {
+        for(size_t variant = 0; variant < 3; ++variant)
+        {
+            constexpr std::array<int64_t, 3> CHANNELS{5, 9, 16};
+            constexpr std::array<int64_t, 3> OUTPUT_CHANNELS{17, 23, 31};
+            constexpr std::array<int64_t, 3> HEIGHTS{3, 11, 9};
+            constexpr std::array<int64_t, 3> WIDTHS{31, 65, 129};
+            const int64_t groups = static_cast<int64_t>(variant) + 1;
+            auto shape = conv(CHANNELS[variant] * groups,
+                              OUTPUT_CHANNELS[variant] * groups,
+                              {HEIGHTS[variant], WIDTHS[variant]},
+                              {3, 3},
+                              {1, 1},
+                              {1, 1},
+                              {stride, stride},
+                              {1, 1},
+                              false,
+                              groups,
+                              groups);
+            if(variant == 2)
+            {
+                shape.mode = ConvMode::CONVOLUTION;
+            }
+            // The short mixed-filter case has fewer than eight row-chunk steps:
+            // loop6 must write dw without partials, including at stride two.
+            DeviceCase deviceCase{"NativeSmallCStride" + std::to_string(stride) + "Cg"
+                                      + std::to_string(CHANNELS[variant]),
+                                  shape};
+            deviceCase.otherFilterLayout = variant == 0;
+            deviceCase.onlyLoop = 6;
+            deviceCase.sixteenBitOnly = true;
+            cases.push_back(std::move(deviceCase));
+        }
+    }
+
+    // Whole-vector and clamped vector loads, just below/at/above both new position tiles.
+    // Both layouts see each width, while per-group channels cross BK64/BC64 and retain tails.
+    for(const bool channelsLast : {false, true})
+    {
+        constexpr std::array<int64_t, 6> WIDTHS{127, 128, 129, 255, 256, 257};
+        constexpr std::array<int64_t, 3> CHANNELS{24, 72, 80};
+        constexpr std::array<int64_t, 3> OUTPUT_CHANNELS{40, 80, 72};
+        for(size_t variant = 0; variant < WIDTHS.size(); ++variant)
+        {
+            const size_t channelVariant = variant % CHANNELS.size();
+            const int64_t groups = static_cast<int64_t>(channelVariant) + 1;
+            const bool oneSplit = variant < 2;
+            DeviceCase deviceCase{"NativePointwiseRing"
+                                      + std::string(channelsLast ? "NhwcW" : "NchwW")
+                                      + std::to_string(WIDTHS[variant]),
+                                  conv(CHANNELS[channelVariant] * groups,
+                                       OUTPUT_CHANNELS[channelVariant] * groups,
+                                       {oneSplit ? 3 : 9, WIDTHS[variant]},
+                                       {1, 1},
+                                       {0, 0},
+                                       {0, 0},
+                                       {1, 1},
+                                       {1, 1},
+                                       channelsLast,
+                                       groups,
+                                       oneSplit ? 1 : 3)};
+            deviceCase.onlyLoop = 1;
+            cases.push_back(std::move(deviceCase));
+        }
+    }
     auto convolution = conv(16, 16, {7, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, false, 2);
     convolution.mode = ConvMode::CONVOLUTION;
     cases.push_back({"TrueConvolutionGrouped", convolution});
@@ -494,6 +588,16 @@ std::vector<DeviceCase> deviceCases()
     {
         cases.push_back({name, shape, false, false, true});
     }
+    // r(2+1)d's temporal 3x1x1, channels-first, input channels that are not whole vectors.
+    cases.push_back(
+        {"ThreeD3x1x1UnalignedChannels",
+         conv(46, 16, {4, 6, 7}, {3, 1, 1}, {1, 0, 0}, {1, 0, 0}, {1, 1, 1}, {1, 1, 1})});
+    // Inception's 5x5 channels-last (the gfx11 output rows; the generic loop elsewhere).
+    cases.push_back({"Inception5x5Nhwc",
+                     conv(16, 24, {11, 13}, {5, 5}, {2, 2}, {2, 2}, {1, 1}, {1, 1}, true),
+                     false,
+                     false,
+                     true});
     // Narrow outputs (packed rows where they ship, gfx950 / gfx12): several images' 7^2 rows,
     // stride 2 with and without padding (17-column rows: 3 a 64-position step, a partial last
     // group), 3-D, and a grouped true convolution.
@@ -552,6 +656,10 @@ std::vector<DeviceCase> deviceCases()
               cases.push_back(deviceCase);
           };
     generic("Generic5x5Nhwc", conv(24, 40, {13, 17}, {5, 5}, {2, 2}, {2, 2}, {1, 1}, {1, 1}, true));
+    // r(2+1)d's temporal 3x1x1 with input channels that are not whole vectors (230, 45): the
+    // generic loop's channels-last elements. (Channels-first: the specialized tier.)
+    generic("Generic3x1x1UnalignedChannelsNdhwc",
+            conv(46, 16, {4, 6, 7}, {3, 1, 1}, {1, 0, 0}, {1, 0, 0}, {1, 1, 1}, {1, 1, 1}, true));
     generic("Generic1x9Nhwc", conv(32, 64, {150}, {9}, {4}, {4}, {1}, {1}, true));
     // Dilated width taps (the shared window reads them at offsets of 2).
     generic("Generic1x5Dilation2Nhwc", conv(32, 32, {90}, {5}, {4}, {4}, {1}, {2}, true));
@@ -562,6 +670,32 @@ std::vector<DeviceCase> deviceCases()
             conv(16, 16, {40, 40}, {3, 3}, {3, 3}, {3, 3}, {1, 1}, {3, 3}, true, 1, 1));
     generic("Generic7x7Stride2Nhwc",
             conv(24, 24, {19, 23}, {7, 7}, {3, 3}, {3, 3}, {2, 2}, {1, 1}, true));
+    // Channels-first and channels-last geometries no specialized config has: 1-D 9 taps at
+    // stride 3 and dilation 2, 3-D 3x5x3 with mixed padding and dilation, a 4x4 stride-4
+    // patchify, and 3-D stride 2 dilation 2 channels-last.
+    generic("Generic1x9Stride3Dilation2Nchw", conv(24, 40, {100}, {9}, {4}, {4}, {3}, {2}));
+    generic("Generic3x5x3ThreeDNchw",
+            conv(16, 24, {5, 7, 9}, {3, 5, 3}, {1, 2, 1}, {1, 2, 1}, {1, 2, 1}, {1, 1, 2}));
+    generic("GenericPatchify4x4Stride4Nchw",
+            conv(16, 32, {16, 20}, {4, 4}, {0, 0}, {0, 0}, {4, 4}, {1, 1}));
+    generic("Generic3x3x3Stride2Dilation2Ndhwc",
+            conv(16, 32, {7, 9, 11}, {3, 3, 3}, {2, 2, 2}, {2, 2, 2}, {2, 2, 2}, {2, 2, 2}, true));
+    // ASPP-class dilations no specialized config has (3x3 d18 and d30, 1x3 d12), in both layouts:
+    // the generic loop serves them on gfx11 and on gfx12's matrix atoms (elsewhere it declines
+    // them for BLAS).
+    const auto aspp = [&](const std::string& name, const ConvShape& shape) {
+        DeviceCase deviceCase{name, shape};
+        deviceCase.genericOnly = true;
+        deviceCase.someArchs = true;
+        cases.push_back(deviceCase);
+    };
+    aspp("GenericDilation18Nhwc",
+         conv(16, 24, {40, 44}, {3, 3}, {18, 18}, {18, 18}, {1, 1}, {18, 18}, true));
+    aspp("GenericDilation18Nchw",
+         conv(16, 24, {40, 44}, {3, 3}, {18, 18}, {18, 18}, {1, 1}, {18, 18}));
+    aspp("GenericDilation30PartialTilesNchw",
+         conv(24, 40, {65, 65}, {3, 3}, {30, 30}, {30, 30}, {1, 1}, {30, 30}, false, 1, 1));
+    aspp("GenericOneD1x3Dilation12Nhwc", conv(32, 48, {130}, {3}, {12}, {12}, {1}, {12}, true));
     // 24 channels of 10 x 12, rows 16 apart (channels-first elements).
     generic("GenericPaddedRowsNchw",
             conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}),
@@ -580,10 +714,91 @@ std::vector<DeviceCase> deviceCases()
         largeCl.someArchs = true;
         cases.push_back(largeCl);
     }
+    // Three channels-last images of 4096 x 320^2 (2.5 GiB in 16-bit, 5 GiB in fp32): the
+    // tensor is past 2 GiB, each image within it, so every config reads its image through a
+    // 64-bit base. 1x1 stride 4 keeps the CPU reference short.
+    {
+        DeviceCase largeBatch{
+            "LargeBatchGenericNhwc",
+            conv(4096, 8, {320, 320}, {1, 1}, {0, 0}, {0, 0}, {4, 4}, {1, 1}, true, 1, 3)};
+        largeBatch.someArchs = true;
+        cases.push_back(largeBatch);
+    }
     // Positions 26 apart: not whole vectors, channels-last elements.
     generic("GenericPaddedChannelsNhwcElements",
             conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true),
             {int64_t{10} * 12 * 26, 1, int64_t{12} * 26, 26});
+    for(auto& deviceCase : cases)
+    {
+        static const std::set<std::string> s_onGfx908{"Nhwc3x3ThreeOutputChannels",
+                                                      "Nhwc1x1FiveOutputChannels",
+                                                      "ThreeDNhwc3x3x3ThreeOutputChannels",
+                                                      "Stem7x7Stride2",
+                                                      "Stem7x7Stride2K64",
+                                                      "Stem3x3Stride1C5",
+                                                      "Stem3x3Stride2ThreeD",
+                                                      "Stem7x7Stride2Nhwc",
+                                                      "Stem3x3Stride2NhwcOneChannel",
+                                                      "Stem3x3Stride1C5Nhwc",
+                                                      "Stem3x3Stride2ThreeDNhwc"};
+        deviceCase.gfx908 = deviceCase.genericOnly || s_onGfx908.count(deviceCase.name) != 0;
+    }
+    const auto nativeCase = [&](std::string name, ConvShape shape, bool filterOther, int64_t loop) {
+        DeviceCase test{std::move(name), std::move(shape), filterOther};
+        test.onlyLoop = loop;
+        cases.push_back(std::move(test));
+    };
+    nativeCase(
+        "GenericThreeDGroupedTails",
+        conv(10, 14, {5, 9, 17}, {2, 4, 5}, {1, 4, 6}, {0, 1, 2}, {2, 3, 2}, {2, 2, 3}, false, 2),
+        true,
+        conv_wrw::LOOP_NATIVE_GENERIC);
+    nativeCase(
+        "GenericThreeDGroupedTailsNdhwc",
+        conv(10, 14, {5, 9, 17}, {2, 4, 5}, {1, 4, 6}, {0, 1, 2}, {2, 3, 2}, {2, 2, 3}, true, 2),
+        true,
+        conv_wrw::LOOP_NATIVE_GENERIC);
+    nativeCase("GenericWideStridedFilter",
+               conv(3, 5, {57}, {17}, {15}, {4}, {3}, {2}, false, 1, 3),
+               false,
+               conv_wrw::LOOP_NATIVE_GENERIC);
+    nativeCase("GenericMostlyPadding",
+               conv(1, 1, {1, 1}, {3, 3}, {9, 7}, {0, 0}, {1, 1}, {1, 1}),
+               false,
+               conv_wrw::LOOP_NATIVE_GENERIC);
+    auto genericConvolution = conv(5, 7, {17, 23}, {3, 3}, {6, 6}, {6, 6}, {1, 1}, {6, 6}, true);
+    genericConvolution.mode = ConvMode::CONVOLUTION;
+    nativeCase("GenericDilation6MixedLayoutConvolution",
+               genericConvolution,
+               true,
+               conv_wrw::LOOP_NATIVE_GENERIC);
+    auto genericThreeDConvolution
+        = conv(10, 14, {5, 9, 17}, {2, 4, 5}, {1, 4, 6}, {0, 1, 2}, {2, 3, 2}, {2, 2, 3}, true, 2);
+    genericThreeDConvolution.mode = ConvMode::CONVOLUTION;
+    nativeCase("GenericThreeDGroupedConvolution",
+               genericThreeDConvolution,
+               true,
+               conv_wrw::LOOP_NATIVE_GENERIC);
+    nativeCase("TapTiledPatchNhwc",
+               conv(3, 19, {35, 49}, {16, 16}, {2, 1}, {1, 3}, {16, 16}, {1, 1}, true, 1, 3),
+               false,
+               conv_wrw::LOOP_TAP_TILED);
+    auto tapTiledGrouped
+        = conv(10, 14, {5, 9, 17}, {2, 4, 5}, {1, 4, 6}, {0, 1, 2}, {2, 3, 2}, {2, 2, 3}, true, 2);
+    tapTiledGrouped.mode = ConvMode::CONVOLUTION;
+    nativeCase("TapTiledGroupedThreeDMixedFilter", tapTiledGrouped, true, conv_wrw::LOOP_TAP_TILED);
+    auto smallKGrouped = conv(
+        10, 6, {4, 7, 11}, {2, 3, 3}, {1, 2, 2}, {0, 1, 2}, {1, 2, 1}, {1, 1, 2}, true, 2, 3);
+    smallKGrouped.mode = ConvMode::CONVOLUTION;
+    nativeCase("SmallKGroupedThreeDMixedFilter", smallKGrouped, true, conv_wrw::LOOP_SMALL_K);
+    nativeCase("SmallKMostlyPaddingDirect",
+               conv(1, 1, {1}, {3}, {5}, {4}, {1}, {2}, true, 1, 1),
+               false,
+               conv_wrw::LOOP_SMALL_K);
+    nativeCase("SmallKPointwiseChannelTail",
+               conv(129, 4, {3, 19}, {1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, true, 1, 3),
+               false,
+               conv_wrw::LOOP_SMALL_K);
     return cases;
 }
 
@@ -611,7 +826,7 @@ int ldsOfCompiled(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
         throw std::runtime_error("the program did not compile");
     }
     int bytes = -1;
-    const auto function = program->getKernel("ConvWrw");
+    const auto function = program->getKernel(kernel.source.entryPoint);
     if(hipFuncGetAttribute(&bytes, HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, function) != hipSuccess)
     {
         throw std::runtime_error("hipFuncGetAttribute failed");
@@ -625,6 +840,10 @@ int ldsOfCompiled(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
 bool expectServed(const std::string& arch, DataType dataType)
 {
     const auto base = std::string(hipdnn_plugin_sdk::stripArchFeatures(arch));
+    if(base == "gfx1250")
+    {
+        return true;
+    }
     // gfx906: the FMA loops, every element type.
     if(base == "gfx90a" || base == "gfx942" || base == "gfx950" || base == "gfx906")
     {
@@ -743,9 +962,29 @@ void expectReduceIsFixedOrderSum(const conv_wrw::WrwLaunch& launch,
                     sum += group[2];
                     sum += group[3];
                     const TO want = static_cast<TO>(sum);
-                    // dw index: (g kg + k, c, taps in row-major order over dims 2..).
-                    const int64_t wtap = r.flip != 0 ? taps - 1 - tap : tap;
-                    int64_t offset = (g * kg + k) * dwStrides[0] + c * dwStrides[1];
+                    // dw index: (g kg + k, c, taps in row-major order over dims 2..). The width
+                    // fold's folded (channel j C + c, tap (outer, tau)) is the graph's channel c
+                    // and width tap (tau - pre) s + j + pad, absent outside the filter.
+                    int64_t dwc = c;
+                    int64_t dwtapIndex = tap;
+                    bool flip = r.flip != 0;
+                    int64_t dwTaps = taps;
+                    if(launch.fold)
+                    {
+                        const auto& f = launch.reduceFold;
+                        const int64_t j = c / f.c;
+                        const int64_t t = (tap % f.fw - f.pre) * f.s + j + f.pad;
+                        if(t < 0 || t >= f.filterW)
+                        {
+                            continue;
+                        }
+                        dwc = c - j * f.c;
+                        dwtapIndex = tap / f.fw * f.filterW + t;
+                        flip = f.flip != 0;
+                        dwTaps = static_cast<int64_t>(f.outer) * f.filterW;
+                    }
+                    const int64_t wtap = flip ? dwTaps - 1 - dwtapIndex : dwtapIndex;
+                    int64_t offset = (g * kg + k) * dwStrides[0] + dwc * dwStrides[1];
                     int64_t rest = wtap;
                     for(size_t axis = dwDims.size() - 1; axis >= 2; --axis)
                     {
@@ -775,6 +1014,14 @@ void expectReduceIsFixedOrderSum(const conv_wrw::WrwLaunch& launch,
     {
         reduce = "rows";
     }
+    else if(r.tile == 3)
+    {
+        reduce = "deep";
+    }
+    else if(r.tile == 4)
+    {
+        reduce = "fold";
+    }
     EXPECT_EQ(mismatches, 0) << "of " << count << " dw elements (reduce " << reduce << ")";
 }
 
@@ -799,6 +1046,18 @@ void runCase(const DeviceCase& deviceCase,
         spec.x.strides = deviceCase.xStrides;
     }
     const auto device = currentDeviceProperties();
+    if((deviceCase.onlyLoop != 0
+        && hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) != "gfx1250")
+       || (deviceCase.sixteenBitOnly && shape.dataType == DataType::FLOAT))
+    {
+        GTEST_SKIP() << "targeted native WRW family requires gfx1250 and its supported dtype";
+    }
+    if(deviceCase.dilationRows
+       && (dataTypeOf<T>() != DataType::HALF
+           || hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) != "gfx1250"))
+    {
+        GTEST_SKIP() << "measured dilation rows require native gfx1250 HALF";
+    }
     const GraphFixture fixture(buildGraph(spec), device);
     const auto bound = matchesGraph(PACK, fixture.context());
     ASSERT_TRUE(bound.has_value()) << "the engine refused a case it should serve";
@@ -820,6 +1079,17 @@ void runCase(const DeviceCase& deviceCase,
     if(infinities)
     {
         plantInfinities(x);
+    }
+    std::optional<Tensor<T>> alternateX;
+    std::optional<Tensor<T>> alternateY;
+    std::optional<Tensor<double>> unroundedReference;
+    const bool independentRevisions
+        = deviceCase.dilationRows || deviceCase.directChannelsFirstStore;
+    if(independentRevisions)
+    {
+        alternateX.emplace(spec.x.dims, spec.x.strides);
+        alternateY.emplace(spec.y.dims, spec.y.strides);
+        unroundedReference.emplace(spec.w.dims, spec.w.strides);
     }
 
     Tensor<T> reference(spec.w.dims, spec.w.strides);
@@ -858,6 +1128,32 @@ void runCase(const DeviceCase& deviceCase,
         {
             continue;
         }
+        // Loop 10 has its own strict numerical suite below, never the legacy scaled bound.
+        if(configOf(kernel).loop == conv_wrw::LOOP_ACCURATE)
+        {
+            continue;
+        }
+        if(deviceCase.onlyLoop != 0 && configOf(kernel).loop != deviceCase.onlyLoop)
+        {
+            continue;
+        }
+        if(deviceCase.dilationRows)
+        {
+            const auto candidate = configOf(kernel);
+            if(candidate.loop != conv_wrw::LOOP_ROWS || candidate.atom != "wmma125_f16"
+               || candidate.layout != 0 || candidate.bk != 64 || candidate.bc != 64
+               || (candidate.bq != 32 && candidate.bq != 128) || candidate.wk != 2
+               || candidate.wc != 2 || candidate.bpu != 2 || candidate.fr != 1 || candidate.s != 3
+               || candidate.sw != 1 || candidate.dw != 24 || candidate.vec != 8
+               || candidate.dws != 1)
+            {
+                continue;
+            }
+        }
+        if(deviceCase.directChannelsFirstStore && configOf(kernel).dws != 2)
+        {
+            continue;
+        }
         // Known open parity item: gfx950's direct loop (5) turns an infinity in x into
         // NaN in other dw elements (0 x inf from positions outside the window), on 16-bit graphs
         // too; left out of the infinity runs until that is fixed.
@@ -871,6 +1167,14 @@ void runCase(const DeviceCase& deviceCase,
         ASSERT_NE(prepared, nullptr);
         const size_t workspaceBytes = handler.workspaceBytes(fixture.context(), *bound, kernel);
         const auto config = configOf(kernel);
+        if(deviceCase.directChannelsFirstStore)
+        {
+            const auto problem = conv_wrw::parseWrwProblem(fixture.context());
+            ASSERT_TRUE(problem.has_value());
+            const auto launch = conv_wrw::wrwLaunchFor(*problem, config, device);
+            ASSERT_TRUE(launch.has_value());
+            EXPECT_EQ(workspaceBytes == 0, launch->args.splits == 1);
+        }
         // No workspace: the kernel writes dw itself (never loop 5).
         if(workspaceBytes == 0)
         {
@@ -907,67 +1211,139 @@ void runCase(const DeviceCase& deviceCase,
             // Stale partials must not leak into the result.
             ASSERT_EQ(hipMemset(workspace, 0x7f, workspaceBytes), hipSuccess);
         }
-        w.fillWithSentinelValue();
-        const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
-            hipdnnPluginDeviceBuffer_t{X_UID, x.rawDeviceData()},
-            hipdnnPluginDeviceBuffer_t{W_UID, w.rawDeviceData()},
-            hipdnnPluginDeviceBuffer_t{Y_UID, y.rawDeviceData()}};
         const Handle handle;
-        handler.launch(
-            handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
-        ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
-        // Deterministic: a second launch gives the same bits (the UED's RFC 0025 claim).
-        EXPECT_TRUE(conv_determinism_test::relaunchReproducesOutput(
-            [&] {
-                handler.launch(handle,
-                               *prepared,
-                               buffers.data(),
-                               static_cast<uint32_t>(buffers.size()),
-                               workspace);
-            },
-            handle.getStream(),
-            w,
-            workspace,
-            workspaceBytes));
+        const int revisions = independentRevisions ? 3 : 1;
+        for(int revision = 0; revision < revisions; ++revision)
+        {
+            SCOPED_TRACE(revision);
+            // Revision one rebinds fresh allocations; revision two mutates the original pair.
+            auto& currentX = revision == 1 ? *alternateX : x;
+            auto& currentY = revision == 1 ? *alternateY : y;
+            if(revision != 0)
+            {
+                currentX.fillTensorWithRandomValues(
+                    -1.0f, 1.0f, SEED + 2U * static_cast<unsigned>(revision));
+                currentY.fillTensorWithRandomValues(
+                    -1.0f, 1.0f, SEED + 2U * static_cast<unsigned>(revision) + 1U);
+                CpuFpReferenceConvolution::wgrad<T, T, T, double>(currentX,
+                                                                  reflect ? crossCorrelation
+                                                                          : reference,
+                                                                  currentY,
+                                                                  shape.stride,
+                                                                  shape.dilation,
+                                                                  shape.prePadding,
+                                                                  shape.postPadding);
+                if(reflect)
+                {
+                    reflectFilter(crossCorrelation, reference);
+                }
+            }
+            if(independentRevisions)
+            {
+                CpuFpReferenceConvolution::wgrad<T, double, T, double>(currentX,
+                                                                       *unroundedReference,
+                                                                       currentY,
+                                                                       shape.stride,
+                                                                       shape.dilation,
+                                                                       shape.prePadding,
+                                                                       shape.postPadding);
+            }
+            if(workspace != nullptr)
+            {
+                ASSERT_EQ(hipMemset(workspace, 0x7f, workspaceBytes), hipSuccess);
+            }
+            w.fillWithSentinelValue();
+            const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
+                hipdnnPluginDeviceBuffer_t{X_UID, currentX.rawDeviceData()},
+                hipdnnPluginDeviceBuffer_t{W_UID, w.rawDeviceData()},
+                hipdnnPluginDeviceBuffer_t{Y_UID, currentY.rawDeviceData()}};
+            handler.launch(handle,
+                           *prepared,
+                           buffers.data(),
+                           static_cast<uint32_t>(buffers.size()),
+                           workspace);
+            ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
+            // Deterministic: a second launch gives the same bits (the UED's RFC 0025 claim).
+            EXPECT_TRUE(conv_determinism_test::relaunchReproducesOutput(
+                [&] {
+                    handler.launch(handle,
+                                   *prepared,
+                                   buffers.data(),
+                                   static_cast<uint32_t>(buffers.size()),
+                                   workspace);
+                },
+                handle.getStream(),
+                w,
+                workspace,
+                workspaceBytes));
+            if(workspace != nullptr)
+            {
+                // The partials of the last launch and its dw: the reduce's sum, bit for bit.
+                const auto problem = conv_wrw::parseWrwProblem(fixture.context());
+                ASSERT_TRUE(problem.has_value());
+                const auto launch = conv_wrw::wrwLaunchFor(*problem, config, device);
+                ASSERT_TRUE(launch.has_value());
+                if(!launch->dwStore)
+                {
+                    if(config.math == 1)
+                    {
+                        expectReduceIsFixedOrderSum<float>(
+                            *launch, workspace, w.rawDeviceData(), w.dims(), w.strides());
+                    }
+                    else
+                    {
+                        expectReduceIsFixedOrderSum<T>(
+                            *launch, workspace, w.rawDeviceData(), w.dims(), w.strides());
+                    }
+                }
+            }
+            w.markDeviceModified();
+
+            const auto* actual = static_cast<const T*>(w.rawHostData());
+            const auto* expected = static_cast<const T*>(reference.rawHostData());
+            const double* independent
+                = independentRevisions
+                      ? static_cast<const double*>(unroundedReference->rawHostData())
+                      : nullptr;
+            int64_t mismatches = 0;
+            forEachIndex(w.dims(), [&](const std::vector<int64_t>& index) {
+                const auto got = static_cast<float>(actual[offsetOf(index, w.strides())]);
+                const auto legacyWant
+                    = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+                const float legacyTolerance
+                    = accumulationBound
+                      + 2.0f * storageEpsilon<T>() * (std::fabs(legacyWant) + 1e-3f);
+                int64_t independentOffset = 0;
+                if(independentRevisions)
+                {
+                    for(size_t axis = 0; axis < index.size(); ++axis)
+                    {
+                        independentOffset
+                            += (reflect && axis >= 2 ? w.dims()[axis] - 1 - index[axis]
+                                                     : index[axis])
+                               * unroundedReference->strides()[axis];
+                    }
+                }
+                const double want = independentRevisions ? independent[independentOffset]
+                                                         : static_cast<double>(legacyWant);
+                const double tolerance = independentRevisions
+                                             ? 0.002 + 0.002 * std::fabs(want)
+                                             : static_cast<double>(legacyTolerance);
+                const bool passes = independentRevisions
+                                        ? std::fabs(static_cast<double>(got) - want) <= tolerance
+                                        : matches(got, legacyWant, legacyTolerance);
+                if(!passes && ++mismatches <= 5)
+                {
+                    ADD_FAILURE() << "at linear index " << offsetOf(index, w.strides()) << ": got "
+                                  << got << ", want " << want << ", tolerance " << tolerance;
+                }
+            });
+            EXPECT_EQ(mismatches, 0);
+        }
         if(workspace != nullptr)
         {
-            // The partials of the last launch and its dw: the reduce's sum, bit for bit.
-            const auto problem = conv_wrw::parseWrwProblem(fixture.context());
-            ASSERT_TRUE(problem.has_value());
-            const auto launch = conv_wrw::wrwLaunchFor(*problem, config, device);
-            ASSERT_TRUE(launch.has_value());
-            if(!launch->dwStore)
-            {
-                if(config.math == 1)
-                {
-                    expectReduceIsFixedOrderSum<float>(
-                        *launch, workspace, w.rawDeviceData(), w.dims(), w.strides());
-                }
-                else
-                {
-                    expectReduceIsFixedOrderSum<T>(
-                        *launch, workspace, w.rawDeviceData(), w.dims(), w.strides());
-                }
-            }
             ASSERT_EQ(hipFree(workspace), hipSuccess);
         }
-        w.markDeviceModified();
-
-        const auto* actual = static_cast<const T*>(w.rawHostData());
-        const auto* expected = static_cast<const T*>(reference.rawHostData());
-        int64_t mismatches = 0;
-        forEachIndex(w.dims(), [&](const std::vector<int64_t>& index) {
-            const auto got = static_cast<float>(actual[offsetOf(index, w.strides())]);
-            const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
-            const float tolerance
-                = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
-            if(!matches(got, want, tolerance) && ++mismatches <= 5)
-            {
-                ADD_FAILURE() << "at linear index " << offsetOf(index, w.strides()) << ": got "
-                              << got << ", want " << want << ", tolerance " << tolerance;
-            }
-        });
-        EXPECT_EQ(mismatches, 0);
     }
     // Three-bf16 is admitted only where it measured faster (threeBf16Pays).
     if(ran == 0 && math == Math::THREE_BF16)
@@ -981,15 +1357,15 @@ void runCase(const DeviceCase& deviceCase,
     const auto base = std::string(hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName));
     const bool gfx906 = base == "gfx906";
     const bool fmaOrFp32 = shape.dataType == DataType::FLOAT || gfx906;
-    if(ran == 0
+    const bool on908 = base == "gfx908" && shape.dataType != DataType::FLOAT && deviceCase.gfx908;
+    if(ran == 0 && !on908
        && (!expectServed(device.gcnArchName, shape.dataType)
            || (deviceCase.matrix16Only && fmaOrFp32) || (deviceCase.noGfx906 && gfx906)
-           || deviceCase.someArchs
-           || (deviceCase.genericOnly && (gfx906 || base.rfind("gfx11", 0) == 0))))
+           || deviceCase.someArchs || (deviceCase.genericOnly && gfx906)))
     {
         GTEST_SKIP() << "no catalog config for this case on " << device.gcnArchName;
     }
-    EXPECT_GE(ran, 1) << "no catalog config serves this case";
+    EXPECT_GE(ran, deviceCase.dilationRows ? 2 : 1) << "no catalog config serves this case";
     if(deviceCase.writesDw)
     {
         EXPECT_GE(wroteDw, 1) << "no config wrote dw itself";
@@ -1021,6 +1397,49 @@ TEST_P(TestGpuConvWrw, BFloat16)
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvWrw,
                          ::testing::ValuesIn(deviceCases()),
+                         [](const auto& info) { return info.param.name; });
+
+/// +inf and -inf in x on the generic loop's cases, every element type: each dw element an
+/// infinity reaches is that infinity (NaN where both meet), as the reference gives, whichever
+/// configs serve the case.
+class TestGpuConvWrwGenericInfinities : public ::testing::TestWithParam<DeviceCase>
+{
+};
+
+TEST_P(TestGpuConvWrwGenericInfinities, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(GetParam(), Math::NATIVE, true);
+}
+
+TEST_P(TestGpuConvWrwGenericInfinities, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<Half>(GetParam(), Math::NATIVE, true);
+}
+
+TEST_P(TestGpuConvWrwGenericInfinities, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(GetParam(), Math::NATIVE, true);
+}
+
+std::vector<DeviceCase> genericInfinityCases()
+{
+    std::vector<DeviceCase> cases;
+    for(const auto& deviceCase : deviceCases())
+    {
+        if(deviceCase.genericOnly)
+        {
+            cases.push_back(deviceCase);
+        }
+    }
+    return cases;
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvWrwGenericInfinities,
+                         ::testing::ValuesIn(genericInfinityCases()),
                          [](const auto& info) { return info.param.name; });
 
 /// gfx950's channels-last ring kept channels-last (loop 1, layout 2) at 128 x 128 tiles, a
@@ -1063,6 +1482,145 @@ void runWideTilesPartialChannels()
     deviceCase.someArchs = true;
     runCase<T>(deviceCase, Math::NATIVE, false, &kernels);
 }
+
+/// The deep quad reduce (ConvWrwReduceDeep): many splits into few quads (c8 k8 3x3: 144 quads,
+/// 16 a block), against the CPU reference and, bit for bit, the quad reduce's fixed-order sum.
+/// Up to four admitted configs whose launch takes it.
+template <typename T>
+void runDeepReduce()
+{
+    const DeviceCase deviceCase{
+        "DeepReduce", conv(8, 8, {16, 16}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, false, 1, 64)};
+    auto shape = deviceCase.shape;
+    shape.dataType = dataTypeOf<T>();
+    const auto spec = specFor(shape, ConvDirection::BACKWARD_WEIGHTS);
+    const auto device = currentDeviceProperties();
+    const GraphFixture fixture(buildGraph(spec), device);
+    const auto bound = matchesGraph(PACK, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    const auto problem = conv_wrw::parseWrwProblem(fixture.context());
+    ASSERT_TRUE(problem.has_value());
+    std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> kernels;
+    for(const auto& kernel : catalog())
+    {
+        if(kernels.size() >= 4 || !matchesKernel(PACK, fixture.context(), kernel, *bound)
+           || kernel.getIntMetadata("math") != 0)
+        {
+            continue;
+        }
+        const auto launch = conv_wrw::wrwLaunchFor(*problem, configOf(kernel), device);
+        if(launch.has_value() && !launch->dwStore && launch->reduce.tile == 3)
+        {
+            EXPECT_GE(launch->reduce.splits, K3_REDUCE_DEEP_MIN_SPLITS);
+            EXPECT_EQ(launch->reduceBlock, 4u * static_cast<unsigned int>(launch->reduce.quads));
+            kernels.push_back(kernel);
+        }
+    }
+    if(kernels.empty())
+    {
+        GTEST_SKIP() << "no config takes the deep reduce here on " << device.gcnArchName;
+    }
+    runCase<T>(deviceCase, Math::NATIVE, false, &kernels);
+}
+
+TEST(TestGpuConvWrwDeepReduce, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runDeepReduce<float>();
+}
+
+TEST(TestGpuConvWrwDeepReduce, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runDeepReduce<Half>();
+}
+
+TEST(TestGpuConvWrwDeepReduce, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runDeepReduce<BFloat16>();
+}
+
+/// The width fold (widthFoldOf): up to four admitted configs per case whose launch runs the
+/// folded stride-1 problem (staging channels-first x, the fold reduce writing dw), against the
+/// CPU reference and, bit for bit, the fixed-order sum of the folded partials. True convolution
+/// reflects the graph's taps.
+template <typename T>
+void runFold(const DeviceCase& deviceCase)
+{
+    auto shape = deviceCase.shape;
+    shape.dataType = dataTypeOf<T>();
+    const auto spec = specFor(shape, ConvDirection::BACKWARD_WEIGHTS);
+    const auto device = currentDeviceProperties();
+    const GraphFixture fixture(buildGraph(spec), device);
+    const auto bound = matchesGraph(PACK, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    const auto problem = conv_wrw::parseWrwProblem(fixture.context());
+    ASSERT_TRUE(problem.has_value());
+    ASSERT_TRUE(conv_wrw::widthFoldOf(*problem).has_value());
+    std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> kernels;
+    for(const auto& kernel : catalog())
+    {
+        if(kernels.size() >= 4 || !matchesKernel(PACK, fixture.context(), kernel, *bound)
+           || kernel.getIntMetadata("math") != 0)
+        {
+            continue;
+        }
+        const auto launch = conv_wrw::wrwLaunchFor(*problem, configOf(kernel), device);
+        if(launch.has_value() && launch->fold)
+        {
+            EXPECT_EQ(launch->reduce.tile, 4);
+            EXPECT_EQ(launch->foldStage, problem->channelsFirst);
+            kernels.push_back(kernel);
+        }
+    }
+    if(kernels.empty())
+    {
+        GTEST_SKIP() << "no config serves the fold here on " << device.gcnArchName;
+    }
+    runCase<T>(deviceCase, Math::NATIVE, false, &kernels);
+}
+
+std::vector<DeviceCase> foldCases()
+{
+    auto convolution = conv(16, 24, {64}, {4}, {1}, {1}, {2}, {1});
+    convolution.mode = ConvMode::CONVOLUTION;
+    return {{"OneD1x16Stride8", conv(32, 64, {256}, {16}, {4}, {4}, {8}, {1})},
+            {"OneD1x16Stride8Nhwc", conv(32, 64, {256}, {16}, {4}, {4}, {8}, {1}, true)},
+            {"TwoD2x2Stride2", conv(16, 32, {12, 16}, {2, 2}, {0, 0}, {0, 0}, {2, 2}, {1, 1})},
+            {"TwoD2x2Stride2Nhwc",
+             conv(16, 32, {12, 16}, {2, 2}, {0, 0}, {0, 0}, {2, 2}, {1, 1}, true)},
+            {"OneD1x4Stride2Convolution", convolution},
+            // A width the stride does not divide: the staged tail is zero.
+            {"OneD1x16Stride8RaggedWidth", conv(32, 64, {250}, {16}, {4}, {4}, {8}, {1})}};
+}
+
+class TestGpuConvWrwFold : public ::testing::TestWithParam<DeviceCase>
+{
+};
+
+TEST_P(TestGpuConvWrwFold, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runFold<float>(GetParam());
+}
+
+TEST_P(TestGpuConvWrwFold, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runFold<Half>(GetParam());
+}
+
+TEST_P(TestGpuConvWrwFold, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runFold<BFloat16>(GetParam());
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvWrwFold,
+                         ::testing::ValuesIn(foldCases()),
+                         [](const auto& info) { return info.param.name; });
 
 TEST(TestGpuConvWrwWideTiles, HalfPartialChannelTiles)
 {
@@ -1177,6 +1735,356 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::ValuesIn(threeBf16Cases()),
                          [](const auto& info) { return info.param.name; });
 
+class TestGpuConvWrwDilationRows : public ::testing::TestWithParam<int64_t>
+{
+};
+
+TEST_P(TestGpuConvWrwDilationRows, HalfAgainstUnroundedDouble)
+{
+    SKIP_IF_NO_DEVICES();
+    DeviceCase test{
+        "DilationRows",
+        conv(16, 24, {5, GetParam()}, {3, 3}, {24, 24}, {24, 24}, {1, 1}, {24, 24}, false, 1, 1)};
+    test.dilationRows = true;
+    runCase<Half>(test);
+}
+
+INSTANTIATE_TEST_SUITE_P(, TestGpuConvWrwDilationRows, ::testing::Values(32, 65, 128));
+
+struct AccurateCase
+{
+    std::string name;
+    ConvShape shape;
+    bool filterLast = false;
+    int partitions = 0; ///< 1: one partition, 2: multiple, 0: either
+    bool productCancellation = false;
+    bool splitCancellation = false;
+};
+
+std::vector<AccurateCase> accurateCases()
+{
+    std::vector<AccurateCase> cases;
+    for(const bool channelsLast : {false, true})
+    {
+        for(const bool filterLast : {false, true})
+        {
+            for(const auto mode : {ConvMode::CROSS_CORRELATION, ConvMode::CONVOLUTION})
+            {
+                auto shape = conv(10,
+                                  14,
+                                  {5, 9, 17},
+                                  {2, 4, 5},
+                                  {1, 4, 6},
+                                  {0, 1, 2},
+                                  {2, 3, 2},
+                                  {2, 2, 3},
+                                  channelsLast,
+                                  2);
+                shape.mode = mode;
+                cases.push_back(
+                    {std::string(channelsLast ? "Ndhwc" : "Ncdhw")
+                         + (filterLast ? "FilterLast" : "FilterFirst")
+                         + (mode == ConvMode::CONVOLUTION ? "Convolution" : "Correlation"),
+                     shape,
+                     filterLast});
+            }
+        }
+    }
+    for(const bool channelsLast : {false, true})
+    {
+        cases.push_back({channelsLast ? "LongCancellationNwc" : "LongCancellationNcw",
+                         conv(3, 5, {65539}, {1}, {0}, {0}, {1}, {1}, channelsLast, 1, 1),
+                         !channelsLast,
+                         2});
+    }
+    cases.push_back({"LongProductCancellation",
+                     conv(3, 5, {65538}, {1}, {0}, {0}, {1}, {1}, false, 1, 1),
+                     true,
+                     2,
+                     true});
+    cases.push_back({"LongSplitCancellation",
+                     conv(3, 5, {65536}, {1}, {0}, {0}, {1}, {1}, false, 1, 1),
+                     true,
+                     2,
+                     false,
+                     true});
+    cases.push_back({"SinglePartitionTwoD",
+                     conv(3, 5, {2, 3}, {1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, true, 1, 1),
+                     false,
+                     1});
+    cases.push_back(
+        {"MostlyPaddingThreeD",
+         conv(2, 3, {1, 1, 1}, {2, 3, 2}, {3, 4, 3}, {0, 0, 0}, {2, 1, 2}, {2, 2, 1}, false, 1, 1),
+         true,
+         1});
+    return cases;
+}
+
+void fillAccurateOperands(Tensor<float>& x,
+                          Tensor<float>& dy,
+                          int revision,
+                          const AccurateCase& test)
+{
+    auto* xp = static_cast<float*>(x.rawHostData());
+    forEachIndex(x.dims(), [&](const auto& index) {
+        int64_t position = index[0];
+        for(size_t axis = 2; axis < index.size(); ++axis)
+        {
+            position = position * x.dims()[axis] + index[axis];
+        }
+        float value = 0.0f;
+        if(test.splitCancellation)
+        {
+            value = 1.0f + float(index[1]) / 16.0f;
+        }
+        else if(test.productCancellation)
+        {
+            value = 4096.0f + float(index[1] + revision) + (position % 2 == 0 ? 1.0f : 0.0f);
+        }
+        else
+        {
+            value = 1.0f + float((position / 4) % 7) / 16.0f + float(index[1]) / 32.0f
+                    + float(revision) / 128.0f;
+        }
+        xp[offsetOf(index, x.strides())] = value;
+    });
+    auto* yp = static_cast<float*>(dy.rawHostData());
+    constexpr std::array<float, 4> CANCELLATION{16777216.0f, 1.0f, -16777216.0f, 1.0f};
+    forEachIndex(dy.dims(), [&](const auto& index) {
+        int64_t position = index[0];
+        for(size_t axis = 2; axis < index.size(); ++axis)
+        {
+            position = position * dy.dims()[axis] + index[axis];
+        }
+        float value = 0.0f;
+        if(test.splitCancellation)
+        {
+            if(position < 32768)
+            {
+                value = 16777216.0f;
+            }
+            else if(position == 65535)
+            {
+                value = -16777216.0f + float(revision + 1);
+            }
+            else
+            {
+                value = -16777216.0f;
+            }
+        }
+        else if(test.productCancellation)
+        {
+            value = position % 2 == 0 ? 4097.0f + float(2 * revision)
+                                      : -4098.0f - float(2 * revision);
+        }
+        else
+        {
+            value = CANCELLATION[size_t((position + revision) % 4)]
+                    * (1.0f + float(index[1] % 3) / 8.0f);
+        }
+        yp[offsetOf(index, dy.strides())] = value;
+    });
+    x.markHostModified();
+    dy.markHostModified();
+}
+
+// Independent direct convolution from graph dimensions/strides, not the K3 launch geometry
+// or partial layout. Keep the authority in double, including the comparison (no FP32 oracle).
+std::vector<double> accurateCpuWeights(const ConvGraphSpec& spec,
+                                       const Tensor<float>& x,
+                                       const Tensor<float>& dy,
+                                       int64_t groups)
+{
+    const auto* xp = x.memory().hostData();
+    const auto* yp = dy.memory().hostData();
+    size_t elements = 1;
+    for(const auto extent : spec.w.dims)
+    {
+        elements *= size_t(extent);
+    }
+    std::vector<double> reference(elements, 0.0);
+    auto outputPositions = spec.y.dims;
+    outputPositions[1] = 1;
+    const int64_t kg = spec.y.dims[1] / groups;
+    forEachIndex(spec.w.dims, [&](const auto& weight) {
+        std::vector<int64_t> xi(spec.x.dims.size(), 0);
+        std::vector<int64_t> yi(spec.y.dims.size(), 0);
+        xi[1] = (weight[0] / kg) * spec.w.dims[1] + weight[1];
+        yi[1] = weight[0];
+        double sum = 0.0;
+        forEachIndex(outputPositions, [&](const auto& position) {
+            xi[0] = yi[0] = position[0];
+            bool inside = true;
+            for(size_t axis = 2; axis < xi.size(); ++axis)
+            {
+                const auto tap = spec.mode == ConvMode::CONVOLUTION
+                                     ? spec.w.dims[axis] - 1 - weight[axis]
+                                     : weight[axis];
+                xi[axis] = position[axis] * spec.stride[axis - 2] + tap * spec.dilation[axis - 2]
+                           - spec.prePadding[axis - 2];
+                yi[axis] = position[axis];
+                inside = inside && xi[axis] >= 0 && xi[axis] < spec.x.dims[axis];
+            }
+            if(inside)
+            {
+                sum += double(xp[offsetOf(xi, spec.x.strides)])
+                       * double(yp[offsetOf(yi, spec.y.strides)]);
+            }
+        });
+        reference[size_t(offsetOf(weight, spec.w.strides))] = sum;
+    });
+    return reference;
+}
+
+class TestGpuConvWrwAccurate : public ::testing::TestWithParam<AccurateCase>
+{
+};
+
+TEST_P(TestGpuConvWrwAccurate, StrictDoubleTruthAndPreparedRebinding)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto& test = GetParam();
+    auto shape = test.shape;
+    shape.dataType = DataType::FLOAT;
+    auto spec = specFor(shape, ConvDirection::BACKWARD_WEIGHTS);
+    spec.w.strides = packedStrides(spec.w.dims, test.filterLast);
+    const auto device = currentDeviceProperties();
+    if(hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) != "gfx1250")
+    {
+        GTEST_SKIP() << "FP64 WRW is qualified only on gfx1250";
+    }
+    const GraphFixture fixture(buildGraph(spec), device);
+    const auto bound = matchesGraph(PACK, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    const auto problem = conv_wrw::parseWrwProblem(fixture.context());
+    ASSERT_TRUE(problem.has_value());
+    Tensor<float> x0(spec.x.dims, spec.x.strides);
+    Tensor<float> x1(spec.x.dims, spec.x.strides);
+    Tensor<float> y0(spec.y.dims, spec.y.strides);
+    Tensor<float> y1(spec.y.dims, spec.y.strides);
+    Tensor<float> w0(spec.w.dims, spec.w.strides);
+    Tensor<float> w1(spec.w.dims, spec.w.strides);
+    const auto& handler = dispatchHandler(PACK);
+    const Handle handle;
+    int ran = 0;
+    for(const auto& kernel : catalog())
+    {
+        const auto config = configOf(kernel);
+        if(config.loop != conv_wrw::LOOP_ACCURATE
+           || !matchesKernel(PACK, fixture.context(), kernel, *bound))
+        {
+            continue;
+        }
+        SCOPED_TRACE(kernel.name);
+        ++ran;
+        const auto launch = conv_wrw::wrwLaunchFor(*problem, config, device);
+        ASSERT_TRUE(launch.has_value());
+        if(test.partitions == 1)
+        {
+            ASSERT_EQ(launch->args.splits, 1);
+        }
+        if(test.partitions == 2)
+        {
+            ASSERT_GT(launch->args.splits, 1);
+        }
+        const auto prepared = handler.prepare(fixture.context(), *bound, kernel);
+        ASSERT_NE(prepared, nullptr);
+        const size_t bytes = handler.workspaceBytes(fixture.context(), *bound, kernel);
+        ASSERT_LE(bytes, size_t(conv_wrw::MAX_WORKSPACE_BYTES));
+        void* workspace = nullptr;
+        ASSERT_EQ(hipMalloc(&workspace, bytes), hipSuccess);
+        std::array<hipdnnPluginDeviceBuffer_t, 3> previous{};
+        for(int revision = 0; revision < 3; ++revision)
+        {
+            SCOPED_TRACE(revision);
+            auto& x = revision == 0 ? x0 : x1;
+            auto& y = revision == 0 ? y0 : y1;
+            auto& w = revision == 0 ? w0 : w1;
+            fillAccurateOperands(x, y, revision, test);
+            const auto reference = accurateCpuWeights(spec, x, y, shape.groups);
+            w.fillWithSentinelValue();
+            const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
+                hipdnnPluginDeviceBuffer_t{X_UID, x.rawDeviceData()},
+                hipdnnPluginDeviceBuffer_t{W_UID, w.rawDeviceData()},
+                hipdnnPluginDeviceBuffer_t{Y_UID, y.rawDeviceData()}};
+            if(revision == 2)
+            {
+                for(size_t i = 0; i < buffers.size(); ++i)
+                {
+                    EXPECT_EQ(buffers[i].ptr, previous[i].ptr);
+                }
+            }
+            previous = buffers;
+            ASSERT_EQ(hipMemset(workspace, 0x7f, bytes), hipSuccess);
+            handler.launch(handle, *prepared, buffers.data(), uint32_t(buffers.size()), workspace);
+            ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
+            EXPECT_TRUE(conv_determinism_test::relaunchReproducesOutput(
+                [&] {
+                    handler.launch(
+                        handle, *prepared, buffers.data(), uint32_t(buffers.size()), workspace);
+                },
+                handle.getStream(),
+                w,
+                workspace,
+                bytes));
+            w.markDeviceModified();
+            const auto* actual = static_cast<const float*>(w.rawHostData());
+            int64_t mismatches = 0;
+            for(size_t i = 0; i < reference.size(); ++i)
+            {
+                const double tolerance = 1e-4 + 1e-4 * std::fabs(reference[i]);
+                if(!(std::fabs(double(actual[i]) - reference[i]) <= tolerance) && ++mismatches <= 5)
+                {
+                    ADD_FAILURE() << "dw[" << i << "] got " << actual[i] << ", reference "
+                                  << reference[i] << ", tolerance " << tolerance;
+                }
+            }
+            EXPECT_EQ(mismatches, 0);
+        }
+        ASSERT_EQ(hipFree(workspace), hipSuccess);
+    }
+    ASSERT_GT(ran, 0) << "the accuracy candidate must be reachable through real prepare/launch";
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvWrwAccurate,
+                         ::testing::ValuesIn(accurateCases()),
+                         [](const auto& info) { return info.param.name; });
+
+TEST(TestGpuConvWrwDirectChannelsFirstStore, GroupedReflectedAndSplitTransitions)
+{
+    SKIP_IF_NO_DEVICES();
+    if(hipdnn_plugin_sdk::stripArchFeatures(currentDeviceProperties().gcnArchName) != "gfx1250")
+    {
+        GTEST_SKIP() << "native direct channels-first store requires gfx1250";
+    }
+    for(const bool manySplits : {false, true})
+    {
+        auto shape = conv(15,
+                          21,
+                          manySplits ? std::vector<int64_t>{8, 16} : std::vector<int64_t>{4, 4},
+                          {3, 3},
+                          {1, 1},
+                          {1, 1},
+                          {1, 1},
+                          {1, 1},
+                          false,
+                          3,
+                          manySplits ? 16 : 1);
+        shape.mode = ConvMode::CONVOLUTION;
+        DeviceCase test{"DirectChannelsFirstStore", shape};
+        test.onlyLoop = conv_wrw::LOOP_TAP_TILED;
+        test.directChannelsFirstStore = true;
+        runCase<Half>(test);
+    }
+    auto shape = conv(
+        19, 21, {2, 2, 4}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, false, 1, 1);
+    DeviceCase test{"DirectChannelsFirstStoreThreeD", shape};
+    test.onlyLoop = conv_wrw::LOOP_TAP_TILED;
+    test.directChannelsFirstStore = true;
+    runCase<Half>(test);
+}
+
 // ---- Host-only: the shipped catalog ----
 
 std::string_view stringOf(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
@@ -1248,10 +2156,61 @@ TEST(TestConvWrwCatalog, EveryGenericSpecKeyParses)
     EXPECT_GT(keys, 0);
 }
 
+TEST(TestConvWrwCatalog, EveryMatrixArchHasAGenericTierPerDtypeAndLayout)
+{
+    // The generic loop is the coverage floor: on every architecture with matrix cores, each
+    // element type has generic configs reading elements (layout 0) and channel vectors
+    // (layout 1), and their block-based buffer forms for images past 2 GiB. fp32 on RDNA runs
+    // the FMA form.
+    static constexpr std::array<const char*, 6> ARCHS{
+        "gfx908", "gfx90a", "gfx942", "gfx950", "gfx1101", "gfx1201"};
+    for(const char* arch : ARCHS)
+    {
+        for(const char* dtype : {"FLOAT", "HALF", "BFLOAT16"})
+        {
+            // gfx908 has no bf16 generic configs (its bf16 atom ships for common filters).
+            if(std::string(arch) == "gfx908" && std::string(dtype) == "BFLOAT16")
+            {
+                continue;
+            }
+            // RDNA fp32 runs the FMA form, whose pack lists the RDNA architectures: a build for
+            // other targets installs no copy of it.
+            const bool rdna = std::string(arch).rfind("gfx11", 0) == 0
+                              || std::string(arch).rfind("gfx12", 0) == 0;
+            if(rdna && std::string(dtype) == "FLOAT"
+               && std::none_of(catalog().begin(), catalog().end(), [](const auto& kernel) {
+                      return kernel.getStringMetadata("atom") == "fma"
+                             && kernel.getIntMetadata("loop") == conv_wrw::LOOP_GENERIC;
+                  }))
+            {
+                continue;
+            }
+            for(const int64_t layout :
+                {conv_wrw::LAYOUT_CHANNELS_FIRST, conv_wrw::LAYOUT_CHANNELS_LAST})
+            {
+                for(const int64_t pb : {int64_t{0}, int64_t{1}})
+                {
+                    SCOPED_TRACE(std::string(arch) + " " + dtype + " layout "
+                                 + std::to_string(layout) + " pb " + std::to_string(pb));
+                    const bool found
+                        = std::any_of(catalog().begin(), catalog().end(), [&](const auto& kernel) {
+                              const auto config = configOf(kernel);
+                              return config.loop == conv_wrw::LOOP_GENERIC && config.math == 0
+                                     && config.layout == layout && config.pb == pb
+                                     && stringOf(kernel, "dtype") == dtype
+                                     && conv_igemm::atomRunsOn(config.atom, arch);
+                          });
+                    EXPECT_TRUE(found);
+                }
+            }
+        }
+    }
+}
+
 TEST(TestConvWrwCatalog, DilatedRowsHaveSpecializedConfigsInBothLayouts)
 {
     // A dilated filter row the specialized tier misses in one layout falls to the generic tier,
-    // which declines ASPP-class dilations and has no gfx11 configs, and then to the BLAS path
+    // which declines ASPP-class dilations except on gfx11 and gfx12, and then to the BLAS path
     // (30x slower on gfx1100 for channels-last fp16 deeplab). Every matrix-core arch serves every
     // deeplab / SSD 3x3 dilation and HiFi-GAN's dilated 1-D rows in both layouts with a
     // specialized config.
@@ -1322,22 +2281,23 @@ TEST(TestConvWrwCatalog, DilatedRowsHaveSpecializedConfigsInBothLayouts)
 
 TEST(TestConvWrwCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsItsArchitectures)
 {
-    static constexpr std::array<const char*, 7> ARCHS{
-        "gfx908", "gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1151", "gfx1201"};
-    std::set<int64_t> loops;
+    static constexpr std::array<const char*, 8> ARCHS{
+        "gfx908", "gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1151", "gfx1201", "gfx1250"};
     for(const auto& kernel : catalog())
     {
         SCOPED_TRACE(kernel.name);
         const auto config = configOf(kernel);
         EXPECT_EQ(conv_wrw::atomIdOf(config.atom), config.atomId);
         EXPECT_EQ(stringOf(kernel, "direction"), "WRW");
-        EXPECT_EQ(kernel.source.entryPoint, "ConvWrw");
         const auto dtype = stringOf(kernel, "dtype");
         // Three-bf16 configs (math 1) are bf16 kernels on fp32 graphs.
         const int elementBytes = dtype == "FLOAT" && config.math == 0 ? 4 : 2;
         EXPECT_TRUE(config.math == 0 || (config.math == 1 && dtype == "FLOAT"));
         // 16-byte vectors; the FMA output rows also take scalar units.
-        if(config.loop != conv_wrw::LOOP_ROWS_FMA || config.vec != 1)
+        if((config.loop != conv_wrw::LOOP_ROWS_FMA && config.loop != conv_wrw::LOOP_NATIVE_GENERIC
+            && config.loop != conv_wrw::LOOP_TAP_TILED && config.loop != conv_wrw::LOOP_SMALL_K
+            && config.loop != conv_wrw::LOOP_ACCURATE)
+           || config.vec != 1)
         {
             EXPECT_EQ(config.vec * elementBytes, 16);
         }
@@ -1357,9 +2317,7 @@ TEST(TestConvWrwCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsItsArchitectures
                 << arch;
         }
         EXPECT_GT(archs, 0) << "a config no architecture runs";
-        loops.insert(config.loop);
     }
-    EXPECT_EQ(loops, (std::set<int64_t>{0, 1, 2, 3, 4, 5, 6, 7, 8}));
 }
 
 } // namespace

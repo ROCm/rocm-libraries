@@ -1155,6 +1155,92 @@ TEST(TestFillInputs, ConvPlusBiasPlusReluFused)
     EXPECT_TRUE(result.filled) << result.reason;
 }
 
+namespace
+{
+
+// conv -> MUL by a constant scalar (a tensor carrying a value) -> y.
+GraphResult buildConvConstantScaleGraph(DataType scaleType)
+{
+    GraphResult r;
+    auto& b = r.builder;
+    const std::vector<int64_t> scalarDims{1, 1};
+    const std::vector<int64_t> scalarStrides{1, 1};
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(CreateTensorAttributesDirect(b, 1, "x", DataType::FLOAT, &kStrides, &kDims));
+    tensors.push_back(CreateTensorAttributesDirect(b, 2, "w", DataType::FLOAT, &kStrides, &kDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 10, "conv_y", DataType::FLOAT, &kStrides, &kDims, true));
+    flatbuffers::Offset<void> value;
+    TensorValue valueType = TensorValue::Float32Value;
+    if(scaleType == DataType::BFLOAT16)
+    {
+        valueType = TensorValue::BFloat16Value;
+        value = b.CreateStruct(BFloat16Value(0.5f)).Union();
+    }
+    else
+    {
+        value = b.CreateStruct(Float32Value(0.5f)).Union();
+    }
+    tensors.push_back(CreateTensorAttributesDirect(
+        b, 7, "scale", scaleType, &scalarStrides, &scalarDims, false, valueType, value));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 6, "out", DataType::FLOAT, &kStrides, &kDims));
+
+    auto conv = CreateConvolutionFwdAttributesDirect(b, 1, 2, 10);
+    auto mul = CreatePointwiseAttributes(b,
+                                         PointwiseMode::MUL,
+                                         flatbuffers::nullopt,
+                                         flatbuffers::nullopt,
+                                         flatbuffers::nullopt,
+                                         flatbuffers::nullopt,
+                                         10,
+                                         7,
+                                         flatbuffers::nullopt,
+                                         6);
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(
+        b, "conv", DataType::FLOAT, NodeAttributes::ConvolutionFwdAttributes, conv.Union()));
+    nodes.push_back(CreateNodeDirect(
+        b, "mul", DataType::FLOAT, NodeAttributes::PointwiseAttributes, mul.Union()));
+    b.Finish(CreateGraphDirect(b,
+                               "conv_const_scale",
+                               DataType::FLOAT,
+                               DataType::FLOAT,
+                               DataType::FLOAT,
+                               &tensors,
+                               &nodes));
+    r.graph = GetGraph(b.GetBufferPointer());
+    return r;
+}
+
+} // namespace
+
+// The references read a constant's buffer, while engines bake its value: the buffer must
+// hold the value, never a random draw.
+TEST(TestFillInputs, ConstantScalarInputHoldsItsValue)
+{
+    for(const auto scaleType : {DataType::FLOAT, DataType::BFLOAT16})
+    {
+        const auto graph = buildConvConstantScaleGraph(scaleType);
+        const std::vector<int64_t> leafUids = {1, 2, 7};
+        auto inputs = makeTensorsFromGraph(graph, leafUids);
+        InputFillRecipes recipes;
+        // Even over a recipe a test sets: the engines never see another value.
+        recipes.setRange(7, -1.0f, 1.0f);
+        const auto result
+            = fillInputs(*graph.graph, inputs, leafUids, recipes, hostReferences(), nullptr);
+        ASSERT_TRUE(result.filled) << result.reason;
+        const auto* raw = inputs.at(7)->rawHostData();
+        const float value
+            = scaleType == DataType::BFLOAT16
+                  ? static_cast<float>(*static_cast<const hipdnn_data_sdk::types::bfloat16*>(raw))
+                  : *static_cast<const float*>(raw);
+        EXPECT_EQ(value, 0.5f);
+    }
+}
+
 // Unit seam: verify the fill policy itself. Epsilon is the fixed-value
 // path; momentum is the seeded random path and must reproduce across runs.
 TEST(TestFillInputs, RuntimePbvScalarsUseFixedAndDeterministicRandomFills)

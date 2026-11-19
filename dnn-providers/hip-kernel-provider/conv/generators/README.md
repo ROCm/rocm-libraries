@@ -17,6 +17,7 @@ python3 gen_igemm.py ../../src/engines/kernel_ingestor_engine/descriptors/conv/i
 | `gen_igemm_nchw.py` | `igemm_nchw` | `CONV_IGEMM_NCHW_BWD` |
 | `gen_direct.py` | `direct` | `CONV_DIRECT_FWD`, `CONV_DIRECT_BWD` |
 | `gen_winograd.py` | `winograd` | `CONV_WINOGRAD_FWD`, `CONV_WINOGRAD_BWD`, `CONV_WINOGRAD_WRW` |
+| `gen_winograd_nd.py` | `winograd_nd` | `CONV_WINOGRAD_ND_FWD` |
 | `gen_conv_wrw.py` | `wrw` | `CONV_WRW` |
 | `gen_conv_stem_bwd.py` | `stem_bwd` | `CONV_STEM_BWD` |
 | `gen_smallc.py` | `smallc` | `CONV_SMALLC_FWD`, `CONV_SMALLC_BWD` |
@@ -38,5 +39,8 @@ Rules the generators follow, which the engine packs and tests rely on:
 - **Configs are told apart only by integer knobs.** Candidate enumeration and the winner cache distinguish configs only by their integer knob fields. A config field that changes the compiled kernel must therefore be an int knob. The engines' catalog tests fail if two configs share a knob tuple, and some generators also assert it.
 - **Each config is admitted on its own gates.** A config is a candidate for a graph only if its pack's gates accept both the graph and the config. The packs (`src/engines/kernel_ingestor_engine/packs/Conv*Problem.*`) decline every field they don't support, and each gate has a test.
 - **Catalog files are split where a generator asserts a size.** The catalogs are DVC outputs, so the repository's 500 KB pre-commit file limit does not apply to them; `gen_conv_wrw.py` and `gen_conv_stem_bwd.py` still split their catalogs per dtype and kernel family and assert each file stays under 500 KB, and `gen_group.py` splits its backward-weights catalog the same way. The single-file catalogs (for example `igemm_nchw`, `group` bwd) run to about 1.4 MB.
+- **Native gfx1250 atoms have their own contracts.** `wmma125_f16`/`wmma125_bf16` use K32 and 16-element lane fragments; `wmma125_f32` uses exact K4 and float2 fragments. Keep existing atom IDs stable and add distinct native IDs rather than aliasing older WMMA instructions.
+- **One engine can span several packs.** Native implicit-GEMM and channels-first backward-data catalogs are emitted separately from legacy packs (per dtype where needed). Catalog-driven tests must read every matching pack, not one fixed file.
+- **WRW geometry is a kernel contract.** Runtime-geometry configurations and fixed-geometry configurations remain distinct autotuning candidates; loop and atom IDs must agree with the host planner and kernel.
 
 After regenerating, run the engine's tests; see the conv section of `../README.md` for the filters.

@@ -992,7 +992,7 @@ std::vector<ConfigRefusal> configRefusals()
              f.atom = "wmma11_f16";
              f.atomId = 12;
          }},
-        {"LoopUnknown", [](ConfigFields& f) { f.loop = 9; }},
+        {"LoopUnknown", [](ConfigFields& f) { f.loop = 13; }},
         // The generic loop: runtime geometry, fr taps a block, a position per thread, whole
         // channel rows a pass, its layout the problem's channel-vector form, at most 64 loads,
         // and no specialized class serving the problem.
@@ -1519,40 +1519,40 @@ TEST(TestConvWrwKernelMatch, GenericBlockBuffersServeLargeImagesThroughStepWindo
     // pb 1 on a small image: declined (the specialized and per-image configs serve it).
     EXPECT_FALSE(admits(f, "gfx942", channelsLastShape()));
     // Channels-first: the step window spans the block's channel planes (2.2 GB 33000 x 33000
-    // fp16 planes are past it) but only the columns a chunk reaches (one 2^31-byte row at
-    // width stride 2^20 is within it).
+    // fp16 planes are past it) but only the columns a chunk reaches (eight 2^28-byte rows at
+    // width stride 2^17 are within it).
     auto planes = baseShape();
-    planes.c = 2;
+    planes.c = 8;
     planes.k = 1; // one dy plane: the x window alone past the range
     planes.input = {33000, 33000};
     planes.prePadding = planes.postPadding = {1, 1};
     auto cf = genericFields();
     cf.pb = 1;
     EXPECT_FALSE(admits(cf, "gfx942", planes));
-    // The dy window alone: one 0.8 GB x plane, 8 dy planes of it (7 more in the window).
+    // The dy window alone: 0.2 GB planes, x's window 7 more of them (within), dy's 15 more
+    // (past); at 11 dy planes the window (10 more, 2.0 GB) is within and the image past.
     auto dyPlanes = baseShape();
     dyPlanes.n = 1;
-    dyPlanes.c = 1;
-    dyPlanes.k = 8;
-    dyPlanes.input = {20000, 20000};
+    dyPlanes.c = 8;
+    dyPlanes.k = 16;
+    dyPlanes.input = {10000, 10000};
     EXPECT_FALSE(admits(cf, "gfx942", dyPlanes));
-    dyPlanes.k = 2;
-    dyPlanes.input = {20000, 30000}; // 1 more 1.2 GB dy plane: within
+    dyPlanes.k = 11;
     EXPECT_TRUE(admits(cf, "gfx942", dyPlanes));
     auto row = baseShape();
     row.n = 1;
-    row.c = 1;
+    row.c = 8;
     row.k = 8;
-    row.input = {1, int64_t{1} << 30}; // fp16: 2^31 bytes in one row
+    row.input = {1, int64_t{1} << 27}; // fp16: 2^28 bytes a row, 2^31 an image
     row.filter = {1, 1};
     row.prePadding = row.postPadding = {0, 0};
-    row.stride = {1, int64_t{1} << 20};
+    row.stride = {1, int64_t{1} << 17};
     EXPECT_TRUE(admits(cf, "gfx942", row));
     auto cfLarge = large;
     cfLarge.channelsLast = false;
-    cfLarge.c = 2;
+    cfLarge.c = 8;
     cfLarge.k = 1;
-    cfLarge.input = {33000, 16500}; // two 1.1 GB planes: window within, image past
+    cfLarge.input = {14000, 10000}; // eight 0.28 GB planes: window within, image past
     EXPECT_TRUE(admits(cf, "gfx942", cfLarge));
     // A specialized block-buffer class (lower case) declines the generic twin.
     cf.spec = "4r0.3.2.1.0";
@@ -1667,6 +1667,54 @@ TEST(TestConvWrwKernelMatch, SmallCRowsServeFewChannelsFirstChannels)
     ASSERT_TRUE(launch.has_value());
     EXPECT_EQ(launch->block, 256u);
     EXPECT_EQ(launch->gridY, 1u); // 3 filter rows, fr 3
+}
+
+TEST(TestConvWrwKernelMatch, NativeSmallCRowsBoundChannelsPerGroupAndVectorStridePhases)
+{
+    for(const auto dtype : {DataType::HALF, DataType::BFLOAT16})
+    {
+        SCOPED_TRACE(dtypeName(dtype));
+        auto shape = baseShape();
+        shape.dataType = dtype;
+        shape.groups = 3;
+        shape.c = 48; // Cg16 is supported even though the tensor has more than 16 channels.
+        shape.k = 72;
+        shape.input = {11, 65};
+        auto fields = smallcFields();
+        fields.atom = dtype == DataType::HALF ? "wmma125_f16" : "wmma125_bf16";
+        fields.atomId = conv_wrw::atomIdOf(fields.atom);
+        fields.bk = 16;
+        fields.bc = 8;
+        fields.wk = 1;
+        for(const int64_t stride : {1, 2})
+        {
+            SCOPED_TRACE(stride);
+            shape.stride = {stride, stride};
+            fields.sw = stride;
+            EXPECT_TRUE(admits(fields, "gfx1250", shape));
+            auto pastLimit = shape;
+            pastLimit.c = 51; // Cg17, not the global channel count, is past the limit.
+            EXPECT_FALSE(admits(fields, "gfx1250", pastLimit));
+            auto channelsLast = shape;
+            channelsLast.channelsLast = true;
+            auto channelsLastFields = fields;
+            channelsLastFields.layout = 1;
+            // CL BQ64 exceeds the one-wave scalar-load pass mask. BQ32 fits at
+            // stride 1; stride 2 needs two output-channel waves to keep passes <=32.
+            EXPECT_FALSE(admits(channelsLastFields, "gfx1250", channelsLast));
+            channelsLastFields.bq = 32;
+            if(stride == 2)
+            {
+                EXPECT_FALSE(admits(channelsLastFields, "gfx1250", channelsLast));
+                channelsLastFields.bk = 32;
+                channelsLastFields.wk = 2;
+            }
+            EXPECT_TRUE(admits(channelsLastFields, "gfx1250", channelsLast));
+        }
+        shape.stride = {1, 3};
+        fields.sw = 3; // VEC8 cannot hold three whole channels-first stride phases.
+        EXPECT_FALSE(admits(fields, "gfx1250", shape));
+    }
 }
 
 TEST(TestConvWrwKernelMatch, TheRingRunsHeightStridesAsPhases)
@@ -2062,6 +2110,11 @@ TEST(TestConvWrwKernelMatch, TheLdsLimitIsTheDevices)
     EXPECT_GT(conv_wrw::ldsBytesOf(configOf(f), 2), 64 * 1024);
     EXPECT_FALSE(admits(f, "gfx942"));
     EXPECT_TRUE(admits(f, "gfx950"));
+    const auto problem = parse(specOf(baseShape()));
+    ASSERT_TRUE(problem.has_value());
+    auto legacy = deviceOf("gfx950:sramecc+:xnack-");
+    legacy.sharedMemPerBlock = size_t{64} * 1024;
+    EXPECT_TRUE(conv_wrw::wrwLaunchFor(*problem, configOf(f), legacy).has_value());
     EXPECT_EQ(conv_wrw::ldsLimitOf("gfx950:sramecc+:xnack-"), 160 * 1024);
     EXPECT_EQ(conv_wrw::ldsLimitOf("gfx942"), 64 * 1024);
     EXPECT_EQ(conv_wrw::ldsLimitOf("gfx1100"), 64 * 1024);
@@ -2475,19 +2528,215 @@ TEST(TestConvWrwLaunch, TheReduceWritesEitherFilterLayoutAndReflectsForConvoluti
     EXPECT_EQ(oneSplit950->reduce.splits, 1);
     EXPECT_EQ(oneSplit950->reduce.tile, 2);
     EXPECT_EQ(oneSplit950->reduceGrid, 40u);
-    // More splits than the tile reduce takes: quads.
+    // More splits than the tile reduce takes: quads, by the deep reduce from
+    // K3_REDUCE_DEEP_MIN_SPLITS splits where the quad grid (34 blocks) leaves most units idle.
     auto deep = baseShape();
     deep.n = 64;
     const auto manySplits = launchOf(ConfigFields{}, deep);
     ASSERT_TRUE(manySplits.has_value());
     EXPECT_GT(manySplits->reduce.splits, K3_REDUCE_TILE_MAX_SPLITS);
-    EXPECT_EQ(manySplits->reduce.tile, 0);
+    EXPECT_GE(manySplits->reduce.splits, K3_REDUCE_DEEP_MIN_SPLITS);
+    EXPECT_EQ(manySplits->reduce.tile, 3);
+    // 9 taps x 40 k x 6 quads = 2160 quads on 304 units: 16 a block (64 threads).
+    EXPECT_EQ(manySplits->reduce.quads, 16);
+    EXPECT_EQ(manySplits->reduceGrid, 2160u / 16);
+    EXPECT_EQ(manySplits->reduceBlock, 64u);
+    // Wide: 9 taps x 256 k x 64 quads = 2304 quad blocks, more than a third of 2048 units; the
+    // quad reduce, however many splits.
+    auto wide256 = baseShape();
+    wide256.c = wide256.k = 256;
+    wide256.n = 64;
+    const auto wideSplits = launchOf(ConfigFields{}, wide256, "gfx942", 2048);
+    ASSERT_TRUE(wideSplits.has_value());
+    EXPECT_GE(wideSplits->reduce.splits, K3_REDUCE_DEEP_MIN_SPLITS);
+    EXPECT_EQ(wideSplits->reduce.tile, 0);
+    EXPECT_EQ(wideSplits->reduceBlock, 256u);
+    auto fewSplits = baseShape();
+    fewSplits.n = 12;
+    const auto someSplits = launchOf(ConfigFields{}, fewSplits);
+    ASSERT_TRUE(someSplits.has_value());
+    if(someSplits->reduce.splits > K3_REDUCE_TILE_MAX_SPLITS
+       && someSplits->reduce.splits < K3_REDUCE_DEEP_MIN_SPLITS)
+    {
+        EXPECT_EQ(someSplits->reduce.tile, 0);
+        EXPECT_EQ(someSplits->reduceBlock, 256u);
+    }
 
     auto convolution = baseShape();
     convolution.mode = ConvMode::CONVOLUTION;
     const auto flipped = launchOf(ConfigFields{}, convolution);
     ASSERT_TRUE(flipped.has_value());
     EXPECT_EQ(flipped->reduce.flip, 1);
+}
+
+/// HiFi-GAN's transposed-conv class as a wrw graph: 1-D, filter 16, stride 8, padding 4.
+ConvShape foldShape(bool channelsLast = false)
+{
+    auto shape = baseShape();
+    shape.input = {256};
+    shape.filter = {16};
+    shape.prePadding = shape.postPadding = {4};
+    shape.stride = {8};
+    shape.dilation = {1};
+    shape.channelsLast = channelsLast;
+    return shape;
+}
+
+/// A unit-stride ring config of the folded class: filter width 2 channels-first (staged,
+/// shifted), 3 channels-last (in place, ceil-padded).
+ConfigFields foldFields(int64_t layout = 0)
+{
+    ConfigFields f;
+    f.fr = 1;
+    f.s = layout == 0 ? 2 : 3;
+    f.layout = layout;
+    return f;
+}
+
+TEST(TestConvWrwFold, ViewIsTheStrideOneProblemOverFoldedChannels)
+{
+    const auto problem = parse(specOf(foldShape()));
+    ASSERT_TRUE(problem.has_value());
+    const auto view = conv_wrw::widthFoldOf(*problem);
+    ASSERT_TRUE(view.has_value());
+    const auto& v = view->base.args;
+    // Channels-first, staged shifted by 4 mod 8 = 4: 24 channels by 8 phases, ceil(260 / 8) = 33
+    // positions padded to whole 8-half vectors (40), 16 / 8 = 2 taps at padding (4 - 4) / 8 = 0.
+    EXPECT_EQ(v.c, 24 * 8);
+    EXPECT_EQ(v.inSpatial[2], 40);
+    EXPECT_EQ(v.outSpatial[2], problem->base.args.outSpatial[2]);
+    EXPECT_EQ(v.filter[2], 2);
+    EXPECT_EQ(v.stride[2], 1);
+    EXPECT_EQ(v.prePadding[2], 0);
+    EXPECT_EQ(view->taps, 2);
+    EXPECT_EQ(view->foldShift, 4);
+    EXPECT_TRUE(view->folded);
+    // Staged packed N (C s) D H U.
+    EXPECT_EQ(v.xStrides[4], 1);
+    EXPECT_EQ(v.xStrides[1], 40);
+    EXPECT_EQ(v.xStrides[0], 24 * 8 * 40);
+    // Channels-last x is the folded layout already (s C elements a folded position), in place:
+    // 256 / 8 positions, ceil(12 / 8) + ceil(4 / 8) = 3 taps at padding 1, no shift.
+    const auto nhwc = conv_wrw::widthFoldOf(*parse(specOf(foldShape(true))));
+    ASSERT_TRUE(nhwc.has_value());
+    EXPECT_EQ(nhwc->base.args.xStrides[1], 1);
+    EXPECT_EQ(nhwc->base.args.xStrides[4], 24 * 8);
+    EXPECT_EQ(nhwc->base.args.inSpatial[2], 32);
+    EXPECT_EQ(nhwc->base.args.filter[2], 3);
+    EXPECT_EQ(nhwc->base.args.prePadding[2], 1);
+    EXPECT_EQ(nhwc->foldShift, 0);
+    // A filter equal to the stride, unpadded (patch-like): one folded tap.
+    auto patch = baseShape();
+    patch.input = {12, 16};
+    patch.filter = {2, 2};
+    patch.prePadding = patch.postPadding = {0, 0};
+    patch.stride = {2, 2};
+    const auto p2 = conv_wrw::widthFoldOf(*parse(specOf(patch)));
+    ASSERT_TRUE(p2.has_value());
+    EXPECT_EQ(p2->base.args.filter[2], 1);
+    EXPECT_EQ(p2->base.args.prePadding[2], 0);
+    EXPECT_EQ(p2->base.args.stride[1], 2); // the height keeps its stride
+}
+
+TEST(TestConvWrwFold, DeclinesEveryFieldOutsideTheFold)
+{
+    const std::vector<std::pair<std::string, std::function<void(ConvShape&)>>> refusals{
+        {"unit stride", [](ConvShape& s) { s.stride = {1}; }},
+        {"stride not dividing the filter", [](ConvShape& s) { s.filter = {12}; }},
+        {"channels-last width not a whole number of strides",
+         [](ConvShape& s) {
+             s.input = {252};
+             s.channelsLast = true;
+         }},
+        {"dilated width", [](ConvShape& s) { s.dilation = {2}; }},
+        {"groups", [](ConvShape& s) { s.groups = 2; }},
+    };
+    ASSERT_TRUE(parse(specOf(foldShape())).has_value());
+    for(const auto& [name, mutate] : refusals)
+    {
+        SCOPED_TRACE(name);
+        auto shape = foldShape();
+        mutate(shape);
+        const auto problem = parse(specOf(shape));
+        ASSERT_TRUE(problem.has_value());
+        EXPECT_FALSE(conv_wrw::widthFoldOf(*problem).has_value());
+    }
+    // Staged channels-first x takes any width: the shifted tail is zero.
+    auto ragged = foldShape();
+    ragged.input = {250};
+    const auto view = conv_wrw::widthFoldOf(*parse(specOf(ragged)));
+    ASSERT_TRUE(view.has_value());
+    EXPECT_EQ(view->base.args.inSpatial[2], 32); // ceil(254 / 8)
+}
+
+TEST(TestConvWrwFold, AUnitStrideConfigOfTheFoldedClassServesThroughTheFold)
+{
+    const auto launch = launchOf(foldFields(), foldShape());
+    ASSERT_TRUE(launch.has_value());
+    EXPECT_TRUE(launch->fold);
+    EXPECT_TRUE(launch->foldStage);
+    EXPECT_FALSE(launch->dwStore);
+    EXPECT_EQ(launch->reduce.tile, 4);
+    EXPECT_EQ(launch->reduce.cg, 24 * 8);
+    EXPECT_EQ(launch->reduce.taps, 2);
+    EXPECT_EQ(launch->reduceBlock, 4u * static_cast<unsigned int>(launch->reduce.quads));
+    const auto& f = launch->reduceFold;
+    EXPECT_EQ(f.c, 24);
+    EXPECT_EQ(f.s, 8);
+    EXPECT_EQ(f.fw, 2);
+    EXPECT_EQ(f.pre, 0);
+    EXPECT_EQ(f.pad, 0); // 4 less the shift of 4
+    EXPECT_EQ(f.filterW, 16);
+    EXPECT_EQ(f.outer, 1);
+    EXPECT_EQ(f.wk, 24 * 16); // K C S
+    EXPECT_EQ(f.wc, 16);
+    EXPECT_EQ(f.wtap, 1);
+    // The staged x after the partials: 2 images x 24 channels x 40 positions x 8 phases.
+    EXPECT_GE(launch->foldOffset,
+              static_cast<size_t>(launch->reduce.splits)
+                  * static_cast<size_t>(launch->reduce.partialElems) * 4);
+    EXPECT_EQ(launch->workspaceBytes, launch->foldOffset + size_t{2} * 24 * 40 * 8 * 2);
+    EXPECT_EQ(launch->foldArgs.rows, 2 * 24);
+    EXPECT_EQ(launch->foldArgs.u, 40);
+    EXPECT_EQ(launch->foldArgs.shift, 4);
+    EXPECT_EQ(launch->foldArgs.width, 256);
+    // One tile of 2048 / 8 = 256 positions a row.
+    EXPECT_EQ(launch->foldGrid, 2u * 24);
+    // Channels-last: no staging.
+    const auto nhwc = launchOf(foldFields(1), foldShape(true));
+    ASSERT_TRUE(nhwc.has_value());
+    EXPECT_TRUE(nhwc->fold);
+    EXPECT_FALSE(nhwc->foldStage);
+    // A unit-stride config of another class does not serve it, and a foldable graph's own class
+    // (filter 16 stride 8) runs unfolded.
+    auto other = foldFields();
+    other.s = 5;
+    EXPECT_FALSE(launchOf(other, foldShape()).has_value());
+    auto own = foldFields();
+    own.s = 16;
+    own.sw = 8;
+    own.vec = 8;
+    const auto unfolded = launchOf(own, foldShape());
+    if(unfolded.has_value())
+    {
+        EXPECT_FALSE(unfolded->fold);
+    }
+    // Not foldable (channels-last width 252): the unit-stride config declines as before.
+    auto ragged = foldShape(true);
+    ragged.input = {252};
+    EXPECT_FALSE(launchOf(foldFields(1), ragged).has_value());
+}
+
+TEST(TestConvWrwLaunch, DeepReduceBlocksGiveEveryUnitTwo)
+{
+    // 64 quads a block while that leaves every unit two blocks, halved down to 16.
+    EXPECT_EQ(conv_wrw::deepReduceQuads(36864, 256), 64); // 576 blocks
+    EXPECT_EQ(conv_wrw::deepReduceQuads(32768, 256), 64); // exactly 512
+    EXPECT_EQ(conv_wrw::deepReduceQuads(16384, 256), 32); // 512 of 32
+    EXPECT_EQ(conv_wrw::deepReduceQuads(2304, 256), 16); // c32 k32 3x3: 144 blocks
+    EXPECT_EQ(conv_wrw::deepReduceQuads(1, 256), 16);
+    EXPECT_EQ(conv_wrw::deepReduceQuads(1000, 1), 64);
+    EXPECT_EQ(conv_wrw::deepReduceQuads(1000, 0), 64); // no units reported: as one
 }
 
 TEST(TestConvWrwLaunch, ReduceTilesFillTheUnitsWithinTheLds)
@@ -2776,13 +3025,14 @@ TEST(TestConvWrwKernelMatch, TheGenericLoopServesStridedOperandsAlone)
     EXPECT_FALSE(matchesKernel(PACK, fixture.context(), kernel, *bound));
     // Elements take any channel count (no whole vectors), in either packed layout too.
     auto odd = baseShape();
-    odd.c = 5;
+    odd.c = 9;
     odd.k = 7;
     EXPECT_TRUE(admits(genericFields(), "gfx942", odd));
     odd.channelsLast = true;
     EXPECT_TRUE(admits(genericFields(), "gfx942", odd));
     EXPECT_FALSE(admits(genericClFields(), "gfx942", odd));
-    // Images smaller than a vector (one channel of 5 positions).
+    // Images smaller than a vector (one channel of 5 positions): the rows decline them, and
+    // the generic loop declines them as a stem.
     auto tiny = baseShape();
     tiny.c = 1;
     tiny.k = 2;
@@ -2790,7 +3040,7 @@ TEST(TestConvWrwKernelMatch, TheGenericLoopServesStridedOperandsAlone)
     tiny.filter = {1, 3};
     tiny.prePadding = tiny.postPadding = {0, 0};
     EXPECT_FALSE(admits(rowsFields(), "gfx942", tiny));
-    EXPECT_TRUE(admits(genericFields(), "gfx942", tiny));
+    EXPECT_FALSE(admits(genericFields(), "gfx942", tiny));
 }
 
 TEST(TestConvWrwKernelMatch, FlatPositionsServeRowsShorterThanAStep)
@@ -2918,6 +3168,96 @@ TEST(TestConvWrwKernelMatch, TheGenericLoopLeavesWidelyDilatedSmallFiltersToBlas
     EXPECT_TRUE(admits(genericFields(), "gfx942", dilated({1, 10}, {1, 6})));
     EXPECT_TRUE(admits(genericFields(), "gfx942", dilated({2, 5}, {6, 1})));
     EXPECT_FALSE(admits(genericFields(), "gfx942", dilated({1, 9}, {1, 6})));
+    // gfx11 and gfx12's matrix atoms keep them (BLAS is slow there): dilation 6 and 12 admit.
+    // gfx12's FMA form (fp32) declines them, gfx11's admits.
+    const auto wmma = [](const char* atom) {
+        auto f = genericFields();
+        f.atom = atom;
+        f.atomId = conv_wrw::atomIdOf(atom);
+        f.wk = 4;
+        f.wc = 2;
+        return f;
+    };
+    EXPECT_TRUE(admits(wmma("wmma11_f16"), "gfx1101", dilated({3, 3}, {6, 6})));
+    EXPECT_TRUE(admits(wmma("wmma11_f16"), "gfx1100", dilated({3, 3}, {12, 12})));
+    EXPECT_TRUE(admits(wmma("wmma11_f16"), "gfx1151", dilated({3, 3}, {6, 1})));
+    EXPECT_TRUE(admits(wmma("wmma12_f16"), "gfx1201", dilated({3, 3}, {6, 6})));
+    EXPECT_TRUE(admits(wmma("wmma12_f16"), "gfx1200", dilated({3, 3}, {12, 12})));
+    const auto fp32Dilated = [&](std::vector<int64_t> d) {
+        auto shape = dilated({3, 3}, std::move(d));
+        shape.dataType = DataType::FLOAT;
+        return shape;
+    };
+    EXPECT_TRUE(admits(genericFmaFields(), "gfx1201", fp32Dilated({5, 5})));
+    EXPECT_FALSE(admits(genericFmaFields(), "gfx1201", fp32Dilated({6, 6})));
+    EXPECT_TRUE(admits(genericFmaFields(), "gfx1100", fp32Dilated({6, 6})));
+}
+
+TEST(TestConvWrwKernelMatch, TheGenericLoopLeavesNarrowGroupsToTheVectorEngines)
+{
+    // groups x (c / groups, k / groups): fewer than 16 input and fewer than 16 output channels
+    // a group declines (depthwise, ResNeXt-class); a group as wide as 16 on either side admits.
+    const auto grouped = [](int64_t groups, int64_t cg, int64_t kg, bool channelsLast) {
+        auto shape = baseShape();
+        shape.groups = groups;
+        shape.c = groups * cg;
+        shape.k = groups * kg;
+        shape.channelsLast = channelsLast;
+        return shape;
+    };
+    auto wmma11 = genericClFields();
+    wmma11.atom = "wmma11_f16";
+    wmma11.atomId = conv_wrw::atomIdOf("wmma11_f16");
+    wmma11.bk = 64;
+    wmma11.bc = 64;
+    wmma11.wk = 4;
+    wmma11.wc = 2;
+    // Channels-first elements on gfx942, channel vectors on gfx1101.
+    EXPECT_TRUE(admits(genericFields(), "gfx942", grouped(4, 16, 16, false)));
+    EXPECT_FALSE(admits(genericFields(), "gfx942", grouped(4, 15, 15, false)));
+    EXPECT_TRUE(admits(genericFields(), "gfx942", grouped(4, 15, 16, false)));
+    EXPECT_TRUE(admits(genericFields(), "gfx942", grouped(4, 16, 15, false)));
+    EXPECT_FALSE(admits(genericFields(), "gfx942", grouped(64, 1, 1, false)));
+    EXPECT_FALSE(admits(genericFields(), "gfx942", grouped(32, 1, 2, false)));
+    EXPECT_TRUE(admits(wmma11, "gfx1101", grouped(2, 16, 16, true)));
+    EXPECT_FALSE(admits(wmma11, "gfx1101", grouped(2, 8, 8, true)));
+    // One group is not narrow, however few its channels.
+    EXPECT_TRUE(admits(genericFields(), "gfx942", grouped(1, 8, 8, false)));
+    // The FMA form too (fp32 on RDNA), past its own few-channel gate.
+    const auto fp32 = [&](int64_t groups, int64_t cg, int64_t kg) {
+        auto shape = grouped(groups, cg, kg, false);
+        shape.dataType = DataType::FLOAT;
+        return shape;
+    };
+    EXPECT_TRUE(admits(genericFmaFields(), "gfx1201", fp32(2, 16, 16)));
+    EXPECT_FALSE(admits(genericFmaFields(), "gfx1201", fp32(2, 8, 8)));
+}
+
+TEST(TestConvWrwKernelMatch, TheGenericLoopLeavesStemsAndNarrowRowsToBlas)
+{
+    // Fewer than 8 input channels a group (stems) decline, on the matrix atoms as in the FMA
+    // form.
+    auto stem = baseShape();
+    stem.c = 7;
+    EXPECT_FALSE(admits(genericFields(), "gfx942", stem));
+    stem.c = 8;
+    EXPECT_TRUE(admits(genericFields(), "gfx942", stem));
+    // Output rows of fewer than 4 positions decline: 3x3 unpadded on 5 columns gives 3, on 6
+    // gives 4.
+    auto narrow = baseShape();
+    narrow.prePadding = narrow.postPadding = {0, 0};
+    narrow.input = {10, 5};
+    EXPECT_FALSE(admits(genericFields(), "gfx942", narrow));
+    narrow.input = {10, 6};
+    EXPECT_TRUE(admits(genericFields(), "gfx942", narrow));
+    // The flattened-position form fills its steps across rows: it keeps the 3-column rows,
+    // and the stems' decline still holds for it.
+    auto flat = genericFields();
+    flat.flat = 1;
+    narrow.input = {10, 5};
+    EXPECT_TRUE(admits(flat, "gfx942", narrow));
+    stem.c = 7;
+    EXPECT_FALSE(admits(flat, "gfx942", stem));
 }
 
 TEST(TestConvWrwLaunch, TheGenericWindowGroupsWidthTapsPerFilterRow)
@@ -3246,7 +3586,9 @@ TEST(TestConvWrwSpec, MalformedKeysAreNotClasses)
     for(const char* key : {"",
                            "R0.3.1.1.0",
                            "16R0.3.1.1.0", // fma
-                           "17R0.3.1.1.0",
+                           "17R0.3.1.1.0", // native atoms are outside the legacy spec namespace
+                           "18R0.3.1.1.0",
+                           "19R0.3.1.1.0",
                            "-1R0.3.1.1.0",
                            "4X0.3.1.1.0",
                            "4R3.3.1.1.0",
@@ -3374,41 +3716,486 @@ TEST(TestConvWrwLds, MirrorsTheKernelsArithmetic)
               3 * (2 * (40 * 64 + 32 * 64) + 512) * 2 + 1 * 4 * 3 * 2 * 2 * 64 * 16);
 }
 
-TEST(TestConvWrwDefines, EveryFieldIsADefine)
+WrwConfig genericConfig(DataType dtype, bool channelsLast = false)
 {
-    auto f = dmaFields();
-    const auto defines
-        = conv_wrw::compileDefinesFor(DataType::BFLOAT16, configOf(f), "K1AtomMfma32Bf16X16");
-    ASSERT_EQ(defines.size(), 21u);
-    EXPECT_EQ(defines[0], (std::pair<std::string, std::string>{"CONV_K3_T", "unsigned short"}));
-    EXPECT_EQ(defines[1],
-              (std::pair<std::string, std::string>{"CONV_K3_ATOM", "K1AtomMfma32Bf16X16"}));
-    EXPECT_EQ(defines[2], (std::pair<std::string, std::string>{"CONV_K3_LOOP", "2"}));
-    EXPECT_EQ(defines[13], (std::pair<std::string, std::string>{"CONV_K3_TK", "0"}));
-    EXPECT_EQ(defines[18], (std::pair<std::string, std::string>{"CONV_K3_NS", "2"}));
-    EXPECT_EQ(defines[19], (std::pair<std::string, std::string>{"CONV_K3_WQ", "0"}));
-    EXPECT_EQ(defines[20], (std::pair<std::string, std::string>{"CONV_K3_DWS", "1"}));
-    const auto direct
-        = conv_wrw::compileDefinesFor(DataType::HALF, configOf(directFields()), "K1AtomMfmaF16X32");
-    ASSERT_EQ(direct.size(), 21u);
-    EXPECT_EQ(direct[2], (std::pair<std::string, std::string>{"CONV_K3_LOOP", "5"}));
-    EXPECT_EQ(direct[19], (std::pair<std::string, std::string>{"CONV_K3_WQ", "2"}));
-    EXPECT_EQ(direct[20], (std::pair<std::string, std::string>{"CONV_K3_DWS", "0"}));
-    // The FMA ring names no atom.
-    const auto fma = conv_wrw::compileDefinesFor(DataType::FLOAT, configOf(fmaFields()), "");
-    ASSERT_EQ(fma.size(), 20u);
-    EXPECT_EQ(fma[0], (std::pair<std::string, std::string>{"CONV_K3_T", "float"}));
-    EXPECT_EQ(fma[1], (std::pair<std::string, std::string>{"CONV_K3_LOOP", "3"}));
-    EXPECT_EQ(fma[12], (std::pair<std::string, std::string>{"CONV_K3_TK", "4"}));
-    // Block-based buffers: CONV_K3_PB is defined only when set.
-    auto pb = rowsFields();
-    pb.pb = 1;
-    const auto blocks
-        = conv_wrw::compileDefinesFor(DataType::HALF, configOf(pb), "K1AtomMfma32F16");
-    ASSERT_EQ(blocks.size(), 22u);
-    EXPECT_EQ(blocks[21], (std::pair<std::string, std::string>{"CONV_K3_PB", "1"}));
-    EXPECT_THROW(static_cast<void>(conv_wrw::compileDefinesFor(DataType::DOUBLE, configOf(f), "")),
-                 std::invalid_argument);
+    WrwConfig c;
+    if(dtype == DataType::FLOAT)
+    {
+        c.atom = "wmma125_f32";
+    }
+    else if(dtype == DataType::HALF)
+    {
+        c.atom = "wmma125_f16";
+    }
+    else
+    {
+        c.atom = "wmma125_bf16";
+    }
+    c.atomId = conv_wrw::atomIdOf(c.atom);
+    c.loop = conv_wrw::LOOP_NATIVE_GENERIC;
+    c.layout = channelsLast ? 1 : 0;
+    c.bk = c.bc = 32;
+    c.bq = 64;
+    c.fr = c.s = c.sw = c.dw = 0;
+    c.wk = c.wc = 2;
+    c.vec = c.dws = 1;
+    c.xcd = c.align = c.ns = c.wq = c.tk = c.tc = 0;
+    c.bpu = 2;
+    return c;
+}
+
+TEST(TestConvWrwGeneric, RuntimeGeometryAndGroupedChannelTails)
+{
+    for(const auto dtype : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
+    {
+        for(const bool channelsLast : {false, true})
+        {
+            for(const auto mode : {ConvMode::CROSS_CORRELATION, ConvMode::CONVOLUTION})
+            {
+                auto shape = baseShape();
+                shape.dataType = dtype;
+                shape.mode = mode;
+                shape.channelsLast = channelsLast;
+                shape.c = 10;
+                shape.k = 14;
+                shape.groups = 2;
+                shape.input = {5, 9, 17};
+                shape.filter = {2, 4, 5};
+                shape.prePadding = {1, 4, 6};
+                shape.postPadding = {0, 1, 2};
+                shape.stride = {2, 3, 2};
+                shape.dilation = {2, 2, 3};
+                auto spec = specOf(shape);
+                // Exercise the filter layout independently of the activation layout.
+                spec.w.strides = packedStrides(spec.w.dims, !channelsLast);
+                const auto problem = parse(spec);
+                ASSERT_TRUE(problem.has_value());
+                auto config = genericConfig(dtype, channelsLast);
+                const auto launch
+                    = conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1250", 8));
+                ASSERT_TRUE(launch.has_value());
+                const auto& a = problem->base.args;
+                const int64_t positions = a.n * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
+                EXPECT_EQ(launch->args.steps, (positions + config.bq - 1) / config.bq);
+                EXPECT_EQ(launch->gridX, 2 * problem->taps);
+                EXPECT_EQ(launch->gridY, 1u);
+                EXPECT_EQ(launch->reduce.flip, mode == ConvMode::CONVOLUTION);
+                EXPECT_LE(launch->workspaceBytes, conv_wrw::MAX_WORKSPACE_BYTES);
+                EXPECT_FALSE(
+                    conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1201")).has_value());
+                config.s = 5; // Runtime loop metadata cannot falsely claim a specialized geometry.
+                EXPECT_FALSE(
+                    conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1250")).has_value());
+            }
+        }
+    }
+}
+
+TEST(TestConvWrwGeneric, NativeScalarGathersAdmitStridedOperandsInMatchingLoadOrder)
+{
+    for(const auto dtype : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
+    {
+        for(const int64_t pitch : {0, 26, 32})
+        {
+            SCOPED_TRACE(dtypeName(dtype));
+            SCOPED_TRACE(pitch);
+            auto shape = baseShape();
+            shape.dataType = dtype;
+            shape.channelsLast = pitch != 0;
+            auto spec = specOf(shape);
+            spec.x.strides
+                = pitch == 0 ? std::vector<int64_t>{int64_t{24} * 10 * 16, int64_t{10} * 16, 16, 1}
+                             : std::vector<int64_t>{int64_t{10} * 12 * pitch, 1, 12 * pitch, pitch};
+            const auto problem = parse(spec);
+            ASSERT_TRUE(problem.has_value());
+            ASSERT_FALSE(problem->channelsFirst || problem->channelsLast);
+            auto config = genericConfig(dtype, pitch == 32);
+            EXPECT_TRUE(conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1250")).has_value());
+            config.layout = 1 - config.layout;
+            EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1250")).has_value());
+            // Vectorized specialized rows must not claim the scalar gather's strided inputs.
+            config.loop = conv_wrw::LOOP_ROWS;
+            config.fr = 1;
+            config.s = 3;
+            config.sw = config.dw = 1;
+            config.vec = 16 / problem->elementBytes;
+            EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1250")).has_value());
+        }
+    }
+}
+
+TEST(TestConvWrwLaunch, ChannelsFirstStoreKeepsSplitAndFilterLayoutContracts)
+{
+    auto config = genericConfig(DataType::HALF);
+    config.loop = conv_wrw::LOOP_TAP_TILED;
+    config.bk = config.bc = 64;
+    config.bq = 32;
+    config.dws = 2;
+    config.bpu = 1;
+    auto shape = baseShape();
+    shape.n = 1;
+    shape.input = {4, 4};
+    const auto problem = parse(specOf(shape));
+    ASSERT_TRUE(problem.has_value());
+    const auto device = deviceOf("gfx1250", 256);
+    const auto direct = conv_wrw::wrwLaunchFor(*problem, config, device);
+    ASSERT_TRUE(direct.has_value());
+    EXPECT_EQ(direct->args.splits, 1);
+    EXPECT_TRUE(direct->dwStore);
+    EXPECT_EQ(direct->workspaceBytes, 0u);
+    auto legacyConfig = config;
+    legacyConfig.dws = 1;
+    const auto legacy = conv_wrw::wrwLaunchFor(*problem, legacyConfig, device);
+    ASSERT_TRUE(legacy.has_value());
+    EXPECT_FALSE(legacy->dwStore);
+    EXPECT_GT(legacy->workspaceBytes, 0u);
+
+    shape.n = 16;
+    shape.input = {16, 16};
+    const auto large = parse(specOf(shape));
+    ASSERT_TRUE(large.has_value());
+    const auto split = conv_wrw::wrwLaunchFor(*large, config, device);
+    ASSERT_TRUE(split.has_value());
+    EXPECT_GT(split->args.splits, 1);
+    EXPECT_FALSE(split->dwStore);
+    EXPECT_GT(split->workspaceBytes, 0u);
+
+    auto mixedSpec = specOf(shape);
+    mixedSpec.w.strides = filterChannelsLast(mixedSpec.w.dims);
+    const auto mixed = parse(mixedSpec);
+    ASSERT_TRUE(mixed.has_value());
+    EXPECT_FALSE(conv_wrw::wrwLaunchFor(*mixed, config, device).has_value());
+    config.loop = conv_wrw::LOOP_NATIVE_GENERIC;
+    EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, device).has_value());
+}
+
+TEST(TestConvWrwGeneric, GlobalAddressesBeyondBufferImageLimit)
+{
+    auto shape = baseShape();
+    shape.n = shape.k = 1;
+    shape.c = int64_t{1} << 27;
+    shape.input = {1, 8};
+    shape.filter = {1, 1};
+    shape.prePadding = shape.postPadding = {0, 0};
+    shape.stride = {1, 1};
+    const auto problem = parse(specOf(shape));
+    ASSERT_TRUE(problem.has_value());
+    const auto generic
+        = conv_wrw::wrwLaunchFor(*problem, genericConfig(DataType::HALF), deviceOf("gfx1250"));
+    ASSERT_TRUE(generic.has_value());
+    EXPECT_EQ(generic->args.xImage * 2, TWO_POW_31);
+    EXPECT_EQ(generic->args.xs[0], int64_t{1} << 30);
+    auto specialized = genericConfig(DataType::HALF);
+    specialized.loop = conv_wrw::LOOP_ROWS;
+    specialized.fr = specialized.s = specialized.dw = 1;
+    specialized.sw = 1;
+    specialized.vec = 8;
+    EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, specialized, deviceOf("gfx1250")).has_value());
+}
+
+TEST(TestConvWrwGeneric, RefusesUnallocatableSplitPartials)
+{
+    auto shape = baseShape();
+    shape.n = 1;
+    shape.c = shape.k = 16384;
+    shape.input = {2, 2};
+    shape.filter = {3, 3};
+    const auto problem = parse(specOf(shape));
+    ASSERT_TRUE(problem.has_value());
+    EXPECT_FALSE(
+        conv_wrw::wrwLaunchFor(*problem, genericConfig(DataType::HALF), deviceOf("gfx1250"))
+            .has_value());
+}
+
+TEST(TestConvWrwWorkspace, NativeCapPreservesLegacyLargeRingAdmission)
+{
+    auto shape = baseShape();
+    shape.dataType = DataType::HALF;
+    shape.n = 1;
+    shape.groups = 1;
+    shape.c = shape.k = 8192;
+    shape.input = {2, 2};
+    shape.filter = {3, 3};
+    shape.prePadding = shape.postPadding = {1, 1};
+    const auto problem = parse(specOf(shape));
+    ASSERT_TRUE(problem.has_value());
+    ConfigFields fields;
+    const auto legacy = conv_wrw::wrwLaunchFor(*problem, configOf(fields), deviceOf("gfx942"));
+    ASSERT_TRUE(legacy.has_value());
+    EXPECT_EQ(legacy->args.splits, 1);
+    EXPECT_EQ(legacy->workspaceBytes, size_t{9} * 8192 * 8192 * sizeof(float));
+    fields.atom = "wmma125_f16";
+    fields.atomId = conv_wrw::atomIdOf(fields.atom);
+    EXPECT_FALSE(
+        conv_wrw::wrwLaunchFor(*problem, configOf(fields), deviceOf("gfx1250")).has_value());
+    shape.c = shape.k = 4096;
+    const auto smaller = parse(specOf(shape));
+    ASSERT_TRUE(smaller.has_value());
+    EXPECT_TRUE(
+        conv_wrw::wrwLaunchFor(*smaller, configOf(fields), deviceOf("gfx1250")).has_value());
+}
+
+TEST(TestConvWrwTapTiled, UsesAvailableLdsRatherThanLegacyLimit)
+{
+    for(const auto dtype : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
+    {
+        auto shape = baseShape();
+        shape.dataType = dtype;
+        const auto problem = parse(specOf(shape));
+        ASSERT_TRUE(problem.has_value());
+        auto config = genericConfig(dtype);
+        config.loop = conv_wrw::LOOP_TAP_TILED;
+        config.bc = 128;
+        config.bq = 256;
+        config.wc = 4;
+        auto device = deviceOf("gfx1250");
+        device.sharedMemPerBlock = size_t{64} * 1024;
+        EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, device).has_value());
+        device.sharedMemPerBlock = size_t{320} * 1024;
+        EXPECT_TRUE(conv_wrw::wrwLaunchFor(*problem, config, device).has_value());
+    }
+}
+
+TEST(TestConvWrwDilationRows, ChunkAndLoadBoundsAtWidth65And128)
+{
+    auto shape = baseShape();
+    shape.c = 2048;
+    shape.k = 256;
+    shape.n = 16;
+    shape.dilation = {24, 24};
+    shape.prePadding = shape.postPadding = {24, 24};
+    auto config = genericConfig(DataType::HALF);
+    config.loop = conv_wrw::LOOP_ROWS;
+    config.bk = config.bc = 64;
+    config.fr = config.sw = 1;
+    config.s = 3;
+    config.dw = 24;
+    config.vec = 8;
+    for(const int64_t width : {65, 128})
+    {
+        shape.input = {width, width};
+        const auto problem = parse(specOf(shape));
+        ASSERT_TRUE(problem.has_value());
+        for(const int64_t bq : {32, 64, 128})
+        {
+            config.bq = bq;
+            auto device = deviceOf("gfx1250");
+            const auto launch = conv_wrw::wrwLaunchFor(*problem, config, device);
+            ASSERT_TRUE(launch.has_value());
+            const int64_t chunks = (width + bq - 1) / bq;
+            EXPECT_EQ(launch->args.chunks, chunks);
+            EXPECT_EQ(launch->args.steps, 16 * width * chunks);
+            device.sharedMemPerBlock = static_cast<size_t>(conv_wrw::ldsBytesOf(config, 2) - 1);
+            EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, device).has_value());
+        }
+    }
+    const auto problem = parse(specOf(shape));
+    ASSERT_TRUE(problem.has_value());
+    config.bq = 32;
+    config.wk = config.wc = 1;
+    const auto device = deviceOf("gfx1250");
+    ASSERT_TRUE(conv_wrw::wrwLaunchFor(*problem, config, device).has_value());
+    config.bc = 128; // 40 x-window vector loads per lane exceed the real 32-bit pass mask.
+    EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, device).has_value());
+}
+
+TEST(TestConvWrwSmallK, RefusesUnsupportedChannelCountLayoutAndArchitecture)
+{
+    for(const auto dtype : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
+    {
+        auto shape = baseShape();
+        shape.dataType = dtype;
+        shape.channelsLast = true;
+        shape.c = 10;
+        shape.k = 6;
+        shape.groups = 2;
+        auto config = genericConfig(dtype, true);
+        config.loop = conv_wrw::LOOP_SMALL_K;
+        config.atom = "fma";
+        config.atomId = 16;
+        config.bk = config.tk = 4;
+        config.bc = 64;
+        config.tc = 1;
+        config.wk = config.wc = 0;
+        auto problem = parse(specOf(shape));
+        ASSERT_TRUE(problem.has_value());
+        EXPECT_TRUE(conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1250")).has_value());
+        EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1201")).has_value());
+        shape.k = 10; // Five output channels per group cannot fit the four accumulators.
+        problem = parse(specOf(shape));
+        ASSERT_TRUE(problem.has_value());
+        EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1250")).has_value());
+        shape.k = 6;
+        shape.channelsLast = false;
+        problem = parse(specOf(shape));
+        ASSERT_TRUE(problem.has_value());
+        EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1250")).has_value());
+    }
+}
+
+WrwConfig accurateConfig(bool channelsLast = false)
+{
+    WrwConfig c;
+    c.atom = "fma";
+    c.atomId = conv_wrw::atomIdOf(c.atom);
+    c.loop = conv_wrw::LOOP_ACCURATE;
+    c.layout = channelsLast ? 1 : 0;
+    c.bk = c.bc = 8;
+    c.bq = 32;
+    c.tk = c.tc = c.vec = 1;
+    c.bpu = 2;
+    return c;
+}
+
+TEST(TestConvWrwAccurate, CoversRuntimeGeometryWithoutDirectStoreOrFloatWorkspace)
+{
+    for(const bool channelsLast : {false, true})
+    {
+        for(const bool filterLast : {false, true})
+        {
+            for(const auto mode : {ConvMode::CROSS_CORRELATION, ConvMode::CONVOLUTION})
+            {
+                auto shape = baseShape();
+                shape.dataType = DataType::FLOAT;
+                shape.channelsLast = channelsLast;
+                shape.mode = mode;
+                shape.c = 10;
+                shape.k = 14;
+                shape.groups = 2;
+                shape.input = {5, 9, 17};
+                shape.filter = {2, 4, 5};
+                shape.prePadding = {1, 4, 6};
+                shape.postPadding = {0, 1, 2};
+                shape.stride = {2, 3, 2};
+                shape.dilation = {2, 2, 3};
+                auto spec = specOf(shape);
+                spec.w.strides = packedStrides(spec.w.dims, filterLast);
+                const auto problem = parse(spec);
+                ASSERT_TRUE(problem.has_value());
+                const auto launch = conv_wrw::wrwLaunchFor(
+                    *problem, accurateConfig(channelsLast), deviceOf("gfx1250"));
+                ASSERT_TRUE(launch.has_value());
+                EXPECT_FALSE(launch->dwStore);
+                EXPECT_EQ(launch->workspaceBytes,
+                          size_t(launch->args.splits) * size_t(launch->args.partialElems)
+                              * sizeof(double));
+                EXPECT_LE(launch->workspaceBytes, conv_wrw::MAX_WORKSPACE_BYTES);
+                EXPECT_GE(launch->args.splits * launch->args.stepsPerSplit, launch->args.steps);
+                EXPECT_LT((launch->args.splits - 1) * launch->args.stepsPerSplit,
+                          launch->args.steps);
+            }
+        }
+    }
+}
+
+TEST(TestConvWrwAccurate, RefusesEveryUnsupportedConfigFieldAndDeviceResource)
+{
+    auto shape = baseShape();
+    shape.dataType = DataType::FLOAT;
+    const auto problem = parse(specOf(shape));
+    ASSERT_TRUE(problem.has_value());
+    const auto good = accurateConfig();
+    using Mutation = std::pair<const char*, std::function<void(WrwConfig&)>>;
+    const std::vector<Mutation> mutations{
+        {"Atom",
+         [](auto& c) {
+             c.atom = "mfma16_f32";
+             c.atomId = 3;
+         }},
+        {"AtomId", [](auto& c) { ++c.atomId; }},
+        {"Loop", [](auto& c) { c.loop = 13; }},
+        {"Layout", [](auto& c) { c.layout = 1; }},
+        {"Transpose", [](auto& c) { c.layout = 2; }},
+        {"Bk", [](auto& c) { c.bk = 32; }},
+        {"Bc", [](auto& c) { c.bc = 32; }},
+        {"Bq", [](auto& c) { c.bq = 128; }},
+        {"Tk", [](auto& c) { c.tk = 2; }},
+        {"Tc", [](auto& c) { c.tc = 2; }},
+        {"Vec", [](auto& c) { c.vec = 4; }},
+        {"Wk", [](auto& c) { c.wk = 1; }},
+        {"Wc", [](auto& c) { c.wc = 1; }},
+        {"Fr", [](auto& c) { c.fr = 1; }},
+        {"S", [](auto& c) { c.s = 3; }},
+        {"Sw", [](auto& c) { c.sw = 1; }},
+        {"Dw", [](auto& c) { c.dw = 1; }},
+        {"Xcd", [](auto& c) { c.xcd = 1; }},
+        {"Align", [](auto& c) { c.align = 1; }},
+        {"Ns", [](auto& c) { c.ns = 2; }},
+        {"Wq", [](auto& c) { c.wq = 1; }},
+        {"Dws", [](auto& c) { c.dws = 1; }},
+        {"Bpu", [](auto& c) { c.bpu = 3; }},
+    };
+    for(const auto& [name, mutate] : mutations)
+    {
+        SCOPED_TRACE(name);
+        auto config = good;
+        mutate(config);
+        EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1250")).has_value());
+    }
+    for(const auto dtype : {DataType::HALF, DataType::BFLOAT16})
+    {
+        shape.dataType = dtype;
+        const auto lowPrecision = parse(specOf(shape));
+        ASSERT_TRUE(lowPrecision.has_value());
+        EXPECT_FALSE(conv_wrw::wrwLaunchFor(*lowPrecision, good, deviceOf("gfx1250")).has_value());
+    }
+    auto device = deviceOf("gfx1250");
+    device.sharedMemPerBlock = size_t(conv_wrw::ldsBytesOf(good, 4)) - 1;
+    EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, good, device).has_value());
+    device = deviceOf("gfx1250");
+    device.multiProcessorCount = 0;
+    EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, good, device).has_value());
+    for(const char* arch : {"gfx000", "gfx950", "gfx1201", ""})
+    {
+        EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, good, deviceOf(arch)).has_value()) << arch;
+    }
+    EXPECT_TRUE(conv_wrw::wrwLaunchFor(*problem, good, deviceOf("gfx1250:xnack-")).has_value());
+}
+
+TEST(TestConvWrwAccurate, EnforcesDoubleWorkspaceBoundaryAndAddressesLargeImages)
+{
+    auto shape = baseShape();
+    shape.dataType = DataType::FLOAT;
+    shape.n = shape.k = 1;
+    shape.c = int64_t{1} << 27;
+    shape.input = {8};
+    shape.filter = {1};
+    shape.prePadding = shape.postPadding = {0};
+    shape.stride = shape.dilation = {1};
+    const auto problem = parse(specOf(shape));
+    ASSERT_TRUE(problem.has_value());
+    const auto launch = conv_wrw::wrwLaunchFor(*problem, accurateConfig(), deviceOf("gfx1250"));
+    ASSERT_TRUE(launch.has_value());
+    EXPECT_EQ(launch->workspaceBytes, size_t(conv_wrw::MAX_WORKSPACE_BYTES));
+    EXPECT_GT(launch->args.xImage * static_cast<int64_t>(sizeof(float)), TWO_POW_31);
+    const auto suffixed
+        = conv_wrw::wrwLaunchFor(*problem, accurateConfig(), deviceOf("gfx1250:xnack-"));
+    ASSERT_TRUE(suffixed.has_value());
+    EXPECT_EQ(suffixed->workspaceBytes, size_t(conv_wrw::MAX_WORKSPACE_BYTES));
+    ++shape.c;
+    const auto tooLarge = parse(specOf(shape));
+    ASSERT_TRUE(tooLarge.has_value());
+    EXPECT_FALSE(
+        conv_wrw::wrwLaunchFor(*tooLarge, accurateConfig(), deviceOf("gfx1250")).has_value());
+    EXPECT_FALSE(conv_wrw::wrwLaunchFor(*tooLarge, accurateConfig(), deviceOf("gfx1250:xnack-"))
+                     .has_value());
+    EXPECT_EQ(conv_wrw::splitsWanted(1, 2, 1 << 20, int64_t{1} << 26, 304, sizeof(double)), 2);
+}
+
+TEST(TestConvWrwAccurate, RefusesOversizedRuntimeGrid)
+{
+    auto shape = baseShape();
+    shape.dataType = DataType::FLOAT;
+    shape.n = 1;
+    shape.c = shape.k = shape.groups = int64_t{1} << 30;
+    shape.input = {3};
+    shape.filter = {3};
+    shape.prePadding = shape.postPadding = {0};
+    shape.stride = shape.dilation = {1};
+    const auto problem = parse(specOf(shape));
+    ASSERT_TRUE(problem.has_value());
+    EXPECT_FALSE(
+        conv_wrw::wrwLaunchFor(*problem, accurateConfig(), deviceOf("gfx1250")).has_value());
 }
 
 TEST(TestConvWrwComputeType, ServesCudnnsComputeTypesPerElementType)

@@ -28,8 +28,10 @@
 #endif
 // RDNA families, not chip lists, so a gfx11-generic / gfx12-generic build keeps its WMMA atoms.
 #include "ConvArchFamily.h"
+#include "ConvPackedMath.h"
 #define K1_HAS_WMMA11 HKP_ARCH_GFX11
 #define K1_HAS_WMMA12 HKP_ARCH_GFX12
+#define K1_HAS_WMMA125 HKP_ARCH_GFX1250
 
 typedef _Float16 k1_half;
 typedef unsigned short k1_bf16; // bf16 bits
@@ -168,7 +170,9 @@ typedef long long K1Pos;
 #else
 typedef int K1Pos;
 #endif
-#if HKP_ARCH_GFX11 || HKP_ARCH_GFX12
+#if HKP_ARCH_GFX1250
+#define K1_RSRC_FLAGS 0
+#elif HKP_ARCH_GFX11 || HKP_ARCH_GFX12
 #define K1_RSRC_FLAGS 0x31004000
 #elif defined(__gfx1010__) || defined(__gfx1030__) || defined(__gfx1031__) || defined(__gfx1032__)
 #define K1_RSRC_FLAGS 0x31014000
@@ -573,6 +577,67 @@ struct K1AtomWmma12Bf16 : K1Wmma12
     {
 #if K1_HAS_WMMA12
         return __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(a, b, c);
+#else
+        __builtin_trap();
+        return c;
+#endif
+    }
+};
+
+// gfx1250's wave32 instructions keep the accumulator mapping of gfx1200/1201, but
+// each half-wave supplies 16 reduction elements for f16/bf16 and two for f32.
+struct K1Wmma125 : K1Wmma12
+{
+    static constexpr int KA = 32, KPL = 16;
+};
+
+struct K1AtomWmma125F16 : K1Wmma125
+{
+    typedef _Float16 elem;
+    typedef k1h<16> frag;
+    __device__ static acc mma(frag a, frag b, acc c)
+    {
+#if K1_HAS_WMMA125
+        return __builtin_amdgcn_wmma_f32_16x16x32_f16(false, a, false, b, 0, c, false, false);
+#else
+        __builtin_trap();
+        return c;
+#endif
+    }
+};
+
+struct K1AtomWmma125Bf16 : K1Wmma125
+{
+    typedef short elem;
+    typedef k1s<16> frag;
+    __device__ static acc mma(frag a, frag b, acc c)
+    {
+#if K1_HAS_WMMA125
+        typedef __bf16 bf16x16 __attribute__((ext_vector_type(16)));
+        return __builtin_amdgcn_wmma_f32_16x16x32_bf16(false,
+                                                       __builtin_bit_cast(bf16x16, a),
+                                                       false,
+                                                       __builtin_bit_cast(bf16x16, b),
+                                                       0,
+                                                       c,
+                                                       false,
+                                                       false);
+#else
+        __builtin_trap();
+        return c;
+#endif
+    }
+};
+
+struct K1AtomWmma125F32 : K1Wmma125
+{
+    static constexpr int KA = 4, KPL = 2;
+    typedef float elem;
+    typedef k1f<2> frag;
+    __device__ static acc mma(frag a, frag b, acc c)
+    {
+#if K1_HAS_WMMA125
+        return __builtin_amdgcn_wmma_f32_16x16x4_f32(false, a, false, b, 0, c, false, false);
 #else
         __builtin_trap();
         return c;
@@ -2093,6 +2158,72 @@ struct K1TilesCf : K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, 0, 0>
     }
 };
 
+// Pointwise channels-first input: coalesced spatial vectors, transposed inside the A tile.
+// The matcher requires whole spatial vectors, one group, unit stride and no padding.
+template <class T, int BM, int BN, int BK, int VEC, int THREADS, int DIR, int WD, int PACK>
+struct K1CFPointTiles : K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK>
+{
+    using Base = K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK>;
+    using Raw = typename Base::Raw;
+    static constexpr int PASSES = BM * BK / (VEC * THREADS);
+    static_assert(DIR == K1_FORWARD && WD == 0 && PACK == 0 && BM % VEC == 0);
+    static_assert(BM * BK % (VEC * THREADS) == 0);
+    long long offsets[PASSES];
+    bool live[PASSES];
+    int channels[PASSES], rows[PASSES], spatial;
+    Raw values[PASSES];
+    __device__ void init(const K1Args& a,
+                         const K1Gather& gth,
+                         const K1TapMap& mp,
+                         int g,
+                         long long m0,
+                         int n0,
+                         int tid)
+    {
+        Base::init(a, gth, mp, g, m0, n0, tid);
+        spatial = a.di * a.hi * a.wi;
+#pragma unroll
+        for(int p = 0; p < PASSES; ++p)
+        {
+            const int u = tid + p * THREADS;
+            channels[p] = u / (BM / VEC);
+            rows[p] = u % (BM / VEC) * VEC;
+            const long long m = m0 + rows[p];
+            const long long img = m / spatial, pos = m % spatial;
+            live[p] = m < gth.rows;
+            offsets[p] = (img * a.c + gth.chanOffset + channels[p]) * spatial + pos;
+        }
+    }
+    __device__ void load()
+    {
+        const int c0 = this->curIt * BK;
+        const bool valid = this->curIt++ < this->endIt;
+#pragma unroll
+        for(int p = 0; p < PASSES; ++p)
+        {
+            values[p] = Raw{};
+            if(valid && live[p] && c0 + channels[p] < this->gather.cgroup)
+                values[p] = *reinterpret_cast<const Raw*>(this->src + offsets[p]
+                                                          + static_cast<long long>(c0) * spatial);
+        }
+        const int c = c0 + this->kv;
+        this->loadBTap(0, 0, 0, c0, c, c < this->gather.cgroup && valid, valid);
+    }
+    __device__ void storeRows(T* as, T* bs, int ld) const
+    {
+        typedef T Elements __attribute__((ext_vector_type(VEC)));
+#pragma unroll
+        for(int p = 0; p < PASSES; ++p)
+        {
+            const Elements v = __builtin_bit_cast(Elements, values[p]);
+#pragma unroll
+            for(int e = 0; e < VEC; ++e)
+                as[(rows[p] + e) * ld + channels[p]] = v[e];
+        }
+        this->storeB(bs, ld, 0);
+    }
+};
+
 // Backward data reads the filter as wT[g][tap][c][k]: per group and tap, w's [kg][cg] slice
 // transposed through 32 x 32 LDS tiles. Grid (ceil(cg / 32), ceil(kg / 32), groups * taps),
 // 256 threads.
@@ -2491,8 +2622,8 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
     static_assert(K1_PATCH == 0 || DIR == K1_FORWARD || CF == 0,
                   "patch backward data writes channels-last dx");
     static_assert(CFX == 0
-                      || (CF != 0 && !SPLIT && WD == 0 && PACK == 0 && DMA == 0 && K1_PATCH == 0),
-                  "channels-first input: CF output, native math, no direct filter, tap packing, "
+                      || (CF == 1 && !SPLIT && WD == 0 && PACK == 0 && DMA == 0 && K1_PATCH == 0),
+                  "channels-first input: CF 1 output, native math, no direct filter, tap packing, "
                   "DMA or patch view");
 
     __shared__ __attribute__((aligned(16))) T lds[LDS];
@@ -2535,9 +2666,13 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
     }
 #endif
 
-    typename K1If<CFX != 0,
-                  K1TilesCf<T, BM, BN, BK, VEC, THREADS, DIR>,
-                  K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK>>::type tiles;
+    typedef typename K1If<
+        CFX != 0,
+        K1TilesCf<T, BM, BN, BK, VEC, THREADS, DIR>,
+        typename K1If<CF == 2,
+                      K1CFPointTiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK>,
+                      K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK>>::type>::type InputTiles;
+    InputTiles tiles;
     tiles.init(a, gather, map, g, m0, n0, tid);
     if constexpr(DMA != 0 && PACK == 2)
     {
@@ -3257,10 +3392,9 @@ __device__ void k1ConvFma(const K1Args& a CONV_EPI_FN_PARAM)
                 for(int i = 0; i < TM; ++i)
 #pragma unroll
                     for(int j = 0; j < TN; ++j)
-                        acc[i][j] = __builtin_amdgcn_fdot2(__builtin_bit_cast(K1H2, ap[i]),
-                                                           __builtin_bit_cast(K1H2, bp[j]),
-                                                           acc[i][j],
-                                                           false);
+                        acc[i][j] = k1Dot2(__builtin_bit_cast(K1H2, ap[i]),
+                                           __builtin_bit_cast(K1H2, bp[j]),
+                                           acc[i][j]);
             }
             continue;
         }

@@ -88,6 +88,9 @@ constexpr std::array<AtomShape, ATOMS.size()> SHAPES{{
     {16, 16}, // wmma12_f16
     {16, 16}, // wmma12_bf16
     {16, 4}, // fma: SbFma
+    {16, 32}, // wmma125_f16
+    {16, 32}, // wmma125_bf16
+    {16, 4}, // wmma125_f32
 }};
 
 } // namespace
@@ -279,7 +282,12 @@ int64_t ldsBytesOf(const StemBwdConfig& config, int elementBytes)
 
 int64_t ldsLimitOf(std::string_view gcnArchName)
 {
-    return hipdnn_plugin_sdk::stripArchFeatures(gcnArchName) == "gfx950" ? 160 * 1024 : 64 * 1024;
+    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
+    if(arch == "gfx1250")
+    {
+        return int64_t{320} * 1024;
+    }
+    return arch == "gfx950" ? int64_t{160} * 1024 : int64_t{64} * 1024;
 }
 
 std::optional<StemBwdLaunch>
@@ -313,7 +321,11 @@ std::optional<StemBwdLaunch>
     // The layout and its vector.
     if(config.layout == LAYOUT_CHANNELS_LAST)
     {
-        if(!problem.dyChannelsLast || config.vec != ev || a.k % ev != 0)
+        // Vectors of channels: K whole vectors. Single elements serve only the output channel
+        // counts that are not (r(2+1)d's 45, say), whose channel runs vectors cannot load.
+        const bool wholeK = a.k % ev == 0;
+        if(!problem.dyChannelsLast || (config.vec != ev && config.vec != 1)
+           || (config.vec == ev) != wholeK)
         {
             return std::nullopt;
         }
@@ -369,7 +381,12 @@ std::optional<StemBwdLaunch>
         return std::nullopt;
     }
     const int64_t threads = config.th * (fma ? FMA_ROW_THREADS : info->wave);
-    if(threads > MAX_BLOCK || ldsBytesOf(config, eb) > ldsLimitOf(arch))
+    const auto architecturalLds = static_cast<size_t>(ldsLimitOf(arch));
+    const auto availableLds
+        = hipdnn_plugin_sdk::stripArchFeatures(arch) == "gfx1250" && device.sharedMemPerBlock > 0
+              ? std::min(architecturalLds, device.sharedMemPerBlock)
+              : architecturalLds;
+    if(threads > MAX_BLOCK || ldsBytesOf(config, eb) > static_cast<int64_t>(availableLds))
     {
         return std::nullopt;
     }

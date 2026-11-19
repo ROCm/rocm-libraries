@@ -1,8 +1,9 @@
 # Generates the CONV_WRW descriptors (backward weights, K3). Each config is admitted on
 # correctness alone (its atom on the device and taking the graph's dtype, its layout the graph's,
-# its filter width / stride / dilation and, for the row rings, filter height equal to the
-# problem's, its LDS within the device's); autotune (UHD later) ranks them. Priority orders the
-# declared fallback.
+# its specialized filter geometry equal to the problem's (loops 8-12 instead keep geometry
+# runtime), its LDS within the device's); autotune (UHD later) ranks them. Loop 10 is a complete
+# FLOAT candidate with FP64 products, partials and fold, not an alternate mode of an old kernel.
+# Priority orders the declared fallback; accurate entries follow all legacy entries.
 #
 # Every config-distinguishing field is an integer knob (hipDNN's candidate enumeration tells
 # configs apart by their integer knobs only); the strings (direction, dtype, atom) are
@@ -13,6 +14,7 @@
 # and layouts) and FILTERS (filter-width / stride / dilation / row combos and the loop they run
 # on). The LDS arithmetic is ConvWrwGeom.h's k3LdsBytes (ported below; keep it in step) and the
 # load passes ConvWrwProblem.cpp's loadPassesOf; a config that does not fit is dropped.
+# The accurate loop's bounded float staging uses (BK + BC) * (BQ + 1) * 4 bytes instead.
 import json, pathlib, sys, uuid
 
 out = pathlib.Path(sys.argv[1])
@@ -44,6 +46,9 @@ ATOMS = [
     "wmma12_f16",
     "wmma12_bf16",
     "fma",
+    "wmma125_f16",
+    "wmma125_bf16",
+    "wmma125_f32",
 ]
 SHAPE = {
     "mfma16_f16": (16, 16, 4),
@@ -63,6 +68,9 @@ SHAPE = {
     "wmma12_f16": (16, 16, 8),
     "wmma12_bf16": (16, 16, 8),
     "fma": (0, 0, 0),
+    "wmma125_f16": (16, 32, 16),
+    "wmma125_bf16": (16, 32, 16),
+    "wmma125_f32": (16, 4, 2),
 }
 CDNA = ["gfx908", "gfx90a", "gfx942", "gfx950"]
 ARCHS = {
@@ -82,6 +90,9 @@ ARCHS = {
     "wmma11_bf16": ["gfx11"],
     "wmma12_f16": ["gfx12"],
     "wmma12_bf16": ["gfx12"],
+    "wmma125_f16": ["gfx1250"],
+    "wmma125_bf16": ["gfx1250"],
+    "wmma125_f32": ["gfx1250"],
     "fma": CDNA + ["gfx11", "gfx12"],
 }
 INTS = [
@@ -188,6 +199,14 @@ def lds_bytes(c, e):  # ConvWrwGeom.h k3LdsBytes
         c[k] for k in ("loop", "layout", "bk", "bc", "bq", "fr", "s", "sw", "dw")
     )
     vec, align, ns = c["vec"], c["align"], c["ns"]
+    if loop == 10:
+        return (bk + bc) * (bq + 1) * 4
+    if loop == 9:
+        return 0
+    if loop == 12:
+        return (bk + bc) * (bq + 16 // e) * e + bq * 32
+    if loop == 11:
+        return (bk + bc) * (bq + 16 // e) * e
     if loop == 8:  # generic taps: a bk-row dy chunk and fr bc-row x tiles, two buffers
         if c["tk"]:  # the FMA form: [position][channel] rows of bk / bc + 16 bytes
             u = 16 // e
@@ -261,6 +280,8 @@ def lds_bytes(c, e):  # ConvWrwGeom.h k3LdsBytes
 
 def passes(c, e):  # ConvWrwProblem.cpp loadPassesOf
     vec = c["vec"]
+    if c["loop"] in (9, 10, 11, 12):
+        return 0
     if c["loop"] == 8:  # k3WrwGeneric's loads a thread holds
         threads = (
             (c["bk"] // c["tk"]) * (c["bc"] // c["tc"])
@@ -338,11 +359,18 @@ def passes(c, e):  # ConvWrwProblem.cpp loadPassesOf
 
 
 def archs_of(c):
+    if c["loop"] in (9, 10, 11, 12):
+        return ["gfx1250"]
     return ["gfx950"] if c["loop"] in (2, 5) or c["layout"] == TR else ARCHS[c["atom"]]
 
 
 def lds_limit(c):
-    return 160 * 1024 if archs_of(c) == ["gfx950"] else 64 * 1024
+    archs = archs_of(c)
+    return (
+        320 * 1024
+        if archs == ["gfx1250"]
+        else 160 * 1024 if archs == ["gfx950"] else 64 * 1024
+    )
 
 
 def valid(c, dtype, fma16=False):
@@ -350,6 +378,78 @@ def valid(c, dtype, fma16=False):
     16-bit graphs, which only devices without a matrix core for the type take (gfx906).
     """
     e = eb(dtype)
+    if c["loop"] == 10:
+        return (
+            dtype == "FLOAT"
+            and c["atom"] == "fma"
+            and c["atom_id"] == 16
+            and c["layout"] in (CF, CL)
+            and c["bk"] in (8, 16)
+            and c["bc"] in (8, 16)
+            and c["bq"] in (32, 64)
+            and c["tk"] == c["tc"] == c["vec"] == 1
+            and c["fr"] == c["s"] == c["sw"] == c["dw"] == 0
+            and c["wk"] == c["wc"] == c["xcd"] == c["align"] == c["ns"] == c["wq"] == 0
+            and c["dws"] == 0
+            and c["bpu"] in (1, 2, 4, 8)
+            and lds_bytes(c, e) <= lds_limit(c)
+        )
+    if c["loop"] == 9:
+        return (
+            c["atom"] == "fma"
+            and c["atom_id"] == 16
+            and c["layout"] == CL
+            and c["bk"] == c["tk"] == 4
+            and c["tc"] == c["vec"] == 1
+            and c["bc"] in (64, 128, 256)
+            and c["bq"] in (64, 128, 256)
+            and c["fr"] == c["s"] == c["sw"] == c["dw"] == 0
+            and c["wk"] == c["wc"] == c["xcd"] == c["align"] == c["ns"] == c["wq"] == 0
+            and c["dws"] == 1
+            and c["bpu"] in (1, 2, 4, 8)
+            and lds_bytes(c, e) == 0
+        )
+    if c["loop"] in (11, 12):
+        dim, ka, _ = SHAPE[c["atom"]]
+        return (
+            c["atom"].startswith("wmma125_")
+            and c["layout"] in (CF, CL)
+            and c["vec"] == 1
+            and c["fr"] == c["s"] == c["sw"] == c["dw"] == 0
+            and c["tk"] == c["tc"] == c["xcd"] == c["align"] == c["ns"] == c["wq"] == 0
+            and (
+                c["dws"] == 1
+                or (
+                    c["dws"] == 2
+                    and c["loop"] == 12
+                    and c["layout"] == CF
+                    and c["atom"] == "wmma125_f16"
+                    and (c["bk"], c["bc"], c["bq"], c["wk"], c["wc"])
+                    == (64, 64, 32, 2, 2)
+                )
+            )
+            and c["bpu"] in (1, 2, 4, 8)
+            and 1 <= c["wk"] <= 8
+            and 1 <= c["wc"] <= 8
+            and 1 <= c["bk"] <= 128
+            and 1 <= c["bc"] <= 128
+            and 1 <= c["bq"] <= 256
+            and c["bk"] % (c["wk"] * dim) == c["bc"] % (c["wc"] * dim) == 0
+            and c["bq"] % ka == 0
+            and c["wk"] * c["wc"] * wave(c["atom"]) <= 1024
+            and lds_bytes(c, e) <= lds_limit(c)
+            and (
+                c["loop"] == 11
+                or (
+                    (c["wk"] * c["wc"] * wave(c["atom"])) % c["bk"] == 0
+                    and (c["wk"] * c["wc"] * wave(c["atom"])) % c["bc"] == 0
+                    and (c["wk"] * c["wc"] * wave(c["atom"]))
+                    % min(c["bq"], c["wk"] * c["wc"] * wave(c["atom"]))
+                    == 0
+                    and c["bq"] % min(c["bq"], c["wk"] * c["wc"] * wave(c["atom"])) == 0
+                )
+            )
+        )
     fma = c["loop"] in (3, 4) or (c["loop"] == 8 and c["atom"] == "fma")
     ok = (c["vec"] * e == 16 or (c["loop"] == 4 and c["vec"] == 1)) and (
         c["atom"] == "fma"
@@ -498,6 +598,7 @@ RDNA16 = [
 # for narrow channel counts and long filters, a tall one for 128+ channels.
 RDNA_1D = [(32, 32, 2, 2, 64), (128, 32, 4, 2, 64)]
 ONE_D = {
+    "1x2",
     "1x3",
     "1x3d3",
     "1x3d5",
@@ -517,6 +618,13 @@ EXTRA_TILES = {
     # fp32's 32-position windows at dilation 24 / 36 overflow 64 KiB: 16 positions.
     ("mfma32_f32", ("3x3d12", "3x3d24", "3x3d36")): [(64, 64, 2, 2, 16)],
     ("mfma32_", ("1x16s8",)): [(64, 32, 2, 1, 16)],
+    # The width fold's 1x2 rows over C x s channels (HiFi-GAN 1x16 stride 8): wide channel tiles
+    # on the 32 x 32 atoms every CDNA part runs (the gfx950 pack is at its size cap).
+    ("mfma32_", ("1x2",)): [
+        (128, 128, 4, 2, 64),
+        (128, 128, 4, 2, 32),
+        (256, 64, 4, 2, 64),
+    ],
     ("mfma16_f32", ("3x3s2r1", "2x2s2r1")): [(32, 32, 2, 2, 32)],
     # RDNA 3x3 (deeplab dilations, unet2d), measured on gfx1100: 32-position tiles, up to 128 x 64.
     (
@@ -618,11 +726,14 @@ FILTERS = [
     ("1x1", 1, 1, 1, 1, 1, [0, 1], [0, 1], None),
     ("1x3", 3, 1, 1, 1, 1, [0, -1], [0, 1], None),
     # HiFi-GAN's dilated 1-D rows, in both layouts (channels-last otherwise falls to the
-    # generic tier, or to BLAS on gfx11).
+    # generic tier).
     ("1x3d5", 3, 1, 5, 1, 1, [0, -1], [0, 1], None),
     # HiFi-GAN's dilation-3 1x3 (the d5 row's tiles).
     ("1x3d3", 3, 1, 3, 1, 1, [0, -1], [0, 1], None),
     ("1x4", 4, 1, 1, 1, 1, [0, -1], [0], None),
+    # Two-tap rows: the width fold's HiFi-GAN class (1x16 stride 8 is 1x2 stride 1 over C x 8
+    # channels, widthFoldOf) on the 1x4 row's tiles.
+    ("1x2", 2, 1, 1, 1, 1, [0, -1], [0], None),
     ("1x7", 7, 1, 1, 1, 1, [-1], [0], None),
     ("1x7d3", 7, 1, 3, 1, 1, [-1], [0], None),
     ("1x7d5", 7, 1, 5, 1, 1, [-1], [0], None),
@@ -630,8 +741,8 @@ FILTERS = [
     ("1x11d3", 11, 1, 3, 1, 1, [-1], [0], None),
     ("1x11d5", 11, 1, 5, 1, 1, [-1], [0], None),
     # Dilated 3x3 rows in both layouts: without channels-last configs a channels-last deeplab
-    # ASPP layer (d4 / d24 / d36) has no specialized config, the generic tier declines it (d6+)
-    # or has no gfx11 config, and it falls to the BLAS path (30x on gfx1100).
+    # ASPP layer (d4 / d24 / d36) has no specialized config, the generic tier declines it (d6+,
+    # except on gfx11) and it falls to the BLAS path (30x on gfx1100).
     ("3x3d4", 3, 1, 4, 3, 1, [0, -1], [0], None),
     # SSD300's dilation-6 3x3 (the d4 row's tiles).
     ("3x3d6", 3, 1, 6, 3, 1, [0, -1], [0], None),
@@ -948,8 +1059,16 @@ UNALIGNED_K = [
         0,
     ),
     ({"FLOAT": "mfma32_f32"}, [(32, 128, 1, 4, 16), (32, 64, 1, 2, 16)], 0),
+    # gfx908 bf16 (no bf16_1k atom): the half-rate 32 x 32 atom.
+    ({"BFLOAT16": "mfma32_bf16_908"}, [(32, 128, 1, 4, 32), (32, 64, 1, 2, 32)], 0),
 ]
-UNALIGNED_K_FILTERS = [("3x3", 3, 3), ("1x1", 1, 1)]
+# 1x7: HiFi-GAN's output layer (one output channel), which has 32 input channels: also tiles 32
+# input channels wide (atom family prefix -> tiles), so a block's channel tile is not half empty.
+UNALIGNED_K_NARROW = {
+    "mfma": [(32, 32, 1, 1, 32), (32, 32, 1, 1, 64)],
+    "wmma": [(16, 32, 1, 2, 32), (16, 32, 1, 2, 64)],
+}
+UNALIGNED_K_FILTERS = [("3x3", 3, 3), ("1x1", 1, 1), ("1x7", 7, 1)]
 
 
 def build_unaligned_k():
@@ -957,7 +1076,8 @@ def build_unaligned_k():
     for atoms, tiles, xcd in UNALIGNED_K:
         for dtype, atom in atoms.items():
             for tag, s, fr in UNALIGNED_K_FILTERS:
-                for t in tiles:
+                extra = UNALIGNED_K_NARROW.get(atom[:4], []) if tag == "1x7" else []
+                for t in tiles + [x for x in extra if x not in tiles]:
                     c = C(atom, 1, CL, t, s, 1, 1, fr, 16 // eb(dtype), xcd, 2, 0)
                     if valid(c, dtype):
                         CATALOG[dtype].extend(with_bpu(c))
@@ -971,8 +1091,10 @@ def build_unaligned_k():
 SMALLC_ATOMS = [
     ({"HALF": "mfma16x32_f16", "BFLOAT16": "mfma16x32_bf16"}, 1),
     ({"HALF": "mfma16_f16", "BFLOAT16": "mfma16_bf16", "FLOAT": "mfma16_f32"}, 0),
+    ({"BFLOAT16": "mfma16_bf16_908"}, 0),  # gfx908 bf16
     ({"HALF": "wmma11_f16", "BFLOAT16": "wmma11_bf16"}, 0),
     ({"HALF": "wmma12_f16", "BFLOAT16": "wmma12_bf16"}, 0),
+    ({"HALF": "wmma125_f16", "BFLOAT16": "wmma125_bf16"}, 0),
 ]
 SMALLC_TILES = [(64, 4, 4, 64), (32, 4, 2, 64), (64, 8, 4, 32), (64, 16, 4, 32)]
 # Channels-last stems also take longer position steps: EfficientNet-v2 stems (c3 k24 3x3 s2,
@@ -1176,7 +1298,8 @@ def build_pb():
 
 # The generic tier (loop 8): few configs of runtime filter, strides and dilation, each declined
 # wherever a specialized config's class serves (its "spec", written by emit). (atoms per dtype,
-# xcd, [(layout, (bk, bc, wk, wc, bq), taps a block[, shared-window dw])]), the measured best per arch: gfx950 on
+# xcd, [(layout, (bk, bc, wk, wc, bq), taps a block[, shared-window dw])][, the tiles with a
+# block-based buffer twin, default all]), the measured best per arch: gfx950 on
 # 2-D 5x5 / 7x7 and 3-D 1x5x5 channels-last fp16 (1.5-1.9x over the BLAS path), gfx1201 on the
 # same and 1-D k3 (1.7-3.2x).
 GENERIC = [
@@ -1214,6 +1337,16 @@ GENERIC = [
             (CF, (128, 64, 4, 2, 32), 2),
         ],
     ),
+    # gfx908 bf16 (no bf16_1k atom): the half-rate 32 x 32 atom, the 32 x 32 tiles.
+    (
+        {"BFLOAT16": "mfma32_bf16_908"},
+        0,
+        [
+            (CL, (128, 64, 4, 2, 32), 3),
+            (CL, (64, 64, 2, 2, 32), 5),
+            (CF, (128, 64, 4, 2, 32), 2),
+        ],
+    ),
     (
         {"FLOAT": "mfma32_f32"},
         0,
@@ -1232,6 +1365,35 @@ GENERIC = [
         ],
     ),
 ]
+
+
+# gfx11 channels-last rows that the families' channels-first-only filter rows leave out (after
+# every other specialized config, so those keep their priorities): Inception's 5x5 on the output
+# rows (channels-first gfx11 runs 5x5 there, 3.4x ahead of the ring) on the channels-first tiles,
+# and the 3x3 ring on gfx12's 32 x 32 tile for 32-channel groups (ResNeXt / RegNet grouped
+# layers). (tag, s, sw, dw, fr, loop, tiles).
+GFX11_CL_ATOMS = {"HALF": "wmma11_f16", "BFLOAT16": "wmma11_bf16"}
+GFX11_CL_ROWS = [
+    ("5x5r1", 5, 1, 1, 1, 0, [RDNA16[1], (64, 64, 4, 2, 64)]),
+    ("3x3g32", 3, 1, 1, 3, 1, [(32, 32, 2, 2, 32)]),
+]
+
+
+def build_gfx11_cl():
+    dropped = 0
+    for dtype, atom in GFX11_CL_ATOMS.items():
+        vec = 16 // eb(dtype)
+        have = {tuple(x[f] for f in INTS) for x in CATALOG[dtype]}
+        for tag, s, sw, dw, fr, loop, tiles in GFX11_CL_ROWS:
+            for t in tiles:
+                c = C(atom, loop, CL, t, s, sw, dw, fr, vec, 0, 0, 0)
+                if not valid(c, dtype):
+                    dropped += 1
+                    continue
+                for v in with_bpu(c):
+                    assert tuple(v[f] for f in INTS) not in have, f"{tag} {t} ships"
+                    CATALOG[dtype].append(v)
+    return dropped
 
 
 # Flattened positions (flat 1): steps of bq consecutive positions of the flattened (image, depth,
@@ -1256,21 +1418,60 @@ GENERIC_FLAT = [
 ]
 
 
+# gfx11's generic tier, built after GENERIC_FLAT (its own entries: the tiles, then the tiles
+# with a block-based buffer twin).
+GENERIC_GFX11 = [
+    # gfx11 (wave32, 16 x 16 x 16 WMMA), chosen by a greedy cover of 19 candidate tiles timed on
+    # gfx1101 over the corpus wrw layers BLAS serves there and the specialized classes' layers.
+    # Channels-first elements: 128 x 64 at 2 taps for wide channel counts, 64 x 64 at 3, 64 x 64
+    # on 4 waves at 1 tap for short maps, 32 x 32 for few output channels (HiFi-GAN's 1-channel
+    # outputs, 1.34x the BLAS path where 64 x 64 gives 1.15x). Channel vectors: 64 x 32 at 9 taps
+    # and the shared windows for unit width stride. Within 1.2% of all 19 (geomean) on
+    # channels-first layers and 7% on channels-last. Block-based buffer twins on one tile a
+    # layout only (images past 2 GiB; listed last, the "pb" set); flattened-position twins on
+    # every tile without a shared window, as in GENERIC.
+    (
+        {"HALF": "wmma11_f16", "BFLOAT16": "wmma11_bf16"},
+        0,
+        [
+            (CF, (128, 64, 4, 2, 32), 2),
+            (CF, (64, 64, 4, 2, 32), 3),
+            (CF, (64, 64, 2, 2, 32), 1),
+            (CF, (32, 32, 2, 2, 32), 3),
+            (CL, (64, 32, 4, 2, 32), 9),
+            (CL, (128, 64, 4, 2, 32), 5, 16),
+            (CL, (64, 64, 4, 2, 32), 9, 8),
+        ],
+        {0, 4},
+    ),
+]
+
+
 def build_generic():
     dropped = 0
-    for atoms, xcd, tiles in GENERIC:
-        for dtype, atom in atoms.items():
-            for lay, tile, taps, *window in tiles:
-                wx = window[0] if window else 0  # dw: shared-window positions
-                c = C(atom, 8, lay, tile, 0, 0, wx, taps, 16 // eb(dtype), xcd, 0, 0)
-                if valid(c, dtype):
-                    CATALOG[dtype].extend(with_bpu(c))
-                    # Its block-based buffer twin: images past the 32-bit buffer range.
-                    CATALOG[dtype].extend(with_bpu(dict(c, pb=1)))
-                    if not wx:
-                        CATALOG[dtype].extend(with_bpu(dict(c, flat=1)))
-                else:
-                    dropped += 1
+
+    def add(entries):
+        dropped = 0
+        for atoms, xcd, tiles, *pb_tiles in entries:
+            for dtype, atom in atoms.items():
+                for t, (lay, tile, taps, *window) in enumerate(tiles):
+                    wx = window[0] if window else 0  # dw: shared-window positions
+                    c = C(
+                        atom, 8, lay, tile, 0, 0, wx, taps, 16 // eb(dtype), xcd, 0, 0
+                    )
+                    if valid(c, dtype):
+                        CATALOG[dtype].extend(with_bpu(c))
+                        # Its block-based buffer twin: images past the 32-bit buffer range
+                        # (every tile, or the entry's "pb" set).
+                        if not pb_tiles or t in pb_tiles[0]:
+                            CATALOG[dtype].extend(with_bpu(dict(c, pb=1)))
+                        if not wx:
+                            CATALOG[dtype].extend(with_bpu(dict(c, flat=1)))
+                    else:
+                        dropped += 1
+        return dropped
+
+    dropped += add(GENERIC)
     for atoms, xcd, tiles in GENERIC_FLAT:
         for dtype, atom in atoms.items():
             for lay, tile, taps in tiles:
@@ -1279,10 +1480,180 @@ def build_generic():
                     CATALOG[dtype].extend(with_bpu(dict(c, flat=1)))
                 else:
                     dropped += 1
+    dropped += add(GENERIC_GFX11)
+    return dropped
+
+
+DILATED_ROWS_CF_1250 = {
+    "1x3d3",
+    "1x3d5",
+    "1x7d3",
+    "1x7d5",
+    "1x11d3",
+    "1x11d5",
+    "3x3d4",
+    "3x3d6",
+    "3x3d24",
+    "3x3d36",
+    "3x3d4r1",
+    "3x3d6r1",
+    "3x3d24r1",
+    "3x3d36r1",
+}
+
+
+def build_native1250():
+    # Native matrix atoms: retain window-reuse loops for common filters, while loop 11 covers
+    # every runtime filter/stride/dilation and channel tail without vector-alignment gates.
+    dropped = 0
+    for dtype, atom in (
+        ("HALF", "wmma125_f16"),
+        ("BFLOAT16", "wmma125_bf16"),
+        ("FLOAT", "wmma125_f32"),
+    ):
+        tiles = [(32, 32, 2, 2, 64), (64, 64, 2, 2, 64), (64, 32, 4, 2, 64)]
+        # The dilated rows ship channels-first only here: channels-last dilated problems run
+        # loop 11, except SSD300's dilation-6 rows, which take both layouts below.
+        native_filters = [
+            row if row[0] not in DILATED_ROWS_CF_1250 else row[:8] + ([CF],)
+            for row in FILTERS
+        ] + [
+            ("3x3d6", 3, 1, 6, 3, 1, [0, 1], [0], [CF, CL]),
+            ("3x3d6r1", 3, 1, 6, 1, 0, [0, 1], [0], [CF, CL]),
+        ]
+        for _, s, sw, dw, fr, loop, idx, aligns, lays in native_filters:
+            picked = (
+                tiles
+                if idx is None
+                else list(
+                    dict.fromkeys(
+                        tiles[i] for i in idx if -len(tiles) <= i < len(tiles)
+                    )
+                )
+            )
+            for tile in picked:
+                for layout in ([CF, CL] if lays is None else lays):
+                    if layout not in (CF, CL):
+                        continue
+                    for align in (aligns if layout == CF and loop == 1 else [0]):
+                        c = C(
+                            atom,
+                            loop,
+                            layout,
+                            tile,
+                            s,
+                            sw,
+                            dw,
+                            fr,
+                            16 // eb(dtype),
+                            0,
+                            align,
+                            0,
+                        )
+                        if valid(c, dtype):
+                            CATALOG[dtype].extend(with_bpu(c))
+                        else:
+                            dropped += 1
+        generic_tiles = [
+            (16, 16, 1, 1, 32),
+            (32, 32, 2, 2, 64),
+            (64, 64, 2, 2, 64),
+            (64, 32, 4, 2, 128),
+            (32, 64, 2, 4, 128),
+            (64, 128, 2, 4, 64),
+        ]
+        for tile in generic_tiles:
+            for layout in (CF, CL):
+                for bpu in (2, 4):
+                    c = C(atom, 11, layout, tile, 0, 0, 0, 0, 1, 0, 0, 0)
+                    c.update(dws=1, bpu=bpu)
+                    if valid(c, dtype):
+                        CATALOG[dtype].append(c)
+                    else:
+                        dropped += 1
+        # A bounded candidate set, not an exhaustive product. BC packs small-C taps into
+        # useful matrix columns; BQ explores amortizing metadata and LDS staging. These are
+        # measurement candidates, not claimed winning tiles.
+        tap_tiles = [
+            (32, 32, 2, 2, 64),
+            (32, 64, 2, 2, 64),
+            (64, 32, 2, 2, 64),
+            (64, 64, 2, 2, 64),
+            (32, 128, 2, 4, 64),
+            (64, 128, 2, 4, 64),
+            (32, 64, 2, 2, 128),
+            (64, 64, 2, 2, 128),
+            (64, 128, 2, 4, 128),
+            (64, 64, 2, 2, 256),
+            (32, 128, 2, 4, 256),
+        ]
+        for tile in tap_tiles:
+            for layout in (CF, CL):
+                for bpu in (2, 4):
+                    c = C(atom, 12, layout, tile, 0, 0, 0, 0, 1, 0, 0, 0)
+                    c.update(dws=1, bpu=bpu)
+                    if valid(c, dtype):
+                        CATALOG[dtype].append(c)
+                    else:
+                        dropped += 1
+        for bc in (64, 128, 256):
+            for bq in (64, 128, 256):
+                for bpu in (2, 4):
+                    c = C("fma", 9, CL, (4, bc, 4, 1, bq), 0, 0, 0, 0, 1, 0, 0, 0)
+                    c.update(dws=1, bpu=bpu)
+                    if valid(c, dtype):
+                        CATALOG[dtype].append(c)
+                    else:
+                        dropped += 1
+    return dropped
+
+
+def build_dilation_rows():
+    # Append only the two measured NCHW row windows, preserving all old identities and order.
+    for bq in (32, 128):
+        c = C("wmma125_f16", 0, CF, (64, 64, 2, 2, bq), 3, 1, 24, 1, 8, 0, 0, 0)
+        c.update(dws=1, bpu=2)
+        assert valid(c, "HALF")
+        CATALOG["HALF"].append(c)
+
+
+def build_accurate():
+    # Small independent measurement candidates; all use the same FP64 arithmetic contract.
+    for bk, bc, bq in ((8, 8, 32), (16, 16, 32), (16, 16, 64)):
+        for layout in (CF, CL):
+            for bpu in (2, 4):
+                c = C("fma", 10, layout, (bk, bc, 1, 1, bq), 0, 0, 0, 0, 1, 0, 0, 0)
+                c.update(dws=0, bpu=bpu)
+                assert valid(c, "FLOAT")
+                CATALOG["FLOAT"].append(c)
+
+
+def build_family_tiles():
+    # Append after accuracy/dilation entries without changing their fallback priorities.
+    dropped = 0
+    for dtype, atom in (("HALF", "wmma125_f16"), ("BFLOAT16", "wmma125_bf16")):
+        # One wave packs small input-channel groups across the three width taps.
+        for sw in (1, 2):
+            c = C(atom, 6, CF, (16, 8, 1, 1, 32), 3, sw, 1, 3, 8, 0, 0, 0)
+            if valid(c, dtype):
+                CATALOG[dtype].extend(with_bpu(c))
+            else:
+                dropped += 1
+        # Longer pointwise ring chunks reuse each staged row across channel tiles.
+        for layout in (CF, CL):
+            for bq in (128, 256):
+                c = C(atom, 1, layout, (64, 64, 2, 2, bq), 1, 1, 1, 1, 8, 0, 0, 0)
+                if valid(c, dtype):
+                    CATALOG[dtype].extend(
+                        dict(c, bpu=b) for b in ((2, 4) if bq == 128 else (2,))
+                    )
+                else:
+                    dropped += 1
     return dropped
 
 
 SPEC_KIND = {0: "R", 6: "C", 1: "P", 2: "G", 5: "D"}
+SPEC_MAX_ATOM_ID = ATOMS.index("fma")
 
 
 def spec_of(g, cfgs):
@@ -1296,6 +1667,8 @@ def spec_of(g, cfgs):
     """
     keys = set()
     for c in cfgs:
+        if c["atom_id"] > SPEC_MAX_ATOM_ID:
+            continue
         if c["atom"] == "fma":
             if g["atom"] != "fma" or c["loop"] not in (3, 4):
                 continue
@@ -1411,8 +1784,17 @@ def build():
                             ), f"breadth config {atom} {tag} {t} b{b} ships"
                             CATALOG[dtype].append(dict(c, bpu=b))
                             BREADTH_KEYS.add(key)
+    dropped += build_gfx11_cl()
     # The generic tier last: the specialized configs keep their priorities.
     dropped += build_generic()
+    dropped += build_native1250()
+    build_accurate()
+    build_dilation_rows()
+    dropped += build_family_tiles()
+    c = C("wmma125_f16", 12, CF, (64, 64, 2, 2, 32), 0, 0, 0, 0, 1, 0, 0, 0)
+    c.update(dws=2, bpu=1)
+    assert valid(c, "HALF")
+    CATALOG["HALF"].append(c)
     # Two rows can give one config (the FMA output rows ignore the filter height: 1x3 and 3x3r1
     # map alike); keep the first.
     for dtype, cfgs in CATALOG.items():
@@ -1439,6 +1821,7 @@ X3_ATOMS = {
     "mfma16x32_bf16",
     "wmma11_bf16",
     "wmma12_bf16",
+    "wmma125_bf16",
 }
 X3_LOOPS = (0, 1, 5, 6)
 X3_TILES = 2
@@ -1487,7 +1870,7 @@ def dws_of(c):
     if c["loop"] == 5:
         return 0
     if (
-        c["atom"].startswith("wmma12")
+        c["atom"].startswith("wmma12_")
         and (c["bk"] // c["wk"]) * (c["bc"] // c["wc"]) >= 512
     ):
         return 0
@@ -1495,10 +1878,20 @@ def dws_of(c):
 
 
 def family_of(c):
-    """The pack a config ships in: the direct loop, gfx950's 16 x 32 / 32 x 16 atoms, the other
-    MFMA atoms, RDNA's WMMA per generation (gfx11, gfx12), or the FMA loops. The 32 x 32 atom's
-    packed rows ship in a pack without gfx950, which has its own measured packed-rows tiles.
+    """The pack a config ships in: the direct loop, gfx950's 16 x 32 / 32 x 16 atoms (3-wide
+    filters in one pack, every other width in a second, each under the 500 KB file cap), the
+    other MFMA atoms, RDNA's WMMA per generation (gfx11, gfx12), gfx1250's native packs, or the
+    FMA loops. The 32 x 32 atom's packed rows ship in a pack without gfx950, which has its own
+    measured packed-rows tiles.
     """
+    if c["loop"] == 10:
+        return "accurate"
+    if c["loop"] == 9:
+        return "smallk1250"
+    if c["loop"] == 12:
+        return "taptiled1250"
+    if c["atom"].startswith("wmma125_"):
+        return "generic1250" if c["loop"] == 11 else "gfx1250"
     if c["loop"] == 5:
         return "direct"
     if c["loop"] == 8:
@@ -1512,7 +1905,7 @@ def family_of(c):
     if c["atom"].startswith("wmma12"):
         return "rdna12"
     if c["atom"].startswith(("mfma16x32", "mfma32x16")):
-        return "gfx950"
+        return "gfx950" if c["s"] == 3 else "gfx950b"
     return "cdna"
 
 
@@ -1600,7 +1993,7 @@ def emit():
         half906 = (len(CATALOG906[dtype]) + 1) // 2
         # The generic tier comes last, after every specialized config.
         tagged = (
-            [(c, family_of(c)) for c in cfgs if c["loop"] != 8]
+            [(c, family_of(c)) for c in cfgs if c["loop"] not in (8, 10)]
             + [
                 (c, "fma906" if j < half906 else "fma906b")
                 for j, c in enumerate(CATALOG906[dtype])
@@ -1612,8 +2005,20 @@ def emit():
                 for c in (CATALOGX3 if dtype == "FLOAT" else [])
             ]
             + [(c, family_of(c)) for c in cfgs if c["loop"] == 8]
+            + [(c, "accurate") for c in cfgs if c["loop"] == 10]
         )
-        for i, (c, fam) in enumerate(tagged):
+        legacy_i = native_i = accurate_i = 0
+        for c, fam in tagged:
+            native = c["atom"].startswith("wmma125_") or c["loop"] == 9
+            accurate = c["loop"] == 10
+            priority = (
+                -10000 - accurate_i
+                if accurate
+                else 2000 - native_i if native else 1000 - legacy_i
+            )
+            accurate_i += int(accurate)
+            native_i += int(native)
+            legacy_i += int(not native and not accurate)
             pack = packs.setdefault(fam, [])
             lay = ["nchw", "nhwc", "nhwctr"][c["layout"]]
             thr = (
@@ -1630,6 +2035,8 @@ def emit():
                 + (".pb" if c["pb"] else "")
                 + (".flat" if c["flat"] else "")
             )
+            if native:
+                name += f".dws{c['dws']}"
             pack.append(
                 {
                     "version": "1.0",
@@ -1637,8 +2044,12 @@ def emit():
                     "name": name,
                     "kernel_source": {
                         "kind": "embedded_source",
-                        "source_file": "kernels/ConvWrw.cpp",
-                        "entry_point": "ConvWrw",
+                        "source_file": (
+                            "kernels/ConvWrwAccurate.cpp"
+                            if accurate
+                            else "kernels/ConvWrw.cpp"
+                        ),
+                        "entry_point": "ConvWrwAccurate" if accurate else "ConvWrw",
                     },
                     "metadata": {
                         "direction": "WRW",
@@ -1650,7 +2061,7 @@ def emit():
                             else {}
                         ),
                     },
-                    "priority": 1000 - i,
+                    "priority": priority,
                 }
             )
         for fam, pack in sorted(packs.items()):
@@ -1666,6 +2077,12 @@ def emit():
                         "fmardna": FMARDNA_ARCHS,
                         "cdnapk": CDNA[:3],
                         "genericfma": FMARDNA_ARCHS,
+                        "gfx1250": ["gfx1250"],
+                        "generic1250": ["gfx1250"],
+                        "taptiled1250": ["gfx1250"],
+                        "smallk1250": ["gfx1250"],
+                        "accurate": ["gfx1250"],
+                        "x3gfx1250": ["gfx1250"],
                     }.get(fam, []),
                     "matchers": [umd],
                     "engine": ued_tf32 if fam.startswith("x3") else ued,

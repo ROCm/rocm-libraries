@@ -52,6 +52,7 @@
 
 #include "ConvArchFamily.h"
 #include "ConvGroupValuWrwArgs.h"
+#include "ConvPackedMath.h"
 
 #ifndef GVW_DT
 #error "GVW_DT must name the element type"
@@ -171,7 +172,9 @@ constexpr int NA = CB * KB * FR * FS;
 constexpr int NAP = (NA + WAVE - 1) / WAVE * WAVE;
 constexpr int Q = NAP / WAVE;
 
-#if HKP_ARCH_GFX11 || HKP_ARCH_GFX12
+#if HKP_ARCH_GFX1250
+#define GVW_RSRC_FLAGS 0
+#elif HKP_ARCH_GFX11 || HKP_ARCH_GFX12
 #define GVW_RSRC_FLAGS 0x31004000
 #elif defined(__gfx1010__) || defined(__gfx1030__) || defined(__gfx1031__) || defined(__gfx1032__)
 #define GVW_RSRC_FLAGS 0x31014000
@@ -418,7 +421,6 @@ __device__ inline void passDot2(float (&acc)[CB][KB][FR][FS],
 {
     if constexpr(DOT2)
     {
-        typedef _Float16 GvwH2 __attribute__((ext_vector_type(2)));
         unsigned dyd[KB][P / 2];
         {
             const bool ok = rowOk & colY;
@@ -488,11 +490,9 @@ __device__ inline void passDot2(float (&acc)[CB][KB][FR][FS],
 #pragma unroll
                             for(int k = 0; k < KB; ++k)
                             {
-                                acc[c][k][r][s]
-                                    = __builtin_amdgcn_fdot2(__builtin_bit_cast(GvwH2, pair),
-                                                             __builtin_bit_cast(GvwH2, dyd[k][jp]),
-                                                             acc[c][k][r][s],
-                                                             false);
+                                acc[c][k][r][s] = k1Dot2(__builtin_bit_cast(HkpHalf2, pair),
+                                                         __builtin_bit_cast(HkpHalf2, dyd[k][jp]),
+                                                         acc[c][k][r][s]);
                             }
                         }
                     }
@@ -614,7 +614,6 @@ __device__ inline void ringRow(
 #if GVW_DOT2
     (void)ox0;
     (void)wo;
-    typedef _Float16 GvwH2 __attribute__((ext_vector_type(2)));
 #pragma unroll
     for(int r = 0; r < FR; ++r)
     {
@@ -639,11 +638,9 @@ __device__ inline void ringRow(
 #pragma unroll
                     for(int k = 0; k < KB; ++k)
                     {
-                        acc[c][k][r][s]
-                            = __builtin_amdgcn_fdot2(__builtin_bit_cast(GvwH2, pair),
-                                                     __builtin_bit_cast(GvwH2, dy[k][jp]),
-                                                     acc[c][k][r][s],
-                                                     false);
+                        acc[c][k][r][s] = k1Dot2(__builtin_bit_cast(HkpHalf2, pair),
+                                                 __builtin_bit_cast(HkpHalf2, dy[k][jp]),
+                                                 acc[c][k][r][s]);
                     }
                 }
             }
