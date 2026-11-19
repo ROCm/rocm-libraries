@@ -87,6 +87,7 @@ class TestArchTarget(unittest.TestCase):
                 "mfma_f32_32x32x2_f32",
                 "mfma_f32_32x32x4_bf16",
                 "mfma_f32_32x32x8_f16",
+                "mfma_f32_4x4x4_f16",
                 "mfma_i32_16x16x16_i8",
                 "mfma_i32_32x32x8_i8",
             ],
@@ -243,10 +244,12 @@ class TestMmaCatalog(unittest.TestCase):
                 a_dtype="fp16", b_dtype="fp16", c_dtype="fp32"
             )
         )
-        # gfx942 narrow CDNA3 atoms only; gfx950 adds the wide CDNA4 atoms.
-        self.assertEqual(f("gfx942"), [(16, 16, 16), (32, 32, 8)])
+        # gfx942 narrow CDNA3 atoms only; gfx950 adds the wide CDNA4 atoms. Both
+        # list the batched 4x4x4 atom (16 independent 4 x 4 blocks).
+        self.assertEqual(f("gfx942"), [(4, 4, 4), (16, 16, 16), (32, 32, 8)])
         self.assertEqual(
-            f("gfx950"), [(16, 16, 16), (16, 16, 32), (32, 32, 8), (32, 32, 16)]
+            f("gfx950"),
+            [(4, 4, 4), (16, 16, 16), (16, 16, 32), (32, 32, 8), (32, 32, 16)],
         )
 
     def test_wide_atom_absent_on_gfx942(self):
@@ -624,7 +627,7 @@ class TestGemmPolicy(unittest.TestCase):
             pol.valid_warp_tiles(
                 ArchTarget.from_gfx("gfx942"), ("fp16", "fp16", "fp32")
             ),
-            [(16, 16, 16), (32, 32, 8)],
+            [(4, 4, 4), (16, 16, 16), (32, 32, 8)],
         )
 
 

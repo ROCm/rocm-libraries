@@ -240,6 +240,8 @@ static const char* const order_gfx90a[] = {
     "mfma_i32_16x16x16_i8",
     "mfma_i32_32x32x8_i8",
     "mfma_f64_16x16x4_f64",
+    "mfma_f32_4x4x4_f16",
+    "mfma_f32_4x4x4_bf16",
 };
 static const char* const order_gfx942[] = {
     "mfma_f32_16x16x8_xf32",     "mfma_f32_32x32x4_xf32",     "mfma_f32_16x16x4_f32",
@@ -248,7 +250,8 @@ static const char* const order_gfx942[] = {
     "mfma_f32_32x32x8_bf16",     "mfma_f32_16x16x32_fp8",     "mfma_f32_32x32x16_fp8",
     "mfma_f32_16x16x32_bf8",     "mfma_f32_32x32x16_bf8",     "mfma_i32_16x16x32_i8",
     "mfma_i32_32x32x16_i8",      "mfma_f32_16x16x32_fp8_bf8", "mfma_f32_16x16x32_bf8_fp8",
-    "mfma_f32_32x32x16_fp8_bf8", "mfma_f32_32x32x16_bf8_fp8",
+    "mfma_f32_32x32x16_fp8_bf8", "mfma_f32_32x32x16_bf8_fp8", "mfma_f32_4x4x4_f16",
+    "mfma_f32_4x4x4_bf16",
 };
 static const char* const order_gfx950[] = {
     "mfma_gfx950_f32_32x32x64_fp8_fp8_scale_e8m0_e8m0_k32",
@@ -301,6 +304,8 @@ static const char* const order_gfx950[] = {
     "mfma_i32_32x32x32_i8",
     "mfma_f32_16x16x32_xf32",
     "mfma_f32_32x32x16_xf32",
+    "mfma_f32_4x4x4_f16",
+    "mfma_f32_4x4x4_bf16",
     "mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp6e2m3",
     "mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp6e3m2",
     "mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1",

@@ -165,9 +165,9 @@ class TestMmaFragTables(unittest.TestCase):
                 self.assertNotEqual(_mma_dst_dtype(op_id), "i32")
 
     def test_an_op_id_outside_the_catalog_defaults_result_to_fp32(self):
-        # mfma_f32_4x4x4_f16 has fragment information but no catalog row.
-        self.assertNotIn("mfma_f32_4x4x4_f16", _op_id_dst_dtype())
-        self.assertEqual(_mma_dst_dtype("mfma_f32_4x4x4_f16"), "fp32")
+        # The builder-only K=128 op_id has fragment information but no catalog row.
+        self.assertNotIn("mfma_f32_16x16x128_fp4fp6fp8", _op_id_dst_dtype())
+        self.assertEqual(_mma_dst_dtype("mfma_f32_16x16x128_fp4fp6fp8"), "fp32")
 
     def test_mma_results_take_the_destination_dtype(self):
         # Include the gfx1250 BF16 result from an independent FP32 source.

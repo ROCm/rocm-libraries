@@ -425,8 +425,7 @@ def test_hip_f32_mfma_reinterprets_only_the_one_element_vector(
 def test_hip_batched_4x4x4_mfma_lowers_in_both_engines(
     arch, op_id, elem, builtin, tmp_path
 ):
-    # Not in the arch MMA catalog (the kernels emit them by op_id), so the op_id
-    # goes to b.mma as it is.
+    # The kernels emit these atoms by op_id, so the op_id goes to b.mma as it is.
     b = IRBuilder(f"mma_operand_{op_id}")
     out = b.param("D", PtrType(F32, "global"))
     a_value, b_value, c_value = (
