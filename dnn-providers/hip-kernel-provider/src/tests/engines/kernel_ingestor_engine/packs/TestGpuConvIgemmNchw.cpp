@@ -333,7 +333,8 @@ bool everyCaseServed(DataType dataType)
     {
         return true;
     }
-    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(currentDeviceProperties().gcnArchName);
+    const auto properties = currentDeviceProperties();
+    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(properties.gcnArchName);
     const std::array<const char*, 4> atoms
         = dataType == DataType::HALF
               ? std::array<const char*, 4>{"mfma16_f16", "wmma11_f16", "wmma12_f16", "wmma125_f16"}

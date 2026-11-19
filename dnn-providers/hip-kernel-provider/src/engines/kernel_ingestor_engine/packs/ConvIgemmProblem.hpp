@@ -197,6 +197,17 @@ bool inputPackedChannelsFirst(const IgemmProblem& problem);
 /// operands keep their order in the workspace.
 IgemmProblem withoutInputStaging(const IgemmProblem& problem);
 
+/**
+ * @brief @p problem as a 1-D channels-first line, for the channels-first-input (cfx) configs.
+ *
+ * A pointwise convolution (every filter extent 1, unit stride, no padding, output extents equal to
+ * the input's) whose input and output are packed channels-first is the 1-D problem over each
+ * channel's D x H x W pixels as one run of L = D H W: the same bytes, read and written in place.
+ * The view has depth and height 1 and width L. A problem that is already 1-D, or that is not such
+ * a pointwise convolution, is returned unchanged (cfxFits then decides as before).
+ */
+IgemmProblem withChannelsFirstLineView(const IgemmProblem& problem);
+
 /// The tile fields the channels-first-input fit depends on.
 struct CfxTile
 {
@@ -234,18 +245,31 @@ struct SplitPlan
     size_t workspaceBytes = 0; ///< staged operands and partials
 };
 
-/// The analytic default: split only when the tiles leave the device under-filled, at most 16
-/// splits, and the partials under 1 GiB. Under-filled is fewer than two blocks per CU on gfx9,
-/// keeping at least two k-iterations per split; fewer than one block per WGP on legacy gfx10+
-/// (device_units), keeping at least 64; gfx1250 keeps one block per CU and eight iterations.
-/// A device that reports no units gets no split (the kernel match declines it).
-/// @p pack: 1 the config's k-steps span whole taps (tap packing), so
-/// a k-step covers bk / (reduction channels) taps; 2 the reduction runs flat (taps x channels in
-/// k-steps of bk). @p noSplit (patch configs): one launch whatever the fill; their GEMMs are
-/// microsecond-scale, so the reduce launch and the partials' round trip cost more than an
-/// under-filled grid.
-/// @p splitPolicy: 0 uses the analytic default; 1 explicitly disables split-K for the qualified
-/// gfx1250 HALF backward-data configs, independently of patch configs' @p noSplit.
+/// The split policy's largest explicit split count (split_policy N, 2 <= N <= this).
+inline constexpr int64_t MAX_SPLIT_POLICY = 64;
+
+/**
+ * @brief The split-K plan of a config on @p problem.
+ *
+ * @p splitPolicy (the config's `split_policy` knob):
+ * - 0, the analytic default: split only when the tiles leave the device under-filled, at most
+ *   16 splits, the partials under 1 GiB. Under-filled is fewer blocks than the units hold: on
+ *   gfx9 @p residentBlocks a CU (8-wave blocks' occupancy, residentBlocksOf) up to 2, 2 when 0,
+ *   keeping at least two k-iterations per split; one block per WGP on legacy gfx10+
+ *   (device_units), keeping at least 64; one block per CU on gfx1250, keeping eight.
+ * - 1: no split.
+ * - N from 2 to MAX_SPLIT_POLICY: exactly N splits where the unsplit grid under-fills the
+ *   device, each split keeps a k-iteration and the partials and the grid fit; otherwise no split
+ *   (the kernel match declines such a config, and any whose plan equals the default's, so
+ *   autotune times only distinct plans, and a filled grid's engine workspace carries no
+ *   partials it never runs).
+ *
+ * A device that reports no units gets no split (the kernel match declines it). @p pack: 1 the
+ * config's k-steps span whole taps (tap packing), so a k-step covers bk / (reduction channels)
+ * taps; 2 the reduction runs flat (taps x channels in k-steps of bk). @p noSplit (patch configs):
+ * one launch whatever the fill; their GEMMs are microsecond-scale, so the reduce launch and the
+ * partials' round trip cost more than an under-filled grid.
+ */
 SplitPlan splitPlanFor(const IgemmProblem& problem,
                        int64_t bm,
                        int64_t bn,
@@ -253,7 +277,28 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
                        const hipdnn_plugin_sdk::ingestor::DeviceProperties& device,
                        int64_t pack = 0,
                        bool noSplit = false,
-                       int64_t splitPolicy = 0);
+                       int64_t splitPolicy = 0,
+                       int64_t residentBlocks = 0);
+
+/**
+ * @brief Blocks of a matrix-core config of at least 8 waves (512 threads on gfx9) a CU holds at
+ *        once, from its threads, its LDS and its accumulators; 0 for smaller blocks, the FMA
+ *        kernel (wave 0) or a device whose dispatch units are not gfx9 CUs (the split plan's arch
+ *        default, 2 a CU on gfx9, applies).
+ *
+ * Waves: 32 a gfx9 CU (8 a SIMD). LDS: (bm + bn) rows of bk padded by a 16-byte vector, by the
+ * DMA stages or the k-stages, within the CU's 64 KiB (160 KiB on gfx950). Registers: bm x bn / threads
+ * fp32 accumulators a lane plus 64, within 512 a lane.
+ */
+int64_t residentBlocksOf(int64_t bm,
+                         int64_t bn,
+                         int64_t bk,
+                         int64_t threads,
+                         int64_t wave,
+                         int64_t stages,
+                         int64_t dma,
+                         int elementBytes,
+                         std::string_view gcnArchName);
 
 /// Whether tap packing serves @p problem with a @p bk k-step: the reduction channels per tap
 /// are fewer than bk and divide it.
