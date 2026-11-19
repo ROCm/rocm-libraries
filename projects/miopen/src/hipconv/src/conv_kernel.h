@@ -137,6 +137,13 @@ public:
     virtual LaunchParams get_launch_params(const hipconv::Device& dev,
                                            const hipconv::ConvParams& par) const = 0;
 
+    // Whether the launch grid for `par` fits the device's Y/Z workgroup-count limit.
+    //
+    // gfx1200/gfx1201 wrap and gfx1250 truncates a larger count to 16 bits, so the launch is
+    // accepted and returns wrong results. Mirrors miopen::GetMaxWorkgroupsYZ(); true on every
+    // other architecture without computing the launch params.
+    bool grid_fits(const hipconv::Device& dev, const hipconv::ConvParams& par) const;
+
     // Enqueue the kernel; throw on a launch-time failure.
     //
     // Defined out-of-line in conv_kernel.cpp so this header stays free of HIP

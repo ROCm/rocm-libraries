@@ -144,6 +144,9 @@ ConvSolution PoolingForward2d::GetSolution(const ExecutionContext& context,
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
+    int tile_w = 0;
+    int tile_h = 0;
+
     {
         auto kernel = KernelInfo{};
 
@@ -165,10 +168,11 @@ ConvSolution PoolingForward2d::GetSolution(const ExecutionContext& context,
         while(grp_tile0 * grp_tile1 > 256 && grp_tile0 > 1)
             grp_tile0 >>= 1;
 
-        const int g_wk_width =
-            ((kp.out_width + grp_tile0 * kp.out_pix_tile0 - 1) / (grp_tile0 * kp.out_pix_tile0));
-        const int g_wk_height =
-            ((kp.out_height + grp_tile1 * kp.out_pix_tile1 - 1) / (grp_tile1 * kp.out_pix_tile1));
+        tile_w = grp_tile0 * kp.out_pix_tile0;
+        tile_h = grp_tile1 * kp.out_pix_tile1;
+
+        const int g_wk_width  = (kp.out_width + tile_w - 1) / tile_w;
+        const int g_wk_height = (kp.out_height + tile_h - 1) / tile_h;
 
         int pooling_method =
             (pool_d.GetMode() == miopenPoolingMax)
@@ -186,8 +190,6 @@ ConvSolution PoolingForward2d::GetSolution(const ExecutionContext& context,
             {"MLO_POOLING_N_VERT_OUT_PIX", kp.out_pix_tile1},
             {"MLO_POOLING_GROUP_SZ0", grp_tile0},
             {"MLO_POOLING_GROUP_SZ1", grp_tile1},
-            {"MLO_POOLING_N_X_TILES", g_wk_width},
-            {"MLO_POOLING_N_Y_TILES", g_wk_height},
             {"MLO_POOLING_INDEX_TYPE", get_pooling_index_type_name(pool_d.GetIndexType())},
         };
 
@@ -220,10 +222,15 @@ ConvSolution PoolingForward2d::GetSolution(const ExecutionContext& context,
         result.construction_params.push_back(kernel);
     }
 
-    result.invoker_factory = [](const std::vector<Kernel>& kernels) {
+    result.invoker_factory = [tile_w, tile_h](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
             decltype(auto) kernel = handle_.Run(kernels.front());
             decltype(auto) params = raw_params.CastTo<miopen::pooling::FwdInvokeParams>();
+
+            const int n_x_tiles =
+                (static_cast<int>(params.yDesc.GetLengths()[3]) + tile_w - 1) / tile_w;
+            const int n_y_tiles =
+                (static_cast<int>(params.yDesc.GetLengths()[2]) + tile_h - 1) / tile_h;
 
             kernel(params.x,
                    params.y,
@@ -240,7 +247,9 @@ ConvSolution PoolingForward2d::GetSolution(const ExecutionContext& context,
                    static_cast<int>(params.xDesc.GetStrides()[2]),
                    static_cast<int>(params.yDesc.GetStrides()[0]),
                    static_cast<int>(params.yDesc.GetStrides()[1]),
-                   static_cast<int>(params.yDesc.GetStrides()[2]));
+                   static_cast<int>(params.yDesc.GetStrides()[2]),
+                   n_x_tiles,
+                   n_y_tiles);
         };
     };
 

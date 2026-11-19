@@ -155,6 +155,8 @@ ConvSolution PoolingBackward2d::GetSolution(const ExecutionContext& context,
     auto result = ConvSolution{miopenStatusSuccess};
 
     const kernel_params kp(problem, config);
+    const int tile_w = kp.grp_tile0 * kp.out_pix_tile0;
+    const int tile_h = kp.grp_tile1 * kp.out_pix_tile1;
 
     {
         auto kernel = KernelInfo{};
@@ -177,10 +179,8 @@ ConvSolution PoolingBackward2d::GetSolution(const ExecutionContext& context,
                                               ? MLO_POOLING_OP_AVE
                                               : MLO_POOLING_OP_AVE_INCLUSIVE);
 
-        const int g_wk_width  = ((kp.in_width + kp.grp_tile0 * kp.out_pix_tile0 - 1) /
-                                (kp.grp_tile0 * kp.out_pix_tile0));
-        const int g_wk_height = ((kp.in_height + kp.grp_tile1 * kp.out_pix_tile1 - 1) /
-                                 (kp.grp_tile1 * kp.out_pix_tile1));
+        const int g_wk_width  = (kp.in_width + tile_w - 1) / tile_w;
+        const int g_wk_height = (kp.in_height + tile_h - 1) / tile_h;
 
         const auto build_params =
             KernelBuildParameters{
@@ -193,8 +193,6 @@ ConvSolution PoolingBackward2d::GetSolution(const ExecutionContext& context,
                 {"MLO_POOLBWD_N_VERT_OUT_PIX", kp.out_pix_tile1},
                 {"MLO_POOLBWD_GROUP_SZ0", kp.grp_tile0},
                 {"MLO_POOLBWD_GROUP_SZ1", kp.grp_tile1},
-                {"MLO_POOLBWD_N_X_TILES", g_wk_width},
-                {"MLO_POOLBWD_N_Y_TILES", g_wk_height},
                 {"MLO_POOLING_INDEX_TYPE",
                  get_pooling_index_type_name(problem.GetPooling().GetIndexType())},
                 {"USE_IMG_INDEX",
@@ -218,10 +216,15 @@ ConvSolution PoolingBackward2d::GetSolution(const ExecutionContext& context,
         result.construction_params.push_back(kernel);
     }
 
-    result.invoker_factory = [](const std::vector<Kernel>& kernels) {
+    result.invoker_factory = [tile_w, tile_h](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
             decltype(auto) kernel = handle_.Run(kernels.front());
             decltype(auto) params = raw_params.CastTo<miopen::pooling::BwdInvokeParams>();
+
+            const int n_x_tiles =
+                (static_cast<int>(params.dxDesc.GetLengths()[3]) + tile_w - 1) / tile_w;
+            const int n_y_tiles =
+                (static_cast<int>(params.dxDesc.GetLengths()[2]) + tile_h - 1) / tile_h;
 
             if(params.pooling.GetMode() == miopenPoolingMax)
             {
@@ -240,7 +243,9 @@ ConvSolution PoolingBackward2d::GetSolution(const ExecutionContext& context,
                        static_cast<int>(params.dxDesc.GetStrides()[2]),
                        static_cast<int>(params.dyDesc.GetStrides()[0]),
                        static_cast<int>(params.dyDesc.GetStrides()[1]),
-                       static_cast<int>(params.dyDesc.GetStrides()[2]));
+                       static_cast<int>(params.dyDesc.GetStrides()[2]),
+                       n_x_tiles,
+                       n_y_tiles);
             }
             else
             {
@@ -258,7 +263,9 @@ ConvSolution PoolingBackward2d::GetSolution(const ExecutionContext& context,
                        static_cast<int>(params.dxDesc.GetStrides()[2]),
                        static_cast<int>(params.dyDesc.GetStrides()[0]),
                        static_cast<int>(params.dyDesc.GetStrides()[1]),
-                       static_cast<int>(params.dyDesc.GetStrides()[2]));
+                       static_cast<int>(params.dyDesc.GetStrides()[2]),
+                       n_x_tiles,
+                       n_y_tiles);
             }
         };
     };

@@ -49,7 +49,7 @@ public:
                 continue;
             for(ConvKernel* kernel : group.kernels)
             {
-                if(kernel->is_valid_config(dev, par))
+                if(kernel->is_valid_config(dev, par) && kernel->grid_fits(dev, par))
                     result.push_back({kernel, kernel->get_weighted_throughput_index(dev, par)});
             }
         }

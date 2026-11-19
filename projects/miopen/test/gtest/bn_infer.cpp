@@ -162,15 +162,33 @@ INSTANTIATE_TEST_SUITE_P(
 // workgroups equals H*W. The host caps the Y workgroup count at 65535, so 255x255 (65025) runs
 // without the cap (control), while 256x256 (65536) and 300x300 are capped and exercise the stride
 // loop on every architecture.
+// C = 2 gives vector size 2, xlocalsize = 1 and ylocalsize = 256, so the cap is 65535 * 256 =
+// 16776960 positions; 4100x4100 = 16810000 is just above it with a multi-thread Y workgroup.
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Standard,
     GPU_BNOCLInferYWorkgroupLimit2D_FP16,
     testing::Combine(testing::ValuesIn(std::vector<BN2DTestCase>{
                          {1, 257, 255, 255, miopen::batchnorm::Direction::ForwardInference, 1, 0},
                          {1, 257, 256, 256, miopen::batchnorm::Direction::ForwardInference, 1, 0},
-                         {1, 257, 300, 300, miopen::batchnorm::Direction::ForwardInference, 1, 0}}),
+                         {1, 257, 300, 300, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+                         {1, 2, 4100, 4100, miopen::batchnorm::Direction::ForwardInference, 1, 0}}),
                      testing::ValuesIn({miopenTensorNHWC}),
                      testing::ValuesIn({miopenBNSpatial}),
+                     testing::ValuesIn({testBNAPIV2, testBNAPIInvVar}),
+                     testing::ValuesIn({miopenActivationPASTHRU})),
+    TestNameGenerator<BN2DTestCase>());
+
+// Per-activation mode shares the Y grid cap but indexes the parameters per position, so the stride
+// loop has to reload them. Its parameter tensors have C*H*W elements, hence the smaller shapes:
+// 300x300 and 384x384 are 1.4x and 2.2x above the 65535 workgroup cap.
+INSTANTIATE_TEST_SUITE_P(
+    StandardPerActivation,
+    GPU_BNOCLInferYWorkgroupLimit2D_FP16,
+    testing::Combine(testing::ValuesIn(std::vector<BN2DTestCase>{
+                         {1, 257, 300, 300, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+                         {1, 257, 384, 384, miopen::batchnorm::Direction::ForwardInference, 1, 0}}),
+                     testing::ValuesIn({miopenTensorNHWC}),
+                     testing::ValuesIn({miopenBNPerActivation}),
                      testing::ValuesIn({testBNAPIV2, testBNAPIInvVar}),
                      testing::ValuesIn({miopenActivationPASTHRU})),
     TestNameGenerator<BN2DTestCase>());

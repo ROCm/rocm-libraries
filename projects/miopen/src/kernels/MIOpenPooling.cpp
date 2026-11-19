@@ -65,21 +65,17 @@ extern "C" __global__ __launch_bounds__(block_size) void mloPoolingG(const FLOAT
                                                                      int mlo_bot_str,
                                                                      int mlo_top_batch_str,
                                                                      int mlo_top_channel_str,
-                                                                     int mlo_top_str)
+                                                                     int mlo_top_str,
+                                                                     int mlo_n_x_tiles,
+                                                                     int mlo_n_y_tiles)
 {
-    // The workgroup index is linearized in blockIdx.x as (batch * output channel, vertical tile,
-    // horizontal tile), horizontal tile fastest, which is the dispatch order of the equivalent 3D
-    // grid. blockIdx.y/z are only 16 bits wide on gfx12, so a problem dimension that can exceed
-    // 65536 must not be mapped to them.
-    const unsigned int x_tile  = blockIdx.x % MLO_POOLING_N_X_TILES;
-    const unsigned int rest    = blockIdx.x / MLO_POOLING_N_X_TILES;
-    const unsigned int y_tile  = rest % MLO_POOLING_N_Y_TILES;
-    const unsigned int x       = x_tile * MLO_POOLING_GROUP_SZ0 * MLO_POOLING_N_HORIZ_OUT_PIX;
-    const unsigned int y       = y_tile * MLO_POOLING_GROUP_SZ1 * MLO_POOLING_N_VERT_OUT_PIX;
+    const PoolingWorkgroup wg  = poolingDecodeWorkgroup(blockIdx.x, mlo_n_x_tiles, mlo_n_y_tiles);
+    const unsigned int x       = wg.x_tile * MLO_POOLING_GROUP_SZ0 * MLO_POOLING_N_HORIZ_OUT_PIX;
+    const unsigned int y       = wg.y_tile * MLO_POOLING_GROUP_SZ1 * MLO_POOLING_N_VERT_OUT_PIX;
     const unsigned int lcl_id0 = threadIdx.x;
     const unsigned int lcl_id1 = threadIdx.y;
 
-    const unsigned int ob      = rest / MLO_POOLING_N_Y_TILES;
+    const unsigned int ob      = wg.ob;
     const unsigned int b       = ob / mlo_n_outputs;
     const unsigned int o       = ob - b * mlo_n_outputs;
     const unsigned int bot_x   = (x + lcl_id0 * MLO_POOLING_N_HORIZ_OUT_PIX) * MLO_POOLING_STRIDE0;

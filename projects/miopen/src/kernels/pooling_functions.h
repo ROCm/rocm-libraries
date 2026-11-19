@@ -69,4 +69,20 @@ __device__ float approxRcp(float x)
     return __builtin_amdgcn_rcpf(x);
 }
 
+// 2D pooling launches all workgroups along blockIdx.x because blockIdx.y/z are only 16 bits wide on
+// gfx12. The index is (batch * channel, vertical tile, horizontal tile), horizontal tile fastest.
+struct PoolingWorkgroup
+{
+    unsigned int x_tile;
+    unsigned int y_tile;
+    unsigned int ob;
+};
+
+__device__ inline PoolingWorkgroup
+poolingDecodeWorkgroup(unsigned int wg, unsigned int n_x_tiles, unsigned int n_y_tiles)
+{
+    const unsigned int rest = wg / n_x_tiles;
+    return {wg % n_x_tiles, rest % n_y_tiles, rest / n_y_tiles};
+}
+
 #endif // GUARD_POOLING_FUNCTIONS_H

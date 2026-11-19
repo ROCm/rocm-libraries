@@ -48,6 +48,7 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
                                                       const FLOAT_ACCUM* invVariance,
                                                       const FLOAT_ACCUM* scale,
                                                       const FLOAT_ACCUM* bias,
+                                                      unsigned int hw,
                                                       unsigned int batchSize,
                                                       unsigned int cStride,
                                                       unsigned int hwStride,
@@ -58,33 +59,40 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
     FLOAT_ACCUM inhat[MIO_BN_VEC_SIZE];
     FLOAT value[MIO_BN_VEC_SIZE];
 
-    // loop over the batches
-    // NOTE: We use zlocalsize = 1 and zgridsize = min(batchSize, maxGridSizeToFillTheGPU). So the
-    // idea here is to use the blocks in z-dimension to cover the batch dimension first, and then
-    // each block will loop over the remaining batches with stride of gridDim.z if necessary.
-    for(unsigned int n = blockIdx.z; n < batchSize; n += gridDim.z)
+    // The host caps the number of workgroups in Y (the Y and Z workgroup IDs are only 16 bits wide
+    // on gfx12), so each thread strides over the remaining spatial positions.
+    for(; tidy * vecSizeY < hw; tidy += gridDim.y * MIO_BN_GRP1)
     {
-        // load input value
-        const unsigned int batchIndex =
-            (n * batchStride) + (tidx * cStride * vecSizeX) + (tidy * hwStride * vecSizeY);
-        *(reinterpret_cast<FLOAT_VEC_TYPE*>(value)) =
-            *(reinterpret_cast<const FLOAT_VEC_TYPE*>(in + batchIndex));
-
-        // perform batchnorm and activation
-#pragma unroll
-        for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
+        // loop over the batches
+        // NOTE: We use zlocalsize = 1 and zgridsize = min(batchSize, maxGridSizeToFillTheGPU). So
+        // the idea here is to use the blocks in z-dimension to cover the batch dimension first,
+        // and then each block will loop over the remaining batches with stride of gridDim.z if
+        // necessary.
+        for(unsigned int n = blockIdx.z; n < batchSize; n += gridDim.z)
         {
-            inhat[i] = (CVT_FLOAT2ACCUM(value[i]) - mean[i]) * invVariance[i];
-            inhat[i] = scale[i] * inhat[i] + bias[i];
-            inhat[i] = miopen::batchnorm::activation_op<FLOAT_ACCUM,
-                                                        miopen::neuron_op_type{MIOPEN_NRN_OP_ID}>(
-                inhat[i], alpha, beta);
-            value[i] = CVT_ACCUM2FLOAT(inhat[i]);
-        }
+            // load input value
+            const unsigned int batchIndex =
+                (n * batchStride) + (tidx * cStride * vecSizeX) + (tidy * hwStride * vecSizeY);
+            *(reinterpret_cast<FLOAT_VEC_TYPE*>(value)) =
+                *(reinterpret_cast<const FLOAT_VEC_TYPE*>(in + batchIndex));
 
-        // write output value
-        *(reinterpret_cast<FLOAT_VEC_TYPE*>(out + batchIndex)) =
-            *(reinterpret_cast<const FLOAT_VEC_TYPE*>(value));
+            // perform batchnorm and activation
+#pragma unroll
+            for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
+            {
+                inhat[i] = (CVT_FLOAT2ACCUM(value[i]) - mean[i]) * invVariance[i];
+                inhat[i] = scale[i] * inhat[i] + bias[i];
+                inhat[i] =
+                    miopen::batchnorm::activation_op<FLOAT_ACCUM,
+                                                     miopen::neuron_op_type{MIOPEN_NRN_OP_ID}>(
+                        inhat[i], alpha, beta);
+                value[i] = CVT_ACCUM2FLOAT(inhat[i]);
+            }
+
+            // write output value
+            *(reinterpret_cast<FLOAT_VEC_TYPE*>(out + batchIndex)) =
+                *(reinterpret_cast<const FLOAT_VEC_TYPE*>(value));
+        }
     }
 }
 
@@ -160,25 +168,21 @@ extern "C" __global__ void __launch_bounds__(blockSize)
         invVariance[i] = rsqrt(fabs(variance[i] + static_cast<FLOAT_ACCUM>(epsilon)));
     }
 
-    // The host caps the number of workgroups in Y (the Y and Z workgroup IDs are only 16 bits wide
-    // on gfx12), so each thread strides over the remaining spatial positions.
-    for(; tidy * vecSizeY < hw; tidy += gridDim.y * MIO_BN_GRP1)
-    {
-        BNFwdInferSpatialImpl<vecSizeX, vecSizeY>(tidx,
-                                                  tidy,
-                                                  in,
-                                                  out,
-                                                  mean,
-                                                  invVariance,
-                                                  pscale,
-                                                  pbias,
-                                                  batchSize,
-                                                  cStride,
-                                                  hwStride,
-                                                  batchStride,
-                                                  alpha,
-                                                  beta);
-    }
+    BNFwdInferSpatialImpl<vecSizeX, vecSizeY>(tidx,
+                                              tidy,
+                                              in,
+                                              out,
+                                              mean,
+                                              invVariance,
+                                              pscale,
+                                              pbias,
+                                              hw,
+                                              batchSize,
+                                              cStride,
+                                              hwStride,
+                                              batchStride,
+                                              alpha,
+                                              beta);
 }
 
 // Uses estimated inverse variance rather than inverse variance, which avoids need for an
@@ -248,23 +252,19 @@ extern "C" __global__ void __launch_bounds__(blockSize)
         }
     }
 
-    // The host caps the number of workgroups in Y (the Y and Z workgroup IDs are only 16 bits wide
-    // on gfx12), so each thread strides over the remaining spatial positions.
-    for(; tidy * vecSizeY < hw; tidy += gridDim.y * MIO_BN_GRP1)
-    {
-        BNFwdInferSpatialImpl<vecSizeX, vecSizeY>(tidx,
-                                                  tidy,
-                                                  in,
-                                                  out,
-                                                  mean,
-                                                  invVariance,
-                                                  pscale,
-                                                  pbias,
-                                                  batchSize,
-                                                  cStride,
-                                                  hwStride,
-                                                  batchStride,
-                                                  alpha,
-                                                  beta);
-    }
+    BNFwdInferSpatialImpl<vecSizeX, vecSizeY>(tidx,
+                                              tidy,
+                                              in,
+                                              out,
+                                              mean,
+                                              invVariance,
+                                              pscale,
+                                              pbias,
+                                              hw,
+                                              batchSize,
+                                              cStride,
+                                              hwStride,
+                                              batchStride,
+                                              alpha,
+                                              beta);
 }

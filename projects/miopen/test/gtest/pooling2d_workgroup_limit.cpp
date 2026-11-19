@@ -38,11 +38,11 @@ GetPoolingWorkgroupLimit2dTestCases(bool control_and_large_nc)
         const std::vector<Config>& configs;
     };
     std::vector<Problem> problems = {
-        {{512, 256, 8, 8}, {2, 2}, {0, 0}, all_configs}}; // N*C = 131072
+        {{512, 256, 20, 14}, {2, 2}, {0, 0}, all_configs}}; // N*C = 131072
     if(control_and_large_nc)
     {
-        problems.push_back({{256, 256, 8, 8}, {2, 2}, {0, 0}, few_configs});   // N*C = 65536
-        problems.push_back({{70000, 1, 28, 28}, {3, 3}, {1, 1}, all_configs}); // N*C = 70000
+        problems.push_back({{256, 256, 14, 20}, {2, 2}, {0, 0}, few_configs}); // N*C = 65536
+        problems.push_back({{70000, 1, 28, 20}, {3, 3}, {1, 1}, all_configs}); // N*C = 70000
     }
 
     std::vector<PoolingTestCase> test_cases;
@@ -78,12 +78,12 @@ TEST_P(GPU_PoolingWorkgroupLimit2d_FP32, FloatTest_pooling2d_workgroup_limit) { 
 
 TEST_P(GPU_PoolingWorkgroupLimit2d_FP16, HalfTest_pooling2d_workgroup_limit) { RunTest(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_PoolingWorkgroupLimit2d_FP32,
                          testing::ValuesIn(GetPoolingWorkgroupLimit2dTestCases(true)),
                          pooling2d_gtest::GetPoolingTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_PoolingWorkgroupLimit2d_FP16,
                          testing::ValuesIn(GetPoolingWorkgroupLimit2dTestCases(false)),
                          pooling2d_gtest::GetPoolingTestCaseName);

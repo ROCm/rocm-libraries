@@ -83,16 +83,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   workspace `miopenFindSolutions` allocates when no workspace is preallocated, so it can now
   return GEMM solutions for dilated problems. When free memory cannot be read, no dilated GEMM
   workspace is reported.
-* [Pooling][BatchNorm] Fixed wrong results with a success status on gfx12
-  ([#15001](https://github.com/ROCm/rocm-libraries/issues/15001)). A launch with too many
-  workgroups in Y or Z does not run correctly: more than 65536 on gfx1200 and gfx1201 wrap
-  `blockIdx`, and 65536 or more on gfx1250 truncate the workgroup count to 16 bits (so exactly
-  65536 runs nothing). The kernel then covers only part of the problem. The 2D pooling forward and
-  backward solvers mapped N*C to Z, and the BatchNorm forward inference solver mapped H*W to Y for
-  NHWC. The pooling kernels now index all their workgroups through the X workgroup ID, and the
-  BatchNorm inference solver caps the Y workgroup count at 65535 and strides over the remaining
-  positions. Kernel launches on those architectures that still exceed the limit now fail with
-  `miopenStatusInternalError` instead of returning wrong results.
+* [Pooling][BatchNorm][Conv] Fixed wrong results on gfx12 for launches with more than 65535
+  workgroups in Y or Z ([#15001](https://github.com/ROCm/rocm-libraries/issues/15001)); launches
+  still over the limit are rejected or fail with `miopenStatusInternalError`.
 
 ### Added
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for

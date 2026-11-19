@@ -34,6 +34,7 @@
 
 #include <array>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -65,7 +66,8 @@ inline HipEventPtr make_hip_event()
 ///     error reported anywhere.
 ///
 /// Note this bounds the number of WORK-ITEMS per dimension, not the number of
-/// workgroups; there is no separate per-dimension workgroup-count limit on either path.
+/// workgroups; the Y/Z workgroup-count limit of some architectures is checked separately by
+/// CheckWorkgroupCount().
 ///
 /// \param gdims Global work size, in work-items (already gridDim * blockDim).
 /// \param name Kernel name, used in the exception message.
@@ -94,12 +96,19 @@ MIOPEN_INTERNALS_EXPORT void CheckWorkgroupCount(const std::array<size_t, 3>& gd
                                                  const std::string& name,
                                                  size_t max_workgroups_yz);
 
-/// CheckWorkgroupCount() with the limit of the device that runs \p stream. The device is only
-/// queried for grids above the smallest limit of any architecture.
-MIOPEN_INTERNALS_EXPORT void ValidateWorkgroupCount(const std::array<size_t, 3>& gdims,
-                                                    const std::array<size_t, 3>& ldims,
-                                                    const std::string& name,
-                                                    hipStream_t stream);
+/// The checks every kernel launch must pass: ValidateGlobalWorkSize(), then CheckWorkgroupCount()
+/// with the limit \p get_max_workgroups_yz returns. The limit is only requested for grids above the
+/// smallest limit of any architecture, so small launches need no device query.
+MIOPEN_INTERNALS_EXPORT void ValidateLaunch(const std::array<size_t, 3>& gdims,
+                                            const std::array<size_t, 3>& ldims,
+                                            const std::string& name,
+                                            const std::function<size_t()>& get_max_workgroups_yz);
+
+/// ValidateLaunch() with the limit of the device that runs \p stream.
+MIOPEN_INTERNALS_EXPORT void ValidateLaunch(const std::array<size_t, 3>& gdims,
+                                            const std::array<size_t, 3>& ldims,
+                                            const std::string& name,
+                                            hipStream_t stream);
 
 struct HipEventProfiler
 {

@@ -10,6 +10,7 @@
 #include <miopen/logger.hpp>
 #include <miopen/stringutils.hpp>
 
+#include <functional>
 #include <limits>
 #include <mutex>
 #include <unordered_map>
@@ -111,6 +112,8 @@ void CheckWorkgroupCount(const std::array<size_t, 3>& gdims,
 namespace {
 
 /// Maximum Y/Z workgroup count of the device that runs \p stream. Looked up once per device.
+/// The stream, not the creating handle's target, decides: an invoker may be run on a stream of
+/// another device than the one its kernel was built for.
 size_t GetStreamMaxWorkgroupsYZ(hipStream_t stream)
 {
     static std::mutex mutex;
@@ -125,28 +128,40 @@ size_t GetStreamMaxWorkgroupsYZ(hipStream_t stream)
     if(it != cache.end())
         return it->second;
 
+    // A failed query says nothing about the device, so it is not cached.
     hipDeviceProp_t props{};
-    const size_t limit = hipGetDeviceProperties(&props, device) == hipSuccess
-                             ? GetMaxWorkgroupsYZ(std::string{props.gcnArchName})
-                             : std::numeric_limits<size_t>::max();
+    if(hipGetDeviceProperties(&props, device) != hipSuccess)
+        return std::numeric_limits<size_t>::max();
+
+    const size_t limit = GetMaxWorkgroupsYZ(std::string{props.gcnArchName});
     cache.emplace(device, limit);
     return limit;
 }
 
 } // namespace
 
-void ValidateWorkgroupCount(const std::array<size_t, 3>& gdims,
-                            const std::array<size_t, 3>& ldims,
-                            const std::string& name,
-                            hipStream_t stream)
+void ValidateLaunch(const std::array<size_t, 3>& gdims,
+                    const std::array<size_t, 3>& ldims,
+                    const std::string& name,
+                    const std::function<size_t()>& get_max_workgroups_yz)
 {
+    ValidateGlobalWorkSize(gdims, name);
+
     // The smallest limit of any architecture: grids below it need no device lookup.
     constexpr size_t smallest_limit = (size_t{1} << 16) - 1;
     const auto workgroups = [&](size_t i) { return (gdims[i] + ldims[i] - 1) / ldims[i]; };
     if(workgroups(1) <= smallest_limit && workgroups(2) <= smallest_limit)
         return;
 
-    CheckWorkgroupCount(gdims, ldims, name, GetStreamMaxWorkgroupsYZ(stream));
+    CheckWorkgroupCount(gdims, ldims, name, get_max_workgroups_yz());
+}
+
+void ValidateLaunch(const std::array<size_t, 3>& gdims,
+                    const std::array<size_t, 3>& ldims,
+                    const std::string& name,
+                    hipStream_t stream)
+{
+    ValidateLaunch(gdims, ldims, name, [stream] { return GetStreamMaxWorkgroupsYZ(stream); });
 }
 
 void HIPOCKernelInvoke::run(void* args, std::size_t size) const
@@ -154,9 +169,6 @@ void HIPOCKernelInvoke::run(void* args, std::size_t size) const
     MIOPEN_LOG_I2("kernel_name = "
                   << GetName() << ", global_work_dim = " << DimToFormattedString(gdims.data(), 3)
                   << ", local_work_dim = " << DimToFormattedString(ldims.data(), 3));
-
-    ValidateGlobalWorkSize(gdims, GetName());
-    ValidateWorkgroupCount(gdims, ldims, GetName(), stream);
 
     HipEventPtr start = nullptr;
     HipEventPtr stop  = nullptr;
@@ -180,6 +192,8 @@ void HIPOCKernelInvoke::run(void* args, std::size_t size) const
     {
         MIOPEN_THROW("MIOPEN_DEVICE_ARCH used, escaping launching kernel");
     }
+
+    ValidateLaunch(gdims, ldims, GetName(), stream);
 
     MIOPEN_HANDLE_LOCK
 
@@ -251,8 +265,7 @@ void HIPOCKernelInvoke::run_cooperative(void** kern_args) const
     }
 
 #if WORKAROUND_SWDEV_448157
-    ValidateGlobalWorkSize(gdims, GetName());
-    ValidateWorkgroupCount(gdims, ldims, GetName(), stream);
+    ValidateLaunch(gdims, ldims, GetName(), stream);
 
     // Unlike run(), this path passes the workgroup count rather than the work-item
     // count, so the division below must be exact or the remainder is silently dropped.
