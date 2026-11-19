@@ -103,6 +103,25 @@ class TestFwdXHaloYRingSpec(unittest.TestCase):
         ):
             self.assertTrue(_fwd_kloop_conflict(self._spec(**bad)), bad)
 
+    def test_dilated_h_refused(self):
+        # The ring reuses input rows across the y taps: dilation 1 along H
+        # (a kernarg, so checked on the launched problem).
+        from kernels.common.conv_implicit_gemm import (
+            fwd_launch_problem_reason,
+            is_valid_spec_for_problem,
+        )
+
+        nopad = dict(pH=0, pW=0, pD=0)
+        ok = _problem(C=64, Hi=10, Wi=66, Di=4, **nopad)
+        dil = _problem(C=64, Hi=8, Wi=66, Di=4, dH=2, **nopad)
+        for kw in (dict(xh_yring=14), dict(xh_yring=14, xh_pad=True)):
+            s = self._spec(**kw)
+            with self.subTest(**kw):
+                self.assertIsNone(fwd_launch_problem_reason(s, ok))
+                self.assertIn("dilation 1", fwd_launch_problem_reason(s, dil))
+                self.assertFalse(is_valid_spec_for_problem(s, dil, "gfx942")[0])
+        self.assertIsNone(fwd_launch_problem_reason(self._spec(), dil))
+
     def test_aot_axis_adds_only(self):
         from kernels.conv import aot_jobs as A
 

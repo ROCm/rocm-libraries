@@ -1113,6 +1113,15 @@ int rocke_conv_fxd_wave_rows(const rocke_implicit_gemm_conv_spec_t* s)
     return (r + 3) / 4 * 4;
 }
 
+int rocke_conv_fwd_split_det_slab_m_chunks(const rocke_implicit_gemm_conv_spec_t* s)
+{
+    const int mfm = rocke_implicit_gemm_conv_spec_mfmas_per_warp_m(s);
+    int mch = s->cshuffle_m_chunks > 1 ? s->cshuffle_m_chunks : 1;
+    while((s->tile_m * s->tile_n * 4) / mch > 32 * 1024 && mfm % (mch * 2) == 0)
+        mch *= 2;
+    return mch;
+}
+
 int rocke_conv_xhalo_a_rows(const rocke_implicit_gemm_conv_spec_t* s)
 {
     if(s->uk_xhalo && s->xh_stride_m && s->fxh_dma >= 1000)
@@ -1187,6 +1196,12 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                        || s->split_atomic_fast || s->split_flag_store || s->split_zero_first
                        || s->split_tail_compact || s->split_det || s->split_xcd_remap
                        || s->split_streamk || s->split_hybrid;
+    /* epi_store_fast acts on the unsplit store too: judged at every split_k. */
+    if(s->epi_store_fast
+       && (s->epilogue == NULL || strcmp(s->epilogue, "cshuffle") != 0 || s->cshuffle_m_chunks > 1
+           || s->dtype_d == NULL || strcmp(s->dtype_d, "bf16") != 0 || s->wave_size != 64))
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "epi_store_fast: the unchunked bf16 wave64 cshuffle store only");
     if(s->split_k == 1)
     {
         if(s->split_det || s->split_xcd_remap || s->split_streamk || s->split_hybrid
@@ -1200,16 +1215,13 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                             reason_cap,
                             "split_atomic_agent/split_atomic_pairs need the split-K binary "
                             "(split_k > 1)");
-        if(s->split_tail)
+        if(s->split_tail || s->split_tail_compact)
             ROCKE_SPEC_FAIL(
-                reason, reason_cap, "split_tail needs the split-K binary (split_k > 1)");
+                reason,
+                reason_cap,
+                "split_tail / split_tail_compact need the split-K binary (split_k > 1)");
         return true;
     }
-    if(s->epi_store_fast
-       && (s->epilogue == NULL || strcmp(s->epilogue, "cshuffle") != 0 || s->cshuffle_m_chunks > 1
-           || s->dtype_d == NULL || strcmp(s->dtype_d, "bf16") != 0 || s->wave_size != 64))
-        ROCKE_SPEC_FAIL(
-            reason, reason_cap, "epi_store_fast: the unchunked bf16 wave64 cshuffle store only");
     if(s->split_tail_compact && !s->split_tail)
         ROCKE_SPEC_FAIL(reason, reason_cap, "split_tail_compact is a split_tail launch");
     if(s->split_atomic_fast && (!s->split_atomic_pairs || s->cshuffle_m_chunks > 1))
@@ -1237,8 +1249,15 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                             reason_cap,
                             "split_det: plain / split_tail / split_hybrid grids, bf16 D, no other "
                             "split store");
+        /* Modes 1/2: the owner (slice ks_count - 1) spins on the other
+         * slices, which only the plain grid dispatches before it. */
+        if((s->split_det == 1 || s->split_det == 2) && s->split_xcd_remap && !s->split_hybrid)
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "split_det 1/2: the owner waits on the other slices, so it must be "
+                            "dispatched last (no split_xcd_remap; split_det 3 or split_hybrid)");
         if((s->split_flag_store || s->split_zero_first)
-           && (s->split_streamk || s->split_xcd_remap
+           && (s->split_streamk || s->split_hybrid || s->split_xcd_remap
                || (s->split_flag_store && s->split_zero_first)))
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
@@ -1276,6 +1295,9 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                         "fwd split_k > 1 needs the single-tile K loop (no unroll_k / async_dma)");
     if(s->group_merge > 1)
         ROCKE_SPEC_FAIL(reason, reason_cap, "fwd split_k > 1 does not support group_merge");
+    if(rocke_conv_problem_is_pointwise(&s->problem))
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "fwd split_k > 1 does not support the pointwise fast path");
     const char* dd = s->dtype_d ? s->dtype_d : "fp16";
     if(strcmp(dd, "fp32") != 0 && strcmp(dd, "bf16") != 0 && strcmp(dd, "fp16") != 0)
         ROCKE_SPEC_FAIL(
@@ -1448,7 +1470,7 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
     }
     {
         const int mc = s->cshuffle_m_chunks;
-        if(mc != 1 && mc != 0)
+        if(mc != 1)
         {
             const int mpw = s->tile_m / s->warp_m / s->warp_tile_m;
             if(mc < 1 || s->epilogue == NULL || strcmp(s->epilogue, "cshuffle") != 0
@@ -1526,12 +1548,14 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
         const char* dd = s->dtype_d ? s->dtype_d : "fp16";
         if(s->epi_quad_xpose
            && !(s->epilogue && strcmp(s->epilogue, "cshuffle") == 0 && s->split_k <= 1
-                && !(s->pipeline && strcmp(s->pipeline, "wavelet") == 0) && s->warp_tile_m == 16
-                && s->warp_tile_n == 16 && (strcmp(dd, "bf16") == 0 || strcmp(dd, "fp16") == 0)))
-            ROCKE_SPEC_FAIL(reason,
-                            reason_cap,
-                            "epi_quad_xpose replaces the unsplit cshuffle store of the 16x16 MFMA "
-                            "atom (bf16/f16 output)");
+                && s->wave_size == 64 && !(s->pipeline && strcmp(s->pipeline, "wavelet") == 0)
+                && s->warp_tile_m == 16 && s->warp_tile_n == 16
+                && (strcmp(dd, "bf16") == 0 || strcmp(dd, "fp16") == 0)))
+            ROCKE_SPEC_FAIL(
+                reason,
+                reason_cap,
+                "epi_quad_xpose replaces the unsplit wave64 cshuffle store of the 16x16 "
+                "MFMA atom (bf16/f16 output)");
         if(s->epi_quad_xpose < 0 || s->epi_quad_xpose > 4
            || (s->epi_quad_xpose >= 2
                && ((s->tile_n / s->warp_n) % 32 || !s->uniform_k_decode || s->reg_prefetch != 1
@@ -1551,10 +1575,13 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                             "xh_stride_m needs uk_xhalo (a multiple of 4), epi_quad_xpose 3/4, "
                             "mfmas_per_warp_m >= 2 and no xh_dpp / rpf_pingpong");
     }
-    if(s->fxh_dma < 0
-       || (s->fxh_dma
-           && !(s->xh_stride_m && s->lds_kpack_read && s->lds_xor && s->tile_k == 32
-                && !s->defer_mfma && !s->vmem_interleave && s->split_k <= 1)))
+    /* (13-15 and >= 3000 would decode as other values' schedules.) */
+    if(s->fxh_dma < 0 || (s->fxh_dma >= 13 && s->fxh_dma <= 15) || s->fxh_dma >= 3000)
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "fxh_dma is 1-12, 16-999, 1000 + n or 2000 + n (n < 1000)");
+    if((s->fxh_dma
+        && !(s->xh_stride_m && s->lds_kpack_read && s->lds_xor && s->tile_k == 32 && !s->defer_mfma
+             && !s->vmem_interleave && s->split_k <= 1)))
         ROCKE_SPEC_FAIL(reason,
                         reason_cap,
                         "fxh_dma needs xh_stride_m, lds_kpack_read, lds_xor, tile_k 32 and no "
@@ -1589,6 +1616,14 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
         if(s->warp_tile_k == 0 || (s->tile_k / s->warp_tile_k) % 2)
             ROCKE_SPEC_FAIL(
                 reason, reason_cap, "lds_kpack_read needs an even number of kk steps per tile");
+        /* One 16-byte read covers two kk steps of 4 k values per lane. */
+        const char* da = s->dtype_a ? s->dtype_a : "fp16";
+        if(s->mma_dtype != NULL || (strcmp(da, "bf16") != 0 && strcmp(da, "fp16") != 0)
+           || s->warp_tile_m * s->warp_tile_k != 256)
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "lds_kpack_read needs a 16-bit MFMA atom of 4 k values per lane "
+                            "(16x16x16 / 32x32x8)");
     }
     if(s->fb_skip_empty && !s->uniform_k_decode)
         ROCKE_SPEC_FAIL(
@@ -1953,6 +1988,14 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
                                     : 2;
             const int mch = s->cshuffle_m_chunks > 1 ? s->cshuffle_m_chunks : 1;
             c_lds = is_cshuffle ? (s->tile_m / mch * s->tile_n * c_dtype_bytes) : 0;
+            /* split_det 3 stages its f32 partial tile through the same LDS. */
+            if(s->split_det == 3 && rocke_conv_fwd_split_k_atomic(s) && is_cshuffle)
+            {
+                const int det_lds
+                    = s->tile_m / rocke_conv_fwd_split_det_slab_m_chunks(s) * s->tile_n * 4;
+                if(det_lds > c_lds)
+                    c_lds = det_lds;
+            }
         }
         {
             /* wavelet keeps A/B live across the whole scf_if_else, so the LDS
@@ -2042,6 +2085,11 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
     }
 
     if(!rocke_conv_fwd_split_atomic_ok(s, reason, reason_cap))
+        return false;
+    /* The unsplit spec too: its split-K knobs are refused here, as validate
+     * refuses them, not left for the build to find. */
+    if(s->split_k == 1 && !s->split_k_cluster
+       && !rocke_conv_fwd_asplit_conflict_ok(s, reason, reason_cap))
         return false;
     if(s->split_k != 1 || s->split_k_cluster)
     {

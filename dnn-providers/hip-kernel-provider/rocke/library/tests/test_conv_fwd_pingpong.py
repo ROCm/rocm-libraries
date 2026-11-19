@@ -17,7 +17,13 @@ from unittest import mock
 
 import pytest
 
-from tests.test_conv_fwd_3d_kloop_knobs import _SKIP, _TOL, _problem, _run
+from tests.test_conv_fwd_3d_kloop_knobs import (
+    _SKIP,
+    _TOL,
+    _cpp_is_valid,
+    _problem,
+    _run,
+)
 
 _PP = dict(uniform_k_decode=True, reg_prefetch=1, lds_xor=True, lds_kpack_read=True)
 
@@ -136,6 +142,20 @@ class TestFwdPingPongSpec(unittest.TestCase):
         ):
             with self.subTest(**kw):
                 self.assertNotEqual(_fwd_kloop_conflict(self._spec(**kw)), "")
+
+    def test_engines_agree(self):
+        # Both engines refuse the retired modes and an unset chunk count.
+        from kernels.common.conv_implicit_gemm import is_valid_spec
+
+        for kw in (
+            dict(rpf_pingpong=2),
+            dict(rpf_pingpong=3),
+            dict(rpf_pingpong=4, cshuffle_m_chunks=0),
+            dict(rpf_pingpong=4),
+        ):
+            with self.subTest(**kw):
+                s = self._spec(**kw)
+                self.assertEqual(_cpp_is_valid(s, "gfx942"), is_valid_spec(s, "gfx942"))
 
     def test_names(self):
         a = self._spec()

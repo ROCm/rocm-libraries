@@ -20,7 +20,13 @@ from unittest import mock
 
 import pytest
 
-from tests.test_conv_fwd_3d_kloop_knobs import _SKIP, _TOL, _problem, _run
+from tests.test_conv_fwd_3d_kloop_knobs import (
+    _SKIP,
+    _TOL,
+    _cpp_is_valid,
+    _problem,
+    _run,
+)
 
 
 @pytest.mark.gpu
@@ -127,10 +133,12 @@ class TestFwd3dXHalo(unittest.TestCase):
 @unittest.skipIf(_SKIP, _SKIP)
 class TestFwd3dQuadXposeEpilogue(unittest.TestCase):
     """epi_quad_xpose (register-only store of the 16x16 atom) against the fp32
-    reference: the x-halo loop and the plain uniform_k_decode loop (B channel
-    permutation of modes 2/3 at both B loaders), partial M tiles, K not a
-    multiple of the tile (the last N tile's 8-channel runs straddle K), and
-    grouped."""
+    reference: the x-halo loop and the uniform-tap loop of uniform_k_decode (B
+    channel permutation of modes 2-4 at both B loaders), partial M tiles, a
+    partial last N tile (K a multiple of the 8-channel runs, not of the
+    tile), and grouped. Mode 1 also on the fallback loop (cpg not a multiple
+    of tile_k), on 4-channel runs (K=36) and on the pointwise path; modes 2-4
+    refuse those launches (fwd_launch_problem_reason)."""
 
     def _check(self, problem, **kw):
         err = _run(problem, **kw)
@@ -163,6 +171,19 @@ class TestFwd3dQuadXposeEpilogue(unittest.TestCase):
                         self._check(
                             prob, tile=tile, epi_quad_xpose=mode, **base, **knobs
                         )
+        for i, prob in enumerate(
+            (
+                _problem(C=48, Hi=10, Wi=10, Di=6, **nopad),
+                _problem(C=64, K=36, Hi=10, Wi=10, Di=6, **nopad),
+            )
+        ):
+            with self.subTest(mode=1, mode1_prob=i):
+                self._check(
+                    prob, tile=tile, epi_quad_xpose=1, lds_kpack_read=True, **base
+                )
+        # The pointwise fast path (its own D address), grouped.
+        pw = _problem(C=128, K=128, groups=2, Z=1, Y=1, X=1, pH=0, pW=0, pD=0)
+        self._check(pw, tile=(128, 64, 32, 2, 2, 16), epi_quad_xpose=1)
 
 
 @pytest.mark.gpu
@@ -328,6 +349,97 @@ class TestFwdLdsKnobSpec(unittest.TestCase):
         ):
             with self.subTest(**kw):
                 self.assertNotEqual(_fwd_kloop_conflict(self._spec(**kw)), "")
+
+    def test_quad_xpose_launch_problem(self):
+        # cpg / kpg are kernargs: the launched problem, not the build one,
+        # decides (is_valid_spec_for_problem / identity_supports_problem).
+        from kernels.common.conv_implicit_gemm import (
+            fwd_launch_problem_reason,
+            is_valid_spec_for_problem,
+        )
+
+        for mode in (2, 3, 4):
+            s = self._spec(epilogue="cshuffle", epi_quad_xpose=mode)  # tile_k 32
+            with self.subTest(mode=mode):
+                self.assertIsNone(fwd_launch_problem_reason(s, _problem(C=64)))
+                self.assertEqual(
+                    is_valid_spec_for_problem(s, _problem(C=64), "gfx942"),
+                    (True, "ok"),
+                )
+                # cpg 48 / 16: the fallback loop stores B in the plain order.
+                for p in (_problem(C=48), _problem(C=32, K=64, groups=2)):
+                    self.assertIn("cpg % tile_k", fwd_launch_problem_reason(s, p))
+                    self.assertFalse(is_valid_spec_for_problem(s, p, "gfx942")[0])
+                # kpg 36: the last 8-channel run would be dropped.
+                for p in (_problem(C=64, K=36), _problem(C=64, K=72, groups=2)):
+                    self.assertIn("multiple of 8", fwd_launch_problem_reason(s, p))
+        s1 = self._spec(epilogue="cshuffle", epi_quad_xpose=1)
+        self.assertIsNone(fwd_launch_problem_reason(s1, _problem(C=48, K=36)))
+        self.assertIn("multiple of 4", fwd_launch_problem_reason(s1, _problem(K=6)))
+
+    def test_quad_xpose_wave64_only(self):
+        from kernels.common.conv_implicit_gemm import _fwd_kloop_conflict
+
+        s = self._spec(
+            uniform_k_decode=False,
+            reg_prefetch=0,
+            lds_xor=False,
+            epilogue="cshuffle",
+            epi_quad_xpose=1,
+            wave_size=32,
+        )
+        self.assertIn("wave64", _fwd_kloop_conflict(s))
+        self.assertEqual(_cpp_is_valid(s, "gfx1151")[0], False)
+
+    def test_kpack_read_atom(self):
+        # One 16-byte read is two kk steps of a 16-bit atom with 4 k per lane.
+        from kernels.common.conv_implicit_gemm import ConvDataSpec, is_valid_spec
+
+        why = "4 k values per lane"
+        ok = self._spec(lds_kpack_read=True, epilogue="cshuffle")
+        self.assertEqual(is_valid_spec(ok, "gfx942"), (True, "ok"))
+        tf32 = self._spec(
+            lds_kpack_read=True,
+            epilogue="cshuffle",
+            data=ConvDataSpec(
+                dtype_a="fp32", dtype_b="fp32", dtype_d="fp32", mma_dtype="tf32"
+            ),
+            warp_tile_k=8,
+        )
+        k8 = self._spec(
+            lds_kpack_read=True,
+            epilogue="cshuffle",
+            data=ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16"),
+            tile_k=64,
+            warp_tile_k=32,
+        )
+        for spec, arch in ((tf32, "gfx942"), (k8, "gfx950")):
+            with self.subTest(arch=arch):
+                py = is_valid_spec(spec, arch)
+                self.assertFalse(py[0])
+                self.assertIn(why, py[1])
+                self.assertEqual(_cpp_is_valid(spec, arch), py)
+
+    def test_python_only_knobs_refused_by_cpp(self):
+        # Knobs without a C++ twin: the binding refuses them by name instead
+        # of building the knob-less kernel.
+        from rocke.core.backend import BackendError, import_engine
+
+        from kernels.conv.engine_bridge import (
+            ENGINE_MODULE,
+            conv_implicit_gemm_spec_to_dict,
+        )
+
+        try:
+            eng = import_engine(ENGINE_MODULE)
+        except BackendError as e:
+            self.skipTest(f"C++ engine not importable: {e}")
+        d = conv_implicit_gemm_spec_to_dict(self._spec(epilogue="cshuffle"))
+        for key in ("xh_dpp", "a_direct", "xh_subtile", "pp_fetch_deep"):
+            with self.subTest(key=key), self.assertRaisesRegex(
+                ValueError, f"'{key}' has no C\\+\\+"
+            ):
+                eng.conv_implicit_gemm_lower_llvm(dict(d, **{key: 1}), arch="gfx942")
 
     def test_names(self):
         a = self._spec()

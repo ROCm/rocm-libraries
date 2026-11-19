@@ -761,6 +761,11 @@ bool rocke_conv_fwd_split_atomic_ok(const rocke_implicit_gemm_conv_spec_t* s,
                                     size_t reason_cap);
 /* Python _fxd_wave_rows / _xhalo_a_rows / _xhalo_b_rows. */
 int rocke_conv_fxd_wave_rows(const rocke_implicit_gemm_conv_spec_t* s);
+/* Python fwd_split_det_slab_m_chunks: split_det 3 stages its f32 partial tile
+ * through LDS in this many row slabs (cshuffle_m_chunks, doubled while a slab
+ * exceeds 32 KB and the warp's M atoms still divide). Shared by the epilogue
+ * and the LDS budget. */
+int rocke_conv_fwd_split_det_slab_m_chunks(const rocke_implicit_gemm_conv_spec_t* s);
 int rocke_conv_xhalo_a_rows(const rocke_implicit_gemm_conv_spec_t* s);
 int rocke_conv_xhalo_b_rows(const rocke_implicit_gemm_conv_spec_t* s);
 

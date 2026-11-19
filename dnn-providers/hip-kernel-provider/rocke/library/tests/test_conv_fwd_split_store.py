@@ -21,7 +21,13 @@ from unittest import mock
 
 import pytest
 
-from tests.test_conv_fwd_3d_kloop_knobs import _SKIP, _TOL, _problem, _run
+from tests.test_conv_fwd_3d_kloop_knobs import (
+    _SKIP,
+    _TOL,
+    _cpp_is_valid,
+    _problem,
+    _run,
+)
 
 _PP5 = dict(
     uniform_k_decode=True,
@@ -355,9 +361,125 @@ class TestFwdSplitStoreSpec(unittest.TestCase):
             dict(split_k=2, split_hybrid=24, split_streamk=True),
             dict(split_k=2, split_hybrid=24, xcd_remap=6),
             dict(split_k=2, split_hybrid=24, split_tail=True),
+            # split_hybrid runs the stream-K loop: no flag store / zero-first.
+            dict(split_k=2, split_hybrid=24, split_zero_first=True),
+            dict(split_k=2, split_hybrid=24, split_flag_store=True),
         ):
             with self.subTest(**kw):
                 self.assertNotEqual(fwd_split_k_conflict(self._spec(**kw)), "")
+
+    def test_unsplit_spec_refuses_split_knobs(self):
+        # is_valid_spec refuses what validate() refuses: the split-K knobs of
+        # an unsplit spec (no-ops under their own tag otherwise), in both
+        # engines.
+        from kernels.common.conv_implicit_gemm import is_valid_spec
+
+        self.assertEqual(is_valid_spec(self._spec(), "gfx942"), (True, "ok"))
+        self.assertEqual(
+            is_valid_spec(self._spec(epi_store_fast=True), "gfx942"), (True, "ok")
+        )
+        for kw in (
+            dict(split_tail=True),
+            dict(split_tail_compact=True),
+            dict(split_atomic_fast=True),
+            dict(split_atomic_pairs=True),
+            dict(split_det=3),
+            dict(split_hybrid=24),
+            dict(split_zero_first=True),
+            dict(epi_store_fast=True, cshuffle_m_chunks=2),
+        ):
+            with self.subTest(**kw):
+                s = self._spec(**kw)
+                py = is_valid_spec(s, "gfx942")
+                self.assertFalse(py[0])
+                with self.assertRaises(ValueError):
+                    s.validate()
+                self.assertEqual(_cpp_is_valid(s, "gfx942"), py)
+
+    def test_split_knob_parity(self):
+        # The split-K rules of this change, judged the same by both engines.
+        from kernels.common.conv_implicit_gemm import is_valid_spec
+
+        for kw in (
+            dict(split_k=2, split_hybrid=24, split_zero_first=True),
+            dict(split_k=2, split_hybrid=24, split_flag_store=True),
+            dict(split_k=2, split_zero_first=True),
+            dict(split_k=2, split_atomic_pairs=True, split_atomic_fast=True),
+        ):
+            with self.subTest(**kw):
+                s = self._spec(**kw)
+                self.assertEqual(_cpp_is_valid(s, "gfx942"), is_valid_spec(s, "gfx942"))
+
+    def test_pointwise_split_refused(self):
+        # The atomic split of the pointwise fast path is not built.
+        from kernels.common.conv_implicit_gemm import is_valid_spec
+
+        pw = _problem(C=128, K=128, groups=2, Z=1, Y=1, X=1, pH=0, pW=0, pD=0)
+        s = self._spec(
+            problem=pw,
+            split_k=2,
+            uniform_k_decode=False,
+            reg_prefetch=0,
+            lds_xor=False,
+            lds_kpack_read=False,
+            rpf_pingpong=0,
+            vmem_interleave=0,
+        )
+        py = is_valid_spec(s, "gfx942")
+        self.assertEqual(
+            py, (False, "fwd split_k > 1 does not support the pointwise fast path")
+        )
+        self.assertEqual(_cpp_is_valid(s, "gfx942"), py)
+
+    def test_launch_problem_rules(self):
+        # The split binaries take kpg and groups as kernargs: the launched
+        # problem decides.
+        from kernels.common.conv_implicit_gemm import (
+            fwd_launch_problem_reason,
+            is_valid_spec_for_problem,
+        )
+
+        szf = self._spec(split_k=2, split_zero_first=True)
+        for K, why in ((16, None), (24, None), (12, "multiple of 8")):
+            p = _problem(C=128, K=K, pH=0, pW=0, pD=0)
+            with self.subTest(split_zero_first=True, K=K):
+                r = fwd_launch_problem_reason(szf, p)
+                self.assertTrue(r is None if why is None else why in r, r)
+                self.assertEqual(
+                    is_valid_spec_for_problem(szf, p, "gfx942")[0], not why
+                )
+        for kw in (dict(split_streamk=True), dict(split_hybrid=24)):
+            s = self._spec(split_k=2, **kw)
+            with self.subTest(**kw):
+                g1 = _problem(C=128, K=128, pH=0, pW=0, pD=0)
+                g2 = _problem(C=128, K=128, groups=2, pH=0, pW=0, pD=0)
+                self.assertIsNone(fwd_launch_problem_reason(s, g1))
+                self.assertIn("groups == 1", fwd_launch_problem_reason(s, g2))
+                self.assertFalse(is_valid_spec_for_problem(s, g2, "gfx942")[0])
+        # The other split binaries serve grouped problems.
+        self.assertIsNone(
+            fwd_launch_problem_reason(
+                self._spec(split_k=2), _problem(C=128, K=128, groups=2)
+            )
+        )
+
+    def test_split_tail_full_tiles_bound(self):
+        # full_tiles counts tiles of the launch: past them, the remap would
+        # leave real tiles unwritten.
+        from kernels.common.conv_args import ConvArgs
+
+        p = _problem(C=128, K=128, pH=0, pW=0, pD=0)
+        a = ConvArgs.from_problem(p, tile_m=256, tile_n=128, tile_k=64)
+        tiles = a.num_pid_m * a.num_pid_n
+        ptrs = (1 << 20, 2 << 20, 3 << 20, 64, 64, 64)
+        for full in (0, tiles):
+            v = a.to_launch_values(*ptrs, split_k=2, full_tiles=full)
+            self.assertEqual(v["full_tiles"], full)
+        for full in (-1, tiles + 1):
+            with self.subTest(full_tiles=full), self.assertRaisesRegex(
+                ValueError, "full_tiles"
+            ):
+                a.to_launch_values(*ptrs, split_k=2, full_tiles=full)
 
     def test_names(self):
         a = self._spec(split_k=2)

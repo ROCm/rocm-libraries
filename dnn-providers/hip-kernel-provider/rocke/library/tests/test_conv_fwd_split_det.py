@@ -15,7 +15,7 @@ import unittest
 
 import pytest
 
-from tests.test_conv_fwd_3d_kloop_knobs import _SKIP, _TOL, _problem
+from tests.test_conv_fwd_3d_kloop_knobs import _SKIP, _TOL, _cpp_is_valid, _problem
 
 _PP5 = dict(
     uniform_k_decode=True,
@@ -263,6 +263,64 @@ class TestFwdSplitDetSpec(unittest.TestCase):
         ):
             with self.subTest(**kw):
                 self.assertNotEqual(fwd_split_k_conflict(self._s(**kw)), "")
+
+    def test_owner_wait_dispatch_order(self):
+        # Modes 1 / 2: the owner spins on the other slices, which the whole-
+        # launch split_xcd_remap may dispatch after it; mode 3 and the hybrid
+        # grid do not wait that way.
+        from kernels.common.conv_implicit_gemm import (
+            fwd_split_k_conflict,
+            is_valid_spec,
+        )
+
+        for kw in (
+            dict(split_k=2, split_det=3, split_xcd_remap=6),
+            dict(split_k=2, split_det=2, xcd_remap=6),  # tile remap: slice = z
+            dict(split_k=2, split_det=2, split_hybrid=16, split_xcd_remap=6),
+        ):
+            with self.subTest(**kw):
+                self.assertEqual(fwd_split_k_conflict(self._s(**kw)), "")
+        for kw in (
+            dict(split_k=2, split_det=1, split_xcd_remap=8),
+            dict(split_k=2, split_det=2, split_xcd_remap=6),
+        ):
+            with self.subTest(**kw):
+                s = self._s(**kw)
+                self.assertIn("dispatched last", fwd_split_k_conflict(s))
+                py = is_valid_spec(s, "gfx942")
+                self.assertFalse(py[0])
+                self.assertEqual(_cpp_is_valid(s, "gfx942"), py)
+
+    def test_slab_staging_lds(self):
+        # split_det 3 stages its f32 partial tile through the cshuffle LDS:
+        # charged by the budget, so a tile whose slab cannot fit is refused
+        # instead of failing to compile.
+        from kernels.common.conv_implicit_gemm import (
+            fwd_split_det_slab_m_chunks,
+            implicit_gemm_lds_bytes,
+            is_valid_spec,
+        )
+
+        p = _problem(C=128, K=128, pH=0, pW=0, pD=0)
+        big = _spec(
+            p,
+            (128, 256, 64, 8, 1, 16),
+            uniform_k_decode=True,
+            reg_prefetch=1,
+            lds_xor=True,
+            split_k=2,
+            split_det=3,
+        )
+        self.assertEqual(fwd_split_det_slab_m_chunks(big), 1)  # 1 M atom per warp
+        self.assertEqual(implicit_gemm_lds_bytes(big)[2], 128 * 256 * 4)
+        py = is_valid_spec(big, "gfx942")
+        self.assertFalse(py[0])
+        self.assertIn("LDS budget", py[1])
+        self.assertEqual(_cpp_is_valid(big, "gfx942"), py)
+        ok = self._s(split_k=2, split_det=3)  # t256x128 w4x2: 4 row slabs
+        self.assertEqual(fwd_split_det_slab_m_chunks(ok), 4)
+        self.assertEqual(is_valid_spec(ok, "gfx942"), (True, "ok"))
+        self.assertEqual(_cpp_is_valid(ok, "gfx942"), (True, "ok"))
 
     def test_name_label_abi(self):
         from kernels.common.conv_abi import conv_arg_names

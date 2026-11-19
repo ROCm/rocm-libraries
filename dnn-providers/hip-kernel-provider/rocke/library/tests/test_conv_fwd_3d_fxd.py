@@ -15,7 +15,13 @@ from unittest import mock
 
 import pytest
 
-from tests.test_conv_fwd_3d_kloop_knobs import _SKIP, _TOL, _problem, _run
+from tests.test_conv_fwd_3d_kloop_knobs import (
+    _SKIP,
+    _TOL,
+    _cpp_is_valid,
+    _problem,
+    _run,
+)
 
 _BASE = dict(
     uniform_k_decode=True,
@@ -97,6 +103,34 @@ class TestFwdXHaloDmaSpec(unittest.TestCase):
             dict(fxh_dma=1036, xh_wait_smem=False),
         ):
             self.assertTrue(_fwd_kloop_conflict(self._spec(**bad)), bad)
+
+    def test_value_ranges(self):
+        # Values the builder would decode as another value's schedule (fxh_dma
+        # 13-15, >= 3000) and out-of-range sched_strategy: refused by both
+        # engines with one reason.
+        from kernels.common.conv_implicit_gemm import is_valid_spec
+
+        for good in (12, 16, 1036, 2999):
+            s = self._spec(fxh_dma=good, uk_xhalo=8)
+            self.assertEqual(is_valid_spec(s, "gfx942"), (True, "ok"), good)
+        for bad in (
+            dict(fxh_dma=13, uk_xhalo=8),
+            dict(fxh_dma=15, uk_xhalo=8),
+            dict(fxh_dma=3036, uk_xhalo=8),
+            dict(sched_strategy=6),
+            dict(sched_strategy=-1),
+        ):
+            with self.subTest(**bad):
+                s = self._spec(**bad)
+                py = is_valid_spec(s, "gfx942")
+                self.assertFalse(py[0])
+                with self.assertRaises(ValueError):
+                    s.validate()
+                cpp = _cpp_is_valid(s, "gfx942")
+                self.assertFalse(cpp[0])
+                if bad.get("fxh_dma", 1000) >= 1000:
+                    # (the C port carries the x-halo DMA loop at >= 1000 only)
+                    self.assertEqual(cpp, py)
 
     def test_aot_axis_adds_only(self):
         from kernels.conv import aot_jobs as A

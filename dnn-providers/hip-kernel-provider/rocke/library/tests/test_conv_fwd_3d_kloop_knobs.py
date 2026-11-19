@@ -171,6 +171,28 @@ def _problem(**kw):
 _TOL = 5e-2
 
 
+def _cpp_is_valid(spec, arch: str):
+    """The C++ engine's ``is_valid_spec`` of ``spec`` (skips the test when the
+    engine binding is not importable): its validator mirrors the Python one,
+    reason strings included."""
+    from rocke.core.backend import BackendError, import_engine
+
+    from kernels.conv.engine_bridge import (
+        ENGINE_MODULE,
+        conv_implicit_gemm_spec_to_dict,
+    )
+
+    try:
+        eng = import_engine(ENGINE_MODULE)
+    except BackendError as e:
+        raise unittest.SkipTest(f"C++ engine not importable: {e}") from None
+    return tuple(
+        eng.conv_implicit_gemm_is_valid_spec(
+            conv_implicit_gemm_spec_to_dict(spec), arch
+        )
+    )
+
+
 @unittest.skipIf(_SKIP, _SKIP)
 class TestFwd3dKLoopKnobs(unittest.TestCase):
     def _check(self, problem, **kw):

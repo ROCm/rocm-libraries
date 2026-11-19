@@ -580,10 +580,7 @@ static void conv_fwd_split_store(rocke_conv_build_ctx_t* ctx,
         rocke_value_t* ws_rsrc
             = rocke_b_buffer_rsrc(b, ctx->fwd_p_sk_partials, rocke_b_const_i32(b, 0x7FFFFFF0));
         /* Row slabs of <= 32 KB of f32 where the warp's M atoms allow. */
-        const int mfm = ctx->mfmas_m;
-        int mch = spec->cshuffle_m_chunks > 1 ? spec->cshuffle_m_chunks : 1;
-        while((ctx->block_m * ctx->block_n * 4) / mch > 32 * 1024 && mfm % (mch * 2) == 0)
-            mch *= 2;
+        const int mch = rocke_conv_fwd_split_det_slab_m_chunks(spec);
         rocke_cshuffle_epilogue_t e32 = rocke_cshuffle_epilogue_from_grid(epi->atom, &epi->grid, 4);
         e32.out_dtype = "fp32";
         e32.no_alias = spec->cshuffle_no_alias;

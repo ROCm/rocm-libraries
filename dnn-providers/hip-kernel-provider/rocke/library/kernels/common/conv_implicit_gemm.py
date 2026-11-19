@@ -713,8 +713,8 @@ class ImplicitGemmConvSpec:
     # partials to its accumulators in slot order (bitwise-reproducible f32
     # sum) and stores D once in bf16, then resets the counter (zeroed once at
     # allocation). D needs no clearing. A waiting owner only waits on
-    # earlier-dispatched workgroups (with split_xcd_remap the launch must be
-    # co-resident: tiles * ks_count <= resident workgroups). Scratch: one
+    # earlier-dispatched workgroups, so modes 1 / 2 refuse split_xcd_remap
+    # (it remaps the whole launch; split_hybrid keeps the owner last). Scratch: one
     # block_m x block_n f32 slot per non-owner contribution of every split
     # tile (split_tail: of the tail tiles only, see fwd_split_det_slots).
     # Appends ``sk_flags`` and ``sk_partials`` to the split-K ABI. 1: the
@@ -1033,18 +1033,6 @@ class ImplicitGemmConvSpec:
         _spk_why = fwd_split_k_conflict(self)
         if _spk_why:
             raise ValueError(_spk_why)
-        if self.split_addr_k_decode:
-            p_ = self.problem
-            if not p_.is_3d or p_.is_pointwise or self.group_merge > 1:
-                raise ValueError(
-                    "split_addr_k_decode is built on the 3-D split-addressing path "
-                    "(no pointwise, no group_merge)"
-                )
-            if p_.cpg % self.tile_k:
-                raise ValueError(
-                    f"split_addr_k_decode needs cpg % tile_k == 0 (a K tile must not "
-                    f"straddle a filter tap); cpg={p_.cpg}, tile_k={self.tile_k}"
-                )
         if self.prefetch_regs and (self.async_dma or self.pipeline == "wavelet"):
             raise ValueError(
                 "prefetch_regs stages the sync loader's registers; async_dma and "
@@ -1159,6 +1147,8 @@ def _fwd_kloop_conflict(spec: "ImplicitGemmConvSpec") -> str:
     """
     if spec.xcd_remap < 0:
         return "xcd_remap must be >= 0"
+    if spec.sched_strategy not in (0, *_SCHED_STRATEGIES):
+        return "sched_strategy must be 0..5"
     _sched_why = _fwd_kloop_sched_conflict(spec)
     if _sched_why:
         return _sched_why
@@ -1287,13 +1277,14 @@ def _fwd_kloop_conflict(spec: "ImplicitGemmConvSpec") -> str:
     if spec.epi_quad_xpose and not (
         spec.epilogue == "cshuffle"
         and spec.split_k <= 1
+        and spec.wave_size == 64
         and spec.pipeline != "wavelet"
         and spec.warp_tile_m == spec.warp_tile_n == 16
         and spec.data.dtype_d in ("bf16", "fp16")
     ):
         return (
-            "epi_quad_xpose replaces the unsplit cshuffle store of the 16x16 MFMA "
-            "atom (bf16/f16 output)"
+            "epi_quad_xpose replaces the unsplit wave64 cshuffle store of the 16x16 "
+            "MFMA atom (bf16/f16 output)"
         )
     if spec.epi_quad_xpose not in (0, 1, 2, 3, 4) or (
         spec.epi_quad_xpose >= 2
@@ -1365,17 +1356,17 @@ def _fwd_kloop_conflict(spec: "ImplicitGemmConvSpec") -> str:
             "xh_stride_m needs uk_xhalo (a multiple of 4), epi_quad_xpose 3/4, mfmas_per_warp_m >= 2 "
             "and no xh_dpp / rpf_pingpong"
         )
-    if spec.fxh_dma < 0 or (
-        spec.fxh_dma
-        and not (
-            spec.xh_stride_m
-            and spec.lds_kpack_read
-            and spec.lds_xor
-            and spec.tile_k == 32
-            and not spec.defer_mfma
-            and not spec.vmem_interleave
-            and spec.split_k <= 1
-        )
+    if spec.fxh_dma < 0 or 13 <= spec.fxh_dma <= 15 or spec.fxh_dma >= 3000:
+        # (13-15 and >= 3000 would decode as other values' schedules.)
+        return "fxh_dma is 1-12, 16-999, 1000 + n or 2000 + n (n < 1000)"
+    if spec.fxh_dma and not (
+        spec.xh_stride_m
+        and spec.lds_kpack_read
+        and spec.lds_xor
+        and spec.tile_k == 32
+        and not spec.defer_mfma
+        and not spec.vmem_interleave
+        and spec.split_k <= 1
     ):
         return (
             "fxh_dma needs xh_stride_m, lds_kpack_read, lds_xor, tile_k 32 and no "
@@ -1414,11 +1405,30 @@ def _fwd_kloop_conflict(spec: "ImplicitGemmConvSpec") -> str:
             return "lds_kpack_read and a_direct are exclusive"
         if (spec.tile_k // spec.warp_tile_k) % 2:
             return "lds_kpack_read needs an even number of kk steps per tile"
+        if (
+            spec.data.mma_dtype is not None
+            or spec.data.dtype_a not in ("bf16", "fp16")
+            or spec.warp_tile_m * spec.warp_tile_k != 256
+        ):
+            # One 16-byte read covers two kk steps of 4 k values per lane.
+            return (
+                "lds_kpack_read needs a 16-bit MFMA atom of 4 k values per lane "
+                "(16x16x16 / 32x32x8)"
+            )
     if spec.a_direct:
         if not (spec.uniform_k_decode and spec.reg_prefetch == 1):
             return "a_direct is implemented in the uniform_k_decode + reg_prefetch=1 loop only"
     if spec.reg_prefetch not in (0, 1, 2):
         return f"reg_prefetch must be 0, 1 or 2, got {spec.reg_prefetch}"
+    if spec.split_addr_k_decode:
+        p_ = spec.problem
+        if not p_.is_3d or p_.is_pointwise or spec.group_merge > 1:
+            return (
+                "split_addr_k_decode is built on the 3-D split-addressing path "
+                "(no pointwise, no group_merge)"
+            )
+        if p_.cpg % spec.tile_k:
+            return "split_addr_k_decode needs cpg % tile_k == 0"
     if not (spec.uniform_k_decode or spec.reg_prefetch):
         return ""
     # The small-spatial K loop (prefetch_regs, split_addr_k_decode) is a
@@ -1701,6 +1711,68 @@ def resolve_fwd_split_k_spec(
     return dc_replace(spec, split_k=degree)
 
 
+def fwd_launch_problem_reason(knobs: object, problem: object) -> Optional[str]:
+    """Why a forward implicit-GEMM binary cannot be launched on ``problem``,
+    or ``None``.
+
+    ``knobs`` is the binary's :class:`ImplicitGemmConvSpec` or its
+    ``KernelIdentity`` (read by attribute: ``tile_k``, ``group_merge``,
+    ``split_k`` and the knobs below). The binary takes cpg, kpg, groups and
+    the dilation as kernargs, so these rules hold for every launched problem,
+    not only the one the binary was built for; ``is_valid_spec_for_problem``
+    and ``identity_supports_problem`` both ask this predicate.
+
+    * ``epi_quad_xpose`` 2-4: the epilogue expects the B rows of the
+      uniform-tap loop's channel order, which the plain fallback loop (taken
+      when ``cpg % tile_k != 0``) does not store: cpg must be a multiple of
+      tile_k.
+    * ``epi_quad_xpose``: one store writes 4 (mode 1) or 8 (modes 2-4)
+      consecutive output channels under a whole-vector bound, so the output
+      channel run (kpg, or kpg * Gm merged) must be a multiple of it.
+    * ``split_zero_first``: slice 0 zeroes D in 8-channel vectors: kpg must
+      be a multiple of 8.
+    * ``split_streamk`` / ``split_hybrid``: the flat stream-K grid decodes one
+      group: groups must be 1.
+    * ``xh_yring``: the ring reuses input rows across the y taps, which holds
+      for dilation 1 along H only.
+    """
+    cpg = int(getattr(problem, "cpg", 0) or 0)
+    kpg = int(getattr(problem, "kpg", 0) or 0)
+    groups = int(getattr(problem, "groups", 1) or 1)
+    tile_k = max(1, int(getattr(knobs, "tile_k", 1) or 1))
+    gm = max(1, int(getattr(knobs, "group_merge", 1) or 1))
+    eqx = int(getattr(knobs, "epi_quad_xpose", 0) or 0)
+    if eqx >= 2 and cpg % tile_k:
+        return (
+            f"epi_quad_xpose {eqx} needs cpg % tile_k == 0 (the fallback loop "
+            f"stores B in the plain channel order); cpg={cpg}, tile_k={tile_k}"
+        )
+    if eqx:
+        _w = 8 if eqx >= 2 else 4
+        if (kpg * gm) % _w:
+            return (
+                f"epi_quad_xpose {eqx} stores {_w} output channels per lane: the "
+                f"output channel run ({kpg * gm}) must be a multiple of {_w}"
+            )
+    if int(getattr(knobs, "split_k", 1) or 1) > 1:
+        if getattr(knobs, "split_zero_first", False) and kpg % 8:
+            return (
+                f"split_zero_first zeroes D in 8-channel vectors: kpg must be a "
+                f"multiple of 8 (kpg={kpg})"
+            )
+        if (
+            getattr(knobs, "split_streamk", False)
+            or int(getattr(knobs, "split_hybrid", 0) or 0)
+        ) and groups != 1:
+            return "split_streamk / split_hybrid serve groups == 1 only (the flat grid decodes one group)"
+    if (
+        int(getattr(knobs, "xh_yring", 0) or 0)
+        and int(getattr(problem, "dH", 1) or 1) != 1
+    ):
+        return "xh_yring serves dilation 1 along H only"
+    return None
+
+
 def is_valid_spec_for_problem(
     spec: ImplicitGemmConvSpec, problem: ConvProblem, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
@@ -1719,6 +1791,9 @@ def is_valid_spec_for_problem(
         _why = fwd_split_k_cluster_problem_reason(problem)
         if _why is not None:
             return False, _why
+    _why = fwd_launch_problem_reason(spec, problem)
+    if _why is not None:
+        return False, _why
 
     # uk_nopad drops the per-tap bounds checks: the binary is only correct
     # on an unpadded problem (the AOT build problem may be padded; the
@@ -1912,6 +1987,14 @@ def fwd_split_k_conflict(spec: "ImplicitGemmConvSpec") -> str:
             "problem: it needs split_k > 1, wave_size 64 and no split_k_cluster "
             "(a 3-D split is always atomic)"
         )
+    # epi_store_fast acts on the unsplit store too: judged at every split_k.
+    if spec.epi_store_fast and (
+        spec.epilogue != "cshuffle"
+        or spec.cshuffle_m_chunks > 1
+        or spec.data.dtype_d != "bf16"
+        or spec.wave_size != 64
+    ):
+        return "epi_store_fast: the unchunked bf16 wave64 cshuffle store only"
     if spec.split_k == 1:
         if (
             spec.split_xcd_remap
@@ -1922,11 +2005,11 @@ def fwd_split_k_conflict(spec: "ImplicitGemmConvSpec") -> str:
             or spec.split_det
         ):
             return "split_xcd_remap / split_streamk / split_flag_store need the split-K binary"
-        if spec.split_atomic_agent or spec.split_atomic_pairs:
+        if spec.split_atomic_agent or spec.split_atomic_pairs or spec.split_atomic_fast:
             return "split_atomic_agent/split_atomic_pairs need the split-K binary (split_k > 1)"
         return (
-            "split_tail needs the split-K binary (split_k > 1)"
-            if spec.split_tail
+            "split_tail / split_tail_compact need the split-K binary (split_k > 1)"
+            if spec.split_tail or spec.split_tail_compact
             else ""
         )
     if spec.split_k == -1 or not fwd_split_k_atomic(spec) or spec.pipeline == "wavelet":
@@ -1947,6 +2030,13 @@ def fwd_split_k_conflict(spec: "ImplicitGemmConvSpec") -> str:
         or (spec.split_det == 3 and spec.split_tail)
     ):
         return "split_det: plain / split_tail / split_hybrid grids, bf16 D, no other split store"
+    if spec.split_det in (1, 2) and spec.split_xcd_remap and not spec.split_hybrid:
+        # Modes 1/2: the owner (slice ks_count - 1) spins on the other slices,
+        # which only the plain grid dispatches before it.
+        return (
+            "split_det 1/2: the owner waits on the other slices, so it must be "
+            "dispatched last (no split_xcd_remap; split_det 3 or split_hybrid)"
+        )
     if spec.split_hybrid and (spec.split_streamk or spec.split_hybrid < 0):
         return "split_hybrid: one segment scheme (not with split_streamk), E >= 0"
     if (spec.split_streamk or spec.split_hybrid) and (
@@ -1955,10 +2045,11 @@ def fwd_split_k_conflict(spec: "ImplicitGemmConvSpec") -> str:
         or spec.chiplet_swizzle
         or (spec.split_xcd_remap and not spec.split_hybrid)
     ):
-        # (One group at launch: the host launches it on groups == 1 only.)
+        # One group per launch: fwd_launch_problem_reason refuses groups > 1.
         return "split_streamk: no split tail, no tile remap"
     if (spec.split_flag_store or spec.split_zero_first) and (
         spec.split_streamk
+        or spec.split_hybrid
         or spec.split_xcd_remap
         or (spec.split_flag_store and spec.split_zero_first)
     ):
@@ -1967,13 +2058,6 @@ def fwd_split_k_conflict(spec: "ImplicitGemmConvSpec") -> str:
         spec.split_tail or spec.xcd_remap or spec.chiplet_swizzle
     ):
         return "split_xcd_remap replaces xcd_remap / chiplet_swizzle and keeps no split tail"
-    if spec.epi_store_fast and (
-        spec.epilogue != "cshuffle"
-        or spec.cshuffle_m_chunks > 1
-        or spec.data.dtype_d != "bf16"
-        or spec.wave_size != 64
-    ):
-        return "epi_store_fast: the unchunked bf16 wave64 cshuffle store only"
     if spec.split_atomic_fast and (
         not spec.split_atomic_pairs or spec.cshuffle_m_chunks > 1
     ):
@@ -1992,6 +2076,8 @@ def fwd_split_k_conflict(spec: "ImplicitGemmConvSpec") -> str:
         return "fwd split_k > 1 needs the single-tile K loop (no unroll_k / async_dma)"
     if spec.group_merge > 1:
         return "fwd split_k > 1 does not support group_merge"
+    if spec.problem.is_pointwise:
+        return "fwd split_k > 1 does not support the pointwise fast path"
     if spec.data.dtype_d not in ("fp32", "bf16", "fp16"):
         return f"fwd split_k > 1 needs dtype_d fp32/bf16/fp16 (got {spec.data.dtype_d})"
     if spec.data.dtype_d != "fp32" and spec.problem.kpg % 2:
@@ -2036,6 +2122,19 @@ def _xhalo_b_rows(spec: "ImplicitGemmConvSpec") -> int:
     return rows + (1 if (rows * (spec.tile_k // _vb)) % spec.block_size else 0)
 
 
+def fwd_split_det_slab_m_chunks(spec: "ImplicitGemmConvSpec") -> int:
+    """``split_det`` 3: the row slabs the f32 partial tile is staged in
+    through LDS (``cshuffle_m_chunks``, doubled while a slab exceeds 32 KB and
+    the warp's M atoms still divide). Shared by the builder and
+    :func:`implicit_gemm_lds_bytes`."""
+    mch = max(spec.cshuffle_m_chunks, 1)
+    while (spec.tile_m * spec.tile_n * 4) // mch > 32 * 1024 and (
+        spec.mfmas_per_warp_m % (mch * 2) == 0
+    ):
+        mch *= 2
+    return mch
+
+
 def implicit_gemm_lds_bytes(spec: ImplicitGemmConvSpec) -> Tuple[int, int, int, bool]:
     """LDS a forward spec allocates: ``(total, a_b_bytes, c_bytes, double)``.
 
@@ -2075,6 +2174,12 @@ def implicit_gemm_lds_bytes(spec: ImplicitGemmConvSpec) -> Tuple[int, int, int, 
         if spec.epilogue == "cshuffle"
         else 0
     )
+    if spec.split_det == 3 and fwd_split_k_atomic(spec) and spec.epilogue == "cshuffle":
+        # split_det 3 stages its f32 partial tile through the same LDS.
+        _c_lds = max(
+            _c_lds,
+            spec.tile_m // fwd_split_det_slab_m_chunks(spec) * spec.tile_n * 4,
+        )
     # cshuffle_no_alias decides whether the cshuffle C tile shares the A/B pool
     # bytes, so the LDS budget must be computed per case:
     #   OFF (default, aliased): C reuses the A/B bytes   -> pool = max(ab, c)
@@ -2280,7 +2385,9 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             if flag:
                 return False, f"WMMA conv does not support {label} on {arch}"
 
-    if spec.split_atomic:
+    if spec.split_atomic or (spec.split_k == 1 and not spec.split_k_cluster):
+        # The unsplit spec too: its split-K knobs are refused here, as
+        # validate() refuses them, not left for the build to find.
         _why = fwd_split_k_conflict(spec)
         if _why:
             return False, _why
@@ -4508,12 +4615,7 @@ def _build_implicit_gemm_conv_impl(
                     slab = b.to_sgpr_u32(b.mul(slot, b.mul(p_M, p_K)))
                     ws_rsrc = b.buffer_rsrc(p_sk_partials, b.const_i32(0x7FFFFFF0))
                     # Row slabs of <= 32 KB of f32 where the warp's M atoms allow.
-                    _mfm = spec.mfmas_per_warp_m
-                    _mch = max(spec.cshuffle_m_chunks, 1)
-                    while (block_m * block_n * 4) // _mch > 32 * 1024 and _mfm % (
-                        _mch * 2
-                    ) == 0:
-                        _mch *= 2
+                    _mch = fwd_split_det_slab_m_chunks(spec)
                     epi32 = CShuffleEpilogue.from_grid(
                         atom=spec.atom,
                         grid=grid,
