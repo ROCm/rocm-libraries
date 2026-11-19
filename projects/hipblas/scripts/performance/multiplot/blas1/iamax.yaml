@@ -18,7 +18,7 @@ Tests:
   - name: iamax_bench
     category: bench
     function: iamax
-    precision: *single_double_precisions
+    precision: *single_double_precisions_complex_real
     alpha: 1
     iters: 20
     matrix_size: *sizes
