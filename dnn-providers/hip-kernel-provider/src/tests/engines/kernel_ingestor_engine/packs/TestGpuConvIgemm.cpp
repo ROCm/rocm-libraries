@@ -858,8 +858,8 @@ std::vector<FlexCase> flexCases()
     auto convolution = dense(32, 40, {6, 7, 5}, {3, 3, 3}, {1, 1, 1}, true);
     convolution.mode = ConvMode::CONVOLUTION;
     cases.push_back({"Ndhwc3x3x3ConvolutionMode", convolution, true});
-    auto channelsFirst = dense(32, 40, {6, 7, 5}, {3, 3, 3}, {1, 1, 1}, false);
-    cases.push_back({"Ncdhw3x3x3Staged", channelsFirst, true});
+    cases.push_back(
+        {"Ncdhw3x3x3Staged", dense(32, 40, {6, 7, 5}, {3, 3, 3}, {1, 1, 1}, false), true});
     return cases;
 }
 

@@ -1050,11 +1050,15 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
         iterations = divUp(phaseTaps * reduction, bk);
     }
     const long long wanted = device_units::dispatchUnits(device) * blocksPerUnit;
-    long long splits
-        = flex ? flexSplits(tiles, iterations, device_units::dispatchUnits(device))
-          : tiles >= wanted
-              ? 1
-              : std::min({divUp(wanted, tiles), iterations / minIterations, MAX_SPLITS});
+    long long splits = 1;
+    if(flex)
+    {
+        splits = flexSplits(tiles, iterations, device_units::dispatchUnits(device));
+    }
+    else if(tiles < wanted)
+    {
+        splits = std::min({divUp(wanted, tiles), iterations / minIterations, MAX_SPLITS});
+    }
     while(splits > 1
           && (splits * plan.outElems * static_cast<long long>(sizeof(float)) > MAX_PARTIAL_BYTES
               || grid->z * splits > MAX_GRID_YZ))
