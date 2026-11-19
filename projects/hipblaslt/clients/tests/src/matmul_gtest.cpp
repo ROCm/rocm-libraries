@@ -39,6 +39,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -309,6 +310,33 @@ namespace
             EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
             EXPECT_GT(d.norm_error, 1e-5);
             EXPECT_LT(d.norm_error / d.batches, 1e-5);
+        }
+    }
+
+    // Issue #15746: with norm_check_assert set, an allclose failure fails the test even when the
+    // norm check passes. One of 4096 f16 elements is off by 1, which keeps norm_error under the
+    // f16 limit of 0.01 and puts the element outside every allclose pair.
+    TEST(BenchVerify, smoke_NormAssertRejectsAllcloseFailure)
+    {
+        for(bool norm_assert : {false, true})
+        {
+            SCOPED_TRACE(norm_assert);
+            BenchVerifyD<hipblasLtHalf> d(64, 64, 1, HIPBLASLT_BATCH_MODE_STRIDED);
+            d.at(d.result, 0, 100) = hipblasLtHalf(3.0f);
+            ::testing::TestPartResultArray failures;
+            int64_t                        counted;
+            {
+                ::testing::ScopedFakeTestPartResultReporter reporter(
+                    ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
+                    &failures);
+                counted = d.run(HIP_R_16F, HIP_R_16F, true, norm_assert);
+            }
+            EXPECT_EQ(counted, 1);
+            EXPECT_LT(d.norm_error, 0.01);
+            EXPECT_EQ(d.atol, 1);
+            ASSERT_EQ(failures.size(), norm_assert ? 1 : 0);
+            if(norm_assert)
+                EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
         }
     }
 

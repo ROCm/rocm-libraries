@@ -685,18 +685,6 @@ protected:
                           unsigned int seed) override
     {
         using namespace frontend_sdpa_detail;
-        // A packed graph's offset tables are no node's operands, so the harness does not make
-        // them; they join the bundle here.
-        for(const auto* table : {_current != nullptr ? &_current->offsetsQ : nullptr,
-                                 _current != nullptr ? &_current->offsetsKv : nullptr})
-        {
-            if(table != nullptr && *table != nullptr
-               && bundle.tensors.count((*table)->get_uid()) == 0)
-            {
-                bundle.addTensor(**table,
-                                 hipdnn_test_sdk::utilities::createTensorFromAttribute(**table));
-            }
-        }
         for(auto& [uid, tensor] : bundle.tensors)
         {
             if(uid == SEQ_LEN_Q_UID && _current != nullptr)

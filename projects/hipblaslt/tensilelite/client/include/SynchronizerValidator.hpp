@@ -57,6 +57,8 @@ namespace TensileLite
         /// leaving *out* untouched; otherwise fills *out* and returns true.
         bool scanSynchronizerResidue(uint8_t const* host, size_t bytes, SynchronizerResidue& out);
 
+        class ClientProblemFactory;
+
         class SynchronizerValidator : public RunListener
         {
         public:
@@ -161,6 +163,11 @@ namespace TensileLite
                 return m_errorsReported;
             }
 
+            void setSplit(ClientProblemFactory const* split)
+            {
+                m_split = split;
+            }
+
         private:
             // Each enclosing phase needs its own family. TimingRec retains the name pointer,
             // so all names have static storage rather than being assembled during the check.
@@ -195,6 +202,8 @@ namespace TensileLite
                 "synchronizer_flag_scan_post_solution",
                 nullptr,
                 nullptr};
+
+            ContractionProblem* deviceProblem(int deviceId) const;
 
             /// Checks the launches since the last check, if any (with the
             /// iteration's inputs); marks the solution failed if dirty or if
@@ -237,6 +246,7 @@ namespace TensileLite
             // One narrow-alpha warning per run, not one per solution.
             bool                m_narrowAlphaWarned = false;
             ContractionProblem* m_problem      = nullptr;
+            ClientProblemFactory const* m_split = nullptr;
             uint8_t*            m_staging      = nullptr;
             size_t              m_stagingBytes = 0;
             // The current run iteration's inputs per device: their buffer addresses
