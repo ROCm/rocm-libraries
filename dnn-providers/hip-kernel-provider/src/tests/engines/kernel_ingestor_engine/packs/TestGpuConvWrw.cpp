@@ -205,6 +205,7 @@ conv_wrw::WrwConfig configOf(const hipdnn_plugin_sdk::ingestor::KernelDefinition
     c.dws = kernel.getIntMetadata("dws");
     c.pb = kernel.getIntMetadata("pb");
     c.math = kernel.getIntMetadata("math");
+    c.flat = kernel.metadata.count("flat") != 0 ? kernel.getIntMetadata("flat") : 0;
     return c;
 }
 
@@ -315,6 +316,9 @@ struct DeviceCase
     /// initializer lets the cases' aggregate initializations omit it without
     /// -Wmissing-field-initializers.
     std::vector<int64_t> xStrides{}; // NOLINT(readability-redundant-member-init)
+    /// Served on gfx908 in 16-bit too (bf16 on its half-rate atoms): output channels that are
+    /// not whole vectors, the small-C rows and the generic loop.
+    bool gfx908 = false;
     /// Nonzero: exercise this native gfx1250 loop alone against the independent reference.
     int64_t onlyLoop = 0;
     bool dilationRows = false;
@@ -365,6 +369,9 @@ std::vector<DeviceCase> deviceCases()
          conv(32, 3, {21, 45}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true)},
         {"Nhwc1x1FiveOutputChannels",
          conv(16, 5, {13, 37}, {1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, true, 1, 3)},
+        // A 3-D VAE output layer (3 channels from many), channels-last.
+        {"ThreeDNhwc3x3x3ThreeOutputChannels",
+         conv(40, 3, {4, 7, 37}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, true)},
         {"ThreeDNhwc3x3x3",
          conv(16, 32, {4, 6, 40}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, true)},
         {"GroupedNchw3x3", conv(48, 32, {7, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, false, 2)},
@@ -695,6 +702,21 @@ std::vector<DeviceCase> deviceCases()
     generic("GenericPaddedChannelsNhwcElements",
             conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true),
             {int64_t{10} * 12 * 26, 1, int64_t{12} * 26, 26});
+    for(auto& deviceCase : cases)
+    {
+        static const std::set<std::string> s_onGfx908{"Nhwc3x3ThreeOutputChannels",
+                                                      "Nhwc1x1FiveOutputChannels",
+                                                      "ThreeDNhwc3x3x3ThreeOutputChannels",
+                                                      "Stem7x7Stride2",
+                                                      "Stem7x7Stride2K64",
+                                                      "Stem3x3Stride1C5",
+                                                      "Stem3x3Stride2ThreeD",
+                                                      "Stem7x7Stride2Nhwc",
+                                                      "Stem3x3Stride2NhwcOneChannel",
+                                                      "Stem3x3Stride1C5Nhwc",
+                                                      "Stem3x3Stride2ThreeDNhwc"};
+        deviceCase.gfx908 = deviceCase.genericOnly || s_onGfx908.count(deviceCase.name) != 0;
+    }
     const auto nativeCase = [&](std::string name, ConvShape shape, bool filterOther, int64_t loop) {
         DeviceCase test{std::move(name), std::move(shape), filterOther};
         test.onlyLoop = loop;
@@ -1281,7 +1303,8 @@ void runCase(const DeviceCase& deviceCase,
     const auto base = std::string(hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName));
     const bool gfx906 = base == "gfx906";
     const bool fmaOrFp32 = shape.dataType == DataType::FLOAT || gfx906;
-    if(ran == 0
+    const bool on908 = base == "gfx908" && shape.dataType != DataType::FLOAT && deviceCase.gfx908;
+    if(ran == 0 && !on908
        && (!expectServed(device.gcnArchName, shape.dataType)
            || (deviceCase.matrix16Only && fmaOrFp32) || (deviceCase.noGfx906 && gfx906)
            || deviceCase.someArchs || (deviceCase.genericOnly && gfx906)))
@@ -1881,9 +1904,10 @@ TEST(TestConvWrwCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its integer knobs: within one dtype (what
     // one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 23> KNOBS{
-        "atom_id", "loop", "layout", "bk",  "bc", "bq",    "fr",  "s",  "sw",  "dw", "wk",  "wc",
-        "tk",      "tc",   "vec",    "xcd", "ns", "align", "bpu", "wq", "dws", "pb", "math"};
+    static constexpr std::array<const char*, 24> KNOBS{
+        "atom_id", "loop",  "layout", "bk", "bc",  "bq", "fr",   "s",
+        "sw",      "dw",    "wk",     "wc", "tk",  "tc", "vec",  "xcd",
+        "ns",      "align", "bpu",    "wq", "dws", "pb", "math", "flat"};
     std::array<std::set<std::vector<int64_t>>, 3> seen;
     for(const auto& kernel : catalog())
     {

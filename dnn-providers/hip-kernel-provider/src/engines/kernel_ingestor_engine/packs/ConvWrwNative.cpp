@@ -119,6 +119,8 @@ WrwConfig configOf(const KernelDefinition& kernel)
     config.wq = kernel.getIntMetadata("wq");
     config.dws = kernel.getIntMetadata("dws");
     config.pb = kernel.getIntMetadata("pb");
+    // Flattened positions (an absent field reads as 0).
+    config.flat = kernel.metadata.count("flat") != 0 ? kernel.getIntMetadata("flat") : 0;
     config.bpu = kernel.getIntMetadata("bpu");
     // The generic loop's specialized classes (the two tiers); no other loop carries them.
     if(config.loop == conv_wrw::LOOP_GENERIC)

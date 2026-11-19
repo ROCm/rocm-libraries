@@ -509,6 +509,7 @@ struct ConfigFields
     int64_t loop = 1, layout = 0;
     int64_t bk = 64, bc = 64, bq = 32, fr = 3, s = 3, sw = 1, dw = 1, wk = 2, wc = 2, vec = 8;
     int64_t tk = 0, tc = 0, xcd = 0, align = 0, ns = 0, bpu = 2, wq = 0, dws = 1, pb = 0, math = 0;
+    int64_t flat = 0; ///< written only when set (an absent field reads as 0)
     /// The generic loop's specialized classes (metadata of loop 8 only).
     std::string spec;
 };
@@ -610,6 +611,10 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
     {
         kernel.metadata["spec"] = f.spec;
     }
+    if(f.flat != 0)
+    {
+        kernel.metadata["flat"] = f.flat;
+    }
     return kernel;
 }
 
@@ -641,6 +646,7 @@ WrwConfig configOf(const ConfigFields& f)
     c.pb = f.pb;
     c.spec = f.spec;
     c.math = f.math;
+    c.flat = f.flat;
     return c;
 }
 
@@ -2841,6 +2847,56 @@ TEST(TestConvWrwKernelMatch, TheGenericLoopServesStridedOperandsAlone)
     EXPECT_FALSE(admits(genericFields(), "gfx942", tiny));
 }
 
+TEST(TestConvWrwKernelMatch, FlatPositionsServeRowsShorterThanAStep)
+{
+    auto f = genericFields();
+    f.flat = 1;
+    // 12-column output rows, 32 positions a step.
+    EXPECT_TRUE(admits(f, "gfx942"));
+    // A row as long as the step: the row chunks run full there.
+    auto wide = baseShape();
+    wide.input = {10, 32};
+    EXPECT_TRUE(admits(genericFields(), "gfx942", wide));
+    EXPECT_FALSE(admits(f, "gfx942", wide));
+    // Beside the specialized classes: a spec key serving the graph declines the plain generic
+    // config only.
+    auto served = genericFields();
+    served.spec = "4R0.3.1.1.0"; // the 3x3 output rows' class, which serves the base graph
+    EXPECT_FALSE(admits(served, "gfx942"));
+    served.flat = 1;
+    EXPECT_TRUE(admits(served, "gfx942"));
+    // Each field one at a time: the knob's range, the generic loop, no window, no block-based
+    // buffers.
+    const std::vector<std::pair<std::string, std::function<void(ConfigFields&)>>> mutations{
+        {"flat", [](ConfigFields& g) { g.flat = 2; }},
+        {"loop",
+         [](ConfigFields& g) {
+             g = ConfigFields{};
+             g.flat = 1;
+         }},
+        {"dw",
+         [](ConfigFields& g) {
+             g.layout = 1;
+             g.dw = 8;
+         }},
+        {"pb", [](ConfigFields& g) { g.pb = 1; }},
+    };
+    for(const auto& [name, mutate] : mutations)
+    {
+        auto g = f;
+        mutate(g);
+        EXPECT_FALSE(admits(g, "gfx942")) << name;
+    }
+    // Steps of 32 flattened positions over every image; x and dy whole-tensor buffers.
+    const auto launch = launchOf(f);
+    ASSERT_TRUE(launch.has_value());
+    const auto& a = launch->args;
+    EXPECT_EQ(a.chunks, 1);
+    EXPECT_EQ(a.steps, (2 * 10 * 12 + 31) / 32);
+    EXPECT_EQ(a.xImage, int64_t{2} * 24 * 10 * 12);
+    EXPECT_EQ(a.yImage, int64_t{2} * 40 * 10 * 12);
+}
+
 TEST(TestConvWrwLaunch, TheGenericLoopReadsTheGraphsStridesAndSpans)
 {
     const auto problem = parse(rowPaddedSpec());
@@ -2998,6 +3054,14 @@ TEST(TestConvWrwKernelMatch, TheGenericLoopLeavesStemsAndNarrowRowsToBlas)
     EXPECT_FALSE(admits(genericFields(), "gfx942", narrow));
     narrow.input = {10, 6};
     EXPECT_TRUE(admits(genericFields(), "gfx942", narrow));
+    // The flattened-position form fills its steps across rows: it keeps the 3-column rows,
+    // and the stems' decline still holds for it.
+    auto flat = genericFields();
+    flat.flat = 1;
+    narrow.input = {10, 5};
+    EXPECT_TRUE(admits(flat, "gfx942", narrow));
+    stem.c = 7;
+    EXPECT_FALSE(admits(flat, "gfx942", stem));
 }
 
 TEST(TestConvWrwLaunch, TheGenericWindowGroupsWidthTapsPerFilterRow)

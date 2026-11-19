@@ -908,6 +908,10 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     const int64_t kg = a.k / a.groups;
     const int64_t cg = a.c / a.groups;
     const bool gfx950 = hipdnn_plugin_sdk::stripArchFeatures(arch) == "gfx950";
+    // Flattened positions (flat 1): every output position, and the whole x and dy spans.
+    const int64_t flatPositions = a.n * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
+    const int64_t xTensor = (a.n - 1) * a.xStrides[0] + problem.xSpan;
+    const int64_t yTensor = (a.n - 1) * a.yStrides[0] + problem.ySpan;
     const bool gfx1250 = hipdnn_plugin_sdk::stripArchFeatures(arch) == "gfx1250";
 
     // Loop and layout.
@@ -1139,8 +1143,10 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         // few positions (a step's chunk mostly empty) go to BLAS. Measured against it: ViT,
         // ConvNeXt and R(2+1)D stems (3 channels) 2.5-30x behind on gfx1101, 4.2-7.9x on
         // gfx1201 (FMA form); Inception's 5x5 over a 5x5 map (one position a row) 5-25x behind
-        // on gfx1101.
-        if(cg < GENERIC_MIN_CHANNELS || a.outSpatial[2] < GENERIC_MIN_OUTPUT_WIDTH)
+        // on gfx1101. The flattened-position form (flat 1) fills its steps across rows, so it
+        // keeps narrow rows.
+        if(cg < GENERIC_MIN_CHANNELS
+           || (config.flat == 0 && a.outSpatial[2] < GENERIC_MIN_OUTPUT_WIDTH))
         {
             return std::nullopt;
         }
@@ -1292,17 +1298,38 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     // (Block-based generic buffers: the per-step windows.)
     int64_t xImage = a.c * a.inSpatial[0] * a.inSpatial[1] * a.inSpatial[2];
     int64_t yImage = a.k * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
-    if(generic)
+    if(generic && config.pb == 1)
     {
-        xImage = config.pb == 1 ? xWindow : problem.xSpan;
-        yImage = config.pb == 1 ? yWindow : problem.ySpan;
+        xImage = xWindow;
+        yImage = yWindow;
+    }
+    else if(generic && config.flat != 0)
+    {
+        xImage = xTensor;
+        yImage = yTensor;
+    }
+    else if(generic)
+    {
+        xImage = problem.xSpan;
+        yImage = problem.ySpan;
     }
     if(!generic && !runtime && cf && (xImage < config.vec || yImage < config.vec))
     {
         return std::nullopt;
     }
-    // The two tiers: the generic loop only where no specialized config's class serves.
-    if(generic)
+    // Flattened positions (flat 1): the generic loop without a shared window or block-based
+    // buffers, where an output row is shorter than a step (row chunks would run part empty);
+    // x and dy each one buffer, and the positions within 32 bits.
+    if(config.flat != 0
+       && (config.flat != 1 || !generic || config.dw != 0 || config.pb != 0
+           || a.outSpatial[2] >= config.bq || flatPositions > INT_LIMIT - config.bq
+           || xTensor > INT_LIMIT / eb || yTensor > INT_LIMIT / eb))
+    {
+        return std::nullopt;
+    }
+    // The two tiers: the generic loop only where no specialized config's class serves (flat
+    // configs serve beside them: the specialized loops step over row chunks).
+    if(generic && config.flat == 0)
     {
         size_t from = 0;
         while(from < config.spec.size())
@@ -1427,6 +1454,11 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         if(packed)
         {
             steps = pack_features::checkedProduct({a.n, a.outSpatial[0], chunks});
+        }
+        else if(generic && config.flat != 0)
+        {
+            chunks = 1;
+            steps = divUp(flatPositions, config.bq);
         }
         else if(rows)
         {
@@ -1673,6 +1705,10 @@ std::vector<std::pair<std::string, std::string>> compileDefinesFor(data_objects:
     if(config.pb != 0)
     {
         defines.emplace_back("CONV_K3_PB", std::to_string(config.pb));
+    }
+    if(config.flat != 0)
+    {
+        defines.emplace_back("CONV_K3_FLAT", std::to_string(config.flat));
     }
     return defines;
 }

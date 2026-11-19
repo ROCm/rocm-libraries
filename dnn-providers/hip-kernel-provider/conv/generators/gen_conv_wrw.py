@@ -118,6 +118,7 @@ INTS = [
     "wq",
     "dws",
     "pb",
+    "flat",
     "math",
 ]
 STRINGS = ["direction", "dtype", "atom"]
@@ -920,7 +921,7 @@ def C(atom, loop, layout, tile, s, sw, dw, fr, vec, xcd, align, ns):
         bpu=0,
         wq=0,
     )
-    return dict(c, dws=dws_of(c), pb=0, math=0)
+    return dict(c, dws=dws_of(c), pb=0, flat=0, math=0)
 
 
 def D(atom, tile, s, dw, fr, ns):
@@ -950,6 +951,7 @@ def D(atom, tile, s, dw, fr, ns):
         wq=wq,
         dws=0,
         pb=0,
+        flat=0,
         math=0,
     )
 
@@ -1046,6 +1048,8 @@ UNALIGNED_K = [
         0,
     ),
     ({"FLOAT": "mfma32_f32"}, [(32, 128, 1, 4, 16), (32, 64, 1, 2, 16)], 0),
+    # gfx908 bf16 (no bf16_1k atom): the half-rate 32 x 32 atom.
+    ({"BFLOAT16": "mfma32_bf16_908"}, [(32, 128, 1, 4, 32), (32, 64, 1, 2, 32)], 0),
 ]
 UNALIGNED_K_FILTERS = [("3x3", 3, 3), ("1x1", 1, 1)]
 
@@ -1069,6 +1073,7 @@ def build_unaligned_k():
 SMALLC_ATOMS = [
     ({"HALF": "mfma16x32_f16", "BFLOAT16": "mfma16x32_bf16"}, 1),
     ({"HALF": "mfma16_f16", "BFLOAT16": "mfma16_bf16", "FLOAT": "mfma16_f32"}, 0),
+    ({"BFLOAT16": "mfma16_bf16_908"}, 0),  # gfx908 bf16
     ({"HALF": "wmma11_f16", "BFLOAT16": "wmma11_bf16"}, 0),
     ({"HALF": "wmma12_f16", "BFLOAT16": "wmma12_bf16"}, 0),
     ({"HALF": "wmma125_f16", "BFLOAT16": "wmma125_bf16"}, 0),
@@ -1314,6 +1319,16 @@ GENERIC = [
             (CF, (128, 64, 4, 2, 32), 2),
         ],
     ),
+    # gfx908 bf16 (no bf16_1k atom): the half-rate 32 x 32 atom, the 32 x 32 tiles.
+    (
+        {"BFLOAT16": "mfma32_bf16_908"},
+        0,
+        [
+            (CL, (128, 64, 4, 2, 32), 3),
+            (CL, (64, 64, 2, 2, 32), 5),
+            (CF, (128, 64, 4, 2, 32), 2),
+        ],
+    ),
     (
         {"FLOAT": "mfma32_f32"},
         0,
@@ -1331,6 +1346,34 @@ GENERIC = [
             (CL, (64, 64, 4, 4, 32), 5, 8),
         ],
     ),
+]
+
+
+# Flattened positions (flat 1): steps of bq consecutive positions of the flattened (image, depth,
+# row, column) order, for output rows shorter than bq (small 2-D and 3-D maps with wide channels:
+# GEMM-shaped wrw). Twins of the generic configs without a shared window, plus wider tiles: one
+# or two taps of 128 x 128 channels a block.
+GENERIC_FLAT = [
+    (
+        {"HALF": "mfma32x16_f16", "BFLOAT16": "mfma32x16_bf16"},
+        1,
+        [(CL, (128, 128, 2, 2, 32), 2), (CL, (128, 128, 2, 2, 32), 3)],
+    ),
+    (
+        {"HALF": "mfma32_f16", "BFLOAT16": "mfma32_bf16"},
+        0,
+        [
+            (CL, (128, 128, 2, 2, 32), 1),
+            (CL, (128, 128, 2, 2, 32), 2),
+            (CL, (128, 128, 4, 2, 32), 2),
+        ],
+    ),
+]
+
+
+# gfx11's generic tier, built after GENERIC_FLAT (its own entries: the tiles, then the tiles
+# with a block-based buffer twin).
+GENERIC_GFX11 = [
     # gfx11 (wave32, 16 x 16 x 16 WMMA), chosen by a greedy cover of 19 candidate tiles timed on
     # gfx1101 over the corpus wrw layers BLAS serves there and the specialized classes' layers.
     # Channels-first elements: 128 x 64 at 2 taps for wide channel counts, 64 x 64 at 3, 64 x 64
@@ -1338,7 +1381,8 @@ GENERIC = [
     # outputs, 1.34x the BLAS path where 64 x 64 gives 1.15x). Channel vectors: 64 x 32 at 9 taps
     # and the shared windows for unit width stride. Within 1.2% of all 19 (geomean) on
     # channels-first layers and 7% on channels-last. Block-based buffer twins on one tile a
-    # layout only (images past 2 GiB; listed last, the "pb" set).
+    # layout only (images past 2 GiB; listed last, the "pb" set); flattened-position twins on
+    # every tile without a shared window, as in GENERIC.
     (
         {"HALF": "wmma11_f16", "BFLOAT16": "wmma11_bf16"},
         0,
@@ -1358,19 +1402,38 @@ GENERIC = [
 
 def build_generic():
     dropped = 0
-    for atoms, xcd, tiles, *pb_tiles in GENERIC:
+
+    def add(entries):
+        dropped = 0
+        for atoms, xcd, tiles, *pb_tiles in entries:
+            for dtype, atom in atoms.items():
+                for t, (lay, tile, taps, *window) in enumerate(tiles):
+                    wx = window[0] if window else 0  # dw: shared-window positions
+                    c = C(
+                        atom, 8, lay, tile, 0, 0, wx, taps, 16 // eb(dtype), xcd, 0, 0
+                    )
+                    if valid(c, dtype):
+                        CATALOG[dtype].extend(with_bpu(c))
+                        # Its block-based buffer twin: images past the 32-bit buffer range
+                        # (every tile, or the entry's "pb" set).
+                        if not pb_tiles or t in pb_tiles[0]:
+                            CATALOG[dtype].extend(with_bpu(dict(c, pb=1)))
+                        if not wx:
+                            CATALOG[dtype].extend(with_bpu(dict(c, flat=1)))
+                    else:
+                        dropped += 1
+        return dropped
+
+    dropped += add(GENERIC)
+    for atoms, xcd, tiles in GENERIC_FLAT:
         for dtype, atom in atoms.items():
-            for t, (lay, tile, taps, *window) in enumerate(tiles):
-                wx = window[0] if window else 0  # dw: shared-window positions
-                c = C(atom, 8, lay, tile, 0, 0, wx, taps, 16 // eb(dtype), xcd, 0, 0)
+            for lay, tile, taps in tiles:
+                c = C(atom, 8, lay, tile, 0, 0, 0, taps, 16 // eb(dtype), xcd, 0, 0)
                 if valid(c, dtype):
-                    CATALOG[dtype].extend(with_bpu(c))
-                    # Its block-based buffer twin: images past the 32-bit buffer range (every
-                    # tile, or the entry's "pb" set).
-                    if not pb_tiles or t in pb_tiles[0]:
-                        CATALOG[dtype].extend(with_bpu(dict(c, pb=1)))
+                    CATALOG[dtype].extend(with_bpu(dict(c, flat=1)))
                 else:
                     dropped += 1
+    dropped += add(GENERIC_GFX11)
     return dropped
 
 
@@ -1921,6 +1984,7 @@ def emit():
                 f".{thr}.fr{c['fr']}s{c['s']}sw{c['sw']}dw{c['dw']}"
                 f".v{c['vec']}.x{c['xcd']}a{c['align']}n{c['ns']}b{c['bpu']}"
                 + (".pb" if c["pb"] else "")
+                + (".flat" if c["flat"] else "")
             )
             if native:
                 name += f".dws{c['dws']}"
