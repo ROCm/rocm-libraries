@@ -116,6 +116,17 @@ _DISABLE_CASES = [
     ("fp8 at DepthU 256",     dict(ProblemType={"DataTypeA": DataType("float8"),
                                                 "DataTypeB": DataType("float8")},
                                    DepthU=256)),
+    # Plain fp8 is a shipped type and takes a different register peak than the
+    # scaled one: MT128x384 reaches 276 VGPRs, which judgeRegisterBudget
+    # refuses outright. Scales on one side only is equally unmeasured.
+    ("fp8 without block scales",
+                              dict(ProblemType={"DataTypeA": DataType("float8"),
+                                                "DataTypeB": DataType("float8"),
+                                                "MXBlockA": 0, "MXBlockB": 0},
+                                   MIWaveTile=[4, 12])),
+    ("fp8 scaled on A only",  dict(ProblemType={"DataTypeA": DataType("float8"),
+                                                "DataTypeB": DataType("float8"),
+                                                "MXBlockB": 0})),
 ]
 
 
@@ -147,6 +158,11 @@ _STILL_ELIGIBLE_CASES = [
     ("fp8 at DepthU 128",     dict(ProblemType={"DataTypeA": DataType("float8"),
                                                 "DataTypeB": DataType("float8")},
                                    DepthU=128)),
+    # The scale requirement is fp8's alone. fp4 reaches the subtile path
+    # block-scaled, so asking it of fp4 would be free -- and wrong: the one
+    # unscaled-fp4 case the gate already relies on is MX skew above.
+    ("fp4 without block scales",
+                              dict(ProblemType={"MXBlockA": 0, "MXBlockB": 0})),
 ]
 
 

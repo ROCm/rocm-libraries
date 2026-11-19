@@ -38,7 +38,7 @@ FP16 = "half"
 
 
 def kern(dtA=FP8, dtB=FP8, dtD=BF16, subtile=True, mt0=256, mt1=256, plsin=True,
-         transA=True, transB=False):
+         transA=True, transB=False, mxA=32, mxB=32):
     return {
         "UseSubtileImpl": subtile,
         "MacroTile0": mt0,
@@ -50,6 +50,8 @@ def kern(dtA=FP8, dtB=FP8, dtD=BF16, subtile=True, mt0=256, mt1=256, plsin=True,
             "DestDataType": DataType(dtD),
             "TransposeA": transA,
             "TransposeB": transB,
+            "MXBlockA": mxA,
+            "MXBlockB": mxB,
         },
     }
 
@@ -66,6 +68,14 @@ _TYPE_CASES = [
     ("fp32 out", kern(dtD=FP32), False),
     ("fp16 out", kern(dtD=FP16), False),
     ("fp8 in, fp8 out", kern(dtD=FP8), False),
+    # The scale requirement rides on the fp8 operand, not on the store: plain
+    # fp8 is a shipped type that fp4 has no equivalent of, and it is not what
+    # the store was measured on.
+    ("unscaled fp8", kern(mxA=0, mxB=0), False),
+    ("fp8 scaled on A only", kern(mxB=0), False),
+    ("fp8 scaled on B only", kern(mxA=0), False),
+    ("unscaled mixed fp4/fp8", kern(dtA=FP4, dtB=FP8, mxA=0, mxB=0), False),
+    ("unscaled fp4", kern(dtA=FP4, dtB=FP4, mxA=0, mxB=0), True),
 ]
 
 

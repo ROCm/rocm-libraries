@@ -102,9 +102,9 @@ def isMxf4SubtilePath(kernel) -> bool:
 
 
 def plsinStoreDataTypes(kernel) -> bool:
-    """MX fp4 or fp8 in, bf16 out -- what the PLSIN fused store can be built for.
+    """MX fp4 or MX fp8 in, bf16 out -- what the PLSIN fused store is built for.
 
-    Wider than plsinDataTypes by exactly fp8. The register argument that keeps
+    Wider than plsinDataTypes by exactly MX fp8. The register argument that keeps
     plsinDataTypes at fp4 is about a *bf16-input* kernel, and it does not reach
     fp8: on gfx950 v_mfma_*_f8f6f4 covers K=128 whatever the operand width, so
     an fp8 kernel runs the same MI shape at the same MIWaveTile as fp4 and
@@ -114,17 +114,33 @@ def plsinStoreDataTypes(kernel) -> bool:
 
     bf16 input stays out: there the accumulators do crowd the pack ring.
 
-    Answerable at any point, including on a half-built solution dict. Unlike
-    plsinDataTypes, which is only ever reached through isMxf4SubtilePath's
-    guard, Naming calls this one directly, so it carries its own.
+    Any operand of fp8 width brings a block-scale requirement with it, and fp4
+    on its own does not. The asymmetry is about what each type can arrive as
+    rather than about the store: fp4 reaches the subtile path block-scaled, so
+    asking costs it nothing, while plain fp8 is a shipped type in its own right
+    and is not what any of the above was measured on. Without the scales the
+    store takes a different register peak -- MT128x384 (MIWaveTile [4,12])
+    reaches 276 VGPRs, which judgeRegisterBudget refuses outright rather than
+    emitting as a dropped shell. A state that does not say whether it is scaled
+    is read as unscaled, which is the answer that withholds the store, and the
+    fp4 arm is left alone so no fp4 kernel's answer moves.
+
+    Answerable at any point, including on a half-built solution dict, and
+    "not in scope" is the conservative answer there -- same convention as
+    isMxf4SubtilePath, which this is asked alongside.
     """
     def _mxIn(dt):
         return dt.isFloat4() or dt.isFloat8()
 
     try:
         pt = kernel["ProblemType"]
-        return _mxIn(pt["DataTypeA"]) and _mxIn(pt["DataTypeB"]) \
-            and pt["DestDataType"].isBFloat16()
+        dtA, dtB = pt["DataTypeA"], pt["DataTypeB"]
+        if not (_mxIn(dtA) and _mxIn(dtB)
+                and pt["DestDataType"].isBFloat16()):
+            return False
+        if dtA.isFloat8() or dtB.isFloat8():
+            return bool(pt.get("MXBlockA")) and bool(pt.get("MXBlockB"))
+        return True
     except (KeyError, TypeError, AttributeError):
         return False
 
