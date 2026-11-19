@@ -1,5 +1,5 @@
 ArchitectureName: gfx1250
-CUCount: null
+CUCount: 96
 DefaultSolution:
   1LDSBuffer: 0
   ActivationAlt: false
