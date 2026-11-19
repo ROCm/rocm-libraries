@@ -32,7 +32,6 @@ from __future__ import annotations
 import math
 import os
 from dataclasses import asdict
-from importlib import import_module
 
 import numpy as np
 import pytest
@@ -43,12 +42,13 @@ from dispatch.attention.tuning_specs import (
     make_explicit_attention_3d_specs,
 )
 from kernels.common import attention_unified as au
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 from rocke.numeric.sdpa_reference import sdpa_reference
 from rocke.runtime.hip_module import Runtime, get_device_arch, get_device_num_cus
 from rocke.runtime.host_buffers import as_u8_buffer
 from rocke.runtime.launcher import DeviceMem
+
+from ._tiled_3d_binding_ir import lower_like_tiled_3d_binding
 
 HEAD_SIZE = 128
 NUM_QUERY_HEADS = 16
@@ -206,6 +206,7 @@ def _attention(problem, arch, q, k, v, *, tuning_spec=None, sinks=None):
         "num_seqs": 1,
         "block_table_stride": blocks,
         "qq_bias_stride_0": 0,
+        **au._runtime_kernarg_values(problem),
     }
     reduce_values = {
         "output_ptr": out,
@@ -213,6 +214,7 @@ def _attention(problem, arch, q, k, v, *, tuning_spec=None, sinks=None):
         "segm_max_ptr": segm_max,
         "segm_expsum_ptr": segm_expsum,
         "seq_lens_ptr": seq_lens,
+        **au._runtime_kernarg_values(problem),
     }
     # The launch fences the stream, so ``out`` is complete when it returns.
     au._launch_3d_pipeline(
@@ -346,15 +348,6 @@ def test_native_builder_matches_python(arch, q_len, kv_len, num_segments, use_si
     # The explicit specs do not depend on the CU count.
     problem = _problem(1, q_len=q_len, kv_len=kv_len, use_sinks=use_sinks)
     spec = _explicit_spec(problem, arch, num_segments)
-    module = import_module(f"kernels.{arch}.attention_tiled_3d")
-    expected = _lower_kernel_to_llvm_python(
-        module.build_unified_attention_3d_tiled(spec.kernel_spec, arch=arch), arch=arch
-    )
-    if arch == "gfx950":
-        # The gfx950 binding lowers the reduce kernel after the segment kernel.
-        expected += _lower_kernel_to_llvm_python(
-            module.build_unified_attention_reduce_tiled(spec.reduce_spec, arch=arch),
-            arch=arch,
-        )
+    expected = lower_like_tiled_3d_binding(spec.kernel_spec, arch)
     lower = getattr(engine, f"{arch}_attention_tiled_3d_lower_llvm")
     assert lower(asdict(spec.kernel_spec), arch) == expected

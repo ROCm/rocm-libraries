@@ -114,14 +114,17 @@ namespace hiptensor
 
         assert(mMaxCachelines > 0);
 
-        //If the table size equal to the maximum size, then remove extra LRU(least-recently-used) record
-        if(mPlanCacheLines.size() == mMaxCachelines
-           && mPlanCacheLines.find(hashId) != mPlanCacheLines.end())
+        //If a new cache line would exceed the maximum size, then remove the LRU(least-recently-used) record.
+        //An existing cache line is updated in place and needs no room.
+        if(!mPlanCacheLines.contains(hashId))
         {
-            std::pair<HashId, time_point> lru_item = mPqUidUsedTimes.top();
-            mPqUidUsedTimes.pop();
+            while(mPlanCacheLines.size() >= mMaxCachelines && !mPqUidUsedTimes.empty())
+            {
+                std::pair<HashId, time_point> lru_item = mPqUidUsedTimes.top();
+                mPqUidUsedTimes.pop();
 
-            mPlanCacheLines.erase(lru_item.first);
+                mPlanCacheLines.erase(lru_item.first);
+            }
         }
 
         //Add the cache line
@@ -189,13 +192,11 @@ namespace hiptensor
             fstream.write(reinterpret_cast<char*>(&uId), sizeof(uId));
         }
 
-        UpdatablePriorityQueue<HashId, time_point> tmp_heap = mPqUidUsedTimes;
-        size                                                = tmp_heap.size();
+        auto usedTimes = mPqUidUsedTimes.sorted();
+        size           = usedTimes.size();
         fstream.write(reinterpret_cast<char*>(&size), sizeof(size));
-        while(!tmp_heap.empty())
+        for(auto& mPair : usedTimes)
         {
-            std::pair<HashId, time_point> mPair = tmp_heap.top();
-            tmp_heap.pop();
             fstream.write(reinterpret_cast<char*>(&mPair.first), sizeof(mPair.first));
             fstream.write(reinterpret_cast<char*>(&mPair.second), sizeof(mPair.second));
         }

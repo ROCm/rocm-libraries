@@ -571,6 +571,72 @@ typedef struct config
 /* Each gfx1250 config that tests a *choice* of encoding is followed by its
  * gfx950 twin, so the pair pins both branches. Index-for-index with the Python
  * emitter's CONFIGS list. */
+
+/* Mirrors gfx1250_lowering_emit.py build_tdm_descriptor: a real rank-2 TDM
+ * descriptor built by rocke_b_tdm_descriptor_2d from an i64 global address,
+ * rather than the zeroed placeholder build_tensor_transfers uses. Pins the
+ * GROUP0 / GROUP1 bit packing, the readfirstlane on every word and the LDS pad
+ * fields -- the half where a wrong bit gives garbage or a hang rather than a
+ * compile error. Built at a 1-byte element width because every 8-bit defect in
+ * this load path has been a 2-bytes-per-element assumption. The pad is a
+ * 128-byte row with an 80-byte gap: interval 4, amount 19. */
+static void build_tdm_descriptor(rocke_ir_builder_t* b)
+{
+    rocke_value_t* groups[5];
+    rocke_value_t* gaddr = rocke_b_const_i64(b, 0);
+    rocke_value_t* lds = rocke_b_const_i64(b, 0);
+    rocke_value_t* dim0 = rocke_b_const_i32(b, 4096);
+    rocke_value_t* dim1 = rocke_b_const_i32(b, 8192);
+    rocke_value_t* pitch = rocke_b_const_i32(b, 8192);
+
+    if(!rocke_b_tdm_descriptor_2d(b, gaddr, lds, 1, dim0, dim1, pitch, 128, 128, 0, 4, 19, groups))
+        return;
+    rocke_b_tensor_load_to_lds(b, groups[0], groups[1], groups[2], groups[3], groups[4], 0);
+    rocke_b_s_wait_tensorcnt(b, 0);
+    rocke_b_ret(b);
+}
+
+/* A full rank-2 TDM descriptor fed by global_addr_of; runtime_pitch switches
+ * the row pitch between a constant and the kernel's K argument. */
+static void tdm_descriptor(rocke_ir_builder_t* b, bool runtime_pitch)
+{
+    rocke_param_opts_t o;
+    const int shape[] = {64, 48};
+    rocke_value_t* groups[5];
+
+    memset(&o, 0, sizeof(o));
+    o.noalias = true;
+    o.noalias_set = true;
+    o.readonly = true;
+    o.readonly_set = true;
+    o.align = 16;
+    o.align_set = true;
+    rocke_value_t* a_ptr = rocke_b_param(b, "A", rocke_ptr_type(b, rocke_bf16(), "global"), &o);
+    rocke_value_t* k_dim = rocke_b_param(b, "K", rocke_i32(), NULL);
+    rocke_value_t* smem = rocke_b_smem_alloc(b, rocke_bf16(), shape, 2, "tile");
+    rocke_value_t* zero = rocke_b_const_i32(b, 0);
+    rocke_value_t* gaddr = rocke_b_global_addr_of(b, a_ptr, zero);
+    rocke_value_t* lds = rocke_b_smem_addr_of(b, smem);
+    rocke_value_t* rows = rocke_b_const_i32(b, 64);
+    rocke_value_t* pitch = runtime_pitch ? k_dim : rocke_b_const_i32(b, 4096);
+
+    if(!rocke_b_tdm_descriptor_2d(b, gaddr, lds, 2, k_dim, rows, pitch, 32, 64, 0, 3, 7, groups))
+        return;
+    rocke_b_tensor_load_to_lds(b, groups[0], groups[1], groups[2], groups[3], groups[4], 0);
+    rocke_b_s_wait_tensorcnt(b, 0);
+    rocke_b_ret(b);
+}
+
+static void build_tdm_descriptor_const_pitch(rocke_ir_builder_t* b)
+{
+    tdm_descriptor(b, false);
+}
+
+static void build_tdm_descriptor_runtime_pitch(rocke_ir_builder_t* b)
+{
+    tdm_descriptor(b, true);
+}
+
 static const config_t BASE_CONFIGS[] = {
     {build_wmma_k32_f16, "gfx1250"},
     {build_wmma_k32_bf16, "gfx1250"},
@@ -644,14 +710,99 @@ static const config_t BASE_CONFIGS[] = {
     {NULL, "gfx1250", "fp4", true, "bf6"},
 };
 
+/* The f16/bf16 buffer stores with their optional cache-policy immediate:
+ * every store form with a non-zero value (it reaches the intrinsic's aux
+ * operand) and one default store (no attribute, aux 0). */
+static void build_buffer_store_cachepolicy(rocke_ir_builder_t* b)
+{
+    rocke_param_opts_t ro;
+    rocke_param_opts_t wo;
+    memset(&ro, 0, sizeof(ro));
+    ro.readonly = true;
+    ro.readonly_set = true;
+    ro.align = 16;
+    ro.align_set = true;
+    memset(&wo, 0, sizeof(wo));
+    wo.align = 16;
+    wo.align_set = true;
+    rocke_value_t* src = rocke_b_param(b, "src", rocke_ptr_type(b, rocke_f16(), "global"), &ro);
+    rocke_value_t* dst = rocke_b_param(b, "dst", rocke_ptr_type(b, rocke_f16(), "global"), &wo);
+    rocke_value_t* nbytes = rocke_b_param(b, "nbytes", rocke_i32(), NULL);
+    rocke_value_t* rs = rocke_b_buffer_rsrc(b, src, nbytes);
+    rocke_value_t* rd = rocke_b_buffer_rsrc(b, dst, nbytes);
+    rocke_value_t* c0 = rocke_b_const_i32(b, 0);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    rocke_value_t* off = rocke_b_mul(b, tid, rocke_b_const_i32(b, 16));
+    rocke_value_t* h8 = rocke_b_buffer_load_vN(b, rs, off, c0, rocke_f16(), 8);
+    rocke_b_buffer_store_vN_f16_ex(b, rd, off, c0, h8, 4, 1);
+    rocke_value_t* h2 = rocke_b_buffer_load_vN(b, rs, off, c0, rocke_f16(), 2);
+    rocke_b_buffer_store_vN_f16_ex(b, rd, off, c0, h2, 1, 24);
+    rocke_b_buffer_store_vN_f16(b, rd, off, c0, h8, 4);
+    rocke_value_t* h1 = rocke_b_buffer_load_f16(b, rs, off, c0);
+    rocke_b_buffer_store_f16_ex(b, rd, off, c0, h1, 3);
+    rocke_value_t* g8 = rocke_b_buffer_load_vN(b, rs, off, c0, rocke_bf16(), 8);
+    rocke_b_buffer_store_vN_bf16_ex(b, rd, off, c0, g8, 4, 1);
+    rocke_value_t* g4 = rocke_b_buffer_load_vN(b, rs, off, c0, rocke_bf16(), 4);
+    rocke_b_buffer_store_vN_bf16_ex(b, rd, off, c0, g4, 2, 17);
+    rocke_value_t* g1 = rocke_b_buffer_load_bf16(b, rs, off, c0);
+    rocke_b_buffer_store_bf16_ex(b, rd, off, c0, g1, 31);
+    rocke_b_ret(b);
+}
+
+/* The dtype-generic scalar buffer load for every element type (the 16-bit
+ * ones through the i16 intrinsic, the 32-bit ones through i32). */
+static void build_buffer_load_scalar(rocke_ir_builder_t* b)
+{
+    rocke_param_opts_t ro;
+    rocke_param_opts_t wo;
+    memset(&ro, 0, sizeof(ro));
+    ro.readonly = true;
+    ro.readonly_set = true;
+    ro.align = 16;
+    ro.align_set = true;
+    memset(&wo, 0, sizeof(wo));
+    wo.align = 16;
+    wo.align_set = true;
+    rocke_value_t* src = rocke_b_param(b, "src", rocke_ptr_type(b, rocke_i32(), "global"), &ro);
+    rocke_value_t* dst = rocke_b_param(b, "dst", rocke_ptr_type(b, rocke_i32(), "global"), &wo);
+    rocke_value_t* nbytes = rocke_b_param(b, "nbytes", rocke_i32(), NULL);
+    rocke_value_t* rs = rocke_b_buffer_rsrc(b, src, nbytes);
+    rocke_value_t* rd = rocke_b_buffer_rsrc(b, dst, nbytes);
+    rocke_value_t* c0 = rocke_b_const_i32(b, 0);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    rocke_value_t* off = rocke_b_mul(b, tid, rocke_b_const_i32(b, 4));
+    rocke_value_t* h = rocke_b_buffer_load(b, rs, off, c0, rocke_f16());
+    rocke_value_t* g = rocke_b_buffer_load(b, rs, off, c0, rocke_bf16());
+    rocke_value_t* f = rocke_b_buffer_load(b, rs, off, c0, rocke_f32());
+    rocke_value_t* i = rocke_b_buffer_load(b, rs, off, c0, rocke_i32());
+    rocke_b_buffer_store_f16(b, rd, off, c0, h);
+    rocke_b_buffer_store_bf16(b, rd, off, c0, g);
+    rocke_b_buffer_store_f32(b, rd, off, c0, f);
+    rocke_b_buffer_store_f32(b, rd, off, c0, rocke_b_bitcast(b, i, rocke_f32()));
+    rocke_b_ret(b);
+}
+
 static const config_t FEATURE_CONFIGS[] = {
     {build_data_prefetch, "gfx1250"},
     {build_cluster, "gfx1250"},
     {build_cluster_dims, "gfx1250"},
     {build_multicast, "gfx1250"},
     {build_tdm, "gfx1250"},
+    {build_buffer_store_cachepolicy, "gfx1250"},
+    {build_buffer_load_scalar, "gfx1250"},
 };
 static const int NUM_FEATURE_CONFIGS = (int)(sizeof(FEATURE_CONFIGS) / sizeof(FEATURE_CONFIGS[0]));
+
+/* The TDM descriptor builder, then the TDM descriptor lowered with a fixed and
+ * with a runtime row pitch. Last, mirroring the Python: inserting earlier would
+ * renumber every later config in both emitters. */
+static const config_t TDM_DESCRIPTOR_CONFIGS[] = {
+    {build_tdm_descriptor, "gfx1250"},
+    {build_tdm_descriptor_const_pitch, "gfx1250"},
+    {build_tdm_descriptor_runtime_pitch, "gfx1250"},
+};
+static const int NUM_TDM_DESCRIPTOR_CONFIGS
+    = (int)(sizeof(TDM_DESCRIPTOR_CONFIGS) / sizeof(TDM_DESCRIPTOR_CONFIGS[0]));
 
 static const int NUM_BASE_CONFIGS = (int)(sizeof(BASE_CONFIGS) / sizeof(BASE_CONFIGS[0]));
 static const char* const MATRIX_DTYPES[] = {"fp8", "bf8", "fp6", "bf6", "fp4"};
@@ -659,7 +810,7 @@ static const char* const SCALE_DTYPES[] = {"e8m0", "e5m3", "e4m3"};
 static const int NUM_MATRIX_DTYPES = (int)(sizeof(MATRIX_DTYPES) / sizeof(MATRIX_DTYPES[0]));
 static const int NUM_SCALE_DTYPES = (int)(sizeof(SCALE_DTYPES) / sizeof(SCALE_DTYPES[0]));
 static const int NUM_CONFIGS
-    = NUM_BASE_CONFIGS + NUM_FEATURE_CONFIGS
+    = NUM_BASE_CONFIGS + NUM_FEATURE_CONFIGS + NUM_TDM_DESCRIPTOR_CONFIGS
       + 2 * (2 * (NUM_MATRIX_DTYPES - 1) * (NUM_SCALE_DTYPES - 1) + NUM_SCALE_DTYPES - 1);
 
 /* Mirror the Python emitter's supported scale pairs in their original order.
@@ -674,9 +825,15 @@ static bool select_config(int idx, config_t* out)
         *out = BASE_CONFIGS[idx];
         return true;
     }
-    if(idx >= NUM_CONFIGS - NUM_FEATURE_CONFIGS)
+    if(idx >= NUM_CONFIGS - NUM_TDM_DESCRIPTOR_CONFIGS)
     {
-        *out = FEATURE_CONFIGS[idx - (NUM_CONFIGS - NUM_FEATURE_CONFIGS)];
+        *out = TDM_DESCRIPTOR_CONFIGS[idx - (NUM_CONFIGS - NUM_TDM_DESCRIPTOR_CONFIGS)];
+        return true;
+    }
+    if(idx >= NUM_CONFIGS - NUM_TDM_DESCRIPTOR_CONFIGS - NUM_FEATURE_CONFIGS)
+    {
+        *out = FEATURE_CONFIGS[idx
+                               - (NUM_CONFIGS - NUM_TDM_DESCRIPTOR_CONFIGS - NUM_FEATURE_CONFIGS)];
         return true;
     }
     idx -= NUM_BASE_CONFIGS;

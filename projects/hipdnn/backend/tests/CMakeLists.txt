@@ -104,12 +104,14 @@ add_executable(
     descriptors/TestNodeFactory.cpp
     descriptors/TestVariantPackDescriptor.cpp
     main.cpp
+    TestBackendExecuteDeviceCheck.cpp
     TestEnginePluginResourceManager.cpp
     TestExecutionPlanSerializationApi.cpp
     TestGraphAndPlanSerializationApi.cpp
     TestHipdnnBackendWriteRanking.cpp
     TestLastErrorManager.cpp
     TestBackendEnumStringUtils.cpp
+    TestNumericalNoteHeaders.cpp
     TestFlatbufferUtilities.cpp
     TestHandle.cpp
     TestHelpers.cpp
@@ -321,4 +323,4 @@ add_dependencies(hipdnn_backend_tests
     ${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET}
 )
 
-add_hipdnn_test(hipdnn_backend_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_backend_tests ${CMAKE_CURRENT_BINARY_DIR} GTEST_CATEGORIES)

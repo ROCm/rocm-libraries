@@ -39,9 +39,9 @@ Assertion ids:
                        the checks below read it from it)
     ukd-count          the number of shipped UKDs found in the --expect list differs
                        from its length (or is 0), or a shipped UKD is not in the list
-    ukd-kind           a UKD's shipped kernel_source.kind is not what its expected
-                       kind's output type requires ("kpack", or the authored kind for
-                       a pass-through)
+    ukd-kind           a UKD's shipped kernel_source.kind (for `sources`, the kind of
+                       each launch's entry) is not what its expected kind's output
+                       type requires ("kpack", or the authored kind for a pass-through)
     arch-field         a KDP `arch` present and not [<pass>], or a UKD `arch` absent
                        or not [<pass>], where <pass> is the expected UKD's `arch` (for
                        a KDP, that of its expected UKDs; --arch when it has none)
@@ -51,15 +51,21 @@ Assertion ids:
                        provenance.source_file differs from kernel_source.source_file
     kpack-toc          an archive is unreadable or has no entry, under its pass, for a
                        UKD's toc_key
-    sha256             the archive blob's sha256 differs from kernel_source.sha256
-    signature          a UKD's signature is not a non-empty list
-    symbol             a UKD's symbol does not appear in its archive blob
+    sha256             the archive blob's sha256 differs from kernel_source.sha256 (for
+                       `sources`, from that of each launch's entry)
+    signature          a UKD's signature (for `sources`, each launch's) is not a
+                       non-empty list
+    symbol             a UKD's symbol (for `sources`, each launch's) does not appear in
+                       its archive blob
     launches           a kpack UKD ships `kernel_source` where the expect entry lists
                        launches, or `sources` where it lists none; the shipped launch
-                       names differ from the expect entry's; or a launch's shipped symbol
-                       differs from the one the compiler recorded for it in
+                       names differ from the expect entry's; or, for a kind with
+                       hkp_probe_kinds.Kind.launch_evidence (rocke), a launch's shipped
+                       symbol differs from the one the compiler recorded for it in
                        provenance.effective_spec[<launch>].observations (its primary
-                       `symbol`, or `companions[<role>]` for an authored role)
+                       `symbol`, or `companions[<role>]` for an authored role). A hip or
+                       hsaco `sources` UKD carries no such evidence and gets only the
+                       kpack-toc, sha256, symbol, signature and launch-signature checks
     launch-signature   a shipped launch's signature differs from the argument list its
                        symbol has in the archive blob, or the blob has no such kernel
     no-rules-for-kind  a UKD's expected kind has no entry in hkp_probe_kinds.KINDS
@@ -310,9 +316,8 @@ def _check_kpack_entry(label, source, pass_arch, archives, failures, field):
     return blob
 
 
-def _check_launch(label, launch, source, role, blob, ukd, failures):
-    """The `launches` and `launch-signature` checks for one shipped launch."""
-    symbol = source.get("symbol")
+def _check_launch_evidence(label, launch, symbol, role, ukd, failures):
+    """Bind a rocke launch's shipped symbol to the compiler's record of it."""
     evidence = (ukd.get("provenance") or {}).get("effective_spec")
     if not isinstance(evidence, dict):
         failures.add(
@@ -320,26 +325,36 @@ def _check_launch(label, launch, source, role, blob, ukd, failures):
             f"{label} provenance.effective_spec is {evidence!r}, not an object keyed "
             "by launch",
         )
-    else:
-        observed = (evidence.get(launch) or {}).get("observations")
-        if not isinstance(observed, dict):
-            failures.add(
-                "launches",
-                f"{label} provenance.effective_spec has no observations for it",
-            )
-        else:
-            # Both directions, so a swap between launches whose signatures are
-            # identical is still caught.
-            recorded = (
-                observed.get("symbol")
-                if role is None
-                else (observed.get("companions") or {}).get(role)
-            )
-            if recorded != symbol:
-                failures.add(
-                    "launches",
-                    f"{label} symbol {symbol!r} != compiler-recorded {recorded!r}",
-                )
+        return
+    observed = (evidence.get(launch) or {}).get("observations")
+    if not isinstance(observed, dict):
+        failures.add(
+            "launches",
+            f"{label} provenance.effective_spec has no observations for it",
+        )
+        return
+    # Both directions, so a swap between launches whose signatures are identical is
+    # still caught.
+    recorded = (
+        observed.get("symbol")
+        if role is None
+        else (observed.get("companions") or {}).get(role)
+    )
+    if recorded != symbol:
+        failures.add(
+            "launches",
+            f"{label} symbol {symbol!r} != compiler-recorded {recorded!r}",
+        )
+
+
+def _check_launch(label, launch, source, role, blob, ukd, with_evidence, failures):
+    """The `launches` and `launch-signature` checks for one shipped launch.
+
+    The compiler-evidence binding runs only for a kind with `launch_evidence`; any other
+    kind has the structural checks alone."""
+    symbol = source.get("symbol")
+    if with_evidence:
+        _check_launch_evidence(label, launch, symbol, role, ukd, failures)
     if blob is None:
         return
     try:
@@ -413,7 +428,14 @@ def _check_kpack_ukd(args, label, ukd, expected, archives, failures):
         )
         if launch in (launches or {}) and source.get("kind") == "kpack":
             _check_launch(
-                entry_label, launch, source, launches[launch], blob, ukd, failures
+                entry_label,
+                launch,
+                source,
+                launches[launch],
+                blob,
+                ukd,
+                KINDS[expected["kind"]].launch_evidence,
+                failures,
             )
 
 

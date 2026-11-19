@@ -232,20 +232,28 @@ inline hipdnn_plugin_sdk::ingestor::KernelDefinition
     return kernel;
 }
 
-// A GenericPlan over `handler` for the stub kernel of `seed` and `kind`, on the Pointwise
-// test graph. Builds no code object and needs no device.
+// A GenericPlan over `handler` for `kernel`, on the Pointwise test graph. Builds no code
+// object and needs no device.
+inline std::unique_ptr<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>>
+    makeStubPlan(const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>& handler,
+                 hipdnn_plugin_sdk::ingestor::KernelDefinition kernel)
+{
+    const GraphFixture fixture(buildPointwiseGraph());
+    const hipdnn_plugin_sdk::ingestor::BoundTokens bound;
+    return std::make_unique<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>>(
+        hipdnn_plugin_sdk::ingestor::KernelDispatcher<Handle>{std::move(kernel), &handler},
+        fixture.context(),
+        bound);
+}
+
+// makeStubPlan() for the stub kernel of `seed` and `kind`.
 inline std::unique_ptr<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>>
     makeStubPlan(const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>& handler,
                  uint8_t seed,
                  hipdnn_plugin_sdk::ingestor::KernelSourceKind kind
                  = hipdnn_plugin_sdk::ingestor::KernelSourceKind::KPACK)
 {
-    const GraphFixture fixture(buildPointwiseGraph());
-    const hipdnn_plugin_sdk::ingestor::BoundTokens bound;
-    return std::make_unique<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>>(
-        hipdnn_plugin_sdk::ingestor::KernelDispatcher<Handle>{stubKernel(seed, kind), &handler},
-        fixture.context(),
-        bound);
+    return makeStubPlan(handler, stubKernel(seed, kind));
 }
 
 // A plan of an engine other than an ingestor engine. It has no saveable plan, and it does not
@@ -266,11 +274,16 @@ public:
     }
 };
 
-// The number of entries in the kpack module caches of all packs.
+// The number of entries in the kpack module caches of the packs every test build compiles:
+// Pointwise, ConvFwd, gfx950 dense and unified 2D/3D, and gfx942 dense. The FlyDSL caches
+// (optional) and the gfx1151 caches (file-local) are not counted.
 inline size_t packModuleCacheEntries()
 {
     return pointwiseKpackModuleCache().size() + convFwdKpackModuleCache().size()
-           + gfx950AttentionDenseKpackModuleCache().size();
+           + gfx950AttentionDenseKpackModuleCache().size()
+           + gfx950AttentionUnified2DKpackModuleCache().size()
+           + gfx950AttentionUnified3DKpackModuleCache().size()
+           + gfx942AttentionDenseKpackModuleCache().size();
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

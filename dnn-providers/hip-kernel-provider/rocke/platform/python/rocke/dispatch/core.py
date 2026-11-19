@@ -24,7 +24,7 @@ from typing import (
     runtime_checkable,
 )
 
-from ..core.arch import known_arches
+from ..core.arch import known_arches, listed_arch_for
 
 
 def stable_json_hash(payload: Mapping[str, Any], *, n: int = 16) -> str:
@@ -272,6 +272,9 @@ class Capability:
     with one exception: ``arches`` fails closed, so a capability that declares
     no architecture matches nothing. :meth:`CandidateRegistry.register` rejects
     that case up front rather than letting it surface as a silent no-match.
+    ``arches`` admits a target it names or the generic target that target's
+    ``arch_specs.json`` row points at (:func:`~rocke.core.arch.listed_arch_for`),
+    so naming ``gfx11-generic`` covers every gfx11 processor that points there.
 
     Capability is a conservative *superset* of what ``_supports()`` accepts. A
     constraint it cannot express stays in the predicate; the direction that
@@ -303,7 +306,7 @@ class Capability:
             return str(value)
 
         arch = canonical("arch")
-        if arch not in self.arches:
+        if listed_arch_for(arch, self.arches) is None:
             return False, f"arch {arch!r} not in {self.arches}"
         if self.dtypes and canonical("dtype").lower() not in self.dtypes:
             return False, f"dtype {canonical('dtype')!r} not in {self.dtypes}"
@@ -617,12 +620,15 @@ def selector_matches(
     """
     algorithm = normalize_selector(request.algorithm)
     spec_id = normalize_selector(request.spec_id)
-    if algorithm not in ("auto", candidate.algorithm):
+    # Both sides normalized, as select() compares them: a spec_id with an
+    # upper-case character (a %-escape in a lossless label) still matches
+    # its own pin.
+    if algorithm not in ("auto", normalize_selector(candidate.algorithm)):
         return (
             False,
             f"request algorithm {request.algorithm!r} != {candidate.algorithm!r}",
         )
-    if spec_id not in ("auto", candidate.spec_id):
+    if spec_id not in ("auto", normalize_selector(candidate.spec_id)):
         return False, f"request spec_id {request.spec_id!r} != {candidate.spec_id!r}"
     return True, "ok"
 
@@ -877,7 +883,8 @@ class CandidateRegistry:
         }
 
     def for_arch(self, arch: str) -> Tuple[KernelCandidate, ...]:
-        """Return the candidates declaring ``arch``, without needing a request.
+        """Return the candidates declaring ``arch`` or the generic target its
+        row points at, without needing a request.
 
         A candidate that has not declared a capability is excluded: it has made
         no claim about ``arch``, and guessing one from its predicate would
@@ -886,7 +893,8 @@ class CandidateRegistry:
         return tuple(
             c
             for c in self.candidates()
-            if c.capability is not None and arch in c.capability.arches
+            if c.capability is not None
+            and listed_arch_for(arch, c.capability.arches) is not None
         )
 
     def _auto_visible(
@@ -944,7 +952,11 @@ class CandidateRegistry:
                 continue
             capability = candidate.capability
             arch = getattr(request, "arch", "")
-            if capability is not None and arch and arch not in capability.arches:
+            if (
+                capability is not None
+                and arch
+                and listed_arch_for(arch, capability.arches) is None
+            ):
                 continue
             pinned, _why = selector_matches(request, candidate)
             if not pinned and spec_id_alias is not None:

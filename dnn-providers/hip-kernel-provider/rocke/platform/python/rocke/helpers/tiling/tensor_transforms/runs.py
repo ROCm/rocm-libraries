@@ -41,8 +41,11 @@ from dataclasses import dataclass
 from math import prod
 from typing import TYPE_CHECKING
 
+from rocke.core.facts import stated_facts_of
+from rocke.core.ir import Value
+
 from .graph import TransformGraph, TransformType
-from .ranges import AffineCoord, BoundCheck, Congruence, RuntimeValue, VectorRun
+from .ranges import AffineCoord, BoundCheck, Congruence, VectorRun
 
 if TYPE_CHECKING:
     from ..descriptors import TensorDesc
@@ -159,7 +162,7 @@ def _contiguity_blocker(
     for name, step, stride in zip(graph.outputs, outputs, tensor.strides):
         if step.step == 0:
             continue
-        if isinstance(stride, RuntimeValue):
+        if isinstance(stride, Value):
             return name, "runtime stride"
         total += step.step * stride
         first_moving = first_moving or name
@@ -219,13 +222,15 @@ def _aligned(congruence: Congruence, width: int) -> bool:
     return congruence.modulus % width == 0 and congruence.residue % width == 0
 
 
-def _end_residue(end: int | RuntimeValue, width: int) -> int | None:
-    """``end mod width``, from the int itself or from a runtime end's stated multiple-of fact."""
+def _end_residue(end: int | Value, width: int) -> int | None:
+    """``end mod width``, from the int itself or from a runtime length's stated multiple-of
+    fact."""
     if isinstance(end, int):
         return end % width
-    if end._congruence.modulus % width:
+    facts = stated_facts_of(end)
+    if facts.multiple_of % width:
         return None
-    return (end._congruence.residue + end._plus) % width
+    return facts.residue % width
 
 
 def _linear(reads: list[_RunStep], coeffs: Sequence[int], exact: int) -> _RunStep:

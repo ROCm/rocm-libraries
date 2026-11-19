@@ -155,7 +155,11 @@ class TestDispatchedMixedCohort:
     ):
         import dataclasses
 
-        from dispatch.attention import AttentionRequest, _problem, dispatch_attention
+        from dispatch.attention import (
+            AttentionRequest,
+            attention_problem,
+            dispatch_attention,
+        )
         from kernels import run_unified_attention_torch
 
         P = _harness()
@@ -186,7 +190,7 @@ class TestDispatchedMixedCohort:
             **request_kw,
         )
         assert req.seqlen_q == req.seqlen_k == 700, "the maxima must be equal"
-        problem = _problem(req)
+        problem = attention_problem(req)
         assert dispatch_attention(req).spec.causal_top_left
         assert problem.causal_top_left == band["causal_top_left"]
         assert problem.right_bound == band["right_bound"]

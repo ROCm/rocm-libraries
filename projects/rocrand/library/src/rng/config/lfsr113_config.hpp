@@ -40,7 +40,7 @@ struct generator_config_selector<ROCRAND_RNG_PSEUDO_LFSR113, T>
             case target_arch::gfx1100: return 64;
             case target_arch::gfx1030: return 64;
             case target_arch::gfx942: return 512;
-            case target_arch::gfx950: return 1024;
+            case target_arch::gfx950: return 128;
             case target_arch::gfx90a: return 64;
             case target_arch::gfx908: return 256;
             case target_arch::gfx906: return 256;
@@ -62,7 +62,7 @@ struct generator_config_selector<ROCRAND_RNG_PSEUDO_LFSR113, T>
             case target_arch::gfx1100: return 1024;
             case target_arch::gfx1030: return 512;
             case target_arch::gfx942: return 2048;
-            case target_arch::gfx950: return 1024;
+            case target_arch::gfx950: return 4096;
             case target_arch::gfx90a: return 2048;
             case target_arch::gfx908: return 1024;
             case target_arch::gfx906: return 2048;

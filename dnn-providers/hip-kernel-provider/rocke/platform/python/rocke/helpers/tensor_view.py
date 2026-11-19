@@ -395,7 +395,7 @@ class TensorView:
         the store (cache-bypass) for write-once outputs.
         """
         if self.addr_space == "lds":
-            if self.dtype.name in ("f16", "bf16"):
+            if self.dtype.name in ("f16", "bf16", "f64"):
                 b.smem_store_vN(self.base, list(indices), value, 1)
                 return
             if self.dtype.name == "f32":
@@ -438,12 +438,13 @@ class TensorView:
     ) -> Value:
         """Vectorised load of ``n`` consecutive elements starting at
         ``indices``. Supports ``n in {2, 4, 8}`` for f16/bf16 (global &
+        LDS), ``n in {2, 4, 8, 16}`` for the 8-bit float types (global &
         LDS) and ``n = 2`` for f64 (global); buffer ops use ``dwords =
-        n // 2`` for f16 and support ``n in {2, 4, 8}`` accordingly.
-        ``nontemporal`` (global path only) streams the load
-        (cache-bypass)."""
+        n // 2`` for f16 and support ``n in {2, 4, 8}`` accordingly. The
+        exact per-dtype width sets are enforced by the underlying
+        ``smem_load_vN`` / ``global_load_vN``."""
         if self.addr_space == "lds":
-            if self.dtype.name in ("f16", "bf16"):
+            if self.dtype.name in ("f16", "bf16", "fp8e4m3", "bf8e5m2"):
                 return b.smem_load_vN(self.base, *indices, dtype=self.dtype, n=n)
             if self.dtype.name == "f32":
                 return b.smem_load_vN_f32(self.base, *indices, n=n)
@@ -466,16 +467,8 @@ class TensorView:
                 f"buffer vec load not yet wired for dtype {self.dtype.name}"
             )
         off = self.desc.offset(b, indices)
-        if self.dtype.name in ("f16", "bf16", "f64"):
-            return b.global_load_vN(
-                self.base,
-                off,
-                self.dtype,
-                n,
-                temporal_hint=(
-                    TemporalHint.STREAMING if nontemporal else TemporalHint.DEFAULT
-                ),
-            )
+        if self.dtype.name in ("f16", "bf16", "f64", "fp8e4m3", "bf8e5m2"):
+            return b.global_load_vN(self.base, off, self.dtype, n)
         if self.dtype.name == "f32":
             # f32 global vec loads aren't wired through ``global_load_vN``
             # yet (the IR primitive only covers 16-bit elements). Fall

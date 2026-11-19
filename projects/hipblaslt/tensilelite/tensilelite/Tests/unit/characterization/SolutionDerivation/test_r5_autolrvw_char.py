@@ -40,28 +40,6 @@ Solution = S.Solution
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
-def gfx950_iim():
-    """Single-arch ISA info map for gfx950."""
-    from tensilelite.Common.Architectures import gfxToIsa
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Validators import validateToolchain
-
-    cxx = validateToolchain("amdclang++")
-    isa = gfxToIsa("gfx950")
-    return makeIsaInfoMap([isa], cxx)
-
-
-@pytest.fixture(scope="module")
-def gfx950_assembler():
-    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
-
-    cxx = validateToolchain("amdclang++")
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(cxx, bundler, "default").assembler
-
-
-@pytest.fixture(scope="module")
 def _gp_assigned(gfx950_iim):
     """Assign global parameters for gfx950 once per module; restore after."""
     import contextlib
@@ -161,9 +139,9 @@ def _make_gfx950_mx_fp8_solution(iim, assembler, **overrides):
 #     3064-3130 isAutoLRVW (auto LRVW via MIInputPerThread, TransposeLDS path)
 # ===========================================================================
 
-def test_gfx950_mx_fp8_autolrvw_derived_valid(_gp_assigned, gfx950_iim, gfx950_assembler):
+def test_gfx950_mx_fp8_autolrvw_derived_valid(_gp_assigned, gfx950_iim, assembler):
     """gfx950 MX FP8 + UseSubtileImpl=1 + LRVW auto: solution must be Valid."""
-    sol = _make_gfx950_mx_fp8_solution(gfx950_iim, gfx950_assembler)
+    sol = _make_gfx950_mx_fp8_solution(gfx950_iim, assembler)
     assert sol is not None
     assert sol.get("Valid") is True, (
         "Expected Valid=True for gfx950 MX FP8 + UseSubtileImpl=1 + auto LRVW; "
@@ -171,9 +149,9 @@ def test_gfx950_mx_fp8_autolrvw_derived_valid(_gp_assigned, gfx950_iim, gfx950_a
     )
 
 
-def test_gfx950_mx_fp8_autolrvw_vw_forced(_gp_assigned, gfx950_iim, gfx950_assembler):
+def test_gfx950_mx_fp8_autolrvw_vw_forced(_gp_assigned, gfx950_iim, assembler):
     """UseSubtileImpl block (line 819-820) forces VectorWidthA/B to 1."""
-    sol = _make_gfx950_mx_fp8_solution(gfx950_iim, gfx950_assembler)
+    sol = _make_gfx950_mx_fp8_solution(gfx950_iim, assembler)
     assert sol.get("Valid") is True
     # UseSubtileImpl block must set VWA/B = 1 (lines 819-820)
     assert sol.get("VectorWidthA") == 1, (
@@ -184,9 +162,9 @@ def test_gfx950_mx_fp8_autolrvw_vw_forced(_gp_assigned, gfx950_iim, gfx950_assem
     )
 
 
-def test_gfx950_mx_fp8_autolrvw_bufferstoreD_forced(_gp_assigned, gfx950_iim, gfx950_assembler):
+def test_gfx950_mx_fp8_autolrvw_bufferstoreD_forced(_gp_assigned, gfx950_iim, assembler):
     """UseSubtileImpl block (line 824) forces BufferStore=1."""
-    sol = _make_gfx950_mx_fp8_solution(gfx950_iim, gfx950_assembler)
+    sol = _make_gfx950_mx_fp8_solution(gfx950_iim, assembler)
     assert sol.get("Valid") is True
     # Line 824: state["BufferStore"] = 1
     assert sol.get("BufferStore") == 1, (
@@ -194,9 +172,9 @@ def test_gfx950_mx_fp8_autolrvw_bufferstoreD_forced(_gp_assigned, gfx950_iim, gf
     )
 
 
-def test_gfx950_mx_fp8_autolrvw_shadow_limit_cleared(_gp_assigned, gfx950_iim, gfx950_assembler):
+def test_gfx950_mx_fp8_autolrvw_shadow_limit_cleared(_gp_assigned, gfx950_iim, assembler):
     """UseSubtileImpl block (lines 826-827) clears Use64bShadowLimit flags."""
-    sol = _make_gfx950_mx_fp8_solution(gfx950_iim, gfx950_assembler)
+    sol = _make_gfx950_mx_fp8_solution(gfx950_iim, assembler)
     assert sol.get("Valid") is True
     # Lines 826-827: Use64bShadowLimit = False, Use64bShadowLimitMX = False
     assert sol.get("Use64bShadowLimit") is False, (
@@ -207,9 +185,9 @@ def test_gfx950_mx_fp8_autolrvw_shadow_limit_cleared(_gp_assigned, gfx950_iim, g
     )
 
 
-def test_gfx950_mx_fp8_autolrvw_abtile_pair_fp8(_gp_assigned, gfx950_iim, gfx950_assembler):
+def test_gfx950_mx_fp8_autolrvw_abtile_pair_fp8(_gp_assigned, gfx950_iim, assembler):
     """UseSubtileImpl block (line 848) sets _ABTilePair to 'AB_B8' for FP8 data type."""
-    sol = _make_gfx950_mx_fp8_solution(gfx950_iim, gfx950_assembler)
+    sol = _make_gfx950_mx_fp8_solution(gfx950_iim, assembler)
     assert sol.get("Valid") is True
     # Line 848: is8bitFloat -> AB_B8
     assert sol.get("_ABTilePairA") == "AB_B8", (
@@ -220,9 +198,9 @@ def test_gfx950_mx_fp8_autolrvw_abtile_pair_fp8(_gp_assigned, gfx950_iim, gfx950
     )
 
 
-def test_gfx950_mx_fp8_autolrvw_lrvw_derived(_gp_assigned, gfx950_iim, gfx950_assembler):
+def test_gfx950_mx_fp8_autolrvw_lrvw_derived(_gp_assigned, gfx950_iim, assembler):
     """isAutoLRVW (lines 3064-3088) derives LRVW from MIInputPerThread when LRVW=-1."""
-    sol = _make_gfx950_mx_fp8_solution(gfx950_iim, gfx950_assembler)
+    sol = _make_gfx950_mx_fp8_solution(gfx950_iim, assembler)
     assert sol.get("Valid") is True
     lrvwa = sol.get("LocalReadVectorWidthA")
     lrvwb = sol.get("LocalReadVectorWidthB")
@@ -244,9 +222,9 @@ def test_gfx950_mx_fp8_autolrvw_lrvw_derived(_gp_assigned, gfx950_iim, gfx950_as
     )
 
 
-def test_gfx950_mx_fp8_autolrvw_source_swap_cleared(_gp_assigned, gfx950_iim, gfx950_assembler):
+def test_gfx950_mx_fp8_autolrvw_source_swap_cleared(_gp_assigned, gfx950_iim, assembler):
     """UseSubtileImpl block (line 821) forces SourceSwap=False even if config requests True."""
-    sol = _make_gfx950_mx_fp8_solution(gfx950_iim, gfx950_assembler, SourceSwap=True)
+    sol = _make_gfx950_mx_fp8_solution(gfx950_iim, assembler, SourceSwap=True)
     assert sol.get("Valid") is True
     # Line 821: state["SourceSwap"] = False
     assert sol.get("SourceSwap") is False, (
@@ -259,10 +237,10 @@ def test_gfx950_mx_fp8_autolrvw_source_swap_cleared(_gp_assigned, gfx950_iim, gf
 #   and the different MIInputPerThread value (4 instead of 8 for 128-MI).
 # ===========================================================================
 
-def test_gfx950_mx_fp8_mi32x32_autolrvw(_gp_assigned, gfx950_iim, gfx950_assembler):
+def test_gfx950_mx_fp8_mi32x32_autolrvw(_gp_assigned, gfx950_iim, assembler):
     """MI32x32x64 with UseSubtileImpl=1 + auto LRVW — exercises DepthU duUnit path."""
     sol = _make_gfx950_mx_fp8_solution(
-        gfx950_iim, gfx950_assembler,
+        gfx950_iim, assembler,
         MatrixInstruction=[32, 32, 64, 1, 1, 2, 2, 2, 2],
         DepthU=256,
     )
@@ -279,10 +257,10 @@ def test_gfx950_mx_fp8_mi32x32_autolrvw(_gp_assigned, gfx950_iim, gfx950_assembl
 #   (line 870-872): PGR in {0,1,2} -> valid.
 # ===========================================================================
 
-def test_gfx950_mx_fp8_pgr2_autolrvw(_gp_assigned, gfx950_iim, gfx950_assembler):
+def test_gfx950_mx_fp8_pgr2_autolrvw(_gp_assigned, gfx950_iim, assembler):
     """PrefetchGlobalRead=2 with UseSubtileImpl=1 passes the PGR guard (line 870-872)."""
     sol = _make_gfx950_mx_fp8_solution(
-        gfx950_iim, gfx950_assembler,
+        gfx950_iim, assembler,
         PrefetchGlobalRead=2,
     )
     if sol.get("Valid"):
@@ -295,10 +273,10 @@ def test_gfx950_mx_fp8_pgr2_autolrvw(_gp_assigned, gfx950_iim, gfx950_assembler)
 #   Exercises the isAutoLRVW validation branch (lines 3066-3071) when LRVW != -1.
 # ===========================================================================
 
-def test_gfx950_mx_fp8_explicit_lrvw_valid(_gp_assigned, gfx950_iim, gfx950_assembler):
+def test_gfx950_mx_fp8_explicit_lrvw_valid(_gp_assigned, gfx950_iim, assembler):
     """Explicit LRVW=16 (non-auto) takes the validation branch in isAutoLRVW (line 3066)."""
     sol = _make_gfx950_mx_fp8_solution(
-        gfx950_iim, gfx950_assembler,
+        gfx950_iim, assembler,
         LocalReadVectorWidth=16,
     )
     # LRVW=16 is valid for FP8 on gfx950 (numRegisters=0.5, tmplrvw=16, 16*0.5=8 >= 1)
@@ -325,10 +303,10 @@ def test_gfx950_mx_fp8_explicit_lrvw_valid(_gp_assigned, gfx950_iim, gfx950_asse
 # pass-through assertion below fails, killing the mutant.
 # ===========================================================================
 
-def test_gfx950_mx_fp8_explicit_wide_lrvw_preserved(_gp_assigned, gfx950_iim, gfx950_assembler):
+def test_gfx950_mx_fp8_explicit_wide_lrvw_preserved(_gp_assigned, gfx950_iim, assembler):
     """Explicit wide LRVW=64 must pass through unchanged (isAutoLRVW False default)."""
     sol = _make_gfx950_mx_fp8_solution(
-        gfx950_iim, gfx950_assembler,
+        gfx950_iim, assembler,
         LocalReadVectorWidth=64,
     )
     assert sol is not None

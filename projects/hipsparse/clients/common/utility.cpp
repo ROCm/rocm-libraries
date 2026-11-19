@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -124,30 +124,26 @@ void query_version(char* version)
     status = hipsparseCreate(&handle);
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "The creation of the hipsparseHandle_t failed." << std::endl;
-        throw(status);
+        throw_hipsparse_error("hipsparseCreate", status);
     }
 
     status = hipsparseGetVersion(handle, &hipsparse_ver);
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "hipsparseGetVersion failed." << std::endl;
-        throw(status);
+        throw_hipsparse_error("hipsparseGetVersion", status);
     }
 
     status = hipsparseGetGitRevision(handle, hipsparse_rev);
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "hipsparseGetGitRevision failed." << std::endl;
-        throw(status);
+        throw_hipsparse_error("hipsparseGetGitRevision", status);
     }
 
     status = hipsparseDestroy(handle);
 
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "rocsparse_destroy_handle failed." << std::endl;
-        throw(status);
+        throw_hipsparse_error("hipsparseDestroy", status);
     }
 
     snprintf(version,
@@ -239,9 +235,7 @@ double get_time_us(void)
 
     if(status != hipSuccess)
     {
-        fprintf(stderr, "HIP error: %s (%d)\n", hipGetErrorString(status), status);
-        // hipsparse-bench catches hipsparseStatus_t, not hipError_t.
-        throw HIPSPARSE_STATUS_INTERNAL_ERROR;
+        throw_hip_error("hipDeviceSynchronize", status);
     }
 
     auto now = std::chrono::steady_clock::now();
@@ -257,9 +251,7 @@ double get_time_us_sync(hipStream_t stream)
 
     if(status != hipSuccess)
     {
-        fprintf(stderr, "HIP error: %s (%d)\n", hipGetErrorString(status), status);
-        // hipsparse-bench catches hipsparseStatus_t, not hipError_t.
-        throw HIPSPARSE_STATUS_INTERNAL_ERROR;
+        throw_hip_error("hipStreamSynchronize", status);
     }
 
     auto now = std::chrono::steady_clock::now();

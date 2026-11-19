@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -285,12 +285,12 @@ void testing_check_matrix_csc(const Arguments& arg)
 
             if(col != -1)
             {
-                rocsparse_int index = (uplo == rocsparse_fill_mode_lower)
+                rocsparse_int index = (uplo == rocsparse_fill_mode_upper)
                                           ? hcsc_col_ptr[col + 1] - base - 1
                                           : hcsc_col_ptr[col] - base;
                 temp                = hcsc_row_ind[index];
 
-                hcsc_row_ind[index] = (uplo == rocsparse_fill_mode_lower) ? (m - 1 + base) : base;
+                hcsc_row_ind[index] = (uplo == rocsparse_fill_mode_upper) ? (m - 1 + base) : base;
                 dcsc_row_ind.transfer_from(hcsc_row_ind);
 
                 CHECK_ROCSPARSE_ERROR(rocsparse_check_matrix_csc<T>(handle,

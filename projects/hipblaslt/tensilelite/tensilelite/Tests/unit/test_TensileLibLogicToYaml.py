@@ -25,7 +25,7 @@
 import pytest
 from unittest.mock import mock_open, patch
 
-from tensilelite import TensileLibLogicToYaml
+from tensilelite import lib_logic_to_yaml as TensileLibLogicToYaml
 
 # Test data
 VALID_LIBLOGIC_FILE_CONTENT = """

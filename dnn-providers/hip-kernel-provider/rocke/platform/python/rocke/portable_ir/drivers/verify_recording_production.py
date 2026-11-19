@@ -28,7 +28,7 @@ from rocke.portable_ir.src.recording_builder import kernel_to_recipe, record_ker
 def _count(prog):
     n = 0
     for i in prog:
-        if i.get("op") in ("emit", "scf_for", "scf_if", "ret"):
+        if i.get("op") in ("emit", "scf_for", "scf_if", "scf_if_else", "ret"):
             n += 1
         for key in ("body", "then", "else"):
             if key in i:
