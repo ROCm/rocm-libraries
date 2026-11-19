@@ -322,6 +322,8 @@ using FmhaBatchPrefillPageTileGeometryFor =
 //  - the WMMA operand guard for every vectorized-KV problem, which requires it; the linear page
 //    tile keeps its unguarded refills (see the hazard note of the scheduled-TDM policy) and takes
 //    the LDS drain before every K/V TDM issue instead (kDrainLdsBeforeTdmIssue);
+//  - the LDS drain also for every vectorized D64 M64 tile, KV-split partials included, where the
+//    stale-fragment event was most frequent (kDrainLdsBeforeTdmIssue of the scheduled-TDM policy);
 //  - M128 tiles (P64/P128 x D64/D128): the other four (scalar row clamp 1);
 //  - P128 D64 M64 tiles: the v_maximum3 row max and the scalar row clamp 2 (3.5 % less time than
 //    without them; clamp 1 recovers 3 %). Not for P64 D64 M64, where the earlier TDM issue showed a
@@ -335,10 +337,16 @@ using FmhaBatchPrefillPageTileOptionsFor = std::conditional_t<
     std::conditional_t<
         !detail::fmha_tdm_is_split_partial_v<Problem> && Geometry::kM == 128,
         FmhaTdmSchedTuningOptions<true, true, true, 1, true>,
-        std::conditional_t<!detail::fmha_tdm_is_split_partial_v<Problem> && Geometry::kM == 64 &&
-                               Geometry::kHeadDimQK == 64 && Problem::kPageBlockSize == 128,
-                           FmhaTdmSchedTuningOptions<false, false, true, 2, true>,
-                           FmhaTdmSchedTuningOptions<false, false, false, 0, true>>>>;
+        std::conditional_t<
+            !detail::fmha_tdm_is_split_partial_v<Problem> && Geometry::kM == 64 &&
+                Geometry::kHeadDimQK == 64 && Problem::kPageBlockSize == 128,
+            FmhaTdmSchedTuningOptions<false, false, true, 2, true, true>,
+            FmhaTdmSchedTuningOptions<false,
+                                      false,
+                                      false,
+                                      0,
+                                      true,
+                                      Geometry::kM == 64 && Geometry::kHeadDimQK == 64>>>>;
 
 // Scheduled-TDM tuning of a page-tile problem: the default tuning of its geometry, with the
 // page-tile code-generation options (read through FmhaTdmSchedTuningOptionsOf).
