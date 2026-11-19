@@ -101,34 +101,26 @@ def iter_global_fragment_scalars(
     align: int,
     mask: Value | None = None,
     pad: Value | None = None,
-    clip: tuple[Value, Value] | None = None,
 ) -> Iterator[Value]:
-    """Read a fragment as scalar storage units, optionally clipping invalid units.
+    """Read a fragment as scalar storage units, optionally masked as a run.
 
     ``offset`` is the physical start, including any runtime strides. A shared
-    ``mask`` applies to the whole run. Alternatively ``clip=(position, bound)``
-    tests each unit against an exclusive logical bound independently of its
-    physical address. Masked units read safe element zero and return ``pad``.
-    The caller must ensure ``ptr[0]`` exists when clipping an access.
+    ``mask`` applies to the whole run; when false, each load reads safe element
+    zero and returns ``pad``. The caller must ensure ``ptr[0]`` exists when
+    using a mask.
     """
-    if n <= 0 or (mask is not None and clip is not None):
-        raise ValueError(
-            "a fragment needs positive width and at most one clipping mode"
-        )
-    if (mask is not None or clip is not None) and pad is None:
+    if n <= 0:
+        raise ValueError("fragment needs positive width")
+    if mask is not None and pad is None:
         raise ValueError("a clipped fragment needs a pad value")
     for i in range(n):
         step = b.const_i32(i) if i else None
         address = offset if step is None else b.add(offset, step)
-        valid = mask
-        if clip is not None:
-            position, bound = clip
-            valid = b.cmp_lt(position if step is None else b.add(position, step), bound)
-        if valid is None:
+        if mask is None:
             yield b.global_load(ptr, address, dtype, align=align)
         else:
             assert pad is not None
-            yield b.masked_global_load(ptr, address, valid, pad, dtype, align=align)
+            yield b.masked_global_load(ptr, address, mask, pad, dtype, align=align)
 
 
 def load_clipped_global_fragment(

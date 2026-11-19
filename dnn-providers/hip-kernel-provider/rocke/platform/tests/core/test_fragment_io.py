@@ -7,19 +7,14 @@ from rocke.helpers.io import iter_global_fragment_scalars, load_clipped_global_f
 
 
 @pytest.mark.parametrize(
-    "n, clipping, match",
-    [
-        (0, {}, "positive width"),
-        (1, {"mask": object(), "clip": (object(), object())}, "one clipping mode"),
-        (1, {"mask": object()}, "needs a pad value"),
-        (1, {"clip": (object(), object())}, "needs a pad value"),
-    ],
+    "n, mask, match",
+    [(0, None, "positive width"), (1, object(), "needs a pad value")],
 )
-def test_fragment_rejects_invalid_clipping_before_emitting(n, clipping, match):
+def test_fragment_rejects_invalid_width_or_mask_before_emitting(n, mask, match):
     with pytest.raises(ValueError, match=match):
         list(
             iter_global_fragment_scalars(
-                None, None, None, dtype=F16, n=n, align=1, **clipping
+                None, None, None, dtype=F16, n=n, align=1, mask=mask
             )
         )
 
