@@ -4518,6 +4518,27 @@ def _emit_epilogue_cshuffle(
         col = b.mul(col_v, b.const_i32(store_vec)) if store_vec > 1 else col_v
         return row, col_v, col
 
+    # EXPERIMENT: ROCKE_EXP_EPI_BATCH=n -> the copy-out issues its LDS reads n
+    # at a time, then their n global stores, instead of alternating read and
+    # store (which makes every store wait for the previous one to release its
+    # data registers). Only without bounds masks or a fused epilogue.
+    import os as _os_eb
+
+    _eb = int(_os_eb.environ.get("ROCKE_EXP_EPI_BATCH", "0"))
+    if _eb > 0 and store_vec > 1 and not (pad_m or pad_n) and fused_epilogue is None:
+        for e0 in range(0, vecs_per_thread, _eb):
+            group = []
+            for e in range(e0, min(e0 + _eb, vecs_per_thread)):
+                vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+                row, col_v, col = _vec_rc(vec_idx)
+                c_off = b.add(b.mul(b.add(block_m_off, row), N), b.add(block_n_off, col))
+                if batch_off_c is not None:
+                    c_off = b.add(batch_off_c, c_off)
+                group.append((c_off, _load_smem_vec(b, Cs, row, col, store_vec, c_dtype)))
+            for c_off, hv in group:
+                b.global_store_vN(C, c_off, hv, store_vec)
+        return
+
     for e in range(vecs_per_thread):
         vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
         row, col_v, col = _vec_rc(vec_idx)
