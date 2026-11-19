@@ -291,6 +291,7 @@ protected:
         createSweepWithCases(
             root / "comprehensive" / "SdpaFwdPlan" / "Q", {"q1", "q2", "q3"}, true);
         createSweepWithCases(root / "full" / "Matmul" / "F", {"f1"}, false);
+        createMinimalBundle(root / "full" / "Matmul" / "F" / "golden" / "f1", "extra");
 
         createMinimalBundle(root / "quick" / "Matmul" / "direct", "Small");
         std::ofstream(root / "quick" / "Matmul" / "direct" / "Small.support.json") << "{}";
@@ -564,6 +565,7 @@ TEST_F(TestBundleDiscoveryFixture, SweepRootAtTheDataRootIsFound)
     const auto result = discoverBundles(_tempDir);
     ASSERT_EQ(result.size(), 1u);
     EXPECT_EQ(result.front().jsonPath, _tempDir / "sweep.json");
+    EXPECT_EQ(result.front().suiteName, "_");
 }
 
 TEST_F(TestBundleDiscoveryFixture, DataRootWithATrailingSeparatorIsNotALeaf)
@@ -649,6 +651,61 @@ TEST_F(TestBundleDiscoveryFixture, DirectoryNamedSweepJsonMarksASweepRoot)
     EXPECT_EQ(sweepDirs, std::vector<std::filesystem::path>{sweepDir});
     const std::vector<std::filesystem::path> expected{sweepDir / "sweep.json"};
     EXPECT_EQ(detail::findEmptyLeafFolders(_tempDir, sweepDirs), expected);
+}
+
+// In a sweep that the filter skips, a directory named sweep.json fails discovery with
+// a message that names it.
+TEST_F(TestBundleDiscoveryFixture, DirectoryNamedSweepJsonThrowsWithItsPathWhenTheFilterSkipsIt)
+{
+    const auto sweepDir = _tempDir / "quick" / "Op" / "Odd";
+    std::filesystem::create_directories(sweepDir / "sweep.json");
+    std::ofstream(sweepDir / "graph.template.json") << "{}";
+
+    try
+    {
+        (void)discoverBundles(_tempDir, [](const std::string&) { return false; });
+        FAIL() << "discovery did not throw";
+    }
+    catch(const std::runtime_error& e)
+    {
+        EXPECT_NE(std::string(e.what()).find((sweepDir / "sweep.json").string()), std::string::npos)
+            << e.what();
+    }
+}
+
+// The walk skips a sweep.json that is a directory link back to its own folder, and a
+// link to nothing. Such a folder is not a sweep root, so it is an empty leaf.
+TEST_F(TestBundleDiscoveryFixture, SweepJsonLinkThatTheWalkSkipsMarksNoSweepRoot)
+{
+    namespace fs = std::filesystem;
+    const auto looped = _tempDir / "quick" / "Op" / "Looped";
+    const auto dangling = _tempDir / "quick" / "Op" / "Dangling";
+    for(const auto& dir : {looped, dangling})
+    {
+        fs::create_directories(dir);
+        std::ofstream(dir / "graph.template.json") << "{}";
+    }
+    createMinimalBundle(_tempDir / "quick" / "Op" / "Good", "good");
+    try
+    {
+        fs::create_directory_symlink(looped, looped / "sweep.json");
+        fs::create_symlink(_tempDir / "missing.json", dangling / "sweep.json");
+    }
+    catch(const fs::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create symlinks here: " << e.what();
+    }
+
+    EXPECT_TRUE(isSweepBundleRoot(looped));
+    const auto sweepDirs = findSweepDirectories(_tempDir);
+    EXPECT_TRUE(sweepDirs.empty());
+    EXPECT_EQ(detail::findEmptyLeafFolders(_tempDir, sweepDirs),
+              (std::vector<fs::path>{dangling, looped}));
+
+    std::vector<DiscoveredBundle> result;
+    ASSERT_NO_THROW(result = discoverBundles(_tempDir));
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result.front().suiteName, "quick_Op_Good");
 }
 
 TEST_F(TestBundleDiscoveryFixture, SweepRootsAndEmptyLeavesBehindADirectorySymlinkAreFound)
@@ -1628,6 +1685,8 @@ TEST_F(TestBundleDiscoveryFixture, SweepCaseScanFallsBackOnShapesItDoesNotAccept
         R"json({})json",
         R"json({"other":[{"id":"a"}]})json",
         R"json({"cases":{}})json",
+        R"json({"cases":1,"other":[{}]})json",
+        R"json({"cases":{},"other":[{}]})json",
         R"json({"cases":"a"})json",
         R"json({"cases":[1]})json",
         R"json({"cases":["a"]})json",
@@ -2081,9 +2140,15 @@ TEST_F(TestBundleDiscoveryFixture, DiscoverAndSelectBundlesCountsSweepsTheFilter
 
     BundleRegistrationStats stats;
     SupportClaimCoverage coverage;
+    testing::internal::CaptureStderr();
     const auto discovered = detail::discoverAndSelectBundles(
         _tempDir, "NoSuchSuite.*", /*writing=*/false, /*observing=*/true, stats, coverage);
+    const auto printed = testing::internal::GetCapturedStderr();
 
+    EXPECT_NE(printed.find("--gtest_filter excluded 3 of 3 discovered bundle test(s) before "
+                           "loading\n"),
+              std::string::npos)
+        << printed;
     ASSERT_TRUE(discovered.has_value());
     EXPECT_TRUE(discovered->bundles.empty());
     EXPECT_EQ(discovered->unparsedSweeps.size(), 2u);

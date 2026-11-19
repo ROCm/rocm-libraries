@@ -730,8 +730,13 @@ inline std::optional<size_t> countSweepCasesWithoutParsing(std::string_view json
 // readSweepCaseIds(), which throws for a malformed manifest.
 inline size_t countSweepCases(const std::filesystem::path& sweepPath)
 {
-    std::ifstream stream(sweepPath, std::ios::binary);
-    if(!stream)
+    std::error_code error;
+    std::ifstream stream;
+    if(std::filesystem::is_regular_file(sweepPath, error))
+    {
+        stream.open(sweepPath, std::ios::binary);
+    }
+    if(!stream.is_open())
     {
         throw std::runtime_error("Could not open sweep manifest: " + sweepPath.string());
     }
