@@ -10,7 +10,7 @@
 // ./enum_device <output file>
 //
 //  Sample output:
-// 	{
+//     {
 //   "version": {
 //     "major": 1,
 //     "minor": 0

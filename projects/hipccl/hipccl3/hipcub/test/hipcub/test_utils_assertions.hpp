@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -48,7 +48,7 @@ template<class T>
 inline void assert_eq(const std::vector<T>& result, const std::vector<T>& expected, const size_t max_length = SIZE_MAX)
 {
     if(max_length == SIZE_MAX || max_length > expected.size()) ASSERT_EQ(result.size(), expected.size());
-    for(size_t i = 0; i < std::min(result.size(), max_length); i++)
+    for(size_t i = 0; i < _HIPCUB_STD::min(result.size(), max_length); i++)
     {
         if(bit_equal(result[i], expected[i])) continue; // Check to also regard equality of NaN's, -NaN, +inf, -inf as correct.
 
@@ -74,7 +74,7 @@ inline void assert_eq(const std::vector<T>& result, const std::vector<T>& expect
 inline void assert_eq(const std::vector<test_utils::half>& result, const std::vector<test_utils::half>& expected, const size_t max_length = SIZE_MAX)
 {
     if(max_length == SIZE_MAX || max_length > expected.size()) ASSERT_EQ(result.size(), expected.size());
-    for(size_t i = 0; i < std::min(result.size(), max_length); i++)
+    for(size_t i = 0; i < _HIPCUB_STD::min(result.size(), max_length); i++)
     {
         if(bit_equal(result[i], expected[i])) continue; // Check to also regard equality of NaN's, -NaN, +inf, -inf as correct.
         ASSERT_EQ(test_utils::native_half(result[i]), test_utils::native_half(expected[i])) << "where index = " << i;
@@ -84,7 +84,7 @@ inline void assert_eq(const std::vector<test_utils::half>& result, const std::ve
 inline void assert_eq(const std::vector<test_utils::bfloat16>& result, const std::vector<test_utils::bfloat16>& expected, const size_t max_length = SIZE_MAX)
 {
     if(max_length == SIZE_MAX || max_length > expected.size()) ASSERT_EQ(result.size(), expected.size());
-    for(size_t i = 0; i < std::min(result.size(), max_length); i++)
+    for(size_t i = 0; i < _HIPCUB_STD::min(result.size(), max_length); i++)
     {
         if(bit_equal(result[i], expected[i])) continue; // Check to also regard equality of NaN's, -NaN, +inf, -inf as correct.
         ASSERT_EQ(test_utils::native_bfloat16(result[i]), test_utils::native_bfloat16(expected[i])) << "where index = " << i;
@@ -137,9 +137,13 @@ inline auto assert_near(const std::vector<T>& result, const std::vector<T>& expe
     }
 }
 
-template<class T, std::enable_if_t<std::is_same<T, test_utils::bfloat16>::value ||
-                                       std::is_same<T, test_utils::half>::value, bool> = true>
-inline void assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
+template<
+    class T,
+    std::enable_if_t<std::is_same_v<T, test_utils::bfloat16> || std::is_same_v<T, test_utils::half>,
+                     bool>
+    = true>
+inline void
+    assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
 {
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
@@ -176,9 +180,14 @@ inline auto assert_near(const std::vector<custom_test_type<T>>& result, const st
     }
 }
 
-template<class T, std::enable_if_t<std::is_same<T, test_utils::bfloat16>::value ||
-                                       std::is_same<T, test_utils::half>::value, bool> = true>
-inline void assert_near(const std::vector<custom_test_type<T>>& result, const std::vector<custom_test_type<T>>& expected, const float percent)
+template<
+    class T,
+    std::enable_if_t<std::is_same_v<T, test_utils::bfloat16> || std::is_same_v<T, test_utils::half>,
+                     bool>
+    = true>
+inline void assert_near(const std::vector<custom_test_type<T>>& result,
+                        const std::vector<custom_test_type<T>>& expected,
+                        const float                             percent)
 {
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
@@ -209,8 +218,11 @@ inline auto assert_near(const T& result, const T& expected, const float)
     ASSERT_EQ(result, expected);
 }
 
-template<class T, std::enable_if_t<std::is_same<T, test_utils::bfloat16>::value ||
-                                       std::is_same<T, test_utils::half>::value, bool> = true>
+template<
+    class T,
+    std::enable_if_t<std::is_same_v<T, test_utils::bfloat16> || std::is_same_v<T, test_utils::half>,
+                     bool>
+    = true>
 inline void assert_near(const T& result, const T& expected, const float percent)
 {
     if(bit_equal(result, expected)) return; // Check to also regard equality of NaN's, -NaN, +inf, -inf as correct.
@@ -224,8 +236,10 @@ inline auto assert_near(const custom_test_type<T>& result, const custom_test_typ
 {
     auto diff1 = std::abs(percent * expected.x);
     auto diff2 = std::abs(percent * expected.y);
-    if(!bit_equal(result.x, expected.x)) ASSERT_NEAR(result.x, expected.x, diff1);
-    if(!bit_equal(result.x, expected.x)) ASSERT_NEAR(result.y, expected.y, diff2);
+    if(!bit_equal(result.x, expected.x))
+        ASSERT_NEAR(result.x, expected.x, diff1);
+    if(!bit_equal(result.y, expected.y))
+        ASSERT_NEAR(result.y, expected.y, diff2);
 }
 
 template<class T>
@@ -254,7 +268,7 @@ inline void assert_bit_eq(const std::vector<T>& result, const std::vector<T>& ex
     }
 }
 
-#if HIPCUB_IS_INT128_ENABLED
+#if _CCCL_HAS_INT128()
 inline void assert_bit_eq(const std::vector<__int128_t>& result,
                           const std::vector<__int128_t>& expected)
 {
@@ -328,7 +342,7 @@ inline void assert_bit_eq(const std::vector<__uint128_t>& result,
         }
     }
 }
-#endif //HIPCUB_IS_INT128_ENABLED
+#endif //_CCCL_HAS_INT128()
 
 /// Compile-time assertion for type equality of two objects.
 template<class ExpectedT, class ActualT>
@@ -336,5 +350,5 @@ inline void assert_type(ExpectedT /*obj1*/, ActualT /*obj2*/)
 {
     testing::StaticAssertTypeEq<ExpectedT, ActualT>();
 }
-}
+} // namespace test_utils
 #endif  // HIPCUB_TEST_HIPCUB_TEST_UTILS_ASSERTIONS_HPP_

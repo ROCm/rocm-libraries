@@ -1,0 +1,47 @@
+{
+  "claims": {
+    "HIPBLASLT_ENGINE": [
+      {
+        "cases": [
+          "16_128_bfp16_92ac4b",
+          "1_1_16_128_fp16_nchw",
+          "2_3_16_128_bfp16_nchw_41da6d",
+          "2_3_16_128_fp32_nchw_ab5168",
+          "3_16_128_bfp16_ncl_c4811d",
+          "3_16_128_bfp16_ncl_d03be1",
+          "3_16_128_bfp16_ncl_dd8149",
+          "3_16_128_fp16_ncl_7fec08",
+          "3_16_128_fp16_ncl_9e1f76",
+          "3_16_128_fp16_ncl_fb1e05",
+          "3_16_128_fp32_ncl_6c616c",
+          "3_16_128_fp32_ncl_9b6525"
+        ],
+        "support": {
+          "gfx1101": [
+            "linux",
+            "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux"
+          ],
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

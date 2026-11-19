@@ -551,11 +551,15 @@ template <>
 inline void Driver::InitDataType<float8_fnuz>()
 {
     data_type = miopenFloat8_fnuz;
+    miopen_f8::set_hip_f8_ieee_exponent_bias(
+        miopen::UsesIeeeExponentBias(miopen::deref(GetHandle()).GetDeviceName()));
 }
 template <>
 inline void Driver::InitDataType<bfloat8_fnuz>()
 {
     data_type = miopenBFloat8_fnuz;
+    miopen_f8::set_hip_f8_ieee_exponent_bias(
+        miopen::UsesIeeeExponentBias(miopen::deref(GetHandle()).GetDeviceName()));
 }
 // "std::is_same<Tgpu, float>{}" used to avoid "static_assert" compilation error,
 // which occurs when the condition does not depend in any way on the template parameters.

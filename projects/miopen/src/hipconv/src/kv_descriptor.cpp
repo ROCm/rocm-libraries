@@ -32,9 +32,15 @@ bool to_int(std::string_view s, int& out)
 bool to_bool(std::string_view s, bool& out)
 {
     if(s == "true" || s == "1")
-        return out = true, true;
+    {
+        out = true;
+        return true;
+    }
     if(s == "false" || s == "0")
-        return out = false, true;
+    {
+        out = false;
+        return true;
+    }
     return false;
 }
 
@@ -126,7 +132,7 @@ bool KVDescriptor::match(std::string_view spec)
                 }
             if(!field)
                 return fail("unknown key '" + std::string(key) + "'");
-            if(!field->matches(val))
+            if(!field->matches(*this, val))
                 return false;
         }
         if(comma == std::string_view::npos)
@@ -136,12 +142,12 @@ bool KVDescriptor::match(std::string_view spec)
     return true;
 }
 
-std::string KVDescriptor::describe() const
+std::string KVDescriptor::describe(bool include_defaults) const
 {
     std::string out;
     for(const auto& f : fields_)
     {
-        std::string rendered = f.render();
+        std::string rendered = f.render(include_defaults);
         if(rendered.empty())
             continue;
         if(!out.empty())

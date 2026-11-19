@@ -24,6 +24,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/functional.h>
@@ -65,7 +72,6 @@ struct is_operator_plus_function_object_impl;
 template <typename T>
 using is_operator_plus_function_object = detail::is_operator_plus_function_object_impl<T>;
 
-#if THRUST_CPP_DIALECT >= 2017
 /*! \brief <tt>constexpr bool</tt> that is \c true if \c T is a
  *  <a href="https://en.cppreference.com/w/cpp/named_req/FunctionObject">FunctionObject</a>
  *  equivalent to \c operator<, and \c false otherwise.
@@ -77,7 +83,6 @@ using is_operator_plus_function_object = detail::is_operator_plus_function_objec
  */
 template <typename T>
 constexpr bool is_operator_plus_function_object_v = is_operator_plus_function_object<T>::value;
-#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -93,9 +98,11 @@ struct is_operator_plus_function_object_impl : false_type
 template <typename T>
 struct is_operator_plus_function_object_impl<thrust::plus<T>> : true_type
 {};
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
 template <typename T>
 struct is_operator_plus_function_object_impl<std::plus<T>> : true_type
 {};
+#endif
 
 } // namespace detail
 

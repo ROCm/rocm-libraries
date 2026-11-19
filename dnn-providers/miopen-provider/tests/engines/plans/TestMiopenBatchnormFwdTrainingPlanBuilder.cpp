@@ -1,7 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
 #include <memory>
+#include <string>
 
 #include <gtest/gtest.h>
 
@@ -149,6 +151,36 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForNon
     const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_FALSE(applicable);
+}
+
+TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsTrueForReluWithZeroSlope)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+        true,
+        false,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+        {588, 196, 14, 1},
+        {1, 3, 14, 14},
+        /*reluLowerClipSlope=*/0.0f);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForLeakyRelu)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+        true,
+        false,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+        {588, 196, 14, 1},
+        {1, 3, 14, 14},
+        /*reluLowerClipSlope=*/0.01f);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForWrongNodeOrder)
@@ -1069,4 +1101,101 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForMix
     const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_FALSE(applicable);
+}
+
+// The handle-free checks of isApplicable, runnable without a device.
+namespace
+{
+
+bool isTrainingGraphApplicable(const flatbuffers::FlatBufferBuilder& builder)
+{
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    return MiopenBatchnormFwdTrainingPlanBuilder::isGraphApplicable(graph);
+}
+
+// Running statistics requested (next-running outputs present) with the saved pair intact.
+flatbuffers::FlatBufferBuilder trainingGraphWithRunningStats()
+{
+    // The base graph carries prev running stats and momentum; add the two next-running outputs.
+    return mutateGraph(
+        createValidBatchnormFwdTrainingGraph(
+            {588, 196, 14, 1}, {1, 3, 14, 14}, true, false, false, true),
+        [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+            int64_t nextUid = 0;
+            for(const auto& tensor : graph.tensors)
+            {
+                nextUid = std::max(nextUid, tensor->uid + 1);
+            }
+            auto* attrs = graph.nodes.at(0)->attributes.AsBatchnormAttributes();
+            for(auto* uid :
+                {&attrs->next_running_mean_tensor_uid, &attrs->next_running_variance_tensor_uid})
+            {
+                auto tensor
+                    = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>();
+                tensor->uid = nextUid;
+                tensor->name = "next_running_stat_" + std::to_string(nextUid);
+                tensor->data_type = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+                tensor->dims = {1, 3, 1, 1};
+                tensor->strides = {3, 1, 1, 1};
+                graph.tensors.push_back(std::move(tensor));
+                *uid = nextUid++;
+            }
+        });
+}
+
+flatbuffers::FlatBufferBuilder withoutSavedPair(const flatbuffers::FlatBufferBuilder& source)
+{
+    return mutateGraph(source, [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+        auto* attrs = graph.nodes.at(0)->attributes.AsBatchnormAttributes();
+        attrs->mean_tensor_uid = flatbuffers::nullopt;
+        attrs->inv_variance_tensor_uid = flatbuffers::nullopt;
+    });
+}
+
+} // namespace
+
+TEST(TestMiopenBatchnormFwdTrainingPlanBuilderGraphApplicability, AcceptsLegalGraphs)
+{
+    EXPECT_TRUE(isTrainingGraphApplicable(createValidBatchnormFwdTrainingGraph()));
+    EXPECT_TRUE(isTrainingGraphApplicable(createValidBatchnormFwdTrainingActivGraph()));
+}
+
+TEST(TestMiopenBatchnormFwdTrainingPlanBuilderGraphApplicability,
+     AcceptsPlainTrainingWithoutSavedStatistics)
+{
+    EXPECT_TRUE(isTrainingGraphApplicable(
+        createValidBatchnormFwdTrainingGraph({588, 196, 14, 1}, {1, 3, 14, 14}, false)));
+}
+
+TEST(TestMiopenBatchnormFwdTrainingPlanBuilderGraphApplicability,
+     DeclinesRunningStatsWithoutSavedPair)
+{
+    const auto running = trainingGraphWithRunningStats();
+    EXPECT_TRUE(isTrainingGraphApplicable(running));
+
+    const auto noSavedPair = withoutSavedPair(running);
+    EXPECT_FALSE(isTrainingGraphApplicable(noSavedPair));
+}
+
+TEST(TestMiopenBatchnormFwdTrainingPlanBuilderGraphApplicability,
+     DeclinesFusedActivationWithoutSavedPair)
+{
+    const auto noSavedPair = withoutSavedPair(createValidBatchnormFwdTrainingActivGraph());
+    EXPECT_FALSE(isTrainingGraphApplicable(noSavedPair));
+}
+
+// isApplicable must apply the handle-free checks.
+TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableDeclinesRunningStatsWithoutSavedPair)
+{
+    const auto builder = withoutSavedPair(trainingGraphWithRunningStats());
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder,
+       IsApplicableDeclinesFusedActivationWithoutSavedPair)
+{
+    const auto builder = withoutSavedPair(createValidBatchnormFwdTrainingActivGraph());
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }

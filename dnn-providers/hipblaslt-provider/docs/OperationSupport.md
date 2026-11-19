@@ -13,11 +13,18 @@ hipBLASLt is **column-major**; hipDNN's output is **row-major**. To produce `C =
 ### Stand-alone Matmul (GEMM)
 
 hipBLASLt Provider Plugin supports stand-alone Matmul (GEMM, general matrix multiplication) operations with the following features and constraints:
-- Input and output data types: FP32, FP16, BF16
+- Input and output data types: FP32, FP16, BF16. A and B must have the same data type. With a fused activation, the activation output must be FP32, FP16 or BF16
 - Compute data type: FP32
 - Transposed inputs: supported
-- Batched matmuls: only equal batch sizes are supported, or broadcasting when one input has a single batch (batch=1)
+- Batched matmuls: only equal batch sizes are supported, or broadcasting when one input has a single batch (batch=1). hipBLASLt takes one flattened batch stride, so the batch axes of each tensor must nest contiguously (each axis with extent above one strides by the inner batch stride times the extents inside it). Batch axes of size 1 are ignored. In a fused graph, the final output must have the same batch dimensions and the same flattened batch stride as the matmul output
+- Pass-by-value tensors: A, B, the bias input and the output each need a device buffer, so none of them may be pass-by-value
+- Tensor roles: the plan writes only the final output, so every fused intermediate (the matmul output when a bias or activation follows, the bias output when an activation follows) must be `virtual`; all other tensors must not be. A graph with any other layout is declined
+- Bias: a bias tensor must have packed strides (hipBLASLt reads it as a vector; strides of size-1 dimensions are ignored) and data type FP32 or the final output type (hipBLASLt's documented bias types are the D type and the FP32 scale type); other FP16/BF16 combinations pass the type check and are declined when hipBLASLt has no kernel
 - Fused operations: Matmul supports fused bias, forward activation (ReLU, clamp, GELU with tanh approximation, and Swish with unit beta), and fused bias + forward activation (same supported activations).
+- ReLU parameters (`RELU_FWD`): an unset `relu_lower_clip` is treated as 0, an unset `relu_upper_clip` as no upper bound, and an unset `relu_lower_clip_slope` or a slope of exactly 0 as no leaky slope.
+    - Standard ReLU: no upper clip and a lower clip of 0 (or unset)
+    - Clamp: `relu_upper_clip` set; the lower bound is `relu_lower_clip`, or 0 if unset (so ReLU6 needs only the upper clip)
+    - Not supported: a non-zero `relu_lower_clip_slope` (leaky ReLU; hipBLASLt has no such epilogue), or a non-zero `relu_lower_clip` without an upper clip
 
 ### MX BlockScaleDequantize + GEMM (MX GEMM)
 
@@ -47,7 +54,12 @@ Matmul(a, b) → d
 > B currently returns incorrect results and is rejected as unsupported
 > (originally observed on gfx950; not yet arch-gated pending further testing).
 
-**Hardware support:** Supported on **gfx950** and **gfx1250** only.
+**Hardware support:** Supported on **gfx950** only.
+
+> **Known issue (#13715):** on **gfx1250**, hipBLASLt has MX GEMM kernels only for
+> `transA = T, transB = N`. The layout below reaches hipBLASLt as
+> `transA = N, transB = T` (after the row-major operand swap), so hipBLASLt
+> finds no algorithm and the engine declines every MX graph on gfx1250.
 
 **Graph requirements:** the plugin validates the hipDNN graph
 against these before accepting it. They derive from hipBLASLt's `VEC32_UE8M0` scale mode — see the
@@ -55,6 +67,8 @@ against these before accepting it. They derive from hipBLASLt's `VEC32_UE8M0` sc
 - Tensor roles: the MX inputs, the UE8M0 scales, and the output `d` must be non-virtual; the dequantize outputs `a`/`b` must be virtual (fused intermediates)
 - Scale tensors: dtype `FP8_E8M0`, with one scale per 32-element block — element count `M*(K/32)` for `scale_a`, `(K/32)*N` for `scale_b`
 - Layout: `opA = T` (A is col-major, i.e., `stride[-2] == 1`), `opB = N` (B is row-major, i.e., `stride[-1] == 1`)
+- Scale layout: scale tensors must be dense row-major (the A scale `[M, K/32]` with strides `[K/32, 1]`, the B scale `[K/32, N]` with strides `[N, 1]`; strides of size-1 dimensions are ignored)
+- Dequantize attributes: `is_negative_scale` is declined; the plan scales by 2^(scale) only
 - Alignment: `M % 16 == 0`, `N % 16 == 0`, `K % 128 == 0`
 - Block size: innermost `block_size == 32` for both scale tensors (VEC32)
 - Batch: single batch only (`batch == 1`); hipBLASLt requires `B == 1` for this scale mode

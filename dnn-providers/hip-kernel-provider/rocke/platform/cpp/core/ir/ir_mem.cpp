@@ -51,7 +51,94 @@ rocke_value_t* rocke_b_block_id_z(rocke_ir_builder_t* b)
     return rocke_i_block_id_axis(b, "z");
 }
 
+/* gfx1250 workgroup clusters. A launch without a cluster shape is a 1x1x1
+ * cluster: every id and max id inside the cluster reads 0 and the cluster id
+ * equals the workgroup id. */
+
+static rocke_value_t* rocke_i_cluster_axis_read(
+    rocke_ir_builder_t* b, rocke_opcode_t op, const char* name, const char* axis, const char* hint)
+{
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!axis)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "%s axis must be x, y, or z, got None", name);
+    if(strcmp(axis, "x") != 0 && strcmp(axis, "y") != 0 && strcmp(axis, "z") != 0)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "%s axis must be x, y, or z, got '%s'", name, axis);
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "axis", axis);
+    return rocke_i_op1(b, op, NULL, 0, rocke_i32(), &a, hint);
+}
+
+rocke_value_t* rocke_b_cluster_id(rocke_ir_builder_t* b, const char* axis)
+{
+    return rocke_i_cluster_axis_read(b, ROCKE_OP_GPU_CLUSTER_ID, "cluster_id", axis, "cid");
+}
+rocke_value_t* rocke_b_cluster_workgroup_id(rocke_ir_builder_t* b, const char* axis)
+{
+    return rocke_i_cluster_axis_read(
+        b, ROCKE_OP_GPU_CLUSTER_WORKGROUP_ID, "cluster_workgroup_id", axis, "cwid");
+}
+rocke_value_t* rocke_b_cluster_workgroup_max_id(rocke_ir_builder_t* b, const char* axis)
+{
+    return rocke_i_cluster_axis_read(
+        b, ROCKE_OP_GPU_CLUSTER_WORKGROUP_MAX_ID, "cluster_workgroup_max_id", axis, "cwmax");
+}
+rocke_value_t* rocke_b_cluster_workgroup_flat_id(rocke_ir_builder_t* b)
+{
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return NULL;
+    a = rocke_i_attrs(b);
+    return rocke_i_op1(
+        b, ROCKE_OP_GPU_CLUSTER_WORKGROUP_FLAT_ID, NULL, 0, rocke_i32(), &a, "cwflat");
+}
+rocke_value_t* rocke_b_cluster_workgroup_max_flat_id(rocke_ir_builder_t* b)
+{
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return NULL;
+    a = rocke_i_attrs(b);
+    return rocke_i_op1(
+        b, ROCKE_OP_GPU_CLUSTER_WORKGROUP_MAX_FLAT_ID, NULL, 0, rocke_i32(), &a, "cwmaxflat");
+}
+rocke_value_t* rocke_b_cluster_size(rocke_ir_builder_t* b, const char* axis)
+{
+    rocke_value_t* max_id = rocke_b_cluster_workgroup_max_id(b, axis);
+    if(!max_id)
+        return NULL;
+    return rocke_b_add(b, max_id, rocke_b_const_i32(b, 1));
+}
+
 /* ============================ global loads ============================== */
+
+/* `align` as the alignment claim of global access op `opcode` (Python
+ * core/ir.py::_checked_align): one that is not a positive power of two is
+ * refused through rocke_i_set_err, which throws ckc::ValueError
+ * (ROCKE_ERR_VALUE, the Python engine's text), as the lowerers refuse it. */
+static int64_t checked_global_align(rocke_ir_builder_t* b, rocke_opcode_t opcode, int align)
+{
+    if(!rocke_i_is_valid_align(align))
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        ROCKE_I_ALIGN_NOT_POWER_OF_TWO_FMT,
+                        rocke_opcode_name(opcode),
+                        (long long)align);
+    return align;
+}
+
+/* The `align` scalar global access op `opcode` records: `unannotated`, the
+ * op's own default, when `align` is 0, else `align` as checked_global_align
+ * accepts it (a negative `align` is refused, not read as the default). */
+static int64_t global_scalar_align(rocke_ir_builder_t* b,
+                                   rocke_opcode_t opcode,
+                                   int align,
+                                   int64_t unannotated)
+{
+    return align == 0 ? unannotated : checked_global_align(b, opcode, align);
+}
 
 rocke_value_t* rocke_b_global_load(rocke_ir_builder_t* b,
                                    rocke_value_t* ptr,
@@ -66,13 +153,12 @@ rocke_value_t* rocke_b_global_load(rocke_ir_builder_t* b,
     if(!ptr || !idx || !dtype)
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "global_load: null operand/dtype");
-    if(align <= 0)
-        align = 1;
+    const int64_t claim = global_scalar_align(b, ROCKE_OP_MEMREF_GLOBAL_LOAD_TYPED, align, 1);
     ops[0] = ptr;
     ops[1] = idx;
     a = rocke_i_attrs(b);
     rocke_attr_set_str(b, &a, "elem_type", dtype->name);
-    rocke_attr_set_int(b, &a, "align", (int64_t)align);
+    rocke_attr_set_int(b, &a, "align", claim);
     return rocke_i_op1(b, ROCKE_OP_MEMREF_GLOBAL_LOAD_TYPED, ops, 2, dtype, &a, "gl");
 }
 
@@ -87,12 +173,11 @@ rocke_value_t* rocke_b_global_load_f16(rocke_ir_builder_t* b,
         return NULL;
     if(!ptr || !idx)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "global_load_f16: null operand");
-    if(align <= 0)
-        align = 2;
+    const int64_t claim = global_scalar_align(b, ROCKE_OP_MEMREF_GLOBAL_LOAD, align, 2);
     ops[0] = ptr;
     ops[1] = idx;
     a = rocke_i_attrs(b);
-    rocke_attr_set_int(b, &a, "align", (int64_t)align);
+    rocke_attr_set_int(b, &a, "align", claim);
     return rocke_i_op1(b, ROCKE_OP_MEMREF_GLOBAL_LOAD, ops, 2, rocke_f16(), &a, "gl");
 }
 
@@ -101,7 +186,7 @@ rocke_value_t* rocke_b_global_load_f32(rocke_ir_builder_t* b,
                                        rocke_value_t* idx,
                                        int align)
 {
-    return rocke_b_global_load(b, ptr, idx, rocke_f32(), align <= 0 ? 4 : align);
+    return rocke_b_global_load(b, ptr, idx, rocke_f32(), align == 0 ? 4 : align);
 }
 
 rocke_value_t* rocke_b_global_load_i32(rocke_ir_builder_t* b,
@@ -109,7 +194,7 @@ rocke_value_t* rocke_b_global_load_i32(rocke_ir_builder_t* b,
                                        rocke_value_t* idx,
                                        int align)
 {
-    return rocke_b_global_load(b, ptr, idx, rocke_i32(), align <= 0 ? 4 : align);
+    return rocke_b_global_load(b, ptr, idx, rocke_i32(), align == 0 ? 4 : align);
 }
 
 rocke_value_t* rocke_b_global_load_i64(rocke_ir_builder_t* b,
@@ -117,7 +202,7 @@ rocke_value_t* rocke_b_global_load_i64(rocke_ir_builder_t* b,
                                        rocke_value_t* idx,
                                        int align)
 {
-    return rocke_b_global_load(b, ptr, idx, rocke_i64(), align <= 0 ? 8 : align);
+    return rocke_b_global_load(b, ptr, idx, rocke_i64(), align == 0 ? 8 : align);
 }
 
 rocke_value_t* rocke_b_global_load_bf16(rocke_ir_builder_t* b,
@@ -125,13 +210,21 @@ rocke_value_t* rocke_b_global_load_bf16(rocke_ir_builder_t* b,
                                         rocke_value_t* idx,
                                         int align)
 {
-    return rocke_b_global_load(b, ptr, idx, rocke_bf16(), align <= 0 ? 2 : align);
+    return rocke_b_global_load(b, ptr, idx, rocke_bf16(), align == 0 ? 2 : align);
+}
+
+rocke_value_t* rocke_b_global_load_f64(rocke_ir_builder_t* b,
+                                       rocke_value_t* ptr,
+                                       rocke_value_t* idx,
+                                       int align)
+{
+    return rocke_b_global_load(b, ptr, idx, rocke_f64(), align == 0 ? 8 : align);
 }
 
 rocke_value_t*
     rocke_b_global_load_i8(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, int align)
 {
-    return rocke_b_global_load(b, ptr, idx, rocke_i8(), align <= 0 ? 1 : align);
+    return rocke_b_global_load(b, ptr, idx, rocke_i8(), align == 0 ? 1 : align);
 }
 
 rocke_value_t* rocke_b_global_load_i16(rocke_ir_builder_t* b,
@@ -139,7 +232,7 @@ rocke_value_t* rocke_b_global_load_i16(rocke_ir_builder_t* b,
                                        rocke_value_t* idx,
                                        int align)
 {
-    return rocke_b_global_load(b, ptr, idx, rocke_i16(), align <= 0 ? 2 : align);
+    return rocke_b_global_load(b, ptr, idx, rocke_i16(), align == 0 ? 2 : align);
 }
 
 rocke_value_t* rocke_b_global_load_bf8e5m2(rocke_ir_builder_t* b,
@@ -147,7 +240,7 @@ rocke_value_t* rocke_b_global_load_bf8e5m2(rocke_ir_builder_t* b,
                                            rocke_value_t* idx,
                                            int align)
 {
-    return rocke_b_global_load(b, ptr, idx, rocke_bf8e5m2(), align <= 0 ? 1 : align);
+    return rocke_b_global_load(b, ptr, idx, rocke_bf8e5m2(), align == 0 ? 1 : align);
 }
 
 rocke_value_t* rocke_b_global_load_fp8e4m3(rocke_ir_builder_t* b,
@@ -155,7 +248,7 @@ rocke_value_t* rocke_b_global_load_fp8e4m3(rocke_ir_builder_t* b,
                                            rocke_value_t* idx,
                                            int align)
 {
-    return rocke_b_global_load(b, ptr, idx, rocke_fp8e4m3(), align <= 0 ? 1 : align);
+    return rocke_b_global_load(b, ptr, idx, rocke_fp8e4m3(), align == 0 ? 1 : align);
 }
 
 rocke_value_t* rocke_b_masked_global_load(rocke_ir_builder_t* b,
@@ -194,14 +287,13 @@ void rocke_b_global_store(
         (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "global_store: null operand");
         return;
     }
-    if(align <= 0)
-        align = 1;
+    const int64_t claim = global_scalar_align(b, ROCKE_OP_MEMREF_GLOBAL_STORE_TYPED, align, 1);
     ops[0] = ptr;
     ops[1] = idx;
     ops[2] = value;
     a = rocke_i_attrs(b);
     rocke_attr_set_str(b, &a, "elem_type", value->type->name);
-    rocke_attr_set_int(b, &a, "align", (int64_t)align);
+    rocke_attr_set_int(b, &a, "align", claim);
     (void)rocke_i_op0(b, ROCKE_OP_MEMREF_GLOBAL_STORE_TYPED, ops, 3, &a);
 }
 
@@ -244,6 +336,18 @@ static int mem_opts_streaming(rocke_ir_builder_t* b, const rocke_mem_opts_t* opt
     return -1;
 }
 
+/* The `align` a global vector access op of `lanes` `elem` values records
+ * (Python core/ir.py::_global_vector_align): rocke_i_vector_access_align
+ * when `align` is 0, else `align` as checked_global_align accepts it (a
+ * negative `align` is refused, not read as the default). */
+static int64_t global_vector_align(
+    rocke_ir_builder_t* b, rocke_opcode_t opcode, int lanes, const rocke_type_t* elem, int align)
+{
+    if(align == 0)
+        return rocke_i_vector_access_align(lanes, elem);
+    return checked_global_align(b, opcode, align);
+}
+
 rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
                                       rocke_value_t* ptr,
                                       rocke_value_t* idx,
@@ -265,7 +369,7 @@ rocke_value_t* rocke_b_global_load_vN_ex(rocke_ir_builder_t* b,
     rocke_value_t* ops[2];
     rocke_attr_map_t a;
     const rocke_type_t* vt;
-    int elem_bytes;
+    int64_t claim;
     int streaming;
     const char* en;
     if(!rocke_i_live(b))
@@ -277,7 +381,6 @@ rocke_value_t* rocke_b_global_load_vN_ex(rocke_ir_builder_t* b,
     if(rocke_i_type_is(dtype, "f16") || rocke_i_type_is(dtype, "bf16")
        || rocke_i_type_is(dtype, "i16"))
     {
-        elem_bytes = 2;
         if(n != 2 && n != 4 && n != 6 && n != 8 && n != 16)
             return (rocke_value_t*)rocke_i_set_err(
                 b, ROCKE_ERR_VALUE, "unsupported vector width for global_load_vN: %d", n);
@@ -285,15 +388,19 @@ rocke_value_t* rocke_b_global_load_vN_ex(rocke_ir_builder_t* b,
     else if(rocke_i_type_is(dtype, "f32") || rocke_i_type_is(dtype, "i32")
             || rocke_i_type_is(dtype, "tf32"))
     {
-        elem_bytes = 4;
         if(n != 2 && n != 3 && n != 4 && n != 8)
+            return (rocke_value_t*)rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "unsupported vector width for %s global_load_vN: %d", en, n);
+    }
+    else if(rocke_i_type_is(dtype, "f64"))
+    {
+        if(n != 2)
             return (rocke_value_t*)rocke_i_set_err(
                 b, ROCKE_ERR_VALUE, "unsupported vector width for %s global_load_vN: %d", en, n);
     }
     else if(rocke_i_type_is(dtype, "fp8e4m3") || rocke_i_type_is(dtype, "bf8e5m2")
             || rocke_i_type_is(dtype, "i8"))
     {
-        elem_bytes = 1;
         if(n != 2 && n != 4 && n != 8 && n != 12 && n != 16)
             return (rocke_value_t*)rocke_i_set_err(
                 b, ROCKE_ERR_VALUE, "unsupported vector width for %s global_load_vN: %d", en, n);
@@ -303,9 +410,10 @@ rocke_value_t* rocke_b_global_load_vN_ex(rocke_ir_builder_t* b,
         return (rocke_value_t*)rocke_i_set_err(
             b,
             ROCKE_ERR_VALUE,
-            "global_load_vN supports f16/bf16/i16/f32/i32/tf32/fp8e4m3/bf8e5m2/i8, got %s",
+            "global_load_vN supports f16/bf16/i16/f32/i32/tf32/f64/fp8e4m3/bf8e5m2/i8, got %s",
             en);
     }
+    claim = global_vector_align(b, ROCKE_OP_MEMREF_GLOBAL_LOAD_VN, n, dtype, align);
     streaming = mem_opts_streaming(b, opts, "global_load_vN");
     if(streaming < 0)
         return NULL;
@@ -317,11 +425,7 @@ rocke_value_t* rocke_b_global_load_vN_ex(rocke_ir_builder_t* b,
     a = rocke_i_attrs(b);
     rocke_attr_set_str(b, &a, "elem_type", en);
     rocke_attr_set_int(b, &a, "vec", (int64_t)n);
-    rocke_attr_set_int(
-        b,
-        &a,
-        "align",
-        (int64_t)(align > 0 ? align : (n * elem_bytes == 12 ? elem_bytes : n * elem_bytes)));
+    rocke_attr_set_int(b, &a, "align", claim);
     /* Python records the attr only for STREAMING, keeping default IR unchanged. */
     if(streaming)
         rocke_attr_set_bool(b, &a, "nontemporal", true);
@@ -382,7 +486,7 @@ void rocke_b_global_store_vN_ex(rocke_ir_builder_t* b,
     rocke_attr_map_t a;
     const rocke_type_t* et;
     const char* en;
-    int elem_bytes;
+    int64_t claim;
     int streaming;
     if(!rocke_i_live(b))
         return;
@@ -401,7 +505,6 @@ void rocke_b_global_store_vN_ex(rocke_ir_builder_t* b,
     en = et->name;
     if(rocke_i_type_is(et, "f16") || rocke_i_type_is(et, "bf16") || rocke_i_type_is(et, "i16"))
     {
-        elem_bytes = 2;
         if(n == 16)
         {
             (void)rocke_i_set_err(
@@ -411,7 +514,6 @@ void rocke_b_global_store_vN_ex(rocke_ir_builder_t* b,
     }
     else if(rocke_i_type_is(et, "f32") || rocke_i_type_is(et, "i32") || rocke_i_type_is(et, "tf32"))
     {
-        elem_bytes = 4;
         if(n == 16)
         {
             (void)rocke_i_set_err(
@@ -419,20 +521,26 @@ void rocke_b_global_store_vN_ex(rocke_ir_builder_t* b,
             return;
         }
     }
-    else if(rocke_i_type_is(et, "i8") || rocke_i_type_is(et, "fp8e4m3")
-            || rocke_i_type_is(et, "bf8e5m2"))
+    else if(rocke_i_type_is(et, "f64"))
     {
-        elem_bytes = 1;
+        if(n > 2)
+        {
+            (void)rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "global_store_vN n=%d not supported for %s", n, en);
+            return;
+        }
     }
-    else
+    else if(!rocke_i_type_is(et, "i8") && !rocke_i_type_is(et, "fp8e4m3")
+            && !rocke_i_type_is(et, "bf8e5m2"))
     {
         (void)rocke_i_set_err(
             b,
             ROCKE_ERR_VALUE,
-            "global_store_vN supports f16/bf16/i16/f32/i32/tf32/i8/fp8e4m3/bf8e5m2, got %s",
+            "global_store_vN supports f16/bf16/i16/f32/i32/tf32/f64/i8/fp8e4m3/bf8e5m2, got %s",
             en);
         return;
     }
+    claim = global_vector_align(b, ROCKE_OP_MEMREF_GLOBAL_STORE_VN, n, et, align);
     streaming = mem_opts_streaming(b, opts, "global_store_vN");
     if(streaming < 0)
         return;
@@ -442,7 +550,7 @@ void rocke_b_global_store_vN_ex(rocke_ir_builder_t* b,
     a = rocke_i_attrs(b);
     rocke_attr_set_str(b, &a, "elem_type", en);
     rocke_attr_set_int(b, &a, "vec", (int64_t)n);
-    rocke_attr_set_int(b, &a, "align", (int64_t)(align > 0 ? align : n * elem_bytes));
+    rocke_attr_set_int(b, &a, "align", claim);
     if(streaming)
         rocke_attr_set_bool(b, &a, "nontemporal", true);
     (void)rocke_i_op0(b, ROCKE_OP_MEMREF_GLOBAL_STORE_VN, ops, 3, &a);
@@ -501,6 +609,147 @@ static bool rocke_i_ordering_ok(const char* ordering)
            && (!strcmp(ordering, "monotonic") || !strcmp(ordering, "acquire")
                || !strcmp(ordering, "release") || !strcmp(ordering, "acq_rel")
                || !strcmp(ordering, "seq_cst"));
+}
+
+/* IRBuilder._FENCE_SCOPES */
+static bool rocke_i_fence_scope_ok(const char* scope)
+{
+    return scope
+           && (!strcmp(scope, "workgroup") || !strcmp(scope, "agent") || !strcmp(scope, "system"));
+}
+
+void rocke_b_fence(rocke_ir_builder_t* b, const char* scope, const char* ordering)
+{
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return;
+    if(scope == NULL)
+        scope = "agent";
+    if(ordering == NULL)
+        ordering = "acq_rel";
+    if(!rocke_i_fence_scope_ok(scope))
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown fence scope '%s'", scope);
+        return;
+    }
+    if(strcmp(ordering, "acquire") && strcmp(ordering, "release") && strcmp(ordering, "acq_rel")
+       && strcmp(ordering, "seq_cst"))
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown fence ordering '%s'", ordering);
+        return;
+    }
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "scope", scope);
+    rocke_attr_set_str(b, &a, "ordering", ordering);
+    (void)rocke_i_op0(b, ROCKE_OP_MEMREF_FENCE, NULL, 0, &a);
+}
+
+/* ir._is_flag_ptr: the ptr<i32,global> a cross-workgroup flag op addresses. */
+static bool rocke_i_flag_ptr_ok(const rocke_type_t* t)
+{
+    return t && t->kind == ROCKE_TYPE_PTR && t->space && !strcmp(t->space, "global") && t->pointee
+           && rocke_i_type_is(t->pointee, "i32");
+}
+
+void rocke_b_global_flag_store(rocke_ir_builder_t* b,
+                               rocke_value_t* ptr,
+                               rocke_value_t* idx,
+                               rocke_value_t* value,
+                               const char* scope,
+                               const char* ordering)
+{
+    rocke_value_t* ops[3];
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return;
+    if(!ptr || !idx || !value)
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "global_flag_store: null operand");
+        return;
+    }
+    if(scope == NULL)
+        scope = "agent";
+    if(ordering == NULL)
+        ordering = "release";
+    if(!rocke_i_flag_ptr_ok(ptr->type))
+    {
+        (void)rocke_i_set_err(b,
+                              ROCKE_ERR_VALUE,
+                              "global_flag_store expects a global i32 pointer, got %s",
+                              ptr->type ? ptr->type->name : "?");
+        return;
+    }
+    if(!rocke_i_type_is(value->type, "i32"))
+    {
+        (void)rocke_i_set_err(b,
+                              ROCKE_ERR_VALUE,
+                              "global_flag_store expects an i32 value, got %s",
+                              value->type->name);
+        return;
+    }
+    if(!rocke_i_fence_scope_ok(scope))
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown flag scope '%s'", scope);
+        return;
+    }
+    if(strcmp(ordering, "monotonic") && strcmp(ordering, "release") && strcmp(ordering, "seq_cst"))
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown flag store ordering '%s'", ordering);
+        return;
+    }
+    ops[0] = ptr;
+    ops[1] = idx;
+    ops[2] = value;
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "scope", scope);
+    rocke_attr_set_str(b, &a, "ordering", ordering);
+    (void)rocke_i_op0(b, ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE, ops, 3, &a);
+}
+
+void rocke_b_global_flag_wait_eq(rocke_ir_builder_t* b,
+                                 rocke_value_t* ptr,
+                                 rocke_value_t* idx,
+                                 rocke_value_t* expect,
+                                 const char* scope)
+{
+    rocke_value_t* ops[3];
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return;
+    if(!ptr || !idx || !expect)
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "global_flag_wait_eq: null operand");
+        return;
+    }
+    if(scope == NULL)
+        scope = "agent";
+    if(!rocke_i_flag_ptr_ok(ptr->type))
+    {
+        (void)rocke_i_set_err(b,
+                              ROCKE_ERR_VALUE,
+                              "global_flag_wait_eq expects a global i32 pointer, got %s",
+                              ptr->type ? ptr->type->name : "?");
+        return;
+    }
+    if(!rocke_i_type_is(expect->type, "i32"))
+    {
+        (void)rocke_i_set_err(b,
+                              ROCKE_ERR_VALUE,
+                              "global_flag_wait_eq expects an i32 value, got %s",
+                              expect->type->name);
+        return;
+    }
+    if(!rocke_i_fence_scope_ok(scope))
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown flag scope '%s'", scope);
+        return;
+    }
+    ops[0] = ptr;
+    ops[1] = idx;
+    ops[2] = expect;
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "scope", scope);
+    (void)rocke_i_op0(b, ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ, ops, 3, &a);
 }
 
 rocke_value_t* rocke_b_global_atomic_add(rocke_ir_builder_t* b,
@@ -664,7 +913,8 @@ void rocke_b_global_atomic_add_f32(rocke_ir_builder_t* b,
 
 /* ===================== vector.* element-wise family ===================== */
 
-/* IRBuilder.vector_binary: matching vector operands -> a->type. */
+/* IRBuilder.vector_binary: matching vector operands -> a->type. The signed
+ * ops (smax, smin) refuse an unsigned element type. */
 static rocke_value_t* rocke_i_vector_binary(rocke_ir_builder_t* b,
                                             rocke_opcode_t opcode,
                                             rocke_value_t* a,
@@ -679,6 +929,10 @@ static rocke_value_t* rocke_i_vector_binary(rocke_ir_builder_t* b,
     if(!rocke_i_is_vector(a->type, NULL, -1) || !rocke_type_eq(a->type, c->type))
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "vector_binary expects matching vector operands");
+    if(opcode == ROCKE_OP_VECTOR_SMAX)
+        rocke_i_refuse_unsigned("vector_smax", a->type, NULL);
+    if(opcode == ROCKE_OP_VECTOR_SMIN)
+        rocke_i_refuse_unsigned("vector_smin", a->type, NULL);
     ops[0] = a;
     ops[1] = c;
     return rocke_i_op1(b, opcode, ops, 2, a->type, NULL, hint);
@@ -911,6 +1165,7 @@ rocke_value_t*
     if(!rocke_i_is_vector(v->type, NULL, -1))
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "vector_sext expects vector input");
+    rocke_i_refuse_unsigned("vector_sext", v->type, NULL);
     vt = rocke_vector_type(b, target, rocke_i_count_of(v->type));
     if(!vt)
         return NULL;
@@ -1023,6 +1278,30 @@ rocke_value_t* rocke_b_vec_concat(rocke_ir_builder_t* b, rocke_value_t* a, rocke
     return rocke_i_op1(b, ROCKE_OP_VECTOR_CONCAT, ops, 2, vt, &attr, "vc");
 }
 
+/* ==================== undef (freeze-poison) vector base ================= */
+
+/* Only a base for vectors fully overwritten by subsequent inserts; never a
+ * zero substitute. Port of Python IRBuilder.undef_vec / the pinned PR9710
+ * vector.undef op (LLVM: ``freeze <nxtype> poison``). */
+rocke_value_t* rocke_b_undef_vec(rocke_ir_builder_t* b, const rocke_type_t* elem, int n)
+{
+    rocke_attr_map_t a;
+    const rocke_type_t* vt;
+    char* hint;
+    if(!rocke_i_live(b))
+        return NULL;
+    vt = rocke_vector_type(b, elem, n);
+    if(!vt)
+        return NULL;
+    hint = rocke_arena_printf(&b->arena, "udf%d", n);
+    if(!hint)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_OOM, "OOM udf hint");
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "elem", elem->name);
+    rocke_attr_set_int(b, &a, "vec", (int64_t)n);
+    return rocke_i_op1(b, ROCKE_OP_VECTOR_UNDEF, NULL, 0, vt, &a, hint);
+}
+
 /* =================== vec bitcast / packed f32->fXX ===================== */
 
 rocke_value_t*
@@ -1035,6 +1314,8 @@ rocke_value_t*
     if(!v || !target)
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "vec_bitcast: null operand/target");
+    rocke_i_check_bitcast_width(
+        "vec_bitcast", v->type, target, "slice or concatenate the vector first");
     ops[0] = v;
     a = rocke_i_attrs(b);
     rocke_attr_set_str(b, &a, "target", target->name);

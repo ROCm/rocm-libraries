@@ -21,6 +21,16 @@ include(CMakeFindDependencyMacro)
 if("@RPP_PACKAGE_BACKEND_TYPE@" STREQUAL "HIP")
     find_dependency(HIP)
 endif()
+if("@RPP_PACKAGE_SIMDE@" STREQUAL "ON")
+    find_dependency(PkgConfig)
+    pkg_check_modules(SIMDE REQUIRED simde)
+    if(NOT TARGET simde::simde)
+        add_library(simde::simde INTERFACE IMPORTED)
+        set_target_properties(simde::simde PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${SIMDE_INCLUDE_DIRS}"
+        )
+    endif()
+endif()
 
 # targets
 include(${CMAKE_CURRENT_LIST_DIR}/@PROJECT_NAME@-targets.cmake)
@@ -51,7 +61,20 @@ if(NOT TARGET @PROJECT_NAME@::@PROJECT_NAME@)
     set_property(TARGET @PROJECT_NAME@::@PROJECT_NAME@ APPEND PROPERTY
       INTERFACE_LINK_LIBRARIES hip::host)
   endif()
+  if("@RPP_PACKAGE_SIMDE@" STREQUAL "ON" AND SIMDE_INCLUDE_DIRS)
+    set_property(TARGET @PROJECT_NAME@::@PROJECT_NAME@ APPEND PROPERTY
+      INTERFACE_INCLUDE_DIRECTORIES "${SIMDE_INCLUDE_DIRS}")
+  endif()
 endif ()
+
+find_path(@PROJECT_NAME@_HALF_INCLUDE_DIR
+  NAMES half/half.hpp half.hpp
+  HINTS "${PACKAGE_PREFIX_DIR}/include" "$ENV{ROCM_PATH}/include")
+mark_as_advanced(@PROJECT_NAME@_HALF_INCLUDE_DIR)
+if(@PROJECT_NAME@_HALF_INCLUDE_DIR)
+  set_property(TARGET @PROJECT_NAME@::@PROJECT_NAME@ APPEND PROPERTY
+    INTERFACE_INCLUDE_DIRECTORIES "${@PROJECT_NAME@_HALF_INCLUDE_DIR}")
+endif()
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(

@@ -19335,6 +19335,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrtri_strided_batched(rocblas_handle     
     and is no larger than 10 of these blocks, the API takes advantage of utilizing preallocated
     memory found in the handle to increase overall performance (where ``k`` is ``m``
     when ``rocblas_side_left`` and ``n`` when ``rocblas_side_right``).
+    Unless the problem is small, trsm also uses temporary device memory from the handle;
+    see Device Memory Allocation in the API Reference Guide.
 
     Although not widespread, some gemm kernels used by trsm might use atomic operations.
     See Atomic Operations in the API Reference Guide for more information.
@@ -19528,6 +19530,9 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_64(rocblas_handle                han
     and is no larger than 10 of these blocks, the API takes advantage of utilizing preallocated
     memory found in the handle to increase overall performance (where ``k`` is ``m``
     when ``rocblas_side_left`` and ``n`` when ``rocblas_side_right``).
+    Unless the problem is small, trsm also uses temporary device memory from the handle
+    that grows linearly with ``batch_count``; see Device Memory Allocation in the API
+    Reference Guide.
 
     @param[in]
     handle    [rocblas_handle]
@@ -19714,8 +19719,11 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_batched_64(rocblas_handle           
     Note about memory allocation:
     When trsm is launched with a ``k`` evenly divisible by the internal block size of 128,
     and is no larger than 10 of these blocks, the API takes advantage of utilizing preallocated
-    memory found in the handle to increase overall performance (where ``k`` is ``m`` when
-    ``HIPBLAS_SIDE_LEFT`` and ``n`` when ``HIPBLAS_SIDE_RIGHT``).
+    memory found in the handle to increase overall performance (where ``k`` is ``m``
+    when ``rocblas_side_left`` and ``n`` when ``rocblas_side_right``).
+    Unless the problem is small, trsm also uses temporary device memory from the handle
+    that grows linearly with ``batch_count``; see Device Memory Allocation in the API
+    Reference Guide.
 
     @param[in]
     handle    [rocblas_handle]

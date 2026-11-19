@@ -48,9 +48,8 @@ With `MIOPEN_ENABLE_HIPDNN_WRAPPER=ON`, each `*_forwarding_parity` ctest entry r
 `script/run_forwarding_parity.py`. It replays the shim surface twice, once with
 `MIOPEN_HIPDNN_FORWARDING=disabled` and once with `=enabled`, and requires the two runs to
 agree test for test. The runs can differ only for entry points listed in
-`kForwardingEntries` in `src/private/routing.cpp`. That list is empty today, so the entries
-cannot fail yet. The harness is in place first so that the first forwarded entry point is
-tested by something already known to work.
+`kForwardingEntries` in `src/private/routing.cpp`, so a shim test that reaches an entry point
+outside that list runs the same code twice and checks nothing.
 
 Why it is set up this way:
 
@@ -75,28 +74,167 @@ Why it is set up this way:
 - **Tier labels are `quick`, `standard`, `comprehensive` and `full`,** so the harness runs in
   every tier lane. Not `ffm-quick`/`ffm-full`: those run a fixed list of patterns on a tight
   time budget.
-- **In a discrete build, only `test_hipdnn_shim_conv` gets an entry.** Any other binary would
+- **`wrapper_abi_check`, `wrapper_bare_link_check` and `forwarding_failure_modes` get the same
+  split.** They need no GPU, but on an architecture that `test_categories.yaml` declares, the
+  runner selects `-L ^<tier>$ -L ^ex_gpu_<arch>$`, which an entry with only tier labels does
+  not match. Each therefore also has one entry per `ex_gpu_*` label, such as
+  `wrapper_abi_check_ex_gpu_gfx110X`, so TheRock's GPU jobs run them. `miopen_add_wrapper_check`
+  registers the build-tree entries and `miopen_append_installed_wrapper_check` the packaged ones.
+  Select the bare entry by name with `ctest -R '^wrapper_abi_check$'`.
+  The per-architecture entries use the same label list as the parity entries, so an architecture
+  gets them only while it has an enabled suite.
+  `check_wrapper_registration.py` fails CI when an entry is missing, mislabelled, unexpected or
+  added twice, in the build tree and the packaged list. It compares against the labels of the
+  architectures with an enabled suite, so a label whose suites are all `DISABLED` is not
+  checked. It needs the bare parity entry, so it runs only on a `MIOPEN_TEST_DISCRETE=OFF`
+  configure (a build tree also needs a GPU or a `MIOPEN_TEST_GFX*` option).
+  `test_check_wrapper_registration` covers the check itself.
+- **In a discrete build, only the `test_hipdnn_shim_conv*` binaries get entries.** Any other binary would
   replay a filter that matches nothing, and the comparison rejects two empty runs.
 - **No build-tree entry without a GPU.** The shim tests are all `GPU_` tests.
 
 The packaged test list (`bin/MIOpen/CTestTestfile.cmake`) is generated from
-`test_categories.yaml` and does not see `add_test()` calls, so the harness entries and
-`wrapper_abi_check` are written into it separately. Without that, `ctest -L forwarding_parity`
-on a packaged build would select nothing and pass. The packaged entries are not tied to
+`test_categories.yaml` and does not see `add_test()` calls, so the harness entries,
+`wrapper_abi_check` and `wrapper_bare_link_check` are written into it separately. Without that,
+`ctest -L forwarding_parity` on a packaged build would select nothing and pass. The packaged entries are not tied to
 `MIOPEN_NO_GPU`, which describes the build machine; packages are often built without a GPU and
 tested elsewhere. Only the single-binary build (`MIOPEN_TEST_DISCRETE=OFF`) ships them.
 
+With the flag on, the packaged tests' scripts, data files, `forwarding_failure_probe` and the
+fake hipDNN backend install under `bin/miopen_wrapper_tests/`, and the test list refers to
+them as `../miopen_wrapper_tests/…`. `miopen_gtest` stays in `bin/`. The files share one
+folder so that packagers can keep the fake backend, which has the real backend's file name,
+out of runtime packages with a single pattern. TheRock's `ml-libs/artifact-miopen.toml` names
+the folder; change both together.
+
+The packaged scripts find the two libraries from their own location
+(`script/miopen_wrapper_libs.py`). On Linux they look in the prefix's `lib*/` for one
+versioned `libMIOpen.so.*` and one `libMIOpen_private.so.*`. On Windows they look in `bin/`
+for `MIOpen.dll` and `MIOpen_private.dll`, since Windows installs DLLs beside the programs
+that load them. The parity harness puts that directory first on `LD_LIBRARY_PATH` on Linux
+and on `PATH` on Windows.
+
 `wrapper_abi_check` (`script/check_wrapper_abi.py`) checks the wrapper's exported ABI from the
-two built libraries. It loads neither, so it needs no GPU and is registered whenever the flag
-is on. The packaged copy leaves out `--public-header`, which compares two source files that
-the build-tree entry already checks.
+two built libraries and any CK plugins beside them. It also checks the wrapper's list of
+required shared libraries (`DT_NEEDED`): `libMIOpen_private` must be on it and `libhipdnn_backend` must not, so the
+hipDNN backend is opened on first use rather than required at load time. It also fails if a
+`libMIOpenCKGroupedConv_*.so` beside the libraries references a MIOpen entry point by its plain
+name instead of its `_impl` name. This part is skipped when no plugin sits beside the libraries
+(a build without CK, or an installed layout with none) and always on Windows. The build-tree
+entry passes `--require-plugins` when plugin targets exist, so there a missing plugin fails
+instead of skipping; the usual cause is building only `MIOpen` and `MIOpen_private`. The full
+list is also committed as `test/public_abi/wrapper_needed.baseline` (Linux only), but the ctest entry
+does not compare against it, because it names ROCm soversions and the x86-64 loader and would
+fail on every ROCm update. To compare it by hand, pass `--needed-baseline
+test/public_abi/wrapper_needed.baseline` to `script/check_wrapper_abi.py`. On Windows it reads
+the DLLs instead: their export tables, their import tables (`MIOpen_private.dll` must be
+imported and `hipdnn_backend.dll` must not), and their version resources, which must record
+the same file version because a DLL name carries none. It loads neither library, so it needs
+no GPU and is registered whenever the flag is on. The packaged copy leaves out
+`--public-header`, which compares two source files that the build-tree entry already checks.
+
+`wrapper_bare_link_check` (`script/check_bare_link.py`) links a program that takes the address
+of every symbol in `public_symbols.baseline` against `-L<lib dir> -lMIOpen` alone, the way a
+pkg-config user or a configure-time `check_library_exists(MIOpen <symbol> ...)` probe does,
+and fails if any is unresolved. `wrapper_abi_check` says the wrapper exports a symbol; this
+says a consumer that does not name `libMIOpen_private` can use it. It never runs the program.
+The build-tree entry names the CMake C++ compiler. The packaged entry names none, so the
+script looks for `$CXX`, `c++`, `clang++` or `g++`, and skips (exit 77, which ctest reports as
+skipped) if there is none. It skips on Windows too, where an import library already fails the
+link for a symbol the DLL does not export. `test_check_bare_link` builds two small libraries
+shaped like a wrapper build and covers the check itself.
 
 `test_forwarding_parity_scripts` tests the harness scripts themselves. It needs no GPU or
-build output, so it carries only the tier labels. It uses `unittest` rather than `pytest`,
-because nothing installs `pytest` on a machine that builds MIOpen.
+build output, so it carries only the tier labels. The component CI runs it in its
+configure-only wrapper-on tree. It uses `unittest` rather than `pytest`, because nothing
+installs `pytest` on a machine that builds MIOpen.
 
 Two cache variables tune the harness:
 
 - `MIOPEN_FORWARDING_PARITY_FILTER` (default `*HipdnnShim*`): the gtest filter replayed.
 - `MIOPEN_FORWARDING_PARITY_TIMEOUT` (default `3600`): seconds per entry, covering both
   replays and the comparison.
+
+### Saying more than pass or fail
+
+A test that reaches an ending the gtest verdict does not distinguish should record it with
+`RecordProperty("parity_<something>", ...)`. gtest writes the property into the `<testcase>`
+element, and `compare_forwarding_runs.py` folds every `parity_*` property into the outcome it
+compares. The fused convolution test uses this: it passes whether the library
+computed a result or declined the problem, and without the property the two replays look like
+they agreed when one of them did no work.
+
+Record a property from within the test's own execution, keyed so that two cases in one test
+cannot overwrite each other — gtest replaces a property recorded twice under the same key.
+
+### Known divergences
+
+`known_forwarding_divergences.txt` lists divergences that are accepted for now. Each line names
+a test, the devices the gap is open on (`all`, or a comma-separated list of gfx names such as
+`gfx90a,gfx942`), the outcome expected from each replay, and why the gap exists. A matching
+divergence is printed and tolerated; anything else still fails.
+
+The device a run used comes from the test binary itself: a shim test binary records MIOpen's
+device name as the `forwarding_parity_device` property of its report. The comparison stops if the
+two reports name different devices. It also stops if neither report names a device and the list
+has entries. In that case no line can match the run.
+
+Three rules make the list safe to have:
+
+- A line applies only to runs on a device it lists. On any other device it tolerates nothing, so
+  a gap that shows up on a new device fails until someone checks it there.
+- A line that applies to the run but whose test no longer produces exactly those outcomes fails
+  the comparison, which asks for it to be updated or deleted. The list therefore describes gaps
+  that are open today rather than accumulating history. A line whose test is not in the run at
+  all is ignored, because several test binaries share the list.
+- A run that tolerates a line says so in its output and does not print the ordinary success
+  line, so a known divergence never reads as a clean pass.
+
+A divergence that depends on the build as well as the device, such as one that exists only when
+the Composable Kernel (CK) plugin is loaded, is listed with the token `optional` in the devices
+field (`all,optional`, or `gfx942,optional`). Such a line is tolerated when it diverges. When the
+two replays agree it is not an error, because the gap is not open on that build. The output
+names each optional line that did not occur, with the outcome both replays reported, and the
+final line ends with the count, so a log never hides which of the two happened. Use it only when
+the reason is a build option; a gap that depends on the device alone is listed by device.
+
+One test can have several lines, each checked on its own devices. List the devices where the gap
+does not depend on the build without `optional`, so it fails if it closes, and add an
+`all,optional` line for the rest. `GPU_HipdnnShimConvBiasActiv2d_FP16` is listed that way: a
+Winograd solver serves it on gfx942, gfx950 and gfx1200 with no CK plugin, but on gfx1151 and
+gfx110x only a CK solver does. `test_compare_forwarding_runs` also checks that every line names
+a test that exists.
+
+To add one, run the harness, copy the failing line's test name, the device it ran on, and both
+outcomes into the file, and write down the reason. The list's own rules are covered by
+`test_forwarding_parity_scripts`, or by hand with
+`python3 -m unittest test_compare_forwarding_runs` from `script/`; neither needs a build or GPU.
+
+## Forwarding failure modes
+
+`forwarding_failure_modes` checks what a flag-ON build does when forwarding is turned on but
+hipDNN cannot be used: the status each call returns, the lines printed to stderr, and what
+`miopenGetLastForwardedError` and `miopenGetErrorString` report. It also checks the routing trace
+and that `MIOPEN_DISABLE_HIPDNN_FOR` keeps calls off a broken hipDNN. The switches involved are
+read once per process, so each case runs a fresh process:
+
+- `forwarding_failure_probe` links only the public `libMIOpen.so`, as an application would. It
+  runs the steps named on its command line, such as `conv_forward` or `last_forwarded`, and prints
+  one result line per step.
+- A fake hipDNN backend stands in for a broken installation. It has the real backend's file name
+  but no version, so hipDNN loads it and then refuses it. Every case points
+  `HIPDNN_BACKEND_LIBRARY_PATH` at it, so no case can reach a real backend. It prints a marker
+  line to stderr when it is loaded, which shows whether a case loaded it at all.
+- `script/test_forwarding_failure_modes.py` is the `unittest` module that runs the probe under
+  each environment and checks its output.
+
+Run it from the build directory with `ctest -R '^forwarding_failure_modes$'`. It needs no GPU.
+
+A missing backend cannot be tested directly. When `HIPDNN_BACKEND_LIBRARY_PATH` names a directory
+without the backend, hipDNN moves on to its next search location and may find the real backend
+there. The fake is the closest stand-in: hipDNN refuses it, which takes MIOpen down the same path
+as a missing backend.
+
+The fake is built as a CMake `MODULE` library, not `SHARED`. On Windows a `SHARED` library's DLL
+is written next to `MIOpen.dll`, where hipDNN looks for its backend, so every other test would
+load the fake. A `MODULE` library goes to its own directory on every platform.

@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -259,6 +259,16 @@ void output_json(const std::vector<GeneratedLauncher>& launchers,
     output << "]";
 }
 
+// Give the params the node ordering an SBCC kernel generates against, which
+// rotates the parent length so the SBCC's own transform dimension comes first.
+// parent_length itself stays in plan order because it is the function-pool key.
+static StockhamPartialPassParams pp_params_sbcc(StockhamPartialPassParams params)
+{
+    std::rotate(
+        params.node_length.rbegin(), params.node_length.rbegin() + 1, params.node_length.rend());
+    return params;
+}
+
 // Render stockham partial-pass kernel generated launchers in JSON format.
 void stockham_partial_pass_variants(const std::string&               kernel_name,
                                     const StockhamGeneratorSpecs&    specs1,
@@ -269,7 +279,8 @@ void stockham_partial_pass_variants(const std::string&               kernel_name
 {
     std::vector<GeneratedLauncher> launchers;
 
-    if(specs1.scheme == "CS_3D_PP" && specs2.scheme == "CS_3D_PP")
+    if((specs1.scheme == "CS_3D_PP" && specs2.scheme == "CS_3D_PP")
+       || (specs1.scheme == "CS_REAL_3D_PP" && specs2.scheme == "CS_REAL_3D_PP"))
     {
         // SBRR_PP + SBCC_PP
         if(params_1.current_dim == 0 && params_2.current_dim == 2)
@@ -288,7 +299,7 @@ void stockham_partial_pass_variants(const std::string&               kernel_name
                           params_1.off_dim,
                           launchers);
 
-            StockhamPartialPassKernelCC kernelCC(specs2, params_2, false);
+            StockhamPartialPassKernelCC kernelCC(specs2, pp_params_sbcc(params_2), false);
             make_launcher(specs2.precision,
                           *specs2.transform_type,
                           {{"pp_sbcc", specs2.scheme, "", ""}},
@@ -318,7 +329,7 @@ void stockham_partial_pass_variants(const std::string&               kernel_name
                           params_1.off_dim,
                           launchers);
 
-            StockhamPartialPassKernelCC kernelRR(specs2, params_2, false);
+            StockhamPartialPassKernelCC kernelRR(specs2, pp_params_sbcc(params_2), false);
             make_launcher(specs2.precision,
                           *specs2.transform_type,
                           {{"pp_stoc", specs2.scheme, "", ""}},
@@ -351,39 +362,6 @@ void stockham_partial_pass_variants(const std::string&               kernel_name
         else
         {
             throw std::runtime_error("invalid dimensions for CS_3D_PP");
-        }
-    }
-    else if(specs1.scheme == "CS_REAL_3D_PP" && specs2.scheme == "CS_REAL_3D_PP")
-    {
-        if(params_1.current_dim == 0 && params_2.current_dim == 2)
-        {
-            StockhamPartialPassKernelRR kernelRR(specs1, params_1);
-            make_launcher(specs1.precision,
-                          *specs1.transform_type,
-                          {{"pp_stoc", specs1.scheme, "", ""}},
-                          kernelRR,
-                          specs1.gcn_arch_name,
-                          "CS_KERNEL_STOCKHAM_PP",
-                          params_1.pp_threads_per_transform,
-                          params_1.pp_factors_curr,
-                          params_1.pp_factors_other,
-                          params_1.current_dim,
-                          params_1.off_dim,
-                          launchers);
-
-            StockhamPartialPassKernelCC kernelCC(specs2, params_2, false);
-            make_launcher(specs2.precision,
-                          *specs2.transform_type,
-                          {{"pp_sbcc", specs2.scheme, "", ""}},
-                          kernelCC,
-                          specs2.gcn_arch_name,
-                          "CS_KERNEL_STOCKHAM_PP_BLOCK_CC",
-                          params_2.pp_threads_per_transform,
-                          params_2.pp_factors_curr,
-                          params_2.pp_factors_other,
-                          params_2.current_dim,
-                          params_2.off_dim,
-                          launchers);
         }
     }
     else
@@ -622,7 +600,7 @@ void validate_pp_length(const std::string&               scheme,
 
     if(scheme == "CS_REAL_3D_PP" && pp_params.current_dim == 0)
     {
-        // For real 3D FFTs, the z-dimension length is halved in the
+        // For r2c/c2r 3D FFTs, the x-dimension length is halved in the
         // complex domain. So we need to multiply by 2 here to get
         // the correct length to compare against parent_length.
         length_curr *= 2;

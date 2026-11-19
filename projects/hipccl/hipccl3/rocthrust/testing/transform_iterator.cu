@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -15,33 +15,56 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/config.h>
-
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVHPC
-// suppress warnings on thrust::identity
-THRUST_SUPPRESS_DEPRECATED_PUSH
-#endif // THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVHPC
-
 #include <thrust/copy.h>
+#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
+#include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
+#include <thrust/logical.h>
 #include <thrust/reduce.h>
 #include <thrust/sequence.h>
 
 #include <memory>
 #include <vector>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <functional>
-#  include <type_traits>
-#  include <utility>
-#endif
 
 #include <unittest/unittest.h>
 
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVHPC
-THRUST_SUPPRESS_DEPRECATED_POP
-#endif // THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVHPC
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <functional>
+#  include <iterator>
+#  include <type_traits>
+#endif
+
+// ensure that we properly support thrust::reverse_iterator from _THRUST_STD
+void TestTransformIteratorTraits()
+{
+  using func    = thrust::negate<int>;
+  using base_it = thrust::host_vector<int>::iterator;
+
+  using it     = thrust::transform_iterator<func, base_it>;
+  using traits = _THRUST_STD::iterator_traits<it>;
+
+  static_assert(_THRUST_STD::is_same_v<traits::difference_type, ptrdiff_t>);
+  static_assert(_THRUST_STD::is_same_v<traits::value_type, int>);
+  static_assert(_THRUST_STD::is_same_v<traits::pointer, void>);
+  static_assert(_THRUST_STD::is_same_v<traits::reference, int>);
+  static_assert(_THRUST_STD::is_same_v<traits::iterator_category, _THRUST_STD::random_access_iterator_tag>);
+
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_traversal_t<it>, thrust::random_access_traversal_tag>);
+
+  static_assert(::internal::is_cpp17_random_access_iterator<it>::value);
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
+  static_assert(!_THRUST_STD::output_iterator<it, int>);
+  static_assert(_THRUST_STD::input_iterator<it>);
+  static_assert(_THRUST_STD::forward_iterator<it>);
+  static_assert(_THRUST_STD::bidirectional_iterator<it>);
+  static_assert(_THRUST_STD::random_access_iterator<it>);
+  static_assert(!_THRUST_STD::contiguous_iterator<it>);
+#endif
+}
+DECLARE_UNITTEST(TestTransformIteratorTraits);
 
 template <class Vector>
 void TestTransformIterator()
@@ -167,7 +190,6 @@ struct forward
 
 void TestTransformIteratorReferenceAndValueType()
 {
-  THRUST_SUPPRESS_DEPRECATED_PUSH
   using _THRUST_STD::is_same;
   using _THRUST_STD::negate;
   {
@@ -191,11 +213,6 @@ void TestTransformIteratorReferenceAndValueType()
     static_assert(is_same<decltype(it_tr_fwd)::reference, bool&&>::value, "");
     static_assert(is_same<decltype(it_tr_fwd)::value_type, bool>::value, "");
     (void) it_tr_fwd;
-
-    auto it_tr_tid = thrust::make_transform_iterator(it, thrust::identity<bool>{});
-    static_assert(is_same<decltype(it_tr_tid)::reference, bool>::value, ""); // identity<bool>::value_type
-    static_assert(is_same<decltype(it_tr_tid)::value_type, bool>::value, "");
-    (void) it_tr_tid;
 
     auto it_tr_cid = thrust::make_transform_iterator(it, ::internal::identity{});
     static_assert(is_same<decltype(it_tr_cid)::reference, bool>::value, ""); // special handling by
@@ -226,11 +243,6 @@ void TestTransformIteratorReferenceAndValueType()
     static_assert(is_same<decltype(it_tr_fwd)::value_type, bool>::value, "");
     (void) it_tr_fwd;
 
-    auto it_tr_tid = thrust::make_transform_iterator(it, thrust::identity<bool>{});
-    static_assert(is_same<decltype(it_tr_tid)::reference, bool>::value, ""); // identity<bool>::value_type
-    static_assert(is_same<decltype(it_tr_tid)::value_type, bool>::value, "");
-    (void) it_tr_tid;
-
     auto it_tr_cid = thrust::make_transform_iterator(it, ::internal::identity{});
     static_assert(is_same<decltype(it_tr_cid)::reference, bool>::value, ""); // special handling by
                                                                              // transform_iterator_reference
@@ -260,37 +272,22 @@ void TestTransformIteratorReferenceAndValueType()
     static_assert(is_same<decltype(it_tr_fwd)::value_type, bool>::value, "");
     (void) it_tr_fwd;
 
-    auto it_tr_ide = thrust::make_transform_iterator(it, thrust::identity<bool>{});
-    static_assert(is_same<decltype(it_tr_ide)::reference, bool>::value, ""); // identity<bool>::value_type
-    static_assert(is_same<decltype(it_tr_ide)::value_type, bool>::value, "");
-    (void) it_tr_ide;
-
-    auto it_tr_tid = thrust::make_transform_iterator(it, thrust::identity<bool>{});
-    static_assert(is_same<decltype(it_tr_tid)::reference, bool>::value, ""); // identity<bool>::value_type
-    static_assert(is_same<decltype(it_tr_tid)::value_type, bool>::value, "");
-    (void) it_tr_tid;
-
     auto it_tr_cid = thrust::make_transform_iterator(it, ::internal::identity{});
     static_assert(is_same<decltype(it_tr_cid)::reference, bool>::value, ""); // special handling by
                                                                              // transform_iterator_reference
     static_assert(is_same<decltype(it_tr_cid)::value_type, bool>::value, "");
     (void) it_tr_cid;
   }
-  THRUST_SUPPRESS_DEPRECATED_POP
 }
 DECLARE_UNITTEST(TestTransformIteratorReferenceAndValueType);
 
 void TestTransformIteratorIdentity()
 {
-  THRUST_SUPPRESS_DEPRECATED_PUSH
   thrust::device_vector<int> v(3, 42);
 
-  ASSERT_EQUAL(*thrust::make_transform_iterator(v.begin(), thrust::identity<int>{}), 42);
-  ASSERT_EQUAL(*thrust::make_transform_iterator(v.begin(), thrust::identity<>{}), 42);
   ASSERT_EQUAL(*thrust::make_transform_iterator(v.begin(), ::internal::identity{}), 42);
   using namespace thrust::placeholders;
   ASSERT_EQUAL(*thrust::make_transform_iterator(v.begin(), _1), 42);
-  THRUST_SUPPRESS_DEPRECATED_POP
 }
 
 DECLARE_UNITTEST(TestTransformIteratorIdentity);

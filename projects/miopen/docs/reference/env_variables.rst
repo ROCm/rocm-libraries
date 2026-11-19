@@ -114,6 +114,21 @@ and :doc:`Performance database <../conceptual/perfdb>`.
         | solvers are still used as a fallback when no non-naive solver
         | succeeds.
         |
+        | At most ``GPU_MAX_HW_QUEUES`` minus 2 skipped streams (at least
+        | 1; 2 at the HIP default of 4 queues) may be outstanding. Beyond
+        | that, the next naive evaluation waits for one to finish rather
+        | than timing a kernel that shares a hardware queue with it.
+        |
+        | A skipped kernel's scratch buffer is released as soon as the
+        | kernel finishes, by a background thread MIOpen starts for the
+        | handle on the first skip; no further MIOpen call is needed, so
+        | a workload that only replays a captured HIP graph releases it
+        | too. A deallocator installed with ``miopenSetAllocator`` is
+        | therefore called from that thread, possibly while another
+        | thread is capturing. It must not make calls HIP refuses during
+        | any capture, such as a synchronous ``hipMemcpy`` or
+        | ``hipMemset``: those invalidate every capture in the process.
+        |
         | Limitation: a skipped kernel keeps reading the caller's input
         | tensors until it finishes. Its results are discarded, so stale
         | or reused data is harmless, but unmapping those pages while it
@@ -212,6 +227,13 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
         | Uses only the LightGBM heuristics: bypasses TunaNet solver selection and the
         | KTN / two-tower kernel-tuning models, keeping the LightGBM solver selector and
         | perf-config picker.
+      - | 0: Disable (default)
+        | 1: Enable
+
+    * - | ``MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB``
+        | Disables the precomputed config-embedding table used by the gfx942/gfx950 two-tower
+        | candidate selection, so kernel-config selection falls through to the solver's non-AI
+        | heuristic.
       - | 0: Disable (default)
         | 1: Enable
 
@@ -324,6 +346,11 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
 
     * - | ``MIOPEN_DEBUG_CONV_DIRECT_HIP_WRW53``
         | Controls ConvHipBwdWrW53 direct solution.
+      - | 0: Disable
+        | 1: Enable
+
+    * - | ``MIOPEN_DEBUG_CONV_DIRECT_DEPTHWISE_FWD_2D``
+        | Controls ConvDirectDepthwiseFwd2D direct solution.
       - | 0: Disable
         | 1: Enable
 
@@ -747,6 +774,13 @@ following table. For more information, see :doc:`Logging and debugging <../how-t
         | Controls 3D ConvHipImplicitGemmFwdXdlops solution.
       - | 0: Disable
         | 1: Enable
+
+    * - | ``MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE``
+        | Opts out of the gfx942/gfx950 FP16/BF16 large-tensor (in_depth >= 3 and in_width >= 256)
+        | hard-coded override for 3D ConvHipImplicitGemmGroupFwdXdlops, so selection uses the AI
+        | heuristic instead of the hard-coded config.
+      - | 0: Skip the override and use the AI heuristic
+        | unset or 1: Hard-coded override active (default)
 
     * - | ``MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS``
         | Controls 3D ConvHipImplicitGemmBwdXdlops solution.

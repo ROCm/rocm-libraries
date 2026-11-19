@@ -46,7 +46,7 @@
 |--------|-------|
 | goal | <correctness \| peak TFLOPS \| target \| learning> |
 | algorithm / dtypes | GEMM `C=A·B`; f16 in → f32 acc → <..> out |
-| A=(M×K) / B=(K×N) / C=(M×N) | strides + stride-1 axis per tensor (a **layout pictogram** here is great) |
+| A=(M, K) / B=(N, K) / C=(M, N) | strides + stride-1 axis per tensor, named K- / N- / M-contiguous (axis order: `tiling_api_surface.md` sec 3, "One axis convention"; a **layout pictogram** here is great) |
 | atom / wave size | `<MxNxK>` / `<64\|32>` |
 | pipeline | <interleaved · double-buffered · …> |
 | arch / GPU | <gfx90a/gfx942 · MI210/MI300> |
@@ -96,7 +96,8 @@ numpy golden, `max_abs_diff==0.0`); rocprof caveats (ROCm-7.14 container). *(a c
 Describe the **winning config's** kernel (you only know the winner after §4). Reproducible to the encoding:
 
 - **Tiling hierarchy:** macro <Mt×Nt> ⊃ wave grid <waves_m × waves_n> (wave <..>) ⊃ atom <MxNxK>; buffering.
-- **Ordered tensors:** A=(M×K) s=(..) → <..>-contig; B=(K×N) s=(..) → <..>-contig; C=(M×N) s=(..) → <..>-contig.
+- **Ordered tensors** (the one axis convention): A=(M, K) s=(..) -> <..>-contig; B=(N, K) s=(..) -> <..>-contig;
+  C=(M, N) s=(..) -> <..>-contig.
 - **EXACT static distributions** — for each of A, B, C (+ staging/LDS descs), the full `WarpDistributionEncoding`
   (a table): **Rs** (`replication_lengths`), **Hs** (`hierarchical_lengths`), **Ps** (`lane_to_rh_*`),
   **Ys** (`register_to_rh_*`); flag any Kt-/tile-dependent rows. Plus the **`make_tile_desc` recipe**,

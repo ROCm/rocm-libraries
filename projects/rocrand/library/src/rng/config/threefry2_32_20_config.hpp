@@ -44,8 +44,10 @@ struct generator_config_selector<ROCRAND_RNG_PSEUDO_THREEFRY2_32_20, T>
             case target_arch::gfx908: return 512;
             case target_arch::gfx906: return 256;
             case target_arch::gfx1150: return 1024;
+            case target_arch::gfx1170: return 1024;
+            case target_arch::gfx1171: return 1024;
             case target_arch::gfx1201: return 1024;
-            case target_arch::gfx950: return 1024;
+            case target_arch::gfx950: return 128;
             default:
                 return generator_config_defaults<ROCRAND_RNG_PSEUDO_THREEFRY2_32_20, T>::threads;
         }
@@ -65,8 +67,10 @@ struct generator_config_selector<ROCRAND_RNG_PSEUDO_THREEFRY2_32_20, T>
             case target_arch::gfx908: return 1200;
             case target_arch::gfx906: return 896;
             case target_arch::gfx1150: return 1024;
+            case target_arch::gfx1170: return 1024;
+            case target_arch::gfx1171: return 1024;
             case target_arch::gfx1201: return 2048;
-            case target_arch::gfx950: return 1024;
+            case target_arch::gfx950: return 4096;
             default:
                 return generator_config_defaults<ROCRAND_RNG_PSEUDO_THREEFRY2_32_20, T>::blocks;
         }

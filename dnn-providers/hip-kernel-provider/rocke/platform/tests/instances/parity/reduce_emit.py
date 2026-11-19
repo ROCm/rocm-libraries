@@ -80,6 +80,38 @@ def _spec(idx: int) -> Reduce2DSpec:
             ),
             "gfx1201",
         )
+    if idx == 8:
+        # f64: accumulates natively (block_tile_reduce_sync, vec=2).
+        return Reduce2DSpec(
+            n_per_block=4096, op="sum", block_size=256, vec=2, dtype="f64", wave_size=64
+        )
+    if idx == 9:
+        return Reduce2DSpec(
+            n_per_block=2048, op="max", block_size=256, vec=2, dtype="f64", wave_size=64
+        )
+    if idx == 10:
+        return Reduce2DSpec(
+            n_per_block=2048,
+            op="mean",
+            block_size=128,
+            vec=2,
+            dtype="f64",
+            wave_size=64,
+        )
+    if idx == 11:
+        # f64 min / prod take the wave-XOR prologue path.
+        return Reduce2DSpec(
+            n_per_block=4096, op="min", block_size=256, vec=2, dtype="f64", wave_size=64
+        )
+    if idx == 12:
+        return Reduce2DSpec(
+            n_per_block=4096,
+            op="prod",
+            block_size=256,
+            vec=2,
+            dtype="f64",
+            wave_size=64,
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -91,7 +123,7 @@ def main() -> int:
     return run_emit(
         _spec,
         _build,
-        usage="usage: reduce_emit.py <config_index 0..7> [mode]\n",
+        usage="usage: reduce_emit.py <config_index 0..12> [mode]\n",
     )
 
 

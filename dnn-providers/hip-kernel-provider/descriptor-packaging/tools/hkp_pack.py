@@ -113,6 +113,11 @@ def _parse_args(argv):
         "staged, installable directory.",
     )
     p.add_argument(
+        "--generic-targets-json",
+        required=True,
+        help="The generic GPU target table (gpu_generic_targets.json).",
+    )
+    p.add_argument(
         "--kpack-python-dir",
         default=None,
         help="Path to the rocm-kpack 'python' directory (overrides any "
@@ -146,10 +151,11 @@ def _parse_args(argv):
         action="append",
         default=[],
         metavar="NAME",
-        help="A top-level child folder of the source root that this build does "
-        "not pack (a descriptor family whose build flag is off), matched "
-        "case-insensitively. A name that matches no folder is ignored. "
-        "Repeatable.",
+        help="A folder of the source root that this build does not pack: a "
+        "top-level child (a descriptor family whose build flag is off) or a "
+        "'/'-separated path under the root (a bundle whose DVC files were not "
+        "pulled), matched case-insensitively. A name that matches no folder is "
+        "ignored. Repeatable.",
     )
     p.add_argument(
         "--disable-kind",
@@ -159,6 +165,13 @@ def _parse_args(argv):
         help="A kernel_source kind this build has no producer for. Its UKDs are "
         "pruned like arch-pruned ones, and a KDP left with none is dropped. "
         "Repeatable; an unknown kind is an error.",
+    )
+    p.add_argument(
+        "--require-dvc",
+        action="store_true",
+        help="A model file that is absent while its `<model>.dvc` pointer exists "
+        "(a `dvc pull` that was not run) is an error. Without it the model's UHD "
+        "is left out of the shipped tree with a warning.",
     )
     return p.parse_args(argv)
 
@@ -171,6 +184,7 @@ def main(argv=None):
         arches=arches,
         out_root=Path(args.out_root),
         hipcc=args.hipcc,
+        generic_targets_json=Path(args.generic_targets_json),
         rocm_kpack_dir=args.kpack_python_dir,
         inter_root=Path(args.inter_root),
         rocke_wheel_stamp=args.rocke_wheel_stamp,
@@ -178,6 +192,7 @@ def main(argv=None):
         source_label=args.source_label,
         exclude_folders=tuple(args.exclude_folder),
         disabled_kinds=tuple(args.disable_kind),
+        require_dvc=args.require_dvc,
     )
     return 0
 

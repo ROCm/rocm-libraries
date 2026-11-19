@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "Helpers.hpp"
+
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
@@ -12,6 +14,7 @@
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
 using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
+using hipdnn_data_sdk::helpers::createRaggedSdpaTensor;
 
 // =================================================================================================
 // formatComparisonHeader
@@ -210,4 +213,17 @@ TEST(TestAppendComparisonDiff, ProducesDiffOutput)
 
     EXPECT_TRUE(std::regex_search(output, std::regex(R"(Mismatched:\s+1\b)")));
     EXPECT_NE(output.find("Worst mismatches:"), std::string::npos);
+}
+
+TEST(TestAppendComparisonDiff, RaggedLayoutMismatchIsReported)
+{
+    auto expected = createRaggedSdpaTensor<float>(1.0f);
+    auto actual = createRaggedSdpaTensor<float>(1.0f, {0, 3, 5});
+
+    std::ostringstream oss;
+    appendComparisonDiff<float>(oss, "o", expected, actual, 0.0f, 0.0f);
+    const std::string output = oss.str();
+
+    EXPECT_NE(output.find("ragged layout mismatch"), std::string::npos) << output;
+    EXPECT_EQ(output.find("Total elements:"), std::string::npos) << output;
 }

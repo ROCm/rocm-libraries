@@ -2277,6 +2277,28 @@ namespace rocisa
         }
     };
 
+    struct SSendMsgRtnB32 : public CommonInstruction
+    {
+        SSendMsgRtnB32(const std::shared_ptr<Container>& dst,
+                       const InstructionInput&           src,
+                       const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("s_sendmsg_rtn_b32");
+        }
+
+        SSendMsgRtnB32(const SSendMsgRtnB32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SSendMsgRtnB32>(*this);
+        }
+    };
+
     struct SSetRegB32 : public CommonInstruction
     {
         SSetRegB32(const std::shared_ptr<Container>& dst,
@@ -5247,6 +5269,35 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VMed3F32>(*this);
+        }
+    };
+
+    struct VMaximumMinimumF32 : public CommonInstruction
+    {
+        VMaximumMinimumF32(const std::shared_ptr<Container>& dst,
+                           const InstructionInput&           src0,
+                           const InstructionInput&           src1,
+                           const InstructionInput&           src2,
+                           const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_F32,
+                                dst,
+                                {src0, src1, src2},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("v_maximumminimum_f32");
+        }
+
+        VMaximumMinimumF32(const VMaximumMinimumF32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VMaximumMinimumF32>(*this);
         }
     };
 

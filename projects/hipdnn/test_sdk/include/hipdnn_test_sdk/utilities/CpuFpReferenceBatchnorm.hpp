@@ -153,22 +153,30 @@ public:
         auto batchnormFwdTrainingFunc = [&](const std::vector<int64_t>& indices) {
             auto cidx = indices[0];
             auto meanAccum = static_cast<ComputeDataType>(0.0);
-            auto varianceAccum = static_cast<ComputeDataType>(0.0);
 
-            // Calculate mean and variance for this channel
+            // Calculate the mean for this channel
             hipdnn_data_sdk::utilities::iterateAlongDimensions(
                 batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
                     auto fullIndices = hipdnn_data_sdk::utilities::buildTensorIndices(
                         batchSpatialIndices[0], cidx, batchSpatialIndices, 1);
                     auto inVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
                     meanAccum = meanAccum + inVal;
-                    varianceAccum = varianceAccum + (inVal * inVal);
                 });
 
-            // NOTE: Different operation order from MIOpen produces expected FP differences.
-            // Both implementations are correct; validated using RMS error tolerance
             ComputeDataType channelMean = meanAccum / nhw;
-            ComputeDataType channelVariance = (varianceAccum / nhw) - (channelMean * channelMean);
+
+            // Calculate variance in a second pass to avoid catastrophic cancellation
+            auto varianceAccum = static_cast<ComputeDataType>(0.0);
+            hipdnn_data_sdk::utilities::iterateAlongDimensions(
+                batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
+                    auto fullIndices = hipdnn_data_sdk::utilities::buildTensorIndices(
+                        batchSpatialIndices[0], cidx, batchSpatialIndices, 1);
+                    auto inVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
+                    auto deviation = inVal - channelMean;
+                    varianceAccum = varianceAccum + (deviation * deviation);
+                });
+
+            ComputeDataType channelVariance = varianceAccum / nhw;
 
             auto invVar = static_cast<ComputeDataType>(1.0)
                           / hipdnn_data_sdk::types::sqrt(channelVariance + epsilonCompute);
@@ -303,22 +311,30 @@ public:
             if(mean == nullptr || invVariance == nullptr)
             {
                 auto meanAccum = static_cast<ComputeDataType>(0.0);
-                auto varianceAccum = static_cast<ComputeDataType>(0.0);
 
-                // Calculate mean and variance for this channel
+                // Calculate the mean for this channel.
                 hipdnn_data_sdk::utilities::iterateAlongDimensions(
                     batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
                         auto fullIndices = hipdnn_data_sdk::utilities::buildTensorIndices(
                             batchSpatialIndices[0], cidx, batchSpatialIndices, 1);
                         auto inVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
                         meanAccum = meanAccum + inVal;
-                        varianceAccum = varianceAccum + (inVal * inVal);
                     });
 
                 channelMean = meanAccum / nhwF;
 
-                ComputeDataType calculatedVariance
-                    = (varianceAccum / nhwF) - (channelMean * channelMean);
+                // Calculate variance in a second pass to avoid catastrophic cancellation.
+                auto varianceAccum = static_cast<ComputeDataType>(0.0);
+                hipdnn_data_sdk::utilities::iterateAlongDimensions(
+                    batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
+                        auto fullIndices = hipdnn_data_sdk::utilities::buildTensorIndices(
+                            batchSpatialIndices[0], cidx, batchSpatialIndices, 1);
+                        auto inVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
+                        auto deviation = inVal - channelMean;
+                        varianceAccum = varianceAccum + (deviation * deviation);
+                    });
+
+                ComputeDataType calculatedVariance = varianceAccum / nhwF;
 
                 ComputeDataType denominator
                     = hipdnn_data_sdk::types::sqrt(calculatedVariance + epsilonCompute);

@@ -18,6 +18,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/allocator_aware_execution_policy.h>
 #include <thrust/system/cpp/detail/execution_policy.h>
 
@@ -40,7 +47,7 @@ struct par_t
 
 } // namespace detail
 
-THRUST_INLINE_CONSTANT detail::par_t par;
+THRUST_GLOBAL_CONSTANT detail::par_t par;
 
 } // namespace cpp
 } // namespace system

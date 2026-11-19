@@ -60,37 +60,60 @@ set(HIPTENSOR_ELEMENTWISE_SOURCES
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_trinary_solution_rank6_double_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_trinary_solution_rank6_float_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_trinary_solution_rank6_half_instances.cpp
-   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_cpu_reference_rank2_instances.cpp
-   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_cpu_reference_rank3_instances.cpp
-   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_cpu_reference_rank4_instances.cpp
-   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_cpu_reference_rank5_instances.cpp
-   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_cpu_reference_rank6_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank2_double_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank2_double_noop_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank2_bhalf_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank2_bhalf_noop_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank2_float_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank2_float_noop_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank2_half_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank2_half_noop_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank3_double_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank3_double_noop_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank3_bhalf_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank3_bhalf_noop_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank3_float_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank3_float_noop_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank3_half_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank3_half_noop_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank4_double_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank4_double_noop_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank4_bhalf_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank4_bhalf_noop_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank4_float_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank4_float_noop_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank4_half_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank4_half_noop_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank5_double_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank5_double_noop_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank5_bhalf_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank5_bhalf_noop_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank5_float_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank5_float_noop_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank5_half_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank5_half_noop_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank6_double_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank6_double_noop_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank6_bhalf_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank6_bhalf_noop_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank6_float_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank6_float_noop_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank6_half_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank6_half_noop_instances.cpp
-   ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_cpu_reference.cpp
-   ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_cpu_reference_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_instance_selection.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_solution.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_solution_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_solution_registry.cpp
 )
 
+hiptensor_set_host_only_sources(
+   ${CMAKE_CURRENT_SOURCE_DIR}/device/instance_params.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_elementwise_permute.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_elementwise_binary.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_elementwise_trinary.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_instance_selection.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_solution.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_solution_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_solution_registry.cpp
+)
 add_hiptensor_component(hiptensor_elementwise ${HIPTENSOR_ELEMENTWISE_SOURCES})

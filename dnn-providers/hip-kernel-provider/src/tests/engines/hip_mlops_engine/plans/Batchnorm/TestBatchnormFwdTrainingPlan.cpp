@@ -141,6 +141,36 @@ TEST(TestBatchnormFwdTrainingParams, HandlesMeanVarianceMissing)
     EXPECT_FALSE(params.hasSaveMeanVariance());
 }
 
+TEST(TestBatchnormFwdTrainingParams, LeavesSavedStatisticsUnsetWhenBothVirtual)
+{
+    auto base = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+        {1, 3, 14, 14}, {1, 3, 14, 14}, true);
+    auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+        base, [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+            auto* attrs = graph.nodes.at(0)->attributes.AsBatchnormAttributes();
+            for(auto& tensor : graph.tensors)
+            {
+                if(tensor->uid == attrs->mean_tensor_uid.value()
+                   || tensor->uid == attrs->inv_variance_tensor_uid.value())
+                {
+                    tensor->virtual_ = true;
+                }
+            }
+        });
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_BatchnormAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    const BatchnormFwdTrainingParams params(*attrs, graph.getTensorMap());
+
+    EXPECT_FALSE(params.hasSaveMeanVariance());
+    EXPECT_EQ(params.mean(), nullptr);
+    EXPECT_EQ(params.invVariance(), nullptr);
+}
+
 TEST(TestBatchnormFwdTrainingParams, HasRunningStatsReturnsFalseWhenNotProvided)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
@@ -338,24 +368,31 @@ TEST(TestBatchnormFwdTrainingPlan, CompileDefaultSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FPMIX=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFPMIX=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FPUPCAST=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFPUPCAST=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SAVE_MEAN_VARIANCE=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_RUNNING_RESULT=0"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_N=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_C=3"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_HW=50176"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_INHW=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NHW=50176"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHW=150528"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NCHW=150528"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_BATCHES=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHANNELS=3"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SPATIAL_SIZE=50176"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP0_FINAL=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP1_FINAL=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP2_FINAL=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_N_ELEMENTS=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP0=1024"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP1=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP2=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRPS0=3"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRPS1=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRPS2=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP0_FINAL=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP1_FINAL=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP2_FINAL=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_BATCH_ELEMENTS=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_AMDGCN=0"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAXN=768"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAX_BATCH=768"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDS_SIZE=1024"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VEC_SIZE=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAXHW=2500"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAX_SPATIAL=2500"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NODPP=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDSGCN_SIZE=16"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_USESAVED=0"));
@@ -400,7 +437,7 @@ TEST(TestBatchnormFwdTrainingPlan, CompileNchwLayoutSetsCorrectDefine)
                != capturedOptions.end();
     };
 
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_NHWC=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_CHANNEL_LAST=0"));
 }
 
 TEST(TestBatchnormFwdTrainingPlan, CompileNhwcLayoutSetsCorrectDefine)
@@ -437,7 +474,7 @@ TEST(TestBatchnormFwdTrainingPlan, CompileNhwcLayoutSetsCorrectDefine)
                != capturedOptions.end();
     };
 
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_NHWC=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_CHANNEL_LAST=1"));
 }
 
 TEST(TestBatchnormFwdTrainingPlan, HasNoSaveStatsSetsCorrectDefines)
@@ -475,9 +512,8 @@ TEST(TestBatchnormFwdTrainingPlan, CompileWithUnsupportedDimensionThrows)
 {
     const MockKernelCompiler mockCompiler;
 
-    // 3D tensor is not supported
-    auto builder
-        = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph({12, 4, 1}, {1, 3, 4});
+    // 2D tensor is not supported
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph({4, 1}, {1, 4});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

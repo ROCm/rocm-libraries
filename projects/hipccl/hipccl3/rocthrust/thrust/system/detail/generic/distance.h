@@ -18,6 +18,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/iterator/iterator_traits.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -29,7 +36,7 @@ namespace generic
 {
 
 template <typename InputIterator>
-inline THRUST_HOST_DEVICE typename thrust::iterator_traits<InputIterator>::difference_type
+inline THRUST_HOST_DEVICE thrust::detail::it_difference_t<InputIterator>
 distance(InputIterator first, InputIterator last);
 
 } // end namespace generic

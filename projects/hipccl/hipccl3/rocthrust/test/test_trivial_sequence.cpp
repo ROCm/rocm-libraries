@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -24,6 +24,10 @@
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <iterator>
+#endif
+
 using VectorTestsParams = ::testing::Types<
   Params<thrust::host_vector<signed char>>,
   Params<thrust::host_vector<short>>,
@@ -46,7 +50,7 @@ void test_func(Iterator first, Iterator last)
   using System = typename thrust::iterator_system<Iterator>::type;
   System system;
   thrust::detail::trivial_sequence<Iterator, System> ts(system, first, last);
-  using ValueType = typename thrust::iterator_traits<Iterator>::value_type;
+  using ValueType = typename _THRUST_STD::iterator_traits<Iterator>::value_type;
 
   ASSERT_EQ_QUIET((ValueType) ts.begin()[0], ValueType(0, 11));
   ASSERT_EQ_QUIET((ValueType) ts.begin()[1], ValueType(2, 11));

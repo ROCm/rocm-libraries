@@ -274,6 +274,14 @@ inline bool isTensorRuntimePassByValue(const data_objects::TensorAttributesT* te
     return tensor != nullptr && tensor->is_runtime_pass_by_value;
 }
 
+/// True if `tensor` is a pass-by-value scalar in ANY state (compile-time
+/// constant, runtime-with-default, or pure runtime user-supplied). Takes a reference so
+/// `isPassByValueTensor(nullptr)` still picks the serialized-table overload.
+inline bool isPassByValueTensor(const data_objects::TensorAttributesT& tensor)
+{
+    return tensor.is_runtime_pass_by_value || tensor.value.type != data_objects::TensorValue::NONE;
+}
+
 /// @brief True if any tensor obtained by applying `project` to an element of
 /// `range` is a runtime pass-by-value scalar. `project` maps an element to a
 /// tensor pointer accepted by isTensorRuntimePassByValue, so the same flag

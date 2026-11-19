@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2011-2021, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2022-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2022-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -32,8 +32,9 @@
 #include "../../../config.hpp"
 #include "../../../util_deprecated.hpp"
 
-#include <hipcub/thread/thread_operators.hpp>
 #include <rocprim/device/device_adjacent_difference.hpp> // IWYU pragma: export
+
+#include _HIPCUB_STD_INCLUDE(functional)
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -41,15 +42,16 @@ struct DeviceAdjacentDifference
 {
     template<typename InputIteratorT,
              typename OutputIteratorT,
-             typename DifferenceOpT = ::hipcub::Difference,
-             typename NumItemsT     = std::uint32_t>
-    static HIPCUB_RUNTIME_FUNCTION hipError_t SubtractLeftCopy(void*           d_temp_storage,
-                                                               std::size_t&    temp_storage_bytes,
-                                                               InputIteratorT  d_input,
-                                                               OutputIteratorT d_output,
-                                                               NumItemsT       num_items,
-                                                               DifferenceOpT   difference_op = {},
-                                                               hipStream_t     stream        = 0)
+             typename DifferenceOpT = _HIPCUB_STD::minus<>,
+             typename NumItemsT     = uint32_t>
+    static HIPCUB_RUNTIME_FUNCTION
+    hipError_t SubtractLeftCopy(void*           d_temp_storage,
+                                size_t&         temp_storage_bytes,
+                                InputIteratorT  d_input,
+                                OutputIteratorT d_output,
+                                NumItemsT       num_items,
+                                DifferenceOpT   difference_op = {},
+                                hipStream_t     stream        = 0)
     {
         return ::rocprim::adjacent_difference(d_temp_storage,
                                               temp_storage_bytes,
@@ -63,17 +65,17 @@ struct DeviceAdjacentDifference
 
     template<typename InputIteratorT,
              typename OutputIteratorT,
-             typename DifferenceOpT = ::hipcub::Difference,
-             typename NumItemsT     = std::uint32_t>
-    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS static HIPCUB_RUNTIME_FUNCTION hipError_t
-        SubtractLeftCopy(void*           d_temp_storage,
-                         std::size_t&    temp_storage_bytes,
-                         InputIteratorT  d_input,
-                         OutputIteratorT d_output,
-                         NumItemsT       num_items,
-                         DifferenceOpT   difference_op,
-                         hipStream_t     stream,
-                         bool            debug_synchronous)
+             typename DifferenceOpT = _HIPCUB_STD::minus<>,
+             typename NumItemsT     = uint32_t>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS static HIPCUB_RUNTIME_FUNCTION
+    hipError_t SubtractLeftCopy(void*           d_temp_storage,
+                                size_t&         temp_storage_bytes,
+                                InputIteratorT  d_input,
+                                OutputIteratorT d_output,
+                                NumItemsT       num_items,
+                                DifferenceOpT   difference_op,
+                                hipStream_t     stream,
+                                bool            debug_synchronous)
     {
         HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
         return SubtractLeftCopy(d_temp_storage,
@@ -86,14 +88,15 @@ struct DeviceAdjacentDifference
     }
 
     template<typename RandomAccessIteratorT,
-             typename DifferenceOpT = ::hipcub::Difference,
-             typename NumItemsT     = std::uint32_t>
-    static HIPCUB_RUNTIME_FUNCTION hipError_t SubtractLeft(void*                 d_temp_storage,
-                                                           std::size_t&          temp_storage_bytes,
-                                                           RandomAccessIteratorT d_input,
-                                                           NumItemsT             num_items,
-                                                           DifferenceOpT         difference_op = {},
-                                                           hipStream_t           stream        = 0)
+             typename DifferenceOpT = _HIPCUB_STD::minus<>,
+             typename NumItemsT     = uint32_t>
+    static HIPCUB_RUNTIME_FUNCTION
+    hipError_t SubtractLeft(void*                 d_temp_storage,
+                            size_t&               temp_storage_bytes,
+                            RandomAccessIteratorT d_input,
+                            NumItemsT             num_items,
+                            DifferenceOpT         difference_op = {},
+                            hipStream_t           stream        = 0)
     {
         return ::rocprim::adjacent_difference_inplace(d_temp_storage,
                                                       temp_storage_bytes,
@@ -105,16 +108,16 @@ struct DeviceAdjacentDifference
     }
 
     template<typename RandomAccessIteratorT,
-             typename DifferenceOpT = ::hipcub::Difference,
-             typename NumItemsT     = std::uint32_t>
-    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS static HIPCUB_RUNTIME_FUNCTION hipError_t
-        SubtractLeft(void*                 d_temp_storage,
-                     std::size_t&          temp_storage_bytes,
-                     RandomAccessIteratorT d_input,
-                     NumItemsT             num_items,
-                     DifferenceOpT         difference_op,
-                     hipStream_t           stream,
-                     bool                  debug_synchronous)
+             typename DifferenceOpT = _HIPCUB_STD::minus<>,
+             typename NumItemsT     = uint32_t>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS static HIPCUB_RUNTIME_FUNCTION
+    hipError_t SubtractLeft(void*                 d_temp_storage,
+                            size_t&               temp_storage_bytes,
+                            RandomAccessIteratorT d_input,
+                            NumItemsT             num_items,
+                            DifferenceOpT         difference_op,
+                            hipStream_t           stream,
+                            bool                  debug_synchronous)
     {
         HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
         return SubtractLeft(d_temp_storage,
@@ -127,15 +130,16 @@ struct DeviceAdjacentDifference
 
     template<typename InputIteratorT,
              typename OutputIteratorT,
-             typename DifferenceOpT = ::hipcub::Difference,
-             typename NumItemsT     = std::uint32_t>
-    static HIPCUB_RUNTIME_FUNCTION hipError_t SubtractRightCopy(void*           d_temp_storage,
-                                                                std::size_t&    temp_storage_bytes,
-                                                                InputIteratorT  d_input,
-                                                                OutputIteratorT d_output,
-                                                                NumItemsT       num_items,
-                                                                DifferenceOpT   difference_op = {},
-                                                                hipStream_t     stream        = 0)
+             typename DifferenceOpT = _HIPCUB_STD::minus<>,
+             typename NumItemsT     = uint32_t>
+    static HIPCUB_RUNTIME_FUNCTION
+    hipError_t SubtractRightCopy(void*           d_temp_storage,
+                                 size_t&         temp_storage_bytes,
+                                 InputIteratorT  d_input,
+                                 OutputIteratorT d_output,
+                                 NumItemsT       num_items,
+                                 DifferenceOpT   difference_op = {},
+                                 hipStream_t     stream        = 0)
     {
         return ::rocprim::adjacent_difference_right(d_temp_storage,
                                                     temp_storage_bytes,
@@ -149,17 +153,17 @@ struct DeviceAdjacentDifference
 
     template<typename InputIteratorT,
              typename OutputIteratorT,
-             typename DifferenceOpT = ::hipcub::Difference,
-             typename NumItemsT     = std::uint32_t>
-    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS static HIPCUB_RUNTIME_FUNCTION hipError_t
-        SubtractRightCopy(void*           d_temp_storage,
-                          std::size_t&    temp_storage_bytes,
-                          InputIteratorT  d_input,
-                          OutputIteratorT d_output,
-                          NumItemsT       num_items,
-                          DifferenceOpT   difference_op,
-                          hipStream_t     stream,
-                          bool            debug_synchronous)
+             typename DifferenceOpT = _HIPCUB_STD::minus<>,
+             typename NumItemsT     = uint32_t>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS static HIPCUB_RUNTIME_FUNCTION
+    hipError_t SubtractRightCopy(void*           d_temp_storage,
+                                 size_t&         temp_storage_bytes,
+                                 InputIteratorT  d_input,
+                                 OutputIteratorT d_output,
+                                 NumItemsT       num_items,
+                                 DifferenceOpT   difference_op,
+                                 hipStream_t     stream,
+                                 bool            debug_synchronous)
     {
         HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
         return SubtractRightCopy(d_temp_storage,
@@ -172,14 +176,15 @@ struct DeviceAdjacentDifference
     }
 
     template<typename RandomAccessIteratorT,
-             typename DifferenceOpT = ::hipcub::Difference,
-             typename NumItemsT     = std::uint32_t>
-    static HIPCUB_RUNTIME_FUNCTION hipError_t SubtractRight(void*        d_temp_storage,
-                                                            std::size_t& temp_storage_bytes,
-                                                            RandomAccessIteratorT d_input,
-                                                            NumItemsT             num_items,
-                                                            DifferenceOpT difference_op = {},
-                                                            hipStream_t   stream        = 0)
+             typename DifferenceOpT = _HIPCUB_STD::minus<>,
+             typename NumItemsT     = uint32_t>
+    static HIPCUB_RUNTIME_FUNCTION
+    hipError_t SubtractRight(void*                 d_temp_storage,
+                             size_t&               temp_storage_bytes,
+                             RandomAccessIteratorT d_input,
+                             NumItemsT             num_items,
+                             DifferenceOpT         difference_op = {},
+                             hipStream_t           stream        = 0)
     {
         return ::rocprim::adjacent_difference_right_inplace(d_temp_storage,
                                                             temp_storage_bytes,
@@ -191,16 +196,16 @@ struct DeviceAdjacentDifference
     }
 
     template<typename RandomAccessIteratorT,
-             typename DifferenceOpT = ::hipcub::Difference,
-             typename NumItemsT     = std::uint32_t>
-    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS static HIPCUB_RUNTIME_FUNCTION hipError_t
-        SubtractRight(void*                 d_temp_storage,
-                      std::size_t&          temp_storage_bytes,
-                      RandomAccessIteratorT d_input,
-                      NumItemsT             num_items,
-                      DifferenceOpT         difference_op,
-                      hipStream_t           stream,
-                      bool                  debug_synchronous)
+             typename DifferenceOpT = _HIPCUB_STD::minus<>,
+             typename NumItemsT     = uint32_t>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS static HIPCUB_RUNTIME_FUNCTION
+    hipError_t SubtractRight(void*                 d_temp_storage,
+                             size_t&               temp_storage_bytes,
+                             RandomAccessIteratorT d_input,
+                             NumItemsT             num_items,
+                             DifferenceOpT         difference_op,
+                             hipStream_t           stream,
+                             bool                  debug_synchronous)
     {
         HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
         return SubtractRight(d_temp_storage,

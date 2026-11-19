@@ -388,27 +388,6 @@ using invoke_result = invoke_result_r<void, F, Args...>;
 template<class F, class... Args>
 using invoke_result_t = typename invoke_result<F, Args...>::type;
 
-/// \brief Utility wrapper around ``invoke_result`` for binary operators.
-///
-/// \tparam T Input type to the binary operator.
-/// \tparam F Type of the binary operator.
-template<class T, class F>
-struct [[deprecated("To deduce the type of accumulator, use 'rocprim::accumulator_t' "
-                    "instead.")]] invoke_result_binary_op
-{
-    /// \brief The result type of the binary operator.
-    using type = typename invoke_result<F, T, T>::type;
-};
-
-/// \brief Helper type. It is an alias for ``invoke_result_binary_op::type``.
-///
-/// \tparam T Input type to the binary operator.
-/// \tparam F Type of the binary operator.
-template<class T, class F>
-using invoke_result_binary_op_t
-    [[deprecated("To deduce the type of accumulator, use 'rocprim::accumulator_t' instead.")]]
-    = typename invoke_result_binary_op<T, F>::type;
-
 /// \brief The type of intermediate accumulator (according to CCCL)
 template<typename Invokable, typename InputT, typename InitT = InputT>
 using accumulator_t = ::std::decay_t<invoke_result_t<Invokable, InitT, InputT>>;

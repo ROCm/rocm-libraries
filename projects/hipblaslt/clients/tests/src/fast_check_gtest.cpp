@@ -16,6 +16,9 @@
 #include "hip_placement.hpp"
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_test.hpp"
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+#include "mxDataGen.hpp"
+#endif
 
 #include <hip/hip_runtime.h>
 
@@ -568,6 +571,167 @@ namespace
         EXPECT_EQ(e.max_result, max_result);
         EXPECT_GT(max_result, max_partial) << "the beta and bias terms must count";
     }
+
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+    // integer_exact MX data: every dequantized value is an element in {0, 1, 2} (A) or
+    // {-2, ..., 2} (B) times a scale of 1, 2 or 4, and more than one scale is used, in both the
+    // layout the generator aligns itself and the one this change recomputes.
+    TEST(FastCheck_pre_checkin, integer_exact_mx_values_are_exact_with_varied_scales)
+    {
+        const uint64_t rows = 64, cols = 128;
+        for(hipDataType type : {HIP_R_8F_E4M3, HIP_R_8F_E5M2})
+            for(bool isMatrixA : {true, false})
+                for(bool transpose : {false, true})
+                {
+                    std::vector<uint8_t> data(rows * cols), scale(rows * cols / 32 + 64);
+                    std::vector<float>   ref = generateMXInput(type,
+                                                             HIP_R_8U,
+                                                             data.data(),
+                                                             scale.data(),
+                                                             rows,
+                                                             cols,
+                                                             rows,
+                                                             transpose,
+                                                             32,
+                                                             1,
+                                                             isMatrixA,
+                                                             MXScaleLayout::None,
+                                                             "integer_exact");
+                    ASSERT_EQ(ref.size(), rows * cols);
+                    bool sawLargeScale = false, sawUnitScale = false, sawNegative = false;
+                    for(float v : ref)
+                    {
+                        const float a = std::fabs(v);
+                        ASSERT_TRUE(a == 0 || a == 1 || a == 2 || a == 4 || a == 8)
+                            << v << " isMatrixA=" << isMatrixA << " transpose=" << transpose;
+                        sawLargeScale |= a == 8 || a == 4;
+                        sawUnitScale |= a == 1;
+                        sawNegative |= v < 0;
+                    }
+                    EXPECT_TRUE(sawLargeScale && sawUnitScale);
+                    EXPECT_EQ(sawNegative, !isMatrixA);
+
+                    // The reference must describe the bytes the GPU reads: decode each element and
+                    // its block's scale here, independently of the generator. K runs along the
+                    // stored rows when A is transposed or B is not; each run of 32 along K shares a
+                    // scale, which the other layouts index as (k / 32) * rows + row.
+                    const bool kMajor = isMatrixA == transpose;
+                    auto       decode = [type](uint8_t code) {
+                        // Normalize the E5M2 encodings of +/-1 to the E4M3 table.
+                        if(type == HIP_R_8F_E5M2 && (code & 0x7f) == 0x3c)
+                            code = uint8_t((code & 0x80) | 0x38);
+                        switch(code)
+                        {
+                        case 0xC0:
+                            return -2.f;
+                        case 0xB8:
+                            return -1.f;
+                        case 0x00:
+                            return 0.f;
+                        case 0x38:
+                            return 1.f;
+                        case 0x40:
+                            return 2.f;
+                        }
+                        ADD_FAILURE() << "unexpected fp8 code " << int(code);
+                        return 0.f;
+                    };
+                    for(size_t idx = 0; idx < ref.size(); idx++)
+                    {
+                        const size_t row = idx % rows, k = idx / rows;
+                        const size_t s = kMajor ? idx / 32 : (k / 32) * rows + row;
+                        const float  expected
+                            = decode(data[idx]) * std::ldexp(1.f, int(scale[s]) - 127);
+                        ASSERT_EQ(ref[idx], expected)
+                            << "element " << idx << " isMatrixA=" << isMatrixA
+                            << " transpose=" << transpose;
+                    }
+                }
+    }
+    // The reference must match the actual swizzled scale bytes, or explicitly refuse the
+    // layout. Decode using the documented axis permutations rather than the swizzle helper.
+    TEST(FastCheck_pre_checkin, integer_exact_mx_swizzled_references_match_or_refuse)
+    {
+        for(hipDataType type : {HIP_R_8F_E4M3, HIP_R_8F_E5M2})
+            for(bool isA : {true, false})
+                for(bool transpose : {true, false})
+                    for(MXScaleLayout layout : {MXScaleLayout::GFX950, MXScaleLayout::GFX1250})
+                        for(const auto& shape : {std::pair<size_t, size_t>{64, 256}, {80, 160}})
+                        {
+                            const auto [mn, K]          = shape;
+                            const bool           kMajor = isA == transpose;
+                            const size_t         rows = kMajor ? K : mn, cols = kMajor ? mn : K;
+                            const size_t         blocks = K / 32;
+                            std::vector<uint8_t> data(rows * cols), scale(rows * cols, 0xcc);
+                            std::vector<float>   ref;
+                            try
+                            {
+                                ref = generateMXInput(type,
+                                                      HIP_R_8U,
+                                                      data.data(),
+                                                      scale.data(),
+                                                      rows,
+                                                      cols,
+                                                      rows,
+                                                      transpose,
+                                                      32,
+                                                      1,
+                                                      isA,
+                                                      layout,
+                                                      "integer_exact");
+                            }
+                            catch(const std::runtime_error& e)
+                            {
+                                ASSERT_FALSE(kMajor) << e.what();
+                                EXPECT_NE(std::string(e.what()).find("integer_exact"),
+                                          std::string::npos);
+                                continue;
+                            }
+                            ASSERT_EQ(ref.size(), rows * cols);
+                            for(size_t idx = 0; idx < ref.size(); idx++)
+                            {
+                                const size_t k     = kMajor ? idx % rows : idx / rows;
+                                const size_t m     = kMajor ? idx / rows : idx % rows;
+                                const size_t block = k / 32;
+                                size_t       si;
+                                if(layout == MXScaleLayout::GFX1250)
+                                {
+                                    const size_t fast = kMajor ? blocks : mn;
+                                    const size_t slow = kMajor ? mn : blocks;
+                                    const size_t natural
+                                        = kMajor ? m * blocks + block : block * mn + m;
+                                    const size_t f = natural % fast, s = natural / fast;
+                                    si = (f / 4) * slow * 4 + s * 4 + f % 4;
+                                }
+                                else
+                                {
+                                    const size_t paddedBlocks = (blocks + 7) / 8 * 8;
+                                    si = (((((m / 32) * (paddedBlocks / 8) + block / 8) * 4
+                                            + block % 4)
+                                               * 16
+                                           + m % 16)
+                                              * 2
+                                          + (block / 4) % 2)
+                                             * 2
+                                         + (m / 16) % 2;
+                                }
+                                const uint8_t code = data[idx], magnitude = code & 0x7f;
+                                const uint8_t one = type == HIP_R_8F_E4M3 ? 0x38 : 0x3c;
+                                ASSERT_TRUE(magnitude == 0 || magnitude == one
+                                            || magnitude == 0x40);
+                                const float value = (magnitude == one    ? 1.f
+                                                     : magnitude == 0x40 ? 2.f
+                                                                         : 0.f)
+                                                    * ((code & 0x80) ? -1.f : 1.f);
+                                const float expected
+                                    = value * std::ldexp(1.f, int(scale[si]) - 127);
+                                ASSERT_EQ(ref[idx], expected)
+                                    << "idx=" << idx << " isA=" << isA << " transpose=" << transpose
+                                    << " layout=" << int(layout);
+                            }
+                        }
+    }
+#endif
 
     // ------------------------------------------------------------------------------------------
     // fast_check_result_device: D in device memory
@@ -1176,6 +1340,7 @@ namespace
         }
         ::testing::GTEST_FLAG(filter) = saved;
         EXPECT_TRUE(hipblaslt_category_needs_a_filter("stress"));
+        EXPECT_TRUE(hipblaslt_category_needs_a_filter("sdc_hunt"));
         EXPECT_FALSE(hipblaslt_category_needs_a_filter("nightly"));
     }
 
@@ -1190,6 +1355,9 @@ namespace
 
     TEST(FastCheckDevice_pre_checkin, memory_shortfall_reclaims_idle_buffers)
     {
+#if HIPBLASLT_TEST_ASAN_BUILD
+        GTEST_SKIP() << "ASAN quarantine delays freeing GPU memory.";
+#endif
         // Hold one live allocation while returning another to the client pool. The latter
         // is reusable capacity, so it must not make an otherwise fitting case skip.
         auto live = memory_pool<d_memory>::Get(4096);
@@ -1197,11 +1365,27 @@ namespace
         ASSERT_EQ(hipMemset(live.get(), 42, live.bytes()), hipSuccess);
         auto cached = memory_pool<d_memory>::Get(size_t(16) << 20);
         ASSERT_NE(cached.get(), nullptr);
-        const size_t capacity = cached.capacity();
+        const size_t          capacity = cached.capacity();
+        const void*           idle     = cached.get();
+        hipPointerAttribute_t attr{};
+        ASSERT_EQ(hipPointerGetAttributes(&attr, idle), hipSuccess);
+        ASSERT_EQ(attr.type, hipMemoryTypeDevice);
         memory_pool<d_memory>::Restore(cached);
-        size_t free_bytes = 0, total_bytes = 0;
-        ASSERT_EQ(hipMemGetInfo(&free_bytes, &total_bytes), hipSuccess);
-        EXPECT_EQ(fast_check_memory_shortfall(free_bytes + capacity / 2, 0), "");
+        const size_t cached_bytes = memory_pool<d_memory>::CachedBytes();
+        ASSERT_GE(cached_bytes, capacity);
+        // Free device memory as only the pool changes it: nothing until it releases its idle
+        // buffers. hipMemGetInfo would also count other processes on the GPU (e.g. parallel test
+        // shards) allocating between two reads, which made this test flaky.
+        auto released = [&](size_t& free) {
+            free = cached_bytes - memory_pool<d_memory>::CachedBytes();
+            return true;
+        };
+        EXPECT_EQ(fast_check_memory_shortfall(capacity / 2, 0, released), "");
+        EXPECT_EQ(memory_pool<d_memory>::CachedBytes(), 0u);
+        // Released means returned to the device, not just dropped from the pool's list.
+        attr = {};
+        EXPECT_TRUE(hipPointerGetAttributes(&attr, idle) != hipSuccess
+                    || attr.type != hipMemoryTypeDevice);
         unsigned char value = 0;
         ASSERT_EQ(hipMemcpy(&value, live.get(), 1, hipMemcpyDeviceToHost), hipSuccess);
         EXPECT_EQ(value, 42);

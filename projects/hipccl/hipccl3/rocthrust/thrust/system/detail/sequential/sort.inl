@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2021 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -27,13 +27,12 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/reverse.h>
 #include <thrust/system/detail/sequential/stable_merge_sort.h>
 #include <thrust/system/detail/sequential/stable_primitive_sort.h>
-
-#include <thrust/detail/nv_target.h>
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
@@ -68,7 +67,7 @@ THRUST_HOST_DEVICE void stable_sort(
   thrust::system::detail::sequential::stable_primitive_sort(exec, first, last);
 
   // if comp is greater<T> then reverse the keys
-  using KeyType = typename thrust::iterator_traits<RandomAccessIterator>::value_type;
+  using KeyType = thrust::detail::it_value_t<RandomAccessIterator>;
 
   if (needs_reverse<KeyType, StrictWeakOrdering>::value)
   {
@@ -89,7 +88,7 @@ THRUST_HOST_DEVICE void stable_sort_by_key(
   thrust::detail::true_type)
 {
   // if comp is greater<T> then reverse the keys and values
-  using KeyType = typename thrust::iterator_traits<RandomAccessIterator1>::value_type;
+  using KeyType = thrust::detail::it_value_t<RandomAccessIterator1>;
 
   // note, we also have to reverse the (unordered) input to preserve stability
   if (needs_reverse<KeyType, StrictWeakOrdering>::value)
@@ -141,7 +140,7 @@ template <typename KeyType, typename Compare>
 struct use_primitive_sort
     : ::internal::_And<::internal::is_arithmetic<KeyType>,
                        _THRUST_STD::disjunction<_THRUST_STD::is_same<Compare, thrust::less<KeyType>>,
-                                               _THRUST_STD::is_same<Compare, thrust::greater<KeyType>>>>
+                                                _THRUST_STD::is_same<Compare, thrust::greater<KeyType>>>>
 {};
 
 } // end namespace sort_detail
@@ -154,12 +153,12 @@ THRUST_HOST_DEVICE void stable_sort(
   StrictWeakOrdering comp)
 {
   // the compilation time of stable_primitive_sort is too expensive to use within a single CUDA thread
-  NV_IF_TARGET(
-    NV_IS_HOST,
-    (using KeyType = thrust::iterator_value_t<RandomAccessIterator>;
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST,
+    (using KeyType = thrust::detail::it_value_t<RandomAccessIterator>;
      sort_detail::use_primitive_sort<KeyType, StrictWeakOrdering> use_primitive_sort;
      sort_detail::stable_sort(exec, first, last, comp, use_primitive_sort);),
-    ( // NV_IS_DEVICE:
+    ( // _THRUST_IS_DEVICE:
       thrust::detail::false_type use_primitive_sort;
       sort_detail::stable_sort(exec, first, last, comp, use_primitive_sort);));
 }
@@ -176,12 +175,12 @@ THRUST_HOST_DEVICE void stable_sort_by_key(
   StrictWeakOrdering comp)
 {
   // the compilation time of stable_primitive_sort_by_key is too expensive to use within a single CUDA thread
-  NV_IF_TARGET(
-    NV_IS_HOST,
-    (using KeyType = thrust::iterator_value_t<RandomAccessIterator1>;
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST,
+    (using KeyType = thrust::detail::it_value_t<RandomAccessIterator1>;
      sort_detail::use_primitive_sort<KeyType, StrictWeakOrdering> use_primitive_sort;
      sort_detail::stable_sort_by_key(exec, first1, last1, first2, comp, use_primitive_sort);),
-    ( // NV_IS_DEVICE:
+    ( // _THRUST_IS_DEVICE:
       thrust::detail::false_type use_primitive_sort;
       sort_detail::stable_sort_by_key(exec, first1, last1, first2, comp, use_primitive_sort);));
 }

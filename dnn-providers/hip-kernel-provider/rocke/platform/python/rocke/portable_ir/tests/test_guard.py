@@ -101,11 +101,15 @@ class TestDerivation(unittest.TestCase):
         """On a gate whose structure the candidate rules can express, derivation
         should reproduce it -- not merely stay sound. Sound-but-useless is the
         easy failure mode here, so this pins agreement in both directions."""
-        g = derive_guard(gate, CANDS, gate_name="test", arch="gfx950")
-        self.assertEqual(g["derivation"]["method"], "coupled")
-        report = verify_guard(g, gate, CANDS, samples=2000, seed=99)
-        self.assertEqual(report.unsound, [])
-        self.assertEqual(report.strict, [], "derivation lost coverage it could keep")
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                g = derive_guard(gate, CANDS, gate_name="test", arch=arch)
+                self.assertEqual(g["derivation"]["method"], "coupled")
+                report = verify_guard(g, gate, CANDS, samples=2000, seed=99)
+                self.assertEqual(report.unsound, [])
+                self.assertEqual(
+                    report.strict, [], "derivation lost coverage it could keep"
+                )
 
     def test_finds_the_coupling_rule(self):
         g = derive_guard(gate, CANDS, gate_name="test")
@@ -296,22 +300,10 @@ class TestRecipeIntegration(unittest.TestCase):
 
 
 def _online_lib():
-    """Path to a prebuilt shared librocke, or None. Same discovery the other
-    portable-IR tests use; building one here would make a unit test take
-    minutes."""
-    import os
-    import tempfile
+    """Return a source-matched prebuilt engine without making unit tests build."""
+    from rocke.portable_ir.src import online
 
-    here = os.path.dirname(os.path.abspath(__file__))
-    platform = os.path.normpath(os.path.join(here, "..", "..", "..", "..", ".."))
-    for cand in (
-        os.environ.get("ROCKE_ONLINE_LIB"),
-        os.path.join(tempfile.gettempdir(), "rocke_online", "librocke.so"),
-        os.path.join(platform, "build", "librocke.so"),
-    ):
-        if cand and os.path.exists(cand):
-            return cand
-    return None
+    return online.resolve_library_path(build=False)
 
 
 @unittest.skipIf(
@@ -387,6 +379,41 @@ class TestCEvaluatorParity(unittest.TestCase):
             self.assertEqual(
                 verdict, "admitted" if py_ok else "refused", f"D={d} ({why})"
             )
+
+    def test_refusals_match_python(self):
+        """A rule the evaluator refuses -- a zero divisor, a negative operand of
+        div or mod, an int64 overflow, an inexact number, an unbound leaf --
+        refuses the binding in both engines with the same reason, so the
+        caller who asked in one engine hears what the other would enforce."""
+        two_62 = {"mul": [1 << 31, 1 << 31]}
+        preds = [
+            {"eq": [{"mod": [{"spec": "D"}, 0]}, 0]},
+            {"eq": [{"div": [{"spec": "D"}, 2]}, 1]},
+            {"gt": [{"mul": [two_62, {"spec": "D"}]}, 0]},
+            {"gt": [{"add": [{"mul": [two_62, 2]}, 0]}, 0]},
+            {"gt": [2.5, 0]},
+            {"gt": [{"param": "M"}, 0]},
+        ]
+        for pred in preds:
+            g = {
+                "schema": GUARD_SCHEMA,
+                "free": ["D"],
+                "rules": [{"pred": pred, "reason": "rule rejected"}],
+            }
+            recipe = attach_guard(
+                {**self.recipe, "spec": [{"name": "D", "kind": "int"}]}, g
+            )
+            cbor = self.recipe_bundle.cbor_encode(recipe)
+            for d in (3, -3):
+                py_ok, py_why = check_guard(g, {"D": d}, {})
+                verdict, c_why = self.online.check_recipe_guard(cbor, ints={"D": d})
+                self.assertEqual(
+                    verdict, "admitted" if py_ok else "refused", f"{pred} D={d}"
+                )
+                self.assertEqual(py_why, c_why, f"{pred} D={d}")
+            # Every rule above is refused at D = -3; the case is only worth
+            # having if the refusal comes from the evaluator.
+            self.assertIn("did not evaluate", py_why, pred)
 
     def test_absent_guard_reported_not_assumed(self):
         from rocke.portable_ir.examples import recipe_toy

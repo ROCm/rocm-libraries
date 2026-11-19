@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,11 +28,11 @@
 
 // hipcub API
 #include <hipcub/device/device_segmented_reduce.hpp>
-#include <hipcub/iterator/counting_input_iterator.hpp>
+#include <hipcub/thread/thread_operators.hpp>
 
 template<class Input,
          class Output,
-         class ReduceOp = hipcub::Sum,
+         class ReduceOp = test_utils::plus,
          int Init
          = 0, // as only integral types supported, int is used here even for floating point inputs
          unsigned int MinSegmentLength = 0,
@@ -56,17 +56,17 @@ public:
     using params = Params;
 };
 
-using Params1
-    = ::testing::Types<params1<unsigned int, unsigned int, hipcub::Sum>,
-                       params1<int, int, hipcub::Sum, -100, 0, 10000>,
-                       params1<double, double, hipcub::Min, 1000, 0, 10000>,
-                       params1<int, short, hipcub::Max, 10, 1000, 10000>,
-                       params1<short, double, hipcub::Sum, 5, 1, 1000>,
-                       params1<float, double, hipcub::Max, 50, 2, 10>,
-                       params1<float, float, hipcub::Sum, 123, 100, 200>,
-                       params1<test_utils::half, test_utils::half, hipcub::Max, 50, 2, 10>,
-                       params1<test_utils::bfloat16, test_utils::bfloat16, hipcub::Max, 50, 2, 10>,
-                       params1<unsigned int, unsigned int, hipcub::Sum, 0, 1000, true>>;
+using Params1 = ::testing::Types<
+    params1<unsigned int, unsigned int, test_utils::plus>,
+    params1<int, int, test_utils::plus, -100, 0, 10000>,
+    params1<double, double, test_utils::minimum, 1000, 0, 10000>,
+    params1<int, short, test_utils::maximum, 10, 1000, 10000>,
+    params1<short, double, test_utils::plus, 5, 1, 1000>,
+    params1<float, double, test_utils::maximum, 50, 2, 10>,
+    params1<float, float, test_utils::plus, 123, 100, 200>,
+    params1<test_utils::half, test_utils::half, test_utils::maximum, 50, 2, 10>,
+    params1<test_utils::bfloat16, test_utils::bfloat16, test_utils::maximum, 50, 2, 10>,
+    params1<unsigned int, unsigned int, test_utils::plus, 0, 1000, true>>;
 
 TYPED_TEST_SUITE(HipcubDeviceSegmentedReduceOp, Params1);
 
@@ -125,7 +125,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduceOp, Reduce)
                 const size_t segment_length = segment_length_dis(gen);
                 offsets.push_back(offset);
 
-                const size_t end   = std::min(size, offset + segment_length);
+                const size_t end   = _HIPCUB_STD::min(size, offset + segment_length);
                 max_segment_length = std::max(max_segment_length, end - offset);
 
                 result_type aggregate = init;
@@ -278,7 +278,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Sum)
 
     using input_type     = typename TestFixture::params::input_type;
     using output_type    = typename TestFixture::params::output_type;
-    using reduce_op_type = typename hipcub::Sum;
+    using reduce_op_type = typename test_utils::plus;
     using result_type    = output_type;
     using offset_type    = unsigned int;
 
@@ -324,7 +324,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Sum)
                 const size_t segment_length = segment_length_dis(gen);
                 offsets.push_back(offset);
 
-                const size_t end   = std::min(size, offset + segment_length);
+                const size_t end   = _HIPCUB_STD::min(size, offset + segment_length);
                 max_segment_length = std::max(max_segment_length, end - offset);
 
                 result_type aggregate = init;
@@ -435,11 +435,11 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Min)
 
     using input_type     = typename TestFixture::params::input_type;
     using output_type    = typename TestFixture::params::output_type;
-    using reduce_op_type = typename hipcub::Min;
+    using reduce_op_type = typename test_utils::minimum;
     using result_type    = output_type;
     using offset_type    = unsigned int;
 
-    constexpr input_type init = std::numeric_limits<input_type>::max();
+    constexpr input_type init = _HIPCUB_STD::numeric_limits<input_type>::max();
     reduce_op_type       reduce_op;
 
     std::random_device         rd;
@@ -481,7 +481,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Min)
                 const size_t segment_length = segment_length_dis(gen);
                 offsets.push_back(offset);
 
-                const size_t end   = std::min(size, offset + segment_length);
+                const size_t end   = _HIPCUB_STD::min(size, offset + segment_length);
                 max_segment_length = std::max(max_segment_length, end - offset);
 
                 result_type aggregate = init;
@@ -592,11 +592,11 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Max)
 
     using input_type     = typename TestFixture::params::input_type;
     using output_type    = typename TestFixture::params::output_type;
-    using reduce_op_type = typename hipcub::Max;
+    using reduce_op_type = typename test_utils::maximum;
     using result_type    = output_type;
     using offset_type    = unsigned int;
 
-    constexpr input_type init = std::numeric_limits<input_type>::lowest();
+    constexpr input_type init = _HIPCUB_STD::numeric_limits<input_type>::lowest();
     reduce_op_type       reduce_op;
 
     std::random_device         rd;
@@ -638,7 +638,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Max)
                 const size_t segment_length = segment_length_dis(gen);
                 offsets.push_back(offset);
 
-                const size_t end   = std::min(size, offset + segment_length);
+                const size_t end   = _HIPCUB_STD::min(size, offset + segment_length);
                 max_segment_length = std::max(max_segment_length, end - offset);
 
                 result_type aggregate = init;
@@ -752,14 +752,14 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Max)
 struct ArgMinDispatch
 {
     template<typename InputIteratorT, typename OutputIteratorT, typename OffsetIteratorT>
-    auto operator()(void*           d_temp_storage,
-                    size_t&         temp_storage_bytes,
-                    InputIteratorT  d_in,
-                    OutputIteratorT d_out,
-                    int             num_segments,
-                    OffsetIteratorT d_begin_offsets,
-                    OffsetIteratorT d_end_offsets,
-                    hipStream_t     stream) const
+    auto operator()(void*                d_temp_storage,
+                    size_t&              temp_storage_bytes,
+                    InputIteratorT       d_in,
+                    OutputIteratorT      d_out,
+                    _HIPCUB_STD::int64_t num_segments,
+                    OffsetIteratorT      d_begin_offsets,
+                    OffsetIteratorT      d_end_offsets,
+                    hipStream_t          stream) const
     {
         return hipcub::DeviceSegmentedReduce::ArgMin(d_temp_storage,
                                                      temp_storage_bytes,
@@ -775,14 +775,14 @@ struct ArgMinDispatch
 struct ArgMaxDispatch
 {
     template<typename InputIteratorT, typename OutputIteratorT, typename OffsetIteratorT>
-    auto operator()(void*           d_temp_storage,
-                    size_t&         temp_storage_bytes,
-                    InputIteratorT  d_in,
-                    OutputIteratorT d_out,
-                    int             num_segments,
-                    OffsetIteratorT d_begin_offsets,
-                    OffsetIteratorT d_end_offsets,
-                    hipStream_t     stream) const
+    auto operator()(void*                d_temp_storage,
+                    size_t&              temp_storage_bytes,
+                    InputIteratorT       d_in,
+                    OutputIteratorT      d_out,
+                    _HIPCUB_STD::int64_t num_segments,
+                    OffsetIteratorT      d_begin_offsets,
+                    OffsetIteratorT      d_end_offsets,
+                    hipStream_t          stream) const
     {
         return hipcub::DeviceSegmentedReduce::ArgMax(d_temp_storage,
                                                      temp_storage_bytes,
@@ -848,7 +848,7 @@ void test_argminmax(typename TestFixture::params::input_type empty_value)
                 offsets.push_back(offset);
                 Iterator x(&values_input[offset]);
 
-                const size_t end   = std::min(size, offset + segment_length);
+                const size_t end   = _HIPCUB_STD::min(size, offset + segment_length);
                 max_segment_length = std::max(max_segment_length, end - offset);
                 if(offset < end)
                 {
@@ -1144,8 +1144,8 @@ TEST(HipcubDeviceSegmentedReduceLargeIndicesTests, LargeIndices)
     using T              = size_t;
     using input_type     = T;
     using output_type    = T;
-    using IteratorType   = rocprim::counting_iterator<input_type>;
-    using reduce_op_type = typename hipcub::Sum;
+    using IteratorType   = test_utils::counting_iterator<input_type>;
+    using reduce_op_type = typename test_utils::plus;
     using offset_type    = T;
 
     const input_type init = input_type(0);
@@ -1186,7 +1186,7 @@ TEST(HipcubDeviceSegmentedReduceLargeIndicesTests, LargeIndices)
                 const size_t segment_length = segment_length_dis(gen);
                 offsets.push_back(offset);
 
-                const offset_type end       = std::min(size, offset + segment_length);
+                const offset_type end       = _HIPCUB_STD::min(size, offset + segment_length);
                 output_type       aggregate = init;
                 aggregate = reduce_op(aggregate, gauss_sum(end) - gauss_sum(offset));
                 aggregates_expected.push_back(aggregate);

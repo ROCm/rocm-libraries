@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,8 @@
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <functional>
 #endif
+
+#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 
 // This example demonstrates how to build a minimal custom
 // Thrust backend by intercepting for_each's dispatch.
@@ -67,7 +69,9 @@ int main()
   my_system sys;
 
   // To invoke our version of for_each, pass sys as the first parameter
-  thrust::for_each(sys, vec.begin(), vec.end(), _THRUST_STD::negate<>{});
+  // Note: _THRUST_STD refers to ::hip::std if libhipcxx is available;
+  // otherwise it falls back to ::std.
+  thrust::for_each(sys, vec.begin(), vec.end(), _THRUST_STD::negate{});
 
   // Other algorithms that Thrust implements with thrust::for_each will also
   // cause our version of for_each to be invoked when we pass an instance of my_system as the first parameter.
@@ -76,7 +80,9 @@ int main()
   thrust::transform(sys, vec.begin(), vec.end(), vec.begin(), ::internal::identity{});
 
   // Invocations without my_system are handled normally.
-  thrust::for_each(vec.begin(), vec.end(), _THRUST_STD::negate<>{});
+  // Note: _THRUST_STD refers to ::hip::std if libhipcxx is available;
+  // otherwise it falls back to ::std.
+  thrust::for_each(vec.begin(), vec.end(), _THRUST_STD::negate{});
 
   return 0;
 }

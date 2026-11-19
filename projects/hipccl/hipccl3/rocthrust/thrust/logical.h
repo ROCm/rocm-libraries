@@ -69,7 +69,7 @@ THRUST_NAMESPACE_BEGIN
  *  thrust::all_of(thrust::host, A, A + 3, ::internal::identity{}); // returns false
  *
  *  // empty range
- *  thrust::all_of(thrust::host, A, A, ::internal::identity{}); // returns false
+ *  thrust::all_of(thrust::host, A, A, ::internal::identity{}); // returns true
  *
  *  \endcode
  *
@@ -108,7 +108,7 @@ all_of(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
  *  thrust::all_of(A, A + 3, ::internal::identity{}); // returns false
  *
  *  // empty range
- *  thrust::all_of(A, A, ::internal::identity{}); // returns false
+ *  thrust::all_of(A, A, ::internal::identity{}); // returns true
  *
  *  \endcode
  *

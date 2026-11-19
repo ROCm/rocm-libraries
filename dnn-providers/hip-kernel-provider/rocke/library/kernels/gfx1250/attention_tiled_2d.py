@@ -21,11 +21,14 @@ independently.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 from typing import Optional, Tuple
 
 from rocke.core.ir import BF16, F32, FP8E4M3, I32, IRBuilder, KernelDef, PtrType, Type
-from rocke.helpers.attention import PagedKvDescriptor, binary_search_seq_idx
+from rocke.helpers.attention import (
+    PagedKvDescriptor,
+    binary_search_seq_idx,
+    binary_search_seq_idx_iters,
+)
 from ._wmma_attention_common import (
     BLOCK_M as _BLOCK_M,
     HEAD_SIZE as _HEAD_SIZE,
@@ -127,9 +130,7 @@ class UnifiedAttention2DTiledSpec:
 
     @property
     def binary_search_iters(self) -> int:
-        if self.num_seqs <= 0:
-            return 32
-        return max(1, int(math.ceil(math.log2(self.num_seqs + 1))))
+        return binary_search_seq_idx_iters(self.num_seqs)
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -417,7 +418,7 @@ def build_unified_attention_2d_tiled(
         else:
             m_inits.append(neg_inf)
     l_inits = [one_f for _ in range(c_frag)]
-    acc_inits = [b.zero_vec_f32(c_frag) for _ in range(HD // _WMMA_N)]
+    acc_inits = [b.zero_vec_f32(op.srcs[2].frag_len) for _ in range(HD // _WMMA_N)]
 
     iter_args = []
     for r in range(c_frag):
@@ -488,7 +489,7 @@ def build_unified_attention_2d_tiled(
             kv_dtype=FP8E4M3,
             k_scale=k_scale,
             dtype=dtype,
-            c_frag=c_frag,
+            src2_frag=op.srcs[2].frag_len,
             phys_block=phys_block,
         )
 

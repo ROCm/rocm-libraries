@@ -349,6 +349,8 @@ Function name                                        yes no
 :cpp:func:`rocsparse_v2_spmv_buffer_size()`              x
 :cpp:func:`rocsparse_spgeam_buffer_size()`               x
 :cpp:func:`rocsparse_spgeam()`                           x
+:cpp:func:`rocsparse_spsort_buffer_size()`               x
+:cpp:func:`rocsparse_spsort()`                           x
 :cpp:func:`rocsparse_sptrsv_buffer_size()`               x
 :cpp:func:`rocsparse_sptrsm_buffer_size()`               x
 :cpp:func:`rocsparse_spilu0_buffer_size()`               x

@@ -46,7 +46,8 @@ import re
 import time
 from typing import Any, Dict, List
 
-ARCH = "gfx950"
+# The target arch. `ROCKE_ROLL_ARCH` selects it so a test can run the lane per arch.
+ARCH = os.environ.get("ROCKE_ROLL_ARCH", "gfx950")
 
 
 # --------------------------------------------------------------------------
@@ -118,10 +119,11 @@ def _conv(**over):
 
 
 def _attn(**over):
-    from kernels.gfx950.attention_dense import (
-        AttentionDenseSpec,
-        build_attention_dense,
-    )
+    import importlib
+
+    family = importlib.import_module(f"kernels.{ARCH}.attention_dense")
+    AttentionDenseSpec = family.AttentionDenseSpec
+    build_attention_dense = family.build_attention_dense
 
     spec = dict(
         batch=1,
@@ -230,14 +232,10 @@ def _alpha_norm(text: str) -> str:
 
 def _flavor() -> str:
     from rocke.core.lower_llvm import _flavor_for_llvm
-    from rocke.runtime.comgr import loaded_compiler_info
+    from rocke.runtime.comgr import _require_compiler_info
 
-    info = loaded_compiler_info()
-    return (
-        _flavor_for_llvm(info.llvm_version[0])
-        if info is not None and info.llvm_version is not None
-        else "llvm20"
-    )
+    info = _require_compiler_info()
+    return _flavor_for_llvm(info.llvm_version[0])
 
 
 def _hsaco(ll: str) -> bytes:

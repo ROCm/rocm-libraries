@@ -31,9 +31,12 @@
 #include "hip_placement.hpp"
 #include "hipblaslt_ostream.hpp"
 
+#include <initializer_list>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <utility>
+#include <vector>
 
 class HipDeviceBuffer : public d_vector_type
 {
@@ -141,9 +144,9 @@ class HipHostBuffer
 {
 public:
     HipHostBuffer(hipDataType dtype, std::size_t numElements)
-        : buffer(memory_pool<h_memory>::Get(realDataTypeSize(dtype) * numElements
-                                                ? realDataTypeSize(dtype) * numElements
-                                                : realDataTypeSize(dtype)))
+        : requested(realDataTypeSize(dtype) * numElements ? realDataTypeSize(dtype) * numElements
+                                                          : realDataTypeSize(dtype))
+        , buffer(memory_pool<h_memory>::Get(requested))
     {
     }
 
@@ -193,24 +196,71 @@ public:
         return reinterpret_cast<const T*>(buf());
     }
 
+    // A failed pinned allocation leaves a null buffer rather than an error.
+    hipError_t memcheck() const
+    {
+        return buffer.get() ? hipSuccess : hipErrorOutOfMemory;
+    }
+
+    std::size_t getRequestedBytes() const
+    {
+        return requested;
+    }
+
 private:
-    h_memory buffer;
+    std::size_t requested;
+    h_memory    buffer;
 };
+
+// Describes the failed allocation of `b`, or returns an empty string when it succeeded.
+inline std::string host_allocation_failure(const HipHostBuffer& b)
+{
+    if(b.memcheck() == hipSuccess)
+        return {};
+    std::ostringstream s;
+    s.precision(3);
+    s << "could not allocate " << double(b.getRequestedBytes()) / double(1 << 30)
+      << " GiB of pinned host memory";
+    return s.str();
+}
+
+// Describes the first host buffer in `groups` whose allocation failed, or returns an empty
+// string when every allocation succeeded.
+inline std::string
+    host_allocation_failure(std::initializer_list<const std::vector<HipHostBuffer>*> groups)
+{
+    for(const auto* group : groups)
+        for(const auto& b : *group)
+            if(std::string why = host_allocation_failure(b); !why.empty())
+                return why;
+    return {};
+}
 
 inline hipError_t synchronize(HipDeviceBuffer&    dBuf,
                               const HipHostBuffer& hBuf,
                               std::size_t          block_count = 1,
                               hipStream_t          stream      = nullptr)
 {
-    hipError_t hip_err;
+    if(block_count == 0)
+        return hipErrorInvalidValue;
 
-    // Perform async copy for all blocks
-    for(size_t i_block = 0; i_block < block_count; i_block++)
+    const size_t blockBytes = dBuf.getNumBytes() / block_count;
+    auto*        firstBlock = dBuf.as<char>();
+    hipError_t   hip_err    = hipMemcpyAsync(firstBlock,
+                                        hBuf.as<char>(),
+                                        blockBytes,
+                                        dBuf.use_HMM ? hipMemcpyHostToHost : hipMemcpyHostToDevice,
+                                        stream);
+    if(hip_err != hipSuccess)
+        return hip_err;
+
+    // Identical rotating blocks share one host upload. The stream orders device copies after it.
+    for(size_t i_block = 1; i_block < block_count; i_block++)
     {
-        hip_err = hipMemcpyAsync(dBuf.as<char>() + i_block * dBuf.getNumBytes() / block_count,
-                                 hBuf.as<char>(),
-                                 dBuf.getNumBytes() / block_count,
-                                 dBuf.use_HMM ? hipMemcpyHostToHost : hipMemcpyHostToDevice,
+        hip_err = hipMemcpyAsync(firstBlock + i_block * dBuf.getNumBytes() / block_count,
+                                 firstBlock,
+                                 blockBytes,
+                                 dBuf.use_HMM ? hipMemcpyHostToHost : hipMemcpyDeviceToDevice,
                                  stream);
 
         if(hip_err != hipSuccess)
@@ -224,6 +274,9 @@ inline hipError_t synchronize(HipDeviceBuffer&    dBuf,
 
 inline hipError_t broadcast(HipDeviceBuffer& dBuf, std::size_t repeats)
 {
+    if(repeats == 0)
+        return hipErrorInvalidValue;
+
     hipError_t hip_err = hipSuccess;
     for(size_t i = 1; i < repeats; ++i)
     {
@@ -253,7 +306,7 @@ inline hipError_t synchronize(HipHostBuffer&         hBuf,
     // lda is only used by the swizzled row-by-row copy below; the plain copy path
     // ignores it, so only the swizzle path can have an out-of-range leading dimension.
     if(needSwizzle && row > lda)
-        hipblaslt_cerr << "invalid values of lda in synchronize()" << std::endl;
+        return hipErrorInvalidValue;
     hipError_t hip_err;
 
     // Synchronize to ensure prior work is complete

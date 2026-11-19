@@ -18,13 +18,18 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/function.h>
 #include <thrust/detail/static_assert.h> // for depend_on_instantiation
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/omp/detail/pragma_omp.h>
 #include <thrust/system/omp/detail/reduce_intervals.h>
-#include <thrust/iterator/iterator_traits.h>
-#include <thrust/detail/function.h>
 
 #include <cstdint>
 
@@ -41,36 +46,34 @@ template <typename DerivedPolicy,
           typename OutputIterator,
           typename BinaryFunction,
           typename Decomposition>
-void reduce_intervals(execution_policy<DerivedPolicy> &,
-                      InputIterator input,
-                      OutputIterator output,
-                      BinaryFunction binary_op,
-                      Decomposition decomp)
+void reduce_intervals(
+  execution_policy<DerivedPolicy>&,
+  InputIterator input,
+  OutputIterator output,
+  BinaryFunction binary_op,
+  Decomposition decomp)
 {
   // we're attempting to launch an omp kernel, assert we're compiling with omp support
   // ========================================================================
   // X Note to the user: If you've found this line due to a compiler error, X
   // X you need to enable OpenMP support in your compiler.                  X
   // ========================================================================
-  THRUST_STATIC_ASSERT_MSG(
-    (thrust::detail::depend_on_instantiation<
-      InputIterator, (THRUST_DEVICE_COMPILER_IS_OMP_CAPABLE == THRUST_TRUE)
-    >::value)
-  , "OpenMP compiler support is not enabled"
-  );
+  static_assert(
+    thrust::detail::depend_on_instantiation<InputIterator, (THRUST_DEVICE_COMPILER_IS_OMP_CAPABLE == THRUST_TRUE)>::value,
+    "OpenMP compiler support is not enabled");
 
 #if (THRUST_DEVICE_COMPILER_IS_OMP_CAPABLE == THRUST_TRUE)
-  using OutputType = typename thrust::iterator_value<OutputIterator>::type;
+  using OutputType = thrust::detail::it_value_t<OutputIterator>;
 
   // wrap binary_op
-  thrust::detail::wrapped_function<BinaryFunction,OutputType> wrapped_binary_op{binary_op};
+  thrust::detail::wrapped_function<BinaryFunction, OutputType> wrapped_binary_op{binary_op};
 
   using index_type = std::intptr_t;
 
   index_type n = static_cast<index_type>(decomp.size());
 
   THRUST_PRAGMA_OMP(parallel for)
-  for(index_type i = 0; i < n; i++)
+  for (index_type i = 0; i < n; i++)
   {
     InputIterator begin = input + decomp[i].begin();
     InputIterator end   = input + decomp[i].end();
@@ -88,7 +91,7 @@ void reduce_intervals(execution_policy<DerivedPolicy> &,
       }
 
       OutputIterator tmp = output + i;
-      *tmp = sum;
+      *tmp               = sum;
     }
   }
 #endif // THRUST_DEVICE_COMPILER_IS_OMP_CAPABLE

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from rocke.core.ir import F16, IRBuilder, VectorType
 from rocke.helpers.tiling.emit import fill_fragment
 from rocke.helpers.tiling.fragments import make_fragment
 from rocke.helpers.tiling.memory import cooperative_load_desc
@@ -17,40 +18,37 @@ from rocke.helpers.tiling.memory import cooperative_load_desc
 _TILE = cooperative_load_desc(128, 16, 4, vw=8)
 
 
-class _RecordingBuilder:
-    """Records the one ``zero_vec`` the zero fill is allowed to emit."""
-
-    def __init__(self) -> None:
-        self.zero_vec_calls: list[tuple] = []
-
-    def zero_vec(self, dtype, count):
-        self.zero_vec_calls.append((dtype, count))
-        return ("zeros", dtype, count)
+def _emitted_ops(b: IRBuilder) -> int:
+    return len(b.kernel.body.ops)
 
 
-def test_zero_fill_sets_registers_to_zero_vector() -> None:
-    b = _RecordingBuilder()
-    frag = make_fragment(_TILE, "f16")
+def test_zero_fill_sets_registers_to_one_zero_vector() -> None:
+    b = IRBuilder("fill_zero")
+    frag = make_fragment(_TILE, F16)
     fill_fragment(b, frag, 0)
-    assert b.zero_vec_calls == [("f16", _TILE.register_count)]
-    assert frag.value == ("zeros", "f16", _TILE.register_count)
+    assert frag.value.type == VectorType(F16, _TILE.register_count)
+    assert frag.value.op.name == "arith.constant_vec"
+    assert frag.value.op.attrs["fill"] == 0.0
+    assert _emitted_ops(b) == 1
 
 
 def test_nonzero_scalar_is_rejected_not_silently_zeroed() -> None:
-    b = _RecordingBuilder()
-    frag = make_fragment(_TILE, "f16")
-    with pytest.raises(NotImplementedError) as excinfo:
+    b = IRBuilder("fill_nonzero")
+    frag = make_fragment(_TILE, F16)
+    with pytest.raises(NotImplementedError, match="compile-time zero"):
         fill_fragment(b, frag, 1)
-    assert "compile-time zero" in str(excinfo.value)
-    assert b.zero_vec_calls == []  # nothing emitted
-    assert frag.value is None  # fragment untouched
+    assert _emitted_ops(b) == 0  # nothing emitted
+    with pytest.raises(ValueError, match="not filled"):  # fragment untouched
+        frag.value
 
 
 def test_runtime_scalar_is_rejected() -> None:
-    b = _RecordingBuilder()
-    frag = make_fragment(_TILE, "f16")
-    runtime_scalar = object()  # stands in for an SSA Value
-    with pytest.raises(NotImplementedError):
+    b = IRBuilder("fill_runtime")
+    runtime_scalar = b.const_i32(1)
+    emitted_before = _emitted_ops(b)
+    frag = make_fragment(_TILE, F16)
+    with pytest.raises(NotImplementedError, match="compile-time zero"):
         fill_fragment(b, frag, runtime_scalar)
-    assert b.zero_vec_calls == []
-    assert frag.value is None
+    assert _emitted_ops(b) == emitted_before
+    with pytest.raises(ValueError, match="not filled"):
+        frag.value

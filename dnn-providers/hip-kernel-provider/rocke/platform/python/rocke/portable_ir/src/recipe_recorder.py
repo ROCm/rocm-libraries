@@ -10,7 +10,8 @@
 # recorder. The recorder's surface mirrors the IRBuilder (param/const/add/fmul/
 # load/store/...), so authoring reads almost identically; the only delta from a
 # normal builder is that compile-time / runtime control flow uses recorder
-# primitives (`scf_for`, `scf_if`, `static_if`) so the emitted recipe stays
+# primitives (`scf_for`, `scf_if`, `scf_if_else`, `static_if`) so the emitted
+# recipe stays
 # PARAMETRIC (the spec is bound later, in the C VM, at JIT time).
 #
 # Recording is an OFFLINE step (CPython is fine here); the resulting recipe is
@@ -254,6 +255,17 @@ class RecipeRecorder:
             self._stack.pop()
             self._emit({"op": "scf_if", "cond": cond.reg, "then": body})
 
+    def scf_if_else(self, cond):
+        """Runtime if/else (converging), mirroring ``IRBuilder.scf_if_else``::
+
+        with rec.scf_if_else(cond) as (then_ctx, else_ctx):
+            with then_ctx:
+                ...
+            with else_ctx:
+                ...
+        """
+        return _IfElseRec(self, cond)
+
     def static_if(self, pred, then_fn, else_fn):
         """Compile-time branch; BOTH arms are recorded (the VM picks one per
         spec at JIT time). Each arm's result is aliased to a common output."""
@@ -321,6 +333,41 @@ class _StaticForRec:
             }
         )
         self.results = [V(name, init.type) for name, init in self.carried]
+        return False
+
+
+class _ArmRec:
+    """One arm of an scf_if_else: routes recorded instrs into `body`."""
+
+    def __init__(self, rec, body):
+        self._rec = rec
+        self._body = body
+
+    def __enter__(self):
+        self._rec._stack.append(self._body)
+        return self
+
+    def __exit__(self, *exc):
+        self._rec._stack.pop()
+
+
+class _IfElseRec:
+    """`with rec.scf_if_else(cond) as (then_ctx, else_ctx)`. The instruction is
+    placed when the block opens, so it sits where IRBuilder emits the op; the
+    arms fill its bodies."""
+
+    def __init__(self, rec, cond):
+        self._rec = rec
+        self._cond = cond
+
+    def __enter__(self):
+        tbody, ebody = [], []
+        self._rec._emit(
+            {"op": "scf_if_else", "cond": self._cond.reg, "then": tbody, "else": ebody}
+        )
+        return _ArmRec(self._rec, tbody), _ArmRec(self._rec, ebody)
+
+    def __exit__(self, *exc):
         return False
 
 

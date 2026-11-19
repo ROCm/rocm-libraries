@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/pair.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
@@ -50,8 +57,8 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> unique_by_key_
   OutputIterator2 values_output,
   BinaryPredicate binary_pred)
 {
-  using InputKeyType    = typename thrust::iterator_traits<InputIterator1>::value_type;
-  using OutputValueType = typename thrust::iterator_traits<OutputIterator2>::value_type;
+  using InputKeyType    = thrust::detail::it_value_t<InputIterator1>;
+  using OutputValueType = thrust::detail::it_value_t<OutputIterator2>;
 
   if (keys_first != keys_last)
   {
