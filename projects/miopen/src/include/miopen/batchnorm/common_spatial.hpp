@@ -543,23 +543,16 @@ inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescrip
             }
         }
 
-        // Vector sizes that are two largest ones dividing c and 1
+        // All powers of 2 dividing c and 1
         std::vector<size_t> vectorsizes;
         for(size_t vs = kMaxSupportedVectorSize; vs > 1; vs >>= 1)
         {
-            if(c % vs == 0 && vectorsizes.size() < 2)
+            if(c % vs == 0)
             {
                 vectorsizes.push_back(vs);
             }
         }
         vectorsizes.push_back(1);
-
-        // zlocalsize is 1, but with batch sizes >= 10, zlocalsize 2 can be beneficial
-        std::vector<size_t> zlocalsize_vector = {1};
-        if(n >= 10)
-        {
-            zlocalsize_vector.push_back(2);
-        }
 
         for(const size_t& vectorsize : vectorsizes)
         {
@@ -573,63 +566,62 @@ inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescrip
                 }
             }
 
+            // The workgroup size is limited by the shared memory, which is fixed, so with
+            // vectorization the maximum is 1024 / vectorsize
+            const size_t max_localsize = 1024 / vectorsize;
+
             for(const size_t& xlocalsize : xlocalsize_vector)
             {
+                // zlocalsize is a power of 2 dividing n until it reaches the batch size
+                std::vector<size_t> zlocalsize_vector;
+                for(size_t z = 1; z <= static_cast<size_t>(n) && n % z == 0; z <<= 1)
+                {
+                    zlocalsize_vector.push_back(z);
+                }
+
                 for(const size_t& zlocalsize : zlocalsize_vector)
                 {
-                    // Use multiple zblocks if batch size is large enough.
-                    // nelements = 32 is an optimal value for the current implementation when
-                    // the batch size is large enough.
-                    std::vector<size_t> nelements_vector = {n / zlocalsize};
-                    if(n / zlocalsize > 64)
-                    {
-                        nelements_vector.push_back(32);
-                    }
-
                     for(size_t ylocalsize = 8; ylocalsize <= 64; ylocalsize <<= 1)
                     {
-                        for(const size_t& nelements : nelements_vector)
+                        if(xlocalsize * ylocalsize * zlocalsize > max_localsize)
                         {
-                            // Restriction of the current implementation
-                            if(nelements == 0 || n % nelements != 0)
-                            {
-                                continue;
-                            }
+                            continue;
+                        }
 
-                            // Restriction based on the number of CUs
-                            const size_t xgridsize =
-                                xlocalsize * ((cv + xlocalsize - 1) / xlocalsize);
-                            const size_t ygridsize =
-                                ylocalsize * ((in_cstride + ylocalsize - 1) / ylocalsize);
-                            const size_t zgridsize =
-                                zlocalsize * ((n / nelements + zlocalsize - 1) / zlocalsize);
-                            const size_t nWG = (xgridsize / xlocalsize) * (ygridsize / ylocalsize) *
-                                               (zgridsize / zlocalsize);
-                            if(in_cstride > 64 && nWG < problem.GetMinWorkgroups())
-                            {
-                                continue;
-                            }
+                        // All the batch is processed by a single block of z threads
+                        const size_t nelements = n / zlocalsize;
 
-                            // Avoid inserting the default spatial multiple instance twice
-                            if(vectorsize == vectorsize_default &&
-                               xlocalsize == xlocalsize_default &&
-                               ylocalsize == ylocalsize_default &&
-                               zlocalsize == zlocalsize_default && nelements == nelements_default)
-                            {
-                                continue;
-                            }
+                        // Restriction based on the number of CUs
+                        const size_t xgridsize = xlocalsize * ((cv + xlocalsize - 1) / xlocalsize);
+                        const size_t ygridsize =
+                            ylocalsize * ((in_cstride + ylocalsize - 1) / ylocalsize);
+                        const size_t zgridsize =
+                            zlocalsize * ((n / nelements + zlocalsize - 1) / zlocalsize);
+                        const size_t nWG = (xgridsize / xlocalsize) * (ygridsize / ylocalsize) *
+                                           (zgridsize / zlocalsize);
+                        if(in_cstride > 64 && nWG < problem.GetMinWorkgroups())
+                        {
+                            continue;
+                        }
 
-                            // Check if the instance is applicable and add it
-                            if(IsSpatialMultipleApplicable(problem,
-                                                           vectorsize,
-                                                           stash_values,
-                                                           ylocalsize,
-                                                           zlocalsize,
-                                                           nelements))
-                            {
-                                valid_kernels.push_back(GetKernelIdFromVariant(
-                                    2, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements));
-                            }
+                        // Avoid inserting the default spatial multiple instance twice
+                        if(vectorsize == vectorsize_default && xlocalsize == xlocalsize_default &&
+                           ylocalsize == ylocalsize_default && zlocalsize == zlocalsize_default &&
+                           nelements == nelements_default)
+                        {
+                            continue;
+                        }
+
+                        // Check if the instance is applicable and add it
+                        if(IsSpatialMultipleApplicable(problem,
+                                                       vectorsize,
+                                                       stash_values,
+                                                       ylocalsize,
+                                                       zlocalsize,
+                                                       nelements))
+                        {
+                            valid_kernels.push_back(GetKernelIdFromVariant(
+                                2, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements));
                         }
                     }
                 }
