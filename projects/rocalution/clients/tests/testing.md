@@ -302,13 +302,13 @@ suites skip in the `quick`, `standard` and `comprehensive` categories and run in
 test operations that the unit tests now check against independent references. They are kept until
 a review of each suite confirms that the unit tests cover all of its checks, on every platform and
 in every CI job that runs the suite. A suite that is covered is then deleted, not maintained next to
-the unit tests. The `local_matrix_allocations`, `local_matrix_zero`, `local_matrix_set_data_ptr`,
-`local_matrix_multicoloring` suites and the ItLUSolve case of `local_matrix_itsolve` have been
-deleted on that basis; the Jenkins test command runs both unit-test binaries after
-`rocalution-test`, so its lanes keep these checks. A clients-only build (`install.sh
---clients-only`) does not build the unit tests, and the `rtest.xml` sets run only
-`rocalution-test`, so neither runs these checks any more. The solver, preconditioner and AMG suites
-stay as the integration layer.
+the unit tests. The `local_matrix_allocations`, `local_matrix_zero`, `local_matrix_set_data_ptr`
+and `local_matrix_multicoloring` suites and the ItLUSolve case of `local_matrix_itsolve` have been
+deleted on that basis. The Jenkins test command runs both unit-test binaries after
+`rocalution-test`, so the Jenkins lanes still run these checks. A clients-only build (`install.sh
+--clients-only`) doesn't build the unit tests, and the `rtest.xml` sets run only
+`rocalution-test`, so clients-only builds and `rtest.xml` runs no longer run these checks. The
+solver, preconditioner and AMG suites stay as the integration layer.
 
 ---
 
