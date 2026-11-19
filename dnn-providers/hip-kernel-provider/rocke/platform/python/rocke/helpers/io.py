@@ -20,10 +20,20 @@ the most common dtype-promote-on-read pattern.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from typing import Literal
 
-from ..core.ir import BF16, F16, IRBuilder, TemporalHint, Type, Value
+from ..core.ir import (
+    BF8E5M2,
+    BF16,
+    F16,
+    F64,
+    FP8E4M3,
+    IRBuilder,
+    TemporalHint,
+    Type,
+    Value,
+)
 
 
 __all__ = [
@@ -123,27 +133,35 @@ def iter_global_fragment_scalars(
 
 def load_clipped_global_fragment(
     b: IRBuilder,
-    ptr: Value,
-    offset: Value,
-    position: Value,
+    origin: Value,
+    start: Value,
     bound: Value,
     *,
     dtype: Type,
     n: int,
+    read: Callable[[Value, Value, int], Value],
 ) -> Value:
-    """Load a contiguous window run and zero-fill units past its logical bound.
+    """Read a scalar run, zero-filling where ``origin + start + i >= bound``.
 
-    Returns a scalar for ``n=1`` or a packed vector ready for an LDS store.
-    Addresses can use runtime strides; the clip is expressed in logical units.
+    ``read(local_position, valid, i)`` must issue a safe scalar read even when
+    ``valid`` is false. It can clip a local column before striding or choose
+    a safe offset in packed storage. Return a scalar for one unit and a packed
+    vector for multiple units.
     """
     if n <= 0:
         raise ValueError("fragment needs positive width")
-    pad = b.vec_extract(b.zero_vec(dtype, 1), 0)
-    values = list(
-        iter_global_fragment_scalars(
-            b, ptr, offset, dtype=dtype, n=n, align=1, pad=pad, clip=(position, bound)
-        )
-    )
+    values = []
+    for i in range(n):
+        local = b.add(start, b.const_i32(i)) if i else start
+        valid = b.cmp_lt(b.add(origin, local), bound)
+        raw = read(local, valid, i)
+        if dtype in (FP8E4M3, BF8E5M2):
+            pad = b.trunc(b.const_i32(0), dtype)
+        elif dtype == F64:
+            pad = b.const_f64(0.0)
+        else:
+            pad = b.cast_f32_to(b.const_f32(0.0), dtype)
+        values.append(b.select(valid, raw, pad))
     return values[0] if n == 1 else b.vec_pack(values, dtype)
 
 

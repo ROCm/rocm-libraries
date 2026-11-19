@@ -201,6 +201,33 @@ struct rocke_gemm_sync_operand
     rocke_value_t* parity_v;
 };
 
+struct rocke_gemm_clipped_operand
+{
+    const rocke_gemm_sync_operand& copy;
+    rocke_value_t* row;
+    rocke_value_t* chunk_id;
+};
+
+static rocke_value_t* rocke_gemm_read_clipped_scalar(
+    rocke_ir_builder_t* b, rocke_value_t* local, rocke_value_t* valid, int i, const void* user)
+{
+    const auto& chunk = *static_cast<const rocke_gemm_clipped_operand*>(user);
+    const auto* source = chunk.copy.source;
+    const auto* ctx = chunk.copy.ctx;
+    if(source->rank == 2)
+    {
+        rocke_value_t* base = source->origin[0];
+        rocke_value_t* chunk_start = rocke_b_mul(b, chunk.chunk_id, ctx->c_load_vec);
+        rocke_value_t* element = rocke_b_add(b, chunk_start, rocke_b_const_i32(b, i));
+        rocke_value_t* offset = rocke_b_add(b, base, element);
+        rocke_value_t* safe = rocke_b_select(b, valid, offset, base);
+        return rocke_b_global_load(b, source->view->base, safe, ctx->storage_dtype, 0);
+    }
+    rocke_value_t* safe = rocke_b_select(b, valid, local, rocke_b_const_i32(b, 0));
+    rocke_value_t* indices[3] = {rocke_b_const_i32(b, 0), chunk.row, safe};
+    return rocke_tile_window_load_scalar(b, source, indices, 3);
+}
+
 static void rocke_gemm_copy_sync_chunk(rocke_ir_builder_t* b,
                                        rocke_value_t* row,
                                        rocke_value_t* col,
@@ -210,22 +237,28 @@ static void rocke_gemm_copy_sync_chunk(rocke_ir_builder_t* b,
     const auto& copy = *static_cast<rocke_gemm_sync_operand*>(user);
     auto* ctx = copy.ctx;
     int width = ctx->load_vec;
-    rocke_value_t* src_idx[3] = {rocke_b_const_i32(b, 0), row, col};
-    const int rank = copy.source->rank;
-    if(rank == 2)
-        src_idx[1] = rocke_b_mul(b, chunk_id, ctx->c_load_vec);
     rocke_value_t* value;
     if(ctx->spec->trait.pad_k)
     {
-        rocke_value_t* offset = rocke_tile_window_element_offset(b, copy.source, src_idx, rank);
-        rocke_value_t* position = rocke_b_add(b, copy.k_off, col);
-        value = rocke_b_load_clipped_global_fragment(
-            b, copy.source->view->base, offset, position, ctx->K, ctx->storage_dtype, width);
+        const rocke_gemm_clipped_operand clipped{copy, row, chunk_id};
+        value = rocke_b_load_clipped_global_fragment(b,
+                                                     copy.k_off,
+                                                     col,
+                                                     ctx->K,
+                                                     ctx->storage_dtype,
+                                                     width,
+                                                     rocke_gemm_read_clipped_scalar,
+                                                     &clipped);
     }
-    else if(width == 1)
-        value = rocke_tile_window_load_scalar(b, copy.source, src_idx, rank);
     else
-        value = rocke_tile_window_load_vec(b, copy.source, src_idx, rank, width);
+    {
+        rocke_value_t* src_idx[3] = {rocke_b_const_i32(b, 0), row, col};
+        const int rank = copy.source->rank;
+        if(rank == 2)
+            src_idx[1] = rocke_b_mul(b, chunk_id, ctx->c_load_vec);
+        value = width == 1 ? rocke_tile_window_load_scalar(b, copy.source, src_idx, rank)
+                           : rocke_tile_window_load_vec(b, copy.source, src_idx, rank, width);
+    }
 
     rocke_value_t* dst_row = row;
     if(ctx->db && copy.parity_v != NULL)

@@ -39,27 +39,37 @@ static int rocke_io_is_vec_width(int n)
 }
 
 rocke_value_t* rocke_b_load_clipped_global_fragment(rocke_ir_builder_t* b,
-                                                    rocke_value_t* ptr,
-                                                    rocke_value_t* offset,
-                                                    rocke_value_t* position,
+                                                    rocke_value_t* origin,
+                                                    rocke_value_t* start,
                                                     rocke_value_t* bound,
                                                     const rocke_type_t* dtype,
-                                                    int n)
+                                                    int n,
+                                                    rocke_clipped_fragment_reader_t read,
+                                                    const void* user)
 {
     if(!rocke_i_live(b))
         return NULL;
     if(n <= 0)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "fragment needs positive width");
-    rocke_value_t* pad = rocke_b_vec_extract(b, rocke_b_zero_vec(b, dtype, 1), 0);
+    if(read == NULL)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "clipped fragment needs a reader");
     std::vector<rocke_value_t*> values;
     values.reserve(n);
     for(int i = 0; i < n; ++i)
     {
-        rocke_value_t* step = i ? rocke_b_const_i32(b, i) : NULL;
-        rocke_value_t* address = step ? rocke_b_add(b, offset, step) : offset;
-        rocke_value_t* coord = step ? rocke_b_add(b, position, step) : position;
+        rocke_value_t* local = i ? rocke_b_add(b, start, rocke_b_const_i32(b, i)) : start;
+        rocke_value_t* coord = rocke_b_add(b, origin, local);
         rocke_value_t* valid = rocke_b_cmp_lt(b, coord, bound);
-        values.push_back(rocke_b_masked_global_load(b, ptr, address, valid, pad, dtype, 1));
+        rocke_value_t* raw = read(b, local, valid, i, user);
+        rocke_value_t* pad;
+        if(rocke_type_eq(dtype, rocke_fp8e4m3()) || rocke_type_eq(dtype, rocke_bf8e5m2()))
+            pad = rocke_b_trunc(b, rocke_b_const_i32(b, 0), dtype);
+        else if(rocke_type_eq(dtype, rocke_f64()))
+            pad = rocke_b_const_f64(b, 0.0);
+        else
+            pad = rocke_b_cast_f32_to(b, rocke_b_const_f32(b, 0.0), dtype);
+        values.push_back(rocke_b_select(b, valid, raw, pad));
     }
     return n == 1 ? values[0] : rocke_b_vec_pack(b, values.data(), n, dtype);
 }

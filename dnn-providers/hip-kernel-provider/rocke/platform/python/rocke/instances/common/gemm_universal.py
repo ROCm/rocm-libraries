@@ -1989,27 +1989,33 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
 
         def copy_operand(loader, source, dest):
             def emit(row, col, chunk_id):
-                zero = b.const_i32(0)
-                # Keep packed reads linear instead of reconstructing the
-                # same address from the logical row and column.
-                if source.rank == 2:
-                    indices = (zero, b.mul(chunk_id, chunk_grid[1]))
-                else:
-                    indices = (zero, row, col)
                 if spec.trait.pad_k:
+
+                    def read(local, valid, i):
+                        if source.rank == 2:
+                            base = source.origin[0]
+                            offset = b.add(
+                                base,
+                                b.add(b.mul(chunk_id, chunk_grid[1]), b.const_i32(i)),
+                            )
+                            safe = b.select(valid, offset, base)
+                            return b.global_load(source.view.base, safe, storage_dtype)
+                        safe = b.select(valid, local, b.const_i32(0))
+                        return source.load_scalar(b, b.const_i32(0), row, safe)
+
                     value = load_clipped_global_fragment(
-                        b,
-                        source.view.base,
-                        source.element_offset(b, *indices),
-                        b.add(k_off, col),
-                        K,
-                        dtype=storage_dtype,
-                        n=load_vec,
+                        b, k_off, col, K, dtype=storage_dtype, n=load_vec, read=read
                     )
-                elif load_vec == 1:
-                    value = source.load_scalar(b, *indices)
                 else:
-                    value = source.load_vec(b, *indices, n=load_vec)
+                    zero = b.const_i32(0)
+                    if source.rank == 2:
+                        indices = (zero, b.mul(chunk_id, chunk_grid[1]))
+                    else:
+                        indices = (zero, row, col)
+                    if load_vec == 1:
+                        value = source.load_scalar(b, *indices)
+                    else:
+                        value = source.load_vec(b, *indices, n=load_vec)
 
                 # Only the LDS row is slot-relative; swizzle the logical row.
                 dst_row = row
