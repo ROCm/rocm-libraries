@@ -49,7 +49,9 @@ struct K1Args
     /// XCD-contiguous block order (CONV_IGEMM_XCD): the device's XCDs, dealt workgroups
     /// round-robin in launch order; 1 or 0 keeps the launch order.
     int xcds;
-    int padding1;
+    /// Register-staged flex tile (CONV_IGEMM_FLEX 2) with splits > 1: the row tile the
+    /// partials start at (a split launch of the trailing row tiles); 0 otherwise.
+    int partialTile;
 };
 
 /// Adds the splits' fp32 partials in split order into the output's element type.

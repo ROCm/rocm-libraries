@@ -1032,6 +1032,42 @@ long long flexSplits(long long tiles, long long kSteps, long long units)
     return best;
 }
 
+FlexTailSplit flexTailSplit(
+    long long rowTiles, long long rowWidth, long long kSteps, long long units, bool tailAlone)
+{
+    constexpr long long MAX_SPLITS = 16;
+    FlexTailSplit best;
+    if(rowTiles < 1 || rowWidth < 1 || units < 1)
+    {
+        return best;
+    }
+    const long long tiles = rowTiles * rowWidth;
+    long long bestCost = divUp(tiles, units) * kSteps;
+    const auto consider = [&](long long first) {
+        const long long tail = (rowTiles - first) * rowWidth;
+        for(long long splits = 2; splits <= MAX_SPLITS; ++splits)
+        {
+            const long long cost
+                = divUp(first * rowWidth, units) * kSteps
+                  + divUp(tail * splits, units) * (divUp(kSteps, splits) + FLEX_SPLIT_COST);
+            if(cost < bestCost)
+            {
+                bestCost = cost;
+                best.splitRowTile = first;
+                best.splits = splits;
+            }
+        }
+    };
+    // The row tiles whose tiles fill whole rounds (none when they fill less than one).
+    const long long full = tiles / units * units / rowWidth;
+    if(tailAlone && full > 0 && full < rowTiles)
+    {
+        consider(full);
+    }
+    consider(0);
+    return best;
+}
+
 int64_t residentBlocksOf(int64_t bm,
                          int64_t bn,
                          int64_t bk,
@@ -1075,7 +1111,7 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
                        bool noSplit,
                        int64_t splitPolicy,
                        int64_t residentBlocks,
-                       bool flex)
+                       int64_t flex)
 {
     if(splitPolicy < 0 || splitPolicy > MAX_SPLIT_POLICY)
     {
@@ -1152,13 +1188,28 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
             return plan;
         }
         plan.splits = static_cast<int>(splitPolicy);
+        plan.partialElems = plan.outElems;
         plan.partialOffset = alignUp(problem.workspaceBytes);
         plan.workspaceBytes
             = plan.partialOffset + static_cast<size_t>(splitPolicy * plan.outElems) * sizeof(float);
         return plan;
     }
     long long splits = 1;
-    if(flex)
+    long long splitRowTile = 0;
+    if(flex == 2)
+    {
+        // One launch of the whole grid (rows within one dispatch) for the tail split.
+        const long long rowWidth = static_cast<long long>(grid->y) * grid->z;
+        const auto split = flexTailSplit(grid->x,
+                                         rowWidth,
+                                         iterations,
+                                         wanted,
+                                         problem.base.epilogue.empty()
+                                             && launchTilesFor(grid->x, 512) == grid->x);
+        splits = split.splits;
+        splitRowTile = split.splitRowTile;
+    }
+    else if(flex != 0)
     {
         splits = flexSplits(tiles, iterations, device_units::dispatchUnits(device));
     }
@@ -1166,8 +1217,11 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
     {
         splits = std::min({divUp(wanted, tiles), iterations / minIterations, MAX_SPLITS});
     }
+    // Rows (output positions forward, input positions backward) of bm a row tile.
+    const long long outChans = forward ? a.k : a.c;
+    const long long partialElems = plan.outElems - splitRowTile * bm * outChans;
     while(splits > 1
-          && (splits * plan.outElems * static_cast<long long>(sizeof(float)) > MAX_PARTIAL_BYTES
+          && (splits * partialElems * static_cast<long long>(sizeof(float)) > MAX_PARTIAL_BYTES
               || grid->z * splits > MAX_GRID_YZ))
     {
         --splits;
@@ -1175,9 +1229,11 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
     if(splits > 1)
     {
         plan.splits = static_cast<int>(splits);
+        plan.splitRowTile = splitRowTile;
+        plan.partialElems = partialElems;
         plan.partialOffset = alignUp(problem.workspaceBytes);
         plan.workspaceBytes
-            = plan.partialOffset + static_cast<size_t>(splits * plan.outElems) * sizeof(float);
+            = plan.partialOffset + static_cast<size_t>(splits * partialElems) * sizeof(float);
     }
     return plan;
 }
@@ -1321,6 +1377,17 @@ long long patchTileLds(const Tile& tile, bool backward, std::string_view arch)
     return std::max(stages, out);
 }
 
+/// The flex tile's form by its atom: 0 none, 1 LDS DMA (16x16x32, gfx950), 2 register-staged
+/// (gfx942).
+int64_t flexForm(const Tile& tile)
+{
+    if(tile.flex == 0)
+    {
+        return 0;
+    }
+    return tile.atom.rfind("mfma16x32_", 0) == 0 ? 1 : 2;
+}
+
 std::optional<Tile> tileOf(const KernelDefinition& kernel)
 {
     Tile tile;
@@ -1354,14 +1421,21 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.splitPolicy = kernel.getIntMetadata("split_policy");
     tile.cfx = kernel.getIntMetadata("cfx");
     tile.flex = kernel.metadata.count("flex") != 0 ? kernel.getIntMetadata("flex") : 0;
-    // The flex tile: 256 positions x 256, 192 or 128 channels of 16-bit 16x16x32 atoms on 4 x 2 waves,
-    // 64-channel k-steps, 8-wide vectors, XCD order; any split policy; every other variant knob off.
+    // The flex tile: 256 positions x 256, 192 or 128 channels of 16-bit 16x16x32 atoms on 4 x 2
+    // waves, 64-channel k-steps, 8-wide vectors, XCD order; any split policy; every other variant
+    // knob off. The register-staged form (16x16x16 / 16x16x4 atoms, gfx942): one 64 KiB-class LDS
+    // stage, BN 128, 128-byte reduction steps (64 16-bit or 32 fp32 channels, 16-byte vectors).
+    const bool flexReg
+        = tile.atom == "mfma16_f16" || tile.atom == "mfma16_bf16" || tile.atom == "mfma16_f32";
+    const int64_t flexElem = tile.atom == "mfma16_f32" ? 4 : 2;
     if(tile.flex != 0
-       && (tile.flex != 1 || (tile.atom != "mfma16x32_f16" && tile.atom != "mfma16x32_bf16")
+       && (tile.flex != 1
+           || (tile.atom != "mfma16x32_f16" && tile.atom != "mfma16x32_bf16" && !flexReg)
            || tile.split || tile.bm != 256 || (tile.bn != 256 && tile.bn != 192 && tile.bn != 128)
-           || tile.bk != 64 || tile.wm != 4 || tile.wn != 2 || tile.vec != 8 || tile.stages != 1
-           || tile.xcd != 1 || tile.halo != 0 || tile.wdirect != 0 || tile.pack != 0 || tile.cf != 0
-           || tile.swz != 0 || tile.dma != 0 || tile.fuse != 0 || tile.large != 0 || tile.patch != 0
+           || (flexReg && tile.bn != 128) || tile.bk != 128 / flexElem || tile.wm != 4
+           || tile.wn != 2 || tile.vec != 16 / flexElem || tile.stages != 1 || tile.xcd != 1
+           || tile.halo != 0 || tile.wdirect != 0 || tile.pack != 0 || tile.cf != 0 || tile.swz != 0
+           || tile.dma != 0 || tile.fuse != 0 || tile.large != 0 || tile.patch != 0
            || tile.cfx != 0))
     {
         return std::nullopt;
@@ -1440,7 +1514,8 @@ int64_t residentBlocksFor(const Tile& tile,
                           const conv_igemm::IgemmProblem& problem,
                           const hipdnn_plugin_sdk::ingestor::DeviceProperties& device)
 {
-    // The flex tile's two activation and three filter stages fill a gfx950 CU's LDS.
+    // The flex tile runs one block a CU: the LDS-DMA form's two activation and three filter
+    // stages fill a gfx950 CU's LDS, the register-staged form's 48 KiB stage a gfx942 one's.
     if(tile.flex != 0)
     {
         return 1;
@@ -1632,10 +1707,12 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    // The flex tile: gfx950, 32-bit buffer offsets, backward data at unit stride (one phase),
-    // and at most FLEX_MAX_TAPS taps along each filter axis (its per-row in-image tap bits).
+    // The flex tile: gfx950 (LDS-DMA form, 16x16x32 atoms) or gfx942 (register-staged form),
+    // 32-bit buffer offsets, backward data at unit stride (one phase), and at most FLEX_MAX_TAPS
+    // taps along each filter axis (its per-row in-image tap bits).
     if(tile->flex != 0
-       && (hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName) != "gfx950"
+       && (hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName)
+               != (tile->atom.rfind("mfma16x32_", 0) == 0 ? "gfx950" : "gfx942")
            || !bufferLoads(*problem) || problem->phases != 1 || a.ft > FLEX_MAX_TAPS
            || a.fr > FLEX_MAX_TAPS || a.fs > FLEX_MAX_TAPS))
     {
@@ -1690,7 +1767,7 @@ bool kernelMatches(const MatchContext& context,
                                                         false,
                                                         0,
                                                         resident,
-                                                        tile->flex != 0);
+                                                        flexForm(*tile));
         const auto chosen = conv_igemm::splitPlanFor(*problem,
                                                      tile->bm,
                                                      tile->bn,
@@ -1700,8 +1777,8 @@ bool kernelMatches(const MatchContext& context,
                                                      false,
                                                      tile->splitPolicy,
                                                      resident,
-                                                     tile->flex != 0);
-        if(chosen.splits == automatic.splits
+                                                     flexForm(*tile));
+        if((chosen.splits == automatic.splits && chosen.splitRowTile == automatic.splitRowTile)
            || (tile->splitPolicy >= 2 && chosen.splits != tile->splitPolicy))
         {
             return false;
@@ -1927,7 +2004,7 @@ public:
                    tile->patch != 0,
                    tile->splitPolicy,
                    residentBlocksFor(*tile, *problem, context.deviceProperties),
-                   tile->flex != 0)
+                   flexForm(*tile))
             .workspaceBytes;
     }
 
@@ -1995,7 +2072,7 @@ public:
         }
         if(tile->flex != 0)
         {
-            options.add("CONV_IGEMM_FLEX", std::to_string(tile->flex));
+            options.add("CONV_IGEMM_FLEX", std::to_string(flexForm(*tile)));
         }
         const int waves = conv_igemm::occupancyTarget(tile->atom,
                                                       tile->bm,
@@ -2021,7 +2098,7 @@ public:
                                        tile->patch != 0,
                                        tile->splitPolicy,
                                        residentBlocksFor(*tile, *problem, context.deviceProperties),
-                                       tile->flex != 0);
+                                       flexForm(*tile));
         // The fused epilogue: in the convolution, and in the split-K reduce that writes the
         // output when the reduction is split. Fusion off adds no option, so the code is that of
         // an unfused build.
@@ -2039,7 +2116,17 @@ public:
         conv.setBlockSize(threads, 1, 1);
         conv.setGridSize(static_cast<unsigned int>(launchTiles), grid->y, gridZ);
         std::optional<IngestorKernelCode> convTail;
-        if(rowTiles % launchTiles != 0)
+        if(plan.splitRowTile > 0)
+        {
+            // The tail split: the leading row tiles unsplit, then the rest split (convTail).
+            conv.setGridSize(static_cast<unsigned int>(plan.splitRowTile), grid->y, grid->z);
+            convTail.emplace(buildIngestorKernelCode(
+                _kernelCompiler, _kpackLoader, context, kernel, options, convSignature(fused)));
+            convTail->setBlockSize(threads, 1, 1);
+            convTail->setGridSize(
+                static_cast<unsigned int>(rowTiles - plan.splitRowTile), grid->y, gridZ);
+        }
+        else if(rowTiles % launchTiles != 0)
         {
             convTail.emplace(buildIngestorKernelCode(
                 _kernelCompiler, _kpackLoader, context, kernel, options, convSignature(fused)));
@@ -2060,7 +2147,7 @@ public:
                                                    reduceSignature(fused)));
             reduce->setBlockSize(COPY_BLOCK, 1, 1);
             reduce->setGridSize(static_cast<unsigned int>(std::clamp<long long>(
-                                    divUpBlocks(plan.outElems), 1, COPY_MAX_BLOCKS)),
+                                    divUpBlocks(plan.partialElems), 1, COPY_MAX_BLOCKS)),
                                 1,
                                 1);
         }
@@ -2218,12 +2305,7 @@ public:
                                                   channelsFirstOutput ? pixels : 1,
                                                   a.k);
         }
-        for(long long first = 0; first < dispatch.rowTiles(); first += dispatch.launchTiles())
-        {
-            args.tileBase = static_cast<int>(first);
-            const bool whole = dispatch.rowTiles() - first >= dispatch.launchTiles();
-            auto& conv
-                = whole ? dispatch.convForStream(stream) : dispatch.convTailForStream(stream);
+        const auto launchConv = [&](compilation::IRunnableKernel& conv) {
             if(fused)
             {
                 conv.launch(stream, args, epiArgs);
@@ -2232,11 +2314,38 @@ public:
             {
                 conv.launch(stream, args);
             }
+        };
+        args.partialTile = 0;
+        if(plan.splitRowTile > 0)
+        {
+            // The tail split: the leading row tiles unsplit, then the rest split into partials
+            // of their rows only.
+            args.splits = 1;
+            args.tileBase = 0;
+            launchConv(dispatch.convForStream(stream));
+            args.splits = plan.splits;
+            args.tileBase = static_cast<int>(plan.splitRowTile);
+            args.partialTile = static_cast<int>(plan.splitRowTile);
+            args.outElems = plan.partialElems;
+            launchConv(dispatch.convTailForStream(stream));
+        }
+        else
+        {
+            for(long long first = 0; first < dispatch.rowTiles(); first += dispatch.launchTiles())
+            {
+                args.tileBase = static_cast<int>(first);
+                const bool whole = dispatch.rowTiles() - first >= dispatch.launchTiles();
+                launchConv(whole ? dispatch.convForStream(stream)
+                                 : dispatch.convTailForStream(stream));
+            }
         }
         if(plan.splits > 1)
         {
-            K1ReduceArgs reduce{
-                args.partial, forward ? operand[2] : operand[0], plan.outElems, plan.splits, 0};
+            // The split rows' output: past the unsplit rows' elements.
+            char* out = static_cast<char*>(forward ? operand[2] : operand[0])
+                        + (plan.outElems - plan.partialElems)
+                              * static_cast<long long>(problem.elementBytes);
+            K1ReduceArgs reduce{args.partial, out, plan.partialElems, plan.splits, 0};
             if(fused)
             {
                 dispatch.reduceForStream(stream).launch(stream, reduce, epiArgs);
