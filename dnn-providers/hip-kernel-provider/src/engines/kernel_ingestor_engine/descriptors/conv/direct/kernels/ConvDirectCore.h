@@ -850,6 +850,8 @@ __device__ inline void k2Drive(const K2Block& b,
 // TO: output type (T, or fp32 for the three-bf16 form whose operands are bf16).
 // SPLIT 1: split-C config; the block reduces chunks [z cps, (z+1) cps) and the epilogue writes fp32
 // partials to ws[z] (k2SplitReduce finishes). SPLIT 0 writes TO to y and needs splits = 1.
+// Always inlined into its kernel: the largest register-path tiles otherwise compile to a call
+// that spills its registers to scratch.
 template <class T,
           class Atom,
           int KD,
@@ -869,7 +871,7 @@ template <class T,
           int CF = 0,
           int CF_RUN = 2,
           int XPF = 0>
-__device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
+__device__ __attribute__((always_inline)) void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = Atom::WAVE;
     constexpr int THREADS = WM * WN * WAVE;
@@ -1104,13 +1106,14 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
                 }
 #endif
             };
-            // Past the last chunk the tail reloads this chunk's first steps (unused): the same
-            // loads on every path keep the compiler's waits exact.
+            // The tail loads the next chunk's first steps on every path: past the last chunk the
+            // cursor's chunk and tap are back at the first (in range, unused), and the same loads
+            // on every path keep the compiler's waits exact.
             auto loadB = [&](int q, Frag(&bf)[NB][FN]) {
                 if(q < NQ)
                     loadBAt(cc, dt, q, bf);
                 else
-                    loadBAt(more ? cnx : cc, dtn, q - NQ, bf);
+                    loadBAt(cnx, dtn, q - NQ, bf);
             };
             // Weight fragments PD steps ahead, in a ring indexed by compile-time step numbers. PD from
             // a ~16-VGPR budget: deep for fp32 (one VGPR per fragment), one step for big fragments.
@@ -1375,17 +1378,6 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
         = SPLIT ? reinterpret_cast<TS*>(
                       a.ws + static_cast<long long>(blockIdx.z) * a.n * a.dout * a.ho * a.wo * a.k)
                 : reinterpret_cast<TS*>(a.y);
-    // The channels-last store's arguments as separate scalars and the block's output base
-    // (elements): read from the argument block inside the epilogue they reload whole spilled
-    // argument registers on every store.
-    const int eK = __builtin_amdgcn_readfirstlane(a.k);
-    const int eWo = __builtin_amdgcn_readfirstlane(a.wo);
-    const int eTw = __builtin_amdgcn_readfirstlane(a.tw);
-    const int eHo = __builtin_amdgcn_readfirstlane(a.ho);
-    const long long ePlane = static_cast<long long>(eHo) * eWo * eK;
-    const long long eBase
-        = static_cast<long long>(b.img) * __builtin_amdgcn_readfirstlane(a.dout) * ePlane
-          + (static_cast<long long>(b.oh0) * eWo + b.ow0) * eK;
     // Epilogue: per DIM-row slab, accumulators to the wave's LDS strip, then 16-byte rows to
     // global. The strips use the halo stage not holding the next chunk: all waves are done with it
     // after the barrier, and the next chunk's barrier orders the strips before its reuse.
@@ -1489,18 +1481,21 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
                     const int col = (v - rr * RV) * VO;
                     const int m = wm * WTM + i * DIM + rr;
                     const int nn = n0 + wn * WTN + col;
-                    if(m >= tilePix || nn >= eK)
+                    if(m >= tilePix || nn >= a.k)
                         continue;
-                    const int ohl = m / eTw, owl = m - ohl * eTw;
-                    if(b.oh0 + ohl >= eHo || b.ow0 + owl >= eWo)
+                    const int ohl = m / a.tw, owl = m - ohl * a.tw;
+                    const int oh = b.oh0 + ohl, ow = b.ow0 + owl;
+                    if(oh >= a.ho || ow >= a.wo)
                         continue;
                     const long long o
-                        = eBase + od * ePlane + static_cast<long long>(ohl * eWo + owl) * eK + nn;
-                    if(nn + VO <= eK && eK % VO == 0)
+                        = (((static_cast<long long>(b.img) * a.dout + od) * a.ho + oh) * a.wo + ow)
+                              * a.k
+                          + nn;
+                    if(nn + VO <= a.k && a.k % VO == 0)
                         *reinterpret_cast<Raw*>(out + o)
                             = *reinterpret_cast<const Raw*>(strip + rr * OLD + col);
                     else
-                        for(int e = 0; e < VO && nn + e < eK; ++e)
+                        for(int e = 0; e < VO && nn + e < a.k; ++e)
                             out[o + e] = strip[rr * OLD + col + e];
                 }
             }
@@ -1546,7 +1541,7 @@ template <class T,
           int RING = 1,
           int PIPE = 0,
           int HALO = k2HaloMax((THREADS / NT) * TM, R, S)>
-__device__ void k2ConvFma(const K2Args& a CONV_EPI_FN_PARAM)
+__device__ __attribute__((always_inline)) void k2ConvFma(const K2Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int BN = NT * TN;
     constexpr int LDH = HALO + 1;
