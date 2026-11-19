@@ -2490,12 +2490,8 @@ def build_unified_attention_2d_tiled(
         # dwords in {1, 3, 4}; on CDNA3 only 1 (4 bytes/lane) legalises for
         # the load-*to-LDS* form, so the candidate list is clamped here.
         tile_bytes = T * HD  # 1 byte per fp8 element
-        fp8_dword_candidates = [
-            (d, by)
-            for (d, by) in [(4, 16), (3, 12), (1, 4)]
-            if d in attn_arch_caps("gfx942").lds_dma_dwords
-        ]
-        for dwords_try, bytes_per_lane in fp8_dword_candidates:
+        for dwords_try in sorted(attn_arch_caps("gfx942").lds_dma_dwords, reverse=True):
+            bytes_per_lane = dwords_try * 4
             payload = THREADS * bytes_per_lane
             if tile_bytes >= payload and tile_bytes % payload == 0:
                 K_FP8_DWORDS = dwords_try

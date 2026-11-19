@@ -32,6 +32,7 @@ from functools import cached_property
 
 from rocke.core.arch.target import MmaOp
 from rocke.core.ir import IRBuilder, Value
+from rocke.helpers.attention_arch_caps import ASM_TAIL_NOP_MAX
 
 from ._attention_bwd_caps import (
     ASM_MFMA_VALU_LEAD_WAIT_STATES,
@@ -172,8 +173,8 @@ def mma_agpr_asm_steps(
         raise ValueError("an asm MFMA cluster needs at least one K step")
     mnem = mfma_asm_mnemonic(g.arch, g.dtype, g.atom_k)
     nop = AGPR_ASM_TAIL_NOP[g.atom_k] if tail_nop is None else int(tail_nop)
-    if not 0 <= nop <= 15:
-        raise ValueError(f"s_nop count {nop} outside [0, 15]")
+    if not 0 <= nop <= ASM_TAIL_NOP_MAX:
+        raise ValueError(f"s_nop count {nop} outside [0, {ASM_TAIL_NOP_MAX}]")
     if (
         isinstance(lead_wait, bool)
         or not isinstance(lead_wait, int)

@@ -819,6 +819,12 @@ _SUPPORTED_HEAD_SIZES = (64, 128)
 # Per-lane width of every K/V async-DMA instruction: the widest gfx942 has
 # (1 dword), from the attention capability table.
 _DMA_DWORDS = attn_arch_caps("gfx942").max_lds_dma_dwords
+# The per-lane LDS addresses (lane * 2 halves) are written for 1-dword lanes.
+if _DMA_DWORDS != 1:
+    raise RuntimeError(
+        "gfx942 dense attention lane addressing assumes a 1-dword LDS-DMA width; "
+        f"the capability table gives {_DMA_DWORDS}"
+    )
 
 # Elements moved into LDS by ONE async-DMA instruction: 64 lanes x _DMA_DWORDS
 # (4 B) / 2 B per element. wave64 and a 2-byte dtype are the only cases this kernel

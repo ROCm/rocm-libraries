@@ -89,6 +89,13 @@ MFMA_N = 16
 # vmcnt field is 6 bits.
 SEGMENT_THREADS = 64
 KV_DMA_DWORDS = attn_arch_caps("gfx950").max_lds_dma_dwords
+# The KV swizzle (one lane payload = one 16-byte chunk, tid * 8 halves) is
+# written for 4-dword lanes.
+if KV_DMA_DWORDS != 4:
+    raise RuntimeError(
+        "gfx950 tiled 3D attention lane addressing assumes a 4-dword LDS-DMA "
+        f"width; the capability table gives {KV_DMA_DWORDS}"
+    )
 KV_HALVES_PER_LANE = KV_DMA_DWORDS * 2
 KV_HALVES_PER_CALL = SEGMENT_THREADS * KV_HALVES_PER_LANE
 MAX_VMCNT = (1 << 6) - 1

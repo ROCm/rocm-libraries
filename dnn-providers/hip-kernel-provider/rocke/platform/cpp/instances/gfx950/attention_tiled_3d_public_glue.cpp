@@ -44,11 +44,10 @@
  *
  * ARCH GATE NOTE (validate_tiled_attention_arch). The Python validator
  * (instances/common/attention_arch.py) admits the gfx950 wide-K + ds_read_tr
- * path and the gfx942 narrow 16x16x16 strided-V path. The C arch surface
- * (rocke/helper_rocke.core.arch.h) exposes op_for_shape but not the
- * memory.has_ds_read_tr predicate, so the wide-K admission is reproduced via the
- * catalogued 16x16x32 f16 atom only (the canonical wide-K marker). The fallback
- * reason strings mirror the Python text byte-for-byte.
+ * path and the gfx942 narrow 16x16x16 strided-V path. The wide-K admission here
+ * requires both the catalogued 16x16x32 f16 atom and memory.has_ds_read_tr, as
+ * the Python does. The fallback reason strings mirror the Python text
+ * byte-for-byte.
  */
 #include <math.h>
 #include <stdio.h>
@@ -779,6 +778,17 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
      * delivers the widest gfx950 width, 4 DWORDS (8 halves) per lane; no
      * wide-b128 sync path. ---- */
     out->ASYNC_LDS_DWORDS = rocke_attn_max_lds_dma_dwords("gfx950");
+    /* The KV swizzle (one lane payload = one 16-byte chunk) is written for
+     * 4-dword lanes. */
+    if(out->ASYNC_LDS_DWORDS != 4)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "gfx950 tiled 3D attention lane addressing assumes a 4-dword LDS-DMA "
+                        "width; the capability table gives %d",
+                        out->ASYNC_LDS_DWORDS);
+        return false;
+    }
     out->HALVES_PER_LANE = out->ASYNC_LDS_DWORDS * 2; /* 8 */
     out->KV_HALVES_PER_CALL = out->THREADS * ROCKE_ATTN3D950_KV_HALVES_PER_LANE;
 

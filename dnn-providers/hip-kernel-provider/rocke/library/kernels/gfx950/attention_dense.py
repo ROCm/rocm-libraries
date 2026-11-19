@@ -156,6 +156,13 @@ GFX950_DENSE_LAYOUTS = MappingProxyType(
 # path the widest (4 dwords, dwordx4).
 _DMA_DWORDS = min(attn_arch_caps("gfx950").lds_dma_dwords)
 _WIDE_DMA_DWORDS = attn_arch_caps("gfx950").max_lds_dma_dwords
+# The per-lane LDS addresses below are written for these two widths (lane * 2
+# halves on the default path, 8-half d_buckets on the wide path).
+if (_DMA_DWORDS, _WIDE_DMA_DWORDS) != (1, 4):
+    raise RuntimeError(
+        "gfx950 dense attention lane addressing assumes LDS-DMA widths (1, 4); "
+        f"the capability table gives ({_DMA_DWORDS}, {_WIDE_DMA_DWORDS})"
+    )
 
 _DEFAULT_GFX950_LAYOUT = GFX950_DENSE_LAYOUTS["default"]
 

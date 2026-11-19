@@ -2091,6 +2091,12 @@ def build_unified_attention_2d_tiled(
     # 512 halfs = 1024 bytes, i.e. a contiguous slice of the natural [T, HD]
     # tile. This works for HD=128 and HD=256 without changing the LDS layout.
     KV_DMA_DWORDS = attn_arch_caps("gfx950").max_lds_dma_dwords
+    # lane_half_base (tid * 8 halves) below is written for 4-dword lanes.
+    if KV_DMA_DWORDS != 4:
+        raise RuntimeError(
+            "gfx950 tiled 2D attention lane addressing assumes a 4-dword LDS-DMA "
+            f"width; the capability table gives {KV_DMA_DWORDS}"
+        )
     KV_HALVES_PER_CALL = THREADS * KV_DMA_DWORDS * 2
     assert (T * HD) % KV_HALVES_PER_CALL == 0
     kv_calls_per_tile = (T * HD) // KV_HALVES_PER_CALL
@@ -2110,11 +2116,8 @@ def build_unified_attention_2d_tiled(
         # nw=4 -> 2048 bytes/tile vs 4096 bytes/full-call), drop to a
         # narrower per-lane payload so the loader still tiles cleanly.
         tile_bytes = T * HD  # 1 byte per fp8 element
-        for dwords_try, bytes_per_lane in [
-            (d, by)
-            for (d, by) in [(4, 16), (3, 12), (1, 4)]
-            if d in attn_arch_caps("gfx950").lds_dma_dwords
-        ]:
+        for dwords_try in sorted(attn_arch_caps("gfx950").lds_dma_dwords, reverse=True):
+            bytes_per_lane = dwords_try * 4
             payload = THREADS * bytes_per_lane
             if tile_bytes >= payload and tile_bytes % payload == 0:
                 K_FP8_DWORDS = dwords_try

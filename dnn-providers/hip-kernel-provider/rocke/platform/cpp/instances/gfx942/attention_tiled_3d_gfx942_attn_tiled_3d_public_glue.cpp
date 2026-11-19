@@ -32,13 +32,12 @@
  *
  * ARCH GATE NOTE (validate_tiled_attention_arch). The Python validator
  * (instances/common/attention_arch.py) admits two families: the gfx950 wide-K +
- * ds_read_tr path and the gfx942 narrow 16x16x16 strided-V path. The C arch
- * surface (rocke/helper_rocke.core.arch.h) exposes op_for_shape but not the
- * memory.has_ds_read_tr predicate, so the wide-K admission is reproduced via the
- * catalogued 16x16x32 f16 atom only (the canonical wide-K marker). On gfx942 the
- * relevant branch is the narrow path (gfx942 in {_NARROW_TILED_2D_ARCHES} AND
- * the 16x16x16 f16+bf16 atoms present), which IS fully reproducible here. The
- * fallback reason strings mirror the Python text byte-for-byte.
+ * ds_read_tr path and the gfx942 narrow 16x16x16 strided-V path. The wide-K
+ * admission here requires both the catalogued 16x16x32 f16 atom and
+ * memory.has_ds_read_tr, as the Python does. On gfx942 the relevant branch is
+ * the narrow path (gfx942 in {_NARROW_TILED_2D_ARCHES} AND the 16x16x16
+ * f16+bf16 atoms present). The fallback reason strings mirror the Python text
+ * byte-for-byte.
  */
 #include <math.h>
 #include <stdio.h>
