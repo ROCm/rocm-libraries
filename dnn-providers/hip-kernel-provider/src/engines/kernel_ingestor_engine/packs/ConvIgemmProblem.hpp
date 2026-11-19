@@ -268,7 +268,9 @@ inline constexpr int64_t MAX_SPLIT_POLICY = 64;
  * config's k-steps span whole taps (tap packing), so a k-step covers bk / (reduction channels)
  * taps; 2 the reduction runs flat (taps x channels in k-steps of bk). @p noSplit (patch configs):
  * one launch whatever the fill; their GEMMs are microsecond-scale, so the reduce launch and the
- * partials' round trip cost more than an under-filled grid.
+ * partials' round trip cost more than an under-filled grid. @p flex (flex tiles, one block a
+ * CU): the default splits only within one round of the device's units, into the count whose
+ * k-steps a split plus FLEX_SPLIT_COST is least (flexSplits); policies 1 and N apply unchanged.
  */
 SplitPlan splitPlanFor(const IgemmProblem& problem,
                        int64_t bm,
@@ -278,7 +280,8 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
                        int64_t pack = 0,
                        bool noSplit = false,
                        int64_t splitPolicy = 0,
-                       int64_t residentBlocks = 0);
+                       int64_t residentBlocks = 0,
+                       bool flex = false);
 
 /**
  * @brief Blocks of a matrix-core config of at least 8 waves (512 threads on gfx9) a CU holds at
@@ -299,6 +302,15 @@ int64_t residentBlocksOf(int64_t bm,
                          int64_t dma,
                          int elementBytes,
                          std::string_view gcnArchName);
+
+/// The flex tile's split count: the tiles times the splits stay within one block per unit, and
+/// among those counts the one whose k-steps per split plus FLEX_SPLIT_COST is least; 1 when the
+/// tiles already fill the units or no split saves steps.
+long long flexSplits(long long tiles, long long kSteps, long long units);
+
+/// The flex tile's fixed cost of one more split, in its 64-channel k-steps (the partials'
+/// round trip and the reduce launch).
+inline constexpr long long FLEX_SPLIT_COST = 14;
 
 /// Whether tap packing serves @p problem with a @p bk k-step: the reduction channels per tap
 /// are fewer than bk and divide it.

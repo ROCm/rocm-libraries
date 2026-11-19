@@ -15,7 +15,7 @@ SPDX-License-Identifier:  MIT
 - **Wins when:** compute-bound dense and grouped layers in fwd and bwd-data, NCHW 16-bit backward data, 3-D fp32, and everything on gfx906 (where MIOpen falls to im2col + rocBLAS). It serves every fwd/bwd graph of the 2K subset.
 - **Loses when:** gfx90a/gfx908 NCHW fp16 forward vs MIOpen's older XDLOPS implicit GEMMs (1.2-1.4x behind), gfx906 NCHW fp16 forward vs its V4R1 kernel (1.55x), stride-1 3x3 where Winograd (K5) or direct (K2) win, strided NCHW bwd-data where K7 wins.
 - **Precision:** fp32 accumulation, one rounding (split-K partials in fp32, summed in split order). Deterministic. No numerical notes on the exact engines; the TF32 siblings report `TENSOR_CORE`.
-- **Instances:** 1832 fwd + 1395 bwd exact configs (214 fwd + 126 bwd of them `cfx`, served only on 1-D channels-first graphs), all runtime-geometry (no compile-time shape tier), 37 large-image twins among them, and 752 fwd + 491 bwd patch configs admitted only on patch convolutions (44 fwd + 88 bwd of them the patch tile); the TF32 siblings list 48 fwd + 45 bwd TF32-class configs (9 + 6 of them patch configs).
+- **Instances:** 1838 fwd + 1401 bwd exact configs (6 of each the gfx950 flex tile; 214 fwd + 126 bwd of them `cfx`, served only on 1-D channels-first graphs), all runtime-geometry (no compile-time shape tier), 37 large-image twins among them, and 752 fwd + 491 bwd patch configs admitted only on patch convolutions (44 fwd + 88 bwd of them the patch tile); the TF32 siblings list 48 fwd + 45 bwd TF32-class configs (9 + 6 of them patch configs).
 - **vs MIOpen:** competes with CK grouped implicit GEMM (`ConvHipImplicitGemm{,3D}Group{Fwd,Bwd}Xdlops`), the older HIP and asm implicit GEMMs, and `GemmFwdRest`/`GemmBwdRest`. Call-weighted factor where K1 is our best: 0.93-1.44x fwd, 1.15-1.47x bwd on matrix-core GPUs; 3.0x / 1.8x on gfx906.
 
 ## Why it exists
@@ -49,6 +49,12 @@ block: stage A (gathered) and B (filter) tiles in LDS -> MMA/FMA over the k-step
 - Matrix-core block of `WM x WN` waves, tile `BM x BN`, k-step `BK`. One LDS buffer per operand: the next k-step's global loads are issued into registers before the current step's multiplies and stored after a barrier. gfx950 `dma` configs instead load straight into a ring of 2-4 swizzled LDS stages.
 - Atoms: MFMA 16x16 and 32x32 (wave64), gfx950 16x16x32 / 32x32x16, gfx908 bf16 forms, WMMA gfx11 (both half-waves hold all k) and gfx12 (half-waves split k), fp32 MFMA, and xf32 on gfx942.
 - FMA kernel: k-major LDS tiles, each thread a `TM x TN` register tile in runs of 4x4; fp16 multiplies pairs of k with `v_dot2_f32_f16`.
+- Flex tile (`flex`, `k1ConvFlex`, gfx950 16-bit): 256 flattened output positions x 256, 192 or 128 channels on eight waves (192: whole tiles of 192 and 384 channels).
+  - The block's rows run on across planes and images, so no spatial tile is padded.
+  - Both operands reach LDS by 16-byte DMA in 64-channel (128-byte) rows: X double-buffered, W triple-buffered. A lane's X rows are fixed for the block and keep their offset at tap 0 plus one in-image bit per tap of each axis, so a step's DMA is a uniform tap delta and one mask test per row.
+  - The reduction walks 64-channel slices outer and taps inner, so consecutive steps read shifted copies of the same rows (L1 hits).
+  - The two wave groups (the channel halves) ping-pong one barrier apart, with `s_setprio` around the multiplies; X's DMA goes out in a step's first half, W's (one step further ahead) in its second.
+  - The epilogue stages each wave's tile in LDS and stores whole 16-byte runs.
 - Epilogue: fp32 accumulators converted once and stored channels-last; `cf` configs write packed channels-first output directly; split configs write fp32 partials indexed like the output.
 
 **Knobs** (each a compile-time define; every config field is a knob so candidates are distinguishable):
@@ -69,6 +75,7 @@ block: stage A (gathered) and B (filter) tiles in LDS -> MMA/FMA over the k-step
 | `patch` | 1: the patch view above on the general loop (forward width fold, backward data one GEMM with the patch scatter); 2: the patch tile | patch convolutions only; backward data writes channels-last dx with a vector dividing S C |
 | `math` `bf16x3` | three-bf16 TF32 form (the `_TF32` engines only) | fp32 graphs |
 | `split_policy` | 0 the analytic split-K plan, 1 none, N (2-64) exactly N splits (`splitPlanFor`) | twins served only where the plan differs from the default's |
+| `flex` | the flex tile (above): `bm` 256, `bn` 256, 192 or 128, `bk` 64, 4 x 2 waves, `vec` 8, `xcd` 1, any `split_policy`, every other knob off | gfx950; 16-bit; 32-bit-addressable problems; backward data at unit stride; at most 10 taps along each filter axis |
 
 **Host side:**
 - Gates: everything the naive parser gates (`parseConvNaiveProblem`, every graph, node and tensor field), plus `N`, `C`, `K`, groups, extents, padding, stride and dilation within 32 bits, row tiles and grid y/z within launch limits. Fwd and bwd only.
@@ -77,6 +84,7 @@ block: stage A (gathered) and B (filter) tiles in LDS -> MMA/FMA over the k-step
   - 0, the analytic default: split only when the tiles under-fill the device: fewer blocks than the CUs hold on gfx9 (2 a CU; for blocks of 8 waves, their resident blocks a CU from threads, LDS and accumulators, `residentBlocksOf`, at most 2; keeping at least 2 k-iterations per split. Smaller blocks measured faster split for 2 than for an occupancy-derived 1), fewer than 1 per WGP on gfx10+ (keeping at least 64, since a split costs about 50 k-steps of partial store there), 1 per CU on gfx1250 (keeping 8); at most 16 splits; partials at most 1 GiB.
   - 1: no split. N from 2 to 64: exactly N splits of an under-filled grid, where each keeps a k-iteration and the partials fit. A filled grid takes no explicit split: its partials would only size the engine's workspace, which is the largest any served config needs (a 154 MB 32-split workspace on a filled 3-channel backward-data grid measured 5-8% slower on gfx950 with the same winning kernel).
   - The gfx9 matrix-core configs that can split have a no-split twin, and the widest tiles (256 x 128 and up) a 32-split twin. The kernel match serves a twin only where its plan differs from the default's, so autotune times distinct plans only.
+  - Flex tiles (one block a CU) under policy 0 split only within one round of the device's CUs, into the count whose k-steps per split plus a fixed cost of 14 k-steps is least (`flexSplits`).
   - A reduce kernel adds the partials in split order.
 - Addressing: buffer loads with 32-bit offsets from a per-block 64-bit base (out-of-range reads return zero, so padding needs no branch); `K1_BUFFER=0` switches to 64-bit global loads when a block's rows or the filter could span 2^31 bytes. A grid past 2^32 work items runs as consecutive launches (`tileBase`).
 - Occupancy: the swizzled 128x128x64 WMMA tile with 4x2 waves gets `waves_per_eu` 4 on gfx1100, gfx1101 and gfx1151 (1.5x VGPR file), where the compiler otherwise spills it and runs 1.6x slower.

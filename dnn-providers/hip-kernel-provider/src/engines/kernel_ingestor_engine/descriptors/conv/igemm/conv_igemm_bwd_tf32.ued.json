@@ -28,7 +28,8 @@
     "large",
     "patch",
     "split_policy",
-    "cfx"
+    "cfx",
+    "flex"
   ],
   "behavior_notes": [
     "runtime_compilation"
