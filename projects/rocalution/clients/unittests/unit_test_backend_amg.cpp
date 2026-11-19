@@ -588,9 +588,8 @@ TYPED_TEST(backend_amg, pmis_unassigned_nodes_join_a_neighbouring_aggregate)
     EXPECT_EQ(a[8], -2);
 }
 
-// j influences i if a_ij < eps min_k a_ik, or a_ij > eps max_k a_ik if the diagonal of i
-// is negative, never on the diagonal. omega counts the rows that i influences, plus a
-// random number in [0, 1).
+// j influences i if a_ij < eps min_k a_ik, never on the diagonal. omega counts the rows
+// that i influences, plus a random number in [0, 1).
 TYPED_TEST(backend_amg, rs_strong_influences_compare_with_the_most_negative_coupling)
 {
     using T = typename TypeParam::value_type;
@@ -640,12 +639,52 @@ TYPED_TEST(backend_amg, rs_strong_influences_compare_with_the_most_negative_coup
         EXPECT_GE(omega[i], static_cast<float>(influenced[i])) << "node " << i;
         EXPECT_LT(omega[i], static_cast<float>(influenced[i] + 1)) << "node " << i;
     }
+}
 
-    // Scaled by -1, every row has a negative diagonal. In row 0, a_02 = 0.2 lies below the
-    // threshold 0.25 and a_03 = -0.5 has the sign of the diagonal, so neither is strong.
-    const Csr<T> negated = transformed(ref, [](int, int, T v) { return -v; });
-    const auto   S       = this->strong_influences(negated, 0.25f, 0, nullptr);
-    EXPECT_EQ(S, rs_strength(negated, 0.25));
+// If the diagonal of i is negative, j influences i if a_ij > eps max_k a_ik instead, so
+// the matrix above scaled by -1 has the same strong couplings
+TYPED_TEST(backend_amg,
+           rs_strong_influences_compare_with_the_most_positive_coupling_for_a_negative_diagonal)
+{
+    using T = typename TypeParam::value_type;
+    Csr<T> ref(4);
+    ref.add(0, -4.0);
+    ref.add(1, 1.0);
+    ref.add(2, 0.2);
+    ref.add(3, -0.5);
+    ref.end_row();
+    ref.add(0, 1.0);
+    ref.add(1, -3.0);
+    ref.add(2, 1.0);
+    ref.end_row();
+    ref.add(0, 0.2);
+    ref.add(1, 1.0);
+    ref.add(2, -2.0);
+    ref.add(3, 0.25);
+    ref.end_row();
+    ref.add(0, -0.5);
+    ref.add(2, 0.25);
+    ref.add(3, -1.0);
+    ref.end_row();
+
+    // In row 0, a_02 = 0.2 lies below the threshold 0.25 and a_03 = -0.5 has the sign of
+    // the diagonal, so neither is strong. a_23 = 0.25 lies exactly on the threshold 0.25 * 1.
+    const auto S = this->strong_influences(ref, 0.25f, 0, nullptr);
+    EXPECT_EQ(S,
+              (std::vector<bool>{false,
+                                 true,
+                                 false,
+                                 false,
+                                 true,
+                                 false,
+                                 true,
+                                 false,
+                                 true,
+                                 false,
+                                 false,
+                                 false,
+                                 true,
+                                 false}));
     EXPECT_EQ(S, rs_strength(ref, 0.25));
 }
 
@@ -736,6 +775,16 @@ TYPED_TEST(backend_amg, rs_strong_influences_of_a_grid_and_its_negation)
     }
     const auto S_negated = this->strong_influences(negated, 0.25f, 0, nullptr);
     EXPECT_EQ(S_negated, S);
+}
+
+// Row 0 of the fan couples to all 11 other nodes, so it is longer than the 8 lanes that
+// the accelerator gives a row, and the lane holding its diagonal also holds a later
+// coupling. The diagonal sign must survive that coupling.
+TYPED_TEST(backend_amg, rs_strong_influences_of_a_negated_row_longer_than_a_wavefront)
+{
+    using T              = typename TypeParam::value_type;
+    const Csr<T> negated = transformed(band<T>(12, 1, true), [](int, int, T v) { return -v; });
+    EXPECT_EQ(this->strong_influences(negated, 0.25f, 0, nullptr), rs_strength(negated, 0.25));
 }
 
 // A row without diagonal counts as one with a positive diagonal. The negated grid runs
