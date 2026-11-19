@@ -153,6 +153,14 @@ namespace TensileLite
                    || mode == InitMode::Maf2_0UnitScale;
         }
 
+        // The MAF modes prescribe the data of every type, non-block-scaled FP8 included (trig,
+        // or N(0, 1)), so those operands always take initArray.
+        static bool IsMaf(InitMode const& mode)
+        {
+            return mode == InitMode::Maf1_0 || mode == InitMode::Maf2_0
+                   || mode == InitMode::Maf2_0UnitScale;
+        }
+
         static bool IsRandomLike(InitMode const& mode)
         {
             return mode == InitMode::Random || mode == InitMode::RandomNarrow
