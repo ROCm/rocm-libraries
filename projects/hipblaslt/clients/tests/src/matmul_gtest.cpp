@@ -34,6 +34,7 @@
 #include "testing_matmul.hpp"
 #include "testing_matmul_batch_offset.hpp"
 #include "utility.hpp"
+#include <Tensile/Debug.hpp>
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
@@ -1568,7 +1569,7 @@ namespace
         expectScheduling(*gemm, 0, HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO);
     }
 
-    TEST_P(ClientScheduling, smoke_InitializeAppliesModeBeforePreparingArguments)
+    TEST_P(ClientScheduling, smoke_InitializeAppliesModeToProblem)
     {
         SchedulingProblem problem;
         auto              gemm  = problem.make(GetParam());
@@ -1600,6 +1601,113 @@ namespace
     }
 
     INSTANTIATE_TEST_SUITE_P(SingleAndGrouped, ClientScheduling, ::testing::Bool());
+
+    TEST(ClientSchedulingHybrid, smoke_InitializePacksRequestedMode)
+    {
+        int device = 0;
+        ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+        hipDeviceProp_t properties{};
+        ASSERT_EQ(hipGetDeviceProperties(&properties, device), hipSuccess);
+        if(std::string(properties.gcnArchName).find("gfx950") != 0)
+            GTEST_SKIP() << "requires the gfx950 BF16 Hybrid kernels";
+
+        // Reload after the environment guards restore their saved values.
+        struct ReloadDebugOnExit
+        {
+            ~ReloadDebugOnExit()
+            {
+                TensileLite::Debug::Instance().reloadDebugBitsForTest();
+            }
+        } reloadDebug;
+        test_env::ScopedEnv debugBits("TENSILE_DB", "64");
+        test_env::ScopedEnv forceMode("TENSILE_PERSISTENT_HYBRID_FORCE_MODE", "-1");
+        TensileLite::Debug::Instance().reloadDebugBitsForTest();
+
+        hipblaslt_local_handle handle;
+        ASSERT_EQ(hipblasLtSetUniformSummationOrder(handle, 0), HIPBLAS_STATUS_SUCCESS);
+        hipblaslt_ext::Gemm gemm(handle,
+                                 HIPBLAS_OP_T,
+                                 HIPBLAS_OP_N,
+                                 HIP_R_16BF,
+                                 HIP_R_16BF,
+                                 HIP_R_16BF,
+                                 HIP_R_16BF,
+                                 HIPBLAS_COMPUTE_32F);
+        // TN 32x128x256 admits the shipped BF16 Hybrid kernels with a small workspace.
+        device_vector<uint16_t> storage(32 * 256 + 128 * 256 + 2 * 32 * 128);
+        ASSERT_EQ(storage.memcheck(), hipSuccess);
+        auto*                     data  = static_cast<uint16_t*>(storage);
+        float                     alpha = 1, beta = 0;
+        hipblaslt_ext::GemmInputs inputs;
+        inputs.setA(data);
+        inputs.setB(data + 32 * 256);
+        inputs.setC(data + 32 * 256 + 128 * 256);
+        inputs.setD(data + 32 * 256 + 128 * 256 + 32 * 128);
+        inputs.setAlpha(&alpha);
+        inputs.setBeta(&beta);
+        hipblaslt_ext::GemmEpilogue epilogue;
+        epilogue.setScalingAType(HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F);
+        epilogue.setScalingBType(HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F);
+        ASSERT_EQ(gemm.setProblem(32, 128, 256, 1, epilogue, inputs), HIPBLAS_STATUS_SUCCESS);
+        constexpr size_t workspaceBytes = 32 * 1024 * 1024;
+        gemm.setMaxWorkspaceBytes(workspaceBytes);
+        std::vector<hipblasLtMatmulHeuristicResult_t> algorithms;
+        ASSERT_EQ(hipblaslt_ext::getAllAlgos(handle,
+                                             gemm.getGemmType(),
+                                             HIPBLAS_OP_T,
+                                             HIPBLAS_OP_N,
+                                             HIP_R_16BF,
+                                             HIP_R_16BF,
+                                             HIP_R_16BF,
+                                             HIP_R_16BF,
+                                             HIPBLAS_COMPUTE_32F,
+                                             algorithms),
+                  HIPBLAS_STATUS_SUCCESS);
+        auto candidate = std::find_if(algorithms.begin(), algorithms.end(), [&](auto& result) {
+            const auto name = hipblaslt_ext::getKernelNameFromAlgo(handle, result.algo);
+            if(name.find("_TPSSK_") == std::string::npos || name.find("_WAH_") == std::string::npos)
+                return false;
+            for(auto mode :
+                {HIPBLASLT_STREAMK_TILE_SCHEDULING_ON, HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF})
+            {
+                gemm.setStreamKTileSchedulingMode(mode);
+                size_t required = 0;
+                if(gemm.isAlgoSupported(result.algo, required) != HIPBLAS_STATUS_SUCCESS
+                   || required > workspaceBytes)
+                    return false;
+            }
+            return true;
+        });
+        ASSERT_NE(candidate, algorithms.end()) << "no BF16 Hybrid kernel supports both modes";
+        RecordProperty("kernel_name",
+                       hipblaslt_ext::getKernelNameFromAlgo(handle, candidate->algo));
+        SCOPED_TRACE(hipblaslt_ext::getKernelNameFromAlgo(handle, candidate->algo));
+        device_vector<unsigned char> workspace(workspaceBytes);
+        ASSERT_EQ(workspace.memcheck(), hipSuccess);
+        hipblaslt_ext::GemmTuning tuning;
+        for(bool tuned : {false, true})
+        {
+            SCOPED_TRACE(tuned ? "tuned initialize" : "initialize");
+            for(auto mode :
+                {HIPBLASLT_STREAMK_TILE_SCHEDULING_ON, HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF})
+            {
+                SCOPED_TRACE(mode);
+                gemm.setStreamKTileSchedulingMode(mode);
+                ASSERT_EQ(tuned ? gemm.initialize(candidate->algo, tuning, workspace, false)
+                                : gemm.initialize(candidate->algo, workspace, false),
+                          HIPBLAS_STATUS_SUCCESS);
+                uint32_t   packed = 0;
+                const auto name   = mode == HIPBLASLT_STREAMK_TILE_SCHEDULING_ON
+                                        ? "SKTiles|ModeBit"
+                                        : "MagicShiftItersPerTile";
+                ASSERT_TRUE(
+                    hipblaslt_gemm_argument_for_test(GemmDataAccess::data(gemm), name, &packed));
+                // Hybrid kernels read bit 30 of their third scheduling word to choose the queue.
+                EXPECT_EQ((packed >> 30) & 1u,
+                          mode == HIPBLASLT_STREAMK_TILE_SCHEDULING_ON ? 1u : 0u);
+            }
+        }
+    }
 
     using BenchCase = std::tuple<bool, bool, int, hipblasLtStreamKTileSchedulingMode_t>;
     class BenchScheduling : public ::testing::TestWithParam<BenchCase>
@@ -1647,6 +1755,10 @@ namespace
         arg.unit_check               = 0;
         arg.fast_check               = 0;
         arg.timing                   = 0;
+        // One MiB fits more than two of these small GEMMs; the iteration cap selects two blocks.
+        arg.rotating   = 1;
+        arg.cold_iters = 0;
+        arg.iters      = 2;
         if(method == 2)
         {
             SchedulingProblem probe;
@@ -1657,19 +1769,33 @@ namespace
             ASSERT_GE(arg.solution_index, 0) << "no explicit-index candidate";
         }
 
-        int observed = 0;
+        int                          observed = 0;
+        hipblaslt_ext::GemmInstance* first    = nullptr;
         struct SelectionObserved
         {
         };
         hipblaslt_bench::gemm_selection_observer_for_test = [&](auto& gemm) {
             ++observed;
+            SCOPED_TRACE(observed);
+            if(observed == 1)
+                first = &gemm;
+            else
+            {
+                EXPECT_NE(&gemm, first);
+                // Selection queries block zero only. Apply the next instance's
+                // stored request through a support check before inspecting it.
+                hipblasLtMatmulAlgo_t algo{};
+                size_t                workspace = 0;
+                static_cast<void>(gemm.isAlgoSupported(algo, workspace));
+            }
             expectScheduling(gemm, 7, mode);
             // Check forwarding even without a matching grouped kernel, before
             // launch or the no-solution diagnostic.
-            throw SelectionObserved{};
+            if(observed == 2)
+                throw SelectionObserved{};
         };
         EXPECT_THROW(testing_matmul(arg), SelectionObserved);
-        EXPECT_EQ(observed, 1);
+        EXPECT_EQ(observed, 2);
     }
 
     INSTANTIATE_TEST_SUITE_P(

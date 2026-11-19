@@ -326,12 +326,14 @@ operations such as layernorm and amax, ULP-level numerical checks, and Stream-K.
 
 `ClientScheduling` and `BenchScheduling` in `clients/tests/src/matmul_gtest.cpp` check
 the effective SM-count and scheduling requests on single and grouped C++ problems.
-The benchmark tests exercise sizes-and-strides and descriptor setup with heuristic,
-all-algorithm and explicit-index selection, stopping before launch so devices without
-a matching grouped kernel still check forwarding. The API tests cover mode validation,
-descriptor inheritance, preference precedence and
-initialization after replacing a problem. Their `smoke_` names include them in the
-quick shared CI lane.
+The benchmark tests check both rotating-buffer instances with sizes-and-strides and
+descriptor setup through heuristic, all-algorithm and explicit-index selection,
+stopping before launch so devices without a matching grouped kernel still check
+forwarding. The API tests cover mode validation, descriptor inheritance, preference
+precedence and initialization after replacing a problem. On gfx950, `ClientSchedulingHybrid` also
+requires a supported BF16 Hybrid kernel and checks the packed scheduling-mode bit
+after successful calls to both initialization overloads. Their `smoke_` names include
+them in the quick shared CI lane.
 
 Each YAML case validates against a CPU reference computation with tolerance checks, so a failure means a
 real numerical disagreement rather than a crash only.
