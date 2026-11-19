@@ -3179,9 +3179,15 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # ROCKE_EXP_MX_RA_PEND=n: LDS reads the second barrier may leave in flight
     # (the next tile's reads issued after this buffer's last one; default 0).
     # ROCKE_EXP_MX_RA_NOFENCE=1: no scheduling fences between the groups.
+    # ROCKE_EXP_MX_RA=2: one barrier per tile instead. With read-ahead this
+    # buffer's last reads go out at the end of the K-atom before the last, so
+    # one barrier ROCKE_EXP_MX_RA_BAR (default 8) WMMAs into the last K-atom
+    # covers both (own reads drained, own fills landed), and the refill and the
+    # next tile's reads follow it.
     import os as _os_ra
 
-    _mx_ra = _os_ra.environ.get("ROCKE_EXP_MX_RA") == "1"
+    _mx_ra = _os_ra.environ.get("ROCKE_EXP_MX_RA", "") in ("1", "2")
+    _mx_ra_one = _os_ra.environ.get("ROCKE_EXP_MX_RA") == "2"
 
     def _emit_kloop_mx_readahead() -> None:
         nonlocal _for_results
@@ -3259,12 +3265,19 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         n_even = b.add(n_tiles, b.mod(n_tiles, b.const_i32(2)))
         k_end = b.add(k_lo, b.mul(n_even, c_block_k))
 
-        def wmmas(acc, a, bh, sa, sb, which):
-            for j in range(half):
+        bar_at = int(_os_ra.environ.get("ROCKE_EXP_MX_RA_BAR", "8"))
+
+        def wmmas(acc, a, bh, sa, sb, which, lo=0, hi=None):
+            order = [(j, mi) for j in range(half) for mi in range(mfmas_m)]
+            for j, mi in order[lo:hi]:
                 ni = which * half + j
-                for mi in range(mfmas_m):
-                    f = mi * mfmas_n + ni
-                    acc[f] = b.mma(_mx_op.op_id, a[mi], bh[j], acc[f], sa[mi], sb[ni])
+                f = mi * mfmas_n + ni
+                acc[f] = b.mma(_mx_op.op_id, a[mi], bh[j], acc[f], sa[mi], sb[ni])
+
+        def _refill(p, k_cur):
+            k_next = b.add(k_cur, bk2)
+            with b.scf_if(b.cmp_lt(k_next, k_end)):
+                emit_load_phase(A_smem, B_smem, k_next, lds_parity=p)
 
         def _tile(p, k_cur, acc, head):
             acc = list(acc)
@@ -3272,6 +3285,29 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             for s in range(k_atoms):
                 last = s + 1 == k_atoms
                 sp, sk = (1 - p, 0) if last else (p, s + 1)
+                if last and _mx_ra_one:
+                    # This buffer's reads all issued last K-atom: drain them,
+                    # wait for this wave's fill of the next tile, and one
+                    # barrier publishes it and frees this buffer for the refill.
+                    fence()
+                    wmmas(acc, a, b0, sa, sb, 0, 0, bar_at)
+                    fence()
+                    b.inline_asm("s_wait_dscnt 0", "~{memory}")
+                    b.s_wait_tensorcnt(0)
+                    b.s_barrier_bare()
+                    _refill(p, k_cur)
+                    fence()
+                    na, nsa, nsb = rd_head(sp, sk)
+                    fence()
+                    wmmas(acc, a, b0, sa, sb, 0, bar_at)
+                    fence()
+                    nb0 = [rd_b(sp, sk, j) for j in range(half)]
+                    fence()
+                    wmmas(acc, a, b1, sa, sb, 1)
+                    fence()
+                    nb1 = [rd_b(sp, sk, half + j) for j in range(half)]
+                    a, sa, sb, b0, b1 = na, nsa, nsb, nb0, nb1
+                    continue
                 if last:
                     # The next tile has landed (this wave's fills) and is
                     # published to every wave.
@@ -3288,9 +3324,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     # tile two ahead (the issuing pair only; none past the end).
                     b.inline_asm(f"s_wait_dscnt {pend}", "~{memory}")
                     b.s_barrier_bare()
-                    k_next = b.add(k_cur, bk2)
-                    with b.scf_if(b.cmp_lt(k_next, k_end)):
-                        emit_load_phase(A_smem, B_smem, k_next, lds_parity=p)
+                    _refill(p, k_cur)
                     fence()
                 nb0 = [rd_b(sp, sk, j) for j in range(half)]
                 fence()
