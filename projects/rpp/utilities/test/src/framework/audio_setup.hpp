@@ -27,6 +27,7 @@ SOFTWARE.
 
 #include <rpp/rpp.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <vector>
 
@@ -128,6 +129,61 @@ void for_each_audio_padding(const RpptDesc& d, const std::vector<Rpp32s>& length
         const std::size_t used = static_cast<std::size_t>(lengths[n]) * d.c;
         for (std::size_t i = used; i < d.strides.nStride; ++i) fn(n, base + i);
     }
+}
+
+// ---- frequency-time planes ----------------------------------------------------
+//
+// Spectrogram and mel filter bank tensors: per sample, a plane of rows x cols, one channel. NFT
+// puts frequency on the rows and time on the columns, NTF the reverse. Rows are padded like an
+// image row. Each sample's real extent travels beside the descriptor.
+
+struct AudioPlane {
+    Rpp32u rows;
+    Rpp32u cols;
+};
+
+inline RpptDesc make_audio_plane_descriptor(Rpp32u n, Rpp32u maxRows, Rpp32u maxCols,
+                                            RpptLayout layout) {
+    RpptDesc d{};
+    d.numDims = 3;
+    d.offsetInBytes = 0;
+    d.dataType = F32;
+    d.layout = layout;
+    d.n = n;
+    d.c = 1;
+    d.h = maxRows;
+    d.w = maxCols;
+    d.strides.wStride = 1;
+    d.strides.cStride = 1;
+    d.strides.hStride = padded_width(maxCols);
+    d.strides.nStride = maxRows * d.strides.hStride;
+    return d;
+}
+
+inline RpptDesc make_audio_plane_descriptor(const std::vector<AudioPlane>& planes,
+                                            RpptLayout layout) {
+    Rpp32u maxRows = 0, maxCols = 0;
+    for (const AudioPlane& p : planes) {
+        maxRows = std::max(maxRows, p.rows);
+        maxCols = std::max(maxCols, p.cols);
+    }
+    return make_audio_plane_descriptor(static_cast<Rpp32u>(planes.size()), maxRows, maxCols,
+                                       layout);
+}
+
+// Element (row, col) of sample n.
+inline std::size_t audio_plane_index(const RpptDesc& d, Rpp32u n, Rpp32u row, Rpp32u col) {
+    return static_cast<std::size_t>(n) * d.strides.nStride +
+           static_cast<std::size_t>(row) * d.strides.hStride + col;
+}
+
+// fn(n, row, col, idx) for every element within each sample's plane.
+template <typename Fn>
+void for_each_audio_plane_element(const RpptDesc& d, const std::vector<AudioPlane>& planes, Fn fn) {
+    for (Rpp32u n = 0; n < d.n; ++n)
+        for (Rpp32u row = 0; row < planes[n].rows; ++row)
+            for (Rpp32u col = 0; col < planes[n].cols; ++col)
+                fn(n, row, col, audio_plane_index(d, n, row, col));
 }
 
 // ---- buffers ----------------------------------------------------------------

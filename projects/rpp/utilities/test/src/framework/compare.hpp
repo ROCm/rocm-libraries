@@ -176,6 +176,19 @@ inline ::testing::AssertionResult compare_audio_padding(const Rpp32f* actual, co
     return mismatches.result();
 }
 
+// Compares each sample's plane (spectrogram, mel filter bank) within its extent only.
+inline ::testing::AssertionResult compare_audio_plane(const Rpp32f* actual, const Rpp32f* reference,
+                                                      const RpptDesc& d,
+                                                      const std::vector<AudioPlane>& planes,
+                                                      Bound bound) {
+    Mismatches mismatches(bound);
+    for_each_audio_plane_element(d, planes, [&](Rpp32u n, Rpp32u row, Rpp32u col, std::size_t idx) {
+        mismatches.check(actual[idx], reference[idx],
+                         named_coord({{"n", n}, {"row", row}, {"col", col}}));
+    });
+    return mismatches.result();
+}
+
 // ---- reductions ------------------------------------------------------------
 
 // TOut is the op's output element type (e.g. Rpp64u for U8 sum, Rpp32f for mean/stddev).
