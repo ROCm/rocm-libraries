@@ -352,6 +352,7 @@ jobs:
         timeout-minutes: 2
         continue-on-error: ${{ !inputs.replay || inputs.replay == 'none' }}
         run: |
+          sudo -n sed -i 's|^URIs: http://|URIs: https://|' /etc/apt/sources.list.d/ubuntu.sources
           sudo -n apt-get update -o Acquire::Retries=0 -o Acquire::http::Timeout=15
           sudo -n apt-get install -y --no-install-recommends gdb
 
