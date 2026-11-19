@@ -482,7 +482,7 @@ def test_every_mfma_instance_finds_its_helpers_in_the_bundle(arch, shipped):
     exactly one helper kernel of the same shard, and every helper is used. An engine
     without the MFMA pipelines ships neither."""
     from builders.common.convolution_backward_data import (
-        gfx950_conv_dgrad_aot_helper_fields,
+        conv_dgrad_aot_helper_fields,
     )
 
     defaults = {
@@ -511,7 +511,7 @@ def test_every_mfma_instance_finds_its_helpers_in_the_bundle(arch, shipped):
     specs = {s.instance_id: s for s in _specs_of(arch, shipped)}
     for shard, kernel in mfma:
         meta = kernel["metadata"]
-        for wanted in gfx950_conv_dgrad_aot_helper_fields(specs[meta["instance_id"]]):
+        for wanted in conv_dgrad_aot_helper_fields(specs[meta["instance_id"]]):
             found = [
                 (s, h)
                 for s, h in helpers

@@ -331,7 +331,7 @@ std::optional<dgrad::AotInstance> aotInstance(const KernelDefinition& kernel,
 }
 
 /// Where a helper is looked up: the same pack, the same archive, the instance's dtype,
-/// and the identity fields gfx950_conv_dgrad_aot_helper_fields names.
+/// and the identity fields conv_dgrad_aot_helper_fields names.
 struct HelperKey
 {
     std::string archive;
