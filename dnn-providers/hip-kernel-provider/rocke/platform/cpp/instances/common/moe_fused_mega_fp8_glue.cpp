@@ -960,7 +960,7 @@ rocke_kernel_def_t*
     /* ---- builder attrs ---- (Python 1692) */
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", spec->block_size);
 
-    /* ---- params (BUILD_SPEC_FP8 Section 2.7) ---- (Python 1695-1737) */
+    /* ---- params ---- (Python 1695-1737) */
     fp8_global = rocke_ptr_type(b, rocke_fp8e4m3(), "global");
     f32_global = rocke_ptr_type(b, rocke_f32(), "global");
     i32_global = rocke_ptr_type(b, rocke_i32(), "global");

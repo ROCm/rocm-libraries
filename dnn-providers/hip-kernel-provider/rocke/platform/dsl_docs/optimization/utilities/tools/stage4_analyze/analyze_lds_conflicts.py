@@ -7,7 +7,8 @@ Deep analysis of LDS (Local Data Share) bank conflicts based on:
 - ISA disassembly (ds_read/ds_write patterns)
 - Architecture-specific conflict period rules (gfx942 vs gfx950)
 
-References runbook sections 6.3, 6.4, 6.4a + LDS_a.md, LDS_b.md
+References runbook sections 6.3, 6.4, 6.4a and the two LDS bank-conflict
+articles listed in arch/gfx950.md section 21.10.
 
 Usage:
     python analyze_lds_conflicts.py --rocprof stats.csv --isa kernel.s --arch gfx950

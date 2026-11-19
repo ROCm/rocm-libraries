@@ -8,7 +8,7 @@ a recipe (schema ``rocke.recipe/v1``) *as the kernel is built*. Any production
 ``build_*`` records with zero changes -- helpers, closures, dataclasses, and
 descriptor math execute normally; only their emitted ops are captured.
 
-This is Step 1 of ``dsl_docs/architecture/portable_ir_scaling_plan.md``: the
+This is Step 1 of ``portable_ir/portable_ir_scaling_plan.md``: the
 universal "record" path (the recorded recipe is concrete / per-shape, == portable
 IR). Rolling builds on top of it.
 

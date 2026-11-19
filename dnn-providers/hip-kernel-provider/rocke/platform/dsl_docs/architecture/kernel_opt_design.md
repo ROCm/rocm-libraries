@@ -30,7 +30,8 @@ Today they are mutually exclusive (validator
 ## 2. Why each lever in isolation underperforms
 
 From `analysis/2026-05-21-experiment-hsaco-structural-diff.md` and the cohort
-re-bench (`results/rocke_ua_prefill2d_bf16_r4.csv`):
+re-bench (`results/rocke_ua_prefill2d_bf16_r4.csv`), both in the experiment's
+out-of-tree workspace (see §11):
 
 | variant                | target shape | cohort geomean ratio vs stock |
 |------------------------|------------:|------------------------------:|
@@ -310,6 +311,9 @@ shapes falling back; the sinks-fixed number could be significantly higher
 without R1.
 
 ## 11. References
+
+The `analysis/`, `results/`, `tests/` and `experiments/` paths below are in the
+experiment's own workspace, not in this tree.
 
 - `analysis/2026-05-21-experiment-hsaco-structural-diff.md` — root cause and
   per-iter histograms

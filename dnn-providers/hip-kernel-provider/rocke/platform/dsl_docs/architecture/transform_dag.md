@@ -1,4 +1,4 @@
-# TRANSFORM_DAG.md — Coordinate-Transform DAG over SSA Values
+# Coordinate-Transform DAG over SSA Values
 
 > The tiling layer's coordinate graph is documented in [`tensor_transforms_api.md`](../../python/rocke/helpers/tiling/docs/tensor_transforms_api.md); this doc
 > covers `helpers/transforms.py`.

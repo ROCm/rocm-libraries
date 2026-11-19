@@ -196,7 +196,7 @@ flavor axis alone. `_need()` (`:1536`) sets a flag and validates nothing.
 
 This is the structural cause of two already-diagnosed bugs: B9 (`ds.read.tr16.b128`,
 fictional on the gfx950 path, real-but-different on the gfx1250 path, one table
-row for both) and the tiled-3D arch-routing bug (`f8f6f4_..._plan.md` §4.10).
+row for both) and the tiled-3D arch-routing bug (§4.10 of the out-of-tree f8f6f4 and declaration-validation plan).
 
 The `arch or "gfx950"` default makes it worse: a caller that forgets `arch=`
 silently gets gfx950 rather than an error. Several such call sites were found and
@@ -395,7 +395,7 @@ state entirely: a flavor with no column is absent, and absence skips rather than
 reds.
 
 Catches B3, B4 and B9 immediately, and unlike the module gate does **not** depend
-on a corpus case happening to emit them (`f8f6f4_..._plan.md` §4.8 admits that
+on a corpus case happening to emit them (§4.8 of the out-of-tree f8f6f4 plan admits that
 limitation explicitly).
 
 **R2 — make `_need()` arch-aware; land it warn-only.**

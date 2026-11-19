@@ -564,4 +564,4 @@ Save this as `bench_conv_profile.py` and use it with rocprofv3.
 - `tools/wavescope/capture_wavescope_pmc.py` - PMC capture, artifact export and verification
 - `/kernel-trace-analysis` - Analyze captured ATT traces
 - `src/stage3_extract_isa/extract_isa.py` - Extract ISA from a rocKE HSACO
-- `.claude/OPTIMIZATION_RUNBOOK.md` Section 10 - Profiling methodology
+- `dsl_docs/optimization/optimization_runbook.md` Section 3.1a - Profiler metrics (hardware counters)

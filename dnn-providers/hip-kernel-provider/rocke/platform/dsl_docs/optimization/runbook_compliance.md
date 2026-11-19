@@ -19,7 +19,7 @@ helper Z".
 |---|---|
 | Memory-bound floor (B / peak HBM BW) | `ConvFp16Problem::metrics()` returns `gbps` |
 | Compute floor (FLOPs / peak fp16 MFMA throughput) | `ConvFp16Problem::metrics()` returns `tflops` |
-| Achieved-vs-peak comparison | `ck/dsl/ck_dsl_current_results.md` lays this out per kernel |
+| Achieved-vs-peak comparison | out-of-tree CK DSL results notes lay this out per kernel |
 
 ## §3 Bottleneck classification
 
@@ -170,8 +170,8 @@ This is the canonical "pull every lever; measure each" example for
 the runbook's optimisation methodology — see
 `example/ck_tile/dsl/08_bake_off_implicit_gemm/expected.json`,
 `09_bake_off_direct_conv_16c/expected.json`, and
-`10_bake_off_direct_conv_4c/expected.json` for the gates, and
-`ck/dsl/ck_dsl_current_results.md` for the full results.
+`10_bake_off_direct_conv_4c/expected.json` for the gates; the full results are in
+out-of-tree CK DSL results notes.
 
 ## CK Tile parity examples
 

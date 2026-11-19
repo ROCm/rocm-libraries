@@ -76,8 +76,8 @@ The mask is the cuDNN band ``(left = sliding_window, right = right_bound)`` on t
   outputs zeros. Bottom-right alignment (``causal_bottom_right``) is plain causal only.
 
 Experimental/negative levers from the sweep (step-2 8-cluster, K-staging, per-nsub
-staging, score truncation, PV V-prefetch) are intentionally NOT carried over — see
-the experiment's ``plan.md`` for their measured results.
+staging, score truncation, PV V-prefetch) are intentionally NOT carried over; their
+measured results are in the experiment's plan, which is not in the tree.
 """
 
 import hashlib

@@ -182,8 +182,8 @@ def pack_args_kernelparams(
     underspecified and have been observed to read the host buffer
     *after* ``hipModuleLaunchKernel`` returns. The ``extra`` race
     produced the parity-harness "max_abs jumps to 2.5 / 512 on the
-    second CK call" symptom investigated in
-    ``ck/dsl/unified_attention_creative_results.md``.
+    second CK call" symptom (investigated in out-of-tree
+    unified-attention notes).
 
     This is the same approach Triton's AMD driver uses (see
     ``triton/backends/amd/driver.py:392-402``: ``void *params[] = { ... };

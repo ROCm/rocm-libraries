@@ -14,8 +14,8 @@ Algorithm:
   - 3-accumulator circular pipeline along H
   - Per output row: 9 MFMAs (R*S)
 
-Reference numbers from the bake-off study
-`convolution_direct_vs_implicit_gemm_study.md`:
+Reference numbers from the direct-conv vs implicit-GEMM bake-off study
+(not in the tree):
   CK Tile streaming direct-conv (`v2_16c_*`):
     groups=8:  ~155 TFLOPS
     groups=16: ~250 TFLOPS

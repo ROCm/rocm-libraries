@@ -441,4 +441,4 @@ python dsl_docs/optimization/utilities/tools/stage5_compare/compare_rocprof_stat
 For empirical performance data on prefetch strategies, see:
 - `/gemm-optimization-rocke` skill (GEMM-specific pipeline tuning)
 - `/lds-optimization-rocke` skill (LDS double-buffering trade-offs)
-- `.claude/skills/empirical-case-studies/SKILL.md` (Case Study 3: pipeline comparison)
+- `empirical-case-studies.md` (measured case studies)
