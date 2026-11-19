@@ -77,5 +77,5 @@ def _catalog_op(lowerer, op_id: str):
     signedness flags follow; refused, as by the backend, where the catalog does
     not list it."""
     backend = lowerer._backend
-    backend._require_catalog_lists(op_id)
+    backend.require_catalog_lists(op_id)
     return backend.arch.mma.by_op_id(op_id)
